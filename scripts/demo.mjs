@@ -186,10 +186,14 @@ async function main() {
       `JSON.stringify((function(){
          var el = document.elementFromPoint(${cx}, ${cy});
          return { h: __vg.demo.hovered(),
-                  tip: getComputedStyle(document.getElementById('tip')).display,
+                  // #vg-tip: the page prefixes its ids so it can mount inside Obsidian without
+                  // colliding with the app DOM. With the old id this resolved to null and
+                  // getComputedStyle threw, which the recorder reported as "demo failed"
+                  // seven seconds into a take.
+                  tip: getComputedStyle(document.getElementById('vg-tip')).display,
                   // A legend row lights up under the pointer. Harmless, but it is still
                   // the page appearing to react before the demo has done anything.
-                  row: !!(el && el.closest && el.closest('.row, #legend .lbl')) };
+                  row: !!(el && el.closest && el.closest('.row, #vg-legend .lbl')) };
        })())`);
     const c = JSON.parse(clean);
     if (!c.h && c.tip === "none" && !c.row) { at = { x: cx, y: cy }; break; }

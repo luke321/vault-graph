@@ -10,7 +10,9 @@ becomes something you can learn and recognise rather than a fresh tangle each ti
 
 ![The disc growing from the vault first note, a note hovered, a folder hidden, a subfolder highlighted, three heatmap days hovered, then one folder soloed](assets/demo.gif)
 
-Nothing in that clip is staged. `?demo` drives the real controls over Chrome DevTools
+Recorded against a **generated mirror** of a real vault -- same folder tree, same note
+counts, same dates, same link graph, none of the content (`scripts/make-demo-vault.mjs`).
+Nothing in it is staged: `?demo` drives the real controls over Chrome DevTools
 protocol, `scripts/record-demo.ps1` captures it unattended, and it stops on the demo
 finishing rather than after a guessed duration -- see
 [`.ai-context/decisions/0007`](.ai-context/decisions/0007-the-demo-drives-real-input.md).

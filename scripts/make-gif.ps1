@@ -10,7 +10,13 @@
 # the WHOLE take first.
 #
 # GitHub renders the README GIF inline, so width and frame rate are a file-size decision
-# rather than a quality one. Measured on the same 34-second take: 760px/11fps is 6.6 MB,
+# rather than a quality one. Re-measured on the 36s mirror take: 10fps/700px is 6.7 MB,
+# 15fps/700px is 9.2 MB, 20fps/640px is 9.7 MB, 20fps/700px is 11.1 MB. 15 is the default
+# now because 10 reads as clunky on the cascade -- the disc re-packing is the whole point of
+# the clip and it is the part a low frame rate flattens -- and 9.2 MB is still under the
+# point where a README GIF stops loading promptly.
+#
+# Was: Measured on the same 34-second take: 760px/11fps is 6.6 MB,
 # 700px/10fps is 5.3 MB, 640px/10fps is 4.6 MB. 700/10 is the default because GitHub
 # renders the README column narrower than 760 anyway, so the extra megabyte buys nothing
 # a reader can see.
@@ -20,7 +26,7 @@ param(
   [Parameter(Mandatory = $true)][string] $In,
   [string] $Out = "",
   [int] $Width = 700,
-  [int] $Fps = 10
+  [int] $Fps = 15
 )
 
 $ErrorActionPreference = 'Stop'
