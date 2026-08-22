@@ -1,0 +1,200 @@
+# Invariants
+
+Measured properties that must not regress. Each one has a way to check it — use it,
+don't reason about it.
+
+**Most of them run in one command:**
+
+```bash
+node scripts/smoke.mjs
+```
+
+It builds to a temp file, drives a real Chrome, and prints the number it measured for each
+check, pass or fail — exiting non-zero so it can gate a push. The one property it does
+**not** cover is the per-frame animation steps; that section says so and stays manual. Numbers below are from a 450-note vault (1458 links) on
+2026-08-22; the shape matters more than the exact figure.
+
+## Plan parity
+
+The static plan and the live (opacity-weighted) plan must agree cell for cell.
+
+```javascript
+__vg.checkPlanParity()      // -> parityOK: true
+```
+
+**Check it with a folder hidden, not just at full vault** — the historic failure was a
+flag that only diverged once something was filtered.
+
+## A zero-weight member costs nothing
+
+The strongest of the plan guarantees, and the one that catches the whole class. The
+cascade and the resting path legitimately disagree on *membership* -- a departing note is
+in the plan while it fades and gone once it has -- so they can never be identical. What
+must hold is that the extra zero-weight members change nothing.
+
+```javascript
+__vg.checkZeroWeightInvariance()   // hide a folder first -> invariantOK: true
+```
+
+**Run it with a folder hidden.** At full vault there are no zero-weight members, so it
+passes vacuously. With `04` hidden it reports 16 cells vs 19 -- the padded plan seats the
+hidden notes -- and must still give identical rows and `maxR`.
+
+This failed until 2026-08-22 because the gap total counted *groups present* rather than
+*weight present*, so handing over moved every wedge by one 2-degree gap: 33 graph units,
+6 screen pixels, in a single frame after the animation had converged.
+
+## No jump at the end of an animation
+
+`settle()` must be a no-op, not a correction. The cascade runs past progress 1 until
+every note is within half a unit of its target.
+
+```javascript
+__vg.probe(true)            // then toggle a folder
+__vg.probeReport()          // outerMaxStep is the biggest single-frame step
+```
+
+| Toggle | worst single-frame step | settle jump |
+|---|---|---|
+| `04 - Daily Notes` hide | 40 | 0 |
+| `03 - Resources` hide | 40 | 0 |
+| `08 - Meeting Notes` hide | 40 | 0 |
+| `05 - Weekly Reviews` hide | 0 (inner band only) | 0 |
+
+The inner ring is not a special case: `share()` and `allocateBand` each run once per
+band, so every continuity rule here applies to it identically. An inner-band step means the
+same defect as an outer-band one.
+
+40 units is one `RADIAL_EASE` quarter-step of a 160-unit row. Anything near 160 means a
+row tick has stopped being smoothed. Tail displacement should decay to exactly 0:
+measured `27 → 22.3 → 12.8 → 4.6 → 0.8 → 0` on a hide.
+
+## Behaviour does not depend on how much was toggled
+
+Hiding a small folder and a large one must differ in *degree*, never in *kind*. There is
+one plan basis; no threshold switches it. Resting ring radius after hiding: `03` 1818,
+`04` 1978, `08` 1658, `05` 2138 (unchanged, inner band).
+
+## The rings are independent
+
+Toggling an inner-band group must not move the outer band. Measured, an `05` toggle
+leaves the outer band constant — 0 units of movement.
+
+## Only depth-1 subfolders with their own tint slot are pushed
+
+A group or a *named* subfolder moves as a block when highlighted. Pooled tail subfolders
+and everything at depth 2+ get the ring only, because their notes are interleaved with
+cell-mates at the same angles and pushing a subset slides it out *through* them.
+
+```javascript
+__vg.pushReport()           // pushedCount / pushedByPath vs haloedByPath
+```
+
+`03 - Resources/Locations` is the case that settled it: 3 notes, seventh in the order,
+sharing the tail slot with six others. `pushedCount` must be 0 when it is selected.
+
+## The resting disc is on the lattice
+
+At rest every note's radius is `base + an integer row × SP`. A fractional radius at rest
+blends two grids one row apart and reads as a smeared disc. Row counts are integers when
+`rowsOf` is absent; only an animation passes a real number.
+
+Checked as the **equivalent** claim, because `SP`, `INNER_SCALE`, `UNIT` and `geomLock` are
+all locked inside the layout: *the distinct radii within one band must be evenly spaced.*
+That needs nothing but node positions and `buildWedgePlan(false)` for band membership, and
+it is stricter than the sentence above — it also catches a band whose spacing has drifted,
+not only a fractional radius.
+
+Measured: inner band **2 rows at 128, spread 0**; outer **7 rows at 160, spread 0**. Those
+gaps are the constants themselves — 160 is `UNIT × SP`, 128 is `UNIT × INNER_SCALE`.
+
+Two exclusions matter. Only notes at full alpha, since mid-cascade radii are legitimately
+fractional; and no degree-0 notes, which are sunflower-packed into the hub hole and were
+never on the lattice.
+
+## Every heatmap day with notes fills its cell
+
+The band encodes the count as *grain*, not as area, so a partially filled square is a
+tiling bug rather than a small day. Sample the four corners of every day-cell that has
+notes and none may come back as `--dim`.
+
+```javascript
+__vg.heatReport()      // daysWithNotes, blocksAtBusiest, pxPerNoteAtBusiest
+```
+
+Measured: **0 of 48 cells partially filled**; the busiest day tiles 180 blocks into a
+13px cell, i.e. 0.94px per note. `blocksAtBusiest` must equal the busiest day's count —
+if it is lower, notes are being dropped from the tiling rather than drawn sub-pixel.
+
+## A heatmap day haloes but never pushes
+
+Clicking or hovering a day changes colour and halo only. Nothing moves — a day's notes
+are scattered across every folder, so pushing them slides a subset out *through* its
+cell-mates, which is the same failure the pooled-subfolder rule exists to prevent.
+
+```javascript
+__vg.state.markDay = "2026-08-19"; __vg.renderer.refresh(); __vg.pushReport()
+```
+
+Measured: `pushedCount` **0**, haloed 14, and **0 nodes changed position**. `mark today`
+must still push — measured 6 pushed, 6 haloed — or the change went too far.
+
+## Aiming at a note is a timing problem before it is a geometry problem
+
+`scripts/smoke.mjs` hovers the most isolated note on screen and asserts what got hovered.
+It missed roughly **one run in six** with **19.9px of clearance** — far too much room for
+that to be an aiming problem, and exactly the size of the mark-push drift, because the two
+checks above it set `markDay`/`markToday` and clearing that animates notes back. The fix is
+to wait on the app's own idle predicate before computing the aim:
+
+```javascript
+!!__vg.demo.busy()      // play || cascade || layout anim || hover tween || highlight tween
+```
+
+Measured after: **24 consecutive clean runs**, against ~1-in-6 before — but **one miss did
+survive the fix**, in the first batch after it, so the residual rate is small and not zero.
+On a miss the check now reports the target's drift in pixels, what actually got hovered,
+and which element sits at the aim point, which separates the three candidate causes (a
+moving layout, a stale hit-test index, something painted over the canvas). **Read that line
+rather than re-running** — the whole reason the diagnostic exists is that a flaky check
+otherwise trains you to re-run instead of measure.
+
+## The heatmap grid always fits its box
+
+Weeks are dropped before pixels: `heatGeom` picks columns from what fits at the 7px cell
+floor, then grows the cell into what is there. The band must never need its scrollbar.
+
+```javascript
+__vg.heat.w <= document.getElementById("heatwrap").clientWidth
+```
+
+The failure this replaced is worth remembering because it did not look like a layout
+bug: the grid scrolls from `scrollLeft` 0, which is the **oldest** end, so a narrow
+viewport opened on empty months with every note off the right edge and was reported as a
+missing stylesheet.
+
+## Nav counts share one right edge
+
+Grid columns align only within one grid, and every legend row is its own grid — so the
+alignment comes from `min-width: 3ch` on the last column, not from a shared template.
+
+```javascript
+new Set([].map.call(document.querySelectorAll("#legend .ct"),
+        function (e) { return Math.round(e.getBoundingClientRect().right); })).size
+```
+
+Must be **1**, at any depth and whatever is unfolded. Measured 24 rows / 24 counts / one
+edge at 266px with the tree open, and 9 / 9 / one edge at the folded default. The `only`
+button is laid out at every depth with only its opacity changing on hover, so this holds
+while hovering too.
+
+## Animations are a fixed length, unless the page can't draw them
+
+Durations are wall-clock (`TIMELINE_MS` 4500, `CASCADE_MS` 1600, `TWEEN_MS` 380), so
+frame rate does not change how long a toggle takes. Below ~20fps the per-frame advance
+clamps and the animation stretches rather than leaping.
+
+**Every animation force-completes on stalled frames, never on a deadline.** A fixed
+`setTimeout(settle, dur + margin)` fires part-way through on any page too slow to finish
+in time and snaps the disc — this exact bug has been introduced twice. Watchdogs re-arm
+while frames keep arriving.

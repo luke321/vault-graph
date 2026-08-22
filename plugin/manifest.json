@@ -1,0 +1,9 @@
+{
+  "id": "vault-graph-spike",
+  "name": "Vault Graph (spike)",
+  "version": "0.0.1-spike",
+  "minAppVersion": "1.5.0",
+  "description": "Spike: hosts the vault-graph disc inside an Obsidian view, with the data derived from Obsidian's own metadata cache instead of a filesystem crawl.",
+  "author": "Lukas Proprentner",
+  "isDesktopOnly": false
+}

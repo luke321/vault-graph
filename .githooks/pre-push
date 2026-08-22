@@ -1,0 +1,75 @@
+#!/bin/sh
+# Run the invariant suite before letting a push through.
+#
+# Enable it in a fresh clone with:
+#
+#   git config core.hooksPath .githooks
+#
+# Tracked in the repo rather than written into .git/hooks, because .git/hooks is not
+# version controlled -- a hook that lives only there is a hook the next clone does not
+# have, and the whole point is that it should not depend on anyone remembering.
+#
+# WHY pre-push AND NOT pre-commit: the suite builds the page and drives a real Chrome, so
+# it costs ~30 seconds. That is a fine price per push and an intolerable one per commit.
+#
+# Skipping is deliberate and cheap, because there are honest reasons to (a docs-only
+# change, no Chrome on the machine, a hurry):
+#
+#   SKIP_SMOKE=1 git push
+#
+# There is no --no-verify advice here on purpose: that also disables every other hook,
+# silently, and is the habit that makes hooks worthless.
+
+if ! command -v node >/dev/null 2>&1; then
+  echo "pre-push: node not found, skipping every check" >&2
+  exit 0
+fi
+
+root=$(git rev-parse --show-toplevel)
+
+# THE PII CHECK RUNS FIRST, ALWAYS, AND HAS NO SKIP.
+#
+# Everything else here is about correctness and can honestly be skipped in a hurry. This
+# one is about other people: the repo is public, and it has already published a
+# colleague's full name and seven colleagues' first names for weeks without anyone
+# noticing. A gate with an escape hatch would have been opened on exactly the day it
+# mattered, so SKIP_SMOKE deliberately does not reach it -- and it is cheap enough
+# (~50ms, no Chrome, no build) that there is no reason to want one.
+echo "pre-push: checking for names and identifiers..."
+if ! node "$root/scripts/check-pii.mjs"; then
+  cat >&2 <<'EOF'
+
+pre-push: PII check failed -- push blocked.
+
+This repository is PUBLIC. Fix the text above before pushing. If a hit is
+legitimate, add the file to ALLOW_FILES in scripts/check-pii.mjs with a comment
+saying why -- do not remove the name from the deny list to make it pass.
+
+There is no skip flag for this check.
+EOF
+  exit 1
+fi
+
+if [ -n "$SKIP_SMOKE" ]; then
+  echo "pre-push: SKIP_SMOKE set, skipping the invariant suite"
+  exit 0
+fi
+
+echo "pre-push: running the invariant suite (SKIP_SMOKE=1 to skip)..."
+if node "$root/scripts/smoke.mjs"; then
+  exit 0
+fi
+
+cat >&2 <<'EOF'
+
+pre-push: the invariant suite failed -- push blocked.
+
+Read the FAIL lines above: each prints the number it measured, which is usually
+enough to say what moved. If the failure is expected because the behaviour changed
+on purpose, update .ai-context/invariants.md and the check together -- the numbers
+in that file are the regression suite, so a check quietly relaxed is worse than one
+that fails.
+
+To push anyway:  SKIP_SMOKE=1 git push
+EOF
+exit 1

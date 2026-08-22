@@ -1,0 +1,24 @@
+# Deny list for scripts/check-pii.mjs. Copy to `.pii-names`, which is gitignored.
+#
+#   cp .pii-names.example .pii-names
+#
+# One name per line. `#` starts a comment. Matching is case-sensitive and on word
+# boundaries, so a capitalised name in prose is caught while a lowercase identifier that
+# happens to contain it is not.
+#
+# WHY THIS FILE IS NOT THE LIST. An earlier version kept the names inline in
+# check-pii.mjs, reasoning that anyone who could read the list could already read the
+# repository. That stopped being true of the goal rather than the access: the history was
+# rewritten specifically to remove those names, and the checker was republishing every one
+# of them, permanently, in the file doing the purging.
+#
+# So the names live on the machines that push, and never in a commit. If you clone this
+# repository the check still runs its identifier patterns and tells you, loudly, that it
+# has no name list.
+#
+# Put first names in as well as full ones. Next to a repository about somebody's personal
+# notes, a first name plus a note count is identifying.
+
+# Colleagues, family, anyone who appears in the vault:
+# Firstname
+# Firstname Lastname
