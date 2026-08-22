@@ -1,44 +1,31 @@
-/* Vault Graph spike -- host chrome only.
+/* Vault Graph -- host chrome.
  *
- * Deliberately tiny. The page inside the frame carries its own 422 lines of tokens and
- * cannot see any of this, which is the central trade-off of the iframe approach: the
- * disc is immune to the user's theme, for better and for worse.
+ * How the view's element behaves inside Obsidian, and nothing else. The page's own styling
+ * is src/page.css, appended after this by scripts/build-plugin.mjs with every rule scoped
+ * under `.vault-graph`.
  *
- * Uses Obsidian's CSS variables rather than literal colours, which is what the
- * guidelines ask for and what the real port would need throughout. */
+ * Deliberately tiny, and it uses Obsidian's own variables rather than literal values,
+ * because the things a user notices first about a view -- does it fill the pane, does it
+ * scroll when it should not -- belong to the host rather than to the graph.
+ */
 
-.vault-graph-view {
-  display: flex;
-  flex-direction: column;
-  height: 100%;
+/* Obsidian gives `.view-content` padding and lets it scroll. The graph wants neither, and
+ * it needs a DEFINITE height: the page's own root asks for `height: 100%`, which against an
+ * auto-height parent resolves to zero and draws nothing. That failure is silent and looks
+ * like a broken renderer, so it is worth being explicit about both sides of the contract. */
+.workspace-leaf-content[data-type="vault-graph-view"] .view-content {
   padding: 0;
   overflow: hidden;
 }
 
-.vault-graph-view .vgs-status {
-  flex: 0 0 auto;
-  padding: var(--size-4-2) var(--size-4-3);
-  border-bottom: 1px solid var(--background-modifier-border);
-  background-color: var(--background-secondary);
-  color: var(--text-muted);
-  font-family: var(--font-monospace);
-  font-size: var(--font-ui-smaller);
-  line-height: 1.4;
-  white-space: pre-wrap;
-}
-
-.vault-graph-view .vgs-stage {
-  flex: 1 1 auto;
-  min-height: 0;
-  position: relative;
-}
-
-.vault-graph-view .vgs-frame {
-  display: block;
-  width: 100%;
+.vault-graph-view {
   height: 100%;
-  border: 0;
-  /* The page paints its own ground; without this the frame flashes white on a dark
-     theme while the libraries parse. */
-  background-color: var(--background-primary);
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* The parent side of the page's `height: 100%`. */
+.vault-graph-view > .vault-graph {
+  height: 100%;
+  min-height: 0;
 }

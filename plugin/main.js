@@ -5,8 +5,9 @@
  * measurement: the page runs unchanged inside Obsidian, Obsidian's own index can produce
  * its data in ~12ms, and the iframe that made proving that cheap has to go.
  *
- * Still an iframe at this commit. The in-DOM port is the next step and the reason the
- * page's three parts are imported separately below rather than assembled on disk.
+ * The iframe is gone. The page mounts directly into the view's element, so __vg is in this
+ * window, the theme comes from Obsidian's own CSS variables, and the invariant suite can
+ * reach the page without a message bridge.
  *
  * AN ES MODULE, not a script, and that is load-bearing rather than fashion: a script's
  * top-level `const Plugin` IS a global, so it collides with the DOM's own `Plugin` and
@@ -20,16 +21,19 @@ import { Plugin, ItemView, Notice, normalizePath, addIcon } from "obsidian";
 // and styles.css, so anything read from disk at runtime does not exist for a real user --
 // the page and both libraries have to BE the bundle. `raw:` and `b64:` are the bundler's
 // namespace loaders; see the esbuild plugin in that script.
-// The page in its four parts, not as one document. This is the shape the in-DOM mount
-// needs -- markup to put in a container, CSS to register as the plugin's stylesheet, script
-// to call -- and src/build-graph.mjs assembles the same four into a standalone file for the
-// export path. Still assembled into a document here, for the iframe, until the mount lands.
-import SHELL from "raw:../src/shell.html";
-import PAGE_CSS from "raw:../src/page.css";
+// THE PAGE, AS CODE RATHER THAN AS TEXT.
+//
+// The iframe needed the page as one HTML string. Mounting it in the DOM needs the opposite:
+// the script as a real import so it can be CALLED, the libraries as real imports so they
+// can be passed to it, and only the markup still as text, because markup has to be parsed
+// into nodes either way.
+//
+// page.css is absent on purpose -- it is no longer the plugin's business. It ships as
+// styles.css, which Obsidian loads itself; see scripts/build-plugin.mjs.
+import { mountVaultGraph } from "../src/page.js";
+import graphology from "../vendor/graphology.umd.min.js";
+import sigma from "../vendor/sigma.min.js";
 import PAGE_HTML from "raw:../src/page.html";
-import PAGE_JS from "raw:../src/page.js";
-import GRAPHOLOGY from "raw:../vendor/graphology.umd.min.js";
-import SIGMA from "raw:../vendor/sigma.min.js";
 import LOGO_MASK_B64 from "b64:../assets/logo-mask.png";
 
 const VIEW_TYPE = "vault-graph-view";
@@ -79,11 +83,6 @@ function discIcon() {
          ring(36, 8.5, 8, 0) + ring(16, 6.5, 4, 22.5) +
          "</g>";
 }
-
-// How long a mount strategy gets to say "ready" before it is called dead. The page posts
-// its handshake from the END of its own boot, so this measures "did the whole thing come
-// up", not "did the iframe load".
-const HANDSHAKE_MS = 6000;
 
 /* ================================================================= taxonomy ==
  * Ported from src/build-graph.mjs, line-for-line wherever it is a pure function of the
@@ -370,137 +369,31 @@ async function buildData(app, opts) {
   };
 }
 
-/* ============================================================ page assembly ==
- * Exactly the three seams build-graph.mjs uses -- <!--LIBS-->, <!--ASSETS-->,
- * <!--DATA--> -- which is the whole reason an iframe spike is cheap. Nothing in
- * template.html changes.
+/* ====================================================================== view ==
+ * IN THE DOM, not in an iframe.
  *
- * Plus two spike-only injections that a real port would not carry:
- *   - a pre-script at the ASSETS seam, so a boot-time throw is reported rather than
- *     silently timing out the handshake;
- *   - a bridge before </body>, which posts "ready", forwards obsidian:// clicks to the
- *     host, and answers probe requests.
+ * The spike hosted the page in a sandboxed <iframe>, which proved it ran inside Obsidian
+ * and cost three things that all mattered (plugin/SPIKE.md has the measurements):
+ *
+ *   - the invariant suite could not reach it. An opaque-origin frame is site-isolated into
+ *     its own CDP target, so smoke.mjs could not call __vg and every check would have
+ *     needed a postMessage envelope, forever.
+ *   - the host could not read into it either, so the plugin talked to its own page through
+ *     a message bridge.
+ *   - it inherited nothing, so the theme had to be handed across by rewriting an attribute.
+ *
+ * All three disappear here. __vg is in this window, the page is in this document, and the
+ * theme is whatever Obsidian's CSS variables say -- because page.css is now the plugin's
+ * stylesheet, loaded by Obsidian itself.
  */
-const PRE_SCRIPT = [
-  "<script>",
-  "(function () {",
-  "  var post = function (m) { try { parent.postMessage(m, '*'); } catch (e) {} };",
-  "  window.addEventListener('error', function (e) {",
-  "    post({ vgSpike: 'error', message: String(e.message), line: e.lineno || 0 });",
-  "  });",
-  "  window.addEventListener('unhandledrejection', function (e) {",
-  "    post({ vgSpike: 'error', message: 'unhandled rejection: ' + String(e.reason), line: 0 });",
-  "  });",
-  "})();",
-  "</script>",
-].join("\n");
-
-const BRIDGE = [
-  "<script>",
-  "(function () {",
-  "  var post = function (m) { try { parent.postMessage(m, '*'); } catch (e) {} };",
-  "  var D = window.VAULT_DATA || {};",
-  "  // WAIT FOR __vg, do not just read it. Measured: this script runs at the end of the",
-  "  // document, which is BEFORE the template has finished booting -- sigma is",
-  "  // constructed later, off the boot path. The first version reported hasVg:false and",
-  "  // canvases:0 and the verdict table called a working page broken, while a probe two",
-  "  // seconds later found 11 nodes and plan parity OK. So the handshake polls, and says",
-  "  // how long it waited.",
-  "  var t0 = Date.now();",
-  "  var tick = function () {",
-  // #vg-graph: the page's ids are prefixed so they cannot collide with the host document.
-  // With the old selector this counted 0, waited out the 5s handshake timeout, and reported
-  // a fully working page as having painted nothing.
-  "    var canvases = document.querySelectorAll('#vg-graph canvas').length;",
-  "    var up = !!window.__vg && canvases > 0;",
-  "    if (!up && Date.now() - t0 < 5000) { setTimeout(tick, 100); return; }",
-  "    post({ vgSpike: 'ready',",
-  "           nodes: (D.nodes || []).length,",
-  "           edges: (D.edges || []).length,",
-  "           hasVg: !!window.__vg,",
-  "           canvases: canvases,",
-  "           bootMs: Date.now() - t0 });",
-  "  };",
-  "  tick();",
-  "  // obsidian:// hrefs cannot navigate from inside a sandboxed frame, and should not:",
-  "  // the host has workspace.openLinkText, which respects panes and history.",
-  "  document.addEventListener('click', function (ev) {",
-  "    var a = ev.target && ev.target.closest ? ev.target.closest('a[href^=\"obsidian://\"]') : null;",
-  "    if (!a) return;",
-  "    ev.preventDefault();",
-  "    post({ vgSpike: 'open', href: a.getAttribute('href') });",
-  "  }, true);",
-  "  // The probe channel. A sandboxed frame is a different origin, so the host cannot",
-  "  // touch window.__vg directly -- it has to ask. This is the shape the invariant",
-  "  // suite would use if the page stays in a frame.",
-  "  window.addEventListener('message', function (ev) {",
-  "    var m = ev.data;",
-  "    if (!m || m.vgSpike !== 'probe') return;",
-  "    var out = { vgSpike: 'probe-result', id: m.id, hasVg: !!window.__vg };",
-  "    try {",
-  "      if (window.__vg && window.__vg.checkPlanParity) out.planParity = window.__vg.checkPlanParity();",
-  "      if (window.__vg && window.__vg.graph) {",
-  "        out.order = window.__vg.graph.order; out.size = window.__vg.graph.size;",
-  "      }",
-  "    } catch (e) { out.error = String(e && e.message || e); }",
-  "    post(out);",
-  "  });",
-  "})();",
-  "</script>",
-].join("\n");
-
-// No I/O at all any more. This used to read four files out of the plugin folder, which is
-// the single thing that made the spike uninstallable: a release ships main.js,
-// manifest.json and styles.css, and nothing put those four files beside them.
-// page.js is an ES module because this file imports it. Inlining it into a document means
-// putting it in a classic <script>, where an export statement is a syntax error -- so it
-// comes off on the way in. shell.html's bootstrap then calls the function.
-const asScript = (js) => js.replace(/^export \{[^}]*\};?\s*$/m, "").trimEnd();
-
-function assemblePage(data) {
-  const libs = "<script>\n" + GRAPHOLOGY + "\n</script>\n<script>\n" + SIGMA + "\n</script>";
-
-  const assets = PRE_SCRIPT +
-    "\n<script>window.VAULT_LOGO_MASK=" +
-    JSON.stringify("data:image/png;base64," + LOGO_MASK_B64) + ";</script>";
-
-  // The page defaults to dark (design/0009). `data-theme` now lives on the page's OWN root
-  // element rather than on <html>, which is what lets an in-DOM mount set it at all: the
-  // host's <html> is not ours to write.
-  //
-  // activeDocument, not document: with a view torn out into a popout window, `document` is
-  // still the main window's and the theme read would be the wrong window's. Obsidian
-  // exposes activeDocument for precisely this, and obsidianmd/prefer-active-doc is an
-  // error without it.
-  const theme = activeDocument.body.classList.contains("theme-light") ? "light" : "dark";
-  const markup = PAGE_HTML.trimEnd()
-    .replace('data-theme="dark"', 'data-theme="' + theme + '"');
-
-  // Same six seams the exporter fills, in the same order, from the same four files. Two
-  // assemblers over one page is the arrangement the split exists to allow; if these ever
-  // disagree about a seam the standalone and the plugin are drawing different pages.
-  return SHELL
-    .replace("<!--CSS-->", () => PAGE_CSS.trimEnd())
-    .replace("<!--MARKUP-->", () => markup)
-    .replace("<!--SCRIPT-->", () => asScript(PAGE_JS))
-    .replace("<!--LIBS-->", () => libs)
-    .replace("<!--ASSETS-->", () => assets)
-    .replace("<!--DATA-->", () => "<script>window.VAULT_DATA=" + JSON.stringify(data) + ";</script>")
-    .replace("</body>", BRIDGE + "\n</body>");
-}
-
-/* ====================================================================== view ==*/
 
 class VaultGraphView extends ItemView {
   constructor(leaf, plugin) {
     super(leaf);
     this.plugin = plugin;
-    this.frame = null;
-    this.blobUrl = null;
-    this.ready = null;          // whatever the page reported at handshake
-    this.strategy = null;       // which mount strategy won
-    this.pending = new Map();   // probe id -> resolve
-    this.probeSeq = 0;
+    this.api = null;         // what mountVaultGraph returned: the __vg surface
+    this.lastData = null;
+    this.mountMs = 0;
   }
 
   getViewType() { return VIEW_TYPE; }
@@ -508,150 +401,73 @@ class VaultGraphView extends ItemView {
   getIcon() { return ICON_ID; }
 
   async onOpen() {
-    const root = this.contentEl;
-    root.empty();
-    root.addClass("vault-graph-view");
-
-    this.status = root.createDiv({ cls: "vgs-status" });
-    this.stage = root.createDiv({ cls: "vgs-stage" });
-
-    // One listener for the lifetime of the view, registered so it unhooks on unload.
-    this.registerDomEvent(window, "message", (ev) => this.onFrameMessage(ev));
-
-    await this.reload();
+    await this.render();
   }
 
   async onClose() {
-    this.teardownFrame();
+    this.teardown();
   }
 
-  teardownFrame() {
-    if (this.blobUrl) { URL.revokeObjectURL(this.blobUrl); this.blobUrl = null; }
-    if (this.frame) { this.frame.remove(); this.frame = null; }
+  // FREE THE WEBGL CONTEXT. Sigma holds one per renderer and a browser allows a small
+  // number of them; opening and closing this view a dozen times without killing the
+  // renderer exhausts them and the thirteenth mount draws nothing at all.
+  teardown() {
+    if (this.api && this.api.renderer) {
+      try { this.api.renderer.kill(); } catch { /* already gone */ }
+    }
+    this.api = null;
+    this.contentEl.empty();
   }
 
-  say(text) {
-    if (this.status) this.status.setText(text);
-  }
-
-  async reload() {
-    this.teardownFrame();
-    this.say("Building from the metadata cache...");
+  async render() {
+    this.teardown();
+    const root = this.contentEl;
+    root.addClass("vault-graph-view");
 
     const data = await buildData(this.app, this.plugin.settings);
     this.lastData = data;
-    const s = data.stats, m = data._spike;
-    this.say(s.nodes + " notes, " + s.edges + " links, " + s.orphans + " orphans, " +
-             s.unresolved + " unresolved -- built in " + m.msTotal + "ms " +
-             "(index " + m.msIndex + ", links " + m.msEdges + ", words " + m.msWords + ")");
 
-    const html = assemblePage(data);
-    this.pageBytes = html.length;
+    // PARSED, NOT ASSIGNED. innerHTML with this markup would be safe -- it is a constant
+    // from our own bundle, with no vault content in it -- but `prefer-create-el` is an
+    // error under Obsidian's lint config and a reviewer should not have to take my word
+    // for which strings are constants. DOMParser builds the same tree without ever
+    // handing a string to the DOM.
+    const parsed = new DOMParser().parseFromString(PAGE_HTML, "text/html");
+    const page = parsed.body.firstElementChild;
+    if (!page) throw new Error("page markup did not parse to an element");
+    root.appendChild(page);
 
-    // Two strategies, in order, because which one Obsidian's CSP tolerates is precisely
-    // what the spike is measuring. srcdoc first: it is sandboxable, so the page cannot
-    // reach back into the app. forceStrategy pins one, so the harness can run both and
-    // compare what each costs -- they differ in reachability, not just in posture.
-    const order = this.plugin.settings.forceStrategy
-      ? [this.plugin.settings.forceStrategy]
-      : ["srcdoc", "blob"];
-    for (const strategy of order) {
-      const ready = await this.tryMount(html, strategy);
-      if (ready) {
-        this.strategy = strategy;
-        this.ready = ready;
-        this.say(this.status.getText() + " | mounted via " + strategy +
-                 ", " + Math.round(html.length / 1024) + "KB, " +
-                 ready.canvases + " canvases, __vg " + (ready.hasVg ? "present" : "MISSING"));
-        return;
-      }
-      this.teardownFrame();
-    }
+    // The page's palette lives on this element (page.css is scoped to it), so the theme is
+    // set here rather than on <html> -- which is not ours to write. activeDocument, because
+    // a view torn out into a popout window is in a different document than `document`.
+    page.setAttribute("data-theme",
+      activeDocument.body.classList.contains("theme-light") ? "light" : "dark");
 
-    this.say("MOUNT FAILED -- neither srcdoc nor blob produced a handshake. " +
-             (this.lastError || "no error reported"));
-  }
-
-  tryMount(html, strategy) {
-    return new Promise((resolve) => {
-      const frame = this.stage.createEl("iframe", { cls: "vgs-frame" });
-      this.frame = frame;
-      this.lastError = null;
-
-      let done = false;
-      const finish = (v) => { if (!done) { done = true; this.awaitingReady = null; resolve(v); } };
-      this.awaitingReady = finish;
-      window.setTimeout(() => finish(null), HANDSHAKE_MS);
-
-      if (strategy === "srcdoc") {
-        // No allow-same-origin: the frame gets an opaque origin and cannot touch the
-        // app. That is the right posture, and it is also why the probe channel has to
-        // exist -- see BRIDGE.
-        frame.setAttribute("sandbox", "allow-scripts allow-popups");
-        frame.srcdoc = html;
-      } else {
-        // A blob URL cannot be fetched by a frame with an opaque origin, so this path
-        // runs UNSANDBOXED. Strictly worse posture; kept only as the fallback.
-        this.blobUrl = URL.createObjectURL(new Blob([html], { type: "text/html" }));
-        frame.src = this.blobUrl;
-      }
+    const t0 = performance.now();
+    this.api = mountVaultGraph(page, data, {
+      // Real module imports, not globals: the UMD wrappers take their `module.exports`
+      // branch under esbuild, so nothing is ever assigned to `window`. This is exactly why
+      // page.js takes its libraries as arguments.
+      Graph: graphology.Graph || graphology,
+      Sigma: sigma.Sigma || sigma,
+      rendering: sigma.rendering || {},
+      logoMask: "data:image/png;base64," + LOGO_MASK_B64,
     });
-  }
+    this.mountMs = Math.round(performance.now() - t0);
 
-  onFrameMessage(ev) {
-    if (!this.frame || ev.source !== this.frame.contentWindow) return;
-    const m = ev.data;
-    if (!m || !m.vgSpike) return;
-
-    if (m.vgSpike === "ready" && this.awaitingReady) { this.awaitingReady(m); return; }
-
-    if (m.vgSpike === "error") {
-      this.lastError = "page error: " + m.message + (m.line ? " (line " + m.line + ")" : "");
-      console.error("[vault-graph]", this.lastError);
-      return;
-    }
-
-    if (m.vgSpike === "open") {
-      // obsidian://open?vault=X&file=Y -- only the file matters; the host already knows
-      // which vault it is. openLinkText beats the URI: it honours pane state and history.
+    // The page renders `obsidian://open?...` links for each note. Following the URI would
+    // work, but openLinkText is the thing that respects panes, history and modifier keys --
+    // and it does not need the vault name, which the URI form has to guess at.
+    this.registerDomEvent(page, "click", (ev) => {
+      const a = ev.target instanceof Element ? ev.target.closest('a[href^="obsidian://"]') : null;
+      if (!a) return;
+      ev.preventDefault();
       try {
-        const q = new URLSearchParams(m.href.slice(m.href.indexOf("?") + 1));
+        const q = new URLSearchParams(a.getAttribute("href").split("?")[1] || "");
         const file = q.get("file");
         if (file) this.app.workspace.openLinkText(file, "", false);
-      } catch (e) { new Notice("Could not open that note: " + e.message); }
-      return;
-    }
-
-    if (m.vgSpike === "probe-result") {
-      const fn = this.pending.get(m.id);
-      if (fn) { this.pending.delete(m.id); fn(m); }
-      return;
-    }
-  }
-
-  // Ask the page to run __vg.checkPlanParity() and hand the result back. This is the
-  // shape scripts/smoke.mjs would have to take if the page stays in a frame.
-  probe() {
-    if (!this.frame || !this.frame.contentWindow) return Promise.resolve({ error: "no frame" });
-    const id = ++this.probeSeq;
-    return new Promise((resolve) => {
-      this.pending.set(id, resolve);
-      window.setTimeout(() => {
-        if (this.pending.has(id)) { this.pending.delete(id); resolve({ error: "probe timed out" }); }
-      }, 4000);
-      this.frame.contentWindow.postMessage({ vgSpike: "probe", id: id }, "*");
+      } catch { new Notice("Could not open that note."); }
     });
-  }
-
-  // What the host can see WITHOUT asking. Under srcdoc+sandbox this must fail; the
-  // failure is the finding, so it is reported rather than swallowed.
-  reachIntoFrame() {
-    try {
-      const w = this.frame && this.frame.contentWindow;
-      return { reachable: !!(w && w.__vg), note: w ? "contentWindow readable" : "no frame" };
-    } catch (e) {
-      return { reachable: false, note: "blocked: " + (e && e.message) };
-    }
   }
 }
 
@@ -662,10 +478,9 @@ const DEFAULTS = {
   templates: false,     // --templates
   flatMonths: false,    // --flat-months
   words: true,          // the one field that still costs I/O
-  forceStrategy: null,  // "srcdoc" | "blob" | null (try both, first to handshake wins)
 };
 
-class VaultGraphSpikePlugin extends Plugin {
+class VaultGraphPlugin extends Plugin {
   async onload() {
     this.settings = Object.assign({}, DEFAULTS, await this.loadData());
 
@@ -689,36 +504,32 @@ class VaultGraphSpikePlugin extends Plugin {
       callback: async () => {
         const view = this.currentView();
         if (!view) { new Notice("Open the graph first."); return; }
-        await view.reload();
+        await view.render();
       },
     });
 
-    // The spike's actual verdict, printed where a person and the CDP harness can both
-    // read it. Everything this reports is a number somebody would otherwise guess at.
+    // Diagnostics, for the CDP harness and for anyone wondering where the time went.
+    // No console.log: "avoid unnecessary logging" is a guideline and the linter enforces
+    // it, and nothing was ever reading the log.
     this.addCommand({
       id: "report",
-      // Sentence case, and the linter checks it -- the previous wording also named the
-      // console, which is no longer where this goes.
       name: "Report diagnostics",
-      callback: async () => {
+      callback: () => {
         const view = this.currentView();
         if (!view) { new Notice("Open the graph first."); return; }
+        const api = view.api;
         const report = {
-          mountStrategy: view.strategy,
-          pageKB: Math.round((view.pageBytes || 0) / 1024),
-          handshake: view.ready,
-          hostCanReachFrame: view.reachIntoFrame(),
-          probeOverPostMessage: await view.probe(),
+          mount: "in-dom",
+          mountMs: view.mountMs,
+          hasApi: !!api,
+          order: api && api.graph ? api.graph.order : 0,
+          size: api && api.graph ? api.graph.size : 0,
+          canvases: view.contentEl.querySelectorAll("#vg-graph canvas").length,
+          planParity: api && api.checkPlanParity ? api.checkPlanParity() : null,
           build: view.lastData && view.lastData._spike,
           stats: view.lastData && view.lastData.stats,
         };
-        // NOT console.log: "avoid unnecessary logging to console" is a guideline and the
-        // linter enforces it. Nothing was reading the log anyway -- the harness reads the
-        // global below -- so dropping it costs exactly nothing.
         window.__vgSpikeReport = report;
-        // No identifier in the string: the sentence-case rule lowercases what it checks,
-        // so any camelCase name in user-facing text is an unfixable "violation". Naming
-        // the global here was never useful to a reader anyway.
         new Notice("Diagnostics ready.");
         return report;
       },
@@ -740,4 +551,4 @@ class VaultGraphSpikePlugin extends Plugin {
   }
 }
 
-export default VaultGraphSpikePlugin;
+export default VaultGraphPlugin;

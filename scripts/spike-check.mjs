@@ -156,17 +156,10 @@ try {
   })()`);
   console.log("ribbon icon: " + JSON.stringify(icon));
 
-  // WATCH FOR EXECUTION CONTEXTS BEFORE creating the frame. This is the whole third
-  // question: the host cannot touch a sandboxed frame, but CDP is not bound by the
-  // same-origin rule -- it addresses each frame's execution context directly. The
-  // contexts have to be collected as they are ANNOUNCED though; there is no "list
-  // contexts" command to ask afterwards.
-  const contexts = [];
-  cdp.on((msg) => {
-    if (msg.method === "Runtime.executionContextCreated") contexts.push(msg.params.context);
-  });
-  await cdp.send("Runtime.enable");
-  await cdp.send("Page.enable").catch(() => null);
+  // NO FRAME BOOKKEEPING ANY MORE. This used to collect execution contexts before creating
+  // the iframe, because a sandboxed frame is site-isolated into its own CDP target and the
+  // only way in was to address its context directly -- which cdp.mjs, speaking one session,
+  // could not do. The page is in this document now, so `__vg` is simply here.
 
   // Open the view, then let it build and mount.
   await evalIn(`app.commands.executeCommandById(${JSON.stringify(pluginId + ":open")})`);
@@ -222,88 +215,57 @@ try {
   console.log("\n=== aliases ============================================");
   console.log(JSON.stringify(alias, null, 2));
 
-  // Now reach into the frame the way smoke.mjs would have to.
-  const frames = await cdp.send("Page.getFrameTree").catch(() => null);
-  const kids = (frames && frames.frameTree && frames.frameTree.childFrames) || [];
-  console.log("\nchild frames seen by CDP: " + kids.length);
-
-  const mainFrameId = frames && frames.frameTree && frames.frameTree.frame.id;
-  const frameContexts = contexts.filter(
-    (c) => c.auxData && c.auxData.frameId && c.auxData.frameId !== mainFrameId
-  );
-  console.log("execution contexts announced: " + contexts.length +
-              " (" + frameContexts.length + " in child frames)");
-
-  let cdpIntoFrame = { reached: false, note: "no child-frame context announced" };
-  for (const ctx of frameContexts) {
-    try {
-      const r = await cdp.send("Runtime.evaluate", {
-        expression: "(function () { return window.__vg ? " +
-                    "{ order: __vg.graph.order, size: __vg.graph.size, " +
-                    "parityOK: __vg.checkPlanParity().parityOK } : null; })()",
-        contextId: ctx.id, returnByValue: true, awaitPromise: true,
-      });
-      if (r.result && r.result.value) {
-        cdpIntoFrame = { reached: true, origin: ctx.origin || "(opaque)", value: r.result.value };
-        break;
-      }
-    } catch (e) {
-      cdpIntoFrame = { reached: false, note: String(e.message) };
-    }
-  }
-  console.log("CDP into the frame: " + JSON.stringify(cdpIntoFrame));
-
-  // WHY it failed matters more than that it failed. A sandboxed frame gets an opaque
-  // origin, which Chromium site-isolates into its own PROCESS -- so it is not a child
-  // frame of this target at all, it is a separate target. cdp.mjs speaks one session and
-  // has no sessionId support, so it cannot address one. Listing the targets says whether
-  // that is the explanation or whether the frame is simply absent.
-  const targets = await json(PORT, "/json/list").catch(() => []);
-  console.log("CDP targets: " + JSON.stringify(
-    targets.map((t) => ({ type: t.type, url: (t.url || "").slice(0, 60) }))));
-
-  // THE OTHER STRATEGY. Same page, unsandboxed, from a blob URL: same origin as the app,
-  // so the host can reach in -- and so could the existing harness. The trade is that the
-  // page is then inside the app's origin with no isolation at all. Running both is the
-  // only way to state the trade with numbers instead of adjectives.
-  console.log("\n=== second pass: blob, unsandboxed ====================");
-  await evalIn(`(function () {
-    var p = app.plugins.getPlugin(${id});
-    p.settings.forceStrategy = "blob";
-    return true;
+  // THE PAGE IS IN THIS WINDOW. Everything below used to need a message bridge or a second
+  // CDP target; it is now an ordinary property read, which is the entire point of the port.
+  const direct = await evalIn(`(function () {
+    var vg = window.__vg;
+    if (!vg) return { reachable: false };
+    return {
+      reachable: true,
+      order: vg.graph.order,
+      size: vg.graph.size,
+      parityOK: vg.checkPlanParity().parityOK,
+      canvases: document.querySelectorAll("#vg-graph canvas").length,
+      // The page's own root, in the app's document -- not in a frame.
+      inDocument: !!document.querySelector(".workspace-leaf-content .vault-graph"),
+      themeAttr: (document.querySelector(".vault-graph") || {}).getAttribute
+        ? document.querySelector(".vault-graph").getAttribute("data-theme") : null
+    };
   })()`);
-  await evalIn(`app.commands.executeCommandById(${JSON.stringify(pluginId + ":rebuild")})`);
-  await sleep(4000);
-  await evalIn(`app.commands.executeCommandById(${JSON.stringify(pluginId + ":report")})`);
-  await sleep(1200);
-  const blobReport = await evalIn("window.__vgSpikeReport || null");
-  console.log(JSON.stringify({
-    mountStrategy: blobReport && blobReport.mountStrategy,
-    handshake: blobReport && blobReport.handshake,
-    hostCanReachFrame: blobReport && blobReport.hostCanReachFrame,
-  }, null, 2));
+  console.log("direct read of __vg: " + JSON.stringify(direct));
+
+  // NO IFRAME ANYWHERE. Stated as a check rather than assumed, because "it still works"
+  // and "it works the way we intended" are different claims and only one of them is
+  // interesting after a port.
+  const frames = await evalIn(
+    `document.querySelectorAll("iframe").length`);
+
+  // CSS SCOPE, MEASURED IN THE LIVE APP. page.css ships as the plugin's stylesheet, so the
+  // question is not whether it is scoped in the file -- check-scope.mjs answers that -- but
+  // whether Obsidian's own chrome survived loading it. If a rule had leaked, the workspace
+  // would be wearing the page's background.
+  const leak = await evalIn(`(function () {
+    var el = document.querySelector(".workspace-tabs") || document.body;
+    var cs = getComputedStyle(el);
+    return { workspaceFont: cs.fontFamily.slice(0, 32), pageTokenOnBody:
+             getComputedStyle(document.body).getPropertyValue("--surface-1").trim() };
+  })()`);
+  console.log("host chrome: " + JSON.stringify(leak));
 
   const verdict = [];
   verdict.push(["custom ribbon icon registered", icon.circles === 12,
                 icon.buttonFound ? icon.circles + " circles, class " + icon.iconClass
                                  : "ribbon button not found"]);
-  verdict.push(["page mounted", !!report.mountStrategy, report.mountStrategy || "no"]);
-  verdict.push(["__vg present in page", !!(report.handshake && report.handshake.hasVg)]);
-  verdict.push(["canvases painted", (report.handshake && report.handshake.canvases) > 0,
-                (report.handshake && report.handshake.canvases) + " canvases"]);
-  verdict.push(["host can reach __vg directly",
-                !!(report.hostCanReachFrame && report.hostCanReachFrame.reachable),
-                report.hostCanReachFrame && report.hostCanReachFrame.note]);
-  verdict.push(["probe over postMessage says parity holds",
-                !!(report.probeOverPostMessage && report.probeOverPostMessage.planParity &&
-                   report.probeOverPostMessage.planParity.parityOK),
-                report.probeOverPostMessage && report.probeOverPostMessage.planParity
-                  ? "parityOK=" + report.probeOverPostMessage.planParity.parityOK
-                  : (report.probeOverPostMessage && report.probeOverPostMessage.error)]);
-  verdict.push(["CDP can reach __vg in the frame", cdpIntoFrame.reached,
-                cdpIntoFrame.reached
-                  ? "parityOK=" + cdpIntoFrame.value.parityOK + ", order=" + cdpIntoFrame.value.order
-                  : cdpIntoFrame.note]);
+  verdict.push(["mounted in the DOM, not in a frame", frames === 0, frames + " iframe(s)"]);
+  verdict.push(["the page is in the app's document", !!direct.inDocument]);
+  verdict.push(["host reads __vg directly, no bridge", !!direct.reachable,
+                direct.reachable ? direct.order + " nodes, " + direct.size + " edges" : "not reachable"]);
+  verdict.push(["canvases painted", direct.canvases > 0, direct.canvases + " canvases"]);
+  verdict.push(["plan parity holds at rest", !!direct.parityOK]);
+  verdict.push(["theme handed to the page", !!direct.themeAttr, "data-theme=" + direct.themeAttr]);
+  verdict.push(["page.css did not leak onto the host", leak.pageTokenOnBody === "",
+                leak.pageTokenOnBody === "" ? "no --surface-1 on body"
+                                            : "LEAKED: body has --surface-1=" + leak.pageTokenOnBody]);
   verdict.push(["fenced link stayed out of the graph", cache.linksIntoOrphan.length === 0,
                 cache.linksIntoOrphan.length
                   ? "indexed from " + cache.linksIntoOrphan.join(", ")
@@ -311,17 +273,11 @@ try {
   verdict.push(["alias link is in resolvedLinks", !!alias.inResolvedLinks,
                 alias.inResolvedLinks ? "resolved" :
                   "UNRESOLVED -- getFirstLinkpathDest says " + alias.getFirstLinkpathDest]);
-  verdict.push(["blob pass: host can reach __vg",
-                !!(blobReport && blobReport.hostCanReachFrame && blobReport.hostCanReachFrame.reachable),
-                blobReport && blobReport.hostCanReachFrame && blobReport.hostCanReachFrame.note]);
 
   console.log("\n=== verdict ============================================");
   for (const [name, ok, note] of verdict) {
     console.log((ok ? "  yes  " : "  NO   ") + name + (note ? "   (" + note + ")" : ""));
   }
-  console.log("\nNote: 'host can reach __vg directly' being NO is the expected and correct");
-  console.log("result under a sandboxed frame. It is listed because it is the reason the");
-  console.log("probe channel has to exist at all.");
 
   await shutdown(0);
 } catch (e) {

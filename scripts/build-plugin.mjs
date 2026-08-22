@@ -73,12 +73,24 @@ const options = {
   },
 };
 
-// styles.css is copied rather than bundled: Obsidian loads it itself, as a sibling of
-// main.js, and it is not reachable from the module graph.
+// styles.css is CONCATENATED, not bundled: Obsidian loads it itself as a sibling of
+// main.js, so nothing in the module graph imports it.
+//
+// Two parts, in this order:
+//   plugin/styles.css   the host chrome -- how the view's element behaves inside Obsidian
+//   src/page.css        the page itself, every rule scoped under .vault-graph
+//
+// THE PAGE'S STYLESHEET IS NOW THE PLUGIN'S STYLESHEET. That is the whole reason
+// check-scope.mjs exists and has no skip flag: one unscoped selector in page.css and this
+// file restyles Obsidian instead of the graph.
 function copyStyles() {
-  const css = readFileSync(join(ROOT, "plugin", "styles.css"), "utf8");
+  const host = readFileSync(join(ROOT, "plugin", "styles.css"), "utf8");
+  const page = readFileSync(join(ROOT, "src", "page.css"), "utf8");
   writeFileSync(join(ROOT, "styles.css"),
-    "/* Built by scripts/build-plugin.mjs from plugin/styles.css. */\n" + css, "utf8");
+    "/* Built by scripts/build-plugin.mjs from plugin/styles.css + src/page.css. */\n" +
+    host.trimEnd() + "\n\n" +
+    "/* ---- src/page.css ---------------------------------------------------- */\n" +
+    page.trimEnd() + "\n", "utf8");
 }
 
 if (WATCH) {
