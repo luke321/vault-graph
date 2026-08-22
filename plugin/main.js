@@ -548,7 +548,7 @@ class VaultGraphPlugin extends Plugin {
       id: "rebuild",
       name: "Rebuild from the metadata cache",
       callback: async () => {
-        const view = this.currentView();
+        const view = await this.currentView();
         if (!view) { new Notice("Open the graph first."); return; }
         await view.render();
       },
@@ -560,8 +560,8 @@ class VaultGraphPlugin extends Plugin {
     this.addCommand({
       id: "report",
       name: "Report diagnostics",
-      callback: () => {
-        const view = this.currentView();
+      callback: async () => {
+        const view = await this.currentView();
         if (!view) { new Notice("Open the graph first."); return; }
         const api = view.handle && view.handle.api;
         const report = {
@@ -583,17 +583,30 @@ class VaultGraphPlugin extends Plugin {
   }
 
   // Guidelines: don't hold a reference to the view, and don't detach leaves in onunload.
-  currentView() {
-    const leaves = this.app.workspace.getLeavesOfType(VIEW_TYPE);
-    return leaves.length ? leaves[0].view : null;
+  //
+  // The `instanceof` is NOT belt and braces, and neither is the await. Since 1.7.2 a leaf
+  // restored from a saved workspace is DEFERRED: the leaf is real and getLeavesOfType finds
+  // it, but until something reveals it `leaf.view` is a DeferredView placeholder rather than
+  // this plugin's view. Handing that placeholder back made "Rebuild" a TypeError -- the stub
+  // has no `render` -- and made the diagnostics report say hasApi:false about a graph that
+  // was perfectly fine. Both read as bugs in the graph, and neither is.
+  async currentView() {
+    for (const leaf of this.app.workspace.getLeavesOfType(VIEW_TYPE)) {
+      await leaf.loadIfDeferred();
+      if (leaf.view instanceof VaultGraphView) return leaf.view;
+    }
+    return null;
   }
 
+  // `revealLeaf` is awaited on purpose: since 1.7.2 it resolves once the view is really
+  // loaded rather than merely fronted, which is the difference between a tab that shows a
+  // graph and a tab that shows nothing until you click it.
   async activate() {
     const existing = this.app.workspace.getLeavesOfType(VIEW_TYPE);
-    if (existing.length) { this.app.workspace.revealLeaf(existing[0]); return; }
+    if (existing.length) { await this.app.workspace.revealLeaf(existing[0]); return; }
     const leaf = this.app.workspace.getLeaf("tab");
     await leaf.setViewState({ type: VIEW_TYPE, active: true });
-    this.app.workspace.revealLeaf(leaf);
+    await this.app.workspace.revealLeaf(leaf);
   }
 }
 

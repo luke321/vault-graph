@@ -29,6 +29,57 @@ published tag breaks every link to it.
 
 ---
 
+## 1.5.2 — 2026-08-22
+
+The directory's review of 1.5.1 came back with exactly one **error**, and chasing it found a
+real bug that had nothing to do with the linter.
+
+- **`minAppVersion` is now `1.7.2`, and it is now a measured number rather than an inherited
+  one.** The error was `Workspace.revealLeaf` at `plugin/main.js:593` and `:596` — marked
+  `@since 1.7.2` in `obsidian.d.ts`, against a declared floor of `1.5.0`. That `1.5.0` had no
+  rationale anywhere in this repo, because it never had one: it came from a template and was
+  never checked against what the plugin actually calls. Every other Obsidian API used here is
+  older, so 1.7.2 is the true floor.
+- **A deferred view is no longer mistaken for a live one.** This is the part worth reading.
+  `revealLeaf` did not become *new* in 1.7.2, it became *async* — because 1.7.2 introduced
+  DEFERRED views, and a leaf restored from a saved workspace now has a `DeferredView`
+  placeholder as its `view` until something reveals it. `currentView()` returned that
+  placeholder, so **"Rebuild from the metadata cache" was a `TypeError`** on the first use
+  after a restart (the stub has no `render`), and **"Report diagnostics" reported
+  `hasApi: false`** about a graph that was working correctly. Both read as bugs in the graph;
+  neither was. `currentView()` now awaits `loadIfDeferred()` and checks `instanceof`, and both
+  `revealLeaf` calls are awaited, which is what the API asks for.
+- **`scripts/deferred-check.mjs` reproduces it**, because neither existing harness could:
+  `smoke.mjs` and `spike-check.mjs` both open the graph in the foreground and look at it
+  immediately, which is the one state where deferral never happens. It is two phases against
+  one profile — open the graph, leave a different tab active, quit, relaunch — and it measures
+  the hazard before asserting the fix: on the restored leaf `isDeferred` is `true` and
+  `leaf.view.render` is `undefined`, which is the TypeError. Then, with the fix, "Rebuild"
+  completes with no throw and no window error, the leaf ends up undeferred with the real view,
+  7 canvases paint, and diagnostics report `hasApi: true, order: 452`. 10/10. It is a manual
+  command rather than a push gate, for the same reason the per-frame animation invariant is:
+  it launches a real Obsidian twice and takes about ninety seconds.
+
+  Two things it got wrong first, both worth knowing. `constructor.name` identifies nothing
+  here — the bundler minifies every class to a single letter, so the real view and the
+  placeholder both report `"t"`; `typeof view.render === "function"` is the discriminator, and
+  it is the method the command actually calls. And `app.plugins.enablePlugin()` on a vault in
+  restricted mode registers the id **without loading the plugin**, so the command silently did
+  nothing and the first version of this check passed vacuously on a leaf that did not exist.
+  `setEnable(true)` first, then assert `getPlugin()` before believing anything.
+- **The lint gap that hid it is closed.** `obsidianmd/no-unsupported-api` is scoped to
+  `**/*.{ts,cts,mts,tsx}` in the recommended preset, and this plugin is plain JavaScript
+  — so the rule silently never ran locally while the directory ran it anyway. A check that
+  cannot fail is worse than no check, because the clean run is taken as evidence. It is now
+  enabled explicitly for `plugin/**/*.js` and `src/page.js`, and it reproduces both errors.
+
+**Left alone, and now with numbers.** The scorecard's ~10,980 issues are five
+`@typescript-eslint/no-unsafe-*` rules — 5,470 member-access, 2,396 assignment, 1,533 call,
+613 argument, 540 return. All warnings, no errors, and overwhelmingly
+`vendor/graphology.umd.min.js:1`: type-aware rules objecting that untyped JavaScript is
+untyped. Silencing them means either a TypeScript rewrite or dropping the vendored library
+that makes the exporter work with no npm install and no network.
+
 ## 1.5.1 — 2026-08-22
 
 Everything the directory's automated review raised on 1.5.0, plus a contributing guide.

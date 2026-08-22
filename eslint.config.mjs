@@ -17,6 +17,14 @@ export default defineConfig([
     // Only the plugin. src/ is the HTML exporter -- a Node script that never runs inside
     // Obsidian, so Obsidian's rules say nothing about it -- and vendor/ is third-party.
     files: ["plugin/**/*.js", "src/page.js"],
+    rules: {
+      // THE PRESET SCOPES THIS RULE TO `**/*.{ts,cts,mts,tsx}`, so on a plain-JavaScript
+      // plugin it silently never runs -- and the directory's scanner runs it anyway. That
+      // gap cost a rejected release: two `revealLeaf` calls flagged upstream while the
+      // local run said clean. Turning it on here closes the only known hole between what
+      // this repo checks and what the directory checks.
+      "obsidianmd/no-unsupported-api": "error",
+    },
     languageOptions: {
       ecmaVersion: 2022,
       // MODULE, not commonjs. Getting this wrong is invisible and expensive: eslint keeps

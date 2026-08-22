@@ -52,6 +52,20 @@ node scripts/smoke.mjs        # 17 invariants, over two vault shapes
 node scripts/check-scope.mjs  # the page cannot style, or be styled by, its host
 ```
 
+One more is manual, because it launches a real Obsidian twice and takes about ninety seconds.
+Run it if you touch the view's lifecycle — `onOpen`, `currentView`, `activate`, or anything
+that reaches for `leaf.view`:
+
+```bash
+node scripts/deferred-check.mjs --vault ./demo-vault
+```
+
+Since Obsidian 1.7.2 a tab restored in the background is **deferred**: the leaf is real and
+`getLeavesOfType` finds it, but `leaf.view` is a placeholder until something reveals it. Both
+other harnesses open the graph in the foreground, which is the one state where that never
+happens — so this one quits and relaunches to get the leaf into the state a person's first
+restart of the day puts it in.
+
 `git config core.hooksPath .githooks` once per clone runs those on every push, along with a
 check that refuses to publish other people's names. Two of the three have no skip flag, on
 purpose: what they prevent is damage to somebody else's software, or to somebody else.
