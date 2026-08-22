@@ -2,7 +2,8 @@
 
 **Your whole vault as one disc.** Every note is a dot; every top-level folder owns a wedge
 of the circle whose angle is its share of the vault. Notes fill concentric rings from the
-middle outwards, best-connected first, so hubs sit near the hub and leaves land on the rim.
+middle outwards, best-connected first, so the best-connected notes sit near the centre and
+leaves land on the rim.
 
 The layout is **deterministic, not force-directed**. There is no simulation to settle and
 no seed to get lucky with: the same vault always draws the same picture, so the shape
@@ -70,8 +71,13 @@ Enable. Open it from the ribbon icon or the command palette (*Vault graph: Open 
 
 It reads your vault through Obsidian's own metadata cache, so it sees the same links
 Obsidian does, aliases and frontmatter links included. It builds in about a tenth of a
-second on a 450-note vault. **Nothing leaves your machine** — no network, no telemetry, no
-account.
+second on a 450-note vault. **Nothing leaves your machine** — it makes no network requests,
+collects nothing, and needs no account.
+
+<sub>For completeness, since it is greppable: the bundled Sigma.js carries a `fetch` in its
+image-loading path. This plugin never registers an image node program, so that path is
+unreachable — but the string is in the file, and it is better to say so than to have someone
+find it.</sub>
 
 ---
 
@@ -144,8 +150,18 @@ It does **not** contain note bodies. Nothing you wrote inside a note is in the f
 That distinction matters the moment you think about sharing. A screenshot is usually fine.
 Handing someone the HTML hands them **a complete listing of your note titles**, which for
 most vaults is more revealing than it sounds. The file is designed to live inside your own
-vault and sync to your own devices; treat it as private by default. There is no anonymise
-mode.
+vault and sync to your own devices; treat it as private by default.
+
+**If you want to show the graph rather than your vault**, generate a mirror first:
+
+```bash
+node scripts/make-demo-vault.mjs --vault "/path/to/your/vault" --out ./demo-vault
+```
+
+It reproduces the shape and none of the content — same folder tree, same note count per
+folder, same `created` dates, same word counts, and the whole link graph rewritten between
+renamed notes, so it builds to the same numbers your vault does. Every screenshot and the
+demo clip in this README were made from one.
 
 ## Which vault
 
@@ -209,7 +225,7 @@ are Windows-only conveniences, not requirements:
 |---|---|---|
 | `refresh-graph.ps1` | rebuild *and* open | `node src/build-graph.mjs && open <path>` |
 | `record-demo.ps1` | record the demo to mp4 | not ported — needs `avfoundation` / `x11grab` |
-| `make-gif.ps1` | encode a take as the README GIF | works anywhere ffmpeg does, if you port the wrapper |
+| `make-gif.ps1` | encode a take as the README GIF (15fps, 700px) | works anywhere ffmpeg does, if you port the wrapper |
 | `cursor.ps1` | moves the OS pointer during a recording | not ported |
 | `make-logo.ps1` | rebuild the logo mask from source art | not ported; `assets/` is prebuilt |
 
@@ -252,7 +268,7 @@ If you have just rebuilt, reload the browser tab.
 ## Optional: the scripted demo
 
 `?demo` on the URL arms a walkthrough that drives the real controls over Chrome's DevTools
-protocol. The storyboard is `demoMode()` in `src/template.html` — append beats to it and
+protocol. The storyboard is `demoMode()` in `src/page.js` — append beats to it and
 nothing else needs changing.
 
 ```powershell
@@ -269,14 +285,22 @@ nothing else needs changing.
 node scripts/smoke.mjs
 ```
 
-Builds to a temp file, drives a real Chrome, and checks 16 measured properties of the
+Builds to a temp file, drives a real Chrome, and checks 17 measured properties of the
 layout — plan parity, the resting lattice, the heatmap's tiling, the hover and highlight
-ramps — printing the number it measured for each. `--vault PATH` points it at a different
-vault (`--url FILE` at an already-built page), which is worth doing: a small vault and a
-large one take different branches through the ring balancer and the gap scaling.
+ramps — printing the number it measured for each.
+
+With no arguments it checks **two vault shapes**, one after the other: a ~450-note mirror of
+a real vault and a 10,000-note synthetic, generating either on demand. That is not
+belt-and-braces — a small vault and a large one take different branches through the ring
+balancer and the gap scaling, and a change that passes at 450 notes can still break the band
+split at 10,000. The mirror is skipped with a notice when there is no real vault to mirror,
+never silently.
+
+`--vault PATH` is repeatable and overrides that pair; `--url FILE` checks an already-built
+page.
 
 ```bash
-node scripts/smoke.mjs --vault ./test-vault
+node scripts/smoke.mjs --vault ./test-vault --vault ./demo-vault
 ```
 
 Exits non-zero, so it can gate a push:
@@ -317,12 +341,38 @@ The wedges are the filing system; the edges are the actual structure.
 
 ## Files
 
+**The page, in four parts.** One source, two mounts: the exporter wraps them in a document,
+the plugin puts them in an Obsidian view.
+
+| | |
+|---|---|
+| `src/page.html` | the markup |
+| `src/page.css` | every rule scoped under `.vault-graph`, so it can be dropped into another document |
+| `src/page.js` | `mountVaultGraph(root, data, deps)` — layout, render, interaction |
+| `src/shell.html` | the standalone document that wraps the three, and its bootstrap |
+
+**The two things built from it.**
+
 | | |
 |---|---|
 | `src/build-graph.mjs` | crawls the vault, resolves links, emits one HTML file |
-| `src/template.html` | the whole app — layout, render, interaction |
+| `plugin/main.js` | the Obsidian plugin: reads the metadata cache, mounts the page in a view |
+| `manifest.json` | the plugin manifest, at the repo root because Obsidian requires it there |
 | `vendor/` | Sigma.js + graphology, committed rather than installed |
-| `scripts/` | build/open, demo, recording, invariant suite, test-vault generator |
+
+**Tooling.**
+
+| | |
+|---|---|
+| `scripts/build-plugin.mjs` | bundles the plugin into `main.js` + `styles.css` (`npm run build`) |
+| `scripts/install-plugin.ps1` | copies exactly the three files Obsidian installs, and nothing else |
+| `scripts/smoke.mjs` | the invariant suite, over both vault shapes |
+| `scripts/check-scope.mjs` | asserts the page cannot style or be styled by its host |
+| `scripts/check-pii.mjs` | refuses to publish other people's names; no skip flag |
+| `scripts/make-demo-vault.mjs` | a structural mirror of a real vault, with none of its content |
+| `scripts/make-test-vault.mjs` | a synthetic vault, deliberately awkward |
+| `scripts/shoot.mjs` | screenshots the page at rest, for comparing two commits |
+| `scripts/record-demo.ps1`, `make-gif.ps1` | the demo recording and its encode |
 | `.ai-context/` | architecture, invariants, and one record per decision |
 | `CHANGELOG.md` | what shipped, per release |
 

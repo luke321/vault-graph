@@ -24,6 +24,68 @@ regression suite rather than as history.
 
 ---
 
+## 1.5.0 — 2026-08-22
+
+**The first release with an Obsidian plugin in it.** The graph now mounts inside Obsidian as
+a view, reading the vault through Obsidian's own metadata cache, and still exports the
+standalone HTML file it always did. One source, two mounts.
+
+Note the tag: **`1.5.0`, with no `v`**, unlike every release before it. Obsidian matches a
+release tag against the `version` string in `manifest.json`, and a manifest version must be
+bare semver — so the `v` prefix would make the plugin uninstallable.
+
+### The plugin
+
+- Mounts **in the DOM**, not in an iframe. The spike that proved the page ran inside
+  Obsidian used a sandboxed frame and paid for it three ways: the invariant suite could not
+  reach the page, the plugin talked to itself through a message bridge, and the theme had to
+  be handed across an origin boundary. All three are gone.
+- Reads `resolvedLinks`, `unresolvedLinks`, `getFileCache` and `stat.mtime` — the same links
+  Obsidian resolves, aliases and frontmatter links included. About 12ms on 450 notes.
+- **Follows the theme**, including a live switch, and the palette is re-read rather than
+  snapshotted at mount.
+- Clicking a note opens it with `openLinkText`, which respects panes and history.
+- Its own ribbon mark, drawn from the product: two concentric bands of notes around a
+  hollow hub.
+- Ships as `main.js` + `manifest.json` + `styles.css` and nothing else, because that is
+  exactly what Obsidian installs.
+
+### The page, split in four
+
+`template.html` became `shell.html` + `page.css` + `page.html` + `page.js`, and both
+consumers assemble from the same four. The split itself changed nothing: built from the same
+vault before and after, the standalone output was byte-identical apart from its timestamp.
+
+Then the page learned to live somewhere else: every id is prefixed, every CSS rule is scoped
+under one class, and `page.js` is `mountVaultGraph(root, data, deps)` with no `document`
+reach left in it. `scripts/check-scope.mjs` asserts all three and gates every push.
+
+### Behaviour
+
+- **"Mark today" means what the heatmap means.** It counted files *touched* today as well as
+  created, and `touched` is an mtime that a sync or a frontmatter rewrite moves — so it
+  marked far more than the band showed. `created` alone now, pinned to the band by a new
+  invariant as set equality rather than counts.
+- **"Mark today" no longer moves notes**, only haloes them, like a marked heatmap day. Its
+  notes are scattered across every folder, so pushing them slid a subset out through their
+  own cell-mates.
+- **Links are softer in the light theme.** The palette was perceptually symmetric, which is
+  not the same as looking symmetric: 1500 opaque lines over a near-white field accumulate
+  into a wash and read as dirt, while the same density on a dark field reads as glow.
+
+### Checking it
+
+- The suite runs **both vault shapes** every time — a ~450-note mirror and a 10,000-note
+  synthetic — and there are 17 checks, not 16. A change that passes at 450 notes can still
+  break the band split at 10,000.
+- `scripts/make-demo-vault.mjs` builds a structural mirror of a real vault with none of its
+  content, so screenshots and the demo clip no longer show anybody's notes.
+- `scripts/shoot.mjs` screenshots the page at rest for comparing two commits, which is how
+  the one regression in this release was caught: the centre mark vanished, and no invariant
+  looks at the middle of the disc.
+- Every guideline error in the shipped page is fixed — 62 to zero against Obsidian's own
+  lint, which had never been pointed at `src/` before.
+
 ## v1.4.4 — 2026-08-22
 
 **v1.4.3 withdrawn and deleted.** A verification clone of the published repository turned
