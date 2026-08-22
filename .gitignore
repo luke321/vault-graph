@@ -14,3 +14,8 @@ demo-vault/
 .pii-names
 
 node_modules/
+
+# Built plugin artifacts. Obsidian gets these from the release, not from the repo;
+# main.js is 600KB of bundle and would churn on every template edit.
+/main.js
+/styles.css
