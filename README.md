@@ -8,6 +8,15 @@ The layout is **deterministic, not force-directed**. There is no simulation to s
 no seed to get lucky with: the same vault always draws the same picture, so the shape
 becomes something you can learn and recognise rather than a fresh tangle each time.
 
+![The disc growing from the vault first note, a note hovered, a folder hidden, a subfolder highlighted, three heatmap days hovered, then one folder soloed](assets/demo.gif)
+
+Nothing in that clip is staged. `?demo` drives the real controls over Chrome DevTools
+protocol, `scripts/record-demo.ps1` captures it unattended, and it stops on the demo
+finishing rather than after a guessed duration -- see
+[`.ai-context/decisions/0007`](.ai-context/decisions/0007-the-demo-drives-real-input.md).
+
+And the same thing inside Obsidian:
+
 ![Vault Graph inside Obsidian, dark theme](assets/screenshots/plugin-dark.png)
 
 Ships as an **Obsidian plugin** and as a **standalone HTML exporter** — one page, two
