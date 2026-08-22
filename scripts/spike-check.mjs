@@ -290,6 +290,38 @@ try {
   if (shotDir) {
     mkdirSync(shotDir, { recursive: true });
     const shoot = async (name) => {
+      // CLEAR THE NOTICES FIRST. This runs after the diagnostics command, so "Diagnostics
+      // ready." was sitting in the corner of every screenshot that has been taken so far --
+      // a toast from the harness, published in the README as though it were the plugin.
+      await evalIn(`(function(){
+        var n = document.querySelectorAll(".notice, .notice-container > *");
+        for (var i = 0; i < n.length; i++) n[i].remove();
+      })(); void 0`);
+      await sleep(250);
+      // WHAT THE PAGE ACTUALLY THINKS THE THEME IS. A screenshot showing dark chrome around
+      // a light-palette disc means the attribute or the repaint did not land, and the shot
+      // alone cannot say which.
+      const st = await evalIn(`(function(){
+        var el = document.querySelector(".vault-graph");
+        var vg = window.__vg;
+        return JSON.stringify({
+          bodyTheme: document.body.classList.contains("theme-dark") ? "dark" : "light",
+          pageAttr: el ? el.getAttribute("data-theme") : null,
+          edgeToken: el ? getComputedStyle(el).getPropertyValue("--edge").trim() : null,
+          themeSeenByJs: vg && vg.readTheme ? "readTheme exposed" : "NOT exposed"
+        });
+      })()`);
+      console.log("    state: " + st);
+      const probe = await evalIn(`(function(){
+        var vg = window.__vg, g = vg.graph;
+        var e = g.edges()[0];
+        var before = vg.renderer.getEdgeDisplayData(e).color;
+        vg.readTheme();
+        vg.renderer.refresh();
+        var after = vg.renderer.getEdgeDisplayData(e).color;
+        return JSON.stringify({ edgeBefore: before, edgeAfterManualReread: after });
+      })()`);
+      console.log("    probe: " + probe);
       const r = await cdp.send("Page.captureScreenshot", { format: "png" });
       writeFileSync(join(shotDir, name + ".png"), Buffer.from(r.data, "base64"));
       console.log("  wrote " + name + ".png");
@@ -298,10 +330,10 @@ try {
     // Obsidian's own theme switch, so the host chrome changes with the page rather than
     // the page alone -- which is the integration worth showing.
     await evalIn(`app.changeTheme("obsidian"); void 0`);          // dark
-    await sleep(1200);
+    await sleep(2200);
     await shoot("obsidian-dark");
     await evalIn(`app.changeTheme("moonstone"); void 0`);         // light
-    await sleep(1800);
+    await sleep(2600);
     await shoot("obsidian-light");
     await evalIn(`app.changeTheme("obsidian"); void 0`);
     await sleep(600);

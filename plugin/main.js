@@ -391,7 +391,11 @@ class VaultGraphView extends ItemView {
   constructor(leaf, plugin) {
     super(leaf);
     this.plugin = plugin;
-    this.api = null;         // what mountVaultGraph returned: the __vg surface
+    // A HANDLE, not the api. mountVaultGraph returns before its deferred init has built
+    // the api, so anything captured here would be null forever -- and null reads exactly
+    // like "no api" to every guard below, which is how the theme repaint, the renderer
+    // teardown and the diagnostics all became silent no-ops together.
+    this.handle = null;
     this.lastData = null;
     this.mountMs = 0;
   }
@@ -412,10 +416,11 @@ class VaultGraphView extends ItemView {
   // number of them; opening and closing this view a dozen times without killing the
   // renderer exhausts them and the thirteenth mount draws nothing at all.
   teardown() {
-    if (this.api && this.api.renderer) {
-      try { this.api.renderer.kill(); } catch { /* already gone */ }
+    const api = this.handle && this.handle.api;
+    if (api && api.renderer) {
+      try { api.renderer.kill(); } catch { /* already gone */ }
     }
-    this.api = null;
+    this.handle = null;
     this.contentEl.empty();
   }
 
@@ -435,13 +440,17 @@ class VaultGraphView extends ItemView {
     //
     // Then repaint: the renderer only draws when asked, and the logo and heatmap band paint
     // from `afterRender`, so a refresh carries them along.
-    if (this.api) {
+    const api = this.handle && this.handle.api;
+    if (api) {
       try {
-        if (this.api.readTheme) this.api.readTheme();
-        if (this.api.renderer) this.api.renderer.refresh();
-        if (this.api.placeLogo) this.api.placeLogo();
-        if (this.api.heatBuild) this.api.heatBuild();
+        if (api.readTheme) api.readTheme();
+        if (api.renderer) api.renderer.refresh();
+        if (api.placeLogo) api.placeLogo();
+        if (api.heatBuild) api.heatBuild();
       } catch { /* a half-built view is not worth an exception here */ }
+    } else {
+      // Still initialising. It will mount with the current theme anyway, because render()
+      // sets the attribute before calling mountVaultGraph.
     }
   }
 
@@ -476,7 +485,7 @@ class VaultGraphView extends ItemView {
     this.registerEvent(this.app.workspace.on("css-change", () => this.syncTheme()));
 
     const t0 = performance.now();
-    this.api = mountVaultGraph(page, data, {
+    this.handle = mountVaultGraph(page, data, {
       // Real module imports, not globals: the UMD wrappers take their `module.exports`
       // branch under esbuild, so nothing is ever assigned to `window`. This is exactly why
       // page.js takes its libraries as arguments.
@@ -549,7 +558,7 @@ class VaultGraphPlugin extends Plugin {
       callback: () => {
         const view = this.currentView();
         if (!view) { new Notice("Open the graph first."); return; }
-        const api = view.api;
+        const api = view.handle && view.handle.api;
         const report = {
           mount: "in-dom",
           mountMs: view.mountMs,

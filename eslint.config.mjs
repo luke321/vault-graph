@@ -16,7 +16,7 @@ export default defineConfig([
   {
     // Only the plugin. src/ is the HTML exporter -- a Node script that never runs inside
     // Obsidian, so Obsidian's rules say nothing about it -- and vendor/ is third-party.
-    files: ["plugin/**/*.js"],
+    files: ["plugin/**/*.js", "src/page.js"],
     languageOptions: {
       ecmaVersion: 2022,
       // MODULE, not commonjs. Getting this wrong is invisible and expensive: eslint keeps
@@ -45,6 +45,6 @@ export default defineConfig([
     },
   },
   {
-    ignores: ["node_modules/**", "vendor/**", "dist/**", "test-vault/**", "src/**", "scripts/**"],
+    ignores: ["node_modules/**", "vendor/**", "dist/**", "test-vault/**", "demo-vault/**", "src/build-graph.mjs", "scripts/**"],
   },
 ]);

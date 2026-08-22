@@ -4915,7 +4915,17 @@ function mountVaultGraph(root, data, deps) {
     }
     $("busy").style.display = "none";
   }, 20);
-  return API;
+  // A LIVE HANDLE, not the API itself.
+  //
+  // Init runs inside a setTimeout so the browser can paint "Laying out graph..." first, so
+  // API does not exist yet when this returns. Returning it directly returned null -- and
+  // null is indistinguishable from "no api" to every `if (this.api)` guard on the plugin
+  // side, which is how the theme repaint, the renderer teardown and the diagnostics all
+  // became silent no-ops at once. Measured: the canvas held #e8e7e1 while its own CSS token
+  // said #333330, and a manual readTheme() + refresh() fixed it instantly.
+  //
+  // A getter cannot go stale, and it cannot be mistaken for a value that never arrived.
+  return { get api() { return API; }, get ready() { return API !== null; } };
 }
 
 export { mountVaultGraph };
