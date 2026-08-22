@@ -452,6 +452,11 @@ const BRIDGE = [
 // No I/O at all any more. This used to read four files out of the plugin folder, which is
 // the single thing that made the spike uninstallable: a release ships main.js,
 // manifest.json and styles.css, and nothing put those four files beside them.
+// page.js is an ES module because this file imports it. Inlining it into a document means
+// putting it in a classic <script>, where an export statement is a syntax error -- so it
+// comes off on the way in. shell.html's bootstrap then calls the function.
+const asScript = (js) => js.replace(/^export \{[^}]*\};?\s*$/m, "").trimEnd();
+
 function assemblePage(data) {
   const libs = "<script>\n" + GRAPHOLOGY + "\n</script>\n<script>\n" + SIGMA + "\n</script>";
 
@@ -477,7 +482,7 @@ function assemblePage(data) {
   return SHELL
     .replace("<!--CSS-->", () => PAGE_CSS.trimEnd())
     .replace("<!--MARKUP-->", () => markup)
-    .replace("<!--SCRIPT-->", () => PAGE_JS.trimEnd())
+    .replace("<!--SCRIPT-->", () => asScript(PAGE_JS))
     .replace("<!--LIBS-->", () => libs)
     .replace("<!--ASSETS-->", () => assets)
     .replace("<!--DATA-->", () => "<script>window.VAULT_DATA=" + JSON.stringify(data) + ";</script>")

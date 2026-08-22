@@ -553,10 +553,17 @@ const assets =
 // commit that introduced it, the file produced here was byte-identical to the one the
 // single template produced, apart from its own build timestamp.
 const part = (f) => readFileSync(join(HERE, f), "utf8");
+
+// page.js is an ES module because the plugin imports it. A standalone page cannot be one:
+// a module served from file:// is blocked by CORS, and opening this file straight off a
+// disk is its entire reason to exist. So the export statement -- which is a syntax error in
+// a classic script -- comes off on the way in, and shell.html calls the function directly.
+const asScript = (js) => js.replace(/^export \{[^}]*\};?\s*$/m, "").trimEnd();
+
 const html = part("shell.html")
   .replace("<!--CSS-->", () => part("page.css").trimEnd())
   .replace("<!--MARKUP-->", () => part("page.html").trimEnd())
-  .replace("<!--SCRIPT-->", () => part("page.js").trimEnd())
+  .replace("<!--SCRIPT-->", () => asScript(part("page.js")))
   .replace("<!--LIBS-->", () => libs)
   .replace("<!--ASSETS-->", () => assets)
   .replace("<!--DATA-->", () => `<script>window.VAULT_DATA=${JSON.stringify(data)};</script>`);

@@ -32,5 +32,32 @@ html, body { height: 100%; margin: 0; }
 <script>
 <!--SCRIPT-->
 </script>
+
+<script>
+/* THE STANDALONE'S BOOTSTRAP.
+ *
+ * page.js exports a function now instead of running itself, so somebody has to call it.
+ * Here that is this block; in the plugin it is main.js.
+ *
+ * The dependencies are read off `window` HERE, at the one place that knows they are UMD
+ * globals -- this page loaded them as <script> tags. Inside a plugin they are bundled
+ * module imports and never touch `window` at all, which is exactly why page.js takes them
+ * as arguments rather than reaching for them.
+ *
+ * A classic script, not type="module", deliberately: a module served from file:// is
+ * blocked by CORS, and being openable straight off a disk is the whole point of this file.
+ * The assembler strips page.js's `export` line for the same reason.
+ */
+mountVaultGraph(
+  document.getElementById("vg-app"),
+  window.VAULT_DATA,
+  {
+    Graph: window.graphology.Graph || window.graphology,
+    Sigma: (window.Sigma && window.Sigma.Sigma) || window.Sigma,
+    rendering: (window.Sigma && window.Sigma.rendering) || {},
+    logoMask: window.VAULT_LOGO_MASK || ""
+  }
+);
+</script>
 </body>
 </html>

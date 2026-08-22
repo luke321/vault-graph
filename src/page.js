@@ -1,21 +1,42 @@
-(function () {
+/**
+ * Mount the disc into one element.
+ *
+ *   mountVaultGraph(root, data, deps) -> the __vg debug surface
+ *
+ * root  the element to build inside. Must be the page's own root -- the element carrying
+ *       class="vault-graph", since every rule in page.css is scoped under it and every
+ *       custom property is declared on it.
+ * data  what build-graph.mjs or the plugin's adapter produced.
+ * deps  { Graph, Sigma, rendering, logoMask } -- INJECTED rather than read off `window`,
+ *       because in a plugin the libraries are bundled module imports and never become
+ *       globals at all. The standalone page passes its UMD globals in; see shell.html.
+ *
+ * WAS AN IIFE. Nothing about the body changed when it stopped being one: it already kept
+ * every name to itself, which is what made this a signature change rather than a rewrite.
+ */
+function mountVaultGraph(root, data, deps) {
   "use strict";
 
-  var DATA = window.VAULT_DATA;
-  var Graph = window.graphology.Graph || window.graphology;
-  var SigmaCls = (window.Sigma && window.Sigma.Sigma) || window.Sigma;
+  var DATA = data;
+  var Graph = deps.Graph;
+  var SigmaCls = deps.Sigma;
   // The programs hang off the UMD NAMESPACE object, not off the Sigma class that
   // SigmaCls resolves to -- the bundle sets both `Sigma.Sigma` and
   // `Sigma.rendering` on the same export, so `SigmaCls.rendering` is undefined and
   // reaching for a program through it throws during construction. That kills the
   // whole init inside its setTimeout, which surfaces as a page stuck on
   // "Laying out graph..." with nothing in the console.
-  var RENDERING = (window.Sigma && window.Sigma.rendering) || {};
+  var RENDERING = deps.rendering || {};
+  var LOGO_MASK = deps.logoMask || "";
+  var API = null;
 
   // Ids carry a `vg-` prefix so they cannot collide with the host document, and the
   // prefix is added HERE rather than at the ~200 call sites, which stay $("graph").
   var ID = "vg-";
-  var $ = function (id) { return document.getElementById(ID + id); };
+  // querySelector on the ROOT, not getElementById on the document. Two views of this page
+  // in one Obsidian window would otherwise share every id, and the second one would drive
+  // the first one's DOM.
+  var $ = function (id) { return root.querySelector("#" + ID + id); };
 
   // THE TOKENS LIVE ON OUR OWN ROOT, not on the document's.
   //
@@ -27,7 +48,8 @@
   // getPropertyValue returns "", every colour parses to black, and the heatmap draws every
   // day as though it were empty. Measured exactly that way -- 88 days with notes, 88 of
   // them "partially filled" -- before this was pointed at the right element.
-  var ROOT = $("app") || document.documentElement;
+  // The container itself, which $() cannot return: querySelector only sees descendants.
+  var ROOT = root;
   var css = function (name) {
     return getComputedStyle(ROOT).getPropertyValue(name).trim();
   };
@@ -2826,10 +2848,17 @@
     // so it needs its own hook. Debounced, because a drag-resize fires continuously
     // and each change costs a full refresh.
     var rzTimer = null;
-    window.addEventListener("resize", function () {
+    // OBSERVE THE CONTAINER. A window resize listener is right for a page that fills the
+    // window and wrong for a view inside an app: dragging an Obsidian sidebar resizes this
+    // element without resizing the window, and closing a pane resizes it the other way.
+    // Watching the element covers both, and still fires on a window resize, because the
+    // container is sized from the window in the standalone.
+    var onResize = function () {
       if (rzTimer) clearTimeout(rzTimer);
       rzTimer = setTimeout(function () { rzTimer = null; refreshSizeScale(); placeLogo(); }, 120);
-    });
+    };
+    if (window.ResizeObserver) new ResizeObserver(onResize).observe(root);
+    else window.addEventListener("resize", onResize);
 
     // afterRender covers the cases a camera event does not: the first paint, a
     // container resize (Sigma re-reads its dimensions and renders without the camera
@@ -4591,7 +4620,7 @@
   setTimeout(function () {
     makeRenderer();
     // Debug handle: lets a test page inspect live layout state from outside.
-    window.__vg = { graph: graph, state: state, get renderer() { return renderer; },
+    API = window.__vg = { graph: graph, state: state, get renderer() { return renderer; },
                     ringsLayout: ringsLayout, visible: visible, groupOf: groupOf,
                     alpha: alpha, cascade: cascade, syncAlpha: syncAlpha,
                     clearAlpha: clearAlpha, buildWedgePlan: buildWedgePlan,
@@ -4829,8 +4858,8 @@
     buildSearch(); buildTools(); buildStats();
     // Inlined at build time by build-graph.mjs; absent if logo-mask.png was missing,
     // in which case the element simply stays display:none.
-    if (window.VAULT_LOGO_MASK) {
-      var mu = 'url("' + window.VAULT_LOGO_MASK + '")';
+    if (LOGO_MASK) {
+      var mu = 'url("' + LOGO_MASK + '")';
       $("logo").style.webkitMaskImage = mu;
       $("logo").style.maskImage = mu;
       // The inner layer masks by the logo AND a radial fade, so it occupies the middle
@@ -4845,7 +4874,7 @@
       // Also decoded as an Image, because Save PNG has to composite the mask onto a
       // canvas by hand -- a CSS-masked element cannot be drawImage'd.
       logoMaskImg = new Image();
-      logoMaskImg.src = window.VAULT_LOGO_MASK;
+      logoMaskImg.src = LOGO_MASK;
     }
     regroup();
     // After regroup, because the band paints with nodeColor() and the sub-shade
@@ -4882,4 +4911,7 @@
     }
     $("busy").style.display = "none";
   }, 20);
-})();
+  return API;
+}
+
+export { mountVaultGraph };

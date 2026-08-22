@@ -77,18 +77,42 @@ if (!html.includes('class="vault-graph"')) {
 /* ---- 3. script ---------------------------------------------------------- */
 
 const js = readFileSync(join(SRC, "page.js"), "utf8");
-// The one legitimate getElementById is inside the $ accessor, which adds the prefix.
-const lookups = [...js.matchAll(/getElementById\(([^)]*)\)/g)].map((m) => m[1].trim());
-for (const arg of lookups) {
-  if (arg !== "ID + id") problems.push(`page.js  direct id lookup outside the accessor: getElementById(${arg})`);
+
+// NO `document.` AT ALL. This is the strongest of the three invariants and the cheapest to
+// state: the page is handed one element, and everything it touches is inside it. A single
+// `document.getElementById` reaches past the container into the host application, which in
+// Obsidian means grabbing the app's element instead of ours -- and with two views of this
+// page open, grabbing the other view's.
+//
+// TWO EXCEPTIONS, both real and both narrow:
+//
+//   document.createElement  makes DETACHED nodes -- three scratch canvases for the PNG
+//                           export and one <a> to trigger the download. None is ever added
+//                           to the host's tree, and there is no container-scoped way to
+//                           create an element.
+//   document.title          the demo recorder's completion signal: record-demo.ps1 stops
+//                           when the title changes, rather than after a guessed duration.
+//                           It is inside the demo path, which only arms from `?demo` on a
+//                           standalone URL, so a plugin can never reach it. Left as an
+//                           exception rather than removed, because deleting it would make
+//                           the recorder guess again.
+const ALLOWED_REACHES = new Set(["document.createElement", "document.title"]);
+const reaches = [...js.matchAll(/\bdocument\.[A-Za-z_$][\w$]*/g)].map((m) => m[0]);
+for (const r of [...new Set(reaches)]) {
+  if (!ALLOWED_REACHES.has(r)) problems.push(`page.js  reaches the host document: ${r}`);
+}
+
+// The accessor itself, scoped to the element the mount was given.
+if (!js.includes('var $ = function (id) { return root.querySelector("#" + ID + id); };')) {
+  problems.push("page.js  the $ accessor is not the root-scoped form");
 }
 if (!js.includes('var ID = "' + PREFIX + '"')) {
   problems.push("page.js  the id prefix constant is missing");
 }
-// A stylesheet read off the host's root would come back empty now that the tokens are ours.
-if (js.includes("getComputedStyle(document.documentElement)")) {
-  problems.push("page.js  reads custom properties off documentElement; the tokens are on the container");
+if (!/export \{[^}]*mountVaultGraph[^}]*\}/.test(js)) {
+  problems.push("page.js  does not export mountVaultGraph");
 }
+const lookups = reaches;
 
 /* ---- report ------------------------------------------------------------- */
 
