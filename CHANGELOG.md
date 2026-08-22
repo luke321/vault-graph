@@ -19,6 +19,11 @@ regression suite rather than as history.
 
 `v1.0` predates the scheme and is left as a two-part tag rather than retconned.
 
+**From `1.5.0` the tag drops the `v`.** Obsidian matches a release tag against the `version`
+string in `manifest.json`, and a manifest version must be bare semver — so a `v` prefix
+makes the plugin uninstallable. The older `v`-prefixed tags stay as they are; renaming a
+published tag breaks every link to it.
+
 **Every release gets a GitHub Release with a ready-to-run package attached** — see
 [`.ai-context/releasing.md`](.ai-context/releasing.md).
 
