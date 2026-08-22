@@ -419,6 +419,27 @@ class VaultGraphView extends ItemView {
     this.contentEl.empty();
   }
 
+  // activeDocument, not document: a view torn out into a popout window lives in a different
+  // document, and reading the main window's theme there gives the wrong answer.
+  syncTheme() {
+    if (!this.page) return;
+    const want = activeDocument.body.classList.contains("theme-light") ? "light" : "dark";
+    if (this.page.getAttribute("data-theme") === want) return;
+    this.page.setAttribute("data-theme", want);
+
+    // The palette is read from CSS variables as things are drawn, so the DOM follows the
+    // attribute on its own -- but the canvases do not, because they only repaint when the
+    // renderer is asked to. The logo and the heatmap band paint from `afterRender`, so a
+    // refresh carries them along.
+    if (this.api) {
+      try {
+        if (this.api.renderer) this.api.renderer.refresh();
+        if (this.api.placeLogo) this.api.placeLogo();
+        if (this.api.heatBuild) this.api.heatBuild();
+      } catch { /* a half-built view is not worth an exception here */ }
+    }
+  }
+
   async render() {
     this.teardown();
     const root = this.contentEl;
@@ -438,10 +459,16 @@ class VaultGraphView extends ItemView {
     root.appendChild(page);
 
     // The page's palette lives on this element (page.css is scoped to it), so the theme is
-    // set here rather than on <html> -- which is not ours to write. activeDocument, because
-    // a view torn out into a popout window is in a different document than `document`.
-    page.setAttribute("data-theme",
-      activeDocument.body.classList.contains("theme-light") ? "light" : "dark");
+    // set here rather than on <html> -- which is not ours to write.
+    this.page = page;
+    this.syncTheme();
+
+    // AND IT HAS TO FOLLOW. Setting it once at mount was the first version, and a
+    // screenshot of Obsidian in its light theme showed why that is not enough: light
+    // chrome, black view. `css-change` is Obsidian's own signal for exactly this -- it
+    // fires when the theme or a CSS snippet changes -- and it is the whole difference
+    // between a view that is themed and one that happened to match at startup.
+    this.registerEvent(this.app.workspace.on("css-change", () => this.syncTheme()));
 
     const t0 = performance.now();
     this.api = mountVaultGraph(page, data, {

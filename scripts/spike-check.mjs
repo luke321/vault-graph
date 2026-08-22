@@ -279,6 +279,34 @@ try {
     console.log((ok ? "  yes  " : "  NO   ") + name + (note ? "   (" + note + ")" : ""));
   }
 
+  // --shot <dir>: capture the view, in both of Obsidian's themes.
+  //
+  // Screenshots of a PLUGIN have to be taken inside the app -- the tab bar, the ribbon and
+  // the theme are most of what a reader is trying to see, and none of them exist in the
+  // standalone page. This lives here rather than in its own script because getting to a
+  // settled view inside a real Obsidian is the expensive part, and this file already does
+  // it: launch, leave restricted mode, enable, open, wait for the intro to land.
+  const shotDir = arg("shot", "");
+  if (shotDir) {
+    mkdirSync(shotDir, { recursive: true });
+    const shoot = async (name) => {
+      const r = await cdp.send("Page.captureScreenshot", { format: "png" });
+      writeFileSync(join(shotDir, name + ".png"), Buffer.from(r.data, "base64"));
+      console.log("  wrote " + name + ".png");
+    };
+    console.log("\n=== screenshots ========================================");
+    // Obsidian's own theme switch, so the host chrome changes with the page rather than
+    // the page alone -- which is the integration worth showing.
+    await evalIn(`app.changeTheme("obsidian"); void 0`);          // dark
+    await sleep(1200);
+    await shoot("obsidian-dark");
+    await evalIn(`app.changeTheme("moonstone"); void 0`);         // light
+    await sleep(1800);
+    await shoot("obsidian-light");
+    await evalIn(`app.changeTheme("obsidian"); void 0`);
+    await sleep(600);
+  }
+
   await shutdown(0);
 } catch (e) {
   console.error(e);
