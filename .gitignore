@@ -12,3 +12,5 @@ demo-vault/
 # The PII deny list itself. The whole point is that these names are not in a commit;
 # .pii-names.example explains the file and carries no names.
 .pii-names
+
+node_modules/

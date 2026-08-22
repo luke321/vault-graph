@@ -19,9 +19,55 @@
  */
 "use strict";
 
-const { Plugin, ItemView, Notice, normalizePath, arrayBufferToBase64 } = require("obsidian");
+const { Plugin, ItemView, Notice, normalizePath, arrayBufferToBase64, addIcon } = require("obsidian");
 
 const VIEW_TYPE = "vault-graph-spike";
+const ICON_ID = "vault-graph-disc";
+
+/* ====================================================================== icon ==
+ * The ribbon started on Lucide's `git-fork`, which already sits in this vault's ribbon
+ * for something else -- two identical icons, one of them ours. So the mark is its own.
+ *
+ * It is the product drawn literally: two concentric bands of notes around a hollow hub.
+ * Emitted from geometry rather than hand-written path data, so the numbers that were
+ * tuned are visible as numbers.
+ *
+ * THREE THINGS MEASURED, all of which look like arbitrary constants and are not:
+ *
+ * 1. NO WRAP GAP, even though the disc itself has one. Two attempts, both rejected by
+ *    looking at them at 18px. Spreading N dots inclusively across a 344-degree arc leaves
+ *    16 degrees between the first and last dot against a regular pitch of 31, so the gap
+ *    is NARROWER than the spacing and reads as the dots bunching at the top. Skipping a
+ *    slot instead makes the gap exactly twice the pitch -- correct, unmistakable, and at
+ *    ribbon size it reads as a broken ring rather than as a deliberate opening. The disc
+ *    can afford the gap at 1000px; a 18px icon cannot.
+ *
+ * 2. 8 AND 4 SLOTS, because the ribbon draws this at 18px. Rendered at that size and
+ *    upscaled to look at, 12+6 slots and 10+5 slots both merge into a soft ring; 8+4 is
+ *    the densest pair whose dots still resolve individually, and it keeps the two-band
+ *    reading that a single ring loses.
+ *
+ * 3. THE INNER RING IS OFFSET BY HALF THE OUTER PITCH. With 8 outer and 4 inner slots,
+ *    any whole-slot offset puts every inner dot on the same bearing as an outer one,
+ *    which lines them up into four spokes and reads as a wheel. 22.5 degrees interleaves
+ *    them, which is also what the real disc does -- its rows do not line up either.
+ */
+function discIcon() {
+  const ring = (r, dot, slots, offset) => {
+    let out = "";
+    for (let i = 0; i < slots; i++) {
+      const rad = (-90 + (offset || 0) + 360 * i / slots) * Math.PI / 180;
+      out += '<circle cx="' + (50 + r * Math.cos(rad)).toFixed(2) +
+                 '" cy="' + (50 + r * Math.sin(rad)).toFixed(2) +
+                  '" r="' + dot + '"/>';
+    }
+    return out;
+  };
+  // currentColor, so it follows the theme and the ribbon's own hover state.
+  return '<g fill="currentColor" stroke="none">' +
+         ring(36, 8.5, 8, 0) + ring(16, 6.5, 4, 22.5) +
+         "</g>";
+}
 
 // How long a mount strategy gets to say "ready" before it is called dead. The page posts
 // its handshake from the END of its own boot, so this measures "did the whole thing come
@@ -343,13 +389,25 @@ const BRIDGE = [
   "(function () {",
   "  var post = function (m) { try { parent.postMessage(m, '*'); } catch (e) {} };",
   "  var D = window.VAULT_DATA || {};",
-  "  // Sent from the END of boot, after the template's own script has run to",
-  "  // completion. That is what makes it a real 'it came up' signal.",
-  "  post({ vgSpike: 'ready',",
-  "         nodes: (D.nodes || []).length,",
-  "         edges: (D.edges || []).length,",
-  "         hasVg: !!window.__vg,",
-  "         canvases: document.querySelectorAll('#graph canvas').length });",
+  "  // WAIT FOR __vg, do not just read it. Measured: this script runs at the end of the",
+  "  // document, which is BEFORE the template has finished booting -- sigma is",
+  "  // constructed later, off the boot path. The first version reported hasVg:false and",
+  "  // canvases:0 and the verdict table called a working page broken, while a probe two",
+  "  // seconds later found 11 nodes and plan parity OK. So the handshake polls, and says",
+  "  // how long it waited.",
+  "  var t0 = Date.now();",
+  "  var tick = function () {",
+  "    var canvases = document.querySelectorAll('#graph canvas').length;",
+  "    var up = !!window.__vg && canvases > 0;",
+  "    if (!up && Date.now() - t0 < 5000) { setTimeout(tick, 100); return; }",
+  "    post({ vgSpike: 'ready',",
+  "           nodes: (D.nodes || []).length,",
+  "           edges: (D.edges || []).length,",
+  "           hasVg: !!window.__vg,",
+  "           canvases: canvases,",
+  "           bootMs: Date.now() - t0 });",
+  "  };",
+  "  tick();",
   "  // obsidian:// hrefs cannot navigate from inside a sandboxed frame, and should not:",
   "  // the host has workspace.openLinkText, which respects panes and history.",
   "  document.addEventListener('click', function (ev) {",
@@ -430,7 +488,7 @@ class VaultGraphView extends ItemView {
 
   getViewType() { return VIEW_TYPE; }
   getDisplayText() { return "Vault graph (spike)"; }
-  getIcon() { return "git-fork"; }
+  getIcon() { return ICON_ID; }
 
   async onOpen() {
     const root = this.contentEl;
@@ -475,8 +533,12 @@ class VaultGraphView extends ItemView {
 
     // Two strategies, in order, because which one Obsidian's CSP tolerates is precisely
     // what the spike is measuring. srcdoc first: it is sandboxable, so the page cannot
-    // reach back into the app.
-    for (const strategy of ["srcdoc", "blob"]) {
+    // reach back into the app. forceStrategy pins one, so the harness can run both and
+    // compare what each costs -- they differ in reachability, not just in posture.
+    const order = this.plugin.settings.forceStrategy
+      ? [this.plugin.settings.forceStrategy]
+      : ["srcdoc", "blob"];
+    for (const strategy of order) {
       const ready = await this.tryMount(html, strategy);
       if (ready) {
         this.strategy = strategy;
@@ -583,6 +645,7 @@ const DEFAULTS = {
   templates: false,     // --templates
   flatMonths: false,    // --flat-months
   words: true,          // the one field that still costs I/O
+  forceStrategy: null,  // "srcdoc" | "blob" | null (try both, first to handshake wins)
 };
 
 class VaultGraphSpikePlugin extends Plugin {
@@ -591,7 +654,11 @@ class VaultGraphSpikePlugin extends Plugin {
 
     this.registerView(VIEW_TYPE, (leaf) => new VaultGraphView(leaf, this));
 
-    this.addRibbonIcon("git-fork", "Vault graph (spike)", () => this.activate());
+    // Registered before anything asks for it: the ribbon button and the view tab both
+    // resolve the id at creation time, and an unknown id renders as an empty box.
+    addIcon(ICON_ID, discIcon());
+
+    this.addRibbonIcon(ICON_ID, "Vault graph (spike)", () => this.activate());
 
     this.addCommand({
       id: "open",

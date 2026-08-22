@@ -1,0 +1,16 @@
+{
+  "name": "vault-graph",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Build tooling for the Vault Graph Obsidian plugin. The HTML exporter in src/ stays node-builtins-only and needs none of this.",
+  "scripts": {
+    "build": "node scripts/build-plugin.mjs",
+    "dev": "node scripts/build-plugin.mjs --watch",
+    "lint": "eslint plugin/**/*.js"
+  },
+  "devDependencies": {
+    "esbuild": "^0.21.5",
+    "eslint": "^9.9.0",
+    "eslint-plugin-obsidianmd": "^0.2.0"
+  }
+}

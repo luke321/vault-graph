@@ -1,0 +1,10 @@
+{
+  "id": "vault-graph",
+  "name": "Vault Graph",
+  "version": "1.5.0",
+  "minAppVersion": "1.5.0",
+  "description": "See your whole vault as one disc: notes packed into folder wedges on a fixed radial lattice, coloured by folder, with a growth heatmap and a timeline. The layout is deterministic, not force-directed, so it looks the same every time.",
+  "author": "Lukas Proprentner",
+  "authorUrl": "https://github.com/luke321/vault-graph",
+  "isDesktopOnly": false
+}
