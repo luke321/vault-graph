@@ -88,7 +88,9 @@ Hovering a square haloes that day's notes; clicking pins the selection. Both
 deliberately do **not** push the notes out radially, for the reason `isPushed` already
 documents for pooled subfolders: a day's notes are scattered across every folder, so
 pushing them slides a subset out *through* its cell-mates at the same angles. Verified —
-0 nodes move, 0 pushed, 14 haloed on 2026-08-19, while `mark today` still pushes its 6.
+0 nodes move, 0 pushed, 14 haloed on 2026-08-19. `mark today` used to push its 6 and no
+longer does -- the argument in this paragraph applies to it identically, which took a while
+to notice.
 
 Hover refreshes only when the day under the pointer actually **changes**. `mousemove`
 fires many times per cell, and a renderer refresh per event repaints the disc dozens of

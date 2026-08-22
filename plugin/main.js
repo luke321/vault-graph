@@ -493,6 +493,11 @@ class VaultGraphView extends ItemView {
       Sigma: sigma.Sigma || sigma,
       rendering: sigma.rendering || {},
       logoMask: "data:image/png;base64," + LOGO_MASK_B64,
+      // The window this view is actually in. A view dragged out into a popout must schedule
+      // its timers and animation frames there, not on the main window -- which is what
+      // obsidianmd/prefer-active-window-timers is about. The standalone page passes nothing
+      // and gets its own window, because `activeWindow` is an Obsidian global.
+      win: activeWindow,
     });
     this.mountMs = Math.round(performance.now() - t0);
 

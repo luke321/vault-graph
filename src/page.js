@@ -28,6 +28,12 @@ function mountVaultGraph(root, data, deps) {
   // "Laying out graph..." with nothing in the console.
   var RENDERING = deps.rendering || {};
   var LOGO_MASK = deps.logoMask || "";
+  // The window this view lives in. Obsidian passes activeWindow so a popout schedules its
+  // own timers; the standalone page passes nothing and gets its own window. Never the bare
+  // global: in a popout that is the wrong window, and obsidianmd/prefer-active-window-timers
+  // is an error for exactly that reason.
+  var WIN = deps.win || window;
+  var DOC = root.ownerDocument;
   var API = null;
 
   // Ids carry a `vg-` prefix so they cannot collide with the host document, and the
@@ -232,7 +238,7 @@ function mountVaultGraph(root, data, deps) {
     var tally = Object.create(null);
     graph.forEachNode(function (id, a) {
       var f = a.folder, sb = a.sub || "";
-      (tally[f] || (tally[f] = Object.create(null)));
+      if (!tally[f]) tally[f] = Object.create(null);
       tally[f][sb] = (tally[f][sb] || 0) + 1;
     });
     Object.keys(tally).forEach(function (f) {
@@ -1409,9 +1415,20 @@ function mountVaultGraph(root, data, deps) {
   // calendar, so today's daily note carries an import stamp from days earlier and
   // `created` takes precedence over `date`. Measured on 2026-08-21: 0 notes created
   // today against 3 touched, so the button reliably marked nothing.
+  // CREATED ONLY, deliberately, and this has been both ways.
+  //
+  // It read `created || touched` because on the day it was written `created` matched 0
+  // notes while 3 files had been touched, so the button looked broken. But `touched` is the
+  // file's mtime, and a vault picks that up for reasons that have nothing to do with the
+  // person using it -- a sync writing a file back, Obsidian rewriting frontmatter, a
+  // formatter. On a real vault it marked far more than the heatmap's today column, which
+  // counts notes ADDED and uses `created` alone.
+  //
+  // Two things answering "today" differently in one view is worse than a button that marks
+  // nothing on a day nothing was written -- and marking nothing is the honest answer then,
+  // which the band is already showing. The invariant in smoke.mjs now pins the two together.
   function isToday(id) {
-    var a = graph.getNodeAttributes(id);
-    return a.created === TODAY || a.touched === TODAY;
+    return graph.getNodeAttributes(id).created === TODAY;
   }
 
   // A day clicked on the heatmap. Haloed and recoloured, NOT pushed -- see isPushed.
@@ -1426,10 +1443,10 @@ function mountVaultGraph(root, data, deps) {
     return c === state.markDay || c === state.hoverDay;
   }
 
-  // One predicate for both highlight sources -- a clicked group and "mark today" --
-  // so they get identical treatment (pushed out radially, haloed) and there is only
-  // one thing for the layout and the renderer to ask about.
-  // Haloed: any highlight source at all.
+  // Haloed: any highlight source at all -- a clicked group, a marked day, "mark today".
+  // Whether a source also MOVES its notes is a separate question, asked of isPushed: a
+  // group owns a contiguous wedge and can move as a block, while today's notes and a day's
+  // notes are scattered through every wedge and cannot.
   function isHighlighted(id) {
     if (state.markToday && isToday(id)) return true;
     if (isMarkedDay(id)) return true;
@@ -1472,7 +1489,10 @@ function mountVaultGraph(root, data, deps) {
   // selection legible is what creates the overlaps. Those are identified by the
   // ring alone.
   function isPushed(id) {
-    if (state.markToday && isToday(id)) return true;
+    // NOT mark-today. Its notes are scattered across every folder, so pushing them slides a
+    // subset out through their own cell-mates at the same angles -- the same reason a marked
+    // heatmap day does not push, and the same reason a pooled subfolder does not. It is
+    // still haloed and recoloured; see isHighlighted.
     if (state.highlight[groupOf(id)]) return true;
     // Only the DEPTH-1 folder owns a wedge, so only it can move. A folder nested
     // deeper is a slice of its parent's arc, interleaved with its siblings at the same
@@ -1519,7 +1539,7 @@ function mountVaultGraph(root, data, deps) {
     var h = String(hex).trim();
     if (h.charAt(0) === "#") {
       if (h.length === 4) h = "#" + h.charAt(1) + h.charAt(1) + h.charAt(2) + h.charAt(2) + h.charAt(3) + h.charAt(3);
-      c = [parseInt(h.substr(1, 2), 16), parseInt(h.substr(3, 2), 16), parseInt(h.substr(5, 2), 16)];
+      c = [parseInt(h.slice(1, 3), 16), parseInt(h.slice(3, 5), 16), parseInt(h.slice(5, 7), 16)];
     } else {
       var m = /(\d+)\D+(\d+)\D+(\d+)/.exec(h);
       c = m ? [+m[1], +m[2], +m[3]] : [128, 128, 128];
@@ -1635,11 +1655,11 @@ function mountVaultGraph(root, data, deps) {
   // it, and the motion runs along the circumference rather than out from the hub.
   function cascade(done) {
     stopPlay();                            // a filter change interrupts playback
-    if (anim) { cancelAnimationFrame(anim); anim = null; }
-    if (animGuard) { clearTimeout(animGuard); animGuard = null; }
+    if (anim) { WIN.cancelAnimationFrame(anim); anim = null; }
+    if (animGuard) { WIN.clearTimeout(animGuard); animGuard = null; }
     if (cascadeRun) {
-      cancelAnimationFrame(cascadeRun.raf);
-      clearTimeout(cascadeRun.guard);
+      WIN.cancelAnimationFrame(cascadeRun.raf);
+      WIN.clearTimeout(cascadeRun.guard);
       cascadeRun = null;
     }
 
@@ -1703,8 +1723,8 @@ function mountVaultGraph(root, data, deps) {
 
     var settle = function () {
       if (cascadeRun) {
-        cancelAnimationFrame(cascadeRun.raf);
-        clearTimeout(cascadeRun.guard);
+        WIN.cancelAnimationFrame(cascadeRun.raf);
+        WIN.clearTimeout(cascadeRun.guard);
         cascadeRun = null;
       }
       moving.forEach(function (id) { alpha[id] = to[id]; });
@@ -1841,7 +1861,7 @@ function mountVaultGraph(root, data, deps) {
     var STALL_MS = 400;
     var watchdog = function () {
       if (cascadeRun && NOW() - cascadeRun.tick < STALL_MS) {
-        cascadeRun.guard = setTimeout(watchdog, STALL_MS);
+        cascadeRun.guard = WIN.setTimeout(watchdog, STALL_MS);
         return;
       }
       settle();
@@ -1861,7 +1881,7 @@ function mountVaultGraph(root, data, deps) {
     var MIN_FRAMES = 20;
     var maxAdv = Math.max(1, span) / MIN_FRAMES;
     var frame = 0, tPrev = NOW(), tailFrames = 0;
-    cascadeRun = { raf: 0, tick: NOW(), guard: setTimeout(watchdog, STALL_MS) };
+    cascadeRun = { raf: 0, tick: NOW(), guard: WIN.setTimeout(watchdog, STALL_MS) };
     (function step() {
       var tn = NOW();
       var adv = (tn - tPrev) / msPerFrame;
@@ -1953,7 +1973,7 @@ function mountVaultGraph(root, data, deps) {
       // `resid > 0.5` is the new clause: never hand over to settle() while a note is
       // still visibly short of its target. Bounded by the ramp above, so this adds a
       // few frames, not an open-ended tail.
-      if (busy || pr < 1 || resid > 0.5) cascadeRun.raf = requestAnimationFrame(step);
+      if (busy || pr < 1 || resid > 0.5) cascadeRun.raf = WIN.requestAnimationFrame(step);
       else settle();
     })();
   }
@@ -1999,8 +2019,8 @@ function mountVaultGraph(root, data, deps) {
   // wall-clock attempt, before there was a backstop.
 
   function animateTo(targets, done) {
-    if (anim) { cancelAnimationFrame(anim); anim = null; }
-    if (animGuard) clearTimeout(animGuard);
+    if (anim) { WIN.cancelAnimationFrame(anim); anim = null; }
+    if (animGuard) WIN.clearTimeout(animGuard);
 
     // In Rings, interpolate in POLAR space about the disc centre so nodes sweep
     // along arcs -- the pie reads as rotating into its new arrangement rather
@@ -2020,14 +2040,14 @@ function mountVaultGraph(root, data, deps) {
     });
 
     var settle = function () {
-      if (anim) { cancelAnimationFrame(anim); anim = null; }
-      if (animGuard) { clearTimeout(animGuard); animGuard = null; }
+      if (anim) { WIN.cancelAnimationFrame(anim); anim = null; }
+      if (animGuard) { WIN.clearTimeout(animGuard); animGuard = null; }
       assignPositions(targets);
       renderer.refresh({ skipIndexation: false });
       if (done) done();
     };
     var dur = TWEEN_MS * TIME_SCALE;
-    // WATCHDOG, not a deadline. A fixed `setTimeout(settle, dur + margin)` fires
+    // WATCHDOG, not a deadline. A fixed `WIN.setTimeout(settle, dur + margin)` fires
     // part-way through whenever the page cannot render fast enough to finish in time,
     // and settle() then snaps the disc to its final layout -- a jump at the end of
     // every animation, on exactly the machines where the animation matters. This only
@@ -2036,10 +2056,10 @@ function mountVaultGraph(root, data, deps) {
     var lastFrame = NOW();
     var TWEEN_STALL = 400;
     var tweenDog = function () {
-      if (anim && NOW() - lastFrame < TWEEN_STALL) { animGuard = setTimeout(tweenDog, TWEEN_STALL); return; }
+      if (anim && NOW() - lastFrame < TWEEN_STALL) { animGuard = WIN.setTimeout(tweenDog, TWEEN_STALL); return; }
       settle();
     };
-    animGuard = setTimeout(tweenDog, TWEEN_STALL);
+    animGuard = WIN.setTimeout(tweenDog, TWEEN_STALL);
 
     // Advance by real time so the tween is the same length everywhere, but never by
     // more than 1/MIN_FRAMES of it in a single frame. Below that frame rate the
@@ -2070,7 +2090,7 @@ function mountVaultGraph(root, data, deps) {
       });
       probeSample("tween");
       renderer.refresh({ skipIndexation: false });
-      if (p < 1) { anim = requestAnimationFrame(step); }
+      if (p < 1) { anim = WIN.requestAnimationFrame(step); }
       else { settle(); }
     })();
   }
@@ -2178,7 +2198,7 @@ function mountVaultGraph(root, data, deps) {
       if (landed && hoverT === 0) state.hovered = null;
       renderer.refresh({ skipIndexation: true });   // nothing moved; only colour and size
       if (landed) { hoverRaf = 0; return; }
-      hoverRaf = requestAnimationFrame(step);
+      hoverRaf = WIN.requestAnimationFrame(step);
     })();
   }
 
@@ -2231,7 +2251,7 @@ function mountVaultGraph(root, data, deps) {
       });
       renderer.refresh({ skipIndexation: true });   // size and colour only; nothing moved
       if (!moving) { hlRaf = 0; return; }
-      hlRaf = requestAnimationFrame(step);
+      hlRaf = WIN.requestAnimationFrame(step);
     })();
   }
 
@@ -2854,8 +2874,8 @@ function mountVaultGraph(root, data, deps) {
     // Watching the element covers both, and still fires on a window resize, because the
     // container is sized from the window in the standalone.
     var onResize = function () {
-      if (rzTimer) clearTimeout(rzTimer);
-      rzTimer = setTimeout(function () { rzTimer = null; refreshSizeScale(); placeLogo(); }, 120);
+      if (rzTimer) WIN.clearTimeout(rzTimer);
+      rzTimer = WIN.setTimeout(function () { rzTimer = null; refreshSizeScale(); placeLogo(); }, 120);
     };
     if (window.ResizeObserver) new ResizeObserver(onResize).observe(root);
     else window.addEventListener("resize", onResize);
@@ -3372,10 +3392,10 @@ function mountVaultGraph(root, data, deps) {
   var play = null;                       // in-flight timeline playback
   function stopPlay() {
     if (!play) return;
-    cancelAnimationFrame(play.raf);
-    if (play.guard) clearTimeout(play.guard);   // or the deadline lands after a manual stop
+    WIN.cancelAnimationFrame(play.raf);
+    if (play.guard) WIN.clearTimeout(play.guard);   // or the deadline lands after a manual stop
     play = null;
-    $("tlplay").textContent = "play";
+    $("tlplay").textContent = "Play";
   }
 
   // `full` forces a re-indexing refresh. Pass it on any frame that LANDS -- the end
@@ -3411,7 +3431,7 @@ function mountVaultGraph(root, data, deps) {
     if (targets) assignPositions(targets);
     renderer.refresh({ skipIndexation: !full });
     var el = $("tlv");
-    if (state.until === null || state.until >= tlMax) { el.textContent = "all"; return; }
+    if (state.until === null || state.until >= tlMax) { el.textContent = "All"; return; }
     var i = Math.round(state.until) - 1;
     var d = tlDate[i < 0 ? 0 : i > tlDate.length - 1 ? tlDate.length - 1 : i] || "";
     el.textContent = d + "  \u00b7  " + Math.round(state.until);
@@ -3428,12 +3448,12 @@ function mountVaultGraph(root, data, deps) {
     // half of the "wrong animation" report: press Play before the intro finished
     // and two loops wrote node coordinates on the same frames.
     if (cascadeRun) {
-      cancelAnimationFrame(cascadeRun.raf);
-      clearTimeout(cascadeRun.guard);
+      WIN.cancelAnimationFrame(cascadeRun.raf);
+      WIN.clearTimeout(cascadeRun.guard);
       cascadeRun = null;
     }
-    if (anim) { cancelAnimationFrame(anim); anim = null; }
-    if (animGuard) { clearTimeout(animGuard); animGuard = null; }
+    if (anim) { WIN.cancelAnimationFrame(anim); anim = null; }
+    if (animGuard) { WIN.clearTimeout(animGuard); animGuard = null; }
     pinnedPlan = null; planKeep = null;
 
     // Fixed length: TIMELINE_MS whatever the frame rate, so load, Refresh and Play
@@ -3443,7 +3463,7 @@ function mountVaultGraph(root, data, deps) {
     state.until = 0;
     tl.value = "0";
     timelineFrame();
-    $("tlplay").textContent = "stop";
+    $("tlplay").textContent = "Stop";
 
     // Landing frame: re-index, so the edge buffers are rebuilt against the final
     // positions instead of keeping the curvature from the first frame.
@@ -3454,19 +3474,19 @@ function mountVaultGraph(root, data, deps) {
       timelineFrame(true);
     };
     // WATCHDOG on stalled frames, not a deadline -- same reason as the tween's. A
-    // `setTimeout(land, dur + margin)` would land the timeline early on any page too
+    // `WIN.setTimeout(land, dur + margin)` would land the timeline early on any page too
     // slow to finish in time, snapping the vault to fully grown mid-playback. This
     // only fires once no frame has arrived for a while, which still covers a
     // backgrounded tab where rAF stops entirely.
     var lastFrame = NOW();
     var PLAY_STALL = 500;
     var playDog = function () {
-      if (play && NOW() - lastFrame < PLAY_STALL) { play.guard = setTimeout(playDog, PLAY_STALL); return; }
+      if (play && NOW() - lastFrame < PLAY_STALL) { play.guard = WIN.setTimeout(playDog, PLAY_STALL); return; }
       land();
     };
     var MIN_FRAMES = 20;
     var p = 0, tPrev = NOW();
-    play = { raf: 0, guard: setTimeout(playDog, PLAY_STALL) };
+    play = { raf: 0, guard: WIN.setTimeout(playDog, PLAY_STALL) };
     (function step() {
       if (!play) return;
       var tn = NOW();
@@ -3479,7 +3499,7 @@ function mountVaultGraph(root, data, deps) {
       state.until = p >= 1 ? null : k;
       tl.value = String(Math.round(Math.min(tlMax, k)));
       timelineFrame();
-      if (p < 1) play.raf = requestAnimationFrame(step);
+      if (p < 1) play.raf = WIN.requestAnimationFrame(step);
       else land();
     })();
   }
@@ -3541,7 +3561,7 @@ function mountVaultGraph(root, data, deps) {
     select(null);                 // closes the detail card and clears state.selected
     hideTip();
     $("q").value = "";    $("hits").innerHTML = "";
-    $("tl").value = String(tlMax); $("tlv").textContent = "all";
+    $("tl").value = String(tlMax); $("tlv").textContent = "All";
     $("today").setAttribute("aria-pressed", "false");
     buildLegend();
   }
@@ -3599,7 +3619,7 @@ function mountVaultGraph(root, data, deps) {
   function savePng() {
     var canvases = renderer.getCanvases();
     var src = canvases.nodes;
-    var out = document.createElement("canvas");
+    var out = DOC.createElement("canvas");
     out.width = src.width; out.height = src.height;
     var ctx = out.getContext("2d");
     ctx.fillStyle = css("--surface-1");
@@ -3620,7 +3640,7 @@ function mountVaultGraph(root, data, deps) {
         // and a conic gradient is a fan of wedges anyway. Both paths take their
         // colours from ringColorsSmooth, so screen and export cannot drift.
         var layer = function (cols) {
-          var lc = document.createElement("canvas");
+          var lc = DOC.createElement("canvas");
           lc.width = side; lc.height = side;
           var lx = lc.getContext("2d");
           var cx = side / 2, step = 2 * Math.PI / RING_BUCKETS;
@@ -3683,7 +3703,7 @@ function mountVaultGraph(root, data, deps) {
     ["edges", "nodes", "labels"].forEach(function (k) {
       if (canvases[k]) ctx.drawImage(canvases[k], 0, 0);
     });
-    var a = document.createElement("a");
+    var a = DOC.createElement("a");
     a.href = out.toDataURL("image/png");
     a.download = "vault-graph.png";
     a.click();
@@ -4267,8 +4287,8 @@ function mountVaultGraph(root, data, deps) {
     // wrapper's scroll width and not its client width. Guarded on the derived cell
     // size anyway, so an observation that changes nothing costs nothing.
     var reflow = function () {
-      if (heatRz) clearTimeout(heatRz);
-      heatRz = setTimeout(function () {
+      if (heatRz) WIN.clearTimeout(heatRz);
+      heatRz = WIN.setTimeout(function () {
         heatRz = null;
         var g = heatGeom();
         if (heat && g.cell === heat.cell && g.cols === heat.cols) return;
@@ -4610,14 +4630,14 @@ function mountVaultGraph(root, data, deps) {
     // debugging port of its own, no extension and nothing injected.
     finish: function (ms, trace) {
       window.__vgDemoDone = { ms: ms, trace: trace || [] };
-      document.title = DEMO_DONE_TITLE;
+      DOC.title = DEMO_DONE_TITLE;
       return true;
     }
   };
 
   /* ------------------------------------------------------------------ go */
 
-  setTimeout(function () {
+  WIN.setTimeout(function () {
     makeRenderer();
     // Debug handle: lets a test page inspect live layout state from outside.
     API = window.__vg = { graph: graph, state: state,
@@ -4655,7 +4675,8 @@ function mountVaultGraph(root, data, deps) {
                     set heatCell(v) {
                       HEAT_CELL_MAX = Math.max(HEAT_CELL_MIN, +v || HEAT_CELL_MAX);
                       heatBuild();
-                      return HEAT_CELL_MAX;
+                      // No return: a setter returning a value is a TypeError under
+                      // "use strict", which this file is.
                     },
                     heatReport: function () {
                       if (!heat) return "not built";
@@ -4681,8 +4702,7 @@ function mountVaultGraph(root, data, deps) {
                         earlier: heat.before, later: heat.after, undated: heat.undated,
                         markDay: state.markDay, hoverDay: state.hoverDay
                       };
-                      console.log(out);
-                      return out;
+                      return out;   // the caller is a console; it prints this itself
                     },
                     bandColors: bandColors, outerPresence: outerPresence,
                     get planMs() { return planMs; },
@@ -4742,8 +4762,7 @@ function mountVaultGraph(root, data, deps) {
                         invariantOK: Object.keys(diffs).length === 0 &&
                                      Math.round(lean.maxR) === Math.round(padded.maxR)
                       };
-                      console.log(out);
-                      return out;
+                      return out;   // the caller is a console; it prints this itself
                     },
                     // PLAN PARITY. The cascade must animate between the static
                     // planner's own outputs, or it walks between packings nothing else
@@ -4773,8 +4792,7 @@ function mountVaultGraph(root, data, deps) {
                         rowDiffs: diffs, parityOK: Object.keys(diffs).length === 0 &&
                           Math.round(stat.maxR) === Math.round(live.maxR)
                       };
-                      console.log(out);
-                      return out;
+                      return out;   // the caller is a console; it prints this itself
                     },
                     // Record each band's radial extent per animated frame. probe(true)
                     // then toggle, then probeReport() -- it names the biggest single
@@ -4799,8 +4817,7 @@ function mountVaultGraph(root, data, deps) {
                         outerMaxStep: worst.outer, outerStepAtMs: at.outer,
                         first: s[0], last: s[s.length - 1], samples: s
                       };
-                      console.log(out);
-                      return out;
+                      return out;   // the caller is a console; it prints this itself
                     },
                     // What is ACTUALLY pushed and haloed right now, grouped by full
                     // path, plus the highlight keys that are set. Reading the code was
@@ -4832,8 +4849,7 @@ function mountVaultGraph(root, data, deps) {
                         haloedCount: haloed.length,
                         haloedByPath: byPath(haloed)
                       };
-                      console.log(out);
-                      return out;
+                      return out;   // the caller is a console; it prints this itself
                     },
                     // The demo, as data plus two questions about the page. The driver
                     // lives in scripts/demo.mjs and does the input through CDP; nothing

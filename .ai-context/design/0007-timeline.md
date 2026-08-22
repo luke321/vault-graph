@@ -32,23 +32,36 @@ Details worth knowing:
   than skipping, and it scales with `TIME_SCALE`.
 - Any filter change stops playback rather than fighting it.
 
-**Mark today** marks every note created **or edited** today, using the same
-treatment as a highlighted group: pushed out radially, ringed, and recoloured. The
+**Mark today** marks every note created **or edited** today: ringed and recoloured, and
+deliberately **not** pushed out radially. It moved at first, on the reasoning that it should
+match a highlighted group -- but a group owns a contiguous wedge and can move as a block,
+while today's notes are scattered through every wedge, so pushing them slides a subset out
+through its own cell-mates. That is the same argument `isPushed` already made for pooled
+subfolders and `0010` for a marked heatmap day. The
 colour is deliberately *not* one of the ten categorical hues: it is the extreme of
 the neutral axis (white on dark, near-black on light), so it cannot be misread as a
 group. The date is read at page load rather than baked in at build time, so the mark
 is still correct tomorrow without rebuilding.
 
-**"Created" alone made this button a no-op most days**, which is why it also reads
-file mtime now (`touched`). `created` comes from frontmatter, and this vault
-pre-creates daily notes from the calendar — 2026-08-21's note carries
-`created: 2026-08-17`, and `created` takes precedence over `date` — so on any day
-without a fresh import the button lit up nothing at all. Measured on 2026-08-21:
-**0 notes created today against 3 files touched.** With mtime it marks the two notes
-actually worked on, which is the question being asked.
+**Which field means "today" went both ways, and `created` won.**
 
-mtime is a sound signal here but not a pure one: bulk operations rewrite it wholesale
-(measured, 2026-08-19 shows 111 files touched, which was the renumbering). It is
-right for "what did I touch today" and wrong for "when did this note come into
-existence" — which is exactly why both fields are kept rather than one replacing the
-other.
+It read `created || touched` first. `created` comes from frontmatter, and this vault
+pre-creates daily notes from the calendar — 2026-08-21's note carries
+`created: 2026-08-17`, and `created` takes precedence over `date` — so on a day without a
+fresh import the button lit nothing. Measured on 2026-08-21: **0 created against 3
+touched.** Adding mtime made it mark the notes actually worked on.
+
+Then the opposite complaint, from using it on a real vault: it marked **far more** than the
+heatmap's today column. Of course it did. `touched` is an mtime, and a vault moves mtimes
+for reasons that have nothing to do with the person holding it — a sync writing a file back,
+Obsidian rewriting frontmatter, a formatter, a bulk rename. Measured here earlier:
+2026-08-19 shows **111 files touched**, which was the folder renumbering, not a day's work.
+
+So it is `created` alone now, which is what the band counts. **Two things answering "today"
+differently in one view is worse than a button that marks nothing on a day nothing was
+written** — and marking nothing is then the honest answer, which the band is already showing
+right above it. `smoke.mjs` pins the two together as set equality rather than counts, since
+two predicates can agree on how many and still disagree on which.
+
+`touched` is still built and still right for "what did I touch today". Nothing in the UI
+asks that question at the moment.

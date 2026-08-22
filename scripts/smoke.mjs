@@ -282,17 +282,46 @@ check("a marked heatmap day haloes but never pushes", async (p) => {
            detail: `${r.day}: ${r.haloed} haloed, ${r.pushed} pushed, ${r.moved} moved` };
 });
 
-check("mark today still pushes", async (p) => {
+check("mark today haloes but never pushes", async (p) => {
   const r = await p.j(`(function(){
     __vg.state.markToday = true;
     var rep = __vg.pushReport();
     __vg.state.markToday = false; __vg.renderer.refresh();
     return {pushed: rep.pushedCount, haloed: rep.haloedCount};
   })()`);
-  // Zero is a legitimate answer on a day nothing was touched, so this asserts the
-  // RELATIONSHIP -- whatever is haloed by mark today is also pushed by it -- rather than
-  // a count that depends on when the vault was last edited.
-  return { ok: r.pushed === r.haloed, detail: `${r.pushed} pushed / ${r.haloed} haloed` };
+  // REVERSED DELIBERATELY. This asserted that whatever mark-today haloes it also PUSHES,
+  // which was the behaviour until today's notes were observed sliding out through their own
+  // cell-mates -- the exact failure design/0010 already describes for a marked heatmap day.
+  // Both now halo without moving anything, so the assertion is that nothing moved.
+  //
+  // Zero haloed is a legitimate answer on a day nothing was touched, so the check does not
+  // demand a count; it demands that the count of moved notes is zero whatever it is.
+  return { ok: r.pushed === 0, detail: `${r.pushed} pushed / ${r.haloed} haloed` };
+});
+
+check("mark today marks exactly the heatmap's today column", async (p) => {
+  // The band and the button both answer "today" and used to answer it differently: the band
+  // counts notes CREATED today, the button also counted files TOUCHED today -- an mtime,
+  // which a sync or a frontmatter rewrite moves for reasons that have nothing to do with
+  // the person. On a real vault that marked far more notes than the band showed.
+  //
+  // Set equality, not counts: two predicates can agree on how many and still disagree on
+  // which. Both empty is a pass -- on a day nothing was written, marking nothing is correct.
+  const r = await p.j(`(function(){
+    var today = new Date();
+    var p2 = function (n) { return String(n).padStart(2, "0"); };
+    var key = today.getFullYear() + "-" + p2(today.getMonth() + 1) + "-" + p2(today.getDate());
+    var byButton = [];
+    __vg.graph.forEachNode(function (id) { if (__vg.isToday(id)) byButton.push(id); });
+    var day = __vg.heat && __vg.heat.days ? __vg.heat.days[key] : null;
+    var byBand = day ? day.ids.slice() : [];
+    var sort = function (a) { return a.slice().sort(); };
+    var A = sort(byButton).join("|"), B = sort(byBand).join("|");
+    return { button: byButton.length, band: byBand.length, same: A === B, key: key };
+  })()`);
+  return { ok: r.same,
+           detail: `${r.key}: ${r.button} marked by the button, ${r.band} in the band` +
+                   (r.same ? "" : "  <- different SETS, not just counts") };
 });
 
 check("hovering a note ramps in and releases at zero", async (p) => {
