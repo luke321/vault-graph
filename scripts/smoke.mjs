@@ -28,8 +28,17 @@ import { join, dirname } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
+const ROOT = dirname(HERE);
 const argv = process.argv.slice(2);
 const arg = (n, d) => { const i = argv.indexOf("--" + n); return i >= 0 && argv[i + 1] ? argv[i + 1] : d; };
+// Repeatable, and comma-splitting, so `--vault a --vault b` and `--vault a,b` both work.
+const argAll = (n) => {
+  const out = [];
+  argv.forEach((a, i) => {
+    if (a === "--" + n && argv[i + 1]) out.push(...argv[i + 1].split(",").map((s) => s.trim()).filter(Boolean));
+  });
+  return out;
+};
 const PORT = Number(arg("port", 9333));      // not 9222: do not fight a debug session
 const HEADED = argv.includes("--headed");
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -399,7 +408,7 @@ async function settle(p, ms = 6000) {
 
 /* ---------------------------------------------------------------- the run */
 
-async function main() {
+async function runOne(vault) {
   let url = arg("url", "");
   let scratch = null;
   if (!url) {
@@ -408,11 +417,10 @@ async function main() {
     // user actually reads. Learns where it landed from the builder's own "wrote <path>"
     // line all the same, which is the contract refresh-graph.ps1 and record-demo.ps1 use.
     scratch = join(mkdtempSync(join(tmpdir(), "vg-smoke-build-")), "vault-graph.html");
-    // --vault goes straight through to the builder, so the suite can be pointed at the
-    // synthetic vault as easily as at a real one. Worth having: a 450-note vault and a
-    // 10,000-note vault exercise different branches of the band balancer and the gap
-    // scaling, and four defects were found only because both were checked.
-    const vault = arg("vault", "");
+    // --vault goes straight through to the builder. A 450-note vault and a 10,000-note
+    // vault exercise different branches of the band balancer and the gap scaling, and four
+    // defects were found only because both were checked -- so the default is now to check
+    // BOTH, one after the other, rather than whichever one somebody remembered to pass.
     const b = spawnSync(process.execPath,
                         [join(HERE, "..", "src", "build-graph.mjs"), "--out", scratch]
                           .concat(vault ? ["--vault", vault] : []),
@@ -475,11 +483,7 @@ async function main() {
     }
 
     console.log(`\n${checks.length - failed}/${checks.length} passed`);
-    if (failed) {
-      console.log("\nNot covered here, check by hand: the resting lattice, per-frame\n" +
-                  "animation steps (__vg.probe/probeReport), and anything about how it looks.");
-    }
-    return failed ? 1 : 0;
+    return failed;
   } finally {
     if (page) page.close();
     try { chrome.kill(); } catch {}
@@ -487,6 +491,84 @@ async function main() {
     try { rmSync(profile, { recursive: true, force: true }); } catch {}
     if (scratch) { try { rmSync(dirname(scratch), { recursive: true, force: true }); } catch {} }
   }
+}
+
+/* ------------------------------------------------------- which vaults, and why
+ *
+ * TWO SHAPES, BY DEFAULT. Every constant in this project was tuned against one vault --
+ * ~450 notes, nine top-level folders, one dominant folder -- and the ones that look most
+ * like arbitrary tuning are exactly the ones another shape breaks: ten colour slots, three
+ * named tint slots, a 6-degree minimum wedge, a 52-week heatmap window, and a band
+ * balancer that has to satisfy three requirements it cannot always satisfy at once.
+ *
+ * So the suite checks a small vault AND a large one, and it stopped being optional the day
+ * a change passed at 450 notes and broke the band split at 10,000.
+ *
+ *   demo vault   a structural mirror of the author's real vault, names replaced
+ *                (scripts/make-demo-vault.mjs). Same folder tree, same counts, same
+ *                dates, same link graph -- so it exercises the real shape without
+ *                carrying anyone's content. Needs a real vault to mirror.
+ *   10k vault    synthetic, deliberately awkward: more top-level folders than there are
+ *                colour slots, sliver folders beside a dominant one, five levels of
+ *                nesting (scripts/make-test-vault.mjs). Needs nothing.
+ *
+ * Both are gitignored and generated on demand. The synthetic one always can be; the mirror
+ * needs OBSIDIAN_VAULT, and is SKIPPED WITH A NOTICE rather than silently, because "the
+ * suite passed" must never quietly mean "half the suite ran".
+ */
+function resolveVaults() {
+  const explicit = argAll("vault");
+  if (explicit.length) return explicit.map((v) => ({ path: v, label: v }));
+  if (arg("url", "")) return [{ path: "", label: "the page passed with --url" }];
+
+  const out = [];
+  const gen = (script, args, dir, label) => {
+    if (!existsSync(dir)) {
+      console.log(`generating ${label} ...`);
+      const r = spawnSync(process.execPath, [join(HERE, script), "--out", dir, ...args],
+                          { encoding: "utf8" });
+      if (r.status !== 0) {
+        console.log(`  cannot generate ${label}: ${(r.stderr || "").trim().split("\n")[0]}`);
+        return;
+      }
+    }
+    out.push({ path: dir, label });
+  };
+
+  const real = process.env.VAULT_GRAPH_VAULT || process.env.OBSIDIAN_VAULT || "";
+  if (real) gen("make-demo-vault.mjs", ["--vault", real], join(ROOT, "demo-vault"), "the demo vault (mirror)");
+  else console.log("SKIPPING the demo vault: no OBSIDIAN_VAULT to mirror.");
+
+  gen("make-test-vault.mjs", ["--notes", "10000"], join(ROOT, "test-vault"), "the 10k synthetic vault");
+
+  if (!out.length) throw new Error("no vault to check, and none could be generated");
+  return out;
+}
+
+async function main() {
+  const vaults = resolveVaults();
+  console.log(`checking ${vaults.length} vault(s): ${vaults.map((v) => v.label).join(", ")}\n`);
+
+  let worst = 0;
+  const summary = [];
+  for (const v of vaults) {
+    console.log(`${"=".repeat(72)}\n== ${v.label}\n${"=".repeat(72)}`);
+    const failed = await runOne(v.path);
+    summary.push({ label: v.label, failed });
+    worst = Math.max(worst, failed);
+  }
+
+  if (vaults.length > 1) {
+    console.log(`\n${"=".repeat(72)}`);
+    for (const s of summary) {
+      console.log(`  ${s.failed ? "FAIL" : " ok "}  ${checks.length - s.failed}/${checks.length}  ${s.label}`);
+    }
+  }
+  if (worst) {
+    console.log("\nNot covered here, check by hand: per-frame animation steps\n" +
+                "(__vg.probe/probeReport), and anything about how it looks.");
+  }
+  return worst ? 1 : 0;
 }
 
 main().then((code) => process.exit(code)).catch((e) => {

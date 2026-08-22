@@ -9,8 +9,11 @@
 # version controlled -- a hook that lives only there is a hook the next clone does not
 # have, and the whole point is that it should not depend on anyone remembering.
 #
-# WHY pre-push AND NOT pre-commit: the suite builds the page and drives a real Chrome, so
-# it costs ~30 seconds. That is a fine price per push and an intolerable one per commit.
+# WHY pre-push AND NOT pre-commit: the suite builds the page and drives a real Chrome, and
+# now does that TWICE -- once against a ~450-note mirror of a real vault, once against a
+# 10,000-note synthetic, because a change that passes at 450 notes can still break the band
+# split at 10,000. Call it a minute or two. A fine price per push, an intolerable one per
+# commit.
 #
 # Skipping is deliberate and cheap, because there are honest reasons to (a docs-only
 # change, no Chrome on the machine, a hurry):
