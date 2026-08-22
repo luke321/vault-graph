@@ -91,8 +91,27 @@
   }
 
   .vault-graph, .vault-graph * { box-sizing: border-box; }
-  /* .row/.lbl set an explicit display, which would otherwise beat [hidden] */
-  .vault-graph [hidden] { display: none !important; }
+  /* HIDING, WITHOUT !important, AND THIS TOOK TWO GOES.
+   *
+   * The rule has to beat whatever sets an explicit display on the thing being hidden. For
+   * `.row`/`.lbl` that is one class, so a doubled attribute selector (0,3,0) is enough.
+   * For the five overlay elements it is an ID -- `.vault-graph #vg-busy { display: grid }`
+   * at (1,1,0) -- and an ID beats any number of attributes, so the attribute form loses.
+   *
+   * Which is what the !important was really for; the comment here used to blame .row/.lbl
+   * and was wrong about its own reason. Removing it on the review’s own advice left the
+   * "Laying out graph..." overlay permanently over the canvas, swallowing every hover --
+   * caught as "element at aim vg-busy" rather than as anything about CSS.
+   *
+   * So the overlays are named explicitly at (1,2,0), which beats their own rules by one
+   * attribute and needs no !important. */
+  .vault-graph [hidden][hidden] { display: none; }
+  .vault-graph #vg-busy[hidden],
+  .vault-graph #vg-tip[hidden],
+  .vault-graph #vg-detail[hidden],
+  .vault-graph #vg-htip[hidden],
+  .vault-graph #vg-logo[hidden],
+  .vault-graph #vg-logoInner[hidden] { display: none; }
   .vault-graph { height: 100%; margin: 0; }
   .vault-graph {
     background: var(--surface-1);
@@ -313,11 +332,10 @@
      inside a 115px band. */
   .vault-graph #vg-heatwrap { overflow-x: auto; overflow-y: hidden; scrollbar-width: thin;
               scrollbar-color: var(--border-strong) transparent; }
-  .vault-graph #vg-heatwrap::-webkit-scrollbar { height: 5px; }
-  .vault-graph #vg-heatwrap::-webkit-scrollbar-track { background: transparent; }
-  .vault-graph #vg-heatwrap::-webkit-scrollbar-thumb {
-    background: var(--border-strong); border-radius: 3px;
-  }
+  /* No ::-webkit-scrollbar rules. `scrollbar-width` and `scrollbar-color` above are the
+     standard properties and do the same job; the vendor-prefixed ones were belt and braces
+     for older engines, and the review flags them as only partially supported. The 5px
+     height goes with them, which is the whole cost. */
   /* Centred, so a band with room to spare reads as deliberate rather than as content
      that ran out. margin:auto still lets it scroll when it genuinely overflows. */
   .vault-graph #vg-heatc { display: block; cursor: pointer; margin: 0 auto; }

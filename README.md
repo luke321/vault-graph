@@ -74,10 +74,16 @@ Obsidian does, aliases and frontmatter links included. It builds in about a tent
 second on a 450-note vault. **Nothing leaves your machine** — it makes no network requests,
 collects nothing, and needs no account.
 
-<sub>For completeness, since it is greppable: the bundled Sigma.js carries a `fetch` in its
+**What it touches, plainly.** A graph of a whole vault has to know what is in the whole
+vault, so the plugin enumerates every markdown file (`vault.getMarkdownFiles`) and reads
+their frontmatter and link data from Obsidian’s own metadata cache. It reads note bodies only
+to count words (`vault.cachedRead`), and it writes nothing anywhere. Obsidian’s own automated
+review flags the enumeration, correctly — it is what the plugin is for, and worth stating
+rather than leaving to be discovered.
+
+<sub>Also greppable, so also worth stating: the bundled Sigma.js carries a `fetch` in its
 image-loading path. This plugin never registers an image node program, so that path is
-unreachable — but the string is in the file, and it is better to say so than to have someone
-find it.</sub>
+unreachable — but the string is in the file.</sub>
 
 ---
 

@@ -29,6 +29,38 @@ published tag breaks every link to it.
 
 ---
 
+## 1.5.1 — 2026-08-22
+
+Everything the directory's automated review raised on 1.5.0, plus a contributing guide.
+
+- **`authorUrl` points at a profile**, not at this repository. The field answers "who wrote
+  this", and the repo link is already the plugin's own page.
+- **No `!important` anywhere**, and the fix is more interesting than the rule. Removing it
+  broke hiding outright: the overlays are styled by ID selectors, and an ID beats any number
+  of attributes, so `[hidden]` simply lost. The "Laying out graph…" overlay then sat over the
+  canvas permanently and swallowed every hover — caught as *"element at aim vg-busy"* rather
+  than as anything about CSS. The overlays are now named at ID-level specificity, which beats
+  their own rules by one attribute and needs no `!important`. The old comment blamed
+  `.row`/`.lbl` and was wrong about its own reason.
+- **No `::-webkit-scrollbar` rules.** `scrollbar-width` and `scrollbar-color` were already
+  there and do the same job; the vendor-prefixed ones were belt and braces, and the review
+  flags them as only partially supported. Cost: 5px of scroll-bar height on the heatmap.
+- **The README says what the plugin touches.** A graph of a whole vault has to enumerate the
+  whole vault, so it does — `getMarkdownFiles`, the metadata cache, and `cachedRead` for word
+  counts, writing nothing. The review flags the enumeration correctly; it is what the plugin
+  is for, and better stated than discovered.
+- **`CONTRIBUTING.md`**: issues are the way in for now, with what makes a useful one — vault
+  shape for layout reports, a screenshot for anything visual, and a reminder never to paste a
+  built HTML file, since it carries every note title in plain text. `make-demo-vault.mjs` is
+  there for exactly that.
+
+**Left alone deliberately:** the CSS masks the centre mark is built from, which the review
+flags as partially supported — the mark *is* two masks composited, and it degrades to nothing
+rather than to something broken. And the ~11,000 issues the scorecard attributes to
+`vendor/`: that is 260 KB of minified third-party JS with 73,000-character lines. Replacing
+it with npm dependencies would trade the exporter's "no npm install, no network" property for
+a number about somebody else's code.
+
 ## 1.5.0 — 2026-08-22
 
 **The first release with an Obsidian plugin in it.** The graph now mounts inside Obsidian as
