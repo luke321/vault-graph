@@ -1,26 +1,85 @@
 # Vault Graph
 
-An interactive graph of an [Obsidian](https://obsidian.md) vault as a single
-self-contained offline HTML file. No server, no network, no build step beyond one Node
-script — Sigma.js and graphology are vendored and inlined at build time.
+**Your whole vault as one disc.** Every note is a dot; every top-level folder owns a wedge
+of the circle whose angle is its share of the vault. Notes fill concentric rings from the
+middle outwards, best-connected first, so hubs sit near the hub and leaves land on the rim.
 
-![The disc growing from the vault's first note, a note hovered, a folder hidden, a
-subfolder highlighted, three heatmap days hovered, then one folder soloed](assets/demo.gif)
+The layout is **deterministic, not force-directed**. There is no simulation to settle and
+no seed to get lucky with: the same vault always draws the same picture, so the shape
+becomes something you can learn and recognise rather than a fresh tangle each time.
 
-<sup>Recorded by the repo itself, against a real 450-note vault — `?demo` drives the real
-controls over Chrome's DevTools protocol, `scripts/record-demo.ps1` captures it unattended
-and `scripts/make-gif.ps1` encodes it. Nothing in that clip was staged; see
-[`.ai-context/decisions/0007`](.ai-context/decisions/0007-the-demo-drives-real-input.md).</sup>
+![Vault Graph inside Obsidian, dark theme](assets/screenshots/plugin-dark.png)
 
-The layout is a pie chart made of notes: each top-level folder owns a wedge whose angle is
-its share of the vault, and notes fill concentric rings from the middle outwards,
-best-connected first — so hubs sit near the centre and leaves land on the rim. Above it, a
-heatmap band shows how many notes you added each day, each square pieced together from the
-colours of the notes that landed in it.
+Ships as an **Obsidian plugin** and as a **standalone HTML exporter** — one page, two
+mounts, from the same source. The exporter writes a single self-contained offline file with
+no server and no network, which is how the graph reaches a phone.
 
 ---
 
-## Install
+## What it does
+
+**The disc**
+- One wedge per top-level folder, sized by how much of the vault it holds; subfolders take
+  their parent's hue at a lighter tint and cut sub-wedges inside it.
+- Node size follows link count, so hubs are visibly hubs.
+- Two bands — an inner ring and an outer ring — assigned once and kept stable, so hiding
+  something in one ring never re-packs the other.
+- Links are curved away from the hub by default, because only ~9% of links stay inside one
+  folder and straight chords would draw a grey wash across the middle. There is a switch.
+
+**Filtering, and what it does to the layout**
+- Click any folder or subfolder in the legend to hide it. The remaining wedges **grow back
+  into the angle it vacated** and the whole disc re-packs — the layout is a statement about
+  what is currently visible, not a fixed seating plan with gaps in it.
+- Solo a folder, hide everything, bring it all back.
+- Search narrows to matching notes and lists the hits.
+
+**Time**
+- A **heatmap band** above the disc: one square per day, coloured from the notes that landed
+  in it, so a busy week is both taller and more colourful.
+- A **timeline** slider replays the vault's growth from its first note to today. `play`
+  animates it.
+- `mark today` haloes everything created today without moving anything.
+
+**Reading one note**
+- Hover a note to raise it and dim everything unconnected to it.
+- Click for a panel: folder, type, tags, word count, and its linked notes — click any of
+  them to jump across the disc.
+- In the plugin, **Open in Obsidian** opens the note in a pane.
+
+**Themes**
+- Follows Obsidian's theme, including a live switch.
+
+![Vault Graph in the light theme](assets/screenshots/plugin-light.png)
+
+---
+
+## Install the plugin
+
+**From Obsidian** — Settings → Community plugins → Browse → "Vault Graph" → Install, then
+Enable. Open it from the ribbon icon or the command palette (*Vault graph: Open the graph*).
+
+**Manually** — download `main.js`, `manifest.json` and `styles.css` from the
+[latest release](https://github.com/luke321/vault-graph/releases/latest) into
+`<vault>/.obsidian/plugins/vault-graph/`, then reload plugins and enable it.
+
+**From source** — `npm install && npm run build`, then `./scripts/install-plugin.ps1`.
+
+It reads your vault through Obsidian's own metadata cache, so it sees the same links
+Obsidian does, aliases and frontmatter links included. It builds in about a tenth of a
+second on a 450-note vault. **Nothing leaves your machine** — no network, no telemetry, no
+account.
+
+---
+
+## Or export a standalone page
+
+The other half of the same source: one HTML file, openable offline on anything with a
+browser.
+
+![The standalone page](assets/screenshots/standalone-light.png)
+
+### Getting the exporter
 
 **Requirements: Node 18 or newer. That is the whole list.** No `npm install`, no network
 access, no build tooling.

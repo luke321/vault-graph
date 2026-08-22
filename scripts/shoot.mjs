@@ -117,6 +117,27 @@ try {
   await setTheme("dark");
   await sleep(900);
 
+  // A HIGHLIGHTED FOLDER, IN THE LIGHT THEME. The halo ring mixes the node colour toward
+  // `--today`, which is near-black in light and white in dark -- so this is the shot that
+  // proves the palette was actually re-read rather than carried over. A white ring on a
+  // white background is invisible, and that is precisely the symptom a stale palette gives.
+  await setTheme("light");
+  await sleep(700);
+  await page.eval(`(function(){
+    var r = document.querySelector("#vg-legend .lg") || document.querySelector("#legend .lg");
+    if (r) r.click();
+  })(); void 0`);
+  await sleep(1500);
+  await shoot("04-light-highlight");
+  await setTheme("dark");
+  await sleep(700);
+  await shoot("05-dark-highlight");
+  await page.eval(`(function(){
+    var r = document.querySelector("#vg-legend .lg") || document.querySelector("#legend .lg");
+    if (r) r.click();
+  })(); void 0`);
+  await sleep(900);
+
   // One folder hidden, to show the disc close around the gap -- the behaviour the whole
   // layout exists for.
   await page.eval(`(function(){
