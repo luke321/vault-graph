@@ -53,6 +53,22 @@ EOF
   exit 1
 fi
 
+# SCOPE NEXT, and also unskippable, for the same kind of reason as the PII check: it costs
+# nothing (a static read of three files, no browser) and what it prevents is damage to
+# somebody else's software. page.css ships as the plugin's stylesheet, so one unscoped
+# selector styles the whole of Obsidian, and the failure would look like an Obsidian bug.
+echo "pre-push: checking the page is scoped..."
+if ! node "$root/scripts/check-scope.mjs"; then
+  cat >&2 <<'EOF'
+
+pre-push: scope check failed -- push blocked.
+
+page.css is loaded into Obsidian itself. An unscoped rule styles the app, not the
+page. Scope it under .vault-graph, or prefix the id and reach it through $().
+EOF
+  exit 1
+fi
+
 if [ -n "$SKIP_SMOKE" ]; then
   echo "pre-push: SKIP_SMOKE set, skipping the invariant suite"
   exit 0

@@ -78,8 +78,8 @@ check("__vg is present and the intro landed", async (p) => {
 
 check("legend opens folded to top-level folders", async (p) => {
   const r = await p.j(`{
-    rows: document.querySelectorAll('#legend .lgr').length,
-    subs: document.querySelectorAll('#legend .lgs').length,
+    rows: document.querySelectorAll('#vg-legend .lgr').length,
+    subs: document.querySelectorAll('#vg-legend .lgs').length,
     groups: (__vg.state.dim, Object.keys(__vg.state.collapsed).length)
   }`);
   return { ok: r.subs === 0 && r.rows > 0, detail: `${r.rows} rows, ${r.subs} subfolder rows` };
@@ -87,7 +87,7 @@ check("legend opens folded to top-level folders", async (p) => {
 
 check("nav counts share one right edge", async (p) => {
   const edges = async () => p.j(`(function(){
-    var xs = [].map.call(document.querySelectorAll('#legend .ct'),
+    var xs = [].map.call(document.querySelectorAll('#vg-legend .ct'),
       function(e){return Math.round(e.getBoundingClientRect().right);});
     return {n: xs.length, distinct: Array.from(new Set(xs))};
   })()`);
@@ -100,7 +100,7 @@ check("nav counts share one right edge", async (p) => {
   // groups shut and this measured the folded tree twice while reporting that it had
   // checked both. Hence the row-count assertion below: a check that cannot tell whether
   // it did anything is worse than no check.
-  await p.eval(`(function(){ var b = document.querySelectorAll('#legend [data-tw]');
+  await p.eval(`(function(){ var b = document.querySelectorAll('#vg-legend [data-tw]');
                 for (var i = 0; i < b.length; i++) b[i].click(); })(); void 0`);
   await sleep(300);
   const open = await edges();
@@ -112,7 +112,7 @@ check("nav counts share one right edge", async (p) => {
 
 check("every heatmap day with notes fills its cell", async (p) => {
   const r = await p.j(`(function(){
-    var h = __vg.heat, cv = document.getElementById('heatc'), ctx = cv.getContext('2d');
+    var h = __vg.heat, cv = document.getElementById('vg-heatc'), ctx = cv.getContext('2d');
     var dpr = window.devicePixelRatio || 1;
     var at = function(x,y){ var q = ctx.getImageData(Math.round(x*dpr), Math.round(y*dpr),1,1).data;
                             return q[0]+','+q[1]+','+q[2]; };
@@ -130,7 +130,7 @@ check("every heatmap day with notes fills its cell", async (p) => {
 });
 
 check("heatmap grid fits its box", async (p) => {
-  const r = await p.j(`{w: __vg.heat.w, box: document.getElementById('heatwrap').clientWidth,
+  const r = await p.j(`{w: __vg.heat.w, box: document.getElementById('vg-heatwrap').clientWidth,
                         cols: __vg.heat.cols, cell: __vg.heat.cell}`);
   return { ok: r.w <= r.box, detail: `${r.cols} cols at ${r.cell}px = ${r.w}px in ${r.box}px` };
 });
@@ -313,7 +313,10 @@ check("hovering a note ramps in and releases at zero", async (p) => {
       if ((__vg.alpha[i]||0) > 0.9) far = i; });
     return {t: __vg.hoverT, hit: f === ${JSON.stringify(w.expect)},
             farColour: far ? __vg.renderer.getNodeDisplayData(far).color : null,
-            dim: getComputedStyle(document.documentElement).getPropertyValue('--dim').trim()};
+            // #vg-app, not documentElement: the palette is declared on the page's own root
+            // so it can mount inside another document. Read from the wrong element and this
+            // comes back "", which fails as "the far node is the wrong colour".
+            dim: getComputedStyle(document.getElementById('vg-app')).getPropertyValue('--dim').trim()};
   })()`);
   await p.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: 5, y: 5, buttons: 0 });
   await sleep(400);
@@ -339,7 +342,7 @@ check("hovering a note ramps in and releases at zero", async (p) => {
   if (!on.hit) {
     const d = await p.j(`(function(){
       var a = __vg.graph.getNodeAttributes(${JSON.stringify(w.expect)});
-      var o = document.getElementById("graph").getBoundingClientRect();
+      var o = document.getElementById("vg-graph").getBoundingClientRect();
       var v = __vg.renderer.graphToViewport({x: a.x, y: a.y});
       var el = document.elementFromPoint(${w.x}, ${w.y});
       return {dx: +(v.x + o.left - ${w.x}).toFixed(1), dy: +(v.y + o.top - ${w.y}).toFixed(1),

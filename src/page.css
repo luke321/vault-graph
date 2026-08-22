@@ -1,5 +1,5 @@
   /* ---- tokens: light is the base, dark redefines only what changes -------- */
-  :root {
+  .vault-graph {
     color-scheme: light;
     --surface-0: #f4f3f0;
     --surface-1: #fcfcfb;
@@ -41,7 +41,7 @@
     --accent: #2a78d6;
   }
   @media (prefers-color-scheme: dark) {
-    :root:not([data-theme="light"]) {
+    .vault-graph:not([data-theme="light"]) {
       color-scheme: dark;
       --surface-0: #121211;
       --surface-1: #1a1a19;
@@ -62,7 +62,7 @@
       --accent: #3987e5;
     }
   }
-  :root[data-theme="dark"] {
+  .vault-graph[data-theme="dark"] {
     color-scheme: dark;
     --surface-0: #121211;
     --surface-1: #1a1a19;
@@ -83,91 +83,91 @@
     --accent: #3987e5;
   }
 
-  * { box-sizing: border-box; }
+  .vault-graph, .vault-graph * { box-sizing: border-box; }
   /* .row/.lbl set an explicit display, which would otherwise beat [hidden] */
-  [hidden] { display: none !important; }
-  html, body { height: 100%; margin: 0; }
-  body {
+  .vault-graph [hidden] { display: none !important; }
+  .vault-graph { height: 100%; margin: 0; }
+  .vault-graph {
     background: var(--surface-1);
     color: var(--text-1);
     font: 13px/1.45 ui-sans-serif, -apple-system, "Segoe UI", system-ui, sans-serif;
     overflow: hidden;
   }
 
-  #app { display: grid; grid-template-columns: 288px 1fr; height: 100%; }
+  .vault-graph { display: grid; grid-template-columns: 288px 1fr; height: 100%; }
 
   /* ---------------------------------------------------------- sidebar ----- */
-  #sidebar {
+  .vault-graph #vg-sidebar {
     background: var(--surface-0);
     border-right: 1px solid var(--border);
     overflow-y: auto;
     padding: 14px 14px 28px;
     display: flex; flex-direction: column; gap: 18px;
   }
-  .brand { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
-  .brand h1 { font-size: 14px; margin: 0; letter-spacing: -0.01em; }
-  .brand .sub { font-size: 11px; color: var(--text-3); }
+  .vault-graph .brand { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+  .vault-graph .brand h1 { font-size: 14px; margin: 0; letter-spacing: -0.01em; }
+  .vault-graph .brand .sub { font-size: 11px; color: var(--text-3); }
 
-  .block > .lbl {
+  .vault-graph .block > .lbl {
     font-size: 10px; text-transform: uppercase; letter-spacing: .08em;
     color: var(--text-3); margin-bottom: 7px; font-weight: 600;
   }
 
-  .seg { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; }
-  .seg button {
+  .vault-graph .seg { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; }
+  .vault-graph .seg button {
     font: inherit; font-size: 12px; padding: 6px 8px; cursor: pointer;
     background: var(--surface-2); color: var(--text-2);
     border: 1px solid var(--border); border-radius: 6px; text-align: left;
   }
-  .seg button:hover { border-color: var(--border-strong); color: var(--text-1); }
-  .seg button[aria-pressed="true"] {
+  .vault-graph .seg button:hover { border-color: var(--border-strong); color: var(--text-1); }
+  .vault-graph .seg button[aria-pressed="true"] {
     background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600;
   }
 
-  input[type="search"] {
+  .vault-graph input[type="search"] {
     width: 100%; font: inherit; padding: 7px 9px; border-radius: 6px;
     background: var(--surface-2); color: var(--text-1); border: 1px solid var(--border);
   }
-  input[type="search"]:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
-  input[type="range"] { width: 100%; accent-color: var(--accent); }
+  .vault-graph input[type="search"]:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+  .vault-graph input[type="range"] { width: 100%; accent-color: var(--accent); }
 
-  .row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-  .row .val { font-variant-numeric: tabular-nums; color: var(--text-2); font-size: 11px; }
+  .vault-graph .row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+  .vault-graph .row .val { font-variant-numeric: tabular-nums; color: var(--text-2); font-size: 11px; }
 
   /* legend = the identity carrier past 4 colors */
-  #legend { display: flex; flex-direction: column; gap: 1px; }
+  .vault-graph #vg-legend { display: flex; flex-direction: column; gap: 1px; }
 
   /* A row is now three controls, not one button: a twisty, an eye, and the label.
      They do different things (unfold / show-hide / highlight), so they have to be
      separately clickable -- and separately focusable, which nesting would break. */
-  .lgr { display: flex; align-items: center; gap: 2px; }
+  .vault-graph .lgr { display: flex; align-items: center; gap: 2px; }
   /* One indent step per folder level. Capped at four because the sidebar runs out of
      width, not because the vault runs out of depth -- deeper folders keep the last
      indent rather than being hidden. */
-  .lgr.sub { padding-left: 14px; }
-  .lgr.sub2 { padding-left: 28px; }
-  .lgr.sub3 { padding-left: 42px; }
-  .lgr.sub4 { padding-left: 54px; }
+  .vault-graph .lgr.sub { padding-left: 14px; }
+  .vault-graph .lgr.sub2 { padding-left: 28px; }
+  .vault-graph .lgr.sub3 { padding-left: 42px; }
+  .vault-graph .lgr.sub4 { padding-left: 54px; }
 
-  .tw, .eye {
+  .vault-graph .tw, .vault-graph .eye {
     flex: none; background: none; border: 0; padding: 2px; cursor: pointer;
     color: var(--text-3); line-height: 0; border-radius: 4px;
   }
-  .tw { width: 16px; height: 18px; font: inherit; font-size: 9px; line-height: 1;
+  .vault-graph .tw { width: 16px; height: 18px; font: inherit; font-size: 9px; line-height: 1;
         color: var(--text-3); }
-  .tw:hover, .eye:hover { color: var(--text-1); background: var(--surface-2); }
-  .tw[aria-expanded="true"] { color: var(--text-2); }
+  .vault-graph .tw:hover, .vault-graph .eye:hover { color: var(--text-1); background: var(--surface-2); }
+  .vault-graph .tw[aria-expanded="true"] { color: var(--text-2); }
   /* An empty slot where a group has no subfolders, so every label still lines up. */
-  .tw.none { visibility: hidden; cursor: default; }
-  .eye { width: 20px; height: 18px; }
-  .eye svg { width: 14px; height: 14px; display: block; }
+  .vault-graph .tw.none { visibility: hidden; cursor: default; }
+  .vault-graph .eye { width: 20px; height: 18px; }
+  .vault-graph .eye svg { width: 14px; height: 14px; display: block; }
   /* Hidden reads as dimmed-and-struck on the label; the eye itself just loses its
      pupil, so the icon is legible at 14px rather than relying on colour alone. */
-  .eye[aria-pressed="false"] { color: var(--text-3); opacity: .6; }
+  .vault-graph .eye[aria-pressed="false"] { color: var(--text-3); opacity: .6; }
 
   /* sw | name | only | count. The count is LAST and fixed-width, so it lands on the
      same x in every row -- see the .ct rule. */
-  .lg {
+  .vault-graph .lg {
     display: grid; grid-template-columns: 12px 1fr auto auto; align-items: center;
     gap: 8px; padding: 4px 6px; border-radius: 5px; cursor: pointer;
     border: 1px solid transparent; text-align: left; background: none;
@@ -179,17 +179,17 @@
      it for the indented subfolder rows, whose smaller type makes a fill alone easy
      to skim past. Same treatment at both levels so the state reads the same wherever
      it is. */
-  .lg[data-hl="on"], .lgs[data-hl="on"] {
+  .vault-graph .lg[data-hl="on"], .vault-graph .lgs[data-hl="on"] {
     background: color-mix(in srgb, var(--accent) 22%, transparent);
     border-color: var(--accent);
     box-shadow: inset 2px 0 0 0 var(--accent);
     color: var(--text-1);
   }
-  .lg[data-hl="on"] .ct, .lgs[data-hl="on"] .ct { color: var(--text-2); }
-  .lg:hover { background: var(--surface-2); border-color: var(--border); }
-  .lg .sw { width: 11px; height: 11px; border-radius: 3px; }
-  .lg .nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .lg .ct { font-size: 11px; }
+  .vault-graph .lg[data-hl="on"] .ct, .vault-graph .lgs[data-hl="on"] .ct { color: var(--text-2); }
+  .vault-graph .lg:hover { background: var(--surface-2); border-color: var(--border); }
+  .vault-graph .lg .sw { width: 11px; height: 11px; border-radius: 3px; }
+  .vault-graph .lg .nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .vault-graph .lg .ct { font-size: 11px; }
   /* Counts line up down the whole tree. Grid columns only align WITHIN one grid, and
      every row here is its own grid -- so the alignment has to come from a fixed width
      on the last column, not from the grid. 3ch covers three digits, which is what this
@@ -197,7 +197,7 @@
      so 11 and 141 have their units in the same place.
      Indentation does not break it: .lgr.subN pads the LEFT, and every row still ends
      at the container's right edge with the same 6px of padding. */
-  .lg .ct, .lgs .ct {
+  .vault-graph .lg .ct, .vault-graph .lgs .ct {
     color: var(--text-3); font-variant-numeric: tabular-nums;
     min-width: 3ch; text-align: right;
   }
@@ -205,53 +205,53 @@
      only its OPACITY changes on hover, so revealing it never shifts a count sideways.
      It sits after the name and before the count, which is the reading order -- what
      the row is, what you can do to it, how big it is. */
-  .lg .only, .lgs .only {
+  .vault-graph .lg .only, .vault-graph .lgs .only {
     font-size: 10px; color: var(--text-3); opacity: 0; padding: 1px 4px;
     border: 1px solid var(--border-strong); border-radius: 4px;
     background: var(--surface-1); line-height: 1.3; white-space: nowrap;
   }
-  .lgs .only { font-size: 9px; }
-  .lg:hover .only, .lgs:hover .only { opacity: 1; }
-  .lg .only:hover, .lgs .only:hover {
+  .vault-graph .lgs .only { font-size: 9px; }
+  .vault-graph .lg:hover .only, .vault-graph .lgs:hover .only { opacity: 1; }
+  .vault-graph .lg .only:hover, .vault-graph .lgs .only:hover {
     color: var(--text-1); border-color: var(--accent);
   }
   /* nested subfolder rows: swatch + name, indented under their PARA folder */
   /* sw | name | only | count, the same four columns as .lg so the two read as one
      tree rather than as two lists. */
-  .lgs {
+  .vault-graph .lgs {
     display: grid; grid-template-columns: 10px 1fr auto auto; align-items: center;
     gap: 7px; padding: 2px 6px; color: var(--text-2);
     font: inherit; font-size: 11px; background: none;
     border: 1px solid transparent; border-radius: 5px;
     flex: 1; min-width: 0; text-align: left; cursor: pointer;
   }
-  .lgs:hover { background: var(--surface-2); border-color: var(--border); color: var(--text-1); }
-  .lgs[aria-pressed="false"] { opacity: .35; }
-  .lgs[aria-pressed="false"] .nm { text-decoration: line-through; }
-  .lgs .sw { width: 10px; height: 10px; border-radius: 2px; }
-  .lgs .nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .lg[aria-pressed="false"] { opacity: .38; }
-  .lg[aria-pressed="false"] .nm { text-decoration: line-through; }
+  .vault-graph .lgs:hover { background: var(--surface-2); border-color: var(--border); color: var(--text-1); }
+  .vault-graph .lgs[aria-pressed="false"] { opacity: .35; }
+  .vault-graph .lgs[aria-pressed="false"] .nm { text-decoration: line-through; }
+  .vault-graph .lgs .sw { width: 10px; height: 10px; border-radius: 2px; }
+  .vault-graph .lgs .nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .vault-graph .lg[aria-pressed="false"] { opacity: .38; }
+  .vault-graph .lg[aria-pressed="false"] .nm { text-decoration: line-through; }
 
   /* Every control in the sidebar is a button and looks like one -- these used to
      be underlined text links, which read as navigation rather than as controls. */
-  .mini { display: flex; flex-wrap: wrap; gap: 5px; }
+  .vault-graph .mini { display: flex; flex-wrap: wrap; gap: 5px; }
 
-  #stats { font-size: 11px; color: var(--text-3); line-height: 1.6; }
-  #stats b { color: var(--text-2); font-variant-numeric: tabular-nums; font-weight: 600; }
+  .vault-graph #vg-stats { font-size: 11px; color: var(--text-3); line-height: 1.6; }
+  .vault-graph #vg-stats b { color: var(--text-2); font-variant-numeric: tabular-nums; font-weight: 600; }
 
-  .tools { display: flex; flex-wrap: wrap; gap: 5px; }
-  .tools button, .mini button, button.btn {
+  .vault-graph .tools { display: flex; flex-wrap: wrap; gap: 5px; }
+  .vault-graph .tools button, .vault-graph .mini button, .vault-graph button.btn {
     font: inherit; font-size: 11px; padding: 5px 8px; cursor: pointer;
     background: var(--surface-2); color: var(--text-2);
     border: 1px solid var(--border); border-radius: 6px;
   }
-  .tools button:hover, .mini button:hover, button.btn:hover {
+  .vault-graph .tools button:hover, .vault-graph .mini button:hover, .vault-graph button.btn:hover {
     color: var(--text-1); border-color: var(--border-strong);
   }
   /* A toggle shows its state by being filled, so its label can stay constant --
      a button whose text changes makes you read it to find out what it did. */
-  .mini button[aria-pressed="true"], button.btn[aria-pressed="true"] {
+  .vault-graph .mini button[aria-pressed="true"], .vault-graph button.btn[aria-pressed="true"] {
     background: var(--accent); border-color: var(--accent); color: #fff;
   }
 
@@ -262,7 +262,7 @@
      arithmetic has to keep an overlay clear of the rim. Sigma re-reads its
      container size on its own, and refreshSizeScale already exists to re-tune the
      dot sizes to a shorter stage. */
-  #stage { position: relative; overflow: hidden; background: var(--surface-1);
+  .vault-graph #vg-stage { position: relative; overflow: hidden; background: var(--surface-1);
            display: grid; grid-template-rows: auto 1fr; }
   /* The canvas row is the positioning context for everything that used to measure
      itself against #stage: the logo, the tooltip, the detail card. graphToViewport
@@ -270,58 +270,58 @@
      has to live in the same box -- with the band above, #stage and #graph no longer
      share an origin. #busy stays a child of #stage on purpose (inset:0, out of
      grid flow), so the loading cover still hides the band as well. */
-  #canvas { position: relative; overflow: hidden; }
-  #graph { position: absolute; inset: 0; }
+  .vault-graph #vg-canvas { position: relative; overflow: hidden; }
+  .vault-graph #vg-graph { position: absolute; inset: 0; }
 
   /* ---------------------------------------------------------- heatmap ----- */
   /* Notes ADDED per day. One canvas, not 364 divs: it repaints from afterRender
      alongside the logo, so the band densifies frame for frame with the disc during
      the intro and the timeline, and a per-frame DOM write for every cell would not
      survive that. */
-  #heat {
+  .vault-graph #vg-heat {
     position: relative; padding: 9px 14px 8px;
     border-bottom: 1px solid var(--border); background: var(--surface-0);
     display: flex; flex-direction: column; gap: 6px; min-width: 0;
   }
-  #heat .hrow { display: flex; align-items: center; gap: 10px; min-width: 0; }
-  #heat .hrow .lbl {
+  .vault-graph #vg-heat .hrow { display: flex; align-items: center; gap: 10px; min-width: 0; }
+  .vault-graph #vg-heat .hrow .lbl {
     font-size: 10px; text-transform: uppercase; letter-spacing: .08em;
     color: var(--text-3); font-weight: 600; flex: 0 0 auto;
   }
-  #heatnote {
+  .vault-graph #vg-heatnote {
     font-size: 11px; color: var(--text-3); min-width: 0;
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
   /* The ramp is drawn in the palette's own MEAN colour, the same trick the logo's
      core uses: it says "this is the intensity axis" without claiming a hue that
      belongs to some group. */
-  #heatscale {
+  .vault-graph #vg-heatscale {
     margin-left: auto; flex: 0 0 auto; display: flex; align-items: center; gap: 3px;
     font-size: 10px; color: var(--text-3);
   }
-  #heatscale canvas { display: block; }
+  .vault-graph #vg-heatscale canvas { display: block; }
   /* The grid is sized to FIT (heatGeom drops weeks before it drops pixels),
      so this normally never scrolls -- it is a safety valve for a window narrower than
      the 8-week floor. Thin and dim, because when it does appear it is 5px of chrome
      inside a 115px band. */
-  #heatwrap { overflow-x: auto; overflow-y: hidden; scrollbar-width: thin;
+  .vault-graph #vg-heatwrap { overflow-x: auto; overflow-y: hidden; scrollbar-width: thin;
               scrollbar-color: var(--border-strong) transparent; }
-  #heatwrap::-webkit-scrollbar { height: 5px; }
-  #heatwrap::-webkit-scrollbar-track { background: transparent; }
-  #heatwrap::-webkit-scrollbar-thumb {
+  .vault-graph #vg-heatwrap::-webkit-scrollbar { height: 5px; }
+  .vault-graph #vg-heatwrap::-webkit-scrollbar-track { background: transparent; }
+  .vault-graph #vg-heatwrap::-webkit-scrollbar-thumb {
     background: var(--border-strong); border-radius: 3px;
   }
   /* Centred, so a band with room to spare reads as deliberate rather than as content
      that ran out. margin:auto still lets it scroll when it genuinely overflows. */
-  #heatc { display: block; cursor: pointer; margin: 0 auto; }
-  #htip {
+  .vault-graph #vg-heatc { display: block; cursor: pointer; margin: 0 auto; }
+  .vault-graph #vg-htip {
     position: absolute; pointer-events: none; z-index: 7; max-width: 240px;
     background: var(--surface-2); border: 1px solid var(--border-strong);
     border-radius: 7px; padding: 6px 9px; font-size: 12px;
     box-shadow: 0 6px 20px rgba(0,0,0,.18); display: none;
   }
-  #htip .t { font-weight: 600; margin-bottom: 2px; }
-  #htip .m { color: var(--text-2); font-size: 11px; }
+  .vault-graph #vg-htip .t { font-weight: 600; margin-bottom: 2px; }
+  .vault-graph #vg-htip .m { color: var(--text-2); font-size: 11px; }
 
   /* The logo sits in the hub hole. Position and size come from JS, because the hole
      radius in PIXELS depends on the camera ratio -- the disc centre itself never
@@ -334,7 +334,7 @@
      it re-colours itself when the palette, the theme or the filters change -- there is
      no second copy of the colour scheme to keep in sync.
      mask-image is set from JS, since the PNG arrives as a base64 data URI. */
-  #logo, #logoInner {
+  .vault-graph #vg-logo, .vault-graph #vg-logoInner {
     position: absolute; display: none; pointer-events: none;
     transform: translate(-50%, -50%);
     opacity: .95;
@@ -346,75 +346,75 @@
      covers the middle of the mark and dissolves into the layer beneath. Two mask
      images plus mask-composite does this in one element -- no extra clipping wrapper,
      and the two layers stay in exact registration because they share a mask-size. */
-  #logoInner {
+  .vault-graph #vg-logoInner {
     -webkit-mask-composite: source-in;   /* older WebKit keyword for the same thing */
     mask-composite: intersect;
   }
   /* The wedge hues were validated against the dark surface; on the light one the same
      fills sit lighter than the paper, so the mark is deepened a touch to hold its
      edges instead of dissolving into the background. */
-  :root[data-theme="light"] #logo { opacity: .9; filter: saturate(1.05) brightness(.86); }
+  .vault-graph[data-theme="light"] #vg-logo { opacity: .9; filter: saturate(1.05) brightness(.86); }
 
-  #tip {
+  .vault-graph #vg-tip {
     position: absolute; pointer-events: none; z-index: 5; max-width: 260px;
     background: var(--surface-2); border: 1px solid var(--border-strong);
     border-radius: 7px; padding: 7px 9px; font-size: 12px;
     box-shadow: 0 6px 20px rgba(0,0,0,.18); display: none;
   }
-  #tip .t { font-weight: 600; margin-bottom: 3px; }
-  #tip .m { color: var(--text-2); font-size: 11px; }
+  .vault-graph #vg-tip .t { font-weight: 600; margin-bottom: 3px; }
+  .vault-graph #vg-tip .m { color: var(--text-2); font-size: 11px; }
 
   /* node detail card */
-  #detail {
+  .vault-graph #vg-detail {
     position: absolute; right: 12px; top: 12px; width: 278px; z-index: 6;
     background: var(--surface-2); border: 1px solid var(--border);
     border-radius: 9px; padding: 12px; display: none;
     box-shadow: 0 8px 28px rgba(0,0,0,.16); max-height: calc(100% - 24px); overflow-y: auto;
   }
-  #detail h2 { font-size: 13px; margin: 0 22px 6px 0; line-height: 1.3; }
-  #detail .meta { font-size: 11px; color: var(--text-2); margin-bottom: 9px; }
-  #detail .meta span { display: inline-block; margin-right: 8px; }
-  #detail .chip {
+  .vault-graph #vg-detail h2 { font-size: 13px; margin: 0 22px 6px 0; line-height: 1.3; }
+  .vault-graph #vg-detail .meta { font-size: 11px; color: var(--text-2); margin-bottom: 9px; }
+  .vault-graph #vg-detail .meta span { display: inline-block; margin-right: 8px; }
+  .vault-graph #vg-detail .chip {
     display: inline-block; font-size: 10px; padding: 1px 6px; margin: 0 3px 3px 0;
     border: 1px solid var(--border); border-radius: 999px; color: var(--text-2);
   }
-  #detail .nb { font-size: 10px; text-transform: uppercase; letter-spacing: .07em;
+  .vault-graph #vg-detail .nb { font-size: 10px; text-transform: uppercase; letter-spacing: .07em;
                 color: var(--text-3); margin: 10px 0 5px; font-weight: 600; }
-  #detail a.open {
+  .vault-graph #vg-detail a.open {
     display: inline-block; font-size: 11px; color: var(--accent);
     text-decoration: none; border: 1px solid var(--accent);
     border-radius: 6px; padding: 4px 8px; margin-top: 4px;
   }
-  #detail a.open:hover { background: color-mix(in srgb, var(--accent) 12%, transparent); }
-  #detail ul { list-style: none; margin: 0; padding: 0; }
-  #detail li button {
+  .vault-graph #vg-detail a.open:hover { background: color-mix(in srgb, var(--accent) 12%, transparent); }
+  .vault-graph #vg-detail ul { list-style: none; margin: 0; padding: 0; }
+  .vault-graph #vg-detail li button {
     background: none; border: 0; padding: 2px 0; font: inherit; font-size: 12px;
     color: var(--text-2); cursor: pointer; text-align: left; width: 100%;
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
-  #detail li button:hover { color: var(--accent); text-decoration: underline; }
-  #detail .x {
+  .vault-graph #vg-detail li button:hover { color: var(--accent); text-decoration: underline; }
+  .vault-graph #vg-detail .x {
     position: absolute; right: 8px; top: 7px; background: none; border: 0;
     color: var(--text-3); font-size: 16px; cursor: pointer; line-height: 1; padding: 2px 5px;
   }
-  #detail .x:hover { color: var(--text-1); }
+  .vault-graph #vg-detail .x:hover { color: var(--text-1); }
 
-  #hits { margin-top: 6px; max-height: 168px; overflow-y: auto; }
-  #hits button {
+  .vault-graph #vg-hits { margin-top: 6px; max-height: 168px; overflow-y: auto; }
+  .vault-graph #vg-hits button {
     display: block; width: 100%; text-align: left; font: inherit; font-size: 12px;
     background: none; border: 0; padding: 3px 5px; border-radius: 4px;
     color: var(--text-2); cursor: pointer;
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
-  #hits button:hover { background: var(--surface-2); color: var(--text-1); }
+  .vault-graph #vg-hits button:hover { background: var(--surface-2); color: var(--text-1); }
 
-  #busy {
+  .vault-graph #vg-busy {
     position: absolute; inset: 0; display: grid; place-items: center;
     background: var(--surface-1); z-index: 20; font-size: 13px; color: var(--text-2);
   }
 
   @media (max-width: 720px) {
-    #app { grid-template-columns: 1fr; grid-template-rows: 42% 58%; }
-    #sidebar { border-right: 0; border-bottom: 1px solid var(--border); }
-    #detail { width: auto; left: 12px; }
+    .vault-graph { grid-template-columns: 1fr; grid-template-rows: 42% 58%; }
+    .vault-graph #vg-sidebar { border-right: 0; border-bottom: 1px solid var(--border); }
+    .vault-graph #vg-detail { width: auto; left: 12px; }
   }

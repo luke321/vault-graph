@@ -1,10 +1,24 @@
 <!doctype html>
-<html lang="en" data-theme="dark">
+<html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Vault Graph</title>
 <!--ASSETS-->
+<style>
+/* THE STANDALONE'S OWN CHROME, and the only CSS here that is not page.css.
+ *
+ * page.css is scoped entirely under `.vault-graph` so it can be dropped into somebody
+ * else's document without styling it. That leaves the document itself unstyled -- and the
+ * container asks for `height: 100%`, which against an auto-height body resolves to zero and
+ * draws nothing at all. In a plugin the host has already sized the view; here nobody has,
+ * so the shell does it.
+ *
+ * No custom properties are used: they live on `.vault-graph` now, so they do not exist out
+ * here. The container paints the full viewport anyway, so nothing shows through.
+ */
+html, body { height: 100%; margin: 0; }
+</style>
 <style>
 <!--CSS-->
 </style>

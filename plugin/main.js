@@ -408,7 +408,10 @@ const BRIDGE = [
   "  // how long it waited.",
   "  var t0 = Date.now();",
   "  var tick = function () {",
-  "    var canvases = document.querySelectorAll('#graph canvas').length;",
+  // #vg-graph: the page's ids are prefixed so they cannot collide with the host document.
+  // With the old selector this counted 0, waited out the 5s handshake timeout, and reported
+  // a fully working page as having painted nothing.
+  "    var canvases = document.querySelectorAll('#vg-graph canvas').length;",
   "    var up = !!window.__vg && canvases > 0;",
   "    if (!up && Date.now() - t0 < 5000) { setTimeout(tick, 100); return; }",
   "    post({ vgSpike: 'ready',",
@@ -456,23 +459,24 @@ function assemblePage(data) {
     "\n<script>window.VAULT_LOGO_MASK=" +
     JSON.stringify("data:image/png;base64," + LOGO_MASK_B64) + ";</script>";
 
-  // The template hardcodes data-theme="dark" on <html>, deliberately (design/0009).
-  // An iframe inherits nothing from Obsidian, so the host has to hand the theme over --
-  // which is exactly the integration the in-DOM port gets for free.
+  // The page defaults to dark (design/0009). `data-theme` now lives on the page's OWN root
+  // element rather than on <html>, which is what lets an in-DOM mount set it at all: the
+  // host's <html> is not ours to write.
   //
   // activeDocument, not document: with a view torn out into a popout window, `document` is
   // still the main window's and the theme read would be the wrong window's. Obsidian
   // exposes activeDocument for precisely this, and obsidianmd/prefer-active-doc is an
   // error without it.
   const theme = activeDocument.body.classList.contains("theme-light") ? "light" : "dark";
+  const markup = PAGE_HTML.trimEnd()
+    .replace('data-theme="dark"', 'data-theme="' + theme + '"');
 
   // Same six seams the exporter fills, in the same order, from the same four files. Two
   // assemblers over one page is the arrangement the split exists to allow; if these ever
   // disagree about a seam the standalone and the plugin are drawing different pages.
   return SHELL
-    .replace('<html lang="en" data-theme="dark">', '<html lang="en" data-theme="' + theme + '">')
     .replace("<!--CSS-->", () => PAGE_CSS.trimEnd())
-    .replace("<!--MARKUP-->", () => PAGE_HTML.trimEnd())
+    .replace("<!--MARKUP-->", () => markup)
     .replace("<!--SCRIPT-->", () => PAGE_JS.trimEnd())
     .replace("<!--LIBS-->", () => libs)
     .replace("<!--ASSETS-->", () => assets)

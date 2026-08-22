@@ -12,9 +12,24 @@
   // "Laying out graph..." with nothing in the console.
   var RENDERING = (window.Sigma && window.Sigma.rendering) || {};
 
-  var $ = function (id) { return document.getElementById(id); };
+  // Ids carry a `vg-` prefix so they cannot collide with the host document, and the
+  // prefix is added HERE rather than at the ~200 call sites, which stay $("graph").
+  var ID = "vg-";
+  var $ = function (id) { return document.getElementById(ID + id); };
+
+  // THE TOKENS LIVE ON OUR OWN ROOT, not on the document's.
+  //
+  // They used to be declared on `:root`, so reading them off documentElement worked. They
+  // are on `.vault-graph` now -- the page's own #app element -- because a page that has to
+  // mount inside somebody else's document must not put its palette on their <html>.
+  //
+  // This one line is the whole cost of that move, and getting it wrong is silent: every
+  // getPropertyValue returns "", every colour parses to black, and the heatmap draws every
+  // day as though it were empty. Measured exactly that way -- 88 days with notes, 88 of
+  // them "partially filled" -- before this was pointed at the right element.
+  var ROOT = $("app") || document.documentElement;
   var css = function (name) {
-    return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+    return getComputedStyle(ROOT).getPropertyValue(name).trim();
   };
 
   // --- OKLCH, so a subfolder tint can rotate hue and nudge lightness without
