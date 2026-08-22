@@ -540,8 +540,23 @@ const assets =
   (FAVICON ? `<link rel="icon" href="${FAVICON}">` : "") +
   `\n<script>window.VAULT_LOGO_MASK=${JSON.stringify(LOGO_MASK)};</script>`;
 
-const template = readFileSync(join(HERE, "template.html"), "utf8");
-const html = template
+// ONE PAGE, TWO MOUNTS.
+//
+// This used to be one read of template.html. The page is four files now -- shell.html plus
+// page.css, page.html and page.js -- because the Obsidian plugin has to mount the same page
+// INSIDE an existing document, where a doctype, a <head> and a stylesheet full of `:root`
+// tokens are not things it can use. The plugin imports the three parts and puts them in a
+// view; this assembles them into a standalone document, which is the shape that travels to
+// a phone.
+//
+// Neither mount is the other's poor relation, and the split is exactly a split: at the
+// commit that introduced it, the file produced here was byte-identical to the one the
+// single template produced, apart from its own build timestamp.
+const part = (f) => readFileSync(join(HERE, f), "utf8");
+const html = part("shell.html")
+  .replace("<!--CSS-->", () => part("page.css").trimEnd())
+  .replace("<!--MARKUP-->", () => part("page.html").trimEnd())
+  .replace("<!--SCRIPT-->", () => part("page.js").trimEnd())
   .replace("<!--LIBS-->", () => libs)
   .replace("<!--ASSETS-->", () => assets)
   .replace("<!--DATA-->", () => `<script>window.VAULT_DATA=${JSON.stringify(data)};</script>`);

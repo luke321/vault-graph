@@ -20,7 +20,14 @@ import { Plugin, ItemView, Notice, normalizePath, addIcon } from "obsidian";
 // and styles.css, so anything read from disk at runtime does not exist for a real user --
 // the page and both libraries have to BE the bundle. `raw:` and `b64:` are the bundler's
 // namespace loaders; see the esbuild plugin in that script.
-import TEMPLATE from "raw:../src/template.html";
+// The page in its four parts, not as one document. This is the shape the in-DOM mount
+// needs -- markup to put in a container, CSS to register as the plugin's stylesheet, script
+// to call -- and src/build-graph.mjs assembles the same four into a standalone file for the
+// export path. Still assembled into a document here, for the iframe, until the mount lands.
+import SHELL from "raw:../src/shell.html";
+import PAGE_CSS from "raw:../src/page.css";
+import PAGE_HTML from "raw:../src/page.html";
+import PAGE_JS from "raw:../src/page.js";
 import GRAPHOLOGY from "raw:../vendor/graphology.umd.min.js";
 import SIGMA from "raw:../vendor/sigma.min.js";
 import LOGO_MASK_B64 from "b64:../assets/logo-mask.png";
@@ -459,8 +466,14 @@ function assemblePage(data) {
   // error without it.
   const theme = activeDocument.body.classList.contains("theme-light") ? "light" : "dark";
 
-  return TEMPLATE
+  // Same six seams the exporter fills, in the same order, from the same four files. Two
+  // assemblers over one page is the arrangement the split exists to allow; if these ever
+  // disagree about a seam the standalone and the plugin are drawing different pages.
+  return SHELL
     .replace('<html lang="en" data-theme="dark">', '<html lang="en" data-theme="' + theme + '">')
+    .replace("<!--CSS-->", () => PAGE_CSS.trimEnd())
+    .replace("<!--MARKUP-->", () => PAGE_HTML.trimEnd())
+    .replace("<!--SCRIPT-->", () => PAGE_JS.trimEnd())
     .replace("<!--LIBS-->", () => libs)
     .replace("<!--ASSETS-->", () => assets)
     .replace("<!--DATA-->", () => "<script>window.VAULT_DATA=" + JSON.stringify(data) + ";</script>")

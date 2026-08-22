@@ -1,0 +1,79 @@
+<div id="app">
+  <aside id="sidebar">
+    <div class="brand">
+      <h1 id="vname">Vault Graph</h1>
+    </div>
+
+    <div class="block">
+    </div>
+
+    <div class="block">
+      <div class="lbl">Search</div>
+      <input type="search" id="q" placeholder="Find a note...">
+      <div id="hits"></div>
+    </div>
+
+    <div class="block">
+      <div class="row"><div class="lbl" style="margin:0">Timeline</div><span class="val" id="tlv">all</span></div>
+      <input type="range" id="tl" min="0" max="100" value="100"
+             title="Reveal notes oldest-first. The slider is linear in NOTE COUNT, not in time: nearly every note is from the last few months, so a time axis would spend most of its travel on empty years.">
+      <div class="mini" style="margin-top:7px">
+        <button id="tlplay" title="Grow the vault from its first note to now">play</button>
+        <button id="tlall">all</button>
+        <button id="today" aria-pressed="false" title="Colour, push out and halo every note created or edited today">mark today</button>
+      </div>
+    </div>
+
+    <div class="block">
+      <div class="row" style="margin-bottom:7px">
+        <div class="lbl" style="margin:0">Groups <span id="gcount" class="val"></span></div>
+        <div class="mini"><button id="allon">all</button><button id="alloff">none</button></div>
+      </div>
+      <div id="legend"></div>
+    </div>
+
+    <div class="block">
+      <div class="lbl">View</div>
+      <div class="tools">
+        <button id="refresh" title="Re-read the file from disk and reset all filters. Re-reads this file from disk and clears every filter. To pick up notes written since it was built, run refresh-graph.ps1 (or build-graph.mjs) first.">Refresh</button>
+        <button id="fit">Fit</button>
+        <button id="png">Save PNG</button>
+      </div>
+    </div>
+
+    <div id="stats"></div>
+  </aside>
+
+  <main id="stage">
+    <!-- Notes added per day, above the disc. Its own grid row, so the disc is
+         centred in what is left rather than being overlapped. -->
+    <div id="heat">
+      <div class="hrow">
+        <div class="lbl">Notes added</div>
+        <span id="heatnote"></span>
+        <div id="heatscale" aria-hidden="true">
+          <span>fewer</span><canvas id="heatkey"></canvas><span>more</span>
+        </div>
+      </div>
+      <div id="heatwrap"><canvas id="heatc"></canvas></div>
+      <div id="htip"></div>
+    </div>
+
+    <div id="canvas">
+      <!-- Before #graph on purpose: the canvases then paint OVER the logo, so if an
+           unlinked note is ever sunflower-packed into the hub hole it draws on top of
+           the logo rather than being hidden behind it. (This vault currently has 0
+           unlinked notes, so the hole is empty -- but that is data, not a guarantee.) -->
+      <div id="logo" aria-hidden="true"></div>
+      <!-- Two-ring mode only: the inner band's palette, masked to the middle of the mark
+           so it fades out into the outer band's colours. Same logo mask, intersected
+           with a radial fade. -->
+      <div id="logoInner" aria-hidden="true"></div>
+      <div id="graph"></div>
+      <div id="tip"></div>
+      <div id="detail"></div>
+    </div>
+
+    <div id="busy">Laying out graph...</div>
+  </main>
+</div>
