@@ -1,27 +1,31 @@
 /**
- * Vault Graph -- SPIKE. Not a submission candidate; see plugin/SPIKE.md.
+ * Vault Graph -- the Obsidian plugin.
  *
- * Answers three questions and nothing else:
+ * Grew out of the spike recorded in plugin/SPIKE.md, which established three things by
+ * measurement: the page runs unchanged inside Obsidian, Obsidian's own index can produce
+ * its data in ~12ms, and the iframe that made proving that cheap has to go.
  *
- *   1. Does template.html run unchanged inside Obsidian?        -> the mount strategies
- *   2. Can Obsidian's own index produce window.VAULT_DATA?      -> buildData()
- *   3. Can the invariant suite still reach __vg from out here?  -> the probe bridge
+ * Still an iframe at this commit. The in-DOM port is the next step and the reason the
+ * page's three parts are imported separately below rather than assembled on disk.
  *
- * Deliberately hand-written CommonJS: no esbuild, no node_modules, so the spike keeps
- * the property the repo is proud of. A REAL plugin cannot -- it has to bundle sigma and
- * graphology from npm rather than string-replacing vendored minified files into a
- * template -- and that is a finding, not an oversight.
- *
- * The page is hosted in an IFRAME, which is what makes this a spike rather than a port:
- * the template is a whole HTML document (doctype, head, 422 lines of :root tokens) and
- * an iframe is the one container that takes it verbatim. The costs of that choice are
- * measured rather than guessed -- see SPIKE.md.
+ * AN ES MODULE, not a script, and that is load-bearing rather than fashion: a script's
+ * top-level `const Plugin` IS a global, so it collides with the DOM's own `Plugin` and
+ * every top-level function trips no-implicit-globals. Seven of the twelve lint errors in
+ * the first clean run were that one fact. esbuild emits CommonJS for Obsidian's loader.
  */
-"use strict";
 
-const { Plugin, ItemView, Notice, normalizePath, arrayBufferToBase64, addIcon } = require("obsidian");
+import { Plugin, ItemView, Notice, normalizePath, addIcon } from "obsidian";
 
-const VIEW_TYPE = "vault-graph-spike";
+// Compiled in by scripts/build-plugin.mjs. Obsidian installs only main.js, manifest.json
+// and styles.css, so anything read from disk at runtime does not exist for a real user --
+// the page and both libraries have to BE the bundle. `raw:` and `b64:` are the bundler's
+// namespace loaders; see the esbuild plugin in that script.
+import TEMPLATE from "raw:../src/template.html";
+import GRAPHOLOGY from "raw:../vendor/graphology.umd.min.js";
+import SIGMA from "raw:../vendor/sigma.min.js";
+import LOGO_MASK_B64 from "b64:../assets/logo-mask.png";
+
+const VIEW_TYPE = "vault-graph-view";
 const ICON_ID = "vault-graph-disc";
 
 /* ====================================================================== icon ==
@@ -94,7 +98,7 @@ const TYPE_ALIAS = {
 
 const SKIP_FILES = new Set(["claude.md", "readme.md", "license.md"]);
 
-const deNumber = (s) => String(s).replace(/^[\s\d._)\-]+/, "").trim();
+const deNumber = (s) => String(s).replace(/^[\s\d._)-]+/, "").trim();
 const slug = (s) => deNumber(s).toLowerCase().replace(/[\s_]+/g, "-");
 const singular = (s) => s.replace(/ies$/, "y").replace(/([^aeious])s$/, "$1");
 const norm = (s) => String(s).split(/[\\/]/).filter(Boolean).join("/");
@@ -162,7 +166,7 @@ async function readConfigJson(app, name) {
     const p = normalizePath(app.vault.configDir + "/" + name);
     if (!(await app.vault.adapter.exists(p))) return null;
     return JSON.parse(await app.vault.adapter.read(p));
-  } catch (e) {
+  } catch {
     return null;   // a vault that never configured this plugin is normal, not broken
   }
 }
@@ -304,10 +308,10 @@ async function buildData(app, opts) {
     await Promise.all(nodes.filter((n) => n._file).map(async (n) => {
       try {
         const raw = await app.vault.cachedRead(n._file);
-        const m = /^---\r?\n[\s\S]*?\r?\n---/.exec(raw.replace(/^﻿/, ""));
+        const m = /^---\r?\n[\s\S]*?\r?\n---/.exec(raw.replace(/^\uFEFF/, ""));
         const body = m ? raw.slice(m[0].length) : raw;
         n.words = body.split(/\s+/).filter(Boolean).length;
-      } catch (e) { n.words = 0; }
+      } catch { n.words = 0; }
     }));
   }
   const tWords = performance.now();
@@ -435,36 +439,27 @@ const BRIDGE = [
   "</script>",
 ].join("\n");
 
-async function assemblePage(plugin, data) {
-  const dir = plugin.manifest.dir;
-  const read = (rel) => plugin.app.vault.adapter.read(normalizePath(dir + "/" + rel));
-
-  const template = await read("template.html");
-
-  const libNames = ["graphology.umd.min.js", "sigma.min.js"];
-  const libSrc = [];
-  for (const name of libNames) libSrc.push("<script>\n" + (await read("vendor/" + name)) + "\n</script>");
-  const libs = libSrc.join("\n");
-
-  // The logo is optional -- a missing file means no mark, not a broken page, same as in
-  // the Node builder. arrayBufferToBase64 is Obsidian's own helper; node's Buffer is not
-  // available on mobile.
-  let logoMask = "";
-  try {
-    const buf = await plugin.app.vault.adapter.readBinary(normalizePath(dir + "/assets/logo-mask.png"));
-    logoMask = "data:image/png;base64," + arrayBufferToBase64(buf);
-  } catch (e) { /* no logo, fine */ }
+// No I/O at all any more. This used to read four files out of the plugin folder, which is
+// the single thing that made the spike uninstallable: a release ships main.js,
+// manifest.json and styles.css, and nothing put those four files beside them.
+function assemblePage(data) {
+  const libs = "<script>\n" + GRAPHOLOGY + "\n</script>\n<script>\n" + SIGMA + "\n</script>";
 
   const assets = PRE_SCRIPT +
-    "\n<script>window.VAULT_LOGO_MASK=" + JSON.stringify(logoMask) + ";</script>";
+    "\n<script>window.VAULT_LOGO_MASK=" +
+    JSON.stringify("data:image/png;base64," + LOGO_MASK_B64) + ";</script>";
 
   // The template hardcodes data-theme="dark" on <html>, deliberately (design/0009).
   // An iframe inherits nothing from Obsidian, so the host has to hand the theme over --
-  // which is exactly the integration a real port would get for free by living in the
-  // DOM. Doing it here proves the light path renders too.
-  const theme = document.body.classList.contains("theme-light") ? "light" : "dark";
+  // which is exactly the integration the in-DOM port gets for free.
+  //
+  // activeDocument, not document: with a view torn out into a popout window, `document` is
+  // still the main window's and the theme read would be the wrong window's. Obsidian
+  // exposes activeDocument for precisely this, and obsidianmd/prefer-active-doc is an
+  // error without it.
+  const theme = activeDocument.body.classList.contains("theme-light") ? "light" : "dark";
 
-  return template
+  return TEMPLATE
     .replace('<html lang="en" data-theme="dark">', '<html lang="en" data-theme="' + theme + '">')
     .replace("<!--LIBS-->", () => libs)
     .replace("<!--ASSETS-->", () => assets)
@@ -487,13 +482,13 @@ class VaultGraphView extends ItemView {
   }
 
   getViewType() { return VIEW_TYPE; }
-  getDisplayText() { return "Vault graph (spike)"; }
+  getDisplayText() { return "Vault graph"; }
   getIcon() { return ICON_ID; }
 
   async onOpen() {
     const root = this.contentEl;
     root.empty();
-    root.addClass("vault-graph-spike");
+    root.addClass("vault-graph-view");
 
     this.status = root.createDiv({ cls: "vgs-status" });
     this.stage = root.createDiv({ cls: "vgs-stage" });
@@ -528,7 +523,7 @@ class VaultGraphView extends ItemView {
              s.unresolved + " unresolved -- built in " + m.msTotal + "ms " +
              "(index " + m.msIndex + ", links " + m.msEdges + ", words " + m.msWords + ")");
 
-    const html = await assemblePage(this.plugin, data);
+    const html = assemblePage(data);
     this.pageBytes = html.length;
 
     // Two strategies, in order, because which one Obsidian's CSP tolerates is precisely
@@ -590,7 +585,7 @@ class VaultGraphView extends ItemView {
 
     if (m.vgSpike === "error") {
       this.lastError = "page error: " + m.message + (m.line ? " (line " + m.line + ")" : "");
-      console.error("[vault-graph-spike]", this.lastError);
+      console.error("[vault-graph]", this.lastError);
       return;
     }
 
@@ -658,7 +653,7 @@ class VaultGraphSpikePlugin extends Plugin {
     // resolve the id at creation time, and an unknown id renders as an empty box.
     addIcon(ICON_ID, discIcon());
 
-    this.addRibbonIcon(ICON_ID, "Vault graph (spike)", () => this.activate());
+    this.addRibbonIcon(ICON_ID, "Vault graph", () => this.activate());
 
     this.addCommand({
       id: "open",
@@ -680,7 +675,9 @@ class VaultGraphSpikePlugin extends Plugin {
     // read it. Everything this reports is a number somebody would otherwise guess at.
     this.addCommand({
       id: "report",
-      name: "Report spike findings to the console",
+      // Sentence case, and the linter checks it -- the previous wording also named the
+      // console, which is no longer where this goes.
+      name: "Report diagnostics",
       callback: async () => {
         const view = this.currentView();
         if (!view) { new Notice("Open the graph first."); return; }
@@ -693,9 +690,14 @@ class VaultGraphSpikePlugin extends Plugin {
           build: view.lastData && view.lastData._spike,
           stats: view.lastData && view.lastData.stats,
         };
-        console.log("[vault-graph-spike] report", report);
-        window.__vgSpikeReport = report;      // so CDP can read it without parsing logs
-        new Notice("Spike report written to the console and window.__vgSpikeReport.");
+        // NOT console.log: "avoid unnecessary logging to console" is a guideline and the
+        // linter enforces it. Nothing was reading the log anyway -- the harness reads the
+        // global below -- so dropping it costs exactly nothing.
+        window.__vgSpikeReport = report;
+        // No identifier in the string: the sentence-case rule lowercases what it checks,
+        // so any camelCase name in user-facing text is an unfixable "violation". Naming
+        // the global here was never useful to a reader anyway.
+        new Notice("Diagnostics ready.");
         return report;
       },
     });
@@ -716,4 +718,4 @@ class VaultGraphSpikePlugin extends Plugin {
   }
 }
 
-module.exports = VaultGraphSpikePlugin;
+export default VaultGraphSpikePlugin;

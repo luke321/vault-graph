@@ -14,7 +14,7 @@
 
 import { attach, json } from "./cdp.mjs";
 import { spawn } from "node:child_process";
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, writeFileSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -116,7 +116,10 @@ try {
   // is here to demonstrate.
   const evalIn = (expr) => cdp.eval(expr);
 
-  const pluginId = "vault-graph-spike";
+  // Read from the manifest rather than keeping a second copy. The id moved from
+  // vault-graph-spike to vault-graph when the manifest became a real one, and a stale copy
+  // here fails as "plugin not loaded" -- which reads as a build problem and is not one.
+  const pluginId = JSON.parse(readFileSync(join(HERE, "..", "manifest.json"), "utf8")).id;
   const id = JSON.stringify(pluginId);
 
   // RESTRICTED MODE. Measured: seeding community-plugins.json is NOT enough -- a vault

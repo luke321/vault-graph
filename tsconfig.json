@@ -1,0 +1,21 @@
+{
+  // NOT a compile step. The plugin is plain JavaScript on purpose -- esbuild bundles it
+  // and nothing transpiles it. This file exists solely so typescript-eslint can build a
+  // program for the type-aware rules in Obsidian's recommended preset (no-deprecated and
+  // friends), which otherwise refuse to load and take the whole lint run down with them.
+  //
+  // allowJs with checkJs off: give the rules a type graph to read, without turning every
+  // loose annotation in a 700-line JS file into a lint error.
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "allowJs": true,
+    "checkJs": false,
+    "noEmit": true,
+    "skipLibCheck": true,
+    "strict": false,
+    "types": []
+  },
+  "include": ["plugin/**/*.js"]
+}

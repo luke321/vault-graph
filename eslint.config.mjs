@@ -19,7 +19,18 @@ export default defineConfig([
     files: ["plugin/**/*.js"],
     languageOptions: {
       ecmaVersion: 2022,
-      sourceType: "commonjs",
+      // MODULE, not commonjs. Getting this wrong is invisible and expensive: eslint keeps
+      // treating the file as a script, so every top-level function is a "global" and the
+      // `Plugin` import collides with the DOM's own `Plugin` -- seven errors that describe
+      // the config rather than the code.
+      sourceType: "module",
+      // The preset's type-aware rules refuse to load without a program, and a rule that
+      // fails to load takes the whole run down rather than skipping itself. tsconfig.json
+      // exists only to satisfy this -- see the comment in it.
+      parserOptions: {
+        projectService: true,
+        tsconfigRootDir: import.meta.dirname,
+      },
       globals: {
         window: "readonly",
         document: "readonly",
