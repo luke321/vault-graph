@@ -325,7 +325,7 @@
     position: absolute; pointer-events: none; z-index: 7; max-width: 240px;
     background: var(--surface-2); border: 1px solid var(--border-strong);
     border-radius: 7px; padding: 6px 9px; font-size: 12px;
-    box-shadow: 0 6px 20px rgba(0,0,0,.18); display: none;
+    box-shadow: 0 6px 20px rgba(0,0,0,.18); display: block;
   }
   .vault-graph #vg-htip .t { font-weight: 600; margin-bottom: 2px; }
   .vault-graph #vg-htip .m { color: var(--text-2); font-size: 11px; }
@@ -342,7 +342,10 @@
      no second copy of the colour scheme to keep in sync.
      mask-image is set from JS, since the PNG arrives as a base64 data URI. */
   .vault-graph #vg-logo, .vault-graph #vg-logoInner {
-    position: absolute; display: none; pointer-events: none;
+    /* `block` is the SHOWN state; both layers start with the `hidden` attribute in the
+       markup and drop it when placed. The rule used to say `none` and rely on an inline
+       display to reveal it, which is the thing the attribute replaced. */
+    position: absolute; display: block; pointer-events: none;
     transform: translate(-50%, -50%);
     opacity: .95;
     -webkit-mask-repeat: no-repeat; mask-repeat: no-repeat;
@@ -366,7 +369,7 @@
     position: absolute; pointer-events: none; z-index: 5; max-width: 260px;
     background: var(--surface-2); border: 1px solid var(--border-strong);
     border-radius: 7px; padding: 7px 9px; font-size: 12px;
-    box-shadow: 0 6px 20px rgba(0,0,0,.18); display: none;
+    box-shadow: 0 6px 20px rgba(0,0,0,.18); display: block;
   }
   .vault-graph #vg-tip .t { font-weight: 600; margin-bottom: 3px; }
   .vault-graph #vg-tip .m { color: var(--text-2); font-size: 11px; }
@@ -375,7 +378,7 @@
   .vault-graph #vg-detail {
     position: absolute; right: 12px; top: 12px; width: 278px; z-index: 6;
     background: var(--surface-2); border: 1px solid var(--border);
-    border-radius: 9px; padding: 12px; display: none;
+    border-radius: 9px; padding: 12px; display: block;
     box-shadow: 0 8px 28px rgba(0,0,0,.16); max-height: calc(100% - 24px); overflow-y: auto;
   }
   .vault-graph #vg-detail h2 { font-size: 13px; margin: 0 22px 6px 0; line-height: 1.3; }

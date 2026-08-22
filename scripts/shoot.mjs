@@ -87,6 +87,18 @@ try {
   }
   await sleep(600);
 
+  // Busy while anything is animating; the page exposes it for exactly this.
+  const settle = async (ms) => {
+    const deadline = Date.now() + (ms || 8000);
+    for (;;) {
+      const busy = await page.eval("!!(window.__vg && __vg.demo && __vg.demo.busy && __vg.demo.busy())")
+                             .catch(() => false);
+      if (!busy) { await sleep(250); return true; }
+      if (Date.now() > deadline) return false;
+      await sleep(120);
+    }
+  };
+
   const shoot = async (name) => {
     const r = await page.send("Page.captureScreenshot", { format: "png", captureBeyondViewport: false });
     writeFileSync(join(OUT, name + ".png"), Buffer.from(r.data, "base64"));
@@ -144,7 +156,12 @@ try {
     var e = document.querySelector("#vg-legend .eye") || document.querySelector("#legend .eye");
     if (e) e.click();
   })(); void 0`);
-  await sleep(1400);
+  // WAIT FOR REST, do not guess at it. A fixed sleep after a click that starts the reveal
+  // cascade samples a MOVING disc, and two runs then differ by a sub-pixel offset across
+  // every dot -- which reads as a rendering regression in a comparison and is only timing.
+  // Measured: 1200 differing samples between two runs of identical code, against 3 for
+  // every static shot.
+  await settle();
   await shoot("03-one-folder-hidden");
 
   console.log("wrote " + OUT);

@@ -56,6 +56,16 @@ function mountVaultGraph(root, data, deps) {
   // them "partially filled" -- before this was pointed at the right element.
   // The container itself, which $() cannot return: querySelector only sees descendants.
   var ROOT = root;
+  // Replace an element's children from a markup string, without an innerHTML sink.
+  //
+  // Parsed in an inert document -- no browsing context, so nothing executes during the
+  // parse -- and the resulting nodes are moved across. Every caller escapes its
+  // interpolations with esc(); the rest is this page's own constants.
+  var setHTML = function (el, html) {
+    var parsed = new DOMParser().parseFromString("<body>" + html + "</body>", "text/html");
+    el.replaceChildren.apply(el, Array.prototype.slice.call(parsed.body.childNodes));
+  };
+
   var css = function (name) {
     return getComputedStyle(ROOT).getPropertyValue(name).trim();
   };
@@ -236,7 +246,7 @@ function mountVaultGraph(root, data, deps) {
   var subOrder = Object.create(null);
   (function () {
     var tally = Object.create(null);
-    graph.forEachNode(function (id, a) {
+    graph.forEachNode(function (_id, a) {
       var f = a.folder, sb = a.sub || "";
       if (!tally[f]) tally[f] = Object.create(null);
       tally[f][sb] = (tally[f][sb] || 0) + 1;
@@ -2643,7 +2653,7 @@ function mountVaultGraph(root, data, deps) {
       if (gi) {
         if (gi !== lastGradientInner) { lastGradientInner = gi; eli.style.background = gi; }
       } else if (lastGradientInner) { lastGradientInner = ""; }
-      eli.style.display = gi ? "block" : "none";
+      eli.hidden = !gi;
     }
     var c = renderer.graphToViewport({ x: 0, y: 0 });
     var edge = renderer.graphToViewport({ x: geomLock.r0 * UNIT, y: 0 });
@@ -2653,7 +2663,7 @@ function mountVaultGraph(root, data, deps) {
     el.style.height = size + "px";
     el.style.left = c.x + "px";
     el.style.top = c.y + "px";
-    el.style.display = "block";
+    el.hidden = false;
     if (eli && gi) {
       eli.style.width = size + "px";
       eli.style.height = size + "px";
@@ -2910,12 +2920,12 @@ function mountVaultGraph(root, data, deps) {
   function showTip(id) {
     var a = graph.getNodeAttributes(id), t = $("tip");
     var p = renderer.graphToViewport({ x: a.x, y: a.y });
-    t.innerHTML = '<div class="t">' + esc(a.label) + '</div>' +
+    setHTML(t, '<div class="t">' + esc(a.label) + '</div>' +
       '<div class="m">' + esc(groupOf(id)) + ' &middot; ' + a.deg + ' link' + (a.deg === 1 ? "" : "s") +
       '<br>' + esc(a.ntype) + ' &middot; ' + esc(a.folder) +
       (a.sub ? ' / ' + esc(a.sub) : '') +
-      '</div>';
-    t.style.display = "block";
+      '</div>');
+    t.hidden = false;
     // #canvas, NOT #stage: graphToViewport returns coordinates relative to
     // sigma's container, and the heatmap band means #stage's origin is now
     // above it. Measuring against #stage put every tooltip the height of the
@@ -2925,14 +2935,14 @@ function mountVaultGraph(root, data, deps) {
     var y = Math.min(Math.max(p.y - box.height - 10, 8), st.height - box.height - 8);
     t.style.left = x + "px"; t.style.top = y + "px";
   }
-  function hideTip() { $("tip").style.display = "none"; }
+  function hideTip() { $("tip").hidden = true; }
 
   /* ------------------------------------------------------- detail panel */
 
   function select(id) {
     state.selected = id;
     var d = $("detail");
-    if (!id) { d.style.display = "none"; renderer.refresh(); return; }
+    if (!id) { d.hidden = true; renderer.refresh(); return; }
 
     var a = graph.getNodeAttributes(id);
     var nb = neighboursOf(id).slice().sort(function (p, q) {
@@ -2967,8 +2977,8 @@ function mountVaultGraph(root, data, deps) {
       h += '<div class="nb">No links</div>';
     }
 
-    d.innerHTML = h;
-    d.style.display = "block";
+    setHTML(d, h);
+    d.hidden = false;
     d.querySelector(".x").onclick = function () { select(null); };
     Array.prototype.forEach.call(d.querySelectorAll("[data-go]"), function (b) {
       b.onclick = function () { select(b.getAttribute("data-go")); centerOn(b.getAttribute("data-go")); };
@@ -2998,7 +3008,7 @@ function mountVaultGraph(root, data, deps) {
     // the same way as one a single level down.
     var kids = Object.create(null);
     if (state.dim === "folder") {
-      graph.forEachNode(function (id, a) {
+      graph.forEachNode(function (_id, a) {
         var k = a.folder + "/" + (a.sub || "");
         subCount[k] = (subCount[k] || 0) + 1;
         var d = a.dirs || [];
@@ -3060,7 +3070,7 @@ function mountVaultGraph(root, data, deps) {
       }).join("");
     };
 
-    $("legend").innerHTML = names.map(function (g) {
+    setHTML($("legend"), names.map(function (g) {
       var vis = !isHidden(g);
       var hasSubs = state.dim === "folder" && (subOrder[g] || []).length > 1 &&
                     (counts[g] || 0) >= NEST_MIN;
@@ -3143,7 +3153,7 @@ function mountVaultGraph(root, data, deps) {
         }
       }
       return row;
-    }).join("");
+    }).join(""));
 
     var each = function (sel, fn) {
       Array.prototype.forEach.call($("legend").querySelectorAll(sel), fn);
@@ -3173,7 +3183,7 @@ function mountVaultGraph(root, data, deps) {
       state.hiddenSub = Object.create(null);
       var rest = path.slice(g.length + 1);
       var want = rest ? rest.split("/") : [];
-      graph.forEachNode(function (id, a) {
+      graph.forEachNode(function (_id, a) {
         if (a.folder !== g) return;
         var d = a.dirs || [], i = 0;
         while (i < want.length && i < d.length && d[i] === want[i]) i++;
@@ -3363,20 +3373,20 @@ function mountVaultGraph(root, data, deps) {
     q.oninput = function () {
       state.query = q.value.trim().toLowerCase();
       var hits = $("hits");
-      if (!state.query) { hits.innerHTML = ""; renderer.refresh(); return; }
+      if (!state.query) { hits.replaceChildren(); renderer.refresh(); return; }
       var found = [];
       graph.forEachNode(function (id, a) {
         if (a.label.toLowerCase().indexOf(state.query) > -1) found.push(id);
       });
       found.sort(function (p, o) { return graph.getNodeAttribute(o, "deg") - graph.getNodeAttribute(p, "deg"); });
-      hits.innerHTML = found.slice(0, 40).map(function (id) {
+      setHTML(hits, found.slice(0, 40).map(function (id) {
         return '<button data-hit="' + id + '">' + esc(graph.getNodeAttribute(id, "label")) +
                ' <span style="color:var(--text-3)">' + graph.getNodeAttribute(id, "deg") + '</span></button>';
-      }).join("") || '<div style="color:var(--text-3);font-size:11px;padding:4px">No match</div>';
+      }).join("") || '<div style="color:var(--text-3);font-size:11px;padding:4px">No match</div>');
       Array.prototype.forEach.call(hits.querySelectorAll("[data-hit]"), function (b) {
         b.onclick = function () {
           var id = b.getAttribute("data-hit");
-          q.value = ""; state.query = ""; hits.innerHTML = "";
+          q.value = ""; state.query = ""; hits.replaceChildren();
           select(id); centerOn(id);
         };
       });
@@ -3560,7 +3570,7 @@ function mountVaultGraph(root, data, deps) {
     state.hovered = null;
     select(null);                 // closes the detail card and clears state.selected
     hideTip();
-    $("q").value = "";    $("hits").innerHTML = "";
+    $("q").value = "";    $("hits").replaceChildren();
     $("tl").value = String(tlMax); $("tlv").textContent = "All";
     $("today").setAttribute("aria-pressed", "false");
     buildLegend();
@@ -3630,7 +3640,7 @@ function mountVaultGraph(root, data, deps) {
     // `destination-in`. Drawn underneath the graph layers, matching the on-screen
     // stacking.
     var lg = $("logo");
-    if (lg && logoMaskImg && logoMaskImg.complete && lg.style.display !== "none") {
+    if (lg && logoMaskImg && logoMaskImg.complete && !lg.hidden) {
       var w = parseFloat(lg.style.width) || 0;
       var dpr = src.width / ($("graph").clientWidth || src.width);
       if (w > 0) {
@@ -3712,13 +3722,12 @@ function mountVaultGraph(root, data, deps) {
   function buildStats() {
     var s = DATA.stats;
     $("vname").textContent = DATA.vault + " graph";
-    $("stats").innerHTML =
-      "<b>" + s.nodes + "</b> notes &middot; <b>" + s.edges + "</b> links &middot; <b>" +
+    setHTML($("stats"), "<b>" + s.nodes + "</b> notes &middot; <b>" + s.edges + "</b> links &middot; <b>" +
       s.orphans + "</b> unlinked<br>" +
       "<b>" + s.unresolved + "</b> link(s) point at notes that do not exist" +
       (s.ghostsIncluded ? " (shown as ghosts)" : " (hidden)") + "<br>" +
       (s.templatesExcluded ? "Templates excluded. " : "") +
-      "Generated " + esc(DATA.generated);
+      "Generated " + esc(DATA.generated));
   }
 
   function esc(s) {
@@ -4217,8 +4226,7 @@ function mountVaultGraph(root, data, deps) {
     }
     var top = Object.keys(by).sort(function (a, b) { return by[b] - by[a]; }).slice(0, 3);
     var wd = HEAT_WD[(new Date(d.ms).getUTCDay() + 6) % 7];
-    t.innerHTML =
-      '<div class="t">' + esc(d.key) + " · " + wd +
+    setHTML(t, '<div class="t">' + esc(d.key) + " · " + wd +
       (d.key === TODAY ? " · today" : "") + "</div>" +
       '<div class="m">' +
       (n ? n + " note" + (n === 1 ? "" : "s") + " added" : "nothing added") +
@@ -4226,8 +4234,8 @@ function mountVaultGraph(root, data, deps) {
         return '<b style="color:' + colorOf(g2) + '">■</b> ' + esc(g2) + " " + by[g2];
       }).join("<br>") : "") +
       (n ? "<br><i>click to mark them on the disc</i>" : "") +
-      "</div>";
-    t.style.display = "block";
+      "</div>");
+    t.hidden = false;
     var box = t.getBoundingClientRect();
     var host = $("heat").getBoundingClientRect(), cv = $("heatc").getBoundingClientRect();
     var cx = cv.left - host.left + HEAT_GUTTER + d.col * heat.pitch + heat.cell / 2;
@@ -4253,12 +4261,12 @@ function mountVaultGraph(root, data, deps) {
     };
     cv.addEventListener("mousemove", function (ev) {
       var d = heatHit(ev);
-      if (d) heatShowTip(d); else $("htip").style.display = "none";
+      if (d) heatShowTip(d); else $("htip").hidden = true;
       cv.style.cursor = (d && d.n > 0.004) ? "pointer" : "default";
       setHover(d && d.n > 0.004 ? d.key : null);
     });
     cv.addEventListener("mouseleave", function () {
-      $("htip").style.display = "none";
+      $("htip").hidden = true;
       setHover(null);
     });
     // Clicking a day marks its notes on the disc -- the same treatment as
@@ -4922,14 +4930,13 @@ function mountVaultGraph(root, data, deps) {
     // note is present and the layout is derived once, with no animation.
     if (demoOn()) {
       timelineFrame(true);
-      if (window.console) {
-        console.log("[demo] armed at rest: " + demoMode().length +
-                    " beats. Run scripts/demo.mjs to drive it (CDP does the input).");
-      }
+      // No log. scripts/demo.mjs prints every beat to the terminal as it drives them, so
+      // this said the same thing twice -- and console noise is a guideline the linter
+      // enforces.
     } else {
       playTimeline();
     }
-    $("busy").style.display = "none";
+    $("busy").hidden = true;
   }, 20);
   // A LIVE HANDLE, not the API itself.
   //
