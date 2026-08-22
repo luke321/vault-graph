@@ -427,12 +427,17 @@ class VaultGraphView extends ItemView {
     if (this.page.getAttribute("data-theme") === want) return;
     this.page.setAttribute("data-theme", want);
 
-    // The palette is read from CSS variables as things are drawn, so the DOM follows the
-    // attribute on its own -- but the canvases do not, because they only repaint when the
-    // renderer is asked to. The logo and the heatmap band paint from `afterRender`, so a
-    // refresh carries them along.
+    // READ THE PALETTE AGAIN FIRST. The page snapshots its colours into one object at init,
+    // so the attribute alone restyles the DOM and leaves every canvas colour behind -- the
+    // disc keeps the old theme's node and edge colours. That is subtle in one direction and
+    // ugly in the other: dark-theme edges are near-black, and on a white background they
+    // read as a hard grey scribble over the whole disc rather than as faint connections.
+    //
+    // Then repaint: the renderer only draws when asked, and the logo and heatmap band paint
+    // from `afterRender`, so a refresh carries them along.
     if (this.api) {
       try {
+        if (this.api.readTheme) this.api.readTheme();
         if (this.api.renderer) this.api.renderer.refresh();
         if (this.api.placeLogo) this.api.placeLogo();
         if (this.api.heatBuild) this.api.heatBuild();

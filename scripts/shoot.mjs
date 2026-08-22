@@ -99,9 +99,17 @@ try {
   // the page was scoped the palette lived on `:root` and the ids were unprefixed; after,
   // both belong to `.vault-graph`. A comparison tool that only understands the new shape
   // cannot produce the "before" half of the comparison.
+  // AND RE-READ THE PALETTE. The page snapshots its colours at init, so setting the
+  // attribute alone restyles the DOM and leaves the canvas painted in the other theme.
+  // The first version of this script did exactly that, and its "light" screenshot showed
+  // near-black dark-theme edges scribbled over a white disc -- a screenshot bug that looked
+  // convincingly like a design problem.
   const setTheme = (t) => page.eval(
     `(function(){ var el = document.querySelector(".vault-graph") || document.documentElement;
-                  el.setAttribute("data-theme", ${JSON.stringify(t)}); })(); void 0`);
+                  el.setAttribute("data-theme", ${JSON.stringify(t)});
+                  if (window.__vg && __vg.readTheme) { __vg.readTheme(); __vg.renderer.refresh();
+                    if (__vg.placeLogo) __vg.placeLogo();
+                    if (__vg.heatBuild) __vg.heatBuild(); } })(); void 0`);
 
   await setTheme("light");
   await sleep(900);

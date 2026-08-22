@@ -4620,7 +4620,11 @@ function mountVaultGraph(root, data, deps) {
   setTimeout(function () {
     makeRenderer();
     // Debug handle: lets a test page inspect live layout state from outside.
-    API = window.__vg = { graph: graph, state: state, get renderer() { return renderer; },
+    API = window.__vg = { graph: graph, state: state,
+                    // Re-read the palette from CSS. Called once at init, and again by a
+                    // host whose theme changed: THEME is a snapshot, so without this a
+                    // theme flip restyles the DOM and leaves every canvas colour behind.
+                    readTheme: readTheme, get renderer() { return renderer; },
                     ringsLayout: ringsLayout, visible: visible, groupOf: groupOf,
                     alpha: alpha, cascade: cascade, syncAlpha: syncAlpha,
                     clearAlpha: clearAlpha, buildWedgePlan: buildWedgePlan,

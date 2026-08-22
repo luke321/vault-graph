@@ -9,7 +9,14 @@
     --text-1: #0b0b0b;
     --text-2: #52514e;
     --text-3: #86857d;
-    --edge:      #d9d7cf;
+    /* LIGHTER THAN PERCEPTUAL PARITY WOULD ASK FOR, deliberately. Against the light
+       surface this is a step of about 7 in L*, where the dark theme edge is about 13 from
+       its own background -- so on paper the light theme is now the more timid of the two.
+       It has to be: 1557 opaque lines over a near-white field accumulate into a grey wash
+       and read as dirt, while the same density on a dark field reads as glow and is
+       forgiven. Symmetric numbers, asymmetric perception. See design/0005 on the curve
+       switch, which is the other half of the same problem. */
+    --edge:      #e8e7e1;
     --edge-hi:   #2a78d6;
     --dim:       #e6e5df;
     /* Today is deliberately NOT one of the categorical hues -- it is the extreme
