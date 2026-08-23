@@ -29,6 +29,41 @@ published tag breaks every link to it.
 
 ---
 
+## 1.5.3 — 2026-08-23
+
+Zero network calls, rather than two unreachable ones.
+
+- **The shipped `main.js` now contains no network request at all.** The directory's review
+  reports, under **Disclosures**, how many a plugin makes — ours said **2**, and a plugin
+  that draws a picture of the vault should say 0 ([#1](https://github.com/luke321/vault-graph/issues/1)).
+  Both were Sigma.js's `loadSVGImage`, which fetches an SVG so a node-image program can draw
+  from it; this page registers exactly two programs, `EdgeCurveProgram` and
+  `createNodeBorderProgram`, so neither call could ever run. That is still the wrong number
+  to ship: "there is a `fetch` in there but we never take that path" is a claim a user has
+  to take on trust, and **0** is one they can check with a grep.
+- **They are stripped at read time, not patched into `vendor/`.** `src/vendor.mjs` replaces
+  each `fetch(` with a thrower as the bundle is read, and both consumers go through it — the
+  HTML exporter and the esbuild plugin build. `vendor/` stays byte-identical to upstream, so
+  the committed bundle can still be diffed against the release it came from; the modification
+  travels with the build and is recorded in `vendor/NOTICE.md`, as MIT redistribution asks.
+  The alternatives — disclose them, take an npm supply chain to tree-shake them, fork the
+  bundle, or shadow the binding and leave the literal in the file — are weighed in
+  [`0008-zero-network-calls`](.ai-context/decisions/0008-zero-network-calls.md).
+- **The count is the gate, and that is the part that matters in a year.** Each bundle
+  declares how many calls it is expected to contain, and a mismatch is a hard build error
+  rather than a silent strip. Stripping is mechanical; noticing that an upstream update
+  added a *third* call — one that might be necessary, and would then have to be disclosed
+  rather than removed — is not.
+- **`scripts/check-network.mjs` keeps the answer at zero**, from three directions: our own
+  sources, the vendored bundles after stripping, and whatever a build left behind. It also
+  covers remote resources — `src=`, stylesheet `href=`, `@import`, `url()` — because a
+  webfont is a request too, and a quieter one. Static, no browser, milliseconds, so it joins
+  the PII and scope checks on `pre-push` **with no skip flag**.
+
+Measured: built `main.js` has 0 network primitives and 2 throwers, and a standalone page over
+a 3003-note synthetic vault has 0. Both guards fail as they should — a planted `fetch` in
+`plugin/main.js`, and a third `fetch` in a copied Sigma bundle.
+
 ## 1.5.2 — 2026-08-22
 
 The directory's review of 1.5.1 came back with exactly one **error**, and chasing it found a
