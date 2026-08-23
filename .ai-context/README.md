@@ -23,6 +23,7 @@ changing the layout or the animation.
 | `0006-zero-weight-members-must-cost-nothing` | Why a fading note must change nothing, and the gap count that broke it |
 | `0007-the-demo-drives-real-input` | Why `?demo` clicks through CDP and not `el.click()`, and the cursor that was removed |
 | `0008-zero-network-calls` | Why the vendored bundles are stripped at read time rather than patched, forked or disclosed |
+| `0009-one-browser-per-run` | Why the suite takes a free port per run, and how a lost race read as a flaky renderer |
 
 ### DDRs — `design/`
 

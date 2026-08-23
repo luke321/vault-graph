@@ -20,10 +20,11 @@
 //   * Anything about how it LOOKS. Colour, spacing and legibility are decided by
 //     looking; this only asserts the things with numbers.
 
-import { attach } from "./cdp.mjs";
+import { attach, json } from "./cdp.mjs";
 import { spawn, spawnSync } from "node:child_process";
 import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
+import { createServer } from "node:net";
 import { join, dirname } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
@@ -39,9 +40,39 @@ const argAll = (n) => {
   });
   return out;
 };
-const PORT = Number(arg("port", 9333));      // not 9222: do not fight a debug session
+// A PORT PER RUN, NOT A PORT PER PROJECT.
+//
+// This was a constant, 9333, and that is a bug the moment two of these run at once --
+// several agents on one machine, or a suite started while another is finishing. The second
+// Chrome cannot bind the port, so it silently loses the race and `attach` connects to the
+// FIRST run's browser instead. Nothing errors: the checks run happily against the other
+// run's page, so one vault reports the other's legend (60 rows on a 13-folder vault) and
+// hovers a node id it does not contain. Every failure then reads like a bug in the page.
+//
+// Measured while chasing github#7, and it cost hours: two of these processes were racing
+// and the numbers made no sense until the losing one was found.
+//
+// So each vault run takes a free port from the OS. `--port` still pins one for a human
+// who wants to open devtools against it, and pinning is when the "is it already busy"
+// refusal matters -- see runOne.
+const PINNED_PORT = arg("port", "") ? Number(arg("port", "")) : 0;
 const HEADED = argv.includes("--headed");
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+// Ask the OS for a port nobody is using, then hand it straight to Chrome. There is a race
+// in principle -- the port is free when we let go of it and taken when Chrome binds -- and
+// it does not matter: Chrome failing to bind is caught by the identity check below, which
+// is there for the far likelier case of somebody else's browser.
+function freePort() {
+  return new Promise((resolve, reject) => {
+    const srv = createServer();
+    srv.on("error", reject);
+    srv.listen(0, "127.0.0.1", () => {
+      const { port } = srv.address();
+      srv.close(() => resolve(port));
+    });
+  });
+}
 
 /* ------------------------------------------------------------------ chrome */
 
@@ -411,6 +442,53 @@ check("highlighting ramps per note and is additive", async (p) => {
   return { ok, detail: `first ${first.a}, then first ${mid.a} / second ${mid.b.toFixed(2)}, released ${gone.a}/${gone.b}` };
 });
 
+check("hover re-arms after the pointer leaves the stage", async (p) => {
+  // THE ONE THAT MADE THIS SUITE FLAKY, now asserted directly (github#7).
+  //
+  // Sigma's handleLeave emitted leaveNode without clearing its own hoveredNode, so once
+  // the pointer left the container it still believed it was on that note -- and coming
+  // back to the SAME note emitted nothing, because the re-entry test is
+  // `hoveredNode !== nodeAtPosition`. The hover above passed or failed depending on
+  // whether anything earlier had moved the pointer off the canvas.
+  //
+  // It is a real defect for a person too: glance away, come back to the note you were
+  // reading, no highlight. src/vendor.mjs patches it at read time.
+  //
+  // The sequence is the whole point -- on, OFF THE CANVAS, on again. Measured before the
+  // fix: 1 hit in 40. After: 40 in 40.
+  await settle(p);
+  const w = await p.j(`__vg.demo.where("note","04") || __vg.demo.where("note","03")`);
+  if (!w) return { ok: false, detail: "no note target resolved at all" };
+
+  const enter = async (x, y) => {
+    await p.send("Input.dispatchMouseEvent", { type: "mouseMoved", x, y, buttons: 0 });
+    await sleep(400);
+    return p.j(`{hovered: __vg.state.hovered, t: __vg.hoverT}`);
+  };
+
+  const first = await enter(w.x, w.y);
+  // 5,5 is OUTSIDE #vg-graph -- the nav column. That is what makes this a leave rather
+  // than a move, and it is the same coordinate the hover check releases to.
+  const away = await enter(5, 5);
+  const back = await enter(w.x, w.y);
+  await p.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: 5, y: 5, buttons: 0 });
+  await sleep(300);
+
+  // Same density escape as the hover check: below the aiming threshold this cannot assert
+  // anything, and a check that fails on a coin flip is worse than an honest gap.
+  const AIMABLE_PX = 10;
+  if (first.hovered !== w.expect && w.gap != null && w.gap < AIMABLE_PX) {
+    return { ok: true,
+             detail: `skipped -- too dense to aim (${w.gap}px clearance); the first hover ` +
+                     `never landed, so there is nothing to re-arm` };
+  }
+  const ok = first.hovered === w.expect && away.hovered === null && back.hovered === w.expect;
+  return { ok,
+           detail: `on ${first.hovered} (t ${first.t}), off ${away.hovered} (t ${away.t}), ` +
+                   `back on ${back.hovered} (t ${back.t})` +
+                   (back.hovered === null ? "  <- stuck: sigma still thinks it is hovered" : "") };
+});
+
 check("a highlighted note is drawn larger", async (p) => {
   const r = await p.j(`(function(){
     var g = null; __vg.graph.forEachNode(function(i,a){ if (!g) g = a.folder; });
@@ -465,10 +543,51 @@ async function runOne(vault) {
   }
   console.log(`checking ${url}\n`);
 
+  // One port for this run alone, unless a human pinned one with --port.
+  const PORT = PINNED_PORT || (await freePort());
+
+  // A PINNED PORT THAT IS ALREADY ANSWERING is somebody else's browser, and attaching to
+  // it would measure their page instead of the one just built -- silently, since every
+  // check would still run. Refuse. (An OS-assigned port cannot already be busy, so this
+  // guards only the deliberate case.)
+  try {
+    if (!PINNED_PORT) throw new Error("not pinned");
+    await json(PORT, "/json/version");
+    throw new Error(
+      `something is already serving CDP on port ${PORT}.\n` +
+      "A previous run leaked its browser, and attaching to it would silently measure the\n" +
+      "wrong page -- see killBrowser() at the bottom of this file. Close it and re-run:\n\n" +
+      "  taskkill /F /IM chrome.exe /FI \"WINDOWTITLE eq vault-graph*\"\n\n" +
+      "or kill whatever is holding the port."
+    );
+  } catch (e) {
+    if (/already serving CDP/.test(e.message)) throw e;   // ours -- pass it on
+    // anything else means nothing answered, which is what we want
+  }
+
   const profile = mkdtempSync(join(tmpdir(), "vg-smoke-"));
   const chrome = spawn(findChrome(), [
     `--remote-debugging-port=${PORT}`, `--user-data-dir=${profile}`,
-    "--no-first-run", "--no-default-browser-check", "--disable-features=Translate,TranslateUI",
+    "--no-first-run", "--no-default-browser-check",
+    // THE WINDOW MUST KEEP ANIMATING WHILE NOBODY IS LOOKING AT IT.
+    //
+    // The window is parked off-screen below, and Windows tells Chrome so: its native
+    // occlusion calculator marks a window nobody can see as occluded, and Chrome then
+    // backgrounds the renderer -- requestAnimationFrame stops, timers are throttled.
+    // Every value this suite measures is downstream of a frame, so the whole run comes
+    // apart at once and none of the failures mention frames: the hover lands but its
+    // ramp reads 0, the highlight ramp reads 0, a highlighted note is 1.00x, the legend
+    // reports the rows it had before it was built, and Runtime.evaluate starts timing
+    // out. Measured: 2 clean runs out of 8 while the machine was busy, and the failures
+    // look like six unrelated bugs (github#7).
+    //
+    // It is intermittent because occlusion is recalculated on OS events and under load,
+    // which is why this read as "flaky pointer checks" for a while and why it lost more
+    // often from a git hook -- a push is exactly when the machine is busy.
+    "--disable-features=Translate,TranslateUI,CalculateNativeWinOcclusion",
+    "--disable-backgrounding-occluded-windows",
+    "--disable-renderer-backgrounding",
+    "--disable-background-timer-throttling",
     // A real window, sized so the layout is the one a person gets. Headless is tempting
     // for a pre-push check, but half these checks read PIXELS back out of a canvas and
     // measure a laid-out sidebar, and a software rasteriser is not the thing shipping.
@@ -493,6 +612,18 @@ async function runOne(vault) {
       }
     });
 
+    // AND IS IT OUR PAGE? The port check above is the guard; this is the proof. A stale
+    // browser answers, attaches and evaluates perfectly happily -- the only thing wrong
+    // with it is that it is showing the previous vault, which no check can tell from a
+    // real defect. One string comparison turns that into an honest failure.
+    const at = await page.eval("location.href").catch(() => "");
+    if (at && at !== url) {
+      throw new Error(
+        `attached to the wrong page.\n  wanted ${url}\n  got    ${at}\n` +
+        "That is a leaked browser from an earlier run, not a defect in the page."
+      );
+    }
+
     // Wait for the page to be READY, not for a duration.
     const ready = Date.now() + 30000;
     for (;;) {
@@ -503,6 +634,29 @@ async function runOne(vault) {
     }
 
     page.j = async (expr) => JSON.parse(await page.eval(`JSON.stringify(${expr})`));
+
+    // ARE FRAMES ARRIVING? Ask before measuring anything, because every number below is
+    // downstream of one. A backgrounded renderer does not fail a check -- it fails six, in
+    // six different vocabularies, none of which says "no frames" (github#7). One honest
+    // message beats a scoreboard that has to be decoded.
+    //
+    // The bar is deliberately on the floor: 5 frames in 600ms, about 8fps. The page is
+    // designed to survive a slow machine -- animations stretch rather than leap below
+    // ~20fps, which is an invariant of its own -- so this must catch a renderer that has
+    // STOPPED, not one that is merely struggling.
+    const fps = await page.j(`new Promise(function(r){
+      var n = 0, t0 = performance.now();
+      (function tick(){ n++; if (performance.now() - t0 < 600) requestAnimationFrame(tick);
+                        else r({frames: n, ms: Math.round(performance.now() - t0)}); })();
+    })`).catch(() => ({ frames: 0, ms: 0 }));
+    if (fps.frames < 5) {
+      throw new Error(
+        `the page is not animating -- ${fps.frames} frame(s) in ${fps.ms}ms.\n` +
+        "Every check here measures something a frame produced, so the run would report six\n" +
+        "unrelated-looking failures instead of this one. The usual cause is Chrome\n" +
+        "backgrounding the off-screen window; the launch flags above are what prevent it."
+      );
+    }
     const ctx = { errors };
 
     let failed = 0;
@@ -518,11 +672,80 @@ async function runOne(vault) {
     return failed;
   } finally {
     if (page) page.close();
-    try { chrome.kill(); } catch {}
-    await sleep(300);
+    await killBrowser(chrome, PORT);
     try { rmSync(profile, { recursive: true, force: true }); } catch {}
     if (scratch) { try { rmSync(dirname(scratch), { recursive: true, force: true }); } catch {} }
   }
+}
+
+/**
+ * Shut the browser down, and MEAN IT.
+ *
+ * `chrome.kill()` was the whole teardown, and on Windows it kills the process we spawned
+ * and nothing else: Chrome's launcher hands off to a browser process that is not our
+ * child, so the browser survives, keeps the debug port, and the NEXT run attaches to it.
+ * The run then measures the previous vault's page -- 60 legend rows on a 13-folder vault,
+ * a hover on a node id that vault does not contain -- and every failure reads like a bug
+ * in the page (github#7).
+ *
+ * Three steps, weakest to strongest, because the polite one is also the one that leaves
+ * no orphaned profile directories behind:
+ *
+ *   Browser.close   ask it to quit, over the protocol it is already speaking
+ *   taskkill /T /F  take the tree down (Windows kill does not walk children)
+ *   wait            do not return until the port stops answering
+ */
+async function killBrowser(child, PORT) {
+  const gone = async () => {
+    try { await json(PORT, "/json/version"); return false; } catch { return true; }
+  };
+
+  try {
+    const b = await attach(PORT, "");
+    await b.send("Browser.close").catch(() => {});
+    b.close();
+  } catch {}
+  for (let i = 0; i < 20; i++) {           // ~2s of grace for the polite exit
+    if (await gone()) return;
+    await sleep(100);
+  }
+
+  if (process.platform === "win32" && child.pid) {
+    spawnSync("taskkill", ["/PID", String(child.pid), "/T", "/F"], { stdio: "ignore" });
+  }
+  try { child.kill(); } catch {}
+  for (let i = 0; i < 20; i++) {
+    if (await gone()) return;
+    await sleep(100);
+  }
+
+  // STILL THERE. Ask the PORT who owns it, rather than trusting the handle we spawned:
+  // Chrome's launcher hands the browser off, so the surviving process is frequently not
+  // our child and not reachable through it. This is the step that actually works.
+  //
+  // netstat, parsed WITHOUT looking for the word LISTENING -- this machine prints
+  // "ABHÖREN", and a filter on the English word is why a leaked browser went unnoticed
+  // for as long as it did. The address column is unambiguous on its own, and the PID is
+  // the last field on the line whatever the locale.
+  if (process.platform === "win32") {
+    const out = spawnSync("netstat", ["-ano", "-p", "tcp"], { encoding: "utf8" }).stdout || "";
+    const owners = new Set();
+    for (const line of out.split(/\r?\n/)) {
+      if (!line.includes("127.0.0.1:" + PORT) && !line.includes("[::1]:" + PORT)) continue;
+      const pid = line.trim().split(/\s+/).pop();
+      // Only a listener owns the port; a TIME_WAIT row's pid is 0 and means nothing.
+      if (/^\d+$/.test(pid) && pid !== "0") owners.add(pid);
+    }
+    for (const pid of owners) spawnSync("taskkill", ["/PID", pid, "/T", "/F"], { stdio: "ignore" });
+    for (let i = 0; i < 20; i++) {
+      if (await gone()) return;
+      await sleep(100);
+    }
+  }
+
+  // Not fatal on its own -- the next run's port check refuses rather than measuring the
+  // wrong thing -- but say so, because a leak here is exactly why that check exists.
+  console.log(`  !! a browser is still holding port ${PORT} after teardown`);
 }
 
 /* ------------------------------------------------------- which vaults, and why

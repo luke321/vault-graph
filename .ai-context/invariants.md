@@ -159,6 +159,26 @@ moving layout, a stale hit-test index, something painted over the canvas). **Rea
 rather than re-running** — the whole reason the diagnostic exists is that a flaky check
 otherwise trains you to re-run instead of measure.
 
+## Hover re-arms after the pointer leaves the stage
+
+Hover a note, move the pointer off the canvas entirely, move back onto **the same note**.
+It must light up again.
+
+```bash
+node scripts/smoke.mjs      # "hover re-arms after the pointer leaves the stage"
+```
+
+It did not, for as long as this project has existed. Sigma's `handleLeave` emits
+`leaveNode` without clearing its own `hoveredNode`, so on re-entry
+`hoveredNode !== nodeAtPosition` is false and nothing is emitted — glance at the sidebar,
+come back to the note you were reading, no highlight. `src/vendor.mjs` patches it at read
+time; `handleMove`, two lines earlier in the same bundle, always did it correctly.
+
+It is also what made this suite flaky, which is the more expensive half of the story: the
+hover checks failed whenever anything earlier had moved the pointer off the canvas.
+Measured on the 450-note vault by repeating the hover: **1 hit in 40 before, 40 in 40
+after.**
+
 ## The heatmap grid always fits its box
 
 Weeks are dropped before pixels: `heatGeom` picks columns from what fits at the 7px cell
