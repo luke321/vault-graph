@@ -426,6 +426,126 @@ check("a highlighted note is drawn larger", async (p) => {
   return { ok: ratio > 1.3 && ratio < 1.7, detail: `${r.before} -> ${after} (${ratio.toFixed(2)}x)` };
 });
 
+/* ----------------------------------------------------------------- camera --
+ * Panning, wheel zoom and the two ways to reset. Driven with real input, because every one of
+ * these is a gesture and three of them are sigma settings -- a constant that reads fine can
+ * still be the wrong constant, and only the input says so.
+ *
+ * These leave the camera reset, so nothing after them inherits a moved view.
+ */
+
+async function camState(p) {
+  return p.j(`(function(){ var c = __vg.renderer.getCamera().getState();
+    return { x: +c.x.toFixed(4), y: +c.y.toFixed(4), ratio: +c.ratio.toFixed(4) }; })()`);
+}
+
+async function stageBox(p) {
+  return p.j(`(function(){ var r = document.querySelector("#vg-graph").getBoundingClientRect();
+    return { left: r.left, top: r.top, w: r.width, h: r.height,
+             cx: r.left + r.width/2, cy: r.top + r.height/2 }; })()`);
+}
+
+async function camReset(p) {
+  await p.eval(`__vg.renderer.getCamera().setState({x:0.5,y:0.5,ratio:1.08,angle:0}); void 0`);
+  await sleep(250);
+}
+
+check("one wheel notch is a step, not a leap", async (p) => {
+  // Sigma's default zoomingRatio is 1.7, so a notch multiplied the ratio by that: three
+  // notches took the disc from filling the stage to a sixth of it. Reported as "zooming does
+  // jumps that are too big", which it was.
+  await camReset(p);
+  const box = await stageBox(p);
+  const a = await camState(p);
+  await p.send("Input.dispatchMouseEvent", { type: "mouseWheel", x: box.cx, y: box.cy, deltaX: 0, deltaY: -120 });
+  await sleep(400);
+  const b = await camState(p);
+  await camReset(p);
+  const step = a.ratio / b.ratio;
+  return {
+    ok: step > 1.1 && step < 1.35,
+    detail: `ratio ${a.ratio} -> ${b.ratio}, x${step.toFixed(3)} per notch (sigma's default is 1.7)`,
+  };
+});
+
+check("dragging the stage pans the camera", async (p) => {
+  // Panning was OFF, with a listener that put the camera back to centre after every update.
+  // That is defensible while zoom is the only gesture, but it also made zoom-toward-pointer a
+  // lie: the camera was dragged back the moment it moved, so zooming in on one wedge walked
+  // it off the far edge instead.
+  await camReset(p);
+  const box = await stageBox(p);
+  const a = await camState(p);
+  await p.send("Input.dispatchMouseEvent", { type: "mousePressed", x: box.cx, y: box.cy, button: "left", clickCount: 1, buttons: 1 });
+  for (let k = 1; k <= 8; k++) {
+    await p.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: box.cx - k * 14, y: box.cy - k * 8, button: "left", buttons: 1 });
+    await sleep(30);
+  }
+  await p.send("Input.dispatchMouseEvent", { type: "mouseReleased", x: box.cx - 112, y: box.cy - 64, button: "left", clickCount: 1, buttons: 0 });
+  await sleep(500);
+  const b = await camState(p);
+  const sel = await p.j(`__vg.state.selected`);
+  await camReset(p);
+  return {
+    // The ratio must NOT move -- a pan that also zooms means the wheel and the drag are
+    // fighting over the same state -- and a pan must not read as a click on the stage, which
+    // would clear the selection every time you moved the view.
+    ok: Math.abs(b.x - a.x) + Math.abs(b.y - a.y) > 0.01 &&
+        Math.abs(b.ratio - a.ratio) < 1e-6 && sel === null,
+    detail: `camera (${a.x}, ${a.y}) -> (${b.x}, ${b.y}), ratio held at ${b.ratio}, ` +
+            `selection ${sel === null ? "untouched" : "CLEARED"}`,
+  };
+});
+
+check("double-clicking the graph resets the view", async (p) => {
+  // preventSigmaDefault() is what makes this a reset rather than a reset AND sigma's own
+  // double-click zoom. The captor emits the event and then checks that flag synchronously, so
+  // setting it in the handler is seen; without it the two fight and the camera lands
+  // somewhere neither asked for.
+  await p.eval(`__vg.renderer.getCamera().setState({x:0.28,y:0.66,ratio:4.2,angle:0}); void 0`);
+  await sleep(250);
+  const box = await stageBox(p);
+  const x = box.cx - 160, y = box.cy - 90;
+  for (const n of [1, 2]) {
+    await p.send("Input.dispatchMouseEvent", { type: "mousePressed", x, y, button: "left", clickCount: n, buttons: 1 });
+    await p.send("Input.dispatchMouseEvent", { type: "mouseReleased", x, y, button: "left", clickCount: n, buttons: 0 });
+    await sleep(40);
+  }
+  await sleep(750);
+  const c = await camState(p);
+  await camReset(p);
+  return {
+    ok: Math.abs(c.x - 0.5) < 0.002 && Math.abs(c.y - 0.5) < 0.002 && Math.abs(c.ratio - 1.08) < 0.02,
+    detail: `from (0.28, 0.66) ratio 4.2 -> (${c.x}, ${c.y}) ratio ${c.ratio}; reset is (0.5, 0.5) 1.08`,
+  };
+});
+
+check("the stage's reset button is present and resets", async (p) => {
+  await p.eval(`__vg.renderer.getCamera().setState({x:0.31,y:0.72,ratio:3.4,angle:0}); void 0`);
+  await sleep(250);
+  const btn = await p.j(`(function(){
+    var b = document.querySelector("#vg-reset");
+    if (!b) return null;
+    var r = b.getBoundingClientRect(), g = document.querySelector("#vg-canvas").getBoundingClientRect();
+    return { w: Math.round(r.width), h: Math.round(r.height),
+             fromTop: Math.round(r.top - g.top), fromRight: Math.round(g.right - r.right),
+             label: b.getAttribute("aria-label"), svg: !!b.querySelector("svg") };
+  })()`);
+  if (!btn) { await camReset(p); return { ok: false, detail: "no #vg-reset inside the stage" }; }
+  await p.eval(`document.querySelector("#vg-reset").click(); void 0`);
+  await sleep(750);
+  const c = await camState(p);
+  await camReset(p);
+  return {
+    // Position asserted as well as behaviour: "top right of the graph view" is what was
+    // asked for, and a button that works from the wrong corner is a different thing.
+    ok: Math.abs(c.x - 0.5) < 0.002 && Math.abs(c.ratio - 1.08) < 0.02 &&
+        btn.fromTop < 40 && btn.fromRight < 40 && btn.svg && !!btn.label,
+    detail: `${btn.w}x${btn.h}px, ${btn.fromTop}px from the top and ${btn.fromRight}px from ` +
+            `the right, labelled "${btn.label}"; camera -> (${c.x}, ${c.y}) ratio ${c.ratio}`,
+  };
+});
+
 /* -------------------------------------------------------------- date range --
  * The brush is DRIVEN, not called. Every one of these dispatches real pointer events at real
  * pixels, because the bugs it exists to catch were all in the gesture rather than in the

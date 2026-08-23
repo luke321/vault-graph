@@ -2950,15 +2950,28 @@ function mountVaultGraph(root, data, deps) {
       zIndex: true,
       minCameraRatio: 0.02,
       maxCameraRatio: 12,
-      // The disc is the whole point of this view, so it stays centred: panning and
-      // rotation are off, zoom stays. With the normalisation box pinned symmetric
-      // about the origin, the camera's (0.5, 0.5) IS the centre of the disc, so
-      // holding the camera there keeps the ring centred in the stage whatever is
-      // filtered. Zoom still moves the camera toward the pointer, so it is pulled
-      // back on every camera update -- see the centre lock below.
-      enableCameraPanning: false,
+      // PANNING IS ON, and the centre lock that used to fight it is gone.
+      //
+      // The disc was pinned to the middle of the stage on the reasoning that it is the whole
+      // point of the view, with a camera listener that put x and y back to 0.5 after every
+      // update. That is defensible while the only camera gesture is zoom -- but it also
+      // makes zoom-toward-pointer a lie, since the camera is dragged back the moment it
+      // moves, so zooming in on one wedge walks it off the far edge instead. Panning plus a
+      // reset is the ordinary answer, and it costs nothing that a reset does not give back.
+      //
+      // Rotation stays off: the wedge labels and the heatmap's day rows both assume up is up.
+      enableCameraPanning: true,
       enableCameraRotation: false,
       enableCameraZooming: true,
+      // ONE WHEEL NOTCH WAS 70%. Sigma's default zoomingRatio is 1.7, so every notch
+      // multiplied or divided the ratio by that -- three notches and the disc has gone from
+      // filling the stage to a sixth of it. 1.2 is about 32 notches across the whole
+      // 0.02..12 range, which is a scroll rather than a teleport.
+      //
+      // The animation is shortened with it. 250ms per notch is fine at 70% and lags visibly
+      // at 20%, because the next notch arrives before the last one has landed.
+      zoomingRatio: 1.2,
+      zoomDuration: 120,
       defaultEdgeType: "line",
       // Both programs are registered up front so the toggle is a per-edge `type`
       // in the reducer rather than a renderer rebuild. Sigma merges these with its
@@ -3033,20 +3046,11 @@ function mountVaultGraph(root, data, deps) {
       }
     });
 
-    // Centre lock: zooming with the wheel recentres toward the pointer, which
-    // would slide the disc off-centre over time. Ratio changes are kept, x and y
-    // are not.
+    // The centre lock is gone -- see enableCameraPanning above. What it was bundled with is
+    // not: a camera change moves the hub hole in screen pixels, so the logo has to be
+    // re-placed and the row pitch re-measured whatever moved the camera.
     (function () {
-      var cam = renderer.getCamera(), fixing = false;
-      cam.on("updated", function (st) {
-        if (fixing) return;
-        if (Math.abs(st.x - 0.5) < 1e-9 && Math.abs(st.y - 0.5) < 1e-9) return;
-        fixing = true;
-        cam.setState({ x: 0.5, y: 0.5, ratio: st.ratio, angle: 0 });
-        fixing = false;
-      });
-      // Zoom changes the hole's pixel radius, so the logo is re-placed with it --
-      // and the row pitch with it, so the dot sizes are rechecked too.
+      var cam = renderer.getCamera();
       cam.on("updated", function () { placeLogo(); refreshSizeScale(); });
     })();
 
@@ -3086,6 +3090,23 @@ function mountVaultGraph(root, data, deps) {
     renderer.on("leaveNode", function () { hideTip(); hoverTo(0); });
     renderer.on("clickNode", function (e) { select(e.node); });
     renderer.on("clickStage", function () { select(null); });
+
+    // DOUBLE CLICK RESETS THE VIEW, on the stage and on a note alike.
+    //
+    // preventSigmaDefault() is what makes it a reset rather than a reset AND sigma's own
+    // double-click zoom: the captor emits the event and then checks that flag before doing
+    // its own thing, synchronously, so setting it here is seen. Without it the two fight and
+    // the camera lands somewhere neither asked for.
+    //
+    // A note gets the same treatment as the stage on purpose. "Double click zooms to this
+    // note" is a defensible other answer, but then double click means two things depending
+    // on a 6px target, and one of them is not what the tooltip says.
+    var onDoubleClick = function (e) {
+      if (e && e.preventSigmaDefault) e.preventSigmaDefault();
+      fit();
+    };
+    renderer.on("doubleClickStage", onDoubleClick);
+    renderer.on("doubleClickNode", onDoubleClick);
   }
 
   /* ------------------------------------------------------- group labels */
@@ -3783,6 +3804,8 @@ function mountVaultGraph(root, data, deps) {
       playTimeline();
     };
     $("fit").onclick = fit;
+    // The same job as Fit, in the corner of the stage where the question gets asked.
+    if ($("reset")) $("reset").onclick = fit;
     $("png").onclick = savePng;
     // No theme toggle: the page is dark, always. `<html data-theme="dark">` is set in
     // the markup, which outranks both the bare :root tokens and the

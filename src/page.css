@@ -298,6 +298,22 @@
      grid flow), so the loading cover still hides the band as well. */
   .vault-graph #vg-canvas { position: relative; overflow: hidden; }
   .vault-graph #vg-graph { position: absolute; inset: 0; }
+  /* The reset control, in the stage's own top-right corner. Quiet until wanted: the graph is
+     the subject and a lit button in front of it competes with the thing it is there to
+     restore. */
+  .vault-graph #vg-reset {
+    position: absolute; top: 10px; right: 10px; z-index: 6;
+    display: flex; align-items: center; justify-content: center;
+    width: 26px; height: 26px; padding: 0; cursor: pointer;
+    background: var(--surface-2); color: var(--text-3);
+    border: 1px solid var(--border); border-radius: 7px;
+    opacity: .55; transition: opacity .12s, color .12s, border-color .12s;
+  }
+  .vault-graph #vg-reset:hover { opacity: 1; color: var(--text-1); border-color: var(--border-strong); }
+  .vault-graph #vg-reset:focus-visible { opacity: 1; outline: 2px solid var(--accent); outline-offset: 1px; }
+  @media (prefers-reduced-motion: reduce) {
+    .vault-graph #vg-reset { transition: none; }
+  }
 
   /* ---------------------------------------------------------- heatmap ----- */
   /* Notes ADDED per day. One canvas, not 364 divs: it repaints from afterRender

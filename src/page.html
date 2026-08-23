@@ -80,6 +80,19 @@
            with a radial fade. -->
       <div id="vg-logoInner" aria-hidden="true" hidden></div>
       <div id="vg-graph"></div>
+      <!-- Reset the view. In the corner of the STAGE rather than only in the sidebar,
+           because it answers a question you have while looking at the graph -- "how do I get
+           back" -- and the sidebar is not where you are looking when you have it. The Fit
+           button in View does the same thing and stays: same job, different moment. -->
+      <button id="vg-reset" type="button" title="Reset the view (or double-click the graph)"
+              aria-label="Reset the view">
+        <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" focusable="false">
+          <path d="M1.5 5.5V2.5a1 1 0 0 1 1-1h3M14.5 5.5V2.5a1 1 0 0 0-1-1h-3M1.5 10.5v3a1 1 0 0 0 1 1h3M14.5 10.5v3a1 1 0 0 1-1 1h-3"
+                fill="none" stroke="currentColor" stroke-width="1.5"
+                stroke-linecap="round" stroke-linejoin="round"/>
+          <circle cx="8" cy="8" r="1.6" fill="currentColor"/>
+        </svg>
+      </button>
       <div id="vg-tip" hidden></div>
       <div id="vg-detail" hidden></div>
     </div>
