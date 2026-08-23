@@ -18,6 +18,11 @@
  *                           says", which is hidden for a folder whose name starts with an
  *                           underscore and shown for everything else.
  *         onFolderShown(m)  as onFolderColors, for that map.
+ *         panEnabled        false to start with drag-to-pan off. ABSENT MEANS ON -- a fresh
+ *                           page has no saved answer, and dragging is what a graph does, so
+ *                           the default cannot be "wait to be told". The corner control
+ *                           flips it live; this is only where it starts.
+ *         onPanEnabled(v)   as onFolderColors, for that flag.
  *         settingsUI        true to show the gear AND let it open the page's own panel.
  *                           The STANDALONE sets this, because nothing else there can hold
  *                           a setting.
@@ -202,6 +207,14 @@ function mountVaultGraph(root, data, deps) {
   }
   var folderColors = cleanFolderColors(deps.folderColors);
 
+  // DRAG-TO-PAN, ON UNLESS THE HOST SAYS OTHERWISE. Absent means on: a fresh page has no
+  // saved answer and dragging is what a graph does, so the default cannot be "wait to be
+  // told". Only an explicit false turns it off -- github#4 argued for off-by-default on a
+  // 10k vault, and the reverse won: the rim is unreachable without it, and a control in the
+  // corner is a cheaper way to find that out than a settings tab is.
+  var panEnabled = deps.panEnabled === false ? false : true;
+  var onPanEnabled = typeof deps.onPanEnabled === "function" ? deps.onPanEnabled : null;
+
   // ARCHIVE FOLDERS: the ones whose name starts with `_`.
   //
   // A leading underscore is how a vault says "sorts last, not part of the working set" --
@@ -307,6 +320,16 @@ function mountVaultGraph(root, data, deps) {
     hoverDay: null,
     query: "",
     until: null,        // timeline: reveal the oldest N notes, or null for all
+    // DATE RANGE CAP. Two ends, either of which may be null for "no bound", in ms UTC at
+    // midnight. Separate from `until` on purpose: that one reveals the oldest N notes and
+    // is a growth animation, this one is a filter. They compose -- see timeFactor.
+    from: null,
+    to: null,
+    // The RIGHT EDGE of the heatmap's 52-week window, or null for "the last 52 weeks".
+    // The band was a fixed sliding window onto today, which is what made everything before
+    // it unreachable: on the 10-year fixture that is nine years of the vault with no way to
+    // point at it. Concepts that move the window write this.
+    heatEnd: null,
     markToday: false,
     // Bow links away from the hub instead of chording across it. 91% of links cross
     // the disc, so straight is the case that would need the excuse. No longer a
@@ -654,6 +677,19 @@ function mountVaultGraph(root, data, deps) {
   // not need the box widened, which would shrink the resting disc for everyone.
   var HL_PUSH = 0.9;
 
+  // How far the density solve is allowed to spread the lattice (github#13). sqrt has no
+  // ceiling of its own, so isolating one folder out of a 1500-note vault would otherwise
+  // ask for a spacing of 30 and draw a handful of boulders on the rim. 2.6 lets a vault
+  // be filtered to ~15% of itself before the disc starts shrinking again instead of
+  // spreading -- which covers isolating a single PARA folder, the gesture this is for.
+  var DENSITY_MAX = 2.6;
+
+  // The lattice spacing the last plan actually used. Read by measureSizeScale, which has
+  // to know how wide a ROW is rather than how wide a lattice unit is -- they were the
+  // same number until the density solve, and conflating them is why dot size did not
+  // respond to filtering at all.
+  var lastSP = 1;
+
   var NEST_MIN = 2;
   // Group folding is OFF now that there are 10 hues: it existed only because
   // groups past slot 4 all shared one grey and merged into an unreadable mass.
@@ -842,22 +878,60 @@ function mountVaultGraph(root, data, deps) {
   //   totFloor  the two callers floor the weight total differently (1e-4 vs 1e-6).
   //             Preserved exactly -- unifying it would move every wedge for no reason.
   //
-  // Presence is OPACITY, weight over seats, never weight alone: a 55-note folder fading
-  // from 55 down to 1 keeps min(1, weight) pinned at 1 the whole way and then collapses in
-  // two frames, which relocates a discontinuity instead of removing it.
-  function allocateBand(list, weightOf, seatsOf, opts) {
+  // PRESENCE IS "IS ANYTHING HERE", NOT "HOW FULL IS IT". A wedge earns one gap by
+  // existing; a folder showing 30 of its 100 notes is one wedge and wants one gap, exactly
+  // as it did at 100. So the gap total must not be a function of the note count -- and for
+  // a long time it was, twice over.
+  //
+  // Weight over seats was the reading before, and it fails in both directions. Its own
+  // note recorded the failure it was chosen to avoid -- weight ALONE keeps a 55-note folder
+  // pinned at 1 all the way down to its last note and then collapses in two frames -- but
+  // the denominator brought a worse one: seats are whatever the current plan happens to
+  // seat, so the same group reads 0.3 mid-animation, 0.48 at rest with a range applied, and
+  // 1.0 once the departed notes leave the plan. Measured: nG 7 -> 3.38 across settle() on a
+  // date change, and 6.716 -> 7 merely from scrubbing the timeline.
+  //
+  // Both problems have one answer, and it is not a better formula here. The COLLAPSE case
+  // is a group on its way out, and a group on its way out is something the cascade knows
+  // about before the first frame -- so it supplies the presence itself, walked from 1 to 0
+  // across the whole animation (opts.groupPres). What is left for this function is only
+  // "does this group have anything at all", which min(1, weight) answers, ramps smoothly
+  // over the first or last note's fade, and does not care how many notes there are.
+  //
+  // Seats are therefore not consulted at all any more, and the parameter is gone: every
+  // reading of them was a way of dividing by a number that had nothing to do with the
+  // question.
+  //
+  // ...EXCEPT WHEN THE PLANNER SUPPLIES IT (opts.groupPres). Weight over seats is the right
+  // reading of "how present is this group" only while the seats are the group's own final
+  // count. During a cascade they are not: the plan is rebuilt every frame from what is
+  // still on screen, so a group that KEEPS 30 of its 100 notes reads 30/100 = 0.3 while
+  // the departing 70 are still seated, and 1.0 the moment they leave the plan. Nothing
+  // about that group's gap should have moved -- it is still there, still one wedge, still
+  // entitled to one gap -- and the whole reservation moved twice instead.
+  //
+  // A legend toggle never showed it, which is why it survived: hiding a folder takes every
+  // note in it to zero together, so presence runs 1 -> 0 cleanly and the survivors stay
+  // pinned at 1. Only a filter that thins groups WITHOUT emptying them separates the two
+  // readings, and the date range is the first such filter this page has had.
+  //
+  // So the cascade hands in a presence walked between the two packings by its own progress,
+  // exactly as it already does for row counts -- one planner, one clock, and a group's gap
+  // is about whether the group is there rather than how full it is.
+  function allocateBand(list, weightOf, opts) {
     var TWO = 2 * Math.PI;
     var tot = 0, gw = Object.create(null);
     list.forEach(function (c) {
       tot += weightOf(c);
-      var g = gw[c.g] || (gw[c.g] = { w: 0, seats: 0 });
+      var g = gw[c.g] || (gw[c.g] = { w: 0 });
       g.w += weightOf(c);
-      g.seats += seatsOf(c);
     });
-    var presOf = function (c) { return Math.min(1, weightOf(c) / Math.max(1, seatsOf(c))); };
+    var presOf = function (c) { return Math.min(1, weightOf(c)); };
+    var given = opts.groupPres || null;
     var groupPres = Object.create(null), nG = 0;
     Object.keys(gw).forEach(function (k) {
-      groupPres[k] = Math.min(1, gw[k].w / Math.max(1, gw[k].seats));
+      var p = (given && given[k] !== undefined) ? given[k] : gw[k].w;
+      groupPres[k] = p < 0 ? 0 : p > 1 ? 1 : p;
       nG += groupPres[k];
     });
     var nSub = 0;
@@ -897,7 +971,7 @@ function mountVaultGraph(root, data, deps) {
   // the plain integer, which is what a resting disc must have: a fractional count
   // blends two grids one row apart, and at rest that reads as a smeared disc
   // rather than a packed one.
-  function buildWedgePlan(onlyVisible, weightOf, rowsOf) {
+  function buildWedgePlan(onlyVisible, weightOf, rowsOf, spIn) {
     var W = weightOf || function () { return 1; };
     var all = order[state.dim] || [];
     var nested = state.dim === "folder";
@@ -1025,7 +1099,6 @@ function mountVaultGraph(root, data, deps) {
     var share = function (list, band) {
       var a = allocateBand(list,
                            function (c) { return c.wsum; },
-                           function (c) { return c.list.length; },
                            { subGaps: false, clamp: null, totFloor: 0.0001 });
       // Recorded so the probe can show the gap total shrinking frame by frame -- the whole
       // point of making it continuous is that this series has no cliff in it.
@@ -1052,7 +1125,49 @@ function mountVaultGraph(root, data, deps) {
     // Fixing the hole at a FRACTION of the outer radius and solving for r0 keeps
     // the hub the same relative size whether 440 notes are showing or 55 -- a
     // fixed r0 gave a 32% hole at full size and a 69% one when filtered down.
-    var SP = 1, HOLE = 0.3;
+    // THE DENSITY KNOB (github#13). SP is the lattice spacing -- radial between rows
+    // AND tangential along them, which is what makes the packing uniform -- and it was
+    // a hard 1. That made the disc a function of how many notes the VAULT holds rather
+    // than how many are on screen: measured, screen row pitch was 19.481px at every
+    // filter state of a 500-note vault and 12.064px at every state of a 1500-note one,
+    // so filtering 503 notes down to 62 moved the median dot from 4.254px to 4.208px
+    // and left 25% of the disc's radius as empty margin.
+    //
+    // Solve it instead. A lattice of spacing s holds 1/s^2 notes per unit area, so an
+    // annulus with a hole at HOLE*R holds n = pi*R^2*(1-HOLE^2)/s^2, i.e.
+    // R = s*sqrt(n / (pi*(1-HOLE^2))). Setting that equal to the FULL-vault R gives
+    //
+    //     s = sqrt(n_full / n_visible)
+    //
+    // exactly -- not an approximation, the same uniform-density assumption the r0
+    // formula below already makes. The disc then always fills its box, notes move
+    // outward as their neighbours leave, and each one gets proportionally more room.
+    //
+    // CONTINUOUS, WHICH IS THE WHOLE POINT. The retired REPACK_BELOW mechanism below
+    // switched plan basis at 55% and its three failures were all failures of the
+    // THRESHOLD: inconsistent either side, two packings inside one animation, and call
+    // sites disagreeing about which side they were on. A smooth function of the visible
+    // weight has no side to be on. It also holds the two invariants for free -- a
+    // departing note sits at weight 0 and contributes nothing to planTotal, so
+    // zero-weight invariance survives; and both the lean and padded plans derive it
+    // from their own planTotal, so parity survives.
+    //
+    // Capped, because sqrt grows without bound: one surviving note would otherwise be
+    // one boulder on the rim. At DENSITY_MAX the disc stops filling the box and starts
+    // shrinking again, which is the honest end of the behaviour rather than a cliff.
+    var HOLE = 0.3;
+    // SUPPLIED, DURING A CASCADE, for the same reason rowsOf is. Deriving it here from
+    // planTotal is right at rest and wrong mid-animation: the cascade weights membership
+    // by alpha, so planTotal slides every frame and the lattice breathed with it --
+    // measured, biggest single-frame radial step went from 0 to 94 units against a row of
+    // 160, i.e. the whole disc shifting half a row per frame. The cascade hands in the
+    // interpolation between its two endpoint packings instead, exactly as it does for
+    // rows, so the last frame and rest agree by construction.
+    var fullTotal = geomLock && geomLock.total > 0 ? geomLock.total : planTotal;
+    var density = spIn > 0 ? spIn
+      : (planTotal > 0.0001
+          ? Math.min(DENSITY_MAX, Math.sqrt(fullTotal / planTotal)) : 1);
+    var SP = density;
     var r0 = geomLock ? geomLock.r0 : Math.max(1.5, HOLE * Math.sqrt(
       Math.max(1, TOTAL) / (Math.PI * (1 - HOLE * HOLE))));
 
@@ -1091,7 +1206,10 @@ function mountVaultGraph(root, data, deps) {
     }
 
     // Hoisted above the balancer, which needs it to place the outer base.
-    var GUTTER = 1.6;
+    // In LATTICE units, so it scales with SP: the gap between the rings has to stay the
+    // same number of rows wide as the rows spread apart, or a filtered disc shows two
+    // bands nearly touching where the full one showed a clear channel.
+    var GUTTER = 1.6 * SP;
 
     // The inner ring is deliberately THINNER than the outer, not equal to it. Equal
     // thickness was tried first and reads oddly: the inner band sits at a smaller radius,
@@ -1387,6 +1505,28 @@ function mountVaultGraph(root, data, deps) {
       if (r > maxR) maxR = r;
     });
 
+    // WHY THERE IS NO CORRECTION PASS HERE, having tried one.
+    //
+    // The open-loop solve leaves maxR a few percent past the locked extent -- measured,
+    // reach 1.072 at a density of 1.023 -- and the obvious repair is to feed that back
+    // and scale SP until maxR lands on the lock. It was written, and it MADE THINGS
+    // WORSE: pitch * sqrt(shown) spread 1.10x -> 1.15x, because the loop drove SP back
+    // to 1 in almost every state and undid the whole change.
+    //
+    // The reason is worth keeping, because it contradicts what this was built on.
+    // Filtering a vault BARELY MOVES THE DISC'S RADIUS: maxR is the max over cells, and
+    // hiding some folders leaves the deepest survivor holding all of its own notes, so
+    // it still reaches the rim. Measured on the baseline, reach was 1.000 with 481, 465
+    // and 382 of 503 notes showing -- there was no empty margin to reclaim at all. What
+    // filtering does is make the disc SPARSER inside a radius that hardly changes.
+    //
+    // And that radius is quantised in whole rows. The outermost row already sits flush
+    // against the box, so any spreading at all pushes it a full row out: 2.3% more
+    // spacing bought 7% more radius. There is no SP between "no change" and "one row
+    // over", which is exactly why a loop targeting the lock can only pick SP = 1.
+    //
+    // So the overshoot is accepted and handled where it belongs -- in the camera, which
+    // is the thing that decides how much of the box is on screen. See fitRatio().
     // Rows sit SP apart in every cell -- spacing is never rescaled per cell, which
     // is what keeps density uniform. Each cell's first row is at its band's inner
     // edge, so columns grow outward and a cell ends where its notes run out.
@@ -1499,7 +1639,8 @@ function mountVaultGraph(root, data, deps) {
       c.slots = placeCell(c, rf, base);
     });
 
-    return { cells: cells, maxR: maxR, total: planTotal, r0: r0, rOuter: rOuter };
+    return { cells: cells, maxR: maxR, total: planTotal, r0: r0, rOuter: rOuter,
+             sp: SP, density: density };
   }
 
   // RETIRED 2026-08-22. This used to switch the plan basis on how much of the vault
@@ -1587,18 +1728,34 @@ function mountVaultGraph(root, data, deps) {
       c.geom = 0; c.live = 0;
       c.slots.forEach(function (sl) {
         var al = alpha[sl.id] || 0;
-        c.geom += (fullRing || !visible(sl.id)) ? al : 1;
+        // willShow, not visible. A note on its way out counts what is left of it, and
+        // the date range is a way out like any other -- visible() only knows about
+        // hidden folders, so an excluded note was counting as a WHOLE SEAT at opacity
+        // zero. Same asymmetry the cascade's destination plan had (see willShow), one
+        // level down.
+        var will = willShow(sl.id);
+        c.geom += (fullRing || !will) ? al : 1;
         c.live += al;
       });
       live += c.geom;
     });
     var shown = plan.cells.filter(function (c) { return c.geom > 1e-4; });
     if (!shown.length || !live) return null;
+    // How deep this plan reaches, for fit(). Recorded here rather than measured off node
+    // positions later: this is plan.maxR, the same quantity geomLock holds for the full
+    // vault, so the two divide to exactly 1 on an unfiltered disc. The outermost NOTE sits a
+    // little inside the lattice radius it was packed against, so measuring positions made a
+    // full disc read as 96% of itself and fit() zoomed slightly in on nothing.
+    lastMaxR = plan.maxR || lastMaxR;
+    // Recorded beside lastMaxR and for the same reason: both are properties of the
+    // packing on screen, and both are read from render-time code that has no plan.
+    if (plan.sp > 0) lastSP = plan.sp;
 
     // The inner and main bands are each a full circle, so they are allocated
     // separately -- a small cell competes only with the other small cells.
     var TWO = 2 * Math.PI;
     var pos = {};
+    if (probe) lastStart = Object.create(null);
     [true, false].forEach(function (isInner) {
       var band = shown.filter(function (c) { return !!c.inner === isInner; });
       if (!band.length) return;
@@ -1609,9 +1766,11 @@ function mountVaultGraph(root, data, deps) {
       // story, including why the group count has to be continuous.
       var a = allocateBand(band,
                            function (c) { return c.geom; },
-                           function (c) { return c.slots.length; },
-                           { subGaps: true, clamp: 0.45, totFloor: 1e-6 });
+                           { subGaps: true, clamp: 0.45, totFloor: 1e-6,
+                             groupPres: gapPres });
       var gap = a.gap, subGap = a.subGap;
+      lastGapDeg[isInner ? "i" : "o"] = Math.round(gap * 180 / Math.PI * 1000) / 1000;
+      lastNG[isInner ? "i" : "o"] = Math.round(a.nG * 1000) / 1000;
       band.forEach(function (c) { c.span = a.shareOf(c); });
 
       // A gap BEFORE EVERY GROUP, including the first -- that leading one is the wrap
@@ -1633,6 +1792,12 @@ function mountVaultGraph(root, data, deps) {
       band.forEach(function (c) {
         if (prevG !== null) theta += (c.g !== prevG) ? gap * a.groupPres[c.g] : subGap * a.presOf(c);
         prevG = c.g;
+        // Recorded for the probe: the leading edge of each group's wedge, which is what
+        // moves when the gap reservation changes. Only the first cell of a group writes,
+        // so this is the group's own start rather than its last subfolder's.
+        if (probe && lastStart && lastStart[c.g] === undefined) {
+          lastStart[c.g] = Math.round(theta * 180 / Math.PI * 1000) / 1000;
+        }
         // The wedge keeps its FINAL start angle and only its span opens, so an
         // arriving note fans its own wedge wider instead of shoving every other
         // wedge round the disc. Normalising by the running total instead would
@@ -1664,11 +1829,28 @@ function mountVaultGraph(root, data, deps) {
           // A constant, deliberately not scaled by presence: anything presence-weighted
           // here would rotate the ring as notes arrive, which is the class of bug the
           // leading-offset note describes.
+          if (probe && probe.watch === sl.id) {
+            probe.watched = { k: c.k, g: c.g, u: Math.round(sl.u * 1e5) / 1e5,
+                              slotR: Math.round(sl.r), slots: c.slots.length,
+                              a0: Math.round(a0 * 1e4) / 1e4, a1: Math.round(a1 * 1e4) / 1e4,
+                              span: Math.round(c.span * 1e4) / 1e4,
+                              open: Math.round((c.geom > 1e-6 ? c.live / c.geom : 0) * 1e4) / 1e4,
+                              geom: Math.round(c.geom * 1e3) / 1e3,
+                              live: Math.round(c.live * 1e3) / 1e3,
+                              inner: !!c.inner };
+          }
           var t = sweepAngle(a0 + (a1 - a0) * sl.u - gap / 2);
           // Highlighted notes step outward by HL_PUSH rows. Applied here rather than
           // in the packing so it changes nothing about rows, capacities or wedge
           // angles -- a highlight is a pure display offset, and every stability
           // guarantee about reflows survives it untouched.
+          // NOT scaled by the plan's spacing, though it is quoted in rows. Scaling it
+          // was tried and is wrong: the constant was sized as a FRACTION OF THE RADIUS
+          // ("0.9 rows on a ~13.3-row disc is 6.8%"), and the radius is the thing the
+          // density solve holds still -- it is the row COUNT that shrinks as the lattice
+          // spreads. At the density cap the disc is ~5 rows deep, so 0.9 rows would have
+          // been 18% of it and a highlighted note would have protruded off the stage.
+          // Left in lattice units it stays the 6.8% it was tuned to be.
           var rr = sl.r + (isPushed(sl.id) ? HL_PUSH : 0);
           pos[sl.id] = { x: rr * Math.cos(t), y: rr * Math.sin(t) };
         });
@@ -1706,14 +1888,151 @@ function mountVaultGraph(root, data, deps) {
   // axis would spend 97% of its travel on empty years and the interesting part
   // would be the last pixel.
   var tlRank = Object.create(null), tlDate = [], tlMax = 0;
+  // id -> created, in ms UTC. Absent for an undated note, which is what timeFactor keys on.
+  var tlMs = Object.create(null);
+  // The whole vault's dates, bucketed, built once. Every one of the three concepts needs
+  // the same two things -- how many notes per month, and per year -- and building it once
+  // is also what stops three controls disagreeing about where the vault starts.
+  var dateSpan = null;
   function buildTimeline() {
     var dated = [];
     graph.forEachNode(function (id, a) { if (a.created) dated.push([id, a.created]); });
     dated.sort(function (x, y) { return x[1] < y[1] ? -1 : x[1] > y[1] ? 1 : 0; });
-    tlRank = Object.create(null); tlDate = [];
-    dated.forEach(function (pair, i) { tlRank[pair[0]] = i + 1; tlDate.push(pair[1]); });
+    tlRank = Object.create(null); tlDate = []; tlMs = Object.create(null);
+    dated.forEach(function (pair, i) {
+      tlRank[pair[0]] = i + 1;
+      tlDate.push(pair[1]);
+      // heatParse returns NaN for anything that is not a bare ISO day -- an unrendered
+      // Templater placeholder, most often -- and those must not get a position on any of
+      // these axes. Written as isNaN rather than as ms === ms, which is the same test and
+      // reads like a typo.
+      var ms = heatParse(pair[1]);
+      if (!Number.isNaN(ms)) tlMs[pair[0]] = ms;
+    });
     tlMax = dated.length;
+    buildDateSpan(dated);
   }
+
+  /**
+   * The whole vault's dates, bucketed by month and by year.
+   *
+   * Built once, from the FULL graph and never from what is visible, for the same reason the
+   * disc's plan is: a control whose own axis moved when you used it would be unusable. All
+   * three concepts read this, which is also what stops them disagreeing about where the
+   * vault starts.
+   *
+   * MONTHS ARE DENSE, not sparse -- every month between the first and last gets an entry,
+   * including the empty ones. The author's own vault has a whole year with no notes in it
+   * (2021), and a control built from only the months that exist would silently close that
+   * gap up and lie about the shape of the history.
+   */
+  function buildDateSpan(dated) {
+    dateSpan = null;
+    if (!dated.length) return;
+    var lo = heatParse(dated[0][1]), hi = heatParse(dated[dated.length - 1][1]);
+    if (Number.isNaN(lo) || Number.isNaN(hi)) return;
+    var d0 = new Date(lo), d1 = new Date(hi);
+    var y0 = d0.getUTCFullYear(), m0 = d0.getUTCMonth();
+    var y1 = d1.getUTCFullYear(), m1 = d1.getUTCMonth();
+    var months = [], index = Object.create(null);
+    for (var y = y0, m = m0; y < y1 || (y === y1 && m <= m1);) {
+      var key = y + "-" + (m < 9 ? "0" : "") + (m + 1);
+      index[key] = months.length;
+      months.push({ key: key, y: y, m: m, ms: Date.UTC(y, m, 1), n: 0 });
+      if (++m > 11) { m = 0; y++; }
+    }
+    var years = Object.create(null);
+    for (var i = 0; i < dated.length; i++) {
+      var s = dated[i][1], k = s.slice(0, 7), ix = index[k];
+      if (ix !== undefined) months[ix].n++;
+      var yy = s.slice(0, 4);
+      years[yy] = (years[yy] || 0) + 1;
+    }
+    var ylist = [];
+    for (var yk = y0; yk <= y1; yk++) ylist.push({ y: yk, n: years[String(yk)] || 0 });
+    var nMax = 1, tot = 0;
+    months.forEach(function (mm) { if (mm.n > nMax) nMax = mm.n; tot += mm.n; });
+    // THE HEIGHT REFERENCE IS A PERCENTILE, NOT THE MAXIMUM, and the bars are linear against
+    // it. Neither half of that is arbitrary; each fixes what the other choice broke.
+    //
+    // Against the MAX the scale is hostage to one month. On an eleven-year vault the busiest
+    // month holds 631 and the median holds under 40, so every bar but one was a hairline --
+    // which is what the sqrt was for, and sqrt then did the opposite damage on a two-year
+    // vault where the ratio is only about three: every bar came out between 68% and 100% and
+    // the strip read as a solid slab with no shape in it at all.
+    //
+    // p90 with a floor at a third of the max, linear, gives a readable spread in both. A
+    // genuine spike clips at full height, which is honest -- it is the tallest thing there --
+    // and costs one month's precision to give every other month some.
+    var sorted = months.map(function (mm) { return mm.n; }).sort(function (x, y) { return x - y; });
+    var p90 = sorted.length ? sorted[Math.floor(sorted.length * 0.9)] : 1;
+    var nRef = Math.max(1, p90, nMax * 0.35);
+    var yMax = 1;
+    ylist.forEach(function (yy) { if (yy.n > yMax) yMax = yy.n; });
+    dateSpan = {
+      months: months, years: ylist, index: index,
+      lo: months[0].ms, hi: Date.UTC(y1, m1 + 1, 0),      // last day of the last month
+      nMax: nMax, nRef: nRef, yMax: yMax, dated: tot,
+      undated: graph.order - tot
+    };
+  }
+
+  /**
+   * The range as two ISO days. Null ends read as the span's own ends, and it says so rather
+   * than saying "All dates".
+   *
+   * It DID say "All dates" when nothing was capped, which put the same two words in the
+   * readout and on the button beside it -- one describing a state and one offering to return
+   * to it, indistinguishable. Naming the actual dates is also the more useful answer at rest:
+   * it is where the reader learns what eleven years of strip actually spans.
+   */
+  function rangeLabel() {
+    if (!dateSpan) return "";
+    var f = state.from === null ? dateSpan.lo : state.from;
+    var t = state.to === null ? dateSpan.hi : state.to;
+    var iso = function (ms) { return new Date(ms).toISOString().slice(0, 10); };
+    return iso(f) + "  \u2192  " + iso(t);
+  }
+
+  /** The chrome that goes with a range, whichever path put it there. */
+  function rangeChrome() {
+    var el = $("rangenote");
+    if (el) el.textContent = rangeLabel();
+    // Nothing to clear when nothing is capped. A live button that does nothing is a worse
+    // answer to "is a filter on?" than a dead one.
+    var btn = $("rangeall");
+    if (btn) btn.disabled = (state.from === null && state.to === null);
+    drawDateUI();
+  }
+
+  /**
+   * A range change that is a JUMP: the All-dates button, or the debug API. Animated, because
+   * a discrete filter change animates everywhere else in this page.
+   */
+  function applyRange() {
+    rangeChrome();
+    cascade();
+  }
+
+  /* THE DRAG DOES NOT TOUCH THE DISC AT ALL.
+   *
+   * Two attempts got this wrong before it got simple. The first put cascade() on every
+   * pointermove -- a 1600ms reveal that walks the disc one note at a time, cancelled and
+   * restarted 120 times a second, so what you saw was dozens of animations each showing its
+   * own first frame. The second replaced that with one cheap layout frame per pointermove,
+   * which is what the timeline slider does and is right for the timeline: 452 notes.
+   *
+   * At 10,000 it is still too much. syncAlpha, the packer and a Sigma refresh are each O(n)
+   * and they run between the pointer moving and the next paint, so the drag lags the cursor
+   * however cleverly it is scheduled. The honest answer is that the disc is not a thing that
+   * can be scrubbed at that size.
+   *
+   * So a drag only moves the RIBBON: the handles, the pill, the readout and the tooltip,
+   * which are one small canvas and two spans. `state` is not written either -- the preview
+   * lives on the drag object, so an abandoned drag leaves nothing half-applied and there is
+   * exactly one moment when the filter changes. The disc updates once, on release, animated
+   * like every other filter change in the page.
+   */
 
   // Today's date, read at load rather than baked in at build time, so the mark
   // stays correct tomorrow without rebuilding the snapshot.
@@ -1856,8 +2175,46 @@ function mountVaultGraph(root, data, deps) {
   // How many notes' worth of ramp a note gets as the cutoff passes it. Ranks, not
   // days, for the same reason the slider is: it keeps the fade even whether the
   // vault gained one note that month or two hundred.
+  /**
+   * Does this note survive EVERY filter, not just the legend's?
+   *
+   * `visible()` answers one question -- is its group and its subfolder chain unhidden -- and
+   * that was the whole answer for as long as it was the only filter. The timeline cutoff and
+   * the date range both live in timeFactor instead, multiplied into opacity, which is what
+   * lets them animate without a clause in visible().
+   *
+   * THE CASCADE PLANS WITH THIS, NOT WITH visible(). Its destination packing has to be the
+   * one settle() will actually assign, and settle assigns whatever the packer derives from
+   * the SETTLED OPACITIES -- so a note the date range excludes has no seat there. Planning
+   * with visible() gave it one, so the animation walked toward a disc that still seated the
+   * excluded notes and then re-densified in a single frame at the end.
+   *
+   * That is the jump, and it only appeared when a change REDUCED the note count: adding notes
+   * back means the seats planB reserved are the seats they end up in, so the two agreed by
+   * luck in that direction.
+   *
+   * The epsilon matches present(): a note part-way through a timeline ramp is on screen and
+   * belongs in the packing, and only one at rest at zero does not.
+   */
+  function willShow(id) { return visible(id) && timeFactor(id) > 0.004; }
+
   var TL_FADE = 8;
   function timeFactor(id) {
+    // THE DATE CAP FIRST, because it is a hard bound and the rank cutoff is a ramp: a note
+    // outside the range is out whatever the slider says, and multiplying a ramp by zero
+    // would give the same answer more slowly.
+    //
+    // UNDATED NOTES STAY, which is the same rule the rank cutoff already applies one line
+    // down, and it matters more here than it looks: 20% of the notes in the 10-year fixture
+    // carry no frontmatter at all. Dropping them from every range would mean a range filter
+    // that also silently filters by "has frontmatter", which is not a date question.
+    if (state.from !== null || state.to !== null) {
+      var ms = tlMs[id];
+      if (ms !== undefined) {
+        if (state.from !== null && ms < state.from) return 0;
+        if (state.to !== null && ms > state.to) return 0;
+      }
+    }
     if (state.until === null) return 1;
     var rk = tlRank[id];
     if (!rk) return 1;                     // undated notes are always present
@@ -1985,6 +2342,27 @@ function mountVaultGraph(root, data, deps) {
   var pinnedPlan = null;     // plan held still for the duration of one cascade
   var planMs = 0;            // cost of the last plan build, for measurement
   var lastGapN = { i: 0, o: 0 };   // continuous group count per band, behind the gap total
+  // The RENDERED allocation's own numbers, which are the ones that place wedges: the
+  // continuous group count it reserved for, and the gap angle it spent. lastGapN above
+  // comes from the REFERENCE allocation, which sizes rows and never positions anything --
+  // so it can look perfectly smooth while the arc the notes actually sit in jumps.
+  var lastGapDeg = { i: 0, o: 0 }, lastNG = { i: 0, o: 0 };
+  var lastStart = null;   // group -> wedge start angle in degrees, this frame
+  // Group presences for the GAP reservation, walked between the cascade's two packings
+  // and read by the rendered allocation. Null at rest, which is when weight-over-seats
+  // is already the right answer -- see allocateBand.
+  var gapPres = null;
+  // How deep the LAST plan reached, in lattice units -- the same measure geomLock.maxR
+  // holds for the full vault, so the two divide cleanly. Taken from the plan rather than
+  // from node positions: the outermost note sits a little inside the lattice radius it was
+  // packed against, so measuring the live extent made a full, unfiltered disc read as 96%
+  // of itself and fit() zoomed in slightly on nothing.
+  var lastMaxR = 0;
+  // WHAT THE LAST CASCADE WAS ASKED TO DO. Every question about a jump starts with
+  // "did it animate at all, and over how many notes", and inferring that from frame
+  // counts is guesswork -- an instant apply and a one-frame animation look identical
+  // from outside.
+  var lastCascade = { ins: 0, outs: 0, span: 0, path: "none", frames: 0, ms: 0 };
 
   // Hold the wedge plan still while a cascade runs. visible() is already at its
   // final value the moment a filter changes, so buildWedgePlan would return the
@@ -2013,6 +2391,7 @@ function mountVaultGraph(root, data, deps) {
       WIN.clearTimeout(cascadeRun.guard);
       cascadeRun = null;
     }
+    gapPres = null;      // belongs to the run just abandoned; see allocateBand
 
     // A null plan is legitimate: "none" hides every note, so there is no
     // geometry left to lay out. The fade still has to run, with positions simply
@@ -2022,7 +2401,9 @@ function mountVaultGraph(root, data, deps) {
     fullRing = false;
     graph.forEachNode(function (id) { if (present(id)) fullRing = true; });
 
-    planKeep = function (id) { return visible(id) || present(id); };
+    // willShow, not visible: membership is "staying, or still fading out", and "staying" has
+    // to mean staying under every filter. See willShow.
+    planKeep = function (id) { return willShow(id) || present(id); };
     var plan = pinPlan();
     // Arrival order is CLOCKWISE round the circumference. Work out where every
     // note ends up on the FINISHED disc and sort by that sweep angle: notes that
@@ -2035,7 +2416,7 @@ function mountVaultGraph(root, data, deps) {
     // arrives at its final angle and never moves again -- the only thing that
     // moves is what is still downstream, and that is still invisible.
     var keep = Object.create(null);
-    graph.forEachNode(function (id) { keep[id] = alpha[id] || 0; alpha[id] = visible(id) ? 1 : 0; });
+    graph.forEachNode(function (id) { keep[id] = alpha[id] || 0; alpha[id] = visible(id) ? timeFactor(id) : 0; });
     var finalPos = ringsLayout() || {};
     graph.forEachNode(function (id) { alpha[id] = keep[id]; });
     var sweepOf = Object.create(null);
@@ -2046,13 +2427,18 @@ function mountVaultGraph(root, data, deps) {
 
     var ins = [], outs = [], to = Object.create(null), from = Object.create(null);
     graph.forEachNode(function (id) {
-      var want = visible(id) ? 1 : 0;
+      // timeFactor, not 1: a note the timeline or the date range excludes must not be
+      // revealed by a filter change somewhere else. See the note on `keep` above.
+      var want = visible(id) ? timeFactor(id) : 0;
       var now = alpha[id] || 0;
       if (Math.abs(now - want) <= 0.004) return;
       to[id] = want; from[id] = now;
       (want ? ins : outs).push(id);
     });
-    if (!ins.length && !outs.length) { pinnedPlan = null; applyLayout(true); return; }
+    if (!ins.length && !outs.length) {
+      lastCascade = { ins: 0, outs: 0, span: 0, path: "instant: nothing to move", frames: 0, ms: 0 };
+      pinnedPlan = null; applyLayout(true); return;
+    }
 
     // Clockwise in BOTH directions -- notes leave in the same sweep they arrived
     // in, so the animation never runs backwards.
@@ -2071,13 +2457,21 @@ function mountVaultGraph(root, data, deps) {
     var span = Math.max(windowFor(ins.length), windowFor(outs.length))
              + FADE_FRAMES * TIME_SCALE;
     var moving = ins.concat(outs);
+    lastCascade = { ins: ins.length, outs: outs.length, span: Math.round(span * 100) / 100,
+                    path: "animated", frames: 0, ms: 0, t0: NOW() };
 
     var settle = function () {
+      if (!lastCascade.exit) lastCascade.exit = "settle() called from outside the loop";
+      // Back to weight-over-seats: at rest the seats ARE the group's own notes, so the
+      // derived reading is right and a stale override would freeze the gap at whatever
+      // the last frame happened to hold.
+      gapPres = null;
       if (cascadeRun) {
         WIN.cancelAnimationFrame(cascadeRun.raf);
         WIN.clearTimeout(cascadeRun.guard);
         cascadeRun = null;
       }
+      probeSample("pre-settle");
       moving.forEach(function (id) { alpha[id] = to[id]; });
       pinnedPlan = null;
       planKeep = null;
@@ -2085,6 +2479,7 @@ function mountVaultGraph(root, data, deps) {
       // which is exactly what an unpinned ringsLayout() produces now that the
       // departing notes are gone.
       applyLayout(false);
+      probeSample("settled");
       if (done) done();
     };
 
@@ -2143,11 +2538,18 @@ function mountVaultGraph(root, data, deps) {
     // the flag settle() will compute, and the contract above -- "at 1, exactly the one
     // settle() assigns" -- holds again.
     var shownAfter = 0;
-    graph.forEachNode(function (id) { if (visible(id)) shownAfter++; });
+    graph.forEachNode(function (id) { if (willShow(id)) shownAfter++; });
     var ovAfter = true;   // one basis everywhere; see REPACK_BELOW
 
+    // The lattice spacing at each end of the toggle. Scalars, not per-cell maps: the
+    // spacing is global by construction -- it is what makes the packing uniform -- so
+    // there is one number per endpoint rather than one per cell.
+    var spSrc = 1, spDst = 1;
     var rowsSrc = Object.create(null), rowsDst = Object.create(null);
     var bandSrc = Object.create(null), bandDst = Object.create(null);
+    // A group is PRESENT at an end if it has any seated weight there -- one wedge, one
+    // gap, regardless of how many notes it keeps. The union of the two ends is walked.
+    var presSrc = Object.create(null), presDst = Object.create(null), presKeys = [];
     // ONE planner, called the same way at both ends.
     //
     // The cascade's endpoints have to be *the static planner's own output* for the
@@ -2173,7 +2575,9 @@ function mountVaultGraph(root, data, deps) {
     };
     (function () {
       var a = staticPlan(function (id) { return wasPresent[id]; });
-      var b = staticPlan(function (id) { return visible(id); });
+      // THE DESTINATION PACKING. willShow, so it is the packing settle() will assign rather
+      // than one that still seats whatever the date range or the timeline has excluded.
+      var b = staticPlan(function (id) { return willShow(id); });
       // Also the depth of each BAND at both ends -- the deepest cell in it, which is
       // what sets the ring's outer radius. A cell that exists at only one end takes
       // this instead of its own missing count, so it matches the ring rather than
@@ -2200,6 +2604,22 @@ function mountVaultGraph(root, data, deps) {
       };
       if (a) a.cells.forEach(record(rowsSrc, bandSrc));
       if (b) b.cells.forEach(record(rowsDst, bandDst));
+      // Taken from the endpoint plans themselves, which were built on binary presence --
+      // so these are the two densities the disc genuinely rests at, not a sample of
+      // whatever alpha happened to be on some frame.
+      if (a && a.sp > 0) spSrc = a.sp;
+      if (b && b.sp > 0) spDst = b.sp;
+      var seen = Object.create(null);
+      var presFor = function (p, m) {
+        if (!p) return;
+        p.cells.forEach(function (c) {
+          if (c.wsum <= 0.0001) return;
+          m[c.g] = 1;
+          if (!seen[c.g]) { seen[c.g] = 1; presKeys.push(c.g); }
+        });
+      };
+      presFor(a, presSrc);
+      presFor(b, presDst);
     })();
 
     // The guard is a WATCHDOG on stalled frames, not a deadline. It used to be a
@@ -2254,6 +2674,17 @@ function mountVaultGraph(root, data, deps) {
       var pr = Math.min(1, frame / Math.max(1, span));
       var ease = pr * pr * (3 - 2 * pr);
 
+      // THE GAP RESERVATION, WALKED. Same clock as the row counts below, so a group that
+      // is leaving gives up its gap over the whole cascade and one that merely thins
+      // never gives up any of it. At ease 0 this is the packing the disc is resting in;
+      // at 1 it is what settle() assigns, so the last frame and rest agree exactly.
+      gapPres = Object.create(null);
+      for (var gi = 0; gi < presKeys.length; gi++) {
+        var gk = presKeys[gi];
+        var ps = presSrc[gk] || 0, pd = presDst[gk] || 0;
+        gapPres[gk] = ps + (pd - ps) * ease;
+      }
+
       // ONE allocation per frame, from a plan whose geometry is interpolated
       // between the two packings. Angles are therefore assigned once, in a single
       // contiguous sweep, and cannot overlap; the radial re-densification arrives
@@ -2280,7 +2711,10 @@ function mountVaultGraph(root, data, deps) {
         if (d === undefined) d = bandDst[bk] !== undefined ? bandDst[bk] : s;
         return s + (d - s) * ease;
       };
-      var plan = buildWedgePlan(ovAfter, weightOf, rowsAt);
+      // Same clock as the rows and the gap reservation above: at ease 0 this is the
+      // packing the disc is resting in and at 1 it is the one settle() assigns.
+      var spNow = spSrc + (spDst - spSrc) * ease;
+      var plan = buildWedgePlan(ovAfter, weightOf, rowsAt, spNow);
       var targets = plan ? ringsLayout(plan, true) : null;
       // CONVERGE BEFORE SETTLING. Easing closes only RADIAL_EASE of each note's gap
       // per frame, so when progress hits 1 a small remainder is still outstanding --
@@ -2320,35 +2754,108 @@ function mountVaultGraph(root, data, deps) {
       // every frame was the reason the frame rate fell far enough for the old
       // fixed guard to fire mid-animation.
       probeSample("cascade");
+      lastCascade.frames++;
+      lastCascade.ms = Math.round(NOW() - lastCascade.t0);
       renderer.refresh({ skipIndexation: true });
       // `resid > 0.5` is the new clause: never hand over to settle() while a note is
       // still visibly short of its target. Bounded by the ramp above, so this adds a
       // few frames, not an open-ended tail.
+      // Only while something is recording: this is one object per frame in the hot loop,
+      // and the frame count and elapsed time above already answer "did it animate".
+      if (probe) lastCascade.last = { adv: Math.round(adv * 1000) / 1000, frame: Math.round(frame * 100) / 100,
+                           span: Math.round(span * 100) / 100, pr: Math.round(pr * 1000) / 1000,
+                           busy: busy, resid: Math.round(resid * 100) / 100,
+                           msPerFrame: Math.round(msPerFrame * 1000) / 1000,
+                           moving: moving.length, run: !!cascadeRun };
       if (busy || pr < 1 || resid > 0.5) cascadeRun.raf = WIN.requestAnimationFrame(step);
-      else settle();
+      else { lastCascade.exit = "converged"; settle(); }
     })();
   }
 
   /* ------------------------------------------------------------- animation */
 
-  // FRAME-BY-FRAME RADIAL PROBE. Reasoning about which band can move the other has
+  // FRAME-BY-FRAME PROBE, ON BOTH AXES. Reasoning about which band can move the other has
   // been wrong twice, so measure it: this samples each band's radial extent on every
   // animated frame, and the report gives the biggest single-frame step per band. A
   // "jump" is a large step in one frame; a smooth animation is many small ones.
+  //
+  // THE TANGENTIAL HALF WAS MISSING FOR MONTHS, and a whole class of jump with it. Every
+  // number here was a radius, so a change that left radii alone and slid every wedge round
+  // the circle measured as perfectly smooth -- which is exactly what a change in the gap
+  // reservation does. The date sliders jumped visibly while "a range change animates instead
+  // of snapping" passed, because the only thing it could see was the radius.
+  //
+  // Tangential displacement is reported in GRAPH UNITS, not degrees: a degree at the rim is
+  // four times the movement it is at the hub, and what a person sees is the distance. Only
+  // notes present in both frames count -- a note fading in has no previous position, and
+  // charging it for arriving would report a jump on every frame of every animation.
   var probe = null;
   function probeSample(tag) {
     if (!probe) return;
     var iMin = Infinity, iMax = 0, oMin = Infinity, oMax = 0, iN = 0, oN = 0;
+    var prev = probe.prevAng, now = Object.create(null);
+    var prevR = probe.prevR, nowR = Object.create(null);
+    var tanStep = 0, tanId = null, tanOver = 0, tanSum = 0, tanN = 0;
+    // PER-NOTE RADIAL STEP, which is what the tangential half has always measured and the
+    // radial half never did. Both band extents below are a MAX OVER A SET, and the set churns
+    // as notes arrive and leave -- so when the furthest note winks out the maximum is handed
+    // to the next one in and the sample steps by the distance between them, reporting a jump
+    // in a disc that did not move. Worse in the other direction: a stale note parked outside
+    // every visible one pinned the extent flat across an entire cascade (path 0 over 154
+    // frames), so a moving disc measured as perfectly still. A note's own change in radius has
+    // neither failure, and "the disc jumped" is a statement about notes, not about a maximum.
+    var radStep = 0, radId = null, radSum = 0, radN = 0;
     graph.forEachNode(function (id, a) {
       var r = Math.hypot(a.x, a.y);
+      // Tangential step: the angle moved, times the radius it moved at.
+      if (present(id)) {
+        var th = Math.atan2(a.y, a.x);
+        now[id] = th;
+        nowR[id] = r;
+        if (prevR && prevR[id] !== undefined) {
+          var dr = Math.abs(r - prevR[id]);
+          if (dr > radStep) { radStep = dr; radId = id; }
+          radSum += dr; radN++;
+        }
+        if (prev && prev[id] !== undefined) {
+          var d = th - prev[id];
+          // Shortest way round, or a note crossing the 12 o'clock seam reports a
+          // near-full-circle jump every time it wraps.
+          while (d > Math.PI) d -= 2 * Math.PI;
+          while (d < -Math.PI) d += 2 * Math.PI;
+          var moved = Math.abs(d) * r;
+          if (moved > tanStep) { tanStep = moved; tanId = id; }
+          if (moved > 160) tanOver++;         // further than one row, in one frame
+          tanSum += moved; tanN++;
+        }
+      }
+      // NOT FILTERED to present notes, and that is a known blind spot rather than an
+      // oversight -- see github#17. Filtering was tried: the outermost notes are frequently
+      // exactly the ones a date range excludes, so the extent COLLAPSED the instant the range
+      // applied, measured as a single frame step of 3230 out of a total path of 4131. Left
+      // unfiltered it is pinned by stale coordinates instead, which is stable but partly
+      // blind. Stable and blind is the better failure of the two for a guard, and the honest
+      // fix needs a set fixed across the whole probe rather than a filter.
       if (bandLock && bandLock[groupOf(id)]) {
         iN++; if (r < iMin) iMin = r; if (r > iMax) iMax = r;
       } else {
         oN++; if (r < oMin) oMin = r; if (r > oMax) oMax = r;
       }
     });
+    probe.prevAng = now;
+    probe.prevR = nowR;
+    if (probe.watch) probe.watchSeries.push(probe.watched || null);
     probe.samples.push({
       tag: tag, ms: Math.round(NOW() - probe.t0), gapI: lastGapN.i, gapO: lastGapN.o,
+      ngI: lastNG.i, ngO: lastNG.o, gapDegI: lastGapDeg.i, gapDegO: lastGapDeg.o,
+      radStep: Math.round(radStep), radId: radId,
+      radMean: Math.round(radN ? radSum / radN : 0),
+      tanStep: Math.round(tanStep), tanId: tanId, tanOver: tanOver,
+      tanMean: Math.round(tanN ? tanSum / tanN : 0),
+      // Where each group's wedge STARTS. "The gap jumped" is precisely this series
+      // moving in a step rather than a ramp, and it is what a person sees: every
+      // wedge boundary shifting round the disc at once.
+      starts: lastStart,
       innerN: iN, innerMin: Math.round(iMin === Infinity ? 0 : iMin), innerMax: Math.round(iMax),
       outerN: oN, outerMin: Math.round(oMin === Infinity ? 0 : oMin), outerMax: Math.round(oMax)
     });
@@ -3034,6 +3541,15 @@ function mountVaultGraph(root, data, deps) {
   // scale to 1, which is the right behaviour: zoom is how you get detail back.
   var REF_PITCH = 28;
   var SIZE_FLOOR = 0.45;
+  // RAISED ABOVE 1 (github#13). The cap of 1 existed when the only thing that moved the
+  // pitch was the window: a large screen already measured above the reference, so
+  // allowing more would have inflated dots on the machine the constants were tuned on.
+  // Now the density solve moves the pitch too, and a filtered disc genuinely has more
+  // room per note -- clamping at 1 there is what kept the median dot at 4.2px while its
+  // neighbours' room nearly tripled. The ceiling is what NODE_MAX's 11 was tuned
+  // against, so it bounds the drawn radius at ~2.4x the reference rather than letting
+  // sqrt run.
+  var SIZE_CEIL = 2.4;
   var sizeScale = 1;
 
   // Whether the border program actually loaded. If the bundle ever ships without it,
@@ -3043,12 +3559,14 @@ function mountVaultGraph(root, data, deps) {
 
   function measureSizeScale() {
     if (!renderer) return 1;
-    // One row of spacing is SP (=1) layout units, i.e. UNIT graph units.
+    // One row of spacing is lastSP LATTICE units, i.e. lastSP * UNIT graph units. That
+    // distinction is the fix: measuring one lattice unit answered a question about the
+    // camera, and the question here is how much room a note has next to its neighbour.
     var a = renderer.graphToViewport({ x: 0, y: 0 });
-    var b = renderer.graphToViewport({ x: UNIT, y: 0 });
+    var b = renderer.graphToViewport({ x: UNIT * (lastSP || 1), y: 0 });
     var pitch = Math.hypot(b.x - a.x, b.y - a.y);
     if (!(pitch > 0)) return sizeScale;
-    return Math.max(SIZE_FLOOR, Math.min(1, pitch / REF_PITCH));
+    return Math.max(SIZE_FLOOR, Math.min(SIZE_CEIL, pitch / REF_PITCH));
   }
 
   // Returns true if it moved enough to be worth a repaint. The threshold is what
@@ -3119,15 +3637,32 @@ function mountVaultGraph(root, data, deps) {
       zIndex: true,
       minCameraRatio: 0.02,
       maxCameraRatio: 12,
-      // The disc is the whole point of this view, so it stays centred: panning and
-      // rotation are off, zoom stays. With the normalisation box pinned symmetric
-      // about the origin, the camera's (0.5, 0.5) IS the centre of the disc, so
-      // holding the camera there keeps the ring centred in the stage whatever is
-      // filtered. Zoom still moves the camera toward the pointer, so it is pulled
-      // back on every camera update -- see the centre lock below.
-      enableCameraPanning: false,
+      // PANNING IS ON, and the centre lock that used to fight it is gone.
+      //
+      // The disc was pinned to the middle of the stage on the reasoning that it is the whole
+      // point of the view, with a camera listener that put x and y back to 0.5 after every
+      // update. That is defensible while the only camera gesture is zoom -- but it also
+      // makes zoom-toward-pointer a lie, since the camera is dragged back the moment it
+      // moves, so zooming in on one wedge walks it off the far edge instead. Panning plus a
+      // reset is the ordinary answer, and it costs nothing that a reset does not give back.
+      //
+      // Rotation stays off: the wedge labels and the heatmap's day rows both assume up is up.
+      //
+      // The initial value is the SETTING rather than a literal: the host may have persisted
+      // it off, and starting on and correcting afterwards would let one drag through before
+      // the lock arrived.
+      enableCameraPanning: panEnabled,
       enableCameraRotation: false,
       enableCameraZooming: true,
+      // ONE WHEEL NOTCH WAS 70%. Sigma's default zoomingRatio is 1.7, so every notch
+      // multiplied or divided the ratio by that -- three notches and the disc has gone from
+      // filling the stage to a sixth of it. 1.2 is about 32 notches across the whole
+      // 0.02..12 range, which is a scroll rather than a teleport.
+      //
+      // The animation is shortened with it. 250ms per notch is fine at 70% and lags visibly
+      // at 20%, because the next notch arrives before the last one has landed.
+      zoomingRatio: 1.2,
+      zoomDuration: 120,
       defaultEdgeType: "line",
       // Both programs are registered up front so the toggle is a per-edge `type`
       // in the reducer rather than a renderer rebuild. Sigma merges these with its
@@ -3202,20 +3737,11 @@ function mountVaultGraph(root, data, deps) {
       }
     });
 
-    // Centre lock: zooming with the wheel recentres toward the pointer, which
-    // would slide the disc off-centre over time. Ratio changes are kept, x and y
-    // are not.
+    // The centre lock is gone -- see enableCameraPanning above. What it was bundled with is
+    // not: a camera change moves the hub hole in screen pixels, so the logo has to be
+    // re-placed and the row pitch re-measured whatever moved the camera.
     (function () {
-      var cam = renderer.getCamera(), fixing = false;
-      cam.on("updated", function (st) {
-        if (fixing) return;
-        if (Math.abs(st.x - 0.5) < 1e-9 && Math.abs(st.y - 0.5) < 1e-9) return;
-        fixing = true;
-        cam.setState({ x: 0.5, y: 0.5, ratio: st.ratio, angle: 0 });
-        fixing = false;
-      });
-      // Zoom changes the hole's pixel radius, so the logo is re-placed with it --
-      // and the row pitch with it, so the dot sizes are rechecked too.
+      var cam = renderer.getCamera();
       cam.on("updated", function () { placeLogo(); refreshSizeScale(); });
     })();
 
@@ -3255,6 +3781,23 @@ function mountVaultGraph(root, data, deps) {
     renderer.on("leaveNode", function () { hideTip(); hoverTo(0); });
     renderer.on("clickNode", function (e) { select(e.node); });
     renderer.on("clickStage", function () { select(null); });
+
+    // DOUBLE CLICK RESETS THE VIEW, on the stage and on a note alike.
+    //
+    // preventSigmaDefault() is what makes it a reset rather than a reset AND sigma's own
+    // double-click zoom: the captor emits the event and then checks that flag before doing
+    // its own thing, synchronously, so setting it here is seen. Without it the two fight and
+    // the camera lands somewhere neither asked for.
+    //
+    // A note gets the same treatment as the stage on purpose. "Double click zooms to this
+    // note" is a defensible other answer, but then double click means two things depending
+    // on a 6px target, and one of them is not what the tooltip says.
+    var onDoubleClick = function (e) {
+      if (e && e.preventSigmaDefault) e.preventSigmaDefault();
+      fit();
+    };
+    renderer.on("doubleClickStage", onDoubleClick);
+    renderer.on("doubleClickNode", onDoubleClick);
   }
 
   /* ------------------------------------------------------- group labels */
@@ -3714,7 +4257,11 @@ function mountVaultGraph(root, data, deps) {
         base.cells.forEach(function (c) { bandLock[c.g] = c.inner; });
         // maxR is kept as well as the two band radii: the edge curvature needs to
         // know how big the disc is to judge which chords pass near its centre.
-        geomLock = { r0: base.r0, rOuter: base.rOuter, maxR: base.maxR };
+        // total is the DENOMINATOR of the density solve: every later plan asks "how
+        // much of the vault is on screen" and this is the "of the vault" half. Captured
+        // from the same unfiltered plan as the radii, so the two cannot disagree.
+        geomLock = { r0: base.r0, rOuter: base.rOuter, maxR: base.maxR,
+                     total: base.total };
 
         // PIN THE NORMALISATION BOX. Sigma rescales node coordinates against the
         // graph's bounding box on every refresh (autoRescale, on by default), so
@@ -3838,10 +4385,11 @@ function mountVaultGraph(root, data, deps) {
       WIN.cancelAnimationFrame(cascadeRun.raf);
       WIN.clearTimeout(cascadeRun.guard);
       cascadeRun = null;
+      gapPres = null;    // belongs to the run just abandoned; see allocateBand
     }
     if (anim) { WIN.cancelAnimationFrame(anim); anim = null; }
     if (animGuard) { WIN.clearTimeout(animGuard); animGuard = null; }
-    pinnedPlan = null; planKeep = null;
+    pinnedPlan = null; planKeep = null; gapPres = null;
 
     // Fixed length: TIMELINE_MS whatever the frame rate, so load, Refresh and Play
     // are the same few seconds every time. A slow page shows fewer steps of the
@@ -3999,7 +4547,15 @@ function mountVaultGraph(root, data, deps) {
       fit();
       playTimeline();
     };
-    $("fit").onclick = fit;
+    // THE CAMERA CLUSTER (github#4). The Fit button in View is gone: it did exactly what
+    // the corner control does, and two buttons for one job is one too many to explain.
+    if ($("reset")) $("reset").onclick = fit;
+    if ($("zin")) $("zin").onclick = function () { zoomBy(1); };
+    if ($("zout")) $("zout").onclick = function () { zoomBy(-1); };
+    if ($("pan")) $("pan").onclick = function () { setPan(!panEnabled, true); };
+    // The saved default, applied once the renderer exists. Not persisted -- writing here
+    // would save a value the host just handed us.
+    setPan(panEnabled, false);
     $("png").onclick = savePng;
 
     // THE GEAR, if a host asked for it in either of the two ways. It is hidden by default
@@ -4135,8 +4691,90 @@ function mountVaultGraph(root, data, deps) {
   // clear of the edge.
   // Fit is now purely a zoom reset: the centre never moves, so this only has to
   // put the ratio back.
+  var FIT_RATIO = 1.08;      // the full disc, filling the stage
+
+  /**
+   * FIT THE DISC THAT IS THERE, not the one the vault started with.
+   *
+   * The normalisation box is pinned to the FULL-VAULT extent on purpose -- see the note on
+   * setCustomBBox -- so that filtering makes the disc genuinely shrink instead of the camera
+   * silently zooming to refill the viewport every frame of every cascade. That is right
+   * during an animation and wrong the moment somebody asks to be centred: hide half the
+   * vault and "fit" would frame the empty ring the notes used to occupy.
+   *
+   * So the ratio is scaled by how much of the locked extent the disc currently uses. At full
+   * vault that is 1 and this is exactly the old constant; with the outer ring toggled away it
+   * closes in on what is left. The box does the not-moving and the camera does the zooming,
+   * which keeps the two jobs apart -- renormalising the box per frame is what moved the ring
+   * centre 13px and zoomed 8.2% with the camera provably untouched.
+   *
+   * Measured on the live radius rather than the plan's: a plan is what the layout intends and
+   * this question is about what is on screen, which after a cascade are the same thing and
+   * during one are not.
+   */
+  function fitRatio() {
+    var locked = geomLock && geomLock.maxR ? geomLock.maxR : 0;
+    var live = lastMaxR;
+    if (!locked || !live) return FIT_RATIO;
+    // The upper clamp used to be 1, on the reasoning that the box is the full-vault size
+    // so anything beyond it is empty margin. That stopped being true with the density
+    // solve (github#13): a filtered disc spreads its lattice to keep its notes at an
+    // honest density, and the outermost row lands a few percent PAST the locked extent
+    // -- measured up to 1.079. That is disc, not margin, and clamping at 1 framed it
+    // with its rim cut off. Allowed out to 1.35, which covers a full row of overshoot at
+    // any density the cap permits, and no further: past that something else is wrong and
+    // framing empty space would hide it.
+    // Clamped low as well, or a single surviving note in the hub would fill the stage.
+    var k = live / locked;
+    if (k > 1.35) k = 1.35;
+    if (k < 0.12) k = 0.12;
+    return FIT_RATIO * k;
+  }
+
   function fit() {
-    renderer.getCamera().animate({ x: 0.5, y: 0.5, ratio: 1.08, angle: 0 }, { duration: 380 });
+    var to = { x: 0.5, y: 0.5, ratio: fitRatio(), angle: 0 };
+    // SIGMA DROPS x AND y WHILE PANNING IS OFF (Camera.validateState), so with the pan
+    // toggle off this would apply the ratio and leave the disc wherever it was last
+    // dragged -- centring that does not centre. Panning is turned back on for the flight
+    // and taken away again in the callback, which sigma also fires if the animation is
+    // cut short. Reported on github#4, which hit it from the other direction.
+    if (!panEnabled) {
+      renderer.setSetting("enableCameraPanning", true);
+      renderer.getCamera().animate(to, { duration: 380 }, function () {
+        renderer.setSetting("enableCameraPanning", false);
+      });
+      return;
+    }
+    renderer.getCamera().animate(to, { duration: 380 });
+  }
+
+  // The wheel's own step, so a button press and a notch agree. Sigma's zoomingRatio is the
+  // setting the wheel reads; reading it back rather than repeating 1.2 means they cannot
+  // drift apart.
+  function zoomBy(dir) {
+    var cam = renderer.getCamera();
+    var step = renderer.getSetting("zoomingRatio") || 1.2;
+    var r = cam.getState().ratio * (dir > 0 ? 1 / step : step);
+    var lo = renderer.getSetting("minCameraRatio"), hi = renderer.getSetting("maxCameraRatio");
+    if (typeof lo === "number" && r < lo) r = lo;
+    if (typeof hi === "number" && r > hi) r = hi;
+    cam.animate({ ratio: r }, { duration: renderer.getSetting("zoomDuration") || 120 });
+  }
+
+  // PAN IS A MODE, and the host owns its default. Turning it off flies home FIRST and
+  // re-locks on landing, for the validateState reason in fit(): a camera left off-centre
+  // with panning disabled cannot be recovered by anything that sets x or y, which includes
+  // fit() itself.
+  function setPan(on, persist) {
+    panEnabled = !!on;
+    var btn = $("pan");
+    if (btn) btn.setAttribute("aria-pressed", panEnabled ? "true" : "false");
+    if (renderer) {
+      if (panEnabled) renderer.setSetting("enableCameraPanning", true);
+      else fit();      // fit() re-locks in its own callback
+    }
+    if (persist && onPanEnabled) onPanEnabled(panEnabled);
+    return panEnabled;
   }
 
   function savePng() {
@@ -4360,7 +4998,12 @@ function mountVaultGraph(root, data, deps) {
     var g = heatGeom();
     var cols = g.cols, cell = g.cell;
     var pitch = cell + HEAT_GAP;
-    var start = heatMonday(heatParse(TODAY)) - (cols - 1) * WEEK_MS;
+    // THE WINDOW'S RIGHT EDGE IS STATE NOW, not always today. A fixed sliding window onto
+    // today is what made everything before it unreachable -- on the 10-year fixture that is
+    // nine years of the vault with nothing to point at. `heatEnd` is null for "the last 52
+    // weeks", which is still the default and still where it opens.
+    var endMs = state.heatEnd === null ? heatParse(TODAY) : state.heatEnd;
+    var start = heatMonday(endMs) - (cols - 1) * WEEK_MS;
 
     var days = Object.create(null), keys = [];
     for (var c = 0; c < cols; c++) {
@@ -4408,7 +5051,7 @@ function mountVaultGraph(root, data, deps) {
     heat = {
       cols: cols, cell: cell, pitch: pitch, start: start, days: days, keys: keys,
       cuts: cuts, nMax: nMax, before: before, after: after, undated: undated,
-      dated: counts.length, mean: null,
+      dated: counts.length,
       w: HEAT_GUTTER + cols * pitch - HEAT_GAP + HEAT_ARROW_W,
       h: HEAT_MONTH_H + 7 * pitch - HEAT_GAP
     };
@@ -4846,6 +5489,503 @@ function mountVaultGraph(root, data, deps) {
 
   var DEMO_DONE_TITLE = "vault-graph demo complete";
 
+  /* ------------------------------------------------------------ date range --
+   * A BRUSH OVER THE WHOLE HISTORY, under the band.
+   *
+   * The band is a 52-week sliding window onto today, so everything before it is
+   * unreachable -- on a ten-year vault that is nine years with nothing to point at. This is
+   * the axis that reaches them, and the two ends of the brush are the filter.
+   *
+   * WHY THE AXIS IS LINEAR IN TIME, which is the one real decision here. Measured on the
+   * author's vault: 452 notes over 11.4 years, 389 of them in 2026, and a whole year (2021)
+   * holding none. A time axis therefore spends most of its width on very little -- the
+   * sidebar's timeline slider dodges exactly this by being linear in note count instead.
+   *
+   * It is kept anyway, because the two are not the same instrument. A slider is for
+   * *setting* a value and wants its travel spent evenly. This is for *finding* one, and what
+   * makes a date findable is that it sits where you expect on a calendar: 2019 is at 2019,
+   * the burst is visibly a burst, and the year with nothing in it is visibly empty. Spending
+   * the width proportionally to notes would put 2021 and 2026 side by side at the same size
+   * and lose all three of those facts. Two other concepts were built -- a year rail beside
+   * the band, and twin rank-linear sliders -- and this is the one that survived.
+   *
+   * The bars are sqrt-scaled for the same reason the disc's node sizes are: one month here
+   * holds 631 notes and most hold under 40, so a linear height is one bar and a flat line.
+   */
+
+  /* THREE LANES, because the strip carries two independent things and a legend.
+   *
+   *   bars    the months, and the BRUSH -- the two ends of the date filter
+   *   track   the band's own 52-week window, draggable on its own
+   *   labels  the year ticks
+   *
+   * The window used to follow whichever brush end was being dragged, which is convenient
+   * right up to the point where you want to look at one stretch while filtering to another.
+   * They are separate instruments -- the brush says which notes count, the window says which
+   * weeks the grid above is drawing -- so they get separate lanes and separate gestures.
+   * Which lane the pointer is in decides what it grabs; nothing has to be moded.
+   */
+  var RIBBON_BARS = 26;      // the bars and the brush
+  var RIBBON_TRACK = 14;     // the band-window track
+  var RIBBON_LABELS = 11;    // the year ticks
+  var RIBBON_H = RIBBON_BARS + RIBBON_TRACK + RIBBON_LABELS;
+  var GRAB_PX = 6;           // how close to an edge counts as grabbing it
+  var DRAG_MIN = 3;          // px before a press counts as a drag rather than a click
+
+  var brushDrag = null;
+
+  function drawDateUI() { drawRibbon(); }
+
+  // A canvas sized for the device, drawn in CSS pixels. Same treatment the heat band gets;
+  // without it every one-pixel rule in here lands on a half pixel and greys out.
+  function fitCanvas(cv, w, h) {
+    var dpr = Math.min(2, WIN.devicePixelRatio || 1);
+    cv.width = Math.round(w * dpr); cv.height = Math.round(h * dpr);
+    cv.style.width = w + "px"; cv.style.height = h + "px";
+    var cx = cv.getContext("2d");
+    cx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    cx.clearRect(0, 0, w, h);
+    return cx;
+  }
+
+  /**
+   * The bar ramp: the surface at nothing, the accent at the busiest month.
+   *
+   * It read `heat.mean` first, falling back to the accent -- and `heat.mean` is set to null
+   * where the heat object is built and never assigned anywhere, so the fallback has always
+   * been the whole function. Written as what it does. The accent is a validated colour and
+   * "the mean of the group palette" was a guess, so this is the better of the two anyway.
+   */
+  function dateRamp(t) {
+    return t <= 0 ? css("--dim")
+                  : mixHex(css("--surface-2"), css("--accent"), 0.25 + 0.75 * Math.min(1, t));
+  }
+
+  /**
+   * The scrubbers' colour: the bars' own hue, pushed for contrast against them.
+   *
+   * "Same colour as the bars" was already true and that was the problem -- the handles were
+   * drawn at the accent and a busy month's bar IS the accent, so a handle standing on a tall
+   * bar disappeared into it. Same hue, moved along the light/dark axis instead: toward
+   * --text-1, which is near-black on the light theme and white on the dark one, so the shift
+   * is away from the bars in both rather than toward white in one and invisible in the other.
+   */
+  function scrubColor() { return mixHex(css("--accent"), css("--text-1"), 0.3); }
+
+  // withAlpha takes an rgba string and mixHex takes two hexes; neither does this one thing.
+  function rgbaHex(hex, a) {
+    var c = toRgb(hex);
+    return "rgba(" + c[0] + "," + c[1] + "," + c[2] + "," + a + ")";
+  }
+
+  function ribbonW() {
+    var cv = $("ribbon");
+    var r = cv && cv.getBoundingClientRect();
+    return r && r.width ? r.width : 600;
+  }
+  function ribbonX(ms, w) {
+    var span = dateSpan.hi - dateSpan.lo;
+    return span > 0 ? ((ms - dateSpan.lo) / span) * w : 0;
+  }
+  function ribbonMs(x, w) {
+    return dateSpan.lo + (Math.max(0, Math.min(w, x)) / w) * (dateSpan.hi - dateSpan.lo);
+  }
+  /**
+   * The brush's two ends, with null meaning "the end of the span".
+   *
+   * Reads the in-flight drag first, so the handles follow the cursor while the disc behind
+   * them stays put. This is the one place the preview and the applied state are allowed to
+   * disagree, and it is what makes a drag cost a canvas repaint instead of a relayout.
+   */
+  function brushEnds() {
+    if (brushDrag && brushDrag.pFrom !== undefined) return [brushDrag.pFrom, brushDrag.pTo];
+    return [state.from === null ? dateSpan.lo : state.from,
+            state.to === null ? dateSpan.hi : state.to];
+  }
+
+  /**
+   * Where the band's window is.
+   *
+   * Reads state directly -- the window drag is LIVE and writes state on every frame, unlike
+   * the brush, which previews. The two are not inconsistent: dragging the brush re-lays out
+   * the whole disc, which is O(n) three times over and cannot keep up at ten thousand notes,
+   * while dragging the window only re-buckets the band. Those are different budgets, so they
+   * get different answers, and the one that can afford to be live is live.
+   */
+  function winEndNow() {
+    if (state.heatEnd !== null) return state.heatEnd;
+    return heat ? heat.start + heat.cols * WEEK_MS : heatParse(TODAY);
+  }
+
+  function drawRibbon() {
+    var cv = $("ribbon");
+    if (!cv || !dateSpan) return;
+    var w = Math.max(200, ribbonW());
+    var cx = fitCanvas(cv, w, RIBBON_H);
+    var top = RIBBON_BARS;                     // the bars live above this line
+    var ms = dateSpan.months, n = ms.length;
+    var pitch = w / n;
+
+    for (var i = 0; i < n; i++) {
+      var m = ms[i];
+      var t = Math.min(1, m.n / dateSpan.nRef);
+      var bh = m.n ? Math.max(1.5, (top - 2) * t) : 0;
+      cx.fillStyle = m.n ? dateRamp(t) : css("--dim");
+      cx.fillRect(i * pitch, top - bh, Math.max(1, pitch - 0.6), bh || 1);
+    }
+
+    // Year boundaries, and a label wherever there is room. Only January gets a rule, so the
+    // strip reads as years rather than as 121 months.
+    cx.font = '500 8.5px ui-sans-serif, "Segoe UI", system-ui, sans-serif';
+    cx.textBaseline = "alphabetic";
+    var every = pitch * 12 < 26 ? 2 : 1;       // skip alternate labels before they collide
+    for (var j = 0; j < n; j++) {
+      if (ms[j].m !== 0) continue;
+      var x = j * pitch;
+      cx.fillStyle = rgbaHex(css("--text-3"), 0.28);
+      cx.fillRect(x, 0, 1, top);
+      if ((ms[j].y % every) === 0) {
+        cx.fillStyle = css("--text-3");
+        cx.fillText("'" + String(ms[j].y).slice(2), x + 2, RIBBON_H - 2);
+      }
+    }
+
+    // THE BAND'S WINDOW, on its own track and draggable. A rail the full width of the span
+    // with a pill on it showing the 52 weeks the grid above is drawing -- which is also a
+    // scrollbar, and reads as one, which is the point: it is the thing you move to look
+    // somewhere else.
+    var tw = winTrack(w);
+    cx.fillStyle = rgbaHex(css("--text-3"), 0.16);
+    heatRect(cx, 0, tw.y + tw.h / 2 - 1, w, 2, 1);
+    cx.fill();
+    // The pill in the bars' own hue, so the whole strip reads as one instrument, with a rim
+    // in the band's background so its ends are legible against the rail behind them.
+    var pillW = Math.max(10, tw.x1 - tw.x0);
+    cx.fillStyle = scrubColor();
+    cx.globalAlpha = brushDrag && brushDrag.mode === "win" ? 1 : 0.86;
+    heatRect(cx, tw.x0, tw.y, pillW, tw.h, tw.h / 2);
+    cx.fill();
+    cx.globalAlpha = 1;
+    cx.strokeStyle = rgbaHex(css("--surface-0"), 0.9);
+    cx.lineWidth = 1;
+    heatRect(cx, tw.x0, tw.y, pillW, tw.h, tw.h / 2);
+    cx.stroke();
+
+    // The brush: a wash over everything OUTSIDE it, two hard edges, and a grip on each.
+    // 0.72 of the surface rather than 0.62 -- at the lower value the difference between
+    // inside and outside was a few percent of luminance on a dark ground and the brush read
+    // as two lines with nothing between them.
+    //
+    // DRAWN UNCONDITIONALLY, with the handles resting on the ends of the span when nothing
+    // is filtered. They used to appear only once a range existed, which meant the control
+    // opened as a bar chart with no visible way to operate it -- you had to guess that
+    // dragging it did something. The wash needs no condition either: at rest the handles are
+    // at the ends, so there is nothing outside them and both rectangles are zero-width.
+    //
+    // `from`/`to` stay NULL at rest rather than being set to the span's ends. Null means "no
+    // bound", which is what lets timeFactor skip the comparison entirely and what keeps a
+    // note dated outside the known span -- a bad stamp, a note edited later -- from being
+    // excluded by a filter nobody asked for.
+    var e = brushEnds(), x0 = ribbonX(e[0], w), x1 = ribbonX(e[1], w);
+    cx.fillStyle = rgbaHex(css("--surface-0"), 0.72);
+    cx.fillRect(0, 0, x0, top);
+    cx.fillRect(x1, 0, w - x1, top);
+
+    // The two scrubbers. Each is a full-height rule plus a grip, and each is outlined in the
+    // band's own background -- which is what makes it legible standing on a bar of any height,
+    // and the reason a plain accent-coloured handle was invisible on a busy month.
+    var col = scrubColor(), rim = rgbaHex(css("--surface-0"), 0.92);
+    var gw = 9, gh = Math.max(12, top - 8), gy = (top - gh) / 2;
+    [x0, x1].forEach(function (x) {
+      // The RULE sits exactly on the date; the GRIP is nudged to stay inside the canvas. At
+      // rest the two handles are at the ends of the span, so a grip centred on the date has
+      // half of itself outside the element -- which is the one moment it most needs to be
+      // seen, since that is the state the control opens in.
+      var gx = Math.max(0, Math.min(w - gw, x - gw / 2));
+      cx.fillStyle = rim;
+      cx.fillRect(x - 2.5, 0, 5, top);
+      cx.fillStyle = col;
+      cx.fillRect(x - 1.5, 0, 3, top);
+      heatRect(cx, gx, gy, gw, gh, 3);
+      cx.fill();
+      cx.strokeStyle = rim;
+      cx.lineWidth = 1;
+      heatRect(cx, gx, gy, gw, gh, 3);
+      cx.stroke();
+      // Two notches, so the grip reads as something to take hold of rather than as a tab.
+      cx.fillStyle = rim;
+      cx.fillRect(gx + gw / 2 - 2, gy + gh / 2 - 3, 1, 6);
+      cx.fillRect(gx + gw / 2 + 1, gy + gh / 2 - 3, 1, 6);
+    });
+  }
+
+  /**
+   * Repaint the band for the current window, doing as little as the change allows.
+   *
+   * THE GRID IS COLUMNED BY WEEK. heatMonday() quantises the window's end, so a drag across a
+   * few pixels inside one week produces a byte-identical grid -- and heatBuild() re-buckets
+   * every note in the vault to produce it, ten thousand of them on the fixture. So the week is
+   * computed first and the rebuild is skipped when it has not moved.
+   *
+   * The ribbon is redrawn either way, which is what makes the pill glide while the grid steps.
+   * That difference is not a compromise, it is the truth about the two things: the pill is a
+   * continuous position and the band is a row of weeks.
+   */
+  function rebuildBand() {
+    var endMs = state.heatEnd === null ? heatParse(TODAY) : state.heatEnd;
+    var wantStart = heatMonday(endMs) - ((heat ? heat.cols : HEAT_WEEKS) - 1) * WEEK_MS;
+    var moved = !heat || heat.start !== wantStart;
+    if (moved) heatBuild();
+    drawDateUI();
+    if (moved) heatDraw();
+  }
+
+  /** The window pill's box on the track, in canvas pixels. Follows a drag if one is live. */
+  function winTrack(w) {
+    var span = (heat ? heat.cols : HEAT_WEEKS) * WEEK_MS;
+    var end = winEndNow();
+    return { x0: ribbonX(end - span, w), x1: ribbonX(end, w),
+             y: RIBBON_BARS + 2, h: RIBBON_TRACK - 5 };
+  }
+
+  /** True when a press at this height is aiming at the window track rather than the bars. */
+  function inWinTrack(y) { return y >= RIBBON_BARS && y < RIBBON_BARS + RIBBON_TRACK; }
+
+  /**
+   * Move the band's window so it ENDS at `ms`, clamped to today and to the span.
+   *
+   * Ends rather than starts, because the window is 52 weeks looking backwards -- that is what
+   * it has always been, and a window that started where you pointed would show the year after
+   * the date you picked rather than the year up to it.
+   */
+  /** The window's span, in ms. */
+  function winSpan() { return (heat ? heat.cols : HEAT_WEEKS) * WEEK_MS; }
+
+  function clampWinEnd(ms) {
+    var todayMs = heatParse(TODAY);
+    var lo = dateSpan.lo + winSpan();         // never scroll off the left end of the history
+    return Math.max(Math.min(ms, todayMs), Math.min(lo, todayMs));
+  }
+
+  /**
+   * The window end that puts the pointer in the MIDDLE of the pill.
+   *
+   * Grabbing it used to set the window's END to the pointer, so the pill jumped to sit
+   * entirely to the left of the hand and the thing being dragged was somewhere else. Centring
+   * is what a scrollbar thumb does when you click the trough, and it means the date under the
+   * cursor is the middle of what the grid is showing -- which is the date you were pointing at.
+   */
+  function winEndCentred(ms) { return clampWinEnd(ms + winSpan() / 2); }
+
+  /**
+   * What a press at `x` grabs: an existing edge, the span between them, or empty strip.
+   *
+   * THE BUG THIS EXISTS TO FIX: every press used to start a NEW brush anchored where the
+   * pointer went down, with the other end following the pointer. So grabbing the left edge
+   * and dragging moved the right edge as well -- reported as "when I move the left slider
+   * the right one moves too", and it was not a slider at all, it was a fresh selection every
+   * time. An edge has to be a thing you can take hold of.
+   */
+  function brushHit(x, w, y) {
+    if (y !== undefined && inWinTrack(y)) return "win";
+    var e = brushEnds(), x0 = ribbonX(e[0], w), x1 = ribbonX(e[1], w);
+    // The nearer edge wins when both are in reach, or a narrow brush has one grabbable edge.
+    var d0 = Math.abs(x - x0), d1 = Math.abs(x - x1);
+    if (d0 <= GRAB_PX || d1 <= GRAB_PX) return d0 <= d1 ? "from" : "to";
+    // A press INSIDE the brush pans it -- unless the brush is the whole span, where panning
+    // is a clamped no-op and what the press obviously means is "select from about here".
+    // Without that exception the resting control had no way to start a range except by
+    // finding one of the two handles at the very ends of the strip.
+    if (x > x0 && x < x1) {
+      return (state.from === null && state.to === null) ? "new" : "body";
+    }
+    return "new";
+  }
+
+  /**
+   * The date under the handle, floated above the strip.
+   *
+   * Positioned against #vg-heat, which is the band's own positioning context -- the same one
+   * #vg-htip uses. Clamped to the band so a handle at either extreme does not push its own
+   * label off the edge, which is the failure every tooltip in this page has had once.
+   */
+  function showRTip(x, text) {
+    var t = $("rtip"), rib = $("ribbon"), band = $("heat");
+    if (!t || !rib || !band) return;
+    setHTML(t, esc(text));
+    t.hidden = false;
+    var bb = band.getBoundingClientRect(), rb = rib.getBoundingClientRect();
+    var tb = t.getBoundingClientRect();
+    var left = Math.max(4, Math.min(bb.width - tb.width - 4, (rb.left - bb.left) + x - tb.width / 2));
+    t.style.left = left + "px";
+    t.style.top = ((rb.top - bb.top) - tb.height - 3) + "px";
+  }
+  function hideRTip() { var t = $("rtip"); if (t) t.hidden = true; }
+
+  /** A range end as a plain ISO day. */
+  function isoDay(ms) { return new Date(ms).toISOString().slice(0, 10); }
+
+  /** What the grid above is currently drawing, for the track's tooltip. */
+  function winLabel() {
+    if (!heat) return "";
+    return isoDay(heat.start) + "  \u2192  " + isoDay(heat.start + heat.cols * WEEK_MS - DAY_MS);
+  }
+
+  function buildDateUI() {
+    var rib = $("ribbon");
+    if (!rib) return;
+
+    // ONE UPDATE PER FRAME. A pointermove fires 120+ times a second on a decent mouse and
+    // each update re-lays out the disc; without this the handler is the bottleneck and the
+    // drag lags behind the cursor. The last position is the only one that matters.
+    var pend = null, pendRaf = 0;
+    var flush = function () {
+      pendRaf = 0;
+      var f = pend; pend = null;
+      if (f) f();
+    };
+    var onFrame = function (fn) {
+      pend = fn;
+      if (!pendRaf) pendRaf = WIN.requestAnimationFrame(flush);
+    };
+
+    $("rangeall").onclick = function () {
+      state.from = null; state.to = null; state.heatEnd = null;
+      heatBuild();
+      applyRange();
+      heatDraw();
+    };
+
+    var xOf = function (ev) { return ev.clientX - rib.getBoundingClientRect().left; };
+    var yOf = function (ev) { return ev.clientY - rib.getBoundingClientRect().top; };
+
+    rib.addEventListener("pointerdown", function (ev) {
+      if (!dateSpan) return;
+      var w = ribbonW(), x = xOf(ev), mode = brushHit(x, w, yOf(ev)), e = brushEnds();
+      brushDrag = { mode: mode, x0: ev.clientX, moved: false,
+                    // For an edge drag the OTHER end is the anchor and does not move. For a
+                    // body drag both ends move together, so both originals are kept.
+                    anchor: mode === "from" ? e[1] : e[0],
+                    from0: e[0], to0: e[1], grab: ribbonMs(x, w),
+                    winEnd0: heat ? heat.start + heat.cols * WEEK_MS : 0 };
+      try { rib.setPointerCapture(ev.pointerId); } catch { /* fine */ }
+      rib.setAttribute("data-grab", mode === "win" ? "moving"
+                                  : mode === "body" ? "moving" : "edge");
+      // A PRESS ON THE TRACK IS ALSO A JUMP. Dragging the pill across eleven years to reach
+      // 2018 is a lot of mouse; pressing at 2018 puts it there and the drag then refines it.
+      if (mode === "win") {
+        state.heatEnd = winEndCentred(ribbonMs(x, w));
+        rebuildBand();
+        showRTip(x, winLabel());
+      }
+    });
+
+    rib.addEventListener("pointermove", function (ev) {
+      if (!brushDrag) {
+        // Cursor as affordance: the edges are 2px of paint and nothing else says they can be
+        // taken hold of.
+        if (dateSpan) {
+          var x = xOf(ev), w2 = ribbonW(), m = brushHit(x, w2, yOf(ev));
+          if (m === "win") rib.setAttribute("data-grab", "body");
+          else if (m === "from" || m === "to") rib.setAttribute("data-grab", "edge");
+          else if (m === "body") rib.setAttribute("data-grab", "body");
+          else rib.removeAttribute("data-grab");
+          // The date under the pointer, hovering as well as dragging. This is a date axis
+          // eleven years wide in 1268px -- a month is nine pixels, and reading one off the
+          // year ticks alone is guesswork. On the track it names the window instead, because
+          // there the thing being moved is a 52-week span rather than a day.
+          showRTip(x, m === "win" ? winLabel() : isoDay(ribbonMs(x, w2)));
+        }
+        return;
+      }
+      if (Math.abs(ev.clientX - brushDrag.x0) > DRAG_MIN) brushDrag.moved = true;
+      if (!brushDrag.moved) return;
+
+      var w = ribbonW(), here = ribbonMs(xOf(ev), w), lo, hi, follow;
+
+      // The band's window, moved on its own and touching neither end of the brush. LIVE:
+      // rebuildBand() only does the expensive half when the window crosses a week boundary,
+      // so this costs one canvas per frame and one re-bucket per week travelled.
+      if (brushDrag.mode === "win") {
+        var wx = xOf(ev);
+        onFrame(function () {
+          if (!brushDrag) return;
+          state.heatEnd = winEndCentred(here);
+          rebuildBand();
+          showRTip(wx, winLabel());
+        });
+        return;
+      }
+
+      if (brushDrag.mode === "body") {
+        // Pan the whole range, clamped so it keeps its width at either end of the span.
+        var d = here - brushDrag.grab;
+        var width = brushDrag.to0 - brushDrag.from0;
+        lo = Math.max(dateSpan.lo, Math.min(dateSpan.hi - width, brushDrag.from0 + d));
+        hi = lo + width;
+        follow = hi;
+      } else if (brushDrag.mode === "from" || brushDrag.mode === "to") {
+        // One end moves, the anchor does not. Crossing over is allowed and simply swaps
+        // which end is which, so a drag past the far edge does not stick.
+        lo = Math.min(brushDrag.anchor, here);
+        hi = Math.max(brushDrag.anchor, here);
+        follow = here;                    // the band follows the end being dragged
+      } else {
+        lo = Math.min(brushDrag.grab, here);
+        hi = Math.max(brushDrag.grab, here);
+        follow = here;
+      }
+      // THE BAND'S WINDOW IS NOT TOUCHED HERE. It used to follow whichever end was moving,
+      // which is convenient until you want to read one stretch while filtering to another --
+      // and it made the window impossible to place deliberately, since the next brush nudge
+      // took it back. It has its own track now.
+      var mode = brushDrag.mode;
+      brushDrag.pFrom = lo;
+      brushDrag.pTo = hi;
+      onFrame(function () {
+        if (!brushDrag) return;
+        // Both ends labelled while panning, since both are moving; otherwise just the one
+        // under the hand. A label naming the end you are not touching is noise.
+        showRTip(ribbonX(follow, w),
+                 mode === "body" ? isoDay(lo) + "  \u2192  " + isoDay(hi) : isoDay(follow));
+        drawDateUI();               // the handles only; the disc waits for release
+        var el = $("rangenote");
+        if (el) el.textContent = isoDay(lo) + "  \u2192  " + isoDay(hi);
+      });
+    });
+
+    // THE ONE MOMENT THE FILTER CHANGES. Everything the drag did was a preview on a canvas;
+    // this is where it becomes state, and where the disc animates to it exactly as it does
+    // for a legend toggle.
+    var endDrag = function (ev) {
+      if (!brushDrag) return;
+      var d = brushDrag;
+      brushDrag = null;
+      rib.removeAttribute("data-grab");
+      hideRTip();
+      try { rib.releasePointerCapture(ev.pointerId); } catch { /* fine */ }
+
+      // Nothing to apply for a window drag: it has been applying itself all along.
+      if (d.mode === "win") return;
+      if (d.moved && d.pFrom !== undefined) {
+        // The ends of the span mean "no bound" rather than "the first and last note", so a
+        // drag that lands on an end clears that half of the filter. Without this, brushing
+        // the whole strip left a range that excluded anything dated outside the known span.
+        state.from = d.pFrom <= dateSpan.lo ? null : d.pFrom;
+        state.to = d.pTo >= dateSpan.hi ? null : d.pTo;
+        applyRange();
+      } else {
+        rangeChrome();              // an abandoned drag: put the readout back
+      }
+    };
+    rib.addEventListener("pointerup", endDrag);
+    rib.addEventListener("pointercancel", endDrag);
+    rib.addEventListener("pointerleave", function () { if (!brushDrag) hideRTip(); });
+
+    if (WIN.ResizeObserver) new WIN.ResizeObserver(function () { drawDateUI(); }).observe($("heat"));
+    applyRange();
+  }
+
   function demoOn() {
     return /(^|[?&#])demo\b/.test(String(location.search) + " " + String(location.hash));
   }
@@ -4887,6 +6027,20 @@ function mountVaultGraph(root, data, deps) {
   // different folder.
   function demoFind(kind, arg) {
     if (kind === "id") return $(arg);
+    // A point on the STAGE, for the camera beats. "centre", or a fraction pair like "0.3,0.4"
+    // measured from the stage's top-left, so a pan can start somewhere with disc under it.
+    if (kind === "stage") {
+      var stageEl = $("graph");
+      if (!stageEl) return null;
+      var sb = stageEl.getBoundingClientRect();
+      var f = (arg === "centre" || !arg) ? [0.5, 0.5] : String(arg).split(",").map(Number);
+      return demoPoint(sb.left + sb.width * f[0], sb.top + sb.height * f[1],
+                       2, 2, "stage " + (arg || "centre"));
+    }
+    // A BRUSH HANDLE on the date ribbon, "from" or "to", or the window pill, "window".
+    // Resolved from the same geometry the control draws with, so a beat aims where the
+    // handle is rather than where the storyboard guessed it would be.
+    if (kind === "brush") return demoRibbonPoint(arg);
     if (kind === "eye" || kind === "group") {
       var g = demoGroup(arg);
       if (!g) return null;
@@ -5060,6 +6214,42 @@ function mountVaultGraph(root, data, deps) {
   // into view first, because CDP input hit-tests for real -- a control below the fold
   // is a control that cannot be clicked, and reporting its off-screen coordinates would
   // make the driver click whatever is at that spot instead.
+  /**
+   * A synthetic target: something with a bounding box that is not an element.
+   *
+   * demoWhere reads getBoundingClientRect off whatever demoFind returns, so anything that can
+   * answer that question can be a target. The camera and the ribbon handles are positions
+   * rather than elements, and inventing a DOM node for each would be a lot of DOM for a
+   * recording.
+   */
+  function demoPoint(cx, cy, w, h, label) {
+    return {
+      getBoundingClientRect: function () {
+        return { left: cx - w / 2, top: cy - h / 2, width: w, height: h };
+      },
+      demoLabel: label
+    };
+  }
+
+  /** Where a ribbon handle is, in page coordinates. */
+  function demoRibbonPoint(which) {
+    var rib = $("ribbon");
+    if (!rib || !dateSpan) return null;
+    var b = rib.getBoundingClientRect();
+    var w = b.width;
+    if (which === "window") {
+      var t = winTrack(w);
+      return demoPoint(b.left + (t.x0 + t.x1) / 2, b.top + t.y + t.h / 2, 8, 8, "band window");
+    }
+    var e = brushEnds();
+    var x = ribbonX(which === "to" ? e[1] : e[0], w);
+    // Nudged inside the strip: an end handle sits exactly on the edge at rest, and half of a
+    // press at x = 0 lands outside the element.
+    x = Math.max(2, Math.min(w - 2, x));
+    return demoPoint(b.left + x, b.top + RIBBON_BARS / 2, 8, 8,
+                     which === "to" ? "range end" : "range start");
+  }
+
   function demoWhere(kind, arg) {
     var el = demoFind(kind, arg);
     if (!el) return null;
@@ -5089,11 +6279,19 @@ function mountVaultGraph(root, data, deps) {
   // to grow -- append beats here and the driver picks them up with no other change.
   //
   // Beats are DATA, not functions, because the thing executing them is in another
-  // process. Four verbs so far:
-  //   {settle}                     wait until nothing is animating
-  //   {click, target:[kind, arg]}  move the real pointer there and click it
-  //   {hover, target:[kind, arg]}  move there and stop, to let a hover state show
-  //   {park}                       pointer back to the vetted nothing-under-it spot
+  // process. Seven verbs:
+  //   {settle}                          wait until nothing is animating
+  //   {click, target}                   move the real pointer there and click it
+  //   {hover, target}                   move there and stop, to let a hover state show
+  //   {dblclick, target}                two clicks inside the double-click window
+  //   {drag: [dx, dy], target}          press there, glide by the offset, release
+  //   {wheel: n, target}                n notches over it; positive zooms in
+  //   {park}                            pointer back to the vetted nothing-under-it spot
+  //
+  // A target is [kind, arg]. Beyond the legend kinds there are two synthetic ones, because
+  // the camera and the date ribbon's handles are positions rather than elements:
+  //   ["stage", "centre"] or ["stage", "0.3,0.4"]   a point on the graph
+  //   ["brush", "from" | "to" | "window"]           a handle on the date ribbon
   // `why` is for the log and the eventual captions -- it is the only part of a beat a
   // person reads.
   function demoMode() {
@@ -5185,6 +6383,55 @@ function mountVaultGraph(root, data, deps) {
       { click: true, target: ["only", "08"], why: "solo a single folder" },
       { settle: true, why: "let everything else recede" },
 
+      /* --- the camera --------------------------------------------------- */
+      // Put everything back first: the camera act is about the camera, and a disc still
+      // filtered from the beats above makes it look like the zoom did something to the data.
+      { click: true, target: ["id", "allon"], why: "show everything again" },
+      { settle: true, why: "let the whole disc come back" },
+
+      // Zoom in a few notches rather than one. One notch is a fifth now, which is the point
+      // -- it is a scroll and not a teleport -- and a single notch on camera looks like
+      // nothing happened.
+      { wheel: 4, target: ["stage", "0.42,0.40"], why: "zoom in, a fifth per notch" },
+      { settle: true, why: "let the last notch land" },
+
+      // Then pan, which is only possible now that the disc is not pinned to the middle. Held
+      // button the whole way, or the page sees a click and a release with nothing between.
+      { drag: [190, 110], target: ["stage", "0.55,0.45"], why: "drag the disc around" },
+      { settle: true, why: "let the pan settle" },
+
+      // Two ways back, both shown, because the button is discoverable and the double-click is
+      // faster once you know it.
+      { dblclick: true, target: ["stage", "centre"], why: "double-click anywhere to reset" },
+      { settle: true, why: "let the view come back" },
+      { wheel: 3, target: ["stage", "0.60,0.55"], why: "zoom in again, to have something to reset" },
+      { settle: true, why: "let it land" },
+      { click: true, target: ["id", "reset"], why: "...and the reset button in the corner" },
+      { settle: true, why: "let the view come back" },
+
+      /* --- the date range ----------------------------------------------- */
+      // The ribbon under the band carries every month of the vault. Its two handles are the
+      // filter; the pill below them is the 52 weeks the grid above is drawing, and they move
+      // independently -- which is most of what this act is for.
+      //
+      // The disc waits for the release on each of these, deliberately: a drag repaints one
+      // small canvas and the filter lands once, when the button comes up.
+      { drag: [300, 0], target: ["brush", "from"], why: "drag the range start forward" },
+      { settle: true, why: "let the disc thin out" },
+      { drag: [-170, 0], target: ["brush", "to"], why: "and pull the range end back" },
+      { settle: true, why: "let it thin further" },
+
+      // The band's window, moved on its own. The range above stays exactly where it was.
+      { drag: [-260, 0], target: ["brush", "window"], why: "slide the heatmap window back on its own" },
+      { settle: true, why: "let the band redraw" },
+      { drag: [170, 0], target: ["brush", "window"], why: "...and forward again" },
+      { settle: true, why: "let the band redraw" },
+
+      // Clear it, so the recording ends on the whole vault rather than on a filtered slice
+      // that the next viewer would read as the default.
+      { click: true, target: ["id", "rangeall"], why: "clear the date range" },
+      { settle: true, why: "let the whole vault come back" },
+
       // Pointer out of the way, so the last frame is the disc rather than a hover state
       // left behind by the last click.
       { park: true, why: "leave the final frame clean" }
@@ -5197,6 +6444,18 @@ function mountVaultGraph(root, data, deps) {
     doneTitle: DEMO_DONE_TITLE,
     storyboard: demoMode,
     busy: demoBusy,
+    /**
+     * WHICH of the five things busy() ors together is still running.
+     *
+     * busy() answers "is anything moving", which is the right question for a driver deciding
+     * whether to act. It is the wrong question for a driver that has GIVEN UP waiting: then
+     * the only useful thing to know is what it was waiting for, and a boolean cannot say.
+     * Every "settle timed out" before this was a guess between five candidates.
+     */
+    busyWhy: function () {
+      return { play: !!play, cascade: !!cascadeRun, anim: !!anim,
+               hover: !!hoverRaf, highlight: !!hlRaf };
+    },
     where: demoWhere,
     // What is hovered right now. The driver compares this against a target's `expect`
     // after a hover beat: aiming at a dot is only as good as the hit-test agreeing, and
@@ -5259,6 +6518,10 @@ function mountVaultGraph(root, data, deps) {
                       return Object.assign(Object.create(null), folderShown);
                     },
                     setFolderShown: applyFolderShown,
+                    // The saved default, applied live. Mirrors setFolderShown: the host owns
+                    // the store and this owns the camera.
+                    setPanEnabled: function (v) { return setPan(v !== false, false); },
+                    get panEnabled() { return panEnabled; },
                     hiddenByDefault: hiddenByDefault,
                     // Push the defaults into the live filter and repaint. This is the
                     // "and now show it" half, kept separate so loading saved settings at
@@ -5387,6 +6650,83 @@ function mountVaultGraph(root, data, deps) {
                       };
                       return out;   // the caller is a console; it prints this itself
                     },
+                    // DENSITY. The question github#13 is about: does the disc that is on
+                    // screen depend on how many notes are on screen, or on how many the
+                    // vault happens to hold? Everything here is measured, not planned --
+                    // the plan is what the layout intends, and after a cascade the two
+                    // agree while during one they do not.
+                    //
+                    // pitchPx is the whole point. It is one lattice row in SCREEN pixels,
+                    // which is what decides whether two notes in a column touch, and with
+                    // the normalisation box pinned and the camera still it is invariant to
+                    // note count by construction -- so it reads the same at 1500 notes and
+                    // at 500, which is the bug.
+                    //
+                    // pitchRoot is that made scale-free: if a filtered disc were to refill
+                    // its box, area per note would scale as 1/n and pitch as its root, so
+                    // pitchPx * sqrt(shown) would hold still across every filter state.
+                    // That product is the invariant, and it does not need a second vault to
+                    // compare against.
+                    densityReport: function () {
+                      var shown = 0, lit = 0;
+                      graph.forEachNode(function (id) {
+                        if (visible(id)) shown++;
+                        if ((alpha[id] || 0) > 0.004) lit++;
+                      });
+                      // One lattice row, mapped through the same camera the notes are drawn
+                      // with. graphToViewport is the only honest way to ask: it goes through
+                      // the pinned bbox, so it answers in the pixels a person sees.
+                      var pitchPx = null, unitPx = null, discPx = null;
+                      if (renderer) {
+                        var a = renderer.graphToViewport({ x: 0, y: 0 });
+                        var u = renderer.graphToViewport({ x: UNIT, y: 0 });
+                        unitPx = Math.hypot(u.x - a.x, u.y - a.y);
+                        // A ROW, not a lattice unit. These were the same number before the
+                        // density solve, and pitchPx is the one that decides whether two
+                        // notes in a column touch.
+                        var b = renderer.graphToViewport({ x: UNIT * (lastSP || 1), y: 0 });
+                        pitchPx = Math.hypot(b.x - a.x, b.y - a.y);
+                        // How far the disc actually reaches on screen, from the live radius
+                        // rather than the locked one -- the gap between them IS the empty
+                        // margin the notes no longer fill.
+                        var e = renderer.graphToViewport({ x: (lastMaxR || 0) * UNIT, y: 0 });
+                        discPx = Math.hypot(e.x - a.x, e.y - a.y);
+                      }
+                      // Drawn sizes, as the reducer leaves them -- sizeScale included, which
+                      // is the multiplier NODE_MAX does not clamp.
+                      var sizes = [];
+                      if (renderer) {
+                        graph.forEachNode(function (id) {
+                          if (!visible(id)) return;
+                          var d = renderer.getNodeDisplayData(id);
+                          if (d && d.size > 0) sizes.push(d.size);
+                        });
+                        sizes.sort(function (x, y) { return x - y; });
+                      }
+                      var med = sizes.length ? sizes[Math.floor(sizes.length / 2)] : null;
+                      var r3 = function (v) { return v === null ? null : Math.round(v * 1000) / 1000; };
+                      return {
+                        shown: shown, lit: lit, total: graph.order,
+                        // The locked geometry, and how much of it the notes reach.
+                        lockedMaxR: geomLock ? Math.round(geomLock.maxR) : null,
+                        liveMaxR: Math.round(lastMaxR || 0),
+                        reach: geomLock && geomLock.maxR
+                          ? r3((lastMaxR || 0) / geomLock.maxR) : null,
+                        r0: geomLock ? r3(geomLock.r0) : null,
+                        // The hole as a SHARE of what is drawn. The r0 formula exists to hold
+                        // this constant; pinning r0 while the disc shrinks is what breaks it.
+                        holeShare: lastMaxR ? r3((geomLock ? geomLock.r0 : 0) / lastMaxR) : null,
+                        sp: r3(lastSP),
+                        unitPx: r3(unitPx),
+                        pitchPx: r3(pitchPx),
+                        pitchRoot: pitchPx ? r3(pitchPx * Math.sqrt(Math.max(1, shown))) : null,
+                        sizeScale: r3(sizeScale),
+                        sizeMedian: r3(med),
+                        sizeMin: r3(sizes.length ? sizes[0] : null),
+                        sizeMax: r3(sizes.length ? sizes[sizes.length - 1] : null),
+                        cameraRatio: r3(renderer ? renderer.getCamera().ratio : null)
+                      };
+                    },
                     // PLAN PARITY. The cascade must animate between the static
                     // planner's own outputs, or it walks between packings nothing else
                     // renders -- which is every jump chased on 2026-08-22. This
@@ -5421,24 +6761,111 @@ function mountVaultGraph(root, data, deps) {
                     // then toggle, then probeReport() -- it names the biggest single
                     // frame step per band, which is what "a jump" actually is.
                     probe: function (on) {
-                      probe = (on === false) ? null : { t0: NOW(), samples: [] };
+                      probe = (on === false) ? null
+                        : { t0: NOW(), samples: [], prevAng: null, prevR: null,
+                            watch: arguments.length > 1 ? String(arguments[1]) : null,
+                            watched: null, watchSeries: [] };
                       return probe ? "recording" : "off";
                     },
                     probeReport: function () {
                       if (!probe || !probe.samples.length) return "nothing recorded -- call __vg.probe(true) first";
                       var s = probe.samples, worst = { inner: 0, outer: 0 }, at = { inner: 0, outer: 0 };
+                      var tanWorst = 0, tanAt = 0, tanWho = null, ngWorst = 0, ngAt = 0;
+                      var startWorst = 0, startAt = 0, startG = null, overWorst = 0;
                       for (var i = 1; i < s.length; i++) {
                         var di = Math.abs(s[i].innerMax - s[i - 1].innerMax);
                         var doo = Math.abs(s[i].outerMax - s[i - 1].outerMax);
                         if (di > worst.inner) { worst.inner = di; at.inner = s[i].ms; }
                         if (doo > worst.outer) { worst.outer = doo; at.outer = s[i].ms; }
+                        if (s[i].tanStep > tanWorst) { tanWorst = s[i].tanStep; tanAt = s[i].ms; tanWho = s[i].tanId; }
+                        var ds = 0, dsG = null;
+                        Object.keys(s[i].starts || {}).forEach(function (g) {
+                          var was = (s[i - 1].starts || {})[g];
+                          if (was === undefined) return;
+                          var dd = Math.abs(s[i].starts[g] - was);
+                          if (dd > 180) dd = 360 - dd;
+                          if (dd > ds) { ds = dd; dsG = g; }
+                        });
+                        if (ds > startWorst) { startWorst = ds; startAt = s[i].ms; startG = dsG; }
+                        var dng = Math.max(Math.abs(s[i].ngO - s[i - 1].ngO), Math.abs(s[i].ngI - s[i - 1].ngI));
+                        if (dng > ngWorst) { ngWorst = dng; ngAt = s[i].ms; }
                       }
                       var out = {
                         frames: s.length,
                         spanMs: s[s.length - 1].ms,
+                        // The per-note radial worst, and the mean note's move. This is the
+                        // radial counterpart of tanMaxStep and the number to judge a jump by;
+                        // the band extents below are kept for context but are a max over a
+                        // churning set, so their step is not a step in the disc.
+                        radMaxStep: (function () {
+                          var w = 0, who = null, when = 0;
+                          for (var j = 0; j < s.length; j++) {
+                            if (s[j].radStep > w) { w = s[j].radStep; who = s[j].radId; when = s[j].ms; }
+                          }
+                          return { step: w, node: who, atMs: when };
+                        })(),
+                        radMeanStep: (function () {
+                          var t = 0, k = 0;
+                          for (var j = 0; j < s.length; j++) { t += s[j].radMean || 0; k++; }
+                          return Math.round(k ? t / k : 0);
+                        })(),
                         innerMaxStep: worst.inner, innerStepAtMs: at.inner,
                         outerMaxStep: worst.outer, outerStepAtMs: at.outer,
-                        first: s[0], last: s[s.length - 1], samples: s
+                        // HOW FAR EACH BAND WENT IN TOTAL. A per-frame step means nothing
+                        // on its own: a smooth animation over a long distance and a snap
+                        // over a short one produce the same number. Reported so a caller
+                        // can ask the only question that scales -- is this frame's move a
+                        // reasonable multiple of the average frame's share of the trip.
+                        // Needed once the lattice spacing began following the visible count
+                        // (github#13), which made a range cascade travel much further.
+                        innerTravel: Math.abs(s[s.length - 1].innerMax - s[0].innerMax),
+                        outerTravel: Math.abs(s[s.length - 1].outerMax - s[0].outerMax),
+                        // AND THE PATH, which is the honest denominator. Travel is net, so a
+                        // band that moves out and part-way back reports less than it went --
+                        // and comparing a frame's step against a net figure then flags a
+                        // smooth animation whose target was moving. The path is the sum of
+                        // the steps, so path / frames is the mean frame, and a frame can be
+                        // judged as a multiple of that.
+                        innerPath: (function () {
+                          var t = 0;
+                          for (var j = 1; j < s.length; j++) t += Math.abs(s[j].innerMax - s[j - 1].innerMax);
+                          return Math.round(t);
+                        })(),
+                        outerPath: (function () {
+                          var t = 0;
+                          for (var j = 1; j < s.length; j++) t += Math.abs(s[j].outerMax - s[j - 1].outerMax);
+                          return Math.round(t);
+                        })(),
+                        // The tangential jump, and the gap reservation behind it.
+                        tanMaxStep: tanWorst, tanStepAtMs: tanAt, tanStepNode: tanWho,
+                        // The handover frame, called out on its own: settle() replacing
+                        // the interpolation with a fresh rest computation.
+                        settleStep: (function () {
+                          for (var j = 1; j < s.length; j++) {
+                            if (s[j].tag === "settled") {
+                              return { tan: s[j].tanStep, over: s[j].tanOver,
+                                       mean: s[j].tanMean,
+                                       ngBefore: s[j - 1].ngO, ngAfter: s[j].ngO,
+                                       startsMoved: (function () {
+                                         var m = 0, g = null, a = s[j].starts || {}, b = s[j - 1].starts || {};
+                                         Object.keys(a).forEach(function (k) {
+                                           if (b[k] === undefined) return;
+                                           var d = Math.abs(a[k] - b[k]);
+                                           if (d > 180) d = 360 - d;
+                                           if (d > m) { m = d; g = k; }
+                                         });
+                                         return { deg: Math.round(m * 1000) / 1000, group: g };
+                                       })() };
+                            }
+                          }
+                          return null;
+                        })(),
+                        // A wedge boundary moving in one step IS the gap jumping.
+                        startMaxStep: Math.round(startWorst * 1000) / 1000,
+                        startStepAtMs: startAt, startStepGroup: startG,
+                        ngMaxStep: Math.round(ngWorst * 1000) / 1000, ngStepAtMs: ngAt,
+                        first: s[0], last: s[s.length - 1], samples: s,
+                        watch: probe.watch, watchSeries: probe.watchSeries
                       };
                       return out;   // the caller is a console; it prints this itself
                     },
@@ -5490,6 +6917,37 @@ function mountVaultGraph(root, data, deps) {
                     get hlBusy() { return !!hlRaf; },
                     // Re-derive the locked geometry, then settle. Needed after any of
                     // the above, because r0/rOuter/band membership are locked at load.
+                    // The date range, for the suite and the shooter.
+                    get dateSpan() { return dateSpan; },
+                    setRange: function (fromISO, toISO) {
+                      state.from = fromISO ? heatParse(fromISO) : null;
+                      state.to = toISO ? heatParse(toISO) : null;
+                      applyRange();
+                      heatDraw();
+                    },
+                    setHeatEnd: function (iso) {
+                      state.heatEnd = iso ? heatParse(iso) : null;
+                      heatBuild(); drawDateUI(); heatDraw();
+                    },
+                    lastCascade: function () { return lastCascade; },
+                    // The gap the LAST layout pass actually spent, per band. The probe
+                    // reports this per frame during an animation; a resting disc has no
+                    // frames, and "do two rest states agree about the gap" is the whole
+                    // question behind a jump at the end of one.
+                    lastGap: function () {
+                      return { ngI: lastNG.i, ngO: lastNG.o,
+                               gapDegI: lastGapDeg.i, gapDegO: lastGapDeg.o };
+                    },
+                    rangeReport: function () {
+                      var lit = 0, dated = 0;
+                      graph.forEachNode(function (id) {
+                        if ((alpha[id] || 0) > 0.004) lit++;
+                        if (tlMs[id] !== undefined) dated++;
+                      });
+                      return { from: state.from, to: state.to, heatEnd: state.heatEnd,
+                               lit: lit, dated: dated,
+                               total: graph.order, label: rangeLabel() };
+                    },
                     relayout: function () {
                       bandLock = null; geomLock = null;
                       regroup();
@@ -5525,6 +6983,7 @@ function mountVaultGraph(root, data, deps) {
     // so the band grows with the disc instead of appearing fully lit.
     buildHeatmapUI();
     heatBuild();
+    buildDateUI();
     fit();                 // frame the FULL disc first, so the camera holds still
     syncSizeScale();       // ...then size the dots to the pitch this window gives us
     // ...then grow the vault from its first note to now. This used to be
