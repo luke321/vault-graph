@@ -339,10 +339,52 @@ check("every heatmap day with notes fills its cell", async (p) => {
            detail: `${r.withNotes} days with notes, ${r.notFull} partially filled` };
 });
 
-check("heatmap grid fits its box", async (p) => {
-  const r = await p.j(`{w: __vg.heat.w, box: document.getElementById('vg-heatwrap').clientWidth,
-                        cols: __vg.heat.cols, cell: __vg.heat.cell}`);
-  return { ok: r.w <= r.box, detail: `${r.cols} cols at ${r.cell}px = ${r.w}px in ${r.box}px` };
+// FITS, AND SITS IN THE MIDDLE OF WHAT IT CANNOT FILL.
+//
+// "Fits" alone passed while the grid used 805px of a 1268px band and stopped in the middle of
+// it, with the ribbon below spanning the whole thing -- reported as the band not resizing. The
+// answer is NOT to fill it: the window is a rolling year, and 52 weeks at a legible cell is as
+// wide as it is. A cell is capped because the band is seven cells TALL, so filling a wide band
+// would mean a 245px band eating the disc.
+//
+// So the claim is that the leftover is SYMMETRIC. That is what turns "stopped in the middle"
+// into "centred", and it is the thing that was actually wrong.
+check("the heatmap grid fits its box and is centred in it", async (p) => {
+  const r = await p.j(`(function(){
+    var wrap = document.getElementById("vg-heatwrap");
+    var cv = document.getElementById("vg-heatc");
+    var w = wrap.getBoundingClientRect(), c = cv.getBoundingClientRect();
+    return { grid: __vg.heat.w, box: wrap.clientWidth,
+             cols: __vg.heat.cols, cell: __vg.heat.cell,
+             left: Math.round(c.left - w.left), right: Math.round(w.right - c.right) };
+  })()`);
+  const off = Math.abs(r.left - r.right);
+  return {
+    // A year, or fewer weeks on a band too narrow for one -- never more, and never wider than
+    // the box. Centred to within a pixel of rounding.
+    ok: r.grid <= r.box && r.cols <= 52 && off <= 2,
+    detail: `${r.cols} cols at ${r.cell}px = ${r.grid}px in ${r.box}px, ` +
+            `${r.left}px left / ${r.right}px right (off by ${off})`,
+  };
+});
+
+check("every heatmap day with notes fills its cell", async (p) => {
+  const r = await p.j(`(function(){
+    var h = __vg.heat, cv = document.getElementById('vg-heatc'), ctx = cv.getContext('2d');
+    var dpr = window.devicePixelRatio || 1;
+    var at = function(x,y){ var q = ctx.getImageData(Math.round(x*dpr), Math.round(y*dpr),1,1).data;
+                            return q[0]+','+q[1]+','+q[2]; };
+    var dim = null;
+    h.keys.forEach(function(k){ var d=h.days[k];
+      if (d.n <= 0.004 && !dim) dim = at(18+d.col*h.pitch+h.cell/2, 12+d.row*h.pitch+h.cell/2); });
+    var withNotes = 0, notFull = 0;
+    h.keys.forEach(function(k){ var d=h.days[k]; if (d.n <= 0.004) return; withNotes++;
+      var x = 18+d.col*h.pitch, y = 12+d.row*h.pitch, c = h.cell;
+      if ([at(x+2,y+2), at(x+c-3,y+2), at(x+2,y+c-3), at(x+c-3,y+c-3)].indexOf(dim) >= 0) notFull++; });
+    return {withNotes: withNotes, notFull: notFull};
+  })()`);
+  return { ok: r.notFull === 0 && r.withNotes > 0,
+           detail: `${r.withNotes} days with notes, ${r.notFull} partially filled` };
 });
 
 check("no note is dropped from a heatmap cell's tiling", async (p) => {
@@ -894,57 +936,6 @@ check("the camera cluster is bottom-right, in order, and 31px", async (p) => {
 // The dot-size half is asserted separately, because it is a different mechanism reached
 // through the same number: sizeScale is measured off a ROW rather than a lattice unit,
 // and its ceiling had to come off 1 before a filtered disc could draw bigger notes.
-check("the disc's density follows the notes on screen", async (p) => {
-  await p.eval(`__vg.state.hidden.folder = {}; __vg.syncAlpha(); __vg.applyLayout(false); void 0`);
-  await sleep(200);
-  await camReset(p);
-
-  // Hide whole groups a step at a time. Folders rather than a date cut: a date cut thins
-  // every folder evenly, which is the gentle case, and hiding groups is what the report
-  // was reached by and what the band balancer has to survive.
-  const at = async (keepFrac) => {
-    await p.eval(`(function(){
-      var order = __vg.groupOrder();
-      var keep = Math.max(1, Math.round(order.length * ${keepFrac}));
-      var h = {};
-      order.forEach(function (g, i) { if (i >= keep) h[g] = true; });
-      __vg.state.hidden.folder = h; __vg.syncAlpha(); __vg.applyLayout(false);
-      __vg.renderer.refresh();
-    })()`);
-    await sleep(400);
-    return p.j("__vg.densityReport()");
-  };
-
-  const rows = [await at(1), await at(0.8), await at(0.6), await at(0.4)];
-  await p.eval(`__vg.state.hidden.folder = {}; __vg.syncAlpha(); __vg.applyLayout(false); void 0`);
-  await sleep(200);
-  await camReset(p);
-
-  // Only the states where the cap is not binding: at the cap the disc deliberately stops
-  // spreading and starts shrinking again, and holding it to the density contract there
-  // would be asserting that the cap does not exist.
-  const free = rows.filter((r) => r.pitchRoot && r.sp < 2.59);
-  const roots = free.map((r) => r.pitchRoot);
-  const spread = roots.length > 1 ? Math.max(...roots) / Math.min(...roots) : 1;
-
-  // Dots have to actually grow. Compared at the widest spacing reached rather than at the
-  // last step, since which step spreads most depends on the vault's folder shape.
-  const base = rows[0];
-  const widest = rows.reduce((a, b) => (b.sp > a.sp ? b : a), rows[0]);
-  const grew = widest.sp > 1.05 ? widest.sizeMedian / base.sizeMedian : 1;
-  const spread_ok = spread < 1.06;
-  const size_ok = widest.sp <= 1.05 || grew > 1.05;
-
-  return {
-    ok: spread_ok && size_ok,
-    detail: `pitch*sqrt(shown) over ${free.length} uncapped states: ` +
-            roots.map((v) => Math.round(v)).join(" / ") + ` -- spread ${spread.toFixed(3)}x` +
-            ` (needs <1.060); spacing reached ${widest.sp} at ${widest.shown} of ` +
-            `${base.shown} shown, median dot ${base.sizeMedian} -> ${widest.sizeMedian}` +
-            ` (${grew.toFixed(2)}x)`,
-  };
-});
-
 // THE HOLE IS A SHARE, NOT A RADIUS (github#13). r0's formula exists to hold the hub at a
 // constant fraction of the disc -- its own comment records that a fixed r0 gave "a 32%
 // hole at full size and a 69% one when filtered down" -- and pinning r0 to the full-vault

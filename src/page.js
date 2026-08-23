@@ -689,23 +689,62 @@ function mountVaultGraph(root, data, deps) {
   // spreading -- which covers isolating a single PARA folder, the gesture this is for.
   var DENSITY_MAX = 2.6;
 
+
+
   // The lattice spacing the last plan actually used. Read by measureSizeScale, which has
   // to know how wide a ROW is rather than how wide a lattice unit is -- they were the
   // same number until the density solve, and conflating them is why dot size did not
   // respond to filtering at all.
   var lastSP = 1;
+  // The INNER band's spacing, alongside it. The two rings are solved separately, so one number
+  // cannot answer for both -- and when it tried, the inner ring's geometry followed the outer
+  // ring's filtering.
+  var lastSPI = 1;
+  // How deep each band is RIGHT NOW, in rows. The seam falls off against this rather than
+  // against the locked full-vault depth: filter a 10,000-note vault down to 500 and it should
+  // read like a 500-note vault, gaps included, not keep the hairline seam a ten-row-deep ring
+  // earned. Locked depth got that wrong in the one direction nobody checked.
+  var lastRows = { i: REF_ROWS, o: REF_ROWS };
 
-  // ONE ROW OF THE LATTICE, IN GRAPH UNITS. Everything that is a distance ON the disc -- the
-  // seam, a wedge's end margin, how big a dot may be, how much room a note has -- is really a
-  // multiple of this, and it is NOT UNIT any more.
+  // ONE ROW OF THE LATTICE AT FULL VAULT, IN GRAPH UNITS -- and deliberately NOT the live
+  // pitch, which is a different number at every filter state.
   //
-  // SP was a hard 1 when those were written, so UNIT was the pitch and the two were the same
-  // number. github#13 made SP the thing the density solve moves: a filtered disc spreads its
-  // lattice rather than shrinking, so the pitch is lastSP * UNIT and can be 1.8x that. Every
-  // constant quoted "in rows" has to be measured against this or it silently means something
-  // different at every filter state -- a seam of 0.075 rows would have been 0.075 UNIT, which
-  // is 4% of a row on a sparse disc instead of 7.5%.
-  function pitchUnits() { return UNIT * (lastSP || 1); }
+  // The seam and a wedge's end margins are quoted in rows, so they need a row to measure
+  // against. Using the LIVE pitch was the obvious reading and is wrong twice over:
+  //
+  //   * it makes the gap a function of the filter, which is the thing three earlier fixes were
+  //     about. Toggling one folder visibly moved every channel on the disc -- reported as "you
+  //     can see the gaps moving when toggling 08 Meeting Notes".
+  //   * the live pitch is PER BAND now, and there is only one lastSP. It holds the outer band's,
+  //     so the inner ring's seams were sized by the outer ring's spacing: hide outer folders,
+  //     SP_O climbs, and the inner ring's gaps grow for a reason that has nothing to do with
+  //     the inner ring. Reported as the inner gaps growing while outer folders were toggled.
+  //
+  // The full-vault pitch is one number, the same in both bands, and it does not move. A gap is
+  // a statement about the vault's structure, so that is the right clock for it. What DOES scale
+  // with the live lattice is the dots -- see dotUnits, which is about a dot and keeps the live
+  // pitch on purpose.
+  //
+  // TIMES INNER_SCALE IN THE INNER BAND, which is the factor that made the inner ring's
+  // channels read as much too wide. Inner radii are DRAWN at INNER_SCALE, so the inner band's
+  // real step is 0.8 of its lattice pitch -- measured, 117 units against the outer band's 159.
+  // Spending a full UNIT of margin there put the zero point alone at 160/117 = 1.37 steps,
+  // before any seam: a boundary wider than a note-to-note gap by half again, purely from using
+  // the wrong ring's ruler. Measured channels per band, before: inner 1.53/1.69/1.37 against
+  // outer 1.27/1.20/1.07 on the three vaults.
+  //
+  // THE LIVE PITCH, per band, and times INNER_SCALE in the inner one. A seam is a distance
+  // between notes, so it belongs on the same ruler the notes are spaced by -- and that ruler is
+  // the band's own live spacing. The locked pitch was tried and is wrong in the direction that
+  // was not being watched: it holds a filtered 10,000-note disc to the seam its full self
+  // earned, when what a person sees on screen is 500 notes that should look like 500 notes.
+  //
+  // Per band and never one shared number, which is the error that made the inner ring's gaps
+  // grow while outer folders were toggled.
+  function pitchUnits(band) {
+    var sp = band === "i" ? (lastSPI || 1) : (lastSP || 1);
+    return UNIT * sp * (band === "i" ? INNER_SCALE : 1);
+  }
 
   var NEST_MIN = 2;
   // Group folding is OFF now that there are 10 hues: it existed only because
@@ -914,6 +953,17 @@ function mountVaultGraph(root, data, deps) {
   // intent -- less seam as a vault grows -- against a quantity that actually describes the
   // geometry rather than standing in for it.
   var SEAM_ROWS = 0.075;    // of a row pitch, at REF_ROWS
+
+  // AND NEVER MORE THAN THIS, whatever the pitch does. The seam is a fraction of the live
+  // pitch, which is right -- a sparse ring wants a proportionally sparse seam -- until the
+  // pitch itself runs away: a heavily filtered band spreads its spacing by up to DENSITY_MAX,
+  // and a seam riding that comes out several times wider than any gap on a full disc. On a
+  // mostly-hidden demo vault it ate visible arcs out of the ring, which reads as the circle
+  // not being closed rather than as a wide seam.
+  //
+  // Against UNIT and not against the live pitch, because the point is to bound the runaway
+  // rather than to scale with it.
+  var SEAM_MAX_ROWS = 0.16;
   var REF_ROWS = 5;
   var SEAM_FALL = 1.5;      // (REF_ROWS / rows) ^ this
   var GAP_FULL_TO = 1000;     // pre-lock fallback only, from here down
@@ -931,7 +981,7 @@ function mountVaultGraph(root, data, deps) {
   // the two rings differ and a shallow inner ring should not be held to the outer one's seam.
   function seamFall(band) {
     var k = band === "i" ? "i" : "o";
-    var rows = (geomLock && geomLock.rows && geomLock.rows[k]) || REF_ROWS;
+    var rows = lastRows[k] || REF_ROWS;
     return Math.pow(REF_ROWS / Math.max(1, rows), SEAM_FALL);
   }
 
@@ -939,7 +989,10 @@ function mountVaultGraph(root, data, deps) {
     var k = band === "i" ? "i" : "o";
     var r = geomLock && geomLock.bandR ? geomLock.bandR[k] : 0;
     if (!r) return SLICE_GAP * Math.PI / 180 * gapScale() * frac;
-    return (SEAM_ROWS * seamFall(band) * frac * pitchUnits()) / r;
+    var w = SEAM_ROWS * seamFall(band) * pitchUnits(band);
+    var cap = SEAM_MAX_ROWS * UNIT;
+    if (w > cap) w = cap;
+    return (w * frac) / r;
   }
 
   function gapFor(nGroups, band) {
@@ -986,29 +1039,43 @@ function mountVaultGraph(root, data, deps) {
   // margin and the dot term were already the whole excess. Measured channels over an ordinary
   // step, before any of this: 1.60, 1.72, 1.52 on the three vaults -- so the excess to scale is
   // 0.60, 0.72 and 0.52 of a step, and it is emergent rather than a constant anyone set.
-  var EXCESS_KEEP = 0.5;    // of the channel, at REF_ROWS
+  var EXCESS_KEEP = 0.35;   // of the channel, at REF_ROWS
 
   // A TYPICAL dot's radius, in graph units. The end margin corrects for how this note differs
   // from typical rather than adding its whole radius: adding it made every boundary wider by
   // two radii, where the thing it was for -- both dots' EDGES equidistant from the seam -- only
   // needs the DIFFERENCE between them. A hub steps in, a leaf steps out, and a boundary between
   // two ordinary notes costs nothing at all.
-  var DOT_TYP = 0;
+  // PER BAND, because the correction is "how does this note differ from a typical one" and a
+  // typical note is not the same size in both rings: the two bands have their own spacing, so
+  // their dots have their own scale. Measuring against the outer band's typical dot inflated
+  // every inner-band margin by the difference -- measured, the inner ring's channel sat at
+  // 1.52 of a step against the outer ring's 1.20, with the zero point already correct at 1.03.
+  // A correction whose average is not zero is not a correction, it is a bias.
+  var DOT_TYP_I = 0, DOT_TYP_O = 0;
+  var dotTyp = function (band) { return band === "i" ? DOT_TYP_I : DOT_TYP_O; };
   function measureDotTyp() {
     var sizes = [];
     graph.forEachNode(function (id, a) { sizes.push(a.size || 4); });
     sizes.sort(function (x, y) { return x - y; });
-    DOT_TYP = sizes.length ? dotUnits(sizes[Math.floor(sizes.length / 2)]) : 0;
+    var mid = sizes.length ? sizes[Math.floor(sizes.length / 2)] : 4;
+    DOT_TYP_I = dotUnits(mid, "i");
+    DOT_TYP_O = dotUnits(mid, "o");
   }
 
   // A DOT'S RADIUS IN GRAPH UNITS. The layout needs a length, and `size` is in pixels -- but
   // the biggest dot is now pinned at DOT_OF_PITCH of the row pitch (see measureSizeScale), so
   // the conversion is a ratio of constants with no camera in it. That is the whole reason the
   // size rule was written that way round: a zoom-dependent radius could not be used here.
-  function dotUnits(size) {
+  // A dot's radius in graph units. The LIVE pitch, and per band: a dot is drawn against the
+  // spacing it actually has, which is the whole point of solving that per ring. `band` is "i"
+  // or "o"; anything else takes the outer, which is the one a caller without a band is
+  // almost certainly asking about.
+  function dotUnits(size, band) {
     var z = size || 4;
     if (z > NODE_MAX) z = NODE_MAX;
-    return DOT_OF_PITCH * pitchUnits() * (z / NODE_MAX);
+    var sp = band === "i" ? (lastSPI || 1) : (lastSP || 1);
+    return DOT_OF_PITCH * UNIT * sp * (z / NODE_MAX);
   }
 
   function seamAt(r, nBoundaries) {
@@ -1328,10 +1395,53 @@ function mountVaultGraph(root, data, deps) {
     // interpolation between its two endpoint packings instead, exactly as it does for
     // rows, so the last frame and rest agree by construction.
     var fullTotal = geomLock && geomLock.total > 0 ? geomLock.total : planTotal;
-    var density = spIn > 0 ? spIn
+    var density = (spIn && typeof spIn === "object") ? (spIn.o || 1)
+      : spIn > 0 ? spIn
       : (planTotal > 0.0001
           ? Math.min(DENSITY_MAX, Math.sqrt(fullTotal / planTotal)) : 1);
     var SP = density;
+
+    // ...AND THEN ONE PER BAND, because the two rings are packed independently and a single
+    // spacing makes each answer for the other's filtering.
+    //
+    // Hiding OUTER folders raises the disc-wide density -- fewer notes on screen, same box --
+    // so the inner ring spreads outward even though its own occupancy never changed, while the
+    // outer ring loses rows faster than the spreading puts back. The two close on each other.
+    // Measured on the 1402-note vault, hiding outer groups one at a time: the inner ring's
+    // outer edge went 1528 -> 1767 -> 1954 -> 2552 while the outer ring's fell 3761 -> 3762 ->
+    // 3375 -> 3030, and the clear space between them collapsed 843 -> 89 units.
+    //
+    // A band's spacing is now solved from ITS OWN occupancy, so hiding a folder moves the ring
+    // that folder is in and leaves the other one alone.
+    //
+    // Only once the split is LOCKED. Before that -- the one plan that produces bandLock -- the
+    // split is what the balancer is still searching for, so per-band totals would depend on the
+    // candidate being scored. That plan is the unfiltered one, where the density is 1 and the
+    // two are the same number anyway.
+    // HANDED IN DURING A CASCADE, never re-derived per frame. github#13 already established
+    // this for the single spacing -- "hand the cascade its spacing instead of letting it
+    // re-derive one per frame" -- and making the spacing per band quietly broke it: spIn fed
+    // only `density`, so the two bands went back to solving themselves from the live weights on
+    // every frame.
+    //
+    // That is visible and it is ugly. The row counts are integers and the rim solve below lands
+    // on them, so a spacing re-derived per frame is a step function of the frame: the disc
+    // jiggles, the inner ring stops animating at all because its own occupancy has not changed
+    // enough to move its solve, and then it jumps when the solve finally ticks. Reported as
+    // exactly that, disabling 04 and then 03.
+    //
+    // Walked between the two packings' own values, it is smooth by construction -- and the rim
+    // pin comes along for free, because each endpoint solved its own pin at rest.
+    var given = (spIn && typeof spIn === "object") ? spIn : null;
+    var SP_I = given && given.i > 0 ? given.i : SP;
+    var SP_O = given && given.o > 0 ? given.o : SP;
+    var bandDensity = function (cells, key) {
+      if (!geomLock || !geomLock.bandTotal) return SP;
+      var full = geomLock.bandTotal[key] || 0, now = 0;
+      cells.forEach(function (c) { now += c.wsum; });
+      if (!(full > 0.0001) || !(now > 0.0001)) return SP;
+      return Math.min(DENSITY_MAX, Math.sqrt(full / now));
+    };
     var r0 = geomLock ? geomLock.r0 : Math.max(1.5, HOLE * Math.sqrt(
       Math.max(1, TOTAL) / (Math.PI * (1 - HOLE * HOLE))));
 
@@ -1347,10 +1457,13 @@ function mountVaultGraph(root, data, deps) {
     // and put the padded plan's maxR one row outside the lean plan's (github#5). The
     // cascade's row recorder already worked around the same floor by hand; the geometry
     // never did.
-    function rowsNeeded(span, n, st) {
+    // `sp` defaults to the disc-wide spacing, which is what the balancer wants: it is scoring
+    // candidate splits and there is no per-band answer until one is chosen.
+    function rowsNeeded(span, n, st, sp) {
       if (!(n > 0)) return 0;
+      var p = sp > 0 ? sp : SP;
       var i = 0, r = st, k = 0;
-      while (i < n && k < 500) { i += Math.max(0.05, span * r / SP); r += SP; k++; }
+      while (i < n && k < 500) { i += Math.max(0.05, span * r / p); r += p; k++; }
       return Math.max(1, k);
     }
 
@@ -1654,21 +1767,52 @@ function mountVaultGraph(root, data, deps) {
     })();
 
     // Inner band first, from the hub outward; the main band starts past it.
+    if (!given) {
+      SP_I = bandDensity(inner, "i");
+      SP_O = bandDensity(outer, "o");
+    }
+
+    // WHY THERE IS NO CONSTANT-EXTENT SOLVE HERE, having built one twice.
+    //
+    // Holding each ring's thickness fixed and letting the spacing fall out of it is the right
+    // shape for the problem -- a disc that keeps its size under filtering is what a person
+    // wants -- and it does not survive contact with the row count.
+    //
+    // The two relations are: rows = what this spacing needs (rowsNeeded RISES with spacing,
+    // because a wider row holds fewer notes), and spacing = span / (rows - 1). The composite is
+    // monotone DECREASING, so plain iteration flips between two extremes rather than settling --
+    // measured on the 10k vault, the inner band landed on 31 rows at 4.096 units, a spacing 60x
+    // narrower than the counts had been solved against, which drew a lattice of mostly-empty
+    // rows (spread 112 against 0 for a clean band). Damping with the geometric mean converges,
+    // and converges to a DEGENERATE point: as the spacing narrows the capacity per row grows
+    // without bound, one row suffices, and that drives the spacing back to the cap. Measured
+    // there: 18 rows at 0.313 units, spread 164.
+    //
+    // Fixing the spacing and NOT re-deriving the count holds the span exactly and is the same
+    // failure by another route: the counts then belong to a spacing nobody drew.
+    //
+    // What would work is not an iteration at all. A band of thickness T over an angular span A
+    // at radius r has a known area, and a square lattice of pitch s holds area/s^2 notes -- so
+    // s and rows = T/s come out of one division, consistent by construction, with the count
+    // never solved against a spacing it will not be drawn with. That is a rewrite of rowsNeeded
+    // rather than a wrapper around it, so it is left for its own pass rather than bolted on at
+    // the end of this one. The per-band density solve below is what ships: it stops the two
+    // rings converging, which was the reported bug, and leaves the rim moving under heavy
+    // filtering, which is measured in .ai-context/changelog-detail.md.
     var innerRows = 0;
     inner.forEach(function (c) {
-      c.rows = rowsNeeded(usableRef(c, r0), c.wsum, r0);
+      c.rows = rowsNeeded(usableRef(c, r0), c.wsum, r0, SP_I);
       if (c.rows > innerRows) innerRows = c.rows;
     });
     var rOuter = geomLock ? geomLock.rOuter
-               : (inner.length ? r0 + innerRows * SP + GUTTER : r0);
+               : (inner.length ? r0 + innerRows * SP_I + 1.6 * SP_I : r0);
 
     var maxR = rOuter;
     outer.forEach(function (c) {
-      c.rows = rowsNeeded(usableRef(c, rOuter), c.wsum, rOuter);
-      var r = rOuter + c.rows * SP;
+      c.rows = rowsNeeded(usableRef(c, rOuter), c.wsum, rOuter, SP_O);
+      var r = rOuter + c.rows * SP_O;
       if (r > maxR) maxR = r;
     });
-
     // WHY THERE IS NO CORRECTION PASS HERE, having tried one.
     //
     // The open-loop solve leaves maxR a few percent past the locked extent -- measured,
@@ -1712,6 +1856,9 @@ function mountVaultGraph(root, data, deps) {
     // the coordinate crosses a boundary, and the triangle wave keeps u continuous
     // across that tick (an even row runs 0 -> 1, the next runs 1 -> 0).
     function placeCell(c, rows, base) {
+      // The spacing of the band this cell is in -- rows sit this far apart, and the capacity
+      // arithmetic below inverts against the same number.
+      var SP = c.inner ? SP_I : SP_O;
       var live = [], dead = [];
       c.list.forEach(function (id) { (W(id) > 0.0001 ? live : dead).push(id); });
       var seq = live.concat(dead);
@@ -1788,7 +1935,7 @@ function mountVaultGraph(root, data, deps) {
         rowW[r.row] = (rowW[r.row] || 0) + r.w;
         if (rowFirst[r.row] === undefined) rowFirst[r.row] = r.w;
         rowLast[r.row] = r.w;
-        var dz = dotUnits(graph.getNodeAttribute(r.id, "size"));
+        var dz = dotUnits(graph.getNodeAttribute(r.id, "size"), c.inner ? "i" : "o");
         if (edgeA[r.row] === undefined) edgeA[r.row] = dz;
         edgeB[r.row] = dz;
       });
@@ -1842,7 +1989,12 @@ function mountVaultGraph(root, data, deps) {
     });
 
     return { cells: cells, maxR: maxR, total: planTotal, r0: r0, rOuter: rOuter,
-             sp: SP, density: density };
+             sp: SP_O, spInner: SP_I, density: density,
+             rows: { i: innerRows, o: (function () {
+               var m = 0;
+               outer.forEach(function (c) { if (c.rows > m) m = c.rows; });
+               return m || REF_ROWS;
+             })() } };
   }
 
   // RETIRED 2026-08-22. This used to switch the plan basis on how much of the vault
@@ -1952,6 +2104,8 @@ function mountVaultGraph(root, data, deps) {
     // Recorded beside lastMaxR and for the same reason: both are properties of the
     // packing on screen, and both are read from render-time code that has no plan.
     if (plan.sp > 0) lastSP = plan.sp;
+    if (plan.spInner > 0) lastSPI = plan.spInner;
+    if (plan.rows) lastRows = plan.rows;
 
     // The inner and main bands are each a full circle, so they are allocated
     // separately -- a small cell competes only with the other small cells.
@@ -2098,11 +2252,12 @@ function mountVaultGraph(root, data, deps) {
           // in from their own edge put those two notes exactly one step apart, which is a
           // boundary nobody can see. Everything past that is the channel, and the channel is
           // what gets scaled -- including the seam, which sits inside it.
-          var zero = MARGIN_ROWS * pitchUnits();
+          var zero = MARGIN_ROWS * pitchUnits(isInner ? "i" : "o");
           var seamArc = sm.gap * rGraph / 2;      // this side's half of the seam, in units
           var keep = EXCESS_KEEP * seamFall(isInner ? "i" : "o");
+          var typ = dotTyp(isInner ? "i" : "o");
           var side = function (e) {
-            var raw = zero + ((e || 0) - DOT_TYP);    // what the boundary would have cost
+            var raw = zero + ((e || 0) - typ);        // what the boundary would have cost
             var m = zero + keep * (raw - zero + seamArc) - seamArc;
             return m < 0 ? 0 : m / rGraph;
           };
@@ -2882,6 +3037,10 @@ function mountVaultGraph(root, data, deps) {
     // spacing is global by construction -- it is what makes the packing uniform -- so
     // there is one number per endpoint rather than one per cell.
     var spSrc = 1, spDst = 1;
+    // Per band, for the same reason the layout is: one number cannot carry two rings, and a
+    // ring whose spacing is interpolated from the other ring's endpoints is a ring that moves
+    // when the other one is filtered.
+    var spSrcB = { i: 1, o: 1 }, spDstB = { i: 1, o: 1 };
     var rowsSrc = Object.create(null), rowsDst = Object.create(null);
     var bandSrc = Object.create(null), bandDst = Object.create(null);
     // A group is PRESENT at an end if it has any seated weight there -- one wedge, one
@@ -2946,6 +3105,8 @@ function mountVaultGraph(root, data, deps) {
       // whatever alpha happened to be on some frame.
       if (a && a.sp > 0) spSrc = a.sp;
       if (b && b.sp > 0) spDst = b.sp;
+      if (a) { spSrcB = { i: a.spInner || a.sp || 1, o: a.sp || 1 }; }
+      if (b) { spDstB = { i: b.spInner || b.sp || 1, o: b.sp || 1 }; }
       var seen = Object.create(null);
       var presFor = function (p, m) {
         if (!p) return;
@@ -3050,7 +3211,10 @@ function mountVaultGraph(root, data, deps) {
       };
       // Same clock as the rows and the gap reservation above: at ease 0 this is the
       // packing the disc is resting in and at 1 it is the one settle() assigns.
-      var spNow = spSrc + (spDst - spSrc) * ease;
+      var spNow = {
+        i: spSrcB.i + (spDstB.i - spSrcB.i) * ease,
+        o: spSrcB.o + (spDstB.o - spSrcB.o) * ease,
+      };
       var plan = buildWedgePlan(ovAfter, weightOf, rowsAt, spNow);
       var targets = plan ? ringsLayout(plan, true) : null;
       // CONVERGE BEFORE SETTLING. Easing closes only RADIAL_EASE of each note's gap
@@ -3914,6 +4078,10 @@ function mountVaultGraph(root, data, deps) {
   // inferring it from a ratio of counts.
   var DOT_OF_PITCH = 11 / 28;   // biggest dot RADIUS, as a fraction of the lattice pitch
   var DOT_MIN_PX = 1.5;         // and the smallest is still a dot
+  // How far a dot may grow with a spreading lattice before it stops following it. 1.6 of a
+  // normal row's worth: enough that a filtered disc reads as bigger dots, short of the point
+  // where two of them are most of the space between their neighbours.
+  var DOT_MAX_SPREAD = 1.6;
   // display px = DOT_M * attr size + DOT_B, never below DOT_LO.
   var DOT_M = 1, DOT_B = 0, DOT_LO = DOT_MIN_PX;
   var sizeScale = 1;            // kept for the probe and the report; = DOT_M at NODE_MAX
@@ -3951,7 +4119,14 @@ function mountVaultGraph(root, data, deps) {
     //
     // Unbounded is the honest answer: zoomed far enough in, one note SHOULD fill the view.
     // NODE_MAX stays as the top of the attribute range the line below maps from.
+    // CAPPED IN ABSOLUTE TERMS TOO. DOT_OF_PITCH of the live pitch is the relationship that
+    // has to hold -- a dot against the space it has -- but a heavily filtered band spreads its
+    // pitch by up to DENSITY_MAX, and a dot riding that is a blob. The ratio is
+    // preserved right up to the cap and then held, which reads as a sparse ring of ordinary
+    // dots rather than a handful of balloons.
     var hi = DOT_OF_PITCH * pitch;
+    var hiCap = DOT_OF_PITCH * UNIT * DOT_MAX_SPREAD * cam;
+    if (hi > hiCap) hi = hiCap;
     // The floor is the one thing that IS about pixels on screen -- a dot has to stay visible --
     // so it is converted the other way, from px to the size units sigma will divide by ratio.
     var lo = Math.min(hi, DOT_MIN_PX * cam);
@@ -4395,7 +4570,15 @@ function mountVaultGraph(root, data, deps) {
         eyeBtn('data-eye="' + esc(g) + '"', vis, g) +
         '<button class="lg" data-g="' + esc(g) + '" data-hl="' + (hl ? "on" : "off") +
           '" aria-pressed="' + vis + '" title="Highlight ' + esc(g) + '">' +
-        '<span class="sw" style="background:' + colorOf(g) + '"></span>' +
+        // THE SWATCH SAYS WHICH RING, by its size: a small square for the inner band and a
+        // full one for the outer. The legend named a colour and a count and said nothing about
+        // where on the disc to look, which is the one thing a two-ring layout needs it to say.
+        // Size rather than another glyph or another colour: it costs no room, adds no
+        // vocabulary, and the inner ring IS the smaller ring -- so the mark and the thing it
+        // stands for read the same way round.
+        '<span class="sw' + (bandLock && bandLock[g] ? ' sw-in' : '') +
+          '" title="' + (bandLock && bandLock[g] ? 'Inner ring' : 'Outer ring') +
+          '" style="background:' + colorOf(g) + '"></span>' +
         '<span class="nm" title="' + esc(g) + '">' + esc(g) + '</span>' +
         '<span class="only" data-only="1" title="Show only ' + esc(g) + '">only</span>' +
         '<span class="ct">' + counts[g] + '</span></button>' +
@@ -4510,8 +4693,13 @@ function mountVaultGraph(root, data, deps) {
     // Twisties: pure disclosure. No layout consequence at all, so no cascade -- the
     // pie already shows every sub-wedge whether or not the legend lists it.
     each("[data-tw]", function (b) {
+      var g = b.getAttribute("data-tw");
+      // THE WHOLE ROW ANSWERS "WHERE IS THIS FOLDER", not just the label. The halo was bound
+      // to the label button alone, and the eye and the twisty are its SIBLINGS -- so reaching
+      // for the control you actually wanted lost the answer you were using to aim with.
+      b.onmouseenter = function () { hoverHighlight(g, null); };
+      b.onmouseleave = function () { hoverHighlight(null, null); };
       b.onclick = function () {
-        var g = b.getAttribute("data-tw");
         if (state.collapsed[g]) delete state.collapsed[g]; else state.collapsed[g] = true;
         buildLegend();
       };
@@ -4563,8 +4751,11 @@ function mountVaultGraph(root, data, deps) {
 
     // Eyes: visibility, which is what the whole row used to do.
     each("[data-eye]", function (b) {
+      var g = b.getAttribute("data-eye");
+      // Same as the twisty: hovering the eye haloes what the eye is about to hide.
+      b.onmouseenter = function () { hoverHighlight(g, null); };
+      b.onmouseleave = function () { hoverHighlight(null, null); };
       b.onclick = function () {
-        var g = b.getAttribute("data-eye");
         var h = state.hidden[state.dim] || (state.hidden[state.dim] = Object.create(null));
         h[g] = !h[g];
         buildLegend();
@@ -4687,6 +4878,11 @@ function mountVaultGraph(root, data, deps) {
         // Each band's OUTER EDGE, in graph units, which is what the seam is sized against.
         // Taken from the full-vault plan's own slots -- the radius a note actually sits at,
         // rather than the lattice figure maxR holds, because a seam is a width between dots.
+        // PER BAND as well as in total, because the spacing is solved per band now: each ring
+        // asks how much of ITS OWN notes are showing, so hiding a folder moves the ring that
+        // folder is in and leaves the other one alone.
+        var bandTotal = { i: 0, o: 0 };
+        base.cells.forEach(function (c) { bandTotal[c.inner ? "i" : "o"] += c.wsum; });
         var bandR = { i: 0, o: 0 }, bandRows = { i: 0, o: 0 };
         base.cells.forEach(function (c) {
           var k = c.inner ? "i" : "o";
@@ -4707,7 +4903,8 @@ function mountVaultGraph(root, data, deps) {
         // the vault is on screen" and this is the "of the vault" half. Captured from the same
         // unfiltered plan as the radii, so the two cannot disagree.
         geomLock = { r0: base.r0, rOuter: base.rOuter, maxR: base.maxR,
-                     total: base.total, bandR: bandR, rows: bandRows };
+                     total: base.total, bandTotal: bandTotal,
+                     bandR: bandR, rows: bandRows };
 
         // AND THEN AGAIN, now that bandR exists. This plan was built before it did, so its
         // gaps came from the pre-lock fallback rule rather than from the seam -- a different
@@ -4720,7 +4917,8 @@ function mountVaultGraph(root, data, deps) {
         // stays with the first, because which ring a group belongs to must not depend on a gap.
         var again = buildWedgePlan(false);
         if (again) geomLock = { r0: again.r0, rOuter: again.rOuter, maxR: again.maxR,
-                                total: again.total, bandR: bandR, rows: bandRows };
+                                total: again.total, bandTotal: bandTotal,
+                                bandR: bandR, rows: bandRows };
 
         // PIN THE NORMALISATION BOX. Sigma rescales node coordinates against the
         // graph's bounding box on every refresh (autoRescale, on by default), so
@@ -5016,6 +5214,24 @@ function mountVaultGraph(root, data, deps) {
     // would save a value the host just handed us.
     setPan(panEnabled, false);
     $("png").onclick = savePng;
+    // COPIES THE DUMP, and falls back to the console when the clipboard refuses -- which it
+    // does on a page opened from a file in some builds. Either way the text exists somewhere
+    // it can be pasted from, which is the whole job.
+    if ($("dbg")) $("dbg").onclick = function () {
+      var txt = JSON.stringify(API.debugDump(), null, 2);
+      var done = function (how) {
+        var b = $("dbg");
+        b.textContent = how;
+        WIN.setTimeout(function () { b.textContent = "Debug"; }, 1600);
+      };
+      try {
+        WIN.navigator.clipboard.writeText(txt).then(function () { done("Copied"); },
+                                                    function () { console.log(txt); done("In console"); });
+      } catch (e) {
+        console.log(txt);
+        done("In console");
+      }
+    };
 
     // THE GEAR, if a host asked for it in either of the two ways. It is hidden by default
     // because a page that cannot store a setting should not offer to change one.
@@ -5365,6 +5581,13 @@ function mountVaultGraph(root, data, deps) {
   //
   // WEEKS START MONDAY, because the vault's own weeks do: weekly reviews are filed
   // by ISO week, and an ISO week starts Monday. This is not GitHub's grid.
+  // A CEILING, not the answer: heatGeom picks the count that fills the band at a legible cell
+  // and clamps to this. Three years, because past that the window stops being "recently" and
+  // the ribbon below is the instrument for picking a year.
+  // A ROLLING YEAR. It was raised to three so a wide band could be filled, and filling it is
+  // not worth the trade: the window is what "notes added" is about, and a year is the span a
+  // person reads a year-over-year grid as. A wide band therefore has room left over, which is
+  // handled by CENTRING the grid rather than by inventing more history to put in it.
   var HEAT_WEEKS = 52;
   // 52 columns of the trailing year, WHEN THEY FIT. Measured on this vault that window
   // holds 420 of 454 dated notes; the other 30 carry CONTENT dates back to 2015 (books,
@@ -5436,16 +5659,33 @@ function mountVaultGraph(root, data, deps) {
   // copies of this arithmetic is how the guard ends up disagreeing with the build and
   // the band quietly stops resizing.
   //
-  // Weeks are dropped BEFORE pixels: columns are how many fit at the smallest legible
-  // cell, then the cell grows to fill what is actually there. So a wide window gets the
-  // full year and a narrow one gets fewer weeks at a readable size -- never 52 weeks of
-  // 3px smear, and never a scrollbar.
+  // THE WINDOW IS AS MANY WEEKS AS THE BAND CAN SHOW at a legible cell -- not 52 of them with
+  // the rest of the band left empty.
+  //
+  // It used to take 52 and grow the cell to fill, which cannot work: the cell is capped at
+  // HEAT_CELL_MAX because the band is seven cells TALL and a 33px cell would be a 245px band
+  // eating the disc. So the cap bound first and the leftover width simply stayed empty --
+  // measured, 52 cols at 13px is 805px of a 1268px band, and on a 1900px window barely half of
+  // it. Two instruments about the same axis, the strip below spanning the full width and the
+  // grid above stopping in the middle.
+  //
+  // So the CELL is what is fixed and the COLUMNS are what flex: pick the count that lands the
+  // cell near its cap and fills the width. A wide band shows more history at the same
+  // legibility, which is the useful direction -- and the readout already says "last N weeks"
+  // from this number, so it stays honest without a second change.
+  //
+  // Bounded by the vault's own span, because a window reaching past the first note is empty
+  // columns pretending to be data.
   function heatGeom() {
     var wrap = $("heatwrap");
     var avail = ((wrap && wrap.clientWidth) || $("stage").clientWidth || 900) - HEAT_GUTTER;
     avail -= HEAT_ARROW_W;
-    var fits = Math.floor((avail + HEAT_GAP) / (HEAT_CELL_MIN + HEAT_GAP));
-    var cols = Math.max(HEAT_WEEKS_MIN, Math.min(HEAT_WEEKS, fits));
+    // At the target cell, then clamped: never below the minimum legible count, never past the
+    // ceiling, never wider than the vault is old.
+    var want = Math.floor((avail + HEAT_GAP) / (HEAT_CELL_MAX + HEAT_GAP));
+    var span = dateSpan ? Math.ceil((dateSpan.hi - dateSpan.lo) / WEEK_MS) + 1 : HEAT_WEEKS;
+    var cols = Math.max(HEAT_WEEKS_MIN, Math.min(HEAT_WEEKS, span, want));
+    // Whatever the count came out as, spend the width on the cell rather than leaving a gap.
     var cell = Math.floor((avail - (cols - 1) * HEAT_GAP) / cols);
     return { cols: cols, cell: Math.max(HEAT_CELL_MIN, Math.min(HEAT_CELL_MAX, cell)) };
   }
@@ -7503,6 +7743,109 @@ function mountVaultGraph(root, data, deps) {
                     // question behind a jump at the end of one.
                     // Where the strip puts a date, for checking the year buttons line up.
                     ribbonXOf: function (ms) { return ribbonX(ms, ribbonW()); },
+                    /**
+                     * EVERYTHING NEEDED TO REPRODUCE WHAT IS ON SCREEN, as one object.
+                     *
+                     * Reporting a layout problem by describing it costs a round trip per
+                     * unknown -- which folders were hidden, what the range was, how deep each
+                     * band was, what the spacing came out as. Most of this session's
+                     * measurements were a probe written to answer one of those and then thrown
+                     * away. This is those probes, kept, behind a button.
+                     *
+                     * Measured off the LIVE state, not the plan: what matters is the disc a
+                     * person is looking at, and the two have disagreed more than once.
+                     */
+                    debugDump: function () {
+                      var a0 = renderer ? renderer.graphToViewport({ x: 0, y: 0 }) : null;
+                      var b0 = renderer ? renderer.graphToViewport({ x: UNIT, y: 0 }) : null;
+                      var pxPerRow = a0 && b0 ? Math.hypot(b0.x - a0.x, b0.y - a0.y) : 0;
+                      var perPx = pxPerRow > 0 ? UNIT / pxPerRow : 0;
+                      // Radii and drawn sizes of everything on screen, split into bands on the
+                      // largest radial gap -- the same split every probe in this session used.
+                      var pts = [];
+                      graph.forEachNode(function (id, a) {
+                        if ((alpha[id] || 0) <= 0.004) return;
+                        var d = renderer && renderer.getNodeDisplayData(id);
+                        pts.push({ r: Math.hypot(a.x, a.y), th: Math.atan2(a.y, a.x),
+                                   rad: (d ? d.size : 4) * perPx, g: a.folder });
+                      });
+                      pts.sort(function (x, y) { return x.r - y.r; });
+                      var gi = 0, gap = 0;
+                      for (var i = 1; i < pts.length; i++) {
+                        var gg = pts[i].r - pts[i - 1].r;
+                        if (gg > gap) { gap = gg; gi = i; }
+                      }
+                      var r3 = function (v) { return Math.round(v * 1000) / 1000; };
+                      var bandStat = function (arr) {
+                        if (!arr.length) return null;
+                        var rows = {}, steps = [], clears = [], worst = 1e9;
+                        arr.forEach(function (q) {
+                          var k = Math.round(q.r / 8) * 8;
+                          (rows[k] || (rows[k] = [])).push(q);
+                        });
+                        Object.keys(rows).forEach(function (k) {
+                          var row = rows[k].slice().sort(function (x, y) { return x.th - y.th; });
+                          for (var i = 1; i < row.length; i++) {
+                            var arc = (row[i].th - row[i - 1].th) * (+k);
+                            if (!(arc > 1 && arc < 3000)) continue;
+                            steps.push(arc);
+                            var cl = arc - row[i].rad - row[i - 1].rad;
+                            clears.push(cl);
+                            if (cl < worst) worst = cl;
+                          }
+                        });
+                        steps.sort(function (x, y) { return x - y; });
+                        var q = function (f) {
+                          return steps.length ? Math.round(steps[Math.floor(steps.length * f)]) : 0;
+                        };
+                        var radii = arr.map(function (x) { return x.rad; }).sort(function (x, y) { return x - y; });
+                        return {
+                          notes: arr.length, rows: Object.keys(rows).length,
+                          inner: Math.round(arr[0].r), outer: Math.round(arr[arr.length - 1].r),
+                          step35: q(0.35), step95: q(0.95),
+                          channelRatio: q(0.35) ? r3(q(0.95) / q(0.35)) : 0,
+                          dotRadius: { min: Math.round(radii[0]),
+                                       med: Math.round(radii[Math.floor(radii.length / 2)]),
+                                       max: Math.round(radii[radii.length - 1]) },
+                          worstPairClearance: worst === 1e9 ? null : Math.round(worst),
+                          overlappingPairs: clears.filter(function (c) { return c < 0; }).length,
+                        };
+                      };
+                      var cam = renderer ? renderer.getCamera().getState() : null;
+                      var hidden = Object.keys(state.hidden[state.dim] || {}).filter(function (k) {
+                        return (state.hidden[state.dim] || {})[k];
+                      });
+                      return {
+                        note: "vault-graph debug dump -- paste this back verbatim",
+                        vault: { name: DATA.vault || "", notes: graph.order,
+                                 links: graph.size, generated: DATA.generated || "" },
+                        screen: { win: WIN.innerWidth + "x" + WIN.innerHeight,
+                                  dpr: WIN.devicePixelRatio || 1,
+                                  stage: $("canvas") ? Math.round($("canvas").clientWidth) + "x" +
+                                         Math.round($("canvas").clientHeight) : "",
+                                  pxPerRow: r3(pxPerRow) },
+                        camera: cam ? { x: r3(cam.x), y: r3(cam.y), ratio: r3(cam.ratio) } : null,
+                        filters: { hiddenFolders: hidden,
+                                   hiddenSub: Object.keys(state.hiddenSub || {}),
+                                   range: rangeLabel(),
+                                   from: state.from, to: state.to, heatEnd: state.heatEnd,
+                                   timelineUntil: state.until,
+                                   markToday: !!state.markToday, shown: pts.length },
+                        spacing: { spOuter: r3(lastSP), spInner: r3(lastSPI),
+                                   rowsOuter: lastRows.o, rowsInner: lastRows.i,
+                                   pitchOuterUnits: r3(pitchUnits("o")),
+                                   pitchInnerUnits: r3(pitchUnits("i")) },
+                        seam: { outerDeg: lastGapDeg.o, innerDeg: lastGapDeg.i,
+                                nGOuter: lastNG.o, nGInner: lastNG.i,
+                                fallOuter: r3(seamFall("o")), fallInner: r3(seamFall("i")) },
+                        locked: geomLock ? { r0: r3(geomLock.r0), rOuter: r3(geomLock.rOuter),
+                                             maxR: r3(geomLock.maxR), rows: geomLock.rows,
+                                             bandTotal: geomLock.bandTotal } : null,
+                        bands: { inner: bandStat(pts.slice(0, gi)), outer: bandStat(pts.slice(gi)) },
+                        dots: { ofPitch: r3(DOT_OF_PITCH), minPx: DOT_MIN_PX,
+                                maxSpread: DOT_MAX_SPREAD, m: r3(DOT_M), b: r3(DOT_B), lo: r3(DOT_LO) },
+                      };
+                    },
                     lastGap: function () {
                       return { ngI: lastNG.i, ngO: lastNG.o,
                                gapDegI: lastGapDeg.i, gapDegO: lastGapDeg.o };
