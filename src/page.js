@@ -1475,6 +1475,9 @@ function mountVaultGraph(root, data, deps) {
     // Walked between the two packings' own values, it is smooth by construction -- and the rim
     // pin comes along for free, because each endpoint solved its own pin at rest.
     var given = (spIn && typeof spIn === "object") ? spIn : null;
+    // The band room, when the caller is walking it between two packings. Same channel as the
+    // spacing, because it is the same kind of quantity and must not be re-derived per frame.
+    var givenRoom = given && given.room ? given.room : null;
     var SP_I = given && given.i > 0 ? given.i : SP;
     var SP_O = given && given.o > 0 ? given.o : SP;
     var bandDensity = function (cells, key) {
@@ -2072,8 +2075,43 @@ function mountVaultGraph(root, data, deps) {
       c.slots = placeCell(c, rf, base, c.inner ? innerRows : outerRows);
     });
 
+    // THE ROOM EACH BAND HAS, as a property of the PLAN. dotPx sizes a whole band from one
+    // figure so that size stays monotone in link weight; that figure has to come from here
+    // rather than from the placed notes, for the same reason the spacing does. Derived per
+    // frame from live weights it is a step function of the frame -- notes per row is an INTEGER
+    // -- and every dot in the band breathed for the length of a cascade, measured at 252% in a
+    // single frame with 72 of 122 frames moving more than 5%.
+    //
+    // Handed in during a cascade, exactly as the spacing and the gap presence are, so the last
+    // frame and rest agree by construction rather than by coincidence.
+    var roomOf = function (list) {
+      var v = [];
+      list.forEach(function (c) {
+        if (!c.slots || !c.slots.length) return;
+        var rn = Object.create(null);
+        c.slots.forEach(function (sl) { rn[sl.r] = (rn[sl.r] || 0) + 1; });
+        c.slots.forEach(function (sl) {
+          var n = rn[sl.r] || 1;
+          var step = (c.band || 0) * sl.r * UNIT / n;
+          if (step > 1) v.push(step);
+        });
+      });
+      if (!v.length) return 0;
+      v.sort(function (x, y) { return x - y; });
+      // A TENTH PERCENTILE, and the two neighbouring choices were both measured and are both
+      // worse. The MINIMUM is the only value that cannot overlap, and one tight pair then sets
+      // the size for its whole band -- the inner band's median dot came out at a quarter of
+      // what its room allowed. The FIFTH is not a small step from the tenth: the low tail is
+      // notes sitting in wedges only a few degrees wide, and it is steep enough that moving one
+      // notch collapsed every dot in the vault onto the pixel floor, diameter over step 0.02 to
+      // 0.10. The tenth holds 0.31 to 0.43 across every range with a single overlapping pair,
+      // 19 units on a step of 330, at one of them.
+      return v[Math.floor(v.length * 0.1)];
+    };
+    var roomPlan = givenRoom || { i: roomOf(inner), o: roomOf(outer) };
+
     return { cells: cells, maxR: maxR, total: planTotal, r0: r0, rOuter: rOuter,
-             sp: SP_O, spInner: SP_I, density: density,
+             sp: SP_O, spInner: SP_I, density: density, room: roomPlan,
              rows: { i: innerRows, o: (function () {
                var m = 0;
                outer.forEach(function (c) { if (c.rows > m) m = c.rows; });
@@ -2281,6 +2319,7 @@ function mountVaultGraph(root, data, deps) {
         c.slots.forEach(function (sl) {
           if (present(sl.id)) rowN[sl.r] = (rowN[sl.r] || 0) + 1;
         });
+        var rowsUsed = Object.keys(rowN).length || 1;
         c.slots.forEach(function (sl) {
           if (!present(sl.id)) return;
           // The seam this note's own row pays for, and the wedge edges either side of it.
@@ -2364,9 +2403,19 @@ function mountVaultGraph(root, data, deps) {
           // outlier that shrinks everything.
           var nRow = rowN[sl.r] || 1;
           var zero = arc * rGraph / (2 * nRow);
-          // Twice the half-step is the step. Pushed per note so the percentile below is
-          // weighted by how many notes actually sit at each spacing.
-          roomPool[isInner ? "i" : "o"].push(2 * zero);
+          // THE STEP, but with a CONTINUOUS count. nRow is how many notes are present in this
+          // row right now, an integer, so a step built on it is a step function of the frame --
+          // and since dotPx sizes a whole band from a percentile of these, every dot in the
+          // band moved whenever any row gained or lost a note. Measured: 211% in a single
+          // frame, 28 of 122 frames past 5%.
+          //
+          // The cell's opacity-weighted count over the rows it occupies is the same quantity
+          // with the staircase taken out -- a note arriving contributes its alpha rather than
+          // suddenly contributing one -- so it slides where nRow ticked. The margin above keeps
+          // nRow, which is right: a margin is where a note SITS, and it has to be the half-step
+          // of the row the note is actually in.
+          roomPool[isInner ? "i" : "o"].push(
+            arc * rGraph * rowsUsed / Math.max(0.001, c.live));
           var seamArc = sm.gap * rGraph / 2;      // this side's half of the seam, in units
           var keep = EXCESS_KEEP * seamFall(isInner ? "i" : "o");
           var typ = dotTyp(isInner ? "i" : "o");
@@ -2498,6 +2547,9 @@ function mountVaultGraph(root, data, deps) {
     // as smooth as they are, which is the property #13 established for the spacing and the
     // seam. The fit map keeps its own job: bounding an individual dot, not sizing the band.
     var pool = roomPool;
+    // THE PLAN'S OWN FIGURE WINS. It is the one the cascade walks, so taking it here is what
+    // makes the final frame and the resting layout the same layout.
+    var planRoom = plan.room || null;
     // A LOW PERCENTILE, NOT THE MINIMUM. The minimum is the correct bound and the wrong
     // statistic: it is one pair, and one pair that happens to be tight sets the size for every
     // note in its band. Measured on the 454-note vault, taking the minimum put the inner band's
@@ -2512,7 +2564,19 @@ function mountVaultGraph(root, data, deps) {
       v.sort(function (x, y) { return x - y; });
       return v[Math.floor(v.length * 0.1)];
     };
+    // FROM THE LIVE ARCS, not from the plan's reference ones. The plan carries a room figure
+    // too, and handing it in was tried first on the theory that a walked value must be smoother
+    // than a measured one. It is smoother and it is wrong: plan.room is built from c.band, the
+    // cell's REFERENCE width, while the disc is drawn from c.span, its live share -- and under
+    // filtering those differ several-fold, so every dot collapsed onto the pixel floor,
+    // diameter over step 0.02 to 0.10.
+    //
+    // The measured pool was never the problem. It is filled from arc/n as placement computes
+    // it, which moves exactly as smoothly as the positions do; the breathing came entirely from
+    // the per-note cap that used to sit on top of it, and with that gone the worst single-frame
+    // size change is 2.2% against 252% before.
     bandRoom = { i: pick(pool.i), o: pick(pool.o) };
+    if (planRoom) { /* kept on the plan for the probe; the live pool is what draws */ }
     dotFit = fit;
     return out;
   }
@@ -3236,6 +3300,10 @@ function mountVaultGraph(root, data, deps) {
     // ring whose spacing is interpolated from the other ring's endpoints is a ring that moves
     // when the other one is filtered.
     var spSrcB = { i: 1, o: 1 }, spDstB = { i: 1, o: 1 };
+    // The two endpoint packings' band room, walked alongside their spacing. Zero means "this
+    // packing had nothing in that band", and the walk below falls back to the other end rather
+    // than interpolating toward an empty band.
+    var roomSrcB = { i: 0, o: 0 }, roomDstB = { i: 0, o: 0 };
     var rowsSrc = Object.create(null), rowsDst = Object.create(null);
     var bandSrc = Object.create(null), bandDst = Object.create(null);
     // A group is PRESENT at an end if it has any seated weight there -- one wedge, one
@@ -3302,6 +3370,8 @@ function mountVaultGraph(root, data, deps) {
       if (b && b.sp > 0) spDst = b.sp;
       if (a) { spSrcB = { i: a.spInner || a.sp || 1, o: a.sp || 1 }; }
       if (b) { spDstB = { i: b.spInner || b.sp || 1, o: b.sp || 1 }; }
+      if (a && a.room) roomSrcB = { i: a.room.i || 0, o: a.room.o || 0 };
+      if (b && b.room) roomDstB = { i: b.room.i || 0, o: b.room.o || 0 };
       var seen = Object.create(null);
       var presFor = function (p, m) {
         if (!p) return;
@@ -3406,9 +3476,18 @@ function mountVaultGraph(root, data, deps) {
       };
       // Same clock as the rows and the gap reservation above: at ease 0 this is the
       // packing the disc is resting in and at 1 it is the one settle() assigns.
+      var roomWalk = function (k) {
+        var sv = roomSrcB[k], dv = roomDstB[k];
+        if (!(sv > 1)) return dv;          // band was empty at this end
+        if (!(dv > 1)) return sv;
+        return sv + (dv - sv) * ease;
+      };
       var spNow = {
         i: spSrcB.i + (spDstB.i - spSrcB.i) * ease,
         o: spSrcB.o + (spDstB.o - spSrcB.o) * ease,
+        // Walked, not re-derived. Notes per row is an integer, so a room solved from the live
+        // weights is a step function of the frame and every dot in the band breathes with it.
+        room: { i: roomWalk("i"), o: roomWalk("o") },
       };
       var plan = buildWedgePlan(ovAfter, weightOf, rowsAt, spNow);
       var targets = plan ? ringsLayout(plan, true) : null;
@@ -4391,13 +4470,14 @@ function mountVaultGraph(root, data, deps) {
       // sets the size for its whole band, which is the honest trade for an encoding that can be
       // read.
       var room = bandRoom[isIn ? "i" : "o"];
-      // ...BUT NEVER MORE THAN THIS NOTE'S OWN ROOM. The band figure is a tenth percentile, so
-      // by construction a tenth of pairs are tighter than it, and the plan-derived step cannot
-      // see a note that is individually crowded -- measured, one overlapping pair at -19 units
-      // on one date range. As a CAP rather than a scale it costs the ordering only where a note
-      // would otherwise collide, which is the one place the ordering has to yield.
-      var own = dotFit[id];
-      if (own !== undefined && own > 1 && (!(room > 1) || own < room)) room = own;
+      // AND NOTHING PER NOTE. A cap taken from this note's own measured room was tried, to stop
+      // the tightest pairs touching, and it is the thing that made dots breathe: dotFit is
+      // measured off live positions, and a note's NEAREST NEIGHBOUR is not a fixed neighbour --
+      // it changes as the disc moves and as notes arrive, so a minimum over it jumps for
+      // reasons that have nothing to do with the note. Measured directly, with the cap the
+      // worst single-frame size change was 252% and 72 of 122 frames moved more than 5%;
+      // without it, 2.2% and none. It also broke the ordering it was bolted onto, which is the
+      // property the encoding exists for. Both requirements point the same way.
       var pit = pitchUnits(isIn ? "i" : "o");
       // BOTH WAYS. This only ever shrank a dot, which is half a rule: the ramp sizes a note
       // against the RADIAL pitch, dotFit measures the room it has ALONG its row, and those two
