@@ -720,9 +720,17 @@ function mountVaultGraph(root, data, deps) {
   }
 
   // Group colour, tinted by subfolder when the folders are what we are looking at.
+  //
+  // UNLINKED IS A GROUP, NOT A FOLDER, and the folder dimension is the one place that can
+  // forget it. Every other dimension asks groupOf; this one used to go straight to the
+  // note's own folder, so a degree-0 note wore its folder's tint while the legend showed
+  // it under one swatch -- measured 0 of 12 matching on a 700-note vault, 9 distinct
+  // colours under a single legend row (github#3). `(vault root)` is NOT the same case:
+  // the builder writes that as a real folder value, so colorOf resolves it already.
   function nodeColor(id) {
     var a = graph.getNodeAttributes(id);
     if (state.dim !== "folder") return colorOf(groupOf(id));
+    if (groupOf(id) === UNLINKED) return colorOf(UNLINKED);
     return subShade[a.folder + "/" + (a.sub || "")] || colorOf(a.folder);
   }
 
