@@ -273,7 +273,11 @@ function mountVaultGraph(root, data, deps) {
     // SEPARATE axis again, and transient: it never survives a rebuild of the legend and
     // it is never persisted, so it cannot leave the disc in a state nobody chose.
     hoverGroup: null,   // group name under the pointer, or null
-    hoverPath: null,    // "PARA/a/b" under the pointer, or null
+    // Path keys under the pointer, as a SET rather than one string. A depth-1 row can
+    // stand for several subfolders at once -- the "N smaller subfolders" tail row carries
+    // every index it pools -- so one row is not one key, and hovering it has to light all
+    // of them or it lights the wrong part of the wedge it points at.
+    hoverSub: Object.create(null),
     // Every group starts COLLAPSED, so the legend opens as a list of the vault's
     // top-level folders and nothing else. It used to open with one level of subfolders
     // showing, on the reasoning that that level is what the pie already draws as
@@ -489,18 +493,32 @@ function mountVaultGraph(root, data, deps) {
     var auto = 0;
     names.forEach(function (g) {
       var k = byFolder[g];
-      if (k && THEME.byKey[k]) { groupColor[g] = THEME.byKey[k]; groupSlot[g] = k; return; }
-      // An archive takes the grey slot without CONSUMING one: `auto` does not advance, so
-      // the working folders' rotation is unaffected, but the slot is a real slot -- which
-      // is what lets the picker ring it and "Auto" mean something on an archive row.
+      var picked = (k && THEME.byKey[k]) ? k : "";
+
+      // ARCHIVES NEVER CONSUME A SLOT, with or without a pick of their own. That is the
+      // whole of "out of the rotation": `auto` does not advance here, so which hue a
+      // working folder gets cannot depend on how many archives sort before it.
       if (isArchiveGroup(g)) {
-        groupColor[g] = THEME.byKey[ARCHIVE_SLOT];
-        groupSlot[g] = ARCHIVE_SLOT;
+        var akey = picked || ARCHIVE_SLOT;
+        groupColor[g] = THEME.byKey[akey];
+        groupSlot[g] = akey;
         return;
       }
+
+      // EVERY OTHER FOLDER CONSUMES ITS POSITION, whether or not it uses the colour that
+      // position hands it. `auto++` happens before the pick is considered, deliberately.
+      //
+      // Returning early on a pick -- which is how this read when the archive counter went
+      // in -- silently reintroduced the blast radius this whole design exists to avoid:
+      // an overridden folder did not advance the counter, so every folder after it slid
+      // one slot along. Measured on the 17-folder vault, one click on one folder
+      // recoloured FOURTEEN groups and repainted 624 notes outside the folder touched.
+      // It was index-based (`i % SLOT_COUNT`) before the counter, which had this right by
+      // construction; the counter has to be told.
       var key = "g" + ((auto++ % SLOT_COUNT) + 1);
-      groupColor[g] = THEME.byKey[key];
-      groupSlot[g] = key;
+      var use = picked || key;
+      groupColor[g] = THEME.byKey[use];
+      groupSlot[g] = use;
     });
     buildSubShades();
   }
@@ -1670,7 +1688,7 @@ function mountVaultGraph(root, data, deps) {
     for (var k = 1; k <= d.length; k++) {
       var pk = pathKey(a, k);
       if (state.highlightSub[pk]) return true;
-      if (state.hoverPath === pk) return true;
+      if (state.hoverSub[pk]) return true;
     }
     return false;
   }
@@ -1690,12 +1708,17 @@ function mountVaultGraph(root, data, deps) {
   // back null inside the hidden-folder sweep. Three unrelated-looking failures, one stale
   // index. Hover is a per-row event, not a per-frame one, so the re-index costs nothing
   // worth having.
-  function hoverHighlight(group, path) {
+  // `keys` is an array of path keys, or null. Compared as a joined string rather than by
+  // identity so that re-entering the same row does not repaint.
+  function hoverHighlight(group, keys) {
     group = group || null;
-    path = path || null;
-    if (state.hoverGroup === group && state.hoverPath === path) return;
+    var next = Object.create(null);
+    (keys || []).forEach(function (k) { if (k) next[k] = true; });
+    var a = Object.keys(state.hoverSub).sort().join(","),
+        b = Object.keys(next).sort().join(",");
+    if (state.hoverGroup === group && a === b) return;
     state.hoverGroup = group;
-    state.hoverPath = path;
+    state.hoverSub = next;
     if (renderer) renderer.refresh();
   }
 
@@ -2471,10 +2494,10 @@ function mountVaultGraph(root, data, deps) {
            Object.keys(state.highlightSub).join(",") + "|" +
            (state.markToday ? "T" : "") + "|" +
            (state.markDay || "") + "|" + (state.hoverDay || "") + "|" +
-           // Both hover keys belong here for the same reason everything else does: this
-           // is what decides whether the per-note sweep runs at all, so a source missing
-           // from it is a source whose highlight silently never ramps.
-           (state.hoverGroup || "") + "|" + (state.hoverPath || "");
+           // Both hover sources belong here for the same reason everything else does:
+           // this is what decides whether the per-note sweep runs at all, so a source
+           // missing from it is a source whose highlight silently never ramps.
+           (state.hoverGroup || "") + "|" + Object.keys(state.hoverSub).join(",");
   }
 
   function hlWalk() {
@@ -3457,7 +3480,7 @@ function mountVaultGraph(root, data, deps) {
     });
     each("[data-hpath]", function (b) {
       var hp = b.getAttribute("data-hpath");
-      b.onmouseenter = function () { hoverHighlight(null, hp); };
+      b.onmouseenter = function () { hoverHighlight(null, [hp]); };
       b.onmouseleave = function () { hoverHighlight(null, null); };
       b.onclick = function (ev) {
         var p = b.getAttribute("data-hpath");
@@ -3511,6 +3534,18 @@ function mountVaultGraph(root, data, deps) {
     // it toggles them as a block -- all on if any were off, all off once they are all
     // on, which is the same "make it so" behaviour the tail's eye has.
     each("[data-hsub]", function (b) {
+      // Hover lights every subfolder the row stands for -- which for the pooled tail row
+      // is several. Resolved here rather than in hoverHighlight, because the row carries
+      // tint-slot INDICES and only subOrder can turn those back into names.
+      var hoverKeys = function () {
+        var f = b.getAttribute("data-hsub");
+        var subs = subOrder[f] || [];
+        return b.getAttribute("data-idx").split(",").map(function (i) {
+          return f + "/" + subs[+i];
+        });
+      };
+      b.onmouseenter = function () { hoverHighlight(null, hoverKeys()); };
+      b.onmouseleave = function () { hoverHighlight(null, null); };
       b.onclick = function (ev) {
         var f = b.getAttribute("data-hsub");
         var subs = subOrder[f] || [];
@@ -4985,11 +5020,23 @@ function mountVaultGraph(root, data, deps) {
       // this one has run.
       { click: true, target: ["twisty", "03"], why: "unfold a folder to reach its subfolders" },
 
-      // Highlighting is a SEPARATE axis from visibility -- that is the whole point of
-      // the eye being its own control -- so show it on a subfolder: People is the
-      // biggest thing inside 03 and owns a sub-wedge of its own, which means it moves
-      // as a block rather than just being ringed.
-      { click: true, target: ["sub", "03/People"], why: "highlight one subfolder" },
+      // HOVER FIRST, and at both levels. It is the cheaper question and the one you would
+      // try first: a halo, with nothing hidden and no wedge moved. A whole folder, then
+      // one subfolder inside the folder just unfolded -- both rows do it, so both are
+      // worth showing, and the second is only reachable because the twisty above ran.
+      //
+      // These two used to sit AFTER the heatmap, on the way to the gear, which sent the
+      // pointer back up to the legend between two things that had nothing to do with it.
+      // The legend work belongs together, and the trip to the gear should be one trip.
+      { hover: true, target: ["group", "01"], why: "hover a folder to find it on the disc" },
+      { hover: true, target: ["sub", "03/People"], why: "...and one subfolder inside it" },
+
+      // Then the click, which is the same question answered permanently: highlighting is
+      // a SEPARATE axis from visibility -- the whole point of the eye being its own
+      // control -- and on a subfolder that owns a sub-wedge it moves as a block rather
+      // than only being ringed. Hover haloes; a click also pushes. Shown back to back so
+      // the difference is visible rather than asserted.
+      { click: true, target: ["sub", "03/People"], why: "click it instead: haloed AND pushed out" },
       { settle: true, why: "let the sub-wedge push out" },
       { click: true, target: ["sub", "03/People"], why: "...and let it back down" },
       { settle: true, why: "let it settle back" },
@@ -5000,11 +5047,6 @@ function mountVaultGraph(root, data, deps) {
       { hover: true, target: ["busiest", "1"], why: "hover the busiest day" },
       { hover: true, target: ["busiest", "2"], why: "...and the next" },
       { hover: true, target: ["busiest", "3"], why: "...and the next" },
-
-      // Hovering a folder in the legend, which is the cheap version of the eye: it
-      // haloes without hiding anything and without moving a wedge, so it reads as
-      // "where is this" rather than as a filter.
-      { hover: true, target: ["group", "01"], why: "hover a folder to find it on the disc" },
 
       // THE COLOUR PICKER. The gear has to come first -- the panel's swatches do not
       // exist in the DOM until buildSettings has run, so the `swatch` targets below
