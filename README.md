@@ -9,7 +9,7 @@ The layout is **deterministic, not force-directed**. There is no simulation to s
 no seed to get lucky with: the same vault always draws the same picture, so the shape
 becomes something you can learn and recognise rather than a fresh tangle each time.
 
-![The disc growing from the vault's first note, a note hovered, a folder hidden, a subfolder highlighted, three heatmap days hovered, a folder hovered from the legend, two folders recoloured from the palette and put back, then one folder soloed](assets/demo.gif)
+![The disc growing from the vault's first note, a note hovered, a folder hidden, a folder and a subfolder hovered from the legend, that subfolder then clicked to push it out, three heatmap days hovered, two folders recoloured from the palette and put back, then one folder soloed](assets/demo.gif)
 
 
 ![Vault Graph inside Obsidian, dark theme](assets/screenshots/plugin-dark.png)
