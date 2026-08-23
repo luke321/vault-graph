@@ -142,3 +142,23 @@ Two properties worth knowing, because they're what make the disc readable:
   flooring them in one band spent 48 degrees (13% of the circle) on 26 notes (6% of
   the vault). The inner band needs exactly one row here: 26 notes against a
   circumference of 28.
+- **The biggest folders go on the OUTER ring**, where the circumference is. The balancer's
+  other three rules are pure geometry — thickness ratio, row counts, hole size — and
+  geometry does not care *which* folders make up a band, only how many rows they need. So
+  among splits scoring the same it kept whichever it reached first, and on the 10k vault
+  that was `05 - Meeting Notes` (1679 notes) and `01 - Projects` (1066) inside while
+  Journal (48), Clippings (92) and Literature Notes (148) sat on the rim.
+
+  The term is **the biggest folder inside minus the smallest outside**, which is zero when
+  the split is size-ordered. Two simpler versions failed first and are worth knowing
+  about: *total inner share* cannot express this at all — the thickness target fixes how
+  much mass the inner band needs, so every viable candidate has about the same total
+  (measured 27.5% before and after, the term only reshuffling which folders made it up) —
+  and *biggest inner folder alone* fixed the 10k vault but left the 450-note one with an
+  11-note folder on the rim outside a 59-note folder, because anything smaller than the
+  peak still moves across for free.
+
+  It costs nothing geometrically: both vaults keep the row counts and thickness they
+  already had (4/6 rows at 0.48, and 16/23 at 0.55) and merely order the folders correctly
+  within them. Weighted low on purpose, so the thickness target still wins wherever the
+  two disagree — which is what "if possible" has to mean.

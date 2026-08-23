@@ -1147,8 +1147,10 @@ function mountVaultGraph(root, data, deps) {
       // thresholds already agree.
       var PIN_BELOW = 10;                      // notes; fewer than this never leaves the hub
       var groupNotes = {};
+      var totalNotes = 0;
       cells.forEach(function (c) {
         groupNotes[c.g] = (groupNotes[c.g] || 0) + c.list.length;
+        totalNotes += c.list.length;
       });
       var pinnedInner = {};
       names.forEach(function (g) {
@@ -1209,11 +1211,47 @@ function mountVaultGraph(root, data, deps) {
         if (!ins.length || !outs.length) return { cost: Infinity, r0: R0_BASE };
         share(ins, "i"); share(outs, "o");
         cells.forEach(function (c) { c.bandRef = c.band; });
+
+        // HOW FAR THIS SPLIT IS FROM BEING SIZE-ORDERED: the biggest folder it puts inside
+        // minus the smallest it puts outside, as a share of the vault. Zero when every
+        // outer folder is at least as big as every inner one -- which is exactly "the
+        // largest folders are on the rim". Depends only on the split, so it is computed
+        // once rather than per radius.
+        //
+        // TWO SIMPLER VERSIONS FAILED FIRST, and both failures say something:
+        //
+        //   TOTAL INNER SHARE cannot express this at all. The thickness target effectively
+        //   fixes how much mass the inner band needs, so every candidate satisfying it has
+        //   about the same total -- measured 27.5% before and 27.5% after, the term merely
+        //   picking a different combination adding to the same figure. It moved two big
+        //   folders out and pulled the second-largest in.
+        //
+        //   BIGGEST INNER FOLDER ALONE got the 10k vault exactly right and left the
+        //   450-note one with an 11-note folder on the rim while a 59-note folder sat
+        //   inside. Once the largest inner folder is fixed, moving anything smaller across
+        //   does not change the term, so those candidates were ties again.
+        //
+        // The DIFFERENCE is the thing being asked for: not "less inside", not "nothing big
+        // inside", but "nothing inside that is bigger than something outside".
+        var biggestInner = 0, smallestOuter = Infinity;
+        names.forEach(function (g) {
+          var n = groupNotes[g] || 0;
+          if (a[g]) { if (n > biggestInner) biggestInner = n; }
+          else if (n < smallestOuter) smallestOuter = n;
+        });
+        // No outer groups is the degenerate case priced out above; guard anyway so this
+        // reads as 0 rather than as -Infinity leaking into the cost.
+        if (!isFinite(smallestOuter)) smallestOuter = biggestInner;
+        var innerPeak = totalNotes
+          ? Math.max(0, biggestInner - smallestOuter) / totalNotes
+          : 0;
+
         var bc = Infinity, br = R0_BASE;
         for (var m = 100; m <= 300; m += 5) {
           var rv = R0_BASE * (m / 100), t = spanFor(ins, outs, rv);
           var c2 = Math.abs(t.inner - BAND_RATIO * t.outer) +
                    (t.iR > t.oR ? INVERT_WEIGHT * (t.iR - t.oR) : 0) +
+                   SIZE_WEIGHT * SP * innerPeak +
                    (t.inner >= t.outer ? 1000 : 0) +
                    // Priced, not forbidden: on a vault where nothing else works the least
                    // bad answer is still a slightly larger hub, and a wall would leave the
@@ -1241,6 +1279,30 @@ function mountVaultGraph(root, data, deps) {
       // for inverting, but a hard wall made every candidate infeasible and left the search
       // sitting on its starting point -- measured, 34/9 with nothing improved.
       var INVERT_WEIGHT = 0.5;   // per row of inversion, in drawn units
+
+      // AND A FOURTH, WEAKER PREFERENCE: the big folders belong OUTSIDE.
+      //
+      //   4. as little of the vault inside as the rest of this allows
+      //
+      // The three rules above are all geometry -- thickness, row counts, hole size -- and
+      // geometry does not care WHICH folders make up a band, only how many rows they need.
+      // So among splits that score the same the search kept whichever it reached first,
+      // and on the 10k vault that was `05 - Meeting Notes` (1679 notes) and `01 - Projects`
+      // (1066) INSIDE while Journal (48), Clippings (92) and Literature Notes (148) sat on
+      // the rim. Geometrically fine, and backwards: the outer ring has the circumference,
+      // so that is where the folders that need room should go, and a huge folder in the hub
+      // is what makes the inner band deep enough to crowd the middle.
+      //
+      // Expressed as a share of the vault rather than a folder count, and multiplied by SP
+      // so it is in the same drawn units as everything else it is added to -- otherwise the
+      // weight would mean something different at every disc size. Deliberately small: at
+      // 0.275 inner share it costs about half of one row of inversion, so it breaks ties
+      // and nudges near-ties, and the thickness target still wins whenever it disagrees.
+      // "If possible", which is the whole of what was asked for.
+      //
+      // The pinned-inner folders are a constant in this term -- they cannot move, so they
+      // shift every candidate equally and cannot bias the choice between them.
+      var SIZE_WEIGHT = 5.0;
       var cost = function (a) { return evaluate(a).cost; };
 
       // EXHAUSTIVE when it is cheap, greedy when it is not. Single-move descent gets

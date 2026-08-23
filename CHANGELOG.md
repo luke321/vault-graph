@@ -112,6 +112,16 @@ changed shape.
   CDP hit-testing, so it fails if the swatch is covered or scrolled away. The run is 26
   beats and ~43s, up from 20 and ~30s.
 
+- **The biggest folders now land on the outer ring.** The band balancer's rules were all
+  geometry — thickness, row counts, hole size — which says nothing about *which* folders
+  make up a band, so among equal-scoring splits it kept whichever it reached first. On the
+  10k vault that meant `05 - Meeting Notes` (1679) and `01 - Projects` (1066) inside while
+  Journal (48), Clippings (92) and Literature Notes (148) sat on the rim. There is now a
+  fourth, weakly-weighted preference: the biggest folder inside minus the smallest outside,
+  zero when the split is size-ordered. Both vaults keep exactly the row counts and
+  thickness they had (4/6 at 0.48, 16/23 at 0.55) and simply order the folders correctly
+  within them.
+
 - **Hovering a folder in the legend haloes its notes on the disc.** A separate highlight
   source alongside a clicked group and a marked day, ramping through the same per-note
   path. It haloes without pushing: a wedge sliding out and back under a moving pointer is
