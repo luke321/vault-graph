@@ -1209,6 +1209,48 @@ function mountVaultGraph(root, data, deps) {
     var SEP = "\u0000";
     var byCell = {}, cellsOf = {}, planTotal = 0;
 
+    // A SUB-WEDGE HAS TO BE ABLE TO HOLD A NOTE PER ROW, or it is dead arc.
+    //
+    // The gate used to be the group's own size alone, which says nothing about the wedges the
+    // split produces. Measured on a 454-note vault: 02 - Areas, 4 notes over 3 subfolders, came
+    // out as three cells of one and two notes, each allotted a fair 4 degrees -- and a 4-degree
+    // wedge at that radius holds 0.26 notes per row, so rowsNeeded gave each of them 4 rows to
+    // fit one note and the other three rows were empty. Four such cells adjacent, with their
+    // seams, was a 641-unit hole in one row against a 172-unit step. Same cause as dot radii
+    // coming out 8 beside 60: dotFit measures the room a note has, and beside a hole that room
+    // is enormous.
+    //
+    // COUNTED FROM WHAT IS ON SCREEN, not from the vault. The first cut of this read counts[],
+    // the whole-vault tally, on the theory that a static answer cannot pop mid-animation. It
+    // cannot -- and it also cannot see a filter: under a one-month range 03 - Resources still
+    // split on its 138 notes while ten were showing, which is the same dead arc again, and was
+    // reported in the outer ring the moment the inner one stopped doing it.
+    //
+    // Stability comes from WHICH membership instead of from ignoring it. willShow is the
+    // DESTINATION -- what the disc is settling into -- so it does not move while a cascade
+    // runs, and the live per-frame plan agrees with the destination packing throughout. The
+    // answer changes exactly once, when the filter does, before any frame is drawn; planA is
+    // built on the old membership and keeps the old split, planB the new, and notes interpolate
+    // between the two packings the way they already do for rows and spacing. Counting alpha
+    // instead would let the threshold fall mid-flight, which is a change of cell IDENTITY
+    // rather than of weight, and that is the one thing the cascade cannot walk.
+    var liveG = Object.create(null);
+    graph.forEachNode(function (id) {
+      if (onlyVisible && !(planKeep || visible)(id)) return;
+      if (onlyVisible && !willShow(id)) return;
+      var g0 = groupOf(id);
+      liveG[g0] = (liveG[g0] || 0) + 1;
+    });
+    var splitOf = Object.create(null);
+    var splitFor = function (g) {
+      if (splitOf[g] === undefined) {
+        var nSubs = (subOrder[g] || []).length;
+        splitOf[g] = nested && nSubs > 1 &&
+                     (liveG[g] || 0) >= Math.max(NEST_MIN, nSubs * REF_ROWS);
+      }
+      return splitOf[g];
+    };
+
     graph.forEachNode(function (id) {
       // While a cascade runs, "who gets a slot" is the UNION of what is staying
       // and what is still on screen on its way out. Filtering to visible() alone
@@ -1217,7 +1259,7 @@ function mountVaultGraph(root, data, deps) {
       // faded at stale coordinates on top of the reflowed disc).
       if (onlyVisible && !(planKeep || visible)(id)) return;
       var g = groupOf(id), a = graph.getNodeAttributes(id);
-      var split = nested && (subOrder[g] || []).length > 1 && (counts[g] || 0) >= NEST_MIN;
+      var split = splitFor(g);
       var key = split ? g + SEP + subTintIndex(g, a.sub) : g;
       if (!byCell[key]) {
         byCell[key] = [];
@@ -4095,6 +4137,7 @@ function mountVaultGraph(root, data, deps) {
   var DOT_MAX_SPREAD = 1.6;
   // display px = DOT_M * attr size + DOT_B, never below DOT_LO.
   var DOT_M = 1, DOT_B = 0, DOT_LO = DOT_MIN_PX;
+  var DOT_MI = 1, DOT_BI = 0, DOT_LOI = DOT_MIN_PX;   // the inner band's own ramp
   var sizeScale = 1;            // kept for the probe and the report; = DOT_M at NODE_MAX
 
   // Whether the border program actually loaded. If the bundle ever ships without it,
@@ -4135,16 +4178,31 @@ function mountVaultGraph(root, data, deps) {
     // pitch by up to DENSITY_MAX, and a dot riding that is a blob. The ratio is
     // preserved right up to the cap and then held, which reads as a sparse ring of ordinary
     // dots rather than a handful of balloons.
-    var hi = DOT_OF_PITCH * pitch;
-    var hiCap = DOT_OF_PITCH * UNIT * DOT_MAX_SPREAD * cam;
-    if (hi > hiCap) hi = hiCap;
+    // ONE RAMP PER BAND, because there is one pitch per band and a dot is a fraction of its
+    // OWN pitch. Calibrated from lastSP alone, the whole disc was sized by the OUTER ring:
+    // measured on a 96-of-454 date range, the outer pitch was 400 units and the inner 206, and
+    // the same dots went into both -- worst pair clearance 239 in the outer band against 29 in
+    // the inner. Reported exactly that way round, gaps at the outer seams and notes touching on
+    // the inner ring, which is one bug seen from both ends.
+    //
     // The floor is the one thing that IS about pixels on screen -- a dot has to stay visible --
     // so it is converted the other way, from px to the size units sigma will divide by ratio.
-    var lo = Math.min(hi, DOT_MIN_PX * cam);
-    DOT_M = (hi - lo) / Math.max(1e-6, NODE_MAX - NODE_MIN);
-    DOT_B = lo - DOT_M * NODE_MIN;
-    DOT_LO = lo;
-    return hi / NODE_MAX;      // what the old multiplier would have been at the top end
+    var rampFor = function (units) {
+      var bb = renderer.graphToViewport({ x: units, y: 0 });
+      var pit = Math.hypot(bb.x - a.x, bb.y - a.y) * cam;
+      var hi = DOT_OF_PITCH * pit;
+      var hiCap = DOT_OF_PITCH * UNIT * DOT_MAX_SPREAD * cam;
+      if (hi > hiCap) hi = hiCap;
+      var lo = Math.min(hi, DOT_MIN_PX * cam);
+      return { m: (hi - lo) / Math.max(1e-6, NODE_MAX - NODE_MIN),
+               b: lo - (hi - lo) / Math.max(1e-6, NODE_MAX - NODE_MIN) * NODE_MIN,
+               lo: lo, hi: hi };
+    };
+    var ro = rampFor(UNIT * (lastSP || 1));
+    var ri = rampFor(UNIT * (lastSPI || 1) * INNER_SCALE);
+    DOT_M = ro.m; DOT_B = ro.b; DOT_LO = ro.lo;
+    DOT_MI = ri.m; DOT_BI = ri.b; DOT_LOI = ri.lo;
+    return ro.hi / NODE_MAX;   // what the old multiplier would have been at the top end
   }
 
   // A dot's radius in display pixels. One place, so the renderer, the label placer and any
@@ -4155,13 +4213,17 @@ function mountVaultGraph(root, data, deps) {
   // proportion to the gap it actually has. Both directions matter and the nearer one wins,
   // which is what dotFit already holds.
   function dotPx(size, id) {
-    var v = DOT_M * (size || 4) + DOT_B;
+    // Which band this note is in, so both the ramp and the room it is measured against are
+    // the ones that belong to it.
+    var isIn = id !== undefined && bandLock && !!bandLock[groupOf(id)];
+    var v = (isIn ? DOT_MI : DOT_M) * (size || 4) + (isIn ? DOT_BI : DOT_B);
     if (id !== undefined) {
       var room = dotFit[id];
-      var pit = pitchUnits();
+      var pit = pitchUnits(isIn ? "i" : "o");
       if (room !== undefined && room < pit) v *= room / pit;
     }
-    return v < DOT_LO ? DOT_LO : v;
+    var lo = isIn ? DOT_LOI : DOT_LO;
+    return v < lo ? lo : v;
   }
 
   // Returns true if it moved enough to be worth a repaint. The threshold is what
