@@ -3,6 +3,25 @@
 #   .\scripts\record-demo.ps1
 #   .\scripts\record-demo.ps1 -Slow 1.5 -Fps 60 -Out demo.mp4
 #   .\scripts\record-demo.ps1 -Url http://127.0.0.1:8765/?demo
+#   .\scripts\record-demo.ps1 -Monitor right          # keep it off the screen you are on
+#
+# RECORD AGAINST A GENERATED VAULT, not your own. With no -Url this builds from the default
+# vault, and the page embeds every note's real title -- which then goes into a video that
+# ends up in a public README. Generate one and point -Url at it:
+#
+#   node scripts/make-test-vault.mjs --out "$env:TEMP/Demo Vault" --notes 700 --seed 7
+#   node src/build-graph.mjs --vault "$env:TEMP/Demo Vault" --out "$env:TEMP/rec/vault-graph.html"
+#   .\scripts\record-demo.ps1 -Monitor right -Url "file:///$env:TEMP/rec/vault-graph.html?demo"
+#
+# The vault's FOLDER NAME becomes the title in the top-left corner, so name it something you
+# do not mind publishing. 700 notes reads well at 1600x1000; the storyboard resolves its
+# folder targets by prefix and falls back to the largest group, so it needs no particular
+# folder to exist.
+#
+# One thing the synthetic vault does worse than a mirror of a real one: its notes are spread
+# evenly over the calendar, so the heatmap's busiest day held 5 notes against a real vault's
+# 53, and the three heatmap beats land flatter. Raise --notes if that matters more than the
+# take being short.
 #
 # Three processes, in order: Chrome with a debugging port, ffmpeg grabbing that window,
 # and the driver. The driver BLOCKS until the last beat lands, so ffmpeg is stopped on
@@ -28,6 +47,19 @@ param(
   [int]    $Port = 9222,
   [int]    $Width = 1600,
   [int]    $Height = 1000,
+  # WHICH SCREEN to put the window on, centred in that screen's working area. Not
+  # tidiness: this takes the physical mouse for the length of the take, so recording on a
+  # monitor you are not working on is the difference between waiting it out and having the
+  # pointer yanked out from under whatever you were doing.
+  #
+  # `left` and `right` are by POSITION, not by device number -- \\.\DISPLAY2 is whichever
+  # one Windows enumerated second, which says nothing about where it physically sits.
+  [ValidateSet('', 'primary', 'left', 'right')]
+  [string] $Monitor = '',
+  # ...or exact coordinates, which win over -Monitor. [int]::MinValue means "unset",
+  # because 0 is a legitimate position.
+  [int]    $X = [int]::MinValue,
+  [int]    $Y = [int]::MinValue,
   [switch] $KeepChrome
 )
 
@@ -88,6 +120,36 @@ Write-Host "out    $Out"
 # NOT $profile -- that is a PowerShell automatic variable (the profile script path).
 $profileDir = Join-Path $env:TEMP 'vg-demo-profile'
 $chrome = (Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\chrome.exe').'(default)'
+
+# --- where to put the window ----------------------------------------------------------
+# Centred in the chosen screen's WORKING area, not its bounds, so the taskbar cannot end
+# up over the window -- and gdigrab captures the window's rect, so anything overlapping it
+# is in the video.
+#
+# Positive offsets only, in practice. gdigrab's `desktop` input is addressed from the
+# PRIMARY monitor's top-left, so a monitor to the left of primary has negative coordinates
+# and captures unreliably. A monitor to the right is the easy case.
+$posX = 40; $posY = 40
+if ($Monitor) {
+  Add-Type -AssemblyName System.Windows.Forms
+  $screens = @([System.Windows.Forms.Screen]::AllScreens)
+  $target = switch ($Monitor) {
+    'primary' { $screens | Where-Object { $_.Primary } | Select-Object -First 1 }
+    'left'    { $screens | Sort-Object { $_.Bounds.X } | Select-Object -First 1 }
+    'right'   { $screens | Sort-Object { $_.Bounds.X } | Select-Object -Last 1 }
+  }
+  if (-not $target) { throw "no monitor matched -Monitor $Monitor" }
+  $wa = $target.WorkingArea
+  $posX = $wa.X + [int](($wa.Width  - $Width)  / 2)
+  $posY = $wa.Y + [int](($wa.Height - $Height) / 2)
+  Write-Host ("monitor {0} ({1}) -> window at {2},{3}" -f `
+    $Monitor, $target.DeviceName, $posX, $posY) -ForegroundColor DarkGray
+  if ($wa.X -lt 0) {
+    Write-Warning "that screen is left of the primary, so gdigrab sees negative offsets -- check the capture"
+  }
+}
+if ($X -ne [int]::MinValue) { $posX = $X }
+if ($Y -ne [int]::MinValue) { $posY = $Y }
 # --app= gives a window with no tab strip and no address bar, which is most of what
 # would otherwise be in frame. `--disable-features=Translate,TranslateUI` because the
 # translate bubble DID appear over the page on a first take -- the vault's folder names
@@ -99,7 +161,7 @@ $chromeArgs = @(
   '--hide-crash-restore-bubble', '--disable-session-crashed-bubble',
   '--disable-features=Translate,TranslateUI,MediaRouter',
   '--lang=en-US',
-  "--window-size=$Width,$Height", '--window-position=40,40',
+  "--window-size=$Width,$Height", "--window-position=$posX,$posY",
   "--app=$Url"
 )
 $chromeProc = Start-Process $chrome -ArgumentList $chromeArgs -PassThru
