@@ -22,6 +22,7 @@ changing the layout or the animation.
 | `0005-vault-agnostic-source-in-repo-output-in-vault` | Nothing about a vault is hardcoded; source here, output in the vault |
 | `0006-zero-weight-members-must-cost-nothing` | Why a fading note must change nothing, and the gap count that broke it |
 | `0007-the-demo-drives-real-input` | Why `?demo` clicks through CDP and not `el.click()`, and the cursor that was removed |
+| `0008-zero-network-calls` | Why the vendored bundles are stripped at read time rather than patched, forked or disclosed |
 
 ### DDRs — `design/`
 

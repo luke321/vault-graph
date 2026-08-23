@@ -81,9 +81,11 @@ to count words (`vault.cachedRead`), and it writes nothing anywhere. Obsidian’
 review flags the enumeration, correctly — it is what the plugin is for, and worth stating
 rather than leaving to be discovered.
 
-<sub>Also greppable, so also worth stating: the bundled Sigma.js carries a `fetch` in its
-image-loading path. This plugin never registers an image node program, so that path is
-unreachable — but the string is in the file.</sub>
+<sub>**Zero network calls, and greppable.** The bundled Sigma.js ships two `fetch` calls in
+its image-loading path, for a node-image program this plugin never registers. They were
+unreachable, and they are now removed at build time rather than explained away — so
+`main.js` contains none, and `node scripts/check-network.mjs` is the gate that keeps it that
+way. See [`0008-zero-network-calls`](.ai-context/decisions/0008-zero-network-calls.md).</sub>
 
 ---
 
@@ -375,6 +377,7 @@ the plugin puts them in an Obsidian view.
 | `scripts/smoke.mjs` | the invariant suite, over both vault shapes |
 | `scripts/check-scope.mjs` | asserts the page cannot style or be styled by its host |
 | `scripts/check-pii.mjs` | refuses to publish other people's names; no skip flag |
+| `scripts/check-network.mjs` | asserts nothing shipped can make a request; no skip flag |
 | `scripts/make-demo-vault.mjs` | a structural mirror of a real vault, with none of its content |
 | `scripts/make-test-vault.mjs` | a synthetic vault, deliberately awkward |
 | `scripts/shoot.mjs` | screenshots the page at rest, for comparing two commits |

@@ -17,6 +17,10 @@
 import { readFileSync, writeFileSync, readdirSync, statSync, existsSync } from "node:fs";
 import { join, relative, sep, basename, dirname, resolve as resolvePath } from "node:path";
 import { fileURLToPath } from "node:url";
+// The libraries are read through this rather than straight off disk: it strips Sigma's
+// two unreachable fetch() calls, so the generated page makes no network requests at
+// all. Same module the plugin build uses -- see src/vendor.mjs. github#1
+import { readVendorSource } from "./vendor.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 // Repo root. Everything this script reads that is not source lives beside src/,
@@ -517,7 +521,7 @@ const LIB_NOTICE = `<!--
 -->`;
 
 const libs = LIB_NOTICE + "\n" + ["graphology.umd.min.js", "sigma.min.js"]
-  .map((f) => `<script>\n${readFileSync(join(ROOT, "vendor", f), "utf8")}\n</script>`)
+  .map((f) => `<script>\n${readVendorSource(ROOT, f)}\n</script>`)
   .join("\n");
 
 // The logo and favicon are inlined as data URIs for the same reason the libraries

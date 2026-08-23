@@ -45,11 +45,12 @@ slots, the six-degree minimum wedge, the fifty-two-week heatmap window. Each has
 measurement behind it, and the recurring failure mode in this repo is reasoning about the
 code instead of measuring it.
 
-Two commands, and both are gates rather than suggestions:
+Three commands, and all three are gates rather than suggestions:
 
 ```bash
-node scripts/smoke.mjs        # 17 invariants, over two vault shapes
-node scripts/check-scope.mjs  # the page cannot style, or be styled by, its host
+node scripts/smoke.mjs         # 17 invariants, over two vault shapes
+node scripts/check-scope.mjs   # the page cannot style, or be styled by, its host
+node scripts/check-network.mjs # nothing shipped can make a network request
 ```
 
 One more is manual, because it launches a real Obsidian twice and takes about ninety seconds.
@@ -67,8 +68,9 @@ happens — so this one quits and relaunches to get the leaf into the state a pe
 restart of the day puts it in.
 
 `git config core.hooksPath .githooks` once per clone runs those on every push, along with a
-check that refuses to publish other people's names. Two of the three have no skip flag, on
-purpose: what they prevent is damage to somebody else's software, or to somebody else.
+check that refuses to publish other people's names. Three of the four have no skip flag, on
+purpose: what they prevent is damage to somebody else's software, or to somebody else —
+and all three are static reads that cost milliseconds, so there is nothing to skip for.
 
 For a visual change, take before-and-after screenshots of the same vault and compare them:
 
