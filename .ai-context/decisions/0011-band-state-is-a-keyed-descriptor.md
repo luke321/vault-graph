@@ -43,14 +43,16 @@ the wrong *pass*. Each was found by a person looking at the disc, not by a check
 
 ## Decision
 
-Replace the pairs with one keyed descriptor per band — `sp`, `rows`, `room`, `scale`, `ramp`,
-`gapDeg`, `nG` — reached through `bandOf(key)`.
+Replace the pairs with one keyed descriptor per band — `sp`, `rows`, `room`, `ramp`, `gapDeg`,
+`nG` — reached through `bandOf(key)`, plus `bandScale(key)` for the drawn scale.
 
 The value is not tidiness. It is that **there is no bare name left to reach for**: the band has to
 be named, so the wrong band has to be chosen *deliberately*. Bugs 1–3 and 5 become unwriteable.
-Folding `INNER_SCALE` into the descriptor as `scale` — better still, storing `base` and `sp`
-pre-scaled so a radius is `base + row*sp` with nothing multiplying it — removes the eleven sites
-that currently have to remember the inner ring is drawn at 0.8.
+
+The drawn scale is deliberately *not* a field on the descriptor — see the hoisting trap below.
+Putting `INNER_SCALE` behind one function still removes the eleven sites that each had to remember
+the inner ring is drawn at 0.8; folding it further, into a pre-scaled `base` and `sp`, is a separate
+step and is listed at the end.
 
 ## Landed
 
@@ -58,7 +60,7 @@ that currently have to remember the inner ring is drawn at 0.8.
 Every pair is gone; the sole direct `BAND.` reference is inside `bandOf` itself.
 
 Verified by measurement rather than by argument: `parity.mjs` captures every note's radius, angle
-and drawn radius across six filter states per fixture — 18 states, 5 892 notes at rest — and the
+and drawn radius across six filter states per fixture — 18 states, 4 858 notes at rest — and the
 diff is **0.00 on all three quantities in all 18 states, nothing missing**. Suite 44/44 on all
 three fixtures.
 
