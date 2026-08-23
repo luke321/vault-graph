@@ -102,15 +102,27 @@ try {
     await settle();
     await shoot(ui + "-1-rest");
 
+    // DATES COME FROM THE VAULT, not from this file. They were hardcoded to 2019-2020, which
+    // was fine while every fixture spanned a decade and produced an entirely empty band the
+    // moment one spanned two years -- a screenshot of nothing, captioned as a range in the
+    // middle of the history.
+    const span = await page.j(`(function(){
+      var d = __vg.dateSpan;
+      var iso = function (ms) { return new Date(ms).toISOString().slice(0, 10); };
+      var at = function (f) { return iso(d.lo + (d.hi - d.lo) * f); };
+      return { lo: iso(d.lo), hi: iso(d.hi), q1: at(0.2), q2: at(0.55), late: at(0.86) };
+    })()`);
+    console.log("    span " + span.lo + " -> " + span.hi);
+
     // A range in the MIDDLE of the history -- the part the 52-week window cannot reach, and
-    // the whole reason any of these exist.
-    await page.eval(`__vg.setRange("2019-01-01", "2020-06-30"); __vg.setHeatEnd("2020-06-30"); void 0`);
+    // the whole reason this control exists.
+    await page.eval(`__vg.setRange("${span.q1}", "${span.q2}"); __vg.setHeatEnd("${span.q2}"); void 0`);
     await settle();
     await shoot(ui + "-2-mid-history");
     console.log("    " + JSON.stringify(await page.j("__vg.rangeReport()")));
 
-    // And a recent slice, where all the density is.
-    await page.eval(`__vg.setRange("2026-05-01", null); __vg.setHeatEnd(null); void 0`);
+    // And a recent slice, where the density is.
+    await page.eval(`__vg.setRange("${span.late}", null); __vg.setHeatEnd(null); void 0`);
     await settle();
     await shoot(ui + "-3-recent");
     await shoot(ui + "-4-whole", true);

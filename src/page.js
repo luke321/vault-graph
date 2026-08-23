@@ -4114,7 +4114,7 @@ function mountVaultGraph(root, data, deps) {
     heat = {
       cols: cols, cell: cell, pitch: pitch, start: start, days: days, keys: keys,
       cuts: cuts, nMax: nMax, before: before, after: after, undated: undated,
-      dated: counts.length, mean: null,
+      dated: counts.length,
       w: HEAT_GUTTER + cols * pitch - HEAT_GAP + HEAT_ARROW_W,
       h: HEAT_MONTH_H + 7 * pitch - HEAT_GAP
     };
@@ -4589,7 +4589,7 @@ function mountVaultGraph(root, data, deps) {
    * Which lane the pointer is in decides what it grabs; nothing has to be moded.
    */
   var RIBBON_BARS = 26;      // the bars and the brush
-  var RIBBON_TRACK = 11;     // the band-window track
+  var RIBBON_TRACK = 14;     // the band-window track
   var RIBBON_LABELS = 11;    // the year ticks
   var RIBBON_H = RIBBON_BARS + RIBBON_TRACK + RIBBON_LABELS;
   var GRAB_PX = 6;           // how close to an edge counts as grabbing it
@@ -4611,12 +4611,29 @@ function mountVaultGraph(root, data, deps) {
     return cx;
   }
 
-  // The intensity ramp the heat band already uses, so a bar here and a square up there mean
-  // the same thing at the same colour.
+  /**
+   * The bar ramp: the surface at nothing, the accent at the busiest month.
+   *
+   * It read `heat.mean` first, falling back to the accent -- and `heat.mean` is set to null
+   * where the heat object is built and never assigned anywhere, so the fallback has always
+   * been the whole function. Written as what it does. The accent is a validated colour and
+   * "the mean of the group palette" was a guess, so this is the better of the two anyway.
+   */
   function dateRamp(t) {
-    var m = heat && heat.mean ? heat.mean : css("--accent");
-    return t <= 0 ? css("--dim") : mixHex(css("--surface-2"), m, 0.25 + 0.75 * Math.min(1, t));
+    return t <= 0 ? css("--dim")
+                  : mixHex(css("--surface-2"), css("--accent"), 0.25 + 0.75 * Math.min(1, t));
   }
+
+  /**
+   * The scrubbers' colour: the bars' own hue, pushed for contrast against them.
+   *
+   * "Same colour as the bars" was already true and that was the problem -- the handles were
+   * drawn at the accent and a busy month's bar IS the accent, so a handle standing on a tall
+   * bar disappeared into it. Same hue, moved along the light/dark axis instead: toward
+   * --text-1, which is near-black on the light theme and white on the dark one, so the shift
+   * is away from the bars in both rather than toward white in one and invisible in the other.
+   */
+  function scrubColor() { return mixHex(css("--accent"), css("--text-1"), 0.3); }
 
   // withAlpha takes an rgba string and mixHex takes two hexes; neither does this one thing.
   function rgbaHex(hex, a) {
@@ -4704,9 +4721,18 @@ function mountVaultGraph(root, data, deps) {
     cx.fillStyle = rgbaHex(css("--text-3"), 0.16);
     heatRect(cx, 0, tw.y + tw.h / 2 - 1, w, 2, 1);
     cx.fill();
-    cx.fillStyle = rgbaHex(css("--text-1"), brushDrag && brushDrag.mode === "win" ? 0.72 : 0.5);
-    heatRect(cx, tw.x0, tw.y, Math.max(6, tw.x1 - tw.x0), tw.h, tw.h / 2);
+    // The pill in the bars' own hue, so the whole strip reads as one instrument, with a rim
+    // in the band's background so its ends are legible against the rail behind them.
+    var pillW = Math.max(10, tw.x1 - tw.x0);
+    cx.fillStyle = scrubColor();
+    cx.globalAlpha = brushDrag && brushDrag.mode === "win" ? 1 : 0.86;
+    heatRect(cx, tw.x0, tw.y, pillW, tw.h, tw.h / 2);
     cx.fill();
+    cx.globalAlpha = 1;
+    cx.strokeStyle = rgbaHex(css("--surface-0"), 0.9);
+    cx.lineWidth = 1;
+    heatRect(cx, tw.x0, tw.y, pillW, tw.h, tw.h / 2);
+    cx.stroke();
 
     // The brush: a wash over everything OUTSIDE it, two hard edges, and a grip on each.
     // 0.72 of the surface rather than 0.62 -- at the lower value the difference between
@@ -4727,11 +4753,33 @@ function mountVaultGraph(root, data, deps) {
     cx.fillStyle = rgbaHex(css("--surface-0"), 0.72);
     cx.fillRect(0, 0, x0, top);
     cx.fillRect(x1, 0, w - x1, top);
-    cx.fillStyle = css("--accent");
-    cx.fillRect(x0 - 1, 0, 2, top);
-    cx.fillRect(x1 - 1, 0, 2, top);
-    cx.fillRect(x0 - 3, top / 2 - 4, 6, 8);
-    cx.fillRect(x1 - 3, top / 2 - 4, 6, 8);
+
+    // The two scrubbers. Each is a full-height rule plus a grip, and each is outlined in the
+    // band's own background -- which is what makes it legible standing on a bar of any height,
+    // and the reason a plain accent-coloured handle was invisible on a busy month.
+    var col = scrubColor(), rim = rgbaHex(css("--surface-0"), 0.92);
+    var gw = 9, gh = Math.max(12, top - 8), gy = (top - gh) / 2;
+    [x0, x1].forEach(function (x) {
+      // The RULE sits exactly on the date; the GRIP is nudged to stay inside the canvas. At
+      // rest the two handles are at the ends of the span, so a grip centred on the date has
+      // half of itself outside the element -- which is the one moment it most needs to be
+      // seen, since that is the state the control opens in.
+      var gx = Math.max(0, Math.min(w - gw, x - gw / 2));
+      cx.fillStyle = rim;
+      cx.fillRect(x - 2.5, 0, 5, top);
+      cx.fillStyle = col;
+      cx.fillRect(x - 1.5, 0, 3, top);
+      heatRect(cx, gx, gy, gw, gh, 3);
+      cx.fill();
+      cx.strokeStyle = rim;
+      cx.lineWidth = 1;
+      heatRect(cx, gx, gy, gw, gh, 3);
+      cx.stroke();
+      // Two notches, so the grip reads as something to take hold of rather than as a tab.
+      cx.fillStyle = rim;
+      cx.fillRect(gx + gw / 2 - 2, gy + gh / 2 - 3, 1, 6);
+      cx.fillRect(gx + gw / 2 + 1, gy + gh / 2 - 3, 1, 6);
+    });
   }
 
   /**
@@ -4760,7 +4808,7 @@ function mountVaultGraph(root, data, deps) {
     var span = (heat ? heat.cols : HEAT_WEEKS) * WEEK_MS;
     var end = winEndNow();
     return { x0: ribbonX(end - span, w), x1: ribbonX(end, w),
-             y: RIBBON_BARS + 2, h: RIBBON_TRACK - 4 };
+             y: RIBBON_BARS + 2, h: RIBBON_TRACK - 5 };
   }
 
   /** True when a press at this height is aiming at the window track rather than the bars. */
@@ -4773,12 +4821,24 @@ function mountVaultGraph(root, data, deps) {
    * it has always been, and a window that started where you pointed would show the year after
    * the date you picked rather than the year up to it.
    */
+  /** The window's span, in ms. */
+  function winSpan() { return (heat ? heat.cols : HEAT_WEEKS) * WEEK_MS; }
+
   function clampWinEnd(ms) {
     var todayMs = heatParse(TODAY);
-    var span = (heat ? heat.cols : HEAT_WEEKS) * WEEK_MS;
-    var lo = dateSpan.lo + span;              // never scroll off the left end of the history
+    var lo = dateSpan.lo + winSpan();         // never scroll off the left end of the history
     return Math.max(Math.min(ms, todayMs), Math.min(lo, todayMs));
   }
+
+  /**
+   * The window end that puts the pointer in the MIDDLE of the pill.
+   *
+   * Grabbing it used to set the window's END to the pointer, so the pill jumped to sit
+   * entirely to the left of the hand and the thing being dragged was somewhere else. Centring
+   * is what a scrollbar thumb does when you click the trough, and it means the date under the
+   * cursor is the middle of what the grid is showing -- which is the date you were pointing at.
+   */
+  function winEndCentred(ms) { return clampWinEnd(ms + winSpan() / 2); }
 
   /**
    * What a press at `x` grabs: an existing edge, the span between them, or empty strip.
@@ -4877,7 +4937,7 @@ function mountVaultGraph(root, data, deps) {
       // A PRESS ON THE TRACK IS ALSO A JUMP. Dragging the pill across eleven years to reach
       // 2018 is a lot of mouse; pressing at 2018 puts it there and the drag then refines it.
       if (mode === "win") {
-        state.heatEnd = clampWinEnd(ribbonMs(x, w));
+        state.heatEnd = winEndCentred(ribbonMs(x, w));
         rebuildBand();
         showRTip(x, winLabel());
       }
@@ -4913,7 +4973,7 @@ function mountVaultGraph(root, data, deps) {
         var wx = xOf(ev);
         onFrame(function () {
           if (!brushDrag) return;
-          state.heatEnd = clampWinEnd(here);
+          state.heatEnd = winEndCentred(here);
           rebuildBand();
           showRTip(wx, winLabel());
         });

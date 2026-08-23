@@ -687,22 +687,39 @@ check("the band's window and the brush move independently", async (p) => {
   };
 });
 
-check("a press on the window track jumps the window there", async (p) => {
-  // Dragging the pill across eleven years to reach 2018 is a lot of mouse, so a press on the
-  // track is also a jump. It must not disturb the brush.
+check("a press on the window track centres the window there", async (p) => {
+  // Dragging the pill across a decade to reach one year is a lot of mouse, so a press on the
+  // track is a jump too -- and it CENTRES rather than landing the window's end on the pointer.
+  // The end-at-pointer version put the whole pill to the left of the hand, so the thing being
+  // dragged was somewhere other than where the cursor was.
+  //
+  // Asserted as "the date under the pointer is the middle of what the grid shows", within a
+  // couple of weeks: the window's end quantises to a Monday and is clamped at today, so an
+  // exact midpoint is not available at either extreme.
   await clearRange(p);
   const box = await ribbonBox(p);
   const yBars = box.top + 12, yTrack = box.top + RIB_BARS + 5;
   const a = await ribbonDrag(p, box, Math.round(box.w * 0.30), Math.round(box.w * 0.55), yBars);
-  const x = box.left + Math.round(box.w * 0.30);
+  const frac = 0.35;
+  const x = box.left + Math.round(box.w * frac);
   await p.send("Input.dispatchMouseEvent", { type: "mousePressed", x: x, y: yTrack, button: "left", clickCount: 1, buttons: 1 });
   await p.send("Input.dispatchMouseEvent", { type: "mouseReleased", x: x, y: yTrack, button: "left", clickCount: 1, buttons: 0 });
+  await sleep(200);
   await settle(p);
   const b = await rangeSnap(p);
+  const aim = await p.j(`(function(){
+    var d = __vg.dateSpan;
+    var ms = d.lo + (d.hi - d.lo) * ${frac};
+    var mid = __vg.heat.start + (__vg.heat.cols * 7 * 86400000) / 2;
+    return { aimISO: new Date(ms).toISOString().slice(0,10),
+             midISO: new Date(mid).toISOString().slice(0,10),
+             offDays: Math.round(Math.abs(mid - ms) / 86400000) };
+  })()`);
   await clearRange(p);
   return {
-    ok: b.winEnd !== a.winEnd && b.from === a.from && b.to === a.to,
-    detail: `window ${a.winEnd} -> ${b.winEnd}, brush ${b.from === a.from && b.to === a.to ? "held" : "MOVED"}`,
+    ok: b.winEnd !== a.winEnd && b.from === a.from && b.to === a.to && aim.offDays <= 14,
+    detail: `pressed at ${aim.aimISO}, window centred on ${aim.midISO} (${aim.offDays}d off); ` +
+            `brush ${b.from === a.from && b.to === a.to ? "held" : "MOVED"}`,
   };
 });
 
