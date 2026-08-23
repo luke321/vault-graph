@@ -1109,8 +1109,61 @@ async function rangeSnap(p) {
              fromISO: r.from ? new Date(r.from).toISOString().slice(0,10) : null,
              toISO: r.to ? new Date(r.to).toISOString().slice(0,10) : null,
              winStart: new Date(__vg.heat.start).toISOString().slice(0,10),
-             winEnd: new Date(__vg.heat.start + __vg.heat.cols * 7 * 86400000).toISOString().slice(0,10) };
+             winEnd: new Date(__vg.heat.start + __vg.heat.cols * 7 * 86400000).toISOString().slice(0,10),
+             // The same two in ms, for the checks that do arithmetic on the window rather
+             // than just comparing it to itself.
+             winEndMs: __vg.heat.start + __vg.heat.cols * 7 * 86400000,
+             winSpanMs: __vg.heat.cols * 7 * 86400000 };
   })()`);
+}
+
+/** The ribbon x for a date, in canvas pixels. */
+function xOfMs(p, ms) {
+  return p.j(`(function(){
+    var d = __vg.dateSpan, w = document.querySelector("#vg-ribbon").getBoundingClientRect().width;
+    return ((${ms} - d.lo) / (d.hi - d.lo)) * w; })()`);
+}
+
+/** A press on the window track at `x`, with no drag. The press alone is a jump. */
+async function trackPress(p, box, x, yTrack) {
+  await p.send("Input.dispatchMouseEvent",
+    { type: "mousePressed", x: box.left + x, y: yTrack, button: "left", clickCount: 1, buttons: 1 });
+  await p.send("Input.dispatchMouseEvent",
+    { type: "mouseReleased", x: box.left + x, y: yTrack, button: "left", clickCount: 1, buttons: 0 });
+  await sleep(200);
+  await settle(p);
+  return rangeSnap(p);
+}
+
+/**
+ * How far the band's window can actually travel on THIS vault, asked of the control.
+ *
+ * The two checks below used to press at fixed fractions of the ribbon -- 0.90/0.62 and 0.35
+ * -- which reach somewhere only when the window is small against the span. On a vault whose
+ * history is barely wider than the 52-week window the pill fills most of the rail, those
+ * fractions aim outside its travel, and the checks asserted motion the geometry forbids:
+ * both failed on the shape vault while passing on the other two (github#18). Pressing at
+ * each end of the rail asks where the window can go instead of assuming.
+ *
+ * THE GRID STEPS IN WHOLE WEEKS -- heatMonday() quantises heat.start -- so the two extremes
+ * reporting the same window is not a rounding artefact, it is the window having nowhere to
+ * go. That is the honest answer on a vault whose whole history fits inside one window, and
+ * `moves` is false rather than the check inventing a failure out of it.
+ *
+ * `aim(f)` is the date to press at to put the window's centre a fraction f along that
+ * travel -- which is the only kind of aim point these checks may use.
+ */
+async function winTravel(p, box, yTrack) {
+  const lo = await trackPress(p, box, 1, yTrack);
+  const hi = await trackPress(p, box, Math.round(box.w - 1), yTrack);
+  const span = hi.winSpanMs;
+  return {
+    moves: lo.winEndMs !== hi.winEndMs,
+    loMs: lo.winEndMs, hiMs: hi.winEndMs, spanMs: span,
+    days: Math.round((hi.winEndMs - lo.winEndMs) / 86400000),
+    weeks: Math.round(span / (7 * 86400000)),
+    aim: (f) => lo.winEndMs + (hi.winEndMs - lo.winEndMs) * f - span / 2,
+  };
 }
 
 /** Press, move in steps, release. Steps matter: the handler ignores anything under 3px. */
@@ -1202,21 +1255,38 @@ check("the band's window and the brush move independently", async (p) => {
   await clearRange(p);
   const box = await ribbonBox(p);
   const yBars = box.top + 12, yTrack = box.top + RIB_BARS + 5;
-  const a = await ribbonDrag(p, box, Math.round(box.w * 0.25), Math.round(box.w * 0.50), yBars);
-  const b = await ribbonDrag(p, box, Math.round(box.w * 0.90), Math.round(box.w * 0.62), yTrack);
-  const winMoved = b.winEnd !== a.winEnd && b.from === a.from && b.to === a.to;
 
-  const xAt = async (ms) => p.j(`(function(){
-    var d = __vg.dateSpan, w = document.querySelector("#vg-ribbon").getBoundingClientRect().width;
-    return ((${ms} - d.lo) / (d.hi - d.lo)) * w; })()`);
-  const c = await ribbonDrag(p, box, Math.round(await xAt(b.from)), Math.round(await xAt(b.from) - box.w * 0.09), yBars);
-  const brushMoved = c.from < b.from && c.winEnd === b.winEnd;
+  const t = await winTravel(p, box, yTrack);
+  await clearRange(p);
+  if (!t.moves) {
+    return { ok: true,
+             detail: `the ${t.weeks}-week window covers this vault's whole history, so it has ` +
+                     `nowhere to travel; nothing to move independently of` };
+  }
+
+  const a = await ribbonDrag(p, box, Math.round(box.w * 0.25), Math.round(box.w * 0.50), yBars);
+  // Across the FULL travel, so the window is guaranteed to cross a week boundary -- the grid
+  // steps in weeks, and a drag shorter than one would report "held" for the wrong reason.
+  const b = await ribbonDrag(p, box, Math.round(await xOfMs(p, t.aim(1))),
+                             Math.round(await xOfMs(p, t.aim(0))), yTrack);
+  const winMoved = b.winEnd !== a.winEnd;
+  const brushHeld = b.from === a.from && b.to === a.to;
+
+  const c = await ribbonDrag(p, box, Math.round(await xOfMs(p, b.from)),
+                             Math.round(await xOfMs(p, b.from) - box.w * 0.09), yBars);
+  const brushMoved = c.from < b.from;
+  const winHeld = c.winEnd === b.winEnd;
 
   await clearRange(p);
   return {
-    ok: winMoved && brushMoved,
-    detail: `window ${a.winEnd} -> ${b.winEnd} (brush ${winMoved ? "held" : "MOVED"}), ` +
-            `brush ${b.fromISO} -> ${c.fromISO} (window ${brushMoved ? "held" : "MOVED"})`,
+    ok: winMoved && brushHeld && brushMoved && winHeld,
+    // The two conditions are reported SEPARATELY. They used to share one flag, so a window
+    // that failed to move printed "brush MOVED" about a brush that had not -- which is how
+    // github#18 came to be filed as a coupling bug when the brush was never touched.
+    detail: `over ${t.days}d of travel: window ${a.winEnd} -> ${b.winEnd} ` +
+            `(${winMoved ? "moved" : "HELD"}, brush ${brushHeld ? "held" : "MOVED"}), ` +
+            `brush ${b.fromISO} -> ${c.fromISO} ` +
+            `(${brushMoved ? "moved" : "HELD"}, window ${winHeld ? "held" : "MOVED"})`,
   };
 });
 
@@ -1227,32 +1297,38 @@ check("a press on the window track centres the window there", async (p) => {
   // dragged was somewhere other than where the cursor was.
   //
   // Asserted as "the date under the pointer is the middle of what the grid shows", within a
-  // couple of weeks: the window's end quantises to a Monday and is clamped at today, so an
-  // exact midpoint is not available at either extreme.
+  // couple of weeks: the window's end quantises to a Monday, so an exact midpoint is not
+  // available anywhere.
+  //
+  // THE PRESS LANDS AT THE MIDDLE OF THE WINDOW'S OWN TRAVEL, not at a fixed fraction of the
+  // ribbon. Centring is a promise the control can only keep where it can still move; a
+  // fraction chosen without asking aims off the end of the travel on a narrow-span vault and
+  // measures the clamp instead (github#18).
   await clearRange(p);
   const box = await ribbonBox(p);
   const yBars = box.top + 12, yTrack = box.top + RIB_BARS + 5;
+
+  const t = await winTravel(p, box, yTrack);
+  await clearRange(p);
+  if (!t.moves) {
+    return { ok: true,
+             detail: `the ${t.weeks}-week window covers this vault's whole history, so every ` +
+                     `press lands on the one window there is` };
+  }
+
   const a = await ribbonDrag(p, box, Math.round(box.w * 0.30), Math.round(box.w * 0.55), yBars);
-  const frac = 0.35;
-  const x = box.left + Math.round(box.w * frac);
-  await p.send("Input.dispatchMouseEvent", { type: "mousePressed", x: x, y: yTrack, button: "left", clickCount: 1, buttons: 1 });
-  await p.send("Input.dispatchMouseEvent", { type: "mouseReleased", x: x, y: yTrack, button: "left", clickCount: 1, buttons: 0 });
-  await sleep(200);
-  await settle(p);
-  const b = await rangeSnap(p);
-  const aim = await p.j(`(function(){
-    var d = __vg.dateSpan;
-    var ms = d.lo + (d.hi - d.lo) * ${frac};
-    var mid = __vg.heat.start + (__vg.heat.cols * 7 * 86400000) / 2;
-    return { aimISO: new Date(ms).toISOString().slice(0,10),
-             midISO: new Date(mid).toISOString().slice(0,10),
-             offDays: Math.round(Math.abs(mid - ms) / 86400000) };
-  })()`);
+  const aimMs = t.aim(0.5);
+  const b = await trackPress(p, box, Math.round(await xOfMs(p, aimMs)), yTrack);
+  const midMs = b.winEndMs - b.winSpanMs / 2;
+  const offDays = Math.round(Math.abs(midMs - aimMs) / 86400000);
+  const iso = (ms) => new Date(ms).toISOString().slice(0, 10);
+  const brushHeld = b.from === a.from && b.to === a.to;
+
   await clearRange(p);
   return {
-    ok: b.winEnd !== a.winEnd && b.from === a.from && b.to === a.to && aim.offDays <= 14,
-    detail: `pressed at ${aim.aimISO}, window centred on ${aim.midISO} (${aim.offDays}d off); ` +
-            `brush ${b.from === a.from && b.to === a.to ? "held" : "MOVED"}`,
+    ok: b.winEnd !== a.winEnd && brushHeld && offDays <= 14,
+    detail: `pressed at ${iso(aimMs)}, window centred on ${iso(midMs)} (${offDays}d off) ` +
+            `within ${t.days}d of travel; brush ${brushHeld ? "held" : "MOVED"}`,
   };
 });
 
