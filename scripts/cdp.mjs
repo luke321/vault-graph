@@ -231,10 +231,48 @@ export async function attach(port, match = "") {
       ws.send(JSON.stringify({ id, method, params }));
     });
 
+  // EVERY UNCAUGHT PAGE ERROR, kept from the moment we attach.
+  //
+  // Without this a page that fails to BOOT is nearly undiagnosable from out here: eval() only
+  // reports exceptions from the expression IT ran, so a script that threw during setup shows up
+  // only as `window.__vg is undefined` with no reason attached. Diagnosing one such failure took
+  // six rounds of narrowing by hand, and the answer was still not in reach -- the module body
+  // re-ran clean when evaluated a second time, so the throw was in the boot path and invisible.
+  //
+  // Runtime.enable is what makes exceptionThrown arrive; console errors come with it, since a
+  // page that logs an error before dying is saying the same thing.
+  const errors = [];
+  listeners.push((msg) => {
+    if (msg.method === "Runtime.exceptionThrown") {
+      const d = msg.params?.exceptionDetails || {};
+      errors.push({
+        kind: "exception",
+        text: d.exception?.description || d.text || "unknown exception",
+        line: d.lineNumber, col: d.columnNumber, url: d.url || "",
+      });
+    } else if (msg.method === "Runtime.consoleAPICalled" && msg.params?.type === "error") {
+      errors.push({
+        kind: "console",
+        text: (msg.params.args || [])
+          .map((a) => a.description ?? a.value ?? a.type).join(" "),
+      });
+    }
+  });
+  await send("Runtime.enable").catch(() => {});
+
   return {
     target: page,
     send,
     on: (fn) => listeners.push(fn),
+    /** Uncaught page errors and console.error calls, oldest first. */
+    get errors() { return errors.slice(); },
+    /** The first page error as a one-line string, or null. For "why is the page dead". */
+    firstError() {
+      if (!errors.length) return null;
+      const e = errors[0];
+      return e.kind + ": " + String(e.text).split(String.fromCharCode(10))[0] +
+             (e.line != null ? " (line " + (e.line + 1) + ")" : "");
+    },
     // Why the connection went, or null while it is up. A long run can then stop at the first
     // sign of it rather than working through every remaining step against a closed socket.
     get lost() { return dead; },
