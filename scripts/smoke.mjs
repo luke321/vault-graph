@@ -555,18 +555,23 @@ async function runOne(vault) {
     console.log(`\n${checks.length - failed}/${checks.length} passed`);
     return failed;
   } finally {
-    if (page) page.close();
-    // KILL THE TREE, not the launcher. `spawn().kill()` signals the process we started,
-    // and Chrome's launcher hands off to a browser process and exits -- so the kill lands
-    // on something already gone while the browser it started keeps running, keeps its
-    // profile locked, and keeps answering on the debugging port. The next run then finds
-    // it there. Measured: leftovers from several runs alive at once, and three separate
-    // misdiagnoses traced back to one of them serving a stale page.
+    // ORDER MATTERS HERE, and getting it wrong is invisible.
     //
-    // Ask politely first: Browser.close lets Chrome shut itself down and release the
-    // profile cleanly. taskkill /T is the fallback, and on anything but Windows the plain
-    // kill is all there is.
+    // Browser.close asks Chrome to shut itself down and release the profile -- the only
+    // one of these three that reliably reaches the BROWSER process rather than the
+    // launcher. It has to be sent BEFORE page.close(), because that closes the websocket
+    // the request would travel over: with the calls the other way round the send threw
+    // into an empty catch on every run, silently, and the browser stayed up. Which is
+    // exactly the leak this block was added to fix -- it blocked a push one commit later,
+    // with the new guard correctly refusing to measure the stale page it had left behind.
     try { if (page) await page.send("Browser.close"); } catch { /* already going */ }
+    if (page) page.close();
+
+    // Then the blunt instruments, for a Chrome that ignored the request or never got it.
+    // `spawn().kill()` signals the process we started, and Chrome's launcher hands off to
+    // a browser process and exits -- so on its own that kill lands on something already
+    // gone while the browser keeps running, keeps the profile locked, and keeps answering
+    // on the debugging port.
     try { chrome.kill(); } catch { /* already gone */ }
     if (process.platform === "win32" && chrome.pid) {
       try { spawnSync("taskkill", ["/PID", String(chrome.pid), "/T", "/F"], { stdio: "ignore" }); }
