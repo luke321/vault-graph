@@ -426,6 +426,239 @@ check("a highlighted note is drawn larger", async (p) => {
   return { ok: ratio > 1.3 && ratio < 1.7, detail: `${r.before} -> ${after} (${ratio.toFixed(2)}x)` };
 });
 
+/* -------------------------------------------------------------- date range --
+ * The brush is DRIVEN, not called. Every one of these dispatches real pointer events at real
+ * pixels, because the bugs it exists to catch were all in the gesture rather than in the
+ * filter: which end a press grabs, whether the other end stays put, whether the disc waits
+ * for the release. `__vg.setRange()` exercises none of that -- it was green while grabbing
+ * one handle dragged both.
+ *
+ * These run LAST and each one leaves the range clear, so nothing above can be affected by
+ * the order the suite happens to run in.
+ */
+
+// The ribbon's three lanes, so a press can be aimed at one of them. Mirrors the constants in
+// page.js; a mismatch shows up as a check aiming at the wrong lane rather than as a wrong
+// number, which is why each helper reports what it hit.
+const RIB_BARS = 26, RIB_TRACK = 11;
+
+async function ribbonBox(p) {
+  return p.j(`(function(){
+    var r = document.querySelector("#vg-ribbon").getBoundingClientRect();
+    return { left: r.left, top: r.top, w: r.width, h: r.height };
+  })()`);
+}
+
+async function rangeSnap(p) {
+  return p.j(`(function(){
+    var r = __vg.rangeReport();
+    return { from: r.from, to: r.to, lit: r.lit, total: r.total,
+             fromISO: r.from ? new Date(r.from).toISOString().slice(0,10) : null,
+             toISO: r.to ? new Date(r.to).toISOString().slice(0,10) : null,
+             winStart: new Date(__vg.heat.start).toISOString().slice(0,10),
+             winEnd: new Date(__vg.heat.start + __vg.heat.cols * 7 * 86400000).toISOString().slice(0,10) };
+  })()`);
+}
+
+/** Press, move in steps, release. Steps matter: the handler ignores anything under 3px. */
+async function ribbonDrag(p, box, x0, x1, y) {
+  await p.send("Input.dispatchMouseEvent",
+    { type: "mousePressed", x: box.left + x0, y: y, button: "left", clickCount: 1, buttons: 1 });
+  for (let k = 1; k <= 6; k++) {
+    await p.send("Input.dispatchMouseEvent",
+      { type: "mouseMoved", x: box.left + x0 + (x1 - x0) * (k / 6), y: y, button: "left", buttons: 1 });
+    await sleep(45);
+  }
+  await p.send("Input.dispatchMouseEvent",
+    { type: "mouseReleased", x: box.left + x1, y: y, button: "left", clickCount: 1, buttons: 0 });
+  // A beat BEFORE settle: it returns at once when busy is already false, and right after the
+  // release the cascade has not started yet, so waiting first would wait past it.
+  await sleep(150);
+  await settle(p);
+  await sleep(120);
+  return rangeSnap(p);
+}
+
+async function clearRange(p) {
+  await p.eval(`__vg.setRange(null, null); __vg.setHeatEnd(null); void 0`);
+  await sleep(150);
+  await settle(p);
+}
+
+check("a drag on the ribbon caps the date range", async (p) => {
+  await clearRange(p);
+  const box = await ribbonBox(p);
+  const before = await rangeSnap(p);
+  const r = await ribbonDrag(p, box, Math.round(box.w * 0.25), Math.round(box.w * 0.55), box.top + 12);
+  await clearRange(p);
+  return {
+    ok: r.fromISO !== null && r.toISO !== null && r.fromISO < r.toISO && r.lit < before.lit,
+    detail: `${r.fromISO} -> ${r.toISO}, lit ${before.lit} -> ${r.lit} of ${r.total}`,
+  };
+});
+
+check("dragging one brush edge leaves the other alone", async (p) => {
+  // THE BUG THIS PINS. Every press used to start a new brush anchored where the pointer went
+  // down, with the far end following it -- so grabbing the left handle moved the right one
+  // too. Both directions are checked, because an anchor that is wrong one way round is easy
+  // to write and the symptom only shows on one of the two edges.
+  await clearRange(p);
+  const box = await ribbonBox(p);
+  const y = box.top + 12;
+  const a = await ribbonDrag(p, box, Math.round(box.w * 0.30), Math.round(box.w * 0.60), y);
+
+  const xAt = async (ms) => p.j(`(function(){
+    var d = __vg.dateSpan, w = document.querySelector("#vg-ribbon").getBoundingClientRect().width;
+    return ((${ms} - d.lo) / (d.hi - d.lo)) * w; })()`);
+
+  const b = await ribbonDrag(p, box, Math.round(await xAt(a.from)), Math.round(await xAt(a.from) - box.w * 0.1), y);
+  const leftOk = b.to === a.to && b.from < a.from;
+
+  const c = await ribbonDrag(p, box, Math.round(await xAt(b.to)), Math.round(await xAt(b.to) + box.w * 0.08), y);
+  const rightOk = c.from === b.from && c.to > b.to;
+
+  await clearRange(p);
+  return {
+    ok: leftOk && rightOk,
+    detail: `left edge ${a.fromISO}->${b.fromISO} (far end ${leftOk ? "held" : "MOVED"}), ` +
+            `right edge ${b.toISO}->${c.toISO} (far end ${rightOk ? "held" : "MOVED"})`,
+  };
+});
+
+check("dragging inside the brush pans it and keeps its width", async (p) => {
+  await clearRange(p);
+  const box = await ribbonBox(p);
+  const y = box.top + 12;
+  const a = await ribbonDrag(p, box, Math.round(box.w * 0.30), Math.round(box.w * 0.50), y);
+  const mid = Math.round(box.w * 0.40);
+  const b = await ribbonDrag(p, box, mid, mid + Math.round(box.w * 0.08), y);
+  const wA = a.to - a.from, wB = b.to - b.from;
+  await clearRange(p);
+  return {
+    // A day of slack: the pan is clamped to the span and the ends quantise to pixels.
+    ok: Math.abs(wA - wB) <= 86400000 && b.from > a.from,
+    detail: `width ${Math.round(wA / 86400000)}d -> ${Math.round(wB / 86400000)}d, ` +
+            `moved to ${b.fromISO} -> ${b.toISO}`,
+  };
+});
+
+check("the band's window and the brush move independently", async (p) => {
+  // They were one control: the window followed whichever brush end was dragged, so it could
+  // not be placed deliberately -- the next nudge of the brush took it back. Checked BOTH
+  // ways, since either direction of coupling would be a regression.
+  await clearRange(p);
+  const box = await ribbonBox(p);
+  const yBars = box.top + 12, yTrack = box.top + RIB_BARS + 5;
+  const a = await ribbonDrag(p, box, Math.round(box.w * 0.25), Math.round(box.w * 0.50), yBars);
+  const b = await ribbonDrag(p, box, Math.round(box.w * 0.90), Math.round(box.w * 0.62), yTrack);
+  const winMoved = b.winEnd !== a.winEnd && b.from === a.from && b.to === a.to;
+
+  const xAt = async (ms) => p.j(`(function(){
+    var d = __vg.dateSpan, w = document.querySelector("#vg-ribbon").getBoundingClientRect().width;
+    return ((${ms} - d.lo) / (d.hi - d.lo)) * w; })()`);
+  const c = await ribbonDrag(p, box, Math.round(await xAt(b.from)), Math.round(await xAt(b.from) - box.w * 0.09), yBars);
+  const brushMoved = c.from < b.from && c.winEnd === b.winEnd;
+
+  await clearRange(p);
+  return {
+    ok: winMoved && brushMoved,
+    detail: `window ${a.winEnd} -> ${b.winEnd} (brush ${winMoved ? "held" : "MOVED"}), ` +
+            `brush ${b.fromISO} -> ${c.fromISO} (window ${brushMoved ? "held" : "MOVED"})`,
+  };
+});
+
+check("a press on the window track jumps the window there", async (p) => {
+  // Dragging the pill across eleven years to reach 2018 is a lot of mouse, so a press on the
+  // track is also a jump. It must not disturb the brush.
+  await clearRange(p);
+  const box = await ribbonBox(p);
+  const yBars = box.top + 12, yTrack = box.top + RIB_BARS + 5;
+  const a = await ribbonDrag(p, box, Math.round(box.w * 0.30), Math.round(box.w * 0.55), yBars);
+  const x = box.left + Math.round(box.w * 0.30);
+  await p.send("Input.dispatchMouseEvent", { type: "mousePressed", x: x, y: yTrack, button: "left", clickCount: 1, buttons: 1 });
+  await p.send("Input.dispatchMouseEvent", { type: "mouseReleased", x: x, y: yTrack, button: "left", clickCount: 1, buttons: 0 });
+  await settle(p);
+  const b = await rangeSnap(p);
+  await clearRange(p);
+  return {
+    ok: b.winEnd !== a.winEnd && b.from === a.from && b.to === a.to,
+    detail: `window ${a.winEnd} -> ${b.winEnd}, brush ${b.from === a.from && b.to === a.to ? "held" : "MOVED"}`,
+  };
+});
+
+check("the disc waits for the release", async (p) => {
+  // THE SMOOTHNESS FIX, as a property rather than as a frame rate. A drag previews on the
+  // ribbon and must not touch the disc: the first version put a full cascade on every
+  // pointermove and the second a full layout, and at 10k notes both lag the cursor. So the
+  // opacities may not move until the button comes up.
+  await clearRange(p);
+  const box = await ribbonBox(p);
+  const y = box.top + 12;
+  const x0 = Math.round(box.w * 0.30), x1 = Math.round(box.w * 0.60);
+  const litOf = () => p.j(`(function(){ var n = 0;
+    __vg.graph.forEachNode(function(id){ if ((__vg.alpha[id]||0) > 0.004) n++; }); return n; })()`);
+
+  const before = await litOf();
+  await p.send("Input.dispatchMouseEvent", { type: "mousePressed", x: box.left + x0, y: y, button: "left", clickCount: 1, buttons: 1 });
+  for (let k = 1; k <= 6; k++) {
+    await p.send("Input.dispatchMouseEvent",
+      { type: "mouseMoved", x: box.left + x0 + (x1 - x0) * (k / 6), y: y, button: "left", buttons: 1 });
+    await sleep(45);
+  }
+  const during = await litOf();
+  // ...and the handles ARE following, or "nothing moved" would pass for the wrong reason.
+  const previewing = await p.j(`(function(){
+    var t = document.querySelector("#vg-rtip");
+    return !t.hidden && /\\d{4}-\\d{2}-\\d{2}/.test(t.textContent); })()`);
+  await p.send("Input.dispatchMouseEvent", { type: "mouseReleased", x: box.left + x1, y: y, button: "left", clickCount: 1, buttons: 0 });
+  await settle(p);
+  const after = await litOf();
+  await clearRange(p);
+  return {
+    ok: during === before && after < before && previewing,
+    detail: `lit ${before} during drag ${during} (${during === before ? "untouched" : "MOVED"}), ` +
+            `after release ${after}; tooltip ${previewing ? "tracking" : "ABSENT"}`,
+  };
+});
+
+check("All dates clears the range and the window", async (p) => {
+  const box = await ribbonBox(p);
+  await ribbonDrag(p, box, Math.round(box.w * 0.30), Math.round(box.w * 0.55), box.top + 12);
+  await p.eval(`document.querySelector("#vg-rangeall").click(); void 0`);
+  await settle(p);
+  const r = await p.j(`(function(){ var r = __vg.rangeReport();
+    return { from: r.from, to: r.to, heatEnd: r.heatEnd, lit: r.lit, total: r.total,
+             disabled: !!document.querySelector("#vg-rangeall").disabled }; })()`);
+  return {
+    ok: r.from === null && r.to === null && r.heatEnd === null && r.lit === r.total && r.disabled,
+    detail: `from/to/heatEnd null, ${r.lit} of ${r.total} lit, button ` +
+            (r.disabled ? "disabled" : "STILL LIVE"),
+  };
+});
+
+check("undated notes survive every range", async (p) => {
+  // Deliberate, and worth pinning because it is the kind of rule that gets tidied away: 20%
+  // of the 10k fixture carries no frontmatter, and excluding those from a date range would
+  // make a date filter quietly also filter on "has frontmatter".
+  const r = await p.j(`(function(){
+    __vg.setRange("2019-01-01", "2019-01-02");
+    var undated = 0, lit = 0;
+    __vg.graph.forEachNode(function(id, a){ if (!a.created) undated++; });
+    return { undated: undated };
+  })()`);
+  await settle(p);
+  const lit = await p.j(`(function(){ var n = 0;
+    __vg.graph.forEachNode(function(id, a){ if (!a.created && (__vg.alpha[id]||0) > 0.004) n++; });
+    return n; })()`);
+  await clearRange(p);
+  return {
+    ok: r.undated === 0 || lit === r.undated,
+    detail: r.undated === 0
+      ? "no undated notes in this vault -- nothing to check"
+      : `${lit} of ${r.undated} undated notes lit inside a two-day range`,
+  };
+});
+
 // Idle means the app's own definition of idle -- the same predicate the demo driver waits
 // on (play || cascade || layout anim || hover tween || highlight tween), so a check cannot
 // disagree with the recorder about when the disc has settled.

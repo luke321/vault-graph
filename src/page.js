@@ -1506,15 +1506,8 @@ function mountVaultGraph(root, data, deps) {
     return iso(f) + "  \u2192  " + iso(t);
   }
 
-  /**
-   * Apply the range. One entry point for all three concepts, so they cannot drift.
-   *
-   * Goes through cascade(), not straight to the renderer: the range is a filter and every
-   * other filter in this page animates, so this one does too -- and cascade() is also what
-   * re-derives the plan, so the disc re-densifies around what is left instead of leaving
-   * holes where the excluded notes were.
-   */
-  function applyRange() {
+  /** The chrome that goes with a range, whichever path put it there. */
+  function rangeChrome() {
     var el = $("rangenote");
     if (el) el.textContent = rangeLabel();
     // Nothing to clear when nothing is capped. A live button that does nothing is a worse
@@ -1522,8 +1515,36 @@ function mountVaultGraph(root, data, deps) {
     var btn = $("rangeall");
     if (btn) btn.disabled = (state.from === null && state.to === null);
     drawDateUI();
+  }
+
+  /**
+   * A range change that is a JUMP: the All-dates button, or the debug API. Animated, because
+   * a discrete filter change animates everywhere else in this page.
+   */
+  function applyRange() {
+    rangeChrome();
     cascade();
   }
+
+  /* THE DRAG DOES NOT TOUCH THE DISC AT ALL.
+   *
+   * Two attempts got this wrong before it got simple. The first put cascade() on every
+   * pointermove -- a 1600ms reveal that walks the disc one note at a time, cancelled and
+   * restarted 120 times a second, so what you saw was dozens of animations each showing its
+   * own first frame. The second replaced that with one cheap layout frame per pointermove,
+   * which is what the timeline slider does and is right for the timeline: 452 notes.
+   *
+   * At 10,000 it is still too much. syncAlpha, the packer and a Sigma refresh are each O(n)
+   * and they run between the pointer moving and the next paint, so the drag lags the cursor
+   * however cleverly it is scheduled. The honest answer is that the disc is not a thing that
+   * can be scrubbed at that size.
+   *
+   * So a drag only moves the RIBBON: the handles, the pill, the readout and the tooltip,
+   * which are one small canvas and two spans. `state` is not written either -- the preview
+   * lives on the drag object, so an abandoned drag leaves nothing half-applied and there is
+   * exactly one moment when the filter changes. The disc updates once, on release, animated
+   * like every other filter change in the page.
+   */
 
   // Today's date, read at load rather than baked in at build time, so the mark
   // stays correct tomorrow without rebuilding the snapshot.
@@ -4550,10 +4571,24 @@ function mountVaultGraph(root, data, deps) {
   function ribbonMs(x, w) {
     return dateSpan.lo + (Math.max(0, Math.min(w, x)) / w) * (dateSpan.hi - dateSpan.lo);
   }
-  /** The brush's two ends, with null meaning "the end of the span". */
+  /**
+   * The brush's two ends, with null meaning "the end of the span".
+   *
+   * Reads the in-flight drag first, so the handles follow the cursor while the disc behind
+   * them stays put. This is the one place the preview and the applied state are allowed to
+   * disagree, and it is what makes a drag cost a canvas repaint instead of a relayout.
+   */
   function brushEnds() {
+    if (brushDrag && brushDrag.pFrom !== undefined) return [brushDrag.pFrom, brushDrag.pTo];
     return [state.from === null ? dateSpan.lo : state.from,
             state.to === null ? dateSpan.hi : state.to];
+  }
+
+  /** Where the band's window is, or is being dragged to. */
+  function winEndNow() {
+    if (brushDrag && brushDrag.pWin !== undefined) return brushDrag.pWin;
+    if (state.heatEnd !== null) return state.heatEnd;
+    return heat ? heat.start + heat.cols * WEEK_MS : heatParse(TODAY);
   }
 
   function drawRibbon() {
@@ -4626,11 +4661,27 @@ function mountVaultGraph(root, data, deps) {
     cx.fillRect(x1 - 3, top / 2 - 4, 6, 8);
   }
 
-  /** The window pill's box on the track, in canvas pixels. */
+  /**
+   * Repaint the band for a new window, and only if the window really moved.
+   *
+   * The grid is columned by WEEK, so heatMonday() quantises the end date -- a drag across a
+   * few pixels inside one week produces an identical grid. heatBuild() re-buckets every note
+   * in the vault, which is 10k of them on the fixture, so skipping the identical rebuilds is
+   * most of the cost of a window drag.
+   */
+  function rebuildBand() {
+    var was = heat ? heat.start : null;
+    heatBuild();
+    drawDateUI();
+    if (heat && heat.start !== was) heatDraw();
+  }
+
+  /** The window pill's box on the track, in canvas pixels. Follows a drag if one is live. */
   function winTrack(w) {
-    var x0 = heat ? ribbonX(heat.start, w) : 0;
-    var x1 = heat ? ribbonX(heat.start + heat.cols * WEEK_MS, w) : 0;
-    return { x0: x0, x1: x1, y: RIBBON_BARS + 2, h: RIBBON_TRACK - 4 };
+    var span = (heat ? heat.cols : HEAT_WEEKS) * WEEK_MS;
+    var end = winEndNow();
+    return { x0: ribbonX(end - span, w), x1: ribbonX(end, w),
+             y: RIBBON_BARS + 2, h: RIBBON_TRACK - 4 };
   }
 
   /** True when a press at this height is aiming at the window track rather than the bars. */
@@ -4643,11 +4694,11 @@ function mountVaultGraph(root, data, deps) {
    * it has always been, and a window that started where you pointed would show the year after
    * the date you picked rather than the year up to it.
    */
-  function setWinEnd(ms) {
+  function clampWinEnd(ms) {
     var todayMs = heatParse(TODAY);
     var span = (heat ? heat.cols : HEAT_WEEKS) * WEEK_MS;
     var lo = dateSpan.lo + span;              // never scroll off the left end of the history
-    state.heatEnd = Math.max(Math.min(ms, todayMs), Math.min(lo, todayMs));
+    return Math.max(Math.min(ms, todayMs), Math.min(lo, todayMs));
   }
 
   /**
@@ -4708,6 +4759,20 @@ function mountVaultGraph(root, data, deps) {
     var rib = $("ribbon");
     if (!rib) return;
 
+    // ONE UPDATE PER FRAME. A pointermove fires 120+ times a second on a decent mouse and
+    // each update re-lays out the disc; without this the handler is the bottleneck and the
+    // drag lags behind the cursor. The last position is the only one that matters.
+    var pend = null, pendRaf = 0;
+    var flush = function () {
+      pendRaf = 0;
+      var f = pend; pend = null;
+      if (f) f();
+    };
+    var onFrame = function (fn) {
+      pend = fn;
+      if (!pendRaf) pendRaf = WIN.requestAnimationFrame(flush);
+    };
+
     $("rangeall").onclick = function () {
       state.from = null; state.to = null; state.heatEnd = null;
       heatBuild();
@@ -4733,8 +4798,8 @@ function mountVaultGraph(root, data, deps) {
       // A PRESS ON THE TRACK IS ALSO A JUMP. Dragging the pill across eleven years to reach
       // 2018 is a lot of mouse; pressing at 2018 puts it there and the drag then refines it.
       if (mode === "win") {
-        setWinEnd(ribbonMs(x, w));
-        heatBuild(); drawDateUI(); heatDraw();
+        brushDrag.pWin = clampWinEnd(ribbonMs(x, w));
+        drawDateUI();
         showRTip(x, winLabel());
       }
     });
@@ -4764,11 +4829,13 @@ function mountVaultGraph(root, data, deps) {
 
       // The band's window, moved on its own and touching neither end of the brush.
       if (brushDrag.mode === "win") {
-        setWinEnd(here);
-        heatBuild();
-        drawDateUI();
-        heatDraw();
-        showRTip(xOf(ev), winLabel());
+        var wx = xOf(ev);
+        onFrame(function () {
+          if (!brushDrag) return;
+          brushDrag.pWin = clampWinEnd(here);
+          drawDateUI();                       // the pill only; the grid waits for release
+          showRTip(wx, winLabel());
+        });
         return;
       }
 
@@ -4790,26 +4857,51 @@ function mountVaultGraph(root, data, deps) {
         hi = Math.max(brushDrag.grab, here);
         follow = here;
       }
-      state.from = lo;
-      state.to = hi;
       // THE BAND'S WINDOW IS NOT TOUCHED HERE. It used to follow whichever end was moving,
       // which is convenient until you want to read one stretch while filtering to another --
       // and it made the window impossible to place deliberately, since the next brush nudge
       // took it back. It has its own track now.
-      //
-      // Both ends labelled while panning, since both are moving; otherwise just the one under
-      // the hand. A label naming the end you are not touching is noise.
-      showRTip(ribbonX(follow, w),
-               brushDrag.mode === "body" ? isoDay(lo) + "  \u2192  " + isoDay(hi) : isoDay(follow));
-      applyRange();
+      var mode = brushDrag.mode;
+      brushDrag.pFrom = lo;
+      brushDrag.pTo = hi;
+      onFrame(function () {
+        if (!brushDrag) return;
+        // Both ends labelled while panning, since both are moving; otherwise just the one
+        // under the hand. A label naming the end you are not touching is noise.
+        showRTip(ribbonX(follow, w),
+                 mode === "body" ? isoDay(lo) + "  \u2192  " + isoDay(hi) : isoDay(follow));
+        drawDateUI();               // the handles only; the disc waits for release
+        var el = $("rangenote");
+        if (el) el.textContent = isoDay(lo) + "  \u2192  " + isoDay(hi);
+      });
     });
 
+    // THE ONE MOMENT THE FILTER CHANGES. Everything the drag did was a preview on a canvas;
+    // this is where it becomes state, and where the disc animates to it exactly as it does
+    // for a legend toggle.
     var endDrag = function (ev) {
       if (!brushDrag) return;
+      var d = brushDrag;
       brushDrag = null;
       rib.removeAttribute("data-grab");
       hideRTip();
       try { rib.releasePointerCapture(ev.pointerId); } catch { /* fine */ }
+
+      if (d.pWin !== undefined) {
+        state.heatEnd = d.pWin;
+        rebuildBand();
+        return;
+      }
+      if (d.moved && d.pFrom !== undefined) {
+        // The ends of the span mean "no bound" rather than "the first and last note", so a
+        // drag that lands on an end clears that half of the filter. Without this, brushing
+        // the whole strip left a range that excluded anything dated outside the known span.
+        state.from = d.pFrom <= dateSpan.lo ? null : d.pFrom;
+        state.to = d.pTo >= dateSpan.hi ? null : d.pTo;
+        applyRange();
+      } else {
+        rangeChrome();              // an abandoned drag: put the readout back
+      }
     };
     rib.addEventListener("pointerup", endDrag);
     rib.addEventListener("pointercancel", endDrag);
