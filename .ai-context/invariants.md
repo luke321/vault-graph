@@ -44,6 +44,29 @@ This failed until 2026-08-22 because the gap total counted *groups present* rath
 *weight present*, so handing over moved every wedge by one 2-degree gap: 33 graph units,
 6 screen pixels, in a single frame after the animation had converged.
 
+**It failed again until 2026-08-23, and only on a vault with a dominant folder.** A cell
+seated at weight 0 still asked for one row, because `rowsNeeded` ends in `Math.max(1, k)`
+-- and that row reaches the band balancer's split search, so the chosen hub radius came out
+differently between the two plans. Hiding a group holding 77% of the vault measured
+`leanMaxR 13` against `paddedMaxR 14`; every other group on the same vault was clean,
+because anywhere else the spurious row disappears into the maximum. `rowsNeeded` returns 0
+when there is no weight to place. Checked by `scripts/smoke.mjs` against the third fixture,
+`scripts/make-shape-vault.mjs`, which exists for this shape.
+
+**The check compares the UNION of cell keys**, counting a missing cell as zero rows. A cell
+present only in the padded plan *is* the seated zero-weight cell this is about, and
+iterating the lean plan's keys alone never compared it -- which is why the failure above
+first read as an empty `rowDiffs` beside a `maxR` that differed by a row. Counting missing
+as zero is the other half: absent and seated-at-zero-rows are the same statement, and
+comparing `undefined` against `0` fails every hidden folder on every vault.
+
+**Nothing here reaches the screen at rest.** The resting plan seats only visible notes, so
+no cell has zero weight; mid-cascade the plan is pinned and `geomLock` holds `r0`,
+`rOuter` and `maxR` -- measured `innerMaxStep 0` and `outerMaxStep 0` across 122 frames
+while hiding the dominant folder. This invariant is the guarantee, not the symptom: what it
+protects is the next change, and `geomLock` is all that stands between a violation and the
+6px jump above.
+
 ## No jump at the end of an animation
 
 `settle()` must be a no-op, not a correction. The cascade runs past progress 1 until
@@ -74,6 +97,66 @@ measured `27 → 22.3 → 12.8 → 4.6 → 0.8 → 0` on a hide.
 Hiding a small folder and a large one must differ in *degree*, never in *kind*. There is
 one plan basis; no threshold switches it. Resting ring radius after hiding: `03` 1818,
 `04` 1978, `08` 1658, `05` 2138 (unchanged, inner band).
+
+## The disc's density follows the notes on screen
+
+Two vaults of different sizes showing the same number of notes must draw the same disc:
+same row pitch, same dot sizes. The lattice spacing solves it — a lattice of spacing `s`
+holds `1/s^2` notes per unit area, so holding the outer radius fixed gives
+`s = sqrt(n_full / n_visible)`.
+
+```javascript
+__vg.densityReport()      // -> pitchRoot, held constant across filter states
+```
+
+**`pitchRoot` is the invariant**, not `pitchPx`. It is `pitchPx * sqrt(shown)`, which is
+what holds still if the density is honest. It reads *exactly* the same number at every
+state where the `DENSITY_MAX` cap is not binding — 436.919 on a 500-note vault, 467.219 on
+a 1500-note one — so a spread above about 1.01x on uncapped states is a real regression and
+not tolerance.
+
+Before this existed, `pitchPx` was a constant **per vault**: 19.481px at every filter state
+of a 500-note vault and 12.064px at every state of a 1500-note one, because the box is
+pinned and the spacing was a hard 1. Filtering 503 notes down to 62 moved the median dot
+4.254px → 4.208px. Spread of `pitchRoot` was **2.85x**; it is 1.10x now, and the whole
+residual is the capped step.
+
+**Filtering barely moves the disc's radius**, which is worth knowing before trying to
+improve this. `maxR` is the max over cells, so the deepest surviving folder still reaches
+the rim: `reach` measured 1.000 with 481, 465 and 382 of 503 notes showing. There is no
+empty margin to reclaim — filtering makes the disc *sparser* at a radius that hardly
+changes. A correction pass that scales the spacing until `maxR` lands back on the locked
+extent was tried and **made it worse** (spread 1.10x → 1.15x): the outer edge is quantised
+in whole rows and already flush with the box, so 2.3% more spacing buys 7% more radius and
+there is no spacing between "no change" and "one row over". The overshoot belongs to the
+camera — see `fitRatio()`, whose upper clamp came off 1 for exactly this.
+
+**The cascade must be handed the spacing, not left to derive one.** Deriving it from
+`planTotal` mid-animation samples alpha-weighted membership, which slides every frame:
+measured, the biggest single-frame radial step went from 0 to **94 units against a row of
+160**. Both endpoint packings are built from binary presence and the per-frame value is the
+interpolation between them, on the same clock as `rowsAt` and the gap reservation.
+
+**Dot size is a separate mechanism reached through the same number.** `measureSizeScale`
+measures a *row*, not a lattice unit — they were the same number until the spacing became a
+variable, and conflating them is why size ignored filtering entirely. Its ceiling came off
+1, since a filtered disc genuinely has more room per note. Median dot 4.238px → 10.854px
+filtering 503 notes to 62.
+
+## The hub stays the same share of the disc
+
+`r0`'s formula exists to hold the hub at a constant *fraction* — its own comment records
+that a fixed `r0` gave "a 32% hole at full size and a 69% one when filtered down". Pinning
+`r0` into `geomLock` reintroduced precisely that for every filtered view: measured 0.328 →
+0.439 on a 500-note vault and 0.27 → 0.417 on a 1500-note one.
+
+```javascript
+__vg.densityReport()      // -> holeShare, drift under 0.06 while filtering
+```
+
+`r0` needed no change in the end. The share is held by the disc keeping its outer radius,
+which is what the density solve does — so this checks the outcome the formula was written
+for rather than the formula. Holds at 0.304–0.328 and 0.256–0.38.
 
 ## The rings are independent
 
@@ -254,6 +337,32 @@ The failure this replaced is worth remembering because it did not look like a la
 bug: the grid scrolls from `scrollLeft` 0, which is the **oldest** end, so a narrow
 viewport opened on empty months with every note off the right edge and was reported as a
 missing stylesheet.
+
+## Every unlinked note wears the (unlinked) swatch
+
+A note of degree 0 belongs to the `(unlinked)` group, not to its folder, and the legend
+draws one swatch for it. What the disc paints must agree with that swatch — through the
+**renderer**, not through `colorOf`, which was correct throughout the failure.
+
+```javascript
+(function () {
+  var g = __vg.graph, r = __vg.renderer, sw = __vg.colorOf("(unlinked)").toLowerCase();
+  var ids = g.nodes().filter(function (id) { return g.degree(id) === 0; });
+  return ids.filter(function (id) {
+    return r.getNodeDisplayData(id).color.toLowerCase() === sw;
+  }).length + " of " + ids.length;
+})()
+```
+
+Must be **all of them**. Measured before the fix: **0 of 12** on a 700-note generated
+vault (9 distinct colours under one legend row) and **6 of 148** on the 10,000-note
+synthetic; after, 12 of 12 and 148 of 148. Those 6 are why the check asserts *all* and not
+*any* — one folder's slot happens to be the same hex, so an `any` form passed on a broken
+build.
+
+`demo-vault` mirrors a real vault and has **0 of 452** unlinked notes, so the check
+reports that it had nothing to measure rather than passing on that shape. A vault with no
+orphans cannot exercise this.
 
 ## Nav counts share one right edge
 

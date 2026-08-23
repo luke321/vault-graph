@@ -682,6 +682,31 @@ function mountVaultGraph(root, data, deps) {
   // not need the box widened, which would shrink the resting disc for everyone.
   var HL_PUSH = 0.9;
 
+  // How far the density solve is allowed to spread the lattice (github#13). sqrt has no
+  // ceiling of its own, so isolating one folder out of a 1500-note vault would otherwise
+  // ask for a spacing of 30 and draw a handful of boulders on the rim. 2.6 lets a vault
+  // be filtered to ~15% of itself before the disc starts shrinking again instead of
+  // spreading -- which covers isolating a single PARA folder, the gesture this is for.
+  var DENSITY_MAX = 2.6;
+
+  // The lattice spacing the last plan actually used. Read by measureSizeScale, which has
+  // to know how wide a ROW is rather than how wide a lattice unit is -- they were the
+  // same number until the density solve, and conflating them is why dot size did not
+  // respond to filtering at all.
+  var lastSP = 1;
+
+  // ONE ROW OF THE LATTICE, IN GRAPH UNITS. Everything that is a distance ON the disc -- the
+  // seam, a wedge's end margin, how big a dot may be, how much room a note has -- is really a
+  // multiple of this, and it is NOT UNIT any more.
+  //
+  // SP was a hard 1 when those were written, so UNIT was the pitch and the two were the same
+  // number. github#13 made SP the thing the density solve moves: a filtered disc spreads its
+  // lattice rather than shrinking, so the pitch is lastSP * UNIT and can be 1.8x that. Every
+  // constant quoted "in rows" has to be measured against this or it silently means something
+  // different at every filter state -- a seam of 0.075 rows would have been 0.075 UNIT, which
+  // is 4% of a row on a sparse disc instead of 7.5%.
+  function pitchUnits() { return UNIT * (lastSP || 1); }
+
   var NEST_MIN = 2;
   // Group folding is OFF now that there are 10 hues: it existed only because
   // groups past slot 4 all shared one grey and merged into an unreadable mass.
@@ -748,9 +773,17 @@ function mountVaultGraph(root, data, deps) {
   }
 
   // Group colour, tinted by subfolder when the folders are what we are looking at.
+  //
+  // UNLINKED IS A GROUP, NOT A FOLDER, and the folder dimension is the one place that can
+  // forget it. Every other dimension asks groupOf; this one used to go straight to the
+  // note's own folder, so a degree-0 note wore its folder's tint while the legend showed
+  // it under one swatch -- measured 0 of 12 matching on a 700-note vault, 9 distinct
+  // colours under a single legend row (github#3). `(vault root)` is NOT the same case:
+  // the builder writes that as a real folder value, so colorOf resolves it already.
   function nodeColor(id) {
     var a = graph.getNodeAttributes(id);
     if (state.dim !== "folder") return colorOf(groupOf(id));
+    if (groupOf(id) === UNLINKED) return colorOf(UNLINKED);
     return subShade[a.folder + "/" + (a.sub || "")] || colorOf(a.folder);
   }
 
@@ -906,7 +939,7 @@ function mountVaultGraph(root, data, deps) {
     var k = band === "i" ? "i" : "o";
     var r = geomLock && geomLock.bandR ? geomLock.bandR[k] : 0;
     if (!r) return SLICE_GAP * Math.PI / 180 * gapScale() * frac;
-    return (SEAM_ROWS * seamFall(band) * frac * UNIT) / r;
+    return (SEAM_ROWS * seamFall(band) * frac * pitchUnits()) / r;
   }
 
   function gapFor(nGroups, band) {
@@ -975,11 +1008,11 @@ function mountVaultGraph(root, data, deps) {
   function dotUnits(size) {
     var z = size || 4;
     if (z > NODE_MAX) z = NODE_MAX;
-    return DOT_OF_PITCH * UNIT * (z / NODE_MAX);
+    return DOT_OF_PITCH * pitchUnits() * (z / NODE_MAX);
   }
 
   function seamAt(r, nBoundaries) {
-    var g = r > 1e-6 ? (SEAM_ROWS * UNIT) / r : 0;
+    var g = r > 1e-6 ? (SEAM_ROWS * pitchUnits()) / r : 0;
     var tot = g * nBoundaries;
     var cap = 2 * Math.PI * SEAM_CAP;
     if (tot > cap) { g *= cap / tot; tot = cap; }
@@ -1102,7 +1135,7 @@ function mountVaultGraph(root, data, deps) {
   // the plain integer, which is what a resting disc must have: a fractional count
   // blends two grids one row apart, and at rest that reads as a smeared disc
   // rather than a packed one.
-  function buildWedgePlan(onlyVisible, weightOf, rowsOf) {
+  function buildWedgePlan(onlyVisible, weightOf, rowsOf, spIn) {
     var W = weightOf || function () { return 1; };
     var all = order[state.dim] || [];
     var nested = state.dim === "folder";
@@ -1256,7 +1289,49 @@ function mountVaultGraph(root, data, deps) {
     // Fixing the hole at a FRACTION of the outer radius and solving for r0 keeps
     // the hub the same relative size whether 440 notes are showing or 55 -- a
     // fixed r0 gave a 32% hole at full size and a 69% one when filtered down.
-    var SP = 1, HOLE = 0.3;
+    // THE DENSITY KNOB (github#13). SP is the lattice spacing -- radial between rows
+    // AND tangential along them, which is what makes the packing uniform -- and it was
+    // a hard 1. That made the disc a function of how many notes the VAULT holds rather
+    // than how many are on screen: measured, screen row pitch was 19.481px at every
+    // filter state of a 500-note vault and 12.064px at every state of a 1500-note one,
+    // so filtering 503 notes down to 62 moved the median dot from 4.254px to 4.208px
+    // and left 25% of the disc's radius as empty margin.
+    //
+    // Solve it instead. A lattice of spacing s holds 1/s^2 notes per unit area, so an
+    // annulus with a hole at HOLE*R holds n = pi*R^2*(1-HOLE^2)/s^2, i.e.
+    // R = s*sqrt(n / (pi*(1-HOLE^2))). Setting that equal to the FULL-vault R gives
+    //
+    //     s = sqrt(n_full / n_visible)
+    //
+    // exactly -- not an approximation, the same uniform-density assumption the r0
+    // formula below already makes. The disc then always fills its box, notes move
+    // outward as their neighbours leave, and each one gets proportionally more room.
+    //
+    // CONTINUOUS, WHICH IS THE WHOLE POINT. The retired REPACK_BELOW mechanism below
+    // switched plan basis at 55% and its three failures were all failures of the
+    // THRESHOLD: inconsistent either side, two packings inside one animation, and call
+    // sites disagreeing about which side they were on. A smooth function of the visible
+    // weight has no side to be on. It also holds the two invariants for free -- a
+    // departing note sits at weight 0 and contributes nothing to planTotal, so
+    // zero-weight invariance survives; and both the lean and padded plans derive it
+    // from their own planTotal, so parity survives.
+    //
+    // Capped, because sqrt grows without bound: one surviving note would otherwise be
+    // one boulder on the rim. At DENSITY_MAX the disc stops filling the box and starts
+    // shrinking again, which is the honest end of the behaviour rather than a cliff.
+    var HOLE = 0.3;
+    // SUPPLIED, DURING A CASCADE, for the same reason rowsOf is. Deriving it here from
+    // planTotal is right at rest and wrong mid-animation: the cascade weights membership
+    // by alpha, so planTotal slides every frame and the lattice breathed with it --
+    // measured, biggest single-frame radial step went from 0 to 94 units against a row of
+    // 160, i.e. the whole disc shifting half a row per frame. The cascade hands in the
+    // interpolation between its two endpoint packings instead, exactly as it does for
+    // rows, so the last frame and rest agree by construction.
+    var fullTotal = geomLock && geomLock.total > 0 ? geomLock.total : planTotal;
+    var density = spIn > 0 ? spIn
+      : (planTotal > 0.0001
+          ? Math.min(DENSITY_MAX, Math.sqrt(fullTotal / planTotal)) : 1);
+    var SP = density;
     var r0 = geomLock ? geomLock.r0 : Math.max(1.5, HOLE * Math.sqrt(
       Math.max(1, TOTAL) / (Math.PI * (1 - HOLE * HOLE))));
 
@@ -1264,7 +1339,16 @@ function mountVaultGraph(root, data, deps) {
     // is proportional and unfloored, for the same reason as in placeCell: flooring
     // it clamped a narrow cell's rows to one note each, so a 19-note cell asked
     // for 8 rows and drew as a thin sparse spoke instead of a packed wedge.
+    //
+    // A CELL WITH NO WEIGHT NEEDS NO ROWS, and the floor below is why that has to be said
+    // out loud. A departing cell stays seated in the plan at weight 0 while it fades, so
+    // `Math.max(1, k)` handed it one row anyway -- and that row reaches the band
+    // balancer's split search, which is how 738 zero-weight members moved the hub radius
+    // and put the padded plan's maxR one row outside the lean plan's (github#5). The
+    // cascade's row recorder already worked around the same floor by hand; the geometry
+    // never did.
     function rowsNeeded(span, n, st) {
+      if (!(n > 0)) return 0;
       var i = 0, r = st, k = 0;
       while (i < n && k < 500) { i += Math.max(0.05, span * r / SP); r += SP; k++; }
       return Math.max(1, k);
@@ -1286,7 +1370,10 @@ function mountVaultGraph(root, data, deps) {
     }
 
     // Hoisted above the balancer, which needs it to place the outer base.
-    var GUTTER = 1.6;
+    // In LATTICE units, so it scales with SP: the gap between the rings has to stay the
+    // same number of rows wide as the rows spread apart, or a filtered disc shows two
+    // bands nearly touching where the full one showed a clear channel.
+    var GUTTER = 1.6 * SP;
 
     // The inner ring is deliberately THINNER than the outer, not equal to it. Equal
     // thickness was tried first and reads oddly: the inner band sits at a smaller radius,
@@ -1582,6 +1669,28 @@ function mountVaultGraph(root, data, deps) {
       if (r > maxR) maxR = r;
     });
 
+    // WHY THERE IS NO CORRECTION PASS HERE, having tried one.
+    //
+    // The open-loop solve leaves maxR a few percent past the locked extent -- measured,
+    // reach 1.072 at a density of 1.023 -- and the obvious repair is to feed that back
+    // and scale SP until maxR lands on the lock. It was written, and it MADE THINGS
+    // WORSE: pitch * sqrt(shown) spread 1.10x -> 1.15x, because the loop drove SP back
+    // to 1 in almost every state and undid the whole change.
+    //
+    // The reason is worth keeping, because it contradicts what this was built on.
+    // Filtering a vault BARELY MOVES THE DISC'S RADIUS: maxR is the max over cells, and
+    // hiding some folders leaves the deepest survivor holding all of its own notes, so
+    // it still reaches the rim. Measured on the baseline, reach was 1.000 with 481, 465
+    // and 382 of 503 notes showing -- there was no empty margin to reclaim at all. What
+    // filtering does is make the disc SPARSER inside a radius that hardly changes.
+    //
+    // And that radius is quantised in whole rows. The outermost row already sits flush
+    // against the box, so any spreading at all pushes it a full row out: 2.3% more
+    // spacing bought 7% more radius. There is no SP between "no change" and "one row
+    // over", which is exactly why a loop targeting the lock can only pick SP = 1.
+    //
+    // So the overshoot is accepted and handled where it belongs -- in the camera, which
+    // is the thing that decides how much of the box is on screen. See fitRatio().
     // Rows sit SP apart in every cell -- spacing is never rescaled per cell, which
     // is what keeps density uniform. Each cell's first row is at its band's inner
     // edge, so columns grow outward and a cell ends where its notes run out.
@@ -1732,7 +1841,8 @@ function mountVaultGraph(root, data, deps) {
       c.slots = placeCell(c, rf, base);
     });
 
-    return { cells: cells, maxR: maxR, total: planTotal, r0: r0, rOuter: rOuter };
+    return { cells: cells, maxR: maxR, total: planTotal, r0: r0, rOuter: rOuter,
+             sp: SP, density: density };
   }
 
   // RETIRED 2026-08-22. This used to switch the plan basis on how much of the vault
@@ -1839,6 +1949,9 @@ function mountVaultGraph(root, data, deps) {
     // little inside the lattice radius it was packed against, so measuring positions made a
     // full disc read as 96% of itself and fit() zoomed slightly in on nothing.
     lastMaxR = plan.maxR || lastMaxR;
+    // Recorded beside lastMaxR and for the same reason: both are properties of the
+    // packing on screen, and both are read from render-time code that has no plan.
+    if (plan.sp > 0) lastSP = plan.sp;
 
     // The inner and main bands are each a full circle, so they are allocated
     // separately -- a small cell competes only with the other small cells.
@@ -1985,7 +2098,7 @@ function mountVaultGraph(root, data, deps) {
           // in from their own edge put those two notes exactly one step apart, which is a
           // boundary nobody can see. Everything past that is the channel, and the channel is
           // what gets scaled -- including the seam, which sits inside it.
-          var zero = MARGIN_ROWS * UNIT;
+          var zero = MARGIN_ROWS * pitchUnits();
           var seamArc = sm.gap * rGraph / 2;      // this side's half of the seam, in units
           var keep = EXCESS_KEEP * seamFall(isInner ? "i" : "o");
           var side = function (e) {
@@ -2016,6 +2129,13 @@ function mountVaultGraph(root, data, deps) {
             }
           }
           lastAt[sl.r] = { t: t, id: sl.id };
+          // HL_PUSH is NOT scaled by the plan's spacing, though it is quoted in rows. Scaling it
+          // was tried and is wrong: the constant was sized as a FRACTION OF THE RADIUS
+          // ("0.9 rows on a ~13.3-row disc is 6.8%"), and the radius is the thing the
+          // density solve holds still -- it is the row COUNT that shrinks as the lattice
+          // spreads. At the density cap the disc is ~5 rows deep, so 0.9 rows would have
+          // been 18% of it and a highlighted note would have protruded off the stage.
+          // Left in lattice units it stays the 6.8% it was tuned to be.
           var rr = sl.r + (isPushed(sl.id) ? HL_PUSH : 0);
           pos[sl.id] = { x: rr * Math.cos(t), y: rr * Math.sin(t) };
         });
@@ -2758,6 +2878,10 @@ function mountVaultGraph(root, data, deps) {
     graph.forEachNode(function (id) { if (willShow(id)) shownAfter++; });
     var ovAfter = true;   // one basis everywhere; see REPACK_BELOW
 
+    // The lattice spacing at each end of the toggle. Scalars, not per-cell maps: the
+    // spacing is global by construction -- it is what makes the packing uniform -- so
+    // there is one number per endpoint rather than one per cell.
+    var spSrc = 1, spDst = 1;
     var rowsSrc = Object.create(null), rowsDst = Object.create(null);
     var bandSrc = Object.create(null), bandDst = Object.create(null);
     // A group is PRESENT at an end if it has any seated weight there -- one wedge, one
@@ -2817,6 +2941,11 @@ function mountVaultGraph(root, data, deps) {
       };
       if (a) a.cells.forEach(record(rowsSrc, bandSrc));
       if (b) b.cells.forEach(record(rowsDst, bandDst));
+      // Taken from the endpoint plans themselves, which were built on binary presence --
+      // so these are the two densities the disc genuinely rests at, not a sample of
+      // whatever alpha happened to be on some frame.
+      if (a && a.sp > 0) spSrc = a.sp;
+      if (b && b.sp > 0) spDst = b.sp;
       var seen = Object.create(null);
       var presFor = function (p, m) {
         if (!p) return;
@@ -2919,7 +3048,10 @@ function mountVaultGraph(root, data, deps) {
         if (d === undefined) d = bandDst[bk] !== undefined ? bandDst[bk] : s;
         return s + (d - s) * ease;
       };
-      var plan = buildWedgePlan(ovAfter, weightOf, rowsAt);
+      // Same clock as the rows and the gap reservation above: at ease 0 this is the
+      // packing the disc is resting in and at 1 it is the one settle() assigns.
+      var spNow = spSrc + (spDst - spSrc) * ease;
+      var plan = buildWedgePlan(ovAfter, weightOf, rowsAt, spNow);
       var targets = plan ? ringsLayout(plan, true) : null;
       // CONVERGE BEFORE SETTLING. Easing closes only RADIAL_EASE of each note's gap
       // per frame, so when progress hits 1 a small remainder is still outstanding --
@@ -2999,13 +3131,29 @@ function mountVaultGraph(root, data, deps) {
     if (!probe) return;
     var iMin = Infinity, iMax = 0, oMin = Infinity, oMax = 0, iN = 0, oN = 0;
     var prev = probe.prevAng, now = Object.create(null);
+    var prevR = probe.prevR, nowR = Object.create(null);
     var tanStep = 0, tanId = null, tanOver = 0, tanSum = 0, tanN = 0;
+    // PER-NOTE RADIAL STEP, which is what the tangential half has always measured and the
+    // radial half never did. Both band extents below are a MAX OVER A SET, and the set churns
+    // as notes arrive and leave -- so when the furthest note winks out the maximum is handed
+    // to the next one in and the sample steps by the distance between them, reporting a jump
+    // in a disc that did not move. Worse in the other direction: a stale note parked outside
+    // every visible one pinned the extent flat across an entire cascade (path 0 over 154
+    // frames), so a moving disc measured as perfectly still. A note's own change in radius has
+    // neither failure, and "the disc jumped" is a statement about notes, not about a maximum.
+    var radStep = 0, radId = null, radSum = 0, radN = 0;
     graph.forEachNode(function (id, a) {
       var r = Math.hypot(a.x, a.y);
       // Tangential step: the angle moved, times the radius it moved at.
       if (present(id)) {
         var th = Math.atan2(a.y, a.x);
         now[id] = th;
+        nowR[id] = r;
+        if (prevR && prevR[id] !== undefined) {
+          var dr = Math.abs(r - prevR[id]);
+          if (dr > radStep) { radStep = dr; radId = id; }
+          radSum += dr; radN++;
+        }
         if (prev && prev[id] !== undefined) {
           var d = th - prev[id];
           // Shortest way round, or a note crossing the 12 o'clock seam reports a
@@ -3018,6 +3166,13 @@ function mountVaultGraph(root, data, deps) {
           tanSum += moved; tanN++;
         }
       }
+      // NOT FILTERED to present notes, and that is a known blind spot rather than an
+      // oversight -- see github#17. Filtering was tried: the outermost notes are frequently
+      // exactly the ones a date range excludes, so the extent COLLAPSED the instant the range
+      // applied, measured as a single frame step of 3230 out of a total path of 4131. Left
+      // unfiltered it is pinned by stale coordinates instead, which is stable but partly
+      // blind. Stable and blind is the better failure of the two for a guard, and the honest
+      // fix needs a set fixed across the whole probe rather than a filter.
       if (bandLock && bandLock[groupOf(id)]) {
         iN++; if (r < iMin) iMin = r; if (r > iMax) iMax = r;
       } else {
@@ -3025,10 +3180,13 @@ function mountVaultGraph(root, data, deps) {
       }
     });
     probe.prevAng = now;
+    probe.prevR = nowR;
     if (probe.watch) probe.watchSeries.push(probe.watched || null);
     probe.samples.push({
       tag: tag, ms: Math.round(NOW() - probe.t0), gapI: lastGapN.i, gapO: lastGapN.o,
       ngI: lastNG.i, ngO: lastNG.o, gapDegI: lastGapDeg.i, gapDegO: lastGapDeg.o,
+      radStep: Math.round(radStep), radId: radId,
+      radMean: Math.round(radN ? radSum / radN : 0),
       tanStep: Math.round(tanStep), tanId: tanId, tanOver: tanOver,
       tanMean: Math.round(tanN ? tanSum / tanN : 0),
       // Where each group's wedge STARTS. "The gap jumped" is precisely this series
@@ -3742,7 +3900,19 @@ function mountVaultGraph(root, data, deps) {
   // expressed as the ratio they always were. At the reference pitch this reproduces today's
   // sizes exactly; below it, it keeps doing what the multiplier was meant to.
   var REF_PITCH = 28;
-  var DOT_OF_PITCH = 11 / 28;   // biggest dot RADIUS, as a fraction of the row pitch
+  // NO FLOOR AND NO CEILING ON A MULTIPLIER, because the multiplier is gone. github#13
+  // raised the ceiling from 1 to 2.4 for a good reason -- a filtered disc genuinely has more
+  // room per note, and clamping at 1 kept the median dot at 4.2px while its neighbours' room
+  // nearly tripled -- but a clamp at either end is a knee, and a knee is what dots growing as
+  // you zoom in and then shrinking again actually is. Measured across a 21x zoom, diameter
+  // over pitch: 0.786 flat below the old knee, then 0.55, 0.367, 0.092 above it.
+  //
+  // Both ends are now separate numbers with separate jobs, and neither is a clamp on the
+  // other: the biggest dot is a fraction of the pitch (or notes collide), the smallest is a
+  // floor in PIXELS (or notes vanish), and the range between them is linear. The room a
+  // filtered disc gains is picked up per note by dotFit, which measures it rather than
+  // inferring it from a ratio of counts.
+  var DOT_OF_PITCH = 11 / 28;   // biggest dot RADIUS, as a fraction of the lattice pitch
   var DOT_MIN_PX = 1.5;         // and the smallest is still a dot
   // display px = DOT_M * attr size + DOT_B, never below DOT_LO.
   var DOT_M = 1, DOT_B = 0, DOT_LO = DOT_MIN_PX;
@@ -3755,9 +3925,11 @@ function mountVaultGraph(root, data, deps) {
 
   function measureSizeScale() {
     if (!renderer) return sizeScale;
-    // One row of spacing is SP (=1) layout units, i.e. UNIT graph units.
+    // One row of spacing is lastSP LATTICE units, i.e. lastSP * UNIT graph units. That
+    // distinction is the fix: measuring one lattice unit answered a question about the
+    // camera, and the question here is how much room a note has next to its neighbour.
     var a = renderer.graphToViewport({ x: 0, y: 0 });
-    var b = renderer.graphToViewport({ x: UNIT, y: 0 });
+    var b = renderer.graphToViewport({ x: UNIT * (lastSP || 1), y: 0 });
     var pitch = Math.hypot(b.x - a.x, b.y - a.y);
     if (!(pitch > 0)) return sizeScale;
     // TIMES THE CAMERA RATIO, because sigma now scales what we hand it by 1/ratio (see
@@ -3800,7 +3972,8 @@ function mountVaultGraph(root, data, deps) {
     var v = DOT_M * (size || 4) + DOT_B;
     if (id !== undefined) {
       var room = dotFit[id];
-      if (room !== undefined && room < UNIT) v *= room / UNIT;
+      var pit = pitchUnits();
+      if (room !== undefined && room < pit) v *= room / pit;
     }
     return v < DOT_LO ? DOT_LO : v;
   }
@@ -4530,8 +4703,11 @@ function mountVaultGraph(root, data, deps) {
             if (rr > bandR[k]) bandR[k] = rr;
           });
         });
+        // total is the DENOMINATOR of the density solve: every later plan asks "how much of
+        // the vault is on screen" and this is the "of the vault" half. Captured from the same
+        // unfiltered plan as the radii, so the two cannot disagree.
         geomLock = { r0: base.r0, rOuter: base.rOuter, maxR: base.maxR,
-                     bandR: bandR, rows: bandRows };
+                     total: base.total, bandR: bandR, rows: bandRows };
 
         // AND THEN AGAIN, now that bandR exists. This plan was built before it did, so its
         // gaps came from the pre-lock fallback rule rather than from the seam -- a different
@@ -4544,7 +4720,7 @@ function mountVaultGraph(root, data, deps) {
         // stays with the first, because which ring a group belongs to must not depend on a gap.
         var again = buildWedgePlan(false);
         if (again) geomLock = { r0: again.r0, rOuter: again.rOuter, maxR: again.maxR,
-                                bandR: bandR, rows: bandRows };
+                                total: again.total, bandR: bandR, rows: bandRows };
 
         // PIN THE NORMALISATION BOX. Sigma rescales node coordinates against the
         // graph's bounding box on every refresh (autoRescale, on by default), so
@@ -4999,11 +5175,17 @@ function mountVaultGraph(root, data, deps) {
     var locked = geomLock && geomLock.maxR ? geomLock.maxR : 0;
     var live = lastMaxR;
     if (!locked || !live) return FIT_RATIO;
-    // Never zoom OUT past the full-vault framing: the box is that size, so a ratio above
-    // this is empty margin. Clamped low as well, or a single surviving note in the hub
-    // would fill the stage with one dot.
+    // The upper clamp used to be 1, on the reasoning that the box is the full-vault size
+    // so anything beyond it is empty margin. That stopped being true with the density
+    // solve (github#13): a filtered disc spreads its lattice to keep its notes at an
+    // honest density, and the outermost row lands a few percent PAST the locked extent
+    // -- measured up to 1.079. That is disc, not margin, and clamping at 1 framed it
+    // with its rim cut off. Allowed out to 1.35, which covers a full row of overshoot at
+    // any density the cap permits, and no further: past that something else is wrong and
+    // framing empty space would hide it.
+    // Clamped low as well, or a single surviving note in the hub would fill the stage.
     var k = live / locked;
-    if (k > 1) k = 1;
+    if (k > 1.35) k = 1.35;
     if (k < 0.12) k = 0.12;
     return FIT_RATIO * k;
   }
@@ -5835,13 +6017,19 @@ function mountVaultGraph(root, data, deps) {
     // Room for a label is about 20px; below that, name every other year.
     var pitchY = span > 0 ? (w * (365.25 * 86400000)) / span : w;
     var every = pitchY < 20 ? 2 : 1;
+    // WHICH YEAR IS SELECTED, read through the same clamping that setting it goes through.
+    // An end AT the span's own end is stored as null -- "no bound" -- so the newest year, whose
+    // December is past the last note, comes back as `to === null` and compared as itself: the
+    // button for the year you just clicked read unpressed, on every vault whose span ends
+    // mid-year. Resolving nulls to the span's ends first is all it needs.
     var cur = null;
-    if (state.from !== null && state.to !== null) {
-      var a = new Date(state.from), b = new Date(state.to);
-      if (a.getUTCFullYear() === b.getUTCFullYear() &&
-          a.getUTCMonth() === 0 && a.getUTCDate() === 1 &&
-          b.getUTCMonth() === 11 && b.getUTCDate() === 31) cur = a.getUTCFullYear();
-    }
+    var cf = state.from === null ? dateSpan.lo : state.from;
+    var ct = state.to === null ? dateSpan.hi : state.to;
+    var ca = new Date(cf), cb = new Date(ct);
+    if (ca.getUTCFullYear() === cb.getUTCFullYear() &&
+        ca.getUTCMonth() === 0 && ca.getUTCDate() === 1 &&
+        (cb.getUTCMonth() === 11 && cb.getUTCDate() === 31 ||
+         ct >= dateSpan.hi)) cur = ca.getUTCFullYear();
     var html = "";
     dateSpan.years.forEach(function (yy) {
       if ((yy.y % every) !== 0) return;
@@ -6348,6 +6536,17 @@ function mountVaultGraph(root, data, deps) {
 
     if (WIN.ResizeObserver) new WIN.ResizeObserver(function () { drawDateUI(); }).observe($("heat"));
     applyRange();
+  }
+
+  // ?rest -- COME UP AT REST, with no intro. The intro is TIMELINE_MS * TIME_SCALE, 5.6
+  // seconds, and it is the single largest cost in an automated run: every page a measurement
+  // opens pays it before the first check, and the suite opens one per lane per vault.
+  //
+  // Same door ?demo already used for the same reason -- timelineFrame(true) is the resting
+  // full disc, derived once with no animation -- so this is that branch given its own name
+  // rather than a second way of doing it.
+  function restOn() {
+    return /(^|[?&#])rest\b/.test(String(location.search) + " " + String(location.hash));
   }
 
   function demoOn() {
@@ -6993,7 +7192,21 @@ function mountVaultGraph(root, data, deps) {
                       planKeep = save;
                       var rows = function (p) { var m = {}; p.cells.forEach(function (c) { m[c.k] = c.rows; }); return m; };
                       var a = rows(lean), b = rows(padded), diffs = {};
-                      Object.keys(a).forEach(function (k) { if (a[k] !== b[k]) diffs[k] = { withoutZeros: a[k], withZeros: b[k] }; });
+                      // THE UNION, not the lean plan's keys. A cell that exists only in
+                      // the padded plan is exactly the seated zero-weight cell this is
+                      // about, and iterating `a` alone never compared it -- which is how
+                      // github#5 came back as an empty rowDiffs beside a maxR that
+                      // differed by a row. checkPlanParity has always done the union.
+                      // Missing counts as ZERO on both sides. A cell whose notes are all
+                      // hidden is absent from the lean plan and seated at 0 rows in the
+                      // padded one, and those are the same statement -- comparing
+                      // undefined against 0 would fail every hidden folder on every
+                      // vault, which is exactly what it did when this first went in.
+                      Object.keys(a).concat(Object.keys(b)).forEach(function (k) {
+                        if ((a[k] || 0) !== (b[k] || 0)) {
+                          diffs[k] = { withoutZeros: a[k] || 0, withZeros: b[k] || 0 };
+                        }
+                      });
                       var out = {
                         leanMaxR: Math.round(lean.maxR), paddedMaxR: Math.round(padded.maxR),
                         maxRMatches: Math.round(lean.maxR) === Math.round(padded.maxR),
@@ -7003,6 +7216,83 @@ function mountVaultGraph(root, data, deps) {
                                      Math.round(lean.maxR) === Math.round(padded.maxR)
                       };
                       return out;   // the caller is a console; it prints this itself
+                    },
+                    // DENSITY. The question github#13 is about: does the disc that is on
+                    // screen depend on how many notes are on screen, or on how many the
+                    // vault happens to hold? Everything here is measured, not planned --
+                    // the plan is what the layout intends, and after a cascade the two
+                    // agree while during one they do not.
+                    //
+                    // pitchPx is the whole point. It is one lattice row in SCREEN pixels,
+                    // which is what decides whether two notes in a column touch, and with
+                    // the normalisation box pinned and the camera still it is invariant to
+                    // note count by construction -- so it reads the same at 1500 notes and
+                    // at 500, which is the bug.
+                    //
+                    // pitchRoot is that made scale-free: if a filtered disc were to refill
+                    // its box, area per note would scale as 1/n and pitch as its root, so
+                    // pitchPx * sqrt(shown) would hold still across every filter state.
+                    // That product is the invariant, and it does not need a second vault to
+                    // compare against.
+                    densityReport: function () {
+                      var shown = 0, lit = 0;
+                      graph.forEachNode(function (id) {
+                        if (visible(id)) shown++;
+                        if ((alpha[id] || 0) > 0.004) lit++;
+                      });
+                      // One lattice row, mapped through the same camera the notes are drawn
+                      // with. graphToViewport is the only honest way to ask: it goes through
+                      // the pinned bbox, so it answers in the pixels a person sees.
+                      var pitchPx = null, unitPx = null, discPx = null;
+                      if (renderer) {
+                        var a = renderer.graphToViewport({ x: 0, y: 0 });
+                        var u = renderer.graphToViewport({ x: UNIT, y: 0 });
+                        unitPx = Math.hypot(u.x - a.x, u.y - a.y);
+                        // A ROW, not a lattice unit. These were the same number before the
+                        // density solve, and pitchPx is the one that decides whether two
+                        // notes in a column touch.
+                        var b = renderer.graphToViewport({ x: UNIT * (lastSP || 1), y: 0 });
+                        pitchPx = Math.hypot(b.x - a.x, b.y - a.y);
+                        // How far the disc actually reaches on screen, from the live radius
+                        // rather than the locked one -- the gap between them IS the empty
+                        // margin the notes no longer fill.
+                        var e = renderer.graphToViewport({ x: (lastMaxR || 0) * UNIT, y: 0 });
+                        discPx = Math.hypot(e.x - a.x, e.y - a.y);
+                      }
+                      // Drawn sizes, as the reducer leaves them -- sizeScale included, which
+                      // is the multiplier NODE_MAX does not clamp.
+                      var sizes = [];
+                      if (renderer) {
+                        graph.forEachNode(function (id) {
+                          if (!visible(id)) return;
+                          var d = renderer.getNodeDisplayData(id);
+                          if (d && d.size > 0) sizes.push(d.size);
+                        });
+                        sizes.sort(function (x, y) { return x - y; });
+                      }
+                      var med = sizes.length ? sizes[Math.floor(sizes.length / 2)] : null;
+                      var r3 = function (v) { return v === null ? null : Math.round(v * 1000) / 1000; };
+                      return {
+                        shown: shown, lit: lit, total: graph.order,
+                        // The locked geometry, and how much of it the notes reach.
+                        lockedMaxR: geomLock ? Math.round(geomLock.maxR) : null,
+                        liveMaxR: Math.round(lastMaxR || 0),
+                        reach: geomLock && geomLock.maxR
+                          ? r3((lastMaxR || 0) / geomLock.maxR) : null,
+                        r0: geomLock ? r3(geomLock.r0) : null,
+                        // The hole as a SHARE of what is drawn. The r0 formula exists to hold
+                        // this constant; pinning r0 while the disc shrinks is what breaks it.
+                        holeShare: lastMaxR ? r3((geomLock ? geomLock.r0 : 0) / lastMaxR) : null,
+                        sp: r3(lastSP),
+                        unitPx: r3(unitPx),
+                        pitchPx: r3(pitchPx),
+                        pitchRoot: pitchPx ? r3(pitchPx * Math.sqrt(Math.max(1, shown))) : null,
+                        sizeScale: r3(sizeScale),
+                        sizeMedian: r3(med),
+                        sizeMin: r3(sizes.length ? sizes[0] : null),
+                        sizeMax: r3(sizes.length ? sizes[sizes.length - 1] : null),
+                        cameraRatio: r3(renderer ? renderer.getCamera().ratio : null)
+                      };
                     },
                     // PLAN PARITY. The cascade must animate between the static
                     // planner's own outputs, or it walks between packings nothing else
@@ -7039,7 +7329,7 @@ function mountVaultGraph(root, data, deps) {
                     // frame step per band, which is what "a jump" actually is.
                     probe: function (on) {
                       probe = (on === false) ? null
-                        : { t0: NOW(), samples: [], prevAng: null,
+                        : { t0: NOW(), samples: [], prevAng: null, prevR: null,
                             watch: arguments.length > 1 ? String(arguments[1]) : null,
                             watched: null, watchSeries: [] };
                       return probe ? "recording" : "off";
@@ -7070,8 +7360,49 @@ function mountVaultGraph(root, data, deps) {
                       var out = {
                         frames: s.length,
                         spanMs: s[s.length - 1].ms,
+                        // The per-note radial worst, and the mean note's move. This is the
+                        // radial counterpart of tanMaxStep and the number to judge a jump by;
+                        // the band extents below are kept for context but are a max over a
+                        // churning set, so their step is not a step in the disc.
+                        radMaxStep: (function () {
+                          var w = 0, who = null, when = 0;
+                          for (var j = 0; j < s.length; j++) {
+                            if (s[j].radStep > w) { w = s[j].radStep; who = s[j].radId; when = s[j].ms; }
+                          }
+                          return { step: w, node: who, atMs: when };
+                        })(),
+                        radMeanStep: (function () {
+                          var t = 0, k = 0;
+                          for (var j = 0; j < s.length; j++) { t += s[j].radMean || 0; k++; }
+                          return Math.round(k ? t / k : 0);
+                        })(),
                         innerMaxStep: worst.inner, innerStepAtMs: at.inner,
                         outerMaxStep: worst.outer, outerStepAtMs: at.outer,
+                        // HOW FAR EACH BAND WENT IN TOTAL. A per-frame step means nothing
+                        // on its own: a smooth animation over a long distance and a snap
+                        // over a short one produce the same number. Reported so a caller
+                        // can ask the only question that scales -- is this frame's move a
+                        // reasonable multiple of the average frame's share of the trip.
+                        // Needed once the lattice spacing began following the visible count
+                        // (github#13), which made a range cascade travel much further.
+                        innerTravel: Math.abs(s[s.length - 1].innerMax - s[0].innerMax),
+                        outerTravel: Math.abs(s[s.length - 1].outerMax - s[0].outerMax),
+                        // AND THE PATH, which is the honest denominator. Travel is net, so a
+                        // band that moves out and part-way back reports less than it went --
+                        // and comparing a frame's step against a net figure then flags a
+                        // smooth animation whose target was moving. The path is the sum of
+                        // the steps, so path / frames is the mean frame, and a frame can be
+                        // judged as a multiple of that.
+                        innerPath: (function () {
+                          var t = 0;
+                          for (var j = 1; j < s.length; j++) t += Math.abs(s[j].innerMax - s[j - 1].innerMax);
+                          return Math.round(t);
+                        })(),
+                        outerPath: (function () {
+                          var t = 0;
+                          for (var j = 1; j < s.length; j++) t += Math.abs(s[j].outerMax - s[j - 1].outerMax);
+                          return Math.round(t);
+                        })(),
                         // The tangential jump, and the gap reservation behind it.
                         tanMaxStep: tanWorst, tanStepAtMs: tanAt, tanStepNode: tanWho,
                         // The handover frame, called out on its own: settle() replacing
@@ -7240,7 +7571,7 @@ function mountVaultGraph(root, data, deps) {
     // itself, through the Refresh button, once the recording is rolling.
     // timelineFrame(true) is the resting full disc: `until` is null by default, so every
     // note is present and the layout is derived once, with no animation.
-    if (demoOn()) {
+    if (demoOn() || restOn()) {
       timelineFrame(true);
       // No log. scripts/demo.mjs prints every beat to the terminal as it drives them, so
       // this said the same thing twice -- and console noise is a guideline the linter

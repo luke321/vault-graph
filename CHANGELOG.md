@@ -29,6 +29,36 @@ published tag breaks every link to it.
 
 ---
 
+## 1.6.1 — 2026-08-23
+
+The files Obsidian installs were missing from 1.6.0's release, so nobody could install it.
+
+- **`main.js`, `manifest.json` and `styles.css` are attached to the release again.** Obsidian
+  downloads those three directly from the release assets and never opens the zip — the
+  directory's scanner says as much, "All other files will not be downloaded by Obsidian" —
+  so 1.6.0 going out with only `vault-graph-1.6.0.zip` was a release nobody could install
+  or update to. It failed the automated review on exactly that: *the release 1.6.0
+  specified in `manifest.json` is missing the `main.js` file*, and the same for
+  `manifest.json`.
+
+  The cause was narrow. `release.ps1` only ever passed the zip to `gh release create`, and
+  the releases before this were cut **by hand** — where attaching the loose files is simply
+  what one does. 1.6.0 was the script's first real run, which is the first moment the
+  omission could show. The script attaches all four now and **refuses to publish** if any of
+  the three is missing, rather than producing another uninstallable release.
+
+- **`clip-path` swapped for `clip` in the screen-reader-only rule.** The directory's CSS
+  lint flags `clip-path` as only partially supported by Obsidian 1.6.5. This plugin's floor
+  is 1.7.2 so nobody was affected, but a warning that needs a paragraph of explanation is
+  worse than the one-line alternative — and `clip: rect(0 0 0 0)` is what every
+  screen-reader-only helper has used for twenty years.
+
+Nothing else changed: no behaviour, no layout, no colours. 1.6.0's assets were repaired in
+place as well, so that release is installable too; this one exists so the fixes are in a
+tagged commit and the directory has a release to review.
+
+---
+
 ## 1.6.0 — 2026-08-23
 
 **You can choose the colours now**, in both targets, and the palette they come from

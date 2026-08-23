@@ -326,10 +326,16 @@
     color: var(--text-1); background: var(--surface-2); border-color: var(--border);
   }
   /* Visible to a screen reader, gone from the layout. Not `display: none`, which
-     takes it out of the accessibility tree along with the layout. */
+     takes it out of the accessibility tree along with the layout.
+
+     The deprecated `clip` rather than `clip-path`, deliberately: the directory's CSS lint
+     flagged clip-path as only partially supported by Obsidian 1.6.5. This plugin's floor is
+     1.7.2 so it would have worked, but a warning that needs a paragraph of explanation is
+     worse than the one-line alternative -- and `clip` is what every screen-reader-only
+     helper has used for twenty years, on the widest support of anything here. */
   .vault-graph .sr {
     position: absolute; width: 1px; height: 1px; overflow: hidden;
-    clip-path: inset(50%); white-space: nowrap;
+    clip: rect(0 0 0 0); white-space: nowrap;
   }
 
   /* One row per top-level folder: its name, then the ten slots under it. Stacked
