@@ -844,9 +844,29 @@ function mountVaultGraph(root, data, deps) {
   //   totFloor  the two callers floor the weight total differently (1e-4 vs 1e-6).
   //             Preserved exactly -- unifying it would move every wedge for no reason.
   //
-  // Presence is OPACITY, weight over seats, never weight alone: a 55-note folder fading
-  // from 55 down to 1 keeps min(1, weight) pinned at 1 the whole way and then collapses in
-  // two frames, which relocates a discontinuity instead of removing it.
+  // PRESENCE IS "IS ANYTHING HERE", NOT "HOW FULL IS IT". A wedge earns one gap by
+  // existing; a folder showing 30 of its 100 notes is one wedge and wants one gap, exactly
+  // as it did at 100. So the gap total must not be a function of the note count -- and for
+  // a long time it was, twice over.
+  //
+  // Weight over seats was the reading before, and it fails in both directions. Its own
+  // note recorded the failure it was chosen to avoid -- weight ALONE keeps a 55-note folder
+  // pinned at 1 all the way down to its last note and then collapses in two frames -- but
+  // the denominator brought a worse one: seats are whatever the current plan happens to
+  // seat, so the same group reads 0.3 mid-animation, 0.48 at rest with a range applied, and
+  // 1.0 once the departed notes leave the plan. Measured: nG 7 -> 3.38 across settle() on a
+  // date change, and 6.716 -> 7 merely from scrubbing the timeline.
+  //
+  // Both problems have one answer, and it is not a better formula here. The COLLAPSE case
+  // is a group on its way out, and a group on its way out is something the cascade knows
+  // about before the first frame -- so it supplies the presence itself, walked from 1 to 0
+  // across the whole animation (opts.groupPres). What is left for this function is only
+  // "does this group have anything at all", which min(1, weight) answers, ramps smoothly
+  // over the first or last note's fade, and does not care how many notes there are.
+  //
+  // Seats are therefore not consulted at all any more, and the parameter is gone: every
+  // reading of them was a way of dividing by a number that had nothing to do with the
+  // question.
   //
   // ...EXCEPT WHEN THE PLANNER SUPPLIES IT (opts.groupPres). Weight over seats is the right
   // reading of "how present is this group" only while the seats are the group's own final
@@ -864,22 +884,19 @@ function mountVaultGraph(root, data, deps) {
   // So the cascade hands in a presence walked between the two packings by its own progress,
   // exactly as it already does for row counts -- one planner, one clock, and a group's gap
   // is about whether the group is there rather than how full it is.
-  function allocateBand(list, weightOf, seatsOf, opts) {
+  function allocateBand(list, weightOf, opts) {
     var TWO = 2 * Math.PI;
     var tot = 0, gw = Object.create(null);
     list.forEach(function (c) {
       tot += weightOf(c);
-      var g = gw[c.g] || (gw[c.g] = { w: 0, seats: 0 });
+      var g = gw[c.g] || (gw[c.g] = { w: 0 });
       g.w += weightOf(c);
-      g.seats += seatsOf(c);
     });
-    var presOf = function (c) { return Math.min(1, weightOf(c) / Math.max(1, seatsOf(c))); };
+    var presOf = function (c) { return Math.min(1, weightOf(c)); };
     var given = opts.groupPres || null;
     var groupPres = Object.create(null), nG = 0;
     Object.keys(gw).forEach(function (k) {
-      var p = (given && given[k] !== undefined)
-        ? given[k]
-        : gw[k].w / Math.max(1, gw[k].seats);
+      var p = (given && given[k] !== undefined) ? given[k] : gw[k].w;
       groupPres[k] = p < 0 ? 0 : p > 1 ? 1 : p;
       nG += groupPres[k];
     });
@@ -1048,7 +1065,6 @@ function mountVaultGraph(root, data, deps) {
     var share = function (list, band) {
       var a = allocateBand(list,
                            function (c) { return c.wsum; },
-                           function (c) { return c.list.length; },
                            { subGaps: false, clamp: null, totFloor: 0.0001 });
       // Recorded so the probe can show the gap total shrinking frame by frame -- the whole
       // point of making it continuous is that this series has no cliff in it.
@@ -1601,7 +1617,13 @@ function mountVaultGraph(root, data, deps) {
       c.geom = 0; c.live = 0;
       c.slots.forEach(function (sl) {
         var al = alpha[sl.id] || 0;
-        c.geom += (fullRing || !visible(sl.id)) ? al : 1;
+        // willShow, not visible. A note on its way out counts what is left of it, and
+        // the date range is a way out like any other -- visible() only knows about
+        // hidden folders, so an excluded note was counting as a WHOLE SEAT at opacity
+        // zero. Same asymmetry the cascade's destination plan had (see willShow), one
+        // level down.
+        var will = willShow(sl.id);
+        c.geom += (fullRing || !will) ? al : 1;
         c.live += al;
       });
       live += c.geom;
@@ -1624,7 +1646,6 @@ function mountVaultGraph(root, data, deps) {
       // story, including why the group count has to be continuous.
       var a = allocateBand(band,
                            function (c) { return c.geom; },
-                           function (c) { return c.slots.length; },
                            { subGaps: true, clamp: 0.45, totFloor: 1e-6,
                              groupPres: gapPres });
       var gap = a.gap, subGap = a.subGap;
@@ -2317,6 +2338,7 @@ function mountVaultGraph(root, data, deps) {
         WIN.clearTimeout(cascadeRun.guard);
         cascadeRun = null;
       }
+      probeSample("pre-settle");
       moving.forEach(function (id) { alpha[id] = to[id]; });
       pinnedPlan = null;
       planKeep = null;
@@ -2324,6 +2346,7 @@ function mountVaultGraph(root, data, deps) {
       // which is exactly what an unpinned ringsLayout() produces now that the
       // departing notes are gone.
       applyLayout(false);
+      probeSample("settled");
       if (done) done();
     };
 
@@ -6401,6 +6424,28 @@ function mountVaultGraph(root, data, deps) {
                         outerMaxStep: worst.outer, outerStepAtMs: at.outer,
                         // The tangential jump, and the gap reservation behind it.
                         tanMaxStep: tanWorst, tanStepAtMs: tanAt, tanStepNode: tanWho,
+                        // The handover frame, called out on its own: settle() replacing
+                        // the interpolation with a fresh rest computation.
+                        settleStep: (function () {
+                          for (var j = 1; j < s.length; j++) {
+                            if (s[j].tag === "settled") {
+                              return { tan: s[j].tanStep, over: s[j].tanOver,
+                                       mean: s[j].tanMean,
+                                       ngBefore: s[j - 1].ngO, ngAfter: s[j].ngO,
+                                       startsMoved: (function () {
+                                         var m = 0, g = null, a = s[j].starts || {}, b = s[j - 1].starts || {};
+                                         Object.keys(a).forEach(function (k) {
+                                           if (b[k] === undefined) return;
+                                           var d = Math.abs(a[k] - b[k]);
+                                           if (d > 180) d = 360 - d;
+                                           if (d > m) { m = d; g = k; }
+                                         });
+                                         return { deg: Math.round(m * 1000) / 1000, group: g };
+                                       })() };
+                            }
+                          }
+                          return null;
+                        })(),
                         // A wedge boundary moving in one step IS the gap jumping.
                         startMaxStep: Math.round(startWorst * 1000) / 1000,
                         startStepAtMs: startAt, startStepGroup: startG,
@@ -6471,6 +6516,14 @@ function mountVaultGraph(root, data, deps) {
                       heatBuild(); drawDateUI(); heatDraw();
                     },
                     lastCascade: function () { return lastCascade; },
+                    // The gap the LAST layout pass actually spent, per band. The probe
+                    // reports this per frame during an animation; a resting disc has no
+                    // frames, and "do two rest states agree about the gap" is the whole
+                    // question behind a jump at the end of one.
+                    lastGap: function () {
+                      return { ngI: lastNG.i, ngO: lastNG.o,
+                               gapDegI: lastGapDeg.i, gapDegO: lastGapDeg.o };
+                    },
                     rangeReport: function () {
                       var lit = 0, dated = 0;
                       graph.forEachNode(function (id) {
