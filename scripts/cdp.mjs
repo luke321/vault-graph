@@ -131,11 +131,32 @@ function upgrade(url) {
   });
 }
 
-/** Attach to a page target on `port` whose URL contains `match`. */
+/**
+ * Attach to a page target on `port` whose URL contains `match`.
+ *
+ * A NON-EMPTY `match` IS A REQUIREMENT, NOT A PREFERENCE. This used to fall back to any
+ * page when the match found nothing, which is the worst of both: the caller asks for a
+ * specific page, does not get it, and is handed a different one silently.
+ *
+ * What that cost: a killed run leaves its Chrome behind, still listening. The next run
+ * launches its own, attaches to the LEFTOVER, and drives a page from a previous build --
+ * so the checks report real-looking failures about code that is fine. Diagnosed as three
+ * different bugs before the note count gave it away (`1402 notes` under a build that had
+ * just said 455). Failing here turns that into one clear error instead.
+ */
 export async function attach(port, match = "") {
   const targets = await json(port, "/json/list");
-  const page = targets.find((t) => t.type === "page" && (t.url || "").includes(match))
-            || targets.find((t) => t.type === "page");
+  const pages = targets.filter((t) => t.type === "page");
+  const page = match
+    ? pages.find((t) => (t.url || "").includes(match))
+    : pages[0];
+  if (!page && match && pages.length) {
+    throw new Error(
+      `no page target on port ${port} matching ${match} -- found ` +
+      pages.map((t) => t.url).join(", ") +
+      `. A Chrome from an earlier run is probably still on this port.`
+    );
+  }
   if (!page) throw new Error(`no page target on port ${port}` + (match ? ` matching ${match}` : ""));
   const ws = await upgrade(page.webSocketDebuggerUrl);
 

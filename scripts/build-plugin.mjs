@@ -18,8 +18,9 @@
 
 import { build, context } from "esbuild";
 import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { readVendorSource } from "../src/vendor.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(HERE, "..");
@@ -49,6 +50,26 @@ const rawLoader = {
   },
 };
 
+/* ------------------------------------------------------------------ vendor --
+ * The two UMD bundles do not come off disk verbatim. Sigma ships two fetch() calls inside
+ * loadSVGImage, for a node-image program this page never registers, and the directory's
+ * automated review counts them and asks users to trust that we never take that path
+ * (github#1). readVendorSource replaces them with a thrower and fails the build if the
+ * count ever changes -- the reasoning is in src/vendor.mjs.
+ *
+ * It has to be an onLoad hook rather than a pre-pass: esbuild reads the import at
+ * plugin/main.js:34-35 off disk itself, so there is nowhere else to get in front of it.
+ */
+const vendorNoNetwork = {
+  name: "vendor-no-network",
+  setup(b) {
+    b.onLoad({ filter: /[\\/]vendor[\\/][^\\/]+\.js$/, namespace: "file" }, (args) => ({
+      contents: readVendorSource(ROOT, basename(args.path)),
+      loader: "js",
+    }));
+  },
+};
+
 const options = {
   entryPoints: [join(ROOT, "plugin", "main.js")],
   outfile: join(ROOT, "main.js"),
@@ -67,7 +88,7 @@ const options = {
   // and "source is not minified-only" is easiest to satisfy by shipping readable code.
   minify: false,
   logLevel: "info",
-  plugins: [rawLoader],
+  plugins: [rawLoader, vendorNoNetwork],
   banner: {
     js: "/* Vault Graph -- built by scripts/build-plugin.mjs. Source: plugin/ and src/. */",
   },

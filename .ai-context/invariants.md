@@ -139,6 +139,68 @@ __vg.state.markDay = "2026-08-19"; __vg.renderer.refresh(); __vg.pushReport()
 Measured: `pushedCount` **0**, haloed 14, and **0 nodes changed position**. `mark today`
 must still push — measured 6 pushed, 6 haloed — or the change went too far.
 
+## `skipIndexation` is a promise, and only hlWalk can keep it
+
+`renderer.refresh({ skipIndexation: true })` tells Sigma "nothing moved, do not rebuild the
+spatial index". Inside `hlWalk` that is true by construction: its loop writes `hl[id]` and
+nothing else, so it earns the flag and needs it — it runs every frame of a ramp.
+
+**Anything driven by a person's pointer has not earned it.** Hover highlight was written
+with the flag copied from `hlWalk`, on the reasoning that a halo does not move anything.
+The halo does not; the *rest of the page* does. A legend row can be crossed at any moment,
+including mid-cascade and mid-tween, and skipping indexation then leaves the quadtree
+describing where the disc used to be.
+
+Hover is a per-row event, not a per-frame one, so a full refresh costs nothing worth having.
+The rule stands on what the flag *promises* rather than on a measurement: only code that
+can guarantee nothing moved may claim nothing moved.
+
+**The measurement that seemed to prove it does not, and that is worth recording.** With the
+flag the suite reported 9/17 on the demo vault, with three failures that read as three
+unrelated bugs — aim resolving to the bare canvas, a legend reporting itself folded while
+showing 18 subfolder rows, and `buildWedgePlan` returning null in the hidden-folder sweep.
+Removing the flag gave 17/17. But the *same* signature turned up later from a completely
+different cause (below), so that run cannot be attributed cleanly. Two wrong theories in
+one afternoon, both plausible, both fitting the evidence:
+
+1. a parked mouse landing on a legend row — ruled out by `HEAD` passing in the same
+   environment;
+2. `skipIndexation` — probably right, unprovable from that run.
+
+## A leaked Chrome on the debug port makes the suite measure a stale page
+
+`attach(PORT, "")` takes **whatever is listening**, and a killed run can leave its browser
+behind. A later run then drives the *previous* run's page: same checks, same output format,
+failures that look like real regressions and move around between runs.
+
+The tell is in the second check, which prints the note count:
+
+```
+  ok   __vg is present and the intro landed
+         1402 notes, until=null          <- the build above said 455
+```
+
+Measured: 11/17 and 13/17, entirely from a leftover browser holding a page from an earlier
+build. Nothing was wrong with the code. Before believing any failure here, **check that the
+note count matches the `wrote ...` line above it**, and if it does not:
+
+```powershell
+Get-CimInstance Win32_Process -Filter "Name='chrome.exe'" |
+  Where-Object { $_.CommandLine -like "*vg-smoke*" } |
+  ForEach-Object { Stop-Process -Id $_.ProcessId -Force }
+```
+
+## Highlight has five sources, and every one belongs in the signature
+
+`isHighlighted` answers yes for a clicked group, a clicked subfolder path, a marked heatmap
+day, "mark today", and — since 2026-08-23 — a hovered legend row (`state.hoverGroup` /
+`state.hoverPath`). All five feed the same per-note ramp, and all five must appear in
+`hlSignature`: that signature decides whether the per-note sweep runs at all, so a source
+missing from it is a source whose highlight silently never ramps.
+
+Hover **haloes without pushing** — `isPushed` does not ask about the hover keys, for the
+same reason a marked day does not push.
+
 ## Aiming at a note is a timing problem before it is a geometry problem
 
 `scripts/smoke.mjs` hovers the most isolated note on screen and asserts what got hovered.
@@ -158,6 +220,26 @@ and which element sits at the aim point, which separates the three candidate cau
 moving layout, a stale hit-test index, something painted over the canvas). **Read that line
 rather than re-running** — the whole reason the diagnostic exists is that a flaky check
 otherwise trains you to re-run instead of measure.
+
+## Hover re-arms after the pointer leaves the stage
+
+Hover a note, move the pointer off the canvas entirely, move back onto **the same note**.
+It must light up again.
+
+```bash
+node scripts/smoke.mjs      # "hover re-arms after the pointer leaves the stage"
+```
+
+It did not, for as long as this project has existed. Sigma's `handleLeave` emits
+`leaveNode` without clearing its own `hoveredNode`, so on re-entry
+`hoveredNode !== nodeAtPosition` is false and nothing is emitted — glance at the sidebar,
+come back to the note you were reading, no highlight. `src/vendor.mjs` patches it at read
+time; `handleMove`, two lines earlier in the same bundle, always did it correctly.
+
+It is also what made this suite flaky, which is the more expensive half of the story: the
+hover checks failed whenever anything earlier had moved the pointer off the canvas.
+Measured on the 450-note vault by repeating the hover: **1 hit in 40 before, 40 in 40
+after.**
 
 ## The heatmap grid always fits its box
 

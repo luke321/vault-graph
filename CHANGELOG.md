@@ -29,6 +29,202 @@ published tag breaks every link to it.
 
 ---
 
+## 1.6.0 — 2026-08-23
+
+**You can choose the colours now**, in both targets, and the palette they come from
+changed shape.
+
+- **A settings tab for the plugin, and a gear for the standalone page.** Each lists every
+  top-level folder with the twelve palette slots under it; picking one holds that folder to
+  that colour, and **changes nothing else** — position decides every other folder's colour,
+  so one pick cannot move a wedge you did not touch. Two folders may share a slot, which is
+  a way of saying they belong together. The plugin persists through `saveData()`, the
+  standalone through
+  `localStorage` under a **vault-scoped key** — two graphs built from different vaults are
+  the same `file://` origin, so an unscoped key would have them overwrite each other's
+  colours. `page.js` itself stores nothing: settings go in through the deps object and
+  changes come back out through a callback, because there is no store both hosts have. See
+  [`0009-the-host-persists-settings-not-the-page`](.ai-context/decisions/0009-the-host-persists-settings-not-the-page.md).
+
+- **The plugin's four existing settings finally have a UI.** `ghosts`, `templates`,
+  `flatMonths` and `words` have been real settings since the plugin was written, persisted
+  and reachable only by hand-editing `data.json`. They sit above the colours now. They
+  rebuild the view, where a colour only repaints it — colour is not an input to the layout,
+  and a swatch click has no business replaying the reveal animation.
+
+- **A saved colour is a slot (`g7`), never a hex.** The palette has separate light and dark
+  values, so a stored hex would be right in one theme and wrong in the other. Swatches are
+  coloured by a class resolving `var(--g7)` for the same reason: a `var()` re-resolves on a
+  theme flip, an inline hex does not.
+
+- **Twelve slots, and they go round.** It was ten hues and then a grey tail: every folder
+  past the tenth fell into the neutrals and merged into one undifferentiated blob. Folder
+  13 now comes back to slot 1. A repeated hue is still separated by its wedge, its rim
+  label and its legend row; the grey tail separated nothing from anything. Measured on the
+  17-folder synthetic vault: `g1…g12`, then `g1…g5` again.
+
+- **Grey is a choice instead of a consolation.** Slots 11 and 12 are greys, carrying the
+  values the first two neutrals already had, so a folder can be told to recede on purpose.
+  The neutrals still exist as the dim colour and as `colorOf`'s fallback.
+
+- **Slots 6 and 10 stopped being pastels.** `#e87ba4` and `#c26ed3` were the two palest
+  slots on the light surface, and magenta was the one hue in the palette failing 3:1
+  against it. Measured, it was lightness rather than low chroma: their chroma was mid-pack.
+  Both hues are kept to within a degree or two; chroma and contrast go 0.141/2.62 →
+  0.227/5.12 and 0.168/3.16 → 0.225/6.94, and light-theme slots under 3:1 drop from four to
+  three. **The palette's worst pair is unchanged** — Orange vs Red at dE 7.1, before and
+  after — so two more slots and two much stronger hues cost nothing in separation.
+
+- **Each row rings the slot its folder is actually using**, whether or not anybody chose
+  it — brightly for a chosen slot, dimly for the one a folder's position gives it. Marking
+  only chosen slots meant that a folder on Auto, which is every folder until somebody
+  changes something, had no mark at all: the panel showed twelve colours and would not say
+  which of them the folder was. In the plugin the marks are corrected from the live graph
+  once it answers, because a note with no links at all is grouped under `(unlinked)` rather
+  than under its folder — so a path-derived list is one row short on any vault with
+  orphans, and every folder after it would be ringed one slot out.
+
+- **`_`-prefixed folders are treated as archives**: out of the colour rotation, given the
+  grey slot `g11`, and hidden by default. `g11` of the two greys because it is the
+  lower-contrast one against the surface in both themes (4.99 vs 9.51 on light, 5.16 vs
+  9.12 on dark), which is what recede means. It is a real palette slot rather than a
+  neutral off to one side, so the picker can ring it and Auto means something on an
+  archive row. A leading underscore is how a vault says "sorts
+  last, not part of the working set", and spending a hue on one costs twice — the archive
+  gets a colour that says look at me, and every folder after it is pushed a slot along.
+  Measured on the demo mirror: `_ Archives` and `_ Claude` sort at positions 2 and 3, so
+  they were taking `g2`/`g3` and shifting every working folder by two. The working folders
+  now run an unbroken `g1…g9`. Notes are still in the graph — this is a colour and
+  visibility rule, not an exclusion, and it says nothing about files (`_scratch.md` is a
+  note like any other).
+
+- **Per-folder visibility is a setting, beside the colour.** Each row gets an eye that sets
+  the *default*, persisted alongside the colours; the legend's own eye stays the live,
+  session-only filter. The map is tri-state — shown, hidden, or absent meaning "whatever
+  the `_` rule says" — so hiding a folder by hand stays distinguishable from never having
+  mentioned it. **This changes what `Refresh` means**: it used to clear every filter to
+  "everything visible" and now returns to the configured default, because the alternative
+  is one control that disagrees with the settings.
+
+- **The scripted demo shows the picker.** Six new beats open the gear, recolour two folders
+  (one of them to a grey, which is the answer to "can a folder recede on purpose"), reset,
+  and close — plus two that hover a folder and a subfolder from the legend. The swatch beat
+  aims at a real 15px target through CDP hit-testing, so it fails if the swatch is covered
+  or scrolled away. The run is 29 beats and ~50s, up from 20 and ~30s.
+
+- **The biggest folders now land on the outer ring.** The band balancer's rules were all
+  geometry — thickness, row counts, hole size — which says nothing about *which* folders
+  make up a band, so among equal-scoring splits it kept whichever it reached first. On the
+  10k vault that meant `05 - Meeting Notes` (1679) and `01 - Projects` (1066) inside while
+  Journal (48), Clippings (92) and Literature Notes (148) sat on the rim. There is now a
+  fourth, weakly-weighted preference: the biggest folder inside minus the smallest outside,
+  zero when the split is size-ordered. Both vaults keep exactly the row counts and
+  thickness they had (4/6 at 0.48, 16/23 at 0.55) and simply order the folders correctly
+  within them.
+
+- **Hovering a folder in the legend haloes its notes on the disc.** A separate highlight
+  source alongside a clicked group and a marked day, ramping through the same per-note
+  path. It haloes without pushing: a wedge sliding out and back under a moving pointer is
+  a lot of motion to spend on a question the halo has already answered. Clicking still
+  pins the highlight and pushes.
+
+- **`scripts/palette-check.mjs`** prints all of the above for both themes. Deliberately not
+  part of the smoke suite: a palette does not drift on its own, and what makes a hue right
+  is looking at it.
+
+The invariant suite is 19 checks now and passes on both vaults.
+
+---
+
+## 1.5.3 — 2026-08-23
+
+Zero network calls, and a note gets dated even when nothing says so.
+
+- **A note is dated by its filename or its file stamp when the frontmatter does not say.**
+  Reported as 118 notes "undated" on a vault that does not write a `created:` field
+  ([#6](https://github.com/luke321/vault-graph/issues/6)) — which was the whole rule:
+  frontmatter `created`, then `date`, then give up. The chain is now frontmatter → a date
+  at the **front** of the filename → the file's own creation stamp. Frontmatter still wins
+  even when it is the worst answer, because it is a deliberate statement and the graph
+  should not silently disagree with the note.
+  - `min(ctime, mtime)`, not `ctime`. Sync clients, restores and copies between drives all
+    stamp creation with the copy and leave modification intact, which produces files
+    "created" long after they were last written.
+  - The filename date has to be at the front and real. `Q3 2026-08-23 review` does not
+    count — a date mid-title is as likely to be the subject as the filing date — and
+    `2026-02-31` does not count either, which now also applies to frontmatter, where an
+    impossible date could always have opened a phantom heatmap column.
+  - **The rule is one function now**, `src/dates.mjs`. Both mounts had their own copy and
+    both had the same gap; fixing that twice is how it comes back in one of them.
+  - Every build says how it dated things: `dated: 8037 from frontmatter, 842 from the
+    filename, 1123 from the file stamp, none undated`. On the 10k synthetic vault that is
+    1965 undated → 0.
+- **Refresh picks up new files — in the plugin, where it can.** The standalone page cannot
+  and never could: its data is baked in at build time, so there Refresh resets the filters
+  and replays the intro, and its tooltip now says so instead of claiming twice over to
+  "re-read the file from disk", which is where the expectation came from. In Obsidian the
+  vault is right there, so the button rebuilds from the metadata cache and remounts.
+  `scripts/refresh-check.mjs` drives the whole round trip in a real Obsidian — 454 notes,
+  write one, still 454, click Refresh, 455.
+
+- **The shipped `main.js` now contains no network request at all.** The directory's review
+  reports, under **Disclosures**, how many a plugin makes — ours said **2**, and a plugin
+  that draws a picture of the vault should say 0 ([#1](https://github.com/luke321/vault-graph/issues/1)).
+  Both were Sigma.js's `loadSVGImage`, which fetches an SVG so a node-image program can draw
+  from it; this page registers exactly two programs, `EdgeCurveProgram` and
+  `createNodeBorderProgram`, so neither call could ever run. That is still the wrong number
+  to ship: "there is a `fetch` in there but we never take that path" is a claim a user has
+  to take on trust, and **0** is one they can check with a grep.
+- **They are stripped at read time, not patched into `vendor/`.** `src/vendor.mjs` replaces
+  each `fetch(` with a thrower as the bundle is read, and both consumers go through it — the
+  HTML exporter and the esbuild plugin build. `vendor/` stays byte-identical to upstream, so
+  the committed bundle can still be diffed against the release it came from; the modification
+  travels with the build and is recorded in `vendor/NOTICE.md`, as MIT redistribution asks.
+  The alternatives — disclose them, take an npm supply chain to tree-shake them, fork the
+  bundle, or shadow the binding and leave the literal in the file — are weighed in
+  [`0008-zero-network-calls`](.ai-context/decisions/0008-zero-network-calls.md).
+- **The count is the gate, and that is the part that matters in a year.** Each bundle
+  declares how many calls it is expected to contain, and a mismatch is a hard build error
+  rather than a silent strip. Stripping is mechanical; noticing that an upstream update
+  added a *third* call — one that might be necessary, and would then have to be disclosed
+  rather than removed — is not.
+- **`scripts/check-network.mjs` keeps the answer at zero**, from three directions: our own
+  sources, the vendored bundles after stripping, and whatever a build left behind. It also
+  covers remote resources — `src=`, stylesheet `href=`, `@import`, `url()` — because a
+  webfont is a request too, and a quieter one. Static, no browser, milliseconds, so it joins
+  the PII and scope checks on `pre-push` **with no skip flag**.
+
+- **`scripts/release.ps1` can cut a release again.** Its version guard still required a
+  `v` prefix, which 1.5.0 deliberately dropped — Obsidian matches the release tag against
+  `manifest.json`'s `version`, and a manifest version must be bare semver, so a `v`-tagged
+  release is one nobody can install. The check was never updated, which is why 1.5.0–1.5.2
+  were cut by hand. It now takes bare semver, gives a `v` its own message rather than a
+  format error, and additionally refuses a version the manifest does not already claim —
+  the other half of the same rule, and otherwise invisible until a user reports the plugin
+  will not update. The path in `releasing.md` had a carriage return in place of the `r` in
+  `release.ps1`, so the one command it documents could not be copied and run.
+
+- **Hover comes back when you return to a note.** Move the pointer off the graph and back
+  onto the same note and it stayed dark — Sigma's `handleLeave` emits `leaveNode` without
+  clearing the node it just said you left, so the re-entry test never fires. `handleMove`,
+  two lines earlier in the same bundle, always did it correctly. Patched at read time
+  alongside the network calls; measured 1 hit in 40 before, 40 in 40 after.
+- **The invariant suite is trustworthy again**
+  ([#7](https://github.com/luke321/vault-graph/issues/7)). It had been failing on clean
+  trees, which is the failure that teaches people to re-run instead of read. Two causes,
+  and neither was the one the symptoms suggested. The hover bug above accounted for the
+  three pointer checks. The rest was the suite racing **itself**: it launched Chrome on a
+  constant port, so a second run silently attached to the first one's browser and measured
+  the wrong page — a 13-folder vault reporting 60 legend rows, a 454-note vault hovering
+  node 492. Each run now takes a free port from the OS, asserts the page it attached to is
+  the one it just built, tears the browser down by whoever actually holds the port, and
+  checks frames are arriving before measuring anything downstream of one. Two suites can
+  now run at once, which is what the constant port had quietly forbidden.
+
+Measured: built `main.js` has 0 network primitives and 2 throwers, and a standalone page over
+a 3003-note synthetic vault has 0. Both guards fail as they should — a planted `fetch` in
+`plugin/main.js`, and a third `fetch` in a copied Sigma bundle.
+
 ## 1.5.2 — 2026-08-22
 
 The directory's review of 1.5.1 came back with exactly one **error**, and chasing it found a

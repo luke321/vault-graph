@@ -40,25 +40,36 @@ Every screenshot and the demo clip in the README were made that way.
 ## If you do want to work on it
 
 Read [`.ai-context/`](.ai-context/) first, and the record for the part you are touching.
-Several constants look arbitrary and are not: the ten colour slots, the three named tint
+Several constants look arbitrary and are not: the twelve colour slots, the three named tint
 slots, the six-degree minimum wedge, the fifty-two-week heatmap window. Each has a
 measurement behind it, and the recurring failure mode in this repo is reasoning about the
 code instead of measuring it.
 
-Two commands, and both are gates rather than suggestions:
+Three commands, and all three are gates rather than suggestions:
 
 ```bash
-node scripts/smoke.mjs        # 17 invariants, over two vault shapes
-node scripts/check-scope.mjs  # the page cannot style, or be styled by, its host
+node scripts/smoke.mjs         # 17 invariants, over two vault shapes
+node scripts/check-scope.mjs   # the page cannot style, or be styled by, its host
+node scripts/check-network.mjs # nothing shipped can make a network request
 ```
 
-One more is manual, because it launches a real Obsidian twice and takes about ninety seconds.
-Run it if you touch the view's lifecycle — `onOpen`, `currentView`, `activate`, or anything
-that reaches for `leaf.view`:
+Two more are manual, because they launch a real Obsidian and take a minute or two each.
+Run the first if you touch the view's lifecycle — `onOpen`, `currentView`, `activate`, or
+anything that reaches for `leaf.view`; run the second if you touch what Refresh does, or
+how the plugin builds its data:
 
 ```bash
 node scripts/deferred-check.mjs --vault ./demo-vault
 ```
+
+```bash
+node scripts/refresh-check.mjs --vault ./demo-vault
+```
+
+The second one writes a probe note into the vault you point it at and deletes it again, so
+point it at a generated vault. It is the only harness that covers the whole round trip —
+write a file, Obsidian notices, rebuild, remount, the note is on the disc — which is what
+`Refresh doesn't seem to pick up new files` turned out to be about.
 
 Since Obsidian 1.7.2 a tab restored in the background is **deferred**: the leaf is real and
 `getLeavesOfType` finds it, but `leaf.view` is a placeholder until something reveals it. Both
@@ -67,8 +78,50 @@ happens — so this one quits and relaunches to get the leaf into the state a pe
 restart of the day puts it in.
 
 `git config core.hooksPath .githooks` once per clone runs those on every push, along with a
-check that refuses to publish other people's names. Two of the three have no skip flag, on
-purpose: what they prevent is damage to somebody else's software, or to somebody else.
+check that refuses to publish other people's names. Three of the four have no skip flag, on
+purpose: what they prevent is damage to somebody else's software, or to somebody else —
+and all three are static reads that cost milliseconds, so there is nothing to skip for.
+
+## Branches, and how work reaches main
+
+**`develop` is where work lands. `main` only ever receives `develop`.**
+
+```
+your branch  ->  develop  ->  main
+```
+
+`main` is what the Obsidian directory installs from and what a release is tagged on, so
+nothing should reach it that has not already been through `develop`, where the invariant
+suite runs on every push. The rule is enforced twice, because there are two ways to move a
+commit and neither mechanism can see the other:
+
+| | |
+|---|---|
+| `.github/workflows/branch-policy.yml` | a pull request into `main` fails unless its head is `develop` in this repository — GitHub has no branch-protection setting for "the PR must come from X", so it is a required check |
+| `.githooks/pre-push` | a `git push` to `main` is refused unless `develop` is already an ancestor of it — a merge of `develop` passes, a commit made straight on `main` does not |
+
+`main` also carries a ruleset: pull request required, that check required, no force pushes,
+no deletion.
+
+## Commit messages
+
+Reference the issue with a **closing keyword** — `Closes #7` on its own line in the body:
+
+```
+Fix the suite's flake, which was two bugs and neither was the settle
+
+...what changed and what was measured...
+
+Closes #7
+```
+
+GitHub resolves closing keywords when the commit reaches the **default branch**, which is
+`main`. So an issue fixed on a branch stays open through `develop` and closes by itself
+when the release merge lands — which is exactly when it is true to say it is fixed. A bare
+`#7` links without closing, and is right for a commit that only touches an issue in passing.
+
+If a merge into `main` needs to close issues its commits did not name, put the keywords in
+the merge commit message; that works the same way.
 
 For a visual change, take before-and-after screenshots of the same vault and compare them:
 

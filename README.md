@@ -9,7 +9,7 @@ The layout is **deterministic, not force-directed**. There is no simulation to s
 no seed to get lucky with: the same vault always draws the same picture, so the shape
 becomes something you can learn and recognise rather than a fresh tangle each time.
 
-![The disc growing from the vault first note, a note hovered, a folder hidden, a subfolder highlighted, three heatmap days hovered, then one folder soloed](assets/demo.gif)
+![The disc growing from the vault's first note, a note hovered, a folder hidden, a folder and a subfolder hovered from the legend, that subfolder then clicked to push it out, three heatmap days hovered, two folders recoloured from the palette and put back, then one folder soloed](assets/demo.gif)
 
 
 ![Vault Graph inside Obsidian, dark theme](assets/screenshots/plugin-dark.png)
@@ -77,13 +77,46 @@ collects nothing, and needs no account.
 **What it touches, plainly.** A graph of a whole vault has to know what is in the whole
 vault, so the plugin enumerates every markdown file (`vault.getMarkdownFiles`) and reads
 their frontmatter and link data from Obsidian’s own metadata cache. It reads note bodies only
-to count words (`vault.cachedRead`), and it writes nothing anywhere. Obsidian’s own automated
-review flags the enumeration, correctly — it is what the plugin is for, and worth stating
-rather than leaving to be discovered.
+to count words (`vault.cachedRead`), and it writes nothing in your vault — the one file it
+writes is its own `data.json` in its plugin folder, holding the settings below. Obsidian’s
+own automated review flags the enumeration, correctly — it is what the plugin is for, and
+worth stating rather than leaving to be discovered.
 
-<sub>Also greppable, so also worth stating: the bundled Sigma.js carries a `fetch` in its
-image-loading path. This plugin never registers an image node program, so that path is
-unreachable — but the string is in the file.</sub>
+### Settings
+
+Settings → Community plugins → Vault Graph.
+
+| | |
+|---|---|
+| **Folder colours** | One row per top-level folder, with the twelve palette slots under it. The slot the folder is **currently using** is ringed — brightly if you chose it, dimly if it is just the one its position gives it. Click a slot to hold the folder to that colour; **Auto** hands it back. Setting one folder never changes another, and two folders may share a colour — useful for saying they belong together. |
+| **Folder visibility** | The eye at the start of each row sets whether that folder is shown **by default**. The legend's own eye inside the graph is the live filter for this session; this one is what the graph comes back to. |
+
+The graph view has a gear in its top-left corner that opens this tab directly, so the
+colours are reachable from the thing they colour.
+| **Include notes that do not exist yet** | Wikilinks pointing at a note nobody has written. |
+| **Include templates** | Notes under your template folders. |
+| **Flatten month folders** | Treat `2026-08` and its siblings as one folder rather than a subfolder each. |
+| **Count words** | Sizes each note by its length. The one setting that costs real I/O. |
+
+Colours and visibility repaint the open graph immediately. The other four rebuild it,
+because they change what is *in* it.
+
+Folders are coloured from twelve slots — ten hues and two greys — handed out in folder
+order and round again, so a thirteenth folder comes back to the first slot rather than
+falling into a grey pile. A saved choice is a *slot*, not a colour value, so it follows
+your Obsidian theme between light and dark.
+
+Folders whose name starts with `_` are treated as archives — `_ Archives`, `_old`, scratch.
+They stay in the graph, but they take no slot in the colour rotation, wear the palette's
+darker grey, and start hidden. All three are defaults: pick a colour or click the eye and
+your choice wins. It is a rule about folders, not files — `_scratch.md` is a note like any
+other.
+
+<sub>**Zero network calls, and greppable.** The bundled Sigma.js ships two `fetch` calls in
+its image-loading path, for a node-image program this plugin never registers. They were
+unreachable, and they are now removed at build time rather than explained away — so
+`main.js` contains none, and `node scripts/check-network.mjs` is the gate that keeps it that
+way. See [`0008-zero-network-calls`](.ai-context/decisions/0008-zero-network-calls.md).</sub>
 
 ---
 
@@ -142,8 +175,34 @@ xdg-open "path/to/vault-graph.html"   # Linux
 No server, no `localhost`, no watch mode, and nothing left running when the script exits.
 The page is a **snapshot** of the vault as it was when you generated it: to see notes you
 have added since, run step 2 again and reload the tab. (The Refresh button *inside* the
-page resets the filters and replays the intro — it cannot re-read your vault, because a
+page returns to your default view and replays the intro — it cannot re-read your vault, because a
 `file://` page is not allowed to.)
+
+### The gear
+
+Top right of the sidebar. It opens the same folder-colour picker the plugin has: one row
+per top-level folder, twelve slots each — ten hues and two greys — handed out in folder
+order and round again, so a thirteenth folder comes back to the first slot. The slot each
+folder is currently using is ringed — brightly if you chose it, dimly if it is just the one
+its position gives it, which is also what the **Auto** button beside it is reporting.
+**Auto** hands a folder back to that positional slot. Setting one folder never changes
+another, and two folders may share a colour — useful for saying they belong together.
+
+Hovering a folder in the legend haloes its notes on the disc, so you can find one without
+clicking anything. Clicking still pins the highlight and pushes the wedge out.
+
+Each row also starts with an eye that sets whether that folder is shown **by default** —
+the same mark the legend uses, because it is the same question about a different moment.
+The legend's eye is the live filter for this session; this one is what the graph comes back
+to. Folders whose name starts with `_` are archives — no slot in the colour rotation, the
+palette's darker grey, and hidden until you say otherwise.
+
+Your choices are remembered in the browser's `localStorage`, under a key scoped to the
+vault name, so regenerating the file keeps them and a graph of a *different* vault gets its
+own. Colours and default visibility are what is kept: highlights and the timeline still
+start fresh. **Refresh** returns to those defaults rather than to "everything visible". If
+the browser has site data blocked the picker still works — the choices just do not outlive
+the tab.
 
 ## Read this before sharing the output
 
@@ -268,7 +327,9 @@ disc.
 no network, and `fetch()` is blocked on `file://`, so nothing in the browser can walk your
 vault. Re-run the build to make it current.
 
-**The in-page Refresh button is not that.** It resets every filter and replays the intro.
+**The in-page Refresh button is not that.** It returns to your defaults — clearing
+highlights and the timeline, and putting each folder back to the visibility set in the
+gear — and replays the intro.
 If you have just rebuilt, reload the browser tab.
 
 ## Optional: the scripted demo
@@ -375,10 +436,13 @@ the plugin puts them in an Obsidian view.
 | `scripts/smoke.mjs` | the invariant suite, over both vault shapes |
 | `scripts/check-scope.mjs` | asserts the page cannot style or be styled by its host |
 | `scripts/check-pii.mjs` | refuses to publish other people's names; no skip flag |
+| `scripts/check-network.mjs` | asserts nothing shipped can make a request; no skip flag |
+| `scripts/refresh-check.mjs` | drives a real Obsidian: write a note, click Refresh, is it there? |
 | `scripts/make-demo-vault.mjs` | a structural mirror of a real vault, with none of its content |
 | `scripts/make-test-vault.mjs` | a synthetic vault, deliberately awkward |
 | `scripts/shoot.mjs` | screenshots the page at rest, for comparing two commits |
 | `scripts/record-demo.ps1`, `make-gif.ps1` | the demo recording and its encode |
+| `.github/workflows/branch-policy.yml` | main only accepts pull requests from develop |
 | `.ai-context/` | architecture, invariants, and one record per decision |
 | `CHANGELOG.md` | what shipped, per release |
 
