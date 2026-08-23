@@ -2388,6 +2388,9 @@ function mountVaultGraph(root, data, deps) {
     // the tightest row is not known until every row has been walked.
     var cellRoomNext = Object.create(null);
     var cellMin = Object.create(null), cellOf = Object.create(null);
+    // Per note, its distance to the nearer edge of its own wedge. A hard cap on the drawn
+    // radius -- see where it is filled, and dotPx.
+    var edgeCapNext = Object.create(null);
     if (probe) lastStart = Object.create(null);
     [true, false].forEach(function (isInner) {
       var band = shown.filter(function (c) { return !!c.inner === isInner; });
@@ -2676,6 +2679,23 @@ function mountVaultGraph(root, data, deps) {
             mgA *= k; mgB *= k;
           }
           var t = sweepAngle(a0 + mgA + (arc - mgA - mgB) * sl.u - sm.gap / 2);
+          // HOW MUCH ROOM THIS NOTE HAS TO ITS OWN WEDGE EDGE, in graph units. dotPx caps the
+          // drawn radius at this, which is the only bound on "a dot must not cross into the
+          // seam" that cannot go stale.
+          //
+          // Sizing the MARGIN to the largest dot was the previous attempt and it has a circular
+          // dependency: the margin has to be reserved during placement, the room the dot is
+          // sized from is a percentile over the placement, and bandRoom is a module variable
+          // assigned at the END of the pass -- so the margin was reserved from the PREVIOUS
+          // layout's room. When the room grew between layouts the dot outgrew the margin held
+          // for it and crossed the boundary, which is the note in the seam, reported twice.
+          //
+          // A distance is not circular. mgA and mgB are this wedge's own edges, known here,
+          // and both are smooth functions of the plan, so capping by them cannot make a dot
+          // breathe the way a cap taken from measured neighbours did.
+          var spanArc = arc - mgA - mgB;
+          var dEdge = Math.min(mgA + spanArc * sl.u, mgB + spanArc * (1 - sl.u)) * rGraph;
+          if (dEdge > 0) edgeCapNext[sl.id] = dEdge;
           // Highlighted notes step outward by HL_PUSH rows. Applied here rather than
           // in the packing so it changes nothing about rows, capacities or wedge
           // angles -- a highlight is a pure display offset, and every stability
@@ -2815,6 +2835,7 @@ function mountVaultGraph(root, data, deps) {
       if (m > 1) cellRoomNext[id] = m;
     });
     cellRoom = cellRoomNext;
+    edgeCap = edgeCapNext;
     if (planRoom) { /* kept on the plan for the probe; the live pool is what draws */ }
     dotFit = fit;
     return out;
@@ -3351,6 +3372,9 @@ function mountVaultGraph(root, data, deps) {
   // Per note, its own cell's step. Bounds a dot where its folder is packed tighter than the
   // band's tenth percentile; continuous, so it does not make dots breathe.
   var cellRoom = Object.create(null);
+  // Per note, its distance to the nearer edge of its own wedge, in graph units. A dot may not
+  // exceed it, or it crosses into the seam.
+  var edgeCap = Object.create(null);
   // WHAT THE LAST CASCADE WAS ASKED TO DO. Every question about a jump starts with
   // "did it animate at all, and over how many notes", and inferring that from frame
   // counts is guesswork -- an instant apply and a one-frame animation look identical
@@ -4767,7 +4791,22 @@ function mountVaultGraph(root, data, deps) {
     // A dot that cannot be both visible and separate is drawn separate. Sub-pixel is faint and
     // honest; overlapping is a smear that says two notes are one.
     var lo = (isIn ? DOT_LOI : DOT_LO) * scale;
-    return v < lo ? lo : v;
+    if (v < lo) v = lo;
+    // AND NEVER PAST ITS OWN WEDGE EDGE. Last, so it outranks the pixel floor too: a dot that
+    // cannot be both visible and inside its wedge is drawn inside it. The cap is in graph
+    // units and v is in the size units sigma divides by the camera ratio, so it converts
+    // through the same pitch pair the ramp was built from.
+    var capU = edgeCap[id];
+    if (capU !== undefined && capU > 0) {
+      var pitU = pitchUnits(isIn ? "i" : "o");
+      var hiU = DOT_OF_PITCH * pitU;                 // what v = ramp top means, in graph units
+      if (hiU > 1e-6) {
+        var capV = (isIn ? DOT_MI : DOT_M) * NODE_MAX + (isIn ? DOT_BI : DOT_B);
+        var vMax = capV * (capU / hiU);
+        if (v > vMax) v = vMax;
+      }
+    }
+    return v;
   }
 
   // Returns true if it moved enough to be worth a repaint. The threshold is what
