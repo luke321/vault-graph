@@ -2794,13 +2794,29 @@ function mountVaultGraph(root, data, deps) {
     if (!probe) return;
     var iMin = Infinity, iMax = 0, oMin = Infinity, oMax = 0, iN = 0, oN = 0;
     var prev = probe.prevAng, now = Object.create(null);
+    var prevR = probe.prevR, nowR = Object.create(null);
     var tanStep = 0, tanId = null, tanOver = 0, tanSum = 0, tanN = 0;
+    // PER-NOTE RADIAL STEP, which is what the tangential half has always measured and the
+    // radial half never did. Both band extents below are a MAX OVER A SET, and the set churns
+    // as notes arrive and leave -- so when the furthest note winks out the maximum is handed
+    // to the next one in and the sample steps by the distance between them, reporting a jump
+    // in a disc that did not move. Worse in the other direction: a stale note parked outside
+    // every visible one pinned the extent flat across an entire cascade (path 0 over 154
+    // frames), so a moving disc measured as perfectly still. A note's own change in radius has
+    // neither failure, and "the disc jumped" is a statement about notes, not about a maximum.
+    var radStep = 0, radId = null, radSum = 0, radN = 0;
     graph.forEachNode(function (id, a) {
       var r = Math.hypot(a.x, a.y);
       // Tangential step: the angle moved, times the radius it moved at.
       if (present(id)) {
         var th = Math.atan2(a.y, a.x);
         now[id] = th;
+        nowR[id] = r;
+        if (prevR && prevR[id] !== undefined) {
+          var dr = Math.abs(r - prevR[id]);
+          if (dr > radStep) { radStep = dr; radId = id; }
+          radSum += dr; radN++;
+        }
         if (prev && prev[id] !== undefined) {
           var d = th - prev[id];
           // Shortest way round, or a note crossing the 12 o'clock seam reports a
@@ -2813,6 +2829,13 @@ function mountVaultGraph(root, data, deps) {
           tanSum += moved; tanN++;
         }
       }
+      // NOT FILTERED to present notes, and that is a known blind spot rather than an
+      // oversight -- see github#17. Filtering was tried: the outermost notes are frequently
+      // exactly the ones a date range excludes, so the extent COLLAPSED the instant the range
+      // applied, measured as a single frame step of 3230 out of a total path of 4131. Left
+      // unfiltered it is pinned by stale coordinates instead, which is stable but partly
+      // blind. Stable and blind is the better failure of the two for a guard, and the honest
+      // fix needs a set fixed across the whole probe rather than a filter.
       if (bandLock && bandLock[groupOf(id)]) {
         iN++; if (r < iMin) iMin = r; if (r > iMax) iMax = r;
       } else {
@@ -2820,10 +2843,13 @@ function mountVaultGraph(root, data, deps) {
       }
     });
     probe.prevAng = now;
+    probe.prevR = nowR;
     if (probe.watch) probe.watchSeries.push(probe.watched || null);
     probe.samples.push({
       tag: tag, ms: Math.round(NOW() - probe.t0), gapI: lastGapN.i, gapO: lastGapN.o,
       ngI: lastNG.i, ngO: lastNG.o, gapDegI: lastGapDeg.i, gapDegO: lastGapDeg.o,
+      radStep: Math.round(radStep), radId: radId,
+      radMean: Math.round(radN ? radSum / radN : 0),
       tanStep: Math.round(tanStep), tanId: tanId, tanOver: tanOver,
       tanMean: Math.round(tanN ? tanSum / tanN : 0),
       // Where each group's wedge STARTS. "The gap jumped" is precisely this series
@@ -6736,7 +6762,7 @@ function mountVaultGraph(root, data, deps) {
                     // frame step per band, which is what "a jump" actually is.
                     probe: function (on) {
                       probe = (on === false) ? null
-                        : { t0: NOW(), samples: [], prevAng: null,
+                        : { t0: NOW(), samples: [], prevAng: null, prevR: null,
                             watch: arguments.length > 1 ? String(arguments[1]) : null,
                             watched: null, watchSeries: [] };
                       return probe ? "recording" : "off";
@@ -6767,8 +6793,49 @@ function mountVaultGraph(root, data, deps) {
                       var out = {
                         frames: s.length,
                         spanMs: s[s.length - 1].ms,
+                        // The per-note radial worst, and the mean note's move. This is the
+                        // radial counterpart of tanMaxStep and the number to judge a jump by;
+                        // the band extents below are kept for context but are a max over a
+                        // churning set, so their step is not a step in the disc.
+                        radMaxStep: (function () {
+                          var w = 0, who = null, when = 0;
+                          for (var j = 0; j < s.length; j++) {
+                            if (s[j].radStep > w) { w = s[j].radStep; who = s[j].radId; when = s[j].ms; }
+                          }
+                          return { step: w, node: who, atMs: when };
+                        })(),
+                        radMeanStep: (function () {
+                          var t = 0, k = 0;
+                          for (var j = 0; j < s.length; j++) { t += s[j].radMean || 0; k++; }
+                          return Math.round(k ? t / k : 0);
+                        })(),
                         innerMaxStep: worst.inner, innerStepAtMs: at.inner,
                         outerMaxStep: worst.outer, outerStepAtMs: at.outer,
+                        // HOW FAR EACH BAND WENT IN TOTAL. A per-frame step means nothing
+                        // on its own: a smooth animation over a long distance and a snap
+                        // over a short one produce the same number. Reported so a caller
+                        // can ask the only question that scales -- is this frame's move a
+                        // reasonable multiple of the average frame's share of the trip.
+                        // Needed once the lattice spacing began following the visible count
+                        // (github#13), which made a range cascade travel much further.
+                        innerTravel: Math.abs(s[s.length - 1].innerMax - s[0].innerMax),
+                        outerTravel: Math.abs(s[s.length - 1].outerMax - s[0].outerMax),
+                        // AND THE PATH, which is the honest denominator. Travel is net, so a
+                        // band that moves out and part-way back reports less than it went --
+                        // and comparing a frame's step against a net figure then flags a
+                        // smooth animation whose target was moving. The path is the sum of
+                        // the steps, so path / frames is the mean frame, and a frame can be
+                        // judged as a multiple of that.
+                        innerPath: (function () {
+                          var t = 0;
+                          for (var j = 1; j < s.length; j++) t += Math.abs(s[j].innerMax - s[j - 1].innerMax);
+                          return Math.round(t);
+                        })(),
+                        outerPath: (function () {
+                          var t = 0;
+                          for (var j = 1; j < s.length; j++) t += Math.abs(s[j].outerMax - s[j - 1].outerMax);
+                          return Math.round(t);
+                        })(),
                         // The tangential jump, and the gap reservation behind it.
                         tanMaxStep: tanWorst, tanStepAtMs: tanAt, tanStepNode: tanWho,
                         // The handover frame, called out on its own: settle() replacing
