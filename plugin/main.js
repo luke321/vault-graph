@@ -493,11 +493,15 @@ class VaultGraphView extends ItemView {
       Sigma: sigma.Sigma || sigma,
       rendering: sigma.rendering || {},
       logoMask: "data:image/png;base64," + LOGO_MASK_B64,
-      // The saved per-folder palette slots and visibility defaults. No settingsUI and no
-      // onFolderColors/onFolderShown: in Obsidian the settings tab owns both, and the
-      // page's own gear stays hidden.
+      // The saved per-folder palette slots and visibility defaults. No onFolderColors or
+      // onFolderShown: in Obsidian the settings tab owns writing both.
       folderColors: this.plugin.settings.folderColors,
       folderShown: this.plugin.settings.folderShown,
+      // The gear IS shown here -- it is where somebody looking at the disc goes to look
+      // for the colours -- but it opens Obsidian's settings tab rather than a second
+      // panel inside the view saying the same things. `settingsUI` is deliberately not
+      // set: that is the standalone's mode, where nothing else can hold a setting.
+      openSettings: () => this.plugin.openSettings(),
       // The window this view is actually in. A view dragged out into a popout must schedule
       // its timers and animation frames there, not on the main window -- which is what
       // obsidianmd/prefer-active-window-timers is about. The standalone page passes nothing
@@ -854,6 +858,25 @@ class VaultGraphPlugin extends Plugin {
 
   async saveSettings() {
     await this.saveData(this.settings);
+  }
+
+  // Open this plugin's own settings tab, for the gear in the view.
+  //
+  // `app.setting` is NOT in the public API. It is what every plugin uses for this, because
+  // there is nothing else -- there is no documented "open my settings tab" -- so it is
+  // guarded at both steps and falls back to telling the user where to click rather than
+  // throwing inside a click handler. If a future Obsidian drops it, the gear degrades to a
+  // signpost instead of doing nothing.
+  openSettings() {
+    const setting = this.app.setting;
+    if (!setting || typeof setting.open !== "function") {
+      // Worded to survive obsidianmd/ui/sentence-case, which flags any capitalised word
+      // mid-string -- and its suggested fix lowercased the plugin's own name.
+      new Notice("Open the plugin's settings tab from the community plugins list.");
+      return;
+    }
+    setting.open();
+    if (typeof setting.openTabById === "function") setting.openTabById(this.manifest.id);
   }
 
   // A COLOUR CHANGE REPAINTS. It does not rebuild, and the difference is the whole

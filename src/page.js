@@ -18,10 +18,15 @@
  *                           says", which is hidden for a folder whose name starts with an
  *                           underscore and shown for everything else.
  *         onFolderShown(m)  as onFolderColors, for that map.
- *         settingsUI        true to show the gear and its panel. The STANDALONE sets
- *                           this; the plugin does not, because Obsidian already gives it
- *                           a settings tab and two settings UIs for one setting is how
- *                           they drift apart.
+ *         settingsUI        true to show the gear AND let it open the page's own panel.
+ *                           The STANDALONE sets this, because nothing else there can hold
+ *                           a setting.
+ *         openSettings()    show the gear but hand its click to the host. The PLUGIN sets
+ *                           this: the gear belongs in the view either way -- it is where
+ *                           somebody looking at the disc goes to look for it -- but what
+ *                           it opens is Obsidian's own settings tab, not a second panel
+ *                           saying the same things. Mutually exclusive with settingsUI;
+ *                           if both arrive, this one wins.
  *         onFolderColors(m) called after a change, with the new map. THE HOST PERSISTS,
  *                           not this file: the plugin writes it through saveData() and
  *                           the standalone into localStorage, and page.js knowing about
@@ -252,6 +257,7 @@ function mountVaultGraph(root, data, deps) {
     return isArchiveGroup(g);
   }
   var SETTINGS_UI = !!deps.settingsUI;
+  var openHostSettings = typeof deps.openSettings === "function" ? deps.openSettings : null;
   var saveFolderColors = typeof deps.onFolderColors === "function" ? deps.onFolderColors : null;
   var saveFolderShown = typeof deps.onFolderShown === "function" ? deps.onFolderShown : null;
 
@@ -3901,11 +3907,17 @@ function mountVaultGraph(root, data, deps) {
     $("fit").onclick = fit;
     $("png").onclick = savePng;
 
-    // THE GEAR, and only if a host asked for it. In the plugin this whole branch is
-    // skipped and the button stays hidden: Obsidian's settings tab renders the same
-    // rows from the same palette() call, and one setting behind two UIs in one product
-    // is how the two of them drift.
-    if (SETTINGS_UI) {
+    // THE GEAR, if a host asked for it in either of the two ways. It is hidden by default
+    // because a page that cannot store a setting should not offer to change one.
+    if (openHostSettings) {
+      // HOSTED: the gear is a shortcut to the host's own settings, so it opens nothing
+      // here. `aria-expanded` is removed rather than left at "false" -- it would be
+      // claiming to control a panel this button no longer has.
+      $("gear").hidden = false;
+      $("gear").removeAttribute("aria-expanded");
+      $("gear").removeAttribute("aria-controls");
+      $("gear").onclick = function () { openHostSettings(); };
+    } else if (SETTINGS_UI) {
       $("gear").hidden = false;
       $("gear").onclick = function () {
         var open = $("settings").hidden;
@@ -4982,10 +4994,11 @@ function mountVaultGraph(root, data, deps) {
   // to grow -- append beats here and the driver picks them up with no other change.
   //
   // Beats are DATA, not functions, because the thing executing them is in another
-  // process. Three verbs so far:
+  // process. Four verbs so far:
   //   {settle}                     wait until nothing is animating
   //   {click, target:[kind, arg]}  move the real pointer there and click it
   //   {hover, target:[kind, arg]}  move there and stop, to let a hover state show
+  //   {park}                       pointer back to the vetted nothing-under-it spot
   // `why` is for the log and the eventual captions -- it is the only part of a beat a
   // person reads.
   function demoMode() {
@@ -5063,9 +5076,23 @@ function mountVaultGraph(root, data, deps) {
       { settle: true, why: "let the palette snap back" },
       { click: true, target: ["id", "gear"], why: "close the panel" },
 
+      // FOLD 03 BACK UP before soloing, and this is not tidiness.
+      //
+      // `only` hides every other group, and a hidden group stops rendering its subfolder
+      // rows -- so soloing while 03 is unfolded deletes those rows and pulls everything
+      // below them UP, by 97px measured. The pointer does not move, so it ends up over a
+      // row three below the one it clicked, whose `only` chip then lights up with its own
+      // tooltip. The take ended on a tooltip for the wrong folder, which reads exactly
+      // like the demo having mis-clicked.
+      { click: true, target: ["twisty", "03"], why: "fold the subfolders away again" },
+
       // And `only`, which is the fastest way to answer "where does one folder live".
       { click: true, target: ["only", "08"], why: "solo a single folder" },
-      { settle: true, why: "let everything else recede" }
+      { settle: true, why: "let everything else recede" },
+
+      // Pointer out of the way, so the last frame is the disc rather than a hover state
+      // left behind by the last click.
+      { park: true, why: "leave the final frame clean" }
     ];
   }
 

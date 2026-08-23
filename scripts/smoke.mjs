@@ -556,7 +556,22 @@ async function runOne(vault) {
     return failed;
   } finally {
     if (page) page.close();
-    try { chrome.kill(); } catch {}
+    // KILL THE TREE, not the launcher. `spawn().kill()` signals the process we started,
+    // and Chrome's launcher hands off to a browser process and exits -- so the kill lands
+    // on something already gone while the browser it started keeps running, keeps its
+    // profile locked, and keeps answering on the debugging port. The next run then finds
+    // it there. Measured: leftovers from several runs alive at once, and three separate
+    // misdiagnoses traced back to one of them serving a stale page.
+    //
+    // Ask politely first: Browser.close lets Chrome shut itself down and release the
+    // profile cleanly. taskkill /T is the fallback, and on anything but Windows the plain
+    // kill is all there is.
+    try { if (page) await page.send("Browser.close"); } catch { /* already going */ }
+    try { chrome.kill(); } catch { /* already gone */ }
+    if (process.platform === "win32" && chrome.pid) {
+      try { spawnSync("taskkill", ["/PID", String(chrome.pid), "/T", "/F"], { stdio: "ignore" }); }
+      catch { /* nothing else to try */ }
+    }
     await sleep(300);
     try { rmSync(profile, { recursive: true, force: true }); } catch {}
     if (scratch) { try { rmSync(dirname(scratch), { recursive: true, force: true }); } catch {} }
