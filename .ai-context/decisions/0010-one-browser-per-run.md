@@ -1,4 +1,4 @@
-# 0009 — The suite gets its own browser, on its own port
+# 0010 — The suite gets its own browser, on its own port
 
 **Date** 2026-08-23 · **Status** accepted · **Issue** [#7](https://github.com/luke321/vault-graph/issues/7)
 

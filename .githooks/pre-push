@@ -30,6 +30,59 @@ fi
 
 root=$(git rev-parse --show-toplevel)
 
+# MAIN ONLY EVER RECEIVES DEVELOP, and this is the command-line half of that rule -- the
+# other half is .github/workflows/branch-policy.yml, which governs the button on the
+# website. Neither substitutes for the other: a ruleset cannot say "the pull request must
+# come from develop", and a workflow never sees a `git push`.
+#
+# The test is not "which branch am I on" -- that is trivially wrong for a merge made
+# locally and pushed. It is: IS DEVELOP ALREADY AN ANCESTOR OF WHAT I AM PUSHING TO MAIN?
+# A merge of develop into main passes, because develop's tip is a parent. A fast-forward
+# of main to develop passes, because ancestry includes equality. A commit made straight on
+# main does not, which is the case worth catching -- work that never went through develop
+# is work the invariant suite never gated.
+#
+# stdin is the ref list git hands a pre-push hook: "<local ref> <local sha> <remote ref>
+# <remote sha>" per line. It is read here and NOT consumed for anything else, which is why
+# the checks below get their own </dev/null -- a child inheriting a half-read stdin is a
+# fine way to lose a line of it.
+policy_fail=""
+while read -r _local_ref local_sha remote_ref _remote_sha; do
+  [ "$remote_ref" = "refs/heads/main" ] || continue
+  # A deletion pushes the all-zero sha. Nothing to check, and the ruleset forbids it anyway.
+  case "$local_sha" in *[!0]*) ;; *) continue ;; esac
+
+  # Prefer the remote's idea of develop, since that is what main will be compared against;
+  # fall back to the local branch on a machine that has not fetched.
+  dev=""
+  for ref in refs/remotes/origin/develop refs/heads/develop; do
+    if git rev-parse --verify --quiet "$ref" >/dev/null; then dev=$ref; break; fi
+  done
+  if [ -z "$dev" ]; then
+    policy_fail="no develop branch to check against -- fetch first"
+    break
+  fi
+  if ! git merge-base --is-ancestor "$dev" "$local_sha"; then
+    policy_fail="$dev is not an ancestor of the commit being pushed to main"
+    break
+  fi
+done
+
+if [ -n "$policy_fail" ]; then
+  cat >&2 <<EOF
+
+pre-push: push to main refused -- $policy_fail.
+
+main only ever receives develop. Merge into develop, push that, and open a
+develop -> main pull request; the same rule is enforced on the website by
+.github/workflows/branch-policy.yml.
+
+If you are releasing, the merge into main is the release step -- it should
+already contain develop.
+EOF
+  exit 1
+fi
+
 # THE PII CHECK RUNS FIRST, ALWAYS, AND HAS NO SKIP.
 #
 # Everything else here is about correctness and can honestly be skipped in a hurry. This
@@ -39,7 +92,7 @@ root=$(git rev-parse --show-toplevel)
 # mattered, so SKIP_SMOKE deliberately does not reach it -- and it is cheap enough
 # (~50ms, no Chrome, no build) that there is no reason to want one.
 echo "pre-push: checking for names and identifiers..."
-if ! node "$root/scripts/check-pii.mjs"; then
+if ! node "$root/scripts/check-pii.mjs" </dev/null; then
   cat >&2 <<'EOF'
 
 pre-push: PII check failed -- push blocked.
@@ -58,7 +111,7 @@ fi
 # somebody else's software. page.css ships as the plugin's stylesheet, so one unscoped
 # selector styles the whole of Obsidian, and the failure would look like an Obsidian bug.
 echo "pre-push: checking the page is scoped..."
-if ! node "$root/scripts/check-scope.mjs"; then
+if ! node "$root/scripts/check-scope.mjs" </dev/null; then
   cat >&2 <<'EOF'
 
 pre-push: scope check failed -- push blocked.
@@ -75,7 +128,7 @@ fi
 # shipped main.js and reports the number to users. Ours said 2 for a while (github#1).
 # A static read of ten files and two bundles, no browser, so there is nothing to skip for.
 echo "pre-push: checking nothing reaches the network..."
-if ! node "$root/scripts/check-network.mjs"; then
+if ! node "$root/scripts/check-network.mjs" </dev/null; then
   cat >&2 <<'EOF'
 
 pre-push: network check failed -- push blocked.
@@ -96,7 +149,7 @@ if [ -n "$SKIP_SMOKE" ]; then
 fi
 
 echo "pre-push: running the invariant suite (SKIP_SMOKE=1 to skip)..."
-if node "$root/scripts/smoke.mjs"; then
+if node "$root/scripts/smoke.mjs" </dev/null; then
   exit 0
 fi
 
