@@ -338,7 +338,10 @@ function mountVaultGraph(root, data, deps) {
     curveEdges: true,
     // Logo colouring: true = the inner band's palette in the middle, fading out into
     // the outer's. false = the outer ring's palette across the whole mark.
-    logoTwoRing: true
+    logoTwoRing: true,
+    // SPIKE (github#12, concept E): notes pinned into the hub, newest last. The mark
+    // yields to them -- an empty list is the brain, a non-empty one is notes.
+    pinned: []
   };
 
   /* ------------------------------------------------- graph + base layout */
@@ -1877,7 +1880,86 @@ function mountVaultGraph(root, data, deps) {
                                     y: graph.getNodeAttribute(id, "y") };
     });
 
+    hubPlace(out, plan.r0, scale);
     return out;
+  }
+
+  /* -------------------------------------------------- SPIKE: the pinned hub */
+
+  // SPIKE (github#12, concept E). Notes right-clicked into the hub sit in the hole
+  // instead of on their lattice row. This is the ONE exception to "every note obeys the
+  // same lattice" -- the note above says hubPositions was deleted to remove exactly that,
+  // and re-introducing it is the thing this spike exists to judge rather than assume.
+  //
+  // Placed by ring, not sunflower-packed: 1 in the middle, then 6, then the rest. A hub
+  // holding three notes should read as three deliberate choices, and phyllotaxis reads as
+  // spill. The radii are fractions of r0 so the arrangement rides the hole's own size --
+  // the band balancer moves r0, and anything hard-coded here would drift off centre.
+  // MEASURED, not guessed. github#12 put hub capacity at ~13, from the 13 blobs drawn in
+  // logo-mask.png. That is the capacity of the ART; the capacity of the HOLE is far lower,
+  // because a pinned note carries a label and the hole is ~180px across. Shot at 9 on the
+  // 1402-note demo vault the labels overlap into an unreadable stack. Six is the most that
+  // fits as dots, and three the most that fits as dots WITH labels -- hence LABEL_UPTO.
+  var PIN_MAX = 6;
+  var LABEL_UPTO = 3;
+  var HUB_R1 = 0.62;              // the outer pinned ring, as a fraction of the hole
+
+  // Two arrangements, because the first one measured badly and the reason was structural
+  // rather than a tuning miss. A RING puts notes side by side, labels are horizontal, and
+  // two notes at the same height overlap their names at any radius the hole can afford --
+  // shot at 3 on the demo vault and the two lower labels already collide. A COLUMN gives
+  // every label its own band of height, which is the axis a horizontal label actually
+  // needs. The ring is kept so the two can be looked at side by side.
+  var HUB_SHAPE = "column";       // "column" | "ring"
+
+  function hubSlots(n, r0) {
+    if (n <= 0) return [];
+    if (n === 1) return [{ x: 0, y: 0 }];
+    if (HUB_SHAPE === "column") {
+      // Centred vertically, spread over most of the hole's diameter. Nudged left of centre
+      // so the label, which sits to the right of its dot, has the other half to run into.
+      var out2 = [], span = r0 * 1.32, x0 = -r0 * 0.42;
+      for (var j = 0; j < n; j++) {
+        out2.push({ x: x0, y: span * (0.5 - j / (n - 1)) });
+      }
+      return out2;
+    }
+    // One in the middle only once there are enough around it to make a middle mean
+    // something. At two or three, a centre dot just looks like one of them is late.
+    var mid = n >= 5 ? 1 : 0;
+    var ring = n - mid, out = [], r = r0 * HUB_R1 * (ring <= 3 ? 0.62 : 1);
+    if (mid) out.push({ x: 0, y: 0 });
+    for (var k = 0; k < ring; k++) {
+      // Start at 12 o'clock and go clockwise, matching the wedge order around them.
+      var t = Math.PI / 2 - (k / ring) * Math.PI * 2;
+      out.push({ x: r * Math.cos(t), y: r * Math.sin(t) });
+    }
+    return out;
+  }
+
+  function hubPlace(out, r0, scale) {
+    var ids = state.pinned.filter(function (id) { return graph.hasNode(id); });
+    if (!ids.length) return;
+    var slots = hubSlots(ids.length, r0);
+    ids.forEach(function (id, k) {
+      if (out[id] && slots[k]) out[id] = { x: slots[k].x * scale, y: slots[k].y * scale };
+    });
+  }
+
+  function isPinned(id) { return state.pinned.indexOf(id) >= 0; }
+
+  // Toggling is the whole gesture: right-click pins, right-click again releases. A cap,
+  // because the hole does not grow -- the oldest pin gives way rather than the newest
+  // being refused, so the gesture never silently does nothing.
+  function togglePin(id) {
+    var i = state.pinned.indexOf(id);
+    if (i >= 0) state.pinned.splice(i, 1);
+    else {
+      state.pinned.push(id);
+      if (state.pinned.length > PIN_MAX) state.pinned.shift();
+    }
+    applyLayout(true);
+    placeLogo();
   }
 
   /* ------------------------------------------------------------- timeline */
@@ -3483,6 +3565,15 @@ function mountVaultGraph(root, data, deps) {
   function placeLogo() {
     var el = $("logo");
     if (!el || !logoMaskReady || !renderer || !geomLock) return;
+    // SPIKE (github#12, concept E): THE MARK YIELDS TO THE NOTES. One pin is enough --
+    // a brain with a note sitting on top of it is worse than either alone, and the hub
+    // can hold one thing at a time. Unpin the last and it comes back.
+    if (state.pinned.length) {
+      el.hidden = true;
+      var eli0 = $("logoInner");
+      if (eli0) eli0.hidden = true;
+      return;
+    }
     // Re-paint only when the ring's colours actually changed. This runs from
     // afterRender, so it fires on every frame of a cascade -- and assigning the same
     // background string 90 times would be 90 style recalculations for nothing.
@@ -3702,6 +3793,22 @@ function mountVaultGraph(root, data, deps) {
         // Applied last, so it scales the arrival ramp above as well as the resting
         // size -- a fading note should grow toward the size it will actually hold.
         if (sizeScale !== 1) r.size = (r.size || a.size) * sizeScale;
+        // SPIKE (github#12, concept E). A pinned note is bigger and always labelled: it
+        // is standing where the mark used to be, so it has to carry the weight the mark
+        // did. Colour is untouched -- it keeps its group's hue, which is how the hub goes
+        // on being coloured by the ring without any sampler at all.
+        if (state.pinned.length && isPinned(id)) {
+          r.size = (r.size || a.size) * 2.2;
+          r.zIndex = 3;
+          // Labels only while they still fit. Past LABEL_UPTO the hub is dots, and the
+          // name comes from hovering or selecting one -- which is the same way every
+          // other note in the disc answers "what is this".
+          if (HUB_SHAPE === "column" || state.pinned.length <= LABEL_UPTO
+              || state.hovered === id || state.selected === id) {
+            r.label = a.label;
+            r.forceLabel = true;
+          }
+        }
         return r;
       },
       edgeReducer: function (id, a) {
@@ -3781,6 +3888,21 @@ function mountVaultGraph(root, data, deps) {
     renderer.on("leaveNode", function () { hideTip(); hoverTo(0); });
     renderer.on("clickNode", function (e) { select(e.node); });
     renderer.on("clickStage", function () { select(null); });
+    // SPIKE (github#12, concept E). Right-click is the pin gesture. preventDefault on the
+    // original event, or the browser context menu covers the thing that just moved.
+    renderer.on("rightClickNode", function (e) {
+      if (e.event && e.event.original) e.event.original.preventDefault();
+      togglePin(e.node);
+    });
+    // Right-click on empty stage clears the hub and brings the mark back. A way out that
+    // does not need you to remember which nine notes you pinned.
+    renderer.on("rightClickStage", function (e) {
+      if (e.event && e.event.original) e.event.original.preventDefault();
+      if (!state.pinned.length) return;
+      state.pinned = [];
+      applyLayout(true);
+      placeLogo();
+    });
 
     // DOUBLE CLICK RESETS THE VIEW, on the stage and on a note alike.
     //
@@ -6929,6 +7051,11 @@ function mountVaultGraph(root, data, deps) {
                       state.heatEnd = iso ? heatParse(iso) : null;
                       heatBuild(); drawDateUI(); heatDraw();
                     },
+                    // SPIKE (github#12, concept E): the pin gesture, for the shooter.
+                    pin: function (id) { togglePin(id); },
+                    pinned: function () { return state.pinned.slice(); },
+                    hubShape: function (s) { HUB_SHAPE = s; applyLayout(false);
+                                             renderer.refresh(); },
                     lastCascade: function () { return lastCascade; },
                     // The gap the LAST layout pass actually spent, per band. The probe
                     // reports this per frame during an animation; a resting disc has no
