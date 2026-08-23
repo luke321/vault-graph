@@ -1506,7 +1506,23 @@ function mountVaultGraph(root, data, deps) {
       var p = sp > 0 ? sp : SP;
       var i = 0, r = st, k = 0;
       while (i < n && k < 500) { i += Math.max(0.05, span * r / p); r += p; k++; }
-      return Math.max(1, k);
+      // NEVER MORE ROWS THAN NOTES. The loop answers "how many rows of THIS arc does it take
+      // to hold n notes at the lattice pitch", and for a narrow arc that answer exceeds n --
+      // measured, a 4-degree wedge holds 0.26 notes per row, so one note was told it needed
+      // four rows. One note fits in one row. It does not FILL one, which is a different thing
+      // and not one that more rows repair: the extra rows are empty, they are dead arc in
+      // every row the cell fails to reach, and because the band's depth is the deepest cell in
+      // it, a single note in a small folder was setting a whole band four rows deep.
+      //
+      // That depth is what made the dots uneven. Rows are filled in proportion to their arc,
+      // so the angular STEP should be one pitch everywhere -- but a row holds an integer
+      // number of notes, and the shortest arc takes the worst rounding. A row with capacity
+      // 2.5 given 3 notes is 20% crowded where a row with capacity 20 given 21 is 5%, dotFit
+      // shrinks by exactly that, and the innermost row -- always the shortest -- always loses.
+      // Reported as inner rows carrying visibly smaller dots than the rows outside them.
+      // Fewer, fuller rows is the fix: the same notes over less depth round better.
+      var cap = Math.ceil(n - 1e-9);
+      return Math.max(1, cap > 0 && k > cap ? cap : k);
     }
 
     // The edge inset, per cell, from the cell's own band base. Held here so the row
@@ -4134,7 +4150,24 @@ function mountVaultGraph(root, data, deps) {
   // How far a dot may grow with a spreading lattice before it stops following it. 1.6 of a
   // normal row's worth: enough that a filtered disc reads as bigger dots, short of the point
   // where two of them are most of the space between their neighbours.
-  var DOT_MAX_SPREAD = 1.6;
+  // Up from 1.6, which was set when a filtered band's dots became blobs -- and most of that
+  // was the inner band wearing the OUTER band's ramp, since there was only one. With a ramp per
+  // band, a dot can follow its own lattice all the way to the spacing cap, which is what keeps
+  // the proportion the design is stated in. Measured before: a 96-of-454 range spread the outer
+  // pitch to 2.5 while the cap held dots at 1.6, so diameter over step came out 0.49 at the
+  // largest dot against a design of 0.786 -- 0.786 * (1.6 / 2.5) exactly. Reported as gaps
+  // between the seam and the edge notes, which is what a sparse ring of undersized dots is.
+  var DOT_MAX_SPREAD = DENSITY_MAX;
+  // How far a dot may outgrow its band's pitch on the strength of the room it measures. The
+  // shrink direction is unbounded on purpose -- a crowded note gives up whatever it must.
+  //
+  // THE SAME FACTOR THE LATTICE MAY SPREAD BY, and it has to be, because a ring of fixed
+  // diameter holding few notes spreads TANGENTIALLY without limit while its radial pitch is
+  // capped at DENSITY_MAX. Measured on a 22-of-454 range: pitch 416 units, step 1046 -- 2.5x --
+  // so a 1.6 ceiling drew dots at diameter/step 0.26 against a design of 0.786, and the ring
+  // read as nine small dots adrift on a circle. Set to the spacing cap, the growth a dot is
+  // allowed and the spread the lattice is allowed are one number instead of two that disagree.
+  var DOT_ROOM_MAX = DENSITY_MAX;
   // display px = DOT_M * attr size + DOT_B, never below DOT_LO.
   var DOT_M = 1, DOT_B = 0, DOT_LO = DOT_MIN_PX;
   var DOT_MI = 1, DOT_BI = 0, DOT_LOI = DOT_MIN_PX;   // the inner band's own ramp
@@ -4220,7 +4253,22 @@ function mountVaultGraph(root, data, deps) {
     if (id !== undefined) {
       var room = dotFit[id];
       var pit = pitchUnits(isIn ? "i" : "o");
-      if (room !== undefined && room < pit) v *= room / pit;
+      // BOTH WAYS. This only ever shrank a dot, which is half a rule: the ramp sizes a note
+      // against the RADIAL pitch, dotFit measures the room it has ALONG its row, and those two
+      // are the same number only when a row is exactly full. They usually are not. Measured on
+      // a 96-of-454 range: pitch 400 units, step 640, so every note had 1.6x the room its size
+      // was drawn from -- diameter over step 0.49 against a design of 0.786, which reads as a
+      // sparse ring with gaps at every seam and was reported as exactly that. Letting the same
+      // ratio grow a dot as well as shrink it restores the proportion the design is stated in,
+      // in every filter state rather than only in the full one.
+      //
+      // Bounded, because room is unbounded: beside a hole a note would otherwise inflate to
+      // fill it, which trades a gap for a balloon and hides the hole rather than fixing it.
+      if (room !== undefined && pit > 1e-9) {
+        var f = room / pit;
+        if (f > DOT_ROOM_MAX) f = DOT_ROOM_MAX;
+        v *= f;
+      }
     }
     var lo = isIn ? DOT_LOI : DOT_LO;
     return v < lo ? lo : v;
