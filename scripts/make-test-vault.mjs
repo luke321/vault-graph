@@ -131,6 +131,14 @@ const FOLDERS = [
   // Past the ten colour slots on purpose: everything below falls to the neutrals.
   { name: "11 - Clippings",     share: 0.01, kind: "article", subs: [] },
   { name: "12 - Journal",       share: 0.005, kind: "daily", subs: [] },
+  // Three more, so the wedge count is past anything a ten-slot palette can name and the
+  // neutral fallback carries a third of the disc rather than a corner of it. Shares are
+  // normalised against the total, so these can be added without touching the others.
+  { name: "15 - Courses",       share: 0.02, kind: "literature",
+    subs: ["Enrolled", "Completed", "Wishlist"] },
+  { name: "16 - Media Log",     share: 0.015, kind: "article",
+    subs: ["Films", "Series", "Podcasts"] },
+  { name: "17 - Ideas",         share: 0.01, kind: "fleeting", subs: [] },
   // Slivers, beside a folder holding a quarter of the vault.
   { name: "00 - Inbox",         fixed: 3, kind: "fleeting", subs: [] },
   { name: "13 - Someday Maybe", fixed: 2, kind: "fleeting", subs: [] },
@@ -181,7 +189,14 @@ function createdDay() {
   if (YEARS <= 0 || DAYS <= 365) return Math.floor(Math.pow(rnd(), 0.45) * DAYS);
   if (rnd() < RECENT_SHARE) {
     // The burst: the last twelve months, leaning to the most recent weeks.
-    return DAYS - Math.floor(Math.pow(rnd(), 0.55) * 365);
+    //
+    // THE EXPONENT HAS TO BE ABOVE 1 HERE and below 1 in the tail below, which is not
+    // symmetry it is the opposite: this one is a distance BACK from the end of the span, the
+    // other is a distance FORWARD from the start, and both want to lean toward the present.
+    // It was 0.55, which leans a distance-back toward LARGER -- so the burst landed at the
+    // beginning of its own twelve months and the newest weeks came out emptiest. Visible as a
+    // heatmap whose right-hand edge, the part that is today, was the sparsest thing on it.
+    return DAYS - Math.floor(Math.pow(rnd(), 1.8) * 365);
   }
   // The tail: everything before that, leaning gently later. Never reaches into the burst,
   // so the two shares stay the shares they say they are.

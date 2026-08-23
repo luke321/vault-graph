@@ -1479,12 +1479,27 @@ function mountVaultGraph(root, data, deps) {
     for (var yk = y0; yk <= y1; yk++) ylist.push({ y: yk, n: years[String(yk)] || 0 });
     var nMax = 1, tot = 0;
     months.forEach(function (mm) { if (mm.n > nMax) nMax = mm.n; tot += mm.n; });
+    // THE HEIGHT REFERENCE IS A PERCENTILE, NOT THE MAXIMUM, and the bars are linear against
+    // it. Neither half of that is arbitrary; each fixes what the other choice broke.
+    //
+    // Against the MAX the scale is hostage to one month. On an eleven-year vault the busiest
+    // month holds 631 and the median holds under 40, so every bar but one was a hairline --
+    // which is what the sqrt was for, and sqrt then did the opposite damage on a two-year
+    // vault where the ratio is only about three: every bar came out between 68% and 100% and
+    // the strip read as a solid slab with no shape in it at all.
+    //
+    // p90 with a floor at a third of the max, linear, gives a readable spread in both. A
+    // genuine spike clips at full height, which is honest -- it is the tallest thing there --
+    // and costs one month's precision to give every other month some.
+    var sorted = months.map(function (mm) { return mm.n; }).sort(function (x, y) { return x - y; });
+    var p90 = sorted.length ? sorted[Math.floor(sorted.length * 0.9)] : 1;
+    var nRef = Math.max(1, p90, nMax * 0.35);
     var yMax = 1;
     ylist.forEach(function (yy) { if (yy.n > yMax) yMax = yy.n; });
     dateSpan = {
       months: months, years: ylist, index: index,
       lo: months[0].ms, hi: Date.UTC(y1, m1 + 1, 0),      // last day of the last month
-      nMax: nMax, yMax: yMax, dated: tot,
+      nMax: nMax, nRef: nRef, yMax: yMax, dated: tot,
       undated: graph.order - tot
     };
   }
@@ -4634,9 +4649,16 @@ function mountVaultGraph(root, data, deps) {
             state.to === null ? dateSpan.hi : state.to];
   }
 
-  /** Where the band's window is, or is being dragged to. */
+  /**
+   * Where the band's window is.
+   *
+   * Reads state directly -- the window drag is LIVE and writes state on every frame, unlike
+   * the brush, which previews. The two are not inconsistent: dragging the brush re-lays out
+   * the whole disc, which is O(n) three times over and cannot keep up at ten thousand notes,
+   * while dragging the window only re-buckets the band. Those are different budgets, so they
+   * get different answers, and the one that can afford to be live is live.
+   */
   function winEndNow() {
-    if (brushDrag && brushDrag.pWin !== undefined) return brushDrag.pWin;
     if (state.heatEnd !== null) return state.heatEnd;
     return heat ? heat.start + heat.cols * WEEK_MS : heatParse(TODAY);
   }
@@ -4652,8 +4674,9 @@ function mountVaultGraph(root, data, deps) {
 
     for (var i = 0; i < n; i++) {
       var m = ms[i];
-      var bh = m.n ? Math.max(1.5, (top - 2) * Math.sqrt(m.n / dateSpan.nMax)) : 0;
-      cx.fillStyle = m.n ? dateRamp(m.n / dateSpan.nMax) : css("--dim");
+      var t = Math.min(1, m.n / dateSpan.nRef);
+      var bh = m.n ? Math.max(1.5, (top - 2) * t) : 0;
+      cx.fillStyle = m.n ? dateRamp(t) : css("--dim");
       cx.fillRect(i * pitch, top - bh, Math.max(1, pitch - 0.6), bh || 1);
     }
 
@@ -4712,18 +4735,24 @@ function mountVaultGraph(root, data, deps) {
   }
 
   /**
-   * Repaint the band for a new window, and only if the window really moved.
+   * Repaint the band for the current window, doing as little as the change allows.
    *
-   * The grid is columned by WEEK, so heatMonday() quantises the end date -- a drag across a
-   * few pixels inside one week produces an identical grid. heatBuild() re-buckets every note
-   * in the vault, which is 10k of them on the fixture, so skipping the identical rebuilds is
-   * most of the cost of a window drag.
+   * THE GRID IS COLUMNED BY WEEK. heatMonday() quantises the window's end, so a drag across a
+   * few pixels inside one week produces a byte-identical grid -- and heatBuild() re-buckets
+   * every note in the vault to produce it, ten thousand of them on the fixture. So the week is
+   * computed first and the rebuild is skipped when it has not moved.
+   *
+   * The ribbon is redrawn either way, which is what makes the pill glide while the grid steps.
+   * That difference is not a compromise, it is the truth about the two things: the pill is a
+   * continuous position and the band is a row of weeks.
    */
   function rebuildBand() {
-    var was = heat ? heat.start : null;
-    heatBuild();
+    var endMs = state.heatEnd === null ? heatParse(TODAY) : state.heatEnd;
+    var wantStart = heatMonday(endMs) - ((heat ? heat.cols : HEAT_WEEKS) - 1) * WEEK_MS;
+    var moved = !heat || heat.start !== wantStart;
+    if (moved) heatBuild();
     drawDateUI();
-    if (heat && heat.start !== was) heatDraw();
+    if (moved) heatDraw();
   }
 
   /** The window pill's box on the track, in canvas pixels. Follows a drag if one is live. */
@@ -4848,8 +4877,8 @@ function mountVaultGraph(root, data, deps) {
       // A PRESS ON THE TRACK IS ALSO A JUMP. Dragging the pill across eleven years to reach
       // 2018 is a lot of mouse; pressing at 2018 puts it there and the drag then refines it.
       if (mode === "win") {
-        brushDrag.pWin = clampWinEnd(ribbonMs(x, w));
-        drawDateUI();
+        state.heatEnd = clampWinEnd(ribbonMs(x, w));
+        rebuildBand();
         showRTip(x, winLabel());
       }
     });
@@ -4877,13 +4906,15 @@ function mountVaultGraph(root, data, deps) {
 
       var w = ribbonW(), here = ribbonMs(xOf(ev), w), lo, hi, follow;
 
-      // The band's window, moved on its own and touching neither end of the brush.
+      // The band's window, moved on its own and touching neither end of the brush. LIVE:
+      // rebuildBand() only does the expensive half when the window crosses a week boundary,
+      // so this costs one canvas per frame and one re-bucket per week travelled.
       if (brushDrag.mode === "win") {
         var wx = xOf(ev);
         onFrame(function () {
           if (!brushDrag) return;
-          brushDrag.pWin = clampWinEnd(here);
-          drawDateUI();                       // the pill only; the grid waits for release
+          state.heatEnd = clampWinEnd(here);
+          rebuildBand();
           showRTip(wx, winLabel());
         });
         return;
@@ -4937,11 +4968,8 @@ function mountVaultGraph(root, data, deps) {
       hideRTip();
       try { rib.releasePointerCapture(ev.pointerId); } catch { /* fine */ }
 
-      if (d.pWin !== undefined) {
-        state.heatEnd = d.pWin;
-        rebuildBand();
-        return;
-      }
+      // Nothing to apply for a window drag: it has been applying itself all along.
+      if (d.mode === "win") return;
       if (d.moved && d.pFrom !== undefined) {
         // The ends of the span mean "no bound" rather than "the first and last note", so a
         // drag that lands on an end clears that half of the filter. Without this, brushing
@@ -5002,6 +5030,20 @@ function mountVaultGraph(root, data, deps) {
   // different folder.
   function demoFind(kind, arg) {
     if (kind === "id") return $(arg);
+    // A point on the STAGE, for the camera beats. "centre", or a fraction pair like "0.3,0.4"
+    // measured from the stage's top-left, so a pan can start somewhere with disc under it.
+    if (kind === "stage") {
+      var stageEl = $("graph");
+      if (!stageEl) return null;
+      var sb = stageEl.getBoundingClientRect();
+      var f = (arg === "centre" || !arg) ? [0.5, 0.5] : String(arg).split(",").map(Number);
+      return demoPoint(sb.left + sb.width * f[0], sb.top + sb.height * f[1],
+                       2, 2, "stage " + (arg || "centre"));
+    }
+    // A BRUSH HANDLE on the date ribbon, "from" or "to", or the window pill, "window".
+    // Resolved from the same geometry the control draws with, so a beat aims where the
+    // handle is rather than where the storyboard guessed it would be.
+    if (kind === "brush") return demoRibbonPoint(arg);
     if (kind === "eye" || kind === "group") {
       var g = demoGroup(arg);
       if (!g) return null;
@@ -5161,6 +5203,42 @@ function mountVaultGraph(root, data, deps) {
   // into view first, because CDP input hit-tests for real -- a control below the fold
   // is a control that cannot be clicked, and reporting its off-screen coordinates would
   // make the driver click whatever is at that spot instead.
+  /**
+   * A synthetic target: something with a bounding box that is not an element.
+   *
+   * demoWhere reads getBoundingClientRect off whatever demoFind returns, so anything that can
+   * answer that question can be a target. The camera and the ribbon handles are positions
+   * rather than elements, and inventing a DOM node for each would be a lot of DOM for a
+   * recording.
+   */
+  function demoPoint(cx, cy, w, h, label) {
+    return {
+      getBoundingClientRect: function () {
+        return { left: cx - w / 2, top: cy - h / 2, width: w, height: h };
+      },
+      demoLabel: label
+    };
+  }
+
+  /** Where a ribbon handle is, in page coordinates. */
+  function demoRibbonPoint(which) {
+    var rib = $("ribbon");
+    if (!rib || !dateSpan) return null;
+    var b = rib.getBoundingClientRect();
+    var w = b.width;
+    if (which === "window") {
+      var t = winTrack(w);
+      return demoPoint(b.left + (t.x0 + t.x1) / 2, b.top + t.y + t.h / 2, 8, 8, "band window");
+    }
+    var e = brushEnds();
+    var x = ribbonX(which === "to" ? e[1] : e[0], w);
+    // Nudged inside the strip: an end handle sits exactly on the edge at rest, and half of a
+    // press at x = 0 lands outside the element.
+    x = Math.max(2, Math.min(w - 2, x));
+    return demoPoint(b.left + x, b.top + RIBBON_BARS / 2, 8, 8,
+                     which === "to" ? "range end" : "range start");
+  }
+
   function demoWhere(kind, arg) {
     var el = demoFind(kind, arg);
     if (!el) return null;
@@ -5190,10 +5268,18 @@ function mountVaultGraph(root, data, deps) {
   // to grow -- append beats here and the driver picks them up with no other change.
   //
   // Beats are DATA, not functions, because the thing executing them is in another
-  // process. Three verbs so far:
-  //   {settle}                     wait until nothing is animating
-  //   {click, target:[kind, arg]}  move the real pointer there and click it
-  //   {hover, target:[kind, arg]}  move there and stop, to let a hover state show
+  // process. Six verbs:
+  //   {settle}                          wait until nothing is animating
+  //   {click, target}                   move the real pointer there and click it
+  //   {hover, target}                   move there and stop, to let a hover state show
+  //   {dblclick, target}                two clicks inside the double-click window
+  //   {drag: [dx, dy], target}          press there, glide by the offset, release
+  //   {wheel: n, target}                n notches over it; positive zooms in
+  //
+  // A target is [kind, arg]. Beyond the legend kinds there are two synthetic ones, because
+  // the camera and the date ribbon's handles are positions rather than elements:
+  //   ["stage", "centre"] or ["stage", "0.3,0.4"]   a point on the graph
+  //   ["brush", "from" | "to" | "window"]           a handle on the date ribbon
   // `why` is for the log and the eventual captions -- it is the only part of a beat a
   // person reads.
   function demoMode() {
@@ -5246,7 +5332,56 @@ function mountVaultGraph(root, data, deps) {
 
       // And `only`, which is the fastest way to answer "where does one folder live".
       { click: true, target: ["only", "08"], why: "solo a single folder" },
-      { settle: true, why: "let everything else recede" }
+      { settle: true, why: "let everything else recede" },
+
+      /* --- the camera --------------------------------------------------- */
+      // Put everything back first: the camera act is about the camera, and a disc still
+      // filtered from the beats above makes it look like the zoom did something to the data.
+      { click: true, target: ["id", "allon"], why: "show everything again" },
+      { settle: true, why: "let the whole disc come back" },
+
+      // Zoom in a few notches rather than one. One notch is a fifth now, which is the point
+      // -- it is a scroll and not a teleport -- and a single notch on camera looks like
+      // nothing happened.
+      { wheel: 4, target: ["stage", "0.42,0.40"], why: "zoom in, a fifth per notch" },
+      { settle: true, why: "let the last notch land" },
+
+      // Then pan, which is only possible now that the disc is not pinned to the middle. Held
+      // button the whole way, or the page sees a click and a release with nothing between.
+      { drag: [190, 110], target: ["stage", "0.55,0.45"], why: "drag the disc around" },
+      { settle: true, why: "let the pan settle" },
+
+      // Two ways back, both shown, because the button is discoverable and the double-click is
+      // faster once you know it.
+      { dblclick: true, target: ["stage", "centre"], why: "double-click anywhere to reset" },
+      { settle: true, why: "let the view come back" },
+      { wheel: 3, target: ["stage", "0.60,0.55"], why: "zoom in again, to have something to reset" },
+      { settle: true, why: "let it land" },
+      { click: true, target: ["id", "reset"], why: "...and the reset button in the corner" },
+      { settle: true, why: "let the view come back" },
+
+      /* --- the date range ----------------------------------------------- */
+      // The ribbon under the band carries every month of the vault. Its two handles are the
+      // filter; the pill below them is the 52 weeks the grid above is drawing, and they move
+      // independently -- which is most of what this act is for.
+      //
+      // The disc waits for the release on each of these, deliberately: a drag repaints one
+      // small canvas and the filter lands once, when the button comes up.
+      { drag: [300, 0], target: ["brush", "from"], why: "drag the range start forward" },
+      { settle: true, why: "let the disc thin out" },
+      { drag: [-170, 0], target: ["brush", "to"], why: "and pull the range end back" },
+      { settle: true, why: "let it thin further" },
+
+      // The band's window, moved on its own. The range above stays exactly where it was.
+      { drag: [-260, 0], target: ["brush", "window"], why: "slide the heatmap window back on its own" },
+      { settle: true, why: "let the band redraw" },
+      { drag: [170, 0], target: ["brush", "window"], why: "...and forward again" },
+      { settle: true, why: "let the band redraw" },
+
+      // Clear it, so the recording ends on the whole vault rather than on a filtered slice
+      // that the next viewer would read as the default.
+      { click: true, target: ["id", "rangeall"], why: "clear the date range" },
+      { settle: true, why: "let the whole vault come back" }
     ];
   }
 

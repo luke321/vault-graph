@@ -158,16 +158,24 @@ Handing someone the HTML hands them **a complete listing of your note titles**, 
 most vaults is more revealing than it sounds. The file is designed to live inside your own
 vault and sync to your own devices; treat it as private by default.
 
-**If you want to show the graph rather than your vault**, generate a mirror first:
+**If you want to show the graph rather than your vault**, there are two vaults that are not
+yours to show it with.
 
 ```bash
-node scripts/make-demo-vault.mjs --vault "/path/to/your/vault" --out ./demo-vault
+node scripts/make-demo-vault.mjs --out ./demo-vault        # invented, fixed, two dense years
+node scripts/make-mirror-vault.mjs --vault "/path/to/your/vault" --out ./mirror-vault
 ```
 
-It reproduces the shape and none of the content — same folder tree, same note count per
-folder, same `created` dates, same word counts, and the whole link graph rewritten between
-renamed notes, so it builds to the same numbers your vault does. Every screenshot and the
-demo clip in this README were made from one.
+The **demo vault** is invented from end to end: eighteen top-level folders, nesting five deep,
+and two years of dates dense in every month. It is the same on every machine, which is what
+makes a screenshot comparable and a recording reproducible. Every screenshot and the demo clip
+in this README were made from it.
+
+The **mirror** is for bug reports. It reproduces one real vault's shape and none of its
+content — same folder tree, same note count per folder, same `created` dates, same word
+counts, and the whole link graph rewritten between renamed notes, so it builds to the same
+numbers yours does. If the layout misbehaves on your vault, the shape *is* the report, and a
+generic fixture cannot reproduce a shape it does not have.
 
 ## Which vault
 
@@ -375,7 +383,8 @@ the plugin puts them in an Obsidian view.
 | `scripts/smoke.mjs` | the invariant suite, over both vault shapes |
 | `scripts/check-scope.mjs` | asserts the page cannot style or be styled by its host |
 | `scripts/check-pii.mjs` | refuses to publish other people's names; no skip flag |
-| `scripts/make-demo-vault.mjs` | a structural mirror of a real vault, with none of its content |
+| `scripts/make-demo-vault.mjs` | the demo vault: invented, fixed, two dense years |
+| `scripts/make-mirror-vault.mjs` | a structural mirror of a real vault, with none of its content |
 | `scripts/make-test-vault.mjs` | a synthetic vault, deliberately awkward |
 | `scripts/shoot.mjs` | screenshots the page at rest, for comparing two commits |
 | `scripts/record-demo.ps1`, `make-gif.ps1` | the demo recording and its encode |

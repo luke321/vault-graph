@@ -31,11 +31,16 @@ vault.** The file contains every note title, path and tag in plain text. If you 
 a problem without showing your notes, generate a mirror — same shape, none of the content:
 
 ```bash
-node scripts/make-demo-vault.mjs --vault "/path/to/your/vault" --out ./demo-vault
-node src/build-graph.mjs --vault ./demo-vault --out ./demo.html
+node scripts/make-mirror-vault.mjs --vault "/path/to/your/vault" --out ./mirror-vault
+node src/build-graph.mjs --vault ./mirror-vault --out ./mirror.html
 ```
 
-Every screenshot and the demo clip in the README were made that way.
+Attach that, or a screenshot of it. The shape is what a layout report needs and the mirror
+keeps the shape exactly: folder tree, per-folder counts, dates, word counts and the whole link
+graph, under invented names.
+
+For anything that is not about your particular vault, `node scripts/make-demo-vault.mjs`
+builds the project's own fixed demo vault and needs no vault of yours at all.
 
 ## If you do want to work on it
 
