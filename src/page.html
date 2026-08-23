@@ -2,6 +2,23 @@
   <aside id="vg-sidebar">
     <div class="brand">
       <h1 id="vg-vname">Vault Graph</h1>
+      <!-- Hidden until a host opts in with settingsUI. The PLUGIN does not: Obsidian
+           gives it a settings tab, and the same setting behind two different UIs in the
+           same product is how the two drift apart. -->
+      <button id="vg-gear" class="gear" hidden aria-expanded="false"
+              aria-controls="vg-settings" title="Settings">
+        <span aria-hidden="true">&#9881;</span><span class="sr">Settings</span>
+      </button>
+    </div>
+
+    <div class="block" id="vg-settings" hidden>
+      <div class="row" style="margin-bottom:7px">
+        <div class="lbl" style="margin:0">Folder colours</div>
+        <div class="mini"><button id="vg-fcreset" title="Drop every override and go back to the automatic order">Reset</button></div>
+      </div>
+      <div id="vg-setbody"></div>
+      <p class="hint">Twelve slots, handed out in folder order and round again. Setting
+        one folder never moves another, and two folders may share a colour.</p>
     </div>
 
     <div class="block">
@@ -35,7 +52,7 @@
     <div class="block">
       <div class="lbl">View</div>
       <div class="tools">
-        <button id="vg-refresh" title="Re-read the file from disk and reset all filters. Re-reads this file from disk and clears every filter. To pick up notes written since it was built, run refresh-graph.ps1 (or build-graph.mjs) first.">Refresh</button>
+        <button id="vg-refresh" title="Back to the defaults, and replay the intro. Clears highlights and the timeline, and returns each folder to the visibility set in the gear -- so archives go back to hidden. This page is a snapshot -- its data was baked in when it was built -- so to pick up notes written since, rebuild it with refresh-graph.ps1 (or build-graph.mjs). The Obsidian plugin rebuilds in place instead.">Refresh</button>
         <button id="vg-fit">Fit</button>
         <button id="vg-png">Save PNG</button>
       </div>

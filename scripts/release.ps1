@@ -1,8 +1,15 @@
 # Cut a release: tag, package, publish, attach.
 #
-#   .\scripts\release.ps1 v1.4.0
-#   .\scripts\release.ps1 v1.4.1 -Notes "one-line summary"
-#   .\scripts\release.ps1 v1.4.0 -DryRun
+#   .\scripts\release.ps1 1.5.3
+#   .\scripts\release.ps1 1.5.3 -Notes "one-line summary"
+#   .\scripts\release.ps1 1.6.0 -Title "The Color Picker Update"
+#   .\scripts\release.ps1 1.5.3 -DryRun
+#
+# THE VERSION IS BARE SEMVER, WITH NO `v`. Obsidian installs a plugin by matching the
+# release tag against the `version` string in manifest.json, and a manifest version must
+# be bare semver -- so a `v`-prefixed tag makes the plugin uninstallable. The tags up to
+# v1.4.4 keep their prefix because renaming a published tag breaks every link to it; from
+# 1.5.0 on there is no prefix. See CHANGELOG.md's versioning section.
 #
 # One command, because a tag without its package is the failure mode this exists to
 # prevent: GitHub's auto-generated source archive ships `.ai-context/` and the dev tooling,
@@ -15,6 +22,16 @@
 param(
   [Parameter(Mandatory = $true)][string] $Version,
   [string] $Notes = "",
+  # A NAME for the release, shown on the Release page as "<version> - <title>". The version
+  # alone was the only option before, which is fine for a patch and thin for a release
+  # anyone is meant to remember.
+  #
+  # Joined with an ASCII hyphen, not an em dash, and that is a decision rather than
+  # laziness: the notes reach `gh` as a FILE written as UTF-8, and survive, while the title
+  # reaches it as a native command-line ARGUMENT -- which PowerShell 5.1 re-encodes on the
+  # way out. This repo has already published mojibake that way once, and a release title
+  # cannot be quietly fixed afterwards without the old one having been seen.
+  [string] $Title = "",
   [switch] $DryRun,
   [switch] $AllowDirty
 )
@@ -41,8 +58,26 @@ $here = Split-Path -Parent $MyInvocation.MyCommand.Path
 $repo = Split-Path -Parent $here
 Push-Location $repo
 try {
-  if ($Version -notmatch '^v\d+\.\d+\.\d+$') {
-    throw "Version must look like v1.4.0 (semver, from v1.1.0 on -- see CHANGELOG.md)"
+  # BARE SEMVER. This said `^v\d+...` until 1.5.3 and would have rejected every version
+  # released since 1.5.0 -- it predates the decision to drop the prefix and was never
+  # updated, so the last three releases were cut by hand. A `v` gets its own message rather
+  # than a format error, because passing one is the obvious mistake and the reason it is
+  # wrong is not obvious at all.
+  if ($Version -match '^v\d') {
+    throw ("Drop the 'v': the tag must be bare semver ($($Version.Substring(1))). Obsidian " +
+           "matches the release tag against manifest.json's version, which cannot carry a " +
+           "prefix -- a v-tagged release is one nobody can install.")
+  }
+  if ($Version -notmatch '^\d+\.\d+\.\d+$') {
+    throw "Version must look like 1.5.3 (bare semver -- see CHANGELOG.md's versioning section)"
+  }
+
+  # AND IT HAS TO BE THE VERSION THE MANIFEST CLAIMS. Same rule, the other half: Obsidian
+  # matches the tag against manifest.json, so a tag that disagrees with it installs nothing.
+  # Cheap to check here, invisible until a user reports the plugin will not update.
+  $manifest = ConvertFrom-Json ([IO.File]::ReadAllText((Join-Path $repo 'manifest.json'), [Text.Encoding]::UTF8))
+  if ($manifest.version -ne $Version) {
+    throw "manifest.json says $($manifest.version), you asked for $Version. Bump the manifest first."
   }
 
   # A release has to be reproducible from its tag, and it cannot be if the tree it was
@@ -120,7 +155,8 @@ try {
   $notesFile = Join-Path $env:TEMP "vg-notes-$Version.md"
   $body = if ($Notes) { "$Notes`n`n$section" } else { $section }
   [IO.File]::WriteAllText($notesFile, $body, $utf8)
-  Invoke-Native $gh @('release', 'create', $Version, $zip, '--title', $Version, '--notes-file', $notesFile)
+  $releaseTitle = if ($Title) { "$Version - $Title" } else { $Version }
+  Invoke-Native $gh @('release', 'create', $Version, $zip, '--title', $releaseTitle, '--notes-file', $notesFile)
   Remove-Item $notesFile -ErrorAction SilentlyContinue
 
   Write-Host "`nreleased $Version with $(Split-Path $zip -Leaf)" -ForegroundColor Green
