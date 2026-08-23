@@ -155,8 +155,34 @@ try {
   $notesFile = Join-Path $env:TEMP "vg-notes-$Version.md"
   $body = if ($Notes) { "$Notes`n`n$section" } else { $section }
   [IO.File]::WriteAllText($notesFile, $body, $utf8)
+  # THE THREE LOOSE FILES ARE WHAT OBSIDIAN ACTUALLY INSTALLS, and they are not optional.
+  #
+  # Obsidian downloads main.js, manifest.json and styles.css directly from the release
+  # assets. It never opens the zip -- the directory's own scanner says so in as many words,
+  # "All other files will not be downloaded by Obsidian" -- so a release carrying only the
+  # zip is a release nobody can install or update to.
+  #
+  # 1.6.0 shipped exactly that way and the scan came back with two errors: "the release
+  # 1.6.0 specified in manifest.json is missing the main.js file", and the same for
+  # manifest.json. The releases before it looked fine only because they were cut BY HAND
+  # (see the version-regex note above) and attaching the loose files is what one does by
+  # hand. 1.6.0 was this script's first real run, which is when the omission could first
+  # show up.
+  #
+  # The zip stays: it is what someone wanting to RUN the exporter needs, since GitHub's
+  # source archive ships .ai-context/ and the dev tooling. The scanner calls it an extra
+  # unsupported file, which is a recommendation and is the intended trade.
+  $loose = @('main.js', 'manifest.json', 'styles.css') | ForEach-Object { Join-Path $repo $_ }
+  $missing = $loose | Where-Object { -not (Test-Path $_) }
+  if ($missing) {
+    if (-not $tagExists) { & git tag -d $Version | Out-Null }
+    throw ("not attaching an uninstallable release -- missing " +
+           (($missing | Split-Path -Leaf) -join ', ') + ". Run: node scripts/build-plugin.mjs")
+  }
+
   $releaseTitle = if ($Title) { "$Version - $Title" } else { $Version }
-  Invoke-Native $gh @('release', 'create', $Version, $zip, '--title', $releaseTitle, '--notes-file', $notesFile)
+  Invoke-Native $gh (@('release', 'create', $Version) + $loose + @($zip) +
+                     @('--title', $releaseTitle, '--notes-file', $notesFile))
   Remove-Item $notesFile -ErrorAction SilentlyContinue
 
   Write-Host "`nreleased $Version with $(Split-Path $zip -Leaf)" -ForegroundColor Green
