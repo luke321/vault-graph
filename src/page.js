@@ -1865,9 +1865,10 @@ function mountVaultGraph(root, data, deps) {
     var rOuter = geomLock ? geomLock.rOuter
                : (inner.length ? r0 + innerRows * SP_I + 1.6 * SP_I : r0);
 
-    var maxR = rOuter;
+    var maxR = rOuter, outerRows = 0;
     outer.forEach(function (c) {
       c.rows = rowsNeeded(usableRef(c, rOuter), c.wsum, rOuter, SP_O);
+      if (c.rows > outerRows) outerRows = c.rows;
       var r = rOuter + c.rows * SP_O;
       if (r > maxR) maxR = r;
     });
@@ -1913,7 +1914,7 @@ function mountVaultGraph(root, data, deps) {
     // count may be fractional and the coordinate simply slides: the row ticks when
     // the coordinate crosses a boundary, and the triangle wave keeps u continuous
     // across that tick (an even row runs 0 -> 1, the next runs 1 -> 0).
-    function placeCell(c, rows, base) {
+    function placeCell(c, rows, base, bandRows) {
       // The spacing of the band this cell is in -- rows sit this far apart, and the capacity
       // arithmetic below inverts against the same number.
       var SP = c.inner ? SP_I : SP_O;
@@ -1935,8 +1936,30 @@ function mountVaultGraph(root, data, deps) {
       // PASS 1 -- which row each note lands in. Unchanged: a continuous row
       // coordinate inverted out of the cumulative capacity, so the count may be
       // fractional and the row simply ticks as it crosses a boundary.
+      // A CELL WITH FEWER NOTES THAN ITS BAND IS DEEP GOES DOWN THE RADIUS, one note per row,
+      // as a block centred in the band.
+      //
+      // The capacity inversion below is the right answer for a cell that fills its arc and the
+      // wrong one for a narrow cell that cannot. A 4-degree wedge holds a quarter of a note per
+      // row, so its notes pile into the innermost rows and the rest of its arc is empty at
+      // every radius outside them -- and because a cell holds its arc for the WHOLE band, that
+      // emptiness is a hole in every row it fails to reach. Measured on a 454-note vault, one
+      // pair of folders had a gap between them at every date range tried: 1111, 1148, 1027 and
+      // 1614 units against row medians of 331 to 767. Capping the row count moved that hole
+      // outward instead of closing it, since the dead rows simply changed ends.
+      //
+      // One note per row occupies the arc at every radius the cell spans, so there is nothing
+      // left to be a hole. Each note is then alone in its row, which the angular pass already
+      // centres.
+      //
+      // CENTRED, and on INTEGER rows. A block of n rows in a band of R leaves R-n to divide,
+      // and half of an odd remainder is a fractional row -- which is off the lattice, and the
+      // lattice is a stated invariant with a check behind it. Rounded, so a one-row remainder
+      // lands on one side rather than half a row off on both.
+      var centred = bandRows > 0 && live.length > 0 && live.length < bandRows;
+      var cStart = centred ? Math.round((bandRows - live.length) / 2) : 0;
       var recs = [], acc = 0;
-      seq.forEach(function (id) {
+      seq.forEach(function (id, idx) {
         var w = W(id);
         var s = wTot > 0.0001 ? (acc + w / 2) / wTot : 0.5;
         acc += w;
@@ -1958,7 +1981,10 @@ function mountVaultGraph(root, data, deps) {
         // smeared disc for the whole animation. That is the same failure the row-count
         // note above describes at rest, and trading one bad frame for ~120 mushy ones
         // is the wrong way round. See the changelog.
-        recs.push({ id: id, w: w, row: Math.floor(pp) });
+        // seq is live-then-dead, so an index past the live count is a note on its way out; it
+        // keeps the last row of the block rather than inventing one below it.
+        recs.push({ id: id, w: w,
+                    row: centred ? cStart + Math.min(idx, live.length - 1) : Math.floor(pp) });
       });
 
       // PASS 2 -- where in that row it sits, measured WITHIN THE ROW rather than
@@ -2043,7 +2069,7 @@ function mountVaultGraph(root, data, deps) {
       // formula above takes a fractional count directly.
       var rf = rowsOf ? rowsOf(c) : c.rows;
       if (!rf) rf = c.rows;
-      c.slots = placeCell(c, rf, base);
+      c.slots = placeCell(c, rf, base, c.inner ? innerRows : outerRows);
     });
 
     return { cells: cells, maxR: maxR, total: planTotal, r0: r0, rOuter: rOuter,
@@ -2173,7 +2199,7 @@ function mountVaultGraph(root, data, deps) {
     // The last note placed at each radius, ACROSS cells: keyed by row, so the note at the end
     // of one wedge and the note at the start of the next are compared. Reset per band, since
     // the two rings have their own radii and never share a row.
-    var lastAt = null;
+    var lastAt = null, firstAt = null;
     if (probe) lastStart = Object.create(null);
     [true, false].forEach(function (isInner) {
       var band = shown.filter(function (c) { return !!c.inner === isInner; });
@@ -2195,6 +2221,7 @@ function mountVaultGraph(root, data, deps) {
       // spend. The reference radius is the locked one, used only for the probe's readout and
       // for nothing the disc depends on.
       lastAt = Object.create(null);
+      firstAt = Object.create(null);
       var nB = a.nG + a.nSub;
       var refR = geomLock && geomLock.bandR ? geomLock.bandR[isInner ? "i" : "o"] : 0;
 
@@ -2344,6 +2371,26 @@ function mountVaultGraph(root, data, deps) {
           // The previous note in THIS ROW, whichever wedge it belonged to. Both notes take the
           // gap and each keeps the SMALLER of its two sides: a dot has to clear whichever
           // neighbour is nearer, not the average of them.
+          // AND BOUNDED BY ITS OWN WEDGE. The step above is measured to whichever note is
+          // nearest in the row, and across a boundary that note is on the FAR side of the
+          // channel -- so the room it reports includes the channel, and a dot allowed to take
+          // the room it has will take the channel with it. Two edge notes each claiming their
+          // share leaves a fifth of the seam visible, which is the seam gone.
+          //
+          // mgA and mgB already are the distance from this wedge's edges to its end notes, so
+          // the distance from any note to the nearer edge falls straight out of its position
+          // along the arc. Room is capped at twice that: a radius is DOT_OF_PITCH of the room,
+          // so twice the edge distance keeps the dot inside its own wedge with a fifth of the
+          // distance to spare -- the same proportion an interior note keeps from its
+          // neighbour. The channel is then whatever it was reserved to be, whoever is standing
+          // at the end of the row.
+          var spanArc = arc - mgA - mgB;
+          var dLo = (mgA + spanArc * sl.u) * rGraph;
+          var dHi = (mgB + spanArc * (1 - sl.u)) * rGraph;
+          var edgeRoom = 2 * Math.min(dLo, dHi);
+          if (edgeRoom > 1 && (fit[sl.id] === undefined || edgeRoom < fit[sl.id])) {
+            fit[sl.id] = edgeRoom;
+          }
           var prev = lastAt[sl.r];
           if (prev) {
             var step = Math.abs(t - prev.t) * rGraph;
@@ -2353,6 +2400,7 @@ function mountVaultGraph(root, data, deps) {
             }
           }
           lastAt[sl.r] = { t: t, id: sl.id };
+          if (firstAt[sl.r] === undefined) firstAt[sl.r] = { t: t, id: sl.id };
           // HL_PUSH is NOT scaled by the plan's spacing, though it is quoted in rows. Scaling it
           // was tried and is wrong: the constant was sized as a FRACTION OF THE RADIUS
           // ("0.9 rows on a ~13.3-row disc is 6.8%"), and the radius is the thing the
@@ -2366,6 +2414,22 @@ function mountVaultGraph(root, data, deps) {
         // Contiguous: the next wedge starts where this one's OPEN part ended. In fractions
         // rather than radians now, so it means the same thing at every radius.
         fracBefore += frac * open;
+      });
+      // THE PAIR AT 12 O'CLOCK, which nothing measured. Every row is walked once, left to
+      // right, so its first and last note are never neighbours in the walk although they are
+      // neighbours on the disc -- and each therefore took its room from its one inner side.
+      // With dots only ever shrinking that was harmless; letting them GROW made it an overlap,
+      // measured as a single pair at -13 units on one date range.
+      Object.keys(firstAt).forEach(function (rk) {
+        var fst = firstAt[rk], lst = lastAt[rk];
+        if (!fst || !lst || fst.id === lst.id) return;
+        var d = fst.t - lst.t;
+        while (d < 0) d += TWO;
+        var step = d * Math.max(1e-6, (+rk) * UNIT);
+        if (step > 1) {
+          if (fit[fst.id] === undefined || step < fit[fst.id]) fit[fst.id] = step;
+          if (fit[lst.id] === undefined || step < fit[lst.id]) fit[lst.id] = step;
+        }
       });
     });
 
