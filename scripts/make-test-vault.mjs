@@ -3,6 +3,7 @@
 //
 //   node scripts/make-test-vault.mjs                    # ./test-vault, ~3000 notes
 //   node scripts/make-test-vault.mjs --notes 8000
+//   node scripts/make-test-vault.mjs --notes 10000 --years 10
 //   node scripts/make-test-vault.mjs --out /tmp/tv --seed 7
 //
 // WHY THIS EXISTS. Every measurement in .ai-context/ was taken against ONE vault: ~450
@@ -138,10 +139,58 @@ const FOLDERS = [
 
 /* ---------------------------------------------------------------- titles */
 
-const DAY0 = Date.UTC(2025, 0, 6);
-const DAYS = 560;
+/* ------------------------------------------------------------------- dates --
+ * HOW FAR BACK THE VAULT GOES, and how its notes are spread over that.
+ *
+ *   --years 10                 span ten years instead of the default 560 days
+ *   --end 2026-08-23           pin the newest date, for a byte-reproducible vault
+ *
+ * The END DEFAULTS TO TODAY, which is a deliberate break from "the same --seed gives the
+ * same vault". It has to: the heatmap band shows the last 52 WEEKS relative to the real
+ * clock, so a fixture whose newest note is a year in the past exercises none of it. The
+ * anchor used to be a hardcoded 2025-01-06 and had already drifted a month behind. Pass
+ * --end to get the old guarantee back.
+ *
+ * THE SPREAD IS A MIXTURE, NOT A CURVE, because that is what a real vault looks like: a
+ * long stretch of occasional use and then the point where it got adopted properly.
+ * Measured on the author's own 452-note vault -- 389 notes in the last twelve months and 52
+ * spread over the eleven years before it, with one year holding none at all. A single power
+ * law cannot produce both halves of that: tuned to put 86% in the last year it leaves the
+ * earlier years empty, and tuned to fill them it flattens the burst.
+ *
+ * So: RECENT_SHARE of the notes land in the last twelve months, the rest spread back over
+ * the whole span with a mild recency lean. Both halves are visible on a year-scale control,
+ * which is the point of generating this at all.
+ */
+const RECENT_SHARE = 0.55;   // fraction of notes dated within the last twelve months
+const endStr = arg("end", new Date().toISOString().slice(0, 10));
+const END = Date.parse(endStr + "T00:00:00Z");
+const YEARS = Number(arg("years", 0));
+const DAYS = YEARS > 0 ? Math.round(YEARS * 365.25) : 560;
+const DAY0 = END - DAYS * 86400000;
 const dayStr = (i) => new Date(DAY0 + i * 86400000).toISOString().slice(0, 10);
-const weekStr = (i) => `${2025 + Math.floor(i / 52)}-W${String((i % 52) + 1).padStart(2, "0")}`;
+
+/**
+ * A day index for one note, 0 = oldest, DAYS = the end date.
+ *
+ * `Math.pow(rnd(), 0.45)` is what this was, and it is kept for the single-span default so
+ * the existing fixture is unchanged. The mixture only engages once --years asks for a span
+ * longer than the recent window it is meant to sit behind.
+ */
+function createdDay() {
+  if (YEARS <= 0 || DAYS <= 365) return Math.floor(Math.pow(rnd(), 0.45) * DAYS);
+  if (rnd() < RECENT_SHARE) {
+    // The burst: the last twelve months, leaning to the most recent weeks.
+    return DAYS - Math.floor(Math.pow(rnd(), 0.55) * 365);
+  }
+  // The tail: everything before that, leaning gently later. Never reaches into the burst,
+  // so the two shares stay the shares they say they are.
+  return Math.floor(Math.pow(rnd(), 0.75) * Math.max(1, DAYS - 365));
+}
+// Anchored to the span's own first year rather than a hardcoded 2025, or a --years 10 vault
+// files a decade of weekly reviews under years it has no notes in.
+const YEAR0 = new Date(DAY0).getUTCFullYear();
+const weekStr = (i) => `${YEAR0 + Math.floor(i / 52)}-W${String((i % 52) + 1).padStart(2, "0")}`;
 
 let nth = 0;
 function titleFor(kind) {
@@ -238,7 +287,7 @@ for (const n of notes) {
   mkdirSync(dir, { recursive: true });
 
   const bare = rnd() < 0.2;                              // some notes have no frontmatter
-  const created = dayStr(Math.floor(Math.pow(rnd(), 0.45) * DAYS));
+  const created = dayStr(createdDay());
   const tags = rnd() < 0.55 ? some(TAGS, int(1, 2)) : [];
   const fm = bare ? "" : ["---", `created: ${created}`,
     tags.length ? `tags: [${tags.join(", ")}]` : null,

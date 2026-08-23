@@ -330,6 +330,48 @@
      so this normally never scrolls -- it is a safety valve for a window narrower than
      the 8-week floor. Thin and dim, because when it does appear it is 5px of chrome
      inside a 115px band. */
+  /* ------------------------------------------------------ date range ----- */
+  /* THE BAND IS THREE ROWS NOW: header, [rail | grid], and the range control. The grid was
+     centred in a full-width band and left ~460px of the 1268 empty on this vault, which is
+     the space these use. */
+  .vault-graph #vg-heat .hmid { display: flex; align-items: flex-end; gap: 10px; min-width: 0; }
+  .vault-graph #vg-heat .hmid #vg-heatwrap { flex: 1 1 auto; }
+  .vault-graph #vg-rail { display: block; flex: 0 0 auto; cursor: pointer; margin-bottom: 2px; }
+  /* [hidden] AT ID-LEVEL SPECIFICITY, or it loses. `#vg-twin { display: flex }` is an id
+     selector and `[hidden]` is one attribute, so the id wins and the element stays laid
+     out -- which is exactly how the band grew to 930px with two of the three concepts
+     stacked invisibly inside it, the ribbon canvas contributing its default 300x150.
+     This is the same trap the 1.5.1 review fixed on the #vg-busy overlay; it is worth a
+     rule of its own rather than an !important. */
+  .vault-graph #vg-rail[hidden],
+  .vault-graph #vg-ribbon[hidden],
+  .vault-graph #vg-twin[hidden] { display: none; }
+  .vault-graph #vg-heat .hfoot { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
+  .vault-graph #vg-ribbon { display: block; width: 100%; cursor: ew-resize; }
+  .vault-graph #vg-twin { display: flex; flex-direction: column; gap: 2px; }
+  .vault-graph #vg-twin input[type="range"] { width: 100%; }
+  .vault-graph #vg-heat .hfootrow {
+    display: flex; align-items: center; gap: 10px; min-width: 0;
+    font-size: 11px; color: var(--text-3);
+  }
+  .vault-graph #vg-rangenote {
+    font-variant-numeric: tabular-nums; min-width: 0;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .vault-graph #vg-heat .hfootrow button { margin-left: auto; flex: 0 0 auto; }
+  /* The concept switcher. Deliberately plain -- it is review scaffolding, and dressing it
+     up would make it look like part of the product. */
+  .vault-graph .dsw { display: flex; gap: 3px; flex: 0 0 auto; }
+  .vault-graph .dsw button {
+    font: inherit; font-size: 10px; letter-spacing: .04em; padding: 3px 7px; cursor: pointer;
+    background: var(--surface-2); color: var(--text-3);
+    border: 1px solid var(--border); border-radius: 5px;
+  }
+  .vault-graph .dsw button:hover { color: var(--text-1); border-color: var(--border-strong); }
+  .vault-graph .dsw button[aria-pressed="true"] {
+    background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600;
+  }
+
   .vault-graph #vg-heatwrap { overflow-x: auto; overflow-y: hidden; scrollbar-width: thin;
               scrollbar-color: var(--border-strong) transparent; }
   /* No ::-webkit-scrollbar rules. `scrollbar-width` and `scrollbar-color` above are the

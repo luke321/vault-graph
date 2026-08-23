@@ -2,7 +2,9 @@ vault-graph.html
 *.bak
 demo-*.mp4
 *.stackdump
-test-vault/
+# Any generated fixture, not just the default name: --out picks the directory and the
+# generator is the artefact, so none of them belongs in a commit.
+test-vault*/
 dist/
 
 # Generated demo vault -- a structural mirror of a real vault. Regenerate with

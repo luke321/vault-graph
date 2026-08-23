@@ -182,6 +182,18 @@ function mountVaultGraph(root, data, deps) {
     hoverDay: null,
     query: "",
     until: null,        // timeline: reveal the oldest N notes, or null for all
+    // DATE RANGE CAP. Two ends, either of which may be null for "no bound", in ms UTC at
+    // midnight. Separate from `until` on purpose: that one reveals the oldest N notes and
+    // is a growth animation, this one is a filter. They compose -- see timeFactor.
+    from: null,
+    to: null,
+    // The RIGHT EDGE of the heatmap's 52-week window, or null for "the last 52 weeks".
+    // The band was a fixed sliding window onto today, which is what made everything before
+    // it unreachable: on the 10-year fixture that is nine years of the vault with no way to
+    // point at it. Concepts that move the window write this.
+    heatEnd: null,
+    // Which of the three date-range controls is on screen. A concept switch, not a feature.
+    dateUI: "rail",
     markToday: false,
     // Bow links away from the hub instead of chording across it. 91% of links cross
     // the disc, so straight is the case that would need the excuse. No longer a
@@ -1405,13 +1417,103 @@ function mountVaultGraph(root, data, deps) {
   // axis would spend 97% of its travel on empty years and the interesting part
   // would be the last pixel.
   var tlRank = Object.create(null), tlDate = [], tlMax = 0;
+  // id -> created, in ms UTC. Absent for an undated note, which is what timeFactor keys on.
+  var tlMs = Object.create(null);
+  // The whole vault's dates, bucketed, built once. Every one of the three concepts needs
+  // the same two things -- how many notes per month, and per year -- and building it once
+  // is also what stops three controls disagreeing about where the vault starts.
+  var dateSpan = null;
   function buildTimeline() {
     var dated = [];
     graph.forEachNode(function (id, a) { if (a.created) dated.push([id, a.created]); });
     dated.sort(function (x, y) { return x[1] < y[1] ? -1 : x[1] > y[1] ? 1 : 0; });
-    tlRank = Object.create(null); tlDate = [];
-    dated.forEach(function (pair, i) { tlRank[pair[0]] = i + 1; tlDate.push(pair[1]); });
+    tlRank = Object.create(null); tlDate = []; tlMs = Object.create(null);
+    dated.forEach(function (pair, i) {
+      tlRank[pair[0]] = i + 1;
+      tlDate.push(pair[1]);
+      // heatParse returns NaN for anything that is not a bare ISO day -- an unrendered
+      // Templater placeholder, most often -- and those must not get a position on any of
+      // these axes. Written as isNaN rather than as ms === ms, which is the same test and
+      // reads like a typo.
+      var ms = heatParse(pair[1]);
+      if (!Number.isNaN(ms)) tlMs[pair[0]] = ms;
+    });
     tlMax = dated.length;
+    buildDateSpan(dated);
+  }
+
+  /**
+   * The whole vault's dates, bucketed by month and by year.
+   *
+   * Built once, from the FULL graph and never from what is visible, for the same reason the
+   * disc's plan is: a control whose own axis moved when you used it would be unusable. All
+   * three concepts read this, which is also what stops them disagreeing about where the
+   * vault starts.
+   *
+   * MONTHS ARE DENSE, not sparse -- every month between the first and last gets an entry,
+   * including the empty ones. The author's own vault has a whole year with no notes in it
+   * (2021), and a control built from only the months that exist would silently close that
+   * gap up and lie about the shape of the history.
+   */
+  function buildDateSpan(dated) {
+    dateSpan = null;
+    if (!dated.length) return;
+    var lo = heatParse(dated[0][1]), hi = heatParse(dated[dated.length - 1][1]);
+    if (Number.isNaN(lo) || Number.isNaN(hi)) return;
+    var d0 = new Date(lo), d1 = new Date(hi);
+    var y0 = d0.getUTCFullYear(), m0 = d0.getUTCMonth();
+    var y1 = d1.getUTCFullYear(), m1 = d1.getUTCMonth();
+    var months = [], index = Object.create(null);
+    for (var y = y0, m = m0; y < y1 || (y === y1 && m <= m1);) {
+      var key = y + "-" + (m < 9 ? "0" : "") + (m + 1);
+      index[key] = months.length;
+      months.push({ key: key, y: y, m: m, ms: Date.UTC(y, m, 1), n: 0 });
+      if (++m > 11) { m = 0; y++; }
+    }
+    var years = Object.create(null);
+    for (var i = 0; i < dated.length; i++) {
+      var s = dated[i][1], k = s.slice(0, 7), ix = index[k];
+      if (ix !== undefined) months[ix].n++;
+      var yy = s.slice(0, 4);
+      years[yy] = (years[yy] || 0) + 1;
+    }
+    var ylist = [];
+    for (var yk = y0; yk <= y1; yk++) ylist.push({ y: yk, n: years[String(yk)] || 0 });
+    var nMax = 1, tot = 0;
+    months.forEach(function (mm) { if (mm.n > nMax) nMax = mm.n; tot += mm.n; });
+    var yMax = 1;
+    ylist.forEach(function (yy) { if (yy.n > yMax) yMax = yy.n; });
+    dateSpan = {
+      months: months, years: ylist, index: index,
+      lo: months[0].ms, hi: Date.UTC(y1, m1 + 1, 0),      // last day of the last month
+      nMax: nMax, yMax: yMax, dated: tot,
+      undated: graph.order - tot
+    };
+  }
+
+  /** The range as two ISO days, for a label. null ends read as the span's own ends. */
+  function rangeLabel() {
+    if (!dateSpan) return "";
+    var f = state.from === null ? dateSpan.lo : state.from;
+    var t = state.to === null ? dateSpan.hi : state.to;
+    var iso = function (ms) { return new Date(ms).toISOString().slice(0, 10); };
+    if (state.from === null && state.to === null) return "All dates";
+    return iso(f) + "  \u2192  " + iso(t);
+  }
+
+  /**
+   * Apply the range. One entry point for all three concepts, so they cannot drift.
+   *
+   * Goes through cascade(), not straight to the renderer: the range is a filter and every
+   * other filter in this page animates, so this one does too -- and cascade() is also what
+   * re-derives the plan, so the disc re-densifies around what is left instead of leaving
+   * holes where the excluded notes were.
+   */
+  function applyRange() {
+    var el = $("rangenote");
+    if (el) el.textContent = rangeLabel();
+    drawDateUI();
+    cascade();
   }
 
   // Today's date, read at load rather than baked in at build time, so the mark
@@ -1517,6 +1619,21 @@ function mountVaultGraph(root, data, deps) {
   // vault gained one note that month or two hundred.
   var TL_FADE = 8;
   function timeFactor(id) {
+    // THE DATE CAP FIRST, because it is a hard bound and the rank cutoff is a ramp: a note
+    // outside the range is out whatever the slider says, and multiplying a ramp by zero
+    // would give the same answer more slowly.
+    //
+    // UNDATED NOTES STAY, which is the same rule the rank cutoff already applies one line
+    // down, and it matters more here than it looks: 20% of the notes in the 10-year fixture
+    // carry no frontmatter at all. Dropping them from every range would mean a range filter
+    // that also silently filters by "has frontmatter", which is not a date question.
+    if (state.from !== null || state.to !== null) {
+      var ms = tlMs[id];
+      if (ms !== undefined) {
+        if (state.from !== null && ms < state.from) return 0;
+        if (state.to !== null && ms > state.to) return 0;
+      }
+    }
     if (state.until === null) return 1;
     var rk = tlRank[id];
     if (!rk) return 1;                     // undated notes are always present
@@ -1694,7 +1811,7 @@ function mountVaultGraph(root, data, deps) {
     // arrives at its final angle and never moves again -- the only thing that
     // moves is what is still downstream, and that is still invisible.
     var keep = Object.create(null);
-    graph.forEachNode(function (id) { keep[id] = alpha[id] || 0; alpha[id] = visible(id) ? 1 : 0; });
+    graph.forEachNode(function (id) { keep[id] = alpha[id] || 0; alpha[id] = visible(id) ? timeFactor(id) : 0; });
     var finalPos = ringsLayout() || {};
     graph.forEachNode(function (id) { alpha[id] = keep[id]; });
     var sweepOf = Object.create(null);
@@ -1705,7 +1822,9 @@ function mountVaultGraph(root, data, deps) {
 
     var ins = [], outs = [], to = Object.create(null), from = Object.create(null);
     graph.forEachNode(function (id) {
-      var want = visible(id) ? 1 : 0;
+      // timeFactor, not 1: a note the timeline or the date range excludes must not be
+      // revealed by a filter change somewhere else. See the note on `keep` above.
+      var want = visible(id) ? timeFactor(id) : 0;
       var now = alpha[id] || 0;
       if (Math.abs(now - want) <= 0.004) return;
       to[id] = want; from[id] = now;
@@ -3847,7 +3966,12 @@ function mountVaultGraph(root, data, deps) {
     var g = heatGeom();
     var cols = g.cols, cell = g.cell;
     var pitch = cell + HEAT_GAP;
-    var start = heatMonday(heatParse(TODAY)) - (cols - 1) * WEEK_MS;
+    // THE WINDOW'S RIGHT EDGE IS STATE NOW, not always today. A fixed sliding window onto
+    // today is what made everything before it unreachable -- on the 10-year fixture that is
+    // nine years of the vault with nothing to point at. `heatEnd` is null for "the last 52
+    // weeks", which is still the default and still where it opens.
+    var endMs = state.heatEnd === null ? heatParse(TODAY) : state.heatEnd;
+    var start = heatMonday(endMs) - (cols - 1) * WEEK_MS;
 
     var days = Object.create(null), keys = [];
     for (var c = 0; c < cols; c++) {
@@ -4332,6 +4456,425 @@ function mountVaultGraph(root, data, deps) {
   // teleported the mark on every rebuild.
 
   var DEMO_DONE_TITLE = "vault-graph demo complete";
+
+  /* ------------------------------------------------------------ date range --
+   * THREE CONCEPTS OVER ONE FILTER.
+   *
+   * The ask: use the space beside and below the band, cap the filter to a date range with
+   * two ends, and give the earlier years -- which the 52-week sliding window makes
+   * unreachable -- somewhere to be selected from.
+   *
+   * The data is what makes this a design question rather than a layout one. Measured on the
+   * author's vault: 452 notes over 11.4 years, 389 of them in 2026 and a whole year (2021)
+   * with none at all. So a control with a LINEAR TIME AXIS spends ~90% of its travel on
+   * nothing, which is the same trap the rank slider in the sidebar already dodges by being
+   * linear in note count instead. Each concept answers that differently, and that is the
+   * thing to compare:
+   *
+   *   rail     Coarse and fine are SEPARATE controls. A year rail beside the band moves the
+   *            52-week window; dragging across the weeks sets the range. Time-linear within
+   *            a year, and the year rail hides the emptiness by giving every year one row
+   *            whatever it holds.
+   *   ribbon   ONE control, the whole span, months as bars. Time-linear and therefore honest
+   *            about the empty stretches -- you can see 2021 is missing. The band becomes a
+   *            detail view of whatever is brushed.
+   *   sliders  Two sliders, linear in NOTES like the existing timeline, so the travel is
+   *            even and the empty years cost nothing. Cheapest to operate, and the only one
+   *            that cannot show you the shape of the history.
+   *
+   * All three write state.from / state.to and call applyRange(). Nothing else knows which
+   * one is on screen.
+   */
+
+  var RAIL_W = 74;          // the year rail, px
+  var RAIL_ROW_MIN = 8;     // below this the year label stops fitting
+  var RIBBON_H = 34;
+  var DRAG_MIN = 3;         // px before a press on the band counts as a drag rather than a click
+
+  var dragSel = null;       // an in-flight drag on the band or the ribbon
+
+  function dateUIIs(k) { return state.dateUI === k; }
+
+  /** Show the one control the concept switch asks for, hide the other two. */
+  function syncDateUI() {
+    var rail = $("rail"), rib = $("ribbon"), twin = $("twin");
+    if (rail) rail.hidden = !dateUIIs("rail");
+    if (rib) rib.hidden = !dateUIIs("ribbon");
+    if (twin) twin.hidden = !dateUIIs("sliders");
+    Array.prototype.forEach.call($("dsw").querySelectorAll("[data-dui]"), function (b) {
+      b.setAttribute("aria-pressed", b.getAttribute("data-dui") === state.dateUI ? "true" : "false");
+    });
+    // The rail borrows width from the band, so the grid has to be re-fitted around it.
+    heatBuild();
+    drawDateUI();
+    heatDraw();
+  }
+
+  function drawDateUI() {
+    if (dateUIIs("rail")) drawRail();
+    else if (dateUIIs("ribbon")) drawRibbon();
+    else syncTwin();
+  }
+
+  /* ---- shared drawing helpers ------------------------------------------- */
+
+  // A canvas sized for the device, drawn in CSS pixels. Same treatment the heat band gets;
+  // without it every one-pixel rule in here lands on a half pixel and greys out.
+  function fitCanvas(cv, w, h) {
+    var dpr = Math.min(2, WIN.devicePixelRatio || 1);
+    cv.width = Math.round(w * dpr); cv.height = Math.round(h * dpr);
+    cv.style.width = w + "px"; cv.style.height = h + "px";
+    var cx = cv.getContext("2d");
+    cx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    cx.clearRect(0, 0, w, h);
+    return cx;
+  }
+
+  // The intensity ramp the heat band already uses, so a bar in one of these controls and a
+  // square in the band mean the same thing at the same colour.
+  function dateRamp(t) {
+    var m = heat && heat.mean ? heat.mean : css("--accent");
+    return t <= 0 ? css("--dim") : mixHex(css("--surface-2"), m, 0.25 + 0.75 * Math.min(1, t));
+  }
+
+  /* ---- concept 1: the year rail ----------------------------------------- */
+
+  /**
+   * One row per year, beside the band. Bar length is that year's note count.
+   *
+   * EVERY YEAR GETS A ROW, including the ones holding nothing. That is the whole reason this
+   * concept can afford a time axis at all: the emptiness is spent on 13 pixels of row rather
+   * than on 90% of the control's travel, and an empty year still reads as a year that exists
+   * and has nothing in it -- which is information.
+   *
+   * sqrt on the bar length, not linear: 2026 holds 86% of this vault, so a linear bar would
+   * be one full-width row and ten hairlines.
+   */
+  function drawRail() {
+    var cv = $("rail");
+    if (!cv || !dateSpan) return;
+    var ys = dateSpan.years;
+    // THE RAIL FITS THE BAND, not the reverse. Eleven years at a fixed 13px row is 159px
+    // against the grid's ~117, so a fixed row height made the whole band taller than the
+    // heatmap in it and took the difference out of the disc. Divided evenly instead, and only
+    // if that would fall below the point where an 8px year label stops fitting does the rail
+    // grow and take the band with it.
+    var avail = (heat ? heat.h : 117) - 12;
+    var row = Math.max(RAIL_ROW_MIN, Math.floor(avail / Math.max(1, ys.length)));
+    var h = Math.max(row * ys.length + 12, 40);
+    var cx = fitCanvas(cv, RAIL_W, h);
+    var winLo = heat ? heat.start : 0;
+    var winHi = heat ? heat.start + heat.cols * WEEK_MS : 0;
+
+    cx.font = '600 ' + (row >= 11 ? 9 : 8) + 'px ui-sans-serif, "Segoe UI", system-ui, sans-serif';
+    cx.textBaseline = "middle";
+    railRow = row;
+    for (var i = 0; i < ys.length; i++) {
+      var y = ys[i], top = 6 + i * row;
+      var inWin = Date.UTC(y.y, 11, 31) >= winLo && Date.UTC(y.y, 0, 1) <= winHi;
+      // The bar.
+      var bw = Math.round(38 * Math.sqrt(y.n / dateSpan.yMax));
+      var bh = Math.max(2, row - 4);
+      cx.fillStyle = y.n ? dateRamp(y.n / dateSpan.yMax) : css("--dim");
+      cx.fillRect(30, top + (row - bh) / 2, Math.max(y.n ? 2 : 1, bw), bh);
+      // The year, and a marker when the band is currently looking at it.
+      cx.fillStyle = inWin ? css("--text-1") : css("--text-3");
+      cx.fillText(String(y.y), 2, top + row / 2);
+      if (inWin) {
+        cx.fillStyle = css("--accent");
+        cx.fillRect(0, top + 1, 1.5, Math.max(2, row - 2));
+      }
+    }
+  }
+
+  // Whatever drawRail last divided the space into. Read rather than recomputed, so a hit
+  // and a paint cannot disagree about where a row is.
+  var railRow = 12;
+
+  function railHit(ev) {
+    if (!dateSpan) return null;
+    var r = $("rail").getBoundingClientRect();
+    var i = Math.floor((ev.clientY - r.top - 6) / railRow);
+    return (i >= 0 && i < dateSpan.years.length) ? dateSpan.years[i] : null;
+  }
+
+  /* ---- concept 2: the ribbon -------------------------------------------- */
+
+  /**
+   * The whole span, one bar per month, with a brush.
+   *
+   * TIME-LINEAR AND HONEST ABOUT IT. This is the only one of the three that shows the shape
+   * of the history -- that the vault has a burst and a long thin tail, and that one year in
+   * the middle is empty. It is also the one that pays for it: on this vault most of the strip
+   * is a flat line, and the interesting part is the last eighth.
+   *
+   * Worth having as a concept precisely because that tradeoff is the decision. sqrt again on
+   * the bar heights, for the same reason as the rail.
+   */
+  function drawRibbon() {
+    var cv = $("ribbon");
+    if (!cv || !dateSpan) return;
+    var wrap = cv.parentNode;
+    var w = Math.max(200, (wrap && wrap.clientWidth) || 600);
+    var cx = fitCanvas(cv, w, RIBBON_H);
+    var ms = dateSpan.months, n = ms.length;
+    var pitch = w / n;
+
+    // The bars.
+    for (var i = 0; i < n; i++) {
+      var m = ms[i];
+      var bh = m.n ? Math.max(1.5, (RIBBON_H - 11) * Math.sqrt(m.n / dateSpan.nMax)) : 0;
+      cx.fillStyle = m.n ? dateRamp(m.n / dateSpan.nMax) : css("--dim");
+      cx.fillRect(i * pitch, RIBBON_H - 10 - bh, Math.max(1, pitch - 0.6), bh || 1);
+    }
+
+    // Year boundaries, and a label wherever there is room for one. Only January gets a rule,
+    // so the strip reads as years rather than as 137 months.
+    cx.font = '500 8.5px ui-sans-serif, "Segoe UI", system-ui, sans-serif';
+    cx.textBaseline = "alphabetic";
+    var every = pitch * 12 < 26 ? 2 : 1;      // skip alternate labels when they would collide
+    for (var j = 0; j < n; j++) {
+      if (ms[j].m !== 0) continue;
+      var x = j * pitch;
+      cx.fillStyle = rgbaHex(css("--text-3"), 0.28);
+      cx.fillRect(x, 0, 1, RIBBON_H - 9);
+      if ((ms[j].y % every) === 0) {
+        cx.fillStyle = css("--text-3");
+        cx.fillText("'" + String(ms[j].y).slice(2), x + 2, RIBBON_H - 1.5);
+      }
+    }
+
+    // The brush. Drawn as two edges plus a wash, so the selection reads as a window on the
+    // strip rather than as a highlight of some bars.
+    // Where the band is looking. UNDER the brush and drawn as a foot rather than a frame:
+    // a full outline competed with the brush edges for the same two pixels and the two read
+    // as one confused shape. A tick along the bottom says "the grid above is showing this
+    // much" without claiming to be a selection.
+    if (heat) {
+      var hx0 = ribbonX(heat.start, w), hx1 = ribbonX(heat.start + heat.cols * WEEK_MS, w);
+      cx.fillStyle = rgbaHex(css("--text-1"), 0.5);
+      cx.fillRect(hx0, RIBBON_H - 9, Math.max(2, hx1 - hx0), 1.5);
+      cx.fillRect(hx0, RIBBON_H - 12, 1, 4);
+      cx.fillRect(hx1 - 1, RIBBON_H - 12, 1, 4);
+    }
+
+    // The brush. Drawn as a wash over everything OUTSIDE it plus two hard edges, so the
+    // selection reads as a window on the strip rather than as some highlighted bars.
+    //
+    // 0.72 of the surface, not 0.62: at the lower value the difference between inside and
+    // outside was a few percent of luminance on a dark ground and the brush read as a pair
+    // of lines with nothing between them. This is the one thing in the control that has to
+    // be unmissable.
+    var lo = state.from === null ? dateSpan.lo : state.from;
+    var hi = state.to === null ? dateSpan.hi : state.to;
+    if (state.from !== null || state.to !== null) {
+      var x0 = ribbonX(lo, w), x1 = ribbonX(hi, w);
+      cx.fillStyle = rgbaHex(css("--surface-0"), 0.72);
+      cx.fillRect(0, 0, x0, RIBBON_H - 9);
+      cx.fillRect(x1, 0, w - x1, RIBBON_H - 9);
+      cx.fillStyle = css("--accent");
+      cx.fillRect(x0 - 1, 0, 2, RIBBON_H - 9);
+      cx.fillRect(x1 - 1, 0, 2, RIBBON_H - 9);
+      // Grips, so the edges look draggable rather than drawn.
+      cx.fillRect(x0 - 3, (RIBBON_H - 9) / 2 - 4, 6, 8);
+      cx.fillRect(x1 - 3, (RIBBON_H - 9) / 2 - 4, 6, 8);
+    }
+  }
+
+  function ribbonX(ms, w) {
+    var span = dateSpan.hi - dateSpan.lo;
+    return span > 0 ? ((ms - dateSpan.lo) / span) * w : 0;
+  }
+  function ribbonMs(x, w) {
+    return dateSpan.lo + (Math.max(0, Math.min(w, x)) / w) * (dateSpan.hi - dateSpan.lo);
+  }
+
+  // The heat band's own helper takes a hex and an alpha; this page has withAlpha for rgba
+  // strings and mixHex for hexes, and neither does the one thing needed here.
+  function rgbaHex(hex, a) {
+    var c = toRgb(hex);
+    return "rgba(" + c[0] + "," + c[1] + "," + c[2] + "," + a + ")";
+  }
+
+  /* ---- concept 3: twin sliders ------------------------------------------ */
+
+  /**
+   * Two sliders, indexed in NOTES rather than in days.
+   *
+   * The same choice the sidebar's timeline already makes, and for the same measured reason:
+   * 86% of this vault is in its last year, so a slider linear in time spends nearly all of
+   * its travel where there is nothing to select. Linear in rank, every pixel of travel
+   * changes the selection by the same number of notes.
+   *
+   * The cost is that this control cannot show you the shape of the history at all -- there
+   * is nothing to look at, only two handles and the dates they currently resolve to. That is
+   * the tradeoff to judge it on.
+   */
+  /**
+   * Put the handles where the state says. One-way binding is the trap here: the sliders drove
+   * the range perfectly and ignored it being set from anywhere else, so switching to this
+   * concept with a range already applied showed two handles at full travel over a filtered
+   * disc -- a control confidently reporting the opposite of the truth.
+   */
+  function syncTwin() {
+    var a = $("rfrom"), b = $("rto");
+    if (!a || !b || !tlMax) return;
+    a.max = String(tlMax); b.max = String(tlMax);
+    a.value = String(state.from === null ? 0 : rankAtOrAfter(state.from));
+    b.value = String(state.to === null ? tlMax : rankAtOrBefore(state.to));
+  }
+
+  /**
+   * The rank of the first note dated at or after `ms`, and the last dated at or before it.
+   *
+   * Binary search over tlDate, which is already sorted -- the timeline built it that way.
+   * Two functions rather than one because the ends are not symmetric: `from` wants the first
+   * note it lets in and `to` wants the last, and using one for both puts a handle a note off
+   * at every range whose ends do not land exactly on a note.
+   */
+  function rankAtOrAfter(ms) {
+    var lo = 0, hi = tlDate.length;
+    while (lo < hi) {
+      var mid = (lo + hi) >> 1;
+      if (heatParse(tlDate[mid]) < ms) lo = mid + 1; else hi = mid;
+    }
+    return lo + 1;                       // ranks are 1-based
+  }
+  function rankAtOrBefore(ms) {
+    var lo = 0, hi = tlDate.length;
+    while (lo < hi) {
+      var mid = (lo + hi) >> 1;
+      if (heatParse(tlDate[mid]) <= ms) lo = mid + 1; else hi = mid;
+    }
+    return Math.max(1, lo);
+  }
+
+  function twinApply() {
+    var a = $("rfrom"), b = $("rto");
+    var lo = Math.min(+a.value, +b.value), hi = Math.max(+a.value, +b.value);
+    // Rank 0 and rank tlMax mean "no bound", so the ends of the travel clear the filter
+    // rather than clamping it to the first and last note.
+    state.from = lo <= 0 ? null : heatParse(tlDate[lo - 1]);
+    state.to = hi >= tlMax ? null : heatParse(tlDate[hi - 1]);
+    applyRange();
+  }
+
+  /* ---- wiring ----------------------------------------------------------- */
+
+  function buildDateUI() {
+    if (!$("dsw")) return;
+
+    Array.prototype.forEach.call($("dsw").querySelectorAll("[data-dui]"), function (b) {
+      b.onclick = function () { state.dateUI = b.getAttribute("data-dui"); syncDateUI(); };
+    });
+
+    $("rangeall").onclick = function () {
+      state.from = null; state.to = null; state.heatEnd = null;
+      var a = $("rfrom"), b = $("rto");
+      if (a && b) { a.value = "0"; b.value = String(tlMax); }
+      heatBuild();
+      applyRange();
+      heatDraw();
+    };
+
+    /* --- the rail: click a year to move the band there --------------------- */
+    var rail = $("rail");
+    rail.addEventListener("click", function (ev) {
+      var y = railHit(ev);
+      if (!y) return;
+      // The window's RIGHT edge goes to the end of the clicked year, so clicking 2019 shows
+      // the 52 weeks ending that December -- which is the year, plus a little of the one
+      // before it. Landing the window's left edge on January instead would show the year and
+      // then a year of the future, which is the wrong half.
+      state.heatEnd = Math.min(heatParse(TODAY), Date.UTC(y.y, 11, 31));
+      heatBuild();
+      drawDateUI();
+      heatDraw();
+    });
+    rail.addEventListener("mousemove", function (ev) {
+      var y = railHit(ev);
+      rail.style.cursor = y ? "pointer" : "default";
+      rail.title = y ? y.y + ": " + y.n + " note" + (y.n === 1 ? "" : "s") : "";
+    });
+
+    /* --- the band: drag across the weeks to set the range ------------------ */
+    // A DRAG, not two handles. Handles on a 13px grid are 13px targets that also have to
+    // not be the click that marks a day -- the band already owns click and hover. A drag is
+    // unambiguous: past DRAG_MIN pixels it is a range, under it the old click still fires.
+    var hc = $("heatc");
+    hc.addEventListener("pointerdown", function (ev) {
+      if (!dateUIIs("rail") || !heat) return;
+      dragSel = { x0: ev.clientX, ms0: heatMsAt(ev), moved: false };
+      try { hc.setPointerCapture(ev.pointerId); } catch { /* fine */ }
+    });
+    hc.addEventListener("pointermove", function (ev) {
+      if (!dragSel) return;
+      if (Math.abs(ev.clientX - dragSel.x0) > DRAG_MIN) dragSel.moved = true;
+      if (!dragSel.moved) return;
+      var a = dragSel.ms0, b = heatMsAt(ev);
+      if (a === null || b === null) return;
+      state.from = Math.min(a, b);
+      state.to = Math.max(a, b) + DAY_MS - 1;      // inclusive of the last day
+      applyRange();
+      heatDraw();
+    });
+    hc.addEventListener("pointerup", function (ev) {
+      var was = dragSel;
+      dragSel = null;
+      try { hc.releasePointerCapture(ev.pointerId); } catch { /* fine */ }
+      if (was && was.moved) ev.stopPropagation();
+    });
+
+    /* --- the ribbon: brush ------------------------------------------------- */
+    var rib = $("ribbon");
+    rib.addEventListener("pointerdown", function (ev) {
+      if (!dateSpan) return;
+      var r = rib.getBoundingClientRect();
+      dragSel = { ms0: ribbonMs(ev.clientX - r.left, r.width), moved: false, x0: ev.clientX };
+      try { rib.setPointerCapture(ev.pointerId); } catch { /* fine */ }
+    });
+    rib.addEventListener("pointermove", function (ev) {
+      if (!dragSel || !dateSpan) return;
+      var r = rib.getBoundingClientRect();
+      if (Math.abs(ev.clientX - dragSel.x0) > DRAG_MIN) dragSel.moved = true;
+      if (!dragSel.moved) return;
+      var b = ribbonMs(ev.clientX - r.left, r.width);
+      state.from = Math.min(dragSel.ms0, b);
+      state.to = Math.max(dragSel.ms0, b);
+      // THE BAND FOLLOWS THE BRUSH, which is what makes this one control rather than two:
+      // brushing 2019 and then having to find 2019 again in the band would be worse than
+      // the rail, not better.
+      state.heatEnd = Math.min(heatParse(TODAY), state.to);
+      heatBuild();
+      applyRange();
+      heatDraw();
+    });
+    rib.addEventListener("pointerup", function (ev) {
+      dragSel = null;
+      try { rib.releasePointerCapture(ev.pointerId); } catch { /* fine */ }
+    });
+
+    /* --- the sliders ------------------------------------------------------- */
+    $("rfrom").oninput = twinApply;
+    $("rto").oninput = twinApply;
+
+    if (WIN.ResizeObserver) new WIN.ResizeObserver(function () { drawDateUI(); }).observe($("heat"));
+    syncDateUI();
+    applyRange();
+  }
+
+  /** The day under the pointer on the heat band, in ms, or null if it is off the grid. */
+  function heatMsAt(ev) {
+    if (!heat) return null;
+    var r = $("heatc").getBoundingClientRect();
+    var x = ev.clientX - r.left - HEAT_GUTTER, y = ev.clientY - r.top - HEAT_MONTH_H;
+    var col = Math.floor(x / heat.pitch), row = Math.floor(y / heat.pitch);
+    if (col < 0) col = 0;
+    if (col > heat.cols - 1) col = heat.cols - 1;
+    if (row < 0) row = 0;
+    if (row > 6) row = 6;
+    return heat.start + col * WEEK_MS + row * DAY_MS;
+  }
 
   function demoOn() {
     return /(^|[?&#])demo\b/.test(String(location.search) + " " + String(location.hash));
@@ -4875,6 +5418,29 @@ function mountVaultGraph(root, data, deps) {
                     get hlBusy() { return !!hlRaf; },
                     // Re-derive the locked geometry, then settle. Needed after any of
                     // the above, because r0/rOuter/band membership are locked at load.
+                    // The date range, for the suite and the shooter.
+                    get dateSpan() { return dateSpan; },
+                    setDateUI: function (k) { state.dateUI = k; syncDateUI(); },
+                    setRange: function (fromISO, toISO) {
+                      state.from = fromISO ? heatParse(fromISO) : null;
+                      state.to = toISO ? heatParse(toISO) : null;
+                      applyRange();
+                      heatDraw();
+                    },
+                    setHeatEnd: function (iso) {
+                      state.heatEnd = iso ? heatParse(iso) : null;
+                      heatBuild(); drawDateUI(); heatDraw();
+                    },
+                    rangeReport: function () {
+                      var lit = 0, dated = 0;
+                      graph.forEachNode(function (id) {
+                        if ((alpha[id] || 0) > 0.004) lit++;
+                        if (tlMs[id] !== undefined) dated++;
+                      });
+                      return { from: state.from, to: state.to, heatEnd: state.heatEnd,
+                               ui: state.dateUI, lit: lit, dated: dated,
+                               total: graph.order, label: rangeLabel() };
+                    },
                     relayout: function () {
                       bandLock = null; geomLock = null;
                       regroup();
@@ -4910,6 +5476,7 @@ function mountVaultGraph(root, data, deps) {
     // so the band grows with the disc instead of appearing fully lit.
     buildHeatmapUI();
     heatBuild();
+    buildDateUI();
     fit();                 // frame the FULL disc first, so the camera holds still
     syncSizeScale();       // ...then size the dots to the pitch this window gives us
     // ...then grow the vault from its first note to now. This used to be
