@@ -108,9 +108,9 @@ changed shape.
 
 - **The scripted demo shows the picker.** Six new beats open the gear, recolour two folders
   (one of them to a grey, which is the answer to "can a folder recede on purpose"), reset,
-  and close — plus one that hovers a legend row. Beat 18 aims at a real 15px swatch through
-  CDP hit-testing, so it fails if the swatch is covered or scrolled away. The run is 26
-  beats and ~43s, up from 20 and ~30s.
+  and close — plus two that hover a folder and a subfolder from the legend. The swatch beat
+  aims at a real 15px target through CDP hit-testing, so it fails if the swatch is covered
+  or scrolled away. The run is 29 beats and ~50s, up from 20 and ~30s.
 
 - **The biggest folders now land on the outer ring.** The band balancer's rules were all
   geometry — thickness, row counts, hole size — which says nothing about *which* folders
@@ -132,7 +132,7 @@ changed shape.
   part of the smoke suite: a palette does not drift on its own, and what makes a hue right
   is looking at it.
 
-The invariant suite is 18 checks now and passes on both vaults.
+The invariant suite is 19 checks now and passes on both vaults.
 
 ---
 
