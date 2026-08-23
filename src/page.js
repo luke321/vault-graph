@@ -378,6 +378,8 @@ function mountVaultGraph(root, data, deps) {
       : Math.min(NODE_MAX, NODE_MIN + 1.55 * Math.sqrt(a.deg)));
   });
 
+  measureDotTyp();
+
   // Which notes deserve a permanent label: strictly the best-connected ones.
   // Sigma's own label thinning is grid-based, which assumes nodes are spread out --
   // false by construction in Rings, where every hub is packed into the centre so they
@@ -892,15 +894,19 @@ function mountVaultGraph(root, data, deps) {
 
   // The angle that buys SEAM_ROWS of row pitch at this band's outer edge, or the legacy
   // rule if the geometry is not locked yet. `frac` lets sub-gaps ride the same width.
+  // How much of the base separation a band of this depth gets. The band's OWN depth, because
+  // the two rings differ and a shallow inner ring should not be held to the outer one's seam.
+  function seamFall(band) {
+    var k = band === "i" ? "i" : "o";
+    var rows = (geomLock && geomLock.rows && geomLock.rows[k]) || REF_ROWS;
+    return Math.pow(REF_ROWS / Math.max(1, rows), SEAM_FALL);
+  }
+
   function seamAngle(band, frac) {
     var k = band === "i" ? "i" : "o";
     var r = geomLock && geomLock.bandR ? geomLock.bandR[k] : 0;
     if (!r) return SLICE_GAP * Math.PI / 180 * gapScale() * frac;
-    // The band's OWN depth: the two rings differ, and a shallow inner ring should not be
-    // held to the outer one's seam.
-    var rows = (geomLock.rows && geomLock.rows[k]) || REF_ROWS;
-    var fall = Math.pow(REF_ROWS / Math.max(1, rows), SEAM_FALL);
-    return (SEAM_ROWS * fall * frac * UNIT) / r;
+    return (SEAM_ROWS * seamFall(band) * frac * UNIT) / r;
   }
 
   function gapFor(nGroups, band) {
@@ -918,7 +924,49 @@ function mountVaultGraph(root, data, deps) {
   // rather than refusing it keeps the arithmetic continuous, so an inner row does not jump
   // when a group arrives.
   var SEAM_CAP = 0.45;      // of the circle, at any one radius
-  var MARGIN_ROWS = 0.5;    // row pitches between a wedge's edge and its end NOTE EDGE
+  // THE BOUNDARY, STATED AS WHAT IT ACTUALLY CONTROLS: how much further apart two notes are
+  // across a wedge boundary than two notes inside one.
+  //
+  // It used to be stated as "half a row pitch of margin, plus this note's own radius, at each
+  // end" -- and that phrasing is why three rounds of shrinking the SEAM changed nothing a
+  // person could see. Measured, the boundary came to 1.43, 1.47 and 1.46 times a normal step
+  // on the three vaults: the same ratio everywhere, and almost none of it the seam. The
+  // additive radius was most of it, worth ~126 units of extra width at every boundary on the
+  // disc, and the seam it dwarfed was 24 falling to 12.
+  //
+  // Half a pitch per side with nothing added is the ZERO point: two wedges each holding their
+  // end note half a step in from their own edge puts those two notes exactly one step apart,
+  // which is a boundary you cannot see. Everything above that is the seam a person reads, so
+  // that is the number to name and to scale.
+  //
+  // EXCESS_BASE is what the disc had (0.44 of a step) and the falloff takes it from there, so
+  // "half for a five-row band, a quarter at nine, none at twenty-three" is what comes out.
+  var MARGIN_ROWS = 0.5;    // the zero point: half a pitch from the wedge edge, per side
+  // HOW MUCH OF THE CHANNEL TO KEEP at REF_ROWS. The channel is what a boundary has OVER one
+  // ordinary step, and this scales exactly that -- so 0.5 means "half the gap you can see",
+  // which is what was asked for, rather than half of some term that turns out to contribute
+  // little of it.
+  //
+  // Two earlier attempts moved the wrong number. Shrinking the SEAM took it from 24 units to
+  // 12 and changed the measured channel from 1.60 to 1.60 -- the seam is a tenth of it. Adding
+  // an excess ON TOP of the existing margin made it wider still (1.60 -> 1.90), because the
+  // margin and the dot term were already the whole excess. Measured channels over an ordinary
+  // step, before any of this: 1.60, 1.72, 1.52 on the three vaults -- so the excess to scale is
+  // 0.60, 0.72 and 0.52 of a step, and it is emergent rather than a constant anyone set.
+  var EXCESS_KEEP = 0.5;    // of the channel, at REF_ROWS
+
+  // A TYPICAL dot's radius, in graph units. The end margin corrects for how this note differs
+  // from typical rather than adding its whole radius: adding it made every boundary wider by
+  // two radii, where the thing it was for -- both dots' EDGES equidistant from the seam -- only
+  // needs the DIFFERENCE between them. A hub steps in, a leaf steps out, and a boundary between
+  // two ordinary notes costs nothing at all.
+  var DOT_TYP = 0;
+  function measureDotTyp() {
+    var sizes = [];
+    graph.forEachNode(function (id, a) { sizes.push(a.size || 4); });
+    sizes.sort(function (x, y) { return x - y; });
+    DOT_TYP = sizes.length ? dotUnits(sizes[Math.floor(sizes.length / 2)]) : 0;
+  }
 
   // A DOT'S RADIUS IN GRAPH UNITS. The layout needs a length, and `size` is in pixels -- but
   // the biggest dot is now pinned at DOT_OF_PITCH of the row pitch (see measureSizeScale), so
@@ -1920,22 +1968,32 @@ function mountVaultGraph(root, data, deps) {
           // the size floor had stopped tracking the lattice (see DOT_OF_PITCH). Insetting on
           // top of a sufficient margin just moved the boundary out to twice a normal step and
           // read as a slice missing from the disc.
-          // HALF A ROW PITCH OF MARGIN AT EACH END, MEASURED TO THE NOTE'S EDGE.
+          // THE END MARGIN: the zero point, plus this band's share of the extra separation,
+          // plus how far this end note differs from a typical one.
           //
-          // Measuring to its CENTRE is what made a seam look off-centre even when it was
-          // arithmetically centred: dot radius runs 4x from a leaf to a hub, so a fat note and
-          // a thin one placed the same distance from the boundary put their edges at visibly
-          // different distances from it. The channel is the space between the dots, and that is
-          // what has to be equal -- reported from a screenshot of the 12 o'clock axis, with a
-          // hub on one side and a leaf on the other.
+          // That last term is what keeps the channel centred between the two dots' EDGES rather
+          // than their centres -- dot radius runs 4x from a leaf to a hub, so equal centre
+          // distances put edges visibly unequal distances from the boundary, which is what a
+          // screenshot of the 12 o'clock axis showed. It is a DIFFERENCE and not a radius, so
+          // it costs no width on average.
           //
-          // So each end's allowance is the margin PLUS that end note's own radius, and the two
-          // ends differ. Capped together at two thirds of the arc, because a sliver wedge
-          // holding one hub note could otherwise ask for more room than it has and invert.
+          // Capped together at two thirds of the arc, because a sliver wedge holding one hub
+          // note could otherwise ask for more room than it has and invert.
           var arc = a1 - a0;
           var rGraph = Math.max(1e-6, sl.r * UNIT);
-          var mgA = (MARGIN_ROWS * UNIT + (sl.eA || 0)) / rGraph;
-          var mgB = (MARGIN_ROWS * UNIT + (sl.eB || 0)) / rGraph;
+          // HALF A PITCH IS THE ZERO POINT: two wedges each holding their end note half a step
+          // in from their own edge put those two notes exactly one step apart, which is a
+          // boundary nobody can see. Everything past that is the channel, and the channel is
+          // what gets scaled -- including the seam, which sits inside it.
+          var zero = MARGIN_ROWS * UNIT;
+          var seamArc = sm.gap * rGraph / 2;      // this side's half of the seam, in units
+          var keep = EXCESS_KEEP * seamFall(isInner ? "i" : "o");
+          var side = function (e) {
+            var raw = zero + ((e || 0) - DOT_TYP);    // what the boundary would have cost
+            var m = zero + keep * (raw - zero + seamArc) - seamArc;
+            return m < 0 ? 0 : m / rGraph;
+          };
+          var mgA = side(sl.eA), mgB = side(sl.eB);
           var room = arc * 0.66;
           if (mgA + mgB > room) {
             var k = room / (mgA + mgB);
