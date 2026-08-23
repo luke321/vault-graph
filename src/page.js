@@ -2043,8 +2043,32 @@ function mountVaultGraph(root, data, deps) {
     hubChanged(true);
   }
 
+  // A HOVER MUST NOT SURVIVE THE NOTE MOVING OUT FROM UNDER THE POINTER.
+  //
+  // Sigma re-evaluates what is hovered only when the pointer MOVES, and it tests against
+  // the quadtree. animateTo refreshes with `skipIndexation: true` for the length of the
+  // tween -- earned there, since re-indexing every frame is what made the frame rate fall
+  // -- so for those ~380ms the index describes where the disc used to be. Move the pointer
+  // off a note during that window and sigma tests stale geometry, decides the note is
+  // still under the cursor, and then nothing moves again to correct it: the halo stays and
+  // the rest of the disc stays dimmed until you jog the mouse. That is the "sometimes",
+  // and it is the hazard invariants.md already names -- anything driven by a pointer has
+  // not earned the flag.
+  //
+  // Released rather than re-tested, because there is nothing to re-test against until the
+  // pointer moves again. Twice: once now, for the hover the drag itself was holding, and
+  // once when the tween has settled and the index is honest again, for one acquired
+  // mid-flight. If the pointer really is over the note when it lands, the next move
+  // re-enters it, which is what hover means.
+  function releaseHover() {
+    if (!state.hovered) return;
+    hideTip();
+    hoverTo(0);
+  }
+
   function hubChanged(animate) {
-    applyLayout(!!animate);
+    releaseHover();
+    applyLayout(!!animate, releaseHover);
     placeLogo();
   }
 
@@ -2094,11 +2118,24 @@ function mountVaultGraph(root, data, deps) {
     if (!captor) return;
 
     renderer.on("downNode", function (e) {
+      // LEFT BUTTON ONLY. downNode fires for any button, so a right-click was arming a
+      // drag as well as pinning: hold the right button down, move a few pixels, and the
+      // note came with the pointer. Right-click is a click -- it has one outcome, and the
+      // pin animation is the whole of it.
+      var o = e.event && e.event.original;
+      if (o && o.button !== 0) return;
       nodeDrag = { id: e.node, moved: false, over: false, wasPinned: isPinned(e.node) };
     });
 
     captor.on("mousemovebody", function (e) {
       if (!nodeDrag) return;
+      // The button can come up outside the window, where no mouseup reaches us -- the
+      // next move then carries the note around with nothing held down. `buttons` is the
+      // live state of the button rather than a memory of the press, so it catches that.
+      if (e.original && e.original.buttons !== undefined && !(e.original.buttons & 1)) {
+        drop();
+        return;
+      }
       // THE CAMERA MUST NOT PAN UNDER THE DRAG, and this has to happen FIRST -- before the
       // threshold test, not after it. The early version returned while the pointer was
       // still inside NODE_DRAG_MIN, so those first few moves reached sigma's own handler
@@ -3213,11 +3250,15 @@ function mountVaultGraph(root, data, deps) {
 
 
 
-  function applyLayout(animate) {
+  function applyLayout(animate, done) {
     var targets = ringsLayout();
-    if (!targets) return;
-    if (animate) animateTo(targets);
-    else { assignPositions(targets); renderer.refresh({ skipIndexation: false }); }
+    if (!targets) { if (done) done(); return; }
+    if (animate) animateTo(targets, done);
+    else {
+      assignPositions(targets);
+      renderer.refresh({ skipIndexation: false });
+      if (done) done();
+    }
   }
 
   /* ---------------------------------------------------------------- render */
