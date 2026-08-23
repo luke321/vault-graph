@@ -490,6 +490,24 @@ class VaultGraphView extends ItemView {
       // obsidianmd/prefer-active-window-timers is about. The standalone page passes nothing
       // and gets its own window, because `activeWindow` is an Obsidian global.
       win: activeWindow,
+      // What the standalone page cannot do. There the data is baked into the file, so
+      // Refresh can only reset filters and replay -- and it was reported, fairly, as a
+      // button that does not pick up new files (github#6). Here the vault is right
+      // there: render() tears this view down, rebuilds from the metadata cache and
+      // mounts again, so the button means what its label says.
+      //
+      // Guarded, because a rebuild triggered from inside the mount it is about to
+      // destroy will re-enter if the user leans on it. render() is async and the click
+      // handler cannot await it.
+      onRefresh: () => {
+        if (this.rebuilding) return;
+        this.rebuilding = true;
+        this.render()
+          .catch((e) => new Notice("Vault Graph: rebuild failed -- " + e.message))
+          // Cleared on the NEW view state, not the old one: render() replaces
+          // this.handle, and the flag lives on the view rather than the mount.
+          .finally(() => { this.rebuilding = false; });
+      },
     });
     this.mountMs = Math.round(performance.now() - t0);
 

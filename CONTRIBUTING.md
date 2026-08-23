@@ -53,13 +53,23 @@ node scripts/check-scope.mjs   # the page cannot style, or be styled by, its hos
 node scripts/check-network.mjs # nothing shipped can make a network request
 ```
 
-One more is manual, because it launches a real Obsidian twice and takes about ninety seconds.
-Run it if you touch the view's lifecycle — `onOpen`, `currentView`, `activate`, or anything
-that reaches for `leaf.view`:
+Two more are manual, because they launch a real Obsidian and take a minute or two each.
+Run the first if you touch the view's lifecycle — `onOpen`, `currentView`, `activate`, or
+anything that reaches for `leaf.view`; run the second if you touch what Refresh does, or
+how the plugin builds its data:
 
 ```bash
 node scripts/deferred-check.mjs --vault ./demo-vault
 ```
+
+```bash
+node scripts/refresh-check.mjs --vault ./demo-vault
+```
+
+The second one writes a probe note into the vault you point it at and deletes it again, so
+point it at a generated vault. It is the only harness that covers the whole round trip —
+write a file, Obsidian notices, rebuild, remount, the note is on the disc — which is what
+`Refresh doesn't seem to pick up new files` turned out to be about.
 
 Since Obsidian 1.7.2 a tab restored in the background is **deferred**: the leaf is real and
 `getLeavesOfType` finds it, but `leaf.view` is a placeholder until something reveals it. Both
