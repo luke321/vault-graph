@@ -23,6 +23,12 @@
  *                           the default cannot be "wait to be told". The corner control
  *                           flips it live; this is only where it starts.
  *         onPanEnabled(v)   as onFolderColors, for that flag.
+ *         pinned            note ids to put in the hub at mount, in slot order. Filtered
+ *                           against the graph on the way in: the store outlives the vault
+ *                           it was written from, so a note that has since been renamed or
+ *                           deleted is simply not there any more and the hub opens without
+ *                           it rather than holding a slot for a note that cannot be drawn.
+ *         onPinned(ids)     as onFolderColors, for that list.
  *         settingsUI        true to show the gear AND let it open the page's own panel.
  *                           The STANDALONE sets this, because nothing else there can hold
  *                           a setting.
@@ -273,6 +279,7 @@ function mountVaultGraph(root, data, deps) {
   var openHostSettings = typeof deps.openSettings === "function" ? deps.openSettings : null;
   var saveFolderColors = typeof deps.onFolderColors === "function" ? deps.onFolderColors : null;
   var saveFolderShown = typeof deps.onFolderShown === "function" ? deps.onFolderShown : null;
+  var savePinned = typeof deps.onPinned === "function" ? deps.onPinned : null;
 
   /* ------------------------------------------------------------------ state */
 
@@ -1908,7 +1915,18 @@ function mountVaultGraph(root, data, deps) {
   // actually holds: hub notes are DOTS and name themselves on hover, exactly like every
   // other note in the disc.
   var PIN_MAX = 13;
-  var HUB_R1 = 0.62;              // the outermost hub ring, as a fraction of the hole
+  // The outermost hub ring, as a fraction of the hole.
+  //
+  // 0.50, and the number is measured against the INNERMOST REAL NOTE rather than against
+  // r0 -- what "touching the inner ring" means is the gap between the outer pinned dot's
+  // edge and the first note of the disc, and both of those carry a radius the hole does
+  // not know about. At 0.62 the ball reached 0.865 of that distance on the demo vault:
+  // 8.8px of clearance from a 5.8px dot to a note that has its own radius again, which
+  // reads as contact. At 0.50 it reaches 0.70, which is ~19px.
+  //
+  // Both terms scale together, which is why one constant is enough: shrinking the ring
+  // shrinks the slot spacing, and hubSizeMult is derived from that spacing.
+  var HUB_R1 = 0.50;
 
   // A BALL, built from hex rings: 1 in the middle, 6 around it, the rest outside those.
   // Below seven there is no centre -- a middle dot among three or four reads as one of them
@@ -1938,8 +1956,21 @@ function mountVaultGraph(root, data, deps) {
     return out;
   }
 
+  /**
+   * The pinned notes that are actually on screen, in slot order.
+   *
+   * A pin the current filter has hidden is SKIPPED HERE rather than released. Releasing it
+   * was the first version and it is wrong in a way that only shows up later: hiding a
+   * folder would permanently drop every pin in it, and unhiding would not bring them back
+   * -- a transient filter quietly editing a stored choice. Filters are deliberately not
+   * persisted (see .ai-context/decisions/0009), so they must not persist anything else
+   * either. Skipping keeps the ball gapless and the size count honest while it is hidden,
+   * and the note returns to its slot when the filter lifts.
+   */
   function pinnedIds() {
-    return state.pinned.filter(function (id) { return graph.hasNode(id); });
+    return state.pinned.filter(function (id) {
+      return graph.hasNode(id) && willShow(id);
+    });
   }
 
   // The closest two hub slots get, as a fraction of the hole's radius. Written by hubPlace
@@ -2017,19 +2048,6 @@ function mountVaultGraph(root, data, deps) {
     return true;
   }
 
-  // A pinned note that a filter has taken off screen is not in the hub any more -- it is
-  // holding a slot nothing occupies, so the ball has a gap in it and the count the sizes
-  // are derived from is wrong. Released rather than hidden, because the reader can see the
-  // hub and cannot see a list of notes waiting to come back to it.
-  function dropInvisiblePins() {
-    if (!state.pinned.length) return false;
-    var keep = state.pinned.filter(function (id) {
-      return graph.hasNode(id) && willShow(id);
-    });
-    if (keep.length === state.pinned.length) return false;
-    state.pinned = keep;
-    return true;
-  }
 
   function unpin(id) {
     var i = state.pinned.indexOf(id);
@@ -2070,6 +2088,37 @@ function mountVaultGraph(root, data, deps) {
     releaseHover();
     applyLayout(!!animate, releaseHover);
     placeLogo();
+    if (savePinned) savePinned(state.pinned.slice());
+  }
+
+  /**
+   * The hub as the host handed it over, at mount.
+   *
+   * FILTERED AGAINST THE GRAPH, which is the rule github#12 asked for and the only one that
+   * survives contact with a real vault: the store outlives the build it was written from, so
+   * a pinned note can be renamed, deleted, or filtered out of the graph entirely by
+   * --ghosts or --templates between one build and the next. A missing id is dropped
+   * silently rather than held as an empty slot -- the hub is what is in the middle, and a
+   * slot for a note that cannot be drawn is a gap in the ball and a wrong count for the
+   * sizes to derive from.
+   *
+   * Capped on the way in as well. Nothing stops a store written by a future version, or
+   * hand-edited, from carrying more than the hole holds.
+   *
+   * A copy, not the caller's array: the host keeps its own reference to whatever it passed,
+   * and pinning would otherwise mutate the plugin's settings object in place.
+   */
+  function seedPins() {
+    var want = deps.pinned;
+    if (!want || !want.length || typeof want.length !== "number") return;
+    var seen = Object.create(null), out = [];
+    for (var i = 0; i < want.length && out.length < PIN_MAX; i++) {
+      var id = want[i];
+      if (typeof id !== "string" || seen[id] || !graph.hasNode(id)) continue;
+      seen[id] = 1;
+      out.push(id);
+    }
+    state.pinned = out;
   }
 
   /* --- drag and drop ------------------------------------------------------- */
@@ -2677,8 +2726,6 @@ function mountVaultGraph(root, data, deps) {
   // it, and the motion runs along the circumference rather than out from the hub.
   function cascade(done) {
     stopPlay();                            // a filter change interrupts playback
-    // Before the plan is pinned, since releasing a pin changes who is in the ring.
-    dropInvisiblePins();
     if (anim) { WIN.cancelAnimationFrame(anim); anim = null; }
     if (animGuard) { WIN.clearTimeout(animGuard); animGuard = null; }
     if (cascadeRun) {
@@ -4125,15 +4172,12 @@ function mountVaultGraph(root, data, deps) {
       if (e.event && e.event.original) e.event.original.preventDefault();
       togglePin(e.node);
     });
-    // Right-click on empty stage clears the hub and brings the mark back. A way out that
-    // does not need you to remember which thirteen notes you pinned, or to drag each one
-    // back out of the hole.
-    renderer.on("rightClickStage", function (e) {
-      if (e.event && e.event.original) e.event.original.preventDefault();
-      if (!state.pinned.length) return;
-      state.pinned = [];
-      hubChanged(true);
-    });
+    // NO clear-all on a stage right-click. It was here as "a way out that does not need you
+    // to remember what you pinned", and it is a trap: the hub IS empty stage between its
+    // dots, so right-clicking in the middle -- the most natural place to right-click when
+    // you are looking at the hub -- threw the whole thing away. An undoable gesture would
+    // be one thing; this was a destructive one sitting on top of the feature it destroys.
+    // Unpinning is per note, the same way pinning is.
     bindNodeDrag();
 
     // DOUBLE CLICK RESETS THE VIEW, on the stage and on a note alike.
@@ -7313,6 +7357,7 @@ function mountVaultGraph(root, data, deps) {
                       applyLayout(false);
                       renderer.refresh();
                     } };
+    seedPins();
     buildTimeline();
     buildTimelineUI();
     buildSearch(); buildTools(); buildStats();
