@@ -901,6 +901,49 @@ check("a range change animates instead of snapping", async (p) => {
   };
 });
 
+// THE GAP RESERVATION IS THE PLANNER'S, NOT THE LIVE WEIGHTS'. A group that keeps 30 of
+// its 100 notes is still one wedge entitled to one gap, but presence was read as weight over
+// seats -- and during a cascade the seats are the OLD plan's, so it read 0.3 while the
+// departing 70 were still seated and 1.0 the moment they left. Every wedge boundary on the
+// disc moved twice for a change that should not have touched the gap at all.
+//
+// A legend toggle cannot show this, which is why it shipped: hiding a folder takes all of it
+// to zero together, so presence runs 1 -> 0 cleanly. Only a filter that thins groups without
+// emptying them separates the two readings, and the date range is the first one this page has.
+//
+// The assertion is EXACTLY ZERO, not a tolerance. The reservation is now walked between the
+// two packings by cascade progress, and for a change that empties no group both ends are the
+// same number -- so any movement at all means it is being derived again.
+check("the gap reservation holds still while groups only thin", async (p) => {
+  await clearRange(p);
+  const before = await p.j(`__vg.rangeReport()`);
+  await p.eval(`__vg.probe(true); void 0`);
+  // A span wide enough that every folder keeps some notes -- the point is thinning, not
+  // emptying. Asserted below rather than assumed, since a vault could be shaped otherwise.
+  await p.eval(`__vg.setRange("2025-03-01", null); void 0`);
+  await sleep(200);
+  await settle(p);
+  await sleep(250);
+  const r = await p.j(`__vg.probeReport()`);
+  await p.eval(`__vg.probe(false); void 0`);
+  const after = await p.j(`__vg.rangeReport()`);
+  await clearRange(p);
+  const s0 = r.samples[0], s1 = r.samples[r.samples.length - 1];
+  const emptied = s0.ngO !== s1.ngO || s0.ngI !== s1.ngI;
+  if (r.frames < 5) {
+    return { ok: false, detail: `only ${r.frames} frame(s) -- nothing was animated to measure` };
+  }
+  return {
+    // Emptying a group legitimately moves the reservation, so a vault where this range
+    // empties one is reported rather than silently passing on a weaker assertion.
+    ok: r.ngMaxStep === 0 && !emptied,
+    detail: emptied
+      ? `this range empties a group (nG ${s0.ngO} -> ${s1.ngO}), so the gap moves for a real reason`
+      : `nG held at ${s1.ngO} across ${r.frames} frames, worst step ${r.ngMaxStep}; ` +
+        `lit ${before.lit} -> ${after.lit}`,
+  };
+});
+
 check("undated notes survive every range", async (p) => {
   // Deliberate, and worth pinning because it is the kind of rule that gets tidied away: 20%
   // of the 10k fixture carries no frontmatter, and excluding those from a date range would

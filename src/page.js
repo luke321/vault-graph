@@ -847,6 +847,23 @@ function mountVaultGraph(root, data, deps) {
   // Presence is OPACITY, weight over seats, never weight alone: a 55-note folder fading
   // from 55 down to 1 keeps min(1, weight) pinned at 1 the whole way and then collapses in
   // two frames, which relocates a discontinuity instead of removing it.
+  //
+  // ...EXCEPT WHEN THE PLANNER SUPPLIES IT (opts.groupPres). Weight over seats is the right
+  // reading of "how present is this group" only while the seats are the group's own final
+  // count. During a cascade they are not: the plan is rebuilt every frame from what is
+  // still on screen, so a group that KEEPS 30 of its 100 notes reads 30/100 = 0.3 while
+  // the departing 70 are still seated, and 1.0 the moment they leave the plan. Nothing
+  // about that group's gap should have moved -- it is still there, still one wedge, still
+  // entitled to one gap -- and the whole reservation moved twice instead.
+  //
+  // A legend toggle never showed it, which is why it survived: hiding a folder takes every
+  // note in it to zero together, so presence runs 1 -> 0 cleanly and the survivors stay
+  // pinned at 1. Only a filter that thins groups WITHOUT emptying them separates the two
+  // readings, and the date range is the first such filter this page has had.
+  //
+  // So the cascade hands in a presence walked between the two packings by its own progress,
+  // exactly as it already does for row counts -- one planner, one clock, and a group's gap
+  // is about whether the group is there rather than how full it is.
   function allocateBand(list, weightOf, seatsOf, opts) {
     var TWO = 2 * Math.PI;
     var tot = 0, gw = Object.create(null);
@@ -857,9 +874,13 @@ function mountVaultGraph(root, data, deps) {
       g.seats += seatsOf(c);
     });
     var presOf = function (c) { return Math.min(1, weightOf(c) / Math.max(1, seatsOf(c))); };
+    var given = opts.groupPres || null;
     var groupPres = Object.create(null), nG = 0;
     Object.keys(gw).forEach(function (k) {
-      groupPres[k] = Math.min(1, gw[k].w / Math.max(1, gw[k].seats));
+      var p = (given && given[k] !== undefined)
+        ? given[k]
+        : gw[k].w / Math.max(1, gw[k].seats);
+      groupPres[k] = p < 0 ? 0 : p > 1 ? 1 : p;
       nG += groupPres[k];
     });
     var nSub = 0;
@@ -1592,6 +1613,7 @@ function mountVaultGraph(root, data, deps) {
     // separately -- a small cell competes only with the other small cells.
     var TWO = 2 * Math.PI;
     var pos = {};
+    if (probe) lastStart = Object.create(null);
     [true, false].forEach(function (isInner) {
       var band = shown.filter(function (c) { return !!c.inner === isInner; });
       if (!band.length) return;
@@ -1603,8 +1625,11 @@ function mountVaultGraph(root, data, deps) {
       var a = allocateBand(band,
                            function (c) { return c.geom; },
                            function (c) { return c.slots.length; },
-                           { subGaps: true, clamp: 0.45, totFloor: 1e-6 });
+                           { subGaps: true, clamp: 0.45, totFloor: 1e-6,
+                             groupPres: gapPres });
       var gap = a.gap, subGap = a.subGap;
+      lastGapDeg[isInner ? "i" : "o"] = Math.round(gap * 180 / Math.PI * 1000) / 1000;
+      lastNG[isInner ? "i" : "o"] = Math.round(a.nG * 1000) / 1000;
       band.forEach(function (c) { c.span = a.shareOf(c); });
 
       // A gap BEFORE EVERY GROUP, including the first -- that leading one is the wrap
@@ -1626,6 +1651,12 @@ function mountVaultGraph(root, data, deps) {
       band.forEach(function (c) {
         if (prevG !== null) theta += (c.g !== prevG) ? gap * a.groupPres[c.g] : subGap * a.presOf(c);
         prevG = c.g;
+        // Recorded for the probe: the leading edge of each group's wedge, which is what
+        // moves when the gap reservation changes. Only the first cell of a group writes,
+        // so this is the group's own start rather than its last subfolder's.
+        if (probe && lastStart && lastStart[c.g] === undefined) {
+          lastStart[c.g] = Math.round(theta * 180 / Math.PI * 1000) / 1000;
+        }
         // The wedge keeps its FINAL start angle and only its span opens, so an
         // arriving note fans its own wedge wider instead of shoving every other
         // wedge round the disc. Normalising by the running total instead would
@@ -1657,6 +1688,16 @@ function mountVaultGraph(root, data, deps) {
           // A constant, deliberately not scaled by presence: anything presence-weighted
           // here would rotate the ring as notes arrive, which is the class of bug the
           // leading-offset note describes.
+          if (probe && probe.watch === sl.id) {
+            probe.watched = { k: c.k, g: c.g, u: Math.round(sl.u * 1e5) / 1e5,
+                              slotR: Math.round(sl.r), slots: c.slots.length,
+                              a0: Math.round(a0 * 1e4) / 1e4, a1: Math.round(a1 * 1e4) / 1e4,
+                              span: Math.round(c.span * 1e4) / 1e4,
+                              open: Math.round((c.geom > 1e-6 ? c.live / c.geom : 0) * 1e4) / 1e4,
+                              geom: Math.round(c.geom * 1e3) / 1e3,
+                              live: Math.round(c.live * 1e3) / 1e3,
+                              inner: !!c.inner };
+          }
           var t = sweepAngle(a0 + (a1 - a0) * sl.u - gap / 2);
           // Highlighted notes step outward by HL_PUSH rows. Applied here rather than
           // in the packing so it changes nothing about rows, capacities or wedge
@@ -2153,6 +2194,21 @@ function mountVaultGraph(root, data, deps) {
   var pinnedPlan = null;     // plan held still for the duration of one cascade
   var planMs = 0;            // cost of the last plan build, for measurement
   var lastGapN = { i: 0, o: 0 };   // continuous group count per band, behind the gap total
+  // The RENDERED allocation's own numbers, which are the ones that place wedges: the
+  // continuous group count it reserved for, and the gap angle it spent. lastGapN above
+  // comes from the REFERENCE allocation, which sizes rows and never positions anything --
+  // so it can look perfectly smooth while the arc the notes actually sit in jumps.
+  var lastGapDeg = { i: 0, o: 0 }, lastNG = { i: 0, o: 0 };
+  var lastStart = null;   // group -> wedge start angle in degrees, this frame
+  // Group presences for the GAP reservation, walked between the cascade's two packings
+  // and read by the rendered allocation. Null at rest, which is when weight-over-seats
+  // is already the right answer -- see allocateBand.
+  var gapPres = null;
+  // WHAT THE LAST CASCADE WAS ASKED TO DO. Every question about a jump starts with
+  // "did it animate at all, and over how many notes", and inferring that from frame
+  // counts is guesswork -- an instant apply and a one-frame animation look identical
+  // from outside.
+  var lastCascade = { ins: 0, outs: 0, span: 0, path: "none", frames: 0, ms: 0 };
 
   // Hold the wedge plan still while a cascade runs. visible() is already at its
   // final value the moment a filter changes, so buildWedgePlan would return the
@@ -2181,6 +2237,7 @@ function mountVaultGraph(root, data, deps) {
       WIN.clearTimeout(cascadeRun.guard);
       cascadeRun = null;
     }
+    gapPres = null;      // belongs to the run just abandoned; see allocateBand
 
     // A null plan is legitimate: "none" hides every note, so there is no
     // geometry left to lay out. The fade still has to run, with positions simply
@@ -2224,7 +2281,10 @@ function mountVaultGraph(root, data, deps) {
       to[id] = want; from[id] = now;
       (want ? ins : outs).push(id);
     });
-    if (!ins.length && !outs.length) { pinnedPlan = null; applyLayout(true); return; }
+    if (!ins.length && !outs.length) {
+      lastCascade = { ins: 0, outs: 0, span: 0, path: "instant: nothing to move", frames: 0, ms: 0 };
+      pinnedPlan = null; applyLayout(true); return;
+    }
 
     // Clockwise in BOTH directions -- notes leave in the same sweep they arrived
     // in, so the animation never runs backwards.
@@ -2243,8 +2303,15 @@ function mountVaultGraph(root, data, deps) {
     var span = Math.max(windowFor(ins.length), windowFor(outs.length))
              + FADE_FRAMES * TIME_SCALE;
     var moving = ins.concat(outs);
+    lastCascade = { ins: ins.length, outs: outs.length, span: Math.round(span * 100) / 100,
+                    path: "animated", frames: 0, ms: 0, t0: NOW() };
 
     var settle = function () {
+      if (!lastCascade.exit) lastCascade.exit = "settle() called from outside the loop";
+      // Back to weight-over-seats: at rest the seats ARE the group's own notes, so the
+      // derived reading is right and a stale override would freeze the gap at whatever
+      // the last frame happened to hold.
+      gapPres = null;
       if (cascadeRun) {
         WIN.cancelAnimationFrame(cascadeRun.raf);
         WIN.clearTimeout(cascadeRun.guard);
@@ -2320,6 +2387,9 @@ function mountVaultGraph(root, data, deps) {
 
     var rowsSrc = Object.create(null), rowsDst = Object.create(null);
     var bandSrc = Object.create(null), bandDst = Object.create(null);
+    // A group is PRESENT at an end if it has any seated weight there -- one wedge, one
+    // gap, regardless of how many notes it keeps. The union of the two ends is walked.
+    var presSrc = Object.create(null), presDst = Object.create(null), presKeys = [];
     // ONE planner, called the same way at both ends.
     //
     // The cascade's endpoints have to be *the static planner's own output* for the
@@ -2374,6 +2444,17 @@ function mountVaultGraph(root, data, deps) {
       };
       if (a) a.cells.forEach(record(rowsSrc, bandSrc));
       if (b) b.cells.forEach(record(rowsDst, bandDst));
+      var seen = Object.create(null);
+      var presFor = function (p, m) {
+        if (!p) return;
+        p.cells.forEach(function (c) {
+          if (c.wsum <= 0.0001) return;
+          m[c.g] = 1;
+          if (!seen[c.g]) { seen[c.g] = 1; presKeys.push(c.g); }
+        });
+      };
+      presFor(a, presSrc);
+      presFor(b, presDst);
     })();
 
     // The guard is a WATCHDOG on stalled frames, not a deadline. It used to be a
@@ -2427,6 +2508,17 @@ function mountVaultGraph(root, data, deps) {
       // the repack, so it has to finish exactly when the last note does.
       var pr = Math.min(1, frame / Math.max(1, span));
       var ease = pr * pr * (3 - 2 * pr);
+
+      // THE GAP RESERVATION, WALKED. Same clock as the row counts below, so a group that
+      // is leaving gives up its gap over the whole cascade and one that merely thins
+      // never gives up any of it. At ease 0 this is the packing the disc is resting in;
+      // at 1 it is what settle() assigns, so the last frame and rest agree exactly.
+      gapPres = Object.create(null);
+      for (var gi = 0; gi < presKeys.length; gi++) {
+        var gk = presKeys[gi];
+        var ps = presSrc[gk] || 0, pd = presDst[gk] || 0;
+        gapPres[gk] = ps + (pd - ps) * ease;
+      }
 
       // ONE allocation per frame, from a plan whose geometry is interpolated
       // between the two packings. Angles are therefore assigned once, in a single
@@ -2494,35 +2586,82 @@ function mountVaultGraph(root, data, deps) {
       // every frame was the reason the frame rate fell far enough for the old
       // fixed guard to fire mid-animation.
       probeSample("cascade");
+      lastCascade.frames++;
+      lastCascade.ms = Math.round(NOW() - lastCascade.t0);
       renderer.refresh({ skipIndexation: true });
       // `resid > 0.5` is the new clause: never hand over to settle() while a note is
       // still visibly short of its target. Bounded by the ramp above, so this adds a
       // few frames, not an open-ended tail.
+      // Only while something is recording: this is one object per frame in the hot loop,
+      // and the frame count and elapsed time above already answer "did it animate".
+      if (probe) lastCascade.last = { adv: Math.round(adv * 1000) / 1000, frame: Math.round(frame * 100) / 100,
+                           span: Math.round(span * 100) / 100, pr: Math.round(pr * 1000) / 1000,
+                           busy: busy, resid: Math.round(resid * 100) / 100,
+                           msPerFrame: Math.round(msPerFrame * 1000) / 1000,
+                           moving: moving.length, run: !!cascadeRun };
       if (busy || pr < 1 || resid > 0.5) cascadeRun.raf = WIN.requestAnimationFrame(step);
-      else settle();
+      else { lastCascade.exit = "converged"; settle(); }
     })();
   }
 
   /* ------------------------------------------------------------- animation */
 
-  // FRAME-BY-FRAME RADIAL PROBE. Reasoning about which band can move the other has
+  // FRAME-BY-FRAME PROBE, ON BOTH AXES. Reasoning about which band can move the other has
   // been wrong twice, so measure it: this samples each band's radial extent on every
   // animated frame, and the report gives the biggest single-frame step per band. A
   // "jump" is a large step in one frame; a smooth animation is many small ones.
+  //
+  // THE TANGENTIAL HALF WAS MISSING FOR MONTHS, and a whole class of jump with it. Every
+  // number here was a radius, so a change that left radii alone and slid every wedge round
+  // the circle measured as perfectly smooth -- which is exactly what a change in the gap
+  // reservation does. The date sliders jumped visibly while "a range change animates instead
+  // of snapping" passed, because the only thing it could see was the radius.
+  //
+  // Tangential displacement is reported in GRAPH UNITS, not degrees: a degree at the rim is
+  // four times the movement it is at the hub, and what a person sees is the distance. Only
+  // notes present in both frames count -- a note fading in has no previous position, and
+  // charging it for arriving would report a jump on every frame of every animation.
   var probe = null;
   function probeSample(tag) {
     if (!probe) return;
     var iMin = Infinity, iMax = 0, oMin = Infinity, oMax = 0, iN = 0, oN = 0;
+    var prev = probe.prevAng, now = Object.create(null);
+    var tanStep = 0, tanId = null, tanOver = 0, tanSum = 0, tanN = 0;
     graph.forEachNode(function (id, a) {
       var r = Math.hypot(a.x, a.y);
+      // Tangential step: the angle moved, times the radius it moved at.
+      if (present(id)) {
+        var th = Math.atan2(a.y, a.x);
+        now[id] = th;
+        if (prev && prev[id] !== undefined) {
+          var d = th - prev[id];
+          // Shortest way round, or a note crossing the 12 o'clock seam reports a
+          // near-full-circle jump every time it wraps.
+          while (d > Math.PI) d -= 2 * Math.PI;
+          while (d < -Math.PI) d += 2 * Math.PI;
+          var moved = Math.abs(d) * r;
+          if (moved > tanStep) { tanStep = moved; tanId = id; }
+          if (moved > 160) tanOver++;         // further than one row, in one frame
+          tanSum += moved; tanN++;
+        }
+      }
       if (bandLock && bandLock[groupOf(id)]) {
         iN++; if (r < iMin) iMin = r; if (r > iMax) iMax = r;
       } else {
         oN++; if (r < oMin) oMin = r; if (r > oMax) oMax = r;
       }
     });
+    probe.prevAng = now;
+    if (probe.watch) probe.watchSeries.push(probe.watched || null);
     probe.samples.push({
       tag: tag, ms: Math.round(NOW() - probe.t0), gapI: lastGapN.i, gapO: lastGapN.o,
+      ngI: lastNG.i, ngO: lastNG.o, gapDegI: lastGapDeg.i, gapDegO: lastGapDeg.o,
+      tanStep: Math.round(tanStep), tanId: tanId, tanOver: tanOver,
+      tanMean: Math.round(tanN ? tanSum / tanN : 0),
+      // Where each group's wedge STARTS. "The gap jumped" is precisely this series
+      // moving in a step rather than a ramp, and it is what a person sees: every
+      // wedge boundary shifting round the disc at once.
+      starts: lastStart,
       innerN: iN, innerMin: Math.round(iMin === Infinity ? 0 : iMin), innerMax: Math.round(iMax),
       outerN: oN, outerMin: Math.round(oMin === Infinity ? 0 : oMin), outerMax: Math.round(oMax)
     });
@@ -4033,10 +4172,11 @@ function mountVaultGraph(root, data, deps) {
       WIN.cancelAnimationFrame(cascadeRun.raf);
       WIN.clearTimeout(cascadeRun.guard);
       cascadeRun = null;
+      gapPres = null;    // belongs to the run just abandoned; see allocateBand
     }
     if (anim) { WIN.cancelAnimationFrame(anim); anim = null; }
     if (animGuard) { WIN.clearTimeout(animGuard); animGuard = null; }
-    pinnedPlan = null; planKeep = null;
+    pinnedPlan = null; planKeep = null; gapPres = null;
 
     // Fixed length: TIMELINE_MS whatever the frame rate, so load, Refresh and Play
     // are the same few seconds every time. A slow page shows fewer steps of the
@@ -6225,24 +6365,48 @@ function mountVaultGraph(root, data, deps) {
                     // then toggle, then probeReport() -- it names the biggest single
                     // frame step per band, which is what "a jump" actually is.
                     probe: function (on) {
-                      probe = (on === false) ? null : { t0: NOW(), samples: [] };
+                      probe = (on === false) ? null
+                        : { t0: NOW(), samples: [], prevAng: null,
+                            watch: arguments.length > 1 ? String(arguments[1]) : null,
+                            watched: null, watchSeries: [] };
                       return probe ? "recording" : "off";
                     },
                     probeReport: function () {
                       if (!probe || !probe.samples.length) return "nothing recorded -- call __vg.probe(true) first";
                       var s = probe.samples, worst = { inner: 0, outer: 0 }, at = { inner: 0, outer: 0 };
+                      var tanWorst = 0, tanAt = 0, tanWho = null, ngWorst = 0, ngAt = 0;
+                      var startWorst = 0, startAt = 0, startG = null, overWorst = 0;
                       for (var i = 1; i < s.length; i++) {
                         var di = Math.abs(s[i].innerMax - s[i - 1].innerMax);
                         var doo = Math.abs(s[i].outerMax - s[i - 1].outerMax);
                         if (di > worst.inner) { worst.inner = di; at.inner = s[i].ms; }
                         if (doo > worst.outer) { worst.outer = doo; at.outer = s[i].ms; }
+                        if (s[i].tanStep > tanWorst) { tanWorst = s[i].tanStep; tanAt = s[i].ms; tanWho = s[i].tanId; }
+                        var ds = 0, dsG = null;
+                        Object.keys(s[i].starts || {}).forEach(function (g) {
+                          var was = (s[i - 1].starts || {})[g];
+                          if (was === undefined) return;
+                          var dd = Math.abs(s[i].starts[g] - was);
+                          if (dd > 180) dd = 360 - dd;
+                          if (dd > ds) { ds = dd; dsG = g; }
+                        });
+                        if (ds > startWorst) { startWorst = ds; startAt = s[i].ms; startG = dsG; }
+                        var dng = Math.max(Math.abs(s[i].ngO - s[i - 1].ngO), Math.abs(s[i].ngI - s[i - 1].ngI));
+                        if (dng > ngWorst) { ngWorst = dng; ngAt = s[i].ms; }
                       }
                       var out = {
                         frames: s.length,
                         spanMs: s[s.length - 1].ms,
                         innerMaxStep: worst.inner, innerStepAtMs: at.inner,
                         outerMaxStep: worst.outer, outerStepAtMs: at.outer,
-                        first: s[0], last: s[s.length - 1], samples: s
+                        // The tangential jump, and the gap reservation behind it.
+                        tanMaxStep: tanWorst, tanStepAtMs: tanAt, tanStepNode: tanWho,
+                        // A wedge boundary moving in one step IS the gap jumping.
+                        startMaxStep: Math.round(startWorst * 1000) / 1000,
+                        startStepAtMs: startAt, startStepGroup: startG,
+                        ngMaxStep: Math.round(ngWorst * 1000) / 1000, ngStepAtMs: ngAt,
+                        first: s[0], last: s[s.length - 1], samples: s,
+                        watch: probe.watch, watchSeries: probe.watchSeries
                       };
                       return out;   // the caller is a console; it prints this itself
                     },
@@ -6306,6 +6470,7 @@ function mountVaultGraph(root, data, deps) {
                       state.heatEnd = iso ? heatParse(iso) : null;
                       heatBuild(); drawDateUI(); heatDraw();
                     },
+                    lastCascade: function () { return lastCascade; },
                     rangeReport: function () {
                       var lit = 0, dated = 0;
                       graph.forEachNode(function (id) {
