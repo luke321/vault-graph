@@ -31,7 +31,34 @@ published tag breaks every link to it.
 
 ## 1.5.3 — 2026-08-23
 
-Zero network calls, rather than two unreachable ones.
+Zero network calls, and a note gets dated even when nothing says so.
+
+- **A note is dated by its filename or its file stamp when the frontmatter does not say.**
+  Reported as 118 notes "undated" on a vault that does not write a `created:` field
+  ([#6](https://github.com/luke321/vault-graph/issues/6)) — which was the whole rule:
+  frontmatter `created`, then `date`, then give up. The chain is now frontmatter → a date
+  at the **front** of the filename → the file's own creation stamp. Frontmatter still wins
+  even when it is the worst answer, because it is a deliberate statement and the graph
+  should not silently disagree with the note.
+  - `min(ctime, mtime)`, not `ctime`. Sync clients, restores and copies between drives all
+    stamp creation with the copy and leave modification intact, which produces files
+    "created" long after they were last written.
+  - The filename date has to be at the front and real. `Q3 2026-08-23 review` does not
+    count — a date mid-title is as likely to be the subject as the filing date — and
+    `2026-02-31` does not count either, which now also applies to frontmatter, where an
+    impossible date could always have opened a phantom heatmap column.
+  - **The rule is one function now**, `src/dates.mjs`. Both mounts had their own copy and
+    both had the same gap; fixing that twice is how it comes back in one of them.
+  - Every build says how it dated things: `dated: 8037 from frontmatter, 842 from the
+    filename, 1123 from the file stamp, none undated`. On the 10k synthetic vault that is
+    1965 undated → 0.
+- **Refresh picks up new files — in the plugin, where it can.** The standalone page cannot
+  and never could: its data is baked in at build time, so there Refresh resets the filters
+  and replays the intro, and its tooltip now says so instead of claiming twice over to
+  "re-read the file from disk", which is where the expectation came from. In Obsidian the
+  vault is right there, so the button rebuilds from the metadata cache and remounts.
+  `scripts/refresh-check.mjs` drives the whole round trip in a real Obsidian — 454 notes,
+  write one, still 454, click Refresh, 455.
 
 - **The shipped `main.js` now contains no network request at all.** The directory's review
   reports, under **Disclosures**, how many a plugin makes — ours said **2**, and a plugin

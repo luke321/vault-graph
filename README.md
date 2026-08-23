@@ -378,6 +378,7 @@ the plugin puts them in an Obsidian view.
 | `scripts/check-scope.mjs` | asserts the page cannot style or be styled by its host |
 | `scripts/check-pii.mjs` | refuses to publish other people's names; no skip flag |
 | `scripts/check-network.mjs` | asserts nothing shipped can make a request; no skip flag |
+| `scripts/refresh-check.mjs` | drives a real Obsidian: write a note, click Refresh, is it there? |
 | `scripts/make-demo-vault.mjs` | a structural mirror of a real vault, with none of its content |
 | `scripts/make-test-vault.mjs` | a synthetic vault, deliberately awkward |
 | `scripts/shoot.mjs` | screenshots the page at rest, for comparing two commits |

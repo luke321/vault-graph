@@ -3601,7 +3601,23 @@ function mountVaultGraph(root, data, deps) {
     //
     // Resetting state directly always works, costs no reload, and -- the point --
     // always plays the animation.
+    //
+    // THE PLUGIN CAN DO BETTER, AND NOW DOES. Everything above is about a file whose
+    // data was baked in at build time -- true of the standalone page and only of the
+    // standalone page. Mounted in Obsidian the vault is right there, and the view can
+    // rebuild from the metadata cache in a few hundred milliseconds, so the host passes
+    // `onRefresh` and the button means what everybody assumed it meant: pick up what I
+    // have written since. Reported as "Refresh doesn't seem to pick up new files"
+    // (github#6), which was a fair reading of a button labelled Refresh.
+    var onRefresh = typeof deps.onRefresh === "function" ? deps.onRefresh : null;
+    if (onRefresh) {
+      $("refresh").title = "Rebuild from the vault and replay. Picks up notes written " +
+                           "since the graph was drawn, and clears every filter.";
+    }
     $("refresh").onclick = function () {
+      // The host tears this mount down and builds a new one, so there is nothing to
+      // reset here and no animation to start -- the fresh mount plays its own intro.
+      if (onRefresh) { onRefresh(); return; }
       resetView();
       fit();
       playTimeline();
