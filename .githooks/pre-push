@@ -69,6 +69,27 @@ EOF
   exit 1
 fi
 
+# NETWORK NEXT, also unskippable, and cheapest of the three. Both artifacts are offline
+# objects -- one HTML file that works off a USB stick, and a plugin that reads a private
+# vault -- and the Obsidian directory's automated review counts the network calls in the
+# shipped main.js and reports the number to users. Ours said 2 for a while (github#1).
+# A static read of ten files and two bundles, no browser, so there is nothing to skip for.
+echo "pre-push: checking nothing reaches the network..."
+if ! node "$root/scripts/check-network.mjs"; then
+  cat >&2 <<'EOF'
+
+pre-push: network check failed -- push blocked.
+
+This plugin promises to make no network requests, and the directory's review checks
+that promise on every submission. If a request is genuinely needed it must be
+disclosed to users, not slipped in. If it arrived with a vendored bundle, read what
+it does and account for it in src/vendor.mjs.
+
+There is no skip flag for this check.
+EOF
+  exit 1
+fi
+
 if [ -n "$SKIP_SMOKE" ]; then
   echo "pre-push: SKIP_SMOKE set, skipping the invariant suite"
   exit 0
