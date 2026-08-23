@@ -2256,12 +2256,23 @@ function mountVaultGraph(root, data, deps) {
           var seamArc = sm.gap * rGraph / 2;      // this side's half of the seam, in units
           var keep = EXCESS_KEEP * seamFall(isInner ? "i" : "o");
           var typ = dotTyp(isInner ? "i" : "o");
-          var side = function (e) {
-            var raw = zero + ((e || 0) - typ);        // what the boundary would have cost
+          // ONE WIDTH PER BAND, not one per row. Sizing each half of the channel from the
+          // END NOTE OF THAT ROW is exact per note and wobbly per disc, because the drawn dot
+          // is min(dotUnits, dotFit) while the room reserved here was the uncapped dotUnits --
+          // so wherever dotFit bites, the channel keeps room for a dot that never arrives.
+          // Measured on the demo vault, the room beyond a wedge's own step ran -6 to +28 units
+          // on a 160 pitch, with the two sides of one boundary disagreeing by up to 22: gaps
+          // that read as notes not reaching the seam, worst where the end notes are fattest.
+          //
+          // The band-typical dot instead. A genuinely fat end note now sits marginally closer
+          // to the channel than a typical one does, which is the trade: a channel of one
+          // visible width beats a per-note-exact one that changes every row.
+          var side = function () {
+            var raw = zero;                          // what the boundary costs, per band
             var m = zero + keep * (raw - zero + seamArc) - seamArc;
             return m < 0 ? 0 : m / rGraph;
           };
-          var mgA = side(sl.eA), mgB = side(sl.eB);
+          var mgA = side(), mgB = side();
           var room = arc * 0.66;
           if (mgA + mgB > room) {
             var k = room / (mgA + mgB);
