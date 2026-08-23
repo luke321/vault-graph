@@ -450,6 +450,31 @@ async function camReset(p) {
   await sleep(250);
 }
 
+/**
+ * Wait until the camera stops moving.
+ *
+ * fit() ANIMATES -- `camera.animate(..., { duration: 380 })` -- so a check that resets the
+ * view and then reads the camera is racing that animation. Two of these were sleeping 750ms,
+ * which is twice the duration and still lost on a loaded machine, exactly the class of failure
+ * the note on aiming at a note already records: a fixed wait fires part-way through on a page
+ * too slow to finish in time.
+ *
+ * Two identical samples rather than one, because the animation's own easing means a single
+ * pair of equal readings can happen mid-flight at low velocity.
+ */
+async function camSettle(p, ms = 4000) {
+  const deadline = Date.now() + ms;
+  let prev = null, same = 0;
+  for (;;) {
+    const c = await camState(p);
+    const key = c.x + "|" + c.y + "|" + c.ratio;
+    if (key === prev) { if (++same >= 2) return c; } else { same = 0; }
+    prev = key;
+    if (Date.now() > deadline) return c;
+    await sleep(60);
+  }
+}
+
 check("one wheel notch is a step, not a leap", async (p) => {
   // Sigma's default zoomingRatio is 1.7, so a notch multiplied the ratio by that: three
   // notches took the disc from filling the stage to a sixth of it. Reported as "zooming does
@@ -458,8 +483,7 @@ check("one wheel notch is a step, not a leap", async (p) => {
   const box = await stageBox(p);
   const a = await camState(p);
   await p.send("Input.dispatchMouseEvent", { type: "mouseWheel", x: box.cx, y: box.cy, deltaX: 0, deltaY: -120 });
-  await sleep(400);
-  const b = await camState(p);
+  const b = await camSettle(p);
   await camReset(p);
   const step = a.ratio / b.ratio;
   return {
@@ -482,8 +506,7 @@ check("dragging the stage pans the camera", async (p) => {
     await sleep(30);
   }
   await p.send("Input.dispatchMouseEvent", { type: "mouseReleased", x: box.cx - 112, y: box.cy - 64, button: "left", clickCount: 1, buttons: 0 });
-  await sleep(500);
-  const b = await camState(p);
+  const b = await camSettle(p);
   const sel = await p.j(`__vg.state.selected`);
   await camReset(p);
   return {
@@ -511,8 +534,7 @@ check("double-clicking the graph resets the view", async (p) => {
     await p.send("Input.dispatchMouseEvent", { type: "mouseReleased", x, y, button: "left", clickCount: n, buttons: 0 });
     await sleep(40);
   }
-  await sleep(750);
-  const c = await camState(p);
+  const c = await camSettle(p);
   await camReset(p);
   return {
     ok: Math.abs(c.x - 0.5) < 0.002 && Math.abs(c.y - 0.5) < 0.002 && Math.abs(c.ratio - 1.08) < 0.02,
@@ -533,8 +555,7 @@ check("the stage's reset button is present and resets", async (p) => {
   })()`);
   if (!btn) { await camReset(p); return { ok: false, detail: "no #vg-reset inside the stage" }; }
   await p.eval(`document.querySelector("#vg-reset").click(); void 0`);
-  await sleep(750);
-  const c = await camState(p);
+  const c = await camSettle(p);
   await camReset(p);
   return {
     // Position asserted as well as behaviour: "top right of the graph view" is what was
@@ -832,7 +853,16 @@ async function settle(p, ms = 6000) {
   const deadline = Date.now() + ms;
   for (;;) {
     if (!(await p.j("!!__vg.demo.busy()").catch(() => false))) return true;
-    if (Date.now() > deadline) return false;
+    if (Date.now() > deadline) {
+      // SAY WHAT IS STILL RUNNING. busy() is the OR of five things and a silent cap tells you
+      // only that one of them was true -- which turns "this check took six seconds" into a
+      // guess. Cheap, and only on the path that has already given up.
+      const who = await p.j("__vg.demo.busyWhy()").catch(() => null);
+      console.log("         ! settle gave up after " + ms + "ms, still busy: " +
+                  (who ? Object.keys(who).filter(function (k) { return who[k]; }).join(", ") || "nothing?"
+                       : "could not ask"));
+      return false;
+    }
     await sleep(120);
   }
 }
@@ -873,7 +903,21 @@ async function runOne(vault) {
     // measure a laid-out sidebar, and a software rasteriser is not the thing shipping.
     ...(HEADED ? [] : ["--window-position=-2400,0"]),
     "--window-size=1600,1000", `--app=${url}`
-  ], { stdio: "ignore", detached: false });
+  ], { stdio: ["ignore", "ignore", "pipe"], detached: false });
+
+  const chromeSaid = [];
+  if (chrome.stderr) {
+    chrome.stderr.setEncoding("utf8");
+    chrome.stderr.on("data", (d) => {
+      for (const line of String(d).split("\n")) {
+        const t = line.trim();
+        if (t) chromeSaid.push(t);
+      }
+      while (chromeSaid.length > 40) chromeSaid.shift();
+    });
+  }
+  let chromeGone = null;
+  chrome.on("exit", (code, sig) => { chromeGone = "exit " + code + (sig ? " " + sig : ""); });
 
   let page = null;
   try {
@@ -905,15 +949,55 @@ async function runOne(vault) {
     const ctx = { errors };
 
     let failed = 0;
+    const timings = [];
     for (const c of checks) {
+      // STOP AT A LOST OR WEDGED PAGE rather than running the rest against it. Every
+      // remaining check would fail, none of them for its own reason, and the report would name
+      // a dozen features as broken when the truth is one page that stopped answering.
+      //
+      // The liveness probe is one trivial eval, and it is here rather than inside the checks
+      // because what it has to establish is exactly "was the page still alive BEFORE this
+      // check ran" -- which names the check that wedged it as the previous line of output.
+      if (page.lost) {
+        console.log(`\n  !! CDP connection lost (${page.lost}) -- ` +
+                    `${checks.length - timings.length} check(s) not run`);
+        if (chromeGone) console.log(`     chrome process: ${chromeGone}`);
+        if (chromeSaid.length) {
+          console.log("     chrome said:");
+          for (const l of chromeSaid.slice(-12)) console.log("       " + l);
+        }
+        failed += checks.length - timings.length;
+        break;
+      }
+      try {
+        await page.eval("1");
+      } catch (e) {
+        const last = timings.length ? timings[timings.length - 1].name : "(before the first check)";
+        console.log(`\n  !! the page stopped answering after "${last}" -- ${e.message}`);
+        if (chromeGone) console.log(`     chrome process: ${chromeGone}`);
+        if (chromeSaid.length) {
+          console.log("     chrome said:");
+          for (const l of chromeSaid.slice(-12)) console.log("       " + l);
+        }
+        console.log(`     ${checks.length - timings.length} check(s) not run`);
+        failed += checks.length - timings.length;
+        break;
+      }
       let r;
+      const t0 = Date.now();
       try { r = await c.fn(page, ctx); }
       catch (e) { r = { ok: false, detail: "threw: " + e.message }; }
+      const ms = Date.now() - t0;
+      timings.push({ name: c.name, ms });
       if (!r.ok) failed++;
-      console.log(`${r.ok ? "  ok  " : " FAIL "} ${c.name}\n         ${r.detail}`);
+      const secs = ms >= 1000 ? ` ${(ms / 1000).toFixed(1)}s` : "";
+      console.log(`${r.ok ? "  ok  " : " FAIL "} ${c.name}${secs}\n         ${r.detail}`);
     }
 
-    console.log(`\n${checks.length - failed}/${checks.length} passed`);
+    const total = timings.reduce((a, t) => a + t.ms, 0);
+    const slow = timings.slice().sort((a, b) => b.ms - a.ms).slice(0, 5);
+    console.log(`\n${checks.length - failed}/${checks.length} passed in ${(total / 1000).toFixed(0)}s`);
+    console.log("slowest: " + slow.map((t) => `${t.name} ${(t.ms / 1000).toFixed(1)}s`).join(", "));
     return failed;
   } finally {
     if (page) page.close();
@@ -935,17 +1019,23 @@ async function runOne(vault) {
  * So the suite checks a small vault AND a large one, and it stopped being optional the day
  * a change passed at 450 notes and broke the band split at 10,000.
  *
- *   demo vault   a structural mirror of the author's real vault, names replaced
- *                (scripts/make-demo-vault.mjs). Same folder tree, same counts, same
- *                dates, same link graph -- so it exercises the real shape without
- *                carrying anyone's content. Needs a real vault to mirror.
- *   10k vault    synthetic, deliberately awkward: more top-level folders than there are
+ *   demo vault   1400 notes over two dense years, every month populated, ramping toward
+ *                the present (scripts/make-demo-vault.mjs). The shape a vault in real use
+ *                has, and the one the date ribbon is worth looking at on.
+ *   10k vault    synthetic and deliberately awkward: more top-level folders than there are
  *                colour slots, sliver folders beside a dominant one, five levels of
- *                nesting (scripts/make-test-vault.mjs). Needs nothing.
+ *                nesting, and ten years of dates (scripts/make-test-vault.mjs).
  *
- * Both are gitignored and generated on demand. The synthetic one always can be; the mirror
- * needs OBSIDIAN_VAULT, and is SKIPPED WITH A NOTICE rather than silently, because "the
- * suite passed" must never quietly mean "half the suite ran".
+ * Both are gitignored and generated on demand, and NEITHER NEEDS A VAULT OF YOURS any more.
+ * The demo vault used to be a mirror of the author's real one, which meant it needed
+ * OBSIDIAN_VAULT and was skipped with a notice when there was none -- so on a contributor's
+ * machine "the suite passed" meant half the suite ran. It is a declared structure now, so
+ * both halves always run and the skip branch is gone.
+ *
+ * THE TWO DATE SHAPES ARE THE POINT of having two, as much as the two sizes. Two dense years
+ * and a decade with a thin tail break different things: the ribbon's bar scale was tuned on
+ * one and read as a solid slab on the other, and the heatmap's 52-week window covers most of
+ * the first and a tenth of the second.
  */
 function resolveVaults() {
   const explicit = argAll("vault");
@@ -966,11 +1056,9 @@ function resolveVaults() {
     out.push({ path: dir, label });
   };
 
-  const real = process.env.VAULT_GRAPH_VAULT || process.env.OBSIDIAN_VAULT || "";
-  if (real) gen("make-demo-vault.mjs", ["--vault", real], join(ROOT, "demo-vault"), "the demo vault (mirror)");
-  else console.log("SKIPPING the demo vault: no OBSIDIAN_VAULT to mirror.");
-
-  gen("make-test-vault.mjs", ["--notes", "10000"], join(ROOT, "test-vault"), "the 10k synthetic vault");
+  gen("make-demo-vault.mjs", [], join(ROOT, "demo-vault"), "the demo vault (2 dense years)");
+  gen("make-test-vault.mjs", ["--notes", "10000", "--years", "10"],
+      join(ROOT, "test-vault"), "the 10k synthetic vault (10 years)");
 
   if (!out.length) throw new Error("no vault to check, and none could be generated");
   return out;

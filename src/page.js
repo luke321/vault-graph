@@ -5451,6 +5451,18 @@ function mountVaultGraph(root, data, deps) {
     doneTitle: DEMO_DONE_TITLE,
     storyboard: demoMode,
     busy: demoBusy,
+    /**
+     * WHICH of the five things busy() ors together is still running.
+     *
+     * busy() answers "is anything moving", which is the right question for a driver deciding
+     * whether to act. It is the wrong question for a driver that has GIVEN UP waiting: then
+     * the only useful thing to know is what it was waiting for, and a boolean cannot say.
+     * Every "settle timed out" before this was a guess between five candidates.
+     */
+    busyWhy: function () {
+      return { play: !!play, cascade: !!cascadeRun, anim: !!anim,
+               hover: !!hoverRaf, highlight: !!hlRaf };
+    },
     where: demoWhere,
     // What is hovered right now. The driver compares this against a target's `expect`
     // after a hover beat: aiming at a dot is only as good as the hit-test agreeing, and
