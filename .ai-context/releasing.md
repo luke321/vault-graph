@@ -8,8 +8,14 @@ what someone wanting to *run* this needs.
 ## One command
 
 ```powershell
-.\scriptselease.ps1 v1.4.0
+.\scripts\release.ps1 1.5.3
 ```
+
+**The version is bare semver, with no `v`.** Obsidian installs a plugin by matching the
+release tag against `manifest.json`'s `version`, which cannot carry a prefix — so a
+`v`-tagged release is one nobody can install. The script rejects a `v` with that reason,
+and rejects a version the manifest does not already claim. (Its own check said `^v...`
+until 1.5.3, which is why 1.5.0–1.5.2 were cut by hand.)
 
 It refuses to release a dirty tree (a release must be reproducible from its tag), refuses a
 version with no `## <version>` section in `CHANGELOG.md` (a version whose changes nobody
@@ -30,7 +36,7 @@ text as the release notes, so `git show <tag>` and the Release page agree.
    `dist/vault-graph-<version>.zip` containing only what is needed to run: `src/`,
    `vendor/`, `scripts/`, `assets/`, `README.md`, `LICENSE`, `CHANGELOG.md`.
 6. **Create the release** and attach it:
-   `gh release create v<version> dist/vault-graph-<version>.zip --notes-file <notes>`
+   `gh release create <version> dist/vault-graph-<version>.zip --notes-file <notes>`
 
 ## What the package must NOT contain
 

@@ -60,6 +60,16 @@ Zero network calls, rather than two unreachable ones.
   webfont is a request too, and a quieter one. Static, no browser, milliseconds, so it joins
   the PII and scope checks on `pre-push` **with no skip flag**.
 
+- **`scripts/release.ps1` can cut a release again.** Its version guard still required a
+  `v` prefix, which 1.5.0 deliberately dropped — Obsidian matches the release tag against
+  `manifest.json`'s `version`, and a manifest version must be bare semver, so a `v`-tagged
+  release is one nobody can install. The check was never updated, which is why 1.5.0–1.5.2
+  were cut by hand. It now takes bare semver, gives a `v` its own message rather than a
+  format error, and additionally refuses a version the manifest does not already claim —
+  the other half of the same rule, and otherwise invisible until a user reports the plugin
+  will not update. The path in `releasing.md` had a carriage return in place of the `r` in
+  `release.ps1`, so the one command it documents could not be copied and run.
+
 Measured: built `main.js` has 0 network primitives and 2 throwers, and a standalone page over
 a 3003-note synthetic vault has 0. Both guards fail as they should — a planted `fetch` in
 `plugin/main.js`, and a third `fetch` in a copied Sigma bundle.
