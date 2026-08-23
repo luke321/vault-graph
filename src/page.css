@@ -606,6 +606,10 @@
     position: absolute; display: block; pointer-events: none;
     transform: translate(-50%, -50%);
     opacity: .95;
+    /* The mark yields to pinned notes by fading rather than by being switched off. Timed
+       against TWEEN_MS, the same clock the note travels to the hub on, so the two halves
+       of the change finish together instead of one popping and the other gliding. */
+    transition: opacity 380ms ease;
     -webkit-mask-repeat: no-repeat; mask-repeat: no-repeat;
     -webkit-mask-position: center;  mask-position: center;
     -webkit-mask-size: contain;     mask-size: contain;

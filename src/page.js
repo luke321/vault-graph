@@ -988,6 +988,12 @@ function mountVaultGraph(root, data, deps) {
       // wedge vanished instead of closing) and it had no target position (so it
       // faded at stale coordinates on top of the reflowed disc).
       if (onlyVisible && !(planKeep || visible)(id)) return;
+      // A PINNED NOTE HAS LEFT THE RING. Without this it keeps its seat and the wedge is
+      // drawn around a hole where it used to be -- the note is in the hub and its chair is
+      // still at the table. Excluding it from the plan is what makes the ring re-densify,
+      // and it is the same mechanism a hidden note uses, minus the fade: the note is still
+      // fully present, it is just no longer part of this packing.
+      if (isPinned(id)) return;
       var g = groupOf(id), a = graph.getNodeAttributes(id);
       var split = nested && (subOrder[g] || []).length > 1 && (counts[g] || 0) >= NEST_MIN;
       var key = split ? g + SEP + subTintIndex(g, a.sub) : g;
@@ -1936,16 +1942,57 @@ function mountVaultGraph(root, data, deps) {
     return state.pinned.filter(function (id) { return graph.hasNode(id); });
   }
 
+  // The closest two hub slots get, as a fraction of the hole's radius. Written by hubPlace
+  // and read by the node reducer: it is what the dots are sized against, so that thirteen
+  // notes in the hub are drawn small enough to be thirteen notes rather than one blob.
+  var hubSep = 0;
+
   function hubPlace(out, r0, scale) {
     var ids = pinnedIds();
+    hubSep = 0;
     if (!ids.length) return;
-    // The note being dragged follows the pointer instead of its slot -- it has not been
-    // dropped yet, and snapping it to a seat mid-gesture is the drag arguing with the hand.
     var slots = hubSlots(ids.length, r0);
+    // Measured off the slots themselves rather than derived from the count, because the
+    // arrangement changes shape at 2, at 7 and again once the outer ring opens -- a formula
+    // in the count would have to know all three and would drift the moment one is retuned.
+    if (slots.length < 2) {
+      // ALONE GETS THE CAP. Deriving a "spacing" from the hole radius gave one note a
+      // smaller dot than three of them -- measured 10.93px against 11.73px -- because a
+      // ring of three sits at 0.38 of the hole and its members are further apart than
+      // HUB_R1. There is no spacing when there is nothing to space against; the only
+      // sensible answer is the largest a hub note is allowed to be.
+      hubSep = HUB_SIZE_MAX / HUB_SIZE_K;
+    } else {
+      var best = Infinity;
+      for (var a = 0; a < slots.length; a++) {
+        for (var b = a + 1; b < slots.length; b++) {
+          var d = Math.hypot(slots[a].x - slots[b].x, slots[a].y - slots[b].y);
+          if (d < best) best = d;
+        }
+      }
+      hubSep = best / r0;
+    }
     ids.forEach(function (id, k) {
+      // The note being dragged follows the pointer instead of its slot -- it has not been
+      // dropped yet, and snapping it to a seat mid-gesture is the drag arguing with the hand.
       if (nodeDrag && nodeDrag.id === id) return;
-      if (out[id] && slots[k]) out[id] = { x: slots[k].x * scale, y: slots[k].y * scale };
+      // WRITTEN UNCONDITIONALLY, not only where the ring left a position behind. A pinned
+      // note is excluded from the plan now, so under `strict` it has no entry at all and
+      // the old `if (out[id])` guard silently skipped exactly the notes this exists for.
+      if (slots[k]) out[id] = { x: slots[k].x * scale, y: slots[k].y * scale };
     });
+  }
+
+  // How much bigger a hub note is drawn than it would be on the ring.
+  //
+  // Proportional to the slot spacing, which is the only thing that keeps the ball readable
+  // across the range: one note alone can afford to be large, thirteen cannot, and the step
+  // between them is not linear in the count because the arrangement changes shape twice on
+  // the way. Clamped at both ends -- 2.8 so a lone pin does not become a planet, 1.15 so a
+  // full hub is still visibly heavier than the ring it came from.
+  var HUB_SIZE_K = 3.5, HUB_SIZE_MIN = 1.15, HUB_SIZE_MAX = 2.8;
+  function hubSizeMult() {
+    return Math.max(HUB_SIZE_MIN, Math.min(HUB_SIZE_MAX, HUB_SIZE_K * hubSep));
   }
 
   function isPinned(id) { return state.pinned.indexOf(id) >= 0; }
@@ -1961,9 +2008,26 @@ function mountVaultGraph(root, data, deps) {
     if (i >= 0) state.pinned.splice(i, 1);
     if (at === undefined || at > state.pinned.length) at = state.pinned.length;
     state.pinned.splice(at, 0, id);
+    // Evict from the front, never the note just added. The first version wrote the guard
+    // into the splice index and could drop the wrong note when the new one had landed at
+    // position 0 -- which is reachable, since `at` is an insert position.
     while (state.pinned.length > PIN_MAX) {
       state.pinned.splice(state.pinned[0] === id ? 1 : 0, 1);
     }
+    return true;
+  }
+
+  // A pinned note that a filter has taken off screen is not in the hub any more -- it is
+  // holding a slot nothing occupies, so the ball has a gap in it and the count the sizes
+  // are derived from is wrong. Released rather than hidden, because the reader can see the
+  // hub and cannot see a list of notes waiting to come back to it.
+  function dropInvisiblePins() {
+    if (!state.pinned.length) return false;
+    var keep = state.pinned.filter(function (id) {
+      return graph.hasNode(id) && willShow(id);
+    });
+    if (keep.length === state.pinned.length) return false;
+    state.pinned = keep;
     return true;
   }
 
@@ -2576,6 +2640,8 @@ function mountVaultGraph(root, data, deps) {
   // it, and the motion runs along the circumference rather than out from the hub.
   function cascade(done) {
     stopPlay();                            // a filter change interrupts playback
+    // Before the plan is pinned, since releasing a pin changes who is in the ring.
+    dropInvisiblePins();
     if (anim) { WIN.cancelAnimationFrame(anim); anim = null; }
     if (animGuard) { WIN.clearTimeout(animGuard); animGuard = null; }
     if (cascadeRun) {
@@ -3566,6 +3632,11 @@ function mountVaultGraph(root, data, deps) {
       // in-between states, not just the endpoints.
       if (!present(id)) return;
       if ((bandLock ? !!bandLock[groupOf(id)] : false) !== wantInner) return;
+      // A PINNED NOTE IS NOT ON THE RIM, whatever its coordinates say. The r > 1e-6 guard
+      // below only catches one sitting exactly at the centre; every other hub slot has a
+      // direction, so a pinned note was voting for the colour of the wedge it happens to
+      // point at -- from inside the hole, where it is nowhere near the outermost note.
+      if (isPinned(id)) return;
       var r = Math.hypot(a.x, a.y);
       if (!(r > 1e-6)) return;                       // hub notes have no direction
       var k = Math.floor(angleSweep(Math.atan2(a.y, a.x)) / (2 * Math.PI) * RING_BUCKETS);
@@ -3683,12 +3754,18 @@ function mountVaultGraph(root, data, deps) {
     // dropped -- the mark is painted UNDER sigma's canvases and the hub is where every
     // edge converges, so anything faint enough to read as a container is not visible at
     // all. Measured at 0.26 and again at 0.55; neither survived the edge tangle.
-    if (state.pinned.length) {
-      el.hidden = true;
-      var eli0 = $("logoInner");
-      if (eli0) eli0.hidden = true;
-      return;
-    }
+    // FADED, NOT HIDDEN, and the rest of the function still runs. Setting `hidden` popped
+    // the mark out on the frame the first pin landed, while the note it yielded to was
+    // still crossing the disc -- the one hard cut in an otherwise tweened change. Opacity
+    // is transitioned in page.css; the mark keeps being sized and positioned underneath so
+    // it has nowhere to jump to when it comes back.
+    //
+    // Ghosting it PERMANENTLY, so it stays as a container behind the notes, is a different
+    // idea and was spiked and dropped: the mark is painted UNDER sigma's canvases and the
+    // hub is where every edge converges, so anything faint enough to read as a container is
+    // not visible at all. Measured at 0.26 and again at 0.55; neither survived the tangle.
+    var yielded = state.pinned.length > 0;
+    el.style.opacity = yielded ? "0" : "";
     // Re-paint only when the ring's colours actually changed. This runs from
     // afterRender, so it fires on every frame of a cascade -- and assigning the same
     // background string 90 times would be 90 style recalculations for nothing.
@@ -3712,6 +3789,7 @@ function mountVaultGraph(root, data, deps) {
         if (gi !== lastGradientInner) { lastGradientInner = gi; eli.style.background = gi; }
       } else if (lastGradientInner) { lastGradientInner = ""; }
       eli.hidden = !gi;
+      eli.style.opacity = yielded ? "0" : "";   // fades with the layer beneath it
     }
     var c = renderer.graphToViewport({ x: 0, y: 0 });
     var edge = renderer.graphToViewport({ x: geomLock.r0 * UNIT, y: 0 });
@@ -3916,7 +3994,7 @@ function mountVaultGraph(root, data, deps) {
         // Forcing them on was tried and was a mistake -- it made the hub illegible past
         // three, and the pile-up then got mistaken for a capacity limit.
         if (isPinned(id)) {
-          r.size = (r.size || a.size) * 2.2;
+          r.size = (r.size || a.size) * hubSizeMult();
           r.zIndex = 3;
         }
         return r;
