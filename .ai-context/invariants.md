@@ -44,6 +44,29 @@ This failed until 2026-08-22 because the gap total counted *groups present* rath
 *weight present*, so handing over moved every wedge by one 2-degree gap: 33 graph units,
 6 screen pixels, in a single frame after the animation had converged.
 
+**It failed again until 2026-08-23, and only on a vault with a dominant folder.** A cell
+seated at weight 0 still asked for one row, because `rowsNeeded` ends in `Math.max(1, k)`
+-- and that row reaches the band balancer's split search, so the chosen hub radius came out
+differently between the two plans. Hiding a group holding 77% of the vault measured
+`leanMaxR 13` against `paddedMaxR 14`; every other group on the same vault was clean,
+because anywhere else the spurious row disappears into the maximum. `rowsNeeded` returns 0
+when there is no weight to place. Checked by `scripts/smoke.mjs` against the third fixture,
+`scripts/make-shape-vault.mjs`, which exists for this shape.
+
+**The check compares the UNION of cell keys**, counting a missing cell as zero rows. A cell
+present only in the padded plan *is* the seated zero-weight cell this is about, and
+iterating the lean plan's keys alone never compared it -- which is why the failure above
+first read as an empty `rowDiffs` beside a `maxR` that differed by a row. Counting missing
+as zero is the other half: absent and seated-at-zero-rows are the same statement, and
+comparing `undefined` against `0` fails every hidden folder on every vault.
+
+**Nothing here reaches the screen at rest.** The resting plan seats only visible notes, so
+no cell has zero weight; mid-cascade the plan is pinned and `geomLock` holds `r0`,
+`rOuter` and `maxR` -- measured `innerMaxStep 0` and `outerMaxStep 0` across 122 frames
+while hiding the dominant folder. This invariant is the guarantee, not the symptom: what it
+protects is the next change, and `geomLock` is all that stands between a violation and the
+6px jump above.
+
 ## No jump at the end of an animation
 
 `settle()` must be a no-op, not a correction. The cascade runs past progress 1 until
