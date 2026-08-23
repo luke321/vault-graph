@@ -9,7 +9,7 @@ The layout is **deterministic, not force-directed**. There is no simulation to s
 no seed to get lucky with: the same vault always draws the same picture, so the shape
 becomes something you can learn and recognise rather than a fresh tangle each time.
 
-![The disc growing from the vault's first note, a note hovered, a folder hidden, a folder and a subfolder hovered from the legend, that subfolder then clicked to push it out, three heatmap days hovered, two folders recoloured from the palette and put back, then one folder soloed](assets/demo.gif)
+![The disc growing from the vault's first note, a note hovered, a folder hidden, a folder and a subfolder hovered from the legend, that subfolder then clicked to push it out, three heatmap days hovered, two folders recoloured from the palette and put back, then one folder soloed](assets/demo.webp)
 
 
 ![Vault Graph inside Obsidian, dark theme](assets/screenshots/plugin-dark.png)
@@ -298,7 +298,7 @@ are Windows-only conveniences, not requirements:
 |---|---|---|
 | `refresh-graph.ps1` | rebuild *and* open | `node src/build-graph.mjs && open <path>` |
 | `record-demo.ps1` | record the demo to mp4 | not ported — needs `avfoundation` / `x11grab` |
-| `make-gif.ps1` | encode a take as the README GIF (15fps, 700px) | works anywhere ffmpeg does, if you port the wrapper |
+| `make-hero.ps1` | encode a take as the README hero (animated WebP, 30fps, 700px) | works anywhere ffmpeg does, if you port the wrapper |
 | `cursor.ps1` | moves the OS pointer during a recording | not ported |
 | `make-logo.ps1` | rebuild the logo mask from source art | not ported; `assets/` is prebuilt |
 
@@ -450,7 +450,7 @@ the plugin puts them in an Obsidian view.
 | `scripts/make-mirror-vault.mjs` | a structural mirror of a real vault, with none of its content |
 | `scripts/make-test-vault.mjs` | a synthetic vault, deliberately awkward |
 | `scripts/shoot.mjs` | screenshots the page at rest, for comparing two commits |
-| `scripts/record-demo.ps1`, `make-gif.ps1` | the demo recording and its encode |
+| `scripts/record-demo.ps1`, `make-hero.ps1` | the demo recording and its encode |
 | `.github/workflows/branch-policy.yml` | main only accepts pull requests from develop |
 | `.ai-context/` | architecture, invariants, and one record per decision |
 | `CHANGELOG.md` | what shipped, per release |
