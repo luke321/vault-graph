@@ -442,6 +442,7 @@ the plugin puts them in an Obsidian view.
 | `scripts/make-test-vault.mjs` | a synthetic vault, deliberately awkward |
 | `scripts/shoot.mjs` | screenshots the page at rest, for comparing two commits |
 | `scripts/record-demo.ps1`, `make-gif.ps1` | the demo recording and its encode |
+| `.github/workflows/branch-policy.yml` | main only accepts pull requests from develop |
 | `.ai-context/` | architecture, invariants, and one record per decision |
 | `CHANGELOG.md` | what shipped, per release |
 
