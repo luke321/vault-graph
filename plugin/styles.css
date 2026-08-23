@@ -28,4 +28,12 @@
 .vault-graph-view > .vault-graph {
   height: 100%;
   min-height: 0;
+  /* THE STATUS BAR FLOATS OVER THIS CORNER. The camera cluster sits in the stage's
+   * bottom-right, which on the standalone page is empty and in Obsidian is where
+   * "1234 words" and the sync indicator live -- so at the page's own 12px the bottom
+   * button ends up underneath them. Raised here rather than in page.css because it is a
+   * fact about the HOST, and the page deliberately never learns which host it is in: it
+   * reads a number and puts its buttons that far from the edge. github#4 reported this
+   * from a real vault, its first in-app screenshot showing `fit` behind the bar. */
+  --controls-inset: 44px;
 }

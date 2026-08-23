@@ -516,6 +516,621 @@ check("a highlighted note is drawn larger", async (p) => {
   return { ok: ratio > 1.3 && ratio < 1.7, detail: `${r.before} -> ${after} (${ratio.toFixed(2)}x)` };
 });
 
+/* ----------------------------------------------------------------- camera --
+ * Panning, wheel zoom and the two ways to reset. Driven with real input, because every one of
+ * these is a gesture and three of them are sigma settings -- a constant that reads fine can
+ * still be the wrong constant, and only the input says so.
+ *
+ * These leave the camera reset, so nothing after them inherits a moved view.
+ */
+
+async function camState(p) {
+  return p.j(`(function(){ var c = __vg.renderer.getCamera().getState();
+    return { x: +c.x.toFixed(4), y: +c.y.toFixed(4), ratio: +c.ratio.toFixed(4) }; })()`);
+}
+
+async function stageBox(p) {
+  return p.j(`(function(){ var r = document.querySelector("#vg-graph").getBoundingClientRect();
+    return { left: r.left, top: r.top, w: r.width, h: r.height,
+             cx: r.left + r.width/2, cy: r.top + r.height/2 }; })()`);
+}
+
+async function camReset(p) {
+  await p.eval(`__vg.renderer.getCamera().setState({x:0.5,y:0.5,ratio:1.08,angle:0}); void 0`);
+  await sleep(250);
+}
+
+/**
+ * Wait until the camera stops moving.
+ *
+ * fit() ANIMATES -- `camera.animate(..., { duration: 380 })` -- so a check that resets the
+ * view and then reads the camera is racing that animation. Two of these were sleeping 750ms,
+ * which is twice the duration and still lost on a loaded machine, exactly the class of failure
+ * the note on aiming at a note already records: a fixed wait fires part-way through on a page
+ * too slow to finish in time.
+ *
+ * Two identical samples rather than one, because the animation's own easing means a single
+ * pair of equal readings can happen mid-flight at low velocity.
+ */
+async function camSettle(p, ms = 4000) {
+  const deadline = Date.now() + ms;
+  let prev = null, same = 0;
+  for (;;) {
+    const c = await camState(p);
+    const key = c.x + "|" + c.y + "|" + c.ratio;
+    if (key === prev) { if (++same >= 2) return c; } else { same = 0; }
+    prev = key;
+    if (Date.now() > deadline) return c;
+    await sleep(60);
+  }
+}
+
+check("one wheel notch is a step, not a leap", async (p) => {
+  // Sigma's default zoomingRatio is 1.7, so a notch multiplied the ratio by that: three
+  // notches took the disc from filling the stage to a sixth of it. Reported as "zooming does
+  // jumps that are too big", which it was.
+  await camReset(p);
+  const box = await stageBox(p);
+  const a = await camState(p);
+  await p.send("Input.dispatchMouseEvent", { type: "mouseWheel", x: box.cx, y: box.cy, deltaX: 0, deltaY: -120 });
+  const b = await camSettle(p);
+  await camReset(p);
+  const step = a.ratio / b.ratio;
+  return {
+    ok: step > 1.1 && step < 1.35,
+    detail: `ratio ${a.ratio} -> ${b.ratio}, x${step.toFixed(3)} per notch (sigma's default is 1.7)`,
+  };
+});
+
+check("dragging the stage pans the camera", async (p) => {
+  // Panning was OFF, with a listener that put the camera back to centre after every update.
+  // That is defensible while zoom is the only gesture, but it also made zoom-toward-pointer a
+  // lie: the camera was dragged back the moment it moved, so zooming in on one wedge walked
+  // it off the far edge instead.
+  await camReset(p);
+  const box = await stageBox(p);
+  const a = await camState(p);
+  await p.send("Input.dispatchMouseEvent", { type: "mousePressed", x: box.cx, y: box.cy, button: "left", clickCount: 1, buttons: 1 });
+  for (let k = 1; k <= 8; k++) {
+    await p.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: box.cx - k * 14, y: box.cy - k * 8, button: "left", buttons: 1 });
+    await sleep(30);
+  }
+  await p.send("Input.dispatchMouseEvent", { type: "mouseReleased", x: box.cx - 112, y: box.cy - 64, button: "left", clickCount: 1, buttons: 0 });
+  const b = await camSettle(p);
+  const sel = await p.j(`__vg.state.selected`);
+  await camReset(p);
+  return {
+    // The ratio must NOT move -- a pan that also zooms means the wheel and the drag are
+    // fighting over the same state -- and a pan must not read as a click on the stage, which
+    // would clear the selection every time you moved the view.
+    ok: Math.abs(b.x - a.x) + Math.abs(b.y - a.y) > 0.01 &&
+        Math.abs(b.ratio - a.ratio) < 1e-6 && sel === null,
+    detail: `camera (${a.x}, ${a.y}) -> (${b.x}, ${b.y}), ratio held at ${b.ratio}, ` +
+            `selection ${sel === null ? "untouched" : "CLEARED"}`,
+  };
+});
+
+check("double-clicking the graph resets the view", async (p) => {
+  // preventSigmaDefault() is what makes this a reset rather than a reset AND sigma's own
+  // double-click zoom. The captor emits the event and then checks that flag synchronously, so
+  // setting it in the handler is seen; without it the two fight and the camera lands
+  // somewhere neither asked for.
+  await p.eval(`__vg.renderer.getCamera().setState({x:0.28,y:0.66,ratio:4.2,angle:0}); void 0`);
+  await sleep(250);
+  const box = await stageBox(p);
+  const x = box.cx - 160, y = box.cy - 90;
+  for (const n of [1, 2]) {
+    await p.send("Input.dispatchMouseEvent", { type: "mousePressed", x, y, button: "left", clickCount: n, buttons: 1 });
+    await p.send("Input.dispatchMouseEvent", { type: "mouseReleased", x, y, button: "left", clickCount: n, buttons: 0 });
+    await sleep(40);
+  }
+  const c = await camSettle(p);
+  await camReset(p);
+  return {
+    ok: Math.abs(c.x - 0.5) < 0.002 && Math.abs(c.y - 0.5) < 0.002 && Math.abs(c.ratio - 1.08) < 0.02,
+    detail: `from (0.28, 0.66) ratio 4.2 -> (${c.x}, ${c.y}) ratio ${c.ratio}; reset is (0.5, 0.5) 1.08`,
+  };
+});
+
+// THE CLUSTER'S GEOMETRY, asserted and not just its behaviour. "Bottom-right corner, in
+// this order, and a fifth larger" is what github#4 and the follow-up asked for, and a
+// cluster that works from the wrong corner in the wrong order is a different thing. The
+// order matters most: zoom is the pair reached for repeatedly, so it has to be the far end
+// of the stack rather than next to the mode switch.
+check("the camera cluster is bottom-right, in order, and 31px", async (p) => {
+  const box = await p.j(`(function(){
+    var cam = document.querySelector("#vg-cam");
+    if (!cam) return null;
+    var g = document.querySelector("#vg-canvas").getBoundingClientRect();
+    var ids = ["vg-zin", "vg-zout", "vg-reset", "vg-pan"];
+    var out = { fromBottom: null, fromRight: null, buttons: [] };
+    var cr = cam.getBoundingClientRect();
+    out.fromBottom = Math.round(g.bottom - cr.bottom);
+    out.fromRight = Math.round(g.right - cr.right);
+    for (var i = 0; i < ids.length; i++) {
+      var b = document.getElementById(ids[i]);
+      if (!b) { out.buttons.push({ id: ids[i], missing: true }); continue; }
+      var r = b.getBoundingClientRect();
+      out.buttons.push({ id: ids[i], w: Math.round(r.width), h: Math.round(r.height),
+                         top: Math.round(r.top), label: b.getAttribute("aria-label"),
+                         svg: !!b.querySelector("svg"),
+                         inside: r.top >= cr.top - 1 && r.bottom <= cr.bottom + 1 });
+    }
+    // The old Fit button in View is gone -- one job, one control.
+    out.oldFit = !!document.querySelector("#vg-fit");
+    // AND THE CARD YIELDS. They share the right-hand gutter, and of the two it is the card
+    // that gives way: a control that relocates when a panel opens is a moving target. Forced
+    // open with more content than could ever fit rather than by clicking a hub, because the
+    // claim is about the max-height calc, not about any particular note.
+    var d = document.querySelector("#vg-detail");
+    if (d) {
+      var wasHidden = d.hasAttribute("hidden"), html = d.innerHTML;
+      d.removeAttribute("hidden");
+      d.innerHTML = new Array(400).join("<p>tall</p>");
+      var dr = d.getBoundingClientRect();
+      out.cardClears = Math.round(cr.top - dr.bottom);
+      d.innerHTML = html;
+      if (wasHidden) d.setAttribute("hidden", "");
+    }
+    return out;
+  })()`);
+  if (!box) return { ok: false, detail: "no #vg-cam inside the stage" };
+  const bad = box.buttons.filter((b) => b.missing || b.w !== 31 || b.h !== 31 || !b.svg || !b.label);
+  // Stacked top to bottom in the order declared, which is what "pan is the lowest" means.
+  let ordered = true;
+  for (let i = 1; i < box.buttons.length; i++) {
+    if (box.buttons[i].missing || box.buttons[i - 1].missing) { ordered = false; break; }
+    if (!(box.buttons[i].top > box.buttons[i - 1].top)) ordered = false;
+  }
+  return {
+    ok: bad.length === 0 && ordered && !box.oldFit &&
+        box.fromBottom >= 0 && box.fromBottom < 60 && box.fromRight >= 0 && box.fromRight < 60 &&
+        box.buttons.every((b) => b.inside) && box.cardClears > 0,
+    detail: bad.length
+      ? `wrong: ${bad.map((b) => b.missing ? b.id + " missing" : b.id + " " + b.w + "x" + b.h).join(", ")}`
+      : `${box.buttons.length} buttons at ${box.buttons[0].w}x${box.buttons[0].h}px, ` +
+        `${box.fromBottom}px from the bottom and ${box.fromRight}px from the right, ` +
+        `top-to-bottom ${box.buttons.map((b) => b.id.replace("vg-", "")).join(" ")}` +
+        `${box.oldFit ? "; #vg-fit IS STILL THERE" : "; #vg-fit gone"}` +
+        `; a full detail card clears it by ${box.cardClears}px`,
+  };
+});
+
+// FIT FITS WHAT IS THERE. The normalisation box is pinned to the full-vault extent so that
+// filtering shrinks the disc instead of the camera silently refilling the viewport every
+// frame -- right during an animation, wrong the moment somebody asks to be centred, because
+// "fit" would frame the empty ring the notes used to occupy. Two ratios, one assertion:
+// full vault must give the old constant, and a filtered disc must give a smaller number.
+check("fit zooms in when the disc has shrunk", async (p) => {
+  await p.eval(`__vg.state.hidden.folder = {}; __vg.syncAlpha(); __vg.applyLayout(false); void 0`);
+  await sleep(200);
+  await p.eval(`document.querySelector("#vg-reset").click(); void 0`);
+  const full = await camSettle(p);
+
+  // Hide everything except the two smallest groups, so the disc genuinely gets smaller.
+  const hid = await p.j(`(function(){
+    var order = __vg.groupOrder();
+    var keep = order.slice(-2);
+    var h = {};
+    order.forEach(function (g) { if (keep.indexOf(g) < 0) h[g] = true; });
+    __vg.state.hidden.folder = h; __vg.syncAlpha(); __vg.applyLayout(false);
+    var max = 0;
+    __vg.graph.forEachNode(function (id, a) {
+      if ((__vg.alpha[id] || 0) <= 0.004) return;
+      var r = Math.hypot(a.x, a.y); if (r > max) max = r;
+    });
+    return { kept: keep.length, hidden: Object.keys(h).length, extent: Math.round(max) };
+  })()`);
+  await sleep(250);
+  await p.eval(`document.querySelector("#vg-reset").click(); void 0`);
+  const small = await camSettle(p);
+
+  await p.eval(`__vg.state.hidden.folder = {}; __vg.syncAlpha(); __vg.applyLayout(false); void 0`);
+  await sleep(200);
+  await camReset(p);
+  return {
+    // Still centred either way: the box is symmetric about the origin, so this is only ever
+    // a question about the ratio.
+    ok: Math.abs(full.ratio - 1.08) < 0.02 && small.ratio < full.ratio - 0.05 &&
+        Math.abs(small.x - 0.5) < 0.002 && Math.abs(small.y - 0.5) < 0.002,
+    detail: `full vault ratio ${full.ratio}; with ${hid.hidden} of ${hid.hidden + hid.kept} ` +
+            `groups hidden the disc reaches ${hid.extent} and fit gives ${small.ratio}, ` +
+            `centred at (${small.x}, ${small.y})`,
+  };
+});
+
+// The buttons have to agree with the wheel, or the same gesture means two things. Asserted
+// against the renderer's own zoomingRatio rather than a repeated 1.2.
+check("the zoom buttons step by one wheel notch", async (p) => {
+  await camReset(p);
+  const step = await p.j(`__vg.renderer.getSetting("zoomingRatio")`);
+  const a = await camState(p);
+  await p.eval(`document.querySelector("#vg-zin").click(); void 0`);
+  const inn = await camSettle(p);
+  await p.eval(`document.querySelector("#vg-zout").click(); void 0`);
+  const back = await camSettle(p);
+  await camReset(p);
+  const got = a.ratio / inn.ratio;
+  return {
+    ok: Math.abs(got - step) < 0.02 && Math.abs(back.ratio - a.ratio) < 0.01,
+    detail: `in: ${a.ratio} -> ${inn.ratio} (x${got.toFixed(3)}, setting is ${step}); ` +
+            `out returns to ${back.ratio}`,
+  };
+});
+
+// PAN IS A MODE, and the one that can trap the camera. Sigma's Camera.validateState drops
+// x and y while panning is off, so turning it off with the disc dragged away would leave a
+// view nothing could recentre -- fit() included, since fit() sets x and y. Turning it off
+// therefore has to fly home first. Both halves are asserted: the drag stops working, and
+// the disc is back at the centre afterwards.
+check("the pan toggle locks the camera and flies home", async (p) => {
+  await camReset(p);
+  const box = await stageBox(p);
+  const on = await p.j(`document.querySelector("#vg-pan").getAttribute("aria-pressed")`);
+
+  // Drag away while pan is on, then switch it off: it should not stay off-centre.
+  await p.send("Input.dispatchMouseEvent", { type: "mousePressed", x: box.cx, y: box.cy, button: "left", clickCount: 1, buttons: 1 });
+  for (let i = 1; i <= 6; i++) {
+    await p.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: box.cx - i * 18, y: box.cy - i * 10, button: "left", buttons: 1 });
+    await sleep(25);
+  }
+  await p.send("Input.dispatchMouseEvent", { type: "mouseReleased", x: box.cx - 108, y: box.cy - 60, button: "left", clickCount: 1, buttons: 0 });
+  const moved = await camSettle(p);
+
+  await p.eval(`document.querySelector("#vg-pan").click(); void 0`);
+  const home = await camSettle(p);
+  const off = await p.j(`(function(){
+    return { pressed: document.querySelector("#vg-pan").getAttribute("aria-pressed"),
+             setting: !!__vg.renderer.getSetting("enableCameraPanning"),
+             api: !!__vg.panEnabled };
+  })()`);
+
+  // ...and a drag now does nothing.
+  await p.send("Input.dispatchMouseEvent", { type: "mousePressed", x: box.cx, y: box.cy, button: "left", clickCount: 1, buttons: 1 });
+  for (let i = 1; i <= 6; i++) {
+    await p.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: box.cx + i * 18, y: box.cy + i * 10, button: "left", buttons: 1 });
+    await sleep(25);
+  }
+  await p.send("Input.dispatchMouseEvent", { type: "mouseReleased", x: box.cx + 108, y: box.cy + 60, button: "left", clickCount: 1, buttons: 0 });
+  const locked = await camSettle(p);
+
+  await p.eval(`document.querySelector("#vg-pan").click(); void 0`);
+  await camSettle(p);
+  const back = await p.j(`document.querySelector("#vg-pan").getAttribute("aria-pressed")`);
+  await camReset(p);
+  return {
+    ok: on === "true" && off.pressed === "false" && !off.setting && !off.api &&
+        Math.abs(moved.x - 0.5) > 0.01 &&
+        Math.abs(home.x - 0.5) < 0.002 && Math.abs(home.y - 0.5) < 0.002 &&
+        Math.abs(locked.x - home.x) < 0.002 && back === "true",
+    detail: `on by default ${on}; dragged to (${moved.x}, ${moved.y}), toggling off flew home ` +
+            `to (${home.x}, ${home.y}); a drag while locked left it at (${locked.x}, ${locked.y}); ` +
+            `toggles back to ${back}`,
+  };
+});
+
+/* -------------------------------------------------------------- date range --
+ * The brush is DRIVEN, not called. Every one of these dispatches real pointer events at real
+ * pixels, because the bugs it exists to catch were all in the gesture rather than in the
+ * filter: which end a press grabs, whether the other end stays put, whether the disc waits
+ * for the release. `__vg.setRange()` exercises none of that -- it was green while grabbing
+ * one handle dragged both.
+ *
+ * These run LAST and each one leaves the range clear, so nothing above can be affected by
+ * the order the suite happens to run in.
+ */
+
+// The ribbon's three lanes, so a press can be aimed at one of them. Mirrors the constants in
+// page.js; a mismatch shows up as a check aiming at the wrong lane rather than as a wrong
+// number, which is why each helper reports what it hit.
+const RIB_BARS = 26, RIB_TRACK = 11;
+
+async function ribbonBox(p) {
+  return p.j(`(function(){
+    var r = document.querySelector("#vg-ribbon").getBoundingClientRect();
+    return { left: r.left, top: r.top, w: r.width, h: r.height };
+  })()`);
+}
+
+async function rangeSnap(p) {
+  return p.j(`(function(){
+    var r = __vg.rangeReport();
+    return { from: r.from, to: r.to, lit: r.lit, total: r.total,
+             fromISO: r.from ? new Date(r.from).toISOString().slice(0,10) : null,
+             toISO: r.to ? new Date(r.to).toISOString().slice(0,10) : null,
+             winStart: new Date(__vg.heat.start).toISOString().slice(0,10),
+             winEnd: new Date(__vg.heat.start + __vg.heat.cols * 7 * 86400000).toISOString().slice(0,10) };
+  })()`);
+}
+
+/** Press, move in steps, release. Steps matter: the handler ignores anything under 3px. */
+async function ribbonDrag(p, box, x0, x1, y) {
+  await p.send("Input.dispatchMouseEvent",
+    { type: "mousePressed", x: box.left + x0, y: y, button: "left", clickCount: 1, buttons: 1 });
+  for (let k = 1; k <= 6; k++) {
+    await p.send("Input.dispatchMouseEvent",
+      { type: "mouseMoved", x: box.left + x0 + (x1 - x0) * (k / 6), y: y, button: "left", buttons: 1 });
+    await sleep(45);
+  }
+  await p.send("Input.dispatchMouseEvent",
+    { type: "mouseReleased", x: box.left + x1, y: y, button: "left", clickCount: 1, buttons: 0 });
+  // A beat BEFORE settle: it returns at once when busy is already false, and right after the
+  // release the cascade has not started yet, so waiting first would wait past it.
+  await sleep(150);
+  await settle(p);
+  await sleep(120);
+  return rangeSnap(p);
+}
+
+async function clearRange(p) {
+  await p.eval(`__vg.setRange(null, null); __vg.setHeatEnd(null); void 0`);
+  await sleep(150);
+  await settle(p);
+}
+
+check("a drag on the ribbon caps the date range", async (p) => {
+  await clearRange(p);
+  const box = await ribbonBox(p);
+  const before = await rangeSnap(p);
+  const r = await ribbonDrag(p, box, Math.round(box.w * 0.25), Math.round(box.w * 0.55), box.top + 12);
+  await clearRange(p);
+  return {
+    ok: r.fromISO !== null && r.toISO !== null && r.fromISO < r.toISO && r.lit < before.lit,
+    detail: `${r.fromISO} -> ${r.toISO}, lit ${before.lit} -> ${r.lit} of ${r.total}`,
+  };
+});
+
+check("dragging one brush edge leaves the other alone", async (p) => {
+  // THE BUG THIS PINS. Every press used to start a new brush anchored where the pointer went
+  // down, with the far end following it -- so grabbing the left handle moved the right one
+  // too. Both directions are checked, because an anchor that is wrong one way round is easy
+  // to write and the symptom only shows on one of the two edges.
+  await clearRange(p);
+  const box = await ribbonBox(p);
+  const y = box.top + 12;
+  const a = await ribbonDrag(p, box, Math.round(box.w * 0.30), Math.round(box.w * 0.60), y);
+
+  const xAt = async (ms) => p.j(`(function(){
+    var d = __vg.dateSpan, w = document.querySelector("#vg-ribbon").getBoundingClientRect().width;
+    return ((${ms} - d.lo) / (d.hi - d.lo)) * w; })()`);
+
+  const b = await ribbonDrag(p, box, Math.round(await xAt(a.from)), Math.round(await xAt(a.from) - box.w * 0.1), y);
+  const leftOk = b.to === a.to && b.from < a.from;
+
+  const c = await ribbonDrag(p, box, Math.round(await xAt(b.to)), Math.round(await xAt(b.to) + box.w * 0.08), y);
+  const rightOk = c.from === b.from && c.to > b.to;
+
+  await clearRange(p);
+  return {
+    ok: leftOk && rightOk,
+    detail: `left edge ${a.fromISO}->${b.fromISO} (far end ${leftOk ? "held" : "MOVED"}), ` +
+            `right edge ${b.toISO}->${c.toISO} (far end ${rightOk ? "held" : "MOVED"})`,
+  };
+});
+
+check("dragging inside the brush pans it and keeps its width", async (p) => {
+  await clearRange(p);
+  const box = await ribbonBox(p);
+  const y = box.top + 12;
+  const a = await ribbonDrag(p, box, Math.round(box.w * 0.30), Math.round(box.w * 0.50), y);
+  const mid = Math.round(box.w * 0.40);
+  const b = await ribbonDrag(p, box, mid, mid + Math.round(box.w * 0.08), y);
+  const wA = a.to - a.from, wB = b.to - b.from;
+  await clearRange(p);
+  return {
+    // A day of slack: the pan is clamped to the span and the ends quantise to pixels.
+    ok: Math.abs(wA - wB) <= 86400000 && b.from > a.from,
+    detail: `width ${Math.round(wA / 86400000)}d -> ${Math.round(wB / 86400000)}d, ` +
+            `moved to ${b.fromISO} -> ${b.toISO}`,
+  };
+});
+
+check("the band's window and the brush move independently", async (p) => {
+  // They were one control: the window followed whichever brush end was dragged, so it could
+  // not be placed deliberately -- the next nudge of the brush took it back. Checked BOTH
+  // ways, since either direction of coupling would be a regression.
+  await clearRange(p);
+  const box = await ribbonBox(p);
+  const yBars = box.top + 12, yTrack = box.top + RIB_BARS + 5;
+  const a = await ribbonDrag(p, box, Math.round(box.w * 0.25), Math.round(box.w * 0.50), yBars);
+  const b = await ribbonDrag(p, box, Math.round(box.w * 0.90), Math.round(box.w * 0.62), yTrack);
+  const winMoved = b.winEnd !== a.winEnd && b.from === a.from && b.to === a.to;
+
+  const xAt = async (ms) => p.j(`(function(){
+    var d = __vg.dateSpan, w = document.querySelector("#vg-ribbon").getBoundingClientRect().width;
+    return ((${ms} - d.lo) / (d.hi - d.lo)) * w; })()`);
+  const c = await ribbonDrag(p, box, Math.round(await xAt(b.from)), Math.round(await xAt(b.from) - box.w * 0.09), yBars);
+  const brushMoved = c.from < b.from && c.winEnd === b.winEnd;
+
+  await clearRange(p);
+  return {
+    ok: winMoved && brushMoved,
+    detail: `window ${a.winEnd} -> ${b.winEnd} (brush ${winMoved ? "held" : "MOVED"}), ` +
+            `brush ${b.fromISO} -> ${c.fromISO} (window ${brushMoved ? "held" : "MOVED"})`,
+  };
+});
+
+check("a press on the window track centres the window there", async (p) => {
+  // Dragging the pill across a decade to reach one year is a lot of mouse, so a press on the
+  // track is a jump too -- and it CENTRES rather than landing the window's end on the pointer.
+  // The end-at-pointer version put the whole pill to the left of the hand, so the thing being
+  // dragged was somewhere other than where the cursor was.
+  //
+  // Asserted as "the date under the pointer is the middle of what the grid shows", within a
+  // couple of weeks: the window's end quantises to a Monday and is clamped at today, so an
+  // exact midpoint is not available at either extreme.
+  await clearRange(p);
+  const box = await ribbonBox(p);
+  const yBars = box.top + 12, yTrack = box.top + RIB_BARS + 5;
+  const a = await ribbonDrag(p, box, Math.round(box.w * 0.30), Math.round(box.w * 0.55), yBars);
+  const frac = 0.35;
+  const x = box.left + Math.round(box.w * frac);
+  await p.send("Input.dispatchMouseEvent", { type: "mousePressed", x: x, y: yTrack, button: "left", clickCount: 1, buttons: 1 });
+  await p.send("Input.dispatchMouseEvent", { type: "mouseReleased", x: x, y: yTrack, button: "left", clickCount: 1, buttons: 0 });
+  await sleep(200);
+  await settle(p);
+  const b = await rangeSnap(p);
+  const aim = await p.j(`(function(){
+    var d = __vg.dateSpan;
+    var ms = d.lo + (d.hi - d.lo) * ${frac};
+    var mid = __vg.heat.start + (__vg.heat.cols * 7 * 86400000) / 2;
+    return { aimISO: new Date(ms).toISOString().slice(0,10),
+             midISO: new Date(mid).toISOString().slice(0,10),
+             offDays: Math.round(Math.abs(mid - ms) / 86400000) };
+  })()`);
+  await clearRange(p);
+  return {
+    ok: b.winEnd !== a.winEnd && b.from === a.from && b.to === a.to && aim.offDays <= 14,
+    detail: `pressed at ${aim.aimISO}, window centred on ${aim.midISO} (${aim.offDays}d off); ` +
+            `brush ${b.from === a.from && b.to === a.to ? "held" : "MOVED"}`,
+  };
+});
+
+check("the disc waits for the release", async (p) => {
+  // THE SMOOTHNESS FIX, as a property rather than as a frame rate. A drag previews on the
+  // ribbon and must not touch the disc: the first version put a full cascade on every
+  // pointermove and the second a full layout, and at 10k notes both lag the cursor. So the
+  // opacities may not move until the button comes up.
+  await clearRange(p);
+  const box = await ribbonBox(p);
+  const y = box.top + 12;
+  const x0 = Math.round(box.w * 0.30), x1 = Math.round(box.w * 0.60);
+  const litOf = () => p.j(`(function(){ var n = 0;
+    __vg.graph.forEachNode(function(id){ if ((__vg.alpha[id]||0) > 0.004) n++; }); return n; })()`);
+
+  const before = await litOf();
+  await p.send("Input.dispatchMouseEvent", { type: "mousePressed", x: box.left + x0, y: y, button: "left", clickCount: 1, buttons: 1 });
+  for (let k = 1; k <= 6; k++) {
+    await p.send("Input.dispatchMouseEvent",
+      { type: "mouseMoved", x: box.left + x0 + (x1 - x0) * (k / 6), y: y, button: "left", buttons: 1 });
+    await sleep(45);
+  }
+  const during = await litOf();
+  // ...and the handles ARE following, or "nothing moved" would pass for the wrong reason.
+  const previewing = await p.j(`(function(){
+    var t = document.querySelector("#vg-rtip");
+    return !t.hidden && /\\d{4}-\\d{2}-\\d{2}/.test(t.textContent); })()`);
+  await p.send("Input.dispatchMouseEvent", { type: "mouseReleased", x: box.left + x1, y: y, button: "left", clickCount: 1, buttons: 0 });
+  await settle(p);
+  const after = await litOf();
+  await clearRange(p);
+  return {
+    ok: during === before && after < before && previewing,
+    detail: `lit ${before} during drag ${during} (${during === before ? "untouched" : "MOVED"}), ` +
+            `after release ${after}; tooltip ${previewing ? "tracking" : "ABSENT"}`,
+  };
+});
+
+check("All dates clears the range and the window", async (p) => {
+  const box = await ribbonBox(p);
+  await ribbonDrag(p, box, Math.round(box.w * 0.30), Math.round(box.w * 0.55), box.top + 12);
+  await p.eval(`document.querySelector("#vg-rangeall").click(); void 0`);
+  await settle(p);
+  const r = await p.j(`(function(){ var r = __vg.rangeReport();
+    return { from: r.from, to: r.to, heatEnd: r.heatEnd, lit: r.lit, total: r.total,
+             disabled: !!document.querySelector("#vg-rangeall").disabled }; })()`);
+  return {
+    ok: r.from === null && r.to === null && r.heatEnd === null && r.lit === r.total && r.disabled,
+    detail: `from/to/heatEnd null, ${r.lit} of ${r.total} lit, button ` +
+            (r.disabled ? "disabled" : "STILL LIVE"),
+  };
+});
+
+check("a range change animates instead of snapping", async (p) => {
+  // THE JUMP, pinned. The cascade planned its destination from visible(), which knows about
+  // hidden groups and nothing else -- so with a date range applied planA and planB were the
+  // same packing, the cascade had nothing to walk between, and the whole change landed in a
+  // single frame. Measured before the fix: 1 frame over 6ms. It was not a rough animation, it
+  // was no animation.
+  //
+  // Two assertions, because either alone passes for the wrong reason: it has to take real
+  // frames, AND settle() has to be a no-op at the end of them. A long animation that then
+  // snaps is the other half of the same bug.
+  await clearRange(p);
+  await p.eval(`__vg.probe(true); void 0`);
+  await p.eval(`__vg.setRange("2018-01-01", "2021-01-01"); void 0`);
+  await sleep(200);
+  await settle(p);
+  await sleep(250);
+  const r = await p.j(`__vg.probeReport()`);
+  await p.eval(`__vg.probe(false); void 0`);
+  await clearRange(p);
+  return {
+    // A row is 160 graph units and RADIAL_EASE moves at most a quarter of one per frame, so
+    // anything at or under 40 is the animation working. The frame floor is deliberately low:
+    // this is a check against snapping, not a frame-rate budget.
+    ok: r.frames > 20 && r.outerMaxStep <= 40 && r.innerMaxStep <= 40,
+    detail: `${r.frames} frames over ${r.spanMs}ms, biggest single-frame step: outer ` +
+            `${r.outerMaxStep}, inner ${r.innerMaxStep} (one row = 160)`,
+  };
+});
+
+// THE GAP RESERVATION IS THE PLANNER'S, NOT THE LIVE WEIGHTS'. A group that keeps 30 of
+// its 100 notes is still one wedge entitled to one gap, but presence was read as weight over
+// seats -- and during a cascade the seats are the OLD plan's, so it read 0.3 while the
+// departing 70 were still seated and 1.0 the moment they left. Every wedge boundary on the
+// disc moved twice for a change that should not have touched the gap at all.
+//
+// A legend toggle cannot show this, which is why it shipped: hiding a folder takes all of it
+// to zero together, so presence runs 1 -> 0 cleanly. Only a filter that thins groups without
+// emptying them separates the two readings, and the date range is the first one this page has.
+//
+// The assertion is EXACTLY ZERO, not a tolerance. The reservation is now walked between the
+// two packings by cascade progress, and for a change that empties no group both ends are the
+// same number -- so any movement at all means it is being derived again.
+check("the gap reservation holds still while groups only thin", async (p) => {
+  await clearRange(p);
+  const before = await p.j(`__vg.rangeReport()`);
+  await p.eval(`__vg.probe(true); void 0`);
+  // A span wide enough that every folder keeps some notes -- the point is thinning, not
+  // emptying. Asserted below rather than assumed, since a vault could be shaped otherwise.
+  await p.eval(`__vg.setRange("2025-03-01", null); void 0`);
+  await sleep(200);
+  await settle(p);
+  await sleep(250);
+  const r = await p.j(`__vg.probeReport()`);
+  await p.eval(`__vg.probe(false); void 0`);
+  const after = await p.j(`__vg.rangeReport()`);
+  await clearRange(p);
+  const s0 = r.samples[0], s1 = r.samples[r.samples.length - 1];
+  const emptied = s0.ngO !== s1.ngO || s0.ngI !== s1.ngI;
+  if (r.frames < 5) {
+    return { ok: false, detail: `only ${r.frames} frame(s) -- nothing was animated to measure` };
+  }
+  return {
+    // Emptying a group legitimately moves the reservation, so a vault where this range
+    // empties one is reported rather than silently passing on a weaker assertion.
+    ok: r.ngMaxStep === 0 && !emptied,
+    detail: emptied
+      ? `this range empties a group (nG ${s0.ngO} -> ${s1.ngO}), so the gap moves for a real reason`
+      : `nG held at ${s1.ngO} across ${r.frames} frames, worst step ${r.ngMaxStep}; ` +
+        `lit ${before.lit} -> ${after.lit}`,
+  };
+});
+
+check("undated notes survive every range", async (p) => {
+  // Deliberate, and worth pinning because it is the kind of rule that gets tidied away: 20%
+  // of the 10k fixture carries no frontmatter, and excluding those from a date range would
+  // make a date filter quietly also filter on "has frontmatter".
+  const r = await p.j(`(function(){
+    __vg.setRange("2019-01-01", "2019-01-02");
+    var undated = 0, lit = 0;
+    __vg.graph.forEachNode(function(id, a){ if (!a.created) undated++; });
+    return { undated: undated };
+  })()`);
+  await settle(p);
+  const lit = await p.j(`(function(){ var n = 0;
+    __vg.graph.forEachNode(function(id, a){ if (!a.created && (__vg.alpha[id]||0) > 0.004) n++; });
+    return n; })()`);
+  await clearRange(p);
+  return {
+    ok: r.undated === 0 || lit === r.undated,
+    detail: r.undated === 0
+      ? "no undated notes in this vault -- nothing to check"
+      : `${lit} of ${r.undated} undated notes lit inside a two-day range`,
+  };
+});
+
 // COLOUR IS OTHERWISE OUT OF SCOPE HERE, and this one is in anyway, because it is not
 // about how it looks: it is about blast radius, and it has broken twice. Both times the
 // automatic assignment stopped being a pure function of position -- first by claiming
@@ -583,7 +1198,16 @@ async function settle(p, ms = 6000) {
   const deadline = Date.now() + ms;
   for (;;) {
     if (!(await p.j("!!__vg.demo.busy()").catch(() => false))) return true;
-    if (Date.now() > deadline) return false;
+    if (Date.now() > deadline) {
+      // SAY WHAT IS STILL RUNNING. busy() is the OR of five things and a silent cap tells you
+      // only that one of them was true -- which turns "this check took six seconds" into a
+      // guess. Cheap, and only on the path that has already given up.
+      const who = await p.j("__vg.demo.busyWhy()").catch(() => null);
+      console.log("         ! settle gave up after " + ms + "ms, still busy: " +
+                  (who ? Object.keys(who).filter(function (k) { return who[k]; }).join(", ") || "nothing?"
+                       : "could not ask"));
+      return false;
+    }
     await sleep(120);
   }
 }
@@ -665,7 +1289,21 @@ async function runOne(vault) {
     // measure a laid-out sidebar, and a software rasteriser is not the thing shipping.
     ...(HEADED ? [] : ["--window-position=-2400,0"]),
     "--window-size=1600,1000", `--app=${url}`
-  ], { stdio: "ignore", detached: false });
+  ], { stdio: ["ignore", "ignore", "pipe"], detached: false });
+
+  const chromeSaid = [];
+  if (chrome.stderr) {
+    chrome.stderr.setEncoding("utf8");
+    chrome.stderr.on("data", (d) => {
+      for (const line of String(d).split("\n")) {
+        const t = line.trim();
+        if (t) chromeSaid.push(t);
+      }
+      while (chromeSaid.length > 40) chromeSaid.shift();
+    });
+  }
+  let chromeGone = null;
+  chrome.on("exit", (code, sig) => { chromeGone = "exit " + code + (sig ? " " + sig : ""); });
 
   let page = null;
   try {
@@ -738,15 +1376,55 @@ async function runOne(vault) {
     const ctx = { errors };
 
     let failed = 0;
+    const timings = [];
     for (const c of checks) {
+      // STOP AT A LOST OR WEDGED PAGE rather than running the rest against it. Every
+      // remaining check would fail, none of them for its own reason, and the report would name
+      // a dozen features as broken when the truth is one page that stopped answering.
+      //
+      // The liveness probe is one trivial eval, and it is here rather than inside the checks
+      // because what it has to establish is exactly "was the page still alive BEFORE this
+      // check ran" -- which names the check that wedged it as the previous line of output.
+      if (page.lost) {
+        console.log(`\n  !! CDP connection lost (${page.lost}) -- ` +
+                    `${checks.length - timings.length} check(s) not run`);
+        if (chromeGone) console.log(`     chrome process: ${chromeGone}`);
+        if (chromeSaid.length) {
+          console.log("     chrome said:");
+          for (const l of chromeSaid.slice(-12)) console.log("       " + l);
+        }
+        failed += checks.length - timings.length;
+        break;
+      }
+      try {
+        await page.eval("1");
+      } catch (e) {
+        const last = timings.length ? timings[timings.length - 1].name : "(before the first check)";
+        console.log(`\n  !! the page stopped answering after "${last}" -- ${e.message}`);
+        if (chromeGone) console.log(`     chrome process: ${chromeGone}`);
+        if (chromeSaid.length) {
+          console.log("     chrome said:");
+          for (const l of chromeSaid.slice(-12)) console.log("       " + l);
+        }
+        console.log(`     ${checks.length - timings.length} check(s) not run`);
+        failed += checks.length - timings.length;
+        break;
+      }
       let r;
+      const t0 = Date.now();
       try { r = await c.fn(page, ctx); }
       catch (e) { r = { ok: false, detail: "threw: " + e.message }; }
+      const ms = Date.now() - t0;
+      timings.push({ name: c.name, ms });
       if (!r.ok) failed++;
-      console.log(`${r.ok ? "  ok  " : " FAIL "} ${c.name}\n         ${r.detail}`);
+      const secs = ms >= 1000 ? ` ${(ms / 1000).toFixed(1)}s` : "";
+      console.log(`${r.ok ? "  ok  " : " FAIL "} ${c.name}${secs}\n         ${r.detail}`);
     }
 
-    console.log(`\n${checks.length - failed}/${checks.length} passed`);
+    const total = timings.reduce((a, t) => a + t.ms, 0);
+    const slow = timings.slice().sort((a, b) => b.ms - a.ms).slice(0, 5);
+    console.log(`\n${checks.length - failed}/${checks.length} passed in ${(total / 1000).toFixed(0)}s`);
+    console.log("slowest: " + slow.map((t) => `${t.name} ${(t.ms / 1000).toFixed(1)}s`).join(", "));
     return failed;
   } finally {
     // ORDER MATTERS HERE, and getting it wrong is invisible.
@@ -846,32 +1524,39 @@ async function killBrowser(child, PORT) {
 
 /* ------------------------------------------------------- which vaults, and why
  *
- * TWO SHAPES, BY DEFAULT. Every constant in this project was tuned against one vault --
+ * THREE SHAPES, BY DEFAULT. Every constant in this project was tuned against one vault --
  * ~450 notes, nine top-level folders, one dominant folder -- and the ones that look most
  * like arbitrary tuning are exactly the ones another shape breaks: twelve colour slots, three
  * named tint slots, a 6-degree minimum wedge, a 52-week heatmap window, and a band
  * balancer that has to satisfy three requirements it cannot always satisfy at once.
  *
- * So the suite checks a small vault AND a large one, and it stopped being optional the day
- * a change passed at 450 notes and broke the band split at 10,000.
+ * So the suite checks a small vault AND a large one AND a lopsided one, and it stopped being
+ * optional the day a change passed at 450 notes and broke the band split at 10,000.
  *
- *   demo vault   a structural mirror of the author's real vault, names replaced
- *                (scripts/make-demo-vault.mjs). Same folder tree, same counts, same
- *                dates, same link graph -- so it exercises the real shape without
- *                carrying anyone's content. Needs a real vault to mirror.
- *   10k vault    synthetic, deliberately awkward: more top-level folders than there are
+ *   demo vault   1400 notes over two dense years, every month populated, ramping toward
+ *                the present (scripts/make-demo-vault.mjs). The shape a vault in real use
+ *                has, and the one the date ribbon is worth looking at on.
+ *   10k vault    synthetic and deliberately awkward: more top-level folders than there are
  *                colour slots, sliver folders beside a dominant one, five levels of
- *                nesting (scripts/make-test-vault.mjs). Needs nothing.
+ *                nesting, and ten years of dates (scripts/make-test-vault.mjs).
  *   shape vault  954 notes where ONE GROUP HOLDS 77% and a single unlinked note sits at
- *                the vault root (scripts/make-shape-vault.mjs). Needs nothing. Added
- *                after a reported vault failed three checks that both shapes above
- *                passed (github#5): neither has a dominant group, so a spurious row
- *                vanishes into the maximum instead of moving the outer radius, and
- *                neither has an unlinked note sorting ahead of every real folder.
+ *                the vault root (scripts/make-shape-vault.mjs). Added after a reported
+ *                vault failed three checks that both shapes above passed (github#5):
+ *                neither has a dominant group, so a spurious row vanishes into the
+ *                maximum instead of moving the outer radius, and neither has an unlinked
+ *                note sorting ahead of every real folder.
  *
- * All three are gitignored and generated on demand. The two synthetics always can be; the
- * mirror needs OBSIDIAN_VAULT, and is SKIPPED WITH A NOTICE rather than silently, because
- * "the suite passed" must never quietly mean "half the suite ran".
+ * All three are gitignored and generated on demand, and NONE NEEDS A VAULT OF YOURS. The
+ * demo vault used to be a mirror of the author's real one, which meant it needed
+ * OBSIDIAN_VAULT and was skipped with a notice when there was none -- so on a contributor's
+ * machine "the suite passed" meant part of the suite ran. It is a declared structure now, so
+ * every shape always runs and the skip branch is gone. The mirror still exists as an opt-in
+ * (scripts/make-mirror-vault.mjs) for checking against a real vault on purpose.
+ *
+ * THE TWO DATE SHAPES ARE THE POINT of having them, as much as the sizes. Two dense years
+ * and a decade with a thin tail break different things: the ribbon's bar scale was tuned on
+ * one and read as a solid slab on the other, and the heatmap's 52-week window covers most of
+ * the first and a tenth of the second.
  */
 function resolveVaults() {
   const explicit = argAll("vault");
@@ -892,11 +1577,9 @@ function resolveVaults() {
     out.push({ path: dir, label });
   };
 
-  const real = process.env.VAULT_GRAPH_VAULT || process.env.OBSIDIAN_VAULT || "";
-  if (real) gen("make-demo-vault.mjs", ["--vault", real], join(ROOT, "demo-vault"), "the demo vault (mirror)");
-  else console.log("SKIPPING the demo vault: no OBSIDIAN_VAULT to mirror.");
-
-  gen("make-test-vault.mjs", ["--notes", "10000"], join(ROOT, "test-vault"), "the 10k synthetic vault");
+  gen("make-demo-vault.mjs", [], join(ROOT, "demo-vault"), "the demo vault (2 dense years)");
+  gen("make-test-vault.mjs", ["--notes", "10000", "--years", "10"],
+      join(ROOT, "test-vault"), "the 10k synthetic vault (10 years)");
   gen("make-shape-vault.mjs", [], join(ROOT, "shape-vault"), "the dominant-folder vault");
 
   if (!out.length) throw new Error("no vault to check, and none could be generated");
