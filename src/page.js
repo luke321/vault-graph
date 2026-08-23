@@ -1647,6 +1647,29 @@ function mountVaultGraph(root, data, deps) {
   // How many notes' worth of ramp a note gets as the cutoff passes it. Ranks, not
   // days, for the same reason the slider is: it keeps the fade even whether the
   // vault gained one note that month or two hundred.
+  /**
+   * Does this note survive EVERY filter, not just the legend's?
+   *
+   * `visible()` answers one question -- is its group and its subfolder chain unhidden -- and
+   * that was the whole answer for as long as it was the only filter. The timeline cutoff and
+   * the date range both live in timeFactor instead, multiplied into opacity, which is what
+   * lets them animate without a clause in visible().
+   *
+   * THE CASCADE PLANS WITH THIS, NOT WITH visible(). Its destination packing has to be the
+   * one settle() will actually assign, and settle assigns whatever the packer derives from
+   * the SETTLED OPACITIES -- so a note the date range excludes has no seat there. Planning
+   * with visible() gave it one, so the animation walked toward a disc that still seated the
+   * excluded notes and then re-densified in a single frame at the end.
+   *
+   * That is the jump, and it only appeared when a change REDUCED the note count: adding notes
+   * back means the seats planB reserved are the seats they end up in, so the two agreed by
+   * luck in that direction.
+   *
+   * The epsilon matches present(): a note part-way through a timeline ramp is on screen and
+   * belongs in the packing, and only one at rest at zero does not.
+   */
+  function willShow(id) { return visible(id) && timeFactor(id) > 0.004; }
+
   var TL_FADE = 8;
   function timeFactor(id) {
     // THE DATE CAP FIRST, because it is a hard bound and the rank cutoff is a ramp: a note
@@ -1828,7 +1851,9 @@ function mountVaultGraph(root, data, deps) {
     fullRing = false;
     graph.forEachNode(function (id) { if (present(id)) fullRing = true; });
 
-    planKeep = function (id) { return visible(id) || present(id); };
+    // willShow, not visible: membership is "staying, or still fading out", and "staying" has
+    // to mean staying under every filter. See willShow.
+    planKeep = function (id) { return willShow(id) || present(id); };
     var plan = pinPlan();
     // Arrival order is CLOCKWISE round the circumference. Work out where every
     // note ends up on the FINISHED disc and sort by that sweep angle: notes that
@@ -1951,7 +1976,7 @@ function mountVaultGraph(root, data, deps) {
     // the flag settle() will compute, and the contract above -- "at 1, exactly the one
     // settle() assigns" -- holds again.
     var shownAfter = 0;
-    graph.forEachNode(function (id) { if (visible(id)) shownAfter++; });
+    graph.forEachNode(function (id) { if (willShow(id)) shownAfter++; });
     var ovAfter = true;   // one basis everywhere; see REPACK_BELOW
 
     var rowsSrc = Object.create(null), rowsDst = Object.create(null);
@@ -1981,7 +2006,9 @@ function mountVaultGraph(root, data, deps) {
     };
     (function () {
       var a = staticPlan(function (id) { return wasPresent[id]; });
-      var b = staticPlan(function (id) { return visible(id); });
+      // THE DESTINATION PACKING. willShow, so it is the packing settle() will assign rather
+      // than one that still seats whatever the date range or the timeline has excluded.
+      var b = staticPlan(function (id) { return willShow(id); });
       // Also the depth of each BAND at both ends -- the deepest cell in it, which is
       // what sets the ring's outer radius. A cell that exists at only one end takes
       // this instead of its own missing count, so it matches the ring rather than

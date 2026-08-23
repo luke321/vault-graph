@@ -636,6 +636,35 @@ check("All dates clears the range and the window", async (p) => {
   };
 });
 
+check("a range change animates instead of snapping", async (p) => {
+  // THE JUMP, pinned. The cascade planned its destination from visible(), which knows about
+  // hidden groups and nothing else -- so with a date range applied planA and planB were the
+  // same packing, the cascade had nothing to walk between, and the whole change landed in a
+  // single frame. Measured before the fix: 1 frame over 6ms. It was not a rough animation, it
+  // was no animation.
+  //
+  // Two assertions, because either alone passes for the wrong reason: it has to take real
+  // frames, AND settle() has to be a no-op at the end of them. A long animation that then
+  // snaps is the other half of the same bug.
+  await clearRange(p);
+  await p.eval(`__vg.probe(true); void 0`);
+  await p.eval(`__vg.setRange("2018-01-01", "2021-01-01"); void 0`);
+  await sleep(200);
+  await settle(p);
+  await sleep(250);
+  const r = await p.j(`__vg.probeReport()`);
+  await p.eval(`__vg.probe(false); void 0`);
+  await clearRange(p);
+  return {
+    // A row is 160 graph units and RADIAL_EASE moves at most a quarter of one per frame, so
+    // anything at or under 40 is the animation working. The frame floor is deliberately low:
+    // this is a check against snapping, not a frame-rate budget.
+    ok: r.frames > 20 && r.outerMaxStep <= 40 && r.innerMaxStep <= 40,
+    detail: `${r.frames} frames over ${r.spanMs}ms, biggest single-frame step: outer ` +
+            `${r.outerMaxStep}, inner ${r.innerMaxStep} (one row = 160)`,
+  };
+});
+
 check("undated notes survive every range", async (p) => {
   // Deliberate, and worth pinning because it is the kind of rule that gets tidied away: 20%
   // of the 10k fixture carries no frontmatter, and excluding those from a date range would
