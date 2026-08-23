@@ -23,6 +23,7 @@ changing the layout or the animation.
 | `0006-zero-weight-members-must-cost-nothing` | Why a fading note must change nothing, and the gap count that broke it |
 | `0007-the-demo-drives-real-input` | Why `?demo` clicks through CDP and not `el.click()`, and the cursor that was removed |
 | `0008-zero-network-calls` | Why the vendored bundles are stripped at read time rather than patched, forked or disclosed |
+| `0009-the-host-persists-settings-not-the-page` | Settings go in and come back out; the page stores nothing, and only one host gets a gear |
 
 ### DDRs — `design/`
 
@@ -31,7 +32,7 @@ changing the layout or the animation.
 | `0001-layout-the-disc` | Wedge angles, rows, and why density is a fixed unit |
 | `0002-reveal-cascade` | The animation, and every discrete step that had to be removed |
 | `0003-subfolder-differentiation` | Tint slots, the pooled tail, the four-step ladder |
-| `0004-group-colours` | Ten slots, fixed order, stable as the vault grows |
+| `0004-group-colours` | Twelve slots, cycling, pickable per folder; archives out of the rotation |
 | `0005-labels-and-edges` | Which notes get labels; edge curvature around the hub |
 | `0006-groups-navigation` | The sidebar: eye vs label, three selection channels |
 | `0007-timeline` | Oldest-first reveal, linear in note count |

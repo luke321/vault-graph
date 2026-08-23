@@ -8,11 +8,13 @@
 // WHY THIS EXISTS. Every measurement in .ai-context/ was taken against ONE vault: ~450
 // notes, 9 top-level folders, one dominant folder. Anyone else's vault is a different
 // shape, and the constants that look like tuning are the ones most likely to break on it --
-// ten colour slots, three named tint slots, a 6-degree minimum wedge. This generates the
+// twelve colour slots, three named tint slots, a 6-degree minimum wedge. This generates the
 // shapes that vault cannot produce:
 //
-//   * MORE top-level folders than there are colour slots (10), so the neutral fallback and
-//     the wedge minimum both get exercised
+//   * MORE top-level folders than there are colour slots (12), so the palette has to wrap
+//     and the wedge minimum gets exercised. 17 folders means slots g1-g12 and then g1-g5
+//     again -- the only shape that proves the cycle, since a 9-folder vault never reaches
+//     the end of the palette at all
 //   * SLIVER folders at root with 1-3 notes, beside a folder holding a third of the vault
 //   * DEEP nesting, five levels, past the point the legend indents
 //   * MANY subfolders in one folder, past the three that get their own tint
@@ -127,7 +129,8 @@ const FOLDERS = [
     deep: { "2025-01": ["Old projects"], "2025-05": ["Old projects", "Superseded"] } },
   { name: "09 - Maps of Content", share: 0.02, kind: "moc", subs: [] },
   { name: "10 - Literature Notes", share: 0.015, kind: "literature", subs: [] },
-  // Past the ten colour slots on purpose: everything below falls to the neutrals.
+  // Past the twelve colour slots on purpose: everything below wraps to the start of the
+  // palette, so the same hue appears on two wedges and the cycle is actually exercised.
   { name: "11 - Clippings",     share: 0.01, kind: "article", subs: [] },
   { name: "12 - Journal",       share: 0.005, kind: "daily", subs: [] },
   // Slivers, beside a folder holding a quarter of the vault.

@@ -207,6 +207,9 @@ async function main() {
   await page.send("Input.dispatchMouseEvent", { type: "mouseMoved", ...at, buttons: 0 });
   cursorTo(at.x, at.y);
   console.log(`[${el()}] pointer parked at ${at.x},${at.y}`);
+  // Kept, so a {park} beat can send the pointer back to the one position this run has
+  // already PROVEN hovers nothing.
+  const parkAt = { x: at.x, y: at.y };
 
   const t0 = Date.now();
   const trace = [];
@@ -217,6 +220,15 @@ async function main() {
       await settle(page, beat.why);
       console.log(`[${el()}] ${n} settled`);
       trace.push(`settle: ${beat.why || ""}`);
+      continue;
+    }
+    // {park} -- get the pointer out of the way, so a take does not END on whatever the
+    // last click happened to leave under it. Worth a verb of its own because the position
+    // is the vetted one from startup, not a guess.
+    if (beat.park) {
+      console.log(`[${el()}] ${n} park — ${beat.why || ""}`);
+      await moveTo(page, parkAt.x, parkAt.y);
+      trace.push(`park: ${beat.why || ""}`);
       continue;
     }
     if (beat.click || beat.hover) {
