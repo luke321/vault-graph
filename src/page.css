@@ -454,21 +454,48 @@
      grid flow), so the loading cover still hides the band as well. */
   .vault-graph #vg-canvas { position: relative; overflow: hidden; }
   .vault-graph #vg-graph { position: absolute; inset: 0; }
-  /* The reset control, in the stage's own top-right corner. Quiet until wanted: the graph is
-     the subject and a lit button in front of it competes with the thing it is there to
-     restore. */
-  .vault-graph #vg-reset {
-    position: absolute; top: 10px; right: 10px; z-index: 6;
-    display: flex; align-items: center; justify-content: center;
-    width: 26px; height: 26px; padding: 0; cursor: pointer;
-    background: var(--surface-2); color: var(--text-3);
-    border: 1px solid var(--border); border-radius: 7px;
-    opacity: .55; transition: opacity .12s, color .12s, border-color .12s;
+  /* The camera cluster, in the stage's own BOTTOM-right corner (github#4). Quiet until
+     wanted: the graph is the subject, and lit buttons in front of it compete with the thing
+     they are there to move.
+
+     --controls-inset is a variable and not 10px because the host decides how much room the
+     corner really has. On the page nothing else is there; under Obsidian the status bar
+     floats over exactly this spot, so plugin/styles.css raises it and `fit` stops hiding
+     behind "1234 words". The page never learns which host it is in -- it reads a number.
+
+     --controls-h is that cluster's height, published so #vg-detail can keep clear of it.
+     Four 31px buttons and three 6px gaps. It is spelled out rather than measured because
+     the card's max-height is a CSS calc and cannot ask the DOM. */
+  .vault-graph {
+    --controls-inset: 12px;
+    --controls-h: 142px;
   }
-  .vault-graph #vg-reset:hover { opacity: 1; color: var(--text-1); border-color: var(--border-strong); }
-  .vault-graph #vg-reset:focus-visible { opacity: 1; outline: 2px solid var(--accent); outline-offset: 1px; }
+  .vault-graph #vg-cam {
+    position: absolute; right: var(--controls-inset); bottom: var(--controls-inset);
+    z-index: 6; display: flex; flex-direction: column; gap: 6px;
+  }
+  /* 31px, a fifth up from the 26px this started at: the cluster is four targets now rather
+     than one afterthought in a corner, and a 26px button is under every touch-target
+     guideline going. The icons went 14 -> 17 with it, so the glyph keeps its margin. */
+  .vault-graph #vg-cam button {
+    display: flex; align-items: center; justify-content: center;
+    width: 31px; height: 31px; padding: 0; cursor: pointer;
+    background: var(--surface-2); color: var(--text-3);
+    border: 1px solid var(--border); border-radius: 8px;
+    opacity: .55; transition: opacity .12s, color .12s, border-color .12s, background-color .12s;
+  }
+  .vault-graph #vg-cam button:hover { opacity: 1; color: var(--text-1); border-color: var(--border-strong); }
+  .vault-graph #vg-cam button:focus-visible { opacity: 1; outline: 2px solid var(--accent); outline-offset: 1px; }
+  /* Pan is a MODE, so it reads as held down rather than as just-clicked. Separated from the
+     three actions above it by a little more air, for the same reason. */
+  .vault-graph #vg-pan { margin-top: 4px; }
+  .vault-graph #vg-pan[aria-pressed="true"] {
+    opacity: .8; color: var(--accent); border-color: var(--accent);
+    background: color-mix(in oklab, var(--accent) 12%, var(--surface-2));
+  }
+  .vault-graph #vg-pan[aria-pressed="true"]:hover { opacity: 1; color: var(--accent); }
   @media (prefers-reduced-motion: reduce) {
-    .vault-graph #vg-reset { transition: none; }
+    .vault-graph #vg-cam button { transition: none; }
   }
 
   /* ---------------------------------------------------------- heatmap ----- */
@@ -604,7 +631,14 @@
     position: absolute; right: 12px; top: 12px; width: 278px; z-index: 6;
     background: var(--surface-2); border: 1px solid var(--border);
     border-radius: 9px; padding: 12px; display: block;
-    box-shadow: 0 8px 28px rgba(0,0,0,.16); max-height: calc(100% - 24px); overflow-y: auto;
+    box-shadow: 0 8px 28px rgba(0,0,0,.16); overflow-y: auto;
+    /* Stops short of the camera cluster instead of running to the bottom edge. The card and
+       the cluster share the right-hand gutter, and of the two it is the card that should
+       yield: a control that relocates when a panel opens is a moving target, which is the
+       whole reason the cluster is pinned to the corner in the first place. A hub with 200
+       links scrolls -- it already did at 24px -- so nothing is lost that was not scrolling
+       anyway. */
+    max-height: calc(100% - 28px - var(--controls-h) - var(--controls-inset));
   }
   .vault-graph #vg-detail h2 { font-size: 13px; margin: 0 22px 6px 0; line-height: 1.3; }
   .vault-graph #vg-detail .meta { font-size: 11px; color: var(--text-2); margin-bottom: 9px; }

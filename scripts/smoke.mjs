@@ -620,28 +620,180 @@ check("double-clicking the graph resets the view", async (p) => {
   };
 });
 
-check("the stage's reset button is present and resets", async (p) => {
-  await p.eval(`__vg.renderer.getCamera().setState({x:0.31,y:0.72,ratio:3.4,angle:0}); void 0`);
-  await sleep(250);
-  const btn = await p.j(`(function(){
-    var b = document.querySelector("#vg-reset");
-    if (!b) return null;
-    var r = b.getBoundingClientRect(), g = document.querySelector("#vg-canvas").getBoundingClientRect();
-    return { w: Math.round(r.width), h: Math.round(r.height),
-             fromTop: Math.round(r.top - g.top), fromRight: Math.round(g.right - r.right),
-             label: b.getAttribute("aria-label"), svg: !!b.querySelector("svg") };
+// THE CLUSTER'S GEOMETRY, asserted and not just its behaviour. "Bottom-right corner, in
+// this order, and a fifth larger" is what github#4 and the follow-up asked for, and a
+// cluster that works from the wrong corner in the wrong order is a different thing. The
+// order matters most: zoom is the pair reached for repeatedly, so it has to be the far end
+// of the stack rather than next to the mode switch.
+check("the camera cluster is bottom-right, in order, and 31px", async (p) => {
+  const box = await p.j(`(function(){
+    var cam = document.querySelector("#vg-cam");
+    if (!cam) return null;
+    var g = document.querySelector("#vg-canvas").getBoundingClientRect();
+    var ids = ["vg-zin", "vg-zout", "vg-reset", "vg-pan"];
+    var out = { fromBottom: null, fromRight: null, buttons: [] };
+    var cr = cam.getBoundingClientRect();
+    out.fromBottom = Math.round(g.bottom - cr.bottom);
+    out.fromRight = Math.round(g.right - cr.right);
+    for (var i = 0; i < ids.length; i++) {
+      var b = document.getElementById(ids[i]);
+      if (!b) { out.buttons.push({ id: ids[i], missing: true }); continue; }
+      var r = b.getBoundingClientRect();
+      out.buttons.push({ id: ids[i], w: Math.round(r.width), h: Math.round(r.height),
+                         top: Math.round(r.top), label: b.getAttribute("aria-label"),
+                         svg: !!b.querySelector("svg"),
+                         inside: r.top >= cr.top - 1 && r.bottom <= cr.bottom + 1 });
+    }
+    // The old Fit button in View is gone -- one job, one control.
+    out.oldFit = !!document.querySelector("#vg-fit");
+    // AND THE CARD YIELDS. They share the right-hand gutter, and of the two it is the card
+    // that gives way: a control that relocates when a panel opens is a moving target. Forced
+    // open with more content than could ever fit rather than by clicking a hub, because the
+    // claim is about the max-height calc, not about any particular note.
+    var d = document.querySelector("#vg-detail");
+    if (d) {
+      var wasHidden = d.hasAttribute("hidden"), html = d.innerHTML;
+      d.removeAttribute("hidden");
+      d.innerHTML = new Array(400).join("<p>tall</p>");
+      var dr = d.getBoundingClientRect();
+      out.cardClears = Math.round(cr.top - dr.bottom);
+      d.innerHTML = html;
+      if (wasHidden) d.setAttribute("hidden", "");
+    }
+    return out;
   })()`);
-  if (!btn) { await camReset(p); return { ok: false, detail: "no #vg-reset inside the stage" }; }
+  if (!box) return { ok: false, detail: "no #vg-cam inside the stage" };
+  const bad = box.buttons.filter((b) => b.missing || b.w !== 31 || b.h !== 31 || !b.svg || !b.label);
+  // Stacked top to bottom in the order declared, which is what "pan is the lowest" means.
+  let ordered = true;
+  for (let i = 1; i < box.buttons.length; i++) {
+    if (box.buttons[i].missing || box.buttons[i - 1].missing) { ordered = false; break; }
+    if (!(box.buttons[i].top > box.buttons[i - 1].top)) ordered = false;
+  }
+  return {
+    ok: bad.length === 0 && ordered && !box.oldFit &&
+        box.fromBottom >= 0 && box.fromBottom < 60 && box.fromRight >= 0 && box.fromRight < 60 &&
+        box.buttons.every((b) => b.inside) && box.cardClears > 0,
+    detail: bad.length
+      ? `wrong: ${bad.map((b) => b.missing ? b.id + " missing" : b.id + " " + b.w + "x" + b.h).join(", ")}`
+      : `${box.buttons.length} buttons at ${box.buttons[0].w}x${box.buttons[0].h}px, ` +
+        `${box.fromBottom}px from the bottom and ${box.fromRight}px from the right, ` +
+        `top-to-bottom ${box.buttons.map((b) => b.id.replace("vg-", "")).join(" ")}` +
+        `${box.oldFit ? "; #vg-fit IS STILL THERE" : "; #vg-fit gone"}` +
+        `; a full detail card clears it by ${box.cardClears}px`,
+  };
+});
+
+// FIT FITS WHAT IS THERE. The normalisation box is pinned to the full-vault extent so that
+// filtering shrinks the disc instead of the camera silently refilling the viewport every
+// frame -- right during an animation, wrong the moment somebody asks to be centred, because
+// "fit" would frame the empty ring the notes used to occupy. Two ratios, one assertion:
+// full vault must give the old constant, and a filtered disc must give a smaller number.
+check("fit zooms in when the disc has shrunk", async (p) => {
+  await p.eval(`__vg.state.hidden.folder = {}; __vg.syncAlpha(); __vg.applyLayout(false); void 0`);
+  await sleep(200);
   await p.eval(`document.querySelector("#vg-reset").click(); void 0`);
-  const c = await camSettle(p);
+  const full = await camSettle(p);
+
+  // Hide everything except the two smallest groups, so the disc genuinely gets smaller.
+  const hid = await p.j(`(function(){
+    var order = __vg.groupOrder();
+    var keep = order.slice(-2);
+    var h = {};
+    order.forEach(function (g) { if (keep.indexOf(g) < 0) h[g] = true; });
+    __vg.state.hidden.folder = h; __vg.syncAlpha(); __vg.applyLayout(false);
+    var max = 0;
+    __vg.graph.forEachNode(function (id, a) {
+      if ((__vg.alpha[id] || 0) <= 0.004) return;
+      var r = Math.hypot(a.x, a.y); if (r > max) max = r;
+    });
+    return { kept: keep.length, hidden: Object.keys(h).length, extent: Math.round(max) };
+  })()`);
+  await sleep(250);
+  await p.eval(`document.querySelector("#vg-reset").click(); void 0`);
+  const small = await camSettle(p);
+
+  await p.eval(`__vg.state.hidden.folder = {}; __vg.syncAlpha(); __vg.applyLayout(false); void 0`);
+  await sleep(200);
   await camReset(p);
   return {
-    // Position asserted as well as behaviour: "top right of the graph view" is what was
-    // asked for, and a button that works from the wrong corner is a different thing.
-    ok: Math.abs(c.x - 0.5) < 0.002 && Math.abs(c.ratio - 1.08) < 0.02 &&
-        btn.fromTop < 40 && btn.fromRight < 40 && btn.svg && !!btn.label,
-    detail: `${btn.w}x${btn.h}px, ${btn.fromTop}px from the top and ${btn.fromRight}px from ` +
-            `the right, labelled "${btn.label}"; camera -> (${c.x}, ${c.y}) ratio ${c.ratio}`,
+    // Still centred either way: the box is symmetric about the origin, so this is only ever
+    // a question about the ratio.
+    ok: Math.abs(full.ratio - 1.08) < 0.02 && small.ratio < full.ratio - 0.05 &&
+        Math.abs(small.x - 0.5) < 0.002 && Math.abs(small.y - 0.5) < 0.002,
+    detail: `full vault ratio ${full.ratio}; with ${hid.hidden} of ${hid.hidden + hid.kept} ` +
+            `groups hidden the disc reaches ${hid.extent} and fit gives ${small.ratio}, ` +
+            `centred at (${small.x}, ${small.y})`,
+  };
+});
+
+// The buttons have to agree with the wheel, or the same gesture means two things. Asserted
+// against the renderer's own zoomingRatio rather than a repeated 1.2.
+check("the zoom buttons step by one wheel notch", async (p) => {
+  await camReset(p);
+  const step = await p.j(`__vg.renderer.getSetting("zoomingRatio")`);
+  const a = await camState(p);
+  await p.eval(`document.querySelector("#vg-zin").click(); void 0`);
+  const inn = await camSettle(p);
+  await p.eval(`document.querySelector("#vg-zout").click(); void 0`);
+  const back = await camSettle(p);
+  await camReset(p);
+  const got = a.ratio / inn.ratio;
+  return {
+    ok: Math.abs(got - step) < 0.02 && Math.abs(back.ratio - a.ratio) < 0.01,
+    detail: `in: ${a.ratio} -> ${inn.ratio} (x${got.toFixed(3)}, setting is ${step}); ` +
+            `out returns to ${back.ratio}`,
+  };
+});
+
+// PAN IS A MODE, and the one that can trap the camera. Sigma's Camera.validateState drops
+// x and y while panning is off, so turning it off with the disc dragged away would leave a
+// view nothing could recentre -- fit() included, since fit() sets x and y. Turning it off
+// therefore has to fly home first. Both halves are asserted: the drag stops working, and
+// the disc is back at the centre afterwards.
+check("the pan toggle locks the camera and flies home", async (p) => {
+  await camReset(p);
+  const box = await stageBox(p);
+  const on = await p.j(`document.querySelector("#vg-pan").getAttribute("aria-pressed")`);
+
+  // Drag away while pan is on, then switch it off: it should not stay off-centre.
+  await p.send("Input.dispatchMouseEvent", { type: "mousePressed", x: box.cx, y: box.cy, button: "left", clickCount: 1, buttons: 1 });
+  for (let i = 1; i <= 6; i++) {
+    await p.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: box.cx - i * 18, y: box.cy - i * 10, button: "left", buttons: 1 });
+    await sleep(25);
+  }
+  await p.send("Input.dispatchMouseEvent", { type: "mouseReleased", x: box.cx - 108, y: box.cy - 60, button: "left", clickCount: 1, buttons: 0 });
+  const moved = await camSettle(p);
+
+  await p.eval(`document.querySelector("#vg-pan").click(); void 0`);
+  const home = await camSettle(p);
+  const off = await p.j(`(function(){
+    return { pressed: document.querySelector("#vg-pan").getAttribute("aria-pressed"),
+             setting: !!__vg.renderer.getSetting("enableCameraPanning"),
+             api: !!__vg.panEnabled };
+  })()`);
+
+  // ...and a drag now does nothing.
+  await p.send("Input.dispatchMouseEvent", { type: "mousePressed", x: box.cx, y: box.cy, button: "left", clickCount: 1, buttons: 1 });
+  for (let i = 1; i <= 6; i++) {
+    await p.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: box.cx + i * 18, y: box.cy + i * 10, button: "left", buttons: 1 });
+    await sleep(25);
+  }
+  await p.send("Input.dispatchMouseEvent", { type: "mouseReleased", x: box.cx + 108, y: box.cy + 60, button: "left", clickCount: 1, buttons: 0 });
+  const locked = await camSettle(p);
+
+  await p.eval(`document.querySelector("#vg-pan").click(); void 0`);
+  await camSettle(p);
+  const back = await p.j(`document.querySelector("#vg-pan").getAttribute("aria-pressed")`);
+  await camReset(p);
+  return {
+    ok: on === "true" && off.pressed === "false" && !off.setting && !off.api &&
+        Math.abs(moved.x - 0.5) > 0.01 &&
+        Math.abs(home.x - 0.5) < 0.002 && Math.abs(home.y - 0.5) < 0.002 &&
+        Math.abs(locked.x - home.x) < 0.002 && back === "true",
+    detail: `on by default ${on}; dragged to (${moved.x}, ${moved.y}), toggling off flew home ` +
+            `to (${home.x}, ${home.y}); a drag while locked left it at (${locked.x}, ${locked.y}); ` +
+            `toggles back to ${back}`,
   };
 });
 

@@ -18,6 +18,11 @@
  *                           says", which is hidden for a folder whose name starts with an
  *                           underscore and shown for everything else.
  *         onFolderShown(m)  as onFolderColors, for that map.
+ *         panEnabled        false to start with drag-to-pan off. ABSENT MEANS ON -- a fresh
+ *                           page has no saved answer, and dragging is what a graph does, so
+ *                           the default cannot be "wait to be told". The corner control
+ *                           flips it live; this is only where it starts.
+ *         onPanEnabled(v)   as onFolderColors, for that flag.
  *         settingsUI        true to show the gear AND let it open the page's own panel.
  *                           The STANDALONE sets this, because nothing else there can hold
  *                           a setting.
@@ -201,6 +206,14 @@ function mountVaultGraph(root, data, deps) {
     return out;
   }
   var folderColors = cleanFolderColors(deps.folderColors);
+
+  // DRAG-TO-PAN, ON UNLESS THE HOST SAYS OTHERWISE. Absent means on: a fresh page has no
+  // saved answer and dragging is what a graph does, so the default cannot be "wait to be
+  // told". Only an explicit false turns it off -- github#4 argued for off-by-default on a
+  // 10k vault, and the reverse won: the rim is unreachable without it, and a control in the
+  // corner is a cheaper way to find that out than a settings tab is.
+  var panEnabled = deps.panEnabled === false ? false : true;
+  var onPanEnabled = typeof deps.onPanEnabled === "function" ? deps.onPanEnabled : null;
 
   // ARCHIVE FOLDERS: the ones whose name starts with `_`.
   //
@@ -1630,6 +1643,12 @@ function mountVaultGraph(root, data, deps) {
     });
     var shown = plan.cells.filter(function (c) { return c.geom > 1e-4; });
     if (!shown.length || !live) return null;
+    // How deep this plan reaches, for fit(). Recorded here rather than measured off node
+    // positions later: this is plan.maxR, the same quantity geomLock holds for the full
+    // vault, so the two divide to exactly 1 on an unfiltered disc. The outermost NOTE sits a
+    // little inside the lattice radius it was packed against, so measuring positions made a
+    // full disc read as 96% of itself and fit() zoomed slightly in on nothing.
+    lastMaxR = plan.maxR || lastMaxR;
 
     // The inner and main bands are each a full circle, so they are allocated
     // separately -- a small cell competes only with the other small cells.
@@ -2225,6 +2244,12 @@ function mountVaultGraph(root, data, deps) {
   // and read by the rendered allocation. Null at rest, which is when weight-over-seats
   // is already the right answer -- see allocateBand.
   var gapPres = null;
+  // How deep the LAST plan reached, in lattice units -- the same measure geomLock.maxR
+  // holds for the full vault, so the two divide cleanly. Taken from the plan rather than
+  // from node positions: the outermost note sits a little inside the lattice radius it was
+  // packed against, so measuring the live extent made a full, unfiltered disc read as 96%
+  // of itself and fit() zoomed in slightly on nothing.
+  var lastMaxR = 0;
   // WHAT THE LAST CASCADE WAS ASKED TO DO. Every question about a jump starts with
   // "did it animate at all, and over how many notes", and inferring that from frame
   // counts is guesswork -- an instant apply and a one-frame animation look identical
@@ -3465,7 +3490,11 @@ function mountVaultGraph(root, data, deps) {
       // reset is the ordinary answer, and it costs nothing that a reset does not give back.
       //
       // Rotation stays off: the wedge labels and the heatmap's day rows both assume up is up.
-      enableCameraPanning: true,
+      //
+      // The initial value is the SETTING rather than a literal: the host may have persisted
+      // it off, and starting on and correcting afterwards would let one drag through before
+      // the lock arrived.
+      enableCameraPanning: panEnabled,
       enableCameraRotation: false,
       enableCameraZooming: true,
       // ONE WHEEL NOTCH WAS 70%. Sigma's default zoomingRatio is 1.7, so every notch
@@ -4357,9 +4386,15 @@ function mountVaultGraph(root, data, deps) {
       fit();
       playTimeline();
     };
-    $("fit").onclick = fit;
-    // The same job as Fit, in the corner of the stage where the question gets asked.
+    // THE CAMERA CLUSTER (github#4). The Fit button in View is gone: it did exactly what
+    // the corner control does, and two buttons for one job is one too many to explain.
     if ($("reset")) $("reset").onclick = fit;
+    if ($("zin")) $("zin").onclick = function () { zoomBy(1); };
+    if ($("zout")) $("zout").onclick = function () { zoomBy(-1); };
+    if ($("pan")) $("pan").onclick = function () { setPan(!panEnabled, true); };
+    // The saved default, applied once the renderer exists. Not persisted -- writing here
+    // would save a value the host just handed us.
+    setPan(panEnabled, false);
     $("png").onclick = savePng;
 
     // THE GEAR, if a host asked for it in either of the two ways. It is hidden by default
@@ -4495,8 +4530,84 @@ function mountVaultGraph(root, data, deps) {
   // clear of the edge.
   // Fit is now purely a zoom reset: the centre never moves, so this only has to
   // put the ratio back.
+  var FIT_RATIO = 1.08;      // the full disc, filling the stage
+
+  /**
+   * FIT THE DISC THAT IS THERE, not the one the vault started with.
+   *
+   * The normalisation box is pinned to the FULL-VAULT extent on purpose -- see the note on
+   * setCustomBBox -- so that filtering makes the disc genuinely shrink instead of the camera
+   * silently zooming to refill the viewport every frame of every cascade. That is right
+   * during an animation and wrong the moment somebody asks to be centred: hide half the
+   * vault and "fit" would frame the empty ring the notes used to occupy.
+   *
+   * So the ratio is scaled by how much of the locked extent the disc currently uses. At full
+   * vault that is 1 and this is exactly the old constant; with the outer ring toggled away it
+   * closes in on what is left. The box does the not-moving and the camera does the zooming,
+   * which keeps the two jobs apart -- renormalising the box per frame is what moved the ring
+   * centre 13px and zoomed 8.2% with the camera provably untouched.
+   *
+   * Measured on the live radius rather than the plan's: a plan is what the layout intends and
+   * this question is about what is on screen, which after a cascade are the same thing and
+   * during one are not.
+   */
+  function fitRatio() {
+    var locked = geomLock && geomLock.maxR ? geomLock.maxR : 0;
+    var live = lastMaxR;
+    if (!locked || !live) return FIT_RATIO;
+    // Never zoom OUT past the full-vault framing: the box is that size, so a ratio above
+    // this is empty margin. Clamped low as well, or a single surviving note in the hub
+    // would fill the stage with one dot.
+    var k = live / locked;
+    if (k > 1) k = 1;
+    if (k < 0.12) k = 0.12;
+    return FIT_RATIO * k;
+  }
+
   function fit() {
-    renderer.getCamera().animate({ x: 0.5, y: 0.5, ratio: 1.08, angle: 0 }, { duration: 380 });
+    var to = { x: 0.5, y: 0.5, ratio: fitRatio(), angle: 0 };
+    // SIGMA DROPS x AND y WHILE PANNING IS OFF (Camera.validateState), so with the pan
+    // toggle off this would apply the ratio and leave the disc wherever it was last
+    // dragged -- centring that does not centre. Panning is turned back on for the flight
+    // and taken away again in the callback, which sigma also fires if the animation is
+    // cut short. Reported on github#4, which hit it from the other direction.
+    if (!panEnabled) {
+      renderer.setSetting("enableCameraPanning", true);
+      renderer.getCamera().animate(to, { duration: 380 }, function () {
+        renderer.setSetting("enableCameraPanning", false);
+      });
+      return;
+    }
+    renderer.getCamera().animate(to, { duration: 380 });
+  }
+
+  // The wheel's own step, so a button press and a notch agree. Sigma's zoomingRatio is the
+  // setting the wheel reads; reading it back rather than repeating 1.2 means they cannot
+  // drift apart.
+  function zoomBy(dir) {
+    var cam = renderer.getCamera();
+    var step = renderer.getSetting("zoomingRatio") || 1.2;
+    var r = cam.getState().ratio * (dir > 0 ? 1 / step : step);
+    var lo = renderer.getSetting("minCameraRatio"), hi = renderer.getSetting("maxCameraRatio");
+    if (typeof lo === "number" && r < lo) r = lo;
+    if (typeof hi === "number" && r > hi) r = hi;
+    cam.animate({ ratio: r }, { duration: renderer.getSetting("zoomDuration") || 120 });
+  }
+
+  // PAN IS A MODE, and the host owns its default. Turning it off flies home FIRST and
+  // re-locks on landing, for the validateState reason in fit(): a camera left off-centre
+  // with panning disabled cannot be recovered by anything that sets x or y, which includes
+  // fit() itself.
+  function setPan(on, persist) {
+    panEnabled = !!on;
+    var btn = $("pan");
+    if (btn) btn.setAttribute("aria-pressed", panEnabled ? "true" : "false");
+    if (renderer) {
+      if (panEnabled) renderer.setSetting("enableCameraPanning", true);
+      else fit();      // fit() re-locks in its own callback
+    }
+    if (persist && onPanEnabled) onPanEnabled(panEnabled);
+    return panEnabled;
   }
 
   function savePng() {
@@ -6240,6 +6351,10 @@ function mountVaultGraph(root, data, deps) {
                       return Object.assign(Object.create(null), folderShown);
                     },
                     setFolderShown: applyFolderShown,
+                    // The saved default, applied live. Mirrors setFolderShown: the host owns
+                    // the store and this owns the camera.
+                    setPanEnabled: function (v) { return setPan(v !== false, false); },
+                    get panEnabled() { return panEnabled; },
                     hiddenByDefault: hiddenByDefault,
                     // Push the defaults into the live filter and repaint. This is the
                     // "and now show it" half, kept separate so loading saved settings at

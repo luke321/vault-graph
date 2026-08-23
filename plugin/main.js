@@ -489,6 +489,13 @@ class VaultGraphView extends ItemView {
       // onFolderShown: in Obsidian the settings tab owns writing both.
       folderColors: this.plugin.settings.folderColors,
       folderShown: this.plugin.settings.folderShown,
+      // Pan DOES get a writer, unlike the two maps above: the control that flips it is in
+      // the view rather than in the settings tab, so the view is what has to persist it.
+      panEnabled: this.plugin.settings.panEnabled,
+      onPanEnabled: async (v) => {
+        this.plugin.settings.panEnabled = !!v;
+        await this.plugin.saveSettings();
+      },
       // The gear IS shown here -- it is where somebody looking at the disc goes to look
       // for the colours -- but it opens Obsidian's settings tab rather than a second
       // panel inside the view saying the same things. `settingsUI` is deliberately not
@@ -551,6 +558,10 @@ const DEFAULTS = {
   // decides: a folder whose name starts with an underscore is an archive, so it is out of
   // the colour rotation, grey, and hidden until somebody says otherwise.
   folderShown: {},
+  // Drag-to-pan in the view. ON by default: the rim of a big vault is unreachable without
+  // it, and the corner control is a cheaper way to discover that than a settings tab is.
+  // Held here so a vault where dragging gets in the way can start locked.
+  panEnabled: true,
 };
 
 // The four build settings, described once. They live here rather than inline in display()
@@ -628,6 +639,28 @@ class VaultGraphSettingTab extends PluginSettingTab {
             await this.plugin.rebuildViews();
           }));
     }
+
+    // VIEW, not build: it changes how you look rather than what you see, so it applies
+    // live through the api and never rebuilds. Same reasoning as the curve switch.
+    //
+    // The toggle and the corner control write the SAME setting, which is the point -- the
+    // button is how you find the feature and this is where the default lives. Reading
+    // `!== false` rather than a plain truthiness keeps "absent means on" true here too, so
+    // a settings file written before this existed shows the toggle on.
+    new Setting(containerEl).setName("View").setHeading();
+
+    new Setting(containerEl)
+      .setName("Drag to pan")
+      .setDesc("Drag the graph to move it, and zoom toward the pointer. Off pins the disc to the centre of the view. The control in the graph's bottom-right corner flips it too, and lands back here.")
+      .addToggle((t) => t
+        .setValue(this.plugin.settings.panEnabled !== false)
+        .onChange(async (v) => {
+          this.plugin.settings.panEnabled = v;
+          await this.plugin.saveSettings();
+          const view = await this.plugin.currentView();
+          const api = view && view.handle && view.handle.api;
+          if (api && api.setPanEnabled) api.setPanEnabled(v);
+        }));
 
     new Setting(containerEl).setName("Folder colours").setHeading();
 
@@ -907,6 +940,7 @@ class VaultGraphPlugin extends Plugin {
     const api = view && view.handle && view.handle.api;
     if (!api || !api.setFolderShown) return;
     api.setFolderShown(this.settings.folderShown);
+    if (api.setPanEnabled) api.setPanEnabled(this.settings.panEnabled !== false);
     if (api.applyHiddenDefaults) api.applyHiddenDefaults();
   }
 

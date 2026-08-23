@@ -95,7 +95,12 @@ mountVaultGraph(
     folderColors: loadSettings().folderColors,
     onFolderColors: function (map) { saveSettings({ folderColors: map }); },
     folderShown: loadSettings().folderShown,
-    onFolderShown: function (map) { saveSettings({ folderShown: map }); }
+    onFolderShown: function (map) { saveSettings({ folderShown: map }); },
+    // Drag-to-pan, remembered. Undefined on a first visit, which page.js reads as ON --
+    // only an explicit false turns it off, so a stored setting is the only way to start
+    // locked and a cleared store goes back to the default rather than to "off".
+    panEnabled: loadSettings().panEnabled,
+    onPanEnabled: function (v) { saveSettings({ panEnabled: v }); }
   }
 );
 </script>
