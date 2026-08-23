@@ -21,6 +21,9 @@ import { fileURLToPath } from "node:url";
 // two unreachable fetch() calls, so the generated page makes no network requests at
 // all. Same module the plugin build uses -- see src/vendor.mjs. github#1
 import { readVendorSource } from "./vendor.mjs";
+// When a note was written -- the one rule, shared with plugin/main.js so the two
+// mounts cannot drift. See src/dates.mjs for the order and why. github#6
+import { localDay, resolveCreated, dateTally } from "./dates.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 // Repo root. Everything this script reads that is not source lives beside src/,
@@ -352,17 +355,8 @@ const paraDirs = (relPath) => {
   return out;
 };
 
-// A date, or nothing. Slicing to 10 characters is not enough on its own: an
-// unrendered Templater placeholder (`created: {{date:YYYY-MM-DD}}`) slices to the
-// string "{{date:YYY", which is not a date but SORTS as one -- and it sorts after
-// every digit, so those notes ranked as the newest in the vault on the timeline and
-// grew the heatmap a column for a day that does not exist. Measured on this vault:
-// 894 valid, 16 placeholders, 6 genuinely undated.
-const ISO_DAY = /^\d{4}-\d{2}-\d{2}$/;
-const day10 = (v) => {
-  const s = typeof v === "string" ? v.slice(0, 10) : "";
-  return ISO_DAY.test(s) ? s : "";
-};
+// How every note got dated, for the summary line. See src/dates.mjs.
+const dates = dateTally();
 
 /* ------------------------------------------------------------------- build */
 
@@ -378,6 +372,12 @@ for (const abs of files) {
   const raw = readFileSync(abs, "utf8");
   const { fm, body } = parseFrontmatter(raw);
   const name = basename(abs, ".md");
+  // ONE stat call, feeding both dates below. It used to be made inside `touched` alone;
+  // `created` needs the creation stamp now, and statting the same file twice per note is
+  // the kind of thing that only shows up on somebody else's 10,000-note vault.
+  let st = null; try { st = statSync(abs); } catch { st = null; }
+  const dated = resolveCreated(fm, name, st && st.ctimeMs, st && st.mtimeMs);
+  dates[dated.source]++;
 
   const tags = []
     .concat(fm.tags ?? [], fm.tag ?? [])
@@ -397,7 +397,11 @@ for (const abs of files) {
     sub: paraDirs(relPath)[0] || "",
     type: inferType(fm, relPath, tags),
     tags,
-    created: day10(fm.created) || day10(fm.date),
+    // Frontmatter, then a date at the front of the filename, then the file's own
+    // creation stamp -- see src/dates.mjs. It was frontmatter or nothing until
+    // github#6, which left a vault that does not write `created:` with an empty
+    // heatmap and everything piled into "undated".
+    created: dated.day,
     // When the FILE was last written, which is not the same question as `created`
     // and is the one "mark today" actually wants to answer. Frontmatter `created`
     // on a daily note is its IMPORT stamp -- this vault pre-creates dailies from
@@ -405,12 +409,7 @@ for (const abs of files) {
     // `created` wins over `date`, so "created today" matched 0 notes on a day when
     // nothing new was imported, and the button looked broken. Measured here: 3
     // files touched today against 0 created today.
-    touched: (() => {
-      try {
-        const m = statSync(abs).mtime, p2 = (n) => String(n).padStart(2, "0");
-        return `${m.getFullYear()}-${p2(m.getMonth() + 1)}-${p2(m.getDate())}`;
-      } catch { return ""; }
-    })(),
+    touched: st ? localDay(st.mtimeMs) : "",
     words: body.split(/\s+/).filter(Boolean).length,
     _links: mineLinks(body, fm),
   };
@@ -499,6 +498,10 @@ const data = {
     edges: edges.length,
     unresolved,
     orphans: degree.filter((d) => d === 0).length,
+    // Where every note's date came from. Carried into the page (and the plugin's
+    // diagnostics command) so "why is everything undated" is a question the build
+    // already answered. github#6
+    dates,
     templatesExcluded: !INCLUDE_TEMPLATES,
     ghostsIncluded: INCLUDE_GHOSTS,
   },
@@ -577,4 +580,7 @@ writeFileSync(OUT, html, "utf8");
 const kb = (Buffer.byteLength(html) / 1024).toFixed(0);
 console.log(`vault-graph: ${data.stats.nodes} notes, ${data.stats.edges} links, ` +
             `${data.stats.orphans} orphans, ${unresolved} unresolved link(s)`);
+console.log(`dated: ${dates.frontmatter} from frontmatter, ${dates.filename} from the ` +
+            `filename, ${dates.stamp} from the file stamp` +
+            (dates.none ? `, ${dates.none} UNDATED` : ", none undated"));
 console.log(`wrote ${OUT} (${kb} KB)`);

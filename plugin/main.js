@@ -33,6 +33,9 @@ import { Plugin, ItemView, Notice, normalizePath, addIcon } from "obsidian";
 import { mountVaultGraph } from "../src/page.js";
 import graphology from "../vendor/graphology.umd.min.js";
 import sigma from "../vendor/sigma.min.js";
+// When a note was written. The SAME module build-graph.mjs uses -- the two crawls stay
+// separate on purpose, the date rule does not. github#6
+import { localDay, resolveCreated, dateTally } from "../src/dates.mjs";
 import PAGE_HTML from "raw:../src/page.html";
 import LOGO_MASK_B64 from "b64:../assets/logo-mask.png";
 
@@ -95,8 +98,6 @@ function discIcon() {
  */
 
 const MONTHISH = /^\d{4}(?:[-_ ]?(?:\d{2}|Q[1-4]|W\d{1,2}))?$/i;
-const ISO_DAY = /^\d{4}-\d{2}-\d{2}$/;
-
 const TYPE_ALIAS = {
   people: "person", person: "person",
   "zettel/permanent": "zettel", "zettel/fleeting": "zettel", "zettel/literature": "zettel",
@@ -109,24 +110,6 @@ const slug = (s) => deNumber(s).toLowerCase().replace(/[\s_]+/g, "-");
 const singular = (s) => s.replace(/ies$/, "y").replace(/([^aeious])s$/, "$1");
 const norm = (s) => String(s).split(/[\\/]/).filter(Boolean).join("/");
 const under = (rel, dir) => !!dir && (rel === dir || rel.startsWith(dir + "/"));
-
-// A date, or nothing. Obsidian's YAML parser is a real one, so unlike the hand-rolled
-// frontmatter reader in build-graph.mjs this can be handed a Date object -- and it is
-// still handed the unrendered Templater placeholder as a string, which is why the ISO
-// test stays.
-const day10 = (v) => {
-  if (v instanceof Date && !isNaN(v.getTime())) {
-    const p2 = (n) => String(n).padStart(2, "0");
-    return v.getFullYear() + "-" + p2(v.getMonth() + 1) + "-" + p2(v.getDate());
-  }
-  const s = typeof v === "string" ? v.slice(0, 10) : "";
-  return ISO_DAY.test(s) ? s : "";
-};
-
-const localDay = (ms) => {
-  const d = new Date(ms), p2 = (n) => String(n).padStart(2, "0");
-  return d.getFullYear() + "-" + p2(d.getMonth() + 1) + "-" + p2(d.getDate());
-};
 
 const paraFolder = (path) => {
   const seg = path.split("/");
@@ -217,6 +200,7 @@ async function buildData(app, opts) {
 
   const index = new Map();          // path -> node index
   const nodes = [];
+  const dates = dateTally();        // how each note got dated; reported in stats
 
   for (const file of files) {
     const cache = app.metadataCache.getFileCache(file) || {};
@@ -232,6 +216,11 @@ async function buildData(app, opts) {
       .filter(Boolean);
 
     const dirs = paraDirs(file.path, opts.flatMonths);
+    // Frontmatter, then a date at the front of the filename, then the file's own creation
+    // stamp -- the same chain build-graph.mjs walks, from the same module. `file.stat` is
+    // Obsidian's own cached stat, so this costs nothing and needs no read. github#6
+    const dated = resolveCreated(fm, file.basename, file.stat.ctime, file.stat.mtime);
+    dates[dated.source]++;
     index.set(file.path, nodes.length);
     nodes.push({
       id: file.path,
@@ -241,7 +230,7 @@ async function buildData(app, opts) {
       sub: dirs[0] || "",
       type: inferType(fm, file.path, tags, dailyDir, isTemplate),
       tags: tags,
-      created: day10(fm.created) || day10(fm.date),
+      created: dated.day,
       touched: localDay(file.stat.mtime),
       words: 0,                     // filled below; the one field still needing a read
       _file: file,
@@ -351,6 +340,9 @@ async function buildData(app, opts) {
       edges: edges.length,
       unresolved: unresolved,
       orphans: degree.filter((d) => d === 0).length,
+      // Where every note's date came from. Surfaced by the "Report diagnostics" command,
+      // so "why is everything undated" is answerable without a rebuild. github#6
+      dates: dates,
       templatesExcluded: !opts.templates,
       ghostsIncluded: !!opts.ghosts,
     },
