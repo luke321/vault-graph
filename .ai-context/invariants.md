@@ -100,20 +100,53 @@ one plan basis; no threshold switches it. Resting ring radius after hiding: `03`
 
 ## The disc's density follows the notes on screen
 
-Two vaults of different sizes showing the same number of notes must draw the same disc:
-same row pitch, same dot sizes. The lattice spacing solves it — a lattice of spacing `s`
-holds `1/s^2` notes per unit area, so holding the outer radius fixed gives
-`s = sqrt(n_full / n_visible)`.
+A band fills its box as evenly as its note count allows: the **lattice stays square**. The
+tangential step a note has along its row stays comparable to the radial pitch between rows, and
+a dot stays a fixed fraction of the step, in every filter state.
 
 ```javascript
-__vg.densityReport()      // -> pitchRoot, held constant across filter states
+__vg.debugDump().bands    // -> per band: notes, rows, step35, dotRadius, inner/outer radius
 ```
 
-**`pitchRoot` is the invariant**, not `pitchPx`. It is `pitchPx * sqrt(shown)`, which is
-what holds still if the density is honest. It reads *exactly* the same number at every
-state where the `DENSITY_MAX` cap is not binding — 436.919 on a 500-note vault, 467.219 on
-a 1500-note one — so a spread above about 1.01x on uncapped states is a real regression and
-not tolerance.
+Two numbers, both per band, both measured off the drawn notes:
+
+- **`step35 / ((outer - inner) / (rows - 1))`** — the lattice's aspect. Measured 0.94–1.07 on the
+  10k and dominant-folder fixtures and 0.77–0.95 on the demo vault; asserted within 1.75 either
+  way, which is one row of slack in a band three or four deep.
+- **`2 * dotRadius.med / step35`** — a dot against its room. Measured 0.45–0.49 on the 10k
+  fixture and 0.30–0.35 on the dominant-folder one; asserted in 0.15–0.80 with a spread under
+  2.2x.
+
+Take the radial pitch from the **drawn radii**, not from `spacing.pitchOuterUnits`. The reported
+spacing can describe a different layout than the one on screen — measured, a band drawn with a
+169-unit step reported a 381-unit pitch — and a ratio between a measured number and a reported
+one is reading their disagreement rather than the lattice.
+
+### This invariant was restated, and the old form is not recoverable
+
+It used to assert `pitchPx * sqrt(shown)` constant to within 1.06, via `densityReport().pitchRoot`.
+That is the statement of a **continuous** density: it requires the pitch to move by any amount the
+note count asks for, which requires the disc to resize freely. Two later changes, both made to fix
+reported bugs, make it unsatisfiable:
+
+- **The rings keep their diameter.** A band fills a locked box, so its pitch is `T / rows` with
+  `rows` an integer — it can only take the values `T/1, T/2, T/3 …`. `pitch * sqrt(n)` therefore
+  drifts within each row count and steps between them. From one row to two the step is a factor of
+  two, and no tolerance that permits that is worth writing.
+- **The two bands are packed independently.** A single spacing made each ring answer for the
+  other's filtering: hiding *outer* folders spread the *inner* ring until the two touched,
+  clearance 843 → 89 units. So the outer band's pitch against the whole disc's note count is not
+  one quantity, it is two, mixed. `densityReport()` reports `pitchRootOuter` and `pitchRootInner`
+  separately now, and the check prints them as context.
+
+The square-lattice form catches what the old one was for and more. `pitch * sqrt(n)` could not see
+the tangential half of the lattice at all, which is where every visible symptom lived: dots sized
+against the radial pitch while sitting at a step 1.58x wider, boundary gaps unlike the interior
+spacing beside them, holes several times the row median. And the dot clause replaces "a wider
+spacing must grow the dots", which was true only while a wider spacing meant a coarser lattice —
+under a locked box `sp` widens because a row was *lost*, and the step, and so the dots, can
+correctly be unchanged. Measured on the dominant-folder fixture: spacing 2.412x, step steady at
+169, median dot steady to within 2%.
 
 Before this existed, `pitchPx` was a constant **per vault**: 19.481px at every filter state
 of a 500-note vault and 12.064px at every state of a 1500-note one, because the box is

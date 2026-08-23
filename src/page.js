@@ -1917,9 +1917,26 @@ function mountVaultGraph(root, data, deps) {
       if (!list.length) return { sp: sp, rows: 0 };
       var n = 0;
       list.forEach(function (c) { n += c.wsum; });
+      // A BAND WITH NO WEIGHT HAS NO DEPTH, and it has to say so rather than fall through to a
+      // count derived from the thickness. Hiding the dominant folder leaves the outer band
+      // holding nothing but that cell at weight 0: an empty LIST returns 0 rows below, so a
+      // list of empty cells has to as well, or seating them moves maxR -- measured 13 against
+      // 21 on the dominant-folder fixture, which is zero-weight invariance (github#5) failing
+      // on maxR while every row count matched.
+      if (!(n > 0.0001)) return { sp: sp, rows: 0 };
       // Handed a spacing (a cascade walking between two packings), the depth follows from it, so
       // the two stay consistent without re-deriving anything the caller has already decided.
       if (given || !(thick > 0) || !(n > 0.5)) {
+        // ROUNDED, and leaving it fractional was tried and reverted the same night. The theory
+        // was sound -- the handed-in spacing walks continuously, so round(thick / sp) ticks
+        // partway through a cascade, and c.rows decides whether a cell is centred down the
+        // radius, which is a discrete change of placement. It bought exactly what it promised on
+        // the frame-step check (10k: one frame moving the outer band 54 units against a 47
+        // budget, down to 50 against 55) and it broke the invariant that matters: the last frame
+        // of a cascade stopped BEING the resting layout, by 785 units of radius, 8419 of
+        // tangential travel and 162% of dot size on the dominant-folder fixture. A count that is
+        // an integer at rest and a real number on the final frame is two different layouts, and
+        // no amount of frame smoothness is worth that.
         var rk = Math.round(thick > 0 && sp > 0 ? thick / sp : 1);
         return { sp: sp, rows: rk > 0 ? rk : 1 };
       }
@@ -1946,7 +1963,12 @@ function mountVaultGraph(root, data, deps) {
     if (geomLock && thickI > 0) {
       var si = solveBand(inner, r0, thickI, INNER_SCALE, SP_I);
       SP_I = si.sp; innerRows = si.rows;
-      inner.forEach(function (c) { c.rows = innerRows; });
+      // AN EMPTY CELL TAKES NO ROWS. Every cell with notes takes the band's depth -- that is
+      // what makes them equally full -- but a cell whose notes are all hidden has to come out at
+      // zero, or seating it changes the answer. That is the zero-weight invariance (github#5),
+      // and rowsNeeded used to give it for free by returning 0 for n <= 0; assigning the band
+      // depth unconditionally lost it on every folder of every fixture.
+      inner.forEach(function (c) { c.rows = c.wsum > 0.0001 ? innerRows : 0; });
     } else {
       inner.forEach(function (c) {
         c.rows = rowsNeeded(usableRef(c, r0), c.wsum, r0, SP_I);
@@ -1961,7 +1983,7 @@ function mountVaultGraph(root, data, deps) {
     if (geomLock && thickO > 0) {
       var so = solveBand(outer, rOuter, thickO, 1, SP_O);
       SP_O = so.sp; outerRows = so.rows;
-      outer.forEach(function (c) { c.rows = outerRows; });
+      outer.forEach(function (c) { c.rows = c.wsum > 0.0001 ? outerRows : 0; });
       maxR = rOuter + outerRows * SP_O;
     } else {
       outer.forEach(function (c) {
@@ -2361,8 +2383,11 @@ function mountVaultGraph(root, data, deps) {
     // it. See where bandRoom is taken from this: it has to be a function of the PLAN, not of
     // the positions that come out of it.
     var roomPool = { i: [], o: [] };
-    // Per note, the step of the cell it belongs to. A bound, not a scale -- see dotPx.
+    // Per note, the step of the tightest row of the cell it belongs to. A bound, not a scale --
+    // see dotPx. Collected per cell and fanned out to its notes once placement is done, since
+    // the tightest row is not known until every row has been walked.
     var cellRoomNext = Object.create(null);
+    var cellMin = Object.create(null), cellOf = Object.create(null);
     if (probe) lastStart = Object.create(null);
     [true, false].forEach(function (isInner) {
       var band = shown.filter(function (c) { return !!c.inner === isInner; });
@@ -2586,7 +2611,17 @@ function mountVaultGraph(root, data, deps) {
           // suddenly contributing one -- so it slides where nRow ticked. The margin above keeps
           // nRow, which is right: a margin is where a note SITS, and it has to be the half-step
           // of the row the note is actually in.
-          var ownStep = arc * rGraph * rowsUsed / Math.max(0.001, c.live);
+          // THE CELL'S TIGHTEST ROW, not its average. Both figures are one number per cell, so
+          // either keeps size monotone in link weight within the cell -- but the average lets
+          // the cell's closest pair be closer than the number that sized it, and the band
+          // percentile above cannot see that either. Measured on the 10k fixture with a folder
+          // hidden: one overlapping pair at -1 unit, both notes in the same sub-wedge, radius 48
+          // each on a 94-unit arc, where the cell's average step was wider.
+          //
+          // A row's step is arc/n at that row's radius, and the innermost row of a cell is the
+          // shortest arc, so the minimum is where the cell is tightest. Bounding by it costs a
+          // little size in cells whose rows differ a lot and nothing anywhere else.
+          var ownStep = arc * rGraph / Math.max(0.001, nRow);
           roomPool[isInner ? "i" : "o"].push(ownStep);
           // ...AND KEPT PER NOTE, as a bound. The band percentile is one number for a whole
           // ring, so a cell packed tighter than the tenth percentile overlaps -- measured by
@@ -2599,7 +2634,8 @@ function mountVaultGraph(root, data, deps) {
           // densely its own folder is packed; it may not depend on which row of that folder it
           // landed in, because rows differ in arc and the innermost is always shortest -- that
           // is the gradient that made the most-connected note the smallest one.
-          cellRoomNext[sl.id] = ownStep;
+          if (cellMin[c.k] === undefined || ownStep < cellMin[c.k]) cellMin[c.k] = ownStep;
+          cellOf[sl.id] = c.k;
           var seamArc = sm.gap * rGraph / 2;      // this side's half of the seam, in units
           var keep = EXCESS_KEEP * seamFall(isInner ? "i" : "o");
           var typ = dotTyp(isInner ? "i" : "o");
@@ -2617,6 +2653,20 @@ function mountVaultGraph(root, data, deps) {
           var side = function () {
             var raw = zero;                          // what the boundary costs, per band
             var m = zero + keep * (raw - zero + seamArc) - seamArc;
+            // NO DOT MAY CROSS ITS OWN WEDGE EDGE. The line above spends part of the half-seam
+            // when keep is below 1 -- which it is at these row counts, 0.35 * 2.152 = 0.75 --
+            // and that is invisible on an interior row, where the margin is half a step and the
+            // seam is a fraction of it. On the RIM row the margin is now only what the biggest
+            // dot needs, so subtracting anything pushes that dot through the boundary and into
+            // the channel. Reported as edge notes sitting inside the seam.
+            //
+            // The floor is the largest radius the band can draw: dotPx tops out at
+            // DOT_OF_PITCH of the band's room, so a margin of that keeps every dot inside its
+            // own wedge on every row, and binds only where it would otherwise not be.
+            var floorU = DOT_OF_PITCH * (bandRoom[isInner ? "i" : "o"] > 1
+                                         ? bandRoom[isInner ? "i" : "o"]
+                                         : pitchUnits(isInner ? "i" : "o"));
+            if (m < floorU) m = floorU;
             return m < 0 ? 0 : m / rGraph;
           };
           var mgA = side(), mgB = side();
@@ -2760,6 +2810,10 @@ function mountVaultGraph(root, data, deps) {
     // the per-note cap that used to sit on top of it, and with that gone the worst single-frame
     // size change is 2.2% against 252% before.
     bandRoom = { i: pick(pool.i), o: pick(pool.o) };
+    Object.keys(cellOf).forEach(function (id) {
+      var m = cellMin[cellOf[id]];
+      if (m > 1) cellRoomNext[id] = m;
+    });
     cellRoom = cellRoomNext;
     if (planRoom) { /* kept on the plan for the probe; the live pool is what draws */ }
     dotFit = fit;
@@ -4661,6 +4715,17 @@ function mountVaultGraph(root, data, deps) {
       var room = bandRoom[isIn ? "i" : "o"];
       var mine = cellRoom[id];
       if (mine !== undefined && mine > 1 && (!(room > 1) || mine < room)) room = mine;
+      // AND A HAIR UNDER, because both figures above are AVERAGES over a row and the notes in a
+      // row are not evenly spaced. Position within a row is weight-based -- a note's own share
+      // of its row's weight -- so a light note beside a heavy one sits closer than the row's
+      // mean step, and no average can see that. The exact bound is each note's own local gap,
+      // which is dotFit, and dotFit is a minimum over WHICH neighbour is nearest: it changes as
+      // the disc moves, and using it made every dot in the vault breathe (252% in one frame).
+      //
+      // 8% off an average is cheaper than that, and it is enough: the residual was one pair at
+      // -5 units on a ~159 step, 3%. Anything materially worse than local weight variation would
+      // not be covered by this and should not be -- it would be a real defect.
+      room *= 0.92;
       // AND NOTHING PER NOTE. A cap taken from this note's own measured room was tried, to stop
       // the tightest pairs touching, and it is the thing that made dots breathe: dotFit is
       // measured off live positions, and a note's NEAREST NEIGHBOUR is not a fixed neighbour --
@@ -8027,15 +8092,19 @@ function mountVaultGraph(root, data, deps) {
                     // That product is the invariant, and it does not need a second vault to
                     // compare against.
                     densityReport: function () {
-                      var shown = 0, lit = 0;
+                      var shown = 0, lit = 0, shownI = 0, shownO = 0;
                       graph.forEachNode(function (id) {
-                        if (visible(id)) shown++;
+                        if (visible(id)) {
+                          shown++;
+                          // PER BAND, because the two are packed independently. See pitchRoot.
+                          if (bandLock && bandLock[groupOf(id)]) shownI++; else shownO++;
+                        }
                         if ((alpha[id] || 0) > 0.004) lit++;
                       });
                       // One lattice row, mapped through the same camera the notes are drawn
                       // with. graphToViewport is the only honest way to ask: it goes through
                       // the pinned bbox, so it answers in the pixels a person sees.
-                      var pitchPx = null, unitPx = null, discPx = null;
+                      var pitchPx = null, pitchPxI = null, unitPx = null, discPx = null;
                       if (renderer) {
                         var a = renderer.graphToViewport({ x: 0, y: 0 });
                         var u = renderer.graphToViewport({ x: UNIT, y: 0 });
@@ -8045,6 +8114,9 @@ function mountVaultGraph(root, data, deps) {
                         // notes in a column touch.
                         var b = renderer.graphToViewport({ x: UNIT * (lastSP || 1), y: 0 });
                         pitchPx = Math.hypot(b.x - a.x, b.y - a.y);
+                        var bi = renderer.graphToViewport({
+                          x: UNIT * (lastSPI || 1) * INNER_SCALE, y: 0 });
+                        pitchPxI = Math.hypot(bi.x - a.x, bi.y - a.y);
                         // How far the disc actually reaches on screen, from the live radius
                         // rather than the locked one -- the gap between them IS the empty
                         // margin the notes no longer fill.
@@ -8078,7 +8150,25 @@ function mountVaultGraph(root, data, deps) {
                         sp: r3(lastSP),
                         unitPx: r3(unitPx),
                         pitchPx: r3(pitchPx),
+                        // PITCH TIMES THE ROOT OF THE NOTE COUNT, and both PER BAND.
+                        //
+                        // The quantity that is conserved is sqrt(area): a band of fixed area
+                        // holding n notes on a square lattice has pitch sqrt(area/n), so
+                        // pitch * sqrt(n) is the band's own constant. Multiplying the OUTER
+                        // band's pitch by the WHOLE disc's note count -- which this reported,
+                        // and which was right when one spacing served both rings -- mixes two
+                        // bands, so hiding folders from one of them moves it for a reason that
+                        // is not a density change. The bands were made independent because a
+                        // single spacing made each ring answer for the other's filtering, which
+                        // was a reported bug; this is the same correction applied to its
+                        // measurement.
+                        shownInner: shownI, shownOuter: shownO,
+                        pitchPxInner: r3(pitchPxI),
                         pitchRoot: pitchPx ? r3(pitchPx * Math.sqrt(Math.max(1, shown))) : null,
+                        pitchRootOuter: pitchPx
+                          ? r3(pitchPx * Math.sqrt(Math.max(1, shownO))) : null,
+                        pitchRootInner: pitchPxI
+                          ? r3(pitchPxI * Math.sqrt(Math.max(1, shownI))) : null,
                         sizeScale: r3(sizeScale),
                         sizeMedian: r3(med),
                         sizeMin: r3(sizes.length ? sizes[0] : null),
