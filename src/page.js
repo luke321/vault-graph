@@ -1236,7 +1236,19 @@ function mountVaultGraph(root, data, deps) {
     // rather than of weight, and that is the one thing the cascade cannot walk.
     var liveG = Object.create(null);
     graph.forEachNode(function (id) {
-      if (onlyVisible && !(planKeep || visible)(id)) return;
+      // MEMBERSHIP AT REST IS THE MEMBERSHIP THE CASCADE ENDS ON, and it was not.
+      //
+      // planKeep, during a cascade, is "staying or still on screen". Absent -- at rest -- this
+      // fell back to visible(), the FOLDER filter alone, so a note excluded by the DATE range
+      // stayed a member at weight 0. That looks harmless and it is the jump at the end of an
+      // animation: measured on a date range, the resting plan carried 11 cells where the final
+      // frame carried 9 -- the extra two being empty sub-cells of one folder -- and the same arc
+      // divided 11 ways instead of 9 moved wedges by up to 10.6 degrees. Radii and dot sizes
+      // were identical to the unit, which is why it read as a sideways twitch with no cause.
+      //
+      // willShow IS that destination. At rest nothing is departing, so "staying or on screen"
+      // and "showing" are the same set, and the two agree by construction rather than nearly.
+      if (onlyVisible && !(planKeep || willShow)(id)) return;
       if (onlyVisible && !willShow(id)) return;
       var g0 = groupOf(id);
       liveG[g0] = (liveG[g0] || 0) + 1;
@@ -1257,7 +1269,19 @@ function mountVaultGraph(root, data, deps) {
       // gave a departing note no slot at all, so nothing held its space (the
       // wedge vanished instead of closing) and it had no target position (so it
       // faded at stale coordinates on top of the reflowed disc).
-      if (onlyVisible && !(planKeep || visible)(id)) return;
+      // MEMBERSHIP AT REST IS THE MEMBERSHIP THE CASCADE ENDS ON, and it was not.
+      //
+      // planKeep, during a cascade, is "staying or still on screen". Absent -- at rest -- this
+      // fell back to visible(), the FOLDER filter alone, so a note excluded by the DATE range
+      // stayed a member at weight 0. That looks harmless and it is the jump at the end of an
+      // animation: measured on a date range, the resting plan carried 11 cells where the final
+      // frame carried 9 -- the extra two being empty sub-cells of one folder -- and the same arc
+      // divided 11 ways instead of 9 moved wedges by up to 10.6 degrees. Radii and dot sizes
+      // were identical to the unit, which is why it read as a sideways twitch with no cause.
+      //
+      // willShow IS that destination. At rest nothing is departing, so "staying or on screen"
+      // and "showing" are the same set, and the two agree by construction rather than nearly.
+      if (onlyVisible && !(planKeep || willShow)(id)) return;
       var g = groupOf(id), a = graph.getNodeAttributes(id);
       var split = splitFor(g);
       var key = split ? g + SEP + subTintIndex(g, a.sub) : g;
@@ -1860,21 +1884,93 @@ function mountVaultGraph(root, data, deps) {
     // the end of this one. The per-band density solve below is what ships: it stops the two
     // rings converging, which was the reported bug, and leaves the rim moving under heavy
     // filtering, which is measured in .ai-context/changelog-detail.md.
+    // FILL THE BOX. A wedge is a box in polar coordinates -- an inner radius, an outer radius,
+    // and two edges running out to the seams -- and the job is to fill it as evenly as the note
+    // count allows. Everything reported this session was one consequence of not doing that:
+    // holes where a cell held arc in rows it had no notes for, interior steps wider than the
+    // boundary gaps beside them, dots undersized because they are drawn against the radial
+    // pitch while sitting at a wider tangential step, and quantisation that always fell hardest
+    // on the innermost row because it has the shortest arc.
+    //
+    // rowsNeeded answers the wrong question. It asks how many rows of a GIVEN spacing it takes
+    // to hold n notes -- so it is solved per cell, against a spacing that came from somewhere
+    // else, and its answer is always at LEAST enough, which means always a bit too much. The
+    // band then ends up deeper than its notes can fill: measured on this vault at a 98-note
+    // range, the outer band had capacity for about 90 notes over 3 rows and held 57, so its
+    // arcs came out 1.58x wider than one pitch and its tangential step was 626 units against a
+    // 396 pitch. Exactly the ratio the dots were missing.
+    //
+    // A band of thickness T at mean radius R has area 2*pi*R*T, and a square lattice of pitch s
+    // holds area/s^2 notes. So s = sqrt(area/n) and rows = T/s come out of ONE division,
+    // consistent with each other by construction -- no iteration, and no count solved against a
+    // spacing it will not be drawn with. Earlier attempts to reach this by feeding a row count
+    // back into a spacing solve did not converge: the composite is monotone decreasing, so plain
+    // iteration flips between extremes and damping converges to a degenerate point. This is why
+    // it had to be a rewrite rather than a wrapper.
+    //
+    // Every cell then takes the BAND's row count, not its own. With arc allocated in proportion
+    // to note count, equal depth makes every cell equally full, which is what puts one step on
+    // the whole ring. Low-count folders are the exception and are handled before this: a folder
+    // too small to fill a column does not get its own sub-wedge, and a cell with fewer notes
+    // than the band is deep is placed one note per row down the middle of it.
+    var solveBand = function (list, base, thick, scale, sp) {
+      if (!list.length) return { sp: sp, rows: 0 };
+      var n = 0;
+      list.forEach(function (c) { n += c.wsum; });
+      // Handed a spacing (a cascade walking between two packings), the depth follows from it, so
+      // the two stay consistent without re-deriving anything the caller has already decided.
+      if (given || !(thick > 0) || !(n > 0.5)) {
+        var rk = Math.round(thick > 0 && sp > 0 ? thick / sp : 1);
+        return { sp: sp, rows: rk > 0 ? rk : 1 };
+      }
+      var T = thick * scale, R = (base + thick / 2) * scale;
+      var s = Math.sqrt(2 * Math.PI * R * T / n);
+      var rw = Math.round(T / s);
+      if (rw < 1) rw = 1;
+      if (rw > 200) rw = 200;
+      return { sp: thick / rw, rows: rw };
+    };
+
+    // The thickness each band is entitled to, from the locked geometry. Without a lock -- the
+    // one unfiltered plan that produces it -- there is nothing to fill yet, so the old per-cell
+    // count stands and sets the lock for everyone after.
+    // A FIXED SHARE OF THE LOCKED HUB-TO-RING SPAN, not that span minus the live GUTTER. The
+    // gutter is 1.6 of the disc-wide spacing, and under filtering that spacing is up to
+    // DENSITY_MAX -- so the gutter grew until the inner band had almost no thickness left to
+    // fill. Measured: the inner band came out at ONE row holding 34 notes, a step of 65 units,
+    // and three overlapping pairs. The band's thickness must not be a function of a number that
+    // moves; the lock is there precisely so it is not.
+    var INNER_FILL = 0.8;              // the rest is the channel between the rings
+    var thickI = geomLock ? (geomLock.rOuter - geomLock.r0) * INNER_FILL : 0;
     var innerRows = 0;
-    inner.forEach(function (c) {
-      c.rows = rowsNeeded(usableRef(c, r0), c.wsum, r0, SP_I);
-      if (c.rows > innerRows) innerRows = c.rows;
-    });
+    if (geomLock && thickI > 0) {
+      var si = solveBand(inner, r0, thickI, INNER_SCALE, SP_I);
+      SP_I = si.sp; innerRows = si.rows;
+      inner.forEach(function (c) { c.rows = innerRows; });
+    } else {
+      inner.forEach(function (c) {
+        c.rows = rowsNeeded(usableRef(c, r0), c.wsum, r0, SP_I);
+        if (c.rows > innerRows) innerRows = c.rows;
+      });
+    }
     var rOuter = geomLock ? geomLock.rOuter
                : (inner.length ? r0 + innerRows * SP_I + 1.6 * SP_I : r0);
 
+    var thickO = geomLock ? geomLock.maxR - geomLock.rOuter : 0;
     var maxR = rOuter, outerRows = 0;
-    outer.forEach(function (c) {
-      c.rows = rowsNeeded(usableRef(c, rOuter), c.wsum, rOuter, SP_O);
-      if (c.rows > outerRows) outerRows = c.rows;
-      var r = rOuter + c.rows * SP_O;
-      if (r > maxR) maxR = r;
-    });
+    if (geomLock && thickO > 0) {
+      var so = solveBand(outer, rOuter, thickO, 1, SP_O);
+      SP_O = so.sp; outerRows = so.rows;
+      outer.forEach(function (c) { c.rows = outerRows; });
+      maxR = rOuter + outerRows * SP_O;
+    } else {
+      outer.forEach(function (c) {
+        c.rows = rowsNeeded(usableRef(c, rOuter), c.wsum, rOuter, SP_O);
+        if (c.rows > outerRows) outerRows = c.rows;
+        var r = rOuter + c.rows * SP_O;
+        if (r > maxR) maxR = r;
+      });
+    }
     // WHY THERE IS NO CORRECTION PASS HERE, having tried one.
     //
     // The open-loop solve leaves maxR a few percent past the locked extent -- measured,
@@ -2136,6 +2232,9 @@ function mountVaultGraph(root, data, deps) {
 
     return { cells: cells, maxR: maxR, total: planTotal, r0: r0, rOuter: rOuter,
              sp: SP_O, spInner: SP_I, density: density, room: roomPlan,
+             // The sub-split gate's inputs, so a probe can see WHY a group did or did not
+             // split rather than inferring it from the cell count.
+             dbgLive: liveG, dbgSplit: splitOf,
              rows: { i: depthOf(inner, innerRows), o: depthOf(outer, outerRows || REF_ROWS) } };
   }
 
@@ -2337,11 +2436,34 @@ function mountVaultGraph(root, data, deps) {
 
         // How many notes this cell puts in each row -- what its end margins are made of, see
         // the zero point below. Counted over the notes that are actually there.
+        // WEIGHTED, NOT COUNTED, and this is the end-of-animation jump. The end margin below is
+        // arc/(2n) -- half the row's own step -- so n decides where every note in the row sits.
+        // Counted as "notes present", n includes a departing note for the whole cascade and
+        // drops it at rest, in one step, and the margin steps with it: measured on a date range,
+        // the last frame and the resting layout differed by up to 301.9 units of TANGENTIAL
+        // movement on an interior step of ~600, with radial and size deltas of exactly 0. Half a
+        // step sideways, on the last frame, for every note in the row.
+        //
+        // Alpha instead: a note leaving contributes less and less of a place until it
+        // contributes none, and the frame before rest and rest itself are the same number by
+        // construction. Same reason weightOf is opacity rather than membership everywhere else
+        // in the packing.
+        //
+        // rowsUsed the same way -- as a sum of per-row occupancy rather than a count of keys,
+        // it stops being a staircase too.
         var rowN = Object.create(null);
         c.slots.forEach(function (sl) {
-          if (present(sl.id)) rowN[sl.r] = (rowN[sl.r] || 0) + 1;
+          var w = alpha[sl.id] || 0;
+          if (w > 0) rowN[sl.r] = (rowN[sl.r] || 0) + w;
         });
-        var rowsUsed = Object.keys(rowN).length || 1;
+        var rowsUsed = 0;
+        Object.keys(rowN).forEach(function (rk) {
+          rowsUsed += rowN[rk] > 1 ? 1 : rowN[rk];
+        });
+        if (!(rowsUsed > 0)) rowsUsed = 1;
+        // The cell's OUTERMOST occupied row, which is the one the eye reads as the ring's edge.
+        var maxRowR = -1;
+        Object.keys(rowN).forEach(function (rk) { if (+rk > maxRowR) maxRowR = +rk; });
         c.slots.forEach(function (sl) {
           if (!present(sl.id)) return;
           // The seam this note's own row pays for, and the wedge edges either side of it.
@@ -2423,8 +2545,36 @@ function mountVaultGraph(root, data, deps) {
           // wedge happens to have. That also makes the room UNIFORM, which is what lets dotPx
           // size a whole band from its tightest pair without the tightest pair being an
           // outlier that shrinks everything.
-          var nRow = rowN[sl.r] || 1;
+          var nRow = rowN[sl.r] > 0.001 ? rowN[sl.r] : 1;
           var zero = arc * rGraph / (2 * nRow);
+          // THE OUTERMOST ROW REACHES ITS EDGES. Every other row keeps half its own step, which
+          // is what makes a boundary invisible -- but the outermost row of a cell is the one
+          // that draws the rim, and it is also the PARTIAL row, holding whatever the rows below
+          // it did not. Half of a short row's step is a wide margin: measured on a 98-note
+          // range, the rim row's boundary gaps came to 936 and 951 units where the same wedges'
+          // interior steps were 574 and 604, so the ring read as broken at every seam while the
+          // rows inside it were flush.
+          //
+          // So that row spends only what a dot needs to clear the seam, and its notes stretch to
+          // the edges instead. It costs a wider spacing WITHIN that row -- the notes there are
+          // genuinely fewer -- which is the trade: the rim is a line a person follows round, and
+          // a gap in it reads as a fault, where uneven spacing along it does not.
+          // A LONE NOTE IN THE RIM ROW IS CENTRED, not stretched. The stretch below exists to
+          // put a row's two END notes against its two edges; with one note there are no two
+          // ends, and reaching for one edge only means leaning against it while the other side
+          // of the wedge stands empty. Centred, it reads as what it is -- a wedge with one note
+          // in its outermost row.
+          if (sl.r === maxRowR && nRow > 1.5) {
+            // Sized to the LARGEST dot the band draws, not the typical one. dotPx's top end is
+            // DOT_OF_PITCH of the band's room, so that product is the biggest radius there can
+            // be -- and it is the one that has to clear the boundary. Sized to the typical dot
+            // instead, the rim closed and then a fat note at the end of a row overlapped its
+            // counterpart across the seam: measured, 1 to 2 overlapping pairs in the inner band
+            // at -24 to -62 units.
+            var bk = isInner ? "i" : "o";
+            var edge = DOT_OF_PITCH * (bandRoom[bk] > 1 ? bandRoom[bk] : pitchUnits(bk));
+            if (edge < zero) zero = edge;
+          }
           // THE STEP, but with a CONTINUOUS count. nRow is how many notes are present in this
           // row right now, an integer, so a step built on it is a step function of the frame --
           // and since dotPx sizes a whole band from a percentile of these, every dot in the
@@ -4493,6 +4643,7 @@ function mountVaultGraph(root, data, deps) {
     // the ones that belong to it.
     var isIn = id !== undefined && bandLock && !!bandLock[groupOf(id)];
     var v = (isIn ? DOT_MI : DOT_M) * (size || 4) + (isIn ? DOT_BI : DOT_B);
+    var scale = 1;
     if (id !== undefined) {
       // THE BAND'S ROOM, NOT THIS NOTE'S. Sizing each note against its own neighbours makes
       // size a function of position as well as of link weight, and the two disagree: notes are
@@ -4534,9 +4685,23 @@ function mountVaultGraph(root, data, deps) {
         var f = room / pit;
         if (f > DOT_ROOM_MAX) f = DOT_ROOM_MAX;
         v *= f;
+        scale = f;
       }
     }
-    var lo = isIn ? DOT_LOI : DOT_LO;
+    // AND THE FLOOR SCALES WITH THE ROOM. This was the last overlap in the vault and it was one
+    // line: the room factor multiplied the value and not the floor, so wherever a note had LESS
+    // room than a pitch the dot shrank and the floor did not, and the floor won.
+    //
+    // It only shows in a small window, which is why it survived every measurement here until a
+    // check ran in a tiled one. The floor is the one quantity in the ramp denominated in
+    // PIXELS -- a dot has to stay visible -- and a fixed number of pixels is a large number of
+    // graph units on a small stage. Measured at 1280x635 with a folder hidden: six overlapping
+    // pairs, every single dot in them at radius exactly 45 units, which is 1.5px there, against
+    // arcs of 45 to 88.
+    //
+    // A dot that cannot be both visible and separate is drawn separate. Sub-pixel is faint and
+    // honest; overlapping is a smear that says two notes are one.
+    var lo = (isIn ? DOT_LOI : DOT_LO) * scale;
     return v < lo ? lo : v;
   }
 

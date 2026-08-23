@@ -1592,6 +1592,123 @@ check("a range change animates instead of snapping", async (p) => {
 // The assertion is EXACTLY ZERO, not a tolerance. The reservation is now walked between the
 // two packings by cascade progress, and for a change that empties no group both ends are the
 // same number -- so any movement at all means it is being derived again.
+// THE INVARIANT THE WHOLE CASCADE EXISTS TO SERVE: the last animated frame IS the resting
+// layout. Not close to it -- identical, per note, in radius, angle and drawn radius. See
+// .ai-context/animation.md, which this check is the executable half of.
+//
+// It is worth a check of its own because every violation found so far was invisible in the
+// frames leading up to it. The cascade converged beautifully and then the layout changed,
+// because the resting layout is computed by a DIFFERENT call and one of its arguments differed.
+// The last one was plan membership: at rest a member was anything `visible`, the folder filter
+// alone, so a note excluded by the DATE range stayed a member at weight 0 -- and a member makes
+// a cell. Eleven cells shared the arc where the final frame had nine, which moved wedges 10.6
+// degrees while every radius and every dot size stayed identical to the unit.
+//
+// Both triggers are exercised, because they reach it differently: a folder toggle changes which
+// notes exist, a range change changes which notes are IN RANGE, and only the second one could
+// ever have caught the membership bug.
+//
+// Angles are compared wrap-safely -- a note either side of 12 o'clock differs by 2*pi for no
+// reason -- and drawn radius goes through renderer.scaleSize, because the node attribute is the
+// reducer's INPUT and reading it raw understates every dot.
+check("the last frame of a cascade is the resting layout", async (p) => {
+  await clearRange(p);
+  await settle(p);
+  await sleep(200);
+
+  const sampler = `(function (trigger) {
+    window.__LF = { last: null, rest: null, frames: 0 };
+    var snap = function () {
+      var a0 = __vg.renderer.graphToViewport({ x: 0, y: 0 });
+      var b0 = __vg.renderer.graphToViewport({ x: 160, y: 0 });
+      var perPx = 160 / Math.hypot(b0.x - a0.x, b0.y - a0.y);
+      var m = {};
+      __vg.graph.forEachNode(function (id, at) {
+        var d = __vg.renderer.getNodeDisplayData(id);
+        if (!d || d.hidden) return;
+        if ((__vg.alpha[id] || 0) < 0.999) return;      // only notes that have arrived
+        m[id] = { r: Math.hypot(at.x, at.y), th: Math.atan2(at.y, at.x),
+                  dot: __vg.renderer.scaleSize(d.size) * perPx };
+      });
+      return m;
+    };
+    var tick = function () {
+      if (__vg.demo.busy()) {
+        window.__LF.last = snap(); window.__LF.frames++;
+        requestAnimationFrame(tick);
+      } else {
+        // A BEAT: busy() clears before the final assignment lands. Without this the check
+        // measures its own stopwatch -- see the note in animation.md.
+        setTimeout(function () { window.__LF.rest = snap(); }, 320);
+      }
+    };
+    trigger();
+    requestAnimationFrame(tick);
+  })`;
+
+  const run = async (label, triggerJs) => {
+    await p.eval(`${sampler}(function () { ${triggerJs} }); void 0`);
+    for (let i = 0; i < 400; i++) {
+      if (await p.j(`!!window.__LF.rest`).catch(() => false)) break;
+      await sleep(100);
+    }
+    return await p.j(`(function () {
+      var L = window.__LF.last, R = window.__LF.rest;
+      if (!L || !R) return { frames: window.__LF.frames, n: 0 };
+      var dr = 0, dt = 0, dd = 0, n = 0, worst = "";
+      Object.keys(R).forEach(function (id) {
+        if (!L[id]) return;
+        n++;
+        var a = Math.abs(R[id].r - L[id].r);
+        var da = R[id].th - L[id].th;
+        while (da > Math.PI) da -= 2 * Math.PI;
+        while (da < -Math.PI) da += 2 * Math.PI;
+        var t = Math.abs(da) * R[id].r;
+        var s = L[id].dot > 0.01 ? Math.abs(R[id].dot - L[id].dot) / L[id].dot : 0;
+        if (a > dr) dr = a;
+        if (t > dt) { dt = t; worst = __vg.graph.getNodeAttribute(id, "folder") || "?"; }
+        if (s > dd) dd = s;
+      });
+      return { frames: window.__LF.frames, n: n, worst: worst,
+               dr: Math.round(dr * 10) / 10, dt: Math.round(dt * 10) / 10,
+               dd: Math.round(dd * 1000) / 10 };
+    })()`).then((r) => ({ label, ...r }));
+  };
+
+  const out = [];
+  // A folder toggle. The first group with an eye, whichever the vault has.
+  const g = (await p.j(`__vg.groupOrder()`))[0];
+  out.push(await run("folder toggle", `document.querySelector('[data-eye="' +
+    ${JSON.stringify(g)}.replace(/"/g, String.fromCharCode(92) + '"') + '"]').click();`));
+  await p.eval(`document.querySelector('[data-eye="' +
+    ${JSON.stringify(g)}.replace(/"/g, String.fromCharCode(92) + '"') + '"]').click(); void 0`);
+  await settle(p);
+  await sleep(200);
+
+  // A range change, taken off the vault's own extent so it works on any fixture.
+  const span = await p.j(`(function () { var f = document.querySelector("#vg-from");
+    return f ? { min: f.min, max: f.max } : null; })()`);
+  if (span && span.min && span.max) {
+    const lo = Date.parse(span.min), hi = Date.parse(span.max);
+    const from = new Date(hi - (hi - lo) * 0.15).toISOString().slice(0, 10);
+    out.push(await run("range change", `__vg.setRange(${JSON.stringify("PLACEHOLDER")}, null);`
+      .replace("PLACEHOLDER", from)));
+  }
+  await clearRange(p);
+
+  // A tenth of a row, and a twentieth of a dot. Float noise and the odd sub-pixel rounding live
+  // far below this; a real violation is a fraction of a ROW -- 160 units -- or a visible step in
+  // size, so anything genuine is orders of magnitude past these.
+  const bad = out.filter((r) => !r.n || r.dr > 16 || r.dt > 16 || r.dd > 5);
+  return {
+    ok: !bad.length,
+    detail: out.map((r) => r.n
+      ? `${r.label}: ${r.frames}f, ${r.n} notes, dr ${r.dr} dtan ${r.dt}` +
+        (r.dt > 1 ? ` (${r.worst})` : "") + ` dot ${r.dd}%`
+      : `${r.label}: nothing sampled`).join(" | "),
+  };
+});
+
 // THE STATES WHERE EVERY LAYOUT BUG THIS FILE KNOWS ABOUT WAS FOUND: folders switched off one
 // at a time, and a date range squeezed until the bands are one or two rows deep. Both drive the
 // disc into the corner the ordinary fixtures never reach -- cells narrower than a note, rows
