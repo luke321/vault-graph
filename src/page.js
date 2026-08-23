@@ -691,20 +691,63 @@ function mountVaultGraph(root, data, deps) {
 
 
 
-  // The lattice spacing the last plan actually used. Read by measureSizeScale, which has
-  // to know how wide a ROW is rather than how wide a lattice unit is -- they were the
-  // same number until the density solve, and conflating them is why dot size did not
-  // respond to filtering at all.
-  var lastSP = 1;
-  // The INNER band's spacing, alongside it. The two rings are solved separately, so one number
-  // cannot answer for both -- and when it tried, the inner ring's geometry followed the outer
-  // ring's filtering.
-  var lastSPI = 1;
-  // How deep each band is RIGHT NOW, in rows. The seam falls off against this rather than
-  // against the locked full-vault depth: filter a 10,000-note vault down to 500 and it should
-  // read like a 500-note vault, gaps included, not keep the hairline seam a ten-row-deep ring
-  // earned. Locked depth got that wrong in the one direction nobody checked.
-  var lastRows = { i: REF_ROWS, o: REF_ROWS };
+  // ONE DESCRIPTOR PER BAND, and the reason it exists is a tally rather than a preference.
+  //
+  // The two rings are packed independently -- a single spacing made each answer for the other's
+  // filtering, which closed the gap between them from 843 units to 89 -- so every quantity
+  // below is per band. Held as PAIRS of scalars, which is what this replaces, the unqualified
+  // name meant the outer band and the inner one needed an `I`. Six bugs in one session were a
+  // site reading the unqualified name:
+  //
+  //   the seam pitch, sized by the outer ring's spacing on both rings;
+  //   the dot ramp, calibrated from the outer spacing and applied to both, so the inner ring's
+  //     notes touched (clearance 29) while the outer ring gapped (239);
+  //   pitchUnits()'s argument omitted, defaulting to the outer band;
+  //   dotFit's room compared against the outer pitch inside the inner band;
+  //   the band depth feeding seamFall taken as an integer rather than the walked value;
+  //   the pixel floor scaled by the room in one place and not the other.
+  //
+  // Every one of those is unwriteable against a keyed object: there is no bare name to reach
+  // for, so the band has to be named, so the wrong band has to be chosen deliberately.
+  //
+  //   sp      the lattice spacing this band's last plan used -- a ROW's width, not a lattice
+  //           unit's. They were the same number until the density solve, and conflating them
+  //           is why dot size did not respond to filtering at all.
+  //   rows    how deep the band is RIGHT NOW. The seam falls off against this rather than the
+  //           locked full-vault depth: filter a 10,000-note vault to 500 and it should read
+  //           like a 500-note vault, gaps included.
+  //   room    the tangential step a note has, as a low percentile over the band. See dotPx.
+  //   ramp    display px = m * attr size + b, never below lo. Per band, because a dot is a
+  //           fraction of ITS OWN pitch.
+  //   gapDeg, nG   the seam width and the seam count, for the probe and the report.
+  //
+  // The factor a band's radii are DRAWN at is bandScale(), a function rather than a field --
+  // see below for why. REF_ROWS and DOT_MIN_PX are declared further down the file, so the
+  // fields that would default to them start at 0 and the readers carry the fallback, exactly
+  // as `lastRows[k] || REF_ROWS` did.
+  //
+  // BUILT ON FIRST USE, not at this statement, because this statement is not reached first.
+  // mountVaultGraph calls measureDotTyp near the top of its body, which reaches dotUnits and so
+  // pitchUnits -- above every one of these declarations. The scalars this replaces survived that
+  // by accident: `(lastSPI || 1)` reads undefined and carries on, where `BAND.i` on undefined
+  // throws, so the page did not boot at all on the first attempt at this change.
+  //
+  // A function declaration is hoisted and a var initialiser is not, so the construction lives
+  // inside bandOf and every writer goes through it too. Nothing may touch BAND directly.
+  var BAND = null;
+  function bandOf(k) {
+    if (!BAND) {
+      BAND = {
+        i: { key: "i", sp: 1, rows: 0, room: 0, ramp: { m: 1, b: 0, lo: 0 }, gapDeg: 0, nG: 0 },
+        o: { key: "o", sp: 1, rows: 0, room: 0, ramp: { m: 1, b: 0, lo: 0 }, gapDeg: 0, nG: 0 },
+      };
+    }
+    return k === "i" ? BAND.i : BAND.o;
+  }
+  // The factor a band's radii are DRAWN at, read rather than stored for the same reason:
+  // INNER_SCALE is declared below the first caller too, so a descriptor built early would
+  // capture undefined and keep it for the session.
+  function bandScale(k) { return k === "i" ? INNER_SCALE : 1; }
 
   // ONE ROW OF THE LATTICE AT FULL VAULT, IN GRAPH UNITS -- and deliberately NOT the live
   // pitch, which is a different number at every filter state.
@@ -742,8 +785,7 @@ function mountVaultGraph(root, data, deps) {
   // Per band and never one shared number, which is the error that made the inner ring's gaps
   // grow while outer folders were toggled.
   function pitchUnits(band) {
-    var sp = band === "i" ? (lastSPI || 1) : (lastSP || 1);
-    return UNIT * sp * (band === "i" ? INNER_SCALE : 1);
+    return UNIT * (bandOf(band).sp || 1) * bandScale(band);
   }
 
   var NEST_MIN = 2;
@@ -981,7 +1023,7 @@ function mountVaultGraph(root, data, deps) {
   // the two rings differ and a shallow inner ring should not be held to the outer one's seam.
   function seamFall(band) {
     var k = band === "i" ? "i" : "o";
-    var rows = lastRows[k] || REF_ROWS;
+    var rows = bandOf(k).rows || REF_ROWS;
     return Math.pow(REF_ROWS / Math.max(1, rows), SEAM_FALL);
   }
 
@@ -1074,8 +1116,7 @@ function mountVaultGraph(root, data, deps) {
   function dotUnits(size, band) {
     var z = size || 4;
     if (z > NODE_MAX) z = NODE_MAX;
-    var sp = band === "i" ? (lastSPI || 1) : (lastSP || 1);
-    return DOT_OF_PITCH * UNIT * sp * (z / NODE_MAX);
+    return DOT_OF_PITCH * pitchUnits(band) / bandScale(band) * (z / NODE_MAX);
   }
 
   function seamAt(r, nBoundaries) {
@@ -2366,9 +2407,9 @@ function mountVaultGraph(root, data, deps) {
     lastMaxR = plan.maxR || lastMaxR;
     // Recorded beside lastMaxR and for the same reason: both are properties of the
     // packing on screen, and both are read from render-time code that has no plan.
-    if (plan.sp > 0) lastSP = plan.sp;
-    if (plan.spInner > 0) lastSPI = plan.spInner;
-    if (plan.rows) lastRows = plan.rows;
+    if (plan.sp > 0) bandOf("o").sp = plan.sp;
+    if (plan.spInner > 0) bandOf("i").sp = plan.spInner;
+    if (plan.rows) { bandOf("i").rows = plan.rows.i; bandOf("o").rows = plan.rows.o; }
 
     // The inner and main bands are each a full circle, so they are allocated
     // separately -- a small cell competes only with the other small cells.
@@ -2405,8 +2446,8 @@ function mountVaultGraph(root, data, deps) {
                            { subGaps: true, clamp: 0.45, totFloor: 1e-6,
                              groupPres: gapPres, band: isInner ? "i" : "o" });
       var gap = a.gap;
-      lastGapDeg[isInner ? "i" : "o"] = Math.round(gap * 180 / Math.PI * 1000) / 1000;
-      lastNG[isInner ? "i" : "o"] = Math.round(a.nG * 1000) / 1000;
+      bandOf(isInner ? "i" : "o").gapDeg = Math.round(gap * 180 / Math.PI * 1000) / 1000;
+      bandOf(isInner ? "i" : "o").nG = Math.round(a.nG * 1000) / 1000;
       band.forEach(function (c) { c.span = a.shareOf(c); });
       // EVERY BOUNDARY COSTS ONE SEAM, group or subfolder, so there is a single count to
       // spend. The reference radius is the locked one, used only for the probe's readout and
@@ -2600,7 +2641,8 @@ function mountVaultGraph(root, data, deps) {
             // counterpart across the seam: measured, 1 to 2 overlapping pairs in the inner band
             // at -24 to -62 units.
             var bk = isInner ? "i" : "o";
-            var edge = DOT_OF_PITCH * (bandRoom[bk] > 1 ? bandRoom[bk] : pitchUnits(bk));
+            var edge = DOT_OF_PITCH * (bandOf(bk).room > 1 ? bandOf(bk).room
+                                                             : pitchUnits(bk));
             if (edge < zero) zero = edge;
           }
           // THE STEP, but with a CONTINUOUS count. nRow is how many notes are present in this
@@ -2666,9 +2708,8 @@ function mountVaultGraph(root, data, deps) {
             // The floor is the largest radius the band can draw: dotPx tops out at
             // DOT_OF_PITCH of the band's room, so a margin of that keeps every dot inside its
             // own wedge on every row, and binds only where it would otherwise not be.
-            var floorU = DOT_OF_PITCH * (bandRoom[isInner ? "i" : "o"] > 1
-                                         ? bandRoom[isInner ? "i" : "o"]
-                                         : pitchUnits(isInner ? "i" : "o"));
+            var fb = bandOf(isInner ? "i" : "o");
+            var floorU = DOT_OF_PITCH * (fb.room > 1 ? fb.room : pitchUnits(fb.key));
             if (m < floorU) m = floorU;
             return m < 0 ? 0 : m / rGraph;
           };
@@ -2829,7 +2870,7 @@ function mountVaultGraph(root, data, deps) {
     // it, which moves exactly as smoothly as the positions do; the breathing came entirely from
     // the per-note cap that used to sit on top of it, and with that gone the worst single-frame
     // size change is 2.2% against 252% before.
-    bandRoom = { i: pick(pool.i), o: pick(pool.o) };
+    bandOf("i").room = pick(pool.i); bandOf("o").room = pick(pool.o);
     Object.keys(cellOf).forEach(function (id) {
       var m = cellMin[cellOf[id]];
       if (m > 1) cellRoomNext[id] = m;
@@ -3336,7 +3377,6 @@ function mountVaultGraph(root, data, deps) {
   // continuous group count it reserved for, and the gap angle it spent. lastGapN above
   // comes from the REFERENCE allocation, which sizes rows and never positions anything --
   // so it can look perfectly smooth while the arc the notes actually sit in jumps.
-  var lastGapDeg = { i: 0, o: 0 }, lastNG = { i: 0, o: 0 };
   var lastStart = null;   // group -> wedge start angle in degrees, this frame
   // Group presences for the GAP reservation, walked between the cascade's two packings
   // and read by the rendered allocation. Null at rest, which is when weight-over-seats
@@ -3368,7 +3408,6 @@ function mountVaultGraph(root, data, deps) {
   var dotFit = Object.create(null);
   // The room a BAND has, one figure each, being the tightest pair in it. See dotPx: size has to
   // be a monotone function of link weight, so it cannot carry a per-note term.
-  var bandRoom = { i: 0, o: 0 };
   // Per note, its own cell's step. Bounds a dot where its folder is packed tighter than the
   // band's tenth percentile; continuous, so it does not make dots breathe.
   var cellRoom = Object.create(null);
@@ -3888,7 +3927,8 @@ function mountVaultGraph(root, data, deps) {
     if (probe.watch) probe.watchSeries.push(probe.watched || null);
     probe.samples.push({
       tag: tag, ms: Math.round(NOW() - probe.t0), gapI: lastGapN.i, gapO: lastGapN.o,
-      ngI: lastNG.i, ngO: lastNG.o, gapDegI: lastGapDeg.i, gapDegO: lastGapDeg.o,
+      ngI: bandOf("i").nG, ngO: bandOf("o").nG,
+      gapDegI: bandOf("i").gapDeg, gapDegO: bandOf("o").gapDeg,
       radStep: Math.round(radStep), radId: radId,
       radMean: Math.round(radN ? radSum / radN : 0),
       tanStep: Math.round(tanStep), tanId: tanId, tanOver: tanOver,
@@ -4639,10 +4679,8 @@ function mountVaultGraph(root, data, deps) {
   // read as nine small dots adrift on a circle. Set to the spacing cap, the growth a dot is
   // allowed and the spread the lattice is allowed are one number instead of two that disagree.
   var DOT_ROOM_MAX = DENSITY_MAX;
-  // display px = DOT_M * attr size + DOT_B, never below DOT_LO.
-  var DOT_M = 1, DOT_B = 0, DOT_LO = DOT_MIN_PX;
-  var DOT_MI = 1, DOT_BI = 0, DOT_LOI = DOT_MIN_PX;   // the inner band's own ramp
-  var sizeScale = 1;            // kept for the probe and the report; = DOT_M at NODE_MAX
+  // display px = ramp.m * attr size + ramp.b, never below ramp.lo, per band. See BAND.
+  var sizeScale = 1;      // kept for the probe and the report; = the outer ramp at NODE_MAX
 
   // Whether the border program actually loaded. If the bundle ever ships without it,
   // highlighting still works -- the radial push carries it on its own -- rather than
@@ -4655,7 +4693,7 @@ function mountVaultGraph(root, data, deps) {
     // distinction is the fix: measuring one lattice unit answered a question about the
     // camera, and the question here is how much room a note has next to its neighbour.
     var a = renderer.graphToViewport({ x: 0, y: 0 });
-    var b = renderer.graphToViewport({ x: UNIT * (lastSP || 1), y: 0 });
+    var b = renderer.graphToViewport({ x: UNIT * (bandOf("o").sp || 1), y: 0 });
     var pitch = Math.hypot(b.x - a.x, b.y - a.y);
     if (!(pitch > 0)) return sizeScale;
     // TIMES THE CAMERA RATIO, because sigma now scales what we hand it by 1/ratio (see
@@ -4702,10 +4740,9 @@ function mountVaultGraph(root, data, deps) {
                b: lo - (hi - lo) / Math.max(1e-6, NODE_MAX - NODE_MIN) * NODE_MIN,
                lo: lo, hi: hi };
     };
-    var ro = rampFor(UNIT * (lastSP || 1));
-    var ri = rampFor(UNIT * (lastSPI || 1) * INNER_SCALE);
-    DOT_M = ro.m; DOT_B = ro.b; DOT_LO = ro.lo;
-    DOT_MI = ri.m; DOT_BI = ri.b; DOT_LOI = ri.lo;
+    var ro = rampFor(UNIT * (bandOf("o").sp || 1) * bandScale("o"));
+    var ri = rampFor(UNIT * (bandOf("i").sp || 1) * bandScale("i"));
+    bandOf("o").ramp = ro; bandOf("i").ramp = ri;
     return ro.hi / NODE_MAX;   // what the old multiplier would have been at the top end
   }
 
@@ -4720,7 +4757,8 @@ function mountVaultGraph(root, data, deps) {
     // Which band this note is in, so both the ramp and the room it is measured against are
     // the ones that belong to it.
     var isIn = id !== undefined && bandLock && !!bandLock[groupOf(id)];
-    var v = (isIn ? DOT_MI : DOT_M) * (size || 4) + (isIn ? DOT_BI : DOT_B);
+    var rp = bandOf(isIn ? "i" : "o").ramp;
+    var v = rp.m * (size || 4) + rp.b;
     var scale = 1;
     if (id !== undefined) {
       // THE BAND'S ROOM, NOT THIS NOTE'S. Sizing each note against its own neighbours makes
@@ -4736,7 +4774,7 @@ function mountVaultGraph(root, data, deps) {
       // to fit the closest pair in it, so nothing can touch. The price is that one crowded pair
       // sets the size for its whole band, which is the honest trade for an encoding that can be
       // read.
-      var room = bandRoom[isIn ? "i" : "o"];
+      var room = bandOf(isIn ? "i" : "o").room;
       var mine = cellRoom[id];
       if (mine !== undefined && mine > 1 && (!(room > 1) || mine < room)) room = mine;
       // AND A HAIR UNDER, because both figures above are AVERAGES over a row and the notes in a
@@ -4790,7 +4828,7 @@ function mountVaultGraph(root, data, deps) {
     //
     // A dot that cannot be both visible and separate is drawn separate. Sub-pixel is faint and
     // honest; overlapping is a smear that says two notes are one.
-    var lo = (isIn ? DOT_LOI : DOT_LO) * scale;
+    var lo = (rp.lo || DOT_MIN_PX) * scale;
     if (v < lo) v = lo;
     // AND NEVER PAST ITS OWN WEDGE EDGE. Last, so it outranks the pixel floor too: a dot that
     // cannot be both visible and inside its wedge is drawn inside it. The cap is in graph
@@ -4801,7 +4839,7 @@ function mountVaultGraph(root, data, deps) {
       var pitU = pitchUnits(isIn ? "i" : "o");
       var hiU = DOT_OF_PITCH * pitU;                 // what v = ramp top means, in graph units
       if (hiU > 1e-6) {
-        var capV = (isIn ? DOT_MI : DOT_M) * NODE_MAX + (isIn ? DOT_BI : DOT_B);
+        var capV = rp.m * NODE_MAX + rp.b;
         var vMax = capV * (capU / hiU);
         if (v > vMax) v = vMax;
       }
@@ -8151,10 +8189,10 @@ function mountVaultGraph(root, data, deps) {
                         // A ROW, not a lattice unit. These were the same number before the
                         // density solve, and pitchPx is the one that decides whether two
                         // notes in a column touch.
-                        var b = renderer.graphToViewport({ x: UNIT * (lastSP || 1), y: 0 });
+                        var b = renderer.graphToViewport({ x: UNIT * (bandOf("o").sp || 1), y: 0 });
                         pitchPx = Math.hypot(b.x - a.x, b.y - a.y);
                         var bi = renderer.graphToViewport({
-                          x: UNIT * (lastSPI || 1) * INNER_SCALE, y: 0 });
+                          x: UNIT * (bandOf("i").sp || 1) * bandScale("i"), y: 0 });
                         pitchPxI = Math.hypot(bi.x - a.x, bi.y - a.y);
                         // How far the disc actually reaches on screen, from the live radius
                         // rather than the locked one -- the gap between them IS the empty
@@ -8186,7 +8224,7 @@ function mountVaultGraph(root, data, deps) {
                         // The hole as a SHARE of what is drawn. The r0 formula exists to hold
                         // this constant; pinning r0 while the disc shrinks is what breaks it.
                         holeShare: lastMaxR ? r3((geomLock ? geomLock.r0 : 0) / lastMaxR) : null,
-                        sp: r3(lastSP),
+                        sp: r3(bandOf("o").sp),
                         unitPx: r3(unitPx),
                         pitchPx: r3(pitchPx),
                         // PITCH TIMES THE ROOT OF THE NOTE COUNT, and both PER BAND.
@@ -8519,24 +8557,27 @@ function mountVaultGraph(root, data, deps) {
                                    from: state.from, to: state.to, heatEnd: state.heatEnd,
                                    timelineUntil: state.until,
                                    markToday: !!state.markToday, shown: pts.length },
-                        spacing: { spOuter: r3(lastSP), spInner: r3(lastSPI),
-                                   rowsOuter: lastRows.o, rowsInner: lastRows.i,
+                        spacing: { spOuter: r3(bandOf("o").sp),
+                                   spInner: r3(bandOf("i").sp),
+                                   rowsOuter: bandOf("o").rows,
+                                   rowsInner: bandOf("i").rows,
                                    pitchOuterUnits: r3(pitchUnits("o")),
                                    pitchInnerUnits: r3(pitchUnits("i")) },
-                        seam: { outerDeg: lastGapDeg.o, innerDeg: lastGapDeg.i,
-                                nGOuter: lastNG.o, nGInner: lastNG.i,
+                        seam: { outerDeg: bandOf("o").gapDeg, innerDeg: bandOf("i").gapDeg,
+                                nGOuter: bandOf("o").nG, nGInner: bandOf("i").nG,
                                 fallOuter: r3(seamFall("o")), fallInner: r3(seamFall("i")) },
                         locked: geomLock ? { r0: r3(geomLock.r0), rOuter: r3(geomLock.rOuter),
                                              maxR: r3(geomLock.maxR), rows: geomLock.rows,
                                              bandTotal: geomLock.bandTotal } : null,
                         bands: { inner: bandStat(pts.slice(0, gi)), outer: bandStat(pts.slice(gi)) },
                         dots: { ofPitch: r3(DOT_OF_PITCH), minPx: DOT_MIN_PX,
-                                maxSpread: DOT_MAX_SPREAD, m: r3(DOT_M), b: r3(DOT_B), lo: r3(DOT_LO) },
+                                maxSpread: DOT_MAX_SPREAD, m: r3(bandOf("o").ramp.m),
+                                b: r3(bandOf("o").ramp.b), lo: r3(bandOf("o").ramp.lo) },
                       };
                     },
                     lastGap: function () {
-                      return { ngI: lastNG.i, ngO: lastNG.o,
-                               gapDegI: lastGapDeg.i, gapDegO: lastGapDeg.o };
+                      return { ngI: bandOf("i").nG, ngO: bandOf("o").nG,
+                               gapDegI: bandOf("i").gapDeg, gapDegO: bandOf("o").gapDeg };
                     },
                     rangeReport: function () {
                       var lit = 0, dated = 0;

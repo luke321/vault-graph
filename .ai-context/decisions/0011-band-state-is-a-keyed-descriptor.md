@@ -1,6 +1,6 @@
 # 0011 — Band state wants to be one keyed descriptor
 
-**Date** 2026-08-24 · **Status** proposed, attempted once, reverted · **Relates to** `animation.md`
+**Date** 2026-08-24 · **Status** accepted · **Relates to** `animation.md`
 
 ## Context
 
@@ -52,25 +52,53 @@ Folding `INNER_SCALE` into the descriptor as `scale` — better still, storing `
 pre-scaled so a radius is `base + row*sp` with nothing multiplying it — removes the eleven sites
 that currently have to remember the inner ring is drawn at 0.8.
 
-## Attempted, reverted
+## Landed
 
-The mechanical rename was written and applied: ~30 sites, all pairs gone, `node --check` clean.
-The page then **failed to boot** — `TypeError: Cannot read properties of undefined (reading 'i')`
-inside `bandOf`, i.e. `BAND` undefined when it was called. `bandOf` is a hoisted function
-declaration and `BAND` is a `var` assigned mid-module, so something reaches it before its
-initialiser runs; grep found no module-level call above the declaration, so the caller is
-indirect and was not tracked down before the session ended.
+`BAND`, reached only through `bandOf(key)`, holding `sp`, `rows`, `room`, `ramp`, `gapDeg`, `nG`.
+Every pair is gone; the sole direct `BAND.` reference is inside `bandOf` itself.
 
-Reverted rather than left half-migrated. The patch script is reproducible and the parity harness
-that gates it exists (`parity.mjs`: every note's radius, angle and drawn radius across six filter
-states per fixture, diffed — a rename must come out at zero).
+Verified by measurement rather than by argument: `parity.mjs` captures every note's radius, angle
+and drawn radius across six filter states per fixture — 18 states, 5 892 notes at rest — and the
+diff is **0.00 on all three quantities in all 18 states, nothing missing**. Suite 44/44 on all
+three fixtures.
 
-**Start here next time.** Print the *caller* of `bandOf` from the first page error, now that the
-CDP harness records page exceptions (`p.errors`, `p.firstError()`). Adding that capture is what
-turned six rounds of narrowing by hand into one round with the answer in it, and it was itself the
-main cost of this attempt: `eval()` only reports exceptions from the expression it ran, so a script
-that dies during boot shows up as `window.__vg is undefined` with no reason attached.
+## The hoisting trap, which is the whole reason this took two attempts
 
-The likely shape of the fix is a hoisting-safe definition — build the descriptor in a function and
-call it from the first reader, or declare it above every other module-level statement — but that is
-a guess, and this file exists because guessing is how the six bugs above took a week.
+The first attempt was the same patch. It passed `node --check` and the page **did not boot**:
+`TypeError: Cannot read properties of undefined (reading 'i')` inside `bandOf`.
+
+`mountVaultGraph` calls `measureDotTyp()` near the top of its body, which reaches `dotUnits` and so
+`pitchUnits` — **above every one of these declarations**. A `var` initialiser has not run at that
+point. The pairs of scalars survived it by accident, because `(lastSPI || 1)` reads `undefined` and
+carries on with 1; `BAND.i` on `undefined` throws.
+
+So two rules, and both matter:
+
+- **The descriptor is built on first use, inside `bandOf`.** A function declaration is hoisted
+  where a `var` initialiser is not. Every *writer* goes through `bandOf` too, so the construction
+  cannot be skipped. Nothing touches `BAND` directly.
+- **`bandScale()` is a function, not a field.** `INNER_SCALE` is declared below that first caller
+  as well, so a descriptor built early would capture `undefined` and keep it for the session. Had
+  `scale` been a field, the page would have booted and drawn the inner ring at `NaN` — the crash
+  was the friendlier failure.
+
+## What made it landable
+
+Two tools, both built because this attempt needed them:
+
+- **`p.errors` / `p.firstError()` in `scripts/cdp.mjs`.** `eval()` only reports exceptions from the
+  expression it ran, so a page dying during boot presents as `window.__vg is undefined` with no
+  reason attached. Without the capture, narrowing by hand took six rounds and did not reach the
+  cause. With it, the same failure printed its own stack — `bandOf → pitchUnits → dotUnits →
+  measureDotTyp → mountVaultGraph` — and the fix followed from reading it.
+- **`parity.mjs`.** "It compiles and the suite is green" is not evidence for a rename: the suite
+  cannot run at all against a page that never initialises, and the first attempt would have passed
+  every static check. A diff of the drawn disc across 18 states is a different kind of claim.
+
+## Still to do
+
+`INNER_SCALE` is now one function instead of eleven scattered reads, but it is not yet *folded*:
+radii are still `(base + row * sp) * scale`. Storing each band's `base` and `sp` pre-scaled would
+make a radius `base + row * sp` with nothing multiplying it, which is the last place the inner ring
+being drawn at 0.8 has to be remembered. That is arithmetic rather than renaming, so it will not
+come out at parity zero to the last decimal, and it wants its own pass.
