@@ -2200,6 +2200,10 @@ function mountVaultGraph(root, data, deps) {
     // of one wedge and the note at the start of the next are compared. Reset per band, since
     // the two rings have their own radii and never share a row.
     var lastAt = null, firstAt = null;
+    // The interior step of every row of every cell, per band, collected as placement computes
+    // it. See where bandRoom is taken from this: it has to be a function of the PLAN, not of
+    // the positions that come out of it.
+    var roomPool = { i: [], o: [] };
     if (probe) lastStart = Object.create(null);
     [true, false].forEach(function (isInner) {
       var band = shown.filter(function (c) { return !!c.inner === isInner; });
@@ -2271,6 +2275,12 @@ function mountVaultGraph(root, data, deps) {
         // makes the motion read along the circumference instead of radially.
         var open = c.geom > 1e-6 ? c.live / c.geom : 0;
 
+        // How many notes this cell puts in each row -- what its end margins are made of, see
+        // the zero point below. Counted over the notes that are actually there.
+        var rowN = Object.create(null);
+        c.slots.forEach(function (sl) {
+          if (present(sl.id)) rowN[sl.r] = (rowN[sl.r] || 0) + 1;
+        });
         c.slots.forEach(function (sl) {
           if (!present(sl.id)) return;
           // The seam this note's own row pays for, and the wedge edges either side of it.
@@ -2337,7 +2347,26 @@ function mountVaultGraph(root, data, deps) {
           // in from their own edge put those two notes exactly one step apart, which is a
           // boundary nobody can see. Everything past that is the channel, and the channel is
           // what gets scaled -- including the seam, which sits inside it.
-          var zero = MARGIN_ROWS * pitchUnits(isInner ? "i" : "o");
+          // HALF THIS WEDGE'S OWN STEP, which is what the sentence above always meant and not
+          // what the code did. Half a PITCH is half a step only where a row is exactly full,
+          // and rows usually are not: measured on an 89-note range, wedges in the outer band
+          // had interior steps of 686 to 736 units on a pitch of 407, so their end notes sat
+          // half a pitch in while their siblings stood a whole step apart -- boundary gap 431
+          // against an interior 736. A channel TIGHTER than the spacing either side of it,
+          // which reads as the notes drifting away from their own edges.
+          //
+          // For n notes in an arc A, asking that the end margin be half the interior step has
+          // one solution: A = 2m + (n-1)s with m = s/2 gives s = A/n and m = A/2n. So the
+          // margin is the row's own half-share of its own arc, and the interior step and the
+          // boundary gap come out the same number by construction, at whatever density the
+          // wedge happens to have. That also makes the room UNIFORM, which is what lets dotPx
+          // size a whole band from its tightest pair without the tightest pair being an
+          // outlier that shrinks everything.
+          var nRow = rowN[sl.r] || 1;
+          var zero = arc * rGraph / (2 * nRow);
+          // Twice the half-step is the step. Pushed per note so the percentile below is
+          // weighted by how many notes actually sit at each spacing.
+          roomPool[isInner ? "i" : "o"].push(2 * zero);
           var seamArc = sm.gap * rGraph / 2;      // this side's half of the seam, in units
           var keep = EXCESS_KEEP * seamFall(isInner ? "i" : "o");
           var typ = dotTyp(isInner ? "i" : "o");
@@ -2454,6 +2483,36 @@ function mountVaultGraph(root, data, deps) {
 
     // Committed once per pass, replacing the previous pass wholesale: a note that has left the
     // disc must not leave its old spacing behind for the next one to size against.
+    // THE TIGHTEST PAIR IN EACH BAND. dotPx sizes every note in a band against this one
+    // figure rather than against its own neighbours, so the ordering by link weight survives
+    // -- and taking the minimum rather than an average is what makes that safe: the largest
+    // dot in the band is sized to fit the closest pair in it, so no pair anywhere can touch.
+    // FROM THE PLAN, NOT FROM THE POSITIONS. Taken from the fit map -- which is measured off
+    // the placed notes -- this jittered every frame of a cascade: the set of notes in it
+    // changes as notes arrive and leave, and a percentile over a moving set moves for reasons
+    // that have nothing to do with any note. Every dot in the band therefore breathed for the
+    // length of the animation, which was reported as exactly that.
+    //
+    // The interior step arc/n is a function of the same interpolated plan quantities that
+    // produce the positions -- the cell's live arc, its radius, its notes per row -- so it is
+    // as smooth as they are, which is the property #13 established for the spacing and the
+    // seam. The fit map keeps its own job: bounding an individual dot, not sizing the band.
+    var pool = roomPool;
+    // A LOW PERCENTILE, NOT THE MINIMUM. The minimum is the correct bound and the wrong
+    // statistic: it is one pair, and one pair that happens to be tight sets the size for every
+    // note in its band. Measured on the 454-note vault, taking the minimum put the inner band's
+    // median dot at 25 units with a diameter-to-step of 0.12 while its worst real clearance was
+    // 93 -- dots a quarter of the size the room allowed, because of a single outlier.
+    //
+    // The tenth percentile keeps what matters -- ONE figure per band, so size stays strictly
+    // monotone in link weight -- and lets the tightest tenth of pairs come closer to touching
+    // than the rest. Overlaps are measured rather than assumed; see the changelog.
+    var pick = function (v) {
+      if (!v.length) return 0;
+      v.sort(function (x, y) { return x - y; });
+      return v[Math.floor(v.length * 0.1)];
+    };
+    bandRoom = { i: pick(pool.i), o: pick(pool.o) };
     dotFit = fit;
     return out;
   }
@@ -2983,6 +3042,9 @@ function mountVaultGraph(root, data, deps) {
   // wedge count and the presence weights at once, and every attempt in this file to predict
   // one of those from the others has been wrong at least once.
   var dotFit = Object.create(null);
+  // The room a BAND has, one figure each, being the tightest pair in it. See dotPx: size has to
+  // be a monotone function of link weight, so it cannot carry a per-note term.
+  var bandRoom = { i: 0, o: 0 };
   // WHAT THE LAST CASCADE WAS ASKED TO DO. Every question about a jump starts with
   // "did it animate at all, and over how many notes", and inferring that from frame
   // counts is guesswork -- an instant apply and a one-frame animation look identical
@@ -4315,7 +4377,27 @@ function mountVaultGraph(root, data, deps) {
     var isIn = id !== undefined && bandLock && !!bandLock[groupOf(id)];
     var v = (isIn ? DOT_MI : DOT_M) * (size || 4) + (isIn ? DOT_BI : DOT_B);
     if (id !== undefined) {
-      var room = dotFit[id];
+      // THE BAND'S ROOM, NOT THIS NOTE'S. Sizing each note against its own neighbours makes
+      // size a function of position as well as of link weight, and the two disagree: notes are
+      // laid down in weight order from the inside out, so the innermost note is the most
+      // connected one -- and the innermost row has the shortest arc, therefore the least room,
+      // therefore the smallest dot. The most connected note came out smaller than its
+      // neighbours and the graph read backwards, which is what a graph must not do.
+      //
+      // One figure per band, the tightest pair in it, makes size strictly monotone in link
+      // weight: the ordering is the whole point of the encoding and nothing local may perturb
+      // it. Taking the MINIMUM is what keeps that safe -- the biggest dot in the band is sized
+      // to fit the closest pair in it, so nothing can touch. The price is that one crowded pair
+      // sets the size for its whole band, which is the honest trade for an encoding that can be
+      // read.
+      var room = bandRoom[isIn ? "i" : "o"];
+      // ...BUT NEVER MORE THAN THIS NOTE'S OWN ROOM. The band figure is a tenth percentile, so
+      // by construction a tenth of pairs are tighter than it, and the plan-derived step cannot
+      // see a note that is individually crowded -- measured, one overlapping pair at -19 units
+      // on one date range. As a CAP rather than a scale it costs the ordering only where a note
+      // would otherwise collide, which is the one place the ordering has to yield.
+      var own = dotFit[id];
+      if (own !== undefined && own > 1 && (!(room > 1) || own < room)) room = own;
       var pit = pitchUnits(isIn ? "i" : "o");
       // BOTH WAYS. This only ever shrank a dot, which is half a rule: the ramp sizes a note
       // against the RADIAL pitch, dotFit measures the room it has ALONG its row, and those two
