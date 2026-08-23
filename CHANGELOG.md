@@ -204,6 +204,23 @@ Zero network calls, and a note gets dated even when nothing says so.
   will not update. The path in `releasing.md` had a carriage return in place of the `r` in
   `release.ps1`, so the one command it documents could not be copied and run.
 
+- **Hover comes back when you return to a note.** Move the pointer off the graph and back
+  onto the same note and it stayed dark — Sigma's `handleLeave` emits `leaveNode` without
+  clearing the node it just said you left, so the re-entry test never fires. `handleMove`,
+  two lines earlier in the same bundle, always did it correctly. Patched at read time
+  alongside the network calls; measured 1 hit in 40 before, 40 in 40 after.
+- **The invariant suite is trustworthy again**
+  ([#7](https://github.com/luke321/vault-graph/issues/7)). It had been failing on clean
+  trees, which is the failure that teaches people to re-run instead of read. Two causes,
+  and neither was the one the symptoms suggested. The hover bug above accounted for the
+  three pointer checks. The rest was the suite racing **itself**: it launched Chrome on a
+  constant port, so a second run silently attached to the first one's browser and measured
+  the wrong page — a 13-folder vault reporting 60 legend rows, a 454-note vault hovering
+  node 492. Each run now takes a free port from the OS, asserts the page it attached to is
+  the one it just built, tears the browser down by whoever actually holds the port, and
+  checks frames are arriving before measuring anything downstream of one. Two suites can
+  now run at once, which is what the constant port had quietly forbidden.
+
 Measured: built `main.js` has 0 network primitives and 2 throwers, and a standalone page over
 a 3003-note synthetic vault has 0. Both guards fail as they should — a planted `fetch` in
 `plugin/main.js`, and a third `fetch` in a copied Sigma bundle.

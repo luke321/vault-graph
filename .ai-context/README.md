@@ -24,6 +24,7 @@ changing the layout or the animation.
 | `0007-the-demo-drives-real-input` | Why `?demo` clicks through CDP and not `el.click()`, and the cursor that was removed |
 | `0008-zero-network-calls` | Why the vendored bundles are stripped at read time rather than patched, forked or disclosed |
 | `0009-the-host-persists-settings-not-the-page` | Settings go in and come back out; the page stores nothing, and only one host gets a gear |
+| `0010-one-browser-per-run` | Why the suite takes a free port per run, and how a lost race read as a flaky renderer |
 
 ### DDRs — `design/`
 
