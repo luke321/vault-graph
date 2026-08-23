@@ -84,8 +84,12 @@ changed shape.
   than under its folder — so a path-derived list is one row short on any vault with
   orphans, and every folder after it would be ringed one slot out.
 
-- **`_`-prefixed folders are treated as archives**: out of the colour rotation, given a
-  recessive grey, and hidden by default. A leading underscore is how a vault says "sorts
+- **`_`-prefixed folders are treated as archives**: out of the colour rotation, given the
+  grey slot `g11`, and hidden by default. `g11` of the two greys because it is the
+  lower-contrast one against the surface in both themes (4.99 vs 9.51 on light, 5.16 vs
+  9.12 on dark), which is what recede means. It is a real palette slot rather than a
+  neutral off to one side, so the picker can ring it and Auto means something on an
+  archive row. A leading underscore is how a vault says "sorts
   last, not part of the working set", and spending a hue on one costs twice — the archive
   gets a colour that says look at me, and every folder after it is pushed a slot along.
   Measured on the demo mirror: `_ Archives` and `_ Claude` sort at positions 2 and 3, so

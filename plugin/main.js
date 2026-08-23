@@ -562,6 +562,9 @@ const SLOT_NAMES = ["Blue", "Orange", "Aqua", "Yellow", "Green", "Magenta",
 // Same rule as page.js's isArchiveGroup, and a copy for the same reason. A leading
 // underscore means archive: out of the colour rotation, grey, hidden by default.
 const isArchiveGroup = (name) => String(name).charAt(0) === "_";
+// ...and the slot it lands on, matching ARCHIVE_SLOT in page.js. g11 of the two greys:
+// the lower-contrast one against the surface in both themes, which is what recede means.
+const ARCHIVE_SLOT = "g11";
 
 // The folders the graph will group by, in the order it will lay them out: first path
 // segment, "(vault root)" for a note sitting loose at the top. Sorted exactly as
@@ -578,11 +581,12 @@ function topFolders(app) {
     const g = paraFolder(file.path);
     count.set(g, (count.get(g) || 0) + 1);
   }
+  // Same three ranks as computeOrder in page.js: archives, then the pseudo-folders, then
+  // the folders the vault actually filed. A copy for the same reason SLOT_NAMES is one.
+  const rank = (s) => (s.charAt(0) === "_" ? 0 : s.charAt(0) === "(" ? 1 : 2);
   return Array.from(count.entries())
-    .sort((a, b) => {
-      const pa = a[0].charAt(0) === "(" ? 0 : 1, pb = b[0].charAt(0) === "(" ? 0 : 1;
-      return pa - pb || a[0].localeCompare(b[0], undefined, { numeric: true });
-    })
+    .sort((a, b) => rank(a[0]) - rank(b[0]) ||
+                    a[0].localeCompare(b[0], undefined, { numeric: true }))
     .map(([name, n]) => ({ name, n }));
 }
 
@@ -646,7 +650,7 @@ class VaultGraphSettingTab extends PluginSettingTab {
     let auto = 0;
     this.renderColours(topFolders(this.app).map((f) => ({
       name: f.name, n: f.n,
-      slot: isArchiveGroup(f.name) ? "" : "g" + ((auto++ % SLOT_NAMES.length) + 1),
+      slot: isArchiveGroup(f.name) ? ARCHIVE_SLOT : "g" + ((auto++ % SLOT_NAMES.length) + 1),
     })));
 
     // ...and then ask the graph itself, which is the only thing that actually knows.
@@ -701,22 +705,23 @@ class VaultGraphSettingTab extends PluginSettingTab {
       const pinned = this.plugin.settings.folderColors[group.name] || "";
       const current = pinned || group.slot;
       const shown = this.shownByDefault(group.name);
+      // The eye comes FIRST, because "am I looking at this folder at all" comes before
+      // what colour it is. Obsidian's own `eye` / `eye-off` icons through an extra
+      // button, rather than a glyph of our own: it is the mark the rest of the app uses
+      // for exactly this, it comes with the hover and focus treatment for free, and it
+      // stays right if Obsidian restyles its icons.
+      //
+      // It sets a DEFAULT. The legend's eye inside the graph is the live filter; this is
+      // what the disc comes back to.
       const row = new Setting(scope)
         .setName(group.name)
         .setDesc((group.n === 1 ? "1 note" : group.n + " notes") +
-                 (shown ? "" : " · hidden by default"));
+                 (shown ? "" : " · hidden by default"))
+        .addExtraButton((b) => b
+          .setIcon(shown ? "eye" : "eye-off")
+          .setTooltip(shown ? "Shown by default" : "Hidden by default")
+          .onClick(() => this.pickVisible(group.name)));
       row.controlEl.addClass("sws");
-
-      // The eye first, because "am I looking at this folder at all" comes before what
-      // colour it is. It sets a DEFAULT: the legend's own eye is the live filter, and
-      // this is what the disc comes back to.
-      const vis = row.controlEl.createEl("button", {
-        cls: "vis", text: shown ? "●" : "○",
-        attr: { "aria-pressed": String(shown),
-                "aria-label": (shown ? "Hide " : "Show ") + group.name,
-                title: shown ? "Shown by default" : "Hidden by default" },
-      });
-      vis.addEventListener("click", () => this.pickVisible(group.name));
 
       SLOT_NAMES.forEach((name, i) => {
         const key = "g" + (i + 1);

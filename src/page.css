@@ -341,16 +341,12 @@
     display: flex; align-items: center; justify-content: space-between;
     gap: 6px; margin-bottom: 4px;
   }
-  /* The default-visibility eye. A filled dot for shown, a hollow one for hidden -- the
-     same open/closed reading as the legend's own eye, at the size a 288px row allows.
-     Dimmed when hidden, so a panel of mostly-shown folders reads at a glance. */
-  .vault-graph .vis {
-    flex: 0 0 auto; font: inherit; font-size: 11px; line-height: 1;
-    padding: 2px 3px; cursor: pointer; border-radius: 5px;
-    background: none; border: 1px solid transparent; color: var(--text-2);
-  }
-  .vault-graph .vis[aria-pressed="false"] { color: var(--text-3); }
-  .vault-graph .vis:hover { color: var(--text-1); border-color: var(--border); }
+  /* The default-visibility eye. It carries `.eye` as well, so it IS the legend's eye --
+     same SVG, same size, same open/closed and dimmed-when-hidden treatment. The live
+     filter and the default it returns to are the same question about two moments, and
+     two different marks for it would be two things to learn. This class only has to undo
+     the flex sizing the row would otherwise give it. */
+  .vault-graph .vis { flex: 0 0 auto; }
   /* min-width: 0 is what actually lets the ellipsis happen -- a flex item's default
      min-width is auto, so a long folder name would push Auto off the line instead of
      truncating. */

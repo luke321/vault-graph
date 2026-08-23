@@ -89,7 +89,7 @@ Settings → Community plugins → Vault Graph.
 | | |
 |---|---|
 | **Folder colours** | One row per top-level folder, with the twelve palette slots under it. The slot the folder is **currently using** is ringed — brightly if you chose it, dimly if it is just the one its position gives it. Click a slot to hold the folder to that colour; **Auto** hands it back. Setting one folder never changes another, and two folders may share a colour — useful for saying they belong together. |
-| **Folder visibility** | The dot at the start of each row sets whether that folder is shown **by default**. The legend's own eye is the live filter for this session; this is what the graph comes back to. |
+| **Folder visibility** | The eye at the start of each row sets whether that folder is shown **by default**. The legend's own eye inside the graph is the live filter for this session; this one is what the graph comes back to. |
 | **Include notes that do not exist yet** | Wikilinks pointing at a note nobody has written. |
 | **Include templates** | Notes under your template folders. |
 | **Flatten month folders** | Treat `2026-08` and its siblings as one folder rather than a subfolder each. |
@@ -104,9 +104,10 @@ falling into a grey pile. A saved choice is a *slot*, not a colour value, so it 
 your Obsidian theme between light and dark.
 
 Folders whose name starts with `_` are treated as archives — `_ Archives`, `_old`, scratch.
-They stay in the graph, but they take no slot in the colour rotation, wear a recessive grey,
-and start hidden. All three are defaults: pick a colour or click the dot and your choice
-wins. It is a rule about folders, not files — `_scratch.md` is a note like any other.
+They stay in the graph, but they take no slot in the colour rotation, wear the palette's
+darker grey, and start hidden. All three are defaults: pick a colour or click the eye and
+your choice wins. It is a rule about folders, not files — `_scratch.md` is a note like any
+other.
 
 <sub>Also greppable, so also worth stating: the bundled Sigma.js carries a `fetch` in its
 image-loading path. This plugin never registers an image node program, so that path is
@@ -185,10 +186,11 @@ another, and two folders may share a colour — useful for saying they belong to
 Hovering a folder in the legend haloes its notes on the disc, so you can find one without
 clicking anything. Clicking still pins the highlight and pushes the wedge out.
 
-Each row also starts with a dot that sets whether that folder is shown **by default**. The
-legend's eye is the live filter for this session; the dot is what the graph comes back to.
-Folders whose name starts with `_` are archives — no slot in the colour rotation, a
-recessive grey, and hidden until you say otherwise.
+Each row also starts with an eye that sets whether that folder is shown **by default** —
+the same mark the legend uses, because it is the same question about a different moment.
+The legend's eye is the live filter for this session; this one is what the graph comes back
+to. Folders whose name starts with `_` are archives — no slot in the colour rotation, the
+palette's darker grey, and hidden until you say otherwise.
 
 Your choices are remembered in the browser's `localStorage`, under a key scoped to the
 vault name, so regenerating the file keeps them and a graph of a *different* vault gets its

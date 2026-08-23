@@ -208,6 +208,30 @@ function mountVaultGraph(root, data, deps) {
   // owns a wedge.
   function isArchiveGroup(g) { return String(g).charAt(0) === "_"; }
 
+  // THE ARCHIVE GREY IS A PALETTE SLOT, not a neutral off to one side.
+  //
+  // It was `--n3` first, which looked right and was the wrong kind of answer: the settings
+  // panel could not mark it, because the colour a folder was using was not one of the
+  // twelve on offer, so an archive row rang no swatch and "Auto" pointed at nothing.
+  //
+  // g11 rather than g12, of the two greys. It is the LOWER-CONTRAST one against the
+  // surface in both themes -- measured 4.99 vs 9.51 on light and 5.16 vs 9.12 on dark --
+  // which is what recede means, and it is also the darker-looking of the two in the dark
+  // theme the disc opens in.
+  var ARCHIVE_SLOT = "g11";
+
+  // The eye, shared between the legend and the settings panel: same mark for the live
+  // filter and for the default it returns to, because they are the same question asked
+  // about two different moments.
+  function eyeSvg(on) {
+    var lid = '<path d="M1.6 8S4 3.9 8 3.9 14.4 8 14.4 8 12 12.1 8 12.1 1.6 8 1.6 8z"' +
+              ' fill="none" stroke="currentColor" stroke-width="1.25"/>';
+    return '<svg viewBox="0 0 16 16" aria-hidden="true">' + lid +
+      (on ? '<circle cx="8" cy="8" r="2" fill="currentColor"/>'
+          : '<path d="M3 13L13 3" stroke="currentColor" stroke-width="1.25"/>') +
+      '</svg>';
+  }
+
   // Explicit per-folder visibility: true = shown, false = hidden, absent = the default
   // above. Tri-state on purpose -- "absent" has to stay distinguishable from "false", or
   // turning `_ Archives` off by hand would be indistinguishable from never having said
@@ -397,10 +421,20 @@ function mountVaultGraph(root, data, deps) {
     // Note: subfolder order stays size-based -- the "N smaller subfolders" fold
     // depends on knowing which are smallest.
     var names = Object.keys(count).sort(function (a, b) {
-      // "(vault root)" is a pseudo-folder for notes sitting loose at the top of the
-      // vault, so it leads the numbered folders rather than trailing them.
-      var pa = a.charAt(0) === "(" ? 0 : 1, pb = b.charAt(0) === "(" ? 0 : 1;
-      return pa - pb || a.localeCompare(b, undefined, { numeric: true });
+      // THREE RANKS, and the reason is that neither `_` nor `(` is a real folder name
+      // competing with the others. Archives first, then the pseudo-folders --
+      // "(vault root)" for notes sitting loose at the top and "(unlinked)" for notes
+      // nothing points at -- then everything the vault actually filed. So the entries
+      // that are not part of the working set stay together at the head of the list
+      // instead of one of them landing above the archives and one below.
+      //
+      // This does not move any colour: archives take the grey slot without consuming
+      // one, so the first pseudo-folder is still the first group in the rotation.
+      var rank = function (s) {
+        var c = s.charAt(0);
+        return c === "_" ? 0 : c === "(" ? 1 : 2;
+      };
+      return rank(a) - rank(b) || a.localeCompare(b, undefined, { numeric: true });
     });
     order[state.dim] = names;
     return count;
@@ -456,9 +490,14 @@ function mountVaultGraph(root, data, deps) {
     names.forEach(function (g) {
       var k = byFolder[g];
       if (k && THEME.byKey[k]) { groupColor[g] = THEME.byKey[k]; groupSlot[g] = k; return; }
-      // "" means "using no slot" -- the archive grey is a neutral, not one of the twelve,
-      // so no swatch in the picker should claim to be the current one.
-      if (isArchiveGroup(g)) { groupColor[g] = THEME.neutrals[2]; groupSlot[g] = ""; return; }
+      // An archive takes the grey slot without CONSUMING one: `auto` does not advance, so
+      // the working folders' rotation is unaffected, but the slot is a real slot -- which
+      // is what lets the picker ring it and "Auto" mean something on an archive row.
+      if (isArchiveGroup(g)) {
+        groupColor[g] = THEME.byKey[ARCHIVE_SLOT];
+        groupSlot[g] = ARCHIVE_SLOT;
+        return;
+      }
       var key = "g" + ((auto++ % SLOT_COUNT) + 1);
       groupColor[g] = THEME.byKey[key];
       groupSlot[g] = key;
@@ -3226,14 +3265,6 @@ function mountVaultGraph(root, data, deps) {
 
     // One eye, two states. Drawn as inline SVG rather than an emoji or a font glyph
     // so it is the same 14px shape on every machine and inherits currentColor.
-    var eyeSvg = function (on) {
-      var lid = '<path d="M1.6 8S4 3.9 8 3.9 14.4 8 14.4 8 12 12.1 8 12.1 1.6 8 1.6 8z"' +
-                ' fill="none" stroke="currentColor" stroke-width="1.25"/>';
-      return '<svg viewBox="0 0 16 16" aria-hidden="true">' + lid +
-        (on ? '<circle cx="8" cy="8" r="2" fill="currentColor"/>'
-            : '<path d="M3 13L13 3" stroke="currentColor" stroke-width="1.25"/>') +
-        '</svg>';
-    };
     var eyeBtn = function (attrs, on, what) {
       return '<button class="eye" ' + attrs + ' aria-pressed="' + on + '" title="' +
              (on ? "Hide " : "Show ") + esc(what) + '">' + eyeSvg(on) + '</button>';
@@ -3935,10 +3966,10 @@ function mountVaultGraph(root, data, deps) {
         var shown = !hiddenByDefault(g);
         return '<div class="scr" role="radiogroup" aria-label="Colour for ' + esc(g) + '">' +
                '<div class="scrh">' +
-               '<button class="vis" data-vis="' + esc(g) + '" aria-pressed="' + shown + '"' +
-               ' title="' + (shown ? "Shown by default" : "Hidden by default") +
+               '<button class="eye vis" data-vis="' + esc(g) + '" aria-pressed="' + shown +
+               '" title="' + (shown ? "Shown by default" : "Hidden by default") +
                '" aria-label="' + (shown ? "Hide" : "Show") + " " + esc(g) + '">' +
-               (shown ? "&#9679;" : "&#9675;") + '</button>' +
+               eyeSvg(shown) + '</button>' +
                '<span class="nm" title="' + esc(g) + '">' + esc(g) + '</span>' +
                '<button class="auto" data-fc="' + esc(g) + '" data-key=""' +
                ' aria-pressed="' + (!pinned) + '"' +

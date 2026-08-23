@@ -151,21 +151,44 @@ The halo does not; the *rest of the page* does. A legend row can be crossed at a
 including mid-cascade and mid-tween, and skipping indexation then leaves the quadtree
 describing where the disc used to be.
 
-Measured, with the flag: **9/17 on the demo vault**, and the three failures looked like
-three unrelated bugs —
-
-| symptom | what it actually was |
-|---|---|
-| `hovering a note` → "element at aim CANVAS.sigma-mouse" | aim resolved against a stale index |
-| `legend opens folded` → 27 rows, 18 subfolder rows | reading a legend the renderer had not caught up with |
-| `plan parity with each folder hidden` → `TypeError: null.cells` | `buildWedgePlan` on stale display data |
-
-Without it: **17/17 on both vaults**, checks untouched. The lesson is the diagnosis, not
-the fix: the first theory was that a parked mouse was landing on a legend row and lighting
-a folder, which was plausible, fitted the demo-vs-10k split, and was wrong. `HEAD` passing
-17/17 in the same environment is what ruled it out — bisect before theorising.
-
 Hover is a per-row event, not a per-frame one, so a full refresh costs nothing worth having.
+The rule stands on what the flag *promises* rather than on a measurement: only code that
+can guarantee nothing moved may claim nothing moved.
+
+**The measurement that seemed to prove it does not, and that is worth recording.** With the
+flag the suite reported 9/17 on the demo vault, with three failures that read as three
+unrelated bugs — aim resolving to the bare canvas, a legend reporting itself folded while
+showing 18 subfolder rows, and `buildWedgePlan` returning null in the hidden-folder sweep.
+Removing the flag gave 17/17. But the *same* signature turned up later from a completely
+different cause (below), so that run cannot be attributed cleanly. Two wrong theories in
+one afternoon, both plausible, both fitting the evidence:
+
+1. a parked mouse landing on a legend row — ruled out by `HEAD` passing in the same
+   environment;
+2. `skipIndexation` — probably right, unprovable from that run.
+
+## A leaked Chrome on the debug port makes the suite measure a stale page
+
+`attach(PORT, "")` takes **whatever is listening**, and a killed run can leave its browser
+behind. A later run then drives the *previous* run's page: same checks, same output format,
+failures that look like real regressions and move around between runs.
+
+The tell is in the second check, which prints the note count:
+
+```
+  ok   __vg is present and the intro landed
+         1402 notes, until=null          <- the build above said 455
+```
+
+Measured: 11/17 and 13/17, entirely from a leftover browser holding a page from an earlier
+build. Nothing was wrong with the code. Before believing any failure here, **check that the
+note count matches the `wrote ...` line above it**, and if it does not:
+
+```powershell
+Get-CimInstance Win32_Process -Filter "Name='chrome.exe'" |
+  Where-Object { $_.CommandLine -like "*vg-smoke*" } |
+  ForEach-Object { Stop-Process -Id $_.ProcessId -Force }
+```
 
 ## Highlight has five sources, and every one belongs in the signature
 

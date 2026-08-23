@@ -115,19 +115,24 @@ things follow, all of them defaults rather than prohibitions:
 
 1. **No slot in the colour rotation.** The automatic counter skips them, so which hue a
    working folder gets does not depend on how many archives happen to sort before it.
-2. **A recessive grey** (`--n3`, the dimmest of the three neutrals in both themes) instead.
+2. **The grey slot `g11`** instead -- a real palette slot, not a neutral off to one side,
+   so the picker can ring it and `Auto` means something on an archive row. `g11` rather
+   than `g12` because it is the lower-contrast of the two greys against the surface in
+   *both* themes (4.99 vs 9.51 light, 5.16 vs 9.12 dark), which is what recede means.
 3. **Hidden on arrival**, and `Refresh` returns to that rather than to "everything shown".
 
 Measured on the demo mirror, which has two: `_ Archives` and `_ Claude` sort at positions
 **2 and 3**, ahead of `01 - Projects`. Under the old rule they took `g2` and `g3` and
 pushed every working folder two slots along — so the vault's largest folders were wearing
-colours chosen by its archives. Now the working folders run an unbroken `g1…g9` and the
-archives sit on no slot at all.
+colours chosen by its archives. Now the working folders run an unbroken `g1…g9`, and the
+archives share `g11` without advancing the counter.
 
-`slotOf` returns `""` for them, which is why it exists: the archive grey is a neutral, not
-one of the twelve, so a settings panel that matched current colours against the palette
-found nothing and dropped those rows entirely — the rows most in need of the visibility
-toggle.
+`slotOf` exists because of this: which slot a group is on is no longer derivable from its
+position, so the settings panels read it back from `buildColors` rather than recomputing
+`i % 12`. It was tried the other way first — matching each group's current colour against
+the palette — and while the archive grey was still a neutral rather than a slot, that
+matched nothing and dropped the archive rows entirely, which were the rows most in need of
+the visibility toggle.
 
 An explicit pick still wins over all of it. The rule decides what happens when nobody has
 said anything.
