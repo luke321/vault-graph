@@ -1592,6 +1592,133 @@ check("a range change animates instead of snapping", async (p) => {
 // The assertion is EXACTLY ZERO, not a tolerance. The reservation is now walked between the
 // two packings by cascade progress, and for a change that empties no group both ends are the
 // same number -- so any movement at all means it is being derived again.
+// THE STATES WHERE EVERY LAYOUT BUG THIS FILE KNOWS ABOUT WAS FOUND: folders switched off one
+// at a time, and a date range squeezed until the bands are one or two rows deep. Both drive the
+// disc into the corner the ordinary fixtures never reach -- cells narrower than a note, rows
+// holding one note, spacing pinned at its cap -- and every defect of the last session showed up
+// there first: dots overlapping, dots collapsed onto the pixel floor, and holes several times
+// the row spacing where a cell held arc in rows it had no notes for.
+//
+// Asserted per state, not at the end, so the report names the state that broke rather than
+// leaving the walk to be repeated by hand. Three properties, each of which was violated by a
+// shipped build:
+//
+//   overlaps   two dots may not intersect. Dot radius is measured through the renderer's own
+//              scaleSize, not read off the node attribute -- the attribute is the reducer's
+//              INPUT and has been off by the camera ratio before now.
+//   collapse   the median dot has to stay a real fraction of the step. A build that sized every
+//              band from its tightest pair drew the whole vault at the 1.5px floor, which no
+//              overlap check would ever notice.
+//   holes      no gap in a row may exceed 2.5x that row's median step. This is deliberately
+//              loose: one note in a small folder occupies one row wherever it sits, so some
+//              slack is structural, and the number is set to catch a wedge's worth of dead arc
+//              rather than a row's own unevenness.
+check("filtered to the bone, the disc stays drawable", async (p) => {
+  await clearRange(p);
+  await settle(p);
+  const probe = `(function () {
+    var a0 = __vg.renderer.graphToViewport({ x: 0, y: 0 });
+    var b0 = __vg.renderer.graphToViewport({ x: 160, y: 0 });
+    var perPx = 160 / Math.hypot(b0.x - a0.x, b0.y - a0.y);
+    var rows = {}, n = 0;
+    __vg.graph.forEachNode(function (id, at) {
+      var d = __vg.renderer.getNodeDisplayData(id);
+      if (!d || d.hidden || (__vg.alpha[id] || 0) < 0.999) return;
+      n++;
+      var r = Math.hypot(at.x, at.y);
+      var k = Math.round(r / 8) * 8;
+      (rows[k] || (rows[k] = [])).push({ th: Math.atan2(at.y, at.x),
+                                         rad: __vg.renderer.scaleSize(d.size) * perPx });
+    });
+    var worstClear = 1e9, overlaps = 0, holeRatio = 0, dots = [], steps = [];
+    Object.keys(rows).forEach(function (k) {
+      var row = rows[k].slice().sort(function (x, y) { return x.th - y.th; });
+      if (row.length < 4) { row.forEach(function (q) { dots.push(q.rad); }); return; }
+      var arcs = [];
+      for (var i = 1; i < row.length; i++) {
+        var arc = (row[i].th - row[i - 1].th) * (+k);
+        if (!(arc > 0.5 && arc < 1e5)) continue;
+        arcs.push(arc);
+        var cl = arc - row[i].rad - row[i - 1].rad;
+        if (cl < worstClear) worstClear = cl;
+        if (cl < 0) overlaps++;
+      }
+      if (!arcs.length) return;
+      var srt = arcs.slice().sort(function (x, y) { return x - y; });
+      var med = srt[Math.floor(srt.length / 2)];
+      steps.push(med);
+      var hi = Math.max.apply(null, arcs);
+      if (med > 0 && hi / med > holeRatio) holeRatio = hi / med;
+      row.forEach(function (q) { dots.push(q.rad); });
+    });
+    dots.sort(function (x, y) { return x - y; });
+    steps.sort(function (x, y) { return x - y; });
+    var medDot = dots.length ? dots[Math.floor(dots.length / 2)] : 0;
+    var medStep = steps.length ? steps[Math.floor(steps.length / 2)] : 0;
+    return { shown: n, overlaps: overlaps,
+             worstClear: worstClear === 1e9 ? null : Math.round(worstClear),
+             holeRatio: Math.round(holeRatio * 100) / 100,
+             ds: medStep > 0 ? Math.round(2 * medDot / medStep * 100) / 100 : 0,
+             rows: Object.keys(rows).length };
+  })()`;
+  const bad = [];
+  const seen = [];
+  const judge = (label, r) => {
+    seen.push(`${label}: ${r.shown}n ${r.rows}r d/s ${r.ds} hole ${r.holeRatio}x clear ${r.worstClear}`);
+    if (r.shown < 4) return;                     // nothing left to be wrong about
+    if (r.overlaps > 0) bad.push(`${label}: ${r.overlaps} overlapping pair(s), worst ${r.worstClear}`);
+    if (r.ds < 0.15) bad.push(`${label}: dots collapsed, diameter/step ${r.ds}`);
+    if (r.holeRatio > 2.5) bad.push(`${label}: a gap ${r.holeRatio}x the row median`);
+  };
+
+  // ONE FOLDER AT A TIME, cumulatively, so the last states are the sparse ones.
+  const groups = await p.j(`__vg.groupOrder()`);
+  for (const g of groups) {
+    const hid = await p.j(`(function(){
+      var b = document.querySelector('[data-eye="' + ${JSON.stringify("")} + ${JSON.stringify(g)}.replace(/"/g, '\\\\"') + '"]');
+      if (!b) return false; b.click(); return true; })()`);
+    if (!hid) continue;
+    await settle(p);
+    // A BEAT AFTER SETTLE, and it is load-bearing. settle() returns when busy() clears, and the
+    // final assignment lands on the frame after that -- read without this, notes still in
+    // flight at full alpha reported 16 overlapping pairs at -78 units on a disc that has none
+    // at rest, identically on every state, which is the signature of a transient and not of a
+    // geometry. The same mistake as the lattice check's missing settle, one step further along.
+    await sleep(300);
+    judge(`hidden through ${g}`, await p.j(probe));
+  }
+  // Back to everything, then squeeze the range instead.
+  for (const g of groups) {
+    await p.j(`(function(){
+      var b = document.querySelector('[data-eye="' + ${JSON.stringify("")} + ${JSON.stringify(g)}.replace(/"/g, '\\\\"') + '"]');
+      if (b && b.getAttribute("aria-pressed") === "false") b.click();
+      return true; })()`).catch(() => 0);
+  }
+  await settle(p);
+
+  // A RANGE SQUEEZED UNTIL THE BANDS ARE SHALLOW. Taken off the vault's own extent so it works
+  // on any fixture: the last tenth, then the last fortieth, then the last two hundredth.
+  const span = await p.j(`(function(){
+    var f = document.querySelector("#vg-from");
+    return f ? { min: f.min, max: f.max } : null; })()`);
+  if (span && span.min && span.max) {
+    const lo = Date.parse(span.min), hi = Date.parse(span.max);
+    for (const frac of [0.1, 0.025, 0.005]) {
+      const from = new Date(hi - (hi - lo) * frac).toISOString().slice(0, 10);
+      await p.eval(`__vg.setRange(${JSON.stringify(from)}, null); void 0`);
+      await settle(p);
+      await sleep(300);
+      judge(`range last ${Math.round(frac * 1000) / 10}%`, await p.j(probe));
+    }
+  }
+  await clearRange(p);
+  return {
+    ok: !bad.length,
+    detail: bad.length ? bad.slice(0, 4).join("; ")
+                       : seen.slice(-4).join(" | "),
+  };
+});
+
 check("the gap reservation holds still while groups only thin", async (p) => {
   await clearRange(p);
   const before = await p.j(`__vg.rangeReport()`);

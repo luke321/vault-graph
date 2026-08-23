@@ -2110,13 +2110,33 @@ function mountVaultGraph(root, data, deps) {
     };
     var roomPlan = givenRoom || { i: roomOf(inner), o: roomOf(outer) };
 
+    // A BAND'S DEPTH, FRACTIONAL WHILE A CASCADE RUNS. The integer c.rows is what places notes
+    // on the lattice, and it is the wrong thing to REPORT: this figure becomes lastRows, and
+    // seamFall is a function of it -- (REF_ROWS/rows)^1.5, which multiplies every channel width
+    // and every end margin on the disc.
+    //
+    // Measured on a folder toggle: rowsOuter went 5 to 4 in one frame and the falloff went 1 to
+    // 1.398 with it, so every seam in the ring widened 40% between two frames. At one row it is
+    // 11.18, so the step off two rows is larger still. That is the jump reported as the planner
+    // failing to reach its end state cleanly -- and the positions were never the problem, which
+    // is why walking them harder never helped.
+    //
+    // rowsOf is the cascade's own interpolation between the two endpoint packings' counts, so
+    // taking the depth from it makes the falloff move at the same rate as everything else. At
+    // rest rowsOf is absent and this is the integer, so the lattice is untouched.
+    var depthOf = function (list, fallback) {
+      if (!rowsOf || !list.length) return fallback;
+      var m = 0;
+      list.forEach(function (c) {
+        var v = rowsOf(c) || c.rows || 0;
+        if (v > m) m = v;
+      });
+      return m > 0 ? m : fallback;
+    };
+
     return { cells: cells, maxR: maxR, total: planTotal, r0: r0, rOuter: rOuter,
              sp: SP_O, spInner: SP_I, density: density, room: roomPlan,
-             rows: { i: innerRows, o: (function () {
-               var m = 0;
-               outer.forEach(function (c) { if (c.rows > m) m = c.rows; });
-               return m || REF_ROWS;
-             })() } };
+             rows: { i: depthOf(inner, innerRows), o: depthOf(outer, outerRows || REF_ROWS) } };
   }
 
   // RETIRED 2026-08-22. This used to switch the plan basis on how much of the vault
@@ -2242,6 +2262,8 @@ function mountVaultGraph(root, data, deps) {
     // it. See where bandRoom is taken from this: it has to be a function of the PLAN, not of
     // the positions that come out of it.
     var roomPool = { i: [], o: [] };
+    // Per note, the step of the cell it belongs to. A bound, not a scale -- see dotPx.
+    var cellRoomNext = Object.create(null);
     if (probe) lastStart = Object.create(null);
     [true, false].forEach(function (isInner) {
       var band = shown.filter(function (c) { return !!c.inner === isInner; });
@@ -2414,8 +2436,20 @@ function mountVaultGraph(root, data, deps) {
           // suddenly contributing one -- so it slides where nRow ticked. The margin above keeps
           // nRow, which is right: a margin is where a note SITS, and it has to be the half-step
           // of the row the note is actually in.
-          roomPool[isInner ? "i" : "o"].push(
-            arc * rGraph * rowsUsed / Math.max(0.001, c.live));
+          var ownStep = arc * rGraph * rowsUsed / Math.max(0.001, c.live);
+          roomPool[isInner ? "i" : "o"].push(ownStep);
+          // ...AND KEPT PER NOTE, as a bound. The band percentile is one number for a whole
+          // ring, so a cell packed tighter than the tenth percentile overlaps -- measured by
+          // hiding folders one at a time on the 1402-note vault, 16 pairs at -78 units. This is
+          // the same continuous quantity as the pool, so bounding by it costs nothing in
+          // smoothness, unlike the measured neighbour distance it replaces: that was a minimum
+          // over WHICH note is nearest, and which note is nearest changes as the disc moves.
+          //
+          // Per CELL rather than per row, which is the point. A note's size may depend on how
+          // densely its own folder is packed; it may not depend on which row of that folder it
+          // landed in, because rows differ in arc and the innermost is always shortest -- that
+          // is the gradient that made the most-connected note the smallest one.
+          cellRoomNext[sl.id] = ownStep;
           var seamArc = sm.gap * rGraph / 2;      // this side's half of the seam, in units
           var keep = EXCESS_KEEP * seamFall(isInner ? "i" : "o");
           var typ = dotTyp(isInner ? "i" : "o");
@@ -2576,6 +2610,7 @@ function mountVaultGraph(root, data, deps) {
     // the per-note cap that used to sit on top of it, and with that gone the worst single-frame
     // size change is 2.2% against 252% before.
     bandRoom = { i: pick(pool.i), o: pick(pool.o) };
+    cellRoom = cellRoomNext;
     if (planRoom) { /* kept on the plan for the probe; the live pool is what draws */ }
     dotFit = fit;
     return out;
@@ -3109,6 +3144,9 @@ function mountVaultGraph(root, data, deps) {
   // The room a BAND has, one figure each, being the tightest pair in it. See dotPx: size has to
   // be a monotone function of link weight, so it cannot carry a per-note term.
   var bandRoom = { i: 0, o: 0 };
+  // Per note, its own cell's step. Bounds a dot where its folder is packed tighter than the
+  // band's tenth percentile; continuous, so it does not make dots breathe.
+  var cellRoom = Object.create(null);
   // WHAT THE LAST CASCADE WAS ASKED TO DO. Every question about a jump starts with
   // "did it animate at all, and over how many notes", and inferring that from frame
   // counts is guesswork -- an instant apply and a one-frame animation look identical
@@ -4470,6 +4508,8 @@ function mountVaultGraph(root, data, deps) {
       // sets the size for its whole band, which is the honest trade for an encoding that can be
       // read.
       var room = bandRoom[isIn ? "i" : "o"];
+      var mine = cellRoom[id];
+      if (mine !== undefined && mine > 1 && (!(room > 1) || mine < room)) room = mine;
       // AND NOTHING PER NOTE. A cap taken from this note's own measured room was tried, to stop
       // the tightest pairs touching, and it is the thing that made dots breathe: dotFit is
       // measured off live positions, and a note's NEAREST NEIGHBOUR is not a fixed neighbour --
@@ -8113,8 +8153,15 @@ function mountVaultGraph(root, data, deps) {
                       graph.forEachNode(function (id, a) {
                         if ((alpha[id] || 0) <= 0.004) return;
                         var d = renderer && renderer.getNodeDisplayData(id);
+                        // THROUGH scaleSize. getNodeDisplayData().size is what the reducer
+                        // RETURNED, not what gets drawn -- sigma scales it again on the way to
+                        // the canvas. Read raw, every radius in this dump was short by that
+                        // factor, so it reported clearances that were not there and
+                        // overlappingPairs: 0 on states that had sixteen. The same trap this
+                        // file's dot measurements hit twice before.
                         pts.push({ r: Math.hypot(a.x, a.y), th: Math.atan2(a.y, a.x),
-                                   rad: (d ? d.size : 4) * perPx, g: a.folder });
+                                   rad: (d && renderer ? renderer.scaleSize(d.size)
+                                                       : 4) * perPx, g: a.folder });
                       });
                       pts.sort(function (x, y) { return x.r - y.r; });
                       var gi = 0, gap = 0;
