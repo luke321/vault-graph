@@ -536,6 +536,34 @@ check("overriding one folder recolours exactly one group", async (p) => {
                        (ok ? "" : ` (${r.moved.slice(0, 6).join(", ")}${r.moved.length > 6 ? ", ..." : ""})`) };
 });
 
+// THE OTHER COLOUR CHECK READS GROUP COLOURS; THIS ONE READS WHAT A NOTE IS PAINTED.
+// That gap is the whole reason github#3 survived: colorOf("(unlinked)") was right the
+// entire time -- the legend drew the correct swatch from it -- while nodeColor went to
+// the note's own folder and painted the same notes nine different colours. A check on
+// the group colour cannot see that, so this one goes through the renderer.
+//
+// It asserts ALL of them, not "at least one", and the difference is not pedantry: on the
+// 10,000-note synthetic, 6 of 148 orphans matched the swatch BY COINCIDENCE before the
+// fix, because one folder's slot happens to be the same hex. An "any" form passed on a
+// broken build.
+//
+// A vault with no orphans reports that instead of passing. demo-vault mirrors a real
+// vault and has 0 of 452, so on that shape there is genuinely nothing to measure -- and
+// a check that cannot tell whether it did anything is worse than no check.
+check("every unlinked note wears the (unlinked) swatch", async (p) => {
+  const r = await p.j(`(function(){
+    var g = __vg.graph, rd = __vg.renderer, sw = String(__vg.colorOf("(unlinked)")).toLowerCase();
+    var ids = g.nodes().filter(function (id) { return g.degree(id) === 0; });
+    var cols = ids.map(function (id) { return String(rd.getNodeDisplayData(id).color).toLowerCase(); });
+    return { swatch: sw, orphans: ids.length,
+             match: cols.filter(function (c) { return c === sw; }).length,
+             distinct: Object.keys(cols.reduce(function (a, c) { a[c] = 1; return a; }, {})).length };
+  })()`);
+  if (!r.orphans) return { ok: true, detail: "no unlinked notes on this shape, nothing to measure" };
+  return { ok: r.match === r.orphans,
+           detail: `${r.match} of ${r.orphans} on ${r.swatch}, ${r.distinct} distinct` };
+});
+
 // Idle means the app's own definition of idle -- the same predicate the demo driver waits
 // on (play || cascade || layout anim || hover tween || highlight tween), so a check cannot
 // disagree with the recorder about when the disc has settled.

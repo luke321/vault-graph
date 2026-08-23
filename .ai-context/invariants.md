@@ -255,6 +255,32 @@ bug: the grid scrolls from `scrollLeft` 0, which is the **oldest** end, so a nar
 viewport opened on empty months with every note off the right edge and was reported as a
 missing stylesheet.
 
+## Every unlinked note wears the (unlinked) swatch
+
+A note of degree 0 belongs to the `(unlinked)` group, not to its folder, and the legend
+draws one swatch for it. What the disc paints must agree with that swatch — through the
+**renderer**, not through `colorOf`, which was correct throughout the failure.
+
+```javascript
+(function () {
+  var g = __vg.graph, r = __vg.renderer, sw = __vg.colorOf("(unlinked)").toLowerCase();
+  var ids = g.nodes().filter(function (id) { return g.degree(id) === 0; });
+  return ids.filter(function (id) {
+    return r.getNodeDisplayData(id).color.toLowerCase() === sw;
+  }).length + " of " + ids.length;
+})()
+```
+
+Must be **all of them**. Measured before the fix: **0 of 12** on a 700-note generated
+vault (9 distinct colours under one legend row) and **6 of 148** on the 10,000-note
+synthetic; after, 12 of 12 and 148 of 148. Those 6 are why the check asserts *all* and not
+*any* — one folder's slot happens to be the same hex, so an `any` form passed on a broken
+build.
+
+`demo-vault` mirrors a real vault and has **0 of 452** unlinked notes, so the check
+reports that it had nothing to measure rather than passing on that shape. A vault with no
+orphans cannot exercise this.
+
 ## Nav counts share one right edge
 
 Grid columns align only within one grid, and every legend row is its own grid — so the
