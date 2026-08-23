@@ -971,7 +971,7 @@ function mountVaultGraph(root, data, deps) {
   // the plain integer, which is what a resting disc must have: a fractional count
   // blends two grids one row apart, and at rest that reads as a smeared disc
   // rather than a packed one.
-  function buildWedgePlan(onlyVisible, weightOf, rowsOf) {
+  function buildWedgePlan(onlyVisible, weightOf, rowsOf, spIn) {
     var W = weightOf || function () { return 1; };
     var all = order[state.dim] || [];
     var nested = state.dim === "folder";
@@ -1156,9 +1156,17 @@ function mountVaultGraph(root, data, deps) {
     // one boulder on the rim. At DENSITY_MAX the disc stops filling the box and starts
     // shrinking again, which is the honest end of the behaviour rather than a cliff.
     var HOLE = 0.3;
+    // SUPPLIED, DURING A CASCADE, for the same reason rowsOf is. Deriving it here from
+    // planTotal is right at rest and wrong mid-animation: the cascade weights membership
+    // by alpha, so planTotal slides every frame and the lattice breathed with it --
+    // measured, biggest single-frame radial step went from 0 to 94 units against a row of
+    // 160, i.e. the whole disc shifting half a row per frame. The cascade hands in the
+    // interpolation between its two endpoint packings instead, exactly as it does for
+    // rows, so the last frame and rest agree by construction.
     var fullTotal = geomLock && geomLock.total > 0 ? geomLock.total : planTotal;
-    var density = planTotal > 0.0001
-      ? Math.min(DENSITY_MAX, Math.sqrt(fullTotal / planTotal)) : 1;
+    var density = spIn > 0 ? spIn
+      : (planTotal > 0.0001
+          ? Math.min(DENSITY_MAX, Math.sqrt(fullTotal / planTotal)) : 1);
     var SP = density;
     var r0 = geomLock ? geomLock.r0 : Math.max(1.5, HOLE * Math.sqrt(
       Math.max(1, TOTAL) / (Math.PI * (1 - HOLE * HOLE))));
@@ -2533,6 +2541,10 @@ function mountVaultGraph(root, data, deps) {
     graph.forEachNode(function (id) { if (willShow(id)) shownAfter++; });
     var ovAfter = true;   // one basis everywhere; see REPACK_BELOW
 
+    // The lattice spacing at each end of the toggle. Scalars, not per-cell maps: the
+    // spacing is global by construction -- it is what makes the packing uniform -- so
+    // there is one number per endpoint rather than one per cell.
+    var spSrc = 1, spDst = 1;
     var rowsSrc = Object.create(null), rowsDst = Object.create(null);
     var bandSrc = Object.create(null), bandDst = Object.create(null);
     // A group is PRESENT at an end if it has any seated weight there -- one wedge, one
@@ -2592,6 +2604,11 @@ function mountVaultGraph(root, data, deps) {
       };
       if (a) a.cells.forEach(record(rowsSrc, bandSrc));
       if (b) b.cells.forEach(record(rowsDst, bandDst));
+      // Taken from the endpoint plans themselves, which were built on binary presence --
+      // so these are the two densities the disc genuinely rests at, not a sample of
+      // whatever alpha happened to be on some frame.
+      if (a && a.sp > 0) spSrc = a.sp;
+      if (b && b.sp > 0) spDst = b.sp;
       var seen = Object.create(null);
       var presFor = function (p, m) {
         if (!p) return;
@@ -2694,7 +2711,10 @@ function mountVaultGraph(root, data, deps) {
         if (d === undefined) d = bandDst[bk] !== undefined ? bandDst[bk] : s;
         return s + (d - s) * ease;
       };
-      var plan = buildWedgePlan(ovAfter, weightOf, rowsAt);
+      // Same clock as the rows and the gap reservation above: at ease 0 this is the
+      // packing the disc is resting in and at 1 it is the one settle() assigns.
+      var spNow = spSrc + (spDst - spSrc) * ease;
+      var plan = buildWedgePlan(ovAfter, weightOf, rowsAt, spNow);
       var targets = plan ? ringsLayout(plan, true) : null;
       // CONVERGE BEFORE SETTLING. Easing closes only RADIAL_EASE of each note's gap
       // per frame, so when progress hits 1 a small remainder is still outstanding --
