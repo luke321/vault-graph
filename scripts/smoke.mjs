@@ -1096,6 +1096,142 @@ check("the gap reservation holds still while groups only thin", async (p) => {
   };
 });
 
+// THE RANGE IS TYPEABLE, and the two fields are the range rather than a readout of it. They
+// were text, so the only way to set a range was to find a two-pixel handle at the far end of
+// eleven years of strip. Both directions are asserted: the fields drive the filter, and the
+// filter drives the fields -- a control that shows a stale date is worse than one that shows
+// nothing, because it looks authoritative.
+check("the date fields set the range and follow it", async (p) => {
+  await clearRange(p);
+  const box = await p.j(`(function(){
+    var b = document.querySelector("#vg-rangebox");
+    if (!b) return null;
+    var row = document.querySelector("#vg-heat .hrow").getBoundingClientRect();
+    var r = b.getBoundingClientRect();
+    return { order: [].map.call(b.children, function (c) { return c.id || String(c.className); }),
+             fromRowRight: Math.round(row.right - r.right),
+             min: document.querySelector("#vg-from").min,
+             max: document.querySelector("#vg-to").max };
+  })()`);
+  if (!box) return { ok: false, detail: "no #vg-rangebox" };
+
+  // Typing into the field applies it.
+  const set = await p.j(`(function(){
+    var f = document.querySelector("#vg-from");
+    var mid = f.min.slice(0, 4) === f.max.slice(0, 4) ? f.max : (Number(f.max.slice(0, 4))) + "-01-01";
+    f.value = mid;
+    f.dispatchEvent(new Event("change", { bubbles: true }));
+    return { typed: mid };
+  })()`);
+  await sleep(200);
+  await settle(p);
+  const after = await p.j(`(function(){
+    var r = __vg.rangeReport();
+    return { lit: r.lit, total: r.total, from: r.from,
+             field: document.querySelector("#vg-from").value };
+  })()`);
+
+  // And clearing it puts the fields back to the span's own ends.
+  await p.eval(`document.querySelector("#vg-rangeall").click(); void 0`);
+  await sleep(200);
+  await settle(p);
+  const cleared = await p.j(`(function(){
+    return { from: document.querySelector("#vg-from").value,
+             to: document.querySelector("#vg-to").value,
+             state: __vg.rangeReport().from };
+  })()`);
+  await clearRange(p);
+  const ordered = box.order.join(",") === "vg-from,arw,vg-to,vg-rangeall";
+  return {
+    ok: ordered && box.fromRowRight <= 2 && !!box.min && !!box.max &&
+        after.field === set.typed && after.from !== null && after.lit < after.total &&
+        cleared.state === null && cleared.from === box.min && cleared.to === box.max,
+    detail: `${box.order.length} controls (${box.order.join(" ")}) flush to the row's right ` +
+            `edge (${box.fromRowRight}px); typing ${set.typed} lit ${after.lit} of ${after.total}; ` +
+            `clearing put the fields back to ${cleared.from} -> ${cleared.to}`,
+  };
+});
+
+// THE YEARS ARE BUTTONS. They were text painted on the strip, which meant hit-testing a pixel
+// band by hand and no keyboard, no focus ring, no hover state the browser could give us -- a
+// control only a mouse could reach. Asserted as buttons: real elements, one per year, each at
+// its own year's position on the scale above, and the one the range sits on marked pressed.
+check("the year buttons select a year and halo it on hover", async (p) => {
+  await clearRange(p);
+  const list = await p.j(`(function(){
+    var host = document.querySelector("#vg-years");
+    if (!host) return null;
+    var bs = [].slice.call(host.querySelectorAll("button[data-yr]"));
+    if (!bs.length) return { none: true };
+    var rib = document.querySelector("#vg-ribbon").getBoundingClientRect();
+    // Each button should sit over its own year. Worst error across all of them, in px.
+    var worst = 0;
+    bs.forEach(function (b) {
+      var yr = +b.getAttribute("data-yr");
+      // CLAMPED, like the button is. A year whose January falls before the vault s first
+      // note has a negative position on the scale, and the button sits at the strip s edge
+      // instead -- which is correct, and is what made this read as 327px of error.
+      var want = Math.max(0, Math.min(rib.width, __vg.ribbonXOf(Date.UTC(yr, 0, 1))));
+      var got = b.getBoundingClientRect().left + b.getBoundingClientRect().width / 2 - rib.left;
+      var d = Math.abs(got - want);
+      if (d > worst) worst = d;
+    });
+    var mid = bs[Math.floor(bs.length / 2)];
+    var r = mid.getBoundingClientRect();
+    return { n: bs.length, worstPx: Math.round(worst),
+             years: bs.map(function (b) { return b.getAttribute("data-yr"); }),
+             pick: mid.getAttribute("data-yr"),
+             x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2),
+             tagged: bs.every(function (b) { return b.tagName === "BUTTON" && b.hasAttribute("aria-pressed"); }) };
+  })()`);
+  if (!list || list.none) return { ok: false, detail: "no year buttons under the ribbon" };
+
+  // Hover haloes exactly that year's notes.
+  await p.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: list.x, y: list.y });
+  await sleep(260);
+  const hov = await p.j(`(function(){
+    var yr = __vg.state.hoverYear, n = 0, real = 0;
+    __vg.graph.forEachNode(function (id, a) {
+      if (__vg.isHighlighted(id)) n++;
+      if (a.created && a.created.slice(0, 4) === yr) real++;
+    });
+    return { year: yr, haloed: n, real: real };
+  })()`);
+
+  // Clicking selects the calendar year, and the button says so.
+  await p.send("Input.dispatchMouseEvent", { type: "mousePressed", x: list.x, y: list.y, button: "left", clickCount: 1, buttons: 1 });
+  await p.send("Input.dispatchMouseEvent", { type: "mouseReleased", x: list.x, y: list.y, button: "left", clickCount: 1, buttons: 0 });
+  await sleep(260);
+  await settle(p);
+  const clicked = await p.j(`(function(){
+    var r = __vg.rangeReport();
+    var b = document.querySelector('#vg-years button[data-yr="' + ${JSON.stringify(list.pick)} + '"]');
+    return { fromISO: r.from ? new Date(r.from).toISOString().slice(0, 10) : null,
+             toISO: r.to ? new Date(r.to).toISOString().slice(0, 10) : null,
+             lit: r.lit, pressed: b && b.getAttribute("aria-pressed"),
+             field: document.querySelector("#vg-from").value };
+  })()`);
+
+  // And leaving drops the halo rather than leaving it stuck on.
+  await p.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: list.x, y: list.y - 220 });
+  await sleep(220);
+  const left = await p.j(`__vg.state.hoverYear`);
+  await clearRange(p);
+  const yr = list.pick;
+  // A year at the very edge of the span is clamped to an open end, which is correct.
+  const okRange = clicked.lit > 0 &&
+        (clicked.fromISO === null || clicked.fromISO.slice(0, 4) === yr) &&
+        (clicked.toISO === null || clicked.toISO.slice(0, 4) === yr);
+  return {
+    ok: list.tagged && list.worstPx <= 2 && hov.year === yr && hov.real > 0 &&
+        hov.haloed === hov.real && okRange && clicked.pressed === "true" && left === null,
+    detail: `${list.n} buttons (${list.years.join(" ")}) within ${list.worstPx}px of their own ` +
+            `year; hovering '${yr}' haloed ${hov.haloed} of its ${hov.real} notes; clicking gave ` +
+            `${clicked.fromISO} -> ${clicked.toISO} (${clicked.lit} lit, pressed=${clicked.pressed}); ` +
+            `leaving cleared it (${left})`,
+  };
+});
+
 check("undated notes survive every range", async (p) => {
   // Deliberate, and worth pinning because it is the kind of rule that gets tidied away: 20%
   // of the 10k fixture carries no frontmatter, and excluding those from a date range would

@@ -67,20 +67,38 @@
       <div class="hrow">
         <div class="lbl">Notes added</div>
         <span id="vg-heatnote"></span>
-        <!-- THE RANGE READOUT AND ITS RESET LIVE UP HERE, beside the counts they qualify,
-             so the strip below is nothing but the strip. A row of its own under the ribbon
-             put a button and a date at the bottom of the band and cost 22px of the disc for
-             two things nobody looks at except when they are already looking here. -->
-        <span id="vg-rangenote"></span>
-        <button id="vg-rangeall" class="btn" title="Clear the date range">All dates</button>
         <div id="vg-heatscale" aria-hidden="true">
           <span>fewer</span><canvas id="vg-heatkey"></canvas><span>more</span>
+        </div>
+        <!-- THE RANGE LIVES UP HERE, beside the counts it qualifies, so the strip below is
+             nothing but the strip: a row of its own under the ribbon cost 22px of the disc
+             for two things nobody looks at except when they are already looking here.
+
+             AT THE END OF THE ROW, and as one group. It was loose in the middle, between the
+             prose and the legend, where it read as a third unrelated thing rather than as
+             the control it is. Three items that act on one filter belong together, and the
+             end of the row is the one place a group can grow without pushing anything about.
+
+             REAL DATE FIELDS, not a readout. They were text, so the only way to set a range
+             was to find and drag a handle -- fine for browsing, useless for "just show me
+             2024". A native picker also brings a calendar, keyboard entry and the locale's
+             own date order for free, none of which is worth reimplementing on a canvas. -->
+        <div id="vg-rangebox">
+          <input id="vg-from" class="dt" type="date" aria-label="Range start">
+          <span class="arw" aria-hidden="true">&rarr;</span>
+          <input id="vg-to" class="dt" type="date" aria-label="Range end">
+          <button id="vg-rangeall" class="btn" title="Clear the date range">All dates</button>
         </div>
       </div>
       <div id="vg-heatwrap"><canvas id="vg-heatc"></canvas></div>
       <!-- The whole history, brushable. The band above is a 52-week window onto whatever
            this selects. -->
       <canvas id="vg-ribbon"></canvas>
+      <!-- THE YEARS ARE BUTTONS, not text painted on the strip above. They were canvas, which
+           meant hit-testing a pixel band by hand, no keyboard, no focus ring, no hover state
+           the browser could give us -- and a control that only a mouse can reach is half a
+           control. Positioned per year against the same scale the strip uses. -->
+      <div id="vg-years"></div>
       <div id="vg-rtip" hidden></div>
       <div id="vg-htip" hidden></div>
     </div>
