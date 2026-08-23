@@ -86,8 +86,17 @@ const FOLDERS = [
 // draw and nothing is stamped later than today. 420 against a 364-day window leaves the
 // window ~8 weeks of travel, which is what makes this shape worth pointing the ribbon
 // checks at: narrow enough that the pill fills most of the rail, wide enough that it moves.
+//
+// "Today" is the LOCAL date, which is what the page's own TODAY is (src/page.js). Taking it
+// from toISOString() the way make-test-vault.mjs does is a UTC date, and west of UTC that is
+// tomorrow for part of the evening -- one day of stamps in the future, which is the whole
+// thing this is here to stop.
 const SPAN_DAYS = 420;
-const END = Date.parse(arg("end", new Date().toISOString().slice(0, 10)) + "T00:00:00Z");
+const localToday = () => {
+  const d = new Date(), p = (n) => (n < 10 ? "0" : "") + n;
+  return d.getFullYear() + "-" + p(d.getMonth() + 1) + "-" + p(d.getDate());
+};
+const END = Date.parse(arg("end", localToday()) + "T00:00:00Z");
 const DAY0 = END - (SPAN_DAYS - 1) * 86400000;
 const day = (i) => new Date(DAY0 + (i % SPAN_DAYS) * 86400000).toISOString().slice(0, 10);
 

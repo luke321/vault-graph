@@ -1213,9 +1213,7 @@ check("dragging one brush edge leaves the other alone", async (p) => {
   const y = box.top + 12;
   const a = await ribbonDrag(p, box, Math.round(box.w * 0.30), Math.round(box.w * 0.60), y);
 
-  const xAt = async (ms) => p.j(`(function(){
-    var d = __vg.dateSpan, w = document.querySelector("#vg-ribbon").getBoundingClientRect().width;
-    return ((${ms} - d.lo) / (d.hi - d.lo)) * w; })()`);
+  const xAt = (ms) => xOfMs(p, ms);
 
   const b = await ribbonDrag(p, box, Math.round(await xAt(a.from)), Math.round(await xAt(a.from) - box.w * 0.1), y);
   const leftOk = b.to === a.to && b.from < a.from;
@@ -1308,12 +1306,16 @@ check("a press on the window track centres the window there", async (p) => {
   const box = await ribbonBox(p);
   const yBars = box.top + 12, yTrack = box.top + RIB_BARS + 5;
 
+  // TWO WEEKS, not one. The grid steps in whole weeks, so with a single week of travel the
+  // midpoint quantises onto one of the two extremes -- half the time the resting window,
+  // which would read as a press that did nothing. Centring needs an interior position to be
+  // asserted at, and below two weeks of travel there is not one.
   const t = await winTravel(p, box, yTrack);
   await clearRange(p);
-  if (!t.moves) {
+  if (t.days < 14) {
     return { ok: true,
-             detail: `the ${t.weeks}-week window covers this vault's whole history, so every ` +
-                     `press lands on the one window there is` };
+             detail: `the ${t.weeks}-week window has ${t.days}d of travel on this vault -- no ` +
+                     `interior position to centre on` };
   }
 
   const a = await ribbonDrag(p, box, Math.round(box.w * 0.30), Math.round(box.w * 0.55), yBars);
