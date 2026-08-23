@@ -1497,6 +1497,28 @@ function mountVaultGraph(root, data, deps) {
       if (r > maxR) maxR = r;
     });
 
+    // WHY THERE IS NO CORRECTION PASS HERE, having tried one.
+    //
+    // The open-loop solve leaves maxR a few percent past the locked extent -- measured,
+    // reach 1.072 at a density of 1.023 -- and the obvious repair is to feed that back
+    // and scale SP until maxR lands on the lock. It was written, and it MADE THINGS
+    // WORSE: pitch * sqrt(shown) spread 1.10x -> 1.15x, because the loop drove SP back
+    // to 1 in almost every state and undid the whole change.
+    //
+    // The reason is worth keeping, because it contradicts what this was built on.
+    // Filtering a vault BARELY MOVES THE DISC'S RADIUS: maxR is the max over cells, and
+    // hiding some folders leaves the deepest survivor holding all of its own notes, so
+    // it still reaches the rim. Measured on the baseline, reach was 1.000 with 481, 465
+    // and 382 of 503 notes showing -- there was no empty margin to reclaim at all. What
+    // filtering does is make the disc SPARSER inside a radius that hardly changes.
+    //
+    // And that radius is quantised in whole rows. The outermost row already sits flush
+    // against the box, so any spreading at all pushes it a full row out: 2.3% more
+    // spacing bought 7% more radius. There is no SP between "no change" and "one row
+    // over", which is exactly why a loop targeting the lock can only pick SP = 1.
+    //
+    // So the overshoot is accepted and handled where it belongs -- in the camera, which
+    // is the thing that decides how much of the box is on screen. See fitRatio().
     // Rows sit SP apart in every cell -- spacing is never rescaled per cell, which
     // is what keeps density uniform. Each cell's first row is at its band's inner
     // edge, so columns grow outward and a cell ends where its notes run out.
@@ -1814,11 +1836,14 @@ function mountVaultGraph(root, data, deps) {
           // in the packing so it changes nothing about rows, capacities or wedge
           // angles -- a highlight is a pure display offset, and every stability
           // guarantee about reflows survives it untouched.
-          // HL_PUSH is quoted in ROWS and a row is SP lattice units wide, so the push
-          // is scaled by the plan's own spacing. Left unscaled it would shrink from
-          // "just under one row" to a fraction of one as the disc spread out, and the
-          // protrusion that makes a highlight readable would quietly stop reading.
-          var rr = sl.r + (isPushed(sl.id) ? HL_PUSH * (plan.sp || 1) : 0);
+          // NOT scaled by the plan's spacing, though it is quoted in rows. Scaling it
+          // was tried and is wrong: the constant was sized as a FRACTION OF THE RADIUS
+          // ("0.9 rows on a ~13.3-row disc is 6.8%"), and the radius is the thing the
+          // density solve holds still -- it is the row COUNT that shrinks as the lattice
+          // spreads. At the density cap the disc is ~5 rows deep, so 0.9 rows would have
+          // been 18% of it and a highlighted note would have protruded off the stage.
+          // Left in lattice units it stays the 6.8% it was tuned to be.
+          var rr = sl.r + (isPushed(sl.id) ? HL_PUSH : 0);
           pos[sl.id] = { x: rr * Math.cos(t), y: rr * Math.sin(t) };
         });
         theta = a1;                  // contiguous: the next wedge starts here
@@ -4645,11 +4670,17 @@ function mountVaultGraph(root, data, deps) {
     var locked = geomLock && geomLock.maxR ? geomLock.maxR : 0;
     var live = lastMaxR;
     if (!locked || !live) return FIT_RATIO;
-    // Never zoom OUT past the full-vault framing: the box is that size, so a ratio above
-    // this is empty margin. Clamped low as well, or a single surviving note in the hub
-    // would fill the stage with one dot.
+    // The upper clamp used to be 1, on the reasoning that the box is the full-vault size
+    // so anything beyond it is empty margin. That stopped being true with the density
+    // solve (github#13): a filtered disc spreads its lattice to keep its notes at an
+    // honest density, and the outermost row lands a few percent PAST the locked extent
+    // -- measured up to 1.079. That is disc, not margin, and clamping at 1 framed it
+    // with its rim cut off. Allowed out to 1.35, which covers a full row of overshoot at
+    // any density the cap permits, and no further: past that something else is wrong and
+    // framing empty space would hide it.
+    // Clamped low as well, or a single surviving note in the hub would fill the stage.
     var k = live / locked;
-    if (k > 1) k = 1;
+    if (k > 1.35) k = 1.35;
     if (k < 0.12) k = 0.12;
     return FIT_RATIO * k;
   }
