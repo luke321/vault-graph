@@ -49,20 +49,6 @@
       <div id="vg-legend"></div>
     </div>
 
-    <!-- SPIKE (github#12): the five hub concepts, switchable live so they can be compared
-         on one vault without five builds. Not shipping in this form. -->
-    <div class="block">
-      <div class="lbl">Hub concept</div>
-      <select id="vg-hubmode">
-        <option value="C">C &mdash; brain as-is, hover by angle</option>
-        <option value="A">A &mdash; hollow brain, notes inside</option>
-        <option value="B">B &mdash; hub dial</option>
-        <option value="D">D &mdash; bare hub notes, auto</option>
-        <option value="E" selected>E &mdash; pin by right-click</option>
-      </select>
-      <div id="vg-hubnote" class="mini"></div>
-    </div>
-
     <div class="block">
       <div class="lbl">View</div>
       <div class="tools">
@@ -110,19 +96,14 @@
            with a radial fade. -->
       <div id="vg-logoInner" aria-hidden="true" hidden></div>
       <div id="vg-graph"></div>
-      <!-- SPIKE (github#12): B's dial, and the transparent disc that makes the hub
-           hoverable at all -- the mark is a CSS mask and cannot be hit-tested.
+      <!-- The hub's drop target, shown only while a note is being dragged.
 
-           AFTER #vg-graph, unlike the logo above, and that is the finding rather than a
-           detail. Anything painted in the hole from the DOM sits UNDER sigma's canvases,
-           and ~4900 edges converge on the hub: the tangle is dense enough to bury a
-           mid-saturation dial completely. Measured -- the dial's own pixels read back
-           opaque blue while the composited page showed black. The brain gets away with it
-           only because it is a bright outline on a dark core. Concepts that put NODES in
-           the hub (D, E) never meet this problem: nodes are drawn on sigma's own node
-           canvas, above the edges. -->
-      <canvas id="vg-dial" aria-hidden="true" hidden></canvas>
-      <div id="vg-hubhit" aria-hidden="true"></div>
+           AFTER #vg-graph, unlike the logo above, and that placement is a measurement
+           rather than a preference: anything drawn into the hole from the DOM sits UNDER
+           sigma's canvases, and every edge in the vault converges on the hub -- the tangle
+           is dense enough to bury it completely. Two of the concepts spiked for github#12
+           died on exactly this. -->
+      <div id="vg-hubdrop" aria-hidden="true" hidden></div>
       <!-- CAMERA CONTROLS, in the corner of the STAGE rather than in the sidebar, because
            they answer questions you have while looking at the graph -- "closer", "how do I
            get back" -- and the sidebar is not where you are looking when you have them.

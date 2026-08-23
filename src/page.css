@@ -626,35 +626,24 @@
   /* SPIKE (github#12). B's dial: the ring's colours as hard arcs, holed out so the middle
      stays free. The hit disc sits over the whole hole and is the only thing here that
      takes a pointer -- #vg-logo is `pointer-events: none` and a mask does not hit-test. */
-  /* A CANVAS, not a masked conic-gradient div. The div version was written first and never
-     painted a single coloured pixel: the background computed correctly (7890 characters of
-     valid conic-gradient) and nothing occluded it, so the mask was eating it -- and chasing
-     which of mask-mode, mask-size and the farthest-corner percentage basis was responsible
-     is time spent on the wrong question. Arcs on a canvas are twenty lines and every pixel
-     is accounted for. */
-  .vault-graph #vg-dial {
+  /* THE HUB'S DROP TARGET, drawn only while a note is being dragged. Without it the hole
+     is an invisible target and the gesture is a guess -- the first version had no ring and
+     a drop either worked or did not for no stated reason. Dashed while the pointer is
+     outside it, solid and filled once the drop would land. */
+  .vault-graph #vg-hubdrop {
     position: absolute; display: block; pointer-events: none;
-    transform: translate(-50%, -50%);
+    transform: translate(-50%, -50%); border-radius: 50%;
+    border: 2px dashed var(--text-3); opacity: .55;
+    transition: opacity 120ms linear, background-color 120ms linear;
   }
-  .vault-graph #vg-dial[hidden] { display: none; }
-  .vault-graph #vg-hubhit {
-    /* SIZED TO THE HOLE, not to the stage. A full-stage overlay was the first shape and
-       it swallowed every click on the disc behind it -- the hub is the only thing this
-       is allowed to intercept. Placed from JS alongside the logo, since the hole's
-       radius in pixels moves with the camera. */
-    position: absolute; display: block; border-radius: 50%;
-    transform: translate(-50%, -50%);
-    pointer-events: none; background: transparent;
+  .vault-graph #vg-hubdrop[hidden] { display: none; }
+  .vault-graph #vg-hubdrop[data-over="1"] {
+    border-style: solid; border-color: var(--accent); opacity: 1;
+    background: color-mix(in srgb, var(--accent) 12%, transparent);
   }
-  .vault-graph[data-hub="A"] #vg-hubhit,
-  .vault-graph[data-hub="B"] #vg-hubhit,
-  .vault-graph[data-hub="C"] #vg-hubhit { pointer-events: auto; }
-  .vault-graph #vg-hubmode {
-    width: 100%; margin-top: 6px; padding: 4px 6px; font: inherit; font-size: 12px;
-    color: var(--text-1); background: var(--surface-2);
-    border: 1px solid var(--line); border-radius: 6px;
-  }
-  .vault-graph #vg-hubnote { margin-top: 6px; line-height: 1.35; color: var(--text-3); }
+  /* Dragging a pinned note OUT reads as the opposite gesture, so the ring says so rather
+     than looking like a target the note is failing to hit. */
+  .vault-graph #vg-hubdrop[data-drop="out"] { border-color: var(--text-3); opacity: .32; }
 
   .vault-graph #vg-tip {
     position: absolute; pointer-events: none; z-index: 5; max-width: 260px;

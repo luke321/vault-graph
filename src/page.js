@@ -339,9 +339,8 @@ function mountVaultGraph(root, data, deps) {
     // Logo colouring: true = the inner band's palette in the middle, fading out into
     // the outer's. false = the outer ring's palette across the whole mark.
     logoTwoRing: true,
-    // SPIKE (github#12): which of the five hub concepts is live, and -- for E -- the
-    // notes pinned into the hub, newest last.
-    hubMode: "E",
+    // The notes pinned into the hub, in slot order. The mark yields to them: an empty
+    // list is the brain, a non-empty one is notes.
     pinned: []
   };
 
@@ -1885,31 +1884,29 @@ function mountVaultGraph(root, data, deps) {
     return out;
   }
 
-  /* -------------------------------------------------- SPIKE: the pinned hub */
+  /* ---------------------------------------------------------- the pinned hub */
 
-  // SPIKE (github#12, concept E). Notes right-clicked into the hub sit in the hole
-  // instead of on their lattice row. This is the ONE exception to "every note obeys the
-  // same lattice" -- the note above says hubPositions was deleted to remove exactly that,
-  // and re-introducing it is the thing this spike exists to judge rather than assume.
+  // Notes pinned into the hub sit in the hole instead of on their lattice row. This is the
+  // ONE exception to "every note obeys the same lattice" -- the note above records that
+  // hubPositions was deleted to remove exactly that, and it is re-introduced here
+  // deliberately, for notes the reader chose rather than for a category the layout decides.
   //
-  // Placed by ring, not sunflower-packed: 1 in the middle, then 6, then the rest. A hub
-  // holding three notes should read as three deliberate choices, and phyllotaxis reads as
-  // spill. The radii are fractions of r0 so the arrangement rides the hole's own size --
-  // the band balancer moves r0, and anything hard-coded here would drift off centre.
-  // 13, which is what github#12 read off the 13 blobs in logo-mask.png, and it holds:
-  // hub notes are DOTS. An earlier turn of this spike forced their labels on, measured the
-  // resulting pile-up at 9, and concluded the hole could not hold them -- but a pinned note
-  // names itself on hover exactly like every other note in the disc, so the labels were
-  // never the constraint and the pile-up was self-inflicted. Dots pack to the blob count.
+  // github#12 spiked five arrangements of the middle; this is the one that won. The four
+  // that did not are gone rather than left behind a setting: two of them (the hollow brain,
+  // the dial) painted into the hole from the DOM, which puts them UNDER sigma's canvases
+  // where ~4900 converging edges bury them. Notes in the hub are real nodes on sigma's own
+  // node canvas, above the edges, so the problem never arises -- which is most of why this
+  // is the concept that survived.
+  //
+  // Thirteen, which is what the 13 blobs in logo-mask.png suggested and what the hole
+  // actually holds: hub notes are DOTS and name themselves on hover, exactly like every
+  // other note in the disc.
   var PIN_MAX = 13;
   var HUB_R1 = 0.62;              // the outermost hub ring, as a fraction of the hole
 
-  // A BALL, built from hex rings: 1 in the middle, 6 around it, 12 around those. That is
-  // the packing the mask's own blobs approximate, and it stays a ball at every count
-  // rather than becoming a ring with a gap in it.
-  //
-  // Below seven, no centre: a middle dot among three or four reads as one of them being
-  // late rather than as a core, so those counts are a plain ring.
+  // A BALL, built from hex rings: 1 in the middle, 6 around it, the rest outside those.
+  // Below seven there is no centre -- a middle dot among three or four reads as one of them
+  // being late rather than as a core -- so those counts are a plain ring.
   function hubRing(out, count, r, phase) {
     for (var k = 0; k < count; k++) {
       // 12 o'clock, clockwise, matching the wedge order around it.
@@ -1935,243 +1932,144 @@ function mountVaultGraph(root, data, deps) {
     return out;
   }
 
-  /* --- who is in the hub, and what is drawn behind them, per concept -------- */
-
-  // A and D fill themselves with the most connected notes in scope -- Evgene's Option 1.
-  // Cached: this runs inside ringsLayout, which the cascade calls every frame, and a sort
-  // of the whole vault per frame is not something a spike needs to pay for. The key is the
-  // visible count, which is what actually changes the answer.
-  var hubAutoCache = null, hubAutoKey = "";
-  function hubAuto(n) {
-    var shown = 0;
-    graph.forEachNode(function (id) { if (visible(id)) shown++; });
-    var key = state.hubMode + ":" + n + ":" + shown;
-    if (hubAutoCache && hubAutoKey === key) return hubAutoCache;
-    var ids = [];
-    graph.forEachNode(function (id) { if (visible(id)) ids.push(id); });
-    ids.sort(function (a, b) { return graph.degree(b) - graph.degree(a); });
-    hubAutoKey = key;
-    return (hubAutoCache = ids.slice(0, n));
-  }
-
-  // A holds nine, which is what fits inside the silhouette rather than inside the hole;
-  // D has the whole hole and takes the full thirteen.
-  function hubIds() {
-    var m = state.hubMode;
-    if (m === "E") return state.pinned.filter(function (id) { return graph.hasNode(id); });
-    if (m === "A") return hubAuto(9);
-    if (m === "D") return hubAuto(PIN_MAX);
-    return [];                                   // B and C put nothing in the middle
+  function pinnedIds() {
+    return state.pinned.filter(function (id) { return graph.hasNode(id); });
   }
 
   function hubPlace(out, r0, scale) {
-    var ids = hubIds();
+    var ids = pinnedIds();
     if (!ids.length) return;
-    // A's notes sit INSIDE the silhouette, which is smaller than the hole it is drawn in.
-    var slots = hubSlots(ids.length, r0 * (state.hubMode === "A" ? 0.72 : 1));
+    // The note being dragged follows the pointer instead of its slot -- it has not been
+    // dropped yet, and snapping it to a seat mid-gesture is the drag arguing with the hand.
+    var slots = hubSlots(ids.length, r0);
     ids.forEach(function (id, k) {
+      if (nodeDrag && nodeDrag.id === id) return;
       if (out[id] && slots[k]) out[id] = { x: slots[k].x * scale, y: slots[k].y * scale };
     });
   }
 
-  var hubSet = Object.create(null);
-  function isInHub(id) { return !!hubSet[id]; }
-  function refreshHubSet() {
-    hubSet = Object.create(null);
-    hubIds().forEach(function (id) { hubSet[id] = 1; });
-  }
+  function isPinned(id) { return state.pinned.indexOf(id) >= 0; }
 
-  // Toggling is the whole gesture: right-click pins, right-click again releases. A cap,
-  // because the hole does not grow -- the oldest pin gives way rather than the newest
-  // being refused, so the gesture never silently does nothing.
-  function togglePin(id) {
+  // Pin, unpin, or move a note already pinned. `at` is an insert position for a drop; left
+  // out, the note joins at the end.
+  //
+  // A CAP RATHER THAN A REFUSAL: the hole does not grow, so the oldest pin gives way and
+  // the gesture always does something. A refusal at thirteen would read as the drag having
+  // missed.
+  function pin(id, at) {
     var i = state.pinned.indexOf(id);
     if (i >= 0) state.pinned.splice(i, 1);
-    else {
-      state.pinned.push(id);
-      if (state.pinned.length > PIN_MAX) state.pinned.shift();
+    if (at === undefined || at > state.pinned.length) at = state.pinned.length;
+    state.pinned.splice(at, 0, id);
+    while (state.pinned.length > PIN_MAX) {
+      state.pinned.splice(state.pinned[0] === id ? 1 : 0, 1);
     }
+    return true;
+  }
+
+  function unpin(id) {
+    var i = state.pinned.indexOf(id);
+    if (i < 0) return false;
+    state.pinned.splice(i, 1);
+    return true;
+  }
+
+  function togglePin(id) {
+    if (!unpin(id)) pin(id);
     hubChanged(true);
   }
 
   function hubChanged(animate) {
-    hubAutoCache = null;
-    refreshHubSet();
     applyLayout(!!animate);
     placeLogo();
-    drawDial();
   }
 
-  var HUB_NOTES = {
-    A: "Brain ghosted to an outline; the nine most connected notes sit inside it. Hover the outline to light the folder at that angle.",
-    B: "No brain. The hole is a segmented dial — one arc per folder, hover to light it, click to scope.",
-    C: "The mark exactly as it ships today, plus hover: the folder under the cursor's angle lights up, click scopes to it.",
-    D: "No brain at all. The thirteen most connected notes ARE the middle.",
-    E: "Right-click a note to pin it here, again to release. Right-click the stage to clear. The brain is what is here when nothing is pinned."
-  };
+  /* --- drag and drop ------------------------------------------------------- */
 
-  /* --- B and C: what folder is at this angle ------------------------------- */
+  // Dragging a note into the hole pins it; dragging a pinned note out releases it. The
+  // same two outcomes right-click gives, reached the way you would reach for them if
+  // nobody had told you about right-click -- which is the whole argument for having both.
+  //
+  // The node FOLLOWS THE POINTER while dragging rather than a ghost being drawn: the thing
+  // being moved is the thing under the hand, and the disc it came from stays put behind it.
+  // On release the layout reclaims it -- into a hub slot, or back to its lattice seat --
+  // and that snap is what tells you which of the two happened.
+  var nodeDrag = null;
+  // How far the pointer must travel before a press becomes a drag. Same threshold the
+  // ribbon uses, and for the same reason: a click with a shaky hand is still a click.
+  var NODE_DRAG_MIN = 4;
 
-  // The same sampling bandColors() does -- the OUTERMOST visible note at each angular
-  // bucket -- but keeping the group rather than the colour. One pass, cached per frame's
-  // worth of hovering, because a pointer crossing the hole asks this on every move.
-  var angleGroups = null;
-  function bandGroupsNow() {
-    var g = new Array(RING_BUCKETS), rad = new Array(RING_BUCKETS), any = false;
-    graph.forEachNode(function (id, a) {
-      if (!present(id)) return;
-      var r = Math.hypot(a.x, a.y);
-      if (!(r > 1e-6)) return;                   // hub notes have no direction
-      var k = Math.floor(angleSweep(Math.atan2(a.y, a.x)) / (2 * Math.PI) * RING_BUCKETS);
-      k = ((k % RING_BUCKETS) + RING_BUCKETS) % RING_BUCKETS;
-      if (rad[k] === undefined || r > rad[k]) { rad[k] = r; g[k] = groupOf(id); any = true; }
-    });
-    if (!any) return null;
-    // Carry the last group clockwise across the gaps between wedges, so the dial has no
-    // dead angles -- the same trick bandColors uses on its colours.
-    var first = -1;
-    for (var i = 0; i < RING_BUCKETS; i++) if (g[i]) { first = i; break; }
-    if (first < 0) return null;
-    var carry = g[first];
-    for (var n = 0; n < RING_BUCKETS; n++) {
-      var j = (first + n) % RING_BUCKETS;
-      if (g[j]) carry = g[j]; else g[j] = carry;
-    }
-    return g;
+  // Where the hub is, in graph units, and whether a point is in it.
+  function inHubHole(gx, gy) {
+    if (!geomLock) return false;
+    return Math.hypot(gx, gy) / UNIT < geomLock.r0;
   }
 
-  function groupAtAngle(theta) {
-    if (!angleGroups) angleGroups = bandGroupsNow();
-    if (!angleGroups) return null;
-    var k = Math.floor(angleSweep(theta) / (2 * Math.PI) * RING_BUCKETS);
-    return angleGroups[((k % RING_BUCKETS) + RING_BUCKETS) % RING_BUCKETS] || null;
-  }
-
-  // B's dial: the ring's own colours as hard-edged arcs rather than the logo's blurred
-  // wash. Unblurred is the whole point -- the thing you are pointing at has to have an
-  // edge. Drawn as a donut so the middle can still hold a breadcrumb.
-  // How much of the dial's radius the coloured band occupies. The rest is the core, which
-  // is left empty for the breadcrumb github#12 wants there.
-  var DIAL_INNER = 0.56;
-
-  function drawDial() {
-    var d = $("dial");
-    if (!d || !renderer || !geomLock) return;
-    if (state.hubMode !== "B") { d.hidden = true; return; }
-    var cols = ringColors();
-    if (!cols) { d.hidden = true; return; }
+  // The drop target, drawn only while a drag is live. Without it the hole is an invisible
+  // target and the gesture is a guess -- the first version had no ring and dropping felt
+  // like it either worked or did not for no stated reason.
+  function placeHubDrop() {
+    var el = $("hubdrop");
+    if (!el || !renderer || !geomLock) return;
+    if (!nodeDrag || !nodeDrag.moved) { el.hidden = true; return; }
     var c = renderer.graphToViewport({ x: 0, y: 0 });
     var edge = renderer.graphToViewport({ x: geomLock.r0 * UNIT, y: 0 });
-    var size = Math.hypot(edge.x - c.x, edge.y - c.y) * 2 * 1.02;
-    var cx = fitCanvas(d, size, size);           // the same DPR treatment the band gets
-    var R = size / 2, rIn = R * DIAL_INNER, step = (Math.PI * 2) / RING_BUCKETS;
-    // Bucket 0 is 12 o'clock and the sweep runs clockwise, matching angleSweep() -- so an
-    // arc is over the wedge it was sampled from and pointing at it means what it looks like.
-    for (var i = 0; i < RING_BUCKETS; i++) {
-      var a0 = -Math.PI / 2 + i * step, a1 = a0 + step + 0.004;   // hairline overlap
-      cx.beginPath();
-      cx.arc(R, R, R, a0, a1);
-      cx.arc(R, R, rIn, a1, a0, true);
-      cx.closePath();
-      cx.fillStyle = cols[i] || css("--dim");
-      cx.fill();
-    }
-    // The hovered folder's arcs, lifted. This is the whole affordance: without it the dial
-    // is a picture of the palette rather than something you are pointing at.
-    if (state.hoverGroup && angleGroups) {
-      cx.globalCompositeOperation = "source-atop";
-      cx.fillStyle = rgbaHex(css("--text-1"), 0.32);
-      for (var k = 0; k < RING_BUCKETS; k++) {
-        if (angleGroups[k] !== state.hoverGroup) continue;
-        var b0 = -Math.PI / 2 + k * step, b1 = b0 + step + 0.004;
-        cx.beginPath();
-        cx.arc(R, R, R, b0, b1);
-        cx.arc(R, R, rIn, b1, b0, true);
-        cx.closePath();
-        cx.fill();
+    var d = Math.hypot(edge.x - c.x, edge.y - c.y) * 2;
+    el.style.width = el.style.height = d + "px";
+    el.style.left = c.x + "px";
+    el.style.top = c.y + "px";
+    // Lit while the pointer is actually inside, so the ring answers "will this drop?"
+    // rather than only "there is a target somewhere".
+    el.setAttribute("data-over", nodeDrag.over ? "1" : "0");
+    el.setAttribute("data-drop", nodeDrag.wasPinned && !nodeDrag.over ? "out" : "in");
+    el.hidden = false;
+  }
+
+  function bindNodeDrag() {
+    var captor = renderer.getMouseCaptor && renderer.getMouseCaptor();
+    if (!captor) return;
+
+    renderer.on("downNode", function (e) {
+      nodeDrag = { id: e.node, moved: false, over: false, wasPinned: isPinned(e.node) };
+    });
+
+    captor.on("mousemovebody", function (e) {
+      if (!nodeDrag) return;
+      // THE CAMERA MUST NOT PAN UNDER THE DRAG, and this has to happen FIRST -- before the
+      // threshold test, not after it. The early version returned while the pointer was
+      // still inside NODE_DRAG_MIN, so those first few moves reached sigma's own handler
+      // and panned the stage: measured, the camera left (0.5, 0.5) for (0.4601, 0.5207)
+      // over one drag. The press already belongs to the note by then; the threshold only
+      // decides whether the note MOVES, never who owns the gesture.
+      if (e.preventSigmaDefault) e.preventSigmaDefault();
+      if (e.original) { e.original.preventDefault(); e.original.stopPropagation(); }
+      if (!nodeDrag.moved) {
+        if (nodeDrag.x0 === undefined) { nodeDrag.x0 = e.x; nodeDrag.y0 = e.y; }
+        if (Math.hypot(e.x - nodeDrag.x0, e.y - nodeDrag.y0) < NODE_DRAG_MIN) return;
+        nodeDrag.moved = true;
       }
-      cx.globalCompositeOperation = "source-over";
-    }
-    d.style.left = c.x + "px";
-    d.style.top = c.y + "px";
-    d.hidden = false;
-  }
-
-  // The hit disc follows the hole, for the same reason the logo does: the hole's radius in
-  // pixels scales with the camera, so anything hard-coded here comes adrift on zoom.
-  function placeHubHit() {
-    var ov = $("hubhit");
-    if (!ov || !renderer || !geomLock) return;
-    var c = renderer.graphToViewport({ x: 0, y: 0 });
-    var edge = renderer.graphToViewport({ x: geomLock.r0 * UNIT, y: 0 });
-    var hole = Math.hypot(edge.x - c.x, edge.y - c.y);
-    ov.style.width = ov.style.height = hole * 2 + "px";
-    ov.style.left = c.x + "px";
-    ov.style.top = c.y + "px";
-  }
-
-  // One transparent disc over the hole, which is what makes B and C hoverable at all:
-  // the mark is painted with a CSS mask and `pointer-events: none`, so it cannot be hit
-  // (github#12's first constraint). Hit-testing by radius and angle rather than by
-  // sampling the mask's alpha -- for judging a concept the silhouette's exact edge is not
-  // what is being judged, and the overlay is twenty lines against a canvas readback.
-  function hubHitAngle(ev) {
-    // #vg-canvas, NOT #vg-stage. graphToViewport() is relative to the container sigma is
-    // mounted in, and the stage also holds the heat band above it -- measuring from the
-    // stage put the hub's centre ~215px too high, which is a hit-test that silently
-    // answers about the wrong part of the disc.
-    var st = $("canvas"), r = st && st.getBoundingClientRect();
-    if (!r || !renderer || !geomLock) return null;
-    var c = renderer.graphToViewport({ x: 0, y: 0 });
-    var edge = renderer.graphToViewport({ x: geomLock.r0 * UNIT, y: 0 });
-    var hole = Math.hypot(edge.x - c.x, edge.y - c.y);
-    var dx = (ev.clientX - r.left) - c.x, dy = (ev.clientY - r.top) - c.y;
-    if (Math.hypot(dx, dy) > hole) return null;
-    return Math.atan2(-dy, dx);                  // screen y is down; graph y is up
-  }
-
-  function bindHubOverlay() {
-    var ov = $("hubhit");
-    if (!ov) return;
-    ov.addEventListener("pointermove", function (ev) {
-      var m = state.hubMode;
-      if (m !== "B" && m !== "C" && m !== "A") { ov.style.cursor = ""; return; }
-      var th = hubHitAngle(ev);
-      var g = th === null ? null : groupAtAngle(th);
-      ov.style.cursor = g ? "pointer" : "";
-      if (state.hoverGroup !== g) {
-        state.hoverGroup = g;
-        drawDial();
-        renderer.refresh({ skipIndexation: true });
-      }
+      var p = renderer.viewportToGraph(e);
+      graph.setNodeAttribute(nodeDrag.id, "x", p.x);
+      graph.setNodeAttribute(nodeDrag.id, "y", p.y);
+      nodeDrag.over = inHubHole(p.x, p.y);
+      placeHubDrop();
     });
-    ov.addEventListener("pointerleave", function () {
-      if (state.hoverGroup) { state.hoverGroup = null; renderer.refresh({ skipIndexation: true }); }
-    });
-    ov.addEventListener("click", function (ev) {
-      var m = state.hubMode;
-      if (m !== "B" && m !== "C" && m !== "A") return;
-      var th = hubHitAngle(ev);
-      var g = th === null ? null : groupAtAngle(th);
-      if (!g) return;
-      // Toggle the folder's highlight -- the same thing clicking its legend row does, so
-      // the concept borrows a behaviour people already have rather than inventing one.
-      state.highlight[g] = !state.highlight[g];
-      renderer.refresh({ skipIndexation: true });
-    });
-  }
 
-  function setHubMode(m) {
-    state.hubMode = m;
-    state.hoverGroup = null;
-    angleGroups = null;
-    var root = DOC.querySelector(".vault-graph");
-    if (root) root.setAttribute("data-hub", m);   // drives which modes take a pointer
-    var sel = $("hubmode");
-    if (sel && sel.value !== m) sel.value = m;    // so __vg.hubMode() and the picker agree
-    var n = $("hubnote");
-    if (n) n.textContent = HUB_NOTES[m] || "";
-    hubChanged(true);
+    var drop = function () {
+      if (!nodeDrag) return;
+      var d = nodeDrag;
+      nodeDrag = null;
+      placeHubDrop();
+      if (!d.moved) return;                    // a plain click -- clickNode already ran
+      if (d.over && !d.wasPinned) pin(d.id);
+      else if (!d.over && d.wasPinned) unpin(d.id);
+      // Either way the layout reclaims the note: into its slot, or back to its seat. A
+      // drop that changed nothing still animates home, which is the only way to show that
+      // the note has a seat rather than being left wherever it was let go.
+      hubChanged(true);
+    };
+    captor.on("mouseup", drop);
+    captor.on("mouseleave", drop);
   }
 
   /* ------------------------------------------------------------- timeline */
@@ -3777,21 +3675,15 @@ function mountVaultGraph(root, data, deps) {
   function placeLogo() {
     var el = $("logo");
     if (!el || !logoMaskReady || !renderer || !geomLock) return;
-    // SPIKE (github#12): what is drawn behind the hub, per concept.
-    //   A  the silhouette, ghosted back to an outline, with notes on top of it
-    //   B  nothing -- the dial takes the hole
-    //   C  the mark exactly as it ships today
-    //   D  nothing, ever
-    //   E  the mark, until the first pin -- a brain with a note sitting on it is worse
-    //      than either alone, and the hub can hold one thing at a time
-    var m = state.hubMode;
-    var showMark = m === "C" || m === "A" || (m === "E" && !state.pinned.length);
-    // 0.55, not the 0.26 a "ghost" wants. The mark is painted UNDER sigma's canvases and
-    // the hub is where every edge converges, so a quarter-opacity outline simply is not
-    // there -- shot at 0.26 and A was indistinguishable from D. The number is set by what
-    // survives the edge tangle, not by how faint an outline should ideally be.
-    el.style.opacity = m === "A" ? "0.55" : "";
-    if (!showMark) {
+    // THE MARK YIELDS TO THE NOTES. One pin is enough: a brain with a note sitting on top
+    // of it is worse than either alone, and the hub can hold one thing at a time. Unpin
+    // the last and it comes back.
+    //
+    // Ghosting it instead, so it stays as a container behind the notes, was spiked and
+    // dropped -- the mark is painted UNDER sigma's canvases and the hub is where every
+    // edge converges, so anything faint enough to read as a container is not visible at
+    // all. Measured at 0.26 and again at 0.55; neither survived the edge tangle.
+    if (state.pinned.length) {
       el.hidden = true;
       var eli0 = $("logoInner");
       if (eli0) eli0.hidden = true;
@@ -4016,15 +3908,14 @@ function mountVaultGraph(root, data, deps) {
         // Applied last, so it scales the arrival ramp above as well as the resting
         // size -- a fading note should grow toward the size it will actually hold.
         if (sizeScale !== 1) r.size = (r.size || a.size) * sizeScale;
-        // SPIKE (github#12, concept E). A pinned note is bigger and always labelled: it
-        // is standing where the mark used to be, so it has to carry the weight the mark
-        // did. Colour is untouched -- it keeps its group's hue, which is how the hub goes
-        // on being coloured by the ring without any sampler at all.
-        // SPIKE (github#12). A hub note is bigger, because it stands where the mark did.
+        // A pinned note is bigger, because it stands where the mark did. Colour is
+        // untouched -- it keeps its group's hue, which is how the hub goes on being
+        // coloured by the ring with no sampler at all.
+        //
         // NO forced label: it names itself on hover like every other note in the disc.
         // Forcing them on was tried and was a mistake -- it made the hub illegible past
-        // three and then the pile-up got mistaken for a capacity limit.
-        if (isInHub(id)) {
+        // three, and the pile-up then got mistaken for a capacity limit.
+        if (isPinned(id)) {
           r.size = (r.size || a.size) * 2.2;
           r.zIndex = 3;
         }
@@ -4098,7 +3989,7 @@ function mountVaultGraph(root, data, deps) {
     // more than 0.01: change -> refresh -> afterRender -> no change -> stop.
     renderer.on("afterRender", function () {
       placeLogo(); refreshSizeScale(); heatDraw(); hlSync();
-      placeHubHit(); drawDial();                 // SPIKE (github#12)
+      placeHubDrop();                            // the hub's drop ring, while dragging
     });
 
     renderer.on("enterNode", function (e) { state.hovered = e.node; showTip(e.node); hoverTo(1); });
@@ -4108,21 +3999,23 @@ function mountVaultGraph(root, data, deps) {
     renderer.on("leaveNode", function () { hideTip(); hoverTo(0); });
     renderer.on("clickNode", function (e) { select(e.node); });
     renderer.on("clickStage", function () { select(null); });
-    // SPIKE (github#12, concept E). Right-click is the pin gesture. preventDefault on the
-    // original event, or the browser context menu covers the thing that just moved.
+    // Right-click is the pin gesture, and dragging into the hole is the other way to
+    // reach it. preventDefault on the original event, or the browser's context menu
+    // covers the thing that just moved.
     renderer.on("rightClickNode", function (e) {
       if (e.event && e.event.original) e.event.original.preventDefault();
-      if (state.hubMode !== "E") return;         // pinning is concept E's gesture alone
       togglePin(e.node);
     });
     // Right-click on empty stage clears the hub and brings the mark back. A way out that
-    // does not need you to remember which nine notes you pinned.
+    // does not need you to remember which thirteen notes you pinned, or to drag each one
+    // back out of the hole.
     renderer.on("rightClickStage", function (e) {
       if (e.event && e.event.original) e.event.original.preventDefault();
-      if (state.hubMode !== "E" || !state.pinned.length) return;
+      if (!state.pinned.length) return;
       state.pinned = [];
       hubChanged(true);
     });
+    bindNodeDrag();
 
     // DOUBLE CLICK RESETS THE VIEW, on the stage and on a note alike.
     //
@@ -4266,8 +4159,8 @@ function mountVaultGraph(root, data, deps) {
     var twBtn = function (attrs, open) {
       return attrs
         ? '<button class="tw" ' + attrs + ' aria-expanded="' + open + '">' +
-          (open ? "▾" : "▸") + '</button>'
-        : '<span class="tw none">▸</span>';
+          (open ? "â–¾" : "â–¸") + '</button>'
+        : '<span class="tw none">â–¸</span>';
     };
 
     // Everything BELOW a sub-wedge row, recursively, at whatever depth the vault goes.
@@ -4900,13 +4793,6 @@ function mountVaultGraph(root, data, deps) {
     setPan(panEnabled, false);
     $("png").onclick = savePng;
     // SPIKE (github#12): the concept picker.
-    var hm = $("hubmode");
-    if (hm) {
-      hm.onchange = function () { setHubMode(hm.value); };
-      bindHubOverlay();
-      setHubMode(hm.value);
-    }
-
     // THE GEAR, if a host asked for it in either of the two ways. It is hidden by default
     // because a page that cannot store a setting should not offer to change one.
     if (openHostSettings) {
@@ -5442,10 +5328,10 @@ function mountVaultGraph(root, data, deps) {
     var inWin = 0;
     for (var i = 0; i < keys.length; i++) inWin += days[keys[i]].ids.length;
     $("heatnote").textContent =
-      "last " + cols + " weeks · " + inWin + " of " + graph.order + " notes" +
-      (before ? " · " + before + " earlier" : "") +
-      (after ? " · " + after + " later" : "") +
-      (undated ? " · " + undated + " undated" : "");
+      "last " + cols + " weeks Â· " + inWin + " of " + graph.order + " notes" +
+      (before ? " Â· " + before + " earlier" : "") +
+      (after ? " Â· " + after + " later" : "") +
+      (undated ? " Â· " + undated + " undated" : "");
 
     heatSig = "";
     heatDraw();
@@ -5689,7 +5575,7 @@ function mountVaultGraph(root, data, deps) {
     }
     cv.title = anchors.map(function (a) {
       return a + (a === 1 ? " note" : " notes");
-    }).join("  ·  ");
+    }).join("  Â·  ");
   }
 
   // roundRect is not everywhere yet, and this page runs from file:// in whatever
@@ -5731,12 +5617,12 @@ function mountVaultGraph(root, data, deps) {
     }
     var top = Object.keys(by).sort(function (a, b) { return by[b] - by[a]; }).slice(0, 3);
     var wd = HEAT_WD[(new Date(d.ms).getUTCDay() + 6) % 7];
-    setHTML(t, '<div class="t">' + esc(d.key) + " · " + wd +
-      (d.key === TODAY ? " · today" : "") + "</div>" +
+    setHTML(t, '<div class="t">' + esc(d.key) + " Â· " + wd +
+      (d.key === TODAY ? " Â· today" : "") + "</div>" +
       '<div class="m">' +
       (n ? n + " note" + (n === 1 ? "" : "s") + " added" : "nothing added") +
       (top.length ? "<br>" + top.map(function (g2) {
-        return '<b style="color:' + colorOf(g2) + '">■</b> ' + esc(g2) + " " + by[g2];
+        return '<b style="color:' + colorOf(g2) + '">â– </b> ' + esc(g2) + " " + by[g2];
       }).join("<br>") : "") +
       (n ? "<br><i>click to mark them on the disc</i>" : "") +
       "</div>");
@@ -6665,7 +6551,7 @@ function mountVaultGraph(root, data, deps) {
       { hover: true, target: ["note", "05"], why: "hover a meeting note" },
 
       // Hiding: the wedges reallocate and the disc stays a full circle.
-      { click: true, target: ["eye", "04"], why: "hide a folder — the wedges reallocate" },
+      { click: true, target: ["eye", "04"], why: "hide a folder â€” the wedges reallocate" },
       { settle: true, why: "let the wedges reallocate" },
 
       // The tree starts folded, so getting to a subfolder means opening its folder
@@ -7279,9 +7165,10 @@ function mountVaultGraph(root, data, deps) {
                       heatBuild(); drawDateUI(); heatDraw();
                     },
                     // SPIKE (github#12, concept E): the pin gesture, for the shooter.
+                    // The hub, for the suite and the shooter.
                     pin: function (id) { togglePin(id); },
                     pinned: function () { return state.pinned.slice(); },
-                    hubMode: function (m) { setHubMode(m); },
+                    clearPins: function () { state.pinned = []; hubChanged(false); },
                     lastCascade: function () { return lastCascade; },
                     // The gap the LAST layout pass actually spent, per band. The probe
                     // reports this per frame during an animation; a resting disc has no
