@@ -338,6 +338,31 @@ bug: the grid scrolls from `scrollLeft` 0, which is the **oldest** end, so a nar
 viewport opened on empty months with every note off the right edge and was reported as a
 missing stylesheet.
 
+## The window's travel is what the history exceeds the window by
+
+The band shows `heat.cols` weeks ending no later than the current week, so the pill can
+only move by however much the vault's history is *longer* than that. On a vault whose
+history fits inside one window there is no travel, and `clampWinEnd` pinning the pill is
+the right answer rather than a dead control.
+
+Ask the control rather than deriving it — press at each end of the rail and compare:
+
+```javascript
+// after a press at x=1 and a press at x=w-1 on the window track
+__vg.heat.start + __vg.heat.cols * 7 * 86400000    // differs iff the window can move
+```
+
+Two consequences that have each cost something:
+
+- **A fixture whose newest note is in the future has less history than it looks like it
+  has.** `make-shape-vault.mjs` stamped 68 days ahead of today and read as 425 days of
+  span while owning 357 days of history against a 364-day window — so the window was
+  correctly pinned, and two checks that assumed it could move failed against a page that
+  was right (github#18). Every generator anchors its end date to today for this reason.
+- **Aim points must come from the measured travel, never from a fraction of the ribbon.**
+  Centring is a promise the control can only keep where it can still move; a fixed
+  fraction aims off the end of the travel on a narrow-span vault and measures the clamp.
+
 ## Every unlinked note wears the (unlinked) swatch
 
 A note of degree 0 belongs to the `(unlinked)` group, not to its folder, and the legend

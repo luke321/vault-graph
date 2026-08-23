@@ -3,6 +3,7 @@
 //
 //   node scripts/make-shape-vault.mjs                   # ./shape-vault, 954 notes
 //   node scripts/make-shape-vault.mjs --out /tmp/sv
+//   node scripts/make-shape-vault.mjs --end 2026-08-24  # pin the newest date
 //
 // It is CHEAP -- 954 notes, measured 13s through the whole suite, against a minute or two
 // for the 10,000-note one. That is why it runs by default rather than on request.
@@ -29,8 +30,21 @@
 // purpose -- this fixture is about SHAPE, and the realistic-names argument belongs to
 // make-test-vault.mjs, which is the one the demo is recorded against.
 //
-// Deterministic: no Math.random, so the same run gives the same vault and a measurement
-// is repeatable.
+// Deterministic apart from the end date: no Math.random, so the same run gives the same
+// vault and a measurement is repeatable.
+//
+// THE END DATE DEFAULTS TO TODAY, the same deliberate break make-test-vault.mjs takes, and
+// for the same reason plus one of its own. The shared reason is that the heatmap band shows
+// the last 52 weeks against the real clock, so a fixture anchored to a fixed day drifts out
+// of it. The one specific to this file is that the anchor WAS fixed, at 2025-09-01, and the
+// 420-day cycle then ran forwards from it -- which by 2026-08-24 put 68 days of `created`
+// stamps in the FUTURE. No real note has one: a file cannot have been created after today,
+// whatever date the note is about. Discounting them left 357 days of real history against a
+// 364-day window, so the band already covered everything and the window had nothing to
+// scroll -- and two checks that assume it can move failed against a fixture that was wrong
+// rather than a page that was (github#18). The cycle runs BACKWARDS from the end date now.
+//
+// Pass --end to get the byte-reproducible guarantee back.
 
 import { mkdirSync, writeFileSync, rmSync, existsSync } from "node:fs";
 import { join, dirname } from "node:path";
@@ -68,8 +82,23 @@ const FOLDERS = [
   { dir: "tiny",     n:   6, orphans:  6, subs: 0 },   // every note unlinked
 ];
 
-// Spread over a year so the heatmap band has something to draw.
-const day = (i) => new Date(Date.UTC(2025, 8, 1) + (i % 420) * 86400000).toISOString().slice(0, 10);
+// Spread over the 420 days ENDING at the end date, so the heatmap band has something to
+// draw and nothing is stamped later than today. 420 against a 364-day window leaves the
+// window ~8 weeks of travel, which is what makes this shape worth pointing the ribbon
+// checks at: narrow enough that the pill fills most of the rail, wide enough that it moves.
+//
+// "Today" is the LOCAL date, which is what the page's own TODAY is (src/page.js). Taking it
+// from toISOString() the way make-test-vault.mjs does is a UTC date, and west of UTC that is
+// tomorrow for part of the evening -- one day of stamps in the future, which is the whole
+// thing this is here to stop.
+const SPAN_DAYS = 420;
+const localToday = () => {
+  const d = new Date(), p = (n) => (n < 10 ? "0" : "") + n;
+  return d.getFullYear() + "-" + p(d.getMonth() + 1) + "-" + p(d.getDate());
+};
+const END = Date.parse(arg("end", localToday()) + "T00:00:00Z");
+const DAY0 = END - (SPAN_DAYS - 1) * 86400000;
+const day = (i) => new Date(DAY0 + (i % SPAN_DAYS) * 86400000).toISOString().slice(0, 10);
 
 // Subfolders are UNEVEN on purpose: an even split is the one case where the four tint
 // slots and the "N smaller subfolders" fold never have to decide anything.
