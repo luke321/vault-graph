@@ -1060,7 +1060,16 @@ function mountVaultGraph(root, data, deps) {
     // is proportional and unfloored, for the same reason as in placeCell: flooring
     // it clamped a narrow cell's rows to one note each, so a 19-note cell asked
     // for 8 rows and drew as a thin sparse spoke instead of a packed wedge.
+    //
+    // A CELL WITH NO WEIGHT NEEDS NO ROWS, and the floor below is why that has to be said
+    // out loud. A departing cell stays seated in the plan at weight 0 while it fades, so
+    // `Math.max(1, k)` handed it one row anyway -- and that row reaches the band
+    // balancer's split search, which is how 738 zero-weight members moved the hub radius
+    // and put the padded plan's maxR one row outside the lean plan's (github#5). The
+    // cascade's row recorder already worked around the same floor by hand; the geometry
+    // never did.
     function rowsNeeded(span, n, st) {
+      if (!(n > 0)) return 0;
       var i = 0, r = st, k = 0;
       while (i < n && k < 500) { i += Math.max(0.05, span * r / SP); r += SP; k++; }
       return Math.max(1, k);
@@ -5353,7 +5362,21 @@ function mountVaultGraph(root, data, deps) {
                       planKeep = save;
                       var rows = function (p) { var m = {}; p.cells.forEach(function (c) { m[c.k] = c.rows; }); return m; };
                       var a = rows(lean), b = rows(padded), diffs = {};
-                      Object.keys(a).forEach(function (k) { if (a[k] !== b[k]) diffs[k] = { withoutZeros: a[k], withZeros: b[k] }; });
+                      // THE UNION, not the lean plan's keys. A cell that exists only in
+                      // the padded plan is exactly the seated zero-weight cell this is
+                      // about, and iterating `a` alone never compared it -- which is how
+                      // github#5 came back as an empty rowDiffs beside a maxR that
+                      // differed by a row. checkPlanParity has always done the union.
+                      // Missing counts as ZERO on both sides. A cell whose notes are all
+                      // hidden is absent from the lean plan and seated at 0 rows in the
+                      // padded one, and those are the same statement -- comparing
+                      // undefined against 0 would fail every hidden folder on every
+                      // vault, which is exactly what it did when this first went in.
+                      Object.keys(a).concat(Object.keys(b)).forEach(function (k) {
+                        if ((a[k] || 0) !== (b[k] || 0)) {
+                          diffs[k] = { withoutZeros: a[k] || 0, withZeros: b[k] || 0 };
+                        }
+                      });
                       var out = {
                         leanMaxR: Math.round(lean.maxR), paddedMaxR: Math.round(padded.maxR),
                         maxRMatches: Math.round(lean.maxR) === Math.round(padded.maxR),

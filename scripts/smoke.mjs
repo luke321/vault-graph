@@ -419,11 +419,21 @@ check("hovering a note ramps in and releases at zero", async (p) => {
                    `far node ${on.farColour}, out ${off.t}${why}` };
 });
 
+// PICK BY GROUP, NOT BY FOLDER. Highlight is keyed on groupOf(), and groupOf answers
+// "(unlinked)" for a note of degree 0 -- so picking "the first note whose a.folder is X"
+// and then highlighting X misses that note entirely when it happens to be an orphan.
+// Measured on a vault whose alphabetically-first folder held one unlinked root note: hl
+// stayed 0 and the size ratio 1.00x, and both these checks failed on code that was fine
+// (github#5). groupOrder() is the same list the legend draws, which is the list highlight
+// actually responds to.
 check("highlighting ramps per note and is additive", async (p) => {
+  // Additivity needs two groups to be additive BETWEEN. On a vault with one, say so
+  // rather than measuring __vg.hl[null] and reporting a failure about the vault.
+  const ng = await p.j(`__vg.groupOrder().length`);
+  if (ng < 2) return { ok: true, detail: `only ${ng} group on this shape, nothing to add to` };
   const r = await p.j(`(function(){
-    var gs = []; __vg.graph.forEachNode(function(i,a){ if (gs.indexOf(a.folder) < 0) gs.push(a.folder); });
-    gs.sort();
-    var pick = function(g){ var f = null; __vg.graph.forEachNode(function(i,a){ if (!f && a.folder === g) f = i; }); return f; };
+    var gs = __vg.groupOrder();
+    var pick = function(g){ var f = null; __vg.graph.forEachNode(function(i){ if (!f && __vg.groupOf(i) === g) f = i; }); return f; };
     var a = pick(gs[0]), b = pick(gs[1]);
     __vg.state.highlight = {}; __vg.state.highlight[gs[0]] = true; __vg.renderer.refresh();
     return {gs: [gs[0], gs[1]], a: a, b: b};
@@ -490,9 +500,11 @@ check("hover re-arms after the pointer leaves the stage", async (p) => {
 });
 
 check("a highlighted note is drawn larger", async (p) => {
+  // Its own GROUP, for the reason above: highlighting the folder of an unlinked note
+  // does not reach it, and this check then measures 1.00x on a working build.
   const r = await p.j(`(function(){
-    var g = null; __vg.graph.forEachNode(function(i,a){ if (!g) g = a.folder; });
-    var id = null; __vg.graph.forEachNode(function(i,a){ if (!id && a.folder === g) id = i; });
+    var id = null, g = null;
+    __vg.graph.forEachNode(function(i){ if (!id) { id = i; g = __vg.groupOf(i); } });
     return {g: g, id: id, before: +__vg.renderer.getNodeDisplayData(id).size.toFixed(2)};
   })()`);
   await p.eval(`__vg.state.highlight = {${JSON.stringify(r.g)}: true}; __vg.renderer.refresh(); void 0`);
@@ -850,10 +862,16 @@ async function killBrowser(child, PORT) {
  *   10k vault    synthetic, deliberately awkward: more top-level folders than there are
  *                colour slots, sliver folders beside a dominant one, five levels of
  *                nesting (scripts/make-test-vault.mjs). Needs nothing.
+ *   shape vault  954 notes where ONE GROUP HOLDS 77% and a single unlinked note sits at
+ *                the vault root (scripts/make-shape-vault.mjs). Needs nothing. Added
+ *                after a reported vault failed three checks that both shapes above
+ *                passed (github#5): neither has a dominant group, so a spurious row
+ *                vanishes into the maximum instead of moving the outer radius, and
+ *                neither has an unlinked note sorting ahead of every real folder.
  *
- * Both are gitignored and generated on demand. The synthetic one always can be; the mirror
- * needs OBSIDIAN_VAULT, and is SKIPPED WITH A NOTICE rather than silently, because "the
- * suite passed" must never quietly mean "half the suite ran".
+ * All three are gitignored and generated on demand. The two synthetics always can be; the
+ * mirror needs OBSIDIAN_VAULT, and is SKIPPED WITH A NOTICE rather than silently, because
+ * "the suite passed" must never quietly mean "half the suite ran".
  */
 function resolveVaults() {
   const explicit = argAll("vault");
@@ -879,6 +897,7 @@ function resolveVaults() {
   else console.log("SKIPPING the demo vault: no OBSIDIAN_VAULT to mirror.");
 
   gen("make-test-vault.mjs", ["--notes", "10000"], join(ROOT, "test-vault"), "the 10k synthetic vault");
+  gen("make-shape-vault.mjs", [], join(ROOT, "shape-vault"), "the dominant-folder vault");
 
   if (!out.length) throw new Error("no vault to check, and none could be generated");
   return out;

@@ -3,6 +3,7 @@ vault-graph.html
 demo-*.mp4
 *.stackdump
 test-vault/
+shape-vault/
 dist/
 
 # Generated demo vault -- a structural mirror of a real vault. Regenerate with
