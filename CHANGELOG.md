@@ -29,6 +29,113 @@ published tag breaks every link to it.
 
 ---
 
+## 1.6.0 — 2026-08-23
+
+**You can choose the colours now**, in both targets, and the palette they come from
+changed shape.
+
+- **A settings tab for the plugin, and a gear for the standalone page.** Each lists every
+  top-level folder with the twelve palette slots under it; picking one holds that folder to
+  that colour, and **changes nothing else** — position decides every other folder's colour,
+  so one pick cannot move a wedge you did not touch. Two folders may share a slot, which is
+  a way of saying they belong together. The plugin persists through `saveData()`, the
+  standalone through
+  `localStorage` under a **vault-scoped key** — two graphs built from different vaults are
+  the same `file://` origin, so an unscoped key would have them overwrite each other's
+  colours. `page.js` itself stores nothing: settings go in through the deps object and
+  changes come back out through a callback, because there is no store both hosts have. See
+  [`0009-the-host-persists-settings-not-the-page`](.ai-context/decisions/0009-the-host-persists-settings-not-the-page.md).
+
+- **The plugin's four existing settings finally have a UI.** `ghosts`, `templates`,
+  `flatMonths` and `words` have been real settings since the plugin was written, persisted
+  and reachable only by hand-editing `data.json`. They sit above the colours now. They
+  rebuild the view, where a colour only repaints it — colour is not an input to the layout,
+  and a swatch click has no business replaying the reveal animation.
+
+- **A saved colour is a slot (`g7`), never a hex.** The palette has separate light and dark
+  values, so a stored hex would be right in one theme and wrong in the other. Swatches are
+  coloured by a class resolving `var(--g7)` for the same reason: a `var()` re-resolves on a
+  theme flip, an inline hex does not.
+
+- **Twelve slots, and they go round.** It was ten hues and then a grey tail: every folder
+  past the tenth fell into the neutrals and merged into one undifferentiated blob. Folder
+  13 now comes back to slot 1. A repeated hue is still separated by its wedge, its rim
+  label and its legend row; the grey tail separated nothing from anything. Measured on the
+  17-folder synthetic vault: `g1…g12`, then `g1…g5` again.
+
+- **Grey is a choice instead of a consolation.** Slots 11 and 12 are greys, carrying the
+  values the first two neutrals already had, so a folder can be told to recede on purpose.
+  The neutrals still exist as the dim colour and as `colorOf`'s fallback.
+
+- **Slots 6 and 10 stopped being pastels.** `#e87ba4` and `#c26ed3` were the two palest
+  slots on the light surface, and magenta was the one hue in the palette failing 3:1
+  against it. Measured, it was lightness rather than low chroma: their chroma was mid-pack.
+  Both hues are kept to within a degree or two; chroma and contrast go 0.141/2.62 →
+  0.227/5.12 and 0.168/3.16 → 0.225/6.94, and light-theme slots under 3:1 drop from four to
+  three. **The palette's worst pair is unchanged** — Orange vs Red at dE 7.1, before and
+  after — so two more slots and two much stronger hues cost nothing in separation.
+
+- **Each row rings the slot its folder is actually using**, whether or not anybody chose
+  it — brightly for a chosen slot, dimly for the one a folder's position gives it. Marking
+  only chosen slots meant that a folder on Auto, which is every folder until somebody
+  changes something, had no mark at all: the panel showed twelve colours and would not say
+  which of them the folder was. In the plugin the marks are corrected from the live graph
+  once it answers, because a note with no links at all is grouped under `(unlinked)` rather
+  than under its folder — so a path-derived list is one row short on any vault with
+  orphans, and every folder after it would be ringed one slot out.
+
+- **`_`-prefixed folders are treated as archives**: out of the colour rotation, given the
+  grey slot `g11`, and hidden by default. `g11` of the two greys because it is the
+  lower-contrast one against the surface in both themes (4.99 vs 9.51 on light, 5.16 vs
+  9.12 on dark), which is what recede means. It is a real palette slot rather than a
+  neutral off to one side, so the picker can ring it and Auto means something on an
+  archive row. A leading underscore is how a vault says "sorts
+  last, not part of the working set", and spending a hue on one costs twice — the archive
+  gets a colour that says look at me, and every folder after it is pushed a slot along.
+  Measured on the demo mirror: `_ Archives` and `_ Claude` sort at positions 2 and 3, so
+  they were taking `g2`/`g3` and shifting every working folder by two. The working folders
+  now run an unbroken `g1…g9`. Notes are still in the graph — this is a colour and
+  visibility rule, not an exclusion, and it says nothing about files (`_scratch.md` is a
+  note like any other).
+
+- **Per-folder visibility is a setting, beside the colour.** Each row gets an eye that sets
+  the *default*, persisted alongside the colours; the legend's own eye stays the live,
+  session-only filter. The map is tri-state — shown, hidden, or absent meaning "whatever
+  the `_` rule says" — so hiding a folder by hand stays distinguishable from never having
+  mentioned it. **This changes what `Refresh` means**: it used to clear every filter to
+  "everything visible" and now returns to the configured default, because the alternative
+  is one control that disagrees with the settings.
+
+- **The scripted demo shows the picker.** Six new beats open the gear, recolour two folders
+  (one of them to a grey, which is the answer to "can a folder recede on purpose"), reset,
+  and close — plus one that hovers a legend row. Beat 18 aims at a real 15px swatch through
+  CDP hit-testing, so it fails if the swatch is covered or scrolled away. The run is 26
+  beats and ~43s, up from 20 and ~30s.
+
+- **The biggest folders now land on the outer ring.** The band balancer's rules were all
+  geometry — thickness, row counts, hole size — which says nothing about *which* folders
+  make up a band, so among equal-scoring splits it kept whichever it reached first. On the
+  10k vault that meant `05 - Meeting Notes` (1679) and `01 - Projects` (1066) inside while
+  Journal (48), Clippings (92) and Literature Notes (148) sat on the rim. There is now a
+  fourth, weakly-weighted preference: the biggest folder inside minus the smallest outside,
+  zero when the split is size-ordered. Both vaults keep exactly the row counts and
+  thickness they had (4/6 at 0.48, 16/23 at 0.55) and simply order the folders correctly
+  within them.
+
+- **Hovering a folder in the legend haloes its notes on the disc.** A separate highlight
+  source alongside a clicked group and a marked day, ramping through the same per-note
+  path. It haloes without pushing: a wedge sliding out and back under a moving pointer is
+  a lot of motion to spend on a question the halo has already answered. Clicking still
+  pins the highlight and pushes.
+
+- **`scripts/palette-check.mjs`** prints all of the above for both themes. Deliberately not
+  part of the smoke suite: a palette does not drift on its own, and what makes a hue right
+  is looking at it.
+
+The invariant suite is 18 checks now and passes on both vaults.
+
+---
+
 ## 1.5.3 — 2026-08-23
 
 Zero network calls, and a note gets dated even when nothing says so.

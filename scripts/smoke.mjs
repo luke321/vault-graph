@@ -504,6 +504,38 @@ check("a highlighted note is drawn larger", async (p) => {
   return { ok: ratio > 1.3 && ratio < 1.7, detail: `${r.before} -> ${after} (${ratio.toFixed(2)}x)` };
 });
 
+// COLOUR IS OTHERWISE OUT OF SCOPE HERE, and this one is in anyway, because it is not
+// about how it looks: it is about blast radius, and it has broken twice. Both times the
+// automatic assignment stopped being a pure function of position -- first by claiming
+// slots and swapping, then by an overridden folder failing to advance the counter -- and
+// both times one click recoloured most of the disc. Measured at the second break: 14 of 17
+// groups and 624 notes outside the folder that was touched.
+check("overriding one folder recolours exactly one group", async (p) => {
+  const r = await p.j(`(function(){
+    var order = __vg.groupOrder();
+    var before = {}; order.forEach(function (g) { before[g] = __vg.colorOf(g); });
+    // A working folder, not an archive -- archives are deliberately outside the rotation,
+    // so they are not the case at risk here.
+    var target = null;
+    for (var i = 0; i < order.length; i++) {
+      if (!__vg.isArchiveGroup(order[i]) && order[i].charAt(0) !== "(") { target = order[i]; break; }
+    }
+    // Any slot the target is not already on, or the check would assert nothing.
+    var slot = __vg.slotOf(target) === "g8" ? "g5" : "g8";
+    __vg.setFolderColors({ [target]: slot });
+    var after = {}, moved = [];
+    order.forEach(function (g) {
+      after[g] = __vg.colorOf(g);
+      if (before[g] !== after[g]) moved.push(g);
+    });
+    __vg.setFolderColors({});
+    return { target: target, slot: slot, moved: moved, groups: order.length };
+  })()`);
+  const ok = r.moved.length === 1 && r.moved[0] === r.target;
+  return { ok, detail: `${r.target} -> ${r.slot}: ${r.moved.length} of ${r.groups} groups changed` +
+                       (ok ? "" : ` (${r.moved.slice(0, 6).join(", ")}${r.moved.length > 6 ? ", ..." : ""})`) };
+});
+
 // Idle means the app's own definition of idle -- the same predicate the demo driver waits
 // on (play || cascade || layout anim || hover tween || highlight tween), so a check cannot
 // disagree with the recorder about when the disc has settled.
@@ -597,9 +629,15 @@ async function runOne(vault) {
 
   let page = null;
   try {
+    // MATCH THE PAGE WE JUST BUILT, rather than taking whatever answers on the port. The
+    // build directory is a fresh mkdtemp per run, so it identifies this run's page and
+    // nothing else -- and a Chrome left behind by a killed run is still listening on the
+    // same port, ready to hand over a page from a previous build. That happened three
+    // times before the note count gave it away.
+    const want = url.split("/").slice(-2)[0] || url;
     const deadline = Date.now() + 25000;
     for (;;) {
-      try { page = await attach(PORT, ""); break; }
+      try { page = await attach(PORT, want); break; }
       catch (e) { if (Date.now() > deadline) throw e; await sleep(400); }
     }
     // Collect console errors from the load, which is why Runtime is enabled before waiting.
@@ -671,7 +709,25 @@ async function runOne(vault) {
     console.log(`\n${checks.length - failed}/${checks.length} passed`);
     return failed;
   } finally {
+    // ORDER MATTERS HERE, and getting it wrong is invisible.
+    //
+    // Browser.close asks Chrome to shut itself down and release the profile -- the only
+    // one of these three that reliably reaches the BROWSER process rather than the
+    // launcher. It has to be sent BEFORE page.close(), because that closes the websocket
+    // the request would travel over: with the calls the other way round the send threw
+    // into an empty catch on every run, silently, and the browser stayed up. Which is
+    // exactly the leak this block was added to fix -- it blocked a push one commit later,
+    // with the new guard correctly refusing to measure the stale page it had left behind.
+    try { if (page) await page.send("Browser.close"); } catch { /* already going */ }
     if (page) page.close();
+
+    // Then the blunt instruments, for a Chrome that ignored the request or never got it.
+    // `spawn().kill()` signals the process we started, and Chrome's launcher hands off to
+    // a browser process and exits -- so on its own that kill lands on something already
+    // gone while the browser keeps running, keeps the profile locked, and keeps answering
+    // on the debugging port. killBrowser() escalates through them, WAITS for the port to
+    // go quiet rather than sleeping a guessed 300ms, and if it is still held, kills
+    // whoever actually holds it.
     await killBrowser(chrome, PORT);
     try { rmSync(profile, { recursive: true, force: true }); } catch {}
     if (scratch) { try { rmSync(dirname(scratch), { recursive: true, force: true }); } catch {} }
@@ -752,7 +808,7 @@ async function killBrowser(child, PORT) {
  *
  * TWO SHAPES, BY DEFAULT. Every constant in this project was tuned against one vault --
  * ~450 notes, nine top-level folders, one dominant folder -- and the ones that look most
- * like arbitrary tuning are exactly the ones another shape breaks: ten colour slots, three
+ * like arbitrary tuning are exactly the ones another shape breaks: twelve colour slots, three
  * named tint slots, a 6-degree minimum wedge, a 52-week heatmap window, and a band
  * balancer that has to satisfy three requirements it cannot always satisfy at once.
  *

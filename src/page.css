@@ -22,10 +22,18 @@
     /* Today is deliberately NOT one of the categorical hues -- it is the extreme
        of the neutral axis, so it cannot be mistaken for a group colour. */
     --today:     #0b0b0b;
-    /* 10 categorical slots. Slots 1-8 are the documented palette in its
+    /* 12 categorical slots. Slots 1-8 are the documented palette in its
        documented order; 9-10 sit in its two largest hue gaps (measured 93 and 74
        degrees) at the median lightness and chroma of the other eight, so they
-       belong to the same family rather than being arbitrary additions. */
+       belong to the same family rather than being arbitrary additions.
+
+       11-12 ARE GREYS, AND THEY ARE REAL SLOTS. They carry the two neutral values
+       that were already measured for this surface (see --n1/--n2 below) rather than
+       new ones, so "grey" is a choice with the same footing as a hue -- some folders
+       genuinely want to recede. This is also what let the overflow rule go: the
+       automatic run now CYCLES the twelve slots instead of falling back to grey
+       after ten, so a thirteenth folder gets slot 1 again rather than joining an
+       undifferentiated grey pile. */
     --g1: #2a78d6;  /* blue    */
     --g2: #eb6834;  /* orange  */
     --g3: #1baf7a;  /* aqua    */
@@ -37,14 +45,28 @@
        third of the disc. Green there is quieter at that size, and magenta is better
        spent on slot 6, which is usually a small group. */
     --g5: #008300;  /* green   */
-    --g6: #e87ba4;  /* magenta */
+    /* SLOTS 6 AND 10 WERE PASTELS AND ARE NOT ANY MORE.
+       They were #e87ba4 and #c26ed3, and measured it was LIGHTNESS that made them read
+       as pastel, not low chroma: their chroma was mid-pack (0.141 and 0.168 against a
+       palette spanning 0.122-0.191) but they were the two palest slots on this surface,
+       at contrast 2.62 and 3.16 -- and magenta was the one hue in the palette failing
+       3:1 against it. Next to eight saturated hues they read as the two that had faded.
+
+       Both hues are KEPT, to within a degree or two, so slots 9 and 10 stay in the two
+       largest hue gaps they were placed in. What changes is chroma and lightness
+       together: 0.227 and 0.225 (now the palette's highest) at contrast 5.12 and 6.94.
+       Light-theme slots under 3:1 go from four to three, and the palette's worst pair is
+       untouched -- still Orange vs Red at dE 7.1, exactly as with ten slots. */
+    --g6: #d3006e;  /* magenta */
     --g7: #4a3aa7;  /* violet  */
     --g8: #e34948;  /* red     */
     --g9: #00aecb;  /* cyan    */
-    --g10:#c26ed3;  /* orchid  */
-    --n1: #6f6e67;  /* neutrals for groups past slot 4: lightness-distinct, */
-    --n2: #45443f;  /* all clearing 3:1 on this surface, no competing hues */
-    --n3: #8a897f;
+    --g10:#9412ad;  /* orchid  */
+    --g11:#6f6e67;  /* grey    */
+    --g12:#45443f;  /* slate   */
+    --n1: #6f6e67;  /* the same two values as slots 11-12, plus a third: */
+    --n2: #45443f;  /* lightness-distinct, all clearing 3:1 on this surface, */
+    --n3: #8a897f;  /* no competing hues. Still the dim/fallback neutrals. */
     --accent: #2a78d6;
   }
   @media (prefers-color-scheme: dark) {
@@ -63,8 +85,10 @@
       --dim:       #2a2a28;
       --today:     #ffffff;
       --g1: #3987e5; --g2: #d95926; --g3: #199e70; --g4: #c98500;
-      --g5: #008300; --g6: #d55181; --g7: #9085e9; --g8: #e66767;
-      --g9: #009fbb; --g10:#b560bd;
+      --g5: #008300; --g6: #eb1580; --g7: #9085e9; --g8: #e66767;
+      --g9: #009fbb; --g10:#b429d1;
+      /* Slots 11-12 carry the first two neutrals, as they do in the light block. */
+      --g11:#8d8c84; --g12:#bdbcb2;
       --n1: #8d8c84; --n2: #bdbcb2; --n3: #77766d;
       --accent: #3987e5;
     }
@@ -84,8 +108,10 @@
     --dim:       #2a2a28;
     --today:     #ffffff;
     --g1: #3987e5; --g2: #d95926; --g3: #199e70; --g4: #c98500;
-    --g5: #008300; --g6: #d55181; --g7: #9085e9; --g8: #e66767;
-    --g9: #009fbb; --g10:#b560bd;
+    --g5: #008300; --g6: #eb1580; --g7: #9085e9; --g8: #e66767;
+    --g9: #009fbb; --g10:#b429d1;
+    /* Slots 11-12 carry the first two neutrals, as they do in the light block. */
+    --g11:#8d8c84; --g12:#bdbcb2;
     --n1: #8d8c84; --n2: #bdbcb2; --n3: #77766d;
     --accent: #3987e5;
   }
@@ -279,6 +305,136 @@
      a button whose text changes makes you read it to find out what it did. */
   .vault-graph .mini button[aria-pressed="true"], .vault-graph button.btn[aria-pressed="true"] {
     background: var(--accent); border-color: var(--accent); color: #fff;
+  }
+
+  /* --------------------------------------------------------- settings ----- */
+  /* The gear, and the folder-colour picker it opens. STANDALONE ONLY: the plugin
+     leaves #vg-gear hidden and Obsidian's own settings tab carries the same rows.
+
+     It is a SIDEBAR BLOCK, not an overlay. An overlay was the first sketch and it
+     wants a z-index, a dismiss handler, and somewhere to sit that #vg-detail has not
+     already claimed (right: 12px, top: 12px -- the obvious spot is taken). A block
+     needs none of that, scrolls with the sidebar it is already in, and reads as what
+     it is: a section that folds open. */
+  .vault-graph .gear {
+    font: inherit; font-size: 13px; line-height: 1; cursor: pointer;
+    padding: 3px 5px; border-radius: 6px;
+    background: none; border: 1px solid transparent; color: var(--text-3);
+  }
+  .vault-graph .gear:hover { color: var(--text-1); border-color: var(--border); }
+  .vault-graph .gear[aria-expanded="true"] {
+    color: var(--text-1); background: var(--surface-2); border-color: var(--border);
+  }
+  /* Visible to a screen reader, gone from the layout. Not `display: none`, which
+     takes it out of the accessibility tree along with the layout. */
+  .vault-graph .sr {
+    position: absolute; width: 1px; height: 1px; overflow: hidden;
+    clip-path: inset(50%); white-space: nowrap;
+  }
+
+  /* One row per top-level folder: its name, then the ten slots under it. Stacked
+     rather than side by side because "03 - Resources" and ten 18px swatches do not
+     both fit in a 288px sidebar, and truncating the folder name is the one part of
+     this row that has to stay readable. */
+  .vault-graph .scr { margin-bottom: 9px; }
+  .vault-graph .scrh {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 6px; margin-bottom: 4px;
+  }
+  /* The default-visibility eye. It carries `.eye` as well, so it IS the legend's eye --
+     same SVG, same size, same open/closed and dimmed-when-hidden treatment. The live
+     filter and the default it returns to are the same question about two moments, and
+     two different marks for it would be two things to learn. This class only has to undo
+     the flex sizing the row would otherwise give it. */
+  .vault-graph .vis { flex: 0 0 auto; }
+  /* min-width: 0 is what actually lets the ellipsis happen -- a flex item's default
+     min-width is auto, so a long folder name would push Auto off the line instead of
+     truncating. */
+  .vault-graph .scrh .nm {
+    flex: 1 1 auto; min-width: 0; font-size: 11px; color: var(--text-2);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .vault-graph .sws { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
+  /* A FIXED TWELVE COLUMNS in the sidebar, so the row cannot wrap. Flex-wrap put eleven
+     swatches on one line and the twelfth on the next; twelve equal columns of whatever
+     260px minus the gaps allows is about 18px each, and it stays one row at any width
+     because the columns shrink instead of the row breaking. Obsidian's settings pane
+     keeps the flex version -- it is wider, and its rows lay out on their own terms. */
+  /* CAPPED, because the list is one row per top-level folder and that is however many
+     the vault has. At 17 folders the open panel is taller than the sidebar, and Search,
+     Timeline and Groups all end up below the fold -- so opening the colour picker takes
+     the rest of the sidebar away with it. Roughly half the height keeps them reachable
+     and still shows five or six folders at once. */
+  .vault-graph #vg-setbody { max-height: 46vh; overflow-y: auto; }
+  .vault-graph #vg-setbody .sws {
+    display: grid; grid-template-columns: repeat(12, 1fr); gap: 4px;
+  }
+  .vault-graph #vg-setbody .swatch { width: 100%; height: auto; aspect-ratio: 1; }
+  .vault-graph .swatch {
+    width: 18px; height: 18px; padding: 0; cursor: pointer; border-radius: 50%;
+    border: 1px solid var(--border);
+  }
+  /* ONE RULE PER SLOT, so no swatch is ever coloured from JavaScript. Two reasons, and
+     either would be enough: Obsidian's no-static-styles-assignment forbids it in the
+     plugin, and a hex written into an inline style is frozen at the moment it was
+     written -- it would survive a theme change looking like the other theme's palette.
+     A var() re-resolves. */
+  .vault-graph .swatch.vg-g1  { background: var(--g1); }
+  .vault-graph .swatch.vg-g2  { background: var(--g2); }
+  .vault-graph .swatch.vg-g3  { background: var(--g3); }
+  .vault-graph .swatch.vg-g4  { background: var(--g4); }
+  .vault-graph .swatch.vg-g5  { background: var(--g5); }
+  .vault-graph .swatch.vg-g6  { background: var(--g6); }
+  .vault-graph .swatch.vg-g7  { background: var(--g7); }
+  .vault-graph .swatch.vg-g8  { background: var(--g8); }
+  .vault-graph .swatch.vg-g9  { background: var(--g9); }
+  .vault-graph .swatch.vg-g10 { background: var(--g10); }
+  .vault-graph .swatch.vg-g11 { background: var(--g11); }
+  .vault-graph .swatch.vg-g12 { background: var(--g12); }
+
+  /* A TOKENS-ONLY MOUNT, for Obsidian's settings tab. That pane is outside the view, so
+     the palette properties -- which live on .vault-graph -- are not in scope there.
+     Giving a wrapper the class brings them; it also brings everything else the class
+     carries, and in somebody else's settings pane all of that is wrong.
+
+     So this hands back every declaration on the two base rules and keeps only the custom
+     properties. The list is exactly what those rules set -- layout and height, then
+     background, colour, font, overflow and color-scheme. Forcing the page's own text
+     colour and font onto Obsidian's setting rows would restyle a pane that is not ours,
+     and `overflow: hidden` would clip it. If a declaration is ever added to
+     `.vault-graph`, it has to be answered here too. */
+  .vault-graph.vg-tokens {
+    display: block; height: auto; overflow: visible;
+    background: none; color: inherit; font: inherit; color-scheme: inherit;
+  }
+  .vault-graph.vg-tokens .sws { flex-wrap: wrap; justify-content: flex-end; }
+  .vault-graph .swatch:hover { transform: scale(1.15); }
+  /* THE CHECKED ONE IS RINGED, not ticked: a white tick vanishes on yellow and a dark
+     one vanishes on violet, whereas a gap in the surface colour plus an outer line reads
+     against every swatch in the palette and in both themes.
+
+     2px total, deliberately. The swatches sit in a 12-column grid with a 4px gap, so a
+     3px ring would reach a pixel into its neighbour. Only one swatch per row is ever
+     checked, so two rings can never meet -- but the ring still has to stay off the
+     swatch beside it. */
+  .vault-graph .swatch[aria-checked="true"] {
+    box-shadow: 0 0 0 1px var(--surface-0), 0 0 0 2px var(--text-1);
+  }
+  /* AUTOMATIC rather than chosen: the same ring in the dim text colour. The folder is
+     using this slot because of where it sits in the list, and nobody has pinned it --
+     which is exactly what the Auto button beside it is reporting, said twice so the
+     answer is where you are looking. */
+  .vault-graph .swatch[aria-checked="true"][data-auto="1"] {
+    box-shadow: 0 0 0 1px var(--surface-0), 0 0 0 2px var(--text-3);
+  }
+  .vault-graph .scr .auto {
+    font: inherit; font-size: 10px; padding: 2px 6px; cursor: pointer; margin-left: 2px;
+    background: var(--surface-2); color: var(--text-3);
+    border: 1px solid var(--border); border-radius: 6px;
+  }
+  .vault-graph .scr .auto[aria-pressed="true"] { color: var(--text-1); }
+  .vault-graph .hint {
+    font-size: 10px; color: var(--text-3); line-height: 1.5; margin: 8px 0 0;
   }
 
   /* ------------------------------------------------------------ stage ----- */

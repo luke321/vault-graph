@@ -40,7 +40,7 @@ Every screenshot and the demo clip in the README were made that way.
 ## If you do want to work on it
 
 Read [`.ai-context/`](.ai-context/) first, and the record for the part you are touching.
-Several constants look arbitrary and are not: the ten colour slots, the three named tint
+Several constants look arbitrary and are not: the twelve colour slots, the three named tint
 slots, the six-degree minimum wedge, the fifty-two-week heatmap window. Each has a
 measurement behind it, and the recurring failure mode in this repo is reasoning about the
 code instead of measuring it.

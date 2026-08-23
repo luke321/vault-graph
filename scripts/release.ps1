@@ -2,6 +2,7 @@
 #
 #   .\scripts\release.ps1 1.5.3
 #   .\scripts\release.ps1 1.5.3 -Notes "one-line summary"
+#   .\scripts\release.ps1 1.6.0 -Title "The Color Picker Update"
 #   .\scripts\release.ps1 1.5.3 -DryRun
 #
 # THE VERSION IS BARE SEMVER, WITH NO `v`. Obsidian installs a plugin by matching the
@@ -21,6 +22,16 @@
 param(
   [Parameter(Mandatory = $true)][string] $Version,
   [string] $Notes = "",
+  # A NAME for the release, shown on the Release page as "<version> - <title>". The version
+  # alone was the only option before, which is fine for a patch and thin for a release
+  # anyone is meant to remember.
+  #
+  # Joined with an ASCII hyphen, not an em dash, and that is a decision rather than
+  # laziness: the notes reach `gh` as a FILE written as UTF-8, and survive, while the title
+  # reaches it as a native command-line ARGUMENT -- which PowerShell 5.1 re-encodes on the
+  # way out. This repo has already published mojibake that way once, and a release title
+  # cannot be quietly fixed afterwards without the old one having been seen.
+  [string] $Title = "",
   [switch] $DryRun,
   [switch] $AllowDirty
 )
@@ -144,7 +155,8 @@ try {
   $notesFile = Join-Path $env:TEMP "vg-notes-$Version.md"
   $body = if ($Notes) { "$Notes`n`n$section" } else { $section }
   [IO.File]::WriteAllText($notesFile, $body, $utf8)
-  Invoke-Native $gh @('release', 'create', $Version, $zip, '--title', $Version, '--notes-file', $notesFile)
+  $releaseTitle = if ($Title) { "$Version - $Title" } else { $Version }
+  Invoke-Native $gh @('release', 'create', $Version, $zip, '--title', $releaseTitle, '--notes-file', $notesFile)
   Remove-Item $notesFile -ErrorAction SilentlyContinue
 
   Write-Host "`nreleased $Version with $(Split-Path $zip -Leaf)" -ForegroundColor Green
