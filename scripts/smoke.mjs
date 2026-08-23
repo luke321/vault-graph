@@ -529,7 +529,7 @@ async function runOne(vault) {
  *
  * TWO SHAPES, BY DEFAULT. Every constant in this project was tuned against one vault --
  * ~450 notes, nine top-level folders, one dominant folder -- and the ones that look most
- * like arbitrary tuning are exactly the ones another shape breaks: ten colour slots, three
+ * like arbitrary tuning are exactly the ones another shape breaks: twelve colour slots, three
  * named tint slots, a 6-degree minimum wedge, a 52-week heatmap window, and a band
  * balancer that has to satisfy three requirements it cannot always satisfy at once.
  *

@@ -11,6 +11,23 @@
  *       because in a plugin the libraries are bundled module imports and never become
  *       globals at all. The standalone page passes its UMD globals in; see shell.html.
  *
+ *       Also, optionally:
+ *         folderColors      { "<folder>": "g7" } -- the saved per-folder palette slots.
+ *         folderShown       { "<folder>": true|false } -- saved per-folder visibility
+ *                           DEFAULTS. Tri-state: absent means "whatever the `_` rule
+ *                           says", which is hidden for a folder whose name starts with an
+ *                           underscore and shown for everything else.
+ *         onFolderShown(m)  as onFolderColors, for that map.
+ *         settingsUI        true to show the gear and its panel. The STANDALONE sets
+ *                           this; the plugin does not, because Obsidian already gives it
+ *                           a settings tab and two settings UIs for one setting is how
+ *                           they drift apart.
+ *         onFolderColors(m) called after a change, with the new map. THE HOST PERSISTS,
+ *                           not this file: the plugin writes it through saveData() and
+ *                           the standalone into localStorage, and page.js knowing about
+ *                           either store would put an Obsidian-forbidden API (or a
+ *                           useless one) into the other target's bundle.
+ *
  * WAS AN IIFE. Nothing about the body changed when it stopped being one: it already kept
  * every name to itself, which is what made this a signature change rather than a rewrite.
  */
@@ -125,6 +142,19 @@ function mountVaultGraph(root, data, deps) {
   // If shapes come back: an SVG data URI also needs explicit width/height, or it
   // rasterises to 0x0 and silently never draws.
 
+  // THE PALETTE AS CHOOSABLE SLOTS.
+  //
+  // A folder override stores a slot KEY ("g7"), never a hex. The palette has separate
+  // light and dark values -- see the two blocks in page.css -- so a stored hex would be
+  // right in one theme and wrong in the other, and it would also let a colour be picked
+  // that never went through the separation measurements in design/0004.
+  //
+  // TWELVE, including two greys. The greys are ordinary slots, pickable like any hue,
+  // because "this folder should recede" is a real thing to want and the palette should
+  // answer it with a choice rather than only as a side effect of running out of hues.
+  var SLOT_NAMES = ["Blue", "Orange", "Aqua", "Yellow", "Green", "Magenta",
+                    "Violet", "Red", "Cyan", "Orchid", "Grey", "Slate"];
+
   var THEME = {};
   function readTheme() {
     var surf = css("--surface-1");
@@ -138,12 +168,68 @@ function mountVaultGraph(root, data, deps) {
       surface:     surf,
       hoverBg:     css("--surface-2"),
       hoverBorder: css("--border-strong"),
-      slots:    ["--g1", "--g2", "--g3", "--g4", "--g5",
-                 "--g6", "--g7", "--g8", "--g9", "--g10"].map(css),
+      slots:    ["--g1", "--g2", "--g3", "--g4", "--g5", "--g6",
+                 "--g7", "--g8", "--g9", "--g10", "--g11", "--g12"].map(css),
+      // Still here, and still used: --dim's neighbours for the colorOf fallback. They
+      // are no longer the overflow palette -- slots 11-12 carry the same two values as
+      // real slots, and the automatic run cycles rather than falling back.
       neutrals: ["--n1", "--n2", "--n3"].map(css)
     };
+    // key -> live hex, rebuilt on every theme read so an override follows the theme
+    // instead of freezing whichever one was current when it was picked.
+    THEME.byKey = Object.create(null);
+    THEME.slots.forEach(function (hex, i) { THEME.byKey["g" + (i + 1)] = hex; });
   }
   readTheme();
+
+  // Folder -> slot key. Comes in from the host: the plugin reads it out of its own
+  // settings, the standalone page out of localStorage. Anything unrecognised is dropped
+  // rather than trusted -- this map has been through a JSON file either way, and an
+  // unknown key would otherwise resolve to undefined and paint a group black.
+  function cleanFolderColors(raw) {
+    var out = Object.create(null);
+    if (!raw || typeof raw !== "object") return out;
+    Object.keys(raw).forEach(function (g) {
+      var k = raw[g];
+      if (typeof k === "string" && /^g([1-9]|1[0-2])$/.test(k)) out[g] = k;
+    });
+    return out;
+  }
+  var folderColors = cleanFolderColors(deps.folderColors);
+
+  // ARCHIVE FOLDERS: the ones whose name starts with `_`.
+  //
+  // A leading underscore is how a vault says "sorts last, not part of the working set" --
+  // `_ Archives`, `_old`, scratch. They are still notes and still in the graph, but they
+  // are not what the disc is for, so they get three things done to them: no slot in the
+  // colour rotation, a recessive grey, and hidden on arrival. All three are overridable
+  // per folder, and none of them is a rule about FILES -- `_scratch.md` is a note like
+  // any other. This asks about the top-level group name, which is the only level that
+  // owns a wedge.
+  function isArchiveGroup(g) { return String(g).charAt(0) === "_"; }
+
+  // Explicit per-folder visibility: true = shown, false = hidden, absent = the default
+  // above. Tri-state on purpose -- "absent" has to stay distinguishable from "false", or
+  // turning `_ Archives` off by hand would be indistinguishable from never having said
+  // anything about it, and a later change to the default could not reach it.
+  function cleanFolderShown(raw) {
+    var out = Object.create(null);
+    if (!raw || typeof raw !== "object") return out;
+    Object.keys(raw).forEach(function (g) {
+      if (typeof raw[g] === "boolean") out[g] = raw[g];
+    });
+    return out;
+  }
+  var folderShown = cleanFolderShown(deps.folderShown);
+
+  // Hidden unless something says otherwise: an explicit choice first, then the `_` rule.
+  function hiddenByDefault(g) {
+    if (typeof folderShown[g] === "boolean") return !folderShown[g];
+    return isArchiveGroup(g);
+  }
+  var SETTINGS_UI = !!deps.settingsUI;
+  var saveFolderColors = typeof deps.onFolderColors === "function" ? deps.onFolderColors : null;
+  var saveFolderShown = typeof deps.onFolderShown === "function" ? deps.onFolderShown : null;
 
   /* ------------------------------------------------------------------ state */
 
@@ -159,6 +245,11 @@ function mountVaultGraph(root, data, deps) {
     // me where this one is" without hiding everything else.
     highlight: Object.create(null),   // group -> true: pushed out and haloed
     highlightSub: Object.create(null),// "folder/sub" -> true: same, one subfolder
+    // Hovering a legend row haloes its notes for as long as the pointer is on it. A
+    // SEPARATE axis again, and transient: it never survives a rebuild of the legend and
+    // it is never persisted, so it cannot leave the disc in a state nobody chose.
+    hoverGroup: null,   // group name under the pointer, or null
+    hoverPath: null,    // "PARA/a/b" under the pointer, or null
     // Every group starts COLLAPSED, so the legend opens as a list of the vault's
     // top-level folders and nothing else. It used to open with one level of subfolders
     // showing, on the reasoning that that level is what the pie already draws as
@@ -283,16 +374,15 @@ function mountVaultGraph(root, data, deps) {
   }
 
   // Colour is assigned from FULL-dataset group sizes and cached per dimension, so a
-  // filter never repaints the survivors. Only the 4 validated slots are used; the
-  // rest go neutral and lean on the legend + floating labels for identity.
-  // Ten categorical slots, at the author's request. For the record: only four
-  // hues clear the all-pairs colour-vision gate on freely-scattered marks, and ten
-  // cannot -- measured on this set the worst pair is red vs orange at normal-vision
-  // dE 7.1 and CVD dE 1.6. What makes ten workable here is that colour is NOT the
-  // only channel: each group owns a contiguous wedge separated by a 2 degree gap,
-  // carries a label on the rim, and is listed in the legend with its count.
-  var SLOT_COUNT = 10;
+  // filter never repaints the survivors.
+  // Twelve categorical slots -- ten hues and two greys -- at the author's request. For
+  // the record: only four hues clear the all-pairs colour-vision gate on freely-scattered
+  // marks, and twelve cannot. What makes it workable here is that colour is NOT the only
+  // channel: each group owns a contiguous wedge separated by a 2 degree gap, carries a
+  // label on the rim, and is listed in the legend with its count.
+  var SLOT_COUNT = 12;
   var groupColor = Object.create(null);   // group -> literal hex, rebuilt on regroup
+  var groupSlot = Object.create(null);    // group -> slot key it is on, "" for none
   var order = {};   // dim -> [group names, biggest first]
 
   function computeOrder() {
@@ -320,24 +410,93 @@ function mountVaultGraph(root, data, deps) {
   function buildColors() {
     groupColor = Object.create(null);
 
-    // Groups sharing the small-folder wedge share ONE grey -- they are one wedge.
-    // Every group that owns its own wedge must then get a DIFFERENT grey, or it
-    // reads as part of that shared blob. Reserving the first neutral for the
-    // shared wedge and cycling the rest keeps them apart; when nothing is folded
-    // (Force layout, or any non-folder grouping) all three neutrals are in play.
-    var folded = state.layout === "rings" && state.dim === "folder";
-    var pool = folded ? THEME.neutrals.slice(1) : THEME.neutrals;
-    var seq = 0;
+    var names = order[state.dim] || [];
 
-    (order[state.dim] || []).forEach(function (g, i) {
-      if (i < SLOT_COUNT) { groupColor[g] = THEME.slots[i]; return; }
-      if (folded && (counts[g] || 0) < SMALL_GROUP) {
-        groupColor[g] = THEME.neutrals[0];      // the shared wedge's grey
-        return;
-      }
-      groupColor[g] = pool[seq++ % pool.length];
+    // IT GOES ROUND. Folder n takes slot n, and folder 13 comes back to slot 1.
+    //
+    // It used to stop at ten and drop everything past that into the neutrals, on the
+    // reasoning that a repeated hue is a lie about identity. That trade is the wrong way
+    // round: a repeat is still separated by its wedge, its rim label and its legend row,
+    // whereas the grey tail was one undifferentiated blob where nothing was separated
+    // from anything. The greys are slots 11 and 12 now, so grey is still reachable --
+    // as a choice, for a folder that should recede, rather than as what you get for
+    // being thirteenth.
+    //
+    // Overrides only apply to the folder dimension: they are keyed by folder name, and
+    // any other grouping would be matching those names against something else entirely.
+    var byFolder = state.dim === "folder" ? folderColors : Object.create(null);
+
+    // AN OVERRIDE CHANGES EXACTLY ONE FOLDER. Position decides every other colour, and
+    // nothing here looks at what anyone else picked.
+    //
+    // The first version tried to keep the palette a bijection: an override claimed its
+    // slot, the automatic run stepped over it, and picking a slot another folder held
+    // swapped the two. Both halves were wrong, and for the same reason -- they treated
+    // "two folders share a hue" as a mistake to prevent. It is a choice. Grouping three
+    // folders under one colour to say they belong together is a thing to want, and the
+    // clever version made it unreachable while also moving folders nobody touched: one
+    // pick could re-seat four other wedges, so the disc repainted around the one change
+    // you were looking at.
+    //
+    // So: no claiming, no stepping over, no swapping. Duplicates are allowed because
+    // they are allowed to be deliberate.
+    //
+    // ARCHIVES ARE OUT OF THE ROTATION, and that is why the counter is separate from the
+    // index. Spending a hue on `_ Archives` costs twice: the archive gets a colour that
+    // says "look at me", and every folder after it is pushed a slot along, so which hue a
+    // working folder gets depends on how many archives happen to sort before it. A
+    // recessive grey and no slot consumed fixes both. An explicit pick still wins -- the
+    // rule is a default, not a prohibition.
+    // WHICH SLOT EACH GROUP ENDED UP ON is recorded rather than recomputed. The settings
+    // panels have to mark it, and the arithmetic is no longer `i % 12`: archives are
+    // skipped, so the only thing that knows is the loop that did the skipping. Both UIs
+    // read it back through the api.
+    groupSlot = Object.create(null);
+    var auto = 0;
+    names.forEach(function (g) {
+      var k = byFolder[g];
+      if (k && THEME.byKey[k]) { groupColor[g] = THEME.byKey[k]; groupSlot[g] = k; return; }
+      // "" means "using no slot" -- the archive grey is a neutral, not one of the twelve,
+      // so no swatch in the picker should claim to be the current one.
+      if (isArchiveGroup(g)) { groupColor[g] = THEME.neutrals[2]; groupSlot[g] = ""; return; }
+      var key = "g" + ((auto++ % SLOT_COUNT) + 1);
+      groupColor[g] = THEME.byKey[key];
+      groupSlot[g] = key;
     });
     buildSubShades();
+  }
+
+  // The settings UIs need three things and none of them should reach into internals:
+  // what can be picked, what is picked now, and what the groups are called.
+  function paletteInfo() {
+    return SLOT_NAMES.map(function (name, i) {
+      return { key: "g" + (i + 1), name: name, hex: THEME.slots[i] };
+    });
+  }
+
+  // Apply a new folder -> slot map and repaint everything that carries a group colour.
+  //
+  // A rebuild is NOT needed and is not done: colour is not an input to the layout, so the
+  // ring plan, the band lock and every node position are untouched. What does have to be
+  // told is each thing that cached a colour of its own -- the renderer's node reducers,
+  // the logo's conic gradient, the heatmap's per-day mix, and the legend's swatches.
+  // Visibility defaults do not touch colour, so this only replaces the map. The caller
+  // applies it to the live filter -- see pickVisible -- because a *default* changing and
+  // the disc changing are two decisions, and only one of them belongs to a host that is
+  // loading saved settings at boot.
+  function applyFolderShown(map) {
+    folderShown = cleanFolderShown(map);
+    return folderShown;
+  }
+
+  function applyFolderColors(map) {
+    folderColors = cleanFolderColors(map);
+    buildColors();
+    if (renderer) renderer.refresh();
+    try { placeLogo(); } catch { /* logo not mounted yet */ }
+    try { heatBuild(); } catch { /* heatmap not built yet */ }
+    try { buildLegend(); } catch { /* legend not built yet */ }
+    return folderColors;
   }
 
   function colorOf(group) {
@@ -1460,10 +1619,45 @@ function mountVaultGraph(root, data, deps) {
   function isHighlighted(id) {
     if (state.markToday && isToday(id)) return true;
     if (isMarkedDay(id)) return true;
-    if (state.highlight[groupOf(id)]) return true;
+    var g = groupOf(id);
+    if (state.highlight[g]) return true;
+    // HOVERING A LEGEND ROW haloes its notes, and deliberately does NOT push them --
+    // isPushed does not ask about these two. A hover is a transient answer to "where is
+    // this folder", and a wedge sliding out and back under a moving pointer is a lot of
+    // motion to spend on a question that is answered the moment the halo lands. Clicking
+    // the row still pushes; that is the difference between asking and choosing.
+    if (state.hoverGroup === g) return true;
     var a = graph.getNodeAttributes(id), d = a.dirs || [];
-    for (var k = 1; k <= d.length; k++) if (state.highlightSub[pathKey(a, k)]) return true;
+    for (var k = 1; k <= d.length; k++) {
+      var pk = pathKey(a, k);
+      if (state.highlightSub[pk]) return true;
+      if (state.hoverPath === pk) return true;
+    }
     return false;
+  }
+
+  // Set (or clear) the hovered legend row. afterRender picks the change up through
+  // hlSignature and ramps it like any other highlight source.
+  //
+  // A FULL refresh, NOT `{ skipIndexation: true }`. That flag says "nothing moved, so do
+  // not rebuild the spatial index", which is true inside hlWalk's own loop and is NOT true
+  // here: this fires whenever the pointer crosses a legend row, which can be at any point
+  // during a cascade or a layout tween, when nodes very much have moved. Skipping
+  // indexation then leaves Sigma's quadtree describing where the disc used to be.
+  //
+  // Measured, when this said skipIndexation: the suite went from 17/17 to 9/17 on the demo
+  // vault -- aiming at a note resolved nothing ("element at aim CANVAS.sigma-mouse"), the
+  // legend reported itself folded while showing 18 subfolder rows, and buildWedgePlan came
+  // back null inside the hidden-folder sweep. Three unrelated-looking failures, one stale
+  // index. Hover is a per-row event, not a per-frame one, so the re-index costs nothing
+  // worth having.
+  function hoverHighlight(group, path) {
+    group = group || null;
+    path = path || null;
+    if (state.hoverGroup === group && state.hoverPath === path) return;
+    state.hoverGroup = group;
+    state.hoverPath = path;
+    if (renderer) renderer.refresh();
   }
 
   // Does this subfolder own a contiguous wedge of its own? Cells are keyed by TINT
@@ -2237,7 +2431,11 @@ function mountVaultGraph(root, data, deps) {
     return Object.keys(state.highlight).join(",") + "|" +
            Object.keys(state.highlightSub).join(",") + "|" +
            (state.markToday ? "T" : "") + "|" +
-           (state.markDay || "") + "|" + (state.hoverDay || "");
+           (state.markDay || "") + "|" + (state.hoverDay || "") + "|" +
+           // Both hover keys belong here for the same reason everything else does: this
+           // is what decides whether the per-note sweep runs at all, so a source missing
+           // from it is a source whose highlight silently never ramps.
+           (state.hoverGroup || "") + "|" + (state.hoverPath || "");
   }
 
   function hlWalk() {
@@ -2997,6 +3195,12 @@ function mountVaultGraph(root, data, deps) {
   /* ---------------------------------------------------------------- UI */
 
   function buildLegend() {
+    // EVERY ROW BELOW IS ABOUT TO BE REPLACED, and the one under the pointer goes with
+    // them -- so its mouseleave will never fire and its halo would be left on with
+    // nothing hovered. Clearing here is the only place that covers all of the callers
+    // (a click, a colour pick, a filter) rather than each of them remembering to.
+    hoverHighlight(null, null);
+
     var names = order[state.dim] || [];
     $("gcount").textContent = "(" + names.length + ")";
 
@@ -3221,6 +3425,9 @@ function mountVaultGraph(root, data, deps) {
       };
     });
     each("[data-hpath]", function (b) {
+      var hp = b.getAttribute("data-hpath");
+      b.onmouseenter = function () { hoverHighlight(null, hp); };
+      b.onmouseleave = function () { hoverHighlight(null, null); };
       b.onclick = function (ev) {
         var p = b.getAttribute("data-hpath");
         if (ev && ev.target && ev.target.getAttribute("data-only")) {
@@ -3298,6 +3505,8 @@ function mountVaultGraph(root, data, deps) {
     // positions rather than running a reveal cascade -- nothing appears or leaves.
     each(".lg[data-g]", function (b) {
       var g = b.getAttribute("data-g");
+      b.onmouseenter = function () { hoverHighlight(g, null); };
+      b.onmouseleave = function () { hoverHighlight(null, null); };
       b.onclick = function (ev) {
         if (ev.target && ev.target.getAttribute("data-only")) {
           var h = state.hidden[state.dim] || (state.hidden[state.dim] = Object.create(null));
@@ -3314,6 +3523,20 @@ function mountVaultGraph(root, data, deps) {
     });
   }
 
+  // THE DEFAULT VISIBILITY, in one place, for the same reason collapseAll exists: boot and
+  // Refresh have to agree about what "default" means, and two copies of that answer drift.
+  //
+  // This is what changes Refresh's meaning slightly, and the change is deliberate: it used
+  // to clear every filter to "everything visible", and now it returns to the CONFIGURED
+  // default, which hides archives. Anything else would make Refresh the one control that
+  // disagrees with the settings.
+  function seedHidden() {
+    var h = state.hidden[state.dim] = Object.create(null);
+    (order[state.dim] || []).forEach(function (g) {
+      if (hiddenByDefault(g)) h[g] = true;
+    });
+  }
+
   // Collapse every group. Used for the initial state and by resetView, so "collapsed by
   // default" has one definition rather than two that can drift apart.
   function collapseAll() {
@@ -3326,8 +3549,11 @@ function mountVaultGraph(root, data, deps) {
     counts = computeOrder();
     buildColors();
     // Once, at boot. Not on every regroup: __vg.relayout() calls this too, and
-    // re-collapsing there would throw away whatever the user had opened.
-    if (!collapsedInit) { collapsedInit = true; collapseAll(); }
+    // re-collapsing there would throw away whatever the user had opened -- which is
+    // exactly why seedHidden belongs in here with it rather than beside it. Seeding the
+    // hidden set on every regroup would put the archives back every time the layout was
+    // rebuilt, silently undoing an eye the user had just clicked.
+    if (!collapsedInit) { collapsedInit = true; collapseAll(); seedHidden(); }
     // Fix the ring each group belongs to, from the whole data set, before
     // anything is filtered.
     if (!bandLock) {
@@ -3555,7 +3781,7 @@ function mountVaultGraph(root, data, deps) {
   // from a value the user can see to one they cannot.
   function resetView() {
     stopPlay();
-    state.hidden[state.dim] = Object.create(null);
+    seedHidden();
     state.hiddenSub = Object.create(null);
     state.highlight = Object.create(null);
     state.highlightSub = Object.create(null);
@@ -3608,6 +3834,120 @@ function mountVaultGraph(root, data, deps) {
     };
     $("fit").onclick = fit;
     $("png").onclick = savePng;
+
+    // THE GEAR, and only if a host asked for it. In the plugin this whole branch is
+    // skipped and the button stays hidden: Obsidian's settings tab renders the same
+    // rows from the same palette() call, and one setting behind two UIs in one product
+    // is how the two of them drift.
+    if (SETTINGS_UI) {
+      $("gear").hidden = false;
+      $("gear").onclick = function () {
+        var open = $("settings").hidden;
+        $("settings").hidden = !open;
+        $("gear").setAttribute("aria-expanded", String(open));
+        if (open) buildSettings();
+      };
+      $("fcreset").onclick = function () { pickColor(null, null); };
+      // DELEGATED on the container, which survives -- buildSettings replaces its
+      // children on every pick, so a listener bound to a swatch would be bound to an
+      // element that is about to be thrown away.
+      $("setbody").addEventListener("click", function (ev) {
+        var t = ev.target instanceof Element ? ev.target : null;
+        if (!t) return;
+        var v = t.closest("[data-vis]");
+        if (v) { pickVisible(v.getAttribute("data-vis")); return; }
+        var b = t.closest("[data-fc]");
+        if (b) pickColor(b.getAttribute("data-fc"), b.getAttribute("data-key") || null);
+      });
+    }
+
+    // One folder's slot, or -- with both arguments null -- every override dropped.
+    // Nothing else in the map is touched: two folders may hold the same slot, and that
+    // is a way of saying they belong together rather than a collision to resolve.
+    function pickColor(folder, key) {
+      var next = Object.create(null);
+      if (folder) {
+        Object.keys(folderColors).forEach(function (g) { next[g] = folderColors[g]; });
+        if (key) next[folder] = key; else delete next[folder];
+      }
+      var saved = applyFolderColors(next);
+      if (saveFolderColors) saveFolderColors(Object.assign({}, saved));
+      buildSettings();
+    }
+
+    // Flip one folder's DEFAULT visibility, and apply it now so the click does something
+    // visible. Written as an explicit true/false rather than by deleting the key: the
+    // point of the tri-state is that "shown, and I said so" survives a later change to
+    // what `_` folders do by default.
+    function pickVisible(folder) {
+      var next = Object.create(null);
+      Object.keys(folderShown).forEach(function (g) { next[g] = folderShown[g]; });
+      next[folder] = hiddenByDefault(folder);      // was hidden -> show it, and back
+      var saved = applyFolderShown(next);
+      if (saveFolderShown) saveFolderShown(Object.assign({}, saved));
+      // The live filter follows the default it just changed. Without this the setting
+      // would only take effect on the next Refresh, which reads as the click not working.
+      var h = state.hidden[state.dim] || (state.hidden[state.dim] = Object.create(null));
+      if (hiddenByDefault(folder)) h[folder] = true; else delete h[folder];
+      buildLegend();
+      cascade();                                   // notes fade in or out; nothing jumps
+      buildSettings();
+    }
+
+    // Rebuilt whole on every pick. The list is one row per top-level folder and the
+    // vault has tens of those, not thousands, so there is nothing here worth the bugs
+    // that come with patching rows in place.
+    function buildSettings() {
+      var pal = paletteInfo();
+      var rows = (order[state.dim] || []).map(function (g) {
+        var pinned = folderColors[g] || "";
+        // THE SLOT THIS FOLDER IS ACTUALLY USING, read back from buildColors rather than
+        // recomputed -- archives are skipped in the rotation, so `i % SLOT_COUNT` is no
+        // longer the answer and an archive is on no slot at all.
+        //
+        // Marking only the pinned one meant that a folder on Auto, which is every folder
+        // until somebody changes something, had no mark anywhere: the panel showed twelve
+        // colours and would not say which of them the folder was. The two states are
+        // marked differently because "this is the colour" and "this is the colour I chose"
+        // are different facts, and the Auto button is otherwise the only thing saying so.
+        var cur = pinned || groupSlot[g] || "";
+        var sws = pal.map(function (p) {
+          var on = cur === p.key;
+          // The colour comes from `.vg-<key>` in page.css, not from an inline style: a
+          // hex baked in here would not survive the theme flip that readTheme handles.
+          return '<button class="swatch vg-' + p.key + '" role="radio"' +
+                 ' data-fc="' + esc(g) + '" data-key="' + p.key + '"' +
+                 ' aria-checked="' + on + '"' +
+                 (on && !pinned ? ' data-auto="1"' : '') +
+                 ' title="' + esc(p.name) + (on ? (pinned ? " (chosen)" : " (automatic)") : "") +
+                 '" aria-label="' + esc(p.name) + '"></button>';
+        }).join("");
+        // AUTO SITS ON THE NAME LINE, not at the end of the swatches. As a thirteenth
+        // item in that row it was the one thing that could not fit beside twelve
+        // swatches in a 288px sidebar, so the row wrapped and left a single swatch and
+        // a button stranded on a line of their own. Up here it costs no width at all --
+        // the name was already short of the full line -- and the swatches below are a
+        // fixed twelve-column grid that cannot wrap however narrow the sidebar gets.
+        // The eye sits with the colour, because "which folders am I looking at" and "what
+        // colour are they" are the two things this panel is for. It is a DEFAULT, not the
+        // live filter: the legend's own eye is the live one, and this is what the disc
+        // comes back to on Refresh.
+        var shown = !hiddenByDefault(g);
+        return '<div class="scr" role="radiogroup" aria-label="Colour for ' + esc(g) + '">' +
+               '<div class="scrh">' +
+               '<button class="vis" data-vis="' + esc(g) + '" aria-pressed="' + shown + '"' +
+               ' title="' + (shown ? "Shown by default" : "Hidden by default") +
+               '" aria-label="' + (shown ? "Hide" : "Show") + " " + esc(g) + '">' +
+               (shown ? "&#9679;" : "&#9675;") + '</button>' +
+               '<span class="nm" title="' + esc(g) + '">' + esc(g) + '</span>' +
+               '<button class="auto" data-fc="' + esc(g) + '" data-key=""' +
+               ' aria-pressed="' + (!pinned) + '"' +
+               ' title="Back to the slot this folder gets automatically">Auto</button>' +
+               '</div>' +
+               '<span class="sws">' + sws + '</span></div>';
+      }).join("");
+      setHTML($("setbody"), rows);
+    }
     // No theme toggle: the page is dark, always. `<html data-theme="dark">` is set in
     // the markup, which outranks both the bare :root tokens and the
     // prefers-color-scheme block, so a light OS still gets the dark disc. The wedge
@@ -4417,6 +4757,20 @@ function mountVaultGraph(root, data, deps) {
       var row = demoFind("group", arg);
       return row ? row.querySelector(".only") : null;
     }
+    if (kind === "swatch") {                    // "01/g8" -- one slot in a folder's row
+      var cut = arg.indexOf("/");
+      var gsw = demoGroup(arg.slice(0, cut)), key = arg.slice(cut + 1);
+      if (!gsw) return null;
+      // Compared attribute by attribute rather than built into a selector, like every
+      // other resolver here: a folder name goes into `data-fc` verbatim, and quoting one
+      // into an attribute selector is an escaping problem this does not need to have.
+      var sw = $("setbody").querySelectorAll(".swatch");
+      for (var s = 0; s < sw.length; s++) {
+        if (sw[s].getAttribute("data-fc") === gsw &&
+            sw[s].getAttribute("data-key") === key) return sw[s];
+      }
+      return null;                              // the panel is closed, so nothing to aim at
+    }
     if (kind === "note") return demoNoteRect(arg);
     if (kind === "day") return demoCellRect(heat && heat.days[arg]);
     if (kind === "busiest") {
@@ -4616,6 +4970,26 @@ function mountVaultGraph(root, data, deps) {
       { hover: true, target: ["busiest", "2"], why: "...and the next" },
       { hover: true, target: ["busiest", "3"], why: "...and the next" },
 
+      // Hovering a folder in the legend, which is the cheap version of the eye: it
+      // haloes without hiding anything and without moving a wedge, so it reads as
+      // "where is this" rather than as a filter.
+      { hover: true, target: ["group", "01"], why: "hover a folder to find it on the disc" },
+
+      // THE COLOUR PICKER. The gear has to come first -- the panel's swatches do not
+      // exist in the DOM until buildSettings has run, so the `swatch` targets below
+      // resolve to nothing without this beat. Two folders are recoloured rather than
+      // one, because one swatch click looks like a highlight and two look like a
+      // choice; and the second is a grey, which is the answer to "can a folder recede
+      // on purpose" that the archives rule only implies.
+      { click: true, target: ["id", "gear"], why: "open the settings panel" },
+      { click: true, target: ["swatch", "01/g8"], why: "give a folder a colour of its own" },
+      { settle: true, why: "the disc repaints -- no relayout, nothing moves" },
+      { click: true, target: ["swatch", "03/g11"], why: "...and let another one go grey" },
+      { settle: true, why: "let the second repaint land" },
+      { click: true, target: ["id", "fcreset"], why: "put every folder back to automatic" },
+      { settle: true, why: "let the palette snap back" },
+      { click: true, target: ["id", "gear"], why: "close the panel" },
+
       // And `only`, which is the fastest way to answer "where does one folder live".
       { click: true, target: ["only", "08"], why: "solo a single folder" },
       { settle: true, why: "let everything else recede" }
@@ -4667,6 +5041,38 @@ function mountVaultGraph(root, data, deps) {
                     // composited never runs one -- so testing the mark through the
                     // renderer silently measures a stale DOM.
                     placeLogo: placeLogo, ringColors: ringColors,
+                    // Folder colours, for the two settings UIs and for the suite. The
+                    // setter repaints rather than rebuilds -- colour is not an input to
+                    // the layout, and an override must not be able to move a node.
+                    palette: paletteInfo,
+                    groupOrder: function () { return (order[state.dim] || []).slice(); },
+                    groupCount: function (g) { return counts[g] || 0; },
+                    colorOf: colorOf,
+                    // The slot a group is ON, which is not derivable from its position any
+                    // more: archives are skipped in the rotation, and sit on no slot at
+                    // all. "" means exactly that.
+                    slotOf: function (g) { return groupSlot[g] || ""; },
+                    isArchiveGroup: isArchiveGroup,
+                    get folderColors() {
+                      return Object.assign(Object.create(null), folderColors);
+                    },
+                    setFolderColors: applyFolderColors,
+                    // Visibility DEFAULTS. Setting these does not move the live filter --
+                    // the host is expected to apply them, which is what setHiddenDefaults
+                    // is for.
+                    get folderShown() {
+                      return Object.assign(Object.create(null), folderShown);
+                    },
+                    setFolderShown: applyFolderShown,
+                    hiddenByDefault: hiddenByDefault,
+                    // Push the defaults into the live filter and repaint. This is the
+                    // "and now show it" half, kept separate so loading saved settings at
+                    // boot cannot be confused with a person clicking an eye.
+                    applyHiddenDefaults: function () {
+                      seedHidden();
+                      buildLegend();
+                      cascade();
+                    },
                     // The band, for the same reason placeLogo is exposed: it paints
                     // from afterRender, so a tab that is not being composited never
                     // repaints it and testing through the renderer measures a stale

@@ -48,6 +48,39 @@ html, body { height: 100%; margin: 0; }
  * blocked by CORS, and being openable straight off a disk is the whole point of this file.
  * The assembler strips page.js's `export` line for the same reason.
  */
+/* THE STANDALONE'S SETTINGS STORE, and the only persistence in this file.
+ *
+ * localStorage, because this page is one file opened off a disk: there is no server to
+ * ask and no plugin data folder to write into. The KEY IS SCOPED BY VAULT NAME -- a
+ * graph built from a different vault is the same file:// origin as far as the browser is
+ * concerned, so without that the two would overwrite each other's colours.
+ *
+ * Every access is wrapped. localStorage THROWS rather than returning null in real
+ * configurations -- site data blocked, or a file:// page in some builds -- and a
+ * settings store is not worth taking the page down for. The cost of the catch is that
+ * colours stop outliving the tab, which is the right way for this to fail.
+ */
+var SETTINGS_KEY = "vault-graph:settings:" +
+  ((window.VAULT_DATA && window.VAULT_DATA.vault) || "default");
+
+function loadSettings() {
+  try {
+    var raw = window.localStorage.getItem(SETTINGS_KEY);
+    var v = raw ? JSON.parse(raw) : null;
+    return v && typeof v === "object" ? v : {};
+  } catch (e) { return {}; }
+}
+
+function saveSettings(patch) {
+  try {
+    var next = loadSettings();
+    for (var k in patch) {
+      if (Object.prototype.hasOwnProperty.call(patch, k)) next[k] = patch[k];
+    }
+    window.localStorage.setItem(SETTINGS_KEY, JSON.stringify(next));
+  } catch (e) { /* no store, or full: the colours just do not outlive the tab */ }
+}
+
 mountVaultGraph(
   document.getElementById("vg-app"),
   window.VAULT_DATA,
@@ -55,7 +88,14 @@ mountVaultGraph(
     Graph: window.graphology.Graph || window.graphology,
     Sigma: (window.Sigma && window.Sigma.Sigma) || window.Sigma,
     rendering: (window.Sigma && window.Sigma.rendering) || {},
-    logoMask: window.VAULT_LOGO_MASK || ""
+    logoMask: window.VAULT_LOGO_MASK || "",
+    // The gear is the standalone's only settings surface, so it is turned on here. The
+    // plugin leaves it off and uses Obsidian's own settings tab for the same rows.
+    settingsUI: true,
+    folderColors: loadSettings().folderColors,
+    onFolderColors: function (map) { saveSettings({ folderColors: map }); },
+    folderShown: loadSettings().folderShown,
+    onFolderShown: function (map) { saveSettings({ folderShown: map }); }
   }
 );
 </script>

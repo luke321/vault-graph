@@ -139,6 +139,45 @@ __vg.state.markDay = "2026-08-19"; __vg.renderer.refresh(); __vg.pushReport()
 Measured: `pushedCount` **0**, haloed 14, and **0 nodes changed position**. `mark today`
 must still push — measured 6 pushed, 6 haloed — or the change went too far.
 
+## `skipIndexation` is a promise, and only hlWalk can keep it
+
+`renderer.refresh({ skipIndexation: true })` tells Sigma "nothing moved, do not rebuild the
+spatial index". Inside `hlWalk` that is true by construction: its loop writes `hl[id]` and
+nothing else, so it earns the flag and needs it — it runs every frame of a ramp.
+
+**Anything driven by a person's pointer has not earned it.** Hover highlight was written
+with the flag copied from `hlWalk`, on the reasoning that a halo does not move anything.
+The halo does not; the *rest of the page* does. A legend row can be crossed at any moment,
+including mid-cascade and mid-tween, and skipping indexation then leaves the quadtree
+describing where the disc used to be.
+
+Measured, with the flag: **9/17 on the demo vault**, and the three failures looked like
+three unrelated bugs —
+
+| symptom | what it actually was |
+|---|---|
+| `hovering a note` → "element at aim CANVAS.sigma-mouse" | aim resolved against a stale index |
+| `legend opens folded` → 27 rows, 18 subfolder rows | reading a legend the renderer had not caught up with |
+| `plan parity with each folder hidden` → `TypeError: null.cells` | `buildWedgePlan` on stale display data |
+
+Without it: **17/17 on both vaults**, checks untouched. The lesson is the diagnosis, not
+the fix: the first theory was that a parked mouse was landing on a legend row and lighting
+a folder, which was plausible, fitted the demo-vs-10k split, and was wrong. `HEAD` passing
+17/17 in the same environment is what ruled it out — bisect before theorising.
+
+Hover is a per-row event, not a per-frame one, so a full refresh costs nothing worth having.
+
+## Highlight has five sources, and every one belongs in the signature
+
+`isHighlighted` answers yes for a clicked group, a clicked subfolder path, a marked heatmap
+day, "mark today", and — since 2026-08-23 — a hovered legend row (`state.hoverGroup` /
+`state.hoverPath`). All five feed the same per-note ramp, and all five must appear in
+`hlSignature`: that signature decides whether the per-note sweep runs at all, so a source
+missing from it is a source whose highlight silently never ramps.
+
+Hover **haloes without pushing** — `isPushed` does not ask about the hover keys, for the
+same reason a marked day does not push.
+
 ## Aiming at a note is a timing problem before it is a geometry problem
 
 `scripts/smoke.mjs` hovers the most isolated note on screen and asserts what got hovered.

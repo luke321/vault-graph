@@ -15,7 +15,7 @@
  * the first clean run were that one fact. esbuild emits CommonJS for Obsidian's loader.
  */
 
-import { Plugin, ItemView, Notice, normalizePath, addIcon } from "obsidian";
+import { Plugin, ItemView, Notice, PluginSettingTab, Setting, normalizePath, addIcon } from "obsidian";
 
 // Compiled in by scripts/build-plugin.mjs. Obsidian installs only main.js, manifest.json
 // and styles.css, so anything read from disk at runtime does not exist for a real user --
@@ -493,6 +493,11 @@ class VaultGraphView extends ItemView {
       Sigma: sigma.Sigma || sigma,
       rendering: sigma.rendering || {},
       logoMask: "data:image/png;base64," + LOGO_MASK_B64,
+      // The saved per-folder palette slots and visibility defaults. No settingsUI and no
+      // onFolderColors/onFolderShown: in Obsidian the settings tab owns both, and the
+      // page's own gear stays hidden.
+      folderColors: this.plugin.settings.folderColors,
+      folderShown: this.plugin.settings.folderShown,
       // The window this view is actually in. A view dragged out into a popout must schedule
       // its timers and animation frames there, not on the main window -- which is what
       // obsidianmd/prefer-active-window-timers is about. The standalone page passes nothing
@@ -524,11 +529,255 @@ const DEFAULTS = {
   templates: false,     // --templates
   flatMonths: false,    // --flat-months
   words: true,          // the one field that still costs I/O
+  // folder name -> palette slot key ("g7"). A SLOT, not a hex: the palette has separate
+  // light and dark values, so a saved hex would be right in one Obsidian theme and wrong
+  // in the other. Empty means every folder takes the slot its position gives it.
+  folderColors: {},
+  // folder name -> true (shown) / false (hidden), as a DEFAULT. Absent means the `_` rule
+  // decides: a folder whose name starts with an underscore is an archive, so it is out of
+  // the colour rotation, grey, and hidden until somebody says otherwise.
+  folderShown: {},
 };
+
+// The four build settings, described once. They live here rather than inline in display()
+// so the tab is a list of what exists rather than 60 lines of chained calls.
+const BUILD_SETTINGS = [
+  { key: "ghosts", name: "Include notes that do not exist yet",
+    desc: "Wikilinks pointing at a note nobody has written. They are intentions rather than notes, so they are off by default." },
+  { key: "templates", name: "Include templates",
+    desc: "Notes under the template folders. Off by default: a template links to nothing and is linked from nothing, so it lands in the hub as noise." },
+  { key: "flatMonths", name: "Flatten month folders",
+    desc: "Treat 2026-08 and its siblings as one folder rather than as a subfolder each. Turn this on if a year of daily notes is drowning its parent's legend row." },
+  { key: "words", name: "Count words",
+    desc: "Sizes each note by its length. The one setting that costs real I/O: it reads every file rather than answering from the metadata cache." },
+];
+
+// MUST MATCH src/page.js's SLOT_NAMES: ten hues, then two greys. Kept as a copy rather
+// than imported because page.js keeps every name inside mountVaultGraph, and it has to --
+// the standalone build turns that module into a plain <script>, where anything at module
+// scope would become a browser global.
+const SLOT_NAMES = ["Blue", "Orange", "Aqua", "Yellow", "Green", "Magenta",
+                    "Violet", "Red", "Cyan", "Orchid", "Grey", "Slate"];
+
+// Same rule as page.js's isArchiveGroup, and a copy for the same reason. A leading
+// underscore means archive: out of the colour rotation, grey, hidden by default.
+const isArchiveGroup = (name) => String(name).charAt(0) === "_";
+
+// The folders the graph will group by, in the order it will lay them out: first path
+// segment, "(vault root)" for a note sitting loose at the top. Sorted exactly as
+// computeOrder does it, so the third row here is the third wedge on the disc.
+//
+// Derived from the vault rather than read off an open view, because the settings tab has
+// to work with no graph open. One knowing difference from buildData: templates are not
+// filtered out, which needs an async folder read. It only matters for a vault whose
+// template folder is a TOP-LEVEL one, and then it shows a row that colours nothing.
+function topFolders(app) {
+  const count = new Map();
+  for (const file of app.vault.getMarkdownFiles()) {
+    if (SKIP_FILES.has(file.name.toLowerCase())) continue;
+    const g = paraFolder(file.path);
+    count.set(g, (count.get(g) || 0) + 1);
+  }
+  return Array.from(count.entries())
+    .sort((a, b) => {
+      const pa = a[0].charAt(0) === "(" ? 0 : 1, pb = b[0].charAt(0) === "(" ? 0 : 1;
+      return pa - pb || a[0].localeCompare(b[0], undefined, { numeric: true });
+    })
+    .map(([name, n]) => ({ name, n }));
+}
+
+class VaultGraphSettingTab extends PluginSettingTab {
+  constructor(app, plugin) {
+    super(app, plugin);
+    this.plugin = plugin;
+  }
+
+  display() {
+    const { containerEl } = this;
+    containerEl.empty();
+
+    for (const s of BUILD_SETTINGS) {
+      new Setting(containerEl)
+        .setName(s.name)
+        .setDesc(s.desc)
+        .addToggle((t) => t
+          .setValue(!!this.plugin.settings[s.key])
+          .onChange(async (v) => {
+            this.plugin.settings[s.key] = v;
+            await this.plugin.saveSettings();
+            // These four change what is IN the graph, so the view is built again.
+            // A colour, below, only repaints.
+            await this.plugin.rebuildViews();
+          }));
+    }
+
+    new Setting(containerEl).setName("Folder colours").setHeading();
+
+    new Setting(containerEl)
+      .setDesc("Twelve slots, handed out in folder order and round again. Setting one folder never moves another, and two folders may share a colour.")
+      .addButton((b) => b
+        .setButtonText("Reset all")
+        .onClick(async () => {
+          this.plugin.settings.folderColors = {};
+          await this.plugin.saveSettings();
+          await this.plugin.applyFolderColors();
+          this.display();
+        }));
+
+    // THE PALETTE TOKENS LIVE ON .vault-graph, and this pane is not inside one. The
+    // wrapper carries that class so `var(--g7)` resolves here; `vg-tokens` turns off the
+    // page's own grid layout, which comes with the class and is not wanted in a settings
+    // pane. Nothing in this file knows a single hex.
+    const scope = containerEl.createDiv({ cls: ["vault-graph", "vg-tokens"] });
+
+    // AND IT NEEDS THE THEME, for the same reason the view does -- page.css carries a
+    // light palette and a dark one, and picks between them on this attribute. Without it
+    // the wrapper falls through to prefers-color-scheme, which is the OS's answer to a
+    // question only Obsidian can answer: a light OS running a dark Obsidian would show
+    // twelve light-theme swatches in a dark settings pane, none of them the colour the
+    // disc is actually painting. Same source as VaultGraphView.syncTheme.
+    scope.setAttribute("data-theme",
+      activeDocument.body.classList.contains("theme-light") ? "light" : "dark");
+
+    this.scope = scope;
+    // Archives are skipped in the rotation here too, or the fallback would disagree with
+    // the disc about which slot every folder after an archive is on. Hence the separate
+    // counter -- the same reason buildColors has one.
+    let auto = 0;
+    this.renderColours(topFolders(this.app).map((f) => ({
+      name: f.name, n: f.n,
+      slot: isArchiveGroup(f.name) ? "" : "g" + ((auto++ % SLOT_NAMES.length) + 1),
+    })));
+
+    // ...and then ask the graph itself, which is the only thing that actually knows.
+    //
+    // The list above is derived from paths, and the disc's is not quite: a note with no
+    // links at all is grouped under "(unlinked)" rather than under its folder, so a vault
+    // with unlinked notes has one group here that no path produces -- and since the
+    // automatic slot is decided by POSITION in that list, every folder after it would be
+    // marked one slot out. Close enough to look right and wrong on exactly the vaults
+    // that have orphans.
+    //
+    // A view can only be reached asynchronously and display() cannot wait, so the
+    // path-derived list renders first and this corrects it. With no view open there is
+    // nothing to correct against, and the fallback is what stands.
+    this.refreshFromView();
+  }
+
+  // Re-render the colour rows from the live graph's own grouping and colours.
+  async refreshFromView() {
+    const scope = this.scope;
+    const view = await this.plugin.currentView();
+    const api = view && view.handle && view.handle.api;
+    if (!api || !api.groupOrder || !api.palette || !scope || !scope.isConnected) return;
+
+    // api.slotOf, not a hex lookup against the palette. An archive folder is on NO slot --
+    // it takes a neutral, which is deliberately not one of the twelve -- so matching by
+    // colour returns nothing for it, and the first version filtered those rows out
+    // entirely. The archives were the rows most in need of the eye.
+    const groups = api.groupOrder().map((name) => ({
+      name,
+      n: api.groupCount(name),
+      slot: api.slotOf ? api.slotOf(name) : "",
+    }));
+    if (groups.length) this.renderColours(groups);
+  }
+
+  // One row per group: its name, its note count, and the twelve slots.
+  //
+  // `slot` is the slot the group is CURRENTLY USING, whether or not anybody chose it.
+  // Marking only the chosen one meant a folder on Auto -- every folder, until somebody
+  // changes something -- had no mark anywhere, so the panel showed twelve colours and
+  // would not say which of them the folder was.
+  renderColours(groups) {
+    const scope = this.scope;
+    scope.empty();
+    if (!groups.length) {
+      scope.createEl("p", { text: "No folders to colour yet." });
+      return;
+    }
+
+    for (const group of groups) {
+      const pinned = this.plugin.settings.folderColors[group.name] || "";
+      const current = pinned || group.slot;
+      const shown = this.shownByDefault(group.name);
+      const row = new Setting(scope)
+        .setName(group.name)
+        .setDesc((group.n === 1 ? "1 note" : group.n + " notes") +
+                 (shown ? "" : " · hidden by default"));
+      row.controlEl.addClass("sws");
+
+      // The eye first, because "am I looking at this folder at all" comes before what
+      // colour it is. It sets a DEFAULT: the legend's own eye is the live filter, and
+      // this is what the disc comes back to.
+      const vis = row.controlEl.createEl("button", {
+        cls: "vis", text: shown ? "●" : "○",
+        attr: { "aria-pressed": String(shown),
+                "aria-label": (shown ? "Hide " : "Show ") + group.name,
+                title: shown ? "Shown by default" : "Hidden by default" },
+      });
+      vis.addEventListener("click", () => this.pickVisible(group.name));
+
+      SLOT_NAMES.forEach((name, i) => {
+        const key = "g" + (i + 1);
+        const on = current === key;
+        const attr = {
+          role: "radio", "aria-checked": String(on), "aria-label": name,
+          title: name + (on ? (pinned ? " (chosen)" : " (automatic)") : ""),
+        };
+        // Chosen and automatic are marked differently -- the ring is dim for a slot the
+        // folder merely landed on. Two different facts, and the Auto button beside it is
+        // otherwise the only thing that tells them apart.
+        if (on && !pinned) attr["data-auto"] = "1";
+        const b = row.controlEl.createEl("button", { cls: ["swatch", "vg-" + key], attr });
+        b.addEventListener("click", () => this.pick(group.name, key));
+      });
+
+      const auto = row.controlEl.createEl("button", {
+        cls: "auto", text: "Auto",
+        attr: { "aria-pressed": String(!pinned),
+                title: "Back to the slot this folder gets automatically" },
+      });
+      auto.addEventListener("click", () => this.pick(group.name, null));
+    }
+  }
+
+  // Shown unless something says otherwise: an explicit choice first, then the `_` rule.
+  // Mirrors hiddenByDefault in page.js.
+  shownByDefault(folder) {
+    const saved = this.plugin.settings.folderShown[folder];
+    if (typeof saved === "boolean") return saved;
+    return !isArchiveGroup(folder);
+  }
+
+  // Flip one folder's DEFAULT visibility. Written as an explicit boolean rather than by
+  // deleting the key, so "shown, and I said so" survives a later change to what the `_`
+  // rule does.
+  async pickVisible(folder) {
+    const map = Object.assign({}, this.plugin.settings.folderShown);
+    map[folder] = !this.shownByDefault(folder);
+    this.plugin.settings.folderShown = map;
+    await this.plugin.saveSettings();
+    await this.plugin.applyHiddenDefaults();
+    this.display();
+  }
+
+  // One folder's slot. `key` null clears the override. Nothing else in the map is
+  // touched -- two folders may hold the same slot on purpose.
+  async pick(folder, key) {
+    const map = Object.assign({}, this.plugin.settings.folderColors);
+    if (key) map[folder] = key; else delete map[folder];
+    this.plugin.settings.folderColors = map;
+    await this.plugin.saveSettings();
+    await this.plugin.applyFolderColors();
+    this.display();
+  }
+}
 
 class VaultGraphPlugin extends Plugin {
   async onload() {
     this.settings = Object.assign({}, DEFAULTS, await this.loadData());
+    this.addSettingTab(new VaultGraphSettingTab(this.app, this));
 
     this.registerView(VIEW_TYPE, (leaf) => new VaultGraphView(leaf, this));
 
@@ -596,6 +845,37 @@ class VaultGraphPlugin extends Plugin {
       if (leaf.view instanceof VaultGraphView) return leaf.view;
     }
     return null;
+  }
+
+  async saveSettings() {
+    await this.saveData(this.settings);
+  }
+
+  // A COLOUR CHANGE REPAINTS. It does not rebuild, and the difference is the whole
+  // reason setFolderColors exists on the page's api: colour is not an input to the
+  // layout, so going through render() would throw away a settled disc and replay the
+  // reveal animation because somebody clicked a swatch.
+  async applyFolderColors() {
+    const view = await this.currentView();
+    const api = view && view.handle && view.handle.api;
+    if (api && api.setFolderColors) api.setFolderColors(this.settings.folderColors);
+  }
+
+  // Visibility defaults changed: push them into the live filter and let the notes fade.
+  // Like a colour, this repaints rather than rebuilding -- the notes are all still in the
+  // graph, they are just not being drawn.
+  async applyHiddenDefaults() {
+    const view = await this.currentView();
+    const api = view && view.handle && view.handle.api;
+    if (!api || !api.setFolderShown) return;
+    api.setFolderShown(this.settings.folderShown);
+    if (api.applyHiddenDefaults) api.applyHiddenDefaults();
+  }
+
+  // The four build settings DO change the data, so they get the full path.
+  async rebuildViews() {
+    const view = await this.currentView();
+    if (view) await view.render();
   }
 
   // `revealLeaf` is awaited on purpose: since 1.7.2 it resolves once the view is really

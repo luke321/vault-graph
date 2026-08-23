@@ -85,7 +85,7 @@ Three rules keep the nesting from producing debris, all learned the hard way:
   Cost: the floors bind on 8 of 19 cells, spending ~48 degrees of the circle
   (13%) on 26 notes (6%).
 - **Group folding is off.** It existed only because groups past slot 4 all shared
-  one grey and merged into an unreadable mass; with ten hues a 3-note group has its
+  one grey and merged into an unreadable mass; with twelve slots a 3-note group has its
   own colour, its own gap and its own label, so a thin slice reads fine. The
   machinery is still there behind `SMALL_GROUP` if the thin slices ever annoy.
 
