@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Screenshot the three date-range concepts, at rest and with a range applied.
+// Screenshot the date-range ribbon, at rest and with a range applied.
 //
 //   node scripts/shoot-daterange.mjs --vault path/to/vault --out shots/daterange
 //
@@ -95,9 +95,10 @@ try {
     }
   };
 
-  for (const ui of ["rail", "ribbon", "sliders"]) {
+  {
+    const ui = "ribbon";
     console.log(ui + ":");
-    await page.eval(`__vg.setRange(null, null); __vg.setHeatEnd(null); __vg.setDateUI(${JSON.stringify(ui)}); void 0`);
+    await page.eval(`__vg.setRange(null, null); __vg.setHeatEnd(null); void 0`);
     await settle();
     await shoot(ui + "-1-rest");
 

@@ -51,41 +51,21 @@
       <div class="hrow">
         <div class="lbl">Notes added</div>
         <span id="vg-heatnote"></span>
-        <!-- THREE CONCEPTS, one filter. The switcher is scaffolding for the review and
-             would not survive a decision: whichever control wins, the other two go and
-             this row goes with them. -->
-        <div id="vg-dsw" class="dsw" role="group" aria-label="Date range control">
-          <button data-dui="rail" aria-pressed="true"
-                  title="A year rail beside the band. Click a year to move the window; drag across the weeks to set the range.">Rail</button>
-          <button data-dui="ribbon" aria-pressed="false"
-                  title="One strip under the band carrying every month of the vault. Drag to brush a range; the band follows.">Ribbon</button>
-          <button data-dui="sliders" aria-pressed="false"
-                  title="Two sliders under the band, even in notes rather than in time.">Sliders</button>
-        </div>
+        <!-- THE RANGE READOUT AND ITS RESET LIVE UP HERE, beside the counts they qualify,
+             so the strip below is nothing but the strip. A row of its own under the ribbon
+             put a button and a date at the bottom of the band and cost 22px of the disc for
+             two things nobody looks at except when they are already looking here. -->
+        <span id="vg-rangenote"></span>
+        <button id="vg-rangeall" class="btn" title="Clear the date range">All dates</button>
         <div id="vg-heatscale" aria-hidden="true">
           <span>fewer</span><canvas id="vg-heatkey"></canvas><span>more</span>
         </div>
       </div>
-      <!-- The band and whatever sits beside it. A row, so a concept can use the space to
-           the left of the grid that the centred canvas has always been leaving empty. -->
-      <div class="hmid">
-        <canvas id="vg-rail" hidden></canvas>
-        <div id="vg-heatwrap"><canvas id="vg-heatc"></canvas></div>
-      </div>
-      <!-- ...and whatever sits below it. -->
-      <div class="hfoot">
-        <canvas id="vg-ribbon" hidden></canvas>
-        <div id="vg-twin" hidden>
-          <input type="range" id="vg-rfrom" min="0" max="1000" value="0"
-                 title="Earliest note to include. Even in NOTES, not in days, so the travel is not spent on empty years.">
-          <input type="range" id="vg-rto" min="0" max="1000" value="1000"
-                 title="Latest note to include.">
-        </div>
-        <div class="hfootrow">
-          <span id="vg-rangenote"></span>
-          <button id="vg-rangeall" class="btn" title="Clear the date range">All dates</button>
-        </div>
-      </div>
+      <div id="vg-heatwrap"><canvas id="vg-heatc"></canvas></div>
+      <!-- The whole history, brushable. The band above is a 52-week window onto whatever
+           this selects. -->
+      <canvas id="vg-ribbon"></canvas>
+      <div id="vg-rtip" hidden></div>
       <div id="vg-htip" hidden></div>
     </div>
 
