@@ -1692,31 +1692,58 @@ check("a range change animates instead of snapping", async (p) => {
   // a max, so when the furthest note ticks inward the maximum passes to another note and the
   // number moves further than either note did.
   //
-  // AND THE STARVATION TERM. This animation runs at 4x for exactly the reason given above --
-  // a rate bound is meaningless if the page cannot draw the distance -- but the page still gets
-  // whatever frames the machine spares. Measured on the same fixture and build: 226 frames gave
-  // a worst step of 183, and 105 frames gave 781, which is the same motion sampled half as
-  // often. Nominal is 60fps over the measured span; if the page delivered a third of that, a
-  // sampled frame legitimately carries three hops. Without this term the check reports the load
-  // on the machine rather than the smoothness of the disc, and it did: the same commit passed
-  // this check run alone and failed it inside the full suite.
+  // AND EACH STEP IS JUDGED AGAINST ITS OWN GAP, not against the run's mean frame rate.
+  //
+  // This animation runs at 4x for exactly the reason given above -- a rate bound is meaningless
+  // if the page cannot draw the distance -- but the page still gets whatever frames the machine
+  // spares, and starvation is not uniform. A global factor (nominal frames over actual frames)
+  // was tried first and could not hold: the same build measured a worst step of 183 at 410
+  // frames and 825 at 180, with rows walking 0.01 a frame and no seam, sub-seam or split change
+  // anywhere near the jump -- the 825 was five clean row-hops coalescing into ONE stalled frame
+  // near settle, a tail event the mean cannot see. 183 x the mean factor of 2.2 fits any
+  // reasonable bound; the one long gap does not.
+  //
+  // So the worst step is recomputed from the samples with each step divided by its own gap's
+  // duration in nominal frames: a frame that took 80ms may legitimately carry ~5 hops, and a
+  // SNAP still fails by an order of magnitude, because a snap is the whole path in one
+  // ordinary-length frame -- stretching the gap is precisely what a snap does not get to do.
   const ONE_ROW = 160;
-  const nominal = r.spanMs / 16.67;
-  const starve = Math.max(1, nominal / Math.max(1, r.frames));
+  // CASCADE SAMPLES ONLY. The probe also samples at the settle boundary (tagged "pre-settle"
+  // and "settled"), and at settle the page re-parks DEPARTING notes at their zero-weight seats
+  // in the same instant their alpha reaches 0 -- measured on the 10k fixture: outerMax fell
+  // 10715 -> 9877 between those two tags with radStep 0 on both, i.e. an 838-unit step carried
+  // entirely by notes that are invisible at the moment they move. The viewer sees nothing, and
+  // the re-park is correct (the alternative is stranding them at stale coordinates, which is
+  // the github#17 pinning). The settle hand-over has its own instruments -- settleStep here,
+  // and the whole "last frame of a cascade is the resting layout" check -- both of which watch
+  // PRESENT notes and both of which hold at zero. The extent walk keeps to its domain: the
+  // frames of the animation itself.
+  const perGapWorst = (key) => {
+    const smp = r.samples || [];
+    let worst = 0;
+    for (let i = 1; i < smp.length; i++) {
+      if (smp[i].tag !== "cascade" || smp[i - 1].tag !== "cascade") continue;
+      const gapFrames = Math.max(1, (smp[i].ms - smp[i - 1].ms) / 16.67);
+      const d = Math.abs((smp[i][key] || 0) - (smp[i - 1][key] || 0)) / gapFrames;
+      if (d > worst) worst = d;
+    }
+    return Math.round(worst);
+  };
+  const oWorst = perGapWorst("outerMax"), iWorst = perGapWorst("innerMax");
   const budget = (path) =>
-    Math.max(40, ONE_ROW * 1.25 * starve, 6 * path / Math.max(1, r.frames));
+    Math.max(40, ONE_ROW * 1.25, 6 * path / Math.max(1, r.frames));
   const oBudget = budget(r.outerPath), iBudget = budget(r.innerPath);
   const rad = r.radMaxStep || { step: 0, atMs: 0 };
   return {
-    ok: r.frames > 20 && r.outerMaxStep <= oBudget && r.innerMaxStep <= iBudget,
+    ok: r.frames > 20 && oWorst <= oBudget && iWorst <= iBudget,
     detail: `${r.frames} frames over ${r.spanMs}ms at 4x: outer band stepped ` +
-            `${r.outerMaxStep} of ${Math.round(oBudget)} allowed over a path of ` +
-            `${Math.round(r.outerPath)} (net ${Math.round(r.outerTravel)}), inner ` +
-            `${r.innerMaxStep} of ${Math.round(iBudget)} over ${Math.round(r.innerPath)} ` +
-            `(net ${Math.round(r.innerTravel)}); one row = 160. Context, not asserted: worst ` +
-            `single note ${rad.step} at ${Math.round(100 * rad.atMs / Math.max(1, r.spanMs))}% ` +
-            `through, mean note ${r.radMeanStep}/frame; settle moved tan ` +
-            `${r.settleStep ? r.settleStep.tan : "?"}`,
+            `${oWorst}/gap-frame of ${Math.round(oBudget)} allowed over a path of ` +
+            `${Math.round(r.outerPath)} (net ${Math.round(r.outerTravel)}, raw worst ` +
+            `${r.outerMaxStep}), inner ${iWorst} of ${Math.round(iBudget)} over ` +
+            `${Math.round(r.innerPath)} (net ${Math.round(r.innerTravel)}); one row = 160. ` +
+            `Context, not asserted: worst single note ${rad.step} at ` +
+            `${Math.round(100 * rad.atMs / Math.max(1, r.spanMs))}% through, mean note ` +
+            `${r.radMeanStep}/frame; settle moved tan ${r.settleStep ? r.settleStep.tan : "?"}`,
   };
 });
 
@@ -2292,7 +2319,11 @@ check("overriding one folder recolours exactly one group", async (p) => {
 check("every unlinked note wears the (unlinked) swatch", async (p) => {
   const r = await p.j(`(function(){
     var g = __vg.graph, rd = __vg.renderer, sw = String(__vg.colorOf("(unlinked)")).toLowerCase();
-    var ids = g.nodes().filter(function (id) { return g.degree(id) === 0; });
+    // THE PAGE'S OWN PREDICATE, not graph.degree: in a budgeted vault the graph carries only
+    // the strongest share of the web, so degree-0 there includes thousands of linked notes
+    // whose links happen to be trimmed at rest -- measured, 281 of them wearing their folder
+    // colour, which is correct behaviour failing a check that asked the wrong question.
+    var ids = g.nodes().filter(function (id) { return __vg.isOrphan(id); });
     var cols = ids.map(function (id) { return String(rd.getNodeDisplayData(id).color).toLowerCase(); });
     return { swatch: sw, orphans: ids.length,
              match: cols.filter(function (c) { return c === sw; }).length,

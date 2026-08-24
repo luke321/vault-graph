@@ -376,11 +376,65 @@ function mountVaultGraph(root, data, deps) {
       words: n.words || 0, ghost: !!n.ghost
     });
   });
-  DATA.edges.forEach(function (e) {
-    if (!graph.hasEdge(String(e.s), String(e.t))) {
-      graph.addUndirectedEdge(String(e.s), String(e.t), { weight: e.w, size: Math.min(1.6, 0.35 + e.w * 0.25) });
+  /**
+   * THE RESTING WEB IS A BUDGET, and the share it buys shrinks as the vault grows.
+   *
+   * Sigma pays for every edge in the graph on every refresh, and hiding them does not help:
+   * measured on the 10k fixture (36k links), a refresh costs 30.2ms as shipped, still 25.6ms
+   * with the reducer short-circuiting every edge to hidden -- 36k reducer calls and sigma's
+   * own per-edge iteration cost ~18ms even when nothing is drawn. Only absence is cheap. So a
+   * vault past EDGE_RAMP_START draws only its strongest links at rest, chosen by weight, and
+   * the rest exist only in the adjacency map -- until a hover or selection materialises the
+   * focused note's complete web on top (see syncLazyEdges), which is what makes the omission
+   * safe: every link is still reachable, it is just quiet until pointed at.
+   *
+   * The share ramps rather than switching: everything renders up to EDGE_RAMP_START, then the
+   * share falls linearly to EDGE_FLOOR at EDGE_RAMP_END and holds there, so even a monster
+   * keeps a skeleton of its strongest structure. Against the vaults this repo is tuned by:
+   * the real vault (1,576 links) renders 100%; the demo vault (4,902) renders its strongest
+   * 67% (~3.3k); the 10k fixture (37,373) renders 10% (~3.7k). Weight-descending selection
+   * means what survives is the structure a reader would trace anyway -- at 36k the full web
+   * reads as fog, and the fade-in of 36k links during a cascade is a wall of movement behind
+   * the notes.
+   */
+  var EDGE_RAMP_START = 2000, EDGE_RAMP_END = 10000, EDGE_FLOOR = 0.10;
+  /** id -> [{ o: neighbour id, w: link weight }], both directions, deduped. The one source of
+   *  neighbourhood truth in both modes -- neighboursOf() reads this, never graph.neighbors(),
+   *  so the halo, the focus web and the detail panel work identically whether or not the
+   *  edges are materialised. */
+  var adj = Object.create(null);
+  var EDGE_TOTAL = 0;
+  var edgeAttrsOf = function (w) { return { weight: w, size: Math.min(1.6, 0.35 + w * 0.25) }; };
+  var EDGE_SHOWN = 0;
+  var lazyEdges = false;   // true when the resting web is partial; probes read this
+  (function () {
+    var seen = Object.create(null), list = [];
+    DATA.edges.forEach(function (e) {
+      var a = String(e.s), b = String(e.t);
+      var k = a < b ? a + "\u0000" + b : b + "\u0000" + a;
+      if (seen[k]) return;
+      seen[k] = 1;
+      EDGE_TOTAL++;
+      list.push({ a: a, b: b, w: e.w, k: k });
+      (adj[a] || (adj[a] = [])).push({ o: b, w: e.w });
+      if (b !== a) (adj[b] || (adj[b] = [])).push({ o: a, w: e.w });
+    });
+    var share = EDGE_TOTAL <= EDGE_RAMP_START ? 1
+      : EDGE_TOTAL >= EDGE_RAMP_END ? EDGE_FLOOR
+      : 1 - (1 - EDGE_FLOOR) * (EDGE_TOTAL - EDGE_RAMP_START) / (EDGE_RAMP_END - EDGE_RAMP_START);
+    EDGE_SHOWN = Math.round(EDGE_TOTAL * share);
+    lazyEdges = EDGE_SHOWN < EDGE_TOTAL;
+    if (lazyEdges) {
+      // Strongest first; ties broken by key so the same vault always shows the same web --
+      // a resting set that changed between loads would read as links appearing and vanishing
+      // for no reason.
+      list.sort(function (p, q) { return q.w - p.w || (p.k < q.k ? -1 : 1); });
+      list.length = EDGE_SHOWN;
     }
-  });
+    list.forEach(function (e) {
+      if (!graph.hasEdge(e.a, e.b)) graph.addUndirectedEdge(e.a, e.b, edgeAttrsOf(e.w));
+    });
+  })();
 
   // Node area tracks link count; sqrt keeps hubs from swallowing the canvas.
   // The cap is not cosmetic: measured row spacing in the Rings layout is ~28px, so
@@ -449,7 +503,12 @@ function mountVaultGraph(root, data, deps) {
   // and so it cannot collide with a real folder name.
   var UNLINKED = "(unlinked)";
   function groupOf(id) {
-    if (graph.degree(id) === 0) return UNLINKED;
+    // From the ADJACENCY, not graph.degree(): in a budgeted vault the graph holds only the
+    // resting share of the web, so a note whose links were all trimmed would read as unlinked
+    // -- measured with the graph fully empty, all 10k notes classified as (unlinked), the
+    // legend collapsed to one eye and the disc laid out as a single wedge. adj always holds
+    // every link, so the answer is the same in every mode.
+    if (!adj[id]) return UNLINKED;
     return graph.getNodeAttribute(id, "folder");
   }
 
@@ -971,7 +1030,7 @@ function mountVaultGraph(root, data, deps) {
   // A note with no links has nothing to be near, so it goes in the hub hole rather
   // than on the rim. Coreness 0 and degree 0 are the same set -- any note with a
   // link survives the first peel -- so this is exactly the 0-core.
-  function isOrphan(id) { return graph.degree(id) === 0; }
+  function isOrphan(id) { return !adj[id]; }   // adjacency, not graph.degree -- see groupOf
 
   // THE SEAM IS A WIDTH, NOT AN ANGLE, and measuring it in degrees is why it looked wrong.
   //
@@ -4650,9 +4709,44 @@ function mountVaultGraph(root, data, deps) {
   var renderer, neighbourCache = null;
 
   function neighboursOf(id) {
+    // From the adjacency, not graph.neighbors(): in a budgeted vault the graph is missing
+    // every trimmed link (see syncLazyEdges), so asking it would undercount everywhere -- and
+    // the halo, focusSet and the detail panel all need the note's real neighbourhood.
     if (!neighbourCache) neighbourCache = {};
-    if (!neighbourCache[id]) neighbourCache[id] = graph.neighbors(id);
+    if (!neighbourCache[id]) {
+      neighbourCache[id] = (adj[id] || []).map(function (e) { return e.o; });
+    }
     return neighbourCache[id];
+  }
+
+  /**
+   * In a budgeted vault, top the graph up with the focused note's COMPLETE web -- and take
+   * exactly that top-up back when the focus moves on. The resting budget is never touched.
+   *
+   * Called wherever the focus (hovered-or-selected, the same resolution focusSet uses) can
+   * change: enterNode, select(), and the hover tween's landing frame. That last one matters:
+   * state.hovered is only released when the tween reaches zero, precisely so the fade-out gets
+   * drawn -- so the extra links must survive until the same moment, or they would vanish while
+   * the note under the pointer is still fading. The extras are tracked by name rather than
+   * re-derived: deciding what to remove by re-asking the budget would couple this to the
+   * selection rule, and a tracked list cannot disagree with what was actually added.
+   */
+  var lazyShown = null, lazyAdded = [];
+  function syncLazyEdges() {
+    if (!lazyEdges) return;
+    var want = state.hovered || state.selected || null;
+    if (want === lazyShown) return;
+    lazyAdded.forEach(function (pr) {
+      if (graph.hasEdge(pr[0], pr[1])) graph.dropEdge(pr[0], pr[1]);
+    });
+    lazyAdded = [];
+    if (want) (adj[want] || []).forEach(function (e) {
+      if (!graph.hasEdge(want, e.o)) {
+        graph.addUndirectedEdge(want, e.o, edgeAttrsOf(e.w));
+        lazyAdded.push([want, e.o]);
+      }
+    });
+    lazyShown = want;
   }
 
   // The key for a folder at depth k in a note's chain: "PARA/a", "PARA/a/b", ...
@@ -4736,7 +4830,7 @@ function mountVaultGraph(root, data, deps) {
       // The hovered id is released only HERE, at zero. Clearing it in leaveNode would
       // empty focusSet() on that frame and snap the whole disc back to full colour --
       // the fade-out would never be drawn.
-      if (landed && hoverT === 0) state.hovered = null;
+      if (landed && hoverT === 0) { state.hovered = null; syncLazyEdges(); }
       renderer.refresh({ skipIndexation: true });   // nothing moved; only colour and size
       if (landed) { hoverRaf = 0; return; }
       hoverRaf = WIN.requestAnimationFrame(step);
@@ -5672,7 +5766,11 @@ function mountVaultGraph(root, data, deps) {
       placeLogo(); refreshSizeScale(); heatDraw(); hlSync();
     });
 
-    renderer.on("enterNode", function (e) { state.hovered = e.node; showTip(e.node); hoverTo(1); });
+    renderer.on("enterNode", function (e) {
+      state.hovered = e.node;
+      syncLazyEdges();
+      showTip(e.node); hoverTo(1);
+    });
     // The tip goes at once -- it tracks the pointer, so leaving it behind would leave it
     // pointing at nothing -- but the DISC fades back out, which is why state.hovered is
     // released by the tween at zero rather than here.
@@ -5727,6 +5825,7 @@ function mountVaultGraph(root, data, deps) {
 
   function select(id) {
     state.selected = id;
+    syncLazyEdges();
     var d = $("detail");
     if (!id) { d.hidden = true; renderer.refresh(); return; }
 
@@ -8665,6 +8764,15 @@ function mountVaultGraph(root, data, deps) {
                     readTheme: readTheme, get renderer() { return renderer; },
                     ringsLayout: ringsLayout, visible: visible, groupOf: groupOf,
                     alpha: alpha, cascade: cascade, syncAlpha: syncAlpha,
+                    // The lazy-edge seam, exposed for the probes: a test that wants to know
+                    // whether hover materialisation works should drive the same function the
+                    // pointer does, not re-implement it.
+                    syncLazyEdges: syncLazyEdges,
+                    get lazyEdges() { return lazyEdges; },
+                    // The page's own definition of unlinked. A check that re-derives it from
+                    // graph.degree gets a different answer in a budgeted vault, where a note
+                    // whose links were all trimmed has degree 0 and is not unlinked at all.
+                    isOrphan: isOrphan,
                     clearAlpha: clearAlpha, buildWedgePlan: buildWedgePlan,
                     // Both added after wanting them from a test page: applyLayout to
                     // settle without waiting on rAF (which a hidden tab throttles,
@@ -9244,7 +9352,12 @@ function mountVaultGraph(root, data, deps) {
                       return {
                         note: "vault-graph debug dump -- paste this back verbatim",
                         vault: { name: DATA.vault || "", notes: graph.order,
-                                 links: graph.size, generated: DATA.generated || "" },
+                                 // EDGE_TOTAL, not graph.size: in a budgeted vault the graph
+                                 // holds only the resting share, and a dump that said
+                                 // "links: 8027" about a 37k-link vault would send whoever
+                                 // reads it in the wrong direction. linksShown is the budget.
+                                 links: EDGE_TOTAL, linksShown: EDGE_SHOWN, lazyEdges: lazyEdges,
+                                 generated: DATA.generated || "" },
                         screen: { win: WIN.innerWidth + "x" + WIN.innerHeight,
                                   dpr: WIN.devicePixelRatio || 1,
                                   stage: $("canvas") ? Math.round($("canvas").clientWidth) + "x" +
