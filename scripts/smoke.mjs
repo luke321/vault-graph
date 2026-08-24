@@ -2086,10 +2086,35 @@ check("filtered to the bone, the disc stays drawable", async (p) => {
 check("the gap reservation holds still while groups only thin", async (p) => {
   await clearRange(p);
   const before = await p.j(`__vg.rangeReport()`);
+  // THE CUT IS DERIVED FROM THE VAULT, not hardcoded -- the point is thinning, not emptying,
+  // and a fixed date cannot promise that against fixtures anchored to today (github#20 made
+  // them ALWAYS today-anchored, which is when the old "2025-03-01" started emptying a small
+  // inner-band group on freshly generated shapes; before that it was merely going to start
+  // failing on whatever day the drift reached it, the same calendar-dependence the shape-vault
+  // ribbon checks had). A group can only empty if every one of its notes is dated and older
+  // than the cut -- undated notes survive every range -- so the latest cut that empties
+  // nothing is the minimum over such groups of each group's NEWEST note. Cutting exactly
+  // there keeps at least that one note in every group and thins everything older.
+  const cut = await p.j(`(function () {
+    var newest = Object.create(null);
+    __vg.graph.forEachNode(function (id, a) {
+      var g = __vg.groupOf(id);
+      if (!a.created) { newest[g] = "9999-12-31"; return; }   // this group cannot empty
+      if (newest[g] !== "9999-12-31" && (!(g in newest) || a.created > newest[g])) {
+        newest[g] = a.created;
+      }
+    });
+    var min = null;
+    Object.keys(newest).forEach(function (g) {
+      if (newest[g] !== "9999-12-31" && (min === null || newest[g] < min)) min = newest[g];
+    });
+    return min && min.slice(0, 10);   // the range field takes YYYY-MM-DD; a time suffix
+  })()`);                               // would only make the cut minutes earlier anyway
+  if (!cut) {
+    return { ok: true, detail: "every group holds an undated note -- no cut can thin without a date to cut at" };
+  }
   await p.eval(`__vg.probe(true); void 0`);
-  // A span wide enough that every folder keeps some notes -- the point is thinning, not
-  // emptying. Asserted below rather than assumed, since a vault could be shaped otherwise.
-  await p.eval(`__vg.setRange("2025-03-01", null); void 0`);
+  await p.eval(`__vg.setRange(${JSON.stringify("PLACEHOLDER")}, null); void 0`.replace("PLACEHOLDER", cut));
   await sleep(200);
   await settle(p);
   await sleep(250);
@@ -2106,10 +2131,14 @@ check("the gap reservation holds still while groups only thin", async (p) => {
     // Emptying a group legitimately moves the reservation, so a vault where this range
     // empties one is reported rather than silently passing on a weaker assertion.
     ok: r.ngMaxStep === 0 && !emptied,
+    // BOTH bands in the message. It used to print ngO alone, so the one real failure it ever
+    // reported read "nG 8 -> 8" -- a count that had not moved -- while the emptied group was in
+    // the INNER band the message never mentioned.
     detail: emptied
-      ? `this range empties a group (nG ${s0.ngO} -> ${s1.ngO}), so the gap moves for a real reason`
-      : `nG held at ${s1.ngO} across ${r.frames} frames, worst step ${r.ngMaxStep}; ` +
-        `lit ${before.lit} -> ${after.lit}`,
+      ? `the cut at ${cut} emptied a group (nG outer ${s0.ngO} -> ${s1.ngO}, ` +
+        `inner ${s0.ngI} -> ${s1.ngI}), which the derived cut exists to prevent`
+      : `cut at ${cut}: nG held (outer ${s1.ngO}, inner ${s1.ngI}) across ${r.frames} frames, ` +
+        `worst step ${r.ngMaxStep}; lit ${before.lit} -> ${after.lit}`,
   };
 });
 
