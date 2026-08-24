@@ -116,6 +116,32 @@ try {
   Write-Host "`n=== release notes ===" -ForegroundColor Cyan
   Write-Host $section -ForegroundColor DarkGray
 
+  # THE README HERO IS A RECORDING, AND IT GOES STALE SILENTLY. Nothing about a build
+  # fails when assets/demo.webp shows a page three releases old -- it just keeps
+  # advertising the wrong thing to everyone who lands on the repo. Re-recording is part
+  # of cutting a release:
+  #
+  #   .\scripts\record-demo.ps1     then     .\scripts\make-hero.ps1
+  #
+  # A WARNING, NOT A GATE, and deliberately: only a person can say whether anything
+  # visible actually changed, so a hard stop on a docs-only patch would be wrong often
+  # enough to get trained away, and then it would not be read at all.
+  #
+  # IT COMPARES COMMIT DATES, WHICH IS A PROXY AND NOT THE TRUTH. Encoding an old take
+  # and committing it today makes a stale hero look fresh -- which is exactly what
+  # happened when the WebP landed: the asset was committed 2026-08-23 from the 2026-08-22
+  # recording, so this check stayed quiet on a hero that was already behind. Silence here
+  # means "no evidence of staleness", not "the hero is current".
+  $heroAt = (& git log -1 --format=%ct -- assets/demo.webp) | Select-Object -First 1
+  $srcAt  = (& git log -1 --format=%ct -- src) | Select-Object -First 1
+  if ($heroAt -and $srcAt -and ([int64]$srcAt -gt [int64]$heroAt)) {
+    $heroOn = (& git log -1 --format=%cs -- assets/demo.webp) | Select-Object -First 1
+    $srcOn  = (& git log -1 --format=%cs -- src) | Select-Object -First 1
+    Write-Host "`n=== hero ===" -ForegroundColor Cyan
+    Write-Host ("assets/demo.webp was last committed $heroOn; src/ has changed since ($srcOn). " +
+                "Re-record and re-encode, or carry it knowingly.") -ForegroundColor Yellow
+  }
+
   Write-Host "`n=== invariants ===" -ForegroundColor Cyan
   & node (Join-Path $here 'smoke.mjs')
   if ($LASTEXITCODE -ne 0) { throw "the invariant suite failed -- not releasing" }
