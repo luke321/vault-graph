@@ -667,6 +667,31 @@ function mountVaultGraph(root, data, deps) {
   // capacities are computed on the unscaled geometry and the whole band is scaled
   // afterwards, so the proportions are untouched -- it is purely a size trim.
   var INNER_SCALE = 0.8;
+  // How much of the locked hub-to-ring span the inner band fills; the rest is the channel
+  // between the rings. At module scope because the sub-split gate needs a band's depth before
+  // the band is packed, which is above where this used to live.
+  var INNER_FILL = 0.8;
+  /**
+   * How wide the channel between two wedges is, per band.
+   *
+   * The inner ring reads gappier than the outer at the same width, because the same channel is
+   * a larger share of a shorter row: at half the radius a wedge holds half the notes, so a gap
+   * of a given width is twice as much of what is around it. Half for the inner band, by
+   * measurement of how it looks rather than by derivation.
+   */
+  var GAP_BAND = { i: 0.5, o: 1 };
+  /**
+   * The visible channel's half-width, as a fraction of the band's own room -- so the gap scales
+   * with the lattice rather than being a fixed number of units that means something different
+   * on every vault.
+   *
+   * This is a CLEARANCE between dot RIMS, which is the thing a person sees. It used to be a
+   * margin to dot CENTRES, and centres are the wrong reference: dot size varies with link
+   * weight, so equal centre spacing leaves unequal gaps. Measured edge to edge on the 10k
+   * vault, the channel ran 28 to 89 units across the rows of one boundary -- a 3.2x variation
+   * that reads as a ragged seam.
+   */
+  var CLEAR_OF_ROOM = 0.12;
 
   var MIN_SPAN = 6 * Math.PI / 180;
   // Nest whenever a group HAS subfolders. This used to require 12+ notes, because
@@ -1031,7 +1056,7 @@ function mountVaultGraph(root, data, deps) {
     var k = band === "i" ? "i" : "o";
     var r = geomLock && geomLock.bandR ? geomLock.bandR[k] : 0;
     if (!r) return SLICE_GAP * Math.PI / 180 * gapScale() * frac;
-    var w = SEAM_ROWS * seamFall(band) * pitchUnits(band);
+    var w = SEAM_ROWS * seamFall(band) * pitchUnits(band) * (GAP_BAND[k] || 1);
     var cap = SEAM_MAX_ROWS * UNIT;
     if (w > cap) w = cap;
     return (w * frac) / r;
@@ -1221,14 +1246,126 @@ function mountVaultGraph(root, data, deps) {
       gap *= k; subGap *= k; gapTotal *= k;
     }
     var avail = TWO - gapTotal;
+
+    /* ------------------------------------------------------------- minimum arc --
+     * A WEDGE MUST BE AT LEAST AS WIDE AS A NOTE.
+     *
+     * Arc is allotted in proportion to note count, which is what makes every cell equally full
+     * and puts one pitch on the whole ring. It has no floor, and a folder of one note in a
+     * 10,000-note vault therefore gets about a thousandth of the circle: measured, 14 - Reading
+     * List came out at 0.1 degrees and 00 - Inbox at 0.4. A wedge that narrow is narrower than
+     * the note it holds -- the note sits at its centre, its distance to its own boundary is
+     * ~3.5 units, and dotPx correctly refuses to draw a dot that would cross out of it. Result:
+     * radius 3 against 39-55 for the big folders, for a note whose degree is 7 and which is in
+     * no way less important than its neighbours. Reported as small folders rendering tiny.
+     *
+     * So every cell is floored at the angular width of one lattice step, which is exactly the
+     * room one note needs, and the surplus is taken back from the cells that are ABOVE the floor
+     * in proportion to how far above they are. Cells at the floor are untouched, so the floor
+     * cannot be undone by the redistribution that pays for it.
+     *
+     * Nothing is floored when there is no lock to measure a step against -- the one unfiltered
+     * plan that produces geomLock -- and nothing is floored for a cell with no weight, which is
+     * entitled to no arc at all (github#5).
+     */
+    var floorAng = 0;
+    if (opts.band && geomLock && geomLock.bandR) {   // lastMinArc is set below, for the probe
+      var rRef = geomLock.bandR[opts.band === "i" ? "i" : "o"] || 0;
+      // A THIRD OF A STEP, not a whole one, and the three were measured.
+      //
+      // A whole step is what one note needs, and giving it to every cell costs the rows that
+      // cell cannot reach: on the 454-note vault the worst gap went 1.80x the row median to
+      // 2.87x, because several folders there hold fewer notes than the band is deep and each
+      // then held a full step of arc it could not fill. Measured across the three:
+      //
+      // Measured on the 10k vault, once a lone note stopped being bounded by its own cell's
+      // "step" (see the nRow > 1.5 guard in the placement loop):
+      //
+      //   floor      worst gap     small-folder dot radius
+      //   0.35 step    1.93x                16 - 17
+      //   0.8  step    2.73x                37 - 38
+      //   1.3  step    3.73x                38
+      //
+      // 0.8 is the knee. It is where a one-note folder draws at the same size as a crowded one
+      // -- 37 against the 34 of a 47-note folder -- and past it the gap keeps growing while the
+      // dot does not, because the dot is then bounded by the band's room instead of by its own
+      // wedge. The cost is real and is the rows that cell cannot reach: a folder holding fewer
+      // notes than the band is deep now holds most of a step of arc in each of them.
+      if (rRef > 1e-6) floorAng = 0.8 * pitchUnits(opts.band) / rRef;
+    }
+    var shareMap = null;
+    if (floorAng > 0 && tot > opts.totFloor) {
+      shareMap = Object.create(null);
+      // THE FLOOR SCALES WITH PRESENCE, so a wedge that is on its way out gives its arc up
+      // continuously instead of holding a full note's width until the frame it vanishes.
+      //
+      // The floor exists because a wedge must be at least as wide as the note it holds. That is
+      // a statement about a note that is THERE. Applied flat, it also fires for a cell whose
+      // notes are nearly gone: at weight 0.003 a cell was still floored to a full lattice step,
+      // and released the whole of it in the single frame present() culled it. Measured on hiding
+      // a one-note folder, 06 - Monthly Reviews -- a neighbour, not the folder being toggled --
+      // rotated 10.08 degrees in one frame, 153 units at its radius.
+      //
+      // Scaled by min(1, w) the floor is a full step for any cell holding a real note, since a
+      // visible note weighs 1, and shrinks with the last of a departing cell's weight. Nothing
+      // changes at rest; the cliff at the cull becomes a ramp.
+      var floorFor = function (w) { return floorAng * (w > 1 ? 1 : w < 0 ? 0 : w); };
+      var over = 0, under = 0, live = [];
+      list.forEach(function (c) {
+        var w = weightOf(c);
+        var raw = w > 0.0001 ? avail * (w / Math.max(opts.totFloor, tot)) : 0;
+        shareMap[c.k] = raw;
+        if (raw <= 0) return;
+        live.push(c);
+        var fl = floorFor(w);
+        if (raw < fl) under += fl - raw;
+        else over += raw - fl;
+      });
+      // AS MUCH OF THE LIFT AS IS AFFORDABLE, ramped -- not all of it or none.
+      //
+      // This used to bail out to shareMap = null whenever the surplus above the floor could not
+      // cover the deficit below it. That is a switch, and every share in the band changes when it
+      // throws: affordability depends on the live weights, so it can flip mid-cascade, and when
+      // it did, 04 - Daily Notes' wedge start moved 38.55 degrees in a single frame with no cell
+      // appearing, no cell leaving, and the gap count and width both unchanged.
+      //
+      // lift is the fraction of the deficit that can be paid for, so it walks to 1 rather than
+      // arriving there. At lift 1 this is the old expression exactly; below it, cells under the
+      // floor come up part of the way and the ones above pay proportionally. Continuous across
+      // the boundary in both directions, which is the property the switch could not have.
+      var lift = under > 0 && over > 0 ? Math.min(1, over / under) : 0;
+      if (lift > 0) {
+        var take = (under * lift) / over;
+        live.forEach(function (c) {
+          var raw = shareMap[c.k], fl = floorFor(weightOf(c));
+          shareMap[c.k] = raw < fl ? raw + (fl - raw) * lift : raw - (raw - fl) * take;
+        });
+      } else {
+        shareMap = null;
+      }
+    }
+
     return {
       tot: tot, nG: nG, nSub: nSub, gap: gap, subGap: subGap, avail: avail,
+      /** The angular floor actually applied, or 0. For the probe. */
+      minArc: (function () { lastMinArc = shareMap ? floorAng : 0; return lastMinArc; })(),
       groupPres: groupPres, presOf: presOf,
-      shareOf: function (c) { return avail * (weightOf(c) / Math.max(opts.totFloor, tot)); },
+      shareOf: function (c) {
+        if (shareMap && shareMap[c.k] !== undefined) return shareMap[c.k];
+        return avail * (weightOf(c) / Math.max(opts.totFloor, tot));
+      },
       // The share as a plain FRACTION of whatever arc is going. The rendered placement needs
       // this rather than shareOf, because the arc going depends on the radius and so cannot be
       // baked in here.
-      fracOf: function (c) { return weightOf(c) / Math.max(opts.totFloor, tot); }
+      fracOf: function (c) {
+        // The share as a FRACTION of the arc going, so the sweep can work per radius. Derived
+        // from the floored share when there is one, or the two disagree and the wedges stop
+        // filling the circle.
+        if (shareMap && shareMap[c.k] !== undefined) {
+          return avail > 1e-9 ? shareMap[c.k] / avail : 0;
+        }
+        return weightOf(c) / Math.max(opts.totFloor, tot);
+      }
     };
   }
 
@@ -1249,6 +1386,7 @@ function mountVaultGraph(root, data, deps) {
     var nested = state.dim === "folder";
     var SEP = "\u0000";
     var byCell = {}, cellsOf = {}, planTotal = 0;
+    var presMax = Object.create(null);
 
     // A SUB-WEDGE HAS TO BE ABLE TO HOLD A NOTE PER ROW, or it is dead arc.
     //
@@ -1276,6 +1414,7 @@ function mountVaultGraph(root, data, deps) {
     // instead would let the threshold fall mid-flight, which is a change of cell IDENTITY
     // rather than of weight, and that is the one thing the cascade cannot walk.
     var liveG = Object.create(null);
+    var liveN = Object.create(null);
     graph.forEachNode(function (id) {
       // MEMBERSHIP AT REST IS THE MEMBERSHIP THE CASCADE ENDS ON, and it was not.
       //
@@ -1290,16 +1429,89 @@ function mountVaultGraph(root, data, deps) {
       // willShow IS that destination. At rest nothing is departing, so "staying or on screen"
       // and "showing" are the same set, and the two agree by construction rather than nearly.
       if (onlyVisible && !(planKeep || willShow)(id)) return;
-      if (onlyVisible && !willShow(id)) return;
       var g0 = groupOf(id);
-      liveG[g0] = (liveG[g0] || 0) + 1;
+      // A WEIGHT, NOT A COUNT -- and the second filter that used to stand here, rejecting
+      // anything outside willShow, is gone with it.
+      //
+      // liveG feeds bandDepth, and bandDepth is what the split gate below compares against. As a
+      // count over willShow it took the DESTINATION's value from the first frame of a cascade,
+      // while at rest it had the source's -- so the number the gate tested changed in one step
+      // between the resting disc and frame 1. Gates flipped for folders that were not being
+      // toggled at all, and the cell structure teleported before a single note had moved.
+      // Measured on hiding 04 - Daily Notes: 50 notes jumped 2482 units TANGENTIALLY on frame 2,
+      // in 02 - Areas as well as 04, with rows, gaps, room and arc all identical across the
+      // frame. Structure changing under notes that were still where the source put them.
+      //
+      // Summed as weights it is the same number at rest -- a visible note weighs 1 -- and walks
+      // continuously during a cascade, because that is what the weights do. The gate can still
+      // flip, but it flips once, when its input genuinely crosses the threshold, and it moves the
+      // one folder whose split actually changed. Same treatment the row count and the band room
+      // already get: interpolate the INPUT and let the planner stay the only planner.
+      var wv = W(id);
+      liveG[g0] = (liveG[g0] || 0) + (wv > 1 ? 1 : wv < 0 ? 0 : wv);
+      // AND A PLAIN COUNT over the same set, for the SPLIT GATE alone.
+      //
+      // Two different questions are being asked of this loop. "How deep is this band" is about
+      // how much is on screen, and wants the weights -- that is liveG above, and making it a
+      // weight is what stopped the band depth jumping between rest and frame 1. "Does this
+      // folder have enough notes to be worth splitting into subfolder columns" is not about
+      // the fade at all: it is a property of the folder, and the answer must not change while
+      // the folder is on its way out, or its columns merge underneath the notes still in them.
+      //
+      // Measured on hiding 04 - Daily Notes: the gate flipped at 45% of the cascade, while the
+      // folder was still half visible, and its wedge start moved 38.9 degrees in one frame.
+      //
+      // The set this loop walks is the UNION of what is staying and what is still on screen, so
+      // a count over it is the folder at its fullest -- the source count while it leaves, the
+      // destination count while it arrives -- and is constant for the whole cascade. At rest the
+      // union is just what is visible, so the count is unchanged there.
+      liveN[g0] = (liveN[g0] || 0) + 1;
     });
+    // AGAINST THE BAND'S REAL DEPTH, not a constant.
+    //
+    // "Each sub-wedge can fill a column" is a claim about ROWS, and the gate was testing it
+    // against REF_ROWS, which is 5. The demo vault's outer band is 9 rows deep, so a folder of
+    // 25 notes over 4 subfolders passed the test (25 >= 4*5) and should not have (25 < 4*9):
+    // each sub-wedge got 6 or 7 notes for a 9-row band, put a note in some rows and none in
+    // others, and its arc stood EMPTY in the rows it could not reach. Measured on 15 - Courses:
+    // four sub-wedges of 7, 6, 6 and 6, none of them reaching the rim row, and their four arcs
+    // side by side were a 773-unit gap in a row whose ordinary spacing is 175.
+    //
+    // No placement rule removes that. Spanning the notes across the full depth puts the dead
+    // arc in the middle rows, centring them puts it at both edges, capping the row count moves
+    // it outward. Seven notes in a nine-row band leave two rows empty wherever they go, so the
+    // split is what has to be refused.
+    //
+    // NOT CIRCULAR, which is the reason it can be done here at all. The depth of a band follows
+    // from its AREA and the number of notes IN it -- the same single division solveBand does --
+    // and neither term depends on how any group is split. So the gate can know the depth before
+    // the cells exist. Without a geometry lock, on the one unfiltered plan that produces it,
+    // REF_ROWS stands in.
+    var bandLive = { i: 0, o: 0 };
+    Object.keys(liveG).forEach(function (g) {
+      bandLive[bandLock && bandLock[g] ? "i" : "o"] += liveG[g];
+    });
+    var depthOfBand = function (isInner) {
+      if (!geomLock) return REF_ROWS;
+      var n = bandLive[isInner ? "i" : "o"];
+      var thick = isInner ? (geomLock.rOuter - geomLock.r0) * INNER_FILL
+                          : geomLock.maxR - geomLock.rOuter;
+      var scale = isInner ? INNER_SCALE : 1;
+      var base = isInner ? geomLock.r0 : geomLock.rOuter;
+      if (!(thick > 0) || !(n > 0.5)) return REF_ROWS;
+      var T = thick * scale, R = (base + thick / 2) * scale;
+      var rw = Math.round(T / Math.sqrt(2 * Math.PI * R * T / n));
+      return rw < 1 ? 1 : rw > 200 ? 200 : rw;
+    };
+    var bandDepth = { i: 0, o: 0 };
     var splitOf = Object.create(null);
     var splitFor = function (g) {
       if (splitOf[g] === undefined) {
+        var bk = bandLock && bandLock[g] ? "i" : "o";
+        if (!bandDepth[bk]) bandDepth[bk] = depthOfBand(bk === "i");
         var nSubs = (subOrder[g] || []).length;
         splitOf[g] = nested && nSubs > 1 &&
-                     (liveG[g] || 0) >= Math.max(NEST_MIN, nSubs * REF_ROWS);
+                     (liveN[g] || 0) >= Math.max(NEST_MIN, nSubs * bandDepth[bk]);
       }
       return splitOf[g];
     };
@@ -1332,6 +1544,16 @@ function mountVaultGraph(root, data, deps) {
       }
       byCell[key].push(id);
       planTotal += W(id);
+      // HOW PRESENT THIS GROUP IS, as the LARGEST weight among its notes.
+      //
+      // This is what a gap between wedges is reserved against, and it has to answer "does this
+      // group exist at all" rather than "how much of it is left". The max does both jobs the
+      // sum cannot: it stays at 1 while a group merely THINS, because one full-weight note is
+      // enough, and for a group that is LEAVING it reaches 0 at the moment its last note does
+      // -- which is the same moment the cell is culled by present(). So the reservation and the
+      // cell wink out together instead of one outliving the other.
+      var pw = W(id);
+      if (!(presMax[g] >= pw)) presMax[g] = pw;
     });
 
     // Groups too small for a readable wedge share one. Measured here, the
@@ -1998,7 +2220,6 @@ function mountVaultGraph(root, data, deps) {
     // fill. Measured: the inner band came out at ONE row holding 34 notes, a step of 65 units,
     // and three overlapping pairs. The band's thickness must not be a function of a number that
     // moves; the lock is there precisely so it is not.
-    var INNER_FILL = 0.8;              // the rest is the channel between the rings
     var thickI = geomLock ? (geomLock.rOuter - geomLock.r0) * INNER_FILL : 0;
     var innerRows = 0;
     if (geomLock && thickI > 0) {
@@ -2080,11 +2301,27 @@ function mountVaultGraph(root, data, deps) {
       // The spacing of the band this cell is in -- rows sit this far apart, and the capacity
       // arithmetic below inverts against the same number.
       var SP = c.inner ? SP_I : SP_O;
-      var live = [], dead = [];
-      c.list.forEach(function (id) { (W(id) > 0.0001 ? live : dead).push(id); });
-      var seq = live.concat(dead);
+      // ONE STABLE ORDER, and weight decides what a note costs.
+      //
+      // This used to partition into live and dead at W > 0.0001 and lay out live-then-dead. The
+      // angular position below is a RUNNING SUM over this sequence, so the frame an arriving
+      // note's weight crossed that threshold it moved from the end of the sequence to its
+      // natural place -- and every note after it got a new position. Measured on one folder
+      // toggle: 2482 units TANGENTIALLY with zero radial movement on frame 2, and 2235 on frame
+      // 127 as the departing notes fell back below it. A whole cell reshuffling in one frame,
+      // twice, at the two moments an animation is most visible.
+      //
+      // The partition was never needed. A note of weight 0 adds 0 to the running sum, so it
+      // already costs its neighbours nothing -- that is what zero-weight invariance means, and
+      // the check behind it only ever covered rows and maxR, which is why this survived. Keeping
+      // c.list's own order means there is no reordering EVENT: a note grows into its seat from
+      // zero and shrinks out of it, and nothing else has to move to make room.
+      var seq = c.list;
       var wTot = 0;
-      live.forEach(function (id) { wTot += W(id); });
+      seq.forEach(function (id) { wTot += W(id); });
+      // How many notes are really here, as a continuous number rather than a count. Used for
+      // centring, which stepped a whole block by a row whenever a count changed.
+      var nEff = wTot;
 
       var total = base * rows + SP * rows * rows / 2;
       // Computed from the cell's FIXED reference width, never the live span, for the
@@ -2118,8 +2355,8 @@ function mountVaultGraph(root, data, deps) {
       // and half of an odd remainder is a fractional row -- which is off the lattice, and the
       // lattice is a stated invariant with a check behind it. Rounded, so a one-row remainder
       // lands on one side rather than half a row off on both.
-      var centred = bandRows > 0 && live.length > 0 && live.length < bandRows;
-      var cStart = centred ? Math.round((bandRows - live.length) / 2) : 0;
+      var centred = bandRows > 0 && nEff > 0.0001 && nEff < bandRows - 0.0001;
+      var cStart = centred ? Math.round((bandRows - nEff) / 2) : 0;
       var recs = [], acc = 0;
       seq.forEach(function (id, idx) {
         var w = W(id);
@@ -2143,10 +2380,16 @@ function mountVaultGraph(root, data, deps) {
         // smeared disc for the whole animation. That is the same failure the row-count
         // note above describes at rest, and trading one bad frame for ~120 mushy ones
         // is the wrong way round. See the changelog.
-        // seq is live-then-dead, so an index past the live count is a note on its way out; it
-        // keeps the last row of the block rather than inventing one below it.
-        recs.push({ id: id, w: w,
-                    row: centred ? cStart + Math.min(idx, live.length - 1) : Math.floor(pp) });
+        // FROM THE WEIGHT FRACTION, not from the index. One note per row either way -- for n
+        // equal weights s is (i + 0.5) / n and this is exactly i -- but keyed on a continuous
+        // quantity, so a note fading in ticks one row of its own instead of renumbering the
+        // block behind it.
+        var cRow = 0;
+        if (centred) {
+          var top = Math.max(0, Math.ceil(nEff - 0.0001) - 1);
+          cRow = cStart + Math.min(Math.floor(s * nEff), top);
+        }
+        recs.push({ id: id, w: w, row: centred ? cRow : Math.floor(pp) });
       });
 
       // PASS 2 -- where in that row it sits, measured WITHIN THE ROW rather than
@@ -2181,7 +2424,10 @@ function mountVaultGraph(root, data, deps) {
         rowW[r.row] = (rowW[r.row] || 0) + r.w;
         if (rowFirst[r.row] === undefined) rowFirst[r.row] = r.w;
         rowLast[r.row] = r.w;
-        var dz = dotUnits(graph.getNodeAttribute(r.id, "size"), c.inner ? "i" : "o");
+        // THE SIZE ATTRIBUTE, not a radius. A radius needs the band's room, which is not known
+        // here and is known where the margin is spent -- and dotUnits() answers from the PITCH,
+        // which is a different number from the room whenever a row is not exactly full.
+        var dz = graph.getNodeAttribute(r.id, "size") || 4;
         if (edgeA[r.row] === undefined) edgeA[r.row] = dz;
         edgeB[r.row] = dz;
       });
@@ -2283,22 +2529,41 @@ function mountVaultGraph(root, data, deps) {
     // rowsOf is the cascade's own interpolation between the two endpoint packings' counts, so
     // taking the depth from it makes the falloff move at the same rate as everything else. At
     // rest rowsOf is absent and this is the integer, so the lattice is untouched.
-    var depthOf = function (list, fallback) {
-      if (!rowsOf || !list.length) return fallback;
-      var m = 0;
-      list.forEach(function (c) {
-        var v = rowsOf(c) || c.rows || 0;
-        if (v > m) m = v;
-      });
-      return m > 0 ? m : fallback;
+    /**
+     * How deep a band is. ONE DEFINITION, at rest and in motion.
+     *
+     * At rest this is the area solve -- solveBand's own row count for the band, which is what
+     * every cell in it is given. During a cascade it used to be the MAX over cells of the walked
+     * per-cell count, with `|| c.rows` behind it, and those are two different quantities:
+     *
+     *     var v = rowsOf(c) || c.rows || 0;
+     *
+     * rowsAt returns 0 for a cell in neither endpoint plan ("cell knows best"), and the fallback
+     * then reads THIS pass's freshly solved count -- the resting definition -- so such a cell
+     * silently switched definition mid-animation. A cell's key carries its split state, so a
+     * group whose split differs between the endpoint plans and the live frame has no matching
+     * key and takes exactly that path. Measured on the intro, band depth walked 1 -> 1.3 and
+     * then jumped to 4, above BOTH endpoints, before settling back to 3. A depth that overshoots
+     * its destination and returns is a disc that swells and re-packs mid-animation, and it feeds
+     * the seam falloff and the split gate while it does it.
+     *
+     * The cascade hands in the walk between the two ENDPOINT depths instead -- each of which is
+     * a resting area solve -- so the quantity is the same one throughout, is bounded by its own
+     * endpoints, and cannot step.
+     */
+    var depthOf = function (list, fallback, band) {
+      var given = spIn && typeof spIn === "object" && spIn.depth ? spIn.depth[band] : 0;
+      if (given > 0) return given;
+      return fallback;
     };
 
     return { cells: cells, maxR: maxR, total: planTotal, r0: r0, rOuter: rOuter,
              sp: SP_O, spInner: SP_I, density: density, room: roomPlan,
              // The sub-split gate's inputs, so a probe can see WHY a group did or did not
              // split rather than inferring it from the cell count.
-             dbgLive: liveG, dbgSplit: splitOf,
-             rows: { i: depthOf(inner, innerRows), o: depthOf(outer, outerRows || REF_ROWS) } };
+             dbgLive: liveG, dbgSplit: splitOf, presMax: presMax,
+             rows: { i: depthOf(inner, innerRows, "i"),
+                     o: depthOf(outer, outerRows || REF_ROWS, "o") } };
   }
 
   // RETIRED 2026-08-22. This used to switch the plan basis on how much of the vault
@@ -2332,6 +2597,13 @@ function mountVaultGraph(root, data, deps) {
   // departing notes toward the position they were already at, so a closing wedge
   // never migrated radially while the ring re-densified around it.
   function ringsLayout(planIn, strict) {
+    // BEFORE ANY PLACEMENT, because the margins are spent during it. Assigned at the end of the
+    // pass -- which is where the measured value has to be written -- the margin would be reading
+    // the previous pass's number, which is the staleness this override also removes.
+    if (roomNow) {
+      if (roomNow.i > 1) bandOf("i").room = roomNow.i;
+      if (roomNow.o > 1) bandOf("o").room = roomNow.o;
+    }
     // A cell's row count is what sets its density, and rows come from the plan.
     // Filter the vault down hard and the full-vault plan leaves each row holding
     // ~2 notes while its wedge grows to 120 degrees -- measured, 55 notes over 8
@@ -2444,10 +2716,29 @@ function mountVaultGraph(root, data, deps) {
       var a = allocateBand(band,
                            function (c) { return c.geom; },
                            { subGaps: true, clamp: 0.45, totFloor: 1e-6,
-                             groupPres: gapPres, band: isInner ? "i" : "o" });
+                             // FROM THE PLAN, on the same clock as everything else it packs.
+                             //
+                             // This used to be gapPres, walked 1 -> 0 across the whole cascade
+                             // on the cascade's own clock. A note's opacity runs on a per-note
+                             // fade clock that finishes far sooner: measured on a vault where
+                             // 07 - Yearly Reviews holds a single note, the note reached
+                             // present()'s 0.004 floor at 32% of the span and its cell was
+                             // correctly culled -- while the walked reservation still stood at
+                             // 0.767. Three quarters of a gap released in one frame, and every
+                             // wedge boundary in the band shifted to absorb it: 10.66 degrees
+                             // on 06 - Monthly Reviews, in a toggle where no note moved more
+                             // than 162 units. The wedge and its seams have to shrink on the
+                             // clock of the notes they belong to, and now they do.
+                             groupPres: plan.presMax || null,
+                             band: isInner ? "i" : "o" });
       var gap = a.gap;
       bandOf(isInner ? "i" : "o").gapDeg = Math.round(gap * 180 / Math.PI * 1000) / 1000;
       bandOf(isInner ? "i" : "o").nG = Math.round(a.nG * 1000) / 1000;
+      // The SUB-seam count too. Every boundary costs a gap, and a sub-wedge boundary is a
+      // boundary: nSub feeds gapTotal exactly as nG does, so a wedge shift with nG flat is
+      // invisible without this. It is presence-weighted like nG, but the NUMBER of sub-cells
+      // jumps when a group's split gate flips, and that changes avail for the whole band.
+      bandOf(isInner ? "i" : "o").nSub = Math.round(a.nSub * 1000) / 1000;
       band.forEach(function (c) { c.span = a.shareOf(c); });
       // EVERY BOUNDARY COSTS ONE SEAM, group or subfolder, so there is a single count to
       // spend. The reference radius is the locked one, used only for the probe's readout and
@@ -2544,6 +2835,12 @@ function mountVaultGraph(root, data, deps) {
           //
           // sl.r and not the pushed radius: a highlight is a display offset and must not
           // change an angle.
+          // seamAt AND NOT THE ALLOCATOR'S ANGLE, deliberately. The seam is a constant WIDTH,
+          // so its angle shrinks as 1/r -- which is what makes the channel between two wedges
+          // PARALLEL-SIDED rather than a widening slot. A constant angle was tried here and it
+          // is the wrong geometry: it makes wedge boundaries radial rays, so the channel opens
+          // out with radius, which is the "gaps should not be wedge anymore" this was built to
+          // fix. See decision 0002 in .ai-context.
           var sm = seamAt(sl.r * UNIT, nB);
           var a0 = sm.gap * seamsBefore + sm.avail * fracBefore;
           var a1 = a0 + sm.avail * frac * open;
@@ -2599,52 +2896,30 @@ function mountVaultGraph(root, data, deps) {
           // in from their own edge put those two notes exactly one step apart, which is a
           // boundary nobody can see. Everything past that is the channel, and the channel is
           // what gets scaled -- including the seam, which sits inside it.
-          // HALF THIS WEDGE'S OWN STEP, which is what the sentence above always meant and not
-          // what the code did. Half a PITCH is half a step only where a row is exactly full,
-          // and rows usually are not: measured on an 89-note range, wedges in the outer band
-          // had interior steps of 686 to 736 units on a pitch of 407, so their end notes sat
-          // half a pitch in while their siblings stood a whole step apart -- boundary gap 431
-          // against an interior 736. A channel TIGHTER than the spacing either side of it,
-          // which reads as the notes drifting away from their own edges.
+          // THE CHANNEL IS A CLEARANCE BETWEEN RIMS, so the margin is that clearance plus the
+          // end note's OWN radius.
           //
-          // For n notes in an arc A, asking that the end margin be half the interior step has
-          // one solution: A = 2m + (n-1)s with m = s/2 gives s = A/n and m = A/2n. So the
-          // margin is the row's own half-share of its own arc, and the interior step and the
-          // boundary gap come out the same number by construction, at whatever density the
-          // wedge happens to have. That also makes the room UNIFORM, which is what lets dotPx
-          // size a whole band from its tightest pair without the tightest pair being an
-          // outlier that shrinks everything.
+          // Three attempts got here. The row's half-share of its own arc made the boundary gap
+          // equal the interior step, and made the margin a function of the ROW, so every row
+          // with a different note count started at a different angle. One margin per band fixed
+          // that and still measured to centres -- and dot size follows link weight, so equal
+          // centre spacing leaves unequal RIM gaps: 28 to 89 units across one boundary's rows on
+          // the 10k vault, a 3.2x variation, which is the ragged seam that was reported.
+          //
+          // Adding the end note's radius makes the quantity held constant the one a person sees.
+          // eA and eB are the sizes of the notes at this row's two ends, serpentine-corrected in
+          // placeCell, so each side pays for the note that actually sits there.
+          //
+          // Divided by this note's own radius, so the clearance is a constant WIDTH and the two
+          // wedge edges are parallel to the channel between them -- not a constant angle, which
+          // is a radial edge and a channel that widens outward.
+          var bk = isInner ? "i" : "o";
+          var room = bandOf(bk).room > 1 ? bandOf(bk).room : pitchUnits(bk);
+          var clear = CLEAR_OF_ROOM * room * (GAP_BAND[bk] || 1);
+          var radOf = function (z) {
+            return DOT_OF_PITCH * room * (Math.min(z || 4, NODE_MAX) / NODE_MAX);
+          };
           var nRow = rowN[sl.r] > 0.001 ? rowN[sl.r] : 1;
-          var zero = arc * rGraph / (2 * nRow);
-          // THE OUTERMOST ROW REACHES ITS EDGES. Every other row keeps half its own step, which
-          // is what makes a boundary invisible -- but the outermost row of a cell is the one
-          // that draws the rim, and it is also the PARTIAL row, holding whatever the rows below
-          // it did not. Half of a short row's step is a wide margin: measured on a 98-note
-          // range, the rim row's boundary gaps came to 936 and 951 units where the same wedges'
-          // interior steps were 574 and 604, so the ring read as broken at every seam while the
-          // rows inside it were flush.
-          //
-          // So that row spends only what a dot needs to clear the seam, and its notes stretch to
-          // the edges instead. It costs a wider spacing WITHIN that row -- the notes there are
-          // genuinely fewer -- which is the trade: the rim is a line a person follows round, and
-          // a gap in it reads as a fault, where uneven spacing along it does not.
-          // A LONE NOTE IN THE RIM ROW IS CENTRED, not stretched. The stretch below exists to
-          // put a row's two END notes against its two edges; with one note there are no two
-          // ends, and reaching for one edge only means leaning against it while the other side
-          // of the wedge stands empty. Centred, it reads as what it is -- a wedge with one note
-          // in its outermost row.
-          if (sl.r === maxRowR && nRow > 1.5) {
-            // Sized to the LARGEST dot the band draws, not the typical one. dotPx's top end is
-            // DOT_OF_PITCH of the band's room, so that product is the biggest radius there can
-            // be -- and it is the one that has to clear the boundary. Sized to the typical dot
-            // instead, the rim closed and then a fat note at the end of a row overlapped its
-            // counterpart across the seam: measured, 1 to 2 overlapping pairs in the inner band
-            // at -24 to -62 units.
-            var bk = isInner ? "i" : "o";
-            var edge = DOT_OF_PITCH * (bandOf(bk).room > 1 ? bandOf(bk).room
-                                                             : pitchUnits(bk));
-            if (edge < zero) zero = edge;
-          }
           // THE STEP, but with a CONTINUOUS count. nRow is how many notes are present in this
           // row right now, an integer, so a step built on it is a step function of the frame --
           // and since dotPx sizes a whole band from a percentile of these, every dot in the
@@ -2666,8 +2941,39 @@ function mountVaultGraph(root, data, deps) {
           // A row's step is arc/n at that row's radius, and the innermost row of a cell is the
           // shortest arc, so the minimum is where the cell is tightest. Bounding by it costs a
           // little size in cells whose rows differ a lot and nothing anywhere else.
-          var ownStep = arc * rGraph / Math.max(0.001, nRow);
-          roomPool[isInner ? "i" : "o"].push(ownStep);
+          // ONLY FROM A ROW THAT HAS NOTES IN IT, and this guard is the whole bug behind
+          // "unfocused tabs load with huge gaps".
+          //
+          // nRow is the ALPHA-WEIGHTED count of notes in this row, which is right for a margin
+          // -- a note arriving contributes its opacity rather than suddenly contributing one --
+          // and catastrophic as a divisor. Early in the intro every row holds a fraction of a
+          // note, so arc / 0.001 is a thousand times the real step; the pool fills with those,
+          // its tenth percentile explodes, and every margin built on it explodes with it. The
+          // margins ARE the channels, so the disc draws with enormous gaps.
+          //
+          // A visible tab animates out of that within a second and nobody sees it. A BACKGROUND
+          // tab has requestAnimationFrame throttled to a crawl, so it is left parked on an early
+          // frame's geometry -- which is exactly the report: load three vaults, and only the one
+          // in the foreground looks right. Measured in the foreground it is still visible as
+          // transient spikes, worst gap jumping to 4.55x mid-intro against 1.84x at rest.
+          //
+          // Half a note is the threshold: a row with less than that in it has nothing to say
+          // about spacing, and the rows that do are enough to take a percentile over.
+          // ONLY FROM A ROW WITH TWO NOTES IN IT, because a step is a distance BETWEEN notes.
+          //
+          // arc / nRow is read as "the room a note has", and for nRow = 1 that is not a step at
+          // all -- there is no second note in the row to be spaced from. Counting it made a
+          // small folder's own narrow wedge the bound on its dot: 14 - Reading List, one note,
+          // came out at radius 11-23 against 38-55 for the crowded folders, for a note whose
+          // degree is 7. Reported twice, as small folders rendering tiny.
+          //
+          // A lone note is bounded by its distance to its own wedge edge instead, which edgeCap
+          // already does, and its neighbours across that edge have each reserved
+          // clear + DOT_OF_PITCH * bandRoom -- so a band-sized dot there cannot reach them.
+          // The rows that DO hold two or more notes are what a percentile should be taken over.
+          if (nRow > 1.5) {
+            var ownStep = arc * rGraph / nRow;
+            roomPool[isInner ? "i" : "o"].push(ownStep);
           // ...AND KEPT PER NOTE, as a bound. The band percentile is one number for a whole
           // ring, so a cell packed tighter than the tenth percentile overlaps -- measured by
           // hiding folders one at a time on the 1402-note vault, 16 pairs at -78 units. This is
@@ -2679,7 +2985,8 @@ function mountVaultGraph(root, data, deps) {
           // densely its own folder is packed; it may not depend on which row of that folder it
           // landed in, because rows differ in arc and the innermost is always shortest -- that
           // is the gradient that made the most-connected note the smallest one.
-          if (cellMin[c.k] === undefined || ownStep < cellMin[c.k]) cellMin[c.k] = ownStep;
+            if (cellMin[c.k] === undefined || ownStep < cellMin[c.k]) cellMin[c.k] = ownStep;
+          }
           cellOf[sl.id] = c.k;
           var seamArc = sm.gap * rGraph / 2;      // this side's half of the seam, in units
           var keep = EXCESS_KEEP * seamFall(isInner ? "i" : "o");
@@ -2695,24 +3002,28 @@ function mountVaultGraph(root, data, deps) {
           // The band-typical dot instead. A genuinely fat end note now sits marginally closer
           // to the channel than a typical one does, which is the trade: a channel of one
           // visible width beats a per-note-exact one that changes every row.
-          var side = function () {
-            var raw = zero;                          // what the boundary costs, per band
-            var m = zero + keep * (raw - zero + seamArc) - seamArc;
-            // NO DOT MAY CROSS ITS OWN WEDGE EDGE. The line above spends part of the half-seam
-            // when keep is below 1 -- which it is at these row counts, 0.35 * 2.152 = 0.75 --
-            // and that is invisible on an interior row, where the margin is half a step and the
-            // seam is a fraction of it. On the RIM row the margin is now only what the biggest
-            // dot needs, so subtracting anything pushes that dot through the boundary and into
-            // the channel. Reported as edge notes sitting inside the seam.
-            //
-            // The floor is the largest radius the band can draw: dotPx tops out at
-            // DOT_OF_PITCH of the band's room, so a margin of that keeps every dot inside its
-            // own wedge on every row, and binds only where it would otherwise not be.
-            var fb = bandOf(isInner ? "i" : "o");
-            var floorU = DOT_OF_PITCH * (fb.room > 1 ? fb.room : pitchUnits(fb.key));
-            if (m < floorU) m = floorU;
-            return m < 0 ? 0 : m / rGraph;
-          };
+          // THE MARGIN IS THE CLEARANCE, with nothing added and nothing taken away.
+          //
+          // This used to scale an "excess" -- zero + keep * (excess + seamArc) - seamArc, with
+          // keep falling off against the row count -- from when the margin was half a step and
+          // the channel was the part above that. There is no excess now: the margin is exactly
+          // what the largest dot needs, and the seam is reserved separately by allocateBand and
+          // spent by the sweep. Scaling it again took a dot through its own boundary and into
+          // the seam, which was reported twice; a floor was then added to stop it, and the floor
+          // was the same number the scaling started from.
+          // DIVIDED BY THIS NOTE'S OWN RADIUS, so the margin is a constant WIDTH and the two
+          // wedge edges are parallel to the channel between them. Converting at the band's
+          // reference radius instead makes it a constant angle, which is a radial edge and a
+          // channel that widens outward -- the same error as above, one level down.
+          // radOf() IS A GUESS AND GUESSING IS THE BUG. The drawn radius is
+          // ramp(size) * min(bandRoom, cellRoom) * 0.92, then floored and capped -- a different
+          // curve with a floor and two caps -- so a margin built on an estimate of it reserves
+          // room for a dot that does not arrive. Tried: rim gaps went from a 3.2x spread to
+          // 4.9x, with some channels down to 13 units.
+          //
+          // The margin therefore holds the CENTRE at a constant width until the radius is
+          // decided in one place instead of two. See the note at the top of dotPx.
+          var side = function () { return (clear + DOT_OF_PITCH * room) / rGraph; };
           var mgA = side(), mgB = side();
           var room = arc * 0.66;
           if (mgA + mgB > room) {
@@ -2870,13 +3181,19 @@ function mountVaultGraph(root, data, deps) {
     // it, which moves exactly as smoothly as the positions do; the breathing came entirely from
     // the per-note cap that used to sit on top of it, and with that gone the worst single-frame
     // size change is 2.2% against 252% before.
-    bandOf("i").room = pick(pool.i); bandOf("o").room = pick(pool.o);
+    // Measured from this pass -- unless a cascade is walking it, in which case the walked value
+    // is the answer and measuring would overwrite it with a per-frame statistic.
+    if (!roomNow) {
+      bandOf("i").room = pick(pool.i); bandOf("o").room = pick(pool.o);
+    }
     Object.keys(cellOf).forEach(function (id) {
       var m = cellMin[cellOf[id]];
       if (m > 1) cellRoomNext[id] = m;
     });
-    cellRoom = cellRoomNext;
-    edgeCap = edgeCapNext;
+    // Walked if a cascade is walking it, measured otherwise -- the same rule the band room
+    // follows two blocks up, for the same reason.
+    cellRoom = cellNow || cellRoomNext;
+    edgeCap = edgeNow || edgeCapNext;
     if (planRoom) { /* kept on the plan for the probe; the live pool is what draws */ }
     dotFit = fit;
     return out;
@@ -3381,7 +3698,6 @@ function mountVaultGraph(root, data, deps) {
   // Group presences for the GAP reservation, walked between the cascade's two packings
   // and read by the rendered allocation. Null at rest, which is when weight-over-seats
   // is already the right answer -- see allocateBand.
-  var gapPres = null;
   // How deep the LAST plan reached, in lattice units -- the same measure geomLock.maxR
   // holds for the full vault, so the two divide cleanly. Taken from the plan rather than
   // from node positions: the outermost note sits a little inside the lattice radius it was
@@ -3410,7 +3726,79 @@ function mountVaultGraph(root, data, deps) {
   // be a monotone function of link weight, so it cannot carry a per-note term.
   // Per note, its own cell's step. Bounds a dot where its folder is packed tighter than the
   // band's tenth percentile; continuous, so it does not make dots breathe.
+  var lastMinArc = 0;   // the angular wedge floor the last allocation applied, for the probe
+  /**
+   * The band room a cascade hands in, or null at rest.
+   *
+   * Room is a percentile over the spacing of the notes that are CURRENTLY placed, and it decides
+   * dot size -- and, since a margin is a clearance plus the largest dot, it decides POSITIONS
+   * too. Recomputed per frame it is a statistic over a set whose membership changes as notes
+   * arrive and leave, so it steps, and every note in the band steps with it. Measured on one
+   * folder toggle: single frames moving a steady note 717, 952, 1374, 1635 and 1522 units
+   * against a median frame of 45.
+   *
+   * So it is INTERPOLATED between the two endpoint packings rather than derived, which is the
+   * rule this file already follows for the spacing, the row count and the gap reservation. It is
+   * the one quantity that must be interpolated rather than computed: everything else is a
+   * function of the plan, and this is a function of the frame.
+   */
+  var roomNow = null;
+  /**
+   * The two endpoint LAYOUTS of the running cascade, or null at rest.
+   *
+   * INTERPOLATE THE OUTPUT, NOT THE INPUT. The frame loop used to build a plan per frame from
+   * interpolated inputs -- a fractional row count, a walked spacing, opacity weights -- and lay
+   * that out. Every one of those inputs is continuous, and the layout of them is not: a row
+   * count is turned into an integer row by Math.floor, so notes change row in steps. Easing the
+   * radius turns each step into a short slide, which is invisible at a 200-unit pitch and is not
+   * at a 384-unit one. Measured on one folder toggle, with rowsInner crossing 2.0 partway
+   * through: single frames moving a steady note 703, 953, 1378, 1631 and 1515 units against a
+   * median frame of 46.
+   *
+   * Two layouts exist instead, one per endpoint, each a proper packing with integer rows. A frame
+   * is a point on the line between them. At ease 0 the disc IS the layout it was resting in, at
+   * ease 1 it IS the one settle() assigns, and in between every note moves along its own path at
+   * its own steady rate. Nothing is derived per frame, so nothing per frame can step.
+   *
+   * What it gives up is the property decision 0002 chose: an intermediate frame is no longer
+   * itself a valid packing, because a note between two lattice rows sits between them. That
+   * decision rejected taking the radius from a FRACTIONAL row coordinate, which puts a note at a
+   * radius neither endpoint has and was measured as a smeared disc. This is not that: both ends
+   * are exact, and the smear is a note travelling between two places it genuinely belongs.
+   */
+  var posSrc = null, posDst = null;
   var cellRoom = Object.create(null);
+  /**
+   * The per-cell room a cascade hands in, or null at rest.
+   *
+   * Band room is already walked between the two endpoint packings rather than measured per frame
+   * -- see roomNow -- because it is a statistic over a moving set and a statistic over a moving
+   * set steps. This is the same quantity one level down, and dotPx OVERRIDES the band figure with
+   * it whenever a cell is tighter than its band:
+   *
+   *     if (mine !== undefined && mine > 1 && (!(room > 1) || mine < room)) room = mine;
+   *
+   * So walking only the band figure fixed only the notes that read the band figure. A small
+   * folder is exactly the case where its own cell is the tighter of the two, so small folders
+   * kept taking a per-frame measurement and kept stepping. Measured on this vault, worst
+   * single-frame size change on a note at FULL opacity: toggling _ Claude (14 notes) 68.4%,
+   * 02 - Areas (6 notes) 54.9%, 01 - Projects (5 notes) 39.3% -- against 9-11% for the
+   * 138- and 212-note folders, which mostly read the band. Reported as small folders not
+   * looking right while large ones did.
+   */
+  var cellNow = null;
+  /**
+   * The per-note edge cap a cascade hands in, or null at rest.
+   *
+   * Third and last of the quantities dotPx reads that are statistics over a moving set, after
+   * the band room and the cell room. This one is a DISTANCE -- how far a note is from its own
+   * wedge edge -- and it binds hardest where a wedge is narrowest, which is the smallest
+   * folders. Walking the other two fixed every folder except the two smallest: 01 - Projects
+   * (5 notes) stayed at 33.6% and 06 - Monthly Reviews (3 notes) at 23.7%, worst one-frame size
+   * change on a note at full opacity, and in both the stepping note was inside the folder being
+   * toggled. Same treatment, same clock.
+   */
+  var edgeNow = null;
   // Per note, its distance to the nearer edge of its own wedge, in graph units. A dot may not
   // exceed it, or it crosses into the seam.
   var edgeCap = Object.create(null);
@@ -3438,7 +3826,18 @@ function mountVaultGraph(root, data, deps) {
   // it fades, so the wedge fans open by exactly one note's worth per arrival and
   // pushes its clockwise neighbour along -- the space is made by the note taking
   // it, and the motion runs along the circumference rather than out from the hub.
-  function cascade(done) {
+  /**
+   * opts, all optional:
+   *   fullRing  force the ring mode instead of observing it (the timeline is a density
+   *             animation by construction, so for it this is a constant, not an observation)
+   *   order     fn(id) -> number, the ARRIVAL ORDER, replacing the clockwise sweep
+   *   spread    the arrival window in FRAMES, replacing windowFor(n). span is this plus
+   *             FADE_FRAMES, so it sets how much of the animation a single note's fade takes.
+   *   totalMs   the whole cascade's wall-clock length, replacing CASCADE_MS
+   *   onFrame   fn(progress) per frame, for a caller that has UI to keep in step
+   */
+  function cascade(done, opts) {
+    opts = opts || {};
     stopPlay();                            // a filter change interrupts playback
     if (anim) { WIN.cancelAnimationFrame(anim); anim = null; }
     if (animGuard) { WIN.clearTimeout(animGuard); animGuard = null; }
@@ -3447,7 +3846,6 @@ function mountVaultGraph(root, data, deps) {
       WIN.clearTimeout(cascadeRun.guard);
       cascadeRun = null;
     }
-    gapPres = null;      // belongs to the run just abandoned; see allocateBand
 
     // A null plan is legitimate: "none" hides every note, so there is no
     // geometry left to lay out. The fade still has to run, with positions simply
@@ -3456,6 +3854,10 @@ function mountVaultGraph(root, data, deps) {
     // draws the pie from nothing.
     fullRing = false;
     graph.forEachNode(function (id) { if (present(id)) fullRing = true; });
+    // Observed above, overridden here. The timeline starts from an empty screen, so an honest
+    // observation always says "draw mode" -- and draw mode exists for a screen with no ring to
+    // trade against, which is the opposite of what growing a vault needs.
+    if (opts.fullRing !== undefined) fullRing = !!opts.fullRing;
 
     // willShow, not visible: membership is "staying, or still fading out", and "staying" has
     // to mean staying under every filter. See willShow.
@@ -3471,9 +3873,40 @@ function mountVaultGraph(root, data, deps) {
     // upstream of the frontier is already complete when a note lands. So a note
     // arrives at its final angle and never moves again -- the only thing that
     // moves is what is still downstream, and that is still invisible.
+    // ONE PLAN. This layout is the destination, the tween's target, and what gets assigned at
+    // the end -- the same object all three times, so there is nothing for them to disagree about.
+    //
+    // It used to be computed with the PINNED plan still in force, which made it the pinned
+    // packing wearing the destination's opacities rather than the destination packing. settle()
+    // then cleared the pin and built its own, and the two differed: measured on one folder
+    // toggle, 15 notes moved up to 1517 units TANGENTIALLY at the hand-over while the band
+    // extents, the gap angles and every wedge's start angle were identical -- notes seated in a
+    // different order by two plans that were supposed to be the same one.
+    //
+    // So the pin and planKeep come off while it is computed. What comes out is what an unpinned
+    // ringsLayout produces once the departing notes are gone, which is the definition settle()
+    // was written against and never actually met.
     var keep = Object.create(null);
     graph.forEachNode(function (id) { keep[id] = alpha[id] || 0; alpha[id] = visible(id) ? timeFactor(id) : 0; });
+    var pinWas = pinnedPlan, keepWas = planKeep, roomWas = roomNow;
+    pinnedPlan = null; planKeep = null; roomNow = null; cellNow = null; edgeNow = null;
+    // TWICE, and the first one is thrown away.
+    //
+    // Room and position are a fixed point: the margin at a wedge edge is a clearance plus a dot
+    // radius, both scaled by the band's room, and room is measured FROM the positions -- so a
+    // pass can only write the room it measured after it has already spent the margins. Each pass
+    // therefore uses the previous pass's room. At rest that has converged, because frames have
+    // been running. Computed once here it uses the SOURCE disc's room, which is the wrong
+    // number: the destination has different spacing.
+    //
+    // Measured: after a toggle settled, forcing a fresh layout moved 70 notes by up to 39 units
+    // on 03 - Resources, 04 - Daily Notes and 08 - Meeting Notes, with dot sizes identical to
+    // the unit. Margins only, which is precisely the seam -- reported as the seam jumping at the
+    // last frame. The second pass is the one that makes finalPos equal what a relayout produces,
+    // so settle() assigns a state nothing can later disagree with.
+    ringsLayout();
     var finalPos = ringsLayout() || {};
+    pinnedPlan = pinWas; planKeep = keepWas; roomNow = roomWas;
     graph.forEachNode(function (id) { alpha[id] = keep[id]; });
     var sweepOf = Object.create(null);
     graph.forEachNode(function (id) {
@@ -3493,16 +3926,23 @@ function mountVaultGraph(root, data, deps) {
     });
     if (!ins.length && !outs.length) {
       lastCascade = { ins: 0, outs: 0, span: 0, path: "instant: nothing to move", frames: 0, ms: 0 };
-      pinnedPlan = null; applyLayout(true); return;
+      pinnedPlan = null; roomNow = null; cellNow = null; edgeNow = null; posSrc = posDst = null; applyLayout(true); return;
     }
 
     // Clockwise in BOTH directions -- notes leave in the same sweep they arrived
     // in, so the animation never runs backwards.
     var clockwise = function (a, b) { return sweepOf[a] - sweepOf[b]; };
-    ins.sort(clockwise);
-    outs.sort(clockwise);
+    // The arrival order, which is the ONLY thing the timeline needs to do differently: it
+    // reveals the vault by DATE, and everything else reveals it clockwise. Same cascade either
+    // way, so the timeline gets the row walk, the room walk, the plan-derived gap presence and
+    // a settle that assigns the plan -- none of which it had while it ran its own frame loop.
+    var rank = typeof opts.order === "function" ? opts.order : null;
+    var arrival = rank ? function (a, b) { return rank(a) - rank(b); } : clockwise;
+    ins.sort(arrival);
+    outs.sort(arrival);
 
     var windowFor = function (n) {
+      if (opts.spread > 0) return opts.spread;   // a caller with its own shape; see playTimeline
       return Math.max(SPREAD_MIN, Math.min(SPREAD_MAX, n * SPREAD_PER)) * TIME_SCALE;
     };
     var delay = Object.create(null);
@@ -3521,7 +3961,6 @@ function mountVaultGraph(root, data, deps) {
       // Back to weight-over-seats: at rest the seats ARE the group's own notes, so the
       // derived reading is right and a stale override would freeze the gap at whatever
       // the last frame happened to hold.
-      gapPres = null;
       if (cascadeRun) {
         WIN.cancelAnimationFrame(cascadeRun.raf);
         WIN.clearTimeout(cascadeRun.guard);
@@ -3531,10 +3970,16 @@ function mountVaultGraph(root, data, deps) {
       moving.forEach(function (id) { alpha[id] = to[id]; });
       pinnedPlan = null;
       planKeep = null;
-      // No tween needed: at p = 1 the notes are already laid out under planB,
-      // which is exactly what an unpinned ringsLayout() produces now that the
-      // departing notes are gone.
-      applyLayout(false);
+      roomNow = null; cellNow = null; edgeNow = null; posSrc = posDst = null;   // the walk is over; rest measures its own
+      // ASSIGN THE PLAN, do not compute another one. applyLayout(false) built a fresh plan
+      // here, and a fresh plan is a second opinion: it agreed about the structure -- same band
+      // extents, same gaps, same wedge starts -- and disagreed about which seat 15 notes got,
+      // which is a 1517-unit tangential jump at the exact moment the animation hands over.
+      //
+      // finalPos was computed above as what an unpinned layout produces for the destination, so
+      // assigning it is the same answer arrived at once instead of twice.
+      assignPositions(finalPos);
+      renderer.refresh({ skipIndexation: false });
       probeSample("settled");
       if (done) done();
     };
@@ -3609,11 +4054,16 @@ function mountVaultGraph(root, data, deps) {
     // packing had nothing in that band", and the walk below falls back to the other end rather
     // than interpolating toward an empty band.
     var roomSrcB = { i: 0, o: 0 }, roomDstB = { i: 0, o: 0 };
+    // Declared HERE, not inside the endpoint-capture block below. `var` is function-scoped, so
+    // declaring them in that block left the frame loop reading undeclared names -- a
+    // ReferenceError on the first frame, which killed the whole animation rather than degrading
+    // it. The two endpoint maps of per-cell room; see cellNow.
+    var cellSrc = null, cellDst = null;
+    var edgeSrc = null, edgeDst = null;
     var rowsSrc = Object.create(null), rowsDst = Object.create(null);
     var bandSrc = Object.create(null), bandDst = Object.create(null);
     // A group is PRESENT at an end if it has any seated weight there -- one wedge, one
     // gap, regardless of how many notes it keeps. The union of the two ends is walked.
-    var presSrc = Object.create(null), presDst = Object.create(null), presKeys = [];
     // ONE planner, called the same way at both ends.
     //
     // The cascade's endpoints have to be *the static planner's own output* for the
@@ -3668,6 +4118,25 @@ function mountVaultGraph(root, data, deps) {
       };
       if (a) a.cells.forEach(record(rowsSrc, bandSrc));
       if (b) b.cells.forEach(record(rowsDst, bandDst));
+      // A BAND THAT STARTS EMPTY STARTS AT ONE ROW, so its depth WALKS like every other
+      // cascade's instead of arriving at the destination's depth on frame one.
+      //
+      // Nothing filled bandSrc when the source packing was null, and the fallback below then
+      // took the destination depth -- so a disc growing from nothing was laid out at its final
+      // row count from the first frame. The notes still eased into place, but the lattice never
+      // grew, and the row walk is what gives the movement its serpentine: notes shift along
+      // their row and wrap to the next as the count changes. Measured on the intro, pinning the
+      // rows this way looks smoother by every number -- worst tangential step p90 26 against 358
+      // -- and is wrong for the same reason interpolating the endpoints was wrong: the number
+      // improves because the thing being measured has been removed.
+      //
+      // One row is where a disc of one note rests, so this is the depth the source genuinely
+      // has. Only the ARRIVING side is defaulted: a band on its way out has its own fallback
+      // above, and the reasoning there -- a wedge that contracts faster than the ring reads as
+      // sinking out of the disc -- still holds.
+      ["i", "o"].forEach(function (k) {
+        if (bandSrc[k] === undefined && bandDst[k] !== undefined) bandSrc[k] = 1;
+      });
       // Taken from the endpoint plans themselves, which were built on binary presence --
       // so these are the two densities the disc genuinely rests at, not a sample of
       // whatever alpha happened to be on some frame.
@@ -3675,19 +4144,71 @@ function mountVaultGraph(root, data, deps) {
       if (b && b.sp > 0) spDst = b.sp;
       if (a) { spSrcB = { i: a.spInner || a.sp || 1, o: a.sp || 1 }; }
       if (b) { spDstB = { i: b.spInner || b.sp || 1, o: b.sp || 1 }; }
-      if (a && a.room) roomSrcB = { i: a.room.i || 0, o: a.room.o || 0 };
-      if (b && b.room) roomDstB = { i: b.room.i || 0, o: b.room.o || 0 };
-      var seen = Object.create(null);
-      var presFor = function (p, m) {
-        if (!p) return;
-        p.cells.forEach(function (c) {
-          if (c.wsum <= 0.0001) return;
-          m[c.g] = 1;
-          if (!seen[c.g]) { seen[c.g] = 1; presKeys.push(c.g); }
-        });
+      // THE ROOM EACH ENDPOINT ACTUALLY HAS, taken by laying that endpoint out and reading it
+      // back, not from plan.room.
+      //
+      // plan.room is built from c.band, the cell's REFERENCE arc, and the disc is drawn from
+      // c.span, its live share. Under filtering those differ several-fold, and handing the
+      // reference figure in collapsed every dot onto the pixel floor -- diameter over step 0.02
+      // where the design is 0.786. The only number that matches what gets drawn is the one the
+      // layout itself computes, so each endpoint is laid out once, at cascade start, purely to
+      // read it.
+      //
+      // Two extra layouts per cascade, next to the two plan builds staticPlan already does. The
+      // room override is off while they run, so each measures its own.
+      // WITH THE ALPHAS THAT ENDPOINT HAS, which is the whole of it.
+      //
+      // ringsLayout reads each cell's weight from the LIVE alpha map, not from the plan it is
+      // handed -- geom is opacity-weighted membership. So laying planB out at cascade start gave
+      // planB's cells with the PRE-TOGGLE opacities: not the destination, just a different wrong
+      // answer. Measured, that put the entire jump at the hand-over: frames were smooth
+      // (mean step 5, no step at the start at all) and settle() then moved notes 1517 units
+      // tangentially, 15 of them past the threshold.
+      //
+      // playTimeline already does this dance for its own final positions -- swap the alphas in,
+      // lay out, swap them back -- and this is the same need.
+      var roomOf = function (pl, alphaFn) {
+        if (!pl) return null;
+        var outPos = null;
+        var keepAlpha = null;
+        if (alphaFn) {
+          keepAlpha = Object.create(null);
+          graph.forEachNode(function (id) { keepAlpha[id] = alpha[id]; alpha[id] = alphaFn(id); });
+        }
+        var keepI = bandOf("i").room, keepO = bandOf("o").room;
+        var keepFit = dotFit, keepCell = cellRoom, keepEdge = edgeCap;
+        var keepPin = pinnedPlan, keepKeep = planKeep;
+        var saved = roomNow, savedCell = cellNow, savedEdge = edgeNow;
+        roomNow = null; cellNow = null; edgeNow = null; edgeNow = null;
+        outPos = ringsLayout(pl, true);
+        var got = { i: bandOf("i").room, o: bandOf("o").room, pos: outPos,
+                    cells: cellRoom, edges: edgeCap };
+        roomNow = saved; cellNow = savedCell; edgeNow = savedEdge;
+        // Everything that pass wrote as a side effect is put back: it was a measurement, not a
+        // frame, and the disc must not be able to tell it happened.
+        bandOf("i").room = keepI; bandOf("o").room = keepO;
+        dotFit = keepFit; cellRoom = keepCell; edgeCap = keepEdge;
+        pinnedPlan = keepPin; planKeep = keepKeep;
+        if (keepAlpha) graph.forEachNode(function (id) { alpha[id] = keepAlpha[id]; });
+        return got;
       };
-      presFor(a, presSrc);
-      presFor(b, presDst);
+      // A is where the disc IS, so its alphas are the ones in force. B is where it is GOING,
+      // which is the same expression settle() lands on.
+      var rA = roomOf(a, null);
+      var rB = roomOf(b, function (id) { return willShow(id) ? timeFactor(id) : 0; });
+      if (rA) roomSrcB = { i: rA.i || 0, o: rA.o || 0 };
+      if (rB) roomDstB = { i: rB.i || 0, o: rB.o || 0 };
+      cellSrc = (rA && rA.cells) || null; cellDst = (rB && rB.cells) || null;
+      edgeSrc = (rA && rA.edges) || null; edgeDst = (rB && rB.edges) || null;
+      // WHERE THE NOTES ARE, and where the one plan puts them. The source is read off the graph
+      // rather than reconstructed from planA: the disc on screen is the truth about where a note
+      // is starting from, and a packing built to describe it can only ever be an approximation
+      // of it -- which is where the jump at the START of an animation came from.
+      posSrc = Object.create(null);
+      graph.forEachNode(function (id) {
+        posSrc[id] = { x: graph.getNodeAttribute(id, "x"), y: graph.getNodeAttribute(id, "y") };
+      });
+      posDst = finalPos;
     })();
 
     // The guard is a WATCHDOG on stalled frames, not a deadline. It used to be a
@@ -3710,7 +4231,10 @@ function mountVaultGraph(root, data, deps) {
     // however many milliseconds it must take for the whole span to land on CASCADE_MS.
     // The proportions -- which note starts when, how long each fade lasts -- are
     // untouched; only the clock changes.
-    var msPerFrame = (CASCADE_MS * TIME_SCALE) / Math.max(1, span);
+    // Wall clock is set here, not by span: span is a nominal frame count and this divides the
+    // total by it, so a cascade lasts the same time whatever its shape. The timeline wants its
+    // own total (TIMELINE_MS), which is the second of the only two things it needs differently.
+    var msPerFrame = (opts.totalMs > 0 ? opts.totalMs : CASCADE_MS * TIME_SCALE) / Math.max(1, span);
     // Real time drives the progress, but a single frame may never advance more than
     // 1/MIN_FRAMES of the whole span. `04 - Daily Notes` is the toggle that made this
     // necessary: 55 notes plus a repack drops the frame rate far enough that pure
@@ -3741,17 +4265,14 @@ function mountVaultGraph(root, data, deps) {
       // the repack, so it has to finish exactly when the last note does.
       var pr = Math.min(1, frame / Math.max(1, span));
       var ease = pr * pr * (3 - 2 * pr);
+      if (opts.onFrame) opts.onFrame(pr);
 
-      // THE GAP RESERVATION, WALKED. Same clock as the row counts below, so a group that
-      // is leaving gives up its gap over the whole cascade and one that merely thins
-      // never gives up any of it. At ease 0 this is the packing the disc is resting in;
-      // at 1 it is what settle() assigns, so the last frame and rest agree exactly.
-      gapPres = Object.create(null);
-      for (var gi = 0; gi < presKeys.length; gi++) {
-        var gk = presKeys[gi];
-        var ps = presSrc[gk] || 0, pd = presDst[gk] || 0;
-        gapPres[gk] = ps + (pd - ps) * ease;
-      }
+      // THE GAP RESERVATION IS NOT WALKED ANY MORE -- see allocateBand's groupPres. It used to
+      // be interpolated here, from 1 to 0 across the cascade's own clock, and that clock is not
+      // the one the notes fade on: a note's opacity finishes on a per-note fade clock, far
+      // sooner. The reservation outlived the notes it was reserving for, and released what was
+      // left of itself in the single frame their cell was culled. The plan measures each group's
+      // presence from the same weights it packs with instead, so there is one clock.
 
       // ONE allocation per frame, from a plan whose geometry is interpolated
       // between the two packings. Angles are therefore assigned once, in a single
@@ -3787,13 +4308,70 @@ function mountVaultGraph(root, data, deps) {
         if (!(dv > 1)) return sv;
         return sv + (dv - sv) * ease;
       };
+      // The band's DEPTH, walked between the two endpoint packings -- the same clock and the
+      // same endpoints the per-cell row count uses. A band missing from one end takes the other
+      // end's depth rather than interpolating toward nothing, which is the rule bandSrc already
+      // follows.
+      var depthWalk = function (k) {
+        var a2 = bandSrc[k], b2 = bandDst[k];
+        if (a2 === undefined && b2 === undefined) return 0;
+        if (a2 === undefined) a2 = b2;
+        if (b2 === undefined) b2 = a2;
+        return a2 + (b2 - a2) * ease;
+      };
       var spNow = {
         i: spSrcB.i + (spDstB.i - spSrcB.i) * ease,
         o: spSrcB.o + (spDstB.o - spSrcB.o) * ease,
-        // Walked, not re-derived. Notes per row is an integer, so a room solved from the live
-        // weights is a step function of the frame and every dot in the band breathes with it.
-        room: { i: roomWalk("i"), o: roomWalk("o") },
+        depth: { i: depthWalk("i"), o: depthWalk("o") },
       };
+      // The walked room, handed to ringsLayout through the same channel the spacing uses. Set
+      // before the plan is built so the margins inside this frame's layout read it.
+      roomNow = { i: roomWalk("i"), o: roomWalk("o") };
+      // AND THE PER-CELL ROOM, on the same clock. A note in only one endpoint takes that
+      // endpoint's figure rather than interpolating toward a cell that does not exist there,
+      // which is the same fallback the band walk uses for an empty band.
+      if (cellSrc || cellDst) {
+        var cn = Object.create(null);
+        var put = function (id) {
+          if (cn[id] !== undefined) return;
+          var a0 = cellSrc ? cellSrc[id] : undefined, b0 = cellDst ? cellDst[id] : undefined;
+          if (a0 === undefined && b0 === undefined) return;
+          if (a0 === undefined) a0 = b0;
+          if (b0 === undefined) b0 = a0;
+          cn[id] = a0 + (b0 - a0) * ease;
+        };
+        if (cellSrc) Object.keys(cellSrc).forEach(put);
+        if (cellDst) Object.keys(cellDst).forEach(put);
+        cellNow = cn;
+      }
+      if (edgeSrc || edgeDst) {
+        var en = Object.create(null);
+        var putE = function (id) {
+          if (en[id] !== undefined) return;
+          var a1 = edgeSrc ? edgeSrc[id] : undefined, b1 = edgeDst ? edgeDst[id] : undefined;
+          if (a1 === undefined && b1 === undefined) return;
+          if (a1 === undefined) a1 = b1;
+          if (b1 === undefined) b1 = a1;
+          en[id] = a1 + (b1 - a1) * ease;
+        };
+        if (edgeSrc) Object.keys(edgeSrc).forEach(putE);
+        if (edgeDst) Object.keys(edgeDst).forEach(putE);
+        edgeNow = en;
+      }
+      // PLANNED, EVERY FRAME, BY THE ONE PLANNER -- not interpolated between two layouts.
+      //
+      // Interpolating the endpoint layouts was tried and measured beautifully: no step at the
+      // start, mean frame 0, nothing at settle, 128 frames. It is also wrong, and the measurement
+      // could not see it. A frame became a point on a straight polar line between two lattices,
+      // so the lattice itself stopped existing in between -- and with it the serpentine, which is
+      // the whole reason a row's last note and the next row's first sit at the same end. Notes
+      // crossed each other mid-flight instead of following the boustrophedon.
+      //
+      // A plan per frame keeps every frame a valid packing, which is what makes the movement read
+      // as the disc rearranging rather than as dots sliding about. What must NOT be per-frame is
+      // the note SIZE: it comes from a percentile over the notes currently placed, so computing
+      // it per frame makes it fluctuate with the weights. That one quantity is interpolated --
+      // see roomNow.
       var plan = buildWedgePlan(ovAfter, weightOf, rowsAt, spNow);
       var targets = plan ? ringsLayout(plan, true) : null;
       // CONVERGE BEFORE SETTLING. Easing closes only RADIAL_EASE of each note's gap
@@ -3909,13 +4487,19 @@ function mountVaultGraph(root, data, deps) {
           tanSum += moved; tanN++;
         }
       }
-      // NOT FILTERED to present notes, and that is a known blind spot rather than an
-      // oversight -- see github#17. Filtering was tried: the outermost notes are frequently
-      // exactly the ones a date range excludes, so the extent COLLAPSED the instant the range
-      // applied, measured as a single frame step of 3230 out of a total path of 4131. Left
-      // unfiltered it is pinned by stale coordinates instead, which is stable but partly
-      // blind. Stable and blind is the better failure of the two for a guard, and the honest
-      // fix needs a set fixed across the whole probe rather than a filter.
+      // github#17, now fixed: this used to be unfiltered, and the comment here said the honest
+      // fix needed a set fixed across the whole probe rather than a filter. That is what
+      // probe.set is -- see the note where it is captured.
+      // Only notes the probe was started with, and only while they are still drawn. See the
+      // note on probe.set for why it is neither "everything" nor "whatever is present now".
+      // THE SET, AND ONLY THE SET -- no second filter on current opacity. Adding one looked
+      // harmless and reintroduced the collapse this replaced: notes near a range edge carry a
+      // fractional timeFactor from the heat ramp, so they cross any opacity threshold at
+      // different moments and drop in and out of a max. Measured with the filter on, the demo
+      // vault reported a single frame of 3406 units against a path of 4169 while the worst
+      // NOTE moved 149 -- the extent was not moving, its membership was. The set is fixed
+      // precisely so membership cannot move.
+      if (probe.set && !probe.set[id]) return;
       if (bandLock && bandLock[groupOf(id)]) {
         iN++; if (r < iMin) iMin = r; if (r > iMax) iMax = r;
       } else {
@@ -5675,12 +6259,84 @@ function mountVaultGraph(root, data, deps) {
   }
 
   var play = null;                       // in-flight timeline playback
+  // AND IF THE TAB GOES AWAY MID-INTRO, finish it rather than leave it parked.
+  //
+  // The load branch already comes up at rest when the page starts hidden. This is the other
+  // half: a tab that is visible at load and hidden a second later stalls in exactly the same
+  // place, because requestAnimationFrame stops and the watchdog that would rescue the run is
+  // driven by rAF too. Both playback and any cascade in flight are dropped and the resting
+  // layout assigned, which is where they were going.
+  //
+  // A timer, not a frame, on purpose: visibilitychange fires in a background tab where rAF does
+  // not, so this is the one hook that still runs when the thing it is fixing happens.
+  var introOwed = false;      // hidden at load: the intro is owed to the first look at the tab
+  if (typeof document.addEventListener === "function") {
+    document.addEventListener("visibilitychange", function () {
+      var away = typeof document.visibilityState === "string"
+        ? document.visibilityState === "hidden" : !!document.hidden;
+      if (!away) {
+        // The tab has been looked at for the first time and an intro was deferred: play it now.
+        if (introOwed) { introOwed = false; playTimeline(); }
+        return;
+      }
+      // THE INTRO IS `anim`, not `play` and not cascadeRun. Checking only those two meant this
+      // did nothing for the case it was written for -- the intro is what a fresh tab is running.
+      if (!play && !cascadeRun && !anim) return;
+      var wasPlaying = !!play;      // the timeline, as opposed to a filter cascade
+      // AND THE SAME TEARDOWN A COMPLETED RUN DOES, which is the whole of it.
+      //
+      // Cancelling the frame is not stopping a cascade: a cascade holds pinnedPlan and planKeep
+      // for its duration and clears them when it lands, and every layout after one that was
+      // cancelled without clearing them reuses a plan that was pinned for a run that no longer
+      // exists. The disc then stops responding to anything -- reported as animations stopping
+      // altogether after switching tabs, which is exactly what a permanently pinned plan looks
+      // like. playTimeline does this teardown too; see the note there.
+      stopPlay();
+      if (cascadeRun) {
+        WIN.cancelAnimationFrame(cascadeRun.raf);
+        WIN.clearTimeout(cascadeRun.guard);
+        cascadeRun = null;
+      }
+      if (anim) { WIN.cancelAnimationFrame(anim); anim = null; }
+      if (animGuard) { WIN.clearTimeout(animGuard); animGuard = null; }
+      pinnedPlan = null; planKeep = null; roomNow = null; cellNow = null; edgeNow = null;
+      posSrc = posDst = null;
+      // AND THE TIMELINE HAS TO BE COMPLETED, not merely re-rendered.
+      //
+      // timelineFrame() draws whatever state.until says, and until is how far through the intro
+      // we are. It is null at load -- which is why the load path draws the whole disc -- and
+      // partway through while the intro runs, so calling it here without clearing until first
+      // re-renders the same unfinished frame the tab was already stuck on. Which was the whole
+      // report: open three vaults, each one gets focus for a moment as it opens and then loses
+      // it to the next, and every tab but the last stays parked mid-intro.
+      state.until = null;
+      timelineFrame(true);
+      // An intro cut short is still owed, so it plays when the tab is next looked at rather
+      // than being lost because the tab happened to be focused for a moment while loading.
+      if (wasPlaying) introOwed = true;
+    });
+  }
+
   function stopPlay() {
     if (!play) return;
+    // The intro drives a cascade now rather than its own loop, so stopping it means tearing that
+    // cascade down -- otherwise Stop would clear the button and leave the animation running.
+    // Landing on the fully grown disc is what the old land() did, so Stop still means "skip to
+    // the end" rather than "freeze here".
+    var viaCascade = play.viaCascade;
     WIN.cancelAnimationFrame(play.raf);
     if (play.guard) WIN.clearTimeout(play.guard);   // or the deadline lands after a manual stop
     play = null;
     $("tlplay").textContent = "Play";
+    if (!viaCascade) return;
+    if (cascadeRun) {
+      WIN.cancelAnimationFrame(cascadeRun.raf);
+      WIN.clearTimeout(cascadeRun.guard);
+      cascadeRun = null;
+    }
+    pinnedPlan = null; planKeep = null; roomNow = null; cellNow = null; edgeNow = null; posSrc = posDst = null;
+    state.until = null;
+    timelineFrame(true);
   }
 
   // `full` forces a re-indexing refresh. Pass it on any frame that LANDS -- the end
@@ -5725,6 +6381,24 @@ function mountVaultGraph(root, data, deps) {
   // The vault growing from its first note to now. Extracted from the Play button
   // so the intro and Refresh run the same animation rather than three subtly
   // different ones.
+  // The vault growing from its first note to now -- AS A CASCADE, the same transition every
+  // other change to what is shown goes through.
+  //
+  // It used to run its own frame loop: per frame it moved state.until, called syncAlpha() and
+  // then assigned a fresh unpinned ringsLayout(). That is a sequence of independent RESTING
+  // layouts, one per date cutoff, so nothing connected one frame to the next -- and when the
+  // solved row count changed between two cutoffs the whole disc reseated. Measured on the real
+  // vault, rowsInner walked 0 -> 2 -> 3 during the intro and each step moved most of the disc at
+  // once: 81 of 98 notes past 300 units on one frame, 125 of 207 on another, 200 of 361 on a
+  // third, worst single note 5964 units. Reported as a big jump in the inner ring with notes
+  // suddenly popping up.
+  //
+  // None of the continuity work applied to it, because none of that lives in this path: the row
+  // walk, the room walk, the plan-derived gap presence and a settle that assigns the plan are all
+  // inside cascade(). Growing the vault is not a different kind of change -- it is the date
+  // slider moving, which is a filter change -- so it goes through the one path and inherits all
+  // of it. What is left here is the two things that genuinely differ: notes arrive by DATE rather
+  // than clockwise, and the window is TIMELINE_MS rather than derived from how many are moving.
   function playTimeline() {
     var tl = $("tl");
     stopPlay();
@@ -5736,58 +6410,47 @@ function mountVaultGraph(root, data, deps) {
       WIN.cancelAnimationFrame(cascadeRun.raf);
       WIN.clearTimeout(cascadeRun.guard);
       cascadeRun = null;
-      gapPres = null;    // belongs to the run just abandoned; see allocateBand
     }
     if (anim) { WIN.cancelAnimationFrame(anim); anim = null; }
     if (animGuard) { WIN.clearTimeout(animGuard); animGuard = null; }
-    pinnedPlan = null; planKeep = null; gapPres = null;
+    pinnedPlan = null; planKeep = null; roomNow = null; cellNow = null; edgeNow = null;
+    posSrc = posDst = null;
 
-    // Fixed length: TIMELINE_MS whatever the frame rate, so load, Refresh and Play
-    // are the same few seconds every time. A slow page shows fewer steps of the
-    // vault's growth rather than taking twice as long to get there.
+    // DESTINATION: the whole vault. SOURCE: an empty screen. cascade() reads the current alphas
+    // as its starting point, so clearing them is what makes this the growth animation rather
+    // than a no-op -- state.until stays null throughout, and the slider readout below is driven
+    // from the cascade's own progress instead of being the thing that drives the frame.
     var dur = TIMELINE_MS * TIME_SCALE;
-    state.until = 0;
-    tl.value = "0";
-    timelineFrame();
-    $("tlplay").textContent = "Stop";
+    state.until = null;
+    tl.value = String(tlMax);
+    clearAlpha();
 
-    // Landing frame: re-index, so the edge buffers are rebuilt against the final
-    // positions instead of keeping the curvature from the first frame.
-    var land = function () {
-      stopPlay();
-      state.until = null;
-      tl.value = String(tlMax);
-      timelineFrame(true);
-    };
-    // WATCHDOG on stalled frames, not a deadline -- same reason as the tween's. A
-    // `WIN.setTimeout(land, dur + margin)` would land the timeline early on any page too
-    // slow to finish in time, snapping the vault to fully grown mid-playback. This
-    // only fires once no frame has arrived for a while, which still covers a
-    // backgrounded tab where rAF stops entirely.
-    var lastFrame = NOW();
-    var PLAY_STALL = 500;
-    var playDog = function () {
-      if (play && NOW() - lastFrame < PLAY_STALL) { play.guard = WIN.setTimeout(playDog, PLAY_STALL); return; }
-      land();
-    };
-    var MIN_FRAMES = 20;
-    var p = 0, tPrev = NOW();
-    play = { raf: 0, guard: WIN.setTimeout(playDog, PLAY_STALL) };
-    (function step() {
-      if (!play) return;
-      var tn = NOW();
-      lastFrame = tn;
-      var adv = (tn - tPrev) / dur;
-      tPrev = tn;
-      if (adv > 1 / MIN_FRAMES) adv = 1 / MIN_FRAMES;
-      p = Math.min(1, p + adv);
-      var k = tlMax * p;
-      state.until = p >= 1 ? null : k;
-      tl.value = String(Math.round(Math.min(tlMax, k)));
-      timelineFrame();
-      if (p < 1) play.raf = WIN.requestAnimationFrame(step);
-      else land();
-    })();
+    var label = $("tlv");
+    cascade(function () {
+      if (play) { play = null; $("tlplay").textContent = "Play"; }
+      label.textContent = "All";
+    }, {
+      fullRing: true,
+      order: function (id) { return tlRank[id] || 0; },
+      // NO spread override: the stagger is windowFor(n), the same expression a folder toggle
+      // uses, so a note's own fade is the same fraction of the animation in both. Overriding it
+      // (240 frames against windowFor's ~74) made the timeline a visibly different animation
+      // rather than the same one over a longer clock, which is the whole point of it going
+      // through cascade().
+      totalMs: dur,
+      onFrame: function (pr) {
+        var k = tlMax * pr;
+        tl.value = String(Math.round(Math.min(tlMax, k)));
+        if (pr >= 1) { label.textContent = "All"; return; }
+        var i = Math.round(k) - 1;
+        label.textContent = (tlDate[i < 0 ? 0 : i > tlDate.length - 1 ? tlDate.length - 1 : i] || "")
+                          + "  ·  " + Math.round(k);
+      }
+    });
+    // AFTER cascade(), because cascade() calls stopPlay() on the way in -- setting this first
+    // would have the button reset itself to "Play" on the frame it started.
+    play = { raf: 0, guard: 0, viaCascade: true };
+    $("tlplay").textContent = "Stop";
   }
 
   function buildTimelineUI() {
@@ -8287,8 +8950,27 @@ function mountVaultGraph(root, data, deps) {
                     // then toggle, then probeReport() -- it names the biggest single
                     // frame step per band, which is what "a jump" actually is.
                     probe: function (on) {
+                      // THE SET IS FIXED WHEN THE PROBE STARTS. The band extents below are a
+                      // max over notes, and which notes are in that max decided whether the
+                      // number meant anything: filtered to present notes it COLLAPSED the frame
+                      // a range applied, because the outermost notes are frequently the ones a
+                      // range excludes; unfiltered it was pinned by the stale coordinates of
+                      // notes that are not drawn at all, which made a build that repositions
+                      // departing notes look like a regression against one that strands them
+                      // (measured: outerPath 2016 against 0, while the VISIBLE extent of both
+                      // moved identically -- worst frame 183 units, total travel 3202 and 3210).
+                      // A set fixed at probe start is neither: it cannot collapse, because
+                      // membership does not change, and it cannot be pinned by notes nobody can
+                      // see, because it only ever contained notes that were drawn.
                       probe = (on === false) ? null
                         : { t0: NOW(), samples: [], prevAng: null, prevR: null,
+                            set: (function () {
+                              var m = Object.create(null);
+                              graph.forEachNode(function (id) {
+                                if ((alpha[id] || 0) >= 0.999) m[id] = 1;
+                              });
+                              return m;
+                            })(),
                             watch: arguments.length > 1 ? String(arguments[1]) : null,
                             watched: null, watchSeries: [] };
                       return probe ? "recording" : "off";
@@ -8557,6 +9239,10 @@ function mountVaultGraph(root, data, deps) {
                                    from: state.from, to: state.to, heatEnd: state.heatEnd,
                                    timelineUntil: state.until,
                                    markToday: !!state.markToday, shown: pts.length },
+                        // The room each band reports and the arc floor in force -- both feed
+                        // POSITIONS now, so a jump investigation needs to see them per frame.
+                        room: { i: r3(bandOf("i").room), o: r3(bandOf("o").room) },
+                        minArcDeg: r3(lastMinArc * 180 / Math.PI),
                         spacing: { spOuter: r3(bandOf("o").sp),
                                    spInner: r3(bandOf("i").sp),
                                    rowsOuter: bandOf("o").rows,
@@ -8565,6 +9251,7 @@ function mountVaultGraph(root, data, deps) {
                                    pitchInnerUnits: r3(pitchUnits("i")) },
                         seam: { outerDeg: bandOf("o").gapDeg, innerDeg: bandOf("i").gapDeg,
                                 nGOuter: bandOf("o").nG, nGInner: bandOf("i").nG,
+                                nSubOuter: bandOf("o").nSub, nSubInner: bandOf("i").nSub,
                                 fallOuter: r3(seamFall("o")), fallInner: r3(seamFall("i")) },
                         locked: geomLock ? { r0: r3(geomLock.r0), rOuter: r3(geomLock.rOuter),
                                              maxR: r3(geomLock.maxR), rows: geomLock.rows,
@@ -8581,11 +9268,21 @@ function mountVaultGraph(root, data, deps) {
                     },
                     rangeReport: function () {
                       var lit = 0, dated = 0;
+                      // Notes per calendar year. A fixture's date SPREAD is not visible from
+                      // its note count or its span -- a vault can claim ten years and hold
+                      // nine of them in one -- and every year-scale control on the page reads
+                      // this distribution rather than the total.
+                      var byYear = Object.create(null);
                       graph.forEachNode(function (id) {
                         if ((alpha[id] || 0) > 0.004) lit++;
-                        if (tlMs[id] !== undefined) dated++;
+                        if (tlMs[id] !== undefined) {
+                          dated++;
+                          var y = new Date(tlMs[id]).getUTCFullYear();
+                          byYear[y] = (byYear[y] || 0) + 1;
+                        }
                       });
-                      return { from: state.from, to: state.to, heatEnd: state.heatEnd,
+                      return { byYear: byYear,
+                               from: state.from, to: state.to, heatEnd: state.heatEnd,
                                lit: lit, dated: dated,
                                total: graph.order, label: rangeLabel() };
                     },
@@ -8643,7 +9340,32 @@ function mountVaultGraph(root, data, deps) {
     // itself, through the Refresh button, once the recording is rolling.
     // timelineFrame(true) is the resting full disc: `until` is null by default, so every
     // note is present and the layout is derived once, with no animation.
-    if (demoOn() || restOn()) {
+    // AND A HIDDEN TAB COMES UP AT REST TOO, which is a correctness fix and not a saving.
+    //
+    // playTimeline() reveals notes one at a time over about five seconds, and the disc is
+    // legitimately sparse while it does -- rows hold a fraction of their notes, so the room
+    // those rows report is genuinely wide and the channels drawn from it are genuinely wide.
+    // That is what an unfinished intro looks like, and it is fine, because it finishes.
+    //
+    // In a BACKGROUND tab it does not finish. requestAnimationFrame is throttled to roughly a
+    // frame a second there, and the stall watchdog that would force the cascade to complete is
+    // itself driven by rAF, so it never fires either. The tab is left parked on an early frame
+    // for as long as it stays hidden -- and switching to it does not restart anything, so it
+    // just sits there. Reported as "load three vaults and only the visible one renders
+    // correctly", with gaps several times the row spacing in the other two.
+    //
+    // Nothing is lost by skipping it: the intro is an arrival animation for a person watching,
+    // and nobody is watching a hidden tab. If the page is revealed later it is already at rest,
+    // which is where the intro was going to leave it.
+    var hidden = typeof document.visibilityState === "string"
+      ? document.visibilityState === "hidden" : !!document.hidden;
+    // DEFERRED, NOT CANCELLED. A tab that starts hidden comes up at rest so it is never parked
+    // on an unfinished intro -- and it remembers that it owes one, so the animation plays the
+    // first time the tab is actually looked at. Coming up at rest and leaving it there was the
+    // first fix, and it swapped one complaint for another: three vaults opened at once, and the
+    // two in the background had simply skipped their intro for good.
+    if (hidden && !demoOn() && !restOn()) introOwed = true;
+    if (demoOn() || restOn() || hidden) {
       timelineFrame(true);
       // No log. scripts/demo.mjs prints every beat to the terminal as it drives them, so
       // this said the same thing twice -- and console noise is a guideline the linter
