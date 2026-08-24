@@ -1679,8 +1679,32 @@ check("a range change animates instead of snapping", async (p) => {
   // it puts every note off-lattice on every intermediate frame -- one bad frame against ~120
   // mushy ones. So half a row is the honest allowance for a single frame, and it is still far
   // from a snap: a snap moves the whole path at once, which here is six rows.
-  const HALF_ROW = 80;
-  const budget = (path) => Math.max(40, HALF_ROW, 6 * path / Math.max(1, r.frames));
+  // ONE ROW, not half of one, and scaled by how starved of frames the page was.
+  //
+  // The note above says a frame's worst step IS a row tick and that a note hopping a whole row
+  // is deliberate -- and then allowed half a row for it. Those cannot both hold: a row is 160
+  // units and the extent does move a whole one when the outermost note ticks. Measured on the
+  // 10k vault with the extent taken over a set fixed at probe start, the worst frame was 183
+  // units, with the row count walking 0.004 of a row and no seam, sub-seam or split change on
+  // that frame -- a clean single hop, failing a bound that could not have passed one.
+  //
+  // ONE_ROW * 1.25 covers the hop plus the max-passing effect the note describes: the extent is
+  // a max, so when the furthest note ticks inward the maximum passes to another note and the
+  // number moves further than either note did.
+  //
+  // AND THE STARVATION TERM. This animation runs at 4x for exactly the reason given above --
+  // a rate bound is meaningless if the page cannot draw the distance -- but the page still gets
+  // whatever frames the machine spares. Measured on the same fixture and build: 226 frames gave
+  // a worst step of 183, and 105 frames gave 781, which is the same motion sampled half as
+  // often. Nominal is 60fps over the measured span; if the page delivered a third of that, a
+  // sampled frame legitimately carries three hops. Without this term the check reports the load
+  // on the machine rather than the smoothness of the disc, and it did: the same commit passed
+  // this check run alone and failed it inside the full suite.
+  const ONE_ROW = 160;
+  const nominal = r.spanMs / 16.67;
+  const starve = Math.max(1, nominal / Math.max(1, r.frames));
+  const budget = (path) =>
+    Math.max(40, ONE_ROW * 1.25 * starve, 6 * path / Math.max(1, r.frames));
   const oBudget = budget(r.outerPath), iBudget = budget(r.innerPath);
   const rad = r.radMaxStep || { step: 0, atMs: 0 };
   return {
@@ -1862,9 +1886,19 @@ check("filtered to the bone, the disc stays drawable", async (p) => {
       var r = Math.hypot(at.x, at.y);
       var k = Math.round(r / 8) * 8;
       (rows[k] || (rows[k] = [])).push({ th: Math.atan2(at.y, at.x),
-                                         rad: __vg.renderer.scaleSize(d.size) * perPx });
+                                         rad: __vg.renderer.scaleSize(d.size) * perPx,
+                                         // Which WEDGE this note is in. A gap between two
+                                         // wedges is a seam and belongs there; a gap inside one
+                                         // is a hole. Without this the two are the same number.
+                                         w: (at.folder || at.group || at.dir || "?")
+                                            + "\u0000" + (at.sub || "") });
     });
     var worstClear = 1e9, overlaps = 0, holeRatio = 0, dots = [], steps = [], worstRel = 0;
+    // Seams are reported but NOT asserted on. They are a design quantity -- SEAM_ROWS, the
+    // per-band gap factor and the wedge margin all deliberately put empty arc at a wedge
+    // boundary -- so a threshold over them is a threshold over the look of the disc, which is
+    // not what this check is for. It measures whether a wedge has arc it cannot fill.
+    var seamRatio = 0, seamAt = "";
     Object.keys(rows).forEach(function (k) {
       var row = rows[k].slice().sort(function (x, y) { return x.th - y.th; });
       if (row.length < 4) { row.forEach(function (q) { dots.push(q.rad); }); return; }
@@ -1890,8 +1924,22 @@ check("filtered to the bone, the disc stays drawable", async (p) => {
         if (c3 < 0 && med > 0 && -c3 / med > worstRel) worstRel = -c3 / med;
       }
       steps.push(med);
-      var hi = Math.max.apply(null, arcs);
-      if (med > 0 && hi / med > holeRatio) holeRatio = hi / med;
+      // THE BIGGEST GAP INSIDE A WEDGE, which is what a hole is. The old line took the biggest
+      // gap of any kind, so it reported the widest SEAM in the ring -- and a seam is put there
+      // on purpose. Measured on the 10k vault filtered to its last 2.5%: the flagged gap was
+      // the boundary between 15 - Courses and 11 - Clippings, in HEAD as well, at 2.61x against
+      // this build's 3.52x. Both are seams; neither is a hole. Tightening the bound to 3.2x
+      // therefore turned a change in wedge margins into a failing test.
+      for (var w = 1; w < row.length; w++) {
+        var a4 = (row[w].th - row[w - 1].th) * (+k);
+        if (!(a4 > 0.5 && a4 < 1e5)) continue;
+        var same = row[w].w === row[w - 1].w;
+        if (same) { if (med > 0 && a4 / med > holeRatio) holeRatio = a4 / med; }
+        else if (med > 0 && a4 / med > seamRatio) {
+          seamRatio = a4 / med;
+          seamAt = row[w - 1].w.split("\u0000")[0] + " -> " + row[w].w.split("\u0000")[0];
+        }
+      }
       row.forEach(function (q) { dots.push(q.rad); });
     });
     dots.sort(function (x, y) { return x - y; });
@@ -1902,6 +1950,7 @@ check("filtered to the bone, the disc stays drawable", async (p) => {
              worstRel: Math.round(worstRel * 1000) / 10,
              worstClear: worstClear === 1e9 ? null : Math.round(worstClear),
              holeRatio: Math.round(holeRatio * 100) / 100,
+             seamRatio: Math.round(seamRatio * 100) / 100, seamAt: seamAt,
              ds: medStep > 0 ? Math.round(2 * medDot / medStep * 100) / 100 : 0,
              rows: Object.keys(rows).length };
   })()`;
@@ -1909,6 +1958,7 @@ check("filtered to the bone, the disc stays drawable", async (p) => {
   const seen = [];
   const judge = (label, r) => {
     seen.push(`${label}: ${r.shown}n ${r.rows}r d/s ${r.ds} hole ${r.holeRatio}x ` +
+      `seam ${r.seamRatio}x${r.seamAt ? " (" + r.seamAt + ")" : ""} ` +
               `clear ${r.worstClear}${r.worstRel ? " (-" + r.worstRel + "%)" : ""}`);
     if (r.shown < 4) return;                     // nothing left to be wrong about
     // 4% OF THE ROW'S OWN SPACING, not zero, and the reason is in the design rather than in
@@ -1928,18 +1978,27 @@ check("filtered to the bone, the disc stays drawable", async (p) => {
                `${r.worstRel}% of the row median`);
     }
     if (r.ds < 0.15) bad.push(`${label}: dots collapsed, diameter/step ${r.ds}`);
-    // 4.5x, and the number is a BASELINE rather than a target. Measured worst today: 4.24x on
-    // the demo vault, at a sub-wedge boundary where a small folder sits between two larger ones
-    // -- 03 - Resources/People -> 09 - Maps of Content, a 745-unit gap on a 176-unit median.
-    // That is the dead arc of a cell holding fewer notes than the band is deep: it occupies the
-    // rows it can reach and its arc stands empty in the others, and no rule about where to put
-    // those notes removes it, only moves it. Closing it needs the arc allocated per ROW, which
-    // makes wedge edges step slightly from row to row instead of being exactly radial -- a
-    // change to how the disc READS, so it is not one to make quietly.
+    // 3.2x. This was 4.5x, parked there as a baseline while a 4.24x gap on the demo vault was
+    // thought to need the arc allocated per ROW to fix. It did not: the gap was FOUR sub-wedges
+    // of 15 - Courses, 7 and 6 and 6 and 6 notes each, in a band 9 rows deep -- none of them
+    // reaching the rim row, all four holding arc across it. The sub-split gate was testing
+    // "can each sub-wedge fill a column" against REF_ROWS (5) rather than the band's real
+    // depth, so it let a split through that could not be drawn. Gated on the real depth,
+    // 15 - Courses stays one wedge and the gap closes.
     //
-    // Set here so a regression past today's worst trips it. It was 2.5x when written, which was
-    // a guess, and it failed on a limitation that is documented rather than on a defect.
-    if (r.holeRatio > 4.5) bad.push(`${label}: a gap ${r.holeRatio}x the row median`);
+    // 3.2x, AND holeRatio now means a gap INSIDE one wedge. It used to be the biggest gap of
+    // any kind in a ring, which made it mostly a measurement of the widest SEAM -- and a seam is
+    // deliberate. That confusion cost a false failure: at 3.2x this build reported 3.52x on the
+    // 10k vault and 3.21x on the demo vault, both of them the wedge boundary between two
+    // folders, and both present in HEAD too at 2.61x and 2.36x. Nothing was wrong with the disc;
+    // the margin at a wedge edge had changed and the bound was standing over the wrong number.
+    //
+    // Measured worst across every sparse state on all three fixtures once seams are excluded:
+    // 2.01x. Seams in the same runs reach 3.52x and are reported on the detail line instead, so
+    // a change in seam width or wedge margin is still visible -- it just does not fail a check
+    // whose subject is arc a wedge cannot fill. 3.2x leaves the 2.01x its headroom and still
+    // catches a return to 4x, which is what a cell holding rows it cannot reach looks like.
+    if (r.holeRatio > 3.2) bad.push(`${label}: a gap ${r.holeRatio}x the row median INSIDE one wedge`);
   };
 
   // ONE FOLDER AT A TIME, cumulatively, so the last states are the sparse ones.
