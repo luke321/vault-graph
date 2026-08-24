@@ -60,6 +60,24 @@ function mountVaultGraph(root, data, deps) {
   // global: in a popout that is the wrong window, and obsidianmd/prefer-active-window-timers
   // is an error for exactly that reason.
   var WIN = deps.win || window;
+  /**
+   * The document, for PAGE-LEVEL STATE ONLY -- never for finding an element.
+   *
+   * check-scope forbids `document.` outright, and rightly: the page is handed one element and
+   * everything it touches belongs inside it, because in Obsidian a document lookup grabs the
+   * app's element, or with two views open the OTHER view's. That reasoning is about finding
+   * things. It does not cover "is this page being displayed at all", which is not an element,
+   * cannot be scoped to a container, and is the one fact the animation genuinely needs from
+   * outside itself: rAF is throttled in a hidden tab, so a cascade started there advances by a
+   * wall-clock factor with no frames to spend it on and the disc lands wrong.
+   *
+   * So it comes through deps like the window does, which also makes it substitutable -- and a
+   * host that omits it gets no visibility handling rather than a reach it did not sanction.
+   * Obsidian is arguably such a host: its tabs do not change visibilityState, only the app
+   * window does, so a leaf hidden behind another tab is not "hidden" by this measure and wants
+   * the workspace's own hook instead.
+   */
+  var DOC = deps.doc || (WIN && WIN.document) || null;
   var DOC = root.ownerDocument;
   var API = null;
 
@@ -6270,10 +6288,10 @@ function mountVaultGraph(root, data, deps) {
   // A timer, not a frame, on purpose: visibilitychange fires in a background tab where rAF does
   // not, so this is the one hook that still runs when the thing it is fixing happens.
   var introOwed = false;      // hidden at load: the intro is owed to the first look at the tab
-  if (typeof document.addEventListener === "function") {
-    document.addEventListener("visibilitychange", function () {
-      var away = typeof document.visibilityState === "string"
-        ? document.visibilityState === "hidden" : !!document.hidden;
+  if (DOC && typeof DOC.addEventListener === "function") {
+    DOC.addEventListener("visibilitychange", function () {
+      var away = typeof DOC.visibilityState === "string"
+        ? DOC.visibilityState === "hidden" : !!DOC.hidden;
       if (!away) {
         // The tab has been looked at for the first time and an intro was deferred: play it now.
         if (introOwed) { introOwed = false; playTimeline(); }
@@ -9357,8 +9375,10 @@ function mountVaultGraph(root, data, deps) {
     // Nothing is lost by skipping it: the intro is an arrival animation for a person watching,
     // and nobody is watching a hidden tab. If the page is revealed later it is already at rest,
     // which is where the intro was going to leave it.
-    var hidden = typeof document.visibilityState === "string"
-      ? document.visibilityState === "hidden" : !!document.hidden;
+    var hidden = DOC
+      ? (typeof DOC.visibilityState === "string"
+          ? DOC.visibilityState === "hidden" : !!DOC.hidden)
+      : false;
     // DEFERRED, NOT CANCELLED. A tab that starts hidden comes up at rest so it is never parked
     // on an unfinished intro -- and it remembers that it owes one, so the animation plays the
     // first time the tab is actually looked at. Coming up at rest and leaving it there was the

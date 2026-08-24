@@ -96,6 +96,18 @@ const js = readFileSync(join(SRC, "page.js"), "utf8");
 //                           standalone URL, so a plugin can never reach it. Left as an
 //                           exception rather than removed, because deleting it would make
 //                           the recorder guess again.
+//
+// AND ONE ALIAS, which this check cannot see and should not be surprised by: page.js takes
+// `deps.doc` (falling back to WIN.document) into a DOC binding, and reads visibilityState /
+// hidden / addEventListener from it. That is deliberate and it is not a hole in the rule above.
+// The rule is about FINDING THINGS -- a document lookup returns the app's element, or with two
+// views open the other view's -- and "is this page being displayed at all" is not an element,
+// cannot be scoped to a container, and is the one outside fact the animation needs: rAF is
+// throttled in a hidden tab, so a cascade started there burns its wall-clock budget with no
+// frames to spend it on. Routing it through deps keeps it substitutable and lets a host decline
+// it: omit deps.doc and there is no visibility handling at all, rather than a reach nobody
+// sanctioned. If that binding ever grows an element lookup, this check will not catch it -- so
+// it is named here on purpose.
 const ALLOWED_REACHES = new Set(["document.createElement", "document.title"]);
 const reaches = [...js.matchAll(/\bdocument\.[A-Za-z_$][\w$]*/g)].map((m) => m[0]);
 for (const r of [...new Set(reaches)]) {
