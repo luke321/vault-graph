@@ -22,7 +22,9 @@
 
 import { attach, json } from "./cdp.mjs";
 import { spawn, spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync, readFileSync, writeFileSync, readdirSync,
+         renameSync, mkdirSync } from "node:fs";
+import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
 import { createServer } from "node:net";
 import { join, dirname } from "node:path";
@@ -2084,10 +2086,35 @@ check("filtered to the bone, the disc stays drawable", async (p) => {
 check("the gap reservation holds still while groups only thin", async (p) => {
   await clearRange(p);
   const before = await p.j(`__vg.rangeReport()`);
+  // THE CUT IS DERIVED FROM THE VAULT, not hardcoded -- the point is thinning, not emptying,
+  // and a fixed date cannot promise that against fixtures anchored to today (github#20 made
+  // them ALWAYS today-anchored, which is when the old "2025-03-01" started emptying a small
+  // inner-band group on freshly generated shapes; before that it was merely going to start
+  // failing on whatever day the drift reached it, the same calendar-dependence the shape-vault
+  // ribbon checks had). A group can only empty if every one of its notes is dated and older
+  // than the cut -- undated notes survive every range -- so the latest cut that empties
+  // nothing is the minimum over such groups of each group's NEWEST note. Cutting exactly
+  // there keeps at least that one note in every group and thins everything older.
+  const cut = await p.j(`(function () {
+    var newest = Object.create(null);
+    __vg.graph.forEachNode(function (id, a) {
+      var g = __vg.groupOf(id);
+      if (!a.created) { newest[g] = "9999-12-31"; return; }   // this group cannot empty
+      if (newest[g] !== "9999-12-31" && (!(g in newest) || a.created > newest[g])) {
+        newest[g] = a.created;
+      }
+    });
+    var min = null;
+    Object.keys(newest).forEach(function (g) {
+      if (newest[g] !== "9999-12-31" && (min === null || newest[g] < min)) min = newest[g];
+    });
+    return min && min.slice(0, 10);   // the range field takes YYYY-MM-DD; a time suffix
+  })()`);                               // would only make the cut minutes earlier anyway
+  if (!cut) {
+    return { ok: true, detail: "every group holds an undated note -- no cut can thin without a date to cut at" };
+  }
   await p.eval(`__vg.probe(true); void 0`);
-  // A span wide enough that every folder keeps some notes -- the point is thinning, not
-  // emptying. Asserted below rather than assumed, since a vault could be shaped otherwise.
-  await p.eval(`__vg.setRange("2025-03-01", null); void 0`);
+  await p.eval(`__vg.setRange(${JSON.stringify("PLACEHOLDER")}, null); void 0`.replace("PLACEHOLDER", cut));
   await sleep(200);
   await settle(p);
   await sleep(250);
@@ -2104,10 +2131,14 @@ check("the gap reservation holds still while groups only thin", async (p) => {
     // Emptying a group legitimately moves the reservation, so a vault where this range
     // empties one is reported rather than silently passing on a weaker assertion.
     ok: r.ngMaxStep === 0 && !emptied,
+    // BOTH bands in the message. It used to print ngO alone, so the one real failure it ever
+    // reported read "nG 8 -> 8" -- a count that had not moved -- while the emptied group was in
+    // the INNER band the message never mentioned.
     detail: emptied
-      ? `this range empties a group (nG ${s0.ngO} -> ${s1.ngO}), so the gap moves for a real reason`
-      : `nG held at ${s1.ngO} across ${r.frames} frames, worst step ${r.ngMaxStep}; ` +
-        `lit ${before.lit} -> ${after.lit}`,
+      ? `the cut at ${cut} emptied a group (nG outer ${s0.ngO} -> ${s1.ngO}, ` +
+        `inner ${s0.ngI} -> ${s1.ngI}), which the derived cut exists to prevent`
+      : `cut at ${cut}: nG held (outer ${s1.ngO}, inner ${s1.ngI}) across ${r.frames} frames, ` +
+        `worst step ${r.ngMaxStep}; lit ${before.lit} -> ${after.lit}`,
   };
 });
 
@@ -2723,6 +2754,31 @@ async function killBrowser(child, PORT) {
  *                maximum instead of moving the outer radius, and neither has an unlinked
  *                note sorting ahead of every real folder.
  *
+ * ALL THREE LIVE IN ONE SHARED STORE, beside the main repo, and invalidate themselves.
+ *
+ * They used to be generated into each checkout's own root, and only when the directory was
+ * missing -- so every worktree kept whatever it generated whenever, indefinitely. That cost a
+ * blocked push and a full HEAD-vs-branch bisect on 2026-08-24: the develop checkout held a
+ * 468-note demo vault from the day before the generator was fixed, the feature worktree held
+ * the 1,406-note one from after, and two checks failed on fixture content while the code was
+ * innocent ("hovering '2021' haloed 0 of its 0 notes" -- a year that vault genuinely did not
+ * populate). The verdict of the push gate depended on which directory you pushed from.
+ *
+ * So a fixture now lives at <main repo>/.fixtures/<name>-<digest8>, where the digest is
+ * sha256 over the CONTENTS of all three generator scripts plus this fixture's args -- content,
+ * not mtime, because a branch switch rewrites mtimes without changing a byte, and all three
+ * sources feed every digest because make-demo-vault delegates to make-test-vault. Every
+ * worktree resolves the same store through git's common dir, so the gate sees one fixture set
+ * no matter where the push runs. Editing a generator changes the digest and the next run
+ * regenerates; nothing needs to remember to delete anything.
+ *
+ * A fixture also AGES BY DESIGN: --end defaults to today so the 52-week heatmap window stays
+ * exercised, which means the newest note recedes from the real clock from the moment it is
+ * written. The stamp in each fixture carries its generation day, and anything older than
+ * FIXTURE_MAX_AGE_DAYS regenerates -- the first run each week pays the ~10-30s, everyone else
+ * reuses. A leftover fixture directory in a checkout root is ignored with a one-line notice;
+ * --vault remains the explicit override for pointing the suite at any vault on purpose.
+ *
  * All three are gitignored and generated on demand, and NONE NEEDS A VAULT OF YOURS. The
  * demo vault used to be a mirror of the author's real one, which meant it needed
  * OBSIDIAN_VAULT and was skipped with a notice when there was none -- so on a contributor's
@@ -2741,23 +2797,91 @@ function resolveVaults() {
   if (arg("url", "")) return [{ path: "", label: "the page passed with --url" }];
 
   const out = [];
-  const gen = (script, args, dir, label) => {
-    if (!existsSync(dir)) {
+  const FIXTURE_MAX_AGE_DAYS = 7;
+  const GENERATORS = ["make-demo-vault.mjs", "make-test-vault.mjs", "make-shape-vault.mjs"];
+  // Bump to force one regeneration everywhere -- for a change to the store logic itself,
+  // which the generator digest cannot see.
+  const FIXTURE_FORMAT = 1;
+
+  const storeRoot = (() => {
+    // The MAIN repo's root, whichever worktree this runs in: a worktree's common dir is the
+    // main checkout's .git, so its parent is the main root, and every worktree lands on the
+    // same store. A non-git context degrades to a per-checkout store -- freshness survives,
+    // sharing does not, and that is the right trade for a tarball.
+    const g = spawnSync("git", ["-C", ROOT, "rev-parse", "--git-common-dir"],
+                        { encoding: "utf8" });
+    if (g.status === 0 && g.stdout.trim()) {
+      const common = g.stdout.trim();
+      const abs = /^[A-Za-z]:[\\/]|^\//.test(common) ? common : join(ROOT, common);
+      return join(dirname(abs), ".fixtures");
+    }
+    return join(ROOT, ".fixtures");
+  })();
+
+  const digestOf = (args) => {
+    const h = createHash("sha256");
+    h.update("format:" + FIXTURE_FORMAT);
+    for (const g of GENERATORS) h.update(readFileSync(join(HERE, g)));
+    h.update(JSON.stringify(args));
+    return h.digest("hex").slice(0, 8);
+  };
+
+  const todayDay = () => new Date().toISOString().slice(0, 10);
+  const ageDays = (day) => Math.floor((Date.parse(todayDay()) - Date.parse(day)) / 86400000);
+
+  const gen = (script, args, name, label) => {
+    const digest = digestOf(args);
+    const dir = join(storeRoot, `${name}-${digest}`);
+    const stampPath = join(dir, ".stamp.json");
+    let fresh = false;
+    if (existsSync(stampPath)) {
+      try {
+        const st = JSON.parse(readFileSync(stampPath, "utf8"));
+        fresh = st.digest === digest &&
+                typeof st.day === "string" && ageDays(st.day) <= FIXTURE_MAX_AGE_DAYS;
+      } catch { fresh = false; }   // a torn stamp is a stale fixture, not a crash
+    }
+    if (!fresh) {
       console.log(`generating ${label} ...`);
-      const r = spawnSync(process.execPath, [join(HERE, script), "--out", dir, ...args],
+      // Into a scratch name, renamed only after the stamp is written: an interrupted
+      // generation must never be mistaken for a complete fixture, and the stamp being the
+      // LAST thing written before the rename is what guarantees a stamped dir is a whole one.
+      const building = join(storeRoot, `.building-${name}-${process.pid}`);
+      rmSync(building, { recursive: true, force: true });
+      mkdirSync(storeRoot, { recursive: true });
+      const r = spawnSync(process.execPath, [join(HERE, script), "--out", building, ...args],
                           { encoding: "utf8" });
       if (r.status !== 0) {
         console.log(`  cannot generate ${label}: ${(r.stderr || "").trim().split("\n")[0]}`);
+        rmSync(building, { recursive: true, force: true });
         return;
       }
+      writeFileSync(join(building, ".stamp.json"),
+                    JSON.stringify({ digest, day: todayDay(), script, args }, null, 2) + "\n");
+      // One copy per shape: older digests of this name are spent, and keeping them would turn
+      // the store into the pile of stale directories it exists to replace.
+      for (const d of readdirSync(storeRoot)) {
+        // ...including any .building- scratch a crashed run left behind, or they accumulate.
+        if (d.startsWith(`${name}-`) || (d.startsWith(`.building-${name}-`) && d !== `.building-${name}-${process.pid}`)) {
+          rmSync(join(storeRoot, d), { recursive: true, force: true });
+        }
+      }
+      renameSync(building, dir);
+    }
+    // A fixture directory left in this checkout's root is the old world -- possibly mirrored
+    // by hand, certainly not invalidated by anything. Say it is being ignored rather than
+    // silently disagreeing with whoever put it there.
+    if (existsSync(join(ROOT, name))) {
+      console.log(`  note: ${name}/ exists in this checkout and is IGNORED -- the suite uses ` +
+                  `the shared store (${dir}); pass --vault to use a specific vault on purpose`);
     }
     out.push({ path: dir, label });
   };
 
-  gen("make-demo-vault.mjs", [], join(ROOT, "demo-vault"), "the demo vault (2 dense years)");
+  gen("make-demo-vault.mjs", [], "demo-vault", "the demo vault (2 dense years)");
   gen("make-test-vault.mjs", ["--notes", "10000", "--years", "10"],
-      join(ROOT, "test-vault"), "the 10k synthetic vault (10 years)");
-  gen("make-shape-vault.mjs", [], join(ROOT, "shape-vault"), "the dominant-folder vault");
+      "test-vault", "the 10k synthetic vault (10 years)");
+  gen("make-shape-vault.mjs", [], "shape-vault", "the dominant-folder vault");
 
   if (!out.length) throw new Error("no vault to check, and none could be generated");
   return out;
