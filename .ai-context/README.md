@@ -6,6 +6,7 @@ changing the layout or the animation.
 | File | What it is |
 |---|---|
 | `architecture.md` | The pipeline, the data shapes, and where each decision is enforced |
+| `animation.md` | How a cascade works: the two packings, which quantities are walked between them, and the one invariant. Read before touching the cascade, the seam, dot size or plan membership |
 | `invariants.md` | Properties that must not regress, and the command that checks each one |
 | `decisions/` | **ADRs** — structural choices, what they cost, and what was rejected |
 | `design/` | **DDRs** — the as-built design of each part of the disc |

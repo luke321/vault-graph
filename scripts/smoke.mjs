@@ -135,6 +135,17 @@ const check = (name, fn) => all.push({ name, fn });
 // It is deliberately NOT wired into the pre-push hook: a gate that can be narrowed is not
 // a gate. `git push` always runs everything.
 const ONLY = argAll("only").map((v) => v.toLowerCase());
+
+// WHICH CHECKS NEED THE INTRO TO HAVE PLAYED. Every other page is opened with ?rest, which
+// skips it -- 5.6s per page, paid once per lane per vault, and the largest single cost in a
+// run. Only the check that asserts the intro landed needs the real thing, so it gets a lane
+// of its own with an unmodified URL.
+//
+// Named rather than inferred: a check that quietly depends on the intro and is not listed
+// here would fail for a reason nothing in its own text mentions, which is the most expensive
+// kind of failure this suite can produce.
+const NEEDS_INTRO = ["the intro landed"];
+const needsIntro = (c) => NEEDS_INTRO.some((q) => c.name.toLowerCase().includes(q));
 // LAZY, and it has to be: every check() call above runs at module load, AFTER this line, so
 // filtering here eagerly filtered an empty array and matched nothing. Resolved from main().
 const selected = () => (ONLY.length
@@ -157,14 +168,24 @@ const selected = () => (ONLY.length
 //
 // So the frame-sensitive checks are pulled out and run in ONE serial job per vault, after the
 // parallel ones are done, with nothing else competing. Everything else shards freely.
-const JOBS = Math.max(1, Number(arg("jobs", "1")) || 1);
+// FOUR, not one. The serial default was written when a run was one vault; it is three now,
+// and a full run had reached several minutes -- long enough that the temptation is to iterate
+// by reasoning instead of by measuring, which is the failure mode this suite exists to
+// prevent. The frame-sensitive checks still run alone afterwards, so the fidelity argument
+// below is unaffected: what shards is the checks that only read state.
+const JOBS = Math.max(1, Number(arg("jobs", "4")) || 4);
 
 // --grid TILES THE JOBS ON THE LEFTMOST DISPLAY instead of parking them off-screen. Purely
 // for watching a parallel run happen; it changes no measurement. It does mean the windows are
 // SMALLER than the 1600x1000 the off-screen runs use, and a few checks read a laid-out
 // sidebar and a canvas sized to the stage -- so a grid run is for looking at, and the numbers
 // to trust are the ones from a normal run.
-const GRID = argv.includes("--grid");
+// ON BY DEFAULT for a parallel run, because four windows parked on top of each other
+// off-screen are four windows you cannot watch. --no-grid restores the off-screen parking,
+// which is what the numbers in .ai-context were measured with.
+const GRID = argv.includes("--no-grid") ? false
+          : argv.includes("--grid") ? true
+          : JOBS > 1;
 
 // Asked of Windows rather than assumed: a second display can sit at a negative origin, so
 // "the left monitor" is the smallest Left among the screens and not simply 0. Falls back to a
@@ -211,12 +232,27 @@ function gridSlot(i, k) {
 // So the serial lane is "everything whose result depends on when things happen", which is
 // about a third of the suite. What is left parallelises safely: geometry, plan invariants,
 // colours, the legend, the heatmap's tiling -- checks that read a resting page.
-const FRAME_SENSITIVE = [
+// TWO TIERS, because "cannot share a machine" and "reads a frame" are different claims and
+// only one of them is negotiable.
+//
+// READS A FRAME: the number it reports comes from a per-frame sample or from a ramp caught
+// mid-flight. Starve these of frames and they do not fail loudly, they report a smaller
+// number -- a ramp that reads 0, a highlight at 1.00x, an animation of one frame. These stay
+// serial always, and no flag moves them.
+const FRAME_READING = [
   "ramps",                        // hover and highlight ramps, and the re-arm
   "drawn larger",                 // the highlight size ratio, read mid-ramp
   "animates instead of snapping", // per-frame radial steps
   "gap reservation holds still",  // per-frame gap steps
   "waits for the release",        // during-drag sampling
+  "haloes but never pushes",      // reads a canvas mid-interaction
+];
+
+// POINTER-DRIVEN: asserts STATE after a gesture, not a frame during one. Contention makes
+// these time out rather than lie, which is the failure mode you can see -- but it was still a
+// third of github#7's mystery run, so serial is the DEFAULT here too. --fast shards them, and
+// says so in the header, because a run that trades fidelity has to admit it.
+const POINTER_DRIVEN = [
   "flies home",                   // camera flight
   "resets the view",              // camera flight
   "pans the camera",              // drag timing
@@ -228,11 +264,16 @@ const FRAME_SENSITIVE = [
   "window track",
   "All dates clears",             // settles, and was timing out under contention
   "undated notes survive",        // ditto, 20s against a 6s deadline
-  "haloes but never pushes",      // reads a canvas mid-interaction
   "recolours exactly one group",  // rebuilds colours and waits for the repaint
   "fit frames the disc",          // camera flight, twice
   "density follows the notes",    // filters and waits for each state to land
 ];
+
+// --fast MOVES THE POINTER-DRIVEN TIER INTO THE SHARDS. Worth having and worth labelling:
+// measured on one vault, the serial lane is 82s of a 94s run, and all of it is this tier plus
+// six frame-readers. Not wired into the pre-push hook, for the same reason --only is not.
+const FAST = argv.includes("--fast");
+const FRAME_SENSITIVE = FAST ? FRAME_READING : FRAME_READING.concat(POINTER_DRIVEN);
 const isFrameSensitive = (c) =>
   FRAME_SENSITIVE.some((q) => c.name.toLowerCase().includes(q));
 
@@ -298,10 +339,52 @@ check("every heatmap day with notes fills its cell", async (p) => {
            detail: `${r.withNotes} days with notes, ${r.notFull} partially filled` };
 });
 
-check("heatmap grid fits its box", async (p) => {
-  const r = await p.j(`{w: __vg.heat.w, box: document.getElementById('vg-heatwrap').clientWidth,
-                        cols: __vg.heat.cols, cell: __vg.heat.cell}`);
-  return { ok: r.w <= r.box, detail: `${r.cols} cols at ${r.cell}px = ${r.w}px in ${r.box}px` };
+// FITS, AND SITS IN THE MIDDLE OF WHAT IT CANNOT FILL.
+//
+// "Fits" alone passed while the grid used 805px of a 1268px band and stopped in the middle of
+// it, with the ribbon below spanning the whole thing -- reported as the band not resizing. The
+// answer is NOT to fill it: the window is a rolling year, and 52 weeks at a legible cell is as
+// wide as it is. A cell is capped because the band is seven cells TALL, so filling a wide band
+// would mean a 245px band eating the disc.
+//
+// So the claim is that the leftover is SYMMETRIC. That is what turns "stopped in the middle"
+// into "centred", and it is the thing that was actually wrong.
+check("the heatmap grid fits its box and is centred in it", async (p) => {
+  const r = await p.j(`(function(){
+    var wrap = document.getElementById("vg-heatwrap");
+    var cv = document.getElementById("vg-heatc");
+    var w = wrap.getBoundingClientRect(), c = cv.getBoundingClientRect();
+    return { grid: __vg.heat.w, box: wrap.clientWidth,
+             cols: __vg.heat.cols, cell: __vg.heat.cell,
+             left: Math.round(c.left - w.left), right: Math.round(w.right - c.right) };
+  })()`);
+  const off = Math.abs(r.left - r.right);
+  return {
+    // A year, or fewer weeks on a band too narrow for one -- never more, and never wider than
+    // the box. Centred to within a pixel of rounding.
+    ok: r.grid <= r.box && r.cols <= 52 && off <= 2,
+    detail: `${r.cols} cols at ${r.cell}px = ${r.grid}px in ${r.box}px, ` +
+            `${r.left}px left / ${r.right}px right (off by ${off})`,
+  };
+});
+
+check("every heatmap day with notes fills its cell", async (p) => {
+  const r = await p.j(`(function(){
+    var h = __vg.heat, cv = document.getElementById('vg-heatc'), ctx = cv.getContext('2d');
+    var dpr = window.devicePixelRatio || 1;
+    var at = function(x,y){ var q = ctx.getImageData(Math.round(x*dpr), Math.round(y*dpr),1,1).data;
+                            return q[0]+','+q[1]+','+q[2]; };
+    var dim = null;
+    h.keys.forEach(function(k){ var d=h.days[k];
+      if (d.n <= 0.004 && !dim) dim = at(18+d.col*h.pitch+h.cell/2, 12+d.row*h.pitch+h.cell/2); });
+    var withNotes = 0, notFull = 0;
+    h.keys.forEach(function(k){ var d=h.days[k]; if (d.n <= 0.004) return; withNotes++;
+      var x = 18+d.col*h.pitch, y = 12+d.row*h.pitch, c = h.cell;
+      if ([at(x+2,y+2), at(x+c-3,y+2), at(x+2,y+c-3), at(x+c-3,y+c-3)].indexOf(dim) >= 0) notFull++; });
+    return {withNotes: withNotes, notFull: notFull};
+  })()`);
+  return { ok: r.notFull === 0 && r.withNotes > 0,
+           detail: `${r.withNotes} days with notes, ${r.notFull} partially filled` };
 });
 
 check("no note is dropped from a heatmap cell's tiling", async (p) => {
@@ -349,6 +432,15 @@ check("the resting disc is on the lattice", async (p) => {
   // those are sunflower-packed into the hub hole and were never on the lattice. This vault
   // has 0 orphans so that one is moot today, but it would fail spuriously on a vault that
   // has them.
+  //
+  // AND THE PAGE HAS TO BE STILL, which the alpha exclusion above does NOT give. It drops
+  // notes that are FADING, and says nothing about notes that are staying and still MOVING --
+  // every one of those sits at full alpha on a fractional radius for the length of the
+  // relayout. Read without this, the 10k vault reported its inner band as 32 rows rather than
+  // 16, gaps alternating 4.096 and 123.904: one lattice caught a hair short of another, which
+  // is a stopwatch reading and not a geometry one. The demo vault passed throughout, being
+  // small enough to land before the read. Every neighbouring check settles; this one did not.
+  await settle(p);
   const r = await p.j(`(function(){
     var plan = __vg.buildWedgePlan(false), band = {};
     plan.cells.forEach(function(c){ band[c.g] = c.inner; });
@@ -853,6 +945,26 @@ check("the camera cluster is bottom-right, in order, and 31px", async (p) => {
 // The dot-size half is asserted separately, because it is a different mechanism reached
 // through the same number: sizeScale is measured off a ROW rather than a lattice unit,
 // and its ceiling had to come off 1 before a filtered disc could draw bigger notes.
+
+// THE DISC IS A FUNCTION OF WHAT IS ON SCREEN, not of what the vault holds (github#13).
+//
+// The reported symptom was that a 500-note vault and a 1500-note vault filtered down to
+// 500 render differently. The cause was that they had to: the lattice spacing was a hard
+// 1, so with the normalisation box pinned and the camera still, screen row pitch was a
+// CONSTANT per vault -- measured 19.481px at every filter state of a 500-note vault and
+// 12.064px at every state of a 1500-note one, while the median dot moved 4.254 -> 4.208px
+// filtering 503 notes down to 62.
+//
+// Asserted scale-free, so it needs neither a second vault nor a fixture of a known size.
+// A lattice of spacing s holds 1/s^2 notes per unit area, so if the disc keeps its notes
+// at an honest density then pitch * sqrt(shown) holds still across filter states. That
+// product is the whole contract. It reads 1.00x exactly wherever the density cap is not
+// binding, and the tolerance here is for the capped end plus the whole-row quantisation
+// of the outer edge -- NOT slack for the invariant itself.
+//
+// The dot-size half is asserted separately, because it is a different mechanism reached
+// through the same number: sizeScale is measured off a ROW rather than a lattice unit,
+// and its ceiling had to come off 1 before a filtered disc could draw bigger notes.
 check("the disc's density follows the notes on screen", async (p) => {
   await p.eval(`__vg.state.hidden.folder = {}; __vg.syncAlpha(); __vg.applyLayout(false); void 0`);
   await sleep(200);
@@ -875,30 +987,132 @@ check("the disc's density follows the notes on screen", async (p) => {
   };
 
   const rows = [await at(1), await at(0.8), await at(0.6), await at(0.4)];
+  // The drawn lattice per band, alongside the report: debugDump measures the TANGENTIAL step
+  // from the placed notes, which is the half of the lattice densityReport cannot see.
+  const lat = [];
+  for (const k of [1, 0.8, 0.6, 0.4]) {
+    await p.eval(`(function(){
+      var order = __vg.groupOrder();
+      var keep = Math.max(1, Math.round(order.length * ${k}));
+      var h = {};
+      order.forEach(function (g, i) { if (i >= keep) h[g] = true; });
+      __vg.state.hidden.folder = h; __vg.syncAlpha(); __vg.applyLayout(false);
+      __vg.renderer.refresh();
+    })()`);
+    await sleep(400);
+    lat.push(await p.j(`(function(){ var d = __vg.debugDump();
+      return { keep: ${k},
+               // BOTH HALVES FROM THE SAME MEASUREMENT. The radial pitch is taken from the
+               // drawn radii -- (outer - inner) / (rows - 1) -- rather than from the reported
+               // spacing, because the reported one can describe a different layout than the one
+               // on screen: measured here, a band drawn with a 169-unit step reported a
+               // 381-unit pitch, and the ratio was reading that disagreement rather than the
+               // lattice. Measured against measured, there is nothing to be stale.
+               o: d.bands.outer && d.bands.outer.rows > 1
+                 ? { n: d.bands.outer.notes, step: d.bands.outer.step35,
+                     rows: d.bands.outer.rows, dot: d.bands.outer.dotRadius.med,
+                     pitch: (d.bands.outer.outer - d.bands.outer.inner)
+                            / (d.bands.outer.rows - 1) } : null,
+               i: d.bands.inner && d.bands.inner.rows > 1
+                 ? { n: d.bands.inner.notes, step: d.bands.inner.step35,
+                     rows: d.bands.inner.rows, dot: d.bands.inner.dotRadius.med,
+                     pitch: (d.bands.inner.outer - d.bands.inner.inner)
+                            / (d.bands.inner.rows - 1) } : null }; })()`));
+  }
   await p.eval(`__vg.state.hidden.folder = {}; __vg.syncAlpha(); __vg.applyLayout(false); void 0`);
   await sleep(200);
   await camReset(p);
 
-  // Only the states where the cap is not binding: at the cap the disc deliberately stops
-  // spreading and starts shrinking again, and holding it to the density contract there
-  // would be asserting that the cap does not exist.
+  // WHAT THIS ASSERTS NOW, AND WHY IT CHANGED.
+  //
+  // It used to assert `pitch * sqrt(shown)` constant to within 1.06. That is the statement of a
+  // CONTINUOUS density -- it requires the pitch to move by any amount the note count asks for,
+  // which requires the disc to resize freely -- and it was the right statement while the disc
+  // did resize and one spacing served both rings.
+  //
+  // Neither holds now, for reasons that were both reported as bugs.
+  //
+  //   The rings keep their diameter. A band therefore fills a LOCKED box, so its pitch is
+  //   T / rows with rows an INTEGER: it can only take the values T/1, T/2, T/3 ... and
+  //   pitch * sqrt(n) drifts inside each row count and steps between them. Between 1 row and 2
+  //   the step is a factor of two, and no tolerance that permits that is worth writing.
+  //
+  //   The two bands are packed independently, because a single spacing made each ring answer for
+  //   the other's filtering -- measured, hiding OUTER folders spread the INNER ring until the
+  //   two touched, clearance 843 -> 89 units. So the outer band's pitch against the whole disc's
+  //   note count is not one quantity; it is two, mixed.
+  //
+  // What the box-filling design does promise is that the lattice stays roughly SQUARE: the
+  // tangential step a note has along its row stays comparable to the radial pitch between rows.
+  // That is the property every visible symptom of the old behaviour was about -- dots sized
+  // against the pitch while sitting at a much wider step, boundary gaps unlike the interior
+  // spacing, holes several times the row median -- and it survives integer rows, because both
+  // sides move together when the row count ticks.
+  //
+  // The old quantity is still computed and REPORTED per band, since its drift is informative
+  // even where it cannot be asserted. It is just not the pass condition any more.
   const free = rows.filter((r) => r.pitchRoot && r.sp < 2.59);
   const roots = free.map((r) => r.pitchRoot);
   const spread = roots.length > 1 ? Math.max(...roots) / Math.min(...roots) : 1;
+
+  // A band with almost nothing in it has no lattice to be square -- hiding groups can empty one
+  // outright, and the dominant-folder fixture empties its outer band.
+  const sq = [];
+  for (const L of lat) {
+    for (const [band, v] of [["outer", L.o], ["inner", L.i]]) {
+      // AND AT LEAST TWO ROWS. With one row there is no radial pitch: T/1 is the band's whole
+      // thickness, a distance between nothing and nothing, and comparing a tangential step to it
+      // measures how thick the band is rather than how square its lattice is. Measured on the
+      // dominant-folder fixture, whose outer band drops to one row once the dominant folder is
+      // hidden: ratio 0.44 on a lattice that has no second row to be un-square with.
+      if (!v || v.n < 9 || v.rows < 2 || !(v.pitch > 1) || !(v.step > 1)) continue;
+      sq.push({ keep: L.keep, band: band, n: v.n, rows: v.rows,
+                step: Math.round(v.step), pitch: Math.round(v.pitch),
+                ratio: Math.round((v.step / v.pitch) * 100) / 100,
+                ds: Math.round((2 * (v.dot || 0) / v.step) * 100) / 100 });
+    }
+  }
+  const worstSq = sq.reduce((a, b) =>
+    (Math.abs(Math.log(b.ratio)) > Math.abs(Math.log(a.ratio)) ? b : a), sq[0] || { ratio: 1 });
+  // A factor of 1.75 either way. One row of slack in a band three or four deep moves this by
+  // about a third, and the arc a wedge is given is quantised by its note count on top of that,
+  // so a genuine failure -- a band spread 1.58x wider tangentially than radially, which is what
+  // the old solve produced and what the dots were missing -- sits well outside it.
+  const SQ_LO = 1 / 1.75, SQ_HI = 1.75;
+  const square_ok = !sq.length || sq.every((q) => q.ratio >= SQ_LO && q.ratio <= SQ_HI);
 
   // Dots have to actually grow. Compared at the widest spacing reached rather than at the
   // last step, since which step spreads most depends on the vault's folder shape.
   const base = rows[0];
   const widest = rows.reduce((a, b) => (b.sp > a.sp ? b : a), rows[0]);
   const grew = widest.sp > 1.05 ? widest.sizeMedian / base.sizeMedian : 1;
-  const spread_ok = spread < 1.06;
-  const size_ok = widest.sp <= 1.05 || grew > 1.05;
+  // A DOT TRACKS THE ROOM IT HAS, which is not the same claim as "a wider spacing makes bigger
+  // dots" and replaces it.
+  //
+  // That older clause read: if the spacing widened past 1.05, the median dot must have grown by
+  // 5%. It was true while a widening spacing meant a coarser lattice. Under a locked box it does
+  // not: `sp` widens because the band lost a ROW over the same thickness, and the tangential step
+  // -- the room a note actually has beside its neighbours -- can be unchanged. Measured on the
+  // dominant-folder fixture: spacing 2.412x, step steady at 169 units, median dot steady to
+  // within 2%. The dots were right and the clause was asking the wrong question.
+  //
+  // The invariant that survives is the ratio the design is stated in: diameter over step. It
+  // catches what the old clause was for -- dots failing to follow their room, which is what a
+  // sparse ring of pinpricks is -- and it also catches the opposite, which the old clause could
+  // not see at all and which shipped twice: dots outgrowing their room into blobs.
+  const dss = sq.map((q) => q.ds).filter((v) => v > 0);
+  const dsLo = dss.length ? Math.min(...dss) : 1, dsHi = dss.length ? Math.max(...dss) : 1;
+  const size_ok = !dss.length || (dsLo >= 0.15 && dsHi <= 0.8 && dsHi / dsLo < 2.2);
 
   return {
-    ok: spread_ok && size_ok,
-    detail: `pitch*sqrt(shown) over ${free.length} uncapped states: ` +
-            roots.map((v) => Math.round(v)).join(" / ") + ` -- spread ${spread.toFixed(3)}x` +
-            ` (needs <1.060); spacing reached ${widest.sp} at ${widest.shown} of ` +
+    ok: square_ok && size_ok,
+    detail: `step/pitch per band over ${sq.length} sampled states: ` +
+            sq.map((q) => `${q.band[0]}${q.n}:${q.ratio}/d${q.ds}`).join(" ") +
+            ` -- worst square ${worstSq.ratio} (needs ${SQ_LO.toFixed(2)}-${SQ_HI.toFixed(2)}),` +
+            ` diameter/step ${dsLo}-${dsHi} (needs 0.15-0.80, spread <2.2)` +
+            `; context, not asserted: pitch*sqrt(shown) ` +
+            roots.map((v) => Math.round(v)).join("/") + ` spread ${spread.toFixed(3)}x` +
+            `; spacing reached ${widest.sp} at ${widest.shown} of ` +
             `${base.shown} shown, median dot ${base.sizeMedian} -> ${widest.sizeMedian}` +
             ` (${grew.toFixed(2)}x)`,
   };
@@ -1451,7 +1665,46 @@ check("a range change animates instead of snapping", async (p) => {
   // passes to the next one in -- so it is inherently a little steppier than the disc is. A
   // snap has path equal to its own step, so its allowance is 6/frames of it and it fails by a
   // wide margin.
-  const budget = (path) => Math.max(40, 6 * path / Math.max(1, r.frames));
+  // ...OR HALF A ROW, whichever is largest, and that third term is the one that had to be added.
+  //
+  // Six mean frames was calibrated when a range change had NO radial path: the density solve
+  // kept both rims pinned, `path` came out 0 on this fixture, and the budget was always the 40
+  // floor. Filling a locked box changes that -- a range change re-depths the bands, so the disc
+  // genuinely reflows radially and the path is real (0 -> 954 units measured here). Against a
+  // real path, "six mean frames" asks a design that moves in ROWS to move like one that does
+  // not.
+  //
+  // A frame's worst step is a row tick, and that is deliberate: taking the radius from the
+  // fractional row coordinate instead was tried on 2026-08-22 and reverted the same day, because
+  // it puts every note off-lattice on every intermediate frame -- one bad frame against ~120
+  // mushy ones. So half a row is the honest allowance for a single frame, and it is still far
+  // from a snap: a snap moves the whole path at once, which here is six rows.
+  // ONE ROW, not half of one, and scaled by how starved of frames the page was.
+  //
+  // The note above says a frame's worst step IS a row tick and that a note hopping a whole row
+  // is deliberate -- and then allowed half a row for it. Those cannot both hold: a row is 160
+  // units and the extent does move a whole one when the outermost note ticks. Measured on the
+  // 10k vault with the extent taken over a set fixed at probe start, the worst frame was 183
+  // units, with the row count walking 0.004 of a row and no seam, sub-seam or split change on
+  // that frame -- a clean single hop, failing a bound that could not have passed one.
+  //
+  // ONE_ROW * 1.25 covers the hop plus the max-passing effect the note describes: the extent is
+  // a max, so when the furthest note ticks inward the maximum passes to another note and the
+  // number moves further than either note did.
+  //
+  // AND THE STARVATION TERM. This animation runs at 4x for exactly the reason given above --
+  // a rate bound is meaningless if the page cannot draw the distance -- but the page still gets
+  // whatever frames the machine spares. Measured on the same fixture and build: 226 frames gave
+  // a worst step of 183, and 105 frames gave 781, which is the same motion sampled half as
+  // often. Nominal is 60fps over the measured span; if the page delivered a third of that, a
+  // sampled frame legitimately carries three hops. Without this term the check reports the load
+  // on the machine rather than the smoothness of the disc, and it did: the same commit passed
+  // this check run alone and failed it inside the full suite.
+  const ONE_ROW = 160;
+  const nominal = r.spanMs / 16.67;
+  const starve = Math.max(1, nominal / Math.max(1, r.frames));
+  const budget = (path) =>
+    Math.max(40, ONE_ROW * 1.25 * starve, 6 * path / Math.max(1, r.frames));
   const oBudget = budget(r.outerPath), iBudget = budget(r.innerPath);
   const rad = r.radMaxStep || { step: 0, atMs: 0 };
   return {
@@ -1480,6 +1733,327 @@ check("a range change animates instead of snapping", async (p) => {
 // The assertion is EXACTLY ZERO, not a tolerance. The reservation is now walked between the
 // two packings by cascade progress, and for a change that empties no group both ends are the
 // same number -- so any movement at all means it is being derived again.
+// THE INVARIANT THE WHOLE CASCADE EXISTS TO SERVE: the last animated frame IS the resting
+// layout. Not close to it -- identical, per note, in radius, angle and drawn radius. See
+// .ai-context/animation.md, which this check is the executable half of.
+//
+// It is worth a check of its own because every violation found so far was invisible in the
+// frames leading up to it. The cascade converged beautifully and then the layout changed,
+// because the resting layout is computed by a DIFFERENT call and one of its arguments differed.
+// The last one was plan membership: at rest a member was anything `visible`, the folder filter
+// alone, so a note excluded by the DATE range stayed a member at weight 0 -- and a member makes
+// a cell. Eleven cells shared the arc where the final frame had nine, which moved wedges 10.6
+// degrees while every radius and every dot size stayed identical to the unit.
+//
+// Both triggers are exercised, because they reach it differently: a folder toggle changes which
+// notes exist, a range change changes which notes are IN RANGE, and only the second one could
+// ever have caught the membership bug.
+//
+// Angles are compared wrap-safely -- a note either side of 12 o'clock differs by 2*pi for no
+// reason -- and drawn radius goes through renderer.scaleSize, because the node attribute is the
+// reducer's INPUT and reading it raw understates every dot.
+check("the last frame of a cascade is the resting layout", async (p) => {
+  await clearRange(p);
+  await settle(p);
+  await sleep(200);
+
+  const sampler = `(function (trigger) {
+    window.__LF = { last: null, rest: null, frames: 0 };
+    var snap = function () {
+      var a0 = __vg.renderer.graphToViewport({ x: 0, y: 0 });
+      var b0 = __vg.renderer.graphToViewport({ x: 160, y: 0 });
+      var perPx = 160 / Math.hypot(b0.x - a0.x, b0.y - a0.y);
+      var m = {};
+      __vg.graph.forEachNode(function (id, at) {
+        var d = __vg.renderer.getNodeDisplayData(id);
+        if (!d || d.hidden) return;
+        if ((__vg.alpha[id] || 0) < 0.999) return;      // only notes that have arrived
+        m[id] = { r: Math.hypot(at.x, at.y), th: Math.atan2(at.y, at.x),
+                  dot: __vg.renderer.scaleSize(d.size) * perPx };
+      });
+      return m;
+    };
+    var tick = function () {
+      if (__vg.demo.busy()) {
+        window.__LF.last = snap(); window.__LF.frames++;
+        requestAnimationFrame(tick);
+      } else {
+        // A BEAT: busy() clears before the final assignment lands. Without this the check
+        // measures its own stopwatch -- see the note in animation.md.
+        setTimeout(function () { window.__LF.rest = snap(); }, 320);
+      }
+    };
+    trigger();
+    requestAnimationFrame(tick);
+  })`;
+
+  const run = async (label, triggerJs) => {
+    await p.eval(`${sampler}(function () { ${triggerJs} }); void 0`);
+    for (let i = 0; i < 400; i++) {
+      if (await p.j(`!!window.__LF.rest`).catch(() => false)) break;
+      await sleep(100);
+    }
+    return await p.j(`(function () {
+      var L = window.__LF.last, R = window.__LF.rest;
+      if (!L || !R) return { frames: window.__LF.frames, n: 0 };
+      var dr = 0, dt = 0, dd = 0, n = 0, worst = "";
+      Object.keys(R).forEach(function (id) {
+        if (!L[id]) return;
+        n++;
+        var a = Math.abs(R[id].r - L[id].r);
+        var da = R[id].th - L[id].th;
+        while (da > Math.PI) da -= 2 * Math.PI;
+        while (da < -Math.PI) da += 2 * Math.PI;
+        var t = Math.abs(da) * R[id].r;
+        var s = L[id].dot > 0.01 ? Math.abs(R[id].dot - L[id].dot) / L[id].dot : 0;
+        if (a > dr) dr = a;
+        if (t > dt) { dt = t; worst = __vg.graph.getNodeAttribute(id, "folder") || "?"; }
+        if (s > dd) dd = s;
+      });
+      return { frames: window.__LF.frames, n: n, worst: worst,
+               dr: Math.round(dr * 10) / 10, dt: Math.round(dt * 10) / 10,
+               dd: Math.round(dd * 1000) / 10 };
+    })()`).then((r) => ({ label, ...r }));
+  };
+
+  const out = [];
+  // A folder toggle. The first group with an eye, whichever the vault has.
+  const g = (await p.j(`__vg.groupOrder()`))[0];
+  out.push(await run("folder toggle", `document.querySelector('[data-eye="' +
+    ${JSON.stringify(g)}.replace(/"/g, String.fromCharCode(92) + '"') + '"]').click();`));
+  await p.eval(`document.querySelector('[data-eye="' +
+    ${JSON.stringify(g)}.replace(/"/g, String.fromCharCode(92) + '"') + '"]').click(); void 0`);
+  await settle(p);
+  await sleep(200);
+
+  // A range change, taken off the vault's own extent so it works on any fixture.
+  const span = await p.j(`(function () { var f = document.querySelector("#vg-from");
+    return f ? { min: f.min, max: f.max } : null; })()`);
+  if (span && span.min && span.max) {
+    const lo = Date.parse(span.min), hi = Date.parse(span.max);
+    const from = new Date(hi - (hi - lo) * 0.15).toISOString().slice(0, 10);
+    out.push(await run("range change", `__vg.setRange(${JSON.stringify("PLACEHOLDER")}, null);`
+      .replace("PLACEHOLDER", from)));
+  }
+  await clearRange(p);
+
+  // A tenth of a row, and a twentieth of a dot. Float noise and the odd sub-pixel rounding live
+  // far below this; a real violation is a fraction of a ROW -- 160 units -- or a visible step in
+  // size, so anything genuine is orders of magnitude past these.
+  const bad = out.filter((r) => !r.n || r.dr > 16 || r.dt > 16 || r.dd > 5);
+  return {
+    ok: !bad.length,
+    detail: out.map((r) => r.n
+      ? `${r.label}: ${r.frames}f, ${r.n} notes, dr ${r.dr} dtan ${r.dt}` +
+        (r.dt > 1 ? ` (${r.worst})` : "") + ` dot ${r.dd}%`
+      : `${r.label}: nothing sampled`).join(" | "),
+  };
+});
+
+// THE STATES WHERE EVERY LAYOUT BUG THIS FILE KNOWS ABOUT WAS FOUND: folders switched off one
+// at a time, and a date range squeezed until the bands are one or two rows deep. Both drive the
+// disc into the corner the ordinary fixtures never reach -- cells narrower than a note, rows
+// holding one note, spacing pinned at its cap -- and every defect of the last session showed up
+// there first: dots overlapping, dots collapsed onto the pixel floor, and holes several times
+// the row spacing where a cell held arc in rows it had no notes for.
+//
+// Asserted per state, not at the end, so the report names the state that broke rather than
+// leaving the walk to be repeated by hand. Three properties, each of which was violated by a
+// shipped build:
+//
+//   overlaps   two dots may not intersect. Dot radius is measured through the renderer's own
+//              scaleSize, not read off the node attribute -- the attribute is the reducer's
+//              INPUT and has been off by the camera ratio before now.
+//   collapse   the median dot has to stay a real fraction of the step. A build that sized every
+//              band from its tightest pair drew the whole vault at the 1.5px floor, which no
+//              overlap check would ever notice.
+//   holes      no gap in a row may exceed 2.5x that row's median step. This is deliberately
+//              loose: one note in a small folder occupies one row wherever it sits, so some
+//              slack is structural, and the number is set to catch a wedge's worth of dead arc
+//              rather than a row's own unevenness.
+check("filtered to the bone, the disc stays drawable", async (p) => {
+  await clearRange(p);
+  await settle(p);
+  const probe = `(function () {
+    var a0 = __vg.renderer.graphToViewport({ x: 0, y: 0 });
+    var b0 = __vg.renderer.graphToViewport({ x: 160, y: 0 });
+    var perPx = 160 / Math.hypot(b0.x - a0.x, b0.y - a0.y);
+    var rows = {}, n = 0;
+    __vg.graph.forEachNode(function (id, at) {
+      var d = __vg.renderer.getNodeDisplayData(id);
+      if (!d || d.hidden || (__vg.alpha[id] || 0) < 0.999) return;
+      n++;
+      var r = Math.hypot(at.x, at.y);
+      var k = Math.round(r / 8) * 8;
+      (rows[k] || (rows[k] = [])).push({ th: Math.atan2(at.y, at.x),
+                                         rad: __vg.renderer.scaleSize(d.size) * perPx,
+                                         // Which WEDGE this note is in. A gap between two
+                                         // wedges is a seam and belongs there; a gap inside one
+                                         // is a hole. Without this the two are the same number.
+                                         w: (at.folder || at.group || at.dir || "?")
+                                            + "\u0000" + (at.sub || "") });
+    });
+    var worstClear = 1e9, overlaps = 0, holeRatio = 0, dots = [], steps = [], worstRel = 0;
+    // Seams are reported but NOT asserted on. They are a design quantity -- SEAM_ROWS, the
+    // per-band gap factor and the wedge margin all deliberately put empty arc at a wedge
+    // boundary -- so a threshold over them is a threshold over the look of the disc, which is
+    // not what this check is for. It measures whether a wedge has arc it cannot fill.
+    var seamRatio = 0, seamAt = "";
+    Object.keys(rows).forEach(function (k) {
+      var row = rows[k].slice().sort(function (x, y) { return x.th - y.th; });
+      if (row.length < 4) { row.forEach(function (q) { dots.push(q.rad); }); return; }
+      var arcs = [];
+      for (var i = 1; i < row.length; i++) {
+        var arc = (row[i].th - row[i - 1].th) * (+k);
+        if (!(arc > 0.5 && arc < 1e5)) continue;
+        arcs.push(arc);
+        var cl = arc - row[i].rad - row[i - 1].rad;
+        if (cl < worstClear) worstClear = cl;
+        if (cl < 0) overlaps++;
+      }
+      if (!arcs.length) return;
+      var srt = arcs.slice().sort(function (x, y) { return x - y; });
+      var med = srt[Math.floor(srt.length / 2)];
+      // The worst overlap AS A FRACTION of this row's own spacing, which is the scale that
+      // decides whether it is visible. Absolute units are not comparable between the inner and
+      // outer bands, let alone between a 450-note vault and a 10,000-note one.
+      for (var q = 1; q < row.length; q++) {
+        var a3 = (row[q].th - row[q - 1].th) * (+k);
+        if (!(a3 > 0.5 && a3 < 1e5)) continue;
+        var c3 = a3 - row[q].rad - row[q - 1].rad;
+        if (c3 < 0 && med > 0 && -c3 / med > worstRel) worstRel = -c3 / med;
+      }
+      steps.push(med);
+      // THE BIGGEST GAP INSIDE A WEDGE, which is what a hole is. The old line took the biggest
+      // gap of any kind, so it reported the widest SEAM in the ring -- and a seam is put there
+      // on purpose. Measured on the 10k vault filtered to its last 2.5%: the flagged gap was
+      // the boundary between 15 - Courses and 11 - Clippings, in HEAD as well, at 2.61x against
+      // this build's 3.52x. Both are seams; neither is a hole. Tightening the bound to 3.2x
+      // therefore turned a change in wedge margins into a failing test.
+      for (var w = 1; w < row.length; w++) {
+        var a4 = (row[w].th - row[w - 1].th) * (+k);
+        if (!(a4 > 0.5 && a4 < 1e5)) continue;
+        var same = row[w].w === row[w - 1].w;
+        if (same) { if (med > 0 && a4 / med > holeRatio) holeRatio = a4 / med; }
+        else if (med > 0 && a4 / med > seamRatio) {
+          seamRatio = a4 / med;
+          seamAt = row[w - 1].w.split("\u0000")[0] + " -> " + row[w].w.split("\u0000")[0];
+        }
+      }
+      row.forEach(function (q) { dots.push(q.rad); });
+    });
+    dots.sort(function (x, y) { return x - y; });
+    steps.sort(function (x, y) { return x - y; });
+    var medDot = dots.length ? dots[Math.floor(dots.length / 2)] : 0;
+    var medStep = steps.length ? steps[Math.floor(steps.length / 2)] : 0;
+    return { shown: n, overlaps: overlaps,
+             worstRel: Math.round(worstRel * 1000) / 10,
+             worstClear: worstClear === 1e9 ? null : Math.round(worstClear),
+             holeRatio: Math.round(holeRatio * 100) / 100,
+             seamRatio: Math.round(seamRatio * 100) / 100, seamAt: seamAt,
+             ds: medStep > 0 ? Math.round(2 * medDot / medStep * 100) / 100 : 0,
+             rows: Object.keys(rows).length };
+  })()`;
+  const bad = [];
+  const seen = [];
+  const judge = (label, r) => {
+    seen.push(`${label}: ${r.shown}n ${r.rows}r d/s ${r.ds} hole ${r.holeRatio}x ` +
+      `seam ${r.seamRatio}x${r.seamAt ? " (" + r.seamAt + ")" : ""} ` +
+              `clear ${r.worstClear}${r.worstRel ? " (-" + r.worstRel + "%)" : ""}`);
+    if (r.shown < 4) return;                     // nothing left to be wrong about
+    // 4% OF THE ROW'S OWN SPACING, not zero, and the reason is in the design rather than in
+    // the tolerance. A note's position within its row is WEIGHT-based -- its own share of the
+    // row's weight -- so a light note beside a heavy one sits closer than the row's mean step.
+    // Dot size is bounded by one figure per cell and one per band, and both are averages; the
+    // exact bound is each note's own local gap, which is dotFit, and dotFit is a minimum over
+    // WHICH neighbour happens to be nearest. It moves as the disc moves, and sizing from it
+    // made every dot in the vault breathe -- 252% in a single frame, 72 of 122 frames past 5%.
+    //
+    // So a few percent of local crowding is the price of a size that is stable and ordered by
+    // link weight, and the separation is wide: the real defects this check has caught were 44%
+    // of a row median (the pixel floor ignoring the room) and 10% (a cell average bounding a
+    // tighter row), while what remains is 2.5%.
+    if (r.worstRel > 4) {
+      bad.push(`${label}: ${r.overlaps} overlapping pair(s), worst ${r.worstClear} = ` +
+               `${r.worstRel}% of the row median`);
+    }
+    if (r.ds < 0.15) bad.push(`${label}: dots collapsed, diameter/step ${r.ds}`);
+    // 3.2x. This was 4.5x, parked there as a baseline while a 4.24x gap on the demo vault was
+    // thought to need the arc allocated per ROW to fix. It did not: the gap was FOUR sub-wedges
+    // of 15 - Courses, 7 and 6 and 6 and 6 notes each, in a band 9 rows deep -- none of them
+    // reaching the rim row, all four holding arc across it. The sub-split gate was testing
+    // "can each sub-wedge fill a column" against REF_ROWS (5) rather than the band's real
+    // depth, so it let a split through that could not be drawn. Gated on the real depth,
+    // 15 - Courses stays one wedge and the gap closes.
+    //
+    // 3.2x, AND holeRatio now means a gap INSIDE one wedge. It used to be the biggest gap of
+    // any kind in a ring, which made it mostly a measurement of the widest SEAM -- and a seam is
+    // deliberate. That confusion cost a false failure: at 3.2x this build reported 3.52x on the
+    // 10k vault and 3.21x on the demo vault, both of them the wedge boundary between two
+    // folders, and both present in HEAD too at 2.61x and 2.36x. Nothing was wrong with the disc;
+    // the margin at a wedge edge had changed and the bound was standing over the wrong number.
+    //
+    // Measured worst across every sparse state on all three fixtures once seams are excluded:
+    // 2.01x. Seams in the same runs reach 3.52x and are reported on the detail line instead, so
+    // a change in seam width or wedge margin is still visible -- it just does not fail a check
+    // whose subject is arc a wedge cannot fill. 3.2x leaves the 2.01x its headroom and still
+    // catches a return to 4x, which is what a cell holding rows it cannot reach looks like.
+    if (r.holeRatio > 3.2) bad.push(`${label}: a gap ${r.holeRatio}x the row median INSIDE one wedge`);
+  };
+
+  // ONE FOLDER AT A TIME, cumulatively, so the last states are the sparse ones.
+  const groups = await p.j(`__vg.groupOrder()`);
+  for (const g of groups) {
+    const hid = await p.j(`(function(){
+      var b = document.querySelector('[data-eye="' + ${JSON.stringify("")} + ${JSON.stringify(g)}.replace(/"/g, '\\\\"') + '"]');
+      if (!b) return false; b.click(); return true; })()`);
+    if (!hid) continue;
+    await settle(p);
+    // A BEAT AFTER SETTLE, and it is load-bearing. settle() returns when busy() clears, and the
+    // final assignment lands on the frame after that -- read without this, notes still in
+    // flight at full alpha reported 16 overlapping pairs at -78 units on a disc that has none
+    // at rest, identically on every state, which is the signature of a transient and not of a
+    // geometry. The same mistake as the lattice check's missing settle, one step further along.
+    //
+    // 600ms, not 300, because the 10k fixture needs it: at 300 it reported 2 pairs at -16 on
+    // four different states -- the same number four times, which is a stopwatch reading -- and
+    // neither window size reproduced it at rest. Ten thousand notes take longer to place than
+    // one thousand, and this waits for the slowest fixture rather than the median one.
+    await sleep(600);
+    judge(`hidden through ${g}`, await p.j(probe));
+  }
+  // Back to everything, then squeeze the range instead.
+  for (const g of groups) {
+    await p.j(`(function(){
+      var b = document.querySelector('[data-eye="' + ${JSON.stringify("")} + ${JSON.stringify(g)}.replace(/"/g, '\\\\"') + '"]');
+      if (b && b.getAttribute("aria-pressed") === "false") b.click();
+      return true; })()`).catch(() => 0);
+  }
+  await settle(p);
+
+  // A RANGE SQUEEZED UNTIL THE BANDS ARE SHALLOW. Taken off the vault's own extent so it works
+  // on any fixture: the last tenth, then the last fortieth, then the last two hundredth.
+  const span = await p.j(`(function(){
+    var f = document.querySelector("#vg-from");
+    return f ? { min: f.min, max: f.max } : null; })()`);
+  if (span && span.min && span.max) {
+    const lo = Date.parse(span.min), hi = Date.parse(span.max);
+    for (const frac of [0.1, 0.025, 0.005]) {
+      const from = new Date(hi - (hi - lo) * frac).toISOString().slice(0, 10);
+      await p.eval(`__vg.setRange(${JSON.stringify(from)}, null); void 0`);
+      await settle(p);
+      await sleep(600);
+      judge(`range last ${Math.round(frac * 1000) / 10}%`, await p.j(probe));
+    }
+  }
+  await clearRange(p);
+  return {
+    ok: !bad.length,
+    detail: bad.length ? bad.slice(0, 4).join("; ")
+                       : seen.slice(-4).join(" | "),
+  };
+});
+
 check("the gap reservation holds still while groups only thin", async (p) => {
   await clearRange(p);
   const before = await p.j(`__vg.rangeReport()`);
@@ -1507,6 +2081,142 @@ check("the gap reservation holds still while groups only thin", async (p) => {
       ? `this range empties a group (nG ${s0.ngO} -> ${s1.ngO}), so the gap moves for a real reason`
       : `nG held at ${s1.ngO} across ${r.frames} frames, worst step ${r.ngMaxStep}; ` +
         `lit ${before.lit} -> ${after.lit}`,
+  };
+});
+
+// THE RANGE IS TYPEABLE, and the two fields are the range rather than a readout of it. They
+// were text, so the only way to set a range was to find a two-pixel handle at the far end of
+// eleven years of strip. Both directions are asserted: the fields drive the filter, and the
+// filter drives the fields -- a control that shows a stale date is worse than one that shows
+// nothing, because it looks authoritative.
+check("the date fields set the range and follow it", async (p) => {
+  await clearRange(p);
+  const box = await p.j(`(function(){
+    var b = document.querySelector("#vg-rangebox");
+    if (!b) return null;
+    var row = document.querySelector("#vg-heat .hrow").getBoundingClientRect();
+    var r = b.getBoundingClientRect();
+    return { order: [].map.call(b.children, function (c) { return c.id || String(c.className); }),
+             fromRowRight: Math.round(row.right - r.right),
+             min: document.querySelector("#vg-from").min,
+             max: document.querySelector("#vg-to").max };
+  })()`);
+  if (!box) return { ok: false, detail: "no #vg-rangebox" };
+
+  // Typing into the field applies it.
+  const set = await p.j(`(function(){
+    var f = document.querySelector("#vg-from");
+    var mid = f.min.slice(0, 4) === f.max.slice(0, 4) ? f.max : (Number(f.max.slice(0, 4))) + "-01-01";
+    f.value = mid;
+    f.dispatchEvent(new Event("change", { bubbles: true }));
+    return { typed: mid };
+  })()`);
+  await sleep(200);
+  await settle(p);
+  const after = await p.j(`(function(){
+    var r = __vg.rangeReport();
+    return { lit: r.lit, total: r.total, from: r.from,
+             field: document.querySelector("#vg-from").value };
+  })()`);
+
+  // And clearing it puts the fields back to the span's own ends.
+  await p.eval(`document.querySelector("#vg-rangeall").click(); void 0`);
+  await sleep(200);
+  await settle(p);
+  const cleared = await p.j(`(function(){
+    return { from: document.querySelector("#vg-from").value,
+             to: document.querySelector("#vg-to").value,
+             state: __vg.rangeReport().from };
+  })()`);
+  await clearRange(p);
+  const ordered = box.order.join(",") === "vg-from,arw,vg-to,vg-rangeall";
+  return {
+    ok: ordered && box.fromRowRight <= 2 && !!box.min && !!box.max &&
+        after.field === set.typed && after.from !== null && after.lit < after.total &&
+        cleared.state === null && cleared.from === box.min && cleared.to === box.max,
+    detail: `${box.order.length} controls (${box.order.join(" ")}) flush to the row's right ` +
+            `edge (${box.fromRowRight}px); typing ${set.typed} lit ${after.lit} of ${after.total}; ` +
+            `clearing put the fields back to ${cleared.from} -> ${cleared.to}`,
+  };
+});
+
+// THE YEARS ARE BUTTONS. They were text painted on the strip, which meant hit-testing a pixel
+// band by hand and no keyboard, no focus ring, no hover state the browser could give us -- a
+// control only a mouse could reach. Asserted as buttons: real elements, one per year, each at
+// its own year's position on the scale above, and the one the range sits on marked pressed.
+check("the year buttons select a year and halo it on hover", async (p) => {
+  await clearRange(p);
+  const list = await p.j(`(function(){
+    var host = document.querySelector("#vg-years");
+    if (!host) return null;
+    var bs = [].slice.call(host.querySelectorAll("button[data-yr]"));
+    if (!bs.length) return { none: true };
+    var rib = document.querySelector("#vg-ribbon").getBoundingClientRect();
+    // Each button should sit over its own year. Worst error across all of them, in px.
+    var worst = 0;
+    bs.forEach(function (b) {
+      var yr = +b.getAttribute("data-yr");
+      // CLAMPED, like the button is. A year whose January falls before the vault s first
+      // note has a negative position on the scale, and the button sits at the strip s edge
+      // instead -- which is correct, and is what made this read as 327px of error.
+      var want = Math.max(0, Math.min(rib.width, __vg.ribbonXOf(Date.UTC(yr, 0, 1))));
+      var got = b.getBoundingClientRect().left + b.getBoundingClientRect().width / 2 - rib.left;
+      var d = Math.abs(got - want);
+      if (d > worst) worst = d;
+    });
+    var mid = bs[Math.floor(bs.length / 2)];
+    var r = mid.getBoundingClientRect();
+    return { n: bs.length, worstPx: Math.round(worst),
+             years: bs.map(function (b) { return b.getAttribute("data-yr"); }),
+             pick: mid.getAttribute("data-yr"),
+             x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2),
+             tagged: bs.every(function (b) { return b.tagName === "BUTTON" && b.hasAttribute("aria-pressed"); }) };
+  })()`);
+  if (!list || list.none) return { ok: false, detail: "no year buttons under the ribbon" };
+
+  // Hover haloes exactly that year's notes.
+  await p.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: list.x, y: list.y });
+  await sleep(260);
+  const hov = await p.j(`(function(){
+    var yr = __vg.state.hoverYear, n = 0, real = 0;
+    __vg.graph.forEachNode(function (id, a) {
+      if (__vg.isHighlighted(id)) n++;
+      if (a.created && a.created.slice(0, 4) === yr) real++;
+    });
+    return { year: yr, haloed: n, real: real };
+  })()`);
+
+  // Clicking selects the calendar year, and the button says so.
+  await p.send("Input.dispatchMouseEvent", { type: "mousePressed", x: list.x, y: list.y, button: "left", clickCount: 1, buttons: 1 });
+  await p.send("Input.dispatchMouseEvent", { type: "mouseReleased", x: list.x, y: list.y, button: "left", clickCount: 1, buttons: 0 });
+  await sleep(260);
+  await settle(p);
+  const clicked = await p.j(`(function(){
+    var r = __vg.rangeReport();
+    var b = document.querySelector('#vg-years button[data-yr="' + ${JSON.stringify(list.pick)} + '"]');
+    return { fromISO: r.from ? new Date(r.from).toISOString().slice(0, 10) : null,
+             toISO: r.to ? new Date(r.to).toISOString().slice(0, 10) : null,
+             lit: r.lit, pressed: b && b.getAttribute("aria-pressed"),
+             field: document.querySelector("#vg-from").value };
+  })()`);
+
+  // And leaving drops the halo rather than leaving it stuck on.
+  await p.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: list.x, y: list.y - 220 });
+  await sleep(220);
+  const left = await p.j(`__vg.state.hoverYear`);
+  await clearRange(p);
+  const yr = list.pick;
+  // A year at the very edge of the span is clamped to an open end, which is correct.
+  const okRange = clicked.lit > 0 &&
+        (clicked.fromISO === null || clicked.fromISO.slice(0, 4) === yr) &&
+        (clicked.toISO === null || clicked.toISO.slice(0, 4) === yr);
+  return {
+    ok: list.tagged && list.worstPx <= 2 && hov.year === yr && hov.real > 0 &&
+        hov.haloed === hov.real && okRange && clicked.pressed === "true" && left === null,
+    detail: `${list.n} buttons (${list.years.join(" ")}) within ${list.worstPx}px of their own ` +
+            `year; hovering '${yr}' haloed ${hov.haloed} of its ${hov.real} notes; clicking gave ` +
+            `${clicked.fromISO} -> ${clicked.toISO} (${clicked.lit} lit, pressed=${clicked.pressed}); ` +
+            `leaving cleared it (${left})`,
   };
 });
 
@@ -1678,6 +2388,14 @@ async function runOne(vault, work) {
   const chrome = spawn(findChrome(), [
     `--remote-debugging-port=${PORT}`, `--user-data-dir=${profile}`,
     "--no-first-run", "--no-default-browser-check",
+    // NOTHING THIS RUN DOES NOT NEED. Four Chromes starting at once, three times per run,
+    // is the second cost after the intro -- and every one of these subsystems is dead weight
+    // for a page loaded from a file with no network, no extensions and no account. The GPU is
+    // deliberately NOT disabled: the thing being measured is a WebGL canvas.
+    "--disable-extensions", "--disable-component-update", "--disable-client-side-phishing-detection",
+    "--disable-sync", "--no-service-autorun", "--disable-domain-reliability",
+    "--metrics-recording-only", "--no-pings", "--mute-audio",
+    "--disable-breakpad", "--disable-crash-reporter",
     // THE WINDOW MUST KEEP ANIMATING WHILE NOBODY IS LOOKING AT IT.
     //
     // The window is parked off-screen below, and Windows tells Chrome so: its native
@@ -2047,7 +2765,8 @@ async function main() {
   // THE WORK LIST. One entry per (vault, shard). The frame-sensitive checks are one shard of
   // their own per vault and are run last, alone -- see the note on JOBS.
   const shaky = picked.filter(isFrameSensitive);
-  const steady = picked.filter((c) => !isFrameSensitive(c));
+  const intro = picked.filter((c) => !isFrameSensitive(c) && needsIntro(c));
+  const steady = picked.filter((c) => !isFrameSensitive(c) && !needsIntro(c));
   const shard = (list, k) => {
     // Round-robin rather than contiguous slices: the slow checks cluster (every ribbon drag
     // is 5-12s and they are declared together), so contiguous slices give one job the whole
@@ -2065,14 +2784,23 @@ async function main() {
     // One build, reused by every job for this vault. buildFor returns "" when --url was
     // passed or the build failed, and runOne falls back to building its own.
     const url = await buildFor(v);
+    // ?rest on every lane but the intro's: see NEEDS_INTRO.
+    const atRest = url ? url + (url.indexOf("?") < 0 ? "?rest" : "&rest") : url;
     for (const g of shard(steady, JOBS)) {
-      parallel.push({ vault: v, checks: g, tag: v.label, url });
+      parallel.push({ vault: v, checks: g, tag: v.label, url: atRest });
+    }
+    if (intro.length) {
+      parallel.push({ vault: v, checks: intro, tag: v.label + " (intro)", url });
     }
     if (shaky.length) {
-      serial.push({ vault: v, checks: shaky, tag: v.label + " (timing-sensitive, serial)", url });
+      serial.push({ vault: v, checks: shaky, tag: v.label + " (timing-sensitive, serial)", url: atRest });
     }
   }
   if (JOBS > 1) {
+    if (FAST) {
+      console.log("--fast: pointer-driven checks are sharded, not serial. Frame-reading ones " +
+                  "still run alone. Numbers from a contended run are weaker evidence.");
+    }
     console.log(`${JOBS} jobs: ${parallel.length} parallel shard(s) of ${steady.length} checks, ` +
                 `then ${serial.length} serial job(s) of ${shaky.length} frame-sensitive one(s)`);
   }

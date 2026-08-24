@@ -239,7 +239,13 @@
   }
   .vault-graph .lg[data-hl="on"] .ct, .vault-graph .lgs[data-hl="on"] .ct { color: var(--text-2); }
   .vault-graph .lg:hover { background: var(--surface-2); border-color: var(--border); }
-  .vault-graph .lg .sw { width: 11px; height: 11px; border-radius: 3px; }
+  /* RINGS, not squares -- the disc is made of rings, so the legend's mark for a folder should
+     be the same shape as the thing it points at. The subfolder swatches were already round;
+     this makes the top level agree with them. */
+  .vault-graph .lg .sw { width: 11px; height: 11px; border-radius: 50%; }
+  /* A SMALLER SWATCH MEANS THE INNER RING. Scaled rather than sized, so the box it occupies
+     is unchanged and every label down the legend stays on the same left edge. */
+  .vault-graph .lg .sw.sw-in { transform: scale(0.6); }
   .vault-graph .lg .nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .vault-graph .lg .ct { font-size: 11px; }
   /* Counts line up down the whole tree. Grid columns only align WITHIN one grid, and
@@ -504,6 +510,61 @@
     .vault-graph #vg-cam button { transition: none; }
   }
 
+  /* The range group: two date fields, an arrow and the reset, at the end of the heat row. */
+  .vault-graph #vg-rangebox {
+    display: flex; align-items: center; gap: 5px; flex: 0 0 auto; margin-left: 4px;
+  }
+  .vault-graph #vg-rangebox .arw { color: var(--text-3); font-size: 11px; }
+  /* A native date input is a wide control by default -- Chrome reserves room for a picker
+     button and the full locale format. Trimmed to the band's own type scale, and the picker
+     indicator is kept (it is the affordance) but dimmed to match the text beside it. */
+  .vault-graph #vg-rangebox .dt {
+    font: 11px/1.3 ui-sans-serif, -apple-system, "Segoe UI", system-ui, sans-serif;
+    color: var(--text-2); background: var(--surface-2);
+    border: 1px solid var(--border); border-radius: 5px;
+    padding: 2px 4px; width: 104px; min-width: 0;
+  }
+  .vault-graph #vg-rangebox .dt:hover { border-color: var(--border-strong); color: var(--text-1); }
+  .vault-graph #vg-rangebox .dt:focus-visible {
+    outline: 2px solid var(--accent); outline-offset: 1px; color: var(--text-1);
+  }
+  .vault-graph #vg-rangebox .dt::-webkit-calendar-picker-indicator {
+    opacity: .45; cursor: pointer; padding: 0; margin-left: 2px;
+  }
+  .vault-graph #vg-rangebox .dt::-webkit-calendar-picker-indicator:hover { opacity: .9; }
+
+  /* The year buttons under the strip. Absolutely placed, because each one belongs at its own
+     year's position on the scale above rather than wherever a flex row would put it. */
+  .vault-graph #vg-years { position: relative; height: 16px; margin-top: 2px; }
+  /* THEY HAVE TO LOOK LIKE BUTTONS AT REST. As bare text at --text-3 they read as the axis
+     labels they used to be painted as, and a control nobody tries is not a control -- the
+     hover state cannot advertise itself. A chip is the smallest thing that says "press me"
+     at this size: a filled ground, a border, and the label at body contrast. */
+  .vault-graph #vg-years button {
+    position: absolute; top: 0; transform: translateX(-50%);
+    padding: 0 5px; cursor: pointer; border-radius: 4px;
+    background: color-mix(in oklab, var(--text-3) 14%, transparent);
+    border: 1px solid var(--border);
+    color: var(--text-2);
+    font: 600 9.5px/14px ui-sans-serif, "Segoe UI", system-ui, sans-serif;
+    font-variant-numeric: tabular-nums;
+    transition: background-color .12s, color .12s, border-color .12s;
+  }
+  .vault-graph #vg-years button:hover {
+    color: var(--text-1); border-color: var(--accent);
+    background: color-mix(in oklab, var(--accent) 26%, transparent);
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .vault-graph #vg-years button { transition: none; }
+  }
+  .vault-graph #vg-years button:focus-visible {
+    outline: 2px solid var(--accent); outline-offset: 0; color: var(--text-1);
+  }
+  /* The year the range is currently sitting on, so the strip says which one is selected. */
+  .vault-graph #vg-years button[aria-pressed="true"] {
+    color: var(--accent); background: color-mix(in oklab, var(--accent) 14%, transparent);
+  }
+
   /* ---------------------------------------------------------- heatmap ----- */
   /* Notes ADDED per day. One canvas, not 364 divs: it repaints from afterRender
      alongside the logo, so the band densifies frame for frame with the disc during
@@ -570,6 +631,8 @@
   }
   .vault-graph #vg-rtip[hidden] { display: none; }
 
+  /* CENTRED, because a 52-week grid at a legible cell cannot fill a wide band and should not
+     pretend to. Left-aligned it read as a layout that had failed to resize. */
   .vault-graph #vg-heatwrap { overflow-x: auto; overflow-y: hidden; scrollbar-width: thin;
               scrollbar-color: var(--border-strong) transparent; }
   /* No ::-webkit-scrollbar rules. `scrollbar-width` and `scrollbar-color` above are the

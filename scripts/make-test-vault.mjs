@@ -31,7 +31,7 @@
 //
 // Deterministic: the same --seed gives the same vault, so a measurement is repeatable.
 
-import { mkdirSync, writeFileSync, rmSync, existsSync } from "node:fs";
+import { mkdirSync, writeFileSync, rmSync, existsSync, utimesSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -173,10 +173,22 @@ const FOLDERS = [
  * the whole span with a mild recency lean. Both halves are visible on a year-scale control,
  * which is the point of generating this at all.
  */
-const RECENT_SHARE = 0.55;   // fraction of notes dated within the last twelve months
 const endStr = arg("end", new Date().toISOString().slice(0, 10));
 const END = Date.parse(endStr + "T00:00:00Z");
 const YEARS = Number(arg("years", 0));
+/**
+ * Fraction of notes dated within the last twelve months.
+ *
+ * 0.55 for the default 560-day span, which is the shape described above and is what that
+ * fixture has always had. For a MULTI-YEAR span it is 1.4 / YEARS -- the last year gets 1.4x
+ * an even share and the rest spread out -- because at 0.55 a ten-year vault is not a ten-year
+ * vault. Measured before this: 4707 notes in 2026 and 1310 in 2025 out of 10 001, against
+ * 300-600 for each of the nine years before, so 60% of it sat in the last twenty months and
+ * every year-scale control was reading one year with a tail.
+ *
+ * --recent 0.55 restores the old shape on any span.
+ */
+const RECENT_SHARE = Number(arg("recent", YEARS > 1 ? 1.4 / YEARS : 0.55));
 const DAYS = YEARS > 0 ? Math.round(YEARS * 365.25) : 560;
 const DAY0 = END - DAYS * 86400000;
 const dayStr = (i) => new Date(DAY0 + i * 86400000).toISOString().slice(0, 10);
@@ -188,6 +200,11 @@ const dayStr = (i) => new Date(DAY0 + i * 86400000).toISOString().slice(0, 10);
  * the existing fixture is unchanged. The mixture only engages once --years asks for a span
  * longer than the recent window it is meant to sit behind.
  */
+// The day drawn for each note, so the file stamp below can reuse it rather than draw again.
+const dayByNote = new WeakMap();
+const createdDayOf = (n) => dayByNote.get(n);
+createdDayOf.set = (n, d) => dayByNote.set(n, d);
+
 function createdDay() {
   if (YEARS <= 0 || DAYS <= 365) return Math.floor(Math.pow(rnd(), 0.45) * DAYS);
   if (rnd() < RECENT_SHARE) {
@@ -201,9 +218,14 @@ function createdDay() {
     // heatmap whose right-hand edge, the part that is today, was the sparsest thing on it.
     return DAYS - Math.floor(Math.pow(rnd(), 1.8) * 365);
   }
-  // The tail: everything before that, leaning gently later. Never reaches into the burst,
-  // so the two shares stay the shares they say they are.
-  return Math.floor(Math.pow(rnd(), 0.75) * Math.max(1, DAYS - 365));
+  // The tail: everything before that, spread EVENLY. Never reaches into the burst, so the two
+  // shares stay the shares they say they are.
+  //
+  // This leaned later, at pow(rnd(), 0.75), which compounded with the burst: the years nearest
+  // the burst took the most of the remainder and the oldest took the least, so a ten-year vault
+  // ramped instead of spanning. Uniform here, and the recency lean lives entirely in
+  // RECENT_SHARE, where it can be set.
+  return Math.floor(rnd() * Math.max(1, DAYS - 365));
 }
 // Anchored to the span's own first year rather than a hardcoded 2025, or a --years 10 vault
 // files a decade of weekly reviews under years it has no notes in.
@@ -305,7 +327,12 @@ for (const n of notes) {
   mkdirSync(dir, { recursive: true });
 
   const bare = rnd() < 0.2;                              // some notes have no frontmatter
-  const created = dayStr(createdDay());
+  // One draw per note, used by BOTH the frontmatter line and the file stamp below -- drawing
+  // twice would date a note's text and its stamp differently, which is a disagreement the
+  // builder would then have to resolve and this fixture has no business creating.
+  const day = createdDay();
+  createdDayOf.set(n, day);
+  const created = dayStr(day);
   const tags = rnd() < 0.55 ? some(TAGS, int(1, 2)) : [];
   const fm = bare ? "" : ["---", `created: ${created}`,
     tags.length ? `tags: [${tags.join(", ")}]` : null,
@@ -329,8 +356,18 @@ for (const n of notes) {
   const fence = rnd() < 0.08
     ? "\n```dataview\nLIST FROM [[" + pick(CONCEPTS) + " nonexistent]]\n```\n" : "";
 
-  writeFileSync(join(dir, n.title.replace(/[\\/:*?"<>|]/g, "-") + ".md"),
+  const file = join(dir, n.title.replace(/[\\/:*?"<>|]/g, "-") + ".md");
+  writeFileSync(file,
     `${fm}# ${n.title}\n\n${paras.join("\n\n")}\n${fence}\n${links.join(" ")}\n`);
+  // THE FILE STAMP IS A DATE SOURCE, so it has to carry the note's own date.
+  //
+  // A fifth of these notes deliberately have no frontmatter, which is what exercises the
+  // builder's fallback path -- and the fallback is the file's mtime, which is the moment the
+  // generator ran. So every one of them landed on the same day: measured, 1173 notes of 10 001
+  // all dated today, on top of the burst. Stamping the file with the date the note was supposed
+  // to have keeps the fallback path exercised AND lets those notes spread like the rest.
+  const stamp = new Date(DAY0 + createdDayOf(n) * 86400000);
+  try { utimesSync(file, stamp, stamp); } catch { /* a stamp is a nicety, not a requirement */ }
   written++;
 }
 
