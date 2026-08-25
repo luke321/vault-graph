@@ -165,6 +165,15 @@ build draws the wedges it is arguing about.
   had been stale for two releases. The size is clone weight, which is the one thing size costs
   here -- see the note in `make-hero.ps1`.
 
+- **The year chips read as part of the strip.** They sat 8px below the ribbon and 9px above
+  the band's own border, and drawRibbon paints a full-width 2px rail for the window pill
+  along the canvas's bottom edge -- so that line read as the bottom of the timeline section
+  and the chips fell outside the control they label. Reported from the Obsidian pane and
+  measured **identical in both hosts**, which is what ruled out a host-specific cause: 8px
+  above and 9px below in each. Now 1px above against 9px below, so the grouping cannot be
+  misread, and the band is 7px shorter. Pinned as a ratio rather than as pixel values, so a
+  padding change cannot fail the check while the grouping is still right.
+
 Nothing here changes what a note means or where a folder sits: the two-band split, the
 serpentine and the colours are untouched, and so is the reveal itself -- notes still arrive
 oldest-first over the same clock. What changed is which control says so, and that it now

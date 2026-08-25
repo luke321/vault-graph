@@ -2239,7 +2239,18 @@ check("the year buttons select a year and halo it on hover", async (p) => {
       return best === null || d < Math.abs(bs.indexOf(best) - want) ? b : best;
     }, null);
     var r = mid.getBoundingClientRect();
+    // THE CHIPS BELONG TO THE STRIP, and the only thing that says so is which gap is
+    // smaller. drawRibbon paints a full-width rail along the canvas's bottom edge, and that
+    // line reads as the bottom of the timeline section -- so with 8px above the chips and
+    // 9px of band padding below them, they read as a row of their own OUTSIDE the control
+    // they label. Reported from the Obsidian pane; measured identical in the standalone.
+    // Asserted as a RATIO rather than as pixel values, so a padding change cannot fail it
+    // while the grouping is still right.
+    var hb = document.querySelector("#vg-heat").getBoundingClientRect();
+    var yb = document.querySelector("#vg-years").getBoundingClientRect();
     return { n: bs.length, worstPx: Math.round(worst),
+             gapAbove: Math.round((yb.top - rib.bottom) * 10) / 10,
+             gapBelow: Math.round((hb.bottom - yb.bottom) * 10) / 10,
              years: bs.map(function (b) { return b.getAttribute("data-yr"); }),
              pick: mid.getAttribute("data-yr"),
              x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2),
@@ -2287,11 +2298,17 @@ check("the year buttons select a year and halo it on hover", async (p) => {
   const okRange = clicked.lit > 0 &&
         (clicked.fromISO === null || clicked.fromISO.slice(0, 4) === yr) &&
         (clicked.toISO === null || clicked.toISO.slice(0, 4) === yr);
+  // Grouped with the strip: nearly touching it, and at least three times further from the
+  // band's own edge. 1px against 9px passes; the 8-against-9 it shipped with does not.
+  const grouped = list.gapAbove <= 2 && list.gapBelow >= list.gapAbove * 3;
   return {
     ok: list.tagged && list.worstPx <= 2 && hov.year === yr && hov.real > 0 &&
-        hov.haloed === hov.real && okRange && clicked.pressed === "true" && left === null,
+        hov.haloed === hov.real && okRange && clicked.pressed === "true" && left === null &&
+        grouped,
     detail: `${list.n} buttons (${list.years.join(" ")}) within ${list.worstPx}px of their own ` +
-            `year; hovering '${yr}' haloed ${hov.haloed} of its ${hov.real} notes; clicking gave ` +
+            `year, ${list.gapAbove}px under the strip against ${list.gapBelow}px above the ` +
+            `band's edge` + (grouped ? "" : "  <- CHIPS READ AS OUTSIDE THE STRIP") + "; " +
+            `hovering '${yr}' haloed ${hov.haloed} of its ${hov.real} notes; clicking gave ` +
             `${clicked.fromISO} -> ${clicked.toISO} (${clicked.lit} lit, pressed=${clicked.pressed}); ` +
             `leaving cleared it (${left})`,
   };

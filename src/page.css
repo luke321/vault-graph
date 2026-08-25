@@ -534,7 +534,25 @@
 
   /* The year buttons under the strip. Absolutely placed, because each one belongs at its own
      year's position on the scale above rather than wherever a flex row would put it. */
-  .vault-graph #vg-years { position: relative; height: 16px; margin-top: 2px; }
+  /* HUGGING THE STRIP, because they are its axis and not a row of their own.
+   *
+   * A NEGATIVE MARGIN AGAINST THE BAND'S FLEX GAP, which wants explaining. #vg-heat sets
+   * `gap: 6px` between all of its children, and this pair is the one that must not have it:
+   * everything else in the band is a separate thing stacked above the next, while the strip
+   * and its years are one instrument. 6px of gap plus the 2px this used to add came to 8px,
+   * against 9px of band padding below -- so the chips sat almost exactly between the strip
+   * and the band's bottom border, and the eye had no reason to group them upward.
+   *
+   * It had a reason to group them DOWNWARD. drawRibbon paints a full-width 2px rail for the
+   * window pill along the canvas's bottom edge, and that line reads as the bottom of the
+   * timeline section -- so the chips landed outside the thing they label. Reported from the
+   * Obsidian pane, and measured identical in both hosts: 8px above, 9px below, in each.
+   *
+   * -5px against the 6px gap leaves 1px, so the ratio is 1:9 and there is nothing to
+   * misread. Cheaper than the alternative, which is wrapping the canvas and the chips in one
+   * element so the gap simply does not apply between them -- worth doing if this pair ever
+   * grows a third member, and not worth the DOM change for one line of CSS. */
+  .vault-graph #vg-years { position: relative; height: 16px; margin-top: -5px; }
   /* THEY HAVE TO LOOK LIKE BUTTONS AT REST. As bare text at --text-3 they read as the axis
      labels they used to be painted as, and a control nobody tries is not a control -- the
      hover state cannot advertise itself. A chip is the smallest thing that says "press me"
