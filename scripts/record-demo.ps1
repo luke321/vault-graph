@@ -144,6 +144,18 @@ if ($Act) { Write-Host "act    $Act" }
 # bookmarks bar and restore prompts, all of which would end up in the frame.
 # NOT $profile -- that is a PowerShell automatic variable (the profile script path).
 $profileDir = Join-Path $env:TEMP 'vg-demo-profile'
+
+# WIPED BEFORE EVERY RUN. The page's own state (pinned notes, chosen colours, hidden
+# folders) lives in the vault's localStorage, which is part of this profile and
+# otherwise survives across separate invocations -- a `pin` take recorded right after the
+# hero take once opened already showing "Unpin from hub" on a note the hero had pinned,
+# because both ran against the same leftover profile. Deleting it here, not just at the
+# end, also means a run that crashed or was killed mid-take cannot poison the next one.
+if (Test-Path $profileDir) {
+  Write-Host "clearing the leftover demo profile ($profileDir)..." -ForegroundColor DarkGray
+  Remove-Item -Recurse -Force $profileDir -ErrorAction SilentlyContinue
+}
+
 $chrome = (Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\chrome.exe').'(default)'
 
 # --- where to put the window ----------------------------------------------------------
