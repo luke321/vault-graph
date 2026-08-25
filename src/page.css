@@ -452,6 +452,29 @@
   .vault-graph .swatch[aria-checked="true"][data-auto="1"] {
     box-shadow: 0 0 0 1px var(--surface-0), 0 0 0 2px var(--text-3);
   }
+  /* AUTOMATIC BUT NOT IN USE: an override has moved this folder to a different swatch,
+     and this is the one Auto would give back. The ring above already answers "which
+     colour is this folder using" -- marking that same swatch here too would just repeat
+     it, so this is a distinct, smaller mark instead of a second ring, and it only
+     renders on the swatch that ISN'T checked (see the two rules together: never both on
+     one swatch, never neither on an automatic-and-in-use one).
+
+     Same triangle the heatmap band uses for "today" (page.js, heatDraw), and the same
+     reason for the colour: --today is the one token guaranteed not to be one of the
+     twelve hues, so the mark can never be misread as a competing colour choice. */
+  .vault-graph .swatch[data-auto="1"]:not([aria-checked="true"]) {
+    position: relative;
+  }
+  .vault-graph .swatch[data-auto="1"]:not([aria-checked="true"])::after {
+    content: "";
+    position: absolute;
+    left: 50%; bottom: -4px;
+    width: 0; height: 0;
+    transform: translateX(-50%);
+    border-left: 3px solid transparent;
+    border-right: 3px solid transparent;
+    border-bottom: 4px solid var(--today);
+  }
   .vault-graph .scr .auto {
     font: inherit; font-size: 10px; padding: 2px 6px; cursor: pointer; margin-left: 2px;
     background: var(--surface-2); color: var(--text-3);

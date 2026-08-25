@@ -758,10 +758,13 @@ class VaultGraphSettingTab extends PluginSettingTab {
     // the disc about which slot every folder after an archive is on. Hence the separate
     // counter -- the same reason buildColors has one.
     let auto = 0;
-    this.renderColours(topFolders(this.app).map((f) => ({
-      name: f.name, n: f.n,
-      slot: isArchiveGroup(f.name) ? ARCHIVE_SLOT : "g" + ((auto++ % SLOT_NAMES.length) + 1),
-    })));
+    // `slot` doubles as `autoSlot` here: this list is path-derived and never consults
+    // settings.folderColors, so what it computes already IS the automatic guess -- there
+    // is no override applied yet for autoSlot to differ from.
+    this.renderColours(topFolders(this.app).map((f) => {
+      const s = isArchiveGroup(f.name) ? ARCHIVE_SLOT : "g" + ((auto++ % SLOT_NAMES.length) + 1);
+      return { name: f.name, n: f.n, slot: s, autoSlot: s };
+    }));
 
     // ...and then ask the graph itself, which is the only thing that actually knows.
     //
@@ -793,6 +796,7 @@ class VaultGraphSettingTab extends PluginSettingTab {
       name,
       n: api.groupCount(name),
       slot: api.slotOf ? api.slotOf(name) : "",
+      autoSlot: api.autoSlotOf ? api.autoSlotOf(name) : "",
     }));
     if (groups.length) this.renderColours(groups);
   }
@@ -865,14 +869,17 @@ class VaultGraphSettingTab extends PluginSettingTab {
       SLOT_NAMES.forEach((name, i) => {
         const key = "g" + (i + 1);
         const on = current === key;
+        // The slot with no override at all -- distinct from `current` exactly when the
+        // folder is pinned to something else, and marked regardless of `on` so it stays
+        // visible after a pin. Before this, the mark and the checked ring were the same
+        // fact and a pin erased the only trace of what Auto would give back.
+        const isAuto = group.autoSlot === key;
         const attr = {
           role: "radio", "aria-checked": String(on), "aria-label": name,
-          title: name + (on ? (pinned ? " (chosen)" : " (automatic)") : ""),
+          title: name + (on ? (pinned ? " (chosen)" : " (automatic)") :
+                         (isAuto ? " (automatic default)" : "")),
         };
-        // Chosen and automatic are marked differently -- the ring is dim for a slot the
-        // folder merely landed on. Two different facts, and the Auto button beside it is
-        // otherwise the only thing that tells them apart.
-        if (on && !pinned) attr["data-auto"] = "1";
+        if (isAuto) attr["data-auto"] = "1";
         const b = row.controlEl.createEl("button", { cls: ["swatch", "vg-" + key], attr });
         b.addEventListener("click", () => this.pick(group.name, key));
       });
