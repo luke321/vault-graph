@@ -29,6 +29,70 @@ published tag breaks every link to it.
 
 ---
 
+## 1.7.0 — 2026-08-25
+
+Small folders close and open like the big ones, the seams are geometry rather than
+accumulation, and a `--dev` build draws the wedges it is arguing about.
+
+- **A single-column wedge closes and opens at constant speed, in place.** Toggling a small
+  folder off left the wedge visibly failing to close while its notes hopped between rows:
+  the drawn arc stood 6.21 degrees above a straight line at 70% of an 11.88-degree close,
+  and the one-note folder lost 6.92 degrees in a single frame -- 84x its mean step -- when
+  the last fade culled its cell. Every fade ends as a single column, where one note sits per
+  row and there is no serpentine left to preserve, so this was every folder's last moment
+  and not only a small-folder problem.
+
+  A fully toggled single-cell group's presence now walks one linear ramp, and that ramp
+  drives its proportional share, its min-arc floor and its seam together -- three quantities
+  that each had their own curve before. A hide spreads its fades across the whole cascade so
+  the last one lands where the arc is already zero; a show keeps its natural stagger and only
+  its ORDER is ours, outermost note first, so the column materialises from the rim inward.
+  Notes shrink with their wedge, through the per-cell room cap rather than as a per-note size.
+
+  Measured: residuals under 0.06 degrees closing and 0.21 opening against a straight line,
+  settle delta 0.000 in both directions, and a watched neighbour travels 0.00 to 0.04 degrees
+  through a toggle where it used to swing 4.66 degrees out and back.
+
+- **Every seam is a constant-width channel about a radius.** A boundary used to be built at
+  each note's own radius, which multiplies out to a line whose distance from the centre is
+  `gap(r) * (seams - 0.5 - nB * frac)` -- zero only where a boundary's seam index happens to
+  match its share of the circle. Two of nine seams pointed at the centre of the disc and the
+  rest missed by up to 101 units, worst just past a folder holding 233 degrees behind a
+  single seam. The accumulation is now evaluated once at the band's reference radius and each
+  side of it inset by half a seam at the note's own radius: all nine measure 0.
+
+- **A band's seams are measured by its own ruler.** `seamAt` asked `pitchUnits()` for a pitch
+  without saying which band, and that answers with the outer one -- so hiding the outer
+  ring's folders grew the inner ring's seams from 48 units to 109, for a band whose own
+  contents had not moved. The two rings are independent again.
+
+- **Each end note's own dot sets its margin,** so a wedge's ink lands on its boundary and the
+  seam is the whole visible channel. `SEAM_ROWS` rises to 0.3 to suit: the outer band's
+  channels come out 95 to 96 units with a spread of 1, against 114 to 136 with a spread of 22.
+
+- **A dev wedge overlay,** on by default in a `--dev` build; `?wedges` and `?nowedges`
+  override it in any build. Every animation question this release asked was about the
+  envelope, and the envelope was the one thing the page never drew -- so each was answered by
+  re-deriving the boundary in a probe, in a different angle convention from the placement,
+  which is how a note sitting 0.11 degrees off its wedge centre was once measured as 100
+  degrees off it. The overlay draws each wedge's two edges in its folder's colour, one white
+  dashed centre through its notes, one yellow dotted seam centre, the four band radii
+  measured off the dots themselves, a legend and a build stamp. One function serves the
+  notes, the overlay and every probe, because the version where the overlay kept its own copy
+  of the algebra cost most of a morning.
+
+- **`?rowarc`, off by default.** A wedge holds arc in rows it never reaches -- a one-note
+  folder's ten degrees sit empty in every row but one, measuring as a 108- and a 178-unit
+  hole against a 12-unit seam. With the flag on, each row shares its circle only with the
+  wedges present in it: worst within-row seam spread falls from 238 units to 72 on a 456-note
+  vault, 310 to 80 on the demo, 216 to 63 on the 10k. It costs a little motion in a
+  neighbouring wedge during a toggle, so it ships behind a flag until that trade is judged.
+
+Nothing here changes what a note means or where a folder sits: the two-band split, the
+serpentine, the colours and the timeline are untouched.
+
+---
+
 ## 1.6.1 — 2026-08-23
 
 The files Obsidian installs were missing from 1.6.0's release, so nobody could install it.
