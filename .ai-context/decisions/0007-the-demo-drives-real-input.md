@@ -1,6 +1,7 @@
 # The demo drives real input, from outside the page
 
-**Status** accepted · 2026-08-22
+**Status** accepted · 2026-08-22 · the real-pointer half amended 2026-08-25, see
+"Revisited" below
 
 > Why the storyboard lives in the page but the clicking does not, and why the drawn
 > cursor was built and then removed.
@@ -43,6 +44,9 @@ a workaround for having two notions of "where the pointer is" at all.
 The deciding reason is the first one: the synthetic events that moved the mark are the
 same ones that skip hit-testing.
 
+**A drawn cursor came back on 2026-08-25** — with a materially different design that
+neither of these two reasons applies to. See "Revisited" below.
+
 ## The cost, and how it was paid
 
 **CDP input does not move the operating system's cursor** — it is delivered straight to
@@ -59,6 +63,11 @@ hit-tests and still works whether or not the window has focus.
 The remaining cost is real and is why this is opt-in rather than the default: it takes
 the physical mouse for the demo's duration. The driver leaves it off; only the recorder
 turns it on.
+
+**As of 2026-08-25 this section describes the REJECTED design.** The real pointer also
+broke dragging a note into the hub; see "Revisited" below. `--cursor` is still opt-in, but
+for its actual remaining cost (an eval round trip per step) rather than for taking the
+mouse, which it no longer does.
 
 Page origin in screen coordinates is asked of the **page** (`screenX` plus the halved
 horizontal inset), because only the page knows how much of its own window is browser
@@ -122,6 +131,31 @@ recording, and on this vault that could be a person's note. The storyboard aims 
 daily notes and weekly reviews for the same reason — both are titled by date, so the
 label that appears carries nothing personal. Neighbours are never named: `forceLabel` is
 set for the hovered node alone.
+
+## Revisited: the real pointer breaks a drag (2026-08-25)
+
+`--cursor` moving the real system pointer (above) worked for every click and hover this
+project had until one that holds a button down and glides: dragging a note into the hub
+pinned it correctly on every CDP-only take and failed on every take that also moved the
+real pointer, panning the camera instead. Windows delivers real input for wherever the OS
+pointer physically sits regardless of which process put it there via `SetCursorPos`, so
+the real pointer was a **second, genuinely native mouse-event stream** landing in the same
+window as the CDP-injected one — invisible for a click (both streams agree on the outcome,
+one press and one release), and decisive for a drag, which cares about `buttons` on every
+intervening move. The native stream reports none pressed; the CDP-dispatched drag says 1.
+`bindNodeDrag`'s own "the button came up outside the window" safety check — there for the
+real case of a person's drag actually leaving the tab — read the native stream's `buttons:0`
+as exactly that, dropped the note mid-glide, and handed the rest of the gesture to sigma's
+default panning. Confirmed by removing `--cursor` and nothing else: every take pinned.
+
+This is NOT the drawn cursor rejected above. That one dispatched synthetic `MouseEvent`s
+from inside the page to move the mark, coupled to the same click mechanism rejected for
+skipping hit-testing, and it fought the real mouse because it *reacted* to real mousemoves
+Chrome re-dispatches after a DOM rebuild. The current one is a plain positioned element,
+moved by `__vg.demo.cursorAt(x, y)` calls the external driver makes over `Runtime.evaluate`
+— it listens to nothing and dispatches nothing, so neither failure mode has anywhere to
+attach. `scripts/cursor.ps1` is deleted; `-draw_mouse` in the recorder is `0`, since the
+pointer is now part of the page's own rendered pixels and needs no help from gdigrab.
 
 ## Why the WebSocket client is hand-rolled
 

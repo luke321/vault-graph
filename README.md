@@ -302,7 +302,6 @@ are Windows-only conveniences, not requirements:
 | `refresh-graph.ps1` | rebuild *and* open | `node src/build-graph.mjs && open <path>` |
 | `record-demo.ps1` | record the demo to mp4 | not ported — needs `avfoundation` / `x11grab` |
 | `make-hero.ps1` | encode a take as the README hero (animated WebP, 30fps, 700px) | works anywhere ffmpeg does, if you port the wrapper |
-| `cursor.ps1` | moves the OS pointer during a recording | not ported |
 | `make-logo.ps1` | rebuild the logo mask from source art | not ported; `assets/` is prebuilt |
 
 `scripts/smoke.mjs`, `scripts/demo.mjs` and `scripts/make-test-vault.mjs` are Node and
@@ -353,9 +352,11 @@ nothing else needs changing.
 .\scripts\record-demo.ps1        # needs ffmpeg: winget install Gyan.FFmpeg
 ```
 
-> **It takes your mouse.** With `--cursor` (which the recorder passes) the demo moves the
-> real OS pointer so the recording has a visible cursor. For its ~30 seconds the mouse is
-> not yours. Leave `--cursor` off and you lose only the visible arrow.
+The visible cursor in a recording (`--cursor`, which the recorder passes) is drawn inside
+the page and moved by eval, in step with the same input dispatched over CDP — not the
+real OS pointer. It does not touch your mouse; see
+[`.ai-context/decisions/0007`](.ai-context/decisions/0007-the-demo-drives-real-input.md)
+for why an earlier version did and had to be replaced.
 
 ## Optional: the invariant suite
 

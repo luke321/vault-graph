@@ -30,13 +30,16 @@
 # storyboard needs no change here.
 #
 # WHAT IS IN THE FRAME: gdigrab captures the Chrome window's rect, so the sidebar, the heatmap
-# band and the disc are all there. What is NOT there is a cursor. CDP delivers input to
-# the renderer without moving the operating system's pointer, so the buttons visibly
-# depress and the hover states light up, but no arrow travels between them. That is the
-# honest trade for input that hit-tests like a real click. If a visible cursor matters
-# more than that, the alternative is driving the OS pointer with SendInput from
-# PowerShell and letting -draw_mouse pick it up -- at the cost of a demo that steals the
-# physical mouse for its duration.
+# band and the disc are all there. The pointer visible in the take is drawn INSIDE THE PAGE
+# (see demoCursorAt in page.js) and moved by eval, in step with the same coordinates CDP
+# dispatches -- it is part of the window's own rendered pixels, so gdigrab needs no help
+# capturing it. This replaced an earlier version that moved the REAL system pointer with
+# SendInput: it looked identical for a click, and silently broke a drag -- Windows delivers
+# real input for wherever the OS pointer physically sits regardless of which process put it
+# there, so the real pointer was a second, genuinely native mouse-event stream landing in
+# the same window as the CDP-injected one, and the two disagreed on `buttons` in a way that
+# aborted the drag mid-glide and handed the gesture to sigma's own default panning. Nothing
+# here touches the physical mouse any more.
 
 [CmdletBinding()]
 param(
@@ -47,10 +50,10 @@ param(
   [int]    $Port = 9222,
   [int]    $Width = 1600,
   [int]    $Height = 1000,
-  # WHICH SCREEN to put the window on, centred in that screen's working area. Not
-  # tidiness: this takes the physical mouse for the length of the take, so recording on a
-  # monitor you are not working on is the difference between waiting it out and having the
-  # pointer yanked out from under whatever you were doing.
+  # WHICH SCREEN to put the window on, centred in that screen's working area. Tidiness
+  # now rather than a mouse-safety measure -- the take no longer touches the physical
+  # pointer at all -- but a live recording window flashing through beats in your
+  # peripheral vision is still worth putting somewhere you are not looking.
   #
   # `left` and `right` are by POSITION, not by device number -- \\.\DISPLAY2 is whichever
   # one Windows enumerated second, which says nothing about where it physically sits.
@@ -211,13 +214,15 @@ $rh = ($r.B - $r.T) - (($r.B - $r.T) % 2)
 Write-Host "region ${rw}x${rh} at ${rx},${ry}" -ForegroundColor DarkGray
 
 # --- ffmpeg ---------------------------------------------------------------------------
-# -draw_mouse 1 and --cursor on the driver: CDP input alone never moves the OS pointer,
-# so the recording would show every effect and no arrow. The driver moves the real
-# pointer in step with the CDP one (scripts/cursor.ps1) and gdigrab draws it.
+# -draw_mouse 0: the pointer in the take is drawn INSIDE THE PAGE by --cursor on the
+# driver (see demoCursorAt in page.js), which is already part of the window's rendered
+# pixels -- gdigrab needs no help capturing it. Asking gdigrab to draw the REAL system
+# cursor on top would show wherever your actual mouse happens to be resting, which is
+# nowhere near the recording window now that nothing moves it there.
 # yuv420p because some players refuse anything else.
 $ffArgs = @(
   '-hide_banner', '-loglevel', 'warning',
-  '-f', 'gdigrab', '-framerate', "$Fps", '-draw_mouse', '1',
+  '-f', 'gdigrab', '-framerate', "$Fps", '-draw_mouse', '0',
   '-offset_x', "$rx", '-offset_y', "$ry", '-video_size', "${rw}x${rh}",
   '-i', 'desktop',
   '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '20',
@@ -237,8 +242,9 @@ Start-Sleep -Milliseconds 800           # let the first frames land before anyth
 # --- the driver -----------------------------------------------------------------------
 $failed = $null
 try {
-  # --cursor: the demo takes the physical mouse for its duration. That is the price of a
-  # visible arrow in the capture, and it is why the driver does not do it by default.
+  # --cursor: draws the visible arrow inside the page rather than moving the real
+  # pointer (see demoCursorAt in page.js) -- off by default only because it costs a
+  # small eval round trip per step, not because it touches anything of yours.
   & node (Join-Path $here 'demo.mjs') --port $Port --slow $Slow --match 'demo' --cursor
   if ($LASTEXITCODE -ne 0) { $failed = "driver exited $LASTEXITCODE" }
 } catch {
