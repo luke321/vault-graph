@@ -10547,6 +10547,13 @@ function mountVaultGraph(root, data, deps) {
    *   * COLOURS LAST, because colour is a preference and every earlier act should land
    *     on the disc's own palette, not one an earlier take happened to leave behind.
    *
+   * COLOURS IS EXCLUDED FROM THE FULL RUN -- see FULL_RUN_EXCLUDES, just below this
+   * function. It still exists here and still plays on its own via `demoAct("colours")`,
+   * for docs/features/colours.md's own clip: right-clicking a top-level folder's row for
+   * its colour picker. But subfoldercolor already puts that same right-click menu on
+   * camera, one level down, and running the identical gesture twice in the same take
+   * added length without showing the reader anything new.
+   *
    * PIN IS EARLY ON PURPOSE, not tucked in near the end where it used to sit. It is the
    * one act that puts a note somewhere other than its lattice seat, and it earns being
    * seen before the reader has settled into "this is a filter-and-browse tool". The
@@ -10561,7 +10568,9 @@ function mountVaultGraph(root, data, deps) {
    *
    * Every beat below also carries an `act:` tag naming which of these ten it belongs to
    * -- `demoAct(name)`, just after this function, plays one act on its own instead of the
-   * whole thing, for the per-feature clips in docs/features.md.
+   * whole thing, for the per-feature clips in docs/features.md. `demoFullStoryboard()`,
+   * also just below, is the same ten with `colours` filtered back out again for the full
+   * run.
    */
   function demoMode() {
     return [
@@ -10798,6 +10807,25 @@ function mountVaultGraph(root, data, deps) {
     ];
   }
 
+  // ACTS THAT EXIST FOR THEIR OWN PER-FEATURE CLIP, but do not appear in the full run.
+  // Just "colours" for now: subfoldercolor already puts the same right-click colour menu
+  // on camera one level down, so replaying the identical gesture on a top-level folder
+  // too, right at the end of an 85-beat take, cost length without showing anything new.
+  var FULL_RUN_EXCLUDES = ["colours"];
+
+  // THE FULL STORYBOARD, with FULL_RUN_EXCLUDES filtered back out of demoMode()'s single
+  // list -- what the hero recording actually plays. demoMode()'s own trailing park beat
+  // is tagged "colours" and goes with the rest of that act, so whatever act ends up last
+  // here gets its own if it does not already have one, the same rule demoAct() applies
+  // for an isolated act missing one.
+  function demoFullStoryboard() {
+    var beats = demoMode().filter(function (b) { return FULL_RUN_EXCLUDES.indexOf(b.act) === -1; });
+    if (!beats[beats.length - 1].park) {
+      beats = beats.concat([{ park: true, act: beats[beats.length - 1].act, why: "leave the final frame clean" }]);
+    }
+    return beats;
+  }
+
   // ONE ACT IN ISOLATION, for a per-feature clip instead of the whole storyboard. `name`
   // is one of the ten `act:` tags above (`intro`, `note`, `pin`, `timeline`, `heatmap`,
   // `folders`, `subfolders`, `subfoldercolor`, `camera`, `colours`) -- the same names
@@ -10837,7 +10865,7 @@ function mountVaultGraph(root, data, deps) {
   var demoApi = {
     on: demoOn,
     doneTitle: DEMO_DONE_TITLE,
-    storyboard: demoMode,
+    storyboard: demoFullStoryboard,
     act: demoAct,
     busy: demoBusy,
     /**

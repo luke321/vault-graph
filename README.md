@@ -9,7 +9,7 @@ The layout is **deterministic, not force-directed**. There is no simulation to s
 no seed to get lucky with: the same vault always draws the same picture, so the shape
 becomes something you can learn and recognise rather than a fresh tangle each time.
 
-![The disc growing from the vault's first note, a note hovered, a note dragged into the hub to pin it and two more pinned by right-click and from their own detail card, the timeline scrubbed, three heatmap days hovered, a folder hidden and one soloed, a subfolder pushed out and right-clicked for its own colour, the camera panned and reset, then two folders recoloured by right-click and put back](assets/demo.webp)
+![The disc growing from the vault's first note, a note hovered, a note dragged into the hub to pin it and two more pinned by right-click and from their own detail card, the timeline scrubbed, three heatmap days hovered, a folder hidden and one soloed, a subfolder pushed out and right-clicked for its own colour, then the camera panned and reset](assets/demo.webp)
 
 Ships as an **Obsidian plugin** and as a **standalone HTML exporter** — one page, two
 mounts, from the same source. The exporter writes a single self-contained offline file with
