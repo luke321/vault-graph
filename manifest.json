@@ -1,7 +1,7 @@
 {
   "id": "vault-graph",
   "name": "Vault Graph",
-  "version": "1.6.1",
+  "version": "1.7.0",
   "minAppVersion": "1.7.2",
   "description": "Your whole vault as one disc: notes packed into folder wedges on a fixed lattice, sized by links, with a growth heatmap, timeline, search and per-folder filters. Deterministic, not force-directed - the same vault always draws the same picture.",
   "author": "Lukas Proprentner",

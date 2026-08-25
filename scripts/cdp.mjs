@@ -163,6 +163,27 @@ export async function attach(port, match = "") {
   let seq = 0;
   const pending = new Map();
   const listeners = [];
+
+  // A DEAD SOCKET HAS TO SAY SO. There was no close or error handler here, so when the
+  // connection went the driver did not notice: onText simply never fired again and every
+  // subsequent command sat until its own 30-second timeout. One dropped socket therefore
+  // presented as a long tail of unrelated failures, each costing 30s -- measured once as 13
+  // checks failing over 390 seconds, reported as "the tests are slow" and looking for all the
+  // world like thirteen separate bugs in thirteen separate features.
+  //
+  // Now the first command after the drop fails immediately and says what happened, and any
+  // command already in flight is rejected rather than left to time out.
+  let dead = null;
+  const die = (why) => {
+    if (dead) return;
+    dead = why;
+    for (const [id, p] of pending) {
+      pending.delete(id);
+      p.reject(new Error("CDP connection lost (" + why + ")"));
+    }
+  };
+  ws.sock.on("close", () => die("socket closed"));
+  ws.sock.on("error", (e) => die(e.message || "socket error"));
   ws.onText = (text) => {
     let msg;
     try { msg = JSON.parse(text); } catch { return; }
@@ -177,6 +198,10 @@ export async function attach(port, match = "") {
 
   const send = (method, params = {}) =>
     new Promise((resolve, reject) => {
+      if (dead) {
+        reject(new Error("CDP connection lost (" + dead + ") before " + method));
+        return;
+      }
       const id = ++seq;
       // The timeout is CLEARED on completion, and that matters far more than it looks.
       // An outstanding setTimeout keeps Node's event loop alive, so leaving one armed per
@@ -185,9 +210,20 @@ export async function attach(port, match = "") {
       // out 30s longer than the demo. Measured: a 6.9s walkthrough produced a 39.2s video,
       // 32s of it a still frame. The driver's own log said 6.94s throughout, which is what
       // made it invisible: the process was done, it just would not exit.
+      // TEN SECONDS, NOT THIRTY, and the error says what was being asked.
+      //
+      // Thirty was a value chosen when nothing here could plausibly take that long, and it
+      // became the cost of every command issued after a page stopped answering: a wedged
+      // renderer produced a tail of thirty-second waits, once totalling 390 seconds across
+      // thirteen checks and reading as thirteen unrelated bugs. The slowest legitimate command
+      // in this repo is a screenshot of a 10k-note page, comfortably under a second, so ten is
+      // still thirty times the headroom -- and it turns a six-minute mystery into a minute.
+      const label = method === "Runtime.evaluate"
+        ? "Runtime.evaluate " + JSON.stringify(String(params.expression || "").slice(0, 70))
+        : method;
       const timer = setTimeout(() => {
-        if (pending.delete(id)) reject(new Error(`${method} timed out`));
-      }, 30000);
+        if (pending.delete(id)) reject(new Error(label + " got no reply in 10s"));
+      }, 10000);
       pending.set(id, {
         resolve: (v) => { clearTimeout(timer); resolve(v); },
         reject:  (e) => { clearTimeout(timer); reject(e); }
@@ -195,10 +231,51 @@ export async function attach(port, match = "") {
       ws.send(JSON.stringify({ id, method, params }));
     });
 
+  // EVERY UNCAUGHT PAGE ERROR, kept from the moment we attach.
+  //
+  // Without this a page that fails to BOOT is nearly undiagnosable from out here: eval() only
+  // reports exceptions from the expression IT ran, so a script that threw during setup shows up
+  // only as `window.__vg is undefined` with no reason attached. Diagnosing one such failure took
+  // six rounds of narrowing by hand, and the answer was still not in reach -- the module body
+  // re-ran clean when evaluated a second time, so the throw was in the boot path and invisible.
+  //
+  // Runtime.enable is what makes exceptionThrown arrive; console errors come with it, since a
+  // page that logs an error before dying is saying the same thing.
+  const errors = [];
+  listeners.push((msg) => {
+    if (msg.method === "Runtime.exceptionThrown") {
+      const d = msg.params?.exceptionDetails || {};
+      errors.push({
+        kind: "exception",
+        text: d.exception?.description || d.text || "unknown exception",
+        line: d.lineNumber, col: d.columnNumber, url: d.url || "",
+      });
+    } else if (msg.method === "Runtime.consoleAPICalled" && msg.params?.type === "error") {
+      errors.push({
+        kind: "console",
+        text: (msg.params.args || [])
+          .map((a) => a.description ?? a.value ?? a.type).join(" "),
+      });
+    }
+  });
+  await send("Runtime.enable").catch(() => {});
+
   return {
     target: page,
     send,
     on: (fn) => listeners.push(fn),
+    /** Uncaught page errors and console.error calls, oldest first. */
+    get errors() { return errors.slice(); },
+    /** The first page error as a one-line string, or null. For "why is the page dead". */
+    firstError() {
+      if (!errors.length) return null;
+      const e = errors[0];
+      return e.kind + ": " + String(e.text).split(String.fromCharCode(10))[0] +
+             (e.line != null ? " (line " + (e.line + 1) + ")" : "");
+    },
+    // Why the connection went, or null while it is up. A long run can then stop at the first
+    // sign of it rather than working through every remaining step against a closed socket.
+    get lost() { return dead; },
     close: () => ws.close(),
 
     /** Evaluate an expression in the page and return its value. */

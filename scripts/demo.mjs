@@ -115,6 +115,59 @@ async function click(page, x, y) {
   await page.send("Input.dispatchMouseEvent", { type: "mouseReleased", ...base, buttons: 0 });
 }
 
+async function doubleClick(page, x, y) {
+  for (const clickCount of [1, 2]) {
+    const base = { x, y, button: "left", buttons: 1, clickCount };
+    await page.send("Input.dispatchMouseEvent", { type: "mousePressed", ...base });
+    await sleep(40);
+    await page.send("Input.dispatchMouseEvent", { type: "mouseReleased", ...base, buttons: 0 });
+    await sleep(40);
+  }
+}
+
+/**
+ * Press, glide, release -- with the button HELD the whole way.
+ *
+ * Not moveTo followed by a click: a drag is a different gesture and the page can tell. The
+ * ribbon's brush and the disc's pan both read `buttons` on every move, and a sequence of
+ * button-up moves between a press and a release is a press and a release with nothing in
+ * between. Eased and paced like moveTo so it looks like a hand on camera, and the cursor
+ * overlay is driven with it so --cursor sees the same path.
+ */
+async function drag(page, x0, y0, x1, y1) {
+  const steps = Math.max(6, Math.round(MOVE_MS / STEP_MS));
+  await page.send("Input.dispatchMouseEvent",
+    { type: "mousePressed", x: x0, y: y0, button: "left", buttons: 1, clickCount: 1 });
+  await sleep(90);
+  for (let i = 1; i <= steps; i++) {
+    const e = ease(i / steps);
+    const cx = Math.round(x0 + (x1 - x0) * e), cy = Math.round(y0 + (y1 - y0) * e);
+    await page.send("Input.dispatchMouseEvent",
+      { type: "mouseMoved", x: cx, y: cy, button: "left", buttons: 1 });
+    cursorTo(cx, cy);
+    await sleep(STEP_MS);
+  }
+  await sleep(120);
+  await page.send("Input.dispatchMouseEvent",
+    { type: "mouseReleased", x: x1, y: y1, button: "left", buttons: 0, clickCount: 1 });
+  at = { x: x1, y: y1 };
+}
+
+/**
+ * Wheel notches, one at a time with a beat between them.
+ *
+ * Sigma animates each notch over zoomDuration, so firing them back to back would show one
+ * blurred move instead of the steps a person would see. Positive n zooms in.
+ */
+async function wheel(page, x, y, n) {
+  const dir = n < 0 ? 1 : -1;
+  for (let i = 0; i < Math.abs(n); i++) {
+    await page.send("Input.dispatchMouseEvent",
+      { type: "mouseWheel", x, y, deltaX: 0, deltaY: dir * 120 });
+    await sleep(170);
+  }
+}
+
 // Wait for the page to stop moving, by ASKING it -- never by sleeping a guessed
 // duration. A fixed wait fires part-way through on a page too slow to finish in time,
 // and the next beat then acts on a disc that is still animating. The quiet period
@@ -231,11 +284,39 @@ async function main() {
       trace.push(`park: ${beat.why || ""}`);
       continue;
     }
-    if (beat.click || beat.hover) {
+    // Verbs that act on a target the page resolves for us. Everything below shares the
+    // "find it, glide to it, then do the thing" shape; only the thing differs.
+    if (beat.click || beat.hover || beat.dblclick || beat.drag || beat.wheel) {
       const w = await where(page, beat.target);
       if (!w) {
         console.warn(`${n} ! target ${JSON.stringify(beat.target)} not found — skipping`);
         trace.push(`missing: ${JSON.stringify(beat.target)}`);
+        continue;
+      }
+      if (beat.drag) {
+        const [dx, dy] = beat.drag;
+        console.log(`[${el()}] ${n} drag ${w.label} from ${w.x},${w.y} by ${dx},${dy} — ${beat.why || ""}`);
+        await moveTo(page, w.x, w.y);
+        await sleep(DWELL_MS);
+        await drag(page, w.x, w.y, w.x + dx, w.y + dy);
+        trace.push(`drag: ${w.label} by ${dx},${dy}`);
+        continue;
+      }
+      if (beat.wheel) {
+        console.log(`[${el()}] ${n} wheel ${beat.wheel > 0 ? "in" : "out"} x${Math.abs(beat.wheel)} ` +
+                    `over ${w.label} — ${beat.why || ""}`);
+        await moveTo(page, w.x, w.y);
+        await sleep(DWELL_MS);
+        await wheel(page, w.x, w.y, beat.wheel);
+        trace.push(`wheel: ${w.label} ${beat.wheel}`);
+        continue;
+      }
+      if (beat.dblclick) {
+        console.log(`[${el()}] ${n} double-click ${w.label} at ${w.x},${w.y} — ${beat.why || ""}`);
+        await moveTo(page, w.x, w.y);
+        await sleep(DWELL_MS);
+        await doubleClick(page, w.x, w.y);
+        trace.push(`dblclick: ${w.label}`);
         continue;
       }
       console.log(`[${el()}] ${n} ${beat.click ? "click" : "hover"} ${w.label} at ${w.x},${w.y} — ${beat.why || ""}`);
