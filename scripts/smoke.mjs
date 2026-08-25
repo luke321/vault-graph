@@ -248,6 +248,21 @@ const FRAME_READING = [
   "gap reservation holds still",  // per-frame gap steps
   "waits for the release",        // during-drag sampling
   "haloes but never pushes",      // reads a canvas mid-interaction
+  // THE MOST FRAME-DEPENDENT CHECK IN THE FILE, and it was missing from this list.
+  //
+  // Its method is a requestAnimationFrame loop that snapshots every frame until busy()
+  // clears, then compares the LAST DRAWN FRAME against rest. Under contention rAF drops
+  // frames, and the ones it drops are at the end of the cascade -- where a 10k vault is
+  // slowest, since every frame re-plans the whole vault (github#19, 14fps). So `last` is
+  // sampled further back from the true final frame and its distance to rest grows: the check
+  // measures the harness rather than the handover it exists to measure.
+  //
+  // Caught by it blocking a push twice with dtan 30.3 then 35.9 against a 16 threshold, on
+  // the 10k vault only, while passing every single time it was run with --only and passing
+  // three consecutive full runs. That spread -- same code, same vault, values from 0 to 36 --
+  // is contention, not a regression, and the number growing between the two blocked runs is
+  // the tell.
+  "resting layout",
 ];
 
 // POINTER-DRIVEN: asserts STATE after a gesture, not a frame during one. Contention makes
