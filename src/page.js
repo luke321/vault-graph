@@ -9964,6 +9964,10 @@ function mountVaultGraph(root, data, deps) {
    *
    * Beats are DATA, so reordering is reordering -- the driver holds no state between them.
    * What it is NOT free of is the ordering constraints above and the ones each act names.
+   *
+   * Every beat below also carries an `act:` tag naming which of these eight it belongs to
+   * -- `demoAct(name)`, just after this function, plays one act on its own instead of the
+   * whole thing, for the per-feature clips in docs/features.md.
    */
   function demoMode() {
     return [
@@ -9976,9 +9980,9 @@ function mountVaultGraph(root, data, deps) {
       // ribbon to the other, with the date under the handle, so this one beat says both
       // "here is the vault" and "here is the control that scrubs it". Which is why the act
       // that picks that handle up by hand comes next but one.
-      { settle: true, why: "start from a disc at rest" },
-      { click: true, target: ["id", "refresh"], why: "replay the intro on camera" },
-      { settle: true, why: "the vault grows from its first note to now, and the range end sweeps with it" },
+      { settle: true, act: "intro", why: "start from a disc at rest" },
+      { click: true, target: ["id", "refresh"], act: "intro", why: "replay the intro on camera" },
+      { settle: true, act: "intro", why: "the vault grows from its first note to now, and the range end sweeps with it" },
 
       /* --- 2. one note -------------------------------------------------- */
       // Hovering a note names it, lifts it, and lights its links while the rest of the
@@ -9992,8 +9996,8 @@ function mountVaultGraph(root, data, deps) {
       // BEFORE ANY FILTER RUNS, which is why this act moved up past the legend as well as
       // past the ribbon: demoNoteRect picks the most ISOLATED visible note, and the more
       // the disc has been thinned the further that aim drifts from a typical note.
-      { hover: true, target: ["note", "04"], why: "hover a daily note" },
-      { hover: true, target: ["note", "05"], why: "hover a meeting note" },
+      { hover: true, target: ["note", "04"], act: "note", why: "hover a daily note" },
+      { hover: true, target: ["note", "05"], act: "note", why: "hover a meeting note" },
 
       /* --- 3. the timeline ---------------------------------------------- */
       // The strip under the band carries every month of the vault, and it is the timeline:
@@ -10006,38 +10010,41 @@ function mountVaultGraph(root, data, deps) {
       // showed it travelling, this shows a hand doing it. The disc waits for the release on
       // each of these, by design -- a drag repaints one small canvas and the filter lands
       // once, when the button comes up.
-      { drag: [-320, 0], target: ["brush", "to"], why: "pull the range end back by hand -- the handle the intro just swept" },
-      { settle: true, why: "let the disc thin out" },
-      { drag: [200, 0], target: ["brush", "from"], why: "...and bring the range start forward" },
-      { settle: true, why: "let it thin further" },
+      { drag: [-320, 0], target: ["brush", "to"], act: "timeline", why: "pull the range end back by hand -- the handle the intro just swept" },
+      { settle: true, act: "timeline", why: "let the disc thin out" },
+      { drag: [200, 0], target: ["brush", "from"], act: "timeline", why: "...and bring the range start forward" },
+      { settle: true, act: "timeline", why: "let it thin further" },
+
+      // The band's window, moved on its own. The range above stays exactly where it was --
+      // which is most of what this act is for: they are two instruments, not one. Before the
+      // year chips on purpose: a year click sets the range to that year and can drag the
+      // window along with it, and this act is clearer split into "the window, on its own"
+      // then "the year chip, which touches both" rather than the other way round.
+      { drag: [-260, 0], target: ["brush", "window"], act: "timeline", why: "slide the heatmap window back on its own" },
+      { settle: true, act: "timeline", why: "let the band redraw" },
+      { drag: [170, 0], target: ["brush", "window"], act: "timeline", why: "...and forward again" },
+      { settle: true, act: "timeline", why: "let the band redraw" },
 
       // THE YEAR CHIPS, which have never been in the demo. Hover haloes that year's notes
       // wherever they landed; clicking sets the range to that calendar year, and the chip
       // reads pressed. "busiest" picks the fullest year that has a chip, so the hover
       // always lights something -- see demoFind.
-      { hover: true, target: ["year", "busiest"], why: "hover a year to find it on the disc" },
-      { click: true, target: ["year", "busiest"], why: "...and click it to filter to that year" },
-      { settle: true, why: "let the year land" },
-
-      // The band's window, moved on its own. The range above stays exactly where it was --
-      // which is most of what this act is for: they are two instruments, not one.
-      { drag: [-260, 0], target: ["brush", "window"], why: "slide the heatmap window back on its own" },
-      { settle: true, why: "let the band redraw" },
-      { drag: [170, 0], target: ["brush", "window"], why: "...and forward again" },
-      { settle: true, why: "let the band redraw" },
+      { hover: true, target: ["year", "busiest"], act: "timeline", why: "hover a year to find it on the disc" },
+      { click: true, target: ["year", "busiest"], act: "timeline", why: "...and click it to filter to that year" },
+      { settle: true, act: "timeline", why: "let the year land" },
 
       // Clear it, so everything after this runs on the whole vault. Also puts the window
       // back, which is what makes the `busiest` targets in the next act land on cells that
       // are actually on screen.
-      { click: true, target: ["id", "rangeall"], why: "clear the date range" },
-      { settle: true, why: "let the whole vault come back" },
+      { click: true, target: ["id", "rangeall"], act: "timeline", why: "clear the date range" },
+      { settle: true, act: "timeline", why: "let the whole vault come back" },
 
       /* --- 4. the heatmap ----------------------------------------------- */
       // Hovering a day haloes the notes added that day, wherever they landed on the disc.
       // Ranked by what is VISIBLE rather than by date, so this works on any vault.
-      { hover: true, target: ["busiest", "1"], why: "hover the busiest day" },
-      { hover: true, target: ["busiest", "2"], why: "...and the next" },
-      { hover: true, target: ["busiest", "3"], why: "...and the next" },
+      { hover: true, target: ["busiest", "1"], act: "heatmap", why: "hover the busiest day" },
+      { hover: true, target: ["busiest", "2"], act: "heatmap", why: "...and the next" },
+      { hover: true, target: ["busiest", "3"], act: "heatmap", why: "...and the next" },
 
       // AND CLICKING KEEPS IT. This is what replaced the sidebar's "Mark today" in 1.7.0:
       // a picked day's notes are recoloured to the neutral extreme as well as haloed, and
@@ -10047,69 +10054,74 @@ function mountVaultGraph(root, data, deps) {
       // The busiest day rather than today, because today is allowed to hold no notes and a
       // beat that marks nothing reads as a mis-click. Clicked twice, so nothing is left
       // marked for the acts below.
-      { click: true, target: ["busiest", "1"], why: "click a day to keep it marked -- recoloured, haloed, nothing moved" },
-      { settle: true, why: "let the mark ramp in" },
-      { click: true, target: ["busiest", "1"], why: "...and click again to let it go" },
-      { settle: true, why: "let it ramp back" },
+      { click: true, target: ["busiest", "1"], act: "heatmap", why: "click a day to keep it marked -- recoloured, haloed, nothing moved" },
+      { settle: true, act: "heatmap", why: "let the mark ramp in" },
+      { click: true, target: ["busiest", "1"], act: "heatmap", why: "...and click again to let it go" },
+      { settle: true, act: "heatmap", why: "let it ramp back" },
 
       /* --- 5. folders --------------------------------------------------- */
       // Hiding: the wedges reallocate and the disc stays a full circle.
-      { click: true, target: ["eye", "04"], why: "hide a folder -- the wedges reallocate" },
-      { settle: true, why: "let the wedges reallocate" },
+      { click: true, target: ["eye", "04"], act: "folders", why: "hide a folder -- the wedges reallocate" },
+      { settle: true, act: "folders", why: "let the wedges reallocate" },
 
       // And `only`, which is the fastest way to answer "where does one folder live".
       // SAFE HERE because nothing has been unfolded yet: see the note at the top about the
       // 97px row shift that soloing an unfolded legend causes.
-      { click: true, target: ["only", "08"], why: "solo a single folder" },
-      { settle: true, why: "let everything else recede" },
+      { click: true, target: ["only", "08"], act: "folders", why: "solo a single folder" },
+      { settle: true, act: "folders", why: "let everything else recede" },
 
-      { click: true, target: ["id", "allon"], why: "show everything again" },
-      { settle: true, why: "let the whole disc come back" },
+      { click: true, target: ["id", "allon"], act: "folders", why: "show everything again" },
+      { settle: true, act: "folders", why: "let the whole disc come back" },
 
       /* --- 6. subfolders ------------------------------------------------ */
       // The tree starts folded, so getting to a subfolder means opening its folder first.
       // That is the honest sequence and it is worth showing: the disc already draws 03's
       // sub-wedges, and this is where the legend admits they are there. It is also
       // load-bearing -- the row the next beats aim at does not exist until this has run.
-      { click: true, target: ["twisty", "03"], why: "unfold a folder to reach its subfolders" },
+      //
+      // SELF-CONTAINED for isolated recording: unlike the full storyboard's ordering rule
+      // above (folders before subfolders, because soloing while 03 is unfolded shifts
+      // rows), this act never solos anything itself -- it only unfolds, hovers, clicks and
+      // folds back. Recorded alone it needs nothing an earlier act left behind.
+      { click: true, target: ["twisty", "03"], act: "subfolders", why: "unfold a folder to reach its subfolders" },
 
       // HOVER FIRST, and at both levels. It is the cheaper question and the one you would
       // try first: a halo, with nothing hidden and no wedge moved.
-      { hover: true, target: ["group", "01"], why: "hover a folder to find it on the disc" },
-      { hover: true, target: ["sub", "03/People"], why: "...and one subfolder inside it" },
+      { hover: true, target: ["group", "01"], act: "subfolders", why: "hover a folder to find it on the disc" },
+      { hover: true, target: ["sub", "03/People"], act: "subfolders", why: "...and one subfolder inside it" },
 
       // Then the click, which is the same question answered permanently: highlighting is
       // a SEPARATE axis from visibility -- the whole point of the eye being its own
       // control -- and on a subfolder that owns a sub-wedge it moves as a block rather
       // than only being ringed. Hover haloes; a click also pushes. Shown back to back so
       // the difference is visible rather than asserted.
-      { click: true, target: ["sub", "03/People"], why: "click it instead: haloed AND pushed out" },
-      { settle: true, why: "let the sub-wedge push out" },
-      { click: true, target: ["sub", "03/People"], why: "...and let it back down" },
-      { settle: true, why: "let it settle back" },
+      { click: true, target: ["sub", "03/People"], act: "subfolders", why: "click it instead: haloed AND pushed out" },
+      { settle: true, act: "subfolders", why: "let the sub-wedge push out" },
+      { click: true, target: ["sub", "03/People"], act: "subfolders", why: "...and let it back down" },
+      { settle: true, act: "subfolders", why: "let it settle back" },
 
-      { click: true, target: ["twisty", "03"], why: "fold the subfolders away again" },
+      { click: true, target: ["twisty", "03"], act: "subfolders", why: "fold the subfolders away again" },
 
       /* --- 7. the camera ------------------------------------------------ */
       // Zoom in a few notches rather than one. One notch is a fifth now, which is the point
       // -- it is a scroll and not a teleport -- and a single notch on camera looks like
       // nothing happened.
-      { wheel: 4, target: ["stage", "0.42,0.40"], why: "zoom in, a fifth per notch" },
-      { settle: true, why: "let the last notch land" },
+      { wheel: 4, target: ["stage", "0.42,0.40"], act: "camera", why: "zoom in, a fifth per notch" },
+      { settle: true, act: "camera", why: "let the last notch land" },
 
       // Then pan, which is only possible now that the disc is not pinned to the middle. Held
       // button the whole way, or the page sees a click and a release with nothing between.
-      { drag: [190, 110], target: ["stage", "0.55,0.45"], why: "drag the disc around" },
-      { settle: true, why: "let the pan settle" },
+      { drag: [190, 110], target: ["stage", "0.55,0.45"], act: "camera", why: "drag the disc around" },
+      { settle: true, act: "camera", why: "let the pan settle" },
 
       // Two ways back, both shown, because the button is discoverable and the double-click is
       // faster once you know it.
-      { dblclick: true, target: ["stage", "centre"], why: "double-click anywhere to reset" },
-      { settle: true, why: "let the view come back" },
-      { wheel: 3, target: ["stage", "0.60,0.55"], why: "zoom in again, to have something to reset" },
-      { settle: true, why: "let it land" },
-      { click: true, target: ["id", "reset"], why: "...and the reset button in the corner" },
-      { settle: true, why: "let the view come back" },
+      { dblclick: true, target: ["stage", "centre"], act: "camera", why: "double-click anywhere to reset" },
+      { settle: true, act: "camera", why: "let the view come back" },
+      { wheel: 3, target: ["stage", "0.60,0.55"], act: "camera", why: "zoom in again, to have something to reset" },
+      { settle: true, act: "camera", why: "let it land" },
+      { click: true, target: ["id", "reset"], act: "camera", why: "...and the reset button in the corner" },
+      { settle: true, act: "camera", why: "let the view come back" },
 
       /* --- 8. colours --------------------------------------------------- */
       // LAST on purpose. It is a preference panel, and it was landing before the timeline.
@@ -10119,19 +10131,53 @@ function mountVaultGraph(root, data, deps) {
       // click looks like a highlight and two look like a choice; and the second is a grey,
       // which is the answer to "can a folder recede on purpose" that the archives rule
       // only implies.
-      { click: true, target: ["id", "gear"], why: "open the settings panel" },
-      { click: true, target: ["swatch", "01/g8"], why: "give a folder a colour of its own" },
-      { settle: true, why: "the disc repaints -- no relayout, nothing moves" },
-      { click: true, target: ["swatch", "03/g11"], why: "...and let another one go grey" },
-      { settle: true, why: "let the second repaint land" },
-      { click: true, target: ["id", "fcreset"], why: "put every folder back to automatic" },
-      { settle: true, why: "let the palette snap back" },
-      { click: true, target: ["id", "gear"], why: "close the panel" },
+      { click: true, target: ["id", "gear"], act: "colours", why: "open the settings panel" },
+      { click: true, target: ["swatch", "01/g8"], act: "colours", why: "give a folder a colour of its own" },
+      { settle: true, act: "colours", why: "the disc repaints -- no relayout, nothing moves" },
+      { click: true, target: ["swatch", "03/g11"], act: "colours", why: "...and let another one go grey" },
+      { settle: true, act: "colours", why: "let the second repaint land" },
+      { click: true, target: ["id", "fcreset"], act: "colours", why: "put every folder back to automatic" },
+      { settle: true, act: "colours", why: "let the palette snap back" },
+      { click: true, target: ["id", "gear"], act: "colours", why: "close the panel" },
 
       // Pointer out of the way, so the last frame is the disc rather than a hover state
       // left behind by the last click.
-      { park: true, why: "leave the final frame clean" }
+      { park: true, act: "colours", why: "leave the final frame clean" }
     ];
+  }
+
+  // ONE ACT IN ISOLATION, for a per-feature clip instead of the whole storyboard. `name`
+  // is one of the eight `act:` tags above (`intro`, `note`, `timeline`, `heatmap`,
+  // `folders`, `subfolders`, `camera`, `colours`) -- the same names the section comments
+  // in demoMode() already carry, so tagging a beat and naming it here is one decision, not
+  // two.
+  //
+  // Isolated acts don't need the full storyboard's ordering rules (folders-before-
+  // subfolders, colours-last): under `?demo` the page comes up at rest with no filter
+  // applied and the gear closed (see the `?demo` branch near the end of this file), which
+  // is exactly the state every act other than "intro" already assumes as ITS starting
+  // point in the combined run too. A leading `settle` is enough; nothing needs a reset
+  // click first. `park` is appended rather than duplicated from the full storyboard's tail,
+  // so a recording of any single act ends on a clean frame the same way the full one does.
+  //
+  // Unknown name -> empty array with a loud warning, so a typo surfaces immediately in the
+  // recorder's log instead of quietly producing a beat-less, near-instant "recording".
+  function demoAct(name) {
+    var beats = demoMode().filter(function (b) { return b.act === name; });
+    if (!beats.length) {
+      console.warn("demo: no beats tagged act=\"" + name + "\" -- check the name against demoMode()");
+      return [];
+    }
+    if (name === "intro") return beats;   // already starts with its own settle beat
+    // "colours" already ends on its own {park} -- that beat WAS the full storyboard's
+    // final beat, just tagged into the act whose section comment it happened to sit under.
+    // Appending a second one is exactly the double-park a manual --act run caught: two
+    // "leave the final frame clean" beats in a row when this went untested.
+    var out = [{ settle: true, act: name, why: "start from a disc at rest" }].concat(beats);
+    if (!beats[beats.length - 1].park) {
+      out = out.concat([{ park: true, act: name, why: "leave the final frame clean" }]);
+    }
+    return out;
   }
 
   // Everything the driver needs, and nothing it does not.
@@ -10139,6 +10185,7 @@ function mountVaultGraph(root, data, deps) {
     on: demoOn,
     doneTitle: DEMO_DONE_TITLE,
     storyboard: demoMode,
+    act: demoAct,
     busy: demoBusy,
     /**
      * WHICH of the five things busy() ors together is still running.

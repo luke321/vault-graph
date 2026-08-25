@@ -3,10 +3,16 @@
 //   node scripts/demo.mjs                     # attach to Chrome on 9222
 //   node scripts/demo.mjs --port 9223
 //   node scripts/demo.mjs --slow 1.5          # stretch every move and dwell
+//   node scripts/demo.mjs --act timeline      # just one act, not the whole storyboard
 //
 // The storyboard lives in the page (`__vg.demo.storyboard()`), so adding a beat means
-// editing `demoMode()` in template.html and nothing here. This file only knows how to
+// editing `demoMode()` in src/page.js and nothing here. This file only knows how to
 // perform three verbs and how to wait.
+//
+// --act NAME plays `__vg.demo.act(NAME)` instead of the full storyboard -- one of the
+// eight `act:` tags demoMode()'s own beats carry (intro, note, timeline, heatmap,
+// folders, subfolders, camera, colours). Same driver, same verbs; only which beats it
+// gets differs.
 //
 // WHY CDP AND NOT el.click(): a dispatched click skips hit-testing, so an in-page demo
 // keeps passing after the button it aims at has become covered, scrolled away or 0x0.
@@ -37,6 +43,7 @@ const arg = (name, dflt) => {
 const PORT = Number(arg("port", 9222));
 const SLOW = Number(arg("slow", 1));
 const MATCH = arg("match", "");
+const ACT = arg("act", "");
 const CURSOR = argv.includes("--cursor");
 const HERE = dirname(fileURLToPath(import.meta.url));
 
@@ -209,8 +216,11 @@ async function main() {
   const armed = await page.eval("!!(window.__vg && __vg.demo)");
   if (!armed) throw new Error("this page has no __vg.demo -- is it a vault-graph build?");
 
-  const storyboard = JSON.parse(await page.eval("JSON.stringify(__vg.demo.storyboard())"));
-  console.log(`[${el()}] storyboard: ${storyboard.length} beats`);
+  const storyboard = ACT
+    ? JSON.parse(await page.eval(`JSON.stringify(__vg.demo.act(${JSON.stringify(ACT)}))`))
+    : JSON.parse(await page.eval("JSON.stringify(__vg.demo.storyboard())"));
+  if (ACT && !storyboard.length) throw new Error(`--act ${ACT} matched no beats -- see the page's own console warning`);
+  console.log(`[${el()}] storyboard: ${storyboard.length} beats${ACT ? ` (act: ${ACT})` : ""}`);
 
   // PARK THE POINTER SOMEWHERE THAT HOVERS NOTHING, and prove it rather than assume it.
   // The first version parked at 62% x 55% of the viewport to avoid 0,0 on the sidebar, and

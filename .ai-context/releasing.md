@@ -49,6 +49,29 @@ committed 2026-08-23 from the 2026-08-22 recording, so the check would have stay
 on a hero that was already behind. Silence means no *evidence* of staleness, not that the
 hero is current.
 
+## Feature clips are different from the hero — regenerate on judgment, not every release
+
+`docs/features.md` and `assets/features/*.webp` are the per-feature gallery (see
+`docs/features/_template.md`). Unlike the hero, **these are not regenerated every
+release.** Re-record a feature's clip only when it's new or when this release visibly
+changed it — that's a call for whoever is cutting the release to make, looking at what the
+`CHANGELOG.md` entry actually says, not something to automate:
+
+```powershell
+.\scripts\record-demo.ps1 -Act <name>        # e.g. -Act timeline
+.\scripts\make-hero.ps1 -In demo-<name>-<timestamp>.mp4 -Out assets\features\<name>.webp
+```
+
+Commit the new clip and update that feature's `Last re-recorded` line in
+`docs/features/<name>.md` together — that pair is what the `=== features ===` warning
+below reads.
+
+`release.ps1` prints `=== features ===`, one line per feature whose `Last re-recorded`
+predates a commit touching `src/page.js` — the same non-blocking severity as `=== hero
+===`, for the same reason: it's evidence worth a look, not proof anything actually needs
+re-recording. It checks the whole file rather than which `act:` a commit touched, so it can
+over-warn (a `colours`-only change flags every feature) but never under-warns silently.
+
 ## What it does, in case you need to do it by hand
 
 1. **Decide the bump** from `CHANGELOG.md`'s own table — MAJOR breaks output or invocation,
@@ -56,7 +79,9 @@ hero is current.
 2. **Write the release section in `CHANGELOG.md`** — human-readable, what shipped, no
    before/after numbers. Those go in `changelog-detail.md`, which is the regression suite.
 3. **Re-record the hero** if the page changed visually, then commit `assets/demo.webp` —
-   `record-demo.ps1` to take the recording, `make-hero.ps1` to encode it.
+   `record-demo.ps1` to take the recording, `make-hero.ps1` to encode it. **Re-record any
+   feature clip** this release changed, same two commands with `-Act <name>` — see above;
+   this one's a judgment call, not "always."
 4. **Run the suite.** `node scripts/smoke.mjs` — and it runs again on push via
    `.githooks/pre-push`, so a red suite cannot be released.
 5. **Tag, annotated**, with the release summary as the message.
