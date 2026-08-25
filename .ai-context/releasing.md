@@ -23,19 +23,47 @@ wrote down), runs the invariant suite, then tags, packages, pushes and creates t
 Release with the zip attached. `-DryRun` stops after the suite. The tag message is the same
 text as the release notes, so `git show <tag>` and the Release page agree.
 
+
+## Re-record the hero
+
+**`assets/demo.webp` is part of the release, and it is the only part that goes stale
+without anything failing.** It is a recording of the page, so it drifts out of date every
+time the page changes visually, and nothing about a build, a suite run or a package
+notices. Re-record and re-encode as part of cutting a release, before the tag:
+
+```powershell
+.\scripts\record-demo.ps1     # takes the physical mouse for ~30s, so ask first
+.\scripts\make-hero.ps1       # animated WebP, 30fps, 700px
+```
+
+Then commit the new asset, because `release.ps1` refuses a dirty tree.
+
+`release.ps1` prints a `=== hero ===` warning when `src/` has commits newer than
+`assets/demo.webp`. It is a warning rather than a gate on purpose: only a person can say
+whether anything *visible* changed, and a hard stop on a docs-only patch would be wrong
+often enough to get skipped by reflex.
+
+It compares **commit** dates, which is a proxy: encoding an old take and committing it
+today makes a stale hero look fresh. That is not hypothetical — the WebP asset was
+committed 2026-08-23 from the 2026-08-22 recording, so the check would have stayed quiet
+on a hero that was already behind. Silence means no *evidence* of staleness, not that the
+hero is current.
+
 ## What it does, in case you need to do it by hand
 
 1. **Decide the bump** from `CHANGELOG.md`'s own table — MAJOR breaks output or invocation,
    MINOR is a new capability or an intentional visual change, PATCH is fixes and docs.
 2. **Write the release section in `CHANGELOG.md`** — human-readable, what shipped, no
    before/after numbers. Those go in `changelog-detail.md`, which is the regression suite.
-3. **Run the suite.** `node scripts/smoke.mjs` — and it runs again on push via
+3. **Re-record the hero** if the page changed visually, then commit `assets/demo.webp` —
+   `record-demo.ps1` to take the recording, `make-hero.ps1` to encode it.
+4. **Run the suite.** `node scripts/smoke.mjs` — and it runs again on push via
    `.githooks/pre-push`, so a red suite cannot be released.
-4. **Tag, annotated**, with the release summary as the message.
-5. **Build the package** — `node scripts/make-package.mjs` writes
+5. **Tag, annotated**, with the release summary as the message.
+6. **Build the package** — `node scripts/make-package.mjs` writes
    `dist/vault-graph-<version>.zip` containing only what is needed to run: `src/`,
    `vendor/`, `scripts/`, `assets/`, `README.md`, `LICENSE`, `CHANGELOG.md`.
-6. **Create the release** and attach it:
+7. **Create the release** and attach it:
    `gh release create <version> dist/vault-graph-<version>.zip --notes-file <notes>`
 
 ## What the package must NOT contain

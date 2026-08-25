@@ -29,6 +29,188 @@ published tag breaks every link to it.
 
 ---
 
+## 1.7.0 — 2026-08-25
+
+Small folders close and open like the big ones, the seams are geometry rather than
+accumulation, the date strip is the only timeline and it finally resizes, and a `--dev`
+build draws the wedges it is arguing about.
+
+- **A single-column wedge closes and opens at constant speed, in place.** Toggling a small
+  folder off left the wedge visibly failing to close while its notes hopped between rows:
+  the drawn arc stood 6.21 degrees above a straight line at 70% of an 11.88-degree close,
+  and the one-note folder lost 6.92 degrees in a single frame -- 84x its mean step -- when
+  the last fade culled its cell. Every fade ends as a single column, where one note sits per
+  row and there is no serpentine left to preserve, so this was every folder's last moment
+  and not only a small-folder problem.
+
+  A fully toggled single-cell group's presence now walks one linear ramp, and that ramp
+  drives its proportional share, its min-arc floor and its seam together -- three quantities
+  that each had their own curve before. A hide spreads its fades across the whole cascade so
+  the last one lands where the arc is already zero; a show keeps its natural stagger and only
+  its ORDER is ours, outermost note first, so the column materialises from the rim inward.
+  Notes shrink with their wedge, through the per-cell room cap rather than as a per-note size.
+
+  Measured: residuals under 0.06 degrees closing and 0.21 opening against a straight line,
+  settle delta 0.000 in both directions, and a watched neighbour travels 0.00 to 0.04 degrees
+  through a toggle where it used to swing 4.66 degrees out and back.
+
+- **Every seam is a constant-width channel about a radius.** A boundary used to be built at
+  each note's own radius, which multiplies out to a line whose distance from the centre is
+  `gap(r) * (seams - 0.5 - nB * frac)` -- zero only where a boundary's seam index happens to
+  match its share of the circle. Two of nine seams pointed at the centre of the disc and the
+  rest missed by up to 101 units, worst just past a folder holding 233 degrees behind a
+  single seam. The accumulation is now evaluated once at the band's reference radius and each
+  side of it inset by half a seam at the note's own radius: all nine measure 0.
+
+- **A band's seams are measured by its own ruler.** `seamAt` asked `pitchUnits()` for a pitch
+  without saying which band, and that answers with the outer one -- so hiding the outer
+  ring's folders grew the inner ring's seams from 48 units to 109, for a band whose own
+  contents had not moved. The two rings are independent again.
+
+- **Each end note's own dot sets its margin,** so a wedge's ink lands on its boundary and the
+  seam is the whole visible channel. `SEAM_ROWS` rises to 0.3 to suit: the outer band's
+  channels come out 95 to 96 units with a spread of 1, against 114 to 136 with a spread of 22.
+
+- **A dev wedge overlay,** on by default in a `--dev` build; `?wedges` and `?nowedges`
+  override it in any build. Every animation question this release asked was about the
+  envelope, and the envelope was the one thing the page never drew -- so each was answered by
+  re-deriving the boundary in a probe, in a different angle convention from the placement,
+  which is how a note sitting 0.11 degrees off its wedge centre was once measured as 100
+  degrees off it. The overlay draws each wedge's two edges in its folder's colour, one white
+  dashed centre through its notes, one yellow dotted seam centre, the four band radii
+  measured off the dots themselves, a legend and a build stamp. One function serves the
+  notes, the overlay and every probe, because the version where the overlay kept its own copy
+  of the algebra cost most of a morning.
+
+- **`?rowarc`, off by default.** A wedge holds arc in rows it never reaches -- a one-note
+  folder's ten degrees sit empty in every row but one, measuring as a 108- and a 178-unit
+  hole against a 12-unit seam. With the flag on, each row shares its circle only with the
+  wedges present in it: worst within-row seam spread falls from 238 units to 72 on a 456-note
+  vault, 310 to 80 on the demo, 216 to 63 on the 10k. It costs a little motion in a
+  neighbouring wedge during a toggle, so it ships behind a flag until that trade is judged.
+
+- **The sidebar's Timeline block is gone; the date ribbon is the timeline.** A rank slider,
+  Play and All scrubbed the same history the strip under the band already scrubs -- in a
+  different unit, from a panel, while the strip that draws that history sat beside them. The
+  slider is deleted and **Refresh is Play**.
+
+  The intro is now that strip's **right-hand handle travelling**, with the same tooltip a
+  real drag shows. It is a preview: `state.from`/`state.to` stay null for the whole sweep,
+  because writing them per frame would put a hard date cap in `timeFactor` on top of the rank
+  ramp the cascade is already animating -- and a range change stops playback, so the second
+  reveal would cancel the first. A hand on the handle mid-intro wins.
+
+  Measured on a 948px strip: 24-26 sweeping frames, 0.002 to 1.000 of the strip, **0**
+  backwards steps, landing exactly on `x1 === w`. The handle's position comes from the note
+  RANK rather than from the span -- interpolating the span linearly would show it in 2020
+  while every note from 2026 was already lit, since 409 of 442 notes here fall in the last
+  three months. The visible consequence, crossing 0.70 of the strip in the first ~5% of the
+  run and then creeping, is this vault's own distribution: both evenly-dated fixtures sweep
+  at 0.05-0.06 at the same point.
+
+- **Refresh clears the date range,** which it did not. It claims to clear every filter and
+  replay the intro, and it cleared every filter except that one -- so replaying the intro
+  through an applied range grew the vault to a slice of itself. Invisible while "the
+  timeline" meant the rank slider, which it did reset; the omission became the bug when the
+  ribbon became the timeline.
+
+- **The date strip resizes with the window.** It never did. `fitCanvas` pins an inline pixel
+  width on the canvas -- it must, since the bitmap is device pixels and the box is CSS pixels
+  -- and an inline width beats the stylesheet's `width:100%`, so asking the canvas how wide
+  it was returned the width it was last drawn at, for ever. Measured: **1168px in a 668px
+  slot, 1168px again in a 1568px one**, every year chip left where it was; and on a page
+  whose first measurement ran before layout, the 600px fallback in a 1284px band,
+  permanently. The ResizeObserver was wired and firing the whole time and redrew at the same
+  stale number, which is why this read as missing resize handling rather than as a stale
+  measurement.
+
+  Measuring now drops the inline width, reads the box the stylesheet gives and puts the
+  inline width back, so it has no side effect -- and it runs from the draw path and the
+  observer only, never from a pointermove. The observer guards on the width actually having
+  changed, which both saves a redraw per band reflow and breaks the loop that drawing into an
+  observed element would otherwise create. All three vaults now track their slot to within
+  1px at every width.
+
+- **"Mark today" is gone; click the band's today column instead.** It answered "which notes
+  were written today" from the sidebar, by a second predicate, while the band drew the answer
+  -- and it is the one that got the predicate wrong twice, first matching nothing and then
+  matching 111 files a folder rename had touched. Clicking the last cell of the grid marks
+  exactly the notes that cell counted.
+
+  The **fill treatment came with it**: a picked day's notes take `--today`, the neutral
+  extreme that is deliberately not a group hue, on top of the halo they already had. Gated on
+  the picked day and **not** on the hovered one -- recolouring a year of notes as the pointer
+  crosses a label is far too loud, so a hover asks and a click chooses. Two `smoke.mjs` checks
+  went with the button, replaced by one that follows the fill to where it lives.
+
+- **The demo storyboard is ordered by impact, and the hero is re-recorded.** It ran roughly
+  in the order the features were built: the intro, two hovers, the legend, the colour picker,
+  the camera, and the date ribbon LAST. A README hero is watched for a few seconds before the
+  reader decides whether to keep watching, so a preference panel was landing before the point
+  of the tool. The acts now run: the vault growing, one note, the timeline, the heatmap,
+  folders, subfolders, the camera, colours -- with two orderings kept for structural reasons
+  rather than editorial ones, both noted in the storyboard.
+
+  Three beats added, for features that had never been on camera. The intro's own beat now
+  shows the ribbon handle sweeping, since that is what it does. The **year chips** get hovered
+  and clicked -- a new `["year", "busiest"]` target, which picks the fullest year that has a
+  chip, because below about 20px of pitch only every other year is named and the fullest one
+  may have no button to aim at. And a **heatmap day gets clicked**, which is what replaced
+  Mark today: the busiest day rather than today, since today is allowed to hold no notes and a
+  beat that marks nothing reads as a mis-click.
+
+  58 beats, 100.6s. `assets/demo.webp` is **10.6 MB** against the previous 3.2 MB, and that is
+  a deliberate call rather than an oversight: the take it replaced was 34s from 2026-08-22,
+  while the storyboard had already grown to ~87s before this release touched it, so the hero
+  had been stale for two releases. The size is clone weight, which is the one thing size costs
+  here -- see the note in `make-hero.ps1`.
+
+- **The year chips read as part of the strip.** They sat 8px below the ribbon and 9px above
+  the band's own border, and drawRibbon paints a full-width 2px rail for the window pill
+  along the canvas's bottom edge -- so that line read as the bottom of the timeline section
+  and the chips fell outside the control they label. Reported from the Obsidian pane and
+  measured **identical in both hosts**, which is what ruled out a host-specific cause: 8px
+  above and 9px below in each. Now 1px above against 9px below, so the grouping cannot be
+  misread, and the band is 7px shorter. Pinned as a ratio rather than as pixel values, so a
+  padding change cannot fail the check while the grouping is still right.
+
+- **The directory's linter passes on `src/page.js`, which nobody had ever run it against.**
+  `eslint.config.mjs` lists `src/page.js` in its `files`; `npm run lint` passed
+  `plugin/**/*.js`. The config covered the exporter and the script never handed it over, so
+  the community check found six errors nothing local had ever reported. The script now lints
+  what the config covers, which is the actual fix -- the rest is the backlog it had
+  accumulated:
+
+  - **A `cssText` assignment and four `style.display` assignments** on the `--dev` wedge
+    overlay. The rule was right about all five: the box is static, so it is a class in
+    page.css now, and showing or hiding uses the `hidden` attribute the tooltips in this file
+    already use, with an explicit `[hidden]` rule rather than relying on the UA stylesheet.
+  - **`style.width = ""` in `measureRibbon`.** An empty string is a static value; the DOM has
+    `removeProperty` for "unset this", which also says what is meant.
+  - **`innerHTML` on the year chips.** Every value in that string came out of `dateSpan` and
+    was a number, so nothing could have been injected -- but the safety rested on an argument
+    about where the inputs came from, made in one comment and checked nowhere. Built as
+    elements now, so the question is out of reach rather than answered.
+  - **Two `var DOC` declarations, the first dead.** `root.ownerDocument` ran second and won,
+    so `deps.doc` was never consulted and the substitutability its own comment describes did
+    not exist. One declaration, deps first, behaviour unchanged in both hosts.
+  - **`room` declared twice as two different quantities**, kept apart by nothing but statement
+    order: the closure that reads it is called on the line above the second declaration, so it
+    saw the band room while everything below saw the arc cap. Moving that call one line later
+    would have changed every seam margin silently. Renamed, so the behaviour is identical.
+  - **The Debug button's clipboard fallback logged to the console.** That rule is on the
+    preset's restricted-disable list, so a waiver is itself an error -- correctly, since the
+    console is shared with every other plugin. It saves a `.json` instead, which is the better
+    answer anyway: this path exists for a `file://` page outside a secure context, where a
+    bug report is hardest to collect, and a file beats a dump somebody has to select by hand.
+
+Nothing here changes what a note means or where a folder sits: the two-band split, the
+serpentine and the colours are untouched, and so is the reveal itself -- notes still arrive
+oldest-first over the same clock. What changed is which control says so, and that it now
+says it at any window size.
+
+---
+
 ## 1.6.1 — 2026-08-23
 
 The files Obsidian installs were missing from 1.6.0's release, so nobody could install it.
