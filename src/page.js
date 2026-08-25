@@ -11010,7 +11010,18 @@ function mountVaultGraph(root, data, deps) {
                     },
     };
     /* ---- BEGIN: demo automation + debug API -- stripped from the plugin build, see scripts/build-plugin.mjs (stripDemoAndDebug) ---- */
-    Object.assign(window.__vg, {
+    // Object.assign COPIES A VALUE from each of this literal's own `get`/`set` pairs at
+    // the moment it runs -- it does not install the accessor itself, so a plain
+    // Object.assign(window.__vg, {...}) would freeze every getter/setter below (heat,
+    // folderColors, subfolderColors, panEnabled, heatCell, ...) at whatever they
+    // happened to return during this one boot-time call, forever after. Caught by
+    // smoke.mjs: __vg.heat stayed the pre-heatBuild() null through the whole run, so
+    // the page never looked "ready" no matter how long the suite waited.
+    // Object.getOwnPropertyDescriptors + Object.defineProperties copies the ACCESSOR
+    // itself, so each one keeps reading live off this closure the way it does for the
+    // handful of getters in the host API above, which were never in this object and
+    // never had the bug.
+    var debugAPI = {
                     state: state,
                     ringsLayout: ringsLayout, visible: visible, groupOf: groupOf,
                     alpha: alpha, cascade: cascade, syncAlpha: syncAlpha,
@@ -11679,7 +11690,8 @@ function mountVaultGraph(root, data, deps) {
                       applyLayout(false);
                       renderer.refresh();
                     },
-    });
+    };
+    Object.defineProperties(window.__vg, Object.getOwnPropertyDescriptors(debugAPI));
     /* ---- END: demo automation + debug API ---- */
     seedPins();
     buildTimeline();
