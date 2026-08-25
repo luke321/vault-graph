@@ -513,6 +513,15 @@ class VaultGraphView extends ItemView {
         this.plugin.settings.panEnabled = !!v;
         await this.plugin.saveSettings();
       },
+      // The hub, for the same reason pan gets a writer: it is changed in the view, by
+      // right-clicking a note or dragging one into the middle, so the view is what has to
+      // persist it. Not in the settings tab either -- "which notes are in the hub" is a
+      // thing you point at, not a thing you type.
+      pinned: this.plugin.settings.pinned,
+      onPinned: async (ids) => {
+        this.plugin.settings.pinned = ids;
+        await this.plugin.saveSettings();
+      },
       // The gear IS shown here -- it is where somebody looking at the disc goes to look
       // for the colours -- but it opens Obsidian's settings tab rather than a second
       // panel inside the view saying the same things. `settingsUI` is deliberately not
@@ -579,6 +588,11 @@ const DEFAULTS = {
   // decides: a folder whose name starts with an underscore is an archive, so it is out of
   // the colour rotation, grey, and hidden until somebody says otherwise.
   folderShown: {},
+  // Note ids pinned into the hub, in slot order. Empty means the mark is in the middle,
+  // which is the state the graph has always opened in. The plugin rebuilds in place, so
+  // these are re-checked against the graph on every mount -- a renamed or deleted note
+  // drops out rather than holding a slot nothing can fill.
+  pinned: [],
   // Drag-to-pan in the view. ON by default: the rim of a big vault is unreachable without
   // it, and the corner control is a cheaper way to discover that than a settings tab is.
   // Held here so a vault where dragging gets in the way can start locked.
