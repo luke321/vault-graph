@@ -94,6 +94,8 @@ mountVaultGraph(
     settingsUI: true,
     folderColors: loadSettings().folderColors,
     onFolderColors: function (map) { saveSettings({ folderColors: map }); },
+    subfolderColors: loadSettings().subfolderColors,
+    onSubfolderColors: function (map) { saveSettings({ subfolderColors: map }); },
     folderShown: loadSettings().folderShown,
     onFolderShown: function (map) { saveSettings({ folderShown: map }); },
     // Drag-to-pan, remembered. Undefined on a first visit, which page.js reads as ON --

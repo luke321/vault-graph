@@ -13,6 +13,11 @@
  *
  *       Also, optionally:
  *         folderColors      { "<folder>": "g7" } -- the saved per-folder palette slots.
+ *         subfolderColors   { "<folder>/<sub>": "g7" } -- as folderColors, one level down.
+ *                           Keyed to match subShade and subOrder's own keys -- "" for
+ *                           notes sitting directly in the folder. Pins the whole tint the
+ *                           automatic ladder would otherwise compute for that subfolder.
+ *         onSubfolderColors(m) as onFolderColors, for that map.
  *         folderShown       { "<folder>": true|false } -- saved per-folder visibility
  *                           DEFAULTS. Tri-state: absent means "whatever the `_` rule
  *                           says", which is hidden for a folder whose name starts with an
@@ -233,6 +238,20 @@ function mountVaultGraph(root, data, deps) {
   }
   var folderColors = cleanFolderColors(deps.folderColors);
 
+  // Subfolder -> slot key, keyed "<folder>/<sub>" to match subShade and subOrder's own
+  // keys ("" for notes sitting directly in the folder). Same validation as folderColors
+  // and the same reason: a JSON round trip either way, so trust nothing.
+  function cleanSubfolderColors(raw) {
+    var out = Object.create(null);
+    if (!raw || typeof raw !== "object") return out;
+    Object.keys(raw).forEach(function (k) {
+      var v = raw[k];
+      if (typeof v === "string" && /^g([1-9]|1[0-2])$/.test(v)) out[k] = v;
+    });
+    return out;
+  }
+  var subfolderColors = cleanSubfolderColors(deps.subfolderColors);
+
   // DRAG-TO-PAN, ON UNLESS THE HOST SAYS OTHERWISE. Absent means on: a fresh page has no
   // saved answer and dragging is what a graph does, so the default cannot be "wait to be
   // told". Only an explicit false turns it off -- github#4 argued for off-by-default on a
@@ -276,6 +295,16 @@ function mountVaultGraph(root, data, deps) {
       '</svg>';
   }
 
+  // A disclosure twisty, or an invisible placeholder so labels stay aligned. Shared
+  // between the legend and the settings panel now that both nest subfolder rows under a
+  // folder -- the same reason eyeSvg above is shared.
+  function twBtn(attrs, open) {
+    return attrs
+      ? '<button class="tw" ' + attrs + ' aria-expanded="' + open + '">' +
+        (open ? "▾" : "▸") + '</button>'
+      : '<span class="tw none">▸</span>';
+  }
+
   // Explicit per-folder visibility: true = shown, false = hidden, absent = the default
   // above. Tri-state on purpose -- "absent" has to stay distinguishable from "false", or
   // turning `_ Archives` off by hand would be indistinguishable from never having said
@@ -298,6 +327,7 @@ function mountVaultGraph(root, data, deps) {
   var SETTINGS_UI = !!deps.settingsUI;
   var openHostSettings = typeof deps.openSettings === "function" ? deps.openSettings : null;
   var saveFolderColors = typeof deps.onFolderColors === "function" ? deps.onFolderColors : null;
+  var saveSubfolderColors = typeof deps.onSubfolderColors === "function" ? deps.onSubfolderColors : null;
   var saveFolderShown = typeof deps.onFolderShown === "function" ? deps.onFolderShown : null;
 
   /* ------------------------------------------------------------------ state */
@@ -483,6 +513,11 @@ function mountVaultGraph(root, data, deps) {
 
   // Stable subfolder ordering per PARA folder: biggest first, name as tie-break.
   var subOrder = Object.create(null);
+  // "folder/sub" -> note count, from the SAME tally subOrder sorts by -- not a second
+  // graph walk. buildLegend used to keep its own local copy of this, recomputed on every
+  // render; it now reads this one, and the settings panel and the __vg api do too, since
+  // all three need to say how big a subfolder is.
+  var subCount = Object.create(null);
   (function () {
     var tally = Object.create(null);
     graph.forEachNode(function (_id, a) {
@@ -494,6 +529,7 @@ function mountVaultGraph(root, data, deps) {
       subOrder[f] = Object.keys(tally[f]).sort(function (x, y) {
         return tally[f][y] - tally[f][x] || x.localeCompare(y);
       });
+      subOrder[f].forEach(function (sb) { subCount[f + "/" + sb] = tally[f][sb]; });
     });
   })();
 
@@ -681,6 +717,37 @@ function mountVaultGraph(root, data, deps) {
     return folderColors;
   }
 
+  // As applyFolderColors, one level down. buildColors() is NOT called -- a subfolder pin
+  // cannot change any group's own colour, so re-deriving groupColor would be repainting
+  // things that did not change. buildSubShades() alone is enough, and it is also what
+  // applyFolderColors ends in (via buildColors()), which is why a folder recolour keeps
+  // respecting every subfolder pin without this file needing to say so twice.
+  function applySubfolderColors(map) {
+    subfolderColors = cleanSubfolderColors(map);
+    buildSubShades();
+    if (renderer) renderer.refresh();
+    try { placeLogo(); } catch { /* logo not mounted yet */ }
+    try { heatBuild(); } catch { /* heatmap not built yet */ }
+    try { buildLegend(); } catch { /* legend not built yet */ }
+    return subfolderColors;
+  }
+
+  // Whether ANY of g's subfolders carries a pin right now. Both nesting gates below
+  // read this, alongside the ordinary "more than one subfolder" test -- without it, a
+  // pin outlives its own picker: pin a folder's one differentiated subfolder, then let
+  // attrition (notes moved elsewhere) shrink that folder to a single subfolder, and the
+  // twisty that used to reach the pin disappears from the legend, the settings panel
+  // AND the Obsidian settings tab at once, with the pin still silently in effect and no
+  // remaining UI to clear it short of "Reset all", which drops every override in the
+  // vault. A single differentiated subfolder is ordinarily nothing to nest -- see
+  // buildSubShades' own `subs.length < 2` skip -- but a PIN is a deliberate choice, made
+  // through a UI that has to stay reachable for as long as the pin exists.
+  function groupHasPinnedSub(g) {
+    return (subOrder[g] || []).some(function (sb) {
+      return !!subfolderColors[g + "/" + sb];
+    });
+  }
+
   function colorOf(group) {
     return groupColor[group] || THEME.neutrals[0];
   }
@@ -690,7 +757,17 @@ function mountVaultGraph(root, data, deps) {
   // reads as one family while People / Partners / Rezepte separate inside it. This is
   // deliberately BELOW the categorical separation floor -- it is a nested cue on top
   // of an already-labelled group, not an independent colour channel.
+  //
+  // ...UNLESS subfolderColors pins one, which skips the ladder entirely and paints it
+  // one of the twelve slots instead -- a full-strength colour with none of the
+  // "below the floor" restraint above, because a pin is a deliberate choice to make one
+  // subfolder stand out, not a nested cue.
   var subShade = Object.create(null);
+  // "folder/sub" -> the slot key it is ON: the pinned one, or "" for the automatic
+  // ladder. "" on purpose rather than omitting the key -- an automatic tint is never one
+  // of the twelve slot hexes, so there is nothing among them to ring as "current", and
+  // the settings UIs need to say that rather than guess.
+  var subSlot = Object.create(null);
 
   // Four steps, not one per subfolder. Spreading N tints evenly across one hue
   // family collapses as N grows -- measured, nine subfolders land ~3 apart, below
@@ -943,28 +1020,42 @@ function mountVaultGraph(root, data, deps) {
 
   function buildSubShades() {
     subShade = Object.create(null);
+    subSlot = Object.create(null);
     Object.keys(subOrder).forEach(function (f) {
       var subs = subOrder[f];
-      if (subs.length < 2) return;             // nothing to differentiate
       var basecol = colorOf(f);
       var lab = hex2lab(basecol);
       var grey = Math.hypot(lab[1], lab[2]) < 0.02;   // neutrals have no hue to turn
-      if (grey) {        // neutrals share one lightness axis; a ladder would collide
-        subs.forEach(function (sb) { subShade[f + "/" + sb] = basecol; });
-        return;
-      }
       // Lightness targets are spaced evenly between the base and a per-family end
       // point rather than being fixed deltas. Fixed deltas hit the wash-out cap and
       // the top two steps collapsed onto each other -- which is why simply turning
       // the numbers up made separation WORSE (adjacent dE 6.4 -> 4.1), not better.
+      //
+      // Computed once per folder, and only when a ladder will actually run -- a pin
+      // never needs them, and neither does a folder with nothing to differentiate.
+      var haveLadder = subs.length >= 2 && !grey;
       var sign = THEME.dark ? 1 : -1;
-      var budget = hueBudget(basecol);
-      var Lend = THEME.dark
-        ? Math.min(SUB_L_LIMIT, lab[0] + SUB_L_SPAN)
-        : Math.max(1 - SUB_L_LIMIT, lab[0] - SUB_L_SPAN);
+      var budget = haveLadder ? hueBudget(basecol) : 0;
+      var Lend = haveLadder
+        ? (THEME.dark ? Math.min(SUB_L_LIMIT, lab[0] + SUB_L_SPAN)
+                      : Math.max(1 - SUB_L_LIMIT, lab[0] - SUB_L_SPAN))
+        : 0;
       subs.forEach(function (sb) {
+        var pk = f + "/" + sb;
+        // A PIN SKIPS THE LADDER ENTIRELY, whether or not this folder has enough
+        // subfolders to need one -- pinning the sole subfolder of a two-folder vault
+        // is still a real thing to want.
+        var pin = subfolderColors[pk];
+        if (pin && THEME.byKey[pin]) {
+          subShade[pk] = THEME.byKey[pin];
+          subSlot[pk] = pin;
+          return;
+        }
+        subSlot[pk] = "";
+        if (subs.length < 2) return;             // nothing to differentiate
+        if (grey) { subShade[pk] = basecol; return; }  // one lightness axis; ladder would collide
         var t = subTintIndex(f, sb) / (SUB_SLOTS - 1);
-        subShade[f + "/" + sb] = shade(basecol, sign * budget * t, (Lend - lab[0]) * t);
+        subShade[pk] = shade(basecol, sign * budget * t, (Lend - lab[0]) * t);
       });
     });
   }
@@ -6722,6 +6813,15 @@ function mountVaultGraph(root, data, deps) {
 
   /* ---------------------------------------------------------------- UI */
 
+  // buildSettings lives inside buildTools's own closure (the gear/settings-panel
+  // wiring), not out here beside buildLegend -- so buildLegend cannot call it directly
+  // without eslint (correctly) flagging it as undefined, and would throw at runtime if
+  // it tried. buildTools() sets this once, during the one-time init sequence that runs
+  // well before anything could click a twisty, so the settings panel's own subfolder
+  // rows can be kept in sync with the legend's without hoisting either function out of
+  // the closure it belongs in.
+  var refreshSettingsPanel = null;
+
   function buildLegend() {
     // EVERY ROW BELOW IS ABOUT TO BE REPLACED, and the one under the pointer goes with
     // them -- so its mouseleave will never fire and its halo would be left on with
@@ -6732,17 +6832,15 @@ function mountVaultGraph(root, data, deps) {
     var names = order[state.dim] || [];
     $("gcount").textContent = "(" + names.length + ")";
 
-    // Count notes per subfolder so the nested rows can show their size.
-    var subCount = Object.create(null);
-    // ...and the folder TREE, as "prefix -> { childName: count }" at every depth. Built
-    // by walking each note's own `dirs` chain, so the legend's nesting comes from the
-    // vault rather than from any assumed number of levels: a folder five deep renders
-    // the same way as one a single level down.
+    // subCount ("folder/sub" -> note count) is module-scope now -- see its declaration
+    // beside subOrder. What's still built fresh on every render is the folder TREE, as
+    // "prefix -> { childName: count }" at every depth. Built by walking each note's own
+    // `dirs` chain, so the legend's nesting comes from the vault rather than from any
+    // assumed number of levels: a folder five deep renders the same way as one a single
+    // level down.
     var kids = Object.create(null);
     if (state.dim === "folder") {
       graph.forEachNode(function (_id, a) {
-        var k = a.folder + "/" + (a.sub || "");
-        subCount[k] = (subCount[k] || 0) + 1;
         var d = a.dirs || [];
         for (var i = 0; i < d.length; i++) {
           var pk = a.folder + "/" + d.slice(0, i).join("/");
@@ -6758,13 +6856,7 @@ function mountVaultGraph(root, data, deps) {
       return '<button class="eye" ' + attrs + ' aria-pressed="' + on + '" title="' +
              (on ? "Hide " : "Show ") + esc(what) + '">' + eyeSvg(on) + '</button>';
     };
-    // A disclosure twisty, or an invisible placeholder so labels stay aligned.
-    var twBtn = function (attrs, open) {
-      return attrs
-        ? '<button class="tw" ' + attrs + ' aria-expanded="' + open + '">' +
-          (open ? "▾" : "▸") + '</button>'
-        : '<span class="tw none">▸</span>';
-    };
+    // twBtn is module-scope now -- see its declaration beside eyeSvg.
 
     // Everything BELOW a sub-wedge row, recursively, at whatever depth the vault goes.
     // These levels take no tint and cut no wedge -- they inherit their parent's swatch
@@ -6796,8 +6888,14 @@ function mountVaultGraph(root, data, deps) {
 
     setHTML($("legend"), names.map(function (g) {
       var vis = !isHidden(g);
-      var hasSubs = state.dim === "folder" && (subOrder[g] || []).length > 1 &&
-                    (counts[g] || 0) >= NEST_MIN;
+      // A PIN BYPASSES BOTH SIZE GATES, not just the subfolder-count one -- see
+      // groupHasPinnedSub's own comment. NEST_MIN exists to skip nesting a folder too
+      // small to be worth it automatically; it says nothing about a folder somebody
+      // has deliberately pinned a subfolder colour on, however small that folder has
+      // since shrunk to.
+      var hasSubs = state.dim === "folder" &&
+                    (groupHasPinnedSub(g) ||
+                     ((subOrder[g] || []).length > 1 && (counts[g] || 0) >= NEST_MIN));
       var open = hasSubs && !state.collapsed[g];
       var hl = !!state.highlight[g];
 
@@ -6938,6 +7036,11 @@ function mountVaultGraph(root, data, deps) {
       b.onclick = function () {
         if (state.collapsed[g]) delete state.collapsed[g]; else state.collapsed[g] = true;
         buildLegend();
+        // The settings panel's own subfolder rows read this SAME flag -- see
+        // buildSettings, and refreshSettingsPanel's own comment for why this is not a
+        // direct call -- so opening a folder here opens it there too, rather than the
+        // two disagreeing about which folders are expanded.
+        if (refreshSettingsPanel) refreshSettingsPanel();
       };
     });
     // Deeper folder levels: a twisty, an eye and a highlight each, keyed by full path
@@ -7525,6 +7628,11 @@ function mountVaultGraph(root, data, deps) {
   }
 
   function buildTools() {
+    // See refreshSettingsPanel's own declaration, beside buildLegend: this is the one
+    // assignment that makes it reachable from there. buildSettings is hoisted within
+    // this function body, so the forward reference is fine.
+    refreshSettingsPanel = buildSettings;
+
     $("allon").onclick = function () {
       state.hidden[state.dim] = Object.create(null);
       state.hiddenSub = Object.create(null);
@@ -7640,7 +7748,16 @@ function mountVaultGraph(root, data, deps) {
         $("gear").setAttribute("aria-expanded", String(open));
         if (open) buildSettings();
       };
-      $("fcreset").onclick = function () { pickColor(null, null); };
+      // BOTH MAPS, not just folderColors -- this button sits under "Folder colours",
+      // which now covers subfolders too (see subfolderRows), so Reset dropping only
+      // the top-level overrides would leave a subfolder pin behind for the user to
+      // go find and clear by hand. Mirrors plugin/main.js's own "Reset all".
+      $("fcreset").onclick = function () {
+        pickColor(null, null);
+        var savedSub = applySubfolderColors({});
+        if (saveSubfolderColors) saveSubfolderColors(Object.assign({}, savedSub));
+        buildSettings();
+      };
       // DELEGATED on the container, which survives -- buildSettings replaces its
       // children on every pick, so a listener bound to a swatch would be bound to an
       // element that is about to be thrown away.
@@ -7649,10 +7766,121 @@ function mountVaultGraph(root, data, deps) {
         if (!t) return;
         var v = t.closest("[data-vis]");
         if (v) { pickVisible(v.getAttribute("data-vis")); return; }
+        var tw = t.closest("[data-stw]");
+        if (tw) {
+          var fg = tw.getAttribute("data-stw");
+          if (state.collapsed[fg]) delete state.collapsed[fg]; else state.collapsed[fg] = true;
+          buildSettings();
+          buildLegend();          // see the [data-tw] handler: the two stay in sync
+          return;
+        }
+        var s = t.closest("[data-sfc]");
+        if (s) {
+          var pk = s.getAttribute("data-sfc"), slash = pk.indexOf("/");
+          pickSubColors(pk.slice(0, slash), [pk.slice(slash + 1)],
+                        s.getAttribute("data-key") || null);
+          return;
+        }
         var b = t.closest("[data-fc]");
         if (b) pickColor(b.getAttribute("data-fc"), b.getAttribute("data-key") || null);
       });
     }
+
+    // RIGHT-CLICK, IN THE LEGEND ITSELF -- a second, faster way to reach the same twelve
+    // swatches the settings panel offers, without opening it. Unconditional: unlike the
+    // gear above, this does not depend on SETTINGS_UI or openSettings, because a context
+    // menu is not a second settings surface, just a shortcut to the pick functions below,
+    // which already no-op safely with no host to save through.
+    function closeCtxMenu() {
+      var el = $("ctxmenu");
+      if (el) el.hidden = true;
+      DOC.removeEventListener("mousedown", ctxOutside, true);
+      DOC.removeEventListener("keydown", ctxKey, true);
+      WIN.removeEventListener("resize", closeCtxMenu);
+    }
+    function ctxOutside(ev) {
+      var el = $("ctxmenu");
+      if (el && !el.hidden && !el.contains(ev.target)) closeCtxMenu();
+    }
+    function ctxKey(ev) { if (ev.key === "Escape") closeCtxMenu(); }
+
+    // The same 12-swatch + Auto markup buildSettings' own rows build, at the click point
+    // instead of in the sidebar. `current` is a slot key or "" for none; onPick(key) fires
+    // with the chosen key, or null for Auto.
+    //
+    // x/y are VIEWPORT coordinates (straight off the contextmenu event), and the menu is
+    // positioned relative to ROOT rather than the true viewport -- `position: fixed`
+    // measures from the nearest ancestor with a transform or CSS containment, not
+    // necessarily the window, and Obsidian's own workspace panes carry exactly that.
+    // Measured there: the menu opened detached from the row that was right-clicked,
+    // floating wherever the transformed ancestor's origin happened to be. ROOT's own
+    // getBoundingClientRect() already reflects whatever transform sits above it, so
+    // subtracting it converts a viewport point into ROOT's coordinate space correctly
+    // regardless of what Obsidian does further up the tree -- the same reason #vg-detail
+    // and #vg-tip are `position: absolute` against their own ancestor rather than fixed.
+    function openCtxMenu(x, y, current, onPick) {
+      var el = $("ctxmenu");
+      if (!el) return;
+      var pal = paletteInfo();
+      var sws = pal.map(function (p) {
+        var on = current === p.key;
+        return '<button class="swatch vg-' + p.key + '" role="menuitemradio"' +
+               ' data-key="' + p.key + '" aria-checked="' + on + '"' +
+               ' title="' + esc(p.name) + '" aria-label="' + esc(p.name) + '"></button>';
+      }).join("");
+      setHTML(el, '<div class="sws">' + sws + '</div>' +
+                  '<button class="auto" data-key="" aria-pressed="' + !current +
+                  '" title="Back to automatic">Auto</button>');
+      Array.prototype.forEach.call(el.querySelectorAll("[data-key]"), function (b) {
+        b.onclick = function () { onPick(b.getAttribute("data-key") || null); closeCtxMenu(); };
+      });
+      el.hidden = false;
+      var root0 = ROOT.getBoundingClientRect();
+      var rx = x - root0.left, ry = y - root0.top;
+      // Clamped to ROOT's own box, in the same coordinate space: a right-click near the
+      // edge must not open a popover that hangs off the view.
+      var r = el.getBoundingClientRect();
+      el.style.left = Math.max(4, Math.min(rx, ROOT.clientWidth - r.width - 4)) + "px";
+      el.style.top = Math.max(4, Math.min(ry, ROOT.clientHeight - r.height - 4)) + "px";
+      DOC.addEventListener("mousedown", ctxOutside, true);
+      DOC.addEventListener("keydown", ctxKey, true);
+      WIN.addEventListener("resize", closeCtxMenu);
+    }
+
+    // ONE DELEGATED LISTENER, for the same reason the settings panel's click handler is
+    // delegated: buildLegend replaces every row on every render, so anything bound to a
+    // row itself would be bound to an element about to be thrown away.
+    $("legend").addEventListener("contextmenu", function (ev) {
+      var t = ev.target instanceof Element ? ev.target : null;
+      if (!t) return;
+      var gBtn = t.closest(".lg[data-g]");
+      if (gBtn) {
+        ev.preventDefault();
+        var g = gBtn.getAttribute("data-g");
+        openCtxMenu(ev.clientX, ev.clientY, folderColors[g] || groupSlot[g] || "",
+                    function (key) { pickColor(g, key); });
+        return;
+      }
+      // The pooled tail row ("N smaller subfolders") carries several indices -- a pick
+      // there applies to every subfolder it stands for, matching how that row's eye and
+      // highlight already act as a block rather than forcing one right-click per member.
+      var subBtn = t.closest(".lgs[data-hsub]");
+      if (subBtn) {
+        ev.preventDefault();
+        var f = subBtn.getAttribute("data-hsub");
+        var subs = subOrder[f] || [];
+        var idx = subBtn.getAttribute("data-idx").split(",").map(Number);
+        var picked = idx.map(function (i) { return subs[i]; });
+        var cur = idx.length === 1 ? (subfolderColors[f + "/" + picked[0]] || "") : "";
+        openCtxMenu(ev.clientX, ev.clientY, cur,
+                    function (key) { pickSubColors(f, picked, key); });
+        return;
+      }
+      // Depth 2+ (a `data-hpath` row): no picker. Per design/0003-subfolder-
+      // differentiation.md these levels take no tint of their own and inherit their
+      // parent's swatch, so there is nothing here to pin -- the browser's own context
+      // menu shows instead.
+    });
 
     // One folder's slot, or -- with both arguments null -- every override dropped.
     // Nothing else in the map is touched: two folders may hold the same slot, and that
@@ -7665,6 +7893,22 @@ function mountVaultGraph(root, data, deps) {
       }
       var saved = applyFolderColors(next);
       if (saveFolderColors) saveFolderColors(Object.assign({}, saved));
+      buildSettings();
+    }
+
+    // One or more subfolders' slot, in the SAME folder, set to the same key in one write.
+    // The array is what lets the pooled "N smaller subfolders" legend row apply a single
+    // pick to every subfolder it stands for, matching how that row's eye and highlight
+    // already act as a block rather than forcing N separate clicks.
+    function pickSubColors(folder, subs, key) {
+      var next = Object.create(null);
+      Object.keys(subfolderColors).forEach(function (k) { next[k] = subfolderColors[k]; });
+      subs.forEach(function (sb) {
+        var pk = folder + "/" + sb;
+        if (key) next[pk] = key; else delete next[pk];
+      });
+      var saved = applySubfolderColors(next);
+      if (saveSubfolderColors) saveSubfolderColors(Object.assign({}, saved));
       buildSettings();
     }
 
@@ -7690,6 +7934,40 @@ function mountVaultGraph(root, data, deps) {
     // Rebuilt whole on every pick. The list is one row per top-level folder and the
     // vault has tens of those, not thousands, so there is nothing here worth the bugs
     // that come with patching rows in place.
+    // Every named subfolder of g, as its own radiogroup: a live tint preview, its name
+    // and count, an Auto button, and the same twelve swatches a folder row gets. Unlike
+    // a folder row, no swatch here is ever marked "current" while unpinned -- the
+    // automatic tint is a computed shade, not one of the twelve slot hexes, so there is
+    // nothing among them to ring. The Auto button's own pressed state already says
+    // "this one is automatic"; ringing a swatch that is not actually being used would be
+    // the lie a folder row's "(automatic)" marking specifically avoids.
+    function subfolderRows(g, pal) {
+      return (subOrder[g] || []).map(function (sb) {
+        var pk = g + "/" + sb;
+        var pin = subfolderColors[pk] || "";
+        var tint = subShade[pk] || colorOf(g);
+        var nm = sb || "(directly in folder)";
+        var sws = pal.map(function (p) {
+          var on = pin === p.key;
+          return '<button class="swatch vg-' + p.key + '" role="radio"' +
+                 ' data-sfc="' + esc(pk) + '" data-key="' + p.key + '"' +
+                 ' aria-checked="' + on + '" title="' + esc(p.name) + (on ? " (chosen)" : "") +
+                 '" aria-label="' + esc(p.name) + '"></button>';
+        }).join("");
+        return '<div class="scr scrsub" role="radiogroup" aria-label="Colour for ' +
+               esc(g + "/" + nm) + '">' +
+               '<div class="scrh">' +
+               '<span class="sw" style="background:' + tint + ';border-radius:50%"></span>' +
+               '<span class="nm" title="' + esc(nm) + '">' + esc(nm) + '</span>' +
+               '<span class="ct">' + (subCount[pk] || 0) + '</span>' +
+               '<button class="auto" data-sfc="' + esc(pk) + '" data-key=""' +
+               ' aria-pressed="' + (!pin) + '"' +
+               ' title="Back to the automatic tint">Auto</button>' +
+               '</div>' +
+               '<span class="sws">' + sws + '</span></div>';
+      }).join("");
+    }
+
     function buildSettings() {
       var pal = paletteInfo();
       var rows = (order[state.dim] || []).map(function (g) {
@@ -7726,8 +8004,16 @@ function mountVaultGraph(root, data, deps) {
         // live filter: the legend's own eye is the live one, and this is what the disc
         // comes back to on Refresh.
         var shown = !hiddenByDefault(g);
+        // SAME GATE buildLegend uses for its own twisty (pin included -- see
+        // groupHasPinnedSub), and the SAME state (state.collapsed) -- opening a
+        // folder's subfolders here opens them in the legend too.
+        var hasSubs = state.dim === "folder" &&
+                      (groupHasPinnedSub(g) ||
+                       ((subOrder[g] || []).length > 1 && (counts[g] || 0) >= NEST_MIN));
+        var open = hasSubs && !state.collapsed[g];
         return '<div class="scr" role="radiogroup" aria-label="Colour for ' + esc(g) + '">' +
                '<div class="scrh">' +
+               twBtn(hasSubs ? 'data-stw="' + esc(g) + '"' : null, open) +
                '<button class="eye vis" data-vis="' + esc(g) + '" aria-pressed="' + shown +
                '" title="' + (shown ? "Shown by default" : "Hidden by default") +
                '" aria-label="' + (shown ? "Hide" : "Show") + " " + esc(g) + '">' +
@@ -7737,7 +8023,8 @@ function mountVaultGraph(root, data, deps) {
                ' aria-pressed="' + (!pinned) + '"' +
                ' title="Back to the slot this folder gets automatically">Auto</button>' +
                '</div>' +
-               '<span class="sws">' + sws + '</span></div>';
+               '<span class="sws">' + sws + '</span></div>' +
+               (open ? subfolderRows(g, pal) : "");
       }).join("");
       setHTML($("setbody"), rows);
     }
@@ -9954,6 +10241,28 @@ function mountVaultGraph(root, data, deps) {
                       return Object.assign(Object.create(null), folderColors);
                     },
                     setFolderColors: applyFolderColors,
+                    // subfolderColors/setSubfolderColors mirror the pair above and are the
+                    // host's actual read/write path -- both shell.html and plugin/main.js's
+                    // onSubfolderColors go through these. subColorOf/subSlotOf/subOrderOf/
+                    // subCountOf below them are NOT consumed by either host: the Obsidian
+                    // settings tab builds its subfolder rows from its own path-derived
+                    // allSubfolders() instead of asking the api, since a subfolder's
+                    // identity (unlike a top-level folder's) never needs an open view to
+                    // resolve. These four exist for manual inspection and the suite, the
+                    // same role api.colorOf/api.slotOf/api.groupOrder already play one
+                    // level up.
+                    get subfolderColors() {
+                      return Object.assign(Object.create(null), subfolderColors);
+                    },
+                    setSubfolderColors: applySubfolderColors,
+                    subColorOf: function (folder, sub) {
+                      return subShade[folder + "/" + (sub || "")] || colorOf(folder);
+                    },
+                    subSlotOf: function (folder, sub) {
+                      return subSlot[folder + "/" + (sub || "")] || "";
+                    },
+                    subOrderOf: function (g) { return (subOrder[g] || []).slice(); },
+                    subCountOf: function (g, sub) { return subCount[g + "/" + (sub || "")] || 0; },
                     // Visibility DEFAULTS. Setting these does not move the live filter --
                     // the host is expected to apply them, which is what setHiddenDefaults
                     // is for.
