@@ -7748,7 +7748,16 @@ function mountVaultGraph(root, data, deps) {
         $("gear").setAttribute("aria-expanded", String(open));
         if (open) buildSettings();
       };
-      $("fcreset").onclick = function () { pickColor(null, null); };
+      // BOTH MAPS, not just folderColors -- this button sits under "Folder colours",
+      // which now covers subfolders too (see subfolderRows), so Reset dropping only
+      // the top-level overrides would leave a subfolder pin behind for the user to
+      // go find and clear by hand. Mirrors plugin/main.js's own "Reset all".
+      $("fcreset").onclick = function () {
+        pickColor(null, null);
+        var savedSub = applySubfolderColors({});
+        if (saveSubfolderColors) saveSubfolderColors(Object.assign({}, savedSub));
+        buildSettings();
+      };
       // DELEGATED on the container, which survives -- buildSettings replaces its
       // children on every pick, so a listener bound to a swatch would be bound to an
       // element that is about to be thrown away.
@@ -7798,6 +7807,17 @@ function mountVaultGraph(root, data, deps) {
     // The same 12-swatch + Auto markup buildSettings' own rows build, at the click point
     // instead of in the sidebar. `current` is a slot key or "" for none; onPick(key) fires
     // with the chosen key, or null for Auto.
+    //
+    // x/y are VIEWPORT coordinates (straight off the contextmenu event), and the menu is
+    // positioned relative to ROOT rather than the true viewport -- `position: fixed`
+    // measures from the nearest ancestor with a transform or CSS containment, not
+    // necessarily the window, and Obsidian's own workspace panes carry exactly that.
+    // Measured there: the menu opened detached from the row that was right-clicked,
+    // floating wherever the transformed ancestor's origin happened to be. ROOT's own
+    // getBoundingClientRect() already reflects whatever transform sits above it, so
+    // subtracting it converts a viewport point into ROOT's coordinate space correctly
+    // regardless of what Obsidian does further up the tree -- the same reason #vg-detail
+    // and #vg-tip are `position: absolute` against their own ancestor rather than fixed.
     function openCtxMenu(x, y, current, onPick) {
       var el = $("ctxmenu");
       if (!el) return;
@@ -7815,11 +7835,13 @@ function mountVaultGraph(root, data, deps) {
         b.onclick = function () { onPick(b.getAttribute("data-key") || null); closeCtxMenu(); };
       });
       el.hidden = false;
-      // Clamped to the viewport: a right-click near the edge must not open a popover
-      // that hangs off the screen.
+      var root0 = ROOT.getBoundingClientRect();
+      var rx = x - root0.left, ry = y - root0.top;
+      // Clamped to ROOT's own box, in the same coordinate space: a right-click near the
+      // edge must not open a popover that hangs off the view.
       var r = el.getBoundingClientRect();
-      el.style.left = Math.max(4, Math.min(x, WIN.innerWidth - r.width - 4)) + "px";
-      el.style.top = Math.max(4, Math.min(y, WIN.innerHeight - r.height - 4)) + "px";
+      el.style.left = Math.max(4, Math.min(rx, ROOT.clientWidth - r.width - 4)) + "px";
+      el.style.top = Math.max(4, Math.min(ry, ROOT.clientHeight - r.height - 4)) + "px";
       DOC.addEventListener("mousedown", ctxOutside, true);
       DOC.addEventListener("keydown", ctxKey, true);
       WIN.addEventListener("resize", closeCtxMenu);
