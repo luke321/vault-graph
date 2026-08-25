@@ -143,6 +143,28 @@ build draws the wedges it is arguing about.
   crosses a label is far too loud, so a hover asks and a click chooses. Two `smoke.mjs` checks
   went with the button, replaced by one that follows the fill to where it lives.
 
+- **The demo storyboard is ordered by impact, and the hero is re-recorded.** It ran roughly
+  in the order the features were built: the intro, two hovers, the legend, the colour picker,
+  the camera, and the date ribbon LAST. A README hero is watched for a few seconds before the
+  reader decides whether to keep watching, so a preference panel was landing before the point
+  of the tool. The acts now run: the vault growing, one note, the timeline, the heatmap,
+  folders, subfolders, the camera, colours -- with two orderings kept for structural reasons
+  rather than editorial ones, both noted in the storyboard.
+
+  Three beats added, for features that had never been on camera. The intro's own beat now
+  shows the ribbon handle sweeping, since that is what it does. The **year chips** get hovered
+  and clicked -- a new `["year", "busiest"]` target, which picks the fullest year that has a
+  chip, because below about 20px of pitch only every other year is named and the fullest one
+  may have no button to aim at. And a **heatmap day gets clicked**, which is what replaced
+  Mark today: the busiest day rather than today, since today is allowed to hold no notes and a
+  beat that marks nothing reads as a mis-click.
+
+  58 beats, 100.6s. `assets/demo.webp` is **10.6 MB** against the previous 3.2 MB, and that is
+  a deliberate call rather than an oversight: the take it replaced was 34s from 2026-08-22,
+  while the storyboard had already grown to ~87s before this release touched it, so the hero
+  had been stale for two releases. The size is clone weight, which is the one thing size costs
+  here -- see the note in `make-hero.ps1`.
+
 Nothing here changes what a note means or where a folder sits: the two-band split, the
 serpentine and the colours are untouched, and so is the reveal itself -- notes still arrive
 oldest-first over the same clock. What changed is which control says so, and that it now

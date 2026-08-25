@@ -9361,6 +9361,31 @@ function mountVaultGraph(root, data, deps) {
       }
       return null;                              // the panel is closed, so nothing to aim at
     }
+    // A YEAR CHIP under the strip. "busiest" picks the fullest year that HAS a chip, which
+    // is not the same as the fullest year: below about 20px of pitch buildYears names every
+    // other year, so the busiest one may have no button to aim at. Choosing among the chips
+    // that exist is also what keeps this working at any width -- and it can only ever land
+    // on a year with notes, which the hover half of a year beat needs (a chip for an empty
+    // year haloes nothing, and a beat that lights nothing reads as a miss on camera).
+    if (kind === "year") {
+      var yh = $("years");
+      if (!yh || !dateSpan) return null;
+      var chips = [].slice.call(yh.querySelectorAll("button[data-yr]"));
+      if (!chips.length) return null;
+      var have = Object.create(null);
+      dateSpan.years.forEach(function (yy) { have[String(yy.y)] = yy.n; });
+      var pickY = null, bestN = -1;
+      chips.forEach(function (c) {
+        var y = c.getAttribute("data-yr");
+        if (arg && /^\d{4}$/.test(arg)) { if (y === arg) pickY = c; return; }
+        var n = have[y] || 0;
+        if (n > bestN) { bestN = n; pickY = c; }
+      });
+      if (!pickY || (!arg && bestN <= 0)) return null;
+      pickY.demoLabel = "year " + pickY.getAttribute("data-yr") +
+                        " (" + (have[pickY.getAttribute("data-yr")] || 0) + " notes)";
+      return pickY;
+    }
     if (kind === "note") return demoNoteRect(arg);
     if (kind === "day") return demoCellRect(heat && heat.days[arg]);
     if (kind === "busiest") {
@@ -9555,52 +9580,149 @@ function mountVaultGraph(root, data, deps) {
   //   {wheel: n, target}                n notches over it; positive zooms in
   //   {park}                            pointer back to the vetted nothing-under-it spot
   //
-  // A target is [kind, arg]. Beyond the legend kinds there are two synthetic ones, because
-  // the camera and the date ribbon's handles are positions rather than elements:
+  // A target is [kind, arg]. Beyond the legend kinds there are synthetic ones, because the
+  // camera, the ribbon handles and the heatmap's cells are positions rather than elements:
   //   ["stage", "centre"] or ["stage", "0.3,0.4"]   a point on the graph
   //   ["brush", "from" | "to" | "window"]           a handle on the date ribbon
+  //   ["day", "2026-08-19"] / ["busiest", "1"]      a cell in the heatmap band
+  //   ["year", "busiest"] or ["year", "2024"]       a year chip under the ribbon
   // `why` is for the log and the eventual captions -- it is the only part of a beat a
   // person reads.
+  /**
+   * ORDERED BY IMPACT, not by where the code lives.
+   *
+   * The storyboard used to run roughly in the order the features were built: the intro, a
+   * couple of hovers, then the legend, the colour picker, the camera, and the date ribbon
+   * LAST. That is backwards for a recording. A README hero is watched for a few seconds
+   * before the reader decides whether to keep watching, so the two things this page does
+   * that nothing else does -- the vault growing out of nothing, and a note lifting out of
+   * the disc with its links lit -- have to be in those seconds. The colour picker, which is
+   * a preference panel, was landing before the timeline, which is the point of the tool.
+   *
+   * The acts now run: the vault growing, one note, the timeline, the heatmap, folders,
+   * subfolders, the camera, colours. Roughly descending in "would this make someone stop
+   * scrolling", with two exceptions that are structural rather than editorial:
+   *
+   *   * FOLDERS BEFORE SUBFOLDERS, because the subfolder rows do not exist until a twisty
+   *     has been clicked, and `only` must run while 03 is folded -- soloing while it is
+   *     open deletes its rows and pulls everything below them up by 97px, so the pointer
+   *     ends up over a row three below the one it clicked. That cost a take.
+   *   * COLOURS LAST, because the gear panel has to be open for the `swatch` targets to
+   *     resolve at all, and the trip to the gear should be one trip.
+   *
+   * Beats are DATA, so reordering is reordering -- the driver holds no state between them.
+   * What it is NOT free of is the ordering constraints above and the ones each act names.
+   */
   function demoMode() {
     return [
+      /* --- 1. the vault, growing --------------------------------------- */
       // The intro is a BEAT, not the page's own boot animation -- see the `?demo` branch
       // at the bottom of this file. Refresh is the real control for "replay it", so the
       // demo presses it rather than calling playTimeline() behind the scenes.
+      //
+      // It also shows the STRIP now: the intro sweeps the range end from one end of the
+      // ribbon to the other, with the date under the handle, so this one beat says both
+      // "here is the vault" and "here is the control that scrubs it". Which is why the act
+      // that picks that handle up by hand comes next but one.
       { settle: true, why: "start from a disc at rest" },
       { click: true, target: ["id", "refresh"], why: "replay the intro on camera" },
-      { settle: true, why: "let the vault grow from its first note to now" },
+      { settle: true, why: "the vault grows from its first note to now, and the range end sweeps with it" },
 
+      /* --- 2. one note -------------------------------------------------- */
       // Hovering a note names it, lifts it, and lights its links while the rest of the
       // disc recedes. The FOLDERS here are chosen, not incidental: daily notes and
       // weekly reviews are titled by date, so the label that appears on camera carries
-      // no personal information -- unlike a note in 03 - Resources / People. Both are
-      // hovered before 04 is hidden below, or the first target would not be on screen.
+      // no personal information -- unlike a note in 03 - Resources / People.
       // "04"/"05" resolve by prefix on a PARA-ish vault and fall back to the largest
       // group elsewhere. Both are date-titled folders on the vaults this is recorded
-      // against, which is why the label that appears on camera carries no personal
-      // information -- see the note on demoNoteRect.
+      // against -- see the note on demoNoteRect.
+      //
+      // BEFORE ANY FILTER RUNS, which is why this act moved up past the legend as well as
+      // past the ribbon: demoNoteRect picks the most ISOLATED visible note, and the more
+      // the disc has been thinned the further that aim drifts from a typical note.
       { hover: true, target: ["note", "04"], why: "hover a daily note" },
       { hover: true, target: ["note", "05"], why: "hover a meeting note" },
 
+      /* --- 3. the timeline ---------------------------------------------- */
+      // The strip under the band carries every month of the vault, and it is the timeline:
+      // two handles that are the filter, a pill below them for the 52 weeks the grid above
+      // is drawing, and a chip per year. Moved up from LAST -- the sidebar's rank slider is
+      // gone and this is the only timeline now, so it belongs beside the intro that has
+      // just swept it rather than after the preference panel.
+      //
+      // The `to` handle first, and deliberately the same one the intro moved: the intro
+      // showed it travelling, this shows a hand doing it. The disc waits for the release on
+      // each of these, by design -- a drag repaints one small canvas and the filter lands
+      // once, when the button comes up.
+      { drag: [-320, 0], target: ["brush", "to"], why: "pull the range end back by hand -- the handle the intro just swept" },
+      { settle: true, why: "let the disc thin out" },
+      { drag: [200, 0], target: ["brush", "from"], why: "...and bring the range start forward" },
+      { settle: true, why: "let it thin further" },
+
+      // THE YEAR CHIPS, which have never been in the demo. Hover haloes that year's notes
+      // wherever they landed; clicking sets the range to that calendar year, and the chip
+      // reads pressed. "busiest" picks the fullest year that has a chip, so the hover
+      // always lights something -- see demoFind.
+      { hover: true, target: ["year", "busiest"], why: "hover a year to find it on the disc" },
+      { click: true, target: ["year", "busiest"], why: "...and click it to filter to that year" },
+      { settle: true, why: "let the year land" },
+
+      // The band's window, moved on its own. The range above stays exactly where it was --
+      // which is most of what this act is for: they are two instruments, not one.
+      { drag: [-260, 0], target: ["brush", "window"], why: "slide the heatmap window back on its own" },
+      { settle: true, why: "let the band redraw" },
+      { drag: [170, 0], target: ["brush", "window"], why: "...and forward again" },
+      { settle: true, why: "let the band redraw" },
+
+      // Clear it, so everything after this runs on the whole vault. Also puts the window
+      // back, which is what makes the `busiest` targets in the next act land on cells that
+      // are actually on screen.
+      { click: true, target: ["id", "rangeall"], why: "clear the date range" },
+      { settle: true, why: "let the whole vault come back" },
+
+      /* --- 4. the heatmap ----------------------------------------------- */
+      // Hovering a day haloes the notes added that day, wherever they landed on the disc.
+      // Ranked by what is VISIBLE rather than by date, so this works on any vault.
+      { hover: true, target: ["busiest", "1"], why: "hover the busiest day" },
+      { hover: true, target: ["busiest", "2"], why: "...and the next" },
+      { hover: true, target: ["busiest", "3"], why: "...and the next" },
+
+      // AND CLICKING KEEPS IT. This is what replaced the sidebar's "Mark today" in 1.7.0:
+      // a picked day's notes are recoloured to the neutral extreme as well as haloed, and
+      // it stays when the pointer leaves. Clicking today's square -- the last cell of the
+      // grid -- is the whole of what that button did.
+      //
+      // The busiest day rather than today, because today is allowed to hold no notes and a
+      // beat that marks nothing reads as a mis-click. Clicked twice, so nothing is left
+      // marked for the acts below.
+      { click: true, target: ["busiest", "1"], why: "click a day to keep it marked -- recoloured, haloed, nothing moved" },
+      { settle: true, why: "let the mark ramp in" },
+      { click: true, target: ["busiest", "1"], why: "...and click again to let it go" },
+      { settle: true, why: "let it ramp back" },
+
+      /* --- 5. folders --------------------------------------------------- */
       // Hiding: the wedges reallocate and the disc stays a full circle.
-      { click: true, target: ["eye", "04"], why: "hide a folder — the wedges reallocate" },
+      { click: true, target: ["eye", "04"], why: "hide a folder -- the wedges reallocate" },
       { settle: true, why: "let the wedges reallocate" },
 
-      // The tree starts folded, so getting to a subfolder means opening its folder
-      // first. That is the honest sequence and it is worth showing: the disc already
-      // draws 03's sub-wedges, and this is where the legend admits they are there.
-      // It is also load-bearing -- the row the next beat clicks does not exist until
-      // this one has run.
+      // And `only`, which is the fastest way to answer "where does one folder live".
+      // SAFE HERE because nothing has been unfolded yet: see the note at the top about the
+      // 97px row shift that soloing an unfolded legend causes.
+      { click: true, target: ["only", "08"], why: "solo a single folder" },
+      { settle: true, why: "let everything else recede" },
+
+      { click: true, target: ["id", "allon"], why: "show everything again" },
+      { settle: true, why: "let the whole disc come back" },
+
+      /* --- 6. subfolders ------------------------------------------------ */
+      // The tree starts folded, so getting to a subfolder means opening its folder first.
+      // That is the honest sequence and it is worth showing: the disc already draws 03's
+      // sub-wedges, and this is where the legend admits they are there. It is also
+      // load-bearing -- the row the next beats aim at does not exist until this has run.
       { click: true, target: ["twisty", "03"], why: "unfold a folder to reach its subfolders" },
 
       // HOVER FIRST, and at both levels. It is the cheaper question and the one you would
-      // try first: a halo, with nothing hidden and no wedge moved. A whole folder, then
-      // one subfolder inside the folder just unfolded -- both rows do it, so both are
-      // worth showing, and the second is only reachable because the twisty above ran.
-      //
-      // These two used to sit AFTER the heatmap, on the way to the gear, which sent the
-      // pointer back up to the legend between two things that had nothing to do with it.
-      // The legend work belongs together, and the trip to the gear should be one trip.
+      // try first: a halo, with nothing hidden and no wedge moved.
       { hover: true, target: ["group", "01"], why: "hover a folder to find it on the disc" },
       { hover: true, target: ["sub", "03/People"], why: "...and one subfolder inside it" },
 
@@ -9614,48 +9736,9 @@ function mountVaultGraph(root, data, deps) {
       { click: true, target: ["sub", "03/People"], why: "...and let it back down" },
       { settle: true, why: "let it settle back" },
 
-      // The heatmap: hovering a day haloes the notes added that day, wherever they
-      // landed on the disc. Ranked rather than dated, so this works on any vault and
-      // never lands on a cell emptied by the hide above.
-      { hover: true, target: ["busiest", "1"], why: "hover the busiest day" },
-      { hover: true, target: ["busiest", "2"], why: "...and the next" },
-      { hover: true, target: ["busiest", "3"], why: "...and the next" },
-
-      // THE COLOUR PICKER. The gear has to come first -- the panel's swatches do not
-      // exist in the DOM until buildSettings has run, so the `swatch` targets below
-      // resolve to nothing without this beat. Two folders are recoloured rather than
-      // one, because one swatch click looks like a highlight and two look like a
-      // choice; and the second is a grey, which is the answer to "can a folder recede
-      // on purpose" that the archives rule only implies.
-      { click: true, target: ["id", "gear"], why: "open the settings panel" },
-      { click: true, target: ["swatch", "01/g8"], why: "give a folder a colour of its own" },
-      { settle: true, why: "the disc repaints -- no relayout, nothing moves" },
-      { click: true, target: ["swatch", "03/g11"], why: "...and let another one go grey" },
-      { settle: true, why: "let the second repaint land" },
-      { click: true, target: ["id", "fcreset"], why: "put every folder back to automatic" },
-      { settle: true, why: "let the palette snap back" },
-      { click: true, target: ["id", "gear"], why: "close the panel" },
-
-      // FOLD 03 BACK UP before soloing, and this is not tidiness.
-      //
-      // `only` hides every other group, and a hidden group stops rendering its subfolder
-      // rows -- so soloing while 03 is unfolded deletes those rows and pulls everything
-      // below them UP, by 97px measured. The pointer does not move, so it ends up over a
-      // row three below the one it clicked, whose `only` chip then lights up with its own
-      // tooltip. The take ended on a tooltip for the wrong folder, which reads exactly
-      // like the demo having mis-clicked.
       { click: true, target: ["twisty", "03"], why: "fold the subfolders away again" },
 
-      // And `only`, which is the fastest way to answer "where does one folder live".
-      { click: true, target: ["only", "08"], why: "solo a single folder" },
-      { settle: true, why: "let everything else recede" },
-
-      /* --- the camera --------------------------------------------------- */
-      // Put everything back first: the camera act is about the camera, and a disc still
-      // filtered from the beats above makes it look like the zoom did something to the data.
-      { click: true, target: ["id", "allon"], why: "show everything again" },
-      { settle: true, why: "let the whole disc come back" },
-
+      /* --- 7. the camera ------------------------------------------------ */
       // Zoom in a few notches rather than one. One notch is a fifth now, which is the point
       // -- it is a scroll and not a teleport -- and a single notch on camera looks like
       // nothing happened.
@@ -9676,28 +9759,22 @@ function mountVaultGraph(root, data, deps) {
       { click: true, target: ["id", "reset"], why: "...and the reset button in the corner" },
       { settle: true, why: "let the view come back" },
 
-      /* --- the date range ----------------------------------------------- */
-      // The ribbon under the band carries every month of the vault. Its two handles are the
-      // filter; the pill below them is the 52 weeks the grid above is drawing, and they move
-      // independently -- which is most of what this act is for.
-      //
-      // The disc waits for the release on each of these, deliberately: a drag repaints one
-      // small canvas and the filter lands once, when the button comes up.
-      { drag: [300, 0], target: ["brush", "from"], why: "drag the range start forward" },
-      { settle: true, why: "let the disc thin out" },
-      { drag: [-170, 0], target: ["brush", "to"], why: "and pull the range end back" },
-      { settle: true, why: "let it thin further" },
-
-      // The band's window, moved on its own. The range above stays exactly where it was.
-      { drag: [-260, 0], target: ["brush", "window"], why: "slide the heatmap window back on its own" },
-      { settle: true, why: "let the band redraw" },
-      { drag: [170, 0], target: ["brush", "window"], why: "...and forward again" },
-      { settle: true, why: "let the band redraw" },
-
-      // Clear it, so the recording ends on the whole vault rather than on a filtered slice
-      // that the next viewer would read as the default.
-      { click: true, target: ["id", "rangeall"], why: "clear the date range" },
-      { settle: true, why: "let the whole vault come back" },
+      /* --- 8. colours --------------------------------------------------- */
+      // LAST on purpose. It is a preference panel, and it was landing before the timeline.
+      // The gear has to come first regardless -- the panel's swatches do not exist in the
+      // DOM until buildSettings has run, so the `swatch` targets below resolve to nothing
+      // without this beat. Two folders are recoloured rather than one, because one swatch
+      // click looks like a highlight and two look like a choice; and the second is a grey,
+      // which is the answer to "can a folder recede on purpose" that the archives rule
+      // only implies.
+      { click: true, target: ["id", "gear"], why: "open the settings panel" },
+      { click: true, target: ["swatch", "01/g8"], why: "give a folder a colour of its own" },
+      { settle: true, why: "the disc repaints -- no relayout, nothing moves" },
+      { click: true, target: ["swatch", "03/g11"], why: "...and let another one go grey" },
+      { settle: true, why: "let the second repaint land" },
+      { click: true, target: ["id", "fcreset"], why: "put every folder back to automatic" },
+      { settle: true, why: "let the palette snap back" },
+      { click: true, target: ["id", "gear"], why: "close the panel" },
 
       // Pointer out of the way, so the last frame is the disc rather than a hover state
       // left behind by the last click.
