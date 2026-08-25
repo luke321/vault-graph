@@ -77,8 +77,16 @@ function mountVaultGraph(root, data, deps) {
    * window does, so a leaf hidden behind another tab is not "hidden" by this measure and wants
    * the workspace's own hook instead.
    */
-  var DOC = deps.doc || (WIN && WIN.document) || null;
-  var DOC = root.ownerDocument;
+  //
+  // ONE DECLARATION. This was two `var DOC` lines, and the first was dead: `root.ownerDocument`
+  // ran second and won, so `deps.doc` was never consulted and the substitutability the comment
+  // above describes did not exist. No host passes `doc` today, and in both hosts the two
+  // expressions agree -- the standalone's root is in `window.document`, and the plugin's is in
+  // the leaf's own document, which is also what `activeWindow.document` gives -- so this
+  // changes no behaviour. Ordered deps-first so the fallback chain matches what the comment
+  // promises, with the element's own document ahead of the window's, since it is the one that
+  // stays right when the view is dragged into a popout.
+  var DOC = deps.doc || (root && root.ownerDocument) || (WIN && WIN.document) || null;
   var API = null;
 
   // Ids carry a `vg-` prefix so they cannot collide with the host document, and the
@@ -3308,9 +3316,16 @@ function mountVaultGraph(root, data, deps) {
             return (clear + DOT_OF_PITCH * room * f) / rGraph;
           };
           var mgA = side(sl.eA), mgB = side(sl.eB);
-          var room = arc * 0.66;
-          if (mgA + mgB > room) {
-            var k = room / (mgA + mgB);
+          // `arcCap`, NOT a second `room`. This was `var room = arc * 0.66`, redeclaring the
+          // band room from the top of this block -- a different quantity under the same name,
+          // and the two were kept apart by nothing but statement order: `side()` closes over
+          // `room` and is called on the line ABOVE this one, so it read the band room, and
+          // everything below read the arc cap. Moving that call one line later would have
+          // changed every seam margin silently. A rename, so the behaviour is identical and
+          // the trap is gone.
+          var arcCap = arc * 0.66;
+          if (mgA + mgB > arcCap) {
+            var k = arcCap / (mgA + mgB);
             mgA *= k; mgB *= k;
           }
           // No wrap rotation here any more: it is folded into pLead/pTrail (see edgeSweep),
@@ -3353,7 +3368,9 @@ function mountVaultGraph(root, data, deps) {
           // distance to spare -- the same proportion an interior note keeps from its
           // neighbour. The channel is then whatever it was reserved to be, whoever is standing
           // at the end of the row.
-          var spanArc = arc - mgA - mgB;
+          //
+          // spanArc is the one computed above for dEdge -- identical expression, same scope,
+          // and it was simply written twice.
           var dLo = (mgA + spanArc * sl.u) * rGraph;
           var dHi = (mgB + spanArc * (1 - sl.u)) * rGraph;
           var edgeRoom = 2 * Math.min(dLo, dHi);
@@ -3844,8 +3861,12 @@ function mountVaultGraph(root, data, deps) {
   function drawWedgeDebug() {
     var cv = DBG.canvas;
     if (!cv) return;
-    if (!DBG.on || !renderer || !geomLock) { cv.style.display = "none"; return; }
-    cv.style.display = "";
+    // THE `hidden` ATTRIBUTE, not a display assignment. Same reason the tooltips in this
+    // file use it: the Obsidian directory's linter rejects a static style assignment, and
+    // `hidden` says what is meant -- see the [hidden] rule in page.css, which makes it stick
+    // whatever else claims `display` on a canvas.
+    if (!DBG.on || !renderer || !geomLock) { cv.hidden = true; return; }
+    cv.hidden = false;
     var host = $("graph");
     var w = host.clientWidth, h = host.clientHeight, dpr = WIN.devicePixelRatio || 1;
     if (cv.width !== Math.round(w * dpr) || cv.height !== Math.round(h * dpr)) {
@@ -4171,13 +4192,15 @@ function mountVaultGraph(root, data, deps) {
       var host = $("graph");
       if (host) {
         var cv = DOC.createElement("canvas");
+        // The box is the class's job now; see .vg-wedge-debug in page.css. It was a cssText
+        // assignment, which is the one form obsidianmd/no-static-styles-assignment rejects
+        // unconditionally -- and it was static, so the rule was right.
         cv.className = "vg-wedge-debug";
-        cv.style.cssText = "position:absolute;left:0;top:0;pointer-events:none;z-index:6";
         host.appendChild(cv);
         DBG.canvas = cv;
       }
     }
-    if (!DBG.on) { DBG.cells = null; if (DBG.canvas) DBG.canvas.style.display = "none"; }
+    if (!DBG.on) { DBG.cells = null; if (DBG.canvas) DBG.canvas.hidden = true; }
     if (renderer) renderer.refresh({ skipIndexation: true });
     return DBG.on;
   }
@@ -7567,12 +7590,35 @@ function mountVaultGraph(root, data, deps) {
         b.textContent = how;
         WIN.setTimeout(function () { b.textContent = "Debug"; }, 1600);
       };
+      // THE FALLBACK SAVES A FILE, it does not log.
+      //
+      // It used to `console.log(txt)` and label the button "In console", which is a fair
+      // affordance and a rule violation the Obsidian directory will not let anyone waive:
+      // obsidianmd/rule-custom-message is on the preset's restricted-disable list, so an
+      // eslint-disable for it is itself an error. Correctly so -- the guideline is about
+      // plugins that chatter into a console shared by every other plugin.
+      //
+      // A file is the better answer anyway. This path exists for the case where the clipboard
+      // refuses, which is a file:// page outside a secure context -- exactly the host where
+      // collecting a bug report is hardest -- and a .json somebody can attach beats a console
+      // dump they have to select by hand. It reuses the mechanism Save PNG already proves in
+      // both hosts: an anchor with a data URL and a download attribute.
+      var save = function () {
+        try {
+          var a = DOC.createElement("a");
+          a.href = "data:application/json;charset=utf-8," + encodeURIComponent(txt);
+          a.download = "vault-graph-debug.json";
+          a.click();
+          done("Saved");
+        } catch (e2) {
+          // Nothing left to try, and a button that lies is worse than one that admits it.
+          done("Failed");
+        }
+      };
       try {
-        WIN.navigator.clipboard.writeText(txt).then(function () { done("Copied"); },
-                                                    function () { console.log(txt); done("In console"); });
+        WIN.navigator.clipboard.writeText(txt).then(function () { done("Copied"); }, save);
       } catch (e) {
-        console.log(txt);
-        done("In console");
+        save();
       }
     };
 
@@ -8642,17 +8688,33 @@ function mountVaultGraph(root, data, deps) {
         ca.getUTCMonth() === 0 && ca.getUTCDate() === 1 &&
         (cb.getUTCMonth() === 11 && cb.getUTCDate() === 31 ||
          ct >= dateSpan.hi)) cur = ca.getUTCFullYear();
-    var html = "";
+    // BUILT AS ELEMENTS, not as a string assigned to innerHTML.
+    //
+    // The old version concatenated markup and assigned it. Every value in it was a number
+    // out of dateSpan, so nothing could have been injected -- but the Obsidian directory's
+    // linter rejects the assignment on sight (no-unsanitized/property), and it is right to:
+    // the safety of that line rested on an argument about where its inputs came from, made
+    // in one place and checked nowhere. Building elements moves the question out of reach
+    // instead of answering it, and textContent cannot be markup whatever it holds.
+    //
+    // replaceChildren() rather than innerHTML = "": same clear, and it is the verb for it.
+    var made = [];
     dateSpan.years.forEach(function (yy) {
       if ((yy.y % every) !== 0) return;
       var at = Math.max(0, Math.min(w, ribbonX(Date.UTC(yy.y, 0, 1), w)));
-      html += '<button type="button" data-yr="' + yy.y + '"' +
-              ' style="left:' + Math.round(at) + 'px"' +
-              ' aria-pressed="' + (cur === yy.y) + '"' +
-              ' title="' + yy.y + ' -- ' + yy.n + ' note' + (yy.n === 1 ? "" : "s") + '">' +
-              "'" + String(yy.y).slice(2) + "</button>";
+      var b = DOC.createElement("button");
+      b.type = "button";
+      b.setAttribute("data-yr", String(yy.y));
+      b.setAttribute("aria-pressed", cur === yy.y ? "true" : "false");
+      b.title = yy.y + " -- " + yy.n + " note" + (yy.n === 1 ? "" : "s");
+      // Dynamic by nature -- it is the year's own place on the strip -- so it stays inline.
+      // setProperty rather than an assignment: the value is not static, so the rule does not
+      // fire either way, and this form cannot start firing if the rule ever tightens.
+      b.style.setProperty("left", Math.round(at) + "px");
+      b.textContent = "'" + String(yy.y).slice(2);
+      made.push(b);
     });
-    host.innerHTML = html;
+    host.replaceChildren.apply(host, made);
   }
 
   // A canvas sized for the device, drawn in CSS pixels. Same treatment the heat band gets;
@@ -8730,10 +8792,13 @@ function mountVaultGraph(root, data, deps) {
   function measureRibbon() {
     var cv = $("ribbon");
     if (!cv) return 0;
+    // removeProperty / setProperty rather than `style.width = ""`. An empty string IS a
+    // static value, which obsidianmd/no-static-styles-assignment rejects -- and the DOM has
+    // a verb for "unset this" that says what is meant more plainly than assigning "".
     var keep = cv.style.width;
-    cv.style.width = "";
+    cv.style.removeProperty("width");
     var w = cv.getBoundingClientRect().width;
-    cv.style.width = keep;
+    if (keep) cv.style.setProperty("width", keep);
     return w;
   }
   function ribbonW() {

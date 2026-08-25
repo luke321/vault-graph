@@ -464,6 +464,20 @@
      share an origin. #busy stays a child of #stage on purpose (inset:0, out of
      grid flow), so the loading cover still hides the band as well. */
   .vault-graph #vg-canvas { position: relative; overflow: hidden; }
+  /* THE --dev WEDGE OVERLAY'S CANVAS. Its box was a `style.cssText` assignment in
+     setWedgeDebug, which the Obsidian directory's own linter rejects
+     (obsidianmd/no-static-styles-assignment) -- and rightly: nothing here is dynamic, so it
+     is a class. The canvas is created and sized in JS, but WHERE it sits is a fact about the
+     layout and belongs with the rest of the layout.
+
+     The [hidden] rule is explicit rather than left to the UA stylesheet. `hidden` gives
+     `display: none` at UA priority, which any author rule naming `display` on this element
+     would silently beat -- and this file already sets `display: block` on two other
+     canvases. Cheap insurance against the next one being a element selector. */
+  .vault-graph canvas.vg-wedge-debug {
+    position: absolute; left: 0; top: 0; pointer-events: none; z-index: 6;
+  }
+  .vault-graph canvas.vg-wedge-debug[hidden] { display: none; }
   .vault-graph #vg-graph { position: absolute; inset: 0; }
   /* The camera cluster, in the stage's own BOTTOM-right corner (github#4). Quiet until
      wanted: the graph is the subject, and lit buttons in front of it compete with the thing

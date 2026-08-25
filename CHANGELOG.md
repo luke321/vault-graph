@@ -174,6 +174,36 @@ build draws the wedges it is arguing about.
   misread, and the band is 7px shorter. Pinned as a ratio rather than as pixel values, so a
   padding change cannot fail the check while the grouping is still right.
 
+- **The directory's linter passes on `src/page.js`, which nobody had ever run it against.**
+  `eslint.config.mjs` lists `src/page.js` in its `files`; `npm run lint` passed
+  `plugin/**/*.js`. The config covered the exporter and the script never handed it over, so
+  the community check found six errors nothing local had ever reported. The script now lints
+  what the config covers, which is the actual fix -- the rest is the backlog it had
+  accumulated:
+
+  - **A `cssText` assignment and four `style.display` assignments** on the `--dev` wedge
+    overlay. The rule was right about all five: the box is static, so it is a class in
+    page.css now, and showing or hiding uses the `hidden` attribute the tooltips in this file
+    already use, with an explicit `[hidden]` rule rather than relying on the UA stylesheet.
+  - **`style.width = ""` in `measureRibbon`.** An empty string is a static value; the DOM has
+    `removeProperty` for "unset this", which also says what is meant.
+  - **`innerHTML` on the year chips.** Every value in that string came out of `dateSpan` and
+    was a number, so nothing could have been injected -- but the safety rested on an argument
+    about where the inputs came from, made in one comment and checked nowhere. Built as
+    elements now, so the question is out of reach rather than answered.
+  - **Two `var DOC` declarations, the first dead.** `root.ownerDocument` ran second and won,
+    so `deps.doc` was never consulted and the substitutability its own comment describes did
+    not exist. One declaration, deps first, behaviour unchanged in both hosts.
+  - **`room` declared twice as two different quantities**, kept apart by nothing but statement
+    order: the closure that reads it is called on the line above the second declaration, so it
+    saw the band room while everything below saw the arc cap. Moving that call one line later
+    would have changed every seam margin silently. Renamed, so the behaviour is identical.
+  - **The Debug button's clipboard fallback logged to the console.** That rule is on the
+    preset's restricted-disable list, so a waiver is itself an error -- correctly, since the
+    console is shared with every other plugin. It saves a `.json` instead, which is the better
+    answer anyway: this path exists for a `file://` page outside a secure context, where a
+    bug report is hardest to collect, and a file beats a dump somebody has to select by hand.
+
 Nothing here changes what a note means or where a folder sits: the two-band split, the
 serpentine and the colours are untouched, and so is the reveal itself -- notes still arrive
 oldest-first over the same clock. What changed is which control says so, and that it now
