@@ -16,7 +16,7 @@ which is what makes the band read as a calendar rather than as scattered squares
 ## Which date, and why not the other two
 
 `created` from frontmatter, falling back to `date` — the same field the timeline
-ranks by, so the band and the slider tell one story. The alternatives were measured
+ranks by, so the band and the ribbon tell one story. The alternatives were measured
 on the live vault and both answer a different question:
 
 | Field | Measured | Answers |

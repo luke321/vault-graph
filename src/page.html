@@ -2,9 +2,20 @@
   <aside id="vg-sidebar">
     <div class="brand">
       <h1 id="vg-vname">Vault Graph</h1>
-      <!-- Hidden until a host opts in with settingsUI. The PLUGIN does not: Obsidian
-           gives it a settings tab, and the same setting behind two different UIs in the
-           same product is how the two drift apart. -->
+      <!-- Hidden until a host opts in, and TWO different deps opt in -- which is worth
+           saying plainly here, because this comment used to name only one and was read
+           (by its own author, out loud, wrongly) as "the plugin has no gear". Both hosts
+           show it; they differ in what it OPENS.
+
+             settingsUI      the gear opens the panel below, #vg-settings. The STANDALONE
+                             sets this, because nothing else there can hold a setting.
+             openSettings()  the gear hands its click to the host. The PLUGIN sets this,
+                             and Obsidian's own settings tab opens -- the same setting
+                             behind two UIs in one product is how the two drift apart.
+
+           So the swatch panel below is standalone-only, which is also why the demo
+           storyboard can click through it: the demo records the standalone page. See the
+           deps table at the top of page.js, which had this right. -->
       <button id="vg-gear" class="gear" hidden aria-expanded="false"
               aria-controls="vg-settings" title="Settings">
         <span aria-hidden="true">&#9881;</span><span class="sr">Settings</span>
@@ -31,17 +42,6 @@
     </div>
 
     <div class="block">
-      <div class="row"><div class="lbl" style="margin:0">Timeline</div><span class="val" id="vg-tlv">All</span></div>
-      <input type="range" id="vg-tl" min="0" max="100" value="100"
-             title="Reveal notes oldest-first. The slider is linear in NOTE COUNT, not in time: nearly every note is from the last few months, so a time axis would spend most of its travel on empty years.">
-      <div class="mini" style="margin-top:7px">
-        <button id="vg-tlplay" title="Grow the vault from its first note to now">Play</button>
-        <button id="vg-tlall">All</button>
-        <button id="vg-today" aria-pressed="false" title="Colour, push out and halo every note created or edited today">Mark today</button>
-      </div>
-    </div>
-
-    <div class="block">
       <div class="row" style="margin-bottom:7px">
         <div class="lbl" style="margin:0">Groups <span id="vg-gcount" class="val"></span></div>
         <div class="mini"><button id="vg-allon">All</button><button id="vg-alloff">None</button></div>
@@ -52,7 +52,7 @@
     <div class="block">
       <div class="lbl">View</div>
       <div class="tools">
-        <button id="vg-refresh" title="Back to the defaults, and replay the intro. Clears highlights and the timeline, and returns each folder to the visibility set in the gear -- so archives go back to hidden. This page is a snapshot -- its data was baked in when it was built -- so to pick up notes written since, rebuild it with refresh-graph.ps1 (or build-graph.mjs). The Obsidian plugin rebuilds in place instead.">Refresh</button>
+        <button id="vg-refresh" title="Back to the defaults, and replay the intro. Clears highlights and the date range, and returns each folder to the visibility set in the gear -- so archives go back to hidden. This page is a snapshot -- its data was baked in when it was built -- so to pick up notes written since, rebuild it with refresh-graph.ps1 (or build-graph.mjs). The Obsidian plugin rebuilds in place instead.">Refresh</button>
         <button id="vg-png">Save PNG</button>
         <!-- Dumps the exact state to the clipboard: filters, spacing, seam, per-band
              geometry and dot sizes. For pasting into a bug report rather than describing it. -->

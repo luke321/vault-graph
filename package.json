@@ -6,7 +6,7 @@
   "scripts": {
     "build": "node scripts/build-plugin.mjs",
     "dev": "node scripts/build-plugin.mjs --watch",
-    "lint": "eslint plugin/**/*.js"
+    "lint": "eslint plugin src/page.js"
   },
   "devDependencies": {
     "esbuild": "^0.21.5",
