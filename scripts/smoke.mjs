@@ -3195,9 +3195,12 @@ async function killBrowser(child, PORT) {
  * So the suite checks a small vault AND a large one AND a lopsided one, and it stopped being
  * optional the day a change passed at 450 notes and broke the band split at 10,000.
  *
- *   demo vault   1400 notes over two dense years, every month populated, ramping toward
- *                the present (scripts/make-demo-vault.mjs). The shape a vault in real use
- *                has, and the one the date ribbon is worth looking at on.
+ *   demo vault   1400 notes over nine years: two dense recent ones (85% of notes) behind a
+ *                genuinely sparse tail, 18 of 108 possible months empty
+ *                (scripts/make-demo-vault.mjs). The shape a vault in real use has, the one
+ *                the date ribbon is worth looking at on, and -- since github#23 -- the one
+ *                shape in this trio that actually exercises the compact axis rather than
+ *                skipping past it (10k and shape stay evenly populated, no real gaps).
  *   10k vault    synthetic and deliberately awkward: more top-level folders than there are
  *                colour slots, sliver folders beside a dominant one, five levels of
  *                nesting, and ten years of dates (scripts/make-test-vault.mjs).
@@ -3332,7 +3335,7 @@ function resolveVaults() {
     out.push({ path: dir, label });
   };
 
-  gen("make-demo-vault.mjs", [], "demo-vault", "the demo vault (2 dense years)");
+  gen("make-demo-vault.mjs", [], "demo-vault", "the demo vault (sparse tail, 2 dense years)");
   gen("make-test-vault.mjs", ["--notes", "10000", "--years", "10"],
       "test-vault", "the 10k synthetic vault (10 years)");
   gen("make-shape-vault.mjs", [], "shape-vault", "the dominant-folder vault");

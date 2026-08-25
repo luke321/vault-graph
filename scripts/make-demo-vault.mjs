@@ -27,10 +27,16 @@
 // folders beside one holding a quarter of the vault. This is a preset over that rather than a
 // second generator, because two generators for one job drift apart.
 //
-// THE PRESET IS TWO DENSE YEARS. Every month populated, ramping toward the present the way a
-// vault in real use does, and no tail of ancient notes -- so the heatmap band is full to its
-// right-hand edge, the ribbon has shape along its whole width, and dragging a range over it
-// selects something at every position rather than nothing for four fifths of its travel.
+// THE PRESET IS A SPARSE TAIL BEHIND TWO DENSE YEARS, not two dense years alone (github#23).
+// It used to be exactly two dense years and nothing older, on the reasoning above -- a long
+// thin tail read as "one spike and nine years of near-empty strip" and the ribbon had
+// nothing to demonstrate on it. That reasoning is what the compact date axis exists to fix:
+// a sparse tail is now the CASE this vault has to cover, not a shape to avoid. 85% of notes
+// land in the last twelve months (`--recent 0.85`, well above the plain `1.4/years` formula)
+// over a 9-year span, which measured **10-28 notes across eight early years against 226 and
+// 756 in the two recent ones**, 18 of 108 possible months genuinely empty -- sparse enough
+// for compaction to visibly do something, dense enough at the front that dragging a range
+// there still selects something at every position.
 //
 // Deterministic apart from the end date, which defaults to today so the band's last-52-weeks
 // window has notes in it. Pass --end to pin that too and get a byte-identical vault.
@@ -59,18 +65,24 @@ if (argv.includes("--vault")) {
 
 const OUT = resolve(opt("out", join(ROOT, "demo-vault")));
 const NOTES = opt("notes", "1400");
-const YEARS = opt("years", "2");
+const YEARS = opt("years", "9");
+// Well above the plain 1.4/years formula (0.156 at nine years) -- that shape spreads the
+// non-recent share EVENLY across every year (see make-test-vault.mjs's own createdDay()),
+// so at nine years it produced 100-140 notes in EVERY year and nothing sparse to compact at
+// all, measured directly while choosing this number. 0.85 leaves ~15% of NOTES for the
+// other eight years combined, which is what actually thins them out.
+const RECENT = opt("recent", "0.85");
 const SEED = opt("seed", "1");
 const END = opt("end", "");
 
 const args = [join(HERE, "make-test-vault.mjs"),
-              "--out", OUT, "--notes", NOTES, "--years", YEARS, "--seed", SEED];
+              "--out", OUT, "--notes", NOTES, "--years", YEARS, "--recent", RECENT, "--seed", SEED];
 if (END) args.push("--end", END);
 
 const r = spawnSync(process.execPath, args, { stdio: "inherit" });
 if (r.status !== 0) process.exit(r.status || 1);
 
-console.log("\ndemo vault: " + NOTES + " notes over " + YEARS + " years, seed " + SEED +
-            (END ? ", ending " + END : ", ending today"));
+console.log("\ndemo vault: " + NOTES + " notes over " + YEARS + " years (recent share " +
+            RECENT + "), seed " + SEED + (END ? ", ending " + END : ", ending today"));
 console.log("build it:");
 console.log('  node src/build-graph.mjs --vault "' + OUT + '" --out demo.html');

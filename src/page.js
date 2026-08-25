@@ -10885,6 +10885,18 @@ function mountVaultGraph(root, data, deps) {
       // gone and this is the only timeline now, so it belongs beside the intro that has
       // just swept it rather than after the preference panel.
       //
+      // THE COMPACT-AXIS TOGGLE FIRST, before any dragging: the demo vault now carries a
+      // genuinely sparse tail behind its two dense years (github#23), on purpose, so this
+      // is the one act that has something real to show off here. Off then on, so the
+      // strip's own reflow -- years snapping back to plain calendar width, then
+      // regathering around where the notes actually are -- is the first thing this act
+      // demonstrates, before the existing brush/window/year choreography runs with it
+      // back in its default (on) state.
+      { click: true, target: ["id", "compact"], act: "timeline", why: "turn off the compact axis -- back to one width per month" },
+      { settle: true, act: "timeline", why: "let the strip spread back out to plain calendar time" },
+      { click: true, target: ["id", "compact"], act: "timeline", why: "...and back on, weighted by note count again" },
+      { settle: true, act: "timeline", why: "let it compact again" },
+
       // The `to` handle first, and deliberately the same one the intro moved: the intro
       // showed it travelling, this shows a hand doing it. The disc waits for the release on
       // each of these, by design -- a drag repaints one small canvas and the filter lands
