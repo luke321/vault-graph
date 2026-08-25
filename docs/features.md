@@ -64,16 +64,6 @@ hoverable and clickable the same way a top-level folder is.
 
 *Clip pending.*
 
-## Folder colours
-
-*Predates versioning*
-
-Twelve palette slots, handed out in folder order. Right-click a folder in the legend for
-the picker at the row itself; click a slot to hold that folder to a colour, two folders
-may share one on purpose.
-
-*Clip pending.*
-
 ## The camera
 
 *Predates versioning — undocumented until this gallery*
@@ -103,12 +93,14 @@ moment it is unpinned.
 
 ![A note dragged into the hole to pin it, a second note right-clicked to pin it the other way, and a third pinned from its own detail card, whose panel is then closed](../assets/features/pin.webp)
 
-## Subfolder colours
+## Color Picker
 
 *Unreleased*
 
-The same right-click colour menu a top-level folder's row opens, reached from a
-subfolder's row instead — recolour "People" inside "03 - Resources" without touching its
-parent's own hue. The row only exists once its folder's twisty is open.
+Right-click any folder or subfolder's row in the legend for the twelve-swatch picker at
+the row itself — no settings panel needed. Click a slot to hold that row to a colour,
+**Auto** hands it back to whatever its position would give it anyway. Shown here on a
+subfolder — recolour "People" inside "03 - Resources" without touching its parent's own
+hue. The row only exists once its folder's twisty is open.
 
 ![A folder unfolded to reach a subfolder, that subfolder right-clicked for its own colour menu, given a colour, then put back to automatic](../assets/features/subfoldercolor.webp)
