@@ -572,6 +572,11 @@ function mountVaultGraph(root, data, deps) {
   var SLOT_COUNT = 12;
   var groupColor = Object.create(null);   // group -> literal hex, rebuilt on regroup
   var groupSlot = Object.create(null);    // group -> slot key it is on, "" for none
+  // group -> the slot it would be on with no override at all. Recorded rather than left
+  // to be recomputed, for the same reason groupSlot is: an override discards the
+  // automatic key right after using it to advance the rotation counter, and nothing else
+  // reproduces "i % 12, archives skipped" without duplicating the loop that does it.
+  var groupAutoSlot = Object.create(null);
   var order = {};   // dim -> [group names, biggest first]
 
   function computeOrder() {
@@ -651,6 +656,7 @@ function mountVaultGraph(root, data, deps) {
     // skipped, so the only thing that knows is the loop that did the skipping. Both UIs
     // read it back through the api.
     groupSlot = Object.create(null);
+    groupAutoSlot = Object.create(null);
     var auto = 0;
     names.forEach(function (g) {
       var k = byFolder[g];
@@ -663,6 +669,9 @@ function mountVaultGraph(root, data, deps) {
         var akey = picked || ARCHIVE_SLOT;
         groupColor[g] = THEME.byKey[akey];
         groupSlot[g] = akey;
+        // An archive's automatic slot is ARCHIVE_SLOT unconditionally -- an override
+        // changes what it's using, never what "automatic" means for it.
+        groupAutoSlot[g] = ARCHIVE_SLOT;
         return;
       }
 
@@ -680,6 +689,9 @@ function mountVaultGraph(root, data, deps) {
       var use = picked || key;
       groupColor[g] = THEME.byKey[use];
       groupSlot[g] = use;
+      // `key`, not `use`: the pick already won for groupSlot above, but the automatic
+      // slot is the position's own answer regardless of what's currently applied.
+      groupAutoSlot[g] = key;
     });
     buildSubShades();
   }
@@ -7818,15 +7830,21 @@ function mountVaultGraph(root, data, deps) {
     // subtracting it converts a viewport point into ROOT's coordinate space correctly
     // regardless of what Obsidian does further up the tree -- the same reason #vg-detail
     // and #vg-tip are `position: absolute` against their own ancestor rather than fixed.
-    function openCtxMenu(x, y, current, onPick) {
+    // autoKey is the folder's own automatic slot, omitted by the subfolder caller below --
+    // a subfolder's automatic colour is a computed tint, not one of these twelve, so there
+    // is nothing among them for it to mark. See page.css's data-auto rule.
+    function openCtxMenu(x, y, current, onPick, autoKey) {
       var el = $("ctxmenu");
       if (!el) return;
       var pal = paletteInfo();
       var sws = pal.map(function (p) {
         var on = current === p.key;
+        var isAuto = !!autoKey && autoKey === p.key;
         return '<button class="swatch vg-' + p.key + '" role="menuitemradio"' +
                ' data-key="' + p.key + '" aria-checked="' + on + '"' +
-               ' title="' + esc(p.name) + '" aria-label="' + esc(p.name) + '"></button>';
+               (isAuto ? ' data-auto="1"' : '') +
+               ' title="' + esc(p.name) + (isAuto ? " (automatic)" : "") +
+               '" aria-label="' + esc(p.name) + '"></button>';
       }).join("");
       setHTML(el, '<div class="sws">' + sws + '</div>' +
                   '<button class="auto" data-key="" aria-pressed="' + !current +
@@ -7858,7 +7876,7 @@ function mountVaultGraph(root, data, deps) {
         ev.preventDefault();
         var g = gBtn.getAttribute("data-g");
         openCtxMenu(ev.clientX, ev.clientY, folderColors[g] || groupSlot[g] || "",
-                    function (key) { pickColor(g, key); });
+                    function (key) { pickColor(g, key); }, groupAutoSlot[g] || "");
         return;
       }
       // The pooled tail row ("N smaller subfolders") carries several indices -- a pick
@@ -7982,15 +8000,23 @@ function mountVaultGraph(root, data, deps) {
         // marked differently because "this is the colour" and "this is the colour I chose"
         // are different facts, and the Auto button is otherwise the only thing saying so.
         var cur = pinned || groupSlot[g] || "";
+        // THE SLOT THIS FOLDER WOULD BE ON WITH NO OVERRIDE AT ALL -- distinct from `cur`
+        // exactly when the folder is pinned to something else. Marked independently of
+        // aria-checked so it stays visible after an override (github#29): before this,
+        // "automatic" and "currently in use" were the same ring, and a pin erased the
+        // only trace of what Auto would give back.
+        var autoKey = groupAutoSlot[g] || "";
         var sws = pal.map(function (p) {
           var on = cur === p.key;
+          var isAuto = autoKey === p.key;
           // The colour comes from `.vg-<key>` in page.css, not from an inline style: a
           // hex baked in here would not survive the theme flip that readTheme handles.
           return '<button class="swatch vg-' + p.key + '" role="radio"' +
                  ' data-fc="' + esc(g) + '" data-key="' + p.key + '"' +
                  ' aria-checked="' + on + '"' +
-                 (on && !pinned ? ' data-auto="1"' : '') +
-                 ' title="' + esc(p.name) + (on ? (pinned ? " (chosen)" : " (automatic)") : "") +
+                 (isAuto ? ' data-auto="1"' : '') +
+                 ' title="' + esc(p.name) +
+                 (on ? (pinned ? " (chosen)" : " (automatic)") : (isAuto ? " (automatic default)" : "")) +
                  '" aria-label="' + esc(p.name) + '"></button>';
         }).join("");
         // AUTO SITS ON THE NAME LINE, not at the end of the swatches. As a thirteenth
@@ -10283,6 +10309,9 @@ function mountVaultGraph(root, data, deps) {
                     // more: archives are skipped in the rotation, and sit on no slot at
                     // all. "" means exactly that.
                     slotOf: function (g) { return groupSlot[g] || ""; },
+                    // The slot a group would be on with no override at all -- unlike
+                    // slotOf, never affected by folderColors. "" for the same reason.
+                    autoSlotOf: function (g) { return groupAutoSlot[g] || ""; },
                     isArchiveGroup: isArchiveGroup,
                     get folderColors() {
                       return Object.assign(Object.create(null), folderColors);

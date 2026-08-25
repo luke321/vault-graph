@@ -452,6 +452,39 @@
   .vault-graph .swatch[aria-checked="true"][data-auto="1"] {
     box-shadow: 0 0 0 1px var(--surface-0), 0 0 0 2px var(--text-3);
   }
+  /* AUTOMATIC BUT NOT IN USE: an override has moved this folder to a different swatch,
+     and this is the one Auto would give back. The ring above already answers "which
+     colour is this folder using" -- marking that same swatch here too would just repeat
+     it, so this is a distinct, smaller mark instead of a second ring, and it only
+     renders on the swatch that ISN'T checked (see the two rules together: never both on
+     one swatch, never neither on an automatic-and-in-use one).
+
+     Same triangle the heatmap band uses for "today" (page.js, heatDraw), and the same
+     reason for the colour: --today is the one token guaranteed not to be one of the
+     twelve hues, so the mark can never be misread as a competing colour choice. */
+  .vault-graph .swatch[data-auto="1"]:not([aria-checked="true"]) {
+    position: relative;
+  }
+  /* A real 6x4 box clipped to a triangle, not the classic zero-width-plus-border hack.
+     Three different centering formulas on the bordered-zero-width version --
+     `transform: translateX(-50%)`, `calc(50% - 3px)`, and `margin: 0 auto` -- all
+     measured PIXEL-IDENTICAL positions, confirming the LAYOUT math was never the
+     problem; a live probe element's getBoundingClientRect agreed with all three. What
+     did not agree was the screenshot: the rendered mark sat measurably right of every
+     one of those verified positions, by the same amount regardless of which formula
+     placed it there -- which points at how Chrome RASTERISES a zero-content-width
+     border-triangle's diagonal edges at fractional sub-pixel widths, not at anything
+     this file controls. `clip-path` paints a genuinely sized box instead of exploiting
+     border geometry, going through a different rasteriser path entirely. */
+  .vault-graph .swatch[data-auto="1"]:not([aria-checked="true"])::after {
+    content: "";
+    position: absolute;
+    left: 50%; bottom: -4px;
+    width: 6px; height: 4px;
+    transform: translateX(-50%);
+    background: var(--today);
+    clip-path: polygon(50% 0%, 100% 100%, 0% 100%);
+  }
   .vault-graph .scr .auto {
     font: inherit; font-size: 10px; padding: 2px 6px; cursor: pointer; margin-left: 2px;
     background: var(--surface-2); color: var(--text-3);
