@@ -144,6 +144,10 @@
     color: var(--text-1);
     font: 13px/1.45 ui-sans-serif, -apple-system, "Segoe UI", system-ui, sans-serif;
     overflow: hidden;
+    /* The containing block for .ctxmenu (position: absolute) -- see its own comment.
+       No offsets, so this has no visual effect on its own; .vg-tokens hands it back
+       below, same as every other declaration added here. */
+    position: relative;
   }
 
   .vault-graph { display: grid; grid-template-columns: 288px 1fr; height: 100%; }
@@ -410,13 +414,23 @@
 
      So this hands back every declaration on the two base rules and keeps only the custom
      properties. The list is exactly what those rules set -- layout and height, then
-     background, colour, font, overflow and color-scheme. Forcing the page's own text
-     colour and font onto Obsidian's setting rows would restyle a pane that is not ours,
-     and `overflow: hidden` would clip it. If a declaration is ever added to
+     background, colour, font, overflow, position and color-scheme. Forcing the page's
+     own text colour and font onto Obsidian's setting rows would restyle a pane that is
+     not ours, and `overflow: hidden` would clip it. If a declaration is ever added to
      `.vault-graph`, it has to be answered here too. */
   .vault-graph.vg-tokens {
-    display: block; height: auto; overflow: visible;
+    display: block; height: auto; overflow: visible; position: static;
     background: none; color: inherit; font: inherit; color-scheme: inherit;
+  }
+
+  /* A subfolder row nested under a folder's own Setting, INSIDE .vg-tokens -- so this
+     rule reaches the Obsidian settings tab exactly the way .swatch/.auto above already
+     do, through the same scoping trick rather than a second one. Obsidian's own
+     .setting-item classes carry the rest of the row's styling; this only indents it and
+     drops the border every other Setting row has, so a run of subfolder rows reads as
+     one nested block under its folder rather than as more top-level rows. */
+  .vault-graph.vg-tokens .vg-subrow {
+    margin-left: 24px; padding-top: 6px; padding-bottom: 6px; border-top: none;
   }
   .vault-graph.vg-tokens .sws { flex-wrap: wrap; justify-content: flex-end; }
   .vault-graph .swatch:hover { transform: scale(1.15); }
@@ -807,6 +821,48 @@
     filter: drop-shadow(0 1px 2px rgba(0,0,0,.45));
   }
   .vault-graph #vg-democursor[hidden] { display: none; }
+
+  /* THE RIGHT-CLICK COLOUR MENU. #vg-settings above is a sidebar block on purpose, to
+     avoid exactly this z-index-and-dismiss-handler cost -- but a menu that has to open
+     at the click point cannot be a block, so it pays that cost deliberately.
+
+     `position: absolute` against #vg-app (this rule is what makes #vg-app itself the
+     containing block -- see the bare `.vault-graph { position: relative }` near the top
+     of this file), NOT `fixed` against the viewport. Fixed was tried first and breaks
+     inside Obsidian: the plugin mounts #vg-app directly into a workspace pane, and
+     Obsidian's own panes sit under a transformed/contained ancestor for their resize
+     animation, which becomes fixed's containing block instead of the window -- measured,
+     the menu opened detached from the row that was right-clicked, floating wherever that
+     ancestor's own origin happened to be. #vg-app's own getBoundingClientRect() already
+     reflects whatever sits above it, so page.js converts the click's viewport coordinates
+     into #vg-app's frame before positioning -- the same reason #vg-detail and #vg-tip are
+     absolute against their own ancestor rather than fixed. z-index above #vg-detail (6)
+     and #vg-tip (5), since it can be opened while either is showing. */
+  .vault-graph .ctxmenu {
+    position: absolute; z-index: 9; width: 176px;
+    background: var(--surface-2); border: 1px solid var(--border-strong);
+    border-radius: 8px; padding: 8px; box-shadow: 0 8px 28px rgba(0,0,0,.22);
+  }
+  .vault-graph .ctxmenu .sws {
+    display: grid; grid-template-columns: repeat(6, 1fr); gap: 4px; margin-bottom: 6px;
+  }
+  .vault-graph .ctxmenu .swatch { width: 100%; height: auto; aspect-ratio: 1; }
+  .vault-graph .ctxmenu .auto { width: 100%; }
+
+  /* A subfolder row in the settings panel, nested under its folder's own .scr. Indented
+     like .lgr.sub in the legend (14px), on the same .scr/.scrh/.sws layout the folder
+     rows already use -- it is a smaller version of the same thing, not a different one. */
+  .vault-graph .scrsub { margin-left: 14px; }
+  .vault-graph .scrsub .scrh .nm { font-size: 10px; }
+  .vault-graph .scrsub .sw {
+    width: 10px; height: 10px; flex: 0 0 auto; margin-right: 1px;
+  }
+  /* Same treatment as the legend's own .ct -- text-3, tabular-nums -- so a count reads
+     the same whether it is sitting in a CSS grid row there or a flex row here. */
+  .vault-graph .scrsub .ct {
+    color: var(--text-3); font-variant-numeric: tabular-nums; font-size: 10px;
+    margin: 0 4px;
+  }
 
   .vault-graph #vg-hits { margin-top: 6px; max-height: 168px; overflow-y: auto; }
   .vault-graph #vg-hits button {

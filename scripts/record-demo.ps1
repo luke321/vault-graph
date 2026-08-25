@@ -4,6 +4,15 @@
 #   .\scripts\record-demo.ps1 -Slow 1.5 -Fps 60 -Out demo.mp4
 #   .\scripts\record-demo.ps1 -Url http://127.0.0.1:8765/?demo
 #   .\scripts\record-demo.ps1 -Monitor right          # keep it off the screen you are on
+#   .\scripts\record-demo.ps1 -Act timeline           # one feature's beats, not the whole demo
+#
+# -ACT NAME records ONE act instead of the full storyboard -- one of the `act:` tags in
+# demoMode() (src/page.js): intro, note, timeline, heatmap, folders, subfolders, camera,
+# colours. -Out defaults to `demo-<name>-<timestamp>.mp4` instead of `demo-<timestamp>.mp4`,
+# same folder, same everything else. This script only ever writes the raw take (.mp4) --
+# encoding it into the docs gallery's `assets/features/<name>.webp` is make-hero.ps1's job,
+# same as it always has been for the hero; see docs/features/_template.md for the exact
+# two-command pipeline.
 #
 # RECORD AGAINST A GENERATED VAULT, not your own. With no -Url this builds from the default
 # vault, and the page embeds every note's real title -- which then goes into a video that
@@ -63,7 +72,12 @@ param(
   # because 0 is a legitimate position.
   [int]    $X = [int]::MinValue,
   [int]    $Y = [int]::MinValue,
-  [switch] $KeepChrome
+  [switch] $KeepChrome,
+  # One act's beats instead of the whole storyboard -- see demoMode()'s `act:` tags in
+  # src/page.js. Empty (the default) records everything, unchanged from before this flag
+  # existed. Last in the param block so it doesn't shift the positional index of anything
+  # documented above it.
+  [string] $Act  = ""
 )
 
 $ErrorActionPreference = 'Stop'
@@ -110,11 +124,19 @@ if (-not $Url) {
   $Url = ([uri]("file:///" + ($Matches[1] -replace '\\','/'))).AbsoluteUri + "?demo"
 }
 if (-not $Out) {
-  $Out = Join-Path $repo ("demo-" + (Get-Date -Format 'yyyy-MM-dd-HHmmss') + ".mp4")
+  $stamp = Get-Date -Format 'yyyy-MM-dd-HHmmss'
+  # $(...), NOT bare (...) -- `if` is a STATEMENT, and only the subexpression operator
+  # converts a statement's output into a value bare parens can be used in. Bare parens
+  # parse fine (PowerShell accepts an unresolved bareword there) and then fail at RUNTIME
+  # with "the term 'if' was not recognized" -- caught only by actually running this, not by
+  # a syntax check, which is exactly why this needed the manual verification pass.
+  $base = $(if ($Act) { "demo-$Act-$stamp" } else { "demo-$stamp" })
+  $Out = Join-Path $repo ($base + ".mp4")
 }
 
 Write-Host "url    $Url"
 Write-Host "out    $Out"
+if ($Act) { Write-Host "act    $Act" }
 
 # --- Chrome ---------------------------------------------------------------------------
 # Its own profile directory: a debugging port is refused if Chrome is already running on
@@ -191,10 +213,20 @@ Start-Sleep -Seconds 2
 # so 'Vault Graph' never matched -- and the page RENAMES ITSELF when the demo finishes
 # (that is its completion signal), so even the right title would stop matching mid-take.
 # The window rect is stable regardless of what the window is called.
+#
+# NOT GetWindowRect ALONE. On Windows 10/11 it returns the window rect INCLUDING the
+# invisible DWM resize border and drop-shadow margin -- pixels outside what Chrome
+# actually paints, roughly 7-8px per edge at 100% scaling and more when scaled -- so
+# gdigrab recorded a sliver of real desktop along every edge of every take (issue #26).
+# DwmGetWindowAttribute(..., DWMWA_EXTENDED_FRAME_BOUNDS, ...) answers the visible bounds
+# instead; GetWindowRect stays as the fallback for whatever DWM call fails on.
 Add-Type -Namespace Win -Name U -MemberDefinition @'
   [StructLayout(LayoutKind.Sequential)] public struct RECT { public int L, T, R, B; }
   [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr h, out RECT r);
+  [DllImport("dwmapi.dll")] public static extern int DwmGetWindowAttribute(
+    IntPtr h, int attr, out RECT r, int size);
 '@ -ErrorAction SilentlyContinue
+$DWMWA_EXTENDED_FRAME_BOUNDS = 9
 
 $hwnd = [IntPtr]::Zero
 $deadline = (Get-Date).AddSeconds(10)
@@ -205,20 +237,42 @@ while ((Get-Date) -lt $deadline) {
 }
 if ($hwnd -eq [IntPtr]::Zero) { throw "Chrome's window never appeared" }
 
+$wr = New-Object Win.U+RECT
+if (-not [Win.U]::GetWindowRect($hwnd, [ref] $wr)) { throw "GetWindowRect failed" }
+
 $r = New-Object Win.U+RECT
-if (-not [Win.U]::GetWindowRect($hwnd, [ref] $r)) { throw "GetWindowRect failed" }
+# SizeOf($r), NOT SizeOf([Win.U+RECT]) -- the Type-literal overload throws in PS 5.1
+# ("System.RuntimeType cannot be marshaled as an unmanaged struct"), because the bracket
+# syntax hands Marshal.SizeOf a RuntimeType object rather than binding its Type overload.
+# An actual struct instance resolves correctly; the values in it don't matter for a size.
+$dwmOk = ([Win.U]::DwmGetWindowAttribute($hwnd, $DWMWA_EXTENDED_FRAME_BOUNDS, [ref] $r, [System.Runtime.InteropServices.Marshal]::SizeOf($r)) -eq 0)
+if (-not $dwmOk) {
+  Write-Warning "DwmGetWindowAttribute failed; falling back to GetWindowRect (the capture may include a border sliver -- see issue #26)"
+  $r = $wr
+}
+
+# Clamp to the window's own screen's WORKING area, so an oversized -Width/-Height cannot
+# pull desktop in on the far side either -- the same class of bug as the border, just from
+# the other direction.
+Add-Type -AssemblyName System.Windows.Forms -ErrorAction SilentlyContinue
+$screen = [System.Windows.Forms.Screen]::FromHandle($hwnd)
+$wa = $screen.WorkingArea
+$cl = [Math]::Max($r.L, $wa.X); $ct = [Math]::Max($r.T, $wa.Y)
+$cr = [Math]::Min($r.R, $wa.X + $wa.Width); $cb = [Math]::Min($r.B, $wa.Y + $wa.Height)
+
 # Even dimensions: yuv420p subsamples 2x2, and an odd width makes libx264 refuse.
-$rx = $r.L; $ry = $r.T
-$rw = ($r.R - $r.L) - (($r.R - $r.L) % 2)
-$rh = ($r.B - $r.T) - (($r.B - $r.T) % 2)
-Write-Host "region ${rw}x${rh} at ${rx},${ry}" -ForegroundColor DarkGray
+$rx = $cl; $ry = $ct
+$rw = ($cr - $cl) - (($cr - $cl) % 2)
+$rh = ($cb - $ct) - (($cb - $ct) % 2)
+$trimW = ($wr.R - $wr.L) - ($cr - $cl); $trimH = ($wr.B - $wr.T) - ($cb - $ct)
+Write-Host "region ${rw}x${rh} at ${rx},${ry} (trimmed ${trimW}x${trimH} of border/off-screen vs GetWindowRect)" -ForegroundColor DarkGray
 
 # --- ffmpeg ---------------------------------------------------------------------------
-# -draw_mouse 0: the pointer in the take is drawn INSIDE THE PAGE by --cursor on the
-# driver (see demoCursorAt in page.js), which is already part of the window's rendered
-# pixels -- gdigrab needs no help capturing it. Asking gdigrab to draw the REAL system
-# cursor on top would show wherever your actual mouse happens to be resting, which is
-# nowhere near the recording window now that nothing moves it there.
+# -draw_mouse 0: the pointer in the take is drawn INSIDE THE PAGE, by the driver, always
+# (see demoCursorAt in page.js) -- already part of the window's rendered pixels, so
+# gdigrab needs no help capturing it. Asking gdigrab to draw the REAL system cursor on
+# top would show wherever your actual mouse happens to be resting, which is nowhere near
+# the recording window now that nothing moves it there.
 # yuv420p because some players refuse anything else.
 $ffArgs = @(
   '-hide_banner', '-loglevel', 'warning',
@@ -242,10 +296,12 @@ Start-Sleep -Milliseconds 800           # let the first frames land before anyth
 # --- the driver -----------------------------------------------------------------------
 $failed = $null
 try {
-  # --cursor: draws the visible arrow inside the page rather than moving the real
-  # pointer (see demoCursorAt in page.js) -- off by default only because it costs a
-  # small eval round trip per step, not because it touches anything of yours.
-  & node (Join-Path $here 'demo.mjs') --port $Port --slow $Slow --match 'demo' --cursor
+  # The demo's cursor is drawn inside the page now (see demoCursorAt in page.js), not
+  # moved at the OS level, so there is no --cursor flag left to pass here -- the driver
+  # always draws it.
+  $driverArgs = @('--port', $Port, '--slow', $Slow, '--match', 'demo')
+  if ($Act) { $driverArgs += @('--act', $Act) }
+  & node (Join-Path $here 'demo.mjs') @driverArgs
   if ($LASTEXITCODE -ne 0) { $failed = "driver exited $LASTEXITCODE" }
 } catch {
   $failed = $_.Exception.Message

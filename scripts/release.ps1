@@ -142,6 +142,35 @@ try {
                 "Re-record and re-encode, or carry it knowingly.") -ForegroundColor Yellow
   }
 
+  # THE SAME PROXY, PER FEATURE -- see docs/features/_template.md and .ai-context/releasing.md's
+  # "Feature clips are different from the hero" section. Unlike the hero, a feature clip is NOT
+  # expected to be re-recorded every release, so this never blocks and does not claim to know
+  # which act a change actually touched -- it warns against the whole of src/page.js (where every
+  # act lives), same as the hero warns against the whole of src/, and leaves "does this actually
+  # need re-recording" to whoever reads CHANGELOG.md and decides.
+  $pageAt = (& git log -1 --format=%ct -- src/page.js) | Select-Object -First 1
+  $pageOn = (& git log -1 --format=%cs -- src/page.js) | Select-Object -First 1
+  $featureDocs = Get-ChildItem (Join-Path $repo 'docs/features') -Filter '*.md' -ErrorAction SilentlyContinue |
+    Where-Object { $_.Name -ne '_template.md' }
+  $staleFeatures = @()
+  foreach ($doc in $featureDocs) {
+    $name = $doc.BaseName
+    $clip = "assets/features/$name.webp"
+    $clipAt = (& git log -1 --format=%ct -- $clip) | Select-Object -First 1
+    if (-not $clipAt) { continue }   # no clip recorded yet -- not staleness, just not done yet
+    if ($pageAt -and ([int64]$pageAt -gt [int64]$clipAt)) {
+      $clipOn = (& git log -1 --format=%cs -- $clip) | Select-Object -First 1
+      $staleFeatures += "  $name`: clip committed $clipOn, src/page.js changed since ($pageOn)"
+    }
+  }
+  if ($staleFeatures.Count) {
+    Write-Host "`n=== features ===" -ForegroundColor Cyan
+    Write-Host "src/page.js has changed since these feature clips were last recorded:" -ForegroundColor Yellow
+    $staleFeatures | ForEach-Object { Write-Host $_ -ForegroundColor Yellow }
+    Write-Host ("Re-record whichever ones this release actually changed visibly -- see " +
+                "`".ai-context/releasing.md`". Not every one; that call is yours.") -ForegroundColor Yellow
+  }
+
   Write-Host "`n=== invariants ===" -ForegroundColor Cyan
   & node (Join-Path $here 'smoke.mjs')
   if ($LASTEXITCODE -ne 0) { throw "the invariant suite failed -- not releasing" }

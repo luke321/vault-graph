@@ -3,10 +3,16 @@
 //   node scripts/demo.mjs                     # attach to Chrome on 9222
 //   node scripts/demo.mjs --port 9223
 //   node scripts/demo.mjs --slow 1.5          # stretch every move and dwell
+//   node scripts/demo.mjs --act timeline      # just one act, not the whole storyboard
 //
 // The storyboard lives in the page (`__vg.demo.storyboard()`), so adding a beat means
-// editing `demoMode()` in template.html and nothing here. This file only knows how to
+// editing `demoMode()` in src/page.js and nothing here. This file only knows how to
 // perform three verbs and how to wait.
+//
+// --act NAME plays `__vg.demo.act(NAME)` instead of the full storyboard -- one of the
+// eight `act:` tags demoMode()'s own beats carry (intro, note, timeline, heatmap,
+// folders, subfolders, camera, colours). Same driver, same verbs; only which beats it
+// gets differs.
 //
 // WHY CDP AND NOT el.click(): a dispatched click skips hit-testing, so an in-page demo
 // keeps passing after the button it aims at has become covered, scrolled away or 0x0.
@@ -15,10 +21,11 @@
 // real click would fail. That is the entire point of demonstrating something.
 //
 // CDP input does not move the operating system's cursor -- it is delivered straight to
-// the renderer -- so a recording of a CDP-driven demo shows every effect and no arrow.
-// `--cursor` fixes that by drawing one INSIDE THE PAGE (see demoCursorAt in page.js) and
-// moving it by eval from this same loop, in the same coordinates dispatched to CDP. Off
-// by default only because it costs a little: an extra round trip per step.
+// the renderer -- so a recording of a CDP-driven demo would show every effect and no
+// arrow without help. The driver always draws one INSIDE THE PAGE (see demoCursorAt in
+// page.js) and moves it by eval from this same loop, in the same coordinates dispatched
+// to CDP. Unconditional, not a flag: there is no reason left to leave it off, and one
+// fewer thing to remember to pass.
 //
 // NOT the real OS pointer -- that was the first version (scripts/cursor.ps1,
 // SetCursorPos) and it worked for clicks and broke on drags. Windows delivers real
@@ -43,7 +50,7 @@ const arg = (name, dflt) => {
 const PORT = Number(arg("port", 9222));
 const SLOW = Number(arg("slow", 1));
 const MATCH = arg("match", "");
-const CURSOR = argv.includes("--cursor");
+const ACT = arg("act", "");
 
 const MOVE_MS = 620 * SLOW;    // how long a glide across the page takes
 const DWELL_MS = 420 * SLOW;   // pause on a control before clicking, for the viewer
@@ -67,12 +74,10 @@ let at = { x: 0, y: 0 };
 // added back in. Sequencing it costs a small round trip per step; that is cheaper than a
 // drag that silently does not land.
 async function cursorTo(page, x, y) {
-  if (!CURSOR) return;
   await page.eval(`__vg.demo.cursorAt(${Math.round(x)}, ${Math.round(y)})`).catch(() => {});
 }
 
 function cursorHide(page) {
-  if (!CURSOR) return;
   page.eval("__vg.demo.cursorHide()").catch(() => {});
 }
 
@@ -123,7 +128,7 @@ async function doubleClick(page, x, y) {
  * ribbon's brush and the disc's pan both read `buttons` on every move, and a sequence of
  * button-up moves between a press and a release is a press and a release with nothing in
  * between. Eased and paced like moveTo so it looks like a hand on camera, and the cursor
- * overlay is driven with it so --cursor sees the same path.
+ * overlay is driven with it so it sees the same path.
  */
 async function drag(page, x0, y0, x1, y1) {
   const steps = Math.max(6, Math.round(MOVE_MS / STEP_MS));
@@ -209,8 +214,11 @@ async function main() {
   const armed = await page.eval("!!(window.__vg && __vg.demo)");
   if (!armed) throw new Error("this page has no __vg.demo -- is it a vault-graph build?");
 
-  const storyboard = JSON.parse(await page.eval("JSON.stringify(__vg.demo.storyboard())"));
-  console.log(`[${el()}] storyboard: ${storyboard.length} beats`);
+  const storyboard = ACT
+    ? JSON.parse(await page.eval(`JSON.stringify(__vg.demo.act(${JSON.stringify(ACT)}))`))
+    : JSON.parse(await page.eval("JSON.stringify(__vg.demo.storyboard())"));
+  if (ACT && !storyboard.length) throw new Error(`--act ${ACT} matched no beats -- see the page's own console warning`);
+  console.log(`[${el()}] storyboard: ${storyboard.length} beats${ACT ? ` (act: ${ACT})` : ""}`);
 
   // PARK THE POINTER SOMEWHERE THAT HOVERS NOTHING, and prove it rather than assume it.
   // The first version parked at 62% x 55% of the viewport to avoid 0,0 on the sidebar, and
@@ -252,7 +260,7 @@ async function main() {
     if (!c.h && c.tip === "none" && !c.row) { at = { x: cx, y: cy }; break; }
   }
   at = Array.isArray(at) ? { x: at[0], y: at[1] } : at;
-  if (CURSOR) console.log(`[${el()}] drawing the demo cursor in-page`);
+  console.log(`[${el()}] drawing the demo cursor in-page`);
   await page.send("Input.dispatchMouseEvent", { type: "mouseMoved", ...at, buttons: 0 });
   await cursorTo(page, at.x, at.y);
   console.log(`[${el()}] pointer parked at ${at.x},${at.y}`);
@@ -311,9 +319,9 @@ async function main() {
         await sleep(DWELL_MS);
         // RE-RESOLVED RIGHT BEFORE THE PRESS, not reused from the top of the beat. A note
         // is a much smaller target than the hub it is heading for, and under real load --
-        // ffmpeg's gdigrab and the --cursor helper both competing for the same CPU the
-        // renderer needs -- the ~1s of moveTo + dwell between the first resolve and the
-        // press is enough for a still-settling disc to drift the note off of it: measured,
+        // ffmpeg's gdigrab competing for the same CPU the renderer needs -- the ~1s of
+        // moveTo + dwell between the first resolve and the press is enough for a
+        // still-settling disc to drift the note off of it: measured,
         // the press missed the note entirely and sigma's OWN default took over, panning
         // the camera instead of dragging anything. Re-resolving here shrinks that window
         // to milliseconds; a corrective micro-move only fires if the note actually moved.

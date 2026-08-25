@@ -13,6 +13,11 @@
  *
  *       Also, optionally:
  *         folderColors      { "<folder>": "g7" } -- the saved per-folder palette slots.
+ *         subfolderColors   { "<folder>/<sub>": "g7" } -- as folderColors, one level down.
+ *                           Keyed to match subShade and subOrder's own keys -- "" for
+ *                           notes sitting directly in the folder. Pins the whole tint the
+ *                           automatic ladder would otherwise compute for that subfolder.
+ *         onSubfolderColors(m) as onFolderColors, for that map.
  *         folderShown       { "<folder>": true|false } -- saved per-folder visibility
  *                           DEFAULTS. Tri-state: absent means "whatever the `_` rule
  *                           says", which is hidden for a folder whose name starts with an
@@ -239,6 +244,20 @@ function mountVaultGraph(root, data, deps) {
   }
   var folderColors = cleanFolderColors(deps.folderColors);
 
+  // Subfolder -> slot key, keyed "<folder>/<sub>" to match subShade and subOrder's own
+  // keys ("" for notes sitting directly in the folder). Same validation as folderColors
+  // and the same reason: a JSON round trip either way, so trust nothing.
+  function cleanSubfolderColors(raw) {
+    var out = Object.create(null);
+    if (!raw || typeof raw !== "object") return out;
+    Object.keys(raw).forEach(function (k) {
+      var v = raw[k];
+      if (typeof v === "string" && /^g([1-9]|1[0-2])$/.test(v)) out[k] = v;
+    });
+    return out;
+  }
+  var subfolderColors = cleanSubfolderColors(deps.subfolderColors);
+
   // DRAG-TO-PAN, ON UNLESS THE HOST SAYS OTHERWISE. Absent means on: a fresh page has no
   // saved answer and dragging is what a graph does, so the default cannot be "wait to be
   // told". Only an explicit false turns it off -- github#4 argued for off-by-default on a
@@ -291,6 +310,16 @@ function mountVaultGraph(root, data, deps) {
     return '<svg viewBox="0 0 16 16" aria-hidden="true">' + head + point + '</svg>';
   }
 
+  // A disclosure twisty, or an invisible placeholder so labels stay aligned. Shared
+  // between the legend and the settings panel now that both nest subfolder rows under a
+  // folder -- the same reason eyeSvg above is shared.
+  function twBtn(attrs, open) {
+    return attrs
+      ? '<button class="tw" ' + attrs + ' aria-expanded="' + open + '">' +
+        (open ? "▾" : "▸") + '</button>'
+      : '<span class="tw none">▸</span>';
+  }
+
   // Explicit per-folder visibility: true = shown, false = hidden, absent = the default
   // above. Tri-state on purpose -- "absent" has to stay distinguishable from "false", or
   // turning `_ Archives` off by hand would be indistinguishable from never having said
@@ -313,6 +342,7 @@ function mountVaultGraph(root, data, deps) {
   var SETTINGS_UI = !!deps.settingsUI;
   var openHostSettings = typeof deps.openSettings === "function" ? deps.openSettings : null;
   var saveFolderColors = typeof deps.onFolderColors === "function" ? deps.onFolderColors : null;
+  var saveSubfolderColors = typeof deps.onSubfolderColors === "function" ? deps.onSubfolderColors : null;
   var saveFolderShown = typeof deps.onFolderShown === "function" ? deps.onFolderShown : null;
   var savePinned = typeof deps.onPinned === "function" ? deps.onPinned : null;
 
@@ -502,6 +532,11 @@ function mountVaultGraph(root, data, deps) {
 
   // Stable subfolder ordering per PARA folder: biggest first, name as tie-break.
   var subOrder = Object.create(null);
+  // "folder/sub" -> note count, from the SAME tally subOrder sorts by -- not a second
+  // graph walk. buildLegend used to keep its own local copy of this, recomputed on every
+  // render; it now reads this one, and the settings panel and the __vg api do too, since
+  // all three need to say how big a subfolder is.
+  var subCount = Object.create(null);
   (function () {
     var tally = Object.create(null);
     graph.forEachNode(function (_id, a) {
@@ -513,6 +548,7 @@ function mountVaultGraph(root, data, deps) {
       subOrder[f] = Object.keys(tally[f]).sort(function (x, y) {
         return tally[f][y] - tally[f][x] || x.localeCompare(y);
       });
+      subOrder[f].forEach(function (sb) { subCount[f + "/" + sb] = tally[f][sb]; });
     });
   })();
 
@@ -700,6 +736,37 @@ function mountVaultGraph(root, data, deps) {
     return folderColors;
   }
 
+  // As applyFolderColors, one level down. buildColors() is NOT called -- a subfolder pin
+  // cannot change any group's own colour, so re-deriving groupColor would be repainting
+  // things that did not change. buildSubShades() alone is enough, and it is also what
+  // applyFolderColors ends in (via buildColors()), which is why a folder recolour keeps
+  // respecting every subfolder pin without this file needing to say so twice.
+  function applySubfolderColors(map) {
+    subfolderColors = cleanSubfolderColors(map);
+    buildSubShades();
+    if (renderer) renderer.refresh();
+    try { placeLogo(); } catch { /* logo not mounted yet */ }
+    try { heatBuild(); } catch { /* heatmap not built yet */ }
+    try { buildLegend(); } catch { /* legend not built yet */ }
+    return subfolderColors;
+  }
+
+  // Whether ANY of g's subfolders carries a pin right now. Both nesting gates below
+  // read this, alongside the ordinary "more than one subfolder" test -- without it, a
+  // pin outlives its own picker: pin a folder's one differentiated subfolder, then let
+  // attrition (notes moved elsewhere) shrink that folder to a single subfolder, and the
+  // twisty that used to reach the pin disappears from the legend, the settings panel
+  // AND the Obsidian settings tab at once, with the pin still silently in effect and no
+  // remaining UI to clear it short of "Reset all", which drops every override in the
+  // vault. A single differentiated subfolder is ordinarily nothing to nest -- see
+  // buildSubShades' own `subs.length < 2` skip -- but a PIN is a deliberate choice, made
+  // through a UI that has to stay reachable for as long as the pin exists.
+  function groupHasPinnedSub(g) {
+    return (subOrder[g] || []).some(function (sb) {
+      return !!subfolderColors[g + "/" + sb];
+    });
+  }
+
   function colorOf(group) {
     return groupColor[group] || THEME.neutrals[0];
   }
@@ -709,7 +776,17 @@ function mountVaultGraph(root, data, deps) {
   // reads as one family while People / Partners / Rezepte separate inside it. This is
   // deliberately BELOW the categorical separation floor -- it is a nested cue on top
   // of an already-labelled group, not an independent colour channel.
+  //
+  // ...UNLESS subfolderColors pins one, which skips the ladder entirely and paints it
+  // one of the twelve slots instead -- a full-strength colour with none of the
+  // "below the floor" restraint above, because a pin is a deliberate choice to make one
+  // subfolder stand out, not a nested cue.
   var subShade = Object.create(null);
+  // "folder/sub" -> the slot key it is ON: the pinned one, or "" for the automatic
+  // ladder. "" on purpose rather than omitting the key -- an automatic tint is never one
+  // of the twelve slot hexes, so there is nothing among them to ring as "current", and
+  // the settings UIs need to say that rather than guess.
+  var subSlot = Object.create(null);
 
   // Four steps, not one per subfolder. Spreading N tints evenly across one hue
   // family collapses as N grows -- measured, nine subfolders land ~3 apart, below
@@ -962,28 +1039,42 @@ function mountVaultGraph(root, data, deps) {
 
   function buildSubShades() {
     subShade = Object.create(null);
+    subSlot = Object.create(null);
     Object.keys(subOrder).forEach(function (f) {
       var subs = subOrder[f];
-      if (subs.length < 2) return;             // nothing to differentiate
       var basecol = colorOf(f);
       var lab = hex2lab(basecol);
       var grey = Math.hypot(lab[1], lab[2]) < 0.02;   // neutrals have no hue to turn
-      if (grey) {        // neutrals share one lightness axis; a ladder would collide
-        subs.forEach(function (sb) { subShade[f + "/" + sb] = basecol; });
-        return;
-      }
       // Lightness targets are spaced evenly between the base and a per-family end
       // point rather than being fixed deltas. Fixed deltas hit the wash-out cap and
       // the top two steps collapsed onto each other -- which is why simply turning
       // the numbers up made separation WORSE (adjacent dE 6.4 -> 4.1), not better.
+      //
+      // Computed once per folder, and only when a ladder will actually run -- a pin
+      // never needs them, and neither does a folder with nothing to differentiate.
+      var haveLadder = subs.length >= 2 && !grey;
       var sign = THEME.dark ? 1 : -1;
-      var budget = hueBudget(basecol);
-      var Lend = THEME.dark
-        ? Math.min(SUB_L_LIMIT, lab[0] + SUB_L_SPAN)
-        : Math.max(1 - SUB_L_LIMIT, lab[0] - SUB_L_SPAN);
+      var budget = haveLadder ? hueBudget(basecol) : 0;
+      var Lend = haveLadder
+        ? (THEME.dark ? Math.min(SUB_L_LIMIT, lab[0] + SUB_L_SPAN)
+                      : Math.max(1 - SUB_L_LIMIT, lab[0] - SUB_L_SPAN))
+        : 0;
       subs.forEach(function (sb) {
+        var pk = f + "/" + sb;
+        // A PIN SKIPS THE LADDER ENTIRELY, whether or not this folder has enough
+        // subfolders to need one -- pinning the sole subfolder of a two-folder vault
+        // is still a real thing to want.
+        var pin = subfolderColors[pk];
+        if (pin && THEME.byKey[pin]) {
+          subShade[pk] = THEME.byKey[pin];
+          subSlot[pk] = pin;
+          return;
+        }
+        subSlot[pk] = "";
+        if (subs.length < 2) return;             // nothing to differentiate
+        if (grey) { subShade[pk] = basecol; return; }  // one lightness axis; ladder would collide
         var t = subTintIndex(f, sb) / (SUB_SLOTS - 1);
-        subShade[f + "/" + sb] = shade(basecol, sign * budget * t, (Lend - lab[0]) * t);
+        subShade[pk] = shade(basecol, sign * budget * t, (Lend - lab[0]) * t);
       });
     });
   }
@@ -7199,6 +7290,15 @@ function mountVaultGraph(root, data, deps) {
 
   /* ---------------------------------------------------------------- UI */
 
+  // buildSettings lives inside buildTools's own closure (the gear/settings-panel
+  // wiring), not out here beside buildLegend -- so buildLegend cannot call it directly
+  // without eslint (correctly) flagging it as undefined, and would throw at runtime if
+  // it tried. buildTools() sets this once, during the one-time init sequence that runs
+  // well before anything could click a twisty, so the settings panel's own subfolder
+  // rows can be kept in sync with the legend's without hoisting either function out of
+  // the closure it belongs in.
+  var refreshSettingsPanel = null;
+
   function buildLegend() {
     // EVERY ROW BELOW IS ABOUT TO BE REPLACED, and the one under the pointer goes with
     // them -- so its mouseleave will never fire and its halo would be left on with
@@ -7209,17 +7309,15 @@ function mountVaultGraph(root, data, deps) {
     var names = order[state.dim] || [];
     $("gcount").textContent = "(" + names.length + ")";
 
-    // Count notes per subfolder so the nested rows can show their size.
-    var subCount = Object.create(null);
-    // ...and the folder TREE, as "prefix -> { childName: count }" at every depth. Built
-    // by walking each note's own `dirs` chain, so the legend's nesting comes from the
-    // vault rather than from any assumed number of levels: a folder five deep renders
-    // the same way as one a single level down.
+    // subCount ("folder/sub" -> note count) is module-scope now -- see its declaration
+    // beside subOrder. What's still built fresh on every render is the folder TREE, as
+    // "prefix -> { childName: count }" at every depth. Built by walking each note's own
+    // `dirs` chain, so the legend's nesting comes from the vault rather than from any
+    // assumed number of levels: a folder five deep renders the same way as one a single
+    // level down.
     var kids = Object.create(null);
     if (state.dim === "folder") {
       graph.forEachNode(function (_id, a) {
-        var k = a.folder + "/" + (a.sub || "");
-        subCount[k] = (subCount[k] || 0) + 1;
         var d = a.dirs || [];
         for (var i = 0; i < d.length; i++) {
           var pk = a.folder + "/" + d.slice(0, i).join("/");
@@ -7235,13 +7333,7 @@ function mountVaultGraph(root, data, deps) {
       return '<button class="eye" ' + attrs + ' aria-pressed="' + on + '" title="' +
              (on ? "Hide " : "Show ") + esc(what) + '">' + eyeSvg(on) + '</button>';
     };
-    // A disclosure twisty, or an invisible placeholder so labels stay aligned.
-    var twBtn = function (attrs, open) {
-      return attrs
-        ? '<button class="tw" ' + attrs + ' aria-expanded="' + open + '">' +
-          (open ? "â–¾" : "â–¸") + '</button>'
-        : '<span class="tw none">â–¸</span>';
-    };
+    // twBtn is module-scope now -- see its declaration beside eyeSvg.
 
     // Everything BELOW a sub-wedge row, recursively, at whatever depth the vault goes.
     // These levels take no tint and cut no wedge -- they inherit their parent's swatch
@@ -7273,8 +7365,14 @@ function mountVaultGraph(root, data, deps) {
 
     setHTML($("legend"), names.map(function (g) {
       var vis = !isHidden(g);
-      var hasSubs = state.dim === "folder" && (subOrder[g] || []).length > 1 &&
-                    (counts[g] || 0) >= NEST_MIN;
+      // A PIN BYPASSES BOTH SIZE GATES, not just the subfolder-count one -- see
+      // groupHasPinnedSub's own comment. NEST_MIN exists to skip nesting a folder too
+      // small to be worth it automatically; it says nothing about a folder somebody
+      // has deliberately pinned a subfolder colour on, however small that folder has
+      // since shrunk to.
+      var hasSubs = state.dim === "folder" &&
+                    (groupHasPinnedSub(g) ||
+                     ((subOrder[g] || []).length > 1 && (counts[g] || 0) >= NEST_MIN));
       var open = hasSubs && !state.collapsed[g];
       var hl = !!state.highlight[g];
 
@@ -7415,6 +7513,11 @@ function mountVaultGraph(root, data, deps) {
       b.onclick = function () {
         if (state.collapsed[g]) delete state.collapsed[g]; else state.collapsed[g] = true;
         buildLegend();
+        // The settings panel's own subfolder rows read this SAME flag -- see
+        // buildSettings, and refreshSettingsPanel's own comment for why this is not a
+        // direct call -- so opening a folder here opens it there too, rather than the
+        // two disagreeing about which folders are expanded.
+        if (refreshSettingsPanel) refreshSettingsPanel();
       };
     });
     // Deeper folder levels: a twisty, an eye and a highlight each, keyed by full path
@@ -8002,6 +8105,11 @@ function mountVaultGraph(root, data, deps) {
   }
 
   function buildTools() {
+    // See refreshSettingsPanel's own declaration, beside buildLegend: this is the one
+    // assignment that makes it reachable from there. buildSettings is hoisted within
+    // this function body, so the forward reference is fine.
+    refreshSettingsPanel = buildSettings;
+
     $("allon").onclick = function () {
       state.hidden[state.dim] = Object.create(null);
       state.hiddenSub = Object.create(null);
@@ -8117,7 +8225,16 @@ function mountVaultGraph(root, data, deps) {
         $("gear").setAttribute("aria-expanded", String(open));
         if (open) buildSettings();
       };
-      $("fcreset").onclick = function () { pickColor(null, null); };
+      // BOTH MAPS, not just folderColors -- this button sits under "Folder colours",
+      // which now covers subfolders too (see subfolderRows), so Reset dropping only
+      // the top-level overrides would leave a subfolder pin behind for the user to
+      // go find and clear by hand. Mirrors plugin/main.js's own "Reset all".
+      $("fcreset").onclick = function () {
+        pickColor(null, null);
+        var savedSub = applySubfolderColors({});
+        if (saveSubfolderColors) saveSubfolderColors(Object.assign({}, savedSub));
+        buildSettings();
+      };
       // DELEGATED on the container, which survives -- buildSettings replaces its
       // children on every pick, so a listener bound to a swatch would be bound to an
       // element that is about to be thrown away.
@@ -8126,10 +8243,121 @@ function mountVaultGraph(root, data, deps) {
         if (!t) return;
         var v = t.closest("[data-vis]");
         if (v) { pickVisible(v.getAttribute("data-vis")); return; }
+        var tw = t.closest("[data-stw]");
+        if (tw) {
+          var fg = tw.getAttribute("data-stw");
+          if (state.collapsed[fg]) delete state.collapsed[fg]; else state.collapsed[fg] = true;
+          buildSettings();
+          buildLegend();          // see the [data-tw] handler: the two stay in sync
+          return;
+        }
+        var s = t.closest("[data-sfc]");
+        if (s) {
+          var pk = s.getAttribute("data-sfc"), slash = pk.indexOf("/");
+          pickSubColors(pk.slice(0, slash), [pk.slice(slash + 1)],
+                        s.getAttribute("data-key") || null);
+          return;
+        }
         var b = t.closest("[data-fc]");
         if (b) pickColor(b.getAttribute("data-fc"), b.getAttribute("data-key") || null);
       });
     }
+
+    // RIGHT-CLICK, IN THE LEGEND ITSELF -- a second, faster way to reach the same twelve
+    // swatches the settings panel offers, without opening it. Unconditional: unlike the
+    // gear above, this does not depend on SETTINGS_UI or openSettings, because a context
+    // menu is not a second settings surface, just a shortcut to the pick functions below,
+    // which already no-op safely with no host to save through.
+    function closeCtxMenu() {
+      var el = $("ctxmenu");
+      if (el) el.hidden = true;
+      DOC.removeEventListener("mousedown", ctxOutside, true);
+      DOC.removeEventListener("keydown", ctxKey, true);
+      WIN.removeEventListener("resize", closeCtxMenu);
+    }
+    function ctxOutside(ev) {
+      var el = $("ctxmenu");
+      if (el && !el.hidden && !el.contains(ev.target)) closeCtxMenu();
+    }
+    function ctxKey(ev) { if (ev.key === "Escape") closeCtxMenu(); }
+
+    // The same 12-swatch + Auto markup buildSettings' own rows build, at the click point
+    // instead of in the sidebar. `current` is a slot key or "" for none; onPick(key) fires
+    // with the chosen key, or null for Auto.
+    //
+    // x/y are VIEWPORT coordinates (straight off the contextmenu event), and the menu is
+    // positioned relative to ROOT rather than the true viewport -- `position: fixed`
+    // measures from the nearest ancestor with a transform or CSS containment, not
+    // necessarily the window, and Obsidian's own workspace panes carry exactly that.
+    // Measured there: the menu opened detached from the row that was right-clicked,
+    // floating wherever the transformed ancestor's origin happened to be. ROOT's own
+    // getBoundingClientRect() already reflects whatever transform sits above it, so
+    // subtracting it converts a viewport point into ROOT's coordinate space correctly
+    // regardless of what Obsidian does further up the tree -- the same reason #vg-detail
+    // and #vg-tip are `position: absolute` against their own ancestor rather than fixed.
+    function openCtxMenu(x, y, current, onPick) {
+      var el = $("ctxmenu");
+      if (!el) return;
+      var pal = paletteInfo();
+      var sws = pal.map(function (p) {
+        var on = current === p.key;
+        return '<button class="swatch vg-' + p.key + '" role="menuitemradio"' +
+               ' data-key="' + p.key + '" aria-checked="' + on + '"' +
+               ' title="' + esc(p.name) + '" aria-label="' + esc(p.name) + '"></button>';
+      }).join("");
+      setHTML(el, '<div class="sws">' + sws + '</div>' +
+                  '<button class="auto" data-key="" aria-pressed="' + !current +
+                  '" title="Back to automatic">Auto</button>');
+      Array.prototype.forEach.call(el.querySelectorAll("[data-key]"), function (b) {
+        b.onclick = function () { onPick(b.getAttribute("data-key") || null); closeCtxMenu(); };
+      });
+      el.hidden = false;
+      var root0 = ROOT.getBoundingClientRect();
+      var rx = x - root0.left, ry = y - root0.top;
+      // Clamped to ROOT's own box, in the same coordinate space: a right-click near the
+      // edge must not open a popover that hangs off the view.
+      var r = el.getBoundingClientRect();
+      el.style.left = Math.max(4, Math.min(rx, ROOT.clientWidth - r.width - 4)) + "px";
+      el.style.top = Math.max(4, Math.min(ry, ROOT.clientHeight - r.height - 4)) + "px";
+      DOC.addEventListener("mousedown", ctxOutside, true);
+      DOC.addEventListener("keydown", ctxKey, true);
+      WIN.addEventListener("resize", closeCtxMenu);
+    }
+
+    // ONE DELEGATED LISTENER, for the same reason the settings panel's click handler is
+    // delegated: buildLegend replaces every row on every render, so anything bound to a
+    // row itself would be bound to an element about to be thrown away.
+    $("legend").addEventListener("contextmenu", function (ev) {
+      var t = ev.target instanceof Element ? ev.target : null;
+      if (!t) return;
+      var gBtn = t.closest(".lg[data-g]");
+      if (gBtn) {
+        ev.preventDefault();
+        var g = gBtn.getAttribute("data-g");
+        openCtxMenu(ev.clientX, ev.clientY, folderColors[g] || groupSlot[g] || "",
+                    function (key) { pickColor(g, key); });
+        return;
+      }
+      // The pooled tail row ("N smaller subfolders") carries several indices -- a pick
+      // there applies to every subfolder it stands for, matching how that row's eye and
+      // highlight already act as a block rather than forcing one right-click per member.
+      var subBtn = t.closest(".lgs[data-hsub]");
+      if (subBtn) {
+        ev.preventDefault();
+        var f = subBtn.getAttribute("data-hsub");
+        var subs = subOrder[f] || [];
+        var idx = subBtn.getAttribute("data-idx").split(",").map(Number);
+        var picked = idx.map(function (i) { return subs[i]; });
+        var cur = idx.length === 1 ? (subfolderColors[f + "/" + picked[0]] || "") : "";
+        openCtxMenu(ev.clientX, ev.clientY, cur,
+                    function (key) { pickSubColors(f, picked, key); });
+        return;
+      }
+      // Depth 2+ (a `data-hpath` row): no picker. Per design/0003-subfolder-
+      // differentiation.md these levels take no tint of their own and inherit their
+      // parent's swatch, so there is nothing here to pin -- the browser's own context
+      // menu shows instead.
+    });
 
     // One folder's slot, or -- with both arguments null -- every override dropped.
     // Nothing else in the map is touched: two folders may hold the same slot, and that
@@ -8142,6 +8370,22 @@ function mountVaultGraph(root, data, deps) {
       }
       var saved = applyFolderColors(next);
       if (saveFolderColors) saveFolderColors(Object.assign({}, saved));
+      buildSettings();
+    }
+
+    // One or more subfolders' slot, in the SAME folder, set to the same key in one write.
+    // The array is what lets the pooled "N smaller subfolders" legend row apply a single
+    // pick to every subfolder it stands for, matching how that row's eye and highlight
+    // already act as a block rather than forcing N separate clicks.
+    function pickSubColors(folder, subs, key) {
+      var next = Object.create(null);
+      Object.keys(subfolderColors).forEach(function (k) { next[k] = subfolderColors[k]; });
+      subs.forEach(function (sb) {
+        var pk = folder + "/" + sb;
+        if (key) next[pk] = key; else delete next[pk];
+      });
+      var saved = applySubfolderColors(next);
+      if (saveSubfolderColors) saveSubfolderColors(Object.assign({}, saved));
       buildSettings();
     }
 
@@ -8167,6 +8411,40 @@ function mountVaultGraph(root, data, deps) {
     // Rebuilt whole on every pick. The list is one row per top-level folder and the
     // vault has tens of those, not thousands, so there is nothing here worth the bugs
     // that come with patching rows in place.
+    // Every named subfolder of g, as its own radiogroup: a live tint preview, its name
+    // and count, an Auto button, and the same twelve swatches a folder row gets. Unlike
+    // a folder row, no swatch here is ever marked "current" while unpinned -- the
+    // automatic tint is a computed shade, not one of the twelve slot hexes, so there is
+    // nothing among them to ring. The Auto button's own pressed state already says
+    // "this one is automatic"; ringing a swatch that is not actually being used would be
+    // the lie a folder row's "(automatic)" marking specifically avoids.
+    function subfolderRows(g, pal) {
+      return (subOrder[g] || []).map(function (sb) {
+        var pk = g + "/" + sb;
+        var pin = subfolderColors[pk] || "";
+        var tint = subShade[pk] || colorOf(g);
+        var nm = sb || "(directly in folder)";
+        var sws = pal.map(function (p) {
+          var on = pin === p.key;
+          return '<button class="swatch vg-' + p.key + '" role="radio"' +
+                 ' data-sfc="' + esc(pk) + '" data-key="' + p.key + '"' +
+                 ' aria-checked="' + on + '" title="' + esc(p.name) + (on ? " (chosen)" : "") +
+                 '" aria-label="' + esc(p.name) + '"></button>';
+        }).join("");
+        return '<div class="scr scrsub" role="radiogroup" aria-label="Colour for ' +
+               esc(g + "/" + nm) + '">' +
+               '<div class="scrh">' +
+               '<span class="sw" style="background:' + tint + ';border-radius:50%"></span>' +
+               '<span class="nm" title="' + esc(nm) + '">' + esc(nm) + '</span>' +
+               '<span class="ct">' + (subCount[pk] || 0) + '</span>' +
+               '<button class="auto" data-sfc="' + esc(pk) + '" data-key=""' +
+               ' aria-pressed="' + (!pin) + '"' +
+               ' title="Back to the automatic tint">Auto</button>' +
+               '</div>' +
+               '<span class="sws">' + sws + '</span></div>';
+      }).join("");
+    }
+
     function buildSettings() {
       var pal = paletteInfo();
       var rows = (order[state.dim] || []).map(function (g) {
@@ -8203,8 +8481,16 @@ function mountVaultGraph(root, data, deps) {
         // live filter: the legend's own eye is the live one, and this is what the disc
         // comes back to on Refresh.
         var shown = !hiddenByDefault(g);
+        // SAME GATE buildLegend uses for its own twisty (pin included -- see
+        // groupHasPinnedSub), and the SAME state (state.collapsed) -- opening a
+        // folder's subfolders here opens them in the legend too.
+        var hasSubs = state.dim === "folder" &&
+                      (groupHasPinnedSub(g) ||
+                       ((subOrder[g] || []).length > 1 && (counts[g] || 0) >= NEST_MIN));
+        var open = hasSubs && !state.collapsed[g];
         return '<div class="scr" role="radiogroup" aria-label="Colour for ' + esc(g) + '">' +
                '<div class="scrh">' +
+               twBtn(hasSubs ? 'data-stw="' + esc(g) + '"' : null, open) +
                '<button class="eye vis" data-vis="' + esc(g) + '" aria-pressed="' + shown +
                '" title="' + (shown ? "Shown by default" : "Hidden by default") +
                '" aria-label="' + (shown ? "Hide" : "Show") + " " + esc(g) + '">' +
@@ -8214,7 +8500,8 @@ function mountVaultGraph(root, data, deps) {
                ' aria-pressed="' + (!pinned) + '"' +
                ' title="Back to the slot this folder gets automatically">Auto</button>' +
                '</div>' +
-               '<span class="sws">' + sws + '</span></div>';
+               '<span class="sws">' + sws + '</span></div>' +
+               (open ? subfolderRows(g, pal) : "");
       }).join("");
       setHTML($("setbody"), rows);
     }
@@ -9795,18 +10082,6 @@ function mountVaultGraph(root, data, deps) {
     return /(^|[?&#])demo\b/.test(String(location.search) + " " + String(location.hash));
   }
 
-  // Which storyboard `?demo` should run. "" is the README hero (demoMode); anything
-  // else names one of the shorter per-feature demos below, one per new README section
-  // from now on rather than growing the hero to cover everything the page can do.
-  // `\bdemo\b` above still matches "demo=pin" -- the "=" is a word boundary too -- so
-  // this only has to say WHICH, not whether.
-  function demoWhich() {
-    var q = String(WIN.location ? WIN.location.search : "") + " " +
-            String(WIN.location ? WIN.location.hash : "");
-    var m = /(^|[?&#])demo=([\w-]+)/.exec(q);
-    return m ? m[2] : "";
-  }
-
   // Is anything moving? Every animation in this page owns one of these three, so this
   // is the whole answer rather than a sample of it. The driver polls this instead of
   // sleeping: a fixed wait fires part-way through on a page too slow to finish in time,
@@ -10222,18 +10497,28 @@ function mountVaultGraph(root, data, deps) {
    * a preference panel, was landing before the timeline, which is the point of the tool.
    *
    * The acts now run: the vault growing, one note, the timeline, the heatmap, folders,
-   * subfolders, the camera, colours. Roughly descending in "would this make someone stop
-   * scrolling", with two exceptions that are structural rather than editorial:
+   * subfolders, the camera, pinning a note, colours. Roughly descending in "would this
+   * make someone stop scrolling", with three exceptions that are structural rather than
+   * editorial:
    *
    *   * FOLDERS BEFORE SUBFOLDERS, because the subfolder rows do not exist until a twisty
    *     has been clicked, and `only` must run while 03 is folded -- soloing while it is
    *     open deletes its rows and pulls everything below them up by 97px, so the pointer
    *     ends up over a row three below the one it clicked. That cost a take.
+   *   * PIN RIGHT BEFORE COLOURS, not earlier. Pinning leaves up to three notes sitting in
+   *     the hub for the rest of a combined run -- that is the point of the act, not a bug
+   *     in it, but every act after this one inherits a hub that is no longer empty. Placed
+   *     last but one, only "colours" (whose own beats open the gear and click swatches,
+   *     never the disc) inherits it.
    *   * COLOURS LAST, because the gear panel has to be open for the `swatch` targets to
    *     resolve at all, and the trip to the gear should be one trip.
    *
    * Beats are DATA, so reordering is reordering -- the driver holds no state between them.
    * What it is NOT free of is the ordering constraints above and the ones each act names.
+   *
+   * Every beat below also carries an `act:` tag naming which of these nine it belongs to
+   * -- `demoAct(name)`, just after this function, plays one act on its own instead of the
+   * whole thing, for the per-feature clips in docs/features.md.
    */
   function demoMode() {
     return [
@@ -10246,9 +10531,9 @@ function mountVaultGraph(root, data, deps) {
       // ribbon to the other, with the date under the handle, so this one beat says both
       // "here is the vault" and "here is the control that scrubs it". Which is why the act
       // that picks that handle up by hand comes next but one.
-      { settle: true, why: "start from a disc at rest" },
-      { click: true, target: ["id", "refresh"], why: "replay the intro on camera" },
-      { settle: true, why: "the vault grows from its first note to now, and the range end sweeps with it" },
+      { settle: true, act: "intro", why: "start from a disc at rest" },
+      { click: true, target: ["id", "refresh"], act: "intro", why: "replay the intro on camera" },
+      { settle: true, act: "intro", why: "the vault grows from its first note to now, and the range end sweeps with it" },
 
       /* --- 2. one note -------------------------------------------------- */
       // Hovering a note names it, lifts it, and lights its links while the rest of the
@@ -10262,8 +10547,8 @@ function mountVaultGraph(root, data, deps) {
       // BEFORE ANY FILTER RUNS, which is why this act moved up past the legend as well as
       // past the ribbon: demoNoteRect picks the most ISOLATED visible note, and the more
       // the disc has been thinned the further that aim drifts from a typical note.
-      { hover: true, target: ["note", "04"], why: "hover a daily note" },
-      { hover: true, target: ["note", "05"], why: "hover a meeting note" },
+      { hover: true, target: ["note", "04"], act: "note", why: "hover a daily note" },
+      { hover: true, target: ["note", "05"], act: "note", why: "hover a meeting note" },
 
       /* --- 3. the timeline ---------------------------------------------- */
       // The strip under the band carries every month of the vault, and it is the timeline:
@@ -10276,38 +10561,41 @@ function mountVaultGraph(root, data, deps) {
       // showed it travelling, this shows a hand doing it. The disc waits for the release on
       // each of these, by design -- a drag repaints one small canvas and the filter lands
       // once, when the button comes up.
-      { drag: [-320, 0], target: ["brush", "to"], why: "pull the range end back by hand -- the handle the intro just swept" },
-      { settle: true, why: "let the disc thin out" },
-      { drag: [200, 0], target: ["brush", "from"], why: "...and bring the range start forward" },
-      { settle: true, why: "let it thin further" },
+      { drag: [-320, 0], target: ["brush", "to"], act: "timeline", why: "pull the range end back by hand -- the handle the intro just swept" },
+      { settle: true, act: "timeline", why: "let the disc thin out" },
+      { drag: [200, 0], target: ["brush", "from"], act: "timeline", why: "...and bring the range start forward" },
+      { settle: true, act: "timeline", why: "let it thin further" },
+
+      // The band's window, moved on its own. The range above stays exactly where it was --
+      // which is most of what this act is for: they are two instruments, not one. Before the
+      // year chips on purpose: a year click sets the range to that year and can drag the
+      // window along with it, and this act is clearer split into "the window, on its own"
+      // then "the year chip, which touches both" rather than the other way round.
+      { drag: [-260, 0], target: ["brush", "window"], act: "timeline", why: "slide the heatmap window back on its own" },
+      { settle: true, act: "timeline", why: "let the band redraw" },
+      { drag: [170, 0], target: ["brush", "window"], act: "timeline", why: "...and forward again" },
+      { settle: true, act: "timeline", why: "let the band redraw" },
 
       // THE YEAR CHIPS, which have never been in the demo. Hover haloes that year's notes
       // wherever they landed; clicking sets the range to that calendar year, and the chip
       // reads pressed. "busiest" picks the fullest year that has a chip, so the hover
       // always lights something -- see demoFind.
-      { hover: true, target: ["year", "busiest"], why: "hover a year to find it on the disc" },
-      { click: true, target: ["year", "busiest"], why: "...and click it to filter to that year" },
-      { settle: true, why: "let the year land" },
-
-      // The band's window, moved on its own. The range above stays exactly where it was --
-      // which is most of what this act is for: they are two instruments, not one.
-      { drag: [-260, 0], target: ["brush", "window"], why: "slide the heatmap window back on its own" },
-      { settle: true, why: "let the band redraw" },
-      { drag: [170, 0], target: ["brush", "window"], why: "...and forward again" },
-      { settle: true, why: "let the band redraw" },
+      { hover: true, target: ["year", "busiest"], act: "timeline", why: "hover a year to find it on the disc" },
+      { click: true, target: ["year", "busiest"], act: "timeline", why: "...and click it to filter to that year" },
+      { settle: true, act: "timeline", why: "let the year land" },
 
       // Clear it, so everything after this runs on the whole vault. Also puts the window
       // back, which is what makes the `busiest` targets in the next act land on cells that
       // are actually on screen.
-      { click: true, target: ["id", "rangeall"], why: "clear the date range" },
-      { settle: true, why: "let the whole vault come back" },
+      { click: true, target: ["id", "rangeall"], act: "timeline", why: "clear the date range" },
+      { settle: true, act: "timeline", why: "let the whole vault come back" },
 
       /* --- 4. the heatmap ----------------------------------------------- */
       // Hovering a day haloes the notes added that day, wherever they landed on the disc.
       // Ranked by what is VISIBLE rather than by date, so this works on any vault.
-      { hover: true, target: ["busiest", "1"], why: "hover the busiest day" },
-      { hover: true, target: ["busiest", "2"], why: "...and the next" },
-      { hover: true, target: ["busiest", "3"], why: "...and the next" },
+      { hover: true, target: ["busiest", "1"], act: "heatmap", why: "hover the busiest day" },
+      { hover: true, target: ["busiest", "2"], act: "heatmap", why: "...and the next" },
+      { hover: true, target: ["busiest", "3"], act: "heatmap", why: "...and the next" },
 
       // AND CLICKING KEEPS IT. This is what replaced the sidebar's "Mark today" in 1.7.0:
       // a picked day's notes are recoloured to the neutral extreme as well as haloed, and
@@ -10317,71 +10605,93 @@ function mountVaultGraph(root, data, deps) {
       // The busiest day rather than today, because today is allowed to hold no notes and a
       // beat that marks nothing reads as a mis-click. Clicked twice, so nothing is left
       // marked for the acts below.
-      { click: true, target: ["busiest", "1"], why: "click a day to keep it marked -- recoloured, haloed, nothing moved" },
-      { settle: true, why: "let the mark ramp in" },
-      { click: true, target: ["busiest", "1"], why: "...and click again to let it go" },
-      { settle: true, why: "let it ramp back" },
+      { click: true, target: ["busiest", "1"], act: "heatmap", why: "click a day to keep it marked -- recoloured, haloed, nothing moved" },
+      { settle: true, act: "heatmap", why: "let the mark ramp in" },
+      { click: true, target: ["busiest", "1"], act: "heatmap", why: "...and click again to let it go" },
+      { settle: true, act: "heatmap", why: "let it ramp back" },
 
       /* --- 5. folders --------------------------------------------------- */
       // Hiding: the wedges reallocate and the disc stays a full circle.
-      { click: true, target: ["eye", "04"], why: "hide a folder -- the wedges reallocate" },
-      { settle: true, why: "let the wedges reallocate" },
+      { click: true, target: ["eye", "04"], act: "folders", why: "hide a folder -- the wedges reallocate" },
+      { settle: true, act: "folders", why: "let the wedges reallocate" },
 
       // And `only`, which is the fastest way to answer "where does one folder live".
       // SAFE HERE because nothing has been unfolded yet: see the note at the top about the
       // 97px row shift that soloing an unfolded legend causes.
-      { click: true, target: ["only", "08"], why: "solo a single folder" },
-      { settle: true, why: "let everything else recede" },
+      { click: true, target: ["only", "08"], act: "folders", why: "solo a single folder" },
+      { settle: true, act: "folders", why: "let everything else recede" },
 
-      { click: true, target: ["id", "allon"], why: "show everything again" },
-      { settle: true, why: "let the whole disc come back" },
+      { click: true, target: ["id", "allon"], act: "folders", why: "show everything again" },
+      { settle: true, act: "folders", why: "let the whole disc come back" },
 
       /* --- 6. subfolders ------------------------------------------------ */
       // The tree starts folded, so getting to a subfolder means opening its folder first.
       // That is the honest sequence and it is worth showing: the disc already draws 03's
       // sub-wedges, and this is where the legend admits they are there. It is also
       // load-bearing -- the row the next beats aim at does not exist until this has run.
-      { click: true, target: ["twisty", "03"], why: "unfold a folder to reach its subfolders" },
+      //
+      // SELF-CONTAINED for isolated recording: unlike the full storyboard's ordering rule
+      // above (folders before subfolders, because soloing while 03 is unfolded shifts
+      // rows), this act never solos anything itself -- it only unfolds, hovers, clicks and
+      // folds back. Recorded alone it needs nothing an earlier act left behind.
+      { click: true, target: ["twisty", "03"], act: "subfolders", why: "unfold a folder to reach its subfolders" },
 
       // HOVER FIRST, and at both levels. It is the cheaper question and the one you would
       // try first: a halo, with nothing hidden and no wedge moved.
-      { hover: true, target: ["group", "01"], why: "hover a folder to find it on the disc" },
-      { hover: true, target: ["sub", "03/People"], why: "...and one subfolder inside it" },
+      { hover: true, target: ["group", "01"], act: "subfolders", why: "hover a folder to find it on the disc" },
+      { hover: true, target: ["sub", "03/People"], act: "subfolders", why: "...and one subfolder inside it" },
 
       // Then the click, which is the same question answered permanently: highlighting is
       // a SEPARATE axis from visibility -- the whole point of the eye being its own
       // control -- and on a subfolder that owns a sub-wedge it moves as a block rather
       // than only being ringed. Hover haloes; a click also pushes. Shown back to back so
       // the difference is visible rather than asserted.
-      { click: true, target: ["sub", "03/People"], why: "click it instead: haloed AND pushed out" },
-      { settle: true, why: "let the sub-wedge push out" },
-      { click: true, target: ["sub", "03/People"], why: "...and let it back down" },
-      { settle: true, why: "let it settle back" },
+      { click: true, target: ["sub", "03/People"], act: "subfolders", why: "click it instead: haloed AND pushed out" },
+      { settle: true, act: "subfolders", why: "let the sub-wedge push out" },
+      { click: true, target: ["sub", "03/People"], act: "subfolders", why: "...and let it back down" },
+      { settle: true, act: "subfolders", why: "let it settle back" },
 
-      { click: true, target: ["twisty", "03"], why: "fold the subfolders away again" },
+      { click: true, target: ["twisty", "03"], act: "subfolders", why: "fold the subfolders away again" },
 
       /* --- 7. the camera ------------------------------------------------ */
       // Zoom in a few notches rather than one. One notch is a fifth now, which is the point
       // -- it is a scroll and not a teleport -- and a single notch on camera looks like
       // nothing happened.
-      { wheel: 4, target: ["stage", "0.42,0.40"], why: "zoom in, a fifth per notch" },
-      { settle: true, why: "let the last notch land" },
+      { wheel: 4, target: ["stage", "0.42,0.40"], act: "camera", why: "zoom in, a fifth per notch" },
+      { settle: true, act: "camera", why: "let the last notch land" },
 
       // Then pan, which is only possible now that the disc is not pinned to the middle. Held
       // button the whole way, or the page sees a click and a release with nothing between.
-      { drag: [190, 110], target: ["stage", "0.55,0.45"], why: "drag the disc around" },
-      { settle: true, why: "let the pan settle" },
+      { drag: [190, 110], target: ["stage", "0.55,0.45"], act: "camera", why: "drag the disc around" },
+      { settle: true, act: "camera", why: "let the pan settle" },
 
       // Two ways back, both shown, because the button is discoverable and the double-click is
       // faster once you know it.
-      { dblclick: true, target: ["stage", "centre"], why: "double-click anywhere to reset" },
-      { settle: true, why: "let the view come back" },
-      { wheel: 3, target: ["stage", "0.60,0.55"], why: "zoom in again, to have something to reset" },
-      { settle: true, why: "let it land" },
-      { click: true, target: ["id", "reset"], why: "...and the reset button in the corner" },
-      { settle: true, why: "let the view come back" },
+      { dblclick: true, target: ["stage", "centre"], act: "camera", why: "double-click anywhere to reset" },
+      { settle: true, act: "camera", why: "let the view come back" },
+      { wheel: 3, target: ["stage", "0.60,0.55"], act: "camera", why: "zoom in again, to have something to reset" },
+      { settle: true, act: "camera", why: "let it land" },
+      { click: true, target: ["id", "reset"], act: "camera", why: "...and the reset button in the corner" },
+      { settle: true, act: "camera", why: "let the view come back" },
 
-      /* --- 8. colours --------------------------------------------------- */
+      /* --- 8. pinning a note ---------------------------------------------- */
+      // Three DIFFERENT notes, one per gesture -- pinning is a TOGGLE (see togglePin), so
+      // running two gestures against the same note would have the second one release what
+      // the first just placed, and the act would end with fewer pins than it showed
+      // landing. biginner rather than a folder prefix for the drag -- see
+      // demoBigInnerNote: a drag has to survive a press, a glide and a release landing
+      // correctly under real load, and a big dot on the inner ring is both the easiest
+      // hit-test and the shortest trip to the hub.
+      { drag: true, target: ["biginner"], act: "pin", to: ["stage", "centre"],
+        why: "drag a note into the hole to pin it" },
+      { settle: true, act: "pin", why: "the hub opens and the ring closes around where it was" },
+      { rightclick: true, target: ["note", "05"], act: "pin", why: "right-click a note -- pins the same way" },
+      { settle: true, act: "pin", why: "let the second pin land" },
+      { click: true, target: ["note", "03"], act: "pin", why: "click a note to open its card" },
+      { click: true, target: ["pin"], act: "pin", why: "...and pin it from the card itself" },
+      { settle: true, act: "pin", why: "let the third pin land" },
+
+      /* --- 9. colours --------------------------------------------------- */
       // LAST on purpose. It is a preference panel, and it was landing before the timeline.
       // The gear has to come first regardless -- the panel's swatches do not exist in the
       // DOM until buildSettings has run, so the `swatch` targets below resolve to nothing
@@ -10389,64 +10699,62 @@ function mountVaultGraph(root, data, deps) {
       // click looks like a highlight and two look like a choice; and the second is a grey,
       // which is the answer to "can a folder recede on purpose" that the archives rule
       // only implies.
-      { click: true, target: ["id", "gear"], why: "open the settings panel" },
-      { click: true, target: ["swatch", "01/g8"], why: "give a folder a colour of its own" },
-      { settle: true, why: "the disc repaints -- no relayout, nothing moves" },
-      { click: true, target: ["swatch", "03/g11"], why: "...and let another one go grey" },
-      { settle: true, why: "let the second repaint land" },
-      { click: true, target: ["id", "fcreset"], why: "put every folder back to automatic" },
-      { settle: true, why: "let the palette snap back" },
-      { click: true, target: ["id", "gear"], why: "close the panel" },
+      { click: true, target: ["id", "gear"], act: "colours", why: "open the settings panel" },
+      { click: true, target: ["swatch", "01/g8"], act: "colours", why: "give a folder a colour of its own" },
+      { settle: true, act: "colours", why: "the disc repaints -- no relayout, nothing moves" },
+      { click: true, target: ["swatch", "03/g11"], act: "colours", why: "...and let another one go grey" },
+      { settle: true, act: "colours", why: "let the second repaint land" },
+      { click: true, target: ["id", "fcreset"], act: "colours", why: "put every folder back to automatic" },
+      { settle: true, act: "colours", why: "let the palette snap back" },
+      { click: true, target: ["id", "gear"], act: "colours", why: "close the panel" },
 
       // Pointer out of the way, so the last frame is the disc rather than a hover state
       // left behind by the last click.
-      { park: true, why: "leave the final frame clean" }
+      { park: true, act: "colours", why: "leave the final frame clean" }
     ];
   }
 
-  /**
-   * `?demo=pin` -- the three ways to put a note in the hub, and nothing else. Short on
-   * purpose: this is a per-feature clip for its own README section, not a second hero,
-   * and a viewer deciding whether to keep watching a ten-second clip is a different
-   * question than deciding whether to keep watching a ninety-second one.
-   *
-   * Three DIFFERENT notes, one per gesture -- pinning is a TOGGLE (see togglePin), so
-   * running two gestures against the same note would have the second one release what
-   * the first just placed, and the clip would end with fewer pins than it showed landing.
-   */
-  function demoModePin() {
-    return [
-      { settle: true, why: "start from a disc at rest" },
-
-      /* --- 1. drag a note into the hole ---------------------------------- */
-      // biginner, not a folder prefix -- see demoBigInnerNote. A drag has to survive a
-      // press, a glide and a release landing correctly under real load; a big dot on the
-      // inner ring is both the easiest hit-test and the shortest trip to the hub.
-      { drag: true, target: ["biginner"], to: ["stage", "centre"],
-        why: "drag a note into the hole to pin it" },
-      { settle: true, why: "the hub opens and the ring closes around where it was" },
-
-      /* --- 2. right-click is the other way in ------------------------------ */
-      { rightclick: true, target: ["note", "05"], why: "right-click a note -- pins the same way" },
-      { settle: true, why: "let the second pin land" },
-
-      /* --- 3. the detail card's own toggle -------------------------------- */
-      { click: true, target: ["note", "03"], why: "click a note to open its card" },
-      { click: true, target: ["pin"], why: "...and pin it from the card itself" },
-      { settle: true, why: "let the third pin land" },
-
-      { park: true, why: "leave the final frame clean" }
-    ];
+  // ONE ACT IN ISOLATION, for a per-feature clip instead of the whole storyboard. `name`
+  // is one of the nine `act:` tags above (`intro`, `note`, `timeline`, `heatmap`,
+  // `folders`, `subfolders`, `camera`, `pin`, `colours`) -- the same names the section
+  // comments in demoMode() already carry, so tagging a beat and naming it here is one
+  // decision, not two.
+  //
+  // Isolated acts don't need the full storyboard's ordering rules (folders-before-
+  // subfolders, pin-before-colours): under `?demo` the page comes up at rest with no
+  // filter applied and the gear closed (see the `?demo` branch near the end of this
+  // file), which is exactly the state every act other than "intro" already assumes as
+  // ITS starting point in the combined run too. A leading `settle` is enough; nothing
+  // needs a reset click first. `park` is appended rather than duplicated from the full
+  // storyboard's tail, so a recording of any single act ends on a clean frame the same
+  // way the full one does.
+  //
+  // Unknown name -> empty array with a loud warning, so a typo surfaces immediately in the
+  // recorder's log instead of quietly producing a beat-less, near-instant "recording".
+  function demoAct(name) {
+    var beats = demoMode().filter(function (b) { return b.act === name; });
+    if (!beats.length) {
+      console.warn("demo: no beats tagged act=\"" + name + "\" -- check the name against demoMode()");
+      return [];
+    }
+    if (name === "intro") return beats;   // already starts with its own settle beat
+    // "colours" already ends on its own {park} -- that beat WAS the full storyboard's
+    // final beat, just tagged into the act whose section comment it happened to sit under.
+    // Appending a second one is exactly the double-park a manual --act run caught: two
+    // "leave the final frame clean" beats in a row when this went untested.
+    var out = [{ settle: true, act: name, why: "start from a disc at rest" }].concat(beats);
+    if (!beats[beats.length - 1].park) {
+      out = out.concat([{ park: true, act: name, why: "leave the final frame clean" }]);
+    }
+    return out;
   }
 
   // Everything the driver needs, and nothing it does not.
   var demoApi = {
     on: demoOn,
     doneTitle: DEMO_DONE_TITLE,
-    // Dispatched on ?demo=<name> (demoWhich) rather than always demoMode, so a second
-    // storyboard needs no change here -- only a new WHICH branch and its own function,
-    // the same shape demoMode/demoModePin already are.
-    storyboard: function () { return demoWhich() === "pin" ? demoModePin() : demoMode(); },
+    storyboard: demoMode,
+    act: demoAct,
     busy: demoBusy,
     /**
      * WHICH of the five things busy() ors together is still running.
@@ -10553,6 +10861,28 @@ function mountVaultGraph(root, data, deps) {
                       return Object.assign(Object.create(null), folderColors);
                     },
                     setFolderColors: applyFolderColors,
+                    // subfolderColors/setSubfolderColors mirror the pair above and are the
+                    // host's actual read/write path -- both shell.html and plugin/main.js's
+                    // onSubfolderColors go through these. subColorOf/subSlotOf/subOrderOf/
+                    // subCountOf below them are NOT consumed by either host: the Obsidian
+                    // settings tab builds its subfolder rows from its own path-derived
+                    // allSubfolders() instead of asking the api, since a subfolder's
+                    // identity (unlike a top-level folder's) never needs an open view to
+                    // resolve. These four exist for manual inspection and the suite, the
+                    // same role api.colorOf/api.slotOf/api.groupOrder already play one
+                    // level up.
+                    get subfolderColors() {
+                      return Object.assign(Object.create(null), subfolderColors);
+                    },
+                    setSubfolderColors: applySubfolderColors,
+                    subColorOf: function (folder, sub) {
+                      return subShade[folder + "/" + (sub || "")] || colorOf(folder);
+                    },
+                    subSlotOf: function (folder, sub) {
+                      return subSlot[folder + "/" + (sub || "")] || "";
+                    },
+                    subOrderOf: function (g) { return (subOrder[g] || []).slice(); },
+                    subCountOf: function (g, sub) { return subCount[g + "/" + (sub || "")] || 0; },
                     // Visibility DEFAULTS. Setting these does not move the live filter --
                     // the host is expected to apply them, which is what setHiddenDefaults
                     // is for.
