@@ -418,6 +418,16 @@
     display: block; height: auto; overflow: visible;
     background: none; color: inherit; font: inherit; color-scheme: inherit;
   }
+
+  /* A subfolder row nested under a folder's own Setting, INSIDE .vg-tokens -- so this
+     rule reaches the Obsidian settings tab exactly the way .swatch/.auto above already
+     do, through the same scoping trick rather than a second one. Obsidian's own
+     .setting-item classes carry the rest of the row's styling; this only indents it and
+     drops the border every other Setting row has, so a run of subfolder rows reads as
+     one nested block under its folder rather than as more top-level rows. */
+  .vault-graph.vg-tokens .vg-subrow {
+    margin-left: 24px; padding-top: 6px; padding-bottom: 6px; border-top: none;
+  }
   .vault-graph.vg-tokens .sws { flex-wrap: wrap; justify-content: flex-end; }
   .vault-graph .swatch:hover { transform: scale(1.15); }
   /* THE CHECKED ONE IS RINGED, not ticked: a white tick vanishes on yellow and a dark
@@ -767,6 +777,39 @@
     color: var(--text-3); font-size: 16px; cursor: pointer; line-height: 1; padding: 2px 5px;
   }
   .vault-graph #vg-detail .x:hover { color: var(--text-1); }
+
+  /* THE RIGHT-CLICK COLOUR MENU. #vg-settings above is a sidebar block on purpose, to
+     avoid exactly this z-index-and-dismiss-handler cost -- but a menu that has to open
+     at the click point cannot be a block, so it pays that cost deliberately. `position:
+     fixed` against the viewport, not `absolute` against #vg-app: it can be opened from a
+     row inside the scrolling sidebar, and its left/top are set from clientX/clientY in
+     page.js, which are viewport coordinates. z-index above #vg-detail (6) and #vg-tip
+     (5), since it can be opened while either is showing. */
+  .vault-graph .ctxmenu {
+    position: fixed; z-index: 9; width: 176px;
+    background: var(--surface-2); border: 1px solid var(--border-strong);
+    border-radius: 8px; padding: 8px; box-shadow: 0 8px 28px rgba(0,0,0,.22);
+  }
+  .vault-graph .ctxmenu .sws {
+    display: grid; grid-template-columns: repeat(6, 1fr); gap: 4px; margin-bottom: 6px;
+  }
+  .vault-graph .ctxmenu .swatch { width: 100%; height: auto; aspect-ratio: 1; }
+  .vault-graph .ctxmenu .auto { width: 100%; }
+
+  /* A subfolder row in the settings panel, nested under its folder's own .scr. Indented
+     like .lgr.sub in the legend (14px), on the same .scr/.scrh/.sws layout the folder
+     rows already use -- it is a smaller version of the same thing, not a different one. */
+  .vault-graph .scrsub { margin-left: 14px; }
+  .vault-graph .scrsub .scrh .nm { font-size: 10px; }
+  .vault-graph .scrsub .sw {
+    width: 10px; height: 10px; flex: 0 0 auto; margin-right: 1px;
+  }
+  /* Same treatment as the legend's own .ct -- text-3, tabular-nums -- so a count reads
+     the same whether it is sitting in a CSS grid row there or a flex row here. */
+  .vault-graph .scrsub .ct {
+    color: var(--text-3); font-variant-numeric: tabular-nums; font-size: 10px;
+    margin: 0 4px;
+  }
 
   .vault-graph #vg-hits { margin-top: 6px; max-height: 168px; overflow-y: auto; }
   .vault-graph #vg-hits button {
