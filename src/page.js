@@ -1765,8 +1765,17 @@ function mountVaultGraph(root, data, deps) {
         var bk = bandLock && bandLock[g] ? "i" : "o";
         if (!bandDepth[bk]) bandDepth[bk] = depthOfBand(bk === "i");
         var nSubs = (subOrder[g] || []).length;
+        // CAPPED AT SUB_SLOTS for the threshold, not the raw subfolder count. However
+        // many real subfolders a folder has, subTintIndex never hands out more than
+        // SUB_SLOTS distinct cells -- the smallest ones pool into the "N smaller
+        // subfolders" tail and share the last one. Gating on the raw count asks a
+        // folder to prove it can fill rows for pieces that were never going to be
+        // drawn separately, which made 03 - Resources (9 subfolders, 60 notes) and
+        // 05 - Meeting Notes (14 subfolders, 85 notes) fail a bar meant for 9 and 14
+        // pieces when both only ever draw 4.
+        var splitPieces = Math.min(nSubs, SUB_SLOTS);
         splitOf[g] = nested && nSubs > 1 &&
-                     (liveN[g] || 0) >= Math.max(NEST_MIN, nSubs * bandDepth[bk]);
+                     (liveN[g] || 0) >= Math.max(NEST_MIN, splitPieces * bandDepth[bk]);
       }
       return splitOf[g];
     };
