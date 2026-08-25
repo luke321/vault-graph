@@ -7,7 +7,7 @@
  * vault-graph.html. No server, no network, no build step at view time.
  *
  * Usage:  node "03 - Resources/Vault Graph/build-graph.mjs"
- *          [--ghosts] [--templates] [--flat-months] [--no-nav] [--out FILE]
+ *          [--ghosts] [--templates] [--flat-months] [--no-nav] [--dev] [--out FILE]
  *
  * Vault-agnostic: it crawls every folder and reads which folders are templates
  * and daily notes from the vault's own .obsidian config, so no folder name or
@@ -129,6 +129,11 @@ const VAULT = (() => {
 })();
 
 const INCLUDE_GHOSTS = flag("ghosts");        // unresolved [[links]] as phantom nodes
+// A DEVELOPMENT BUILD: turns the wedge overlay (wedge edges, band radii, envelope centres)
+// on by default. It is off in every normal build, and `?nowedges` turns it off in a dev one --
+// the flag decides the DEFAULT, not the availability, so a shipped page can still be asked
+// for it with `?wedges` when a reported animation bug needs looking at.
+const DEV_BUILD = flag("dev");
 const INCLUDE_TEMPLATES = flag("templates");
 // Default output goes NEXT TO THE VAULT'S copy, not next to the source: the HTML is what
 // has to travel to the other devices, and the vault is what syncs.
@@ -505,6 +510,7 @@ const data = {
     templatesExcluded: !INCLUDE_TEMPLATES,
     ghostsIncluded: INCLUDE_GHOSTS,
   },
+  dev: DEV_BUILD,
 };
 
 /* ------------------------------------------------------------------ emit */

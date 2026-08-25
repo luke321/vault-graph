@@ -998,6 +998,26 @@ function mountVaultGraph(root, data, deps) {
   // ring re-packed the other. Locking both makes the rings independent: each
   // one's rows depend on its own weights, at its own fixed base.
   var geomLock = null;
+  /**
+   * THE WEDGE OVERLAY -- wedge edges and band radii, drawn over the disc.
+   *
+   * Every animation question asked here so far ("does the wedge close at constant speed",
+   * "does the neighbour stay put", "is the note centred in its wedge") is a question about
+   * the ENVELOPE, and the envelope is the one thing the page never draws. Answering them
+   * from note positions alone means re-deriving the boundary in a probe script, in a
+   * different angle convention from the one placeCell uses -- which is exactly how a note
+   * sitting dead centre in its wedge got reported as 100 degrees off it.
+   *
+   * So the layout hands its own boundaries out, and this draws them. `cells` is refilled by
+   * every ringsLayout pass while `on`, in the SAME terms the placement uses (a seam count and
+   * two wedge fractions, converted to an angle per radius by seamAt) -- not a copy of the
+   * answer in another form. On by default in a --dev build; `?wedges` / `?nowedges` override.
+   */
+  var DBG = { on: false, cells: null, canvas: null };
+  // The overlay's structural hue -- band radii and seam centres, the two things that belong to
+  // the disc rather than to a folder. Kept as one constant so they cannot drift apart.
+  var SEAM_YELLOW = "rgb(255,196,0)";
+  var SEAM_YELLOW_45 = "rgba(255,196,0,0.45)";
   // Kept for reference: locking the packing width per cell made a folder's rows
   // immune to other folders, but density then never adapted -- see the row count
   // note in buildWedgePlan.
@@ -1096,7 +1116,13 @@ function mountVaultGraph(root, data, deps) {
   // This is the third thing to stand where gapScale's note-count ramp used to. It is the same
   // intent -- less seam as a vault grows -- against a quantity that actually describes the
   // geometry rather than standing in for it.
-  var SEAM_ROWS = 0.075;    // of a row pitch, at REF_ROWS
+  // Raised from 0.075 once the margins stopped reserving a band-typical dot at every wedge
+  // end (see the margin note in placeCell). With the notes' ink landing ON their boundary, the
+  // seam IS the visible channel -- at 0.075 it was 12 units, so the two edges of every seam
+  // sat on top of each other and read as one doubled line instead of as a gap. At 0.3 the
+  // channel measures 94 to 97 units in the outer band with a spread of 2, against the 136 it
+  // used to show when two thirds of it was margin nobody could see.
+  var SEAM_ROWS = 0.3;      // of a row pitch, at REF_ROWS
 
   // AND NEVER MORE THAN THIS, whatever the pitch does. The seam is a fraction of the live
   // pitch, which is right -- a sparse ring wants a proportionally sparse seam -- until the
@@ -1221,8 +1247,30 @@ function mountVaultGraph(root, data, deps) {
     return DOT_OF_PITCH * pitchUnits(band) / bandScale(band) * (z / NODE_MAX);
   }
 
-  function seamAt(r, nBoundaries) {
-    var g = r > 1e-6 ? (SEAM_ROWS * pitchUnits()) / r : 0;
+  // THE BAND IS NOT OPTIONAL. pitchUnits() with no band answers for the OUTER one -- bandOf
+  // returns BAND.o for anything that is not "i" -- so every seam on the disc was measured in
+  // outer-band rows, including the inner band's. Hide the outer ring's folders and SP_O climbs,
+  // and the inner ring's seams grew with it: measured, 48 units to 109, a 2.3x change to a band
+  // whose own contents did not move. That is the exact failure pitchUnits' own note says it
+  // exists to prevent ("per band and never one shared number"), reintroduced by dropping the
+  // argument at the one call site that matters most.
+  /**
+   * A CELL'S BOUNDARY SWEEP AT ONE RADIUS -- the only place this is worked out.
+   *
+   * The overlay used to re-derive it from a captured summary, in its own copy of the algebra,
+   * and every time the placement changed the two drifted: edges drawn where no note was, a
+   * centre line that missed the notes it was supposed to bisect, and a morning of "there is
+   * another line". A cell now carries the radius-INDEPENDENT part of each boundary (pLead,
+   * pTrail, with the wrap rotation already folded in) and both callers add the same half-seam
+   * through the same seamAt. One formula, two readers, nothing to drift.
+   */
+  function edgeSweep(c, which, rGraph) {
+    var sm = seamAt(rGraph, c.nB, c.bandKey);
+    return which === "lead" ? c.pLead + sm.gap / 2 : c.pTrail - sm.gap / 2;
+  }
+
+  function seamAt(r, nBoundaries, band) {
+    var g = r > 1e-6 ? (SEAM_ROWS * pitchUnits(band)) / r : 0;
     var tot = g * nBoundaries;
     var cap = 2 * Math.PI * SEAM_CAP;
     if (tot > cap) { g *= cap / tot; tot = cap; }
@@ -1386,7 +1434,13 @@ function mountVaultGraph(root, data, deps) {
       // Scaled by min(1, w) the floor is a full step for any cell holding a real note, since a
       // visible note weighs 1, and shrinks with the last of a departing cell's weight. Nothing
       // changes at rest; the cliff at the cull becomes a ramp.
-      var floorFor = function (w) { return floorAng * (w > 1 ? 1 : w < 0 ? 0 : w); };
+      var floorFor = function (w, c0) {
+        // Driver two: the floor otherwise holds one full note-width until the group's weight
+        // drops below one -- i.e. until the LAST note fades -- which is precisely the arc
+        // refusing to close. On the ramp it falls (rises) linearly with the same clock.
+        if (colWalk && c0 && colWalk[c0.g] !== undefined) return floorAng * colWalk[c0.g].f;
+        return floorAng * (w > 1 ? 1 : w < 0 ? 0 : w);
+      };
       var over = 0, under = 0, live = [];
       list.forEach(function (c) {
         var w = weightOf(c);
@@ -1394,7 +1448,7 @@ function mountVaultGraph(root, data, deps) {
         shareMap[c.k] = raw;
         if (raw <= 0) return;
         live.push(c);
-        var fl = floorFor(w);
+        var fl = floorFor(w, c);
         if (raw < fl) under += fl - raw;
         else over += raw - fl;
       });
@@ -1414,7 +1468,7 @@ function mountVaultGraph(root, data, deps) {
       if (lift > 0) {
         var take = (under * lift) / over;
         live.forEach(function (c) {
-          var raw = shareMap[c.k], fl = floorFor(weightOf(c));
+          var raw = shareMap[c.k], fl = floorFor(weightOf(c), c);
           shareMap[c.k] = raw < fl ? raw + (fl - raw) * lift : raw - (raw - fl) * take;
         });
       } else {
@@ -1630,6 +1684,9 @@ function mountVaultGraph(root, data, deps) {
       // -- which is the same moment the cell is culled by present(). So the reservation and the
       // cell wink out together instead of one outliving the other.
       var pw = W(id);
+      // Driver three: the seam otherwise stands at the group's max alpha -- full width until
+      // the last note fades, then a snap. On the ramp it closes with the wedge.
+      if (colWalk && colWalk[g] !== undefined) pw = colWalk[g].f;
       if (!(presMax[g] >= pw)) presMax[g] = pw;
     });
 
@@ -2741,6 +2798,24 @@ function mountVaultGraph(root, data, deps) {
         // zero. Same asymmetry the cascade's destination plan had (see willShow), one
         // level down.
         var will = willShow(sl.id);
+        // Driver one of the wedge-arc ramp: a fully-toggled single-cell group's rendered
+        // share walks linearly instead of tracking the staggered alpha sum -- and it is the
+        // GROUP total n0 * ramp, not a per-slot sum, because a faded note leaving the plan
+        // takes its slot with it and a per-slot sum stepped down one share per cull: measured
+        // as a 1.55-degree single-frame arc step, 16x the mean, mid-hide.
+        //
+        // BOTH TERMS, and this is the whole reason the neighbours stay still. The reservation
+        // and the placement have to carry the SAME presence weight or the ring rotates -- the
+        // seam allocator reads presMax while the drawn width is share x (live/geom), so
+        // ramping geom alone left the seam on the ramp and the width on the staggered alpha
+        // sum. Two clocks, and the wedge next door swung 4.66 degrees out and back across a
+        // toggle that moves it 0.00 on develop. With live tied to geom the open fraction is 1
+        // and both terms are the ramp, which is exactly the relationship a group of notes
+        // fading together has anyway (presMax = a, geom = n * a) -- just on an even clock.
+        if (colWalk) {
+          var cw = colWalk[groupOf(sl.id)];
+          if (cw !== undefined) { c.geom = c.live = cw.n * cw.f; return; }
+        }
         c.geom += (fullRing || !will) ? al : 1;
         c.live += al;
       });
@@ -2781,7 +2856,8 @@ function mountVaultGraph(root, data, deps) {
     // Per note, its distance to the nearer edge of its own wedge. A hard cap on the drawn
     // radius -- see where it is filled, and dotPx.
     var edgeCapNext = Object.create(null);
-    if (probe) lastStart = Object.create(null);
+    var dbgCells = DBG.on ? [] : null;
+    if (probe) { lastStart = Object.create(null); lastArc = Object.create(null); lastBand = Object.create(null); }
     [true, false].forEach(function (isInner) {
       var band = shown.filter(function (c) { return !!c.inner === isInner; });
       if (!band.length) return;
@@ -2816,7 +2892,13 @@ function mountVaultGraph(root, data, deps) {
       // invisible without this. It is presence-weighted like nG, but the NUMBER of sub-cells
       // jumps when a group's split gate flips, and that changes avail for the whole band.
       bandOf(isInner ? "i" : "o").nSub = Math.round(a.nSub * 1000) / 1000;
-      band.forEach(function (c) { c.span = a.shareOf(c); });
+      band.forEach(function (c) {
+        c.span = a.shareOf(c);
+        if (probe && lastArc) {
+          lastArc[c.g] = (lastArc[c.g] || 0) + c.span * 180 / Math.PI;
+          lastBand[c.g] = isInner ? "i" : "o";
+        }
+      });
       // EVERY BOUNDARY COSTS ONE SEAM, group or subfolder, so there is a single count to
       // spend. The reference radius is the locked one, used only for the probe's readout and
       // for nothing the disc depends on.
@@ -2824,6 +2906,52 @@ function mountVaultGraph(root, data, deps) {
       firstAt = Object.create(null);
       var nB = a.nG + a.nSub;
       var refR = geomLock && geomLock.bandR ? geomLock.bandR[isInner ? "i" : "o"] : 0;
+      // The boundary rays are fixed at this radius; only the half-seam inset moves with r.
+      // Absent (no geomLock yet, first pass) the old per-radius sweep still applies.
+      // refR IS ALREADY IN GRAPH UNITS -- geomLock.bandR is what seamAngle divides a width by
+      // directly. Multiplying by UNIT again made the reference gap 160 times too small: 0.0004
+      // radians, so every wedge lost a full LOCAL seam with nothing reserved against it and the
+      // small ones lost half their arc. Measured, 06's wedge came out 5.5 degrees at the inner
+      // row against a nominal 11.9, with its note 7 degrees off the middle.
+      // NAMED sBand, NOT sRef, and that is not cosmetic: the probe readout inside the
+      // placement loop below declares its own `var sRef`, which var-hoists to the top of that
+      // callback and shadows this one for the whole of it. The ray path read the shadow --
+      // undefined unless the probe branch happened to run -- so it silently never executed and
+      // the disc kept the old accumulated boundaries while every measurement said otherwise.
+      // Same class as the roomPool/pool hoist that put every note at the origin.
+      var sBand = refR > 0 ? seamAt(refR, nB, isInner ? "i" : "o") : null;
+      // PER-ROW SHARES -- see rowArcOn. Presence-weighted, so a wedge leaving a row gives its
+      // arc up as its notes fade rather than the frame they are culled.
+      var rowShare = null;
+      if (rowArcOn()) {
+        rowShare = Object.create(null);
+        var presIn = Object.create(null);
+        band.forEach(function (c0, ci) {
+          c0.slots.forEach(function (sl0) {
+            var w0 = alpha[sl0.id] || 0;
+            if (!(w0 > 0.004)) return;
+            if (w0 > 1) w0 = 1;
+            var rk0 = Math.round(sl0.r * 1000);
+            var arr0 = presIn[rk0] || (presIn[rk0] = []);
+            if (!(arr0[ci] >= w0)) arr0[ci] = w0;
+          });
+        });
+        Object.keys(presIn).forEach(function (rk0) {
+          var arr0 = presIn[rk0], tot0 = 0;
+          band.forEach(function (c0, ci) { tot0 += a.fracOf(c0) * (arr0[ci] || 0); });
+          if (!(tot0 > 1e-9)) return;
+          var acc0 = 0, sb0 = 0, seams0 = [], before0 = [], frac0 = [];
+          band.forEach(function (c0, ci) {
+            var p0 = arr0[ci] || 0;
+            sb0 += p0;                       // one seam before every cell present in this row
+            seams0[ci] = sb0;
+            before0[ci] = acc0;
+            frac0[ci] = a.fracOf(c0) * p0 / tot0;
+            acc0 += frac0[ci];
+          });
+          rowShare[rk0] = { seams: seams0, before: before0, frac: frac0, nB: sb0 };
+        });
+      }
 
       // A gap BEFORE EVERY GROUP, including the first -- that leading one is the wrap
       // boundary between the last group and the first, so the ring still reads as even.
@@ -2846,7 +2974,7 @@ function mountVaultGraph(root, data, deps) {
       // terms carry exactly the presence weights the reservation used, as before -- that is what
       // keeps a departing group from rotating the disc.
       var seamsBefore = a.groupPres[band[0].g], fracBefore = 0, prevG = null;
-      band.forEach(function (c) {
+      band.forEach(function (c, cIdx) {
         if (prevG !== null) seamsBefore += (c.g !== prevG) ? a.groupPres[c.g] : a.presOf(c);
         prevG = c.g;
         var frac = a.fracOf(c);
@@ -2854,8 +2982,8 @@ function mountVaultGraph(root, data, deps) {
         // moves when the gap reservation changes. Only the first cell of a group writes,
         // so this is the group's own start rather than its last subfolder's.
         if (probe && lastStart && lastStart[c.g] === undefined) {
-          var sRef = seamAt(refR, nB);
-          lastStart[c.g] = Math.round((sRef.gap * seamsBefore + sRef.avail * fracBefore) *
+          var sProbe = seamAt(refR, nB, isInner ? "i" : "o");
+          lastStart[c.g] = Math.round((sProbe.gap * seamsBefore + sProbe.avail * fracBefore) *
                                       180 / Math.PI * 1000) / 1000;
         }
         // The wedge keeps its FINAL start angle and only its span opens, so an
@@ -2870,6 +2998,32 @@ function mountVaultGraph(root, data, deps) {
         // neighbours and pushes what follows round the circle, which is what
         // makes the motion read along the circumference instead of radially.
         var open = c.geom > 1e-6 ? c.live / c.geom : 0;
+        // THE RADIUS-INDEPENDENT PART OF THIS CELL'S TWO BOUNDARIES, with the wrap rotation
+        // folded in. Everything that reads a boundary -- the notes below, the overlay, the
+        // probes -- goes through edgeSweep from here.
+        c.bandKey = isInner ? "i" : "o";
+        c.nB = nB;
+        if (sBand) {
+          var A0c = sBand.gap * seamsBefore + sBand.avail * fracBefore;
+          c.pLead = A0c - sBand.gap;
+          c.pTrail = A0c + sBand.avail * frac * open;
+        } else {
+          c.pLead = undefined; c.pTrail = undefined;
+        }
+        // The overlay's copy of this cell's envelope: how many seams lie before it, and where
+        // its OPEN span starts and ends as a fraction of the band's available arc. Radius-free
+        // on purpose -- the seam is a constant width, so the drawn edge is a curve, and the
+        // overlay evaluates it through the same seamAt the notes go through.
+        // Captured as the RAYS the placement now uses, plus the reference gap, so the overlay
+        // reconstructs exactly what the notes were placed with rather than a formula that was
+        // true one version ago.
+        if (dbgCells) {
+          dbgCells.push({ g: c.g, k: c.k, inner: !!c.inner, nB: nB, bandKey: c.bandKey,
+                          seams: seamsBefore, f0: fracBefore,
+                          f1: fracBefore + frac * open,
+                          pLead: c.pLead, pTrail: c.pTrail,
+                          ids: c.slots.map(function (sl) { return sl.id; }) });
+        }
 
         // How many notes this cell puts in each row -- what its end margins are made of, see
         // the zero point below. Counted over the notes that are actually there.
@@ -2918,9 +3072,38 @@ function mountVaultGraph(root, data, deps) {
           // is the wrong geometry: it makes wedge boundaries radial rays, so the channel opens
           // out with radius, which is the "gaps should not be wedge anymore" this was built to
           // fix. See decision 0002 in .ai-context.
-          var sm = seamAt(sl.r * UNIT, nB);
-          var a0 = sm.gap * seamsBefore + sm.avail * fracBefore;
-          var a1 = a0 + sm.avail * frac * open;
+          var rs = rowShare ? rowShare[Math.round(sl.r * 1000)] : null;
+          // EVERY SEAM GETS ITS OWN HALF-GAP, NOT AN ACCUMULATED ONE.
+          //
+          // The sweep used to be built at each note's own radius: gap(r) * seamsBefore +
+          // avail(r) * fracBefore. Multiply that out and a boundary is
+          //
+          //     theta(r) = 2*pi*frac + gap(r) * (seams - 0.5 - nB * frac)
+          //
+          // whose 1/r coefficient IS its distance from the centre of the disc. It vanishes only
+          // where a boundary's seam INDEX matches its share of the CIRCLE -- true at the wrap by
+          // construction and nowhere else unless every wedge is the same size. Measured on the
+          // reporter's vault, two of nine seams pointed at the centre and the rest missed by 32
+          // to 101 units, worst just past 04 - Daily Notes, which takes 233 degrees behind a
+          // single seam. Reported as "the seam lines are not all radial", and they were not.
+          //
+          // Now the boundary is a fixed RAY -- the whole accumulation is evaluated once at the
+          // band's reference radius -- and each side of it is inset by half a seam at the note's
+          // own radius. So every seam is a constant-width channel about a radius, tilted by
+          // W/2 and nothing else: the same 29 units everywhere, instead of however uneven the
+          // wedges before it happen to be.
+          var sm = seamAt(sl.r * UNIT, rs ? rs.nB : nB, isInner ? "i" : "o");
+          var a0, a1;
+          if (c.pLead !== undefined) {
+            a0 = edgeSweep(c, "lead", sl.r * UNIT);
+            a1 = edgeSweep(c, "trail", sl.r * UNIT);
+          } else if (rs && rs.frac[cIdx] > 0) {
+            a0 = sm.gap * rs.seams[cIdx] + sm.avail * rs.before[cIdx] - sm.gap / 2;
+            a1 = a0 + sm.avail * rs.frac[cIdx] * open;
+          } else {
+            a0 = sm.gap * seamsBefore + sm.avail * fracBefore - sm.gap / 2;
+            a1 = a0 + sm.avail * frac * open;
+          }
           // ROTATED BACK BY HALF A GAP, so the WRAP GAP is centred on 12 o'clock rather
           // than starting there. The allocation places a full gap before the first group
           // (see the leading-offset note above), and sweep 0 is 12 o'clock -- so the gap
@@ -3100,14 +3283,33 @@ function mountVaultGraph(root, data, deps) {
           //
           // The margin therefore holds the CENTRE at a constant width until the radius is
           // decided in one place instead of two. See the note at the top of dotPx.
-          var side = function () { return (clear + DOT_OF_PITCH * room) / rGraph; };
-          var mgA = side(), mgB = side();
+          // EACH END NOTE'S OWN DOT, not the biggest dot in the band.
+          //
+          // The reservation was one band-typical width at both ends, so a note smaller than
+          // the band's biggest stopped short of its own boundary by the difference -- measured
+          // at 26 units on one row of 03, and it is the whole reason two ends of one wedge read
+          // as uneven while the numbers reserved for them are identical. The end notes' size
+          // ATTRIBUTES have been threaded here as sl.eA and sl.eB since the margin moved to
+          // this site; they were never used. Scaled by the same room the band's biggest dot is
+          // scaled by, so this is that number times the note's own share of NODE_MAX, and the
+          // ink of every end note lands on its wedge's edge instead of somewhere behind it.
+          //
+          // The dots then TOUCH the seam, so the seam is the whole visible channel and has to
+          // be wide enough to be one -- see SEAM_ROWS, raised in the same change.
+          var side = function (z) {
+            var f = (z || NODE_MAX) / NODE_MAX;
+            if (f > 1) f = 1; else if (f < 0.15) f = 0.15;
+            return (clear + DOT_OF_PITCH * room * f) / rGraph;
+          };
+          var mgA = side(sl.eA), mgB = side(sl.eB);
           var room = arc * 0.66;
           if (mgA + mgB > room) {
             var k = room / (mgA + mgB);
             mgA *= k; mgB *= k;
           }
-          var t = sweepAngle(a0 + mgA + (arc - mgA - mgB) * sl.u - sm.gap / 2);
+          // No wrap rotation here any more: it is folded into pLead/pTrail (see edgeSweep),
+          // which is what lets one expression serve the notes and the overlay both.
+          var t = sweepAngle(a0 + mgA + (arc - mgA - mgB) * sl.u);
           // HOW MUCH ROOM THIS NOTE HAS TO ITS OWN WEDGE EDGE, in graph units. dotPx caps the
           // drawn radius at this, which is the only bound on "a dot must not cross into the
           // seam" that cannot go stale.
@@ -3273,6 +3475,7 @@ function mountVaultGraph(root, data, deps) {
     edgeCap = edgeNow || edgeCapNext;
     if (planRoom) { /* kept on the plan for the probe; the live pool is what draws */ }
     dotFit = fit;
+    if (dbgCells) DBG.cells = dbgCells;
     return out;
   }
 
@@ -3433,6 +3636,8 @@ function mountVaultGraph(root, data, deps) {
    */
   function applyRange() {
     rangeChrome();
+    // A range change is NOT a wedge toggle; the wedge-arc machinery below must not engage on
+    // a range that happens to empty a group. Every legend/visibility path passes colToggle.
     cascade();
   }
 
@@ -3520,6 +3725,460 @@ function mountVaultGraph(root, data, deps) {
       if (state.hoverSub[pk]) return true;
     }
     return false;
+  }
+
+  /**
+   * WHERE ONE CELL'S NOTES ACTUALLY REACH, as a fraction of its band's available arc -- the
+   * same fraction space f0/f1 live in, so a drawn edge can be put through them.
+   *
+   * placeCell holds the end note half a step in (the margin is arc/(2n)), so a wedge's
+   * ALLOCATED boundary stands about 3.7 degrees clear of its last dot on this vault. Two
+   * neighbouring boundaries then sit as a close pair in the middle of a wide empty channel,
+   * which reads as the edges touching each other and bounding nothing, with the seam invisible
+   * between them -- reported exactly that way. The seam is the channel between these note
+   * edges, and drawing them there is what makes it visible.
+   *
+   * Back through the same conversion the placement used, at each note's OWN radius: the seam
+   * is a constant width, so both its angle and the fraction a given angle corresponds to
+   * depend on where the note sits. The dot's half-width goes in as an angle at that radius,
+   * so the edge clears the ink rather than the centre.
+   */
+  function cellNoteFrac(c) {
+    if (!renderer || !c || !c.ids || !c.ids.length) return null;
+    var q0 = renderer.graphToViewport({ x: 0, y: 0 });
+    var q1 = renderer.graphToViewport({ x: UNIT, y: 0 });
+    var d0 = Math.hypot(q1.x - q0.x, q1.y - q0.y);
+    var perPx = d0 > 1e-3 ? UNIT / d0 : 0;
+    var lo = Infinity, hi = -Infinity;
+    c.ids.forEach(function (id) {
+      if ((alpha[id] || 0) < 0.5) return;
+      var at = graph.getNodeAttributes(id);
+      var rl = Math.hypot(at.x, at.y) / UNIT;
+      if (!(rl > 1e-6)) return;
+      var dd = renderer.getNodeDisplayData(id);
+      if (!dd || dd.hidden) return;
+      var sn = seamAt(rl * UNIT, c.nB, c.inner ? "i" : "o");
+      if (!(sn.avail > 1e-9)) return;
+      var f = (angleSweep(Math.atan2(at.y, at.x)) + sn.gap / 2 - sn.gap * c.seams) / sn.avail;
+      var half = (renderer.scaleSize(dd.size) * perPx) / (rl * UNIT) / sn.avail;
+      if (f - half < lo) lo = f - half;
+      if (f + half > hi) hi = f + half;
+    });
+    return lo < hi ? { lo: lo, hi: hi } : null;
+  }
+
+  /**
+   * The wedge envelope at one lattice radius, in the SCREEN angle convention (degrees, the
+   * same one atan2 on a node's x/y gives). Groups are folded from their cells, so a folder
+   * split into sub-wedges reports one envelope per sub-wedge run rather than a bounding box
+   * across the whole band.
+   *
+   * `centre` is the midpoint between this wedge's two ANGULAR NEIGHBOURS' facing edges --
+   * wedge plus both half-seams -- which is where a single-column note should sit.
+   */
+  function wedgeEdges(rLattice) {
+    var cells = DBG.cells;
+    if (!cells || !cells.length) return [];
+    var out = [];
+    ["i", "o"].forEach(function (bk) {
+      var band = cells.filter(function (c) { return (c.inner ? "i" : "o") === bk; });
+      if (!band.length) return;
+      var r = rLattice || (geomLock
+        ? (bk === "i" ? geomLock.r0 + (geomLock.rOuter - geomLock.r0) * INNER_FILL * 0.5
+                      : (geomLock.rOuter + geomLock.maxR) / 2)
+        : 1);
+      var sm = seamAt(r * UNIT, band[0].nB, bk);
+      // Straight through edgeSweep -- the placement's own expression. The pre-ray form stays
+      // for a capture taken before geomLock existed, where there is no reference radius.
+      var sw = function (c, which) {
+        if (c.pLead !== undefined) return edgeSweep(c, which === "f0" ? "lead" : "trail", r * UNIT);
+        return sm.gap * c.seams + sm.avail * c[which] - sm.gap / 2;
+      };
+      // Fold adjacent cells of the same group into one wedge, in sweep order.
+      var runs = [];
+      band.slice().sort(function (x, y) { return x.f0 - y.f0; }).forEach(function (c) {
+        var last = runs[runs.length - 1];
+        if (last && last.g === c.g) { last.b = c; return; }
+        runs.push({ g: c.g, band: bk, a: c, b: c });
+      });
+      var noteFrac = function (run) {
+        var lo = Infinity, hi = -Infinity;
+        band.filter(function (c) { return c.g === run.g && c.f0 >= run.a.f0 && c.f1 <= run.b.f1; })
+            .forEach(function (c) {
+              var e = cellNoteFrac(c);
+              if (!e) return;
+              if (e.lo < lo) lo = e.lo;
+              if (e.hi > hi) hi = e.hi;
+            });
+        return lo < hi ? { lo: lo, hi: hi } : null;
+      };
+
+      runs.forEach(function (run, i) {
+        var prev = runs[(i - 1 + runs.length) % runs.length];
+        var next = runs[(i + 1) % runs.length];
+        var lo = sw(prev.b, "f1"), hi = sw(next.a, "f0");
+        if (runs.length < 2) { lo = sw(run.a, "f0") - sm.gap; hi = sw(run.b, "f1") + sm.gap; }
+        else { while (hi < lo) hi += 2 * Math.PI; }
+        var deg = function (x) { return sweepAngle(x) * 180 / Math.PI; };
+        var nf = noteFrac(run);
+        out.push({ g: run.g, band: bk, r: r,
+                   // The note-hugging edges, in the same fraction space as f0/f1 so the
+                   // drawing can put its curve through them. Null when nothing is drawn.
+                   nf0: nf ? nf.lo : null, nf1: nf ? nf.hi : null,
+                   nStart: nf ? deg(sw({ seams: run.a.seams, f0: nf.lo }, "f0")) : null,
+                   nEnd: nf ? deg(sw({ seams: run.a.seams, f0: nf.hi }, "f0")) : null,
+                   // The raw terms too: a swing in `start` is either the seam count or the
+                   // fraction before it, and the sum alone cannot say which.
+                   seams: run.a.seams, f0: run.a.f0, f1: run.b.f1,
+                   gap: sm.gap * 180 / Math.PI, avail: sm.avail * 180 / Math.PI,
+                   start: deg(sw(run.a, "f0")), end: deg(sw(run.b, "f1")),
+                   arc: (sw(run.b, "f1") - sw(run.a, "f0")) * 180 / Math.PI,
+                   centre: deg((lo + hi) / 2) });
+      });
+    });
+    return out;
+  }
+
+  /** Draw the overlay: every wedge edge as a curve across its band, plus the band radii. */
+  function drawWedgeDebug() {
+    var cv = DBG.canvas;
+    if (!cv) return;
+    if (!DBG.on || !renderer || !geomLock) { cv.style.display = "none"; return; }
+    cv.style.display = "";
+    var host = $("graph");
+    var w = host.clientWidth, h = host.clientHeight, dpr = WIN.devicePixelRatio || 1;
+    if (cv.width !== Math.round(w * dpr) || cv.height !== Math.round(h * dpr)) {
+      cv.width = Math.round(w * dpr); cv.height = Math.round(h * dpr);
+      cv.style.width = w + "px"; cv.style.height = h + "px";
+    }
+    var g2 = cv.getContext("2d");
+    g2.setTransform(dpr, 0, 0, dpr, 0, 0);
+    g2.clearRect(0, 0, w, h);
+    // THE BANDS AS DRAWN, measured off the dots themselves -- outer edge of the outermost
+    // note, inner edge of the innermost -- rather than off geomLock. geomLock's radii are the
+    // solver's LATTICE bounds, taken before INNER_SCALE and before the row pitch decides where
+    // a row actually lands, so all four circles missed: the outer ring's outer circle floated
+    // clear of the notes, its inner circle ran through their middles, and both inner-ring
+    // circles sat inside the ring. A debug ring that does not touch what it claims to bound is
+    // worse than none -- it invites exactly the reasoning-instead-of-measuring this project
+    // keeps paying for. Orphans are excluded: they live in the hub hole, not in a band.
+    var perPx = (function () {
+      var a0 = renderer.graphToViewport({ x: 0, y: 0 });
+      var b0 = renderer.graphToViewport({ x: UNIT, y: 0 });
+      var d0 = Math.hypot(b0.x - a0.x, b0.y - a0.y);
+      return d0 > 1e-3 ? UNIT / d0 : 0;
+    })();
+    var seen = { i: null, o: null };
+    graph.forEachNode(function (id, a) {
+      if ((alpha[id] || 0) < 0.5 || isOrphan(id)) return;
+      var dd = renderer.getNodeDisplayData(id);
+      if (!dd || dd.hidden) return;
+      var rl = Math.hypot(a.x, a.y) / UNIT;
+      var dot = renderer.scaleSize(dd.size) * perPx / UNIT;
+      var k = bandLock && bandLock[groupOf(id)] ? "i" : "o";
+      var bb = seen[k] || (seen[k] = { lo: Infinity, hi: -Infinity });
+      if (rl - dot < bb.lo) bb.lo = rl - dot;
+      if (rl + dot > bb.hi) bb.hi = rl + dot;
+    });
+    var thickI = (geomLock.rOuter - geomLock.r0) * INNER_FILL;
+    var bandR = { i: [geomLock.r0, geomLock.r0 + thickI], o: [geomLock.rOuter, geomLock.maxR] };
+    ["i", "o"].forEach(function (k) {
+      if (seen[k] && seen[k].lo < seen[k].hi) bandR[k] = [seen[k].lo, seen[k].hi];
+    });
+    var vp = function (rl, ang) {
+      return renderer.graphToViewport({ x: rl * UNIT * Math.cos(ang), y: rl * UNIT * Math.sin(ang) });
+    };
+    // The folder's own colour at a given alpha. colorOf answers in whatever CSS form the
+    // palette holds (hex or a colour function), so the alpha rides in globalAlpha rather
+    // than being spliced into the string.
+    var tint = function (g0, a) { return { c: colorOf(g0), a: a }; };
+    // The band radii first, underneath: r0, the inner band's fill edge, rOuter, maxR.
+    g2.lineWidth = 1;
+    g2.strokeStyle = SEAM_YELLOW_45;
+    g2.lineWidth = 2;
+    g2.setLineDash([4, 4]);
+    [bandR.i[0], bandR.i[1], bandR.o[0], bandR.o[1]].forEach(function (rl) {
+      g2.beginPath();
+      for (var i = 0; i <= 96; i++) {
+        var q = vp(rl, i / 96 * 2 * Math.PI);
+        if (i) g2.lineTo(q.x, q.y); else g2.moveTo(q.x, q.y);
+      }
+      g2.stroke();
+    });
+    g2.setLineDash([]);
+    var cells = DBG.cells || [];
+    ["i", "o"].forEach(function (bk) {
+      var band = cells.filter(function (c) { return (c.inner ? "i" : "o") === bk; });
+      if (!band.length) return;
+      var lo = bandR[bk][0], hi = bandR[bk][1];
+      // A SEAM IS A PARALLEL-SIDED CHANNEL, and this draws it as one.
+      //
+      // The seam is a constant WIDTH, so its angle goes as 1/r -- that is the whole point of
+      // seamAt, and it is what stops the channels between wedges opening out into slots as
+      // they run outward (decision 0002). Drawing each edge as a curve of constant FRACTION
+      // hid it: the two facing edges both splayed with radius and read as radial rays, with
+      // nothing between them. So each boundary is now drawn as what it geometrically is --
+      // a radial centre line, and one straight edge either side of it, PARALLEL to it, each
+      // offset to the nearest ink on its own side. Parallel lines either side of a radius
+      // are the picture of a constant-width channel; anything else here would be a lie about
+      // the layout.
+      var rMid = (lo + hi) / 2, loG = lo * UNIT, hiG = hi * UNIT;
+      var fracOf = function (c, which) {
+        var e = cellNoteFrac(c);
+        return e ? (which === "f0" ? e.lo : e.hi) : c[which];
+      };
+      var angAt = function (c, which, rl) {
+        var sm = seamAt(rl * UNIT, c.nB, c.inner ? "i" : "o");
+        return sweepAngle(sm.gap * c.seams + sm.avail * fracOf(c, which) - sm.gap / 2);
+      };
+      // Every drawn dot of a cell, in graph units, with the radius of its ink.
+      var inkOf = function (c) {
+        var out = [];
+        var q0 = renderer.graphToViewport({ x: 0, y: 0 });
+        var q1 = renderer.graphToViewport({ x: UNIT, y: 0 });
+        var d0 = Math.hypot(q1.x - q0.x, q1.y - q0.y);
+        var perPx = d0 > 1e-3 ? UNIT / d0 : 0;
+        (c.ids || []).forEach(function (id) {
+          if ((alpha[id] || 0) < 0.5) return;
+          var dd = renderer.getNodeDisplayData(id);
+          if (!dd || dd.hidden) return;
+          var at = graph.getNodeAttributes(id);
+          out.push({ x: at.x, y: at.y, rad: renderer.scaleSize(dd.size) * perPx });
+        });
+        return out;
+      };
+
+      // EACH WEDGE IN ITS OWN FOLDER'S COLOUR, so an edge is attributable at a glance --
+      // with twelve wedges in a band, one accent colour for all of them says a boundary
+      // moved without saying whose. Sub-wedge boundaries are the same hue, drawn faint:
+      // the two are different things, and every measured wedge-jump bug so far has been
+      // about which of them moved.
+
+      // ONE CENTRE LINE PER FOLDER, not per cell. Drawn per cell, a folder split into
+      // sub-wedges showed one dashed line per sub-wedge -- 05 has two, 04 has three -- and
+      // beside a neighbour's single line they read as that neighbour having two centres.
+      // Reported as monthly having two, when the extra lines were its neighbours': 05's second
+      // sub-wedge, and yearly's own line running the full height of the band while its single
+      // note sits in one row. A folder is one wedge to the eye, so it gets one middle.
+      //
+      // EVALUATED AT BOTH ENDS OF THE BAND AND JOINED. A wedge boundary is a straight line but
+      // not a radial one: the seam is a constant width, so its angle goes as W/r and a boundary
+      // is theta = theta0 + d/r; the midline between two of them is another straight line with
+      // its own offset. Taking the centre angle once in the middle and drawing a RADIUS through
+      // it put 06's three notes 0.08, 0.32 and 0.73 degrees off their own centre. Two points,
+      // one line: every note of every single-column wedge now measures 0 units off it.
+      (function () {
+        var runs = [];
+        band.slice().sort(function (x, y) { return x.f0 - y.f0; }).forEach(function (c0) {
+          var last = runs[runs.length - 1];
+          if (last && last.g === c0.g) { last.cells.push(c0); return; }
+          runs.push({ g: c0.g, cells: [c0] });
+        });
+        runs.forEach(function (run) {
+          var a0c = run.cells[0], b0c = run.cells[run.cells.length - 1];
+          var fMid = (a0c.f0 + b0c.f1) / 2;
+          var host0 = a0c;
+          run.cells.forEach(function (c0) { if (c0.f0 <= fMid && fMid <= c0.f1) host0 = c0; });
+          void b0c;
+          // The run's own middle: halfway between its first cell's leading boundary and its
+          // last cell's trailing one, both from edgeSweep. Nothing reconstructed.
+          var mid = function (rl) {
+            if (a0c.pLead !== undefined) {
+              return sweepAngle((edgeSweep(a0c, "lead", rl * UNIT)
+                                 + edgeSweep(b0c, "trail", rl * UNIT)) / 2);
+            }
+            var sm0 = seamAt(rl * UNIT, host0.nB, host0.inner ? "i" : "o");
+            return sweepAngle(sm0.gap * host0.seams + sm0.avail * fMid - sm0.gap / 2);
+          };
+          var pts = [];
+          for (var qq = 0; qq <= 24; qq++) {
+            var rq = lo + (hi - lo) * qq / 24;
+            pts.push(vp(rq, mid(rq)));
+          }
+          // WHITE, not the folder's colour. A narrow wedge is about 15 screen pixels wide at
+          // this vault's inner band -- measured off the overlay canvas along one scanline:
+          // 07's leading edge, centre and trailing edge landed at x=630, 637.5 and 644.5 with
+          // its note at 638. Three lines of one hue inside 15 pixels read as two, which is
+          // what "there are two lines in yearly" was looking at. Colour tells them apart where
+          // position cannot: folder hues for edges, yellow for the seam, white for the middle.
+          g2.strokeStyle = "#fff"; g2.globalAlpha = 0.6; g2.lineWidth = 2;
+          g2.setLineDash([5, 5]);
+          g2.beginPath();
+          pts.forEach(function (pt, qq) { if (qq) g2.lineTo(pt.x, pt.y); else g2.moveTo(pt.x, pt.y); });
+          g2.stroke();
+          g2.setLineDash([]); g2.globalAlpha = 1;
+        });
+      })();
+      var sorted = band.slice().sort(function (x, y) { return x.f0 - y.f0; });
+      sorted.forEach(function (c, i) {
+        var next = sorted[(i + 1) % sorted.length];
+        if (next === c) return;
+        // EVERY LINE IS ITS OWN CURVE, EVALUATED AT BOTH ENDS OF THE BAND AND JOINED.
+        //
+        // A boundary is the straight line theta = theta0 + d/r: same theta0 for both sides of a
+        // seam (they share a wedge fraction), d differing by exactly one seam width -- so the
+        // two are parallel and their midline is parallel to both. That much was right.
+        //
+        // What was wrong was mixing two approximations. The edges were built as perpendicular
+        // OFFSETS from a ray through the origin at the angle the boundary has at the band's
+        // middle: exact at that radius and drifting from the true boundary at every other,
+        // while the wedge's centre line was already a chord between its true angles at the
+        // band's two ends. Two different approximations of parallel lines do not stay
+        // equidistant, so the centre stopped looking centred towards the inner and outer rows --
+        // reported on 06, whose measured centre-to-seam arcs are equal to the unit at every row.
+        //
+        // One construction for all three: take the angle at lo, take it at hi, join. The lines
+        // are chords of the curves they represent, they agree with each other everywhere, and
+        // the seam's centre is the midpoint of its two edges by arithmetic at both ends.
+        var angOf = function (cell, which, rl) {
+          if (cell.pLead !== undefined) {
+            return edgeSweep(cell, which === "f0" ? "lead" : "trail", rl * UNIT);
+          }
+          var sm0 = seamAt(rl * UNIT, cell.nB, cell.inner ? "i" : "o");
+          return sm0.gap * cell.seams + sm0.avail * cell[which] - sm0.gap / 2;
+        };
+        // SAMPLED, NOT A CHORD. A boundary was taken for a straight line, on the grounds that
+        // theta0 + d/r is the small-angle form of one. For the seam WIDTH that holds -- d is 58
+        // units against a radius of hundreds -- but a boundary's own d is (seams - 0.5) * W,
+        // which reaches 493 units at the eighth seam of this vault's inner band: d/r = 0.73,
+        // nothing small about it. A line through the curve's two endpoints then cuts several
+        // pixels inside it in the middle rows, by a different amount for each of the three
+        // lines, which is why 06's centre stopped looking centred while its measured
+        // centre-to-seam arcs are equal to the unit at every row. Sampling the same formula the
+        // notes are placed with cannot disagree with where they ended up.
+        // THE INNER BAND'S SEAM LINES RUN ALL THE WAY IN, to a whisker off the hub's centre.
+        // A seam is meant to read as radial, and whether it does is a question about where the
+        // lines POINT -- which is only answerable if they are long enough to see converge. They
+        // do not converge on a point, and that is the geometry rather than a defect: a boundary
+        // is theta = theta0 + d/r, so it swings as the radius falls away, and near the hub the
+        // swing is all there is. seamAt's own cap (SEAM_CAP, 45% of the circle) is what keeps
+        // it finite. Drawing it makes both facts visible at once.
+        var chord = function (fn, style, width, dash, tag, rFrom) {
+          if (DBG.trace) DBG.trace.push({ tag: tag || "?", c: c.k, next: next.k,
+                                          deg: sweepAngle(fn(DBG.traceR)) * 180 / Math.PI });
+          g2.strokeStyle = style.c; g2.globalAlpha = style.a; g2.lineWidth = width;
+          if (dash) g2.setLineDash(dash);
+          var r0c = rFrom !== undefined ? rFrom : lo;
+          g2.beginPath();
+          for (var q = 0; q <= 48; q++) {
+            var rl = r0c + (hi - r0c) * q / 48;
+            var pt = vp(rl, sweepAngle(fn(rl)));
+            if (q) g2.lineTo(pt.x, pt.y); else g2.moveTo(pt.x, pt.y);
+          }
+          g2.stroke();
+          if (dash) g2.setLineDash([]);
+          g2.globalAlpha = 1;
+        };
+        var sweepA = function (rl) { return angOf(c, "f1", rl); };
+        var sweepB = function (rl) {
+          var a = angOf(next, "f0", rl), b = sweepA(rl);
+          while (a < b) a += 2 * Math.PI;            // the wrap: B follows A in sweep
+          while (a - b > Math.PI) a -= 2 * Math.PI;
+          return a;
+        };
+        var groupBoundary = c.g !== next.g;
+        // THE SEAM CENTRE IS DRAWN STRAIGHT AND LONG, not bent inward along its own curve.
+        // The question it answers is whether a seam POINTS at the centre of the disc, and the
+        // way to answer that is to take the line it actually is across the band and carry it on
+        // in a straight line far enough to pass the hub. Sampling the 1/r curve inward instead
+        // bends it, which shows the swing but hides the aim; this shows the aim, and by how much
+        // each one misses. They are not all radial: every boundary has its own perpendicular
+        // offset d = (seams - 0.5) * W, so each misses the centre by its own d.
+        (function () {
+          var mid = function (rl) { return sweepAngle((sweepA(rl) + sweepB(rl)) / 2); };
+          var pOut = { x: hi * UNIT * Math.cos(mid(hi)), y: hi * UNIT * Math.sin(mid(hi)) };
+          var pIn = { x: lo * UNIT * Math.cos(mid(lo)), y: lo * UNIT * Math.sin(mid(lo)) };
+          var dx = pIn.x - pOut.x, dy = pIn.y - pOut.y, L = Math.hypot(dx, dy);
+          if (!(L > 1e-6)) return;
+          var reach = Math.hypot(pIn.x, pIn.y);          // enough to carry it past the hub
+          var pEnd = { x: pIn.x + dx / L * reach, y: pIn.y + dy / L * reach };
+          var q0 = renderer.graphToViewport(pOut), q1 = renderer.graphToViewport(pEnd);
+          g2.strokeStyle = SEAM_YELLOW;
+          g2.globalAlpha = groupBoundary ? 0.75 : 0.45;
+          g2.lineWidth = 2;
+          g2.setLineDash([3, 4]);
+          g2.beginPath(); g2.moveTo(q0.x, q0.y); g2.lineTo(q1.x, q1.y); g2.stroke();
+          g2.setLineDash([]); g2.globalAlpha = 1;
+        })();
+        chord(sweepA, tint(c.g, groupBoundary ? 0.9 : 0.35), groupBoundary ? 3 : 2,
+              null, c.g + " trailing");
+        chord(sweepB, tint(next.g, groupBoundary ? 0.9 : 0.35), groupBoundary ? 3 : 2,
+              null, next.g + " leading");
+        // NO INK MARK. Where a wedge's notes stop short of its boundary was drawn as a short
+        // dotted tick per row, and it read as a second centre line: two dashed things inside
+        // one wedge, one of them the centre and one of them not. The shortfall is measurable
+        // (scratchpad margins2) and does not need to be on the disc while the disc is being
+        // judged by eye. Two solid edges and one dashed centre, nothing else.
+        // (the folder's centre line is drawn once per FOLDER, after this loop)
+      });
+      // NO ENVELOPE-CENTRE LINE. The first version of this overlay drew one -- the midpoint
+      // between a wedge's two NEIGHBOURS' facing edges, which is a different line from the
+      // wedge's own middle and sits about a pixel from it on a narrow wedge. It survived every
+      // later rewrite because each patch anchored somewhere else, and it is the "salmon dotted
+      // line in the yearly wedge, not in the centre or anything" that took four rounds to find:
+      // a third line in the folder's own colour, one pixel off the middle, at 15 pixels of
+      // wedge. wedgeEdges() still reports  for the probes that measure against it.
+    });
+    drawWedgeLegend(g2);
+  }
+
+  /**
+   * A LEGEND ON THE OVERLAY, and the build it belongs to.
+   *
+   * Four kinds of line are on this canvas and they have been renamed, recoloured and moved
+   * several times in one morning -- so the page now says what its own lines mean, and stamps
+   * the build it came from. Half the confusion in that morning was two Chrome windows open on
+   * two different builds, which no amount of zooming can tell apart.
+   */
+  function drawWedgeLegend(g2) {
+    var rows = [
+      ["solid, folder colour", "wedge edge"],
+      ["dashed white", "wedge centre"],
+      ["dotted yellow", "seam centre"],
+      ["dashed yellow", "band radius"]
+    ];
+    var pad = 8, lh = 16, sw = 34, x = 12, y = 12;
+    g2.font = "11px ui-monospace, monospace";
+    g2.textBaseline = "middle";
+    var wide = 0;
+    rows.forEach(function (r) { wide = Math.max(wide, g2.measureText(r[1]).width); });
+    var w = sw + 8 + wide + pad * 2, h = lh * (rows.length + 1) + pad * 2;
+    g2.globalAlpha = 0.72; g2.fillStyle = "#000";
+    g2.fillRect(x, y, w, h);
+    g2.globalAlpha = 1;
+    rows.forEach(function (r, i) {
+      var yy = y + pad + lh * i + lh / 2;
+      g2.strokeStyle = i === 0 ? "#e66767" : i === 1 ? "#fff" : SEAM_YELLOW;
+      g2.globalAlpha = i === 0 ? 0.9 : i === 1 ? 0.5 : i === 2 ? 0.75 : 0.45;
+      g2.lineWidth = i === 0 ? 1.5 : 1;
+      g2.setLineDash(i === 0 ? [] : i === 1 ? [5, 5] : i === 2 ? [3, 4] : [4, 4]);
+      g2.beginPath(); g2.moveTo(x + pad, yy); g2.lineTo(x + pad + sw, yy); g2.stroke();
+      g2.setLineDash([]);
+      g2.globalAlpha = 0.85; g2.fillStyle = "#fff";
+      g2.fillText(r[1], x + pad + sw + 8, yy);
+    });
+    g2.globalAlpha = 0.55; g2.fillStyle = "#fff";
+    g2.fillText("built " + (DATA && DATA.generated ? DATA.generated : "?"),
+                x + pad, y + pad + lh * rows.length + lh / 2);
+    g2.globalAlpha = 1;
+  }
+
+  /** Turn the overlay on or off; creates its canvas on first use. */
+  function wedgeDebug(v) {
+    DBG.on = !!v;
+    if (DBG.on && !DBG.canvas) {
+      var host = $("graph");
+      if (host) {
+        var cv = DOC.createElement("canvas");
+        cv.className = "vg-wedge-debug";
+        cv.style.cssText = "position:absolute;left:0;top:0;pointer-events:none;z-index:6";
+        host.appendChild(cv);
+        DBG.canvas = cv;
+      }
+    }
+    if (!DBG.on) { DBG.cells = null; if (DBG.canvas) DBG.canvas.style.display = "none"; }
+    if (renderer) renderer.refresh({ skipIndexation: true });
+    return DBG.on;
   }
 
   // Set (or clear) the hovered legend row. afterRender picks the change up through
@@ -3772,6 +4431,16 @@ function mountVaultGraph(root, data, deps) {
   // comes from the REFERENCE allocation, which sizes rows and never positions anything --
   // so it can look perfectly smooth while the arc the notes actually sit in jumps.
   var lastStart = null;   // group -> wedge start angle in degrees, this frame
+  /** group -> RENDERED wedge arc in degrees, this frame -- the sum of the group's cells'
+   *  c.span, which is the allocation the disc is actually drawn from. The probe needs it
+   *  because every proxy tried so far lied: the span of the group's own notes reads ~0 for a
+   *  single column (its notes share one angle), and lastStart is scaled at the reference
+   *  radius. "The wedge should close at constant speed" is a claim about THIS number. */
+  var lastArc = null;
+  /** group -> "i"|"o", captured with lastArc: neighbour arithmetic on wedge starts is only
+   *  meaningful within one band -- the two bands are separate circles, and a metric that
+   *  sorted both into one ring reported a column 100 degrees off its own envelope centre. */
+  var lastBand = null;
   // Group presences for the GAP reservation, walked between the cascade's two packings
   // and read by the rendered allocation. Null at rest, which is when weight-over-seats
   // is already the right answer -- see allocateBand.
@@ -3820,6 +4489,27 @@ function mountVaultGraph(root, data, deps) {
    * function of the plan, and this is a function of the frame.
    */
   var roomNow = null;
+  /**
+   * The wedge-arc ramp for fully-toggled SINGLE-CELL groups, or null at rest: group -> a
+   * factor walking 1 -> 0 (hide) or 0 -> 1 (show) on the cascade's own clock.
+   *
+   * "The wedge should close and open at constant speed" is a claim about the RENDERED ARC,
+   * and measured on the 3-note inner folder the arc held up to 6.2 degrees above the straight
+   * line at 70% of an 11.9-degree close, then crashed. The arc is max(proportional share,
+   * min-arc floor) plus the seam, and each driver had its own curve: the share tracks the
+   * staggered alpha sum (an S), the floor holds one full note-width until the LAST note fades
+   * (min(1, weight)), and the seam presence is the group's max alpha (1 until the very end).
+   * One ramp drives all three, and then max(P*ramp, F*ramp) = max(P, F)*ramp -- a straight
+   * line by arithmetic, not by tuning.
+   *
+   * ONLY the arc-side quantities read this: the rendered geom, the floor, the seam presence.
+   * Seats, rows, fade delays and dot sizes are untouched -- the reverted curtain (ef6e1c8)
+   * and the reverted column machinery (2feff5b) are why nothing that moves a NOTE may be
+   * driven by a group-level clock. Single-cell groups only: a note in a one-per-row column
+   * sits at its wedge's centre, so a narrowing wedge cannot collide it, and multi-wedge
+   * folders are explicitly out of scope until this is judged on the simple case.
+   */
+  var colWalk = null;
   /**
    * The two endpoint LAYOUTS of the running cascade, or null at rest.
    *
@@ -3963,10 +4653,12 @@ function mountVaultGraph(root, data, deps) {
     // So the pin and planKeep come off while it is computed. What comes out is what an unpinned
     // ringsLayout produces once the departing notes are gone, which is the definition settle()
     // was written against and never actually met.
+    colWalk = null;   // the previous cascade's ramps die before the resting layouts below run
     var keep = Object.create(null);
     graph.forEachNode(function (id) { keep[id] = alpha[id] || 0; alpha[id] = visible(id) ? timeFactor(id) : 0; });
     var pinWas = pinnedPlan, keepWas = planKeep, roomWas = roomNow;
     pinnedPlan = null; planKeep = null; roomNow = null; cellNow = null; edgeNow = null;
+    colWalk = null;
     // TWICE, and the first one is thrown away.
     //
     // Room and position are a fixed point: the margin at a wedge edge is a clearance plus a dot
@@ -4029,6 +4721,28 @@ function mountVaultGraph(root, data, deps) {
     });
     var span = Math.max(windowFor(ins.length), windowFor(outs.length))
              + FADE_FRAMES * TIME_SCALE;
+    // WHICH GROUPS GET THE ARC RAMP: fully toggled (every present note leaving, or every
+    // arriving note entering an empty group), on a legend toggle only. The single-cell gate
+    // is applied where the endpoint plans are in scope, below.
+    var tglDir = Object.create(null), tglN = Object.create(null);
+    if (opts.colToggle) (function () {
+      var startN = Object.create(null), outN = Object.create(null), inN = Object.create(null);
+      graph.forEachNode(function (id) {
+        if ((alpha[id] || 0) > 0.004) {
+          var g0 = groupOf(id);
+          startN[g0] = (startN[g0] || 0) + 1;
+        }
+      });
+      outs.forEach(function (id) { var g0 = groupOf(id); outN[g0] = (outN[g0] || 0) + 1; });
+      ins.forEach(function (id) { var g0 = groupOf(id); inN[g0] = (inN[g0] || 0) + 1; });
+      Object.keys(outN).forEach(function (g0) {
+        if (!inN[g0] && outN[g0] === (startN[g0] || 0)) { tglDir[g0] = "out"; tglN[g0] = outN[g0]; }
+      });
+      Object.keys(inN).forEach(function (g0) {
+        if (!outN[g0] && !(startN[g0] || 0)) { tglDir[g0] = "in"; tglN[g0] = inN[g0]; }
+      });
+    })();
+
     var moving = ins.concat(outs);
     lastCascade = { ins: ins.length, outs: outs.length, span: Math.round(span * 100) / 100,
                     path: "animated", frames: 0, ms: 0, t0: NOW() };
@@ -4048,6 +4762,7 @@ function mountVaultGraph(root, data, deps) {
       pinnedPlan = null;
       planKeep = null;
       roomNow = null; cellNow = null; edgeNow = null; posSrc = posDst = null;   // the walk is over; rest measures its own
+      colWalk = null;
       // ASSIGN THE PLAN, do not compute another one. applyLayout(false) built a fresh plan
       // here, and a fresh plan is a second opinion: it agreed about the structure -- same band
       // extents, same gaps, same wedge starts -- and disagreed about which seat 15 notes got,
@@ -4166,9 +4881,21 @@ function mountVaultGraph(root, data, deps) {
     };
     (function () {
       var a = staticPlan(function (id) { return wasPresent[id]; });
+      // The single-cell gate: a group splitting into sub-wedges is out of scope, judged on the
+      // populated end's plan (the source for a hide, the destination for a show).
+      var cellsOfG = function (p0) {
+        var m = Object.create(null);
+        if (p0) p0.cells.forEach(function (c) { m[c.g] = (m[c.g] || 0) + 1; });
+        return m;
+      };
       // THE DESTINATION PACKING. willShow, so it is the packing settle() will assign rather
       // than one that still seats whatever the date range or the timeline has excluded.
       var b = staticPlan(function (id) { return willShow(id); });
+      var aCells = cellsOfG(a), bCells = cellsOfG(b);
+      Object.keys(tglDir).forEach(function (g0) {
+        var n0 = tglDir[g0] === "out" ? aCells[g0] : bCells[g0];
+        if (n0 !== 1) delete tglDir[g0];
+      });
       // Also the depth of each BAND at both ends -- the deepest cell in it, which is
       // what sets the ring's outer radius. A cell that exists at only one end takes
       // this instead of its own missing count, so it matches the ring rather than
@@ -4357,6 +5084,43 @@ function mountVaultGraph(root, data, deps) {
       // as the blended rows, spread across the whole fade.
       // Membership is the union of staying and still-on-screen (planKeep), and
       // the weights do the densifying.
+    // A RAMPED GROUP'S FADES FILL THE WHOLE CASCADE. The wedge's arc walks the full span, and
+    // the default stagger window is far shorter for a small group -- so its notes were gone by
+    // a third in, the ramped wedge closed EMPTY for the rest, and when the last note's cull
+    // took the cell out of the plan the arc fell off a cliff: measured 6.92 degrees in one
+    // frame on the single-note folder, 84x the mean step. Spread across span - FADE, the last
+    // fade lands at the cascade's end, where the arc is ~0 and the cull costs nothing. Order:
+    // inner to outer on a hide (the column winks out from the hub), outer to inner on a show
+    // (it materialises from the rim) -- the two are time-mirrors, like the arc itself.
+    (function () {
+      var stretch = Math.max(1, span - FADE_FRAMES * TIME_SCALE);
+      Object.keys(tglDir).forEach(function (g0) {
+        var set = (tglDir[g0] === "out" ? outs : ins).filter(function (id) {
+          return groupOf(id) === g0;
+        });
+        if (!set.length) return;
+        set.sort(function (p, q) {
+          var ap = graph.getNodeAttributes(p), aq = graph.getNodeAttributes(q);
+          var d = Math.hypot(ap.x, ap.y) - Math.hypot(aq.x, aq.y);
+          return tglDir[g0] === "out" ? d : -d;   // hide: inner first; show: outer first
+        });
+        // HIDES ONLY. The cliff this fixes is a hide phenomenon -- the last note's fade
+        // culls the cell and the arc falls off whatever it was still holding -- and a show
+        // has no equivalent: its cell exists from the first frame. Stretching the arrivals
+        // too left two of a three-note column standing in a part-open wedge for 28 frames,
+        // against 1 on develop. So a show keeps the natural stagger and only its ORDER is
+        // ours: outer first, so the column materialises from the rim inward.
+        if (tglDir[g0] === "out") {
+          set.forEach(function (id, i) {
+            delay[id] = set.length < 2 ? stretch : stretch * i / (set.length - 1);
+          });
+        } else {
+          var base0 = set.map(function (id) { return delay[id] || 0; }).sort(function (x, y) { return x - y; });
+          set.forEach(function (id, i) { delay[id] = base0[i]; });
+        }
+      });
+    })();
+
       var rowsAt = function (c) {
         var s = rowsSrc[c.k], d = rowsDst[c.k];
         if (s === undefined && d === undefined) return 0;   // cell knows best
@@ -4404,6 +5168,14 @@ function mountVaultGraph(root, data, deps) {
       // The walked room, handed to ringsLayout through the same channel the spacing uses. Set
       // before the plan is built so the margins inside this frame's layout read it.
       roomNow = { i: roomWalk("i"), o: roomWalk("o") };
+      // The arc ramps, on the same clock as everything else the frame walks.
+      colWalk = Object.create(null);
+      Object.keys(tglDir).forEach(function (g0) {
+        // pr, not ease: ease is the smoothstep the NOTES ride, and an arc linear in ease is
+        // S-shaped in time -- measured as a symmetric +-1.2 degree residual on an 11.9-degree
+        // wedge. Constant speed is a statement about the clock on the wall.
+        colWalk[g0] = { f: tglDir[g0] === "out" ? 1 - pr : pr, n: tglN[g0] || 1 };
+      });
       // AND THE PER-CELL ROOM, on the same clock. A note in only one endpoint takes that
       // endpoint's figure rather than interpolating toward a cell that does not exist there,
       // which is the same fallback the band walk uses for an empty band.
@@ -4598,6 +5370,8 @@ function mountVaultGraph(root, data, deps) {
       // moving in a step rather than a ramp, and it is what a person sees: every
       // wedge boundary shifting round the disc at once.
       starts: lastStart,
+      arcs: lastArc,
+      bands: lastBand,
       innerN: iN, innerMin: Math.round(iMin === Infinity ? 0 : iMin), innerMax: Math.round(iMax),
       outerN: oN, outerMin: Math.round(oMin === Infinity ? 0 : oMin), outerMax: Math.round(oMax)
     });
@@ -5472,6 +6246,21 @@ function mountVaultGraph(root, data, deps) {
       // read.
       var room = bandOf(isIn ? "i" : "o").room;
       var mine = cellRoom[id];
+      // A RAMPED CELL'S ROOM RAMPS WITH IT. cellRoom is walked between the two endpoint
+      // packings, which know nothing about the arc ramp -- so a wedge held narrow by the ramp
+      // kept handing its notes the room of a wedge that is not there, and two of a three-note
+      // column overlapped by 24 units at 83% of a show. The tangential step inside a cell is
+      // proportional to the cell's arc, so the same factor applies to both. Through cellRoom
+      // rather than as a size multiplier: this is the per-CELL cap, which is stable, and not
+      // the per-NOTE one, which is the thing that made every dot in the vault breathe.
+      if (colWalk) {
+        var cwd = colWalk[groupOf(id)];
+        // Falling back to the BAND's room when the cell has none of its own: cellRoom is only
+        // filled for cells whose measured step exceeds a unit, so a small folder's cell is
+        // usually absent from it -- and ramping an absent number is a no-op, which is exactly
+        // what the first attempt at this measured (28 overlapping frames, unchanged).
+        if (cwd !== undefined) mine = (mine === undefined ? room : mine) * cwd.f;
+      }
       if (mine !== undefined && mine > 1 && (!(room > 1) || mine < room)) room = mine;
       // AND A HAIR UNDER, because both figures above are AVERAGES over a row and the notes in a
       // row are not evenly spaced. Position within a row is weight-based -- a note's own share
@@ -5687,6 +6476,19 @@ function mountVaultGraph(root, data, deps) {
           r.size = (r.size || a.size) * (0.45 + 0.55 * al);
           if (al < 0.62) { r.label = ""; r.forceLabel = false; r.highlighted = false; }
         }
+        // A RAMPED WEDGE'S NOTES SHRINK WITH IT. The reporter's ideal case is the one-note
+        // folder: "the wedge continuously gets smaller, the note as well, and it vanishes".
+        // Without this the dots keep their resting size inside a wedge that is closing under
+        // them, and two of a three-note column interpenetrate by 35 units for 36 frames --
+        // measured on the show, where the stretched fades leave two notes standing in a
+        // half-open wedge. Size, not position: the group clock may scale a dot, never move a
+        // note -- that distinction is what the two reverts were about.
+        if (colWalk) {
+          var cwr = colWalk[groupOf(id)];
+          if (cwr !== undefined) {
+            r.size = Math.max(0.05, (r.size === undefined ? base : r.size) * cwr.f);
+          }
+        }
         // Applied last, so it carries the arrival ramp above as well as the resting size --
         // a fading note should grow toward the size it will actually hold. The ramp is a
         // RATIO against the attribute size, so it survives the switch from a multiplier to a
@@ -5763,6 +6565,7 @@ function mountVaultGraph(root, data, deps) {
     // Safe against a repaint loop because syncSizeScale only reports a change worth
     // more than 0.01: change -> refresh -> afterRender -> no change -> stop.
     renderer.on("afterRender", function () {
+      if (DBG.on) drawWedgeDebug();
       placeLogo(); refreshSizeScale(); heatDraw(); hlSync();
     });
 
@@ -5794,6 +6597,10 @@ function mountVaultGraph(root, data, deps) {
     };
     renderer.on("doubleClickStage", onDoubleClick);
     renderer.on("doubleClickNode", onDoubleClick);
+    // The wedge overlay, on by default in a --dev build. Here rather than at construction:
+    // it needs geomLock and a first layout to have something to draw, and both exist by the
+    // time the handlers are wired.
+    if (wantWedgeDebug()) wedgeDebug(true);
   }
 
   /* ------------------------------------------------------- group labels */
@@ -6113,7 +6920,7 @@ function mountVaultGraph(root, data, deps) {
         var p = b.getAttribute("data-epath");
         if (state.hiddenSub[p]) delete state.hiddenSub[p]; else state.hiddenSub[p] = true;
         buildLegend();
-        cascade();
+        cascade(null, { colToggle: true });
       };
     });
     each("[data-hpath]", function (b) {
@@ -6125,7 +6932,7 @@ function mountVaultGraph(root, data, deps) {
         if (ev && ev.target && ev.target.getAttribute("data-only")) {
           onlyUnder(p.slice(0, p.indexOf("/")), p);
           buildLegend();
-          cascade();
+          cascade(null, { colToggle: true });
           return;
         }
         if (state.highlightSub[p]) delete state.highlightSub[p];
@@ -6147,14 +6954,18 @@ function mountVaultGraph(root, data, deps) {
     // Eyes: visibility, which is what the whole row used to do.
     each("[data-eye]", function (b) {
       var g = b.getAttribute("data-eye");
-      // Same as the twisty: hovering the eye haloes what the eye is about to hide.
-      b.onmouseenter = function () { hoverHighlight(g, null); };
-      b.onmouseleave = function () { hoverHighlight(null, null); };
+      // NO hover halo on the eye, deliberately re-removed 2026-08-24. It was added so the
+      // whole row answers "where is this folder" (see the twisty above, which keeps it), but
+      // the eye is the one control whose click starts an animation OF the haloed notes -- and
+      // the pointer is still on the eye while that animation runs, so the halo's size bump and
+      // radial push ride the entire fade and the departing notes read as touching. The deeper
+      // eyes (data-esub, data-epath) never had a halo, so this also makes the eyes consistent
+      // with each other. The label keeps its halo: highlighting is that button's whole job.
       b.onclick = function () {
         var h = state.hidden[state.dim] || (state.hidden[state.dim] = Object.create(null));
         h[g] = !h[g];
         buildLegend();
-        cascade();
+        cascade(null, { colToggle: true });
       };
     });
     each("[data-esub]", function (b) {
@@ -6167,7 +6978,7 @@ function mountVaultGraph(root, data, deps) {
           if (off) state.hiddenSub[key] = true; else delete state.hiddenSub[key];
         });
         buildLegend();
-        cascade();               // one note at a time, and the wedge opens for it
+        cascade(null, { colToggle: true });               // one note at a time, and the wedge opens for it
       };
     });
 
@@ -6194,7 +7005,7 @@ function mountVaultGraph(root, data, deps) {
         if (ev && ev.target && ev.target.getAttribute("data-only")) {
           onlySubs(f, idx.map(function (i) { return subs[+i]; }));
           buildLegend();
-          cascade();
+          cascade(null, { colToggle: true });
           return;
         }
         var allOn = idx.every(function (i) { return !!state.highlightSub[f + "/" + subs[+i]]; });
@@ -6219,7 +7030,7 @@ function mountVaultGraph(root, data, deps) {
           var h = state.hidden[state.dim] || (state.hidden[state.dim] = Object.create(null));
           (order[state.dim] || []).forEach(function (n) { h[n] = (n !== g); });
           buildLegend();
-          cascade();
+          cascade(null, { colToggle: true });
           return;
         }
         if (state.highlight[g]) delete state.highlight[g]; else state.highlight[g] = true;
@@ -6417,6 +7228,7 @@ function mountVaultGraph(root, data, deps) {
       if (anim) { WIN.cancelAnimationFrame(anim); anim = null; }
       if (animGuard) { WIN.clearTimeout(animGuard); animGuard = null; }
       pinnedPlan = null; planKeep = null; roomNow = null; cellNow = null; edgeNow = null;
+    colWalk = null;
       posSrc = posDst = null;
       // AND THE TIMELINE HAS TO BE COMPLETED, not merely re-rendered.
       //
@@ -6452,6 +7264,7 @@ function mountVaultGraph(root, data, deps) {
       cascadeRun = null;
     }
     pinnedPlan = null; planKeep = null; roomNow = null; cellNow = null; edgeNow = null; posSrc = posDst = null;
+    colWalk = null;
     state.until = null;
     timelineFrame(true);
   }
@@ -6531,6 +7344,7 @@ function mountVaultGraph(root, data, deps) {
     if (anim) { WIN.cancelAnimationFrame(anim); anim = null; }
     if (animGuard) { WIN.clearTimeout(animGuard); animGuard = null; }
     pinnedPlan = null; planKeep = null; roomNow = null; cellNow = null; edgeNow = null;
+    colWalk = null;
     posSrc = posDst = null;
 
     // DESTINATION: the whole vault. SOURCE: an empty screen. cascade() reads the current alphas
@@ -6636,12 +7450,12 @@ function mountVaultGraph(root, data, deps) {
     $("allon").onclick = function () {
       state.hidden[state.dim] = Object.create(null);
       state.hiddenSub = Object.create(null);
-      buildLegend(); cascade();
+      buildLegend(); cascade(null, { colToggle: true });
     };
     $("alloff").onclick = function () {
       var h = state.hidden[state.dim] = Object.create(null);
       (order[state.dim] || []).forEach(function (g) { h[g] = true; });
-      buildLegend(); cascade();            // recedes rim-inward; nothing to lay out
+      buildLegend(); cascade(null, { colToggle: true });            // recedes rim-inward; nothing to lay out
     };
     // Refresh clears every filter and replays the intro, in-page -- no navigation.
     //
@@ -6768,7 +7582,7 @@ function mountVaultGraph(root, data, deps) {
       var h = state.hidden[state.dim] || (state.hidden[state.dim] = Object.create(null));
       if (hiddenByDefault(folder)) h[folder] = true; else delete h[folder];
       buildLegend();
-      cascade();                                   // notes fade in or out; nothing jumps
+      cascade(null, { colToggle: true });                                   // notes fade in or out; nothing jumps
       buildSettings();
     }
 
@@ -8259,8 +9073,37 @@ function mountVaultGraph(root, data, deps) {
   // Same door ?demo already used for the same reason -- timelineFrame(true) is the resting
   // full disc, derived once with no animation -- so this is that branch given its own name
   // rather than a second way of doing it.
+  /** --dev build, or ?wedges on the URL; ?nowedges wins over both. */
+  function wantWedgeDebug() {
+    var q = String(WIN.location ? WIN.location.search : "") + " " +
+            String(WIN.location ? WIN.location.hash : "");
+    if (/(^|[?&#])nowedges\b/.test(q)) return false;
+    if (/(^|[?&#])wedges\b/.test(q)) return true;
+    return !!(DATA && DATA.dev);
+  }
+
   function restOn() {
     return /(^|[?&#])rest\b/.test(String(location.search) + " " + String(location.hash));
+  }
+
+  /**
+   * `?rowarc` -- share each ROW's circle among the wedges that are actually in that row.
+   *
+   * A wedge's arc is decided once for the whole band, and a wedge reaches only as many rows as
+   * it has notes to fill. 07 - Yearly Reviews holds one note, so it exists in exactly one row
+   * -- and in the two rows it does not reach, its 10 degrees of arc simply sits empty. Measured
+   * on the reporter's vault, that is a 108-unit hole in one row and a 178-unit hole in the next,
+   * against a seam of 12 units everywhere else: the "gap on one side of yearly is larger than
+   * the other" is yearly's own arc lying empty beside it, not yearly being off centre.
+   *
+   * So each row divides its circle among the cells present IN THAT ROW, weighted by the same
+   * band shares, and pays one seam for each of them. Nothing else moves: a note keeps its seat
+   * fraction inside its own wedge, its margins, its row and its size. This is the arc
+   * redistribution on its own, without the note re-spacing that came with it last time and
+   * looked, correctly, horrible.
+   */
+  function rowArcOn() {
+    return /(^|[?&#])rowarc/.test(String(location.search) + " " + String(location.hash));
   }
 
   function demoOn() {
@@ -8773,6 +9616,32 @@ function mountVaultGraph(root, data, deps) {
                     // graph.degree gets a different answer in a budgeted vault, where a note
                     // whose links were all trimmed has degree 0 and is not unlinked at all.
                     isOrphan: isOrphan,
+                    // The wedge overlay, and the numbers it draws. wedgeEdges() is the honest
+                    // answer to "where is this wedge", in the same screen-angle convention as
+                    // a node's atan2 -- a probe that re-derives it from lastStart is working in
+                    // sweep space and off by the half-gap rotation.
+                    wedgeDebug: wedgeDebug, wedgeEdges: wedgeEdges,
+                    // The locked band radii, in graph units -- what the boundary rays are
+                    // pinned at, and the number a unit slip in it silently disables.
+                    bandRef: function () { return geomLock ? geomLock.bandR : null; },
+                    // Every line the overlay draws, with its angle at one radius: the only way
+                    // to tell a line that is misplaced from a line that is missing.
+                    wedgeTrace: function (rLattice) {
+                      DBG.trace = []; DBG.traceR = rLattice;
+                      drawWedgeDebug();
+                      var out = DBG.trace; DBG.trace = null;
+                      return out;
+                    },
+                    // The raw captured cells, for diagnosing what the overlay drew: one entry
+                    // per CELL, which is one per sub-wedge, not one per folder.
+                    wedgeCells: function () { return (DBG.cells || []).map(function (c) {
+                      return { g: c.g, k: c.k, band: c.inner ? "i" : "o", seams: c.seams,
+                               f0: c.f0, f1: c.f1, pLead: c.pLead, pTrail: c.pTrail,
+                               n: (c.ids || []).length }; }); },
+                    // The two terms a wedge edge is made of, so a probe can decompose a
+                    // measured swing instead of guessing which one moved.
+                    seamDeg: function (bk) { return bandOf(bk).gapDeg || 0; },
+                    seamNB: function (bk) { return (bandOf(bk).nG || 0) + (bandOf(bk).nSub || 0); },
                     clearAlpha: clearAlpha, buildWedgePlan: buildWedgePlan,
                     // Both added after wanting them from a test page: applyLayout to
                     // settle without waiting on rAF (which a hidden tab throttles,
@@ -8819,7 +9688,7 @@ function mountVaultGraph(root, data, deps) {
                     applyHiddenDefaults: function () {
                       seedHidden();
                       buildLegend();
-                      cascade();
+                      cascade(null, { colToggle: true });
                     },
                     // The band, for the same reason placeLogo is exposed: it paints
                     // from afterRender, so a tab that is not being composited never
