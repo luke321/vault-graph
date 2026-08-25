@@ -32,4 +32,4 @@ commit.
 | | |
 |---|---|
 | **Introduced in** | `1.7.0` — "The Timeline Update" |
-| **Last re-recorded** | `never — clip not yet recorded` |
+| **Last re-recorded** | `docs/feature-gallery — 2026-08-25` |

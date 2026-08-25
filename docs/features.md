@@ -89,4 +89,4 @@ A strip under the heatmap band carrying every month of the vault: two handles ca
 range, a pill sets the heatmap's own 52-week window, and a chip per year jumps straight
 there. Replaced the sidebar's old rank slider — the ribbon is the only timeline now.
 
-*Clip pending.*
+![The date range dragged in by both handles, a year chip hovered and clicked, the heatmap's own window slid back and forward on its own, then the date range cleared](../assets/features/timeline.webp)

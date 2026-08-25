@@ -122,7 +122,13 @@ if (-not $Url) {
 }
 if (-not $Out) {
   $stamp = Get-Date -Format 'yyyy-MM-dd-HHmmss'
-  $Out = Join-Path $repo ((if ($Act) { "demo-$Act-$stamp" } else { "demo-$stamp" }) + ".mp4")
+  # $(...), NOT bare (...) -- `if` is a STATEMENT, and only the subexpression operator
+  # converts a statement's output into a value bare parens can be used in. Bare parens
+  # parse fine (PowerShell accepts an unresolved bareword there) and then fail at RUNTIME
+  # with "the term 'if' was not recognized" -- caught only by actually running this, not by
+  # a syntax check, which is exactly why this needed the manual verification pass.
+  $base = $(if ($Act) { "demo-$Act-$stamp" } else { "demo-$stamp" })
+  $Out = Join-Path $repo ($base + ".mp4")
 }
 
 Write-Host "url    $Url"
