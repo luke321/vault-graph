@@ -22,40 +22,15 @@ no server and no network, which is how the graph reaches a phone.
 
 ## What it does
 
-**The disc**
-- One wedge per top-level folder, sized by how much of the vault it holds; subfolders take
-  their parent's hue at a lighter tint and cut sub-wedges inside it.
-- Node size follows link count, so hubs are visibly hubs.
-- Two bands — an inner ring and an outer ring — assigned once and kept stable, so hiding
-  something in one ring never re-packs the other.
-- Links are curved away from the hub by default, because only ~9% of links stay inside one
-  folder and straight chords would draw a grey wash across the middle. There is a switch.
+One wedge per top-level folder, sized by how much of the vault it holds, filled with notes
+ringed by how well-connected they are. Click a folder to hide it and the rest re-pack; hover
+a note to see its links; search narrows to matching notes; scrub a date ribbon to watch the
+vault grow. Follows Obsidian's theme, including a live switch.
 
-**Filtering, and what it does to the layout**
-- Click any folder or subfolder in the legend to hide it. The remaining wedges **grow back
-  into the angle it vacated** and the whole disc re-packs — the layout is a statement about
-  what is currently visible, not a fixed seating plan with gaps in it.
-- Solo a folder, hide everything, bring it all back.
-- Search narrows to matching notes and lists the hits.
-
-**Time**
-- A **heatmap band** above the disc: one square per day, coloured from the notes that landed
-  in it, so a busy week is both taller and more colourful.
-- A **date ribbon** under the band carries every month of the vault. Its two handles are a
-  date filter, the pill below them is the 52 weeks the band is drawing, and the year chips
-  under it jump to a year. It is the timeline: `refresh` replays the vault's growth by
-  sweeping the right-hand handle from the first note to today.
-- **Click a day** in the band to pick out its notes on the disc — recoloured and haloed,
-  nothing moved. Clicking today's square is how you see what you wrote today.
-
-**Reading one note**
-- Hover a note to raise it and dim everything unconnected to it.
-- Click for a panel: folder, type, tags, word count, and its linked notes — click any of
-  them to jump across the disc.
-- In the plugin, **Open in Obsidian** opens the note in a pane.
-
-**Themes**
-- Follows Obsidian's theme, including a live switch.
+**The full feature list, one short clip per feature, lives in
+[`docs/features.md`](docs/features.md)** — the disc itself, filtering, the heatmap and
+timeline, reading a note, the camera, and folder colours, each with what it does and how its
+clip gets regenerated.
 
 ![Vault Graph in the light theme](assets/screenshots/plugin-light.png)
 
