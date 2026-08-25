@@ -260,6 +260,12 @@ function mountVaultGraph(root, data, deps) {
   var panEnabled = deps.panEnabled === false ? false : true;
   var onPanEnabled = typeof deps.onPanEnabled === "function" ? deps.onPanEnabled : null;
 
+  // COMPACT DATE AXIS, ON UNLESS THE HOST SAYS OTHERWISE -- same absent-means-on contract as
+  // panEnabled above, for the same reason: the better axis should not need anyone to find a
+  // toggle first (github#23).
+  var compactAxis = deps.compactAxis === false ? false : true;
+  var onCompactAxis = typeof deps.onCompactAxis === "function" ? deps.onCompactAxis : null;
+
   // ARCHIVE FOLDERS: the ones whose name starts with `_`.
   //
   // A leading underscore is how a vault says "sorts last, not part of the working set" --
@@ -3694,11 +3700,45 @@ function mountVaultGraph(root, data, deps) {
     var nRef = Math.max(1, p90, nMax * 0.35);
     var yMax = 1;
     ylist.forEach(function (yy) { if (yy.n > yMax) yMax = yy.n; });
+    // AXIS SEGMENTS -- built unconditionally, cheap, and read by ribbonX/ribbonMs only when
+    // compactAxis is on. A month with notes (n > 0) keeps ITS OWN REAL DURATION as its
+    // weight; a maximal run of CONSECUTIVE zero-note months collapses into a single segment
+    // weighing one AVERAGE month regardless of how many real months it actually spans --
+    // "collapses to about the width of that one month" (github#23).
+    //
+    // WEIGHT IS MS, NOT A FLAT 1 PER MONTH -- a real month is not exactly the same width, and
+    // the no-op guarantee depends on that. Giving every month a flat weight of 1 was tried
+    // first and measured wrong: with zero gaps every segment is still "one month" wide on
+    // the nose, which is a UNIFORM axis, not the genuinely time-proportional one
+    // ribbonXLinear computes -- the two differ by a few px purely from month-length variance
+    // (28-31 days), even with nothing to collapse. Weighting a month segment by its own real
+    // span makes the sums telescope back to dateSpan.lo/hi exactly (see ribbonXCompact), so
+    // "no gaps" reduces to the linear formula byte-for-byte instead of merely close to it.
+    var AVG_MONTH_MS = 30.436875 * 86400000; // 365.2425 / 12 days -- the Gregorian mean month
+    function segEndMs(i) {
+      return (i + 1 < months.length) ? months[i + 1].ms : Date.UTC(y1, m1 + 1, 0);
+    }
+    var segs = [], segW = 0, segOfMonth = new Array(months.length);
+    for (var si = 0; si < months.length;) {
+      if (months[si].n > 0) {
+        var mw = segEndMs(si) - months[si].ms;
+        segOfMonth[si] = segs.length;
+        segs.push({ type: "month", i: si, w0: segW, w1: segW + mw });
+        segW += mw; si++;
+      } else {
+        var sj = si;
+        while (sj < months.length && months[sj].n === 0) sj++;
+        for (var sk = si; sk < sj; sk++) segOfMonth[sk] = segs.length;
+        segs.push({ type: "gap", i0: si, i1: sj - 1, w0: segW, w1: segW + AVG_MONTH_MS });
+        segW += AVG_MONTH_MS; si = sj;
+      }
+    }
     dateSpan = {
       months: months, years: ylist, index: index,
       lo: months[0].ms, hi: Date.UTC(y1, m1 + 1, 0),      // last day of the last month
       nMax: nMax, nRef: nRef, yMax: yMax, dated: tot,
-      undated: graph.order - tot
+      undated: graph.order - tot,
+      axis: { segs: segs, totalW: segW || 1, segOfMonth: segOfMonth }
     };
   }
 
@@ -7746,7 +7786,7 @@ function mountVaultGraph(root, data, deps) {
         var open = $("settings").hidden;
         $("settings").hidden = !open;
         $("gear").setAttribute("aria-expanded", String(open));
-        if (open) buildSettings();
+        if (open) { buildOptions(); buildSettings(); }
       };
       // BOTH MAPS, not just folderColors -- this button sits under "Folder colours",
       // which now covers subfolders too (see subfolderRows), so Reset dropping only
@@ -7783,6 +7823,18 @@ function mountVaultGraph(root, data, deps) {
         }
         var b = t.closest("[data-fc]");
         if (b) pickColor(b.getAttribute("data-fc"), b.getAttribute("data-key") || null);
+      });
+      // DELEGATED for the same reason as setbody above, though #vg-optbody's rows are only
+      // ever rebuilt by buildOptions() itself (never thrown away mid-interaction the way a
+      // folder pick rebuilds the swatch grid) -- kept delegated anyway so a second option
+      // row needs no second listener.
+      $("optbody").addEventListener("click", function (ev) {
+        var t = ev.target instanceof Element ? ev.target : null;
+        var b = t && t.closest("[data-opt]");
+        if (!b) return;
+        var key = b.getAttribute("data-opt");
+        var row = OPTION_ROWS.filter(function (o) { return o.key === key; })[0];
+        if (row) { row.set(!row.get()); buildOptions(); }
       });
     }
 
@@ -7968,6 +8020,31 @@ function mountVaultGraph(root, data, deps) {
       }).join("");
     }
 
+    // GENERIC BOOLEAN OPTIONS for the standalone settings panel -- one row today
+    // (compactAxis, github#23), written as a table so a second one is an entry here, not a
+    // new mechanism. Reuses the existing .mini button[aria-pressed] convention (a toggle
+    // shows its state by being filled; the label stays constant), so no new CSS is needed.
+    var OPTION_ROWS = [
+      { key: "compactAxis", label: "Compact date axis",
+        title: "Collapse runs of months with no notes instead of giving every one equal width",
+        get: function () { return compactAxis; },
+        set: function (v) { setCompactAxis(v, true); } }
+    ];
+    function buildOptions() {
+      var host = $("optbody");
+      if (!host) return;
+      setHTML(host, OPTION_ROWS.map(function (o) {
+        var on = !!o.get();
+        return '<div class="row" style="margin-bottom:7px">' +
+               '<div class="lbl" style="margin:0">' + esc(o.label) + '</div>' +
+               // "vg-" prefixed, to match what $() actually looks up ($() prepends ID="vg-"
+               // itself; a literal "opt-<key>" id here would never resolve through $()).
+               '<div class="mini"><button id="vg-opt-' + o.key + '" data-opt="' + o.key + '"' +
+               ' aria-pressed="' + on + '" title="' + esc(o.title) + '">Enabled' +
+               '</button></div></div>';
+      }).join(""));
+    }
+
     function buildSettings() {
       var pal = paletteInfo();
       var rows = (order[state.dim] || []).map(function (g) {
@@ -8126,6 +8203,19 @@ function mountVaultGraph(root, data, deps) {
     }
     if (persist && onPanEnabled) onPanEnabled(panEnabled);
     return panEnabled;
+  }
+
+  // Flips which axis ribbonX/ribbonMs use and repaints everything that reads it -- the bars,
+  // the brush and the year chips are all downstream of dateSpan.axis/compactAxis, so a
+  // redraw (not a rebuild: dateSpan.axis already exists either way) is enough, live, with no
+  // reload -- same shape as setPan above.
+  function setCompactAxis(on, persist) {
+    compactAxis = !!on;
+    var btn = $("opt-compactAxis");
+    if (btn) btn.setAttribute("aria-pressed", compactAxis ? "true" : "false");
+    if (dateSpan) drawDateUI();
+    if (persist && onCompactAxis) onCompactAxis(compactAxis);
+    return compactAxis;
   }
 
   function savePng() {
@@ -9092,12 +9182,66 @@ function mountVaultGraph(root, data, deps) {
     if (!ribW) ribW = measureRibbon();
     return ribW || 600;
   }
-  function ribbonX(ms, w) {
+  function ribbonXLinear(ms, w) {
     var span = dateSpan.hi - dateSpan.lo;
     return span > 0 ? ((ms - dateSpan.lo) / span) * w : 0;
   }
-  function ribbonMs(x, w) {
+  function ribbonMsLinear(x, w) {
     return dateSpan.lo + (Math.max(0, Math.min(w, x)) / w) * (dateSpan.hi - dateSpan.lo);
+  }
+
+  // Month index for `ms`, by calendar arithmetic against the first bucketed month rather
+  // than a binary search -- months are contiguous by construction (buildDateSpan walks
+  // every one between lo and hi), so this is exact and O(1).
+  function monthIndexOfMs(ms) {
+    var d = new Date(ms), m0 = new Date(dateSpan.months[0].ms);
+    var idx = (d.getUTCFullYear() - m0.getUTCFullYear()) * 12 + (d.getUTCMonth() - m0.getUTCMonth());
+    return Math.max(0, Math.min(dateSpan.months.length - 1, idx));
+  }
+  // The end of month `i`'s ms range -- the next month's start, or dateSpan.hi itself when
+  // `i` is the last month (which is always populated: dateSpan.hi is derived FROM its last
+  // note, so nothing is ever dated past it). Must match buildDateSpan's own segEndMs exactly
+  // -- both this and the weight it assigns have to agree, or the no-gap case stops reducing
+  // to ribbonXLinear exactly.
+  function monthEndMs(i) {
+    return (i + 1 < dateSpan.months.length) ? dateSpan.months[i + 1].ms : dateSpan.hi;
+  }
+  function segSpanMs(seg) {
+    return seg.type === "month"
+      ? [dateSpan.months[seg.i].ms, monthEndMs(seg.i)]
+      : [dateSpan.months[seg.i0].ms, monthEndMs(seg.i1)];
+  }
+
+  /**
+   * ms -> x through dateSpan.axis's weight-space instead of raw time: a populated month
+   * keeps its own proportional slice, a collapsed run of empty months shares one weight-1
+   * slice regardless of how many months it actually spans (github#23). With no empty runs
+   * every segment is one month at weight 1, which is the same axis ribbonXLinear computes --
+   * that identity is the no-op guarantee on an evenly-dated vault, not a special case here.
+   */
+  function ribbonXCompact(ms, w) {
+    var ax = dateSpan.axis, seg = ax.segs[ax.segOfMonth[monthIndexOfMs(ms)]];
+    var span = segSpanMs(seg), lo = span[0], hi = span[1];
+    var frac = hi > lo ? Math.max(0, Math.min(1, (ms - lo) / (hi - lo))) : 0;
+    var wPos = seg.w0 + frac * (seg.w1 - seg.w0);
+    return (wPos / ax.totalW) * w;
+  }
+  function ribbonMsCompact(x, w) {
+    var ax = dateSpan.axis, xc = Math.max(0, Math.min(w, x));
+    var wPos = (xc / w) * ax.totalW, segs = ax.segs, seg = segs[segs.length - 1];
+    for (var i = 0; i < segs.length; i++) {
+      if (wPos <= segs[i].w1) { seg = segs[i]; break; }
+    }
+    var frac = seg.w1 > seg.w0 ? Math.max(0, Math.min(1, (wPos - seg.w0) / (seg.w1 - seg.w0))) : 0;
+    var span = segSpanMs(seg);
+    return span[0] + frac * (span[1] - span[0]);
+  }
+
+  function ribbonX(ms, w) {
+    return (compactAxis && dateSpan.axis) ? ribbonXCompact(ms, w) : ribbonXLinear(ms, w);
+  }
+  function ribbonMs(x, w) {
+    return (compactAxis && dateSpan.axis) ? ribbonMsCompact(x, w) : ribbonMsLinear(x, w);
   }
 
   /**
@@ -9132,6 +9276,15 @@ function mountVaultGraph(root, data, deps) {
     return heat ? heat.start + heat.cols * WEEK_MS : heatParse(TODAY);
   }
 
+  // One month's bar: height against nRef, dim when empty. Shared by both the linear and
+  // compact bar-layout paths in drawRibbon so the fill/height math has exactly one copy.
+  function paintMonthBar(cx, top, m, x, bw) {
+    var t = Math.min(1, m.n / dateSpan.nRef);
+    var bh = m.n ? Math.max(1.5, (top - 2) * t) : 0;
+    cx.fillStyle = m.n ? dateRamp(t) : css("--dim");
+    cx.fillRect(x, top - bh, bw, bh || 1);
+  }
+
   function drawRibbon() {
     var cv = $("ribbon");
     if (!cv || !dateSpan) return;
@@ -9139,22 +9292,52 @@ function mountVaultGraph(root, data, deps) {
     var cx = fitCanvas(cv, w, RIBBON_H);
     var top = RIBBON_BARS;                     // the bars live above this line
     var ms = dateSpan.months, n = ms.length;
-    var pitch = w / n;
+    var useCompact = compactAxis && dateSpan.axis;
 
-    for (var i = 0; i < n; i++) {
-      var m = ms[i];
-      var t = Math.min(1, m.n / dateSpan.nRef);
-      var bh = m.n ? Math.max(1.5, (top - 2) * t) : 0;
-      cx.fillStyle = m.n ? dateRamp(t) : css("--dim");
-      cx.fillRect(i * pitch, top - bh, Math.max(1, pitch - 0.6), bh || 1);
-    }
-
-    // Year boundaries. Only January gets a rule, so the strip reads as years rather than as
-    // 121 months. The years themselves are named by the buttons below -- see buildYears.
-    for (var j = 0; j < n; j++) {
-      if (ms[j].m !== 0) continue;
-      cx.fillStyle = rgbaHex(css("--text-3"), 0.28);
-      cx.fillRect(j * pitch, 0, 1, top);
+    if (useCompact) {
+      // SEGMENT-SPACE LAYOUT, using the SAME weights dateSpan.axis carries for ribbonX/
+      // ribbonMs -- a populated month its own real duration, a collapsed run one average
+      // month -- so the bars, the brush and the year chips agree about where things are
+      // rather than being two formulas that happen to look similar. A collapsed run is
+      // painted as a visible dim band rather than reusing the ordinary empty-month bar
+      // (which is the same colour at zero height, i.e. invisible): the axis has to SHOW it
+      // is compacting, not just narrow silently (github#23).
+      var segs = dateSpan.axis.segs, totalW = dateSpan.axis.totalW;
+      for (var si = 0; si < segs.length; si++) {
+        var seg = segs[si];
+        var segX = (seg.w0 / totalW) * w;
+        var segW = Math.max(1, ((seg.w1 - seg.w0) / totalW) * w - 0.6);
+        if (seg.type === "month") {
+          paintMonthBar(cx, top, ms[seg.i], segX, segW);
+        } else {
+          cx.fillStyle = css("--dim");
+          cx.fillRect(segX, top - 2, segW, 2);
+        }
+      }
+      // Year boundaries, in segment space -- a January that falls inside a collapsed run
+      // draws its rule at the run's own start, since that's the only x it has. KNOWN
+      // CONSEQUENCE, not a separate bug: several Januarys inside one multi-year run all
+      // land on that same run's own single x, so a 2-year gap and a 20-year gap draw
+      // identically and lose their internal year lines -- an accepted cost of collapsing a
+      // whole run to one segment's width (github#23), not something this pass fixes.
+      for (var j = 0; j < n; j++) {
+        if (ms[j].m !== 0) continue;
+        var jSeg = segs[dateSpan.axis.segOfMonth[j]];
+        cx.fillStyle = rgbaHex(css("--text-3"), 0.28);
+        cx.fillRect((jSeg.w0 / totalW) * w, 0, 1, top);
+      }
+    } else {
+      var pitch = w / n;
+      for (var i = 0; i < n; i++) {
+        paintMonthBar(cx, top, ms[i], i * pitch, Math.max(1, pitch - 0.6));
+      }
+      // Year boundaries. Only January gets a rule, so the strip reads as years rather than as
+      // 121 months. The years themselves are named by the buttons below -- see buildYears.
+      for (var j2 = 0; j2 < n; j2++) {
+        if (ms[j2].m !== 0) continue;
+        cx.fillStyle = rgbaHex(css("--text-3"), 0.28);
+        cx.fillRect(j2 * pitch, 0, 1, top);
+      }
     }
 
     // THE BAND'S WINDOW, on its own track and draggable. A rail the full width of the span
@@ -10321,6 +10504,10 @@ function mountVaultGraph(root, data, deps) {
                     // the store and this owns the camera.
                     setPanEnabled: function (v) { return setPan(v !== false, false); },
                     get panEnabled() { return panEnabled; },
+                    // The saved default, applied live -- same shape as setPanEnabled, for
+                    // the plugin's View-settings toggle (github#23).
+                    setCompactAxis: function (v) { return setCompactAxis(v !== false, false); },
+                    get compactAxis() { return compactAxis; },
                     hiddenByDefault: hiddenByDefault,
                     // Push the defaults into the live filter and repaint. This is the
                     // "and now show it" half, kept separate so loading saved settings at

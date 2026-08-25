@@ -471,6 +471,58 @@ Two consequences that have each cost something:
   Centring is a promise the control can only keep where it can still move; a fixed
   fraction aims off the end of the travel on a narrow-span vault and measures the clamp.
 
+## Compacting the date axis is an exact no-op with nothing to collapse
+
+`compactAxis` (default on, github#23) collapses a maximal run of consecutive zero-note
+months into one segment weighing one *average* month, instead of giving every calendar
+month equal width. It has to be a no-op whenever there is no such run — an evenly-dated
+vault, or the setting off — and "close to zero" is not good enough for that promise.
+
+```javascript
+__vg.setCompactAxis(false); __vg.ribbonXOf(ms)   // the linear formula
+__vg.setCompactAxis(true);  __vg.ribbonXOf(ms)   // the compact one
+```
+
+**A flat weight of 1 per month was tried first and measured wrong.** With zero gaps every
+segment is still exactly "one month" wide, which is a *uniform* axis, not the genuinely
+time-proportional one the linear formula computes — real months differ by 28–31 days, and
+that alone produced a 0.56–4.45px drift on all three fixtures (none of which contain a real
+gap) even with the setting nominally a no-op. The fix weighs a populated month's segment by
+its own real duration in ms, not a flat 1. The sums then telescope back to
+`dateSpan.lo`/`dateSpan.hi` exactly, so "no gaps" reduces `ribbonXCompact` to
+`ribbonXLinear` byte-for-byte rather than merely close to it — measured **0px** delta
+across a dozen sample points on demo, 10k and shape after the fix, against 0.56–4.45px
+before it.
+
+A collapsed run measures the opposite way: **narrower than it would draw linearly, not
+close to some segment-table arithmetic that produced the same number by construction.**
+Measured on a hand-built 4-month gap: 8.2px compacted against 31.7px linear (74% narrower).
+
+**None of the three standard fixtures (demo, 10k, shape) contain a real empty-month run.**
+The 10k vault's own comment describes the *real* vault it was modelled on as having "one
+year holding none at all," but at 10,000 notes over 10 years the synthetic generator's
+recency-lean distribution still lands at least one note in every month by chance — measured
+directly, `hasGap: false` on all three. The two checks in `smoke.mjs` that need a real run
+are written to read this from the live vault and report `ok: true, "skipped — ..."` rather
+than assert a false positive, matching the existing "too dense to aim" skip convention — but
+that means the gap-collapsing code path itself is **not exercised by the default suite**,
+only by a hand-built vault used to verify it once (see `changelog-detail.md`). A fixture
+engineered for this the way `make-shape-vault.mjs` was for a dominant folder (github#5) is
+the natural next step if this code changes again; it was not built for this ticket because
+doing so touches the shared, digest-invalidated fixture store rather than only this
+ticket's own code.
+
+**A third check needs no gap at all, and exists because a mismatched id can hide behind a
+full re-render.** `$()` prepends `"vg-"` to every lookup (`src/page.js:103`) — a rendered
+element's own id has to carry that prefix too, or a module-scope function using `$()` to
+reach it will find nothing. The compact-axis settings-panel toggle shipped once with a
+button id missing that prefix, and it read as working: the click handler always calls
+`buildOptions()` right after, which replaces the whole row from live state regardless of
+whether the broken lookup's direct DOM write landed. *the settings-panel toggle actually
+flips the live state* drives the real gear-and-click path end to end and was confirmed to
+fail with the id bug reintroduced and pass with it fixed — a check reading only the `__vg`
+API surface (as the other two here do) cannot see this class of bug at all.
+
 ## Every unlinked note wears the (unlinked) swatch
 
 A note of degree 0 belongs to the `(unlinked)` group, not to its folder, and the legend

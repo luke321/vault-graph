@@ -102,7 +102,11 @@ mountVaultGraph(
     // only an explicit false turns it off, so a stored setting is the only way to start
     // locked and a cleared store goes back to the default rather than to "off".
     panEnabled: loadSettings().panEnabled,
-    onPanEnabled: function (v) { saveSettings({ panEnabled: v }); }
+    onPanEnabled: function (v) { saveSettings({ panEnabled: v }); },
+    // Compact date axis, remembered the same way -- undefined on a first visit reads as ON
+    // in page.js, only an explicit false turns it off (github#23).
+    compactAxis: loadSettings().compactAxis,
+    onCompactAxis: function (v) { saveSettings({ compactAxis: v }); }
   }
 );
 </script>

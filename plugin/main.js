@@ -513,6 +513,11 @@ class VaultGraphView extends ItemView {
         this.plugin.settings.panEnabled = !!v;
         await this.plugin.saveSettings();
       },
+      // Compact date axis (github#23) has no in-view control on this host -- unlike pan,
+      // whose corner button lives IN the view, this one only ever changes from the
+      // settings-tab toggle below, which saves and pushes live itself. So this stays
+      // read-only, same reasoning as folderShown just above.
+      compactAxis: this.plugin.settings.compactAxis,
       // The gear IS shown here -- it is where somebody looking at the disc goes to look
       // for the colours -- but it opens Obsidian's settings tab rather than a second
       // panel inside the view saying the same things. `settingsUI` is deliberately not
@@ -583,6 +588,10 @@ const DEFAULTS = {
   // it, and the corner control is a cheaper way to discover that than a settings tab is.
   // Held here so a vault where dragging gets in the way can start locked.
   panEnabled: true,
+  // Collapse runs of empty months on the date strip instead of giving every one equal
+  // width. ON by default -- the better axis should not need anyone to find a toggle first
+  // (github#23) -- and a no-op on a vault with nothing to collapse.
+  compactAxis: true,
 };
 
 // The four build settings, described once. They live here rather than inline in display()
@@ -717,6 +726,19 @@ class VaultGraphSettingTab extends PluginSettingTab {
           const view = await this.plugin.currentView();
           const api = view && view.handle && view.handle.api;
           if (api && api.setPanEnabled) api.setPanEnabled(v);
+        }));
+
+    new Setting(containerEl)
+      .setName("Compact date axis")
+      .setDesc("Collapse runs of months with no notes on the date strip instead of giving every one equal width. A no-op when there's nothing to collapse.")
+      .addToggle((t) => t
+        .setValue(this.plugin.settings.compactAxis !== false)
+        .onChange(async (v) => {
+          this.plugin.settings.compactAxis = v;
+          await this.plugin.saveSettings();
+          const view = await this.plugin.currentView();
+          const api = view && view.handle && view.handle.api;
+          if (api && api.setCompactAxis) api.setCompactAxis(v);
         }));
 
     new Setting(containerEl).setName("Folder colours").setHeading();
@@ -1089,6 +1111,7 @@ class VaultGraphPlugin extends Plugin {
     if (!api || !api.setFolderShown) return;
     api.setFolderShown(this.settings.folderShown);
     if (api.setPanEnabled) api.setPanEnabled(this.settings.panEnabled !== false);
+    if (api.setCompactAxis) api.setCompactAxis(this.settings.compactAxis !== false);
     if (api.applyHiddenDefaults) api.applyHiddenDefaults();
   }
 

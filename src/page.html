@@ -23,6 +23,10 @@
     </div>
 
     <div class="block" id="vg-settings" hidden>
+      <!-- Generic boolean options -- one row today (compactAxis, github#23), rendered once
+           by buildOptions() rather than rebuilt per-folder the way #vg-setbody is. A second
+           standalone setting is one entry in OPTION_ROWS away, not a new panel. -->
+      <div id="vg-optbody"></div>
       <div class="row" style="margin-bottom:7px">
         <div class="lbl" style="margin:0">Folder colours</div>
         <div class="mini"><button id="vg-fcreset" title="Drop every folder AND subfolder override and go back to the automatic order">Reset</button></div>

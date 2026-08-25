@@ -1341,11 +1341,15 @@ async function rangeSnap(p) {
   })()`);
 }
 
-/** The ribbon x for a date, in canvas pixels. */
+/**
+ * The ribbon x for a date, in canvas pixels -- via __vg.ribbonXOf, the page's own mapping,
+ * rather than a formula duplicated here. It USED to reimplement the plain linear formula
+ * directly, which quietly went stale once ribbonX gained a compact-axis branch (github#23):
+ * any check calling this against a sparse vault with compaction on would silently compute
+ * the OLD (unweighted) position while the page drew the new one.
+ */
 function xOfMs(p, ms) {
-  return p.j(`(function(){
-    var d = __vg.dateSpan, w = document.querySelector("#vg-ribbon").getBoundingClientRect().width;
-    return ((${ms} - d.lo) / (d.hi - d.lo)) * w; })()`);
+  return p.j(`__vg.ribbonXOf(${ms})`);
 }
 
 /** A press on the window track at `x`, with no drag. The press alone is a jump. */
@@ -2454,6 +2458,110 @@ check("the intro sweeps the range end across the strip", async (p) => {
             `state stayed null: ${stayedPreview}; handle labelled: ${labelled}` +
             (startedLeft ? "" : "  <- DID NOT START AT THE LEFT END") +
             (landedRight ? "" : "  <- DID NOT LAND ON THE RIGHT END"),
+  };
+});
+
+check("compact axis: off matches the linear formula, and on is a no-op with nothing to collapse", async (p) => {
+  // Toggles __vg.setCompactAxis live and compares ribbonXOf across a handful of samples.
+  // A vault with no empty-month run has to come back at ~0px delta -- that identity IS the
+  // no-op guarantee (github#23), not a separate formula this check trusts. A vault WITH one
+  // has to move -- but NONE of demo/10k/shape currently has a real gap (see
+  // .ai-context/invariants.md's "Compacting the date axis..." entry: the 10k generator's
+  // recency lean lands a note in every month by chance, unlike the real vault it mirrors),
+  // so today the hasGap branch below is only exercised by a hand-built vault outside the
+  // repo, not by this suite. Written to read the live vault rather than assume a shape, so
+  // it engages automatically the day a fixture with a real gap exists.
+  const r = await p.j(`(function(){
+    var d = __vg.dateSpan;
+    if (!d) return { skip: true };
+    var hasGap = d.axis.segs.some(function (s) { return s.type === "gap"; });
+    var wasOn = __vg.compactAxis;
+    var samples = d.months.map(function (m) { return m.ms; }).concat([d.lo, d.hi]);
+    __vg.setCompactAxis(false);
+    var off = samples.map(function (ms) { return __vg.ribbonXOf(ms); });
+    __vg.setCompactAxis(true);
+    var on = samples.map(function (ms) { return __vg.ribbonXOf(ms); });
+    __vg.setCompactAxis(wasOn);
+    var maxDelta = 0;
+    for (var i = 0; i < samples.length; i++) maxDelta = Math.max(maxDelta, Math.abs(on[i] - off[i]));
+    return { hasGap: hasGap, maxDelta: Math.round(maxDelta * 100) / 100 };
+  })()`);
+  if (r.skip) return { ok: false, detail: "no dateSpan on this vault" };
+  const ok = r.hasGap ? r.maxDelta > 1 : r.maxDelta <= 0.01;
+  return {
+    ok,
+    detail: `hasGap=${r.hasGap}, on-vs-off max sample delta ${r.maxDelta}px` +
+      (r.hasGap ? " (expected > 1px -- compaction should move something)"
+                : " (expected ~0px -- nothing to collapse)"),
+  };
+});
+
+check("compact axis: a run of empty months draws meaningfully narrower than it would linearly", async (p) => {
+  const r = await p.j(`(function(){
+    var d = __vg.dateSpan;
+    if (!d) return { skip: true };
+    var ax = d.axis;
+    var gap = ax.segs.filter(function (s) { return s.type === "gap" && (s.i1 - s.i0) >= 2; })[0];
+    if (!gap) return { noGap: true };
+    var wasOn = __vg.compactAxis;
+    var startMs = d.months[gap.i0].ms;
+    var nextMs = (gap.i1 + 1 < d.months.length) ? d.months[gap.i1 + 1].ms : d.hi;
+    __vg.setCompactAxis(true);
+    var compactPx = __vg.ribbonXOf(nextMs) - __vg.ribbonXOf(startMs);
+    __vg.setCompactAxis(false);
+    var linearPx = __vg.ribbonXOf(nextMs) - __vg.ribbonXOf(startMs);
+    __vg.setCompactAxis(wasOn);
+    return { runMonths: gap.i1 - gap.i0 + 1,
+             compactPx: Math.round(compactPx * 10) / 10, linearPx: Math.round(linearPx * 10) / 10 };
+  })()`);
+  if (r.skip) return { ok: false, detail: "no dateSpan on this vault" };
+  if (r.noGap) return { ok: true, detail: "skipped — no run of 3+ empty months on this vault" };
+  // The direct, user-visible promise of github#23: a run collapses to noticeably LESS space
+  // than it would take uncompacted -- not merely self-consistent with the segment table that
+  // produced it, which a check comparing two numbers both read off __vg.dateSpan would be.
+  const ok = r.compactPx < r.linearPx * 0.7;
+  return {
+    ok,
+    detail: `a ${r.runMonths}-month empty run draws ${r.compactPx}px compacted against ` +
+      `${r.linearPx}px it would take linearly` +
+      (r.linearPx > 0 ? ` (${Math.round((1 - r.compactPx / r.linearPx) * 100)}% narrower)` : ""),
+  };
+});
+
+check("compact axis: the settings-panel toggle actually flips the live state", async (p) => {
+  // A REAL regression check, not a manual one-off: $() prepends "vg-" (src/page.js:103), so
+  // a rendered row whose literal id is "opt-<key>" instead of "vg-opt-<key>" leaves
+  // setCompactAxis's own $("opt-compactAxis") lookup permanently unable to find its button --
+  // exactly the bug an adversarial review caught here, since the click handler always
+  // rebuilds the row wholesale and masked it in every path this suite drove before this
+  // check existed. Queries the DOM directly (not through $()) so it can't share the bug's
+  // own blind spot.
+  const r = await p.j(`(function(){
+    var gear = document.querySelector("#vg-gear");
+    if (!gear || gear.hidden) return { noGear: true };
+    gear.click();
+    var before = document.querySelector("#vg-opt-compactAxis");
+    if (!before) return { noButton: true };
+    var beforePressed = before.getAttribute("aria-pressed"), beforeState = __vg.compactAxis;
+    before.click();
+    var after = document.querySelector("#vg-opt-compactAxis");
+    var afterPressed = after && after.getAttribute("aria-pressed"), afterState = __vg.compactAxis;
+    // Restore, and close the panel again, so the check leaves no trace on the page.
+    if (after && afterState !== beforeState) after.click();
+    gear.click();
+    return { beforePressed: beforePressed, beforeState: beforeState,
+             afterPressed: afterPressed, afterState: afterState };
+  })()`);
+  if (r.noGear) return { ok: false, detail: "no #vg-gear on this build -- standalone only" };
+  if (r.noButton) {
+    return { ok: false, detail: "gear opened but #vg-opt-compactAxis was not found -- the " +
+      "rendered row id and the $() lookup setCompactAxis uses have drifted apart again" };
+  }
+  const flipped = r.afterState !== r.beforeState && r.afterPressed !== r.beforePressed;
+  return {
+    ok: flipped,
+    detail: `clicking the row: state ${r.beforeState}->${r.afterState}, aria-pressed ` +
+      `${r.beforePressed}->${r.afterPressed}`,
   };
 });
 
