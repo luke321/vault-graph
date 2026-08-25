@@ -452,6 +452,39 @@
   .vault-graph .swatch[aria-checked="true"][data-auto="1"] {
     box-shadow: 0 0 0 1px var(--surface-0), 0 0 0 2px var(--text-3);
   }
+  /* AUTOMATIC BUT NOT IN USE: an override has moved this folder to a different swatch,
+     and this is the one Auto would give back. The ring above already answers "which
+     colour is this folder using" -- marking that same swatch here too would just repeat
+     it, so this is a distinct, smaller mark instead of a second ring, and it only
+     renders on the swatch that ISN'T checked (see the two rules together: never both on
+     one swatch, never neither on an automatic-and-in-use one).
+
+     Same triangle the heatmap band uses for "today" (page.js, heatDraw), and the same
+     reason for the colour: --today is the one token guaranteed not to be one of the
+     twelve hues, so the mark can never be misread as a competing colour choice. */
+  .vault-graph .swatch[data-auto="1"]:not([aria-checked="true"]) {
+    position: relative;
+  }
+  /* A real 6x4 box clipped to a triangle, not the classic zero-width-plus-border hack.
+     Three different centering formulas on the bordered-zero-width version --
+     `transform: translateX(-50%)`, `calc(50% - 3px)`, and `margin: 0 auto` -- all
+     measured PIXEL-IDENTICAL positions, confirming the LAYOUT math was never the
+     problem; a live probe element's getBoundingClientRect agreed with all three. What
+     did not agree was the screenshot: the rendered mark sat measurably right of every
+     one of those verified positions, by the same amount regardless of which formula
+     placed it there -- which points at how Chrome RASTERISES a zero-content-width
+     border-triangle's diagonal edges at fractional sub-pixel widths, not at anything
+     this file controls. `clip-path` paints a genuinely sized box instead of exploiting
+     border geometry, going through a different rasteriser path entirely. */
+  .vault-graph .swatch[data-auto="1"]:not([aria-checked="true"])::after {
+    content: "";
+    position: absolute;
+    left: 50%; bottom: -4px;
+    width: 6px; height: 4px;
+    transform: translateX(-50%);
+    background: var(--today);
+    clip-path: polygon(50% 0%, 100% 100%, 0% 100%);
+  }
   .vault-graph .scr .auto {
     font: inherit; font-size: 10px; padding: 2px 6px; cursor: pointer; margin-left: 2px;
     background: var(--surface-2); color: var(--text-3);
@@ -745,6 +778,10 @@
     position: absolute; display: block; pointer-events: none;
     transform: translate(-50%, -50%);
     opacity: .95;
+    /* The mark yields to pinned notes by fading rather than by being switched off. Timed
+       against TWEEN_MS, the same clock the note travels to the hub on, so the two halves
+       of the change finish together instead of one popping and the other gliding. */
+    transition: opacity 380ms ease;
     -webkit-mask-repeat: no-repeat; mask-repeat: no-repeat;
     -webkit-mask-position: center;  mask-position: center;
     -webkit-mask-size: contain;     mask-size: contain;
@@ -761,6 +798,28 @@
      fills sit lighter than the paper, so the mark is deepened a touch to hold its
      edges instead of dissolving into the background. */
   .vault-graph[data-theme="light"] #vg-logo { opacity: .9; filter: saturate(1.05) brightness(.86); }
+
+  /* SPIKE (github#12). B's dial: the ring's colours as hard arcs, holed out so the middle
+     stays free. The hit disc sits over the whole hole and is the only thing here that
+     takes a pointer -- #vg-logo is `pointer-events: none` and a mask does not hit-test. */
+  /* THE HUB'S DROP TARGET, drawn only while a note is being dragged. Without it the hole
+     is an invisible target and the gesture is a guess -- the first version had no ring and
+     a drop either worked or did not for no stated reason. Dashed while the pointer is
+     outside it, solid and filled once the drop would land. */
+  .vault-graph #vg-hubdrop {
+    position: absolute; display: block; pointer-events: none;
+    transform: translate(-50%, -50%); border-radius: 50%;
+    border: 2px dashed var(--text-3); opacity: .55;
+    transition: opacity 120ms linear, background-color 120ms linear;
+  }
+  .vault-graph #vg-hubdrop[hidden] { display: none; }
+  .vault-graph #vg-hubdrop[data-over="1"] {
+    border-style: solid; border-color: var(--accent); opacity: 1;
+    background: color-mix(in srgb, var(--accent) 12%, transparent);
+  }
+  /* Dragging a pinned note OUT reads as the opposite gesture, so the ring says so rather
+     than looking like a target the note is failing to hit. */
+  .vault-graph #vg-hubdrop[data-drop="out"] { border-color: var(--text-3); opacity: .32; }
 
   .vault-graph #vg-tip {
     position: absolute; pointer-events: none; z-index: 5; max-width: 260px;
@@ -794,12 +853,16 @@
   }
   .vault-graph #vg-detail .nb { font-size: 10px; text-transform: uppercase; letter-spacing: .07em;
                 color: var(--text-3); margin: 10px 0 5px; font-weight: 600; }
+  .vault-graph #vg-detail .actions {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 4px;
+  }
   .vault-graph #vg-detail a.open {
     display: inline-block; font-size: 11px; color: var(--accent);
     text-decoration: none; border: 1px solid var(--accent);
-    border-radius: 6px; padding: 4px 8px; margin-top: 4px;
+    border-radius: 6px; padding: 4px 8px;
   }
   .vault-graph #vg-detail a.open:hover { background: color-mix(in srgb, var(--accent) 12%, transparent); }
+  .vault-graph #vg-detail .pin svg { width: 13px; height: 13px; vertical-align: -2px; margin-right: 3px; }
   .vault-graph #vg-detail ul { list-style: none; margin: 0; padding: 0; }
   .vault-graph #vg-detail li button {
     background: none; border: 0; padding: 2px 0; font: inherit; font-size: 12px;
@@ -812,6 +875,16 @@
     color: var(--text-3); font-size: 16px; cursor: pointer; line-height: 1; padding: 2px 5px;
   }
   .vault-graph #vg-detail .x:hover { color: var(--text-1); }
+
+  /* Fixed white-on-black regardless of theme, like every real OS pointer -- its whole
+     job is to read against whatever is under it, light disc or dark. No transition: a
+     cursor that eases toward its target looks like it is being dragged there by
+     something else, which is the opposite of what a pointer communicates. */
+  .vault-graph #vg-democursor {
+    position: absolute; left: 0; top: 0; z-index: 50; pointer-events: none;
+    filter: drop-shadow(0 1px 2px rgba(0,0,0,.45));
+  }
+  .vault-graph #vg-democursor[hidden] { display: none; }
 
   /* THE RIGHT-CLICK COLOUR MENU. #vg-settings above is a sidebar block on purpose, to
      avoid exactly this z-index-and-dismiss-handler cost -- but a menu that has to open

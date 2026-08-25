@@ -523,6 +523,15 @@ class VaultGraphView extends ItemView {
         this.plugin.settings.compactAxis = !!v;
         await this.plugin.saveSettings();
       },
+      // The hub, for the same reason pan gets a writer: it is changed in the view, by
+      // right-clicking a note or dragging one into the middle, so the view is what has to
+      // persist it. Not in the settings tab either -- "which notes are in the hub" is a
+      // thing you point at, not a thing you type.
+      pinned: this.plugin.settings.pinned,
+      onPinned: async (ids) => {
+        this.plugin.settings.pinned = ids;
+        await this.plugin.saveSettings();
+      },
       // The gear IS shown here -- it is where somebody looking at the disc goes to look
       // for the colours -- but it opens Obsidian's settings tab rather than a second
       // panel inside the view saying the same things. `settingsUI` is deliberately not
@@ -589,6 +598,11 @@ const DEFAULTS = {
   // decides: a folder whose name starts with an underscore is an archive, so it is out of
   // the colour rotation, grey, and hidden until somebody says otherwise.
   folderShown: {},
+  // Note ids pinned into the hub, in slot order. Empty means the mark is in the middle,
+  // which is the state the graph has always opened in. The plugin rebuilds in place, so
+  // these are re-checked against the graph on every mount -- a renamed or deleted note
+  // drops out rather than holding a slot nothing can fill.
+  pinned: [],
   // Drag-to-pan in the view. ON by default: the rim of a big vault is unreachable without
   // it, and the corner control is a cheaper way to discover that than a settings tab is.
   // Held here so a vault where dragging gets in the way can start locked.
@@ -785,10 +799,13 @@ class VaultGraphSettingTab extends PluginSettingTab {
     // the disc about which slot every folder after an archive is on. Hence the separate
     // counter -- the same reason buildColors has one.
     let auto = 0;
-    this.renderColours(topFolders(this.app).map((f) => ({
-      name: f.name, n: f.n,
-      slot: isArchiveGroup(f.name) ? ARCHIVE_SLOT : "g" + ((auto++ % SLOT_NAMES.length) + 1),
-    })));
+    // `slot` doubles as `autoSlot` here: this list is path-derived and never consults
+    // settings.folderColors, so what it computes already IS the automatic guess -- there
+    // is no override applied yet for autoSlot to differ from.
+    this.renderColours(topFolders(this.app).map((f) => {
+      const s = isArchiveGroup(f.name) ? ARCHIVE_SLOT : "g" + ((auto++ % SLOT_NAMES.length) + 1);
+      return { name: f.name, n: f.n, slot: s, autoSlot: s };
+    }));
 
     // ...and then ask the graph itself, which is the only thing that actually knows.
     //
@@ -820,6 +837,7 @@ class VaultGraphSettingTab extends PluginSettingTab {
       name,
       n: api.groupCount(name),
       slot: api.slotOf ? api.slotOf(name) : "",
+      autoSlot: api.autoSlotOf ? api.autoSlotOf(name) : "",
     }));
     if (groups.length) this.renderColours(groups);
   }
@@ -892,14 +910,17 @@ class VaultGraphSettingTab extends PluginSettingTab {
       SLOT_NAMES.forEach((name, i) => {
         const key = "g" + (i + 1);
         const on = current === key;
+        // The slot with no override at all -- distinct from `current` exactly when the
+        // folder is pinned to something else, and marked regardless of `on` so it stays
+        // visible after a pin. Before this, the mark and the checked ring were the same
+        // fact and a pin erased the only trace of what Auto would give back.
+        const isAuto = group.autoSlot === key;
         const attr = {
           role: "radio", "aria-checked": String(on), "aria-label": name,
-          title: name + (on ? (pinned ? " (chosen)" : " (automatic)") : ""),
+          title: name + (on ? (pinned ? " (chosen)" : " (automatic)") :
+                         (isAuto ? " (automatic default)" : "")),
         };
-        // Chosen and automatic are marked differently -- the ring is dim for a slot the
-        // folder merely landed on. Two different facts, and the Auto button beside it is
-        // otherwise the only thing that tells them apart.
-        if (on && !pinned) attr["data-auto"] = "1";
+        if (isAuto) attr["data-auto"] = "1";
         const b = row.controlEl.createEl("button", { cls: ["swatch", "vg-" + key], attr });
         b.addEventListener("click", () => this.pick(group.name, key));
       });

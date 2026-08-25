@@ -562,6 +562,50 @@ actually flips the live state, and persists* covers it the same way the settings
 covers its own button, and was confirmed against the real plugin under CDP (22px tall, no
 overflow, no overlap with the date fields) rather than assumed from the standalone.
 
+## A note in the hub has left the ring, and the ring closes behind it
+
+Pinning takes a note out of `buildWedgePlan` entirely. Skip that and it keeps its seat, so
+its wedge is drawn around a hole where it used to be — the note is in the hub and its chair
+is still at the table.
+
+```
+node scripts/smoke.mjs --only "leaves no gap"
+```
+
+Measured as the worst neighbour gap within one row of the busiest wedge, against that
+vault's own resting spread rather than an absolute: **1.69x median at rest, 1.68x with six
+pinned** on the shape vault. A vacated seat roughly doubles it.
+
+Three numbers hang off the same decision:
+
+- **The hub's dots shrink as it fills**, and the size comes from the closest two *slots*,
+  not from the count — the ball changes shape at 2 and again at 7. On the demo vault:
+  **16.53px at one pinned, 13.76 at three, 11.02 at six, 6.79 at thirteen.** A lone note
+  takes the cap outright; deriving its spacing from the hole gave it a *smaller* dot than
+  three (10.93 against 11.73), because a ring of three sits further out than the spacing
+  the hole implies.
+- **The ball must not touch the innermost ring.** `HUB_R1` is measured against the first
+  real note of the disc, not against `r0` — both the dot and the note carry a radius the
+  hole knows nothing about. At 0.62 the outer edge reached **0.865** of that distance,
+  8.8px of clearance, which reads as contact; at 0.50 it reaches **0.714**, ~19px.
+- **A pin hidden by a filter is skipped, not released.** Filters are deliberately not
+  persisted, so they must not quietly edit something that is. Releasing was the first
+  version: hiding a folder dropped every pin in it and unhiding did not bring them back.
+
+## The mark yields to the hub by fading, not by switching off
+
+`hidden` popped the mark out on the frame the first pin landed, while the note it was
+yielding to was still crossing the disc — the one hard cut in an otherwise tweened change.
+
+```
+node scripts/smoke.mjs --only "mark yields"
+```
+
+Opacity **0.95 at rest → 0 with three pinned → 0.95 cleared**, with `hidden` false
+throughout. The check sleeps past the 380ms transition on every read; `settle()` waits for
+the layout and knows nothing about a CSS transition, and reading straight after a clear
+returned 0.1414 — the fade caught in progress, not a fact about the mark.
+
 ## Every unlinked note wears the (unlinked) swatch
 
 A note of degree 0 belongs to the `(unlinked)` group, not to its folder, and the legend

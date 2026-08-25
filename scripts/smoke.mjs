@@ -2645,6 +2645,148 @@ check("overriding one folder recolours exactly one group", async (p) => {
                        (ok ? "" : ` (${r.moved.slice(0, 6).join(", ")}${r.moved.length > 6 ? ", ..." : ""})`) };
 });
 
+/* ------------------------------------------------------------------------ the hub */
+
+/** The n most connected notes, which is what a person reaches for first. */
+function topByDegree(p, n) {
+  return p.j(`(function(){
+    var o = []; __vg.graph.forEachNode(function(id){ o.push([id, __vg.graph.degree(id)]); });
+    o.sort(function(a,b){ return b[1]-a[1]; });
+    return o.slice(0, ${n}).map(function(x){ return x[0]; }); })()`);
+}
+
+async function pinN(p, n) {
+  await p.eval(`__vg.clearPins(); void 0`);
+  const ids = await topByDegree(p, n);
+  for (const id of ids) await p.eval(`__vg.pin(${JSON.stringify(id)}); void 0`);
+  await settle(p);
+  return ids;
+}
+
+check("a pinned note leaves no gap in the ring it came from", async (p) => {
+  // THE BUG THIS PINS. A pinned note kept its seat in buildWedgePlan, so its wedge was
+  // drawn around a hole where it used to be -- the note in the hub and its chair still at
+  // the table. Measured as the biggest angular step between neighbours in one wedge: a
+  // vacated seat doubles it, and re-densifying leaves it at the wedge's own spacing.
+  const gapOf = () => p.j(`(function(){
+    // The busiest group, since a wedge with more notes in it has a tighter spacing and so
+    // a missing one shows up more clearly against it.
+    var byG = {};
+    __vg.graph.forEachNode(function(id, a){
+      if ((__vg.alpha[id]||0) < 0.5) return;
+      var g = __vg.groupOf(id); (byG[g] || (byG[g] = [])).push([Math.atan2(a.y, a.x), Math.hypot(a.x,a.y)]);
+    });
+    var best = null;
+    Object.keys(byG).forEach(function(g){ if (!best || byG[g].length > byG[best].length) best = g; });
+    // One RING of that wedge at a time -- notes on different rows are not neighbours, and
+    // mixing them would report the row pitch as an angular gap.
+    var rows = {};
+    byG[best].forEach(function(pr){ var k = Math.round(pr[1] / 40); (rows[k] || (rows[k] = [])).push(pr[0]); });
+    var worst = 0, count = 0;
+    Object.keys(rows).forEach(function(k){
+      var a = rows[k].slice().sort(function(x,y){ return x-y; });
+      if (a.length < 6) return;                 // too few to have a meaningful spacing
+      count += a.length;
+      var med = [];
+      for (var i = 1; i < a.length; i++) med.push(a[i] - a[i-1]);
+      med.sort(function(x,y){ return x-y; });
+      var m = med[Math.floor(med.length/2)], top = med[med.length-1];
+      if (m > 0 && top / m > worst) worst = top / m;
+    });
+    return { group: best, worst: Math.round(worst*100)/100, notes: count };
+  })()`);
+
+  await p.eval(`__vg.clearPins(); void 0`);
+  await settle(p);
+  const before = await gapOf();
+  await pinN(p, 6);
+  const after = await gapOf();
+  await p.eval(`__vg.clearPins(); void 0`);
+  await settle(p);
+  // Against the vault's OWN resting spread rather than an absolute: a wedge that already
+  // has uneven rows would fail an absolute threshold for a reason that has nothing to do
+  // with pinning. What may not happen is the spread getting materially worse.
+  const ok = after.worst <= before.worst * 1.35 + 0.05;
+  return { ok, detail: `worst neighbour gap in ${before.group} (${before.notes} notes): ` +
+                       `${before.worst}x median at rest -> ${after.worst}x with 6 pinned` };
+});
+
+check("the hub's dots shrink as it fills", async (p) => {
+  // A fixed multiplier put thirteen overlapping dots in a 180px hole. The size is derived
+  // from the closest two SLOTS now, so it has to fall monotonically as the ball packs --
+  // and the one-note case is the interesting one: deriving its spacing from the hole gave
+  // a lone pin a SMALLER dot than three of them (10.93 against 11.73).
+  const sizeAt = async (n) => {
+    const ids = await pinN(p, n);
+    return p.j(`(function(){
+      var d = __vg.renderer.getNodeDisplayData(${JSON.stringify(ids[0])});
+      return Math.round(d.size * 100) / 100; })()`);
+  };
+  const s1 = await sizeAt(1), s3 = await sizeAt(3), s6 = await sizeAt(6), s13 = await sizeAt(13);
+  await p.eval(`__vg.clearPins(); void 0`);
+  await settle(p);
+  const ok = s1 > s3 && s3 > s6 && s6 > s13;
+  return { ok, detail: `1 -> ${s1}px, 3 -> ${s3}, 6 -> ${s6}, 13 -> ${s13}` +
+                       (ok ? " (monotonic)" : "  NOT MONOTONIC") };
+});
+
+check("the mark yields to the hub and comes back", async (p) => {
+  const markOn = () => p.j(`(function(){
+    var el = document.querySelector("#vg-logo");
+    return { hidden: !!el.hidden, opacity: getComputedStyle(el).opacity }; })()`);
+  // SLEEP PAST THE FADE on every read, not just the last one. settle() waits for the
+  // layout, and the mark's opacity is a CSS transition that knows nothing about it -- read
+  // straight after clearing, the "resting" opacity came back 0.1414 on the demo vault and 0
+  // on the shape vault, which is the fade caught in progress rather than anything about the
+  // mark. 500 > the 380ms transition.
+  const FADE = 500;
+  await p.eval(`__vg.clearPins(); void 0`);
+  await settle(p);
+  await sleep(FADE);
+  const rest = await markOn();
+  await pinN(p, 3);
+  await sleep(FADE);
+  const held = await markOn();
+  await p.eval(`__vg.clearPins(); void 0`);
+  await settle(p);
+  await sleep(500);                            // the fade is 380ms
+  const back = await markOn();
+  // FADED, not hidden: `hidden` popped the mark out on the frame the first pin landed,
+  // while the note it was yielding to was still crossing the disc.
+  const ok = Number(rest.opacity) > 0.5 && Number(held.opacity) < 0.05 &&
+             Number(back.opacity) > 0.5 && !held.hidden;
+  return { ok, detail: `opacity ${rest.opacity} at rest -> ${held.opacity} with 3 pinned ` +
+                       `(hidden=${held.hidden}, must be false) -> ${back.opacity} cleared` };
+});
+
+check("a pin hidden by a filter is skipped, not released", async (p) => {
+  // Filters are deliberately not persisted, so they must not quietly edit something that
+  // IS. Releasing the pin was the first version: hiding a folder dropped every pin in it
+  // and unhiding did not bring them back.
+  await pinN(p, 3);
+  const before = await p.j(`__vg.pinned().length`);
+  const drawnNow = () => p.j(`(function(){ var n = 0;
+    __vg.pinned().forEach(function(id){ if ((__vg.alpha[id]||0) > 0.5) n++; }); return n; })()`);
+  const drawnRest = await drawnNow();
+  // A two-day window, the same blunt instrument the plan-parity check uses. Which filter
+  // does the hiding is not the point -- willShow is what pinnedIds consults, and the date
+  // range reaches it by the same route a legend toggle does.
+  await p.eval(`__vg.setRange("2019-01-01", "2019-01-02"); void 0`);
+  await settle(p);
+  const whileHidden = await p.j(`__vg.pinned().length`);
+  const drawnHidden = await drawnNow();
+  await clearRange(p);
+  const after = await p.j(`__vg.pinned().length`);
+  const drawnBack = await drawnNow();
+  await p.eval(`__vg.clearPins(); void 0`);
+  await settle(p);
+  const ok = whileHidden === before && after === before &&
+             drawnHidden < drawnRest && drawnBack === drawnRest;
+  return { ok, detail: `${before} pinned: ${drawnRest} drawn at rest -> ${drawnHidden} while ` +
+                       `filtered out (still ${whileHidden} held) -> ${drawnBack} back, ` +
+                       `${after} held` };
+});
+
 // THE OTHER COLOUR CHECK READS GROUP COLOURS; THIS ONE READS WHAT A NOTE IS PAINTED.
 // That gap is the whole reason github#3 survived: colorOf("(unlinked)") was right the
 // entire time -- the legend drew the correct swatch from it -- while nodeColor went to

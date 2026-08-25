@@ -137,6 +137,31 @@ the visibility toggle.
 An explicit pick still wins over all of it. The rule decides what happens when nobody has
 said anything.
 
+## The automatic slot is remembered even when it loses
+
+`slotOf` answers "what is this group using" — pick or position, whichever applies. Once
+overrides existed (github#22), that left no answer to a different question: "what would
+this group be using with no pick at all". `buildColors` computed that value every time —
+the raw `i % 12` before `picked || key` decided anything — and then threw it away, because
+nothing downstream needed it. It does now (github#29): the settings panels have to mark
+the automatic swatch even while a different one is pinned, so a user can find their way
+back to it without hitting `Auto` and losing the override to check.
+
+`groupAutoSlot` records it in the same loop, for the same reason `groupSlot` does —
+archives are skipped from the rotation, so nothing outside that loop can recompute it
+without duplicating the skip logic. `autoSlotOf` on the api mirrors `slotOf` exactly, and
+answers unconditionally: an archive's automatic slot is always `g11`, a working folder's is
+always its position in the rotation, in both cases whether or not something currently
+overrides it.
+
+The two facts get one mark each, never combined into a single ring: `aria-checked` is
+"what's in effect", `data-auto` is "what's automatic", and a swatch can carry either, both,
+or neither. Both on the same swatch was already possible (an unpinned folder — nothing
+overrides its position, so the checked one and the automatic one are the same swatch). What
+was missing is the two marks landing on *different* swatches at once: a pin checks one, and
+the automatic mark now still shows on whichever other swatch it belongs to, instead of
+disappearing the moment they disagree.
+
 ## Visibility has two levels
 
 | | |
