@@ -68,8 +68,9 @@ hoverable and clickable the same way a top-level folder is.
 
 *Predates versioning*
 
-Twelve palette slots, handed out in folder order. Click a slot to hold a folder to a
-colour; two folders may share one on purpose.
+Twelve palette slots, handed out in folder order. Right-click a folder in the legend for
+the picker at the row itself; click a slot to hold that folder to a colour, two folders
+may share one on purpose.
 
 *Clip pending.*
 
@@ -90,3 +91,24 @@ range, a pill sets the heatmap's own 52-week window, and a chip per year jumps s
 there. Replaced the sidebar's old rank slider — the ribbon is the only timeline now.
 
 ![The date range dragged in by both handles, a year chip hovered and clicked, the heatmap's own window slid back and forward on its own, then the date range cleared](../assets/features/timeline.webp)
+
+## Pin a note to the hub
+
+*Unreleased*
+
+Drag a note into the hole at the centre, right-click it, or open its own detail card and
+click **Pin to hub** — three ways to hold up to thirteen notes together in the hub, out
+of the ring. The ring closes around wherever a pinned note came from, and reopens the
+moment it is unpinned.
+
+![A note dragged into the hole to pin it, a second note right-clicked to pin it the other way, and a third pinned from its own detail card, whose panel is then closed](../assets/features/pin.webp)
+
+## Subfolder colours
+
+*Unreleased*
+
+The same right-click colour menu a top-level folder's row opens, reached from a
+subfolder's row instead — recolour "People" inside "03 - Resources" without touching its
+parent's own hue. The row only exists once its folder's twisty is open.
+
+![A folder unfolded to reach a subfolder, that subfolder right-clicked for its own colour menu, given a colour, then put back to automatic](../assets/features/subfoldercolor.webp)

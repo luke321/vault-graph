@@ -3886,6 +3886,7 @@ function mountVaultGraph(root, data, deps) {
   // The drop target, drawn only while a drag is live. Without it the hole is an invisible
   // target and the gesture is a guess -- the first version had no ring and dropping felt
   // like it either worked or did not for no stated reason.
+  /* ---- BEGIN: demo automation + debug API -- stripped from the plugin build, see scripts/build-plugin.mjs (stripDemoAndDebug) ---- */
   /**
    * A purely cosmetic pointer, drawn IN THE PAGE and moved by eval -- never at the OS
    * level. `x, y` are PAGE coordinates, the same ones the driver already dispatches
@@ -3909,7 +3910,13 @@ function mountVaultGraph(root, data, deps) {
   function demoCursorAt(x, y) {
     var el = $("democursor");
     if (!el) return;
-    var b = $("canvas").getBoundingClientRect();
+    // Against ROOT, not #vg-canvas -- see the element's own comment in page.html for
+    // why: nested in the canvas it was clipped by that element's overflow:hidden for
+    // every beat whose target was not literally over the disc (the sidebar, the
+    // heatmap band, the ribbon), which is most of the storyboard. Same coordinate
+    // conversion the right-click colour menu already uses against ROOT, for the same
+    // reason: ROOT's own getBoundingClientRect() reflects whatever sits above it.
+    var b = ROOT.getBoundingClientRect();
     el.style.left = (x - b.left) + "px";
     el.style.top = (y - b.top) + "px";
     el.hidden = false;
@@ -3918,6 +3925,7 @@ function mountVaultGraph(root, data, deps) {
     var el = $("democursor");
     if (el) el.hidden = true;
   }
+  /* ---- END: demo automation + debug API ---- */
 
   function placeHubDrop() {
     var el = $("hubdrop");
@@ -10091,6 +10099,8 @@ function mountVaultGraph(root, data, deps) {
     return /(^|[?&#])demo\b/.test(String(location.search) + " " + String(location.hash));
   }
 
+  /* ---- BEGIN: demo automation + debug API -- stripped from the plugin build, see scripts/build-plugin.mjs (stripDemoAndDebug) ---- */
+
   // Is anything moving? Every animation in this page owns one of these three, so this
   // is the whole answer rather than a sample of it. The driver polls this instead of
   // sleeping: a fixed wait fires part-way through on a page too slow to finish in time,
@@ -10199,6 +10209,18 @@ function mountVaultGraph(root, data, deps) {
       }
       return null;                              // the panel is closed, so nothing to aim at
     }
+    // The right-click colour menu's own swatches -- "g8", or "" for its Auto button.
+    // Unlike the settings panel's "swatch" kind above, only one folder or subfolder can
+    // have this menu open at a time, so there is no folder half of the key to match.
+    if (kind === "ctxswatch") {
+      var cm = $("ctxmenu");
+      if (!cm || cm.hidden) return null;
+      var csw = cm.querySelectorAll("[data-key]");
+      for (var cs = 0; cs < csw.length; cs++) {
+        if (csw[cs].getAttribute("data-key") === (arg || "")) return csw[cs];
+      }
+      return null;                              // the menu is closed, so nothing to aim at
+    }
     // A YEAR CHIP under the strip. "busiest" picks the fullest year that HAS a chip, which
     // is not the same as the fullest year: below about 20px of pitch buildYears names every
     // other year, so the busiest one may have no button to aim at. Choosing among the chips
@@ -10232,6 +10254,14 @@ function mountVaultGraph(root, data, deps) {
     if (kind === "pin") {
       var dcard = $("detail");
       return dcard && !dcard.hidden ? dcard.querySelector(".pin") : null;
+    }
+    // The detail card's own close button. A card left open after a beat is done with
+    // it is not a resting state anything else in the storyboard expects -- every other
+    // act starts from "nothing selected", and the pin act is the one act that opens a
+    // card without a hover or a click-elsewhere already lined up to close it again.
+    if (kind === "detailclose") {
+      var dc2 = $("detail");
+      return dc2 && !dc2.hidden ? dc2.querySelector(".x") : null;
     }
     if (kind === "day") return demoCellRect(heat && heat.days[arg]);
     if (kind === "busiest") {
@@ -10505,27 +10535,31 @@ function mountVaultGraph(root, data, deps) {
    * the disc with its links lit -- have to be in those seconds. The colour picker, which is
    * a preference panel, was landing before the timeline, which is the point of the tool.
    *
-   * The acts now run: the vault growing, one note, the timeline, the heatmap, folders,
-   * subfolders, the camera, pinning a note, colours. Roughly descending in "would this
-   * make someone stop scrolling", with three exceptions that are structural rather than
-   * editorial:
+   * The acts now run: the vault growing, one note, pinning a note, the timeline, the
+   * heatmap, folders, subfolders, subfolder colours, the camera, colours. Roughly
+   * descending in "would this make someone stop scrolling", with two exceptions that
+   * are structural rather than editorial:
    *
    *   * FOLDERS BEFORE SUBFOLDERS, because the subfolder rows do not exist until a twisty
    *     has been clicked, and `only` must run while 03 is folded -- soloing while it is
    *     open deletes its rows and pulls everything below them up by 97px, so the pointer
    *     ends up over a row three below the one it clicked. That cost a take.
-   *   * PIN RIGHT BEFORE COLOURS, not earlier. Pinning leaves up to three notes sitting in
-   *     the hub for the rest of a combined run -- that is the point of the act, not a bug
-   *     in it, but every act after this one inherits a hub that is no longer empty. Placed
-   *     last but one, only "colours" (whose own beats open the gear and click swatches,
-   *     never the disc) inherits it.
-   *   * COLOURS LAST, because the gear panel has to be open for the `swatch` targets to
-   *     resolve at all, and the trip to the gear should be one trip.
+   *   * COLOURS LAST, because colour is a preference and every earlier act should land
+   *     on the disc's own palette, not one an earlier take happened to leave behind.
+   *
+   * PIN IS EARLY ON PURPOSE, not tucked in near the end where it used to sit. It is the
+   * one act that puts a note somewhere other than its lattice seat, and it earns being
+   * seen before the reader has settled into "this is a filter-and-browse tool". The
+   * cost is real and accepted: it leaves up to three notes sitting in the hub for
+   * every act after it, so a re-record of the full storyboard shows a filled hub in
+   * the timeline, heatmap, folders, subfolders and camera acts too. That is not a bug
+   * to route around -- the hub is not a special case to cut away from, it is what the
+   * disc looks like once you have used it.
    *
    * Beats are DATA, so reordering is reordering -- the driver holds no state between them.
    * What it is NOT free of is the ordering constraints above and the ones each act names.
    *
-   * Every beat below also carries an `act:` tag naming which of these nine it belongs to
+   * Every beat below also carries an `act:` tag naming which of these ten it belongs to
    * -- `demoAct(name)`, just after this function, plays one act on its own instead of the
    * whole thing, for the per-feature clips in docs/features.md.
    */
@@ -10559,7 +10593,35 @@ function mountVaultGraph(root, data, deps) {
       { hover: true, target: ["note", "04"], act: "note", why: "hover a daily note" },
       { hover: true, target: ["note", "05"], act: "note", why: "hover a meeting note" },
 
-      /* --- 3. the timeline ---------------------------------------------- */
+      /* --- 3. pinning a note ---------------------------------------------- */
+      // EARLY, not tucked away near the end -- it is the one thing on this page that
+      // puts a note somewhere OTHER than its lattice seat, and it is worth seeing before
+      // the timeline/heatmap/folder acts that follow, which then run against a disc with
+      // a filled hub for the rest of the recording. That is a real change to what those
+      // later acts show on a re-record, and it is the point: the hub is not a special
+      // case to cut away from, it is what the disc looks like once you have used it.
+      //
+      // Three DIFFERENT notes, one per gesture -- pinning is a TOGGLE (see togglePin), so
+      // running two gestures against the same note would have the second one release what
+      // the first just placed, and the act would end with fewer pins than it showed
+      // landing. biginner rather than a folder prefix for the drag -- see
+      // demoBigInnerNote: a drag has to survive a press, a glide and a release landing
+      // correctly under real load, and a big dot on the inner ring is both the easiest
+      // hit-test and the shortest trip to the hub.
+      { drag: true, target: ["biginner"], act: "pin", to: ["stage", "centre"],
+        why: "drag a note into the hole to pin it" },
+      { settle: true, act: "pin", why: "the hub opens and the ring closes around where it was" },
+      { rightclick: true, target: ["note", "05"], act: "pin", why: "right-click a note -- pins the same way" },
+      { settle: true, act: "pin", why: "let the second pin land" },
+      { click: true, target: ["note", "03"], act: "pin", why: "click a note to open its card" },
+      { click: true, target: ["pin"], act: "pin", why: "...and pin it from the card itself" },
+      { settle: true, act: "pin", why: "let the third pin land" },
+      // Closed rather than left open: every other act starts from "nothing selected",
+      // and this is the one act that opens a card with nothing later in its own beats
+      // to close it again.
+      { click: true, target: ["detailclose"], act: "pin", why: "close the card" },
+
+      /* --- 4. the timeline ---------------------------------------------- */
       // The strip under the band carries every month of the vault, and it is the timeline:
       // two handles that are the filter, a pill below them for the 52 weeks the grid above
       // is drawing, and a chip per year. Moved up from LAST -- the sidebar's rank slider is
@@ -10599,7 +10661,7 @@ function mountVaultGraph(root, data, deps) {
       { click: true, target: ["id", "rangeall"], act: "timeline", why: "clear the date range" },
       { settle: true, act: "timeline", why: "let the whole vault come back" },
 
-      /* --- 4. the heatmap ----------------------------------------------- */
+      /* --- 5. the heatmap ----------------------------------------------- */
       // Hovering a day haloes the notes added that day, wherever they landed on the disc.
       // Ranked by what is VISIBLE rather than by date, so this works on any vault.
       { hover: true, target: ["busiest", "1"], act: "heatmap", why: "hover the busiest day" },
@@ -10619,7 +10681,7 @@ function mountVaultGraph(root, data, deps) {
       { click: true, target: ["busiest", "1"], act: "heatmap", why: "...and click again to let it go" },
       { settle: true, act: "heatmap", why: "let it ramp back" },
 
-      /* --- 5. folders --------------------------------------------------- */
+      /* --- 6. folders --------------------------------------------------- */
       // Hiding: the wedges reallocate and the disc stays a full circle.
       { click: true, target: ["eye", "04"], act: "folders", why: "hide a folder -- the wedges reallocate" },
       { settle: true, act: "folders", why: "let the wedges reallocate" },
@@ -10633,7 +10695,7 @@ function mountVaultGraph(root, data, deps) {
       { click: true, target: ["id", "allon"], act: "folders", why: "show everything again" },
       { settle: true, act: "folders", why: "let the whole disc come back" },
 
-      /* --- 6. subfolders ------------------------------------------------ */
+      /* --- 7. subfolders ------------------------------------------------ */
       // The tree starts folded, so getting to a subfolder means opening its folder first.
       // That is the honest sequence and it is worth showing: the disc already draws 03's
       // sub-wedges, and this is where the legend admits they are there. It is also
@@ -10662,7 +10724,25 @@ function mountVaultGraph(root, data, deps) {
 
       { click: true, target: ["twisty", "03"], act: "subfolders", why: "fold the subfolders away again" },
 
-      /* --- 7. the camera ------------------------------------------------ */
+      /* --- 8. subfolder colours ------------------------------------------ */
+      // The same right-click menu the top-level colours act uses (see there), on a
+      // SUBFOLDER row instead of a folder's own -- which does not exist until its
+      // twisty is open, the same precondition the subfolders act above needs.
+      // SELF-CONTAINED for isolated recording, for the same reason "subfolders" is.
+      { click: true, target: ["twisty", "03"], act: "subfoldercolor", why: "unfold a folder to reach its subfolders" },
+      { settle: true, act: "subfoldercolor", why: "let the subfolder rows land" },
+      { rightclick: true, target: ["sub", "03/People"], act: "subfoldercolor",
+        why: "right-click a subfolder for its own colour menu" },
+      { settle: true, act: "subfoldercolor", why: "let the menu open" },
+      { click: true, target: ["ctxswatch", "g5"], act: "subfoldercolor", why: "give it a colour of its own" },
+      { settle: true, act: "subfoldercolor", why: "the disc repaints" },
+      { rightclick: true, target: ["sub", "03/People"], act: "subfoldercolor", why: "right-click it again" },
+      { settle: true, act: "subfoldercolor", why: "let the menu open" },
+      { click: true, target: ["ctxswatch", ""], act: "subfoldercolor", why: "...and put it back to automatic" },
+      { settle: true, act: "subfoldercolor", why: "let the tint snap back" },
+      { click: true, target: ["twisty", "03"], act: "subfoldercolor", why: "fold the subfolders away again" },
+
+      /* --- 9. the camera ------------------------------------------------ */
       // Zoom in a few notches rather than one. One notch is a fifth now, which is the point
       // -- it is a scroll and not a teleport -- and a single notch on camera looks like
       // nothing happened.
@@ -10683,39 +10763,34 @@ function mountVaultGraph(root, data, deps) {
       { click: true, target: ["id", "reset"], act: "camera", why: "...and the reset button in the corner" },
       { settle: true, act: "camera", why: "let the view come back" },
 
-      /* --- 8. pinning a note ---------------------------------------------- */
-      // Three DIFFERENT notes, one per gesture -- pinning is a TOGGLE (see togglePin), so
-      // running two gestures against the same note would have the second one release what
-      // the first just placed, and the act would end with fewer pins than it showed
-      // landing. biginner rather than a folder prefix for the drag -- see
-      // demoBigInnerNote: a drag has to survive a press, a glide and a release landing
-      // correctly under real load, and a big dot on the inner ring is both the easiest
-      // hit-test and the shortest trip to the hub.
-      { drag: true, target: ["biginner"], act: "pin", to: ["stage", "centre"],
-        why: "drag a note into the hole to pin it" },
-      { settle: true, act: "pin", why: "the hub opens and the ring closes around where it was" },
-      { rightclick: true, target: ["note", "05"], act: "pin", why: "right-click a note -- pins the same way" },
-      { settle: true, act: "pin", why: "let the second pin land" },
-      { click: true, target: ["note", "03"], act: "pin", why: "click a note to open its card" },
-      { click: true, target: ["pin"], act: "pin", why: "...and pin it from the card itself" },
-      { settle: true, act: "pin", why: "let the third pin land" },
-
-      /* --- 9. colours --------------------------------------------------- */
-      // LAST on purpose. It is a preference panel, and it was landing before the timeline.
-      // The gear has to come first regardless -- the panel's swatches do not exist in the
-      // DOM until buildSettings has run, so the `swatch` targets below resolve to nothing
-      // without this beat. Two folders are recoloured rather than one, because one swatch
-      // click looks like a highlight and two look like a choice; and the second is a grey,
-      // which is the answer to "can a folder recede on purpose" that the archives rule
-      // only implies.
-      { click: true, target: ["id", "gear"], act: "colours", why: "open the settings panel" },
-      { click: true, target: ["swatch", "01/g8"], act: "colours", why: "give a folder a colour of its own" },
+      /* --- 10. colours -------------------------------------------------- */
+      // LAST regardless: colour is still a preference, and letting every earlier act
+      // land on an unmodified palette keeps a re-record of any of them from picking up
+      // a colour choice this one made.
+      //
+      // RIGHT-CLICK, not the gear -- the same twelve swatches, reached at the row
+      // itself instead of a settings panel one trip away. The gear panel still exists
+      // (see the settings-tab screenshot) but is not what this page leads with any
+      // more, on either host: it is slower for the same outcome. Two folders are
+      // recoloured rather than one, because one swatch click looks like a highlight
+      // and two look like a choice; and the second is a grey, which is the answer to
+      // "can a folder recede on purpose" that the archives rule only implies.
+      { rightclick: true, target: ["group", "01"], act: "colours", why: "right-click a folder for its own colour menu" },
+      { settle: true, act: "colours", why: "let the menu open" },
+      { click: true, target: ["ctxswatch", "g8"], act: "colours", why: "give it a colour of its own" },
       { settle: true, act: "colours", why: "the disc repaints -- no relayout, nothing moves" },
-      { click: true, target: ["swatch", "03/g11"], act: "colours", why: "...and let another one go grey" },
+      { rightclick: true, target: ["group", "03"], act: "colours", why: "right-click another folder" },
+      { settle: true, act: "colours", why: "let the menu open" },
+      { click: true, target: ["ctxswatch", "g11"], act: "colours", why: "...and let it go grey" },
       { settle: true, act: "colours", why: "let the second repaint land" },
-      { click: true, target: ["id", "fcreset"], act: "colours", why: "put every folder back to automatic" },
+      { rightclick: true, target: ["group", "01"], act: "colours", why: "right-click the first folder again" },
+      { settle: true, act: "colours", why: "let the menu open" },
+      { click: true, target: ["ctxswatch", ""], act: "colours", why: "put it back to automatic" },
+      { settle: true, act: "colours", why: "let it snap back" },
+      { rightclick: true, target: ["group", "03"], act: "colours", why: "...and the second" },
+      { settle: true, act: "colours", why: "let the menu open" },
+      { click: true, target: ["ctxswatch", ""], act: "colours", why: "put it back to automatic too" },
       { settle: true, act: "colours", why: "let the palette snap back" },
-      { click: true, target: ["id", "gear"], act: "colours", why: "close the panel" },
 
       // Pointer out of the way, so the last frame is the disc rather than a hover state
       // left behind by the last click.
@@ -10724,17 +10799,17 @@ function mountVaultGraph(root, data, deps) {
   }
 
   // ONE ACT IN ISOLATION, for a per-feature clip instead of the whole storyboard. `name`
-  // is one of the nine `act:` tags above (`intro`, `note`, `timeline`, `heatmap`,
-  // `folders`, `subfolders`, `camera`, `pin`, `colours`) -- the same names the section
-  // comments in demoMode() already carry, so tagging a beat and naming it here is one
-  // decision, not two.
+  // is one of the ten `act:` tags above (`intro`, `note`, `pin`, `timeline`, `heatmap`,
+  // `folders`, `subfolders`, `subfoldercolor`, `camera`, `colours`) -- the same names
+  // the section comments in demoMode() already carry, so tagging a beat and naming it
+  // here is one decision, not two.
   //
   // Isolated acts don't need the full storyboard's ordering rules (folders-before-
-  // subfolders, pin-before-colours): under `?demo` the page comes up at rest with no
-  // filter applied and the gear closed (see the `?demo` branch near the end of this
-  // file), which is exactly the state every act other than "intro" already assumes as
-  // ITS starting point in the combined run too. A leading `settle` is enough; nothing
-  // needs a reset click first. `park` is appended rather than duplicated from the full
+  // subfolders): under `?demo` the page comes up at rest with no filter applied and
+  // the gear closed (see the `?demo` branch near the end of this file), which is
+  // exactly the state every act other than "intro" already assumes as ITS starting
+  // point in the combined run too. A leading `settle` is enough; nothing needs a reset
+  // click first. `park` is appended rather than duplicated from the full
   // storyboard's tail, so a recording of any single act ends on a clean frame the same
   // way the full one does.
   //
@@ -10796,16 +10871,86 @@ function mountVaultGraph(root, data, deps) {
     }
   };
 
+  /* ---- END: demo automation + debug API ---- */
+
   /* ------------------------------------------------------------------ go */
 
   WIN.setTimeout(function () {
     makeRenderer();
     // Debug handle: lets a test page inspect live layout state from outside.
-    API = window.__vg = { graph: graph, state: state,
+    API = window.__vg = { graph: graph,
                     // Re-read the palette from CSS. Called once at init, and again by a
                     // host whose theme changed: THEME is a snapshot, so without this a
                     // theme flip restyles the DOM and leaves every canvas colour behind.
                     readTheme: readTheme, get renderer() { return renderer; },
+                    // Logo internals: placeLogo has to be callable directly, because
+                    // refresh() only schedules a render and a tab that is not being
+                    // composited never runs one -- so testing the mark through the
+                    // renderer silently measures a stale DOM.
+                    placeLogo: placeLogo,
+                    // Folder colours, for the two settings UIs and for the suite. The
+                    // setter repaints rather than rebuilds -- colour is not an input to
+                    // the layout, and an override must not be able to move a node.
+                    palette: paletteInfo,
+                    groupOrder: function () { return (order[state.dim] || []).slice(); },
+                    groupCount: function (g) { return counts[g] || 0; },
+                    // The slot a group is ON, which is not derivable from its position any
+                    // more: archives are skipped in the rotation, and sit on no slot at
+                    // all. "" means exactly that.
+                    slotOf: function (g) { return groupSlot[g] || ""; },
+                    setFolderColors: applyFolderColors,
+                    setSubfolderColors: applySubfolderColors,
+                    setFolderShown: applyFolderShown,
+                    // The saved default, applied live. Mirrors setFolderShown: the host owns
+                    // the store and this owns the camera.
+                    setPanEnabled: function (v) { return setPan(v !== false, false); },
+                    // Push the defaults into the live filter and repaint. This is the
+                    // "and now show it" half, kept separate so loading saved settings at
+                    // boot cannot be confused with a person clicking an eye.
+                    applyHiddenDefaults: function () {
+                      seedHidden();
+                      buildLegend();
+                      cascade(null, { colToggle: true });
+                    },
+                    // The band, for the same reason placeLogo is exposed: it paints
+                    // from afterRender, so a tab that is not being composited never
+                    // repaints it and testing through the renderer measures a stale
+                    // canvas.
+                    heatBuild: heatBuild,
+                    // PLAN PARITY. The cascade must animate between the static
+                    // planner's own outputs, or it walks between packings nothing else
+                    // renders -- which is every jump chased on 2026-08-22. This
+                    // compares, for the CURRENT visibility state, the plan the static
+                    // path builds against the one the cascade would end on. Per-cell
+                    // row counts and maxR must match exactly. Run it with a folder
+                    // hidden, not just at full vault, since the REPACK_BELOW flag is
+                    // what used to differ.
+                    checkPlanParity: function () {
+                      var shown = 0;
+                      graph.forEachNode(function (id) { if (visible(id)) shown++; });
+                      var ov = true;
+                      var stat = buildWedgePlan(ov, function (id) { return visible(id) ? 1 : 0; });
+                      var live = buildWedgePlan(ov, function (id) { return alpha[id] || 0; });
+                      var diffs = {};
+                      var rows = function (p) { var m = {}; p.cells.forEach(function (c) { m[c.k] = c.rows; }); return m; };
+                      var rs = rows(stat), rl = rows(live);
+                      Object.keys(rs).concat(Object.keys(rl)).forEach(function (k) {
+                        if (rs[k] !== rl[k]) diffs[k] = { staticPlan: rs[k], livePlan: rl[k] };
+                      });
+                      var out = {
+                        shown: shown, threshold: Math.round(graph.order * REPACK_BELOW), onlyVisible: ov,
+                        staticMaxR: Math.round(stat.maxR), liveMaxR: Math.round(live.maxR),
+                        maxRMatches: Math.round(stat.maxR) === Math.round(live.maxR),
+                        cellsStatic: stat.cells.length, cellsLive: live.cells.length,
+                        rowDiffs: diffs, parityOK: Object.keys(diffs).length === 0 &&
+                          Math.round(stat.maxR) === Math.round(live.maxR)
+                      };
+                      return out;   // the caller is a console; it prints this itself
+                    },
+    };
+    /* ---- BEGIN: demo automation + debug API -- stripped from the plugin build, see scripts/build-plugin.mjs (stripDemoAndDebug) ---- */
+    Object.assign(window.__vg, {
+                    state: state,
                     ringsLayout: ringsLayout, visible: visible, groupOf: groupOf,
                     alpha: alpha, cascade: cascade, syncAlpha: syncAlpha,
                     // The lazy-edge seam, exposed for the probes: a test that wants to know
@@ -10849,27 +10994,12 @@ function mountVaultGraph(root, data, deps) {
                     // making a working animation look like a no-op), and
                     // isHighlighted to check the predicate directly.
                     applyLayout: applyLayout, isHighlighted: isHighlighted,
-                    // Logo internals: placeLogo has to be callable directly, because
-                    // refresh() only schedules a render and a tab that is not being
-                    // composited never runs one -- so testing the mark through the
-                    // renderer silently measures a stale DOM.
-                    placeLogo: placeLogo, ringColors: ringColors,
-                    // Folder colours, for the two settings UIs and for the suite. The
-                    // setter repaints rather than rebuilds -- colour is not an input to
-                    // the layout, and an override must not be able to move a node.
-                    palette: paletteInfo,
-                    groupOrder: function () { return (order[state.dim] || []).slice(); },
-                    groupCount: function (g) { return counts[g] || 0; },
+                    ringColors: ringColors,
                     colorOf: colorOf,
-                    // The slot a group is ON, which is not derivable from its position any
-                    // more: archives are skipped in the rotation, and sit on no slot at
-                    // all. "" means exactly that.
-                    slotOf: function (g) { return groupSlot[g] || ""; },
                     isArchiveGroup: isArchiveGroup,
                     get folderColors() {
                       return Object.assign(Object.create(null), folderColors);
                     },
-                    setFolderColors: applyFolderColors,
                     // subfolderColors/setSubfolderColors mirror the pair above and are the
                     // host's actual read/write path -- both shell.html and plugin/main.js's
                     // onSubfolderColors go through these. subColorOf/subSlotOf/subOrderOf/
@@ -10883,7 +11013,6 @@ function mountVaultGraph(root, data, deps) {
                     get subfolderColors() {
                       return Object.assign(Object.create(null), subfolderColors);
                     },
-                    setSubfolderColors: applySubfolderColors,
                     subColorOf: function (folder, sub) {
                       return subShade[folder + "/" + (sub || "")] || colorOf(folder);
                     },
@@ -10898,25 +11027,9 @@ function mountVaultGraph(root, data, deps) {
                     get folderShown() {
                       return Object.assign(Object.create(null), folderShown);
                     },
-                    setFolderShown: applyFolderShown,
-                    // The saved default, applied live. Mirrors setFolderShown: the host owns
-                    // the store and this owns the camera.
-                    setPanEnabled: function (v) { return setPan(v !== false, false); },
                     get panEnabled() { return panEnabled; },
                     hiddenByDefault: hiddenByDefault,
-                    // Push the defaults into the live filter and repaint. This is the
-                    // "and now show it" half, kept separate so loading saved settings at
-                    // boot cannot be confused with a person clicking an eye.
-                    applyHiddenDefaults: function () {
-                      seedHidden();
-                      buildLegend();
-                      cascade(null, { colToggle: true });
-                    },
-                    // The band, for the same reason placeLogo is exposed: it paints
-                    // from afterRender, so a tab that is not being composited never
-                    // repaints it and testing through the renderer measures a stale
-                    // canvas.
-                    heatBuild: heatBuild, heatDraw: heatDraw,
+                    heatDraw: heatDraw,
                     get heat() { return heat; },
                     // Live, for the same reason radialEase and subGap are: the cell
                     // size trades how legible the mosaic inside one square is against
@@ -11132,36 +11245,6 @@ function mountVaultGraph(root, data, deps) {
                         sizeMax: r3(sizes.length ? sizes[sizes.length - 1] : null),
                         cameraRatio: r3(renderer ? renderer.getCamera().ratio : null)
                       };
-                    },
-                    // PLAN PARITY. The cascade must animate between the static
-                    // planner's own outputs, or it walks between packings nothing else
-                    // renders -- which is every jump chased on 2026-08-22. This
-                    // compares, for the CURRENT visibility state, the plan the static
-                    // path builds against the one the cascade would end on. Per-cell
-                    // row counts and maxR must match exactly. Run it with a folder
-                    // hidden, not just at full vault, since the REPACK_BELOW flag is
-                    // what used to differ.
-                    checkPlanParity: function () {
-                      var shown = 0;
-                      graph.forEachNode(function (id) { if (visible(id)) shown++; });
-                      var ov = true;
-                      var stat = buildWedgePlan(ov, function (id) { return visible(id) ? 1 : 0; });
-                      var live = buildWedgePlan(ov, function (id) { return alpha[id] || 0; });
-                      var diffs = {};
-                      var rows = function (p) { var m = {}; p.cells.forEach(function (c) { m[c.k] = c.rows; }); return m; };
-                      var rs = rows(stat), rl = rows(live);
-                      Object.keys(rs).concat(Object.keys(rl)).forEach(function (k) {
-                        if (rs[k] !== rl[k]) diffs[k] = { staticPlan: rs[k], livePlan: rl[k] };
-                      });
-                      var out = {
-                        shown: shown, threshold: Math.round(graph.order * REPACK_BELOW), onlyVisible: ov,
-                        staticMaxR: Math.round(stat.maxR), liveMaxR: Math.round(live.maxR),
-                        maxRMatches: Math.round(stat.maxR) === Math.round(live.maxR),
-                        cellsStatic: stat.cells.length, cellsLive: live.cells.length,
-                        rowDiffs: diffs, parityOK: Object.keys(diffs).length === 0 &&
-                          Math.round(stat.maxR) === Math.round(live.maxR)
-                      };
-                      return out;   // the caller is a console; it prints this itself
                     },
                     // Record each band's radial extent per animated frame. probe(true)
                     // then toggle, then probeReport() -- it names the biggest single
@@ -11534,7 +11617,9 @@ function mountVaultGraph(root, data, deps) {
                       regroup();
                       applyLayout(false);
                       renderer.refresh();
-                    } };
+                    },
+    });
+    /* ---- END: demo automation + debug API ---- */
     seedPins();
     buildTimeline();
     buildSearch(); buildTools(); buildStats();

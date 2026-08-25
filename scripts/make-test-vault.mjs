@@ -113,16 +113,22 @@ const YQ = (n) => Array.from({ length: n }, (_, i) =>
   `${2025 + Math.floor(i / 4)}-Q${(i % 4) + 1}`);
 
 const FOLDERS = [
-  { name: "04 - Daily Notes",   share: 0.26, subs: YM(18), kind: "daily" },
+  // FIXED, not shared -- an exact count regardless of --notes, the same way the three
+  // slivers at the bottom of this list already are. Daily Notes was the biggest share
+  // by far (0.26) and is deliberately cut down here, well below several folders it
+  // used to dwarf.
+  { name: "04 - Daily Notes",   fixed: 50, subs: YM(18), kind: "daily" },
   { name: "05 - Meeting Notes", share: 0.17, subs: YM(14), kind: "meeting",
     deep: { "2025-03": ["Acme Corp", "Northwind"], "2025-09": ["Acme Corp"] } },
-  { name: "03 - Resources",     share: 0.20, kind: "resource",
+  // Resources deliberately smaller than Zettelkasten now, rather than the other way
+  // share alone would have given it.
+  { name: "03 - Resources",     fixed: 60, kind: "resource",
     subs: ["Books", "Articles", "Concepts", "People", "Recipes", "Travel", "Quotes", "Software", "Languages"],
     deep: { People: ["Colleagues", "Family", "Authors"], Travel: ["Europe", "Asia"],
             Books: ["Read", "Reading", "To read"] } },
-  { name: "01 - Projects",      share: 0.11, kind: "project", subs: PROJECTS.slice(0, 7),
+  { name: "01 - Projects",      fixed: 200, kind: "project", subs: PROJECTS.slice(0, 7),
     deep: { "Greenhouse Rebuild": ["Notes", "Suppliers"], "Website Migration": ["Content", "Redirects"] } },
-  { name: "06 - Zettelkasten",  share: 0.09, kind: "zettel", subs: ["Permanent", "Literature", "Fleeting"] },
+  { name: "06 - Zettelkasten",  fixed: 200, kind: "zettel", subs: ["Permanent", "Literature", "Fleeting"] },
   { name: "02 - Areas",         share: 0.06, kind: "area", subs: AREAS,
     deep: { Health: ["Training", "Nutrition"], Finance: ["Budget", "Investments"] } },
   { name: "07 - Weekly Reviews", share: 0.04, kind: "review", subs: YQ(6) },
@@ -134,14 +140,11 @@ const FOLDERS = [
   // palette, so the same hue appears on two wedges and the cycle is actually exercised.
   { name: "11 - Clippings",     share: 0.01, kind: "article", subs: [] },
   { name: "12 - Journal",       share: 0.005, kind: "daily", subs: [] },
-  // Three more, so the wedge count is past anything a ten-slot palette can name and the
-  // neutral fallback carries a third of the disc rather than a corner of it. Shares are
-  // normalised against the total, so these can be added without touching the others.
+  // One more, so the wedge count is still past what a ten-slot palette can name. Two
+  // siblings of this one (Media Log, Ideas) were trimmed to thin the outer ring --
+  // this is the one of the three with real subfolder structure to lose testing it.
   { name: "15 - Courses",       share: 0.02, kind: "literature",
     subs: ["Enrolled", "Completed", "Wishlist"] },
-  { name: "16 - Media Log",     share: 0.015, kind: "article",
-    subs: ["Films", "Series", "Podcasts"] },
-  { name: "17 - Ideas",         share: 0.01, kind: "fleeting", subs: [] },
   // Slivers, beside a folder holding a quarter of the vault.
   { name: "00 - Inbox",         fixed: 3, kind: "fleeting", subs: [] },
   { name: "13 - Someday Maybe", fixed: 2, kind: "fleeting", subs: [] },
