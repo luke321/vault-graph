@@ -248,20 +248,14 @@ const FRAME_READING = [
   "gap reservation holds still",  // per-frame gap steps
   "waits for the release",        // during-drag sampling
   "haloes but never pushes",      // reads a canvas mid-interaction
-  // THE MOST FRAME-DEPENDENT CHECK IN THE FILE, and it was missing from this list.
+  // Reads a frame, so it belongs here -- but note that this classification is precautionary
+  // and is NOT what fixed it. It blocked three pushes with dtan 30.3 / 35.9 / 26.7 on the 10k
+  // vault, and contention was the first theory and was wrong: moving it to the serial lane
+  // changed nothing, and running it ALONE still failed 3 times in 6.
   //
-  // Its method is a requestAnimationFrame loop that snapshots every frame until busy()
-  // clears, then compares the LAST DRAWN FRAME against rest. Under contention rAF drops
-  // frames, and the ones it drops are at the end of the cascade -- where a 10k vault is
-  // slowest, since every frame re-plans the whole vault (github#19, 14fps). So `last` is
-  // sampled further back from the true final frame and its distance to rest grows: the check
-  // measures the harness rather than the handover it exists to measure.
-  //
-  // Caught by it blocking a push twice with dtan 30.3 then 35.9 against a 16 threshold, on
-  // the 10k vault only, while passing every single time it was run with --only and passing
-  // three consecutive full runs. That spread -- same code, same vault, values from 0 to 36 --
-  // is contention, not a regression, and the number growing between the two blocked runs is
-  // the tell.
+  // The cause was an off-by-one-frame in the check's own sampler, and the shape of the numbers
+  // said so -- bimodal, exactly 0 or 22-27 and never in between, which is a discrete question
+  // (did it catch the final frame) rather than noise. See the note in the sampler.
   "resting layout",
 ];
 
@@ -1821,6 +1815,21 @@ check("the last frame of a cascade is the resting layout", async (p) => {
         window.__LF.last = snap(); window.__LF.frames++;
         requestAnimationFrame(tick);
       } else {
+        // SNAP ON THE TRANSITION TOO, or last is the second-to-last animated frame.
+        //
+        // The loop used to stop here without snapping, so last came from the previous
+        // iteration -- one whole frame before the animation's last drawn frame. Cost of that
+        // frame, measured: nothing on a vault that draws 120 frames per cascade, and 22 to 27
+        // units on the 10k fixture, which draws 43 because every frame re-plans the whole
+        // vault (github#19). Against a 16-unit threshold that is a coin flip, and it read as
+        // bimodal -- exactly 0 or 22-27, never in between -- because it is a discrete
+        // question: did the sampler catch the final frame or miss it. Measured 3 failures in
+        // 6 runs with nothing else running, which is what ruled out contention.
+        //
+        // This is still BEFORE the final assignment, which is the frame the check wants: the
+        // beat below exists because busy() clears before that assignment lands, so snapping
+        // the instant it clears captures the last ANIMATED frame and not the resting one.
+        window.__LF.last = snap(); window.__LF.frames++;
         // A BEAT: busy() clears before the final assignment lands. Without this the check
         // measures its own stopwatch -- see the note in animation.md.
         setTimeout(function () { window.__LF.rest = snap(); }, 320);
