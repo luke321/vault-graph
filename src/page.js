@@ -10683,7 +10683,7 @@ function mountVaultGraph(root, data, deps) {
 
       /* --- 6. folders --------------------------------------------------- */
       // Hiding: the wedges reallocate and the disc stays a full circle.
-      { click: true, target: ["eye", "04"], act: "folders", why: "hide a folder -- the wedges reallocate" },
+      { click: true, target: ["eye", "06"], act: "folders", why: "hide a folder -- the wedges reallocate" },
       { settle: true, act: "folders", why: "let the wedges reallocate" },
 
       // And `only`, which is the fastest way to answer "where does one folder live".
