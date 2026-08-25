@@ -331,9 +331,16 @@ function mountVaultGraph(root, data, deps) {
     selected: null,
     hovered: null,
     // Days marked on the heatmap: one picked by clicking, one under the pointer.
-    // Both halo their notes without moving them (see isPushed), and both are
-    // independent of markToday -- any combination can be on at once, and none of
-    // them is a visibility filter.
+    // Both halo their notes without moving them (see isPushed), and neither is a
+    // visibility filter.
+    //
+    // markDay IS THE WHOLE OF "MARK TODAY" NOW. There used to be a separate `markToday`
+    // flag behind a sidebar button, and clicking the band's today column already did the
+    // same job by the same predicate -- `created === the key`, which for that column IS
+    // today. Two controls answering one question, one of which had to be found in the
+    // sidebar while the answer was drawn in the band. The button went; the band is the
+    // control, so the fill treatment the button owned moved onto the picked day -- see
+    // nodeStyle.
     markDay: null,
     hoverDay: null,
     // The year label under the pointer, if any. Same shape as hoverDay and read the same
@@ -351,7 +358,6 @@ function mountVaultGraph(root, data, deps) {
     // it unreachable: on the 10-year fixture that is nine years of the vault with no way to
     // point at it. Concepts that move the window write this.
     heatEnd: null,
-    markToday: false,
     // Bow links away from the hub instead of chording across it. 91% of links cross
     // the disc, so straight is the case that would need the excuse. No longer a
     // control: these two are fixed, and the code paths for false are kept only
@@ -3481,12 +3487,20 @@ function mountVaultGraph(root, data, deps) {
 
   /* ------------------------------------------------------------- timeline */
 
-  // Notes ranked oldest-first. The slider is linear in RANK rather than in time
-  // on purpose: measured on this vault, 409 of 442 notes fall in the last three
-  // months while a handful carry content dates back to 2015, so a linear time
-  // axis would spend 97% of its travel on empty years and the interesting part
-  // would be the last pixel.
+  // Notes ranked oldest-first. THE REVEAL IS ORDERED BY RANK rather than by time on
+  // purpose: measured on this vault, 409 of 442 notes fall in the last three months while a
+  // handful carry content dates back to 2015, so an intro paced by the calendar would spend
+  // 97% of its run on empty years and put everything worth watching in the last half second.
+  //
+  // The strip below it IS paced by the calendar, because a date axis is what a date filter
+  // needs. The two meet in sweepTo, which turns the intro's progress into a position by
+  // going through the rank -- so the handle says "everything left of here is on screen",
+  // which is the same thing it says under a hand, and the crawl through the empty years is
+  // the vault's own shape rather than a mapping artefact.
   var tlRank = Object.create(null), tlDate = [], tlMax = 0;
+  // The same dates as tlDate, in ms, so the intro's sweep can turn a progress fraction into
+  // a position on the ribbon without parsing a string on every one of its ~270 frames.
+  var tlDateMs = [];
   // id -> created, in ms UTC. Absent for an undated note, which is what timeFactor keys on.
   var tlMs = Object.create(null);
   // The whole vault's dates, bucketed, built once. Every one of the three concepts needs
@@ -3497,7 +3511,7 @@ function mountVaultGraph(root, data, deps) {
     var dated = [];
     graph.forEachNode(function (id, a) { if (a.created) dated.push([id, a.created]); });
     dated.sort(function (x, y) { return x[1] < y[1] ? -1 : x[1] > y[1] ? 1 : 0; });
-    tlRank = Object.create(null); tlDate = []; tlMs = Object.create(null);
+    tlRank = Object.create(null); tlDate = []; tlDateMs = []; tlMs = Object.create(null);
     dated.forEach(function (pair, i) {
       tlRank[pair[0]] = i + 1;
       tlDate.push(pair[1]);
@@ -3507,6 +3521,10 @@ function mountVaultGraph(root, data, deps) {
       // reads like a typo.
       var ms = heatParse(pair[1]);
       if (!Number.isNaN(ms)) tlMs[pair[0]] = ms;
+      // Kept parallel to tlDate INCLUDING the unparseable ones, so a rank still indexes the
+      // same note in both. NaN is carried and clamped where it is read, not dropped here --
+      // dropping it would slide every later rank by one.
+      tlDateMs.push(ms);
     });
     tlMax = dated.length;
     buildDateSpan(dated);
@@ -3647,7 +3665,7 @@ function mountVaultGraph(root, data, deps) {
    * pointermove -- a 1600ms reveal that walks the disc one note at a time, cancelled and
    * restarted 120 times a second, so what you saw was dozens of animations each showing its
    * own first frame. The second replaced that with one cheap layout frame per pointermove,
-   * which is what the timeline slider does and is right for the timeline: 452 notes.
+   * which is what timelineFrame does and is right for a rank cutoff: 452 notes.
    *
    * At 10,000 it is still too much. syncAlpha, the packer and a Sigma refresh are each O(n)
    * and they run between the pointer moving and the next paint, so the drag lags the cursor
@@ -3661,39 +3679,23 @@ function mountVaultGraph(root, data, deps) {
    * like every other filter change in the page.
    */
 
-  // Today's date, read at load rather than baked in at build time, so the mark
-  // stays correct tomorrow without rebuilding the snapshot.
+  // Today's date, read at load rather than baked in at build time, so the band's own
+  // today marker stays correct tomorrow without rebuilding the snapshot.
   var TODAY = (function () {
     var d = new Date(), p = function (n) { return (n < 10 ? "0" : "") + n; };
     return d.getFullYear() + "-" + p(d.getMonth() + 1) + "-" + p(d.getDate());
   })();
-  // "Today" means created today OR edited today. `created` alone was not enough:
-  // it comes from frontmatter, and this vault pre-creates daily notes from the
-  // calendar, so today's daily note carries an import stamp from days earlier and
-  // `created` takes precedence over `date`. Measured on 2026-08-21: 0 notes created
-  // today against 3 touched, so the button reliably marked nothing.
-  // CREATED ONLY, deliberately, and this has been both ways.
-  //
-  // It read `created || touched` because on the day it was written `created` matched 0
-  // notes while 3 files had been touched, so the button looked broken. But `touched` is the
-  // file's mtime, and a vault picks that up for reasons that have nothing to do with the
-  // person using it -- a sync writing a file back, Obsidian rewriting frontmatter, a
-  // formatter. On a real vault it marked far more than the heatmap's today column, which
-  // counts notes ADDED and uses `created` alone.
-  //
-  // Two things answering "today" differently in one view is worse than a button that marks
-  // nothing on a day nothing was written -- and marking nothing is the honest answer then,
-  // which the band is already showing. The invariant in smoke.mjs now pins the two together.
-  function isToday(id) {
-    return graph.getNodeAttributes(id).created === TODAY;
-  }
 
-  // A day clicked on the heatmap. Haloed and recoloured, NOT pushed -- see isPushed.
+  // A day clicked on the heatmap, or one under the pointer. Haloed and -- for the clicked
+  // one -- recoloured, and NEVER pushed; see isPushed and nodeStyle.
   //
-  // `created` ONLY, not touched: the band counts notes added, so clicking one of its
-  // squares has to mark exactly the notes that square counted. Reusing isToday's
-  // created-or-touched rule here would light up notes the square never included, which
-  // reads as the heatmap lying about its own number.
+  // `created` ONLY, and never a file's mtime. The band counts notes ADDED, so clicking one
+  // of its squares has to mark exactly the notes that square counted. This was the whole of
+  // the argument that killed the sidebar's "Mark today", which read created-or-touched and
+  // so lit up notes the square never included: on this vault a folder renumbering moved 111
+  // mtimes in a day, none of which was a note written. Two things answering "today"
+  // differently in one view is worse than one answering it plainly, and the band is the one
+  // that draws the number.
   function isMarkedDay(id) {
     if (!state.markDay && !state.hoverDay && state.hoverYear === null) return false;
     var c = graph.getNodeAttribute(id, "created");
@@ -3703,12 +3705,11 @@ function mountVaultGraph(root, data, deps) {
     return state.hoverYear !== null && !!c && c.slice(0, 4) === state.hoverYear;
   }
 
-  // Haloed: any highlight source at all -- a clicked group, a marked day, "mark today".
-  // Whether a source also MOVES its notes is a separate question, asked of isPushed: a
-  // group owns a contiguous wedge and can move as a block, while today's notes and a day's
-  // notes are scattered through every wedge and cannot.
+  // Haloed: any highlight source at all -- a clicked group, a picked or hovered day, a
+  // hovered year. Whether a source also MOVES its notes is a separate question, asked of
+  // isPushed: a group owns a contiguous wedge and can move as a block, while a day's notes
+  // are scattered through every wedge and cannot.
   function isHighlighted(id) {
-    if (state.markToday && isToday(id)) return true;
     if (isMarkedDay(id)) return true;
     var g = groupOf(id);
     if (state.highlight[g]) return true;
@@ -4243,10 +4244,10 @@ function mountVaultGraph(root, data, deps) {
   // selection legible is what creates the overlaps. Those are identified by the
   // ring alone.
   function isPushed(id) {
-    // NOT mark-today. Its notes are scattered across every folder, so pushing them slides a
-    // subset out through their own cell-mates at the same angles -- the same reason a marked
-    // heatmap day does not push, and the same reason a pooled subfolder does not. It is
-    // still haloed and recoloured; see isHighlighted.
+    // NOT a marked day. Its notes are scattered across every folder, so pushing them slides
+    // a subset out through their own cell-mates at the same angles -- the same reason a
+    // pooled subfolder does not push. It is still haloed and recoloured; see isHighlighted
+    // and nodeStyle.
     if (state.highlight[groupOf(id)]) return true;
     // Only the DEPTH-1 folder owns a wedge, so only it can move. A folder nested
     // deeper is a slice of its parent's arc, interleaved with its siblings at the same
@@ -4257,7 +4258,7 @@ function mountVaultGraph(root, data, deps) {
   }
 
   // How many notes' worth of ramp a note gets as the cutoff passes it. Ranks, not
-  // days, for the same reason the slider is: it keeps the fade even whether the
+  // days, for the same reason the reveal order is: it keeps the fade even whether the
   // vault gained one note that month or two hundred.
   /**
    * Does this note survive EVERY filter, not just the legend's?
@@ -4285,7 +4286,7 @@ function mountVaultGraph(root, data, deps) {
   var TL_FADE = 8;
   function timeFactor(id) {
     // THE DATE CAP FIRST, because it is a hard bound and the rank cutoff is a ramp: a note
-    // outside the range is out whatever the slider says, and multiplying a ramp by zero
+    // outside the range is out whatever the rank cutoff says, and multiplying a ramp by zero
     // would give the same answer more slowly.
     //
     // UNDATED NOTES STAY, which is the same rule the rank cutoff already applies one line
@@ -5635,7 +5636,6 @@ function mountVaultGraph(root, data, deps) {
   function hlSignature() {
     return Object.keys(state.highlight).join(",") + "|" +
            Object.keys(state.highlightSub).join(",") + "|" +
-           (state.markToday ? "T" : "") + "|" +
            (state.markDay || "") + "|" + (state.hoverDay || "") + "|" +
            // Both hover sources belong here for the same reason everything else does:
            // this is what decides whether the per-note sweep runs at all, so a source
@@ -5672,8 +5672,8 @@ function mountVaultGraph(root, data, deps) {
   }
 
   // Called from afterRender: no call site has to remember to start the ramp, which
-  // matters because the highlight set is written from six different places (three legend
-  // handlers, the today button, and the heatmap's click and hover).
+  // matters because the highlight set is written from five different places (three legend
+  // handlers, and the heatmap's click and hover).
   function hlSync() {
     var sig = hlSignature();
     if (sig === hlSig) return;
@@ -5728,9 +5728,20 @@ function mountVaultGraph(root, data, deps) {
         // halo on the predicate would drop the ring on the first frame of the fade and
         // leave only a shrinking dot.
         var hv = hl[id] || 0;
-        // Today's notes keep their own non-categorical fill -- the ring says
-        // "highlighted", the fill still says what the note is.
-        if (state.markToday && isToday(id)) {
+        // THE PICKED DAY'S NOTES TAKE THE NEUTRAL FILL. This was gated on the sidebar's
+        // "Mark today" flag, and that button is gone -- clicking the band's today column
+        // marks the same notes by the same predicate, so the band is the control now and
+        // the treatment has to come with it, or the band would do a weaker version of the
+        // job it inherited.
+        //
+        // state.markDay ONLY, not isMarkedDay(). That predicate also answers for hoverDay
+        // and for a hovered year, and recolouring on hover is far too loud a thing to do
+        // while a pointer crosses the band -- a whole year of notes changing fill as the
+        // cursor passes a label. A hover haloes; a CLICK, which is a choice, recolours.
+        //
+        // The colour is the extreme of the neutral axis, deliberately not one of the ten
+        // group hues, so it can never be misread as a folder.
+        if (state.markDay && graph.getNodeAttribute(id, "created") === state.markDay) {
           r.color = mixHex(r.color, THEME.today, hv);
           r.zIndex = 3;
         }
@@ -7256,7 +7267,7 @@ function mountVaultGraph(root, data, deps) {
     WIN.cancelAnimationFrame(play.raf);
     if (play.guard) WIN.clearTimeout(play.guard);   // or the deadline lands after a manual stop
     play = null;
-    $("tlplay").textContent = "Play";
+    endSweep();
     if (!viaCascade) return;
     if (cascadeRun) {
       WIN.cancelAnimationFrame(cascadeRun.raf);
@@ -7301,11 +7312,10 @@ function mountVaultGraph(root, data, deps) {
     var targets = ringsLayout();
     if (targets) assignPositions(targets);
     renderer.refresh({ skipIndexation: !full });
-    var el = $("tlv");
-    if (state.until === null || state.until >= tlMax) { el.textContent = "All"; return; }
-    var i = Math.round(state.until) - 1;
-    var d = tlDate[i < 0 ? 0 : i > tlDate.length - 1 ? tlDate.length - 1 : i] || "";
-    el.textContent = d + "  \u00b7  " + Math.round(state.until);
+    // NOTHING LEFT TO READ OUT. This ended by writing "<date> . <rank>" into the sidebar's
+    // Timeline readout, which is gone along with the slider it belonged to. `state.until`
+    // itself stays: it is how the visibility handler and the ?rest boot say "the whole disc,
+    // no animation", and timeFactor still ramps on it.
   }
 
   // The vault growing from its first note to now. Extracted from the Play button
@@ -7326,11 +7336,10 @@ function mountVaultGraph(root, data, deps) {
   // None of the continuity work applied to it, because none of that lives in this path: the row
   // walk, the room walk, the plan-derived gap presence and a settle that assigns the plan are all
   // inside cascade(). Growing the vault is not a different kind of change -- it is the date
-  // slider moving, which is a filter change -- so it goes through the one path and inherits all
+  // range end moving, which is a filter change -- so it goes through the one path and inherits all
   // of it. What is left here is the two things that genuinely differ: notes arrive by DATE rather
   // than clockwise, and the window is TIMELINE_MS rather than derived from how many are moving.
   function playTimeline() {
-    var tl = $("tl");
     stopPlay();
     // Anything else that drives positions has to be cancelled first, or it fights
     // the playback frame for frame. A load cascade still in flight was the other
@@ -7349,17 +7358,26 @@ function mountVaultGraph(root, data, deps) {
 
     // DESTINATION: the whole vault. SOURCE: an empty screen. cascade() reads the current alphas
     // as its starting point, so clearing them is what makes this the growth animation rather
-    // than a no-op -- state.until stays null throughout, and the slider readout below is driven
+    // than a no-op -- state.until stays null throughout, and the ribbon's sweep below is driven
     // from the cascade's own progress instead of being the thing that drives the frame.
     var dur = TIMELINE_MS * TIME_SCALE;
     state.until = null;
-    tl.value = String(tlMax);
+    // AND THE WHOLE VAULT MEANS NO DATE RANGE. The range is a hard cap in timeFactor, so a
+    // range left over from before would hold part of the vault at zero for the entire intro --
+    // "grow from the first note to now" quietly growing to somebody's old filter instead. It
+    // was left behind because resetView never cleared it, so Refresh replayed the intro
+    // through whatever range was applied. Cleared here as well as there, because boot and the
+    // debug API reach this function without going through resetView.
+    //
+    // rangeChrome() rather than applyRange(): the chrome has to follow the state, but a
+    // cascade here would be a second animation racing the one about to start.
+    state.from = null; state.to = null;
+    rangeChrome();
     clearAlpha();
 
-    var label = $("tlv");
     cascade(function () {
-      if (play) { play = null; $("tlplay").textContent = "Play"; }
-      label.textContent = "All";
+      if (play) play = null;
+      endSweep();
     }, {
       fullRing: true,
       order: function (id) { return tlRank[id] || 0; },
@@ -7369,55 +7387,85 @@ function mountVaultGraph(root, data, deps) {
       // rather than the same one over a longer clock, which is the whole point of it going
       // through cascade().
       totalMs: dur,
-      onFrame: function (pr) {
-        var k = tlMax * pr;
-        tl.value = String(Math.round(Math.min(tlMax, k)));
-        if (pr >= 1) { label.textContent = "All"; return; }
-        var i = Math.round(k) - 1;
-        label.textContent = (tlDate[i < 0 ? 0 : i > tlDate.length - 1 ? tlDate.length - 1 : i] || "")
-                          + "  ·  " + Math.round(k);
-      }
+      onFrame: function (pr) { sweepTo(pr); }
     });
     // AFTER cascade(), because cascade() calls stopPlay() on the way in -- setting this first
-    // would have the button reset itself to "Play" on the frame it started.
+    // would have the run tear its own sweep down on the frame it started.
     play = { raf: 0, guard: 0, viaCascade: true };
-    $("tlplay").textContent = "Stop";
   }
 
-  function buildTimelineUI() {
-    var tl = $("tl");
-    tl.max = String(tlMax);
-    tl.value = String(tlMax);
-    tl.oninput = function () {
-      stopPlay();
-      var n = +this.value;
-      state.until = n >= tlMax ? null : n;
-      timelineFrame();              // dragging: stay cheap, skip indexation
-    };
-    // Releasing the slider is a landing frame, so the curves get rebuilt against
-    // wherever the scrub left the disc.
-    tl.onchange = function () { timelineFrame(true); };
-    $("tlall").onclick = function () {
-      stopPlay();
-      state.until = null;
-      tl.value = String(tlMax);
-      timelineFrame(true);          // a landing frame too
-    };
-    $("tlplay").onclick = function () {
-      if (play) { stopPlay(); return; }
-      playTimeline();
-    };
-    $("today").onclick = function () {
-      state.markToday = !state.markToday;
-      this.setAttribute("aria-pressed", state.markToday ? "true" : "false");
-      // Same treatment as a highlighted group: pushed out and haloed, not just
-      // recoloured. A colour swap alone was easy to miss among ten group hues --
-      // and on this vault it is often a handful of notes scattered across the
-      // whole disc, which is exactly the case a position change solves.
-      applyLayout(true);
-      renderer.refresh();
-    };
+  /**
+   * THE INTRO IS THE RIGHT-HAND SCRUBBER, TRAVELLING.
+   *
+   * Growing the vault from its first note to now and dragging the range end from one end of
+   * the strip to the other are the same statement about the same history, and the page used to
+   * make it twice in two different units: the disc revealed notes by RANK while the sidebar's
+   * slider counted them, and the ribbon -- the control that actually draws the history -- sat
+   * still through all of it. With the slider gone the animation had nothing left to say what
+   * it was doing.
+   *
+   * SO THE PROGRESS FRACTION IS TURNED INTO A DATE THROUGH THE RANK, not through the span.
+   * That is the whole of why it stays in sync. Interpolating dateSpan.lo -> dateSpan.hi
+   * linearly would put the handle at 2020 while the disc was already showing every note from
+   * 2026, because the reveal is ordered by rank and this vault is not spread evenly in time:
+   * measured, 409 of 442 notes fall in the last three months against a handful back to 2015.
+   * Reading tlDateMs at rank `pr * tlMax` makes the handle's position mean exactly "everything
+   * left of here is on screen", which is the same thing it means when a hand is on it.
+   *
+   * The consequence is honest and worth naming: the handle crawls through the empty years and
+   * sprints across the last months. That is the shape of the vault, and the bars underneath it
+   * are drawing the same shape.
+   *
+   * THE TOOLTIP COMES TOO, because it is what a real drag shows -- the strip has no numeric
+   * readout of its own, and the date under the handle is what the deleted sidebar readout was
+   * for. Same helper, same position, so the intro and the gesture look alike down to the label.
+   */
+  function sweepTo(pr) {
+    if (!dateSpan || !tlMax) return;
+    var k = Math.max(0, Math.min(1, pr)) * tlMax;
+    var i = Math.round(k) - 1;
+    if (i < 0) i = 0;
+    if (i > tlDateMs.length - 1) i = tlDateMs.length - 1;
+    var ms = tlDateMs[i];
+    // An unparseable stamp keeps its rank in tlDateMs as NaN -- see buildTimeline. Clamp it
+    // to the span rather than letting NaN reach ribbonX, where it would take the handle and
+    // the wash with it.
+    if (!(ms >= dateSpan.lo)) ms = dateSpan.lo;
+    if (ms > dateSpan.hi) ms = dateSpan.hi;
+    brushSweep = pr >= 1 ? dateSpan.hi : ms;
+    drawRibbon();
+    if (pr >= 1) { hideRTip(); return; }
+    showRTip(ribbonX(brushSweep, ribbonW()), isoDay(brushSweep));
   }
+
+  /** Put the strip back on the real state, whichever way the run ended. */
+  function endSweep() {
+    if (brushSweep === null) return;
+    brushSweep = null;
+    hideRTip();
+    // drawDateUI, not drawRibbon: the year buttons carry a pressed state derived from the
+    // range, and leaving them showing the sweep's last frame is the same class of bug as a
+    // control disagreeing with its own state.
+    drawDateUI();
+  }
+
+  /* buildTimelineUI() IS GONE, and with it the whole sidebar Timeline block.
+   *
+   * It wired four controls, and every one of them had a better answer somewhere else in the
+   * page:
+   *
+   *   slider, Play, All   a second instrument for scrubbing the same history, in a second
+   *                       unit -- the slider was linear in note COUNT, the ribbon under the
+   *                       band is linear in TIME. Two controls answering one question
+   *                       differently is one too many to explain, and the ribbon is the one
+   *                       that also draws the history it scrubs. The intro drives the
+   *                       ribbon's own right-hand handle now; see sweepTo.
+   *   Mark today          the band's today column already marks exactly those notes, by the
+   *                       same `created` predicate, in the place the count is drawn. The
+   *                       button was a second predicate in a second place, and it is the one
+   *                       that got "today" wrong twice. Clicking the last cell of the band
+   *                       is the control; nodeStyle carries the fill treatment it owned.
+   */
 
   // Every filter back to its default, in state AND in the controls that show it.
   // Both halves matter: leaving a control showing one value while the state holds
@@ -7432,7 +7480,6 @@ function mountVaultGraph(root, data, deps) {
     collapseAll();                // back to the DEFAULT, which is folded, not unfolded
     state.tailOpen = Object.create(null);
     state.pathOpen = Object.create(null);
-    state.markToday = false;
     state.markDay = null;
     state.hoverDay = null;
     state.until = null;
@@ -7441,8 +7488,16 @@ function mountVaultGraph(root, data, deps) {
     select(null);                 // closes the detail card and clears state.selected
     hideTip();
     $("q").value = "";    $("hits").replaceChildren();
-    $("tl").value = String(tlMax); $("tlv").textContent = "All";
-    $("today").setAttribute("aria-pressed", "false");
+    // THE DATE RANGE IS A FILTER AND WAS NOT BEING RESET. Refresh claims to clear every
+    // filter and replay the intro, and it cleared every filter but this one -- so replaying
+    // the intro through an applied range grew the vault to a slice of itself. Invisible for
+    // as long as the "timeline" meant the rank slider, which this did reset; the ribbon is
+    // the timeline now, so the omission is the bug.
+    //
+    // No applyRange() here: resetView is followed by a cascade of its own -- playTimeline
+    // from Refresh -- and rangeChrome is the half that has to happen either way.
+    state.from = null; state.to = null; state.heatEnd = null;
+    rangeChrome();
     buildLegend();
   }
 
@@ -7862,8 +7917,8 @@ function mountVaultGraph(root, data, deps) {
   //   birthtime  472 of 934 files "born" today. OneDrive re-creates files on sync,
   //              so NTFS creation time says when this MACHINE first saw the file.
   //   mtime      2026-08-19 shows 240 files, which was the folder renumbering. It
-  //              answers "what did I touch", which is what `mark today` wants and
-  //              is not what this asks.
+  //              answers "what did I touch", which is not what this asks -- and it is
+  //              why the sidebar button that once read it is gone.
   //   created    894 valid of 916, and its big day (2026-06-27, 180 notes) is the
   //              initial import -- i.e. the day those notes really were added.
   //
@@ -8160,7 +8215,7 @@ function mountVaultGraph(root, data, deps) {
     for (var i = 0; i < heat.keys.length; i++) {
       sig.push(Math.round(heat.days[heat.keys[i]].n * 4));
     }
-    sig.push(state.markDay || "", state.hoverDay || "", state.markToday ? 1 : 0, heat.cell);
+    sig.push(state.markDay || "", state.hoverDay || "", heat.cell);
     sig = sig.join(",");
     if (sig === heatSig) return;
     heatSig = sig;
@@ -8258,7 +8313,7 @@ function mountVaultGraph(root, data, deps) {
       // a group hue, so a ring can never be misread as a folder. Three weights --
       // picked, hovered, and today -- in that priority, because a cell can be all
       // three at once and only one ring can be drawn.
-      if (d.key === state.markDay || (state.markToday && d.key === TODAY)) {
+      if (d.key === state.markDay) {
         ctx.strokeStyle = THEME.today;
         ctx.lineWidth = 1.5;
         heatRect(ctx, x2 - 1, y2 - 1, cell + 2, cell + 2, R + 1);
@@ -8412,9 +8467,13 @@ function mountVaultGraph(root, data, deps) {
       $("htip").hidden = true;
       setHover(null);
     });
-    // Clicking a day marks its notes on the disc -- the same treatment as
-    // `mark today`, and the whole reason the band sits above the rings rather than
-    // in the sidebar: the question a heatmap raises is "what were those notes?"
+    // Clicking a day marks its notes on the disc -- recoloured, haloed, not moved -- and
+    // this is the whole reason the band sits above the rings rather than in the sidebar:
+    // the question a heatmap raises is "what were those notes?"
+    //
+    // IT IS ALSO "MARK TODAY" NOW. That was a sidebar toggle doing this to today's column
+    // by a second predicate; clicking the last cell of the band does it by this one, in the
+    // place the answer is already drawn.
     cv.addEventListener("click", function (ev) {
       var d = heatHit(ev);
       if (!d || d.n <= 0.004) return;
@@ -8522,8 +8581,33 @@ function mountVaultGraph(root, data, deps) {
   var DRAG_MIN = 3;          // px before a press counts as a drag rather than a click
 
   var brushDrag = null;
+  /**
+   * The intro's right-hand scrubber, mid-flight, in ms -- or null when nothing is sweeping.
+   *
+   * The intro grows the vault from its first note to now, and that IS the range end travelling
+   * from one end of the strip to the other; the two were simply not connected. It used to
+   * drive a rank slider in the sidebar, and when that went the animation had nothing left to
+   * say what it was doing -- the disc filled up and the one control that shows the history sat
+   * still through all of it.
+   *
+   * A PREVIEW, exactly like brushDrag: state.from and state.to are untouched for the whole
+   * sweep. Writing them per frame would put a hard date cap in timeFactor on top of the rank
+   * ramp the cascade is already animating, which is the same reveal computed twice -- and the
+   * second one would fight the first, since a range change goes through applyRange -> cascade
+   * and cascade stops playback. The disc's reveal stays the cascade's; this is the strip
+   * saying where the reveal has got to.
+   */
+  var brushSweep = null;
 
-  function drawDateUI() { drawRibbon(); buildYears(); }
+  // REMEASURE FIRST. Every path that redraws the strip is also a path where the slot may
+  // have changed -- a window resize, an Obsidian pane drag, the band's own reflow -- and the
+  // bars, the brush and the year buttons all have to come out on one scale. Measuring here
+  // is what makes that true by construction instead of by three callers remembering to.
+  function drawDateUI() {
+    ribW = measureRibbon() || ribW;
+    drawRibbon();
+    buildYears();
+  }
 
   /**
    * One button per year, under the strip, at that year's own position on it.
@@ -8613,10 +8697,48 @@ function mountVaultGraph(root, data, deps) {
     return "rgba(" + c[0] + "," + c[1] + "," + c[2] + "," + a + ")";
   }
 
-  function ribbonW() {
+  // The strip's width in CSS pixels, measured once per layout and cached until something
+  // moves. Zero means "not measured yet".
+  var ribW = 0;
+
+  /**
+   * How wide the strip's SLOT is -- asked of the slot, never of the canvas.
+   *
+   * This is the bug the cache exists for. fitCanvas has to pin an inline pixel width on the
+   * canvas: the bitmap is sized in device pixels and the CSS box has to stay in CSS pixels,
+   * so it writes both. An inline width beats the stylesheet's `width:100%`, so from the first
+   * paint onward the canvas IS whatever it was last drawn at -- and asking it how wide it is
+   * returns that number for ever. Every later measurement confirms the first one.
+   *
+   * Measured on the real vault in a 1284px slot: the strip was 600px wide -- the fallback
+   * below, taken because the very first call ran before the band had been laid out -- and it
+   * stayed 600px through every window resize, because the ResizeObserver's redraw asked the
+   * canvas and the canvas answered 600. The bars, the brush and the year buttons were all on
+   * that scale, so the whole control simply did not resize.
+   *
+   * Dropping the inline width first and letting the stylesheet answer is the measurement. It
+   * costs one forced layout, which is why it happens from drawDateUI and from the observer
+   * only, and never from a pointermove: a drag reads the cache.
+   */
+  // MEASURING LEAVES NOTHING BEHIND. The inline width is restored whichever way this
+  // returns, so the only thing that ever sets it is fitCanvas -- which sets the bitmap in
+  // the same breath, and those two have to agree or a fractional slot width puts the CSS
+  // box half a pixel off the pixels behind it. An earlier version dropped the inline width
+  // to measure and only restored it when the measurement failed, which left the canvas
+  // sized by the stylesheet after any observation the guard below short-circuited: the same
+  // number by luck, and a stretched bitmap the moment the luck ran out.
+  function measureRibbon() {
     var cv = $("ribbon");
-    var r = cv && cv.getBoundingClientRect();
-    return r && r.width ? r.width : 600;
+    if (!cv) return 0;
+    var keep = cv.style.width;
+    cv.style.width = "";
+    var w = cv.getBoundingClientRect().width;
+    cv.style.width = keep;
+    return w;
+  }
+  function ribbonW() {
+    if (!ribW) ribW = measureRibbon();
+    return ribW || 600;
   }
   function ribbonX(ms, w) {
     var span = dateSpan.hi - dateSpan.lo;
@@ -8634,7 +8756,12 @@ function mountVaultGraph(root, data, deps) {
    * disagree, and it is what makes a drag cost a canvas repaint instead of a relayout.
    */
   function brushEnds() {
+    // A DRAG BEATS THE SWEEP. Both are previews and only one can be showing; if a hand is on
+    // the handle while the intro is running, the hand is the one that means something -- and
+    // the release goes through cascade(), which stops playback anyway. Getting this order
+    // wrong would pin the handle under the cursor to wherever the animation had got to.
     if (brushDrag && brushDrag.pFrom !== undefined) return [brushDrag.pFrom, brushDrag.pTo];
+    if (brushSweep !== null) return [dateSpan.lo, brushSweep];
     return [state.from === null ? dateSpan.lo : state.from,
             state.to === null ? dateSpan.hi : state.to];
   }
@@ -9062,7 +9189,23 @@ function mountVaultGraph(root, data, deps) {
       });
     }
 
-    if (WIN.ResizeObserver) new WIN.ResizeObserver(function () { drawDateUI(); }).observe($("heat"));
+    // THE STRIP RESCALES WITH THE BAND. The observer was already here and did nothing,
+    // because the width it redrew at came from the canvas rather than from the slot -- see
+    // measureRibbon. With that fixed it needs one more thing: a guard, so an observation
+    // that changes nothing costs nothing. The band fires this for its own reasons (the grid
+    // rebuilding changes the wrapper's scroll width) and a redraw per observation would be a
+    // canvas repaint and a dozen DOM writes for no change.
+    var onSlot = function () {
+      var w = measureRibbon();
+      if (w && Math.abs(w - ribW) < 0.5) return;
+      ribW = w;
+      drawDateUI();
+    };
+    // A WINDOW FALLBACK, which was missing outright: without ResizeObserver the strip was
+    // drawn once at boot and never again. It covers less -- a pane resized inside a window
+    // that did not move is invisible to it -- but "less" beats "not at all".
+    if (WIN.ResizeObserver) new WIN.ResizeObserver(onSlot).observe($("heat"));
+    else WIN.addEventListener("resize", onSlot);
     applyRange();
   }
 
@@ -9648,7 +9791,6 @@ function mountVaultGraph(root, data, deps) {
                     // making a working animation look like a no-op), and
                     // isHighlighted to check the predicate directly.
                     applyLayout: applyLayout, isHighlighted: isHighlighted,
-                    isToday: isToday,
                     // Logo internals: placeLogo has to be callable directly, because
                     // refresh() only schedules a render and a tab that is not being
                     // composited never runs one -- so testing the mark through the
@@ -10140,6 +10282,22 @@ function mountVaultGraph(root, data, deps) {
                     // Where the strip puts a date, for checking the year buttons line up.
                     ribbonXOf: function (ms) { return ribbonX(ms, ribbonW()); },
                     /**
+                     * The two ends the strip is DRAWING, and where they are on it.
+                     *
+                     * Not state.from/state.to: a drag and the intro's sweep are both previews
+                     * that deliberately leave state alone, so state cannot answer "where is
+                     * the handle". This is brushEnds() -- the one thing drawRibbon reads --
+                     * so a check of the sweep is a check of the pixels rather than of a
+                     * variable that happens to be nearby.
+                     */
+                    brushNow: function () {
+                      if (!dateSpan) return null;
+                      var w = ribbonW(), e = brushEnds();
+                      return { from: e[0], to: e[1], fromISO: isoDay(e[0]), toISO: isoDay(e[1]),
+                               x0: ribbonX(e[0], w), x1: ribbonX(e[1], w), w: w,
+                               sweeping: brushSweep !== null };
+                    },
+                    /**
                      * EVERYTHING NEEDED TO REPRODUCE WHAT IS ON SCREEN, as one object.
                      *
                      * Reporting a layout problem by describing it costs a round trip per
@@ -10238,7 +10396,7 @@ function mountVaultGraph(root, data, deps) {
                                    range: rangeLabel(),
                                    from: state.from, to: state.to, heatEnd: state.heatEnd,
                                    timelineUntil: state.until,
-                                   markToday: !!state.markToday, shown: pts.length },
+                                   markDay: state.markDay, shown: pts.length },
                         // The room each band reports and the arc floor in force -- both feed
                         // POSITIONS now, so a jump investigation needs to see them per frame.
                         room: { i: r3(bandOf("i").room), o: r3(bandOf("o").room) },
@@ -10293,7 +10451,6 @@ function mountVaultGraph(root, data, deps) {
                       renderer.refresh();
                     } };
     buildTimeline();
-    buildTimelineUI();
     buildSearch(); buildTools(); buildStats();
     // Inlined at build time by build-graph.mjs; absent if logo-mask.png was missing,
     // in which case the element simply stays display:none.

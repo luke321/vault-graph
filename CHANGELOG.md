@@ -32,7 +32,8 @@ published tag breaks every link to it.
 ## 1.7.0 — 2026-08-25
 
 Small folders close and open like the big ones, the seams are geometry rather than
-accumulation, and a `--dev` build draws the wedges it is arguing about.
+accumulation, the date strip is the only timeline and it finally resizes, and a `--dev`
+build draws the wedges it is arguing about.
 
 - **A single-column wedge closes and opens at constant speed, in place.** Toggling a small
   folder off left the wedge visibly failing to close while its notes hopped between rows:
@@ -88,8 +89,64 @@ accumulation, and a `--dev` build draws the wedges it is arguing about.
   vault, 310 to 80 on the demo, 216 to 63 on the 10k. It costs a little motion in a
   neighbouring wedge during a toggle, so it ships behind a flag until that trade is judged.
 
+- **The sidebar's Timeline block is gone; the date ribbon is the timeline.** A rank slider,
+  Play and All scrubbed the same history the strip under the band already scrubs -- in a
+  different unit, from a panel, while the strip that draws that history sat beside them. The
+  slider is deleted and **Refresh is Play**.
+
+  The intro is now that strip's **right-hand handle travelling**, with the same tooltip a
+  real drag shows. It is a preview: `state.from`/`state.to` stay null for the whole sweep,
+  because writing them per frame would put a hard date cap in `timeFactor` on top of the rank
+  ramp the cascade is already animating -- and a range change stops playback, so the second
+  reveal would cancel the first. A hand on the handle mid-intro wins.
+
+  Measured on a 948px strip: 24-26 sweeping frames, 0.002 to 1.000 of the strip, **0**
+  backwards steps, landing exactly on `x1 === w`. The handle's position comes from the note
+  RANK rather than from the span -- interpolating the span linearly would show it in 2020
+  while every note from 2026 was already lit, since 409 of 442 notes here fall in the last
+  three months. The visible consequence, crossing 0.70 of the strip in the first ~5% of the
+  run and then creeping, is this vault's own distribution: both evenly-dated fixtures sweep
+  at 0.05-0.06 at the same point.
+
+- **Refresh clears the date range,** which it did not. It claims to clear every filter and
+  replay the intro, and it cleared every filter except that one -- so replaying the intro
+  through an applied range grew the vault to a slice of itself. Invisible while "the
+  timeline" meant the rank slider, which it did reset; the omission became the bug when the
+  ribbon became the timeline.
+
+- **The date strip resizes with the window.** It never did. `fitCanvas` pins an inline pixel
+  width on the canvas -- it must, since the bitmap is device pixels and the box is CSS pixels
+  -- and an inline width beats the stylesheet's `width:100%`, so asking the canvas how wide
+  it was returned the width it was last drawn at, for ever. Measured: **1168px in a 668px
+  slot, 1168px again in a 1568px one**, every year chip left where it was; and on a page
+  whose first measurement ran before layout, the 600px fallback in a 1284px band,
+  permanently. The ResizeObserver was wired and firing the whole time and redrew at the same
+  stale number, which is why this read as missing resize handling rather than as a stale
+  measurement.
+
+  Measuring now drops the inline width, reads the box the stylesheet gives and puts the
+  inline width back, so it has no side effect -- and it runs from the draw path and the
+  observer only, never from a pointermove. The observer guards on the width actually having
+  changed, which both saves a redraw per band reflow and breaks the loop that drawing into an
+  observed element would otherwise create. All three vaults now track their slot to within
+  1px at every width.
+
+- **"Mark today" is gone; click the band's today column instead.** It answered "which notes
+  were written today" from the sidebar, by a second predicate, while the band drew the answer
+  -- and it is the one that got the predicate wrong twice, first matching nothing and then
+  matching 111 files a folder rename had touched. Clicking the last cell of the grid marks
+  exactly the notes that cell counted.
+
+  The **fill treatment came with it**: a picked day's notes take `--today`, the neutral
+  extreme that is deliberately not a group hue, on top of the halo they already had. Gated on
+  the picked day and **not** on the hovered one -- recolouring a year of notes as the pointer
+  crosses a label is far too loud, so a hover asks and a click chooses. Two `smoke.mjs` checks
+  went with the button, replaced by one that follows the fill to where it lives.
+
 Nothing here changes what a note means or where a folder sits: the two-band split, the
-serpentine, the colours and the timeline are untouched.
+serpentine and the colours are untouched, and so is the reveal itself -- notes still arrive
+oldest-first over the same clock. What changed is which control says so, and that it now
+says it at any window size.
 
 ---
 

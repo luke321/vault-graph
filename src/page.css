@@ -181,7 +181,6 @@
     background: var(--surface-2); color: var(--text-1); border: 1px solid var(--border);
   }
   .vault-graph input[type="search"]:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
-  .vault-graph input[type="range"] { width: 100%; accent-color: var(--accent); }
 
   .vault-graph .row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
   .vault-graph .row .val { font-variant-numeric: tabular-nums; color: var(--text-2); font-size: 11px; }

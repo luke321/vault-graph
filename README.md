@@ -41,9 +41,12 @@ no server and no network, which is how the graph reaches a phone.
 **Time**
 - A **heatmap band** above the disc: one square per day, coloured from the notes that landed
   in it, so a busy week is both taller and more colourful.
-- A **timeline** slider replays the vault's growth from its first note to today. `play`
-  animates it.
-- `mark today` haloes everything created today without moving anything.
+- A **date ribbon** under the band carries every month of the vault. Its two handles are a
+  date filter, the pill below them is the 52 weeks the band is drawing, and the year chips
+  under it jump to a year. It is the timeline: `refresh` replays the vault's growth by
+  sweeping the right-hand handle from the first note to today.
+- **Click a day** in the band to pick out its notes on the disc — recoloured and haloed,
+  nothing moved. Clicking today's square is how you see what you wrote today.
 
 **Reading one note**
 - Hover a note to raise it and dim everything unconnected to it.

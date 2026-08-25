@@ -31,17 +31,6 @@
     </div>
 
     <div class="block">
-      <div class="row"><div class="lbl" style="margin:0">Timeline</div><span class="val" id="vg-tlv">All</span></div>
-      <input type="range" id="vg-tl" min="0" max="100" value="100"
-             title="Reveal notes oldest-first. The slider is linear in NOTE COUNT, not in time: nearly every note is from the last few months, so a time axis would spend most of its travel on empty years.">
-      <div class="mini" style="margin-top:7px">
-        <button id="vg-tlplay" title="Grow the vault from its first note to now">Play</button>
-        <button id="vg-tlall">All</button>
-        <button id="vg-today" aria-pressed="false" title="Colour, push out and halo every note created or edited today">Mark today</button>
-      </div>
-    </div>
-
-    <div class="block">
       <div class="row" style="margin-bottom:7px">
         <div class="lbl" style="margin:0">Groups <span id="vg-gcount" class="val"></span></div>
         <div class="mini"><button id="vg-allon">All</button><button id="vg-alloff">None</button></div>
@@ -52,7 +41,7 @@
     <div class="block">
       <div class="lbl">View</div>
       <div class="tools">
-        <button id="vg-refresh" title="Back to the defaults, and replay the intro. Clears highlights and the timeline, and returns each folder to the visibility set in the gear -- so archives go back to hidden. This page is a snapshot -- its data was baked in when it was built -- so to pick up notes written since, rebuild it with refresh-graph.ps1 (or build-graph.mjs). The Obsidian plugin rebuilds in place instead.">Refresh</button>
+        <button id="vg-refresh" title="Back to the defaults, and replay the intro. Clears highlights and the date range, and returns each folder to the visibility set in the gear -- so archives go back to hidden. This page is a snapshot -- its data was baked in when it was built -- so to pick up notes written since, rebuild it with refresh-graph.ps1 (or build-graph.mjs). The Obsidian plugin rebuilds in place instead.">Refresh</button>
         <button id="vg-png">Save PNG</button>
         <!-- Dumps the exact state to the clipboard: filters, spacing, seam, per-band
              geometry and dot sizes. For pasting into a bug report rather than describing it. -->

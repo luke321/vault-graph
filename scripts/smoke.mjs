@@ -545,51 +545,50 @@ check("a marked heatmap day haloes but never pushes", async (p) => {
            detail: `${r.day}: ${r.haloed} haloed, ${r.pushed} pushed, ${r.moved} moved` };
 });
 
-check("mark today haloes but never pushes", async (p) => {
-  const r = await p.j(`(function(){
-    __vg.state.markToday = true;
-    var rep = __vg.pushReport();
-    __vg.state.markToday = false; __vg.renderer.refresh();
-    return {pushed: rep.pushedCount, haloed: rep.haloedCount};
+// THIS REPLACES THE TWO "mark today" CHECKS, which went with the sidebar button.
+//
+// One of them asserted that marking haloes without pushing, which the check above already
+// asserts for the same code path. The other pinned the button's predicate against the band's
+// today column as SET equality -- worth having while two predicates existed, and tautological
+// now that only the band's does.
+//
+// What is genuinely new and was only ever covered on the button's path is the FILL: a picked
+// day's notes take the neutral extreme (--today) instead of their group hue, which is what
+// makes a scattered handful findable among ten hues. That treatment moved from the button to
+// state.markDay, so it needs a check that follows it.
+check("a marked heatmap day recolours its notes", async (p) => {
+  // THE RAMP IS WAITED OUT, NOT RACED. The fill is mixed by hl[id], which afterRender walks
+  // over TWEEN_MS, so reading the colour on the frame after the click reads a value on its
+  // way somewhere -- the flavour of flake that passes locally and fails on a loaded machine.
+  // settle() is the same door every other animated check goes through.
+  await settle(p);
+  const pick = await p.j(`(function(){
+    var h = __vg.heat, b = null;
+    h.keys.forEach(function(k){ var d = h.days[k]; if (!b || d.n > b.n) b = d; });
+    var ids = b.ids.slice(0, 12);
+    window.__mdIds = ids;
+    return { key: b.key, ids: ids,
+             before: ids.map(function (i) { return __vg.renderer.getNodeDisplayData(i).color; }) };
   })()`);
-  // REVERSED DELIBERATELY. This asserted that whatever mark-today haloes it also PUSHES,
-  // which was the behaviour until today's notes were observed sliding out through their own
-  // cell-mates -- the exact failure design/0010 already describes for a marked heatmap day.
-  // Both now halo without moving anything, so the assertion is that nothing moved.
-  //
-  // Zero haloed is a legitimate answer on a day nothing was touched, so the check does not
-  // demand a count; it demands that the count of moved notes is zero whatever it is.
-  return { ok: r.pushed === 0, detail: `${r.pushed} pushed / ${r.haloed} haloed` };
-});
-
-check("mark today marks exactly the heatmap's today column", async (p) => {
-  // The band and the button both answer "today" and used to answer it differently: the band
-  // counts notes CREATED today, the button also counted files TOUCHED today -- an mtime,
-  // which a sync or a frontmatter rewrite moves for reasons that have nothing to do with
-  // the person. On a real vault that marked far more notes than the band showed.
-  //
-  // Set equality, not counts: two predicates can agree on how many and still disagree on
-  // which. Both empty is a pass -- on a day nothing was written, marking nothing is correct.
-  const r = await p.j(`(function(){
-    var today = new Date();
-    var p2 = function (n) { return String(n).padStart(2, "0"); };
-    var key = today.getFullYear() + "-" + p2(today.getMonth() + 1) + "-" + p2(today.getDate());
-    var byButton = [];
-    __vg.graph.forEachNode(function (id) { if (__vg.isToday(id)) byButton.push(id); });
-    var day = __vg.heat && __vg.heat.days ? __vg.heat.days[key] : null;
-    var byBand = day ? day.ids.slice() : [];
-    var sort = function (a) { return a.slice().sort(); };
-    var A = sort(byButton).join("|"), B = sort(byBand).join("|");
-    return { button: byButton.length, band: byBand.length, same: A === B, key: key };
-  })()`);
-  return { ok: r.same,
-           detail: `${r.key}: ${r.button} marked by the button, ${r.band} in the band` +
-                   (r.same ? "" : "  <- different SETS, not just counts") };
+  await p.eval(`__vg.state.markDay = ${JSON.stringify(pick.key)}; __vg.renderer.refresh(); void 0`);
+  await settle(p);
+  const after = await p.j(`__mdIds.map(function (i) { return __vg.renderer.getNodeDisplayData(i).color; })`);
+  await p.eval(`__vg.state.markDay = null; __vg.renderer.refresh(); void 0`);
+  await settle(p);
+  const back = await p.j(`__mdIds.map(function (i) { return __vg.renderer.getNodeDisplayData(i).color; })`);
+  const n = pick.ids.length;
+  let changed = 0, restored = 0;
+  for (let k = 0; k < n; k++) {
+    if (after[k] !== pick.before[k]) changed++;
+    if (back[k] === pick.before[k]) restored++;
+  }
+  return { ok: n > 0 && changed === n && restored === n,
+           detail: `${pick.key}: ${changed}/${n} recoloured, ${restored}/${n} back to their own hue` };
 });
 
 check("hovering a note ramps in and releases at zero", async (p) => {
-  // WAIT FOR THE DISC TO STOP MOVING FIRST. The two checks above set markDay/markToday,
-  // which pushes notes radially, and clearing it animates them back. Aiming at a note
+  // WAIT FOR THE DISC TO STOP MOVING FIRST. The checks above set markDay, which ramps a
+  // halo and a fill, and clearing it ramps them back. Aiming at a note
   // while that is in flight measures a position the note has already left: measured, this
   // check missed roughly one run in six with 19.9px of clearance, which is far more than
   // an aiming problem and exactly the size of the drift. The miss looked like a hover bug
@@ -2222,7 +2221,23 @@ check("the year buttons select a year and halo it on hover", async (p) => {
       var d = Math.abs(got - want);
       if (d > worst) worst = d;
     });
-    var mid = bs[Math.floor(bs.length / 2)];
+    // THE MIDDLE BUTTON IS NOT A SAFE PICK, and this fails on the author's own vault.
+    // The hover half of this check demands that the year haloes its notes, so the year has
+    // to HAVE some -- and a vault is allowed a year with none. This one has exactly that:
+    // 2021 holds 0 notes of 457, it is the 7th of 12 chips, and bs.length / 2 lands on it,
+    // so a run against the real vault reported "hovering '2021' haloed 0 of its 0 notes" and
+    // failed on a page that was right. The three fixtures all populate every year, which is
+    // why the default run never showed it. Nearest populated year to the middle, so the pick
+    // is still a middling one wherever there is a choice.
+    var counts = {};
+    __vg.dateSpan.years.forEach(function (y) { counts[String(y.y)] = y.n; });
+    var withNotes = bs.filter(function (b) { return (counts[b.getAttribute("data-yr")] || 0) > 0; });
+    if (!withNotes.length) return { none: true, allEmpty: true };
+    var want = Math.floor(bs.length / 2);
+    var mid = withNotes.reduce(function (best, b) {
+      var d = Math.abs(bs.indexOf(b) - want);
+      return best === null || d < Math.abs(bs.indexOf(best) - want) ? b : best;
+    }, null);
     var r = mid.getBoundingClientRect();
     return { n: bs.length, worstPx: Math.round(worst),
              years: bs.map(function (b) { return b.getAttribute("data-yr"); }),
@@ -2230,7 +2245,11 @@ check("the year buttons select a year and halo it on hover", async (p) => {
              x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2),
              tagged: bs.every(function (b) { return b.tagName === "BUTTON" && b.hasAttribute("aria-pressed"); }) };
   })()`);
-  if (!list || list.none) return { ok: false, detail: "no year buttons under the ribbon" };
+  if (!list || list.none) {
+    return { ok: false, detail: list && list.allEmpty
+      ? "every year chip belongs to a year with no notes -- nothing to hover"
+      : "no year buttons under the ribbon" };
+  }
 
   // Hover haloes exactly that year's notes.
   await p.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: list.x, y: list.y });
@@ -2275,6 +2294,125 @@ check("the year buttons select a year and halo it on hover", async (p) => {
             `year; hovering '${yr}' haloed ${hov.haloed} of its ${hov.real} notes; clicking gave ` +
             `${clicked.fromISO} -> ${clicked.toISO} (${clicked.lit} lit, pressed=${clicked.pressed}); ` +
             `leaving cleared it (${left})`,
+  };
+});
+
+check("the ribbon rescales with its slot", async (p) => {
+  // THE BUG THIS EXISTS FOR. fitCanvas pins an inline pixel width on the strip's canvas --
+  // it has to, since the bitmap is in device pixels and the CSS box is in CSS pixels -- and
+  // an inline width beats the stylesheet's `width:100%`. So ribbonW(), which asked the
+  // CANVAS how wide it was, got back the width it had last been drawn at, for ever. The
+  // ResizeObserver was already wired and redrew at that same stale number, so the strip
+  // never resized at all: measured on the real vault, 1168px in a 668px slot and 1168px
+  // again in a 1568px one, with every year button left where it was.
+  //
+  // The viewport is overridden rather than the OS window resized: it re-runs layout and
+  // delivers ResizeObserver notifications exactly the same way, costs no window manager, and
+  // clears back to whatever this lane was already using.
+  const at = async () => p.j(`(function(){
+    var rib = document.querySelector("#vg-ribbon");
+    var years = document.querySelector("#vg-years");
+    var bs = [].slice.call(years.querySelectorAll("button[data-yr]"));
+    var rb = rib.getBoundingClientRect();
+    // The SLOT is #vg-years: same containing block, same stretch, and nothing pins its
+    // width -- so it is the honest answer to "how wide should the strip be".
+    var slot = years.getBoundingClientRect().width;
+    var last = bs.length ? bs[bs.length - 1] : null;
+    var lastX = last ? last.getBoundingClientRect().left + last.getBoundingClientRect().width / 2 - rb.left : null;
+    return { rib: Math.round(rb.width), slot: Math.round(slot),
+             inline: rib.style.width, bitmap: rib.width,
+             lastX: lastX === null ? null : Math.round(lastX) };
+  })()`);
+
+  const base = await p.j(`(function(){ return { w: innerWidth, h: innerHeight,
+                            dpr: window.devicePixelRatio || 1 }; })()`);
+  const rows = [];
+  const widths = [Math.round(base.w * 0.62), Math.round(base.w * 1.28), base.w];
+  for (const w of widths) {
+    await p.send("Emulation.setDeviceMetricsOverride",
+                 { width: w, height: base.h, deviceScaleFactor: base.dpr, mobile: false });
+    await sleep(320);
+    rows.push({ w, ...(await at()) });
+  }
+  await p.send("Emulation.clearDeviceMetricsOverride");
+  await sleep(320);
+  const settled = await at();
+
+  // Three things, and all three are needed. The canvas has to match its slot; the inline
+  // width has to match the box, or a fractional slot leaves the bitmap half a pixel off the
+  // pixels behind it; and the year buttons have to be on the same scale, since they are
+  // positioned from ribbonW() and were the visible half of the bug.
+  const tracks = rows.every((r) => Math.abs(r.rib - r.slot) <= 1);
+  const pinned = rows.every((r) => r.inline === r.rib + "px");
+  const moved = new Set(rows.map((r) => r.lastX)).size === rows.length || rows.length < 2;
+  const restored = Math.abs(settled.rib - settled.slot) <= 1;
+  return {
+    ok: tracks && pinned && moved && restored,
+    detail: rows.map((r) => `${r.w}px -> strip ${r.rib}/slot ${r.slot}` +
+                            (r.lastX === null ? "" : `, last year at ${r.lastX}`)).join("; ") +
+            `; cleared -> ${settled.rib}/${settled.slot}` +
+            (tracks ? "" : "  <- STRIP DID NOT FOLLOW ITS SLOT") +
+            (pinned ? "" : "  <- inline width disagrees with the box") +
+            (moved ? "" : "  <- the year buttons did not move"),
+  };
+});
+
+check("the intro sweeps the range end across the strip", async (p) => {
+  // THE INTRO IS THE RIGHT-HAND SCRUBBER TRAVELLING, and this pins the three things that
+  // makes it: it starts at the left end, it never goes backwards, and it finishes exactly at
+  // the right end rather than near it. The disc's reveal and the handle both come off the
+  // same rank, which is what keeps them in step -- interpolating the SPAN linearly instead
+  // would put the handle in 2020 while every note from 2026 was already lit, because a vault
+  // is not spread evenly in time (measured on the real one: 409 of 442 notes in the last
+  // three months against a handful back to 2015).
+  //
+  // A PREVIEW, so state.from/state.to must stay null for the whole sweep. Writing them per
+  // frame would put a hard date cap in timeFactor on top of the rank ramp the cascade is
+  // already animating -- the same reveal computed twice, and the second one cancels playback.
+  await clearRange(p);
+  await settle(p);
+  const scale = await p.j(`__vg.timeScale`);
+  // Faster clock, same animation: this check reads POSITIONS, not frame pacing, and the
+  // intro at its real duration is 5.6s of a suite that pays that per lane already.
+  await p.eval(`__vg.timeScale = 0.25; void 0`);
+  await p.eval(`document.querySelector("#vg-refresh").click(); void 0`);
+  const seen = [];
+  for (let i = 0; i < 90; i++) {
+    const r = await p.j(`(function(){
+      var b = __vg.brushNow();
+      if (!b) return null;
+      var lit = 0; __vg.graph.forEachNode(function (id) { if ((__vg.alpha[id] || 0) > 0.004) lit++; });
+      var tip = document.querySelector("#vg-rtip");
+      return { frac: b.x1 / b.w, x1: Math.round(b.x1), w: Math.round(b.w),
+               sweeping: b.sweeping, lit: lit,
+               tip: tip && !tip.hidden ? tip.textContent : null,
+               from: __vg.state.from, to: __vg.state.to, busy: !!__vg.demo.busy() };
+    })()`);
+    if (r) seen.push(r);
+    if (seen.length > 2 && r && !r.busy && !r.sweeping) break;
+    await sleep(40);
+  }
+  await p.eval(`__vg.timeScale = ${JSON.stringify(scale)}; void 0`);
+  await settle(p);
+
+  const mid = seen.filter((r) => r.sweeping);
+  const end = seen[seen.length - 1];
+  let back = 0, maxFrac = 0;
+  for (const r of mid) { if (r.frac < maxFrac - 0.002) back++; maxFrac = Math.max(maxFrac, r.frac); }
+  const startedLeft = mid.length > 0 && mid[0].frac <= 0.08;
+  const grew = mid.length >= 3 && mid[mid.length - 1].frac > mid[0].frac;
+  const landedRight = !!end && !end.sweeping && Math.abs(end.x1 - end.w) <= 1;
+  const stayedPreview = seen.every((r) => r.from === null && r.to === null);
+  const labelled = mid.some((r) => !!r.tip) && !end.tip;
+  return {
+    ok: mid.length >= 3 && startedLeft && grew && back === 0 && landedRight &&
+        stayedPreview && labelled,
+    detail: `${mid.length} sweeping frames, ${mid.length ? mid[0].frac.toFixed(3) : "-"} -> ` +
+            `${mid.length ? mid[mid.length - 1].frac.toFixed(3) : "-"}, ${back} backwards; ` +
+            `landed at ${end ? end.x1 + "/" + end.w : "?"}; ` +
+            `state stayed null: ${stayedPreview}; handle labelled: ${labelled}` +
+            (startedLeft ? "" : "  <- DID NOT START AT THE LEFT END") +
+            (landedRight ? "" : "  <- DID NOT LAND ON THE RIGHT END"),
   };
 });
 
