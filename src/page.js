@@ -9728,6 +9728,16 @@ function mountVaultGraph(root, data, deps) {
       { drag: [200, 0], target: ["brush", "from"], act: "timeline", why: "...and bring the range start forward" },
       { settle: true, act: "timeline", why: "let it thin further" },
 
+      // The band's window, moved on its own. The range above stays exactly where it was --
+      // which is most of what this act is for: they are two instruments, not one. Before the
+      // year chips on purpose: a year click sets the range to that year and can drag the
+      // window along with it, and this act is clearer split into "the window, on its own"
+      // then "the year chip, which touches both" rather than the other way round.
+      { drag: [-260, 0], target: ["brush", "window"], act: "timeline", why: "slide the heatmap window back on its own" },
+      { settle: true, act: "timeline", why: "let the band redraw" },
+      { drag: [170, 0], target: ["brush", "window"], act: "timeline", why: "...and forward again" },
+      { settle: true, act: "timeline", why: "let the band redraw" },
+
       // THE YEAR CHIPS, which have never been in the demo. Hover haloes that year's notes
       // wherever they landed; clicking sets the range to that calendar year, and the chip
       // reads pressed. "busiest" picks the fullest year that has a chip, so the hover
@@ -9735,13 +9745,6 @@ function mountVaultGraph(root, data, deps) {
       { hover: true, target: ["year", "busiest"], act: "timeline", why: "hover a year to find it on the disc" },
       { click: true, target: ["year", "busiest"], act: "timeline", why: "...and click it to filter to that year" },
       { settle: true, act: "timeline", why: "let the year land" },
-
-      // The band's window, moved on its own. The range above stays exactly where it was --
-      // which is most of what this act is for: they are two instruments, not one.
-      { drag: [-260, 0], target: ["brush", "window"], act: "timeline", why: "slide the heatmap window back on its own" },
-      { settle: true, act: "timeline", why: "let the band redraw" },
-      { drag: [170, 0], target: ["brush", "window"], act: "timeline", why: "...and forward again" },
-      { settle: true, act: "timeline", why: "let the band redraw" },
 
       // Clear it, so everything after this runs on the whole vault. Also puts the window
       // back, which is what makes the `busiest` targets in the next act land on cells that

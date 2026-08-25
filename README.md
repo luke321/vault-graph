@@ -11,9 +11,6 @@ becomes something you can learn and recognise rather than a fresh tangle each ti
 
 ![The disc growing from the vault's first note, a note hovered, a folder hidden, a folder and a subfolder hovered from the legend, that subfolder then clicked to push it out, three heatmap days hovered, two folders recoloured from the palette and put back, then one folder soloed](assets/demo.webp)
 
-
-![Vault Graph inside Obsidian, dark theme](assets/screenshots/plugin-dark.png)
-
 Ships as an **Obsidian plugin** and as a **standalone HTML exporter** — one page, two
 mounts, from the same source. The exporter writes a single self-contained offline file with
 no server and no network, which is how the graph reaches a phone.
@@ -31,8 +28,6 @@ vault grow. Follows Obsidian's theme, including a live switch.
 [`docs/features.md`](docs/features.md)** — the disc itself, filtering, the heatmap and
 timeline, reading a note, the camera, and folder colours, each with what it does and how its
 clip gets regenerated.
-
-![Vault Graph in the light theme](assets/screenshots/plugin-light.png)
 
 ---
 
