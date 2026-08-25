@@ -775,12 +775,16 @@
   }
   .vault-graph #vg-detail .nb { font-size: 10px; text-transform: uppercase; letter-spacing: .07em;
                 color: var(--text-3); margin: 10px 0 5px; font-weight: 600; }
+  .vault-graph #vg-detail .actions {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 4px;
+  }
   .vault-graph #vg-detail a.open {
     display: inline-block; font-size: 11px; color: var(--accent);
     text-decoration: none; border: 1px solid var(--accent);
-    border-radius: 6px; padding: 4px 8px; margin-top: 4px;
+    border-radius: 6px; padding: 4px 8px;
   }
   .vault-graph #vg-detail a.open:hover { background: color-mix(in srgb, var(--accent) 12%, transparent); }
+  .vault-graph #vg-detail .pin svg { width: 13px; height: 13px; vertical-align: -2px; margin-right: 3px; }
   .vault-graph #vg-detail ul { list-style: none; margin: 0; padding: 0; }
   .vault-graph #vg-detail li button {
     background: none; border: 0; padding: 2px 0; font: inherit; font-size: 12px;
@@ -793,6 +797,16 @@
     color: var(--text-3); font-size: 16px; cursor: pointer; line-height: 1; padding: 2px 5px;
   }
   .vault-graph #vg-detail .x:hover { color: var(--text-1); }
+
+  /* Fixed white-on-black regardless of theme, like every real OS pointer -- its whole
+     job is to read against whatever is under it, light disc or dark. No transition: a
+     cursor that eases toward its target looks like it is being dragged there by
+     something else, which is the opposite of what a pointer communicates. */
+  .vault-graph #vg-democursor {
+    position: absolute; left: 0; top: 0; z-index: 50; pointer-events: none;
+    filter: drop-shadow(0 1px 2px rgba(0,0,0,.45));
+  }
+  .vault-graph #vg-democursor[hidden] { display: none; }
 
   .vault-graph #vg-hits { margin-top: 6px; max-height: 168px; overflow-y: auto; }
   .vault-graph #vg-hits button {

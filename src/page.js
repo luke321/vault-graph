@@ -282,6 +282,15 @@ function mountVaultGraph(root, data, deps) {
       '</svg>';
   }
 
+  // A thumbtack: filled head when pinned, outline otherwise -- the same on/off
+  // convention eyeSvg uses, for the detail card's hub toggle.
+  function pinSvg(on) {
+    var head = '<circle cx="8" cy="5.6" r="3.35" ' +
+      (on ? 'fill="currentColor"' : 'fill="none" stroke="currentColor" stroke-width="1.25"') + '/>';
+    var point = '<path d="M8 8.8V14" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>';
+    return '<svg viewBox="0 0 16 16" aria-hidden="true">' + head + point + '</svg>';
+  }
+
   // Explicit per-folder visibility: true = shown, false = hidden, absent = the default
   // above. Tri-state on purpose -- "absent" has to stay distinguishable from "false", or
   // turning `_ Archives` off by hand would be indistinguishable from never having said
@@ -3757,6 +3766,16 @@ function mountVaultGraph(root, data, deps) {
   // How far the pointer must travel before a press becomes a drag. Same threshold the
   // ribbon uses, and for the same reason: a click with a shaky hand is still a click.
   var NODE_DRAG_MIN = 4;
+  // The id of a note that just crossed NODE_DRAG_MIN, so the clickNode this same release
+  // is about to fire does not ALSO open the detail card on top of it. clickNode fires
+  // regardless of whether a drag preceded it -- sigma decides click-vs-drag off its own
+  // press/release bookkeeping, which never sees the movement our mousemovebody handler
+  // consumes with stopPropagation -- so without this, dragging a note into or out of the
+  // hub popped its card open at the same time, which reads as the drag having a side
+  // effect nobody asked for. Set the moment the THRESHOLD is crossed rather than in
+  // drop(), which runs too late to matter: it is on the same "mousemovebody" tick that
+  // decides the gesture is a drag at all, well before the eventual release.
+  var dragJustMoved = null;
 
   // Where the hub is, in graph units, and whether a point is in it.
   function inHubHole(gx, gy) {
@@ -3767,6 +3786,39 @@ function mountVaultGraph(root, data, deps) {
   // The drop target, drawn only while a drag is live. Without it the hole is an invisible
   // target and the gesture is a guess -- the first version had no ring and dropping felt
   // like it either worked or did not for no stated reason.
+  /**
+   * A purely cosmetic pointer, drawn IN THE PAGE and moved by eval -- never at the OS
+   * level. `x, y` are PAGE coordinates, the same ones the driver already dispatches
+   * Input.dispatchMouseEvent at, so it need not know this element exists at all beyond
+   * calling it with the same numbers.
+   *
+   * This replaces moving the REAL system cursor (scripts/cursor.ps1, `--cursor`), which
+   * worked right up until it was asked to drag a NODE rather than click one. Windows
+   * delivers real input for wherever the OS pointer physically sits regardless of which
+   * process moved it there, so SetCursorPos was a SECOND, genuinely native mouse-event
+   * stream landing in the same window as the CDP-injected one -- and the two disagree on
+   * `buttons`: real hardware reports none pressed, while CDP's dispatched drag says 1.
+   * bindNodeDrag's own "the button came up outside the window" safety check -- there for
+   * the real case of a person's drag actually leaving the tab -- read the native
+   * stream's buttons:0 as exactly that, dropped the note mid-glide, and let sigma's
+   * default panning take over for the rest of the gesture. Measured: worked every time
+   * over CDP alone, failed on every take that also moved the real pointer. A DOM element
+   * never touches the OS pointer and generates no second stream, so there is nothing
+   * left for that check to misread.
+   */
+  function demoCursorAt(x, y) {
+    var el = $("democursor");
+    if (!el) return;
+    var b = $("canvas").getBoundingClientRect();
+    el.style.left = (x - b.left) + "px";
+    el.style.top = (y - b.top) + "px";
+    el.hidden = false;
+  }
+  function demoCursorHide() {
+    var el = $("democursor");
+    if (el) el.hidden = true;
+  }
+
   function placeHubDrop() {
     var el = $("hubdrop");
     if (!el || !renderer || !geomLock) return;
@@ -3796,6 +3848,10 @@ function mountVaultGraph(root, data, deps) {
       var o = e.event && e.event.original;
       if (o && o.button !== 0) return;
       nodeDrag = { id: e.node, moved: false, over: false, wasPinned: isPinned(e.node) };
+      // A fresh press starts clean -- otherwise a drag that never crosses NODE_DRAG_MIN
+      // (a plain click) would leave a PRIOR drag's flag sitting there, ready to swallow
+      // this click's own clickNode for the wrong reason.
+      dragJustMoved = null;
     });
 
     captor.on("mousemovebody", function (e) {
@@ -3819,6 +3875,7 @@ function mountVaultGraph(root, data, deps) {
         if (nodeDrag.x0 === undefined) { nodeDrag.x0 = e.x; nodeDrag.y0 = e.y; }
         if (Math.hypot(e.x - nodeDrag.x0, e.y - nodeDrag.y0) < NODE_DRAG_MIN) return;
         nodeDrag.moved = true;
+        dragJustMoved = nodeDrag.id;
       }
       var p = renderer.viewportToGraph(e);
       graph.setNodeAttribute(nodeDrag.id, "x", p.x);
@@ -6440,7 +6497,11 @@ function mountVaultGraph(root, data, deps) {
     // idea and was spiked and dropped: the mark is painted UNDER sigma's canvases and the
     // hub is where every edge converges, so anything faint enough to read as a container is
     // not visible at all. Measured at 0.26 and again at 0.55; neither survived the tangle.
-    var yielded = state.pinned.length > 0;
+    // pinnedIds(), NOT state.pinned -- a filter can hide every pin without releasing any
+    // of them (see pinnedIds), and hubPlace draws nothing for a hub in that state. Yielding
+    // on the raw list left the mark faded with an empty hole under it: hiding the one
+    // folder a pin lived in emptied the hub and the mark never came back to fill it.
+    var yielded = pinnedIds().length > 0;
     el.style.opacity = yielded ? "0" : "";
     // Re-paint only when the ring's colours actually changed. This runs from
     // afterRender, so it fires on every frame of a cascade -- and assigning the same
@@ -6997,7 +7058,13 @@ function mountVaultGraph(root, data, deps) {
     // pointing at nothing -- but the DISC fades back out, which is why state.hovered is
     // released by the tween at zero rather than here.
     renderer.on("leaveNode", function () { hideTip(); hoverTo(0); });
-    renderer.on("clickNode", function (e) { select(e.node); });
+    renderer.on("clickNode", function (e) {
+      // Consumed, not just read -- clickNode fires on this same release either way, and
+      // once used it must not go on suppressing some LATER, unrelated click on the note
+      // this one happened to drag. See dragJustMoved's own comment for why it exists.
+      if (dragJustMoved === e.node) { dragJustMoved = null; return; }
+      select(e.node);
+    });
     renderer.on("clickStage", function () { select(null); });
     // Right-click is the pin gesture, and dragging into the hole is the other way to
     // reach it. preventDefault on the original event, or the browser's context menu
@@ -7089,7 +7156,15 @@ function mountVaultGraph(root, data, deps) {
       }).join("") + '</div>' +
       '<div class="chip" style="border-style:dashed">' + esc(a.folder) +
         (a.sub ? ' / ' + esc(a.sub) : '') + ' / ' + esc(a.ntype) + '</div>' +
-      (a.ghost ? "" : '<div><a class="open" href="obsidian://open?vault=' + vault + '&file=' + file + '">Open in Obsidian</a></div>');
+      '<div class="actions">' +
+        (a.ghost ? "" : '<a class="open" href="obsidian://open?vault=' + vault + '&file=' + file + '">Open in Obsidian</a>') +
+        // The label stays "Pin to hub" either way -- the .btn convention above is that a
+        // toggle shows its state by filling in, not by changing what it says, and the
+        // pin icon itself is already on/off (see pinSvg). Same gesture as right-click.
+        '<button class="btn pin" data-pin="' + id + '" aria-pressed="' + isPinned(id) + '" title="' +
+          (isPinned(id) ? "Unpin from hub" : "Pin to hub") + '">' + pinSvg(isPinned(id)) +
+          ' Pin to hub</button>' +
+      '</div>';
 
     if (nb.length) {
       h += '<div class="nb">Linked notes (' + nb.length + ')</div><ul>' +
@@ -7105,6 +7180,9 @@ function mountVaultGraph(root, data, deps) {
     setHTML(d, h);
     d.hidden = false;
     d.querySelector(".x").onclick = function () { select(null); };
+    // Re-selecting the same id rebuilds the card so the pressed state and icon follow
+    // the toggle -- togglePin itself already re-lays-out the ring and repaints the mark.
+    d.querySelector(".pin").onclick = function () { togglePin(id); select(id); };
     Array.prototype.forEach.call(d.querySelectorAll("[data-go]"), function (b) {
       b.onclick = function () { select(b.getAttribute("data-go")); centerOn(b.getAttribute("data-go")); };
     });
@@ -9717,6 +9795,18 @@ function mountVaultGraph(root, data, deps) {
     return /(^|[?&#])demo\b/.test(String(location.search) + " " + String(location.hash));
   }
 
+  // Which storyboard `?demo` should run. "" is the README hero (demoMode); anything
+  // else names one of the shorter per-feature demos below, one per new README section
+  // from now on rather than growing the hero to cover everything the page can do.
+  // `\bdemo\b` above still matches "demo=pin" -- the "=" is a word boundary too -- so
+  // this only has to say WHICH, not whether.
+  function demoWhich() {
+    var q = String(WIN.location ? WIN.location.search : "") + " " +
+            String(WIN.location ? WIN.location.hash : "");
+    var m = /(^|[?&#])demo=([\w-]+)/.exec(q);
+    return m ? m[2] : "";
+  }
+
   // Is anything moving? Every animation in this page owns one of these three, so this
   // is the whole answer rather than a sample of it. The driver polls this instead of
   // sleeping: a fixed wait fires part-way through on a page too slow to finish in time,
@@ -9851,6 +9941,14 @@ function mountVaultGraph(root, data, deps) {
       return pickY;
     }
     if (kind === "note") return demoNoteRect(arg);
+    if (kind === "biginner") return demoBigInnerNote();
+    // The detail card's hub toggle. Resolvable only once a note is selected and the card
+    // is open -- which the pin storyboard already orders itself around (click the note,
+    // then this), the same way the folder acts order themselves around a twisty.
+    if (kind === "pin") {
+      var dcard = $("detail");
+      return dcard && !dcard.hidden ? dcard.querySelector(".pin") : null;
+    }
     if (kind === "day") return demoCellRect(heat && heat.days[arg]);
     if (kind === "busiest") {
       // Ranked by what is VISIBLE right now, not by membership -- `n` is the sum of the
@@ -9947,6 +10045,66 @@ function mountVaultGraph(root, data, deps) {
       // `expect` lets the driver confirm afterwards that the hover landed where it aimed.
       // The title is logged because it is on camera anyway -- and the storyboard aims only
       // at date-titled folders, which is what makes that safe.
+      expect: best.id,
+      gap: Math.round(Math.sqrt(bestGap) * 10) / 10,
+      demoLabel: "note " + best.label
+    };
+  }
+
+  /**
+   * The biggest note on the INNER ring, for a beat that drags a note somewhere rather
+   * than hovering it in place.
+   *
+   * demoNoteRect optimises for the opposite property -- the MOST ISOLATED note in a
+   * folder, because a hover's whole job is to be an unambiguous, unmistakeable label.
+   * A drag target wants something else: it has to survive a PRESS, a hundred-plus
+   * pixels of glide, and a release all landing correctly, under whatever load the rest
+   * of the machine is carrying (ffmpeg's capture and the --cursor helper both compete
+   * with the renderer for the same CPU during a real recording) -- and a small dot is a
+   * small hit-test box the whole way. Biggest is also nearest: the inner ring is where
+   * the best-connected notes already sit by construction, so this is also the shortest
+   * drag to the hub at its centre.
+   *
+   * INNER, not "biggest anywhere" -- outer-ring notes can be just as big on a
+   * dominant-folder vault, and a long drag across the seam between bands has more
+   * distance for the render backlog in bindNodeDrag's own mousemovebody handler to fall
+   * behind on. geomLock.bandR is graph-normalised the same way inHubHole reads it (see
+   * there): divide the raw hypot by UNIT before comparing.
+   */
+  function demoBigInnerNote() {
+    if (!renderer || !geomLock || !geomLock.bandR) return null;
+    var org = $("graph").getBoundingClientRect();
+    var lo = geomLock.bandR.i[0], hi = geomLock.bandR.i[1];
+    var pts = [];
+    graph.forEachNode(function (id, a) {
+      if ((alpha[id] || 0) < 0.5) return;                 // not on screen right now
+      var rNorm = Math.hypot(a.x, a.y) / UNIT;
+      if (rNorm < lo || rNorm > hi) return;                // outer ring, or off the lattice
+      var v = renderer.graphToViewport({ x: a.x, y: a.y });
+      v = { x: v.x + org.left, y: v.y + org.top };
+      var rad = renderer.scaleSize ? renderer.scaleSize(dotPx(a.size, id)) : dotPx(a.size, id);
+      pts.push({ id: id, x: v.x, y: v.y, r: rad, size: a.size || 0, label: a.label });
+    });
+    if (!pts.length) return null;
+    // BIGGEST FIRST, THEN MOST ISOLATED among a handful of the biggest -- ranking on size
+    // alone can still hand back one of two big dots sitting side by side, which is the
+    // same silent-miss risk demoNoteRect's own comment describes for hover.
+    pts.sort(function (a, b) { return b.size - a.size; });
+    var top = pts.slice(0, Math.min(5, pts.length));
+    var best = null, bestGap = -1;
+    top.forEach(function (p) {
+      var gap = Infinity;
+      for (var j = 0; j < pts.length; j++) {
+        if (pts[j].id === p.id) continue;
+        var dx = p.x - pts[j].x, dy = p.y - pts[j].y;
+        var d2 = dx * dx + dy * dy;
+        if (d2 < gap) gap = d2;
+      }
+      if (gap > bestGap) { bestGap = gap; best = p; }
+    });
+    var box = Math.max(6, best.r * 1.5);
+    return {
+      left: best.x - box / 2, top: best.y - box / 2, width: box, height: box,
       expect: best.id,
       gap: Math.round(Math.sqrt(bestGap) * 10) / 10,
       demoLabel: "note " + best.label
@@ -10246,11 +10404,49 @@ function mountVaultGraph(root, data, deps) {
     ];
   }
 
+  /**
+   * `?demo=pin` -- the three ways to put a note in the hub, and nothing else. Short on
+   * purpose: this is a per-feature clip for its own README section, not a second hero,
+   * and a viewer deciding whether to keep watching a ten-second clip is a different
+   * question than deciding whether to keep watching a ninety-second one.
+   *
+   * Three DIFFERENT notes, one per gesture -- pinning is a TOGGLE (see togglePin), so
+   * running two gestures against the same note would have the second one release what
+   * the first just placed, and the clip would end with fewer pins than it showed landing.
+   */
+  function demoModePin() {
+    return [
+      { settle: true, why: "start from a disc at rest" },
+
+      /* --- 1. drag a note into the hole ---------------------------------- */
+      // biginner, not a folder prefix -- see demoBigInnerNote. A drag has to survive a
+      // press, a glide and a release landing correctly under real load; a big dot on the
+      // inner ring is both the easiest hit-test and the shortest trip to the hub.
+      { drag: true, target: ["biginner"], to: ["stage", "centre"],
+        why: "drag a note into the hole to pin it" },
+      { settle: true, why: "the hub opens and the ring closes around where it was" },
+
+      /* --- 2. right-click is the other way in ------------------------------ */
+      { rightclick: true, target: ["note", "05"], why: "right-click a note -- pins the same way" },
+      { settle: true, why: "let the second pin land" },
+
+      /* --- 3. the detail card's own toggle -------------------------------- */
+      { click: true, target: ["note", "03"], why: "click a note to open its card" },
+      { click: true, target: ["pin"], why: "...and pin it from the card itself" },
+      { settle: true, why: "let the third pin land" },
+
+      { park: true, why: "leave the final frame clean" }
+    ];
+  }
+
   // Everything the driver needs, and nothing it does not.
   var demoApi = {
     on: demoOn,
     doneTitle: DEMO_DONE_TITLE,
-    storyboard: demoMode,
+    // Dispatched on ?demo=<name> (demoWhich) rather than always demoMode, so a second
+    // storyboard needs no change here -- only a new WHICH branch and its own function,
+    // the same shape demoMode/demoModePin already are.
+    storyboard: function () { return demoWhich() === "pin" ? demoModePin() : demoMode(); },
     busy: demoBusy,
     /**
      * WHICH of the five things busy() ors together is still running.
@@ -10265,6 +10461,10 @@ function mountVaultGraph(root, data, deps) {
                hover: !!hoverRaf, highlight: !!hlRaf };
     },
     where: demoWhere,
+    // The recorder's visible pointer -- see demoCursorAt for why it lives in the page
+    // rather than at the OS level.
+    cursorAt: demoCursorAt,
+    cursorHide: demoCursorHide,
     // What is hovered right now. The driver compares this against a target's `expect`
     // after a hover beat: aiming at a dot is only as good as the hit-test agreeing, and
     // a silent miss puts the wrong note's NAME on camera.
