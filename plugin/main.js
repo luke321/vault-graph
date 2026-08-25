@@ -513,11 +513,16 @@ class VaultGraphView extends ItemView {
         this.plugin.settings.panEnabled = !!v;
         await this.plugin.saveSettings();
       },
-      // Compact date axis (github#23) has no in-view control on this host -- unlike pan,
-      // whose corner button lives IN the view, this one only ever changes from the
-      // settings-tab toggle below, which saves and pushes live itself. So this stays
-      // read-only, same reasoning as folderShown just above.
+      // Compact date axis (github#23) DOES get a writer, same reasoning as pan just above
+      // -- it has its own view-level icon now (beside the date range, since the gear on
+      // this host leads to Obsidian's settings tab, not an in-view panel), so the view is
+      // what has to persist a click there. The settings-tab toggle below saves and pushes
+      // live itself either way, same as it already does for pan.
       compactAxis: this.plugin.settings.compactAxis,
+      onCompactAxis: async (v) => {
+        this.plugin.settings.compactAxis = !!v;
+        await this.plugin.saveSettings();
+      },
       // The gear IS shown here -- it is where somebody looking at the disc goes to look
       // for the colours -- but it opens Obsidian's settings tab rather than a second
       // panel inside the view saying the same things. `settingsUI` is deliberately not
@@ -588,9 +593,9 @@ const DEFAULTS = {
   // it, and the corner control is a cheaper way to discover that than a settings tab is.
   // Held here so a vault where dragging gets in the way can start locked.
   panEnabled: true,
-  // Collapse runs of empty months on the date strip instead of giving every one equal
-  // width. ON by default -- the better axis should not need anyone to find a toggle first
-  // (github#23) -- and a no-op on a vault with nothing to collapse.
+  // Weight the date strip's years and months by note count instead of giving every one
+  // equal width, so a sparse decade doesn't cost the same room as one busy year. ON by
+  // default -- the better axis should not need anyone to find a toggle first (github#23).
   compactAxis: true,
 };
 
@@ -730,7 +735,7 @@ class VaultGraphSettingTab extends PluginSettingTab {
 
     new Setting(containerEl)
       .setName("Compact date axis")
-      .setDesc("Collapse runs of months with no notes on the date strip instead of giving every one equal width. A no-op when there's nothing to collapse.")
+      .setDesc("Give each year on the date strip width by how many notes it holds, instead of every year and month reading the same width regardless of content.")
       .addToggle((t) => t
         .setValue(this.plugin.settings.compactAxis !== false)
         .onChange(async (v) => {

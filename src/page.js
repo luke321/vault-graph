@@ -3701,38 +3701,60 @@ function mountVaultGraph(root, data, deps) {
     var yMax = 1;
     ylist.forEach(function (yy) { if (yy.n > yMax) yMax = yy.n; });
     // AXIS SEGMENTS -- built unconditionally, cheap, and read by ribbonX/ribbonMs only when
-    // compactAxis is on. A month with notes (n > 0) keeps ITS OWN REAL DURATION as its
-    // weight; a maximal run of CONSECUTIVE zero-note months collapses into a single segment
-    // weighing one AVERAGE month regardless of how many real months it actually spans --
-    // "collapses to about the width of that one month" (github#23).
+    // compactAxis is on. WEIGHTED BY NOTE COUNT, not by calendar time (github#23) -- the
+    // first version weighed a populated month by its own real duration and only collapsed
+    // literally-empty runs, which undersold the actual ask: a year holding a note or two in
+    // most months (so nothing in it ever reads as "empty") still summed to a full year of
+    // real-time weight, competing evenly against a year an order of magnitude busier just
+    // because both have "every month populated". Measured on the vault this shipped
+    // against: 2023 (21 notes, spread thin enough to touch nearly every month) drew WIDER
+    // than 2026 (399 notes, the vault's busiest year by far) under that scheme, because 2026
+    // is only partway through its own calendar year and 2023 is not.
     //
-    // WEIGHT IS MS, NOT A FLAT 1 PER MONTH -- a real month is not exactly the same width, and
-    // the no-op guarantee depends on that. Giving every month a flat weight of 1 was tried
-    // first and measured wrong: with zero gaps every segment is still "one month" wide on
-    // the nose, which is a UNIFORM axis, not the genuinely time-proportional one
-    // ribbonXLinear computes -- the two differ by a few px purely from month-length variance
-    // (28-31 days), even with nothing to collapse. Weighting a month segment by its own real
-    // span makes the sums telescope back to dateSpan.lo/hi exactly (see ribbonXCompact), so
-    // "no gaps" reduces to the linear formula byte-for-byte instead of merely close to it.
+    // Two levels, both against the SAME percentile-with-floor shape `nRef` above already
+    // uses for bar height -- proven on this file already rather than invented fresh:
+    //
+    // YEAR gets a width between YEAR_FLOOR_MS (about one month) and YEAR_CEIL_MS (about one
+    // real year) based on its own note count against `yearRef`, the p90-with-floor
+    // reference over every year's count -- so a handful of outlier years cannot both crowd
+    // every other year to nothing AND still keep climbing themselves; the ceiling is what
+    // makes "compact" years equidistant in the first place; a year at or past yearRef reads
+    // as fully wide.
+    //
+    // WITHIN a year, every one of its months gets an EQUAL share of the year's own weight --
+    // deliberately not weighted by the month's own note count. Tried the finer-grained
+    // version first (each month's own share of its year, floored so a note-less month
+    // still got a sliver) and it read as noise: month-to-month note counts inside one year
+    // are not a signal worth spending width on, and equal months make every year's own
+    // internal month-tick spacing predictable, which the density weighting between YEARS
+    // does not need help from.
+    //
+    // NOT A NO-OP ON AN EVEN-BY-TIME VAULT ANY MORE. The earlier month-real-duration scheme
+    // reduced exactly to the linear formula whenever no month was literally empty; this one
+    // does not, because it weighs a YEAR by its content rather than by its calendar length
+    // even when every month in it has something -- two years of equal length but unequal
+    // note counts now draw unequal widths on purpose. `compactAxis: false` is the only path
+    // that still reproduces the plain calendar axis; see ribbonXLinear, untouched.
     var AVG_MONTH_MS = 30.436875 * 86400000; // 365.2425 / 12 days -- the Gregorian mean month
-    function segEndMs(i) {
-      return (i + 1 < months.length) ? months[i + 1].ms : Date.UTC(y1, m1 + 1, 0);
-    }
+    var YEAR_FLOOR_MS = AVG_MONTH_MS;         // a compacted year reads as about one month wide
+    var YEAR_CEIL_MS = 12 * AVG_MONTH_MS;     // a fully-referenced year reads as one real year
+    var yCounts = ylist.map(function (yy) { return yy.n; }).sort(function (a, b) { return a - b; });
+    var yMax2 = yCounts.length ? yCounts[yCounts.length - 1] : 1;
+    var yP90 = yCounts.length ? yCounts[Math.floor(yCounts.length * 0.9)] : 1;
+    var yearRef = Math.max(1, yP90, yMax2 * 0.35);
     var segs = [], segW = 0, segOfMonth = new Array(months.length);
-    for (var si = 0; si < months.length;) {
-      if (months[si].n > 0) {
-        var mw = segEndMs(si) - months[si].ms;
-        segOfMonth[si] = segs.length;
-        segs.push({ type: "month", i: si, w0: segW, w1: segW + mw });
-        segW += mw; si++;
-      } else {
-        var sj = si;
-        while (sj < months.length && months[sj].n === 0) sj++;
-        for (var sk = si; sk < sj; sk++) segOfMonth[sk] = segs.length;
-        segs.push({ type: "gap", i0: si, i1: sj - 1, w0: segW, w1: segW + AVG_MONTH_MS });
-        segW += AVG_MONTH_MS; si = sj;
-      }
-    }
+    ylist.forEach(function (yy) {
+      var yFrac = Math.min(1, yy.n / yearRef);
+      var yearWeight = YEAR_FLOOR_MS + yFrac * (YEAR_CEIL_MS - YEAR_FLOOR_MS);
+      var idxs = [];
+      for (var mi = 0; mi < months.length; mi++) if (months[mi].y === yy.y) idxs.push(mi);
+      var mw = yearWeight / idxs.length;
+      idxs.forEach(function (mi) {
+        segOfMonth[mi] = segs.length;
+        segs.push({ i: mi, w0: segW, w1: segW + mw });
+        segW += mw;
+      });
+    });
     dateSpan = {
       months: months, years: ylist, index: index,
       lo: months[0].ms, hi: Date.UTC(y1, m1 + 1, 0),      // last day of the last month
@@ -7727,6 +7749,11 @@ function mountVaultGraph(root, data, deps) {
     // The saved default, applied once the renderer exists. Not persisted -- writing here
     // would save a value the host just handed us.
     setPan(panEnabled, false);
+    // Unconditional, unlike the settings-panel row (buildOptions), because this is the
+    // only in-VIEW way to flip it on the plugin host -- the gear there opens Obsidian's
+    // own settings tab instead of #vg-settings (github#23).
+    if ($("compact")) $("compact").onclick = function () { setCompactAxis(!compactAxis, true); };
+    setCompactAxis(compactAxis, false);
     $("png").onclick = savePng;
     // COPIES THE DUMP, and falls back to the console when the clipboard refuses -- which it
     // does on a page opened from a file in some builds. Either way the text exists somewhere
@@ -8026,7 +8053,7 @@ function mountVaultGraph(root, data, deps) {
     // shows its state by being filled; the label stays constant), so no new CSS is needed.
     var OPTION_ROWS = [
       { key: "compactAxis", label: "Compact date axis",
-        title: "Collapse runs of months with no notes instead of giving every one equal width",
+        title: "Give each year width by how many notes it holds, instead of every year reading the same width",
         get: function () { return compactAxis; },
         set: function (v) { setCompactAxis(v, true); } }
     ];
@@ -8211,8 +8238,14 @@ function mountVaultGraph(root, data, deps) {
   // reload -- same shape as setPan above.
   function setCompactAxis(on, persist) {
     compactAxis = !!on;
-    var btn = $("opt-compactAxis");
-    if (btn) btn.setAttribute("aria-pressed", compactAxis ? "true" : "false");
+    // TWO POSSIBLE BUTTONS, not one -- the settings-panel row (standalone only,
+    // buildOptions) and the view-level icon (both hosts, github#23). Either or both may
+    // be absent depending on host and whether the panel has been opened yet; each syncs
+    // independently.
+    ["opt-compactAxis", "compact"].forEach(function (id) {
+      var btn = $(id);
+      if (btn) btn.setAttribute("aria-pressed", compactAxis ? "true" : "false");
+    });
     if (dateSpan) drawDateUI();
     if (persist && onCompactAxis) onCompactAxis(compactAxis);
     return compactAxis;
@@ -9048,10 +9081,23 @@ function mountVaultGraph(root, data, deps) {
     if (!host) return;
     if (!dateSpan || !dateSpan.years.length) { host.textContent = ""; return; }
     var w = ribbonW();
-    var span = dateSpan.hi - dateSpan.lo;
-    // Room for a label is about 20px; below that, name every other year.
-    var pitchY = span > 0 ? (w * (365.25 * 86400000)) / span : w;
-    var every = pitchY < 20 ? 2 : 1;
+    // Room for a label is measured, not estimated from the calendar span -- that estimate
+    // (average px per YEAR over the whole span) was accurate while the axis was linear, but
+    // github#23's note-weighted axis can put two sparse years' chips much closer together
+    // than the average while a busy year sits comfortably wide elsewhere; a vault-wide
+    // average never sees that. The worst (smallest) gap between any two CONSECUTIVE years'
+    // actual positions is what a label can actually collide with, so that's what decides.
+    var positions = dateSpan.years.map(function (yy) {
+      return Math.max(0, Math.min(w, ribbonX(Date.UTC(yy.y, 0, 1), w)));
+    });
+    var minGap = Infinity;
+    for (var gi = 1; gi < positions.length; gi++) {
+      minGap = Math.min(minGap, positions[gi] - positions[gi - 1]);
+    }
+    // ~28px, not 20: a two-digit chip ("'26") with 5px padding either side runs close to
+    // that wide, and two chips only clear each other when their CENTRES -- not their edges
+    // -- are that far apart, since each is centred on its own position.
+    var every = (positions.length > 1 && minGap < 28) ? 2 : 1;
     // WHICH YEAR IS SELECTED, read through the same clamping that setting it goes through.
     // An end AT the span's own end is stored as null -- "no bound" -- so the newest year, whose
     // December is past the last note, comes back as `to === null` and compared as itself: the
@@ -9076,9 +9122,9 @@ function mountVaultGraph(root, data, deps) {
     //
     // replaceChildren() rather than innerHTML = "": same clear, and it is the verb for it.
     var made = [];
-    dateSpan.years.forEach(function (yy) {
+    dateSpan.years.forEach(function (yy, yi) {
       if ((yy.y % every) !== 0) return;
-      var at = Math.max(0, Math.min(w, ribbonX(Date.UTC(yy.y, 0, 1), w)));
+      var at = positions[yi];        // already computed above, same ribbonX call
       var b = DOC.createElement("button");
       b.type = "button";
       b.setAttribute("data-yr", String(yy.y));
@@ -9200,24 +9246,24 @@ function mountVaultGraph(root, data, deps) {
   }
   // The end of month `i`'s ms range -- the next month's start, or dateSpan.hi itself when
   // `i` is the last month (which is always populated: dateSpan.hi is derived FROM its last
-  // note, so nothing is ever dated past it). Must match buildDateSpan's own segEndMs exactly
-  // -- both this and the weight it assigns have to agree, or the no-gap case stops reducing
-  // to ribbonXLinear exactly.
+  // note, so nothing is ever dated past it).
   function monthEndMs(i) {
     return (i + 1 < dateSpan.months.length) ? dateSpan.months[i + 1].ms : dateSpan.hi;
   }
+  // Every segment is exactly one calendar month now (github#23's note-weighted axis gives
+  // each month its own segment, weighted by content rather than grouped by emptiness), so
+  // this only exists to keep ribbonXCompact/ribbonMsCompact from repeating `monthEndMs`.
   function segSpanMs(seg) {
-    return seg.type === "month"
-      ? [dateSpan.months[seg.i].ms, monthEndMs(seg.i)]
-      : [dateSpan.months[seg.i0].ms, monthEndMs(seg.i1)];
+    return [dateSpan.months[seg.i].ms, monthEndMs(seg.i)];
   }
 
   /**
-   * ms -> x through dateSpan.axis's weight-space instead of raw time: a populated month
-   * keeps its own proportional slice, a collapsed run of empty months shares one weight-1
-   * slice regardless of how many months it actually spans (github#23). With no empty runs
-   * every segment is one month at weight 1, which is the same axis ribbonXLinear computes --
-   * that identity is the no-op guarantee on an evenly-dated vault, not a special case here.
+   * ms -> x through dateSpan.axis's weight-space instead of raw time. Sub-month position
+   * still interpolates by real elapsed time WITHIN the month (there's nothing else to go
+   * by at that resolution), but which pixel-width slice that lands in is decided by
+   * dateSpan.axis's note-weighted segments, not by the month's own calendar length
+   * (github#23) -- a quiet month draws a thin slice and a busy one a wide one even when
+   * both are full calendar months.
    */
   function ribbonXCompact(ms, w) {
     var ax = dateSpan.axis, seg = ax.segs[ax.segOfMonth[monthIndexOfMs(ms)]];
@@ -9295,31 +9341,24 @@ function mountVaultGraph(root, data, deps) {
     var useCompact = compactAxis && dateSpan.axis;
 
     if (useCompact) {
-      // SEGMENT-SPACE LAYOUT, using the SAME weights dateSpan.axis carries for ribbonX/
-      // ribbonMs -- a populated month its own real duration, a collapsed run one average
-      // month -- so the bars, the brush and the year chips agree about where things are
-      // rather than being two formulas that happen to look similar. A collapsed run is
-      // painted as a visible dim band rather than reusing the ordinary empty-month bar
-      // (which is the same colour at zero height, i.e. invisible): the axis has to SHOW it
-      // is compacting, not just narrow silently (github#23).
+      // SEGMENT-SPACE LAYOUT, using the SAME note-weighted segments dateSpan.axis carries
+      // for ribbonX/ribbonMs -- so the bars, the brush and the year chips agree about where
+      // things are rather than being two formulas that happen to look similar. Every
+      // segment is one calendar month, painted exactly as the linear layout paints it
+      // (paintMonthBar doesn't know or care how its x/width were decided) -- the compaction
+      // shows up as a quiet month drawing a thin bar and a busy one a wide one, and a
+      // shrunk YEAR reading as a tight cluster of thin bars between two year rules close
+      // together, not as a separate "collapsed" visual treatment (github#23).
       var segs = dateSpan.axis.segs, totalW = dateSpan.axis.totalW;
       for (var si = 0; si < segs.length; si++) {
         var seg = segs[si];
         var segX = (seg.w0 / totalW) * w;
         var segW = Math.max(1, ((seg.w1 - seg.w0) / totalW) * w - 0.6);
-        if (seg.type === "month") {
-          paintMonthBar(cx, top, ms[seg.i], segX, segW);
-        } else {
-          cx.fillStyle = css("--dim");
-          cx.fillRect(segX, top - 2, segW, 2);
-        }
+        paintMonthBar(cx, top, ms[seg.i], segX, segW);
       }
-      // Year boundaries, in segment space -- a January that falls inside a collapsed run
-      // draws its rule at the run's own start, since that's the only x it has. KNOWN
-      // CONSEQUENCE, not a separate bug: several Januarys inside one multi-year run all
-      // land on that same run's own single x, so a 2-year gap and a 20-year gap draw
-      // identically and lose their internal year lines -- an accepted cost of collapsing a
-      // whole run to one segment's width (github#23), not something this pass fixes.
+      // Year boundaries, in segment space -- every year gets its own rule regardless of how
+      // compacted it is, since every month (including a note-less one in a shrunk year) is
+      // still its own segment with its own x (github#23).
       for (var j = 0; j < n; j++) {
         if (ms[j].m !== 0) continue;
         var jSeg = segs[dateSpan.axis.segOfMonth[j]];

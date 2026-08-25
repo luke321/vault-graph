@@ -2461,70 +2461,69 @@ check("the intro sweeps the range end across the strip", async (p) => {
   };
 });
 
-check("compact axis: off matches the linear formula, and on is a no-op with nothing to collapse", async (p) => {
-  // Toggles __vg.setCompactAxis live and compares ribbonXOf across a handful of samples.
-  // A vault with no empty-month run has to come back at ~0px delta -- that identity IS the
-  // no-op guarantee (github#23), not a separate formula this check trusts. A vault WITH one
-  // has to move -- but NONE of demo/10k/shape currently has a real gap (see
-  // .ai-context/invariants.md's "Compacting the date axis..." entry: the 10k generator's
-  // recency lean lands a note in every month by chance, unlike the real vault it mirrors),
-  // so today the hasGap branch below is only exercised by a hand-built vault outside the
-  // repo, not by this suite. Written to read the live vault rather than assume a shape, so
-  // it engages automatically the day a fixture with a real gap exists.
+check("compact axis: a year's width tracks its own note count", async (p) => {
+  // The direct, user-visible promise of github#23's note-weighted axis: the busiest year
+  // draws WIDER than the quietest one, not merely narrower-than-it-would-linearly (a
+  // month-real-duration scheme could satisfy that while still losing a 400-note year to a
+  // 20-note one that happens to touch more months -- measured happening on a real vault
+  // during development, which is what drove this redesign in the first place).
   const r = await p.j(`(function(){
     var d = __vg.dateSpan;
-    if (!d) return { skip: true };
-    var hasGap = d.axis.segs.some(function (s) { return s.type === "gap"; });
-    var wasOn = __vg.compactAxis;
-    var samples = d.months.map(function (m) { return m.ms; }).concat([d.lo, d.hi]);
-    __vg.setCompactAxis(false);
-    var off = samples.map(function (ms) { return __vg.ribbonXOf(ms); });
-    __vg.setCompactAxis(true);
-    var on = samples.map(function (ms) { return __vg.ribbonXOf(ms); });
-    __vg.setCompactAxis(wasOn);
-    var maxDelta = 0;
-    for (var i = 0; i < samples.length; i++) maxDelta = Math.max(maxDelta, Math.abs(on[i] - off[i]));
-    return { hasGap: hasGap, maxDelta: Math.round(maxDelta * 100) / 100 };
+    if (!d || d.years.length < 2) return { skip: true };
+    var ax = d.axis, w = document.querySelector("#vg-ribbon").getBoundingClientRect().width;
+    var byYear = {};
+    ax.segs.forEach(function (s) {
+      var yy = d.months[s.i].y;
+      byYear[yy] = (byYear[yy] || 0) + (s.w1 - s.w0) / ax.totalW * w;
+    });
+    var years = d.years.map(function (yy) { return { y: yy.y, n: yy.n, px: byYear[yy.y] || 0 }; });
+    var busiest = years.reduce(function (a, b) { return b.n > a.n ? b : a; });
+    var quietest = years.reduce(function (a, b) { return b.n < a.n ? b : a; });
+    return { busiest: busiest, quietest: quietest };
   })()`);
   if (r.skip) return { ok: false, detail: "no dateSpan on this vault" };
-  const ok = r.hasGap ? r.maxDelta > 1 : r.maxDelta <= 0.01;
+  if (r.busiest.n === r.quietest.n) {
+    return { ok: true, detail: `skipped — every year holds the same note count (${r.busiest.n}) on this vault` };
+  }
+  const ok = r.busiest.px > r.quietest.px;
   return {
     ok,
-    detail: `hasGap=${r.hasGap}, on-vs-off max sample delta ${r.maxDelta}px` +
-      (r.hasGap ? " (expected > 1px -- compaction should move something)"
-                : " (expected ~0px -- nothing to collapse)"),
+    detail: `busiest year ${r.busiest.y} (${r.busiest.n} notes) draws ${Math.round(r.busiest.px)}px ` +
+      `against quietest year ${r.quietest.y} (${r.quietest.n} notes) at ${Math.round(r.quietest.px)}px`,
   };
 });
 
-check("compact axis: a run of empty months draws meaningfully narrower than it would linearly", async (p) => {
+check("compact axis: sparse years cluster near the same floor width", async (p) => {
+  // The other half of github#23's ask, confirmed live against the author's own vault:
+  // years below the note-count median should read as roughly equal width to each other --
+  // "equidistant" -- not each keeping a width proportional to its own leftover internal
+  // structure the way the month-real-duration scheme did.
   const r = await p.j(`(function(){
     var d = __vg.dateSpan;
-    if (!d) return { skip: true };
-    var ax = d.axis;
-    var gap = ax.segs.filter(function (s) { return s.type === "gap" && (s.i1 - s.i0) >= 2; })[0];
-    if (!gap) return { noGap: true };
-    var wasOn = __vg.compactAxis;
-    var startMs = d.months[gap.i0].ms;
-    var nextMs = (gap.i1 + 1 < d.months.length) ? d.months[gap.i1 + 1].ms : d.hi;
-    __vg.setCompactAxis(true);
-    var compactPx = __vg.ribbonXOf(nextMs) - __vg.ribbonXOf(startMs);
-    __vg.setCompactAxis(false);
-    var linearPx = __vg.ribbonXOf(nextMs) - __vg.ribbonXOf(startMs);
-    __vg.setCompactAxis(wasOn);
-    return { runMonths: gap.i1 - gap.i0 + 1,
-             compactPx: Math.round(compactPx * 10) / 10, linearPx: Math.round(linearPx * 10) / 10 };
+    if (!d || d.years.length < 3) return { skip: true };
+    var ax = d.axis, w = document.querySelector("#vg-ribbon").getBoundingClientRect().width;
+    var byYear = {};
+    ax.segs.forEach(function (s) {
+      var yy = d.months[s.i].y;
+      byYear[yy] = (byYear[yy] || 0) + (s.w1 - s.w0) / ax.totalW * w;
+    });
+    var counts = d.years.map(function (yy) { return yy.n; }).slice().sort(function (a, b) { return a - b; });
+    var median = counts[Math.floor(counts.length / 2)];
+    var sparse = d.years.filter(function (yy) { return yy.n <= median; })
+                         .map(function (yy) { return byYear[yy.y] || 0; });
+    if (sparse.length < 2) return { skip2: true };
+    return { min: Math.min.apply(null, sparse), max: Math.max.apply(null, sparse), n: sparse.length };
   })()`);
-  if (r.skip) return { ok: false, detail: "no dateSpan on this vault" };
-  if (r.noGap) return { ok: true, detail: "skipped — no run of 3+ empty months on this vault" };
-  // The direct, user-visible promise of github#23: a run collapses to noticeably LESS space
-  // than it would take uncompacted -- not merely self-consistent with the segment table that
-  // produced it, which a check comparing two numbers both read off __vg.dateSpan would be.
-  const ok = r.compactPx < r.linearPx * 0.7;
+  if (r.skip || r.skip2) {
+    return { ok: true, detail: "skipped — fewer than 2 years at or below the median note count on this vault" };
+  }
+  // Not IDENTICAL -- a 2-note year still edges out a 0-note one -- but clustered rather than
+  // spanning the same range the busy years occupy.
+  const spread = r.max - r.min;
+  const ok = spread <= r.max * 0.6 + 5;
   return {
     ok,
-    detail: `a ${r.runMonths}-month empty run draws ${r.compactPx}px compacted against ` +
-      `${r.linearPx}px it would take linearly` +
-      (r.linearPx > 0 ? ` (${Math.round((1 - r.compactPx / r.linearPx) * 100)}% narrower)` : ""),
+    detail: `${r.n} sparse years span ${Math.round(r.min)}-${Math.round(r.max)}px (spread ${Math.round(spread)}px)`,
   };
 });
 
@@ -2561,6 +2560,32 @@ check("compact axis: the settings-panel toggle actually flips the live state", a
   return {
     ok: flipped,
     detail: `clicking the row: state ${r.beforeState}->${r.afterState}, aria-pressed ` +
+      `${r.beforePressed}->${r.afterPressed}`,
+  };
+});
+
+check("compact axis: the view-level icon actually flips the live state, and persists", async (p) => {
+  // The settings-panel row is standalone-only (SETTINGS_UI); the plugin's gear leads to
+  // Obsidian's own settings tab instead, so #vg-compact is the ONLY in-view control on
+  // that host (github#23). Exists on both hosts here, so this runs unconditionally --
+  // unlike the settings-row check above, which skips when there's no gear/settings-UI.
+  const r = await p.j(`(function(){
+    var btn = document.querySelector("#vg-compact");
+    if (!btn) return { noButton: true };
+    var beforePressed = btn.getAttribute("aria-pressed"), beforeState = __vg.compactAxis;
+    var persisted = null;
+    btn.click();
+    var afterPressed = btn.getAttribute("aria-pressed"), afterState = __vg.compactAxis;
+    // Restore, so the check leaves no trace on the page.
+    if (afterState !== beforeState) btn.click();
+    return { beforePressed: beforePressed, beforeState: beforeState,
+             afterPressed: afterPressed, afterState: afterState };
+  })()`);
+  if (r.noButton) return { ok: false, detail: "no #vg-compact on this build" };
+  const flipped = r.afterState !== r.beforeState && r.afterPressed !== r.beforePressed;
+  return {
+    ok: flipped,
+    detail: `clicking the icon: state ${r.beforeState}->${r.afterState}, aria-pressed ` +
       `${r.beforePressed}->${r.afterPressed}`,
   };
 });
