@@ -25,4 +25,4 @@ Commit `assets/features/note.webp` and update `Last re-recorded` below in the sa
 | | |
 |---|---|
 | **Introduced in** | `v1.0` |
-| **Last re-recorded** | `never — clip not yet recorded` |
+| **Last re-recorded** | `unreleased — 2026-08-26` |

@@ -35,7 +35,7 @@ to now.
 Hover a note to raise it and dim everything unconnected to it. Click for a panel — folder,
 type, tags, word count, linked notes — each one clickable to jump across the disc.
 
-*Clip pending.*
+![A daily note hovered, then a meeting note hovered, each raising and haloing its own links while the rest of the disc dims](../assets/features/note.webp)
 
 ## Filtering by folder
 
