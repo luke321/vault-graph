@@ -817,3 +817,74 @@ generation day change the structure" isn't a question that applies to it.
 
 Wired into `.githooks/pre-push` alongside the PII/scope/network checks: cheap (a few
 seconds, no Chrome), so no skip flag, same reasoning as those three.
+
+## A snap that recomputes the plan must also cancel any cascade already animating
+
+`applyLayout(false)` (`assignPositions` + a synchronous refresh) is supposed to be
+unconditional — call it and the disc is at the new plan's positions, full stop. It isn't,
+if a cascade is already mid-flight: `cascadeRun` owns its own `requestAnimationFrame` loop
+regardless of what else just ran, and that loop's very next frame interpolates toward
+whatever target it captured when the cascade *started* — silently overwriting the snap
+with stale, pre-change positions.
+
+Found on `__vg.setSubwedgeGate` (github#31), which mirrors `relayout()`'s
+`bandLock = null; geomLock = null; regroup(); applyLayout(false); renderer.refresh();`
+shape exactly — neither one used to cancel an in-flight cascade first. Flipping the gate
+during the page's own boot intro (~5.6s, `TIMELINE_MS * TIME_SCALE`) is the case that
+surfaces it: `subCellIndex`'s recomputed PLAN correctly merges a folder's sparse cells the
+instant the gate flips, but the intro's own still-running cascade — which started before
+the flip and doesn't know its target went stale — keeps interpolating toward the OLD,
+unmerged layout for as long as it has left to run.
+
+```javascript
+__vg.setSubwedgeGate(true)                 // plan updates correctly, always
+__vg.buildWedgePlan(false).cells...        // -> merged immediately, gate-state is not the bug
+// but the RENDERED notes (graph.getNodeAttributes(id).x/.y) can still show the OLD layout
+// for as long as a cascade that started before the flip keeps running
+```
+
+**Measured directly** (not inferred from reading the code): flipping the gate 200ms into
+the boot intro on the demo vault, before the fix — the recomputed plan correctly reported
+Daily Notes merged to 1 cell, but its 50 notes' actual rendered angles formed **7** distinct
+clusters (a fresh `atan2(y, x)` per note, grouped by >3° gaps). Flipped after the intro had
+already finished, the same 1-cell plan rendered as exactly **1** cluster. After the fix
+(`cancelCascade()` — a small shared helper, extracted from the cancellation block
+`cascade()` already ran at its own start, and now called by `setSubwedgeGate` too — before
+`regroup()`/`applyLayout`), flipping at 200ms, 800ms, or after the intro all render as
+exactly 1 cluster. `relayout()` was left with the same latent gap deliberately — same
+shape, same fix, but out of scope for this ticket; noted rather than silently expanded
+into.
+
+**Not covered by `scripts/smoke.mjs`, and that is a deliberate, documented gap, not an
+oversight** — matching this file's own existing carve-out for per-frame animation timing.
+Three reproduction attempts were tried and rejected before settling on manual-only:
+
+1. A dedicated check in the intro-needing lane (`NEEDS_INTRO`) — doesn't work *at all*,
+   because the suite's own page-ready wait (`__vg.state.until === null`) unconditionally
+   waits out the ENTIRE intro before running any check, "(intro)"-lane checks included; by
+   the time a check function starts, there is no longer anything mid-flight to race.
+2. Triggering a fresh cascade on demand via `__vg.setRange(...)` instead of depending on
+   the boot intro — technically runs, but reads back `undefined` for every field: `page.j`
+   wraps the read in `JSON.stringify(...)` as one piece of text, and `JSON.stringify` on a
+   still-pending Promise serializes it as `"{}"` synchronously rather than awaiting it (a
+   separate, pre-existing gap in the harness itself, not something this ticket fixes).
+   Switching the read to `page.eval` directly (whose own `awaitPromise: true` handles a
+   returned Promise correctly) fixed the `undefined`s, but the check then passed
+   unconditionally, fix present or not: the demo vault's Daily Notes dates are all within
+   the range tried, so nothing's visibility — and therefore nothing about the cascade's own
+   target position for those notes — actually changed. Nothing for the race to disagree
+   with.
+3. Hiding a *different* folder (`state.hidden.folder`) and calling `__vg.cascade()`
+   directly — genuinely triggers a real, multi-frame animated cascade (confirmed: waiting
+   several real `requestAnimationFrame` callbacks before reading, rather than reading
+   synchronously in the same tick, which a first draft of this attempt also got wrong and
+   which is its own necessary condition regardless of trigger method). Still never
+   reproduced the bug even with the fix removed — a toggle-driven cascade's own resting
+   geometry for an unrelated OUTER-band folder apparently converges close enough, quickly
+   enough, that this specific race isn't observable through it, unlike the intro's
+   longer, "draw the whole disc from empty" cascade shape.
+
+A check that cannot fail is not a check (this file's own `check-generator-determinism.mjs`
+entry above says the same thing for a different reason) — so none of the three attempts
+shipped. The fix is verified by the numbers above, taken directly against the actual boot
+intro rather than a synthetic stand-in for it.

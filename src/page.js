@@ -5246,9 +5246,17 @@ function mountVaultGraph(root, data, deps) {
    *   totalMs   the whole cascade's wall-clock length, replacing CASCADE_MS
    *   onFrame   fn(progress) per frame, for a caller that has UI to keep in step
    */
-  function cascade(done, opts) {
-    opts = opts || {};
-    stopPlay();                            // a filter change interrupts playback
+  // STOPS AN IN-FLIGHT CASCADE, without starting a new one -- cascade() below does this at
+  // its own start (a filter change interrupts playback) and needed it inline; a caller that
+  // only wants to SNAP to a fresh layout (relayout(), setSubwedgeGate()) needs the same
+  // cancellation for a different reason: applyLayout(false) writes positions synchronously,
+  // but an intro cascade still mid-flight owns the next animation frame regardless, and
+  // overwrites that snap with whatever stale (pre-change) target it already committed to.
+  // Measured on github#31's subwedgeGate: flipped 200ms into the ~5.6s intro, the recomputed
+  // plan correctly merged Daily Notes to one cell, but the RENDERED notes stayed scattered
+  // across 7 angular clusters -- the cascade's own next frame kept interpolating toward the
+  // old 4-cell layout. Flipped after the intro had already finished, one tight cluster.
+  function cancelCascade() {
     if (anim) { WIN.cancelAnimationFrame(anim); anim = null; }
     if (animGuard) { WIN.clearTimeout(animGuard); animGuard = null; }
     if (cascadeRun) {
@@ -5256,6 +5264,12 @@ function mountVaultGraph(root, data, deps) {
       WIN.clearTimeout(cascadeRun.guard);
       cascadeRun = null;
     }
+  }
+
+  function cascade(done, opts) {
+    opts = opts || {};
+    stopPlay();                            // a filter change interrupts playback
+    cancelCascade();
 
     // A null plan is legitimate: "none" hides every note, so there is no
     // geometry left to lay out. The fade still has to run, with positions simply
@@ -11568,6 +11582,7 @@ function mountVaultGraph(root, data, deps) {
                     setSubwedgeGate: function (v) {
                       subwedgeGate = !!v;
                       bandLock = null; geomLock = null;
+                      cancelCascade();   // otherwise a still-running intro overwrites the snap below
                       regroup();
                       applyLayout(false);
                       renderer.refresh();
