@@ -3957,9 +3957,20 @@ function mountVaultGraph(root, data, deps) {
   var dragJustMoved = null;
 
   // Where the hub is, in graph units, and whether a point is in it.
+  //
+  // TIMES INNER_SCALE, matching where the inner ring's own row 0 actually draws
+  // (placeCell: `(base + row*SP) * INNER_SCALE`, base being this same r0) -- not the
+  // lattice's nominal r0 alone. Without it this boundary sat further out than the ring
+  // genuinely starts, so a small inner-locked folder (few enough notes that its whole
+  // band collapses to one row) placed that row INSIDE what this function still called
+  // the hole: reported as notes overlapping the centre mark ("the notes touch the
+  // brain"), github#35. geomLock.r0 itself is the correct answer to "how big is the
+  // hole" (the HOLE=0.3-of-disc invariant is solved against it) -- INNER_SCALE only
+  // corrects for the inner ring being drawn pulled in from that boundary, which every
+  // caller of the ring's OWN geometry already accounts for and this one had not.
   function inHubHole(gx, gy) {
     if (!geomLock) return false;
-    return Math.hypot(gx, gy) / UNIT < geomLock.r0;
+    return Math.hypot(gx, gy) / UNIT < geomLock.r0 * INNER_SCALE;
   }
 
   // The drop target, drawn only while a drag is live. Without it the hole is an invisible
@@ -4011,7 +4022,10 @@ function mountVaultGraph(root, data, deps) {
     if (!el || !renderer || !geomLock) return;
     if (!nodeDrag || !nodeDrag.moved) { el.hidden = true; return; }
     var c = renderer.graphToViewport({ x: 0, y: 0 });
-    var edge = renderer.graphToViewport({ x: geomLock.r0 * UNIT, y: 0 });
+    // TIMES INNER_SCALE -- see inHubHole, which this ring is drawn to match: the drop
+    // target has to be the same boundary the drop DECISION (inHubHole) uses, or the ring
+    // shown on screen promises a drop the actual test disagrees with.
+    var edge = renderer.graphToViewport({ x: geomLock.r0 * INNER_SCALE * UNIT, y: 0 });
     var d = Math.hypot(edge.x - c.x, edge.y - c.y) * 2;
     el.style.width = el.style.height = d + "px";
     el.style.left = c.x + "px";
@@ -6930,7 +6944,12 @@ function mountVaultGraph(root, data, deps) {
       eli.style.opacity = yielded ? "0" : "";   // fades with the layer beneath it
     }
     var c = renderer.graphToViewport({ x: 0, y: 0 });
-    var edge = renderer.graphToViewport({ x: geomLock.r0 * UNIT, y: 0 });
+    // TIMES INNER_SCALE -- see inHubHole. LOGO_OF_HOLE already caps the mark well inside
+    // this radius, but the radius itself has to be where the ring actually starts, not
+    // the lattice's nominal r0 -- otherwise the logo is sized against a hole bigger than
+    // the one really there and can end up smaller than it should be relative to a ring
+    // that has, in practice, drawn closer in than this measured.
+    var edge = renderer.graphToViewport({ x: geomLock.r0 * INNER_SCALE * UNIT, y: 0 });
     var holePx = Math.hypot(edge.x - c.x, edge.y - c.y);
     var size = Math.max(24, Math.min(LOGO_PX, holePx * 2 * LOGO_OF_HOLE));
     el.style.width = size + "px";
