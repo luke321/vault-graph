@@ -851,9 +851,20 @@ already finished, the same 1-cell plan rendered as exactly **1** cluster. After 
 (`cancelCascade()` — a small shared helper, extracted from the cancellation block
 `cascade()` already ran at its own start, and now called by `setSubwedgeGate` too — before
 `regroup()`/`applyLayout`), flipping at 200ms, 800ms, or after the intro all render as
-exactly 1 cluster. `relayout()` was left with the same latent gap deliberately — same
-shape, same fix, but out of scope for this ticket; noted rather than silently expanded
-into.
+exactly 1 cluster.
+
+**`relayout()` has the identical shape and got the identical fix, in the same ticket.**
+First left alone deliberately (same bug, out of scope) — the user asked for it to be
+included too, so `cancelCascade()` was added there as well. Not independently re-proven
+with the same rendered-angle rigor as `setSubwedgeGate` above (there is no comparably
+clean "the plan changed but the pixels didn't" signal to drive through `relayout()`'s own
+callers without also engaging the fix under test to get there); confidence here rests on
+the code being a byte-identical shape calling the exact same `cascadeRun` mechanism, not
+on a second independent measurement. A lighter sanity pass (hide a folder via direct
+`state.hidden.folder` mutation, then `relayout()`, at 200ms into the intro and again after
+it finished) showed identical, correct exclusion counts in both cases — consistent with
+the fix, though alpha/visibility is filtered independently of the position-overwrite bug
+and so is not itself proof of the same class this section is about.
 
 **Not covered by `scripts/smoke.mjs`, and that is a deliberate, documented gap, not an
 oversight** — matching this file's own existing carve-out for per-frame animation timing.

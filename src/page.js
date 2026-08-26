@@ -12178,6 +12178,7 @@ function mountVaultGraph(root, data, deps) {
                     },
                     relayout: function () {
                       bandLock = null; geomLock = null;
+                      cancelCascade();   // same fix as setSubwedgeGate, same reason -- github#31
                       regroup();
                       applyLayout(false);
                       renderer.refresh();
