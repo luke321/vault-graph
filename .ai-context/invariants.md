@@ -780,3 +780,40 @@ Measured across the three vault shapes `scripts/smoke.mjs` builds: the demo vaul
 synthetic vault (node 1192, degree 54, 152 in-disc samples) **36 before, 0 after**; the
 dominant-folder vault (node 157, degree 103, 1259 in-disc samples) **530 before, 0
 after**. See `design/0005`.
+
+## A synthetic vault's folder/subfolder note counts do not depend on which day it was built
+
+`make-demo-vault.mjs` and `make-shape-vault.mjs` both default their `--end` date to today
+(deliberately — the heatmap's last-52-weeks window needs a note on it, per
+`make-demo-vault.mjs`'s own header). That's a genuine, real difference in the generated
+output from one day to the next, and it is tempting — costly, twice now (github#31/#32) —
+to *reason* about whether that difference could explain some layout oddity rather than
+measure it.
+
+```bash
+node scripts/check-generator-determinism.mjs
+```
+
+Runs each generator twice, `--end` years apart on the same seed, and diffs the resulting
+folder/subfolder note-count trees. They must be **identical**. Confirmed empirically before
+this check existed: `make-test-vault.mjs`'s per-note subfolder pick (`pick(f.paths)`) is a
+pure seeded-PRNG draw over a *fixed* list of subfolder names (`YM(18)`/`YQ(n)`, hardcoded
+from a constant base year, never consulting `END`), and `make-shape-vault.mjs`'s `subFor`
+is a fixed index-share split with no PRNG or date involved at all — so only the *calendar
+date* embedded in each note's frontmatter and file stamp moves with `--end`; which
+folder/subfolder a note lands in never does. Measured with `--end` set to `2024-02-10` and
+`2027-09-28` (different year, month, and quarter): 71 folders / 531 notes
+(`make-demo-vault.mjs`) and 11 folders / 954 notes (`make-shape-vault.mjs`), byte-identical
+counts both times.
+
+Confirmed to actually catch a regression, not just measure a property that happens to
+hold: a temporary probe that made `make-shape-vault.mjs`'s subfolder split shift by
+`new Date(END).getUTCMonth() % 2` was caught immediately (7 of 11 folders differed by 1
+note between the two `--end` dates), then reverted.
+
+**Deliberately excludes `make-mirror-vault.mjs`** — it reproduces a real vault's own
+structure and dates rather than generating synthetic ones from a seed, so "does the
+generation day change the structure" isn't a question that applies to it.
+
+Wired into `.githooks/pre-push` alongside the PII/scope/network checks: cheap (a few
+seconds, no Chrome), so no skip flag, same reasoning as those three.
