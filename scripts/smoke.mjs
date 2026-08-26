@@ -2686,6 +2686,21 @@ check("every unlinked note wears the (unlinked) swatch", async (p) => {
            detail: `${r.match} of ${r.orphans} on ${r.swatch}, ${r.distinct} distinct` };
 });
 
+// Issue #2: Sigma paints every edge on its bottom layer and every node above that, so the
+// edges the focus web lights on hover/click ran under the notes they crossed -- each dim
+// disc in the way cut a grey gap out of a blue line, and on a well-connected hub the web
+// read as dashed. checkFocusWeb() selects the best-connected note, composites the canvases
+// in stacking order, and samples every lit curve where it passes inside a NON-focus disc --
+// dimAtGaps must be 0. Approach follows the diagnosis and geometry already diffed on the
+// fork branch linked from that issue (bartolli/vault-graph@21a618c).
+check("focus web stays above dim notes", async (p) => {
+  const r = await p.j(`__vg.checkFocusWeb()`);
+  if (!r.geomGaps) return { ok: true, detail: `${r.node} (degree ${r.degree}): no in-disc samples on this shape, nothing to measure` };
+  return { ok: r.webOK,
+           detail: `${r.node} (degree ${r.degree}, ${r.edges} edges): ${r.blueAtGaps} blue, ` +
+                   `${r.dimAtGaps} dim, ${r.underLabel} under label/disc of ${r.geomGaps} in-disc samples` };
+});
+
 // Idle means the app's own definition of idle -- the same predicate the demo driver waits
 // on (play || cascade || layout anim || hover tween || highlight tween), so a check cannot
 // disagree with the recorder about when the disc has settled.
