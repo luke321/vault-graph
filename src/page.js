@@ -229,25 +229,14 @@ function mountVaultGraph(root, data, deps) {
   }
   readTheme();
 
-  // Folder -> slot key. Comes in from the host: the plugin reads it out of its own
-  // settings, the standalone page out of localStorage. Anything unrecognised is dropped
-  // rather than trusted -- this map has been through a JSON file either way, and an
-  // unknown key would otherwise resolve to undefined and paint a group black.
-  function cleanFolderColors(raw) {
-    var out = Object.create(null);
-    if (!raw || typeof raw !== "object") return out;
-    Object.keys(raw).forEach(function (g) {
-      var k = raw[g];
-      if (typeof k === "string" && /^g([1-9]|1[0-2])$/.test(k)) out[g] = k;
-    });
-    return out;
-  }
-  var folderColors = cleanFolderColors(deps.folderColors);
-
-  // Subfolder -> slot key, keyed "<folder>/<sub>" to match subShade and subOrder's own
-  // keys ("" for notes sitting directly in the folder). Same validation as folderColors
-  // and the same reason: a JSON round trip either way, so trust nothing.
-  function cleanSubfolderColors(raw) {
+  // Folder/subfolder -> slot key. Comes in from the host: the plugin reads it out of its
+  // own settings, the standalone page out of localStorage. Anything unrecognised is
+  // dropped rather than trusted -- this map has been through a JSON file either way, and
+  // an unknown key would otherwise resolve to undefined and paint a group black. One
+  // cleaner for both maps: a subfolder key is just "<folder>/<sub>" (matching subShade
+  // and subOrder's own keys, "" for notes sitting directly in the folder) rather than a
+  // different shape needing different validation.
+  function cleanSlotMap(raw) {
     var out = Object.create(null);
     if (!raw || typeof raw !== "object") return out;
     Object.keys(raw).forEach(function (k) {
@@ -256,7 +245,8 @@ function mountVaultGraph(root, data, deps) {
     });
     return out;
   }
-  var subfolderColors = cleanSubfolderColors(deps.subfolderColors);
+  var folderColors = cleanSlotMap(deps.folderColors);
+  var subfolderColors = cleanSlotMap(deps.subfolderColors);
 
   // DRAG-TO-PAN, ON UNLESS THE HOST SAYS OTHERWISE. Absent means on: a fresh page has no
   // saved answer and dragging is what a graph does, so the default cannot be "wait to be
@@ -745,7 +735,7 @@ function mountVaultGraph(root, data, deps) {
   }
 
   function applyFolderColors(map) {
-    folderColors = cleanFolderColors(map);
+    folderColors = cleanSlotMap(map);
     buildColors();
     if (renderer) renderer.refresh();
     try { placeLogo(); } catch { /* logo not mounted yet */ }
@@ -760,7 +750,7 @@ function mountVaultGraph(root, data, deps) {
   // applyFolderColors ends in (via buildColors()), which is why a folder recolour keeps
   // respecting every subfolder pin without this file needing to say so twice.
   function applySubfolderColors(map) {
-    subfolderColors = cleanSubfolderColors(map);
+    subfolderColors = cleanSlotMap(map);
     buildSubShades();
     if (renderer) renderer.refresh();
     try { placeLogo(); } catch { /* logo not mounted yet */ }
