@@ -875,3 +875,55 @@ split.
 
 Wired into `.githooks/pre-push` alongside the generator-determinism check: two tiny
 subprocess builds, no Chrome, well under a second, so no skip flag.
+
+## A settled dot is the SAME size a fresh relayout gives it, not just the same position
+
+github#21. `settle()` (the function every cascade hands off to once its frames are done)
+reassigns POSITION from `finalPos` — a genuinely fresh layout, computed once at cascade
+start — but never touched SIZE. `dotPx()`, which the Sigma node reducer calls for every
+dot on every paint, reads `bandOf().room`, `cellRoom` and `edgeCap` as plain persistent
+globals, not something it derives itself — and those are side effects of whichever
+`ringsLayout()` call last ran. For 90-odd frames, that was the FRAME LOOP's own calls,
+walking `roomNow`/`cellNow`/`edgeNow` from the source packing toward the destination's
+*endpoint capture* (`roomOf()` over a `staticPlan`-built plan) one frame at a time — a
+different, independently-computed answer from the one `finalPos` itself came from. Once
+the loop stops, nothing ever asks for the correct figure again, so every dot is left
+sized against the last animated frame's WALKED room until something UNRELATED forces a
+real relayout (a resize, a fit, the next toggle) and it snaps to correct by accident.
+
+Measured live (`__vg.setRange` on the demo vault, `05 - Meeting Notes / 2025-09-19 Vendor
+call`): 26.5px right after a range-change cascade settled, 68.1px after nothing but a bare
+`__vg.ringsLayout()` call with no position change — 157% off, position identical (the
+sampler's own `dr`/`dtan` were 0 throughout, confirming the miss is size-only). 211 of 213
+sampled notes were off by more than 5%. A folder toggle showed the same defect, smaller:
+152 of 689 notes over 5%, worst 11.6%.
+
+**Invisible to every check that existed before this one**, including the "last frame of a
+cascade is the resting layout" check just above (`scripts/smoke.mjs`) — it compares the
+last ANIMATED frame against REST, and both read the identical stale globals, so `dot 0%`
+is what a fully broken build reports too. Confirmed by reverting the fix and re-running
+this section's own commands: the existing check still passed clean.
+
+**Fixed** by having `settle()` call `ringsLayout()` again after `assignPositions`,
+discarding its position output (reusing it would reintroduce the "two plans disagree on
+seats" 1517-unit jump documented at that same call site) and keeping only the
+room/cellRoom/edgeCap side effects. **Once is not enough** — room and position are a
+fixed point (documented at `finalPos`'s own "TWICE, and the first one is thrown away"),
+and a single call still measures its margins against whatever room the frame loop left
+behind. Measured: one call alone left 58 of 213 notes off by more than 5%, worst 39.1%; a
+second immediate call converged all of them to 0%, and a third changed nothing, confirming
+it is a genuine fixed point rather than still drifting.
+
+```js
+__vg.setRange("<a date inside the vault's span>", null);
+// wait for __vg.demo.busy() === false, then:
+__vg.relayout();               // what settle() should already have produced
+// compare a note's renderer.getNodeDisplayData(id).size, scaled, before and after
+```
+
+**One correction to how this bug was first written up**: an earlier draft of github#21
+claimed folder toggles were "fixed" by a settle-time refresh already on `develop`, citing
+branch `fix/small-folder-animation`. That branch is unrelated (a stale, ~30-commit-behind
+wedge-seam-overlay experiment ending in two reverts) and no such fix existed anywhere on
+`develop` before this entry — folder toggles carried the identical defect, just smaller,
+until now.
