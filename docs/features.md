@@ -44,7 +44,7 @@ type, tags, word count, linked notes — each one clickable to jump across the d
 Click a folder in the legend to hide it; the remaining wedges grow back into the angle it
 vacated and the disc re-packs. Solo a folder to hide everything else in one click.
 
-*Clip pending.*
+![A folder hidden, the disc re-packing to fill the angle it vacated, then one folder soloed to hide everything else, then everything shown again](../assets/features/folders.webp)
 
 ## The heatmap
 
