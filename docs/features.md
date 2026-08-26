@@ -62,7 +62,7 @@ its notes on the disc; click to keep the mark.
 Open a folder's twisty to reach the subfolders inside it — tinted from the parent's hue,
 hoverable and clickable the same way a top-level folder is.
 
-*Clip pending.*
+![A folder's twisty opened to reach its subfolders, one hovered to find it on the disc, then clicked to halo it and push its sub-wedge out, then let back down and folded away](../assets/features/subfolders.webp)
 
 ## The camera
 
