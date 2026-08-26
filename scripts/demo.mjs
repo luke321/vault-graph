@@ -10,9 +10,9 @@
 // perform three verbs and how to wait.
 //
 // --act NAME plays `__vg.demo.act(NAME)` instead of the full storyboard -- one of the
-// eight `act:` tags demoMode()'s own beats carry (intro, note, timeline, heatmap,
-// folders, subfolders, camera, colours). Same driver, same verbs; only which beats it
-// gets differs.
+// `act:` tags demoMode()'s own beats carry (intro, note, pin, compactaxis, timeline,
+// heatmap, folders, subfolders, subfoldercolor, camera, colours). Same driver, same
+// verbs; only which beats it gets differs.
 //
 // WHY CDP AND NOT el.click(): a dispatched click skips hit-testing, so an in-page demo
 // keeps passing after the button it aims at has become covered, scrolled away or 0x0.

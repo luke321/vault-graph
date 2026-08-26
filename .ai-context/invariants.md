@@ -471,6 +471,130 @@ Two consequences that have each cost something:
   Centring is a promise the control can only keep where it can still move; a fixed
   fraction aims off the end of the travel on a narrow-span vault and measures the clamp.
 
+## The window pill centres on the pointer's PIXEL, not its date
+
+`winEndCentredAtPx` (`src/page.js`) solves for the window's end by bisection in pixel
+space — given the pointer's x, find the `end` whose drawn pill (`ribbonX(end-span, w)` to
+`ribbonX(end, w)`) has that x as its midpoint. Replaced a formula that added half the
+window's span in TIME to the pointer's own date (`ms + winSpan()/2`), which only centres
+correctly when `ribbonX` is linear: that shortcut assumes a constant px-per-ms ratio to
+turn "half the span in time" into "half the pill's width on screen", and github#23's
+compact axis broke the assumption on purpose. Reported live: grabbing the pill visibly
+resized as it crossed a density boundary and stopped tracking the pointer's actual pixel.
+
+```javascript
+// after a press or drag on the window track
+__vg.heat.start + __vg.heat.cols * 7 * 86400000   // the (Monday-quantised) drawn end
+__vg.ribbonXOf(end)                                // where that end actually sits
+```
+
+**Verified in isolation before trusting the check.** A `debugWinEndCentredAtPx(px, w)`
+probe (removed once it had answered) confirmed the bisection itself lands the RAW end
+exactly on target — 0px off at an achievable pixel, correctly clamped and non-zero off at
+an unachievable one. The remaining error a check can observe is Monday quantisation
+(`heatBuild()` snaps `heat.start`, up to ~7 days away from what the bisection solved for),
+and how many pixels 7 days costs is not a constant — it depends on how dense the axis is
+right there. Measured directly rather than assumed a flat budget: 1.4px on the demo vault,
+3px on the 10k vault, but **37.2px on the dominant-folder vault**, whose 14 months are all
+near the note-count ceiling (no real compaction happening, so a week costs as many pixels
+as it always did on a narrow, largely-linear span). *a press on the window track centres
+the window there* computes its own tolerance from the LOCAL px-per-week at the press point
+(`ribbonXOf(end) - ribbonXOf(end - 7d)`, times 1.5 for margin) rather than a flat number,
+for the same reason the target pixel itself is read off the control's own measured travel
+(`winTravel`, github#18) rather than assumed — a flat pixel budget tuned on a decade-wide
+vault is far too tight for a vault whose whole span is 14 months.
+
+## The date axis weighs years by note count, not by calendar time
+
+`compactAxis` (default on, github#23) gives each calendar YEAR a width between
+`YEAR_FLOOR_MS` (about one month) and `YEAR_CEIL_MS` (about one real year), scaled by that
+year's own note count against `yearRef` — the same p90-with-floor shape `nRef` already uses
+for bar height, applied here to note count per year instead of per month. Within a year,
+every one of its months gets an equal share of the year's own width — deliberately NOT
+weighted by the month's own note count; that was tried and read as noise.
+
+```javascript
+__vg.setCompactAxis(false); __vg.ribbonXOf(ms)   // the untouched linear formula
+__vg.setCompactAxis(true);  __vg.ribbonXOf(ms)   // note-weighted by year
+```
+
+**Two earlier designs were tried and replaced, each measured wrong against the author's
+own real vault (not a synthetic fixture — this is the one case in the ticket where the
+fixtures could not have caught the defect, since none has the shape that broke it):**
+
+1. *Weight a populated month by its own real ms duration, collapse only literally-empty
+   runs.* This was an exact no-op whenever no month was literally empty (0px delta,
+   provably, since the per-month weights telescope back to `dateSpan.lo/hi`) — but it
+   never made a genuinely busy year wider than a quiet one. Measured on the real vault:
+   **2023 (21 notes, spread thin enough to touch nearly every month) drew 172px against
+   2026 (399 notes, the vault's busiest year by far) at only 114px** — 2023 read as "every
+   month populated" and kept full real-time weight throughout, while 2026 is only
+   partway through its own calendar year. A month being merely non-empty said nothing
+   about how much it actually held.
+2. *Weight populated months by their own note count too, not just years.* Fixed the
+   above, but the user reviewing it live asked for equal-width months within a year
+   instead — month-to-month variation inside one year reads as noise, and the current
+   design (year-level weighting, uniform months within it) is what shipped.
+
+**A collapsed year measures against the busiest one, not against a hypothetical
+linear width.** *a year's width tracks its own note count* asserts the busiest year on
+the live vault draws strictly wider than the quietest — measured on the real vault:
+2026 (399 notes) at 408px against 2023's 90px once note-weighting replaced real-duration
+weighting. *sparse years cluster near the same floor width* asserts every year at or
+below the note-count median lands within a bounded spread of every other — not
+identical (a 2-note year still edges out a 0-note one), but visibly equidistant rather
+than each keeping whatever width its own internal month structure happened to produce.
+
+**A third check needs no gap at all, and exists because a mismatched id can hide behind a
+full re-render.** `$()` prepends `"vg-"` to every lookup (`src/page.js:103`) — a rendered
+element's own id has to carry that prefix too, or a module-scope function using `$()` to
+reach it will find nothing. The compact-axis settings-panel toggle shipped once with a
+button id missing that prefix, and it read as working: the click handler always calls
+`buildOptions()` right after, which replaces the whole row from live state regardless of
+whether the broken lookup's direct DOM write landed. *the settings-panel toggle actually
+flips the live state* drives the real gear-and-click path end to end and was confirmed to
+fail with the id bug reintroduced and pass with it fixed — a check reading only the `__vg`
+API surface (as the other two here do) cannot see this class of bug at all.
+
+**The year-chip label-density estimate was also stale, and only a compacted axis exposed
+it.** `buildYears()` decided whether to show every year or skip alternates from
+`(w * 365.25days) / totalSpan` — a vault-wide AVERAGE px-per-year, accurate only while the
+axis was linear. Once a handful of sparse years can sit much closer together than that
+average while one busy year takes the rest of the strip, the average never sees the tight
+spot: measured on the real vault, every year still showed (no skip) while adjacent chips'
+actual rendered boxes overlapped. Fixed to measure the real minimum gap between any two
+consecutive years' actual positions and skip alternates below ~28px (a chip's own
+approximate rendered width) — the number that can actually collide, not an estimate that
+cannot see a local squeeze.
+
+**A vertical overflow was Obsidian-only, and no amount of standalone testing would have
+found it.** The plugin, driven live under CDP (`scripts/spike-check.mjs`, pointed at a
+`make-mirror-vault.mjs` copy of the real vault so no vault content left the machine),
+measured year-chip buttons at **30px tall against a 16px row** — `line-height`, `font-size`
+and `box-sizing` all read correctly as declared, meaning something in Obsidian's own theme
+CSS was still contributing vertical padding this rule's shorthand did not survive against.
+The standalone page never has competing `button` CSS to lose that fight to, so this was
+invisible in every Chrome-only check this ticket ran, including the fixed-then-broken
+label-density check above. Fixed with an explicit `height: 14px` on the button — with
+`box-sizing: border-box` already in force, an explicit height is authoritative regardless
+of what else contributes padding. **Any future date-strip change should get at least one
+pass driven through the actual plugin, not only the standalone build**, precisely because
+this class of defect has no standalone-visible symptom at all.
+
+**There are TWO buttons that flip `compactAxis`, not one, and they live on different
+hosts.** `#vg-opt-compactAxis` is the settings-panel row, standalone-only (the plugin's
+gear opens Obsidian's own settings tab instead of `#vg-settings`). `#vg-compact` is a
+view-level icon beside the date-range fields, present on BOTH hosts — added after the
+settings-panel row alone left the plugin with no in-view way to flip it at all. `setCompactAxis`
+syncs whichever of the two currently exist in the DOM; either may be absent depending on
+host and whether the settings panel has been opened. Adding the second button reversed an
+earlier call: `compactAxis`'s plugin-side dep was made read-only on the reasoning that "no
+in-view control exists on that host" — true when written, false the moment `#vg-compact`
+shipped, so `onCompactAxis` came back, matching `onPanEnabled`. *the view-level icon
+actually flips the live state, and persists* covers it the same way the settings-row check
+covers its own button, and was confirmed against the real plugin under CDP (22px tall, no
+overflow, no overlap with the date fields) rather than assumed from the standalone.
+
 ## A note in the hub has left the ring, and the ring closes behind it
 
 Pinning takes a note out of `buildWedgePlan` entirely. Skip that and it keeps its seat, so

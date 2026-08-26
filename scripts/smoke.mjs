@@ -1341,11 +1341,15 @@ async function rangeSnap(p) {
   })()`);
 }
 
-/** The ribbon x for a date, in canvas pixels. */
+/**
+ * The ribbon x for a date, in canvas pixels -- via __vg.ribbonXOf, the page's own mapping,
+ * rather than a formula duplicated here. It USED to reimplement the plain linear formula
+ * directly, which quietly went stale once ribbonX gained a compact-axis branch (github#23):
+ * any check calling this against a sparse vault with compaction on would silently compute
+ * the OLD (unweighted) position while the page drew the new one.
+ */
 function xOfMs(p, ms) {
-  return p.j(`(function(){
-    var d = __vg.dateSpan, w = document.querySelector("#vg-ribbon").getBoundingClientRect().width;
-    return ((${ms} - d.lo) / (d.hi - d.lo)) * w; })()`);
+  return p.j(`__vg.ribbonXOf(${ms})`);
 }
 
 /** A press on the window track at `x`, with no drag. The press alone is a jump. */
@@ -1518,14 +1522,17 @@ check("a press on the window track centres the window there", async (p) => {
   // The end-at-pointer version put the whole pill to the left of the hand, so the thing being
   // dragged was somewhere other than where the cursor was.
   //
-  // Asserted as "the date under the pointer is the middle of what the grid shows", within a
-  // couple of weeks: the window's end quantises to a Monday, so an exact midpoint is not
-  // available anywhere.
+  // Asserted as "the PIXEL under the pointer is the middle of what the grid shows" -- not the
+  // date, since github#23's compact axis made ribbonX non-linear and a fixed time half-span
+  // stopped being a fixed pixel half-span. Within a budget rather than a flat tolerance: the
+  // window's end quantises to a Monday, so an exact midpoint is never available, and how many
+  // pixels that quantisation costs depends on how dense the axis is right there -- see below.
   //
   // THE PRESS LANDS AT THE MIDDLE OF THE WINDOW'S OWN TRAVEL, not at a fixed fraction of the
   // ribbon. Centring is a promise the control can only keep where it can still move; a
   // fraction chosen without asking aims off the end of the travel on a narrow-span vault and
-  // measures the clamp instead (github#18).
+  // measures the clamp instead (github#18) -- the same lesson bit a first version of this
+  // check's pixel target too (see below).
   await clearRange(p);
   const box = await ribbonBox(p);
   const yBars = box.top + 12, yTrack = box.top + RIB_BARS + 5;
@@ -1543,18 +1550,52 @@ check("a press on the window track centres the window there", async (p) => {
   }
 
   const a = await ribbonDrag(p, box, Math.round(box.w * 0.30), Math.round(box.w * 0.55), yBars);
-  const aimMs = t.aim(0.5);
-  const b = await trackPress(p, box, Math.round(await xOfMs(p, aimMs)), yTrack);
-  const midMs = b.winEndMs - b.winSpanMs / 2;
-  const offDays = Math.round(Math.abs(midMs - aimMs) / 86400000);
-  const iso = (ms) => new Date(ms).toISOString().slice(0, 10);
+  // AIM INSIDE THE ACHIEVABLE PIXEL RANGE, not at t.aim(0.5)'s time-based midpoint (github#18's
+  // own fixed-ribbon-fraction mistake, reintroduced in a new unit): that formula subtracts a
+  // full half-span from a TIME interpolation between the two extremes' own winEnd, which can
+  // land well before dateSpan.lo on a vault whose travel is much narrower than its span (57d
+  // of travel against a 364d window here) -- ribbonXOf then clamps it to near pixel 0, and
+  // bisection correctly converges to the SMALLEST reachable midpoint, which is nowhere near 0.
+  // That was never a bug in the centring; it was this check aiming outside what the control
+  // can do. Deriving the target from the two extreme presses' OWN achievable midpoints (exactly
+  // what winTravel already measured) is the same "read the travel off the control" fix github#18
+  // made, extended to pixel space for github#23's pixel-centred pill.
+  const [loMidPx, hiMidPx] = await p.j(`[
+    (__vg.ribbonXOf(${t.loMs} - ${t.spanMs}) + __vg.ribbonXOf(${t.loMs})) / 2,
+    (__vg.ribbonXOf(${t.hiMs} - ${t.spanMs}) + __vg.ribbonXOf(${t.hiMs})) / 2
+  ]`);
+  const pressX = Math.round((loMidPx + hiMidPx) / 2);
+  const b = await trackPress(p, box, pressX, yTrack);
+  // PIXEL-centred, not time-centred: press at pixel P, the drawn pill's own midpoint has to
+  // land back near P. Time-centred (press at date X, window's time-midpoint lands near X)
+  // was the assertion here before github#23's compact axis -- it stopped being the right
+  // question the moment ribbonX became non-linear, because a fixed TIME half-span is no
+  // longer a fixed PIXEL half-span, and "centred" is a promise about what's on screen.
+  //
+  // TOLERANCE IS A LOCAL PIXEL BUDGET, not a flat number, for the same reason the target
+  // pixel above has to be measured rather than assumed: b.winEndMs is __vg.heat.start plus
+  // the span, and heatBuild() snaps heat.start to a Monday -- centring can only promise the
+  // RAW end (what the bisection actually solved for) lands on the pixel; the quantised end
+  // this check can observe is up to ~1 week away from that, and how many pixels one week
+  // costs depends entirely on how dense this stretch of the axis is. Measured directly
+  // rather than guessed: a flat 8px budget (right for the 10k and demo vaults, where a week
+  // is a couple of pixels against a decade-plus span) failed here by 3-5x, because this
+  // vault's 14 months are all near the note-count ceiling -- no real compaction, so a week
+  // costs as many pixels as it would on the old linear axis, ~20-40 on a narrow vault.
+  const [resultMidPx, pxPerWeek] = await p.j(`[
+    (__vg.ribbonXOf(${b.winEndMs} - ${b.winSpanMs}) + __vg.ribbonXOf(${b.winEndMs})) / 2,
+    __vg.ribbonXOf(${b.winEndMs}) - __vg.ribbonXOf(${b.winEndMs} - 7 * 86400000)
+  ]`);
+  const offPx = Math.round(Math.abs(resultMidPx - pressX) * 10) / 10;
+  const budget = Math.round((Math.abs(pxPerWeek) * 1.5 + 2) * 10) / 10;
   const brushHeld = b.from === a.from && b.to === a.to;
 
   await clearRange(p);
   return {
-    ok: b.winEnd !== a.winEnd && brushHeld && offDays <= 14,
-    detail: `pressed at ${iso(aimMs)}, window centred on ${iso(midMs)} (${offDays}d off) ` +
-            `within ${t.days}d of travel; brush ${brushHeld ? "held" : "MOVED"}`,
+    ok: b.winEnd !== a.winEnd && brushHeld && offPx <= budget,
+    detail: `pressed at pixel ${pressX}, pill's own midpoint landed at ${resultMidPx.toFixed(1)} ` +
+            `(${offPx}px off, budget ${budget}px = 1.5 local weeks) within ${t.days}d of travel; ` +
+            `brush ${brushHeld ? "held" : "MOVED"}`,
   };
 });
 
@@ -2457,6 +2498,135 @@ check("the intro sweeps the range end across the strip", async (p) => {
   };
 });
 
+check("compact axis: a year's width tracks its own note count", async (p) => {
+  // The direct, user-visible promise of github#23's note-weighted axis: the busiest year
+  // draws WIDER than the quietest one, not merely narrower-than-it-would-linearly (a
+  // month-real-duration scheme could satisfy that while still losing a 400-note year to a
+  // 20-note one that happens to touch more months -- measured happening on a real vault
+  // during development, which is what drove this redesign in the first place).
+  const r = await p.j(`(function(){
+    var d = __vg.dateSpan;
+    if (!d || d.years.length < 2) return { skip: true };
+    var ax = d.axis, w = document.querySelector("#vg-ribbon").getBoundingClientRect().width;
+    var byYear = {};
+    ax.segs.forEach(function (s) {
+      var yy = d.months[s.i].y;
+      byYear[yy] = (byYear[yy] || 0) + (s.w1 - s.w0) / ax.totalW * w;
+    });
+    var years = d.years.map(function (yy) { return { y: yy.y, n: yy.n, px: byYear[yy.y] || 0 }; });
+    var busiest = years.reduce(function (a, b) { return b.n > a.n ? b : a; });
+    var quietest = years.reduce(function (a, b) { return b.n < a.n ? b : a; });
+    return { busiest: busiest, quietest: quietest };
+  })()`);
+  if (r.skip) return { ok: false, detail: "no dateSpan on this vault" };
+  if (r.busiest.n === r.quietest.n) {
+    return { ok: true, detail: `skipped — every year holds the same note count (${r.busiest.n}) on this vault` };
+  }
+  const ok = r.busiest.px > r.quietest.px;
+  return {
+    ok,
+    detail: `busiest year ${r.busiest.y} (${r.busiest.n} notes) draws ${Math.round(r.busiest.px)}px ` +
+      `against quietest year ${r.quietest.y} (${r.quietest.n} notes) at ${Math.round(r.quietest.px)}px`,
+  };
+});
+
+check("compact axis: sparse years cluster near the same floor width", async (p) => {
+  // The other half of github#23's ask, confirmed live against the author's own vault:
+  // years below the note-count median should read as roughly equal width to each other --
+  // "equidistant" -- not each keeping a width proportional to its own leftover internal
+  // structure the way the month-real-duration scheme did.
+  const r = await p.j(`(function(){
+    var d = __vg.dateSpan;
+    if (!d || d.years.length < 3) return { skip: true };
+    var ax = d.axis, w = document.querySelector("#vg-ribbon").getBoundingClientRect().width;
+    var byYear = {};
+    ax.segs.forEach(function (s) {
+      var yy = d.months[s.i].y;
+      byYear[yy] = (byYear[yy] || 0) + (s.w1 - s.w0) / ax.totalW * w;
+    });
+    var counts = d.years.map(function (yy) { return yy.n; }).slice().sort(function (a, b) { return a - b; });
+    var median = counts[Math.floor(counts.length / 2)];
+    var sparse = d.years.filter(function (yy) { return yy.n <= median; })
+                         .map(function (yy) { return byYear[yy.y] || 0; });
+    if (sparse.length < 2) return { skip2: true };
+    return { min: Math.min.apply(null, sparse), max: Math.max.apply(null, sparse), n: sparse.length };
+  })()`);
+  if (r.skip || r.skip2) {
+    return { ok: true, detail: "skipped — fewer than 2 years at or below the median note count on this vault" };
+  }
+  // Not IDENTICAL -- a 2-note year still edges out a 0-note one -- but clustered rather than
+  // spanning the same range the busy years occupy.
+  const spread = r.max - r.min;
+  const ok = spread <= r.max * 0.6 + 5;
+  return {
+    ok,
+    detail: `${r.n} sparse years span ${Math.round(r.min)}-${Math.round(r.max)}px (spread ${Math.round(spread)}px)`,
+  };
+});
+
+check("compact axis: the settings-panel toggle actually flips the live state", async (p) => {
+  // A REAL regression check, not a manual one-off: $() prepends "vg-" (src/page.js:103), so
+  // a rendered row whose literal id is "opt-<key>" instead of "vg-opt-<key>" leaves
+  // setCompactAxis's own $("opt-compactAxis") lookup permanently unable to find its button --
+  // exactly the bug an adversarial review caught here, since the click handler always
+  // rebuilds the row wholesale and masked it in every path this suite drove before this
+  // check existed. Queries the DOM directly (not through $()) so it can't share the bug's
+  // own blind spot.
+  const r = await p.j(`(function(){
+    var gear = document.querySelector("#vg-gear");
+    if (!gear || gear.hidden) return { noGear: true };
+    gear.click();
+    var before = document.querySelector("#vg-opt-compactAxis");
+    if (!before) return { noButton: true };
+    var beforePressed = before.getAttribute("aria-pressed"), beforeState = __vg.compactAxis;
+    before.click();
+    var after = document.querySelector("#vg-opt-compactAxis");
+    var afterPressed = after && after.getAttribute("aria-pressed"), afterState = __vg.compactAxis;
+    // Restore, and close the panel again, so the check leaves no trace on the page.
+    if (after && afterState !== beforeState) after.click();
+    gear.click();
+    return { beforePressed: beforePressed, beforeState: beforeState,
+             afterPressed: afterPressed, afterState: afterState };
+  })()`);
+  if (r.noGear) return { ok: false, detail: "no #vg-gear on this build -- standalone only" };
+  if (r.noButton) {
+    return { ok: false, detail: "gear opened but #vg-opt-compactAxis was not found -- the " +
+      "rendered row id and the $() lookup setCompactAxis uses have drifted apart again" };
+  }
+  const flipped = r.afterState !== r.beforeState && r.afterPressed !== r.beforePressed;
+  return {
+    ok: flipped,
+    detail: `clicking the row: state ${r.beforeState}->${r.afterState}, aria-pressed ` +
+      `${r.beforePressed}->${r.afterPressed}`,
+  };
+});
+
+check("compact axis: the view-level icon actually flips the live state, and persists", async (p) => {
+  // The settings-panel row is standalone-only (SETTINGS_UI); the plugin's gear leads to
+  // Obsidian's own settings tab instead, so #vg-compact is the ONLY in-view control on
+  // that host (github#23). Exists on both hosts here, so this runs unconditionally --
+  // unlike the settings-row check above, which skips when there's no gear/settings-UI.
+  const r = await p.j(`(function(){
+    var btn = document.querySelector("#vg-compact");
+    if (!btn) return { noButton: true };
+    var beforePressed = btn.getAttribute("aria-pressed"), beforeState = __vg.compactAxis;
+    var persisted = null;
+    btn.click();
+    var afterPressed = btn.getAttribute("aria-pressed"), afterState = __vg.compactAxis;
+    // Restore, so the check leaves no trace on the page.
+    if (afterState !== beforeState) btn.click();
+    return { beforePressed: beforePressed, beforeState: beforeState,
+             afterPressed: afterPressed, afterState: afterState };
+  })()`);
+  if (r.noButton) return { ok: false, detail: "no #vg-compact on this build" };
+  const flipped = r.afterState !== r.beforeState && r.afterPressed !== r.beforePressed;
+  return {
+    ok: flipped,
+    detail: `clicking the icon: state ${r.beforeState}->${r.afterState}, aria-pressed ` +
+      `${r.beforePressed}->${r.afterPressed}`,
+  };
+});
+
 check("undated notes survive every range", async (p) => {
   // Deliberate, and worth pinning because it is the kind of rule that gets tidied away: 20%
   // of the 10k fixture carries no frontmatter, and excluding those from a date range would
@@ -3077,9 +3247,12 @@ async function killBrowser(child, PORT) {
  * So the suite checks a small vault AND a large one AND a lopsided one, and it stopped being
  * optional the day a change passed at 450 notes and broke the band split at 10,000.
  *
- *   demo vault   1400 notes over two dense years, every month populated, ramping toward
- *                the present (scripts/make-demo-vault.mjs). The shape a vault in real use
- *                has, and the one the date ribbon is worth looking at on.
+ *   demo vault   1400 notes over nine years: two dense recent ones (85% of notes) behind a
+ *                genuinely sparse tail, 18 of 108 possible months empty
+ *                (scripts/make-demo-vault.mjs). The shape a vault in real use has, the one
+ *                the date ribbon is worth looking at on, and -- since github#23 -- the one
+ *                shape in this trio that actually exercises the compact axis rather than
+ *                skipping past it (10k and shape stay evenly populated, no real gaps).
  *   10k vault    synthetic and deliberately awkward: more top-level folders than there are
  *                colour slots, sliver folders beside a dominant one, five levels of
  *                nesting, and ten years of dates (scripts/make-test-vault.mjs).
@@ -3214,7 +3387,7 @@ function resolveVaults() {
     out.push({ path: dir, label });
   };
 
-  gen("make-demo-vault.mjs", [], "demo-vault", "the demo vault (2 dense years)");
+  gen("make-demo-vault.mjs", [], "demo-vault", "the demo vault (sparse tail, 2 dense years)");
   gen("make-test-vault.mjs", ["--notes", "10000", "--years", "10"],
       "test-vault", "the 10k synthetic vault (10 years)");
   gen("make-shape-vault.mjs", [], "shape-vault", "the dominant-folder vault");

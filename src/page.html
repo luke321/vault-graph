@@ -23,6 +23,10 @@
     </div>
 
     <div class="block" id="vg-settings" hidden>
+      <!-- Generic boolean options -- one row today (compactAxis, github#23), rendered once
+           by buildOptions() rather than rebuilt per-folder the way #vg-setbody is. A second
+           standalone setting is one entry in OPTION_ROWS away, not a new panel. -->
+      <div id="vg-optbody"></div>
       <div class="row" style="margin-bottom:7px">
         <div class="lbl" style="margin:0">Folder colours</div>
         <div class="mini"><button id="vg-fcreset" title="Drop every folder AND subfolder override and go back to the automatic order">Reset</button></div>
@@ -86,6 +90,19 @@
              was to find and drag a handle -- fine for browsing, useless for "just show me
              2024". A native picker also brings a calendar, keyboard entry and the locale's
              own date order for free, none of which is worth reimplementing on a canvas. -->
+        <!-- A VIEW-LEVEL control, not only the settings-tab one: the plugin's gear hands
+             off to Obsidian's own settings tab (openSettings, see page.html's own comment
+             on #vg-gear), so there is no other way to flip this from inside the view at
+             all on that host -- unlike panEnabled, which the corner button already covers.
+             Mirrors that button's shape exactly: a mode, aria-pressed, persists on click. -->
+        <button id="vg-compact" type="button" aria-pressed="true"
+                title="Compact the date axis by note count. Off gives every year and month equal width."
+                aria-label="Compact date axis">
+          <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" focusable="false">
+            <path d="M3 4l3 4-3 4M13 4l-3 4 3 4" fill="none" stroke="currentColor"
+                  stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </button>
         <div id="vg-rangebox">
           <input id="vg-from" class="dt" type="date" aria-label="Range start">
           <span class="arw" aria-hidden="true">&rarr;</span>

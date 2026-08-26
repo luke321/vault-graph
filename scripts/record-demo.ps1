@@ -7,8 +7,9 @@
 #   .\scripts\record-demo.ps1 -Act timeline           # one feature's beats, not the whole demo
 #
 # -ACT NAME records ONE act instead of the full storyboard -- one of the `act:` tags in
-# demoMode() (src/page.js): intro, note, timeline, heatmap, folders, subfolders, camera,
-# colours. -Out defaults to `demo-<name>-<timestamp>.mp4` instead of `demo-<timestamp>.mp4`,
+# demoMode() (src/page.js): intro, note, pin, compactaxis, timeline, heatmap, folders,
+# subfolders, subfoldercolor, camera, colours. -Out defaults to
+# `demo-<name>-<timestamp>.mp4` instead of `demo-<timestamp>.mp4`,
 # same folder, same everything else. This script only ever writes the raw take (.mp4) --
 # encoding it into the docs gallery's `assets/features/<name>.webp` is make-hero.ps1's job,
 # same as it always has been for the hero; see docs/features/_template.md for the exact

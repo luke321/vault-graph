@@ -570,6 +570,26 @@
     .vault-graph #vg-cam button { transition: none; }
   }
 
+  /* The compact-axis toggle, left of the range group -- same small icon-button language,
+     scaled down from #vg-cam's 31px corner buttons to sit inline in a text-height row.
+     A MODE, like #vg-pan: fills when on rather than reading as just-clicked. */
+  .vault-graph #vg-compact {
+    display: flex; align-items: center; justify-content: center;
+    width: 22px; height: 22px; padding: 0; cursor: pointer; flex: 0 0 auto; margin-left: 8px;
+    background: var(--surface-2); color: var(--text-3);
+    border: 1px solid var(--border); border-radius: 6px;
+    transition: color .12s, border-color .12s, background-color .12s;
+  }
+  .vault-graph #vg-compact:hover { color: var(--text-1); border-color: var(--border-strong); }
+  .vault-graph #vg-compact:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .vault-graph #vg-compact[aria-pressed="true"] {
+    color: var(--accent); border-color: var(--accent);
+    background: color-mix(in oklab, var(--accent) 14%, var(--surface-2));
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .vault-graph #vg-compact { transition: none; }
+  }
+
   /* The range group: two date fields, an arrow and the reset, at the end of the heat row. */
   .vault-graph #vg-rangebox {
     display: flex; align-items: center; gap: 5px; flex: 0 0 auto; margin-left: 4px;
@@ -620,6 +640,17 @@
      at this size: a filled ground, a border, and the label at body contrast. */
   .vault-graph #vg-years button {
     position: absolute; top: 0; transform: translateX(-50%);
+    /* HEIGHT IS EXPLICIT, not left to line-height + padding to add up to 16px. Inside the
+       Obsidian plugin host (never in the standalone page, which has no competing button
+       CSS to lose to) this chip measured 30px tall instead of 16px -- height:14px plus
+       1px border top and bottom -- with line-height, font-size and box-sizing all reading
+       correctly as set, meaning something in Obsidian's own theme CSS was still adding
+       vertical padding this rule's shorthand did not survive against. An explicit height
+       on a border-box element is authoritative regardless of what padding a competing
+       rule contributes, so it closes the gap without having to win that cascade fight
+       (github#23 -- surfaced by the compact axis packing years close enough for the
+       overflow's own 14px to visibly spill below #vg-years and into the disc). */
+    height: 14px;
     padding: 0 5px; cursor: pointer; border-radius: 4px;
     background: color-mix(in oklab, var(--text-3) 14%, transparent);
     border: 1px solid var(--border);
