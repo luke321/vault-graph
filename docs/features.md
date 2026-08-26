@@ -26,7 +26,7 @@ share of the vault. The layout is deterministic — no simulation, no seed — s
 vault always draws the same picture. Refresh replays the vault growing from its first note
 to now.
 
-*Clip pending.*
+![Refresh clicked, the whole vault regrowing from its first note to now while the date ribbon's range handle sweeps along with it](../assets/features/intro.webp)
 
 ## Reading one note
 
