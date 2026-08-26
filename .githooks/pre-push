@@ -195,6 +195,28 @@ EOF
   exit 1
 fi
 
+# BUILD ORDER DETERMINISM NEXT, same bar again -- two subprocess builds of a handful of
+# notes, no Chrome, under a second. This is the OTHER half of github#31/#32: the generator
+# turned out clean (check above), but the build itself was still reading directories with
+# plain readdirSync, whose order Node documents as filesystem-dependent and which flows
+# unsorted into balanceBands()'s exhaustive-with-ties search over which folders go inner
+# vs outer -- so two builds of the SAME vault content could pick a different split. Fixed
+# by sorting walk()'s readdirSync result; this is what keeps it fixed.
+echo "pre-push: checking build order is filesystem-independent..."
+if ! node "$root/scripts/check-build-order-determinism.mjs" </dev/null; then
+  cat >&2 <<'EOF'
+
+pre-push: build order determinism check failed -- push blocked.
+
+build-graph.mjs's note order depended on filesystem enumeration order again -- read the
+FAIL lines above. walk() in src/build-graph.mjs must sort each directory's entries
+(readdirSync(dir).sort()) before recursing or collecting files.
+
+There is no skip flag for this check.
+EOF
+  exit 1
+fi
+
 if [ -n "$SKIP_SMOKE" ]; then
   echo "pre-push: SKIP_SMOKE set, skipping the invariant suite"
   exit 0

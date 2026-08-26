@@ -831,3 +831,47 @@ generation day change the structure" isn't a question that applies to it.
 
 Wired into `.githooks/pre-push` alongside the PII/scope/network checks: cheap (a few
 seconds, no Chrome), so no skip flag, same reasoning as those three.
+
+## Build order does not affect the band split
+
+github#32's other half, once github#33 cleared the generator: `walk()` in
+`src/build-graph.mjs` read each directory with bare `readdirSync(dir)`, whose order Node
+documents as filesystem-dependent, not a contract. That order became `files`, then
+`notes` (same order, no sort in between), then graph node insertion order, then the group
+iteration order `balanceBands()` searches over. That search is exhaustive over which
+folders go inner vs outer and picks strictly-less-than on cost, so two candidate splits
+tied on cost kept whichever the loop reached first — which used to mean whichever order
+the disk happened to hand groups back that run. Two builds of the *same* vault content
+could therefore land on a different inner/outer split for a folder sitting on one of those
+ties, which is exactly what was reported: `04 - Daily Notes` on the demo vault, `inner:
+true, rows: 6` in one build and `inner: false, rows: 9` in another, same directory, same
+command, minutes apart.
+
+```bash
+node scripts/check-build-order-determinism.mjs
+```
+
+Fixed with `readdirSync(dir).sort()`. The check guards it two ways:
+
+- **Dynamic**: builds two throwaway vaults holding the same notes, created in reversed
+  folder/note order, and asserts both produce the exact same, alphabetically-sorted
+  note-id list.
+- **Static**: reads `walk()`'s own source and asserts it still chains `.sort()` onto the
+  `readdirSync` call.
+
+The dynamic half alone is not adversarial on every filesystem — measured here, on this
+NTFS checkout `readdirSync` already comes back alphabetical even for a directory whose
+files were created in shuffled order, so reverting the fix and re-running *only* the
+dynamic probe still reported clean. The static half caught it immediately: reverting the
+same fix and re-running failed with "walk() no longer sorts its readdirSync(dir) result".
+Both are kept — the dynamic half is the actual functional guarantee the page depends on,
+the static half is what makes the check fail loud regardless of which filesystem happens
+to be under the checkout.
+
+Verified against all three `smoke.mjs` fixtures post-fix (`--only lattice --only "row
+depth"`): demo vault inner 6 / outer 9 rows, 10k vault inner 15 / outer 23, dominant-folder
+vault inner 5 / outer 7 — unchanged from pre-fix on every fixture that already had a stable
+split.
+
+Wired into `.githooks/pre-push` alongside the generator-determinism check: two tiny
+subprocess builds, no Chrome, well under a second, so no skip flag.
