@@ -8420,8 +8420,15 @@ function mountVaultGraph(root, data, deps) {
     // this function body, so the forward reference is fine.
     refreshSettingsPanel = buildSettings;
 
+    // BACK TO DEFAULTS, not literally everything -- a folder disabled in the settings
+    // panel (hiddenByDefault(), the same rule seedHidden() applies at load) stays hidden
+    // here too. A blanket clear used to override that: a person who deliberately hid
+    // "08 - Archive" by default would have it pop back on the moment they clicked All,
+    // which reads as the button ignoring a choice made one screen over. "None" (below)
+    // is the true blanket override -- hiding everything has nothing to preserve, so it
+    // stays as it was.
     $("allon").onclick = function () {
-      state.hidden[state.dim] = Object.create(null);
+      seedHidden();
       state.hiddenSub = Object.create(null);
       buildLegend(); cascade(null, { colToggle: true });
     };
@@ -11591,6 +11598,125 @@ function mountVaultGraph(root, data, deps) {
                       res.webOK = res.dimAtGaps === 0;
                       return res;
                     },
+                    // EVERYTHING NEEDED TO REPRODUCE WHAT IS ON SCREEN, as one object -- behind
+                    // the "Debug" button in both hosts. Kept alongside setPanEnabled/
+                    // setCompactAxis (not with the rest of the debug API below, which the
+                    // plugin build strips) because that button lives in the ordinary UI, not
+                    // behind a dev-only toggle -- it was misplaced inside the stripped region
+                    // for a while, which meant clicking "Debug" in the Obsidian plugin threw
+                    // (API.debugDump is not a function) before ever reaching the clipboard-
+                    // write/file-save fallback, so the button did nothing at all.
+                    debugDump: function () {
+                      var a0 = renderer ? renderer.graphToViewport({ x: 0, y: 0 }) : null;
+                      var b0 = renderer ? renderer.graphToViewport({ x: UNIT, y: 0 }) : null;
+                      var pxPerRow = a0 && b0 ? Math.hypot(b0.x - a0.x, b0.y - a0.y) : 0;
+                      var perPx = pxPerRow > 0 ? UNIT / pxPerRow : 0;
+                      // Radii and drawn sizes of everything on screen, split into bands on the
+                      // largest radial gap -- the same split every probe in this session used.
+                      var pts = [];
+                      graph.forEachNode(function (id, a) {
+                        if ((alpha[id] || 0) <= 0.004) return;
+                        var d = renderer && renderer.getNodeDisplayData(id);
+                        // THROUGH scaleSize. getNodeDisplayData().size is what the reducer
+                        // RETURNED, not what gets drawn -- sigma scales it again on the way to
+                        // the canvas. Read raw, every radius in this dump was short by that
+                        // factor, so it reported clearances that were not there and
+                        // overlappingPairs: 0 on states that had sixteen. The same trap this
+                        // file's dot measurements hit twice before.
+                        pts.push({ r: Math.hypot(a.x, a.y), th: Math.atan2(a.y, a.x),
+                                   rad: (d && renderer ? renderer.scaleSize(d.size)
+                                                       : 4) * perPx, g: a.folder });
+                      });
+                      pts.sort(function (x, y) { return x.r - y.r; });
+                      var gi = 0, gap = 0;
+                      for (var i = 1; i < pts.length; i++) {
+                        var gg = pts[i].r - pts[i - 1].r;
+                        if (gg > gap) { gap = gg; gi = i; }
+                      }
+                      var r3 = function (v) { return Math.round(v * 1000) / 1000; };
+                      var bandStat = function (arr) {
+                        if (!arr.length) return null;
+                        var rows = {}, steps = [], clears = [], worst = 1e9;
+                        arr.forEach(function (q) {
+                          var k = Math.round(q.r / 8) * 8;
+                          (rows[k] || (rows[k] = [])).push(q);
+                        });
+                        Object.keys(rows).forEach(function (k) {
+                          var row = rows[k].slice().sort(function (x, y) { return x.th - y.th; });
+                          for (var i = 1; i < row.length; i++) {
+                            var arc = (row[i].th - row[i - 1].th) * (+k);
+                            if (!(arc > 1 && arc < 3000)) continue;
+                            steps.push(arc);
+                            var cl = arc - row[i].rad - row[i - 1].rad;
+                            clears.push(cl);
+                            if (cl < worst) worst = cl;
+                          }
+                        });
+                        steps.sort(function (x, y) { return x - y; });
+                        var q = function (f) {
+                          return steps.length ? Math.round(steps[Math.floor(steps.length * f)]) : 0;
+                        };
+                        var radii = arr.map(function (x) { return x.rad; }).sort(function (x, y) { return x - y; });
+                        return {
+                          notes: arr.length, rows: Object.keys(rows).length,
+                          inner: Math.round(arr[0].r), outer: Math.round(arr[arr.length - 1].r),
+                          step35: q(0.35), step95: q(0.95),
+                          channelRatio: q(0.35) ? r3(q(0.95) / q(0.35)) : 0,
+                          dotRadius: { min: Math.round(radii[0]),
+                                       med: Math.round(radii[Math.floor(radii.length / 2)]),
+                                       max: Math.round(radii[radii.length - 1]) },
+                          worstPairClearance: worst === 1e9 ? null : Math.round(worst),
+                          overlappingPairs: clears.filter(function (c) { return c < 0; }).length,
+                        };
+                      };
+                      var cam = renderer ? renderer.getCamera().getState() : null;
+                      var hidden = Object.keys(state.hidden[state.dim] || {}).filter(function (k) {
+                        return (state.hidden[state.dim] || {})[k];
+                      });
+                      return {
+                        note: "vault-graph debug dump -- paste this back verbatim",
+                        vault: { name: DATA.vault || "", notes: graph.order,
+                                 // EDGE_TOTAL, not graph.size: in a budgeted vault the graph
+                                 // holds only the resting share, and a dump that said
+                                 // "links: 8027" about a 37k-link vault would send whoever
+                                 // reads it in the wrong direction. linksShown is the budget.
+                                 links: EDGE_TOTAL, linksShown: EDGE_SHOWN, lazyEdges: lazyEdges,
+                                 generated: DATA.generated || "" },
+                        screen: { win: WIN.innerWidth + "x" + WIN.innerHeight,
+                                  dpr: WIN.devicePixelRatio || 1,
+                                  stage: $("canvas") ? Math.round($("canvas").clientWidth) + "x" +
+                                         Math.round($("canvas").clientHeight) : "",
+                                  pxPerRow: r3(pxPerRow) },
+                        camera: cam ? { x: r3(cam.x), y: r3(cam.y), ratio: r3(cam.ratio) } : null,
+                        filters: { hiddenFolders: hidden,
+                                   hiddenSub: Object.keys(state.hiddenSub || {}),
+                                   range: rangeLabel(),
+                                   from: state.from, to: state.to, heatEnd: state.heatEnd,
+                                   timelineUntil: state.until,
+                                   markDay: state.markDay, shown: pts.length },
+                        // The room each band reports and the arc floor in force -- both feed
+                        // POSITIONS now, so a jump investigation needs to see them per frame.
+                        room: { i: r3(bandOf("i").room), o: r3(bandOf("o").room) },
+                        minArcDeg: r3(lastMinArc * 180 / Math.PI),
+                        spacing: { spOuter: r3(bandOf("o").sp),
+                                   spInner: r3(bandOf("i").sp),
+                                   rowsOuter: bandOf("o").rows,
+                                   rowsInner: bandOf("i").rows,
+                                   pitchOuterUnits: r3(pitchUnits("o")),
+                                   pitchInnerUnits: r3(pitchUnits("i")) },
+                        seam: { outerDeg: bandOf("o").gapDeg, innerDeg: bandOf("i").gapDeg,
+                                nGOuter: bandOf("o").nG, nGInner: bandOf("i").nG,
+                                nSubOuter: bandOf("o").nSub, nSubInner: bandOf("i").nSub,
+                                fallOuter: r3(seamFall("o")), fallInner: r3(seamFall("i")) },
+                        locked: geomLock ? { r0: r3(geomLock.r0), rOuter: r3(geomLock.rOuter),
+                                             maxR: r3(geomLock.maxR), rows: geomLock.rows,
+                                             bandTotal: geomLock.bandTotal } : null,
+                        bands: { inner: bandStat(pts.slice(0, gi)), outer: bandStat(pts.slice(gi)) },
+                        dots: { ofPitch: r3(DOT_OF_PITCH), minPx: DOT_MIN_PX,
+                                maxSpread: DOT_MAX_SPREAD, m: r3(bandOf("o").ramp.m),
+                                b: r3(bandOf("o").ramp.b), lo: r3(bandOf("o").ramp.lo) },
+                      };
+                    },
     };
     /* ---- BEGIN: demo automation + debug API -- stripped from the plugin build, see scripts/build-plugin.mjs (stripDemoAndDebug) ---- */
     // Object.assign COPIES A VALUE from each of this literal's own `get`/`set` pairs at
@@ -12123,129 +12249,6 @@ function mountVaultGraph(root, data, deps) {
                       return { from: e[0], to: e[1], fromISO: isoDay(e[0]), toISO: isoDay(e[1]),
                                x0: ribbonX(e[0], w), x1: ribbonX(e[1], w), w: w,
                                sweeping: brushSweep !== null };
-                    },
-                    /**
-                     * EVERYTHING NEEDED TO REPRODUCE WHAT IS ON SCREEN, as one object.
-                     *
-                     * Reporting a layout problem by describing it costs a round trip per
-                     * unknown -- which folders were hidden, what the range was, how deep each
-                     * band was, what the spacing came out as. Most of this session's
-                     * measurements were a probe written to answer one of those and then thrown
-                     * away. This is those probes, kept, behind a button.
-                     *
-                     * Measured off the LIVE state, not the plan: what matters is the disc a
-                     * person is looking at, and the two have disagreed more than once.
-                     */
-                    debugDump: function () {
-                      var a0 = renderer ? renderer.graphToViewport({ x: 0, y: 0 }) : null;
-                      var b0 = renderer ? renderer.graphToViewport({ x: UNIT, y: 0 }) : null;
-                      var pxPerRow = a0 && b0 ? Math.hypot(b0.x - a0.x, b0.y - a0.y) : 0;
-                      var perPx = pxPerRow > 0 ? UNIT / pxPerRow : 0;
-                      // Radii and drawn sizes of everything on screen, split into bands on the
-                      // largest radial gap -- the same split every probe in this session used.
-                      var pts = [];
-                      graph.forEachNode(function (id, a) {
-                        if ((alpha[id] || 0) <= 0.004) return;
-                        var d = renderer && renderer.getNodeDisplayData(id);
-                        // THROUGH scaleSize. getNodeDisplayData().size is what the reducer
-                        // RETURNED, not what gets drawn -- sigma scales it again on the way to
-                        // the canvas. Read raw, every radius in this dump was short by that
-                        // factor, so it reported clearances that were not there and
-                        // overlappingPairs: 0 on states that had sixteen. The same trap this
-                        // file's dot measurements hit twice before.
-                        pts.push({ r: Math.hypot(a.x, a.y), th: Math.atan2(a.y, a.x),
-                                   rad: (d && renderer ? renderer.scaleSize(d.size)
-                                                       : 4) * perPx, g: a.folder });
-                      });
-                      pts.sort(function (x, y) { return x.r - y.r; });
-                      var gi = 0, gap = 0;
-                      for (var i = 1; i < pts.length; i++) {
-                        var gg = pts[i].r - pts[i - 1].r;
-                        if (gg > gap) { gap = gg; gi = i; }
-                      }
-                      var r3 = function (v) { return Math.round(v * 1000) / 1000; };
-                      var bandStat = function (arr) {
-                        if (!arr.length) return null;
-                        var rows = {}, steps = [], clears = [], worst = 1e9;
-                        arr.forEach(function (q) {
-                          var k = Math.round(q.r / 8) * 8;
-                          (rows[k] || (rows[k] = [])).push(q);
-                        });
-                        Object.keys(rows).forEach(function (k) {
-                          var row = rows[k].slice().sort(function (x, y) { return x.th - y.th; });
-                          for (var i = 1; i < row.length; i++) {
-                            var arc = (row[i].th - row[i - 1].th) * (+k);
-                            if (!(arc > 1 && arc < 3000)) continue;
-                            steps.push(arc);
-                            var cl = arc - row[i].rad - row[i - 1].rad;
-                            clears.push(cl);
-                            if (cl < worst) worst = cl;
-                          }
-                        });
-                        steps.sort(function (x, y) { return x - y; });
-                        var q = function (f) {
-                          return steps.length ? Math.round(steps[Math.floor(steps.length * f)]) : 0;
-                        };
-                        var radii = arr.map(function (x) { return x.rad; }).sort(function (x, y) { return x - y; });
-                        return {
-                          notes: arr.length, rows: Object.keys(rows).length,
-                          inner: Math.round(arr[0].r), outer: Math.round(arr[arr.length - 1].r),
-                          step35: q(0.35), step95: q(0.95),
-                          channelRatio: q(0.35) ? r3(q(0.95) / q(0.35)) : 0,
-                          dotRadius: { min: Math.round(radii[0]),
-                                       med: Math.round(radii[Math.floor(radii.length / 2)]),
-                                       max: Math.round(radii[radii.length - 1]) },
-                          worstPairClearance: worst === 1e9 ? null : Math.round(worst),
-                          overlappingPairs: clears.filter(function (c) { return c < 0; }).length,
-                        };
-                      };
-                      var cam = renderer ? renderer.getCamera().getState() : null;
-                      var hidden = Object.keys(state.hidden[state.dim] || {}).filter(function (k) {
-                        return (state.hidden[state.dim] || {})[k];
-                      });
-                      return {
-                        note: "vault-graph debug dump -- paste this back verbatim",
-                        vault: { name: DATA.vault || "", notes: graph.order,
-                                 // EDGE_TOTAL, not graph.size: in a budgeted vault the graph
-                                 // holds only the resting share, and a dump that said
-                                 // "links: 8027" about a 37k-link vault would send whoever
-                                 // reads it in the wrong direction. linksShown is the budget.
-                                 links: EDGE_TOTAL, linksShown: EDGE_SHOWN, lazyEdges: lazyEdges,
-                                 generated: DATA.generated || "" },
-                        screen: { win: WIN.innerWidth + "x" + WIN.innerHeight,
-                                  dpr: WIN.devicePixelRatio || 1,
-                                  stage: $("canvas") ? Math.round($("canvas").clientWidth) + "x" +
-                                         Math.round($("canvas").clientHeight) : "",
-                                  pxPerRow: r3(pxPerRow) },
-                        camera: cam ? { x: r3(cam.x), y: r3(cam.y), ratio: r3(cam.ratio) } : null,
-                        filters: { hiddenFolders: hidden,
-                                   hiddenSub: Object.keys(state.hiddenSub || {}),
-                                   range: rangeLabel(),
-                                   from: state.from, to: state.to, heatEnd: state.heatEnd,
-                                   timelineUntil: state.until,
-                                   markDay: state.markDay, shown: pts.length },
-                        // The room each band reports and the arc floor in force -- both feed
-                        // POSITIONS now, so a jump investigation needs to see them per frame.
-                        room: { i: r3(bandOf("i").room), o: r3(bandOf("o").room) },
-                        minArcDeg: r3(lastMinArc * 180 / Math.PI),
-                        spacing: { spOuter: r3(bandOf("o").sp),
-                                   spInner: r3(bandOf("i").sp),
-                                   rowsOuter: bandOf("o").rows,
-                                   rowsInner: bandOf("i").rows,
-                                   pitchOuterUnits: r3(pitchUnits("o")),
-                                   pitchInnerUnits: r3(pitchUnits("i")) },
-                        seam: { outerDeg: bandOf("o").gapDeg, innerDeg: bandOf("i").gapDeg,
-                                nGOuter: bandOf("o").nG, nGInner: bandOf("i").nG,
-                                nSubOuter: bandOf("o").nSub, nSubInner: bandOf("i").nSub,
-                                fallOuter: r3(seamFall("o")), fallInner: r3(seamFall("i")) },
-                        locked: geomLock ? { r0: r3(geomLock.r0), rOuter: r3(geomLock.rOuter),
-                                             maxR: r3(geomLock.maxR), rows: geomLock.rows,
-                                             bandTotal: geomLock.bandTotal } : null,
-                        bands: { inner: bandStat(pts.slice(0, gi)), outer: bandStat(pts.slice(gi)) },
-                        dots: { ofPitch: r3(DOT_OF_PITCH), minPx: DOT_MIN_PX,
-                                maxSpread: DOT_MAX_SPREAD, m: r3(bandOf("o").ramp.m),
-                                b: r3(bandOf("o").ramp.b), lo: r3(bandOf("o").ramp.lo) },
-                      };
                     },
                     lastGap: function () {
                       return { ngI: bandOf("i").nG, ngO: bandOf("o").nG,
