@@ -417,11 +417,6 @@ function mountVaultGraph(root, data, deps) {
     // control: these two are fixed, and the code paths for false are kept only
     // because flipping either here is still the way to compare the two renderings.
     curveEdges: true,
-    // TEMPORARY -- issue #2 verification only. Gates drawFocusWeb so the fix can be A/B'd
-    // live against the pre-fix stacking via the "Web fix" nav button. Removed, along with
-    // the button and its handler, once the comparison is done; the shipped drawHover calls
-    // drawFocusWeb unconditionally.
-    focusWebFix: true,
     // Logo colouring: true = the inner band's palette in the middle, fading out into
     // the outer's. false = the outer ring's palette across the whole mark.
     logoTwoRing: true,
@@ -6272,7 +6267,6 @@ function mountVaultGraph(root, data, deps) {
   // reducer's, already lit or dimmed. Alpha follows the hover ramp so the web arrives with
   // the dim instead of popping in over it.
   function drawFocusWeb(ctx, data, settings) {
-    if (!state.focusWebFix) return;   // TEMPORARY -- issue #2 A/B toggle
     var f = state.hovered || state.selected;
     if (!f || data.key !== f || state.query) return;
     var ht = hoverAmount();
@@ -8270,13 +8264,6 @@ function mountVaultGraph(root, data, deps) {
     if ($("zin")) $("zin").onclick = function () { zoomBy(1); };
     if ($("zout")) $("zout").onclick = function () { zoomBy(-1); };
     if ($("pan")) $("pan").onclick = function () { setPan(!panEnabled, true); };
-    // TEMPORARY -- issue #2 verification only. Repaints the currently hovered/selected
-    // note (if any) immediately, same pattern as wedgeDebug's own toggle.
-    if ($("webfix")) $("webfix").onclick = function () {
-      state.focusWebFix = !state.focusWebFix;
-      $("webfix").setAttribute("aria-pressed", String(state.focusWebFix));
-      if (renderer) renderer.refresh({ skipIndexation: true });
-    };
     // The saved default, applied once the renderer exists. Not persisted -- writing here
     // would save a value the host just handed us.
     setPan(panEnabled, false);
