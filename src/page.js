@@ -1055,6 +1055,27 @@ function mountVaultGraph(root, data, deps) {
     return k < 0 ? 0 : Math.min(k, SUB_SLOTS - 1);
   }
 
+  // WHICH CELL A NOTE'S SUBFOLDER MAPS TO, kept separate from subTintIndex on purpose --
+  // that function is also the source of a subfolder's COLOUR (buildSubShades), and a
+  // subfolder's tint should not shift just because its geometric slot did. Below its band's
+  // own row depth, a subfolder's notes redirect to the pooled-tail slot instead of earning
+  // their own rank -- splitFor already refuses to split a FOLDER into sub-wedges when its
+  // total can't fill the band's rows (github#18/#19 lineage); this is the same question per
+  // SUBFOLDER, so a lone sparse piece doesn't get its own arc just because its siblings
+  // earned the split (github#31).
+  //
+  // Both `n` and `depth` are the CALLER's numbers (buildWedgePlan's own liveSub and
+  // bandDepth), taken as parameters rather than looked up here -- specifically because an
+  // early version read the whole-vault subCount instead of a live count for `n`, and let a
+  // subfolder clear the bar on notes that were not even on screen under a date range or
+  // hidden-folder filter -- the same class of bug already documented above for the
+  // folder-level gate ("it also cannot see a filter").
+  function subCellIndex(folder, sub, n, depth) {
+    var idx = subTintIndex(folder, sub);
+    if (idx === SUB_SLOTS - 1) return idx;
+    return n >= (depth || REF_ROWS) ? idx : SUB_SLOTS - 1;
+  }
+
   function buildSubShades() {
     subShade = Object.create(null);
     subSlot = Object.create(null);
@@ -1688,6 +1709,12 @@ function mountVaultGraph(root, data, deps) {
     // rather than of weight, and that is the one thing the cascade cannot walk.
     var liveG = Object.create(null);
     var liveN = Object.create(null);
+    // COUNTED FROM WHAT IS ON SCREEN, same reasoning as liveN just below and the same lesson
+    // learned the hard way for the FOLDER-level gate (comment above): subCount is a whole-vault
+    // tally taken once at load, so under a filter a subfolder can clear subCellIndex's threshold
+    // on notes that are not even showing. liveSub is the live, filter-aware answer subCellIndex
+    // actually reads (github#31).
+    var liveSub = Object.create(null);
     graph.forEachNode(function (id) {
       // MEMBERSHIP AT REST IS THE MEMBERSHIP THE CASCADE ENDS ON, and it was not.
       //
@@ -1739,6 +1766,8 @@ function mountVaultGraph(root, data, deps) {
       // destination count while it arrives -- and is constant for the whole cascade. At rest the
       // union is just what is visible, so the count is unchanged there.
       liveN[g0] = (liveN[g0] || 0) + 1;
+      var sk = g0 + "/" + (graph.getNodeAttributes(id).sub || "");
+      liveSub[sk] = (liveSub[sk] || 0) + 1;
     });
     // AGAINST THE BAND'S REAL DEPTH, not a constant.
     //
@@ -1825,7 +1854,12 @@ function mountVaultGraph(root, data, deps) {
       if (isPinned(id)) return;
       var g = groupOf(id), a = graph.getNodeAttributes(id);
       var split = splitFor(g);
-      var key = split ? g + SEP + subTintIndex(g, a.sub) : g;
+      // splitFor(g) just above always populates bandDepth[bk] for this g's band before
+      // returning (see its own body), so the lookup here is never stale or missing.
+      var bk = bandLock && bandLock[g] ? "i" : "o";
+      var key = split
+        ? g + SEP + subCellIndex(g, a.sub, liveSub[g + "/" + (a.sub || "")] || 0, bandDepth[bk])
+        : g;
       if (!byCell[key]) {
         byCell[key] = [];
         (cellsOf[g] || (cellsOf[g] = [])).push(key);
@@ -11524,6 +11558,9 @@ function mountVaultGraph(root, data, deps) {
                     // the plugin's View-settings toggle (github#23).
                     setCompactAxis: function (v) { return setCompactAxis(v !== false, false); },
                     get compactAxis() { return compactAxis; },
+                    // The pooled-tail rank a split cell's key ends in -- exposed so a check can
+                    // derive it instead of hardcoding SUB_SLOTS-1, which is not itself public.
+                    get subTailRank() { return SUB_SLOTS - 1; },
                     hiddenByDefault: hiddenByDefault,
                     heatDraw: heatDraw,
                     get heat() { return heat; },

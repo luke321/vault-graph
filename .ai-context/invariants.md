@@ -209,6 +209,88 @@ __vg.pushReport()           // pushedCount / pushedByPath vs haloedByPath
 `03 - Resources/Locations` is the case that settled it: 3 notes, seventh in the order,
 sharing the tail slot with six others. `pushedCount` must be 0 when it is selected.
 
+## A sub-wedge only earns its own slot if it can fill one
+
+`splitFor(g)` already refuses to split a FOLDER into sub-wedges when its total note count
+can't fill the band's rows (`src/page.js:1781-1799`, github#18/#19 lineage) — but that is
+an aggregate, folder-level test. It says nothing about each *individual* resulting
+subfolder cell once a folder does split. Reviewing the demo vault after github#23 shipped,
+`04 - Daily Notes` (50 notes over 16 month subfolders, clears the folder-level bar as a
+whole) turned up 3 of its 4 sub-cells below the outer band's own row depth —
+`"0:6/9*", "1:6/9*", "2:4/9*"` against a healthy `"3:34/9"` tail — while every other split
+folder on that vault had zero sparse cells. Each sparse cell independently triggers
+`placeCell`'s one-note-per-row spread (correct in isolation; odd repeated three times
+side by side).
+
+`subCellIndex(folder, sub, n, depth)` (`src/page.js`, beside `subTintIndex`) adds the same
+question per subfolder: below `depth` (the caller's own `bandDepth[bk]`, the same number
+`splitFor` already computed for that band) → redirect to the pooled-tail slot instead of
+the subfolder's own rank. Deliberately a **separate function from `subTintIndex`**, not a
+change to it — `subTintIndex` also drives a subfolder's *colour* (`buildSubShades`), and
+colour should not shift just because a geometric slot did. Unconditional — every note
+run through the row-depth test, always; no toggle to check or forget to check.
+
+**`n` is a caller-supplied live count, not a lookup this function makes itself — and it
+was not, at first.** An earlier version read `subCount`, a whole-vault tally built once at
+load and never refreshed, to answer "how many notes does this subfolder have." Under a
+filter that is the wrong answer: a subfolder large in the whole vault but with almost
+nothing currently visible would still clear the threshold on its stale total and keep its
+own sub-wedge cell sparser than what's actually on screen — reproducing the exact defect
+this feature exists to remove. This is the identical bug class `buildWedgePlan`'s own
+comment already documents fixing for the FOLDER-level gate ("COUNTED FROM WHAT IS ON
+SCREEN, not from the vault... it also cannot see a filter"), just not carried over to the
+new per-subfolder one. Fixed the same way that fix was: a `liveSub` map, built in the same
+cascade-stable, filter-aware loop that already produces `liveG`/`liveN` (same
+`onlyVisible && !(planKeep || willShow)` membership), keyed by `folder + "/" + sub`. The
+call site passes `liveSub[...] || 0` as `n`; `subCellIndex` still reads `subOrder` via
+`subTintIndex`, but makes no count lookup of its own — the one piece of module state that
+was actually stale is a parameter instead.
+
+```javascript
+__vg.buildWedgePlan(false).cells   // a sparse rank is already folded into the tail
+```
+
+*No non-tail split cell holds fewer notes than its band's row depth* asserts the general
+rule directly against `buildWedgePlan(false)` — deliberately vault-agnostic (an even vault
+with nothing to gate is a legitimate pass, not skipped) rather than hardcoding which
+folder or vault is expected to be sparse. Confirmed on the demo vault build under this
+suite: 42 cells at rest, 24 of them non-tail split cells, none sparse.
+
+A second check, *the row-depth gate reads LIVE counts, not the whole-vault tally, under a
+filter*, drives `buildWedgePlan(true)` — not `(false)`, which every other check here uses
+— since that live path is exactly what the `subCount`-vs-`liveSub` bug above needed and
+nothing else exercises it. **The window is the fixture's own first 20% of history
+(`dateSpan.lo` to `dateSpan.lo + (hi-lo)*0.2`), not a fixed date.** A first cut reused the
+fixed two-day window an existing pin-and-filter check already uses and it reached zero
+split cells on all three fixtures — a check that cannot fail is not a check, so it was
+re-measured against a vault-relative window wide enough to still keep some. Confirmed
+non-vacuous by reintroducing the fixed bug (`subCellIndex` reading `subCount` again): 2 of
+the 3 fixtures caught it (`01 - Projects` sub-cells at 1/2 and 5/6), the third (the
+dominant-folder fixture, only 6 live cells under this window) did not — reported honestly
+as "vacuous on this fixture" rather than a silent pass, when that happens.
+
+**This shipped as a toggle first (`__vg.setSubwedgeGate`, off by default) and the toggle
+is gone.** It was the right call to make it one initially — this was a hypothesis about a
+look, not a confirmed fix, and the plan it shipped under said so explicitly. Live A/B
+testing across several rounds that day found the merge itself correct every time; what it
+also found, one round at a time, was three real bugs that existed *only because* the
+toggle needed to recompute and re-render live, mid-session, against whatever else the page
+happened to be doing at that moment — a cascade race (flipping the gate mid-intro left the
+plan correct but the rendered notes stuck in their old, scattered positions until the
+intro finished on its own), a stuck timeline (the same interruption skipped the sweep's
+own completion cleanup, leaving the date-strip handle parked wherever the cut-off frame
+left it), and an animation that only ever jumped instead of transitioning (an unconditional
+instant snap is the right choice for something meant to give instant feedback in a
+console, wrong for something a person is watching). Baking the gate in unconditionally —
+so the very first, only cascade of a session already computes the correct layout, with no
+runtime flip to race against anything — removed the need to fix any of the three rather
+than fixing all three. The cascade-cancellation groundwork itself (`stopPlay()` before
+`applyLayout(false)`, so a snap can't be overwritten by whatever was still animating) is a
+real, general finding about `relayout()` and any future caller of the same
+reset-and-snap shape; left unfixed here, deliberately, since there is no longer a caller
+in this ticket that needs it — worth its own follow-up if `relayout()` (or something like
+it) is ever driven the same way live.
+
 ## The resting disc is on the lattice
 
 At rest every note's radius is `base + an integer row × SP`. A fractional radius at rest
