@@ -4023,7 +4023,29 @@ function mountVaultGraph(root, data, deps) {
     el.hidden = false;
   }
 
+  // ONE UPDATE PER FRAME, for anything driven by a high-frequency pointer event. A
+  // pointermove/mousemove fires 120+ times a second on a decent mouse, and running real
+  // layout work on every one of them makes the handler itself the bottleneck -- the drag
+  // lags behind the cursor rather than tracking it. Only the LAST call queued before a
+  // frame paints ever runs; earlier ones in the same frame are simply superseded, which is
+  // correct for anything answering "where is the pointer now" -- only the latest position
+  // ever matters. Shared by buildDateUI's ribbon drag and bindNodeDrag's hub-pin drag,
+  // which both used to carry their own separate copy of this same four-line pattern.
+  function makeFrameCoalescer() {
+    var pend = null, raf = 0;
+    var flush = function () {
+      raf = 0;
+      var f = pend; pend = null;
+      if (f) f();
+    };
+    return function onFrame(fn) {
+      pend = fn;
+      if (!raf) raf = WIN.requestAnimationFrame(flush);
+    };
+  }
+
   function bindNodeDrag() {
+    var onFrame = makeFrameCoalescer();
     var captor = renderer.getMouseCaptor && renderer.getMouseCaptor();
     if (!captor) return;
 
@@ -4064,11 +4086,26 @@ function mountVaultGraph(root, data, deps) {
         nodeDrag.moved = true;
         dragJustMoved = nodeDrag.id;
       }
+      // .over IS COMPUTED HERE, SYNCHRONOUSLY, not deferred with the rest below -- drop()
+      // is bound straight to mouseup/mouseleave (not through onFrame), so it can run before
+      // a queued frame flushes and would otherwise read a stale .over from one frame behind
+      // the pointer's actual release point. inHubHole is cheap pure math, not the DOM work
+      // this throttle exists for, so there is no cost to keeping it immediate.
       var p = renderer.viewportToGraph(e);
-      graph.setNodeAttribute(nodeDrag.id, "x", p.x);
-      graph.setNodeAttribute(nodeDrag.id, "y", p.y);
       nodeDrag.over = inHubHole(p.x, p.y);
-      placeHubDrop();
+      // THE POSITION WRITE AND THE DOM-TOUCHING placeHubDrop() ARE DEFERRED to the next
+      // paint, same reason and same mechanism as the ribbon drag's onFrame calls above --
+      // un-throttled this was measured to fall behind on a real recording, per the comment
+      // on demoBigInnerNote picking shorter drag distances specifically to give it less
+      // distance to fall behind on. Position is read now, off the event that only exists
+      // for this call; only the expensive part waits.
+      var dragId = nodeDrag.id;
+      onFrame(function () {
+        if (!nodeDrag || nodeDrag.id !== dragId) return;    // dropped, or a new drag since
+        graph.setNodeAttribute(dragId, "x", p.x);
+        graph.setNodeAttribute(dragId, "y", p.y);
+        placeHubDrop();
+      });
     });
 
     var drop = function () {
@@ -6382,12 +6419,27 @@ function mountVaultGraph(root, data, deps) {
     hlWalk();
   }
 
+  // MEMOIZED BY FOCUS ID, not recomputed on every call. edgeReducer calls this once PER
+  // EDGE on every render pass (it colours/dims each edge against the current focus), and
+  // drawFocusWeb calls it again on top of that -- both rebuilding the same object from
+  // scratch each time, on a graph that can hold thousands of edges. The result depends on
+  // nothing but `f` and neighboursOf(f): neighboursOf reads `adj`, the note's always-
+  // complete adjacency, not the lazy-edge-budgeted graph (see neighboursOf's own comment),
+  // so it cannot go stale under a given f the way something reading live budgeted edges
+  // could. Caching by `f` alone -- not "once per frame" -- means it also survives
+  // unchanged across a whole hover, not just a single frame of it.
+  var focusSetCache = { key: undefined, set: null };
   function focusSet() {
     var f = state.hovered || state.selected;
-    if (!f) return null;
-    var set = Object.create(null);
-    set[f] = true;
-    neighboursOf(f).forEach(function (n) { set[n] = true; });
+    if (focusSetCache.key === f) return focusSetCache.set;
+    var set = null;
+    if (f) {
+      set = Object.create(null);
+      set[f] = true;
+      neighboursOf(f).forEach(function (n) { set[n] = true; });
+    }
+    focusSetCache.key = f;
+    focusSetCache.set = set;
     return set;
   }
 
@@ -10275,19 +10327,11 @@ function mountVaultGraph(root, data, deps) {
     var rib = $("ribbon");
     if (!rib) return;
 
-    // ONE UPDATE PER FRAME. A pointermove fires 120+ times a second on a decent mouse and
-    // each update re-lays out the disc; without this the handler is the bottleneck and the
-    // drag lags behind the cursor. The last position is the only one that matters.
-    var pend = null, pendRaf = 0;
-    var flush = function () {
-      pendRaf = 0;
-      var f = pend; pend = null;
-      if (f) f();
-    };
-    var onFrame = function (fn) {
-      pend = fn;
-      if (!pendRaf) pendRaf = WIN.requestAnimationFrame(flush);
-    };
+    // ONE UPDATE PER FRAME -- see makeFrameCoalescer, also used by bindNodeDrag's hub-pin
+    // drag. A pointermove fires 120+ times a second on a decent mouse and each update
+    // re-lays out the disc; without this the handler is the bottleneck and the drag lags
+    // behind the cursor. The last position is the only one that matters.
+    var onFrame = makeFrameCoalescer();
 
     $("rangeall").onclick = function () {
       state.from = null; state.to = null; state.heatEnd = null;
