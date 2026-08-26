@@ -5410,6 +5410,38 @@ function mountVaultGraph(root, data, deps) {
       // finalPos was computed above as what an unpinned layout produces for the destination, so
       // assigning it is the same answer arrived at once instead of twice.
       assignPositions(finalPos);
+      // REFRESH THE SIZE STATE TOO, not just position. dotPx() -- what the node reducer calls
+      // for every dot, every frame -- reads bandOf().room, cellRoom and edgeCap, and none of
+      // those are recomputed here on their own: they are side effects of whichever ringsLayout()
+      // call last ran, and that was the FRAME LOOP's, walking roomNow/cellNow/edgeNow from the
+      // source packing to the endpoint capture one frame at a time. Positions land correctly
+      // because assignPositions above reads finalPos directly; size does not, because nothing
+      // re-derives it against the settled alpha -- it is simply left holding whatever the last
+      // animated frame's WALKED figure happened to be.
+      //
+      // github#21: measured up to 157% off on a range change (a note at 26.5px that should be
+      // 68.1px), and up to 11.6% on a folder toggle -- both silent, because dr/dtan (position) are
+      // exactly right, and every check that ever looked (including the "last frame of a cascade
+      // is the resting layout" smoke check) compares the last animated frame against rest, which
+      // read the identical stale globals and agreed with itself.
+      //
+      // The calls below are exactly what an unrelated relayout already does by accident (a
+      // resize, a fit, the next toggle -- see __vg.relayout()), just run here instead of waiting
+      // for one. roomNow/cellNow/edgeNow are already null (cleared above) and pinnedPlan/planKeep
+      // are already null too, so this reads live alpha -- the SAME alpha finalPos was computed
+      // against -- and lands on the same plan deterministically. The POSITION output is discarded
+      // on purpose: reassigning position from a second call is the exact mistake the comment
+      // above this one already fixed once (a 1517-unit jump from two plans disagreeing on seats).
+      // Only the room/cellRoom/edgeCap side effects are wanted here.
+      //
+      // TWICE, same reason finalPos itself is computed twice above: room and position are a
+      // fixed point, and a single call still has this frame's MARGINS measured from whatever
+      // room the frame loop last left behind -- the very staleness this refresh exists to
+      // remove. Measured after adding the first call alone: still 58 of 213 notes off by more
+      // than 5%, worst 39.1%, and a second immediate call converged every one of them to 0 --
+      // stable under a third call too, confirming it is a fixed point and not still drifting.
+      ringsLayout();
+      ringsLayout();
       renderer.refresh({ skipIndexation: false });
       probeSample("settled");
       if (done) done();
