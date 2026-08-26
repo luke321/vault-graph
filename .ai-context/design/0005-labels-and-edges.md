@@ -74,3 +74,39 @@ namespace object, not off the Sigma class.** The bundle sets `Sigma.Sigma` and
 init `setTimeout`, which presents as a page stuck forever on "Laying out graph..."
 with an empty console. The existing warning in this note about `Sigma.rendering` vs
 `Sigma` meant the namespace; this is the same trap one level down.
+
+## The focus web sits above the dim notes
+
+Sigma paints every edge on its bottom layer and every node above that, so the edges lit
+by a hover or a click ran **under** the notes they crossed, and each dim disc cut a grey
+gap out of a blue line -- on a well-connected hub the web read as dashed (issue #2). The
+hovers canvas sits above the nodes layer -- so `drawFocusWeb` strokes every edge with both
+ends in the focus set there once more (the neighbour-to-neighbour ones included -- the
+edge reducer lights those too; the curve program's own geometry: control point = chord
+midpoint + curvature x chord normal; thickness `max(minEdgeThickness, scaleSize(size))`),
+then re-draws the focus neighbours' discs over the web on the same canvas, and `drawHover`
+paints the label pill last. Stacking becomes dim notes < web < lit notes < pill. Not by
+marking the neighbours `highlighted`: that lifts them onto `hoverNodes`, which is above the
+pill as well, and in the plugin the lit discs covered the focus note's name. Halo-typed
+notes are left as they are (their ring would be flattened), so a highlighted neighbour
+stays under the web. Alpha follows the hover ramp, so the web arrives with the dim rather
+than popping in over it.
+
+The approach here follows the diagnosis and geometry already diffed on the fork branch
+linked from issue #2 (`bartolli/vault-graph@21a618c`) -- reimplemented against this file's
+current state rather than applied verbatim.
+
+Measured across the three vault shapes `scripts/smoke.mjs` already builds, with the
+best-connected note selected, sampling every lit curve at 1% steps and keeping the samples
+that fall geometrically inside a non-focus disc: the demo vault (452, degree 71, 169
+edges, 364 in-disc samples): **107 dim before, 0 after**; the 10k synthetic vault (1192,
+degree 54, 55 edges, 152 in-disc samples): **36 dim before, 0 after**; the dominant-folder
+vault (157, degree 103, 206 edges, 1259 in-disc samples): **530 dim before, 0 after**.
+`__vg.checkFocusWeb()` in the console does exactly that -- composite `renderer.getCanvases()`
+onto a 2D canvas, sample the curves inside every non-focus `scaleSize(size)` radius and
+report `{ blueAtGaps, dimAtGaps, underLabel, otherAtGaps, webOK }`. A sample the hovers
+canvas itself has painted opaque and not blue is under the label pill or a lit neighbour's
+disc, told apart by that alpha rather than by colour. `scripts/smoke.mjs` runs this as an
+automated invariant ("focus web stays above dim notes") on every push, across all three
+vault shapes -- confirmed it fails correctly with the fix disabled (`dimAtGaps` 107/36/530
+respectively) before being wired to pass.

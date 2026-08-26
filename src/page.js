@@ -417,6 +417,11 @@ function mountVaultGraph(root, data, deps) {
     // control: these two are fixed, and the code paths for false are kept only
     // because flipping either here is still the way to compare the two renderings.
     curveEdges: true,
+    // TEMPORARY -- issue #2 verification only. Gates drawFocusWeb so the fix can be A/B'd
+    // live against the pre-fix stacking via the "Web fix" nav button. Removed, along with
+    // the button and its handler, once the comparison is done; the shipped drawHover calls
+    // drawFocusWeb unconditionally.
+    focusWebFix: true,
     // Logo colouring: true = the inner band's palette in the middle, fading out into
     // the outer's. false = the outer ring's palette across the whole mark.
     logoTwoRing: true,
@@ -6236,9 +6241,74 @@ function mountVaultGraph(root, data, deps) {
     return set;
   }
 
+  // THE FOCUS WEB, DRAWN ONCE MORE ABOVE THE DIM NOTES. Sigma paints every edge on its
+  // bottom layer and every node above that, so the edges edgeReducer lights on hover or
+  // click ran under the notes they crossed -- each dim disc in the way cut a grey gap out
+  // of a blue line, and on a well-connected hub the web read as dashed (issue #2). The
+  // approach here follows the diagnosis and geometry already diffed on the fork branch
+  // linked from that issue (bartolli/vault-graph@21a618c), reimplemented against this
+  // file's current state rather than applied verbatim.
+  //
+  // `hovers` sits above `nodes`, so stroking the focus edges here and re-drawing the
+  // focus neighbours' discs over them stacks dim notes < web < lit notes -- on this one
+  // canvas, and BELOW the label pill drawHover paints next. NOT by marking the neighbours
+  // `highlighted`: that lifts them onto hoverNodes, which sits above the pill too, and the
+  // lit discs ate the focus note's own name. Geometry is the curve program's own: control
+  // point = chord midpoint + curvature x the chord normal (matches curvatureFor's sign and
+  // magnitude); thickness = max(minEdgeThickness, scaleSize(size)); colour = the edge
+  // reducer's, already lit or dimmed. Alpha follows the hover ramp so the web arrives with
+  // the dim instead of popping in over it.
+  function drawFocusWeb(ctx, data, settings) {
+    if (!state.focusWebFix) return;   // TEMPORARY -- issue #2 A/B toggle
+    var f = state.hovered || state.selected;
+    if (!f || data.key !== f || state.query) return;
+    var ht = hoverAmount();
+    if (ht <= 0) return;
+    // Every edge with BOTH ends in the focus set is lit by the edge reducer -- the
+    // neighbour-to-neighbour ones too, not only those touching the focus note -- so the
+    // overlay walks the whole set, each edge once.
+    var set = focusSet(), seen = Object.create(null);
+    ctx.save();
+    ctx.globalAlpha = ht;
+    ctx.lineCap = "round";
+    Object.keys(set).forEach(function (n) {
+      graph.forEachEdge(n, function (e, attrs, s, t) {
+        if (seen[e]) return;
+        seen[e] = true;
+        if (!set[s] || !set[t]) return;
+        var ed = renderer.getEdgeDisplayData(e);
+        if (!ed || ed.hidden) return;
+        var ps = renderer.graphToViewport(graph.getNodeAttributes(s));
+        var pt = renderer.graphToViewport(graph.getNodeAttributes(t));
+        var dx = pt.x - ps.x, dy = pt.y - ps.y, k = ed.type === "curve" ? (ed.curvature || 0) : 0;
+        ctx.beginPath();
+        ctx.moveTo(ps.x, ps.y);
+        if (k) ctx.quadraticCurveTo((ps.x + pt.x) / 2 + dy * k, (ps.y + pt.y) / 2 - dx * k, pt.x, pt.y);
+        else ctx.lineTo(pt.x, pt.y);
+        ctx.lineWidth = Math.max(settings.minEdgeThickness, renderer.scaleSize(ed.size || 1));
+        ctx.strokeStyle = ed.color;
+        ctx.stroke();
+      });
+    });
+    // The lit neighbours, once more on top of the web. Plain discs only: a halo-typed
+    // note keeps its ring, and stays under the web rather than being flattened here.
+    Object.keys(set).forEach(function (n) {
+      if (n === f) return;
+      var nd = renderer.getNodeDisplayData(n);
+      if (!nd || nd.hidden || nd.type === "halo") return;
+      var p = renderer.graphToViewport(graph.getNodeAttributes(n));
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, renderer.scaleSize(nd.size), 0, 2 * Math.PI);
+      ctx.fillStyle = nd.color;
+      ctx.fill();
+    });
+    ctx.restore();
+  }
+
   // Replaces Sigma's built-in hover label, whose pill is hardcoded to #FFF.
   // Geometry matches its label drawer: text at x + size + 3, y + labelSize/3.
   function drawHover(ctx, data, settings) {
+    drawFocusWeb(ctx, data, settings);
     if (typeof data.label !== "string" || !data.label) return;
     var n = settings.labelSize;
     ctx.font = settings.labelWeight + " " + n + "px " + settings.labelFont;
@@ -8190,6 +8260,13 @@ function mountVaultGraph(root, data, deps) {
     if ($("zin")) $("zin").onclick = function () { zoomBy(1); };
     if ($("zout")) $("zout").onclick = function () { zoomBy(-1); };
     if ($("pan")) $("pan").onclick = function () { setPan(!panEnabled, true); };
+    // TEMPORARY -- issue #2 verification only. Repaints the currently hovered/selected
+    // note (if any) immediately, same pattern as wedgeDebug's own toggle.
+    if ($("webfix")) $("webfix").onclick = function () {
+      state.focusWebFix = !state.focusWebFix;
+      $("webfix").setAttribute("aria-pressed", String(state.focusWebFix));
+      if (renderer) renderer.refresh({ skipIndexation: true });
+    };
     // The saved default, applied once the renderer exists. Not persisted -- writing here
     // would save a value the host just handed us.
     setPan(panEnabled, false);
@@ -11007,6 +11084,88 @@ function mountVaultGraph(root, data, deps) {
                           Math.round(stat.maxR) === Math.round(live.maxR)
                       };
                       return out;   // the caller is a console; it prints this itself
+                    },
+                    // Focus-web check (issue #2): select the best-connected note, composite
+                    // the canvases in stacking order, sample the lit curves where they pass
+                    // inside a NON-focus disc -- dimAtGaps must be 0. A sample the hovers
+                    // canvas painted opaque and not blue is under the focus note's own label
+                    // pill (or a lit neighbour's disc over a dim one), which sit above the web
+                    // on purpose; those count apart as underLabel. The web is thin and sampled
+                    // at one device pixel, so a miss looks one pixel around before it counts.
+                    checkFocusWeb: function () {
+                      var best = null, bd = -1;
+                      graph.forEachNode(function (id) { if (graph.degree(id) > bd) { bd = graph.degree(id); best = id; } });
+                      var keepSel = state.selected, keepHov = state.hovered;
+                      state.selected = best; state.hovered = null;
+                      renderer.refresh({ skipIndexation: true }); renderer.render();
+                      var cv = renderer.getCanvases();
+                      var order = ["edges", "nodes", "edgeLabels", "labels", "hovers", "hoverNodes"];
+                      var W = cv.nodes.width, H = cv.nodes.height, dpr = W / renderer.getDimensions().width;
+                      var off = DOC.createElement("canvas"); off.width = W; off.height = H;
+                      var ctx = off.getContext("2d");
+                      ctx.fillStyle = css("--surface-1"); ctx.fillRect(0, 0, W, H);
+                      order.forEach(function (k) { if (cv[k]) ctx.drawImage(cv[k], 0, 0); });
+                      var img = ctx.getImageData(0, 0, W, H).data;
+                      var hov = DOC.createElement("canvas"); hov.width = W; hov.height = H;
+                      var hctx = hov.getContext("2d"); hctx.drawImage(cv.hovers, 0, 0);
+                      var himg = hctx.getImageData(0, 0, W, H).data;
+                      var at = function (data, x, y) {
+                        var X = Math.round(x * dpr), Y = Math.round(y * dpr);
+                        if (X < 0 || Y < 0 || X >= W || Y >= H) return null;
+                        var i = (Y * W + X) * 4;
+                        return [data[i], data[i + 1], data[i + 2], data[i + 3]];
+                      };
+                      var hi = toRgb(THEME.edgeHi), dm = toRgb(THEME.dim);
+                      var dist = function (c, t) { return c ? Math.abs(c[0] - t[0]) + Math.abs(c[1] - t[1]) + Math.abs(c[2] - t[2]) : 1e9; };
+                      var set = focusSet() || {}, dims = [];
+                      graph.forEachNode(function (id) {
+                        if (set[id]) return;
+                        var d = renderer.getNodeDisplayData(id);
+                        if (!d || d.hidden) return;
+                        var p = renderer.graphToViewport(graph.getNodeAttributes(id));
+                        dims.push({ x: p.x, y: p.y, rad: renderer.scaleSize(d.size) });
+                      });
+                      var res = { node: best, degree: bd, edges: 0, samples: 0, geomGaps: 0,
+                                  blueAtGaps: 0, dimAtGaps: 0, underLabel: 0, otherAtGaps: 0 };
+                      var seen = Object.create(null);
+                      Object.keys(set).forEach(function (n) {
+                        graph.forEachEdge(n, function (e, attrs, s, t) {
+                          if (seen[e] || !set[s] || !set[t]) return;
+                          seen[e] = true;
+                          var ed = renderer.getEdgeDisplayData(e);
+                          if (!ed || ed.hidden) return;
+                          res.edges++;
+                          var ps = renderer.graphToViewport(graph.getNodeAttributes(s));
+                          var pt = renderer.graphToViewport(graph.getNodeAttributes(t));
+                          var dx = pt.x - ps.x, dy = pt.y - ps.y, k = ed.type === "curve" ? (ed.curvature || 0) : 0;
+                          var cp = { x: (ps.x + pt.x) / 2 + dy * k, y: (ps.y + pt.y) / 2 - dx * k };
+                          for (var u = 0.05; u <= 0.95; u += 0.01) {
+                            var x = (1 - u) * (1 - u) * ps.x + 2 * (1 - u) * u * cp.x + u * u * pt.x;
+                            var y = (1 - u) * (1 - u) * ps.y + 2 * (1 - u) * u * cp.y + u * u * pt.y;
+                            res.samples++;
+                            var covered = dims.some(function (d) {
+                              var ddx = d.x - x, ddy = d.y - y;
+                              return ddx * ddx + ddy * ddy <= (d.rad - 0.5) * (d.rad - 0.5);
+                            });
+                            if (!covered) continue;
+                            res.geomGaps++;
+                            var c = at(img, x, y), blue = dist(c, hi) < 60;
+                            for (var ox = -1; ox <= 1 && !blue; ox++) {
+                              for (var oy = -1; oy <= 1 && !blue; oy++) {
+                                if (ox || oy) blue = dist(at(img, x + ox / dpr, y + oy / dpr), hi) < 60;
+                              }
+                            }
+                            var h = at(himg, x, y);
+                            if (blue) res.blueAtGaps++;
+                            else if (h && h[3] >= 250) res.underLabel++;
+                            else if (dist(c, dm) < 60) res.dimAtGaps++;
+                            else res.otherAtGaps++;
+                          }
+                        });
+                      });
+                      state.selected = keepSel; state.hovered = keepHov; renderer.refresh();
+                      res.webOK = res.dimAtGaps === 0;
+                      return res;
                     },
     };
     /* ---- BEGIN: demo automation + debug API -- stripped from the plugin build, see scripts/build-plugin.mjs (stripDemoAndDebug) ---- */

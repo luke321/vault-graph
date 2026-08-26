@@ -566,3 +566,25 @@ clamps and the animation stretches rather than leaping.
 `setTimeout(settle, dur + margin)` fires part-way through on any page too slow to finish
 in time and snaps the disc — this exact bug has been introduced twice. Watchdogs re-arm
 while frames keep arriving.
+
+## The focus web stays above the dim notes
+
+Sigma paints every edge on its bottom layer and every node above that, so a lit (hover or
+click) edge running under a dim note used to lose a bite of itself to every disc it
+crossed — a well-connected hub read as dashed instead of solid (issue #2).
+
+```javascript
+__vg.checkFocusWeb()      // -> dimAtGaps: 0, webOK: true
+```
+
+Selects the best-connected note, composites the canvases in stacking order, and samples
+every lit curve at 1% steps, keeping the samples that fall geometrically inside a
+non-focus disc. `dimAtGaps` must be **0** — any sample landing on a dim disc means the web
+is still running under it. Not frame-sensitive: the check selects rather than hovers, so
+`hoverAmount()` is `1` immediately with no ramp to catch mid-flight.
+
+Measured across the three vault shapes `scripts/smoke.mjs` builds: the demo vault (node
+452, degree 71, 364 in-disc samples) **107 dim before the fix, 0 after**; the 10k
+synthetic vault (node 1192, degree 54, 152 in-disc samples) **36 before, 0 after**; the
+dominant-folder vault (node 157, degree 103, 1259 in-disc samples) **530 before, 0
+after**. See `design/0005`.
