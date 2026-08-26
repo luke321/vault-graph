@@ -70,7 +70,7 @@ hoverable and clickable the same way a top-level folder is.
 
 Scroll to zoom, drag to pan, double-click or the corner button to reset.
 
-*Clip pending.*
+![Scrolling to zoom in, dragging to pan, double-clicking to reset, zooming in again, then the corner button resetting it](../assets/features/camera.webp)
 
 ## The timeline
 

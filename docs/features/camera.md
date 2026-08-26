@@ -28,4 +28,4 @@ commit.
 | | |
 |---|---|
 | **Introduced in** | `predates versioning — undocumented until this gallery` |
-| **Last re-recorded** | `never — clip not yet recorded` |
+| **Last re-recorded** | `unreleased — 2026-08-26` |
