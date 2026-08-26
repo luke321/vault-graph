@@ -991,27 +991,29 @@ class VaultGraphSettingTab extends PluginSettingTab {
     this.display();
   }
 
-  // One folder's slot. `key` null clears the override. Nothing else in the map is
-  // touched -- two folders may hold the same slot on purpose.
-  async pick(folder, key) {
-    const map = Object.assign({}, this.plugin.settings.folderColors);
-    if (key) map[folder] = key; else delete map[folder];
-    this.plugin.settings.folderColors = map;
+  // Set-or-clear one slot override in a settings map, save, apply live, re-render. `key`
+  // null clears the override. Nothing else in the map is touched -- two entries may hold
+  // the same slot on purpose. Shared by pick() and pickSub(), which only differ in which
+  // settings map they touch, how the map key is built, and which apply method re-derives
+  // colours from it.
+  async setOverride(settingsKey, mapKey, key, applyMethod) {
+    const map = Object.assign({}, this.plugin.settings[settingsKey]);
+    if (key) map[mapKey] = key; else delete map[mapKey];
+    this.plugin.settings[settingsKey] = map;
     await this.plugin.saveSettings();
-    await this.plugin.applyFolderColors();
+    await this.plugin[applyMethod]();
     this.display();
+  }
+
+  // One folder's slot.
+  async pick(folder, key) {
+    return this.setOverride("folderColors", folder, key, "applyFolderColors");
   }
 
   // As pick(), one level down. this.display() re-collapses nothing -- see this.subOpen
   // in the constructor -- so the section this pick was made in stays open.
   async pickSub(folder, sub, key) {
-    const map = Object.assign({}, this.plugin.settings.subfolderColors);
-    const pk = folder + "/" + sub;
-    if (key) map[pk] = key; else delete map[pk];
-    this.plugin.settings.subfolderColors = map;
-    await this.plugin.saveSettings();
-    await this.plugin.applySubfolderColors();
-    this.display();
+    return this.setOverride("subfolderColors", folder + "/" + sub, key, "applySubfolderColors");
   }
 }
 
