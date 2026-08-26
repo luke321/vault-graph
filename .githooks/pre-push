@@ -170,6 +170,31 @@ EOF
   exit 1
 fi
 
+# GENERATOR DETERMINISM NEXT, same "cheap enough there's no reason to skip" bar as the
+# three above -- two Node subprocess runs per generator, no Chrome, a few seconds total.
+# Unlike those three this isn't about damage to someone else; it's about the test fixtures
+# lying to whoever reads them. make-demo-vault.mjs and make-shape-vault.mjs both default
+# their --end date to today, and a layout measurement taken from one of their builds is
+# worthless if the SAME seed can quietly produce different folder/subfolder note counts
+# depending on which day it was generated -- exactly the shape of investigation that cost
+# real time chasing github#31/#32 before it turned out the fixtures were never the problem.
+echo "pre-push: checking vault generators are day-independent..."
+if ! node "$root/scripts/check-generator-determinism.mjs" </dev/null; then
+  cat >&2 <<'EOF'
+
+pre-push: generator determinism check failed -- push blocked.
+
+A synthetic vault generator's per-folder note counts changed between two --end dates on
+the same seed. That means a layout measurement taken from one of its builds depends on
+which day it happened to be generated -- read the FAIL lines above for which folder(s)
+moved, and fix the generator so subfolder placement never consults the calendar, only
+the seeded PRNG.
+
+There is no skip flag for this check.
+EOF
+  exit 1
+fi
+
 if [ -n "$SKIP_SMOKE" ]; then
   echo "pre-push: SKIP_SMOKE set, skipping the invariant suite"
   exit 0
