@@ -8608,6 +8608,37 @@ function mountVaultGraph(root, data, deps) {
     }
     function ctxKey(ev) { if (ev.key === "Escape") closeCtxMenu(); }
 
+    // THE ONE SWATCH-BUTTON MARKUP, shared by the three places that draw the twelve slots:
+    // the context menu below, a subfolder's row, and a folder's row in the settings panel.
+    // All three build the same <button class="swatch vg-<key>"> shape and used to each
+    // write it out by hand -- structurally identical, differing only in which extra
+    // data-* attribute carries the row's own key (or none, for the context menu, which
+    // reads data-key alone) and in the title-suffix wording, which stays a per-caller
+    // callback because "chosen" vs "automatic" vs "automatic default" is a real
+    // difference in what each surface can even claim (a context menu has no separate
+    // "automatic default" state to report; a subfolder row never marks Auto at all).
+    //
+    //   pal        paletteInfo()'s list
+    //   opts.role         "radio" or "menuitemradio"
+    //   opts.dataAttr     extra data-* name carrying the row's own key ("fc"/"sfc"), omit
+    //                     for the context menu (data-key alone is enough there)
+    //   opts.dataValue    that attribute's value (a folder name, or "<folder>/<sub>")
+    //   opts.current      the slot key in force, "" for none
+    //   opts.autoKey      the slot Auto would give back, "" if this row never marks one
+    //   opts.titleFor(on, isAuto)  the title-text suffix for one swatch
+    function swatchButtonsHTML(pal, opts) {
+      return pal.map(function (p) {
+        var on = opts.current === p.key;
+        var isAuto = !!opts.autoKey && opts.autoKey === p.key;
+        return '<button class="swatch vg-' + p.key + '" role="' + opts.role + '"' +
+               (opts.dataAttr ? ' data-' + opts.dataAttr + '="' + esc(opts.dataValue) + '"' : '') +
+               ' data-key="' + p.key + '" aria-checked="' + on + '"' +
+               (isAuto ? ' data-auto="1"' : '') +
+               ' title="' + esc(p.name) + (opts.titleFor ? opts.titleFor(on, isAuto) : "") +
+               '" aria-label="' + esc(p.name) + '"></button>';
+      }).join("");
+    }
+
     // The same 12-swatch + Auto markup buildSettings' own rows build, at the click point
     // instead of in the sidebar. `current` is a slot key or "" for none; onPick(key) fires
     // with the chosen key, or null for Auto.
@@ -8629,15 +8660,10 @@ function mountVaultGraph(root, data, deps) {
       var el = $("ctxmenu");
       if (!el) return;
       var pal = paletteInfo();
-      var sws = pal.map(function (p) {
-        var on = current === p.key;
-        var isAuto = !!autoKey && autoKey === p.key;
-        return '<button class="swatch vg-' + p.key + '" role="menuitemradio"' +
-               ' data-key="' + p.key + '" aria-checked="' + on + '"' +
-               (isAuto ? ' data-auto="1"' : '') +
-               ' title="' + esc(p.name) + (isAuto ? " (automatic)" : "") +
-               '" aria-label="' + esc(p.name) + '"></button>';
-      }).join("");
+      var sws = swatchButtonsHTML(pal, {
+        role: "menuitemradio", current: current, autoKey: autoKey,
+        titleFor: function (on, isAuto) { return isAuto ? " (automatic)" : ""; }
+      });
       setHTML(el, '<div class="sws">' + sws + '</div>' +
                   '<button class="auto" data-key="" aria-pressed="' + !current +
                   '" title="Back to automatic">Auto</button>');
@@ -8757,13 +8783,10 @@ function mountVaultGraph(root, data, deps) {
         var pin = subfolderColors[pk] || "";
         var tint = subShade[pk] || colorOf(g);
         var nm = sb || "(directly in folder)";
-        var sws = pal.map(function (p) {
-          var on = pin === p.key;
-          return '<button class="swatch vg-' + p.key + '" role="radio"' +
-                 ' data-sfc="' + esc(pk) + '" data-key="' + p.key + '"' +
-                 ' aria-checked="' + on + '" title="' + esc(p.name) + (on ? " (chosen)" : "") +
-                 '" aria-label="' + esc(p.name) + '"></button>';
-        }).join("");
+        var sws = swatchButtonsHTML(pal, {
+          role: "radio", dataAttr: "sfc", dataValue: pk, current: pin,
+          titleFor: function (on, isAuto) { return on ? " (chosen)" : ""; }
+        });
         return '<div class="scr scrsub" role="radiogroup" aria-label="Colour for ' +
                esc(g + "/" + nm) + '">' +
                '<div class="scrh">' +
@@ -8823,19 +8846,14 @@ function mountVaultGraph(root, data, deps) {
         // "automatic" and "currently in use" were the same ring, and a pin erased the
         // only trace of what Auto would give back.
         var autoKey = groupAutoSlot[g] || "";
-        var sws = pal.map(function (p) {
-          var on = cur === p.key;
-          var isAuto = autoKey === p.key;
-          // The colour comes from `.vg-<key>` in page.css, not from an inline style: a
-          // hex baked in here would not survive the theme flip that readTheme handles.
-          return '<button class="swatch vg-' + p.key + '" role="radio"' +
-                 ' data-fc="' + esc(g) + '" data-key="' + p.key + '"' +
-                 ' aria-checked="' + on + '"' +
-                 (isAuto ? ' data-auto="1"' : '') +
-                 ' title="' + esc(p.name) +
-                 (on ? (pinned ? " (chosen)" : " (automatic)") : (isAuto ? " (automatic default)" : "")) +
-                 '" aria-label="' + esc(p.name) + '"></button>';
-        }).join("");
+        // The colour comes from `.vg-<key>` in page.css, not from an inline style: a hex
+        // baked in here would not survive the theme flip that readTheme handles.
+        var sws = swatchButtonsHTML(pal, {
+          role: "radio", dataAttr: "fc", dataValue: g, current: cur, autoKey: autoKey,
+          titleFor: function (on, isAuto) {
+            return on ? (pinned ? " (chosen)" : " (automatic)") : (isAuto ? " (automatic default)" : "");
+          }
+        });
         // AUTO SITS ON THE NAME LINE, not at the end of the swatches. As a thirteenth
         // item in that row it was the one thing that could not fit beside twelve
         // swatches in a 288px sidebar, so the row wrapped and left a single swatch and
