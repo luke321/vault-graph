@@ -471,6 +471,39 @@ Two consequences that have each cost something:
   Centring is a promise the control can only keep where it can still move; a fixed
   fraction aims off the end of the travel on a narrow-span vault and measures the clamp.
 
+## The window pill centres on the pointer's PIXEL, not its date
+
+`winEndCentredAtPx` (`src/page.js`) solves for the window's end by bisection in pixel
+space — given the pointer's x, find the `end` whose drawn pill (`ribbonX(end-span, w)` to
+`ribbonX(end, w)`) has that x as its midpoint. Replaced a formula that added half the
+window's span in TIME to the pointer's own date (`ms + winSpan()/2`), which only centres
+correctly when `ribbonX` is linear: that shortcut assumes a constant px-per-ms ratio to
+turn "half the span in time" into "half the pill's width on screen", and github#23's
+compact axis broke the assumption on purpose. Reported live: grabbing the pill visibly
+resized as it crossed a density boundary and stopped tracking the pointer's actual pixel.
+
+```javascript
+// after a press or drag on the window track
+__vg.heat.start + __vg.heat.cols * 7 * 86400000   // the (Monday-quantised) drawn end
+__vg.ribbonXOf(end)                                // where that end actually sits
+```
+
+**Verified in isolation before trusting the check.** A `debugWinEndCentredAtPx(px, w)`
+probe (removed once it had answered) confirmed the bisection itself lands the RAW end
+exactly on target — 0px off at an achievable pixel, correctly clamped and non-zero off at
+an unachievable one. The remaining error a check can observe is Monday quantisation
+(`heatBuild()` snaps `heat.start`, up to ~7 days away from what the bisection solved for),
+and how many pixels 7 days costs is not a constant — it depends on how dense the axis is
+right there. Measured directly rather than assumed a flat budget: 1.4px on the demo vault,
+3px on the 10k vault, but **37.2px on the dominant-folder vault**, whose 14 months are all
+near the note-count ceiling (no real compaction happening, so a week costs as many pixels
+as it always did on a narrow, largely-linear span). *a press on the window track centres
+the window there* computes its own tolerance from the LOCAL px-per-week at the press point
+(`ribbonXOf(end) - ribbonXOf(end - 7d)`, times 1.5 for margin) rather than a flat number,
+for the same reason the target pixel itself is read off the control's own measured travel
+(`winTravel`, github#18) rather than assumed — a flat pixel budget tuned on a decade-wide
+vault is far too tight for a vault whose whole span is 14 months.
+
 ## The date axis weighs years by note count, not by calendar time
 
 `compactAxis` (default on, github#23) gives each calendar YEAR a width between

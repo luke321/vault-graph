@@ -10017,14 +10017,38 @@ function mountVaultGraph(root, data, deps) {
   }
 
   /**
-   * The window end that puts the pointer in the MIDDLE of the pill.
+   * The window end that puts the POINTER'S PIXEL, not its date, in the middle of the pill.
    *
    * Grabbing it used to set the window's END to the pointer, so the pill jumped to sit
    * entirely to the left of the hand and the thing being dragged was somewhere else. Centring
    * is what a scrollbar thumb does when you click the trough, and it means the date under the
    * cursor is the middle of what the grid is showing -- which is the date you were pointing at.
+   *
+   * TAKES A PIXEL, NOT A DATE, and solves for `end` by bisection rather than adding half the
+   * window's span in ms -- that shortcut only works when ribbonX is linear, because it
+   * assumes a constant px-per-ms ratio to convert "half the span in time" into "half the
+   * pill's width on screen". compactAxis breaks that assumption on purpose: the same 52-week
+   * span can be many pixels wide sitting in a dense year and few sitting in a sparse one, so
+   * a window whose end tracked the pointer by TIME visibly resized as it crossed that
+   * boundary and stopped tracking the pointer's actual pixel at all (github#23). Solving in
+   * pixel space instead asks the one question that is actually true regardless of the axis:
+   * where does `end` have to be for the drawn pill's midpoint to BE this pixel. Monotonic in
+   * `end` (ribbonX only ever increases with ms), so bisection converges in a fixed handful of
+   * steps and needs no derivative. On a linear axis this converges to the exact same answer
+   * the old formula gave -- centring by pixel and centring by time are the same statement
+   * there, so nothing about the non-compact behaviour changes.
    */
-  function winEndCentred(ms) { return clampWinEnd(ms + winSpan() / 2); }
+  function winEndCentredAtPx(px, w) {
+    var span = winSpan(), todayMs = heatParse(TODAY);
+    var lo = Math.min(dateSpan.lo + span, todayMs), hi = todayMs;
+    if (lo >= hi) return clampWinEnd(hi);
+    for (var i = 0; i < 24; i++) {
+      var mid = (lo + hi) / 2;
+      var midPx = (ribbonX(mid - span, w) + ribbonX(mid, w)) / 2;
+      if (midPx < px) lo = mid; else hi = mid;
+    }
+    return clampWinEnd((lo + hi) / 2);
+  }
 
   /**
    * What a press at `x` grabs: an existing edge, the span between them, or empty strip.
@@ -10143,7 +10167,7 @@ function mountVaultGraph(root, data, deps) {
       // A PRESS ON THE TRACK IS ALSO A JUMP. Dragging the pill across eleven years to reach
       // 2018 is a lot of mouse; pressing at 2018 puts it there and the drag then refines it.
       if (mode === "win") {
-        state.heatEnd = winEndCentred(ribbonMs(x, w));
+        state.heatEnd = winEndCentredAtPx(x, w);
         rebuildBand();
         showRTip(x, winLabel());
       }
@@ -10179,7 +10203,7 @@ function mountVaultGraph(root, data, deps) {
         var wx = xOf(ev);
         onFrame(function () {
           if (!brushDrag) return;
-          state.heatEnd = winEndCentred(here);
+          state.heatEnd = winEndCentredAtPx(wx, w);
           rebuildBand();
           showRTip(wx, winLabel());
         });

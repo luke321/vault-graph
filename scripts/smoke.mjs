@@ -1522,14 +1522,17 @@ check("a press on the window track centres the window there", async (p) => {
   // The end-at-pointer version put the whole pill to the left of the hand, so the thing being
   // dragged was somewhere other than where the cursor was.
   //
-  // Asserted as "the date under the pointer is the middle of what the grid shows", within a
-  // couple of weeks: the window's end quantises to a Monday, so an exact midpoint is not
-  // available anywhere.
+  // Asserted as "the PIXEL under the pointer is the middle of what the grid shows" -- not the
+  // date, since github#23's compact axis made ribbonX non-linear and a fixed time half-span
+  // stopped being a fixed pixel half-span. Within a budget rather than a flat tolerance: the
+  // window's end quantises to a Monday, so an exact midpoint is never available, and how many
+  // pixels that quantisation costs depends on how dense the axis is right there -- see below.
   //
   // THE PRESS LANDS AT THE MIDDLE OF THE WINDOW'S OWN TRAVEL, not at a fixed fraction of the
   // ribbon. Centring is a promise the control can only keep where it can still move; a
   // fraction chosen without asking aims off the end of the travel on a narrow-span vault and
-  // measures the clamp instead (github#18).
+  // measures the clamp instead (github#18) -- the same lesson bit a first version of this
+  // check's pixel target too (see below).
   await clearRange(p);
   const box = await ribbonBox(p);
   const yBars = box.top + 12, yTrack = box.top + RIB_BARS + 5;
@@ -1547,18 +1550,52 @@ check("a press on the window track centres the window there", async (p) => {
   }
 
   const a = await ribbonDrag(p, box, Math.round(box.w * 0.30), Math.round(box.w * 0.55), yBars);
-  const aimMs = t.aim(0.5);
-  const b = await trackPress(p, box, Math.round(await xOfMs(p, aimMs)), yTrack);
-  const midMs = b.winEndMs - b.winSpanMs / 2;
-  const offDays = Math.round(Math.abs(midMs - aimMs) / 86400000);
-  const iso = (ms) => new Date(ms).toISOString().slice(0, 10);
+  // AIM INSIDE THE ACHIEVABLE PIXEL RANGE, not at t.aim(0.5)'s time-based midpoint (github#18's
+  // own fixed-ribbon-fraction mistake, reintroduced in a new unit): that formula subtracts a
+  // full half-span from a TIME interpolation between the two extremes' own winEnd, which can
+  // land well before dateSpan.lo on a vault whose travel is much narrower than its span (57d
+  // of travel against a 364d window here) -- ribbonXOf then clamps it to near pixel 0, and
+  // bisection correctly converges to the SMALLEST reachable midpoint, which is nowhere near 0.
+  // That was never a bug in the centring; it was this check aiming outside what the control
+  // can do. Deriving the target from the two extreme presses' OWN achievable midpoints (exactly
+  // what winTravel already measured) is the same "read the travel off the control" fix github#18
+  // made, extended to pixel space for github#23's pixel-centred pill.
+  const [loMidPx, hiMidPx] = await p.j(`[
+    (__vg.ribbonXOf(${t.loMs} - ${t.spanMs}) + __vg.ribbonXOf(${t.loMs})) / 2,
+    (__vg.ribbonXOf(${t.hiMs} - ${t.spanMs}) + __vg.ribbonXOf(${t.hiMs})) / 2
+  ]`);
+  const pressX = Math.round((loMidPx + hiMidPx) / 2);
+  const b = await trackPress(p, box, pressX, yTrack);
+  // PIXEL-centred, not time-centred: press at pixel P, the drawn pill's own midpoint has to
+  // land back near P. Time-centred (press at date X, window's time-midpoint lands near X)
+  // was the assertion here before github#23's compact axis -- it stopped being the right
+  // question the moment ribbonX became non-linear, because a fixed TIME half-span is no
+  // longer a fixed PIXEL half-span, and "centred" is a promise about what's on screen.
+  //
+  // TOLERANCE IS A LOCAL PIXEL BUDGET, not a flat number, for the same reason the target
+  // pixel above has to be measured rather than assumed: b.winEndMs is __vg.heat.start plus
+  // the span, and heatBuild() snaps heat.start to a Monday -- centring can only promise the
+  // RAW end (what the bisection actually solved for) lands on the pixel; the quantised end
+  // this check can observe is up to ~1 week away from that, and how many pixels one week
+  // costs depends entirely on how dense this stretch of the axis is. Measured directly
+  // rather than guessed: a flat 8px budget (right for the 10k and demo vaults, where a week
+  // is a couple of pixels against a decade-plus span) failed here by 3-5x, because this
+  // vault's 14 months are all near the note-count ceiling -- no real compaction, so a week
+  // costs as many pixels as it would on the old linear axis, ~20-40 on a narrow vault.
+  const [resultMidPx, pxPerWeek] = await p.j(`[
+    (__vg.ribbonXOf(${b.winEndMs} - ${b.winSpanMs}) + __vg.ribbonXOf(${b.winEndMs})) / 2,
+    __vg.ribbonXOf(${b.winEndMs}) - __vg.ribbonXOf(${b.winEndMs} - 7 * 86400000)
+  ]`);
+  const offPx = Math.round(Math.abs(resultMidPx - pressX) * 10) / 10;
+  const budget = Math.round((Math.abs(pxPerWeek) * 1.5 + 2) * 10) / 10;
   const brushHeld = b.from === a.from && b.to === a.to;
 
   await clearRange(p);
   return {
-    ok: b.winEnd !== a.winEnd && brushHeld && offDays <= 14,
-    detail: `pressed at ${iso(aimMs)}, window centred on ${iso(midMs)} (${offDays}d off) ` +
-            `within ${t.days}d of travel; brush ${brushHeld ? "held" : "MOVED"}`,
+    ok: b.winEnd !== a.winEnd && brushHeld && offPx <= budget,
+    detail: `pressed at pixel ${pressX}, pill's own midpoint landed at ${resultMidPx.toFixed(1)} ` +
+            `(${offPx}px off, budget ${budget}px = 1.5 local weeks) within ${t.days}d of travel; ` +
+            `brush ${brushHeld ? "held" : "MOVED"}`,
   };
 });
 
