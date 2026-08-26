@@ -6241,6 +6241,19 @@ function mountVaultGraph(root, data, deps) {
     return set;
   }
 
+  // Shared by drawFocusWeb and checkFocusWeb, so the diagnostic can never drift from what
+  // is actually drawn: the viewport-projected endpoints and the quadratic control point
+  // for one edge (control point = chord midpoint + curvature x the chord normal, matching
+  // curvatureFor's own sign and magnitude). null for a hidden edge.
+  function edgeCurveGeom(e, s, t) {
+    var ed = renderer.getEdgeDisplayData(e);
+    if (!ed || ed.hidden) return null;
+    var ps = renderer.graphToViewport(graph.getNodeAttributes(s));
+    var pt = renderer.graphToViewport(graph.getNodeAttributes(t));
+    var dx = pt.x - ps.x, dy = pt.y - ps.y, k = ed.type === "curve" ? (ed.curvature || 0) : 0;
+    return { ed: ed, ps: ps, pt: pt, k: k, cp: { x: (ps.x + pt.x) / 2 + dy * k, y: (ps.y + pt.y) / 2 - dx * k } };
+  }
+
   // THE FOCUS WEB, DRAWN ONCE MORE ABOVE THE DIM NOTES. Sigma paints every edge on its
   // bottom layer and every node above that, so the edges edgeReducer lights on hover or
   // click ran under the notes they crossed -- each dim disc in the way cut a grey gap out
@@ -6276,17 +6289,14 @@ function mountVaultGraph(root, data, deps) {
         if (seen[e]) return;
         seen[e] = true;
         if (!set[s] || !set[t]) return;
-        var ed = renderer.getEdgeDisplayData(e);
-        if (!ed || ed.hidden) return;
-        var ps = renderer.graphToViewport(graph.getNodeAttributes(s));
-        var pt = renderer.graphToViewport(graph.getNodeAttributes(t));
-        var dx = pt.x - ps.x, dy = pt.y - ps.y, k = ed.type === "curve" ? (ed.curvature || 0) : 0;
+        var geo = edgeCurveGeom(e, s, t);
+        if (!geo) return;
         ctx.beginPath();
-        ctx.moveTo(ps.x, ps.y);
-        if (k) ctx.quadraticCurveTo((ps.x + pt.x) / 2 + dy * k, (ps.y + pt.y) / 2 - dx * k, pt.x, pt.y);
-        else ctx.lineTo(pt.x, pt.y);
-        ctx.lineWidth = Math.max(settings.minEdgeThickness, renderer.scaleSize(ed.size || 1));
-        ctx.strokeStyle = ed.color;
+        ctx.moveTo(geo.ps.x, geo.ps.y);
+        if (geo.k) ctx.quadraticCurveTo(geo.cp.x, geo.cp.y, geo.pt.x, geo.pt.y);
+        else ctx.lineTo(geo.pt.x, geo.pt.y);
+        ctx.lineWidth = Math.max(settings.minEdgeThickness, renderer.scaleSize(geo.ed.size || 1));
+        ctx.strokeStyle = geo.ed.color;
         ctx.stroke();
       });
     });
@@ -11094,7 +11104,15 @@ function mountVaultGraph(root, data, deps) {
                     // at one device pixel, so a miss looks one pixel around before it counts.
                     checkFocusWeb: function () {
                       var best = null, bd = -1;
-                      graph.forEachNode(function (id) { if (graph.degree(id) > bd) { bd = graph.degree(id); best = id; } });
+                      // Skip anything the current filter/opacity has hidden, or picking the
+                      // graph's highest-degree note regardless of what's actually on screen
+                      // can land on one with zero visible edges -- geomGaps stays 0 and the
+                      // check reports "nothing to measure" without having exercised the fix.
+                      graph.forEachNode(function (id) {
+                        var d = renderer.getNodeDisplayData(id);
+                        if (!d || d.hidden) return;
+                        if (graph.degree(id) > bd) { bd = graph.degree(id); best = id; }
+                      });
                       var keepSel = state.selected, keepHov = state.hovered;
                       state.selected = best; state.hovered = null;
                       renderer.refresh({ skipIndexation: true }); renderer.render();
@@ -11132,13 +11150,10 @@ function mountVaultGraph(root, data, deps) {
                         graph.forEachEdge(n, function (e, attrs, s, t) {
                           if (seen[e] || !set[s] || !set[t]) return;
                           seen[e] = true;
-                          var ed = renderer.getEdgeDisplayData(e);
-                          if (!ed || ed.hidden) return;
+                          var geo = edgeCurveGeom(e, s, t);
+                          if (!geo) return;
                           res.edges++;
-                          var ps = renderer.graphToViewport(graph.getNodeAttributes(s));
-                          var pt = renderer.graphToViewport(graph.getNodeAttributes(t));
-                          var dx = pt.x - ps.x, dy = pt.y - ps.y, k = ed.type === "curve" ? (ed.curvature || 0) : 0;
-                          var cp = { x: (ps.x + pt.x) / 2 + dy * k, y: (ps.y + pt.y) / 2 - dx * k };
+                          var ps = geo.ps, pt = geo.pt, cp = geo.cp;
                           for (var u = 0.05; u <= 0.95; u += 0.01) {
                             var x = (1 - u) * (1 - u) * ps.x + 2 * (1 - u) * u * cp.x + u * u * pt.x;
                             var y = (1 - u) * (1 - u) * ps.y + 2 * (1 - u) * u * cp.y + u * u * pt.y;
