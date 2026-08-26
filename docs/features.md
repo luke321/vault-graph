@@ -26,7 +26,7 @@ share of the vault. The layout is deterministic — no simulation, no seed — s
 vault always draws the same picture. Refresh replays the vault growing from its first note
 to now.
 
-*Clip pending.*
+![Refresh clicked, the whole vault regrowing from its first note to now while the date ribbon's range handle sweeps along with it](../assets/features/intro.webp)
 
 ## Reading one note
 
@@ -35,7 +35,7 @@ to now.
 Hover a note to raise it and dim everything unconnected to it. Click for a panel — folder,
 type, tags, word count, linked notes — each one clickable to jump across the disc.
 
-*Clip pending.*
+![A daily note hovered, then a meeting note hovered, each raising and haloing its own links while the rest of the disc dims](../assets/features/note.webp)
 
 ## Filtering by folder
 
@@ -44,7 +44,7 @@ type, tags, word count, linked notes — each one clickable to jump across the d
 Click a folder in the legend to hide it; the remaining wedges grow back into the angle it
 vacated and the disc re-packs. Solo a folder to hide everything else in one click.
 
-*Clip pending.*
+![A folder hidden, the disc re-packing to fill the angle it vacated, then one folder soloed to hide everything else, then everything shown again](../assets/features/folders.webp)
 
 ## The heatmap
 
@@ -53,7 +53,7 @@ vacated and the disc re-packs. Solo a folder to hide everything else in one clic
 One square per day above the disc, coloured from what landed in it. Hover a day to halo
 its notes on the disc; click to keep the mark.
 
-*Clip pending.*
+![The busiest day hovered, then two more, each haloing its notes on the disc, then the busiest day clicked to keep the mark, and clicked again to let it go](../assets/features/heatmap.webp)
 
 ## Subfolders
 
@@ -62,7 +62,7 @@ its notes on the disc; click to keep the mark.
 Open a folder's twisty to reach the subfolders inside it — tinted from the parent's hue,
 hoverable and clickable the same way a top-level folder is.
 
-*Clip pending.*
+![A folder's twisty opened to reach its subfolders, one hovered to find it on the disc, then clicked to halo it and push its sub-wedge out, then let back down and folded away](../assets/features/subfolders.webp)
 
 ## The camera
 
@@ -70,7 +70,7 @@ hoverable and clickable the same way a top-level folder is.
 
 Scroll to zoom, drag to pan, double-click or the corner button to reset.
 
-*Clip pending.*
+![Scrolling to zoom in, dragging to pan, double-clicking to reset, zooming in again, then the corner button resetting it](../assets/features/camera.webp)
 
 ## The timeline
 

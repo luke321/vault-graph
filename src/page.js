@@ -9219,10 +9219,10 @@ function mountVaultGraph(root, data, deps) {
     var inWin = 0;
     for (var i = 0; i < keys.length; i++) inWin += days[keys[i]].ids.length;
     $("heatnote").textContent =
-      "last " + cols + " weeks Â· " + inWin + " of " + graph.order + " notes" +
-      (before ? " Â· " + before + " earlier" : "") +
-      (after ? " Â· " + after + " later" : "") +
-      (undated ? " Â· " + undated + " undated" : "");
+      "last " + cols + " weeks · " + inWin + " of " + graph.order + " notes" +
+      (before ? " · " + before + " earlier" : "") +
+      (after ? " · " + after + " later" : "") +
+      (undated ? " · " + undated + " undated" : "");
 
     heatSig = "";
     heatDraw();
@@ -9466,7 +9466,7 @@ function mountVaultGraph(root, data, deps) {
     }
     cv.title = anchors.map(function (a) {
       return a + (a === 1 ? " note" : " notes");
-    }).join("  Â·  ");
+    }).join("  ·  ");
   }
 
   // roundRect is not everywhere yet, and this page runs from file:// in whatever
@@ -9508,12 +9508,12 @@ function mountVaultGraph(root, data, deps) {
     }
     var top = Object.keys(by).sort(function (a, b) { return by[b] - by[a]; }).slice(0, 3);
     var wd = HEAT_WD[(new Date(d.ms).getUTCDay() + 6) % 7];
-    setHTML(t, '<div class="t">' + esc(d.key) + " Â· " + wd +
-      (d.key === TODAY ? " Â· today" : "") + "</div>" +
+    setHTML(t, '<div class="t">' + esc(d.key) + " · " + wd +
+      (d.key === TODAY ? " · today" : "") + "</div>" +
       '<div class="m">' +
       (n ? n + " note" + (n === 1 ? "" : "s") + " added" : "nothing added") +
       (top.length ? "<br>" + top.map(function (g2) {
-        return '<b style="color:' + colorOf(g2) + '">â– </b> ' + esc(g2) + " " + by[g2];
+        return '<b style="color:' + colorOf(g2) + '">■ </b> ' + esc(g2) + " " + by[g2];
       }).join("<br>") : "") +
       (n ? "<br><i>click to mark them on the disc</i>" : "") +
       "</div>");
