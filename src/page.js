@@ -272,6 +272,14 @@ function mountVaultGraph(root, data, deps) {
   var compactAxis = deps.compactAxis === false ? false : true;
   var onCompactAxis = typeof deps.onCompactAxis === "function" ? deps.onCompactAxis : null;
 
+  // SUB-WEDGE ROW-DEPTH GATE, OFF BY DEFAULT -- github#31. splitFor already refuses to split
+  // a FOLDER into sub-wedges when its notes can't fill the band's rows; this asks the same
+  // question per SUBFOLDER once a folder has split, so a lone sparse piece (e.g. one thin
+  // month among a folder's fuller ones) doesn't get its own arc just because its siblings
+  // earned the split. Dev-only toggle -- __vg.setSubwedgeGate, no settings row, nothing
+  // persisted -- this is for A/B-ing the look before deciding it's worth shipping.
+  var subwedgeGate = false;
+
   // ARCHIVE FOLDERS: the ones whose name starts with `_`.
   //
   // A leading underscore is how a vault says "sorts last, not part of the working set" --
@@ -1055,6 +1063,23 @@ function mountVaultGraph(root, data, deps) {
     return k < 0 ? 0 : Math.min(k, SUB_SLOTS - 1);
   }
 
+  // WHICH CELL A NOTE'S SUBFOLDER MAPS TO, kept separate from subTintIndex on purpose --
+  // that function is also the source of a subfolder's COLOUR (buildSubShades), and a
+  // subfolder's tint should not shift just because its geometric slot did. Both `n` and
+  // `depth` are the CALLER's numbers (buildWedgePlan's own liveSub and bandDepth), taken
+  // as parameters rather than looked up here -- NOT because this function avoids module
+  // state generally (subwedgeGate and subTintIndex's own subOrder read still apply), but
+  // specifically because an early version read the whole-vault subCount instead of a live
+  // count for `n`, and let a subfolder clear the bar on notes that were not even on screen
+  // under a date range or hidden-folder filter -- the same class of bug already documented
+  // above for the folder-level gate ("it also cannot see a filter"). Off by default
+  // (subwedgeGate) -- see github#31.
+  function subCellIndex(folder, sub, n, depth) {
+    var idx = subTintIndex(folder, sub);
+    if (!subwedgeGate || idx === SUB_SLOTS - 1) return idx;
+    return n >= (depth || REF_ROWS) ? idx : SUB_SLOTS - 1;
+  }
+
   function buildSubShades() {
     subShade = Object.create(null);
     subSlot = Object.create(null);
@@ -1688,6 +1713,12 @@ function mountVaultGraph(root, data, deps) {
     // rather than of weight, and that is the one thing the cascade cannot walk.
     var liveG = Object.create(null);
     var liveN = Object.create(null);
+    // COUNTED FROM WHAT IS ON SCREEN, same reasoning as liveN just below and the same lesson
+    // learned the hard way for the FOLDER-level gate (comment above): subCount is a whole-vault
+    // tally taken once at load, so under a filter a subfolder can clear subCellIndex's threshold
+    // on notes that are not even showing. liveSub is the live, filter-aware answer subCellIndex
+    // actually reads (github#31).
+    var liveSub = Object.create(null);
     graph.forEachNode(function (id) {
       // MEMBERSHIP AT REST IS THE MEMBERSHIP THE CASCADE ENDS ON, and it was not.
       //
@@ -1739,6 +1770,8 @@ function mountVaultGraph(root, data, deps) {
       // destination count while it arrives -- and is constant for the whole cascade. At rest the
       // union is just what is visible, so the count is unchanged there.
       liveN[g0] = (liveN[g0] || 0) + 1;
+      var sk = g0 + "/" + (graph.getNodeAttributes(id).sub || "");
+      liveSub[sk] = (liveSub[sk] || 0) + 1;
     });
     // AGAINST THE BAND'S REAL DEPTH, not a constant.
     //
@@ -1825,7 +1858,12 @@ function mountVaultGraph(root, data, deps) {
       if (isPinned(id)) return;
       var g = groupOf(id), a = graph.getNodeAttributes(id);
       var split = splitFor(g);
-      var key = split ? g + SEP + subTintIndex(g, a.sub) : g;
+      // splitFor(g) just above always populates bandDepth[bk] for this g's band before
+      // returning (see its own body), so the lookup here is never stale or missing.
+      var bk = bandLock && bandLock[g] ? "i" : "o";
+      var key = split
+        ? g + SEP + subCellIndex(g, a.sub, liveSub[g + "/" + (a.sub || "")] || 0, bandDepth[bk])
+        : g;
       if (!byCell[key]) {
         byCell[key] = [];
         (cellsOf[g] || (cellsOf[g] = [])).push(key);
@@ -11524,6 +11562,21 @@ function mountVaultGraph(root, data, deps) {
                     // the plugin's View-settings toggle (github#23).
                     setCompactAxis: function (v) { return setCompactAxis(v !== false, false); },
                     get compactAxis() { return compactAxis; },
+                    // Dev-only A/B switch, github#31 -- no settings row, nothing persisted.
+                    // Forces the same reset+redraw __vg.relayout() uses, since the gate
+                    // changes cell KEYS (bandLock/geomLock's cached shape must not survive it).
+                    setSubwedgeGate: function (v) {
+                      subwedgeGate = !!v;
+                      bandLock = null; geomLock = null;
+                      regroup();
+                      applyLayout(false);
+                      renderer.refresh();
+                      return subwedgeGate;
+                    },
+                    get subwedgeGate() { return subwedgeGate; },
+                    // The pooled-tail rank a split cell's key ends in -- exposed so a check can
+                    // derive it instead of hardcoding SUB_SLOTS-1, which is not itself public.
+                    get subTailRank() { return SUB_SLOTS - 1; },
                     hiddenByDefault: hiddenByDefault,
                     heatDraw: heatDraw,
                     get heat() { return heat; },
