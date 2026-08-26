@@ -53,7 +53,7 @@ vacated and the disc re-packs. Solo a folder to hide everything else in one clic
 One square per day above the disc, coloured from what landed in it. Hover a day to halo
 its notes on the disc; click to keep the mark.
 
-*Clip pending.*
+![The busiest day hovered, then two more, each haloing its notes on the disc, then the busiest day clicked to keep the mark, and clicked again to let it go](../assets/features/heatmap.webp)
 
 ## Subfolders
 
