@@ -1719,6 +1719,14 @@ function mountVaultGraph(root, data, deps) {
       // willShow IS that destination. At rest nothing is departing, so "staying or on screen"
       // and "showing" are the same set, and the two agree by construction rather than nearly.
       if (onlyVisible && !(planKeep || willShow)(id)) return;
+      // A PINNED NOTE HAS LEFT THE RING, same as the placement loop below excludes it (see
+      // that loop's own comment). Counting it here anyway inflates liveG/liveN/liveSub --
+      // the inputs bandDepth/splitFor/subCellIndex gate on -- with notes that never occupy a
+      // ring cell, letting a folder pass the split threshold (or a band read deeper than it
+      // is) on notes sitting in the hub. The same "gate reads a count the packing can't see"
+      // defect already fixed for date-range filters (github#18/#19/#31), just not extended
+      // to pinning until now.
+      if (isPinned(id)) return;
       var g0 = groupOf(id);
       // A WEIGHT, NOT A COUNT -- and the second filter that used to stand here, rejecting
       // anything outside willShow, is gone with it.
@@ -2942,7 +2950,24 @@ function mountVaultGraph(root, data, deps) {
     var plan = planIn || pinnedPlan ||
       buildWedgePlan(true,
                      function (id) { return alpha[id] || 0; });
-    if (!plan) return null;
+    // A NULL PLAN IS NOT NECESSARILY AN EMPTY DISC. buildWedgePlan returns null when it has
+    // zero RING cells, which a pinned note deliberately leaves (see the "A PINNED NOTE HAS
+    // LEFT THE RING" comment above) -- so pinning every currently-visible note (PIN_MAX = 13,
+    // genuinely reachable on a small or filtered vault) hits this exact branch with the hub
+    // still full. Returning null unconditionally used to mean applyLayout's `if (!targets)`
+    // no-op skipped hubPlace entirely, so the hub notes kept whatever position they last had
+    // (or none, on first load) and never got seated into their slots.
+    //
+    // r0 falls back to the locked hub radius from the last layout that DID have a ring --
+    // geomLock is set once at load and by the time a person can pin thirteen notes there has
+    // always been an earlier successful layout to set it from. The 1.5 floor only matters if
+    // this is somehow reached before that, and matches buildWedgePlan's own r0 floor.
+    if (!plan) {
+      if (!pinnedIds().length) return null;
+      var hubOut = {};
+      hubPlace(hubOut, geomLock ? geomLock.r0 : 1.5, UNIT);
+      return hubOut;
+    }
 
     // Live angles: each wedge takes its share of what is VISIBLE, so hiding
     // something makes the rest grow back into a full circle.
@@ -3859,6 +3884,18 @@ function mountVaultGraph(root, data, deps) {
 
   function hubChanged(animate) {
     releaseHover();
+    // A FROZEN PLAN MUST NOT OUTLIVE THE MEMBERSHIP IT WAS FROZEN FOR. pinnedPlan is set for
+    // the whole duration of an unrelated big cascade (a folder toggle, a range change -- see
+    // pinPlan()) so that cascade's own per-frame work stays on one consistent plan. But
+    // ringsLayout() (which applyLayout below calls) prefers pinnedPlan over building fresh
+    // whenever it is set, with no notion of "fresh for whom" -- so pinning or unpinning a
+    // note WHILE that other cascade is still animating handed this hub change a plan built
+    // from membership before the toggle, and the ring geometry for one frame disagreed with
+    // the pin that just happened. Clearing it here forces a fresh plan from the CURRENT
+    // pinned set; safe to null out from under the other cascade because its own frame loop
+    // builds its own local plan per frame and never reads pinnedPlan again once running (see
+    // the room/cell/edge endpoint capture, which saves and restores it around itself).
+    pinnedPlan = null;
     applyLayout(!!animate, releaseHover);
     placeLogo();
     if (savePinned) savePinned(state.pinned.slice());
@@ -11354,6 +11391,14 @@ function mountVaultGraph(root, data, deps) {
                     // The saved default, applied live. Mirrors setFolderShown: the host owns
                     // the store and this owns the camera.
                     setPanEnabled: function (v) { return setPan(v !== false, false); },
+                    // Same shape as setPanEnabled, for the plugin's View-settings toggle
+                    // (github#23). Kept alongside setPanEnabled (not with the rest of the
+                    // debug API below, which the plugin build strips) because plugin/main.js's
+                    // own settings tab calls it to live-update an already-open view -- it was
+                    // misplaced inside the stripped region for a while, which meant toggling
+                    // "Compact date axis" in the plugin saved correctly but silently never
+                    // updated a view already open, unlike every sibling toggle here.
+                    setCompactAxis: function (v) { return setCompactAxis(v !== false, false); },
                     // Push the defaults into the live filter and repaint. This is the
                     // "and now show it" half, kept separate so loading saved settings at
                     // boot cannot be confused with a person clicking an eye.
@@ -11576,9 +11621,6 @@ function mountVaultGraph(root, data, deps) {
                       return Object.assign(Object.create(null), folderShown);
                     },
                     get panEnabled() { return panEnabled; },
-                    // The saved default, applied live -- same shape as setPanEnabled, for
-                    // the plugin's View-settings toggle (github#23).
-                    setCompactAxis: function (v) { return setCompactAxis(v !== false, false); },
                     get compactAxis() { return compactAxis; },
                     // The pooled-tail rank a split cell's key ends in -- exposed so a check can
                     // derive it instead of hardcoding SUB_SLOTS-1, which is not itself public.
@@ -12168,6 +12210,26 @@ function mountVaultGraph(root, data, deps) {
                                total: graph.order, label: rangeLabel() };
                     },
                     relayout: function () {
+                      // CANCEL BEFORE RESETTING, or a still-running cascade's next animation
+                      // frame lands after this snap and silently overwrites it -- the same
+                      // gap once found and fixed here for setSubwedgeGate (github#31), lost
+                      // again when that toggle was removed and this treatment reverted with
+                      // it. Clearing pinnedPlan/planKeep too, not just cancelling the frame:
+                      // a cascade holds them for its own duration and clears them when it
+                      // lands, so a layout after a cancelled-but-not-cleared run would reuse
+                      // a plan pinned for a run that no longer exists (see the same teardown
+                      // in playTimeline, a few hundred lines up, for the full account).
+                      stopPlay();
+                      if (cascadeRun) {
+                        WIN.cancelAnimationFrame(cascadeRun.raf);
+                        WIN.clearTimeout(cascadeRun.guard);
+                        cascadeRun = null;
+                      }
+                      if (anim) { WIN.cancelAnimationFrame(anim); anim = null; }
+                      if (animGuard) { WIN.clearTimeout(animGuard); animGuard = null; }
+                      pinnedPlan = null; planKeep = null;
+                      roomNow = null; cellNow = null; edgeNow = null; colWalk = null;
+                      posSrc = posDst = null;
                       bandLock = null; geomLock = null;
                       regroup();
                       applyLayout(false);
