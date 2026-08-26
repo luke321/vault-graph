@@ -10976,25 +10976,26 @@ function mountVaultGraph(root, data, deps) {
       // to close it again.
       { click: true, target: ["detailclose"], act: "pin", why: "close the card" },
 
-      /* --- 4. the timeline ---------------------------------------------- */
+      /* --- 4. the compact axis -------------------------------------------- */
+      // The strip's own reflow, its own act now rather than folded into the timeline one:
+      // the demo vault carries a genuinely sparse tail behind its two dense years on
+      // purpose (github#23), so off-then-on has something real to show -- years snapping
+      // back to plain calendar width, then regathering around where the notes actually
+      // are. Split out because the feature earns its own gallery entry (docs/features/
+      // compactaxis.md), the same way pin and subfoldercolor did rather than being a
+      // paragraph inside an existing page.
+      { click: true, target: ["id", "compact"], act: "compactaxis", why: "turn off the compact axis -- back to one width per month" },
+      { settle: true, act: "compactaxis", why: "let the strip spread back out to plain calendar time" },
+      { click: true, target: ["id", "compact"], act: "compactaxis", why: "...and back on, weighted by note count again" },
+      { settle: true, act: "compactaxis", why: "let it compact again" },
+
+      /* --- 5. the timeline ---------------------------------------------- */
       // The strip under the band carries every month of the vault, and it is the timeline:
       // two handles that are the filter, a pill below them for the 52 weeks the grid above
       // is drawing, and a chip per year. Moved up from LAST -- the sidebar's rank slider is
       // gone and this is the only timeline now, so it belongs beside the intro that has
       // just swept it rather than after the preference panel.
       //
-      // THE COMPACT-AXIS TOGGLE FIRST, before any dragging: the demo vault now carries a
-      // genuinely sparse tail behind its two dense years (github#23), on purpose, so this
-      // is the one act that has something real to show off here. Off then on, so the
-      // strip's own reflow -- years snapping back to plain calendar width, then
-      // regathering around where the notes actually are -- is the first thing this act
-      // demonstrates, before the existing brush/window/year choreography runs with it
-      // back in its default (on) state.
-      { click: true, target: ["id", "compact"], act: "timeline", why: "turn off the compact axis -- back to one width per month" },
-      { settle: true, act: "timeline", why: "let the strip spread back out to plain calendar time" },
-      { click: true, target: ["id", "compact"], act: "timeline", why: "...and back on, weighted by note count again" },
-      { settle: true, act: "timeline", why: "let it compact again" },
-
       // The `to` handle first, and deliberately the same one the intro moved: the intro
       // showed it travelling, this shows a hand doing it. The disc waits for the release on
       // each of these, by design -- a drag repaints one small canvas and the filter lands
@@ -11028,7 +11029,7 @@ function mountVaultGraph(root, data, deps) {
       { click: true, target: ["id", "rangeall"], act: "timeline", why: "clear the date range" },
       { settle: true, act: "timeline", why: "let the whole vault come back" },
 
-      /* --- 5. the heatmap ----------------------------------------------- */
+      /* --- 6. the heatmap ----------------------------------------------- */
       // Hovering a day haloes the notes added that day, wherever they landed on the disc.
       // Ranked by what is VISIBLE rather than by date, so this works on any vault.
       { hover: true, target: ["busiest", "1"], act: "heatmap", why: "hover the busiest day" },
@@ -11048,7 +11049,7 @@ function mountVaultGraph(root, data, deps) {
       { click: true, target: ["busiest", "1"], act: "heatmap", why: "...and click again to let it go" },
       { settle: true, act: "heatmap", why: "let it ramp back" },
 
-      /* --- 6. folders --------------------------------------------------- */
+      /* --- 7. folders --------------------------------------------------- */
       // Hiding: the wedges reallocate and the disc stays a full circle.
       { click: true, target: ["eye", "06"], act: "folders", why: "hide a folder -- the wedges reallocate" },
       { settle: true, act: "folders", why: "let the wedges reallocate" },
@@ -11062,7 +11063,7 @@ function mountVaultGraph(root, data, deps) {
       { click: true, target: ["id", "allon"], act: "folders", why: "show everything again" },
       { settle: true, act: "folders", why: "let the whole disc come back" },
 
-      /* --- 7. subfolders ------------------------------------------------ */
+      /* --- 8. subfolders ------------------------------------------------ */
       // The tree starts folded, so getting to a subfolder means opening its folder first.
       // That is the honest sequence and it is worth showing: the disc already draws 03's
       // sub-wedges, and this is where the legend admits they are there. It is also
@@ -11091,7 +11092,7 @@ function mountVaultGraph(root, data, deps) {
 
       { click: true, target: ["twisty", "03"], act: "subfolders", why: "fold the subfolders away again" },
 
-      /* --- 8. subfolder colours ------------------------------------------ */
+      /* --- 9. subfolder colours ------------------------------------------ */
       // The same right-click menu the top-level colours act uses (see there), on a
       // SUBFOLDER row instead of a folder's own -- which does not exist until its
       // twisty is open, the same precondition the subfolders act above needs.
@@ -11109,7 +11110,7 @@ function mountVaultGraph(root, data, deps) {
       { settle: true, act: "subfoldercolor", why: "let the tint snap back" },
       { click: true, target: ["twisty", "03"], act: "subfoldercolor", why: "fold the subfolders away again" },
 
-      /* --- 9. the camera ------------------------------------------------ */
+      /* --- 10. the camera ------------------------------------------------ */
       // Zoom in a few notches rather than one. One notch is a fifth now, which is the point
       // -- it is a scroll and not a teleport -- and a single notch on camera looks like
       // nothing happened.
@@ -11130,7 +11131,7 @@ function mountVaultGraph(root, data, deps) {
       { click: true, target: ["id", "reset"], act: "camera", why: "...and the reset button in the corner" },
       { settle: true, act: "camera", why: "let the view come back" },
 
-      /* --- 10. colours -------------------------------------------------- */
+      /* --- 11. colours -------------------------------------------------- */
       // LAST regardless: colour is still a preference, and letting every earlier act
       // land on an unmodified palette keeps a re-record of any of them from picking up
       // a colour choice this one made.

@@ -82,6 +82,17 @@ there. Replaced the sidebar's old rank slider — the ribbon is the only timelin
 
 ![The date range dragged in by both handles, a year chip hovered and clicked, the heatmap's own window slid back and forward on its own, then the date range cleared](../assets/features/timeline.webp)
 
+## Compact date axis
+
+*Unreleased*
+
+Years and months on the strip draw by how many notes they hold, not by the calendar. A
+sparse year collapses toward the same narrow width every other sparse year gets; a busy
+one keeps growing to fit what it actually holds. Off, in the gear or the icon beside the
+date fields, gives every year and month back its plain calendar width.
+
+![The compact axis toggled off, spreading every year and month back to plain calendar width, then toggled back on to regather around where the notes actually are](../assets/features/compactaxis.webp)
+
 ## Pin a note to the hub
 
 *Unreleased*
