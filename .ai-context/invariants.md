@@ -209,7 +209,7 @@ __vg.pushReport()           // pushedCount / pushedByPath vs haloedByPath
 `03 - Resources/Locations` is the case that settled it: 3 notes, seventh in the order,
 sharing the tail slot with six others. `pushedCount` must be 0 when it is selected.
 
-## A sub-wedge only earns its own slot if it can fill one (dev toggle, off by default)
+## A sub-wedge only earns its own slot if it can fill one
 
 `splitFor(g)` already refuses to split a FOLDER into sub-wedges when its total note count
 can't fill the band's rows (`src/page.js:1781-1799`, github#18/#19 lineage) — but that is
@@ -227,55 +227,69 @@ question per subfolder: below `depth` (the caller's own `bandDepth[bk]`, the sam
 `splitFor` already computed for that band) → redirect to the pooled-tail slot instead of
 the subfolder's own rank. Deliberately a **separate function from `subTintIndex`**, not a
 change to it — `subTintIndex` also drives a subfolder's *colour* (`buildSubShades`), and
-colour should not shift just because a geometric slot did.
+colour should not shift just because a geometric slot did. Unconditional — every note
+run through the row-depth test, always; no toggle to check or forget to check.
 
 **`n` is a caller-supplied live count, not a lookup this function makes itself — and it
-was not, at first.** The version an adversarial review caught read `subCount`, a
-whole-vault tally built once at load and never refreshed, to answer "how many notes does
-this subfolder have." Under a filter that is the wrong answer: a subfolder large in the
-whole vault but with almost nothing currently visible would still clear the threshold on
-its stale total and keep its own sub-wedge cell sparser than what's actually on screen —
-reproducing the exact defect this feature exists to remove. This is the identical bug
-class `buildWedgePlan`'s own comment already documents fixing for the FOLDER-level gate
-("COUNTED FROM WHAT IS ON SCREEN, not from the vault... it also cannot see a filter"),
-just not carried over to the new per-subfolder one. Fixed the same way that fix was: a new
-`liveSub` map, built in the same cascade-stable, filter-aware loop that already produces
-`liveG`/`liveN` (same `onlyVisible && !(planKeep || willShow)` membership), keyed by
-`folder + "/" + sub`. The call site passes `liveSub[...] || 0` as `n`; `subCellIndex`
-still reads `subwedgeGate` and (via `subTintIndex`) `subOrder`, but no longer makes its
-own count lookup — the one piece of module state that was actually stale is now a
-parameter instead.
+was not, at first.** An earlier version read `subCount`, a whole-vault tally built once at
+load and never refreshed, to answer "how many notes does this subfolder have." Under a
+filter that is the wrong answer: a subfolder large in the whole vault but with almost
+nothing currently visible would still clear the threshold on its stale total and keep its
+own sub-wedge cell sparser than what's actually on screen — reproducing the exact defect
+this feature exists to remove. This is the identical bug class `buildWedgePlan`'s own
+comment already documents fixing for the FOLDER-level gate ("COUNTED FROM WHAT IS ON
+SCREEN, not from the vault... it also cannot see a filter"), just not carried over to the
+new per-subfolder one. Fixed the same way that fix was: a `liveSub` map, built in the same
+cascade-stable, filter-aware loop that already produces `liveG`/`liveN` (same
+`onlyVisible && !(planKeep || willShow)` membership), keyed by `folder + "/" + sub`. The
+call site passes `liveSub[...] || 0` as `n`; `subCellIndex` still reads `subOrder` via
+`subTintIndex`, but makes no count lookup of its own — the one piece of module state that
+was actually stale is a parameter instead.
 
 ```javascript
-__vg.setSubwedgeGate(true)   // recomputes cells; a sparse rank folds into the tail
-__vg.setSubwedgeGate(false)  // back to today's behaviour, byte-identical
-__vg.subwedgeGate            // current state
+__vg.buildWedgePlan(false).cells   // a sparse rank is already folded into the tail
 ```
 
-**Dev-only, github#31 — no settings row, nothing persisted, off by default.** This is an
-A/B tool for deciding whether the look is actually better, not a shipped preference; there
-is no DOM control to drive, so *subwedge gate: off is unchanged, on removes sparse
-non-tail cells* drives the `__vg` setter directly. It is deliberately vault-agnostic (an
-even vault with nothing to gate is a legitimate pass, not skipped) and checks the general
-rule — no non-tail cell of a split folder holds fewer notes than its band's row depth —
-rather than hardcoding which folder or vault is expected to be sparse. Confirmed on the
-demo vault build under this suite: 45 cells at rest, 30 of them non-tail split cells, gate
-on leaves zero sparse ones among them, and turning it back off restores the exact same
-45-cell plan.
+*No non-tail split cell holds fewer notes than its band's row depth* asserts the general
+rule directly against `buildWedgePlan(false)` — deliberately vault-agnostic (an even vault
+with nothing to gate is a legitimate pass, not skipped) rather than hardcoding which
+folder or vault is expected to be sparse. Confirmed on the demo vault build under this
+suite: 42 cells at rest, 24 of them non-tail split cells, none sparse.
 
-A second check, *subwedge gate reads LIVE counts, not the whole-vault tally, under a
+A second check, *the row-depth gate reads LIVE counts, not the whole-vault tally, under a
 filter*, drives `buildWedgePlan(true)` — not `(false)`, which every other check here uses
 — since that live path is exactly what the `subCount`-vs-`liveSub` bug above needed and
-nothing had exercised it before this check existed. **The window is the fixture's own
-first 20% of history (`dateSpan.lo` to `dateSpan.lo + (hi-lo)*0.2`), not a fixed date.** A
-first cut reused the fixed two-day window an existing pin-and-filter check already uses
-and it reached zero split cells on all three fixtures — a check that cannot fail is not a
-check, so it was re-measured against a vault-relative window wide enough to still keep
-some. Confirmed non-vacuous by reintroducing the fixed bug (`subCellIndex` reading
-`subCount` again): 2 of the 3 fixtures caught it (`01 - Projects` sub-cells at 1/2 and
-5/6), the third (the dominant-folder fixture, only 6 live cells under this window) did
-not — reported honestly as "vacuous on this fixture" rather than a silent pass, when that
-happens.
+nothing else exercises it. **The window is the fixture's own first 20% of history
+(`dateSpan.lo` to `dateSpan.lo + (hi-lo)*0.2`), not a fixed date.** A first cut reused the
+fixed two-day window an existing pin-and-filter check already uses and it reached zero
+split cells on all three fixtures — a check that cannot fail is not a check, so it was
+re-measured against a vault-relative window wide enough to still keep some. Confirmed
+non-vacuous by reintroducing the fixed bug (`subCellIndex` reading `subCount` again): 2 of
+the 3 fixtures caught it (`01 - Projects` sub-cells at 1/2 and 5/6), the third (the
+dominant-folder fixture, only 6 live cells under this window) did not — reported honestly
+as "vacuous on this fixture" rather than a silent pass, when that happens.
+
+**This shipped as a toggle first (`__vg.setSubwedgeGate`, off by default) and the toggle
+is gone.** It was the right call to make it one initially — this was a hypothesis about a
+look, not a confirmed fix, and the plan it shipped under said so explicitly. Live A/B
+testing across several rounds that day found the merge itself correct every time; what it
+also found, one round at a time, was three real bugs that existed *only because* the
+toggle needed to recompute and re-render live, mid-session, against whatever else the page
+happened to be doing at that moment — a cascade race (flipping the gate mid-intro left the
+plan correct but the rendered notes stuck in their old, scattered positions until the
+intro finished on its own), a stuck timeline (the same interruption skipped the sweep's
+own completion cleanup, leaving the date-strip handle parked wherever the cut-off frame
+left it), and an animation that only ever jumped instead of transitioning (an unconditional
+instant snap is the right choice for something meant to give instant feedback in a
+console, wrong for something a person is watching). Baking the gate in unconditionally —
+so the very first, only cascade of a session already computes the correct layout, with no
+runtime flip to race against anything — removed the need to fix any of the three rather
+than fixing all three. The cascade-cancellation groundwork itself (`stopPlay()` before
+`applyLayout(false)`, so a snap can't be overwritten by whatever was still animating) is a
+real, general finding about `relayout()` and any future caller of the same
+reset-and-snap shape; left unfixed here, deliberately, since there is no longer a caller
+in this ticket that needs it — worth its own follow-up if `relayout()` (or something like
+it) is ever driven the same way live.
 
 ## The resting disc is on the lattice
 
@@ -817,85 +831,3 @@ generation day change the structure" isn't a question that applies to it.
 
 Wired into `.githooks/pre-push` alongside the PII/scope/network checks: cheap (a few
 seconds, no Chrome), so no skip flag, same reasoning as those three.
-
-## A snap that recomputes the plan must also cancel any cascade already animating
-
-`applyLayout(false)` (`assignPositions` + a synchronous refresh) is supposed to be
-unconditional — call it and the disc is at the new plan's positions, full stop. It isn't,
-if a cascade is already mid-flight: `cascadeRun` owns its own `requestAnimationFrame` loop
-regardless of what else just ran, and that loop's very next frame interpolates toward
-whatever target it captured when the cascade *started* — silently overwriting the snap
-with stale, pre-change positions.
-
-Found on `__vg.setSubwedgeGate` (github#31), which mirrors `relayout()`'s
-`bandLock = null; geomLock = null; regroup(); applyLayout(false); renderer.refresh();`
-shape exactly — neither one used to cancel an in-flight cascade first. Flipping the gate
-during the page's own boot intro (~5.6s, `TIMELINE_MS * TIME_SCALE`) is the case that
-surfaces it: `subCellIndex`'s recomputed PLAN correctly merges a folder's sparse cells the
-instant the gate flips, but the intro's own still-running cascade — which started before
-the flip and doesn't know its target went stale — keeps interpolating toward the OLD,
-unmerged layout for as long as it has left to run.
-
-```javascript
-__vg.setSubwedgeGate(true)                 // plan updates correctly, always
-__vg.buildWedgePlan(false).cells...        // -> merged immediately, gate-state is not the bug
-// but the RENDERED notes (graph.getNodeAttributes(id).x/.y) can still show the OLD layout
-// for as long as a cascade that started before the flip keeps running
-```
-
-**Measured directly** (not inferred from reading the code): flipping the gate 200ms into
-the boot intro on the demo vault, before the fix — the recomputed plan correctly reported
-Daily Notes merged to 1 cell, but its 50 notes' actual rendered angles formed **7** distinct
-clusters (a fresh `atan2(y, x)` per note, grouped by >3° gaps). Flipped after the intro had
-already finished, the same 1-cell plan rendered as exactly **1** cluster. After the fix
-(`cancelCascade()` — a small shared helper, extracted from the cancellation block
-`cascade()` already ran at its own start, and now called by `setSubwedgeGate` too — before
-`regroup()`/`applyLayout`), flipping at 200ms, 800ms, or after the intro all render as
-exactly 1 cluster.
-
-**`relayout()` has the identical shape and got the identical fix, in the same ticket.**
-First left alone deliberately (same bug, out of scope) — the user asked for it to be
-included too, so `cancelCascade()` was added there as well. Not independently re-proven
-with the same rendered-angle rigor as `setSubwedgeGate` above (there is no comparably
-clean "the plan changed but the pixels didn't" signal to drive through `relayout()`'s own
-callers without also engaging the fix under test to get there); confidence here rests on
-the code being a byte-identical shape calling the exact same `cascadeRun` mechanism, not
-on a second independent measurement. A lighter sanity pass (hide a folder via direct
-`state.hidden.folder` mutation, then `relayout()`, at 200ms into the intro and again after
-it finished) showed identical, correct exclusion counts in both cases — consistent with
-the fix, though alpha/visibility is filtered independently of the position-overwrite bug
-and so is not itself proof of the same class this section is about.
-
-**Not covered by `scripts/smoke.mjs`, and that is a deliberate, documented gap, not an
-oversight** — matching this file's own existing carve-out for per-frame animation timing.
-Three reproduction attempts were tried and rejected before settling on manual-only:
-
-1. A dedicated check in the intro-needing lane (`NEEDS_INTRO`) — doesn't work *at all*,
-   because the suite's own page-ready wait (`__vg.state.until === null`) unconditionally
-   waits out the ENTIRE intro before running any check, "(intro)"-lane checks included; by
-   the time a check function starts, there is no longer anything mid-flight to race.
-2. Triggering a fresh cascade on demand via `__vg.setRange(...)` instead of depending on
-   the boot intro — technically runs, but reads back `undefined` for every field: `page.j`
-   wraps the read in `JSON.stringify(...)` as one piece of text, and `JSON.stringify` on a
-   still-pending Promise serializes it as `"{}"` synchronously rather than awaiting it (a
-   separate, pre-existing gap in the harness itself, not something this ticket fixes).
-   Switching the read to `page.eval` directly (whose own `awaitPromise: true` handles a
-   returned Promise correctly) fixed the `undefined`s, but the check then passed
-   unconditionally, fix present or not: the demo vault's Daily Notes dates are all within
-   the range tried, so nothing's visibility — and therefore nothing about the cascade's own
-   target position for those notes — actually changed. Nothing for the race to disagree
-   with.
-3. Hiding a *different* folder (`state.hidden.folder`) and calling `__vg.cascade()`
-   directly — genuinely triggers a real, multi-frame animated cascade (confirmed: waiting
-   several real `requestAnimationFrame` callbacks before reading, rather than reading
-   synchronously in the same tick, which a first draft of this attempt also got wrong and
-   which is its own necessary condition regardless of trigger method). Still never
-   reproduced the bug even with the fix removed — a toggle-driven cascade's own resting
-   geometry for an unrelated OUTER-band folder apparently converges close enough, quickly
-   enough, that this specific race isn't observable through it, unlike the intro's
-   longer, "draw the whole disc from empty" cascade shape.
-
-A check that cannot fail is not a check (this file's own `check-generator-determinism.mjs`
-entry above says the same thing for a different reason) — so none of the three attempts
-shipped. The fix is verified by the numbers above, taken directly against the actual boot
-intro rather than a synthetic stand-in for it.

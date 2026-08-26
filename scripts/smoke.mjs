@@ -2627,47 +2627,36 @@ check("compact axis: the view-level icon actually flips the live state, and pers
   };
 });
 
-check("subwedge gate: off is unchanged, on removes sparse non-tail cells", async (p) => {
-  // github#31 -- dev-only A/B toggle (__vg.setSubwedgeGate), no DOM control to click, so this
-  // drives the API directly. Vault-agnostic on purpose: it doesn't assume any particular
-  // folder is sparse, it asserts the GENERAL invariant and reports how many cells it found
-  // to gate on this fixture (zero is a legitimate, passing result on an even vault).
+check("no non-tail split cell holds fewer notes than its band's row depth", async (p) => {
+  // github#31 -- the per-subfolder row-depth gate (subCellIndex) is unconditional, baked
+  // into buildWedgePlan's own cell-key assignment rather than behind a toggle. Vault-agnostic
+  // on purpose: it doesn't assume any particular folder is sparse, it asserts the GENERAL
+  // invariant and reports how many non-tail split cells it found to check on this fixture
+  // (zero is a legitimate, passing result on an even vault).
   const r = await p.j(`(function(){
-    var before = __vg.buildWedgePlan(false).cells.map(function(c){
-      return { k: c.k, n: c.list.length, rows: c.rows };
-    });
-    __vg.setSubwedgeGate(true);
-    var on = __vg.buildWedgePlan(false).cells;
+    var cells = __vg.buildWedgePlan(false).cells;
     var tail = __vg.subTailRank;
-    var nonTailSplit = on.filter(function(c){
+    var nonTailSplit = cells.filter(function(c){
       // Only cells that actually came from a SPLIT folder carry the \\u0000 separator --
       // an unsplit folder's key is just its own name, and whether THAT is sparse is the
-      // folder-level splitFor gate's job, not this one's (out of scope, see the plan).
+      // folder-level splitFor gate's job, not this one's.
       // The tail rank (the last field) is the pooled tail and is allowed to be sparse --
       // it's the existing, accepted mechanism.
       var parts = c.k.split(String.fromCharCode(0));
       return parts.length >= 2 && +parts.pop() !== tail;
     });
     var sparse = nonTailSplit.filter(function(c){ return c.list.length < c.rows; });
-    __vg.setSubwedgeGate(false);
-    var after = __vg.buildWedgePlan(false).cells.map(function(c){
-      return { k: c.k, n: c.list.length, rows: c.rows };
-    });
-    return { before: before, nonTailSplitCount: nonTailSplit.length,
-             sparseOn: sparse.map(function(c){ return c.k + ":" + c.list.length + "/" + c.rows; }),
-             after: after, gateOffAfter: __vg.subwedgeGate };
+    return { total: cells.length, nonTailSplitCount: nonTailSplit.length,
+             sparse: sparse.map(function(c){ return c.k + ":" + c.list.length + "/" + c.rows; }) };
   })()`);
-  const restored = JSON.stringify(r.before) === JSON.stringify(r.after);
-  const clean = r.sparseOn.length === 0;
   return {
-    ok: restored && clean && r.gateOffAfter === false,
-    detail: `${r.before.length} cells at rest, ${r.nonTailSplitCount} non-tail split cells ` +
-      `checked; gate-on sparse ones: ` + (clean ? "none" : r.sparseOn.join(", ")) +
-      `; restored after off: ${restored}`,
+    ok: r.sparse.length === 0,
+    detail: `${r.total} cells at rest, ${r.nonTailSplitCount} non-tail split cells checked; ` +
+      `sparse ones: ` + (r.sparse.length ? r.sparse.join(", ") : "none"),
   };
 });
 
-check("subwedge gate reads LIVE counts, not the whole-vault tally, under a filter", async (p) => {
+check("the row-depth gate reads LIVE counts, not the whole-vault tally, under a filter", async (p) => {
   // github#31 -- an adversarial review caught the first cut of this reading subCount, a
   // whole-vault tally taken once at load and never refreshed, the exact bug this file's own
   // comment already documents having fixed for the FOLDER-level split gate ("it also cannot
@@ -2677,12 +2666,12 @@ check("subwedge gate reads LIVE counts, not the whole-vault tally, under a filte
   // the gate exists to remove. Fixed by reading a live, filter-aware count (liveSub)
   // instead. This check does not depend on any fixture actually landing in that exact
   // shape -- on these three it mostly empties folders down to a cell or two -- its job is
-  // to exercise buildWedgePlan(true) (not (false), which every other check here uses) with
-  // the gate on at all, something nothing did before this check existed, and to hold the
-  // same "no sparse non-tail cell" invariant there regardless of what it finds. The window
-  // is the fixture's own first 20% of history rather than a fixed date -- vault-agnostic,
-  // and wide enough (unlike an earlier, blunter two-day window that reached zero split
-  // cells on all three fixtures) to actually still contain some split-folder cells to check.
+  // to exercise buildWedgePlan(true) (not (false), which every other check here uses) at
+  // all, something nothing else did before this check existed, and to hold the same
+  // "no sparse non-tail cell" invariant there regardless of what it finds. The window is
+  // the fixture's own first 20% of history rather than a fixed date -- vault-agnostic, and
+  // wide enough (unlike an earlier, blunter two-day window that reached zero split cells on
+  // all three fixtures) to actually still contain some split-folder cells to check.
   await p.eval(`(function(){
     var lo = __vg.dateSpan.lo, hi = __vg.dateSpan.hi;
     var cut = lo + (hi - lo) * 0.2;
@@ -2690,12 +2679,10 @@ check("subwedge gate reads LIVE counts, not the whole-vault tally, under a filte
   })(); void 0`);
   await settle(p);
   const r = await p.j(`(function(){
-    __vg.setSubwedgeGate(true);
     var plan = __vg.buildWedgePlan(true);
-    __vg.setSubwedgeGate(false);
     // A two-day window can legitimately leave a fixture with nothing visible at all --
     // buildWedgePlan(true) returns null then (see its own "if (!cells.length) return
-    // null" bail-out), same as it would with the gate off. Nothing to check, not a fail.
+    // null" bail-out).
     if (!plan) return { empty: true };
     var tail = __vg.subTailRank;
     var nonTailSplit = plan.cells.filter(function(c){

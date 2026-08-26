@@ -272,14 +272,6 @@ function mountVaultGraph(root, data, deps) {
   var compactAxis = deps.compactAxis === false ? false : true;
   var onCompactAxis = typeof deps.onCompactAxis === "function" ? deps.onCompactAxis : null;
 
-  // SUB-WEDGE ROW-DEPTH GATE, OFF BY DEFAULT -- github#31. splitFor already refuses to split
-  // a FOLDER into sub-wedges when its notes can't fill the band's rows; this asks the same
-  // question per SUBFOLDER once a folder has split, so a lone sparse piece (e.g. one thin
-  // month among a folder's fuller ones) doesn't get its own arc just because its siblings
-  // earned the split. Dev-only toggle -- __vg.setSubwedgeGate, no settings row, nothing
-  // persisted -- this is for A/B-ing the look before deciding it's worth shipping.
-  var subwedgeGate = false;
-
   // ARCHIVE FOLDERS: the ones whose name starts with `_`.
   //
   // A leading underscore is how a vault says "sorts last, not part of the working set" --
@@ -1065,18 +1057,22 @@ function mountVaultGraph(root, data, deps) {
 
   // WHICH CELL A NOTE'S SUBFOLDER MAPS TO, kept separate from subTintIndex on purpose --
   // that function is also the source of a subfolder's COLOUR (buildSubShades), and a
-  // subfolder's tint should not shift just because its geometric slot did. Both `n` and
-  // `depth` are the CALLER's numbers (buildWedgePlan's own liveSub and bandDepth), taken
-  // as parameters rather than looked up here -- NOT because this function avoids module
-  // state generally (subwedgeGate and subTintIndex's own subOrder read still apply), but
-  // specifically because an early version read the whole-vault subCount instead of a live
-  // count for `n`, and let a subfolder clear the bar on notes that were not even on screen
-  // under a date range or hidden-folder filter -- the same class of bug already documented
-  // above for the folder-level gate ("it also cannot see a filter"). Off by default
-  // (subwedgeGate) -- see github#31.
+  // subfolder's tint should not shift just because its geometric slot did. Below its band's
+  // own row depth, a subfolder's notes redirect to the pooled-tail slot instead of earning
+  // their own rank -- splitFor already refuses to split a FOLDER into sub-wedges when its
+  // total can't fill the band's rows (github#18/#19 lineage); this is the same question per
+  // SUBFOLDER, so a lone sparse piece doesn't get its own arc just because its siblings
+  // earned the split (github#31).
+  //
+  // Both `n` and `depth` are the CALLER's numbers (buildWedgePlan's own liveSub and
+  // bandDepth), taken as parameters rather than looked up here -- specifically because an
+  // early version read the whole-vault subCount instead of a live count for `n`, and let a
+  // subfolder clear the bar on notes that were not even on screen under a date range or
+  // hidden-folder filter -- the same class of bug already documented above for the
+  // folder-level gate ("it also cannot see a filter").
   function subCellIndex(folder, sub, n, depth) {
     var idx = subTintIndex(folder, sub);
-    if (!subwedgeGate || idx === SUB_SLOTS - 1) return idx;
+    if (idx === SUB_SLOTS - 1) return idx;
     return n >= (depth || REF_ROWS) ? idx : SUB_SLOTS - 1;
   }
 
@@ -5246,17 +5242,9 @@ function mountVaultGraph(root, data, deps) {
    *   totalMs   the whole cascade's wall-clock length, replacing CASCADE_MS
    *   onFrame   fn(progress) per frame, for a caller that has UI to keep in step
    */
-  // STOPS AN IN-FLIGHT CASCADE, without starting a new one -- cascade() below does this at
-  // its own start (a filter change interrupts playback) and needed it inline; a caller that
-  // only wants to SNAP to a fresh layout (relayout(), setSubwedgeGate()) needs the same
-  // cancellation for a different reason: applyLayout(false) writes positions synchronously,
-  // but an intro cascade still mid-flight owns the next animation frame regardless, and
-  // overwrites that snap with whatever stale (pre-change) target it already committed to.
-  // Measured on github#31's subwedgeGate: flipped 200ms into the ~5.6s intro, the recomputed
-  // plan correctly merged Daily Notes to one cell, but the RENDERED notes stayed scattered
-  // across 7 angular clusters -- the cascade's own next frame kept interpolating toward the
-  // old 4-cell layout. Flipped after the intro had already finished, one tight cluster.
-  function cancelCascade() {
+  function cascade(done, opts) {
+    opts = opts || {};
+    stopPlay();                            // a filter change interrupts playback
     if (anim) { WIN.cancelAnimationFrame(anim); anim = null; }
     if (animGuard) { WIN.clearTimeout(animGuard); animGuard = null; }
     if (cascadeRun) {
@@ -5264,12 +5252,6 @@ function mountVaultGraph(root, data, deps) {
       WIN.clearTimeout(cascadeRun.guard);
       cascadeRun = null;
     }
-  }
-
-  function cascade(done, opts) {
-    opts = opts || {};
-    stopPlay();                            // a filter change interrupts playback
-    cancelCascade();
 
     // A null plan is legitimate: "none" hides every note, so there is no
     // geometry left to lay out. The fade still has to run, with positions simply
@@ -11576,19 +11558,6 @@ function mountVaultGraph(root, data, deps) {
                     // the plugin's View-settings toggle (github#23).
                     setCompactAxis: function (v) { return setCompactAxis(v !== false, false); },
                     get compactAxis() { return compactAxis; },
-                    // Dev-only A/B switch, github#31 -- no settings row, nothing persisted.
-                    // Forces the same reset+redraw __vg.relayout() uses, since the gate
-                    // changes cell KEYS (bandLock/geomLock's cached shape must not survive it).
-                    setSubwedgeGate: function (v) {
-                      subwedgeGate = !!v;
-                      bandLock = null; geomLock = null;
-                      cancelCascade();   // otherwise a still-running intro overwrites the snap below
-                      regroup();
-                      applyLayout(false);
-                      renderer.refresh();
-                      return subwedgeGate;
-                    },
-                    get subwedgeGate() { return subwedgeGate; },
                     // The pooled-tail rank a split cell's key ends in -- exposed so a check can
                     // derive it instead of hardcoding SUB_SLOTS-1, which is not itself public.
                     get subTailRank() { return SUB_SLOTS - 1; },
@@ -12178,7 +12147,6 @@ function mountVaultGraph(root, data, deps) {
                     },
                     relayout: function () {
                       bandLock = null; geomLock = null;
-                      cancelCascade();   // same fix as setSubwedgeGate, same reason -- github#31
                       regroup();
                       applyLayout(false);
                       renderer.refresh();
