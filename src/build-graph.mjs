@@ -193,7 +193,16 @@ const under = (rel, dir) => dir && (rel === dir || rel.startsWith(dir + "/"));
 const isTemplate = (rel) => TEMPLATE_DIRS.some((d) => under(rel, d));
 
 function walk(dir, acc = []) {
-  for (const entry of readdirSync(dir)) {
+  // SORTED, not whatever order the filesystem hands back. readdirSync's order is not
+  // part of any contract -- Node documents it as filesystem-dependent -- and this walk's
+  // order becomes `notes`' order (the loop below reads `files` in the order `walk`
+  // returns it, no sort after), which becomes graph node insertion order, which becomes
+  // the group iteration order `balanceBands()` searches over (github#32). That search
+  // is exhaustive-with-ties: candidates of equal cost keep whichever the loop reached
+  // first, so a tie that used to break on unspecified disk order could pick a different
+  // inner/outer split for the SAME vault content from one build to the next -- see
+  // .ai-context/invariants.md.
+  for (const entry of readdirSync(dir).sort()) {
     const p = join(dir, entry);
     let st; try { st = statSync(p); } catch { continue; }
     if (st.isDirectory()) {

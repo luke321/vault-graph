@@ -144,6 +144,10 @@
     color: var(--text-1);
     font: 13px/1.45 ui-sans-serif, -apple-system, "Segoe UI", system-ui, sans-serif;
     overflow: hidden;
+    /* The containing block for .ctxmenu (position: absolute) -- see its own comment.
+       No offsets, so this has no visual effect on its own; .vg-tokens hands it back
+       below, same as every other declaration added here. */
+    position: relative;
   }
 
   .vault-graph { display: grid; grid-template-columns: 288px 1fr; height: 100%; }
@@ -410,13 +414,23 @@
 
      So this hands back every declaration on the two base rules and keeps only the custom
      properties. The list is exactly what those rules set -- layout and height, then
-     background, colour, font, overflow and color-scheme. Forcing the page's own text
-     colour and font onto Obsidian's setting rows would restyle a pane that is not ours,
-     and `overflow: hidden` would clip it. If a declaration is ever added to
+     background, colour, font, overflow, position and color-scheme. Forcing the page's
+     own text colour and font onto Obsidian's setting rows would restyle a pane that is
+     not ours, and `overflow: hidden` would clip it. If a declaration is ever added to
      `.vault-graph`, it has to be answered here too. */
   .vault-graph.vg-tokens {
-    display: block; height: auto; overflow: visible;
+    display: block; height: auto; overflow: visible; position: static;
     background: none; color: inherit; font: inherit; color-scheme: inherit;
+  }
+
+  /* A subfolder row nested under a folder's own Setting, INSIDE .vg-tokens -- so this
+     rule reaches the Obsidian settings tab exactly the way .swatch/.auto above already
+     do, through the same scoping trick rather than a second one. Obsidian's own
+     .setting-item classes carry the rest of the row's styling; this only indents it and
+     drops the border every other Setting row has, so a run of subfolder rows reads as
+     one nested block under its folder rather than as more top-level rows. */
+  .vault-graph.vg-tokens .vg-subrow {
+    margin-left: 24px; padding-top: 6px; padding-bottom: 6px; border-top: none;
   }
   .vault-graph.vg-tokens .sws { flex-wrap: wrap; justify-content: flex-end; }
   .vault-graph .swatch:hover { transform: scale(1.15); }
@@ -437,6 +451,39 @@
      answer is where you are looking. */
   .vault-graph .swatch[aria-checked="true"][data-auto="1"] {
     box-shadow: 0 0 0 1px var(--surface-0), 0 0 0 2px var(--text-3);
+  }
+  /* AUTOMATIC BUT NOT IN USE: an override has moved this folder to a different swatch,
+     and this is the one Auto would give back. The ring above already answers "which
+     colour is this folder using" -- marking that same swatch here too would just repeat
+     it, so this is a distinct, smaller mark instead of a second ring, and it only
+     renders on the swatch that ISN'T checked (see the two rules together: never both on
+     one swatch, never neither on an automatic-and-in-use one).
+
+     Same triangle the heatmap band uses for "today" (page.js, heatDraw), and the same
+     reason for the colour: --today is the one token guaranteed not to be one of the
+     twelve hues, so the mark can never be misread as a competing colour choice. */
+  .vault-graph .swatch[data-auto="1"]:not([aria-checked="true"]) {
+    position: relative;
+  }
+  /* A real 6x4 box clipped to a triangle, not the classic zero-width-plus-border hack.
+     Three different centering formulas on the bordered-zero-width version --
+     `transform: translateX(-50%)`, `calc(50% - 3px)`, and `margin: 0 auto` -- all
+     measured PIXEL-IDENTICAL positions, confirming the LAYOUT math was never the
+     problem; a live probe element's getBoundingClientRect agreed with all three. What
+     did not agree was the screenshot: the rendered mark sat measurably right of every
+     one of those verified positions, by the same amount regardless of which formula
+     placed it there -- which points at how Chrome RASTERISES a zero-content-width
+     border-triangle's diagonal edges at fractional sub-pixel widths, not at anything
+     this file controls. `clip-path` paints a genuinely sized box instead of exploiting
+     border geometry, going through a different rasteriser path entirely. */
+  .vault-graph .swatch[data-auto="1"]:not([aria-checked="true"])::after {
+    content: "";
+    position: absolute;
+    left: 50%; bottom: -4px;
+    width: 6px; height: 4px;
+    transform: translateX(-50%);
+    background: var(--today);
+    clip-path: polygon(50% 0%, 100% 100%, 0% 100%);
   }
   .vault-graph .scr .auto {
     font: inherit; font-size: 10px; padding: 2px 6px; cursor: pointer; margin-left: 2px;
@@ -523,6 +570,26 @@
     .vault-graph #vg-cam button { transition: none; }
   }
 
+  /* The compact-axis toggle, left of the range group -- same small icon-button language,
+     scaled down from #vg-cam's 31px corner buttons to sit inline in a text-height row.
+     A MODE, like #vg-pan: fills when on rather than reading as just-clicked. */
+  .vault-graph #vg-compact {
+    display: flex; align-items: center; justify-content: center;
+    width: 22px; height: 22px; padding: 0; cursor: pointer; flex: 0 0 auto; margin-left: 8px;
+    background: var(--surface-2); color: var(--text-3);
+    border: 1px solid var(--border); border-radius: 6px;
+    transition: color .12s, border-color .12s, background-color .12s;
+  }
+  .vault-graph #vg-compact:hover { color: var(--text-1); border-color: var(--border-strong); }
+  .vault-graph #vg-compact:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .vault-graph #vg-compact[aria-pressed="true"] {
+    color: var(--accent); border-color: var(--accent);
+    background: color-mix(in oklab, var(--accent) 14%, var(--surface-2));
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .vault-graph #vg-compact { transition: none; }
+  }
+
   /* The range group: two date fields, an arrow and the reset, at the end of the heat row. */
   .vault-graph #vg-rangebox {
     display: flex; align-items: center; gap: 5px; flex: 0 0 auto; margin-left: 4px;
@@ -573,6 +640,17 @@
      at this size: a filled ground, a border, and the label at body contrast. */
   .vault-graph #vg-years button {
     position: absolute; top: 0; transform: translateX(-50%);
+    /* HEIGHT IS EXPLICIT, not left to line-height + padding to add up to 16px. Inside the
+       Obsidian plugin host (never in the standalone page, which has no competing button
+       CSS to lose to) this chip measured 30px tall instead of 16px -- height:14px plus
+       1px border top and bottom -- with line-height, font-size and box-sizing all reading
+       correctly as set, meaning something in Obsidian's own theme CSS was still adding
+       vertical padding this rule's shorthand did not survive against. An explicit height
+       on a border-box element is authoritative regardless of what padding a competing
+       rule contributes, so it closes the gap without having to win that cascade fight
+       (github#23 -- surfaced by the compact axis packing years close enough for the
+       overflow's own 14px to visibly spill below #vg-years and into the disc). */
+    height: 14px;
     padding: 0 5px; cursor: pointer; border-radius: 4px;
     background: color-mix(in oklab, var(--text-3) 14%, transparent);
     border: 1px solid var(--border);
@@ -700,6 +778,10 @@
     position: absolute; display: block; pointer-events: none;
     transform: translate(-50%, -50%);
     opacity: .95;
+    /* The mark yields to pinned notes by fading rather than by being switched off. Timed
+       against TWEEN_MS, the same clock the note travels to the hub on, so the two halves
+       of the change finish together instead of one popping and the other gliding. */
+    transition: opacity 380ms ease;
     -webkit-mask-repeat: no-repeat; mask-repeat: no-repeat;
     -webkit-mask-position: center;  mask-position: center;
     -webkit-mask-size: contain;     mask-size: contain;
@@ -716,6 +798,28 @@
      fills sit lighter than the paper, so the mark is deepened a touch to hold its
      edges instead of dissolving into the background. */
   .vault-graph[data-theme="light"] #vg-logo { opacity: .9; filter: saturate(1.05) brightness(.86); }
+
+  /* SPIKE (github#12). B's dial: the ring's colours as hard arcs, holed out so the middle
+     stays free. The hit disc sits over the whole hole and is the only thing here that
+     takes a pointer -- #vg-logo is `pointer-events: none` and a mask does not hit-test. */
+  /* THE HUB'S DROP TARGET, drawn only while a note is being dragged. Without it the hole
+     is an invisible target and the gesture is a guess -- the first version had no ring and
+     a drop either worked or did not for no stated reason. Dashed while the pointer is
+     outside it, solid and filled once the drop would land. */
+  .vault-graph #vg-hubdrop {
+    position: absolute; display: block; pointer-events: none;
+    transform: translate(-50%, -50%); border-radius: 50%;
+    border: 2px dashed var(--text-3); opacity: .55;
+    transition: opacity 120ms linear, background-color 120ms linear;
+  }
+  .vault-graph #vg-hubdrop[hidden] { display: none; }
+  .vault-graph #vg-hubdrop[data-over="1"] {
+    border-style: solid; border-color: var(--accent); opacity: 1;
+    background: color-mix(in srgb, var(--accent) 12%, transparent);
+  }
+  /* Dragging a pinned note OUT reads as the opposite gesture, so the ring says so rather
+     than looking like a target the note is failing to hit. */
+  .vault-graph #vg-hubdrop[data-drop="out"] { border-color: var(--text-3); opacity: .32; }
 
   .vault-graph #vg-tip {
     position: absolute; pointer-events: none; z-index: 5; max-width: 260px;
@@ -749,12 +853,16 @@
   }
   .vault-graph #vg-detail .nb { font-size: 10px; text-transform: uppercase; letter-spacing: .07em;
                 color: var(--text-3); margin: 10px 0 5px; font-weight: 600; }
+  .vault-graph #vg-detail .actions {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 4px;
+  }
   .vault-graph #vg-detail a.open {
     display: inline-block; font-size: 11px; color: var(--accent);
     text-decoration: none; border: 1px solid var(--accent);
-    border-radius: 6px; padding: 4px 8px; margin-top: 4px;
+    border-radius: 6px; padding: 4px 8px;
   }
   .vault-graph #vg-detail a.open:hover { background: color-mix(in srgb, var(--accent) 12%, transparent); }
+  .vault-graph #vg-detail .pin svg { width: 13px; height: 13px; vertical-align: -2px; margin-right: 3px; }
   .vault-graph #vg-detail ul { list-style: none; margin: 0; padding: 0; }
   .vault-graph #vg-detail li button {
     background: none; border: 0; padding: 2px 0; font: inherit; font-size: 12px;
@@ -767,6 +875,58 @@
     color: var(--text-3); font-size: 16px; cursor: pointer; line-height: 1; padding: 2px 5px;
   }
   .vault-graph #vg-detail .x:hover { color: var(--text-1); }
+
+  /* Fixed white-on-black regardless of theme, like every real OS pointer -- its whole
+     job is to read against whatever is under it, light disc or dark. No transition: a
+     cursor that eases toward its target looks like it is being dragged there by
+     something else, which is the opposite of what a pointer communicates. */
+  .vault-graph #vg-democursor {
+    position: absolute; left: 0; top: 0; z-index: 50; pointer-events: none;
+    filter: drop-shadow(0 1px 2px rgba(0,0,0,.45));
+  }
+  .vault-graph #vg-democursor[hidden] { display: none; }
+
+  /* THE RIGHT-CLICK COLOUR MENU. #vg-settings above is a sidebar block on purpose, to
+     avoid exactly this z-index-and-dismiss-handler cost -- but a menu that has to open
+     at the click point cannot be a block, so it pays that cost deliberately.
+
+     `position: absolute` against #vg-app (this rule is what makes #vg-app itself the
+     containing block -- see the bare `.vault-graph { position: relative }` near the top
+     of this file), NOT `fixed` against the viewport. Fixed was tried first and breaks
+     inside Obsidian: the plugin mounts #vg-app directly into a workspace pane, and
+     Obsidian's own panes sit under a transformed/contained ancestor for their resize
+     animation, which becomes fixed's containing block instead of the window -- measured,
+     the menu opened detached from the row that was right-clicked, floating wherever that
+     ancestor's own origin happened to be. #vg-app's own getBoundingClientRect() already
+     reflects whatever sits above it, so page.js converts the click's viewport coordinates
+     into #vg-app's frame before positioning -- the same reason #vg-detail and #vg-tip are
+     absolute against their own ancestor rather than fixed. z-index above #vg-detail (6)
+     and #vg-tip (5), since it can be opened while either is showing. */
+  .vault-graph .ctxmenu {
+    position: absolute; z-index: 9; width: 176px;
+    background: var(--surface-2); border: 1px solid var(--border-strong);
+    border-radius: 8px; padding: 8px; box-shadow: 0 8px 28px rgba(0,0,0,.22);
+  }
+  .vault-graph .ctxmenu .sws {
+    display: grid; grid-template-columns: repeat(6, 1fr); gap: 4px; margin-bottom: 6px;
+  }
+  .vault-graph .ctxmenu .swatch { width: 100%; height: auto; aspect-ratio: 1; }
+  .vault-graph .ctxmenu .auto { width: 100%; }
+
+  /* A subfolder row in the settings panel, nested under its folder's own .scr. Indented
+     like .lgr.sub in the legend (14px), on the same .scr/.scrh/.sws layout the folder
+     rows already use -- it is a smaller version of the same thing, not a different one. */
+  .vault-graph .scrsub { margin-left: 14px; }
+  .vault-graph .scrsub .scrh .nm { font-size: 10px; }
+  .vault-graph .scrsub .sw {
+    width: 10px; height: 10px; flex: 0 0 auto; margin-right: 1px;
+  }
+  /* Same treatment as the legend's own .ct -- text-3, tabular-nums -- so a count reads
+     the same whether it is sitting in a CSS grid row there or a flex row here. */
+  .vault-graph .scrsub .ct {
+    color: var(--text-3); font-variant-numeric: tabular-nums; font-size: 10px;
+    margin: 0 4px;
+  }
 
   .vault-graph #vg-hits { margin-top: 6px; max-height: 168px; overflow-y: auto; }
   .vault-graph #vg-hits button {

@@ -9,10 +9,7 @@ The layout is **deterministic, not force-directed**. There is no simulation to s
 no seed to get lucky with: the same vault always draws the same picture, so the shape
 becomes something you can learn and recognise rather than a fresh tangle each time.
 
-![The disc growing from the vault's first note, a note hovered, a folder hidden, a folder and a subfolder hovered from the legend, that subfolder then clicked to push it out, three heatmap days hovered, two folders recoloured from the palette and put back, then one folder soloed](assets/demo.webp)
-
-
-![Vault Graph inside Obsidian, dark theme](assets/screenshots/plugin-dark.png)
+<img src="assets/demo.webp" width="100%" alt="The disc growing from the vault's first note, a note hovered, a note dragged into the hub to pin it and two more pinned by right-click and from their own detail card, the timeline scrubbed, three heatmap days hovered, a folder hidden and one soloed, a subfolder pushed out and right-clicked for its own colour, then the camera panned and reset">
 
 Ships as an **Obsidian plugin** and as a **standalone HTML exporter** — one page, two
 mounts, from the same source. The exporter writes a single self-contained offline file with
@@ -22,42 +19,15 @@ no server and no network, which is how the graph reaches a phone.
 
 ## What it does
 
-**The disc**
-- One wedge per top-level folder, sized by how much of the vault it holds; subfolders take
-  their parent's hue at a lighter tint and cut sub-wedges inside it.
-- Node size follows link count, so hubs are visibly hubs.
-- Two bands — an inner ring and an outer ring — assigned once and kept stable, so hiding
-  something in one ring never re-packs the other.
-- Links are curved away from the hub by default, because only ~9% of links stay inside one
-  folder and straight chords would draw a grey wash across the middle. There is a switch.
+One wedge per top-level folder, sized by how much of the vault it holds, filled with notes
+ringed by how well-connected they are. Click a folder to hide it and the rest re-pack; hover
+a note to see its links; search narrows to matching notes; scrub a date ribbon to watch the
+vault grow. Follows Obsidian's theme, including a live switch.
 
-**Filtering, and what it does to the layout**
-- Click any folder or subfolder in the legend to hide it. The remaining wedges **grow back
-  into the angle it vacated** and the whole disc re-packs — the layout is a statement about
-  what is currently visible, not a fixed seating plan with gaps in it.
-- Solo a folder, hide everything, bring it all back.
-- Search narrows to matching notes and lists the hits.
-
-**Time**
-- A **heatmap band** above the disc: one square per day, coloured from the notes that landed
-  in it, so a busy week is both taller and more colourful.
-- A **date ribbon** under the band carries every month of the vault. Its two handles are a
-  date filter, the pill below them is the 52 weeks the band is drawing, and the year chips
-  under it jump to a year. It is the timeline: `refresh` replays the vault's growth by
-  sweeping the right-hand handle from the first note to today.
-- **Click a day** in the band to pick out its notes on the disc — recoloured and haloed,
-  nothing moved. Clicking today's square is how you see what you wrote today.
-
-**Reading one note**
-- Hover a note to raise it and dim everything unconnected to it.
-- Click for a panel: folder, type, tags, word count, and its linked notes — click any of
-  them to jump across the disc.
-- In the plugin, **Open in Obsidian** opens the note in a pane.
-
-**Themes**
-- Follows Obsidian's theme, including a live switch.
-
-![Vault Graph in the light theme](assets/screenshots/plugin-light.png)
+**The full feature list, one short clip per feature, lives in
+[`docs/features.md`](docs/features.md)** — the disc itself, filtering, the heatmap and
+timeline, reading a note, the camera, and folder colours, each with what it does and how its
+clip gets regenerated.
 
 ---
 
@@ -302,7 +272,6 @@ are Windows-only conveniences, not requirements:
 | `refresh-graph.ps1` | rebuild *and* open | `node src/build-graph.mjs && open <path>` |
 | `record-demo.ps1` | record the demo to mp4 | not ported — needs `avfoundation` / `x11grab` |
 | `make-hero.ps1` | encode a take as the README hero (animated WebP, 30fps, 700px) | works anywhere ffmpeg does, if you port the wrapper |
-| `cursor.ps1` | moves the OS pointer during a recording | not ported |
 | `make-logo.ps1` | rebuild the logo mask from source art | not ported; `assets/` is prebuilt |
 
 `scripts/smoke.mjs`, `scripts/demo.mjs` and `scripts/make-test-vault.mjs` are Node and
@@ -353,9 +322,11 @@ nothing else needs changing.
 .\scripts\record-demo.ps1        # needs ffmpeg: winget install Gyan.FFmpeg
 ```
 
-> **It takes your mouse.** With `--cursor` (which the recorder passes) the demo moves the
-> real OS pointer so the recording has a visible cursor. For its ~30 seconds the mouse is
-> not yours. Leave `--cursor` off and you lose only the visible arrow.
+The visible cursor in a recording (`--cursor`, which the recorder passes) is drawn inside
+the page and moved by eval, in step with the same input dispatched over CDP — not the
+real OS pointer. It does not touch your mouse; see
+[`.ai-context/decisions/0007`](.ai-context/decisions/0007-the-demo-drives-real-input.md)
+for why an earlier version did and had to be replaced.
 
 ## Optional: the invariant suite
 

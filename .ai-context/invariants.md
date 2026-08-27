@@ -209,6 +209,88 @@ __vg.pushReport()           // pushedCount / pushedByPath vs haloedByPath
 `03 - Resources/Locations` is the case that settled it: 3 notes, seventh in the order,
 sharing the tail slot with six others. `pushedCount` must be 0 when it is selected.
 
+## A sub-wedge only earns its own slot if it can fill one
+
+`splitFor(g)` already refuses to split a FOLDER into sub-wedges when its total note count
+can't fill the band's rows (`src/page.js:1781-1799`, github#18/#19 lineage) — but that is
+an aggregate, folder-level test. It says nothing about each *individual* resulting
+subfolder cell once a folder does split. Reviewing the demo vault after github#23 shipped,
+`04 - Daily Notes` (50 notes over 16 month subfolders, clears the folder-level bar as a
+whole) turned up 3 of its 4 sub-cells below the outer band's own row depth —
+`"0:6/9*", "1:6/9*", "2:4/9*"` against a healthy `"3:34/9"` tail — while every other split
+folder on that vault had zero sparse cells. Each sparse cell independently triggers
+`placeCell`'s one-note-per-row spread (correct in isolation; odd repeated three times
+side by side).
+
+`subCellIndex(folder, sub, n, depth)` (`src/page.js`, beside `subTintIndex`) adds the same
+question per subfolder: below `depth` (the caller's own `bandDepth[bk]`, the same number
+`splitFor` already computed for that band) → redirect to the pooled-tail slot instead of
+the subfolder's own rank. Deliberately a **separate function from `subTintIndex`**, not a
+change to it — `subTintIndex` also drives a subfolder's *colour* (`buildSubShades`), and
+colour should not shift just because a geometric slot did. Unconditional — every note
+run through the row-depth test, always; no toggle to check or forget to check.
+
+**`n` is a caller-supplied live count, not a lookup this function makes itself — and it
+was not, at first.** An earlier version read `subCount`, a whole-vault tally built once at
+load and never refreshed, to answer "how many notes does this subfolder have." Under a
+filter that is the wrong answer: a subfolder large in the whole vault but with almost
+nothing currently visible would still clear the threshold on its stale total and keep its
+own sub-wedge cell sparser than what's actually on screen — reproducing the exact defect
+this feature exists to remove. This is the identical bug class `buildWedgePlan`'s own
+comment already documents fixing for the FOLDER-level gate ("COUNTED FROM WHAT IS ON
+SCREEN, not from the vault... it also cannot see a filter"), just not carried over to the
+new per-subfolder one. Fixed the same way that fix was: a `liveSub` map, built in the same
+cascade-stable, filter-aware loop that already produces `liveG`/`liveN` (same
+`onlyVisible && !(planKeep || willShow)` membership), keyed by `folder + "/" + sub`. The
+call site passes `liveSub[...] || 0` as `n`; `subCellIndex` still reads `subOrder` via
+`subTintIndex`, but makes no count lookup of its own — the one piece of module state that
+was actually stale is a parameter instead.
+
+```javascript
+__vg.buildWedgePlan(false).cells   // a sparse rank is already folded into the tail
+```
+
+*No non-tail split cell holds fewer notes than its band's row depth* asserts the general
+rule directly against `buildWedgePlan(false)` — deliberately vault-agnostic (an even vault
+with nothing to gate is a legitimate pass, not skipped) rather than hardcoding which
+folder or vault is expected to be sparse. Confirmed on the demo vault build under this
+suite: 42 cells at rest, 24 of them non-tail split cells, none sparse.
+
+A second check, *the row-depth gate reads LIVE counts, not the whole-vault tally, under a
+filter*, drives `buildWedgePlan(true)` — not `(false)`, which every other check here uses
+— since that live path is exactly what the `subCount`-vs-`liveSub` bug above needed and
+nothing else exercises it. **The window is the fixture's own first 20% of history
+(`dateSpan.lo` to `dateSpan.lo + (hi-lo)*0.2`), not a fixed date.** A first cut reused the
+fixed two-day window an existing pin-and-filter check already uses and it reached zero
+split cells on all three fixtures — a check that cannot fail is not a check, so it was
+re-measured against a vault-relative window wide enough to still keep some. Confirmed
+non-vacuous by reintroducing the fixed bug (`subCellIndex` reading `subCount` again): 2 of
+the 3 fixtures caught it (`01 - Projects` sub-cells at 1/2 and 5/6), the third (the
+dominant-folder fixture, only 6 live cells under this window) did not — reported honestly
+as "vacuous on this fixture" rather than a silent pass, when that happens.
+
+**This shipped as a toggle first (`__vg.setSubwedgeGate`, off by default) and the toggle
+is gone.** It was the right call to make it one initially — this was a hypothesis about a
+look, not a confirmed fix, and the plan it shipped under said so explicitly. Live A/B
+testing across several rounds that day found the merge itself correct every time; what it
+also found, one round at a time, was three real bugs that existed *only because* the
+toggle needed to recompute and re-render live, mid-session, against whatever else the page
+happened to be doing at that moment — a cascade race (flipping the gate mid-intro left the
+plan correct but the rendered notes stuck in their old, scattered positions until the
+intro finished on its own), a stuck timeline (the same interruption skipped the sweep's
+own completion cleanup, leaving the date-strip handle parked wherever the cut-off frame
+left it), and an animation that only ever jumped instead of transitioning (an unconditional
+instant snap is the right choice for something meant to give instant feedback in a
+console, wrong for something a person is watching). Baking the gate in unconditionally —
+so the very first, only cascade of a session already computes the correct layout, with no
+runtime flip to race against anything — removed the need to fix any of the three rather
+than fixing all three. The cascade-cancellation groundwork itself (`stopPlay()` before
+`applyLayout(false)`, so a snap can't be overwritten by whatever was still animating) is a
+real, general finding about `relayout()` and any future caller of the same
+reset-and-snap shape; left unfixed here, deliberately, since there is no longer a caller
+in this ticket that needs it — worth its own follow-up if `relayout()` (or something like
+it) is ever driven the same way live.
+
 ## The resting disc is on the lattice
 
 At rest every note's radius is `base + an integer row × SP`. A fractional radius at rest
@@ -471,6 +553,174 @@ Two consequences that have each cost something:
   Centring is a promise the control can only keep where it can still move; a fixed
   fraction aims off the end of the travel on a narrow-span vault and measures the clamp.
 
+## The window pill centres on the pointer's PIXEL, not its date
+
+`winEndCentredAtPx` (`src/page.js`) solves for the window's end by bisection in pixel
+space — given the pointer's x, find the `end` whose drawn pill (`ribbonX(end-span, w)` to
+`ribbonX(end, w)`) has that x as its midpoint. Replaced a formula that added half the
+window's span in TIME to the pointer's own date (`ms + winSpan()/2`), which only centres
+correctly when `ribbonX` is linear: that shortcut assumes a constant px-per-ms ratio to
+turn "half the span in time" into "half the pill's width on screen", and github#23's
+compact axis broke the assumption on purpose. Reported live: grabbing the pill visibly
+resized as it crossed a density boundary and stopped tracking the pointer's actual pixel.
+
+```javascript
+// after a press or drag on the window track
+__vg.heat.start + __vg.heat.cols * 7 * 86400000   // the (Monday-quantised) drawn end
+__vg.ribbonXOf(end)                                // where that end actually sits
+```
+
+**Verified in isolation before trusting the check.** A `debugWinEndCentredAtPx(px, w)`
+probe (removed once it had answered) confirmed the bisection itself lands the RAW end
+exactly on target — 0px off at an achievable pixel, correctly clamped and non-zero off at
+an unachievable one. The remaining error a check can observe is Monday quantisation
+(`heatBuild()` snaps `heat.start`, up to ~7 days away from what the bisection solved for),
+and how many pixels 7 days costs is not a constant — it depends on how dense the axis is
+right there. Measured directly rather than assumed a flat budget: 1.4px on the demo vault,
+3px on the 10k vault, but **37.2px on the dominant-folder vault**, whose 14 months are all
+near the note-count ceiling (no real compaction happening, so a week costs as many pixels
+as it always did on a narrow, largely-linear span). *a press on the window track centres
+the window there* computes its own tolerance from the LOCAL px-per-week at the press point
+(`ribbonXOf(end) - ribbonXOf(end - 7d)`, times 1.5 for margin) rather than a flat number,
+for the same reason the target pixel itself is read off the control's own measured travel
+(`winTravel`, github#18) rather than assumed — a flat pixel budget tuned on a decade-wide
+vault is far too tight for a vault whose whole span is 14 months.
+
+## The date axis weighs years by note count, not by calendar time
+
+`compactAxis` (default on, github#23) gives each calendar YEAR a width between
+`YEAR_FLOOR_MS` (about one month) and `YEAR_CEIL_MS` (about one real year), scaled by that
+year's own note count against `yearRef` — the same p90-with-floor shape `nRef` already uses
+for bar height, applied here to note count per year instead of per month. Within a year,
+every one of its months gets an equal share of the year's own width — deliberately NOT
+weighted by the month's own note count; that was tried and read as noise.
+
+```javascript
+__vg.setCompactAxis(false); __vg.ribbonXOf(ms)   // the untouched linear formula
+__vg.setCompactAxis(true);  __vg.ribbonXOf(ms)   // note-weighted by year
+```
+
+**Two earlier designs were tried and replaced, each measured wrong against the author's
+own real vault (not a synthetic fixture — this is the one case in the ticket where the
+fixtures could not have caught the defect, since none has the shape that broke it):**
+
+1. *Weight a populated month by its own real ms duration, collapse only literally-empty
+   runs.* This was an exact no-op whenever no month was literally empty (0px delta,
+   provably, since the per-month weights telescope back to `dateSpan.lo/hi`) — but it
+   never made a genuinely busy year wider than a quiet one. Measured on the real vault:
+   **2023 (21 notes, spread thin enough to touch nearly every month) drew 172px against
+   2026 (399 notes, the vault's busiest year by far) at only 114px** — 2023 read as "every
+   month populated" and kept full real-time weight throughout, while 2026 is only
+   partway through its own calendar year. A month being merely non-empty said nothing
+   about how much it actually held.
+2. *Weight populated months by their own note count too, not just years.* Fixed the
+   above, but the user reviewing it live asked for equal-width months within a year
+   instead — month-to-month variation inside one year reads as noise, and the current
+   design (year-level weighting, uniform months within it) is what shipped.
+
+**A collapsed year measures against the busiest one, not against a hypothetical
+linear width.** *a year's width tracks its own note count* asserts the busiest year on
+the live vault draws strictly wider than the quietest — measured on the real vault:
+2026 (399 notes) at 408px against 2023's 90px once note-weighting replaced real-duration
+weighting. *sparse years cluster near the same floor width* asserts every year at or
+below the note-count median lands within a bounded spread of every other — not
+identical (a 2-note year still edges out a 0-note one), but visibly equidistant rather
+than each keeping whatever width its own internal month structure happened to produce.
+
+**A third check needs no gap at all, and exists because a mismatched id can hide behind a
+full re-render.** `$()` prepends `"vg-"` to every lookup (`src/page.js:103`) — a rendered
+element's own id has to carry that prefix too, or a module-scope function using `$()` to
+reach it will find nothing. The compact-axis settings-panel toggle shipped once with a
+button id missing that prefix, and it read as working: the click handler always calls
+`buildOptions()` right after, which replaces the whole row from live state regardless of
+whether the broken lookup's direct DOM write landed. *the settings-panel toggle actually
+flips the live state* drives the real gear-and-click path end to end and was confirmed to
+fail with the id bug reintroduced and pass with it fixed — a check reading only the `__vg`
+API surface (as the other two here do) cannot see this class of bug at all.
+
+**The year-chip label-density estimate was also stale, and only a compacted axis exposed
+it.** `buildYears()` decided whether to show every year or skip alternates from
+`(w * 365.25days) / totalSpan` — a vault-wide AVERAGE px-per-year, accurate only while the
+axis was linear. Once a handful of sparse years can sit much closer together than that
+average while one busy year takes the rest of the strip, the average never sees the tight
+spot: measured on the real vault, every year still showed (no skip) while adjacent chips'
+actual rendered boxes overlapped. Fixed to measure the real minimum gap between any two
+consecutive years' actual positions and skip alternates below ~28px (a chip's own
+approximate rendered width) — the number that can actually collide, not an estimate that
+cannot see a local squeeze.
+
+**A vertical overflow was Obsidian-only, and no amount of standalone testing would have
+found it.** The plugin, driven live under CDP (`scripts/spike-check.mjs`, pointed at a
+`make-mirror-vault.mjs` copy of the real vault so no vault content left the machine),
+measured year-chip buttons at **30px tall against a 16px row** — `line-height`, `font-size`
+and `box-sizing` all read correctly as declared, meaning something in Obsidian's own theme
+CSS was still contributing vertical padding this rule's shorthand did not survive against.
+The standalone page never has competing `button` CSS to lose that fight to, so this was
+invisible in every Chrome-only check this ticket ran, including the fixed-then-broken
+label-density check above. Fixed with an explicit `height: 14px` on the button — with
+`box-sizing: border-box` already in force, an explicit height is authoritative regardless
+of what else contributes padding. **Any future date-strip change should get at least one
+pass driven through the actual plugin, not only the standalone build**, precisely because
+this class of defect has no standalone-visible symptom at all.
+
+**There are TWO buttons that flip `compactAxis`, not one, and they live on different
+hosts.** `#vg-opt-compactAxis` is the settings-panel row, standalone-only (the plugin's
+gear opens Obsidian's own settings tab instead of `#vg-settings`). `#vg-compact` is a
+view-level icon beside the date-range fields, present on BOTH hosts — added after the
+settings-panel row alone left the plugin with no in-view way to flip it at all. `setCompactAxis`
+syncs whichever of the two currently exist in the DOM; either may be absent depending on
+host and whether the settings panel has been opened. Adding the second button reversed an
+earlier call: `compactAxis`'s plugin-side dep was made read-only on the reasoning that "no
+in-view control exists on that host" — true when written, false the moment `#vg-compact`
+shipped, so `onCompactAxis` came back, matching `onPanEnabled`. *the view-level icon
+actually flips the live state, and persists* covers it the same way the settings-row check
+covers its own button, and was confirmed against the real plugin under CDP (22px tall, no
+overflow, no overlap with the date fields) rather than assumed from the standalone.
+
+## A note in the hub has left the ring, and the ring closes behind it
+
+Pinning takes a note out of `buildWedgePlan` entirely. Skip that and it keeps its seat, so
+its wedge is drawn around a hole where it used to be — the note is in the hub and its chair
+is still at the table.
+
+```
+node scripts/smoke.mjs --only "leaves no gap"
+```
+
+Measured as the worst neighbour gap within one row of the busiest wedge, against that
+vault's own resting spread rather than an absolute: **1.69x median at rest, 1.68x with six
+pinned** on the shape vault. A vacated seat roughly doubles it.
+
+Three numbers hang off the same decision:
+
+- **The hub's dots shrink as it fills**, and the size comes from the closest two *slots*,
+  not from the count — the ball changes shape at 2 and again at 7. On the demo vault:
+  **16.53px at one pinned, 13.76 at three, 11.02 at six, 6.79 at thirteen.** A lone note
+  takes the cap outright; deriving its spacing from the hole gave it a *smaller* dot than
+  three (10.93 against 11.73), because a ring of three sits further out than the spacing
+  the hole implies.
+- **The ball must not touch the innermost ring.** `HUB_R1` is measured against the first
+  real note of the disc, not against `r0` — both the dot and the note carry a radius the
+  hole knows nothing about. At 0.62 the outer edge reached **0.865** of that distance,
+  8.8px of clearance, which reads as contact; at 0.50 it reaches **0.714**, ~19px.
+- **A pin hidden by a filter is skipped, not released.** Filters are deliberately not
+  persisted, so they must not quietly edit something that is. Releasing was the first
+  version: hiding a folder dropped every pin in it and unhiding did not bring them back.
+
+## The mark yields to the hub by fading, not by switching off
+
+`hidden` popped the mark out on the frame the first pin landed, while the note it was
+yielding to was still crossing the disc — the one hard cut in an otherwise tweened change.
+
+```
+node scripts/smoke.mjs --only "mark yields"
+```
+
+Opacity **0.95 at rest → 0 with three pinned → 0.95 cleared**, with `hidden` false
+throughout. The check sleeps past the 380ms transition on every read; `settle()` waits for
+the layout and knows nothing about a CSS transition, and reading straight after a clear
+returned 0.1414 — the fade caught in progress, not a fact about the mark.
+
 ## Every unlinked note wears the (unlinked) swatch
 
 A note of degree 0 belongs to the `(unlinked)` group, not to its folder, and the legend
@@ -522,3 +772,158 @@ clamps and the animation stretches rather than leaping.
 `setTimeout(settle, dur + margin)` fires part-way through on any page too slow to finish
 in time and snaps the disc — this exact bug has been introduced twice. Watchdogs re-arm
 while frames keep arriving.
+
+## The focus web stays above the dim notes
+
+Sigma paints every edge on its bottom layer and every node above that, so a lit (hover or
+click) edge running under a dim note used to lose a bite of itself to every disc it
+crossed — a well-connected hub read as dashed instead of solid (issue #2).
+
+```javascript
+__vg.checkFocusWeb()      // -> dimAtGaps: 0, webOK: true
+```
+
+Selects the best-connected note, composites the canvases in stacking order, and samples
+every lit curve at 1% steps, keeping the samples that fall geometrically inside a
+non-focus disc. `dimAtGaps` must be **0** — any sample landing on a dim disc means the web
+is still running under it. Not frame-sensitive: the check selects rather than hovers, so
+`hoverAmount()` is `1` immediately with no ramp to catch mid-flight.
+
+Measured across the three vault shapes `scripts/smoke.mjs` builds: the demo vault (node
+452, degree 71, 364 in-disc samples) **107 dim before the fix, 0 after**; the 10k
+synthetic vault (node 1192, degree 54, 152 in-disc samples) **36 before, 0 after**; the
+dominant-folder vault (node 157, degree 103, 1259 in-disc samples) **530 before, 0
+after**. See `design/0005`.
+
+## A synthetic vault's folder/subfolder note counts do not depend on which day it was built
+
+`make-demo-vault.mjs` and `make-shape-vault.mjs` both default their `--end` date to today
+(deliberately — the heatmap's last-52-weeks window needs a note on it, per
+`make-demo-vault.mjs`'s own header). That's a genuine, real difference in the generated
+output from one day to the next, and it is tempting — costly, twice now (github#31/#32) —
+to *reason* about whether that difference could explain some layout oddity rather than
+measure it.
+
+```bash
+node scripts/check-generator-determinism.mjs
+```
+
+Runs each generator twice, `--end` years apart on the same seed, and diffs the resulting
+folder/subfolder note-count trees. They must be **identical**. Confirmed empirically before
+this check existed: `make-test-vault.mjs`'s per-note subfolder pick (`pick(f.paths)`) is a
+pure seeded-PRNG draw over a *fixed* list of subfolder names (`YM(18)`/`YQ(n)`, hardcoded
+from a constant base year, never consulting `END`), and `make-shape-vault.mjs`'s `subFor`
+is a fixed index-share split with no PRNG or date involved at all — so only the *calendar
+date* embedded in each note's frontmatter and file stamp moves with `--end`; which
+folder/subfolder a note lands in never does. Measured with `--end` set to `2024-02-10` and
+`2027-09-28` (different year, month, and quarter): 71 folders / 531 notes
+(`make-demo-vault.mjs`) and 11 folders / 954 notes (`make-shape-vault.mjs`), byte-identical
+counts both times.
+
+Confirmed to actually catch a regression, not just measure a property that happens to
+hold: a temporary probe that made `make-shape-vault.mjs`'s subfolder split shift by
+`new Date(END).getUTCMonth() % 2` was caught immediately (7 of 11 folders differed by 1
+note between the two `--end` dates), then reverted.
+
+**Deliberately excludes `make-mirror-vault.mjs`** — it reproduces a real vault's own
+structure and dates rather than generating synthetic ones from a seed, so "does the
+generation day change the structure" isn't a question that applies to it.
+
+Wired into `.githooks/pre-push` alongside the PII/scope/network checks: cheap (a few
+seconds, no Chrome), so no skip flag, same reasoning as those three.
+
+## Build order does not affect the band split
+
+github#32's other half, once github#33 cleared the generator: `walk()` in
+`src/build-graph.mjs` read each directory with bare `readdirSync(dir)`, whose order Node
+documents as filesystem-dependent, not a contract. That order became `files`, then
+`notes` (same order, no sort in between), then graph node insertion order, then the group
+iteration order `balanceBands()` searches over. That search is exhaustive over which
+folders go inner vs outer and picks strictly-less-than on cost, so two candidate splits
+tied on cost kept whichever the loop reached first — which used to mean whichever order
+the disk happened to hand groups back that run. Two builds of the *same* vault content
+could therefore land on a different inner/outer split for a folder sitting on one of those
+ties, which is exactly what was reported: `04 - Daily Notes` on the demo vault, `inner:
+true, rows: 6` in one build and `inner: false, rows: 9` in another, same directory, same
+command, minutes apart.
+
+```bash
+node scripts/check-build-order-determinism.mjs
+```
+
+Fixed with `readdirSync(dir).sort()`. The check guards it two ways:
+
+- **Dynamic**: builds two throwaway vaults holding the same notes, created in reversed
+  folder/note order, and asserts both produce the exact same, alphabetically-sorted
+  note-id list.
+- **Static**: reads `walk()`'s own source and asserts it still chains `.sort()` onto the
+  `readdirSync` call.
+
+The dynamic half alone is not adversarial on every filesystem — measured here, on this
+NTFS checkout `readdirSync` already comes back alphabetical even for a directory whose
+files were created in shuffled order, so reverting the fix and re-running *only* the
+dynamic probe still reported clean. The static half caught it immediately: reverting the
+same fix and re-running failed with "walk() no longer sorts its readdirSync(dir) result".
+Both are kept — the dynamic half is the actual functional guarantee the page depends on,
+the static half is what makes the check fail loud regardless of which filesystem happens
+to be under the checkout.
+
+Verified against all three `smoke.mjs` fixtures post-fix (`--only lattice --only "row
+depth"`): demo vault inner 6 / outer 9 rows, 10k vault inner 15 / outer 23, dominant-folder
+vault inner 5 / outer 7 — unchanged from pre-fix on every fixture that already had a stable
+split.
+
+Wired into `.githooks/pre-push` alongside the generator-determinism check: two tiny
+subprocess builds, no Chrome, well under a second, so no skip flag.
+
+## A settled dot is the SAME size a fresh relayout gives it, not just the same position
+
+github#21. `settle()` (the function every cascade hands off to once its frames are done)
+reassigns POSITION from `finalPos` — a genuinely fresh layout, computed once at cascade
+start — but never touched SIZE. `dotPx()`, which the Sigma node reducer calls for every
+dot on every paint, reads `bandOf().room`, `cellRoom` and `edgeCap` as plain persistent
+globals, not something it derives itself — and those are side effects of whichever
+`ringsLayout()` call last ran. For 90-odd frames, that was the FRAME LOOP's own calls,
+walking `roomNow`/`cellNow`/`edgeNow` from the source packing toward the destination's
+*endpoint capture* (`roomOf()` over a `staticPlan`-built plan) one frame at a time — a
+different, independently-computed answer from the one `finalPos` itself came from. Once
+the loop stops, nothing ever asks for the correct figure again, so every dot is left
+sized against the last animated frame's WALKED room until something UNRELATED forces a
+real relayout (a resize, a fit, the next toggle) and it snaps to correct by accident.
+
+Measured live (`__vg.setRange` on the demo vault, `05 - Meeting Notes / 2025-09-19 Vendor
+call`): 26.5px right after a range-change cascade settled, 68.1px after nothing but a bare
+`__vg.ringsLayout()` call with no position change — 157% off, position identical (the
+sampler's own `dr`/`dtan` were 0 throughout, confirming the miss is size-only). 211 of 213
+sampled notes were off by more than 5%. A folder toggle showed the same defect, smaller:
+152 of 689 notes over 5%, worst 11.6%.
+
+**Invisible to every check that existed before this one**, including the "last frame of a
+cascade is the resting layout" check just above (`scripts/smoke.mjs`) — it compares the
+last ANIMATED frame against REST, and both read the identical stale globals, so `dot 0%`
+is what a fully broken build reports too. Confirmed by reverting the fix and re-running
+this section's own commands: the existing check still passed clean.
+
+**Fixed** by having `settle()` call `ringsLayout()` again after `assignPositions`,
+discarding its position output (reusing it would reintroduce the "two plans disagree on
+seats" 1517-unit jump documented at that same call site) and keeping only the
+room/cellRoom/edgeCap side effects. **Once is not enough** — room and position are a
+fixed point (documented at `finalPos`'s own "TWICE, and the first one is thrown away"),
+and a single call still measures its margins against whatever room the frame loop left
+behind. Measured: one call alone left 58 of 213 notes off by more than 5%, worst 39.1%; a
+second immediate call converged all of them to 0%, and a third changed nothing, confirming
+it is a genuine fixed point rather than still drifting.
+
+```js
+__vg.setRange("<a date inside the vault's span>", null);
+// wait for __vg.demo.busy() === false, then:
+__vg.relayout();               // what settle() should already have produced
+// compare a note's renderer.getNodeDisplayData(id).size, scaled, before and after
+```
+
+**One correction to how this bug was first written up**: an earlier draft of github#21
+claimed folder toggles were "fixed" by a settle-time refresh already on `develop`, citing
+branch `fix/small-folder-animation`. That branch is unrelated (a stale, ~30-commit-behind
+wedge-seam-overlay experiment ending in two reverts) and no such fix existed anywhere on
+`develop` before this entry — folder toggles carried the identical defect, just smaller,
+until now.

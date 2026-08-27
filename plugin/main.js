@@ -485,15 +485,51 @@ class VaultGraphView extends ItemView {
       Sigma: sigma.Sigma || sigma,
       rendering: sigma.rendering || {},
       logoMask: "data:image/png;base64," + LOGO_MASK_B64,
-      // The saved per-folder palette slots and visibility defaults. No onFolderColors or
-      // onFolderShown: in Obsidian the settings tab owns writing both.
+      // The saved per-folder and per-subfolder palette slots, and visibility defaults.
       folderColors: this.plugin.settings.folderColors,
+      subfolderColors: this.plugin.settings.subfolderColors,
+      // COLOURS GET A WRITER, unlike folderShown below: the settings tab is no longer
+      // the only place a pick can happen, since #22 put a right-click menu in the view
+      // itself, and a pick made there has nowhere else to be saved. Mirrors the
+      // settings tab's own pick()/pickSub(), which write the same two settings keys and
+      // then push into the view through applyFolderColors()/applySubfolderColors() --
+      // neither of which calls this callback, so there is no write-back loop between
+      // the two paths.
+      onFolderColors: async (map) => {
+        this.plugin.settings.folderColors = map;
+        await this.plugin.saveSettings();
+      },
+      onSubfolderColors: async (map) => {
+        this.plugin.settings.subfolderColors = map;
+        await this.plugin.saveSettings();
+      },
+      // Visibility defaults have no view-side control to write back from -- the eye in
+      // the settings tab is still the only way to change one -- so this stays read-only.
       folderShown: this.plugin.settings.folderShown,
       // Pan DOES get a writer, unlike the two maps above: the control that flips it is in
       // the view rather than in the settings tab, so the view is what has to persist it.
       panEnabled: this.plugin.settings.panEnabled,
       onPanEnabled: async (v) => {
         this.plugin.settings.panEnabled = !!v;
+        await this.plugin.saveSettings();
+      },
+      // Compact date axis (github#23) DOES get a writer, same reasoning as pan just above
+      // -- it has its own view-level icon now (beside the date range, since the gear on
+      // this host leads to Obsidian's settings tab, not an in-view panel), so the view is
+      // what has to persist a click there. The settings-tab toggle below saves and pushes
+      // live itself either way, same as it already does for pan.
+      compactAxis: this.plugin.settings.compactAxis,
+      onCompactAxis: async (v) => {
+        this.plugin.settings.compactAxis = !!v;
+        await this.plugin.saveSettings();
+      },
+      // The hub, for the same reason pan gets a writer: it is changed in the view, by
+      // right-clicking a note or dragging one into the middle, so the view is what has to
+      // persist it. Not in the settings tab either -- "which notes are in the hub" is a
+      // thing you point at, not a thing you type.
+      pinned: this.plugin.settings.pinned,
+      onPinned: async (ids) => {
+        this.plugin.settings.pinned = ids;
         await this.plugin.saveSettings();
       },
       // The gear IS shown here -- it is where somebody looking at the disc goes to look
@@ -554,14 +590,27 @@ const DEFAULTS = {
   // light and dark values, so a saved hex would be right in one Obsidian theme and wrong
   // in the other. Empty means every folder takes the slot its position gives it.
   folderColors: {},
+  // "folder/sub" -> palette slot key, one level down. Same slot-not-hex reasoning, and
+  // the same "" means the automatic tint -- which for a subfolder is a computed shade,
+  // never one of the twelve slots, so there is nothing to fall back to but the ladder.
+  subfolderColors: {},
   // folder name -> true (shown) / false (hidden), as a DEFAULT. Absent means the `_` rule
   // decides: a folder whose name starts with an underscore is an archive, so it is out of
   // the colour rotation, grey, and hidden until somebody says otherwise.
   folderShown: {},
+  // Note ids pinned into the hub, in slot order. Empty means the mark is in the middle,
+  // which is the state the graph has always opened in. The plugin rebuilds in place, so
+  // these are re-checked against the graph on every mount -- a renamed or deleted note
+  // drops out rather than holding a slot nothing can fill.
+  pinned: [],
   // Drag-to-pan in the view. ON by default: the rim of a big vault is unreachable without
   // it, and the corner control is a cheaper way to discover that than a settings tab is.
   // Held here so a vault where dragging gets in the way can start locked.
   panEnabled: true,
+  // Weight the date strip's years and months by note count instead of giving every one
+  // equal width, so a sparse decade doesn't cost the same room as one busy year. ON by
+  // default -- the better axis should not need anyone to find a toggle first (github#23).
+  compactAxis: true,
 };
 
 // The four build settings, described once. They live here rather than inline in display()
@@ -615,10 +664,46 @@ function topFolders(app) {
     .map(([name, n]) => ({ name, n }));
 }
 
+// As topFolders, one level down: every depth-1 subfolder of EVERY top folder, in one
+// pass over the vault rather than one per folder -- a per-folder version was tried
+// first and rescanned app.vault.getMarkdownFiles() once per row renderColours draws,
+// which is O(folders x files) on every render of the settings tab. Reuses paraDirs --
+// the same helper buildData calls -- rather than reparsing paths a second way. Same
+// no-view-open role as topFolders: the settings tab needs this before any graph has
+// been opened, and there is nothing for refreshFromView to correct it against once one
+// has (see renderColours' own comment on why).
+function allSubfolders(app, flatMonths) {
+  const byFolder = new Map();
+  for (const file of app.vault.getMarkdownFiles()) {
+    if (SKIP_FILES.has(file.name.toLowerCase())) continue;
+    const g = paraFolder(file.path);
+    let count = byFolder.get(g);
+    if (!count) byFolder.set(g, count = new Map());
+    const sb = paraDirs(file.path, flatMonths)[0] || "";
+    count.set(sb, (count.get(sb) || 0) + 1);
+  }
+  // Same tie-break subOrder uses in page.js: biggest first, plain name compare (no
+  // {numeric:true} -- that is topFolders' own choice for top-level folder names, not
+  // subOrder's).
+  const out = new Map();
+  for (const [g, count] of byFolder) {
+    out.set(g, Array.from(count.entries())
+      .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+      .map(([name, n]) => ({ name, n })));
+  }
+  return out;
+}
+
 class VaultGraphSettingTab extends PluginSettingTab {
   constructor(app, plugin) {
     super(app, plugin);
     this.plugin = plugin;
+    // Which folders' subfolder rows are expanded. Tab-local UI state, not settings -- it
+    // does not need to survive a restart, only a re-render, so it lives here rather than
+    // in this.plugin.settings. display() rebuilds the whole tab but never touches this,
+    // which is the point: a pick calls this.display() too, and reopening after a click
+    // must not collapse the section the click was made in.
+    this.subOpen = {};
   }
 
   display() {
@@ -662,16 +747,35 @@ class VaultGraphSettingTab extends PluginSettingTab {
           if (api && api.setPanEnabled) api.setPanEnabled(v);
         }));
 
+    new Setting(containerEl)
+      .setName("Compact date axis")
+      .setDesc("Give each year on the date strip width by how many notes it holds, instead of every year and month reading the same width regardless of content.")
+      .addToggle((t) => t
+        .setValue(this.plugin.settings.compactAxis !== false)
+        .onChange(async (v) => {
+          this.plugin.settings.compactAxis = v;
+          await this.plugin.saveSettings();
+          const view = await this.plugin.currentView();
+          const api = view && view.handle && view.handle.api;
+          if (api && api.setCompactAxis) api.setCompactAxis(v);
+        }));
+
     new Setting(containerEl).setName("Folder colours").setHeading();
 
     new Setting(containerEl)
       .setDesc("Twelve slots, handed out in folder order and round again. Setting one folder never moves another, and two folders may share a colour.")
       .addButton((b) => b
         .setButtonText("Reset all")
+        .setTooltip("Also drops every subfolder override")
         .onClick(async () => {
+          // BOTH MAPS, not just folderColors -- "Reset all" under a "Folder colours"
+          // heading that now covers subfolders too should not leave a subfolder pin
+          // behind for the user to go find and clear by hand.
           this.plugin.settings.folderColors = {};
+          this.plugin.settings.subfolderColors = {};
           await this.plugin.saveSettings();
           await this.plugin.applyFolderColors();
+          await this.plugin.applySubfolderColors();
           this.display();
         }));
 
@@ -695,10 +799,13 @@ class VaultGraphSettingTab extends PluginSettingTab {
     // the disc about which slot every folder after an archive is on. Hence the separate
     // counter -- the same reason buildColors has one.
     let auto = 0;
-    this.renderColours(topFolders(this.app).map((f) => ({
-      name: f.name, n: f.n,
-      slot: isArchiveGroup(f.name) ? ARCHIVE_SLOT : "g" + ((auto++ % SLOT_NAMES.length) + 1),
-    })));
+    // `slot` doubles as `autoSlot` here: this list is path-derived and never consults
+    // settings.folderColors, so what it computes already IS the automatic guess -- there
+    // is no override applied yet for autoSlot to differ from.
+    this.renderColours(topFolders(this.app).map((f) => {
+      const s = isArchiveGroup(f.name) ? ARCHIVE_SLOT : "g" + ((auto++ % SLOT_NAMES.length) + 1);
+      return { name: f.name, n: f.n, slot: s, autoSlot: s };
+    }));
 
     // ...and then ask the graph itself, which is the only thing that actually knows.
     //
@@ -730,6 +837,7 @@ class VaultGraphSettingTab extends PluginSettingTab {
       name,
       n: api.groupCount(name),
       slot: api.slotOf ? api.slotOf(name) : "",
+      autoSlot: api.autoSlotOf ? api.autoSlotOf(name) : "",
     }));
     if (groups.length) this.renderColours(groups);
   }
@@ -748,39 +856,71 @@ class VaultGraphSettingTab extends PluginSettingTab {
       return;
     }
 
+    // ONE SCAN FOR THE WHOLE RENDER, not one per group -- see allSubfolders' own
+    // comment. Path-derived, not from the live api: unlike a top-level folder, a
+    // subfolder's identity never needs an open view to resolve (there is no
+    // "(unlinked)"-style group at this level), so there is nothing for refreshFromView
+    // to correct here. The one thing the live api could add is a note count adjusted
+    // for ghosts/templates, which is not worth a second async round trip for a
+    // settings pane.
+    const subsByFolder = allSubfolders(this.app, this.plugin.settings.flatMonths);
+
     for (const group of groups) {
       const pinned = this.plugin.settings.folderColors[group.name] || "";
       const current = pinned || group.slot;
       const shown = this.shownByDefault(group.name);
-      // The eye comes FIRST, because "am I looking at this folder at all" comes before
-      // what colour it is. Obsidian's own `eye` / `eye-off` icons through an extra
-      // button, rather than a glyph of our own: it is the mark the rest of the app uses
-      // for exactly this, it comes with the hover and focus treatment for free, and it
-      // stays right if Obsidian restyles its icons.
+      const subs = subsByFolder.get(group.name) || [];
+      // A PIN BYPASSES THE SIZE GATE -- mirrors page.js's own groupHasPinnedSub. Without
+      // it, pinning a folder's one differentiated subfolder and then letting it shrink
+      // to a single subfolder (notes moved elsewhere) makes the twisty vanish here with
+      // the pin still silently in effect and no remaining control in this tab to clear
+      // it short of "Reset all", which drops every override in the vault.
+      const hasPin = subs.some((s) => this.plugin.settings.subfolderColors[group.name + "/" + s.name]);
+      const hasSubs = subs.length > 1 || hasPin;
+      const open = hasSubs && !!this.subOpen[group.name];
+
+      // The eye comes FIRST (after the twisty, when there is one), because "am I
+      // looking at this folder at all" comes before what colour it is. Obsidian's own
+      // `eye` / `eye-off` icons through an extra button, rather than a glyph of our
+      // own: it is the mark the rest of the app uses for exactly this, it comes with
+      // the hover and focus treatment for free, and it stays right if Obsidian
+      // restyles its icons.
       //
-      // It sets a DEFAULT. The legend's eye inside the graph is the live filter; this is
-      // what the disc comes back to.
+      // It sets a DEFAULT. The legend's eye inside the graph is the live filter; this
+      // is what the disc comes back to.
       const row = new Setting(scope)
         .setName(group.name)
         .setDesc((group.n === 1 ? "1 note" : group.n + " notes") +
-                 (shown ? "" : " · hidden by default"))
-        .addExtraButton((b) => b
-          .setIcon(shown ? "eye" : "eye-off")
-          .setTooltip(shown ? "Shown by default" : "Hidden by default")
-          .onClick(() => this.pickVisible(group.name)));
+                 (shown ? "" : " · hidden by default"));
+      if (hasSubs) {
+        row.addExtraButton((b) => b
+          .setIcon(open ? "chevron-down" : "chevron-right")
+          .setTooltip(open ? "Hide subfolder colours" : "Subfolder colours")
+          .onClick(() => {
+            this.subOpen[group.name] = !open;
+            this.renderColours(groups);
+          }));
+      }
+      row.addExtraButton((b) => b
+        .setIcon(shown ? "eye" : "eye-off")
+        .setTooltip(shown ? "Shown by default" : "Hidden by default")
+        .onClick(() => this.pickVisible(group.name)));
       row.controlEl.addClass("sws");
 
       SLOT_NAMES.forEach((name, i) => {
         const key = "g" + (i + 1);
         const on = current === key;
+        // The slot with no override at all -- distinct from `current` exactly when the
+        // folder is pinned to something else, and marked regardless of `on` so it stays
+        // visible after a pin. Before this, the mark and the checked ring were the same
+        // fact and a pin erased the only trace of what Auto would give back.
+        const isAuto = group.autoSlot === key;
         const attr = {
           role: "radio", "aria-checked": String(on), "aria-label": name,
-          title: name + (on ? (pinned ? " (chosen)" : " (automatic)") : ""),
+          title: name + (on ? (pinned ? " (chosen)" : " (automatic)") :
+                         (isAuto ? " (automatic default)" : "")),
         };
-        // Chosen and automatic are marked differently -- the ring is dim for a slot the
-        // folder merely landed on. Two different facts, and the Auto button beside it is
-        // otherwise the only thing that tells them apart.
-        if (on && !pinned) attr["data-auto"] = "1";
+        if (isAuto) attr["data-auto"] = "1";
         const b = row.controlEl.createEl("button", { cls: ["swatch", "vg-" + key], attr });
         b.addEventListener("click", () => this.pick(group.name, key));
       });
@@ -791,6 +931,43 @@ class VaultGraphSettingTab extends PluginSettingTab {
                 title: "Back to the slot this folder gets automatically" },
       });
       auto.addEventListener("click", () => this.pick(group.name, null));
+
+      if (open) this.renderSubRows(scope, group.name, subs);
+    }
+  }
+
+  // One row per subfolder, indented (see .vg-subrow in styles.css). Same twelve
+  // swatches a folder row gets, but NEVER marking one "current" while unpinned: unlike
+  // a folder, a subfolder's automatic colour is a computed tint, not one of the twelve
+  // slot hexes, so there is nothing among them to ring -- exactly the same distinction
+  // page.js's own settings panel draws for the same reason. Only the Auto button's own
+  // pressed state says "this one is automatic".
+  renderSubRows(scope, folder, subs) {
+    for (const s of subs) {
+      const pk = folder + "/" + s.name;
+      const pinned = this.plugin.settings.subfolderColors[pk] || "";
+      const row = new Setting(scope)
+        .setName(s.name || "(directly in folder)")
+        .setDesc(s.n === 1 ? "1 note" : s.n + " notes");
+      row.settingEl.addClass("vg-subrow");
+      row.controlEl.addClass("sws");
+
+      SLOT_NAMES.forEach((name, i) => {
+        const key = "g" + (i + 1);
+        const on = pinned === key;
+        const b = row.controlEl.createEl("button", {
+          cls: ["swatch", "vg-" + key],
+          attr: { role: "radio", "aria-checked": String(on), "aria-label": name,
+                  title: name + (on ? " (chosen)" : "") },
+        });
+        b.addEventListener("click", () => this.pickSub(folder, s.name, key));
+      });
+
+      const auto = row.controlEl.createEl("button", {
+        cls: "auto", text: "Auto",
+        attr: { "aria-pressed": String(!pinned), title: "Back to the automatic tint" },
+      });
+      auto.addEventListener("click", () => this.pickSub(folder, s.name, null));
     }
   }
 
@@ -814,15 +991,29 @@ class VaultGraphSettingTab extends PluginSettingTab {
     this.display();
   }
 
-  // One folder's slot. `key` null clears the override. Nothing else in the map is
-  // touched -- two folders may hold the same slot on purpose.
-  async pick(folder, key) {
-    const map = Object.assign({}, this.plugin.settings.folderColors);
-    if (key) map[folder] = key; else delete map[folder];
-    this.plugin.settings.folderColors = map;
+  // Set-or-clear one slot override in a settings map, save, apply live, re-render. `key`
+  // null clears the override. Nothing else in the map is touched -- two entries may hold
+  // the same slot on purpose. Shared by pick() and pickSub(), which only differ in which
+  // settings map they touch, how the map key is built, and which apply method re-derives
+  // colours from it.
+  async setOverride(settingsKey, mapKey, key, applyMethod) {
+    const map = Object.assign({}, this.plugin.settings[settingsKey]);
+    if (key) map[mapKey] = key; else delete map[mapKey];
+    this.plugin.settings[settingsKey] = map;
     await this.plugin.saveSettings();
-    await this.plugin.applyFolderColors();
+    await this.plugin[applyMethod]();
     this.display();
+  }
+
+  // One folder's slot.
+  async pick(folder, key) {
+    return this.setOverride("folderColors", folder, key, "applyFolderColors");
+  }
+
+  // As pick(), one level down. this.display() re-collapses nothing -- see this.subOpen
+  // in the constructor -- so the section this pick was made in stays open.
+  async pickSub(folder, sub, key) {
+    return this.setOverride("subfolderColors", folder + "/" + sub, key, "applySubfolderColors");
   }
 }
 
@@ -932,6 +1123,13 @@ class VaultGraphPlugin extends Plugin {
     if (api && api.setFolderColors) api.setFolderColors(this.settings.folderColors);
   }
 
+  // As applyFolderColors, one level down.
+  async applySubfolderColors() {
+    const view = await this.currentView();
+    const api = view && view.handle && view.handle.api;
+    if (api && api.setSubfolderColors) api.setSubfolderColors(this.settings.subfolderColors);
+  }
+
   // Visibility defaults changed: push them into the live filter and let the notes fade.
   // Like a colour, this repaints rather than rebuilding -- the notes are all still in the
   // graph, they are just not being drawn.
@@ -941,6 +1139,7 @@ class VaultGraphPlugin extends Plugin {
     if (!api || !api.setFolderShown) return;
     api.setFolderShown(this.settings.folderShown);
     if (api.setPanEnabled) api.setPanEnabled(this.settings.panEnabled !== false);
+    if (api.setCompactAxis) api.setCompactAxis(this.settings.compactAxis !== false);
     if (api.applyHiddenDefaults) api.applyHiddenDefaults();
   }
 

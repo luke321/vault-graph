@@ -94,13 +94,26 @@ mountVaultGraph(
     settingsUI: true,
     folderColors: loadSettings().folderColors,
     onFolderColors: function (map) { saveSettings({ folderColors: map }); },
+    subfolderColors: loadSettings().subfolderColors,
+    onSubfolderColors: function (map) { saveSettings({ subfolderColors: map }); },
     folderShown: loadSettings().folderShown,
     onFolderShown: function (map) { saveSettings({ folderShown: map }); },
     // Drag-to-pan, remembered. Undefined on a first visit, which page.js reads as ON --
     // only an explicit false turns it off, so a stored setting is the only way to start
     // locked and a cleared store goes back to the default rather than to "off".
     panEnabled: loadSettings().panEnabled,
-    onPanEnabled: function (v) { saveSettings({ panEnabled: v }); }
+    onPanEnabled: function (v) { saveSettings({ panEnabled: v }); },
+    // Compact date axis, remembered the same way -- undefined on a first visit reads as ON
+    // in page.js, only an explicit false turns it off (github#23).
+    compactAxis: loadSettings().compactAxis,
+    onCompactAxis: function (v) { saveSettings({ compactAxis: v }); },
+    // The hub. Scoped by vault like everything else here, which matters more for this than
+    // for colours: these are note IDS, and two vaults built to the same file:// origin
+    // would otherwise hand each other ids that resolve to different notes or to none.
+    // page.js filters what arrives against the graph, so a stale id is dropped rather
+    // than held as an empty slot.
+    pinned: loadSettings().pinned,
+    onPinned: function (ids) { saveSettings({ pinned: ids }); }
   }
 );
 </script>

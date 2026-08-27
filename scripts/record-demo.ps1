@@ -4,24 +4,39 @@
 #   .\scripts\record-demo.ps1 -Slow 1.5 -Fps 60 -Out demo.mp4
 #   .\scripts\record-demo.ps1 -Url http://127.0.0.1:8765/?demo
 #   .\scripts\record-demo.ps1 -Monitor right          # keep it off the screen you are on
+#   .\scripts\record-demo.ps1 -Act timeline           # one feature's beats, not the whole demo
 #
-# RECORD AGAINST A GENERATED VAULT, not your own. With no -Url this builds from the default
-# vault, and the page embeds every note's real title -- which then goes into a video that
-# ends up in a public README. Generate one and point -Url at it:
+# -ACT NAME records ONE act instead of the full storyboard -- one of the `act:` tags in
+# demoMode() (src/page.js): intro, note, pin, compactaxis, timeline, heatmap, folders,
+# subfolders, subfoldercolor, camera, colours. -Out defaults to
+# `demo-<name>-<timestamp>.mp4` instead of `demo-<timestamp>.mp4`,
+# same folder, same everything else. This script only ever writes the raw take (.mp4) --
+# encoding it into the docs gallery's `assets/features/<name>.webp` is make-hero.ps1's job,
+# same as it always has been for the hero; see docs/features/_template.md for the exact
+# two-command pipeline.
 #
-#   node scripts/make-test-vault.mjs --out "$env:TEMP/Demo Vault" --notes 700 --seed 7
-#   node src/build-graph.mjs --vault "$env:TEMP/Demo Vault" --out "$env:TEMP/rec/vault-graph.html"
+# RECORDS AGAINST THE DEMO VAULT BY DEFAULT, never your own. With no -Url this builds
+# scripts/make-demo-vault.mjs fresh and points Chrome at that -- never at whatever
+# VAULT_GRAPH_VAULT/OBSIDIAN_VAULT/Obsidian's registry would otherwise resolve, which is
+# your real vault on any machine set up the documented way, and the page embeds every
+# note's real title. This was the caller's job until it silently recorded the real vault
+# once; see the "No URL given" branch below for the incident this replaced.
+#
+# Pass -Url yourself only to record against something else on purpose -- a mirror of your
+# own vault while chasing a layout bug (make-mirror-vault.mjs), or a hand-tuned fixture:
+#
+#   node scripts/make-mirror-vault.mjs --vault <path> --out "$env:TEMP/Mirror Vault"
+#   node src/build-graph.mjs --vault "$env:TEMP/Mirror Vault" --out "$env:TEMP/rec/vault-graph.html"
 #   .\scripts\record-demo.ps1 -Monitor right -Url "file:///$env:TEMP/rec/vault-graph.html?demo"
 #
 # The vault's FOLDER NAME becomes the title in the top-left corner, so name it something you
-# do not mind publishing. 700 notes reads well at 1600x1000; the storyboard resolves its
-# folder targets by prefix and falls back to the largest group, so it needs no particular
-# folder to exist.
+# do not mind publishing whenever you pass your own -Url.
 #
-# One thing the synthetic vault does worse than a mirror of a real one: its notes are spread
-# evenly over the calendar, so the heatmap's busiest day held 5 notes against a real vault's
-# 53, and the three heatmap beats land flatter. Raise --notes if that matters more than the
-# take being short.
+# One thing the synthetic demo vault does worse than a mirror of a real one: its notes are
+# spread evenly over the calendar within each day, so the heatmap's busiest day holds far
+# fewer notes than a real vault's, and the three heatmap beats land flatter. Pass --notes to
+# make-demo-vault.mjs (via your own -Url pipeline above) if that matters more than the take
+# being short.
 #
 # Three processes, in order: Chrome with a debugging port, ffmpeg grabbing that window,
 # and the driver. The driver BLOCKS until the last beat lands, so ffmpeg is stopped on
@@ -30,13 +45,16 @@
 # storyboard needs no change here.
 #
 # WHAT IS IN THE FRAME: gdigrab captures the Chrome window's rect, so the sidebar, the heatmap
-# band and the disc are all there. What is NOT there is a cursor. CDP delivers input to
-# the renderer without moving the operating system's pointer, so the buttons visibly
-# depress and the hover states light up, but no arrow travels between them. That is the
-# honest trade for input that hit-tests like a real click. If a visible cursor matters
-# more than that, the alternative is driving the OS pointer with SendInput from
-# PowerShell and letting -draw_mouse pick it up -- at the cost of a demo that steals the
-# physical mouse for its duration.
+# band and the disc are all there. The pointer visible in the take is drawn INSIDE THE PAGE
+# (see demoCursorAt in page.js) and moved by eval, in step with the same coordinates CDP
+# dispatches -- it is part of the window's own rendered pixels, so gdigrab needs no help
+# capturing it. This replaced an earlier version that moved the REAL system pointer with
+# SendInput: it looked identical for a click, and silently broke a drag -- Windows delivers
+# real input for wherever the OS pointer physically sits regardless of which process put it
+# there, so the real pointer was a second, genuinely native mouse-event stream landing in
+# the same window as the CDP-injected one, and the two disagreed on `buttons` in a way that
+# aborted the drag mid-glide and handed the gesture to sigma's own default panning. Nothing
+# here touches the physical mouse any more.
 
 [CmdletBinding()]
 param(
@@ -47,10 +65,10 @@ param(
   [int]    $Port = 9222,
   [int]    $Width = 1600,
   [int]    $Height = 1000,
-  # WHICH SCREEN to put the window on, centred in that screen's working area. Not
-  # tidiness: this takes the physical mouse for the length of the take, so recording on a
-  # monitor you are not working on is the difference between waiting it out and having the
-  # pointer yanked out from under whatever you were doing.
+  # WHICH SCREEN to put the window on, centred in that screen's working area. Tidiness
+  # now rather than a mouse-safety measure -- the take no longer touches the physical
+  # pointer at all -- but a live recording window flashing through beats in your
+  # peripheral vision is still worth putting somewhere you are not looking.
   #
   # `left` and `right` are by POSITION, not by device number -- \\.\DISPLAY2 is whichever
   # one Windows enumerated second, which says nothing about where it physically sits.
@@ -60,7 +78,12 @@ param(
   # because 0 is a legitimate position.
   [int]    $X = [int]::MinValue,
   [int]    $Y = [int]::MinValue,
-  [switch] $KeepChrome
+  [switch] $KeepChrome,
+  # One act's beats instead of the whole storyboard -- see demoMode()'s `act:` tags in
+  # src/page.js. Empty (the default) records everything, unchanged from before this flag
+  # existed. Last in the param block so it doesn't shift the positional index of anything
+  # documented above it.
+  [string] $Act  = ""
 )
 
 $ErrorActionPreference = 'Stop'
@@ -95,23 +118,40 @@ if (-not (Test-Path $ffmpeg)) {
 
 # --- what to record ------------------------------------------------------------------
 if (-not $Url) {
-  # No URL given: build, and learn where it landed from the builder's own "wrote <path>"
-  # line -- the same contract refresh-graph.ps1 uses, so "where does the output go" keeps
-  # exactly one implementation.
+  # No URL given: build the DEMO vault, never the caller's own. This used to call bare
+  # build-graph.mjs, which resolves VAULT_GRAPH_VAULT / OBSIDIAN_VAULT / Obsidian's
+  # registry exactly like every other tool in this ecosystem is supposed to -- which is
+  # precisely wrong here. Every per-feature doc's "regenerate this clip" command
+  # (docs/features/<name>.md) is `-Act <name>` with no -Url, so on any machine set up the
+  # documented way (sync-claude-settings wires OBSIDIAN_VAULT to the real vault) that
+  # bare default silently recorded the real vault -- its real note titles, straight into
+  # a take meant for the public README. The safe vault has to be the DEFAULT, not a
+  # paragraph up in this file's own header that nobody running the documented one-liner
+  # ever reads.
+  $demoOut = Join-Path $env:TEMP 'vg-demo-vault'
+  $demoHtml = Join-Path $env:TEMP 'vg-demo-vault.html'
+  Write-Host "building the demo vault..." -ForegroundColor DarkGray
+  & node (Join-Path $here 'make-demo-vault.mjs') --out $demoOut
+  if ($LASTEXITCODE -ne 0) { throw "make-demo-vault.mjs failed (exit $LASTEXITCODE)" }
   Write-Host "building a fresh snapshot to record..." -ForegroundColor DarkGray
-  $buildOut = & node (Join-Path $here '../src/build-graph.mjs')
-  $buildOut | ForEach-Object { $_ }
+  & node (Join-Path $here '../src/build-graph.mjs') --vault $demoOut --out $demoHtml
   if ($LASTEXITCODE -ne 0) { throw "build-graph.mjs failed (exit $LASTEXITCODE)" }
-  $wrote = $buildOut | Where-Object { $_ -match '^wrote (.+) \(' } | Select-Object -Last 1
-  if ($wrote -notmatch '^wrote (.+) \(') { throw "could not tell where the build landed; pass -Url" }
-  $Url = ([uri]("file:///" + ($Matches[1] -replace '\\','/'))).AbsoluteUri + "?demo"
+  $Url = ([uri]("file:///" + ($demoHtml -replace '\\','/'))).AbsoluteUri + "?demo"
 }
 if (-not $Out) {
-  $Out = Join-Path $repo ("demo-" + (Get-Date -Format 'yyyy-MM-dd-HHmmss') + ".mp4")
+  $stamp = Get-Date -Format 'yyyy-MM-dd-HHmmss'
+  # $(...), NOT bare (...) -- `if` is a STATEMENT, and only the subexpression operator
+  # converts a statement's output into a value bare parens can be used in. Bare parens
+  # parse fine (PowerShell accepts an unresolved bareword there) and then fail at RUNTIME
+  # with "the term 'if' was not recognized" -- caught only by actually running this, not by
+  # a syntax check, which is exactly why this needed the manual verification pass.
+  $base = $(if ($Act) { "demo-$Act-$stamp" } else { "demo-$stamp" })
+  $Out = Join-Path $repo ($base + ".mp4")
 }
 
 Write-Host "url    $Url"
 Write-Host "out    $Out"
+if ($Act) { Write-Host "act    $Act" }
 
 # --- Chrome ---------------------------------------------------------------------------
 # Its own profile directory: a debugging port is refused if Chrome is already running on
@@ -119,6 +159,18 @@ Write-Host "out    $Out"
 # bookmarks bar and restore prompts, all of which would end up in the frame.
 # NOT $profile -- that is a PowerShell automatic variable (the profile script path).
 $profileDir = Join-Path $env:TEMP 'vg-demo-profile'
+
+# WIPED BEFORE EVERY RUN. The page's own state (pinned notes, chosen colours, hidden
+# folders) lives in the vault's localStorage, which is part of this profile and
+# otherwise survives across separate invocations -- a `pin` take recorded right after the
+# hero take once opened already showing "Unpin from hub" on a note the hero had pinned,
+# because both ran against the same leftover profile. Deleting it here, not just at the
+# end, also means a run that crashed or was killed mid-take cannot poison the next one.
+if (Test-Path $profileDir) {
+  Write-Host "clearing the leftover demo profile ($profileDir)..." -ForegroundColor DarkGray
+  Remove-Item -Recurse -Force $profileDir -ErrorAction SilentlyContinue
+}
+
 $chrome = (Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\chrome.exe').'(default)'
 
 # --- where to put the window ----------------------------------------------------------
@@ -188,10 +240,20 @@ Start-Sleep -Seconds 2
 # so 'Vault Graph' never matched -- and the page RENAMES ITSELF when the demo finishes
 # (that is its completion signal), so even the right title would stop matching mid-take.
 # The window rect is stable regardless of what the window is called.
+#
+# NOT GetWindowRect ALONE. On Windows 10/11 it returns the window rect INCLUDING the
+# invisible DWM resize border and drop-shadow margin -- pixels outside what Chrome
+# actually paints, roughly 7-8px per edge at 100% scaling and more when scaled -- so
+# gdigrab recorded a sliver of real desktop along every edge of every take (issue #26).
+# DwmGetWindowAttribute(..., DWMWA_EXTENDED_FRAME_BOUNDS, ...) answers the visible bounds
+# instead; GetWindowRect stays as the fallback for whatever DWM call fails on.
 Add-Type -Namespace Win -Name U -MemberDefinition @'
   [StructLayout(LayoutKind.Sequential)] public struct RECT { public int L, T, R, B; }
   [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr h, out RECT r);
+  [DllImport("dwmapi.dll")] public static extern int DwmGetWindowAttribute(
+    IntPtr h, int attr, out RECT r, int size);
 '@ -ErrorAction SilentlyContinue
+$DWMWA_EXTENDED_FRAME_BOUNDS = 9
 
 $hwnd = [IntPtr]::Zero
 $deadline = (Get-Date).AddSeconds(10)
@@ -202,22 +264,46 @@ while ((Get-Date) -lt $deadline) {
 }
 if ($hwnd -eq [IntPtr]::Zero) { throw "Chrome's window never appeared" }
 
+$wr = New-Object Win.U+RECT
+if (-not [Win.U]::GetWindowRect($hwnd, [ref] $wr)) { throw "GetWindowRect failed" }
+
 $r = New-Object Win.U+RECT
-if (-not [Win.U]::GetWindowRect($hwnd, [ref] $r)) { throw "GetWindowRect failed" }
+# SizeOf($r), NOT SizeOf([Win.U+RECT]) -- the Type-literal overload throws in PS 5.1
+# ("System.RuntimeType cannot be marshaled as an unmanaged struct"), because the bracket
+# syntax hands Marshal.SizeOf a RuntimeType object rather than binding its Type overload.
+# An actual struct instance resolves correctly; the values in it don't matter for a size.
+$dwmOk = ([Win.U]::DwmGetWindowAttribute($hwnd, $DWMWA_EXTENDED_FRAME_BOUNDS, [ref] $r, [System.Runtime.InteropServices.Marshal]::SizeOf($r)) -eq 0)
+if (-not $dwmOk) {
+  Write-Warning "DwmGetWindowAttribute failed; falling back to GetWindowRect (the capture may include a border sliver -- see issue #26)"
+  $r = $wr
+}
+
+# Clamp to the window's own screen's WORKING area, so an oversized -Width/-Height cannot
+# pull desktop in on the far side either -- the same class of bug as the border, just from
+# the other direction.
+Add-Type -AssemblyName System.Windows.Forms -ErrorAction SilentlyContinue
+$screen = [System.Windows.Forms.Screen]::FromHandle($hwnd)
+$wa = $screen.WorkingArea
+$cl = [Math]::Max($r.L, $wa.X); $ct = [Math]::Max($r.T, $wa.Y)
+$cr = [Math]::Min($r.R, $wa.X + $wa.Width); $cb = [Math]::Min($r.B, $wa.Y + $wa.Height)
+
 # Even dimensions: yuv420p subsamples 2x2, and an odd width makes libx264 refuse.
-$rx = $r.L; $ry = $r.T
-$rw = ($r.R - $r.L) - (($r.R - $r.L) % 2)
-$rh = ($r.B - $r.T) - (($r.B - $r.T) % 2)
-Write-Host "region ${rw}x${rh} at ${rx},${ry}" -ForegroundColor DarkGray
+$rx = $cl; $ry = $ct
+$rw = ($cr - $cl) - (($cr - $cl) % 2)
+$rh = ($cb - $ct) - (($cb - $ct) % 2)
+$trimW = ($wr.R - $wr.L) - ($cr - $cl); $trimH = ($wr.B - $wr.T) - ($cb - $ct)
+Write-Host "region ${rw}x${rh} at ${rx},${ry} (trimmed ${trimW}x${trimH} of border/off-screen vs GetWindowRect)" -ForegroundColor DarkGray
 
 # --- ffmpeg ---------------------------------------------------------------------------
-# -draw_mouse 1 and --cursor on the driver: CDP input alone never moves the OS pointer,
-# so the recording would show every effect and no arrow. The driver moves the real
-# pointer in step with the CDP one (scripts/cursor.ps1) and gdigrab draws it.
+# -draw_mouse 0: the pointer in the take is drawn INSIDE THE PAGE, by the driver, always
+# (see demoCursorAt in page.js) -- already part of the window's rendered pixels, so
+# gdigrab needs no help capturing it. Asking gdigrab to draw the REAL system cursor on
+# top would show wherever your actual mouse happens to be resting, which is nowhere near
+# the recording window now that nothing moves it there.
 # yuv420p because some players refuse anything else.
 $ffArgs = @(
   '-hide_banner', '-loglevel', 'warning',
-  '-f', 'gdigrab', '-framerate', "$Fps", '-draw_mouse', '1',
+  '-f', 'gdigrab', '-framerate', "$Fps", '-draw_mouse', '0',
   '-offset_x', "$rx", '-offset_y', "$ry", '-video_size', "${rw}x${rh}",
   '-i', 'desktop',
   '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '20',
@@ -237,9 +323,12 @@ Start-Sleep -Milliseconds 800           # let the first frames land before anyth
 # --- the driver -----------------------------------------------------------------------
 $failed = $null
 try {
-  # --cursor: the demo takes the physical mouse for its duration. That is the price of a
-  # visible arrow in the capture, and it is why the driver does not do it by default.
-  & node (Join-Path $here 'demo.mjs') --port $Port --slow $Slow --match 'demo' --cursor
+  # The demo's cursor is drawn inside the page now (see demoCursorAt in page.js), not
+  # moved at the OS level, so there is no --cursor flag left to pass here -- the driver
+  # always draws it.
+  $driverArgs = @('--port', $Port, '--slow', $Slow, '--match', 'demo')
+  if ($Act) { $driverArgs += @('--act', $Act) }
+  & node (Join-Path $here 'demo.mjs') @driverArgs
   if ($LASTEXITCODE -ne 0) { $failed = "driver exited $LASTEXITCODE" }
 } catch {
   $failed = $_.Exception.Message

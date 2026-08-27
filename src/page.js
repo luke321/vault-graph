@@ -13,6 +13,11 @@
  *
  *       Also, optionally:
  *         folderColors      { "<folder>": "g7" } -- the saved per-folder palette slots.
+ *         subfolderColors   { "<folder>/<sub>": "g7" } -- as folderColors, one level down.
+ *                           Keyed to match subShade and subOrder's own keys -- "" for
+ *                           notes sitting directly in the folder. Pins the whole tint the
+ *                           automatic ladder would otherwise compute for that subfolder.
+ *         onSubfolderColors(m) as onFolderColors, for that map.
  *         folderShown       { "<folder>": true|false } -- saved per-folder visibility
  *                           DEFAULTS. Tri-state: absent means "whatever the `_` rule
  *                           says", which is hidden for a folder whose name starts with an
@@ -23,6 +28,12 @@
  *                           the default cannot be "wait to be told". The corner control
  *                           flips it live; this is only where it starts.
  *         onPanEnabled(v)   as onFolderColors, for that flag.
+ *         pinned            note ids to put in the hub at mount, in slot order. Filtered
+ *                           against the graph on the way in: the store outlives the vault
+ *                           it was written from, so a note that has since been renamed or
+ *                           deleted is simply not there any more and the hub opens without
+ *                           it rather than holding a slot for a note that cannot be drawn.
+ *         onPinned(ids)     as onFolderColors, for that list.
  *         settingsUI        true to show the gear AND let it open the page's own panel.
  *                           The STANDALONE sets this, because nothing else there can hold
  *                           a setting.
@@ -218,20 +229,24 @@ function mountVaultGraph(root, data, deps) {
   }
   readTheme();
 
-  // Folder -> slot key. Comes in from the host: the plugin reads it out of its own
-  // settings, the standalone page out of localStorage. Anything unrecognised is dropped
-  // rather than trusted -- this map has been through a JSON file either way, and an
-  // unknown key would otherwise resolve to undefined and paint a group black.
-  function cleanFolderColors(raw) {
+  // Folder/subfolder -> slot key. Comes in from the host: the plugin reads it out of its
+  // own settings, the standalone page out of localStorage. Anything unrecognised is
+  // dropped rather than trusted -- this map has been through a JSON file either way, and
+  // an unknown key would otherwise resolve to undefined and paint a group black. One
+  // cleaner for both maps: a subfolder key is just "<folder>/<sub>" (matching subShade
+  // and subOrder's own keys, "" for notes sitting directly in the folder) rather than a
+  // different shape needing different validation.
+  function cleanSlotMap(raw) {
     var out = Object.create(null);
     if (!raw || typeof raw !== "object") return out;
-    Object.keys(raw).forEach(function (g) {
-      var k = raw[g];
-      if (typeof k === "string" && /^g([1-9]|1[0-2])$/.test(k)) out[g] = k;
+    Object.keys(raw).forEach(function (k) {
+      var v = raw[k];
+      if (typeof v === "string" && /^g([1-9]|1[0-2])$/.test(v)) out[k] = v;
     });
     return out;
   }
-  var folderColors = cleanFolderColors(deps.folderColors);
+  var folderColors = cleanSlotMap(deps.folderColors);
+  var subfolderColors = cleanSlotMap(deps.subfolderColors);
 
   // DRAG-TO-PAN, ON UNLESS THE HOST SAYS OTHERWISE. Absent means on: a fresh page has no
   // saved answer and dragging is what a graph does, so the default cannot be "wait to be
@@ -240,6 +255,12 @@ function mountVaultGraph(root, data, deps) {
   // corner is a cheaper way to find that out than a settings tab is.
   var panEnabled = deps.panEnabled === false ? false : true;
   var onPanEnabled = typeof deps.onPanEnabled === "function" ? deps.onPanEnabled : null;
+
+  // COMPACT DATE AXIS, ON UNLESS THE HOST SAYS OTHERWISE -- same absent-means-on contract as
+  // panEnabled above, for the same reason: the better axis should not need anyone to find a
+  // toggle first (github#23).
+  var compactAxis = deps.compactAxis === false ? false : true;
+  var onCompactAxis = typeof deps.onCompactAxis === "function" ? deps.onCompactAxis : null;
 
   // ARCHIVE FOLDERS: the ones whose name starts with `_`.
   //
@@ -276,6 +297,25 @@ function mountVaultGraph(root, data, deps) {
       '</svg>';
   }
 
+  // A thumbtack: filled head when pinned, outline otherwise -- the same on/off
+  // convention eyeSvg uses, for the detail card's hub toggle.
+  function pinSvg(on) {
+    var head = '<circle cx="8" cy="5.6" r="3.35" ' +
+      (on ? 'fill="currentColor"' : 'fill="none" stroke="currentColor" stroke-width="1.25"') + '/>';
+    var point = '<path d="M8 8.8V14" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>';
+    return '<svg viewBox="0 0 16 16" aria-hidden="true">' + head + point + '</svg>';
+  }
+
+  // A disclosure twisty, or an invisible placeholder so labels stay aligned. Shared
+  // between the legend and the settings panel now that both nest subfolder rows under a
+  // folder -- the same reason eyeSvg above is shared.
+  function twBtn(attrs, open) {
+    return attrs
+      ? '<button class="tw" ' + attrs + ' aria-expanded="' + open + '">' +
+        (open ? "▾" : "▸") + '</button>'
+      : '<span class="tw none">▸</span>';
+  }
+
   // Explicit per-folder visibility: true = shown, false = hidden, absent = the default
   // above. Tri-state on purpose -- "absent" has to stay distinguishable from "false", or
   // turning `_ Archives` off by hand would be indistinguishable from never having said
@@ -298,7 +338,9 @@ function mountVaultGraph(root, data, deps) {
   var SETTINGS_UI = !!deps.settingsUI;
   var openHostSettings = typeof deps.openSettings === "function" ? deps.openSettings : null;
   var saveFolderColors = typeof deps.onFolderColors === "function" ? deps.onFolderColors : null;
+  var saveSubfolderColors = typeof deps.onSubfolderColors === "function" ? deps.onSubfolderColors : null;
   var saveFolderShown = typeof deps.onFolderShown === "function" ? deps.onFolderShown : null;
+  var savePinned = typeof deps.onPinned === "function" ? deps.onPinned : null;
 
   /* ------------------------------------------------------------------ state */
 
@@ -373,7 +415,10 @@ function mountVaultGraph(root, data, deps) {
     curveEdges: true,
     // Logo colouring: true = the inner band's palette in the middle, fading out into
     // the outer's. false = the outer ring's palette across the whole mark.
-    logoTwoRing: true
+    logoTwoRing: true,
+    // The notes pinned into the hub, in slot order. The mark yields to them: an empty
+    // list is the brain, a non-empty one is notes.
+    pinned: []
   };
 
   /* ------------------------------------------------- graph + base layout */
@@ -483,6 +528,11 @@ function mountVaultGraph(root, data, deps) {
 
   // Stable subfolder ordering per PARA folder: biggest first, name as tie-break.
   var subOrder = Object.create(null);
+  // "folder/sub" -> note count, from the SAME tally subOrder sorts by -- not a second
+  // graph walk. buildLegend used to keep its own local copy of this, recomputed on every
+  // render; it now reads this one, and the settings panel and the __vg api do too, since
+  // all three need to say how big a subfolder is.
+  var subCount = Object.create(null);
   (function () {
     var tally = Object.create(null);
     graph.forEachNode(function (_id, a) {
@@ -494,6 +544,7 @@ function mountVaultGraph(root, data, deps) {
       subOrder[f] = Object.keys(tally[f]).sort(function (x, y) {
         return tally[f][y] - tally[f][x] || x.localeCompare(y);
       });
+      subOrder[f].forEach(function (sb) { subCount[f + "/" + sb] = tally[f][sb]; });
     });
   })();
 
@@ -536,6 +587,11 @@ function mountVaultGraph(root, data, deps) {
   var SLOT_COUNT = 12;
   var groupColor = Object.create(null);   // group -> literal hex, rebuilt on regroup
   var groupSlot = Object.create(null);    // group -> slot key it is on, "" for none
+  // group -> the slot it would be on with no override at all. Recorded rather than left
+  // to be recomputed, for the same reason groupSlot is: an override discards the
+  // automatic key right after using it to advance the rotation counter, and nothing else
+  // reproduces "i % 12, archives skipped" without duplicating the loop that does it.
+  var groupAutoSlot = Object.create(null);
   var order = {};   // dim -> [group names, biggest first]
 
   function computeOrder() {
@@ -615,6 +671,7 @@ function mountVaultGraph(root, data, deps) {
     // skipped, so the only thing that knows is the loop that did the skipping. Both UIs
     // read it back through the api.
     groupSlot = Object.create(null);
+    groupAutoSlot = Object.create(null);
     var auto = 0;
     names.forEach(function (g) {
       var k = byFolder[g];
@@ -627,6 +684,9 @@ function mountVaultGraph(root, data, deps) {
         var akey = picked || ARCHIVE_SLOT;
         groupColor[g] = THEME.byKey[akey];
         groupSlot[g] = akey;
+        // An archive's automatic slot is ARCHIVE_SLOT unconditionally -- an override
+        // changes what it's using, never what "automatic" means for it.
+        groupAutoSlot[g] = ARCHIVE_SLOT;
         return;
       }
 
@@ -644,6 +704,9 @@ function mountVaultGraph(root, data, deps) {
       var use = picked || key;
       groupColor[g] = THEME.byKey[use];
       groupSlot[g] = use;
+      // `key`, not `use`: the pick already won for groupSlot above, but the automatic
+      // slot is the position's own answer regardless of what's currently applied.
+      groupAutoSlot[g] = key;
     });
     buildSubShades();
   }
@@ -672,13 +735,44 @@ function mountVaultGraph(root, data, deps) {
   }
 
   function applyFolderColors(map) {
-    folderColors = cleanFolderColors(map);
+    folderColors = cleanSlotMap(map);
     buildColors();
     if (renderer) renderer.refresh();
     try { placeLogo(); } catch { /* logo not mounted yet */ }
     try { heatBuild(); } catch { /* heatmap not built yet */ }
     try { buildLegend(); } catch { /* legend not built yet */ }
     return folderColors;
+  }
+
+  // As applyFolderColors, one level down. buildColors() is NOT called -- a subfolder pin
+  // cannot change any group's own colour, so re-deriving groupColor would be repainting
+  // things that did not change. buildSubShades() alone is enough, and it is also what
+  // applyFolderColors ends in (via buildColors()), which is why a folder recolour keeps
+  // respecting every subfolder pin without this file needing to say so twice.
+  function applySubfolderColors(map) {
+    subfolderColors = cleanSlotMap(map);
+    buildSubShades();
+    if (renderer) renderer.refresh();
+    try { placeLogo(); } catch { /* logo not mounted yet */ }
+    try { heatBuild(); } catch { /* heatmap not built yet */ }
+    try { buildLegend(); } catch { /* legend not built yet */ }
+    return subfolderColors;
+  }
+
+  // Whether ANY of g's subfolders carries a pin right now. Both nesting gates below
+  // read this, alongside the ordinary "more than one subfolder" test -- without it, a
+  // pin outlives its own picker: pin a folder's one differentiated subfolder, then let
+  // attrition (notes moved elsewhere) shrink that folder to a single subfolder, and the
+  // twisty that used to reach the pin disappears from the legend, the settings panel
+  // AND the Obsidian settings tab at once, with the pin still silently in effect and no
+  // remaining UI to clear it short of "Reset all", which drops every override in the
+  // vault. A single differentiated subfolder is ordinarily nothing to nest -- see
+  // buildSubShades' own `subs.length < 2` skip -- but a PIN is a deliberate choice, made
+  // through a UI that has to stay reachable for as long as the pin exists.
+  function groupHasPinnedSub(g) {
+    return (subOrder[g] || []).some(function (sb) {
+      return !!subfolderColors[g + "/" + sb];
+    });
   }
 
   function colorOf(group) {
@@ -690,7 +784,17 @@ function mountVaultGraph(root, data, deps) {
   // reads as one family while People / Partners / Rezepte separate inside it. This is
   // deliberately BELOW the categorical separation floor -- it is a nested cue on top
   // of an already-labelled group, not an independent colour channel.
+  //
+  // ...UNLESS subfolderColors pins one, which skips the ladder entirely and paints it
+  // one of the twelve slots instead -- a full-strength colour with none of the
+  // "below the floor" restraint above, because a pin is a deliberate choice to make one
+  // subfolder stand out, not a nested cue.
   var subShade = Object.create(null);
+  // "folder/sub" -> the slot key it is ON: the pinned one, or "" for the automatic
+  // ladder. "" on purpose rather than omitting the key -- an automatic tint is never one
+  // of the twelve slot hexes, so there is nothing among them to ring as "current", and
+  // the settings UIs need to say that rather than guess.
+  var subSlot = Object.create(null);
 
   // Four steps, not one per subfolder. Spreading N tints evenly across one hue
   // family collapses as N grows -- measured, nine subfolders land ~3 apart, below
@@ -941,30 +1045,65 @@ function mountVaultGraph(root, data, deps) {
     return k < 0 ? 0 : Math.min(k, SUB_SLOTS - 1);
   }
 
+  // WHICH CELL A NOTE'S SUBFOLDER MAPS TO, kept separate from subTintIndex on purpose --
+  // that function is also the source of a subfolder's COLOUR (buildSubShades), and a
+  // subfolder's tint should not shift just because its geometric slot did. Below its band's
+  // own row depth, a subfolder's notes redirect to the pooled-tail slot instead of earning
+  // their own rank -- splitFor already refuses to split a FOLDER into sub-wedges when its
+  // total can't fill the band's rows (github#18/#19 lineage); this is the same question per
+  // SUBFOLDER, so a lone sparse piece doesn't get its own arc just because its siblings
+  // earned the split (github#31).
+  //
+  // Both `n` and `depth` are the CALLER's numbers (buildWedgePlan's own liveSub and
+  // bandDepth), taken as parameters rather than looked up here -- specifically because an
+  // early version read the whole-vault subCount instead of a live count for `n`, and let a
+  // subfolder clear the bar on notes that were not even on screen under a date range or
+  // hidden-folder filter -- the same class of bug already documented above for the
+  // folder-level gate ("it also cannot see a filter").
+  function subCellIndex(folder, sub, n, depth) {
+    var idx = subTintIndex(folder, sub);
+    if (idx === SUB_SLOTS - 1) return idx;
+    return n >= (depth || REF_ROWS) ? idx : SUB_SLOTS - 1;
+  }
+
   function buildSubShades() {
     subShade = Object.create(null);
+    subSlot = Object.create(null);
     Object.keys(subOrder).forEach(function (f) {
       var subs = subOrder[f];
-      if (subs.length < 2) return;             // nothing to differentiate
       var basecol = colorOf(f);
       var lab = hex2lab(basecol);
       var grey = Math.hypot(lab[1], lab[2]) < 0.02;   // neutrals have no hue to turn
-      if (grey) {        // neutrals share one lightness axis; a ladder would collide
-        subs.forEach(function (sb) { subShade[f + "/" + sb] = basecol; });
-        return;
-      }
       // Lightness targets are spaced evenly between the base and a per-family end
       // point rather than being fixed deltas. Fixed deltas hit the wash-out cap and
       // the top two steps collapsed onto each other -- which is why simply turning
       // the numbers up made separation WORSE (adjacent dE 6.4 -> 4.1), not better.
+      //
+      // Computed once per folder, and only when a ladder will actually run -- a pin
+      // never needs them, and neither does a folder with nothing to differentiate.
+      var haveLadder = subs.length >= 2 && !grey;
       var sign = THEME.dark ? 1 : -1;
-      var budget = hueBudget(basecol);
-      var Lend = THEME.dark
-        ? Math.min(SUB_L_LIMIT, lab[0] + SUB_L_SPAN)
-        : Math.max(1 - SUB_L_LIMIT, lab[0] - SUB_L_SPAN);
+      var budget = haveLadder ? hueBudget(basecol) : 0;
+      var Lend = haveLadder
+        ? (THEME.dark ? Math.min(SUB_L_LIMIT, lab[0] + SUB_L_SPAN)
+                      : Math.max(1 - SUB_L_LIMIT, lab[0] - SUB_L_SPAN))
+        : 0;
       subs.forEach(function (sb) {
+        var pk = f + "/" + sb;
+        // A PIN SKIPS THE LADDER ENTIRELY, whether or not this folder has enough
+        // subfolders to need one -- pinning the sole subfolder of a two-folder vault
+        // is still a real thing to want.
+        var pin = subfolderColors[pk];
+        if (pin && THEME.byKey[pin]) {
+          subShade[pk] = THEME.byKey[pin];
+          subSlot[pk] = pin;
+          return;
+        }
+        subSlot[pk] = "";
+        if (subs.length < 2) return;             // nothing to differentiate
+        if (grey) { subShade[pk] = basecol; return; }  // one lightness axis; ladder would collide
         var t = subTintIndex(f, sb) / (SUB_SLOTS - 1);
-        subShade[f + "/" + sb] = shade(basecol, sign * budget * t, (Lend - lab[0]) * t);
+        subShade[pk] = shade(basecol, sign * budget * t, (Lend - lab[0]) * t);
       });
     });
   }
@@ -1560,6 +1699,12 @@ function mountVaultGraph(root, data, deps) {
     // rather than of weight, and that is the one thing the cascade cannot walk.
     var liveG = Object.create(null);
     var liveN = Object.create(null);
+    // COUNTED FROM WHAT IS ON SCREEN, same reasoning as liveN just below and the same lesson
+    // learned the hard way for the FOLDER-level gate (comment above): subCount is a whole-vault
+    // tally taken once at load, so under a filter a subfolder can clear subCellIndex's threshold
+    // on notes that are not even showing. liveSub is the live, filter-aware answer subCellIndex
+    // actually reads (github#31).
+    var liveSub = Object.create(null);
     graph.forEachNode(function (id) {
       // MEMBERSHIP AT REST IS THE MEMBERSHIP THE CASCADE ENDS ON, and it was not.
       //
@@ -1574,6 +1719,14 @@ function mountVaultGraph(root, data, deps) {
       // willShow IS that destination. At rest nothing is departing, so "staying or on screen"
       // and "showing" are the same set, and the two agree by construction rather than nearly.
       if (onlyVisible && !(planKeep || willShow)(id)) return;
+      // A PINNED NOTE HAS LEFT THE RING, same as the placement loop below excludes it (see
+      // that loop's own comment). Counting it here anyway inflates liveG/liveN/liveSub --
+      // the inputs bandDepth/splitFor/subCellIndex gate on -- with notes that never occupy a
+      // ring cell, letting a folder pass the split threshold (or a band read deeper than it
+      // is) on notes sitting in the hub. The same "gate reads a count the packing can't see"
+      // defect already fixed for date-range filters (github#18/#19/#31), just not extended
+      // to pinning until now.
+      if (isPinned(id)) return;
       var g0 = groupOf(id);
       // A WEIGHT, NOT A COUNT -- and the second filter that used to stand here, rejecting
       // anything outside willShow, is gone with it.
@@ -1611,6 +1764,8 @@ function mountVaultGraph(root, data, deps) {
       // destination count while it arrives -- and is constant for the whole cascade. At rest the
       // union is just what is visible, so the count is unchanged there.
       liveN[g0] = (liveN[g0] || 0) + 1;
+      var sk = g0 + "/" + (graph.getNodeAttributes(id).sub || "");
+      liveSub[sk] = (liveSub[sk] || 0) + 1;
     });
     // AGAINST THE BAND'S REAL DEPTH, not a constant.
     //
@@ -1655,8 +1810,17 @@ function mountVaultGraph(root, data, deps) {
         var bk = bandLock && bandLock[g] ? "i" : "o";
         if (!bandDepth[bk]) bandDepth[bk] = depthOfBand(bk === "i");
         var nSubs = (subOrder[g] || []).length;
+        // CAPPED AT SUB_SLOTS for the threshold, not the raw subfolder count. However
+        // many real subfolders a folder has, subTintIndex never hands out more than
+        // SUB_SLOTS distinct cells -- the smallest ones pool into the "N smaller
+        // subfolders" tail and share the last one. Gating on the raw count asks a
+        // folder to prove it can fill rows for pieces that were never going to be
+        // drawn separately, which made 03 - Resources (9 subfolders, 60 notes) and
+        // 05 - Meeting Notes (14 subfolders, 85 notes) fail a bar meant for 9 and 14
+        // pieces when both only ever draw 4.
+        var splitPieces = Math.min(nSubs, SUB_SLOTS);
         splitOf[g] = nested && nSubs > 1 &&
-                     (liveN[g] || 0) >= Math.max(NEST_MIN, nSubs * bandDepth[bk]);
+                     (liveN[g] || 0) >= Math.max(NEST_MIN, splitPieces * bandDepth[bk]);
       }
       return splitOf[g];
     };
@@ -1680,9 +1844,20 @@ function mountVaultGraph(root, data, deps) {
       // willShow IS that destination. At rest nothing is departing, so "staying or on screen"
       // and "showing" are the same set, and the two agree by construction rather than nearly.
       if (onlyVisible && !(planKeep || willShow)(id)) return;
+      // A PINNED NOTE HAS LEFT THE RING. Without this it keeps its seat and the wedge is
+      // drawn around a hole where it used to be -- the note is in the hub and its chair is
+      // still at the table. Excluding it from the plan is what makes the ring re-densify,
+      // and it is the same mechanism a hidden note uses, minus the fade: the note is still
+      // fully present, it is just no longer part of this packing.
+      if (isPinned(id)) return;
       var g = groupOf(id), a = graph.getNodeAttributes(id);
       var split = splitFor(g);
-      var key = split ? g + SEP + subTintIndex(g, a.sub) : g;
+      // splitFor(g) just above always populates bandDepth[bk] for this g's band before
+      // returning (see its own body), so the lookup here is never stale or missing.
+      var bk = bandLock && bandLock[g] ? "i" : "o";
+      var key = split
+        ? g + SEP + subCellIndex(g, a.sub, liveSub[g + "/" + (a.sub || "")] || 0, bandDepth[bk])
+        : g;
       if (!byCell[key]) {
         byCell[key] = [];
         (cellsOf[g] || (cellsOf[g] = [])).push(key);
@@ -2775,7 +2950,24 @@ function mountVaultGraph(root, data, deps) {
     var plan = planIn || pinnedPlan ||
       buildWedgePlan(true,
                      function (id) { return alpha[id] || 0; });
-    if (!plan) return null;
+    // A NULL PLAN IS NOT NECESSARILY AN EMPTY DISC. buildWedgePlan returns null when it has
+    // zero RING cells, which a pinned note deliberately leaves (see the "A PINNED NOTE HAS
+    // LEFT THE RING" comment above) -- so pinning every currently-visible note (PIN_MAX = 13,
+    // genuinely reachable on a small or filtered vault) hits this exact branch with the hub
+    // still full. Returning null unconditionally used to mean applyLayout's `if (!targets)`
+    // no-op skipped hubPlace entirely, so the hub notes kept whatever position they last had
+    // (or none, on first load) and never got seated into their slots.
+    //
+    // r0 falls back to the locked hub radius from the last layout that DID have a ring --
+    // geomLock is set once at load and by the time a person can pin thirteen notes there has
+    // always been an earlier successful layout to set it from. The 1.5 floor only matters if
+    // this is somehow reached before that, and matches buildWedgePlan's own r0 floor.
+    if (!plan) {
+      if (!pinnedIds().length) return null;
+      var hubOut = {};
+      hubPlace(hubOut, geomLock ? geomLock.r0 : 1.5, UNIT);
+      return hubOut;
+    }
 
     // Live angles: each wedge takes its share of what is VISIBLE, so hiding
     // something makes the rest grow back into a full circle.
@@ -3499,7 +3691,452 @@ function mountVaultGraph(root, data, deps) {
     if (planRoom) { /* kept on the plan for the probe; the live pool is what draws */ }
     dotFit = fit;
     if (dbgCells) DBG.cells = dbgCells;
+    hubPlace(out, plan.r0, scale);
     return out;
+  }
+
+  /* ---------------------------------------------------------- the pinned hub */
+
+  // Notes pinned into the hub sit in the hole instead of on their lattice row. This is the
+  // ONE exception to "every note obeys the same lattice" -- the note above records that
+  // hubPositions was deleted to remove exactly that, and it is re-introduced here
+  // deliberately, for notes the reader chose rather than for a category the layout decides.
+  //
+  // github#12 spiked five arrangements of the middle; this is the one that won. The four
+  // that did not are gone rather than left behind a setting: two of them (the hollow brain,
+  // the dial) painted into the hole from the DOM, which puts them UNDER sigma's canvases
+  // where ~4900 converging edges bury them. Notes in the hub are real nodes on sigma's own
+  // node canvas, above the edges, so the problem never arises -- which is most of why this
+  // is the concept that survived.
+  //
+  // Thirteen, which is what the 13 blobs in logo-mask.png suggested and what the hole
+  // actually holds: hub notes are DOTS and name themselves on hover, exactly like every
+  // other note in the disc.
+  var PIN_MAX = 13;
+  // The outermost hub ring, as a fraction of the hole.
+  //
+  // 0.50, and the number is measured against the INNERMOST REAL NOTE rather than against
+  // r0 -- what "touching the inner ring" means is the gap between the outer pinned dot's
+  // edge and the first note of the disc, and both of those carry a radius the hole does
+  // not know about. At 0.62 the ball reached 0.865 of that distance on the demo vault:
+  // 8.8px of clearance from a 5.8px dot to a note that has its own radius again, which
+  // reads as contact. At 0.50 it reaches 0.70, which is ~19px.
+  //
+  // Both terms scale together, which is why one constant is enough: shrinking the ring
+  // shrinks the slot spacing, and hubSizeMult is derived from that spacing.
+  var HUB_R1 = 0.50;
+
+  // A BALL, built from hex rings: 1 in the middle, 6 around it, the rest outside those.
+  // Below seven there is no centre -- a middle dot among three or four reads as one of them
+  // being late rather than as a core -- so those counts are a plain ring.
+  function hubRing(out, count, r, phase) {
+    for (var k = 0; k < count; k++) {
+      // 12 o'clock, clockwise, matching the wedge order around it.
+      var t = Math.PI / 2 - ((k + phase) / count) * Math.PI * 2;
+      out.push({ x: r * Math.cos(t), y: r * Math.sin(t) });
+    }
+  }
+
+  function hubSlots(n, r0) {
+    if (n <= 0) return [];
+    if (n === 1) return [{ x: 0, y: 0 }];
+    var R = r0 * HUB_R1, out = [];
+    if (n <= 6) {
+      // Tighter for the small counts, so three notes read as a cluster in the middle
+      // rather than as three notes stuck to the rim of the hole.
+      hubRing(out, n, R * (n <= 4 ? 0.62 : 0.86), 0);
+      return out;
+    }
+    out.push({ x: 0, y: 0 });
+    var left = n - 1, inner = Math.min(6, left), outer = left - inner;
+    hubRing(out, inner, outer ? R * 0.5 : R * 0.86, 0);
+    if (outer) hubRing(out, outer, R, 0.5);      // offset, so the two rings interleave
+    return out;
+  }
+
+  /**
+   * The pinned notes that are actually on screen, in slot order.
+   *
+   * A pin the current filter has hidden is SKIPPED HERE rather than released. Releasing it
+   * was the first version and it is wrong in a way that only shows up later: hiding a
+   * folder would permanently drop every pin in it, and unhiding would not bring them back
+   * -- a transient filter quietly editing a stored choice. Filters are deliberately not
+   * persisted (see .ai-context/decisions/0009), so they must not persist anything else
+   * either. Skipping keeps the ball gapless and the size count honest while it is hidden,
+   * and the note returns to its slot when the filter lifts.
+   */
+  function pinnedIds() {
+    return state.pinned.filter(function (id) {
+      return graph.hasNode(id) && willShow(id);
+    });
+  }
+
+  // The closest two hub slots get, as a fraction of the hole's radius. Written by hubPlace
+  // and read by the node reducer: it is what the dots are sized against, so that thirteen
+  // notes in the hub are drawn small enough to be thirteen notes rather than one blob.
+  var hubSep = 0;
+
+  function hubPlace(out, r0, scale) {
+    var ids = pinnedIds();
+    hubSep = 0;
+    if (!ids.length) return;
+    var slots = hubSlots(ids.length, r0);
+    // Measured off the slots themselves rather than derived from the count, because the
+    // arrangement changes shape at 2, at 7 and again once the outer ring opens -- a formula
+    // in the count would have to know all three and would drift the moment one is retuned.
+    if (slots.length < 2) {
+      // ALONE GETS THE CAP. Deriving a "spacing" from the hole radius gave one note a
+      // smaller dot than three of them -- measured 10.93px against 11.73px -- because a
+      // ring of three sits at 0.38 of the hole and its members are further apart than
+      // HUB_R1. There is no spacing when there is nothing to space against; the only
+      // sensible answer is the largest a hub note is allowed to be.
+      hubSep = HUB_SIZE_MAX / HUB_SIZE_K;
+    } else {
+      var best = Infinity;
+      for (var a = 0; a < slots.length; a++) {
+        for (var b = a + 1; b < slots.length; b++) {
+          var d = Math.hypot(slots[a].x - slots[b].x, slots[a].y - slots[b].y);
+          if (d < best) best = d;
+        }
+      }
+      hubSep = best / r0;
+    }
+    ids.forEach(function (id, k) {
+      // The note being dragged follows the pointer instead of its slot -- it has not been
+      // dropped yet, and snapping it to a seat mid-gesture is the drag arguing with the hand.
+      if (nodeDrag && nodeDrag.id === id) return;
+      // WRITTEN UNCONDITIONALLY, not only where the ring left a position behind. A pinned
+      // note is excluded from the plan now, so under `strict` it has no entry at all and
+      // the old `if (out[id])` guard silently skipped exactly the notes this exists for.
+      if (slots[k]) out[id] = { x: slots[k].x * scale, y: slots[k].y * scale };
+    });
+  }
+
+  // How much bigger a hub note is drawn than it would be on the ring.
+  //
+  // Proportional to the slot spacing, which is the only thing that keeps the ball readable
+  // across the range: one note alone can afford to be large, thirteen cannot, and the step
+  // between them is not linear in the count because the arrangement changes shape twice on
+  // the way. Clamped at both ends -- 2.8 so a lone pin does not become a planet, 1.15 so a
+  // full hub is still visibly heavier than the ring it came from.
+  var HUB_SIZE_K = 3.5, HUB_SIZE_MIN = 1.15, HUB_SIZE_MAX = 2.8;
+  function hubSizeMult() {
+    return Math.max(HUB_SIZE_MIN, Math.min(HUB_SIZE_MAX, HUB_SIZE_K * hubSep));
+  }
+
+  function isPinned(id) { return state.pinned.indexOf(id) >= 0; }
+
+  // Pin, unpin, or move a note already pinned. `at` is an insert position for a drop; left
+  // out, the note joins at the end.
+  //
+  // A CAP RATHER THAN A REFUSAL: the hole does not grow, so the oldest pin gives way and
+  // the gesture always does something. A refusal at thirteen would read as the drag having
+  // missed.
+  function pin(id, at) {
+    var i = state.pinned.indexOf(id);
+    if (i >= 0) state.pinned.splice(i, 1);
+    if (at === undefined || at > state.pinned.length) at = state.pinned.length;
+    state.pinned.splice(at, 0, id);
+    // Evict from the front, never the note just added. The first version wrote the guard
+    // into the splice index and could drop the wrong note when the new one had landed at
+    // position 0 -- which is reachable, since `at` is an insert position.
+    while (state.pinned.length > PIN_MAX) {
+      state.pinned.splice(state.pinned[0] === id ? 1 : 0, 1);
+    }
+    return true;
+  }
+
+
+  function unpin(id) {
+    var i = state.pinned.indexOf(id);
+    if (i < 0) return false;
+    state.pinned.splice(i, 1);
+    return true;
+  }
+
+  function togglePin(id) {
+    if (!unpin(id)) pin(id);
+    hubChanged(true);
+  }
+
+  // A HOVER MUST NOT SURVIVE THE NOTE MOVING OUT FROM UNDER THE POINTER.
+  //
+  // Sigma re-evaluates what is hovered only when the pointer MOVES, and it tests against
+  // the quadtree. animateTo refreshes with `skipIndexation: true` for the length of the
+  // tween -- earned there, since re-indexing every frame is what made the frame rate fall
+  // -- so for those ~380ms the index describes where the disc used to be. Move the pointer
+  // off a note during that window and sigma tests stale geometry, decides the note is
+  // still under the cursor, and then nothing moves again to correct it: the halo stays and
+  // the rest of the disc stays dimmed until you jog the mouse. That is the "sometimes",
+  // and it is the hazard invariants.md already names -- anything driven by a pointer has
+  // not earned the flag.
+  //
+  // Released rather than re-tested, because there is nothing to re-test against until the
+  // pointer moves again. Twice: once now, for the hover the drag itself was holding, and
+  // once when the tween has settled and the index is honest again, for one acquired
+  // mid-flight. If the pointer really is over the note when it lands, the next move
+  // re-enters it, which is what hover means.
+  function releaseHover() {
+    if (!state.hovered) return;
+    hideTip();
+    hoverTo(0);
+  }
+
+  function hubChanged(animate) {
+    releaseHover();
+    // A FROZEN PLAN MUST NOT OUTLIVE THE MEMBERSHIP IT WAS FROZEN FOR. pinnedPlan is set for
+    // the whole duration of an unrelated big cascade (a folder toggle, a range change -- see
+    // pinPlan()) so that cascade's own per-frame work stays on one consistent plan. But
+    // ringsLayout() (which applyLayout below calls) prefers pinnedPlan over building fresh
+    // whenever it is set, with no notion of "fresh for whom" -- so pinning or unpinning a
+    // note WHILE that other cascade is still animating handed this hub change a plan built
+    // from membership before the toggle, and the ring geometry for one frame disagreed with
+    // the pin that just happened. Clearing it here forces a fresh plan from the CURRENT
+    // pinned set; safe to null out from under the other cascade because its own frame loop
+    // builds its own local plan per frame and never reads pinnedPlan again once running (see
+    // the room/cell/edge endpoint capture, which saves and restores it around itself).
+    pinnedPlan = null;
+    applyLayout(!!animate, releaseHover);
+    placeLogo();
+    if (savePinned) savePinned(state.pinned.slice());
+  }
+
+  /**
+   * The hub as the host handed it over, at mount.
+   *
+   * FILTERED AGAINST THE GRAPH, which is the rule github#12 asked for and the only one that
+   * survives contact with a real vault: the store outlives the build it was written from, so
+   * a pinned note can be renamed, deleted, or filtered out of the graph entirely by
+   * --ghosts or --templates between one build and the next. A missing id is dropped
+   * silently rather than held as an empty slot -- the hub is what is in the middle, and a
+   * slot for a note that cannot be drawn is a gap in the ball and a wrong count for the
+   * sizes to derive from.
+   *
+   * Capped on the way in as well. Nothing stops a store written by a future version, or
+   * hand-edited, from carrying more than the hole holds.
+   *
+   * A copy, not the caller's array: the host keeps its own reference to whatever it passed,
+   * and pinning would otherwise mutate the plugin's settings object in place.
+   */
+  function seedPins() {
+    var want = deps.pinned;
+    if (!want || !want.length || typeof want.length !== "number") return;
+    var seen = Object.create(null), out = [];
+    for (var i = 0; i < want.length && out.length < PIN_MAX; i++) {
+      var id = want[i];
+      if (typeof id !== "string" || seen[id] || !graph.hasNode(id)) continue;
+      seen[id] = 1;
+      out.push(id);
+    }
+    state.pinned = out;
+  }
+
+  /* --- drag and drop ------------------------------------------------------- */
+
+  // Dragging a note into the hole pins it; dragging a pinned note out releases it. The
+  // same two outcomes right-click gives, reached the way you would reach for them if
+  // nobody had told you about right-click -- which is the whole argument for having both.
+  //
+  // The node FOLLOWS THE POINTER while dragging rather than a ghost being drawn: the thing
+  // being moved is the thing under the hand, and the disc it came from stays put behind it.
+  // On release the layout reclaims it -- into a hub slot, or back to its lattice seat --
+  // and that snap is what tells you which of the two happened.
+  var nodeDrag = null;
+  // How far the pointer must travel before a press becomes a drag. Same threshold the
+  // ribbon uses, and for the same reason: a click with a shaky hand is still a click.
+  var NODE_DRAG_MIN = 4;
+  // The id of a note that just crossed NODE_DRAG_MIN, so the clickNode this same release
+  // is about to fire does not ALSO open the detail card on top of it. clickNode fires
+  // regardless of whether a drag preceded it -- sigma decides click-vs-drag off its own
+  // press/release bookkeeping, which never sees the movement our mousemovebody handler
+  // consumes with stopPropagation -- so without this, dragging a note into or out of the
+  // hub popped its card open at the same time, which reads as the drag having a side
+  // effect nobody asked for. Set the moment the THRESHOLD is crossed rather than in
+  // drop(), which runs too late to matter: it is on the same "mousemovebody" tick that
+  // decides the gesture is a drag at all, well before the eventual release.
+  var dragJustMoved = null;
+
+  // Where the hub is, in graph units, and whether a point is in it.
+  //
+  // TIMES INNER_SCALE, matching where the inner ring's own row 0 actually draws
+  // (placeCell: `(base + row*SP) * INNER_SCALE`, base being this same r0) -- not the
+  // lattice's nominal r0 alone. Without it this boundary sat further out than the ring
+  // genuinely starts, so a small inner-locked folder (few enough notes that its whole
+  // band collapses to one row) placed that row INSIDE what this function still called
+  // the hole: reported as notes overlapping the centre mark ("the notes touch the
+  // brain"), github#35. geomLock.r0 itself is the correct answer to "how big is the
+  // hole" (the HOLE=0.3-of-disc invariant is solved against it) -- INNER_SCALE only
+  // corrects for the inner ring being drawn pulled in from that boundary, which every
+  // caller of the ring's OWN geometry already accounts for and this one had not.
+  function inHubHole(gx, gy) {
+    if (!geomLock) return false;
+    return Math.hypot(gx, gy) / UNIT < geomLock.r0 * INNER_SCALE;
+  }
+
+  // The drop target, drawn only while a drag is live. Without it the hole is an invisible
+  // target and the gesture is a guess -- the first version had no ring and dropping felt
+  // like it either worked or did not for no stated reason.
+  /* ---- BEGIN: demo automation + debug API -- stripped from the plugin build, see scripts/build-plugin.mjs (stripDemoAndDebug) ---- */
+  /**
+   * A purely cosmetic pointer, drawn IN THE PAGE and moved by eval -- never at the OS
+   * level. `x, y` are PAGE coordinates, the same ones the driver already dispatches
+   * Input.dispatchMouseEvent at, so it need not know this element exists at all beyond
+   * calling it with the same numbers.
+   *
+   * This replaces moving the REAL system cursor (scripts/cursor.ps1, `--cursor`), which
+   * worked right up until it was asked to drag a NODE rather than click one. Windows
+   * delivers real input for wherever the OS pointer physically sits regardless of which
+   * process moved it there, so SetCursorPos was a SECOND, genuinely native mouse-event
+   * stream landing in the same window as the CDP-injected one -- and the two disagree on
+   * `buttons`: real hardware reports none pressed, while CDP's dispatched drag says 1.
+   * bindNodeDrag's own "the button came up outside the window" safety check -- there for
+   * the real case of a person's drag actually leaving the tab -- read the native
+   * stream's buttons:0 as exactly that, dropped the note mid-glide, and let sigma's
+   * default panning take over for the rest of the gesture. Measured: worked every time
+   * over CDP alone, failed on every take that also moved the real pointer. A DOM element
+   * never touches the OS pointer and generates no second stream, so there is nothing
+   * left for that check to misread.
+   */
+  function demoCursorAt(x, y) {
+    var el = $("democursor");
+    if (!el) return;
+    // Against ROOT, not #vg-canvas -- see the element's own comment in page.html for
+    // why: nested in the canvas it was clipped by that element's overflow:hidden for
+    // every beat whose target was not literally over the disc (the sidebar, the
+    // heatmap band, the ribbon), which is most of the storyboard. Same coordinate
+    // conversion the right-click colour menu already uses against ROOT, for the same
+    // reason: ROOT's own getBoundingClientRect() reflects whatever sits above it.
+    var b = ROOT.getBoundingClientRect();
+    el.style.left = (x - b.left) + "px";
+    el.style.top = (y - b.top) + "px";
+    el.hidden = false;
+  }
+  function demoCursorHide() {
+    var el = $("democursor");
+    if (el) el.hidden = true;
+  }
+  /* ---- END: demo automation + debug API ---- */
+
+  function placeHubDrop() {
+    var el = $("hubdrop");
+    if (!el || !renderer || !geomLock) return;
+    if (!nodeDrag || !nodeDrag.moved) { el.hidden = true; return; }
+    var c = renderer.graphToViewport({ x: 0, y: 0 });
+    // TIMES INNER_SCALE -- see inHubHole, which this ring is drawn to match: the drop
+    // target has to be the same boundary the drop DECISION (inHubHole) uses, or the ring
+    // shown on screen promises a drop the actual test disagrees with.
+    var edge = renderer.graphToViewport({ x: geomLock.r0 * INNER_SCALE * UNIT, y: 0 });
+    var d = Math.hypot(edge.x - c.x, edge.y - c.y) * 2;
+    el.style.width = el.style.height = d + "px";
+    el.style.left = c.x + "px";
+    el.style.top = c.y + "px";
+    // Lit while the pointer is actually inside, so the ring answers "will this drop?"
+    // rather than only "there is a target somewhere".
+    el.setAttribute("data-over", nodeDrag.over ? "1" : "0");
+    el.setAttribute("data-drop", nodeDrag.wasPinned && !nodeDrag.over ? "out" : "in");
+    el.hidden = false;
+  }
+
+  // ONE UPDATE PER FRAME, for anything driven by a high-frequency pointer event. A
+  // pointermove/mousemove fires 120+ times a second on a decent mouse, and running real
+  // layout work on every one of them makes the handler itself the bottleneck -- the drag
+  // lags behind the cursor rather than tracking it. Only the LAST call queued before a
+  // frame paints ever runs; earlier ones in the same frame are simply superseded, which is
+  // correct for anything answering "where is the pointer now" -- only the latest position
+  // ever matters. Shared by buildDateUI's ribbon drag and bindNodeDrag's hub-pin drag,
+  // which both used to carry their own separate copy of this same four-line pattern.
+  function makeFrameCoalescer() {
+    var pend = null, raf = 0;
+    var flush = function () {
+      raf = 0;
+      var f = pend; pend = null;
+      if (f) f();
+    };
+    return function onFrame(fn) {
+      pend = fn;
+      if (!raf) raf = WIN.requestAnimationFrame(flush);
+    };
+  }
+
+  function bindNodeDrag() {
+    var onFrame = makeFrameCoalescer();
+    var captor = renderer.getMouseCaptor && renderer.getMouseCaptor();
+    if (!captor) return;
+
+    renderer.on("downNode", function (e) {
+      // LEFT BUTTON ONLY. downNode fires for any button, so a right-click was arming a
+      // drag as well as pinning: hold the right button down, move a few pixels, and the
+      // note came with the pointer. Right-click is a click -- it has one outcome, and the
+      // pin animation is the whole of it.
+      var o = e.event && e.event.original;
+      if (o && o.button !== 0) return;
+      nodeDrag = { id: e.node, moved: false, over: false, wasPinned: isPinned(e.node) };
+      // A fresh press starts clean -- otherwise a drag that never crosses NODE_DRAG_MIN
+      // (a plain click) would leave a PRIOR drag's flag sitting there, ready to swallow
+      // this click's own clickNode for the wrong reason.
+      dragJustMoved = null;
+    });
+
+    captor.on("mousemovebody", function (e) {
+      if (!nodeDrag) return;
+      // The button can come up outside the window, where no mouseup reaches us -- the
+      // next move then carries the note around with nothing held down. `buttons` is the
+      // live state of the button rather than a memory of the press, so it catches that.
+      if (e.original && e.original.buttons !== undefined && !(e.original.buttons & 1)) {
+        drop();
+        return;
+      }
+      // THE CAMERA MUST NOT PAN UNDER THE DRAG, and this has to happen FIRST -- before the
+      // threshold test, not after it. The early version returned while the pointer was
+      // still inside NODE_DRAG_MIN, so those first few moves reached sigma's own handler
+      // and panned the stage: measured, the camera left (0.5, 0.5) for (0.4601, 0.5207)
+      // over one drag. The press already belongs to the note by then; the threshold only
+      // decides whether the note MOVES, never who owns the gesture.
+      if (e.preventSigmaDefault) e.preventSigmaDefault();
+      if (e.original) { e.original.preventDefault(); e.original.stopPropagation(); }
+      if (!nodeDrag.moved) {
+        if (nodeDrag.x0 === undefined) { nodeDrag.x0 = e.x; nodeDrag.y0 = e.y; }
+        if (Math.hypot(e.x - nodeDrag.x0, e.y - nodeDrag.y0) < NODE_DRAG_MIN) return;
+        nodeDrag.moved = true;
+        dragJustMoved = nodeDrag.id;
+      }
+      // .over IS COMPUTED HERE, SYNCHRONOUSLY, not deferred with the rest below -- drop()
+      // is bound straight to mouseup/mouseleave (not through onFrame), so it can run before
+      // a queued frame flushes and would otherwise read a stale .over from one frame behind
+      // the pointer's actual release point. inHubHole is cheap pure math, not the DOM work
+      // this throttle exists for, so there is no cost to keeping it immediate.
+      var p = renderer.viewportToGraph(e);
+      nodeDrag.over = inHubHole(p.x, p.y);
+      // THE POSITION WRITE AND THE DOM-TOUCHING placeHubDrop() ARE DEFERRED to the next
+      // paint, same reason and same mechanism as the ribbon drag's onFrame calls above --
+      // un-throttled this was measured to fall behind on a real recording, per the comment
+      // on demoBigInnerNote picking shorter drag distances specifically to give it less
+      // distance to fall behind on. Position is read now, off the event that only exists
+      // for this call; only the expensive part waits.
+      var dragId = nodeDrag.id;
+      onFrame(function () {
+        if (!nodeDrag || nodeDrag.id !== dragId) return;    // dropped, or a new drag since
+        graph.setNodeAttribute(dragId, "x", p.x);
+        graph.setNodeAttribute(dragId, "y", p.y);
+        placeHubDrop();
+      });
+    });
+
+    var drop = function () {
+      if (!nodeDrag) return;
+      var d = nodeDrag;
+      nodeDrag = null;
+      placeHubDrop();
+      if (!d.moved) return;                    // a plain click -- clickNode already ran
+      if (d.over && !d.wasPinned) pin(d.id);
+      else if (!d.over && d.wasPinned) unpin(d.id);
+      // Either way the layout reclaims the note: into its slot, or back to its seat. A
+      // drop that changed nothing still animates home, which is the only way to show that
+      // the note has a seat rather than being left wherever it was let go.
+      hubChanged(true);
+    };
+    captor.on("mouseup", drop);
+    captor.on("mouseleave", drop);
   }
 
   /* ------------------------------------------------------------- timeline */
@@ -3603,11 +4240,67 @@ function mountVaultGraph(root, data, deps) {
     var nRef = Math.max(1, p90, nMax * 0.35);
     var yMax = 1;
     ylist.forEach(function (yy) { if (yy.n > yMax) yMax = yy.n; });
+    // AXIS SEGMENTS -- built unconditionally, cheap, and read by ribbonX/ribbonMs only when
+    // compactAxis is on. WEIGHTED BY NOTE COUNT, not by calendar time (github#23) -- the
+    // first version weighed a populated month by its own real duration and only collapsed
+    // literally-empty runs, which undersold the actual ask: a year holding a note or two in
+    // most months (so nothing in it ever reads as "empty") still summed to a full year of
+    // real-time weight, competing evenly against a year an order of magnitude busier just
+    // because both have "every month populated". Measured on the vault this shipped
+    // against: 2023 (21 notes, spread thin enough to touch nearly every month) drew WIDER
+    // than 2026 (399 notes, the vault's busiest year by far) under that scheme, because 2026
+    // is only partway through its own calendar year and 2023 is not.
+    //
+    // Two levels, both against the SAME percentile-with-floor shape `nRef` above already
+    // uses for bar height -- proven on this file already rather than invented fresh:
+    //
+    // YEAR gets a width between YEAR_FLOOR_MS (about one month) and YEAR_CEIL_MS (about one
+    // real year) based on its own note count against `yearRef`, the p90-with-floor
+    // reference over every year's count -- so a handful of outlier years cannot both crowd
+    // every other year to nothing AND still keep climbing themselves; the ceiling is what
+    // makes "compact" years equidistant in the first place; a year at or past yearRef reads
+    // as fully wide.
+    //
+    // WITHIN a year, every one of its months gets an EQUAL share of the year's own weight --
+    // deliberately not weighted by the month's own note count. Tried the finer-grained
+    // version first (each month's own share of its year, floored so a note-less month
+    // still got a sliver) and it read as noise: month-to-month note counts inside one year
+    // are not a signal worth spending width on, and equal months make every year's own
+    // internal month-tick spacing predictable, which the density weighting between YEARS
+    // does not need help from.
+    //
+    // NOT A NO-OP ON AN EVEN-BY-TIME VAULT ANY MORE. The earlier month-real-duration scheme
+    // reduced exactly to the linear formula whenever no month was literally empty; this one
+    // does not, because it weighs a YEAR by its content rather than by its calendar length
+    // even when every month in it has something -- two years of equal length but unequal
+    // note counts now draw unequal widths on purpose. `compactAxis: false` is the only path
+    // that still reproduces the plain calendar axis; see ribbonXLinear, untouched.
+    var AVG_MONTH_MS = 30.436875 * 86400000; // 365.2425 / 12 days -- the Gregorian mean month
+    var YEAR_FLOOR_MS = AVG_MONTH_MS;         // a compacted year reads as about one month wide
+    var YEAR_CEIL_MS = 12 * AVG_MONTH_MS;     // a fully-referenced year reads as one real year
+    var yCounts = ylist.map(function (yy) { return yy.n; }).sort(function (a, b) { return a - b; });
+    var yMax2 = yCounts.length ? yCounts[yCounts.length - 1] : 1;
+    var yP90 = yCounts.length ? yCounts[Math.floor(yCounts.length * 0.9)] : 1;
+    var yearRef = Math.max(1, yP90, yMax2 * 0.35);
+    var segs = [], segW = 0, segOfMonth = new Array(months.length);
+    ylist.forEach(function (yy) {
+      var yFrac = Math.min(1, yy.n / yearRef);
+      var yearWeight = YEAR_FLOOR_MS + yFrac * (YEAR_CEIL_MS - YEAR_FLOOR_MS);
+      var idxs = [];
+      for (var mi = 0; mi < months.length; mi++) if (months[mi].y === yy.y) idxs.push(mi);
+      var mw = yearWeight / idxs.length;
+      idxs.forEach(function (mi) {
+        segOfMonth[mi] = segs.length;
+        segs.push({ i: mi, w0: segW, w1: segW + mw });
+        segW += mw;
+      });
+    });
     dateSpan = {
       months: months, years: ylist, index: index,
       lo: months[0].ms, hi: Date.UTC(y1, m1 + 1, 0),      // last day of the last month
       nMax: nMax, nRef: nRef, yMax: yMax, dated: tot,
-      undated: graph.order - tot
+      undated: graph.order - tot,
+      axis: { segs: segs, totalW: segW || 1, segOfMonth: segOfMonth }
     };
   }
 
@@ -4795,6 +5488,38 @@ function mountVaultGraph(root, data, deps) {
       // finalPos was computed above as what an unpinned layout produces for the destination, so
       // assigning it is the same answer arrived at once instead of twice.
       assignPositions(finalPos);
+      // REFRESH THE SIZE STATE TOO, not just position. dotPx() -- what the node reducer calls
+      // for every dot, every frame -- reads bandOf().room, cellRoom and edgeCap, and none of
+      // those are recomputed here on their own: they are side effects of whichever ringsLayout()
+      // call last ran, and that was the FRAME LOOP's, walking roomNow/cellNow/edgeNow from the
+      // source packing to the endpoint capture one frame at a time. Positions land correctly
+      // because assignPositions above reads finalPos directly; size does not, because nothing
+      // re-derives it against the settled alpha -- it is simply left holding whatever the last
+      // animated frame's WALKED figure happened to be.
+      //
+      // github#21: measured up to 157% off on a range change (a note at 26.5px that should be
+      // 68.1px), and up to 11.6% on a folder toggle -- both silent, because dr/dtan (position) are
+      // exactly right, and every check that ever looked (including the "last frame of a cascade
+      // is the resting layout" smoke check) compares the last animated frame against rest, which
+      // read the identical stale globals and agreed with itself.
+      //
+      // The calls below are exactly what an unrelated relayout already does by accident (a
+      // resize, a fit, the next toggle -- see __vg.relayout()), just run here instead of waiting
+      // for one. roomNow/cellNow/edgeNow are already null (cleared above) and pinnedPlan/planKeep
+      // are already null too, so this reads live alpha -- the SAME alpha finalPos was computed
+      // against -- and lands on the same plan deterministically. The POSITION output is discarded
+      // on purpose: reassigning position from a second call is the exact mistake the comment
+      // above this one already fixed once (a 1517-unit jump from two plans disagreeing on seats).
+      // Only the room/cellRoom/edgeCap side effects are wanted here.
+      //
+      // TWICE, same reason finalPos itself is computed twice above: room and position are a
+      // fixed point, and a single call still has this frame's MARGINS measured from whatever
+      // room the frame loop last left behind -- the very staleness this refresh exists to
+      // remove. Measured after adding the first call alone: still 58 of 213 notes off by more
+      // than 5%, worst 39.1%, and a second immediate call converged every one of them to 0 --
+      // stable under a third call too, confirming it is a fixed point and not still drifting.
+      ringsLayout();
+      ringsLayout();
       renderer.refresh({ skipIndexation: false });
       probeSample("settled");
       if (done) done();
@@ -5495,11 +6220,15 @@ function mountVaultGraph(root, data, deps) {
 
 
 
-  function applyLayout(animate) {
+  function applyLayout(animate, done) {
     var targets = ringsLayout();
-    if (!targets) return;
-    if (animate) animateTo(targets);
-    else { assignPositions(targets); renderer.refresh({ skipIndexation: false }); }
+    if (!targets) { if (done) done(); return; }
+    if (animate) animateTo(targets, done);
+    else {
+      assignPositions(targets);
+      renderer.refresh({ skipIndexation: false });
+      if (done) done();
+    }
   }
 
   /* ---------------------------------------------------------------- render */
@@ -5704,18 +6433,107 @@ function mountVaultGraph(root, data, deps) {
     hlWalk();
   }
 
+  // MEMOIZED BY FOCUS ID, not recomputed on every call. edgeReducer calls this once PER
+  // EDGE on every render pass (it colours/dims each edge against the current focus), and
+  // drawFocusWeb calls it again on top of that -- both rebuilding the same object from
+  // scratch each time, on a graph that can hold thousands of edges. The result depends on
+  // nothing but `f` and neighboursOf(f): neighboursOf reads `adj`, the note's always-
+  // complete adjacency, not the lazy-edge-budgeted graph (see neighboursOf's own comment),
+  // so it cannot go stale under a given f the way something reading live budgeted edges
+  // could. Caching by `f` alone -- not "once per frame" -- means it also survives
+  // unchanged across a whole hover, not just a single frame of it.
+  var focusSetCache = { key: undefined, set: null };
   function focusSet() {
     var f = state.hovered || state.selected;
-    if (!f) return null;
-    var set = Object.create(null);
-    set[f] = true;
-    neighboursOf(f).forEach(function (n) { set[n] = true; });
+    if (focusSetCache.key === f) return focusSetCache.set;
+    var set = null;
+    if (f) {
+      set = Object.create(null);
+      set[f] = true;
+      neighboursOf(f).forEach(function (n) { set[n] = true; });
+    }
+    focusSetCache.key = f;
+    focusSetCache.set = set;
     return set;
+  }
+
+  // Shared by drawFocusWeb and checkFocusWeb, so the diagnostic can never drift from what
+  // is actually drawn: the viewport-projected endpoints and the quadratic control point
+  // for one edge (control point = chord midpoint + curvature x the chord normal, matching
+  // curvatureFor's own sign and magnitude). null for a hidden edge.
+  function edgeCurveGeom(e, s, t) {
+    var ed = renderer.getEdgeDisplayData(e);
+    if (!ed || ed.hidden) return null;
+    var ps = renderer.graphToViewport(graph.getNodeAttributes(s));
+    var pt = renderer.graphToViewport(graph.getNodeAttributes(t));
+    var dx = pt.x - ps.x, dy = pt.y - ps.y, k = ed.type === "curve" ? (ed.curvature || 0) : 0;
+    return { ed: ed, ps: ps, pt: pt, k: k, cp: { x: (ps.x + pt.x) / 2 + dy * k, y: (ps.y + pt.y) / 2 - dx * k } };
+  }
+
+  // THE FOCUS WEB, DRAWN ONCE MORE ABOVE THE DIM NOTES. Sigma paints every edge on its
+  // bottom layer and every node above that, so the edges edgeReducer lights on hover or
+  // click ran under the notes they crossed -- each dim disc in the way cut a grey gap out
+  // of a blue line, and on a well-connected hub the web read as dashed (issue #2). The
+  // approach here follows the diagnosis and geometry already diffed on the fork branch
+  // linked from that issue (bartolli/vault-graph@21a618c), reimplemented against this
+  // file's current state rather than applied verbatim.
+  //
+  // `hovers` sits above `nodes`, so stroking the focus edges here and re-drawing the
+  // focus neighbours' discs over them stacks dim notes < web < lit notes -- on this one
+  // canvas, and BELOW the label pill drawHover paints next. NOT by marking the neighbours
+  // `highlighted`: that lifts them onto hoverNodes, which sits above the pill too, and the
+  // lit discs ate the focus note's own name. Geometry is the curve program's own: control
+  // point = chord midpoint + curvature x the chord normal (matches curvatureFor's sign and
+  // magnitude); thickness = max(minEdgeThickness, scaleSize(size)); colour = the edge
+  // reducer's, already lit or dimmed. Alpha follows the hover ramp so the web arrives with
+  // the dim instead of popping in over it.
+  function drawFocusWeb(ctx, data, settings) {
+    var f = state.hovered || state.selected;
+    if (!f || data.key !== f || state.query) return;
+    var ht = hoverAmount();
+    if (ht <= 0) return;
+    // Every edge with BOTH ends in the focus set is lit by the edge reducer -- the
+    // neighbour-to-neighbour ones too, not only those touching the focus note -- so the
+    // overlay walks the whole set, each edge once.
+    var set = focusSet(), seen = Object.create(null);
+    ctx.save();
+    ctx.globalAlpha = ht;
+    ctx.lineCap = "round";
+    Object.keys(set).forEach(function (n) {
+      graph.forEachEdge(n, function (e, attrs, s, t) {
+        if (seen[e]) return;
+        seen[e] = true;
+        if (!set[s] || !set[t]) return;
+        var geo = edgeCurveGeom(e, s, t);
+        if (!geo) return;
+        ctx.beginPath();
+        ctx.moveTo(geo.ps.x, geo.ps.y);
+        if (geo.k) ctx.quadraticCurveTo(geo.cp.x, geo.cp.y, geo.pt.x, geo.pt.y);
+        else ctx.lineTo(geo.pt.x, geo.pt.y);
+        ctx.lineWidth = Math.max(settings.minEdgeThickness, renderer.scaleSize(geo.ed.size || 1));
+        ctx.strokeStyle = geo.ed.color;
+        ctx.stroke();
+      });
+    });
+    // The lit neighbours, once more on top of the web. Plain discs only: a halo-typed
+    // note keeps its ring, and stays under the web rather than being flattened here.
+    Object.keys(set).forEach(function (n) {
+      if (n === f) return;
+      var nd = renderer.getNodeDisplayData(n);
+      if (!nd || nd.hidden || nd.type === "halo") return;
+      var p = renderer.graphToViewport(graph.getNodeAttributes(n));
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, renderer.scaleSize(nd.size), 0, 2 * Math.PI);
+      ctx.fillStyle = nd.color;
+      ctx.fill();
+    });
+    ctx.restore();
   }
 
   // Replaces Sigma's built-in hover label, whose pill is hardcoded to #FFF.
   // Geometry matches its label drawer: text at x + size + 3, y + labelSize/3.
   function drawHover(ctx, data, settings) {
+    drawFocusWeb(ctx, data, settings);
     if (typeof data.label !== "string" || !data.label) return;
     var n = settings.labelSize;
     ctx.font = settings.labelWeight + " " + n + "px " + settings.labelFont;
@@ -5962,6 +6780,11 @@ function mountVaultGraph(root, data, deps) {
       // in-between states, not just the endpoints.
       if (!present(id)) return;
       if ((bandLock ? !!bandLock[groupOf(id)] : false) !== wantInner) return;
+      // A PINNED NOTE IS NOT ON THE RIM, whatever its coordinates say. The r > 1e-6 guard
+      // below only catches one sitting exactly at the centre; every other hub slot has a
+      // direction, so a pinned note was voting for the colour of the wedge it happens to
+      // point at -- from inside the hole, where it is nowhere near the outermost note.
+      if (isPinned(id)) return;
       var r = Math.hypot(a.x, a.y);
       if (!(r > 1e-6)) return;                       // hub notes have no direction
       var k = Math.floor(angleSweep(Math.atan2(a.y, a.x)) / (2 * Math.PI) * RING_BUCKETS);
@@ -6071,6 +6894,30 @@ function mountVaultGraph(root, data, deps) {
   function placeLogo() {
     var el = $("logo");
     if (!el || !logoMaskReady || !renderer || !geomLock) return;
+    // THE MARK YIELDS TO THE NOTES. One pin is enough: a brain with a note sitting on top
+    // of it is worse than either alone, and the hub can hold one thing at a time. Unpin
+    // the last and it comes back.
+    //
+    // Ghosting it instead, so it stays as a container behind the notes, was spiked and
+    // dropped -- the mark is painted UNDER sigma's canvases and the hub is where every
+    // edge converges, so anything faint enough to read as a container is not visible at
+    // all. Measured at 0.26 and again at 0.55; neither survived the edge tangle.
+    // FADED, NOT HIDDEN, and the rest of the function still runs. Setting `hidden` popped
+    // the mark out on the frame the first pin landed, while the note it yielded to was
+    // still crossing the disc -- the one hard cut in an otherwise tweened change. Opacity
+    // is transitioned in page.css; the mark keeps being sized and positioned underneath so
+    // it has nowhere to jump to when it comes back.
+    //
+    // Ghosting it PERMANENTLY, so it stays as a container behind the notes, is a different
+    // idea and was spiked and dropped: the mark is painted UNDER sigma's canvases and the
+    // hub is where every edge converges, so anything faint enough to read as a container is
+    // not visible at all. Measured at 0.26 and again at 0.55; neither survived the tangle.
+    // pinnedIds(), NOT state.pinned -- a filter can hide every pin without releasing any
+    // of them (see pinnedIds), and hubPlace draws nothing for a hub in that state. Yielding
+    // on the raw list left the mark faded with an empty hole under it: hiding the one
+    // folder a pin lived in emptied the hub and the mark never came back to fill it.
+    var yielded = pinnedIds().length > 0;
+    el.style.opacity = yielded ? "0" : "";
     // Re-paint only when the ring's colours actually changed. This runs from
     // afterRender, so it fires on every frame of a cascade -- and assigning the same
     // background string 90 times would be 90 style recalculations for nothing.
@@ -6094,9 +6941,15 @@ function mountVaultGraph(root, data, deps) {
         if (gi !== lastGradientInner) { lastGradientInner = gi; eli.style.background = gi; }
       } else if (lastGradientInner) { lastGradientInner = ""; }
       eli.hidden = !gi;
+      eli.style.opacity = yielded ? "0" : "";   // fades with the layer beneath it
     }
     var c = renderer.graphToViewport({ x: 0, y: 0 });
-    var edge = renderer.graphToViewport({ x: geomLock.r0 * UNIT, y: 0 });
+    // TIMES INNER_SCALE -- see inHubHole. LOGO_OF_HOLE already caps the mark well inside
+    // this radius, but the radius itself has to be where the ring actually starts, not
+    // the lattice's nominal r0 -- otherwise the logo is sized against a hole bigger than
+    // the one really there and can end up smaller than it should be relative to a ring
+    // that has, in practice, drawn closer in than this measured.
+    var edge = renderer.graphToViewport({ x: geomLock.r0 * INNER_SCALE * UNIT, y: 0 });
     var holePx = Math.hypot(edge.x - c.x, edge.y - c.y);
     var size = Math.max(24, Math.min(LOGO_PX, holePx * 2 * LOGO_OF_HOLE));
     el.style.width = size + "px";
@@ -6530,6 +7383,18 @@ function mountVaultGraph(root, data, deps) {
         // size this dot is entitled to.
         var base = a.size || 4;
         r.size = dotPx(base, id) * ((r.size === undefined ? base : r.size) / base);
+        // A pinned note is bigger, because it stands where the mark did. Applied after the
+        // dotPx mapping, so it scales the size this dot is actually entitled to. Colour is
+        // untouched -- it keeps its group's hue, which is how the hub goes on being
+        // coloured by the ring with no sampler at all.
+        //
+        // NO forced label: it names itself on hover like every other note in the disc.
+        // Forcing them on was tried and was a mistake -- it made the hub illegible past
+        // three, and the pile-up then got mistaken for a capacity limit.
+        if (isPinned(id)) {
+          r.size = (r.size || a.size) * hubSizeMult();
+          r.zIndex = 3;
+        }
         return r;
       },
       edgeReducer: function (id, a) {
@@ -6601,6 +7466,7 @@ function mountVaultGraph(root, data, deps) {
     renderer.on("afterRender", function () {
       if (DBG.on) drawWedgeDebug();
       placeLogo(); refreshSizeScale(); heatDraw(); hlSync();
+      placeHubDrop();                            // the hub's drop ring, while dragging
     });
 
     renderer.on("enterNode", function (e) {
@@ -6612,8 +7478,28 @@ function mountVaultGraph(root, data, deps) {
     // pointing at nothing -- but the DISC fades back out, which is why state.hovered is
     // released by the tween at zero rather than here.
     renderer.on("leaveNode", function () { hideTip(); hoverTo(0); });
-    renderer.on("clickNode", function (e) { select(e.node); });
+    renderer.on("clickNode", function (e) {
+      // Consumed, not just read -- clickNode fires on this same release either way, and
+      // once used it must not go on suppressing some LATER, unrelated click on the note
+      // this one happened to drag. See dragJustMoved's own comment for why it exists.
+      if (dragJustMoved === e.node) { dragJustMoved = null; return; }
+      select(e.node);
+    });
     renderer.on("clickStage", function () { select(null); });
+    // Right-click is the pin gesture, and dragging into the hole is the other way to
+    // reach it. preventDefault on the original event, or the browser's context menu
+    // covers the thing that just moved.
+    renderer.on("rightClickNode", function (e) {
+      if (e.event && e.event.original) e.event.original.preventDefault();
+      togglePin(e.node);
+    });
+    // NO clear-all on a stage right-click. It was here as "a way out that does not need you
+    // to remember what you pinned", and it is a trap: the hub IS empty stage between its
+    // dots, so right-clicking in the middle -- the most natural place to right-click when
+    // you are looking at the hub -- threw the whole thing away. An undoable gesture would
+    // be one thing; this was a destructive one sitting on top of the feature it destroys.
+    // Unpinning is per note, the same way pinning is.
+    bindNodeDrag();
 
     // DOUBLE CLICK RESETS THE VIEW, on the stage and on a note alike.
     //
@@ -6690,7 +7576,15 @@ function mountVaultGraph(root, data, deps) {
       }).join("") + '</div>' +
       '<div class="chip" style="border-style:dashed">' + esc(a.folder) +
         (a.sub ? ' / ' + esc(a.sub) : '') + ' / ' + esc(a.ntype) + '</div>' +
-      (a.ghost ? "" : '<div><a class="open" href="obsidian://open?vault=' + vault + '&file=' + file + '">Open in Obsidian</a></div>');
+      '<div class="actions">' +
+        (a.ghost ? "" : '<a class="open" href="obsidian://open?vault=' + vault + '&file=' + file + '">Open in Obsidian</a>') +
+        // The label stays "Pin to hub" either way -- the .btn convention above is that a
+        // toggle shows its state by filling in, not by changing what it says, and the
+        // pin icon itself is already on/off (see pinSvg). Same gesture as right-click.
+        '<button class="btn pin" data-pin="' + id + '" aria-pressed="' + isPinned(id) + '" title="' +
+          (isPinned(id) ? "Unpin from hub" : "Pin to hub") + '">' + pinSvg(isPinned(id)) +
+          ' Pin to hub</button>' +
+      '</div>';
 
     if (nb.length) {
       h += '<div class="nb">Linked notes (' + nb.length + ')</div><ul>' +
@@ -6706,6 +7600,9 @@ function mountVaultGraph(root, data, deps) {
     setHTML(d, h);
     d.hidden = false;
     d.querySelector(".x").onclick = function () { select(null); };
+    // Re-selecting the same id rebuilds the card so the pressed state and icon follow
+    // the toggle -- togglePin itself already re-lays-out the ring and repaints the mark.
+    d.querySelector(".pin").onclick = function () { togglePin(id); select(id); };
     Array.prototype.forEach.call(d.querySelectorAll("[data-go]"), function (b) {
       b.onclick = function () { select(b.getAttribute("data-go")); centerOn(b.getAttribute("data-go")); };
     });
@@ -6722,6 +7619,15 @@ function mountVaultGraph(root, data, deps) {
 
   /* ---------------------------------------------------------------- UI */
 
+  // buildSettings lives inside buildTools's own closure (the gear/settings-panel
+  // wiring), not out here beside buildLegend -- so buildLegend cannot call it directly
+  // without eslint (correctly) flagging it as undefined, and would throw at runtime if
+  // it tried. buildTools() sets this once, during the one-time init sequence that runs
+  // well before anything could click a twisty, so the settings panel's own subfolder
+  // rows can be kept in sync with the legend's without hoisting either function out of
+  // the closure it belongs in.
+  var refreshSettingsPanel = null;
+
   function buildLegend() {
     // EVERY ROW BELOW IS ABOUT TO BE REPLACED, and the one under the pointer goes with
     // them -- so its mouseleave will never fire and its halo would be left on with
@@ -6732,17 +7638,15 @@ function mountVaultGraph(root, data, deps) {
     var names = order[state.dim] || [];
     $("gcount").textContent = "(" + names.length + ")";
 
-    // Count notes per subfolder so the nested rows can show their size.
-    var subCount = Object.create(null);
-    // ...and the folder TREE, as "prefix -> { childName: count }" at every depth. Built
-    // by walking each note's own `dirs` chain, so the legend's nesting comes from the
-    // vault rather than from any assumed number of levels: a folder five deep renders
-    // the same way as one a single level down.
+    // subCount ("folder/sub" -> note count) is module-scope now -- see its declaration
+    // beside subOrder. What's still built fresh on every render is the folder TREE, as
+    // "prefix -> { childName: count }" at every depth. Built by walking each note's own
+    // `dirs` chain, so the legend's nesting comes from the vault rather than from any
+    // assumed number of levels: a folder five deep renders the same way as one a single
+    // level down.
     var kids = Object.create(null);
     if (state.dim === "folder") {
       graph.forEachNode(function (_id, a) {
-        var k = a.folder + "/" + (a.sub || "");
-        subCount[k] = (subCount[k] || 0) + 1;
         var d = a.dirs || [];
         for (var i = 0; i < d.length; i++) {
           var pk = a.folder + "/" + d.slice(0, i).join("/");
@@ -6758,13 +7662,7 @@ function mountVaultGraph(root, data, deps) {
       return '<button class="eye" ' + attrs + ' aria-pressed="' + on + '" title="' +
              (on ? "Hide " : "Show ") + esc(what) + '">' + eyeSvg(on) + '</button>';
     };
-    // A disclosure twisty, or an invisible placeholder so labels stay aligned.
-    var twBtn = function (attrs, open) {
-      return attrs
-        ? '<button class="tw" ' + attrs + ' aria-expanded="' + open + '">' +
-          (open ? "▾" : "▸") + '</button>'
-        : '<span class="tw none">▸</span>';
-    };
+    // twBtn is module-scope now -- see its declaration beside eyeSvg.
 
     // Everything BELOW a sub-wedge row, recursively, at whatever depth the vault goes.
     // These levels take no tint and cut no wedge -- they inherit their parent's swatch
@@ -6796,8 +7694,14 @@ function mountVaultGraph(root, data, deps) {
 
     setHTML($("legend"), names.map(function (g) {
       var vis = !isHidden(g);
-      var hasSubs = state.dim === "folder" && (subOrder[g] || []).length > 1 &&
-                    (counts[g] || 0) >= NEST_MIN;
+      // A PIN BYPASSES BOTH SIZE GATES, not just the subfolder-count one -- see
+      // groupHasPinnedSub's own comment. NEST_MIN exists to skip nesting a folder too
+      // small to be worth it automatically; it says nothing about a folder somebody
+      // has deliberately pinned a subfolder colour on, however small that folder has
+      // since shrunk to.
+      var hasSubs = state.dim === "folder" &&
+                    (groupHasPinnedSub(g) ||
+                     ((subOrder[g] || []).length > 1 && (counts[g] || 0) >= NEST_MIN));
       var open = hasSubs && !state.collapsed[g];
       var hl = !!state.highlight[g];
 
@@ -6938,6 +7842,11 @@ function mountVaultGraph(root, data, deps) {
       b.onclick = function () {
         if (state.collapsed[g]) delete state.collapsed[g]; else state.collapsed[g] = true;
         buildLegend();
+        // The settings panel's own subfolder rows read this SAME flag -- see
+        // buildSettings, and refreshSettingsPanel's own comment for why this is not a
+        // direct call -- so opening a folder here opens it there too, rather than the
+        // two disagreeing about which folders are expanded.
+        if (refreshSettingsPanel) refreshSettingsPanel();
       };
     });
     // Deeper folder levels: a twisty, an eye and a highlight each, keyed by full path
@@ -7525,8 +8434,20 @@ function mountVaultGraph(root, data, deps) {
   }
 
   function buildTools() {
+    // See refreshSettingsPanel's own declaration, beside buildLegend: this is the one
+    // assignment that makes it reachable from there. buildSettings is hoisted within
+    // this function body, so the forward reference is fine.
+    refreshSettingsPanel = buildSettings;
+
+    // BACK TO DEFAULTS, not literally everything -- a folder disabled in the settings
+    // panel (hiddenByDefault(), the same rule seedHidden() applies at load) stays hidden
+    // here too. A blanket clear used to override that: a person who deliberately hid
+    // "08 - Archive" by default would have it pop back on the moment they clicked All,
+    // which reads as the button ignoring a choice made one screen over. "None" (below)
+    // is the true blanket override -- hiding everything has nothing to preserve, so it
+    // stays as it was.
     $("allon").onclick = function () {
-      state.hidden[state.dim] = Object.create(null);
+      seedHidden();
       state.hiddenSub = Object.create(null);
       buildLegend(); cascade(null, { colToggle: true });
     };
@@ -7579,6 +8500,11 @@ function mountVaultGraph(root, data, deps) {
     // The saved default, applied once the renderer exists. Not persisted -- writing here
     // would save a value the host just handed us.
     setPan(panEnabled, false);
+    // Unconditional, unlike the settings-panel row (buildOptions), because this is the
+    // only in-VIEW way to flip it on the plugin host -- the gear there opens Obsidian's
+    // own settings tab instead of #vg-settings (github#23).
+    if ($("compact")) $("compact").onclick = function () { setCompactAxis(!compactAxis, true); };
+    setCompactAxis(compactAxis, false);
     $("png").onclick = savePng;
     // COPIES THE DUMP, and falls back to the console when the clipboard refuses -- which it
     // does on a page opened from a file in some builds. Either way the text exists somewhere
@@ -7638,9 +8564,18 @@ function mountVaultGraph(root, data, deps) {
         var open = $("settings").hidden;
         $("settings").hidden = !open;
         $("gear").setAttribute("aria-expanded", String(open));
-        if (open) buildSettings();
+        if (open) { buildOptions(); buildSettings(); }
       };
-      $("fcreset").onclick = function () { pickColor(null, null); };
+      // BOTH MAPS, not just folderColors -- this button sits under "Folder colours",
+      // which now covers subfolders too (see subfolderRows), so Reset dropping only
+      // the top-level overrides would leave a subfolder pin behind for the user to
+      // go find and clear by hand. Mirrors plugin/main.js's own "Reset all".
+      $("fcreset").onclick = function () {
+        pickColor(null, null);
+        var savedSub = applySubfolderColors({});
+        if (saveSubfolderColors) saveSubfolderColors(Object.assign({}, savedSub));
+        buildSettings();
+      };
       // DELEGATED on the container, which survives -- buildSettings replaces its
       // children on every pick, so a listener bound to a swatch would be bound to an
       // element that is about to be thrown away.
@@ -7649,10 +8584,165 @@ function mountVaultGraph(root, data, deps) {
         if (!t) return;
         var v = t.closest("[data-vis]");
         if (v) { pickVisible(v.getAttribute("data-vis")); return; }
+        var tw = t.closest("[data-stw]");
+        if (tw) {
+          var fg = tw.getAttribute("data-stw");
+          if (state.collapsed[fg]) delete state.collapsed[fg]; else state.collapsed[fg] = true;
+          buildSettings();
+          buildLegend();          // see the [data-tw] handler: the two stay in sync
+          return;
+        }
+        var s = t.closest("[data-sfc]");
+        if (s) {
+          var pk = s.getAttribute("data-sfc"), slash = pk.indexOf("/");
+          pickSubColors(pk.slice(0, slash), [pk.slice(slash + 1)],
+                        s.getAttribute("data-key") || null);
+          return;
+        }
         var b = t.closest("[data-fc]");
         if (b) pickColor(b.getAttribute("data-fc"), b.getAttribute("data-key") || null);
       });
+      // DELEGATED for the same reason as setbody above, though #vg-optbody's rows are only
+      // ever rebuilt by buildOptions() itself (never thrown away mid-interaction the way a
+      // folder pick rebuilds the swatch grid) -- kept delegated anyway so a second option
+      // row needs no second listener.
+      $("optbody").addEventListener("click", function (ev) {
+        var t = ev.target instanceof Element ? ev.target : null;
+        var b = t && t.closest("[data-opt]");
+        if (!b) return;
+        var key = b.getAttribute("data-opt");
+        var row = OPTION_ROWS.filter(function (o) { return o.key === key; })[0];
+        if (row) { row.set(!row.get()); buildOptions(); }
+      });
     }
+
+    // RIGHT-CLICK, IN THE LEGEND ITSELF -- a second, faster way to reach the same twelve
+    // swatches the settings panel offers, without opening it. Unconditional: unlike the
+    // gear above, this does not depend on SETTINGS_UI or openSettings, because a context
+    // menu is not a second settings surface, just a shortcut to the pick functions below,
+    // which already no-op safely with no host to save through.
+    function closeCtxMenu() {
+      var el = $("ctxmenu");
+      if (el) el.hidden = true;
+      DOC.removeEventListener("mousedown", ctxOutside, true);
+      DOC.removeEventListener("keydown", ctxKey, true);
+      WIN.removeEventListener("resize", closeCtxMenu);
+    }
+    function ctxOutside(ev) {
+      var el = $("ctxmenu");
+      if (el && !el.hidden && !el.contains(ev.target)) closeCtxMenu();
+    }
+    function ctxKey(ev) { if (ev.key === "Escape") closeCtxMenu(); }
+
+    // THE ONE SWATCH-BUTTON MARKUP, shared by the three places that draw the twelve slots:
+    // the context menu below, a subfolder's row, and a folder's row in the settings panel.
+    // All three build the same <button class="swatch vg-<key>"> shape and used to each
+    // write it out by hand -- structurally identical, differing only in which extra
+    // data-* attribute carries the row's own key (or none, for the context menu, which
+    // reads data-key alone) and in the title-suffix wording, which stays a per-caller
+    // callback because "chosen" vs "automatic" vs "automatic default" is a real
+    // difference in what each surface can even claim (a context menu has no separate
+    // "automatic default" state to report; a subfolder row never marks Auto at all).
+    //
+    //   pal        paletteInfo()'s list
+    //   opts.role         "radio" or "menuitemradio"
+    //   opts.dataAttr     extra data-* name carrying the row's own key ("fc"/"sfc"), omit
+    //                     for the context menu (data-key alone is enough there)
+    //   opts.dataValue    that attribute's value (a folder name, or "<folder>/<sub>")
+    //   opts.current      the slot key in force, "" for none
+    //   opts.autoKey      the slot Auto would give back, "" if this row never marks one
+    //   opts.titleFor(on, isAuto)  the title-text suffix for one swatch
+    function swatchButtonsHTML(pal, opts) {
+      return pal.map(function (p) {
+        var on = opts.current === p.key;
+        var isAuto = !!opts.autoKey && opts.autoKey === p.key;
+        return '<button class="swatch vg-' + p.key + '" role="' + opts.role + '"' +
+               (opts.dataAttr ? ' data-' + opts.dataAttr + '="' + esc(opts.dataValue) + '"' : '') +
+               ' data-key="' + p.key + '" aria-checked="' + on + '"' +
+               (isAuto ? ' data-auto="1"' : '') +
+               ' title="' + esc(p.name) + (opts.titleFor ? opts.titleFor(on, isAuto) : "") +
+               '" aria-label="' + esc(p.name) + '"></button>';
+      }).join("");
+    }
+
+    // The same 12-swatch + Auto markup buildSettings' own rows build, at the click point
+    // instead of in the sidebar. `current` is a slot key or "" for none; onPick(key) fires
+    // with the chosen key, or null for Auto.
+    //
+    // x/y are VIEWPORT coordinates (straight off the contextmenu event), and the menu is
+    // positioned relative to ROOT rather than the true viewport -- `position: fixed`
+    // measures from the nearest ancestor with a transform or CSS containment, not
+    // necessarily the window, and Obsidian's own workspace panes carry exactly that.
+    // Measured there: the menu opened detached from the row that was right-clicked,
+    // floating wherever the transformed ancestor's origin happened to be. ROOT's own
+    // getBoundingClientRect() already reflects whatever transform sits above it, so
+    // subtracting it converts a viewport point into ROOT's coordinate space correctly
+    // regardless of what Obsidian does further up the tree -- the same reason #vg-detail
+    // and #vg-tip are `position: absolute` against their own ancestor rather than fixed.
+    // autoKey is the folder's own automatic slot, omitted by the subfolder caller below --
+    // a subfolder's automatic colour is a computed tint, not one of these twelve, so there
+    // is nothing among them for it to mark. See page.css's data-auto rule.
+    function openCtxMenu(x, y, current, onPick, autoKey) {
+      var el = $("ctxmenu");
+      if (!el) return;
+      var pal = paletteInfo();
+      var sws = swatchButtonsHTML(pal, {
+        role: "menuitemradio", current: current, autoKey: autoKey,
+        titleFor: function (on, isAuto) { return isAuto ? " (automatic)" : ""; }
+      });
+      setHTML(el, '<div class="sws">' + sws + '</div>' +
+                  '<button class="auto" data-key="" aria-pressed="' + !current +
+                  '" title="Back to automatic">Auto</button>');
+      Array.prototype.forEach.call(el.querySelectorAll("[data-key]"), function (b) {
+        b.onclick = function () { onPick(b.getAttribute("data-key") || null); closeCtxMenu(); };
+      });
+      el.hidden = false;
+      var root0 = ROOT.getBoundingClientRect();
+      var rx = x - root0.left, ry = y - root0.top;
+      // Clamped to ROOT's own box, in the same coordinate space: a right-click near the
+      // edge must not open a popover that hangs off the view.
+      var r = el.getBoundingClientRect();
+      el.style.left = Math.max(4, Math.min(rx, ROOT.clientWidth - r.width - 4)) + "px";
+      el.style.top = Math.max(4, Math.min(ry, ROOT.clientHeight - r.height - 4)) + "px";
+      DOC.addEventListener("mousedown", ctxOutside, true);
+      DOC.addEventListener("keydown", ctxKey, true);
+      WIN.addEventListener("resize", closeCtxMenu);
+    }
+
+    // ONE DELEGATED LISTENER, for the same reason the settings panel's click handler is
+    // delegated: buildLegend replaces every row on every render, so anything bound to a
+    // row itself would be bound to an element about to be thrown away.
+    $("legend").addEventListener("contextmenu", function (ev) {
+      var t = ev.target instanceof Element ? ev.target : null;
+      if (!t) return;
+      var gBtn = t.closest(".lg[data-g]");
+      if (gBtn) {
+        ev.preventDefault();
+        var g = gBtn.getAttribute("data-g");
+        openCtxMenu(ev.clientX, ev.clientY, folderColors[g] || groupSlot[g] || "",
+                    function (key) { pickColor(g, key); }, groupAutoSlot[g] || "");
+        return;
+      }
+      // The pooled tail row ("N smaller subfolders") carries several indices -- a pick
+      // there applies to every subfolder it stands for, matching how that row's eye and
+      // highlight already act as a block rather than forcing one right-click per member.
+      var subBtn = t.closest(".lgs[data-hsub]");
+      if (subBtn) {
+        ev.preventDefault();
+        var f = subBtn.getAttribute("data-hsub");
+        var subs = subOrder[f] || [];
+        var idx = subBtn.getAttribute("data-idx").split(",").map(Number);
+        var picked = idx.map(function (i) { return subs[i]; });
+        var cur = idx.length === 1 ? (subfolderColors[f + "/" + picked[0]] || "") : "";
+        openCtxMenu(ev.clientX, ev.clientY, cur,
+                    function (key) { pickSubColors(f, picked, key); });
+        return;
+      }
+      // Depth 2+ (a `data-hpath` row): no picker. Per design/0003-subfolder-
+      // differentiation.md these levels take no tint of their own and inherit their
+      // parent's swatch, so there is nothing here to pin -- the browser's own context
+      // menu shows instead.
+    });
 
     // One folder's slot, or -- with both arguments null -- every override dropped.
     // Nothing else in the map is touched: two folders may hold the same slot, and that
@@ -7665,6 +8755,22 @@ function mountVaultGraph(root, data, deps) {
       }
       var saved = applyFolderColors(next);
       if (saveFolderColors) saveFolderColors(Object.assign({}, saved));
+      buildSettings();
+    }
+
+    // One or more subfolders' slot, in the SAME folder, set to the same key in one write.
+    // The array is what lets the pooled "N smaller subfolders" legend row apply a single
+    // pick to every subfolder it stands for, matching how that row's eye and highlight
+    // already act as a block rather than forcing N separate clicks.
+    function pickSubColors(folder, subs, key) {
+      var next = Object.create(null);
+      Object.keys(subfolderColors).forEach(function (k) { next[k] = subfolderColors[k]; });
+      subs.forEach(function (sb) {
+        var pk = folder + "/" + sb;
+        if (key) next[pk] = key; else delete next[pk];
+      });
+      var saved = applySubfolderColors(next);
+      if (saveSubfolderColors) saveSubfolderColors(Object.assign({}, saved));
       buildSettings();
     }
 
@@ -7690,6 +8796,62 @@ function mountVaultGraph(root, data, deps) {
     // Rebuilt whole on every pick. The list is one row per top-level folder and the
     // vault has tens of those, not thousands, so there is nothing here worth the bugs
     // that come with patching rows in place.
+    // Every named subfolder of g, as its own radiogroup: a live tint preview, its name
+    // and count, an Auto button, and the same twelve swatches a folder row gets. Unlike
+    // a folder row, no swatch here is ever marked "current" while unpinned -- the
+    // automatic tint is a computed shade, not one of the twelve slot hexes, so there is
+    // nothing among them to ring. The Auto button's own pressed state already says
+    // "this one is automatic"; ringing a swatch that is not actually being used would be
+    // the lie a folder row's "(automatic)" marking specifically avoids.
+    function subfolderRows(g, pal) {
+      return (subOrder[g] || []).map(function (sb) {
+        var pk = g + "/" + sb;
+        var pin = subfolderColors[pk] || "";
+        var tint = subShade[pk] || colorOf(g);
+        var nm = sb || "(directly in folder)";
+        var sws = swatchButtonsHTML(pal, {
+          role: "radio", dataAttr: "sfc", dataValue: pk, current: pin,
+          titleFor: function (on, isAuto) { return on ? " (chosen)" : ""; }
+        });
+        return '<div class="scr scrsub" role="radiogroup" aria-label="Colour for ' +
+               esc(g + "/" + nm) + '">' +
+               '<div class="scrh">' +
+               '<span class="sw" style="background:' + tint + ';border-radius:50%"></span>' +
+               '<span class="nm" title="' + esc(nm) + '">' + esc(nm) + '</span>' +
+               '<span class="ct">' + (subCount[pk] || 0) + '</span>' +
+               '<button class="auto" data-sfc="' + esc(pk) + '" data-key=""' +
+               ' aria-pressed="' + (!pin) + '"' +
+               ' title="Back to the automatic tint">Auto</button>' +
+               '</div>' +
+               '<span class="sws">' + sws + '</span></div>';
+      }).join("");
+    }
+
+    // GENERIC BOOLEAN OPTIONS for the standalone settings panel -- one row today
+    // (compactAxis, github#23), written as a table so a second one is an entry here, not a
+    // new mechanism. Reuses the existing .mini button[aria-pressed] convention (a toggle
+    // shows its state by being filled; the label stays constant), so no new CSS is needed.
+    var OPTION_ROWS = [
+      { key: "compactAxis", label: "Compact date axis",
+        title: "Give each year width by how many notes it holds, instead of every year reading the same width",
+        get: function () { return compactAxis; },
+        set: function (v) { setCompactAxis(v, true); } }
+    ];
+    function buildOptions() {
+      var host = $("optbody");
+      if (!host) return;
+      setHTML(host, OPTION_ROWS.map(function (o) {
+        var on = !!o.get();
+        return '<div class="row" style="margin-bottom:7px">' +
+               '<div class="lbl" style="margin:0">' + esc(o.label) + '</div>' +
+               // "vg-" prefixed, to match what $() actually looks up ($() prepends ID="vg-"
+               // itself; a literal "opt-<key>" id here would never resolve through $()).
+               '<div class="mini"><button id="vg-opt-' + o.key + '" data-opt="' + o.key + '"' +
+               ' aria-pressed="' + on + '" title="' + esc(o.title) + '">Enabled' +
+               '</button></div></div>';
+      }).join(""));
+    }
+
     function buildSettings() {
       var pal = paletteInfo();
       var rows = (order[state.dim] || []).map(function (g) {
@@ -7704,17 +8866,20 @@ function mountVaultGraph(root, data, deps) {
         // marked differently because "this is the colour" and "this is the colour I chose"
         // are different facts, and the Auto button is otherwise the only thing saying so.
         var cur = pinned || groupSlot[g] || "";
-        var sws = pal.map(function (p) {
-          var on = cur === p.key;
-          // The colour comes from `.vg-<key>` in page.css, not from an inline style: a
-          // hex baked in here would not survive the theme flip that readTheme handles.
-          return '<button class="swatch vg-' + p.key + '" role="radio"' +
-                 ' data-fc="' + esc(g) + '" data-key="' + p.key + '"' +
-                 ' aria-checked="' + on + '"' +
-                 (on && !pinned ? ' data-auto="1"' : '') +
-                 ' title="' + esc(p.name) + (on ? (pinned ? " (chosen)" : " (automatic)") : "") +
-                 '" aria-label="' + esc(p.name) + '"></button>';
-        }).join("");
+        // THE SLOT THIS FOLDER WOULD BE ON WITH NO OVERRIDE AT ALL -- distinct from `cur`
+        // exactly when the folder is pinned to something else. Marked independently of
+        // aria-checked so it stays visible after an override (github#29): before this,
+        // "automatic" and "currently in use" were the same ring, and a pin erased the
+        // only trace of what Auto would give back.
+        var autoKey = groupAutoSlot[g] || "";
+        // The colour comes from `.vg-<key>` in page.css, not from an inline style: a hex
+        // baked in here would not survive the theme flip that readTheme handles.
+        var sws = swatchButtonsHTML(pal, {
+          role: "radio", dataAttr: "fc", dataValue: g, current: cur, autoKey: autoKey,
+          titleFor: function (on, isAuto) {
+            return on ? (pinned ? " (chosen)" : " (automatic)") : (isAuto ? " (automatic default)" : "");
+          }
+        });
         // AUTO SITS ON THE NAME LINE, not at the end of the swatches. As a thirteenth
         // item in that row it was the one thing that could not fit beside twelve
         // swatches in a 288px sidebar, so the row wrapped and left a single swatch and
@@ -7726,8 +8891,16 @@ function mountVaultGraph(root, data, deps) {
         // live filter: the legend's own eye is the live one, and this is what the disc
         // comes back to on Refresh.
         var shown = !hiddenByDefault(g);
+        // SAME GATE buildLegend uses for its own twisty (pin included -- see
+        // groupHasPinnedSub), and the SAME state (state.collapsed) -- opening a
+        // folder's subfolders here opens them in the legend too.
+        var hasSubs = state.dim === "folder" &&
+                      (groupHasPinnedSub(g) ||
+                       ((subOrder[g] || []).length > 1 && (counts[g] || 0) >= NEST_MIN));
+        var open = hasSubs && !state.collapsed[g];
         return '<div class="scr" role="radiogroup" aria-label="Colour for ' + esc(g) + '">' +
                '<div class="scrh">' +
+               twBtn(hasSubs ? 'data-stw="' + esc(g) + '"' : null, open) +
                '<button class="eye vis" data-vis="' + esc(g) + '" aria-pressed="' + shown +
                '" title="' + (shown ? "Shown by default" : "Hidden by default") +
                '" aria-label="' + (shown ? "Hide" : "Show") + " " + esc(g) + '">' +
@@ -7737,7 +8910,8 @@ function mountVaultGraph(root, data, deps) {
                ' aria-pressed="' + (!pinned) + '"' +
                ' title="Back to the slot this folder gets automatically">Auto</button>' +
                '</div>' +
-               '<span class="sws">' + sws + '</span></div>';
+               '<span class="sws">' + sws + '</span></div>' +
+               (open ? subfolderRows(g, pal) : "");
       }).join("");
       setHTML($("setbody"), rows);
     }
@@ -7839,6 +9013,25 @@ function mountVaultGraph(root, data, deps) {
     }
     if (persist && onPanEnabled) onPanEnabled(panEnabled);
     return panEnabled;
+  }
+
+  // Flips which axis ribbonX/ribbonMs use and repaints everything that reads it -- the bars,
+  // the brush and the year chips are all downstream of dateSpan.axis/compactAxis, so a
+  // redraw (not a rebuild: dateSpan.axis already exists either way) is enough, live, with no
+  // reload -- same shape as setPan above.
+  function setCompactAxis(on, persist) {
+    compactAxis = !!on;
+    // TWO POSSIBLE BUTTONS, not one -- the settings-panel row (standalone only,
+    // buildOptions) and the view-level icon (both hosts, github#23). Either or both may
+    // be absent depending on host and whether the panel has been opened yet; each syncs
+    // independently.
+    ["opt-compactAxis", "compact"].forEach(function (id) {
+      var btn = $(id);
+      if (btn) btn.setAttribute("aria-pressed", compactAxis ? "true" : "false");
+    });
+    if (dateSpan) drawDateUI();
+    if (persist && onCompactAxis) onCompactAxis(compactAxis);
+    return compactAxis;
   }
 
   function savePng() {
@@ -8475,7 +9668,7 @@ function mountVaultGraph(root, data, deps) {
       '<div class="m">' +
       (n ? n + " note" + (n === 1 ? "" : "s") + " added" : "nothing added") +
       (top.length ? "<br>" + top.map(function (g2) {
-        return '<b style="color:' + colorOf(g2) + '">■</b> ' + esc(g2) + " " + by[g2];
+        return '<b style="color:' + colorOf(g2) + '">■ </b> ' + esc(g2) + " " + by[g2];
       }).join("<br>") : "") +
       (n ? "<br><i>click to mark them on the disc</i>" : "") +
       "</div>");
@@ -8671,10 +9864,23 @@ function mountVaultGraph(root, data, deps) {
     if (!host) return;
     if (!dateSpan || !dateSpan.years.length) { host.textContent = ""; return; }
     var w = ribbonW();
-    var span = dateSpan.hi - dateSpan.lo;
-    // Room for a label is about 20px; below that, name every other year.
-    var pitchY = span > 0 ? (w * (365.25 * 86400000)) / span : w;
-    var every = pitchY < 20 ? 2 : 1;
+    // Room for a label is measured, not estimated from the calendar span -- that estimate
+    // (average px per YEAR over the whole span) was accurate while the axis was linear, but
+    // github#23's note-weighted axis can put two sparse years' chips much closer together
+    // than the average while a busy year sits comfortably wide elsewhere; a vault-wide
+    // average never sees that. The worst (smallest) gap between any two CONSECUTIVE years'
+    // actual positions is what a label can actually collide with, so that's what decides.
+    var positions = dateSpan.years.map(function (yy) {
+      return Math.max(0, Math.min(w, ribbonX(Date.UTC(yy.y, 0, 1), w)));
+    });
+    var minGap = Infinity;
+    for (var gi = 1; gi < positions.length; gi++) {
+      minGap = Math.min(minGap, positions[gi] - positions[gi - 1]);
+    }
+    // ~28px, not 20: a two-digit chip ("'26") with 5px padding either side runs close to
+    // that wide, and two chips only clear each other when their CENTRES -- not their edges
+    // -- are that far apart, since each is centred on its own position.
+    var every = (positions.length > 1 && minGap < 28) ? 2 : 1;
     // WHICH YEAR IS SELECTED, read through the same clamping that setting it goes through.
     // An end AT the span's own end is stored as null -- "no bound" -- so the newest year, whose
     // December is past the last note, comes back as `to === null` and compared as itself: the
@@ -8699,9 +9905,9 @@ function mountVaultGraph(root, data, deps) {
     //
     // replaceChildren() rather than innerHTML = "": same clear, and it is the verb for it.
     var made = [];
-    dateSpan.years.forEach(function (yy) {
+    dateSpan.years.forEach(function (yy, yi) {
       if ((yy.y % every) !== 0) return;
-      var at = Math.max(0, Math.min(w, ribbonX(Date.UTC(yy.y, 0, 1), w)));
+      var at = positions[yi];        // already computed above, same ribbonX call
       var b = DOC.createElement("button");
       b.type = "button";
       b.setAttribute("data-yr", String(yy.y));
@@ -8805,12 +10011,66 @@ function mountVaultGraph(root, data, deps) {
     if (!ribW) ribW = measureRibbon();
     return ribW || 600;
   }
-  function ribbonX(ms, w) {
+  function ribbonXLinear(ms, w) {
     var span = dateSpan.hi - dateSpan.lo;
     return span > 0 ? ((ms - dateSpan.lo) / span) * w : 0;
   }
-  function ribbonMs(x, w) {
+  function ribbonMsLinear(x, w) {
     return dateSpan.lo + (Math.max(0, Math.min(w, x)) / w) * (dateSpan.hi - dateSpan.lo);
+  }
+
+  // Month index for `ms`, by calendar arithmetic against the first bucketed month rather
+  // than a binary search -- months are contiguous by construction (buildDateSpan walks
+  // every one between lo and hi), so this is exact and O(1).
+  function monthIndexOfMs(ms) {
+    var d = new Date(ms), m0 = new Date(dateSpan.months[0].ms);
+    var idx = (d.getUTCFullYear() - m0.getUTCFullYear()) * 12 + (d.getUTCMonth() - m0.getUTCMonth());
+    return Math.max(0, Math.min(dateSpan.months.length - 1, idx));
+  }
+  // The end of month `i`'s ms range -- the next month's start, or dateSpan.hi itself when
+  // `i` is the last month (which is always populated: dateSpan.hi is derived FROM its last
+  // note, so nothing is ever dated past it).
+  function monthEndMs(i) {
+    return (i + 1 < dateSpan.months.length) ? dateSpan.months[i + 1].ms : dateSpan.hi;
+  }
+  // Every segment is exactly one calendar month now (github#23's note-weighted axis gives
+  // each month its own segment, weighted by content rather than grouped by emptiness), so
+  // this only exists to keep ribbonXCompact/ribbonMsCompact from repeating `monthEndMs`.
+  function segSpanMs(seg) {
+    return [dateSpan.months[seg.i].ms, monthEndMs(seg.i)];
+  }
+
+  /**
+   * ms -> x through dateSpan.axis's weight-space instead of raw time. Sub-month position
+   * still interpolates by real elapsed time WITHIN the month (there's nothing else to go
+   * by at that resolution), but which pixel-width slice that lands in is decided by
+   * dateSpan.axis's note-weighted segments, not by the month's own calendar length
+   * (github#23) -- a quiet month draws a thin slice and a busy one a wide one even when
+   * both are full calendar months.
+   */
+  function ribbonXCompact(ms, w) {
+    var ax = dateSpan.axis, seg = ax.segs[ax.segOfMonth[monthIndexOfMs(ms)]];
+    var span = segSpanMs(seg), lo = span[0], hi = span[1];
+    var frac = hi > lo ? Math.max(0, Math.min(1, (ms - lo) / (hi - lo))) : 0;
+    var wPos = seg.w0 + frac * (seg.w1 - seg.w0);
+    return (wPos / ax.totalW) * w;
+  }
+  function ribbonMsCompact(x, w) {
+    var ax = dateSpan.axis, xc = Math.max(0, Math.min(w, x));
+    var wPos = (xc / w) * ax.totalW, segs = ax.segs, seg = segs[segs.length - 1];
+    for (var i = 0; i < segs.length; i++) {
+      if (wPos <= segs[i].w1) { seg = segs[i]; break; }
+    }
+    var frac = seg.w1 > seg.w0 ? Math.max(0, Math.min(1, (wPos - seg.w0) / (seg.w1 - seg.w0))) : 0;
+    var span = segSpanMs(seg);
+    return span[0] + frac * (span[1] - span[0]);
+  }
+
+  function ribbonX(ms, w) {
+    return (compactAxis && dateSpan.axis) ? ribbonXCompact(ms, w) : ribbonXLinear(ms, w);
+  }
+  function ribbonMs(x, w) {
+    return (compactAxis && dateSpan.axis) ? ribbonMsCompact(x, w) : ribbonMsLinear(x, w);
   }
 
   /**
@@ -8845,6 +10105,15 @@ function mountVaultGraph(root, data, deps) {
     return heat ? heat.start + heat.cols * WEEK_MS : heatParse(TODAY);
   }
 
+  // One month's bar: height against nRef, dim when empty. Shared by both the linear and
+  // compact bar-layout paths in drawRibbon so the fill/height math has exactly one copy.
+  function paintMonthBar(cx, top, m, x, bw) {
+    var t = Math.min(1, m.n / dateSpan.nRef);
+    var bh = m.n ? Math.max(1.5, (top - 2) * t) : 0;
+    cx.fillStyle = m.n ? dateRamp(t) : css("--dim");
+    cx.fillRect(x, top - bh, bw, bh || 1);
+  }
+
   function drawRibbon() {
     var cv = $("ribbon");
     if (!cv || !dateSpan) return;
@@ -8852,22 +10121,45 @@ function mountVaultGraph(root, data, deps) {
     var cx = fitCanvas(cv, w, RIBBON_H);
     var top = RIBBON_BARS;                     // the bars live above this line
     var ms = dateSpan.months, n = ms.length;
-    var pitch = w / n;
+    var useCompact = compactAxis && dateSpan.axis;
 
-    for (var i = 0; i < n; i++) {
-      var m = ms[i];
-      var t = Math.min(1, m.n / dateSpan.nRef);
-      var bh = m.n ? Math.max(1.5, (top - 2) * t) : 0;
-      cx.fillStyle = m.n ? dateRamp(t) : css("--dim");
-      cx.fillRect(i * pitch, top - bh, Math.max(1, pitch - 0.6), bh || 1);
-    }
-
-    // Year boundaries. Only January gets a rule, so the strip reads as years rather than as
-    // 121 months. The years themselves are named by the buttons below -- see buildYears.
-    for (var j = 0; j < n; j++) {
-      if (ms[j].m !== 0) continue;
-      cx.fillStyle = rgbaHex(css("--text-3"), 0.28);
-      cx.fillRect(j * pitch, 0, 1, top);
+    if (useCompact) {
+      // SEGMENT-SPACE LAYOUT, using the SAME note-weighted segments dateSpan.axis carries
+      // for ribbonX/ribbonMs -- so the bars, the brush and the year chips agree about where
+      // things are rather than being two formulas that happen to look similar. Every
+      // segment is one calendar month, painted exactly as the linear layout paints it
+      // (paintMonthBar doesn't know or care how its x/width were decided) -- the compaction
+      // shows up as a quiet month drawing a thin bar and a busy one a wide one, and a
+      // shrunk YEAR reading as a tight cluster of thin bars between two year rules close
+      // together, not as a separate "collapsed" visual treatment (github#23).
+      var segs = dateSpan.axis.segs, totalW = dateSpan.axis.totalW;
+      for (var si = 0; si < segs.length; si++) {
+        var seg = segs[si];
+        var segX = (seg.w0 / totalW) * w;
+        var segW = Math.max(1, ((seg.w1 - seg.w0) / totalW) * w - 0.6);
+        paintMonthBar(cx, top, ms[seg.i], segX, segW);
+      }
+      // Year boundaries, in segment space -- every year gets its own rule regardless of how
+      // compacted it is, since every month (including a note-less one in a shrunk year) is
+      // still its own segment with its own x (github#23).
+      for (var j = 0; j < n; j++) {
+        if (ms[j].m !== 0) continue;
+        var jSeg = segs[dateSpan.axis.segOfMonth[j]];
+        cx.fillStyle = rgbaHex(css("--text-3"), 0.28);
+        cx.fillRect((jSeg.w0 / totalW) * w, 0, 1, top);
+      }
+    } else {
+      var pitch = w / n;
+      for (var i = 0; i < n; i++) {
+        paintMonthBar(cx, top, ms[i], i * pitch, Math.max(1, pitch - 0.6));
+      }
+      // Year boundaries. Only January gets a rule, so the strip reads as years rather than as
+      // 121 months. The years themselves are named by the buttons below -- see buildYears.
+      for (var j2 = 0; j2 < n; j2++) {
+        if (ms[j2].m !== 0) continue;
+        cx.fillStyle = rgbaHex(css("--text-3"), 0.28);
+        cx.fillRect(j2 * pitch, 0, 1, top);
+      }
     }
 
     // THE BAND'S WINDOW, on its own track and draggable. A rail the full width of the span
@@ -8988,14 +10280,38 @@ function mountVaultGraph(root, data, deps) {
   }
 
   /**
-   * The window end that puts the pointer in the MIDDLE of the pill.
+   * The window end that puts the POINTER'S PIXEL, not its date, in the middle of the pill.
    *
    * Grabbing it used to set the window's END to the pointer, so the pill jumped to sit
    * entirely to the left of the hand and the thing being dragged was somewhere else. Centring
    * is what a scrollbar thumb does when you click the trough, and it means the date under the
    * cursor is the middle of what the grid is showing -- which is the date you were pointing at.
+   *
+   * TAKES A PIXEL, NOT A DATE, and solves for `end` by bisection rather than adding half the
+   * window's span in ms -- that shortcut only works when ribbonX is linear, because it
+   * assumes a constant px-per-ms ratio to convert "half the span in time" into "half the
+   * pill's width on screen". compactAxis breaks that assumption on purpose: the same 52-week
+   * span can be many pixels wide sitting in a dense year and few sitting in a sparse one, so
+   * a window whose end tracked the pointer by TIME visibly resized as it crossed that
+   * boundary and stopped tracking the pointer's actual pixel at all (github#23). Solving in
+   * pixel space instead asks the one question that is actually true regardless of the axis:
+   * where does `end` have to be for the drawn pill's midpoint to BE this pixel. Monotonic in
+   * `end` (ribbonX only ever increases with ms), so bisection converges in a fixed handful of
+   * steps and needs no derivative. On a linear axis this converges to the exact same answer
+   * the old formula gave -- centring by pixel and centring by time are the same statement
+   * there, so nothing about the non-compact behaviour changes.
    */
-  function winEndCentred(ms) { return clampWinEnd(ms + winSpan() / 2); }
+  function winEndCentredAtPx(px, w) {
+    var span = winSpan(), todayMs = heatParse(TODAY);
+    var lo = Math.min(dateSpan.lo + span, todayMs), hi = todayMs;
+    if (lo >= hi) return clampWinEnd(hi);
+    for (var i = 0; i < 24; i++) {
+      var mid = (lo + hi) / 2;
+      var midPx = (ribbonX(mid - span, w) + ribbonX(mid, w)) / 2;
+      if (midPx < px) lo = mid; else hi = mid;
+    }
+    return clampWinEnd((lo + hi) / 2);
+  }
 
   /**
    * What a press at `x` grabs: an existing edge, the span between them, or empty strip.
@@ -9055,19 +10371,11 @@ function mountVaultGraph(root, data, deps) {
     var rib = $("ribbon");
     if (!rib) return;
 
-    // ONE UPDATE PER FRAME. A pointermove fires 120+ times a second on a decent mouse and
-    // each update re-lays out the disc; without this the handler is the bottleneck and the
-    // drag lags behind the cursor. The last position is the only one that matters.
-    var pend = null, pendRaf = 0;
-    var flush = function () {
-      pendRaf = 0;
-      var f = pend; pend = null;
-      if (f) f();
-    };
-    var onFrame = function (fn) {
-      pend = fn;
-      if (!pendRaf) pendRaf = WIN.requestAnimationFrame(flush);
-    };
+    // ONE UPDATE PER FRAME -- see makeFrameCoalescer, also used by bindNodeDrag's hub-pin
+    // drag. A pointermove fires 120+ times a second on a decent mouse and each update
+    // re-lays out the disc; without this the handler is the bottleneck and the drag lags
+    // behind the cursor. The last position is the only one that matters.
+    var onFrame = makeFrameCoalescer();
 
     $("rangeall").onclick = function () {
       state.from = null; state.to = null; state.heatEnd = null;
@@ -9114,7 +10422,7 @@ function mountVaultGraph(root, data, deps) {
       // A PRESS ON THE TRACK IS ALSO A JUMP. Dragging the pill across eleven years to reach
       // 2018 is a lot of mouse; pressing at 2018 puts it there and the drag then refines it.
       if (mode === "win") {
-        state.heatEnd = winEndCentred(ribbonMs(x, w));
+        state.heatEnd = winEndCentredAtPx(x, w);
         rebuildBand();
         showRTip(x, winLabel());
       }
@@ -9150,7 +10458,7 @@ function mountVaultGraph(root, data, deps) {
         var wx = xOf(ev);
         onFrame(function () {
           if (!brushDrag) return;
-          state.heatEnd = winEndCentred(here);
+          state.heatEnd = winEndCentredAtPx(wx, w);
           rebuildBand();
           showRTip(wx, winLabel());
         });
@@ -9318,6 +10626,8 @@ function mountVaultGraph(root, data, deps) {
     return /(^|[?&#])demo\b/.test(String(location.search) + " " + String(location.hash));
   }
 
+  /* ---- BEGIN: demo automation + debug API -- stripped from the plugin build, see scripts/build-plugin.mjs (stripDemoAndDebug) ---- */
+
   // Is anything moving? Every animation in this page owns one of these three, so this
   // is the whole answer rather than a sample of it. The driver polls this instead of
   // sleeping: a fixed wait fires part-way through on a page too slow to finish in time,
@@ -9426,6 +10736,18 @@ function mountVaultGraph(root, data, deps) {
       }
       return null;                              // the panel is closed, so nothing to aim at
     }
+    // The right-click colour menu's own swatches -- "g8", or "" for its Auto button.
+    // Unlike the settings panel's "swatch" kind above, only one folder or subfolder can
+    // have this menu open at a time, so there is no folder half of the key to match.
+    if (kind === "ctxswatch") {
+      var cm = $("ctxmenu");
+      if (!cm || cm.hidden) return null;
+      var csw = cm.querySelectorAll("[data-key]");
+      for (var cs = 0; cs < csw.length; cs++) {
+        if (csw[cs].getAttribute("data-key") === (arg || "")) return csw[cs];
+      }
+      return null;                              // the menu is closed, so nothing to aim at
+    }
     // A YEAR CHIP under the strip. "busiest" picks the fullest year that HAS a chip, which
     // is not the same as the fullest year: below about 20px of pitch buildYears names every
     // other year, so the busiest one may have no button to aim at. Choosing among the chips
@@ -9452,6 +10774,22 @@ function mountVaultGraph(root, data, deps) {
       return pickY;
     }
     if (kind === "note") return demoNoteRect(arg);
+    if (kind === "biginner") return demoBigInnerNote();
+    // The detail card's hub toggle. Resolvable only once a note is selected and the card
+    // is open -- which the pin storyboard already orders itself around (click the note,
+    // then this), the same way the folder acts order themselves around a twisty.
+    if (kind === "pin") {
+      var dcard = $("detail");
+      return dcard && !dcard.hidden ? dcard.querySelector(".pin") : null;
+    }
+    // The detail card's own close button. A card left open after a beat is done with
+    // it is not a resting state anything else in the storyboard expects -- every other
+    // act starts from "nothing selected", and the pin act is the one act that opens a
+    // card without a hover or a click-elsewhere already lined up to close it again.
+    if (kind === "detailclose") {
+      var dc2 = $("detail");
+      return dc2 && !dc2.hidden ? dc2.querySelector(".x") : null;
+    }
     if (kind === "day") return demoCellRect(heat && heat.days[arg]);
     if (kind === "busiest") {
       // Ranked by what is VISIBLE right now, not by membership -- `n` is the sum of the
@@ -9548,6 +10886,66 @@ function mountVaultGraph(root, data, deps) {
       // `expect` lets the driver confirm afterwards that the hover landed where it aimed.
       // The title is logged because it is on camera anyway -- and the storyboard aims only
       // at date-titled folders, which is what makes that safe.
+      expect: best.id,
+      gap: Math.round(Math.sqrt(bestGap) * 10) / 10,
+      demoLabel: "note " + best.label
+    };
+  }
+
+  /**
+   * The biggest note on the INNER ring, for a beat that drags a note somewhere rather
+   * than hovering it in place.
+   *
+   * demoNoteRect optimises for the opposite property -- the MOST ISOLATED note in a
+   * folder, because a hover's whole job is to be an unambiguous, unmistakeable label.
+   * A drag target wants something else: it has to survive a PRESS, a hundred-plus
+   * pixels of glide, and a release all landing correctly, under whatever load the rest
+   * of the machine is carrying (ffmpeg's capture and the --cursor helper both compete
+   * with the renderer for the same CPU during a real recording) -- and a small dot is a
+   * small hit-test box the whole way. Biggest is also nearest: the inner ring is where
+   * the best-connected notes already sit by construction, so this is also the shortest
+   * drag to the hub at its centre.
+   *
+   * INNER, not "biggest anywhere" -- outer-ring notes can be just as big on a
+   * dominant-folder vault, and a long drag across the seam between bands has more
+   * distance for the render backlog in bindNodeDrag's own mousemovebody handler to fall
+   * behind on. geomLock.bandR is graph-normalised the same way inHubHole reads it (see
+   * there): divide the raw hypot by UNIT before comparing.
+   */
+  function demoBigInnerNote() {
+    if (!renderer || !geomLock || !geomLock.bandR) return null;
+    var org = $("graph").getBoundingClientRect();
+    var lo = geomLock.bandR.i[0], hi = geomLock.bandR.i[1];
+    var pts = [];
+    graph.forEachNode(function (id, a) {
+      if ((alpha[id] || 0) < 0.5) return;                 // not on screen right now
+      var rNorm = Math.hypot(a.x, a.y) / UNIT;
+      if (rNorm < lo || rNorm > hi) return;                // outer ring, or off the lattice
+      var v = renderer.graphToViewport({ x: a.x, y: a.y });
+      v = { x: v.x + org.left, y: v.y + org.top };
+      var rad = renderer.scaleSize ? renderer.scaleSize(dotPx(a.size, id)) : dotPx(a.size, id);
+      pts.push({ id: id, x: v.x, y: v.y, r: rad, size: a.size || 0, label: a.label });
+    });
+    if (!pts.length) return null;
+    // BIGGEST FIRST, THEN MOST ISOLATED among a handful of the biggest -- ranking on size
+    // alone can still hand back one of two big dots sitting side by side, which is the
+    // same silent-miss risk demoNoteRect's own comment describes for hover.
+    pts.sort(function (a, b) { return b.size - a.size; });
+    var top = pts.slice(0, Math.min(5, pts.length));
+    var best = null, bestGap = -1;
+    top.forEach(function (p) {
+      var gap = Infinity;
+      for (var j = 0; j < pts.length; j++) {
+        if (pts[j].id === p.id) continue;
+        var dx = p.x - pts[j].x, dy = p.y - pts[j].y;
+        var d2 = dx * dx + dy * dy;
+        if (d2 < gap) gap = d2;
+      }
+      if (gap > bestGap) { bestGap = gap; best = p; }
+    });
+    var box = Math.max(6, best.r * 1.5);
+    return {
+      left: best.x - box / 2, top: best.y - box / 2, width: box, height: box,
       expect: best.id,
       gap: Math.round(Math.sqrt(bestGap) * 10) / 10,
       demoLabel: "note " + best.label
@@ -9664,19 +11062,42 @@ function mountVaultGraph(root, data, deps) {
    * the disc with its links lit -- have to be in those seconds. The colour picker, which is
    * a preference panel, was landing before the timeline, which is the point of the tool.
    *
-   * The acts now run: the vault growing, one note, the timeline, the heatmap, folders,
-   * subfolders, the camera, colours. Roughly descending in "would this make someone stop
-   * scrolling", with two exceptions that are structural rather than editorial:
+   * The acts now run: the vault growing, one note, pinning a note, the timeline, the
+   * heatmap, folders, subfolders, subfolder colours, the camera, colours. Roughly
+   * descending in "would this make someone stop scrolling", with two exceptions that
+   * are structural rather than editorial:
    *
    *   * FOLDERS BEFORE SUBFOLDERS, because the subfolder rows do not exist until a twisty
    *     has been clicked, and `only` must run while 03 is folded -- soloing while it is
    *     open deletes its rows and pulls everything below them up by 97px, so the pointer
    *     ends up over a row three below the one it clicked. That cost a take.
-   *   * COLOURS LAST, because the gear panel has to be open for the `swatch` targets to
-   *     resolve at all, and the trip to the gear should be one trip.
+   *   * COLOURS LAST, because colour is a preference and every earlier act should land
+   *     on the disc's own palette, not one an earlier take happened to leave behind.
+   *
+   * COLOURS IS EXCLUDED FROM THE FULL RUN -- see FULL_RUN_EXCLUDES, just below this
+   * function. It still exists here and still plays on its own via `demoAct("colours")`,
+   * for docs/features/colours.md's own clip: right-clicking a top-level folder's row for
+   * its colour picker. But subfoldercolor already puts that same right-click menu on
+   * camera, one level down, and running the identical gesture twice in the same take
+   * added length without showing the reader anything new.
+   *
+   * PIN IS EARLY ON PURPOSE, not tucked in near the end where it used to sit. It is the
+   * one act that puts a note somewhere other than its lattice seat, and it earns being
+   * seen before the reader has settled into "this is a filter-and-browse tool". The
+   * cost is real and accepted: it leaves up to three notes sitting in the hub for
+   * every act after it, so a re-record of the full storyboard shows a filled hub in
+   * the timeline, heatmap, folders, subfolders and camera acts too. That is not a bug
+   * to route around -- the hub is not a special case to cut away from, it is what the
+   * disc looks like once you have used it.
    *
    * Beats are DATA, so reordering is reordering -- the driver holds no state between them.
    * What it is NOT free of is the ordering constraints above and the ones each act names.
+   *
+   * Every beat below also carries an `act:` tag naming which of these ten it belongs to
+   * -- `demoAct(name)`, just after this function, plays one act on its own instead of the
+   * whole thing, for the per-feature clips in docs/features.md. `demoFullStoryboard()`,
+   * also just below, is the same ten with `colours` filtered back out again for the full
+   * run.
    */
   function demoMode() {
     return [
@@ -9689,9 +11110,9 @@ function mountVaultGraph(root, data, deps) {
       // ribbon to the other, with the date under the handle, so this one beat says both
       // "here is the vault" and "here is the control that scrubs it". Which is why the act
       // that picks that handle up by hand comes next but one.
-      { settle: true, why: "start from a disc at rest" },
-      { click: true, target: ["id", "refresh"], why: "replay the intro on camera" },
-      { settle: true, why: "the vault grows from its first note to now, and the range end sweeps with it" },
+      { settle: true, act: "intro", why: "start from a disc at rest" },
+      { click: true, target: ["id", "refresh"], act: "intro", why: "replay the intro on camera" },
+      { settle: true, act: "intro", why: "the vault grows from its first note to now, and the range end sweeps with it" },
 
       /* --- 2. one note -------------------------------------------------- */
       // Hovering a note names it, lifts it, and lights its links while the rest of the
@@ -9705,10 +11126,51 @@ function mountVaultGraph(root, data, deps) {
       // BEFORE ANY FILTER RUNS, which is why this act moved up past the legend as well as
       // past the ribbon: demoNoteRect picks the most ISOLATED visible note, and the more
       // the disc has been thinned the further that aim drifts from a typical note.
-      { hover: true, target: ["note", "04"], why: "hover a daily note" },
-      { hover: true, target: ["note", "05"], why: "hover a meeting note" },
+      { hover: true, target: ["note", "04"], act: "note", why: "hover a daily note" },
+      { hover: true, target: ["note", "05"], act: "note", why: "hover a meeting note" },
 
-      /* --- 3. the timeline ---------------------------------------------- */
+      /* --- 3. pinning a note ---------------------------------------------- */
+      // EARLY, not tucked away near the end -- it is the one thing on this page that
+      // puts a note somewhere OTHER than its lattice seat, and it is worth seeing before
+      // the timeline/heatmap/folder acts that follow, which then run against a disc with
+      // a filled hub for the rest of the recording. That is a real change to what those
+      // later acts show on a re-record, and it is the point: the hub is not a special
+      // case to cut away from, it is what the disc looks like once you have used it.
+      //
+      // Three DIFFERENT notes, one per gesture -- pinning is a TOGGLE (see togglePin), so
+      // running two gestures against the same note would have the second one release what
+      // the first just placed, and the act would end with fewer pins than it showed
+      // landing. biginner rather than a folder prefix for the drag -- see
+      // demoBigInnerNote: a drag has to survive a press, a glide and a release landing
+      // correctly under real load, and a big dot on the inner ring is both the easiest
+      // hit-test and the shortest trip to the hub.
+      { drag: true, target: ["biginner"], act: "pin", to: ["stage", "centre"],
+        why: "drag a note into the hole to pin it" },
+      { settle: true, act: "pin", why: "the hub opens and the ring closes around where it was" },
+      { rightclick: true, target: ["note", "05"], act: "pin", why: "right-click a note -- pins the same way" },
+      { settle: true, act: "pin", why: "let the second pin land" },
+      { click: true, target: ["note", "03"], act: "pin", why: "click a note to open its card" },
+      { click: true, target: ["pin"], act: "pin", why: "...and pin it from the card itself" },
+      { settle: true, act: "pin", why: "let the third pin land" },
+      // Closed rather than left open: every other act starts from "nothing selected",
+      // and this is the one act that opens a card with nothing later in its own beats
+      // to close it again.
+      { click: true, target: ["detailclose"], act: "pin", why: "close the card" },
+
+      /* --- 4. the compact axis -------------------------------------------- */
+      // The strip's own reflow, its own act now rather than folded into the timeline one:
+      // the demo vault carries a genuinely sparse tail behind its two dense years on
+      // purpose (github#23), so off-then-on has something real to show -- years snapping
+      // back to plain calendar width, then regathering around where the notes actually
+      // are. Split out because the feature earns its own gallery entry (docs/features/
+      // compactaxis.md), the same way pin and subfoldercolor did rather than being a
+      // paragraph inside an existing page.
+      { click: true, target: ["id", "compact"], act: "compactaxis", why: "turn off the compact axis -- back to one width per month" },
+      { settle: true, act: "compactaxis", why: "let the strip spread back out to plain calendar time" },
+      { click: true, target: ["id", "compact"], act: "compactaxis", why: "...and back on, weighted by note count again" },
+      { settle: true, act: "compactaxis", why: "let it compact again" },
+
+      /* --- 5. the timeline ---------------------------------------------- */
       // The strip under the band carries every month of the vault, and it is the timeline:
       // two handles that are the filter, a pill below them for the 52 weeks the grid above
       // is drawing, and a chip per year. Moved up from LAST -- the sidebar's rank slider is
@@ -9719,38 +11181,41 @@ function mountVaultGraph(root, data, deps) {
       // showed it travelling, this shows a hand doing it. The disc waits for the release on
       // each of these, by design -- a drag repaints one small canvas and the filter lands
       // once, when the button comes up.
-      { drag: [-320, 0], target: ["brush", "to"], why: "pull the range end back by hand -- the handle the intro just swept" },
-      { settle: true, why: "let the disc thin out" },
-      { drag: [200, 0], target: ["brush", "from"], why: "...and bring the range start forward" },
-      { settle: true, why: "let it thin further" },
+      { drag: [-320, 0], target: ["brush", "to"], act: "timeline", why: "pull the range end back by hand -- the handle the intro just swept" },
+      { settle: true, act: "timeline", why: "let the disc thin out" },
+      { drag: [200, 0], target: ["brush", "from"], act: "timeline", why: "...and bring the range start forward" },
+      { settle: true, act: "timeline", why: "let it thin further" },
+
+      // The band's window, moved on its own. The range above stays exactly where it was --
+      // which is most of what this act is for: they are two instruments, not one. Before the
+      // year chips on purpose: a year click sets the range to that year and can drag the
+      // window along with it, and this act is clearer split into "the window, on its own"
+      // then "the year chip, which touches both" rather than the other way round.
+      { drag: [-260, 0], target: ["brush", "window"], act: "timeline", why: "slide the heatmap window back on its own" },
+      { settle: true, act: "timeline", why: "let the band redraw" },
+      { drag: [170, 0], target: ["brush", "window"], act: "timeline", why: "...and forward again" },
+      { settle: true, act: "timeline", why: "let the band redraw" },
 
       // THE YEAR CHIPS, which have never been in the demo. Hover haloes that year's notes
       // wherever they landed; clicking sets the range to that calendar year, and the chip
       // reads pressed. "busiest" picks the fullest year that has a chip, so the hover
       // always lights something -- see demoFind.
-      { hover: true, target: ["year", "busiest"], why: "hover a year to find it on the disc" },
-      { click: true, target: ["year", "busiest"], why: "...and click it to filter to that year" },
-      { settle: true, why: "let the year land" },
-
-      // The band's window, moved on its own. The range above stays exactly where it was --
-      // which is most of what this act is for: they are two instruments, not one.
-      { drag: [-260, 0], target: ["brush", "window"], why: "slide the heatmap window back on its own" },
-      { settle: true, why: "let the band redraw" },
-      { drag: [170, 0], target: ["brush", "window"], why: "...and forward again" },
-      { settle: true, why: "let the band redraw" },
+      { hover: true, target: ["year", "busiest"], act: "timeline", why: "hover a year to find it on the disc" },
+      { click: true, target: ["year", "busiest"], act: "timeline", why: "...and click it to filter to that year" },
+      { settle: true, act: "timeline", why: "let the year land" },
 
       // Clear it, so everything after this runs on the whole vault. Also puts the window
       // back, which is what makes the `busiest` targets in the next act land on cells that
       // are actually on screen.
-      { click: true, target: ["id", "rangeall"], why: "clear the date range" },
-      { settle: true, why: "let the whole vault come back" },
+      { click: true, target: ["id", "rangeall"], act: "timeline", why: "clear the date range" },
+      { settle: true, act: "timeline", why: "let the whole vault come back" },
 
-      /* --- 4. the heatmap ----------------------------------------------- */
+      /* --- 6. the heatmap ----------------------------------------------- */
       // Hovering a day haloes the notes added that day, wherever they landed on the disc.
       // Ranked by what is VISIBLE rather than by date, so this works on any vault.
-      { hover: true, target: ["busiest", "1"], why: "hover the busiest day" },
-      { hover: true, target: ["busiest", "2"], why: "...and the next" },
-      { hover: true, target: ["busiest", "3"], why: "...and the next" },
+      { hover: true, target: ["busiest", "1"], act: "heatmap", why: "hover the busiest day" },
+      { hover: true, target: ["busiest", "2"], act: "heatmap", why: "...and the next" },
+      { hover: true, target: ["busiest", "3"], act: "heatmap", why: "...and the next" },
 
       // AND CLICKING KEEPS IT. This is what replaced the sidebar's "Mark today" in 1.7.0:
       // a picked day's notes are recoloured to the neutral extreme as well as haloed, and
@@ -9760,98 +11225,188 @@ function mountVaultGraph(root, data, deps) {
       // The busiest day rather than today, because today is allowed to hold no notes and a
       // beat that marks nothing reads as a mis-click. Clicked twice, so nothing is left
       // marked for the acts below.
-      { click: true, target: ["busiest", "1"], why: "click a day to keep it marked -- recoloured, haloed, nothing moved" },
-      { settle: true, why: "let the mark ramp in" },
-      { click: true, target: ["busiest", "1"], why: "...and click again to let it go" },
-      { settle: true, why: "let it ramp back" },
+      { click: true, target: ["busiest", "1"], act: "heatmap", why: "click a day to keep it marked -- recoloured, haloed, nothing moved" },
+      { settle: true, act: "heatmap", why: "let the mark ramp in" },
+      { click: true, target: ["busiest", "1"], act: "heatmap", why: "...and click again to let it go" },
+      { settle: true, act: "heatmap", why: "let it ramp back" },
 
-      /* --- 5. folders --------------------------------------------------- */
+      /* --- 7. folders --------------------------------------------------- */
       // Hiding: the wedges reallocate and the disc stays a full circle.
-      { click: true, target: ["eye", "04"], why: "hide a folder -- the wedges reallocate" },
-      { settle: true, why: "let the wedges reallocate" },
+      { click: true, target: ["eye", "06"], act: "folders", why: "hide a folder -- the wedges reallocate" },
+      { settle: true, act: "folders", why: "let the wedges reallocate" },
 
       // And `only`, which is the fastest way to answer "where does one folder live".
       // SAFE HERE because nothing has been unfolded yet: see the note at the top about the
       // 97px row shift that soloing an unfolded legend causes.
-      { click: true, target: ["only", "08"], why: "solo a single folder" },
-      { settle: true, why: "let everything else recede" },
+      { click: true, target: ["only", "08"], act: "folders", why: "solo a single folder" },
+      { settle: true, act: "folders", why: "let everything else recede" },
 
-      { click: true, target: ["id", "allon"], why: "show everything again" },
-      { settle: true, why: "let the whole disc come back" },
+      { click: true, target: ["id", "allon"], act: "folders", why: "show everything again" },
+      { settle: true, act: "folders", why: "let the whole disc come back" },
 
-      /* --- 6. subfolders ------------------------------------------------ */
+      /* --- 8. subfolders ------------------------------------------------ */
       // The tree starts folded, so getting to a subfolder means opening its folder first.
       // That is the honest sequence and it is worth showing: the disc already draws 03's
       // sub-wedges, and this is where the legend admits they are there. It is also
       // load-bearing -- the row the next beats aim at does not exist until this has run.
-      { click: true, target: ["twisty", "03"], why: "unfold a folder to reach its subfolders" },
+      //
+      // SELF-CONTAINED for isolated recording: unlike the full storyboard's ordering rule
+      // above (folders before subfolders, because soloing while 03 is unfolded shifts
+      // rows), this act never solos anything itself -- it only unfolds, hovers, clicks and
+      // folds back. Recorded alone it needs nothing an earlier act left behind.
+      { click: true, target: ["twisty", "03"], act: "subfolders", why: "unfold a folder to reach its subfolders" },
 
       // HOVER FIRST, and at both levels. It is the cheaper question and the one you would
       // try first: a halo, with nothing hidden and no wedge moved.
-      { hover: true, target: ["group", "01"], why: "hover a folder to find it on the disc" },
-      { hover: true, target: ["sub", "03/People"], why: "...and one subfolder inside it" },
+      { hover: true, target: ["group", "01"], act: "subfolders", why: "hover a folder to find it on the disc" },
+      { hover: true, target: ["sub", "03/People"], act: "subfolders", why: "...and one subfolder inside it" },
 
       // Then the click, which is the same question answered permanently: highlighting is
       // a SEPARATE axis from visibility -- the whole point of the eye being its own
       // control -- and on a subfolder that owns a sub-wedge it moves as a block rather
       // than only being ringed. Hover haloes; a click also pushes. Shown back to back so
       // the difference is visible rather than asserted.
-      { click: true, target: ["sub", "03/People"], why: "click it instead: haloed AND pushed out" },
-      { settle: true, why: "let the sub-wedge push out" },
-      { click: true, target: ["sub", "03/People"], why: "...and let it back down" },
-      { settle: true, why: "let it settle back" },
+      { click: true, target: ["sub", "03/People"], act: "subfolders", why: "click it instead: haloed AND pushed out" },
+      { settle: true, act: "subfolders", why: "let the sub-wedge push out" },
+      { click: true, target: ["sub", "03/People"], act: "subfolders", why: "...and let it back down" },
+      { settle: true, act: "subfolders", why: "let it settle back" },
 
-      { click: true, target: ["twisty", "03"], why: "fold the subfolders away again" },
+      { click: true, target: ["twisty", "03"], act: "subfolders", why: "fold the subfolders away again" },
 
-      /* --- 7. the camera ------------------------------------------------ */
+      /* --- 9. subfolder colours ------------------------------------------ */
+      // The same right-click menu the top-level colours act uses (see there), on a
+      // SUBFOLDER row instead of a folder's own -- which does not exist until its
+      // twisty is open, the same precondition the subfolders act above needs.
+      // SELF-CONTAINED for isolated recording, for the same reason "subfolders" is.
+      { click: true, target: ["twisty", "03"], act: "subfoldercolor", why: "unfold a folder to reach its subfolders" },
+      { settle: true, act: "subfoldercolor", why: "let the subfolder rows land" },
+      { rightclick: true, target: ["sub", "03/People"], act: "subfoldercolor",
+        why: "right-click a subfolder for its own colour menu" },
+      { settle: true, act: "subfoldercolor", why: "let the menu open" },
+      { click: true, target: ["ctxswatch", "g5"], act: "subfoldercolor", why: "give it a colour of its own" },
+      { settle: true, act: "subfoldercolor", why: "the disc repaints" },
+      { rightclick: true, target: ["sub", "03/People"], act: "subfoldercolor", why: "right-click it again" },
+      { settle: true, act: "subfoldercolor", why: "let the menu open" },
+      { click: true, target: ["ctxswatch", ""], act: "subfoldercolor", why: "...and put it back to automatic" },
+      { settle: true, act: "subfoldercolor", why: "let the tint snap back" },
+      { click: true, target: ["twisty", "03"], act: "subfoldercolor", why: "fold the subfolders away again" },
+
+      /* --- 10. the camera ------------------------------------------------ */
       // Zoom in a few notches rather than one. One notch is a fifth now, which is the point
       // -- it is a scroll and not a teleport -- and a single notch on camera looks like
       // nothing happened.
-      { wheel: 4, target: ["stage", "0.42,0.40"], why: "zoom in, a fifth per notch" },
-      { settle: true, why: "let the last notch land" },
+      { wheel: 4, target: ["stage", "0.42,0.40"], act: "camera", why: "zoom in, a fifth per notch" },
+      { settle: true, act: "camera", why: "let the last notch land" },
 
       // Then pan, which is only possible now that the disc is not pinned to the middle. Held
       // button the whole way, or the page sees a click and a release with nothing between.
-      { drag: [190, 110], target: ["stage", "0.55,0.45"], why: "drag the disc around" },
-      { settle: true, why: "let the pan settle" },
+      { drag: [190, 110], target: ["stage", "0.55,0.45"], act: "camera", why: "drag the disc around" },
+      { settle: true, act: "camera", why: "let the pan settle" },
 
       // Two ways back, both shown, because the button is discoverable and the double-click is
       // faster once you know it.
-      { dblclick: true, target: ["stage", "centre"], why: "double-click anywhere to reset" },
-      { settle: true, why: "let the view come back" },
-      { wheel: 3, target: ["stage", "0.60,0.55"], why: "zoom in again, to have something to reset" },
-      { settle: true, why: "let it land" },
-      { click: true, target: ["id", "reset"], why: "...and the reset button in the corner" },
-      { settle: true, why: "let the view come back" },
+      { dblclick: true, target: ["stage", "centre"], act: "camera", why: "double-click anywhere to reset" },
+      { settle: true, act: "camera", why: "let the view come back" },
+      { wheel: 3, target: ["stage", "0.60,0.55"], act: "camera", why: "zoom in again, to have something to reset" },
+      { settle: true, act: "camera", why: "let it land" },
+      { click: true, target: ["id", "reset"], act: "camera", why: "...and the reset button in the corner" },
+      { settle: true, act: "camera", why: "let the view come back" },
 
-      /* --- 8. colours --------------------------------------------------- */
-      // LAST on purpose. It is a preference panel, and it was landing before the timeline.
-      // The gear has to come first regardless -- the panel's swatches do not exist in the
-      // DOM until buildSettings has run, so the `swatch` targets below resolve to nothing
-      // without this beat. Two folders are recoloured rather than one, because one swatch
-      // click looks like a highlight and two look like a choice; and the second is a grey,
-      // which is the answer to "can a folder recede on purpose" that the archives rule
-      // only implies.
-      { click: true, target: ["id", "gear"], why: "open the settings panel" },
-      { click: true, target: ["swatch", "01/g8"], why: "give a folder a colour of its own" },
-      { settle: true, why: "the disc repaints -- no relayout, nothing moves" },
-      { click: true, target: ["swatch", "03/g11"], why: "...and let another one go grey" },
-      { settle: true, why: "let the second repaint land" },
-      { click: true, target: ["id", "fcreset"], why: "put every folder back to automatic" },
-      { settle: true, why: "let the palette snap back" },
-      { click: true, target: ["id", "gear"], why: "close the panel" },
+      /* --- 11. colours -------------------------------------------------- */
+      // LAST regardless: colour is still a preference, and letting every earlier act
+      // land on an unmodified palette keeps a re-record of any of them from picking up
+      // a colour choice this one made.
+      //
+      // RIGHT-CLICK, not the gear -- the same twelve swatches, reached at the row
+      // itself instead of a settings panel one trip away. The gear panel still exists
+      // (see the settings-tab screenshot) but is not what this page leads with any
+      // more, on either host: it is slower for the same outcome. Two folders are
+      // recoloured rather than one, because one swatch click looks like a highlight
+      // and two look like a choice; and the second is a grey, which is the answer to
+      // "can a folder recede on purpose" that the archives rule only implies.
+      { rightclick: true, target: ["group", "01"], act: "colours", why: "right-click a folder for its own colour menu" },
+      { settle: true, act: "colours", why: "let the menu open" },
+      { click: true, target: ["ctxswatch", "g8"], act: "colours", why: "give it a colour of its own" },
+      { settle: true, act: "colours", why: "the disc repaints -- no relayout, nothing moves" },
+      { rightclick: true, target: ["group", "03"], act: "colours", why: "right-click another folder" },
+      { settle: true, act: "colours", why: "let the menu open" },
+      { click: true, target: ["ctxswatch", "g11"], act: "colours", why: "...and let it go grey" },
+      { settle: true, act: "colours", why: "let the second repaint land" },
+      { rightclick: true, target: ["group", "01"], act: "colours", why: "right-click the first folder again" },
+      { settle: true, act: "colours", why: "let the menu open" },
+      { click: true, target: ["ctxswatch", ""], act: "colours", why: "put it back to automatic" },
+      { settle: true, act: "colours", why: "let it snap back" },
+      { rightclick: true, target: ["group", "03"], act: "colours", why: "...and the second" },
+      { settle: true, act: "colours", why: "let the menu open" },
+      { click: true, target: ["ctxswatch", ""], act: "colours", why: "put it back to automatic too" },
+      { settle: true, act: "colours", why: "let the palette snap back" },
 
       // Pointer out of the way, so the last frame is the disc rather than a hover state
       // left behind by the last click.
-      { park: true, why: "leave the final frame clean" }
+      { park: true, act: "colours", why: "leave the final frame clean" }
     ];
+  }
+
+  // ACTS THAT EXIST FOR THEIR OWN PER-FEATURE CLIP, but do not appear in the full run.
+  // Just "colours" for now: subfoldercolor already puts the same right-click colour menu
+  // on camera one level down, so replaying the identical gesture on a top-level folder
+  // too, right at the end of an 85-beat take, cost length without showing anything new.
+  var FULL_RUN_EXCLUDES = ["colours"];
+
+  // THE FULL STORYBOARD, with FULL_RUN_EXCLUDES filtered back out of demoMode()'s single
+  // list -- what the hero recording actually plays. demoMode()'s own trailing park beat
+  // is tagged "colours" and goes with the rest of that act, so whatever act ends up last
+  // here gets its own if it does not already have one, the same rule demoAct() applies
+  // for an isolated act missing one.
+  function demoFullStoryboard() {
+    var beats = demoMode().filter(function (b) { return FULL_RUN_EXCLUDES.indexOf(b.act) === -1; });
+    if (!beats[beats.length - 1].park) {
+      beats = beats.concat([{ park: true, act: beats[beats.length - 1].act, why: "leave the final frame clean" }]);
+    }
+    return beats;
+  }
+
+  // ONE ACT IN ISOLATION, for a per-feature clip instead of the whole storyboard. `name`
+  // is one of the ten `act:` tags above (`intro`, `note`, `pin`, `timeline`, `heatmap`,
+  // `folders`, `subfolders`, `subfoldercolor`, `camera`, `colours`) -- the same names
+  // the section comments in demoMode() already carry, so tagging a beat and naming it
+  // here is one decision, not two.
+  //
+  // Isolated acts don't need the full storyboard's ordering rules (folders-before-
+  // subfolders): under `?demo` the page comes up at rest with no filter applied and
+  // the gear closed (see the `?demo` branch near the end of this file), which is
+  // exactly the state every act other than "intro" already assumes as ITS starting
+  // point in the combined run too. A leading `settle` is enough; nothing needs a reset
+  // click first. `park` is appended rather than duplicated from the full
+  // storyboard's tail, so a recording of any single act ends on a clean frame the same
+  // way the full one does.
+  //
+  // Unknown name -> empty array with a loud warning, so a typo surfaces immediately in the
+  // recorder's log instead of quietly producing a beat-less, near-instant "recording".
+  function demoAct(name) {
+    var beats = demoMode().filter(function (b) { return b.act === name; });
+    if (!beats.length) {
+      console.warn("demo: no beats tagged act=\"" + name + "\" -- check the name against demoMode()");
+      return [];
+    }
+    if (name === "intro") return beats;   // already starts with its own settle beat
+    // "colours" already ends on its own {park} -- that beat WAS the full storyboard's
+    // final beat, just tagged into the act whose section comment it happened to sit under.
+    // Appending a second one is exactly the double-park a manual --act run caught: two
+    // "leave the final frame clean" beats in a row when this went untested.
+    var out = [{ settle: true, act: name, why: "start from a disc at rest" }].concat(beats);
+    if (!beats[beats.length - 1].park) {
+      out = out.concat([{ park: true, act: name, why: "leave the final frame clean" }]);
+    }
+    return out;
   }
 
   // Everything the driver needs, and nothing it does not.
   var demoApi = {
     on: demoOn,
     doneTitle: DEMO_DONE_TITLE,
-    storyboard: demoMode,
+    storyboard: demoFullStoryboard,
+    act: demoAct,
     busy: demoBusy,
     /**
      * WHICH of the five things busy() ors together is still running.
@@ -9866,6 +11421,10 @@ function mountVaultGraph(root, data, deps) {
                hover: !!hoverRaf, highlight: !!hlRaf };
     },
     where: demoWhere,
+    // The recorder's visible pointer -- see demoCursorAt for why it lives in the page
+    // rather than at the OS level.
+    cursorAt: demoCursorAt,
+    cursorHide: demoCursorHide,
     // What is hovered right now. The driver compares this against a target's `expect`
     // after a hover beat: aiming at a dot is only as good as the hit-test agreeing, and
     // a silent miss puts the wrong note's NAME on camera.
@@ -9880,16 +11439,318 @@ function mountVaultGraph(root, data, deps) {
     }
   };
 
+  /* ---- END: demo automation + debug API ---- */
+
   /* ------------------------------------------------------------------ go */
 
   WIN.setTimeout(function () {
     makeRenderer();
     // Debug handle: lets a test page inspect live layout state from outside.
-    API = window.__vg = { graph: graph, state: state,
+    API = window.__vg = { graph: graph,
                     // Re-read the palette from CSS. Called once at init, and again by a
                     // host whose theme changed: THEME is a snapshot, so without this a
                     // theme flip restyles the DOM and leaves every canvas colour behind.
                     readTheme: readTheme, get renderer() { return renderer; },
+                    // Logo internals: placeLogo has to be callable directly, because
+                    // refresh() only schedules a render and a tab that is not being
+                    // composited never runs one -- so testing the mark through the
+                    // renderer silently measures a stale DOM.
+                    placeLogo: placeLogo,
+                    // Folder colours, for the two settings UIs and for the suite. The
+                    // setter repaints rather than rebuilds -- colour is not an input to
+                    // the layout, and an override must not be able to move a node.
+                    palette: paletteInfo,
+                    groupOrder: function () { return (order[state.dim] || []).slice(); },
+                    groupCount: function (g) { return counts[g] || 0; },
+                    // The slot a group is ON, which is not derivable from its position any
+                    // more: archives are skipped in the rotation, and sit on no slot at
+                    // all. "" means exactly that.
+                    slotOf: function (g) { return groupSlot[g] || ""; },
+                    // The slot a group would be on with no override at all -- unlike
+                    // slotOf, never affected by folderColors. "" for the same reason.
+                    // Kept alongside slotOf (not with the rest of the debug API below,
+                    // which the plugin build strips) because plugin/main.js's own
+                    // settings tab calls it to mark the automatic swatch even once a
+                    // folder has been given an explicit colour.
+                    autoSlotOf: function (g) { return groupAutoSlot[g] || ""; },
+                    setFolderColors: applyFolderColors,
+                    setSubfolderColors: applySubfolderColors,
+                    setFolderShown: applyFolderShown,
+                    // The saved default, applied live. Mirrors setFolderShown: the host owns
+                    // the store and this owns the camera.
+                    setPanEnabled: function (v) { return setPan(v !== false, false); },
+                    // Same shape as setPanEnabled, for the plugin's View-settings toggle
+                    // (github#23). Kept alongside setPanEnabled (not with the rest of the
+                    // debug API below, which the plugin build strips) because plugin/main.js's
+                    // own settings tab calls it to live-update an already-open view -- it was
+                    // misplaced inside the stripped region for a while, which meant toggling
+                    // "Compact date axis" in the plugin saved correctly but silently never
+                    // updated a view already open, unlike every sibling toggle here.
+                    setCompactAxis: function (v) { return setCompactAxis(v !== false, false); },
+                    // Push the defaults into the live filter and repaint. This is the
+                    // "and now show it" half, kept separate so loading saved settings at
+                    // boot cannot be confused with a person clicking an eye.
+                    applyHiddenDefaults: function () {
+                      seedHidden();
+                      buildLegend();
+                      cascade(null, { colToggle: true });
+                    },
+                    // The band, for the same reason placeLogo is exposed: it paints
+                    // from afterRender, so a tab that is not being composited never
+                    // repaints it and testing through the renderer measures a stale
+                    // canvas.
+                    heatBuild: heatBuild,
+                    // PLAN PARITY. The cascade must animate between the static
+                    // planner's own outputs, or it walks between packings nothing else
+                    // renders -- which is every jump chased on 2026-08-22. This
+                    // compares, for the CURRENT visibility state, the plan the static
+                    // path builds against the one the cascade would end on. Per-cell
+                    // row counts and maxR must match exactly. Run it with a folder
+                    // hidden, not just at full vault, since the REPACK_BELOW flag is
+                    // what used to differ.
+                    checkPlanParity: function () {
+                      var shown = 0;
+                      graph.forEachNode(function (id) { if (visible(id)) shown++; });
+                      var ov = true;
+                      var stat = buildWedgePlan(ov, function (id) { return visible(id) ? 1 : 0; });
+                      var live = buildWedgePlan(ov, function (id) { return alpha[id] || 0; });
+                      var diffs = {};
+                      var rows = function (p) { var m = {}; p.cells.forEach(function (c) { m[c.k] = c.rows; }); return m; };
+                      var rs = rows(stat), rl = rows(live);
+                      Object.keys(rs).concat(Object.keys(rl)).forEach(function (k) {
+                        if (rs[k] !== rl[k]) diffs[k] = { staticPlan: rs[k], livePlan: rl[k] };
+                      });
+                      var out = {
+                        shown: shown, threshold: Math.round(graph.order * REPACK_BELOW), onlyVisible: ov,
+                        staticMaxR: Math.round(stat.maxR), liveMaxR: Math.round(live.maxR),
+                        maxRMatches: Math.round(stat.maxR) === Math.round(live.maxR),
+                        cellsStatic: stat.cells.length, cellsLive: live.cells.length,
+                        rowDiffs: diffs, parityOK: Object.keys(diffs).length === 0 &&
+                          Math.round(stat.maxR) === Math.round(live.maxR)
+                      };
+                      return out;   // the caller is a console; it prints this itself
+                    },
+                    // Focus-web check (issue #2): select the best-connected note, composite
+                    // the canvases in stacking order, sample the lit curves where they pass
+                    // inside a NON-focus disc -- dimAtGaps must be 0. A sample the hovers
+                    // canvas painted opaque and not blue is under the focus note's own label
+                    // pill (or a lit neighbour's disc over a dim one), which sit above the web
+                    // on purpose; those count apart as underLabel. The web is thin and sampled
+                    // at one device pixel, so a miss looks one pixel around before it counts.
+                    checkFocusWeb: function () {
+                      var best = null, bd = -1;
+                      // Skip anything the current filter/opacity has hidden, or picking the
+                      // graph's highest-degree note regardless of what's actually on screen
+                      // can land on one with zero visible edges -- geomGaps stays 0 and the
+                      // check reports "nothing to measure" without having exercised the fix.
+                      graph.forEachNode(function (id) {
+                        var d = renderer.getNodeDisplayData(id);
+                        if (!d || d.hidden) return;
+                        if (graph.degree(id) > bd) { bd = graph.degree(id); best = id; }
+                      });
+                      var keepSel = state.selected, keepHov = state.hovered;
+                      state.selected = best; state.hovered = null;
+                      renderer.refresh({ skipIndexation: true }); renderer.render();
+                      var cv = renderer.getCanvases();
+                      var order = ["edges", "nodes", "edgeLabels", "labels", "hovers", "hoverNodes"];
+                      var W = cv.nodes.width, H = cv.nodes.height, dpr = W / renderer.getDimensions().width;
+                      var off = DOC.createElement("canvas"); off.width = W; off.height = H;
+                      var ctx = off.getContext("2d");
+                      ctx.fillStyle = css("--surface-1"); ctx.fillRect(0, 0, W, H);
+                      order.forEach(function (k) { if (cv[k]) ctx.drawImage(cv[k], 0, 0); });
+                      var img = ctx.getImageData(0, 0, W, H).data;
+                      var hov = DOC.createElement("canvas"); hov.width = W; hov.height = H;
+                      var hctx = hov.getContext("2d"); hctx.drawImage(cv.hovers, 0, 0);
+                      var himg = hctx.getImageData(0, 0, W, H).data;
+                      var at = function (data, x, y) {
+                        var X = Math.round(x * dpr), Y = Math.round(y * dpr);
+                        if (X < 0 || Y < 0 || X >= W || Y >= H) return null;
+                        var i = (Y * W + X) * 4;
+                        return [data[i], data[i + 1], data[i + 2], data[i + 3]];
+                      };
+                      var hi = toRgb(THEME.edgeHi), dm = toRgb(THEME.dim);
+                      var dist = function (c, t) { return c ? Math.abs(c[0] - t[0]) + Math.abs(c[1] - t[1]) + Math.abs(c[2] - t[2]) : 1e9; };
+                      var set = focusSet() || {}, dims = [];
+                      graph.forEachNode(function (id) {
+                        if (set[id]) return;
+                        var d = renderer.getNodeDisplayData(id);
+                        if (!d || d.hidden) return;
+                        var p = renderer.graphToViewport(graph.getNodeAttributes(id));
+                        dims.push({ x: p.x, y: p.y, rad: renderer.scaleSize(d.size) });
+                      });
+                      var res = { node: best, degree: bd, edges: 0, samples: 0, geomGaps: 0,
+                                  blueAtGaps: 0, dimAtGaps: 0, underLabel: 0, otherAtGaps: 0 };
+                      var seen = Object.create(null);
+                      Object.keys(set).forEach(function (n) {
+                        graph.forEachEdge(n, function (e, attrs, s, t) {
+                          if (seen[e] || !set[s] || !set[t]) return;
+                          seen[e] = true;
+                          var geo = edgeCurveGeom(e, s, t);
+                          if (!geo) return;
+                          res.edges++;
+                          var ps = geo.ps, pt = geo.pt, cp = geo.cp;
+                          for (var u = 0.05; u <= 0.95; u += 0.01) {
+                            var x = (1 - u) * (1 - u) * ps.x + 2 * (1 - u) * u * cp.x + u * u * pt.x;
+                            var y = (1 - u) * (1 - u) * ps.y + 2 * (1 - u) * u * cp.y + u * u * pt.y;
+                            res.samples++;
+                            var covered = dims.some(function (d) {
+                              var ddx = d.x - x, ddy = d.y - y;
+                              return ddx * ddx + ddy * ddy <= (d.rad - 0.5) * (d.rad - 0.5);
+                            });
+                            if (!covered) continue;
+                            res.geomGaps++;
+                            var c = at(img, x, y), blue = dist(c, hi) < 60;
+                            for (var ox = -1; ox <= 1 && !blue; ox++) {
+                              for (var oy = -1; oy <= 1 && !blue; oy++) {
+                                if (ox || oy) blue = dist(at(img, x + ox / dpr, y + oy / dpr), hi) < 60;
+                              }
+                            }
+                            var h = at(himg, x, y);
+                            if (blue) res.blueAtGaps++;
+                            else if (h && h[3] >= 250) res.underLabel++;
+                            else if (dist(c, dm) < 60) res.dimAtGaps++;
+                            else res.otherAtGaps++;
+                          }
+                        });
+                      });
+                      state.selected = keepSel; state.hovered = keepHov; renderer.refresh();
+                      res.webOK = res.dimAtGaps === 0;
+                      return res;
+                    },
+                    // EVERYTHING NEEDED TO REPRODUCE WHAT IS ON SCREEN, as one object -- behind
+                    // the "Debug" button in both hosts. Kept alongside setPanEnabled/
+                    // setCompactAxis (not with the rest of the debug API below, which the
+                    // plugin build strips) because that button lives in the ordinary UI, not
+                    // behind a dev-only toggle -- it was misplaced inside the stripped region
+                    // for a while, which meant clicking "Debug" in the Obsidian plugin threw
+                    // (API.debugDump is not a function) before ever reaching the clipboard-
+                    // write/file-save fallback, so the button did nothing at all.
+                    debugDump: function () {
+                      var a0 = renderer ? renderer.graphToViewport({ x: 0, y: 0 }) : null;
+                      var b0 = renderer ? renderer.graphToViewport({ x: UNIT, y: 0 }) : null;
+                      var pxPerRow = a0 && b0 ? Math.hypot(b0.x - a0.x, b0.y - a0.y) : 0;
+                      var perPx = pxPerRow > 0 ? UNIT / pxPerRow : 0;
+                      // Radii and drawn sizes of everything on screen, split into bands on the
+                      // largest radial gap -- the same split every probe in this session used.
+                      var pts = [];
+                      graph.forEachNode(function (id, a) {
+                        if ((alpha[id] || 0) <= 0.004) return;
+                        var d = renderer && renderer.getNodeDisplayData(id);
+                        // THROUGH scaleSize. getNodeDisplayData().size is what the reducer
+                        // RETURNED, not what gets drawn -- sigma scales it again on the way to
+                        // the canvas. Read raw, every radius in this dump was short by that
+                        // factor, so it reported clearances that were not there and
+                        // overlappingPairs: 0 on states that had sixteen. The same trap this
+                        // file's dot measurements hit twice before.
+                        pts.push({ r: Math.hypot(a.x, a.y), th: Math.atan2(a.y, a.x),
+                                   rad: (d && renderer ? renderer.scaleSize(d.size)
+                                                       : 4) * perPx, g: a.folder });
+                      });
+                      pts.sort(function (x, y) { return x.r - y.r; });
+                      var gi = 0, gap = 0;
+                      for (var i = 1; i < pts.length; i++) {
+                        var gg = pts[i].r - pts[i - 1].r;
+                        if (gg > gap) { gap = gg; gi = i; }
+                      }
+                      var r3 = function (v) { return Math.round(v * 1000) / 1000; };
+                      var bandStat = function (arr) {
+                        if (!arr.length) return null;
+                        var rows = {}, steps = [], clears = [], worst = 1e9;
+                        arr.forEach(function (q) {
+                          var k = Math.round(q.r / 8) * 8;
+                          (rows[k] || (rows[k] = [])).push(q);
+                        });
+                        Object.keys(rows).forEach(function (k) {
+                          var row = rows[k].slice().sort(function (x, y) { return x.th - y.th; });
+                          for (var i = 1; i < row.length; i++) {
+                            var arc = (row[i].th - row[i - 1].th) * (+k);
+                            if (!(arc > 1 && arc < 3000)) continue;
+                            steps.push(arc);
+                            var cl = arc - row[i].rad - row[i - 1].rad;
+                            clears.push(cl);
+                            if (cl < worst) worst = cl;
+                          }
+                        });
+                        steps.sort(function (x, y) { return x - y; });
+                        var q = function (f) {
+                          return steps.length ? Math.round(steps[Math.floor(steps.length * f)]) : 0;
+                        };
+                        var radii = arr.map(function (x) { return x.rad; }).sort(function (x, y) { return x - y; });
+                        return {
+                          notes: arr.length, rows: Object.keys(rows).length,
+                          inner: Math.round(arr[0].r), outer: Math.round(arr[arr.length - 1].r),
+                          step35: q(0.35), step95: q(0.95),
+                          channelRatio: q(0.35) ? r3(q(0.95) / q(0.35)) : 0,
+                          dotRadius: { min: Math.round(radii[0]),
+                                       med: Math.round(radii[Math.floor(radii.length / 2)]),
+                                       max: Math.round(radii[radii.length - 1]) },
+                          worstPairClearance: worst === 1e9 ? null : Math.round(worst),
+                          overlappingPairs: clears.filter(function (c) { return c < 0; }).length,
+                        };
+                      };
+                      var cam = renderer ? renderer.getCamera().getState() : null;
+                      var hidden = Object.keys(state.hidden[state.dim] || {}).filter(function (k) {
+                        return (state.hidden[state.dim] || {})[k];
+                      });
+                      return {
+                        note: "vault-graph debug dump -- paste this back verbatim",
+                        vault: { name: DATA.vault || "", notes: graph.order,
+                                 // EDGE_TOTAL, not graph.size: in a budgeted vault the graph
+                                 // holds only the resting share, and a dump that said
+                                 // "links: 8027" about a 37k-link vault would send whoever
+                                 // reads it in the wrong direction. linksShown is the budget.
+                                 links: EDGE_TOTAL, linksShown: EDGE_SHOWN, lazyEdges: lazyEdges,
+                                 generated: DATA.generated || "" },
+                        screen: { win: WIN.innerWidth + "x" + WIN.innerHeight,
+                                  dpr: WIN.devicePixelRatio || 1,
+                                  stage: $("canvas") ? Math.round($("canvas").clientWidth) + "x" +
+                                         Math.round($("canvas").clientHeight) : "",
+                                  pxPerRow: r3(pxPerRow) },
+                        camera: cam ? { x: r3(cam.x), y: r3(cam.y), ratio: r3(cam.ratio) } : null,
+                        filters: { hiddenFolders: hidden,
+                                   hiddenSub: Object.keys(state.hiddenSub || {}),
+                                   range: rangeLabel(),
+                                   from: state.from, to: state.to, heatEnd: state.heatEnd,
+                                   timelineUntil: state.until,
+                                   markDay: state.markDay, shown: pts.length },
+                        // The room each band reports and the arc floor in force -- both feed
+                        // POSITIONS now, so a jump investigation needs to see them per frame.
+                        room: { i: r3(bandOf("i").room), o: r3(bandOf("o").room) },
+                        minArcDeg: r3(lastMinArc * 180 / Math.PI),
+                        spacing: { spOuter: r3(bandOf("o").sp),
+                                   spInner: r3(bandOf("i").sp),
+                                   rowsOuter: bandOf("o").rows,
+                                   rowsInner: bandOf("i").rows,
+                                   pitchOuterUnits: r3(pitchUnits("o")),
+                                   pitchInnerUnits: r3(pitchUnits("i")) },
+                        seam: { outerDeg: bandOf("o").gapDeg, innerDeg: bandOf("i").gapDeg,
+                                nGOuter: bandOf("o").nG, nGInner: bandOf("i").nG,
+                                nSubOuter: bandOf("o").nSub, nSubInner: bandOf("i").nSub,
+                                fallOuter: r3(seamFall("o")), fallInner: r3(seamFall("i")) },
+                        locked: geomLock ? { r0: r3(geomLock.r0), rOuter: r3(geomLock.rOuter),
+                                             maxR: r3(geomLock.maxR), rows: geomLock.rows,
+                                             bandTotal: geomLock.bandTotal } : null,
+                        bands: { inner: bandStat(pts.slice(0, gi)), outer: bandStat(pts.slice(gi)) },
+                        dots: { ofPitch: r3(DOT_OF_PITCH), minPx: DOT_MIN_PX,
+                                maxSpread: DOT_MAX_SPREAD, m: r3(bandOf("o").ramp.m),
+                                b: r3(bandOf("o").ramp.b), lo: r3(bandOf("o").ramp.lo) },
+                      };
+                    },
+    };
+    /* ---- BEGIN: demo automation + debug API -- stripped from the plugin build, see scripts/build-plugin.mjs (stripDemoAndDebug) ---- */
+    // Object.assign COPIES A VALUE from each of this literal's own `get`/`set` pairs at
+    // the moment it runs -- it does not install the accessor itself, so a plain
+    // Object.assign(window.__vg, {...}) would freeze every getter/setter below (heat,
+    // folderColors, subfolderColors, panEnabled, heatCell, ...) at whatever they
+    // happened to return during this one boot-time call, forever after. Caught by
+    // smoke.mjs: __vg.heat stayed the pre-heatBuild() null through the whole run, so
+    // the page never looked "ready" no matter how long the suite waited.
+    // Object.getOwnPropertyDescriptors + Object.defineProperties copies the ACCESSOR
+    // itself, so each one keeps reading live off this closure the way it does for the
+    // handful of getters in the host API above, which were never in this object and
+    // never had the bug.
+    var debugAPI = {
+                    state: state,
                     ringsLayout: ringsLayout, visible: visible, groupOf: groupOf,
                     alpha: alpha, cascade: cascade, syncAlpha: syncAlpha,
                     // The lazy-edge seam, exposed for the probes: a test that wants to know
@@ -9933,52 +11794,46 @@ function mountVaultGraph(root, data, deps) {
                     // making a working animation look like a no-op), and
                     // isHighlighted to check the predicate directly.
                     applyLayout: applyLayout, isHighlighted: isHighlighted,
-                    // Logo internals: placeLogo has to be callable directly, because
-                    // refresh() only schedules a render and a tab that is not being
-                    // composited never runs one -- so testing the mark through the
-                    // renderer silently measures a stale DOM.
-                    placeLogo: placeLogo, ringColors: ringColors,
-                    // Folder colours, for the two settings UIs and for the suite. The
-                    // setter repaints rather than rebuilds -- colour is not an input to
-                    // the layout, and an override must not be able to move a node.
-                    palette: paletteInfo,
-                    groupOrder: function () { return (order[state.dim] || []).slice(); },
-                    groupCount: function (g) { return counts[g] || 0; },
+                    ringColors: ringColors,
                     colorOf: colorOf,
-                    // The slot a group is ON, which is not derivable from its position any
-                    // more: archives are skipped in the rotation, and sit on no slot at
-                    // all. "" means exactly that.
-                    slotOf: function (g) { return groupSlot[g] || ""; },
                     isArchiveGroup: isArchiveGroup,
                     get folderColors() {
                       return Object.assign(Object.create(null), folderColors);
                     },
-                    setFolderColors: applyFolderColors,
+                    // subfolderColors/setSubfolderColors mirror the pair above and are the
+                    // host's actual read/write path -- both shell.html and plugin/main.js's
+                    // onSubfolderColors go through these. subColorOf/subSlotOf/subOrderOf/
+                    // subCountOf below them are NOT consumed by either host: the Obsidian
+                    // settings tab builds its subfolder rows from its own path-derived
+                    // allSubfolders() instead of asking the api, since a subfolder's
+                    // identity (unlike a top-level folder's) never needs an open view to
+                    // resolve. These four exist for manual inspection and the suite, the
+                    // same role api.colorOf/api.slotOf/api.groupOrder already play one
+                    // level up.
+                    get subfolderColors() {
+                      return Object.assign(Object.create(null), subfolderColors);
+                    },
+                    subColorOf: function (folder, sub) {
+                      return subShade[folder + "/" + (sub || "")] || colorOf(folder);
+                    },
+                    subSlotOf: function (folder, sub) {
+                      return subSlot[folder + "/" + (sub || "")] || "";
+                    },
+                    subOrderOf: function (g) { return (subOrder[g] || []).slice(); },
+                    subCountOf: function (g, sub) { return subCount[g + "/" + (sub || "")] || 0; },
                     // Visibility DEFAULTS. Setting these does not move the live filter --
                     // the host is expected to apply them, which is what setHiddenDefaults
                     // is for.
                     get folderShown() {
                       return Object.assign(Object.create(null), folderShown);
                     },
-                    setFolderShown: applyFolderShown,
-                    // The saved default, applied live. Mirrors setFolderShown: the host owns
-                    // the store and this owns the camera.
-                    setPanEnabled: function (v) { return setPan(v !== false, false); },
                     get panEnabled() { return panEnabled; },
+                    get compactAxis() { return compactAxis; },
+                    // The pooled-tail rank a split cell's key ends in -- exposed so a check can
+                    // derive it instead of hardcoding SUB_SLOTS-1, which is not itself public.
+                    get subTailRank() { return SUB_SLOTS - 1; },
                     hiddenByDefault: hiddenByDefault,
-                    // Push the defaults into the live filter and repaint. This is the
-                    // "and now show it" half, kept separate so loading saved settings at
-                    // boot cannot be confused with a person clicking an eye.
-                    applyHiddenDefaults: function () {
-                      seedHidden();
-                      buildLegend();
-                      cascade(null, { colToggle: true });
-                    },
-                    // The band, for the same reason placeLogo is exposed: it paints
-                    // from afterRender, so a tab that is not being composited never
-                    // repaints it and testing through the renderer measures a stale
-                    // canvas.
-                    heatBuild: heatBuild, heatDraw: heatDraw,
+                    heatDraw: heatDraw,
                     get heat() { return heat; },
                     // Live, for the same reason radialEase and subGap are: the cell
                     // size trades how legible the mosaic inside one square is against
@@ -10195,36 +12050,6 @@ function mountVaultGraph(root, data, deps) {
                         cameraRatio: r3(renderer ? renderer.getCamera().ratio : null)
                       };
                     },
-                    // PLAN PARITY. The cascade must animate between the static
-                    // planner's own outputs, or it walks between packings nothing else
-                    // renders -- which is every jump chased on 2026-08-22. This
-                    // compares, for the CURRENT visibility state, the plan the static
-                    // path builds against the one the cascade would end on. Per-cell
-                    // row counts and maxR must match exactly. Run it with a folder
-                    // hidden, not just at full vault, since the REPACK_BELOW flag is
-                    // what used to differ.
-                    checkPlanParity: function () {
-                      var shown = 0;
-                      graph.forEachNode(function (id) { if (visible(id)) shown++; });
-                      var ov = true;
-                      var stat = buildWedgePlan(ov, function (id) { return visible(id) ? 1 : 0; });
-                      var live = buildWedgePlan(ov, function (id) { return alpha[id] || 0; });
-                      var diffs = {};
-                      var rows = function (p) { var m = {}; p.cells.forEach(function (c) { m[c.k] = c.rows; }); return m; };
-                      var rs = rows(stat), rl = rows(live);
-                      Object.keys(rs).concat(Object.keys(rl)).forEach(function (k) {
-                        if (rs[k] !== rl[k]) diffs[k] = { staticPlan: rs[k], livePlan: rl[k] };
-                      });
-                      var out = {
-                        shown: shown, threshold: Math.round(graph.order * REPACK_BELOW), onlyVisible: ov,
-                        staticMaxR: Math.round(stat.maxR), liveMaxR: Math.round(live.maxR),
-                        maxRMatches: Math.round(stat.maxR) === Math.round(live.maxR),
-                        cellsStatic: stat.cells.length, cellsLive: live.cells.length,
-                        rowDiffs: diffs, parityOK: Object.keys(diffs).length === 0 &&
-                          Math.round(stat.maxR) === Math.round(live.maxR)
-                      };
-                      return out;   // the caller is a console; it prints this itself
-                    },
                     // Record each band's radial extent per animated frame. probe(true)
                     // then toggle, then probeReport() -- it names the biggest single
                     // frame step per band, which is what "a jump" actually is.
@@ -10416,6 +12241,11 @@ function mountVaultGraph(root, data, deps) {
                       state.heatEnd = iso ? heatParse(iso) : null;
                       heatBuild(); drawDateUI(); heatDraw();
                     },
+                    // SPIKE (github#12, concept E): the pin gesture, for the shooter.
+                    // The hub, for the suite and the shooter.
+                    pin: function (id) { togglePin(id); },
+                    pinned: function () { return state.pinned.slice(); },
+                    clearPins: function () { state.pinned = []; hubChanged(false); },
                     lastCascade: function () { return lastCascade; },
                     // The gap the LAST layout pass actually spent, per band. The probe
                     // reports this per frame during an animation; a resting disc has no
@@ -10438,129 +12268,6 @@ function mountVaultGraph(root, data, deps) {
                       return { from: e[0], to: e[1], fromISO: isoDay(e[0]), toISO: isoDay(e[1]),
                                x0: ribbonX(e[0], w), x1: ribbonX(e[1], w), w: w,
                                sweeping: brushSweep !== null };
-                    },
-                    /**
-                     * EVERYTHING NEEDED TO REPRODUCE WHAT IS ON SCREEN, as one object.
-                     *
-                     * Reporting a layout problem by describing it costs a round trip per
-                     * unknown -- which folders were hidden, what the range was, how deep each
-                     * band was, what the spacing came out as. Most of this session's
-                     * measurements were a probe written to answer one of those and then thrown
-                     * away. This is those probes, kept, behind a button.
-                     *
-                     * Measured off the LIVE state, not the plan: what matters is the disc a
-                     * person is looking at, and the two have disagreed more than once.
-                     */
-                    debugDump: function () {
-                      var a0 = renderer ? renderer.graphToViewport({ x: 0, y: 0 }) : null;
-                      var b0 = renderer ? renderer.graphToViewport({ x: UNIT, y: 0 }) : null;
-                      var pxPerRow = a0 && b0 ? Math.hypot(b0.x - a0.x, b0.y - a0.y) : 0;
-                      var perPx = pxPerRow > 0 ? UNIT / pxPerRow : 0;
-                      // Radii and drawn sizes of everything on screen, split into bands on the
-                      // largest radial gap -- the same split every probe in this session used.
-                      var pts = [];
-                      graph.forEachNode(function (id, a) {
-                        if ((alpha[id] || 0) <= 0.004) return;
-                        var d = renderer && renderer.getNodeDisplayData(id);
-                        // THROUGH scaleSize. getNodeDisplayData().size is what the reducer
-                        // RETURNED, not what gets drawn -- sigma scales it again on the way to
-                        // the canvas. Read raw, every radius in this dump was short by that
-                        // factor, so it reported clearances that were not there and
-                        // overlappingPairs: 0 on states that had sixteen. The same trap this
-                        // file's dot measurements hit twice before.
-                        pts.push({ r: Math.hypot(a.x, a.y), th: Math.atan2(a.y, a.x),
-                                   rad: (d && renderer ? renderer.scaleSize(d.size)
-                                                       : 4) * perPx, g: a.folder });
-                      });
-                      pts.sort(function (x, y) { return x.r - y.r; });
-                      var gi = 0, gap = 0;
-                      for (var i = 1; i < pts.length; i++) {
-                        var gg = pts[i].r - pts[i - 1].r;
-                        if (gg > gap) { gap = gg; gi = i; }
-                      }
-                      var r3 = function (v) { return Math.round(v * 1000) / 1000; };
-                      var bandStat = function (arr) {
-                        if (!arr.length) return null;
-                        var rows = {}, steps = [], clears = [], worst = 1e9;
-                        arr.forEach(function (q) {
-                          var k = Math.round(q.r / 8) * 8;
-                          (rows[k] || (rows[k] = [])).push(q);
-                        });
-                        Object.keys(rows).forEach(function (k) {
-                          var row = rows[k].slice().sort(function (x, y) { return x.th - y.th; });
-                          for (var i = 1; i < row.length; i++) {
-                            var arc = (row[i].th - row[i - 1].th) * (+k);
-                            if (!(arc > 1 && arc < 3000)) continue;
-                            steps.push(arc);
-                            var cl = arc - row[i].rad - row[i - 1].rad;
-                            clears.push(cl);
-                            if (cl < worst) worst = cl;
-                          }
-                        });
-                        steps.sort(function (x, y) { return x - y; });
-                        var q = function (f) {
-                          return steps.length ? Math.round(steps[Math.floor(steps.length * f)]) : 0;
-                        };
-                        var radii = arr.map(function (x) { return x.rad; }).sort(function (x, y) { return x - y; });
-                        return {
-                          notes: arr.length, rows: Object.keys(rows).length,
-                          inner: Math.round(arr[0].r), outer: Math.round(arr[arr.length - 1].r),
-                          step35: q(0.35), step95: q(0.95),
-                          channelRatio: q(0.35) ? r3(q(0.95) / q(0.35)) : 0,
-                          dotRadius: { min: Math.round(radii[0]),
-                                       med: Math.round(radii[Math.floor(radii.length / 2)]),
-                                       max: Math.round(radii[radii.length - 1]) },
-                          worstPairClearance: worst === 1e9 ? null : Math.round(worst),
-                          overlappingPairs: clears.filter(function (c) { return c < 0; }).length,
-                        };
-                      };
-                      var cam = renderer ? renderer.getCamera().getState() : null;
-                      var hidden = Object.keys(state.hidden[state.dim] || {}).filter(function (k) {
-                        return (state.hidden[state.dim] || {})[k];
-                      });
-                      return {
-                        note: "vault-graph debug dump -- paste this back verbatim",
-                        vault: { name: DATA.vault || "", notes: graph.order,
-                                 // EDGE_TOTAL, not graph.size: in a budgeted vault the graph
-                                 // holds only the resting share, and a dump that said
-                                 // "links: 8027" about a 37k-link vault would send whoever
-                                 // reads it in the wrong direction. linksShown is the budget.
-                                 links: EDGE_TOTAL, linksShown: EDGE_SHOWN, lazyEdges: lazyEdges,
-                                 generated: DATA.generated || "" },
-                        screen: { win: WIN.innerWidth + "x" + WIN.innerHeight,
-                                  dpr: WIN.devicePixelRatio || 1,
-                                  stage: $("canvas") ? Math.round($("canvas").clientWidth) + "x" +
-                                         Math.round($("canvas").clientHeight) : "",
-                                  pxPerRow: r3(pxPerRow) },
-                        camera: cam ? { x: r3(cam.x), y: r3(cam.y), ratio: r3(cam.ratio) } : null,
-                        filters: { hiddenFolders: hidden,
-                                   hiddenSub: Object.keys(state.hiddenSub || {}),
-                                   range: rangeLabel(),
-                                   from: state.from, to: state.to, heatEnd: state.heatEnd,
-                                   timelineUntil: state.until,
-                                   markDay: state.markDay, shown: pts.length },
-                        // The room each band reports and the arc floor in force -- both feed
-                        // POSITIONS now, so a jump investigation needs to see them per frame.
-                        room: { i: r3(bandOf("i").room), o: r3(bandOf("o").room) },
-                        minArcDeg: r3(lastMinArc * 180 / Math.PI),
-                        spacing: { spOuter: r3(bandOf("o").sp),
-                                   spInner: r3(bandOf("i").sp),
-                                   rowsOuter: bandOf("o").rows,
-                                   rowsInner: bandOf("i").rows,
-                                   pitchOuterUnits: r3(pitchUnits("o")),
-                                   pitchInnerUnits: r3(pitchUnits("i")) },
-                        seam: { outerDeg: bandOf("o").gapDeg, innerDeg: bandOf("i").gapDeg,
-                                nGOuter: bandOf("o").nG, nGInner: bandOf("i").nG,
-                                nSubOuter: bandOf("o").nSub, nSubInner: bandOf("i").nSub,
-                                fallOuter: r3(seamFall("o")), fallInner: r3(seamFall("i")) },
-                        locked: geomLock ? { r0: r3(geomLock.r0), rOuter: r3(geomLock.rOuter),
-                                             maxR: r3(geomLock.maxR), rows: geomLock.rows,
-                                             bandTotal: geomLock.bandTotal } : null,
-                        bands: { inner: bandStat(pts.slice(0, gi)), outer: bandStat(pts.slice(gi)) },
-                        dots: { ofPitch: r3(DOT_OF_PITCH), minPx: DOT_MIN_PX,
-                                maxSpread: DOT_MAX_SPREAD, m: r3(bandOf("o").ramp.m),
-                                b: r3(bandOf("o").ramp.b), lo: r3(bandOf("o").ramp.lo) },
-                      };
                     },
                     lastGap: function () {
                       return { ngI: bandOf("i").nG, ngO: bandOf("o").nG,
@@ -10587,11 +12294,35 @@ function mountVaultGraph(root, data, deps) {
                                total: graph.order, label: rangeLabel() };
                     },
                     relayout: function () {
+                      // CANCEL BEFORE RESETTING, or a still-running cascade's next animation
+                      // frame lands after this snap and silently overwrites it -- the same
+                      // gap once found and fixed here for setSubwedgeGate (github#31), lost
+                      // again when that toggle was removed and this treatment reverted with
+                      // it. Clearing pinnedPlan/planKeep too, not just cancelling the frame:
+                      // a cascade holds them for its own duration and clears them when it
+                      // lands, so a layout after a cancelled-but-not-cleared run would reuse
+                      // a plan pinned for a run that no longer exists (see the same teardown
+                      // in playTimeline, a few hundred lines up, for the full account).
+                      stopPlay();
+                      if (cascadeRun) {
+                        WIN.cancelAnimationFrame(cascadeRun.raf);
+                        WIN.clearTimeout(cascadeRun.guard);
+                        cascadeRun = null;
+                      }
+                      if (anim) { WIN.cancelAnimationFrame(anim); anim = null; }
+                      if (animGuard) { WIN.clearTimeout(animGuard); animGuard = null; }
+                      pinnedPlan = null; planKeep = null;
+                      roomNow = null; cellNow = null; edgeNow = null; colWalk = null;
+                      posSrc = posDst = null;
                       bandLock = null; geomLock = null;
                       regroup();
                       applyLayout(false);
                       renderer.refresh();
-                    } };
+                    },
+    };
+    Object.defineProperties(window.__vg, Object.getOwnPropertyDescriptors(debugAPI));
+    /* ---- END: demo automation + debug API ---- */
+    seedPins();
     buildTimeline();
     buildSearch(); buildTools(); buildStats();
     // Inlined at build time by build-graph.mjs; absent if logo-mask.png was missing,

@@ -3,10 +3,16 @@
 //   node scripts/demo.mjs                     # attach to Chrome on 9222
 //   node scripts/demo.mjs --port 9223
 //   node scripts/demo.mjs --slow 1.5          # stretch every move and dwell
+//   node scripts/demo.mjs --act timeline      # just one act, not the whole storyboard
 //
 // The storyboard lives in the page (`__vg.demo.storyboard()`), so adding a beat means
-// editing `demoMode()` in template.html and nothing here. This file only knows how to
+// editing `demoMode()` in src/page.js and nothing here. This file only knows how to
 // perform three verbs and how to wait.
+//
+// --act NAME plays `__vg.demo.act(NAME)` instead of the full storyboard -- one of the
+// `act:` tags demoMode()'s own beats carry (intro, note, pin, compactaxis, timeline,
+// heatmap, folders, subfolders, subfoldercolor, camera, colours). Same driver, same
+// verbs; only which beats it gets differs.
 //
 // WHY CDP AND NOT el.click(): a dispatched click skips hit-testing, so an in-page demo
 // keeps passing after the button it aims at has become covered, scrolled away or 0x0.
@@ -15,19 +21,26 @@
 // real click would fail. That is the entire point of demonstrating something.
 //
 // CDP input does not move the operating system's cursor -- it is delivered straight to
-// the renderer -- so a recording of a CDP-driven demo shows every effect and no arrow.
-// `--cursor` fixes that by moving the REAL pointer alongside, through scripts/cursor.ps1,
-// which gdigrab then draws. Off by default because it genuinely takes the mouse; the
-// recorder turns it on.
+// the renderer -- so a recording of a CDP-driven demo would show every effect and no
+// arrow without help. The driver always draws one INSIDE THE PAGE (see demoCursorAt in
+// page.js) and moves it by eval from this same loop, in the same coordinates dispatched
+// to CDP. Unconditional, not a flag: there is no reason left to leave it off, and one
+// fewer thing to remember to pass.
 //
-// The two pointers cannot drift: both are driven from the same coordinates in the same
-// loop. The clicks stay on CDP even with --cursor on, so input still hit-tests and still
-// works whether or not the window has focus.
+// NOT the real OS pointer -- that was the first version (scripts/cursor.ps1,
+// SetCursorPos) and it worked for clicks and broke on drags. Windows delivers real
+// input for wherever the OS pointer physically sits regardless of which process put it
+// there, so moving the real cursor is a SECOND, genuinely native mouse-event stream
+// landing in the same window as the CDP-injected one -- and the two disagree on
+// `buttons`: real hardware reports none pressed, while CDP's dispatched drag says 1.
+// bindNodeDrag's own "the button came up outside the window" safety check -- there for
+// the real case of a person's drag actually leaving the tab -- read the native stream's
+// buttons:0 as exactly that, dropped the note mid-glide, and let sigma's default panning
+// take over for the rest of the gesture. Measured: every CDP-only take pinned correctly;
+// every take with the real cursor on did not. A page element never touches the OS
+// pointer and generates no second stream, so there is nothing left to misread.
 
 import { attach } from "./cdp.mjs";
-import { spawn } from "node:child_process";
-import { fileURLToPath } from "node:url";
-import { dirname, join } from "node:path";
 
 const argv = process.argv.slice(2);
 const arg = (name, dflt) => {
@@ -37,8 +50,7 @@ const arg = (name, dflt) => {
 const PORT = Number(arg("port", 9222));
 const SLOW = Number(arg("slow", 1));
 const MATCH = arg("match", "");
-const CURSOR = argv.includes("--cursor");
-const HERE = dirname(fileURLToPath(import.meta.url));
+const ACT = arg("act", "");
 
 const MOVE_MS = 620 * SLOW;    // how long a glide across the page takes
 const DWELL_MS = 420 * SLOW;   // pause on a control before clicking, for the viewer
@@ -51,48 +63,22 @@ const ease = (p) => (p < 0.5 ? 2 * p * p : 1 - 2 * (1 - p) * (1 - p));
 
 let at = { x: 0, y: 0 };
 
-// One long-lived PowerShell process fed coordinates on stdin. Spawning one per position
-// would cost ~80ms each against a 16ms step, so a glide would crawl.
-let cursor = null;
-let origin = null;      // page (0,0) in screen pixels, plus the device scale
-
-function cursorStart() {
-  if (!CURSOR) return;
-  cursor = spawn("powershell", ["-NoProfile", "-ExecutionPolicy", "Bypass",
-                                "-File", join(HERE, "cursor.ps1")],
-                 { stdio: ["pipe", "inherit", "inherit"] });
-  cursor.on("error", (e) => {
-    console.warn(`  ! cursor helper failed (${e.message}); carrying on without it`);
-    cursor = null;
-  });
+// AWAITED, not fire-and-forget. The first version did not wait for this, on the theory
+// that a dropped or delayed cosmetic update is invisible on camera -- which is true, but
+// missed that the eval and the drag's own Input.dispatchMouseEvent share one WebSocket
+// with no ordering guarantee between them. An un-awaited eval could still be in flight
+// (or reordered against) the next move, and interleaved with a NODE drag specifically --
+// which reads `buttons` and a live drop target on every intervening move -- that was
+// enough to lose track of the gesture mid-glide and hand it to sigma's default panning.
+// Measured: the exact same failure with the real OS pointer removed and only these calls
+// added back in. Sequencing it costs a small round trip per step; that is cheaper than a
+// drag that silently does not land.
+async function cursorTo(page, x, y) {
+  await page.eval(`__vg.demo.cursorAt(${Math.round(x)}, ${Math.round(y)})`).catch(() => {});
 }
 
-function cursorTo(x, y) {
-  if (!cursor || !origin) return;
-  const sx = Math.round((origin.x + x) * origin.dpr);
-  const sy = Math.round((origin.y + y) * origin.dpr);
-  try { cursor.stdin.write(`${sx} ${sy}\n`); } catch { cursor = null; }
-}
-
-function cursorStop() {
-  if (!cursor) return;
-  try { cursor.stdin.end(); } catch {}
-  cursor = null;
-}
-
-// Where the page's (0,0) sits on screen. Asked of the page rather than computed from the
-// window rect, because the page is the only thing that knows how much of its own window
-// is browser chrome -- and with --app= that is a title bar and essentially no side
-// border, which is why the horizontal inset is halved and subtracted from the vertical.
-async function cursorOrigin(page) {
-  const g = JSON.parse(await page.eval(`JSON.stringify({
-    sx: window.screenX, sy: window.screenY,
-    ow: window.outerWidth, oh: window.outerHeight,
-    iw: window.innerWidth, ih: window.innerHeight,
-    dpr: window.devicePixelRatio
-  })`));
-  const inset = Math.max(0, (g.ow - g.iw) / 2);
-  return { x: g.sx + inset, y: g.sy + (g.oh - g.ih) - inset, dpr: g.dpr || 1 };
+function cursorHide(page) {
+  page.eval("__vg.demo.cursorHide()").catch(() => {});
 }
 
 async function moveTo(page, x, y) {
@@ -102,7 +88,7 @@ async function moveTo(page, x, y) {
     const e = ease(i / steps);
     const cx = Math.round(x0 + (x - x0) * e), cy = Math.round(y0 + (y - y0) * e);
     await page.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: cx, y: cy, buttons: 0 });
-    cursorTo(cx, cy);
+    await cursorTo(page, cx, cy);
     await sleep(STEP_MS);
   }
   at = { x, y };
@@ -110,6 +96,16 @@ async function moveTo(page, x, y) {
 
 async function click(page, x, y) {
   const base = { x, y, button: "left", buttons: 1, clickCount: 1 };
+  await page.send("Input.dispatchMouseEvent", { type: "mousePressed", ...base });
+  await sleep(60);
+  await page.send("Input.dispatchMouseEvent", { type: "mouseReleased", ...base, buttons: 0 });
+}
+
+// Chrome raises a native `contextmenu` off a right mouseReleased the same way a real
+// right-click does, and that is the event sigma's rightClickNode listens for -- so this
+// is `click` with the other button, not a different pipeline.
+async function rightClick(page, x, y) {
+  const base = { x, y, button: "right", buttons: 2, clickCount: 1 };
   await page.send("Input.dispatchMouseEvent", { type: "mousePressed", ...base });
   await sleep(60);
   await page.send("Input.dispatchMouseEvent", { type: "mouseReleased", ...base, buttons: 0 });
@@ -132,7 +128,7 @@ async function doubleClick(page, x, y) {
  * ribbon's brush and the disc's pan both read `buttons` on every move, and a sequence of
  * button-up moves between a press and a release is a press and a release with nothing in
  * between. Eased and paced like moveTo so it looks like a hand on camera, and the cursor
- * overlay is driven with it so --cursor sees the same path.
+ * overlay is driven with it so it sees the same path.
  */
 async function drag(page, x0, y0, x1, y1) {
   const steps = Math.max(6, Math.round(MOVE_MS / STEP_MS));
@@ -144,10 +140,19 @@ async function drag(page, x0, y0, x1, y1) {
     const cx = Math.round(x0 + (x1 - x0) * e), cy = Math.round(y0 + (y1 - y0) * e);
     await page.send("Input.dispatchMouseEvent",
       { type: "mouseMoved", x: cx, y: cy, button: "left", buttons: 1 });
-    cursorTo(cx, cy);
+    await cursorTo(page, cx, cy);
     await sleep(STEP_MS);
   }
-  await sleep(120);
+  // FLUSH THE MOVE QUEUE before releasing. Dragging a graph NODE (as opposed to a DOM
+  // handle like the ribbon's brush) forces a layout read and a re-render on every one of
+  // these moves, and firing them 16ms apart can outrun that: the release then races a
+  // backlog of still-queued moves and can win, landing on a STALE mid-glide position
+  // instead of where the cursor visibly ended up -- measured as a drag into the hub that
+  // looked right on camera and did not pin. A round-trip eval only returns once every
+  // input command dispatched ahead of it has reached the renderer's own task queue, which
+  // makes it a real flush rather than a guessed extra delay.
+  await page.eval("1").catch(() => {});
+  await sleep(150);
   await page.send("Input.dispatchMouseEvent",
     { type: "mouseReleased", x: x1, y: y1, button: "left", buttons: 0, clickCount: 1 });
   at = { x: x1, y: y1 };
@@ -209,8 +214,11 @@ async function main() {
   const armed = await page.eval("!!(window.__vg && __vg.demo)");
   if (!armed) throw new Error("this page has no __vg.demo -- is it a vault-graph build?");
 
-  const storyboard = JSON.parse(await page.eval("JSON.stringify(__vg.demo.storyboard())"));
-  console.log(`[${el()}] storyboard: ${storyboard.length} beats`);
+  const storyboard = ACT
+    ? JSON.parse(await page.eval(`JSON.stringify(__vg.demo.act(${JSON.stringify(ACT)}))`))
+    : JSON.parse(await page.eval("JSON.stringify(__vg.demo.storyboard())"));
+  if (ACT && !storyboard.length) throw new Error(`--act ${ACT} matched no beats -- see the page's own console warning`);
+  console.log(`[${el()}] storyboard: ${storyboard.length} beats${ACT ? ` (act: ${ACT})` : ""}`);
 
   // PARK THE POINTER SOMEWHERE THAT HOVERS NOTHING, and prove it rather than assume it.
   // The first version parked at 62% x 55% of the viewport to avoid 0,0 on the sidebar, and
@@ -252,13 +260,9 @@ async function main() {
     if (!c.h && c.tip === "none" && !c.row) { at = { x: cx, y: cy }; break; }
   }
   at = Array.isArray(at) ? { x: at[0], y: at[1] } : at;
-  if (CURSOR) {
-    origin = await cursorOrigin(page);
-    cursorStart();
-    console.log(`[${el()}] real cursor on — page origin at screen ${origin.x},${origin.y} (dpr ${origin.dpr})`);
-  }
+  console.log(`[${el()}] drawing the demo cursor in-page`);
   await page.send("Input.dispatchMouseEvent", { type: "mouseMoved", ...at, buttons: 0 });
-  cursorTo(at.x, at.y);
+  await cursorTo(page, at.x, at.y);
   console.log(`[${el()}] pointer parked at ${at.x},${at.y}`);
   // Kept, so a {park} beat can send the pointer back to the one position this run has
   // already PROVEN hovers nothing.
@@ -286,7 +290,7 @@ async function main() {
     }
     // Verbs that act on a target the page resolves for us. Everything below shares the
     // "find it, glide to it, then do the thing" shape; only the thing differs.
-    if (beat.click || beat.hover || beat.dblclick || beat.drag || beat.wheel) {
+    if (beat.click || beat.hover || beat.dblclick || beat.drag || beat.wheel || beat.rightclick) {
       const w = await where(page, beat.target);
       if (!w) {
         console.warn(`${n} ! target ${JSON.stringify(beat.target)} not found — skipping`);
@@ -294,12 +298,67 @@ async function main() {
         continue;
       }
       if (beat.drag) {
-        const [dx, dy] = beat.drag;
-        console.log(`[${el()}] ${n} drag ${w.label} from ${w.x},${w.y} by ${dx},${dy} — ${beat.why || ""}`);
+        // Either a fixed [dx, dy] offset (the brush handles, the camera drags -- targets
+        // whose destination is a distance from where they start), or a second target the
+        // page resolves the same way as the first (pinning a note by dragging it into the
+        // hub: the hub's screen position is a build-time unknown, but the page can still
+        // answer where its own hole is right now).
+        let dx, dy, dstLabel = "";
+        if (Array.isArray(beat.drag)) { [dx, dy] = beat.drag; }
+        else {
+          const w2 = await where(page, beat.to);
+          if (!w2) {
+            console.warn(`${n} ! drag target ${JSON.stringify(beat.to)} not found — skipping`);
+            trace.push(`missing: ${JSON.stringify(beat.to)}`);
+            continue;
+          }
+          dx = w2.x - w.x; dy = w2.y - w.y; dstLabel = ` to ${w2.label}`;
+        }
+        console.log(`[${el()}] ${n} drag ${w.label} from ${w.x},${w.y} by ${dx},${dy}${dstLabel} — ${beat.why || ""}`);
         await moveTo(page, w.x, w.y);
         await sleep(DWELL_MS);
-        await drag(page, w.x, w.y, w.x + dx, w.y + dy);
-        trace.push(`drag: ${w.label} by ${dx},${dy}`);
+        // RE-RESOLVED RIGHT BEFORE THE PRESS, not reused from the top of the beat. A note
+        // is a much smaller target than the hub it is heading for, and under real load --
+        // ffmpeg's gdigrab competing for the same CPU the renderer needs -- the ~1s of
+        // moveTo + dwell between the first resolve and the press is enough for a
+        // still-settling disc to drift the note off of it: measured,
+        // the press missed the note entirely and sigma's OWN default took over, panning
+        // the camera instead of dragging anything. Re-resolving here shrinks that window
+        // to milliseconds; a corrective micro-move only fires if the note actually moved.
+        let press = w;
+        if (w.expect) {
+          const fresh = await where(page, beat.target);
+          if (fresh && (fresh.x !== w.x || fresh.y !== w.y)) {
+            await moveTo(page, fresh.x, fresh.y);
+            press = fresh;
+          }
+          const gotHover = await page.eval("JSON.stringify(__vg.demo.hovered())");
+          const hit = gotHover && JSON.parse(gotHover);
+          if (hit !== w.expect) {
+            console.warn(`  ! aiming to drag ${w.expect} but hovered ${hit} — the press may miss`);
+          }
+        }
+        await drag(page, press.x, press.y, press.x + dx, press.y + dy);
+        // Verified, not assumed -- same reasoning as the hover/click `expect` check above.
+        // Only meaningful for a note dragged at a second target (the hub): the app's own
+        // pinned list says whether the drop actually registered, which the drag itself
+        // cannot report since it never reads the app's state, only dispatches input.
+        if (w.expect && !Array.isArray(beat.drag)) {
+          const pinned = JSON.parse(await page.eval("JSON.stringify(__vg.state.pinned)"));
+          if (pinned.indexOf(w.expect) < 0) {
+            console.warn(`  ! dragged ${w.expect} but it is not pinned afterward — the drop missed the hub`);
+            trace.push(`MISSED: ${JSON.stringify(beat.target)}`);
+          }
+        }
+        trace.push(`drag: ${w.label} by ${dx},${dy}${dstLabel}`);
+        continue;
+      }
+      if (beat.rightclick) {
+        console.log(`[${el()}] ${n} right-click ${w.label} at ${w.x},${w.y} — ${beat.why || ""}`);
+        await moveTo(page, w.x, w.y);
+        await sleep(DWELL_MS);
+        await rightClick(page, w.x, w.y);
+        trace.push(`rightclick: ${w.label}`);
         continue;
       }
       if (beat.wheel) {
@@ -343,12 +402,11 @@ async function main() {
   const ms = Date.now() - t0;
   await page.eval(`__vg.demo.finish(${ms}, ${JSON.stringify(trace)})`);
   console.log(`[${el()}] done — beats took ${ms}ms, process ${el()} total`);
-  cursorStop();
+  cursorHide(page);
   page.close();
 }
 
 main().catch((e) => {
   console.error("demo failed:", e.message);
-  cursorStop();
   process.exit(1);
 });

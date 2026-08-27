@@ -23,9 +23,13 @@
     </div>
 
     <div class="block" id="vg-settings" hidden>
+      <!-- Generic boolean options -- one row today (compactAxis, github#23), rendered once
+           by buildOptions() rather than rebuilt per-folder the way #vg-setbody is. A second
+           standalone setting is one entry in OPTION_ROWS away, not a new panel. -->
+      <div id="vg-optbody"></div>
       <div class="row" style="margin-bottom:7px">
         <div class="lbl" style="margin:0">Folder colours</div>
-        <div class="mini"><button id="vg-fcreset" title="Drop every override and go back to the automatic order">Reset</button></div>
+        <div class="mini"><button id="vg-fcreset" title="Drop every folder AND subfolder override and go back to the automatic order">Reset</button></div>
       </div>
       <div id="vg-setbody"></div>
       <p class="hint">Twelve slots, handed out in folder order and round again. Setting
@@ -86,6 +90,19 @@
              was to find and drag a handle -- fine for browsing, useless for "just show me
              2024". A native picker also brings a calendar, keyboard entry and the locale's
              own date order for free, none of which is worth reimplementing on a canvas. -->
+        <!-- A VIEW-LEVEL control, not only the settings-tab one: the plugin's gear hands
+             off to Obsidian's own settings tab (openSettings, see page.html's own comment
+             on #vg-gear), so there is no other way to flip this from inside the view at
+             all on that host -- unlike panEnabled, which the corner button already covers.
+             Mirrors that button's shape exactly: a mode, aria-pressed, persists on click. -->
+        <button id="vg-compact" type="button" aria-pressed="true"
+                title="Compact the date axis by note count. Off gives every year and month equal width."
+                aria-label="Compact date axis">
+          <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" focusable="false">
+            <path d="M3 4l3 4-3 4M13 4l-3 4 3 4" fill="none" stroke="currentColor"
+                  stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </button>
         <div id="vg-rangebox">
           <input id="vg-from" class="dt" type="date" aria-label="Range start">
           <span class="arw" aria-hidden="true">&rarr;</span>
@@ -117,6 +134,14 @@
            with a radial fade. -->
       <div id="vg-logoInner" aria-hidden="true" hidden></div>
       <div id="vg-graph"></div>
+      <!-- The hub's drop target, shown only while a note is being dragged.
+
+           AFTER #vg-graph, unlike the logo above, and that placement is a measurement
+           rather than a preference: anything drawn into the hole from the DOM sits UNDER
+           sigma's canvases, and every edge in the vault converges on the hub -- the tangle
+           is dense enough to bury it completely. Two of the concepts spiked for github#12
+           died on exactly this. -->
+      <div id="vg-hubdrop" aria-hidden="true" hidden></div>
       <!-- CAMERA CONTROLS, in the corner of the STAGE rather than in the sidebar, because
            they answer questions you have while looking at the graph -- "closer", "how do I
            get back" -- and the sidebar is not where you are looking when you have them.
@@ -171,4 +196,27 @@
 
     <div id="vg-busy">Laying out graph...</div>
   </main>
+
+  <!-- Right-click on a folder or subfolder row in the legend opens this: the same twelve
+       swatches + Auto the settings panel already has, at the click point rather than in
+       the sidebar. A SIBLING of the sidebar and the stage, not nested in either -- it is
+       positioned fixed against the viewport, and needs to sit above both. -->
+  <div id="vg-ctxmenu" class="ctxmenu" hidden role="menu"></div>
+
+  <!-- THE RECORDING'S CURSOR, drawn here rather than moved at the OS level. See
+       demoCursorAt in page.js: an OS-level pointer is a SECOND, genuinely native
+       input stream landing in the same window as the CDP-injected one, and the two
+       disagree on `buttons` in a way that used to abort a drag mid-glide. This is
+       just a positioned icon, on top of everything else, hit-testing nothing.
+       A SIBLING of the sidebar and the stage, like #vg-ctxmenu above -- nested inside
+       #vg-canvas it was clipped by that element's own `overflow: hidden` the moment a
+       beat's target sat in the sidebar, the heatmap band or the ribbon, which is most
+       of the storyboard: the cursor would vanish for every beat that was not literally
+       over the disc. -->
+  <div id="vg-democursor" aria-hidden="true" hidden>
+    <svg viewBox="0 0 24 24" width="22" height="22">
+      <path d="M3 2 L3 18.5 L7.2 14.6 L10.6 21.8 L13.3 20.5 L9.9 13.4 L16.5 13.4 Z"
+            fill="#fff" stroke="#000" stroke-width="1.3" stroke-linejoin="round"/>
+    </svg>
+  </div>
 </div>

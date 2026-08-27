@@ -1,5 +1,5 @@
 #!/bin/sh
-# Run the invariant suite before letting a push through.
+# Run the invariant suite before letting a push through -- to develop or main only.
 #
 # Enable it in a fresh clone with:
 #
@@ -12,11 +12,15 @@
 # WHY pre-push AND NOT pre-commit: the suite builds the page and drives a real Chrome, and
 # now does that TWICE -- once against a ~450-note mirror of a real vault, once against a
 # 10,000-note synthetic, because a change that passes at 450 notes can still break the band
-# split at 10,000. Call it a minute or two. A fine price per push, an intolerable one per
-# commit.
+# split at 10,000. Call it a minute or two. A fine price per push to develop or main, an
+# intolerable one per commit -- and an unearned one on a feature branch nobody has asked to
+# merge yet, which is why the gate checks below are scoped to gated_push and skip entirely
+# on any other branch. The main-ancestry policy just below stays unconditional regardless
+# -- it only ever fires for a push whose remote ref IS main, so scoping it further would be
+# scoping a no-op.
 #
-# Skipping is deliberate and cheap, because there are honest reasons to (a docs-only
-# change, no Chrome on the machine, a hurry):
+# Skipping the gate checks on a develop/main push is still deliberate and cheap, because
+# there are honest reasons to (a docs-only change, no Chrome on the machine, a hurry):
 #
 #   SKIP_SMOKE=1 git push
 #
@@ -46,8 +50,21 @@ root=$(git rev-parse --show-toplevel)
 # <remote sha>" per line. It is read here and NOT consumed for anything else, which is why
 # the checks below get their own </dev/null -- a child inheriting a half-read stdin is a
 # fine way to lose a line of it.
+#
+# ONE PASS OVER STDIN DOES TWO JOBS, because stdin can only be read once: the main-ancestry
+# policy below, and deciding whether this push touches develop or main at all. gated_push
+# is what the PII/scope/network/smoke block further down reads -- those checks build the
+# page and drive real Chrome, twice, and paying that on every push to a feature branch
+# nobody has asked to merge yet is the wrong price for the wrong moment. develop and main
+# are where the checks earn their keep: that is what everything else eventually merges
+# into, so that is where a regression has to be caught.
 policy_fail=""
+gated_push=""
 while read -r _local_ref local_sha remote_ref _remote_sha; do
+  case "$remote_ref" in
+    refs/heads/develop|refs/heads/main) gated_push=1 ;;
+  esac
+
   [ "$remote_ref" = "refs/heads/main" ] || continue
   # A deletion pushes the all-zero sha. Nothing to check, and the ruleset forbids it anyway.
   case "$local_sha" in *[!0]*) ;; *) continue ;; esac
@@ -83,7 +100,17 @@ EOF
   exit 1
 fi
 
-# THE PII CHECK RUNS FIRST, ALWAYS, AND HAS NO SKIP.
+# NOTHING BELOW THIS LINE RUNS ON A FEATURE BRANCH. gated_push is set above from the SAME
+# stdin read the main-ancestry policy already consumed -- develop and main only, matching
+# what "feature branches don't get gated" actually means: a branch push still gets the
+# main-ancestry check above for free (it only ever fires for a push to main anyway), just
+# not the PII/scope/network/smoke checks, which is the part that costs real time.
+if [ -z "$gated_push" ]; then
+  echo "pre-push: not pushing to develop or main -- skipping the gate checks"
+  exit 0
+fi
+
+# THE PII CHECK RUNS FIRST ON A GATED PUSH, AND HAS NO SKIP.
 #
 # Everything else here is about correctness and can honestly be skipped in a hurry. This
 # one is about other people: the repo is public, and it has already published a
@@ -137,6 +164,53 @@ This plugin promises to make no network requests, and the directory's review che
 that promise on every submission. If a request is genuinely needed it must be
 disclosed to users, not slipped in. If it arrived with a vendored bundle, read what
 it does and account for it in src/vendor.mjs.
+
+There is no skip flag for this check.
+EOF
+  exit 1
+fi
+
+# GENERATOR DETERMINISM NEXT, same "cheap enough there's no reason to skip" bar as the
+# three above -- two Node subprocess runs per generator, no Chrome, a few seconds total.
+# Unlike those three this isn't about damage to someone else; it's about the test fixtures
+# lying to whoever reads them. make-demo-vault.mjs and make-shape-vault.mjs both default
+# their --end date to today, and a layout measurement taken from one of their builds is
+# worthless if the SAME seed can quietly produce different folder/subfolder note counts
+# depending on which day it was generated -- exactly the shape of investigation that cost
+# real time chasing github#31/#32 before it turned out the fixtures were never the problem.
+echo "pre-push: checking vault generators are day-independent..."
+if ! node "$root/scripts/check-generator-determinism.mjs" </dev/null; then
+  cat >&2 <<'EOF'
+
+pre-push: generator determinism check failed -- push blocked.
+
+A synthetic vault generator's per-folder note counts changed between two --end dates on
+the same seed. That means a layout measurement taken from one of its builds depends on
+which day it happened to be generated -- read the FAIL lines above for which folder(s)
+moved, and fix the generator so subfolder placement never consults the calendar, only
+the seeded PRNG.
+
+There is no skip flag for this check.
+EOF
+  exit 1
+fi
+
+# BUILD ORDER DETERMINISM NEXT, same bar again -- two subprocess builds of a handful of
+# notes, no Chrome, under a second. This is the OTHER half of github#31/#32: the generator
+# turned out clean (check above), but the build itself was still reading directories with
+# plain readdirSync, whose order Node documents as filesystem-dependent and which flows
+# unsorted into balanceBands()'s exhaustive-with-ties search over which folders go inner
+# vs outer -- so two builds of the SAME vault content could pick a different split. Fixed
+# by sorting walk()'s readdirSync result; this is what keeps it fixed.
+echo "pre-push: checking build order is filesystem-independent..."
+if ! node "$root/scripts/check-build-order-determinism.mjs" </dev/null; then
+  cat >&2 <<'EOF'
+
+pre-push: build order determinism check failed -- push blocked.
+
+build-graph.mjs's note order depended on filesystem enumeration order again -- read the
+FAIL lines above. walk() in src/build-graph.mjs must sort each directory's entries
+(readdirSync(dir).sort()) before recursing or collecting files.
 
 There is no skip flag for this check.
 EOF
