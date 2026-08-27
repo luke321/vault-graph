@@ -10818,6 +10818,15 @@ function mountVaultGraph(root, data, deps) {
       }
       return null;                              // the menu is closed, so nothing to aim at
     }
+    // The right-click menu's OWN "hidden by default" toggle (github#34) -- only present
+    // when the menu was opened on a top-level folder's row, not a subfolder's (see
+    // openCtxMenu: onToggleVisible is omitted there). No arg, unlike ctxswatch: there is
+    // only ever one.
+    if (kind === "ctxvis") {
+      var cmv = $("ctxmenu");
+      if (!cmv || cmv.hidden) return null;
+      return cmv.querySelector("[data-vis]");    // null on a subfolder's menu, or if closed
+    }
     // A YEAR CHIP under the strip. "busiest" picks the fullest year that HAS a chip, which
     // is not the same as the fullest year: below about 20px of pitch buildYears names every
     // other year, so the busiest one may have no button to aim at. Choosing among the chips
@@ -11304,6 +11313,20 @@ function mountVaultGraph(root, data, deps) {
       // Hiding: the wedges reallocate and the disc stays a full circle.
       { click: true, target: ["eye", "06"], act: "folders", why: "hide a folder -- the wedges reallocate" },
       { settle: true, act: "folders", why: "let the wedges reallocate" },
+
+      // github#34: "hidden by default" -- previously reachable only from the settings
+      // panel's own eye buttons -- is now also on the SAME right-click menu the colours
+      // act uses, one row down from the swatches. "#1", the biggest folder, on purpose:
+      // the eye click just above moves a handful of wedges, and the point of putting this
+      // control in the legend is that it reaches the whole disc from where you are already
+      // looking -- worth showing on a gap big enough that the reallocation is unmistakable
+      // rather than a folder small enough to wonder if anything happened at all.
+      { rightclick: true, target: ["group", "#1"], act: "folders",
+        why: "right-click the biggest folder for its own menu" },
+      { settle: true, act: "folders", why: "let the menu open" },
+      { click: true, target: ["ctxvis", ""], act: "folders",
+        why: "hide it by default too, from the same menu" },
+      { settle: true, act: "folders", why: "the wedges reallocate around a much bigger gap" },
 
       // And `only`, which is the fastest way to answer "where does one folder live".
       // SAFE HERE because nothing has been unfolded yet: see the note at the top about the
