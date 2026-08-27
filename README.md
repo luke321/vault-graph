@@ -9,7 +9,7 @@ The layout is **deterministic, not force-directed**. There is no simulation to s
 no seed to get lucky with: the same vault always draws the same picture, so the shape
 becomes something you can learn and recognise rather than a fresh tangle each time.
 
-<img src="assets/demo.webp" width="100%" alt="The disc growing from the vault's first note, a note hovered, a note dragged into the hub to pin it and two more pinned by right-click and from their own detail card, the timeline scrubbed, three heatmap days hovered, a folder hidden and one soloed, a subfolder pushed out and right-clicked for its own colour, then the camera panned and reset">
+<img src="assets/demo.webp" width="100%" alt="The disc growing from the vault's first note, a note hovered, a note dragged into the hub to pin it and two more pinned by right-click and from their own detail card, the timeline scrubbed, three heatmap days hovered, a folder hidden, the biggest folder right-clicked and hidden by default from its own menu then put back, one folder soloed, a subfolder pushed out, the camera panned and reset, then two folders right-clicked for their own colour">
 
 Ships as an **Obsidian plugin** and as a **standalone HTML exporter** — one page, two
 mounts, from the same source. The exporter writes a single self-contained offline file with
@@ -62,7 +62,7 @@ Settings → Community plugins → Vault Graph.
 | | |
 |---|---|
 | **Folder colours** | One row per top-level folder, with the twelve palette slots under it. The slot the folder is **currently using** is ringed — brightly if you chose it, dimly if it is just the one its position gives it. Click a slot to hold the folder to that colour; **Auto** hands it back. Setting one folder never changes another, and two folders may share a colour — useful for saying they belong together. |
-| **Folder visibility** | The eye at the start of each row sets whether that folder is shown **by default**. The legend's own eye inside the graph is the live filter for this session; this one is what the graph comes back to. |
+| **Folder visibility** | The eye at the start of each row sets whether that folder is shown **by default**. The legend's own eye inside the graph is the live filter for this session; this one is what the graph comes back to. Right-click a folder in the graph's own legend for the same setting, one row down from its colour picker — no need to open this tab just to flip it. |
 
 The graph view has a gear in its top-left corner that opens this tab directly, so the
 colours are reachable from the thing they colour.

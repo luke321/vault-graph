@@ -52,7 +52,8 @@ const SLOW = Number(arg("slow", 1));
 const MATCH = arg("match", "");
 const ACT = arg("act", "");
 
-const MOVE_MS = 620 * SLOW;    // how long a glide across the page takes
+const MOVE_MS = 413 * SLOW;    // how long a glide across the page takes -- 620 read as
+                                // sluggish on camera; 50% faster (620 / 1.5)
 const DWELL_MS = 420 * SLOW;   // pause on a control before clicking, for the viewer
 const STEP_MS = 16;            // ~60fps of pointer positions
 const SETTLE_QUIET_MS = 250;   // busy must stay false this long before we believe it

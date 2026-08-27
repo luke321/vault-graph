@@ -913,6 +913,15 @@
   .vault-graph .ctxmenu .swatch { width: 100%; height: auto; aspect-ratio: 1; }
   .vault-graph .ctxmenu .auto { width: 100%; }
 
+  /* github#34: the settings panel's per-folder "hidden by default" eye, reachable here
+     too. Below Auto rather than beside it -- colour and default-visibility are two
+     different questions, and stacking them keeps the popup one column wide throughout. */
+  .vault-graph .ctxmenu .vis {
+    width: 100%; margin-top: 6px; display: flex; align-items: center;
+    justify-content: center; gap: 5px;
+  }
+  .vault-graph .ctxmenu .vis svg { width: 14px; height: 14px; flex: none; }
+
   /* A subfolder row in the settings panel, nested under its folder's own .scr. Indented
      like .lgr.sub in the legend (14px), on the same .scr/.scrh/.sws layout the folder
      rows already use -- it is a smaller version of the same thing, not a different one. */

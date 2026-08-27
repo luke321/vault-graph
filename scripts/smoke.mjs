@@ -2864,6 +2864,69 @@ check("overriding one folder recolours exactly one group", async (p) => {
                        (ok ? "" : ` (${r.moved.slice(0, 6).join(", ")}${r.moved.length > 6 ? ", ..." : ""})`) };
 });
 
+// github#34: "hidden by default" (previously settings-panel-only) is now also a legend
+// right-click toggle. Through the ACTUAL DOM path (a real `contextmenu` event, a real
+// click on the rendered button), not just the underlying `pickVisible`/`folderShown`
+// mechanism -- that mechanism already had no check of its own before this, but the thing
+// this ticket actually adds is the WIRING (the menu renders the toggle, the click reaches
+// it, the menu closes), which only a DOM-level check can miss a regression in.
+//
+// THE DEFAULT, NOT THE LIVE ROW. A folder's legend row (`.lg[aria-pressed]`) reflects
+// whether it's hidden RIGHT NOW under the current filter -- which starts equal to the
+// default but can already have drifted by the time this check runs, if an earlier check
+// in the same shard hid/showed folders live and left one toggled. Deriving the expected
+// before/after from that row would silently assert against whichever state a PRIOR check
+// happened to leave behind rather than this ticket's own default, which is exactly the
+// live-vs-default conflation the "All button" bug (this ticket's own motivation) was.
+// hiddenByDefault() itself is internal, not on __vg, so it's mirrored here from its own
+// two-line definition (src/page.js) rather than assumed.
+check("a folder's legend row toggles \"hidden by default\" from its context menu", async (p) => {
+  const r = await p.j(`(function(){
+    var g = __vg.groupOrder().filter(function (x) { return x.charAt(0) !== "("; })[0];
+    var hiddenByDefault = function (x) {
+      return typeof __vg.folderShown[x] === "boolean" ? !__vg.folderShown[x] : __vg.isArchiveGroup(x);
+    };
+    var startShown = !hiddenByDefault(g);
+    var liveHiddenBefore = !!(__vg.state.hidden.folder || {})[g];   // to restore exactly, below
+
+    var row = document.querySelector('[data-g="' + g.replace(/"/g, '\\\\"') + '"]');
+    var rect = row.getBoundingClientRect();
+    row.dispatchEvent(new MouseEvent("contextmenu", {
+      bubbles: true, clientX: rect.left + 5, clientY: rect.top + 5 }));
+    var menu = document.querySelector('[id$="ctxmenu"]');
+    var visBtn = menu && !menu.hidden ? menu.querySelector("[data-vis]") : null;
+    var openedOk = !!visBtn;
+    var pressedBefore = openedOk ? visBtn.getAttribute("aria-pressed") : null;
+    if (visBtn) visBtn.click();
+    var closedAfter = menu.hidden;
+
+    var defaultFlipped = hiddenByDefault(g) === startShown;   // was hidden -> shown, or back
+    var rowAfter = document.querySelector('[data-g="' + g.replace(/"/g, '\\\\"') + '"]');
+    var legendFollowed = rowAfter && rowAfter.getAttribute("aria-pressed") === String(!startShown);
+    var settingsEye = document.querySelector('.scr [data-vis="' + g.replace(/"/g, '\\\\"') + '"]');
+    var settingsAgrees = settingsEye ? settingsEye.getAttribute("aria-pressed") === String(!startShown) : null;
+
+    // Restore both the default AND the live filter to exactly what they were, not just
+    // the default -- leaving this check's OWN side effect for the next one to trip over
+    // would be the identical mistake it exists to catch.
+    __vg.setFolderShown(Object.assign({}, __vg.folderShown, { [g]: startShown }));
+    var h = __vg.state.hidden.folder || (__vg.state.hidden.folder = {});
+    if (liveHiddenBefore) h[g] = true; else delete h[g];
+    __vg.syncAlpha(); __vg.applyLayout(false);
+
+    return { g: g, startShown: startShown, openedOk: openedOk, pressedBefore: pressedBefore,
+             closedAfter: closedAfter, defaultFlipped: defaultFlipped,
+             legendFollowed: legendFollowed, settingsAgrees: settingsAgrees };
+  })()`);
+  const ok = r.openedOk && r.pressedBefore === String(r.startShown) && r.closedAfter &&
+             r.defaultFlipped && r.legendFollowed && r.settingsAgrees !== false;
+  return { ok, detail: `"${r.g}" started ${r.startShown ? "shown" : "hidden"} by default; ` +
+    `menu opened with the toggle ${r.openedOk ? "present" : "MISSING"} ` +
+    `(pressed=${r.pressedBefore}); after click: menu closed=${r.closedAfter}, ` +
+    `default flipped=${r.defaultFlipped}, legend followed=${r.legendFollowed}, ` +
+    `settings panel agrees=${r.settingsAgrees}` };
+});
+
 /* ------------------------------------------------------------------------ the hub */
 
 /** The n most connected notes, which is what a person reaches for first. */

@@ -8731,7 +8731,13 @@ function mountVaultGraph(root, data, deps) {
     // autoKey is the folder's own automatic slot, omitted by the subfolder caller below --
     // a subfolder's automatic colour is a computed tint, not one of these twelve, so there
     // is nothing among them for it to mark. See page.css's data-auto rule.
-    function openCtxMenu(x, y, current, onPick, autoKey) {
+    //
+    // visShown/onToggleVisible are github#34: a folder's "hidden by default"
+    // (hiddenByDefault/pickVisible, both pre-existing -- see the settings panel's own eye
+    // button, which calls the same pickVisible) is otherwise reachable only from the
+    // settings panel. Both omitted by the subfolder caller, same reasoning as autoKey --
+    // there is no per-subfolder default-visibility setting to toggle, only per-folder.
+    function openCtxMenu(x, y, current, onPick, autoKey, visShown, onToggleVisible) {
       var el = $("ctxmenu");
       if (!el) return;
       var pal = paletteInfo();
@@ -8739,12 +8745,26 @@ function mountVaultGraph(root, data, deps) {
         role: "menuitemradio", current: current, autoKey: autoKey,
         titleFor: function (on, isAuto) { return isAuto ? " (automatic)" : ""; }
       });
+      // SAME MARKUP AND WORDING AS THE SETTINGS PANEL'S OWN EYE BUTTON
+      // (buildSettings, a few hundred lines down) -- "Shown by default" / "Hidden by
+      // default", so the two surfaces read as one setting rather than two.  data-vis has
+      // no value here (unlike the settings panel's data-vis="<folder>"): onToggleVisible
+      // is already bound to the right folder by the caller, so there is nothing to read
+      // back off the DOM.
+      var visLabel = visShown ? "Shown by default" : "Hidden by default";
+      var visHTML = onToggleVisible
+        ? '<button class="vis" data-vis aria-pressed="' + visShown + '" title="' + visLabel +
+          '">' + eyeSvg(visShown) + '<span>' + visLabel + '</span></button>'
+        : "";
       setHTML(el, '<div class="sws">' + sws + '</div>' +
                   '<button class="auto" data-key="" aria-pressed="' + !current +
-                  '" title="Back to automatic">Auto</button>');
+                  '" title="Back to automatic">Auto</button>' + visHTML);
       Array.prototype.forEach.call(el.querySelectorAll("[data-key]"), function (b) {
         b.onclick = function () { onPick(b.getAttribute("data-key") || null); closeCtxMenu(); };
       });
+      if (onToggleVisible) {
+        el.querySelector("[data-vis]").onclick = function () { onToggleVisible(); closeCtxMenu(); };
+      }
       el.hidden = false;
       var root0 = ROOT.getBoundingClientRect();
       var rx = x - root0.left, ry = y - root0.top;
@@ -8769,7 +8789,8 @@ function mountVaultGraph(root, data, deps) {
         ev.preventDefault();
         var g = gBtn.getAttribute("data-g");
         openCtxMenu(ev.clientX, ev.clientY, folderColors[g] || groupSlot[g] || "",
-                    function (key) { pickColor(g, key); }, groupAutoSlot[g] || "");
+                    function (key) { pickColor(g, key); }, groupAutoSlot[g] || "",
+                    !hiddenByDefault(g), function () { pickVisible(g); });
         return;
       }
       // The pooled tail row ("N smaller subfolders") carries several indices -- a pick
@@ -10797,6 +10818,15 @@ function mountVaultGraph(root, data, deps) {
       }
       return null;                              // the menu is closed, so nothing to aim at
     }
+    // The right-click menu's OWN "hidden by default" toggle (github#34) -- only present
+    // when the menu was opened on a top-level folder's row, not a subfolder's (see
+    // openCtxMenu: onToggleVisible is omitted there). No arg, unlike ctxswatch: there is
+    // only ever one.
+    if (kind === "ctxvis") {
+      var cmv = $("ctxmenu");
+      if (!cmv || cmv.hidden) return null;
+      return cmv.querySelector("[data-vis]");    // null on a subfolder's menu, or if closed
+    }
     // A YEAR CHIP under the strip. "busiest" picks the fullest year that HAS a chip, which
     // is not the same as the fullest year: below about 20px of pitch buildYears names every
     // other year, so the busiest one may have no button to aim at. Choosing among the chips
@@ -11123,12 +11153,17 @@ function mountVaultGraph(root, data, deps) {
    *   * COLOURS LAST, because colour is a preference and every earlier act should land
    *     on the disc's own palette, not one an earlier take happened to leave behind.
    *
-   * COLOURS IS EXCLUDED FROM THE FULL RUN -- see FULL_RUN_EXCLUDES, just below this
-   * function. It still exists here and still plays on its own via `demoAct("colours")`,
-   * for docs/features/colours.md's own clip: right-clicking a top-level folder's row for
-   * its colour picker. But subfoldercolor already puts that same right-click menu on
-   * camera, one level down, and running the identical gesture twice in the same take
-   * added length without showing the reader anything new.
+   * SUBFOLDERCOLOR IS EXCLUDED FROM THE FULL RUN -- see FULL_RUN_EXCLUDES, just below
+   * this function. It still exists here and still plays on its own via
+   * `demoAct("subfoldercolor")`, for docs/features/subfoldercolor.md's own clip. Both it
+   * and `colours` put the identical right-click menu on camera, so running both in the
+   * same take added length without showing the reader anything new -- the same reasoning
+   * as before, the choice of which one just reversed: `colours` right-clicks a TOP-LEVEL
+   * folder's row directly, `subfoldercolor` needs its folder's twisty opened first (the
+   * precondition `subfolders`, the act just before it, exists to set up) -- one extra
+   * click and one extra settle for the full run to pay on every re-record for a gesture
+   * that reads the same either way. `colours` is cheaper to show and colour is already
+   * demonstrated at the folder level nowhere else in the full run, so it is what stays in.
    *
    * PIN IS EARLY ON PURPOSE, not tucked in near the end where it used to sit. It is the
    * one act that puts a note somewhere other than its lattice seat, and it earns being
@@ -11284,6 +11319,35 @@ function mountVaultGraph(root, data, deps) {
       { click: true, target: ["eye", "06"], act: "folders", why: "hide a folder -- the wedges reallocate" },
       { settle: true, act: "folders", why: "let the wedges reallocate" },
 
+      // github#34: "hidden by default" -- previously reachable only from the settings
+      // panel's own eye buttons -- is now also on the SAME right-click menu the colours
+      // act uses, one row down from the swatches. "#1", the biggest folder, on purpose:
+      // the eye click just above moves a handful of wedges, and the point of putting this
+      // control in the legend is that it reaches the whole disc from where you are already
+      // looking -- worth showing on a gap big enough that the reallocation is unmistakable
+      // rather than a folder small enough to wonder if anything happened at all.
+      { rightclick: true, target: ["group", "#1"], act: "folders",
+        why: "right-click the biggest folder for its own menu" },
+      { settle: true, act: "folders", why: "let the menu open" },
+      { click: true, target: ["ctxvis", ""], act: "folders",
+        why: "hide it by default too, from the same menu" },
+      { settle: true, act: "folders", why: "the wedges reallocate around a much bigger gap" },
+
+      // AND PUT IT BACK, unlike the eye click above. That one only ever touched the LIVE
+      // filter (state.hidden), which `allon` further down restores along with everything
+      // else -- but this control writes folderShown, the DEFAULT, which nothing else in
+      // this act (or a later one) resets. Left toggled, the biggest folder would stay
+      // hidden by default for the rest of a full-storyboard run, including any act after
+      // this one that happens to re-derive its own starting state from the default rather
+      // than the live filter it's been running against on camera -- exactly the
+      // live-vs-default split this ticket exists to close, so leaving it dangling here
+      // would be its own small version of that bug.
+      { rightclick: true, target: ["group", "#1"], act: "folders", why: "right-click it again" },
+      { settle: true, act: "folders", why: "let the menu open" },
+      { click: true, target: ["ctxvis", ""], act: "folders",
+        why: "...and put the default back, so later acts start clean" },
+      { settle: true, act: "folders", why: "the wedges settle back" },
+
       // And `only`, which is the fastest way to answer "where does one folder live".
       // SAFE HERE because nothing has been unfolded yet: see the note at the top about the
       // 97px row shift that soloing an unfolded legend causes.
@@ -11397,10 +11461,13 @@ function mountVaultGraph(root, data, deps) {
   }
 
   // ACTS THAT EXIST FOR THEIR OWN PER-FEATURE CLIP, but do not appear in the full run.
-  // Just "colours" for now: subfoldercolor already puts the same right-click colour menu
-  // on camera one level down, so replaying the identical gesture on a top-level folder
-  // too, right at the end of an 85-beat take, cost length without showing anything new.
-  var FULL_RUN_EXCLUDES = ["colours"];
+  // Just "subfoldercolor" now -- it and "colours" put the identical right-click colour
+  // menu on camera, so only one belongs in the full take. Was "colours" that sat out;
+  // swapped because subfoldercolor's version needs its folder's twisty opened first (an
+  // extra click, an extra settle, on every re-record), where colours reaches the same
+  // menu directly off a top-level row. See the doc comment above demoMode() for the
+  // full reasoning.
+  var FULL_RUN_EXCLUDES = ["subfoldercolor"];
 
   // THE FULL STORYBOARD, with FULL_RUN_EXCLUDES filtered back out of demoMode()'s single
   // list -- what the hero recording actually plays. demoMode()'s own trailing park beat
