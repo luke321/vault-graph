@@ -3677,36 +3677,8 @@ function mountVaultGraph(root, data, deps) {
     // size change is 2.2% against 252% before.
     // Measured from this pass -- unless a cascade is walking it, in which case the walked value
     // is the answer and measuring would overwrite it with a per-frame statistic.
-    //
-    // CAPPED BY THE SAME DENSITY_MAX THAT BOUNDS EVERYTHING ELSE THIS FILTERED. `pick(pool)`
-    // measures a real gap between real neighbours, which is honest and, for that reason,
-    // structurally unbounded: a band filtered down to one or two notes has almost no
-    // neighbours to be tight against, so the 10th percentile it reports is close to the
-    // whole arc the note has to itself. Nothing upstream of this line stops that number
-    // from being enormous, and dotPx's own DOT_ROOM_MAX only bounds the RATIO of room to
-    // the live pitch -- so when the pitch has ALSO grown under the same filtering, the two
-    // ratios can move together instead of one correcting the other. Measured on "01 -
-    // Projects" soloed in the real vault (1 note reaching the inner band, github#35): room
-    // 586 against a full-vault room nowhere near it, room/pit only 1.02 (nowhere near
-    // DOT_ROOM_MAX's 2.6), and a 159px dot sitting on top of a hub whose own radius is a
-    // few dozen pixels -- DOT_ROOM_MAX never engaged because nothing was disagreeing with
-    // the equally-inflated pitch it was being measured against.
-    //
-    // Same ratio bandDensity() already computes for the row spacing (sqrt(full/now),
-    // capped at DENSITY_MAX) -- reused here rather than invented, because it is already the
-    // file's answer to "how sparse is this band relative to its own full self", and both
-    // room and pitch are supposed to answer to the same filtering.
-    var bandNow = { i: 0, o: 0 };
-    (plan.cells || []).forEach(function (c) { bandNow[c.inner ? "i" : "o"] += c.wsum; });
-    var capRoom = function (room, key) {
-      if (!geomLock || !geomLock.bandTotal) return room;
-      var full = geomLock.bandTotal[key] || 0, now = bandNow[key] || 0;
-      if (!(full > 0.0001) || !(now > 0.0001)) return room;
-      var ratio = Math.sqrt(full / now);
-      return ratio > DENSITY_MAX ? room * (DENSITY_MAX / ratio) : room;
-    };
     if (!roomNow) {
-      bandOf("i").room = capRoom(pick(pool.i), "i"); bandOf("o").room = capRoom(pick(pool.o), "o");
+      bandOf("i").room = pick(pool.i); bandOf("o").room = pick(pool.o);
     }
     Object.keys(cellOf).forEach(function (id) {
       var m = cellMin[cellOf[id]];
