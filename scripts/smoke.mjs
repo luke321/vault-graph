@@ -2847,6 +2847,94 @@ check("the hub's dots shrink as it fills", async (p) => {
                        (ok ? " (monotonic)" : "  NOT MONOTONIC") };
 });
 
+// A row-0 inner-band note's centre sits exactly on the hub boundary by construction (see
+// HUB_ROW0_FRAC in src/page.js), so nothing but its own drawn radius decides how far it
+// visually pokes into the hub hole. Soloing a folder down to a single note that lands alone
+// in the inner band collapses that band to one row, and the ramp used to size it off the
+// band's WHOLE thickness instead of a normal row's slice -- github#35, "the notes touch the
+// brain". None of the three fixture vaults' default state hits this shape (it needs a folder
+// filtered down to one note that happens to land inner), which is how it shipped unnoticed;
+// this check manufactures it by trying every folder in turn.
+//
+// EVERY FOLDER, NOT THE FIRST HIT, and the WORST result is what gets asserted. Different
+// folders that each solo to exactly one inner note do not balloon by the same amount -- the
+// surviving note's own weight feeds the ramp along with the band pitch, and which folder
+// draws the worst one shifts with the vault's own generated content (the generators anchor
+// to today's date, so note weights are not perfectly stable run to run). Measured live on
+// the demo vault pre-fix: "14 - Reading List" solos to a healthy-looking 2.7%, while "13 -
+// Someday Maybe" -- also a single note left in the inner band, just a different one --
+// comes out at 15.4%. Stopping at the first hit would have asserted on the healthy folder
+// and missed the regression this check exists to catch.
+//
+// DETECTED THE SAME WAY THE PAGE ITSELF REPORTS IT -- debugDump().bands.inner.notes, not a
+// hand-rolled band split out here. buildWedgePlan(false) was tried first and is wrong for
+// this: `false` is its onlyVisible argument, so it returns EVERY folder's cell against the
+// FULL vault regardless of what is currently hidden, not the live post-solo split -- it
+// happened to agree with the live split for some folders and silently disagreed for others,
+// which is worse than not checking at all.
+//
+// NO CONSTANTS IMPORTED FROM THE LAYOUT, same reasoning as "the resting disc is on the
+// lattice": with exactly one inner note left, it is also the smallest-radius visible note on
+// the whole disc (the inner band is always innermost), so the hub radius is measured as
+// THAT note's own radius -- which IS the boundary, row 0 being what it is -- rather than
+// recomputed from INNER_SCALE and UNIT out here.
+check("a soloed hub-adjacent note stays inside the hub's own radius", async (p) => {
+  const r = await p.j(`(function(){
+    var order = __vg.groupOrder().slice();
+    var counts = {};
+    __vg.graph.forEachNode(function(id, a){ counts[a.folder] = (counts[a.folder] || 0) + 1; });
+    var a0 = __vg.renderer.graphToViewport({ x: 0, y: 0 });
+    var b0 = __vg.renderer.graphToViewport({ x: 160, y: 0 });
+    var perPx = 160 / Math.hypot(b0.x - a0.x, b0.y - a0.y);
+
+    var tried = [], hits = [];
+    for (var i = 0; i < order.length; i++) {
+      var g = order[i];
+      var h = {};
+      order.forEach(function (n) { h[n] = (n !== g); });
+      __vg.state.hidden.folder = h; __vg.syncAlpha(); __vg.applyLayout(false);
+      var dd = __vg.debugDump();
+      var nIn = dd.bands.inner ? dd.bands.inner.notes : 0;
+      tried.push(g + ":" + nIn);
+      if (nIn !== 1) continue;
+      var best = null;
+      __vg.graph.forEachNode(function(id, a){
+        if ((__vg.alpha[id] || 0) < 0.999) return;
+        var rr = Math.hypot(a.x, a.y);
+        if (!best || rr < best.r) best = { id: id, r: rr };
+      });
+      var d = __vg.renderer.getNodeDisplayData(best.id);
+      var dotR = __vg.renderer.scaleSize(d.size) * perPx;
+      hits.push({ g: g, notes: counts[g], hubR: best.r, dotR: dotR, frac: dotR / best.r });
+    }
+
+    __vg.state.hidden.folder = {}; __vg.syncAlpha(); __vg.applyLayout(false);
+    if (!hits.length) return { hit: false, tried: tried };
+    hits.sort(function (x, y) { return y.frac - x.frac; });
+    var w = hits[0];
+    return { hit: true, folder: w.g, notes: w.notes, hubR: Math.round(w.hubR),
+             dotR: Math.round(w.dotR * 100) / 100, frac: w.frac, nHits: hits.length };
+  })()`);
+  await settle(p);
+  if (!r.hit) {
+    // NOT ASSERTED, not failed -- same shape as "the hub stays the same share of the disc"
+    // above. The dominant-folder vault's few, large groups never happen to solo down to
+    // exactly one inner note (tried and reported below), which is a fact about that
+    // fixture's folder shape, not a defect: the other two vaults exercise this scenario.
+    return { ok: true, detail: `NOT ASSERTED: no folder on this vault solos down to a single ` +
+                                `inner-band note -- tried ${r.tried.join(", ")}` };
+  }
+  // 0.15, not HUB_ROW0_FRAC's own 0.08: this checks the OUTCOME stays sane, with headroom
+  // for the note's own weight and pixel rounding, not the exact constant -- a tuning change
+  // to HUB_ROW0_FRAC should not have to touch this file. The defect measured 0.31-0.59
+  // before the fix; a healthy row-0 dot on the demo vault at rest measures ~0.03-0.04.
+  const ok = r.frac <= 0.15;
+  return { ok, detail: `worst of ${r.nHits} folder(s) that solo to 1 note alone in the inner ` +
+                       `band: "${r.folder}" (${r.notes} notes) at radius ${r.hubR} -- dot ` +
+                       `radius ${r.dotR}, ${(r.frac * 100).toFixed(1)}% of the hub's own radius ` +
+                       `(must be <=15%)` };
+});
+
 check("the mark yields to the hub and comes back", async (p) => {
   const markOn = () => p.j(`(function(){
     var el = document.querySelector("#vg-logo");
