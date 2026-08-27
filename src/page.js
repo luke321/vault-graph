@@ -8731,7 +8731,13 @@ function mountVaultGraph(root, data, deps) {
     // autoKey is the folder's own automatic slot, omitted by the subfolder caller below --
     // a subfolder's automatic colour is a computed tint, not one of these twelve, so there
     // is nothing among them for it to mark. See page.css's data-auto rule.
-    function openCtxMenu(x, y, current, onPick, autoKey) {
+    //
+    // visShown/onToggleVisible are github#34: a folder's "hidden by default"
+    // (hiddenByDefault/pickVisible, both pre-existing -- see the settings panel's own eye
+    // button, which calls the same pickVisible) is otherwise reachable only from the
+    // settings panel. Both omitted by the subfolder caller, same reasoning as autoKey --
+    // there is no per-subfolder default-visibility setting to toggle, only per-folder.
+    function openCtxMenu(x, y, current, onPick, autoKey, visShown, onToggleVisible) {
       var el = $("ctxmenu");
       if (!el) return;
       var pal = paletteInfo();
@@ -8739,12 +8745,26 @@ function mountVaultGraph(root, data, deps) {
         role: "menuitemradio", current: current, autoKey: autoKey,
         titleFor: function (on, isAuto) { return isAuto ? " (automatic)" : ""; }
       });
+      // SAME MARKUP AND WORDING AS THE SETTINGS PANEL'S OWN EYE BUTTON
+      // (buildSettings, a few hundred lines down) -- "Shown by default" / "Hidden by
+      // default", so the two surfaces read as one setting rather than two.  data-vis has
+      // no value here (unlike the settings panel's data-vis="<folder>"): onToggleVisible
+      // is already bound to the right folder by the caller, so there is nothing to read
+      // back off the DOM.
+      var visLabel = visShown ? "Shown by default" : "Hidden by default";
+      var visHTML = onToggleVisible
+        ? '<button class="vis" data-vis aria-pressed="' + visShown + '" title="' + visLabel +
+          '">' + eyeSvg(visShown) + '<span>' + visLabel + '</span></button>'
+        : "";
       setHTML(el, '<div class="sws">' + sws + '</div>' +
                   '<button class="auto" data-key="" aria-pressed="' + !current +
-                  '" title="Back to automatic">Auto</button>');
+                  '" title="Back to automatic">Auto</button>' + visHTML);
       Array.prototype.forEach.call(el.querySelectorAll("[data-key]"), function (b) {
         b.onclick = function () { onPick(b.getAttribute("data-key") || null); closeCtxMenu(); };
       });
+      if (onToggleVisible) {
+        el.querySelector("[data-vis]").onclick = function () { onToggleVisible(); closeCtxMenu(); };
+      }
       el.hidden = false;
       var root0 = ROOT.getBoundingClientRect();
       var rx = x - root0.left, ry = y - root0.top;
@@ -8769,7 +8789,8 @@ function mountVaultGraph(root, data, deps) {
         ev.preventDefault();
         var g = gBtn.getAttribute("data-g");
         openCtxMenu(ev.clientX, ev.clientY, folderColors[g] || groupSlot[g] || "",
-                    function (key) { pickColor(g, key); }, groupAutoSlot[g] || "");
+                    function (key) { pickColor(g, key); }, groupAutoSlot[g] || "",
+                    !hiddenByDefault(g), function () { pickVisible(g); });
         return;
       }
       // The pooled tail row ("N smaller subfolders") carries several indices -- a pick
