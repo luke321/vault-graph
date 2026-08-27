@@ -11153,12 +11153,17 @@ function mountVaultGraph(root, data, deps) {
    *   * COLOURS LAST, because colour is a preference and every earlier act should land
    *     on the disc's own palette, not one an earlier take happened to leave behind.
    *
-   * COLOURS IS EXCLUDED FROM THE FULL RUN -- see FULL_RUN_EXCLUDES, just below this
-   * function. It still exists here and still plays on its own via `demoAct("colours")`,
-   * for docs/features/colours.md's own clip: right-clicking a top-level folder's row for
-   * its colour picker. But subfoldercolor already puts that same right-click menu on
-   * camera, one level down, and running the identical gesture twice in the same take
-   * added length without showing the reader anything new.
+   * SUBFOLDERCOLOR IS EXCLUDED FROM THE FULL RUN -- see FULL_RUN_EXCLUDES, just below
+   * this function. It still exists here and still plays on its own via
+   * `demoAct("subfoldercolor")`, for docs/features/subfoldercolor.md's own clip. Both it
+   * and `colours` put the identical right-click menu on camera, so running both in the
+   * same take added length without showing the reader anything new -- the same reasoning
+   * as before, the choice of which one just reversed: `colours` right-clicks a TOP-LEVEL
+   * folder's row directly, `subfoldercolor` needs its folder's twisty opened first (the
+   * precondition `subfolders`, the act just before it, exists to set up) -- one extra
+   * click and one extra settle for the full run to pay on every re-record for a gesture
+   * that reads the same either way. `colours` is cheaper to show and colour is already
+   * demonstrated at the folder level nowhere else in the full run, so it is what stays in.
    *
    * PIN IS EARLY ON PURPOSE, not tucked in near the end where it used to sit. It is the
    * one act that puts a note somewhere other than its lattice seat, and it earns being
@@ -11328,6 +11333,21 @@ function mountVaultGraph(root, data, deps) {
         why: "hide it by default too, from the same menu" },
       { settle: true, act: "folders", why: "the wedges reallocate around a much bigger gap" },
 
+      // AND PUT IT BACK, unlike the eye click above. That one only ever touched the LIVE
+      // filter (state.hidden), which `allon` further down restores along with everything
+      // else -- but this control writes folderShown, the DEFAULT, which nothing else in
+      // this act (or a later one) resets. Left toggled, the biggest folder would stay
+      // hidden by default for the rest of a full-storyboard run, including any act after
+      // this one that happens to re-derive its own starting state from the default rather
+      // than the live filter it's been running against on camera -- exactly the
+      // live-vs-default split this ticket exists to close, so leaving it dangling here
+      // would be its own small version of that bug.
+      { rightclick: true, target: ["group", "#1"], act: "folders", why: "right-click it again" },
+      { settle: true, act: "folders", why: "let the menu open" },
+      { click: true, target: ["ctxvis", ""], act: "folders",
+        why: "...and put the default back, so later acts start clean" },
+      { settle: true, act: "folders", why: "the wedges settle back" },
+
       // And `only`, which is the fastest way to answer "where does one folder live".
       // SAFE HERE because nothing has been unfolded yet: see the note at the top about the
       // 97px row shift that soloing an unfolded legend causes.
@@ -11441,10 +11461,13 @@ function mountVaultGraph(root, data, deps) {
   }
 
   // ACTS THAT EXIST FOR THEIR OWN PER-FEATURE CLIP, but do not appear in the full run.
-  // Just "colours" for now: subfoldercolor already puts the same right-click colour menu
-  // on camera one level down, so replaying the identical gesture on a top-level folder
-  // too, right at the end of an 85-beat take, cost length without showing anything new.
-  var FULL_RUN_EXCLUDES = ["colours"];
+  // Just "subfoldercolor" now -- it and "colours" put the identical right-click colour
+  // menu on camera, so only one belongs in the full take. Was "colours" that sat out;
+  // swapped because subfoldercolor's version needs its folder's twisty opened first (an
+  // extra click, an extra settle, on every re-record), where colours reaches the same
+  // menu directly off a top-level row. See the doc comment above demoMode() for the
+  // full reasoning.
+  var FULL_RUN_EXCLUDES = ["subfoldercolor"];
 
   // THE FULL STORYBOARD, with FULL_RUN_EXCLUDES filtered back out of demoMode()'s single
   // list -- what the hero recording actually plays. demoMode()'s own trailing park beat
