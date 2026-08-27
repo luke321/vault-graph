@@ -5,6 +5,12 @@ it vacated and the whole disc re-packs, because the layout is a statement about 
 currently visible, not a fixed seating plan with gaps in it. **Solo** a folder to hide
 everything else in one click; **show everything** brings it all back.
 
+Right-click a folder for the same twelve-swatch colour menu (see [Colours](colours.md)) —
+one row down from the swatches is an eye button for **"hidden by default"**: whether this
+folder starts hidden every time the disc loads. That setting used to be reachable only from
+the settings panel's own eye buttons; it's on the legend's own context menu now too, so it's
+never more than a right-click away from the folder it belongs to.
+
 Search narrows to matching notes and lists the hits — a related way to cut down what's
 shown, but not part of this act (there's no `search` beat in the storyboard), so it has no
 clip of its own here.
