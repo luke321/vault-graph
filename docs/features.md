@@ -26,7 +26,7 @@ share of the vault. The layout is deterministic — no simulation, no seed — s
 vault always draws the same picture. Refresh replays the vault growing from its first note
 to now.
 
-![Refresh clicked, the whole vault regrowing from its first note to now while the date ribbon's range handle sweeps along with it](../assets/features/intro.webp)
+<img src="../assets/features/intro.webp" width="100%" alt="Refresh clicked, the whole vault regrowing from its first note to now while the date ribbon's range handle sweeps along with it">
 
 ## Reading one note
 
@@ -35,7 +35,7 @@ to now.
 Hover a note to raise it and dim everything unconnected to it. Click for a panel — folder,
 type, tags, word count, linked notes — each one clickable to jump across the disc.
 
-![A daily note hovered, then a meeting note hovered, each raising and haloing its own links while the rest of the disc dims](../assets/features/note.webp)
+<img src="../assets/features/note.webp" width="100%" alt="A daily note hovered, then a meeting note hovered, each raising and haloing its own links while the rest of the disc dims">
 
 ## Filtering by folder
 
@@ -44,7 +44,7 @@ type, tags, word count, linked notes — each one clickable to jump across the d
 Click a folder in the legend to hide it; the remaining wedges grow back into the angle it
 vacated and the disc re-packs. Solo a folder to hide everything else in one click.
 
-![A folder hidden, the disc re-packing to fill the angle it vacated, then one folder soloed to hide everything else, then everything shown again](../assets/features/folders.webp)
+<img src="../assets/features/folders.webp" width="100%" alt="A folder hidden, the disc re-packing to fill the angle it vacated, then one folder soloed to hide everything else, then everything shown again">
 
 ## The heatmap
 
@@ -53,7 +53,7 @@ vacated and the disc re-packs. Solo a folder to hide everything else in one clic
 One square per day above the disc, coloured from what landed in it. Hover a day to halo
 its notes on the disc; click to keep the mark.
 
-![The busiest day hovered, then two more, each haloing its notes on the disc, then the busiest day clicked to keep the mark, and clicked again to let it go](../assets/features/heatmap.webp)
+<img src="../assets/features/heatmap.webp" width="100%" alt="The busiest day hovered, then two more, each haloing its notes on the disc, then the busiest day clicked to keep the mark, and clicked again to let it go">
 
 ## Subfolders
 
@@ -62,7 +62,7 @@ its notes on the disc; click to keep the mark.
 Open a folder's twisty to reach the subfolders inside it — tinted from the parent's hue,
 hoverable and clickable the same way a top-level folder is.
 
-![A folder's twisty opened to reach its subfolders, one hovered to find it on the disc, then clicked to halo it and push its sub-wedge out, then let back down and folded away](../assets/features/subfolders.webp)
+<img src="../assets/features/subfolders.webp" width="100%" alt="A folder's twisty opened to reach its subfolders, one hovered to find it on the disc, then clicked to halo it and push its sub-wedge out, then let back down and folded away">
 
 ## The camera
 
@@ -70,7 +70,7 @@ hoverable and clickable the same way a top-level folder is.
 
 Scroll to zoom, drag to pan, double-click or the corner button to reset.
 
-![Scrolling to zoom in, dragging to pan, double-clicking to reset, zooming in again, then the corner button resetting it](../assets/features/camera.webp)
+<img src="../assets/features/camera.webp" width="100%" alt="Scrolling to zoom in, dragging to pan, double-clicking to reset, zooming in again, then the corner button resetting it">
 
 ## The timeline
 
@@ -80,7 +80,7 @@ A strip under the heatmap band carrying every month of the vault: two handles ca
 range, a pill sets the heatmap's own 52-week window, and a chip per year jumps straight
 there. Replaced the sidebar's old rank slider — the ribbon is the only timeline now.
 
-![The date range dragged in by both handles, a year chip hovered and clicked, the heatmap's own window slid back and forward on its own, then the date range cleared](../assets/features/timeline.webp)
+<img src="../assets/features/timeline.webp" width="100%" alt="The date range dragged in by both handles, a year chip hovered and clicked, the heatmap's own window slid back and forward on its own, then the date range cleared">
 
 ## Compact date axis
 
@@ -91,7 +91,7 @@ sparse year collapses toward the same narrow width every other sparse year gets;
 one keeps growing to fit what it actually holds. Off, in the gear or the icon beside the
 date fields, gives every year and month back its plain calendar width.
 
-![The compact axis toggled off, spreading every year and month back to plain calendar width, then toggled back on to regather around where the notes actually are](../assets/features/compactaxis.webp)
+<img src="../assets/features/compactaxis.webp" width="100%" alt="The compact axis toggled off, spreading every year and month back to plain calendar width, then toggled back on to regather around where the notes actually are">
 
 ## Pin a note to the hub
 
@@ -102,7 +102,7 @@ click **Pin to hub** — three ways to hold up to thirteen notes together in the
 of the ring. The ring closes around wherever a pinned note came from, and reopens the
 moment it is unpinned.
 
-![A note dragged into the hole to pin it, a second note right-clicked to pin it the other way, and a third pinned from its own detail card, whose panel is then closed](../assets/features/pin.webp)
+<img src="../assets/features/pin.webp" width="100%" alt="A note dragged into the hole to pin it, a second note right-clicked to pin it the other way, and a third pinned from its own detail card, whose panel is then closed">
 
 ## Folder colours
 
@@ -114,7 +114,7 @@ picker at the row itself, no settings panel needed: click a slot to hold that fo
 a colour, **Auto** hands it back to its positional slot. Setting one folder never changes
 another, and two folders may share a colour — useful for saying they belong together.
 
-![Two folders right-clicked in turn, each given a colour of its own from the picker, then both put back to automatic](../assets/features/colours.webp)
+<img src="../assets/features/colours.webp" width="100%" alt="Two folders right-clicked in turn, each given a colour of its own from the picker, then both put back to automatic">
 
 ## Subfolder colours
 
@@ -126,4 +126,4 @@ parent's own hue. The row only exists once its folder's twisty is open, the same
 precondition the subfolders feature needs. **Auto** hands the tint back to whatever the
 parent folder and position would give it anyway.
 
-![A folder unfolded to reach a subfolder, that subfolder right-clicked for its own colour menu, given a colour, then put back to automatic](../assets/features/subfoldercolor.webp)
+<img src="../assets/features/subfoldercolor.webp" width="100%" alt="A folder unfolded to reach a subfolder, that subfolder right-clicked for its own colour menu, given a colour, then put back to automatic">
