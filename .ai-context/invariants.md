@@ -927,3 +927,50 @@ branch `fix/small-folder-animation`. That branch is unrelated (a stale, ~30-comm
 wedge-seam-overlay experiment ending in two reverts) and no such fix existed anywhere on
 `develop` before this entry — folder toggles carried the identical defect, just smaller,
 until now.
+
+## A row-0 dot may not eat past a fixed share of the hub's own radius
+
+github#35, the dot-sizing half (the hub-boundary-*position* half shipped separately in
+1.8.0). `placeCell` puts row 0 of the inner band at `r0 * INNER_SCALE` — the same circle
+the hub boundary is drawn at — for every inner band, always. A row-0 note's centre sits
+ON that boundary by construction, so nothing but the note's own drawn radius decides how
+far it visually pokes into the hub; normally invisible, since a healthy dot is a small
+fraction of `r0`.
+
+Soloing a folder down to a single note that lands alone in the inner band collapses that
+band to one row, so `spInner = thickI / rows` becomes the band's WHOLE radial thickness
+instead of a normal row's slice, and `rampFor` sizes the dot off that pitch. Measured live
+on the reported repro (`01 - Projects`, 5 notes, real vault mirrored via
+`make-mirror-vault.mjs`): `room.i` 586, `pitchInnerUnits` 573, so the room/pitch shrink
+factor `f` in `dotPx` came out to 1.02 — barely above 1, and NOT the cause, despite being
+the first guess. The ramp itself balloons, from `spInner` alone.
+
+A band-wide cap on `room` (the same `sqrt(full/now)` density ratio `bandDensity()` already
+uses for row spacing) was tried and reverted the same day: it fixed the reported case but
+broke `"filtered to the bone, the disc stays drawable"` on two other fixture vaults —
+ordinary aggressive date filtering also produces sparse bands, nothing to do with the hub,
+and a band-wide cap on `room` cannot distinguish the two. Bisected: dominant-folder vault
+`range last 2.5%` diameter/step 0.07 against a 0.15 floor with the cap, 0.33 without;
+10k vault `range last 0.5%` 0.12 with the cap, comfortably passing without.
+
+**Fixed** with `HUB_ROW0_FRAC`, a per-note cap scoped to row 0 of the inner band only,
+following the `edgeCap` pattern (a hard geometric bound computed once during placement,
+consumed alongside `edgeCap`'s own cap at the end of `dotPx`) rather than touching
+`room`/`sp`/the ramp — it cannot affect any other row or band, so it cannot repeat the
+regression above. `HUB_ROW0_FRAC = 0.08`: measured a healthy row-0 dot's own radius as a
+fraction of `r0 * INNER_SCALE * UNIT` on the demo vault at rest, 4.2% (36 of 851 units) —
+doubled for margin.
+
+```
+node scripts/smoke.mjs --only "filtered to the bone"     # must stay green -- what broke last time
+node scripts/smoke.mjs --only "soloed hub-adjacent"       # the new check for this fix
+```
+
+The second check tries every folder on a vault in turn, soloing each and reading
+`__vg.debugDump().bands.inner.notes === 1` — the app's own live band count, not a
+hand-rolled reconstruction (a `buildWedgePlan(false)` reconstruction was tried first and
+is wrong here: `false` is `onlyVisible`, so it returns every folder's cell against the
+FULL vault regardless of what is hidden). It asserts the WORST folder's fraction, not the
+first hit, since which folder balloons worst shifts with the vault's own generated content
+— none of the three fixtures' resting state hits this shape at all, which is how it
+shipped unnoticed the first time.

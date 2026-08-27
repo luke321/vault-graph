@@ -862,6 +862,21 @@ function mountVaultGraph(root, data, deps) {
   // capacities are computed on the unscaled geometry and the whole band is scaled
   // afterwards, so the proportions are untouched -- it is purely a size trim.
   var INNER_SCALE = 0.8;
+  // The most a row-0 inner-band dot may cover of the hub's own radius (r0 * INNER_SCALE).
+  // Row 0 is placed with its centre exactly ON that boundary in every layout (placeCell:
+  // `(base + row*SP) * INNER_SCALE`, row 0 drops the row term), so only the dot's own
+  // radius decides how far it visually pokes into the hub -- normally negligible, since a
+  // healthy row-0 dot is a small fraction of r0. Measured on the demo vault at rest: 4.2%
+  // (36 of 850.7 graph units, the biggest dot in a 6-row inner band). Doubled for margin,
+  // comfortably below where the reported defect actually sits: soloing a folder down to a
+  // single inner-locked note collapses the band to that one row, and the dot then balloons
+  // to 30-60% of r0 -- "the notes touch the brain", github#35. See dotPx, where this caps
+  // ONLY a note placed in row 0 of the inner band, the same way edgeCap caps a note against
+  // its own wedge edge -- a per-note geometric bound, not a band-wide statistic. (A
+  // band-wide cap on `room` was tried for this instead and reverted: it fixed the reported
+  // case but also shrank dots in ordinary sparse-but-healthy bands, since `room` and the
+  // ramp both feed every note in the band alike.)
+  var HUB_ROW0_FRAC = 0.08;
   // How much of the locked hub-to-ring span the inner band fills; the rest is the channel
   // between the rings. At module scope because the sub-split gate needs a band's depth before
   // the band is packed, which is above where this used to live.
@@ -2786,7 +2801,10 @@ function mountVaultGraph(root, data, deps) {
         // sits at flips with it. The allowances flip with it too, or the fat note gets the
         // thin note's clearance every other row.
         var eA = edgeA[r.row] || 0, eB = edgeB[r.row] || 0;
-        out.push({ id: r.id, r: rr, u: pad + u0 * span,
+        // row IS PASSED OUT, alongside the radius it already decided -- ringsLayout marks
+        // row 0 of the inner band from it (see hubRow0Next there), rather than trying to
+        // reconstruct "is this row 0" from rr later, off the same radius arithmetic twice.
+        out.push({ id: r.id, r: rr, u: pad + u0 * span, row: r.row,
                    eA: (r.row % 2 === 1) ? eB : eA,
                    eB: (r.row % 2 === 1) ? eA : eB });
       });
@@ -3062,6 +3080,9 @@ function mountVaultGraph(root, data, deps) {
     // Per note, its distance to the nearer edge of its own wedge. A hard cap on the drawn
     // radius -- see where it is filled, and dotPx.
     var edgeCapNext = Object.create(null);
+    // Which notes placeCell put in row 0 of the inner band -- the row whose centre sits
+    // exactly on the hub boundary. See HUB_ROW0_FRAC and dotPx.
+    var hubRow0Next = Object.create(null);
     var dbgCells = DBG.on ? [] : null;
     if (probe) { lastStart = Object.create(null); lastArc = Object.create(null); lastBand = Object.create(null); }
     [true, false].forEach(function (isInner) {
@@ -3358,6 +3379,11 @@ function mountVaultGraph(root, data, deps) {
           // note could otherwise ask for more room than it has and invert.
           var arc = a1 - a0;
           var rGraph = Math.max(1e-6, sl.r * UNIT);
+          // ROW 0 OF THE INNER BAND, from the row placeCell actually put this note in -- not
+          // reconstructed from rGraph, which row 0 shares with the hub boundary by
+          // construction and so cannot self-distinguish from "very close to it". See
+          // HUB_ROW0_FRAC and dotPx.
+          if (isInner && sl.row === 0) hubRow0Next[sl.id] = true;
           // HALF A PITCH IS THE ZERO POINT: two wedges each holding their end note half a step
           // in from their own edge put those two notes exactly one step apart, which is a
           // boundary nobody can see. Everything past that is the channel, and the channel is
@@ -3688,6 +3714,7 @@ function mountVaultGraph(root, data, deps) {
     // follows two blocks up, for the same reason.
     cellRoom = cellNow || cellRoomNext;
     edgeCap = edgeNow || edgeCapNext;
+    hubRow0 = hubRow0Next;
     if (planRoom) { /* kept on the plan for the probe; the live pool is what draws */ }
     dotFit = fit;
     if (dbgCells) DBG.cells = dbgCells;
@@ -5286,6 +5313,10 @@ function mountVaultGraph(root, data, deps) {
   // Per note, its distance to the nearer edge of its own wedge, in graph units. A dot may not
   // exceed it, or it crosses into the seam.
   var edgeCap = Object.create(null);
+  // Which notes are in row 0 of the inner band -- a placement fact, not an animated
+  // quantity, so unlike edgeCap/cellRoom it is never walked mid-cascade; freshly computed
+  // every pass is exactly right. See HUB_ROW0_FRAC and dotPx.
+  var hubRow0 = Object.create(null);
   // WHAT THE LAST CASCADE WAS ASKED TO DO. Every question about a jump starts with
   // "did it animate at all, and over how many notes", and inferring that from frame
   // counts is guesswork -- an instant apply and a one-frame animation look identical
@@ -7214,6 +7245,24 @@ function mountVaultGraph(root, data, deps) {
         var capV = rp.m * NODE_MAX + rp.b;
         var vMax = capV * (capU / hiU);
         if (v > vMax) v = vMax;
+      }
+    }
+    // AND NEVER PAST HUB_ROW0_FRAC OF THE HUB'S OWN RADIUS, for a note actually placed in
+    // row 0 of the inner band. See HUB_ROW0_FRAC for why row 0 needs this at all -- its
+    // centre sits exactly on the hub boundary by construction, so nothing but the dot's own
+    // radius decides how far it pokes into the hub, and the ramp above sizes it off the
+    // band's pitch, which is the whole band's thickness whenever the band collapses to this
+    // one row (github#35). Same graph-unit-to-size-unit conversion as the wedge-edge cap
+    // just above, against a different figure -- a fixed share of r0 instead of a per-note
+    // wedge distance, because unlike a wedge edge this boundary does not vary by note.
+    if (isIn && geomLock && hubRow0[id]) {
+      var hubU = HUB_ROW0_FRAC * geomLock.r0 * INNER_SCALE * UNIT;
+      var pitH = pitchUnits("i");
+      var hiH = DOT_OF_PITCH * pitH;
+      if (hiH > 1e-6) {
+        var hubCapV = rp.m * NODE_MAX + rp.b;
+        var hubVMax = hubCapV * (hubU / hiH);
+        if (v > hubVMax) v = hubVMax;
       }
     }
     return v;
