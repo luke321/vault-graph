@@ -31,8 +31,8 @@ published tag breaks every link to it.
 
 ## 1.8.0 — "The Hub" — 2026-08-27
 
-Four correctness bugs in pin-to-hub, a small inner-locked folder no longer overlapping the
-hub when soloed, and the demo pipeline stops being able to record the real vault by
+Four correctness bugs in pin-to-hub, the hub's boundary brought in line with the inner
+ring's own geometry, and the demo pipeline stops being able to record the real vault by
 accident.
 
 - **Four correctness bugs in pin-to-hub, found in an adversarial review of the
@@ -58,17 +58,22 @@ accident.
   default.** It cleared every filter unconditionally instead of reseeding the configured
   defaults, so a folder marked hidden-by-default came back the moment someone clicked All.
 
-- **Notes no longer draw inside the hub when a small inner-locked folder is soloed**
-  (github#35). Two independent bugs stacked: the hub's hit-test and visual boundary were
-  sized against the ring's nominal radius rather than where the inner ring's own row 0
-  actually draws (`INNER_SCALE` pulls it in by a fifth), so a folder collapsed to one row
-  placed its notes well inside what the code still called the hole; and separately, a
-  band's dot-sizing "room" is measured from real neighbour gaps with no upper bound, so a
-  band filtered down to one or two notes — almost nothing to be tight against — reported an
-  enormous room and ballooned its dots regardless of how close they sat to the hub. The
-  first is now scaled to match the ring's own geometry; the second is capped by the same
-  density ratio that already bounds row spacing under filtering, reused rather than
-  invented. Verified live in the real Obsidian plugin, not just the browser build.
+- **The hub's hit-test and visual boundary now match where the inner ring's own row 0
+  actually draws** (github#35, partial). They were sized against the ring's nominal
+  radius instead of the ring's own drawn geometry (`INNER_SCALE` pulls row 0 in by a
+  fifth), so a folder collapsed to a single row by soloing placed its notes well inside
+  what the code still called the hole. Verified live in the real Obsidian plugin, not just
+  the browser build.
+
+  A second, related cause is still open: a band's dot-sizing "room" is measured from real
+  neighbour gaps with no upper bound, so a band filtered down to one or two notes reports
+  an enormous room and balloons its dots regardless of how close they sit to the hub. A
+  first attempt capped `room` by the same density ratio that already bounds row spacing
+  elsewhere, but that cap applies band-wide and shrank dots in ordinary sparse date
+  filtering too, past the point of staying readable — caught by the invariant suite
+  ("filtered to the bone, the disc stays drawable" collapsed to diameter/step 0.07-0.12
+  against a 0.15 floor) and reverted before this release. The position fix stands on its
+  own regardless of the dot-sizing half's fix landing later.
 
 - **The demo recording pipeline could no longer record the real vault by accident.**
   Every feature doc's "regenerate this clip" command builds with no explicit vault, which
