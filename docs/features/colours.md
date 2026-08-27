@@ -30,5 +30,5 @@ commit.
 
 | | |
 |---|---|
-| **Introduced in** | `predates versioning` |
+| **Introduced in** | `1.8.0` — "The Hub" |
 | **Last re-recorded** | `unreleased — 2026-08-27` |
