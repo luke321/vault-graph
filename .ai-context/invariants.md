@@ -928,6 +928,59 @@ wedge-seam-overlay experiment ending in two reverts) and no such fix existed any
 `develop` before this entry — folder toggles carried the identical defect, just smaller,
 until now.
 
+## A vault's layout matches its golden snapshot
+
+github#37. Every check above asserts a *property* of the layout (rows balanced, no stray
+small folders, dot sized right) — none of them would catch a layout that is internally
+consistent and simply *different* from what it used to be. While working github#35, the
+same folder split differently across rebuilds of the same mirror vault with no intentional
+change; the cause turned out to be an in-progress, since-reverted fix rather than the
+fixtures, but nothing in this suite would have caught either explanation.
+
+`scripts/smoke.mjs`'s `"layout matches its golden snapshot"` check compares the current
+build's band assignment (`buildWedgePlan(false)`'s `c.inner`, per folder) and every note's
+`(x, y)` against a checked-in reference in `scripts/layout-snapshots/<fixture>.json`, for
+each of the three named fixtures. A flipped band fails by name; a moved note fails with its
+id and the delta in both radius and angle; an added/removed note id is reported separately
+from a position drift, since it means the *fixture* changed, not the layout logic.
+
+**Snapshots are deliberate, never automatic.** `scripts/update-layout-snapshots.mjs` writes
+them by hand, on request — never from the check, never from the pre-push hook. When a
+layout change is intentional: run that script, review the diff, commit the new snapshot in
+the same change as the code that moved the layout.
+
+**Why a snapshot taken today stays valid indefinitely.** The three fixture generators
+default `--end` to today (so the heatmap's 52-week window stays exercised), which means the
+fixture store's weekly refresh (`FIXTURE_MAX_AGE_DAYS`, `smoke.mjs`) regenerates each vault
+with a different `--end` periodically. Measured before trusting this at all: built the demo
+and shape vaults twice each, 3.5 years apart in `--end`, and compared band assignment plus
+every note's exact `(x, y)` — identical to the full float64, both vaults, both dates. Layout
+depends on the seeded structure and each note's link weight, neither of which `--end`
+touches.
+
+**Reading raw positions off `demo.busy() === false` is NOT enough, on its own.** This is the
+same defect as the section just above (github#21), for POSITION rather than SIZE: a
+still-running cascade's next animation frame can land after a bare `applyLayout(false)` —
+even called twice — and silently overwrite it. Measured taking the snapshot two different
+ways: with `applyLayout(false)` (once, then twice), two consecutive measurements of the
+IDENTICAL build disagreed by several graph units on 90%+ of the demo and 10k vaults' notes
+(the shape vault, smaller and simpler, happened not to show it either way). With
+`__vg.relayout()` — the debug API's, which cancels any in-flight cascade frame and clears
+`roomNow`/`cellNow`/`edgeNow`/`bandLock`/`geomLock` before rebuilding, exactly as this
+section's own code block above already recommends — repeated measurements of the identical
+build are byte-for-byte identical, on all three vaults, across multiple runs.
+
+```
+node scripts/update-layout-snapshots.mjs                      # regenerate, on purpose
+node scripts/smoke.mjs --only "matches its golden snapshot"   # check, all three vaults
+```
+
+Verified the check actually catches something: temporarily changed `INNER_SCALE` from 0.8
+to 0.75 (one folder's real band-assignment threshold), reran the check without regenerating
+the snapshot. It failed on all three vaults, naming the exact folder that flipped band on
+the demo vault (`04 - Daily Notes: outer -> inner`) and reporting every moved note's id and
+delta on the other two. Reverted immediately after.
+
 ## A row-0 dot may not eat past a fixed share of the hub's own radius
 
 github#35, the dot-sizing half (the hub-boundary-*position* half shipped separately in
