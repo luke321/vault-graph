@@ -15,23 +15,28 @@
 # same as it always has been for the hero; see docs/features/_template.md for the exact
 # two-command pipeline.
 #
-# RECORD AGAINST A GENERATED VAULT, not your own. With no -Url this builds from the default
-# vault, and the page embeds every note's real title -- which then goes into a video that
-# ends up in a public README. Generate one and point -Url at it:
+# RECORDS AGAINST THE DEMO VAULT BY DEFAULT, never your own. With no -Url this builds
+# scripts/make-demo-vault.mjs fresh and points Chrome at that -- never at whatever
+# VAULT_GRAPH_VAULT/OBSIDIAN_VAULT/Obsidian's registry would otherwise resolve, which is
+# your real vault on any machine set up the documented way, and the page embeds every
+# note's real title. This was the caller's job until it silently recorded the real vault
+# once; see the "No URL given" branch below for the incident this replaced.
 #
-#   node scripts/make-test-vault.mjs --out "$env:TEMP/Demo Vault" --notes 700 --seed 7
-#   node src/build-graph.mjs --vault "$env:TEMP/Demo Vault" --out "$env:TEMP/rec/vault-graph.html"
+# Pass -Url yourself only to record against something else on purpose -- a mirror of your
+# own vault while chasing a layout bug (make-mirror-vault.mjs), or a hand-tuned fixture:
+#
+#   node scripts/make-mirror-vault.mjs --vault <path> --out "$env:TEMP/Mirror Vault"
+#   node src/build-graph.mjs --vault "$env:TEMP/Mirror Vault" --out "$env:TEMP/rec/vault-graph.html"
 #   .\scripts\record-demo.ps1 -Monitor right -Url "file:///$env:TEMP/rec/vault-graph.html?demo"
 #
 # The vault's FOLDER NAME becomes the title in the top-left corner, so name it something you
-# do not mind publishing. 700 notes reads well at 1600x1000; the storyboard resolves its
-# folder targets by prefix and falls back to the largest group, so it needs no particular
-# folder to exist.
+# do not mind publishing whenever you pass your own -Url.
 #
-# One thing the synthetic vault does worse than a mirror of a real one: its notes are spread
-# evenly over the calendar, so the heatmap's busiest day held 5 notes against a real vault's
-# 53, and the three heatmap beats land flatter. Raise --notes if that matters more than the
-# take being short.
+# One thing the synthetic demo vault does worse than a mirror of a real one: its notes are
+# spread evenly over the calendar within each day, so the heatmap's busiest day holds far
+# fewer notes than a real vault's, and the three heatmap beats land flatter. Pass --notes to
+# make-demo-vault.mjs (via your own -Url pipeline above) if that matters more than the take
+# being short.
 #
 # Three processes, in order: Chrome with a debugging port, ffmpeg grabbing that window,
 # and the driver. The driver BLOCKS until the last beat lands, so ffmpeg is stopped on
@@ -113,16 +118,25 @@ if (-not (Test-Path $ffmpeg)) {
 
 # --- what to record ------------------------------------------------------------------
 if (-not $Url) {
-  # No URL given: build, and learn where it landed from the builder's own "wrote <path>"
-  # line -- the same contract refresh-graph.ps1 uses, so "where does the output go" keeps
-  # exactly one implementation.
+  # No URL given: build the DEMO vault, never the caller's own. This used to call bare
+  # build-graph.mjs, which resolves VAULT_GRAPH_VAULT / OBSIDIAN_VAULT / Obsidian's
+  # registry exactly like every other tool in this ecosystem is supposed to -- which is
+  # precisely wrong here. Every per-feature doc's "regenerate this clip" command
+  # (docs/features/<name>.md) is `-Act <name>` with no -Url, so on any machine set up the
+  # documented way (sync-claude-settings wires OBSIDIAN_VAULT to the real vault) that
+  # bare default silently recorded the real vault -- its real note titles, straight into
+  # a take meant for the public README. The safe vault has to be the DEFAULT, not a
+  # paragraph up in this file's own header that nobody running the documented one-liner
+  # ever reads.
+  $demoOut = Join-Path $env:TEMP 'vg-demo-vault'
+  $demoHtml = Join-Path $env:TEMP 'vg-demo-vault.html'
+  Write-Host "building the demo vault..." -ForegroundColor DarkGray
+  & node (Join-Path $here 'make-demo-vault.mjs') --out $demoOut
+  if ($LASTEXITCODE -ne 0) { throw "make-demo-vault.mjs failed (exit $LASTEXITCODE)" }
   Write-Host "building a fresh snapshot to record..." -ForegroundColor DarkGray
-  $buildOut = & node (Join-Path $here '../src/build-graph.mjs')
-  $buildOut | ForEach-Object { $_ }
+  & node (Join-Path $here '../src/build-graph.mjs') --vault $demoOut --out $demoHtml
   if ($LASTEXITCODE -ne 0) { throw "build-graph.mjs failed (exit $LASTEXITCODE)" }
-  $wrote = $buildOut | Where-Object { $_ -match '^wrote (.+) \(' } | Select-Object -Last 1
-  if ($wrote -notmatch '^wrote (.+) \(') { throw "could not tell where the build landed; pass -Url" }
-  $Url = ([uri]("file:///" + ($Matches[1] -replace '\\','/'))).AbsoluteUri + "?demo"
+  $Url = ([uri]("file:///" + ($demoHtml -replace '\\','/'))).AbsoluteUri + "?demo"
 }
 if (-not $Out) {
   $stamp = Get-Date -Format 'yyyy-MM-dd-HHmmss'
