@@ -29,6 +29,36 @@ published tag breaks every link to it.
 
 ---
 
+## 1.9.0 — "Belonging" — unreleased
+
+An unlinked note now joins its own folder's wedge and colour by default, instead of
+sitting apart with every other unlinked note — reversible per-vault, from either host.
+
+- **An unlinked note joins its own folder's group by default** (`unlinkedByFolder`, github#3
+  reopened) — same wedge, band, colour, count, filter and highlight as any other note filed
+  there, rather than a separate `(unlinked)` population. Off is the escape hatch for anyone
+  who wants that population kept visible and separate, same as this repo shipped it
+  originally: right-click the `(unlinked)` row (always in the legend, so the toggle never
+  needs a trip through settings either direction) or use the new row in the settings panel /
+  plugin settings tab. `(unlinked)`'s own colour, when it has members, is no longer in the
+  ordinary twelve-slot rotation — it takes the same recessive grey archives do, since neither
+  is a folder anyone organised. With members it sorts right after `_`-prefixed archives,
+  ahead of every real folder; at zero (the default) it's greyed out and pushed to the very
+  end instead, since a dormant control isn't worth the same prime seat a real population
+  gets.
+
+- **A fix to a fix, found while building the above:** the github#34 "hidden by default"
+  right-click toggle never actually persisted on the Obsidian plugin host — it repainted the
+  view live and silently reverted on the next reload, because the plugin's own settings
+  writer was never wired for that setting. Fixed alongside, since the wiring this release
+  needed for the new setting was nearly identical.
+
+- **Every generated demo/test fixture now guarantees a handful of genuinely unlinked
+  notes**, so the checks this release depends on (and any future one) always have something
+  real to measure instead of silently skipping on a vault that happened to link everything.
+
+---
+
 ## 1.8.0 — "The Hub" — 2026-08-27
 
 Four correctness bugs in pin-to-hub, the hub's boundary brought in line with the inner

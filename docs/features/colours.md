@@ -10,12 +10,15 @@ saved choice is a *slot*, not a colour value, so it follows the theme between li
 dark. The same picker is also reachable from the gear's settings panel, for anyone who
 would rather work down a list than right-click each row.
 
-A note with no links at all wears one flat colour by default, so `(unlinked)` reads as one
-population rather than a note wearing its folder's tint while looking like every other
-group already lost its own colour. Right-click the `(unlinked)` row for a second toggle
-below the swatches — "Colour by folder" — to give an unlinked note its own folder's tint
-instead; the row's own swatch turns into a gradient of whatever colours are actually in
-play, since one flat colour would no longer say what's underneath.
+A note with no links at all joins its own folder's group by default — same wedge, same
+colour, same everything as any other note filed there. Right-click the `(unlinked)` row
+for a second toggle below the swatches — "Kept separate" — to pull unlinked notes back
+into their own population instead: one flat grey swatch, its own wedge, counted apart from
+the folder it's actually filed in. The row itself is always in the legend, so the toggle is
+reachable from the graph either way — but at 0 (the default) it's greyed out and pushed to
+the very end, since a dormant control isn't worth the same prime seat a real population
+gets. Turn it off, from there or from settings, and it jumps back up to sit right after any
+archive folders, at full colour, the moment it has someone in it.
 
 ## Where it lives in the storyboard
 

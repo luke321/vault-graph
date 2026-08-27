@@ -203,6 +203,11 @@
   .vault-graph .lgr.sub2 { padding-left: 28px; }
   .vault-graph .lgr.sub3 { padding-left: 42px; }
   .vault-graph .lgr.sub4 { padding-left: 54px; }
+  /* github#3, reopened again: (unlinked) at zero is a control with nothing in it right
+     now, not a folder that happens to be empty -- muted so it reads that way, still full
+     opacity on hover/focus so the row never looks unreachable, just quiet. */
+  .vault-graph .lgr-empty { opacity: 0.55; }
+  .vault-graph .lgr-empty:hover, .vault-graph .lgr-empty:focus-within { opacity: 1; }
 
   .vault-graph .tw, .vault-graph .eye {
     flex: none; background: none; border: 0; padding: 2px; cursor: pointer;

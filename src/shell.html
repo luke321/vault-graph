@@ -107,9 +107,9 @@ mountVaultGraph(
     // in page.js, only an explicit false turns it off (github#23).
     compactAxis: loadSettings().compactAxis,
     onCompactAxis: function (v) { saveSettings({ compactAxis: v }); },
-    // Colour unlinked notes by their own folder, remembered the same way -- undefined on a
-    // first visit reads as OFF in page.js, only an explicit true turns it on (github#3,
-    // reopened).
+    // Whether an unlinked note joins its own folder's group, remembered the same way --
+    // undefined on a first visit reads as ON in page.js, only an explicit false turns it
+    // off (github#3, reopened again).
     unlinkedByFolder: loadSettings().unlinkedByFolder,
     onUnlinkedByFolder: function (v) { saveSettings({ unlinkedByFolder: v }); },
     // The hub. Scoped by vault like everything else here, which matters more for this than

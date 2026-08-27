@@ -310,7 +310,8 @@ for (const f of plan) {
     const dir = pick(f.paths);
     const sub = dir.slice(f.name.length + 1);
     const title = f.kind === "resource" ? resourceTitle(sub || "Concepts") : titleFor(f.kind);
-    notes.push({ dir, title, kind: f.kind });
+    const peopleKind = f.kind === "resource" && /People|Colleagues|Family|Authors/.test(sub || "Concepts");
+    notes.push({ dir, title, kind: f.kind, peopleKind });
   }
 }
 // De-duplicate titles -- a real vault cannot have two notes with the same name in one
@@ -323,7 +324,26 @@ for (const n of notes) {
   n.title = t;
 }
 
-const titles = notes.map((n) => n.title);
+// A HANDFUL OF NOTES ARE DELIBERATELY UNLINKED, so every orphan-dependent check (this
+// generator fed nothing but incidental, seed-dependent orphans before this -- the demo
+// fixture has run at 0 unlinked notes) always has something real to measure instead of
+// skipping gracefully. make-shape-vault.mjs already guarantees this for the
+// dominant-folder fixture; this generator (which the demo fixture delegates to, and which
+// the 10k fixture is built from directly) had nothing. Fixed and small regardless of
+// --notes, since the point is "at least one exists," not a realistic unlinked rate.
+//
+// Never a People/Colleagues/Family/Authors note: `person: "[[Name]]"` below draws from the
+// raw PEOPLE array, not from `titles`, so it bypasses the exclusion just below entirely --
+// an orphan-marked person note could still pick up a real incoming link that way.
+const ORPHAN_COUNT = Math.min(6, notes.length);
+const orphanPool = notes.map((n, i) => i).filter((i) => !notes[i].peopleKind);
+for (let k = 0; k < ORPHAN_COUNT && orphanPool.length; k++) {
+  const j = Math.floor(rnd() * orphanPool.length);
+  notes[orphanPool[j]].orphan = true;
+  orphanPool.splice(j, 1);
+}
+
+const titles = notes.filter((n) => !n.orphan).map((n) => n.title);
 let written = 0;
 for (const n of notes) {
   const dir = join(OUT, n.dir);
@@ -337,15 +357,19 @@ for (const n of notes) {
   createdDayOf.set(n, day);
   const created = dayStr(day);
   const tags = rnd() < 0.55 ? some(TAGS, int(1, 2)) : [];
+  // !n.orphan on the meeting/person line too -- that field is the OTHER path to a real
+  // link (see the comment above ORPHAN_COUNT), independent of the outs loop below.
   const fm = bare ? "" : ["---", `created: ${created}`,
     tags.length ? `tags: [${tags.join(", ")}]` : null,
-    n.kind === "meeting" && rnd() < 0.7 ? `person: "[[${pick(PEOPLE)}]]"` : null,
+    n.kind === "meeting" && !n.orphan && rnd() < 0.7 ? `person: "[[${pick(PEOPLE)}]]"` : null,
     rnd() < 0.05 ? `aliases: ["${n.title.split(" ")[0]} note"]` : null,
     "---", ""].filter(Boolean).join("\n");
 
   // Power-law-ish out-degree: most notes link to a few, a handful are hubs, some links
-  // point at nothing (unresolved links are normal and must not break the build).
-  const outs = rnd() < 0.04 ? int(20, 55) : int(0, 5);
+  // point at nothing (unresolved links are normal and must not break the build). Zero for
+  // an orphan-marked note, unconditionally -- it must have no edges in either direction,
+  // and `titles` above already keeps everything else from creating the other half.
+  const outs = n.orphan ? 0 : (rnd() < 0.04 ? int(20, 55) : int(0, 5));
   const links = [];
   for (let k = 0; k < outs; k++) {
     if (rnd() < 0.07) links.push(`[[${pick(CONCEPTS)} ${int(900, 999)}]]`);
@@ -386,7 +410,8 @@ for (const t of ["Home", "Dashboard"]) {
     `# ${t}\n\n[[${titles[0]}]] · [[${titles[1]}]] · [[${titles[2]}]]\n`);
 }
 
-console.log(`wrote ${written} notes + 4 templates + 2 root notes to ${OUT}\n`);
+console.log(`wrote ${written} notes + 4 templates + 2 root notes to ${OUT} ` +
+            `(${notes.filter((n) => n.orphan).length} deliberately unlinked)\n`);
 console.log(`${plan.length} top-level folders (${plan.length - 10} past the colour slots):`);
 for (const f of plan) {
   console.log(`  ${String(f.count).padStart(5)}  ${f.name.padEnd(24)} ${String(f.paths.length).padStart(3)} folder(s)`);
