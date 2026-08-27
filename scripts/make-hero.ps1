@@ -1,7 +1,7 @@
 # Turn a recorded take into the README's hero animation.
 #
 #   .\scripts\make-hero.ps1 -In .\demo-2026-08-22-174500.mp4
-#   .\scripts\make-hero.ps1 -In take.mp4 -Out assets\demo.webp -Width 700 -Fps 30
+#   .\scripts\make-hero.ps1 -In take.mp4 -Out assets\demo.webp -Width 1200 -Fps 30
 #   .\scripts\make-hero.ps1 -In take.mp4 -Format gif          # 15fps, two-pass palette
 #
 # This was an ad-hoc ffmpeg incantation typed twice, which is once more than a step
@@ -44,12 +44,20 @@
 # ENCODE FROM THE MP4, NEVER FROM THE GIF. Transcoding assets\demo.gif to WebP at q70 gave
 # 3.43 MB at a *lower* frame rate, because the GIF's baked-in bayer dither is noise to
 # every later encoder. The take is the source.
+#
+# WHY 1200PX, NOT 700. Every embed in README.md and docs/features.md is <img width="100%">
+# now, not plain markdown image syntax -- the clip fills whatever column it sits in rather
+# than rendering at its own pixel size. At 700px that meant a browser upscaling the asset
+# on any GitHub viewport wider than 700px, which is most of them, and upscaling is where
+# the softness lives -- no encoder setting fixes a source that is already too small. The
+# capture itself is 1586px wide (record-demo.ps1's default window), so 1200 is still a
+# real downscale, not an upscale pretending to be one.
 
 [CmdletBinding()]
 param(
   [Parameter(Mandatory = $true)][string] $In,
   [string] $Out = "",
-  [int] $Width = 700,
+  [int] $Width = 1200,
   [int] $Fps = 0,
   [ValidateSet('webp', 'gif')][string] $Format = 'webp',
   [int] $Quality = 70
