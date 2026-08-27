@@ -33,10 +33,17 @@
 // nothing to demonstrate on it. That reasoning is what the compact date axis exists to fix:
 // a sparse tail is now the CASE this vault has to cover, not a shape to avoid. 85% of notes
 // land in the last twelve months (`--recent 0.85`, well above the plain `1.4/years` formula)
-// over a 9-year span, which measured **10-28 notes across eight early years against 226 and
-// 756 in the two recent ones**, 18 of 108 possible months genuinely empty -- sparse enough
-// for compaction to visibly do something, dense enough at the front that dragging a range
-// there still selects something at every position.
+// over a 10-year span, which measured **9-26 notes across nine early years (151 total) against
+// 221 and 759 in the two recent ones**, 24 of 120 possible months genuinely empty -- sparse
+// enough for compaction to visibly do something, dense enough at the front that dragging a
+// range there still selects something at every position.
+//
+// TEN YEARS, NOT NINE. Nine reached back to the current year minus nine, which is honest but
+// reads as barely historical next to a real vault's decade-plus of notes; the compact axis
+// exists to make a long sparse history legible, and a history one year short of a decade
+// undersold what it is for. Re-measured at ten rather than assumed carried over: the
+// early-year counts and empty-month share above are this span's own numbers, not the
+// nine-year ones with a year appended.
 //
 // Deterministic apart from the end date, which defaults to today so the band's last-52-weeks
 // window has notes in it. Pass --end to pin that too and get a byte-identical vault.
@@ -65,12 +72,12 @@ if (argv.includes("--vault")) {
 
 const OUT = resolve(opt("out", join(ROOT, "demo-vault")));
 const NOTES = opt("notes", "1400");
-const YEARS = opt("years", "9");
-// Well above the plain 1.4/years formula (0.156 at nine years) -- that shape spreads the
+const YEARS = opt("years", "10");
+// Well above the plain 1.4/years formula (0.14 at ten years) -- that shape spreads the
 // non-recent share EVENLY across every year (see make-test-vault.mjs's own createdDay()),
-// so at nine years it produced 100-140 notes in EVERY year and nothing sparse to compact at
+// which produced 100-140 notes in EVERY year at nine years and nothing sparse to compact at
 // all, measured directly while choosing this number. 0.85 leaves ~15% of NOTES for the
-// other eight years combined, which is what actually thins them out.
+// other nine years combined, which is what actually thins them out.
 const RECENT = opt("recent", "0.85");
 const SEED = opt("seed", "1");
 const END = opt("end", "");
