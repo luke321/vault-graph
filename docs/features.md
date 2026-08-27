@@ -84,7 +84,7 @@ there. Replaced the sidebar's old rank slider — the ribbon is the only timelin
 
 ## Compact date axis
 
-*Unreleased*
+*1.8.0 — "The Hub"*
 
 Years and months on the strip draw by how many notes they hold, not by the calendar. A
 sparse year collapses toward the same narrow width every other sparse year gets; a busy

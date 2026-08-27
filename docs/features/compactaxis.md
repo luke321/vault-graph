@@ -27,5 +27,5 @@ commit -- that's what `release.ps1`'s staleness check reads.
 
 | | |
 |---|---|
-| **Introduced in** | `unreleased` |
+| **Introduced in** | `1.8.0` — "The Hub" |
 | **Last re-recorded** | `unreleased — 2026-08-27` |

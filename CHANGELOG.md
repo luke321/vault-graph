@@ -29,6 +29,69 @@ published tag breaks every link to it.
 
 ---
 
+## 1.8.0 — "The Hub" — 2026-08-27
+
+Four correctness bugs in pin-to-hub, a small inner-locked folder no longer overlapping the
+hub when soloed, and the demo pipeline stops being able to record the real vault by
+accident.
+
+- **Four correctness bugs in pin-to-hub, found in an adversarial review of the
+  1.7.0..develop diff.** All four trace back to the feature interacting badly with code
+  that predates it or with its own cascade lifecycle: a wedge-split gate counted pinned
+  notes that the placement loop right after it excludes, so a folder's sub-wedge split or a
+  band's row depth could be decided against notes that never occupy a ring cell; pinning
+  every currently-visible note (reachable on a small or filtered vault) hit the
+  zero-ring-cells path and left every pinned note unpositioned, verified live by pinning all
+  six notes of a solo'd folder; pinning or unpinning while an unrelated cascade was still
+  animating could hand the hub change a plan built from stale membership; and `relayout()`
+  (the debug API) could reset the layout locks with nothing stopping a still-running
+  cascade's next frame from overwriting the reset, the same gap already found and fixed
+  once for a since-removed toggle and lost again when that toggle was baked in.
+
+- **The Debug button stopped copying to clipboard in the Obsidian plugin**, found
+  live-testing this branch in the real app. `debugDump()` had ended up inside the region
+  `scripts/build-plugin.mjs` strips from the plugin build, so it worked in the browser page
+  and silently vanished from the installed plugin. Same root cause as `setCompactAxis`
+  going missing from an earlier build, caught in the same review pass.
+
+- **The legend's "All" button could turn a folder back on that settings had hidden by
+  default.** It cleared every filter unconditionally instead of reseeding the configured
+  defaults, so a folder marked hidden-by-default came back the moment someone clicked All.
+
+- **Notes no longer draw inside the hub when a small inner-locked folder is soloed**
+  (github#35). Two independent bugs stacked: the hub's hit-test and visual boundary were
+  sized against the ring's nominal radius rather than where the inner ring's own row 0
+  actually draws (`INNER_SCALE` pulls it in by a fifth), so a folder collapsed to one row
+  placed its notes well inside what the code still called the hole; and separately, a
+  band's dot-sizing "room" is measured from real neighbour gaps with no upper bound, so a
+  band filtered down to one or two notes — almost nothing to be tight against — reported an
+  enormous room and ballooned its dots regardless of how close they sat to the hub. The
+  first is now scaled to match the ring's own geometry; the second is capped by the same
+  density ratio that already bounds row spacing under filtering, reused rather than
+  invented. Verified live in the real Obsidian plugin, not just the browser build.
+
+- **The demo recording pipeline could no longer record the real vault by accident.**
+  Every feature doc's "regenerate this clip" command builds with no explicit vault, which
+  used to resolve `VAULT_GRAPH_VAULT` / `OBSIDIAN_VAULT` exactly like every other tool here
+  — on any machine set up the documented way, that's the real vault, and its real note
+  titles would have gone straight into a take meant for the public README. The no-URL
+  default now builds the synthetic demo vault itself. The demo vault's own history also
+  grew from nine years to ten, so the compact date axis has something more convincingly
+  historical to compact, and every clip embed switched from fixed-pixel markdown images to
+  full-width `<img>` tags — re-encoded at 1200px instead of 700 so a wider column doesn't
+  upscale a source that's already too small.
+
+- **Three efficiency and duplication findings, from the same adversarial review.** A
+  drag handler wrote hub-drop-target layout on every native `mousemove` — 120+ times a
+  second on a decent mouse — with no throttling, unlike an equivalent ribbon-drag handler
+  that already coalesced to one update per frame; both now share one extracted helper.
+  `focusSet()` was recomputed from scratch on every call despite depending on nothing but
+  the current focus id, and is memoized now. Three near-identical duplications — two
+  colour-cleaning functions, two settings-save methods, and the three sites building the
+  12-swatch colour picker's markup — were each merged into one shared implementation.
+
+---
+
 ## 1.7.0 — 2026-08-25
 
 Small folders close and open like the big ones, the seams are geometry rather than
