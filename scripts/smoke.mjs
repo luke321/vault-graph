@@ -2703,6 +2703,38 @@ check("compact axis: the settings-panel toggle actually flips the live state", a
   };
 });
 
+// Same shape as the compact-axis check just above, for the second OPTION_ROWS entry
+// (github#3, reopened) -- the id-drift bug that check exists to catch is exactly as
+// possible here, since buildOptions() is the one place both rows are rendered from.
+check("colour unlinked by folder: the settings-panel toggle actually flips the live state", async (p) => {
+  const r = await p.j(`(function(){
+    var gear = document.querySelector("#vg-gear");
+    if (!gear || gear.hidden) return { noGear: true };
+    gear.click();
+    var before = document.querySelector("#vg-opt-unlinkedByFolder");
+    if (!before) return { noButton: true };
+    var beforePressed = before.getAttribute("aria-pressed"), beforeState = __vg.unlinkedByFolder;
+    before.click();
+    var after = document.querySelector("#vg-opt-unlinkedByFolder");
+    var afterPressed = after && after.getAttribute("aria-pressed"), afterState = __vg.unlinkedByFolder;
+    if (after && afterState !== beforeState) after.click();
+    gear.click();
+    return { beforePressed: beforePressed, beforeState: beforeState,
+             afterPressed: afterPressed, afterState: afterState };
+  })()`);
+  if (r.noGear) return { ok: false, detail: "no #vg-gear on this build -- standalone only" };
+  if (r.noButton) {
+    return { ok: false, detail: "gear opened but #vg-opt-unlinkedByFolder was not found -- the " +
+      "rendered row id and the $() lookup setUnlinkedByFolder uses have drifted apart" };
+  }
+  const flipped = r.afterState !== r.beforeState && r.afterPressed !== r.beforePressed;
+  return {
+    ok: flipped,
+    detail: `clicking the row: state ${r.beforeState}->${r.afterState}, aria-pressed ` +
+      `${r.beforePressed}->${r.afterPressed}`,
+  };
+});
+
 check("compact axis: the view-level icon actually flips the live state, and persists", async (p) => {
   // The settings-panel row is standalone-only (SETTINGS_UI); the plugin's gear leads to
   // Obsidian's own settings tab instead, so #vg-compact is the ONLY in-view control on
@@ -3187,6 +3219,60 @@ check("every unlinked note wears the (unlinked) swatch", async (p) => {
   if (!r.orphans) return { ok: true, detail: "no unlinked notes on this shape, nothing to measure" };
   return { ok: r.match === r.orphans,
            detail: `${r.match} of ${r.orphans} on ${r.swatch}, ${r.distinct} distinct` };
+});
+
+// github#3, REOPENED: the check above guards the ORIGINAL bug (every unlinked note forced
+// onto one swatch). This one guards the follow-up -- that forcing it is now a CHOICE
+// (unlinkedByFolder, default off) reachable from the (unlinked) row's own right-click menu,
+// same shape as the github#34 check above: through the ACTUAL DOM path (a real
+// `contextmenu` event, a real click on the rendered button), not just the underlying
+// setUnlinkedByFolder/nodeColor mechanism -- that mechanism has its own coverage already
+// (buildColors/nodeColor agree by construction), what only a DOM check can catch a
+// regression in is the WIRING: the menu renders the extra button on this one row only, the
+// click reaches it, the menu closes, and the notes actually repaint.
+//
+// Skips gracefully on a shape with no unlinked notes, same as the check above -- there is
+// no (unlinked) row to right-click, and "0 of 0" is not a passing measurement of anything.
+check("the (unlinked) row's right-click toggle recolours unlinked notes by folder", async (p) => {
+  const r = await p.j(`(function(){
+    var row = document.querySelector('[data-g="(unlinked)"]');
+    if (!row) return { skip: true };
+    var g = __vg.graph, rd = __vg.renderer;
+    var ids = g.nodes().filter(function (id) { return __vg.isOrphan(id); });
+    var startOn = __vg.unlinkedByFolder;
+
+    var rect = row.getBoundingClientRect();
+    row.dispatchEvent(new MouseEvent("contextmenu", {
+      bubbles: true, clientX: rect.left + 5, clientY: rect.top + 5 }));
+    var menu = document.querySelector('[id$="ctxmenu"]');
+    var byBtn = menu && !menu.hidden ? menu.querySelector("[data-byfolder]") : null;
+    var openedOk = !!byBtn;
+    var pressedBefore = openedOk ? byBtn.getAttribute("aria-pressed") : null;
+    if (byBtn) byBtn.click();
+    var closedAfter = menu.hidden;
+    var flipped = __vg.unlinkedByFolder === !startOn;
+
+    // nodeColor(), not a mirrored formula: it is the exact function under test, so this
+    // asks "did the paint agree with the function" rather than "did the paint agree with
+    // this check's own guess at what the function does."
+    var expected = ids.map(function (id) { return String(__vg.nodeColor(id)).toLowerCase(); });
+    var actual = ids.map(function (id) { return String(rd.getNodeDisplayData(id).color).toLowerCase(); });
+    var matched = actual.filter(function (c, i) { return c === expected[i]; }).length;
+
+    // Restore exactly, same discipline as the github#34 check above.
+    __vg.setUnlinkedByFolder(startOn);
+
+    return { skip: false, ids: ids.length, startOn: startOn, openedOk: openedOk,
+             pressedBefore: pressedBefore, closedAfter: closedAfter, flipped: flipped,
+             matched: matched };
+  })()`);
+  if (r.skip) return { ok: true, detail: "no unlinked notes on this shape, nothing to measure" };
+  const ok = r.openedOk && r.pressedBefore === String(r.startOn) && r.closedAfter &&
+             r.flipped && r.matched === r.ids;
+  return { ok, detail: `${r.ids} unlinked notes, started ${r.startOn ? "on" : "off"}; ` +
+    `menu opened with the toggle ${r.openedOk ? "present" : "MISSING"} ` +
+    `(pressed=${r.pressedBefore}); after click: menu closed=${r.closedAfter}, ` +
+    `toggle flipped=${r.flipped}, ${r.matched} of ${r.ids} repainted to their folder's tint` };
 });
 
 // Issue #2: Sigma paints every edge on its bottom layer and every node above that, so the

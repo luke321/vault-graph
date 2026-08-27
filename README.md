@@ -63,6 +63,7 @@ Settings → Community plugins → Vault Graph.
 |---|---|
 | **Folder colours** | One row per top-level folder, with the twelve palette slots under it. The slot the folder is **currently using** is ringed — brightly if you chose it, dimly if it is just the one its position gives it. Click a slot to hold the folder to that colour; **Auto** hands it back. Setting one folder never changes another, and two folders may share a colour — useful for saying they belong together. |
 | **Folder visibility** | The eye at the start of each row sets whether that folder is shown **by default**. The legend's own eye inside the graph is the live filter for this session; this one is what the graph comes back to. Right-click a folder in the graph's own legend for the same setting, one row down from its colour picker — no need to open this tab just to flip it. |
+| **Colour unlinked notes by folder** | Off by default: a note with no links wears one flat colour, so the group it belongs to — everything with no links at all — reads as one population in the legend. Turn this on to give it its own folder's colour instead. Right-click the `(unlinked)` row in the graph's own legend for the same toggle. |
 
 The graph view has a gear in its top-left corner that opens this tab directly, so the
 colours are reachable from the thing they colour.

@@ -10,6 +10,13 @@ saved choice is a *slot*, not a colour value, so it follows the theme between li
 dark. The same picker is also reachable from the gear's settings panel, for anyone who
 would rather work down a list than right-click each row.
 
+A note with no links at all wears one flat colour by default, so `(unlinked)` reads as one
+population rather than a note wearing its folder's tint while looking like every other
+group already lost its own colour. Right-click the `(unlinked)` row for a second toggle
+below the swatches — "Colour by folder" — to give an unlinked note its own folder's tint
+instead; the row's own swatch turns into a gradient of whatever colours are actually in
+play, since one flat colour would no longer say what's underneath.
+
 ## Where it lives in the storyboard
 
 `act: "colours"` in `demoMode()` (`src/page.js`).

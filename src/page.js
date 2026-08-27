@@ -262,6 +262,15 @@ function mountVaultGraph(root, data, deps) {
   var compactAxis = deps.compactAxis === false ? false : true;
   var onCompactAxis = typeof deps.onCompactAxis === "function" ? deps.onCompactAxis : null;
 
+  // COLOUR UNLINKED NOTES BY THEIR OWN FOLDER, OFF UNLESS THE HOST SAYS OTHERWISE -- the
+  // opposite default from compactAxis/panEnabled above, because this one changes shipped
+  // colour behaviour rather than improving on it. github#3 (reopened): the original fix
+  // forced every unlinked note onto the flat (unlinked) swatch so the group reads as one
+  // population; this makes that a choice instead of the only option, for anyone who wants
+  // an unlinked note wearing its folder's tint instead.
+  var unlinkedByFolder = deps.unlinkedByFolder === true ? true : false;
+  var onUnlinkedByFolder = typeof deps.onUnlinkedByFolder === "function" ? deps.onUnlinkedByFolder : null;
+
   // ARCHIVE FOLDERS: the ones whose name starts with `_`.
   //
   // A leading underscore is how a vault says "sorts last, not part of the working set" --
@@ -294,6 +303,15 @@ function mountVaultGraph(root, data, deps) {
     return '<svg viewBox="0 0 16 16" aria-hidden="true">' + lid +
       (on ? '<circle cx="8" cy="8" r="2" fill="currentColor"/>'
           : '<path d="M3 13L13 3" stroke="currentColor" stroke-width="1.25"/>') +
+      '</svg>';
+  }
+
+  // A filled vs. outlined dot -- not the eye, because this is not a visibility question.
+  // Used only by the (unlinked) row's own context-menu toggle (github#3, reopened).
+  function dotSvg(on) {
+    return '<svg viewBox="0 0 16 16" aria-hidden="true">' +
+      (on ? '<circle cx="8" cy="8" r="5" fill="currentColor"/>'
+          : '<circle cx="8" cy="8" r="5" fill="none" stroke="currentColor" stroke-width="1.25"/>') +
       '</svg>';
   }
 
@@ -606,18 +624,26 @@ function mountVaultGraph(root, data, deps) {
     // Note: subfolder order stays size-based -- the "N smaller subfolders" fold
     // depends on knowing which are smallest.
     var names = Object.keys(count).sort(function (a, b) {
-      // THREE RANKS, and the reason is that neither `_` nor `(` is a real folder name
-      // competing with the others. Archives first, then the pseudo-folders --
-      // "(vault root)" for notes sitting loose at the top and "(unlinked)" for notes
-      // nothing points at -- then everything the vault actually filed. So the entries
-      // that are not part of the working set stay together at the head of the list
-      // instead of one of them landing above the archives and one below.
+      // FOUR RANKS, and the reason is that neither `_` nor `(` is a real folder name
+      // competing with the others. UNLINKED first of all -- see below -- then archives,
+      // then the remaining pseudo-folder ("(vault root)", for notes sitting loose at the
+      // top), then everything the vault actually filed. So the entries that are not part
+      // of the working set stay together at the head of the list instead of one of them
+      // landing above the archives and one below.
       //
       // This does not move any colour: archives take the grey slot without consuming
-      // one, so the first pseudo-folder is still the first group in the rotation.
+      // one, so which non-archive group sorts first in the rotation is unaffected by
+      // where the archives themselves land.
       var rank = function (s) {
+        // UNLINKED SORTS FIRST OF ALL, ahead of even the archives (github#3, reopened) --
+        // it is the one group whose own toggles (this ticket added a second) are worth
+        // finding without hunting through the rest of the list, and per the note above
+        // this costs nothing in the colour rotation: archives never advance `auto`
+        // regardless of which rank they sort at, so moving them one rank down changes no
+        // group's slot.
+        if (s === UNLINKED) return 0;
         var c = s.charAt(0);
-        return c === "_" ? 0 : c === "(" ? 1 : 2;
+        return c === "_" ? 1 : c === "(" ? 2 : 3;
       };
       return rank(a) - rank(b) || a.localeCompare(b, undefined, { numeric: true });
     });
@@ -709,6 +735,7 @@ function mountVaultGraph(root, data, deps) {
       groupAutoSlot[g] = key;
     });
     buildSubShades();
+    buildUnlinkedTint();
   }
 
   // The settings UIs need three things and none of them should reach into internals:
@@ -795,6 +822,12 @@ function mountVaultGraph(root, data, deps) {
   // of the twelve slot hexes, so there is nothing among them to ring as "current", and
   // the settings UIs need to say that rather than guess.
   var subSlot = Object.create(null);
+
+  // The distinct folder colours currently worn by unlinked notes, capped -- built by
+  // buildUnlinkedTint() below, read only by the (unlinked) legend row's own swatch when
+  // unlinkedByFolder is on. Empty is a perfectly good answer (no unlinked notes, or the
+  // toggle is off): the swatch falls back to the flat colorOf(UNLINKED) either way.
+  var unlinkedTintColors = [];
 
   // Four steps, not one per subfolder. Spreading N tints evenly across one hue
   // family collapses as N grows -- measured, nine subfolders land ~3 apart, below
@@ -1123,18 +1156,48 @@ function mountVaultGraph(root, data, deps) {
     });
   }
 
+  // 6 is enough for a legend swatch to read as "several colours live here" without an
+  // expensive uniqueness check against hundreds of distinct hexes -- the row is a summary,
+  // not an inventory.
+  var UNLINKED_TINT_CAP = 6;
+
+  // What the (unlinked) row's own swatch mixes, once unlinkedByFolder is on -- same colour
+  // nodeColor() would give each unlinked note, deduped and capped. An O(n) pass, same order
+  // as buildSubShades just above and computeOrder before it, so it lives here (called from
+  // buildColors, once per colour-affecting change) rather than in buildLegend, which runs on
+  // nearly every legend click.
+  function buildUnlinkedTint() {
+    unlinkedTintColors = [];
+    var seen = Object.create(null);
+    graph.forEachNode(function (id) {
+      if (unlinkedTintColors.length >= UNLINKED_TINT_CAP) return;
+      if (groupOf(id) !== UNLINKED) return;
+      var a = graph.getNodeAttributes(id);
+      var c = subShade[a.folder + "/" + (a.sub || "")] || colorOf(a.folder);
+      if (seen[c]) return;
+      seen[c] = true;
+      unlinkedTintColors.push(c);
+    });
+  }
+
   // Group colour, tinted by subfolder when the folders are what we are looking at.
   //
   // UNLINKED IS A GROUP, NOT A FOLDER, and the folder dimension is the one place that can
   // forget it. Every other dimension asks groupOf; this one used to go straight to the
-  // note's own folder, so a degree-0 note wore its folder's tint while the legend showed
-  // it under one swatch -- measured 0 of 12 matching on a 700-note vault, 9 distinct
-  // colours under a single legend row (github#3). `(vault root)` is NOT the same case:
-  // the builder writes that as a real folder value, so colorOf resolves it already.
+  // note's own folder unconditionally, so a degree-0 note wore its folder's tint while the
+  // legend showed it under one swatch -- measured 0 of 12 matching on a 700-note vault, 9
+  // distinct colours under a single legend row (github#3). `(vault root)` is NOT the same
+  // case: the builder writes that as a real folder value, so colorOf resolves it already.
+  //
+  // unlinkedByFolder REOPENS THAT CHOICE, DELIBERATELY (github#3, reopened): some people
+  // want the folder tint back, as long as it is an ask rather than a silent default. Off,
+  // this is exactly the fix above. On, an unlinked note falls through to the same line
+  // every linked note uses -- it still has a real folder/sub, the fix only ever withheld
+  // that colour, never removed it.
   function nodeColor(id) {
     var a = graph.getNodeAttributes(id);
     if (state.dim !== "folder") return colorOf(groupOf(id));
-    if (groupOf(id) === UNLINKED) return colorOf(UNLINKED);
+    if (groupOf(id) === UNLINKED && !unlinkedByFolder) return colorOf(UNLINKED);
     return subShade[a.folder + "/" + (a.sub || "")] || colorOf(a.folder);
   }
 
@@ -7677,6 +7740,33 @@ function mountVaultGraph(root, data, deps) {
   // the closure it belongs in.
   var refreshSettingsPanel = null;
 
+  // The (unlinked) row's own swatch, once unlinkedByFolder is on, would otherwise show one
+  // flat colour that is a LIE about what is actually underneath it -- every other row's
+  // swatch names the one colour every note in it wears; this row's notes no longer agree.
+  // A gradient built from what buildUnlinkedTint() actually found says so honestly, without
+  // a new legend row shape or a fourth swatch state for one group only. Falls back to the
+  // ordinary flat colour whenever there is nothing to mix (toggle off, or fewer than two
+  // distinct colours among the unlinked notes there are).
+  function swatchFill(g) {
+    if (g === UNLINKED && unlinkedByFolder && unlinkedTintColors.length > 1) {
+      var n = unlinkedTintColors.length, step = 360 / n;
+      return "conic-gradient(" + unlinkedTintColors.map(function (c, i) {
+        return c + " " + Math.round(i * step) + "deg " + Math.round((i + 1) * step) + "deg";
+      }).join(", ") + ")";
+    }
+    return colorOf(g);
+  }
+
+  // Ring-size title (github#-none, pre-existing) for every row except (unlinked) with the
+  // toggle on, where the swatch is no longer one colour and the ring-size fact is not what
+  // it needs to say first.
+  function swatchTitle(g, bandLock) {
+    if (g === UNLINKED && unlinkedByFolder && unlinkedTintColors.length > 1) {
+      return "Mixed — coloured by folder";
+    }
+    return bandLock && bandLock[g] ? "Inner ring" : "Outer ring";
+  }
+
   function buildLegend() {
     // EVERY ROW BELOW IS ABOUT TO BE REPLACED, and the one under the pointer goes with
     // them -- so its mouseleave will never fire and its halo would be left on with
@@ -7766,8 +7856,8 @@ function mountVaultGraph(root, data, deps) {
         // vocabulary, and the inner ring IS the smaller ring -- so the mark and the thing it
         // stands for read the same way round.
         '<span class="sw' + (bandLock && bandLock[g] ? ' sw-in' : '') +
-          '" title="' + (bandLock && bandLock[g] ? 'Inner ring' : 'Outer ring') +
-          '" style="background:' + colorOf(g) + '"></span>' +
+          '" title="' + swatchTitle(g, bandLock) +
+          '" style="background:' + swatchFill(g) + '"></span>' +
         '<span class="nm" title="' + esc(g) + '">' + esc(g) + '</span>' +
         '<span class="only" data-only="1" title="Show only ' + esc(g) + '">only</span>' +
         '<span class="ct">' + counts[g] + '</span></button>' +
@@ -8737,7 +8827,12 @@ function mountVaultGraph(root, data, deps) {
     // button, which calls the same pickVisible) is otherwise reachable only from the
     // settings panel. Both omitted by the subfolder caller, same reasoning as autoKey --
     // there is no per-subfolder default-visibility setting to toggle, only per-folder.
-    function openCtxMenu(x, y, current, onPick, autoKey, visShown, onToggleVisible) {
+    //
+    // byFolderOn/onToggleByFolder are github#3 (reopened): whether THIS group's notes take
+    // their own folder's tint instead of the flat swatch. Meaningful for exactly one
+    // caller -- the (unlinked) row, the only group whose notes are not already coloured by
+    // folder -- so every other caller omits both, same as autoKey/visShown above.
+    function openCtxMenu(x, y, current, onPick, autoKey, visShown, onToggleVisible, byFolderOn, onToggleByFolder) {
       var el = $("ctxmenu");
       if (!el) return;
       var pal = paletteInfo();
@@ -8756,14 +8851,24 @@ function mountVaultGraph(root, data, deps) {
         ? '<button class="vis" data-vis aria-pressed="' + visShown + '" title="' + visLabel +
           '">' + eyeSvg(visShown) + '<span>' + visLabel + '</span></button>'
         : "";
+      // SAME MARKUP SHAPE AS visHTML above, one row further down -- data-byfolder, same
+      // reasoning as data-vis (the caller already knows which group, nothing to read back).
+      var byFolderLabel = byFolderOn ? "Colour by folder" : "Colour: unlinked swatch";
+      var byFolderHTML = onToggleByFolder
+        ? '<button class="vis" data-byfolder aria-pressed="' + byFolderOn + '" title="' +
+          byFolderLabel + '">' + dotSvg(byFolderOn) + '<span>' + byFolderLabel + '</span></button>'
+        : "";
       setHTML(el, '<div class="sws">' + sws + '</div>' +
                   '<button class="auto" data-key="" aria-pressed="' + !current +
-                  '" title="Back to automatic">Auto</button>' + visHTML);
+                  '" title="Back to automatic">Auto</button>' + visHTML + byFolderHTML);
       Array.prototype.forEach.call(el.querySelectorAll("[data-key]"), function (b) {
         b.onclick = function () { onPick(b.getAttribute("data-key") || null); closeCtxMenu(); };
       });
       if (onToggleVisible) {
         el.querySelector("[data-vis]").onclick = function () { onToggleVisible(); closeCtxMenu(); };
+      }
+      if (onToggleByFolder) {
+        el.querySelector("[data-byfolder]").onclick = function () { onToggleByFolder(); closeCtxMenu(); };
       }
       el.hidden = false;
       var root0 = ROOT.getBoundingClientRect();
@@ -8788,9 +8893,14 @@ function mountVaultGraph(root, data, deps) {
       if (gBtn) {
         ev.preventDefault();
         var g = gBtn.getAttribute("data-g");
+        // The colour-by-folder toggle is only offered on (unlinked) -- every other group's
+        // notes are already coloured by folder, so there is nothing for the toggle to mean
+        // there.
         openCtxMenu(ev.clientX, ev.clientY, folderColors[g] || groupSlot[g] || "",
                     function (key) { pickColor(g, key); }, groupAutoSlot[g] || "",
-                    !hiddenByDefault(g), function () { pickVisible(g); });
+                    !hiddenByDefault(g), function () { pickVisible(g); },
+                    g === UNLINKED ? unlinkedByFolder : undefined,
+                    g === UNLINKED ? function () { setUnlinkedByFolder(!unlinkedByFolder, true); } : undefined);
         return;
       }
       // The pooled tail row ("N smaller subfolders") carries several indices -- a pick
@@ -8897,15 +9007,20 @@ function mountVaultGraph(root, data, deps) {
       }).join("");
     }
 
-    // GENERIC BOOLEAN OPTIONS for the standalone settings panel -- one row today
-    // (compactAxis, github#23), written as a table so a second one is an entry here, not a
-    // new mechanism. Reuses the existing .mini button[aria-pressed] convention (a toggle
-    // shows its state by being filled; the label stays constant), so no new CSS is needed.
+    // GENERIC BOOLEAN OPTIONS for the standalone settings panel -- two rows now
+    // (compactAxis, github#23; unlinkedByFolder, github#3 reopened), written as a table so
+    // a second one is an entry here, not a new mechanism. Reuses the existing
+    // .mini button[aria-pressed] convention (a toggle shows its state by being filled; the
+    // label stays constant), so no new CSS is needed.
     var OPTION_ROWS = [
       { key: "compactAxis", label: "Compact date axis",
         title: "Give each year width by how many notes it holds, instead of every year reading the same width",
         get: function () { return compactAxis; },
-        set: function (v) { setCompactAxis(v, true); } }
+        set: function (v) { setCompactAxis(v, true); } },
+      { key: "unlinkedByFolder", label: "Colour unlinked notes by folder",
+        title: "Give a note with no links its own folder's colour instead of the flat unlinked swatch -- also reachable by right-clicking the (unlinked) row",
+        get: function () { return unlinkedByFolder; },
+        set: function (v) { setUnlinkedByFolder(v, true); } }
     ];
     function buildOptions() {
       var host = $("optbody");
@@ -9102,6 +9217,25 @@ function mountVaultGraph(root, data, deps) {
     if (dateSpan) drawDateUI();
     if (persist && onCompactAxis) onCompactAxis(compactAxis);
     return compactAxis;
+  }
+
+  // github#3 (reopened): recolours every unlinked note live. No group's own colour actually
+  // changed -- what changed is whether unlinked notes are still allowed to read one -- so
+  // buildColors() would be repainting things that did not change; buildUnlinkedTint() alone
+  // is enough, same reasoning as applySubfolderColors calling buildSubShades() alone
+  // instead of buildColors(). The rest of the repaint set matches applyFolderColors exactly:
+  // this is exactly as broad a recolour as an override is.
+  function setUnlinkedByFolder(on, persist) {
+    unlinkedByFolder = !!on;
+    buildUnlinkedTint();
+    var btn = $("opt-unlinkedByFolder");
+    if (btn) btn.setAttribute("aria-pressed", unlinkedByFolder ? "true" : "false");
+    if (renderer) renderer.refresh();
+    try { placeLogo(); } catch { /* logo not mounted yet */ }
+    try { heatBuild(); } catch { /* heatmap not built yet */ }
+    try { buildLegend(); } catch { /* legend not built yet */ }
+    if (persist && onUnlinkedByFolder) onUnlinkedByFolder(unlinkedByFolder);
+    return unlinkedByFolder;
   }
 
   function savePng() {
@@ -11603,6 +11737,10 @@ function mountVaultGraph(root, data, deps) {
                     // "Compact date axis" in the plugin saved correctly but silently never
                     // updated a view already open, unlike every sibling toggle here.
                     setCompactAxis: function (v) { return setCompactAxis(v !== false, false); },
+                    // Same shape and same reasoning as setCompactAxis just above (github#3,
+                    // reopened) -- v === true, not v !== false, since this setting's default
+                    // is off rather than on.
+                    setUnlinkedByFolder: function (v) { return setUnlinkedByFolder(v === true, false); },
                     // Push the defaults into the live filter and repaint. This is the
                     // "and now show it" half, kept separate so loading saved settings at
                     // boot cannot be confused with a person clicking an eye.
@@ -11912,6 +12050,7 @@ function mountVaultGraph(root, data, deps) {
                     applyLayout: applyLayout, isHighlighted: isHighlighted,
                     ringColors: ringColors,
                     colorOf: colorOf,
+                    nodeColor: nodeColor,
                     isArchiveGroup: isArchiveGroup,
                     get folderColors() {
                       return Object.assign(Object.create(null), folderColors);
@@ -11945,6 +12084,10 @@ function mountVaultGraph(root, data, deps) {
                     },
                     get panEnabled() { return panEnabled; },
                     get compactAxis() { return compactAxis; },
+                    get unlinkedByFolder() { return unlinkedByFolder; },
+                    // What the (unlinked) row's swatch is currently mixing -- a copy, not
+                    // the live array, so a check cannot accidentally mutate the cache.
+                    get unlinkedTintColors() { return unlinkedTintColors.slice(); },
                     // The pooled-tail rank a split cell's key ends in -- exposed so a check can
                     // derive it instead of hardcoding SUB_SLOTS-1, which is not itself public.
                     get subTailRank() { return SUB_SLOTS - 1; },
