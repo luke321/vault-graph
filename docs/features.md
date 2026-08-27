@@ -104,14 +104,26 @@ moment it is unpinned.
 
 ![A note dragged into the hole to pin it, a second note right-clicked to pin it the other way, and a third pinned from its own detail card, whose panel is then closed](../assets/features/pin.webp)
 
-## Color Picker
+## Folder colours
 
 *Unreleased*
 
-Right-click any folder or subfolder's row in the legend for the twelve-swatch picker at
-the row itself — no settings panel needed. Click a slot to hold that row to a colour,
-**Auto** hands it back to whatever its position would give it anyway. Shown here on a
-subfolder — recolour "People" inside "03 - Resources" without touching its parent's own
-hue. The row only exists once its folder's twisty is open.
+Folders are coloured from twelve slots — ten hues and two greys — handed out in folder
+order and round again. Right-click a folder in the legend for the same twelve-swatch
+picker at the row itself, no settings panel needed: click a slot to hold that folder to
+a colour, **Auto** hands it back to its positional slot. Setting one folder never changes
+another, and two folders may share a colour — useful for saying they belong together.
+
+![Two folders right-clicked in turn, each given a colour of its own from the picker, then both put back to automatic](../assets/features/colours.webp)
+
+## Subfolder colours
+
+*Unreleased*
+
+The same right-click colour menu a top-level folder's row opens, reached from a
+subfolder's row instead — recolour "People" inside "03 - Resources" without touching its
+parent's own hue. The row only exists once its folder's twisty is open, the same
+precondition the subfolders feature needs. **Auto** hands the tint back to whatever the
+parent folder and position would give it anyway.
 
 ![A folder unfolded to reach a subfolder, that subfolder right-clicked for its own colour menu, given a colour, then put back to automatic](../assets/features/subfoldercolor.webp)

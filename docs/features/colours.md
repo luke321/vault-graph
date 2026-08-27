@@ -31,4 +31,4 @@ commit.
 | | |
 |---|---|
 | **Introduced in** | `predates versioning` |
-| **Last re-recorded** | `never — clip not yet recorded` |
+| **Last re-recorded** | `unreleased — 2026-08-27` |

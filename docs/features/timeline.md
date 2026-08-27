@@ -32,4 +32,4 @@ commit.
 | | |
 |---|---|
 | **Introduced in** | `1.7.0` — "The Timeline Update" |
-| **Last re-recorded** | `unreleased — 2026-08-26` |
+| **Last re-recorded** | `unreleased — 2026-08-27` |

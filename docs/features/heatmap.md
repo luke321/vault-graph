@@ -27,4 +27,4 @@ commit.
 | | |
 |---|---|
 | **Introduced in** | `predates versioning` |
-| **Last re-recorded** | `unreleased — 2026-08-26` |
+| **Last re-recorded** | `unreleased — 2026-08-27` |
