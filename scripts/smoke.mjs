@@ -537,6 +537,108 @@ check("band assignment obeys its two hard rules", async (p) => {
   };
 });
 
+// EVERY CHECK ABOVE ASSERTS A PROPERTY of the layout (rows balanced, no stray small
+// folders) -- none of them would catch a layout that is internally consistent and still
+// DIFFERENT from what it used to be. github#37: while working github#35, the same folder
+// split differently across rebuilds of the same mirror vault with no intentional change --
+// the cause turned out to be an in-progress, since-reverted fix, not the fixtures, but nothing
+// in this suite would have caught it either way. This check does: it compares the CURRENT
+// build's band assignment and every note's position against a checked-in golden snapshot.
+//
+// SNAPSHOTS ARE DELIBERATE, NEVER AUTOMATIC. scripts/update-layout-snapshots.mjs writes
+// scripts/layout-snapshots/*.json by hand, on request -- never from this check, never from
+// the pre-push hook. A snapshot that regenerates itself on mismatch is not a regression
+// test. When a layout change is intentional: run that script, review the diff, commit the
+// new snapshot in the SAME change as the code that moved the layout.
+//
+// ONLY THE THREE NAMED FIXTURES HAVE A SNAPSHOT -- an explicit --vault or --url has no
+// golden reference to compare against, so this reports NOT ASSERTED rather than failing.
+// Matched by PREFIX against debugDump().vault.name (build-graph.mjs sets it to
+// basename(VAULT), which for a fixture is "<name>-<digest8>" -- see resolveVaults()) since
+// the digest suffix changes whenever a generator script does.
+//
+// POSITION TOLERANCE IS MEASURED, NOT GUESSED. update-layout-snapshots.mjs's own header
+// records why this check calls __vg.relayout() before sampling rather than reading
+// positions straight off demo.busy()===false, or even a bare applyLayout(false) (once or
+// twice): without it, two consecutive measurements of the IDENTICAL build disagreed by up
+// to several graph units on 90%+ of the demo and 10k vaults' notes -- animation-path
+// residue, the same class of bug github#21 fixed for dot size. With relayout(), repeated
+// measurements are byte-for-byte identical. 0.1 graph units is a wide margin over that
+// measured noise floor (0, with relayout(); several units without it) and still tiny next
+// to a real algorithmic drift, which moves notes by tens to hundreds of units.
+check("layout matches its golden snapshot", async (p) => {
+  const dd = await p.j("__vg.debugDump()");
+  const vaultName = dd.vault.name;
+  const fixture = ["demo-vault", "test-vault", "shape-vault"].find((f) => vaultName.startsWith(f));
+  if (!fixture) {
+    return { ok: true, detail: `NOT ASSERTED: "${vaultName}" is not one of the three named ` +
+                                `fixtures -- no golden snapshot to compare against` };
+  }
+  const snapPath = join(ROOT, "scripts", "layout-snapshots", `${fixture}.json`);
+  if (!existsSync(snapPath)) {
+    return { ok: false, detail: `no snapshot at scripts/layout-snapshots/${fixture}.json -- ` +
+                                 `run node scripts/update-layout-snapshots.mjs` };
+  }
+  const snap = JSON.parse(readFileSync(snapPath, "utf8"));
+  // SAME __vg.relayout() call update-layout-snapshots.mjs takes the snapshot behind -- see
+  // that script's header for why plain applyLayout(false) is not enough on its own (a
+  // still-running cascade frame can land after it and silently overwrite the snap).
+  await p.eval(`__vg.relayout(); void 0`).catch(() => {});
+  const r = await p.j(`(function(){
+    var plan = __vg.buildWedgePlan(false), band = {};
+    plan.cells.forEach(function(c){ band[c.g] = c.inner ? "inner" : "outer"; });
+    var pos = {};
+    __vg.graph.forEachNode(function(id, a){ pos[id] = [a.x, a.y]; });
+    return { band: band, positions: pos };
+  })()`);
+
+  const flipped = [];
+  for (const f of Object.keys(snap.band)) {
+    if (r.band[f] !== undefined && r.band[f] !== snap.band[f]) {
+      flipped.push(`${f}: ${snap.band[f]} -> ${r.band[f]}`);
+    }
+  }
+  const snapIds = new Set(Object.keys(snap.positions));
+  const curIds = new Set(Object.keys(r.positions));
+  const added = [...curIds].filter((id) => !snapIds.has(id));
+  const removed = [...snapIds].filter((id) => !curIds.has(id));
+  if (added.length || removed.length) {
+    return {
+      ok: false,
+      detail: `the FIXTURE itself changed, not just the layout -- ${added.length} note(s) ` +
+        `added, ${removed.length} removed since the snapshot was taken. Regenerate deliberately ` +
+        `with node scripts/update-layout-snapshots.mjs if this fixture's generator changed on ` +
+        `purpose (e.g. ${[...added, ...removed].slice(0, 3).join(", ")}${added.length + removed.length > 3 ? ", ..." : ""})`,
+    };
+  }
+  // TOLERANCE, in graph units -- see the check-level comment above for how it was measured.
+  const TOL = 0.1;
+  let worst = null, moved = 0;
+  for (const id of curIds) {
+    const [sx, sy] = snap.positions[id];
+    const [cx, cy] = r.positions[id];
+    const d = Math.hypot(cx - sx, cy - sy);
+    if (d <= TOL) continue;
+    moved++;
+    if (!worst || d > worst.d) {
+      const sAngle = Math.atan2(sy, sx) * 180 / Math.PI;
+      const cAngle = Math.atan2(cy, cx) * 180 / Math.PI;
+      worst = { id, d, sr: Math.hypot(sx, sy), cr: Math.hypot(cx, cy), sAngle, cAngle };
+    }
+  }
+  const ok = flipped.length === 0 && moved === 0;
+  const parts = [`${curIds.size} notes checked against scripts/layout-snapshots/${fixture}.json`];
+  parts.push(flipped.length ? `${flipped.length} folder(s) flipped band: ${flipped.join(", ")}` : "band unchanged");
+  if (moved) {
+    parts.push(`${moved} note(s) moved past ${TOL} units, worst is #${worst.id}: ` +
+      `radius ${worst.sr.toFixed(1)} -> ${worst.cr.toFixed(1)}, ` +
+      `angle ${worst.sAngle.toFixed(1)}° -> ${worst.cAngle.toFixed(1)}°`);
+  } else {
+    parts.push("positions unchanged");
+  }
+  return { ok, detail: parts.join("; ") };
+});
+
 check("a marked heatmap day haloes but never pushes", async (p) => {
   const day = await p.j(`(function(){ var h = __vg.heat, b = null;
     h.keys.forEach(function(k){ var d = h.days[k]; if (!b || d.n > b.n) b = d; }); return b.key; })()`);
