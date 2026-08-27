@@ -95,7 +95,7 @@ date fields, gives every year and month back its plain calendar width.
 
 ## Pin a note to the hub
 
-*Unreleased*
+*1.8.0 — "The Hub"*
 
 Drag a note into the hole at the centre, right-click it, or open its own detail card and
 click **Pin to hub** — three ways to hold up to thirteen notes together in the hub, out
