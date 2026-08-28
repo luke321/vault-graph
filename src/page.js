@@ -7998,6 +7998,12 @@ function mountVaultGraph(root, data, deps) {
     return bandLock && bandLock[g] ? "Inner ring" : "Outer ring";
   }
 
+  // WHERE THE POINTER LAST WAS, in viewport coordinates, so a legend rebuild can ask what
+  // is under it now (github#46). Two numbers written on a mousemove: the file notes
+  // elsewhere that mousemove fires 120+ times a second, which is why nothing REAL is done
+  // in the handler -- the hit-test happens once per rebuild, not once per move.
+  var ptr = null;
+
   function buildLegend() {
     // EVERY ROW BELOW IS ABOUT TO BE REPLACED, and the one under the pointer goes with
     // them -- so its mouseleave will never fire and its halo would be left on with
@@ -8364,6 +8370,40 @@ function mountVaultGraph(root, data, deps) {
         renderer.refresh();
       };
     });
+
+    // AND THE ROW UNDER THE POINTER KEEPS ITS HALO ACROSS THE REBUILD (github#46).
+    // buildLegend opens by clearing the hover, because every row is about to be replaced and
+    // the old one's mouseleave will never fire. That is still right, and it was only half the
+    // problem: the REPLACEMENT row under a stationary pointer gets no mouseenter either, so
+    // clicking a row's `only` chip dropped the halo of the very folder it had just soloed.
+    // Chrome re-dispatches a mousemove at the real cursor after some DOM rebuilds and not
+    // others -- see the demo-cursor note further down, which was bitten by the same thing --
+    // and that is what made this read as intermittent rather than broken: the halo came back
+    // if the mouse happened to twitch, and stayed gone if it did not.
+    //
+    // ASKED OF THE DOM, not remembered from the click. elementFromPoint is the same hit-test
+    // the browser itself would run, so this cannot disagree with what a real mousemove would
+    // have found -- including the case where the rebuild moves the rows around underneath a
+    // pointer that never left, which soloing does (every other row leaves the legend).
+    if (ptr) {
+      var hit = null, hitSub = null;
+      for (var up = DOC.elementFromPoint(ptr.x, ptr.y); up && up !== DOC.body; up = up.parentElement) {
+        if (!up.getAttribute) continue;
+        if (up.getAttribute("data-hsub")) { hitSub = up; break; }
+        if (up.getAttribute("data-g") && up.classList && up.classList.contains("lg")) { hit = up; break; }
+      }
+      // The same two resolutions the row handlers above use, and deliberately those rather
+      // than a shared helper: a subfolder row carries tint-slot INDICES, and only subOrder
+      // turns those back into the names hoverHighlight wants.
+      if (hitSub) {
+        var fSub = hitSub.getAttribute("data-hsub"), subsSub = subOrder[fSub] || [];
+        hoverHighlight(null, (hitSub.getAttribute("data-idx") || "").split(",").map(function (i) {
+          return fSub + "/" + subsSub[+i];
+        }));
+      } else if (hit) {
+        hoverHighlight(hit.getAttribute("data-g"), null);
+      }
+    }
   }
 
   // THE DEFAULT VISIBILITY, in one place, for the same reason collapseAll exists: boot and
@@ -8552,6 +8592,11 @@ function mountVaultGraph(root, data, deps) {
   // not, so this is the one hook that still runs when the thing it is fixing happens.
   var introOwed = false;      // hidden at load: the intro is owed to the first look at the tab
   if (DOC && typeof DOC.addEventListener === "function") {
+    // Passive and capturing, so it still sees the move when something above it stops
+    // propagation, and so it can never delay a scroll. See `ptr`'s own note.
+    DOC.addEventListener("mousemove", function (ev) {
+      ptr = { x: ev.clientX, y: ev.clientY };
+    }, { capture: true, passive: true });
     DOC.addEventListener("visibilitychange", function () {
       var away = typeof DOC.visibilityState === "string"
         ? DOC.visibilityState === "hidden" : !!DOC.hidden;
