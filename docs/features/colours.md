@@ -10,6 +10,9 @@ saved choice is a *slot*, not a colour value, so it follows the theme between li
 dark. The same picker is also reachable from the gear's settings panel, for anyone who
 would rather work down a list than right-click each row.
 
+See also: [unlinked notes joining their folder](unlinked.md) — a related but separate
+toggle, off the same right-click menu, for what an unlinked note's colour and wedge do.
+
 ## Where it lives in the storyboard
 
 `act: "colours"` in `demoMode()` (`src/page.js`).

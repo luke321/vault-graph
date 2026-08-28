@@ -29,6 +29,49 @@ published tag breaks every link to it.
 
 ---
 
+## 1.9.0 — "Belonging" — unreleased
+
+An unlinked note now joins its own folder's wedge and colour by default, instead of
+sitting apart with every other unlinked note — reversible per-vault, from either host.
+
+- **An unlinked note joins its own folder's group by default** (`unlinkedByFolder`, github#3
+  reopened) — same wedge, band, colour, count, filter and highlight as any other note filed
+  there, rather than a separate `(unlinked)` population. Off is the escape hatch for anyone
+  who wants that population kept visible and separate, same as this repo shipped it
+  originally: right-click the `(unlinked)` row (always in the legend, so the toggle never
+  needs a trip through settings either direction) or use the new row in the settings panel /
+  plugin settings tab. `(unlinked)`'s own colour, when it has members, is no longer in the
+  ordinary twelve-slot rotation — it takes the same recessive grey archives do, since neither
+  is a folder anyone organised. `(unlinked)` alone now sorts at the very end of the legend,
+  past every real folder, matching where a loose note sits in Obsidian's own file explorer —
+  greyed out and parenthesised while it holds nothing. `(vault root)` keeps its original
+  place ahead of the real folders, so no existing vault's automatic colours shift on
+  upgrade.
+
+- **Kept separate is not the same as flat.** A second, independent toggle,
+  `unlinkedTintByFolder` (off by default) — a note that's staying in the `(unlinked)`
+  population can still take its own folder's colour instead of the flat swatch, the exact
+  "mixed color dot" the original reopen comment asked for. Only offered once
+  `unlinkedByFolder` is off, since there's nothing left to recolour once every unlinked note
+  has already joined its folder. Same right-click row and settings-panel treatment as the
+  membership toggle above.
+
+- **A fix to a fix, found while building the above:** the github#34 "hidden by default"
+  right-click toggle never actually persisted on the Obsidian plugin host — it repainted the
+  view live and silently reverted on the next reload, because the plugin's own settings
+  writer was never wired for that setting. Fixed alongside, since the wiring this release
+  needed for the new setting was nearly identical.
+
+- **Every generated demo/test fixture now guarantees a handful of genuinely unlinked
+  notes**, so the checks this release depends on (and any future one) always have something
+  real to measure instead of silently skipping on a vault that happened to link everything.
+
+- **Its own gallery entry** — [`docs/features/unlinked.md`](docs/features/unlinked.md) —
+  and its own beat in the demo storyboard, last of all: both toggles here touch colour, so
+  it runs after "colours" for the same reason that one used to run last on its own.
+
+---
+
 ## 1.8.0 — "The Hub" — 2026-08-27
 
 Four correctness bugs in pin-to-hub, the hub's boundary brought in line with the inner

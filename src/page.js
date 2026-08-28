@@ -262,6 +262,30 @@ function mountVaultGraph(root, data, deps) {
   var compactAxis = deps.compactAxis === false ? false : true;
   var onCompactAxis = typeof deps.onCompactAxis === "function" ? deps.onCompactAxis : null;
 
+  // AN UNLINKED NOTE JOINS ITS OWN FOLDER, ON UNLESS THE HOST SAYS OTHERWISE (github#3,
+  // reopened) -- ON by explicit request, unlike a setting that only ever repaints
+  // (compactAxis/panEnabled): a note with no links is still filed somewhere, and by
+  // default it now reads, sorts and sizes as part of that folder rather than as a member
+  // of a separate (unlinked) population. OFF is the escape hatch for anyone who wants that
+  // population kept visible and separate, same as the original fix shipped it -- see
+  // groupOf() below for what this actually changes, and the flat grey (unlinked) swatch
+  // (buildColors()) for what a note looks like while it's off.
+  var unlinkedByFolder = deps.unlinkedByFolder === false ? false : true;
+  var onUnlinkedByFolder = typeof deps.onUnlinkedByFolder === "function" ? deps.onUnlinkedByFolder : null;
+
+  // A SEPARATE QUESTION FROM THE ONE ABOVE (github#3, re-read again): unlinkedByFolder is
+  // membership -- does an unlinked note stand in the (unlinked) group at all, or in its own
+  // folder's. This is COLOUR ONLY, and only means anything while unlinkedByFolder is OFF
+  // (kept separate): a note still standing in the (unlinked) group can either wear the flat
+  // swatch every note in that group has always worn, or its own folder's tint while staying
+  // put -- the exact ask from the reopen comment ("giving them a mixed color dot in the
+  // navigation"), which the bigger membership toggle above does not cover on its own once
+  // someone wants unlinked notes visible as their own population AND individually coloured.
+  // OFF by default -- this is the smaller, opt-in half of the original ask, not the
+  // shipped-behaviour-changing half unlinkedByFolder's own default is.
+  var unlinkedTintByFolder = deps.unlinkedTintByFolder === true ? true : false;
+  var onUnlinkedTintByFolder = typeof deps.onUnlinkedTintByFolder === "function" ? deps.onUnlinkedTintByFolder : null;
+
   // ARCHIVE FOLDERS: the ones whose name starts with `_`.
   //
   // A leading underscore is how a vault says "sorts last, not part of the working set" --
@@ -294,6 +318,15 @@ function mountVaultGraph(root, data, deps) {
     return '<svg viewBox="0 0 16 16" aria-hidden="true">' + lid +
       (on ? '<circle cx="8" cy="8" r="2" fill="currentColor"/>'
           : '<path d="M3 13L13 3" stroke="currentColor" stroke-width="1.25"/>') +
+      '</svg>';
+  }
+
+  // A filled vs. outlined dot -- not the eye, because this is not a visibility question.
+  // Used only by the (unlinked) row's own context-menu toggle (github#3, reopened).
+  function dotSvg(on) {
+    return '<svg viewBox="0 0 16 16" aria-hidden="true">' +
+      (on ? '<circle cx="8" cy="8" r="5" fill="currentColor"/>'
+          : '<circle cx="8" cy="8" r="5" fill="none" stroke="currentColor" stroke-width="1.25"/>') +
       '</svg>';
   }
 
@@ -558,11 +591,19 @@ function mountVaultGraph(root, data, deps) {
  
   /* -------------------------------------------------------------- grouping */
 
-  // Unlinked notes are their OWN GROUP, not their folder's. They used to be
-  // sunflower-packed into the hub hole, which put them nowhere the rest of the language
-  // applies: no wedge, no legend row, no way to filter or count them, and their folder
-  // silently under-reported its size. As a group they get all of that, and they land in
-  // whichever band their size earns like anything else.
+  // Unlinked notes are their OWN GROUP, not their folder's, WHEN unlinkedByFolder IS OFF.
+  // They used to be sunflower-packed into the hub hole unconditionally, which put them
+  // nowhere the rest of the language applies: no wedge, no legend row, no way to filter or
+  // count them, and their folder silently under-reported its size. As a group they get all
+  // of that, and they land in whichever band their size earns like anything else.
+  //
+  // github#3, REOPENED: unlinkedByFolder (default ON) puts that group's membership behind
+  // a toggle instead of making it the only option -- on, a note with no links joins its
+  // real folder's group instead, the same way every OTHER note already does, so it gets
+  // that folder's wedge, band, colour, count, filter and highlight, not a copy of them.
+  // EVERY OTHER CALLER OF groupOf ASKS NO FURTHER QUESTION, which is what makes this the
+  // one place to change: nothing downstream hardcodes UNLINKED, so nothing downstream needs
+  // to know this toggle exists.
   //
   // Named in parentheses so it sorts with "(vault root)" ahead of the numbered folders,
   // and so it cannot collide with a real folder name.
@@ -573,7 +614,7 @@ function mountVaultGraph(root, data, deps) {
     // -- measured with the graph fully empty, all 10k notes classified as (unlinked), the
     // legend collapsed to one eye and the disc laid out as a single wedge. adj always holds
     // every link, so the answer is the same in every mode.
-    if (!adj[id]) return UNLINKED;
+    if (!adj[id]) return unlinkedByFolder ? graph.getNodeAttribute(id, "folder") : UNLINKED;
     return graph.getNodeAttribute(id, "folder");
   }
 
@@ -600,22 +641,36 @@ function mountVaultGraph(root, data, deps) {
       var g = groupOf(id);
       count[g] = (count[g] || 0) + 1;
     });
+    // UNLINKED ALWAYS GETS A ROW, EVEN AT ZERO -- every other group's row is earned by
+    // having a member, but this one is also the ONLY control for its own toggle that
+    // lives in the legend rather than the settings panel. With unlinkedByFolder on (the
+    // default) every unlinked note has joined its folder, so this count is legitimately
+    // 0 -- and if the row followed the ordinary "no row for an empty group" rule, right-
+    // clicking it to turn the toggle back off would be reachable only from settings,
+    // never from the main view (flagged directly: "how do you want to enable it again
+    // from the main view?"). Forcing the key in here, unconditionally, is enough --
+    // count[UNLINKED] || 0 reads correctly either way, and buildLegend already renders
+    // whatever counts[g] says without assuming it is nonzero.
+    if (count[UNLINKED] === undefined) count[UNLINKED] = 0;
     // Name order, not size order. For PARA folders that is their numbered order
     // (01, 02, 03, ...), so wedges run round the disc in the same sequence as the
     // vault's own folder list and a group keeps its colour as the vault grows.
     // Note: subfolder order stays size-based -- the "N smaller subfolders" fold
     // depends on knowing which are smallest.
     var names = Object.keys(count).sort(function (a, b) {
-      // THREE RANKS, and the reason is that neither `_` nor `(` is a real folder name
-      // competing with the others. Archives first, then the pseudo-folders --
-      // "(vault root)" for notes sitting loose at the top and "(unlinked)" for notes
-      // nothing points at -- then everything the vault actually filed. So the entries
-      // that are not part of the working set stay together at the head of the list
-      // instead of one of them landing above the archives and one below.
-      //
-      // This does not move any colour: archives take the grey slot without consuming
-      // one, so the first pseudo-folder is still the first group in the rotation.
+      // ARCHIVES, THEN "(vault root)", THEN EVERY REAL FOLDER, THEN "(unlinked)" LAST OF
+      // ALL -- restored to the pre-ticket order for the first three (github#3, re-read
+      // again: moving "(vault root)" behind the real folders shifted the automatic
+      // twelve-slot colour of every real folder in every vault on upgrade, which is a much
+      // bigger blast radius than a legend reorder should have -- colour identity is not
+      // something to disturb for every existing user just to tidy up two pseudo-group
+      // rows). UNLINKED alone still sorts last, unconditionally, matching where a loose
+      // note sits in Obsidian's own file explorer -- and it is free to, because (see
+      // buildColors below) it does not consume a rotation slot any more than an archive
+      // does, so its position here cannot move anyone else's colour the way vault root's
+      // did.
       var rank = function (s) {
+        if (s === UNLINKED) return 3;
         var c = s.charAt(0);
         return c === "_" ? 0 : c === "(" ? 1 : 2;
       };
@@ -677,15 +732,21 @@ function mountVaultGraph(root, data, deps) {
       var k = byFolder[g];
       var picked = (k && THEME.byKey[k]) ? k : "";
 
-      // ARCHIVES NEVER CONSUME A SLOT, with or without a pick of their own. That is the
-      // whole of "out of the rotation": `auto` does not advance here, so which hue a
-      // working folder gets cannot depend on how many archives sort before it.
-      if (isArchiveGroup(g)) {
+      // ARCHIVES NEVER CONSUME A SLOT, with or without a pick of their own -- and neither
+      // does UNLINKED (github#3, reopened, at the user's explicit request: "don't use the
+      // normal colour table for unlinked, make it gray like the default off ones"). Both
+      // are recessive by default for the same reason: neither is a folder somebody
+      // organised, so neither should compete for one of the twelve identity hues. That is
+      // the whole of "out of the rotation": `auto` does not advance here, so which hue a
+      // working folder gets cannot depend on how many archives (or whether the vault has
+      // any unlinked notes) sort before it. A pick still wins for either, same as any
+      // folder -- this only changes the AUTOMATIC answer.
+      if (isArchiveGroup(g) || g === UNLINKED) {
         var akey = picked || ARCHIVE_SLOT;
         groupColor[g] = THEME.byKey[akey];
         groupSlot[g] = akey;
-        // An archive's automatic slot is ARCHIVE_SLOT unconditionally -- an override
-        // changes what it's using, never what "automatic" means for it.
+        // Automatic is ARCHIVE_SLOT unconditionally for both -- an override changes what
+        // it's using, never what "automatic" means for it.
         groupAutoSlot[g] = ARCHIVE_SLOT;
         return;
       }
@@ -709,6 +770,7 @@ function mountVaultGraph(root, data, deps) {
       groupAutoSlot[g] = key;
     });
     buildSubShades();
+    buildUnlinkedTint();
   }
 
   // The settings UIs need three things and none of them should reach into internals:
@@ -795,6 +857,12 @@ function mountVaultGraph(root, data, deps) {
   // of the twelve slot hexes, so there is nothing among them to ring as "current", and
   // the settings UIs need to say that rather than guess.
   var subSlot = Object.create(null);
+
+  // The distinct folder colours currently worn by unlinked notes, capped -- built by
+  // buildUnlinkedTint() below, read only by the (unlinked) legend row's own swatch when
+  // unlinkedTintByFolder is on. Empty is a perfectly good answer (no unlinked notes, or the
+  // toggle is off): the swatch falls back to the flat colorOf(UNLINKED) either way.
+  var unlinkedTintColors = [];
 
   // Four steps, not one per subfolder. Spreading N tints evenly across one hue
   // family collapses as N grows -- measured, nine subfolders land ~3 apart, below
@@ -1123,18 +1191,52 @@ function mountVaultGraph(root, data, deps) {
     });
   }
 
+  // 6 is enough for a legend swatch to read as "several colours live here" without an
+  // expensive uniqueness check against hundreds of distinct hexes -- the row is a summary,
+  // not an inventory.
+  var UNLINKED_TINT_CAP = 6;
+
+  // What the (unlinked) row's own swatch mixes, once unlinkedTintByFolder is on -- same
+  // colour nodeColor() would give each unlinked note, deduped and capped. Only ever finds
+  // anything while unlinkedByFolder (membership) is OFF: on, no note answers UNLINKED to
+  // groupOf any more, so this comes back empty, which is a correct answer, not a stale one.
+  // An O(n) pass, same order as buildSubShades just above and computeOrder before it, so it
+  // lives here (called from buildColors, once per colour-affecting change) rather than in
+  // buildLegend, which runs on nearly every legend click.
+  function buildUnlinkedTint() {
+    unlinkedTintColors = [];
+    var seen = Object.create(null);
+    graph.forEachNode(function (id) {
+      if (unlinkedTintColors.length >= UNLINKED_TINT_CAP) return;
+      if (groupOf(id) !== UNLINKED) return;
+      var a = graph.getNodeAttributes(id);
+      var c = subShade[a.folder + "/" + (a.sub || "")] || colorOf(a.folder);
+      if (seen[c]) return;
+      seen[c] = true;
+      unlinkedTintColors.push(c);
+    });
+  }
+
   // Group colour, tinted by subfolder when the folders are what we are looking at.
   //
   // UNLINKED IS A GROUP, NOT A FOLDER, and the folder dimension is the one place that can
   // forget it. Every other dimension asks groupOf; this one used to go straight to the
-  // note's own folder, so a degree-0 note wore its folder's tint while the legend showed
-  // it under one swatch -- measured 0 of 12 matching on a 700-note vault, 9 distinct
-  // colours under a single legend row (github#3). `(vault root)` is NOT the same case:
-  // the builder writes that as a real folder value, so colorOf resolves it already.
+  // note's own folder unconditionally, so a degree-0 note wore its folder's tint while the
+  // legend showed it under one swatch -- measured 0 of 12 matching on a 700-note vault, 9
+  // distinct colours under a single legend row (github#3). `(vault root)` is NOT the same
+  // case: the builder writes that as a real folder value, so colorOf resolves it already.
+  //
+  // TWO INDEPENDENT QUESTIONS, not one (github#3, re-read again): groupOf(id) answers
+  // MEMBERSHIP (unlinkedByFolder) -- is this note standing in the (unlinked) group at all.
+  // unlinkedTintByFolder answers COLOUR ONLY, and only matters when the answer to the first
+  // is "yes, still unlinked": does it wear the flat swatch every note in that group always
+  // has, or its own folder's tint while staying put. A note that has already joined its
+  // folder (groupOf returns something other than UNLINKED) never reaches the tint check at
+  // all -- it is already on the ordinary fallthrough, same as any other note in that folder.
   function nodeColor(id) {
     var a = graph.getNodeAttributes(id);
     if (state.dim !== "folder") return colorOf(groupOf(id));
-    if (groupOf(id) === UNLINKED) return colorOf(UNLINKED);
+    if (groupOf(id) === UNLINKED && !unlinkedTintByFolder) return colorOf(UNLINKED);
     return subShade[a.folder + "/" + (a.sub || "")] || colorOf(a.folder);
   }
 
@@ -7677,6 +7779,33 @@ function mountVaultGraph(root, data, deps) {
   // the closure it belongs in.
   var refreshSettingsPanel = null;
 
+  // The (unlinked) row's own swatch, once unlinkedTintByFolder is on, would otherwise show
+  // one flat colour that is a LIE about what is actually underneath it -- every other row's
+  // swatch names the one colour every note in it wears; this row's notes no longer agree
+  // once they are each wearing their own folder's tint while staying put. A gradient built
+  // from what buildUnlinkedTint() actually found says so honestly, without a new legend row
+  // shape or a fourth swatch state for one group only. Falls back to the ordinary flat
+  // colour whenever there is nothing to mix (toggle off, everyone already joined their
+  // folder, or fewer than two distinct colours among the unlinked notes there are).
+  function swatchFill(g) {
+    if (g === UNLINKED && unlinkedTintByFolder && unlinkedTintColors.length > 1) {
+      var n = unlinkedTintColors.length, step = 360 / n;
+      return "conic-gradient(" + unlinkedTintColors.map(function (c, i) {
+        return c + " " + Math.round(i * step) + "deg " + Math.round((i + 1) * step) + "deg";
+      }).join(", ") + ")";
+    }
+    return colorOf(g);
+  }
+
+  // Ring-size title (pre-existing) for every row except (unlinked) mixed, where the swatch
+  // is no longer one colour and the ring-size fact is not what it needs to say first.
+  function swatchTitle(g, bandLock) {
+    if (g === UNLINKED && unlinkedTintByFolder && unlinkedTintColors.length > 1) {
+      return "Mixed — coloured by folder";
+    }
+    return bandLock && bandLock[g] ? "Inner ring" : "Outer ring";
+  }
+
   function buildLegend() {
     // EVERY ROW BELOW IS ABOUT TO BE REPLACED, and the one under the pointer goes with
     // them -- so its mouseleave will never fire and its halo would be left on with
@@ -7754,7 +7883,13 @@ function mountVaultGraph(root, data, deps) {
       var open = hasSubs && !state.collapsed[g];
       var hl = !!state.highlight[g];
 
-      var row = '<div class="lgr">' +
+      // GREYED OUT AT ZERO, ONLY FOR UNLINKED (github#3, reopened again): an empty real
+      // folder cannot exist (a group with no members never earns a row at all -- see
+      // computeOrder), but (unlinked) is now the one group with a permanent row even
+      // empty, so it is the one row that needs its own "nothing here right now" look
+      // rather than reading as a folder with a genuine zero.
+      var lgrClass = "lgr" + (g === UNLINKED && !counts[g] ? " lgr-empty" : "");
+      var row = '<div class="' + lgrClass + '">' +
         twBtn(hasSubs ? 'data-tw="' + esc(g) + '"' : null, open) +
         eyeBtn('data-eye="' + esc(g) + '"', vis, g) +
         '<button class="lg" data-g="' + esc(g) + '" data-hl="' + (hl ? "on" : "off") +
@@ -7766,11 +7901,17 @@ function mountVaultGraph(root, data, deps) {
         // vocabulary, and the inner ring IS the smaller ring -- so the mark and the thing it
         // stands for read the same way round.
         '<span class="sw' + (bandLock && bandLock[g] ? ' sw-in' : '') +
-          '" title="' + (bandLock && bandLock[g] ? 'Inner ring' : 'Outer ring') +
-          '" style="background:' + colorOf(g) + '"></span>' +
+          '" title="' + swatchTitle(g, bandLock) +
+          '" style="background:' + swatchFill(g) + '"></span>' +
         '<span class="nm" title="' + esc(g) + '">' + esc(g) + '</span>' +
         '<span class="only" data-only="1" title="Show only ' + esc(g) + '">only</span>' +
-        '<span class="ct">' + counts[g] + '</span></button>' +
+        // PARENTHESISED FOR UNLINKED WHILE KEPT SEPARATE (github#3, re-read again): its
+        // count is not folded into any folder's own total the way a joined note's is, so
+        // marking it "(13)" rather than "13" says as much without a second glance at the
+        // row's name -- the same convention a template's own count row could use for "not
+        // really part of the total" if one ever needed to.
+        '<span class="ct">' + (g === UNLINKED && !unlinkedByFolder ? "(" + counts[g] + ")" : counts[g]) +
+          '</span></button>' +
         '</div>';
 
       // Subfolders are listed only when they actually get their own wedges, so the
@@ -8144,6 +8285,34 @@ function mountVaultGraph(root, data, deps) {
     // invisible to heatDraw's signature -- it tracks counts, not hues -- so the
     // cached paint is dropped explicitly rather than waiting for a count to move.
     if (heat) { heatSig = ""; heatDraw(); }
+  }
+
+  // A FULL, FROM-SCRATCH RELAYOUT -- for when GROUP MEMBERSHIP OR THE BAND SPLIT ITSELF
+  // may have changed, not just what is visible or which note sits in the hub. NOT the
+  // same job hubChanged() does: pinning a note excludes it from the ring plan entirely
+  // and never touches which group anything is in or how big any wedge is, so
+  // hubChanged() only needs pinnedPlan cleared and a replay. This is for the one thing
+  // that DOES move membership -- unlinkedByFolder (github#3, reopened) -- and mirrors
+  // __vg.relayout()'s own reset exactly, extracted here so a second live caller is not a
+  // second copy of it: cancel whatever's animating, drop every locked geometry cache,
+  // regroup() (recomputes counts, colours and, because bandLock is null, the band split
+  // itself from scratch), then lay out fresh.
+  function hardRelayout(animate) {
+    stopPlay();
+    if (cascadeRun) {
+      WIN.cancelAnimationFrame(cascadeRun.raf);
+      WIN.clearTimeout(cascadeRun.guard);
+      cascadeRun = null;
+    }
+    if (anim) { WIN.cancelAnimationFrame(anim); anim = null; }
+    if (animGuard) { WIN.clearTimeout(animGuard); animGuard = null; }
+    pinnedPlan = null; planKeep = null;
+    roomNow = null; cellNow = null; edgeNow = null; colWalk = null;
+    posSrc = posDst = null;
+    bandLock = null; geomLock = null;
+    regroup();
+    applyLayout(!!animate);
+    if (renderer) renderer.refresh();
   }
 
 
@@ -8737,7 +8906,19 @@ function mountVaultGraph(root, data, deps) {
     // button, which calls the same pickVisible) is otherwise reachable only from the
     // settings panel. Both omitted by the subfolder caller, same reasoning as autoKey --
     // there is no per-subfolder default-visibility setting to toggle, only per-folder.
-    function openCtxMenu(x, y, current, onPick, autoKey, visShown, onToggleVisible) {
+    //
+    // byFolderOn/onToggleByFolder are github#3 (reopened): whether an unlinked note joins
+    // its own folder's group instead of sitting apart in this one. Meaningful for exactly
+    // one caller -- the (unlinked) row, the only group this can ever apply to -- so every
+    // other caller omits both, same as autoKey/visShown above.
+    //
+    // tintOn/onToggleTint are github#3 (re-read again): a SEPARATE question from
+    // byFolderOn -- whether a note still standing in this group (byFolderOn false) wears
+    // its own folder's tint instead of the flat swatch, rather than whether it stands here
+    // at all. The caller passes both only when byFolderOn is itself false: with every
+    // unlinked note already joined to its folder there is nothing left in this group for a
+    // colour source to apply to.
+    function openCtxMenu(x, y, current, onPick, autoKey, visShown, onToggleVisible, byFolderOn, onToggleByFolder, tintOn, onToggleTint) {
       var el = $("ctxmenu");
       if (!el) return;
       var pal = paletteInfo();
@@ -8756,14 +8937,33 @@ function mountVaultGraph(root, data, deps) {
         ? '<button class="vis" data-vis aria-pressed="' + visShown + '" title="' + visLabel +
           '">' + eyeSvg(visShown) + '<span>' + visLabel + '</span></button>'
         : "";
+      // SAME MARKUP SHAPE AS visHTML above, one row further down -- data-byfolder, same
+      // reasoning as data-vis (the caller already knows which group, nothing to read back).
+      var byFolderLabel = byFolderOn ? "Joins its folder" : "Kept separate";
+      var byFolderHTML = onToggleByFolder
+        ? '<button class="vis" data-byfolder aria-pressed="' + byFolderOn + '" title="' +
+          byFolderLabel + '">' + dotSvg(byFolderOn) + '<span>' + byFolderLabel + '</span></button>'
+        : "";
+      // SAME MARKUP SHAPE AGAIN -- data-tint, same reasoning as data-vis/data-byfolder.
+      var tintLabel = tintOn ? "Colour by folder" : "Colour: unlinked swatch";
+      var tintHTML = onToggleTint
+        ? '<button class="vis" data-tint aria-pressed="' + tintOn + '" title="' +
+          tintLabel + '">' + dotSvg(tintOn) + '<span>' + tintLabel + '</span></button>'
+        : "";
       setHTML(el, '<div class="sws">' + sws + '</div>' +
                   '<button class="auto" data-key="" aria-pressed="' + !current +
-                  '" title="Back to automatic">Auto</button>' + visHTML);
+                  '" title="Back to automatic">Auto</button>' + visHTML + byFolderHTML + tintHTML);
       Array.prototype.forEach.call(el.querySelectorAll("[data-key]"), function (b) {
         b.onclick = function () { onPick(b.getAttribute("data-key") || null); closeCtxMenu(); };
       });
       if (onToggleVisible) {
         el.querySelector("[data-vis]").onclick = function () { onToggleVisible(); closeCtxMenu(); };
+      }
+      if (onToggleByFolder) {
+        el.querySelector("[data-byfolder]").onclick = function () { onToggleByFolder(); closeCtxMenu(); };
+      }
+      if (onToggleTint) {
+        el.querySelector("[data-tint]").onclick = function () { onToggleTint(); closeCtxMenu(); };
       }
       el.hidden = false;
       var root0 = ROOT.getBoundingClientRect();
@@ -8788,9 +8988,21 @@ function mountVaultGraph(root, data, deps) {
       if (gBtn) {
         ev.preventDefault();
         var g = gBtn.getAttribute("data-g");
+        // Both extra toggles are only offered on (unlinked) -- every other group's notes
+        // are already coloured by folder and already stand in their own group, so there is
+        // nothing for either to mean there. The tint toggle specifically is only offered
+        // once membership itself is off (kept separate): with every unlinked note already
+        // joined to its folder there is nothing left in this group for a colour source to
+        // apply to.
+        var isUnlinked = g === UNLINKED;
+        var keptSeparate = isUnlinked && !unlinkedByFolder;
         openCtxMenu(ev.clientX, ev.clientY, folderColors[g] || groupSlot[g] || "",
                     function (key) { pickColor(g, key); }, groupAutoSlot[g] || "",
-                    !hiddenByDefault(g), function () { pickVisible(g); });
+                    !hiddenByDefault(g), function () { pickVisible(g); },
+                    isUnlinked ? unlinkedByFolder : undefined,
+                    isUnlinked ? function () { setUnlinkedByFolder(!unlinkedByFolder, true); } : undefined,
+                    keptSeparate ? unlinkedTintByFolder : undefined,
+                    keptSeparate ? function () { setUnlinkedTintByFolder(!unlinkedTintByFolder, true); } : undefined);
         return;
       }
       // The pooled tail row ("N smaller subfolders") carries several indices -- a pick
@@ -8897,15 +9109,24 @@ function mountVaultGraph(root, data, deps) {
       }).join("");
     }
 
-    // GENERIC BOOLEAN OPTIONS for the standalone settings panel -- one row today
-    // (compactAxis, github#23), written as a table so a second one is an entry here, not a
-    // new mechanism. Reuses the existing .mini button[aria-pressed] convention (a toggle
-    // shows its state by being filled; the label stays constant), so no new CSS is needed.
+    // GENERIC BOOLEAN OPTIONS for the standalone settings panel -- two rows now
+    // (compactAxis, github#23; unlinkedByFolder, github#3 reopened), written as a table so
+    // a second one is an entry here, not a new mechanism. Reuses the existing
+    // .mini button[aria-pressed] convention (a toggle shows its state by being filled; the
+    // label stays constant), so no new CSS is needed.
     var OPTION_ROWS = [
       { key: "compactAxis", label: "Compact date axis",
         title: "Give each year width by how many notes it holds, instead of every year reading the same width",
         get: function () { return compactAxis; },
-        set: function (v) { setCompactAxis(v, true); } }
+        set: function (v) { setCompactAxis(v, true); } },
+      { key: "unlinkedByFolder", label: "Unlinked notes join their folder",
+        title: "A note with no links takes its own folder's wedge and colour, instead of sitting apart in a separate unlinked group -- also reachable by right-clicking the (unlinked) row",
+        get: function () { return unlinkedByFolder; },
+        set: function (v) { setUnlinkedByFolder(v, true); } },
+      { key: "unlinkedTintByFolder", label: "Colour unlinked notes by folder",
+        title: "While unlinked notes are kept as their own group, give each one its own folder's colour instead of the flat unlinked swatch -- also reachable by right-clicking the (unlinked) row",
+        get: function () { return unlinkedTintByFolder; },
+        set: function (v) { setUnlinkedTintByFolder(v, true); } }
     ];
     function buildOptions() {
       var host = $("optbody");
@@ -9102,6 +9323,52 @@ function mountVaultGraph(root, data, deps) {
     if (dateSpan) drawDateUI();
     if (persist && onCompactAxis) onCompactAxis(compactAxis);
     return compactAxis;
+  }
+
+  // github#3 (reopened): MOVES every unlinked note into its own folder's group live -- not
+  // a repaint, a REGROUP. groupOf(id) is what decides wedge, band, colour, count, filter
+  // and highlight for every note in the file (see its own comment), so flipping the one
+  // thing it reads makes every unlinked note change groups, which changes every group's
+  // size, which changes wedge angles and can move the inner/outer band split -- the same
+  // shape of change as switching state.dim, not the same shape as a colour override or a
+  // hub pin (hubChanged() is the wrong precedent here: pinning excludes a note from the
+  // ring plan entirely and never touches membership). hardRelayout() (just above) is the
+  // shared reset for exactly this shape of change.
+  //
+  // hardRelayout(false), not (true): an animated tween here would need to reconcile TWO
+  // plans that disagree about which wedge a note is even in, not just where in the same
+  // wedge it sits -- unlike every existing animated transition (a filter change, a range
+  // change), which never moves a note between groups. Untested territory tonight; the
+  // instant snap is what __vg.relayout() already proves does not leave stale state behind.
+  function setUnlinkedByFolder(on, persist) {
+    unlinkedByFolder = !!on;
+    var btn = $("opt-unlinkedByFolder");
+    if (btn) btn.setAttribute("aria-pressed", unlinkedByFolder ? "true" : "false");
+    hardRelayout(false);
+    try { placeLogo(); } catch { /* logo not mounted yet */ }
+    try { heatBuild(); } catch { /* heatmap not built yet */ }
+    try { buildLegend(); } catch { /* legend not built yet */ }
+    if (persist && onUnlinkedByFolder) onUnlinkedByFolder(unlinkedByFolder);
+    return unlinkedByFolder;
+  }
+
+  // github#3 (re-read again): recolours whichever unlinked notes are still standing in the
+  // (unlinked) group live -- unlike setUnlinkedByFolder above, this never changes
+  // membership, so it is exactly as broad a recolour as a folder override is, not a
+  // regroup. buildUnlinkedTint() alone is enough (no group's own colour changed, only
+  // whether unlinked notes are allowed to read their folder's), same reasoning
+  // applySubfolderColors uses for calling buildSubShades() alone instead of buildColors().
+  function setUnlinkedTintByFolder(on, persist) {
+    unlinkedTintByFolder = !!on;
+    buildUnlinkedTint();
+    var btn = $("opt-unlinkedTintByFolder");
+    if (btn) btn.setAttribute("aria-pressed", unlinkedTintByFolder ? "true" : "false");
+    if (renderer) renderer.refresh();
+    try { placeLogo(); } catch { /* logo not mounted yet */ }
+    try { heatBuild(); } catch { /* heatmap not built yet */ }
+    try { buildLegend(); } catch { /* legend not built yet */ }
+    if (persist && onUnlinkedTintByFolder) onUnlinkedTintByFolder(unlinkedTintByFolder);
+    return unlinkedTintByFolder;
   }
 
   function savePng() {
@@ -10827,6 +11094,20 @@ function mountVaultGraph(root, data, deps) {
       if (!cmv || cmv.hidden) return null;
       return cmv.querySelector("[data-vis]");    // null on a subfolder's menu, or if closed
     }
+    // The right-click menu's "joins its folder" toggle (github#3, re-read again) -- only
+    // present when the menu was opened on the (unlinked) row itself, same shape as ctxvis.
+    if (kind === "ctxbyfolder") {
+      var cmb = $("ctxmenu");
+      if (!cmb || cmb.hidden) return null;
+      return cmb.querySelector("[data-byfolder]");
+    }
+    // The right-click menu's "colour by folder" toggle -- only present on the (unlinked)
+    // row AND only once unlinkedByFolder is already off (see openCtxMenu's own caller).
+    if (kind === "ctxtint") {
+      var cmt = $("ctxmenu");
+      if (!cmt || cmt.hidden) return null;
+      return cmt.querySelector("[data-tint]");
+    }
     // A YEAR CHIP under the strip. "busiest" picks the fullest year that HAS a chip, which
     // is not the same as the fullest year: below about 20px of pitch buildYears names every
     // other year, so the busiest one may have no button to aim at. Choosing among the chips
@@ -11426,9 +11707,11 @@ function mountVaultGraph(root, data, deps) {
       { settle: true, act: "camera", why: "let the view come back" },
 
       /* --- 11. colours -------------------------------------------------- */
-      // LAST regardless: colour is still a preference, and letting every earlier act
-      // land on an unmodified palette keeps a re-record of any of them from picking up
-      // a colour choice this one made.
+      // NEAR-LAST, not last of all any more (unlinked, below, is): colour is still a
+      // preference, and letting every earlier act land on an unmodified palette keeps a
+      // re-record of any of them from picking up a colour choice this one made. unlinked
+      // touches colour too (its own tint toggle), which is exactly why it runs after this
+      // one rather than before it.
       //
       // RIGHT-CLICK, not the gear -- the same twelve swatches, reached at the row
       // itself instead of a settings panel one trip away. The gear panel still exists
@@ -11454,9 +11737,51 @@ function mountVaultGraph(root, data, deps) {
       { click: true, target: ["ctxswatch", ""], act: "colours", why: "put it back to automatic too" },
       { settle: true, act: "colours", why: "let the palette snap back" },
 
+      /* --- 12. unlinked --------------------------------------------------- */
+      // LAST OF ALL, at explicit request -- this act's own toggles are colour-affecting
+      // (the tint half) AND membership-affecting (the join half moves notes between
+      // wedges), so it inherits the "runs last" reasoning colours had on its own and adds
+      // a second one: nothing later needs a clean, default membership to start from,
+      // because nothing runs after this.
+      //
+      // The (unlinked) row is ALWAYS in the legend now (github#3, re-read again) --
+      // greyed out and last of all whenever the toggle below is at its default -- so this
+      // act's own first right-click needs no setup the way, say, subfoldercolor's twisty
+      // does: the row is already there, on every fixture, regardless of how many notes
+      // are actually unlinked.
+      { rightclick: true, target: ["group", "(unlinked)"], act: "unlinked",
+        why: "right-click the (unlinked) row -- always last in the legend" },
+      { settle: true, act: "unlinked", why: "let the menu open" },
+      { click: true, target: ["ctxbyfolder", ""], act: "unlinked",
+        why: "keep unlinked notes separate instead of joining their folder" },
+      { settle: true, act: "unlinked", why: "the wedges reallocate -- unlinked notes get their own wedge back" },
+
+      // Now that the group has real members, the SECOND toggle exists: colouring them by
+      // folder while they stay put, rather than moving them out of the group.
+      { rightclick: true, target: ["group", "(unlinked)"], act: "unlinked",
+        why: "right-click it again, now that it holds its own notes" },
+      { settle: true, act: "unlinked", why: "let the menu open" },
+      { click: true, target: ["ctxtint", ""], act: "unlinked",
+        why: "colour them by their own folder anyway -- the row's swatch goes mixed" },
+      { settle: true, act: "unlinked", why: "the dots repaint, and the row's swatch turns into a gradient" },
+
+      // AND PUT BOTH BACK, same discipline the folders act's own default-visibility beats
+      // use (see that comment): these write settings a host persists, not just the live
+      // filter, and nothing runs after this act to reset them for a re-record of an
+      // earlier one -- or for the page a viewer is left looking at after the clip ends.
+      { rightclick: true, target: ["group", "(unlinked)"], act: "unlinked", why: "right-click it once more" },
+      { settle: true, act: "unlinked", why: "let the menu open" },
+      { click: true, target: ["ctxtint", ""], act: "unlinked", why: "...put the colour back to the flat swatch" },
+      { settle: true, act: "unlinked", why: "let the swatch go flat again" },
+      { rightclick: true, target: ["group", "(unlinked)"], act: "unlinked", why: "right-click it a last time" },
+      { settle: true, act: "unlinked", why: "let the menu open" },
+      { click: true, target: ["ctxbyfolder", ""], act: "unlinked",
+        why: "...and let unlinked notes rejoin their folders, back to the default" },
+      { settle: true, act: "unlinked", why: "the row empties and greys out again, back where it started" },
+
       // Pointer out of the way, so the last frame is the disc rather than a hover state
       // left behind by the last click.
-      { park: true, act: "colours", why: "leave the final frame clean" }
+      { park: true, act: "unlinked", why: "leave the final frame clean" }
     ];
   }
 
@@ -11603,6 +11928,17 @@ function mountVaultGraph(root, data, deps) {
                     // "Compact date axis" in the plugin saved correctly but silently never
                     // updated a view already open, unlike every sibling toggle here.
                     setCompactAxis: function (v) { return setCompactAxis(v !== false, false); },
+                    // Same shape as setCompactAxis just above (github#3, reopened) -- the
+                    // host (plugin/main.js) always resolves its own setting through
+                    // DEFAULT_SETTINGS before calling this, so `v` arrives here as an
+                    // explicit true/false already; `v === true` matches deps.unlinkedByFolder's
+                    // own "absent means on, only false turns it off" contract exactly, since
+                    // an explicit true is the one value that contract also reads as on.
+                    setUnlinkedByFolder: function (v) { return setUnlinkedByFolder(v !== false, false); },
+                    // Same shape again -- unlinkedTintByFolder defaults OFF, unlike the two
+                    // above, so this one keeps the v === true polarity that used to belong
+                    // to setUnlinkedByFolder before its own default flipped.
+                    setUnlinkedTintByFolder: function (v) { return setUnlinkedTintByFolder(v === true, false); },
                     // Push the defaults into the live filter and repaint. This is the
                     // "and now show it" half, kept separate so loading saved settings at
                     // boot cannot be confused with a person clicking an eye.
@@ -11912,6 +12248,7 @@ function mountVaultGraph(root, data, deps) {
                     applyLayout: applyLayout, isHighlighted: isHighlighted,
                     ringColors: ringColors,
                     colorOf: colorOf,
+                    nodeColor: nodeColor,
                     isArchiveGroup: isArchiveGroup,
                     get folderColors() {
                       return Object.assign(Object.create(null), folderColors);
@@ -11945,6 +12282,11 @@ function mountVaultGraph(root, data, deps) {
                     },
                     get panEnabled() { return panEnabled; },
                     get compactAxis() { return compactAxis; },
+                    get unlinkedByFolder() { return unlinkedByFolder; },
+                    get unlinkedTintByFolder() { return unlinkedTintByFolder; },
+                    // What the (unlinked) row's swatch is currently mixing -- a copy, not
+                    // the live array, so a check cannot accidentally mutate the cache.
+                    get unlinkedTintColors() { return unlinkedTintColors.slice(); },
                     // The pooled-tail rank a split cell's key ends in -- exposed so a check can
                     // derive it instead of hardcoding SUB_SLOTS-1, which is not itself public.
                     get subTailRank() { return SUB_SLOTS - 1; },
@@ -12409,32 +12751,19 @@ function mountVaultGraph(root, data, deps) {
                                lit: lit, dated: dated,
                                total: graph.order, label: rangeLabel() };
                     },
-                    relayout: function () {
-                      // CANCEL BEFORE RESETTING, or a still-running cascade's next animation
-                      // frame lands after this snap and silently overwrites it -- the same
-                      // gap once found and fixed here for setSubwedgeGate (github#31), lost
-                      // again when that toggle was removed and this treatment reverted with
-                      // it. Clearing pinnedPlan/planKeep too, not just cancelling the frame:
-                      // a cascade holds them for its own duration and clears them when it
-                      // lands, so a layout after a cancelled-but-not-cleared run would reuse
-                      // a plan pinned for a run that no longer exists (see the same teardown
-                      // in playTimeline, a few hundred lines up, for the full account).
-                      stopPlay();
-                      if (cascadeRun) {
-                        WIN.cancelAnimationFrame(cascadeRun.raf);
-                        WIN.clearTimeout(cascadeRun.guard);
-                        cascadeRun = null;
-                      }
-                      if (anim) { WIN.cancelAnimationFrame(anim); anim = null; }
-                      if (animGuard) { WIN.clearTimeout(animGuard); animGuard = null; }
-                      pinnedPlan = null; planKeep = null;
-                      roomNow = null; cellNow = null; edgeNow = null; colWalk = null;
-                      posSrc = posDst = null;
-                      bandLock = null; geomLock = null;
-                      regroup();
-                      applyLayout(false);
-                      renderer.refresh();
-                    },
+                    // CANCEL BEFORE RESETTING, or a still-running cascade's next animation
+                    // frame lands after this snap and silently overwrites it -- the same
+                    // gap once found and fixed here for setSubwedgeGate (github#31), lost
+                    // again when that toggle was removed and this treatment reverted with
+                    // it. Clearing pinnedPlan/planKeep too, not just cancelling the frame:
+                    // a cascade holds them for its own duration and clears them when it
+                    // lands, so a layout after a cancelled-but-not-cleared run would reuse
+                    // a plan pinned for a run that no longer exists (see the same teardown
+                    // in playTimeline, a few hundred lines up, for the full account).
+                    // Extracted to hardRelayout() (core, not stripped -- github#3 reopened
+                    // needed the identical reset for a second live caller) rather than left
+                    // as a second copy of it here.
+                    relayout: function () { hardRelayout(false); },
     };
     Object.defineProperties(window.__vg, Object.getOwnPropertyDescriptors(debugAPI));
     /* ---- END: demo automation + debug API ---- */
