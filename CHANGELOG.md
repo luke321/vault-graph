@@ -94,6 +94,42 @@ sitting apart with every other unlinked note — reversible per-vault, from eith
   because those two pull in opposite directions. Hovering and selection look the same, just
   crisper.
 
+- **The disc no longer bursts out of its own ring during an animation** (github#44). Every
+  cascade drew the outer band up to 35% thicker than the thickness it is locked to, so the rim
+  swung out past the ring it lives in and contracted back as the animation landed — measured at
+  1.336x the locked outer radius on a year chip over the 10,000-note vault, and worse the harder
+  the filter bit. The inner hole was never touched, which is part of why it survived so long.
+  The cause is a relation that was true at both ends and nowhere in between: a band's thickness
+  is `rows x spacing`, the resting solve derives the two from that thickness in a single
+  division precisely so they cannot disagree, and the cascade then walked both terms
+  independently — and interpolating two factors does not preserve their product. Traced frame by
+  frame, rows fell 24 → 19.15 while spacing rose 1.000 → 1.693, which multiplies to 32.42 against
+  a locked 24.00. Spacing is now derived from the walked depth on every frame, the same single
+  division the resting layout uses, so the product is the locked thickness by construction rather
+  than by luck at the two endpoints. Worst overshoot after: 0.996x on year chips, 0.995x on range
+  changes — inside the ring everywhere, and the inner hole is unchanged at 1.000x. Long-standing
+  and shipped; not a regression from anything in this release.
+
+- **Moving unlinked notes into their folders is now animated, not a jump** (github#45). The
+  toggle above this one relocates every unlinked note to a different wedge, and it did so in a
+  single frame while every other layout-changing gesture in the page tweens. It was written that
+  way on the reasoning that a tween would have to reconcile two layouts disagreeing about which
+  wedge a note is even in — but that is not what the animation does: it reads one destination per
+  note from the new layout and sweeps it there, and never asks what group either end belongs to.
+  A note crossing to another wedge can now travel most of the way round the disc, which is
+  precisely the claim the toggle is making, so watching it travel is the point rather than a side
+  effect.
+
+- **Soloing the folder you are pointing at no longer drops its highlight** (github#46). Hovering
+  a row in the legend lights that folder's notes; clicking the same row's `only` chip put the
+  light out during the animation, leaving the one folder still on screen unlit — but only if the
+  mouse was perfectly still, because a pixel of movement brought it straight back. Rebuilding the
+  legend deliberately clears the hover, since the row under the pointer is about to be replaced
+  and will never receive its own mouse-out; what was missing is the other half, because the
+  replacement row under a stationary pointer never receives a mouse-in either. The rebuild now
+  asks the browser what is actually under the pointer and restores the highlight itself instead
+  of waiting for the next twitch of the mouse.
+
 ---
 
 ## 1.8.0 — "The Hub" — 2026-08-27
