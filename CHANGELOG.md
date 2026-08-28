@@ -70,6 +70,19 @@ sitting apart with every other unlinked note — reversible per-vault, from eith
   and its own beat in the demo storyboard, last of all: both toggles here touch colour, so
   it runs after "colours" for the same reason that one used to run last on its own.
 
+- **A link's stroke no longer thickens as you zoom in** (github#39, reported by
+  [Angel Bartolli / @bartolli](https://github.com/bartolli), who named the exact cause in the
+  issue and offered a working patch branch — the 4px cap is their measurement). Link
+  thickness was scaling with the camera exactly the way a note's dot does, which is right for
+  a dot and wrong for a connector: a dot is a thing and should hold its proportion to the
+  room around it, while a line's thickness is the channel carrying link weight. Zoomed in on
+  a well-connected note, its links merged into a solid mass you could no longer trace a
+  single connection through — so the one gesture you'd use to look *more* closely at a note's
+  connections was the one that destroyed them. Strokes are now capped in pixels and hold a
+  constant width below the cap, whatever the zoom, with weight differences preserved. **The
+  resting disc is unchanged** — the cap only engages once you're about 2.7x in, and costs
+  nothing at all before that.
+
 ---
 
 ## 1.8.0 — "The Hub" — 2026-08-27
