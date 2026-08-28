@@ -496,7 +496,11 @@ function mountVaultGraph(root, data, deps) {
    *  edges are materialised. */
   var adj = Object.create(null);
   var EDGE_TOTAL = 0;
-  var edgeAttrsOf = function (w) { return { weight: w, size: Math.min(1.6, 0.35 + w * 0.25) }; };
+  /** The heaviest a link may draw. Named rather than inline because the pixel clamp divides
+   *  by it (see measureEdgeMult) -- a ceiling that drifted from the clamp's own denominator
+   *  would move every stroke's width with nothing saying so. */
+  var EDGE_SIZE_MAX = 1.6;
+  var edgeAttrsOf = function (w) { return { weight: w, size: Math.min(EDGE_SIZE_MAX, 0.35 + w * 0.25) }; };
   var EDGE_SHOWN = 0;
   var lazyEdges = false;   // true when the resting web is partial; probes read this
   (function () {
@@ -6622,7 +6626,10 @@ function mountVaultGraph(root, data, deps) {
   // magnitude); thickness = max(minEdgeThickness, scaleSize(size)); colour = the edge
   // reducer's, already lit or dimmed. Alpha follows the hover ramp so the web arrives with
   // the dim instead of popping in over it.
-  function drawFocusWeb(ctx, data, settings) {
+  // No `settings` parameter any more: the one thing it was read for was minEdgeThickness, and
+  // that now lives inside edgePx so this and edgeReport cannot disagree about a width.
+  // drawHover keeps its own -- it reads labelSize and labelFont, and sigma decides its shape.
+  function drawFocusWeb(ctx, data) {
     var f = state.hovered || state.selected;
     if (!f || data.key !== f || state.query) return;
     var ht = hoverAmount();
@@ -6645,7 +6652,7 @@ function mountVaultGraph(root, data, deps) {
         ctx.moveTo(geo.ps.x, geo.ps.y);
         if (geo.k) ctx.quadraticCurveTo(geo.cp.x, geo.cp.y, geo.pt.x, geo.pt.y);
         else ctx.lineTo(geo.pt.x, geo.pt.y);
-        ctx.lineWidth = Math.max(settings.minEdgeThickness, renderer.scaleSize(geo.ed.size || 1));
+        ctx.lineWidth = edgePx(geo.ed.size);
         ctx.strokeStyle = geo.ed.color;
         ctx.stroke();
       });
@@ -6668,7 +6675,7 @@ function mountVaultGraph(root, data, deps) {
   // Replaces Sigma's built-in hover label, whose pill is hardcoded to #FFF.
   // Geometry matches its label drawer: text at x + size + 3, y + labelSize/3.
   function drawHover(ctx, data, settings) {
-    drawFocusWeb(ctx, data, settings);
+    drawFocusWeb(ctx, data);
     if (typeof data.label !== "string" || !data.label) return;
     var n = settings.labelSize;
     ctx.font = settings.labelWeight + " " + n + "px " + settings.labelFont;
@@ -7385,6 +7392,76 @@ function mountVaultGraph(root, data, deps) {
     if (syncSizeScale() && renderer) renderer.refresh();
   }
 
+  /* ------------------------------------------------------------ edge width */
+
+  // AN EDGE IS CAPPED IN PIXELS; A DOT IS NOT.
+  //
+  // Sigma's edge shader draws max(minEdgeThickness, size / sizeRatio) px, and sizeRatio IS
+  // the camera ratio here because zoomToSizeRatioFunction is identity (see makeRenderer). So
+  // a stroke grew as 1/ratio, exactly like a dot does. That law is right for a dot -- a dot
+  // is a thing, and holding its proportion to the room it has is the whole point -- and wrong
+  // for a connector, whose thickness is meant to carry link weight, not zoom.
+  //
+  // Measured on the 10k fixture against one hub of degree 55: strokes 1.70px at rest,
+  // 3.94px five notches in, 7.87px at ten -- and 55 of those converging on a 20.44px dot is
+  // 307.87px of ink, so the fan drew as one solid mass with no single link traceable through
+  // it. Reported exactly that way: the notes get buried by the links that join them
+  // (github#39).
+  //
+  // ONE MULTIPLIER FOR THE WHOLE WEB, not a per-edge min() against the cap. A min() flattens
+  // every link onto the same number the moment it binds -- all 55 at 4.00px, a 220px fan, and
+  // the weight ordering gone -- while a single k holds the ratios between weights at any zoom
+  // and lands only the heaviest link there can be on the cap. Below the knee it also makes
+  // size * k / ratio a CONSTANT, so the drawn web is invariant under zoom rather than merely
+  // bounded, which is what the invariant is able to check as an equality.
+  //
+  // Above the knee -- ratio >= EDGE_SIZE_MAX / EDGE_MAX_PX, i.e. 0.4 -- k is 1 and nothing
+  // happens at all: no refresh, and not one pixel of the resting disc moves. The whole cost
+  // lives inside the zoom that needed the fix.
+  var EDGE_MAX_PX = 4;    // the widest a link may ever draw
+  var edgeMult = 1;       // what the edge reducer scales every size by; see syncEdgeMult
+
+  function measureEdgeMult() {
+    if (!renderer) return 1;
+    var ratio = renderer.getCamera().getState().ratio || 1;
+    var k = EDGE_MAX_PX * ratio / EDGE_SIZE_MAX;
+    return k < 1 ? k : 1;
+  }
+
+  // Returns true if it moved enough to be worth a repaint -- the same shape as syncSizeScale
+  // and for the same reason, so refresh -> render -> no change -> stop instead of a loop.
+  // 0.002 of the cap is 0.008px on the heaviest link: under a pixel, and under anything a
+  // display can show.
+  function syncEdgeMult() {
+    var next = measureEdgeMult();
+    if (Math.abs(next - edgeMult) < 0.002) return false;
+    edgeMult = next;
+    return true;
+  }
+
+  // Applied at EVERY exit of edgeReducer that draws something, not once before the return --
+  // the query branch returns early, and a size clamped before it would then be overwritten by
+  // the focus branch while a search left it unclamped altogether.
+  //
+  // A named function rather than a closure built inside the reducer: that is a hot path, 3737
+  // calls per refresh on the 10k shape, and the reducer's own per-call cost is the thing the
+  // resting-web budget above exists to bound.
+  function capEdge(r, a) {
+    if (edgeMult < 1) r.size = (r.size === undefined ? (a.size || 1) : r.size) * edgeMult;
+    return r;
+  }
+
+  // What a link ACTUALLY draws, in display pixels. Sigma's edge shader is
+  // max(minEdgeThickness, size / sizeRatio) and scaleSize is its name for that division, so
+  // this is the shader's law rather than a re-derivation of it. Shared by the focus-web
+  // overlay -- which has to stroke exactly what the GPU would -- and by edgeReport, for the
+  // reason edgeCurveGeom is shared with checkFocusWeb: a diagnostic that computes its own
+  // answer eventually disagrees with the canvas, and then it is worse than nothing.
+  function edgePx(size) {
+    if (!renderer) return 0;
+    return Math.max(renderer.getSetting("minEdgeThickness"), renderer.scaleSize(size || 1));
+  }
+
   /* -------------------------------------------------------- edge curvature */
 
   // Bow a link AWAY from the disc centre rather than letting it chord straight
@@ -7562,7 +7639,10 @@ function mountVaultGraph(root, data, deps) {
         }
         r.color = THEME.edge;
         var focus = focusSet();
-        if (state.query) { r.color = THEME.dim; return r; }
+        // capEdge at THIS exit too, not only the last one. A search dims every link and
+        // returns here, which left the whole web unclamped for as long as a query was in the
+        // box -- the one state where the widths were still growing as 1/ratio.
+        if (state.query) { r.color = THEME.dim; return capEdge(r, a); }
         if (focus) {
           // In step with the nodes, off the same hoverT -- the web separating from the
           // rest is most of what makes a hover legible, so it cannot lag behind it.
@@ -7579,7 +7659,11 @@ function mountVaultGraph(root, data, deps) {
         // Squared, so links lag their notes: the dots land first and the web
         // draws itself in behind them rather than everything arriving at once.
         if (al < 0.999) r.color = withAlpha(r.color, al * al);
-        return r;
+        // THE PIXEL CAP, APPLIED LAST, so it carries the hover branch's own size as well as
+        // the resting one -- a lit link is sized toward 1.4 above, and the cap then applies
+        // to whatever that left rather than to the attribute it started from. See
+        // syncEdgeMult: a no-op above the knee, which is where the camera normally is.
+        return capEdge(r, a);
       }
     });
 
@@ -7588,7 +7672,26 @@ function mountVaultGraph(root, data, deps) {
     // re-placed and the row pitch re-measured whatever moved the camera.
     (function () {
       var cam = renderer.getCamera();
-      cam.on("updated", function () { placeLogo(); refreshSizeScale(); });
+      // THE EDGE CAP IS rAF-THROTTLED, AND THE CAMERA IS ITS ONLY INPUT. A refresh re-runs
+      // every reducer, which on the 10k shape is the one cost in this handler worth caring
+      // about -- so at most one per frame, and only when syncEdgeMult says the multiplier
+      // actually moved. Above the knee it never does, and a PAN never does at any zoom,
+      // because a pan does not change the ratio. skipIndexation because nothing moved here;
+      // only the width did.
+      var edgeRaf = 0;
+      // Seeded, AND repainted if the seed moved it. Sigma has already run the reducers once by
+      // now, so a camera that starts below the knee would otherwise draw its first frame
+      // unclamped. In practice fit() flies from ratio 1 to 1.08 and both are above it, which
+      // is exactly the kind of "cannot happen today" that a persisted camera would break.
+      if (syncEdgeMult()) renderer.refresh({ skipIndexation: true });
+      cam.on("updated", function () {
+        placeLogo(); refreshSizeScale();
+        if (edgeRaf) return;
+        edgeRaf = WIN.requestAnimationFrame(function () {
+          edgeRaf = 0;
+          if (syncEdgeMult() && renderer) renderer.refresh({ skipIndexation: true });
+        });
+      });
     })();
 
     // A window resize changes the disc's pixel radius without touching the camera,
@@ -12307,6 +12410,38 @@ function mountVaultGraph(root, data, deps) {
                       heatBuild();
                       // No return: a setter returning a value is a TypeError under
                       // "use strict", which this file is.
+                    },
+                    // WHAT AN EDGE ACTUALLY DRAWS, in pixels, right now. Through edgePx, which
+                    // is the same function the focus-web overlay strokes with, so the number
+                    // reported here and the width on the canvas cannot drift apart.
+                    //
+                    // `id` narrows it to one note's own links, which is the question a hub
+                    // raises; without one it reports the whole visible web. `ribbonPx` is the
+                    // sum of the widths -- the number that says the fan has become a mass,
+                    // where any single width still looks reasonable next to the dot.
+                    edgeReport: function (id) {
+                      if (!renderer) return "no renderer";
+                      var floor = renderer.getSetting("minEdgeThickness");
+                      var px = [], raw = [];
+                      var take = function (e) {
+                        var ed = renderer.getEdgeDisplayData(e);
+                        if (!ed || ed.hidden) return;
+                        raw.push(ed.size);
+                        px.push(edgePx(ed.size));
+                      };
+                      if (id === undefined) graph.forEachEdge(take); else graph.forEachEdge(id, take);
+                      if (!px.length) return { ratio: renderer.getCamera().getState().ratio, shown: 0 };
+                      var nd = id === undefined ? null : renderer.getNodeDisplayData(id);
+                      var r2 = function (v) { return Math.round(v * 100) / 100; };
+                      return {
+                        ratio: r2(renderer.getCamera().getState().ratio),
+                        mult: r2(edgeMult), capPx: EDGE_MAX_PX, floorPx: floor,
+                        shown: px.length,
+                        rawMin: r2(Math.min.apply(null, raw)), rawMax: r2(Math.max.apply(null, raw)),
+                        minPx: r2(Math.min.apply(null, px)), maxPx: r2(Math.max.apply(null, px)),
+                        dotPx: nd ? r2(2 * renderer.scaleSize(nd.size)) : null,
+                        ribbonPx: r2(px.reduce(function (a, v) { return a + v; }, 0)),
+                      };
                     },
                     heatReport: function () {
                       if (!heat) return "not built";

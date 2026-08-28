@@ -75,6 +75,59 @@ init `setTimeout`, which presents as a page stuck forever on "Laying out graph..
 with an empty console. The existing warning in this note about `Sigma.rendering` vs
 `Sigma` meant the namespace; this is the same trap one level down.
 
+## A stroke is capped in pixels; a dot is not
+
+Sigma's edge shader draws `max(minEdgeThickness, size / sizeRatio)`, and `sizeRatio` **is**
+the camera ratio here, because `zoomToSizeRatioFunction` is identity. That identity is
+load-bearing and stays — it is what pins a dot to a fixed fraction of its row pitch, and
+`measureSizeScale` already cancels the same `1/ratio` for nodes with `pitch *= cam`. Edges
+never got the equivalent cancellation, so a stroke grew as `1/ratio` too.
+
+**The two are not the same kind of thing.** A dot represents a note, and holding its
+proportion to the room it has is the entire point of the identity law. A line represents a
+relationship, and its *thickness* is the channel carrying link weight — so making thickness a
+function of zoom overwrites the one signal it has to give. Measured on the 10k fixture, one
+hub of degree 55: strokes 1.70px at rest, 3.94px five notches in, 7.87px at ten, and 55 of
+those converging on a 20.44px dot is **307.87px of ink**, so the fan drew as one solid mass
+with no link traceable through it (github#39).
+
+Worth stating because the obvious diagnosis is wrong: **stroke-to-dot ratio is constant**
+(0.385 at both 5x and 10x), since dots grow as `1/ratio` as well. No single stroke ever
+exceeds the dot it lands on. What breaks is *absolute* legibility, not proportion.
+
+Three things make the fix work:
+
+- **One multiplier for the whole web**, not a per-edge `min()` against the cap:
+  `edgeMult = min(1, EDGE_MAX_PX * ratio / EDGE_SIZE_MAX)`, with `EDGE_MAX_PX` 4 and
+  `EDGE_SIZE_MAX` 1.6, the ceiling `edgeAttrsOf` can produce. A `min()` flattens every link
+  onto the same number the moment it binds — all 55 at 4.00px, a 220px fan, weight ordering
+  gone — while a single `k` holds the ratios between weights at any zoom and lands only the
+  heaviest link there can be on the cap. Below the knee it also makes `size * k / ratio` a
+  **constant**, so the drawn web is invariant under zoom rather than merely bounded, which is
+  what lets the invariant assert an equality. Measured after: 2.12px / 93.93px at both 5x and
+  10x, and the resting disc untouched.
+- **Above the knee it costs nothing.** At `ratio >= EDGE_SIZE_MAX / EDGE_MAX_PX` (0.4) `k` is
+  1, no refresh fires, and not one pixel of the resting disc moves — the whole cost lives
+  inside the zoom that needed the fix. The camera hook is rAF-throttled and gated on
+  `syncEdgeMult`, so it runs at most once a frame; a **pan** never runs it at any zoom,
+  because a pan does not change the ratio. The reducer pass it does run costs 14.5ms on the
+  10k shape against 3.3ms for a render alone, i.e. about 50fps through a 120ms zoom notch.
+- **`capEdge` is applied at every drawing exit of the reducer**, not once before the return.
+  The query branch returns early, so a single application left the whole web unclamped for as
+  long as anything was in the search box — and the suite stayed green until the check learned
+  to read that state, where it now fails at 7.87px.
+
+`edgePx(size)` is the shader's law in one place, shared by the focus-web overlay (which has
+to stroke exactly what the GPU would) and by `__vg.edgeReport()` — the same reason
+`edgeCurveGeom` is shared with `checkFocusWeb` rather than duplicated in it.
+
+**Not touched, and adjacent:** sigma's `minEdgeThickness` default of **1.7px** floors the
+whole 0.60–0.85 weight range this vault produces, so at rest every stroke is identically
+1.70px and the weight encoding is invisible until you zoom past ratio ~0.94. That is the
+opposite defect — the floor hides weight, this section's is the ceiling burying notes — and
+lowering it would change the resting appearance of every vault, so it belongs to its own
+issue with its own before/after shots.
+
 ## The focus web sits above the dim notes
 
 Sigma paints every edge on its bottom layer and every node above that, so the edges lit

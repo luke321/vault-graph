@@ -1413,6 +1413,76 @@ check("the pan toggle locks the camera and flies home", async (p) => {
   };
 });
 
+check("a link's stroke holds its width at any zoom", async (p) => {
+  // Sigma's edge shader draws max(minEdgeThickness, size / sizeRatio), and sizeRatio IS the
+  // camera ratio because zoomToSizeRatioFunction is identity -- so a stroke grew as 1/ratio,
+  // like a dot. Measured on the 10k fixture against one hub of degree 55: 1.70px at rest,
+  // 3.94px five notches in, 7.87px at ten, and 55 of those on a 20.44px dot is 307.87px of
+  // ink -- the fan drew as one mass with no link traceable through it (github#39).
+  //
+  // ASSERTS AN EQUALITY, not just the cap. The fix scales the whole web by one multiplier
+  // rather than clamping each edge against the cap, which makes the drawn width CONSTANT
+  // below the knee -- so the two deep readings must match exactly. A per-edge min() would
+  // still satisfy a cap-only check while flattening every link onto the same number, and
+  // that is the regression this equality is here to catch.
+  await camReset(p);
+  const hub = await p.j(`(function(){
+    var best = null, bd = -1;
+    __vg.graph.forEachNode(function (id) {
+      var d = __vg.renderer.getNodeDisplayData(id);
+      if (!d || d.hidden) return;
+      if (__vg.graph.degree(id) > bd) { bd = __vg.graph.degree(id); best = id; }
+    });
+    return { id: best, degree: bd };
+  })()`);
+
+  // The clamp is applied by a reducer that a rAF re-runs after the camera moves, so POLL for
+  // it rather than sleeping at it -- a fixed wait is the failure this suite already records
+  // twice, and under contention it would read the pre-refresh width and call it a pass.
+  const at = async (ratio) => {
+    await p.eval(`__vg.renderer.getCamera().setState({x:0.5,y:0.5,ratio:${ratio},angle:0}); void 0`);
+    let prev = null, same = 0;
+    for (let i = 0; i < 60; i++) {
+      const r = await p.j(`__vg.edgeReport(${JSON.stringify(hub.id)})`);
+      const key = `${r.maxPx}|${r.mult}`;
+      if (key === prev) { if (++same >= 2) return r; } else { same = 0; }
+      prev = key;
+      await sleep(60);
+    }
+    return p.j(`__vg.edgeReport(${JSON.stringify(hub.id)})`);
+  };
+
+  const rest = await at(1.08);
+  const five = await at(0.216);   // five wheel notches in, where the clamp binds
+  const ten = await at(0.108);    // and twice as far again
+
+  // AND WITH A SEARCH RUNNING, because the reducer's query branch RETURNS EARLY. The first
+  // version of the fix applied the cap once before the final return, so every link went back
+  // to growing as 1/ratio for as long as anything was in the search box -- green suite,
+  // unclamped web. A cap applied at one exit of a function with three is not a cap.
+  await p.eval(`__vg.state.query = "note"; __vg.renderer.refresh(); void 0`);
+  const query = await at(0.108);
+  await p.eval(`__vg.state.query = ""; __vg.renderer.refresh(); void 0`);
+  await camReset(p);
+
+  const cap = rest.capPx;
+  const capped = (r) => r.maxPx <= cap + 0.01;
+  return {
+    // The cap at every zoom and in every state; the two deep readings identical -- which is
+    // the uniform multiplier, not merely a bound; and the resting disc left alone, which is
+    // what the knee at EDGE_SIZE_MAX/EDGE_MAX_PX buys.
+    ok: capped(rest) && capped(five) && capped(ten) && capped(query) &&
+        Math.abs(ten.maxPx - five.maxPx) < 0.02 &&
+        Math.abs(ten.ribbonPx - five.ribbonPx) < 0.5 &&
+        rest.mult === 1 && ten.mult < 1,
+    detail: `hub ${hub.id} (degree ${hub.degree}, ${rest.shown} links shown), cap ${cap}px: ` +
+            `rest ${rest.maxPx}px/fan ${rest.ribbonPx}px (mult ${rest.mult}) -> ` +
+            `5x ${five.maxPx}px/fan ${five.ribbonPx}px -> ` +
+            `10x ${ten.maxPx}px/fan ${ten.ribbonPx}px (mult ${ten.mult}); ` +
+            `10x with a search running ${query.maxPx}px; dot ${ten.dotPx}px`,
+  };
+});
+
 /* -------------------------------------------------------------- date range --
  * The brush is DRIVEN, not called. Every one of these dispatches real pointer events at real
  * pixels, because the bugs it exists to catch were all in the gesture rather than in the
