@@ -795,6 +795,55 @@ synthetic vault (node 1192, degree 54, 152 in-disc samples) **36 before, 0 after
 dominant-folder vault (node 157, degree 103, 1259 in-disc samples) **530 before, 0
 after**. See `design/0005`.
 
+## A link's stroke holds its width at any zoom
+
+Sigma's edge shader draws `max(minEdgeThickness, size / sizeRatio)`, and `sizeRatio` **is**
+the camera ratio here because `zoomToSizeRatioFunction` is identity — so a stroke grew as
+`1/ratio`, exactly like a dot. That law is right for a dot, which is a thing and should hold
+its proportion to the room it has, and wrong for a connector, whose thickness is meant to
+carry link weight rather than zoom (github#39).
+
+```javascript
+__vg.edgeReport(id)       // -> maxPx <= capPx, and identical at any ratio below the knee
+```
+
+Reported through `edgePx`, the same function the focus-web overlay strokes with, so the
+number and the canvas cannot drift apart. `ribbonPx` is the sum of one note's stroke widths
+— the figure that says the fan has become a mass, where any single width still looks
+reasonable beside the dot.
+
+**Assert the equality, not just the cap.** The fix scales the whole web by one multiplier
+(`edgeMult = min(1, EDGE_MAX_PX * ratio / EDGE_SIZE_MAX)`) rather than clamping each edge
+against the cap, which makes the drawn width *constant* below the knee at
+`EDGE_SIZE_MAX / EDGE_MAX_PX = 0.4`. A per-edge `min()` would still satisfy a cap-only check
+while flattening every link onto the same number — all 55 at 4.00px on the 10k hub, a 220px
+fan, weight ordering gone. That is the regression the equality catches.
+
+**And read it with a search running.** `edgeReducer`'s query branch **returns early**. The
+first version of the fix applied the cap once before the final return, so every link went
+back to growing as `1/ratio` for as long as anything was in the search box — with the suite
+green. A cap applied at one exit of a function with three is not a cap; `capEdge` goes at
+every drawing exit, and the check fails at **7.87px** without it.
+
+Measured on the 10k fixture, one hub of degree 55 — drawn stroke, and the total ink of its
+fan:
+
+| | camera ratio | before | after |
+|---|---|---|---|
+| rest | 1.08 | 1.70px / fan 93.50px | 1.70px / fan 93.50px — **unchanged**, above the knee |
+| 5x | 0.216 | 3.94px / fan 153.94px | 2.12px / fan 93.93px |
+| 10x | 0.108 | 7.87px / fan 307.87px | 2.12px / fan 93.93px — **identical to 5x** |
+
+307.87px of ink converging on a 20.44px dot is why the fan read as one mass with no link
+traceable through it. The other two shapes cap the same way: the dominant-folder vault (node
+158, degree 103) 3.38px / 184.6px, the demo vault (node 452, degree 71) 2.75px / 130.63px.
+
+**What it costs, measured rather than assumed.** The camera hook re-runs the reducers, which
+on the 10k shape is 14.5ms against 3.3ms for a render alone — so a zoom notch below the knee
+runs at about 50fps for its 120ms. Above the knee it costs *nothing*: `edgeMult` pins at 1
+and no refresh fires. A pan never fires it at any zoom, because a pan does not change the
+ratio. See `design/0005`.
+
 ## A synthetic vault's folder/subfolder note counts do not depend on which day it was built
 
 `make-demo-vault.mjs` and `make-shape-vault.mjs` both default their `--end` date to today
