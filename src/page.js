@@ -6467,9 +6467,11 @@ function mountVaultGraph(root, data, deps) {
 
   // How far the hover treatment should be applied for this frame. A CLICK selection has
   // no tween and must not be animated by whatever the pointer is doing, so it is always
-  // fully applied; only a hover ramps.
+  // fully applied; only a hover ramps. That holds even while the pointer is ON the selected
+  // note (issue #38) -- state.hovered gets set on enter same as any other note, but the
+  // treatment it is already getting from the selection must not be re-animated by that.
   function hoverAmount() {
-    return state.hovered ? hoverT : 1;
+    return (state.hovered && state.hovered !== state.selected) ? hoverT : 1;
   }
 
   function hoverTo(aim) {
