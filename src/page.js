@@ -11094,6 +11094,20 @@ function mountVaultGraph(root, data, deps) {
       if (!cmv || cmv.hidden) return null;
       return cmv.querySelector("[data-vis]");    // null on a subfolder's menu, or if closed
     }
+    // The right-click menu's "joins its folder" toggle (github#3, re-read again) -- only
+    // present when the menu was opened on the (unlinked) row itself, same shape as ctxvis.
+    if (kind === "ctxbyfolder") {
+      var cmb = $("ctxmenu");
+      if (!cmb || cmb.hidden) return null;
+      return cmb.querySelector("[data-byfolder]");
+    }
+    // The right-click menu's "colour by folder" toggle -- only present on the (unlinked)
+    // row AND only once unlinkedByFolder is already off (see openCtxMenu's own caller).
+    if (kind === "ctxtint") {
+      var cmt = $("ctxmenu");
+      if (!cmt || cmt.hidden) return null;
+      return cmt.querySelector("[data-tint]");
+    }
     // A YEAR CHIP under the strip. "busiest" picks the fullest year that HAS a chip, which
     // is not the same as the fullest year: below about 20px of pitch buildYears names every
     // other year, so the busiest one may have no button to aim at. Choosing among the chips
@@ -11693,9 +11707,11 @@ function mountVaultGraph(root, data, deps) {
       { settle: true, act: "camera", why: "let the view come back" },
 
       /* --- 11. colours -------------------------------------------------- */
-      // LAST regardless: colour is still a preference, and letting every earlier act
-      // land on an unmodified palette keeps a re-record of any of them from picking up
-      // a colour choice this one made.
+      // NEAR-LAST, not last of all any more (unlinked, below, is): colour is still a
+      // preference, and letting every earlier act land on an unmodified palette keeps a
+      // re-record of any of them from picking up a colour choice this one made. unlinked
+      // touches colour too (its own tint toggle), which is exactly why it runs after this
+      // one rather than before it.
       //
       // RIGHT-CLICK, not the gear -- the same twelve swatches, reached at the row
       // itself instead of a settings panel one trip away. The gear panel still exists
@@ -11721,9 +11737,51 @@ function mountVaultGraph(root, data, deps) {
       { click: true, target: ["ctxswatch", ""], act: "colours", why: "put it back to automatic too" },
       { settle: true, act: "colours", why: "let the palette snap back" },
 
+      /* --- 12. unlinked --------------------------------------------------- */
+      // LAST OF ALL, at explicit request -- this act's own toggles are colour-affecting
+      // (the tint half) AND membership-affecting (the join half moves notes between
+      // wedges), so it inherits the "runs last" reasoning colours had on its own and adds
+      // a second one: nothing later needs a clean, default membership to start from,
+      // because nothing runs after this.
+      //
+      // The (unlinked) row is ALWAYS in the legend now (github#3, re-read again) --
+      // greyed out and last of all whenever the toggle below is at its default -- so this
+      // act's own first right-click needs no setup the way, say, subfoldercolor's twisty
+      // does: the row is already there, on every fixture, regardless of how many notes
+      // are actually unlinked.
+      { rightclick: true, target: ["group", "(unlinked)"], act: "unlinked",
+        why: "right-click the (unlinked) row -- always last in the legend" },
+      { settle: true, act: "unlinked", why: "let the menu open" },
+      { click: true, target: ["ctxbyfolder", ""], act: "unlinked",
+        why: "keep unlinked notes separate instead of joining their folder" },
+      { settle: true, act: "unlinked", why: "the wedges reallocate -- unlinked notes get their own wedge back" },
+
+      // Now that the group has real members, the SECOND toggle exists: colouring them by
+      // folder while they stay put, rather than moving them out of the group.
+      { rightclick: true, target: ["group", "(unlinked)"], act: "unlinked",
+        why: "right-click it again, now that it holds its own notes" },
+      { settle: true, act: "unlinked", why: "let the menu open" },
+      { click: true, target: ["ctxtint", ""], act: "unlinked",
+        why: "colour them by their own folder anyway -- the row's swatch goes mixed" },
+      { settle: true, act: "unlinked", why: "the dots repaint, and the row's swatch turns into a gradient" },
+
+      // AND PUT BOTH BACK, same discipline the folders act's own default-visibility beats
+      // use (see that comment): these write settings a host persists, not just the live
+      // filter, and nothing runs after this act to reset them for a re-record of an
+      // earlier one -- or for the page a viewer is left looking at after the clip ends.
+      { rightclick: true, target: ["group", "(unlinked)"], act: "unlinked", why: "right-click it once more" },
+      { settle: true, act: "unlinked", why: "let the menu open" },
+      { click: true, target: ["ctxtint", ""], act: "unlinked", why: "...put the colour back to the flat swatch" },
+      { settle: true, act: "unlinked", why: "let the swatch go flat again" },
+      { rightclick: true, target: ["group", "(unlinked)"], act: "unlinked", why: "right-click it a last time" },
+      { settle: true, act: "unlinked", why: "let the menu open" },
+      { click: true, target: ["ctxbyfolder", ""], act: "unlinked",
+        why: "...and let unlinked notes rejoin their folders, back to the default" },
+      { settle: true, act: "unlinked", why: "the row empties and greys out again, back where it started" },
+
       // Pointer out of the way, so the last frame is the disc rather than a hover state
       // left behind by the last click.
-      { park: true, act: "colours", why: "leave the final frame clean" }
+      { park: true, act: "unlinked", why: "leave the final frame clean" }
     ];
   }
 

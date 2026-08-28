@@ -66,6 +66,10 @@ sitting apart with every other unlinked note — reversible per-vault, from eith
   notes**, so the checks this release depends on (and any future one) always have something
   real to measure instead of silently skipping on a vault that happened to link everything.
 
+- **Its own gallery entry** — [`docs/features/unlinked.md`](docs/features/unlinked.md) —
+  and its own beat in the demo storyboard, last of all: both toggles here touch colour, so
+  it runs after "colours" for the same reason that one used to run last on its own.
+
 ---
 
 ## 1.8.0 — "The Hub" — 2026-08-27

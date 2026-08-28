@@ -107,3 +107,16 @@ precondition the subfolders feature needs. **Auto** hands the tint back to whate
 parent folder and position would give it anyway.
 
 <img src="../assets/features/subfoldercolor.webp" width="100%" alt="A folder unfolded to reach a subfolder, that subfolder right-clicked for its own colour menu, given a colour, then put back to automatic">
+
+## Unlinked notes join their folder
+
+A note with no links at all joins its own folder's group by default — same wedge, same
+colour, same everything as any other note filed there. Right-click the `(unlinked)` row,
+always the last one in the legend, for a second toggle — "Kept separate" — to pull unlinked
+notes back into their own population instead: one flat grey swatch, its own wedge, a
+parenthesised count. A third toggle, "Colour by folder", appears one row further down once
+the group actually holds someone, for a note that stays in that population but still wants
+its own folder's tint — the row's own swatch turns into a gradient of whatever colours are
+actually in play.
+
+<img src="../assets/features/unlinked.webp" width="100%" alt="The (unlinked) row right-clicked to keep its notes separate instead of joining their folder, the wedges reallocating around a new group, then right-clicked again to colour those notes by their own folder anyway, and both toggles put back">
