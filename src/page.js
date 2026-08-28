@@ -645,27 +645,22 @@ function mountVaultGraph(root, data, deps) {
     // Note: subfolder order stays size-based -- the "N smaller subfolders" fold
     // depends on knowing which are smallest.
     var names = Object.keys(count).sort(function (a, b) {
-      // FOUR RANKS FOR EVERYTHING ELSE, and the reason is that neither `_` nor `(` is a
-      // real folder name competing with the others: archives first, then the remaining
-      // pseudo-folder ("(vault root)", for notes sitting loose at the top), then everything
-      // the vault actually filed. UNLINKED alone floats between two of those ranks
-      // depending on its own count -- see below -- so the entries that are not part of the
-      // working set otherwise stay together at the head of the list instead of one landing
-      // above the archives and one below.
+      // ARCHIVES FIRST (personal preference, kept on request), then every REAL folder,
+      // then the two pseudo-groups trail at the very end -- "(vault root)" first of the
+      // two, "(unlinked)" last of all (github#3, reopened again: "vault root is also last
+      // in the original obsidian navigation" -- matching that precedent rather than
+      // giving either pseudo-group a seat among the real folders). Neither pseudo-group's
+      // rank depends on its own count any more: UNLINKED used to float to a higher rank
+      // once it had members, and now stays last regardless, so the toggle is always found
+      // in the same place rather than one that moves under you.
       //
       // This does not move any colour: archives take the grey slot without consuming
       // one, so which non-archive group sorts first in the rotation is unaffected by
       // where the archives themselves land.
       var rank = function (s) {
-        // ARCHIVES FIRST, THEN UNLINKED -- BUT ONLY WHILE IT HAS SOMEONE IN IT (github#3,
-        // reopened again). A real population is worth surfacing up top, right after
-        // archives, same reasoning as before. An EMPTY (unlinked) is a dormant control,
-        // not a population -- it sorts LAST instead, past every real folder, so it stops
-        // taking the second-most-prominent seat in the legend for holding nothing. Right-
-        // click still reaches it wherever it lands; only its rank changes with its count.
-        if (s === UNLINKED) return count[UNLINKED] > 0 ? 1 : 4;
+        if (s === UNLINKED) return 3;
         var c = s.charAt(0);
-        return c === "_" ? 0 : c === "(" ? 2 : 3;
+        return c === "_" ? 0 : c === "(" ? 2 : 1;
       };
       return rank(a) - rank(b) || a.localeCompare(b, undefined, { numeric: true });
     });

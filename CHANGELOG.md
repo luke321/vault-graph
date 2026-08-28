@@ -42,10 +42,10 @@ sitting apart with every other unlinked note — reversible per-vault, from eith
   needs a trip through settings either direction) or use the new row in the settings panel /
   plugin settings tab. `(unlinked)`'s own colour, when it has members, is no longer in the
   ordinary twelve-slot rotation — it takes the same recessive grey archives do, since neither
-  is a folder anyone organised. With members it sorts right after `_`-prefixed archives,
-  ahead of every real folder; at zero (the default) it's greyed out and pushed to the very
-  end instead, since a dormant control isn't worth the same prime seat a real population
-  gets.
+  is a folder anyone organised. Both pseudo-groups now sort at the very end of the legend,
+  after every real folder — `(vault root)` first, `(unlinked)` last of all, matching where a
+  loose note sits in Obsidian's own file explorer — and `(unlinked)` greys out while it holds
+  nothing.
 
 - **A fix to a fix, found while building the above:** the github#34 "hidden by default"
   right-click toggle never actually persisted on the Obsidian plugin host — it repainted the

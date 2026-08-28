@@ -14,11 +14,9 @@ A note with no links at all joins its own folder's group by default — same wed
 colour, same everything as any other note filed there. Right-click the `(unlinked)` row
 for a second toggle below the swatches — "Kept separate" — to pull unlinked notes back
 into their own population instead: one flat grey swatch, its own wedge, counted apart from
-the folder it's actually filed in. The row itself is always in the legend, so the toggle is
-reachable from the graph either way — but at 0 (the default) it's greyed out and pushed to
-the very end, since a dormant control isn't worth the same prime seat a real population
-gets. Turn it off, from there or from settings, and it jumps back up to sit right after any
-archive folders, at full colour, the moment it has someone in it.
+the folder it's actually filed in. The row itself is always the last one in the legend,
+after `(vault root)` — the same place a loose note sits in Obsidian's own file explorer —
+greyed out while it holds nothing, full colour the moment it does.
 
 ## Where it lives in the storyboard
 
