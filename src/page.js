@@ -9546,16 +9546,26 @@ function mountVaultGraph(root, data, deps) {
   // ring plan entirely and never touches membership). hardRelayout() (just above) is the
   // shared reset for exactly this shape of change.
   //
-  // hardRelayout(false), not (true): an animated tween here would need to reconcile TWO
-  // plans that disagree about which wedge a note is even in, not just where in the same
-  // wedge it sits -- unlike every existing animated transition (a filter change, a range
-  // change), which never moves a note between groups. Untested territory tonight; the
-  // instant snap is what __vg.relayout() already proves does not leave stale state behind.
+  // hardRelayout(TRUE) now, and the reasoning that made it (false) turned out to be about
+  // the wrong layer (github#45). The worry was that a tween "would need to reconcile two
+  // plans that disagree about which wedge a note is even in" -- but animateTo does not
+  // reconcile plans at all. It reads one number per note, the target ringsLayout() just
+  // produced, and sweeps the note to it in polar space; it never asks which group either
+  // end belongs to. And the stale state the snap was protecting against is cleared by
+  // hardRelayout itself, above, before the new plan is built -- the same clearing the
+  // animated path gets.
+  //
+  // So a regroup animates for the same reason a filter change does: the note is going
+  // somewhere, and showing it go is what tells you the (unlinked) population went INTO the
+  // folders rather than being replaced by a different picture. The one thing genuinely new
+  // here is the LENGTH of the journey -- a note crossing to another wedge can sweep most of
+  // the way round the disc, where a filter change only ever moves it within its own. That
+  // is exactly what the toggle is claiming happened, so it is the animation doing its job.
   function setUnlinkedByFolder(on, persist) {
     unlinkedByFolder = !!on;
     var btn = $("opt-unlinkedByFolder");
     if (btn) btn.setAttribute("aria-pressed", unlinkedByFolder ? "true" : "false");
-    hardRelayout(false);
+    hardRelayout(true);
     try { placeLogo(); } catch { /* logo not mounted yet */ }
     try { heatBuild(); } catch { /* heatmap not built yet */ }
     try { buildLegend(); } catch { /* legend not built yet */ }
