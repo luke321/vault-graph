@@ -42,10 +42,19 @@ sitting apart with every other unlinked note — reversible per-vault, from eith
   needs a trip through settings either direction) or use the new row in the settings panel /
   plugin settings tab. `(unlinked)`'s own colour, when it has members, is no longer in the
   ordinary twelve-slot rotation — it takes the same recessive grey archives do, since neither
-  is a folder anyone organised. Both pseudo-groups now sort at the very end of the legend,
-  after every real folder — `(vault root)` first, `(unlinked)` last of all, matching where a
-  loose note sits in Obsidian's own file explorer — and `(unlinked)` greys out while it holds
-  nothing.
+  is a folder anyone organised. `(unlinked)` alone now sorts at the very end of the legend,
+  past every real folder, matching where a loose note sits in Obsidian's own file explorer —
+  greyed out and parenthesised while it holds nothing. `(vault root)` keeps its original
+  place ahead of the real folders, so no existing vault's automatic colours shift on
+  upgrade.
+
+- **Kept separate is not the same as flat.** A second, independent toggle,
+  `unlinkedTintByFolder` (off by default) — a note that's staying in the `(unlinked)`
+  population can still take its own folder's colour instead of the flat swatch, the exact
+  "mixed color dot" the original reopen comment asked for. Only offered once
+  `unlinkedByFolder` is off, since there's nothing left to recolour once every unlinked note
+  has already joined its folder. Same right-click row and settings-panel treatment as the
+  membership toggle above.
 
 - **A fix to a fix, found while building the above:** the github#34 "hidden by default"
   right-click toggle never actually persisted on the Obsidian plugin host — it repainted the

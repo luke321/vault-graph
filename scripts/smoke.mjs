@@ -2743,6 +2743,39 @@ check("colour unlinked by folder: the settings-panel toggle actually flips the l
   };
 });
 
+// Same shape again, for the THIRD OPTION_ROWS entry (github#3, re-read again) -- a
+// separate question from unlinkedByFolder just above: while a note is still standing in
+// the (unlinked) group, does it wear its own folder's colour. Same id-drift risk
+// buildOptions() renders all three rows from.
+check("colour unlinked notes by folder: the settings-panel toggle actually flips the live state", async (p) => {
+  const r = await p.j(`(function(){
+    var gear = document.querySelector("#vg-gear");
+    if (!gear || gear.hidden) return { noGear: true };
+    gear.click();
+    var before = document.querySelector("#vg-opt-unlinkedTintByFolder");
+    if (!before) return { noButton: true };
+    var beforePressed = before.getAttribute("aria-pressed"), beforeState = __vg.unlinkedTintByFolder;
+    before.click();
+    var after = document.querySelector("#vg-opt-unlinkedTintByFolder");
+    var afterPressed = after && after.getAttribute("aria-pressed"), afterState = __vg.unlinkedTintByFolder;
+    if (after && afterState !== beforeState) after.click();
+    gear.click();
+    return { beforePressed: beforePressed, beforeState: beforeState,
+             afterPressed: afterPressed, afterState: afterState };
+  })()`);
+  if (r.noGear) return { ok: false, detail: "no #vg-gear on this build -- standalone only" };
+  if (r.noButton) {
+    return { ok: false, detail: "gear opened but #vg-opt-unlinkedTintByFolder was not found -- the " +
+      "rendered row id and the $() lookup setUnlinkedTintByFolder uses have drifted apart" };
+  }
+  const flipped = r.afterState !== r.beforeState && r.afterPressed !== r.beforePressed;
+  return {
+    ok: flipped,
+    detail: `clicking the row: state ${r.beforeState}->${r.afterState}, aria-pressed ` +
+      `${r.beforePressed}->${r.afterPressed}`,
+  };
+});
+
 check("compact axis: the view-level icon actually flips the live state, and persists", async (p) => {
   // The settings-panel row is standalone-only (SETTINGS_UI); the plugin's gear leads to
   // Obsidian's own settings tab instead, so #vg-compact is the ONLY in-view control on
@@ -3218,8 +3251,15 @@ check("a pin hidden by a filter is skipped, not released", async (p) => {
 // here and restored after, same discipline the toggle check below already uses.
 check("every unlinked note wears the (unlinked) swatch", async (p) => {
   const r = await p.j(`(function(){
-    var startOn = __vg.unlinkedByFolder;
+    // BOTH toggles forced off: unlinkedByFolder (membership) so notes are actually
+    // standing in this group at all, and unlinkedTintByFolder (colour, github#3 re-read
+    // again) so the flat-swatch behaviour this check guards is what's actually active
+    // rather than each unlinked note wearing its own folder's tint while still in the
+    // group. Defensive on the second even though it defaults off -- explicit beats
+    // depending on every other check to have cleaned up after itself.
+    var startOn = __vg.unlinkedByFolder, startTint = __vg.unlinkedTintByFolder;
     if (startOn) __vg.setUnlinkedByFolder(false);
+    if (startTint) __vg.setUnlinkedTintByFolder(false);
     var g = __vg.graph, rd = __vg.renderer, sw = String(__vg.colorOf("(unlinked)")).toLowerCase();
     // THE PAGE'S OWN PREDICATE, not graph.degree: in a budgeted vault the graph carries only
     // the strongest share of the web, so degree-0 there includes thousands of linked notes
@@ -3230,6 +3270,7 @@ check("every unlinked note wears the (unlinked) swatch", async (p) => {
     var result = { swatch: sw, orphans: ids.length,
              match: cols.filter(function (c) { return c === sw; }).length,
              distinct: Object.keys(cols.reduce(function (a, c) { a[c] = 1; return a; }, {})).length };
+    if (startTint) __vg.setUnlinkedTintByFolder(true);
     if (startOn) __vg.setUnlinkedByFolder(true);
     return result;
   })()`);
@@ -3295,6 +3336,82 @@ check("the (unlinked) row's right-click toggle moves unlinked notes into their f
     `${r.openedOk ? "present" : "MISSING"} (pressed=${r.pressedBefore}); after click: ` +
     `menu closed=${r.closedAfter}, toggle turned on=${r.turnedOn}, (unlinked) count after=` +
     `${r.countAfter}, ${r.matched} of ${r.ids} repainted to their folder's tint` };
+});
+
+// github#3, RE-READ AGAIN: a note colouring toggle SEPARATE from the membership one just
+// above -- a note can stay standing in the (unlinked) group (kept separate) and still take
+// its own folder's tint, "giving them a mixed color dot in the navigation" per the reopen
+// comment's own wording, which the membership toggle alone cannot do (moving a note out of
+// the group is a different thing from recolouring it in place). Through the same real DOM
+// path as the checks above: a real contextmenu event, a real click, not just the
+// underlying setUnlinkedTintByFolder/nodeColor mechanism. The tint button is only offered
+// once membership is off (nothing left in the group to recolour once everyone has joined
+// their folder), so this check forces that precondition itself rather than assuming it.
+check("the (unlinked) row's right-click tint toggle recolours notes without moving them", async (p) => {
+  const r = await p.j(`(function(){
+    var g = __vg.graph, rd = __vg.renderer;
+    var ids = g.nodes().filter(function (id) { return __vg.isOrphan(id); });
+    if (!ids.length) return { skip: true };
+    var startOn = __vg.unlinkedByFolder, startTint = __vg.unlinkedTintByFolder;
+    if (startOn) __vg.setUnlinkedByFolder(false);      // kept separate, so the button exists
+    if (startTint) __vg.setUnlinkedTintByFolder(false); // start from the flat swatch
+
+    var row = document.querySelector('[data-g="(unlinked)"]');
+    if (!row) return { skip: true };
+    var rect = row.getBoundingClientRect();
+    row.dispatchEvent(new MouseEvent("contextmenu", {
+      bubbles: true, clientX: rect.left + 5, clientY: rect.top + 5 }));
+    var menu = document.querySelector('[id$="ctxmenu"]');
+    var tintBtn = menu && !menu.hidden ? menu.querySelector("[data-tint]") : null;
+    var openedOk = !!tintBtn;
+    var pressedBefore = openedOk ? tintBtn.getAttribute("aria-pressed") : null;
+    if (tintBtn) tintBtn.click();
+    var closedAfter = menu.hidden;
+    var turnedOn = __vg.unlinkedTintByFolder === true;
+    // MEMBERSHIP MUST NOT MOVE: the whole point of this being a separate toggle is that
+    // colouring in place is not the same as joining -- the count stays exactly what it was.
+    var countAfter = __vg.groupCount("(unlinked)");
+
+    var expected = ids.map(function (id) { return String(__vg.nodeColor(id)).toLowerCase(); });
+    var actual = ids.map(function (id) { return String(rd.getNodeDisplayData(id).color).toLowerCase(); });
+    var matched = actual.filter(function (c, i) { return c === expected[i]; }).length;
+    var distinct = Object.keys(actual.reduce(function (a, c) { a[c] = 1; return a; }, {})).length;
+
+    __vg.setUnlinkedTintByFolder(startTint);
+    __vg.setUnlinkedByFolder(startOn);
+
+    return { skip: false, ids: ids.length, openedOk: openedOk, pressedBefore: pressedBefore,
+             closedAfter: closedAfter, turnedOn: turnedOn, countAfter: countAfter,
+             matched: matched, distinct: distinct };
+  })()`);
+  if (r.skip) return { ok: true, detail: "no unlinked notes on this shape, nothing to measure" };
+  const ok = r.openedOk && r.pressedBefore === "false" && r.closedAfter && r.turnedOn &&
+             r.countAfter === r.ids && r.matched === r.ids;
+  return { ok, detail: `${r.ids} unlinked notes kept separate; menu opened with the toggle ` +
+    `${r.openedOk ? "present" : "MISSING"} (pressed=${r.pressedBefore}); after click: ` +
+    `menu closed=${r.closedAfter}, toggle turned on=${r.turnedOn}, (unlinked) count still=` +
+    `${r.countAfter} (must equal ${r.ids}, not 0 -- membership must not move), ` +
+    `${r.matched} of ${r.ids} repainted to their folder's tint, ${r.distinct} distinct` };
+});
+
+// github#3, RE-READ AGAIN: "giving them a mixed color dot" also asked for the row's own
+// COUNT to say it is not an ordinary folder total -- parenthesised while kept separate,
+// since it counts a population no folder's own total includes, unlike every other row's
+// count which is exactly that folder's own note total.
+check("the (unlinked) row's count is parenthesised while kept separate, plain once joined", async (p) => {
+  const r = await p.j(`(function(){
+    var startOn = __vg.unlinkedByFolder;
+    if (startOn) __vg.setUnlinkedByFolder(false);
+    var row = document.querySelector('[data-g="(unlinked)"]');
+    var ctSeparate = row ? row.closest(".lgr").querySelector(".ct").textContent : null;
+    __vg.setUnlinkedByFolder(true);
+    var row2 = document.querySelector('[data-g="(unlinked)"]');
+    var ctJoined = row2 ? row2.closest(".lgr").querySelector(".ct").textContent : null;
+    __vg.setUnlinkedByFolder(startOn);
+    return { ctSeparate: ctSeparate, ctJoined: ctJoined };
+  })()`);
+  const ok = /^\(\d+\)$/.test(r.ctSeparate || "") && /^\d+$/.test(r.ctJoined || "");
+  return { ok, detail: `kept separate: "${r.ctSeparate}" (want "(N)"), joined: "${r.ctJoined}" (want "N")` };
 });
 
 // Issue #2: Sigma paints every edge on its bottom layer and every node above that, so the

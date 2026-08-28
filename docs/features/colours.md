@@ -13,10 +13,17 @@ would rather work down a list than right-click each row.
 A note with no links at all joins its own folder's group by default — same wedge, same
 colour, same everything as any other note filed there. Right-click the `(unlinked)` row
 for a second toggle below the swatches — "Kept separate" — to pull unlinked notes back
-into their own population instead: one flat grey swatch, its own wedge, counted apart from
-the folder it's actually filed in. The row itself is always the last one in the legend,
-after `(vault root)` — the same place a loose note sits in Obsidian's own file explorer —
-greyed out while it holds nothing, full colour the moment it does.
+into their own population instead: one flat grey swatch, its own wedge, a parenthesised
+count. The row itself is always the last one in the legend, after `(vault root)` — the
+same place a loose note sits in Obsidian's own file explorer — greyed out while it holds
+nothing, full colour the moment it does.
+
+Kept separate is not the same as flat: a third toggle, "Colour by folder", appears one row
+further down once the `(unlinked)` row actually holds someone — a note can stay in the
+population and still take its own folder's tint, exactly the ask behind this feature ("a
+mixed color dot in the navigation"). The row's own swatch turns into a gradient of whatever
+colours are actually in play. Both this and "Kept separate" are also settings-panel rows,
+for anyone who would rather work down a list.
 
 ## Where it lives in the storyboard
 

@@ -112,6 +112,11 @@ mountVaultGraph(
     // off (github#3, reopened again).
     unlinkedByFolder: loadSettings().unlinkedByFolder,
     onUnlinkedByFolder: function (v) { saveSettings({ unlinkedByFolder: v }); },
+    // A separate question from the one above (github#3, re-read again): while a note is
+    // still standing in the (unlinked) group, does it wear its own folder's colour instead
+    // of the flat swatch. Undefined reads as OFF -- opt-in, not shipped-behaviour-changing.
+    unlinkedTintByFolder: loadSettings().unlinkedTintByFolder,
+    onUnlinkedTintByFolder: function (v) { saveSettings({ unlinkedTintByFolder: v }); },
     // The hub. Scoped by vault like everything else here, which matters more for this than
     // for colours: these are note IDS, and two vaults built to the same file:// origin
     // would otherwise hand each other ids that resolve to different notes or to none.

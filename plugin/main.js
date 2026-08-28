@@ -533,13 +533,21 @@ class VaultGraphView extends ItemView {
         this.plugin.settings.compactAxis = !!v;
         await this.plugin.saveSettings();
       },
-      // Colour unlinked notes by their own folder (github#3, reopened) -- same shape as
-      // compactAxis just above: a view-level control (the right-click menu's own toggle on
-      // the (unlinked) row) as well as the settings tab below, so the view has to persist
-      // a click made there too.
+      // Whether an unlinked note joins its own folder's group (github#3, reopened) -- same
+      // shape as compactAxis just above: a view-level control (the right-click menu's own
+      // toggle on the (unlinked) row) as well as the settings tab below, so the view has to
+      // persist a click made there too.
       unlinkedByFolder: this.plugin.settings.unlinkedByFolder,
       onUnlinkedByFolder: async (v) => {
         this.plugin.settings.unlinkedByFolder = !!v;
+        await this.plugin.saveSettings();
+      },
+      // A separate question from the one above (github#3, re-read again): whether a note
+      // STILL standing in the (unlinked) group wears its own folder's colour instead of the
+      // flat swatch. Same view-level-control shape as unlinkedByFolder just above.
+      unlinkedTintByFolder: this.plugin.settings.unlinkedTintByFolder,
+      onUnlinkedTintByFolder: async (v) => {
+        this.plugin.settings.unlinkedTintByFolder = !!v;
         await this.plugin.saveSettings();
       },
       // The hub, for the same reason pan gets a writer: it is changed in the view, by
@@ -637,6 +645,12 @@ const DEFAULTS = {
   // anyone who wants the unlinked population kept visible and separate, same as the
   // original fix under this issue number shipped it.
   unlinkedByFolder: true,
+  // A separate question from the one above (github#3, re-read again): while a note is
+  // still standing in the (unlinked) group (unlinkedByFolder off), does it wear its own
+  // folder's colour instead of the flat swatch every note in that group has always worn.
+  // OFF by default -- this is the smaller, opt-in half of the reopen comment's ask, not the
+  // shipped-behaviour-changing half unlinkedByFolder's own default is.
+  unlinkedTintByFolder: false,
 };
 
 // The four build settings, described once. They live here rather than inline in display()
@@ -790,13 +804,26 @@ class VaultGraphSettingTab extends PluginSettingTab {
       .setName("Unlinked notes join their folder")
       .setDesc("A note with no links takes its own folder's wedge and colour, instead of sitting apart in a separate unlinked group. The (unlinked) row's right-click menu flips this too, and lands back here.")
       .addToggle((t) => t
-        .setValue(this.plugin.settings.unlinkedByFolder === true)
+        .setValue(this.plugin.settings.unlinkedByFolder !== false)
         .onChange(async (v) => {
           this.plugin.settings.unlinkedByFolder = v;
           await this.plugin.saveSettings();
           const view = await this.plugin.currentView();
           const api = view && view.handle && view.handle.api;
           if (api && api.setUnlinkedByFolder) api.setUnlinkedByFolder(v);
+        }));
+
+    new Setting(containerEl)
+      .setName("Colour unlinked notes by folder")
+      .setDesc("While unlinked notes are kept as their own group (the toggle just above is off), give each one its own folder's colour instead of the flat unlinked swatch. The (unlinked) row's right-click menu carries this too.")
+      .addToggle((t) => t
+        .setValue(this.plugin.settings.unlinkedTintByFolder === true)
+        .onChange(async (v) => {
+          this.plugin.settings.unlinkedTintByFolder = v;
+          await this.plugin.saveSettings();
+          const view = await this.plugin.currentView();
+          const api = view && view.handle && view.handle.api;
+          if (api && api.setUnlinkedTintByFolder) api.setUnlinkedTintByFolder(v);
         }));
 
     new Setting(containerEl).setName("Folder colours").setHeading();
@@ -1179,7 +1206,8 @@ class VaultGraphPlugin extends Plugin {
     api.setFolderShown(this.settings.folderShown);
     if (api.setPanEnabled) api.setPanEnabled(this.settings.panEnabled !== false);
     if (api.setCompactAxis) api.setCompactAxis(this.settings.compactAxis !== false);
-    if (api.setUnlinkedByFolder) api.setUnlinkedByFolder(this.settings.unlinkedByFolder === true);
+    if (api.setUnlinkedByFolder) api.setUnlinkedByFolder(this.settings.unlinkedByFolder !== false);
+    if (api.setUnlinkedTintByFolder) api.setUnlinkedTintByFolder(this.settings.unlinkedTintByFolder === true);
     if (api.applyHiddenDefaults) api.applyHiddenDefaults();
   }
 
