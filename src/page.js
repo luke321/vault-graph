@@ -6624,7 +6624,10 @@ function mountVaultGraph(root, data, deps) {
   // magnitude); thickness = max(minEdgeThickness, scaleSize(size)); colour = the edge
   // reducer's, already lit or dimmed. Alpha follows the hover ramp so the web arrives with
   // the dim instead of popping in over it.
-  function drawFocusWeb(ctx, data, settings) {
+  // No `settings` parameter any more: the one thing it was read for was minEdgeThickness, and
+  // that now lives inside edgePx so this and edgeReport cannot disagree about a width.
+  // drawHover keeps its own -- it reads labelSize and labelFont, and sigma decides its shape.
+  function drawFocusWeb(ctx, data) {
     var f = state.hovered || state.selected;
     if (!f || data.key !== f || state.query) return;
     var ht = hoverAmount();
@@ -6670,7 +6673,7 @@ function mountVaultGraph(root, data, deps) {
   // Replaces Sigma's built-in hover label, whose pill is hardcoded to #FFF.
   // Geometry matches its label drawer: text at x + size + 3, y + labelSize/3.
   function drawHover(ctx, data, settings) {
-    drawFocusWeb(ctx, data, settings);
+    drawFocusWeb(ctx, data);
     if (typeof data.label !== "string" || !data.label) return;
     var n = settings.labelSize;
     ctx.font = settings.labelWeight + " " + n + "px " + settings.labelFont;
@@ -7674,7 +7677,11 @@ function mountVaultGraph(root, data, deps) {
       // because a pan does not change the ratio. skipIndexation because nothing moved here;
       // only the width did.
       var edgeRaf = 0;
-      syncEdgeMult();                        // seed it, in case the camera starts in past the knee
+      // Seeded, AND repainted if the seed moved it. Sigma has already run the reducers once by
+      // now, so a camera that starts below the knee would otherwise draw its first frame
+      // unclamped. In practice fit() flies from ratio 1 to 1.08 and both are above it, which
+      // is exactly the kind of "cannot happen today" that a persisted camera would break.
+      if (syncEdgeMult()) renderer.refresh({ skipIndexation: true });
       cam.on("updated", function () {
         placeLogo(); refreshSizeScale();
         if (edgeRaf) return;
