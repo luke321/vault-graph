@@ -83,6 +83,17 @@ sitting apart with every other unlinked note — reversible per-vault, from eith
   resting disc is unchanged** — the cap only engages once you're about 2.7x in, and costs
   nothing at all before that.
 
+- **The web of links no longer fogs the middle of the disc** (github#42, found while fixing
+  the above). Every link was being drawn at a minimum of 1.7px when the width it actually
+  asked for was between 0.55px and 1.02px — a floor inherited from the graph library and never
+  set deliberately. One link a pixel too wide is invisible; a few thousand of them sweeping
+  through the centre and overlapping at every crossing is a grey haze that veiled the inner
+  rings and filled the hub hole. The floor is now 1.0px, which halves the web's ink and leaves
+  the disc's centre readable, while still being wide enough that a lone link on a sparse vault
+  doesn't thin away to nothing — checked on a 450-note vault as well as a 10,000-note one,
+  because those two pull in opposite directions. Hovering and selection look the same, just
+  crisper.
+
 ---
 
 ## 1.8.0 — "The Hub" — 2026-08-27

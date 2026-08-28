@@ -1483,6 +1483,54 @@ check("a link's stroke holds its width at any zoom", async (p) => {
   };
 });
 
+check("the resting web is not floored wider than it asks for", async (p) => {
+  // minEdgeThickness was never set, so it sat at sigma's default 1.7px -- while every link's
+  // natural width at the resting zoom is 0.55..1.02px. The floor caught 100% of them and
+  // inflated each two to three times; 3737 of those crossing the middle of the disc stacked
+  // into a grey fog that veiled the inner rings and filled the hub hole (github#42). The far
+  // end of the same setting is the check above: that one is strokes too thick when you zoom
+  // IN, this one at rest.
+  await camReset(p);
+  const r = await p.j(`(function(){
+    var R = __vg.renderer, v = [];
+    // The UNFLOORED width of each drawn link -- what it would draw if nothing clipped it.
+    // edgeReport deliberately reports the floored value, because that is what the canvas
+    // shows; the question here is how far the floor moved it, so it needs the other one.
+    __vg.graph.forEachEdge(function (e) {
+      var ed = R.getEdgeDisplayData(e);
+      if (!ed || ed.hidden) return;
+      v.push(R.scaleSize(ed.size));
+    });
+    v.sort(function (a, b) { return a - b; });
+    var r3 = function (x) { return Math.round(x * 1000) / 1000; };
+    return { floor: R.getSetting("minEdgeThickness"), n: v.length,
+             ratio: r3(R.getCamera().getState().ratio),
+             median: r3(v[Math.floor(v.length / 2)]), min: r3(v[0]), max: r3(v[v.length - 1]) };
+  })()`);
+  const ink = await p.j(`__vg.edgeInk()`);
+  const mult = await p.j(`__vg.edgeReport().mult`);
+
+  const inflation = r.floor / r.median;
+  return {
+    // The constant, because the actual regression risk is a sigma upgrade restoring its 1.7
+    // default -- the value was never set explicitly for the whole life of the file, so nothing
+    // would have said so. And the inflation, because that is WHY 1.0 rather than some other
+    // smaller number: it bounds the floor against what a typical link actually asks for, so a
+    // later change to edgeAttrsOf's 0.35 + 0.25w ramp cannot make the floor dominant again
+    // without tripping. 1.80x against a bound of 2 is thin on purpose.
+    //
+    // litPct > 0 guards the WebGL read: a lost drawing buffer reports zero ink, which is
+    // indistinguishable from a perfectly clean disc, and would turn this into a check that
+    // passes hardest when it is measuring nothing.
+    ok: r.floor <= 1.0 && inflation <= 2 && mult === 1 && ink.litPct > 0,
+    detail: `floor ${r.floor}px against a median natural stroke of ${r.median}px = ` +
+            `${inflation.toFixed(2)}x (needs <= 2; sigma's 1.7 default was ${(1.7 / r.median).toFixed(2)}x). ` +
+            `${r.n} links draw ${r.min}..${r.max}px unfloored at ratio ${r.ratio}. ` +
+            `Context, not asserted: the web covers ${ink.litPct}% of the stage, ` +
+            `mean alpha ${ink.meanAlphaOfLit} where lit, ink ${ink.ink}`,
+  };
+});
+
 /* -------------------------------------------------------------- date range --
  * The brush is DRIVEN, not called. Every one of these dispatches real pointer events at real
  * pixels, because the bugs it exists to catch were all in the gesture rather than in the
