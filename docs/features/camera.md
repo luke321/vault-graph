@@ -4,6 +4,9 @@ Scroll to zoom, drag to pan once the disc isn't pinned to the middle — a held 
 whole way, not a click and a release with nothing between. Double-click anywhere to reset,
 or use the reset button in the corner; both do the same thing.
 
+Hiding or showing a folder reaches for the same reset target on its own, but only while you
+haven't already reached for it yourself — see [Filtering by folder](folders.md).
+
 Never written up in the README before this gallery, despite existing in the demo storyboard
 since it grew a `camera` act — one of the gaps this restructure exists to close.
 

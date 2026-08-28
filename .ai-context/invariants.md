@@ -191,6 +191,45 @@ __vg.densityReport()      // -> holeShare, drift under 0.06 while filtering
 which is what the density solve does — so this checks the outcome the formula was written
 for rather than the formula. Holds at 0.304–0.328 and 0.256–0.38.
 
+**Except when nothing left can reach the rim (github#14).** The density solve conserves the
+share by holding `maxR` fixed while spacing grows to meet it — that has a ceiling: hide the
+one folder deep enough to reach the locked extent and the survivors cannot stretch far enough
+no matter how much `DENSITY_MAX` allows, so `reach` genuinely falls (measured 0.602 on the
+dominant-folder fixture) and `holeShare` genuinely grows (0.273 → 0.454) along with it. `r0`
+still does not move — moving it was considered and set aside, see the entry below — the
+symptom is answered by the camera instead.
+
+## The camera reframes on a visibility toggle, but only while it wasn't already touched
+
+`fitRatio()`/`fit()` already computed the right ratio for whatever `reach` currently is; they
+just never ran automatically when a folder was hidden or shown, so the geometry above could be
+internally consistent while the camera stayed framed for a vault that no longer exists on
+screen — an island of notes in otherwise empty stage on the dominant-folder fixture (`hole`
+0.273 → 0.454, camera never moving).
+
+```javascript
+__vg.camAtRest        // true once the camera is known to sit at fit()'s own target
+```
+
+`camAtRest` is `false` from the instant anything other than `fit()` itself moves the camera —
+a drag, a wheel notch, `zoomBy()`, `centerOn()` — and only `fit()`'s own completion sets it
+back to `true`. A visibility toggle (`cascade()`'s `opts.colToggle`) only auto-fires `fit()`
+while it reads `true`; a camera the user has already panned or zoomed is left exactly where
+they put it.
+
+**Direction decides the timing, not only whether to fit.** A shrink (the disc getting
+smaller) defers to `settle()` — cascade's own completion, once the outgoing notes have
+actually finished fading — because zooming in on notes still visibly leaving reads as wrong.
+A growth fires immediately, alongside the incoming notes' fade-in, because the view expanding
+to meet what's arriving reads as right. Measured across a 738-note toggle on the
+dominant-folder fixture: hiding held the camera at ratio 1.0800 for the entire ~1.8s fade,
+landing at 0.6497 (0.6502 promised) only once settled; showing began moving within 25ms of the
+click and finished by ~450ms, well inside the same ~1.8s fade.
+
+`geomLock`, `r0`, `HOLE`, band thickness and the cascade's own row/spacing interpolation are
+untouched by this — the fix is entirely in what decides to call `fit()` and when, never in
+what `fit()` computes.
+
 ## The rings are independent
 
 Toggling an inner-band group must not move the outer band. Measured, an `05` toggle
