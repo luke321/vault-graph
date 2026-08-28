@@ -6069,9 +6069,46 @@ function mountVaultGraph(root, data, deps) {
         if (b2 === undefined) b2 = a2;
         return a2 + (b2 - a2) * ease;
       };
+      // THE BAND'S THICKNESS IS LOCKED, SO IT HAS TO BE CONSERVED WHILE IT IS WALKED
+      // (github#44). The resting solve derives the two terms from T in one division --
+      // rows = round(T / s), then SP = T / rows -- and .ai-context/animation.md says why:
+      // "One division, so the two are consistent by construction". The cascade dropped that
+      // construction and interpolated rows and SP INDEPENDENTLY, and linear interpolation of
+      // two factors does not preserve their product. Traced on a year chip: rows fell
+      // 24 -> 19.15 while SP rose 1.000 -> 1.693, so the band drew 19.152 x 1.693 = 32.42
+      // against a locked 24.00 -- 35% thick -- and the rim went past the ring with it, by the
+      // same factor the disc overshoot measures independently off note positions (1.351x
+      // against 1.343x). Both ENDPOINTS were always exact, which is why the disc still landed
+      // where it should and nothing at rest ever caught this.
+      //
+      // So only the depth is walked now, and SP follows from it the way the resting solve
+      // derives it. rows * SP is T on every frame by construction rather than at the two ends
+      // only. This replaces the independent walk rather than clamping the drawn radius: a
+      // clamp would hold the rim still while the rows behind it stayed too far apart.
+      //
+      // T COMES FROM THE ENDPOINT PRODUCTS, not from geomLock. Both ends are correct by
+      // construction, so they agree whenever the thickness really is locked, and reading them
+      // avoids reproducing depthOfBand's INNER_SCALE/base arithmetic at a second site where it
+      // could drift. Walking T between them keeps the fix exact at both ends even in the cases
+      // where the two do not quite agree.
+      var thickAt = function (k) {
+        var ds = bandSrc[k], dd = bandDst[k];
+        if (ds === undefined && dd === undefined) return 0;
+        if (ds === undefined) ds = dd;
+        if (dd === undefined) dd = ds;
+        var ts = ds * spSrcB[k], td = dd * spDstB[k];
+        return ts + (td - ts) * ease;
+      };
+      // A band with no depth or no thickness at either end has no product to conserve, and the
+      // straight interpolation is both the only answer left and what the endpoints agree on.
+      var spWalk = function (k) {
+        var rows = depthWalk(k), T = thickAt(k);
+        if (!(rows > 0) || !(T > 0)) return spSrcB[k] + (spDstB[k] - spSrcB[k]) * ease;
+        return T / rows;
+      };
       var spNow = {
-        i: spSrcB.i + (spDstB.i - spSrcB.i) * ease,
-        o: spSrcB.o + (spDstB.o - spSrcB.o) * ease,
+        i: spWalk("i"),
+        o: spWalk("o"),
         depth: { i: depthWalk("i"), o: depthWalk("o") },
       };
       // The walked room, handed to ringsLayout through the same channel the spacing uses. Set
@@ -12985,6 +13022,27 @@ function mountVaultGraph(root, data, deps) {
                       return { from: e[0], to: e[1], fromISO: isoDay(e[0]), toISO: isoDay(e[1]),
                                x0: ribbonX(e[0], w), x1: ribbonX(e[1], w), w: w,
                                sweeping: brushSweep !== null };
+                    },
+                    /**
+                     * THE LOCKED RING GEOMETRY, in graph units, for a per-frame probe.
+                     *
+                     * report() carries lockedMaxR and r0 already, but it walks every node to
+                     * build the rest of its answer, which is far too expensive to call on each
+                     * frame of an animation -- and "does the disc stay inside its rings while it
+                     * moves" is a per-frame question. This is the four numbers and nothing else.
+                     *
+                     * UNIT-SCALED, and the inner pair through INNER_SCALE, so they are directly
+                     * comparable with hypot(x, y) off the graph rather than needing the caller
+                     * to reproduce the scaling and get it subtly wrong.
+                     */
+                    rings: function () {
+                      if (!geomLock) return null;
+                      return {
+                        r0: geomLock.r0 * INNER_SCALE * UNIT,
+                        rInnerOuter: (geomLock.r0 + (geomLock.maxR - geomLock.rOuter)) * INNER_SCALE * UNIT,
+                        rOuter: geomLock.rOuter * UNIT,
+                        maxR: geomLock.maxR * UNIT
+                      };
                     },
                     lastGap: function () {
                       return { ngI: bandOf("i").nG, ngO: bandOf("o").nG,
