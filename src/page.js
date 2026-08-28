@@ -5529,6 +5529,25 @@ function mountVaultGraph(root, data, deps) {
     // so settle() assigns a state nothing can later disagree with.
     ringsLayout();
     var finalPos = ringsLayout() || {};
+    // AUTO-FIT ON A VISIBILITY TOGGLE, ONLY WHILE THE CAMERA IS STILL WHERE fit() LEFT IT
+    // (github#14). The second ringsLayout() above just recomputed the DESTINATION plan and,
+    // with it, lastMaxR -- so fitRatio() already reads the reach this cascade is headed
+    // toward. colToggle is what every visibility-toggle call site passes (the legend eye
+    // icons, the "only" actions, the settings-panel and context-menu toggles, All/None) and
+    // nothing else does -- a date-range drag or the timeline does not carry it, so neither
+    // auto-fits.
+    //
+    // DIRECTION DECIDES THE TIMING, not just whether to fit. Zooming OUT (the disc growing,
+    // more notes arriving) reads right run alongside the fade-in -- the view expanding to
+    // meet what's arriving. Zooming IN (the disc shrinking) reads wrong run alongside the
+    // fade-out: the frame closes in on notes that are still visibly there, fading. So a
+    // shrink is deferred to settle() below, once the outgoing notes are actually gone, and
+    // only a growth (or no change) fires here, immediately.
+    var deferredAutoFit = false;
+    if (opts.colToggle && camAtRest) {
+      if (fitRatio() < renderer.getCamera().getState().ratio) deferredAutoFit = true;
+      else fit();
+    }
     pinnedPlan = pinWas; planKeep = keepWas; roomNow = roomWas;
     graph.forEachNode(function (id) { alpha[id] = keep[id]; });
     var sweepOf = Object.create(null);
@@ -5659,6 +5678,10 @@ function mountVaultGraph(root, data, deps) {
       ringsLayout();
       renderer.refresh({ skipIndexation: false });
       probeSample("settled");
+      // The deferred half of the auto-fit above: a shrinking disc's zoom-in waits for here,
+      // where the outgoing notes have actually finished fading, rather than closing in on
+      // notes still visibly leaving.
+      if (deferredAutoFit) fit();
       if (done) done();
     };
 
@@ -7709,6 +7732,9 @@ function mountVaultGraph(root, data, deps) {
       // is exactly the kind of "cannot happen today" that a persisted camera would break.
       if (syncEdgeMult()) renderer.refresh({ skipIndexation: true });
       cam.on("updated", function () {
+        // Anything that moves the camera fires here, fit()'s own tween included -- fitting
+        // is what tells the two apart. See the note on camAtRest (github#14).
+        if (!fitting) camAtRest = false;
         placeLogo(); refreshSizeScale();
         if (edgeRaf) return;
         edgeRaf = WIN.requestAnimationFrame(function () {
@@ -9351,6 +9377,18 @@ function mountVaultGraph(root, data, deps) {
   // put the ratio back.
   var FIT_RATIO = 1.08;      // the full disc, filling the stage
 
+  // WHETHER THE CAMERA IS STILL WHERE fit() LAST PUT IT (github#14). A folder hidden or
+  // shown can shrink the disc into a fraction of the locked extent, and nothing reframed
+  // the camera to match -- but reframing unconditionally on every filter change would yank
+  // the view out from under anyone who had deliberately panned or zoomed first. camAtRest
+  // is the record of which case this is: true whenever the camera is known to sit at fit()'s
+  // own target, false the moment anything else moves it (a drag, a wheel notch, zoomBy(),
+  // centerOn() -- all of it arrives through the one cam.on("updated") listener below with no
+  // special casing needed). `fitting` is the guard that keeps fit()'s OWN camera.animate()
+  // from being mistaken for one of those: it fires "updated" on every frame of its own
+  // tween, same as a drag would.
+  var camAtRest = true, fitting = false;
+
   /**
    * FIT THE DISC THAT IS THERE, not the one the vault started with.
    *
@@ -9391,6 +9429,12 @@ function mountVaultGraph(root, data, deps) {
 
   function fit() {
     var to = { x: 0.5, y: 0.5, ratio: fitRatio(), angle: 0 };
+    // Marked BEFORE the animate() call, not after: sigma's "updated" can fire on the very
+    // next tick. Cleared in the completion callback rather than after a fixed delay -- a
+    // stale callback from an animation this same function cut short by calling fit() again
+    // just re-arrives here and re-sets the same true/false pair a second time, harmlessly.
+    fitting = true;
+    var landed = function () { fitting = false; camAtRest = true; };
     // SIGMA DROPS x AND y WHILE PANNING IS OFF (Camera.validateState), so with the pan
     // toggle off this would apply the ratio and leave the disc wherever it was last
     // dragged -- centring that does not centre. Panning is turned back on for the flight
@@ -9400,10 +9444,11 @@ function mountVaultGraph(root, data, deps) {
       renderer.setSetting("enableCameraPanning", true);
       renderer.getCamera().animate(to, { duration: 380 }, function () {
         renderer.setSetting("enableCameraPanning", false);
+        landed();
       });
       return;
     }
-    renderer.getCamera().animate(to, { duration: 380 });
+    renderer.getCamera().animate(to, { duration: 380 }, landed);
   }
 
   // The wheel's own step, so a button press and a notch agree. Sigma's zoomingRatio is the
@@ -11729,6 +11774,16 @@ function mountVaultGraph(root, data, deps) {
       { click: true, target: ["eye", "06"], act: "folders", why: "hide a folder -- the wedges reallocate" },
       { settle: true, act: "folders", why: "let the wedges reallocate" },
 
+      // AUTO-FIT (github#14). A folder big enough to shrink `reach` used to leave the
+      // camera framed for the vault that was there a moment ago -- an island of notes in
+      // otherwise empty stage. Showing it again is the more visible half on this vault's
+      // own shape (06 isn't dominant enough to shrink the demo disc much on the way out,
+      // but the return trip still grows it back past where it started); the dominant-folder
+      // fixture is where the shrink itself reads as dramatic, which is why the gallery
+      // entry cites that fixture's numbers rather than this one's.
+      { click: true, target: ["eye", "06"], act: "folders", why: "show it again -- the camera follows, since nothing has zoomed or panned since load" },
+      { settle: true, act: "folders", why: "let the camera and the wedges land together" },
+
       // github#34: "hidden by default" -- previously reachable only from the settings
       // panel's own eye buttons -- is now also on the SAME right-click menu the colours
       // act uses, one row down from the swatches. "#1", the biggest folder, on purpose:
@@ -12881,6 +12936,9 @@ function mountVaultGraph(root, data, deps) {
                     // findable by sampling it -- reading the reducers proves nothing.
                     get hoverT() { return hoverT; },
                     get hoverBusy() { return !!hoverRaf; },
+                    // Whether the camera is still where fit() last left it -- the gate for
+                    // the auto-fit-on-visibility-toggle behaviour (github#14).
+                    get camAtRest() { return camAtRest; },
                     // The highlight ramp, per note. Same motive as hoverT: the size and
                     // the ring are functions of it, so a ramp that is wrong is only
                     // findable by sampling it.

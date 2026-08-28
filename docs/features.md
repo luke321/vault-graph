@@ -47,7 +47,8 @@ Click a folder in the legend to hide it; the remaining wedges grow back into the
 vacated and the disc re-packs. Solo a folder to hide everything else in one click.
 Right-click a folder for the same "hidden by default" setting the settings panel offers —
 whether it starts hidden every time the disc loads — reachable from the legend itself now,
-not only from a separate panel.
+not only from a separate panel. Hide something big enough and the camera reframes to match,
+as long as you haven't already panned or zoomed yourself.
 
 <img src="../assets/features/folders.webp" width="100%" alt="A folder hidden, the disc re-packing to fill the angle it vacated, then the biggest folder right-clicked and hidden by default from its own menu, then one folder soloed to hide everything else, then everything shown again">
 

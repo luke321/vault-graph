@@ -1343,6 +1343,187 @@ check("fit frames the disc that is actually there", async (p) => {
   };
 });
 
+// AUTO-FIT ON A VISIBILITY TOGGLE (github#14). Hiding the group that dominates the disc can
+// drop `reach` well under 1 -- the ring left on screen is a fraction of what the camera is
+// framed for, an island in dead space. fit()/fitRatio() already compute the right ratio; this
+// checks that hiding/showing a group through the real legend eye icon now DRIVES them, and
+// that the direction decides the timing: a shrink (zooming in) waits for the outgoing notes to
+// actually finish fading -- closing in on notes still visibly leaving reads as wrong -- while a
+// growth (zooming out) runs alongside the incoming notes' fade-in, which reads as the view
+// expanding to meet what's arriving. `__vg.demo.busy()` is what gates the wait, not a fixed
+// sleep -- this is a real cascade over real notes and its duration depends on how many, so a
+// clock-based assertion would be exactly the flavour of flake this file elsewhere goes out of
+// its way to avoid.
+async function toRest(p) {
+  // The REAL reset button, not camReset()'s raw setState -- that path is what camAtRest
+  // considers "the user touched it" (correctly, for every other check in this file that wants
+  // a clean camera without caring about this flag); fit() is what it considers "at rest."
+  await p.eval(`document.querySelector("#vg-reset").click(); void 0`);
+  await camSettle(p);
+  // camSettle()'s two-equal-samples check can land WHILE fit()'s own tween is still running
+  // (measured on the 10k vault: a manual setState briefly took, then was overwritten back to
+  // the fit target moments later) -- camAtRest itself, not a guessed margin, is the signal
+  // that fit()'s completion callback has actually fired.
+  const dl = Date.now() + 4000;
+  while (Date.now() < dl) {
+    if (await p.j(`!!__vg.camAtRest`)) return;
+    await sleep(60);
+  }
+}
+async function clickEye(p, group) {
+  await p.eval(`(function(){
+    var want = ${JSON.stringify(group)};
+    var els = document.querySelectorAll("[data-eye]");
+    for (var i = 0; i < els.length; i++) {
+      if (els[i].getAttribute("data-eye") === want) { els[i].click(); return; }
+    }
+  })(); void 0`);
+}
+async function biggestGroup(p) {
+  return p.j(`(function(){
+    var order = __vg.groupOrder(), counts = {};
+    __vg.graph.forEachNode(function (id, a) { counts[a.folder] = (counts[a.folder] || 0) + 1; });
+    var best = null;
+    order.forEach(function (g) { if (!best || (counts[g] || 0) > (counts[best] || 0)) best = g; });
+    return best;
+  })()`);
+}
+// Polls the camera while __vg.demo.busy() says the cascade is running, then waits past fit()'s
+// own 380ms tween once it is not. Returns whether the ratio ever moved from its starting value
+// WHILE busy, and the ratio once everything (cascade AND any deferred fit) has truly landed.
+async function watchDuringCascade(p, startRatio, capMs = 8000) {
+  var movedWhileBusy = false;
+  var deadline = Date.now() + capMs;
+  for (;;) {
+    var busy = await p.j(`!!__vg.demo.busy()`);
+    var r = (await camState(p)).ratio;
+    if (Math.abs(r - startRatio) > 0.01) movedWhileBusy = true;
+    if (!busy || Date.now() > deadline) break;
+    await sleep(60);
+  }
+  await sleep(500);   // past any fit() tween that only started once busy went false
+  const settled = await camState(p);
+  return { movedWhileBusy, finalRatio: settled.ratio };
+}
+
+// "want" IS SAMPLED AFTER THE CASCADE SETTLES, NEVER DURING IT. densityReport()'s reach/
+// lastMaxR are recorded by ringsLayout(), and every frame of the fade re-derives them from
+// that FRAME's interpolated packing (see animation.md, "interpolate the output") -- so a
+// sample taken shortly after the click reads close to UNCHANGED (reach near 1) for most of
+// the fade's own duration, and only converges to the true destination once settle() re-runs
+// ringsLayout() at rest. Measured live: 80ms after hiding a 77%-of-the-vault group, reach
+// still read 1.003; only after the cascade's own settle() did it read the true 0.602. Sampling
+// early does not just blur the number, it flips the shrinking/growing verdict entirely.
+check("hiding the biggest group auto-fits the camera, but only once it has finished leaving", async (p) => {
+  await p.eval(`__vg.state.hidden.folder = {}; __vg.syncAlpha(); __vg.applyLayout(false); void 0`);
+  await sleep(200);
+  await toRest(p);
+  const rest = await camState(p);
+
+  const g = await biggestGroup(p);
+  if (!g) return { ok: false, detail: "no group to hide" };
+
+  await clickEye(p, g);
+  const { movedWhileBusy, finalRatio } = await watchDuringCascade(p, rest.ratio);
+  const dens = await p.j(`__vg.densityReport()`);
+  const want = 1.08 * Math.max(0.12, Math.min(1.35, dens.reach));
+  const shrinking = want < rest.ratio - 0.01;
+
+  // reset for whatever runs after this check
+  await p.eval(`__vg.state.hidden.folder = {}; __vg.syncAlpha(); __vg.applyLayout(false); void 0`);
+  await sleep(200);
+  await toRest(p);
+
+  const atRest = await p.j(`__vg.camAtRest`);
+  const ok = shrinking
+    ? (!movedWhileBusy && Math.abs(finalRatio - want) < 0.03 && atRest)
+    : true;   // the biggest group did not shrink the disc below rest on this fixture -- skip
+  return {
+    ok,
+    detail: shrinking
+      ? `hid "${g}" (reach ${dens.reach}): ratio held at ${rest.ratio} while notes left ` +
+        `(moved early: ${movedWhileBusy}), landed at ${finalRatio.toFixed(4)} against ` +
+        `${want.toFixed(4)} promised, camAtRest ${atRest}`
+      : `hid "${g}": reach ${dens.reach} did not shrink the disc below its resting ratio on ` +
+        `this fixture -- nothing to assert`,
+  };
+});
+
+check("showing a hidden group auto-fits the camera while it is still arriving", async (p) => {
+  await p.eval(`__vg.state.hidden.folder = {}; __vg.syncAlpha(); __vg.applyLayout(false); void 0`);
+  await sleep(200);
+  const g = await biggestGroup(p);
+  if (!g) return { ok: false, detail: "no group to hide" };
+  // Start from it already hidden, camera fit to what's left, both via the real controls.
+  await clickEye(p, g);
+  await sleep(2500);
+  await toRest(p);
+  const rest = await camState(p);
+
+  await clickEye(p, g);   // show it again -- the disc should grow
+  const { movedWhileBusy, finalRatio } = await watchDuringCascade(p, rest.ratio);
+  const dens = await p.j(`__vg.densityReport()`);
+  const want = 1.08 * Math.max(0.12, Math.min(1.35, dens.reach));
+  const growing = want > rest.ratio + 0.01;
+
+  await p.eval(`__vg.state.hidden.folder = {}; __vg.syncAlpha(); __vg.applyLayout(false); void 0`);
+  await sleep(200);
+  await toRest(p);
+
+  const atRest = await p.j(`__vg.camAtRest`);
+  const ok = growing
+    ? (movedWhileBusy && Math.abs(finalRatio - want) < 0.03 && atRest)
+    : true;
+  return {
+    ok,
+    detail: growing
+      ? `showed "${g}" again (reach ${dens.reach}): ratio moved while notes arrived ` +
+        `(${movedWhileBusy}), landed at ${finalRatio.toFixed(4)} against ${want.toFixed(4)} ` +
+        `promised, camAtRest ${atRest}`
+      : `showed "${g}" again: reach ${dens.reach} did not grow the disc past its resting ` +
+        `ratio on this fixture -- nothing to assert`,
+  };
+});
+
+check("a manually moved camera is left alone by a visibility toggle", async (p) => {
+  await p.eval(`__vg.state.hidden.folder = {}; __vg.syncAlpha(); __vg.applyLayout(false); void 0`);
+  await sleep(200);
+  await toRest(p);
+
+  const g = await biggestGroup(p);
+  if (!g) return { ok: false, detail: "no group to hide" };
+
+  // A real camera move that is NOT fit() -- exactly what camAtRest exists to notice. .animate(),
+  // not a raw setState: a bare setState right after this file's own checks have been driving
+  // the same camera measured as silently not applying on the 10k fixture (panning enabled,
+  // no thrown error, state simply unchanged) -- .animate() is the primitive fit() itself uses
+  // everywhere else in this file and is proven reliable by every other check here.
+  const panWas = await p.j(`__vg.renderer.getSetting("enableCameraPanning")`);
+  await p.eval(`__vg.renderer.setSetting("enableCameraPanning", true); void 0`);
+  await p.eval(`__vg.renderer.getCamera().animate({ x: 0.4, y: 0.6, ratio: 0.5, angle: 0 }, { duration: 60 }); void 0`);
+  const dl = Date.now() + 3000;
+  let before = await camState(p);
+  while (Date.now() < dl && Math.abs(before.ratio - 0.5) > 0.01) { await sleep(60); before = await camState(p); }
+  await sleep(150);
+  before = await camState(p);
+  const atRestAfterMove = await p.j(`__vg.camAtRest`);
+
+  await clickEye(p, g);
+  await sleep(3000);   // generous: let the cascade and any (wrongly) triggered fit() land
+  const after = await camState(p);
+
+  await p.eval(`__vg.renderer.setSetting("enableCameraPanning", ${JSON.stringify(!!panWas)});
+    __vg.state.hidden.folder = {}; __vg.syncAlpha(); __vg.applyLayout(false); void 0`);
+  await sleep(200);
+  await toRest(p);
+
+  return {
+    ok: !atRestAfterMove && before.ratio === after.ratio && before.x === after.x && before.y === after.y,
+    detail: `after a manual move: camAtRest=${atRestAfterMove} (must be false); camera before ` +
+      `hiding "${g}" ${JSON.stringify(before)}, after ${JSON.stringify(after)} (must be identical)`,
+  };
+});
+
 // The buttons have to agree with the wheel, or the same gesture means two things. Asserted
 // against the renderer's own zoomingRatio rather than a repeated 1.2.
 check("the zoom buttons step by one wheel notch", async (p) => {
