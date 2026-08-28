@@ -7557,6 +7557,30 @@ function mountVaultGraph(root, data, deps) {
       // at 20%, because the next notch arrives before the last one has landed.
       zoomingRatio: 1.2,
       zoomDuration: 120,
+      // THE FLOOR ON A STROKE, AND SIGMA'S DEFAULT WAS 1.7px.
+      //
+      // A floor exists so a single link is not a sub-pixel hairline that disappears, and that
+      // is a real concern -- at 0.5 the web on a 450-note vault all but vanishes. But 1.7 is
+      // the wrong number for it, because at the resting zoom EVERY link's natural width is
+      // 0.55..1.02px: the floor caught 100% of them and inflated each two to three times.
+      //
+      // One link 1.2px too wide is invisible. 3737 of them sweeping through the middle of the
+      // disc, stacking ink at every crossing, is a grey fog that veiled the inner rings and
+      // filled the hub hole -- measured as one degree-55 hub's fan: 93.5px of stroke at 1.7,
+      // 55.0px at 1.0 (github#42). The far end of the same setting is EDGE_MAX_PX (github#39):
+      // that one was strokes too thick when you zoom IN, this one at rest.
+      //
+      // FLAT, NOT SCALED BY EDGE COUNT, and the issue expected the opposite -- the fog grows
+      // with the number of links while the hairline risk is worst when there are few, so a
+      // curve looked necessary. Looking at both ends says one number does it: at 1.0 the
+      // sparse web still reads as individual strands and the 10k fog is gone. If a shape ever
+      // breaks that, EDGE_RAMP_START / EDGE_FLOOR above is the precedent to follow.
+      //
+      // NOT LOW ENOUGH TO SHOW LINK WEIGHT, which is a separate defect and stays one: the
+      // three weights that exist draw 0.556 / 0.787 / 1.019px at rest, so 1.0 still floors the
+      // first two, and 0.55 -- the value that would separate them -- is where the sparse web
+      // disappears. The two goals genuinely conflict through this one number.
+      minEdgeThickness: 1.0,
       defaultEdgeType: "line",
       // Both programs are registered up front so the toggle is a per-edge `type`
       // in the reducer rather than a renderer rebuild. Sigma merges these with its
@@ -12419,6 +12443,46 @@ function mountVaultGraph(root, data, deps) {
                     // raises; without one it reports the whole visible web. `ribbonPx` is the
                     // sum of the widths -- the number that says the fan has become a mass,
                     // where any single width still looks reasonable next to the dot.
+                    // THE FOG, AS A NUMBER. edgeReport gives a stroke's WIDTH; this gives how
+                    // much of the stage the resting web actually covers, which is the thing
+                    // the eye reacts to and the thing a width only implies -- one link 1.2px
+                    // too wide is invisible, and 3737 of them crossing the same middle is a
+                    // grey wash (github#42).
+                    //
+                    // THE EDGES CANVAS ALONE. Sigma gives every layer its own canvas, so this
+                    // measures the web with no note, label or halo mixed into it. Composited
+                    // into a 2D canvas straight after a render, the way checkFocusWeb does it:
+                    // getImageData on a WebGL canvas is only valid while the drawing buffer is
+                    // still there, so the render and the read cannot be separated.
+                    //
+                    // `ink` is mean alpha over the stage, 0..1. Vault-dependent -- a bigger
+                    // web covers more -- so it is a number to record and compare against the
+                    // same vault, not one to bound.
+                    edgeInk: function () {
+                      if (!renderer) return "no renderer";
+                      renderer.render();
+                      var cv = renderer.getCanvases();
+                      if (!cv.edges) return "no edges canvas";
+                      var W = cv.edges.width, H = cv.edges.height;
+                      var off = DOC.createElement("canvas"); off.width = W; off.height = H;
+                      var ctx = off.getContext("2d");
+                      ctx.drawImage(cv.edges, 0, 0);
+                      var d = ctx.getImageData(0, 0, W, H).data;
+                      var sum = 0, lit = 0;
+                      for (var i = 3; i < d.length; i += 4) {
+                        if (d[i]) { sum += d[i]; lit++; }
+                      }
+                      var px = W * H;
+                      return {
+                        // Guards the WebGL read itself: a lost drawing buffer reports zero ink,
+                        // which is indistinguishable from a perfectly clean disc. `litPct` at
+                        // exactly 0 on a vault with edges means the READ failed, not the fog.
+                        ink: Math.round(1e5 * sum / 255 / px) / 1e5,
+                        litPct: Math.round(1e4 * lit / px) / 100,
+                        meanAlphaOfLit: lit ? Math.round(100 * sum / 255 / lit) / 100 : 0,
+                        edges: graph.size, px: px,
+                      };
+                    },
                     edgeReport: function (id) {
                       if (!renderer) return "no renderer";
                       var floor = renderer.getSetting("minEdgeThickness");

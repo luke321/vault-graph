@@ -121,12 +121,56 @@ Three things make the fix work:
 to stroke exactly what the GPU would) and by `__vg.edgeReport()` — the same reason
 `edgeCurveGeom` is shared with `checkFocusWeb` rather than duplicated in it.
 
-**Not touched, and adjacent:** sigma's `minEdgeThickness` default of **1.7px** floors the
-whole 0.60–0.85 weight range this vault produces, so at rest every stroke is identically
-1.70px and the weight encoding is invisible until you zoom past ratio ~0.94. That is the
-opposite defect — the floor hides weight, this section's is the ceiling burying notes — and
-lowering it would change the resting appearance of every vault, so it belongs to its own
-issue with its own before/after shots.
+## The floor is the same setting from the other end
+
+`minEdgeThickness` was never set, so it sat at sigma's default **1.7px** — while at the
+resting zoom every link's natural width is **0.55–1.02px**. The floor caught 100% of them and
+inflated each two to three times. One link 1.2px too wide is invisible; 3737 of them sweeping
+through the middle of the disc and stacking ink at every crossing is a grey fog that veiled
+the inner rings and filled the hub hole (github#42). Now **1.0px**.
+
+Measured on the 10k fixture, mean coverage of the edges canvas alone — the web with no note or
+label mixed in (`__vg.edgeInk()`):
+
+| floor | one degree-55 hub's fan | web covers | mean alpha where lit | ink |
+|---|---|---|---|---|
+| 1.7px | 93.5px | 30.49% | 0.76 | 0.231 |
+| **1.0px** | **55.0px** | 25.76% | **0.44** | **0.114** |
+
+The area barely moved and the **alpha halved** — which is what fog is, and why the width
+alone did not describe it.
+
+- **A floor is still needed.** At 0.5px the web on a 450-note vault all but vanishes; the
+  hairline risk it exists for is real. 1.0 keeps a sparse web reading as individual strands.
+- **Flat, not scaled by edge count** — and the issue expected the opposite, since fog grows
+  with the number of links while the hairline risk is worst when there are few. Looking at
+  both ends says one number does it. Regenerate the sparse shape with
+  `node scripts/make-test-vault.mjs --notes 450 --years 4 --out <dir> --seed 7` to re-check;
+  it is deliberately not a suite fixture, so this is a by-hand check. If a shape ever breaks
+  the single number, `EDGE_RAMP_START`/`EDGE_FLOOR` is the precedent to follow.
+- **The lit web got thinner too, by 23%.** A focused link is sized toward 1.4, i.e. 1.30px at
+  rest — *below* the old 1.7 floor, so the floor was inflating the hover web as well. It now
+  draws its own 1.30px. `checkFocusWeb` still reports **0 dim** on all three fixtures, which
+  was the risk worth checking: it samples a lit curve's centreline for blue, and a thinner
+  stroke antialiases more.
+
+**Link weight still reaches the screen nowhere, and this did not fix it.** The three weights
+that exist draw 0.556 / 0.787 / 1.019px at rest, so a 1.0 floor still flattens the first two;
+separating them needs **≤0.55**, which is exactly where the sparse web disappears. The two
+goals genuinely conflict through this one number, so weight needs a different channel and its
+own issue. Zoomed in it is marginally better than it was — the deep-zoom range widens from
+1.7–2.12px to 1.5–2.12px, because the light edges are no longer floored up to meet the heavy
+ones. Worth knowing before spending effort on it: **3 distinct weights exist in the whole
+graph and 97–98% of links are weight 1** (3628 of 3737 on the 10k fixture, 3219 of 3288 on the
+demo), so there is little to reveal. Separately, the lit web overwrites weight anyway —
+`edgeReducer` sizes every focused edge toward 1.4 regardless, measured as 3.50px at 10x at
+every floor value.
+
+Also from the same measurements: **nothing reaches `EDGE_SIZE_MAX`.** The observed maximum
+size is 1.10 (weight 3) against the 1.6 ceiling, so `EDGE_MAX_PX`'s 4px is never actually
+reached and the real deep-zoom maximum is 2.75px. Calibration, not a defect — but normalising
+by the observed maximum rather than the theoretical one is the knob if links should ever be
+heavier when zoomed in.
 
 ## The focus web sits above the dim notes
 
