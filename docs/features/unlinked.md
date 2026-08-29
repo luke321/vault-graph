@@ -2,8 +2,8 @@
 
 A note with no links at all joins its own folder's group by default — same wedge, same
 colour, same everything as any other note filed there. Right-click the `(unlinked)` row,
-always the last one in the legend, for a second toggle — "Kept separate" — to pull unlinked
-notes back into their own population instead: one flat grey swatch, its own wedge, a
+always the last one in the legend, and switch off its "Joins its folder" toggle to pull
+unlinked notes back into their own population instead: one flat grey swatch, its own wedge, a
 parenthesised count. A third toggle, "Colour by folder", appears one row further down once
 the group actually holds someone: a note can stay in that population and still take its own
 folder's tint, turning the row's own swatch into a gradient of whatever colours are

@@ -9176,29 +9176,46 @@ function mountVaultGraph(root, data, deps) {
         role: "menuitemradio", current: current, autoKey: autoKey,
         titleFor: function (on, isAuto) { return isAuto ? " (automatic)" : ""; }
       });
-      // SAME MARKUP AND WORDING AS THE SETTINGS PANEL'S OWN EYE BUTTON
-      // (buildSettings, a few hundred lines down) -- "Shown by default" / "Hidden by
-      // default", so the two surfaces read as one setting rather than two.  data-vis has
-      // no value here (unlike the settings panel's data-vis="<folder>"): onToggleVisible
-      // is already bound to the right folder by the caller, so there is nothing to read
-      // back off the DOM.
-      var visLabel = visShown ? "Shown by default" : "Hidden by default";
+      // THE LABEL NAMES THE SETTING AND HOLDS STILL; aria-pressed SAYS WHETHER IT IS ON.
+      //
+      // All three of these rows used to flip their WORDING with their state as well as
+      // their pressed-ness, and that reads exactly backwards. A button in a menu reads as
+      // an action -- so on a vault where unlinked notes already join their folders, the row
+      // said "Joins its folder", and clicking the thing you wanted made it stop. It also
+      // put this menu at odds with the settings panel, whose rows for the same two settings
+      // carry a fixed label and let the toggle hold the state; the comment that used to sit
+      // here claimed the two surfaces matched, and they had not for some time. A screen
+      // reader got the worst of it, announcing "Kept separate, not pressed" -- the inverse
+      // of the truth, because the state was encoded twice and the two encodings disagreed.
+      //
+      // So the visible text is the property, stable in both states the way a checkbox's
+      // label is, and the TITLE carries the action -- what this click will do, which is the
+      // one thing neither a property label nor a pressed state can say on its own.
+      //
+      // data-vis has no value here (unlike the settings panel's data-vis="<folder>"):
+      // onToggleVisible is already bound to the right folder by the caller, so there is
+      // nothing to read back off the DOM.
+      var visTitle = visShown ? "Hide this folder by default" : "Show this folder by default";
       var visHTML = onToggleVisible
-        ? '<button class="vis" data-vis aria-pressed="' + visShown + '" title="' + visLabel +
-          '">' + eyeSvg(visShown) + '<span>' + visLabel + '</span></button>'
+        ? '<button class="vis" data-vis aria-pressed="' + visShown + '" title="' + visTitle +
+          '">' + eyeSvg(visShown) + '<span>Shown by default</span></button>'
         : "";
       // SAME MARKUP SHAPE AS visHTML above, one row further down -- data-byfolder, same
       // reasoning as data-vis (the caller already knows which group, nothing to read back).
-      var byFolderLabel = byFolderOn ? "Joins its folder" : "Kept separate";
+      var byFolderTitle = byFolderOn
+        ? "Keep unlinked notes in their own group instead"
+        : "Let each unlinked note join its own folder's group";
       var byFolderHTML = onToggleByFolder
         ? '<button class="vis" data-byfolder aria-pressed="' + byFolderOn + '" title="' +
-          byFolderLabel + '">' + dotSvg(byFolderOn) + '<span>' + byFolderLabel + '</span></button>'
+          byFolderTitle + '">' + dotSvg(byFolderOn) + '<span>Joins its folder</span></button>'
         : "";
       // SAME MARKUP SHAPE AGAIN -- data-tint, same reasoning as data-vis/data-byfolder.
-      var tintLabel = tintOn ? "Colour by folder" : "Colour: unlinked swatch";
+      var tintTitle = tintOn
+        ? "Use the flat unlinked swatch instead"
+        : "Give each unlinked note its own folder's colour";
       var tintHTML = onToggleTint
         ? '<button class="vis" data-tint aria-pressed="' + tintOn + '" title="' +
-          tintLabel + '">' + dotSvg(tintOn) + '<span>' + tintLabel + '</span></button>'
+          tintTitle + '">' + dotSvg(tintOn) + '<span>Colour by folder</span></button>'
         : "";
       setHTML(el, '<div class="sws">' + sws + '</div>' +
                   '<button class="auto" data-key="" aria-pressed="' + !current +
