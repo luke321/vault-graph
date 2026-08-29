@@ -124,6 +124,17 @@ sitting apart with every other unlinked note — reversible per-vault, from eith
   the journey landing instantly and 3u over the following 1.2 seconds. The layout now happens
   once, in the caller that knows whether it means to animate it.
 
+- **The right-click menu's toggles now say what they are, not what clicking them undoes.** All
+  three rows in that menu flipped their wording along with their state, which reads exactly
+  backwards: on a vault where unlinked notes already join their folders the row said "Joins its
+  folder", so clicking the thing you wanted turned it off. It also disagreed with the settings
+  panel, where the same two settings have always had a fixed label with the toggle holding the
+  state — and with a screen reader it was worse than ambiguous, announcing "Kept separate, not
+  pressed", the inverse of the truth, because the state was encoded twice and the two encodings
+  contradicted each other. The visible text is now the setting's name and holds still the way a
+  checkbox label does, the pressed state says whether it is on, and the tooltip carries the
+  action — the one thing neither of the other two can express.
+
 - **Soloing the folder you are pointing at no longer drops its highlight** (github#46). Hovering
   a row in the legend lights that folder's notes; clicking the same row's `only` chip put the
   light out during the animation, leaving the one folder still on screen unlit — but only if the
