@@ -8428,7 +8428,15 @@ function mountVaultGraph(root, data, deps) {
   }
   var collapsedInit = false;
 
-  function regroup() {
+  // `skipLayout` EXISTS FOR THE ANIMATED CALLER, and only for it. regroup ends by laying the
+  // disc out (below), which is what boot wants: one call, and the notes are where they belong.
+  // hardRelayout(true) wants the opposite -- it is about to tween FROM the positions the notes
+  // are standing in now, and a layout here would have already moved them there, so the tween
+  // would run its full length interpolating a note from where it ended up to where it ended
+  // up. That is exactly what github#45 turned out to be: the tween was running perfectly and
+  // had nothing left to carry (measured, 943u of the move landing synchronously and 3u over
+  // the following 1.2s).
+  function regroup(skipLayout) {
     counts = computeOrder();
     buildColors();
     // Once, at boot. Not on every regroup: __vg.relayout() calls this too, and
@@ -8512,7 +8520,8 @@ function mountVaultGraph(root, data, deps) {
     }
     buildLegend();
     syncAlpha();
-    applyLayout(false);
+    // The caller lays out instead when it means to animate -- see skipLayout's note above.
+    if (!skipLayout) applyLayout(false);
     // The band paints with nodeColor(), which buildColors() just re-derived. That is
     // invisible to heatDraw's signature -- it tracks counts, not hues -- so the
     // cached paint is dropped explicitly rather than waiting for a count to move.
@@ -8542,7 +8551,11 @@ function mountVaultGraph(root, data, deps) {
     roomNow = null; cellNow = null; edgeNow = null; colWalk = null;
     posSrc = posDst = null;
     bandLock = null; geomLock = null;
-    regroup();
+    // SKIPPING regroup's own layout, because the one on the next line is the same work and
+    // this function is the only caller that can animate it. Doing both meant the snap always
+    // won and the tween had nothing to move (github#45); it was also a whole redundant
+    // ringsLayout pass on a path that already rebuilds every lock above.
+    regroup(true);
     applyLayout(!!animate);
     if (renderer) renderer.refresh();
   }
