@@ -118,7 +118,11 @@ sitting apart with every other unlinked note — reversible per-vault, from eith
   note from the new layout and sweeps it there, and never asks what group either end belongs to.
   A note crossing to another wedge can now travel most of the way round the disc, which is
   precisely the claim the toggle is making, so watching it travel is the point rather than a side
-  effect.
+  effect. Asking for the animation turned out to be only half of it: the regroup step already
+  laid the disc out on its own before the tween began, so the tween then ran its full length
+  moving each note from where it had already ended up to where it had already ended up — 943u of
+  the journey landing instantly and 3u over the following 1.2 seconds. The layout now happens
+  once, in the caller that knows whether it means to animate it.
 
 - **Soloing the folder you are pointing at no longer drops its highlight** (github#46). Hovering
   a row in the legend lights that folder's notes; clicking the same row's `only` chip put the
