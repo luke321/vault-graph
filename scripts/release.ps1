@@ -16,6 +16,10 @@
 # which is not what someone wanting to *run* this needs. Every tag gets a Release with
 # `vault-graph-<version>.zip` attached, so a tag is always a downloadable build.
 #
+# RUN IT ON `main`. That is where a release is tagged, and the script refuses to run
+# anywhere else (-AllowAnyBranch overrides). See github#47 for what the absence of that
+# check cost: 1.8.0's tag sits on a develop commit rather than on main's own history.
+#
 # Requires the `gh` CLI, authenticated. See .ai-context/releasing.md.
 
 [CmdletBinding()]
@@ -33,7 +37,12 @@ param(
   # cannot be quietly fixed afterwards without the old one having been seen.
   [string] $Title = "",
   [switch] $DryRun,
-  [switch] $AllowDirty
+  [switch] $AllowDirty,
+  # Cut the release from wherever HEAD is standing, instead of requiring main. The escape
+  # hatch for the branch guard below, shaped like -AllowDirty: there is a legitimate case
+  # (a hotfix line that never reaches main, say), and the guard exists to stop the ACCIDENT,
+  # not to make the deliberate thing impossible.
+  [switch] $AllowAnyBranch
 )
 
 $ErrorActionPreference = 'Stop'
@@ -78,6 +87,43 @@ try {
   $manifest = ConvertFrom-Json ([IO.File]::ReadAllText((Join-Path $repo 'manifest.json'), [Text.Encoding]::UTF8))
   if ($manifest.version -ne $Version) {
     throw "manifest.json says $($manifest.version), you asked for $Version. Bump the manifest first."
+  }
+
+  # THE TAG BELONGS ON MAIN (github#47). main is what the Obsidian directory installs from
+  # and what a release is tagged on -- CONTRIBUTING states it -- and nothing here enforced
+  # it, so the script tagged wherever HEAD happened to be. 1.8.0 is the result: cut before
+  # its release PR merged, so its tag sits on a develop commit three commits back from
+  # main's own history, the only one of four releases not on main's first-parent line. The
+  # three commits between were docs-only and nothing shipped wrong -- but `git log main`
+  # does not show where 1.8.0 was cut, and a published tag cannot be moved afterwards
+  # without breaking every link to it. So this is a class of mistake that has to be caught
+  # BEFORE the tag exists, which is the one moment it is still free to fix.
+  $branch = (& git rev-parse --abbrev-ref HEAD).Trim()
+  if ($branch -ne 'main' -and -not $AllowAnyBranch) {
+    throw ("On '$branch', not main. main is what the Obsidian directory installs from and " +
+           "what a release is tagged on, and a tag cut elsewhere sits off main's history " +
+           "permanently. Merge into main first, or pass -AllowAnyBranch if you know why.")
+  }
+
+  # ...AND ON THE MAIN EVERYONE ELSE CAN SEE. Being AHEAD of origin/main is the normal case
+  # and not checked -- this script pushes HEAD itself a few steps down. Being BEHIND is the
+  # problem: it means tagging a main that is missing commits somebody else has already
+  # published, and the `git push origin HEAD` below would be rejected anyway, after the tag
+  # had been made. Better to say so now than to leave a local tag behind a failed push.
+  #
+  # Fetch first, because "behind" measured against a stale remote ref is not measured at all.
+  #
+  # AN EXPLICIT REFSPEC, not `git fetch origin main`. That form opportunistically
+  # fast-forwards the LOCAL main as well, which this observed doing while the guard was
+  # being written -- a check that silently moves a branch is not a check. This updates the
+  # remote-tracking ref and nothing else.
+  if ($branch -eq 'main') {
+    & git fetch origin 'refs/heads/main:refs/remotes/origin/main' --quiet
+    $behind = (& git rev-list --count 'HEAD..origin/main').Trim()
+    if ($behind -ne '0') {
+      throw ("main is $behind commit(s) behind origin/main. Pull first -- tagging here " +
+             "would tag a main that is missing what is already published.")
+    }
   }
 
   # A release has to be reproducible from its tag, and it cannot be if the tree it was
