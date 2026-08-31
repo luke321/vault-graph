@@ -60,6 +60,7 @@ Behaviour change, not a repair. Verify it reads well rather than that it merely 
 | **Where** | Both hosts. Needs a vault with real unlinked notes — the generated fixtures all guarantee some. |
 | **Do** | Right-click the `(unlinked)` row in the legend and turn "unlinked notes join their folder" OFF, so the notes gather into their own group. Then turn it back ON and watch. |
 | **Expect** | The unlinked notes sweep round the disc to their own folders' wedges instead of teleporting. Both directions animate. It ends exactly where the old snap put it. |
+| **The whole distance** | The travel must occupy the whole animation. A follow-up fix on `develop` found the regroup was laying the disc out *before* the tween started, so the tween then moved each note from where it had already landed to where it had already landed — 943u arriving instantly and 3u crawling over the next 1.2 seconds. Slow it down (`__vg.timeScale = 4`) and watch one note leave: it should set off when the animation starts, not be there already. |
 | **Watch for** | This is the one that could look wrong rather than be wrong. A note can now travel most of the way round the disc, several at once, crossing other wedges on the way. Judge whether that reads as "they went home" or as a scramble. If it is the latter, say so — that is a real finding and the fix is a different animation, not a revert. |
 | **Also** | Do it from the settings panel row as well as the right-click row; both call the same path but only one of them has ever been clicked in anger. |
 | **Then** | Reload. The toggle must come back the way you left it, on both hosts. |
@@ -77,11 +78,25 @@ Behaviour change, not a repair. Verify it reads well rather than that it merely 
 | **And** | Point at row A, click row B's `only` — the highlight should follow what is under the pointer after the rebuild, not what you clicked. |
 | **Result** | |
 
+## The right-click menu's toggles now name the setting
+
+No issue number — found and fixed on `develop` while testing the two toggles above.
+
+| | |
+|---|---|
+| **Where** | Both hosts. Any vault. |
+| **Do** | Right-click a folder row in the legend, then the `(unlinked)` row. Read every toggle row in each menu without clicking. Then flip one, reopen the menu, and read it again. |
+| **Expect** | The visible text is the SETTING'S NAME and holds still when you flip it — only the pressed state changes, the way a checkbox label does. The tooltip is the only place that says what clicking will do. |
+| **The bug** | The wording flipped along with the state, which reads backwards: on a vault where unlinked notes already joined their folders the row said "Joins its folder", so clicking the thing you wanted turned it off. |
+| **Cross-check** | Open the settings panel and compare. The same two settings there have always had a fixed label with the toggle holding the state; the two surfaces must now agree rather than contradict each other. |
+| **Screen reader** | If you can run one over the menu, do. It announced "Kept separate, not pressed" — the inverse of the truth — because the state was encoded twice and the two encodings disagreed. Name plus pressed state must now match reality. |
+| **Result** | |
+
 ---
 
 ## Also unreleased in 1.9.0, and worth a pass
 
-These landed earlier on `develop` and have had less live use than the three above.
+These landed earlier on `develop` and have had less live use than the four above.
 
 | Defect | Test | Result |
 |---|---|---|
@@ -92,6 +107,9 @@ These landed earlier on `develop` and have had less live use than the three abov
 | **github#35** — dot size in the hub row | Solo a small folder that locks to the inner ring. Its notes must not overflow past the hub. | |
 | **github#38** — hover on the selected note | Select a note, hover it, move away. Nothing should flick or ramp — selection already holds the treatment at full. | |
 | **github#14** — camera auto-fit | Toggle a folder's visibility without having touched the camera: the view should fit itself. Then pan or zoom deliberately and toggle again: it must now leave your camera alone. | |
+| **github#37** — golden layout snapshots | Nothing to click; it is a new automated check. Confirm it runs green in `node scripts/smoke.mjs`, and that it goes RED if you perturb a checked-in snapshot by hand — a golden file that cannot fail is not guarding anything. | |
+| **github#47** — a release is cut only from `main` | This release is the guard's first real exercise. From this branch run `.\scripts
+elease.ps1 1.9.0 -DryRun`: it must REFUSE with "On 'release/1.9.0', not main". The refusal IS the pass. Re-run it on `main` after the merge and it should get as far as the invariant suite. | |
 
 ---
 

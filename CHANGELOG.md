@@ -70,6 +70,29 @@ sitting apart with every other unlinked note — reversible per-vault, from eith
   and its own beat in the demo storyboard, last of all: both toggles here touch colour, so
   it runs after "colours" for the same reason that one used to run last on its own.
 
+- **A note soloed next to the hub no longer overflows into it** (github#35, the dot-sizing
+  half). 1.8.0 fixed where the hub boundary is *drawn* and left this half open, after a first
+  attempt was reverted the same day for breaking two other fixtures. Row 0 of the inner band
+  sits with its centre exactly on the hub boundary in every layout, so nothing but a dot's own
+  radius decides how far it visually pokes inside — and soloing a folder down to a single note
+  that lands alone in that band collapses the band to one row, at which point the size ramp
+  reads the band's whole thickness (573 units, measured) instead of a normal row's slice and
+  the dot balloons across the hole. A row-0 dot is now capped at a fixed share of the hub's own
+  radius — 8%, twice the 4.2% a healthy one measures at rest — scoped so narrowly that it
+  cannot reach any other row or band, which is the promise the reverted band-wide attempt could
+  not make. Measured 59% of the hub before, 8.0% after. The new check tries every folder in turn
+  and asserts the worst one, because none of the three fixtures reach this shape at rest — which
+  is how it shipped unnoticed the first time.
+
+- **The layout now has a golden snapshot to regress against** (github#37). Every other check
+  asserts a *property* of the layout — rows balanced, no stray small folders, radii evenly
+  spaced — and not one of them would notice a layout that stayed internally consistent and
+  simply changed between builds, which is what github#35 turned up as a side observation.
+  Band assignment per folder and position per note are now checked in for all three fixture
+  vaults, and a new check compares a live build against them, naming the specific folder that
+  flipped band or the specific note that moved rather than reporting a mismatch. The snapshots
+  are rewritten by hand and never automatically: one that updates itself records whatever broke.
+
 - **A link's stroke no longer thickens as you zoom in** (github#39, reported by
   [Angel Bartolli / @bartolli](https://github.com/bartolli), who named the exact cause in the
   issue and offered a working patch branch — the 4px cap is their measurement). Link
@@ -93,6 +116,28 @@ sitting apart with every other unlinked note — reversible per-vault, from eith
   doesn't thin away to nothing — checked on a 450-note vault as well as a 10,000-note one,
   because those two pull in opposite directions. Hovering and selection look the same, just
   crisper.
+
+- **A selected note no longer flicks when you stop hovering it** (github#38, reported by
+  [Angel Bartolli / @bartolli](https://github.com/bartolli), who named the exact cause in the
+  issue itself). A selection is meant to hold the hover treatment pinned at full throughout;
+  instead, pointing at the note you had already selected switched it onto the ramping branch, so
+  moving away drove its size and its lit web *down* toward the unselected value and then snapped
+  back to full a frame later. Measured on the demo vault: 2.79 → 2.07 across the leave, then
+  straight back to 2.8096. The fix is one line — ramp only when the hovered note differs from the
+  selected one — after which the sampled size is byte-identical across every frame of both the
+  enter and the leave. Hovering a different note, or hovering nothing, is untouched.
+
+- **Hiding a folder reframes the camera, unless you have moved it yourself** (github#14).
+  Hiding a folder big enough to hold the disc's whole extent left the camera framed for a vault
+  that was no longer on screen — an island of notes in an otherwise empty stage. `fitRatio()`
+  and `fit()` already computed the right framing and simply never ran on a filter change; they
+  do now, behind a flag that only lets it fire while nothing has panned or zoomed the camera
+  since it last rested, so a camera you placed deliberately is never overridden. The timing is
+  direction-aware, which is what decides whether it reads well rather than merely happens: a
+  shrink defers to the cascade's own settle, so the view doesn't zoom in on notes still visibly
+  leaving, and a growth fires immediately alongside the incoming fade-in. Measured on a 954-note
+  vault whose one dominant folder holds 77% of it — hiding it drops the disc's reach to 0.602,
+  where the camera used to sit at 1.08 and stay there.
 
 - **The disc no longer bursts out of its own ring during an animation** (github#44). Every
   cascade drew the outer band up to 35% thicker than the thickness it is locked to, so the rim
@@ -144,6 +189,19 @@ sitting apart with every other unlinked note — reversible per-vault, from eith
   replacement row under a stationary pointer never receives a mouse-in either. The rebuild now
   asks the browser what is actually under the pointer and restores the highlight itself instead
   of waiting for the next twitch of the mouse.
+
+- **A release can no longer be tagged off `main` by accident** (github#47). `release.ps1`
+  already refused a `v` prefix, a malformed version, a manifest that disagrees with it, a dirty
+  tree and a missing changelog section — but it never asked which branch it was standing on, and
+  every release before 1.8.0 was simply run from the right place. 1.8.0 is what that costs: cut
+  before its release PR merged, so its tag sits on a `develop` commit three back from main's own
+  history, the only one of four releases off main's first-parent line. Nothing shipped wrong, the
+  three commits between being docs-only — but `git log main` does not show where 1.8.0 was cut,
+  and a published tag cannot be moved afterwards without breaking every link to it. So the one
+  moment that class of mistake is free to fix is before the tag exists, which is where the check
+  now sits: `main`, and not a `main` that is behind `origin/main`. `-AllowAnyBranch` is the
+  escape hatch, shaped like the existing `-AllowDirty`, because the guard exists to stop the
+  accident rather than to make a deliberate off-main release impossible.
 
 ---
 
