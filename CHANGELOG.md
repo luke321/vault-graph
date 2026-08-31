@@ -155,19 +155,21 @@ sitting apart with every other unlinked note — reversible per-vault, from eith
   changes — inside the ring everywhere, and the inner hole is unchanged at 1.000x. Long-standing
   and shipped; not a regression from anything in this release.
 
-- **Moving unlinked notes into their folders is now animated, not a jump** (github#45). The
-  toggle above this one relocates every unlinked note to a different wedge, and it did so in a
-  single frame while every other layout-changing gesture in the page tweens. It was written that
-  way on the reasoning that a tween would have to reconcile two layouts disagreeing about which
-  wedge a note is even in — but that is not what the animation does: it reads one destination per
-  note from the new layout and sweeps it there, and never asks what group either end belongs to.
-  A note crossing to another wedge can now travel most of the way round the disc, which is
-  precisely the claim the toggle is making, so watching it travel is the point rather than a side
-  effect. Asking for the animation turned out to be only half of it: the regroup step already
-  laid the disc out on its own before the tween began, so the tween then ran its full length
-  moving each note from where it had already ended up to where it had already ended up — 943u of
-  the journey landing instantly and 3u over the following 1.2 seconds. The layout now happens
-  once, in the caller that knows whether it means to animate it.
+- **Moving unlinked notes into their folders is now animated, not a jump** (github#45, then
+  github#49 for the shape the animation finally took). The toggle relocates every unlinked note
+  to a different wedge, and it did so in a single frame. The first animated version swept each
+  note bodily across the disc to its new wedge — honest, but hundreds of dots crossing the
+  middle at once read as a scramble. What shipped instead expresses the move in the vocabulary
+  the disc already has: the `(unlinked)` wedge opens or closes exactly like a folder being shown
+  or hidden — same arc ramp, same stretched fades, rings holding still throughout — while each
+  note fades out where it was and fades back in where it now belongs, crossing wedges only while
+  it is invisible. The cascade gained a third category for this (a *move*, alongside arrivals
+  and departures): one clock, one planner, and the setting itself still flips instantly — only
+  the drawing takes its time. A group whose colour has to change because the legend re-ranks
+  around the move (github#48's renumbering, still open) fades to its new colour on the same
+  clock instead of cutting. One known rough edge stays, accepted on review: a vault where
+  whole folders consist only of unlinked notes toggles several wedges at once, and the
+  smallest of them can crowd its neighbour for a beat mid-animation.
 
 - **The right-click menu's toggles now say what they are, not what clicking them undoes.** All
   three rows in that menu flipped their wording along with their state, which reads exactly

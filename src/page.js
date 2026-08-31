@@ -612,7 +612,21 @@ function mountVaultGraph(root, data, deps) {
   // Named in parentheses so it sorts with "(vault root)" ahead of the numbered folders,
   // and so it cannot collide with a real folder name.
   var UNLINKED = "(unlinked)";
+
+  // A NOTE IN MID-MOVE STILL BELONGS WHERE IT IS LEAVING, until it has crossed. This is what
+  // makes a membership change animatable at all: the cascade rebuilds its plan from groupOf
+  // on every frame, so a note whose group flips the instant the setting does is in its new
+  // wedge from frame one and there is nothing left to animate. Holding the OLD answer here,
+  // per note, and releasing it at that note's own fade trough, turns one setting change into
+  // a population of individual moves that can be staggered.
+  //
+  // Keyed by note and cleared as each one crosses, not a single global flag: the whole point
+  // is that at any instant some notes have crossed and others have not, which is what makes
+  // the leaving and the arriving read as one flowing movement rather than two phases.
+  var moveFrom = null;
+
   function groupOf(id) {
+    if (moveFrom) { var mf = moveFrom[id]; if (mf !== undefined) return mf; }
     // From the ADJACENCY, not graph.degree(): in a budgeted vault the graph holds only the
     // resting share of the web, so a note whose links were all trimmed would read as unlinked
     // -- measured with the graph fully empty, all 10k notes classified as (unlinked), the
@@ -841,8 +855,56 @@ function mountVaultGraph(root, data, deps) {
     });
   }
 
+  // A GROUP'S COLOUR IS WALKED TO ITS NEW VALUE, not switched (github#48). Slots are assigned
+  // by position among the groups that currently hold notes, so a group appearing or emptying
+  // renumbers everyone behind it and folders nobody touched inherit the colour of the one in
+  // front -- measured, four of seven groups repainting in a single frame on the unlinked
+  // toggle. The renumbering is its own defect and is not fixed here; what is fixed is that it
+  // arrives as a jump cut. A colour that has to change now fades to its new value over the
+  // same clock everything else on the disc moves on.
+  //
+  // colorShown exists only WHILE a walk is running, so at rest this falls straight through to
+  // groupColor and nothing pays for it.
+  var colorShown = null, colorRaf = 0, colorPrev = 0;
+
   function colorOf(group) {
+    if (colorShown) { var c = colorShown[group]; if (c) return c; }
     return groupColor[group] || THEME.neutrals[0];
+  }
+
+  // Called by regroup with the colours as they were BEFORE buildColors reassigned them. Only
+  // groups that existed at both ends and actually changed are walked: one appearing has no
+  // previous colour to come from, and fading it up from nothing would be a different effect
+  // than the one this is for.
+  function colorWalk(before) {
+    if (!before || !renderer) return;
+    var origin = null;
+    Object.keys(groupColor).forEach(function (g) {
+      var was = before[g];
+      if (was && was !== groupColor[g]) (origin || (origin = Object.create(null)))[g] = was;
+    });
+    if (!origin) return;
+    if (colorRaf) { WIN.cancelAnimationFrame(colorRaf); colorRaf = 0; }
+    colorShown = origin;
+    var t = 0;
+    colorPrev = NOW();
+    (function step() {
+      var now = NOW(), dt = now - colorPrev;
+      colorPrev = now;
+      // Clamped the same way every other ramp here is, so a stalled frame stretches the walk
+      // instead of leaping it.
+      t += Math.min(dt, TWEEN_MS) / (TWEEN_MS * TIME_SCALE);
+      if (t > 1) t = 1;
+      var e = t * t * (3 - 2 * t);
+      var next = Object.create(null);
+      Object.keys(origin).forEach(function (g) { next[g] = mixHex(origin[g], groupColor[g], e); });
+      colorShown = next;
+      renderer.refresh({ skipIndexation: true });     // colour only; nothing moved
+      if (t < 1) { colorRaf = WIN.requestAnimationFrame(step); return; }
+      colorRaf = 0;
+      colorShown = null;
+      renderer.refresh({ skipIndexation: true });
+    })();
   }
 
   // Subfolders get a tint of their PARA folder's colour, not a colour of their own:
@@ -1927,6 +1989,7 @@ function mountVaultGraph(root, data, deps) {
     var bandDepth = { i: 0, o: 0 };
     var splitOf = Object.create(null);
     var splitFor = function (g) {
+      if (splitHold && splitHold[g] !== undefined) return splitHold[g];
       if (splitOf[g] === undefined) {
         var bk = bandLock && bandLock[g] ? "i" : "o";
         if (!bandDepth[bk]) bandDepth[bk] = depthOfBand(bk === "i");
@@ -5360,6 +5423,12 @@ function mountVaultGraph(root, data, deps) {
    * folders are explicitly out of scope until this is judged on the simple case.
    */
   var colWalk = null;
+  // The sub-split gate, FROZEN while a cascade walks. splitFor reads live weights by design,
+  // but mid-cascade a fading group crosses the gate, the split flips, every cell key of that
+  // group changes, and the whole group teleports between two placements in one frame. While
+  // a cascade runs, the gate answers with the DESTINATION packing's decision -- the one
+  // settle() will assign -- so cell keys hold still from the first frame to the last.
+  var splitHold = null;
   /**
    * The two endpoint LAYOUTS of the running cascade, or null at rest.
    *
@@ -5467,6 +5536,10 @@ function mountVaultGraph(root, data, deps) {
       WIN.clearTimeout(cascadeRun.guard);
       cascadeRun = null;
     }
+    // Same release as hardRelayout's -- a new cascade replacing an interrupted move cascade
+    // must not inherit its stale movers or its frozen split gate. Reassigned below when this
+    // cascade carries moves of its own.
+    moveFrom = null; splitHold = null;
 
     // A null plan is legitimate: "none" hides every note, so there is no
     // geometry left to lay out. The fade still has to run, with positions simply
@@ -5556,17 +5629,60 @@ function mountVaultGraph(root, data, deps) {
       sweepOf[id] = q ? angleSweep(Math.atan2(q.y, q.x)) : 0;
     });
 
+    // NOTES THAT CHANGE GROUP WITHOUT CHANGING WHETHER THEY ARE SHOWN. Neither an `in` nor
+    // an `out` -- visible() says the same thing before and after, so the loop below never
+    // sees them -- and yet they have further to travel than either. opts.movesFrom is
+    // "id -> the group it is leaving", captured by the caller before it changed the setting,
+    // and it becomes moveFrom for the length of the cascade.
+    //
+    // A move is a fade OUT of where it was followed by a fade IN where it now belongs, with
+    // the crossing at the trough where nothing is on screen to see it happen. Two legs, so
+    // twice a fade's length per note -- and because the population is staggered, notes are
+    // arriving in the new wedges while others are still leaving the old ones. That overlap is
+    // the whole point: one flowing movement rather than the disc emptying and then refilling.
+    var moves = [];
+    if (opts.movesFrom) {
+      moveFrom = opts.movesFrom;
+      Object.keys(opts.movesFrom).forEach(function (id) {
+        if (!graph.hasNode(id)) return;
+        moves.push(id);
+      });
+      if (!moves.length) moveFrom = null;
+    }
+    // Kept separately from moveFrom, which empties as the notes cross. The frame loop still
+    // has to know a crossed note is on a MOVE schedule and not an ordinary one-leg fade.
+    var isMove = Object.create(null);
+    moves.forEach(function (id) { isMove[id] = true; });
+
     var ins = [], outs = [], to = Object.create(null), from = Object.create(null);
     graph.forEachNode(function (id) {
       // timeFactor, not 1: a note the timeline or the date range excludes must not be
       // revealed by a filter change somewhere else. See the note on `keep` above.
       var want = visible(id) ? timeFactor(id) : 0;
       var now = alpha[id] || 0;
+      // A MOVER'S `from` ONLY. Its `to` is asked below with moveFrom suspended, because
+      // `want` here was computed through groupOf -- which, for a note in mid-move, answers
+      // with the group it is LEAVING. Asking "will it be shown" of the wrong group is how a
+      // note bound for a HIDDEN group got to[id] = 1 and faded in on arrival, showing a group
+      // that is hidden by default until settle() cleared moveFrom and took it away again.
+      if (moveFrom && moveFrom[id] !== undefined) { from[id] = now; return; }
       if (Math.abs(now - want) <= 0.004) return;
       to[id] = want; from[id] = now;
       (want ? ins : outs).push(id);
     });
-    if (!ins.length && !outs.length) {
+    // THE DESTINATION'S OWN ANSWER, for every mover: whether the group it is JOINING is shown,
+    // and at what the date range allows. A mover whose destination is hidden lands on 0 and
+    // simply never comes back -- which is the correct end state, and the leaving leg still
+    // plays, so it fades out of where it was rather than vanishing.
+    if (moves.length) {
+      var saveMF = moveFrom;
+      moveFrom = null;
+      try {
+        moves.forEach(function (id) { to[id] = visible(id) ? timeFactor(id) : 0; });
+      } finally { moveFrom = saveMF; }
+    }
+
+    if (!ins.length && !outs.length && !moves.length) {
       lastCascade = { ins: 0, outs: 0, span: 0, path: "instant: nothing to move", frames: 0, ms: 0 };
       pinnedPlan = null; roomNow = null; cellNow = null; edgeNow = null; posSrc = posDst = null; applyLayout(true); return;
     }
@@ -5582,6 +5698,9 @@ function mountVaultGraph(root, data, deps) {
     var arrival = rank ? function (a, b) { return rank(a) - rank(b); } : clockwise;
     ins.sort(arrival);
     outs.sort(arrival);
+    // Same clockwise sweep. A move is a leave and an arrive, so sweeping them in the one
+    // order the rest of the cascade uses keeps the whole thing turning the same way.
+    moves.sort(arrival);
 
     var windowFor = function (n) {
       if (opts.spread > 0) return opts.spread;   // a caller with its own shape; see playTimeline
@@ -5592,12 +5711,56 @@ function mountVaultGraph(root, data, deps) {
       var w = windowFor(set.length);
       set.forEach(function (id, i) { delay[id] = set.length < 2 ? 0 : w * i / (set.length - 1); });
     });
+    // A MOVER LEAVES EARLY AND ARRIVES LATE, on two separate staggers -- not one delay with
+    // the second fade chained straight onto the first. Chaining them meant an early mover
+    // arrived at its new seat while the notes that had to vacate that space were still easing
+    // away, and the two populations sat drawn on top of each other for tens of frames -- the
+    // "overlapping wedges" report (github#49), photographed mid-flight before this: grey
+    // arrivals landing among orange bystanders that had not left. So the departures fill the
+    // FIRST HALF of the span and the arrivals the SECOND, with the arc ramp below carrying
+    // the wedge itself across the gap -- a mover holds alpha 0 between its legs and feeds no
+    // weight to either end, which is exactly the window in which the bystanders re-seat, with
+    // nothing drawn on top of them while they do.
+    var moveSpan = moves.length
+      ? Math.max(2 * windowFor(moves.length), 4 * FADE_FRAMES * TIME_SCALE) + 2 * FADE_FRAMES * TIME_SCALE
+      : 0;
     var span = Math.max(windowFor(ins.length), windowFor(outs.length))
              + FADE_FRAMES * TIME_SCALE;
+    if (moveSpan > span) span = moveSpan;
+    var arriveAt = Object.create(null), crossAt = Object.create(null);
+    if (moves.length) (function () {
+      var leaveW = span * 0.35;
+      var landW = Math.max(1, span * 0.45 - FADE_FRAMES * TIME_SCALE);
+      moves.forEach(function (id, i) {
+        var f = moves.length < 2 ? 0 : i / (moves.length - 1);
+        delay[id] = leaveW * f;
+        arriveAt[id] = span * 0.55 + landW * f;
+        // WHEN MEMBERSHIP TRANSFERS -- a third clock, and the one the WEDGES live on. The arc
+        // ramp can only act on a cell that exists, and a cell exists only while its group has
+        // members, so the crossings have to span the whole cascade: packing them into the
+        // arrival window (the previous version) meant the group being FILLED had no cell at
+        // all until 55% -- no wedge, no reservation, then both popped in with the ramp already
+        // half-open and the neighbours lurched aside in the same frame, which is the reported
+        // "opening and closing rapidly instead of smoothly". Spread by index across each
+        // note's own invisible gap -- after its fade-out ends, before its fade-in starts, so
+        // the note itself never crosses in view -- the filling group gains its first member
+        // almost at once and the arc ramps open from ~0, while the draining group keeps its
+        // last member nearly to the end and the arc ramps closed to ~0, where the cull costs
+        // nothing. Same reasoning as the stretched fades for ramped hides, one block up.
+        // The crossing needs clear water BEFORE the arrival: at f = 1 it landed exactly ON
+        // arriveAt, so the last movers' fade-in began the same frame they crossed -- no
+        // invisible moment for the position snap, and they eased across the disc in full
+        // view (measured, 1139u at alpha 0.53). One fade-length of margin keeps every
+        // mover invisible long enough to be AT its seat when it starts to appear.
+        var lo = delay[id] + FADE_FRAMES * TIME_SCALE;
+        var hi = Math.max(lo, arriveAt[id] - FADE_FRAMES * TIME_SCALE);
+        crossAt[id] = lo + (hi - lo) * f;
+      });
+    })();
     // WHICH GROUPS GET THE ARC RAMP: fully toggled (every present note leaving, or every
     // arriving note entering an empty group), on a legend toggle only. The single-cell gate
     // is applied where the endpoint plans are in scope, below.
-    var tglDir = Object.create(null), tglN = Object.create(null);
+    var tglDir = Object.create(null), tglN = Object.create(null), tglMv = Object.create(null);
     if (opts.colToggle) (function () {
       var startN = Object.create(null), outN = Object.create(null), inN = Object.create(null);
       graph.forEachNode(function (id) {
@@ -5608,20 +5771,102 @@ function mountVaultGraph(root, data, deps) {
       });
       outs.forEach(function (id) { var g0 = groupOf(id); outN[g0] = (outN[g0] || 0) + 1; });
       ins.forEach(function (id) { var g0 = groupOf(id); inN[g0] = (inN[g0] || 0) + 1; });
+      // MOVES COUNT ON BOTH SIDES OF THIS (github#49, the overlap report). The ramp is what
+      // stops a wedge popping open or falling off a cliff, and a group filled or emptied
+      // PURELY BY MOVES -- (unlinked), on either direction of the toggle -- was invisible to
+      // it: its wedge appeared in the ring arc-first, on top of neighbours that had not yet
+      // made room. The source side is counted with moveFrom in force (the group each mover is
+      // leaving), the destination side with it suspended, for the same reason the endpoint
+      // packings are.
+      var mvOutN = Object.create(null), mvInN = Object.create(null);
+      moves.forEach(function (id) { var g0 = groupOf(id); outN[g0] = (outN[g0] || 0) + 1; mvOutN[g0] = 1; });
+      (function () {
+        var save = moveFrom;
+        moveFrom = null;
+        try {
+          moves.forEach(function (id) { var g0 = groupOf(id); inN[g0] = (inN[g0] || 0) + 1; mvInN[g0] = 1; });
+        } finally { moveFrom = save; }
+      })();
       Object.keys(outN).forEach(function (g0) {
-        if (!inN[g0] && outN[g0] === (startN[g0] || 0)) { tglDir[g0] = "out"; tglN[g0] = outN[g0]; }
+        if (!inN[g0] && outN[g0] === (startN[g0] || 0)) { tglDir[g0] = "out"; tglN[g0] = outN[g0]; if (mvOutN[g0]) tglMv[g0] = true; }
       });
       Object.keys(inN).forEach(function (g0) {
-        if (!outN[g0] && !(startN[g0] || 0)) { tglDir[g0] = "in"; tglN[g0] = inN[g0]; }
+        if (!outN[g0] && !(startN[g0] || 0)) { tglDir[g0] = "in"; tglN[g0] = inN[g0]; if (mvInN[g0]) tglMv[g0] = true; }
       });
     })();
 
-    var moving = ins.concat(outs);
+    // A MOVER LEAVING A FULLY-DRAINING WEDGE FADES ON A FOLDER-HIDE'S OWN SCHEDULE. The
+    // directive is that the (unlinked) wedge toggles like any folder's -- and a folder hide
+    // stretches its fades across the whole span, inner first, precisely so the population
+    // and the closing arc thin TOGETHER. Cramming these movers' fades into the first third
+    // (the vacate-before-arrive rule, which is right for movers leaving a PARTIAL wedge)
+    // emptied the wedge by half-way while its ramp was still ~0.6 open: the survivors
+    // compressed into a tight arc crowding the neighbour, photographed as the tiny/(unlinked)
+    // overlap. Each such mover now fades where a hide would fade it, crosses at its own
+    // trough -- so the cell drains one seat at a time and dies at the very end, where the
+    // ramp is ~0 and the cull costs nothing -- and arrives once the destination's wedge is
+    // full-width, however long that leaves it invisible in between. Movers from partial
+    // sources keep the vacate-before-arrive schedule.
+    if (moves.length) (function () {
+      var byG = Object.create(null);
+      moves.forEach(function (id) {
+        var g0 = moveFrom[id];
+        if (tglDir[g0] === "out") (byG[g0] || (byG[g0] = [])).push(id);
+      });
+      var stretch = Math.max(1, span - 2 * FADE_FRAMES * TIME_SCALE);
+      Object.keys(byG).forEach(function (g0) {
+        var set = byG[g0];
+        set.sort(function (p0, q0) {
+          var ap = graph.getNodeAttributes(p0), aq = graph.getNodeAttributes(q0);
+          return Math.hypot(ap.x, ap.y) - Math.hypot(aq.x, aq.y);   // inner first, like a hide
+        });
+        set.forEach(function (id, i) {
+          delay[id] = set.length < 2 ? stretch : stretch * i / (set.length - 1);
+          crossAt[id] = delay[id] + FADE_FRAMES * TIME_SCALE;
+          arriveAt[id] = Math.max(span * 0.55, crossAt[id] + FADE_FRAMES * TIME_SCALE);
+        });
+      });
+    })();
+
+    // ...AND THE ARRIVALS, RESCHEDULED PER DESTINATION GROUP. arriveAt was staggered by the
+    // global clockwise index, and a small destination's movers sit consecutively in that
+    // order, so its whole cohort landed near-simultaneously -- and a half-faded note takes a
+    // half-width seat (weight is alpha), so a simultaneous cohort packs into tight columns at
+    // double density that expand as the fades finish, read as the wedge overlapping its
+    // neighbour. Spread each destination's arrivals across the whole arrival window instead,
+    // which is what a folder-show's stagger does naturally.
+    if (moves.length) (function () {
+      var save = moveFrom;
+      moveFrom = null;
+      var byDest = Object.create(null);
+      try {
+        moves.forEach(function (id) {
+          var g0 = groupOf(id);
+          (byDest[g0] || (byDest[g0] = [])).push(id);
+        });
+      } finally { moveFrom = save; }
+      var lo1 = span * 0.55, hi1 = span - FADE_FRAMES * TIME_SCALE;
+      Object.keys(byDest).forEach(function (g0) {
+        var set = byDest[g0];
+        set.sort(function (p0, q0) { return arriveAt[p0] - arriveAt[q0]; });
+        set.forEach(function (id, i) {
+          var f0 = set.length < 2 ? 0 : i / (set.length - 1);
+          arriveAt[id] = Math.max(lo1 + (hi1 - lo1) * f0, crossAt[id] + FADE_FRAMES * TIME_SCALE);
+        });
+      });
+    })();
+
+    var moving = ins.concat(outs).concat(moves);
     lastCascade = { ins: ins.length, outs: outs.length, span: Math.round(span * 100) / 100,
                     path: "animated", frames: 0, ms: 0, t0: NOW() };
 
     var settle = function () {
       if (!lastCascade.exit) lastCascade.exit = "settle() called from outside the loop";
+      // EVERY MOVER HAS ARRIVED BY DEFINITION HERE. Released unconditionally rather than
+      // one at a time, because settle() is also what the watchdog calls when the page could
+      // not keep up -- and a mover still holding its old group there would be stranded in a
+      // wedge the layout no longer plans for it.
+      moveFrom = null; splitHold = null;
       // Back to weight-over-seats: at rest the seats ARE the group's own notes, so the
       // derived reading is right and a stale override would freeze the gap at whatever
       // the last frame happened to hold.
@@ -5799,8 +6044,28 @@ function mountVaultGraph(root, data, deps) {
       };
       // THE DESTINATION PACKING. willShow, so it is the packing settle() will assign rather
       // than one that still seats whatever the date range or the timeline has excluded.
-      var b = staticPlan(function (id) { return willShow(id); });
+      // moveFrom SUSPENDED for this one call: the destination packing is what settle() will
+      // assign, and by then every mover has crossed. Asked with moveFrom still in force it
+      // would seat them in the groups they are leaving, and the walked row counts and
+      // spacings would be interpolating toward a disc that never gets drawn.
+      var b = (function () {
+        var save = moveFrom;
+        moveFrom = null;
+        try { return staticPlan(function (id) { return willShow(id); }); }
+        finally { moveFrom = save; }
+      })();
       var aCells = cellsOfG(a), bCells = cellsOfG(b);
+      // MOVE CASCADES ONLY. An ordinary toggle keeps the live gate it has always had --
+      // freezing it there changed how a plain hide re-seats and made it visibly worse. A
+      // membership toggle is where the mid-walk split flip re-keys every cell of a group
+      // and teleports it whole, so that is where the freeze applies.
+      if (moves.length) {
+        splitHold = Object.create(null);
+        Object.keys(bCells).forEach(function (g0) { splitHold[g0] = bCells[g0] > 1; });
+        Object.keys(aCells).forEach(function (g0) {
+          if (splitHold[g0] === undefined) splitHold[g0] = aCells[g0] > 1;
+        });
+      }
       Object.keys(tglDir).forEach(function (g0) {
         var n0 = tglDir[g0] === "out" ? aCells[g0] : bCells[g0];
         if (n0 !== 1) delete tglDir[g0];
@@ -5965,19 +6230,41 @@ function mountVaultGraph(root, data, deps) {
       if (adv > maxAdv) adv = maxAdv;
       frame += adv;
       if (cascadeRun) cascadeRun.tick = tn;
+      // Progress first: the per-note fades and the arc ramps both ride it.
+      var pr = Math.min(1, frame / Math.max(1, span));
+      var ease = pr * pr * (3 - 2 * pr);
       var busy = false;
       for (var i = 0; i < moving.length; i++) {
         var id = moving[i];
+        // A MOVE RUNS TWO FADES BACK TO BACK: out of the group it is leaving, then in to the
+        // one it now belongs to, and it changes wedge AT THE TROUGH between them -- the one
+        // moment it is invisible, so the only frame in which it teleports is a frame nobody
+        // can see. Staggered against its neighbours, so the arrivals of the early movers
+        // overlap the departures of the late ones and the two read as one movement.
+        if (isMove[id]) {
+          // Two legs on two staggers, and the membership crossing on a third clock between
+          // them -- see the scheduling note above the span.
+          if (moveFrom && moveFrom[id] !== undefined && frame >= crossAt[id]) delete moveFrom[id];
+          if (frame < arriveAt[id]) {
+            var q1 = (frame - delay[id]) / (FADE_FRAMES * TIME_SCALE);
+            q1 = q1 < 0 ? 0 : q1 > 1 ? 1 : q1;
+            alpha[id] = (from[id] === undefined ? 1 : from[id]) * (1 - q1 * q1 * (3 - 2 * q1));
+          } else {
+            var q2 = (frame - arriveAt[id]) / (FADE_FRAMES * TIME_SCALE);
+            q2 = q2 < 0 ? 0 : q2 > 1 ? 1 : q2;
+            alpha[id] = (to[id] === undefined ? 1 : to[id]) * (q2 * q2 * (3 - 2 * q2));
+          }
+          if (frame < arriveAt[id] + FADE_FRAMES * TIME_SCALE) busy = true;
+          continue;
+        }
         var q = (frame - delay[id]) / (FADE_FRAMES * TIME_SCALE);
         q = q < 0 ? 0 : q > 1 ? 1 : q;
         alpha[id] = from[id] + (to[id] - from[id]) * (q * q * (3 - 2 * q));   // smoothstep
         if (q < 1) busy = true;
       }
 
-      // Progress across the WHOLE cascade, not per note: this is what carries
-      // the repack, so it has to finish exactly when the last note does.
-      var pr = Math.min(1, frame / Math.max(1, span));
-      var ease = pr * pr * (3 - 2 * pr);
+      // Progress across the WHOLE cascade is computed above the fades now, because the
+      // geometry walk rides the same clock.
       if (opts.onFrame) opts.onFrame(pr);
 
       // THE GAP RESERVATION IS NOT WALKED ANY MORE -- see allocateBand's groupPres. It used to
@@ -6120,7 +6407,25 @@ function mountVaultGraph(root, data, deps) {
         // pr, not ease: ease is the smoothstep the NOTES ride, and an arc linear in ease is
         // S-shaped in time -- measured as a symmetric +-1.2 degree residual on an 11.9-degree
         // wedge. Constant speed is a statement about the clock on the wall.
-        colWalk[g0] = { f: tglDir[g0] === "out" ? 1 - pr : pr, n: tglN[g0] || 1 };
+        var fRamp = tglDir[g0] === "out" ? 1 - pr : pr;
+        // A GROUP FED BY MOVES has its cell born at the first crossing (~one fade in) and
+        // culled at the last (~one fade before the end) -- the ramp is phase-shifted to hit
+        // zero at exactly those moments, so the wedge's arc is ~0 whenever the cell appears
+        // or disappears and the toggle reads like any folder's: the wedge opens from
+        // nothing and closes to nothing, with no pop at either end.
+        if (tglMv[g0]) {
+          var mvEdge = Math.min(0.45, (FADE_FRAMES * TIME_SCALE * 2) / Math.max(1, span));
+          // The IN ramp finishes at 0.55 -- the moment the first arrival starts fading --
+          // not at the end of the span. Ramping through the arrivals packed the early ones
+          // into a half-open wedge at double density, visibly overlapping the neighbour
+          // (the tiny/(unlinked) report). Between the last fade-out and the first fade-in
+          // the whole moving population is invisible, which is exactly the silent window
+          // the wedge uses to finish opening.
+          fRamp = tglDir[g0] === "out"
+            ? Math.max(0, Math.min(1, (1 - mvEdge - pr) / (1 - mvEdge)))
+            : Math.max(0, Math.min(1, (pr - mvEdge) / (0.55 - mvEdge)));
+        }
+        colWalk[g0] = { f: fRamp, n: tglN[g0] || 1 };
       });
       // AND THE PER-CELL ROOM, on the same clock. A note in only one endpoint takes that
       // endpoint's figure rather than interpolating toward a cell that does not exist there,
@@ -6188,13 +6493,49 @@ function mountVaultGraph(root, data, deps) {
       if (targets) graph.forEachNode(function (id) {
         var q = targets[id];
         if (!q) return;
-        // The ANGLE is taken exactly -- it is the circumferential motion, and
-        // easing it would put the wedge out of step with the ring again. Only the
-        // RADIUS is eased, because that is what steps: a row count is an integer,
-        // so it ticks rather than glides, and easing turns each tick into a short
-        // slide of about one row instead of a jump.
-        var x = graph.getNodeAttribute(id, "x"), y = graph.getNodeAttribute(id, "y");
+        // The ANGLE is taken exactly while its target moves the way a wedge sweeps --
+        // easing it would put the wedge out of step with the ring. But "the angle is
+        // continuous" has the same exception the radius does (github#41): a note whose ROW
+        // changes takes a new seat, and although the serpentine makes most row crossings a
+        // short hop, a seat re-index can put the target at the far end of the wedge -- the
+        // drawn angle then snapped the whole arc in one frame. Measured on the
+        // dominant-folder fixture: full-alpha bystanders sweeping 3793 graph units at
+        // constant radius, several per frame, deterministic across runs.
+        //
+        // So the tangential step is BOUNDED, not eased: below the cap the target is taken
+        // exactly, as before, so ordinary wedge motion keeps zero lag and the wedge stays in
+        // step with its ring; above it -- which only a seat jump produces -- the note glides
+        // at the cap along the short way round. Bounded speed rather than a proportional
+        // ease on purpose: an ease lags EVERY note behind a moving target and pays the
+        // leftover in a jump at the end (the exact failure RADIAL_EASE's own note records),
+        // while a cap touches nothing but the teleports.
+        // AN INVISIBLE NOTE TAKES ITS TARGET EXACTLY. Smoothing exists for the eye, and a
+        // note below the visibility floor has no eye on it -- while a mover that crossed
+        // wedges and then eased toward its distant seat was still mid-journey when its
+        // fade-in began, travelling across the disc in full view (measured 1659u in one
+        // frame on the 10k fixture, 25% of the radial gap it had left). Snapping while
+        // invisible is what the whole schedule is built around.
+        // AN INVISIBLE NOTE TAKES ITS TARGET EXACTLY -- smoothing is for the eye, and a
+        // mover below the visibility floor must be AT its seat before its fade-in starts
+        // rather than easing toward it in full view once visible.
         var h = Math.atan2(q.y, q.x);
+        if ((alpha[id] || 0) < 0.05) {
+          graph.mergeNodeAttributes(id, { x: q.x, y: q.y });
+          return;
+        }
+        // The ANGLE is taken exactly -- it is the circumferential motion, and easing it
+        // would put the wedge out of step with the ring. Two attempts to smooth the
+        // github#41 seat-wrap teleports HERE, in the follower, are recorded in this
+        // branch's history and both reverted: a distance-bounded cap sheared the
+        // serpentine on ordinary big toggles (legitimate sweep outruns any cap, and
+        // tangential speed grows with radius, so rows fell out of step with each other),
+        // and a target-step detector marked so many notes during ordinary toggles -- seat
+        // re-indexing is constant there too, which is github#41's own finding -- that the
+        // glide broke the same formation it was protecting. The teleports are an
+        // ASSIGNMENT defect: the fix has to make each note's seat stable across the walk
+        // (pin its planA seat to its planB seat and walk BETWEEN them in the live frame's
+        // geometry), not make the follower cleverer about chasing a reassigned one.
+        var x = graph.getNodeAttribute(id, "x"), y = graph.getNodeAttribute(id, "y");
         var rNow = Math.hypot(x, y), rWant = Math.hypot(q.x, q.y);
         var gap = rWant - rNow;
         if (gap < 0 ? -gap > resid : gap > resid) resid = gap < 0 ? -gap : gap;
@@ -8436,9 +8777,31 @@ function mountVaultGraph(root, data, deps) {
   // up. That is exactly what github#45 turned out to be: the tween was running perfectly and
   // had nothing left to carry (measured, 943u of the move landing synchronously and 3u over
   // the following 1.2s).
-  function regroup(skipLayout) {
+  // `bandHint` PINS GROUPS TO THE RING THEY WERE ALREADY IN, and is applied before the
+  // geometry is derived, which is the whole point of taking it here rather than fixing
+  // bandLock up afterwards. The second buildWedgePlan below re-plans against the locked bands
+  // and is what produces geomLock -- including each band's TOTAL WEIGHT, which every group's
+  // arc is a share of. Pin the bands after that has run and the totals belong to a different
+  // split than the one being drawn: each group in the band then claims a larger share than it
+  // is owed, the shares sum past a full turn, and wedges overlap.
+  // `keepAlpha` LEAVES THE FADES TO THE CASCADE. regroup's syncAlpha snaps every note's
+  // alpha to its resting value, which is right for boot and for an instant relayout -- and
+  // wrong for the deferred path, whose whole point is that a cascade is about to animate the
+  // change. Measured on the demo vault with archives hidden: a hidden folder's unlinked notes
+  // became (unlinked) members at the click, syncAlpha snapped them to alpha 1 at their stale
+  // positions before the cascade could record them at 0, and the cascade then saw nothing to
+  // fade -- an instant wedge with several notes. A folder toggle never touches alphas outside
+  // its cascade; with this flag, neither does the membership toggle.
+  function regroup(skipLayout, bandHint, keepAlpha) {
     counts = computeOrder();
+    // Snapshotted before buildColors overwrites it, so the walk below knows what each group
+    // is coming FROM. Cheap -- one string per group, and there are tens of those.
+    var colorsBefore = null;
+    Object.keys(groupColor).forEach(function (g) {
+      (colorsBefore || (colorsBefore = Object.create(null)))[g] = groupColor[g];
+    });
     buildColors();
+    colorWalk(colorsBefore);
     // Once, at boot. Not on every regroup: __vg.relayout() calls this too, and
     // re-collapsing there would throw away whatever the user had opened -- which is
     // exactly why seedHidden belongs in here with it rather than beside it. Seeding the
@@ -8452,6 +8815,9 @@ function mountVaultGraph(root, data, deps) {
       if (base) {
         bandLock = Object.create(null);
         base.cells.forEach(function (c) { bandLock[c.g] = c.inner; });
+        // Every hinted group, including one the fresh plan has no cell for -- a group being
+        // emptied is exactly that, and it still holds notes for the length of the animation.
+        if (bandHint) Object.keys(bandHint).forEach(function (g) { bandLock[g] = bandHint[g]; });
         // maxR is kept as well as the two band radii: the edge curvature needs to
         // know how big the disc is to judge which chords pass near its centre.
         // Each band's OUTER EDGE, in graph units, which is what the seam is sized against.
@@ -8519,7 +8885,7 @@ function mountVaultGraph(root, data, deps) {
       }
     }
     buildLegend();
-    syncAlpha();
+    if (!keepAlpha) syncAlpha();
     // The caller lays out instead when it means to animate -- see skipLayout's note above.
     if (!skipLayout) applyLayout(false);
     // The band paints with nodeColor(), which buildColors() just re-derived. That is
@@ -8538,7 +8904,11 @@ function mountVaultGraph(root, data, deps) {
   // second copy of it: cancel whatever's animating, drop every locked geometry cache,
   // regroup() (recomputes counts, colours and, because bandLock is null, the band split
   // itself from scratch), then lay out fresh.
-  function hardRelayout(animate) {
+  // `deferLayout` REBUILDS EVERYTHING BUT THE LAYOUT -- locks, counts, colours -- and leaves
+  // the disc standing where it is. For a caller that is about to cascade: the cascade is what
+  // walks the disc to the new arrangement, and laying it out here first would put every note
+  // at its destination before the animation had a chance to carry it there.
+  function hardRelayout(animate, deferLayout) {
     stopPlay();
     if (cascadeRun) {
       WIN.cancelAnimationFrame(cascadeRun.raf);
@@ -8547,16 +8917,52 @@ function mountVaultGraph(root, data, deps) {
     }
     if (anim) { WIN.cancelAnimationFrame(anim); anim = null; }
     if (animGuard) { WIN.clearTimeout(animGuard); animGuard = null; }
+    // A CANCELLED MOVE CASCADE RELEASES ITS MOVERS. moveFrom is cleared by settle(), and
+    // cancelling the cascade above means settle never runs -- left set, every un-crossed
+    // mover answers groupOf with the group it was leaving, forever: measured as the
+    // (unlinked) count stuck at 0 with 139 notes standing in it, when a caller interrupted
+    // the animation and asked for the new state. The interrupt lands everything, so the
+    // movers land too.
+    moveFrom = null; splitHold = null;
     pinnedPlan = null; planKeep = null;
     roomNow = null; cellNow = null; edgeNow = null; colWalk = null;
     posSrc = posDst = null;
+    // BANDLOCK IS SUPPOSED TO BE STICKY. It exists so that filtering cannot migrate a group
+    // from one ring to the other -- see its own note -- and a membership change is a filter's
+    // kind of event, not a Refresh's. Rebuilding it wholesale moved groups between rings and
+    // cost one frame of ~180% of the disc's radius at the start of the gesture, on every
+    // fixture. Leaving it alone entirely was worse in a different way: a group gaining its
+    // first notes has no entry at all, defaulted to the outer ring, and the animation finished
+    // in an arrangement the resting layout disagreed with.
+    //
+    // So the two are separated. Every group that ALREADY had a band keeps it, and only a group
+    // without one takes the fresh plan's answer. The geometry goes with the bands: recomputing
+    // the radii around a split that has not changed is what produced the jump, so the previous
+    // geomLock is kept whenever there was one.
+    var prevBand = bandLock, prevGeom = geomLock;
     bandLock = null; geomLock = null;
+    if (deferLayout && prevBand) {
+      // The previous ring assignment goes in as a HINT so a group the fresh plan does not
+      // know (one being emptied, still holding notes) keeps its ring, and a NEW group takes
+      // the fresh plan's answer.
+      regroup(true, prevBand, true);
+      // AND THE GEOMETRY IS NOT RE-DERIVED AT ALL (github#49, asked directly: "why do the
+      // rings breathe, when radius should stay constant"). The locks are sticky by design --
+      // hide a 500-note folder and the rings hold still while the notes re-pack denser
+      // inside them; only Refresh re-derives. A membership toggle is a filter-class event,
+      // so it keeps the stage too. Two earlier answers were both worse: re-deriving resized
+      // every ring at the click (r0 +25% on the dominant-folder fixture), and walking the
+      // geometry between old and new smoothed that resize without answering why the stage
+      // was moving at all.
+      if (prevGeom) geomLock = prevGeom;
+      return;
+    }
     // SKIPPING regroup's own layout, because the one on the next line is the same work and
     // this function is the only caller that can animate it. Doing both meant the snap always
     // won and the tween had nothing to move (github#45); it was also a whole redundant
     // ringsLayout pass on a path that already rebuilds every lock above.
     regroup(true);
-    applyLayout(!!animate);
+    if (!deferLayout) applyLayout(!!animate);
     if (renderer) renderer.refresh();
   }
 
@@ -9636,15 +10042,44 @@ function mountVaultGraph(root, data, deps) {
   // here is the LENGTH of the journey -- a note crossing to another wedge can sweep most of
   // the way round the disc, where a filter change only ever moves it within its own. That
   // is exactly what the toggle is claiming happened, so it is the animation doing its job.
-  function setUnlinkedByFolder(on, persist) {
-    unlinkedByFolder = !!on;
+  // `instant` SKIPS THE ANIMATION AND NOTHING ELSE. The debug API sets state; it does not
+  // perform the gesture, and a caller that assigns a setting and reads the result on the next
+  // line is asking about the model, not about what is on screen. While a move is in flight
+  // groupOf deliberately answers with the group each note is LEAVING, so a colour read during
+  // one is the pre-move colour -- correct, and not what a state-setting call means to ask.
+  // The two real gestures (the legend's right-click row and the settings panel) animate.
+  function setUnlinkedByFolder(on, persist, instant) {
+    var next = !!on;
+    // WHICH GROUP EACH NOTE IS LEAVING, captured before the setting changes -- afterwards
+    // there is nothing left that remembers. Only notes actually on screen: one already hidden
+    // by a folder filter or the date range has no fade to run, and handing it to the cascade
+    // would leave the animation waiting on a note nobody can see.
+    var movesFrom = null, n = 0;
+    if (renderer && !instant && next !== unlinkedByFolder) {
+      graph.forEachNode(function (id) {
+        if (!isOrphan(id) || !visible(id) || (alpha[id] || 0) <= 0.004) return;
+        if (!movesFrom) movesFrom = Object.create(null);
+        movesFrom[id] = groupOf(id);
+        n++;
+      });
+    }
+    // THE SETTING CHANGES NOW, not when the animation finishes. Everything that asks the
+    // model a question -- the counts, the legend, the colours, the debug API -- is answered
+    // in the new state from this line on. Only the DRAWING lags, and only for the notes that
+    // are moving, which is what the cascade below is for. An earlier attempt ran the two
+    // halves as a sequence of cascades and deferred the flip to the end of the first; that
+    // made a plain setter asynchronous and broke five invariants that quite reasonably expect
+    // a toggle to have toggled.
+    unlinkedByFolder = next;
     var btn = $("opt-unlinkedByFolder");
     if (btn) btn.setAttribute("aria-pressed", unlinkedByFolder ? "true" : "false");
-    hardRelayout(true);
+    // deferLayout while there is something to animate: the cascade walks the disc there.
+    hardRelayout(false, !!n);
     try { placeLogo(); } catch { /* logo not mounted yet */ }
     try { heatBuild(); } catch { /* heatmap not built yet */ }
     try { buildLegend(); } catch { /* legend not built yet */ }
     if (persist && onUnlinkedByFolder) onUnlinkedByFolder(unlinkedByFolder);
+    if (n) cascade(null, { colToggle: true, movesFrom: movesFrom });
     return unlinkedByFolder;
   }
 
@@ -12240,7 +12675,7 @@ function mountVaultGraph(root, data, deps) {
                     // explicit true/false already; `v === true` matches deps.unlinkedByFolder's
                     // own "absent means on, only false turns it off" contract exactly, since
                     // an explicit true is the one value that contract also reads as on.
-                    setUnlinkedByFolder: function (v) { return setUnlinkedByFolder(v !== false, false); },
+                    setUnlinkedByFolder: function (v) { return setUnlinkedByFolder(v !== false, false, true); },
                     // Same shape again -- unlinkedTintByFolder defaults OFF, unlike the two
                     // above, so this one keeps the v === true polarity that used to belong
                     // to setUnlinkedByFolder before its own default flipped.
