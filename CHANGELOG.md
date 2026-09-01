@@ -45,8 +45,11 @@ sitting apart with every other unlinked note — reversible per-vault, from eith
   is a folder anyone organised. `(unlinked)` alone now sorts at the very end of the legend,
   past every real folder, matching where a loose note sits in Obsidian's own file explorer —
   greyed out and parenthesised while it holds nothing. `(vault root)` keeps its original
-  place ahead of the real folders, so no existing vault's automatic colours shift on
-  upgrade.
+  place ahead of the real folders, so it never displaces anyone. Taking `(unlinked)` out of
+  the rotation, though, does move the automatic colours by one slot on a vault that had
+  unlinked notes — in 1.8.0 a populated `(unlinked)` sorted first and consumed slot 0, which
+  no group now does. That is the one upgrade-time colour change here; a folder with an
+  explicit colour, and any vault with no unlinked notes, is untouched.
 
 - **Kept separate is not the same as flat.** A second, independent toggle,
   `unlinkedTintByFolder` (off by default) — a note that's staying in the `(unlinked)`

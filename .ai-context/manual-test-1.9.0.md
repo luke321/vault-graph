@@ -92,6 +92,42 @@ No issue number — found and fixed on `develop` while testing the two toggles a
 | **Screen reader** | If you can run one over the menu, do. It announced "Kept separate, not pressed" — the inverse of the truth — because the state was encoded twice and the two encodings disagreed. Name plus pressed state must now match reality. |
 | **Result** | |
 
+## github#49 — the membership move animates in full
+
+The cascade-moves work that landed last, squashed from seventeen commits (878b45f). The #45
+section above covers the wedge ramping open and the rings holding still; the two beats below
+landed with #49 and are not exercised by anything above.
+
+| | |
+|---|---|
+| **Where** | Page, ideally the 10k vault. `__vg.timeScale = 4` first — none of this is visible at full speed. |
+| **Do** | Toggle "unlinked notes join their folder" OFF then ON and follow one note that has to change wedge. |
+| **Leaves early, arrives late** | The mover should set off almost as the animation starts and land near the very end — the seat it is heading for stays empty until it arrives, rather than filling before the mover gets there or two notes sharing it mid-flight. |
+| **Crossings spread across the span** | When several notes cross at once they should be staggered across the whole animation, not bunched into one instant. |
+| **Accepted edge case — read before reopening** | On a vault whose folders are made *entirely* of unlinked notes, several wedges toggle at once and the smallest can crowd its neighbour for a single beat mid-animation. This was seen, reviewed and accepted (878b45f). Confirm it is still only a brief cosmetic beat that resolves to the correct end state — a lasting overlap or a wrong final seat is a new finding. |
+| **Result** | |
+
+---
+
+## Open findings from the adversarial review — 1.8.0..develop (2026-08-31)
+
+A multi-agent adversarial review of every change since 1.8.0 raised six findings, each
+verified against the source (line numbers on `release/1.9.0`). Four were code-confirmed —
+both independent skeptics agreed — and **have been fixed on `release/1.9.0` (2026-08-31)**;
+the steps below now verify the fix *holds* rather than reproduce a blocker. The last two are
+behaviour that is real but arguably intended, and are left for a decision (see E/F). None is
+human-verified yet; that is what this section is for.
+
+| Finding | How to check | Status |
+|---|---|---|
+| **A — camera snaps back if you pan during a shrinking cascade** (extends github#14 · src/page.js:5929) | Camera at rest. Hide a *dominant* folder so the disc SHRINKS (the zoom-in auto-fit is deferred to the end). While the cascade is still animating, grab and pan — or wheel-zoom — to inspect the remaining notes. The view must now stay where you put it, not snap to the fit at the end. | **Fixed** — the deferred shrink auto-fit now re-checks `camAtRest` at `settle()` (`if (deferredAutoFit && camAtRest) fit()`), matching the immediate/growth branch. Verify a mid-cascade pan survives; and confirm an *untouched* shrink still auto-fits. |
+| **B — a deep subfolder's hover halo drops on solo** (extends github#46 · src/page.js:8729) | Open twisties until a **2+-level-deep** subfolder row shows (a `data-hpath` row, e.g. `Resources/Books/Fiction`). Hover it so its notes light. **Without moving the mouse**, click that row's `only` chip — its notes must stay lit through and after the rebuild. | **Fixed** — the halo carry-across now resolves `data-hpath` rows too (`hoverHighlight(null, [path])`), the same call their own `onmouseenter` makes. Re-check the one-level subfolder and top-level rows still behave (no regression). |
+| **C — smoke suite mis-asserts an explicit `--vault ./test-vault`** (scripts/smoke.mjs:572) | `node scripts/smoke.mjs --vault ./test-vault` — the default output dir of make-test-vault.mjs (3000 notes). It must report **NOT ASSERTED** for the golden-snapshot check, not fail. | **Fixed** — the match is now `startsWith(f + "-")`, so the digest-suffixed store fixtures still match while a bare explicit `--vault` no longer collides with the 10k golden. |
+| **D — three camera checks can flake under load** (scripts/smoke.mjs:1417/1452/1488) | Run the full suite at the default `--jobs 4`. | **Fixed** — the three new #14 checks now match `POINTER_DRIVEN` (`"auto-fits the camera"`, `"left alone by a visibility toggle"`), so they run in the serial lane instead of the parallel pool — off the github#7 flake path. |
+| **E — a vault with orphans shifts its folder colours by one on upgrade** (src/page.js:762) | Open a 1.8.0 vault that has unlinked notes and folders on automatic (un-overridden) colours in 1.9.0 with the default (`unlinkedByFolder` ON). The un-overridden folders move one hue; a folder with an *explicit* colour, and any vault with no unlinked notes, must NOT move. | **Accepted; CHANGELOG corrected (2026-09-01).** The behaviour stands — intrinsic to the "make unlinked grey, out of rotation" request. The changelog no longer claims "no existing vault's automatic colours shift on upgrade"; it now states the one-slot shift plainly. Left as a visual sanity-check only. |
+| **F — hidden `(unlinked)` then toggle ON snaps instead of animating** (src/page.js:10077) | Turn "unlinked notes join their folder" OFF, hide the `(unlinked)` legend row, then turn it back ON. | **Real, low, likely accept.** With every orphan hidden the cascade is skipped (n=0) and the notes appear in their folders with no fade. Matches how 1.8.0 snapped; end state is correct. A coverage gap in the new animation, not a regression. |
+| **Result** | |
+
 ---
 
 ## Also unreleased in 1.9.0, and worth a pass
