@@ -5926,7 +5926,7 @@ function mountVaultGraph(root, data, deps) {
       // The deferred half of the auto-fit above: a shrinking disc's zoom-in waits for here,
       // where the outgoing notes have actually finished fading, rather than closing in on
       // notes still visibly leaving.
-      if (deferredAutoFit) fit();
+      if (deferredAutoFit && camAtRest) fit();
       if (done) done();
     };
 
@@ -8727,20 +8727,24 @@ function mountVaultGraph(root, data, deps) {
     // have found -- including the case where the rebuild moves the rows around underneath a
     // pointer that never left, which soloing does (every other row leaves the legend).
     if (ptr) {
-      var hit = null, hitSub = null;
+      var hit = null, hitSub = null, hitPath = null;
       for (var up = DOC.elementFromPoint(ptr.x, ptr.y); up && up !== DOC.body; up = up.parentElement) {
         if (!up.getAttribute) continue;
         if (up.getAttribute("data-hsub")) { hitSub = up; break; }
+        if (up.getAttribute("data-hpath")) { hitPath = up; break; }
         if (up.getAttribute("data-g") && up.classList && up.classList.contains("lg")) { hit = up; break; }
       }
-      // The same two resolutions the row handlers above use, and deliberately those rather
+      // The same three resolutions the row handlers above use, and deliberately those rather
       // than a shared helper: a subfolder row carries tint-slot INDICES, and only subOrder
-      // turns those back into the names hoverHighlight wants.
+      // turns those back into the names hoverHighlight wants; a deep subfolder row (data-hpath)
+      // already carries its full path, exactly what its own onmouseenter hands hoverHighlight.
       if (hitSub) {
         var fSub = hitSub.getAttribute("data-hsub"), subsSub = subOrder[fSub] || [];
         hoverHighlight(null, (hitSub.getAttribute("data-idx") || "").split(",").map(function (i) {
           return fSub + "/" + subsSub[+i];
         }));
+      } else if (hitPath) {
+        hoverHighlight(null, [hitPath.getAttribute("data-hpath")]);
       } else if (hit) {
         hoverHighlight(hit.getAttribute("data-g"), null);
       }
