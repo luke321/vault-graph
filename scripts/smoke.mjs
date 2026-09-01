@@ -278,6 +278,8 @@ const POINTER_DRIVEN = [
   "recolours exactly one group",  // rebuilds colours and waits for the repaint
   "fit frames the disc",          // camera flight, twice
   "density follows the notes",    // filters and waits for each state to land
+  "auto-fits the camera",         // #14 visibility-toggle auto-fit -- reads camera mid-cascade
+  "left alone by a visibility toggle", // #14 camera-untouched variant, same cascade timing
 ];
 
 // --fast MOVES THE POINTER-DRIVEN TIER INTO THE SHARDS. Worth having and worth labelling:
@@ -569,7 +571,10 @@ check("band assignment obeys its two hard rules", async (p) => {
 check("layout matches its golden snapshot", async (p) => {
   const dd = await p.j("__vg.debugDump()");
   const vaultName = dd.vault.name;
-  const fixture = ["demo-vault", "test-vault", "shape-vault"].find((f) => vaultName.startsWith(f));
+  // startsWith(f + "-"), not startsWith(f): the store fixture is "<name>-<digest8>", so the
+  // trailing "-" still matches it while an explicit --vault ./test-vault (bare basename, no
+  // digest) no longer collides with the 10k golden and correctly reports NOT ASSERTED below.
+  const fixture = ["demo-vault", "test-vault", "shape-vault"].find((f) => vaultName.startsWith(f + "-"));
   if (!fixture) {
     return { ok: true, detail: `NOT ASSERTED: "${vaultName}" is not one of the three named ` +
                                 `fixtures -- no golden snapshot to compare against` };
