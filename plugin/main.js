@@ -488,13 +488,12 @@ class VaultGraphView extends ItemView {
       // The saved per-folder and per-subfolder palette slots, and visibility defaults.
       folderColors: this.plugin.settings.folderColors,
       subfolderColors: this.plugin.settings.subfolderColors,
-      // COLOURS GET A WRITER, unlike folderShown below: the settings tab is no longer
-      // the only place a pick can happen, since #22 put a right-click menu in the view
-      // itself, and a pick made there has nowhere else to be saved. Mirrors the
-      // settings tab's own pick()/pickSub(), which write the same two settings keys and
-      // then push into the view through applyFolderColors()/applySubfolderColors() --
-      // neither of which calls this callback, so there is no write-back loop between
-      // the two paths.
+      // COLOURS GET A WRITER: the settings tab is no longer the only place a pick can
+      // happen, since #22 put a right-click menu in the view itself, and a pick made there
+      // has nowhere else to be saved. Mirrors the settings tab's own pick()/pickSub(),
+      // which write the same two settings keys and then push into the view through
+      // applyFolderColors()/applySubfolderColors() -- neither of which calls this callback,
+      // so there is no write-back loop between the two paths.
       onFolderColors: async (map) => {
         this.plugin.settings.folderColors = map;
         await this.plugin.saveSettings();
@@ -503,8 +502,19 @@ class VaultGraphView extends ItemView {
         this.plugin.settings.subfolderColors = map;
         await this.plugin.saveSettings();
       },
-      // Visibility defaults have no view-side control to write back from -- the eye in
-      // the settings tab is still the only way to change one -- so this stays read-only.
+      // FOLDER SHOWN ALSO GETS A WRITER, for the same #22-shaped reason as colours above --
+      // this used to read "the eye in the settings tab is still the only way to change one,
+      // so this stays read-only," which was true until github#34 put a "hidden by default"
+      // toggle in the view's own right-click menu. That toggle called page.js's existing
+      // pickVisible(), which already tried to persist through this callback -- so on this
+      // host it applied live and then silently reverted on the next reload, because nothing
+      // was listening. Caught while wiring an unrelated new setting through this same block
+      // for github#3 and fixed here rather than filed separately, since the wiring is
+      // identical.
+      onFolderShown: async (map) => {
+        this.plugin.settings.folderShown = map;
+        await this.plugin.saveSettings();
+      },
       folderShown: this.plugin.settings.folderShown,
       // Pan DOES get a writer, unlike the two maps above: the control that flips it is in
       // the view rather than in the settings tab, so the view is what has to persist it.
@@ -521,6 +531,23 @@ class VaultGraphView extends ItemView {
       compactAxis: this.plugin.settings.compactAxis,
       onCompactAxis: async (v) => {
         this.plugin.settings.compactAxis = !!v;
+        await this.plugin.saveSettings();
+      },
+      // Whether an unlinked note joins its own folder's group (github#3, reopened) -- same
+      // shape as compactAxis just above: a view-level control (the right-click menu's own
+      // toggle on the (unlinked) row) as well as the settings tab below, so the view has to
+      // persist a click made there too.
+      unlinkedByFolder: this.plugin.settings.unlinkedByFolder,
+      onUnlinkedByFolder: async (v) => {
+        this.plugin.settings.unlinkedByFolder = !!v;
+        await this.plugin.saveSettings();
+      },
+      // A separate question from the one above (github#3, re-read again): whether a note
+      // STILL standing in the (unlinked) group wears its own folder's colour instead of the
+      // flat swatch. Same view-level-control shape as unlinkedByFolder just above.
+      unlinkedTintByFolder: this.plugin.settings.unlinkedTintByFolder,
+      onUnlinkedTintByFolder: async (v) => {
+        this.plugin.settings.unlinkedTintByFolder = !!v;
         await this.plugin.saveSettings();
       },
       // The hub, for the same reason pan gets a writer: it is changed in the view, by
@@ -611,6 +638,19 @@ const DEFAULTS = {
   // equal width, so a sparse decade doesn't cost the same room as one busy year. ON by
   // default -- the better axis should not need anyone to find a toggle first (github#23).
   compactAxis: true,
+  // An unlinked note joins its own folder's group -- wedge, band, colour, count, filter,
+  // all of it -- instead of sitting apart with every other unlinked note. ON by default, at
+  // explicit request (github#3, reopened): a note with no links is still filed somewhere,
+  // and the disc should read that way unless told otherwise. OFF is the escape hatch for
+  // anyone who wants the unlinked population kept visible and separate, same as the
+  // original fix under this issue number shipped it.
+  unlinkedByFolder: true,
+  // A separate question from the one above (github#3, re-read again): while a note is
+  // still standing in the (unlinked) group (unlinkedByFolder off), does it wear its own
+  // folder's colour instead of the flat swatch every note in that group has always worn.
+  // OFF by default -- this is the smaller, opt-in half of the reopen comment's ask, not the
+  // shipped-behaviour-changing half unlinkedByFolder's own default is.
+  unlinkedTintByFolder: false,
 };
 
 // The four build settings, described once. They live here rather than inline in display()
@@ -758,6 +798,32 @@ class VaultGraphSettingTab extends PluginSettingTab {
           const view = await this.plugin.currentView();
           const api = view && view.handle && view.handle.api;
           if (api && api.setCompactAxis) api.setCompactAxis(v);
+        }));
+
+    new Setting(containerEl)
+      .setName("Unlinked notes join their folder")
+      .setDesc("A note with no links takes its own folder's wedge and colour, instead of sitting apart in a separate unlinked group. The (unlinked) row's right-click menu flips this too, and lands back here.")
+      .addToggle((t) => t
+        .setValue(this.plugin.settings.unlinkedByFolder !== false)
+        .onChange(async (v) => {
+          this.plugin.settings.unlinkedByFolder = v;
+          await this.plugin.saveSettings();
+          const view = await this.plugin.currentView();
+          const api = view && view.handle && view.handle.api;
+          if (api && api.setUnlinkedByFolder) api.setUnlinkedByFolder(v);
+        }));
+
+    new Setting(containerEl)
+      .setName("Colour unlinked notes by folder")
+      .setDesc("While unlinked notes are kept as their own group (the toggle just above is off), give each one its own folder's colour instead of the flat unlinked swatch. The (unlinked) row's right-click menu carries this too.")
+      .addToggle((t) => t
+        .setValue(this.plugin.settings.unlinkedTintByFolder === true)
+        .onChange(async (v) => {
+          this.plugin.settings.unlinkedTintByFolder = v;
+          await this.plugin.saveSettings();
+          const view = await this.plugin.currentView();
+          const api = view && view.handle && view.handle.api;
+          if (api && api.setUnlinkedTintByFolder) api.setUnlinkedTintByFolder(v);
         }));
 
     new Setting(containerEl).setName("Folder colours").setHeading();
@@ -1140,6 +1206,8 @@ class VaultGraphPlugin extends Plugin {
     api.setFolderShown(this.settings.folderShown);
     if (api.setPanEnabled) api.setPanEnabled(this.settings.panEnabled !== false);
     if (api.setCompactAxis) api.setCompactAxis(this.settings.compactAxis !== false);
+    if (api.setUnlinkedByFolder) api.setUnlinkedByFolder(this.settings.unlinkedByFolder !== false);
+    if (api.setUnlinkedTintByFolder) api.setUnlinkedTintByFolder(this.settings.unlinkedTintByFolder === true);
     if (api.applyHiddenDefaults) api.applyHiddenDefaults();
   }
 

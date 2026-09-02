@@ -8,7 +8,7 @@
 #
 # -ACT NAME records ONE act instead of the full storyboard -- one of the `act:` tags in
 # demoMode() (src/page.js): intro, note, pin, compactaxis, timeline, heatmap, folders,
-# subfolders, subfoldercolor, camera, colours. -Out defaults to
+# hiddenbydefault, subfolders, subfoldercolor, camera, colours, unlinked. -Out defaults to
 # `demo-<name>-<timestamp>.mp4` instead of `demo-<timestamp>.mp4`,
 # same folder, same everything else. This script only ever writes the raw take (.mp4) --
 # encoding it into the docs gallery's `assets/features/<name>.webp` is make-hero.ps1's job,
@@ -206,12 +206,27 @@ if ($Y -ne [int]::MinValue) { $posY = $Y }
 # would otherwise be in frame. `--disable-features=Translate,TranslateUI` because the
 # translate bubble DID appear over the page on a first take -- the vault's folder names
 # read as German to Chrome -- and `--lang=en-US` stops it deciding that again.
+#
+# CalculateNativeWinOcclusion OFF, with the two backgrounding switches beside it: Chrome
+# stops painting a window it believes is COVERED, and a page that is not painting never
+# runs another requestAnimationFrame -- so a ramp already scheduled (the hover halo's, in
+# the take that found this) keeps its handle forever, `__vg.demo.busy()` never goes false,
+# and every settle from that beat on burns its full 30-second cap before the driver gives
+# up. Measured: 174s of wall clock for a 12s act, then a throw. Same class as the two-
+# Chromes incident above and just as unreadable from the symptom -- it looks exactly like
+# a page that will not settle.
+#
+# WHAT THIS DOES NOT FIX: gdigrab still captures the window's own screen region, so a
+# window that is genuinely behind another one now records the WINDOW ON TOP OF IT rather
+# than stalling. The take has to be visible either way -- that is what -Monitor is for.
+# These flags only stop an occluded window from taking the driver down with it.
 $chromeArgs = @(
   "--remote-debugging-port=$Port",
   "--user-data-dir=$profileDir",
   '--no-first-run', '--no-default-browser-check',
   '--hide-crash-restore-bubble', '--disable-session-crashed-bubble',
-  '--disable-features=Translate,TranslateUI,MediaRouter',
+  '--disable-features=Translate,TranslateUI,MediaRouter,CalculateNativeWinOcclusion',
+  '--disable-backgrounding-occluded-windows', '--disable-renderer-backgrounding',
   '--lang=en-US',
   "--window-size=$Width,$Height", "--window-position=$posX,$posY",
   "--app=$Url"

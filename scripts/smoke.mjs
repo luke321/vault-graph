@@ -278,6 +278,8 @@ const POINTER_DRIVEN = [
   "recolours exactly one group",  // rebuilds colours and waits for the repaint
   "fit frames the disc",          // camera flight, twice
   "density follows the notes",    // filters and waits for each state to land
+  "auto-fits the camera",         // #14 visibility-toggle auto-fit -- reads camera mid-cascade
+  "left alone by a visibility toggle", // #14 camera-untouched variant, same cascade timing
 ];
 
 // --fast MOVES THE POINTER-DRIVEN TIER INTO THE SHARDS. Worth having and worth labelling:
@@ -537,6 +539,111 @@ check("band assignment obeys its two hard rules", async (p) => {
   };
 });
 
+// EVERY CHECK ABOVE ASSERTS A PROPERTY of the layout (rows balanced, no stray small
+// folders) -- none of them would catch a layout that is internally consistent and still
+// DIFFERENT from what it used to be. github#37: while working github#35, the same folder
+// split differently across rebuilds of the same mirror vault with no intentional change --
+// the cause turned out to be an in-progress, since-reverted fix, not the fixtures, but nothing
+// in this suite would have caught it either way. This check does: it compares the CURRENT
+// build's band assignment and every note's position against a checked-in golden snapshot.
+//
+// SNAPSHOTS ARE DELIBERATE, NEVER AUTOMATIC. scripts/update-layout-snapshots.mjs writes
+// scripts/layout-snapshots/*.json by hand, on request -- never from this check, never from
+// the pre-push hook. A snapshot that regenerates itself on mismatch is not a regression
+// test. When a layout change is intentional: run that script, review the diff, commit the
+// new snapshot in the SAME change as the code that moved the layout.
+//
+// ONLY THE THREE NAMED FIXTURES HAVE A SNAPSHOT -- an explicit --vault or --url has no
+// golden reference to compare against, so this reports NOT ASSERTED rather than failing.
+// Matched by PREFIX against debugDump().vault.name (build-graph.mjs sets it to
+// basename(VAULT), which for a fixture is "<name>-<digest8>" -- see resolveVaults()) since
+// the digest suffix changes whenever a generator script does.
+//
+// POSITION TOLERANCE IS MEASURED, NOT GUESSED. update-layout-snapshots.mjs's own header
+// records why this check calls __vg.relayout() before sampling rather than reading
+// positions straight off demo.busy()===false, or even a bare applyLayout(false) (once or
+// twice): without it, two consecutive measurements of the IDENTICAL build disagreed by up
+// to several graph units on 90%+ of the demo and 10k vaults' notes -- animation-path
+// residue, the same class of bug github#21 fixed for dot size. With relayout(), repeated
+// measurements are byte-for-byte identical. 0.1 graph units is a wide margin over that
+// measured noise floor (0, with relayout(); several units without it) and still tiny next
+// to a real algorithmic drift, which moves notes by tens to hundreds of units.
+check("layout matches its golden snapshot", async (p) => {
+  const dd = await p.j("__vg.debugDump()");
+  const vaultName = dd.vault.name;
+  // startsWith(f + "-"), not startsWith(f): the store fixture is "<name>-<digest8>", so the
+  // trailing "-" still matches it while an explicit --vault ./test-vault (bare basename, no
+  // digest) no longer collides with the 10k golden and correctly reports NOT ASSERTED below.
+  const fixture = ["demo-vault", "test-vault", "shape-vault"].find((f) => vaultName.startsWith(f + "-"));
+  if (!fixture) {
+    return { ok: true, detail: `NOT ASSERTED: "${vaultName}" is not one of the three named ` +
+                                `fixtures -- no golden snapshot to compare against` };
+  }
+  const snapPath = join(ROOT, "scripts", "layout-snapshots", `${fixture}.json`);
+  if (!existsSync(snapPath)) {
+    return { ok: false, detail: `no snapshot at scripts/layout-snapshots/${fixture}.json -- ` +
+                                 `run node scripts/update-layout-snapshots.mjs` };
+  }
+  const snap = JSON.parse(readFileSync(snapPath, "utf8"));
+  // SAME __vg.relayout() call update-layout-snapshots.mjs takes the snapshot behind -- see
+  // that script's header for why plain applyLayout(false) is not enough on its own (a
+  // still-running cascade frame can land after it and silently overwrite the snap).
+  await p.eval(`__vg.relayout(); void 0`).catch(() => {});
+  const r = await p.j(`(function(){
+    var plan = __vg.buildWedgePlan(false), band = {};
+    plan.cells.forEach(function(c){ band[c.g] = c.inner ? "inner" : "outer"; });
+    var pos = {};
+    __vg.graph.forEachNode(function(id, a){ pos[id] = [a.x, a.y]; });
+    return { band: band, positions: pos };
+  })()`);
+
+  const flipped = [];
+  for (const f of Object.keys(snap.band)) {
+    if (r.band[f] !== undefined && r.band[f] !== snap.band[f]) {
+      flipped.push(`${f}: ${snap.band[f]} -> ${r.band[f]}`);
+    }
+  }
+  const snapIds = new Set(Object.keys(snap.positions));
+  const curIds = new Set(Object.keys(r.positions));
+  const added = [...curIds].filter((id) => !snapIds.has(id));
+  const removed = [...snapIds].filter((id) => !curIds.has(id));
+  if (added.length || removed.length) {
+    return {
+      ok: false,
+      detail: `the FIXTURE itself changed, not just the layout -- ${added.length} note(s) ` +
+        `added, ${removed.length} removed since the snapshot was taken. Regenerate deliberately ` +
+        `with node scripts/update-layout-snapshots.mjs if this fixture's generator changed on ` +
+        `purpose (e.g. ${[...added, ...removed].slice(0, 3).join(", ")}${added.length + removed.length > 3 ? ", ..." : ""})`,
+    };
+  }
+  // TOLERANCE, in graph units -- see the check-level comment above for how it was measured.
+  const TOL = 0.1;
+  let worst = null, moved = 0;
+  for (const id of curIds) {
+    const [sx, sy] = snap.positions[id];
+    const [cx, cy] = r.positions[id];
+    const d = Math.hypot(cx - sx, cy - sy);
+    if (d <= TOL) continue;
+    moved++;
+    if (!worst || d > worst.d) {
+      const sAngle = Math.atan2(sy, sx) * 180 / Math.PI;
+      const cAngle = Math.atan2(cy, cx) * 180 / Math.PI;
+      worst = { id, d, sr: Math.hypot(sx, sy), cr: Math.hypot(cx, cy), sAngle, cAngle };
+    }
+  }
+  const ok = flipped.length === 0 && moved === 0;
+  const parts = [`${curIds.size} notes checked against scripts/layout-snapshots/${fixture}.json`];
+  parts.push(flipped.length ? `${flipped.length} folder(s) flipped band: ${flipped.join(", ")}` : "band unchanged");
+  if (moved) {
+    parts.push(`${moved} note(s) moved past ${TOL} units, worst is #${worst.id}: ` +
+      `radius ${worst.sr.toFixed(1)} -> ${worst.cr.toFixed(1)}, ` +
+      `angle ${worst.sAngle.toFixed(1)}° -> ${worst.cAngle.toFixed(1)}°`);
+  } else {
+    parts.push("positions unchanged");
+  }
+  return { ok, detail: parts.join("; ") };
+});
+
 check("a marked heatmap day haloes but never pushes", async (p) => {
   const day = await p.j(`(function(){ var h = __vg.heat, b = null;
     h.keys.forEach(function(k){ var d = h.days[k]; if (!b || d.n > b.n) b = d; }); return b.key; })()`);
@@ -666,18 +773,26 @@ check("hovering a note ramps in and releases at zero", async (p) => {
 // stayed 0 and the size ratio 1.00x, and both these checks failed on code that was fine
 // (github#5). groupOrder() is the same list the legend draws, which is the list highlight
 // actually responds to.
+//
+// FILTERED TO NON-EMPTY GROUPS before picking, not just groupOrder()'s raw order (github#3,
+// reopened again): (unlinked) is now ALWAYS in that list, at 0 members whenever
+// unlinkedByFolder is on (the default) -- a stable control point for its own toggle, not a
+// promise that groupOrder()[0] has anyone in it. Picking blindly reproduced the exact
+// vacuous-measurement shape this check's own header already warns about, just via a new
+// mechanism: pick(gs[0]) returned null, and __vg.hl[null] is 0 by construction regardless
+// of whether highlighting itself works.
 check("highlighting ramps per note and is additive", async (p) => {
-  // Additivity needs two groups to be additive BETWEEN. On a vault with one, say so
-  // rather than measuring __vg.hl[null] and reporting a failure about the vault.
-  const ng = await p.j(`__vg.groupOrder().length`);
-  if (ng < 2) return { ok: true, detail: `only ${ng} group on this shape, nothing to add to` };
   const r = await p.j(`(function(){
-    var gs = __vg.groupOrder();
+    var counted = __vg.groupOrder().filter(function (g) { return __vg.groupCount(g) > 0; });
     var pick = function(g){ var f = null; __vg.graph.forEachNode(function(i){ if (!f && __vg.groupOf(i) === g) f = i; }); return f; };
-    var a = pick(gs[0]), b = pick(gs[1]);
-    __vg.state.highlight = {}; __vg.state.highlight[gs[0]] = true; __vg.renderer.refresh();
-    return {gs: [gs[0], gs[1]], a: a, b: b};
+    var gs = counted;
+    var a = gs.length > 0 ? pick(gs[0]) : null, b = gs.length > 1 ? pick(gs[1]) : null;
+    if (gs.length > 0) { __vg.state.highlight = {}; __vg.state.highlight[gs[0]] = true; __vg.renderer.refresh(); }
+    return {ng: gs.length, gs: [gs[0], gs[1]], a: a, b: b};
   })()`);
+  // Additivity needs two non-empty groups to be additive BETWEEN. On a shape with fewer,
+  // say so rather than measuring __vg.hl[null] and reporting a failure about the vault.
+  if (r.ng < 2) return { ok: true, detail: `only ${r.ng} non-empty group on this shape, nothing to add to` };
   await sleep(700);                                     // TWEEN_MS plus slack
   const first = await p.j(`{a: __vg.hl[${JSON.stringify(r.a)}] || 0, busy: __vg.hlBusy}`);
   await p.eval(`__vg.state.highlight[${JSON.stringify(r.gs[1])}] = true; __vg.renderer.refresh(); void 0`);
@@ -1233,6 +1348,187 @@ check("fit frames the disc that is actually there", async (p) => {
   };
 });
 
+// AUTO-FIT ON A VISIBILITY TOGGLE (github#14). Hiding the group that dominates the disc can
+// drop `reach` well under 1 -- the ring left on screen is a fraction of what the camera is
+// framed for, an island in dead space. fit()/fitRatio() already compute the right ratio; this
+// checks that hiding/showing a group through the real legend eye icon now DRIVES them, and
+// that the direction decides the timing: a shrink (zooming in) waits for the outgoing notes to
+// actually finish fading -- closing in on notes still visibly leaving reads as wrong -- while a
+// growth (zooming out) runs alongside the incoming notes' fade-in, which reads as the view
+// expanding to meet what's arriving. `__vg.demo.busy()` is what gates the wait, not a fixed
+// sleep -- this is a real cascade over real notes and its duration depends on how many, so a
+// clock-based assertion would be exactly the flavour of flake this file elsewhere goes out of
+// its way to avoid.
+async function toRest(p) {
+  // The REAL reset button, not camReset()'s raw setState -- that path is what camAtRest
+  // considers "the user touched it" (correctly, for every other check in this file that wants
+  // a clean camera without caring about this flag); fit() is what it considers "at rest."
+  await p.eval(`document.querySelector("#vg-reset").click(); void 0`);
+  await camSettle(p);
+  // camSettle()'s two-equal-samples check can land WHILE fit()'s own tween is still running
+  // (measured on the 10k vault: a manual setState briefly took, then was overwritten back to
+  // the fit target moments later) -- camAtRest itself, not a guessed margin, is the signal
+  // that fit()'s completion callback has actually fired.
+  const dl = Date.now() + 4000;
+  while (Date.now() < dl) {
+    if (await p.j(`!!__vg.camAtRest`)) return;
+    await sleep(60);
+  }
+}
+async function clickEye(p, group) {
+  await p.eval(`(function(){
+    var want = ${JSON.stringify(group)};
+    var els = document.querySelectorAll("[data-eye]");
+    for (var i = 0; i < els.length; i++) {
+      if (els[i].getAttribute("data-eye") === want) { els[i].click(); return; }
+    }
+  })(); void 0`);
+}
+async function biggestGroup(p) {
+  return p.j(`(function(){
+    var order = __vg.groupOrder(), counts = {};
+    __vg.graph.forEachNode(function (id, a) { counts[a.folder] = (counts[a.folder] || 0) + 1; });
+    var best = null;
+    order.forEach(function (g) { if (!best || (counts[g] || 0) > (counts[best] || 0)) best = g; });
+    return best;
+  })()`);
+}
+// Polls the camera while __vg.demo.busy() says the cascade is running, then waits past fit()'s
+// own 380ms tween once it is not. Returns whether the ratio ever moved from its starting value
+// WHILE busy, and the ratio once everything (cascade AND any deferred fit) has truly landed.
+async function watchDuringCascade(p, startRatio, capMs = 8000) {
+  var movedWhileBusy = false;
+  var deadline = Date.now() + capMs;
+  for (;;) {
+    var busy = await p.j(`!!__vg.demo.busy()`);
+    var r = (await camState(p)).ratio;
+    if (Math.abs(r - startRatio) > 0.01) movedWhileBusy = true;
+    if (!busy || Date.now() > deadline) break;
+    await sleep(60);
+  }
+  await sleep(500);   // past any fit() tween that only started once busy went false
+  const settled = await camState(p);
+  return { movedWhileBusy, finalRatio: settled.ratio };
+}
+
+// "want" IS SAMPLED AFTER THE CASCADE SETTLES, NEVER DURING IT. densityReport()'s reach/
+// lastMaxR are recorded by ringsLayout(), and every frame of the fade re-derives them from
+// that FRAME's interpolated packing (see animation.md, "interpolate the output") -- so a
+// sample taken shortly after the click reads close to UNCHANGED (reach near 1) for most of
+// the fade's own duration, and only converges to the true destination once settle() re-runs
+// ringsLayout() at rest. Measured live: 80ms after hiding a 77%-of-the-vault group, reach
+// still read 1.003; only after the cascade's own settle() did it read the true 0.602. Sampling
+// early does not just blur the number, it flips the shrinking/growing verdict entirely.
+check("hiding the biggest group auto-fits the camera, but only once it has finished leaving", async (p) => {
+  await p.eval(`__vg.state.hidden.folder = {}; __vg.syncAlpha(); __vg.applyLayout(false); void 0`);
+  await sleep(200);
+  await toRest(p);
+  const rest = await camState(p);
+
+  const g = await biggestGroup(p);
+  if (!g) return { ok: false, detail: "no group to hide" };
+
+  await clickEye(p, g);
+  const { movedWhileBusy, finalRatio } = await watchDuringCascade(p, rest.ratio);
+  const dens = await p.j(`__vg.densityReport()`);
+  const want = 1.08 * Math.max(0.12, Math.min(1.35, dens.reach));
+  const shrinking = want < rest.ratio - 0.01;
+
+  // reset for whatever runs after this check
+  await p.eval(`__vg.state.hidden.folder = {}; __vg.syncAlpha(); __vg.applyLayout(false); void 0`);
+  await sleep(200);
+  await toRest(p);
+
+  const atRest = await p.j(`__vg.camAtRest`);
+  const ok = shrinking
+    ? (!movedWhileBusy && Math.abs(finalRatio - want) < 0.03 && atRest)
+    : true;   // the biggest group did not shrink the disc below rest on this fixture -- skip
+  return {
+    ok,
+    detail: shrinking
+      ? `hid "${g}" (reach ${dens.reach}): ratio held at ${rest.ratio} while notes left ` +
+        `(moved early: ${movedWhileBusy}), landed at ${finalRatio.toFixed(4)} against ` +
+        `${want.toFixed(4)} promised, camAtRest ${atRest}`
+      : `hid "${g}": reach ${dens.reach} did not shrink the disc below its resting ratio on ` +
+        `this fixture -- nothing to assert`,
+  };
+});
+
+check("showing a hidden group auto-fits the camera while it is still arriving", async (p) => {
+  await p.eval(`__vg.state.hidden.folder = {}; __vg.syncAlpha(); __vg.applyLayout(false); void 0`);
+  await sleep(200);
+  const g = await biggestGroup(p);
+  if (!g) return { ok: false, detail: "no group to hide" };
+  // Start from it already hidden, camera fit to what's left, both via the real controls.
+  await clickEye(p, g);
+  await sleep(2500);
+  await toRest(p);
+  const rest = await camState(p);
+
+  await clickEye(p, g);   // show it again -- the disc should grow
+  const { movedWhileBusy, finalRatio } = await watchDuringCascade(p, rest.ratio);
+  const dens = await p.j(`__vg.densityReport()`);
+  const want = 1.08 * Math.max(0.12, Math.min(1.35, dens.reach));
+  const growing = want > rest.ratio + 0.01;
+
+  await p.eval(`__vg.state.hidden.folder = {}; __vg.syncAlpha(); __vg.applyLayout(false); void 0`);
+  await sleep(200);
+  await toRest(p);
+
+  const atRest = await p.j(`__vg.camAtRest`);
+  const ok = growing
+    ? (movedWhileBusy && Math.abs(finalRatio - want) < 0.03 && atRest)
+    : true;
+  return {
+    ok,
+    detail: growing
+      ? `showed "${g}" again (reach ${dens.reach}): ratio moved while notes arrived ` +
+        `(${movedWhileBusy}), landed at ${finalRatio.toFixed(4)} against ${want.toFixed(4)} ` +
+        `promised, camAtRest ${atRest}`
+      : `showed "${g}" again: reach ${dens.reach} did not grow the disc past its resting ` +
+        `ratio on this fixture -- nothing to assert`,
+  };
+});
+
+check("a manually moved camera is left alone by a visibility toggle", async (p) => {
+  await p.eval(`__vg.state.hidden.folder = {}; __vg.syncAlpha(); __vg.applyLayout(false); void 0`);
+  await sleep(200);
+  await toRest(p);
+
+  const g = await biggestGroup(p);
+  if (!g) return { ok: false, detail: "no group to hide" };
+
+  // A real camera move that is NOT fit() -- exactly what camAtRest exists to notice. .animate(),
+  // not a raw setState: a bare setState right after this file's own checks have been driving
+  // the same camera measured as silently not applying on the 10k fixture (panning enabled,
+  // no thrown error, state simply unchanged) -- .animate() is the primitive fit() itself uses
+  // everywhere else in this file and is proven reliable by every other check here.
+  const panWas = await p.j(`__vg.renderer.getSetting("enableCameraPanning")`);
+  await p.eval(`__vg.renderer.setSetting("enableCameraPanning", true); void 0`);
+  await p.eval(`__vg.renderer.getCamera().animate({ x: 0.4, y: 0.6, ratio: 0.5, angle: 0 }, { duration: 60 }); void 0`);
+  const dl = Date.now() + 3000;
+  let before = await camState(p);
+  while (Date.now() < dl && Math.abs(before.ratio - 0.5) > 0.01) { await sleep(60); before = await camState(p); }
+  await sleep(150);
+  before = await camState(p);
+  const atRestAfterMove = await p.j(`__vg.camAtRest`);
+
+  await clickEye(p, g);
+  await sleep(3000);   // generous: let the cascade and any (wrongly) triggered fit() land
+  const after = await camState(p);
+
+  await p.eval(`__vg.renderer.setSetting("enableCameraPanning", ${JSON.stringify(!!panWas)});
+    __vg.state.hidden.folder = {}; __vg.syncAlpha(); __vg.applyLayout(false); void 0`);
+  await sleep(200);
+  await toRest(p);
+
+  return {
+    ok: !atRestAfterMove && before.ratio === after.ratio && before.x === after.x && before.y === after.y,
+    detail: `after a manual move: camAtRest=${atRestAfterMove} (must be false); camera before ` +
+      `hiding "${g}" ${JSON.stringify(before)}, after ${JSON.stringify(after)} (must be identical)`,
+  };
+});
+
 // The buttons have to agree with the wheel, or the same gesture means two things. Asserted
 // against the renderer's own zoomingRatio rather than a repeated 1.2.
 check("the zoom buttons step by one wheel notch", async (p) => {
@@ -1300,6 +1596,124 @@ check("the pan toggle locks the camera and flies home", async (p) => {
     detail: `on by default ${on}; dragged to (${moved.x}, ${moved.y}), toggling off flew home ` +
             `to (${home.x}, ${home.y}); a drag while locked left it at (${locked.x}, ${locked.y}); ` +
             `toggles back to ${back}`,
+  };
+});
+
+check("a link's stroke holds its width at any zoom", async (p) => {
+  // Sigma's edge shader draws max(minEdgeThickness, size / sizeRatio), and sizeRatio IS the
+  // camera ratio because zoomToSizeRatioFunction is identity -- so a stroke grew as 1/ratio,
+  // like a dot. Measured on the 10k fixture against one hub of degree 55: 1.70px at rest,
+  // 3.94px five notches in, 7.87px at ten, and 55 of those on a 20.44px dot is 307.87px of
+  // ink -- the fan drew as one mass with no link traceable through it (github#39).
+  //
+  // ASSERTS AN EQUALITY, not just the cap. The fix scales the whole web by one multiplier
+  // rather than clamping each edge against the cap, which makes the drawn width CONSTANT
+  // below the knee -- so the two deep readings must match exactly. A per-edge min() would
+  // still satisfy a cap-only check while flattening every link onto the same number, and
+  // that is the regression this equality is here to catch.
+  await camReset(p);
+  const hub = await p.j(`(function(){
+    var best = null, bd = -1;
+    __vg.graph.forEachNode(function (id) {
+      var d = __vg.renderer.getNodeDisplayData(id);
+      if (!d || d.hidden) return;
+      if (__vg.graph.degree(id) > bd) { bd = __vg.graph.degree(id); best = id; }
+    });
+    return { id: best, degree: bd };
+  })()`);
+
+  // The clamp is applied by a reducer that a rAF re-runs after the camera moves, so POLL for
+  // it rather than sleeping at it -- a fixed wait is the failure this suite already records
+  // twice, and under contention it would read the pre-refresh width and call it a pass.
+  const at = async (ratio) => {
+    await p.eval(`__vg.renderer.getCamera().setState({x:0.5,y:0.5,ratio:${ratio},angle:0}); void 0`);
+    let prev = null, same = 0;
+    for (let i = 0; i < 60; i++) {
+      const r = await p.j(`__vg.edgeReport(${JSON.stringify(hub.id)})`);
+      const key = `${r.maxPx}|${r.mult}`;
+      if (key === prev) { if (++same >= 2) return r; } else { same = 0; }
+      prev = key;
+      await sleep(60);
+    }
+    return p.j(`__vg.edgeReport(${JSON.stringify(hub.id)})`);
+  };
+
+  const rest = await at(1.08);
+  const five = await at(0.216);   // five wheel notches in, where the clamp binds
+  const ten = await at(0.108);    // and twice as far again
+
+  // AND WITH A SEARCH RUNNING, because the reducer's query branch RETURNS EARLY. The first
+  // version of the fix applied the cap once before the final return, so every link went back
+  // to growing as 1/ratio for as long as anything was in the search box -- green suite,
+  // unclamped web. A cap applied at one exit of a function with three is not a cap.
+  await p.eval(`__vg.state.query = "note"; __vg.renderer.refresh(); void 0`);
+  const query = await at(0.108);
+  await p.eval(`__vg.state.query = ""; __vg.renderer.refresh(); void 0`);
+  await camReset(p);
+
+  const cap = rest.capPx;
+  const capped = (r) => r.maxPx <= cap + 0.01;
+  return {
+    // The cap at every zoom and in every state; the two deep readings identical -- which is
+    // the uniform multiplier, not merely a bound; and the resting disc left alone, which is
+    // what the knee at EDGE_SIZE_MAX/EDGE_MAX_PX buys.
+    ok: capped(rest) && capped(five) && capped(ten) && capped(query) &&
+        Math.abs(ten.maxPx - five.maxPx) < 0.02 &&
+        Math.abs(ten.ribbonPx - five.ribbonPx) < 0.5 &&
+        rest.mult === 1 && ten.mult < 1,
+    detail: `hub ${hub.id} (degree ${hub.degree}, ${rest.shown} links shown), cap ${cap}px: ` +
+            `rest ${rest.maxPx}px/fan ${rest.ribbonPx}px (mult ${rest.mult}) -> ` +
+            `5x ${five.maxPx}px/fan ${five.ribbonPx}px -> ` +
+            `10x ${ten.maxPx}px/fan ${ten.ribbonPx}px (mult ${ten.mult}); ` +
+            `10x with a search running ${query.maxPx}px; dot ${ten.dotPx}px`,
+  };
+});
+
+check("the resting web is not floored wider than it asks for", async (p) => {
+  // minEdgeThickness was never set, so it sat at sigma's default 1.7px -- while every link's
+  // natural width at the resting zoom is 0.55..1.02px. The floor caught 100% of them and
+  // inflated each two to three times; 3737 of those crossing the middle of the disc stacked
+  // into a grey fog that veiled the inner rings and filled the hub hole (github#42). The far
+  // end of the same setting is the check above: that one is strokes too thick when you zoom
+  // IN, this one at rest.
+  await camReset(p);
+  const r = await p.j(`(function(){
+    var R = __vg.renderer, v = [];
+    // The UNFLOORED width of each drawn link -- what it would draw if nothing clipped it.
+    // edgeReport deliberately reports the floored value, because that is what the canvas
+    // shows; the question here is how far the floor moved it, so it needs the other one.
+    __vg.graph.forEachEdge(function (e) {
+      var ed = R.getEdgeDisplayData(e);
+      if (!ed || ed.hidden) return;
+      v.push(R.scaleSize(ed.size));
+    });
+    v.sort(function (a, b) { return a - b; });
+    var r3 = function (x) { return Math.round(x * 1000) / 1000; };
+    return { floor: R.getSetting("minEdgeThickness"), n: v.length,
+             ratio: r3(R.getCamera().getState().ratio),
+             median: r3(v[Math.floor(v.length / 2)]), min: r3(v[0]), max: r3(v[v.length - 1]) };
+  })()`);
+  const ink = await p.j(`__vg.edgeInk()`);
+  const mult = await p.j(`__vg.edgeReport().mult`);
+
+  const inflation = r.floor / r.median;
+  return {
+    // The constant, because the actual regression risk is a sigma upgrade restoring its 1.7
+    // default -- the value was never set explicitly for the whole life of the file, so nothing
+    // would have said so. And the inflation, because that is WHY 1.0 rather than some other
+    // smaller number: it bounds the floor against what a typical link actually asks for, so a
+    // later change to edgeAttrsOf's 0.35 + 0.25w ramp cannot make the floor dominant again
+    // without tripping. 1.80x against a bound of 2 is thin on purpose.
+    //
+    // litPct > 0 guards the WebGL read: a lost drawing buffer reports zero ink, which is
+    // indistinguishable from a perfectly clean disc, and would turn this into a check that
+    // passes hardest when it is measuring nothing.
+    ok: r.floor <= 1.0 && inflation <= 2 && mult === 1 && ink.litPct > 0,
+    detail: `floor ${r.floor}px against a median natural stroke of ${r.median}px = ` +
+            `${inflation.toFixed(2)}x (needs <= 2; sigma's 1.7 default was ${(1.7 / r.median).toFixed(2)}x). ` +
+            `${r.n} links draw ${r.min}..${r.max}px unfloored at ratio ${r.ratio}. ` +
+            `Context, not asserted: the web covers ${ink.litPct}% of the stage, ` +
+            `mean alpha ${ink.meanAlphaOfLit} where lit, ink ${ink.ink}`,
   };
 });
 
@@ -1910,8 +2324,15 @@ check("the last frame of a cascade is the resting layout", async (p) => {
   };
 
   const out = [];
-  // A folder toggle. The first group with an eye, whichever the vault has.
-  const g = (await p.j(`__vg.groupOrder()`))[0];
+  // A folder toggle. The first group with an eye, whichever the vault has -- and that now has
+  // to be ASKED FOR rather than assumed of groupOrder()[0] (github#50). A group holding no
+  // notes right now keeps its row and its slot, and a row with nothing on the disc renders no
+  // eye at all (there is nothing for it to toggle), so the raw [0] can be a row whose
+  // querySelector returns null and whose .click() throws inside the sampler. On this very
+  // fixture [0] is "(vault root)", which is exactly such a row whenever membership is kept
+  // separate. Same lesson as the highlight check's own "filtered to non-empty groups before
+  // picking" above, reached by a second mechanism.
+  const g = (await p.j(`__vg.groupOrder().filter(function (x) { return __vg.groupCount(x) > 0; })`))[0];
   out.push(await run("folder toggle", `document.querySelector('[data-eye="' +
     ${JSON.stringify(g)}.replace(/"/g, String.fromCharCode(92) + '"') + '"]').click();`));
   await p.eval(`document.querySelector('[data-eye="' +
@@ -2601,6 +3022,71 @@ check("compact axis: the settings-panel toggle actually flips the live state", a
   };
 });
 
+// Same shape as the compact-axis check just above, for the second OPTION_ROWS entry
+// (github#3, reopened) -- the id-drift bug that check exists to catch is exactly as
+// possible here, since buildOptions() is the one place both rows are rendered from.
+check("colour unlinked by folder: the settings-panel toggle actually flips the live state", async (p) => {
+  const r = await p.j(`(function(){
+    var gear = document.querySelector("#vg-gear");
+    if (!gear || gear.hidden) return { noGear: true };
+    gear.click();
+    var before = document.querySelector("#vg-opt-unlinkedByFolder");
+    if (!before) return { noButton: true };
+    var beforePressed = before.getAttribute("aria-pressed"), beforeState = __vg.unlinkedByFolder;
+    before.click();
+    var after = document.querySelector("#vg-opt-unlinkedByFolder");
+    var afterPressed = after && after.getAttribute("aria-pressed"), afterState = __vg.unlinkedByFolder;
+    if (after && afterState !== beforeState) after.click();
+    gear.click();
+    return { beforePressed: beforePressed, beforeState: beforeState,
+             afterPressed: afterPressed, afterState: afterState };
+  })()`);
+  if (r.noGear) return { ok: false, detail: "no #vg-gear on this build -- standalone only" };
+  if (r.noButton) {
+    return { ok: false, detail: "gear opened but #vg-opt-unlinkedByFolder was not found -- the " +
+      "rendered row id and the $() lookup setUnlinkedByFolder uses have drifted apart" };
+  }
+  const flipped = r.afterState !== r.beforeState && r.afterPressed !== r.beforePressed;
+  return {
+    ok: flipped,
+    detail: `clicking the row: state ${r.beforeState}->${r.afterState}, aria-pressed ` +
+      `${r.beforePressed}->${r.afterPressed}`,
+  };
+});
+
+// Same shape again, for the THIRD OPTION_ROWS entry (github#3, re-read again) -- a
+// separate question from unlinkedByFolder just above: while a note is still standing in
+// the (unlinked) group, does it wear its own folder's colour. Same id-drift risk
+// buildOptions() renders all three rows from.
+check("colour unlinked notes by folder: the settings-panel toggle actually flips the live state", async (p) => {
+  const r = await p.j(`(function(){
+    var gear = document.querySelector("#vg-gear");
+    if (!gear || gear.hidden) return { noGear: true };
+    gear.click();
+    var before = document.querySelector("#vg-opt-unlinkedTintByFolder");
+    if (!before) return { noButton: true };
+    var beforePressed = before.getAttribute("aria-pressed"), beforeState = __vg.unlinkedTintByFolder;
+    before.click();
+    var after = document.querySelector("#vg-opt-unlinkedTintByFolder");
+    var afterPressed = after && after.getAttribute("aria-pressed"), afterState = __vg.unlinkedTintByFolder;
+    if (after && afterState !== beforeState) after.click();
+    gear.click();
+    return { beforePressed: beforePressed, beforeState: beforeState,
+             afterPressed: afterPressed, afterState: afterState };
+  })()`);
+  if (r.noGear) return { ok: false, detail: "no #vg-gear on this build -- standalone only" };
+  if (r.noButton) {
+    return { ok: false, detail: "gear opened but #vg-opt-unlinkedTintByFolder was not found -- the " +
+      "rendered row id and the $() lookup setUnlinkedTintByFolder uses have drifted apart" };
+  }
+  const flipped = r.afterState !== r.beforeState && r.afterPressed !== r.beforePressed;
+  return {
+    ok: flipped,
+    detail: `clicking the row: state ${r.beforeState}->${r.afterState}, aria-pressed ` +
+      `${r.beforePressed}->${r.afterPressed}`,
+  };
+});
+
 check("compact axis: the view-level icon actually flips the live state, and persists", async (p) => {
   // The settings-panel row is standalone-only (SETTINGS_UI); the plugin's gear leads to
   // Obsidian's own settings tab instead, so #vg-compact is the ONLY in-view control on
@@ -2762,6 +3248,137 @@ check("overriding one folder recolours exactly one group", async (p) => {
                        (ok ? "" : ` (${r.moved.slice(0, 6).join(", ")}${r.moved.length > 6 ? ", ..." : ""})`) };
 });
 
+// github#50: THE MEMBERSHIP TOGGLE MUST NOT RENUMBER THE ROTATION. Slots are handed out by
+// position among the groups in groupOrder(), so while that list was built only from groups
+// holding a member, anything emptying one renumbered everyone behind it and each folder
+// inherited the colour of the one in front. Every folder that holds a note now keeps its row
+// and its slot, so both toggle states agree on the list name for name and the answer here is
+// zero disturbed, not "fewer".
+//
+// THE SLOT, NOT colorOf, and that distinction is the whole reason this check is worth
+// trusting. The first cut read `__vg.colorOf(g)` either side of the flip and PASSED ON THE
+// UNFIXED CODE: github#48's `colorWalk` fades a forced recolour, and while it runs colorOf
+// answers from `colorShown`, which starts AT THE OLD VALUE for exactly the groups that
+// changed -- so for the first TWEEN_MS a renumbering reads as "nothing moved" and the check
+// asserts the defect away. That is the vacuous measurement this file keeps re-learning (see
+// the highlight check's own header). Sleeping past the walk would work and would buy a timing
+// dependency in the parallel pool for nothing: `autoSlotOf` IS the rotation position,
+// assigned in buildColors and never animated, and it is what the defect actually moves.
+// `slotOf` travels with it so an override cannot mask the automatic answer.
+//
+// Verified to fail without the fix by disabling computeOrder's seeding: 7 groups, 6 disturbed
+// -- lost (vault root), tiny; renumbered misc, notes, projects, refs.
+//
+// BOTH DIRECTIONS, and that is not redundant: the failure renumbers whatever the list happens
+// to be, so off-then-on could land back on the right slots by luck while one direction was
+// wrong. Restores whatever the shape started at.
+//
+// A SHAPE WITH NO UNLINKED NOTES CANNOT EXERCISE THIS -- with nothing to move, both states are
+// trivially identical and the check would pass vacuously, so it says it had nothing to measure
+// instead (the same discipline the (unlinked) swatch check above uses). All three fixtures do
+// have orphans, so none of them takes that path today; it is here for a vault that does not.
+check("a folder keeps its slot across the membership toggle", async (p) => {
+  const r = await p.j(`(function(){
+    // HOW MANY NOTES THE FLIP MOVES, and the skip test in one number: it is the orphan count
+    // either way round, since those are exactly the notes whose group the toggle changes.
+    // Reported with the verdict rather than left to be trusted -- a shape where it came back 0
+    // would make every comparison below vacuous.
+    var orphans = __vg.graph.nodes().filter(function (id) { return __vg.isOrphan(id); }).length;
+    if (!orphans) return { skip: true };
+    var startOn = __vg.unlinkedByFolder;
+    var snap = function () {
+      var o = __vg.groupOrder(), s = {};
+      o.forEach(function (g) { s[g] = __vg.autoSlotOf(g) + "/" + __vg.slotOf(g); });
+      return { order: o, slot: s };
+    };
+    var a = snap();
+    __vg.setUnlinkedByFolder(!startOn); var b = snap();
+    __vg.setUnlinkedByFolder(startOn);  var c = snap();
+
+    // Named per direction, because "6 disturbed" without which flip did it sends the reader
+    // to the wrong half of the change.
+    var diff = function (x, y) {
+      return {
+        lost: x.order.filter(function (g) { return y.order.indexOf(g) < 0; }),
+        moved: x.order.filter(function (g) { return y.slot[g] && y.slot[g] !== x.slot[g]; })
+      };
+    };
+    return { groups: a.order.length, notesMoved: orphans, away: diff(a, b), back: diff(a, c) };
+  })()`);
+  if (r.skip) return { ok: true, detail: "no unlinked notes on this shape, nothing to move" };
+  const names = (d) => [].concat(d.lost.map((g) => "lost " + g),
+                                 d.moved.map((g) => "renumbered " + g)).join(", ");
+  const bad = r.away.lost.length + r.away.moved.length + r.back.lost.length + r.back.moved.length;
+  return { ok: bad === 0,
+           detail: `${r.groups} groups, ${r.notesMoved} notes moved by the flip, ` +
+                   `${bad} groups disturbed` +
+                   (bad ? ` -- on the flip: ${names(r.away) || "none"}; once back: ` +
+                          `${names(r.back) || "none"}` : "") };
+});
+
+// github#34: "hidden by default" (previously settings-panel-only) is now also a legend
+// right-click toggle. Through the ACTUAL DOM path (a real `contextmenu` event, a real
+// click on the rendered button), not just the underlying `pickVisible`/`folderShown`
+// mechanism -- that mechanism already had no check of its own before this, but the thing
+// this ticket actually adds is the WIRING (the menu renders the toggle, the click reaches
+// it, the menu closes), which only a DOM-level check can miss a regression in.
+//
+// THE DEFAULT, NOT THE LIVE ROW. A folder's legend row (`.lg[aria-pressed]`) reflects
+// whether it's hidden RIGHT NOW under the current filter -- which starts equal to the
+// default but can already have drifted by the time this check runs, if an earlier check
+// in the same shard hid/showed folders live and left one toggled. Deriving the expected
+// before/after from that row would silently assert against whichever state a PRIOR check
+// happened to leave behind rather than this ticket's own default, which is exactly the
+// live-vs-default conflation the "All button" bug (this ticket's own motivation) was.
+// hiddenByDefault() itself is internal, not on __vg, so it's mirrored here from its own
+// two-line definition (src/page.js) rather than assumed.
+check("a folder's legend row toggles \"hidden by default\" from its context menu", async (p) => {
+  const r = await p.j(`(function(){
+    var g = __vg.groupOrder().filter(function (x) { return x.charAt(0) !== "("; })[0];
+    var hiddenByDefault = function (x) {
+      return typeof __vg.folderShown[x] === "boolean" ? !__vg.folderShown[x] : __vg.isArchiveGroup(x);
+    };
+    var startShown = !hiddenByDefault(g);
+    var liveHiddenBefore = !!(__vg.state.hidden.folder || {})[g];   // to restore exactly, below
+
+    var row = document.querySelector('[data-g="' + g.replace(/"/g, '\\\\"') + '"]');
+    var rect = row.getBoundingClientRect();
+    row.dispatchEvent(new MouseEvent("contextmenu", {
+      bubbles: true, clientX: rect.left + 5, clientY: rect.top + 5 }));
+    var menu = document.querySelector('[id$="ctxmenu"]');
+    var visBtn = menu && !menu.hidden ? menu.querySelector("[data-vis]") : null;
+    var openedOk = !!visBtn;
+    var pressedBefore = openedOk ? visBtn.getAttribute("aria-pressed") : null;
+    if (visBtn) visBtn.click();
+    var closedAfter = menu.hidden;
+
+    var defaultFlipped = hiddenByDefault(g) === startShown;   // was hidden -> shown, or back
+    var rowAfter = document.querySelector('[data-g="' + g.replace(/"/g, '\\\\"') + '"]');
+    var legendFollowed = rowAfter && rowAfter.getAttribute("aria-pressed") === String(!startShown);
+    var settingsEye = document.querySelector('.scr [data-vis="' + g.replace(/"/g, '\\\\"') + '"]');
+    var settingsAgrees = settingsEye ? settingsEye.getAttribute("aria-pressed") === String(!startShown) : null;
+
+    // Restore both the default AND the live filter to exactly what they were, not just
+    // the default -- leaving this check's OWN side effect for the next one to trip over
+    // would be the identical mistake it exists to catch.
+    __vg.setFolderShown(Object.assign({}, __vg.folderShown, { [g]: startShown }));
+    var h = __vg.state.hidden.folder || (__vg.state.hidden.folder = {});
+    if (liveHiddenBefore) h[g] = true; else delete h[g];
+    __vg.syncAlpha(); __vg.applyLayout(false);
+
+    return { g: g, startShown: startShown, openedOk: openedOk, pressedBefore: pressedBefore,
+             closedAfter: closedAfter, defaultFlipped: defaultFlipped,
+             legendFollowed: legendFollowed, settingsAgrees: settingsAgrees };
+  })()`);
+  const ok = r.openedOk && r.pressedBefore === String(r.startShown) && r.closedAfter &&
+             r.defaultFlipped && r.legendFollowed && r.settingsAgrees !== false;
+  return { ok, detail: `"${r.g}" started ${r.startShown ? "shown" : "hidden"} by default; ` +
+    `menu opened with the toggle ${r.openedOk ? "present" : "MISSING"} ` +
+    `(pressed=${r.pressedBefore}); after click: menu closed=${r.closedAfter}, ` +
+    `default flipped=${r.defaultFlipped}, legend followed=${r.legendFollowed}, ` +
+    `settings panel agrees=${r.settingsAgrees}` };
+});
+
 /* ------------------------------------------------------------------------ the hub */
 
 /** The n most connected notes, which is what a person reaches for first. */
@@ -2847,6 +3464,94 @@ check("the hub's dots shrink as it fills", async (p) => {
                        (ok ? " (monotonic)" : "  NOT MONOTONIC") };
 });
 
+// A row-0 inner-band note's centre sits exactly on the hub boundary by construction (see
+// HUB_ROW0_FRAC in src/page.js), so nothing but its own drawn radius decides how far it
+// visually pokes into the hub hole. Soloing a folder down to a single note that lands alone
+// in the inner band collapses that band to one row, and the ramp used to size it off the
+// band's WHOLE thickness instead of a normal row's slice -- github#35, "the notes touch the
+// brain". None of the three fixture vaults' default state hits this shape (it needs a folder
+// filtered down to one note that happens to land inner), which is how it shipped unnoticed;
+// this check manufactures it by trying every folder in turn.
+//
+// EVERY FOLDER, NOT THE FIRST HIT, and the WORST result is what gets asserted. Different
+// folders that each solo to exactly one inner note do not balloon by the same amount -- the
+// surviving note's own weight feeds the ramp along with the band pitch, and which folder
+// draws the worst one shifts with the vault's own generated content (the generators anchor
+// to today's date, so note weights are not perfectly stable run to run). Measured live on
+// the demo vault pre-fix: "14 - Reading List" solos to a healthy-looking 2.7%, while "13 -
+// Someday Maybe" -- also a single note left in the inner band, just a different one --
+// comes out at 15.4%. Stopping at the first hit would have asserted on the healthy folder
+// and missed the regression this check exists to catch.
+//
+// DETECTED THE SAME WAY THE PAGE ITSELF REPORTS IT -- debugDump().bands.inner.notes, not a
+// hand-rolled band split out here. buildWedgePlan(false) was tried first and is wrong for
+// this: `false` is its onlyVisible argument, so it returns EVERY folder's cell against the
+// FULL vault regardless of what is currently hidden, not the live post-solo split -- it
+// happened to agree with the live split for some folders and silently disagreed for others,
+// which is worse than not checking at all.
+//
+// NO CONSTANTS IMPORTED FROM THE LAYOUT, same reasoning as "the resting disc is on the
+// lattice": with exactly one inner note left, it is also the smallest-radius visible note on
+// the whole disc (the inner band is always innermost), so the hub radius is measured as
+// THAT note's own radius -- which IS the boundary, row 0 being what it is -- rather than
+// recomputed from INNER_SCALE and UNIT out here.
+check("a soloed hub-adjacent note stays inside the hub's own radius", async (p) => {
+  const r = await p.j(`(function(){
+    var order = __vg.groupOrder().slice();
+    var counts = {};
+    __vg.graph.forEachNode(function(id, a){ counts[a.folder] = (counts[a.folder] || 0) + 1; });
+    var a0 = __vg.renderer.graphToViewport({ x: 0, y: 0 });
+    var b0 = __vg.renderer.graphToViewport({ x: 160, y: 0 });
+    var perPx = 160 / Math.hypot(b0.x - a0.x, b0.y - a0.y);
+
+    var tried = [], hits = [];
+    for (var i = 0; i < order.length; i++) {
+      var g = order[i];
+      var h = {};
+      order.forEach(function (n) { h[n] = (n !== g); });
+      __vg.state.hidden.folder = h; __vg.syncAlpha(); __vg.applyLayout(false);
+      var dd = __vg.debugDump();
+      var nIn = dd.bands.inner ? dd.bands.inner.notes : 0;
+      tried.push(g + ":" + nIn);
+      if (nIn !== 1) continue;
+      var best = null;
+      __vg.graph.forEachNode(function(id, a){
+        if ((__vg.alpha[id] || 0) < 0.999) return;
+        var rr = Math.hypot(a.x, a.y);
+        if (!best || rr < best.r) best = { id: id, r: rr };
+      });
+      var d = __vg.renderer.getNodeDisplayData(best.id);
+      var dotR = __vg.renderer.scaleSize(d.size) * perPx;
+      hits.push({ g: g, notes: counts[g], hubR: best.r, dotR: dotR, frac: dotR / best.r });
+    }
+
+    __vg.state.hidden.folder = {}; __vg.syncAlpha(); __vg.applyLayout(false);
+    if (!hits.length) return { hit: false, tried: tried };
+    hits.sort(function (x, y) { return y.frac - x.frac; });
+    var w = hits[0];
+    return { hit: true, folder: w.g, notes: w.notes, hubR: Math.round(w.hubR),
+             dotR: Math.round(w.dotR * 100) / 100, frac: w.frac, nHits: hits.length };
+  })()`);
+  await settle(p);
+  if (!r.hit) {
+    // NOT ASSERTED, not failed -- same shape as "the hub stays the same share of the disc"
+    // above. The dominant-folder vault's few, large groups never happen to solo down to
+    // exactly one inner note (tried and reported below), which is a fact about that
+    // fixture's folder shape, not a defect: the other two vaults exercise this scenario.
+    return { ok: true, detail: `NOT ASSERTED: no folder on this vault solos down to a single ` +
+                                `inner-band note -- tried ${r.tried.join(", ")}` };
+  }
+  // 0.15, not HUB_ROW0_FRAC's own 0.08: this checks the OUTCOME stays sane, with headroom
+  // for the note's own weight and pixel rounding, not the exact constant -- a tuning change
+  // to HUB_ROW0_FRAC should not have to touch this file. The defect measured 0.31-0.59
+  // before the fix; a healthy row-0 dot on the demo vault at rest measures ~0.03-0.04.
+  const ok = r.frac <= 0.15;
+  return { ok, detail: `worst of ${r.nHits} folder(s) that solo to 1 note alone in the inner ` +
+                       `band: "${r.folder}" (${r.notes} notes) at radius ${r.hubR} -- dot ` +
+                       `radius ${r.dotR}, ${(r.frac * 100).toFixed(1)}% of the hub's own radius ` +
+                       `(must be <=15%)` };
+});
+
 check("the mark yields to the hub and comes back", async (p) => {
   const markOn = () => p.j(`(function(){
     var el = document.querySelector("#vg-logo");
@@ -2918,8 +3623,22 @@ check("a pin hidden by a filter is skipped, not released", async (p) => {
 // A vault with no orphans reports that instead of passing. demo-vault mirrors a real
 // vault and has 0 of 452, so on that shape there is genuinely nothing to measure -- and
 // a check that cannot tell whether it did anything is worse than no check.
+//
+// UNLINKEDBYFOLDER DEFAULTS ON (github#3, reopened again: an unlinked note now JOINS its
+// own folder's group by default, not just its colour), so this behaviour -- the original
+// fix this check guards -- is only what happens with the toggle explicitly off. Forced off
+// here and restored after, same discipline the toggle check below already uses.
 check("every unlinked note wears the (unlinked) swatch", async (p) => {
   const r = await p.j(`(function(){
+    // BOTH toggles forced off: unlinkedByFolder (membership) so notes are actually
+    // standing in this group at all, and unlinkedTintByFolder (colour, github#3 re-read
+    // again) so the flat-swatch behaviour this check guards is what's actually active
+    // rather than each unlinked note wearing its own folder's tint while still in the
+    // group. Defensive on the second even though it defaults off -- explicit beats
+    // depending on every other check to have cleaned up after itself.
+    var startOn = __vg.unlinkedByFolder, startTint = __vg.unlinkedTintByFolder;
+    if (startOn) __vg.setUnlinkedByFolder(false);
+    if (startTint) __vg.setUnlinkedTintByFolder(false);
     var g = __vg.graph, rd = __vg.renderer, sw = String(__vg.colorOf("(unlinked)")).toLowerCase();
     // THE PAGE'S OWN PREDICATE, not graph.degree: in a budgeted vault the graph carries only
     // the strongest share of the web, so degree-0 there includes thousands of linked notes
@@ -2927,13 +3646,206 @@ check("every unlinked note wears the (unlinked) swatch", async (p) => {
     // colour, which is correct behaviour failing a check that asked the wrong question.
     var ids = g.nodes().filter(function (id) { return __vg.isOrphan(id); });
     var cols = ids.map(function (id) { return String(rd.getNodeDisplayData(id).color).toLowerCase(); });
-    return { swatch: sw, orphans: ids.length,
+    var result = { swatch: sw, orphans: ids.length,
              match: cols.filter(function (c) { return c === sw; }).length,
              distinct: Object.keys(cols.reduce(function (a, c) { a[c] = 1; return a; }, {})).length };
+    if (startTint) __vg.setUnlinkedTintByFolder(true);
+    if (startOn) __vg.setUnlinkedByFolder(true);
+    return result;
   })()`);
   if (!r.orphans) return { ok: true, detail: "no unlinked notes on this shape, nothing to measure" };
   return { ok: r.match === r.orphans,
            detail: `${r.match} of ${r.orphans} on ${r.swatch}, ${r.distinct} distinct` };
+});
+
+// github#3, REOPENED TWICE: the check above guards the original bug (every unlinked note
+// forced onto one swatch). This one guards the current shape of the follow-up -- an
+// unlinked note now JOINS its own folder's GROUP (not just its colour) via
+// unlinkedByFolder, default ON, reachable from the (unlinked) row's own right-click menu
+// when it's off. Same shape as the github#34 check above: through the ACTUAL DOM path (a
+// real `contextmenu` event, a real click on the rendered button), not just the underlying
+// setUnlinkedByFolder/groupOf/nodeColor mechanism -- what only a DOM check can catch a
+// regression in is the WIRING: the menu renders the extra button on this one row only, the
+// click reaches it, the menu closes, and the notes actually repaint AND regroup.
+//
+// Forces the toggle off first (the row only renders when unlinkedByFolder is off and the
+// vault actually has unlinked notes -- on by default, its group is always empty), then
+// exercises turning it back ON through the row, which is the direction that actually moves
+// notes into a different group. Skips gracefully on a shape with no unlinked notes at all.
+check("the (unlinked) row's right-click toggle moves unlinked notes into their folder", async (p) => {
+  const r = await p.j(`(function(){
+    var g = __vg.graph, rd = __vg.renderer;
+    var ids = g.nodes().filter(function (id) { return __vg.isOrphan(id); });
+    if (!ids.length) return { skip: true };
+    var startOn = __vg.unlinkedByFolder;
+    if (startOn) __vg.setUnlinkedByFolder(false);
+
+    var row = document.querySelector('[data-g="(unlinked)"]');
+    if (!row) return { skip: true };
+    var rect = row.getBoundingClientRect();
+    row.dispatchEvent(new MouseEvent("contextmenu", {
+      bubbles: true, clientX: rect.left + 5, clientY: rect.top + 5 }));
+    var menu = document.querySelector('[id$="ctxmenu"]');
+    var byBtn = menu && !menu.hidden ? menu.querySelector("[data-byfolder]") : null;
+    var openedOk = !!byBtn;
+    var pressedBefore = openedOk ? byBtn.getAttribute("aria-pressed") : null;
+    if (byBtn) byBtn.click();
+    var closedAfter = menu.hidden;
+    var turnedOn = __vg.unlinkedByFolder === true;
+    var countAfter = __vg.groupCount("(unlinked)");
+
+    // nodeColor(), not a mirrored formula: it is the exact function under test, so this
+    // asks "did the paint agree with the function" rather than "did the paint agree with
+    // this check's own guess at what the function does."
+    var expected = ids.map(function (id) { return String(__vg.nodeColor(id)).toLowerCase(); });
+    var actual = ids.map(function (id) { return String(rd.getNodeDisplayData(id).color).toLowerCase(); });
+    var matched = actual.filter(function (c, i) { return c === expected[i]; }).length;
+
+    // Restore exactly, same discipline as the github#34 check above.
+    __vg.setUnlinkedByFolder(startOn);
+
+    return { skip: false, ids: ids.length, openedOk: openedOk, pressedBefore: pressedBefore,
+             closedAfter: closedAfter, turnedOn: turnedOn, countAfter: countAfter,
+             matched: matched };
+  })()`);
+  if (r.skip) return { ok: true, detail: "no unlinked notes on this shape, nothing to measure" };
+  const ok = r.openedOk && r.pressedBefore === "false" && r.closedAfter &&
+             r.turnedOn && r.countAfter === 0 && r.matched === r.ids;
+  return { ok, detail: `${r.ids} unlinked notes; menu opened with the toggle ` +
+    `${r.openedOk ? "present" : "MISSING"} (pressed=${r.pressedBefore}); after click: ` +
+    `menu closed=${r.closedAfter}, toggle turned on=${r.turnedOn}, (unlinked) count after=` +
+    `${r.countAfter}, ${r.matched} of ${r.ids} repainted to their folder's tint` };
+});
+
+// github#3, RE-READ AGAIN: a note colouring toggle SEPARATE from the membership one just
+// above -- a note can stay standing in the (unlinked) group (kept separate) and still take
+// its own folder's tint, "giving them a mixed color dot in the navigation" per the reopen
+// comment's own wording, which the membership toggle alone cannot do (moving a note out of
+// the group is a different thing from recolouring it in place). Through the same real DOM
+// path as the checks above: a real contextmenu event, a real click, not just the
+// underlying setUnlinkedTintByFolder/nodeColor mechanism. The tint button is only offered
+// once membership is off (nothing left in the group to recolour once everyone has joined
+// their folder), so this check forces that precondition itself rather than assuming it.
+check("the (unlinked) row's right-click tint toggle recolours notes without moving them", async (p) => {
+  const r = await p.j(`(function(){
+    var g = __vg.graph, rd = __vg.renderer;
+    var ids = g.nodes().filter(function (id) { return __vg.isOrphan(id); });
+    if (!ids.length) return { skip: true };
+    var startOn = __vg.unlinkedByFolder, startTint = __vg.unlinkedTintByFolder;
+    if (startOn) __vg.setUnlinkedByFolder(false);      // kept separate, so the button exists
+    if (startTint) __vg.setUnlinkedTintByFolder(false); // start from the flat swatch
+
+    var row = document.querySelector('[data-g="(unlinked)"]');
+    if (!row) return { skip: true };
+    var rect = row.getBoundingClientRect();
+    row.dispatchEvent(new MouseEvent("contextmenu", {
+      bubbles: true, clientX: rect.left + 5, clientY: rect.top + 5 }));
+    var menu = document.querySelector('[id$="ctxmenu"]');
+    var tintBtn = menu && !menu.hidden ? menu.querySelector("[data-tint]") : null;
+    var openedOk = !!tintBtn;
+    var pressedBefore = openedOk ? tintBtn.getAttribute("aria-pressed") : null;
+    if (tintBtn) tintBtn.click();
+    var closedAfter = menu.hidden;
+    var turnedOn = __vg.unlinkedTintByFolder === true;
+    // MEMBERSHIP MUST NOT MOVE: the whole point of this being a separate toggle is that
+    // colouring in place is not the same as joining -- the count stays exactly what it was.
+    var countAfter = __vg.groupCount("(unlinked)");
+
+    var expected = ids.map(function (id) { return String(__vg.nodeColor(id)).toLowerCase(); });
+    var actual = ids.map(function (id) { return String(rd.getNodeDisplayData(id).color).toLowerCase(); });
+    var matched = actual.filter(function (c, i) { return c === expected[i]; }).length;
+    var distinct = Object.keys(actual.reduce(function (a, c) { a[c] = 1; return a; }, {})).length;
+
+    __vg.setUnlinkedTintByFolder(startTint);
+    __vg.setUnlinkedByFolder(startOn);
+
+    return { skip: false, ids: ids.length, openedOk: openedOk, pressedBefore: pressedBefore,
+             closedAfter: closedAfter, turnedOn: turnedOn, countAfter: countAfter,
+             matched: matched, distinct: distinct };
+  })()`);
+  if (r.skip) return { ok: true, detail: "no unlinked notes on this shape, nothing to measure" };
+  const ok = r.openedOk && r.pressedBefore === "false" && r.closedAfter && r.turnedOn &&
+             r.countAfter === r.ids && r.matched === r.ids;
+  return { ok, detail: `${r.ids} unlinked notes kept separate; menu opened with the toggle ` +
+    `${r.openedOk ? "present" : "MISSING"} (pressed=${r.pressedBefore}); after click: ` +
+    `menu closed=${r.closedAfter}, toggle turned on=${r.turnedOn}, (unlinked) count still=` +
+    `${r.countAfter} (must equal ${r.ids}, not 0 -- membership must not move), ` +
+    `${r.matched} of ${r.ids} repainted to their folder's tint, ${r.distinct} distinct` };
+});
+
+// github#50: THE ROW AT ZERO MUST STILL OPEN ITS MENU, from the DEFAULT state, and this is
+// the direction the toggle check above cannot cover -- it starts from kept separate, so it
+// right-clicks the row while it still has members and an eye. The row exists at all only
+// because its menu is the one way back to the toggle from the main view ("how do you want to
+// enable it again from the main view?"), and github#50 now strips a row at zero of its eye
+// and its `only` chip. Those are separate elements from the `.lg[data-g]` button the
+// contextmenu handler closes on, so the menu is unaffected -- but "unaffected by
+// inspection" is exactly the reasoning this suite exists to replace, and the cost of being
+// wrong is a setting with no way back on the host where most people meet it.
+check("the (unlinked) row opens its menu with no notes in it", async (p) => {
+  const r = await p.j(`(function(){
+    if (!__vg.graph.nodes().some(function (id) { return __vg.isOrphan(id); })) return { skip: true };
+    var startOn = __vg.unlinkedByFolder;
+    if (!startOn) __vg.setUnlinkedByFolder(true);      // the default: the group is empty
+    var emptyNow = __vg.groupCount("(unlinked)");
+
+    var row = document.querySelector('[data-g="(unlinked)"]');
+    var rowFound = !!row;
+    // The two controls github#50 drops, and the placeholders that hold their space -- asserted
+    // here rather than trusted, since the row's alignment depends on the second one.
+    var lgr = row ? row.closest(".lgr") : null;
+    var noEye = !!lgr && !lgr.querySelector("[data-eye]") && !!lgr.querySelector(".eye.none");
+    var noOnly = !!row && !row.querySelector("[data-only]") && !!row.querySelector(".only.none");
+    var dimmed = !!lgr && lgr.classList.contains("lgr-empty");
+
+    var openedOk = false, pressedBefore = null, closedAfter = null, turnedOff = null;
+    if (row) {
+      var rect = row.getBoundingClientRect();
+      row.dispatchEvent(new MouseEvent("contextmenu", {
+        bubbles: true, clientX: rect.left + 5, clientY: rect.top + 5 }));
+      var menu = document.querySelector('[id$="ctxmenu"]');
+      var byBtn = menu && !menu.hidden ? menu.querySelector("[data-byfolder]") : null;
+      openedOk = !!byBtn;
+      if (byBtn) {
+        pressedBefore = byBtn.getAttribute("aria-pressed");
+        byBtn.click();
+        closedAfter = menu.hidden;
+        turnedOff = __vg.unlinkedByFolder === false;
+      }
+    }
+    if (__vg.unlinkedByFolder !== startOn) __vg.setUnlinkedByFolder(startOn);
+    return { empty: emptyNow, rowFound: rowFound, noEye: noEye, noOnly: noOnly, dimmed: dimmed,
+             openedOk: openedOk, pressedBefore: pressedBefore, closedAfter: closedAfter,
+             turnedOff: turnedOff };
+  })()`);
+  if (r.skip) return { ok: true, detail: "no unlinked notes on this shape, nothing to empty" };
+  const ok = r.rowFound && r.empty === 0 && r.noEye && r.noOnly && r.dimmed &&
+             r.openedOk && r.closedAfter === true && r.turnedOff === true;
+  return { ok, detail: `row ${r.rowFound ? "present" : "MISSING"} at count ${r.empty}, ` +
+    `dimmed=${r.dimmed}, eye dropped for a placeholder=${r.noEye}, only dropped for a ` +
+    `placeholder=${r.noOnly}; menu ${r.openedOk ? "opened" : "DID NOT OPEN"} ` +
+    `(pressed=${r.pressedBefore}), closed=${r.closedAfter}, membership turned back off=` +
+    `${r.turnedOff}` };
+});
+
+// github#3, RE-READ AGAIN: "giving them a mixed color dot" also asked for the row's own
+// COUNT to say it is not an ordinary folder total -- parenthesised while kept separate,
+// since it counts a population no folder's own total includes, unlike every other row's
+// count which is exactly that folder's own note total.
+check("the (unlinked) row's count is parenthesised while kept separate, plain once joined", async (p) => {
+  const r = await p.j(`(function(){
+    var startOn = __vg.unlinkedByFolder;
+    if (startOn) __vg.setUnlinkedByFolder(false);
+    var row = document.querySelector('[data-g="(unlinked)"]');
+    var ctSeparate = row ? row.closest(".lgr").querySelector(".ct").textContent : null;
+    __vg.setUnlinkedByFolder(true);
+    var row2 = document.querySelector('[data-g="(unlinked)"]');
+    var ctJoined = row2 ? row2.closest(".lgr").querySelector(".ct").textContent : null;
+    __vg.setUnlinkedByFolder(startOn);
+    return { ctSeparate: ctSeparate, ctJoined: ctJoined };
+  })()`);
+  const ok = /^\(\d+\)$/.test(r.ctSeparate || "") && /^\d+$/.test(r.ctJoined || "");
+  return { ok, detail: `kept separate: "${r.ctSeparate}" (want "(N)"), joined: "${r.ctJoined}" (want "N")` };
 });
 
 // Issue #2: Sigma paints every edge on its bottom layer and every node above that, so the

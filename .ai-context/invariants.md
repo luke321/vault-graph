@@ -191,6 +191,45 @@ __vg.densityReport()      // -> holeShare, drift under 0.06 while filtering
 which is what the density solve does — so this checks the outcome the formula was written
 for rather than the formula. Holds at 0.304–0.328 and 0.256–0.38.
 
+**Except when nothing left can reach the rim (github#14).** The density solve conserves the
+share by holding `maxR` fixed while spacing grows to meet it — that has a ceiling: hide the
+one folder deep enough to reach the locked extent and the survivors cannot stretch far enough
+no matter how much `DENSITY_MAX` allows, so `reach` genuinely falls (measured 0.602 on the
+dominant-folder fixture) and `holeShare` genuinely grows (0.273 → 0.454) along with it. `r0`
+still does not move — moving it was considered and set aside, see the entry below — the
+symptom is answered by the camera instead.
+
+## The camera reframes on a visibility toggle, but only while it wasn't already touched
+
+`fitRatio()`/`fit()` already computed the right ratio for whatever `reach` currently is; they
+just never ran automatically when a folder was hidden or shown, so the geometry above could be
+internally consistent while the camera stayed framed for a vault that no longer exists on
+screen — an island of notes in otherwise empty stage on the dominant-folder fixture (`hole`
+0.273 → 0.454, camera never moving).
+
+```javascript
+__vg.camAtRest        // true once the camera is known to sit at fit()'s own target
+```
+
+`camAtRest` is `false` from the instant anything other than `fit()` itself moves the camera —
+a drag, a wheel notch, `zoomBy()`, `centerOn()` — and only `fit()`'s own completion sets it
+back to `true`. A visibility toggle (`cascade()`'s `opts.colToggle`) only auto-fires `fit()`
+while it reads `true`; a camera the user has already panned or zoomed is left exactly where
+they put it.
+
+**Direction decides the timing, not only whether to fit.** A shrink (the disc getting
+smaller) defers to `settle()` — cascade's own completion, once the outgoing notes have
+actually finished fading — because zooming in on notes still visibly leaving reads as wrong.
+A growth fires immediately, alongside the incoming notes' fade-in, because the view expanding
+to meet what's arriving reads as right. Measured across a 738-note toggle on the
+dominant-folder fixture: hiding held the camera at ratio 1.0800 for the entire ~1.8s fade,
+landing at 0.6497 (0.6502 promised) only once settled; showing began moving within 25ms of the
+click and finished by ~450ms, well inside the same ~1.8s fade.
+
+`geomLock`, `r0`, `HOLE`, band thickness and the cascade's own row/spacing interpolation are
+untouched by this — the fix is entirely in what decides to call `fit()` and when, never in
+what `fit()` computes.
+
 ## The rings are independent
 
 Toggling an inner-band group must not move the outer band. Measured, an `05` toggle
@@ -795,6 +834,105 @@ synthetic vault (node 1192, degree 54, 152 in-disc samples) **36 before, 0 after
 dominant-folder vault (node 157, degree 103, 1259 in-disc samples) **530 before, 0
 after**. See `design/0005`.
 
+## A link's stroke holds its width at any zoom
+
+Sigma's edge shader draws `max(minEdgeThickness, size / sizeRatio)`, and `sizeRatio` **is**
+the camera ratio here because `zoomToSizeRatioFunction` is identity — so a stroke grew as
+`1/ratio`, exactly like a dot. That law is right for a dot, which is a thing and should hold
+its proportion to the room it has, and wrong for a connector, whose thickness is meant to
+carry link weight rather than zoom (github#39).
+
+```javascript
+__vg.edgeReport(id)       // -> maxPx <= capPx, and identical at any ratio below the knee
+```
+
+Reported through `edgePx`, the same function the focus-web overlay strokes with, so the
+number and the canvas cannot drift apart. `ribbonPx` is the sum of one note's stroke widths
+— the figure that says the fan has become a mass, where any single width still looks
+reasonable beside the dot.
+
+**Assert the equality, not just the cap.** The fix scales the whole web by one multiplier
+(`edgeMult = min(1, EDGE_MAX_PX * ratio / EDGE_SIZE_MAX)`) rather than clamping each edge
+against the cap, which makes the drawn width *constant* below the knee at
+`EDGE_SIZE_MAX / EDGE_MAX_PX = 0.4`. A per-edge `min()` would still satisfy a cap-only check
+while flattening every link onto the same number — all 55 at 4.00px on the 10k hub, a 220px
+fan, weight ordering gone. That is the regression the equality catches.
+
+**And read it with a search running.** `edgeReducer`'s query branch **returns early**. The
+first version of the fix applied the cap once before the final return, so every link went
+back to growing as `1/ratio` for as long as anything was in the search box — with the suite
+green. A cap applied at one exit of a function with three is not a cap; `capEdge` goes at
+every drawing exit, and the check fails at **7.87px** without it.
+
+Measured on the 10k fixture, one hub of degree 55 — drawn stroke, and the total ink of its
+fan:
+
+| | camera ratio | before | after |
+|---|---|---|---|
+| rest | 1.08 | 1.70px / fan 93.50px | 1.70px / fan 93.50px — **unchanged**, above the knee |
+| 5x | 0.216 | 3.94px / fan 153.94px | 2.12px / fan 93.93px |
+| 10x | 0.108 | 7.87px / fan 307.87px | 2.12px / fan 93.93px — **identical to 5x** |
+
+307.87px of ink converging on a 20.44px dot is why the fan read as one mass with no link
+traceable through it. The other two shapes cap the same way: the dominant-folder vault (node
+158, degree 103) 3.38px / 184.6px, the demo vault (node 452, degree 71) 2.75px / 130.63px.
+
+**What it costs, measured rather than assumed.** The camera hook re-runs the reducers, which
+on the 10k shape is 14.5ms against 3.3ms for a render alone — so a zoom notch below the knee
+runs at about 50fps for its 120ms. Above the knee it costs *nothing*: `edgeMult` pins at 1
+and no refresh fires. A pan never fires it at any zoom, because a pan does not change the
+ratio. See `design/0005`.
+
+**Note the resting numbers above predate github#42**, which lowered `minEdgeThickness` from
+1.7 to 1.0 — so this check's own detail line now reads 1.0px at rest and a 55.0px fan, not
+1.70/93.50. Its assertions read `maxPx` and the 5x/10x equality, neither of which the floor
+touches, so it stayed green through that change.
+
+## The floor may round a hairline up, not widen the whole web
+
+`minEdgeThickness` was never set, so it sat at sigma's default **1.7px** — while at rest every
+link's natural width is **0.55–1.02px**. The floor caught 100% of them and inflated each two
+to three times, and 3737 of those crossing the middle of the disc stacked into a grey fog that
+veiled the inner rings and filled the hub hole (github#42). The same setting family as the
+check above, from the other end: that one is strokes too thick when you zoom **in**, this one
+at rest.
+
+```javascript
+__vg.edgeInk()      // -> the web's own coverage, with no note or label mixed in
+```
+
+**Two assertions, and they do different jobs:**
+
+- `minEdgeThickness <= 1.0`. Blunt on purpose — the real regression risk is a sigma upgrade
+  restoring its default, and since the value was never set explicitly for the whole life of
+  the file, nothing would have said so.
+- **The floor is at most 2x the median natural resting width.** This is *why* 1.0 rather than
+  some other smaller number, and it is what a later change to `edgeAttrsOf`'s `0.35 + 0.25w`
+  ramp would trip — make links thinner without revisiting the floor and the floor becomes
+  dominant again. Measured **1.80x** (1.79 on the demo shape) against sigma's default's
+  **3.06x**. The headroom is thin deliberately.
+
+**`edgeInk()` is context, not asserted** — a bigger web covers more of the stage, so the
+number belongs to its vault. Measured on the 10k fixture:
+
+| floor | one degree-55 hub's fan | web covers | mean alpha where lit | ink |
+|---|---|---|---|---|
+| 1.7px | 93.5px | 30.49% | 0.76 | 0.231 |
+| **1.0px** | **55.0px** | 25.76% | **0.44** | **0.114** |
+
+The coverage barely moved and the **alpha halved**. That is what the fog was, and it is why
+the stroke widths alone did not describe the defect.
+
+**`litPct > 0` is asserted, and it is not a formality.** `edgeInk` reads a WebGL canvas, which
+is only valid straight after a draw; a lost drawing buffer reports zero ink, which is
+indistinguishable from a perfectly clean disc. Without that guard this check would pass
+hardest exactly when it measured nothing.
+
+**Not a fixture:** the 450-note shape that sets 1.0's *lower* bound (at 0.5 a sparse web all
+but vanishes) is generated by hand, not committed —
+`node scripts/make-test-vault.mjs --notes 450 --years 4 --out <dir> --seed 7`. Re-check it by
+looking if the floor is ever retuned. See `design/0005`.
+
 ## A synthetic vault's folder/subfolder note counts do not depend on which day it was built
 
 `make-demo-vault.mjs` and `make-shape-vault.mjs` both default their `--end` date to today
@@ -927,3 +1065,189 @@ branch `fix/small-folder-animation`. That branch is unrelated (a stale, ~30-comm
 wedge-seam-overlay experiment ending in two reverts) and no such fix existed anywhere on
 `develop` before this entry — folder toggles carried the identical defect, just smaller,
 until now.
+
+## A vault's layout matches its golden snapshot
+
+github#37. Every check above asserts a *property* of the layout (rows balanced, no stray
+small folders, dot sized right) — none of them would catch a layout that is internally
+consistent and simply *different* from what it used to be. While working github#35, the
+same folder split differently across rebuilds of the same mirror vault with no intentional
+change; the cause turned out to be an in-progress, since-reverted fix rather than the
+fixtures, but nothing in this suite would have caught either explanation.
+
+`scripts/smoke.mjs`'s `"layout matches its golden snapshot"` check compares the current
+build's band assignment (`buildWedgePlan(false)`'s `c.inner`, per folder) and every note's
+`(x, y)` against a checked-in reference in `scripts/layout-snapshots/<fixture>.json`, for
+each of the three named fixtures. A flipped band fails by name; a moved note fails with its
+id and the delta in both radius and angle; an added/removed note id is reported separately
+from a position drift, since it means the *fixture* changed, not the layout logic.
+
+**Snapshots are deliberate, never automatic.** `scripts/update-layout-snapshots.mjs` writes
+them by hand, on request — never from the check, never from the pre-push hook. When a
+layout change is intentional: run that script, review the diff, commit the new snapshot in
+the same change as the code that moved the layout.
+
+**Why a snapshot taken today stays valid indefinitely.** The three fixture generators
+default `--end` to today (so the heatmap's 52-week window stays exercised), which means the
+fixture store's weekly refresh (`FIXTURE_MAX_AGE_DAYS`, `smoke.mjs`) regenerates each vault
+with a different `--end` periodically. Measured before trusting this at all: built the demo
+and shape vaults twice each, 3.5 years apart in `--end`, and compared band assignment plus
+every note's exact `(x, y)` — identical to the full float64, both vaults, both dates. Layout
+depends on the seeded structure and each note's link weight, neither of which `--end`
+touches.
+
+**Reading raw positions off `demo.busy() === false` is NOT enough, on its own.** This is the
+same defect as the section just above (github#21), for POSITION rather than SIZE: a
+still-running cascade's next animation frame can land after a bare `applyLayout(false)` —
+even called twice — and silently overwrite it. Measured taking the snapshot two different
+ways: with `applyLayout(false)` (once, then twice), two consecutive measurements of the
+IDENTICAL build disagreed by several graph units on 90%+ of the demo and 10k vaults' notes
+(the shape vault, smaller and simpler, happened not to show it either way). With
+`__vg.relayout()` — the debug API's, which cancels any in-flight cascade frame and clears
+`roomNow`/`cellNow`/`edgeNow`/`bandLock`/`geomLock` before rebuilding, exactly as this
+section's own code block above already recommends — repeated measurements of the identical
+build are byte-for-byte identical, on all three vaults, across multiple runs.
+
+```
+node scripts/update-layout-snapshots.mjs                      # regenerate, on purpose
+node scripts/smoke.mjs --only "matches its golden snapshot"   # check, all three vaults
+```
+
+Verified the check actually catches something: temporarily changed `INNER_SCALE` from 0.8
+to 0.75 (one folder's real band-assignment threshold), reran the check without regenerating
+the snapshot. It failed on all three vaults, naming the exact folder that flipped band on
+the demo vault (`04 - Daily Notes: outer -> inner`) and reporting every moved note's id and
+delta on the other two. Reverted immediately after.
+
+## A row-0 dot may not eat past a fixed share of the hub's own radius
+
+github#35, the dot-sizing half (the hub-boundary-*position* half shipped separately in
+1.8.0). `placeCell` puts row 0 of the inner band at `r0 * INNER_SCALE` — the same circle
+the hub boundary is drawn at — for every inner band, always. A row-0 note's centre sits
+ON that boundary by construction, so nothing but the note's own drawn radius decides how
+far it visually pokes into the hub; normally invisible, since a healthy dot is a small
+fraction of `r0`.
+
+Soloing a folder down to a single note that lands alone in the inner band collapses that
+band to one row, so `spInner = thickI / rows` becomes the band's WHOLE radial thickness
+instead of a normal row's slice, and `rampFor` sizes the dot off that pitch. Measured live
+on the reported repro (`01 - Projects`, 5 notes, real vault mirrored via
+`make-mirror-vault.mjs`): `room.i` 586, `pitchInnerUnits` 573, so the room/pitch shrink
+factor `f` in `dotPx` came out to 1.02 — barely above 1, and NOT the cause, despite being
+the first guess. The ramp itself balloons, from `spInner` alone.
+
+A band-wide cap on `room` (the same `sqrt(full/now)` density ratio `bandDensity()` already
+uses for row spacing) was tried and reverted the same day: it fixed the reported case but
+broke `"filtered to the bone, the disc stays drawable"` on two other fixture vaults —
+ordinary aggressive date filtering also produces sparse bands, nothing to do with the hub,
+and a band-wide cap on `room` cannot distinguish the two. Bisected: dominant-folder vault
+`range last 2.5%` diameter/step 0.07 against a 0.15 floor with the cap, 0.33 without;
+10k vault `range last 0.5%` 0.12 with the cap, comfortably passing without.
+
+**Fixed** with `HUB_ROW0_FRAC`, a per-note cap scoped to row 0 of the inner band only,
+following the `edgeCap` pattern (a hard geometric bound computed once during placement,
+consumed alongside `edgeCap`'s own cap at the end of `dotPx`) rather than touching
+`room`/`sp`/the ramp — it cannot affect any other row or band, so it cannot repeat the
+regression above. `HUB_ROW0_FRAC = 0.08`: measured a healthy row-0 dot's own radius as a
+fraction of `r0 * INNER_SCALE * UNIT` on the demo vault at rest, 4.2% (36 of 851 units) —
+doubled for margin.
+
+```
+node scripts/smoke.mjs --only "filtered to the bone"     # must stay green -- what broke last time
+node scripts/smoke.mjs --only "soloed hub-adjacent"       # the new check for this fix
+```
+
+The second check tries every folder on a vault in turn, soloing each and reading
+`__vg.debugDump().bands.inner.notes === 1` — the app's own live band count, not a
+hand-rolled reconstruction (a `buildWedgePlan(false)` reconstruction was tried first and
+is wrong here: `false` is `onlyVisible`, so it returns every folder's cell against the
+FULL vault regardless of what is hidden). It asserts the WORST folder's fraction, not the
+first hit, since which folder balloons worst shifts with the vault's own generated content
+— none of the three fixtures' resting state hits this shape at all, which is how it
+shipped unnoticed the first time.
+
+## A folder that holds notes keeps its row, its slot and its colour
+
+The twelve automatic colour slots are handed out by POSITION in `order[state.dim]`
+(`buildColors`), so while that list was built only from groups currently holding a member,
+anything that emptied a group renumbered every group behind it — each one inheriting the
+colour of the one in front. `computeOrder` now seeds the list from where notes are **filed**
+(each node's own `folder`), so every folder that holds a note keeps its row and its slot
+whether or not its notes are standing in it, and the two membership states agree on the list
+name for name.
+
+```javascript
+(function () {
+  var snap = function () {
+    var o = __vg.groupOrder(), c = {};
+    o.forEach(function (g) { c[g] = String(__vg.colorOf(g)); });
+    return { order: o, colour: c };
+  };
+  var a = snap();
+  __vg.setUnlinkedByFolder(!__vg.unlinkedByFolder);
+  var b = snap();
+  return a.order.filter(function (g) {
+    return b.order.indexOf(g) < 0 || b.colour[g] !== a.colour[g];
+  });
+})()
+```
+
+Must be **empty**, in both directions. Measured on the dominant-folder fixture before the
+fix: turning membership off left **5 of 7 rows** (`gcount` `(7)` → `(5)`), `(vault root)` and
+`tiny` — the two folders made entirely of unlinked notes — vanishing, and **4 of the
+remaining 7 recoloured**, `misc #d95926 → #3987e5`, `notes #199e70 → #d95926`,
+`projects #c98500 → #199e70`, `refs #008300 → #c98500`. After: **7 rows in both states, 0
+recoloured, 0 vanished**, and the same on the demo (18 groups) and 10k (18 groups) fixtures.
+
+**Read it at rest.** github#48's `colorWalk` fades a forced recolour over `TWEEN_MS`, so a
+read taken straight after the toggle returns blends of the two values — measured, `misc` read
+`#3f85dd` at 400ms against its resting `#3987e5`, which makes a renumbering look like a
+near-miss rather than a change.
+
+**A vault with no unlinked notes cannot exercise this**: with nothing to move, both states are
+trivially identical and the check passes vacuously, so it reports that it had nothing to
+measure instead.
+
+### A row at zero costs no arc and no alignment
+
+Two things this could have broken and did not, both of which have their own history here:
+
+- **No cell, so no row and no hub radius.** `buildWedgePlan` filters to `cellsOf[g]`, and a
+  group with no members seats no cell — so a memberless entry cannot repeat the seated
+  zero-weight cell that asked for one row and moved the band balancer's split
+  (see *A zero-weight member costs nothing*, above, found on this same fixture). Confirmed by
+  the golden snapshots: **band unchanged, positions unchanged** on all three fixtures.
+- **The count stays on the shared right edge.** A row at zero drops its eye and its `only`
+  chip, and dropping the chip *outright* moved the count out of `.lg`'s last grid track,
+  leaving it one 8px gap short — `nav counts share one right edge` measured **2 edges** where
+  it demands 1. Both controls leave an invisible placeholder behind (`.eye.none`,
+  `.only.none`, the treatment `.tw.none` already used), which is what holds the column. That
+  invariant's own note says the alignment comes from `.ct`'s `min-width` rather than from the
+  grid; that is half of it — the min-width fixes the count's *width*, being in the last track
+  fixes its right *edge*.
+
+### And it must not cost the row its way back
+
+A row at zero drops its eye and its `only` chip, and `(unlinked)` at zero — the DEFAULT state —
+is exactly such a row. That row exists at all because its right-click menu is the one way back
+to its own membership toggle without a trip through settings, so stripping controls off it is
+the one change here that could strand a setting. The handler closes on `.lg[data-g]`, which is
+neither control, so it is unaffected — and that is reasoning, which is what this file exists to
+replace, so it is asserted instead.
+
+```
+node scripts/smoke.mjs --only "membership toggle"          # slots survive the flip, both ways
+node scripts/smoke.mjs --only "opens its menu with no notes"  # the row at zero keeps its menu
+node scripts/smoke.mjs --only "right edge"                 # 1 edge, not 2
+node scripts/smoke.mjs --only "golden"                     # band and positions unchanged
+node scripts/smoke.mjs --only "zero-weight"                # no seated cell for a memberless group
+```
+
+**The first check reads `autoSlotOf`, not `colorOf`, and that is load-bearing.** Its first cut
+compared `colorOf` either side of the flip and passed on the unfixed code: `colorWalk` answers
+from `colorShown`, which begins AT THE OLD VALUE for precisely the groups that changed, so for
+the first `TWEEN_MS` a renumbering reads as "nothing moved". The check would have asserted the
+defect away. `autoSlotOf` is the rotation position itself — assigned in `buildColors`, never
+animated — and it is what the defect actually moves. Verified by disabling the seeding and
+re-running: **7 groups, 6 disturbed — lost `(vault root)`, `tiny`; renumbered `misc`, `notes`,
+`projects`, `refs`.**

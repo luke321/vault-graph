@@ -11,8 +11,10 @@
 //
 // --act NAME plays `__vg.demo.act(NAME)` instead of the full storyboard -- one of the
 // `act:` tags demoMode()'s own beats carry (intro, note, pin, compactaxis, timeline,
-// heatmap, folders, subfolders, subfoldercolor, camera, colours). Same driver, same
-// verbs; only which beats it gets differs.
+// heatmap, folders, hiddenbydefault, subfolders, subfoldercolor, camera, colours,
+// unlinked). Same driver, same verbs; only which beats it gets differs. Two of those --
+// subfoldercolor and hiddenbydefault -- exist ONLY for their own clip and are filtered
+// out of the full storyboard; see FULL_RUN_EXCLUDES in src/page.js.
 //
 // WHY CDP AND NOT el.click(): a dispatched click skips hit-testing, so an in-page demo
 // keeps passing after the button it aims at has become covered, scrolled away or 0x0.
@@ -52,7 +54,8 @@ const SLOW = Number(arg("slow", 1));
 const MATCH = arg("match", "");
 const ACT = arg("act", "");
 
-const MOVE_MS = 620 * SLOW;    // how long a glide across the page takes
+const MOVE_MS = 413 * SLOW;    // how long a glide across the page takes -- 620 read as
+                                // sluggish on camera; 50% faster (620 / 1.5)
 const DWELL_MS = 420 * SLOW;   // pause on a control before clicking, for the viewer
 const STEP_MS = 16;            // ~60fps of pointer positions
 const SETTLE_QUIET_MS = 250;   // busy must stay false this long before we believe it

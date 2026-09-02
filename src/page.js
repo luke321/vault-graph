@@ -262,6 +262,30 @@ function mountVaultGraph(root, data, deps) {
   var compactAxis = deps.compactAxis === false ? false : true;
   var onCompactAxis = typeof deps.onCompactAxis === "function" ? deps.onCompactAxis : null;
 
+  // AN UNLINKED NOTE JOINS ITS OWN FOLDER, ON UNLESS THE HOST SAYS OTHERWISE (github#3,
+  // reopened) -- ON by explicit request, unlike a setting that only ever repaints
+  // (compactAxis/panEnabled): a note with no links is still filed somewhere, and by
+  // default it now reads, sorts and sizes as part of that folder rather than as a member
+  // of a separate (unlinked) population. OFF is the escape hatch for anyone who wants that
+  // population kept visible and separate, same as the original fix shipped it -- see
+  // groupOf() below for what this actually changes, and the flat grey (unlinked) swatch
+  // (buildColors()) for what a note looks like while it's off.
+  var unlinkedByFolder = deps.unlinkedByFolder === false ? false : true;
+  var onUnlinkedByFolder = typeof deps.onUnlinkedByFolder === "function" ? deps.onUnlinkedByFolder : null;
+
+  // A SEPARATE QUESTION FROM THE ONE ABOVE (github#3, re-read again): unlinkedByFolder is
+  // membership -- does an unlinked note stand in the (unlinked) group at all, or in its own
+  // folder's. This is COLOUR ONLY, and only means anything while unlinkedByFolder is OFF
+  // (kept separate): a note still standing in the (unlinked) group can either wear the flat
+  // swatch every note in that group has always worn, or its own folder's tint while staying
+  // put -- the exact ask from the reopen comment ("giving them a mixed color dot in the
+  // navigation"), which the bigger membership toggle above does not cover on its own once
+  // someone wants unlinked notes visible as their own population AND individually coloured.
+  // OFF by default -- this is the smaller, opt-in half of the original ask, not the
+  // shipped-behaviour-changing half unlinkedByFolder's own default is.
+  var unlinkedTintByFolder = deps.unlinkedTintByFolder === true ? true : false;
+  var onUnlinkedTintByFolder = typeof deps.onUnlinkedTintByFolder === "function" ? deps.onUnlinkedTintByFolder : null;
+
   // ARCHIVE FOLDERS: the ones whose name starts with `_`.
   //
   // A leading underscore is how a vault says "sorts last, not part of the working set" --
@@ -294,6 +318,15 @@ function mountVaultGraph(root, data, deps) {
     return '<svg viewBox="0 0 16 16" aria-hidden="true">' + lid +
       (on ? '<circle cx="8" cy="8" r="2" fill="currentColor"/>'
           : '<path d="M3 13L13 3" stroke="currentColor" stroke-width="1.25"/>') +
+      '</svg>';
+  }
+
+  // A filled vs. outlined dot -- not the eye, because this is not a visibility question.
+  // Used only by the (unlinked) row's own context-menu toggle (github#3, reopened).
+  function dotSvg(on) {
+    return '<svg viewBox="0 0 16 16" aria-hidden="true">' +
+      (on ? '<circle cx="8" cy="8" r="5" fill="currentColor"/>'
+          : '<circle cx="8" cy="8" r="5" fill="none" stroke="currentColor" stroke-width="1.25"/>') +
       '</svg>';
   }
 
@@ -463,7 +496,11 @@ function mountVaultGraph(root, data, deps) {
    *  edges are materialised. */
   var adj = Object.create(null);
   var EDGE_TOTAL = 0;
-  var edgeAttrsOf = function (w) { return { weight: w, size: Math.min(1.6, 0.35 + w * 0.25) }; };
+  /** The heaviest a link may draw. Named rather than inline because the pixel clamp divides
+   *  by it (see measureEdgeMult) -- a ceiling that drifted from the clamp's own denominator
+   *  would move every stroke's width with nothing saying so. */
+  var EDGE_SIZE_MAX = 1.6;
+  var edgeAttrsOf = function (w) { return { weight: w, size: Math.min(EDGE_SIZE_MAX, 0.35 + w * 0.25) }; };
   var EDGE_SHOWN = 0;
   var lazyEdges = false;   // true when the resting web is partial; probes read this
   (function () {
@@ -558,22 +595,44 @@ function mountVaultGraph(root, data, deps) {
  
   /* -------------------------------------------------------------- grouping */
 
-  // Unlinked notes are their OWN GROUP, not their folder's. They used to be
-  // sunflower-packed into the hub hole, which put them nowhere the rest of the language
-  // applies: no wedge, no legend row, no way to filter or count them, and their folder
-  // silently under-reported its size. As a group they get all of that, and they land in
-  // whichever band their size earns like anything else.
+  // Unlinked notes are their OWN GROUP, not their folder's, WHEN unlinkedByFolder IS OFF.
+  // They used to be sunflower-packed into the hub hole unconditionally, which put them
+  // nowhere the rest of the language applies: no wedge, no legend row, no way to filter or
+  // count them, and their folder silently under-reported its size. As a group they get all
+  // of that, and they land in whichever band their size earns like anything else.
+  //
+  // github#3, REOPENED: unlinkedByFolder (default ON) puts that group's membership behind
+  // a toggle instead of making it the only option -- on, a note with no links joins its
+  // real folder's group instead, the same way every OTHER note already does, so it gets
+  // that folder's wedge, band, colour, count, filter and highlight, not a copy of them.
+  // EVERY OTHER CALLER OF groupOf ASKS NO FURTHER QUESTION, which is what makes this the
+  // one place to change: nothing downstream hardcodes UNLINKED, so nothing downstream needs
+  // to know this toggle exists.
   //
   // Named in parentheses so it sorts with "(vault root)" ahead of the numbered folders,
   // and so it cannot collide with a real folder name.
   var UNLINKED = "(unlinked)";
+
+  // A NOTE IN MID-MOVE STILL BELONGS WHERE IT IS LEAVING, until it has crossed. This is what
+  // makes a membership change animatable at all: the cascade rebuilds its plan from groupOf
+  // on every frame, so a note whose group flips the instant the setting does is in its new
+  // wedge from frame one and there is nothing left to animate. Holding the OLD answer here,
+  // per note, and releasing it at that note's own fade trough, turns one setting change into
+  // a population of individual moves that can be staggered.
+  //
+  // Keyed by note and cleared as each one crosses, not a single global flag: the whole point
+  // is that at any instant some notes have crossed and others have not, which is what makes
+  // the leaving and the arriving read as one flowing movement rather than two phases.
+  var moveFrom = null;
+
   function groupOf(id) {
+    if (moveFrom) { var mf = moveFrom[id]; if (mf !== undefined) return mf; }
     // From the ADJACENCY, not graph.degree(): in a budgeted vault the graph holds only the
     // resting share of the web, so a note whose links were all trimmed would read as unlinked
     // -- measured with the graph fully empty, all 10k notes classified as (unlinked), the
     // legend collapsed to one eye and the disc laid out as a single wedge. adj always holds
     // every link, so the answer is the same in every mode.
-    if (!adj[id]) return UNLINKED;
+    if (!adj[id]) return unlinkedByFolder ? graph.getNodeAttribute(id, "folder") : UNLINKED;
     return graph.getNodeAttribute(id, "folder");
   }
 
@@ -596,26 +655,66 @@ function mountVaultGraph(root, data, deps) {
 
   function computeOrder() {
     var count = {};
-    graph.forEachNode(function (id) {
+    var filed = Object.create(null);
+    graph.forEachNode(function (id, a) {
       var g = groupOf(id);
       count[g] = (count[g] || 0) + 1;
+      // WHERE THE NOTE IS FILED, alongside where it is STANDING. Same walk, because the two
+      // answers differ for exactly one reason -- a group other than the note's own folder
+      // claimed it -- and a second pass over 10,000 nodes to learn that costs a walk to say
+      // something the first one already knew. Folder dimension only, guarded the way
+      // buildColors' own `byFolder` is: any other grouping would be tallying folder names
+      // against something that is not folders.
+      if (state.dim === "folder") filed[a.folder] = (filed[a.folder] || 0) + 1;
     });
+    folderCount = filed;
+    // EVERY FOLDER THAT HOLDS A NOTE KEEPS ITS ROW AND ITS SLOT (github#50), whether or not
+    // its notes are currently standing in it. Slots are handed out by POSITION in this list
+    // (see buildColors), so a list built only from groups that happen to hold a member makes
+    // every folder's colour depend on how many groups are populated ahead of it -- and then
+    // anything that empties a group renumbers everyone behind it. Measured on the shape
+    // fixture: turning the membership toggle off vanished 2 of 7 rows and recoloured 4 more,
+    // each inheriting the colour of the one in front, on a change to nothing but membership.
+    //
+    // Seeding from `filed` rather than holding a place in a queue for an absent group is what
+    // makes the question github#48 left open -- what "the vault's folder set" means under a
+    // filter -- stop existing: a note's FOLDER does not change when its GROUP does, and no
+    // filter moves it either, so this list is the same list in every state the page can be in.
+    // The two toggle states now agree on it name for name, which is why flipping membership
+    // recolours nothing at all rather than merely renumbering less often.
+    Object.keys(filed).forEach(function (f) {
+      if (count[f] === undefined) count[f] = 0;
+    });
+    // UNLINKED ALWAYS GETS A ROW, EVEN AT ZERO -- every other group's row is earned by
+    // having a member, but this one is also the ONLY control for its own toggle that
+    // lives in the legend rather than the settings panel. With unlinkedByFolder on (the
+    // default) every unlinked note has joined its folder, so this count is legitimately
+    // 0 -- and if the row followed the ordinary "no row for an empty group" rule, right-
+    // clicking it to turn the toggle back off would be reachable only from settings,
+    // never from the main view (flagged directly: "how do you want to enable it again
+    // from the main view?"). Forcing the key in here, unconditionally, is enough --
+    // count[UNLINKED] || 0 reads correctly either way, and buildLegend already renders
+    // whatever counts[g] says without assuming it is nonzero.
+    if (count[UNLINKED] === undefined) count[UNLINKED] = 0;
     // Name order, not size order. For PARA folders that is their numbered order
     // (01, 02, 03, ...), so wedges run round the disc in the same sequence as the
     // vault's own folder list and a group keeps its colour as the vault grows.
     // Note: subfolder order stays size-based -- the "N smaller subfolders" fold
     // depends on knowing which are smallest.
     var names = Object.keys(count).sort(function (a, b) {
-      // THREE RANKS, and the reason is that neither `_` nor `(` is a real folder name
-      // competing with the others. Archives first, then the pseudo-folders --
-      // "(vault root)" for notes sitting loose at the top and "(unlinked)" for notes
-      // nothing points at -- then everything the vault actually filed. So the entries
-      // that are not part of the working set stay together at the head of the list
-      // instead of one of them landing above the archives and one below.
-      //
-      // This does not move any colour: archives take the grey slot without consuming
-      // one, so the first pseudo-folder is still the first group in the rotation.
+      // ARCHIVES, THEN "(vault root)", THEN EVERY REAL FOLDER, THEN "(unlinked)" LAST OF
+      // ALL -- restored to the pre-ticket order for the first three (github#3, re-read
+      // again: moving "(vault root)" behind the real folders shifted the automatic
+      // twelve-slot colour of every real folder in every vault on upgrade, which is a much
+      // bigger blast radius than a legend reorder should have -- colour identity is not
+      // something to disturb for every existing user just to tidy up two pseudo-group
+      // rows). UNLINKED alone still sorts last, unconditionally, matching where a loose
+      // note sits in Obsidian's own file explorer -- and it is free to, because (see
+      // buildColors below) it does not consume a rotation slot any more than an archive
+      // does, so its position here cannot move anyone else's colour the way vault root's
+      // did.
       var rank = function (s) {
+        if (s === UNLINKED) return 3;
         var c = s.charAt(0);
         return c === "_" ? 0 : c === "(" ? 1 : 2;
       };
@@ -626,6 +725,12 @@ function mountVaultGraph(root, data, deps) {
   }
 
   var counts = {};
+  // folder -> how many notes are FILED there, whatever group each one is standing in. Beside
+  // counts because it is the other half of the same tally: counts says what a wedge draws,
+  // this says what the folder holds, and the legend shows both whenever they disagree
+  // (github#50). Only meaningful in the folder dimension -- computeOrder leaves it empty
+  // otherwise, and an empty map reads as "holds nothing extra" everywhere it is consulted.
+  var folderCount = Object.create(null);
   function buildColors() {
     groupColor = Object.create(null);
 
@@ -677,15 +782,21 @@ function mountVaultGraph(root, data, deps) {
       var k = byFolder[g];
       var picked = (k && THEME.byKey[k]) ? k : "";
 
-      // ARCHIVES NEVER CONSUME A SLOT, with or without a pick of their own. That is the
-      // whole of "out of the rotation": `auto` does not advance here, so which hue a
-      // working folder gets cannot depend on how many archives sort before it.
-      if (isArchiveGroup(g)) {
+      // ARCHIVES NEVER CONSUME A SLOT, with or without a pick of their own -- and neither
+      // does UNLINKED (github#3, reopened, at the user's explicit request: "don't use the
+      // normal colour table for unlinked, make it gray like the default off ones"). Both
+      // are recessive by default for the same reason: neither is a folder somebody
+      // organised, so neither should compete for one of the twelve identity hues. That is
+      // the whole of "out of the rotation": `auto` does not advance here, so which hue a
+      // working folder gets cannot depend on how many archives (or whether the vault has
+      // any unlinked notes) sort before it. A pick still wins for either, same as any
+      // folder -- this only changes the AUTOMATIC answer.
+      if (isArchiveGroup(g) || g === UNLINKED) {
         var akey = picked || ARCHIVE_SLOT;
         groupColor[g] = THEME.byKey[akey];
         groupSlot[g] = akey;
-        // An archive's automatic slot is ARCHIVE_SLOT unconditionally -- an override
-        // changes what it's using, never what "automatic" means for it.
+        // Automatic is ARCHIVE_SLOT unconditionally for both -- an override changes what
+        // it's using, never what "automatic" means for it.
         groupAutoSlot[g] = ARCHIVE_SLOT;
         return;
       }
@@ -709,6 +820,7 @@ function mountVaultGraph(root, data, deps) {
       groupAutoSlot[g] = key;
     });
     buildSubShades();
+    buildUnlinkedTint();
   }
 
   // The settings UIs need three things and none of them should reach into internals:
@@ -775,8 +887,56 @@ function mountVaultGraph(root, data, deps) {
     });
   }
 
+  // A GROUP'S COLOUR IS WALKED TO ITS NEW VALUE, not switched (github#48). Slots are assigned
+  // by position among the groups that currently hold notes, so a group appearing or emptying
+  // renumbers everyone behind it and folders nobody touched inherit the colour of the one in
+  // front -- measured, four of seven groups repainting in a single frame on the unlinked
+  // toggle. The renumbering is its own defect and is not fixed here; what is fixed is that it
+  // arrives as a jump cut. A colour that has to change now fades to its new value over the
+  // same clock everything else on the disc moves on.
+  //
+  // colorShown exists only WHILE a walk is running, so at rest this falls straight through to
+  // groupColor and nothing pays for it.
+  var colorShown = null, colorRaf = 0, colorPrev = 0;
+
   function colorOf(group) {
+    if (colorShown) { var c = colorShown[group]; if (c) return c; }
     return groupColor[group] || THEME.neutrals[0];
+  }
+
+  // Called by regroup with the colours as they were BEFORE buildColors reassigned them. Only
+  // groups that existed at both ends and actually changed are walked: one appearing has no
+  // previous colour to come from, and fading it up from nothing would be a different effect
+  // than the one this is for.
+  function colorWalk(before) {
+    if (!before || !renderer) return;
+    var origin = null;
+    Object.keys(groupColor).forEach(function (g) {
+      var was = before[g];
+      if (was && was !== groupColor[g]) (origin || (origin = Object.create(null)))[g] = was;
+    });
+    if (!origin) return;
+    if (colorRaf) { WIN.cancelAnimationFrame(colorRaf); colorRaf = 0; }
+    colorShown = origin;
+    var t = 0;
+    colorPrev = NOW();
+    (function step() {
+      var now = NOW(), dt = now - colorPrev;
+      colorPrev = now;
+      // Clamped the same way every other ramp here is, so a stalled frame stretches the walk
+      // instead of leaping it.
+      t += Math.min(dt, TWEEN_MS) / (TWEEN_MS * TIME_SCALE);
+      if (t > 1) t = 1;
+      var e = t * t * (3 - 2 * t);
+      var next = Object.create(null);
+      Object.keys(origin).forEach(function (g) { next[g] = mixHex(origin[g], groupColor[g], e); });
+      colorShown = next;
+      renderer.refresh({ skipIndexation: true });     // colour only; nothing moved
+      if (t < 1) { colorRaf = WIN.requestAnimationFrame(step); return; }
+      colorRaf = 0;
+      colorShown = null;
+      renderer.refresh({ skipIndexation: true });
+    })();
   }
 
   // Subfolders get a tint of their PARA folder's colour, not a colour of their own:
@@ -795,6 +955,12 @@ function mountVaultGraph(root, data, deps) {
   // of the twelve slot hexes, so there is nothing among them to ring as "current", and
   // the settings UIs need to say that rather than guess.
   var subSlot = Object.create(null);
+
+  // The distinct folder colours currently worn by unlinked notes, capped -- built by
+  // buildUnlinkedTint() below, read only by the (unlinked) legend row's own swatch when
+  // unlinkedTintByFolder is on. Empty is a perfectly good answer (no unlinked notes, or the
+  // toggle is off): the swatch falls back to the flat colorOf(UNLINKED) either way.
+  var unlinkedTintColors = [];
 
   // Four steps, not one per subfolder. Spreading N tints evenly across one hue
   // family collapses as N grows -- measured, nine subfolders land ~3 apart, below
@@ -862,6 +1028,21 @@ function mountVaultGraph(root, data, deps) {
   // capacities are computed on the unscaled geometry and the whole band is scaled
   // afterwards, so the proportions are untouched -- it is purely a size trim.
   var INNER_SCALE = 0.8;
+  // The most a row-0 inner-band dot may cover of the hub's own radius (r0 * INNER_SCALE).
+  // Row 0 is placed with its centre exactly ON that boundary in every layout (placeCell:
+  // `(base + row*SP) * INNER_SCALE`, row 0 drops the row term), so only the dot's own
+  // radius decides how far it visually pokes into the hub -- normally negligible, since a
+  // healthy row-0 dot is a small fraction of r0. Measured on the demo vault at rest: 4.2%
+  // (36 of 850.7 graph units, the biggest dot in a 6-row inner band). Doubled for margin,
+  // comfortably below where the reported defect actually sits: soloing a folder down to a
+  // single inner-locked note collapses the band to that one row, and the dot then balloons
+  // to 30-60% of r0 -- "the notes touch the brain", github#35. See dotPx, where this caps
+  // ONLY a note placed in row 0 of the inner band, the same way edgeCap caps a note against
+  // its own wedge edge -- a per-note geometric bound, not a band-wide statistic. (A
+  // band-wide cap on `room` was tried for this instead and reverted: it fixed the reported
+  // case but also shrank dots in ordinary sparse-but-healthy bands, since `room` and the
+  // ramp both feed every note in the band alike.)
+  var HUB_ROW0_FRAC = 0.08;
   // How much of the locked hub-to-ring span the inner band fills; the rest is the channel
   // between the rings. At module scope because the sub-split gate needs a band's depth before
   // the band is packed, which is above where this used to live.
@@ -1108,18 +1289,52 @@ function mountVaultGraph(root, data, deps) {
     });
   }
 
+  // 6 is enough for a legend swatch to read as "several colours live here" without an
+  // expensive uniqueness check against hundreds of distinct hexes -- the row is a summary,
+  // not an inventory.
+  var UNLINKED_TINT_CAP = 6;
+
+  // What the (unlinked) row's own swatch mixes, once unlinkedTintByFolder is on -- same
+  // colour nodeColor() would give each unlinked note, deduped and capped. Only ever finds
+  // anything while unlinkedByFolder (membership) is OFF: on, no note answers UNLINKED to
+  // groupOf any more, so this comes back empty, which is a correct answer, not a stale one.
+  // An O(n) pass, same order as buildSubShades just above and computeOrder before it, so it
+  // lives here (called from buildColors, once per colour-affecting change) rather than in
+  // buildLegend, which runs on nearly every legend click.
+  function buildUnlinkedTint() {
+    unlinkedTintColors = [];
+    var seen = Object.create(null);
+    graph.forEachNode(function (id) {
+      if (unlinkedTintColors.length >= UNLINKED_TINT_CAP) return;
+      if (groupOf(id) !== UNLINKED) return;
+      var a = graph.getNodeAttributes(id);
+      var c = subShade[a.folder + "/" + (a.sub || "")] || colorOf(a.folder);
+      if (seen[c]) return;
+      seen[c] = true;
+      unlinkedTintColors.push(c);
+    });
+  }
+
   // Group colour, tinted by subfolder when the folders are what we are looking at.
   //
   // UNLINKED IS A GROUP, NOT A FOLDER, and the folder dimension is the one place that can
   // forget it. Every other dimension asks groupOf; this one used to go straight to the
-  // note's own folder, so a degree-0 note wore its folder's tint while the legend showed
-  // it under one swatch -- measured 0 of 12 matching on a 700-note vault, 9 distinct
-  // colours under a single legend row (github#3). `(vault root)` is NOT the same case:
-  // the builder writes that as a real folder value, so colorOf resolves it already.
+  // note's own folder unconditionally, so a degree-0 note wore its folder's tint while the
+  // legend showed it under one swatch -- measured 0 of 12 matching on a 700-note vault, 9
+  // distinct colours under a single legend row (github#3). `(vault root)` is NOT the same
+  // case: the builder writes that as a real folder value, so colorOf resolves it already.
+  //
+  // TWO INDEPENDENT QUESTIONS, not one (github#3, re-read again): groupOf(id) answers
+  // MEMBERSHIP (unlinkedByFolder) -- is this note standing in the (unlinked) group at all.
+  // unlinkedTintByFolder answers COLOUR ONLY, and only matters when the answer to the first
+  // is "yes, still unlinked": does it wear the flat swatch every note in that group always
+  // has, or its own folder's tint while staying put. A note that has already joined its
+  // folder (groupOf returns something other than UNLINKED) never reaches the tint check at
+  // all -- it is already on the ordinary fallthrough, same as any other note in that folder.
   function nodeColor(id) {
     var a = graph.getNodeAttributes(id);
     if (state.dim !== "folder") return colorOf(groupOf(id));
-    if (groupOf(id) === UNLINKED) return colorOf(UNLINKED);
+    if (groupOf(id) === UNLINKED && !unlinkedTintByFolder) return colorOf(UNLINKED);
     return subShade[a.folder + "/" + (a.sub || "")] || colorOf(a.folder);
   }
 
@@ -1806,6 +2021,7 @@ function mountVaultGraph(root, data, deps) {
     var bandDepth = { i: 0, o: 0 };
     var splitOf = Object.create(null);
     var splitFor = function (g) {
+      if (splitHold && splitHold[g] !== undefined) return splitHold[g];
       if (splitOf[g] === undefined) {
         var bk = bandLock && bandLock[g] ? "i" : "o";
         if (!bandDepth[bk]) bandDepth[bk] = depthOfBand(bk === "i");
@@ -2786,7 +3002,10 @@ function mountVaultGraph(root, data, deps) {
         // sits at flips with it. The allowances flip with it too, or the fat note gets the
         // thin note's clearance every other row.
         var eA = edgeA[r.row] || 0, eB = edgeB[r.row] || 0;
-        out.push({ id: r.id, r: rr, u: pad + u0 * span,
+        // row IS PASSED OUT, alongside the radius it already decided -- ringsLayout marks
+        // row 0 of the inner band from it (see hubRow0Next there), rather than trying to
+        // reconstruct "is this row 0" from rr later, off the same radius arithmetic twice.
+        out.push({ id: r.id, r: rr, u: pad + u0 * span, row: r.row,
                    eA: (r.row % 2 === 1) ? eB : eA,
                    eB: (r.row % 2 === 1) ? eA : eB });
       });
@@ -3062,6 +3281,9 @@ function mountVaultGraph(root, data, deps) {
     // Per note, its distance to the nearer edge of its own wedge. A hard cap on the drawn
     // radius -- see where it is filled, and dotPx.
     var edgeCapNext = Object.create(null);
+    // Which notes placeCell put in row 0 of the inner band -- the row whose centre sits
+    // exactly on the hub boundary. See HUB_ROW0_FRAC and dotPx.
+    var hubRow0Next = Object.create(null);
     var dbgCells = DBG.on ? [] : null;
     if (probe) { lastStart = Object.create(null); lastArc = Object.create(null); lastBand = Object.create(null); }
     [true, false].forEach(function (isInner) {
@@ -3358,6 +3580,11 @@ function mountVaultGraph(root, data, deps) {
           // note could otherwise ask for more room than it has and invert.
           var arc = a1 - a0;
           var rGraph = Math.max(1e-6, sl.r * UNIT);
+          // ROW 0 OF THE INNER BAND, from the row placeCell actually put this note in -- not
+          // reconstructed from rGraph, which row 0 shares with the hub boundary by
+          // construction and so cannot self-distinguish from "very close to it". See
+          // HUB_ROW0_FRAC and dotPx.
+          if (isInner && sl.row === 0) hubRow0Next[sl.id] = true;
           // HALF A PITCH IS THE ZERO POINT: two wedges each holding their end note half a step
           // in from their own edge put those two notes exactly one step apart, which is a
           // boundary nobody can see. Everything past that is the channel, and the channel is
@@ -3688,6 +3915,7 @@ function mountVaultGraph(root, data, deps) {
     // follows two blocks up, for the same reason.
     cellRoom = cellNow || cellRoomNext;
     edgeCap = edgeNow || edgeCapNext;
+    hubRow0 = hubRow0Next;
     if (planRoom) { /* kept on the plan for the probe; the live pool is what draws */ }
     dotFit = fit;
     if (dbgCells) DBG.cells = dbgCells;
@@ -5227,6 +5455,12 @@ function mountVaultGraph(root, data, deps) {
    * folders are explicitly out of scope until this is judged on the simple case.
    */
   var colWalk = null;
+  // The sub-split gate, FROZEN while a cascade walks. splitFor reads live weights by design,
+  // but mid-cascade a fading group crosses the gate, the split flips, every cell key of that
+  // group changes, and the whole group teleports between two placements in one frame. While
+  // a cascade runs, the gate answers with the DESTINATION packing's decision -- the one
+  // settle() will assign -- so cell keys hold still from the first frame to the last.
+  var splitHold = null;
   /**
    * The two endpoint LAYOUTS of the running cascade, or null at rest.
    *
@@ -5286,6 +5520,10 @@ function mountVaultGraph(root, data, deps) {
   // Per note, its distance to the nearer edge of its own wedge, in graph units. A dot may not
   // exceed it, or it crosses into the seam.
   var edgeCap = Object.create(null);
+  // Which notes are in row 0 of the inner band -- a placement fact, not an animated
+  // quantity, so unlike edgeCap/cellRoom it is never walked mid-cascade; freshly computed
+  // every pass is exactly right. See HUB_ROW0_FRAC and dotPx.
+  var hubRow0 = Object.create(null);
   // WHAT THE LAST CASCADE WAS ASKED TO DO. Every question about a jump starts with
   // "did it animate at all, and over how many notes", and inferring that from frame
   // counts is guesswork -- an instant apply and a one-frame animation look identical
@@ -5330,6 +5568,10 @@ function mountVaultGraph(root, data, deps) {
       WIN.clearTimeout(cascadeRun.guard);
       cascadeRun = null;
     }
+    // Same release as hardRelayout's -- a new cascade replacing an interrupted move cascade
+    // must not inherit its stale movers or its frozen split gate. Reassigned below when this
+    // cascade carries moves of its own.
+    moveFrom = null; splitHold = null;
 
     // A null plan is legitimate: "none" hides every note, so there is no
     // geometry left to lay out. The fade still has to run, with positions simply
@@ -5392,6 +5634,25 @@ function mountVaultGraph(root, data, deps) {
     // so settle() assigns a state nothing can later disagree with.
     ringsLayout();
     var finalPos = ringsLayout() || {};
+    // AUTO-FIT ON A VISIBILITY TOGGLE, ONLY WHILE THE CAMERA IS STILL WHERE fit() LEFT IT
+    // (github#14). The second ringsLayout() above just recomputed the DESTINATION plan and,
+    // with it, lastMaxR -- so fitRatio() already reads the reach this cascade is headed
+    // toward. colToggle is what every visibility-toggle call site passes (the legend eye
+    // icons, the "only" actions, the settings-panel and context-menu toggles, All/None) and
+    // nothing else does -- a date-range drag or the timeline does not carry it, so neither
+    // auto-fits.
+    //
+    // DIRECTION DECIDES THE TIMING, not just whether to fit. Zooming OUT (the disc growing,
+    // more notes arriving) reads right run alongside the fade-in -- the view expanding to
+    // meet what's arriving. Zooming IN (the disc shrinking) reads wrong run alongside the
+    // fade-out: the frame closes in on notes that are still visibly there, fading. So a
+    // shrink is deferred to settle() below, once the outgoing notes are actually gone, and
+    // only a growth (or no change) fires here, immediately.
+    var deferredAutoFit = false;
+    if (opts.colToggle && camAtRest) {
+      if (fitRatio() < renderer.getCamera().getState().ratio) deferredAutoFit = true;
+      else fit();
+    }
     pinnedPlan = pinWas; planKeep = keepWas; roomNow = roomWas;
     graph.forEachNode(function (id) { alpha[id] = keep[id]; });
     var sweepOf = Object.create(null);
@@ -5400,17 +5661,60 @@ function mountVaultGraph(root, data, deps) {
       sweepOf[id] = q ? angleSweep(Math.atan2(q.y, q.x)) : 0;
     });
 
+    // NOTES THAT CHANGE GROUP WITHOUT CHANGING WHETHER THEY ARE SHOWN. Neither an `in` nor
+    // an `out` -- visible() says the same thing before and after, so the loop below never
+    // sees them -- and yet they have further to travel than either. opts.movesFrom is
+    // "id -> the group it is leaving", captured by the caller before it changed the setting,
+    // and it becomes moveFrom for the length of the cascade.
+    //
+    // A move is a fade OUT of where it was followed by a fade IN where it now belongs, with
+    // the crossing at the trough where nothing is on screen to see it happen. Two legs, so
+    // twice a fade's length per note -- and because the population is staggered, notes are
+    // arriving in the new wedges while others are still leaving the old ones. That overlap is
+    // the whole point: one flowing movement rather than the disc emptying and then refilling.
+    var moves = [];
+    if (opts.movesFrom) {
+      moveFrom = opts.movesFrom;
+      Object.keys(opts.movesFrom).forEach(function (id) {
+        if (!graph.hasNode(id)) return;
+        moves.push(id);
+      });
+      if (!moves.length) moveFrom = null;
+    }
+    // Kept separately from moveFrom, which empties as the notes cross. The frame loop still
+    // has to know a crossed note is on a MOVE schedule and not an ordinary one-leg fade.
+    var isMove = Object.create(null);
+    moves.forEach(function (id) { isMove[id] = true; });
+
     var ins = [], outs = [], to = Object.create(null), from = Object.create(null);
     graph.forEachNode(function (id) {
       // timeFactor, not 1: a note the timeline or the date range excludes must not be
       // revealed by a filter change somewhere else. See the note on `keep` above.
       var want = visible(id) ? timeFactor(id) : 0;
       var now = alpha[id] || 0;
+      // A MOVER'S `from` ONLY. Its `to` is asked below with moveFrom suspended, because
+      // `want` here was computed through groupOf -- which, for a note in mid-move, answers
+      // with the group it is LEAVING. Asking "will it be shown" of the wrong group is how a
+      // note bound for a HIDDEN group got to[id] = 1 and faded in on arrival, showing a group
+      // that is hidden by default until settle() cleared moveFrom and took it away again.
+      if (moveFrom && moveFrom[id] !== undefined) { from[id] = now; return; }
       if (Math.abs(now - want) <= 0.004) return;
       to[id] = want; from[id] = now;
       (want ? ins : outs).push(id);
     });
-    if (!ins.length && !outs.length) {
+    // THE DESTINATION'S OWN ANSWER, for every mover: whether the group it is JOINING is shown,
+    // and at what the date range allows. A mover whose destination is hidden lands on 0 and
+    // simply never comes back -- which is the correct end state, and the leaving leg still
+    // plays, so it fades out of where it was rather than vanishing.
+    if (moves.length) {
+      var saveMF = moveFrom;
+      moveFrom = null;
+      try {
+        moves.forEach(function (id) { to[id] = visible(id) ? timeFactor(id) : 0; });
+      } finally { moveFrom = saveMF; }
+    }
+
+    if (!ins.length && !outs.length && !moves.length) {
       lastCascade = { ins: 0, outs: 0, span: 0, path: "instant: nothing to move", frames: 0, ms: 0 };
       pinnedPlan = null; roomNow = null; cellNow = null; edgeNow = null; posSrc = posDst = null; applyLayout(true); return;
     }
@@ -5426,6 +5730,9 @@ function mountVaultGraph(root, data, deps) {
     var arrival = rank ? function (a, b) { return rank(a) - rank(b); } : clockwise;
     ins.sort(arrival);
     outs.sort(arrival);
+    // Same clockwise sweep. A move is a leave and an arrive, so sweeping them in the one
+    // order the rest of the cascade uses keeps the whole thing turning the same way.
+    moves.sort(arrival);
 
     var windowFor = function (n) {
       if (opts.spread > 0) return opts.spread;   // a caller with its own shape; see playTimeline
@@ -5436,12 +5743,56 @@ function mountVaultGraph(root, data, deps) {
       var w = windowFor(set.length);
       set.forEach(function (id, i) { delay[id] = set.length < 2 ? 0 : w * i / (set.length - 1); });
     });
+    // A MOVER LEAVES EARLY AND ARRIVES LATE, on two separate staggers -- not one delay with
+    // the second fade chained straight onto the first. Chaining them meant an early mover
+    // arrived at its new seat while the notes that had to vacate that space were still easing
+    // away, and the two populations sat drawn on top of each other for tens of frames -- the
+    // "overlapping wedges" report (github#49), photographed mid-flight before this: grey
+    // arrivals landing among orange bystanders that had not left. So the departures fill the
+    // FIRST HALF of the span and the arrivals the SECOND, with the arc ramp below carrying
+    // the wedge itself across the gap -- a mover holds alpha 0 between its legs and feeds no
+    // weight to either end, which is exactly the window in which the bystanders re-seat, with
+    // nothing drawn on top of them while they do.
+    var moveSpan = moves.length
+      ? Math.max(2 * windowFor(moves.length), 4 * FADE_FRAMES * TIME_SCALE) + 2 * FADE_FRAMES * TIME_SCALE
+      : 0;
     var span = Math.max(windowFor(ins.length), windowFor(outs.length))
              + FADE_FRAMES * TIME_SCALE;
+    if (moveSpan > span) span = moveSpan;
+    var arriveAt = Object.create(null), crossAt = Object.create(null);
+    if (moves.length) (function () {
+      var leaveW = span * 0.35;
+      var landW = Math.max(1, span * 0.45 - FADE_FRAMES * TIME_SCALE);
+      moves.forEach(function (id, i) {
+        var f = moves.length < 2 ? 0 : i / (moves.length - 1);
+        delay[id] = leaveW * f;
+        arriveAt[id] = span * 0.55 + landW * f;
+        // WHEN MEMBERSHIP TRANSFERS -- a third clock, and the one the WEDGES live on. The arc
+        // ramp can only act on a cell that exists, and a cell exists only while its group has
+        // members, so the crossings have to span the whole cascade: packing them into the
+        // arrival window (the previous version) meant the group being FILLED had no cell at
+        // all until 55% -- no wedge, no reservation, then both popped in with the ramp already
+        // half-open and the neighbours lurched aside in the same frame, which is the reported
+        // "opening and closing rapidly instead of smoothly". Spread by index across each
+        // note's own invisible gap -- after its fade-out ends, before its fade-in starts, so
+        // the note itself never crosses in view -- the filling group gains its first member
+        // almost at once and the arc ramps open from ~0, while the draining group keeps its
+        // last member nearly to the end and the arc ramps closed to ~0, where the cull costs
+        // nothing. Same reasoning as the stretched fades for ramped hides, one block up.
+        // The crossing needs clear water BEFORE the arrival: at f = 1 it landed exactly ON
+        // arriveAt, so the last movers' fade-in began the same frame they crossed -- no
+        // invisible moment for the position snap, and they eased across the disc in full
+        // view (measured, 1139u at alpha 0.53). One fade-length of margin keeps every
+        // mover invisible long enough to be AT its seat when it starts to appear.
+        var lo = delay[id] + FADE_FRAMES * TIME_SCALE;
+        var hi = Math.max(lo, arriveAt[id] - FADE_FRAMES * TIME_SCALE);
+        crossAt[id] = lo + (hi - lo) * f;
+      });
+    })();
     // WHICH GROUPS GET THE ARC RAMP: fully toggled (every present note leaving, or every
     // arriving note entering an empty group), on a legend toggle only. The single-cell gate
     // is applied where the endpoint plans are in scope, below.
-    var tglDir = Object.create(null), tglN = Object.create(null);
+    var tglDir = Object.create(null), tglN = Object.create(null), tglMv = Object.create(null);
     if (opts.colToggle) (function () {
       var startN = Object.create(null), outN = Object.create(null), inN = Object.create(null);
       graph.forEachNode(function (id) {
@@ -5452,20 +5803,102 @@ function mountVaultGraph(root, data, deps) {
       });
       outs.forEach(function (id) { var g0 = groupOf(id); outN[g0] = (outN[g0] || 0) + 1; });
       ins.forEach(function (id) { var g0 = groupOf(id); inN[g0] = (inN[g0] || 0) + 1; });
+      // MOVES COUNT ON BOTH SIDES OF THIS (github#49, the overlap report). The ramp is what
+      // stops a wedge popping open or falling off a cliff, and a group filled or emptied
+      // PURELY BY MOVES -- (unlinked), on either direction of the toggle -- was invisible to
+      // it: its wedge appeared in the ring arc-first, on top of neighbours that had not yet
+      // made room. The source side is counted with moveFrom in force (the group each mover is
+      // leaving), the destination side with it suspended, for the same reason the endpoint
+      // packings are.
+      var mvOutN = Object.create(null), mvInN = Object.create(null);
+      moves.forEach(function (id) { var g0 = groupOf(id); outN[g0] = (outN[g0] || 0) + 1; mvOutN[g0] = 1; });
+      (function () {
+        var save = moveFrom;
+        moveFrom = null;
+        try {
+          moves.forEach(function (id) { var g0 = groupOf(id); inN[g0] = (inN[g0] || 0) + 1; mvInN[g0] = 1; });
+        } finally { moveFrom = save; }
+      })();
       Object.keys(outN).forEach(function (g0) {
-        if (!inN[g0] && outN[g0] === (startN[g0] || 0)) { tglDir[g0] = "out"; tglN[g0] = outN[g0]; }
+        if (!inN[g0] && outN[g0] === (startN[g0] || 0)) { tglDir[g0] = "out"; tglN[g0] = outN[g0]; if (mvOutN[g0]) tglMv[g0] = true; }
       });
       Object.keys(inN).forEach(function (g0) {
-        if (!outN[g0] && !(startN[g0] || 0)) { tglDir[g0] = "in"; tglN[g0] = inN[g0]; }
+        if (!outN[g0] && !(startN[g0] || 0)) { tglDir[g0] = "in"; tglN[g0] = inN[g0]; if (mvInN[g0]) tglMv[g0] = true; }
       });
     })();
 
-    var moving = ins.concat(outs);
+    // A MOVER LEAVING A FULLY-DRAINING WEDGE FADES ON A FOLDER-HIDE'S OWN SCHEDULE. The
+    // directive is that the (unlinked) wedge toggles like any folder's -- and a folder hide
+    // stretches its fades across the whole span, inner first, precisely so the population
+    // and the closing arc thin TOGETHER. Cramming these movers' fades into the first third
+    // (the vacate-before-arrive rule, which is right for movers leaving a PARTIAL wedge)
+    // emptied the wedge by half-way while its ramp was still ~0.6 open: the survivors
+    // compressed into a tight arc crowding the neighbour, photographed as the tiny/(unlinked)
+    // overlap. Each such mover now fades where a hide would fade it, crosses at its own
+    // trough -- so the cell drains one seat at a time and dies at the very end, where the
+    // ramp is ~0 and the cull costs nothing -- and arrives once the destination's wedge is
+    // full-width, however long that leaves it invisible in between. Movers from partial
+    // sources keep the vacate-before-arrive schedule.
+    if (moves.length) (function () {
+      var byG = Object.create(null);
+      moves.forEach(function (id) {
+        var g0 = moveFrom[id];
+        if (tglDir[g0] === "out") (byG[g0] || (byG[g0] = [])).push(id);
+      });
+      var stretch = Math.max(1, span - 2 * FADE_FRAMES * TIME_SCALE);
+      Object.keys(byG).forEach(function (g0) {
+        var set = byG[g0];
+        set.sort(function (p0, q0) {
+          var ap = graph.getNodeAttributes(p0), aq = graph.getNodeAttributes(q0);
+          return Math.hypot(ap.x, ap.y) - Math.hypot(aq.x, aq.y);   // inner first, like a hide
+        });
+        set.forEach(function (id, i) {
+          delay[id] = set.length < 2 ? stretch : stretch * i / (set.length - 1);
+          crossAt[id] = delay[id] + FADE_FRAMES * TIME_SCALE;
+          arriveAt[id] = Math.max(span * 0.55, crossAt[id] + FADE_FRAMES * TIME_SCALE);
+        });
+      });
+    })();
+
+    // ...AND THE ARRIVALS, RESCHEDULED PER DESTINATION GROUP. arriveAt was staggered by the
+    // global clockwise index, and a small destination's movers sit consecutively in that
+    // order, so its whole cohort landed near-simultaneously -- and a half-faded note takes a
+    // half-width seat (weight is alpha), so a simultaneous cohort packs into tight columns at
+    // double density that expand as the fades finish, read as the wedge overlapping its
+    // neighbour. Spread each destination's arrivals across the whole arrival window instead,
+    // which is what a folder-show's stagger does naturally.
+    if (moves.length) (function () {
+      var save = moveFrom;
+      moveFrom = null;
+      var byDest = Object.create(null);
+      try {
+        moves.forEach(function (id) {
+          var g0 = groupOf(id);
+          (byDest[g0] || (byDest[g0] = [])).push(id);
+        });
+      } finally { moveFrom = save; }
+      var lo1 = span * 0.55, hi1 = span - FADE_FRAMES * TIME_SCALE;
+      Object.keys(byDest).forEach(function (g0) {
+        var set = byDest[g0];
+        set.sort(function (p0, q0) { return arriveAt[p0] - arriveAt[q0]; });
+        set.forEach(function (id, i) {
+          var f0 = set.length < 2 ? 0 : i / (set.length - 1);
+          arriveAt[id] = Math.max(lo1 + (hi1 - lo1) * f0, crossAt[id] + FADE_FRAMES * TIME_SCALE);
+        });
+      });
+    })();
+
+    var moving = ins.concat(outs).concat(moves);
     lastCascade = { ins: ins.length, outs: outs.length, span: Math.round(span * 100) / 100,
                     path: "animated", frames: 0, ms: 0, t0: NOW() };
 
     var settle = function () {
       if (!lastCascade.exit) lastCascade.exit = "settle() called from outside the loop";
+      // EVERY MOVER HAS ARRIVED BY DEFINITION HERE. Released unconditionally rather than
+      // one at a time, because settle() is also what the watchdog calls when the page could
+      // not keep up -- and a mover still holding its old group there would be stranded in a
+      // wedge the layout no longer plans for it.
+      moveFrom = null; splitHold = null;
       // Back to weight-over-seats: at rest the seats ARE the group's own notes, so the
       // derived reading is right and a stale override would freeze the gap at whatever
       // the last frame happened to hold.
@@ -5522,6 +5955,10 @@ function mountVaultGraph(root, data, deps) {
       ringsLayout();
       renderer.refresh({ skipIndexation: false });
       probeSample("settled");
+      // The deferred half of the auto-fit above: a shrinking disc's zoom-in waits for here,
+      // where the outgoing notes have actually finished fading, rather than closing in on
+      // notes still visibly leaving.
+      if (deferredAutoFit && camAtRest) fit();
       if (done) done();
     };
 
@@ -5639,8 +6076,28 @@ function mountVaultGraph(root, data, deps) {
       };
       // THE DESTINATION PACKING. willShow, so it is the packing settle() will assign rather
       // than one that still seats whatever the date range or the timeline has excluded.
-      var b = staticPlan(function (id) { return willShow(id); });
+      // moveFrom SUSPENDED for this one call: the destination packing is what settle() will
+      // assign, and by then every mover has crossed. Asked with moveFrom still in force it
+      // would seat them in the groups they are leaving, and the walked row counts and
+      // spacings would be interpolating toward a disc that never gets drawn.
+      var b = (function () {
+        var save = moveFrom;
+        moveFrom = null;
+        try { return staticPlan(function (id) { return willShow(id); }); }
+        finally { moveFrom = save; }
+      })();
       var aCells = cellsOfG(a), bCells = cellsOfG(b);
+      // MOVE CASCADES ONLY. An ordinary toggle keeps the live gate it has always had --
+      // freezing it there changed how a plain hide re-seats and made it visibly worse. A
+      // membership toggle is where the mid-walk split flip re-keys every cell of a group
+      // and teleports it whole, so that is where the freeze applies.
+      if (moves.length) {
+        splitHold = Object.create(null);
+        Object.keys(bCells).forEach(function (g0) { splitHold[g0] = bCells[g0] > 1; });
+        Object.keys(aCells).forEach(function (g0) {
+          if (splitHold[g0] === undefined) splitHold[g0] = aCells[g0] > 1;
+        });
+      }
       Object.keys(tglDir).forEach(function (g0) {
         var n0 = tglDir[g0] === "out" ? aCells[g0] : bCells[g0];
         if (n0 !== 1) delete tglDir[g0];
@@ -5805,19 +6262,41 @@ function mountVaultGraph(root, data, deps) {
       if (adv > maxAdv) adv = maxAdv;
       frame += adv;
       if (cascadeRun) cascadeRun.tick = tn;
+      // Progress first: the per-note fades and the arc ramps both ride it.
+      var pr = Math.min(1, frame / Math.max(1, span));
+      var ease = pr * pr * (3 - 2 * pr);
       var busy = false;
       for (var i = 0; i < moving.length; i++) {
         var id = moving[i];
+        // A MOVE RUNS TWO FADES BACK TO BACK: out of the group it is leaving, then in to the
+        // one it now belongs to, and it changes wedge AT THE TROUGH between them -- the one
+        // moment it is invisible, so the only frame in which it teleports is a frame nobody
+        // can see. Staggered against its neighbours, so the arrivals of the early movers
+        // overlap the departures of the late ones and the two read as one movement.
+        if (isMove[id]) {
+          // Two legs on two staggers, and the membership crossing on a third clock between
+          // them -- see the scheduling note above the span.
+          if (moveFrom && moveFrom[id] !== undefined && frame >= crossAt[id]) delete moveFrom[id];
+          if (frame < arriveAt[id]) {
+            var q1 = (frame - delay[id]) / (FADE_FRAMES * TIME_SCALE);
+            q1 = q1 < 0 ? 0 : q1 > 1 ? 1 : q1;
+            alpha[id] = (from[id] === undefined ? 1 : from[id]) * (1 - q1 * q1 * (3 - 2 * q1));
+          } else {
+            var q2 = (frame - arriveAt[id]) / (FADE_FRAMES * TIME_SCALE);
+            q2 = q2 < 0 ? 0 : q2 > 1 ? 1 : q2;
+            alpha[id] = (to[id] === undefined ? 1 : to[id]) * (q2 * q2 * (3 - 2 * q2));
+          }
+          if (frame < arriveAt[id] + FADE_FRAMES * TIME_SCALE) busy = true;
+          continue;
+        }
         var q = (frame - delay[id]) / (FADE_FRAMES * TIME_SCALE);
         q = q < 0 ? 0 : q > 1 ? 1 : q;
         alpha[id] = from[id] + (to[id] - from[id]) * (q * q * (3 - 2 * q));   // smoothstep
         if (q < 1) busy = true;
       }
 
-      // Progress across the WHOLE cascade, not per note: this is what carries
-      // the repack, so it has to finish exactly when the last note does.
-      var pr = Math.min(1, frame / Math.max(1, span));
-      var ease = pr * pr * (3 - 2 * pr);
+      // Progress across the WHOLE cascade is computed above the fades now, because the
+      // geometry walk rides the same clock.
       if (opts.onFrame) opts.onFrame(pr);
 
       // THE GAP RESERVATION IS NOT WALKED ANY MORE -- see allocateBand's groupPres. It used to
@@ -5909,9 +6388,46 @@ function mountVaultGraph(root, data, deps) {
         if (b2 === undefined) b2 = a2;
         return a2 + (b2 - a2) * ease;
       };
+      // THE BAND'S THICKNESS IS LOCKED, SO IT HAS TO BE CONSERVED WHILE IT IS WALKED
+      // (github#44). The resting solve derives the two terms from T in one division --
+      // rows = round(T / s), then SP = T / rows -- and .ai-context/animation.md says why:
+      // "One division, so the two are consistent by construction". The cascade dropped that
+      // construction and interpolated rows and SP INDEPENDENTLY, and linear interpolation of
+      // two factors does not preserve their product. Traced on a year chip: rows fell
+      // 24 -> 19.15 while SP rose 1.000 -> 1.693, so the band drew 19.152 x 1.693 = 32.42
+      // against a locked 24.00 -- 35% thick -- and the rim went past the ring with it, by the
+      // same factor the disc overshoot measures independently off note positions (1.351x
+      // against 1.343x). Both ENDPOINTS were always exact, which is why the disc still landed
+      // where it should and nothing at rest ever caught this.
+      //
+      // So only the depth is walked now, and SP follows from it the way the resting solve
+      // derives it. rows * SP is T on every frame by construction rather than at the two ends
+      // only. This replaces the independent walk rather than clamping the drawn radius: a
+      // clamp would hold the rim still while the rows behind it stayed too far apart.
+      //
+      // T COMES FROM THE ENDPOINT PRODUCTS, not from geomLock. Both ends are correct by
+      // construction, so they agree whenever the thickness really is locked, and reading them
+      // avoids reproducing depthOfBand's INNER_SCALE/base arithmetic at a second site where it
+      // could drift. Walking T between them keeps the fix exact at both ends even in the cases
+      // where the two do not quite agree.
+      var thickAt = function (k) {
+        var ds = bandSrc[k], dd = bandDst[k];
+        if (ds === undefined && dd === undefined) return 0;
+        if (ds === undefined) ds = dd;
+        if (dd === undefined) dd = ds;
+        var ts = ds * spSrcB[k], td = dd * spDstB[k];
+        return ts + (td - ts) * ease;
+      };
+      // A band with no depth or no thickness at either end has no product to conserve, and the
+      // straight interpolation is both the only answer left and what the endpoints agree on.
+      var spWalk = function (k) {
+        var rows = depthWalk(k), T = thickAt(k);
+        if (!(rows > 0) || !(T > 0)) return spSrcB[k] + (spDstB[k] - spSrcB[k]) * ease;
+        return T / rows;
+      };
       var spNow = {
-        i: spSrcB.i + (spDstB.i - spSrcB.i) * ease,
-        o: spSrcB.o + (spDstB.o - spSrcB.o) * ease,
+        i: spWalk("i"),
+        o: spWalk("o"),
         depth: { i: depthWalk("i"), o: depthWalk("o") },
       };
       // The walked room, handed to ringsLayout through the same channel the spacing uses. Set
@@ -5923,7 +6439,25 @@ function mountVaultGraph(root, data, deps) {
         // pr, not ease: ease is the smoothstep the NOTES ride, and an arc linear in ease is
         // S-shaped in time -- measured as a symmetric +-1.2 degree residual on an 11.9-degree
         // wedge. Constant speed is a statement about the clock on the wall.
-        colWalk[g0] = { f: tglDir[g0] === "out" ? 1 - pr : pr, n: tglN[g0] || 1 };
+        var fRamp = tglDir[g0] === "out" ? 1 - pr : pr;
+        // A GROUP FED BY MOVES has its cell born at the first crossing (~one fade in) and
+        // culled at the last (~one fade before the end) -- the ramp is phase-shifted to hit
+        // zero at exactly those moments, so the wedge's arc is ~0 whenever the cell appears
+        // or disappears and the toggle reads like any folder's: the wedge opens from
+        // nothing and closes to nothing, with no pop at either end.
+        if (tglMv[g0]) {
+          var mvEdge = Math.min(0.45, (FADE_FRAMES * TIME_SCALE * 2) / Math.max(1, span));
+          // The IN ramp finishes at 0.55 -- the moment the first arrival starts fading --
+          // not at the end of the span. Ramping through the arrivals packed the early ones
+          // into a half-open wedge at double density, visibly overlapping the neighbour
+          // (the tiny/(unlinked) report). Between the last fade-out and the first fade-in
+          // the whole moving population is invisible, which is exactly the silent window
+          // the wedge uses to finish opening.
+          fRamp = tglDir[g0] === "out"
+            ? Math.max(0, Math.min(1, (1 - mvEdge - pr) / (1 - mvEdge)))
+            : Math.max(0, Math.min(1, (pr - mvEdge) / (0.55 - mvEdge)));
+        }
+        colWalk[g0] = { f: fRamp, n: tglN[g0] || 1 };
       });
       // AND THE PER-CELL ROOM, on the same clock. A note in only one endpoint takes that
       // endpoint's figure rather than interpolating toward a cell that does not exist there,
@@ -5991,13 +6525,49 @@ function mountVaultGraph(root, data, deps) {
       if (targets) graph.forEachNode(function (id) {
         var q = targets[id];
         if (!q) return;
-        // The ANGLE is taken exactly -- it is the circumferential motion, and
-        // easing it would put the wedge out of step with the ring again. Only the
-        // RADIUS is eased, because that is what steps: a row count is an integer,
-        // so it ticks rather than glides, and easing turns each tick into a short
-        // slide of about one row instead of a jump.
-        var x = graph.getNodeAttribute(id, "x"), y = graph.getNodeAttribute(id, "y");
+        // The ANGLE is taken exactly while its target moves the way a wedge sweeps --
+        // easing it would put the wedge out of step with the ring. But "the angle is
+        // continuous" has the same exception the radius does (github#41): a note whose ROW
+        // changes takes a new seat, and although the serpentine makes most row crossings a
+        // short hop, a seat re-index can put the target at the far end of the wedge -- the
+        // drawn angle then snapped the whole arc in one frame. Measured on the
+        // dominant-folder fixture: full-alpha bystanders sweeping 3793 graph units at
+        // constant radius, several per frame, deterministic across runs.
+        //
+        // So the tangential step is BOUNDED, not eased: below the cap the target is taken
+        // exactly, as before, so ordinary wedge motion keeps zero lag and the wedge stays in
+        // step with its ring; above it -- which only a seat jump produces -- the note glides
+        // at the cap along the short way round. Bounded speed rather than a proportional
+        // ease on purpose: an ease lags EVERY note behind a moving target and pays the
+        // leftover in a jump at the end (the exact failure RADIAL_EASE's own note records),
+        // while a cap touches nothing but the teleports.
+        // AN INVISIBLE NOTE TAKES ITS TARGET EXACTLY. Smoothing exists for the eye, and a
+        // note below the visibility floor has no eye on it -- while a mover that crossed
+        // wedges and then eased toward its distant seat was still mid-journey when its
+        // fade-in began, travelling across the disc in full view (measured 1659u in one
+        // frame on the 10k fixture, 25% of the radial gap it had left). Snapping while
+        // invisible is what the whole schedule is built around.
+        // AN INVISIBLE NOTE TAKES ITS TARGET EXACTLY -- smoothing is for the eye, and a
+        // mover below the visibility floor must be AT its seat before its fade-in starts
+        // rather than easing toward it in full view once visible.
         var h = Math.atan2(q.y, q.x);
+        if ((alpha[id] || 0) < 0.05) {
+          graph.mergeNodeAttributes(id, { x: q.x, y: q.y });
+          return;
+        }
+        // The ANGLE is taken exactly -- it is the circumferential motion, and easing it
+        // would put the wedge out of step with the ring. Two attempts to smooth the
+        // github#41 seat-wrap teleports HERE, in the follower, are recorded in this
+        // branch's history and both reverted: a distance-bounded cap sheared the
+        // serpentine on ordinary big toggles (legitimate sweep outruns any cap, and
+        // tangential speed grows with radius, so rows fell out of step with each other),
+        // and a target-step detector marked so many notes during ordinary toggles -- seat
+        // re-indexing is constant there too, which is github#41's own finding -- that the
+        // glide broke the same formation it was protecting. The teleports are an
+        // ASSIGNMENT defect: the fix has to make each note's seat stable across the walk
+        // (pin its planA seat to its planB seat and walk BETWEEN them in the live frame's
+        // geometry), not make the follower cleverer about chasing a reassigned one.
+        var x = graph.getNodeAttribute(id, "x"), y = graph.getNodeAttribute(id, "y");
         var rNow = Math.hypot(x, y), rWant = Math.hypot(q.x, q.y);
         var gap = rWant - rNow;
         if (gap < 0 ? -gap > resid : gap > resid) resid = gap < 0 ? -gap : gap;
@@ -6334,9 +6904,11 @@ function mountVaultGraph(root, data, deps) {
 
   // How far the hover treatment should be applied for this frame. A CLICK selection has
   // no tween and must not be animated by whatever the pointer is doing, so it is always
-  // fully applied; only a hover ramps.
+  // fully applied; only a hover ramps. That holds even while the pointer is ON the selected
+  // note (issue #38) -- state.hovered gets set on enter same as any other note, but the
+  // treatment it is already getting from the selection must not be re-animated by that.
   function hoverAmount() {
-    return state.hovered ? hoverT : 1;
+    return (state.hovered && state.hovered !== state.selected) ? hoverT : 1;
   }
 
   function hoverTo(aim) {
@@ -6487,7 +7059,10 @@ function mountVaultGraph(root, data, deps) {
   // magnitude); thickness = max(minEdgeThickness, scaleSize(size)); colour = the edge
   // reducer's, already lit or dimmed. Alpha follows the hover ramp so the web arrives with
   // the dim instead of popping in over it.
-  function drawFocusWeb(ctx, data, settings) {
+  // No `settings` parameter any more: the one thing it was read for was minEdgeThickness, and
+  // that now lives inside edgePx so this and edgeReport cannot disagree about a width.
+  // drawHover keeps its own -- it reads labelSize and labelFont, and sigma decides its shape.
+  function drawFocusWeb(ctx, data) {
     var f = state.hovered || state.selected;
     if (!f || data.key !== f || state.query) return;
     var ht = hoverAmount();
@@ -6510,7 +7085,7 @@ function mountVaultGraph(root, data, deps) {
         ctx.moveTo(geo.ps.x, geo.ps.y);
         if (geo.k) ctx.quadraticCurveTo(geo.cp.x, geo.cp.y, geo.pt.x, geo.pt.y);
         else ctx.lineTo(geo.pt.x, geo.pt.y);
-        ctx.lineWidth = Math.max(settings.minEdgeThickness, renderer.scaleSize(geo.ed.size || 1));
+        ctx.lineWidth = edgePx(geo.ed.size);
         ctx.strokeStyle = geo.ed.color;
         ctx.stroke();
       });
@@ -6533,7 +7108,7 @@ function mountVaultGraph(root, data, deps) {
   // Replaces Sigma's built-in hover label, whose pill is hardcoded to #FFF.
   // Geometry matches its label drawer: text at x + size + 3, y + labelSize/3.
   function drawHover(ctx, data, settings) {
-    drawFocusWeb(ctx, data, settings);
+    drawFocusWeb(ctx, data);
     if (typeof data.label !== "string" || !data.label) return;
     var n = settings.labelSize;
     ctx.font = settings.labelWeight + " " + n + "px " + settings.labelFont;
@@ -7216,6 +7791,24 @@ function mountVaultGraph(root, data, deps) {
         if (v > vMax) v = vMax;
       }
     }
+    // AND NEVER PAST HUB_ROW0_FRAC OF THE HUB'S OWN RADIUS, for a note actually placed in
+    // row 0 of the inner band. See HUB_ROW0_FRAC for why row 0 needs this at all -- its
+    // centre sits exactly on the hub boundary by construction, so nothing but the dot's own
+    // radius decides how far it pokes into the hub, and the ramp above sizes it off the
+    // band's pitch, which is the whole band's thickness whenever the band collapses to this
+    // one row (github#35). Same graph-unit-to-size-unit conversion as the wedge-edge cap
+    // just above, against a different figure -- a fixed share of r0 instead of a per-note
+    // wedge distance, because unlike a wedge edge this boundary does not vary by note.
+    if (isIn && geomLock && hubRow0[id]) {
+      var hubU = HUB_ROW0_FRAC * geomLock.r0 * INNER_SCALE * UNIT;
+      var pitH = pitchUnits("i");
+      var hiH = DOT_OF_PITCH * pitH;
+      if (hiH > 1e-6) {
+        var hubCapV = rp.m * NODE_MAX + rp.b;
+        var hubVMax = hubCapV * (hubU / hiH);
+        if (v > hubVMax) v = hubVMax;
+      }
+    }
     return v;
   }
 
@@ -7230,6 +7823,76 @@ function mountVaultGraph(root, data, deps) {
 
   function refreshSizeScale() {
     if (syncSizeScale() && renderer) renderer.refresh();
+  }
+
+  /* ------------------------------------------------------------ edge width */
+
+  // AN EDGE IS CAPPED IN PIXELS; A DOT IS NOT.
+  //
+  // Sigma's edge shader draws max(minEdgeThickness, size / sizeRatio) px, and sizeRatio IS
+  // the camera ratio here because zoomToSizeRatioFunction is identity (see makeRenderer). So
+  // a stroke grew as 1/ratio, exactly like a dot does. That law is right for a dot -- a dot
+  // is a thing, and holding its proportion to the room it has is the whole point -- and wrong
+  // for a connector, whose thickness is meant to carry link weight, not zoom.
+  //
+  // Measured on the 10k fixture against one hub of degree 55: strokes 1.70px at rest,
+  // 3.94px five notches in, 7.87px at ten -- and 55 of those converging on a 20.44px dot is
+  // 307.87px of ink, so the fan drew as one solid mass with no single link traceable through
+  // it. Reported exactly that way: the notes get buried by the links that join them
+  // (github#39).
+  //
+  // ONE MULTIPLIER FOR THE WHOLE WEB, not a per-edge min() against the cap. A min() flattens
+  // every link onto the same number the moment it binds -- all 55 at 4.00px, a 220px fan, and
+  // the weight ordering gone -- while a single k holds the ratios between weights at any zoom
+  // and lands only the heaviest link there can be on the cap. Below the knee it also makes
+  // size * k / ratio a CONSTANT, so the drawn web is invariant under zoom rather than merely
+  // bounded, which is what the invariant is able to check as an equality.
+  //
+  // Above the knee -- ratio >= EDGE_SIZE_MAX / EDGE_MAX_PX, i.e. 0.4 -- k is 1 and nothing
+  // happens at all: no refresh, and not one pixel of the resting disc moves. The whole cost
+  // lives inside the zoom that needed the fix.
+  var EDGE_MAX_PX = 4;    // the widest a link may ever draw
+  var edgeMult = 1;       // what the edge reducer scales every size by; see syncEdgeMult
+
+  function measureEdgeMult() {
+    if (!renderer) return 1;
+    var ratio = renderer.getCamera().getState().ratio || 1;
+    var k = EDGE_MAX_PX * ratio / EDGE_SIZE_MAX;
+    return k < 1 ? k : 1;
+  }
+
+  // Returns true if it moved enough to be worth a repaint -- the same shape as syncSizeScale
+  // and for the same reason, so refresh -> render -> no change -> stop instead of a loop.
+  // 0.002 of the cap is 0.008px on the heaviest link: under a pixel, and under anything a
+  // display can show.
+  function syncEdgeMult() {
+    var next = measureEdgeMult();
+    if (Math.abs(next - edgeMult) < 0.002) return false;
+    edgeMult = next;
+    return true;
+  }
+
+  // Applied at EVERY exit of edgeReducer that draws something, not once before the return --
+  // the query branch returns early, and a size clamped before it would then be overwritten by
+  // the focus branch while a search left it unclamped altogether.
+  //
+  // A named function rather than a closure built inside the reducer: that is a hot path, 3737
+  // calls per refresh on the 10k shape, and the reducer's own per-call cost is the thing the
+  // resting-web budget above exists to bound.
+  function capEdge(r, a) {
+    if (edgeMult < 1) r.size = (r.size === undefined ? (a.size || 1) : r.size) * edgeMult;
+    return r;
+  }
+
+  // What a link ACTUALLY draws, in display pixels. Sigma's edge shader is
+  // max(minEdgeThickness, size / sizeRatio) and scaleSize is its name for that division, so
+  // this is the shader's law rather than a re-derivation of it. Shared by the focus-web
+  // overlay -- which has to stroke exactly what the GPU would -- and by edgeReport, for the
+  // reason edgeCurveGeom is shared with checkFocusWeb: a diagnostic that computes its own
+  // answer eventually disagrees with the canvas, and then it is worse than nothing.
+  function edgePx(size) {
+    if (!renderer) return 0;
+    return Math.max(renderer.getSetting("minEdgeThickness"), renderer.scaleSize(size || 1));
   }
 
   /* -------------------------------------------------------- edge curvature */
@@ -7327,6 +7990,30 @@ function mountVaultGraph(root, data, deps) {
       // at 20%, because the next notch arrives before the last one has landed.
       zoomingRatio: 1.2,
       zoomDuration: 120,
+      // THE FLOOR ON A STROKE, AND SIGMA'S DEFAULT WAS 1.7px.
+      //
+      // A floor exists so a single link is not a sub-pixel hairline that disappears, and that
+      // is a real concern -- at 0.5 the web on a 450-note vault all but vanishes. But 1.7 is
+      // the wrong number for it, because at the resting zoom EVERY link's natural width is
+      // 0.55..1.02px: the floor caught 100% of them and inflated each two to three times.
+      //
+      // One link 1.2px too wide is invisible. 3737 of them sweeping through the middle of the
+      // disc, stacking ink at every crossing, is a grey fog that veiled the inner rings and
+      // filled the hub hole -- measured as one degree-55 hub's fan: 93.5px of stroke at 1.7,
+      // 55.0px at 1.0 (github#42). The far end of the same setting is EDGE_MAX_PX (github#39):
+      // that one was strokes too thick when you zoom IN, this one at rest.
+      //
+      // FLAT, NOT SCALED BY EDGE COUNT, and the issue expected the opposite -- the fog grows
+      // with the number of links while the hairline risk is worst when there are few, so a
+      // curve looked necessary. Looking at both ends says one number does it: at 1.0 the
+      // sparse web still reads as individual strands and the 10k fog is gone. If a shape ever
+      // breaks that, EDGE_RAMP_START / EDGE_FLOOR above is the precedent to follow.
+      //
+      // NOT LOW ENOUGH TO SHOW LINK WEIGHT, which is a separate defect and stays one: the
+      // three weights that exist draw 0.556 / 0.787 / 1.019px at rest, so 1.0 still floors the
+      // first two, and 0.55 -- the value that would separate them -- is where the sparse web
+      // disappears. The two goals genuinely conflict through this one number.
+      minEdgeThickness: 1.0,
       defaultEdgeType: "line",
       // Both programs are registered up front so the toggle is a per-edge `type`
       // in the reducer rather than a renderer rebuild. Sigma merges these with its
@@ -7409,7 +8096,10 @@ function mountVaultGraph(root, data, deps) {
         }
         r.color = THEME.edge;
         var focus = focusSet();
-        if (state.query) { r.color = THEME.dim; return r; }
+        // capEdge at THIS exit too, not only the last one. A search dims every link and
+        // returns here, which left the whole web unclamped for as long as a query was in the
+        // box -- the one state where the widths were still growing as 1/ratio.
+        if (state.query) { r.color = THEME.dim; return capEdge(r, a); }
         if (focus) {
           // In step with the nodes, off the same hoverT -- the web separating from the
           // rest is most of what makes a hover legible, so it cannot lag behind it.
@@ -7426,7 +8116,11 @@ function mountVaultGraph(root, data, deps) {
         // Squared, so links lag their notes: the dots land first and the web
         // draws itself in behind them rather than everything arriving at once.
         if (al < 0.999) r.color = withAlpha(r.color, al * al);
-        return r;
+        // THE PIXEL CAP, APPLIED LAST, so it carries the hover branch's own size as well as
+        // the resting one -- a lit link is sized toward 1.4 above, and the cap then applies
+        // to whatever that left rather than to the attribute it started from. See
+        // syncEdgeMult: a no-op above the knee, which is where the camera normally is.
+        return capEdge(r, a);
       }
     });
 
@@ -7435,7 +8129,29 @@ function mountVaultGraph(root, data, deps) {
     // re-placed and the row pitch re-measured whatever moved the camera.
     (function () {
       var cam = renderer.getCamera();
-      cam.on("updated", function () { placeLogo(); refreshSizeScale(); });
+      // THE EDGE CAP IS rAF-THROTTLED, AND THE CAMERA IS ITS ONLY INPUT. A refresh re-runs
+      // every reducer, which on the 10k shape is the one cost in this handler worth caring
+      // about -- so at most one per frame, and only when syncEdgeMult says the multiplier
+      // actually moved. Above the knee it never does, and a PAN never does at any zoom,
+      // because a pan does not change the ratio. skipIndexation because nothing moved here;
+      // only the width did.
+      var edgeRaf = 0;
+      // Seeded, AND repainted if the seed moved it. Sigma has already run the reducers once by
+      // now, so a camera that starts below the knee would otherwise draw its first frame
+      // unclamped. In practice fit() flies from ratio 1 to 1.08 and both are above it, which
+      // is exactly the kind of "cannot happen today" that a persisted camera would break.
+      if (syncEdgeMult()) renderer.refresh({ skipIndexation: true });
+      cam.on("updated", function () {
+        // Anything that moves the camera fires here, fit()'s own tween included -- fitting
+        // is what tells the two apart. See the note on camAtRest (github#14).
+        if (!fitting) camAtRest = false;
+        placeLogo(); refreshSizeScale();
+        if (edgeRaf) return;
+        edgeRaf = WIN.requestAnimationFrame(function () {
+          edgeRaf = 0;
+          if (syncEdgeMult() && renderer) renderer.refresh({ skipIndexation: true });
+        });
+      });
     })();
 
     // A window resize changes the disc's pixel radius without touching the camera,
@@ -7628,6 +8344,69 @@ function mountVaultGraph(root, data, deps) {
   // the closure it belongs in.
   var refreshSettingsPanel = null;
 
+  // The (unlinked) row's own swatch, once unlinkedTintByFolder is on, would otherwise show
+  // one flat colour that is a LIE about what is actually underneath it -- every other row's
+  // swatch names the one colour every note in it wears; this row's notes no longer agree
+  // once they are each wearing their own folder's tint while staying put. A gradient built
+  // from what buildUnlinkedTint() actually found says so honestly, without a new legend row
+  // shape or a fourth swatch state for one group only. Falls back to the ordinary flat
+  // colour whenever there is nothing to mix (toggle off, everyone already joined their
+  // folder, or fewer than two distinct colours among the unlinked notes there are).
+  function swatchFill(g) {
+    if (g === UNLINKED && unlinkedTintByFolder && unlinkedTintColors.length > 1) {
+      var n = unlinkedTintColors.length, step = 360 / n;
+      return "conic-gradient(" + unlinkedTintColors.map(function (c, i) {
+        return c + " " + Math.round(i * step) + "deg " + Math.round((i + 1) * step) + "deg";
+      }).join(", ") + ")";
+    }
+    return colorOf(g);
+  }
+
+  // Ring-size title (pre-existing) for every row except (unlinked) mixed, where the swatch
+  // is no longer one colour and the ring-size fact is not what it needs to say first.
+  function swatchTitle(g, bandLock) {
+    if (g === UNLINKED && unlinkedTintByFolder && unlinkedTintColors.length > 1) {
+      return "Mixed — coloured by folder";
+    }
+    // A GROUP WITH NOTHING ON THE DISC IS ON NEITHER RING, and saying "Outer ring" is not a
+    // harmless default -- bandLock is built from the full-vault plan's own cells, so a group
+    // that seats no cell has no entry, and the fallback below then claims a ring it is not on.
+    // Latent already for (unlinked) at zero (github#3); github#50 gives every folder a row it
+    // can hold at zero, so the wrong answer would have gone from one row to any of them.
+    if (!counts[g]) return "No notes on the disc";
+    return bandLock && bandLock[g] ? "Inner ring" : "Outer ring";
+  }
+
+  // WHAT ONE LEGEND ROW'S COUNT SAYS, in one place because there are three answers and the
+  // row that renders them is already the longest expression in buildLegend.
+  //
+  //   "25"     the ordinary case -- the number of notes this wedge draws
+  //   "(6)"    the folder holds 6 and its wedge draws NONE of them (github#50)
+  //   "(139)"  (unlinked) kept separate -- a total folded into no folder's own count
+  //
+  // Parentheses mean the same thing in both of the last two: no wedge in front of you is
+  // drawing this number. THE BRACKETED FORM IS RESERVED FOR A ROW THAT DRAWS NOTHING, and
+  // that restraint is the whole of the rule. A "drawn (held)" form on every row that differs
+  // was measured first and rejected on sight: with membership kept separate every folder on
+  // the shape fixture under-draws (misc 25 of 27, projects 708 of 738), so it put two numbers
+  // on almost every row to reconcile a total nobody had asked about. A row that draws SOME of
+  // its notes still reports what it draws, exactly as it always has -- the under-report there
+  // is real but is its own question.
+  //
+  // Nothing here is filter-aware: both tallies come from computeOrder's walk over the whole
+  // vault, which is what this count has always reported.
+  function countText(g) {
+    if (g === UNLINKED && !unlinkedByFolder) return "(" + counts[g] + ")";
+    var held = folderCount[g] || 0;
+    return !counts[g] && held ? "(" + held + ")" : String(counts[g]);
+  }
+
+  // WHERE THE POINTER LAST WAS, in viewport coordinates, so a legend rebuild can ask what
+  // is under it now (github#46). Two numbers written on a mousemove: the file notes
+  // elsewhere that mousemove fires 120+ times a second, which is why nothing REAL is done
+  // in the handler -- the hit-test happens once per rebuild, not once per move.
+  var ptr = null;
+
   function buildLegend() {
     // EVERY ROW BELOW IS ABOUT TO BE REPLACED, and the one under the pointer goes with
     // them -- so its mouseleave will never fire and its halo would be left on with
@@ -7705,9 +8484,33 @@ function mountVaultGraph(root, data, deps) {
       var open = hasSubs && !state.collapsed[g];
       var hl = !!state.highlight[g];
 
-      var row = '<div class="lgr">' +
+      // GREYED OUT AT ZERO, FOR ANY GROUP (github#50). This read `g === UNLINKED && ...` and
+      // said an empty real folder cannot exist, which was true while a group with no members
+      // earned no row; a folder now keeps its row while its notes stand elsewhere, so the
+      // "nothing here right now" look is what any row at zero needs and (unlinked) is no
+      // longer the only one that can be in that state.
+      var live = !!counts[g];
+      var lgrClass = "lgr" + (live ? "" : " lgr-empty");
+      // NO CONTROLS THAT WOULD ACT ON NOTHING. An eye toggling the visibility of no notes and
+      // an `only` that empties the disc are both offers the row cannot honour, so a row at
+      // zero is identity and count alone. BOTH LEAVE THEIR BOX BEHIND, invisible, the same
+      // empty-slot treatment `.tw.none` already uses for a group with no subfolders -- the eye
+      // holds the column every label to its right lines up against, and `only` holds the grid
+      // track that keeps the count in the last one. Removing either outright misaligns the
+      // legend, and the second one was measured doing it (see the chip below).
+      //
+      // The (unlinked) row's right-click menu is untouched by this and has to be: it is the
+      // only control for its own membership toggle that lives outside settings, and it hangs
+      // off the row itself, not off either control removed here.
+      var row = '<div class="' + lgrClass + '">' +
         twBtn(hasSubs ? 'data-tw="' + esc(g) + '"' : null, open) +
-        eyeBtn('data-eye="' + esc(g) + '"', vis, g) +
+        // A BUTTON, not the `<span>` twBtn's placeholder uses: that span holds its width by
+        // carrying the glyph, and an empty one would collapse. An empty disabled button takes
+        // `.eye`'s own 20x18 box with no CSS of its own, so the column is exactly the width it
+        // is on every other row. `visibility: hidden` already keeps it out of the a11y tree
+        // and out of tab order; `disabled` says so to anything that reads markup instead.
+        (live ? eyeBtn('data-eye="' + esc(g) + '"', vis, g)
+              : '<button class="eye none" disabled aria-hidden="true"></button>') +
         '<button class="lg" data-g="' + esc(g) + '" data-hl="' + (hl ? "on" : "off") +
           '" aria-pressed="' + vis + '" title="Highlight ' + esc(g) + '">' +
         // THE SWATCH SAYS WHICH RING, by its size: a small square for the inner band and a
@@ -7717,11 +8520,22 @@ function mountVaultGraph(root, data, deps) {
         // vocabulary, and the inner ring IS the smaller ring -- so the mark and the thing it
         // stands for read the same way round.
         '<span class="sw' + (bandLock && bandLock[g] ? ' sw-in' : '') +
-          '" title="' + (bandLock && bandLock[g] ? 'Inner ring' : 'Outer ring') +
-          '" style="background:' + colorOf(g) + '"></span>' +
+          '" title="' + swatchTitle(g, bandLock) +
+          '" style="background:' + swatchFill(g) + '"></span>' +
         '<span class="nm" title="' + esc(g) + '">' + esc(g) + '</span>' +
-        '<span class="only" data-only="1" title="Show only ' + esc(g) + '">only</span>' +
-        '<span class="ct">' + counts[g] + '</span></button>' +
+        // A PLACEHOLDER, NOT AN OMISSION, and the suite is what taught this: `.lg` declares
+        // four grid tracks (sw | name | only | count) and dropping the chip outright moved the
+        // count into track THREE, leaving track four empty -- so the count ended one 8px gap
+        // left of every other row and "nav counts share one right edge" measured 2 edges
+        // instead of 1. That invariant's own note says the alignment comes from `.ct`'s
+        // min-width rather than from the grid, which is half of it: the min-width fixes the
+        // count's WIDTH, and being in the last track is what fixes its right EDGE.
+        (live ? '<span class="only" data-only="1" title="Show only ' + esc(g) + '">only</span>'
+              : '<span class="only none" aria-hidden="true"></span>') +
+        // Three answers, and they moved out to countText() when github#50 added the third --
+        // see its own comment for which is which and why the bracketed form is reserved for a
+        // row drawing nothing.
+        '<span class="ct">' + countText(g) + '</span></button>' +
         '</div>';
 
       // Subfolders are listed only when they actually get their own wedges, so the
@@ -7756,11 +8570,16 @@ function mountVaultGraph(root, data, deps) {
           var pk = g + "/" + sb, tint = subShade[pk] || colorOf(g);
           // A named sub-wedge gets a twisty of its own when the vault nests deeper
           // under it -- that is how `00 1 on 1` keeps being one wedge of 62 notes AND
-          // opens to the seven people inside it.
+          // opens to the seven people inside it. NOT the "(directly in folder)" row
+          // (sb === ""): notes sitting directly in the folder have no children, and its
+          // path `g + "/"` collides with the kids-map key for g's FIRST-LEVEL subfolders
+          // (also `g + "/"`), so an unguarded twisty would nest every sibling subfolder
+          // under it -- with `g//sub` double-slash paths whose own only/hide then match no
+          // note and blank the disc.
           row += srow(tint, sb || "(directly in folder)", subCount[pk] || 0, [k], 1,
-                      kids[pk] ? 'data-twp="' + esc(pk) + '"' : null,
+                      (sb && kids[pk]) ? 'data-twp="' + esc(pk) + '"' : null,
                       !!state.pathOpen[pk]);
-          row += subtree(pk, 2, tint);
+          if (sb) row += subtree(pk, 2, tint);
         });
         var tail = subs.slice(SUB_NAMED);
         if (tail.length) {
@@ -7781,9 +8600,9 @@ function mountVaultGraph(root, data, deps) {
               var pk = g + "/" + sb, tint = subShade[pk] || colorOf(g);
               row += srow(tint, sb || "(directly in folder)", subCount[pk] || 0,
                           [SUB_NAMED + j], 2,
-                          kids[pk] ? 'data-twp="' + esc(pk) + '"' : null,
+                          (sb && kids[pk]) ? 'data-twp="' + esc(pk) + '"' : null,
                           !!state.pathOpen[pk]);
-              row += subtree(pk, 3, tint);
+              if (sb) row += subtree(pk, 3, tint);
             });
           }
         }
@@ -7972,6 +8791,12 @@ function mountVaultGraph(root, data, deps) {
         if (ev.target && ev.target.getAttribute("data-only")) {
           var h = state.hidden[state.dim] || (state.hidden[state.dim] = Object.create(null));
           (order[state.dim] || []).forEach(function (n) { h[n] = (n !== g); });
+          // "only this folder" means the WHOLE folder, every subfolder shown -- so clear any
+          // subfolder-only state left by a prior onlySubs/onlyUnder. Without this, soloing a
+          // subfolder and then soloing its parent folder keeps every other subfolder hidden,
+          // so the folder's own `only` appears to do nothing. onlySubs/onlyUnder reset
+          // hiddenSub the same way for the same reason.
+          state.hiddenSub = Object.create(null);
           buildLegend();
           cascade(null, { colToggle: true });
           return;
@@ -7982,6 +8807,44 @@ function mountVaultGraph(root, data, deps) {
         renderer.refresh();
       };
     });
+
+    // AND THE ROW UNDER THE POINTER KEEPS ITS HALO ACROSS THE REBUILD (github#46).
+    // buildLegend opens by clearing the hover, because every row is about to be replaced and
+    // the old one's mouseleave will never fire. That is still right, and it was only half the
+    // problem: the REPLACEMENT row under a stationary pointer gets no mouseenter either, so
+    // clicking a row's `only` chip dropped the halo of the very folder it had just soloed.
+    // Chrome re-dispatches a mousemove at the real cursor after some DOM rebuilds and not
+    // others -- see the demo-cursor note further down, which was bitten by the same thing --
+    // and that is what made this read as intermittent rather than broken: the halo came back
+    // if the mouse happened to twitch, and stayed gone if it did not.
+    //
+    // ASKED OF THE DOM, not remembered from the click. elementFromPoint is the same hit-test
+    // the browser itself would run, so this cannot disagree with what a real mousemove would
+    // have found -- including the case where the rebuild moves the rows around underneath a
+    // pointer that never left, which soloing does (every other row leaves the legend).
+    if (ptr) {
+      var hit = null, hitSub = null, hitPath = null;
+      for (var up = DOC.elementFromPoint(ptr.x, ptr.y); up && up !== DOC.body; up = up.parentElement) {
+        if (!up.getAttribute) continue;
+        if (up.getAttribute("data-hsub")) { hitSub = up; break; }
+        if (up.getAttribute("data-hpath")) { hitPath = up; break; }
+        if (up.getAttribute("data-g") && up.classList && up.classList.contains("lg")) { hit = up; break; }
+      }
+      // The same three resolutions the row handlers above use, and deliberately those rather
+      // than a shared helper: a subfolder row carries tint-slot INDICES, and only subOrder
+      // turns those back into the names hoverHighlight wants; a deep subfolder row (data-hpath)
+      // already carries its full path, exactly what its own onmouseenter hands hoverHighlight.
+      if (hitSub) {
+        var fSub = hitSub.getAttribute("data-hsub"), subsSub = subOrder[fSub] || [];
+        hoverHighlight(null, (hitSub.getAttribute("data-idx") || "").split(",").map(function (i) {
+          return fSub + "/" + subsSub[+i];
+        }));
+      } else if (hitPath) {
+        hoverHighlight(null, [hitPath.getAttribute("data-hpath")]);
+      } else if (hit) {
+        hoverHighlight(hit.getAttribute("data-g"), null);
+      }
+    }
   }
 
   // THE DEFAULT VISIBILITY, in one place, for the same reason collapseAll exists: boot and
@@ -8006,9 +8869,39 @@ function mountVaultGraph(root, data, deps) {
   }
   var collapsedInit = false;
 
-  function regroup() {
+  // `skipLayout` EXISTS FOR THE ANIMATED CALLER, and only for it. regroup ends by laying the
+  // disc out (below), which is what boot wants: one call, and the notes are where they belong.
+  // hardRelayout(true) wants the opposite -- it is about to tween FROM the positions the notes
+  // are standing in now, and a layout here would have already moved them there, so the tween
+  // would run its full length interpolating a note from where it ended up to where it ended
+  // up. That is exactly what github#45 turned out to be: the tween was running perfectly and
+  // had nothing left to carry (measured, 943u of the move landing synchronously and 3u over
+  // the following 1.2s).
+  // `bandHint` PINS GROUPS TO THE RING THEY WERE ALREADY IN, and is applied before the
+  // geometry is derived, which is the whole point of taking it here rather than fixing
+  // bandLock up afterwards. The second buildWedgePlan below re-plans against the locked bands
+  // and is what produces geomLock -- including each band's TOTAL WEIGHT, which every group's
+  // arc is a share of. Pin the bands after that has run and the totals belong to a different
+  // split than the one being drawn: each group in the band then claims a larger share than it
+  // is owed, the shares sum past a full turn, and wedges overlap.
+  // `keepAlpha` LEAVES THE FADES TO THE CASCADE. regroup's syncAlpha snaps every note's
+  // alpha to its resting value, which is right for boot and for an instant relayout -- and
+  // wrong for the deferred path, whose whole point is that a cascade is about to animate the
+  // change. Measured on the demo vault with archives hidden: a hidden folder's unlinked notes
+  // became (unlinked) members at the click, syncAlpha snapped them to alpha 1 at their stale
+  // positions before the cascade could record them at 0, and the cascade then saw nothing to
+  // fade -- an instant wedge with several notes. A folder toggle never touches alphas outside
+  // its cascade; with this flag, neither does the membership toggle.
+  function regroup(skipLayout, bandHint, keepAlpha) {
     counts = computeOrder();
+    // Snapshotted before buildColors overwrites it, so the walk below knows what each group
+    // is coming FROM. Cheap -- one string per group, and there are tens of those.
+    var colorsBefore = null;
+    Object.keys(groupColor).forEach(function (g) {
+      (colorsBefore || (colorsBefore = Object.create(null)))[g] = groupColor[g];
+    });
     buildColors();
+    colorWalk(colorsBefore);
     // Once, at boot. Not on every regroup: __vg.relayout() calls this too, and
     // re-collapsing there would throw away whatever the user had opened -- which is
     // exactly why seedHidden belongs in here with it rather than beside it. Seeding the
@@ -8022,6 +8915,9 @@ function mountVaultGraph(root, data, deps) {
       if (base) {
         bandLock = Object.create(null);
         base.cells.forEach(function (c) { bandLock[c.g] = c.inner; });
+        // Every hinted group, including one the fresh plan has no cell for -- a group being
+        // emptied is exactly that, and it still holds notes for the length of the animation.
+        if (bandHint) Object.keys(bandHint).forEach(function (g) { bandLock[g] = bandHint[g]; });
         // maxR is kept as well as the two band radii: the edge curvature needs to
         // know how big the disc is to judge which chords pass near its centre.
         // Each band's OUTER EDGE, in graph units, which is what the seam is sized against.
@@ -8089,12 +8985,85 @@ function mountVaultGraph(root, data, deps) {
       }
     }
     buildLegend();
-    syncAlpha();
-    applyLayout(false);
+    if (!keepAlpha) syncAlpha();
+    // The caller lays out instead when it means to animate -- see skipLayout's note above.
+    if (!skipLayout) applyLayout(false);
     // The band paints with nodeColor(), which buildColors() just re-derived. That is
     // invisible to heatDraw's signature -- it tracks counts, not hues -- so the
     // cached paint is dropped explicitly rather than waiting for a count to move.
     if (heat) { heatSig = ""; heatDraw(); }
+  }
+
+  // A FULL, FROM-SCRATCH RELAYOUT -- for when GROUP MEMBERSHIP OR THE BAND SPLIT ITSELF
+  // may have changed, not just what is visible or which note sits in the hub. NOT the
+  // same job hubChanged() does: pinning a note excludes it from the ring plan entirely
+  // and never touches which group anything is in or how big any wedge is, so
+  // hubChanged() only needs pinnedPlan cleared and a replay. This is for the one thing
+  // that DOES move membership -- unlinkedByFolder (github#3, reopened) -- and mirrors
+  // __vg.relayout()'s own reset exactly, extracted here so a second live caller is not a
+  // second copy of it: cancel whatever's animating, drop every locked geometry cache,
+  // regroup() (recomputes counts, colours and, because bandLock is null, the band split
+  // itself from scratch), then lay out fresh.
+  // `deferLayout` REBUILDS EVERYTHING BUT THE LAYOUT -- locks, counts, colours -- and leaves
+  // the disc standing where it is. For a caller that is about to cascade: the cascade is what
+  // walks the disc to the new arrangement, and laying it out here first would put every note
+  // at its destination before the animation had a chance to carry it there.
+  function hardRelayout(animate, deferLayout) {
+    stopPlay();
+    if (cascadeRun) {
+      WIN.cancelAnimationFrame(cascadeRun.raf);
+      WIN.clearTimeout(cascadeRun.guard);
+      cascadeRun = null;
+    }
+    if (anim) { WIN.cancelAnimationFrame(anim); anim = null; }
+    if (animGuard) { WIN.clearTimeout(animGuard); animGuard = null; }
+    // A CANCELLED MOVE CASCADE RELEASES ITS MOVERS. moveFrom is cleared by settle(), and
+    // cancelling the cascade above means settle never runs -- left set, every un-crossed
+    // mover answers groupOf with the group it was leaving, forever: measured as the
+    // (unlinked) count stuck at 0 with 139 notes standing in it, when a caller interrupted
+    // the animation and asked for the new state. The interrupt lands everything, so the
+    // movers land too.
+    moveFrom = null; splitHold = null;
+    pinnedPlan = null; planKeep = null;
+    roomNow = null; cellNow = null; edgeNow = null; colWalk = null;
+    posSrc = posDst = null;
+    // BANDLOCK IS SUPPOSED TO BE STICKY. It exists so that filtering cannot migrate a group
+    // from one ring to the other -- see its own note -- and a membership change is a filter's
+    // kind of event, not a Refresh's. Rebuilding it wholesale moved groups between rings and
+    // cost one frame of ~180% of the disc's radius at the start of the gesture, on every
+    // fixture. Leaving it alone entirely was worse in a different way: a group gaining its
+    // first notes has no entry at all, defaulted to the outer ring, and the animation finished
+    // in an arrangement the resting layout disagreed with.
+    //
+    // So the two are separated. Every group that ALREADY had a band keeps it, and only a group
+    // without one takes the fresh plan's answer. The geometry goes with the bands: recomputing
+    // the radii around a split that has not changed is what produced the jump, so the previous
+    // geomLock is kept whenever there was one.
+    var prevBand = bandLock, prevGeom = geomLock;
+    bandLock = null; geomLock = null;
+    if (deferLayout && prevBand) {
+      // The previous ring assignment goes in as a HINT so a group the fresh plan does not
+      // know (one being emptied, still holding notes) keeps its ring, and a NEW group takes
+      // the fresh plan's answer.
+      regroup(true, prevBand, true);
+      // AND THE GEOMETRY IS NOT RE-DERIVED AT ALL (github#49, asked directly: "why do the
+      // rings breathe, when radius should stay constant"). The locks are sticky by design --
+      // hide a 500-note folder and the rings hold still while the notes re-pack denser
+      // inside them; only Refresh re-derives. A membership toggle is a filter-class event,
+      // so it keeps the stage too. Two earlier answers were both worse: re-deriving resized
+      // every ring at the click (r0 +25% on the dominant-folder fixture), and walking the
+      // geometry between old and new smoothed that resize without answering why the stage
+      // was moving at all.
+      if (prevGeom) geomLock = prevGeom;
+      return;
+    }
+    // SKIPPING regroup's own layout, because the one on the next line is the same work and
+    // this function is the only caller that can animate it. Doing both meant the snap always
+    // won and the tween had nothing to move (github#45); it was also a whole redundant
+    // ringsLayout pass on a path that already rebuilds every lock above.
+    regroup(true);
+    if (!deferLayout) applyLayout(!!animate);
+    if (renderer) renderer.refresh();
   }
 
 
@@ -8142,6 +9111,11 @@ function mountVaultGraph(root, data, deps) {
   // not, so this is the one hook that still runs when the thing it is fixing happens.
   var introOwed = false;      // hidden at load: the intro is owed to the first look at the tab
   if (DOC && typeof DOC.addEventListener === "function") {
+    // Passive and capturing, so it still sees the move when something above it stops
+    // propagation, and so it can never delay a scroll. See `ptr`'s own note.
+    DOC.addEventListener("mousemove", function (ev) {
+      ptr = { x: ev.clientX, y: ev.clientY };
+    }, { capture: true, passive: true });
     DOC.addEventListener("visibilitychange", function () {
       var away = typeof DOC.visibilityState === "string"
         ? DOC.visibilityState === "hidden" : !!DOC.hidden;
@@ -8682,7 +9656,25 @@ function mountVaultGraph(root, data, deps) {
     // autoKey is the folder's own automatic slot, omitted by the subfolder caller below --
     // a subfolder's automatic colour is a computed tint, not one of these twelve, so there
     // is nothing among them for it to mark. See page.css's data-auto rule.
-    function openCtxMenu(x, y, current, onPick, autoKey) {
+    //
+    // visShown/onToggleVisible are github#34: a folder's "hidden by default"
+    // (hiddenByDefault/pickVisible, both pre-existing -- see the settings panel's own eye
+    // button, which calls the same pickVisible) is otherwise reachable only from the
+    // settings panel. Both omitted by the subfolder caller, same reasoning as autoKey --
+    // there is no per-subfolder default-visibility setting to toggle, only per-folder.
+    //
+    // byFolderOn/onToggleByFolder are github#3 (reopened): whether an unlinked note joins
+    // its own folder's group instead of sitting apart in this one. Meaningful for exactly
+    // one caller -- the (unlinked) row, the only group this can ever apply to -- so every
+    // other caller omits both, same as autoKey/visShown above.
+    //
+    // tintOn/onToggleTint are github#3 (re-read again): a SEPARATE question from
+    // byFolderOn -- whether a note still standing in this group (byFolderOn false) wears
+    // its own folder's tint instead of the flat swatch, rather than whether it stands here
+    // at all. The caller passes both only when byFolderOn is itself false: with every
+    // unlinked note already joined to its folder there is nothing left in this group for a
+    // colour source to apply to.
+    function openCtxMenu(x, y, current, onPick, autoKey, visShown, onToggleVisible, byFolderOn, onToggleByFolder, tintOn, onToggleTint) {
       var el = $("ctxmenu");
       if (!el) return;
       var pal = paletteInfo();
@@ -8690,12 +9682,62 @@ function mountVaultGraph(root, data, deps) {
         role: "menuitemradio", current: current, autoKey: autoKey,
         titleFor: function (on, isAuto) { return isAuto ? " (automatic)" : ""; }
       });
+      // THE LABEL NAMES THE SETTING AND HOLDS STILL; aria-pressed SAYS WHETHER IT IS ON.
+      //
+      // All three of these rows used to flip their WORDING with their state as well as
+      // their pressed-ness, and that reads exactly backwards. A button in a menu reads as
+      // an action -- so on a vault where unlinked notes already join their folders, the row
+      // said "Joins its folder", and clicking the thing you wanted made it stop. It also
+      // put this menu at odds with the settings panel, whose rows for the same two settings
+      // carry a fixed label and let the toggle hold the state; the comment that used to sit
+      // here claimed the two surfaces matched, and they had not for some time. A screen
+      // reader got the worst of it, announcing "Kept separate, not pressed" -- the inverse
+      // of the truth, because the state was encoded twice and the two encodings disagreed.
+      //
+      // So the visible text is the property, stable in both states the way a checkbox's
+      // label is, and the TITLE carries the action -- what this click will do, which is the
+      // one thing neither a property label nor a pressed state can say on its own.
+      //
+      // data-vis has no value here (unlike the settings panel's data-vis="<folder>"):
+      // onToggleVisible is already bound to the right folder by the caller, so there is
+      // nothing to read back off the DOM.
+      var visTitle = visShown ? "Hide this folder by default" : "Show this folder by default";
+      var visHTML = onToggleVisible
+        ? '<button class="vis" data-vis aria-pressed="' + visShown + '" title="' + visTitle +
+          '">' + eyeSvg(visShown) + '<span>Shown by default</span></button>'
+        : "";
+      // SAME MARKUP SHAPE AS visHTML above, one row further down -- data-byfolder, same
+      // reasoning as data-vis (the caller already knows which group, nothing to read back).
+      var byFolderTitle = byFolderOn
+        ? "Keep unlinked notes in their own group instead"
+        : "Let each unlinked note join its own folder's group";
+      var byFolderHTML = onToggleByFolder
+        ? '<button class="vis" data-byfolder aria-pressed="' + byFolderOn + '" title="' +
+          byFolderTitle + '">' + dotSvg(byFolderOn) + '<span>Joins its folder</span></button>'
+        : "";
+      // SAME MARKUP SHAPE AGAIN -- data-tint, same reasoning as data-vis/data-byfolder.
+      var tintTitle = tintOn
+        ? "Use the flat unlinked swatch instead"
+        : "Give each unlinked note its own folder's colour";
+      var tintHTML = onToggleTint
+        ? '<button class="vis" data-tint aria-pressed="' + tintOn + '" title="' +
+          tintTitle + '">' + dotSvg(tintOn) + '<span>Colour by folder</span></button>'
+        : "";
       setHTML(el, '<div class="sws">' + sws + '</div>' +
                   '<button class="auto" data-key="" aria-pressed="' + !current +
-                  '" title="Back to automatic">Auto</button>');
+                  '" title="Back to automatic">Auto</button>' + visHTML + byFolderHTML + tintHTML);
       Array.prototype.forEach.call(el.querySelectorAll("[data-key]"), function (b) {
         b.onclick = function () { onPick(b.getAttribute("data-key") || null); closeCtxMenu(); };
       });
+      if (onToggleVisible) {
+        el.querySelector("[data-vis]").onclick = function () { onToggleVisible(); closeCtxMenu(); };
+      }
+      if (onToggleByFolder) {
+        el.querySelector("[data-byfolder]").onclick = function () { onToggleByFolder(); closeCtxMenu(); };
+      }
+      if (onToggleTint) {
+        el.querySelector("[data-tint]").onclick = function () { onToggleTint(); closeCtxMenu(); };
+      }
       el.hidden = false;
       var root0 = ROOT.getBoundingClientRect();
       var rx = x - root0.left, ry = y - root0.top;
@@ -8719,8 +9761,21 @@ function mountVaultGraph(root, data, deps) {
       if (gBtn) {
         ev.preventDefault();
         var g = gBtn.getAttribute("data-g");
+        // Both extra toggles are only offered on (unlinked) -- every other group's notes
+        // are already coloured by folder and already stand in their own group, so there is
+        // nothing for either to mean there. The tint toggle specifically is only offered
+        // once membership itself is off (kept separate): with every unlinked note already
+        // joined to its folder there is nothing left in this group for a colour source to
+        // apply to.
+        var isUnlinked = g === UNLINKED;
+        var keptSeparate = isUnlinked && !unlinkedByFolder;
         openCtxMenu(ev.clientX, ev.clientY, folderColors[g] || groupSlot[g] || "",
-                    function (key) { pickColor(g, key); }, groupAutoSlot[g] || "");
+                    function (key) { pickColor(g, key); }, groupAutoSlot[g] || "",
+                    !hiddenByDefault(g), function () { pickVisible(g); },
+                    isUnlinked ? unlinkedByFolder : undefined,
+                    isUnlinked ? function () { setUnlinkedByFolder(!unlinkedByFolder, true); } : undefined,
+                    keptSeparate ? unlinkedTintByFolder : undefined,
+                    keptSeparate ? function () { setUnlinkedTintByFolder(!unlinkedTintByFolder, true); } : undefined);
         return;
       }
       // The pooled tail row ("N smaller subfolders") carries several indices -- a pick
@@ -8827,15 +9882,24 @@ function mountVaultGraph(root, data, deps) {
       }).join("");
     }
 
-    // GENERIC BOOLEAN OPTIONS for the standalone settings panel -- one row today
-    // (compactAxis, github#23), written as a table so a second one is an entry here, not a
-    // new mechanism. Reuses the existing .mini button[aria-pressed] convention (a toggle
-    // shows its state by being filled; the label stays constant), so no new CSS is needed.
+    // GENERIC BOOLEAN OPTIONS for the standalone settings panel -- two rows now
+    // (compactAxis, github#23; unlinkedByFolder, github#3 reopened), written as a table so
+    // a second one is an entry here, not a new mechanism. Reuses the existing
+    // .mini button[aria-pressed] convention (a toggle shows its state by being filled; the
+    // label stays constant), so no new CSS is needed.
     var OPTION_ROWS = [
       { key: "compactAxis", label: "Compact date axis",
         title: "Give each year width by how many notes it holds, instead of every year reading the same width",
         get: function () { return compactAxis; },
-        set: function (v) { setCompactAxis(v, true); } }
+        set: function (v) { setCompactAxis(v, true); } },
+      { key: "unlinkedByFolder", label: "Unlinked notes join their folder",
+        title: "A note with no links takes its own folder's wedge and colour, instead of sitting apart in a separate unlinked group -- also reachable by right-clicking the (unlinked) row",
+        get: function () { return unlinkedByFolder; },
+        set: function (v) { setUnlinkedByFolder(v, true); } },
+      { key: "unlinkedTintByFolder", label: "Colour unlinked notes by folder",
+        title: "While unlinked notes are kept as their own group, give each one its own folder's colour instead of the flat unlinked swatch -- also reachable by right-clicking the (unlinked) row",
+        get: function () { return unlinkedTintByFolder; },
+        set: function (v) { setUnlinkedTintByFolder(v, true); } }
     ];
     function buildOptions() {
       var host = $("optbody");
@@ -8931,6 +9995,18 @@ function mountVaultGraph(root, data, deps) {
   // put the ratio back.
   var FIT_RATIO = 1.08;      // the full disc, filling the stage
 
+  // WHETHER THE CAMERA IS STILL WHERE fit() LAST PUT IT (github#14). A folder hidden or
+  // shown can shrink the disc into a fraction of the locked extent, and nothing reframed
+  // the camera to match -- but reframing unconditionally on every filter change would yank
+  // the view out from under anyone who had deliberately panned or zoomed first. camAtRest
+  // is the record of which case this is: true whenever the camera is known to sit at fit()'s
+  // own target, false the moment anything else moves it (a drag, a wheel notch, zoomBy(),
+  // centerOn() -- all of it arrives through the one cam.on("updated") listener below with no
+  // special casing needed). `fitting` is the guard that keeps fit()'s OWN camera.animate()
+  // from being mistaken for one of those: it fires "updated" on every frame of its own
+  // tween, same as a drag would.
+  var camAtRest = true, fitting = false;
+
   /**
    * FIT THE DISC THAT IS THERE, not the one the vault started with.
    *
@@ -8971,6 +10047,12 @@ function mountVaultGraph(root, data, deps) {
 
   function fit() {
     var to = { x: 0.5, y: 0.5, ratio: fitRatio(), angle: 0 };
+    // Marked BEFORE the animate() call, not after: sigma's "updated" can fire on the very
+    // next tick. Cleared in the completion callback rather than after a fixed delay -- a
+    // stale callback from an animation this same function cut short by calling fit() again
+    // just re-arrives here and re-sets the same true/false pair a second time, harmlessly.
+    fitting = true;
+    var landed = function () { fitting = false; camAtRest = true; };
     // SIGMA DROPS x AND y WHILE PANNING IS OFF (Camera.validateState), so with the pan
     // toggle off this would apply the ratio and leave the disc wherever it was last
     // dragged -- centring that does not centre. Panning is turned back on for the flight
@@ -8980,10 +10062,11 @@ function mountVaultGraph(root, data, deps) {
       renderer.setSetting("enableCameraPanning", true);
       renderer.getCamera().animate(to, { duration: 380 }, function () {
         renderer.setSetting("enableCameraPanning", false);
+        landed();
       });
       return;
     }
-    renderer.getCamera().animate(to, { duration: 380 });
+    renderer.getCamera().animate(to, { duration: 380 }, landed);
   }
 
   // The wheel's own step, so a button press and a notch agree. Sigma's zoomingRatio is the
@@ -9032,6 +10115,91 @@ function mountVaultGraph(root, data, deps) {
     if (dateSpan) drawDateUI();
     if (persist && onCompactAxis) onCompactAxis(compactAxis);
     return compactAxis;
+  }
+
+  // github#3 (reopened): MOVES every unlinked note into its own folder's group live -- not
+  // a repaint, a REGROUP. groupOf(id) is what decides wedge, band, colour, count, filter
+  // and highlight for every note in the file (see its own comment), so flipping the one
+  // thing it reads makes every unlinked note change groups, which changes every group's
+  // size, which changes wedge angles and can move the inner/outer band split -- the same
+  // shape of change as switching state.dim, not the same shape as a colour override or a
+  // hub pin (hubChanged() is the wrong precedent here: pinning excludes a note from the
+  // ring plan entirely and never touches membership). hardRelayout() (just above) is the
+  // shared reset for exactly this shape of change.
+  //
+  // hardRelayout(TRUE) now, and the reasoning that made it (false) turned out to be about
+  // the wrong layer (github#45). The worry was that a tween "would need to reconcile two
+  // plans that disagree about which wedge a note is even in" -- but animateTo does not
+  // reconcile plans at all. It reads one number per note, the target ringsLayout() just
+  // produced, and sweeps the note to it in polar space; it never asks which group either
+  // end belongs to. And the stale state the snap was protecting against is cleared by
+  // hardRelayout itself, above, before the new plan is built -- the same clearing the
+  // animated path gets.
+  //
+  // So a regroup animates for the same reason a filter change does: the note is going
+  // somewhere, and showing it go is what tells you the (unlinked) population went INTO the
+  // folders rather than being replaced by a different picture. The one thing genuinely new
+  // here is the LENGTH of the journey -- a note crossing to another wedge can sweep most of
+  // the way round the disc, where a filter change only ever moves it within its own. That
+  // is exactly what the toggle is claiming happened, so it is the animation doing its job.
+  // `instant` SKIPS THE ANIMATION AND NOTHING ELSE. The debug API sets state; it does not
+  // perform the gesture, and a caller that assigns a setting and reads the result on the next
+  // line is asking about the model, not about what is on screen. While a move is in flight
+  // groupOf deliberately answers with the group each note is LEAVING, so a colour read during
+  // one is the pre-move colour -- correct, and not what a state-setting call means to ask.
+  // The two real gestures (the legend's right-click row and the settings panel) animate.
+  function setUnlinkedByFolder(on, persist, instant) {
+    var next = !!on;
+    // WHICH GROUP EACH NOTE IS LEAVING, captured before the setting changes -- afterwards
+    // there is nothing left that remembers. Only notes actually on screen: one already hidden
+    // by a folder filter or the date range has no fade to run, and handing it to the cascade
+    // would leave the animation waiting on a note nobody can see.
+    var movesFrom = null, n = 0;
+    if (renderer && !instant && next !== unlinkedByFolder) {
+      graph.forEachNode(function (id) {
+        if (!isOrphan(id) || !visible(id) || (alpha[id] || 0) <= 0.004) return;
+        if (!movesFrom) movesFrom = Object.create(null);
+        movesFrom[id] = groupOf(id);
+        n++;
+      });
+    }
+    // THE SETTING CHANGES NOW, not when the animation finishes. Everything that asks the
+    // model a question -- the counts, the legend, the colours, the debug API -- is answered
+    // in the new state from this line on. Only the DRAWING lags, and only for the notes that
+    // are moving, which is what the cascade below is for. An earlier attempt ran the two
+    // halves as a sequence of cascades and deferred the flip to the end of the first; that
+    // made a plain setter asynchronous and broke five invariants that quite reasonably expect
+    // a toggle to have toggled.
+    unlinkedByFolder = next;
+    var btn = $("opt-unlinkedByFolder");
+    if (btn) btn.setAttribute("aria-pressed", unlinkedByFolder ? "true" : "false");
+    // deferLayout while there is something to animate: the cascade walks the disc there.
+    hardRelayout(false, !!n);
+    try { placeLogo(); } catch { /* logo not mounted yet */ }
+    try { heatBuild(); } catch { /* heatmap not built yet */ }
+    try { buildLegend(); } catch { /* legend not built yet */ }
+    if (persist && onUnlinkedByFolder) onUnlinkedByFolder(unlinkedByFolder);
+    if (n) cascade(null, { colToggle: true, movesFrom: movesFrom });
+    return unlinkedByFolder;
+  }
+
+  // github#3 (re-read again): recolours whichever unlinked notes are still standing in the
+  // (unlinked) group live -- unlike setUnlinkedByFolder above, this never changes
+  // membership, so it is exactly as broad a recolour as a folder override is, not a
+  // regroup. buildUnlinkedTint() alone is enough (no group's own colour changed, only
+  // whether unlinked notes are allowed to read their folder's), same reasoning
+  // applySubfolderColors uses for calling buildSubShades() alone instead of buildColors().
+  function setUnlinkedTintByFolder(on, persist) {
+    unlinkedTintByFolder = !!on;
+    buildUnlinkedTint();
+    var btn = $("opt-unlinkedTintByFolder");
+    if (btn) btn.setAttribute("aria-pressed", unlinkedTintByFolder ? "true" : "false");
+    if (renderer) renderer.refresh();
+    try { placeLogo(); } catch { /* logo not mounted yet */ }
+    try { heatBuild(); } catch { /* heatmap not built yet */ }
+    try { buildLegend(); } catch { /* legend not built yet */ }
+    if (persist && onUnlinkedTintByFolder) onUnlinkedTintByFolder(unlinkedTintByFolder);
+    return unlinkedTintByFolder;
   }
 
   function savePng() {
@@ -10748,6 +11916,29 @@ function mountVaultGraph(root, data, deps) {
       }
       return null;                              // the menu is closed, so nothing to aim at
     }
+    // The right-click menu's OWN "hidden by default" toggle (github#34) -- only present
+    // when the menu was opened on a top-level folder's row, not a subfolder's (see
+    // openCtxMenu: onToggleVisible is omitted there). No arg, unlike ctxswatch: there is
+    // only ever one.
+    if (kind === "ctxvis") {
+      var cmv = $("ctxmenu");
+      if (!cmv || cmv.hidden) return null;
+      return cmv.querySelector("[data-vis]");    // null on a subfolder's menu, or if closed
+    }
+    // The right-click menu's "joins its folder" toggle (github#3, re-read again) -- only
+    // present when the menu was opened on the (unlinked) row itself, same shape as ctxvis.
+    if (kind === "ctxbyfolder") {
+      var cmb = $("ctxmenu");
+      if (!cmb || cmb.hidden) return null;
+      return cmb.querySelector("[data-byfolder]");
+    }
+    // The right-click menu's "colour by folder" toggle -- only present on the (unlinked)
+    // row AND only once unlinkedByFolder is already off (see openCtxMenu's own caller).
+    if (kind === "ctxtint") {
+      var cmt = $("ctxmenu");
+      if (!cmt || cmt.hidden) return null;
+      return cmt.querySelector("[data-tint]");
+    }
     // A YEAR CHIP under the strip. "busiest" picks the fullest year that HAS a chip, which
     // is not the same as the fullest year: below about 20px of pitch buildYears names every
     // other year, so the busiest one may have no button to aim at. Choosing among the chips
@@ -11074,12 +12265,17 @@ function mountVaultGraph(root, data, deps) {
    *   * COLOURS LAST, because colour is a preference and every earlier act should land
    *     on the disc's own palette, not one an earlier take happened to leave behind.
    *
-   * COLOURS IS EXCLUDED FROM THE FULL RUN -- see FULL_RUN_EXCLUDES, just below this
-   * function. It still exists here and still plays on its own via `demoAct("colours")`,
-   * for docs/features/colours.md's own clip: right-clicking a top-level folder's row for
-   * its colour picker. But subfoldercolor already puts that same right-click menu on
-   * camera, one level down, and running the identical gesture twice in the same take
-   * added length without showing the reader anything new.
+   * SUBFOLDERCOLOR IS EXCLUDED FROM THE FULL RUN -- see FULL_RUN_EXCLUDES, just below
+   * this function. It still exists here and still plays on its own via
+   * `demoAct("subfoldercolor")`, for docs/features/subfoldercolor.md's own clip. Both it
+   * and `colours` put the identical right-click menu on camera, so running both in the
+   * same take added length without showing the reader anything new -- the same reasoning
+   * as before, the choice of which one just reversed: `colours` right-clicks a TOP-LEVEL
+   * folder's row directly, `subfoldercolor` needs its folder's twisty opened first (the
+   * precondition `subfolders`, the act just before it, exists to set up) -- one extra
+   * click and one extra settle for the full run to pay on every re-record for a gesture
+   * that reads the same either way. `colours` is cheaper to show and colour is already
+   * demonstrated at the folder level nowhere else in the full run, so it is what stays in.
    *
    * PIN IS EARLY ON PURPOSE, not tucked in near the end where it used to sit. It is the
    * one act that puts a note somewhere other than its lattice seat, and it earns being
@@ -11235,6 +12431,45 @@ function mountVaultGraph(root, data, deps) {
       { click: true, target: ["eye", "06"], act: "folders", why: "hide a folder -- the wedges reallocate" },
       { settle: true, act: "folders", why: "let the wedges reallocate" },
 
+      // AUTO-FIT (github#14). A folder big enough to shrink `reach` used to leave the
+      // camera framed for the vault that was there a moment ago -- an island of notes in
+      // otherwise empty stage. Showing it again is the more visible half on this vault's
+      // own shape (06 isn't dominant enough to shrink the demo disc much on the way out,
+      // but the return trip still grows it back past where it started); the dominant-folder
+      // fixture is where the shrink itself reads as dramatic, which is why the gallery
+      // entry cites that fixture's numbers rather than this one's.
+      { click: true, target: ["eye", "06"], act: "folders", why: "show it again -- the camera follows, since nothing has zoomed or panned since load" },
+      { settle: true, act: "folders", why: "let the camera and the wedges land together" },
+
+      // github#34: "hidden by default" -- previously reachable only from the settings
+      // panel's own eye buttons -- is now also on the SAME right-click menu the colours
+      // act uses, one row down from the swatches. "#1", the biggest folder, on purpose:
+      // the eye click just above moves a handful of wedges, and the point of putting this
+      // control in the legend is that it reaches the whole disc from where you are already
+      // looking -- worth showing on a gap big enough that the reallocation is unmistakable
+      // rather than a folder small enough to wonder if anything happened at all.
+      { rightclick: true, target: ["group", "#1"], act: "folders",
+        why: "right-click the biggest folder for its own menu" },
+      { settle: true, act: "folders", why: "let the menu open" },
+      { click: true, target: ["ctxvis", ""], act: "folders",
+        why: "hide it by default too, from the same menu" },
+      { settle: true, act: "folders", why: "the wedges reallocate around a much bigger gap" },
+
+      // AND PUT IT BACK, unlike the eye click above. That one only ever touched the LIVE
+      // filter (state.hidden), which `allon` further down restores along with everything
+      // else -- but this control writes folderShown, the DEFAULT, which nothing else in
+      // this act (or a later one) resets. Left toggled, the biggest folder would stay
+      // hidden by default for the rest of a full-storyboard run, including any act after
+      // this one that happens to re-derive its own starting state from the default rather
+      // than the live filter it's been running against on camera -- exactly the
+      // live-vs-default split this ticket exists to close, so leaving it dangling here
+      // would be its own small version of that bug.
+      { rightclick: true, target: ["group", "#1"], act: "folders", why: "right-click it again" },
+      { settle: true, act: "folders", why: "let the menu open" },
+      { click: true, target: ["ctxvis", ""], act: "folders",
+        why: "...and put the default back, so later acts start clean" },
+      { settle: true, act: "folders", why: "the wedges settle back" },
+
       // And `only`, which is the fastest way to answer "where does one folder live".
       // SAFE HERE because nothing has been unfolded yet: see the note at the top about the
       // 97px row shift that soloing an unfolded legend causes.
@@ -11313,9 +12548,11 @@ function mountVaultGraph(root, data, deps) {
       { settle: true, act: "camera", why: "let the view come back" },
 
       /* --- 11. colours -------------------------------------------------- */
-      // LAST regardless: colour is still a preference, and letting every earlier act
-      // land on an unmodified palette keeps a re-record of any of them from picking up
-      // a colour choice this one made.
+      // NEAR-LAST, not last of all any more (unlinked, below, is): colour is still a
+      // preference, and letting every earlier act land on an unmodified palette keeps a
+      // re-record of any of them from picking up a colour choice this one made. unlinked
+      // touches colour too (its own tint toggle), which is exactly why it runs after this
+      // one rather than before it.
       //
       // RIGHT-CLICK, not the gear -- the same twelve swatches, reached at the row
       // itself instead of a settings panel one trip away. The gear panel still exists
@@ -11341,17 +12578,105 @@ function mountVaultGraph(root, data, deps) {
       { click: true, target: ["ctxswatch", ""], act: "colours", why: "put it back to automatic too" },
       { settle: true, act: "colours", why: "let the palette snap back" },
 
+      /* --- 12. unlinked --------------------------------------------------- */
+      // LAST OF ALL, at explicit request -- this act's own toggles are colour-affecting
+      // (the tint half) AND membership-affecting (the join half moves notes between
+      // wedges), so it inherits the "runs last" reasoning colours had on its own and adds
+      // a second one: nothing later needs a clean, default membership to start from,
+      // because nothing runs after this.
+      //
+      // The (unlinked) row is ALWAYS in the legend now (github#3, re-read again) --
+      // greyed out and last of all whenever the toggle below is at its default -- so this
+      // act's own first right-click needs no setup the way, say, subfoldercolor's twisty
+      // does: the row is already there, on every fixture, regardless of how many notes
+      // are actually unlinked.
+      { rightclick: true, target: ["group", "(unlinked)"], act: "unlinked",
+        why: "right-click the (unlinked) row -- always last in the legend" },
+      { settle: true, act: "unlinked", why: "let the menu open" },
+      { click: true, target: ["ctxbyfolder", ""], act: "unlinked",
+        why: "keep unlinked notes separate instead of joining their folder" },
+      { settle: true, act: "unlinked", why: "the wedges reallocate -- unlinked notes get their own wedge back" },
+
+      // Now that the group has real members, the SECOND toggle exists: colouring them by
+      // folder while they stay put, rather than moving them out of the group.
+      { rightclick: true, target: ["group", "(unlinked)"], act: "unlinked",
+        why: "right-click it again, now that it holds its own notes" },
+      { settle: true, act: "unlinked", why: "let the menu open" },
+      { click: true, target: ["ctxtint", ""], act: "unlinked",
+        why: "colour them by their own folder anyway -- the row's swatch goes mixed" },
+      { settle: true, act: "unlinked", why: "the dots repaint, and the row's swatch turns into a gradient" },
+
+      // AND PUT BOTH BACK, same discipline the folders act's own default-visibility beats
+      // use (see that comment): these write settings a host persists, not just the live
+      // filter, and nothing runs after this act to reset them for a re-record of an
+      // earlier one -- or for the page a viewer is left looking at after the clip ends.
+      { rightclick: true, target: ["group", "(unlinked)"], act: "unlinked", why: "right-click it once more" },
+      { settle: true, act: "unlinked", why: "let the menu open" },
+      { click: true, target: ["ctxtint", ""], act: "unlinked", why: "...put the colour back to the flat swatch" },
+      { settle: true, act: "unlinked", why: "let the swatch go flat again" },
+      { rightclick: true, target: ["group", "(unlinked)"], act: "unlinked", why: "right-click it a last time" },
+      { settle: true, act: "unlinked", why: "let the menu open" },
+      { click: true, target: ["ctxbyfolder", ""], act: "unlinked",
+        why: "...and let unlinked notes rejoin their folders, back to the default" },
+      { settle: true, act: "unlinked", why: "the row empties and greys out again, back where it started" },
+
       // Pointer out of the way, so the last frame is the disc rather than a hover state
       // left behind by the last click.
-      { park: true, act: "colours", why: "leave the final frame clean" }
+      { park: true, act: "unlinked", why: "leave the final frame clean" },
+
+      /* --- 13. hidden by default ------------------------------------------ */
+      // A CLIP-ONLY ACT, and the SECOND one -- FULL_RUN_EXCLUDES keeps it out of the hero
+      // for exactly the reason subfoldercolor sits out: these beats put a menu row on
+      // camera that the full run already shows, in the folders act, and a hero that
+      // demonstrates the same control twice is a hero nobody watches to the end. Its
+      // position in this list therefore decides nothing -- an excluded act is filtered
+      // wherever it sits -- so it is appended rather than renumbered in beside folders.
+      //
+      // WHY IT EXISTS ANYWAY: github#34 is one of the two things 1.9.0 is actually about,
+      // and its only footage was six beats buried mid-way through folders.webp, after a
+      // hide/show pair and before a solo, both of which predate this release by several.
+      // A release section that embeds that clip is telling the reader "here is what's new"
+      // over a recording that mostly is not. Recorded alone, with demoAct's own leading
+      // settle and trailing park, it is the control and nothing else.
+      //
+      // "#1", THE BIGGEST FOLDER, and the same target the folders act aims at -- the point
+      // of moving this control into the legend is that it reaches the whole disc from
+      // where you are already looking, which only reads on a gap big enough that the
+      // reallocation is unmistakable.
+      { rightclick: true, target: ["group", "#1"], act: "hiddenbydefault",
+        why: "right-click the biggest folder for its own menu" },
+      { settle: true, act: "hiddenbydefault", why: "let the menu open" },
+      { click: true, target: ["ctxvis", ""], act: "hiddenbydefault",
+        why: "hide it by default, from the legend instead of the settings panel" },
+      { settle: true, act: "hiddenbydefault", why: "the wedges reallocate around a much bigger gap" },
+
+      // AND PUT IT BACK, for the reason the folders act's own copy of these beats does:
+      // this writes folderShown, the DEFAULT, which no later act and no `allon` resets. An
+      // isolated recording is not exempt -- the setting outlives the take, on the vault the
+      // recorder built and on whatever host is next asked to open it.
+      { rightclick: true, target: ["group", "#1"], act: "hiddenbydefault", why: "right-click it again" },
+      { settle: true, act: "hiddenbydefault", why: "let the menu open" },
+      { click: true, target: ["ctxvis", ""], act: "hiddenbydefault",
+        why: "...and put the default back, so the clip leaves nothing behind" },
+      { settle: true, act: "hiddenbydefault", why: "the wedges settle back" }
     ];
   }
 
   // ACTS THAT EXIST FOR THEIR OWN PER-FEATURE CLIP, but do not appear in the full run.
-  // Just "colours" for now: subfoldercolor already puts the same right-click colour menu
-  // on camera one level down, so replaying the identical gesture on a top-level folder
-  // too, right at the end of an 85-beat take, cost length without showing anything new.
-  var FULL_RUN_EXCLUDES = ["colours"];
+  // Two of them, and both are here because some other act already puts the same control
+  // on camera in the combined take:
+  //
+  //   subfoldercolor  it and "colours" open the identical right-click colour menu, so only
+  //                   one belongs in the full take. Was "colours" that sat out; swapped
+  //                   because subfoldercolor's version needs its folder's twisty opened
+  //                   first (an extra click, an extra settle, on every re-record), where
+  //                   colours reaches the same menu directly off a top-level row.
+  //   hiddenbydefault the folders act already toggles "hidden by default" mid-sequence.
+  //                   This act repeats those beats ALONE so github#34 has a clip that is
+  //                   only that control -- see its own section in demoMode().
+  //
+  // See the doc comment above demoMode() for the full reasoning.
+  var FULL_RUN_EXCLUDES = ["subfoldercolor", "hiddenbydefault"];
 
   // THE FULL STORYBOARD, with FULL_RUN_EXCLUDES filtered back out of demoMode()'s single
   // list -- what the hero recording actually plays. demoMode()'s own trailing park beat
@@ -11367,10 +12692,13 @@ function mountVaultGraph(root, data, deps) {
   }
 
   // ONE ACT IN ISOLATION, for a per-feature clip instead of the whole storyboard. `name`
-  // is one of the ten `act:` tags above (`intro`, `note`, `pin`, `timeline`, `heatmap`,
-  // `folders`, `subfolders`, `subfoldercolor`, `camera`, `colours`) -- the same names
-  // the section comments in demoMode() already carry, so tagging a beat and naming it
-  // here is one decision, not two.
+  // is one of the thirteen `act:` tags above (`intro`, `note`, `pin`, `compactaxis`,
+  // `timeline`, `heatmap`, `folders`, `hiddenbydefault`, `subfolders`, `subfoldercolor`,
+  // `camera`, `colours`, `unlinked`) -- the same names the section comments in demoMode()
+  // already carry, so tagging a beat and naming it here is one decision, not two. (This
+  // roster said "ten" and named ten while compactaxis and unlinked already existed; a
+  // list that has to be maintained by hand is worth spelling out anyway, because the
+  // alternative is a typo reaching demoAct's warning path instead of a reader.)
   //
   // Isolated acts don't need the full storyboard's ordering rules (folders-before-
   // subfolders): under `?demo` the page comes up at rest with no filter applied and
@@ -11487,6 +12815,17 @@ function mountVaultGraph(root, data, deps) {
                     // "Compact date axis" in the plugin saved correctly but silently never
                     // updated a view already open, unlike every sibling toggle here.
                     setCompactAxis: function (v) { return setCompactAxis(v !== false, false); },
+                    // Same shape as setCompactAxis just above (github#3, reopened) -- the
+                    // host (plugin/main.js) always resolves its own setting through
+                    // DEFAULT_SETTINGS before calling this, so `v` arrives here as an
+                    // explicit true/false already; `v === true` matches deps.unlinkedByFolder's
+                    // own "absent means on, only false turns it off" contract exactly, since
+                    // an explicit true is the one value that contract also reads as on.
+                    setUnlinkedByFolder: function (v) { return setUnlinkedByFolder(v !== false, false, true); },
+                    // Same shape again -- unlinkedTintByFolder defaults OFF, unlike the two
+                    // above, so this one keeps the v === true polarity that used to belong
+                    // to setUnlinkedByFolder before its own default flipped.
+                    setUnlinkedTintByFolder: function (v) { return setUnlinkedTintByFolder(v === true, false); },
                     // Push the defaults into the live filter and repaint. This is the
                     // "and now show it" half, kept separate so loading saved settings at
                     // boot cannot be confused with a person clicking an eye.
@@ -11796,6 +13135,7 @@ function mountVaultGraph(root, data, deps) {
                     applyLayout: applyLayout, isHighlighted: isHighlighted,
                     ringColors: ringColors,
                     colorOf: colorOf,
+                    nodeColor: nodeColor,
                     isArchiveGroup: isArchiveGroup,
                     get folderColors() {
                       return Object.assign(Object.create(null), folderColors);
@@ -11829,6 +13169,11 @@ function mountVaultGraph(root, data, deps) {
                     },
                     get panEnabled() { return panEnabled; },
                     get compactAxis() { return compactAxis; },
+                    get unlinkedByFolder() { return unlinkedByFolder; },
+                    get unlinkedTintByFolder() { return unlinkedTintByFolder; },
+                    // What the (unlinked) row's swatch is currently mixing -- a copy, not
+                    // the live array, so a check cannot accidentally mutate the cache.
+                    get unlinkedTintColors() { return unlinkedTintColors.slice(); },
                     // The pooled-tail rank a split cell's key ends in -- exposed so a check can
                     // derive it instead of hardcoding SUB_SLOTS-1, which is not itself public.
                     get subTailRank() { return SUB_SLOTS - 1; },
@@ -11847,6 +13192,78 @@ function mountVaultGraph(root, data, deps) {
                       heatBuild();
                       // No return: a setter returning a value is a TypeError under
                       // "use strict", which this file is.
+                    },
+                    // WHAT AN EDGE ACTUALLY DRAWS, in pixels, right now. Through edgePx, which
+                    // is the same function the focus-web overlay strokes with, so the number
+                    // reported here and the width on the canvas cannot drift apart.
+                    //
+                    // `id` narrows it to one note's own links, which is the question a hub
+                    // raises; without one it reports the whole visible web. `ribbonPx` is the
+                    // sum of the widths -- the number that says the fan has become a mass,
+                    // where any single width still looks reasonable next to the dot.
+                    // THE FOG, AS A NUMBER. edgeReport gives a stroke's WIDTH; this gives how
+                    // much of the stage the resting web actually covers, which is the thing
+                    // the eye reacts to and the thing a width only implies -- one link 1.2px
+                    // too wide is invisible, and 3737 of them crossing the same middle is a
+                    // grey wash (github#42).
+                    //
+                    // THE EDGES CANVAS ALONE. Sigma gives every layer its own canvas, so this
+                    // measures the web with no note, label or halo mixed into it. Composited
+                    // into a 2D canvas straight after a render, the way checkFocusWeb does it:
+                    // getImageData on a WebGL canvas is only valid while the drawing buffer is
+                    // still there, so the render and the read cannot be separated.
+                    //
+                    // `ink` is mean alpha over the stage, 0..1. Vault-dependent -- a bigger
+                    // web covers more -- so it is a number to record and compare against the
+                    // same vault, not one to bound.
+                    edgeInk: function () {
+                      if (!renderer) return "no renderer";
+                      renderer.render();
+                      var cv = renderer.getCanvases();
+                      if (!cv.edges) return "no edges canvas";
+                      var W = cv.edges.width, H = cv.edges.height;
+                      var off = DOC.createElement("canvas"); off.width = W; off.height = H;
+                      var ctx = off.getContext("2d");
+                      ctx.drawImage(cv.edges, 0, 0);
+                      var d = ctx.getImageData(0, 0, W, H).data;
+                      var sum = 0, lit = 0;
+                      for (var i = 3; i < d.length; i += 4) {
+                        if (d[i]) { sum += d[i]; lit++; }
+                      }
+                      var px = W * H;
+                      return {
+                        // Guards the WebGL read itself: a lost drawing buffer reports zero ink,
+                        // which is indistinguishable from a perfectly clean disc. `litPct` at
+                        // exactly 0 on a vault with edges means the READ failed, not the fog.
+                        ink: Math.round(1e5 * sum / 255 / px) / 1e5,
+                        litPct: Math.round(1e4 * lit / px) / 100,
+                        meanAlphaOfLit: lit ? Math.round(100 * sum / 255 / lit) / 100 : 0,
+                        edges: graph.size, px: px,
+                      };
+                    },
+                    edgeReport: function (id) {
+                      if (!renderer) return "no renderer";
+                      var floor = renderer.getSetting("minEdgeThickness");
+                      var px = [], raw = [];
+                      var take = function (e) {
+                        var ed = renderer.getEdgeDisplayData(e);
+                        if (!ed || ed.hidden) return;
+                        raw.push(ed.size);
+                        px.push(edgePx(ed.size));
+                      };
+                      if (id === undefined) graph.forEachEdge(take); else graph.forEachEdge(id, take);
+                      if (!px.length) return { ratio: renderer.getCamera().getState().ratio, shown: 0 };
+                      var nd = id === undefined ? null : renderer.getNodeDisplayData(id);
+                      var r2 = function (v) { return Math.round(v * 100) / 100; };
+                      return {
+                        ratio: r2(renderer.getCamera().getState().ratio),
+                        mult: r2(edgeMult), capPx: EDGE_MAX_PX, floorPx: floor,
+                        shown: px.length,
+                        rawMin: r2(Math.min.apply(null, raw)), rawMax: r2(Math.max.apply(null, raw)),
+                        minPx: r2(Math.min.apply(null, px)), maxPx: r2(Math.max.apply(null, px)),
+                        dotPx: nd ? r2(2 * renderer.scaleSize(nd.size)) : null,
+                        ribbonPx: r2(px.reduce(function (a, v) { return a + v; }, 0)),
+                      };
                     },
                     heatReport: function () {
                       if (!heat) return "not built";
@@ -12222,6 +13639,9 @@ function mountVaultGraph(root, data, deps) {
                     // findable by sampling it -- reading the reducers proves nothing.
                     get hoverT() { return hoverT; },
                     get hoverBusy() { return !!hoverRaf; },
+                    // Whether the camera is still where fit() last left it -- the gate for
+                    // the auto-fit-on-visibility-toggle behaviour (github#14).
+                    get camAtRest() { return camAtRest; },
                     // The highlight ramp, per note. Same motive as hoverT: the size and
                     // the ring are functions of it, so a ramp that is wrong is only
                     // findable by sampling it.
@@ -12269,6 +13689,27 @@ function mountVaultGraph(root, data, deps) {
                                x0: ribbonX(e[0], w), x1: ribbonX(e[1], w), w: w,
                                sweeping: brushSweep !== null };
                     },
+                    /**
+                     * THE LOCKED RING GEOMETRY, in graph units, for a per-frame probe.
+                     *
+                     * report() carries lockedMaxR and r0 already, but it walks every node to
+                     * build the rest of its answer, which is far too expensive to call on each
+                     * frame of an animation -- and "does the disc stay inside its rings while it
+                     * moves" is a per-frame question. This is the four numbers and nothing else.
+                     *
+                     * UNIT-SCALED, and the inner pair through INNER_SCALE, so they are directly
+                     * comparable with hypot(x, y) off the graph rather than needing the caller
+                     * to reproduce the scaling and get it subtly wrong.
+                     */
+                    rings: function () {
+                      if (!geomLock) return null;
+                      return {
+                        r0: geomLock.r0 * INNER_SCALE * UNIT,
+                        rInnerOuter: (geomLock.r0 + (geomLock.maxR - geomLock.rOuter)) * INNER_SCALE * UNIT,
+                        rOuter: geomLock.rOuter * UNIT,
+                        maxR: geomLock.maxR * UNIT
+                      };
+                    },
                     lastGap: function () {
                       return { ngI: bandOf("i").nG, ngO: bandOf("o").nG,
                                gapDegI: bandOf("i").gapDeg, gapDegO: bandOf("o").gapDeg };
@@ -12293,32 +13734,19 @@ function mountVaultGraph(root, data, deps) {
                                lit: lit, dated: dated,
                                total: graph.order, label: rangeLabel() };
                     },
-                    relayout: function () {
-                      // CANCEL BEFORE RESETTING, or a still-running cascade's next animation
-                      // frame lands after this snap and silently overwrites it -- the same
-                      // gap once found and fixed here for setSubwedgeGate (github#31), lost
-                      // again when that toggle was removed and this treatment reverted with
-                      // it. Clearing pinnedPlan/planKeep too, not just cancelling the frame:
-                      // a cascade holds them for its own duration and clears them when it
-                      // lands, so a layout after a cancelled-but-not-cleared run would reuse
-                      // a plan pinned for a run that no longer exists (see the same teardown
-                      // in playTimeline, a few hundred lines up, for the full account).
-                      stopPlay();
-                      if (cascadeRun) {
-                        WIN.cancelAnimationFrame(cascadeRun.raf);
-                        WIN.clearTimeout(cascadeRun.guard);
-                        cascadeRun = null;
-                      }
-                      if (anim) { WIN.cancelAnimationFrame(anim); anim = null; }
-                      if (animGuard) { WIN.clearTimeout(animGuard); animGuard = null; }
-                      pinnedPlan = null; planKeep = null;
-                      roomNow = null; cellNow = null; edgeNow = null; colWalk = null;
-                      posSrc = posDst = null;
-                      bandLock = null; geomLock = null;
-                      regroup();
-                      applyLayout(false);
-                      renderer.refresh();
-                    },
+                    // CANCEL BEFORE RESETTING, or a still-running cascade's next animation
+                    // frame lands after this snap and silently overwrites it -- the same
+                    // gap once found and fixed here for setSubwedgeGate (github#31), lost
+                    // again when that toggle was removed and this treatment reverted with
+                    // it. Clearing pinnedPlan/planKeep too, not just cancelling the frame:
+                    // a cascade holds them for its own duration and clears them when it
+                    // lands, so a layout after a cancelled-but-not-cleared run would reuse
+                    // a plan pinned for a run that no longer exists (see the same teardown
+                    // in playTimeline, a few hundred lines up, for the full account).
+                    // Extracted to hardRelayout() (core, not stripped -- github#3 reopened
+                    // needed the identical reset for a second live caller) rather than left
+                    // as a second copy of it here.
+                    relayout: function () { hardRelayout(false); },
     };
     Object.defineProperties(window.__vg, Object.getOwnPropertyDescriptors(debugAPI));
     /* ---- END: demo automation + debug API ---- */

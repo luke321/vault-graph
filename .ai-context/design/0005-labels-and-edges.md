@@ -75,6 +75,103 @@ init `setTimeout`, which presents as a page stuck forever on "Laying out graph..
 with an empty console. The existing warning in this note about `Sigma.rendering` vs
 `Sigma` meant the namespace; this is the same trap one level down.
 
+## A stroke is capped in pixels; a dot is not
+
+Sigma's edge shader draws `max(minEdgeThickness, size / sizeRatio)`, and `sizeRatio` **is**
+the camera ratio here, because `zoomToSizeRatioFunction` is identity. That identity is
+load-bearing and stays — it is what pins a dot to a fixed fraction of its row pitch, and
+`measureSizeScale` already cancels the same `1/ratio` for nodes with `pitch *= cam`. Edges
+never got the equivalent cancellation, so a stroke grew as `1/ratio` too.
+
+**The two are not the same kind of thing.** A dot represents a note, and holding its
+proportion to the room it has is the entire point of the identity law. A line represents a
+relationship, and its *thickness* is the channel carrying link weight — so making thickness a
+function of zoom overwrites the one signal it has to give. Measured on the 10k fixture, one
+hub of degree 55: strokes 1.70px at rest, 3.94px five notches in, 7.87px at ten, and 55 of
+those converging on a 20.44px dot is **307.87px of ink**, so the fan drew as one solid mass
+with no link traceable through it (github#39).
+
+Worth stating because the obvious diagnosis is wrong: **stroke-to-dot ratio is constant**
+(0.385 at both 5x and 10x), since dots grow as `1/ratio` as well. No single stroke ever
+exceeds the dot it lands on. What breaks is *absolute* legibility, not proportion.
+
+Three things make the fix work:
+
+- **One multiplier for the whole web**, not a per-edge `min()` against the cap:
+  `edgeMult = min(1, EDGE_MAX_PX * ratio / EDGE_SIZE_MAX)`, with `EDGE_MAX_PX` 4 and
+  `EDGE_SIZE_MAX` 1.6, the ceiling `edgeAttrsOf` can produce. A `min()` flattens every link
+  onto the same number the moment it binds — all 55 at 4.00px, a 220px fan, weight ordering
+  gone — while a single `k` holds the ratios between weights at any zoom and lands only the
+  heaviest link there can be on the cap. Below the knee it also makes `size * k / ratio` a
+  **constant**, so the drawn web is invariant under zoom rather than merely bounded, which is
+  what lets the invariant assert an equality. Measured after: 2.12px / 93.93px at both 5x and
+  10x, and the resting disc untouched.
+- **Above the knee it costs nothing.** At `ratio >= EDGE_SIZE_MAX / EDGE_MAX_PX` (0.4) `k` is
+  1, no refresh fires, and not one pixel of the resting disc moves — the whole cost lives
+  inside the zoom that needed the fix. The camera hook is rAF-throttled and gated on
+  `syncEdgeMult`, so it runs at most once a frame; a **pan** never runs it at any zoom,
+  because a pan does not change the ratio. The reducer pass it does run costs 14.5ms on the
+  10k shape against 3.3ms for a render alone, i.e. about 50fps through a 120ms zoom notch.
+- **`capEdge` is applied at every drawing exit of the reducer**, not once before the return.
+  The query branch returns early, so a single application left the whole web unclamped for as
+  long as anything was in the search box — and the suite stayed green until the check learned
+  to read that state, where it now fails at 7.87px.
+
+`edgePx(size)` is the shader's law in one place, shared by the focus-web overlay (which has
+to stroke exactly what the GPU would) and by `__vg.edgeReport()` — the same reason
+`edgeCurveGeom` is shared with `checkFocusWeb` rather than duplicated in it.
+
+## The floor is the same setting from the other end
+
+`minEdgeThickness` was never set, so it sat at sigma's default **1.7px** — while at the
+resting zoom every link's natural width is **0.55–1.02px**. The floor caught 100% of them and
+inflated each two to three times. One link 1.2px too wide is invisible; 3737 of them sweeping
+through the middle of the disc and stacking ink at every crossing is a grey fog that veiled
+the inner rings and filled the hub hole (github#42). Now **1.0px**.
+
+Measured on the 10k fixture, mean coverage of the edges canvas alone — the web with no note or
+label mixed in (`__vg.edgeInk()`):
+
+| floor | one degree-55 hub's fan | web covers | mean alpha where lit | ink |
+|---|---|---|---|---|
+| 1.7px | 93.5px | 30.49% | 0.76 | 0.231 |
+| **1.0px** | **55.0px** | 25.76% | **0.44** | **0.114** |
+
+The area barely moved and the **alpha halved** — which is what fog is, and why the width
+alone did not describe it.
+
+- **A floor is still needed.** At 0.5px the web on a 450-note vault all but vanishes; the
+  hairline risk it exists for is real. 1.0 keeps a sparse web reading as individual strands.
+- **Flat, not scaled by edge count** — and the issue expected the opposite, since fog grows
+  with the number of links while the hairline risk is worst when there are few. Looking at
+  both ends says one number does it. Regenerate the sparse shape with
+  `node scripts/make-test-vault.mjs --notes 450 --years 4 --out <dir> --seed 7` to re-check;
+  it is deliberately not a suite fixture, so this is a by-hand check. If a shape ever breaks
+  the single number, `EDGE_RAMP_START`/`EDGE_FLOOR` is the precedent to follow.
+- **The lit web got thinner too, by 23%.** A focused link is sized toward 1.4, i.e. 1.30px at
+  rest — *below* the old 1.7 floor, so the floor was inflating the hover web as well. It now
+  draws its own 1.30px. `checkFocusWeb` still reports **0 dim** on all three fixtures, which
+  was the risk worth checking: it samples a lit curve's centreline for blue, and a thinner
+  stroke antialiases more.
+
+**Link weight still reaches the screen nowhere, and this did not fix it.** The three weights
+that exist draw 0.556 / 0.787 / 1.019px at rest, so a 1.0 floor still flattens the first two;
+separating them needs **≤0.55**, which is exactly where the sparse web disappears. The two
+goals genuinely conflict through this one number, so weight needs a different channel and its
+own issue. Zoomed in it is marginally better than it was — the deep-zoom range widens from
+1.7–2.12px to 1.5–2.12px, because the light edges are no longer floored up to meet the heavy
+ones. Worth knowing before spending effort on it: **3 distinct weights exist in the whole
+graph and 97–98% of links are weight 1** (3628 of 3737 on the 10k fixture, 3219 of 3288 on the
+demo), so there is little to reveal. Separately, the lit web overwrites weight anyway —
+`edgeReducer` sizes every focused edge toward 1.4 regardless, measured as 3.50px at 10x at
+every floor value.
+
+Also from the same measurements: **nothing reaches `EDGE_SIZE_MAX`.** The observed maximum
+size is 1.10 (weight 3) against the 1.6 ceiling, so `EDGE_MAX_PX`'s 4px is never actually
+reached and the real deep-zoom maximum is 2.75px. Calibration, not a defect — but normalising
+by the observed maximum rather than the theoretical one is the knob if links should ever be
+heavier when zoomed in.
+
 ## The focus web sits above the dim notes
 
 Sigma paints every edge on its bottom layer and every node above that, so the edges lit
