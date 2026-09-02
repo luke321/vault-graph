@@ -44,13 +44,22 @@ type, tags, word count, linked notes — each one clickable to jump across the d
 ## Filtering by folder
 
 Click a folder in the legend to hide it; the remaining wedges grow back into the angle it
-vacated and the disc re-packs. Solo a folder to hide everything else in one click.
-Right-click a folder for the same "hidden by default" setting the settings panel offers —
-whether it starts hidden every time the disc loads — reachable from the legend itself now,
-not only from a separate panel. Hide something big enough and the camera reframes to match,
-as long as you haven't already panned or zoomed yourself.
+vacated and the disc re-packs. Solo a folder to hide everything else in one click. Hide
+something big enough and the camera reframes to match, as long as you haven't already
+panned or zoomed yourself. The same right-click menu also carries **hidden by default** —
+its own entry, next.
 
 <img src="../assets/features/folders.webp" width="100%" alt="A folder hidden, the disc re-packing to fill the angle it vacated, then the biggest folder right-clicked and hidden by default from its own menu, then one folder soloed to hide everything else, then everything shown again">
+
+## A folder hidden by default
+
+Some folders are noise most of the time — an archive, a template store, a folder of
+attachments. Right-click a folder's row and toggle **hidden by default**, one row below its
+colour picker, and it starts hidden every time the disc opens — this session and the next,
+on whichever host you opened it from. **All** leaves it alone, so "show everything" no
+longer quietly overrides the one folder you asked to keep out of the way.
+
+<img src="../assets/features/hiddenbydefault.webp" width="100%" alt="The biggest folder right-clicked in the legend and hidden by default from its own menu, the wedges reallocating around the gap it leaves, then the setting put back">
 
 ## The heatmap
 

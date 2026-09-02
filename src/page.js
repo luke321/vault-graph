@@ -12622,18 +12622,61 @@ function mountVaultGraph(root, data, deps) {
 
       // Pointer out of the way, so the last frame is the disc rather than a hover state
       // left behind by the last click.
-      { park: true, act: "unlinked", why: "leave the final frame clean" }
+      { park: true, act: "unlinked", why: "leave the final frame clean" },
+
+      /* --- 13. hidden by default ------------------------------------------ */
+      // A CLIP-ONLY ACT, and the SECOND one -- FULL_RUN_EXCLUDES keeps it out of the hero
+      // for exactly the reason subfoldercolor sits out: these beats put a menu row on
+      // camera that the full run already shows, in the folders act, and a hero that
+      // demonstrates the same control twice is a hero nobody watches to the end. Its
+      // position in this list therefore decides nothing -- an excluded act is filtered
+      // wherever it sits -- so it is appended rather than renumbered in beside folders.
+      //
+      // WHY IT EXISTS ANYWAY: github#34 is one of the two things 1.9.0 is actually about,
+      // and its only footage was six beats buried mid-way through folders.webp, after a
+      // hide/show pair and before a solo, both of which predate this release by several.
+      // A release section that embeds that clip is telling the reader "here is what's new"
+      // over a recording that mostly is not. Recorded alone, with demoAct's own leading
+      // settle and trailing park, it is the control and nothing else.
+      //
+      // "#1", THE BIGGEST FOLDER, and the same target the folders act aims at -- the point
+      // of moving this control into the legend is that it reaches the whole disc from
+      // where you are already looking, which only reads on a gap big enough that the
+      // reallocation is unmistakable.
+      { rightclick: true, target: ["group", "#1"], act: "hiddenbydefault",
+        why: "right-click the biggest folder for its own menu" },
+      { settle: true, act: "hiddenbydefault", why: "let the menu open" },
+      { click: true, target: ["ctxvis", ""], act: "hiddenbydefault",
+        why: "hide it by default, from the legend instead of the settings panel" },
+      { settle: true, act: "hiddenbydefault", why: "the wedges reallocate around a much bigger gap" },
+
+      // AND PUT IT BACK, for the reason the folders act's own copy of these beats does:
+      // this writes folderShown, the DEFAULT, which no later act and no `allon` resets. An
+      // isolated recording is not exempt -- the setting outlives the take, on the vault the
+      // recorder built and on whatever host is next asked to open it.
+      { rightclick: true, target: ["group", "#1"], act: "hiddenbydefault", why: "right-click it again" },
+      { settle: true, act: "hiddenbydefault", why: "let the menu open" },
+      { click: true, target: ["ctxvis", ""], act: "hiddenbydefault",
+        why: "...and put the default back, so the clip leaves nothing behind" },
+      { settle: true, act: "hiddenbydefault", why: "the wedges settle back" }
     ];
   }
 
   // ACTS THAT EXIST FOR THEIR OWN PER-FEATURE CLIP, but do not appear in the full run.
-  // Just "subfoldercolor" now -- it and "colours" put the identical right-click colour
-  // menu on camera, so only one belongs in the full take. Was "colours" that sat out;
-  // swapped because subfoldercolor's version needs its folder's twisty opened first (an
-  // extra click, an extra settle, on every re-record), where colours reaches the same
-  // menu directly off a top-level row. See the doc comment above demoMode() for the
-  // full reasoning.
-  var FULL_RUN_EXCLUDES = ["subfoldercolor"];
+  // Two of them, and both are here because some other act already puts the same control
+  // on camera in the combined take:
+  //
+  //   subfoldercolor  it and "colours" open the identical right-click colour menu, so only
+  //                   one belongs in the full take. Was "colours" that sat out; swapped
+  //                   because subfoldercolor's version needs its folder's twisty opened
+  //                   first (an extra click, an extra settle, on every re-record), where
+  //                   colours reaches the same menu directly off a top-level row.
+  //   hiddenbydefault the folders act already toggles "hidden by default" mid-sequence.
+  //                   This act repeats those beats ALONE so github#34 has a clip that is
+  //                   only that control -- see its own section in demoMode().
+  //
+  // See the doc comment above demoMode() for the full reasoning.
+  var FULL_RUN_EXCLUDES = ["subfoldercolor", "hiddenbydefault"];
 
   // THE FULL STORYBOARD, with FULL_RUN_EXCLUDES filtered back out of demoMode()'s single
   // list -- what the hero recording actually plays. demoMode()'s own trailing park beat
@@ -12649,10 +12692,13 @@ function mountVaultGraph(root, data, deps) {
   }
 
   // ONE ACT IN ISOLATION, for a per-feature clip instead of the whole storyboard. `name`
-  // is one of the ten `act:` tags above (`intro`, `note`, `pin`, `timeline`, `heatmap`,
-  // `folders`, `subfolders`, `subfoldercolor`, `camera`, `colours`) -- the same names
-  // the section comments in demoMode() already carry, so tagging a beat and naming it
-  // here is one decision, not two.
+  // is one of the thirteen `act:` tags above (`intro`, `note`, `pin`, `compactaxis`,
+  // `timeline`, `heatmap`, `folders`, `hiddenbydefault`, `subfolders`, `subfoldercolor`,
+  // `camera`, `colours`, `unlinked`) -- the same names the section comments in demoMode()
+  // already carry, so tagging a beat and naming it here is one decision, not two. (This
+  // roster said "ten" and named ten while compactaxis and unlinked already existed; a
+  // list that has to be maintained by hand is worth spelling out anyway, because the
+  // alternative is a typo reaching demoAct's warning path instead of a reader.)
   //
   // Isolated acts don't need the full storyboard's ordering rules (folders-before-
   // subfolders): under `?demo` the page comes up at rest with no filter applied and
