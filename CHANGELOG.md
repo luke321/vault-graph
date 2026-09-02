@@ -83,7 +83,12 @@ sitting apart with every other unlinked note — reversible per-vault, from eith
   fix to a fix, found while building the above:** on the Obsidian plugin host that toggle never
   actually persisted — it repainted the view live and silently reverted on the next reload,
   because the plugin's own settings writer was never wired for that setting. Fixed alongside,
-  since the wiring this release needed for the new setting was nearly identical.
+  since the wiring this release needed for the new setting was nearly identical. It also
+  gets **its own gallery entry** — [`docs/features/hiddenbydefault.md`](docs/features/hiddenbydefault.md)
+  — and a clip that is only this control: the full storyboard toggles it mid-way through
+  the folders act, between beats that shipped several releases ago, so the act is repeated
+  on its own (clip-only, like `subfoldercolor`) rather than asking a reader to find it in
+  someone else's footage.
 
 - **Every generated demo/test fixture now guarantees a handful of genuinely unlinked
   notes**, so the checks this release depends on (and any future one) always have something
