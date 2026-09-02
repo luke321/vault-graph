@@ -655,9 +655,35 @@ function mountVaultGraph(root, data, deps) {
 
   function computeOrder() {
     var count = {};
-    graph.forEachNode(function (id) {
+    var filed = Object.create(null);
+    graph.forEachNode(function (id, a) {
       var g = groupOf(id);
       count[g] = (count[g] || 0) + 1;
+      // WHERE THE NOTE IS FILED, alongside where it is STANDING. Same walk, because the two
+      // answers differ for exactly one reason -- a group other than the note's own folder
+      // claimed it -- and a second pass over 10,000 nodes to learn that costs a walk to say
+      // something the first one already knew. Folder dimension only, guarded the way
+      // buildColors' own `byFolder` is: any other grouping would be tallying folder names
+      // against something that is not folders.
+      if (state.dim === "folder") filed[a.folder] = (filed[a.folder] || 0) + 1;
+    });
+    folderCount = filed;
+    // EVERY FOLDER THAT HOLDS A NOTE KEEPS ITS ROW AND ITS SLOT (github#50), whether or not
+    // its notes are currently standing in it. Slots are handed out by POSITION in this list
+    // (see buildColors), so a list built only from groups that happen to hold a member makes
+    // every folder's colour depend on how many groups are populated ahead of it -- and then
+    // anything that empties a group renumbers everyone behind it. Measured on the shape
+    // fixture: turning the membership toggle off vanished 2 of 7 rows and recoloured 4 more,
+    // each inheriting the colour of the one in front, on a change to nothing but membership.
+    //
+    // Seeding from `filed` rather than holding a place in a queue for an absent group is what
+    // makes the question github#48 left open -- what "the vault's folder set" means under a
+    // filter -- stop existing: a note's FOLDER does not change when its GROUP does, and no
+    // filter moves it either, so this list is the same list in every state the page can be in.
+    // The two toggle states now agree on it name for name, which is why flipping membership
+    // recolours nothing at all rather than merely renumbering less often.
+    Object.keys(filed).forEach(function (f) {
+      if (count[f] === undefined) count[f] = 0;
     });
     // UNLINKED ALWAYS GETS A ROW, EVEN AT ZERO -- every other group's row is earned by
     // having a member, but this one is also the ONLY control for its own toggle that
@@ -699,6 +725,12 @@ function mountVaultGraph(root, data, deps) {
   }
 
   var counts = {};
+  // folder -> how many notes are FILED there, whatever group each one is standing in. Beside
+  // counts because it is the other half of the same tally: counts says what a wedge draws,
+  // this says what the folder holds, and the legend shows both whenever they disagree
+  // (github#50). Only meaningful in the folder dimension -- computeOrder leaves it empty
+  // otherwise, and an empty map reads as "holds nothing extra" everywhere it is consulted.
+  var folderCount = Object.create(null);
   function buildColors() {
     groupColor = Object.create(null);
 
@@ -8336,7 +8368,37 @@ function mountVaultGraph(root, data, deps) {
     if (g === UNLINKED && unlinkedTintByFolder && unlinkedTintColors.length > 1) {
       return "Mixed — coloured by folder";
     }
+    // A GROUP WITH NOTHING ON THE DISC IS ON NEITHER RING, and saying "Outer ring" is not a
+    // harmless default -- bandLock is built from the full-vault plan's own cells, so a group
+    // that seats no cell has no entry, and the fallback below then claims a ring it is not on.
+    // Latent already for (unlinked) at zero (github#3); github#50 gives every folder a row it
+    // can hold at zero, so the wrong answer would have gone from one row to any of them.
+    if (!counts[g]) return "No notes on the disc";
     return bandLock && bandLock[g] ? "Inner ring" : "Outer ring";
+  }
+
+  // WHAT ONE LEGEND ROW'S COUNT SAYS, in one place because there are three answers and the
+  // row that renders them is already the longest expression in buildLegend.
+  //
+  //   "25"     the ordinary case -- the number of notes this wedge draws
+  //   "(6)"    the folder holds 6 and its wedge draws NONE of them (github#50)
+  //   "(139)"  (unlinked) kept separate -- a total folded into no folder's own count
+  //
+  // Parentheses mean the same thing in both of the last two: no wedge in front of you is
+  // drawing this number. THE BRACKETED FORM IS RESERVED FOR A ROW THAT DRAWS NOTHING, and
+  // that restraint is the whole of the rule. A "drawn (held)" form on every row that differs
+  // was measured first and rejected on sight: with membership kept separate every folder on
+  // the shape fixture under-draws (misc 25 of 27, projects 708 of 738), so it put two numbers
+  // on almost every row to reconcile a total nobody had asked about. A row that draws SOME of
+  // its notes still reports what it draws, exactly as it always has -- the under-report there
+  // is real but is its own question.
+  //
+  // Nothing here is filter-aware: both tallies come from computeOrder's walk over the whole
+  // vault, which is what this count has always reported.
+  function countText(g) {
+    if (g === UNLINKED && !unlinkedByFolder) return "(" + counts[g] + ")";
+    var held = folderCount[g] || 0;
+    return !counts[g] && held ? "(" + held + ")" : String(counts[g]);
   }
 
   // WHERE THE POINTER LAST WAS, in viewport coordinates, so a legend rebuild can ask what
@@ -8422,15 +8484,33 @@ function mountVaultGraph(root, data, deps) {
       var open = hasSubs && !state.collapsed[g];
       var hl = !!state.highlight[g];
 
-      // GREYED OUT AT ZERO, ONLY FOR UNLINKED (github#3, reopened again): an empty real
-      // folder cannot exist (a group with no members never earns a row at all -- see
-      // computeOrder), but (unlinked) is now the one group with a permanent row even
-      // empty, so it is the one row that needs its own "nothing here right now" look
-      // rather than reading as a folder with a genuine zero.
-      var lgrClass = "lgr" + (g === UNLINKED && !counts[g] ? " lgr-empty" : "");
+      // GREYED OUT AT ZERO, FOR ANY GROUP (github#50). This read `g === UNLINKED && ...` and
+      // said an empty real folder cannot exist, which was true while a group with no members
+      // earned no row; a folder now keeps its row while its notes stand elsewhere, so the
+      // "nothing here right now" look is what any row at zero needs and (unlinked) is no
+      // longer the only one that can be in that state.
+      var live = !!counts[g];
+      var lgrClass = "lgr" + (live ? "" : " lgr-empty");
+      // NO CONTROLS THAT WOULD ACT ON NOTHING. An eye toggling the visibility of no notes and
+      // an `only` that empties the disc are both offers the row cannot honour, so a row at
+      // zero is identity and count alone. BOTH LEAVE THEIR BOX BEHIND, invisible, the same
+      // empty-slot treatment `.tw.none` already uses for a group with no subfolders -- the eye
+      // holds the column every label to its right lines up against, and `only` holds the grid
+      // track that keeps the count in the last one. Removing either outright misaligns the
+      // legend, and the second one was measured doing it (see the chip below).
+      //
+      // The (unlinked) row's right-click menu is untouched by this and has to be: it is the
+      // only control for its own membership toggle that lives outside settings, and it hangs
+      // off the row itself, not off either control removed here.
       var row = '<div class="' + lgrClass + '">' +
         twBtn(hasSubs ? 'data-tw="' + esc(g) + '"' : null, open) +
-        eyeBtn('data-eye="' + esc(g) + '"', vis, g) +
+        // A BUTTON, not the `<span>` twBtn's placeholder uses: that span holds its width by
+        // carrying the glyph, and an empty one would collapse. An empty disabled button takes
+        // `.eye`'s own 20x18 box with no CSS of its own, so the column is exactly the width it
+        // is on every other row. `visibility: hidden` already keeps it out of the a11y tree
+        // and out of tab order; `disabled` says so to anything that reads markup instead.
+        (live ? eyeBtn('data-eye="' + esc(g) + '"', vis, g)
+              : '<button class="eye none" disabled aria-hidden="true"></button>') +
         '<button class="lg" data-g="' + esc(g) + '" data-hl="' + (hl ? "on" : "off") +
           '" aria-pressed="' + vis + '" title="Highlight ' + esc(g) + '">' +
         // THE SWATCH SAYS WHICH RING, by its size: a small square for the inner band and a
@@ -8443,14 +8523,19 @@ function mountVaultGraph(root, data, deps) {
           '" title="' + swatchTitle(g, bandLock) +
           '" style="background:' + swatchFill(g) + '"></span>' +
         '<span class="nm" title="' + esc(g) + '">' + esc(g) + '</span>' +
-        '<span class="only" data-only="1" title="Show only ' + esc(g) + '">only</span>' +
-        // PARENTHESISED FOR UNLINKED WHILE KEPT SEPARATE (github#3, re-read again): its
-        // count is not folded into any folder's own total the way a joined note's is, so
-        // marking it "(13)" rather than "13" says as much without a second glance at the
-        // row's name -- the same convention a template's own count row could use for "not
-        // really part of the total" if one ever needed to.
-        '<span class="ct">' + (g === UNLINKED && !unlinkedByFolder ? "(" + counts[g] + ")" : counts[g]) +
-          '</span></button>' +
+        // A PLACEHOLDER, NOT AN OMISSION, and the suite is what taught this: `.lg` declares
+        // four grid tracks (sw | name | only | count) and dropping the chip outright moved the
+        // count into track THREE, leaving track four empty -- so the count ended one 8px gap
+        // left of every other row and "nav counts share one right edge" measured 2 edges
+        // instead of 1. That invariant's own note says the alignment comes from `.ct`'s
+        // min-width rather than from the grid, which is half of it: the min-width fixes the
+        // count's WIDTH, and being in the last track is what fixes its right EDGE.
+        (live ? '<span class="only" data-only="1" title="Show only ' + esc(g) + '">only</span>'
+              : '<span class="only none" aria-hidden="true"></span>') +
+        // Three answers, and they moved out to countText() when github#50 added the third --
+        // see its own comment for which is which and why the bracketed form is reserved for a
+        // row drawing nothing.
+        '<span class="ct">' + countText(g) + '</span></button>' +
         '</div>';
 
       // Subfolders are listed only when they actually get their own wedges, so the

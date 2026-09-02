@@ -2324,8 +2324,15 @@ check("the last frame of a cascade is the resting layout", async (p) => {
   };
 
   const out = [];
-  // A folder toggle. The first group with an eye, whichever the vault has.
-  const g = (await p.j(`__vg.groupOrder()`))[0];
+  // A folder toggle. The first group with an eye, whichever the vault has -- and that now has
+  // to be ASKED FOR rather than assumed of groupOrder()[0] (github#50). A group holding no
+  // notes right now keeps its row and its slot, and a row with nothing on the disc renders no
+  // eye at all (there is nothing for it to toggle), so the raw [0] can be a row whose
+  // querySelector returns null and whose .click() throws inside the sampler. On this very
+  // fixture [0] is "(vault root)", which is exactly such a row whenever membership is kept
+  // separate. Same lesson as the highlight check's own "filtered to non-empty groups before
+  // picking" above, reached by a second mechanism.
+  const g = (await p.j(`__vg.groupOrder().filter(function (x) { return __vg.groupCount(x) > 0; })`))[0];
   out.push(await run("folder toggle", `document.querySelector('[data-eye="' +
     ${JSON.stringify(g)}.replace(/"/g, String.fromCharCode(92) + '"') + '"]').click();`));
   await p.eval(`document.querySelector('[data-eye="' +
@@ -3241,6 +3248,74 @@ check("overriding one folder recolours exactly one group", async (p) => {
                        (ok ? "" : ` (${r.moved.slice(0, 6).join(", ")}${r.moved.length > 6 ? ", ..." : ""})`) };
 });
 
+// github#50: THE MEMBERSHIP TOGGLE MUST NOT RENUMBER THE ROTATION. Slots are handed out by
+// position among the groups in groupOrder(), so while that list was built only from groups
+// holding a member, anything emptying one renumbered everyone behind it and each folder
+// inherited the colour of the one in front. Every folder that holds a note now keeps its row
+// and its slot, so both toggle states agree on the list name for name and the answer here is
+// zero disturbed, not "fewer".
+//
+// THE SLOT, NOT colorOf, and that distinction is the whole reason this check is worth
+// trusting. The first cut read `__vg.colorOf(g)` either side of the flip and PASSED ON THE
+// UNFIXED CODE: github#48's `colorWalk` fades a forced recolour, and while it runs colorOf
+// answers from `colorShown`, which starts AT THE OLD VALUE for exactly the groups that
+// changed -- so for the first TWEEN_MS a renumbering reads as "nothing moved" and the check
+// asserts the defect away. That is the vacuous measurement this file keeps re-learning (see
+// the highlight check's own header). Sleeping past the walk would work and would buy a timing
+// dependency in the parallel pool for nothing: `autoSlotOf` IS the rotation position,
+// assigned in buildColors and never animated, and it is what the defect actually moves.
+// `slotOf` travels with it so an override cannot mask the automatic answer.
+//
+// Verified to fail without the fix by disabling computeOrder's seeding: 7 groups, 6 disturbed
+// -- lost (vault root), tiny; renumbered misc, notes, projects, refs.
+//
+// BOTH DIRECTIONS, and that is not redundant: the failure renumbers whatever the list happens
+// to be, so off-then-on could land back on the right slots by luck while one direction was
+// wrong. Restores whatever the shape started at.
+//
+// A SHAPE WITH NO UNLINKED NOTES CANNOT EXERCISE THIS -- with nothing to move, both states are
+// trivially identical and the check would pass vacuously, so it says it had nothing to measure
+// instead (the same discipline the (unlinked) swatch check above uses). All three fixtures do
+// have orphans, so none of them takes that path today; it is here for a vault that does not.
+check("a folder keeps its slot across the membership toggle", async (p) => {
+  const r = await p.j(`(function(){
+    // HOW MANY NOTES THE FLIP MOVES, and the skip test in one number: it is the orphan count
+    // either way round, since those are exactly the notes whose group the toggle changes.
+    // Reported with the verdict rather than left to be trusted -- a shape where it came back 0
+    // would make every comparison below vacuous.
+    var orphans = __vg.graph.nodes().filter(function (id) { return __vg.isOrphan(id); }).length;
+    if (!orphans) return { skip: true };
+    var startOn = __vg.unlinkedByFolder;
+    var snap = function () {
+      var o = __vg.groupOrder(), s = {};
+      o.forEach(function (g) { s[g] = __vg.autoSlotOf(g) + "/" + __vg.slotOf(g); });
+      return { order: o, slot: s };
+    };
+    var a = snap();
+    __vg.setUnlinkedByFolder(!startOn); var b = snap();
+    __vg.setUnlinkedByFolder(startOn);  var c = snap();
+
+    // Named per direction, because "6 disturbed" without which flip did it sends the reader
+    // to the wrong half of the change.
+    var diff = function (x, y) {
+      return {
+        lost: x.order.filter(function (g) { return y.order.indexOf(g) < 0; }),
+        moved: x.order.filter(function (g) { return y.slot[g] && y.slot[g] !== x.slot[g]; })
+      };
+    };
+    return { groups: a.order.length, notesMoved: orphans, away: diff(a, b), back: diff(a, c) };
+  })()`);
+  if (r.skip) return { ok: true, detail: "no unlinked notes on this shape, nothing to move" };
+  const names = (d) => [].concat(d.lost.map((g) => "lost " + g),
+                                 d.moved.map((g) => "renumbered " + g)).join(", ");
+  const bad = r.away.lost.length + r.away.moved.length + r.back.lost.length + r.back.moved.length;
+  return { ok: bad === 0,
+           detail: `${r.groups} groups, ${r.notesMoved} notes moved by the flip, ` +
+                   `${bad} groups disturbed` +
+                   (bad ? ` -- on the flip: ${names(r.away) || "none"}; once back: ` +
+                          `${names(r.back) || "none"}` : "") };
+});
+
 // github#34: "hidden by default" (previously settings-panel-only) is now also a legend
 // right-click toggle. Through the ACTUAL DOM path (a real `contextmenu` event, a real
 // click on the rendered button), not just the underlying `pickVisible`/`folderShown`
@@ -3696,6 +3771,61 @@ check("the (unlinked) row's right-click tint toggle recolours notes without movi
     `menu closed=${r.closedAfter}, toggle turned on=${r.turnedOn}, (unlinked) count still=` +
     `${r.countAfter} (must equal ${r.ids}, not 0 -- membership must not move), ` +
     `${r.matched} of ${r.ids} repainted to their folder's tint, ${r.distinct} distinct` };
+});
+
+// github#50: THE ROW AT ZERO MUST STILL OPEN ITS MENU, from the DEFAULT state, and this is
+// the direction the toggle check above cannot cover -- it starts from kept separate, so it
+// right-clicks the row while it still has members and an eye. The row exists at all only
+// because its menu is the one way back to the toggle from the main view ("how do you want to
+// enable it again from the main view?"), and github#50 now strips a row at zero of its eye
+// and its `only` chip. Those are separate elements from the `.lg[data-g]` button the
+// contextmenu handler closes on, so the menu is unaffected -- but "unaffected by
+// inspection" is exactly the reasoning this suite exists to replace, and the cost of being
+// wrong is a setting with no way back on the host where most people meet it.
+check("the (unlinked) row opens its menu with no notes in it", async (p) => {
+  const r = await p.j(`(function(){
+    if (!__vg.graph.nodes().some(function (id) { return __vg.isOrphan(id); })) return { skip: true };
+    var startOn = __vg.unlinkedByFolder;
+    if (!startOn) __vg.setUnlinkedByFolder(true);      // the default: the group is empty
+    var emptyNow = __vg.groupCount("(unlinked)");
+
+    var row = document.querySelector('[data-g="(unlinked)"]');
+    var rowFound = !!row;
+    // The two controls github#50 drops, and the placeholders that hold their space -- asserted
+    // here rather than trusted, since the row's alignment depends on the second one.
+    var lgr = row ? row.closest(".lgr") : null;
+    var noEye = !!lgr && !lgr.querySelector("[data-eye]") && !!lgr.querySelector(".eye.none");
+    var noOnly = !!row && !row.querySelector("[data-only]") && !!row.querySelector(".only.none");
+    var dimmed = !!lgr && lgr.classList.contains("lgr-empty");
+
+    var openedOk = false, pressedBefore = null, closedAfter = null, turnedOff = null;
+    if (row) {
+      var rect = row.getBoundingClientRect();
+      row.dispatchEvent(new MouseEvent("contextmenu", {
+        bubbles: true, clientX: rect.left + 5, clientY: rect.top + 5 }));
+      var menu = document.querySelector('[id$="ctxmenu"]');
+      var byBtn = menu && !menu.hidden ? menu.querySelector("[data-byfolder]") : null;
+      openedOk = !!byBtn;
+      if (byBtn) {
+        pressedBefore = byBtn.getAttribute("aria-pressed");
+        byBtn.click();
+        closedAfter = menu.hidden;
+        turnedOff = __vg.unlinkedByFolder === false;
+      }
+    }
+    if (__vg.unlinkedByFolder !== startOn) __vg.setUnlinkedByFolder(startOn);
+    return { empty: emptyNow, rowFound: rowFound, noEye: noEye, noOnly: noOnly, dimmed: dimmed,
+             openedOk: openedOk, pressedBefore: pressedBefore, closedAfter: closedAfter,
+             turnedOff: turnedOff };
+  })()`);
+  if (r.skip) return { ok: true, detail: "no unlinked notes on this shape, nothing to empty" };
+  const ok = r.rowFound && r.empty === 0 && r.noEye && r.noOnly && r.dimmed &&
+             r.openedOk && r.closedAfter === true && r.turnedOff === true;
+  return { ok, detail: `row ${r.rowFound ? "present" : "MISSING"} at count ${r.empty}, ` +
+    `dimmed=${r.dimmed}, eye dropped for a placeholder=${r.noEye}, only dropped for a ` +
+    `placeholder=${r.noOnly}; menu ${r.openedOk ? "opened" : "DID NOT OPEN"} ` +
+    `(pressed=${r.pressedBefore}), closed=${r.closedAfter}, membership turned back off=` +
+    `${r.turnedOff}` };
 });
 
 // github#3, RE-READ AGAIN: "giving them a mixed color dot" also asked for the row's own

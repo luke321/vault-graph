@@ -1165,3 +1165,89 @@ FULL vault regardless of what is hidden). It asserts the WORST folder's fraction
 first hit, since which folder balloons worst shifts with the vault's own generated content
 — none of the three fixtures' resting state hits this shape at all, which is how it
 shipped unnoticed the first time.
+
+## A folder that holds notes keeps its row, its slot and its colour
+
+The twelve automatic colour slots are handed out by POSITION in `order[state.dim]`
+(`buildColors`), so while that list was built only from groups currently holding a member,
+anything that emptied a group renumbered every group behind it — each one inheriting the
+colour of the one in front. `computeOrder` now seeds the list from where notes are **filed**
+(each node's own `folder`), so every folder that holds a note keeps its row and its slot
+whether or not its notes are standing in it, and the two membership states agree on the list
+name for name.
+
+```javascript
+(function () {
+  var snap = function () {
+    var o = __vg.groupOrder(), c = {};
+    o.forEach(function (g) { c[g] = String(__vg.colorOf(g)); });
+    return { order: o, colour: c };
+  };
+  var a = snap();
+  __vg.setUnlinkedByFolder(!__vg.unlinkedByFolder);
+  var b = snap();
+  return a.order.filter(function (g) {
+    return b.order.indexOf(g) < 0 || b.colour[g] !== a.colour[g];
+  });
+})()
+```
+
+Must be **empty**, in both directions. Measured on the dominant-folder fixture before the
+fix: turning membership off left **5 of 7 rows** (`gcount` `(7)` → `(5)`), `(vault root)` and
+`tiny` — the two folders made entirely of unlinked notes — vanishing, and **4 of the
+remaining 7 recoloured**, `misc #d95926 → #3987e5`, `notes #199e70 → #d95926`,
+`projects #c98500 → #199e70`, `refs #008300 → #c98500`. After: **7 rows in both states, 0
+recoloured, 0 vanished**, and the same on the demo (18 groups) and 10k (18 groups) fixtures.
+
+**Read it at rest.** github#48's `colorWalk` fades a forced recolour over `TWEEN_MS`, so a
+read taken straight after the toggle returns blends of the two values — measured, `misc` read
+`#3f85dd` at 400ms against its resting `#3987e5`, which makes a renumbering look like a
+near-miss rather than a change.
+
+**A vault with no unlinked notes cannot exercise this**: with nothing to move, both states are
+trivially identical and the check passes vacuously, so it reports that it had nothing to
+measure instead.
+
+### A row at zero costs no arc and no alignment
+
+Two things this could have broken and did not, both of which have their own history here:
+
+- **No cell, so no row and no hub radius.** `buildWedgePlan` filters to `cellsOf[g]`, and a
+  group with no members seats no cell — so a memberless entry cannot repeat the seated
+  zero-weight cell that asked for one row and moved the band balancer's split
+  (see *A zero-weight member costs nothing*, above, found on this same fixture). Confirmed by
+  the golden snapshots: **band unchanged, positions unchanged** on all three fixtures.
+- **The count stays on the shared right edge.** A row at zero drops its eye and its `only`
+  chip, and dropping the chip *outright* moved the count out of `.lg`'s last grid track,
+  leaving it one 8px gap short — `nav counts share one right edge` measured **2 edges** where
+  it demands 1. Both controls leave an invisible placeholder behind (`.eye.none`,
+  `.only.none`, the treatment `.tw.none` already used), which is what holds the column. That
+  invariant's own note says the alignment comes from `.ct`'s `min-width` rather than from the
+  grid; that is half of it — the min-width fixes the count's *width*, being in the last track
+  fixes its right *edge*.
+
+### And it must not cost the row its way back
+
+A row at zero drops its eye and its `only` chip, and `(unlinked)` at zero — the DEFAULT state —
+is exactly such a row. That row exists at all because its right-click menu is the one way back
+to its own membership toggle without a trip through settings, so stripping controls off it is
+the one change here that could strand a setting. The handler closes on `.lg[data-g]`, which is
+neither control, so it is unaffected — and that is reasoning, which is what this file exists to
+replace, so it is asserted instead.
+
+```
+node scripts/smoke.mjs --only "membership toggle"          # slots survive the flip, both ways
+node scripts/smoke.mjs --only "opens its menu with no notes"  # the row at zero keeps its menu
+node scripts/smoke.mjs --only "right edge"                 # 1 edge, not 2
+node scripts/smoke.mjs --only "golden"                     # band and positions unchanged
+node scripts/smoke.mjs --only "zero-weight"                # no seated cell for a memberless group
+```
+
+**The first check reads `autoSlotOf`, not `colorOf`, and that is load-bearing.** Its first cut
+compared `colorOf` either side of the flip and passed on the unfixed code: `colorWalk` answers
+from `colorShown`, which begins AT THE OLD VALUE for precisely the groups that changed, so for
+the first `TWEEN_MS` a renumbering reads as "nothing moved". The check would have asserted the
+defect away. `autoSlotOf` is the rotation position itself — assigned in `buildColors`, never
+animated — and it is what the defect actually moves. Verified by disabling the seeding and
+re-running: **7 groups, 6 disturbed — lost `(vault root)`, `tiny`; renumbered `misc`, `notes`,
+`projects`, `refs`.**

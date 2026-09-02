@@ -48,8 +48,25 @@ sitting apart with every other unlinked note — reversible per-vault, from eith
   place ahead of the real folders, so it never displaces anyone. Taking `(unlinked)` out of
   the rotation, though, does move the automatic colours by one slot on a vault that had
   unlinked notes — in 1.8.0 a populated `(unlinked)` sorted first and consumed slot 0, which
-  no group now does. That is the one upgrade-time colour change here; a folder with an
-  explicit colour, and any vault with no unlinked notes, is untouched.
+  no group now does. That is one of the two upgrade-time colour changes here; a folder with an
+  explicit colour, and any vault with no unlinked notes, is untouched by it.
+
+- **A folder that holds notes keeps its row and its colour.** The automatic colours are
+  handed out by a folder's position among the groups in the legend, and that list used to hold
+  only the groups with a note actually standing in them — so a folder made entirely of
+  unlinked notes dropped out of the legend the moment you kept them separate, and every folder
+  behind it slid one slot along and took the colour of the one in front. Measured on a
+  six-folder test vault: turning the toggle off left five rows of seven and repainted four of
+  them, on a change to nothing but where unlinked notes stand. The list now comes from where
+  notes are **filed** rather than where they are drawn, so a folder keeps its row, its place
+  and its colour whether or not its own notes are in it — and both settings of the toggle now
+  agree on every colour, where before flipping it repainted half the disc. A row whose wedge is
+  currently drawing none of its notes says so: greyed, with its count in parentheses —
+  `tiny (6)` — and without an eye or an `only` chip, neither of which has anything to act on.
+  This is the second upgrade-time colour change: a vault already running with unlinked notes
+  kept separate, and with folders made entirely of them, shifts its automatic colours once
+  onto the same assignment the default has always used. A folder with an explicit colour is
+  untouched.
 
 - **Kept separate is not the same as flat.** A second, independent toggle,
   `unlinkedTintByFolder` (off by default) — a note that's staying in the `(unlinked)`
