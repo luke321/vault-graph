@@ -31,4 +31,4 @@ commit.
 | | |
 |---|---|
 | **Introduced in** | `1.9.0` — "Belonging" |
-| **Last re-recorded** | `unreleased — 2026-08-28` |
+| **Last re-recorded** | `1.9.0 — 2026-09-02` |

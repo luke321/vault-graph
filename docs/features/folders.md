@@ -44,4 +44,4 @@ commit.
 | | |
 |---|---|
 | **Introduced in** | `v1.0` |
-| **Last re-recorded** | `unreleased — 2026-08-27` |
+| **Last re-recorded** | `1.9.0 — 2026-09-02` |

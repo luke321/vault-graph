@@ -31,4 +31,4 @@ commit.
 | | |
 |---|---|
 | **Introduced in** | `predates versioning — undocumented until this gallery` |
-| **Last re-recorded** | `unreleased — 2026-08-27` |
+| **Last re-recorded** | `1.9.0 — 2026-09-02` |
