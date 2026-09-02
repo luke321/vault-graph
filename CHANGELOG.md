@@ -29,7 +29,7 @@ published tag breaks every link to it.
 
 ---
 
-## 1.9.0 — "Belonging" — unreleased
+## 1.9.0 — "Belonging" — 2026-09-02
 
 An unlinked note now joins its own folder's wedge and colour by default, instead of
 sitting apart with every other unlinked note — reversible per-vault, from either host.
@@ -76,11 +76,14 @@ sitting apart with every other unlinked note — reversible per-vault, from eith
   has already joined its folder. Same right-click row and settings-panel treatment as the
   membership toggle above.
 
-- **A fix to a fix, found while building the above:** the github#34 "hidden by default"
-  right-click toggle never actually persisted on the Obsidian plugin host — it repainted the
-  view live and silently reverted on the next reload, because the plugin's own settings
-  writer was never wired for that setting. Fixed alongside, since the wiring this release
-  needed for the new setting was nearly identical.
+- **A folder's "hidden by default" is now reachable from the legend** (github#34) — right-click
+  any folder's row and toggle it there, one row down from its colour picker, instead of opening
+  the settings panel for the one thing you wanted. The folder stays hidden every time the page
+  opens until you switch it back, and the legend's **All** button no longer overrides it. **And a
+  fix to a fix, found while building the above:** on the Obsidian plugin host that toggle never
+  actually persisted — it repainted the view live and silently reverted on the next reload,
+  because the plugin's own settings writer was never wired for that setting. Fixed alongside,
+  since the wiring this release needed for the new setting was nearly identical.
 
 - **Every generated demo/test fixture now guarantees a handful of genuinely unlinked
   notes**, so the checks this release depends on (and any future one) always have something
@@ -185,11 +188,29 @@ sitting apart with every other unlinked note — reversible per-vault, from eith
   note fades out where it was and fades back in where it now belongs, crossing wedges only while
   it is invisible. The cascade gained a third category for this (a *move*, alongside arrivals
   and departures): one clock, one planner, and the setting itself still flips instantly — only
-  the drawing takes its time. A group whose colour has to change because the legend re-ranks
-  around the move (github#48's renumbering, still open) fades to its new colour on the same
-  clock instead of cutting. One known rough edge stays, accepted on review: a vault where
+  the drawing takes its time. The colour tween built for a group that re-ranked
+  around the move (github#48) is still there and still fades rather than cuts, but after
+  github#50 below there is nothing left for it to fade: no group changes colour across the
+  toggle any more. One known rough edge stays, accepted on review: a vault where
   whole folders consist only of unlinked notes toggles several wedges at once, and the
   smallest of them can crowd its neighbour for a beat mid-animation.
+
+- **Every folder that holds notes keeps its row, its slot and its colour** (github#50,
+  resolving the recolour reported as github#48). The twelve automatic colour slots are handed
+  out by position in `order[state.dim]`, and that list was built from the groups *currently
+  holding a member* — so a group emptying moved every group behind it one slot along, and each
+  inherited the colour of the one in front. Measured on the dominant-folder fixture, turning
+  the membership toggle off: 7 legend rows down to 5, `(vault root)` and `tiny` vanishing
+  outright — the two folders made entirely of unlinked notes — and 4 of the remaining 7
+  recoloured. The list is now seeded from where each note is *filed*, in the same walk that
+  tallies the groups, which is what github#48's suggested "keep its place in the queue" needed
+  and could not give on its own: a note's folder does not change when its group does, and no
+  filter moves it either, so the order is identical in every state the page can be in. After:
+  7 rows in both states, 0 recoloured, 0 vanished. A row whose wedge draws nothing now says so
+  — greyed, its count parenthesised, and without an eye or an `only` chip, neither of which
+  has anything to act on. This is a runtime fix, not a retroactive one: the one-slot shift on
+  upgrade described at the top of this release, which comes from `(unlinked)` leaving the
+  rotation between 1.8.0 and 1.9.0, is unchanged by it.
 
 - **The right-click menu's toggles now say what they are, not what clicking them undoes.** All
   three rows in that menu flipped their wording along with their state, which reads exactly
@@ -211,6 +232,20 @@ sitting apart with every other unlinked note — reversible per-vault, from eith
   replacement row under a stationary pointer never receives a mouse-in either. The rebuild now
   asks the browser what is actually under the pointer and restores the highlight itself instead
   of waiting for the next twitch of the mouse.
+
+- **Soloing a folder shows all of it.** `only` on a folder row hid every other folder but left
+  any subfolder solo from an earlier click standing, so soloing a subfolder and then soloing its
+  parent left the parent's other subfolders hidden and the folder's own `only` looking like it
+  had done nothing. The folder-level handler now clears `hiddenSub` the way `onlySubs` and
+  `onlyUnder` already did — "only this folder" means the whole folder.
+
+- **A folder's `(directly in folder)` row is a leaf, not a twisty.** The row that gathers the
+  notes sitting directly in a folder is keyed `g + "/"` — the same key the children map uses for
+  that folder's first-level subfolders — so the row was handed a twisty that, when opened, nested
+  every sibling subfolder underneath it, each at a `g//sub` double-slash path whose own `only` and
+  `hide` then matched no note and blanked the disc. Notes standing directly in a folder have no
+  children, so both the twisty attribute and the recursive subtree call are now guarded on a
+  non-empty subfolder name, at the named level and inside the "more" tail alike.
 
 - **A release can no longer be tagged off `main` by accident** (github#47). `release.ps1`
   already refused a `v` prefix, a malformed version, a manifest that disagrees with it, a dirty
