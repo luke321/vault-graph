@@ -632,7 +632,10 @@ vault is far too tight for a vault whose whole span is 14 months.
 year's own note count against `yearRef` — the same p90-with-floor shape `nRef` already uses
 for bar height, applied here to note count per year instead of per month. Within a year,
 every one of its months gets an equal share of the year's own width — deliberately NOT
-weighted by the month's own note count; that was tried and read as noise.
+weighted by the month's own note count; that was tried and read as noise. The one exception
+is the LAST month, which is the month in progress and takes only the fraction of that equal
+share its elapsed days have earned — see *The strip's right edge is a day the vault has
+reached* below.
 
 ```javascript
 __vg.setCompactAxis(false); __vg.ribbonXOf(ms)   // the untouched linear formula
@@ -715,6 +718,94 @@ shipped, so `onCompactAxis` came back, matching `onPanEnabled`. *the view-level 
 actually flips the live state, and persists* covers it the same way the settings-row check
 covers its own button, and was confirmed against the real plugin under CDP (22px tall, no
 overflow, no overlap with the date fields) rather than assumed from the standalone.
+
+## The strip's right edge is a day the vault has reached
+
+`dateSpan.hi` used to be `Date.UTC(y1, m1 + 1, 0)` — the newest note's month, rounded UP to
+that month's last calendar day (github#51). So the strip's last slice was the month *in
+progress* drawn as if it were over: a full month's share of its year's width, running to a
+date in the future, and scrubbable all the way there.
+
+```javascript
+__vg.dateSpan.hi                                  // the day the strip's right edge means
+new Date(__vg.dateSpan.hi).toISOString().slice(0, 10)
+__vg.ribbonXOf(__vg.dateSpan.hi)                  // == the strip's width, at rest
+```
+
+Measured on a scratch vault written up to the day of the run (2026-09-02, newest note
+2026-09-02, 82 notes over 2025-01 → 2026-09, nine months of 2026 on the strip, 2228px
+strip):
+
+| | before | after |
+|---|---|---|
+| `dateSpan.hi` | **2026-09-30** | **2026-09-02** |
+| 2026-09's share of 2026's width | **11.11%** (104.7px) | **0.83%** (7.3px) |
+| 2026-09 against a complete month in 2026 | **100.0%** | **6.7%** (= 2/30 days) |
+
+So **~97px of that strip — the last 4.3% of the whole control — was days that had not
+happened**, and dragging the right handle across them changed nothing on the disc because
+every one is past the newest note. The readout and the `to` field named them as dates too.
+
+**`hi` is today's local day, clamped on BOTH sides, and the second clamp is not optional.**
+Never before the newest dated note, because a note dated in the future (frontmatter says so,
+and nothing stops it) would otherwise sit past the right edge where no gesture can select it.
+And never past the newest note's own MONTH, because that is the last month the dense month
+grid holds: `monthEndMs` returns `hi` for the last month, so a plain "clamp to today" on a
+vault last written in June and read in September would hand one June segment three months of
+time to interpolate across — and, worse, would compute the pro-rating as *September's*
+day-of-month over *August's* length, collapsing a complete month to 2/31 of its width. All
+three fixtures sat in exactly that state while this was written (generated 2026-08-28, read
+2026-09-02), which is how it was caught.
+
+**Extending the month grid forward to today's month instead was considered and rejected.**
+It would make the right edge mean "now" unconditionally, which is the nicer promise — but the
+cost is unbounded in the other direction: a vault last written years ago would spend years of
+strip on empty months, and on the linear axis (`compactAxis: false`, where there is no
+per-year floor to bound it) the whole informative history would squeeze into a fraction of
+the control. The clamp above never *adds* width, only removes width that was never earned,
+and the dead run it leaves is at most the remainder of one month.
+
+**Both axis paths and both bar layouts inherit this from `buildDateSpan`, by construction.**
+The compact path reads the pro-rated segment widths; the linear path reads the `lo`..`hi`
+those widths are cut from. The linear bar layout was `i * (w / n)` — one equal slice per
+month — while `ribbonXLinear` beside it divided real elapsed time, so a bar and the handle
+standing on it disagreed by up to a day and a half per month even on a vault of whole months
+(February drew as wide as July while the brush treated it as 28/31 of one). Harmless until
+the trailing month stopped running to its own month end, at which point the equal pitch would
+have been the whole bug surviving with compaction off. Now both bar edges come from
+`ribbonXLinear`, so each bar *is* its month's slice. Measured with compaction off on the same
+scratch vault: bars tile with **0 gaps** and end at **2228.0px of 2228.0px**, 2026-02 at
+**102.44px** against 2026-07 at **113.41px** (= 28/31), the trailing 2026-09 at **3.66px**.
+
+**The pro-rating counts days TOUCHED, not whole days elapsed** — the 2nd counts as two, so
+the 1st of a month is 1/31 rather than 0. A zero-width segment is not a rounding detail: the
+brush cannot grab it and `ribbonMsCompact` cannot interpolate inside it (both guard `w1 > w0`
+and fall back to the segment's start), so the strip would lose its right end for a day every
+month.
+
+**The band is deliberately untouched.** It is a rolling window onto `heatParse(TODAY)`, and
+`clampWinEnd` / `winEndCentredAtPx` already refused to scroll past today without going
+through the span at all. The only line of it that reads `hi` is `heatGeom`'s "never wider
+than the vault is old" column clamp, and moving the edge only tightens that toward the truth:
+`lo → hi` is now `lo →` the last day the vault reaches rather than a month end up to thirty
+days in the future, so the clamp can no longer hand the grid weeks of columns before the
+first note.
+
+*the ribbon's right edge is a day the vault has actually reached* asserts all of it: `hi` not
+past today, `hi` not before the newest note, `hi` exactly the day the clamp says, `ribbonXOf(hi)`
+at the strip's own right edge, and the trailing month's segment at exactly its elapsed-day
+fraction of a complete sibling month in the same year. The expected values are restated in the
+check from *today* and *the newest note* — the two facts outside the page — rather than read
+back off `dateSpan.hi`, so a build that got the edge right and the pro-rating wrong cannot
+agree with itself past it. **It goes partly vacuous on a fixture whose last month has since
+ended** (the edge half still asserts; the width half correctly expects 100% and says so in its
+own detail line), which is where all three fixtures sit between regenerations.
+
+**The golden layout snapshots do NOT move.** `dateSpan` is read by the strip, the brush, the
+year chips and the band's column clamp, and by nothing in the disc's layout — the ticket
+expected every checked-in x to shift and it does not, because the snapshots hold node
+positions and band assignment, not axis geometry. Confirmed: *layout matches its golden
+snapshot* passes unchanged on `demo-vault`, 1403 notes, band unchanged, positions unchanged.
 
 ## A note in the hub has left the ring, and the ring closes behind it
 

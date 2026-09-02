@@ -2985,6 +2985,124 @@ check("compact axis: sparse years cluster near the same floor width", async (p) 
   };
 });
 
+check("the ribbon's right edge is a day the vault has actually reached", async (p) => {
+  // github#51. The span used to end at the newest note's MONTH, rounded up to that month's
+  // last calendar day -- so on the 2nd of September the strip ran to the 30th, and the last
+  // ~93% of its final slice was days that had not happened: scrubbable, named by the range
+  // readout and the `to` field, and changing nothing on the disc because every one of them
+  // is past the newest note. Two halves, both read off the page's own dateSpan and
+  // ribbonXOf and both compared against an expectation restated from today and the newest
+  // note -- the two facts outside the page -- rather than from dateSpan.hi itself:
+  //
+  //   1. THE EDGE IS A REAL DAY -- today, clamped on both sides. Not past today; not before
+  //      the newest dated note (a note dated in the future, because frontmatter says so,
+  //      must stay reachable, and a plain "clamp to today" would leave it past the right
+  //      edge where no gesture can select it); and not past the newest note's own MONTH,
+  //      which is the last month the dense grid holds, so the last segment never has more
+  //      than one month of time to interpolate across.
+  //   2. THE MONTH IN PROGRESS IS PAID FOR ITS ELAPSED DAYS. Its segment is narrower than a
+  //      complete month's in the SAME year -- same year, so the year-weighting divisor
+  //      cancels and what is left is the calendar pro-rating on its own -- by the fraction
+  //      of the month still to come. Asserted against the exact expected ratio rather than
+  //      just "narrower", because "narrower" is also satisfied by a bug that shrinks the
+  //      last month to nothing.
+  //
+  // Needs no fixture of its own and no fixed date -- but note that it is only PARTLY live on
+  // a fixture whose newest note is in a month that has since ended, which is where all three
+  // currently sit (generated 2026-08-28, and the checked-in build is not regenerated daily).
+  // Half 1 still asserts on them; half 2 goes vacuous, correctly expects 100%, and says so
+  // in its own detail line rather than reading as a pass it did not earn. It comes back the
+  // moment the fixtures are regenerated, or on any --vault whose vault was written today.
+  const r = await p.j(`(function(){
+    var d = __vg.dateSpan;
+    if (!d) return { skip: true };
+    // Bare ISO days only, tested by shape rather than by regex -- heatParse is not on __vg,
+    // and a template literal would eat the backslashes of one anyway.
+    var isDay = function (s) {
+      return !!s && s.length === 10 && s.charAt(4) === "-" && s.charAt(7) === "-";
+    };
+    var newest = null;
+    __vg.graph.forEachNode(function (id, a) {
+      if (isDay(a.created) && (newest === null || a.created > newest)) newest = a.created;
+    });
+    var pad = function (n) { return (n < 10 ? "0" : "") + n; };
+    var t = new Date();
+    // TODAY'S LOCAL DAY, built the same way src/page.js builds TODAY -- not toISOString,
+    // which is UTC and would disagree by a day for most of the evening in a +NN zone.
+    var today = t.getFullYear() + "-" + pad(t.getMonth() + 1) + "-" + pad(t.getDate());
+    // The last month's segment against a complete month's in the SAME year. Compared in
+    // WEIGHT units, not pixels: the ratio is the assertion, so converting would only add
+    // rounding to it.
+    var last = d.months.length - 1, lastY = d.months[last].y, lastM = d.months[last].m;
+    var ax = d.axis;
+    var wOf = function (mi) { var s = ax.segs[ax.segOfMonth[mi]]; return s.w1 - s.w0; };
+    var sibling = null, yearW = 0;
+    for (var mi = 0; mi <= last; mi++) if (d.months[mi].y === lastY) {
+      if (sibling === null && mi < last) sibling = mi;
+      yearW += wOf(mi);
+    }
+    return {
+      // The number github#51 was written around: "September holds 1/9 of the year's width
+      // for two days of content, the same slice August gets for thirty-one." Reported, not
+      // asserted -- the ratio against a sibling month above is the same statement with the
+      // year's own month count divided out, and is the one worth failing on.
+      lastShareOfYear: yearW > 0 ? wOf(last) / yearW : 0,
+      lastPx: (wOf(last) / ax.totalW) * document.querySelector("#vg-ribbon").getBoundingClientRect().width,
+      hiISO: new Date(d.hi).toISOString().slice(0, 10),
+      today: today, newest: newest, lastKey: d.months[last].key,
+      monthEndISO: new Date(Date.UTC(lastY, lastM + 1, 0)).toISOString().slice(0, 10),
+      daysIn: new Date(Date.UTC(lastY, lastM + 1, 0)).getUTCDate(),
+      lastW: wOf(last), sibW: sibling === null ? null : wOf(sibling),
+      edgeX: __vg.ribbonXOf(d.hi),
+      w: document.querySelector("#vg-ribbon").getBoundingClientRect().width
+    };
+  })()`);
+  if (r.skip) return { ok: false, detail: "no dateSpan on this vault" };
+  // WHERE THE EDGE SHOULD BE, restated here from the two facts OUTSIDE the page -- today,
+  // and the newest note -- rather than read back off dateSpan.hi. That independence is the
+  // point: with `want` derived from `hi`, a build that got `hi` right and the pro-rating
+  // wrong (or the reverse) could still agree with itself, and the check would pass on a
+  // strip that is half fixed. ISO days compare correctly as strings, so this needs no
+  // parsing.
+  const later = (a, b) => (a > b ? a : b);
+  const earlier = (a, b) => (a < b ? a : b);
+  const wantHi = earlier(r.monthEndISO, later(r.newest || r.today, r.today));
+  const notFuture = r.hiISO <= r.today;
+  const reachesNewest = r.newest === null || r.hiISO >= r.newest;
+  const rightDay = r.hiISO === wantHi;
+  // The span's right end IS the strip's right edge, in pixels -- which is what makes the
+  // brush's "an end at the span's own end means no bound" rule reachable by a hand.
+  const edgeAtEnd = Math.abs(r.edgeX - r.w) <= 1;
+  const elapsed = Number(wantHi.slice(8, 10));
+  const want = elapsed / r.daysIn;
+  const got = r.sibW === null ? null : r.lastW / r.sibW;
+  // 1% of the ratio. The two segments are exact rationals of one another (same year, so the
+  // same yearWeight and the same month count divide both), so float noise is all the slack
+  // this needs.
+  const proRated = got === null || Math.abs(got - want) <= 0.01;
+  const parts = [
+    `span ends ${r.hiISO}, wanted ${wantHi} (today ${r.today}, newest note ` +
+      `${r.newest || "none"}, ${r.lastKey} ends ${r.monthEndISO})`,
+    `right edge at ${r.edgeX.toFixed(1)}px of ${r.w.toFixed(1)}px`,
+    `${r.lastKey} takes ${(r.lastShareOfYear * 100).toFixed(2)}% of ${r.lastKey.slice(0, 4)}'s ` +
+      `width (${r.lastPx.toFixed(1)}px)`,
+    r.sibW === null
+      ? `${r.lastKey} is the only month in ${r.lastKey.slice(0, 4)} -- no complete sibling to compare against`
+      : `${r.lastKey} draws ${(got * 100).toFixed(1)}% of a complete month in the same year, ` +
+        `wanted ${(want * 100).toFixed(1)}% (${elapsed}/${r.daysIn} days reached)` +
+        (elapsed === r.daysIn
+          ? " -- VACUOUS on this vault: its last month is already over, so the pro-rating has nothing to do here"
+          : ""),
+  ];
+  if (!notFuture) parts.push("<- THE SPAN ENDS IN THE FUTURE");
+  if (!reachesNewest) parts.push("<- THE NEWEST NOTE IS PAST THE RIGHT EDGE");
+  if (!rightDay) parts.push("<- THE SPAN DOES NOT END ON THE DAY IT REACHES");
+  if (!edgeAtEnd) parts.push("<- dateSpan.hi IS NOT AT THE STRIP'S RIGHT EDGE");
+  if (!proRated) parts.push("<- THE MONTH IN PROGRESS IS NOT PRO-RATED BY ITS ELAPSED DAYS");
+  return { ok: notFuture && reachesNewest && rightDay && edgeAtEnd && proRated,
+           detail: parts.join("; ") };
+});
+
 check("compact axis: the settings-panel toggle actually flips the live state", async (p) => {
   // A REAL regression check, not a manual one-off: $() prepends "vg-" (src/page.js:103), so
   // a rendered row whose literal id is "opt-<key>" instead of "vg-opt-<key>" leaves
