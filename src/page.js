@@ -8485,11 +8485,16 @@ function mountVaultGraph(root, data, deps) {
           var pk = g + "/" + sb, tint = subShade[pk] || colorOf(g);
           // A named sub-wedge gets a twisty of its own when the vault nests deeper
           // under it -- that is how `00 1 on 1` keeps being one wedge of 62 notes AND
-          // opens to the seven people inside it.
+          // opens to the seven people inside it. NOT the "(directly in folder)" row
+          // (sb === ""): notes sitting directly in the folder have no children, and its
+          // path `g + "/"` collides with the kids-map key for g's FIRST-LEVEL subfolders
+          // (also `g + "/"`), so an unguarded twisty would nest every sibling subfolder
+          // under it -- with `g//sub` double-slash paths whose own only/hide then match no
+          // note and blank the disc.
           row += srow(tint, sb || "(directly in folder)", subCount[pk] || 0, [k], 1,
-                      kids[pk] ? 'data-twp="' + esc(pk) + '"' : null,
+                      (sb && kids[pk]) ? 'data-twp="' + esc(pk) + '"' : null,
                       !!state.pathOpen[pk]);
-          row += subtree(pk, 2, tint);
+          if (sb) row += subtree(pk, 2, tint);
         });
         var tail = subs.slice(SUB_NAMED);
         if (tail.length) {
@@ -8510,9 +8515,9 @@ function mountVaultGraph(root, data, deps) {
               var pk = g + "/" + sb, tint = subShade[pk] || colorOf(g);
               row += srow(tint, sb || "(directly in folder)", subCount[pk] || 0,
                           [SUB_NAMED + j], 2,
-                          kids[pk] ? 'data-twp="' + esc(pk) + '"' : null,
+                          (sb && kids[pk]) ? 'data-twp="' + esc(pk) + '"' : null,
                           !!state.pathOpen[pk]);
-              row += subtree(pk, 3, tint);
+              if (sb) row += subtree(pk, 3, tint);
             });
           }
         }
