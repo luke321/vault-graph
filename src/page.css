@@ -217,8 +217,15 @@
         color: var(--text-3); }
   .vault-graph .tw:hover, .vault-graph .eye:hover { color: var(--text-1); background: var(--surface-2); }
   .vault-graph .tw[aria-expanded="true"] { color: var(--text-2); }
-  /* An empty slot where a group has no subfolders, so every label still lines up. */
-  .vault-graph .tw.none { visibility: hidden; cursor: default; }
+  /* An empty slot where a group has no subfolders, so every label still lines up -- and the
+     same on a row with no notes on the disc for the two controls it drops, the eye and the
+     `only` chip, neither of which has anything to act on (github#50). All three keep their
+     box and lose only their ink: the eye holds the column every label to its right lines up
+     against, and `only` holds the grid track that keeps the count in the LAST one, which is
+     what puts every count on the same right edge. */
+  .vault-graph .tw.none, .vault-graph .eye.none, .vault-graph .lg .only.none {
+    visibility: hidden; cursor: default;
+  }
   .vault-graph .eye { width: 20px; height: 18px; }
   .vault-graph .eye svg { width: 14px; height: 14px; display: block; }
   /* Hidden reads as dimmed-and-struck on the label; the eye itself just loses its

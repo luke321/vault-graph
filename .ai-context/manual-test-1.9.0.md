@@ -92,6 +92,24 @@ No issue number — found and fixed on `develop` while testing the two toggles a
 | **Screen reader** | If you can run one over the menu, do. It announced "Kept separate, not pressed" — the inverse of the truth — because the state was encoded twice and the two encodings disagreed. Name plus pressed state must now match reality. |
 | **Result** | |
 
+## github#50 — a folder keeps its row and its colour across the membership toggle
+
+The renumbering github#48 reported, fixed at the source. `release/1.9.0` already *faded* the
+forced recolour rather than jump-cutting it; this stops it happening at all.
+
+| | |
+|---|---|
+| **Where** | Both hosts. Needs a vault with unlinked notes, and ideally one folder made **entirely** of them — the generated fixtures all have some, and `make-shape-vault.mjs` has two (`(vault root)` and `tiny`). |
+| **Do** | Read the whole legend — every row's colour, count and position. Then right-click the `(unlinked)` row and turn "unlinked notes join their folder" OFF. Read it again. Then back ON. |
+| **Expect** | **The same rows, in the same order, in the same colours, all three times.** Nothing vanishes, nothing repaints. What changes is only the counts, and `(unlinked)` filling up. |
+| **The bug** | Two rows disappeared and four more repainted, each taking the colour of the row above it — measured 4 of 7 on the shape fixture. |
+| **The rows that empty** | A folder whose notes have all left for `(unlinked)` stays in the legend, greyed, with its count **in parentheses** — `tiny (6)` — and with **no eye and no `only` chip**, since neither has anything to act on. Confirm the count column still lines up down the whole legend with those rows present: dropping the chip is what broke that alignment the first time. |
+| **The partial case is NOT parenthesised** | A folder drawing *some* of its notes reports what it draws, plain — `notes` holds 100 and reads `4`. That under-report is real and deliberately left alone; a `4 (100)` form was tried and put two numbers on nearly every row. Do not file the plain `4` as a defect against this ticket. |
+| **Swatch tooltip** | Hover the swatch on a row that draws nothing: "No notes on the disc", not "Inner/Outer ring". Also true of `(unlinked)` at zero in the default state, which claimed a ring it was not on before this. |
+| **Upgrade** | Distinct from finding **E** below, and neither fixes the other. This one: a vault already running kept-separate **with a folder made entirely of unlinked notes** shifts its automatic colours once, onto the assignment the default has always used. A folder with an explicit colour must not move. |
+| **Numbers** | Console, before and after each flip: `__vg.groupOrder().map(function (g) { return g + " " + __vg.colorOf(g); })`. **Read it at rest** — `colorWalk` tweens over `TWEEN_MS`, so a read inside a second of the flip returns blends and a real renumbering looks like a near-miss. |
+| **Result** | |
+
 ## github#49 — the membership move animates in full
 
 The cascade-moves work that landed last, squashed from seventeen commits (878b45f). The #45
@@ -124,7 +142,7 @@ human-verified yet; that is what this section is for.
 | **B — a deep subfolder's hover halo drops on solo** (extends github#46 · src/page.js:8729) | Open twisties until a **2+-level-deep** subfolder row shows (a `data-hpath` row, e.g. `Resources/Books/Fiction`). Hover it so its notes light. **Without moving the mouse**, click that row's `only` chip — its notes must stay lit through and after the rebuild. | **Fixed** — the halo carry-across now resolves `data-hpath` rows too (`hoverHighlight(null, [path])`), the same call their own `onmouseenter` makes. Re-check the one-level subfolder and top-level rows still behave (no regression). |
 | **C — smoke suite mis-asserts an explicit `--vault ./test-vault`** (scripts/smoke.mjs:572) | `node scripts/smoke.mjs --vault ./test-vault` — the default output dir of make-test-vault.mjs (3000 notes). It must report **NOT ASSERTED** for the golden-snapshot check, not fail. | **Fixed** — the match is now `startsWith(f + "-")`, so the digest-suffixed store fixtures still match while a bare explicit `--vault` no longer collides with the 10k golden. |
 | **D — three camera checks can flake under load** (scripts/smoke.mjs:1417/1452/1488) | Run the full suite at the default `--jobs 4`. | **Fixed** — the three new #14 checks now match `POINTER_DRIVEN` (`"auto-fits the camera"`, `"left alone by a visibility toggle"`), so they run in the serial lane instead of the parallel pool — off the github#7 flake path. |
-| **E — a vault with orphans shifts its folder colours by one on upgrade** (src/page.js:762) | Open a 1.8.0 vault that has unlinked notes and folders on automatic (un-overridden) colours in 1.9.0 with the default (`unlinkedByFolder` ON). The un-overridden folders move one hue; a folder with an *explicit* colour, and any vault with no unlinked notes, must NOT move. | **Accepted; CHANGELOG corrected (2026-09-01).** The behaviour stands — intrinsic to the "make unlinked grey, out of rotation" request. The changelog no longer claims "no existing vault's automatic colours shift on upgrade"; it now states the one-slot shift plainly. Left as a visual sanity-check only. |
+| **E — a vault with orphans shifts its folder colours by one on upgrade** (src/page.js:762) | Open a 1.8.0 vault that has unlinked notes and folders on automatic (un-overridden) colours in 1.9.0 with the default (`unlinkedByFolder` ON). The un-overridden folders move one hue; a folder with an *explicit* colour, and any vault with no unlinked notes, must NOT move. | **Accepted; CHANGELOG corrected (2026-09-01).** The behaviour stands — intrinsic to the "make unlinked grey, out of rotation" request. The changelog no longer claims "no existing vault's automatic colours shift on upgrade"; it now states the one-slot shift plainly. Left as a visual sanity-check only. **github#50 adds a SECOND and separate upgrade-time shift** — a vault kept-separate with folders made entirely of unlinked notes — which does not subsume this one and is not fixed by it: E is about `(unlinked)` no longer consuming slot 0, and github#50 does not give that slot back. Check the two independently. |
 | **F — hidden `(unlinked)` then toggle ON snaps instead of animating** (src/page.js:10077) | Turn "unlinked notes join their folder" OFF, hide the `(unlinked)` legend row, then turn it back ON. | **Real, low, likely accept.** With every orphan hidden the cascade is skipped (n=0) and the notes appear in their folders with no fade. Matches how 1.8.0 snapped; end state is correct. A coverage gap in the new animation, not a regression. |
 | **Result** | |
 
