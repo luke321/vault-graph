@@ -42,6 +42,16 @@ Enable. Open it from the ribbon icon or the command palette (*Vault graph: Open 
 
 **From source** — `npm install && npm run build`, then `./scripts/install-plugin.ps1`.
 
+<sub>**Check what you downloaded, if you like.** `main.js` is a ~700 KB bundle with two
+libraries inlined, and nothing about downloading a file tells you where it came from. Every
+release asset now carries a [GitHub build provenance
+attestation](https://docs.github.com/en/actions/security-for-github-actions/using-artifact-attestations/using-artifact-attestations-to-establish-provenance-for-builds),
+signed by the workflow that built it — so you can verify it came from this repository at
+the tagged commit rather than being assembled by hand: `gh attestation verify main.js
+--repo luke321/vault-graph`. Releases published before this landed (1.9.0 and earlier)
+have none, because an attestation can only be produced by a workflow and those were
+published from a laptop.</sub>
+
 It reads your vault through Obsidian's own metadata cache, so it sees the same links
 Obsidian does, aliases and frontmatter links included. It builds in about a tenth of a
 second on a 450-note vault. **Nothing leaves your machine** — it makes no network requests,

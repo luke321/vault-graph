@@ -1,15 +1,47 @@
 # Releasing
 
-**Every release gets a git tag, a GitHub Release, and a ready-to-run package attached.**
-The tag alone is not a release: GitHub's auto-generated source archives include
-`.ai-context/` (a few thousand lines of design records) and the dev tooling, which is not
-what someone wanting to *run* this needs.
+**Every release gets a git tag, a GitHub Release, a ready-to-run package, and a build
+provenance attestation on every asset.** The tag alone is not a release: GitHub's
+auto-generated source archives include `.ai-context/` (a few thousand lines of design
+records) and the dev tooling, which is not what someone wanting to *run* this needs.
 
-## One command
+## Two halves: a command, then a workflow
 
 ```powershell
-.\scripts\release.ps1 1.5.3
+.\scripts\release.ps1 1.5.3          # gates, tags, pushes -- and stops
 ```
+
+The push of the tag is the trigger. `.github/workflows/release.yml` does the rest: builds
+`main.js` and `styles.css` from the tagged commit, packages the zip, **attests all four
+assets**, and creates the Release with the `CHANGELOG.md` section as a first-draft body.
+
+**This used to be one command that did everything, and the split is not tidiness
+(github#10).** An artifact attestation is signed through Sigstore using a workflow's OIDC
+token. `id-token: write` is a permission only an Actions run can hold, so a local
+`gh release create` cannot mint one and never could — attesting `main.js` was therefore
+never a flag that could be added to `release.ps1`. Either publication moved into CI or the
+assets stayed unattestable. The Obsidian directory's automated review had asked for this on
+every release since 1.5.2.
+
+**What stayed local is the invariant suite, and that was the real decision.** It drives a
+real Chrome against two vaults, one of which is a structural mirror of a private vault that
+cannot exist on a runner, and the other a 10,000-note synthetic that takes minutes. So the
+gate is still `release.ps1` — it will not tag a red suite — and `.githooks/pre-push` runs
+it again on the push of `main` that carries the tagged commit. **CI trusts the tag** for
+that, and runs the three checks that are static, need no vault and no browser, and are
+about what the release *ships* rather than about the layout: `check-scope.mjs`,
+`check-network.mjs`, `check-pii.mjs`. The alternative — a reduced suite against the
+synthetic vault only — buys a weaker version of a gate that already ran, and costs several
+minutes of every release.
+
+`check-pii.mjs` runs in CI **without its deny list**, and says so loudly on every run: the
+list of real names lives in a gitignored `.pii-names`, deliberately outside this
+repository. Its identifier patterns (work email, Jira keys, an Atlassian host, a Windows
+user path, a vault absolute path) do run, and those are what has actually leaked before.
+Setting a `PII_NAMES` repository secret would restore the name half; that means putting
+those names into repository settings, and that call has not been made.
+
+## What `release.ps1` still does
 
 **The version is bare semver, with no `v`.** Obsidian installs a plugin by matching the
 release tag against `manifest.json`'s `version`, which cannot carry a prefix — so a
@@ -18,16 +50,107 @@ and rejects a version the manifest does not already claim. (Its own check said `
 until 1.5.3, which is why 1.5.0–1.5.2 were cut by hand.)
 
 It refuses to release a dirty tree (a release must be reproducible from its tag), refuses a
-version with no `## <version>` section in `CHANGELOG.md` (a version whose changes nobody
-wrote down), runs the invariant suite, then tags, packages, pushes and creates the GitHub
-Release with the zip attached. `-DryRun` stops after the suite. The tag message is the same
-text as the release notes, so `git show <tag>` and the Release page agree.
+version the manifest does not claim, refuses a version with no `## <version>` section in
+`CHANGELOG.md` (a version whose changes nobody wrote down), refuses to tag anywhere but
+`main` (github#47), builds the plugin as a pre-flight, runs the invariant suite, then tags,
+pushes `main`, pushes the tag and stops. `-DryRun` stops after the suite. The tag message
+is the same `CHANGELOG.md` section the workflow uses for the release body, so `git show
+<tag>` and the Release page still agree.
 
+**The pre-flight build is there for the one failure mode the split introduces.** Nothing
+local consumes `main.js` at release time — the workflow builds its own copy from the tagged
+commit, which is the copy it attests — but a build that fails *in CI* leaves a tag with no
+release, and a published tag cannot be re-cut. Ten seconds locally buys that.
+
+**`-Notes` and `-Title` are gone.** The body is drafted by the workflow from the CHANGELOG
+section and rewritten by hand afterwards, so a one-liner passed at tag time had nowhere to
+land. The title now comes out of the CHANGELOG heading — `## 1.9.0 — "Belonging" —
+2026-09-02` gives `1.9.0 - Belonging` — so the title and the section it sits above cannot
+disagree, which a hand-typed argument allowed. A heading with no quoted name (1.7.0) falls
+back to the bare version.
+
+## The attestation, and what it is worth
+
+Every asset is attested: `main.js`, `manifest.json`, `styles.css` **and the zip**. The zip
+was an open question when this was filed — it is the thing that makes a tag runnable, and
+an unattested asset sitting next to three attested ones is exactly the one a forger would
+replace. Anyone can check one:
+
+```bash
+gh attestation verify main.js --repo luke321/vault-graph
+```
+
+**An attestation is not a reproducibility claim** — it binds *these bytes* to this
+repository, this commit and this workflow run. The zip's bytes are not reproducible at all
+(it carries file mtimes from the checkout) and that is fine. But the claim reads better if
+the build is stable, so it was measured rather than assumed:
+
+**Measured 2026-09-02.** Two consecutive builds of `build-plugin.mjs` in the same directory
+are byte-identical. They were **not** identical across two different checkouts, and the
+whole difference was two comment lines: esbuild prints a `// <namespace>:<path>` header
+above each namespaced module, and the `raw:`/`b64:` loader resolved to an absolute path — so
+the published 1.9.0 `main.js` carries the maintainer's own directory layout twice, for no
+reason. The loader now resolves repo-relative and posix-separated, which makes the bundle
+path- and platform-independent: a bundle built on the runner can be diffed byte-for-byte
+against one built on Windows from the same tag. The change is inert otherwise — the two
+builds were identical apart from those two lines.
+
+## What the workflow needs, and what it does not
+
+It needs no secrets. `GITHUB_TOKEN` with `contents: write`, `id-token: write` and
+`attestations: write` — all three declared in the file — is the whole grant, and
+attestations for a public repository work on that alone. It pins Node to the major the
+releases so far were cut on (v24), installs with `npm ci` so the lockfile decides the
+bundle, and pins its three actions to major tags rather than commit SHAs: all three are
+GitHub's own, the token is scoped to one job, and a SHA nobody bumps silently freezes the
+Sigstore client.
+
+It needs no change to `main`'s ruleset either: it never pushes to `main`, it only reads
+`origin/main` to check the tag is in its history. **Two repository settings can still stop
+it, and neither is visible from the file**: if the default workflow permissions for this
+repository are restrictive, confirm the run actually receives `contents: write` (the
+`permissions:` block asks for it, and a workflow may ask for more than the default — but
+this has not been observed on this repository yet); and if a *tag* protection rule is ever
+added, pushing `1.x.y` from a laptop is what would start failing, not the workflow.
+
+**It publishes immediately rather than creating a draft**, which is what `release.ps1` did,
+so nothing about the visible behaviour of a release changed. The trade is that the
+changelog-dump first draft is public until it is rewritten. If that turns out to be the
+wrong way round, `--draft` on the create and a `gh release edit --draft=false` at the end
+of the human's flow is the whole change — and the `develop`-pinned asset URLs below exist
+partly so a draft *can* be previewed.
+
+**A re-run is a way forward, not a dead end.** If the release already exists the workflow
+re-uploads the assets over it with `--clobber` and leaves the notes alone, because by then
+a person may have rewritten them. That matters because a published tag cannot be re-cut, so
+re-running is the remedy for anything that fails after the tag lands — including the
+main-ancestry guard, which can lose a race if the tag reaches GitHub before the branch does
+(`release.ps1` pushes the branch first for exactly that reason).
+
+**And there is a `workflow_dispatch` with a `tag` input, for one specific trap.** A
+workflow triggered by a tag push runs *the version of that file which is at the tag*. So a
+bug in `release.yml` that only shows up on a real release cannot be fixed by re-running
+(same broken file), nor by fixing `main` (the tag does not move), and the tag cannot be
+re-cut once published — the only way out would be publishing four assets by hand, which is
+unattested and is the thing this all exists to prevent. Dispatching from a branch runs
+*that branch's* file against a tag you name, which turns that into fix-and-re-run:
+
+```bash
+gh workflow run release.yml --ref main -f tag=1.9.1
+```
+
+Worth knowing because **the workflow cannot be exercised without cutting a real tag, so the
+first genuine release is its first full test.** Everything that could be checked short of
+that was: the YAML parses, every `run` block passes `bash -n`, and the guard, notes-draft
+and summary steps were executed against this repository with `VERSION=1.9.0` (they accept
+`1.9.0`, reject `v1.9.0`, `1.9` and `1.9.1`, and derive the title `1.9.0 - Belonging` from
+the CHANGELOG heading). The attestation step, the `gh release` calls and `make-package.mjs`'s
+Linux `zip`/`unzip` path are the parts only a real run can prove.
 
 ## The release body is a highlight reel ON TOP of the CHANGELOG section, not instead of it
 
-`release.ps1` drops the raw `## <version>` section from `CHANGELOG.md` straight into the
-release notes by default — fine as a first draft, wrong as the finished thing.
+The workflow drops the raw `## <version>` section from `CHANGELOG.md` straight into the
+release notes — fine as a first draft, wrong as the finished thing.
 `CHANGELOG.md` is the technical record: dense, bug-by-bug, written for someone reading the
 project's history. The GitHub Release page is what someone deciding whether to update
 actually reads first, and a wall of bug-fix prose with no picture buries the one or two
@@ -78,9 +201,12 @@ re-recorded clip then never reaches the older release page, which for a *hero* i
 the wrong way round. Either way: **never a release branch, and never a tag that does not
 exist yet.**
 
-Write and review this by hand (or have it drafted and then reviewed) before the release is
-published — `gh release edit <version> --notes-file <file>` updates a draft in place, same
-command whether the notes came from `release.ps1`'s default or were rewritten after.
+Write and review this by hand (or have it drafted and then reviewed) as soon as the
+workflow goes green — `gh release edit <version> --notes-file <file>` replaces the body in
+place, same command whether the notes came from the workflow's first draft or were
+rewritten once already. **It is the first thing to do after a release, not the last**: the
+workflow publishes immediately rather than as a draft, so the changelog dump is what the
+page says until this is done.
 
 ## Re-record the hero
 
@@ -142,12 +268,24 @@ over-warn (a `colours`-only change flags every feature) but never under-warns si
    this one's a judgment call, not "always."
 4. **Run the suite.** `node scripts/smoke.mjs` — and it runs again on push via
    `.githooks/pre-push`, so a red suite cannot be released.
-5. **Tag, annotated**, with the release summary as the message.
-6. **Build the package** — `node scripts/make-package.mjs` writes
+5. **Tag, annotated**, with the release summary as the message, on `main`.
+6. **Push `main`, then the tag.** That order, so the workflow's main-ancestry guard cannot
+   lose the race. Everything below is what the workflow then does for you.
+7. **Build the plugin** — `node scripts/build-plugin.mjs` writes `main.js` and
+   `styles.css`. Obsidian downloads exactly those two plus `manifest.json` from the release
+   and never opens the zip; 1.6.0 shipped with only the zip and the directory's scan came
+   back with two errors.
+8. **Build the package** — `node scripts/make-package.mjs` writes
    `dist/vault-graph-<version>.zip` containing only what is needed to run: `src/`,
    `vendor/`, `scripts/`, `assets/`, `README.md`, `LICENSE`, `CHANGELOG.md`.
-7. **Create the release** and attach it:
-   `gh release create <version> dist/vault-graph-<version>.zip --notes-file <notes>`
+9. **Create the release** and attach all four:
+   `gh release create <version> main.js manifest.json styles.css dist/vault-graph-<version>.zip --notes-file <notes>`
+
+**Steps 7–9 by hand produce an unattested release**, and there is no way around that from a
+laptop — see the top of this file. So they are the *second* fallback for a broken workflow:
+try `gh workflow run release.yml --ref main -f tag=<version>` first, which runs a fixed
+`release.yml` against the tag that already exists and still attests. Hand-publishing is the
+last resort, and what it produces is the thing github#10 was filed about.
 
 ## What the package must NOT contain
 

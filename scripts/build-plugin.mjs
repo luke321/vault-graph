@@ -18,7 +18,7 @@
 
 import { build, context } from "esbuild";
 import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
-import { basename, dirname, join, resolve } from "node:path";
+import { basename, dirname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { readVendorSource } from "../src/vendor.mjs";
 
@@ -39,11 +39,34 @@ const rawLoader = {
     for (const [prefix, loader] of [["raw:", "text"], ["b64:", "base64"]]) {
       const filter = new RegExp("^" + prefix);
       b.onResolve({ filter }, (args) => ({
-        path: resolve(dirname(args.importer), args.path.slice(prefix.length)),
+        // THE RESOLVED PATH IS REPO-RELATIVE AND POSIX-SEPARATED, because esbuild PRINTS
+        // it: a namespaced module gets a `// <namespace>:<path>` comment above its
+        // contents in the bundle, so whatever comes back here is a literal string in the
+        // shipped 700 KB main.js. It used to be `resolve(...)`, and the published 1.9.0
+        // bundle therefore carries two lines reading
+        // `// raw::<the whole absolute path of the checkout>\src\page.html`, and the
+        // same for assets/logo-mask.png -- the maintainer's own directory layout, in a
+        // public artifact, for no reason.
+        //
+        // MEASURED 2026-09-02, while wiring up build provenance (github#10): two
+        // consecutive builds in the same directory are byte-identical, and those two
+        // comment lines were the ONLY path-dependent bytes in the whole file -- so before
+        // this change the same commit built in two checkouts produced two different
+        // main.js files. That matters here specifically: an attestation says "these bytes
+        // came from this repo at this commit", and a claim like that is only worth having
+        // if the bytes do not also depend on who typed the command and where. Relative
+        // and posix-separated makes the build path-independent AND platform-independent,
+        // so a bundle built on the runner can be compared byte-for-byte against one built
+        // on a Windows machine from the same tag.
+        path: relative(ROOT, resolve(dirname(args.importer), args.path.slice(prefix.length)))
+          .split(sep).join("/"),
         namespace: prefix,
       }));
+      // ...which means the path handed back here is no longer readable on its own. A
+      // custom namespace is opaque to esbuild -- it never touches the filesystem for one
+      // -- so the only rule is that resolve and load agree, and they agree on ROOT.
       b.onLoad({ filter: /.*/, namespace: prefix }, (args) => ({
-        contents: readFileSync(args.path),
+        contents: readFileSync(join(ROOT, args.path)),
         loader,
       }));
     }

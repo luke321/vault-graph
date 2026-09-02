@@ -139,5 +139,10 @@ const kb = Math.round(statSync(zip).size / 1024);
 console.log(`\npackaged ${files.length} files -> ${relative(ROOT, zip)} (${kb} KB)`);
 console.log("contents:");
 for (const [name] of INCLUDE) console.log("  " + name);
-console.log("\nattach it with:");
+// NORMALLY NOBODY ATTACHES THIS BY HAND. .github/workflows/release.yml runs this script on
+// a tag push, attests the zip along with the three loose files, and uploads all four --
+// which is the only way the assets can carry a provenance attestation at all (github#10).
+// The command below is the by-hand fallback for a broken workflow, and it is worth knowing
+// that a release published that way has no attestation on anything.
+console.log("\nthe release workflow attaches this. By hand, if you must:");
 console.log(`  gh release create ${version} "${relative(ROOT, zip)}" --title "${version}" --notes-file <notes>`);

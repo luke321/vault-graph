@@ -104,6 +104,7 @@ commit and neither mechanism can see the other:
 |---|---|
 | `.github/workflows/branch-policy.yml` | a pull request into `main` fails unless its head is `develop` in this repository — GitHub has no branch-protection setting for "the PR must come from X", so it is a required check |
 | `.githooks/pre-push` | a `git push` to `main` is refused unless `develop` is already an ancestor of it — a merge of `develop` passes, a commit made straight on `main` does not |
+| `.github/workflows/release.yml` | a release tag whose commit is not in `origin/main`'s history is refused before anything is built, signed or published — the same rule again, at the one moment it still matters, since a published tag cannot be moved |
 
 `main` also carries a ruleset: pull request required, that check required, no force pushes,
 no deletion.

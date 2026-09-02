@@ -1,0 +1,429 @@
+# Build, attest and publish a release. A tag push is the trigger; this file is the publisher.
+#
+# WHY PUBLICATION HAD TO MOVE HERE AT ALL, given that scripts/release.ps1 did the whole job
+# locally and did it well (github#10): an artifact attestation can only be produced by a
+# workflow. `actions/attest-build-provenance` signs through Sigstore using the run's OIDC
+# token, which requires `id-token: write` and therefore an Actions run to mint. A local
+# `gh release create` has no such token and no way to get one -- so "attest the release
+# assets" was never a flag that could have been added to release.ps1, it is a
+# restructuring. That is the whole reason this file exists.
+#
+# WHAT AN ATTESTATION BUYS. main.js is a ~700 KB bundle with two vendored libraries
+# inlined. Nothing about downloading it tells you it was built from this repository rather
+# than assembled by hand, and the Obsidian directory's automated review has said so as a
+# Recommendation on every release since 1.5.2 ("Artifact attestations let users
+# cryptographically verify the provenance of the release assets"). After this, anyone can
+# check:
+#
+#   gh attestation verify main.js --repo luke321/vault-graph
+#
+# WHAT STAYED LOCAL, AND WHY. The invariant suite is still the release gate and still runs
+# on the maintainer's machine, not here. It drives a real Chrome against two vaults, one of
+# which is a structural mirror of a private vault that cannot exist on a runner, and the
+# other a 10,000-note synthetic that takes minutes to build and render. So this workflow
+# TRUSTS THE TAG: release.ps1 runs the suite before it writes the tag, and
+# .githooks/pre-push runs it again on the push of main that carries the tagged commit. What
+# runs here instead are the three checks that are static, need no vault and no browser, and
+# are about what the release SHIPS rather than about the layout -- scope, network and PII.
+# Those are cheap enough to be unconditional, and they gate the artifacts.
+#
+# The mirror of this file for the human half of a release is scripts/release.ps1, and the
+# flow the two halves make up is written down in .ai-context/releasing.md, which is the
+# authority. If you change the division of labour here, change that file in the same commit.
+
+name: release
+
+on:
+  push:
+    tags:
+      # BARE SEMVER ONLY, and that is not a cosmetic filter. Obsidian installs a plugin by
+      # matching the release tag against manifest.json's `version`, which cannot carry a
+      # prefix -- so a `v`-tagged release is one nobody can install, and from 1.5.0 on this
+      # repo's tags have no `v`. The tags up to v1.4.4 keep theirs because renaming a
+      # published tag breaks every link to it; this pattern deliberately does not match
+      # them, so re-pushing an old tag cannot re-publish an old release.
+      - '[0-9]+.[0-9]+.[0-9]+'
+
+  # THE ESCAPE HATCH, and it exists for one specific trap. A workflow triggered by a tag
+  # push runs THE VERSION OF THIS FILE THAT IS AT THAT TAG. So if a bug here only shows up
+  # on the first real release, re-running the run re-runs the broken file, fixing the file
+  # on main changes nothing for that tag, and the tag cannot be re-cut once it is published.
+  # The recovery would be publishing four assets by hand -- unattested, which is the exact
+  # thing this file exists to stop.
+  #
+  # Dispatching from a branch runs the file on THAT branch against a tag you name, which
+  # turns an unfixable state back into a fix-and-re-run. It is not hypothetical: this
+  # workflow cannot be exercised at all without cutting a real tag, so the first genuine
+  # release IS its first test.
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing tag to build, attest and publish (bare semver, e.g. 1.9.1)'
+        required: true
+
+# Nothing by default, and the one job below asks for exactly what it needs. That job is the
+# only thing in this repository that can write to the repository at all, so the grant is
+# worth reading.
+permissions: {}
+
+concurrency:
+  # Per tag, and NEVER cancel-in-progress. Everything after the attestation step is
+  # publication: cancelling between "the attestation is signed" and "the release exists"
+  # leaves a tag with a signed bundle nobody can download, which is the one state that is
+  # awkward to recover from by hand.
+  #
+  # `inputs.tag || github.ref_name` throughout: on a tag push `inputs` is empty and the ref
+  # name IS the tag, on a dispatch the input is the tag and the ref name is a branch.
+  group: release-${{ inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: attest and publish ${{ inputs.tag || github.ref_name }}
+    runs-on: ubuntu-latest
+
+    permissions:
+      # Create the release and upload the four assets to it.
+      contents: write
+      # The Sigstore OIDC token. This is the permission the whole issue turns on: without
+      # it attest-build-provenance cannot sign, and there is no way to hand one to a script
+      # running on somebody's laptop.
+      id-token: write
+      # Record the resulting attestation in this repository's attestation store, which is
+      # what `gh attestation verify` reads.
+      attestations: write
+
+    env:
+      # One resolution, at the top, so every `run` below just reads $VERSION and no step has
+      # to care which trigger it was.
+      VERSION: ${{ inputs.tag || github.ref_name }}
+
+    steps:
+      # AN EXPLICIT ref, because of the dispatch trigger: without it a dispatched run would
+      # check out the branch it was dispatched from and cheerfully build, attest and publish
+      # that as if it were the tag. A tag push would land on the right commit anyway; this
+      # makes both triggers mean the same thing.
+      #
+      # fetch-depth: 0 because two things below need history the tag alone does not carry --
+      # the main-ancestry guard needs origin/main, and make-package.mjs shells out to
+      # `git ls-files` (it packages the TRACKED set, never the working tree; see that script
+      # for the release that swept up another session's work-in-progress).
+      - name: Check out the tagged commit
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.tag || github.ref_name }}
+          fetch-depth: 0
+
+      # THE THREE ACTIONS ARE PINNED TO A MAJOR TAG, not a commit SHA. All three are
+      # GitHub's own (`actions/`), the token above is scoped to this one job, and a SHA pin
+      # that nobody remembers to bump is its own hazard here -- it silently freezes the
+      # attestation tooling at whatever Sigstore client shipped that month.
+      #
+      # The majors were CHECKED rather than remembered, 2026-09-02, with
+      # `gh api repos/actions/<name>/releases/latest`: checkout v7, setup-node v7,
+      # attest-build-provenance v4. Most of the documentation and every example still shows
+      # v2 for the attestation action, which would have pinned this two majors back on the
+      # day it was written.
+      - name: Set up Node
+        uses: actions/setup-node@v7
+        with:
+          # Pinned, and to the major the releases so far were cut on (v24.x on the
+          # maintainer's machine). Provenance does not require a reproducible build, but the
+          # claim is worth more if a local build of the same tag can be diffed against this
+          # one byte-for-byte, and that comparison only means anything with the same esbuild
+          # on the same major.
+          node-version: '24'
+          cache: npm
+
+      # `npm ci`, not `npm install`: it installs exactly package-lock.json, and the lockfile
+      # is what makes two builds of one tag produce the same bundle. An attestation is a
+      # claim about bytes, so anything that lets the bytes drift under a fixed commit
+      # weakens it.
+      - name: Install the build toolchain
+        run: npm ci
+
+      # ---------------------------------------------------------------- guards
+      #
+      # Each of these mirrors a check scripts/release.ps1 makes before it writes the tag,
+      # and they are repeated here on purpose: a tag can also be pushed by hand, or this
+      # workflow dispatched, and then none of release.ps1's guards ever ran. Everything
+      # here is cheap, and every failure happens BEFORE anything is signed or published.
+      - name: The tag, the manifest and the CHANGELOG must agree
+        run: |
+          set -euo pipefail
+
+          # The push trigger's tag filter already enforces this shape; a dispatch has no
+          # filter, so the format is checked here rather than trusted.
+          if ! printf '%s' "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "::error::'$VERSION' is not bare semver. Obsidian matches the release tag against"
+            echo "::error::manifest.json's version, which cannot carry a 'v' prefix -- so a v-tagged"
+            echo "::error::release is one nobody can install."
+            exit 1
+          fi
+
+          # AND IT HAS TO BE THE VERSION THE MANIFEST CLAIMS -- the same rule, the other
+          # half. A tag that disagrees with manifest.json publishes a release that installs
+          # nothing, and that stays invisible until a user reports the plugin will not
+          # update. Read as a FILE and parsed, rather than `require("./manifest.json")`,
+          # because this step's whole job is to be the check that cannot itself be wrong.
+          manifest=$(node -p 'JSON.parse(require("node:fs").readFileSync("manifest.json", "utf8")).version')
+          if [ "$manifest" != "$VERSION" ]; then
+            echo "::error::manifest.json says $manifest, the tag says $VERSION. The two have to match --"
+            echo "::error::Obsidian installs a plugin by matching the tag against the manifest version."
+            exit 1
+          fi
+
+          # The CHANGELOG section IS the first draft of the release notes (see below), so a
+          # version with no section is a version whose changes nobody wrote down.
+          if ! grep -q "^## $VERSION" CHANGELOG.md; then
+            echo "::error::CHANGELOG.md has no '## $VERSION' section. Write the release notes first."
+            exit 1
+          fi
+
+          echo "manifest and tag agree on $VERSION, and the CHANGELOG has a section for it"
+
+      # THE TAG BELONGS ON MAIN (github#47). main is what the Obsidian directory installs
+      # from, and a tag cut anywhere else sits off main's history permanently -- 1.8.0's tag
+      # is on a develop commit for exactly this reason, and a published tag cannot be moved
+      # afterwards without breaking every link to it. release.ps1 refuses to tag off main;
+      # this is the same rule on the server, where a hand-pushed tag cannot dodge it.
+      #
+      # Ancestry, not equality: main moves on after a release, so the tagged commit only has
+      # to BE in main's history. `--is-ancestor` counts a commit as its own ancestor, so a
+      # tag on main's tip passes too.
+      - name: The tagged commit must be on main
+        run: |
+          set -euo pipefail
+
+          # A forcing refspec, and into the remote-tracking ref only -- never a local
+          # branch. The ruleset forbids force-pushing main so this should always be a
+          # fast-forward; it is written this way so the check cannot fail for a reason that
+          # has nothing to do with what it is checking.
+          git fetch --no-tags origin '+refs/heads/main:refs/remotes/origin/main'
+
+          # HEAD, not $GITHUB_SHA: the checkout above is detached at the tagged commit, and
+          # HEAD is unambiguously that commit whether the tag is annotated or lightweight --
+          # and on a dispatch $GITHUB_SHA is the branch it was dispatched from, not the tag.
+          sha=$(git rev-parse HEAD)
+          if git merge-base --is-ancestor "$sha" refs/remotes/origin/main; then
+            echo "$sha is in origin/main's history"
+            exit 0
+          fi
+          echo "::error::$sha is not on main. main is what the Obsidian directory installs from,"
+          echo "::error::and a tag cut elsewhere stays off main's history for good (see github#47)."
+          echo "::error::"
+          echo "::error::If main simply has not caught up yet -- release.ps1 pushes the branch and then"
+          echo "::error::the tag, and this run can start between the two -- merge or push main and RE-RUN"
+          echo "::error::this workflow. The check re-fetches, so a re-run is the whole remedy."
+          exit 1
+
+      # ------------------------------------------------------------------ build
+      #
+      # The two built files Obsidian installs. Neither is committed (see .gitignore: main.js
+      # is ~700 KB of bundle and would churn on every template edit), so building them here
+      # duplicates nothing -- before this workflow they were built on the maintainer's
+      # machine and uploaded from there, which is precisely what could not be attested.
+      - name: Build the plugin
+        run: node scripts/build-plugin.mjs
+
+      # THE THREE LOOSE FILES ARE WHAT OBSIDIAN ACTUALLY INSTALLS, and they are not
+      # optional. Obsidian downloads main.js, manifest.json and styles.css directly from the
+      # release assets and never opens the zip -- the directory's own scanner says so in as
+      # many words, "All other files will not be downloaded by Obsidian". 1.6.0 shipped with
+      # only the zip attached and the scan came back with two errors: "the release 1.6.0
+      # specified in manifest.json is missing the main.js file", and the same for
+      # manifest.json. So their presence is asserted rather than assumed, before anything is
+      # signed.
+      - name: Refuse to publish an uninstallable release
+        run: |
+          set -euo pipefail
+          missing=""
+          for f in main.js manifest.json styles.css; do
+            [ -s "$f" ] || missing="$missing $f"
+          done
+          if [ -n "$missing" ]; then
+            echo "::error::missing or empty:$missing -- Obsidian downloads exactly these three files"
+            echo "::error::from the release and never opens the zip, so a release without them installs"
+            echo "::error::nothing. See the 1.6.0 scan errors."
+            exit 1
+          fi
+          ls -l main.js manifest.json styles.css
+
+      # The static checks, all three about what this release SHIPS rather than about the
+      # layout: no unscoped selector (page.css becomes the plugin's stylesheet, so one of
+      # those restyles Obsidian instead of the graph), no network primitive anywhere in the
+      # bundle (the promise the vendored libraries are stripped to keep, github#1), and
+      # nobody else's names or identifiers in the tracked files.
+      #
+      # They run here because they are static reads costing milliseconds and need neither a
+      # vault nor a browser -- the same reason .githooks/pre-push gives them no skip flag.
+      # The browser-driven invariant suite is the one thing that stayed local; see the
+      # header.
+      #
+      # check-pii runs WITHOUT its deny list and says so loudly on every invocation: the
+      # list of real names lives in a gitignored `.pii-names`, deliberately outside this
+      # repository, so there is nothing here for the runner to read. Its regex patterns
+      # (work email, Jira keys, an Atlassian host, a Windows user path, a vault absolute
+      # path) do run, and those are the identifiers that have actually leaked before. A
+      # PII_NAMES repository secret would restore the name half; that means putting those
+      # names into repository settings, and that call has not been made.
+      - name: The page cannot style, or be styled by, its host
+        run: node scripts/check-scope.mjs
+
+      - name: Nothing shipped can make a network request
+        run: node scripts/check-network.mjs
+
+      - name: No other people's names or identifiers
+        run: node scripts/check-pii.mjs
+
+      # The runnable package, which is what makes a tag more than a source snapshot:
+      # GitHub's auto-generated archive ships .ai-context/ (a few thousand lines of design
+      # records) and the dev tooling, and someone who wants to RUN the exporter needs
+      # neither.
+      #
+      # make-package.mjs shells out to `zip` and `unzip` off Windows; both are on the
+      # ubuntu-latest image. If one ever is not, this step fails loudly here rather than
+      # producing a release with an asset missing.
+      - name: Build the runnable package
+        run: node scripts/make-package.mjs "$VERSION"
+
+      # ------------------------------------------------------------- attestation
+      #
+      # THE POINT OF THE WHOLE FILE, and it comes BEFORE publication on purpose: if signing
+      # fails, no release exists yet. The other order would leave a published, unattested
+      # release behind -- which is the state github#10 was filed about, reached by a
+      # different route.
+      #
+      # ALL FOUR ASSETS, including the zip. The issue left that open ("whether the zip
+      # stays. It would want attesting too") and the answer is yes: it is the thing that
+      # makes a tag runnable, it is built from `git ls-files` at the tagged commit, and an
+      # unattested asset sitting next to three attested ones is the one a forger would
+      # replace.
+      #
+      # The zip's BYTES are not reproducible -- it carries file mtimes from the checkout --
+      # and that is fine, because an attestation is not a reproducibility claim. It binds
+      # exactly these bytes to this repository, this commit and this workflow run. main.js
+      # IS byte-stable for a given commit, which is a stronger and separately useful
+      # property; see scripts/build-plugin.mjs for the absolute path that used to make that
+      # untrue and the measurement that found it.
+      - name: Attest build provenance for every release asset
+        uses: actions/attest-build-provenance@v4
+        with:
+          subject-path: |
+            main.js
+            manifest.json
+            styles.css
+            dist/vault-graph-${{ inputs.tag || github.ref_name }}.zip
+
+      # ---------------------------------------------------------------- publish
+      #
+      # THE RELEASE BODY IS THE CHANGELOG SECTION, VERBATIM -- a first draft, not the
+      # finished thing. .ai-context/releasing.md has the shape of a finished release page (a
+      # highlight reel on top, the CHANGELOG section appended underneath) and it is written
+      # and reviewed BY HAND afterwards, with `gh release edit <version> --notes-file
+      # <file>`. That was already the flow when release.ps1 published; moving publication
+      # here does not change it, only which machine types the first draft.
+      #
+      # Extracted with awk rather than one regex over the whole file, matched on an exact
+      # "## <version>" prefix followed by a space or end of line -- so 1.9.0 cannot match a
+      # heading for 1.9.01, which a dot-as-any-character regex would. It ends at the next
+      # `## `, which is how the CHANGELOG is structured (one `##` per release, newest
+      # first), and that includes the section's own trailing `---`.
+      #
+      # THE TITLE COMES FROM THE CHANGELOG HEADING TOO. Those headings look like
+      # `## 1.9.0 — "Belonging" — 2026-09-02`, and the quoted name is what the release page
+      # wants after the version: the version alone is fine for a patch and thin for a
+      # release anyone is meant to remember. release.ps1 took this as a -Title parameter,
+      # which meant a hand-typed string that could disagree with the changelog section it
+      # sits above; reading it from the heading makes that impossible. 1.7.0's heading has
+      # no quoted name, so a missing one is normal and falls back to the bare version.
+      #
+      # Joined with an ASCII hyphen, not an em dash, which is now consistency rather than
+      # necessity: the original reason was that PowerShell 5.1 re-encodes a native
+      # command-line argument on the way out and this repo published mojibake that way
+      # once. A UTF-8 runner has no such problem -- but every published title uses a hyphen,
+      # and a release title cannot be quietly fixed after it has been seen.
+      - name: Draft the release notes from the CHANGELOG
+        run: |
+          set -euo pipefail
+          awk -v hdr="## $VERSION" '
+            index($0, hdr) == 1 && (length($0) == length(hdr) || substr($0, length(hdr) + 1, 1) == " ") {
+              inside = 1; print; next
+            }
+            inside && index($0, "## ") == 1 { exit }
+            inside { print }
+          ' CHANGELOG.md > "$RUNNER_TEMP/notes.md"
+
+          if [ ! -s "$RUNNER_TEMP/notes.md" ]; then
+            echo "::error::extracted an empty '## $VERSION' section from CHANGELOG.md"
+            exit 1
+          fi
+
+          heading=$(head -n 1 "$RUNNER_TEMP/notes.md")
+          name=$(printf '%s\n' "$heading" | sed -n 's/.*"\([^"]*\)".*/\1/p')
+          if [ -n "$name" ]; then
+            echo "RELEASE_TITLE=$VERSION - $name" >> "$GITHUB_ENV"
+          else
+            echo "RELEASE_TITLE=$VERSION" >> "$GITHUB_ENV"
+          fi
+          echo "notes: $(wc -l < "$RUNNER_TEMP/notes.md") lines, starting: $heading"
+
+      # CREATE, OR UPLOAD OVER AN EXISTING RELEASE. A re-run has to be a way forward rather
+      # than a dead end: it is the documented remedy for the main-ancestry guard above and
+      # for anything transient that fails after the tag exists, and a published tag cannot
+      # be re-cut. So the reasoning release.ps1 applies to a tag that already points at HEAD
+      # ("a resumed run, not a mistake") applies here to a release that already exists --
+      # re-upload the assets over it and LEAVE ITS NOTES ALONE, because by then a person may
+      # well have rewritten them.
+      #
+      # NOT A DRAFT, which is a choice rather than an oversight. Publishing straight away is
+      # what release.ps1 did, so nothing about the visible behaviour of a release changes
+      # here; the trade is that the changelog-dump first draft is public for however long it
+      # takes to rewrite it. If that turns out to be the wrong way round, `--draft` on the
+      # create below plus a `gh release edit --draft=false` at the end of the human's flow
+      # is the whole change -- and note that .ai-context/releasing.md's
+      # raw.githubusercontent.com URLs are pinned to `develop` partly so a draft CAN be
+      # previewed before the tag's own assets are reachable.
+      - name: Create the release, or re-upload over it
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          assets="main.js manifest.json styles.css dist/vault-graph-$VERSION.zip"
+
+          if gh release view "$VERSION" >/dev/null 2>&1; then
+            echo "$VERSION already has a release -- re-uploading assets over it, notes untouched"
+            # Unquoted on purpose: $assets is a list of four paths, not one path.
+            # shellcheck disable=SC2086
+            gh release upload "$VERSION" $assets --clobber
+          else
+            # shellcheck disable=SC2086
+            gh release create "$VERSION" $assets \
+              --title "$RELEASE_TITLE" \
+              --notes-file "$RUNNER_TEMP/notes.md"
+          fi
+
+          gh release view "$VERSION" --json tagName,name,isDraft,assets
+
+      # What a person should do next, printed where they are already looking. Rewriting the
+      # release body is the easiest step in the whole flow to forget, because nothing fails
+      # when it is skipped.
+      - name: Say what is left for a human
+        run: |
+          {
+            echo "## $VERSION published"
+            echo
+            echo "Four assets attested with build provenance. Anyone can check one with:"
+            echo
+            echo '```'
+            echo "gh attestation verify main.js --repo $GITHUB_REPOSITORY"
+            echo '```'
+            echo
+            echo "**Still to do by hand:** the release body is the raw CHANGELOG section, which is a"
+            echo "first draft. Write the highlight reel on top of it -- the shape and the reasoning"
+            echo "are in \`.ai-context/releasing.md\` -- and edit it in place with:"
+            echo
+            echo '```'
+            echo "gh release edit $VERSION --notes-file <file>"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
