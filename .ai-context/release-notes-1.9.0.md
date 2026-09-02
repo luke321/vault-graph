@@ -4,7 +4,7 @@ its row and its colour whether or not its notes are currently drawn in it. And a
 **hidden by default** is now a right-click away in the legend, instead of a trip through
 the settings panel.
 
-![The whole disc growing from the vault's first note, a note read, notes pinned to the hub, the date range and heatmap window driven by hand, folders hidden and soloed, subfolders unfolded and coloured, the camera driven and reset, and folder colours set and put back](https://raw.githubusercontent.com/luke321/vault-graph/release/1.9.0/assets/demo.webp)
+![The whole disc growing from the vault's first note, a note read, notes pinned to the hub, the date range and heatmap window driven by hand, folders hidden and soloed, subfolders unfolded and coloured, the camera driven and reset, and folder colours set and put back](https://raw.githubusercontent.com/luke321/vault-graph/develop/assets/demo.webp)
 
 ### New: unlinked notes join their folder
 
@@ -19,7 +19,7 @@ folder** — for notes that stay in the population but still take their own fold
 turning the row's swatch into a gradient of whatever is actually in it. Both toggles are
 settings-panel rows too, for anyone who would rather work down a list than right-click.
 
-![The (unlinked) row right-clicked to keep its notes separate instead of joining their folder, the wedges reallocating around a new group, then right-clicked again to colour those notes by their own folder anyway, and both toggles put back](https://raw.githubusercontent.com/luke321/vault-graph/release/1.9.0/assets/features/unlinked.webp)
+![The (unlinked) row right-clicked to keep its notes separate instead of joining their folder, the wedges reallocating around a new group, then right-clicked again to colour those notes by their own folder anyway, and both toggles put back](https://raw.githubusercontent.com/luke321/vault-graph/develop/assets/features/unlinked.webp)
 
 ### New: a folder keeps its row, its place and its colour
 
@@ -52,7 +52,7 @@ colour picker, and it starts hidden every time the disc opens: this session and 
 whichever host you opened it from. **All** leaves it alone now, so "show everything" no longer
 quietly overrides the one folder you asked to keep out of the way.
 
-![The biggest folder right-clicked in the legend and hidden by default from its own menu, the wedges reallocating around the gap it leaves, then the setting put back](https://raw.githubusercontent.com/luke321/vault-graph/release/1.9.0/assets/features/hiddenbydefault.webp)
+![The biggest folder right-clicked in the legend and hidden by default from its own menu, the wedges reallocating around the gap it leaves, then the setting put back](https://raw.githubusercontent.com/luke321/vault-graph/develop/assets/features/hiddenbydefault.webp)
 
 The setting itself is not new; reaching it from the legend is. And on the Obsidian plugin it
 never actually persisted — it repainted the view live and silently reverted on the next
@@ -94,7 +94,7 @@ after. 1.8.0 fixed where the hub boundary is *drawn* and left this half open.
   so the checks this release depends on always have something real to measure instead of
   silently passing on a vault that happened to link everything.
 - Both new features have their own entry and clip in the
-  [feature gallery](https://github.com/luke321/vault-graph/blob/release/1.9.0/docs/features.md).
+  [feature gallery](https://github.com/luke321/vault-graph/blob/develop/docs/features.md).
 
 ---
 

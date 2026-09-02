@@ -55,13 +55,23 @@ reverse-engineered from it, not invented.
    underneath the highlight reel, so nothing written for the changelog is lost and nothing
    needs maintaining in two places with two different edit histories.
 
-**On the raw.githubusercontent.com URLs while still a draft**: the tag doesn't exist until
-the release is actually published, so a URL pinned to `<version>` (matching how a
-*published* release like 1.7.0 references itself) 404s while previewing a draft. Use the
-release branch name (`release/1.8.0`) instead while drafting — it resolves immediately and
-keeps working after publish too, since the branch doesn't disappear on tag creation. Repoint
-to the tag as a final polish pass only if the branch is expected to be deleted soon after
-merge.
+**On the raw.githubusercontent.com URLs: PIN THEM TO `develop`.** The tag does not exist
+until the release is actually published, so a URL pinned to `<version>` (matching how a
+*published* release like 1.7.0 references itself) 404s while previewing a draft. This file
+used to say: use the release branch (`release/1.8.0`), it "keeps working after publish too,
+since the branch doesn't disappear on tag creation". **That advice was wrong, and it broke a
+published release.** The branch does not disappear on tag creation — it disappears later,
+when somebody cleans up merged branches, which is not an event anybody is thinking about at
+release time. Measured 2026-09-02, while drafting 1.9.0: every image on the published 1.8.0
+release page is a 404, because `release/1.8.0` is gone. `.../release/1.8.0/assets/features/pin.webp`
+answers 404; `.../develop/assets/features/pin.webp` answers 200.
+
+`develop` is the pin because it is the one ref that is never deleted and always carries the
+assets — nothing reaches `main` except through it. A commit SHA is equally permanent, and is
+the better choice if you want a page frozen against later re-records; the trade is that a
+re-recorded clip then never reaches the older release page, which for a *hero* is usually
+the wrong way round. Either way: **never a release branch, and never a tag that does not
+exist yet.**
 
 Write and review this by hand (or have it drafted and then reviewed) before the release is
 published — `gh release edit <version> --notes-file <file>` updates a draft in place, same
