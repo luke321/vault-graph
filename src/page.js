@@ -3886,8 +3886,23 @@ function mountVaultGraph(root, data, deps) {
     // The tenth percentile keeps what matters -- ONE figure per band, so size stays strictly
     // monotone in link weight -- and lets the tightest tenth of pairs come closer to touching
     // than the rest. Overlaps are measured rather than assumed; see the changelog.
+    //
+    // AN EMPTY POOL IS NOT ZERO ROOM. The pool holds one entry per adjacent PAIR, so a band
+    // holding a single visible note contributes none -- and returning 0 for that reported a
+    // measurement nobody took. Everything downstream reads it as real: dotPx multiplies the
+    // dot by `room / pitch`, so the dot went to 0, and the line below it that scales the pixel
+    // floor by the same factor took the floor to 0 with it, leaving nothing to catch it.
+    // Measured on a 495-note vault, soloing a folder that holds one note: drawn size 3.87 with
+    // the vault shown, 0.00 soloed -- smaller for having been given the whole ring, which is
+    // the opposite of what more room should do.
+    //
+    // `undefined` is the shape the consumers already expect: dotPx guards `room !== undefined`
+    // and skips the factor entirely, so the note sizes off the ramp and is bounded by the caps
+    // that exist for it (the wedge edge, and github#35's hub cap for a row-0 note). The other
+    // two readers were already safe -- side() takes `room > 1 ? room : pitchUnits(bk)`, and the
+    // cascade's own writer only assigns `roomNow` when it is > 1.
     var pick = function (v) {
-      if (!v.length) return 0;
+      if (!v.length) return undefined;
       v.sort(function (x, y) { return x - y; });
       return v[Math.floor(v.length * 0.1)];
     };
@@ -7734,7 +7749,11 @@ function mountVaultGraph(root, data, deps) {
       // 8% off an average is cheaper than that, and it is enough: the residual was one pair at
       // -5 units on a ~159 step, 3%. Anything materially worse than local weight variation would
       // not be covered by this and should not be -- it would be a real defect.
-      room *= 0.92;
+      // GUARDED, because `room` is now undefined when nothing was measured (see `pick`) and
+      // `undefined * 0.92` is NaN -- which passes the `!== undefined` test below, divides into
+      // `f`, and takes the dot, the floor and the drawn radius to NaN. Measured before this
+      // line was guarded: a soloed single-note folder returned NaN from dotPx.
+      if (room !== undefined) room *= 0.92;
       // AND NOTHING PER NOTE. A cap taken from this note's own measured room was tried, to stop
       // the tightest pairs touching, and it is the thing that made dots breathe: dotFit is
       // measured off live positions, and a note's NEAREST NEIGHBOUR is not a fixed neighbour --
@@ -12992,6 +13011,8 @@ function mountVaultGraph(root, data, deps) {
                         if (gg > gap) { gap = gg; gi = i; }
                       }
                       var r3 = function (v) { return Math.round(v * 1000) / 1000; };
+                      // For a figure that can legitimately be "not measured" -- see `pick`.
+                      var r3n = function (v) { return v === undefined || v === null ? null : r3(v); };
                       var bandStat = function (arr) {
                         if (!arr.length) return null;
                         var rows = {}, steps = [], clears = [], worst = 1e9;
@@ -13054,7 +13075,9 @@ function mountVaultGraph(root, data, deps) {
                                    markDay: state.markDay, shown: pts.length },
                         // The room each band reports and the arc floor in force -- both feed
                         // POSITIONS now, so a jump investigation needs to see them per frame.
-                        room: { i: r3(bandOf("i").room), o: r3(bandOf("o").room) },
+                        // null, not NaN: "no pair to measure" is the answer a dump of a
+                        // soloed single-note band should give, and r3(undefined) is NaN.
+                        room: { i: r3n(bandOf("i").room), o: r3n(bandOf("o").room) },
                         minArcDeg: r3(lastMinArc * 180 / Math.PI),
                         spacing: { spOuter: r3(bandOf("o").sp),
                                    spInner: r3(bandOf("i").sp),
