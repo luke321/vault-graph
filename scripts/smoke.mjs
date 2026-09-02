@@ -3248,64 +3248,72 @@ check("overriding one folder recolours exactly one group", async (p) => {
                        (ok ? "" : ` (${r.moved.slice(0, 6).join(", ")}${r.moved.length > 6 ? ", ..." : ""})`) };
 });
 
-// github#50: THE MEMBERSHIP TOGGLE MUST NOT REPAINT THE DISC. Slots are handed out by
+// github#50: THE MEMBERSHIP TOGGLE MUST NOT RENUMBER THE ROTATION. Slots are handed out by
 // position among the groups in groupOrder(), so while that list was built only from groups
 // holding a member, anything emptying one renumbered everyone behind it and each folder
-// inherited the colour of the one in front. Measured on this fixture before the fix: turning
-// membership off vanished 2 of 7 rows and recoloured 4 more. Every folder that holds a note
-// now keeps its row and its slot, so the two toggle states agree on the list name for name
-// and the answer here is zero, not "fewer".
+// inherited the colour of the one in front. Every folder that holds a note now keeps its row
+// and its slot, so both toggle states agree on the list name for name and the answer here is
+// zero disturbed, not "fewer".
 //
-// BOTH DIRECTIONS, and that is not redundant: the failure is a renumbering of whatever the
-// list happens to be, so off-then-on could land back on the right colours by luck while a
-// single direction was wrong. Restores whatever the shape started at.
+// THE SLOT, NOT colorOf, and that distinction is the whole reason this check is worth
+// trusting. The first cut read `__vg.colorOf(g)` either side of the flip and PASSED ON THE
+// UNFIXED CODE: github#48's `colorWalk` fades a forced recolour, and while it runs colorOf
+// answers from `colorShown`, which starts AT THE OLD VALUE for exactly the groups that
+// changed -- so for the first TWEEN_MS a renumbering reads as "nothing moved" and the check
+// asserts the defect away. That is the vacuous measurement this file keeps re-learning (see
+// the highlight check's own header). Sleeping past the walk would work and would buy a timing
+// dependency in the parallel pool for nothing: `autoSlotOf` IS the rotation position,
+// assigned in buildColors and never animated, and it is what the defect actually moves.
+// `slotOf` travels with it so an override cannot mask the automatic answer.
+//
+// Verified to fail without the fix by disabling computeOrder's seeding: 7 groups, 6 disturbed
+// -- lost (vault root), tiny; renumbered misc, notes, projects, refs.
+//
+// BOTH DIRECTIONS, and that is not redundant: the failure renumbers whatever the list happens
+// to be, so off-then-on could land back on the right slots by luck while one direction was
+// wrong. Restores whatever the shape started at.
 //
 // A SHAPE WITH NO UNLINKED NOTES CANNOT EXERCISE THIS -- with nothing to move, both states are
-// trivially identical and the check would pass vacuously. `demo-vault` mirrors a real vault
-// and has 0 of 452, so it says it had nothing to measure instead (the same discipline the
-// (unlinked) swatch check above uses).
-// THE SLOT, NOT colorOf, and that distinction is the whole reason this check is worth
-// trusting. The first cut read `__vg.colorOf(g)` either side of the flip and passed on the
-// unfixed code: github#48's `colorWalk` fades a forced recolour, and *while it runs* colorOf
-// answers from `colorShown`, which starts AT THE OLD VALUE for exactly the groups that
-// changed. So a renumbering reads as "nothing moved" for the first TWEEN_MS -- the check
-// would have asserted the defect away rather than catching it, which is the vacuous
-// measurement this file keeps re-learning (see the highlight check's own header). Sleeping
-// past the walk would work and would put a timing dependency in the parallel pool for no
-// gain: `autoSlotOf` is the rotation position itself, assigned in buildColors and never
-// animated, and it is what the defect actually moves. `slotOf` alongside it so an override
-// cannot mask the automatic answer.
+// trivially identical and the check would pass vacuously, so it says it had nothing to measure
+// instead (the same discipline the (unlinked) swatch check above uses). All three fixtures do
+// have orphans, so none of them takes that path today; it is here for a vault that does not.
 check("a folder keeps its slot across the membership toggle", async (p) => {
   const r = await p.j(`(function(){
-    if (!__vg.graph.nodes().some(function (id) { return __vg.isOrphan(id); })) return { skip: true };
+    // HOW MANY NOTES THE FLIP MOVES, and the skip test in one number: it is the orphan count
+    // either way round, since those are exactly the notes whose group the toggle changes.
+    // Reported with the verdict rather than left to be trusted -- a shape where it came back 0
+    // would make every comparison below vacuous.
+    var orphans = __vg.graph.nodes().filter(function (id) { return __vg.isOrphan(id); }).length;
+    if (!orphans) return { skip: true };
     var startOn = __vg.unlinkedByFolder;
     var snap = function () {
       var o = __vg.groupOrder(), s = {};
       o.forEach(function (g) { s[g] = __vg.autoSlotOf(g) + "/" + __vg.slotOf(g); });
       return { order: o, slot: s };
     };
-    // BOTH DIRECTIONS, and that is not redundant: the failure renumbers whatever the list
-    // happens to be, so off-then-on could land back on the right slots by luck while a single
-    // direction was wrong. Restores whatever the shape started at.
     var a = snap();
     __vg.setUnlinkedByFolder(!startOn); var b = snap();
     __vg.setUnlinkedByFolder(startOn);  var c = snap();
 
+    // Named per direction, because "6 disturbed" without which flip did it sends the reader
+    // to the wrong half of the change.
     var diff = function (x, y) {
       return {
         lost: x.order.filter(function (g) { return y.order.indexOf(g) < 0; }),
         moved: x.order.filter(function (g) { return y.slot[g] && y.slot[g] !== x.slot[g]; })
       };
     };
-    return { groups: a.order.length, orphans: __vg.groupCount("(unlinked)"),
-             away: diff(a, b), back: diff(a, c) };
+    return { groups: a.order.length, notesMoved: orphans, away: diff(a, b), back: diff(a, c) };
   })()`);
   if (r.skip) return { ok: true, detail: "no unlinked notes on this shape, nothing to move" };
+  const names = (d) => [].concat(d.lost.map((g) => "lost " + g),
+                                 d.moved.map((g) => "renumbered " + g)).join(", ");
   const bad = r.away.lost.length + r.away.moved.length + r.back.lost.length + r.back.moved.length;
   return { ok: bad === 0,
-           detail: `${r.groups} groups, ${bad} disturbed by the toggle` +
-                   (bad ? ` -- lost ${r.away.lost.join(", ") || "none"}, renumbered ` +
-                          `${r.away.moved.join(", ") || "none"}` : "") };
+           detail: `${r.groups} groups, ${r.notesMoved} notes moved by the flip, ` +
+                   `${bad} groups disturbed` +
+                   (bad ? ` -- on the flip: ${names(r.away) || "none"}; once back: ` +
+                          `${names(r.back) || "none"}` : "") };
 });
 
 // github#34: "hidden by default" (previously settings-panel-only) is now also a legend
