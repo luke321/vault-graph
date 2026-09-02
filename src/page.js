@@ -8706,6 +8706,12 @@ function mountVaultGraph(root, data, deps) {
         if (ev.target && ev.target.getAttribute("data-only")) {
           var h = state.hidden[state.dim] || (state.hidden[state.dim] = Object.create(null));
           (order[state.dim] || []).forEach(function (n) { h[n] = (n !== g); });
+          // "only this folder" means the WHOLE folder, every subfolder shown -- so clear any
+          // subfolder-only state left by a prior onlySubs/onlyUnder. Without this, soloing a
+          // subfolder and then soloing its parent folder keeps every other subfolder hidden,
+          // so the folder's own `only` appears to do nothing. onlySubs/onlyUnder reset
+          // hiddenSub the same way for the same reason.
+          state.hiddenSub = Object.create(null);
           buildLegend();
           cascade(null, { colToggle: true });
           return;
