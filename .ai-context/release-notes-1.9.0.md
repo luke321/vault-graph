@@ -1,99 +1,77 @@
-**Belonging.** An unlinked note stops sitting apart and joins its own folder — same wedge,
-same colour, same everything as any other note filed there. A folder that holds notes keeps
-its row and its colour whether or not its notes are currently drawn in it. And a folder's
-**hidden by default** is now a right-click away in the legend, instead of a trip through
-the settings panel.
-
-![The whole disc growing from the vault's first note, a note read, notes pinned to the hub, the date range and heatmap window driven by hand, folders hidden and soloed, subfolders unfolded and coloured, the camera driven and reset, and folder colours set and put back](https://raw.githubusercontent.com/luke321/vault-graph/develop/assets/demo.webp)
+**Belonging.** An unlinked note joins its own folder instead of sitting apart with every
+other unlinked note; a folder that holds notes keeps its row and its colour whatever is
+drawn in it; and **hidden by default** is now a right-click away in the legend.
 
 ### New: unlinked notes join their folder
 
-A note with no links at all used to be filed with every other unlinked note, in one grey
+A note with no links used to be filed with every other unlinked note, in one grey
 population of strangers. It now takes its own folder's wedge, band, colour, count, filter
-and highlight, like any note filed there — because that is where you actually put it.
+and highlight — because that is where you put it.
 
-Right-click the `(unlinked)` row, always the last one in the legend, to switch that off and
-get the separate population back: its own wedge, one flat recessive grey, a parenthesised
-count. A second toggle appears one row down once that group holds anyone — **Colour by
-folder** — for notes that stay in the population but still take their own folder's tint,
-turning the row's swatch into a gradient of whatever is actually in it. Both toggles are
-settings-panel rows too, for anyone who would rather work down a list than right-click.
+Right-click the `(unlinked)` row, always last in the legend, to switch that off and get the
+separate population back. A second toggle appears once that group holds anyone —
+**Colour by folder** — for notes that stay in it but still take their own folder's tint.
+Both are settings-panel rows too.
 
-![The (unlinked) row right-clicked to keep its notes separate instead of joining their folder, the wedges reallocating around a new group, then right-clicked again to colour those notes by their own folder anyway, and both toggles put back](https://raw.githubusercontent.com/luke321/vault-graph/develop/assets/features/unlinked.webp)
+![The (unlinked) row right-clicked to keep its notes separate, the wedges reallocating around a new group, then right-clicked again to colour those notes by their own folder, and both toggles put back](https://raw.githubusercontent.com/luke321/vault-graph/develop/assets/features/unlinked.webp)
 
 ### New: a folder keeps its row, its place and its colour
 
-Automatic colours are handed out by a folder's position in the legend, and that list used to
-hold only folders with a note actually *standing* in them. So a folder made entirely of
-unlinked notes vanished from the legend the moment you kept those notes separate — and every
-folder behind it slid one slot along and took the colour of the one in front. Measured on a
-six-folder test vault: turning the toggle off left five rows of seven and repainted four of
-them, on a change to nothing but where unlinked notes stand.
+Automatic colours come from a folder's position in the legend, and that list used to hold
+only folders with a note actually *standing* in them — so a folder made entirely of
+unlinked notes vanished the moment you kept those notes separate, and every folder behind
+it slid one slot along and took the colour of the one in front. Measured on a six-folder
+vault: five rows of seven, four of them repainted, on a change to nothing but where
+unlinked notes stand.
 
-The list now comes from where notes are **filed** rather than where they are drawn. A folder
-keeps its row, its place and its colour either way, and both settings of the toggle agree on
-every colour. A row whose wedge is currently drawing none of its notes says so plainly —
-greyed, with its count in parentheses, `tiny (6)`, and no eye or `only` chip, neither of
-which would have anything to act on.
+The list now comes from where notes are **filed**, not where they are drawn. A row whose
+wedge is currently drawing none of its notes says so — greyed, count in parentheses,
+`tiny (6)`.
 
-**Two colour shifts happen once, on upgrade, and only on some vaults.** `(unlinked)` is out
-of the twelve-slot rotation now (it takes the same recessive grey archives do, since neither
-is a folder anyone organised), so a vault that *had* unlinked notes moves every
-un-overridden folder one slot; and a vault already running with them kept separate, with
-folders made entirely of them, shifts once onto the assignment the default has always used.
-A folder with an explicit colour never moves, and a vault with no unlinked notes is untouched
-by either.
+**Two colour shifts happen once, on upgrade.** `(unlinked)` is out of the twelve-slot
+rotation now, so a vault that *had* unlinked notes moves every un-overridden folder one
+slot; and a vault already running with them kept separate, in folders made entirely of
+them, shifts onto the assignment the default has always used. A folder with an explicit
+colour never moves, and a vault with no unlinked notes is untouched.
 
 ### New: hidden by default, from the legend
 
-Some folders are noise most of the time — an archive, a template store, a folder of
-attachments. Right-click any folder's row and toggle **hidden by default**, one row below its
-colour picker, and it starts hidden every time the disc opens: this session and the next, on
-whichever host you opened it from. **All** leaves it alone now, so "show everything" no longer
-quietly overrides the one folder you asked to keep out of the way.
+Right-click any folder's row and toggle **hidden by default**, one row below its colour
+picker: it starts hidden every time the disc opens, this session and the next, on whichever
+host you opened it from. **All** leaves it alone now, so "show everything" no longer
+overrides the one folder you asked to keep out of the way.
 
 ![The biggest folder right-clicked in the legend and hidden by default from its own menu, the wedges reallocating around the gap it leaves, then the setting put back](https://raw.githubusercontent.com/luke321/vault-graph/develop/assets/features/hiddenbydefault.webp)
 
-The setting itself is not new; reaching it from the legend is. And on the Obsidian plugin it
-never actually persisted — it repainted the view live and silently reverted on the next
-reload, because the plugin's own settings writer was never wired for it. Fixed here too.
+The setting is not new; reaching it from the legend is. On the Obsidian plugin it also never
+actually persisted — it reverted on the next reload, because the plugin's settings writer
+was never wired for it. Fixed here.
 
-### Fixed: links you can still trace when you zoom in
+### Fixed: the disc reads clearly again
 
-Link thickness was scaling with the camera the way a note's dot does, which is right for a
-dot and wrong for a connector. Zoomed in on a well-connected note, its links merged into one
-solid mass — so the single gesture you'd use to look *more* closely at a note's connections
-was the one that destroyed them. Strokes are now capped in pixels and hold a constant width
-below the cap, at any zoom, with weight differences preserved. **The resting disc is
-unchanged**: the cap only engages about 2.7x in. Reported by
-[Angel Bartolli / @bartolli](https://github.com/bartolli), who named the exact cause and
-offered a working patch branch — the 4px cap is their measurement.
-
-Found while fixing that: every link was drawn at a minimum of 1.7px when the width it asked
-for was between 0.55px and 1.02px, a floor inherited from the graph library and never chosen.
-One link a pixel too wide is invisible; a few thousand of them crossing the middle is a grey
-haze over the inner rings and the hub hole. The floor is 1.0px now — half the ink, a readable
-centre, and still wide enough that a lone link on a sparse vault doesn't thin away to nothing.
-
-### Fixed: a note soloed next to the hub
-
-Soloing a folder down to a single note that lands alone in the inner band collapsed that band
-to one row, at which point the size ramp read the band's whole thickness instead of a row's
-slice and the dot ballooned across the hub hole. Measured at 59% of the hub before, 8.0%
-after. 1.8.0 fixed where the hub boundary is *drawn* and left this half open.
+- **Links you can still trace when you zoom in.** Stroke width was scaling with the camera
+  like a dot does, so zooming in on a well-connected note merged its links into one mass —
+  the gesture for looking closer destroyed the thing you were looking at. Strokes are capped
+  in pixels now, weight differences preserved, and the resting disc is unchanged: the cap
+  only engages about 2.7x in. Reported by
+  [Angel Bartolli / @bartolli](https://github.com/bartolli), who named the cause and offered
+  a patch — the 4px cap is their measurement.
+- **No more haze over the middle.** Every link was drawn at a minimum of 1.7px when it asked
+  for 0.55–1.02px, a floor inherited from the graph library and never chosen. The floor is
+  1.0px: half the ink, a readable centre, and a lone link on a sparse vault still visible.
+- **A note soloed next to the hub stays out of it.** Soloing down to a single note in the
+  inner band collapsed that band to one row, and the size ramp then read the band's whole
+  thickness instead of a row's slice. 59% of the hub before, 8.0% after.
 
 ### Smaller things
 
 - **The layout has a golden snapshot to regress against.** Every other check asserts a
-  *property* of the layout — rows balanced, radii evenly spaced — and none would notice a
-  layout that stayed internally consistent and simply changed between builds. Band assignment
-  per folder and position per note are now checked in for all three fixture vaults, and a
-  failure names the folder that flipped band or the note that moved. The snapshots are
-  rewritten by hand and never automatically: one that updates itself records whatever broke.
-- **Every generated demo/test fixture now guarantees a handful of genuinely unlinked notes**,
-  so the checks this release depends on always have something real to measure instead of
-  silently passing on a vault that happened to link everything.
-- Both new features have their own entry and clip in the
+  *property* of the layout; none would notice a layout that stayed internally consistent and
+  simply changed. Band assignment and note positions are checked in for all three fixture
+  vaults, and a failure names the folder that flipped band or the note that moved.
+- **Generated fixtures now always contain genuinely unlinked notes**, so the checks this
+  release depends on can't quietly pass on a vault that happened to link everything.
+- Both new features have an entry and a clip in the
   [feature gallery](https://github.com/luke321/vault-graph/blob/develop/docs/features.md).
 
 ---

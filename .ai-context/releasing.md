@@ -39,9 +39,14 @@ reverse-engineered from it, not invented.
 
 1. **One line naming the release** (`**The Hub.**` style, bold) and the two or three things
    it's actually about, in the release's own voice — not a commit-log summary.
-2. **The hero clip**, `assets/demo.webp`, embedded immediately after that line —
-   `![alt](https://raw.githubusercontent.com/<owner>/<repo>/<branch-or-tag>/assets/demo.webp)`.
-   Every release gets this, whether or not anything else does.
+2. **NOT the hero.** `assets/demo.webp` is the README's walkthrough and it is 32 MB — at
+   the top of a release page it is the slowest thing on it and the least specific, since it
+   shows the whole tool rather than what changed. 1.8.0 left it out; 1.9.0 left it out
+   deliberately, after looking at the draft with it in. Embed the FEATURE clips below
+   instead, which are a tenth the size each and actually about this release. (Earlier
+   releases did carry it, and this file used to say "every release gets this, whether or not
+   anything else does" — that was written when the hero was 3 MB and there were no
+   per-feature clips to carry the page.)
 3. **One `###` (h3, not h2) section per genuinely new or visibly-changed feature**, each
    with its matching clip from `assets/features/*.webp` embedded the same way. Only
    feature clips that exist and are current belong here; don't call something "new" that
