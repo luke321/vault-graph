@@ -8,6 +8,7 @@ changing the layout or the animation.
 | `architecture.md` | The pipeline, the data shapes, and where each decision is enforced |
 | `animation.md` | How a cascade works: the two packings, which quantities are walked between them, and the one invariant. Read before touching the cascade, the seam, dot size or plan membership |
 | `invariants.md` | Properties that must not regress, and the command that checks each one |
+| `perf-cascade-frame-cost.md` | What an animated frame costs on a 10k vault, term by term; what was taken out of it and what is left (github#19). Read before optimising the cascade, and before believing anything about `renderer.refresh`'s options |
 | `decisions/` | **ADRs** — structural choices, what they cost, and what was rejected |
 | `design/` | **DDRs** — the as-built design of each part of the disc |
 | `vault-findings.md` | What the graph revealed about the vault it was built for — observations, not decisions |

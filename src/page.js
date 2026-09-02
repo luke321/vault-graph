@@ -1920,6 +1920,21 @@ function mountVaultGraph(root, data, deps) {
     // on notes that are not even showing. liveSub is the live, filter-aware answer subCellIndex
     // actually reads (github#31).
     var liveSub = Object.create(null);
+    // THE MEMBER LIST, WRITTEN DOWN ONCE (github#19).
+    //
+    // This function walks the vault TWICE -- once here for the gate inputs, once below to
+    // seat every note in a cell -- and both walks apply the same two-clause membership test:
+    // the plan predicate, and "not pinned". Asking it twice per note is asking visible(),
+    // timeFactor() and isPinned() twice per note per animated frame, and on the 10k fixture
+    // the profile put visible() alone at 4.3 ms a frame.
+    //
+    // So the first walk records who passed, in the order graph.forEachNode handed them over,
+    // and the second walks THAT array instead of the graph. It is the same set in the same
+    // order, which is the part that matters: `planTotal += W(id)` is a running sum of doubles,
+    // and a sum re-ordered is a sum with a different last bit -- which then divides into
+    // `density = sqrt(fullTotal / planTotal)` and is the sort of one-ULP difference the
+    // golden snapshots are there to catch. Same order, same sum, same disc.
+    var members = [];
     graph.forEachNode(function (id) {
       // MEMBERSHIP AT REST IS THE MEMBERSHIP THE CASCADE ENDS ON, and it was not.
       //
@@ -1942,6 +1957,7 @@ function mountVaultGraph(root, data, deps) {
       // defect already fixed for date-range filters (github#18/#19/#31), just not extended
       // to pinning until now.
       if (isPinned(id)) return;
+      members.push(id);
       var g0 = groupOf(id);
       // A WEIGHT, NOT A COUNT -- and the second filter that used to stand here, rejecting
       // anything outside willShow, is gone with it.
@@ -2041,31 +2057,30 @@ function mountVaultGraph(root, data, deps) {
       return splitOf[g];
     };
 
-    graph.forEachNode(function (id) {
-      // While a cascade runs, "who gets a slot" is the UNION of what is staying
-      // and what is still on screen on its way out. Filtering to visible() alone
-      // gave a departing note no slot at all, so nothing held its space (the
-      // wedge vanished instead of closing) and it had no target position (so it
-      // faded at stale coordinates on top of the reflowed disc).
-      // MEMBERSHIP AT REST IS THE MEMBERSHIP THE CASCADE ENDS ON, and it was not.
-      //
-      // planKeep, during a cascade, is "staying or still on screen". Absent -- at rest -- this
-      // fell back to visible(), the FOLDER filter alone, so a note excluded by the DATE range
-      // stayed a member at weight 0. That looks harmless and it is the jump at the end of an
-      // animation: measured on a date range, the resting plan carried 11 cells where the final
-      // frame carried 9 -- the extra two being empty sub-cells of one folder -- and the same arc
-      // divided 11 ways instead of 9 moved wedges by up to 10.6 degrees. Radii and dot sizes
-      // were identical to the unit, which is why it read as a sideways twitch with no cause.
-      //
-      // willShow IS that destination. At rest nothing is departing, so "staying or on screen"
-      // and "showing" are the same set, and the two agree by construction rather than nearly.
-      if (onlyVisible && !(planKeep || willShow)(id)) return;
-      // A PINNED NOTE HAS LEFT THE RING. Without this it keeps its seat and the wedge is
-      // drawn around a hole where it used to be -- the note is in the hub and its chair is
-      // still at the table. Excluding it from the plan is what makes the ring re-densify,
-      // and it is the same mechanism a hidden note uses, minus the fade: the note is still
-      // fully present, it is just no longer part of this packing.
-      if (isPinned(id)) return;
+    // OVER `members`, NOT THE GRAPH, and the membership test is not repeated here.
+    //
+    // Who gets a slot is decided at the top of this function and written down there -- see the
+    // note on `members`. The two clauses that used to stand at the head of this loop are the
+    // two the first walk applied, verbatim, so re-applying them was recomputing a known
+    // answer. Their reasoning is worth keeping in view, because it is the reasoning behind
+    // WHICH set this list holds:
+    //
+    //   - While a cascade runs, "who gets a slot" is the UNION of what is staying and what is
+    //     still on screen on its way out. Filtering to visible() alone gave a departing note
+    //     no slot at all, so nothing held its space (the wedge vanished instead of closing)
+    //     and it had no target position (so it faded at stale coordinates on top of the
+    //     reflowed disc). At rest the fallback is willShow, the predicate planB was built
+    //     with, not visible(): a note excluded by the DATE range otherwise stayed a member at
+    //     weight 0, and a weight-0 member still creates a CELL. Measured on one date range,
+    //     the resting plan carried 11 cells where the final frame carried 9, and the same arc
+    //     divided 11 ways instead of 9 moved wedges by up to 10.6 degrees -- with radii and
+    //     dot sizes identical to the unit, which is why it read as a sideways twitch with no
+    //     cause.
+    //   - A PINNED NOTE HAS LEFT THE RING. Without that clause it keeps its seat and the wedge
+    //     is drawn around a hole where it used to be -- the note is in the hub and its chair
+    //     is still at the table. Excluding it from the plan is what makes the ring
+    //     re-densify, and it is the same mechanism a hidden note uses, minus the fade.
+    members.forEach(function (id) {
       var g = groupOf(id), a = graph.getNodeAttributes(id);
       var split = splitFor(g);
       // splitFor(g) just above always populates bandDepth[bk] for this g's band before
@@ -3146,18 +3161,20 @@ function mountVaultGraph(root, data, deps) {
       if (roomNow.i > 1) bandOf("i").room = roomNow.i;
       if (roomNow.o > 1) bandOf("o").room = roomNow.o;
     }
-    // A cell's row count is what sets its density, and rows come from the plan.
-    // Filter the vault down hard and the full-vault plan leaves each row holding
-    // ~2 notes while its wedge grows to 120 degrees -- measured, 55 notes over 8
-    // rows with 88-degree gaps, a spidery disc instead of a filled one. Below this
-    // share of the vault the plan is rebuilt from the visible notes, which
-    // re-densifies it.
+    // THE VISIBLE COUNT USED TO BE TAKEN HERE, and it was dead (github#19).
     //
-    // The threshold is deliberately generous: hiding one subfolder (82% left)
-    // stays on the full-vault plan, which is what stops notes swapping seats.
-    // Isolating a group is a big enough change that a reflow is expected anyway.
-    var shownCount = 0;
-    graph.forEachNode(function (id) { if (visible(id)) shownCount++; });
+    // It fed the retired REPACK_BELOW threshold -- "below this share of the vault, rebuild the
+    // plan from the visible notes instead of using the full-vault one" -- which decisions/0001
+    // removed in favour of one always-visible-only basis. The threshold went; the walk that
+    // measured its input stayed, assigned to a local nothing read.
+    //
+    // Not free, and this function runs once per animated frame. On the 10k fixture the walk
+    // called visible() 10 002 times a frame, and visible() is not a cheap predicate: it looks
+    // up the node's attributes, resolves its group and then walks its whole folder chain
+    // against state.hiddenSub. Measured on that fixture, the profile attributed 4.3 ms per
+    // frame to visible() in total, of which this walk was about a quarter -- 1 ms a frame, and
+    // an extra graph traversal, spent on a variable that was deleted along with its reader.
+    //
     // Weight the resting plan by visibility, exactly as a cascade weights it by
     // opacity. Without this the resting plan counted every note at full weight --
     // so a hidden folder still shaped everyone else's bands and row counts, and
@@ -3222,7 +3239,15 @@ function mountVaultGraph(root, data, deps) {
         // hidden folders, so an excluded note was counting as a WHOLE SEAT at opacity
         // zero. Same asymmetry the cascade's destination plan had (see willShow), one
         // level down.
-        var will = willShow(sl.id);
+        //
+        // ASKED ONLY WHEN THE ANSWER IS USED (github#19). This was a `var will =
+        // willShow(sl.id)` on its own line above, and the expression that reads it is
+        // `(fullRing || !will)` -- so under `fullRing`, which is every state with anything at
+        // all on screen, the predicate was computed for every note of every frame and then
+        // never consulted. Inlining it lets `||` do what it does: on the 10k fixture that is
+        // 10 002 fewer visible() calls and 10 002 fewer timeFactor() calls per animated
+        // frame, out of the ~30 000 the frame was making, and visible() measured 2.9 ms of
+        // every frame.
         // Driver one of the wedge-arc ramp: a fully-toggled single-cell group's rendered
         // share walks linearly instead of tracking the staggered alpha sum -- and it is the
         // GROUP total n0 * ramp, not a per-slot sum, because a faded note leaving the plan
@@ -3241,7 +3266,7 @@ function mountVaultGraph(root, data, deps) {
           var cw = colWalk[groupOf(sl.id)];
           if (cw !== undefined) { c.geom = c.live = cw.n * cw.f; return; }
         }
-        c.geom += (fullRing || !will) ? al : 1;
+        c.geom += (fullRing || !willShow(sl.id)) ? al : 1;
         c.live += al;
       });
       live += c.geom;
@@ -6053,6 +6078,8 @@ function mountVaultGraph(root, data, deps) {
     // it. The two endpoint maps of per-cell room; see cellNow.
     var cellSrc = null, cellDst = null;
     var edgeSrc = null, edgeDst = null;
+    // THE SAME TWO MAPS, FLATTENED ONCE (github#19). See pairUp, below the endpoint capture.
+    var cellPair = null, edgePair = null;
     var rowsSrc = Object.create(null), rowsDst = Object.create(null);
     var bandSrc = Object.create(null), bandDst = Object.create(null);
     // A group is PRESENT at an end if it has any seated weight there -- one wedge, one
@@ -6225,6 +6252,44 @@ function mountVaultGraph(root, data, deps) {
       if (rB) roomDstB = { i: rB.i || 0, o: rB.o || 0 };
       cellSrc = (rA && rA.cells) || null; cellDst = (rB && rB.cells) || null;
       edgeSrc = (rA && rA.edges) || null; edgeDst = (rB && rB.edges) || null;
+      // RESOLVED HERE, NOT ON EVERY FRAME (github#19).
+      //
+      // These two pairs of maps hold one number per note, and the frame loop used to walk them
+      // with `Object.keys(src).forEach(put)` then `Object.keys(dst).forEach(put)` into a fresh
+      // `Object.create(null)` -- four 10 000-entry key arrays and two 10 000-property
+      // dictionaries built and thrown away per frame, on the 10k fixture. None of it depends on
+      // the frame: which notes have a figure, and what each end's figure is, are fixed for the
+      // whole cascade. The only per-frame quantity is `ease`.
+      //
+      // So the union is walked once, in exactly the order `put` walked it (source keys first,
+      // destination keys after, first writer wins, a note missing from one end taking the
+      // other end's number), and stored as three parallel arrays plus one output object that
+      // is refilled in place. The frame then does one multiply and one add per note into an
+      // object whose shape never changes -- the same expression on the same doubles, so the
+      // numbers are identical to the last bit, which is what matters for a quantity that
+      // feeds the drawn radius.
+      //
+      // Refilling ONE object rather than allocating a fresh one is safe because the key set is
+      // constant across the cascade: every frame overwrites every key it wrote last frame, and
+      // the only reader (`cellRoom` / `edgeCap`, taken in ringsLayout) reads it within the same
+      // frame and never keeps it past settle, which nulls cellNow/edgeNow outright.
+      var pairUp = function (src, dst) {
+        if (!src && !dst) return null;
+        var ids = [], av = [], bv = [], seen = Object.create(null);
+        var take = function (id) {
+          if (seen[id] !== undefined) return;
+          var x = src ? src[id] : undefined, y = dst ? dst[id] : undefined;
+          if (x === undefined && y === undefined) return;
+          if (x === undefined) x = y;
+          if (y === undefined) y = x;
+          seen[id] = 1; ids.push(id); av.push(x); bv.push(y);
+        };
+        if (src) Object.keys(src).forEach(take);
+        if (dst) Object.keys(dst).forEach(take);
+        return { ids: ids, a: av, b: bv, out: Object.create(null) };
+      };
+      cellPair = pairUp(cellSrc, cellDst);
+      edgePair = pairUp(edgeSrc, edgeDst);
       // WHERE THE NOTES ARE, and where the one plan puts them. The source is read off the graph
       // rather than reconstructed from planA: the disc on screen is the truth about where a note
       // is starting from, and a packing built to describe it can only ever be an approximation
@@ -6477,34 +6542,18 @@ function mountVaultGraph(root, data, deps) {
       // AND THE PER-CELL ROOM, on the same clock. A note in only one endpoint takes that
       // endpoint's figure rather than interpolating toward a cell that does not exist there,
       // which is the same fallback the band walk uses for an empty band.
-      if (cellSrc || cellDst) {
-        var cn = Object.create(null);
-        var put = function (id) {
-          if (cn[id] !== undefined) return;
-          var a0 = cellSrc ? cellSrc[id] : undefined, b0 = cellDst ? cellDst[id] : undefined;
-          if (a0 === undefined && b0 === undefined) return;
-          if (a0 === undefined) a0 = b0;
-          if (b0 === undefined) b0 = a0;
-          cn[id] = a0 + (b0 - a0) * ease;
-        };
-        if (cellSrc) Object.keys(cellSrc).forEach(put);
-        if (cellDst) Object.keys(cellDst).forEach(put);
-        cellNow = cn;
-      }
-      if (edgeSrc || edgeDst) {
-        var en = Object.create(null);
-        var putE = function (id) {
-          if (en[id] !== undefined) return;
-          var a1 = edgeSrc ? edgeSrc[id] : undefined, b1 = edgeDst ? edgeDst[id] : undefined;
-          if (a1 === undefined && b1 === undefined) return;
-          if (a1 === undefined) a1 = b1;
-          if (b1 === undefined) b1 = a1;
-          en[id] = a1 + (b1 - a1) * ease;
-        };
-        if (edgeSrc) Object.keys(edgeSrc).forEach(putE);
-        if (edgeDst) Object.keys(edgeDst).forEach(putE);
-        edgeNow = en;
-      }
+      // One multiply and one add per note, into an object built once -- see pairUp for what
+      // used to stand here and why moving it out cannot change a number.
+      var walkPair = function (p) {
+        if (!p) return null;
+        var ids = p.ids, av = p.a, bv = p.b, out = p.out;
+        for (var i = 0, n = ids.length; i < n; i++) {
+          out[ids[i]] = av[i] + (bv[i] - av[i]) * ease;
+        }
+        return out;
+      };
+      if (cellPair) cellNow = walkPair(cellPair);
+      if (edgePair) edgeNow = walkPair(edgePair);
       // PLANNED, EVERY FRAME, BY THE ONE PLANNER -- not interpolated between two layouts.
       //
       // Interpolating the endpoint layouts was tried and measured beautifully: no step at the
@@ -6537,7 +6586,10 @@ function mountVaultGraph(root, data, deps) {
       var ez = pr < 1 ? RADIAL_EASE
                       : Math.min(1, RADIAL_EASE + tailFrames * 0.15);
       var resid = 0;
-      if (targets) graph.forEachNode(function (id) {
+      // quietWrites: sigma is subscribed to the graph, and every write in this loop otherwise
+      // costs two whole-vault nodeReducer passes that the refresh at the bottom of the frame
+      // discards. See quietWrites for the measurement and for why it cannot change the picture.
+      if (targets) quietWrites(function () { graph.forEachNode(function (id) {
         var q = targets[id];
         if (!q) return;
         // The ANGLE is taken exactly while its target moves the way a wedge sweeps --
@@ -6588,7 +6640,7 @@ function mountVaultGraph(root, data, deps) {
         if (gap < 0 ? -gap > resid : gap > resid) resid = gap < 0 ? -gap : gap;
         var r = rNow + gap * ez;
         graph.mergeNodeAttributes(id, { x: r * Math.cos(h), y: r * Math.sin(h) });
-      });
+      }); });
       if (pr >= 1) tailFrames++;
       // skipIndexation while animating: the quadtree is only needed for hit
       // testing, and settle() rebuilds it. Re-indexing 442 nodes and 1409 edges
@@ -6713,10 +6765,61 @@ function mountVaultGraph(root, data, deps) {
 
   var anim = null, animGuard = null;   // in-flight tween + its force-complete timer
 
+  /**
+   * Write positions for the whole vault WITHOUT SIGMA WATCHING OVER OUR SHOULDER (github#19).
+   *
+   * Sigma subscribes to the graph. Every `mergeNodeAttributes` therefore emits
+   * `nodeAttributesUpdated`, and sigma's handler for one node is
+   *
+   *     updateNode(id);                                        // runs nodeReducer for it
+   *     refresh({ partialGraph: { nodes: [id] }, skipIndexation: false, schedule: true });
+   *
+   * -- and `refresh` runs `updateNode(id)` AGAIN before arming `needToProcess`. So each of the
+   * three bulk position loops in this file (the cascade's follower, the tween's step,
+   * assignPositions) was paying two extra nodeReducer passes over the entire vault, on top of
+   * the one the explicit refresh that immediately follows it performs anyway.
+   *
+   * ALL OF IT IS THROWN AWAY, which is why suppressing it cannot change a pixel. Every one of
+   * those loops is followed by `renderer.refresh(...)` with no `partialGraph`, and sigma's own
+   * source shows what that does: `clearNodeIndices(); clearEdgeIndices();` then `addNode` for
+   * every node and `addEdge` for every edge, then `process()` on the render. The caches the
+   * listener spent the frame filling are wiped and rebuilt from the graph. (`skipIndexation:
+   * true` does not change that -- without a `partialGraph` it takes the identical branch and
+   * only skips arming a flag that the same branch arms unconditionally. That is why
+   * github#19 measured the "cheap" refresh at 35.6 ms against 30.3 for the full one: they are
+   * the same code.)
+   *
+   * Measured on the 10k fixture at rest, a full 10 002-note position loop:
+   * 5.5 ms with sigma listening, 0.5 ms without. Over a folder-toggle cascade the saving is
+   * larger than that difference, because the listener's discarded passes drag nodeStyle,
+   * nodeColor, dotPx and isPushed along with them.
+   *
+   * THE LISTENERS ARE TAKEN FROM THE EMITTER, not from sigma. `renderer.activeListeners
+   * .updateNodeGraphUpdate` is the same function and reads more directly, but it is a private
+   * field of a vendored bundle; `rawListeners` is graphology's own public API, so this keeps
+   * working if either library is updated, and degrades to a plain call if the event has no
+   * subscribers at all. `rawListeners`, not `listeners`: the latter unwraps a `once`
+   * subscription to its inner function, so re-registering what it returns would silently
+   * promote a one-shot listener to a permanent one.
+   *
+   * Scoped to the loop and restored in a `finally`, because a page whose renderer has
+   * permanently stopped listening to its graph is a much worse bug than a slow one.
+   */
+  function quietWrites(fn) {
+    var EV = "nodeAttributesUpdated";
+    var raw = typeof graph.rawListeners === "function" ? graph.rawListeners(EV) : null;
+    if (!raw || !raw.length) { fn(); return; }
+    var ls = raw.slice();
+    for (var i = 0; i < ls.length; i++) graph.removeListener(EV, ls[i]);
+    try { fn(); } finally { for (var j = 0; j < ls.length; j++) graph.on(EV, ls[j]); }
+  }
+
   function assignPositions(targets) {
-    graph.forEachNode(function (id) {
-      var t = targets[id];
-      if (t) graph.mergeNodeAttributes(id, { x: t.x, y: t.y });
+    quietWrites(function () {
+      graph.forEachNode(function (id) {
+        var t = targets[id];
+        if (t) graph.mergeNodeAttributes(id, { x: t.x, y: t.y });
+      });
     });
   }
 
@@ -6783,7 +6886,10 @@ function mountVaultGraph(root, data, deps) {
       if (adv > 1 / MIN_FRAMES) adv = 1 / MIN_FRAMES;
       p = Math.min(1, p + adv);
       var e = p < 0.5 ? 4 * p * p * p : 1 - Math.pow(-2 * p + 2, 3) / 2;
-      graph.forEachNode(function (id) {
+      // quietWrites for the same reason the cascade's follower uses it: the refresh two lines
+      // down rebuilds every index from the graph, so sigma's per-write reaction is work whose
+      // only product is discarded.
+      quietWrites(function () { graph.forEachNode(function (id) {
         var f = from[id];
         if (!f) return;
         if (polar) {
@@ -6795,7 +6901,7 @@ function mountVaultGraph(root, data, deps) {
             y: f.y + (f.ty - f.y) * e
           });
         }
-      });
+      }); });
       probeSample("tween");
       renderer.refresh({ skipIndexation: false });
       if (p < 1) { anim = WIN.requestAnimationFrame(step); }
@@ -6863,8 +6969,26 @@ function mountVaultGraph(root, data, deps) {
 
   // The key for a folder at depth k in a note's chain: "PARA/a", "PARA/a/b", ...
   // Depth 1 is the old `folder + "/" + sub`, so every existing key still matches.
+  // NO slice().join() (github#19). The key is the same string; what is gone is the throwaway
+  // array and the throwaway joined string that every call allocated. This is called once per
+  // ancestor per visible() and once per isPushed(), i.e. on the order of a hundred thousand
+  // times per animated frame on the 10k fixture, where the profile put visible() at 4.3 ms a
+  // frame and isPushed() -- whose whole body is one of these -- at 1.5.
   function pathKey(a, k) {
-    return a.folder + "/" + (a.dirs || []).slice(0, k).join("/");
+    var d = a.dirs;
+    if (!d || !d.length) return a.folder + "/";
+    // OUTSIDE THE CALLERS' DOMAIN, DEFER TO THE SLICE. Both callers count from 1, so the fast
+    // path below only has to be right for k >= 1 -- and it is, checked exhaustively against
+    // the slice form over random folder/dirs shapes. A k of 0 or less means something else
+    // entirely (`slice(0, -1)` drops the LAST segment, it does not return the root), and
+    // reproducing that by hand for an input nobody passes is how a rewrite acquires a bug
+    // that only fires years later. The first draft of this returned the root for every k <= 0
+    // and disagreed with the old function on 114 852 of 1.6 million random comparisons,
+    // all of them k <= 0.
+    if (!(k >= 1)) return a.folder + "/" + d.slice(0, k).join("/");
+    var out = a.folder + "/" + d[0];
+    for (var i = 1; i < k && i < d.length; i++) out += "/" + d[i];
+    return out;
   }
 
   function visible(id) {
@@ -6875,8 +6999,21 @@ function mountVaultGraph(root, data, deps) {
     // hiding a folder hides its whole subtree without needing to know how deep it is.
     if (state.dim === "folder") {
       var d = a.dirs || [];
-      if (!d.length && state.hiddenSub[a.folder + "/"]) return false;
-      for (var k = 1; k <= d.length; k++) if (state.hiddenSub[pathKey(a, k)]) return false;
+      if (!d.length) {
+        if (state.hiddenSub[a.folder + "/"]) return false;
+      } else {
+        // THE CHAIN BUILT ONCE, NOT ONCE PER LEVEL (github#19). This used to call
+        // pathKey(a, k) for k = 1..depth, and each of those calls rebuilt the whole prefix
+        // from the folder up -- quadratic in depth, for a set of strings each of which is the
+        // previous one plus a segment. Extending the key in the loop is the same sequence of
+        // keys in the same order, so the same first hidden ancestor short-circuits it.
+        var key = a.folder + "/" + d[0];
+        if (state.hiddenSub[key]) return false;
+        for (var k = 1; k < d.length; k++) {
+          key += "/" + d[k];
+          if (state.hiddenSub[key]) return false;
+        }
+      }
     }
     return true;
   }
