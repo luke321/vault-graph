@@ -457,7 +457,6 @@ function mountVaultGraph(root, data, deps) {
   /* ------------------------------------------------- graph + base layout */
 
   var graph = new Graph({ type: "undirected" });
-  var N = DATA.nodes.length;
 
   DATA.nodes.forEach(function (n, i) {
     graph.addNode(String(i), {
@@ -610,8 +609,6 @@ function mountVaultGraph(root, data, deps) {
       : Math.min(NODE_MAX, NODE_MIN + 1.55 * Math.sqrt(a.deg)));
   });
 
-  measureDotTyp();
-
   // Which notes deserve a permanent label: strictly the best-connected ones.
   // Sigma's own label thinning is grid-based, which assumes nodes are spread out --
   // false by construction in Rings, where every hub is packed into the centre so they
@@ -648,8 +645,6 @@ function mountVaultGraph(root, data, deps) {
       subOrder[f].forEach(function (sb) { subCount[f + "/" + sb] = tally[f][sb]; });
     });
   })();
-
-  var base = {};   // id -> {x, y} from ForceAtlas2, before any group separation
 
   // Graph-space distance for one layout unit (one row, one note along a row).
   // Fixed on purpose: see the note where it is used.
@@ -1192,8 +1187,9 @@ function mountVaultGraph(root, data, deps) {
   // as `lastRows[k] || REF_ROWS` did.
   //
   // BUILT ON FIRST USE, not at this statement, because this statement is not reached first.
-  // mountVaultGraph calls measureDotTyp near the top of its body, which reaches dotUnits and so
-  // pitchUnits -- above every one of these declarations. The scalars this replaces survived that
+  // mountVaultGraph used to call a measureDotTyp near the top of its body (dead since #55's
+  // unused-value pass), which reached pitchUnits -- above every one of these
+  // declarations, and any early caller would again. The scalars this replaces survived that
   // by accident: `(lastSPI || 1)` reads undefined and carries on, where `BAND.i` on undefined
   // throws, so the page did not boot at all on the first attempt at this change.
   //
@@ -1230,7 +1226,7 @@ function mountVaultGraph(root, data, deps) {
   //
   // The full-vault pitch is one number, the same in both bands, and it does not move. A gap is
   // a statement about the vault's structure, so that is the right clock for it. What DOES scale
-  // with the live lattice is the dots -- see dotUnits, which is about a dot and keeps the live
+  // with the live lattice is the dots -- see dotPx, which is about a dot and keeps the live
   // pitch on purpose.
   //
   // TIMES INNER_SCALE IN THE INNER BAND, which is the factor that made the inner ring's
@@ -1453,7 +1449,6 @@ function mountVaultGraph(root, data, deps) {
   // Kept for reference: locking the packing width per cell made a folder's rows
   // immune to other folders, but density then never adapted -- see the row count
   // note in buildWedgePlan.
-  var bandRefLock = null;
   // Also kept for reference: freezing each note's SLOT -- every note in the cell's
   // whole-vault list counting 1 and holding its place whether visible or not -- was
   // tried 2026-08-21 to stop a depth-2 subfolder toggle repacking its parent cell.
@@ -1629,56 +1624,6 @@ function mountVaultGraph(root, data, deps) {
   //
   // EXCESS_BASE is what the disc had (0.44 of a step) and the falloff takes it from there, so
   // "half for a five-row band, a quarter at nine, none at twenty-three" is what comes out.
-  var MARGIN_ROWS = 0.5;    // the zero point: half a pitch from the wedge edge, per side
-  // HOW MUCH OF THE CHANNEL TO KEEP at REF_ROWS. The channel is what a boundary has OVER one
-  // ordinary step, and this scales exactly that -- so 0.5 means "half the gap you can see",
-  // which is what was asked for, rather than half of some term that turns out to contribute
-  // little of it.
-  //
-  // Two earlier attempts moved the wrong number. Shrinking the SEAM took it from 24 units to
-  // 12 and changed the measured channel from 1.60 to 1.60 -- the seam is a tenth of it. Adding
-  // an excess ON TOP of the existing margin made it wider still (1.60 -> 1.90), because the
-  // margin and the dot term were already the whole excess. Measured channels over an ordinary
-  // step, before any of this: 1.60, 1.72, 1.52 on the three vaults -- so the excess to scale is
-  // 0.60, 0.72 and 0.52 of a step, and it is emergent rather than a constant anyone set.
-  var EXCESS_KEEP = 0.35;   // of the channel, at REF_ROWS
-
-  // A TYPICAL dot's radius, in graph units. The end margin corrects for how this note differs
-  // from typical rather than adding its whole radius: adding it made every boundary wider by
-  // two radii, where the thing it was for -- both dots' EDGES equidistant from the seam -- only
-  // needs the DIFFERENCE between them. A hub steps in, a leaf steps out, and a boundary between
-  // two ordinary notes costs nothing at all.
-  // PER BAND, because the correction is "how does this note differ from a typical one" and a
-  // typical note is not the same size in both rings: the two bands have their own spacing, so
-  // their dots have their own scale. Measuring against the outer band's typical dot inflated
-  // every inner-band margin by the difference -- measured, the inner ring's channel sat at
-  // 1.52 of a step against the outer ring's 1.20, with the zero point already correct at 1.03.
-  // A correction whose average is not zero is not a correction, it is a bias.
-  var DOT_TYP_I = 0, DOT_TYP_O = 0;
-  var dotTyp = function (band) { return band === "i" ? DOT_TYP_I : DOT_TYP_O; };
-  function measureDotTyp() {
-    var sizes = [];
-    graph.forEachNode(function (id, a) { sizes.push(a.size || 4); });
-    sizes.sort(function (x, y) { return x - y; });
-    var mid = sizes.length ? sizes[Math.floor(sizes.length / 2)] : 4;
-    DOT_TYP_I = dotUnits(mid, "i");
-    DOT_TYP_O = dotUnits(mid, "o");
-  }
-
-  // A DOT'S RADIUS IN GRAPH UNITS. The layout needs a length, and `size` is in pixels -- but
-  // the biggest dot is now pinned at DOT_OF_PITCH of the row pitch (see measureSizeScale), so
-  // the conversion is a ratio of constants with no camera in it. That is the whole reason the
-  // size rule was written that way round: a zoom-dependent radius could not be used here.
-  // A dot's radius in graph units. The LIVE pitch, and per band: a dot is drawn against the
-  // spacing it actually has, which is the whole point of solving that per ring. `band` is "i"
-  // or "o"; anything else takes the outer, which is the one a caller without a band is
-  // almost certainly asking about.
-  function dotUnits(size, band) {
-    var z = size || 4;
-    if (z > NODE_MAX) z = NODE_MAX;
-    return DOT_OF_PITCH * pitchUnits(band) / bandScale(band) * (z / NODE_MAX);
-  }
-
   // THE BAND IS NOT OPTIONAL. pitchUnits() with no band answers for the OUTER one -- bandOf
   // returns BAND.o for anything that is not "i" -- so every seam on the disc was measured in
   // outer-band rows, including the inner band's. Hide the outer ring's folders and SP_O climbs,
@@ -3043,8 +2988,8 @@ function mountVaultGraph(root, data, deps) {
         if (rowFirst[r.row] === undefined) rowFirst[r.row] = r.w;
         rowLast[r.row] = r.w;
         // THE SIZE ATTRIBUTE, not a radius. A radius needs the band's room, which is not known
-        // here and is known where the margin is spent -- and dotUnits() answers from the PITCH,
-        // which is a different number from the room whenever a row is not exactly full.
+        // here and is known where the margin is spent -- and a radius taken from the PITCH
+        // is a different number from the room whenever a row is not exactly full.
         var dz = graph.getNodeAttribute(r.id, "size") || 4;
         if (edgeA[r.row] === undefined) edgeA[r.row] = dz;
         edgeB[r.row] = dz;
@@ -3378,8 +3323,6 @@ function mountVaultGraph(root, data, deps) {
     [true, false].forEach(function (isInner) {
       var band = shown.filter(function (c) { return !!c.inner === isInner; });
       if (!band.length) return;
-      var tot = 0;
-      band.forEach(function (c) { tot += c.geom; });
       // The RENDERED allocation: sub-gaps and the affordability clamp both apply here.
       // Shared with buildWedgePlan through allocateBand -- see that function for the whole
       // story, including why the group count has to be continuous.
@@ -3698,9 +3641,6 @@ function mountVaultGraph(root, data, deps) {
           var bk = isInner ? "i" : "o";
           var room = bandOf(bk).room > 1 ? bandOf(bk).room : pitchUnits(bk);
           var clear = CLEAR_OF_ROOM * room * (GAP_BAND[bk] || 1);
-          var radOf = function (z) {
-            return DOT_OF_PITCH * room * (Math.min(z || 4, NODE_MAX) / NODE_MAX);
-          };
           var nRow = rowN[sl.r] > 0.001 ? rowN[sl.r] : 1;
           // THE STEP, but with a CONTINUOUS count. nRow is how many notes are present in this
           // row right now, an integer, so a step built on it is a step function of the frame --
@@ -3770,12 +3710,9 @@ function mountVaultGraph(root, data, deps) {
             if (cellMin[c.k] === undefined || ownStep < cellMin[c.k]) cellMin[c.k] = ownStep;
           }
           cellOf[sl.id] = c.k;
-          var seamArc = sm.gap * rGraph / 2;      // this side's half of the seam, in units
-          var keep = EXCESS_KEEP * seamFall(isInner ? "i" : "o");
-          var typ = dotTyp(isInner ? "i" : "o");
           // ONE WIDTH PER BAND, not one per row. Sizing each half of the channel from the
           // END NOTE OF THAT ROW is exact per note and wobbly per disc, because the drawn dot
-          // is min(dotUnits, dotFit) while the room reserved here was the uncapped dotUnits --
+          // is the pitch-derived radius capped by dotFit, while the room reserved here was uncapped --
           // so wherever dotFit bites, the channel keeps room for a dot that never arrives.
           // Measured on the demo vault, the room beyond a wedge's own step ran -6 to +28 units
           // on a 160 pitch, with the two sides of one boundary disagreeing by up to 22: gaps
@@ -3797,7 +3734,7 @@ function mountVaultGraph(root, data, deps) {
           // wedge edges are parallel to the channel between them. Converting at the band's
           // reference radius instead makes it a constant angle, which is a radial edge and a
           // channel that widens outward -- the same error as above, one level down.
-          // radOf() IS A GUESS AND GUESSING IS THE BUG. The drawn radius is
+          // ESTIMATING THE RADIUS HERE IS A GUESS AND GUESSING IS THE BUG. The drawn radius is
           // ramp(size) * min(bandRoom, cellRoom) * 0.92, then floored and capped -- a different
           // curve with a floor and two caps -- so a margin built on an estimate of it reserves
           // room for a dot that does not arrive. Tried: rim gaps went from a 3.2x spread to
@@ -5027,32 +4964,6 @@ function mountVaultGraph(root, data, deps) {
       // offset to the nearest ink on its own side. Parallel lines either side of a radius
       // are the picture of a constant-width channel; anything else here would be a lie about
       // the layout.
-      var rMid = (lo + hi) / 2, loG = lo * UNIT, hiG = hi * UNIT;
-      var fracOf = function (c, which) {
-        var e = cellNoteFrac(c);
-        return e ? (which === "f0" ? e.lo : e.hi) : c[which];
-      };
-      var angAt = function (c, which, rl) {
-        var sm = seamAt(rl * UNIT, c.nB, c.inner ? "i" : "o");
-        return sweepAngle(sm.gap * c.seams + sm.avail * fracOf(c, which) - sm.gap / 2);
-      };
-      // Every drawn dot of a cell, in graph units, with the radius of its ink.
-      var inkOf = function (c) {
-        var out = [];
-        var q0 = renderer.graphToViewport({ x: 0, y: 0 });
-        var q1 = renderer.graphToViewport({ x: UNIT, y: 0 });
-        var d0 = Math.hypot(q1.x - q0.x, q1.y - q0.y);
-        var perPx = d0 > 1e-3 ? UNIT / d0 : 0;
-        (c.ids || []).forEach(function (id) {
-          if ((alpha[id] || 0) < 0.5) return;
-          var dd = renderer.getNodeDisplayData(id);
-          if (!dd || dd.hidden) return;
-          var at = graph.getNodeAttributes(id);
-          out.push({ x: at.x, y: at.y, rad: renderer.scaleSize(dd.size) * perPx });
-        });
-        return out;
-      };
-
       // EACH WEDGE IN ITS OWN FOLDER'S COLOUR, so an edge is attributable at a glance --
       // with twelve wedges in a band, one accent colour for all of them says a boundary
       // moved without saying whose. Sub-wedge boundaries are the same hue, drawn faint:
@@ -5646,7 +5557,7 @@ function mountVaultGraph(root, data, deps) {
    * radius neither endpoint has and was measured as a smeared disc. This is not that: both ends
    * are exact, and the smear is a note travelling between two places it genuinely belongs.
    */
-  var posSrc = null, posDst = null;
+  var posSrc = null;
   var cellRoom = Object.create(null);
   /**
    * The per-cell room a cascade hands in, or null at rest.
@@ -5697,9 +5608,6 @@ function mountVaultGraph(root, data, deps) {
   // very same plan on all ~90 frames -- this just stops paying for it 90 times.
   function pinPlan() {
     var t0 = (window.performance || Date).now();
-    var keep = planKeep || visible;
-    var shownCount = 0;
-    graph.forEachNode(function (id) { if (keep(id)) shownCount++; });
     pinnedPlan = buildWedgePlan(true);
     planMs = (window.performance || Date).now() - t0;
     return pinnedPlan;
@@ -5750,7 +5658,7 @@ function mountVaultGraph(root, data, deps) {
     // willShow, not visible: membership is "staying, or still fading out", and "staying" has
     // to mean staying under every filter. See willShow.
     planKeep = function (id) { return willShow(id) || present(id); };
-    var plan = pinPlan();
+    pinPlan();
     // Arrival order is CLOCKWISE round the circumference. Work out where every
     // note ends up on the FINISHED disc and sort by that sweep angle: notes that
     // share an angle (a column, inner band and main band alike) arrive together,
@@ -5878,7 +5786,7 @@ function mountVaultGraph(root, data, deps) {
 
     if (!ins.length && !outs.length && !moves.length) {
       lastCascade = { ins: 0, outs: 0, span: 0, path: "instant: nothing to move", frames: 0, ms: 0 };
-      pinnedPlan = null; roomNow = null; cellNow = null; edgeNow = null; posSrc = posDst = null; applyLayout(true); return;
+      pinnedPlan = null; roomNow = null; cellNow = null; edgeNow = null; posSrc = null; applyLayout(true); return;
     }
 
     // Clockwise in BOTH directions -- notes leave in the same sweep they arrived
@@ -6073,7 +5981,7 @@ function mountVaultGraph(root, data, deps) {
       moving.forEach(function (id) { alpha[id] = to[id]; });
       pinnedPlan = null;
       planKeep = null;
-      roomNow = null; cellNow = null; edgeNow = null; posSrc = posDst = null;   // the walk is over; rest measures its own
+      roomNow = null; cellNow = null; edgeNow = null; posSrc = null;   // the walk is over; rest measures its own
       colWalk = null;
       // ASSIGN THE PLAN, do not compute another one. applyLayout(false) built a fresh plan
       // here, and a fresh plan is a second opinion: it agreed about the structure -- same band
@@ -6178,17 +6086,11 @@ function mountVaultGraph(root, data, deps) {
     // visible() is already at its post-toggle value on frame one, so this is exactly
     // the flag settle() will compute, and the contract above -- "at 1, exactly the one
     // settle() assigns" -- holds again.
-    var shownAfter = 0;
-    graph.forEachNode(function (id) { if (willShow(id)) shownAfter++; });
     var ovAfter = true;   // one basis everywhere; see REPACK_BELOW
 
-    // The lattice spacing at each end of the toggle. Scalars, not per-cell maps: the
-    // spacing is global by construction -- it is what makes the packing uniform -- so
-    // there is one number per endpoint rather than one per cell.
-    var spSrc = 1, spDst = 1;
-    // Per band, for the same reason the layout is: one number cannot carry two rings, and a
-    // ring whose spacing is interpolated from the other ring's endpoints is a ring that moves
-    // when the other one is filtered.
+    // The lattice spacing at each end of the toggle, per band for the same reason the layout
+    // is: one number cannot carry two rings, and a ring whose spacing is interpolated from the
+    // other ring's endpoints is a ring that moves when the other one is filtered.
     var spSrcB = { i: 1, o: 1 }, spDstB = { i: 1, o: 1 };
     // The two endpoint packings' band room, walked alongside their spacing. Zero means "this
     // packing had nothing in that band", and the walk below falls back to the other end rather
@@ -6222,8 +6124,6 @@ function mountVaultGraph(root, data, deps) {
     var staticPlan = function (presentFn) {
       var save = planKeep;
       planKeep = presentFn;
-      var shown = 0;
-      graph.forEachNode(function (id) { if (presentFn(id)) shown++; });
       var p = buildWedgePlan(true,
                              function (id) { return presentFn(id) ? 1 : 0; });
       planKeep = save;
@@ -6314,8 +6214,6 @@ function mountVaultGraph(root, data, deps) {
       // Taken from the endpoint plans themselves, which were built on binary presence --
       // so these are the two densities the disc genuinely rests at, not a sample of
       // whatever alpha happened to be on some frame.
-      if (a && a.sp > 0) spSrc = a.sp;
-      if (b && b.sp > 0) spDst = b.sp;
       if (a) { spSrcB = { i: a.spInner || a.sp || 1, o: a.sp || 1 }; }
       if (b) { spDstB = { i: b.spInner || b.sp || 1, o: b.sp || 1 }; }
       // THE ROOM EACH ENDPOINT ACTUALLY HAS, taken by laying that endpoint out and reading it
@@ -6412,7 +6310,7 @@ function mountVaultGraph(root, data, deps) {
       };
       cellPair = pairUp(cellSrc, cellDst);
       edgePair = pairUp(edgeSrc, edgeDst);
-      // WHERE THE NOTES ARE, and where the one plan puts them. The source is read off the graph
+      // WHERE THE NOTES ARE. The source is read off the graph
       // rather than reconstructed from planA: the disc on screen is the truth about where a note
       // is starting from, and a packing built to describe it can only ever be an approximation
       // of it -- which is where the jump at the START of an animation came from.
@@ -6420,7 +6318,6 @@ function mountVaultGraph(root, data, deps) {
       graph.forEachNode(function (id) {
         posSrc[id] = { x: graph.getNodeAttribute(id, "x"), y: graph.getNodeAttribute(id, "y") };
       });
-      posDst = finalPos;
     })();
 
     // The guard is a WATCHDOG on stalled frames, not a deadline. It used to be a
@@ -7849,7 +7746,6 @@ function mountVaultGraph(root, data, deps) {
   // DOT_OF_PITCH is 11/28: the cap and reference pitch that were already tuned together, now
   // expressed as the ratio they always were. At the reference pitch this reproduces today's
   // sizes exactly; below it, it keeps doing what the multiplier was meant to.
-  var REF_PITCH = 28;
   // NO FLOOR AND NO CEILING ON A MULTIPLIER, because the multiplier is gone. github#13
   // raised the ceiling from 1 to 2.4 for a good reason -- a filtered disc genuinely has more
   // room per note, and clamping at 1 kept the median dot at 4.2px while its neighbours' room
@@ -9335,7 +9231,7 @@ function mountVaultGraph(root, data, deps) {
     moveFrom = null; splitHold = null;
     pinnedPlan = null; planKeep = null;
     roomNow = null; cellNow = null; edgeNow = null; colWalk = null;
-    posSrc = posDst = null;
+    posSrc = null;
     // BANDLOCK IS SUPPOSED TO BE STICKY. It exists so that filtering cannot migrate a group
     // from one ring to the other -- see its own note -- and a membership change is a filter's
     // kind of event, not a Refresh's. Rebuilding it wholesale moved groups between rings and
@@ -9455,7 +9351,7 @@ function mountVaultGraph(root, data, deps) {
       if (animGuard) { WIN.clearTimeout(animGuard); animGuard = null; }
       pinnedPlan = null; planKeep = null; roomNow = null; cellNow = null; edgeNow = null;
     colWalk = null;
-      posSrc = posDst = null;
+      posSrc = null;
       // AND THE TIMELINE HAS TO BE COMPLETED, not merely re-rendered.
       //
       // timelineFrame() draws whatever state.until says, and until is how far through the intro
@@ -9489,7 +9385,7 @@ function mountVaultGraph(root, data, deps) {
       WIN.clearTimeout(cascadeRun.guard);
       cascadeRun = null;
     }
-    pinnedPlan = null; planKeep = null; roomNow = null; cellNow = null; edgeNow = null; posSrc = posDst = null;
+    pinnedPlan = null; planKeep = null; roomNow = null; cellNow = null; edgeNow = null; posSrc = null;
     colWalk = null;
     state.until = null;
     timelineFrame(true);
@@ -9569,7 +9465,7 @@ function mountVaultGraph(root, data, deps) {
     if (animGuard) { WIN.clearTimeout(animGuard); animGuard = null; }
     pinnedPlan = null; planKeep = null; roomNow = null; cellNow = null; edgeNow = null;
     colWalk = null;
-    posSrc = posDst = null;
+    posSrc = null;
 
     // DESTINATION: the whole vault. SOURCE: an empty screen. cascade() reads the current alphas
     // as its starting point, so clearing them is what makes this the growth animation rather
@@ -9819,14 +9715,14 @@ function mountVaultGraph(root, data, deps) {
           a.download = "vault-graph-debug.json";
           a.click();
           done("Saved");
-        } catch (e2) {
+        } catch {
           // Nothing left to try, and a button that lies is worse than one that admits it.
           done("Failed");
         }
       };
       try {
         WIN.navigator.clipboard.writeText(txt).then(function () { done("Copied"); }, save);
-      } catch (e) {
+      } catch {
         save();
       }
     };
@@ -13742,7 +13638,7 @@ function mountVaultGraph(root, data, deps) {
                       // One lattice row, mapped through the same camera the notes are drawn
                       // with. graphToViewport is the only honest way to ask: it goes through
                       // the pinned bbox, so it answers in the pixels a person sees.
-                      var pitchPx = null, pitchPxI = null, unitPx = null, discPx = null;
+                      var pitchPx = null, pitchPxI = null, unitPx = null;
                       if (renderer) {
                         var a = renderer.graphToViewport({ x: 0, y: 0 });
                         var u = renderer.graphToViewport({ x: UNIT, y: 0 });
@@ -13755,11 +13651,6 @@ function mountVaultGraph(root, data, deps) {
                         var bi = renderer.graphToViewport({
                           x: UNIT * (bandOf("i").sp || 1) * bandScale("i"), y: 0 });
                         pitchPxI = Math.hypot(bi.x - a.x, bi.y - a.y);
-                        // How far the disc actually reaches on screen, from the live radius
-                        // rather than the locked one -- the gap between them IS the empty
-                        // margin the notes no longer fill.
-                        var e = renderer.graphToViewport({ x: (lastMaxR || 0) * UNIT, y: 0 });
-                        discPx = Math.hypot(e.x - a.x, e.y - a.y);
                       }
                       // Drawn sizes, as the reducer leaves them -- sizeScale included, which
                       // is the multiplier NODE_MAX does not clamp.
@@ -13847,7 +13738,7 @@ function mountVaultGraph(root, data, deps) {
                       if (!probe || !probe.samples.length) return "nothing recorded -- call __vg.probe(true) first";
                       var s = probe.samples, worst = { inner: 0, outer: 0 }, at = { inner: 0, outer: 0 };
                       var tanWorst = 0, tanAt = 0, tanWho = null, ngWorst = 0, ngAt = 0;
-                      var startWorst = 0, startAt = 0, startG = null, overWorst = 0;
+                      var startWorst = 0, startAt = 0, startG = null;
                       for (var i = 1; i < s.length; i++) {
                         var di = Math.abs(s[i].innerMax - s[i - 1].innerMax);
                         var doo = Math.abs(s[i].outerMax - s[i - 1].outerMax);
