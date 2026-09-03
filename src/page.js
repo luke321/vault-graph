@@ -4537,6 +4537,10 @@ function mountVaultGraph(root, data, deps) {
     // internal month-tick spacing predictable, which the density weighting between YEARS
     // does not need help from.
     //
+    // ONE EXCEPTION TO THE EQUAL SHARE, and it is about the calendar rather than about note
+    // counts: the LAST month is the month in progress, and it takes only the fraction of its
+    // equal share that its elapsed days have earned -- see lastFrac below (github#51).
+    //
     // NOT A NO-OP ON AN EVEN-BY-TIME VAULT ANY MORE. The earlier month-real-duration scheme
     // reduced exactly to the linear formula whenever no month was literally empty; this one
     // does not, because it weighs a YEAR by its content rather than by its calendar length
@@ -4550,6 +4554,47 @@ function mountVaultGraph(root, data, deps) {
     var yMax2 = yCounts.length ? yCounts[yCounts.length - 1] : 1;
     var yP90 = yCounts.length ? yCounts[Math.floor(yCounts.length * 0.9)] : 1;
     var yearRef = Math.max(1, yP90, yMax2 * 0.35);
+    // WHERE THE STRIP'S RIGHT EDGE IS, and it is no longer the last month's last calendar
+    // day (github#51). `hi` used to be Date.UTC(y1, m1 + 1, 0) -- the newest note's month,
+    // rounded UP to its end -- so a strip built on the 2nd of September ran to the 30th:
+    // two days of vault and twenty-eight days of nothing, every one of them scrubbable and
+    // every one of them changing nothing on the disc, because they are all past the newest
+    // note. The readout and the `to` field offered those days as dates too, and the eye
+    // reads the right edge as "now", so the vault always looked like it had stopped writing
+    // a few weeks ago.
+    //
+    // TODAY'S LOCAL DAY, bounded on both sides:
+    //
+    //   * NEVER BEFORE THE NEWEST NOTE. A note dated in the future -- frontmatter says so,
+    //     and nothing stops it -- must stay reachable, and today's date alone would leave it
+    //     past the right edge where no gesture can select it.
+    //   * NEVER PAST THE NEWEST NOTE'S OWN MONTH, because that is the last month the dense
+    //     grid above holds. monthEndMs returns `hi` for the last month, so letting `hi` run
+    //     to today on a vault last written in June and read in September would hand that one
+    //     June segment three months of time to interpolate across -- a worse lie than the
+    //     one being fixed. And it would not be worth telling: every day of June HAS happened,
+    //     so a full-width June running to the 30th is already the truth, and the empty days
+    //     between the last note and the month's end are a real gap worth seeing. Which is
+    //     also why `lastFrac` below comes out at exactly 1 in that case and changes nothing.
+    //
+    // The dead run at the right edge is now bounded by how long since you last wrote, at
+    // most to the end of that month, instead of by where the calendar month happens to end.
+    // TODAY is read at load rather than baked in at build time (see its own definition), so
+    // this edge moves on its own overnight -- the same property the band's today marker has.
+    var lastMonthEnd = Date.UTC(y1, m1 + 1, 0);
+    var endMs = Math.min(lastMonthEnd, Math.max(hi, heatParse(TODAY)));
+    // THE MONTH IN PROGRESS IS PAID FOR THE DAYS IT HAS LIVED, as a fraction of the equal
+    // share it would get if it were over. September on the 2nd is a sliver; on the 28th it
+    // is nearly a full month. Exactly 1 for a month that has ended, which is every month but
+    // the last -- and the last one too, the moment it finishes.
+    //
+    // DAYS TOUCHED, not whole days elapsed: the 2nd counts as two, so the 1st of the month
+    // is 1/31 rather than 0. A zero-width segment is not a rounding detail here -- it is a
+    // month the brush cannot grab and ribbonMsCompact cannot interpolate inside (both guard
+    // w1 > w0 and fall back to the segment's start), so the strip would lose its right end
+    // for a day every month. It also makes this the more generous of the two readings by
+    // one day, which is the right direction for a control you have to be able to touch.
+    var lastFrac = new Date(endMs).getUTCDate() / new Date(lastMonthEnd).getUTCDate();
     var segs = [], segW = 0, segOfMonth = new Array(months.length);
     ylist.forEach(function (yy) {
       var yFrac = Math.min(1, yy.n / yearRef);
@@ -4559,13 +4604,26 @@ function mountVaultGraph(root, data, deps) {
       var mw = yearWeight / idxs.length;
       idxs.forEach(function (mi) {
         segOfMonth[mi] = segs.length;
-        segs.push({ i: mi, w0: segW, w1: segW + mw });
-        segW += mw;
+        // The pro-rating happens HERE and nowhere else, because both axis paths and both bar
+        // layouts read these segment widths (or, on the linear path, the `lo`..`hi` these
+        // widths are cut from) -- putting it in the drawing would leave the brush, the year
+        // chips and the bars each holding their own idea of where September ends (github#51).
+        //
+        // The width the month in progress does not take is NOT redistributed to the year's
+        // other months: the year is partly unlived and should draw that way. Stretching
+        // January..August to cover September's missing twenty-eight days would move eleven
+        // complete months' pitch to describe something that happened to the twelfth, and the
+        // equal-share-within-a-year rule above is a promise about COMPLETE months.
+        var mwOwn = mw * (mi === months.length - 1 ? lastFrac : 1);
+        segs.push({ i: mi, w0: segW, w1: segW + mwOwn });
+        segW += mwOwn;
       });
     });
     dateSpan = {
       months: months, years: ylist, index: index,
-      lo: months[0].ms, hi: Date.UTC(y1, m1 + 1, 0),      // last day of the last month
+      // hi is a day the vault has actually reached, not the last month's calendar end --
+      // see the long note above lastMonthEnd (github#51).
+      lo: months[0].ms, hi: endMs,
       nMax: nMax, nRef: nRef, yMax: yMax, dated: tot,
       undated: graph.order - tot,
       axis: { segs: segs, totalW: segW || 1, segOfMonth: segOfMonth }
@@ -10582,6 +10640,16 @@ function mountVaultGraph(root, data, deps) {
   //
   // Bounded by the vault's own span, because a window reaching past the first note is empty
   // columns pretending to be data.
+  //
+  // THE BAND IS DELIBERATELY NOT CHANGED BY github#51, and this is the only line of it that
+  // even reads dateSpan.hi. The band is a rolling window onto TODAY -- heatBuild anchors it
+  // at heatParse(TODAY), clampWinEnd and winEndCentredAtPx already refuse to scroll past
+  // today, and none of that went through the span. So the strip's right edge moving does not
+  // move the band; it only tightens this clamp, and tightens it toward the truth: `hi` used
+  // to be a calendar month's end up to thirty days in the future, so "never wider than the
+  // vault is old" measured the vault as older than it was and could hand the grid a few
+  // weeks of columns before the first note. lo -> hi is now lo -> the last day the vault
+  // reaches, which is the span the window can actually be scrolled across.
   function heatGeom() {
     var wrap = $("heatwrap");
     var avail = ((wrap && wrap.clientWidth) || $("stage").clientWidth || 900) - HEAT_GUTTER;
@@ -11352,8 +11420,17 @@ function mountVaultGraph(root, data, deps) {
     return Math.max(0, Math.min(dateSpan.months.length - 1, idx));
   }
   // The end of month `i`'s ms range -- the next month's start, or dateSpan.hi itself when
-  // `i` is the last month (which is always populated: dateSpan.hi is derived FROM its last
-  // note, so nothing is ever dated past it).
+  // `i` is the last month.
+  //
+  // WHAT THAT MEANS FOR THE LAST MONTH CHANGED (github#51). This used to claim dateSpan.hi
+  // "is derived FROM its last note, so nothing is ever dated past it", and the claim was
+  // false as written: it was derived from that note's MONTH, rounded up, and the month's own
+  // end is up to thirty days PAST the note. The conclusion happened to hold, for the wrong
+  // reason. It still holds, for a reason worth stating plainly: `hi` is today's day floored
+  // at the newest note, so a future-dated note lands inside this segment rather than past
+  // it, and the segment stops where the calendar has actually got to rather than where the
+  // month will eventually end. So the last month is the one month whose ms range is SHORTER
+  // than the calendar month it names -- which is exactly the width buildDateSpan pays it.
   function monthEndMs(i) {
     return (i + 1 < dateSpan.months.length) ? dateSpan.months[i + 1].ms : dateSpan.hi;
   }
@@ -11473,16 +11550,31 @@ function mountVaultGraph(root, data, deps) {
         cx.fillRect((jSeg.w0 / totalW) * w, 0, 1, top);
       }
     } else {
-      var pitch = w / n;
+      // PLACED BY THE SAME MAPPING THE BRUSH USES ON THIS AXIS, not at an equal pitch.
+      //
+      // It was `i * (w / n)`, one equal slice per month, while ribbonXLinear right beside it
+      // divided REAL ELAPSED TIME -- so a bar and the handle standing on it disagreed by up
+      // to a day and a half of width per month even on a vault of nothing but whole months
+      // (February drew as wide as July while the brush treated it as 28/31 of one). Harmless
+      // enough to have gone unnoticed; not harmless once the trailing month stopped running
+      // to its own month end, which is what github#51 changed: the month in progress would
+      // have kept a full month's bar under a strip that no longer reaches that far, and the
+      // equal pitch would have been the whole of the old bug surviving with compaction off.
+      //
+      // Asking ribbonXLinear for both edges makes each bar BE its month's slice of the span,
+      // so the partial month draws short on this path for the same reason it does on the
+      // compact one -- from the single change in buildDateSpan, with no second copy of the
+      // pro-rating here.
       for (var i = 0; i < n; i++) {
-        paintMonthBar(cx, top, ms[i], i * pitch, Math.max(1, pitch - 0.6));
+        var bx = ribbonXLinear(ms[i].ms, w);
+        paintMonthBar(cx, top, ms[i], bx, Math.max(1, ribbonXLinear(monthEndMs(i), w) - bx - 0.6));
       }
       // Year boundaries. Only January gets a rule, so the strip reads as years rather than as
       // 121 months. The years themselves are named by the buttons below -- see buildYears.
       for (var j2 = 0; j2 < n; j2++) {
         if (ms[j2].m !== 0) continue;
         cx.fillStyle = rgbaHex(css("--text-3"), 0.28);
-        cx.fillRect(j2 * pitch, 0, 1, top);
+        cx.fillRect(ribbonXLinear(ms[j2].ms, w), 0, 1, top);
       }
     }
 
