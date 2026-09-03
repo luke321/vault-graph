@@ -58,8 +58,8 @@ const block = (re) => {
   if (!m) throw new Error("block not found: " + re);
   return m[0];
 };
-const light = block(/\.vault-graph \{[\s\S]*?\n  \}/);
-const dark = block(/\.vault-graph\[data-theme="dark"\] \{[\s\S]*?\n  \}/);
+const light = block(/\.vault-graph \{[\s\S]*?\n {2}\}/);
+const dark = block(/\.vault-graph\[data-theme="dark"\] \{[\s\S]*?\n {2}\}/);
 
 const NAMES = ["Blue", "Orange", "Aqua", "Yellow", "Green", "Magenta",
                "Violet", "Red", "Cyan", "Orchid", "Grey", "Slate"];

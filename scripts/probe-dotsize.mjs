@@ -546,7 +546,7 @@ try {
                       `${JSON.stringify(WATCH)}, ${JSON.stringify(restR)}); void 0`);
       await (dir === "in" ? cas.go() : cas.back());
       await settle();
-      const nf = await page.j("__dot.stop()");
+      await page.j("__dot.stop()");
       const rows = await page.j("__dot.rows");
       if (!rows.length) { console.log(`${g} ${dir}: nothing sampled`); continue; }
       const busySpan = rows.filter((r) => r.busy);

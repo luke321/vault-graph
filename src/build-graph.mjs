@@ -219,7 +219,7 @@ function walk(dir, acc = []) {
 
 // Minimal YAML: `k: v`, `k: [a, b]`, and `k:` + `- item` blocks. Enough for a vault.
 function parseFrontmatter(raw) {
-  const text = raw.replace(/^﻿/, "");
+  const text = raw.replace(/^\uFEFF/, "");
   const m = /^---\r?\n([\s\S]*?)\r?\n---/.exec(text);
   if (!m) return { fm: {}, body: text };
   const fm = {};
@@ -261,7 +261,7 @@ const NAV_LINE = new RegExp(
 );
 const stripDailyNav = (s) => (STRIP_NAV ? s.replace(NAV_LINE, "") : s);
 
-const WIKILINK = /!?\[\[([^\[\]|#^]+)(?:[#^][^\[\]|]*)?(?:\|[^\[\]]*)?\]\]/g;
+const WIKILINK = /!?\[\[([^[\]|#^]+)(?:[#^][^[\]|]*)?(?:\|[^[\]]*)?\]\]/g;
 const MDLINK = /\[[^\]]*\]\(([^)\s]+\.md)(?:\s[^)]*)?\)/g;
 
 function mineLinks(body, fm) {
@@ -305,7 +305,7 @@ const TYPE_ALIAS = {
 // hardcoded numeric prefixes ("06" -> daily, "09" -> meeting), which silently
 // mistyped every note the day the vault was renumbered and meant nothing in any
 // other vault.
-const deNumber = (s) => String(s).replace(/^[\s\d._)\-]+/, "").trim();
+const deNumber = (s) => String(s).replace(/^[\s\d._)-]+/, "").trim();
 const slug = (s) => deNumber(s).toLowerCase().replace(/[\s_]+/g, "-");
 const singular = (s) => s.replace(/ies$/, "y").replace(/([^aeious])s$/, "$1");
 

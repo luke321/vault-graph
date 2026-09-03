@@ -17,7 +17,7 @@
 // mounts -- see .ai-context/decisions/0008-one-page-two-mounts.md.
 
 import { build, context } from "esbuild";
-import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { readVendorSource } from "../src/vendor.mjs";

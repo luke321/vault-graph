@@ -96,10 +96,10 @@ try {
   for (let i = 0; i < 60 && !attached; i++) {
     await sleep(1000);
     let c = null;
-    try { c = await attach(PORT, "app://obsidian.md"); } catch (e) { continue; }
+    try { c = await attach(PORT, "app://obsidian.md"); } catch { continue; }
     try {
       if (await c.eval("typeof app !== 'undefined' && !!app.workspace")) { attached = c; break; }
-    } catch (e) { /* still booting */ }
+    } catch { /* still booting */ }
     try { await c.close(); } catch {}
     if (i === 20) {
       const targets = await json(PORT, "/json/list").catch(() => []);

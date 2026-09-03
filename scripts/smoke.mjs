@@ -1740,7 +1740,7 @@ check("the resting web is not floored wider than it asks for", async (p) => {
 // The ribbon's three lanes, so a press can be aimed at one of them. Mirrors the constants in
 // page.js; a mismatch shows up as a check aiming at the wrong lane rather than as a wrong
 // number, which is why each helper reports what it hit.
-const RIB_BARS = 26, RIB_TRACK = 11;
+const RIB_BARS = 26;
 
 async function ribbonBox(p) {
   return p.j(`(function(){
