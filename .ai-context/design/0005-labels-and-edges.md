@@ -85,11 +85,14 @@ never got the equivalent cancellation, so a stroke grew as `1/ratio` too.
 
 **The two are not the same kind of thing.** A dot represents a note, and holding its
 proportion to the room it has is the entire point of the identity law. A line represents a
-relationship, and its *thickness* is the channel carrying link weight — so making thickness a
-function of zoom overwrites the one signal it has to give. Measured on the 10k fixture, one
-hub of degree 55: strokes 1.70px at rest, 3.94px five notches in, 7.87px at ten, and 55 of
-those converging on a 20.44px dot is **307.87px of ink**, so the fan drew as one solid mass
-with no link traceable through it (github#39).
+relationship, and nothing about a relationship gets stronger because the camera came closer.
+(This paragraph originally read "its *thickness* is the channel carrying link weight — so
+making thickness a function of zoom overwrites the one signal it has to give". github#43
+deleted that channel; see "Every link is the same width" below. The conclusion is unchanged,
+and a constant width has even less business tracking the camera than a weighted one did.)
+Measured on the 10k fixture, one hub of degree 55: strokes 1.70px at rest, 3.94px five notches
+in, 7.87px at ten, and 55 of those converging on a 20.44px dot is **307.87px of ink**, so the
+fan drew as one solid mass with no link traceable through it (github#39).
 
 Worth stating because the obvious diagnosis is wrong: **stroke-to-dot ratio is constant**
 (0.385 at both 5x and 10x), since dots grow as `1/ratio` as well. No single stroke ever
@@ -105,8 +108,13 @@ Three things make the fix work:
   heaviest link there can be on the cap. Below the knee it also makes `size * k / ratio` a
   **constant**, so the drawn web is invariant under zoom rather than merely bounded, which is
   what lets the invariant assert an equality. Measured after: 2.12px / 93.93px at both 5x and
-  10x, and the resting disc untouched.
-- **Above the knee it costs nothing.** At `ratio >= EDGE_SIZE_MAX / EDGE_MAX_PX` (0.4) `k` is
+  10x, and the resting disc untouched. **github#43 changed which two widths this is about, not
+  the argument:** `EDGE_SIZE_MAX` is now derived from `EDGE_SIZE_LIT` (1.4), there is no weight
+  ordering left to flatten, and the ratio a `min()` would destroy is the 2.33:1 between a
+  resting link and a lit one — at ten notches in it clamps both to 4.00px and the lit web
+  stops standing out at the one zoom where you are studying a note's connections.
+- **Above the knee it costs nothing.** At `ratio >= EDGE_SIZE_MAX / EDGE_MAX_PX` (0.4 as
+  shipped for github#39, 0.35 since github#43 moved the denominator to 1.4) `k` is
   1, no refresh fires, and not one pixel of the resting disc moves — the whole cost lives
   inside the zoom that needed the fix. The camera hook is rAF-throttled and gated on
   `syncEdgeMult`, so it runs at most once a frame; a **pan** never runs it at any zoom,
@@ -171,6 +179,89 @@ size is 1.10 (weight 3) against the 1.6 ceiling, so `EDGE_MAX_PX`'s 4px is never
 reached and the real deep-zoom maximum is 2.75px. Calibration, not a defect — but normalising
 by the observed maximum rather than the theoretical one is the knob if links should ever be
 heavier when zoomed in.
+
+**Everything above about weight is now history**, kept because it is what the next section
+was decided from: two consecutive days of tuning the two ends of one stroke, each of which
+had to work out what width was *for* before it could pick a number.
+
+## Every link is the same width
+
+`edgeAttrsOf` returns a constant `size` (`EDGE_SIZE`, **0.60**) and the weight ramp
+`min(1.6, 0.35 + 0.25w)` is gone (github#43). A thicker line used to read as "these two notes
+are more strongly related", and the reading was false three ways:
+
+- **It said two unlike things at once.** Weight counts every `[[wikilink]]` mention between
+  two notes with both directions merged into one key, so weight 2 is *either* "one note
+  mentioned the other twice" *or* "the two notes reference each other".
+- **It was legible in one state of four.** Measured on the 10k fixture, one hub of degree 55
+  plus the whole 3815-link resting web:
+
+  | state | drawn | weight readable |
+  |---|---|---|
+  | at rest, not selected | 1.000–1.019px over the entire web | no |
+  | at rest, selected | 1.30px flat | no |
+  | zoomed in, not selected | 1.50–2.12px | yes |
+  | zoomed in, selected | 3.50px flat | no |
+
+  At rest `size / ratio` compresses the ramp to 0.556–1.019px and the 1.0px floor above takes
+  the rest of it — 0.019px of spread across a whole vault. Selected, `edgeReducer` sizes every
+  focused edge toward `EDGE_SIZE_LIT` regardless of weight, which is right and erases the
+  channel. The one state that separated weights is the one where you are *not* looking at a
+  particular note.
+- **There was almost nothing to show.** Remeasured on all three fixtures at this change:
+  **three or four distinct weights in an entire graph, and 98.35–99.72% of links weight 1**
+  (38048/38154 on the 10k, 4723/4787 on the demo, 3106/3158 on the dominant-folder shape),
+  observed maximum size 1.35.
+
+0.60 is what weight 1 already drew, so 98–99% of links do not move at all and the resting web
+measures identical either side of the change — `edgeInk` 29.24% coverage / 0.1486 ink on the
+10k, unchanged to four decimals. At rest the floor absorbs the rest: weight 2 asked for
+0.787px and was already floored to 1.0px, so the only links that change there are the two
+weight-3 ones, 1.019px → 1.000px on a web of 38,154. What
+the disc actually reads out is **degree**, and degree is already carried twice — by dot size
+and by hub rank pulling well-connected notes toward the centre. Width was a fourth channel on
+the weakest available variable.
+
+**Rejected: rescue width by lowering the floor.** It cannot be tuned back — at floor 0.2 the
+ramp's best case is 0.32–1.48px, and 0.55, the floor that would separate the three weights
+that exist, is exactly where a sparse vault's web disappears (measured for github#42 above).
+**Also rejected: move weight to opacity, or to the lit web where there is pixel budget.** That
+is a new channel rather than a repair, and the distribution says there is nothing worth
+spending one on until a real vault shows a fat tail.
+
+**Weight itself stays and still earns its keep**, in one place: the resting-web budget picks
+which links survive by sorting weight-descending, so the ~10% drawn on the 10k fixture are the
+repeated and mutual ones rather than an arbitrary sample. That reads the raw number off
+`DATA.edges` and never needed the stroke to show it. The `weight` edge attribute is carried
+through too, though nothing that draws reads it — it is now the only place a materialised
+link's weight is legible at all.
+
+**What this does to the cap.** `EDGE_SIZE_MAX` is derived from `EDGE_SIZE_LIT` rather than
+being the literal 1.6, because with the ramp gone the widest size that reaches the shader is
+the lit width — and 1.6 was never the true maximum anyway, the reducer's 1.4 was, which is why
+4px was unreachable. The cap is **still needed**: constant in size is not constant in pixels,
+and uncapped at ten notches in a resting link draws 5.56px and a lit one 12.96px, so 55 lit
+links would be 713px of ink on a 42.66px dot. Measured either side of the change, 10k hub of
+degree 55:
+
+| state | before | after |
+|---|---|---|
+| rest (1.08), not selected | 1.00px / fan 55.0px | **unchanged** — `edgeMult` is 1 above the knee |
+| rest, selected | 1.30px | **unchanged** |
+| 5x (0.216) and 10x (0.108), not selected | 1.50–2.12px / fan 83.12px | 1.71px / fan 94.29px |
+| 5x and 10x, selected | 3.50px / fan 192.5px | **4.00px** / fan 220px — the cap, exactly |
+
+(The two zoom levels share a row because below the knee they are *identical*, which is what
+the invariant asserts; the unselected figures are the suite's own, the selected ones from a
+scratch probe that pins `state.selected` and reads `__vg.edgeReport(hub)`.)
+
+So the deep-zoom web is ~14% more ink than 1.9.0 shipped, and 4.00px is `EDGE_MAX_PX` finally
+being reached rather than approached — 4px was the reporter's own measurement against a 21px
+hub dot, and this dot is 42.66px. The dominant-folder hub moves the other way, because it held
+the heavy links: 3.38px / 184.6px becomes 1.71px / 176.57px. **Leaving the denominator at 1.6
+was considered** and rejected: it keeps every pixel identical to 1.9.0, but it leaves a
+constant whose referent has been deleted and keeps the cap unreachable, which is half of what
+github#43 is for.
 
 ## The focus web sits above the dim notes
 

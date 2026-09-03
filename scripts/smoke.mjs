@@ -1611,6 +1611,12 @@ check("a link's stroke holds its width at any zoom", async (p) => {
   // below the knee -- so the two deep readings must match exactly. A per-edge min() would
   // still satisfy a cap-only check while flattening every link onto the same number, and
   // that is the regression this equality is here to catch.
+  //
+  // STILL TRUE AFTER github#43 made width constant, and worth saying because the obvious
+  // reading is that a constant width has nothing left to flatten. What a min() would flatten
+  // now is the ratio between the RESTING web and the LIT web (2.33:1) -- and this check still
+  // catches it through the unfocused strokes alone, because a min() draws 0.60/0.216 = 2.78px
+  // at five notches and clamps to 4.00px at ten, which is not an equality.
   await camReset(p);
   const hub = await p.j(`(function(){
     var best = null, bd = -1;
@@ -1702,8 +1708,11 @@ check("the resting web is not floored wider than it asks for", async (p) => {
     // default -- the value was never set explicitly for the whole life of the file, so nothing
     // would have said so. And the inflation, because that is WHY 1.0 rather than some other
     // smaller number: it bounds the floor against what a typical link actually asks for, so a
-    // later change to edgeAttrsOf's 0.35 + 0.25w ramp cannot make the floor dominant again
-    // without tripping. 1.80x against a bound of 2 is thin on purpose.
+    // later change to the width edgeAttrsOf hands out cannot make the floor dominant again
+    // without tripping. 1.80x against a bound of 2 is thin on purpose. Since github#43 that
+    // width is one constant rather than a 0.35 + 0.25w ramp, so min == median == max here and
+    // the bound covers the whole web rather than half of it -- the ratio itself is unmoved,
+    // because 0.60 is the width 98-99% of links already had.
     //
     // litPct > 0 guards the WebGL read: a lost drawing buffer reports zero ink, which is
     // indistinguishable from a perfectly clean disc, and would turn this into a check that

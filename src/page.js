@@ -487,7 +487,8 @@ function mountVaultGraph(root, data, deps) {
    * 67% (~3.3k); the 10k fixture (37,373) renders 10% (~3.7k). Weight-descending selection
    * means what survives is the structure a reader would trace anyway -- at 36k the full web
    * reads as fog, and the fade-in of 36k links during a cascade is a wall of movement behind
-   * the notes.
+   * the notes. THIS SORT IS THE ONLY THING LINK WEIGHT DECIDES since github#43 took it off
+   * the stroke -- see edgeAttrsOf below for why width was the wrong home for it.
    */
   var EDGE_RAMP_START = 2000, EDGE_RAMP_END = 10000, EDGE_FLOOR = 0.10;
   /** id -> [{ o: neighbour id, w: link weight }], both directions, deduped. The one source of
@@ -496,11 +497,74 @@ function mountVaultGraph(root, data, deps) {
    *  edges are materialised. */
   var adj = Object.create(null);
   var EDGE_TOTAL = 0;
-  /** The heaviest a link may draw. Named rather than inline because the pixel clamp divides
-   *  by it (see measureEdgeMult) -- a ceiling that drifted from the clamp's own denominator
-   *  would move every stroke's width with nothing saying so. */
-  var EDGE_SIZE_MAX = 1.6;
-  var edgeAttrsOf = function (w) { return { weight: w, size: Math.min(EDGE_SIZE_MAX, 0.35 + w * 0.25) }; };
+  /**
+   * EVERY LINK IS THE SAME WIDTH. Weight is not a visual channel here, and the channel it
+   * used to be was making a claim it could not support (github#43).
+   *
+   * `size` was `min(1.6, 0.35 + 0.25w)` -- a ramp on link weight, where weight counts every
+   * [[wikilink]] mention between two notes with both directions merged into one key (see
+   * addEdge in src/build-graph.mjs, and the same merge over Obsidian's resolvedLinks counts
+   * in plugin/main.js). A thicker line therefore read as "these two notes are more strongly
+   * related", and that reading was false three separate ways:
+   *
+   *   IT SAID TWO UNLIKE THINGS AT ONCE. Weight 2 is EITHER "one note mentioned the other
+   *   twice" OR "the two notes reference each other" -- collapsed into one number before
+   *   rendering is even reached, so the signal was muddy at source.
+   *
+   *   IT WAS LEGIBLE IN ONE STATE OF FOUR. Measured on the 10k fixture, one hub of degree 55
+   *   plus the whole 3815-link resting web: at rest and unselected the ENTIRE web draws
+   *   1.000-1.019px, because `size / ratio` compresses the ramp to 0.556-1.019px and
+   *   minEdgeThickness (1.0px, github#42) then floors nearly all of it -- 0.019px of spread
+   *   across a whole vault. Selected, edgeReducer sizes every focused edge toward
+   *   EDGE_SIZE_LIT regardless of weight, which is right (it makes the lit web read as one
+   *   connected thing) and erases the channel outright: measured 1.30px flat at rest, 3.50px
+   *   flat at ten notches in. Only "zoomed in AND not selected" separated weights at all --
+   *   1.50-2.12px on that hub's fan -- and that is the one state where you are not looking at
+   *   a particular note.
+   *
+   *   THERE WAS ALMOST NOTHING TO SHOW. Remeasured on all three fixtures for this change:
+   *   three or four distinct weights in an entire graph, and 98.35-99.72% of links weight 1
+   *   (38048 of 38154 on the 10k, 4723 of 4787 on the demo, 3106 of 3158 on the
+   *   dominant-folder shape). Observed maximum size 1.35, against a ceiling of 1.6 that
+   *   nothing ever reached.
+   *
+   * 0.60 is what weight 1 already drew, so on those fixtures 98-99% of links do not move by
+   * a pixel. What the eye is actually reading off this disc is DEGREE -- how many notes link
+   * to this one -- and degree is already carried twice, by dot size and by hub rank pulling
+   * well-connected notes toward the centre. Width was a fourth channel layered on the
+   * weakest variable available.
+   *
+   * Rejected: keep width and lower the floor to rescue it. It cannot be rescued by tuning --
+   * at floor 0.2 the full ramp's best case is 0.32-1.48px, and 0.55 (the floor that would
+   * separate the three weights that exist) is where the web on a sparse vault disappears
+   * (github#42 measured that end). Also rejected: move weight to opacity or to the lit web
+   * only. That is a new channel rather than a repair, and the distribution above says there
+   * is nothing worth spending one on until a real vault shows a fat tail.
+   *
+   * WEIGHT ITSELF STAYS, and it earns its keep in exactly one place: the resting-web budget
+   * above chooses which links survive by sorting weight-descending, so the ~10% drawn on the
+   * 10k fixture are the repeated and mutual ones rather than an arbitrary sample. That reads
+   * the raw number straight off DATA.edges and never needed the stroke to show it.
+   */
+  var EDGE_SIZE = 0.60;
+  /** What a FOCUSED link is sized toward -- see edgeReducer, which ramps every edge of the
+   *  lit web to this off hoverT. Named here rather than left inline at its use site because
+   *  it is now the widest size any edge can hand the shader, and therefore the pixel clamp's
+   *  denominator; the two must not drift apart. */
+  var EDGE_SIZE_LIT = 1.4;
+  /** The heaviest a link may draw, and the pixel clamp divides by it (see measureEdgeMult) --
+   *  a ceiling that drifted from the clamp's own denominator would move every stroke's width
+   *  with nothing saying so. DERIVED rather than a literal since github#43: it was 1.6, the
+   *  top of a weight ramp, and with the ramp gone the widest size that reaches the shader is
+   *  the lit width. 1.6 was never the true maximum anyway -- the reducer's 1.4 was, which is
+   *  why the 4px cap was unreachable and the real deep-zoom maximum was 3.50px. */
+  var EDGE_SIZE_MAX = EDGE_SIZE_LIT;
+  /** `weight` is carried through as an attribute even though nothing that draws reads it: the
+   *  budget's sort reads DATA.edges directly, and with the ramp gone this is the only place a
+   *  materialised link's weight is legible at all -- from the console, and for whatever
+   *  channel weight is eventually given if a real vault turns out to have a spread worth
+   *  showing. One number per edge, against 38k edges on the largest fixture. */
+  var edgeAttrsOf = function (w) { return { weight: w, size: EDGE_SIZE }; };
   var EDGE_SHOWN = 0;
   var lazyEdges = false;   // true when the resting web is partial; probes read this
   (function () {
@@ -8047,7 +8111,11 @@ function mountVaultGraph(root, data, deps) {
   // the camera ratio here because zoomToSizeRatioFunction is identity (see makeRenderer). So
   // a stroke grew as 1/ratio, exactly like a dot does. That law is right for a dot -- a dot
   // is a thing, and holding its proportion to the room it has is the whole point -- and wrong
-  // for a connector, whose thickness is meant to carry link weight, not zoom.
+  // for a connector, which is a relationship rather than a thing: nothing about a link gets
+  // stronger because the camera came closer. When this was written the argument was put as
+  // "thickness carries link weight, not zoom"; github#43 removed the weight ramp, and the
+  // argument survives it unchanged -- a constant width has even less business varying with
+  // the camera than a weighted one did.
   //
   // Measured on the 10k fixture against one hub of degree 55: strokes 1.70px at rest,
   // 3.94px five notches in, 7.87px at ten -- and 55 of those converging on a 20.44px dot is
@@ -8055,16 +8123,34 @@ function mountVaultGraph(root, data, deps) {
   // it. Reported exactly that way: the notes get buried by the links that join them
   // (github#39).
   //
-  // ONE MULTIPLIER FOR THE WHOLE WEB, not a per-edge min() against the cap. A min() flattens
-  // every link onto the same number the moment it binds -- all 55 at 4.00px, a 220px fan, and
-  // the weight ordering gone -- while a single k holds the ratios between weights at any zoom
-  // and lands only the heaviest link there can be on the cap. Below the knee it also makes
-  // size * k / ratio a CONSTANT, so the drawn web is invariant under zoom rather than merely
-  // bounded, which is what the invariant is able to check as an equality.
+  // ONE MULTIPLIER FOR THE WHOLE WEB, not a per-edge min() against the cap, and github#43
+  // did not cost that argument its subject -- it changed which two widths it is about. A
+  // min() flattens every link onto the same number the moment it binds, while a single k
+  // holds the RATIOS between the widths that exist at any zoom and lands only the widest one
+  // on the cap. Those used to be the weight ramp's steps; they are now the resting width and
+  // the lit width, whose 2.33:1 ratio is the whole reason a focused web reads as separate
+  // from the rest of the disc. Under a min() at ten notches in, a resting link (5.56px
+  // uncapped) and a lit one (12.96px) would both clamp to 4.00px and the lit web would stop
+  // standing out at exactly the zoom where you are studying one note's connections.
+  // Below the knee k also makes size * k / ratio a CONSTANT, so the drawn web is invariant
+  // under zoom rather than merely bounded, which is what the invariant checks as an equality
+  // -- and that equality still catches a min(), which would draw 2.78px at five notches and
+  // 4.00px at ten.
   //
-  // Above the knee -- ratio >= EDGE_SIZE_MAX / EDGE_MAX_PX, i.e. 0.4 -- k is 1 and nothing
+  // IS THE CAP STILL NEEDED NOW THAT WIDTH IS CONSTANT? Yes, and it is needed for the same
+  // reason as before: constant in SIZE is not constant in PIXELS, because the shader divides
+  // by the camera ratio. Uncapped at ten notches in, a resting link draws 5.56px and a lit
+  // one 12.96px on a 42.66px hub dot -- 55 lit links would be 713px of ink converging on it,
+  // which is the github#39 defect in full. What the cap MEANS has changed, though: it used to
+  // be a ceiling nothing reached (the widest size drawn was the reducer's 1.4 against a 1.6
+  // denominator, so the deep-zoom maximum was 3.50px), and with EDGE_SIZE_MAX now derived
+  // from the lit width the normalisation is exact -- a lit link at any zoom below the knee
+  // draws 4.00px, the cap, and a resting one draws 1.71px.
+  //
+  // Above the knee -- ratio >= EDGE_SIZE_MAX / EDGE_MAX_PX, i.e. 0.35 -- k is 1 and nothing
   // happens at all: no refresh, and not one pixel of the resting disc moves. The whole cost
-  // lives inside the zoom that needed the fix.
+  // lives inside the zoom that needed the fix. (The knee was 0.4 while the denominator was
+  // 1.6; 4px at ratio 0.35 is where a lit link first wants more than the cap allows.)
   var EDGE_MAX_PX = 4;    // the widest a link may ever draw
   var edgeMult = 1;       // what the edge reducer scales every size by; see syncEdgeMult
 
@@ -8223,10 +8309,14 @@ function mountVaultGraph(root, data, deps) {
       // sparse web still reads as individual strands and the 10k fog is gone. If a shape ever
       // breaks that, EDGE_RAMP_START / EDGE_FLOOR above is the precedent to follow.
       //
-      // NOT LOW ENOUGH TO SHOW LINK WEIGHT, which is a separate defect and stays one: the
-      // three weights that exist draw 0.556 / 0.787 / 1.019px at rest, so 1.0 still floors the
-      // first two, and 0.55 -- the value that would separate them -- is where the sparse web
-      // disappears. The two goals genuinely conflict through this one number.
+      // IT USED TO BE "NOT LOW ENOUGH TO SHOW LINK WEIGHT", and that conflict is settled
+      // rather than still open. The three weights that existed drew 0.556 / 0.787 / 1.019px at
+      // rest, so 1.0 floored the first two; 0.55 would have separated them and is exactly
+      // where the sparse web disappears, so the two goals genuinely conflicted through this
+      // one number. github#43 resolved it by deciding weight is not on this channel at all
+      // (see edgeAttrsOf), which leaves the floor with a single width to sit against instead
+      // of a range: every link asks for 0.556px at rest and is floored to 1.0px, an inflation
+      // of 1.80x for the whole web rather than for its median.
       minEdgeThickness: 1.0,
       defaultEdgeType: "line",
       // Both programs are registered up front so the toggle is a per-edge `type`
@@ -8317,10 +8407,14 @@ function mountVaultGraph(root, data, deps) {
         if (focus) {
           // In step with the nodes, off the same hoverT -- the web separating from the
           // rest is most of what makes a hover legible, so it cannot lag behind it.
+          // `base` is EDGE_SIZE for every link now that width is constant, so this ramps
+          // from one number to one number -- kept as a read of the attribute rather than
+          // folded into a constant because it is the reducer's job to start from whatever
+          // the edge actually carries, and github#43 left `size` an attribute on purpose.
           var ht = hoverAmount(), base = a.size || 1;
           if (focus[x[0]] && focus[x[1]]) {
             r.color = mixHex(THEME.edge, THEME.edgeHi, ht);
-            r.size = base + (1.4 - base) * ht;
+            r.size = base + (EDGE_SIZE_LIT - base) * ht;
             r.zIndex = 2;
           } else {
             r.color = mixHex(THEME.edge, THEME.dim, ht);
@@ -8331,7 +8425,8 @@ function mountVaultGraph(root, data, deps) {
         // draws itself in behind them rather than everything arriving at once.
         if (al < 0.999) r.color = withAlpha(r.color, al * al);
         // THE PIXEL CAP, APPLIED LAST, so it carries the hover branch's own size as well as
-        // the resting one -- a lit link is sized toward 1.4 above, and the cap then applies
+        // the resting one -- a lit link is sized toward EDGE_SIZE_LIT above, which is the one
+        // size on the disc the cap can actually bind on, and the cap then applies
         // to whatever that left rather than to the attribute it started from. See
         // syncEdgeMult: a no-op above the knee, which is where the camera normally is.
         return capEdge(r, a);

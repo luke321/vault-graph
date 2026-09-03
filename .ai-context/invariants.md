@@ -930,8 +930,11 @@ after**. See `design/0005`.
 Sigma's edge shader draws `max(minEdgeThickness, size / sizeRatio)`, and `sizeRatio` **is**
 the camera ratio here because `zoomToSizeRatioFunction` is identity — so a stroke grew as
 `1/ratio`, exactly like a dot. That law is right for a dot, which is a thing and should hold
-its proportion to the room it has, and wrong for a connector, whose thickness is meant to
-carry link weight rather than zoom (github#39).
+its proportion to the room it has, and wrong for a connector, which is a relationship rather
+than a thing — nothing about a link gets stronger because the camera came closer (github#39).
+The original wording here was "whose thickness is meant to carry link weight rather than
+zoom"; github#43 removed the weight ramp and the argument outlives it, since a constant width
+has even less business varying with the camera.
 
 ```javascript
 __vg.edgeReport(id)       // -> maxPx <= capPx, and identical at any ratio below the knee
@@ -945,9 +948,20 @@ reasonable beside the dot.
 **Assert the equality, not just the cap.** The fix scales the whole web by one multiplier
 (`edgeMult = min(1, EDGE_MAX_PX * ratio / EDGE_SIZE_MAX)`) rather than clamping each edge
 against the cap, which makes the drawn width *constant* below the knee at
-`EDGE_SIZE_MAX / EDGE_MAX_PX = 0.4`. A per-edge `min()` would still satisfy a cap-only check
-while flattening every link onto the same number — all 55 at 4.00px on the 10k hub, a 220px
-fan, weight ordering gone. That is the regression the equality catches.
+`EDGE_SIZE_MAX / EDGE_MAX_PX`. A per-edge `min()` would still satisfy a cap-only check while
+flattening every link onto the same number — all 55 at 4.00px on the 10k hub, a 220px fan,
+weight ordering gone. That is the regression the equality catches.
+
+**Since github#43 the knee is 0.35, and the equality still has teeth.** `EDGE_SIZE_MAX` is no
+longer the top of a weight ramp — it is derived from `EDGE_SIZE_LIT` (1.4), the widest size any
+edge hands the shader — so the knee moved from 0.4 to 0.35 and the normalisation became exact:
+a lit link below the knee draws **4.00px**, the cap itself, where before the widest thing on
+the disc was 3.50px against an unreachable 4px. There is no weight ordering left for a `min()`
+to flatten, but the ratio it would destroy is now the one between the **resting** width and
+the **lit** width (2.33:1) — under a `min()` at ten notches in, a resting link (5.56px
+uncapped) and a lit one (12.96px) both clamp to 4.00px and the lit web stops standing out at
+the exact zoom where you are studying one note. The equality catches it as before: a `min()`
+draws 2.78px at five notches and 4.00px at ten.
 
 **And read it with a search running.** `edgeReducer`'s query branch **returns early**. The
 first version of the fix applied the cap once before the final return, so every link went
@@ -979,6 +993,15 @@ ratio. See `design/0005`.
 1.70/93.50. Its assertions read `maxPx` and the 5x/10x equality, neither of which the floor
 touches, so it stayed green through that change.
 
+**And the deep-zoom numbers predate github#43**, which made width constant and moved the
+clamp's denominator from 1.6 to 1.4. Rest is untouched (1.0px, fan 55.0px, `edgeMult` 1, the
+resting web byte-identical), and below the knee every link now draws the same width instead of
+a 1.50–2.12px spread: **1.71px, fan 94.29px** at both 5x and 10x on the 10k hub, so the
+equality still holds at the tighter figure. The dominant-folder hub goes the other way, since
+it held the heavier links — 3.38px / 184.6px becomes **1.71px / 176.57px**. A *lit* link at
+either depth draws 4.00px, up from 3.50px, which is the cap finally being reached rather than
+approached.
+
 ## The floor may round a hairline up, not widen the whole web
 
 `minEdgeThickness` was never set, so it sat at sigma's default **1.7px** — while at rest every
@@ -998,10 +1021,13 @@ __vg.edgeInk()      // -> the web's own coverage, with no note or label mixed in
   restoring its default, and since the value was never set explicitly for the whole life of
   the file, nothing would have said so.
 - **The floor is at most 2x the median natural resting width.** This is *why* 1.0 rather than
-  some other smaller number, and it is what a later change to `edgeAttrsOf`'s `0.35 + 0.25w`
-  ramp would trip — make links thinner without revisiting the floor and the floor becomes
-  dominant again. Measured **1.80x** (1.79 on the demo shape) against sigma's default's
-  **3.06x**. The headroom is thin deliberately.
+  some other smaller number, and it is what a later change to `edgeAttrsOf`'s width would trip
+  — make links thinner without revisiting the floor and the floor becomes dominant again.
+  Measured **1.80x** (1.79 on the demo shape) against sigma's default's **3.06x**. The headroom
+  is thin deliberately. Since github#43 that width is the single constant `EDGE_SIZE` (0.60)
+  rather than the `0.35 + 0.25w` ramp, so the bound now covers the **whole** web instead of its
+  median: every link asks for 0.556px at rest and the measured inflation is unchanged at 1.80x
+  (1.78x on the dominant-folder shape, where the resting ratio is 1.07).
 
 **`edgeInk()` is context, not asserted** — a bigger web covers more of the stage, so the
 number belongs to its vault. Measured on the 10k fixture:
