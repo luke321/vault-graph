@@ -1188,8 +1188,8 @@ function mountVaultGraph(root, data, deps) {
   //
   // BUILT ON FIRST USE, not at this statement, because this statement is not reached first.
   // mountVaultGraph used to call a measureDotTyp near the top of its body (dead since #55's
-  // unused-value pass), which reached pitchUnits -- above every one of these
-  // declarations, and any early caller would again. The scalars this replaces survived that
+  // unused-value pass), which reached pitchUnits -- above every one of these declarations,
+  // and any early caller would again. The scalars this replaces survived that
   // by accident: `(lastSPI || 1)` reads undefined and carries on, where `BAND.i` on undefined
   // throws, so the page did not boot at all on the first attempt at this change.
   //
@@ -3712,8 +3712,9 @@ function mountVaultGraph(root, data, deps) {
           cellOf[sl.id] = c.k;
           // ONE WIDTH PER BAND, not one per row. Sizing each half of the channel from the
           // END NOTE OF THAT ROW is exact per note and wobbly per disc, because the drawn dot
-          // is the pitch-derived radius capped by dotFit, while the room reserved here was uncapped --
-          // so wherever dotFit bites, the channel keeps room for a dot that never arrives.
+          // is the pitch-derived radius capped by dotFit, while the room reserved here was the
+          // uncapped one -- so wherever dotFit bites, the channel keeps room for a dot that
+          // never arrives.
           // Measured on the demo vault, the room beyond a wedge's own step ran -6 to +28 units
           // on a 160 pitch, with the two sides of one boundary disagreeing by up to 22: gaps
           // that read as notes not reaching the seam, worst where the end notes are fattest.

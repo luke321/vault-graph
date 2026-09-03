@@ -53,7 +53,7 @@ code instead of measuring it.
 Four commands, and all four are gates rather than suggestions:
 
 ```bash
-npm run lint                   # typescript-eslint over our own code; the no-unsafe meter must not grow
+npm run lint                   # our own code under typescript-eslint; the budget may not grow
 node scripts/smoke.mjs         # 17 invariants, over two vault shapes
 node scripts/check-scope.mjs   # the page cannot style, or be styled by, its host
 node scripts/check-network.mjs # nothing shipped can make a network request
