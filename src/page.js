@@ -5962,6 +5962,7 @@ function mountVaultGraph(root, data, deps) {
   // it retargets opacities and the cascade walks them there, one note at a time.
   /** @type {Record<string, number>} */
   var alpha = dict();           // id -> 0..1, the source of truth
+  /** @param {string} id */
   function present(id) { return (alpha[id] || 0) > 0.004; }
   // Opacity is filter AND timeline: the cutoff needs no clause in visible(), it
   // simply holds later notes at zero, and every density decision downstream is
@@ -5974,7 +5975,9 @@ function mountVaultGraph(root, data, deps) {
   // Sigma's parseColor accepts rgba(r,g,b,a), but its channel regex is [0-9]*, so
   // the channels must be INTEGERS -- a CSS4 "rgb(0 0 0 / 50%)" silently fails to
   // parse and the node renders black. Hex in, integer rgba out.
-  var rgbCache = Object.create(null);
+  /** @type {Record<string, number[]>} */   // colour string -> [r, g, b]
+  var rgbCache = dict();
+  /** @param {string} hex a #rgb / #rrggbb hex, or an rgb()/rgba() string @returns {number[]} */
   function toRgb(hex) {
     var c = rgbCache[hex];
     if (c) return c;
@@ -5988,6 +5991,7 @@ function mountVaultGraph(root, data, deps) {
     }
     return (rgbCache[hex] = c);
   }
+  /** @param {string} color @param {number} a */
   function withAlpha(color, a) {
     if (a >= 0.999) return color;
     var c = toRgb(color);
@@ -6073,6 +6077,7 @@ function mountVaultGraph(root, data, deps) {
   var fullRing = false;
   /** @type {((id: string) => boolean) | null} */
   var planKeep = null;       // during a cascade: visible-or-still-on-screen
+  /** @type {{ raf: number, tick: number, guard: number } | null} */
   var cascadeRun = null;     // in-flight cascade
   /** @type {Plan | null} */
   var pinnedPlan = null;     // plan held still for the duration of one cascade
@@ -6123,7 +6128,8 @@ function mountVaultGraph(root, data, deps) {
   // Measured rather than derived because the spacing depends on the margins, the seam, the
   // wedge count and the presence weights at once, and every attempt in this file to predict
   // one of those from the others has been wrong at least once.
-  var dotFit = Object.create(null);
+  /** @type {Record<string, number>} */   // id -> room to its nearer row neighbour, at rest
+  var dotFit = dict();
   // The room a BAND has, one figure each, being the tightest pair in it. See dotPx: size has to
   // be a monotone function of link weight, so it cannot carry a per-note term.
   // Per note, its own cell's step. Bounds a dot where its folder is packed tighter than the
@@ -6198,6 +6204,7 @@ function mountVaultGraph(root, data, deps) {
    * radius neither endpoint has and was measured as a smeared disc. This is not that: both ends
    * are exact, and the smear is a note travelling between two places it genuinely belongs.
    */
+  /** @type {Record<string, Point> | null} */
   var posSrc = null;
   /** @type {Record<string, number>} */
   var cellRoom = dict();
@@ -6274,6 +6281,24 @@ function mountVaultGraph(root, data, deps) {
    *   totalMs   the whole cascade's wall-clock length, replacing CASCADE_MS
    *   onFrame   fn(progress) per frame, for a caller that has UI to keep in step
    */
+  /**
+   * What a caller may hand cascade(). Every field optional; the header comment on the
+   * function says what each does.
+   * @typedef {Object} CascadeOpts
+   * @property {boolean} [fullRing]
+   * @property {boolean} [colToggle]
+   * @property {Record<string, string>} [movesFrom]   id -> the group it is leaving
+   * @property {(id: string) => number} [order]       arrival rank; clockwise when absent
+   * @property {number} [spread]                      stagger window, frames
+   * @property {number} [totalMs]
+   * @property {(pr: number) => void} [onFrame]
+   */
+  /** A pair of per-id numbers to interpolate between, and the map the walk writes into. */
+  /** @typedef {{ ids: string[], a: number[], b: number[], out: Record<string, number> }} WalkPair */
+  /**
+   * @param {(() => void) | null} done
+   * @param {CascadeOpts} [opts]
+   */
   function cascade(done, opts) {
     opts = opts || {};
     stopPlay();                            // a filter change interrupts playback
@@ -6329,7 +6354,8 @@ function mountVaultGraph(root, data, deps) {
     // ringsLayout produces once the departing notes are gone, which is the definition settle()
     // was written against and never actually met.
     colWalk = null;   // the previous cascade's ramps die before the resting layouts below run
-    var keep = Object.create(null);
+    /** @type {Record<string, number>} */
+    var keep = dict();
     graph.forEachNode(function (id) { keep[id] = alpha[id] || 0; alpha[id] = visible(id) ? timeFactor(id) : 0; });
     var pinWas = pinnedPlan, keepWas = planKeep, roomWas = roomNow;
     pinnedPlan = null; planKeep = null; roomNow = null; cellNow = null; edgeNow = null;
@@ -6349,6 +6375,7 @@ function mountVaultGraph(root, data, deps) {
     // last frame. The second pass is the one that makes finalPos equal what a relayout produces,
     // so settle() assigns a state nothing can later disagree with.
     ringsLayout();
+    /** @type {Record<string, Point>} */
     var finalPos = ringsLayout() || {};
     // AUTO-FIT ON A VISIBILITY TOGGLE, ONLY WHILE THE CAMERA IS STILL WHERE fit() LEFT IT
     // (github#14). The second ringsLayout() above just recomputed the DESTINATION plan and,
@@ -6371,7 +6398,8 @@ function mountVaultGraph(root, data, deps) {
     }
     pinnedPlan = pinWas; planKeep = keepWas; roomNow = roomWas;
     graph.forEachNode(function (id) { alpha[id] = keep[id]; });
-    var sweepOf = Object.create(null);
+    /** @type {Record<string, number>} */
+    var sweepOf = dict();
     graph.forEachNode(function (id) {
       var q = finalPos[id];
       sweepOf[id] = q ? angleSweep(Math.atan2(q.y, q.x)) : 0;
@@ -6388,6 +6416,7 @@ function mountVaultGraph(root, data, deps) {
     // twice a fade's length per note -- and because the population is staggered, notes are
     // arriving in the new wedges while others are still leaving the old ones. That overlap is
     // the whole point: one flowing movement rather than the disc emptying and then refilling.
+    /** @type {string[]} */
     var moves = [];
     if (opts.movesFrom) {
       moveFrom = opts.movesFrom;
@@ -6399,10 +6428,18 @@ function mountVaultGraph(root, data, deps) {
     }
     // Kept separately from moveFrom, which empties as the notes cross. The frame loop still
     // has to know a crossed note is on a MOVE schedule and not an ordinary one-leg fade.
-    var isMove = Object.create(null);
+    /** @type {Record<string, boolean>} */
+    var isMove = dict();
     moves.forEach(function (id) { isMove[id] = true; });
 
-    var ins = [], outs = [], to = Object.create(null), from = Object.create(null);
+    /** @type {string[]} */
+    var ins = [];
+    /** @type {string[]} */
+    var outs = [];
+    /** @type {Record<string, number>} */   // id -> alpha it is going to
+    var to = dict();
+    /** @type {Record<string, number>} */   // id -> alpha it is coming from
+    var from = dict();
     graph.forEachNode(function (id) {
       // timeFactor, not 1: a note the timeline or the date range excludes must not be
       // revealed by a filter change somewhere else. See the note on `keep` above.
@@ -6437,24 +6474,27 @@ function mountVaultGraph(root, data, deps) {
 
     // Clockwise in BOTH directions -- notes leave in the same sweep they arrived
     // in, so the animation never runs backwards.
+    /** @param {string} a @param {string} b */
     var clockwise = function (a, b) { return sweepOf[a] - sweepOf[b]; };
     // The arrival order, which is the ONLY thing the timeline needs to do differently: it
     // reveals the vault by DATE, and everything else reveals it clockwise. Same cascade either
     // way, so the timeline gets the row walk, the room walk, the plan-derived gap presence and
     // a settle that assigns the plan -- none of which it had while it ran its own frame loop.
     var rank = typeof opts.order === "function" ? opts.order : null;
-    var arrival = rank ? function (a, b) { return rank(a) - rank(b); } : clockwise;
+    var arrival = rank ? /** @param {string} a @param {string} b */ function (a, b) { return rank(a) - rank(b); } : clockwise;
     ins.sort(arrival);
     outs.sort(arrival);
     // Same clockwise sweep. A move is a leave and an arrive, so sweeping them in the one
     // order the rest of the cascade uses keeps the whole thing turning the same way.
     moves.sort(arrival);
 
+    /** @param {number} n */
     var windowFor = function (n) {
       if (opts.spread > 0) return opts.spread;   // a caller with its own shape; see playTimeline
       return Math.max(SPREAD_MIN, Math.min(SPREAD_MAX, n * SPREAD_PER)) * TIME_SCALE;
     };
-    var delay = Object.create(null);
+    /** @type {Record<string, number>} */   // id -> frame its fade starts
+    var delay = dict();
     [ins, outs].forEach(function (set) {
       var w = windowFor(set.length);
       set.forEach(function (id, i) { delay[id] = set.length < 2 ? 0 : w * i / (set.length - 1); });
@@ -6475,7 +6515,10 @@ function mountVaultGraph(root, data, deps) {
     var span = Math.max(windowFor(ins.length), windowFor(outs.length))
              + FADE_FRAMES * TIME_SCALE;
     if (moveSpan > span) span = moveSpan;
-    var arriveAt = Object.create(null), crossAt = Object.create(null);
+    /** @type {Record<string, number>} */   // id -> frame it lands
+    var arriveAt = dict();
+    /** @type {Record<string, number>} */   // id -> frame it crosses between groups
+    var crossAt = dict();
     if (moves.length) (function () {
       var leaveW = span * 0.35;
       var landW = Math.max(1, span * 0.45 - FADE_FRAMES * TIME_SCALE);
@@ -6508,9 +6551,19 @@ function mountVaultGraph(root, data, deps) {
     // WHICH GROUPS GET THE ARC RAMP: fully toggled (every present note leaving, or every
     // arriving note entering an empty group), on a legend toggle only. The single-cell gate
     // is applied where the endpoint plans are in scope, below.
-    var tglDir = Object.create(null), tglN = Object.create(null), tglMv = Object.create(null);
+    /** @type {Record<string, string>} */   // group -> "in" | "out", when a whole group toggles
+    var tglDir = dict();
+    /** @type {Record<string, number>} */   // group -> how many notes toggle with it
+    var tglN = dict();
+    /** @type {Record<string, number>} */   // group -> 1 when the toggle is a move
+    var tglMv = dict();
     if (opts.colToggle) (function () {
-      var startN = Object.create(null), outN = Object.create(null), inN = Object.create(null);
+      /** @type {Record<string, number>} */
+      var startN = dict();
+      /** @type {Record<string, number>} */
+      var outN = dict();
+      /** @type {Record<string, number>} */
+      var inN = dict();
       graph.forEachNode(function (id) {
         if ((alpha[id] || 0) > 0.004) {
           var g0 = groupOf(id);
@@ -6526,7 +6579,10 @@ function mountVaultGraph(root, data, deps) {
       // made room. The source side is counted with moveFrom in force (the group each mover is
       // leaving), the destination side with it suspended, for the same reason the endpoint
       // packings are.
-      var mvOutN = Object.create(null), mvInN = Object.create(null);
+      /** @type {Record<string, number>} */
+      var mvOutN = dict();
+      /** @type {Record<string, number>} */
+      var mvInN = dict();
       moves.forEach(function (id) { var g0 = groupOf(id); outN[g0] = (outN[g0] || 0) + 1; mvOutN[g0] = 1; });
       (function () {
         var save = moveFrom;
@@ -6556,7 +6612,8 @@ function mountVaultGraph(root, data, deps) {
     // full-width, however long that leaves it invisible in between. Movers from partial
     // sources keep the vacate-before-arrive schedule.
     if (moves.length) (function () {
-      var byG = Object.create(null);
+      /** @type {Record<string, string[]>} */
+      var byG = dict();
       moves.forEach(function (id) {
         var g0 = moveFrom[id];
         if (tglDir[g0] === "out") (byG[g0] || (byG[g0] = [])).push(id);
@@ -6586,7 +6643,8 @@ function mountVaultGraph(root, data, deps) {
     if (moves.length) (function () {
       var save = moveFrom;
       moveFrom = null;
-      var byDest = Object.create(null);
+      /** @type {Record<string, string[]>} */
+      var byDest = dict();
       try {
         moves.forEach(function (id) {
           var g0 = groupOf(id);
@@ -6704,6 +6762,7 @@ function mountVaultGraph(root, data, deps) {
     // rows apart -- every note in 03 and 04 changed row, so mid-animation the
     // grid stopped being a grid. A packing derived from weights is a valid grid at
     // every value of those weights.
+    /** @param {string} id */
     var weightOf = function (id) { return alpha[id] || 0; };
 
     // Row counts at both ends of the move. The count is an integer and it ticks,
@@ -6712,7 +6771,8 @@ function mountVaultGraph(root, data, deps) {
     // 3191 units in a frame) it is walked from the source count to the
     // destination count by animation progress. At progress 0 that is exactly the
     // packing the notes are resting in; at 1, exactly the one settle() assigns.
-    var wasPresent = Object.create(null);
+    /** @type {Record<string, boolean>} */
+    var wasPresent = dict();
     graph.forEachNode(function (id) { wasPresent[id] = present(id); });
 
     // WHICH PLAN BASIS settle() will use, decided once, up front.
@@ -6737,21 +6797,42 @@ function mountVaultGraph(root, data, deps) {
     // The lattice spacing at each end of the toggle, per band for the same reason the layout
     // is: one number cannot carry two rings, and a ring whose spacing is interpolated from the
     // other ring's endpoints is a ring that moves when the other one is filtered.
-    var spSrcB = { i: 1, o: 1 }, spDstB = { i: 1, o: 1 };
+    /** @type {BandNum} */
+    var spSrcB = { i: 1, o: 1 };
+    /** @type {BandNum} */
+    var spDstB = { i: 1, o: 1 };
     // The two endpoint packings' band room, walked alongside their spacing. Zero means "this
     // packing had nothing in that band", and the walk below falls back to the other end rather
     // than interpolating toward an empty band.
-    var roomSrcB = { i: 0, o: 0 }, roomDstB = { i: 0, o: 0 };
+    /** @type {BandNum} */
+    var roomSrcB = { i: 0, o: 0 };
+    /** @type {BandNum} */
+    var roomDstB = { i: 0, o: 0 };
     // Declared HERE, not inside the endpoint-capture block below. `var` is function-scoped, so
     // declaring them in that block left the frame loop reading undeclared names -- a
     // ReferenceError on the first frame, which killed the whole animation rather than degrading
     // it. The two endpoint maps of per-cell room; see cellNow.
-    var cellSrc = null, cellDst = null;
-    var edgeSrc = null, edgeDst = null;
+    /** @type {Record<string, number> | null} */
+    var cellSrc = null;
+    /** @type {Record<string, number> | null} */
+    var cellDst = null;
+    /** @type {Record<string, number> | null} */
+    var edgeSrc = null;
+    /** @type {Record<string, number> | null} */
+    var edgeDst = null;
     // THE SAME TWO MAPS, FLATTENED ONCE (github#19). See pairUp, below the endpoint capture.
-    var cellPair = null, edgePair = null;
-    var rowsSrc = Object.create(null), rowsDst = Object.create(null);
-    var bandSrc = Object.create(null), bandDst = Object.create(null);
+    /** @type {WalkPair | null} */
+    var cellPair = null;
+    /** @type {WalkPair | null} */
+    var edgePair = null;
+    /** @type {Record<string, number>} */   // cell key -> rows, before
+    var rowsSrc = dict();
+    /** @type {Record<string, number>} */   // cell key -> rows, after
+    var rowsDst = dict();
+    /** @type {BandNum} */   // band -> deepest cell, before
+    var bandSrc = dict();
+    /** @type {BandNum} */   // band -> deepest cell, after
+    var bandDst = dict();
     // A group is PRESENT at an end if it has any seated weight there -- one wedge, one
     // gap, regardless of how many notes it keeps. The union of the two ends is walked.
     // ONE planner, called the same way at both ends.
@@ -6767,6 +6848,7 @@ function mountVaultGraph(root, data, deps) {
     // from it exactly as ringsLayout does at rest, so planA is what the disc was
     // resting in and planB is what settle() will assign, by construction rather than
     // by coincidence.
+    /** @param {(id: string) => boolean} presentFn */
     var staticPlan = function (presentFn) {
       var save = planKeep;
       planKeep = presentFn;
@@ -6779,8 +6861,10 @@ function mountVaultGraph(root, data, deps) {
       var a = staticPlan(function (id) { return wasPresent[id]; });
       // The single-cell gate: a group splitting into sub-wedges is out of scope, judged on the
       // populated end's plan (the source for a hide, the destination for a show).
+      /** @param {Plan | null} p0 */
       var cellsOfG = function (p0) {
-        var m = Object.create(null);
+        /** @type {Record<string, number>} */
+        var m = dict();
         if (p0) p0.cells.forEach(function (c) { m[c.g] = (m[c.g] || 0) + 1; });
         return m;
       };
@@ -6802,7 +6886,7 @@ function mountVaultGraph(root, data, deps) {
       // membership toggle is where the mid-walk split flip re-keys every cell of a group
       // and teleports it whole, so that is where the freeze applies.
       if (moves.length) {
-        splitHold = Object.create(null);
+        splitHold = dict();
         Object.keys(bCells).forEach(function (g0) { splitHold[g0] = bCells[g0] > 1; });
         Object.keys(aCells).forEach(function (g0) {
           if (splitHold[g0] === undefined) splitHold[g0] = aCells[g0] > 1;
@@ -6817,6 +6901,7 @@ function mountVaultGraph(root, data, deps) {
       // this instead of its own missing count, so it matches the ring rather than
       // running its own race. Keyed by band, because the two are packed
       // independently and their depths are unrelated.
+      /** @param {BandNum} m @param {Cell} c */
       var deepen = function (m, c) {
         var k = c.inner ? "i" : "o";
         if (m[k] === undefined || c.rows > m[k]) m[k] = c.rows;
@@ -6829,7 +6914,9 @@ function mountVaultGraph(root, data, deps) {
       // recorded, that walks the leaving wedge from 7 rows to 1 while the ring holds,
       // which is the "contracts faster than the ring, reads as sinking out of the disc"
       // failure this fallback was added to fix. Skipping it restores that.
+      /** @param {Record<string, number>} rows @param {BandNum} band */
       var record = function (rows, band) {
+        /** @param {Cell} c */
         return function (c) {
           if (c.wsum <= 0.0001) return;
           rows[c.k] = c.rows;
@@ -6885,12 +6972,15 @@ function mountVaultGraph(root, data, deps) {
       //
       // playTimeline already does this dance for its own final positions -- swap the alphas in,
       // lay out, swap them back -- and this is the same need.
+      /** @param {Plan | null} pl @param {((id: string) => number) | null} alphaFn */
       var roomOf = function (pl, alphaFn) {
         if (!pl) return null;
+        /** @type {Record<string, Point> | null} */
         var outPos = null;
+        /** @type {Record<string, number> | null} */
         var keepAlpha = null;
         if (alphaFn) {
-          keepAlpha = Object.create(null);
+          keepAlpha = dict();
           graph.forEachNode(function (id) { keepAlpha[id] = alpha[id]; alpha[id] = alphaFn(id); });
         }
         var keepI = bandOf("i").room, keepO = bandOf("o").room;
@@ -6939,9 +7029,22 @@ function mountVaultGraph(root, data, deps) {
       // constant across the cascade: every frame overwrites every key it wrote last frame, and
       // the only reader (`cellRoom` / `edgeCap`, taken in ringsLayout) reads it within the same
       // frame and never keeps it past settle, which nulls cellNow/edgeNow outright.
+      /**
+       * @param {Record<string, number> | null} src
+       * @param {Record<string, number> | null} dst
+       * @returns {WalkPair | null}
+       */
       var pairUp = function (src, dst) {
         if (!src && !dst) return null;
-        var ids = [], av = [], bv = [], seen = Object.create(null);
+        /** @type {string[]} */
+        var ids = [];
+        /** @type {number[]} */
+        var av = [];
+        /** @type {number[]} */
+        var bv = [];
+        /** @type {Record<string, number>} */
+        var seen = dict();
+        /** @param {string} id */
         var take = function (id) {
           if (seen[id] !== undefined) return;
           var x = src ? src[id] : undefined, y = dst ? dst[id] : undefined;
@@ -6952,7 +7055,7 @@ function mountVaultGraph(root, data, deps) {
         };
         if (src) Object.keys(src).forEach(take);
         if (dst) Object.keys(dst).forEach(take);
-        return { ids: ids, a: av, b: bv, out: Object.create(null) };
+        return { ids: ids, a: av, b: bv, out: dict() };
       };
       cellPair = pairUp(cellSrc, cellDst);
       edgePair = pairUp(edgeSrc, edgeDst);
@@ -6960,7 +7063,7 @@ function mountVaultGraph(root, data, deps) {
       // rather than reconstructed from planA: the disc on screen is the truth about where a note
       // is starting from, and a packing built to describe it can only ever be an approximation
       // of it -- which is where the jump at the START of an animation came from.
-      posSrc = Object.create(null);
+      posSrc = dict();
       graph.forEachNode(function (id) {
         posSrc[id] = { x: graph.getNodeAttribute(id, "x"), y: graph.getNodeAttribute(id, "y") };
       });
@@ -7094,6 +7197,7 @@ function mountVaultGraph(root, data, deps) {
       });
     })();
 
+      /** @param {Cell} c */
       var rowsAt = function (c) {
         var s = rowsSrc[c.k], d = rowsDst[c.k];
         if (s === undefined && d === undefined) return 0;   // cell knows best
@@ -7116,6 +7220,7 @@ function mountVaultGraph(root, data, deps) {
       };
       // Same clock as the rows and the gap reservation above: at ease 0 this is the
       // packing the disc is resting in and at 1 it is the one settle() assigns.
+      /** @param {string} k */
       var roomWalk = function (k) {
         var sv = roomSrcB[k], dv = roomDstB[k];
         if (!(sv > 1)) return dv;          // band was empty at this end
@@ -7126,6 +7231,7 @@ function mountVaultGraph(root, data, deps) {
       // same endpoints the per-cell row count uses. A band missing from one end takes the other
       // end's depth rather than interpolating toward nothing, which is the rule bandSrc already
       // follows.
+      /** @param {string} k */
       var depthWalk = function (k) {
         var a2 = bandSrc[k], b2 = bandDst[k];
         if (a2 === undefined && b2 === undefined) return 0;
@@ -7155,6 +7261,7 @@ function mountVaultGraph(root, data, deps) {
       // avoids reproducing depthOfBand's INNER_SCALE/base arithmetic at a second site where it
       // could drift. Walking T between them keeps the fix exact at both ends even in the cases
       // where the two do not quite agree.
+      /** @param {string} k */
       var thickAt = function (k) {
         var ds = bandSrc[k], dd = bandDst[k];
         if (ds === undefined && dd === undefined) return 0;
@@ -7165,6 +7272,7 @@ function mountVaultGraph(root, data, deps) {
       };
       // A band with no depth or no thickness at either end has no product to conserve, and the
       // straight interpolation is both the only answer left and what the endpoints agree on.
+      /** @param {string} k */
       var spWalk = function (k) {
         var rows = depthWalk(k), T = thickAt(k);
         if (!(rows > 0) || !(T > 0)) return spSrcB[k] + (spDstB[k] - spSrcB[k]) * ease;
@@ -7179,7 +7287,7 @@ function mountVaultGraph(root, data, deps) {
       // before the plan is built so the margins inside this frame's layout read it.
       roomNow = { i: roomWalk("i"), o: roomWalk("o") };
       // The arc ramps, on the same clock as everything else the frame walks.
-      colWalk = Object.create(null);
+      colWalk = dict();
       Object.keys(tglDir).forEach(function (g0) {
         // pr, not ease: ease is the smoothstep the NOTES ride, and an arc linear in ease is
         // S-shaped in time -- measured as a symmetric +-1.2 degree residual on an 11.9-degree
@@ -7209,6 +7317,7 @@ function mountVaultGraph(root, data, deps) {
       // which is the same fallback the band walk uses for an empty band.
       // One multiply and one add per note, into an object built once -- see pairUp for what
       // used to stand here and why moving it out cannot change a number.
+      /** @param {WalkPair | null} p */
       var walkPair = function (p) {
         if (!p) return null;
         var ids = p.ids, av = p.a, bv = p.b, out = p.out;
@@ -7443,7 +7552,10 @@ function mountVaultGraph(root, data, deps) {
     });
   }
 
-  var anim = null, animGuard = null;   // in-flight tween + its force-complete timer
+  /** @type {number | null} */
+  var anim = null;        // in-flight tween's animation frame
+  /** @type {number | null} */
+  var animGuard = null;   // its force-complete timer
 
   /**
    * Write positions for the whole vault WITHOUT SIGMA WATCHING OVER OUR SHOULDER (github#19).
