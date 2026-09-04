@@ -1,0 +1,21 @@
+{
+  // THE COMPILER'S CHECK ON THE ENGINE (github#58). `tsc --noEmit -p tsconfig.engine.json`,
+  // run by scripts/lint.mjs ahead of eslint, so a type error in src/engine fails the same
+  // gate a lint finding does and the pre-push hook and release.ps1 inherit it through
+  // `npm run lint`.
+  //
+  // A SECOND CONFIG BECAUSE strict CANNOT BE PER-FILE. The engine is written to `strict`, and
+  // the shared program in tsconfig.json cannot carry it: measured 2026-09-04, strict there put
+  // 29 errors on src/page.js (strictNullChecks on `getAttribute()` results) that belong to
+  // github#55's ratchet, and esbuild -- which reads tsconfig.json's `strict` -- injected three
+  // "use strict" directives into main.js. esbuild does not read this file: it looks for
+  // tsconfig.json by name, so nothing set here reaches a bundle.
+  //
+  // include is the engine alone. The engine imports nothing from the page or the plugin, so
+  // the program is small and the check takes well under a second.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "strict": true
+  },
+  "include": ["src/engine/**/*.ts"]
+}

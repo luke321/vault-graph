@@ -2,19 +2,22 @@
   "name": "vault-graph",
   "version": "0.0.0",
   "private": true,
-  "description": "Build tooling for the Vault Graph Obsidian plugin. The HTML exporter in src/ stays node-builtins-only and needs none of this.",
+  "description": "Build tooling for the Vault Graph Obsidian plugin and its HTML exporter. Both bundle the TypeScript engine under src/engine with esbuild; the exporter needs nothing else here.",
   "scripts": {
     "build": "node scripts/build-plugin.mjs",
     "dev": "node scripts/build-plugin.mjs --watch",
-    "lint": "node scripts/lint.mjs"
+    "lint": "node scripts/lint.mjs",
+    "typecheck": "tsc --noEmit -p tsconfig.engine.json"
   },
   "devDependencies": {
-    "esbuild": "^0.21.5",
     "eslint": "^9.9.0",
     "eslint-plugin-obsidianmd": "^0.4.1",
     "globals": "^14.0.0",
     "obsidian": "^1.12.3",
     "typescript": "^5.4.5",
     "typescript-eslint": "^8.67.0"
+  },
+  "dependencies": {
+    "esbuild": "^0.21.5"
   }
 }

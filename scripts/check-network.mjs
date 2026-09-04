@@ -10,21 +10,21 @@
 // counts network calls in the shipped main.js and reports the number to users, which is
 // how we found out we were shipping two (github#1).
 //
-// Those two were Sigma's, unreachable, and are stripped at build time by src/vendor.mjs.
-// This check is the gate that keeps the answer at zero, from three directions:
+// Those two were Sigma's, unreachable, and were stripped at build time by src/vendor.mjs for
+// as long as Sigma was vendored. Since github#58 the renderer is our own code and there is
+// nothing to strip: "zero network calls" is a property of what we wrote, and this check is
+// the gate that keeps the answer at zero, from two directions:
 //
-//   1. our own sources, which should never contain a request in the first place
-//   2. the vendored bundles AFTER stripping -- and readVendorSource fails loudly if the
-//      number of calls in a bundle is not the number we have read and accounted for
-//   3. the built artifacts, if they are lying around, because those are what people run
+//   1. our own sources, which should never contain a request in the first place -- the
+//      plugin, the page, the engine, the markup and the stylesheets
+//   2. the built artifacts, if they are lying around, because those are what people run
 //
 // It is STATIC and takes milliseconds: no build, no browser. That is what makes it cheap
 // enough to run on every push with no skip flag.
 
-import { readFileSync, existsSync } from "node:fs";
+import { readFileSync, readdirSync, existsSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { EXPECTED_FETCHES, findNetworkPrimitives, readVendorSource } from "../src/vendor.mjs";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -34,6 +34,10 @@ const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const OURS = [
   "plugin/main.js",   // the plugin entry point
   "src/page.js",      // the page, bundled into main.js and inlined into the HTML
+  // The engine (github#58): every .ts under src/engine, bundled into both artifacts. Listed
+  // by reading the directory so a file added there is checked without anyone remembering.
+  ...readdirSync(join(ROOT, "src", "engine")).filter((f) => f.endsWith(".ts")).sort()
+    .map((f) => "src/engine/" + f),
   "src/page.html",
   "src/shell.html",
   "src/page.css",
@@ -43,6 +47,35 @@ const OURS = [
 // Built output. Gitignored, so present only after a build -- checked when it is there,
 // since it is the file a user actually runs and the file the directory's review reads.
 const BUILT = ["main.js", "styles.css"];
+
+// A bare `fetch(` -- not `.fetch(`, which would be a method on somebody's object and none
+// of our business.
+const FETCH_CALL = /(^|[^.\w$])fetch\s*\(/g;
+
+/* Everything that would make a request. Names, not call shapes, so a check over the
+ * shipped bundle catches an assignment or an alias as well as a direct call. */
+export const NETWORK_PRIMITIVES = [
+  ["fetch(", FETCH_CALL],
+  ["XMLHttpRequest", /\bXMLHttpRequest\b/g],
+  ["WebSocket", /\bWebSocket\b/g],
+  ["EventSource", /\bEventSource\b/g],
+  ["sendBeacon", /\bsendBeacon\b/g],
+  ["importScripts", /\bimportScripts\b/g],
+  // Obsidian's own HTTP helper. Nothing here should reach for it either, and it is the one
+  // a reader of the plugin API would think to use.
+  ["requestUrl", /\brequestUrl\b/g],
+];
+
+/** Every network primitive in `text`, as `[{ name, count }]`. Empty is the good answer. */
+export function findNetworkPrimitives(text) {
+  const hits = [];
+  for (const [name, re] of NETWORK_PRIMITIVES) {
+    re.lastIndex = 0;
+    const count = (text.match(re) || []).length;
+    if (count) hits.push({ name, count });
+  }
+  return hits;
+}
 
 // A remote resource is a request too, and a quieter one: no JS anywhere in the file, just
 // a font or a script that only loads when someone is online and is logged by whoever
@@ -74,13 +107,7 @@ function scan(label, text) {
 
 for (const f of OURS) scan(f, readFileSync(join(ROOT, f), "utf8"));
 
-/* ---- 2. vendor, as it is shipped ---------------------------------------- */
-
-// readVendorSource throws rather than returning problems: a bundle whose call count has
-// moved is not a lint failure, it is a thing to go and read. Let it stop the run.
-for (const f of Object.keys(EXPECTED_FETCHES)) scan("vendor/" + f + " (stripped)", readVendorSource(ROOT, f));
-
-/* ---- 3. what a build produced ------------------------------------------- */
+/* ---- 2. what a build produced ------------------------------------------- */
 
 let built = 0;
 for (const f of BUILT) {
@@ -106,7 +133,7 @@ Both artifacts are offline objects: one HTML file that works off a USB stick, an
 that reads a private vault. A request here is a promise broken, and the directory's review
 counts them and tells users the number.
 
-If a request is genuinely needed, it has to be DISCLOSED, not hidden: say so in the README
-and the manifest description before adding it here. If it came in with a vendored bundle,
-read what it does and account for it in src/vendor.mjs.`);
+Remove the call. If it is genuinely needed, it has to be disclosed to users -- see
+.ai-context/decisions/0008-zero-network-calls.md -- not hidden from this check.
+`);
 process.exit(1);

@@ -53,7 +53,7 @@ code instead of measuring it.
 Four commands, and all four are gates rather than suggestions:
 
 ```bash
-npm run lint                   # our own code under typescript-eslint; every finding is held at zero
+npm run lint                   # tsc --noEmit on the engine, then typescript-eslint on our own code; every finding is held at zero
 node scripts/smoke.mjs         # 17 invariants, over two vault shapes
 node scripts/check-scope.mjs   # the page cannot style, or be styled by, its host
 node scripts/check-network.mjs # nothing shipped can make a network request
@@ -76,6 +76,13 @@ The second one writes a probe note into the vault you point it at and deletes it
 point it at a generated vault. It is the only harness that covers the whole round trip —
 write a file, Obsidian notices, rebuild, remount, the note is on the disc — which is what
 `Refresh doesn't seem to pick up new files` turned out to be about.
+
+One more if you touch the renderer (`src/engine/`): the suite asserts numbers, and none of
+them can see a disc in the wrong colour. `node scripts/render-diff.mjs --against-dir <dir>`
+compares the current build of every fixture, pixel by pixel and node by node, against
+reference builds of the same vaults made from the commit you are holding the picture to. The
+bar and how to make the references are in `.ai-context/invariants.md` ("The engine draws
+Sigma's picture").
 
 Since Obsidian 1.7.2 a tab restored in the background is **deferred**: the leaf is real and
 `getLeavesOfType` finds it, but `leaf.view` is a placeholder until something reveals it. Both

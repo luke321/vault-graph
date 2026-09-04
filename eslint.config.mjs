@@ -4,8 +4,10 @@
 // later, not a style opinion -- and its review of 1.9.0 showed 77 findings where this run
 // showed 28, because it also runs the five no-unsafe-* rules the preset ships off (github#55).
 //
-// The recommended preset is aimed at TypeScript plugins. This one is plain JavaScript --
-// deliberately, so the plugin has no compile step beyond bundling. That used to be read as
+// The recommended preset is aimed at TypeScript plugins. The plugin and the page are plain
+// JavaScript -- deliberately, so there is no compile step beyond bundling; the engine under
+// src/engine is TypeScript (github#58), which esbuild compiles as part of that same bundling.
+// "Plain JavaScript" used to be read as
 // "so the type-aware rules cannot run", and it is not so: typescript-eslint builds a program
 // from tsconfig.json (allowJs) and the type-aware rules read it whether a file says .ts or
 // .js, which is exactly how the directory runs them on our .js. What the preset's own `files`
@@ -14,8 +16,8 @@
 // THREE SCOPES. The plugin and the page run inside Obsidian, so every guideline rule and the
 // type-aware set apply to them. The exporter (src/*.mjs) and scripts/ are Node programs that
 // never run inside Obsidian, so Obsidian's rules say nothing about them and are off there;
-// the syntax rules and no-unused-vars still run. vendor/ is third-party and ignored -- the
-// directory scans it too, and its findings are github#58's, not ours to fix.
+// the syntax rules and no-unused-vars still run. (vendor/ was a fourth, ignored scope until
+// github#58 replaced the two bundles it held with the engine.)
 
 import obsidianmd from "eslint-plugin-obsidianmd";
 import globals from "globals";
@@ -45,8 +47,11 @@ const OBSIDIAN_OFF = Object.fromEntries(
 export default defineConfig([
   ...obsidianmd.configs.recommended,
   {
-    // THE PLUGIN AND THE PAGE: what actually runs inside Obsidian.
-    files: ["plugin/**/*.js", "src/page.js"],
+    // THE PLUGIN, THE PAGE AND THE ENGINE: what actually runs inside Obsidian. The engine
+    // (src/engine, github#58) is the one TypeScript here, and listing it in this block is
+    // what puts the five no-unsafe-* errors and no-unsupported-api on it; the preset's own
+    // `**/*.ts`-scoped rules reach it on their own.
+    files: ["plugin/**/*.js", "src/page.js", "src/engine/**/*.ts"],
     rules: {
       // THE PRESET SCOPES THIS RULE TO `**/*.{ts,cts,mts,tsx}`, so on a plain-JavaScript
       // plugin it silently never runs -- and the directory's scanner runs it anyway. That
@@ -124,11 +129,22 @@ export default defineConfig([
     },
   },
   {
+    // THE ENGINE IS HOST-AGNOSTIC: the same src/engine code draws inside Obsidian and inside the
+    // standalone page opened off a disk, where Obsidian's DOM helpers (createEl, setCssProps) do
+    // not exist. So the one preset rule that asks for them is off here, with this as the reason;
+    // everything else in the Obsidian block above still applies to it. Static styles are not
+    // set from the engine at all -- page.css positions its layers -- so that rule stays on.
+    files: ["src/engine/**/*.ts"],
+    rules: {
+      "obsidianmd/prefer-create-el": "off",
+    },
+  },
+  {
     // plugin/**/*.d.ts: declarations for the type program (the bundler's `raw:`/`b64:`
     // modules), not code -- there is nothing in one for a rule to say, and the preset's
     // `**/*.ts` scoping would otherwise run its type-aware rules on it with no
     // parserOptions and abort the whole run. tsconfig.json names them; this file need not.
-    ignores: ["node_modules/**", "vendor/**", "dist/**", "test-vault/**", "demo-vault/**",
+    ignores: ["node_modules/**", "dist/**", "test-vault/**", "demo-vault/**",
               ".fixtures/**", "scripts/layout-snapshots/**", "plugin/**/*.d.ts"],
   },
 ]);

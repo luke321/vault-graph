@@ -7,9 +7,10 @@
  *       class="vault-graph", since every rule in page.css is scoped under it and every
  *       custom property is declared on it.
  * data  what build-graph.mjs or the plugin's adapter produced.
- * deps  { Graph, Sigma, rendering, logoMask } -- INJECTED rather than read off `window`,
- *       because in a plugin the libraries are bundled module imports and never become
- *       globals at all. The standalone page passes its UMD globals in; see shell.html.
+ * deps  { Graph, Renderer, logoMask } -- INJECTED rather than read off `window`, because in
+ *       a plugin the engine (src/engine, github#58) is a bundled module import and never
+ *       becomes a global at all. The standalone page reads the same two constructors off the
+ *       `VaultGraphEngine` global its build inlines; see shell.html.
  *
  *       Also, optionally:
  *         folderColors      { "<folder>": "g7" } -- the saved per-folder palette slots.
@@ -61,10 +62,10 @@
  * `import("../src/page.js").X`. Typedefs live at module scope for that reason: one declared
  * inside mountVaultGraph would be local to it.
  *
- * GRAPHOLOGY AND SIGMA ARE TYPED STRUCTURALLY, as exactly the members this file calls and
- * nothing more. Both are vendored bundles with no typings (vendor/NOTICE.md), and github#58
- * replaces them with code of our own -- which can implement these same interfaces. Anything
- * a future caller needs that is not named here shows up on the meter, which is the point.
+ * THE STORE AND THE RENDERER ARE TYPED AS EXACTLY THE MEMBERS THIS FILE CALLS and nothing
+ * more -- the interfaces in src/engine/types.ts, which github#58 measured off the two vendored
+ * bundles (graphology, Sigma) before replacing both with the engine under src/engine. Anything
+ * a future caller needs that is not named there shows up on the meter, which is the point.
  */
 
 /**
@@ -113,156 +114,48 @@
  */
 
 /**
- * The attributes this file puts on every graph node at addNode, and reads back.
- * @typedef {Object} NodeAttrs
- * @property {string} label
- * @property {number} x
- * @property {number} y
- * @property {number} size
- * @property {string} folder
- * @property {string} sub
- * @property {string[]} dirs
- * @property {string} ntype
- * @property {string[]} tags
- * @property {string} path
- * @property {number} deg
- * @property {string} created
- * @property {string} touched
- * @property {number} words
- * @property {boolean} ghost
- */
-
-/** @typedef {{ weight: number, size: number }} EdgeAttrs */
-
-/** A listener as graphology hands it back from rawListeners and takes it for on(). */
-/** @typedef {(...args: unknown[]) => void} GraphListener */
-
-/**
- * The graphology surface this file uses -- an undirected graph keyed by node id.
- * @typedef {Object} GraphLike
- * @property {number} order
- * @property {number} size
- * @property {(id: string, attrs: NodeAttrs) => string} addNode
- * @property {(a: string, b: string, attrs?: EdgeAttrs) => string} addUndirectedEdge
- * @property {(id: string) => boolean} hasNode
- * @property {(a: string, b: string) => boolean} hasEdge
- * @property {(e: string) => void} dropEdge
- * @property {(e: string) => [string, string]} extremities
- * @property {(id: string) => number} degree
- * @property {(id: string) => string[]} neighbors
- * @property {() => string[]} nodes
- * @property {(fn: (id: string, attrs: NodeAttrs) => void) => void} forEachNode
- * @property {{ (fn: (e: string, attrs: EdgeAttrs, s: string, t: string) => void): void,
- *              (id: string, fn: (e: string, attrs: EdgeAttrs, s: string, t: string) => void): void }} forEachEdge
- * @property {<K extends keyof NodeAttrs>(id: string, name: K) => NodeAttrs[K]} getNodeAttribute
- * @property {(id: string) => NodeAttrs} getNodeAttributes
- * @property {<K extends keyof NodeAttrs>(id: string, name: K, value: NodeAttrs[K]) => void} setNodeAttribute
- * @property {(id: string, attrs: Partial<NodeAttrs>) => void} mergeNodeAttributes
- * @property {(event: string, fn: GraphListener) => void} on
- * @property {(event: string, fn: GraphListener) => void} removeListener
- * @property {(event: string) => GraphListener[]} rawListeners
- */
-
-/** @typedef {new (opts?: { type?: string }) => GraphLike} GraphCtor */
-
-/** @typedef {{ x: number, y: number }} Point */
-
-/** @typedef {{ x: number, y: number, ratio: number, angle: number }} CameraState */
-
-/**
- * @typedef {Object} CameraLike
- * @property {number} x
- * @property {number} y
- * @property {number} ratio
- * @property {() => CameraState} getState
- * @property {(to: Partial<CameraState>, opts?: { duration?: number }, done?: () => void) => void} animate
- * @property {(event: string, fn: () => void) => void} on
+ * The attributes this file puts on every graph node at addNode, and reads back. Declared in
+ * src/engine/types.ts since github#58 -- the store and the renderer are checked against the
+ * same declaration this file is -- and imported here as TYPES ONLY: the exporter still pastes
+ * this file as text, and a JSDoc import is a comment to it.
+ * @typedef {import("./engine/types").NodeAttrs} NodeAttrs
+ * @typedef {import("./engine/types").EdgeAttrs} EdgeAttrs
  */
 
 /**
- * What sigma's reducers return and getNodeDisplayData reads back: our attributes plus
- * sigma's own display fields.
- * @typedef {Object} NodeDisplayData
- * @property {number} x
- * @property {number} y
- * @property {number} size
- * @property {string} color
- * @property {string | null} label
- * @property {boolean} hidden
- * @property {boolean} [highlighted]
- * @property {boolean} [forceLabel]
- * @property {number} [zIndex]
- * @property {string} [type]
+ * The graph store: a keyed attribute bag with degree, ours since github#58 (src/engine/store.ts).
+ * It has no event surface -- graphology's listener trio was used here for one thing, silencing
+ * Sigma's subscription to the graph during bulk position writes, and both went together.
+ * @typedef {import("./engine/types").GraphStore} GraphLike
+ * @typedef {import("./engine/types").GraphStoreCtor} GraphCtor
  */
 
-/**
- * @typedef {Object} EdgeDisplayData
- * @property {number} size
- * @property {string} color
- * @property {boolean} hidden
- * @property {string} [type]
- * @property {number} [curvature]
- * @property {string | null} [label]
- */
-
-/** The sigma settings this file reads or writes after construction. */
-/**
- * @typedef {Object} SigmaSettings
- * @property {number} minCameraRatio
- * @property {number} maxCameraRatio
- * @property {number} minEdgeThickness
- * @property {number} zoomDuration
- * @property {number} zoomingRatio
- * @property {boolean} enableCameraPanning
- */
-
-/** The mouse payload sigma passes to node and stage events. */
-/** @typedef {{ x: number, y: number, original: MouseEvent, preventSigmaDefault: () => void }} SigmaMouseEvent */
+/** @typedef {import("./engine/types").Point} Point */
+/** @typedef {import("./engine/types").CameraState} CameraState */
+/** @typedef {import("./engine/types").Camera} CameraLike */
+/** What the node style function returns and getNodeDisplayData reads back. */
+/** @typedef {import("./engine/types").NodeDisplayData} NodeDisplayData */
+/** @typedef {import("./engine/types").EdgeDisplayData} EdgeDisplayData */
+/** The settings this file reads or writes after construction, and the ones drawHover reads. */
+/** @typedef {import("./engine/types").RendererSettings} RendererSettings */
+/** The mouse payload the renderer passes to node and stage events. */
+/** @typedef {import("./engine/types").MouseCoords} MouseCoords */
 /** Node events carry `node`; stage events (clickStage, doubleClickStage) and afterRender do not. */
-/** @typedef {{ node?: string, event: SigmaMouseEvent, preventSigmaDefault?: () => void }} SigmaNodeEvent */
-
-/**
- * The sigma renderer surface this file uses.
- * @typedef {Object} SigmaLike
- * @property {(opts?: { partialGraph?: { nodes?: string[], edges?: string[] }, skipIndexation?: boolean, schedule?: boolean }) => void} refresh
- * @property {() => void} render
- * @property {() => void} kill
- * @property {(p: Point) => Point} graphToViewport
- * @property {(p: Point) => Point} viewportToGraph
- * @property {() => CameraLike} getCamera
- * @property {(size: number) => number} scaleSize
- * @property {(id: string) => NodeDisplayData | undefined} getNodeDisplayData
- * @property {(e: string) => EdgeDisplayData | undefined} getEdgeDisplayData
- * @property {<K extends keyof SigmaSettings>(name: K) => SigmaSettings[K]} getSetting
- * @property {<K extends keyof SigmaSettings>(name: K, value: SigmaSettings[K]) => void} setSetting
- * @property {() => Record<string, HTMLCanvasElement>} getCanvases
- * @property {() => { width: number, height: number }} getDimensions
- * @property {() => { on: (event: string, fn: (e: SigmaMouseEvent) => void) => void }} [getMouseCaptor]
- * @property {(bbox: { x: [number, number], y: [number, number] } | null) => void} setCustomBBox
- * @property {(event: string, fn: (e: SigmaNodeEvent) => void) => void} on
- */
-
-/** @typedef {new (graph: GraphLike, container: HTMLElement, settings: Record<string, unknown>) => SigmaLike} SigmaCtor */
-
-/**
- * `Sigma.rendering` off the UMD namespace: the two programs this file may register. Both
- * optional -- an older bundle without them gets straight edges and no halo.
- * @typedef {Object} RenderingLike
- * @property {(opts: Record<string, unknown>) => unknown} [createNodeBorderProgram]
- * @property {unknown} [EdgeCurveProgram]
- */
+/** @typedef {{ node?: string, event: MouseCoords, preventDefault?: () => void }} RendererEvent */
+/** The renderer surface this file uses: the engine's (src/engine/renderer.ts, github#58). */
+/** @typedef {import("./engine/types").Renderer} RendererLike */
+/** @typedef {import("./engine/types").RendererCtor} RendererCtor */
 
 /** A slot map as the host stores it: folder (or "folder/sub") -> "g1".."g12". */
 /** @typedef {Record<string, string>} SlotMap */
 
 /**
  * What mountVaultGraph is handed as `deps`. The header comment above says what each one is
- * for; this is the shape. Two constructors and the rendering namespace are required, the
- * rest is optional and absent means the documented default.
+ * for; this is the shape. Two constructors are required, the rest is optional and absent
+ * means the documented default.
  * @typedef {Object} MountDeps
  * @property {GraphCtor} Graph
- * @property {SigmaCtor} Sigma
- * @property {RenderingLike} [rendering]
+ * @property {RendererCtor} Renderer
  * @property {string} [logoMask]
  * @property {Window} [win]
  * @property {Document} [doc]
@@ -315,7 +208,7 @@
  * let the plugin claim members it does not have.
  * @typedef {Object} VgApi
  * @property {GraphLike} graph
- * @property {SigmaLike | undefined} renderer   set by makeRenderer() before the api exists; a getter, so a host reads the live one
+ * @property {RendererLike | undefined} renderer   set by makeRenderer() before the api exists; a getter, so a host reads the live one
  * @property {() => void} readTheme
  * @property {() => void} placeLogo
  * @property {() => PaletteSlot[]} palette
@@ -371,14 +264,7 @@ function mountVaultGraph(root, data, deps) {
 
   var DATA = data;
   var Graph = deps.Graph;
-  var SigmaCls = deps.Sigma;
-  // The programs hang off the UMD NAMESPACE object, not off the Sigma class that
-  // SigmaCls resolves to -- the bundle sets both `Sigma.Sigma` and
-  // `Sigma.rendering` on the same export, so `SigmaCls.rendering` is undefined and
-  // reaching for a program through it throws during construction. That kills the
-  // whole init inside its setTimeout, which surfaces as a page stuck on
-  // "Laying out graph..." with nothing in the console.
-  var RENDERING = deps.rendering || {};
+  var RendererCls = deps.Renderer;
   var LOGO_MASK = deps.logoMask || "";
   // The window this view lives in. Obsidian passes activeWindow so a popout schedules its
   // own timers; the standalone page passes nothing and gets its own window. Never the bare
@@ -849,7 +735,7 @@ function mountVaultGraph(root, data, deps) {
 
   /* ------------------------------------------------- graph + base layout */
 
-  var graph = new Graph({ type: "undirected" });
+  var graph = new Graph();
 
   DATA.nodes.forEach(function (n, i) {
     graph.addNode(String(i), {
@@ -1008,10 +894,11 @@ function mountVaultGraph(root, data, deps) {
   });
 
   // Which notes deserve a permanent label: strictly the best-connected ones.
-  // Sigma's own label thinning is grid-based, which assumes nodes are spread out --
+  // Sigma's own label thinning was grid-based, which assumes nodes are spread out --
   // false by construction in Rings, where every hub is packed into the centre so they
   // all compete for one grid cell. That made the choice effectively arbitrary and
-  // could drop rank 1 entirely, so the ranking is decided here. Ties break on label
+  // could drop rank 1 entirely, so the ranking is decided here (and the engine that
+  // replaced Sigma draws only what this file forces, github#58). Ties break on label
   // so the labelled set is identical on every reload.
   /** @type {Record<string, number>} */
   var hubRank = dict();
@@ -5063,7 +4950,7 @@ function mountVaultGraph(root, data, deps) {
       // and panned the stage: measured, the camera left (0.5, 0.5) for (0.4601, 0.5207)
       // over one drag. The press already belongs to the note by then; the threshold only
       // decides whether the note MOVES, never who owns the gesture.
-      if (e.preventSigmaDefault) e.preventSigmaDefault();
+      if (e.preventDefault) e.preventDefault();
       if (e.original) { e.original.preventDefault(); e.original.stopPropagation(); }
       if (!nodeDrag.moved) {
         if (nodeDrag.x0 === undefined) { nodeDrag.x0 = e.x; nodeDrag.y0 = e.y; }
@@ -5089,6 +4976,12 @@ function mountVaultGraph(root, data, deps) {
         if (!nodeDrag || nodeDrag.id !== dragId) return;    // dropped, or a new drag since
         graph.setNodeAttribute(dragId, "x", p.x);
         graph.setNodeAttribute(dragId, "y", p.y);
+        // THE ONE WRITE THAT NEVER HAD ITS OWN REFRESH. Every other position write in this file
+        // is followed by an explicit renderer.refresh; this one leaned on Sigma's subscription
+        // to the graph, whose handler for a changed node was exactly this call -- a partial
+        // update of that node, scheduled for the next frame. The store has no events to
+        // subscribe to (github#58), so the call is made here instead, unchanged.
+        renderer.refresh({ partialGraph: { nodes: [dragId] }, skipIndexation: false, schedule: true });
         placeHubDrop();
       });
     });
@@ -5982,7 +5875,10 @@ function mountVaultGraph(root, data, deps) {
   // not rebuild the spatial index", which is true inside hlWalk's own loop and is NOT true
   // here: this fires whenever the pointer crosses a legend row, which can be at any point
   // during a cascade or a layout tween, when nodes very much have moved. Skipping
-  // indexation then leaves Sigma's quadtree describing where the disc used to be.
+  // indexation then left Sigma's quadtree describing where the disc used to be. (The
+  // engine that replaced Sigma keeps no index and reprocesses on every refresh, so the flag
+  // is accepted and ignored there -- the rule stands as a statement about which code may
+  // claim nothing moved; see invariants.md.)
   //
   // Measured, when this said skipIndexation: the suite went from 17/17 to 9/17 on the demo
   // vault -- aiming at a note resolved nothing ("element at aim CANVAS.sigma-mouse"), the
@@ -7511,10 +7407,9 @@ function mountVaultGraph(root, data, deps) {
       var ez = pr < 1 ? RADIAL_EASE
                       : Math.min(1, RADIAL_EASE + tailFrames * 0.15);
       var resid = 0;
-      // quietWrites: sigma is subscribed to the graph, and every write in this loop otherwise
-      // costs two whole-vault nodeReducer passes that the refresh at the bottom of the frame
-      // discards. See quietWrites for the measurement and for why it cannot change the picture.
-      if (targets) quietWrites(function () { graph.forEachNode(function (id) {
+      // A plain loop into the store; the refresh at the bottom of the frame is what draws it
+      // (see assignPositions for where quietWrites went).
+      if (targets) graph.forEachNode(function (id) {
         var q = targets[id];
         if (!q) return;
         // The ANGLE is taken exactly while its target moves the way a wedge sweeps --
@@ -7565,7 +7460,7 @@ function mountVaultGraph(root, data, deps) {
         if (gap < 0 ? -gap > resid : gap > resid) resid = gap < 0 ? -gap : gap;
         var r = rNow + gap * ez;
         graph.mergeNodeAttributes(id, { x: r * Math.cos(h), y: r * Math.sin(h) });
-      }); });
+      });
       if (pr >= 1) tailFrames++;
       // skipIndexation while animating: the quadtree is only needed for hit
       // testing, and settle() rebuilds it. Re-indexing 442 nodes and 1409 edges
@@ -7714,62 +7609,24 @@ function mountVaultGraph(root, data, deps) {
   var animGuard = null;   // its force-complete timer
 
   /**
-   * Write positions for the whole vault WITHOUT SIGMA WATCHING OVER OUR SHOULDER (github#19).
+   * THE BULK POSITION LOOPS WRITE STRAIGHT INTO THE STORE, and nothing watches them do it.
    *
-   * Sigma subscribes to the graph. Every `mergeNodeAttributes` therefore emits
-   * `nodeAttributesUpdated`, and sigma's handler for one node is
+   * With graphology this took a helper, `quietWrites` (github#19): Sigma subscribed to the
+   * graph, every `mergeNodeAttributes` emitted `nodeAttributesUpdated`, and Sigma's handler ran
+   * the node reducer and scheduled a partial refresh for each of the 10,002 notes -- work the
+   * explicit full refresh at the bottom of the same frame then discarded (5.5 ms per position
+   * loop with Sigma listening, 0.5 ms without, measured on the 10k fixture). The helper
+   * detached the listeners around each loop and restored them in a `finally`.
    *
-   *     updateNode(id);                                        // runs nodeReducer for it
-   *     refresh({ partialGraph: { nodes: [id] }, skipIndexation: false, schedule: true });
-   *
-   * -- and `refresh` runs `updateNode(id)` AGAIN before arming `needToProcess`. So each of the
-   * three bulk position loops in this file (the cascade's follower, the tween's step,
-   * assignPositions) was paying two extra nodeReducer passes over the entire vault, on top of
-   * the one the explicit refresh that immediately follows it performs anyway.
-   *
-   * ALL OF IT IS THROWN AWAY, which is why suppressing it cannot change a pixel. Every one of
-   * those loops is followed by `renderer.refresh(...)` with no `partialGraph`, and sigma's own
-   * source shows what that does: `clearNodeIndices(); clearEdgeIndices();` then `addNode` for
-   * every node and `addEdge` for every edge, then `process()` on the render. The caches the
-   * listener spent the frame filling are wiped and rebuilt from the graph. (`skipIndexation:
-   * true` does not change that -- without a `partialGraph` it takes the identical branch and
-   * only skips arming a flag that the same branch arms unconditionally. That is why
-   * github#19 measured the "cheap" refresh at 35.6 ms against 30.3 for the full one: they are
-   * the same code.)
-   *
-   * Measured on the 10k fixture at rest, a full 10 002-note position loop:
-   * 5.5 ms with sigma listening, 0.5 ms without. Over a folder-toggle cascade the saving is
-   * larger than that difference, because the listener's discarded passes drag nodeStyle,
-   * nodeColor, dotPx and isPushed along with them.
-   *
-   * THE LISTENERS ARE TAKEN FROM THE EMITTER, not from sigma. `renderer.activeListeners
-   * .updateNodeGraphUpdate` is the same function and reads more directly, but it is a private
-   * field of a vendored bundle; `rawListeners` is graphology's own public API, so this keeps
-   * working if either library is updated, and degrades to a plain call if the event has no
-   * subscribers at all. `rawListeners`, not `listeners`: the latter unwraps a `once`
-   * subscription to its inner function, so re-registering what it returns would silently
-   * promote a one-shot listener to a permanent one.
-   *
-   * Scoped to the loop and restored in a `finally`, because a page whose renderer has
-   * permanently stopped listening to its graph is a much worse bug than a slow one.
+   * The store has no event emitter (github#58, src/engine/store.ts), so there is nothing to
+   * detach: the three loops (the cascade's follower, the tween's step, assignPositions) are
+   * plain loops again, each still followed by the refresh that was always the one that drew.
    */
-  /** @param {() => void} fn */
-  function quietWrites(fn) {
-    var EV = "nodeAttributesUpdated";
-    var raw = typeof graph.rawListeners === "function" ? graph.rawListeners(EV) : null;
-    if (!raw || !raw.length) { fn(); return; }
-    var ls = raw.slice();
-    for (var i = 0; i < ls.length; i++) graph.removeListener(EV, ls[i]);
-    try { fn(); } finally { for (var j = 0; j < ls.length; j++) graph.on(EV, ls[j]); }
-  }
-
   /** @param {Record<string, Point>} targets */
   function assignPositions(targets) {
-    quietWrites(function () {
-      graph.forEachNode(function (id) {
-        var t = targets[id];
-        if (t) graph.mergeNodeAttributes(id, { x: t.x, y: t.y });
-      });
+    graph.forEachNode(function (id) {
+      var t = targets[id];
+      if (t) graph.mergeNodeAttributes(id, { x: t.x, y: t.y });
     });
   }
 
@@ -7844,10 +7701,9 @@ function mountVaultGraph(root, data, deps) {
       if (adv > 1 / MIN_FRAMES) adv = 1 / MIN_FRAMES;
       p = Math.min(1, p + adv);
       var e = p < 0.5 ? 4 * p * p * p : 1 - Math.pow(-2 * p + 2, 3) / 2;
-      // quietWrites for the same reason the cascade's follower uses it: the refresh two lines
-      // down rebuilds every index from the graph, so sigma's per-write reaction is work whose
-      // only product is discarded.
-      quietWrites(function () { graph.forEachNode(function (id) {
+      // A plain loop into the store; the refresh two lines down is what draws it (see
+      // assignPositions for where quietWrites went).
+      graph.forEachNode(function (id) {
         var f = from[id];
         if (!f) return;
         if (polar) {
@@ -7859,7 +7715,7 @@ function mountVaultGraph(root, data, deps) {
             y: f.y + (f.ty - f.y) * e
           });
         }
-      }); });
+      });
       probeSample("tween");
       renderer.refresh({ skipIndexation: false });
       if (p < 1) { anim = WIN.requestAnimationFrame(step); }
@@ -7883,7 +7739,7 @@ function mountVaultGraph(root, data, deps) {
 
   /* ---------------------------------------------------------------- render */
 
-  /** @type {SigmaLike | undefined} */
+  /** @type {RendererLike | undefined} */
   var renderer;
   /** @type {Record<string, string[]> | null} */
   var neighbourCache = null;
@@ -8189,7 +8045,7 @@ function mountVaultGraph(root, data, deps) {
   // No `settings` parameter any more: the one thing it was read for was minEdgeThickness, and
   // that now lives inside edgePx so this and edgeReport cannot disagree about a width.
   // drawHover keeps its own -- it reads labelSize and labelFont, and sigma decides its shape.
-  /** @param {CanvasRenderingContext2D} ctx @param {NodeDisplayData & { key?: string }} data */
+  /** @param {CanvasRenderingContext2D} ctx @param {import("./engine/types").HoverData} data */
   function drawFocusWeb(ctx, data) {
     var f = state.hovered || state.selected;
     if (!f || data.key !== f || state.query) return;
@@ -8239,8 +8095,8 @@ function mountVaultGraph(root, data, deps) {
   // Geometry matches its label drawer: text at x + size + 3, y + labelSize/3.
   /**
    * @param {CanvasRenderingContext2D} ctx
-   * @param {NodeDisplayData} data
-   * @param {SigmaSettings & { labelSize: number, labelWeight: string, labelFont: string }} settings
+   * @param {import("./engine/types").HoverData} data   the display data plus the node key, as the renderer hands it over
+   * @param {RendererSettings & { labelSize: number, labelWeight: string, labelFont: string }} settings
    */
   function drawHover(ctx, data, settings) {
     drawFocusWeb(ctx, data);
@@ -8300,7 +8156,7 @@ function mountVaultGraph(root, data, deps) {
         // The halo is the same for both highlight sources. It is drawn in the extreme of
         // the neutral axis for the same reason the today colour is: it must not be
         // mistakable for one of the ten group hues.
-        if (haloOn && hv > 0.004) {
+        if (hv > 0.004) {
           r.type = "halo";
           // Mixed from the note's own colour rather than faded with an alpha: the ring
           // then emerges from the dot instead of ghosting over it, and it stays a solid
@@ -8339,10 +8195,10 @@ function mountVaultGraph(root, data, deps) {
           return r;
         }
         // Nothing is permanently labelled. Notes are named on hover, on click and
-        // in search results -- never by Sigma's viewport label grid, which assumes
-        // nodes are spread out and is false by construction here: every hub is
-        // packed into the centre, so they all compete for one grid cell and which
-        // one wins is arbitrary.
+        // in search results -- never by a viewport label grid: Sigma's assumed nodes
+        // are spread out, which is false by construction here (every hub is packed into
+        // the centre, so they all competed for one cell and which one won was arbitrary),
+        // and the engine that replaced it has none -- it draws exactly the forced set.
         r.label = "";
         return r;
   }
@@ -8763,11 +8619,6 @@ function mountVaultGraph(root, data, deps) {
   // display px = ramp.m * attr size + ramp.b, never below ramp.lo, per band. See BAND.
   var sizeScale = 1;      // kept for the probe and the report; = the outer ramp at NODE_MAX
 
-  // Whether the border program actually loaded. If the bundle ever ships without it,
-  // highlighting still works -- the radial push carries it on its own -- rather than
-  // asking Sigma for a node type it cannot draw.
-  var haloOn = !!RENDERING.createNodeBorderProgram;
-
   function measureSizeScale() {
     if (!renderer) return sizeScale;
     // One row of spacing is lastSP LATTICE units, i.e. lastSP * UNIT graph units. That
@@ -9114,34 +8965,32 @@ function mountVaultGraph(root, data, deps) {
   }
 
   function makeRenderer() {
-    renderer = new SigmaCls(graph, $("graph"), {
-      allowInvalidContainer: true,
-      renderLabels: true,
-      labelRenderedSizeThreshold: 11,
-      labelDensity: 0.2,
-      labelGridCellSize: 150,
+    renderer = new RendererCls(graph, $("graph"), {
+      // The window this view lives in: the renderer's frames, timers and resize listener go
+      // through it, for the same popout reason WIN exists at all.
+      win: WIN,
       labelFont: 'ui-sans-serif, "Segoe UI", system-ui, sans-serif',
       labelSize: 11,
       labelWeight: "500",
-      // Sigma defaults these to black-on-anything and a hardcoded #FFF hover pill,
-      // which is illegible / jarring on the dark surface.
-      labelColor: { color: THEME.text },
-      defaultDrawNodeHover: drawHover,
-      zIndex: true,
+      // Sigma defaulted these to black-on-anything and a hardcoded #FFF hover pill, which is
+      // illegible / jarring on the dark surface. The engine takes the theme's text colour and
+      // draws the pill with the page's own drawHover.
+      labelColor: THEME.text,
+      drawHover: drawHover,
       // SIZES SCALE WITH THE LATTICE, NOT WITH ITS SQUARE ROOT.
       //
-      // Sigma's default zoomToSizeRatioFunction is Math.sqrt, so a node's drawn radius goes as
-      // 1/sqrt(ratio) while its POSITION goes as 1/ratio. The two therefore diverge on every
-      // zoom, and no choice of size can hold a dot at a fixed fraction of the gap to its
+      // Sigma's default zoomToSizeRatioFunction was Math.sqrt, so a node's drawn radius went as
+      // 1/sqrt(ratio) while its POSITION went as 1/ratio. The two therefore diverged on every
+      // zoom, and no choice of size could hold a dot at a fixed fraction of the gap to its
       // neighbour. Measured, drawn diameter over row pitch: 0.76 at rest, 1.44 three notches
       // in, 3.51 at the far end -- dots that end up swallowing their neighbours, which is
       // exactly what "they still touch when zooming in" was.
       //
       // Identity makes the multiplier 1/ratio, the same law the positions follow, so the
       // relationship between a dot and the space it has is the one thing that does NOT change
-      // as the camera moves. The sizes fed in are then pinned to the lattice once (see
-      // measureSizeScale) rather than re-derived per frame.
-      zoomToSizeRatioFunction: /** @param {number} x */ function (x) { return x; },
+      // as the camera moves. The engine's scaleSize is size / ratio by construction -- there
+      // is no setting left to get wrong (github#58) -- and the sizes fed in are pinned to the
+      // lattice once (see measureSizeScale) rather than re-derived per frame.
       minCameraRatio: 0.02,
       maxCameraRatio: 12,
       // PANNING IS ON, and the centre lock that used to fight it is gone.
@@ -9153,15 +9002,14 @@ function mountVaultGraph(root, data, deps) {
       // moves, so zooming in on one wedge walks it off the far edge instead. Panning plus a
       // reset is the ordinary answer, and it costs nothing that a reset does not give back.
       //
-      // Rotation stays off: the wedge labels and the heatmap's day rows both assume up is up.
+      // Rotation is not a setting any more: the wedge labels and the heatmap's day rows both
+      // assume up is up, and the engine has no rotation to switch off.
       //
       // The initial value is the SETTING rather than a literal: the host may have persisted
       // it off, and starting on and correcting afterwards would let one drag through before
       // the lock arrived.
       enableCameraPanning: panEnabled,
-      enableCameraRotation: false,
-      enableCameraZooming: true,
-      // ONE WHEEL NOTCH WAS 70%. Sigma's default zoomingRatio is 1.7, so every notch
+      // ONE WHEEL NOTCH WAS 70%. Sigma's default zoomingRatio was 1.7, so every notch
       // multiplied or divided the ratio by that -- three notches and the disc has gone from
       // filling the stage to a sixth of it. 1.2 is about 32 notches across the whole
       // 0.02..12 range, which is a scroll rather than a teleport.
@@ -9198,27 +9046,14 @@ function mountVaultGraph(root, data, deps) {
       // of a range: every link asks for 0.556px at rest and is floored to 1.0px, an inflation
       // of 1.80x for the whole web rather than for its median.
       minEdgeThickness: 1.0,
-      defaultEdgeType: "line",
-      // Both programs are registered up front so the toggle is a per-edge `type`
-      // in the reducer rather than a renderer rebuild. Sigma merges these with its
-      // own defaults, so "line" survives. NB the programs live on
-      // Sigma.rendering, NOT on Sigma -- getting that wrong makes a program
-      // silently never appear, with no error anywhere.
-      edgeProgramClasses: RENDERING.EdgeCurveProgram
-        ? { curve: RENDERING.EdgeCurveProgram } : {},
-      // A ring around highlighted notes. borders[0] is the OUTER band and the
-      // {fill:true} entry is the CORE -- the reverse of what the option order
-      // suggests, which is worth stating because getting it backwards silently
-      // draws a solid blob in the halo colour.
-      nodeProgramClasses: RENDERING.createNodeBorderProgram ? {
-        halo: RENDERING.createNodeBorderProgram({
-          borders: [
-            { size: { value: 0.26 }, color: { attribute: "haloColor" } },
-            { size: { fill: true }, color: { attribute: "color" } },
-          ],
-        }),
-      } : {},
-      enableEdgeEvents: false,
+      // THE TWO TYPED DRAW PATHS. A link is a straight "line" unless its reducer says "curve"
+      // and gives a `curvature`; a note is a plain disc unless its reducer says "halo": a ring
+      // 0.26 of the radius wide in `haloColor` around a core in `color`. Both used to be Sigma
+      // programs registered here (and the border one had its own trap: borders[0] was the
+      // OUTER band and the {fill:true} entry the core, the reverse of what the order
+      // suggests). They are the engine's two fixed paths now, in src/engine/programs.ts,
+      // chosen per item by the `type` the reducers below set.
+      //
       // Opacity is applied here, once, rather than at each of nodeStyle's five
       // exits. Everything below 0.004 is genuinely hidden, so a fully faded note
       // costs nothing to render and drops out of hit-testing.
@@ -9279,7 +9114,7 @@ function mountVaultGraph(root, data, deps) {
         var x = graph.extremities(id);
         var al = Math.min(alpha[x[0]] || 0, alpha[x[1]] || 0);
         if (al <= 0.004) { r.hidden = true; return r; }
-        if (state.curveEdges && RENDERING.EdgeCurveProgram) {
+        if (state.curveEdges) {
           r.type = "curve";
           r.curvature = curvatureFor(graph.getNodeAttributes(x[0]),
                                      graph.getNodeAttributes(x[1]));
@@ -9331,7 +9166,7 @@ function mountVaultGraph(root, data, deps) {
       // because a pan does not change the ratio. skipIndexation because nothing moved here;
       // only the width did.
       var edgeRaf = 0;
-      // Seeded, AND repainted if the seed moved it. Sigma has already run the reducers once by
+      // Seeded, AND repainted if the seed moved it. The renderer has already run the reducers once by
       // now, so a camera that starts below the knee would otherwise draw its first frame
       // unclamped. In practice fit() flies from ratio 1 to 1.08 and both are above it, which
       // is exactly the kind of "cannot happen today" that a persisted camera would break.
@@ -9416,17 +9251,18 @@ function mountVaultGraph(root, data, deps) {
 
     // DOUBLE CLICK RESETS THE VIEW, on the stage and on a note alike.
     //
-    // preventSigmaDefault() is what makes it a reset rather than a reset AND sigma's own
-    // double-click zoom: the captor emits the event and then checks that flag before doing
-    // its own thing, synchronously, so setting it here is seen. Without it the two fight and
-    // the camera lands somewhere neither asked for.
+    // preventDefault() on the payload stays although the engine's captor has no double-click
+    // zoom of its own to prevent (github#58 dropped it, because this call stopped Sigma's on
+    // every double click there ever was): it costs nothing, and it is the contract -- the
+    // captor emits, then reads the flag synchronously -- that would matter again the day a
+    // default is added.
     //
     // A note gets the same treatment as the stage on purpose. "Double click zooms to this
     // note" is a defensible other answer, but then double click means two things depending
     // on a 6px target, and one of them is not what the tooltip says.
-    /** @param {SigmaNodeEvent} e */
+    /** @param {RendererEvent} e */
     var onDoubleClick = function (e) {
-      if (e && e.preventSigmaDefault) e.preventSigmaDefault();
+      if (e && e.preventDefault) e.preventDefault();
       fit();
     };
     renderer.on("doubleClickStage", onDoubleClick);

@@ -145,7 +145,9 @@ over-warn (a `colours`-only change flags every feature) but never under-warns si
 5. **Tag, annotated**, with the release summary as the message.
 6. **Build the package** — `node scripts/make-package.mjs` writes
    `dist/vault-graph-<version>.zip` containing only what is needed to run: `src/`,
-   `vendor/`, `scripts/`, `assets/`, `README.md`, `LICENSE`, `CHANGELOG.md`.
+   `scripts/`, `assets/`, `package.json` and the lockfile (the exporter bundles the engine
+   with esbuild, a runtime dependency, so `npm ci --omit=dev` once), `README.md`, `LICENSE`,
+   `CHANGELOG.md`.
 7. **Create the release** and attach it:
    `gh release create <version> dist/vault-graph-<version>.zip --notes-file <notes>`
 

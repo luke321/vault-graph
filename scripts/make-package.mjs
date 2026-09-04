@@ -30,9 +30,12 @@ const version = process.argv[2] || (() => {
 })();
 
 // Runtime only. Everything a person needs to build a graph, and nothing aimed at whoever
-// maintains this.
+// maintains this. package.json and the lockfile are in because the exporter bundles the
+// engine with esbuild (github#58) -- a runtime dependency, so `npm ci --omit=dev` installs
+// that one package and nothing of the dev tooling; then build-graph.mjs runs as before.
 const INCLUDE = [
-  ["src", "dir"], ["vendor", "dir"], ["scripts", "dir"], ["assets", "dir"],
+  ["src", "dir"], ["scripts", "dir"], ["assets", "dir"],
+  ["package.json", "file"], ["package-lock.json", "file"],
   ["README.md", "file"], ["LICENSE", "file"], ["CHANGELOG.md", "file"]
 ];
 

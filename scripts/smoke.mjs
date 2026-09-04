@@ -817,7 +817,8 @@ check("hover re-arms after the pointer leaves the stage", async (p) => {
   // whether anything earlier had moved the pointer off the canvas.
   //
   // It is a real defect for a person too: glance away, come back to the note you were
-  // reading, no highlight. src/vendor.mjs patches it at read time.
+  // reading, no highlight. The engine's own captor clears it (github#58); until then
+  // src/vendor.mjs patched Sigma's bundle at read time.
   //
   // The sequence is the whole point -- on, OFF THE CANVAS, on again. Measured before the
   // fix: 1 hit in 40. After: 40 in 40.

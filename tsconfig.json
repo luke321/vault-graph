@@ -1,25 +1,45 @@
 {
-  // NOT a compile step. The plugin is plain JavaScript on purpose -- esbuild bundles it
-  // and nothing transpiles it. This file exists so typescript-eslint can build a program
+  // THE TYPE PROGRAM -- never an emit. Nothing here produces a file: esbuild bundles the
+  // plugin and (since github#58) the exporter's engine, compiling TypeScript on the way with
+  // no help from tsc. This config exists for typescript-eslint, which builds a program from it
   // for the type-aware rules: the ones in Obsidian's recommended preset that refuse to load
-  // without one (no-deprecated and friends), and the five no-unsafe-* rules that
-  // eslint.config.mjs turns on for the plugin and the page (github#55).
+  // without one, and the five no-unsafe-* rules eslint.config.mjs makes errors (github#55,
+  // github#60). The compiler's own check on the engine runs from tsconfig.engine.json.
   //
   // INCLUDE NAMES EVERY FILE THOSE RULES LINT, so the program is stated rather than
   // inherited. With only plugin/**/*.js here, src/page.js was still in the program -- as the
   // plugin's import -- and the rules did reach it that way (measured 2026-09-03: 6,467
   // findings on it either way). But a file that is only in the program because something
-  // else imports it drops out the day that import moves, silently, and #55's Phase 1 runs
-  // tsc over this same config, where an unlisted file is simply not checked. Named, both
-  // stay true by construction.
+  // else imports it drops out the day that import moves, silently. Named, it stays true by
+  // construction.
+  //
+  // src/engine/**/*.ts is the graph store and renderer that replace the vendored graphology
+  // and Sigma bundles (github#58): the only TypeScript here. It is in THIS program so the
+  // lint rules read it with the same types the page is read with, and in tsconfig.engine.json
+  // so tsc checks it under strict.
+  //
+  // strict IS OFF HERE, ON PURPOSE, and it was measured before deciding. With strict on this
+  // program, lint reported 29 new errors in src/page.js -- every one a `getAttribute()` that
+  // is `string | null` under strictNullChecks flowing into an index or a call -- and that is
+  // #55's ratchet (its Phase 4), not github#58's. esbuild also reads `strict` from this file
+  // and injected three "use strict" directives into main.js, which is not nothing for a step
+  // whose proof is a byte-identical bundle. So the engine's strictness lives in
+  // tsconfig.engine.json, which extends this one.
+  //
+  // allowJs with checkJs off: give the rules a type graph to read, without turning every
+  // loose annotation in 14k lines of JS into a lint error. checkJs is #55's Phase 1.
+  //
+  // strictFunctionTypes IS ON, alone of the strict family, so this program and the engine's
+  // agree on what a cast means. Measured: with it off here, a listener widened to
+  // Listener<unknown> in src/engine/emitter.ts was "unnecessary" to the lint (bivariant
+  // parameters make the narrow type assignable) and required to tsc under strict; two programs
+  // reading one file cannot disagree on that, or every fix for one fails the other. It reports
+  // nothing on the JavaScript (checkJs is off) and esbuild does not read it.
   //
   // plugin/**/*.d.ts is the one thing here that is not linted: declarations for the
   // bundler's own `raw:` and `b64:` modules (plugin/bundler-modules.d.ts), which the program
   // needs or every import from them is an error type (github#60). eslint.config.mjs ignores
   // them for the same reason -- nothing in one for a rule to read.
-  //
-  // allowJs with checkJs off: give the rules a type graph to read, without turning every
-  // loose annotation in 14k lines of JS into a lint error. checkJs is #55's Phase 1.
   "compilerOptions": {
     "target": "ES2022",
     "module": "ESNext",
@@ -29,7 +49,8 @@
     "noEmit": true,
     "skipLibCheck": true,
     "strict": false,
+    "strictFunctionTypes": true,
     "types": []
   },
-  "include": ["plugin/**/*.js", "plugin/**/*.d.ts", "src/page.js"]
+  "include": ["plugin/**/*.js", "plugin/**/*.d.ts", "src/page.js", "src/engine/**/*.ts"]
 }

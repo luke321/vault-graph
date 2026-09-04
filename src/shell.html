@@ -39,10 +39,11 @@ html, body { height: 100%; margin: 0; }
  * page.js exports a function now instead of running itself, so somebody has to call it.
  * Here that is this block; in the plugin it is main.js.
  *
- * The dependencies are read off `window` HERE, at the one place that knows they are UMD
- * globals -- this page loaded them as <script> tags. Inside a plugin they are bundled
- * module imports and never touch `window` at all, which is exactly why page.js takes them
- * as arguments rather than reaching for them.
+ * The dependencies are read off `window` HERE, at the one place that knows they are
+ * globals -- this page loaded the engine as a <script> tag, the IIFE build-graph.mjs bundles
+ * from src/engine (`VaultGraphEngine`, github#58). Inside a plugin the same module is a
+ * bundled import and never touches `window` at all, which is exactly why page.js takes its
+ * constructors as arguments rather than reaching for them.
  *
  * A classic script, not type="module", deliberately: a module served from file:// is
  * blocked by CORS, and being openable straight off a disk is the whole point of this file.
@@ -85,9 +86,8 @@ mountVaultGraph(
   document.getElementById("vg-app"),
   window.VAULT_DATA,
   {
-    Graph: window.graphology.Graph || window.graphology,
-    Sigma: (window.Sigma && window.Sigma.Sigma) || window.Sigma,
-    rendering: (window.Sigma && window.Sigma.rendering) || {},
+    Graph: window.VaultGraphEngine.GraphStore,
+    Renderer: window.VaultGraphEngine.Renderer,
     logoMask: window.VAULT_LOGO_MASK || "",
     // The gear is the standalone's only settings surface, so it is turned on here. The
     // plugin leaves it off and uses Obsidian's own settings tab for the same rows.

@@ -9,18 +9,16 @@
 // vendor/*.js out of its own plugin folder at runtime, which works when a script copied
 // them there and fails for every real user, because those files are never installed.
 //
-// So the page, both libraries and the logo are compiled INTO main.js. That is the only
-// shape that survives installation.
+// So the page, the engine and the logo are compiled INTO main.js. That is the only shape
+// that survives installation.
 //
-// The exporter in src/ is untouched and still node-builtins-only: it assembles the same
-// three sources into a standalone HTML file with no npm anywhere near it. One page, two
-// mounts -- see .ai-context/decisions/0008-one-page-two-mounts.md.
+// The exporter in src/ assembles the same sources into a standalone HTML file, bundling the
+// engine with the same esbuild (github#58). One page, two mounts.
 
 import { build, context } from "esbuild";
 import { readFileSync, writeFileSync } from "node:fs";
-import { basename, dirname, join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { readVendorSource } from "../src/vendor.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(HERE, "..");
@@ -28,10 +26,8 @@ const WATCH = process.argv.includes("--watch");
 
 /* ------------------------------------------------------------------ assets --
  * `raw:` and `b64:` import prefixes, so main.js can say what it needs and the bundler
- * decides how it travels. Without a namespace plugin there is no way to say "this .js is
- * text, that .js is code" -- esbuild keys loaders off the extension alone, and vendor/
- * holds .js files that must NOT be parsed as modules (they are UMD bundles that would be
- * torn apart by tree-shaking).
+ * decides how it travels. Without a namespace plugin there is no way to say "this .html is
+ * text, that .png is base64" -- esbuild keys loaders off the extension alone.
  */
 const rawLoader = {
   name: "raw-and-base64",
@@ -50,26 +46,6 @@ const rawLoader = {
   },
 };
 
-/* ------------------------------------------------------------------ vendor --
- * The two UMD bundles do not come off disk verbatim. Sigma ships two fetch() calls inside
- * loadSVGImage, for a node-image program this page never registers, and the directory's
- * automated review counts them and asks users to trust that we never take that path
- * (github#1). readVendorSource replaces them with a thrower and fails the build if the
- * count ever changes -- the reasoning is in src/vendor.mjs.
- *
- * It has to be an onLoad hook rather than a pre-pass: esbuild reads the import at
- * plugin/main.js:34-35 off disk itself, so there is nowhere else to get in front of it.
- */
-const vendorNoNetwork = {
-  name: "vendor-no-network",
-  setup(b) {
-    b.onLoad({ filter: /[\\/]vendor[\\/][^\\/]+\.js$/, namespace: "file" }, (args) => ({
-      contents: readVendorSource(ROOT, basename(args.path)),
-      loader: "js",
-    }));
-  },
-};
-
 /* -------------------------------------------------------------- demo/debug --
  * The demo storyboard (?demo, `demoMode`/`demoAct`), its input-driving helpers
  * (`demoCursorAt` and friends), and the large `window.__vg` debug surface
@@ -85,8 +61,7 @@ const vendorNoNetwork = {
  * non-host slice of the `window.__vg` object -- see that file for exactly what stayed:
  * the ~15 properties plugin/main.js actually calls, like `readTheme` and
  * `setFolderColors`). This removes the TEXT between each marker pair before esbuild
- * ever parses the file, the same way vendorNoNetwork rewrites the vendored bundles
- * above -- not a runtime flag, because a flag would still ship the source and only hide
+ * ever parses the file -- not a runtime flag, because a flag would still ship the source and only hide
  * it, which answers "can a user reach this" but not "is this code in the file".
  *
  * The exporter (src/build-graph.mjs, src/shell.html) does not go through esbuild at
@@ -154,7 +129,7 @@ const options = {
   // and "source is not minified-only" is easiest to satisfy by shipping readable code.
   minify: false,
   logLevel: "info",
-  plugins: [rawLoader, vendorNoNetwork, stripDemoAndDebugPlugin],
+  plugins: [rawLoader, stripDemoAndDebugPlugin],
   banner: {
     js: "/* Vault Graph -- built by scripts/build-plugin.mjs. Source: plugin/ and src/. */",
   },

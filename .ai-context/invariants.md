@@ -389,9 +389,11 @@ deleted `mark today` checks were the only cover for.
 
 ## `skipIndexation` is a promise, and only hlWalk can keep it
 
-`renderer.refresh({ skipIndexation: true })` tells Sigma "nothing moved, do not rebuild the
+`renderer.refresh({ skipIndexation: true })` told Sigma "nothing moved, do not rebuild the
 spatial index". Inside `hlWalk` that is true by construction: its loop writes `hl[id]` and
-nothing else, so it earns the flag and needs it — it runs every frame of a ramp.
+nothing else, so it earns the flag and needs it — it runs every frame of a ramp. (Since
+github#58 the engine keeps no spatial index and accepts the flag without reading it; the rule
+stands as a statement about which code may claim nothing moved, which is what it always was.)
 
 **Anything driven by a person's pointer has not earned it.** Hover highlight was written
 with the flag copied from `hlWalk`, on the reasoning that a halo does not move anything.
@@ -483,8 +485,9 @@ node scripts/smoke.mjs      # "hover re-arms after the pointer leaves the stage"
 It did not, for as long as this project has existed. Sigma's `handleLeave` emits
 `leaveNode` without clearing its own `hoveredNode`, so on re-entry
 `hoveredNode !== nodeAtPosition` is false and nothing is emitted — glance at the sidebar,
-come back to the note you were reading, no highlight. `src/vendor.mjs` patches it at read
-time; `handleMove`, two lines earlier in the same bundle, always did it correctly.
+come back to the note you were reading, no highlight. Until github#58 `src/vendor.mjs`
+patched the bundle at read time; the engine's own captor clears it (`src/engine/renderer.ts`,
+the mouseleave handler), and this check is what says so.
 
 It is also what made this suite flaky, which is the more expensive half of the story: the
 hover checks failed whenever anything earlier had moved the pointer off the canvas.
@@ -1017,9 +1020,10 @@ __vg.edgeInk()      // -> the web's own coverage, with no note or label mixed in
 
 **Two assertions, and they do different jobs:**
 
-- `minEdgeThickness <= 1.0`. Blunt on purpose — the real regression risk is a sigma upgrade
+- `minEdgeThickness <= 1.0`. Blunt on purpose — the regression risk was a sigma upgrade
   restoring its default, and since the value was never set explicitly for the whole life of
-  the file, nothing would have said so.
+  the file, nothing would have said so. The engine has no default to restore (github#58); the
+  assertion stays because the number is a measured one.
 - **The floor is at most 2x the median natural resting width.** This is *why* 1.0 rather than
   some other smaller number, and it is what a later change to `edgeAttrsOf`'s width would trip
   — make links thinner without revisiting the floor and the floor becomes dominant again.
@@ -1384,6 +1388,52 @@ animated — and it is what the defect actually moves. Verified by disabling the
 re-running: **7 groups, 6 disturbed — lost `(vault root)`, `tiny`; renumbered `misc`, `notes`,
 `projects`, `refs`.**
 
+## The engine draws Sigma's picture
+
+github#58. The renderer under `src/engine/` replaced sigma 3.0.2, and the only acceptance
+criterion was that nothing on screen changes. The suite cannot see that: sixteen of its checks
+assert numbers and none reads a disc's colour or a curve's bow. So the comparison is its own
+harness:
+
+```bash
+node scripts/render-diff.mjs --against-dir <dir>              # every fixture, ratios 1.08 / 0.35 / 4.2
+node scripts/render-diff.mjs --against-dir <dir> --query note # the same, in a search: labels and pills lit
+```
+
+It builds each fixture from the current tree and compares it against a reference build of the
+same vault -- `<dir>/<fixture>*.html`, made from whatever commit the picture is being held to
+(a worktree at that commit, its `node_modules` junctioned in, `src/build-graph.mjs --vault ...
+--out ...`). Until the switch the reference was the same tree's `--renderer sigma` build; the
+three Sigma-rendered references the switch was measured against are not kept in the repo,
+because a built page carries every note title of its vault. It loads each build in one Chrome
+tab in turn, puts the camera in the same state, and compares two things per ratio: **camera** --
+`graphToViewport` for every node and `scaleSize` of its size, bar 1e-6 px; **pixels** -- the
+composited `edges`, `nodes`, `labels`, `hovers` and `hoverNodes` layers over the surface colour,
+bar 0.05 % of the stage differing by more than 8/255 in any channel, and `edgeInk` within 1 %
+(decision 0012, D-5). Two builds in two tabs would not do: the background tab never gets a
+frame, and the page defers its edge-cap refresh to one.
+
+**Measured 2026-09-04 on all three fixtures at all three ratios, at rest and in a search: max
+camera |Δ| 0 px, 0 pixels differing, edgeInk equal to five decimals.** The bar was set before
+the numbers were known, and the numbers came in at zero; the bar stays where it was recorded,
+because a later change that costs 0.01 % of pixels is a finding to look at, not a failure to
+argue about.
+
+**Verified a second way, against develop's own build.** `--mode screenshot` (part of `all`)
+captures two `Page.captureScreenshot` clips per ratio, the stage and the whole page, so the
+overlays the page paints from `graphToViewport` -- logo, heatmap band, ribbon, legend, wedge
+labels -- are compared too, as PNG bytes first and decoded pixels when the bytes differ. Against
+pages built from `develop@79d829a` (no engine at all), at five ratios, at rest and in a search:
+stage screenshots PNG-byte-identical in every one of 30 cases; whole-page screenshots differ
+only in the last digit of the sidebar's "Generated …" stamp, because the two builds were minutes
+apart. A reference built at the same minute would be byte-identical throughout.
+
+Two behaviours are different on purpose and were decided before the port: picking is by
+geometry (within `size / ratio` px of the centre, the last-drawn node winning -- the answer
+Sigma's half-resolution colour buffer gave, without the 2 px quantisation), and the label
+density grid is gone, with the occasional plain label it drew for the hovered note during the
+first half of the hover ramp.
+
 ## Our own code lints clean
 
 `npm run lint` runs typescript-eslint over the plugin, the page, the exporter and `scripts/`
@@ -1436,8 +1486,19 @@ where an unlisted file is simply not checked. `plugin/bundler-modules.d.ts` is n
 and an error type at every use.
 
 ```bash
-npm run lint                          # 0 errors, 0 warnings, ~5 s
+npm run lint                          # typecheck: ok, then 0 errors, 0 warnings
 ```
+
+**Since github#58 the same command runs `tsc --noEmit` first.** `src/engine/**/*.ts` -- the
+graph store and renderer that replace the vendored bundles -- is TypeScript under `strict: true`,
+and `scripts/lint.mjs` runs the compiler over `tsconfig.engine.json` ahead of eslint so a type
+error fails the push by the same gate a lint finding does. **Two configs, because `strict`
+cannot be per-file, and this was measured rather than assumed:** `strict` on the shared
+`tsconfig.json` put **29** errors on `src/page.js` -- every one a `getAttribute()` result that is
+`string | null` under `strictNullChecks` flowing into an index or a call, which is #55's Phase 4
+ratchet -- and esbuild, which reads `tsconfig.json`'s `strict`, injected three `"use strict"`
+directives into `main.js`. With the typedefs re-pointed to the engine and `strict` off the shared
+program, lint stayed at 0 errors, 0 warnings and the plugin bundle byte-identical.
 
 Wired into `.githooks/pre-push` after the two determinism checks and ahead of `SKIP_SMOKE`,
 and into `scripts/release.ps1` right after the dirty-tree check: about five seconds, no
