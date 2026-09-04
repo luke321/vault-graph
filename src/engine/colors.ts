@@ -61,6 +61,12 @@ function rgbaToFloat(r: number, g: number, b: number, a: number): number {
   return FLOAT32[0];
 }
 
+// Keyed by the string as given AND by its lower-case form, so a hit costs no allocation: the
+// page hands over 10,000 colour strings a frame during a cascade, and lower-casing each one
+// before the lookup was 10,000 short-lived strings a frame for the collector. Bounded, because
+// a cascade's per-frame alphas produce strings that never recur; Sigma's cache grew without
+// limit for the life of the page.
+const CACHE_LIMIT = 200000;
 const cache = new Map<string, number>();
 let scratch: CanvasRenderingContext2D | null = null;
 
@@ -78,12 +84,17 @@ function normalise(val: string, doc: Document): string {
  * hex nor rgba, and only the first time that string is seen.
  */
 export function floatColor(val: string, doc: Document): number {
+  const direct = cache.get(val);
+  if (direct !== undefined) return direct;
   const key = val.toLowerCase();
-  const hit = cache.get(key);
-  if (hit !== undefined) return hit;
-  let parsed = parseColor(key);
-  if (!parsed) parsed = parseColor(normalise(key, doc).toLowerCase()) ?? { r: 0, g: 0, b: 0, a: 1 };
-  const color = rgbaToFloat(parsed.r, parsed.g, parsed.b, (parsed.a * 255) | 0);
-  cache.set(key, color);
+  let color = cache.get(key);
+  if (color === undefined) {
+    let parsed = parseColor(key);
+    if (!parsed) parsed = parseColor(normalise(key, doc).toLowerCase()) ?? { r: 0, g: 0, b: 0, a: 1 };
+    color = rgbaToFloat(parsed.r, parsed.g, parsed.b, (parsed.a * 255) | 0);
+    if (cache.size >= CACHE_LIMIT) cache.clear();
+    cache.set(key, color);
+  }
+  if (val !== key) cache.set(val, color);
   return color;
 }

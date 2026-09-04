@@ -23,11 +23,6 @@ export class Emitter<Events extends object> {
     return this;
   }
 
-  off<K extends keyof Events>(event: K, fn: Listener<Events[K]>): this {
-    this.listeners.get(event)?.delete(fn as Listener<unknown>);
-    return this;
-  }
-
   emit<K extends keyof Events>(event: K, payload: Events[K]): void {
     const set = this.listeners.get(event);
     if (!set) return;

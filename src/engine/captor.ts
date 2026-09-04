@@ -85,10 +85,9 @@ function getWheelDelta(e: WheelEvent): number {
 }
 
 export class MouseCaptor extends Emitter<CaptorEvents> implements MouseCaptorApi {
-  draggedEvents = 0;
-  isMoving = false;
-  currentWheelDirection = 0;
-
+  private draggedEvents = 0;
+  private isMoving = false;
+  private currentWheelDirection = 0;
   private lastMouseX: number | null = null;
   private lastMouseY: number | null = null;
   private isMouseDown = false;

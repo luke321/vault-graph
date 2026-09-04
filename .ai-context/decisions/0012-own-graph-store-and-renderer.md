@@ -147,6 +147,8 @@ page talks about them by those names throughout.
 | build-time patches on someone else's bundle | 2 | 0 |
 | WebGL contexts per renderer | 3 (+ a picking framebuffer) | 3 |
 | pixels differing from the Sigma build, 3 fixtures × 3 ratios, at rest and in a search | -- | **0** |
+| full refresh on the 10k vault, same machine, back to back | 9.4 ms | **8.8 ms** (was 15–17 before the step-5 fix) |
+| script per cascade frame, 10k vault | 27.1 ms | **26.3 ms** |
 
 The exporter needs `npm ci` once now (esbuild bundles the engine), so the release package
 carries `package.json` and the lockfile and `releasing.md` says so. `scripts/render-diff.mjs`

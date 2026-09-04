@@ -79,10 +79,6 @@ export class Camera extends Emitter<{ updated: CameraState }> implements CameraA
     return valid;
   }
 
-  isAnimated(): boolean {
-    return this.nextFrame !== null;
-  }
-
   setState(state: Partial<CameraState>): this {
     this.previousState = this.getState();
     const valid = this.validateState(state);

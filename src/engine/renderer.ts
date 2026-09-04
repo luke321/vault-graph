@@ -69,32 +69,35 @@ function applyNodeDefaults(key: string, styled: Partial<NodeDisplayData> & Point
   if (typeof styled.x !== "number" || typeof styled.y !== "number") {
     throw new Error(`vault-graph: node "${key}" has no position; the style function must keep x and y`);
   }
+  // IN PLACE, AND ONLY WHAT IS MISSING. This runs once per node per refresh -- 10,002 times a
+  // frame on the 10k vault -- and a first version built a second object per node here; the
+  // profile put the renderer's addNode at 6.7 ms a frame against Sigma's 3.1 and the garbage
+  // collector at 3 ms. Conditional writes on the reducer's own object, as Sigma did, keep
+  // one allocation per node (the copy the reducer already makes) and leave its shape alone.
+  if (!styled.color) styled.color = DEFAULT_NODE_COLOR;
   // Sigma's rule: a falsy label other than "" is no label; anything else is a string.
   const raw: unknown = styled.label;
-  let label: string | null = null;
-  if (typeof raw === "string") label = raw;
-  else if (typeof raw === "number" || typeof raw === "boolean") label = raw ? String(raw) : null;
-  return Object.assign(styled, {
-    color: styled.color || DEFAULT_NODE_COLOR,
-    label,
-    size: styled.size || 2,
-    hidden: styled.hidden ?? false,
-    highlighted: styled.highlighted ?? false,
-    forceLabel: styled.forceLabel ?? false,
-    type: styled.type || "circle",
-    zIndex: styled.zIndex || 0,
-  });
+  if (typeof raw !== "string") {
+    styled.label = (typeof raw === "number" || typeof raw === "boolean") && raw ? String(raw) : null;
+  }
+  if (!styled.size) styled.size = 2;
+  if (styled.hidden === undefined) styled.hidden = false;
+  if (styled.highlighted === undefined) styled.highlighted = false;
+  if (styled.forceLabel === undefined) styled.forceLabel = false;
+  if (!styled.type) styled.type = "circle";
+  if (!styled.zIndex) styled.zIndex = 0;
+  // Every required field has been written above; the cast states that rather than a copy.
+  return styled as NodeDisplayData;
 }
 
 function applyEdgeDefaults(styled: Partial<EdgeDisplayData> & { size: number }): EdgeDisplayData {
-  return Object.assign(styled, {
-    color: styled.color || DEFAULT_EDGE_COLOR,
-    label: styled.label || "",
-    size: styled.size || 0.5,
-    hidden: styled.hidden ?? false,
-    type: styled.type || "line",
-    zIndex: styled.zIndex || 0,
-  });
+  if (!styled.color) styled.color = DEFAULT_EDGE_COLOR;
+  if (!styled.label) styled.label = "";
+  if (!styled.size) styled.size = 0.5;
+  if (styled.hidden === undefined) styled.hidden = false;
+  if (!styled.type) styled.type = "line";
+  if (!styled.zIndex) styled.zIndex = 0;
+  return styled as EdgeDisplayData;
 }
 
 /** A stable sort by zIndex: equal z keeps the incoming (graph) order, as Sigma's did. */
@@ -428,9 +431,14 @@ export class Renderer extends Emitter<EventMap> implements RendererApi {
     this.nodeExtent = graphExtent(this.graph);
     this.normalization = createNormalization(this.customBBox ?? this.nodeExtent);
 
-    let nodes = this.graph.nodes();
+    // One walk collects the ids and their data side by side, so the second pass -- and the
+    // z-sort, when there is one -- never looks a node up again. Measured: the two-lookup
+    // version put process() at 3.7 ms a frame on the 10k vault against Sigma's 2.5.
+    const ids = this.graph.nodes();
+    const datas: NodeDisplayData[] = [];
+    const order: string[] = [];
     let circles = 0, halos = 0;
-    for (const id of nodes) {
+    for (const id of ids) {
       const data = this.nodeData.get(id);
       if (!data) continue;
       const attrs = this.graph.getNodeAttributes(id);
@@ -439,21 +447,33 @@ export class Renderer extends Emitter<EventMap> implements RendererApi {
       this.normalization.applyTo(data);
       if (data.type === "halo") halos++;
       else circles++;
+      order.push(id);
+      datas.push(data);
     }
     this.nodePrograms.circle.reallocate(circles);
     this.nodePrograms.halo.reallocate(halos);
     if (this.nodeZExtent[0] !== this.nodeZExtent[1]) {
-      nodes = byZIndex(nodes, (id) => this.nodeData.get(id)?.zIndex ?? 0);
+      const index = byZIndex(order.map((_, i) => i), (i) => datas[i].zIndex ?? 0);
+      const sortedIds: string[] = [];
+      const sortedDatas: NodeDisplayData[] = [];
+      for (const i of index) {
+        sortedIds.push(order[i]);
+        sortedDatas.push(datas[i]);
+      }
+      order.length = 0;
+      datas.length = 0;
+      for (let i = 0; i < sortedIds.length; i++) {
+        order.push(sortedIds[i]);
+        datas.push(sortedDatas[i]);
+      }
     }
     circles = 0;
     halos = 0;
-    for (const id of nodes) {
-      const data = this.nodeData.get(id);
-      if (!data) continue;
+    for (const data of datas) {
       if (data.type === "halo") this.nodePrograms.halo.process(halos++, data);
       else this.nodePrograms.circle.process(circles++, data);
     }
-    this.nodeOrder = nodes;
+    this.nodeOrder = order;
 
     let edges = this.graph.edges();
     let lines = 0, curves = 0;
