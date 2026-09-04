@@ -1404,12 +1404,12 @@ listed 77 findings against our 28 for exactly this reason, and its per-rule coun
 
 | | `plugin/main.js` | `src/page.js` | total |
 |---|---:|---:|---:|
-| `no-unsafe-member-access` | 0 | 654 | 654 |
-| `no-unsafe-assignment` | 0 | 175 | 175 |
-| `no-unsafe-call` | 0 | 131 | 131 |
-| `no-unsafe-argument` | 0 | 110 | 110 |
-| `no-unsafe-return` | 0 | 42 | 42 |
-| **budget** | **0** | **1,112** | **1,112** |
+| `no-unsafe-member-access` | 0 | 481 | 481 |
+| `no-unsafe-assignment` | 0 | 129 | 129 |
+| `no-unsafe-call` | 0 | 92 | 92 |
+| `no-unsafe-argument` | 0 | 78 | 78 |
+| `no-unsafe-return` | 0 | 30 | 30 |
+| **budget** | **0** | **810** | **810** |
 
 The gate landed 2026-09-03 on `develop@972daca` at **6,977** -- 510 on the plugin, matching
 the directory's board figure for figure (278 / 101 / 99 / 19 / 13), and 6,467 on the page.
@@ -1426,7 +1426,9 @@ typed the reveal cascade -- `CascadeOpts`, `WalkPair`, the in-flight record and 
 per-note map -- 2,531 → 2,057; batch 3d (same day) typed the timeline and the wedge-debug
 overlay -- `DateSpan`, `Month`, `DbgCell` and a typed `DBG` -- 2,057 → 1,499; batch 3e (same
 day) typed the legend, settings panel, search and context menu, where one line -- `$()`
-returning `HTMLElement` -- was worth 51 on its own, 1,499 → 1,112.
+returning `HTMLElement` -- was worth 51 on its own, 1,499 → 1,112; batch 3f (same day) typed
+the heatmap -- `Heat`, `HeatDay`, and the canvas elements the band and the ribbon draw on --
+1,112 → 810.
 `scripts/lint.mjs` runs eslint and fails on any
 error, on any warning outside the meter, and on a meter that differs from the budget in
 EITHER direction -- a count below it means something was typed and the budget stopped
@@ -1445,8 +1447,8 @@ the rules allow `any` to flow into an `unknown`-typed variable, and nothing else
 
 ```bash
 npm run lint                          # 0 errors, 0 actionable warnings, meter = budget, 4 s
-node scripts/lint.mjs --budget 1111   # one under: must fail
-node scripts/lint.mjs --budget 1113   # one over: must fail too
+node scripts/lint.mjs --budget 809    # one under: must fail
+node scripts/lint.mjs --budget 811    # one over: must fail too
 ```
 
 **The five reach `src/page.js` two ways, and `tsconfig.json` names it so only one has to

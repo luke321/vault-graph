@@ -11558,21 +11558,54 @@ function mountVaultGraph(root, data, deps) {
   var DAY_MS = 86400000, WEEK_MS = 7 * DAY_MS;
   var MONTH_ABBR = ["Jan", "Feb", "Mar", "Apr", "May", "Jun",
                     "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  /**
+   * The heatmap band (github#60, batch 3f).
+   * @typedef {Object} HeatDay
+   * @property {string} key      YYYY-MM-DD
+   * @property {number} ms
+   * @property {number} col      week column
+   * @property {number} row      weekday row, 0 = Monday
+   * @property {string[]} ids
+   * @property {{ c: string, w: number }[]} parts   colour and weight per note drawn in the tile
+   * @property {number} n        weighted count currently on screen
+   * @typedef {Object} Heat
+   * @property {number} cols
+   * @property {number} cell
+   * @property {number} pitch
+   * @property {number} start    ms, the Monday of the first column
+   * @property {Record<string, HeatDay>} days
+   * @property {string[]} keys
+   * @property {number[]} cuts   the level thresholds
+   * @property {number} nMax
+   * @property {number} before
+   * @property {number} after
+   * @property {number} undated
+   * @property {number} dated
+   * @property {number} w
+   * @property {number} h
+   */
+  /** @type {Heat | null} */
   var heat = null;         // grid geometry + per-day buckets, rebuilt on resize
   var heatSig = "";        // last painted state, so a resting page repaints nothing
+  /** @type {number | null} */
   var heatRz = null;
 
   // UTC throughout. `created` is a bare calendar date with no zone, and doing the
   // week arithmetic in local time means an hour of DST can slide a note into the
   // neighbouring column twice a year.
+  /** @param {string} s @returns {number} ms, or NaN */
   function heatParse(s) {
     var m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s || "");
     return m ? Date.UTC(+m[1], +m[2] - 1, +m[3]) : NaN;
   }
+  /** @param {number} ms */
   function heatKey(ms) {
-    var d = new Date(ms), p = function (n) { return (n < 10 ? "0" : "") + n; };
+    var d = new Date(ms);
+    /** @param {number} n */
+    var p = function (n) { return (n < 10 ? "0" : "") + n; };
     return d.getUTCFullYear() + "-" + p(d.getUTCMonth() + 1) + "-" + p(d.getUTCDate());
   }
+  /** @param {number} ms */
   function heatMonday(ms) {
     return ms - ((new Date(ms).getUTCDay() + 6) % 7) * DAY_MS;
   }
@@ -11639,7 +11672,10 @@ function mountVaultGraph(root, data, deps) {
     var endMs = state.heatEnd === null ? heatParse(TODAY) : state.heatEnd;
     var start = heatMonday(endMs) - (cols - 1) * WEEK_MS;
 
-    var days = Object.create(null), keys = [];
+    /** @type {Record<string, HeatDay>} */
+    var days = dict();
+    /** @type {string[]} */
+    var keys = [];
     for (var c = 0; c < cols; c++) {
       for (var r = 0; r < 7; r++) {
         var ms = start + c * WEEK_MS + r * DAY_MS;
@@ -11651,7 +11687,9 @@ function mountVaultGraph(root, data, deps) {
 
     // Every dated note, bucketed. Notes outside the window are counted, not binned:
     // the readout says how many, so a short axis never reads as a complete one.
-    var before = 0, after = 0, undated = 0, all = Object.create(null);
+    var before = 0, after = 0, undated = 0;
+    /** @type {Record<string, number>} */
+    var all = dict();
     graph.forEachNode(function (id, a) {
       var k = a.created;
       if (!heatParse(k)) { undated++; return; }
@@ -11665,9 +11703,11 @@ function mountVaultGraph(root, data, deps) {
     // Quantile cuts from the FULL data set, exactly as the group colours are: a
     // filter must not re-scale the survivors, or hiding one folder repaints every
     // remaining day a different shade for no reason the reader can see.
+    /** @type {number[]} */
     var counts = [];
     for (var kk in all) counts.push(all[kk]);
     counts.sort(function (x, y) { return x - y; });
+    /** @param {number} p 0..1 quantile */
     var q = function (p) {
       return counts.length
         ? counts[Math.min(counts.length - 1, Math.floor(p * counts.length))] : 1;
@@ -11707,7 +11747,8 @@ function mountVaultGraph(root, data, deps) {
     // Done here rather than per frame: it depends on nodeColor(), which regroup() has
     // already settled by the time heatBuild runs, and the palette is stable for the
     // life of the data. Re-deriving it 60 times a second buys nothing.
-    var hkey = Object.create(null);
+    /** @type {Record<string, number[]>} */   // id -> [hue, lightness]
+    var hkey = dict();
     graph.forEachNode(function (id) {
       var c = nodeColor(id), l = hex2lab(c);
       hkey[id] = [hueOf(c), l[0]];
@@ -11739,6 +11780,7 @@ function mountVaultGraph(root, data, deps) {
   // Which of the five legend steps a day falls in. Not used for drawing -- the ramp is
   // continuous -- but it is what heatReport counts, and the quantile cuts are still
   // the honest way to ask whether the band is using its range.
+  /** @param {number} n */
   function heatLevel(n) {
     var c = heat.cuts;
     for (var i = 0; i < c.length; i++) if (n <= c[i]) return i;
@@ -11756,6 +11798,11 @@ function mountVaultGraph(root, data, deps) {
   // The notes arrive sorted by hue and are consumed in order, strip by strip and top
   // to bottom within a strip -- so the square sweeps the hue wheel from its top-left
   // to its bottom-right, and a day's folder mix reads as bands rather than as noise.
+  /**
+   * @param {CanvasRenderingContext2D} ctx
+   * @param {number} x @param {number} y @param {number} side
+   * @param {{ c: string, w: number }[]} parts
+   */
   function heatTile(ctx, x, y, side, parts) {
     var n = parts.length;
     if (!n) return;
@@ -11795,7 +11842,7 @@ function mountVaultGraph(root, data, deps) {
   }
 
   function heatDraw() {
-    var cv = $("heatc");
+    var cv = /** @type {HTMLCanvasElement} */ ($("heatc"));
     if (!heat || !cv || !cv.getContext) return;
     heatCompute();
 
@@ -11803,6 +11850,7 @@ function mountVaultGraph(root, data, deps) {
     // on every frame of every animation; at rest that would be 364 rectangles of
     // identical work per frame. Quantising to a quarter of a note keeps the guard
     // from flickering on floating-point noise while still catching a real fade.
+    /** @type {(string | number)[]} */
     var sig = [];
     for (var i = 0; i < heat.keys.length; i++) {
       sig.push(Math.round(heat.days[heat.keys[i]].n * 4));
@@ -11813,7 +11861,7 @@ function mountVaultGraph(root, data, deps) {
     heatSig = sig;
 
     var dpr = window.devicePixelRatio || 1;
-    var ctx = cv.getContext("2d");
+    var ctx = /** @type {CanvasRenderingContext2D} */ (cv.getContext("2d"));
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, heat.w, heat.h);
 
@@ -11939,13 +11987,15 @@ function mountVaultGraph(root, data, deps) {
   // Two NEUTRALS, alternating, deliberately: the legend is about how finely a square
   // is divided, and any hue here would read as a claim about which folder. They are the
   // palette's own greys, so they belong to the same family as everything else.
+  /** @param {number} cell @param {number} R corner radius */
   function heatDrawKey(cell, R) {
-    var cv = $("heatkey");
+    var cv = /** @type {HTMLCanvasElement} */ ($("heatkey"));
     if (!cv || !cv.getContext) return;
     // Deduped: the quantiles collapse on a vault whose days are mostly 1 note --
     // measured here they came out 1/1/2/5, and two identical swatches read as a
     // rendering fault rather than as a tie. Fewer steps is the honest answer; the
     // canvas width follows the count.
+    /** @type {number[]} */
     var anchors = [];
     heat.cuts.concat([heat.nMax]).forEach(function (a) {
       if (anchors.indexOf(a) < 0) anchors.push(a);
@@ -11959,11 +12009,12 @@ function mountVaultGraph(root, data, deps) {
       cv.style.width = w + "px";
       cv.style.height = cell + "px";
     }
-    var ctx = cv.getContext("2d");
+    var ctx = /** @type {CanvasRenderingContext2D} */ (cv.getContext("2d"));
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, w, cell);
     var greys = [THEME.neutrals[0], THEME.neutrals[2]];
     for (var i = 0; i < anchors.length; i++) {
+      /** @type {{ c: string, w: number }[]} */
       var parts = [];
       for (var j = 0; j < anchors[i]; j++) parts.push({ c: greys[j % 2], w: 1 });
       ctx.save();
@@ -11979,6 +12030,10 @@ function mountVaultGraph(root, data, deps) {
 
   // roundRect is not everywhere yet, and this page runs from file:// in whatever
   // browser is set as default, so the path is built by hand.
+  /**
+   * @param {CanvasRenderingContext2D} ctx
+   * @param {number} x @param {number} y @param {number} w @param {number} h @param {number} r
+   */
   function heatRect(ctx, x, y, w, h, r) {
     r = Math.min(r, w / 2, h / 2);
     ctx.beginPath();
@@ -11992,6 +12047,7 @@ function mountVaultGraph(root, data, deps) {
 
   // Which day is under the pointer, or null. Hit-tested arithmetically rather than
   // by walking the cells -- it is a lattice, so there is nothing to search.
+  /** @param {MouseEvent} ev @returns {HeatDay | null} */
   function heatHit(ev) {
     if (!heat) return null;
     var b = $("heatc").getBoundingClientRect();
@@ -12006,9 +12062,11 @@ function mountVaultGraph(root, data, deps) {
   }
 
   var HEAT_WD = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+  /** @param {HeatDay} d */
   function heatShowTip(d) {
     var t = $("htip"), n = Math.round(d.n);
-    var by = Object.create(null);
+    /** @type {Record<string, number>} */
+    var by = dict();
     for (var i = 0; i < d.ids.length; i++) {
       if ((alpha[d.ids[i]] || 0) <= 0.004) continue;
       var g = groupOf(d.ids[i]);
@@ -12038,11 +12096,12 @@ function mountVaultGraph(root, data, deps) {
   }
 
   function buildHeatmapUI() {
-    var cv = $("heatc");
+    var cv = /** @type {HTMLCanvasElement} */ ($("heatc"));
     // Hovering a square haloes that day's notes on the disc. Refreshed only when the
     // day under the pointer actually CHANGES -- mousemove fires many times per cell,
     // and a renderer refresh per event would repaint the disc dozens of times while
     // crossing one square.
+    /** @param {string | null} key */
     var setHover = function (key) {
       if (state.hoverDay === key) return;
       state.hoverDay = key;
@@ -12349,7 +12408,7 @@ function mountVaultGraph(root, data, deps) {
   // sized by the stylesheet after any observation the guard below short-circuited: the same
   // number by luck, and a stretched bitmap the moment the luck ran out.
   function measureRibbon() {
-    var cv = $("ribbon");
+    var cv = /** @type {HTMLCanvasElement} */ ($("ribbon"));
     if (!cv) return 0;
     // removeProperty / setProperty rather than `style.width = ""`. An empty string IS a
     // static value, which obsidianmd/no-static-styles-assignment rejects -- and the DOM has
@@ -12477,7 +12536,7 @@ function mountVaultGraph(root, data, deps) {
   }
 
   function drawRibbon() {
-    var cv = $("ribbon");
+    var cv = /** @type {HTMLCanvasElement} */ ($("ribbon"));
     if (!cv || !dateSpan) return;
     var w = Math.max(200, ribbonW());
     var cx = fitCanvas(cv, w, RIBBON_H);
