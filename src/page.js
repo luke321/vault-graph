@@ -219,7 +219,7 @@
 /** The mouse payload sigma passes to node and stage events. */
 /** @typedef {{ x: number, y: number, original: MouseEvent, preventSigmaDefault: () => void }} SigmaMouseEvent */
 /** Node events carry `node`; stage events (clickStage, doubleClickStage) and afterRender do not. */
-/** @typedef {{ node?: string, event: SigmaMouseEvent }} SigmaNodeEvent */
+/** @typedef {{ node?: string, event: SigmaMouseEvent, preventSigmaDefault?: () => void }} SigmaNodeEvent */
 
 /**
  * The sigma renderer surface this file uses.
@@ -1634,6 +1634,7 @@ function mountVaultGraph(root, data, deps) {
    * @property {{ m: number, b: number, lo: number }} ramp
    * @property {number} gapDeg
    * @property {number} nG
+   * @property {number} [nSub]   subfolder boundaries in this band, set by the allocator
    */
   /** @type {{ i: Band, o: Band } | null} */
   var BAND = null;
@@ -7622,6 +7623,7 @@ function mountVaultGraph(root, data, deps) {
    */
   /** @type {Probe | null} */
   var probe = null;
+  /** @param {string} tag */
   function probeSample(tag) {
     if (!probe) return;
     var iMin = Infinity, iMax = 0, oMin = Infinity, oMax = 0, iN = 0, oN = 0;
@@ -8270,7 +8272,7 @@ function mountVaultGraph(root, data, deps) {
   // NOT decided here any more -- the reducer gates on opacity instead.
   /** @param {string} id @param {NodeAttrs} a @returns {NodeDisplayData & { haloColor?: string }} */
   function nodeStyle(id, a) {
-        var r = Object.assign({}, a);
+        var r = /** @type {NodeDisplayData & { haloColor?: string }} */ (Object.assign({}, a));
         r.color = nodeColor(id);
         // EVERYTHING about being highlighted is a function of hl[id], including whether
         // the treatment is applied at all -- not of isHighlighted(id). On the way out the
@@ -8418,7 +8420,7 @@ function mountVaultGraph(root, data, deps) {
     // it becomes the disc, so it supplies the paint. Band membership comes from
     // bandLock, which is fixed at load, rather than from a radius test.
     var o = bandColors(false), i = bandColors(true);
-    if (!o) return i || new Array(RING_BUCKETS);      // nothing on screen
+    if (!o) return i || /** @type {string[]} */ (new Array(RING_BUCKETS));   // nothing on screen
     if (!i) return o;
     // Hand over CONTINUOUSLY rather than switching. `outer || inner` meant that the
     // frame the last outer note went invisible, the whole mark repainted from the
@@ -8467,6 +8469,7 @@ function mountVaultGraph(root, data, deps) {
 
   /** @param {string[]} a @param {string[]} b @param {number} t */
   function mixColorArrays(a, b, t) {
+    /** @type {string[]} */
     var out = new Array(RING_BUCKETS);
     for (var i = 0; i < RING_BUCKETS; i++) {
       var x = toRgb(a[i] || "#888"), y = toRgb(b[i] || "#888");
@@ -8537,8 +8540,10 @@ function mountVaultGraph(root, data, deps) {
   /** @param {string[]} [src] @returns {string[]} */
   function ringColorsSmooth(src) {
     var col = src || ringColors();
-    if (!col || !col[0]) return col || new Array(RING_BUCKETS);
-    var n = RING_BUCKETS, w = LOGO_BLEND_BUCKETS, out = new Array(n);
+    if (!col || !col[0]) return col || /** @type {string[]} */ (new Array(RING_BUCKETS));
+    var n = RING_BUCKETS, w = LOGO_BLEND_BUCKETS;
+    /** @type {string[]} */
+    var out = new Array(n);
     for (var i = 0; i < n; i++) {
       var r = 0, g = 0, b = 0, k = 0;
       for (var d = -w; d <= w; d++) {
@@ -8550,6 +8555,7 @@ function mountVaultGraph(root, data, deps) {
     return out;
   }
 
+  /** @param {string[]} [src] */
   function ringGradient(src) {
     var col = ringColorsSmooth(src);
     if (!col || !col[0]) return "";
@@ -9219,13 +9225,17 @@ function mountVaultGraph(root, data, deps) {
       /** @param {string} id @param {NodeAttrs} a */
       nodeReducer: function (id, a) {
         var al = alpha[id] || 0;
-        if (al <= 0.004) { var h = Object.assign({}, a); h.hidden = true; return h; }
+        if (al <= 0.004) {
+          var h = /** @type {NodeDisplayData} */ (Object.assign({}, a));
+          h.hidden = true;
+          return h;
+        }
         var r = nodeStyle(id, a);
         if (al < 0.999) {
           // Fade AND grow: opacity alone reads as a colour change, while a note
           // that also scales up reads as arriving. Labels wait until it is
           // mostly there, so the cascade is not a wall of half-legible text.
-          r.color = withAlpha(r.color || a.color, al);
+          r.color = withAlpha(r.color, al);
           r.size = (r.size || a.size) * (0.45 + 0.55 * al);
           if (al < 0.62) { r.label = ""; r.forceLabel = false; r.highlighted = false; }
         }
@@ -9265,7 +9275,7 @@ function mountVaultGraph(root, data, deps) {
       },
       /** @param {string} id @param {EdgeAttrs & Partial<EdgeDisplayData>} a */
       edgeReducer: function (id, a) {
-        var r = Object.assign({}, a);
+        var r = /** @type {EdgeAttrs & Partial<EdgeDisplayData>} */ (Object.assign({}, a));
         var x = graph.extremities(id);
         var al = Math.min(alpha[x[0]] || 0, alpha[x[1]] || 0);
         if (al <= 0.004) { r.hidden = true; return r; }
@@ -9342,12 +9352,14 @@ function mountVaultGraph(root, data, deps) {
     // A window resize changes the disc's pixel radius without touching the camera,
     // so it needs its own hook. Debounced, because a drag-resize fires continuously
     // and each change costs a full refresh.
+    /** @type {number | null} */
     var rzTimer = null;
     // OBSERVE THE CONTAINER. A window resize listener is right for a page that fills the
     // window and wrong for a view inside an app: dragging an Obsidian sidebar resizes this
     // element without resizing the window, and closing a pane resizes it the other way.
     // Watching the element covers both, and still fires on a window resize, because the
     // container is sized from the window in the standalone.
+    /** Debounced: a resize storm should re-measure once, not per event. */
     var onResize = function () {
       if (rzTimer) WIN.clearTimeout(rzTimer);
       rzTimer = WIN.setTimeout(function () { rzTimer = null; refreshSizeScale(); placeLogo(); }, 120);
@@ -9412,6 +9424,7 @@ function mountVaultGraph(root, data, deps) {
     // A note gets the same treatment as the stage on purpose. "Double click zooms to this
     // note" is a defensible other answer, but then double click means two things depending
     // on a 6px target, and one of them is not what the tooltip says.
+    /** @param {SigmaNodeEvent} e */
     var onDoubleClick = function (e) {
       if (e && e.preventSigmaDefault) e.preventSigmaDefault();
       fit();
@@ -9506,7 +9519,7 @@ function mountVaultGraph(root, data, deps) {
     // Re-selecting the same id rebuilds the card so the pressed state and icon follow
     // the toggle -- togglePin itself already re-lays-out the ring and repaints the mark.
     d.querySelector(".pin").onclick = function () { togglePin(id); select(id); };
-    Array.prototype.forEach.call(d.querySelectorAll("[data-go]"), function (b) {
+    Array.prototype.forEach.call(d.querySelectorAll("[data-go]"), /** @param {HTMLElement} b */ function (b) {
       b.onclick = function () { select(b.getAttribute("data-go")); centerOn(b.getAttribute("data-go")); };
     });
     renderer.refresh();
@@ -12518,6 +12531,7 @@ function mountVaultGraph(root, data, deps) {
     if (keep) cv.style.setProperty("width", keep);
     return w;
   }
+  /** @returns {number} the ribbon's pixel width */
   function ribbonW() {
     if (!ribW) ribW = measureRibbon();
     return ribW || 600;
@@ -12536,6 +12550,7 @@ function mountVaultGraph(root, data, deps) {
   // Month index for `ms`, by calendar arithmetic against the first bucketed month rather
   // than a binary search -- months are contiguous by construction (buildDateSpan walks
   // every one between lo and hi), so this is exact and O(1).
+  /** @param {number} ms */
   function monthIndexOfMs(ms) {
     var d = new Date(ms), m0 = new Date(dateSpan.months[0].ms);
     var idx = (d.getUTCFullYear() - m0.getUTCFullYear()) * 12 + (d.getUTCMonth() - m0.getUTCMonth());
@@ -12573,6 +12588,7 @@ function mountVaultGraph(root, data, deps) {
    * (github#23) -- a quiet month draws a thin slice and a busy one a wide one even when
    * both are full calendar months.
    */
+  /** @param {number} ms @param {number} w */
   function ribbonXCompact(ms, w) {
     var ax = dateSpan.axis, seg = ax.segs[ax.segOfMonth[monthIndexOfMs(ms)]];
     var span = segSpanMs(seg), lo = span[0], hi = span[1];
@@ -12580,6 +12596,7 @@ function mountVaultGraph(root, data, deps) {
     var wPos = seg.w0 + frac * (seg.w1 - seg.w0);
     return (wPos / ax.totalW) * w;
   }
+  /** @param {number} x @param {number} w */
   function ribbonMsCompact(x, w) {
     var ax = dateSpan.axis, xc = Math.max(0, Math.min(w, x));
     var wPos = (xc / w) * ax.totalW, segs = ax.segs, seg = segs[segs.length - 1];
@@ -12607,6 +12624,7 @@ function mountVaultGraph(root, data, deps) {
    * them stays put. This is the one place the preview and the applied state are allowed to
    * disagree, and it is what makes a drag cost a canvas repaint instead of a relayout.
    */
+  /** @returns {number[]} [from, to] in ms -- the pending range while a drag is live */
   function brushEnds() {
     // A DRAG BEATS THE SWEEP. Both are previews and only one can be showing; if a hand is on
     // the handle while the intro is running, the hand is the one that means something -- and
@@ -12786,6 +12804,7 @@ function mountVaultGraph(root, data, deps) {
    * That difference is not a compromise, it is the truth about the two things: the pill is a
    * continuous position and the band is a row of weeks.
    */
+  /** Re-window the heatmap band around the current range end. */
   function rebuildBand() {
     var endMs = state.heatEnd === null ? heatParse(TODAY) : state.heatEnd;
     var wantStart = heatMonday(endMs) - ((heat ? heat.cols : HEAT_WEEKS) - 1) * WEEK_MS;
@@ -12796,6 +12815,7 @@ function mountVaultGraph(root, data, deps) {
   }
 
   /** The window pill's box on the track, in canvas pixels. Follows a drag if one is live. */
+  /** @param {number} w */
   function winTrack(w) {
     var span = (heat ? heat.cols : HEAT_WEEKS) * WEEK_MS;
     var end = winEndNow();
@@ -12814,8 +12834,10 @@ function mountVaultGraph(root, data, deps) {
    * the date you picked rather than the year up to it.
    */
   /** The window's span, in ms. */
+  /** @returns {number} the visible window, in ms */
   function winSpan() { return (heat ? heat.cols : HEAT_WEEKS) * WEEK_MS; }
 
+  /** @param {number} ms */
   function clampWinEnd(ms) {
     var todayMs = heatParse(TODAY);
     var lo = dateSpan.lo + winSpan();         // never scroll off the left end of the history
@@ -12866,6 +12888,7 @@ function mountVaultGraph(root, data, deps) {
    * the right one moves too", and it was not a slider at all, it was a fresh selection every
    * time. An edge has to be a thing you can take hold of.
    */
+  /** @param {number} x @param {number} w @param {number} [y] */
   function brushHit(x, w, y) {
     if (y !== undefined && inWinTrack(y)) return "win";
     var e = brushEnds(), x0 = ribbonX(e[0], w), x1 = ribbonX(e[1], w);
@@ -12933,6 +12956,7 @@ function mountVaultGraph(root, data, deps) {
     // THE TWO DATE FIELDS. `change` and not `input`: a picker fires input on every keystroke
     // while a date is half-typed, and "2" parses as the year 2 -- which would relayout the
     // disc for a range nobody asked for, twice per digit.
+    /** @param {HTMLInputElement | null} el @returns {number | null} */
     var fieldMs = function (el) {
       var v = el && el.value;
       if (!v) return null;
@@ -12949,7 +12973,9 @@ function mountVaultGraph(root, data, deps) {
       };
     });
 
+    /** @param {PointerEvent} ev */
     var xOf = function (ev) { return ev.clientX - rib.getBoundingClientRect().left; };
+    /** @param {PointerEvent} ev */
     var yOf = function (ev) { return ev.clientY - rib.getBoundingClientRect().top; };
 
     rib.addEventListener("pointerdown", function (ev) {
@@ -12995,7 +13021,13 @@ function mountVaultGraph(root, data, deps) {
       if (Math.abs(ev.clientX - brushDrag.x0) > DRAG_MIN) brushDrag.moved = true;
       if (!brushDrag.moved) return;
 
-      var w = ribbonW(), here = ribbonMs(xOf(ev), w), lo, hi, follow;
+      var w = ribbonW(), here = ribbonMs(xOf(ev), w);
+
+      /** @type {number} */ var lo;
+
+      /** @type {number} */ var hi;
+
+      /** @type {number} */ var follow;
 
       // The band's window, moved on its own and touching neither end of the brush. LIVE:
       // rebuildBand() only does the expensive half when the window crosses a week boundary,
@@ -13033,7 +13065,7 @@ function mountVaultGraph(root, data, deps) {
       // which is convenient until you want to read one stretch while filtering to another --
       // and it made the window impossible to place deliberately, since the next brush nudge
       // took it back. It has its own track now.
-      var mode = brushDrag.mode;
+      var mode = /** @type {string} */ (brushDrag.mode);
       brushDrag.pFrom = lo;
       brushDrag.pTo = hi;
       onFrame(function () {
@@ -13051,6 +13083,7 @@ function mountVaultGraph(root, data, deps) {
     // THE ONE MOMENT THE FILTER CHANGES. Everything the drag did was a preview on a canvas;
     // this is where it becomes state, and where the disc animates to it exactly as it does
     // for a legend toggle.
+    /** @param {PointerEvent} ev */
     var endDrag = function (ev) {
       if (!brushDrag) return;
       var d = brushDrag;
@@ -13085,6 +13118,7 @@ function mountVaultGraph(root, data, deps) {
     // same state a marked day uses, so it ramps and clears with every other halo rather than
     // being a second highlight mechanism.
     var yrHost = $("years");
+    /** @param {string | null} yr */
     var hoverYear = function (yr) {
       if (state.hoverYear === yr) return;
       state.hoverYear = yr;
@@ -13092,8 +13126,10 @@ function mountVaultGraph(root, data, deps) {
     };
     if (yrHost) {
       /** @param {MouseEvent} ev */
+      /** @param {MouseEvent} ev @returns {string | null} */
       var yrOf = function (ev) {
-        var b = ev.target && ev.target.closest && ev.target.closest("button[data-yr]");
+        var t = /** @type {Element | null} */ (ev.target);
+        var b = t && t.closest && t.closest("button[data-yr]");
         return b ? b.getAttribute("data-yr") : null;
       };
       yrHost.addEventListener("click", function (ev) {
@@ -13115,6 +13151,7 @@ function mountVaultGraph(root, data, deps) {
     // that changes nothing costs nothing. The band fires this for its own reasons (the grid
     // rebuilding changes the wrapper's scroll width) and a redraw per observation would be a
     // canvas repaint and a dozen DOM writes for no change.
+    /** Re-measure the ribbon's slot; a no-op when the width has not moved. */
     var onSlot = function () {
       var w = measureRibbon();
       if (w && Math.abs(w - ribW) < 0.5) return;
@@ -13124,7 +13161,11 @@ function mountVaultGraph(root, data, deps) {
     // A WINDOW FALLBACK, which was missing outright: without ResizeObserver the strip was
     // drawn once at boot and never again. It covers less -- a pane resized inside a window
     // that did not move is invisible to it -- but "less" beats "not at all".
-    if (WIN.ResizeObserver) new WIN.ResizeObserver(onSlot).observe($("heat"));
+    // ResizeObserver is a global constructor, not a member of TypeScript's Window, so the
+      // window this view lives in is viewed through a shape that names it. WIN rather than the
+      // bare global on purpose: a popout has its own (see WIN's own comment).
+      var winRO = /** @type {{ ResizeObserver?: new (cb: () => void) => { observe: (el: Element) => void } }} */ (WIN);
+      if (winRO.ResizeObserver) new winRO.ResizeObserver(onSlot).observe($("heat"));
     else WIN.addEventListener("resize", onSlot);
     applyRange();
   }
@@ -13381,12 +13422,14 @@ function mountVaultGraph(root, data, deps) {
     if (kind === "year") {
       var yh = $("years");
       if (!yh || !dateSpan) return null;
-      var chips = [].slice.call(yh.querySelectorAll("button[data-yr]"));
+      var chips = Array.from(yh.querySelectorAll("button[data-yr]"));
       if (!chips.length) return null;
       /** @type {Record<string, number>} */
       var have = dict();
       dateSpan.years.forEach(function (yy) { have[String(yy.y)] = yy.n; });
-      var pickY = null, bestN = -1;
+      /** @type {(HTMLElement & { demoLabel?: string }) | null} */
+      var pickY = null;
+      var bestN = -1;
       chips.forEach(function (c) {
         var y = c.getAttribute("data-yr");
         if (arg && /^\d{4}$/.test(arg)) { if (y === arg) pickY = c; return; }
@@ -13543,7 +13586,17 @@ function mountVaultGraph(root, data, deps) {
   function demoBigInnerNote() {
     if (!renderer || !geomLock || !geomLock.bandR) return null;
     var org = $("graph").getBoundingClientRect();
-    var lo = geomLock.bandR.i[0], hi = geomLock.bandR.i[1];
+    // THE INNER BAND'S RADII, COMPUTED THE WAY drawWedgeDebug COMPUTES THEM. This read
+    // `geomLock.bandR.i[0]` and `[1]` until github#60 typed geomLock: `bandR` there holds
+    // ONE NUMBER per band -- the outermost row radius, in graph units, which is what
+    // seamAngle divides a width by -- not a [lo, hi] pair. The pair shape belongs to
+    // drawWedgeDebug's own local of the same name. Indexing the number gave undefined for
+    // both ends, every `rNorm < lo || rNorm > hi` was false, and the filter this function
+    // exists for never excluded anything: it returned the biggest note ANYWHERE, which is
+    // exactly what its own comment above says it must not do. r0 and rOuter are already in
+    // the normalised units rNorm is measured in.
+    var lo = geomLock.r0;
+    var hi = geomLock.r0 + (geomLock.rOuter - geomLock.r0) * INNER_FILL;
     /** @type {{ id: string, x: number, y: number, r: number, size: number, label: string }[]} */
     var pts = [];
     graph.forEachNode(function (id, a) {
@@ -13561,7 +13614,9 @@ function mountVaultGraph(root, data, deps) {
     // same silent-miss risk demoNoteRect's own comment describes for hover.
     pts.sort(function (a, b) { return b.size - a.size; });
     var top = pts.slice(0, Math.min(5, pts.length));
-    var best = null, bestGap = -1;
+    /** @type {{ id: string, x: number, y: number, r: number, size: number, label: string } | null} */
+    var best = null;
+    var bestGap = -1;
     top.forEach(function (p) {
       var gap = Infinity;
       for (var j = 0; j < pts.length; j++) {
@@ -14205,8 +14260,8 @@ function mountVaultGraph(root, data, deps) {
     // Called by the driver when the last beat lands. The title is the signal on
     // purpose: a screen recorder outside the browser can poll a window title with no
     // debugging port of its own, no extension and nothing injected.
-    finish: function (ms, trace) {
-      window.__vgDemoDone = { ms: ms, trace: trace || [] };
+    finish: /** @param {number} ms @param {unknown[]} [trace] */ function (ms, trace) {
+      /** @type {Window & { __vgDemoDone?: { ms: number, trace: unknown[] } }} */ (window).__vgDemoDone = { ms: ms, trace: trace || [] };
       DOC.title = DEMO_DONE_TITLE;
       return true;
     }
@@ -14234,18 +14289,18 @@ function mountVaultGraph(root, data, deps) {
                     // the layout, and an override must not be able to move a node.
                     palette: paletteInfo,
                     groupOrder: function () { return (order[state.dim] || []).slice(); },
-                    groupCount: function (g) { return counts[g] || 0; },
+                    groupCount: /** @param {string} g */ function (g) { return counts[g] || 0; },
                     // The slot a group is ON, which is not derivable from its position any
                     // more: archives are skipped in the rotation, and sit on no slot at
                     // all. "" means exactly that.
-                    slotOf: function (g) { return groupSlot[g] || ""; },
+                    slotOf: /** @param {string} g */ function (g) { return groupSlot[g] || ""; },
                     // The slot a group would be on with no override at all -- unlike
                     // slotOf, never affected by folderColors. "" for the same reason.
                     // Kept alongside slotOf (not with the rest of the debug API below,
                     // which the plugin build strips) because plugin/main.js's own
                     // settings tab calls it to mark the automatic swatch even once a
                     // folder has been given an explicit colour.
-                    autoSlotOf: function (g) { return groupAutoSlot[g] || ""; },
+                    autoSlotOf: /** @param {string} g */ function (g) { return groupAutoSlot[g] || ""; },
                     setFolderColors: applyFolderColors,
                     setSubfolderColors: applySubfolderColors,
                     setFolderShown: applyFolderShown,
@@ -14298,8 +14353,10 @@ function mountVaultGraph(root, data, deps) {
                       var ov = true;
                       var stat = buildWedgePlan(ov, function (id) { return visible(id) ? 1 : 0; });
                       var live = buildWedgePlan(ov, function (id) { return alpha[id] || 0; });
+                      /** @type {Record<string, object>} */
                       var diffs = {};
-                      var rows = function (p) { var m = {}; p.cells.forEach(function (c) { m[c.k] = c.rows; }); return m; };
+                      /** @param {Plan} p @returns {Record<string, number>} */
+                      var rows = function (p) { /** @type {Record<string, number>} */ var m = {}; p.cells.forEach(function (c) { m[c.k] = c.rows; }); return m; };
                       var rs = rows(stat), rl = rows(live);
                       Object.keys(rs).concat(Object.keys(rl)).forEach(function (k) {
                         if (rs[k] !== rl[k]) diffs[k] = { staticPlan: rs[k], livePlan: rl[k] };
@@ -14346,6 +14403,7 @@ function mountVaultGraph(root, data, deps) {
                       var hov = DOC.createElement("canvas"); hov.width = W; hov.height = H;
                       var hctx = hov.getContext("2d"); hctx.drawImage(cv.hovers, 0, 0);
                       var himg = hctx.getImageData(0, 0, W, H).data;
+                      /** @param {Uint8ClampedArray} data @param {number} x @param {number} y @returns {number[] | null} */
                       var at = function (data, x, y) {
                         var X = Math.round(x * dpr), Y = Math.round(y * dpr);
                         if (X < 0 || Y < 0 || X >= W || Y >= H) return null;
@@ -14353,8 +14411,11 @@ function mountVaultGraph(root, data, deps) {
                         return [data[i], data[i + 1], data[i + 2], data[i + 3]];
                       };
                       var hi = toRgb(THEME.edgeHi), dm = toRgb(THEME.dim);
+                      /** @param {number[] | null} c @param {number[]} t */
                       var dist = function (c, t) { return c ? Math.abs(c[0] - t[0]) + Math.abs(c[1] - t[1]) + Math.abs(c[2] - t[2]) : 1e9; };
-                      var set = focusSet() || {}, dims = [];
+                      var set = focusSet() || {};
+                      /** @type {{ x: number, y: number, rad: number }[]} */
+                      var dims = [];
                       graph.forEachNode(function (id) {
                         if (set[id]) return;
                         var d = renderer.getNodeDisplayData(id);
@@ -14417,6 +14478,7 @@ function mountVaultGraph(root, data, deps) {
                       var perPx = pxPerRow > 0 ? UNIT / pxPerRow : 0;
                       // Radii and drawn sizes of everything on screen, split into bands on the
                       // largest radial gap -- the same split every probe in this session used.
+                      /** @type {{ r: number, th: number, rad: number, g: string }[]} */
                       var pts = [];
                       graph.forEachNode(function (id, a) {
                         if ((alpha[id] || 0) <= 0.004) return;
@@ -14440,9 +14502,16 @@ function mountVaultGraph(root, data, deps) {
                       var r3 = function (v) { return Math.round(v * 1000) / 1000; };
                       // For a figure that can legitimately be "not measured" -- see `pick`.
                       var r3n = function (v) { return v === undefined || v === null ? null : r3(v); };
+                      /** @param {{ r: number, th: number, rad: number, g: string }[]} arr */
                       var bandStat = function (arr) {
                         if (!arr.length) return null;
-                        var rows = {}, steps = [], clears = [], worst = 1e9;
+                        /** @type {Record<string, { r: number, th: number, rad: number, g: string }[]>} */
+                        var rows = {};
+                        /** @type {number[]} */
+                        var steps = [];
+                        /** @type {number[]} */
+                        var clears = [];
+                        var worst = 1e9;
                         arr.forEach(function (q) {
                           var k = Math.round(q.r / 8) * 8;
                           (rows[k] || (rows[k] = [])).push(q);
@@ -14561,7 +14630,7 @@ function mountVaultGraph(root, data, deps) {
                     bandRef: function () { return geomLock ? geomLock.bandR : null; },
                     // Every line the overlay draws, with its angle at one radius: the only way
                     // to tell a line that is misplaced from a line that is missing.
-                    wedgeTrace: function (rLattice) {
+                    wedgeTrace: /** @param {number} [rLattice] */ function (rLattice) {
                       DBG.trace = []; DBG.traceR = rLattice;
                       drawWedgeDebug();
                       var out = DBG.trace; DBG.trace = null;
@@ -14575,8 +14644,8 @@ function mountVaultGraph(root, data, deps) {
                                n: (c.ids || []).length }; }); },
                     // The two terms a wedge edge is made of, so a probe can decompose a
                     // measured swing instead of guessing which one moved.
-                    seamDeg: function (bk) { return bandOf(bk).gapDeg || 0; },
-                    seamNB: function (bk) { return (bandOf(bk).nG || 0) + (bandOf(bk).nSub || 0); },
+                    seamDeg: /** @param {string} bk */ function (bk) { return bandOf(bk).gapDeg || 0; },
+                    seamNB: /** @param {string} bk */ function (bk) { return (bandOf(bk).nG || 0) + (bandOf(bk).nSub || 0); },
                     clearAlpha: clearAlpha, buildWedgePlan: buildWedgePlan,
                     // Both added after wanting them from a test page: applyLayout to
                     // settle without waiting on rAF (which a hidden tab throttles,
@@ -14603,13 +14672,13 @@ function mountVaultGraph(root, data, deps) {
                     get subfolderColors() {
                       return Object.assign(dict(), subfolderColors);
                     },
-                    subColorOf: function (folder, sub) {
+                    subColorOf: /** @param {string} folder @param {string} [sub] */ function (folder, sub) {
                       return subShade[folder + "/" + (sub || "")] || colorOf(folder);
                     },
-                    subSlotOf: function (folder, sub) {
+                    subSlotOf: /** @param {string} folder @param {string} [sub] */ function (folder, sub) {
                       return subSlot[folder + "/" + (sub || "")] || "";
                     },
-                    subOrderOf: function (g) { return (subOrder[g] || []).slice(); },
+                    subOrderOf: /** @param {string} g */ function (g) { return (subOrder[g] || []).slice(); },
                     subCountOf: function (g, sub) { return subCount[g + "/" + (sub || "")] || 0; },
                     // Visibility DEFAULTS. Setting these does not move the live filter --
                     // the host is expected to apply them, which is what setHiddenDefaults
@@ -14691,10 +14760,14 @@ function mountVaultGraph(root, data, deps) {
                         edges: graph.size, px: px,
                       };
                     },
-                    edgeReport: function (id) {
+                    edgeReport: /** @param {string} [id] */ function (id) {
                       if (!renderer) return "no renderer";
                       var floor = renderer.getSetting("minEdgeThickness");
-                      var px = [], raw = [];
+                      /** @type {number[]} */
+                      var px = [];
+                      /** @type {number[]} */
+                      var raw = [];
+                      /** @param {string} e */
                       var take = function (e) {
                         var ed = renderer.getEdgeDisplayData(e);
                         if (!ed || ed.hidden) return;
@@ -14718,7 +14791,10 @@ function mountVaultGraph(root, data, deps) {
                     heatReport: function () {
                       if (!heat) return "not built";
                       heatCompute();
-                      var lv = [0, 0, 0, 0, 0], nz = 0, top = null;
+                      var lv = [0, 0, 0, 0, 0];
+                      var nz = 0;
+                      /** @type {{ day: string, n: number } | null} */
+                      var top = null;
                       heat.keys.forEach(function (k) {
                         var d = heat.days[k];
                         if (d.n <= 0.004) return;
@@ -14781,6 +14857,7 @@ function mountVaultGraph(root, data, deps) {
                     // every hidden note added back at weight 0. Every cell's rows and maxR must
                     // be identical.
                     checkZeroWeightInvariance: function () {
+                      /** @param {string} id */
                       var W = function (id) { return visible(id) ? 1 : 0; };
                       var save = planKeep;
                       planKeep = function (id) { return visible(id); };
@@ -14788,7 +14865,8 @@ function mountVaultGraph(root, data, deps) {
                       planKeep = function () { return true; };          // hidden notes seated too
                       var padded = buildWedgePlan(true, W);
                       planKeep = save;
-                      var rows = function (p) { var m = {}; p.cells.forEach(function (c) { m[c.k] = c.rows; }); return m; };
+                      /** @param {Plan} p @returns {Record<string, number>} */
+                      var rows = function (p) { /** @type {Record<string, number>} */ var m = {}; p.cells.forEach(function (c) { m[c.k] = c.rows; }); return m; };
                       var a = rows(lean), b = rows(padded), diffs = {};
                       // THE UNION, not the lean plan's keys. A cell that exists only in
                       // the padded plan is exactly the seated zero-weight cell this is
@@ -14861,6 +14939,7 @@ function mountVaultGraph(root, data, deps) {
                       }
                       // Drawn sizes, as the reducer leaves them -- sizeScale included, which
                       // is the multiplier NODE_MAX does not clamp.
+                      /** @type {number[]} */
                       var sizes = [];
                       if (renderer) {
                         graph.forEachNode(function (id) {
@@ -14953,9 +15032,11 @@ function mountVaultGraph(root, data, deps) {
                         if (di > worst.inner) { worst.inner = di; at.inner = s[i].ms; }
                         if (doo > worst.outer) { worst.outer = doo; at.outer = s[i].ms; }
                         if (s[i].tanStep > tanWorst) { tanWorst = s[i].tanStep; tanAt = s[i].ms; tanWho = s[i].tanId; }
-                        var ds = 0, dsG = null;
+                        var ds = 0;
+                        /** @type {string | null} */
+                        var dsG = null;
                         Object.keys(s[i].starts || {}).forEach(function (g) {
-                          var was = (s[i - 1].starts || {})[g];
+                          var was = /** @type {Record<string, number>} */ ((s[i - 1].starts || {}))[g];
                           if (was === undefined) return;
                           var dd = Math.abs(s[i].starts[g] - was);
                           if (dd > 180) dd = 360 - dd;
@@ -15052,11 +15133,15 @@ function mountVaultGraph(root, data, deps) {
                     // run this -- if PUSHED is 0 the movement is coming from somewhere
                     // other than the highlight, and the paths tell us where.
                     pushReport: function () {
-                      var pushed = [], haloed = [];
+                      /** @type {string[]} */
+                      var pushed = [];
+                      /** @type {string[]} */
+                      var haloed = [];
                       graph.forEachNode(function (id) {
                         if (isPushed(id)) pushed.push(id);
                         if (isHighlighted(id)) haloed.push(id);
                       });
+                      /** @param {string[]} ids */
                       var byPath = function (ids) {
                         /** @type {Record<string, number>} */
                         var m = dict();
@@ -15098,19 +15183,19 @@ function mountVaultGraph(root, data, deps) {
                     // the above, because r0/rOuter/band membership are locked at load.
                     // The date range, for the suite and the shooter.
                     get dateSpan() { return dateSpan; },
-                    setRange: function (fromISO, toISO) {
+                    setRange: /** @param {string} [fromISO] @param {string} [toISO] */ function (fromISO, toISO) {
                       state.from = fromISO ? heatParse(fromISO) : null;
                       state.to = toISO ? heatParse(toISO) : null;
                       applyRange();
                       heatDraw();
                     },
-                    setHeatEnd: function (iso) {
+                    setHeatEnd: /** @param {string} [iso] */ function (iso) {
                       state.heatEnd = iso ? heatParse(iso) : null;
                       heatBuild(); drawDateUI(); heatDraw();
                     },
                     // SPIKE (github#12, concept E): the pin gesture, for the shooter.
                     // The hub, for the suite and the shooter.
-                    pin: function (id) { togglePin(id); },
+                    pin: /** @param {string} id */ function (id) { togglePin(id); },
                     pinned: function () { return state.pinned.slice(); },
                     clearPins: function () { state.pinned = []; hubChanged(false); },
                     lastCascade: function () { return lastCascade; },
@@ -15119,7 +15204,7 @@ function mountVaultGraph(root, data, deps) {
                     // frames, and "do two rest states agree about the gap" is the whole
                     // question behind a jump at the end of one.
                     // Where the strip puts a date, for checking the year buttons line up.
-                    ribbonXOf: function (ms) { return ribbonX(ms, ribbonW()); },
+                    ribbonXOf: /** @param {number} ms */ function (ms) { return ribbonX(ms, ribbonW()); },
                     /**
                      * The two ends the strip is DRAWING, and where they are on it.
                      *
