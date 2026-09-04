@@ -8135,7 +8135,7 @@ function mountVaultGraph(root, data, deps) {
     /** @type {Record<string, boolean> | null} */
     var set = null;
     if (f) {
-      set = Object.create(null);
+      set = dict();
       set[f] = true;
       neighboursOf(f).forEach(function (n) { set[n] = true; });
     }
@@ -12547,6 +12547,7 @@ function mountVaultGraph(root, data, deps) {
   // Every segment is exactly one calendar month now (github#23's note-weighted axis gives
   // each month its own segment, weighted by content rather than grouped by emptiness), so
   // this only exists to keep ribbonXCompact/ribbonMsCompact from repeating `monthEndMs`.
+  /** @param {AxisSeg} seg */
   function segSpanMs(seg) {
     return [dateSpan.months[seg.i].ms, monthEndMs(seg.i)];
   }
@@ -12620,6 +12621,7 @@ function mountVaultGraph(root, data, deps) {
 
   // One month's bar: height against nRef, dim when empty. Shared by both the linear and
   // compact bar-layout paths in drawRibbon so the fill/height math has exactly one copy.
+  /** @param {CanvasRenderingContext2D} cx @param {number} top @param {Month} m @param {number} x @param {number} bw */
   function paintMonthBar(cx, top, m, x, bw) {
     var t = Math.min(1, m.n / dateSpan.nRef);
     var bh = m.n ? Math.max(1.5, (top - 2) * t) : 0;
@@ -13152,6 +13154,35 @@ function mountVaultGraph(root, data, deps) {
     return /(^|[?&#])rowarc/.test(String(location.search) + " " + String(location.hash));
   }
 
+  /**
+   * The demo storyboard's own shapes (github#60, batch 3i). Every beat field is optional:
+   * a beat is one of settle / click / dblclick / rightclick / hover / drag / wheel / park,
+   * and `act` and `why` label it. `target` is a [kind, arg] pair demoFind resolves.
+   * @typedef {Object} DemoBeat
+   * @property {string} [act]
+   * @property {string} [why]
+   * @property {boolean} [settle]
+   * @property {boolean} [park]
+   * @property {boolean} [click]
+   * @property {boolean} [dblclick]
+   * @property {boolean} [rightclick]
+   * @property {boolean} [hover]
+   * @property {boolean} [drag]
+   * @property {number} [wheel]
+   * @property {string[]} [target]
+   * @property {string[]} [to]
+   *
+   * What demoWhere reports about a resolved target: where it is on screen, and the label and
+   * clearance the driver annotates its recording with.
+   * @typedef {Object} DemoSpot
+   * @property {number} x
+   * @property {number} y
+   * @property {number} w
+   * @property {number} h
+   * @property {unknown} expect
+   * @property {number | null} gap
+   * @property {string} [label]
+   */
   function demoOn() {
     return /(^|[?&#])demo\b/.test(String(location.search) + " " + String(location.hash));
   }
@@ -13314,7 +13345,8 @@ function mountVaultGraph(root, data, deps) {
       if (!yh || !dateSpan) return null;
       var chips = [].slice.call(yh.querySelectorAll("button[data-yr]"));
       if (!chips.length) return null;
-      var have = Object.create(null);
+      /** @type {Record<string, number>} */
+      var have = dict();
       dateSpan.years.forEach(function (yy) { have[String(yy.y)] = yy.n; });
       var pickY = null, bestN = -1;
       chips.forEach(function (c) {
@@ -13382,6 +13414,7 @@ function mountVaultGraph(root, data, deps) {
   // daily note 2026-06-20 hovered 2026-W27 in a neighbouring wedge instead, because the
   // neighbour was a bigger dot than the margin allowed for. Returns null rather than a
   // risky target, and the beat is skipped and logged.
+  /** @param {string} prefix */
   function demoNoteRect(prefix) {
     var g = demoGroup(prefix);
     if (!g || !renderer) return null;
@@ -13533,6 +13566,7 @@ function mountVaultGraph(root, data, deps) {
    * rather than elements, and inventing a DOM node for each would be a lot of DOM for a
    * recording.
    */
+  /** @param {number} cx @param {number} cy @param {number} w @param {number} h @param {string} [label] */
   function demoPoint(cx, cy, w, h, label) {
     return {
       getBoundingClientRect: function () {
@@ -13561,6 +13595,7 @@ function mountVaultGraph(root, data, deps) {
                      which === "to" ? "range end" : "range start");
   }
 
+  /** @param {string} kind @param {string} [arg] @returns {DemoSpot | null} */
   function demoWhere(kind, arg) {
     var el = demoFind(kind, arg);
     if (!el) return null;
@@ -13660,6 +13695,7 @@ function mountVaultGraph(root, data, deps) {
    * also just below, is the same ten with `colours` filtered back out again for the full
    * run.
    */
+  /** @returns {DemoBeat[]} */
   function demoMode() {
     return [
       /* --- 1. the vault, growing --------------------------------------- */
@@ -14048,6 +14084,7 @@ function mountVaultGraph(root, data, deps) {
   // is tagged "colours" and goes with the rest of that act, so whatever act ends up last
   // here gets its own if it does not already have one, the same rule demoAct() applies
   // for an isolated act missing one.
+  /** @returns {DemoBeat[]} */
   function demoFullStoryboard() {
     var beats = demoMode().filter(function (b) { return FULL_RUN_EXCLUDES.indexOf(b.act) === -1; });
     if (!beats[beats.length - 1].park) {
@@ -14076,6 +14113,7 @@ function mountVaultGraph(root, data, deps) {
   //
   // Unknown name -> empty array with a loud warning, so a typo surfaces immediately in the
   // recorder's log instead of quietly producing a beat-less, near-instant "recording".
+  /** @param {string} name @returns {DemoBeat[]} */
   function demoAct(name) {
     var beats = demoMode().filter(function (b) { return b.act === name; });
     if (!beats.length) {
@@ -14284,7 +14322,8 @@ function mountVaultGraph(root, data, deps) {
                       });
                       var res = { node: best, degree: bd, edges: 0, samples: 0, geomGaps: 0,
                                   blueAtGaps: 0, dimAtGaps: 0, underLabel: 0, otherAtGaps: 0 };
-                      var seen = Object.create(null);
+                      /** @type {Record<string, boolean>} */
+                      var seen = dict();
                       Object.keys(set).forEach(function (n) {
                         graph.forEachEdge(n, function (e, attrs, s, t) {
                           if (seen[e] || !set[s] || !set[t]) return;
@@ -14507,7 +14546,7 @@ function mountVaultGraph(root, data, deps) {
                     nodeColor: nodeColor,
                     isArchiveGroup: isArchiveGroup,
                     get folderColors() {
-                      return Object.assign(Object.create(null), folderColors);
+                      return Object.assign(dict(), folderColors);
                     },
                     // subfolderColors/setSubfolderColors mirror the pair above and are the
                     // host's actual read/write path -- both shell.html and plugin/main.js's
@@ -14520,7 +14559,7 @@ function mountVaultGraph(root, data, deps) {
                     // same role api.colorOf/api.slotOf/api.groupOrder already play one
                     // level up.
                     get subfolderColors() {
-                      return Object.assign(Object.create(null), subfolderColors);
+                      return Object.assign(dict(), subfolderColors);
                     },
                     subColorOf: function (folder, sub) {
                       return subShade[folder + "/" + (sub || "")] || colorOf(folder);
@@ -14534,7 +14573,7 @@ function mountVaultGraph(root, data, deps) {
                     // the host is expected to apply them, which is what setHiddenDefaults
                     // is for.
                     get folderShown() {
-                      return Object.assign(Object.create(null), folderShown);
+                      return Object.assign(dict(), folderShown);
                     },
                     get panEnabled() { return panEnabled; },
                     get compactAxis() { return compactAxis; },
@@ -14850,7 +14889,8 @@ function mountVaultGraph(root, data, deps) {
                       probe = (on === false) ? null
                         : { t0: NOW(), samples: [], prevAng: null, prevR: null,
                             set: (function () {
-                              var m = Object.create(null);
+                              /** @type {Record<string, number>} */
+                              var m = dict();
                               graph.forEachNode(function (id) {
                                 if ((alpha[id] || 0) >= 0.999) m[id] = 1;
                               });
@@ -14976,7 +15016,8 @@ function mountVaultGraph(root, data, deps) {
                         if (isHighlighted(id)) haloed.push(id);
                       });
                       var byPath = function (ids) {
-                        var m = Object.create(null);
+                        /** @type {Record<string, number>} */
+                        var m = dict();
                         ids.forEach(function (id) {
                           var a = graph.getNodeAttributes(id);
                           var k = a.folder + "/" + (a.dirs || []).join("/");
@@ -15084,7 +15125,8 @@ function mountVaultGraph(root, data, deps) {
                       // its note count or its span -- a vault can claim ten years and hold
                       // nine of them in one -- and every year-scale control on the page reads
                       // this distribution rather than the total.
-                      var byYear = Object.create(null);
+                      /** @type {Record<string, number>} */
+                      var byYear = dict();
                       graph.forEachNode(function (id) {
                         if ((alpha[id] || 0) > 0.004) lit++;
                         if (tlMs[id] !== undefined) {

@@ -1404,12 +1404,12 @@ listed 77 findings against our 28 for exactly this reason, and its per-rule coun
 
 | | `plugin/main.js` | `src/page.js` | total |
 |---|---:|---:|---:|
-| `no-unsafe-member-access` | 0 | 142 | 142 |
-| `no-unsafe-assignment` | 0 | 65 | 65 |
-| `no-unsafe-call` | 0 | 26 | 26 |
-| `no-unsafe-argument` | 0 | 65 | 65 |
-| `no-unsafe-return` | 0 | 16 | 16 |
-| **budget** | **0** | **314** | **314** |
+| `no-unsafe-member-access` | 0 | 124 | 124 |
+| `no-unsafe-assignment` | 0 | 42 | 42 |
+| `no-unsafe-call` | 0 | 25 | 25 |
+| `no-unsafe-argument` | 0 | 61 | 61 |
+| `no-unsafe-return` | 0 | 11 | 11 |
+| **budget** | **0** | **263** | **263** |
 
 The gate landed 2026-09-03 on `develop@972daca` at **6,977** -- 510 on the plugin, matching
 the directory's board figure for figure (278 / 101 / 99 / 19 / 13), and 6,467 on the page.
@@ -1430,8 +1430,9 @@ returning `HTMLElement` -- was worth 51 on its own, 1,499 → 1,112; batch 3f (s
 the heatmap -- `Heat`, `HeatDay`, and the canvas elements the band and the ribbon draw on --
 1,112 → 810; batch 3g (same day) typed the render path -- the hub, the note drag, the tween,
 the hover and highlight ramps, edge curvature, Sigma's two reducers and the date ribbon --
-810 → 343, and batch 3h the last of the shipped code -- 343 → 314. **At 314 the meter is
-almost entirely the demo/debug surface** (133) and the `go` block (130), both inside the
+810 → 343, batch 3h the last of the shipped code -- 343 → 314 -- and batch 3i the demo
+storyboard and the last `Object.create(null)` sites, 314 → 263. **At 263 the meter is
+almost entirely the demo/debug surface** (108) and the `go` block (105), both inside the
 markers `scripts/build-plugin.mjs` strips, so what ships in the plugin is typed.
 `scripts/lint.mjs` runs eslint and fails on any
 error, on any warning outside the meter, and on a meter that differs from the budget in
@@ -1451,8 +1452,8 @@ the rules allow `any` to flow into an `unknown`-typed variable, and nothing else
 
 ```bash
 npm run lint                          # 0 errors, 0 actionable warnings, meter = budget, 4 s
-node scripts/lint.mjs --budget 313    # one under: must fail
-node scripts/lint.mjs --budget 315    # one over: must fail too
+node scripts/lint.mjs --budget 262    # one under: must fail
+node scripts/lint.mjs --budget 264    # one over: must fail too
 ```
 
 **The five reach `src/page.js` two ways, and `tsconfig.json` names it so only one has to
