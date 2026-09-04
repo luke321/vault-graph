@@ -188,44 +188,6 @@ export class GraphStore implements GraphStoreApi {
     return rec.attrs;
   }
 
-  /* ------------------------------------------------ sigma 3.0.2 compatibility, transitional --
-   * Until github#58 step 3.6 replaces it, the renderer is still Sigma's bundle, and Sigma
-   * holds the graph itself: its constructor validates the object with graphology-utils'
-   * isGraph (which asks for addUndirectedEdgeWithKey and dropNode as functions and throws
-   * "Sigma: invalid graph instance." otherwise) and subscribes to graph events. None of this is
-   * in the GraphStore interface and none of it is called by page.js; every member below goes
-   * when Sigma does. (edges() and getEdgeAttributes, which Sigma's indexation also reads, are
-   * on the interface: the engine's own renderer reads the edges the same way.)
-   *
-   * on/removeListener are no-ops. The store emits nothing, so Sigma never reacts to a
-   * write -- which is what quietWrites used to arrange around every bulk loop (github#19)
-   * and is safe for the same reason it was: every write in page.js is followed by an
-   * explicit refresh, and Sigma's refresh rebuilds every index from the graph.
-   */
-
-  /** isGraph asks for this too: a simple graph, one edge per pair. */
-  readonly multi = false;
-
-  /** Sigma subscribes to graph events here; nothing is ever emitted. */
-  on(_event: string, _fn: (...args: unknown[]) => void): this {
-    return this;
-  }
-
-  /** The other half of Sigma's subscription, called from its kill(). */
-  removeListener(_event: string, _fn: (...args: unknown[]) => void): this {
-    return this;
-  }
-
-  /** Probed by isGraph, never called: page.js keys nothing itself. */
-  addUndirectedEdgeWithKey(): never {
-    throw new Error("GraphStore: keyed edges are not supported");
-  }
-
-  /** Probed by isGraph, never called: nodes are never removed from the store. */
-  dropNode(): never {
-    throw new Error("GraphStore: nodes are never dropped");
-  }
-
   private attrsOf(id: string): NodeAttrs {
     const attrs = this.nodeAttrs.get(id);
     if (!attrs) throw new Error(`GraphStore: node "${id}" not found`);

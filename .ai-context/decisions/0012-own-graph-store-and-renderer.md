@@ -1,6 +1,6 @@
 # 0012 — Own the graph store and the renderer, in TypeScript
 
-**Date** 2026-09-04 · **Status** accepted, in progress · **Issue** [#58](https://github.com/luke321/vault-graph/issues/58) · **Relates to** `0008`, [#55](https://github.com/luke321/vault-graph/issues/55), [#60](https://github.com/luke321/vault-graph/issues/60)
+**Date** 2026-09-04 · **Status** accepted, landed the same day · **Issue** [#58](https://github.com/luke321/vault-graph/issues/58) · **Relates to** `0008`, [#55](https://github.com/luke321/vault-graph/issues/55), [#60](https://github.com/luke321/vault-graph/issues/60)
 
 ## Context
 
@@ -63,10 +63,11 @@ the same picture** -- and inject them where the bundles are injected today.
   over visible nodes); program registries (`type` stays a field, "halo" and "curve"/"line" are
   fixed draw paths); and **the graph subscription**. The store has no event emitter. The one
   write that leaned on Sigma's reaction -- the node-drag frame -- gets an explicit `refresh()`,
-  and `quietWrites` leaves with the thing it worked around. (Until step 3.6 the store also
-  carries a marked transitional facet for Sigma itself, which holds the graph and validates it
-  with graphology-utils' `isGraph`: no-op `on`/`removeListener`, `getEdgeAttributes`, `edges()`,
-  `multi`, and the two members `isGraph` probes. It goes with Sigma.)
+  and `quietWrites` leaves with the thing it worked around. (Between the store landing and the
+  switch, the store also carried a marked transitional facet for Sigma itself, which held the
+  graph and validated it with graphology-utils' `isGraph`: no-op `on`/`removeListener`, `multi`,
+  and the two members `isGraph` probes. It outlived the switch by one commit -- the adversarial
+  review pass caught it -- and is gone.)
 - **The exporter gains a compile step.** `src/build-graph.mjs` bundles `src/engine/index.ts`
   with esbuild into one IIFE `<script>`, inlined where the two vendor scripts sit. That ends the
   exporter's node-builtins-only stance (`package.json`'s description, the header of
@@ -125,6 +126,10 @@ Things Sigma's source did not say and the harness did.
   engine tests the pointer against each drawn radius (`size / ratio` px) in draw order, last hit
   winning, haloed notes over plain. Same answer to within 2 px, no framebuffer, no texture per
   resize.
+- **Listeners are a Set.** Registering the same function twice on one event fires it once,
+  where Node's EventEmitter (which Sigma used) fired it twice. Nothing in the page does that
+  -- `onDoubleClick` goes on two different events -- and the Set is what makes an
+  unsubscribe during an emit safe. Recorded here because a pixel diff cannot see it.
 - **The two builds must be compared one at a time in one tab.** A background tab gets no
   animation frame, and the page defers its edge-cap refresh to one; two tabs side by side
   measured a settled page against an unsettled one.

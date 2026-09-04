@@ -531,19 +531,35 @@ const data = {
 // classic script that sets `window.VaultGraphEngine`; shell.html reads the constructors off
 // it, the way it read graphology's and Sigma's UMD globals until github#58. Unminified, like the plugin
 // bundle: the shipped file is read by people. `write: false` keeps it in memory -- there is
-// no dist/ to drift. esbuild's output is deterministic for a fixed input, so
-// check-build-order-determinism still holds byte-for-byte.
-const engine = buildSync({
-  entryPoints: [join(ROOT, "src", "engine", "index.ts")],
-  bundle: true,
-  write: false,
-  format: "iife",
-  globalName: "VaultGraphEngine",
-  platform: "browser",
-  target: "es2020",
-  minify: false,
-  logLevel: "silent",
-}).outputFiles[0].text;
+// no dist/ to drift.
+//
+// absWorkingDir IS THE REPO ROOT, NOT process.cwd(). esbuild labels every module in its
+// output with a comment holding the module's path RELATIVE TO THE WORKING DIRECTORY, so the
+// same build from two directories produced two different files (measured: identical to line
+// 1247, then `// src/engine/index.ts` against a `// ../../../../..` climb). This script is
+// run from the vault by refresh-graph.ps1 and from the repo by the harnesses, and the output
+// has to be the same bytes from both -- check-build-order-determinism holds it to that.
+const engine = (() => {
+  try {
+    return buildSync({
+      absWorkingDir: ROOT,
+      entryPoints: [join(ROOT, "src", "engine", "index.ts")],
+      bundle: true,
+      write: false,
+      format: "iife",
+      globalName: "VaultGraphEngine",
+      platform: "browser",
+      target: "es2020",
+      minify: false,
+      logLevel: "silent",
+    }).outputFiles[0].text;
+  } catch (e) {
+    // esbuild's error carries its messages as a list; the default stack shows none of them.
+    const messages = Array.isArray(e.errors) ? e.errors.map((m) => m.text + (m.location ? ` (${m.location.file}:${m.location.line})` : "")) : [String(e.message || e)];
+    console.error("build-graph: the engine did not bundle:\n  " + messages.join("\n  "));
+    process.exit(1);
+  }
+})();
 
 // The engine's camera math and shaders are ported from Sigma.js (MIT); the attribution rides
 // in the engine source itself (src/engine/NOTICE.md) and in the bundle's own comments, so the

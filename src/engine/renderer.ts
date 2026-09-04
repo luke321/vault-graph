@@ -75,11 +75,8 @@ function applyNodeDefaults(key: string, styled: Partial<NodeDisplayData> & Point
   // collector at 3 ms. Conditional writes on the reducer's own object, as Sigma did, keep
   // one allocation per node (the copy the reducer already makes) and leave its shape alone.
   if (!styled.color) styled.color = DEFAULT_NODE_COLOR;
-  // Sigma's rule: a falsy label other than "" is no label; anything else is a string.
-  const raw: unknown = styled.label;
-  if (typeof raw !== "string") {
-    styled.label = (typeof raw === "number" || typeof raw === "boolean") && raw ? String(raw) : null;
-  }
+  // A string is a label, "" included; anything else the reducer left there is no label.
+  if (typeof styled.label !== "string") styled.label = null;
   if (!styled.size) styled.size = 2;
   if (styled.hidden === undefined) styled.hidden = false;
   if (styled.highlighted === undefined) styled.highlighted = false;
@@ -147,6 +144,7 @@ export class Renderer extends Emitter<EventMap> implements RendererApi {
   private height = 0;
   private pixelRatio = 1;
   private needToProcess = false;
+  private killed = false;
   private renderFrame: number | null = null;
   private hoverFrame: number | null = null;
   private readonly onWindowResize = (): void => {
@@ -205,6 +203,7 @@ export class Renderer extends Emitter<EventMap> implements RendererApi {
   /* ------------------------------------------------------------ public API */
 
   refresh(opts?: RefreshOptions): void {
+    if (this.killed) return;
     const partial = opts?.partialGraph;
     if (!partial) {
       this.clearIndices();
@@ -224,6 +223,7 @@ export class Renderer extends Emitter<EventMap> implements RendererApi {
   }
 
   render(): void {
+    if (this.killed) return;
     if (this.renderFrame !== null) {
       this.win.cancelAnimationFrame(this.renderFrame);
       this.renderFrame = null;
@@ -257,7 +257,13 @@ export class Renderer extends Emitter<EventMap> implements RendererApi {
   }
 
   kill(): void {
+    // KILLED FIRST, so nothing that fires afterwards -- the page's timers, a camera tween cut
+    // short, fit()'s landing callback calling setSetting -- can schedule work on a renderer
+    // whose contexts are gone. Sigma had no such guard, and its detached renderer would go on
+    // processing 10,000 nodes per stray frame; nothing threw, so nothing said so.
+    this.killed = true;
     this.removeAllListeners();
+    this.camera.kill();
     this.win.removeEventListener("resize", this.onWindowResize);
     this.captor.kill();
     if (this.renderFrame !== null) this.win.cancelAnimationFrame(this.renderFrame);
@@ -575,7 +581,7 @@ export class Renderer extends Emitter<EventMap> implements RendererApi {
   }
 
   private scheduleRender(): void {
-    if (this.renderFrame !== null) return;
+    if (this.killed || this.renderFrame !== null) return;
     this.renderFrame = this.win.requestAnimationFrame(() => this.render());
   }
 
@@ -584,7 +590,7 @@ export class Renderer extends Emitter<EventMap> implements RendererApi {
   }
 
   private scheduleHighlightedNodesRender(): void {
-    if (this.hoverFrame !== null || this.renderFrame !== null) return;
+    if (this.killed || this.hoverFrame !== null || this.renderFrame !== null) return;
     this.hoverFrame = this.win.requestAnimationFrame(() => {
       this.hoverFrame = null;
       this.renderHighlightedNodes();

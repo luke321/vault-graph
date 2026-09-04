@@ -105,8 +105,11 @@ browser.
 
 ### Getting the exporter
 
-**Requirements: Node 18 or newer. That is the whole list.** No `npm install`, no network
-access, no build tooling.
+**Requirements: Node 18 or newer, and one `npm ci --omit=dev` after unzipping.** That
+installs a single package, esbuild, which bundles the graph engine into the page; nothing
+else is downloaded, and the generator itself never touches the network. (Until the engine
+replaced the vendored libraries there was no install step at all; the trade is recorded in
+[`0012`](.ai-context/decisions/0012-own-graph-store-and-renderer.md).)
 
 **This is not an app you run — it is a generator.** The script reads your vault once and
 writes **one HTML file**. Nothing is listening afterwards; you open that file yourself, in
@@ -122,6 +125,12 @@ the design records and the dev tooling too:
 ```bash
 git clone https://github.com/luke321/vault-graph.git
 cd vault-graph
+```
+
+Either way, once:
+
+```bash
+npm ci --omit=dev        # esbuild only; the dev tooling is not needed to generate
 ```
 
 ### 2. Generate the file
@@ -236,7 +245,7 @@ Registry: `%APPDATA%\obsidian\obsidian.json` (Windows),
 ## Where the output goes
 
 ```
-<this repo>/                              source: template, build script, vendored libs
+<this repo>/                              source: the page, the exporter, the engine (src/engine)
   └─ .ai-context/                         architecture + decision records
 <vault>/03 - Resources/Vault Graph/       ...or anywhere: --out FILE
   ├─ vault-graph.html                     build output, opened directly in a browser

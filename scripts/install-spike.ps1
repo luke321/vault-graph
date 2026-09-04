@@ -10,7 +10,6 @@
 
       plugin/main.js  manifest.json  styles.css
       src/template.html                     -> the page, verbatim
-      vendor/*.js                           -> sigma + graphology, inlined at view time
       assets/logo-mask.png                  -> optional
 
   Vault resolution matches src/build-graph.mjs on purpose: -Vault, then
@@ -119,7 +118,6 @@ if ($TestVault) {
 # ------------------------------------------------------------------- install
 $dest = Join-Path $vaultRoot ".obsidian/plugins/$pluginId"
 New-Item -ItemType Directory -Force -Path $dest | Out-Null
-New-Item -ItemType Directory -Force -Path (Join-Path $dest 'vendor') | Out-Null
 New-Item -ItemType Directory -Force -Path (Join-Path $dest 'assets') | Out-Null
 
 $copies = @(
@@ -127,8 +125,6 @@ $copies = @(
   @{ From = 'plugin/manifest.json'; To = 'manifest.json' }
   @{ From = 'plugin/styles.css';    To = 'styles.css' }
   @{ From = 'src/template.html';    To = 'template.html' }
-  @{ From = 'vendor/graphology.umd.min.js'; To = 'vendor/graphology.umd.min.js' }
-  @{ From = 'vendor/sigma.min.js';          To = 'vendor/sigma.min.js' }
   @{ From = 'assets/logo-mask.png';         To = 'assets/logo-mask.png' }
 )
 

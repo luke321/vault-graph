@@ -64,9 +64,8 @@
  *
  * THE STORE AND THE RENDERER ARE TYPED AS EXACTLY THE MEMBERS THIS FILE CALLS and nothing
  * more -- the interfaces in src/engine/types.ts, which github#58 measured off the two vendored
- * bundles before replacing them. The store is ours already; the renderer is still Sigma's
- * bundle behind the same interface until the rest of #58 lands. Anything a future caller
- * needs that is not named there shows up on the meter, which is the point.
+ * bundles (graphology, Sigma) before replacing both with the engine under src/engine. Anything
+ * a future caller needs that is not named there shows up on the meter, which is the point.
  */
 
 /**
@@ -895,10 +894,11 @@ function mountVaultGraph(root, data, deps) {
   });
 
   // Which notes deserve a permanent label: strictly the best-connected ones.
-  // Sigma's own label thinning is grid-based, which assumes nodes are spread out --
+  // Sigma's own label thinning was grid-based, which assumes nodes are spread out --
   // false by construction in Rings, where every hub is packed into the centre so they
   // all compete for one grid cell. That made the choice effectively arbitrary and
-  // could drop rank 1 entirely, so the ranking is decided here. Ties break on label
+  // could drop rank 1 entirely, so the ranking is decided here (and the engine that
+  // replaced Sigma draws only what this file forces, github#58). Ties break on label
   // so the labelled set is identical on every reload.
   /** @type {Record<string, number>} */
   var hubRank = dict();
@@ -5875,7 +5875,10 @@ function mountVaultGraph(root, data, deps) {
   // not rebuild the spatial index", which is true inside hlWalk's own loop and is NOT true
   // here: this fires whenever the pointer crosses a legend row, which can be at any point
   // during a cascade or a layout tween, when nodes very much have moved. Skipping
-  // indexation then leaves Sigma's quadtree describing where the disc used to be.
+  // indexation then left Sigma's quadtree describing where the disc used to be. (The
+  // engine that replaced Sigma keeps no index and reprocesses on every refresh, so the flag
+  // is accepted and ignored there -- the rule stands as a statement about which code may
+  // claim nothing moved; see invariants.md.)
   //
   // Measured, when this said skipIndexation: the suite went from 17/17 to 9/17 on the demo
   // vault -- aiming at a note resolved nothing ("element at aim CANVAS.sigma-mouse"), the
@@ -8192,10 +8195,10 @@ function mountVaultGraph(root, data, deps) {
           return r;
         }
         // Nothing is permanently labelled. Notes are named on hover, on click and
-        // in search results -- never by Sigma's viewport label grid, which assumes
-        // nodes are spread out and is false by construction here: every hub is
-        // packed into the centre, so they all compete for one grid cell and which
-        // one wins is arbitrary.
+        // in search results -- never by a viewport label grid: Sigma's assumed nodes
+        // are spread out, which is false by construction here (every hub is packed into
+        // the centre, so they all competed for one cell and which one won was arbitrary),
+        // and the engine that replaced it has none -- it draws exactly the forced set.
         r.label = "";
         return r;
   }

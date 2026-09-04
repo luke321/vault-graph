@@ -164,8 +164,8 @@ pre-push: network check failed -- push blocked.
 
 This plugin promises to make no network requests, and the directory's review checks
 that promise on every submission. If a request is genuinely needed it must be
-disclosed to users, not slipped in. If it arrived with a vendored bundle, read what
-it does and account for it in src/vendor.mjs.
+disclosed to users, not slipped in -- the reasoning and the record are in
+.ai-context/decisions/0008-zero-network-calls.md.
 
 There is no skip flag for this check.
 EOF

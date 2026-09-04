@@ -89,6 +89,14 @@ export class Camera extends Emitter<{ updated: CameraState }> implements CameraA
     return this;
   }
 
+  /** Cancels a running tween and drops every listener. The renderer's kill() calls it. */
+  kill(): void {
+    if (this.nextFrame !== null) this.win.cancelAnimationFrame(this.nextFrame);
+    this.nextFrame = null;
+    this.animationCallback = undefined;
+    this.removeAllListeners();
+  }
+
   animate(state: Partial<CameraState>, opts: AnimateOptions = {}, done?: () => void): void {
     const options = { ...ANIMATE_DEFAULTS, ...opts };
     const valid = this.validateState(state);
