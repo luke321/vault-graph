@@ -6,7 +6,7 @@
   "scripts": {
     "build": "node scripts/build-plugin.mjs",
     "dev": "node scripts/build-plugin.mjs --watch",
-    "lint": "eslint plugin src scripts -f ./scripts/lint-summary.mjs --max-warnings 6977"
+    "lint": "node scripts/lint.mjs --budget 6977"
   },
   "devDependencies": {
     "esbuild": "^0.21.5",

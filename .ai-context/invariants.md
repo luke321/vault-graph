@@ -1384,8 +1384,8 @@ formatter prints any that come back in full, the way eslint would.
 **The meter is held at its count.** The five type-aware `@typescript-eslint/no-unsafe-*`
 rules the community directory's review runs on every published version (its board for 1.9.0
 listed 77 findings against our 28 for exactly this reason, and its per-rule counts for
-`plugin/main.js` are the 510 in the table below), at `warn`, with `--max-warnings`
-in `package.json`'s `lint` script set to exactly the total:
+`plugin/main.js` are the 510 in the table below), at `warn`, with `--budget` in
+`package.json`'s `lint` script set to exactly the total:
 
 | | `plugin/main.js` | `src/page.js` | total |
 |---|---:|---:|---:|
@@ -1397,15 +1397,20 @@ in `package.json`'s `lint` script set to exactly the total:
 | **budget** | **510** | **6,467** | **6,977** |
 
 Measured 2026-09-03 on `develop@972daca` plus the dead-code removal that landed with the
-gate; the plugin's 510 match the directory's board figure for figure. Any new warning of
-either kind fails the run. Lowering the count is a deliberate edit of the number in
-`package.json`, and the formatter (`scripts/lint-summary.mjs`) prints budget, used and
-headroom on every run so that edit is made against the figure in front of you. This is the
+gate; the plugin's 510 match the directory's board figure for figure. `scripts/lint.mjs` runs
+eslint and fails on any error, on any warning outside the meter, and on a meter that differs
+from the budget in EITHER direction -- a count below it means something was typed and the
+budget stopped describing the code, so it is lowered in the same commit. eslint's own
+`--max-warnings` gates only the total, and ten meter findings removed without lowering it
+would have let ten unused values through inside the headroom. The formatter
+(`scripts/lint-summary.mjs`) prints budget and meter on every run so the edit is made against
+the figure in front of you. This is the
 progress meter for #55's later phases: every `any` that gets a type takes findings off it.
 
 ```bash
-npm run lint                                    # 0 errors, exactly the budget in warnings, 4 s
-npx eslint plugin src scripts -f ./scripts/lint-summary.mjs --max-warnings 6976   # one under: must fail
+npm run lint                          # 0 errors, 0 actionable warnings, meter = budget, 4 s
+node scripts/lint.mjs --budget 6976   # one under: must fail
+node scripts/lint.mjs --budget 6978   # one over: must fail too
 ```
 
 **The five reach `src/page.js` two ways, and `tsconfig.json` names it so only one has to

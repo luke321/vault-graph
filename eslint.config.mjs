@@ -25,10 +25,11 @@ import { METER_RULES } from "./scripts/lint-summary.mjs";
 // THE METER: the five rules the directory's review runs and the 0.4.1 preset leaves off.
 // WARN, NOT ERROR -- measured on develop@972daca they fire 6,977 times (510 in plugin/main.js,
 // 6,467 in src/page.js), so as errors they would be a wall. The gate is on the COUNT instead:
-// package.json's lint script carries `--max-warnings N` at exactly the measured total, so any
-// new one fails the push and lowering N is a deliberate edit. That makes this the progress
-// meter for #55's later phases -- every `any` that gets a type takes findings off it -- and
-// scripts/lint-summary.mjs is what keeps a 7,000-warning run readable. The list lives there,
+// package.json's lint script runs scripts/lint.mjs with `--budget N` at exactly the measured
+// total, and the wrapper fails when the meter differs from N in EITHER direction: a new one
+// fails the push, and taking one off means lowering N in the same commit. That makes this the
+// progress meter for #55's later phases -- every `any` that gets a type takes findings off it --
+// and scripts/lint-summary.mjs is what keeps a 7,000-warning run readable. The list lives there,
 // imported here, so what is counted and what is warned cannot drift apart.
 const METER = Object.fromEntries(METER_RULES.map((rule) => [rule, "warn"]));
 

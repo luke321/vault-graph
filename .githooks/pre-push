@@ -223,7 +223,7 @@ fi
 # different reason: a lint that runs when someone remembers was 27 warnings deep when it was
 # made a gate (github#55), 26 of them values assigned and never read. The same run
 # also carries the five type-aware no-unsafe-* rules the Obsidian directory's review applies
-# to every published version, held at exactly their current count by --max-warnings in
+# to every published version, held at exactly their current count by the --budget in
 # package.json -- so a new one is caught here rather than on the directory's board.
 #
 # FAILS CLOSED WITHOUT node_modules. eslint is the one gate here that is not a Node built-in,
@@ -245,9 +245,11 @@ if ! (cd "$root" && npm run lint --silent </dev/null); then
 
 pre-push: lint failed -- push blocked.
 
-Read the findings above. A count over the budget means a new no-unsafe-* finding: type
-the value, or raise --max-warnings in package.json's lint script knowingly, with the new
-number -- .ai-context/invariants.md ("The lint warning count does not grow") says why.
+Read the findings above. A meter over the budget means a new no-unsafe-* finding: type the
+value, or raise --budget in package.json's lint script knowingly. A meter under it means
+something got typed: lower --budget to the new count in the same commit. Any warning outside
+the meter is held at zero. .ai-context/invariants.md ("The lint warning count does not grow")
+says why.
 
 There is no skip flag for this check.
 EOF
