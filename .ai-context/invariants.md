@@ -1368,3 +1368,60 @@ defect away. `autoSlotOf` is the rotation position itself — assigned in `build
 animated — and it is what the defect actually moves. Verified by disabling the seeding and
 re-running: **7 groups, 6 disturbed — lost `(vault root)`, `tiny`; renumbered `misc`, `notes`,
 `projects`, `refs`.**
+
+## The lint warning count does not grow
+
+`npm run lint` runs typescript-eslint over the plugin, the page, the exporter and `scripts/`
+(github#55). Two kinds of finding come out of it, and they are held to different rules.
+
+**Actionable findings are zero.** Every syntax and unused-value rule the Obsidian preset
+enables, plus `no-unsupported-api`, on all of our own code. Measured before the gate existed:
+27 warnings (26 × `no-unused-vars` in `src/page.js`, one settings-tab rule), and 40 more when
+the scope was first widened to the exporter and scripts under the same rules -- 25 of them the
+`catch {}` teardown idiom the Node-side block now allows, the other 15 fixed. Zero after; the
+formatter prints any that come back in full, the way eslint would.
+
+**The meter is held at its count.** The five type-aware `@typescript-eslint/no-unsafe-*`
+rules the community directory's review runs on every published version (its board for 1.9.0
+listed 77 findings against our 28 for exactly this reason, and its per-rule counts for
+`plugin/main.js` are the 510 in the table below), at `warn`, with `--budget` in
+`package.json`'s `lint` script set to exactly the total:
+
+| | `plugin/main.js` | `src/page.js` | total |
+|---|---:|---:|---:|
+| `no-unsafe-member-access` | 278 | 3,860 | 4,138 |
+| `no-unsafe-assignment` | 101 | 1,365 | 1,466 |
+| `no-unsafe-call` | 99 | 870 | 969 |
+| `no-unsafe-argument` | 19 | 212 | 231 |
+| `no-unsafe-return` | 13 | 160 | 173 |
+| **budget** | **510** | **6,467** | **6,977** |
+
+Measured 2026-09-03 on `develop@972daca` plus the dead-code removal that landed with the
+gate; the plugin's 510 match the directory's board figure for figure. `scripts/lint.mjs` runs
+eslint and fails on any error, on any warning outside the meter, and on a meter that differs
+from the budget in EITHER direction -- a count below it means something was typed and the
+budget stopped describing the code, so it is lowered in the same commit. eslint's own
+`--max-warnings` gates only the total, and ten meter findings removed without lowering it
+would have let ten unused values through inside the headroom. The formatter
+(`scripts/lint-summary.mjs`) prints budget and meter on every run so the edit is made against
+the figure in front of you. This is the
+progress meter for #55's later phases: every `any` that gets a type takes findings off it.
+
+```bash
+npm run lint                          # 0 errors, 0 actionable warnings, meter = budget, 4 s
+node scripts/lint.mjs --budget 6976   # one under: must fail
+node scripts/lint.mjs --budget 6978   # one over: must fail too
+```
+
+**The five reach `src/page.js` two ways, and `tsconfig.json` names it so only one has to
+hold.** With `include` at `plugin/**/*.js` alone the page was in the type program as the
+plugin's import, and the rules did run on it -- measured, the same 6,467 either way. It is
+named in `include` regardless: a file in the program only because something imports it drops
+out silently the day that import moves, and #55's Phase 1 runs `tsc` over the same config,
+where an unlisted file is simply not checked.
+
+Wired into `.githooks/pre-push` after the two determinism checks and ahead of `SKIP_SMOKE`,
+and into `scripts/release.ps1` right after the dirty-tree check: about five seconds, no
+Chrome, so no skip flag. It **fails closed** on a checkout without `node_modules` -- eslint is
+the one gate that is not a Node built-in, and a gate that skips when its tool is missing is the
+gate that runs when someone remembers, which is how 27 warnings accumulated in the first place.

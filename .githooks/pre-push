@@ -1,5 +1,6 @@
 #!/bin/sh
-# Run the invariant suite before letting a push through -- to develop or main only.
+# Run the gate checks and the invariant suite before letting a push through -- to develop or
+# main only.
 #
 # Enable it in a fresh clone with:
 #
@@ -53,11 +54,11 @@ root=$(git rev-parse --show-toplevel)
 #
 # ONE PASS OVER STDIN DOES TWO JOBS, because stdin can only be read once: the main-ancestry
 # policy below, and deciding whether this push touches develop or main at all. gated_push
-# is what the PII/scope/network/smoke block further down reads -- those checks build the
-# page and drive real Chrome, twice, and paying that on every push to a feature branch
-# nobody has asked to merge yet is the wrong price for the wrong moment. develop and main
-# are where the checks earn their keep: that is what everything else eventually merges
-# into, so that is where a regression has to be caught.
+# is what the gate block further down reads (PII, scope, network, determinism, lint, smoke)
+# -- those checks build the page and drive real Chrome, twice, and paying that on every
+# push to a feature branch nobody has asked to merge yet is the wrong price for the wrong
+# moment. develop and main are where the checks earn their keep: that is what everything
+# else eventually merges into, so that is where a regression has to be caught.
 policy_fail=""
 gated_push=""
 while read -r _local_ref local_sha remote_ref _remote_sha; do
@@ -104,7 +105,8 @@ fi
 # stdin read the main-ancestry policy already consumed -- develop and main only, matching
 # what "feature branches don't get gated" actually means: a branch push still gets the
 # main-ancestry check above for free (it only ever fires for a push to main anyway), just
-# not the PII/scope/network/smoke checks, which is the part that costs real time.
+# not the gate checks (PII, scope, network, determinism, lint, smoke), which is the part
+# that costs real time.
 if [ -z "$gated_push" ]; then
   echo "pre-push: not pushing to develop or main -- skipping the gate checks"
   exit 0
@@ -211,6 +213,43 @@ pre-push: build order determinism check failed -- push blocked.
 build-graph.mjs's note order depended on filesystem enumeration order again -- read the
 FAIL lines above. walk() in src/build-graph.mjs must sort each directory's entries
 (readdirSync(dir).sort()) before recursing or collecting files.
+
+There is no skip flag for this check.
+EOF
+  exit 1
+fi
+
+# LINT NEXT, same bar again -- about five seconds, no Chrome -- and no skip flag, for a
+# different reason: a lint that runs when someone remembers was 27 warnings deep when it was
+# made a gate (github#55), 26 of them values assigned and never read. The same run
+# also carries the five type-aware no-unsafe-* rules the Obsidian directory's review applies
+# to every published version, held at exactly their current count by the --budget in
+# package.json -- so a new one is caught here rather than on the directory's board.
+#
+# FAILS CLOSED WITHOUT node_modules. eslint is the one gate here that is not a Node built-in,
+# and a fresh clone or worktree has not run `npm ci` yet. Skipping in that case would be the
+# runs-when-someone-remembers gate again, with a different excuse; npm ci takes twenty seconds.
+echo "pre-push: linting..."
+if [ ! -e "$root/node_modules/.bin/eslint" ] || ! command -v npm >/dev/null 2>&1; then
+  cat >&2 <<'EOF'
+
+pre-push: lint cannot run -- push blocked.
+
+node_modules/.bin/eslint is missing (or npm is not on PATH), so this checkout has not run
+`npm ci`. Run it, then push again. There is no skip flag for this check.
+EOF
+  exit 1
+fi
+if ! (cd "$root" && npm run lint --silent </dev/null); then
+  cat >&2 <<'EOF'
+
+pre-push: lint failed -- push blocked.
+
+Read the findings above. A meter over the budget means a new no-unsafe-* finding: type the
+value, or raise --budget in package.json's lint script knowingly. A meter under it means
+something got typed: lower --budget to the new count in the same commit. Any warning outside
+the meter is held at zero. .ai-context/invariants.md ("The lint warning count does not grow")
+says why.
 
 There is no skip flag for this check.
 EOF

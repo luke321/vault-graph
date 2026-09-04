@@ -1,11 +1,20 @@
 {
   // NOT a compile step. The plugin is plain JavaScript on purpose -- esbuild bundles it
-  // and nothing transpiles it. This file exists solely so typescript-eslint can build a
-  // program for the type-aware rules in Obsidian's recommended preset (no-deprecated and
-  // friends), which otherwise refuse to load and take the whole lint run down with them.
+  // and nothing transpiles it. This file exists so typescript-eslint can build a program
+  // for the type-aware rules: the ones in Obsidian's recommended preset that refuse to load
+  // without one (no-deprecated and friends), and the five no-unsafe-* rules that
+  // eslint.config.mjs turns on for the plugin and the page (github#55).
+  //
+  // INCLUDE NAMES EVERY FILE THOSE RULES LINT, so the program is stated rather than
+  // inherited. With only plugin/**/*.js here, src/page.js was still in the program -- as the
+  // plugin's import -- and the rules did reach it that way (measured 2026-09-03: 6,467
+  // findings on it either way). But a file that is only in the program because something
+  // else imports it drops out the day that import moves, silently, and #55's Phase 1 runs
+  // tsc over this same config, where an unlisted file is simply not checked. Named, both
+  // stay true by construction.
   //
   // allowJs with checkJs off: give the rules a type graph to read, without turning every
-  // loose annotation in a 700-line JS file into a lint error.
+  // loose annotation in 14k lines of JS into a lint error. checkJs is #55's Phase 1.
   "compilerOptions": {
     "target": "ES2022",
     "module": "ESNext",
@@ -17,5 +26,5 @@
     "strict": false,
     "types": []
   },
-  "include": ["plugin/**/*.js"]
+  "include": ["plugin/**/*.js", "src/page.js"]
 }

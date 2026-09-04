@@ -134,6 +134,19 @@ try {
     throw "Working tree is dirty. Commit first, or pass -AllowDirty if you know why."
   }
 
+  # LINT, FIRST OF THE GATES, because it is the cheapest -- about five seconds, no Chrome --
+  # and because failing here still costs nothing: no tag, no build, no notes read. The same
+  # `npm run lint` the pre-push hook runs on develop and main (github#55): zero actionable
+  # findings, and the five type-aware no-unsafe-* rules the Obsidian directory's review runs on
+  # every published version held at exactly their budget, so a release cannot ship a
+  # count the directory's board would show growing. Sits here rather than beside the invariant
+  # suite so it stays out of the way of the release-flow rewrite in github#10.
+  Write-Host "`n=== lint ===" -ForegroundColor Cyan
+  # THROUGH Invoke-Native, NOT A BARE `&`: over budget, eslint reports on stderr, and under this
+  # script's 'Stop' preference that would end the run before the throw below could say why.
+  try { Invoke-Native npm @('run', 'lint', '--silent') }
+  catch { throw "lint failed -- not releasing (npm ci first, if this is a fresh clone)" }
+
   # A tag already ON THIS COMMIT is a resumed run, not a mistake -- the first version of
   # this script died between pushing and publishing, and refusing to continue would have
   # meant deleting a good tag to re-make it identically. A tag pointing anywhere else is

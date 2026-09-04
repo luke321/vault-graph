@@ -24,7 +24,7 @@ function json(port, path) {
       let b = "";
       res.on("data", (c) => (b += c));
       res.on("end", () => {
-        try { resolve(JSON.parse(b)); } catch (e) { reject(new Error(`bad JSON from ${path}: ${b.slice(0, 200)}`)); }
+        try { resolve(JSON.parse(b)); } catch { reject(new Error(`bad JSON from ${path}: ${b.slice(0, 200)}`)); }
       });
     });
     req.on("error", reject);

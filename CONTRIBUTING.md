@@ -50,9 +50,10 @@ slots, the six-degree minimum wedge, the fifty-two-week heatmap window. Each has
 measurement behind it, and the recurring failure mode in this repo is reasoning about the
 code instead of measuring it.
 
-Three commands, and all three are gates rather than suggestions:
+Four commands, and all four are gates rather than suggestions:
 
 ```bash
+npm run lint                   # our own code under typescript-eslint; the budget may not grow
 node scripts/smoke.mjs         # 17 invariants, over two vault shapes
 node scripts/check-scope.mjs   # the page cannot style, or be styled by, its host
 node scripts/check-network.mjs # nothing shipped can make a network request
@@ -82,10 +83,12 @@ other harnesses open the graph in the foreground, which is the one state where t
 happens — so this one quits and relaunches to get the leaf into the state a person's first
 restart of the day puts it in.
 
-`git config core.hooksPath .githooks` once per clone runs those on every push, along with a
-check that refuses to publish other people's names. Three of the four have no skip flag, on
-purpose: what they prevent is damage to somebody else's software, or to somebody else —
-and all three are static reads that cost milliseconds, so there is nothing to skip for.
+`git config core.hooksPath .githooks` once per clone runs those on every push to `develop` or
+`main`, along with a check that refuses to publish other people's names and two that keep the
+generated fixtures deterministic. Only the invariant suite has a skip flag, on purpose:
+everything else is a static read costing seconds at most, and what most of it prevents is
+damage to somebody else's software, or to somebody else. The lint gate fails closed on a
+clone that has not run `npm ci` — run it, then push.
 
 ## Branches, and how work reaches main
 

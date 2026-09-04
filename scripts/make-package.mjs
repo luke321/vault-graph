@@ -14,7 +14,7 @@
 // include list to stay correct.
 
 import { execFileSync } from "node:child_process";
-import { mkdirSync, rmSync, existsSync, cpSync, writeFileSync, readdirSync, statSync } from "node:fs";
+import { mkdirSync, rmSync, cpSync, writeFileSync, readdirSync, statSync } from "node:fs";
 import { join, dirname, relative, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
