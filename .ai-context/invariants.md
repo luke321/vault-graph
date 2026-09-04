@@ -1436,8 +1436,19 @@ where an unlisted file is simply not checked. `plugin/bundler-modules.d.ts` is n
 and an error type at every use.
 
 ```bash
-npm run lint                          # 0 errors, 0 warnings, ~5 s
+npm run lint                          # typecheck: ok, then 0 errors, 0 warnings
 ```
+
+**Since github#58 the same command runs `tsc --noEmit` first.** `src/engine/**/*.ts` -- the
+graph store and renderer that replace the vendored bundles -- is TypeScript under `strict: true`,
+and `scripts/lint.mjs` runs the compiler over `tsconfig.engine.json` ahead of eslint so a type
+error fails the push by the same gate a lint finding does. **Two configs, because `strict`
+cannot be per-file, and this was measured rather than assumed:** `strict` on the shared
+`tsconfig.json` put **29** errors on `src/page.js` -- every one a `getAttribute()` result that is
+`string | null` under `strictNullChecks` flowing into an index or a call, which is #55's Phase 4
+ratchet -- and esbuild, which reads `tsconfig.json`'s `strict`, injected three `"use strict"`
+directives into `main.js`. With the typedefs re-pointed to the engine and `strict` off the shared
+program, lint stayed at 0 errors, 0 warnings and the plugin bundle byte-identical.
 
 Wired into `.githooks/pre-push` after the two determinism checks and ahead of `SKIP_SMOKE`,
 and into `scripts/release.ps1` right after the dirty-tree check: about five seconds, no

@@ -113,134 +113,45 @@
  */
 
 /**
- * The attributes this file puts on every graph node at addNode, and reads back.
- * @typedef {Object} NodeAttrs
- * @property {string} label
- * @property {number} x
- * @property {number} y
- * @property {number} size
- * @property {string} folder
- * @property {string} sub
- * @property {string[]} dirs
- * @property {string} ntype
- * @property {string[]} tags
- * @property {string} path
- * @property {number} deg
- * @property {string} created
- * @property {string} touched
- * @property {number} words
- * @property {boolean} ghost
+ * The attributes this file puts on every graph node at addNode, and reads back. Declared in
+ * src/engine/types.ts since github#58 -- the store and the renderer are checked against the
+ * same declaration this file is -- and imported here as TYPES ONLY: the exporter still pastes
+ * this file as text, and a JSDoc import is a comment to it.
+ * @typedef {import("./engine/types").NodeAttrs} NodeAttrs
+ * @typedef {import("./engine/types").EdgeAttrs} EdgeAttrs
  */
-
-/** @typedef {{ weight: number, size: number }} EdgeAttrs */
 
 /** A listener as graphology hands it back from rawListeners and takes it for on(). */
 /** @typedef {(...args: unknown[]) => void} GraphListener */
 
 /**
- * The graphology surface this file uses -- an undirected graph keyed by node id.
- * @typedef {Object} GraphLike
- * @property {number} order
- * @property {number} size
- * @property {(id: string, attrs: NodeAttrs) => string} addNode
- * @property {(a: string, b: string, attrs?: EdgeAttrs) => string} addUndirectedEdge
- * @property {(id: string) => boolean} hasNode
- * @property {(a: string, b: string) => boolean} hasEdge
- * @property {(e: string) => void} dropEdge
- * @property {(e: string) => [string, string]} extremities
- * @property {(id: string) => number} degree
- * @property {(id: string) => string[]} neighbors
- * @property {() => string[]} nodes
- * @property {(fn: (id: string, attrs: NodeAttrs) => void) => void} forEachNode
- * @property {{ (fn: (e: string, attrs: EdgeAttrs, s: string, t: string) => void): void,
- *              (id: string, fn: (e: string, attrs: EdgeAttrs, s: string, t: string) => void): void }} forEachEdge
- * @property {<K extends keyof NodeAttrs>(id: string, name: K) => NodeAttrs[K]} getNodeAttribute
- * @property {(id: string) => NodeAttrs} getNodeAttributes
- * @property {<K extends keyof NodeAttrs>(id: string, name: K, value: NodeAttrs[K]) => void} setNodeAttribute
- * @property {(id: string, attrs: Partial<NodeAttrs>) => void} mergeNodeAttributes
- * @property {(event: string, fn: GraphListener) => void} on
- * @property {(event: string, fn: GraphListener) => void} removeListener
- * @property {(event: string) => GraphListener[]} rawListeners
+ * The graph store, plus graphology's event surface. The listener trio exists only for
+ * quietWrites, which silences Sigma's subscription to the graph during bulk position writes;
+ * both go when graphology does (github#58, step 2), so they stay declared here rather than in
+ * the engine's own GraphStore.
+ * @typedef {import("./engine/types").GraphStore & {
+ *   on: (event: string, fn: GraphListener) => void,
+ *   removeListener: (event: string, fn: GraphListener) => void,
+ *   rawListeners: (event: string) => GraphListener[],
+ * }} GraphLike
  */
 
 /** @typedef {new (opts?: { type?: string }) => GraphLike} GraphCtor */
 
-/** @typedef {{ x: number, y: number }} Point */
-
-/** @typedef {{ x: number, y: number, ratio: number, angle: number }} CameraState */
-
-/**
- * @typedef {Object} CameraLike
- * @property {number} x
- * @property {number} y
- * @property {number} ratio
- * @property {() => CameraState} getState
- * @property {(to: Partial<CameraState>, opts?: { duration?: number }, done?: () => void) => void} animate
- * @property {(event: string, fn: () => void) => void} on
- */
-
-/**
- * What sigma's reducers return and getNodeDisplayData reads back: our attributes plus
- * sigma's own display fields.
- * @typedef {Object} NodeDisplayData
- * @property {number} x
- * @property {number} y
- * @property {number} size
- * @property {string} color
- * @property {string | null} label
- * @property {boolean} hidden
- * @property {boolean} [highlighted]
- * @property {boolean} [forceLabel]
- * @property {number} [zIndex]
- * @property {string} [type]
- */
-
-/**
- * @typedef {Object} EdgeDisplayData
- * @property {number} size
- * @property {string} color
- * @property {boolean} hidden
- * @property {string} [type]
- * @property {number} [curvature]
- * @property {string | null} [label]
- */
-
-/** The sigma settings this file reads or writes after construction. */
-/**
- * @typedef {Object} SigmaSettings
- * @property {number} minCameraRatio
- * @property {number} maxCameraRatio
- * @property {number} minEdgeThickness
- * @property {number} zoomDuration
- * @property {number} zoomingRatio
- * @property {boolean} enableCameraPanning
- */
-
-/** The mouse payload sigma passes to node and stage events. */
-/** @typedef {{ x: number, y: number, original: MouseEvent, preventSigmaDefault: () => void }} SigmaMouseEvent */
+/** @typedef {import("./engine/types").Point} Point */
+/** @typedef {import("./engine/types").CameraState} CameraState */
+/** @typedef {import("./engine/types").Camera} CameraLike */
+/** What the node style function returns and getNodeDisplayData reads back. */
+/** @typedef {import("./engine/types").NodeDisplayData} NodeDisplayData */
+/** @typedef {import("./engine/types").EdgeDisplayData} EdgeDisplayData */
+/** The settings this file reads or writes after construction, and the ones drawHover reads. */
+/** @typedef {import("./engine/types").RendererSettings} SigmaSettings */
+/** The mouse payload the renderer passes to node and stage events. */
+/** @typedef {import("./engine/types").MouseCoords} SigmaMouseEvent */
 /** Node events carry `node`; stage events (clickStage, doubleClickStage) and afterRender do not. */
 /** @typedef {{ node?: string, event: SigmaMouseEvent, preventSigmaDefault?: () => void }} SigmaNodeEvent */
-
-/**
- * The sigma renderer surface this file uses.
- * @typedef {Object} SigmaLike
- * @property {(opts?: { partialGraph?: { nodes?: string[], edges?: string[] }, skipIndexation?: boolean, schedule?: boolean }) => void} refresh
- * @property {() => void} render
- * @property {() => void} kill
- * @property {(p: Point) => Point} graphToViewport
- * @property {(p: Point) => Point} viewportToGraph
- * @property {() => CameraLike} getCamera
- * @property {(size: number) => number} scaleSize
- * @property {(id: string) => NodeDisplayData | undefined} getNodeDisplayData
- * @property {(e: string) => EdgeDisplayData | undefined} getEdgeDisplayData
- * @property {<K extends keyof SigmaSettings>(name: K) => SigmaSettings[K]} getSetting
- * @property {<K extends keyof SigmaSettings>(name: K, value: SigmaSettings[K]) => void} setSetting
- * @property {() => Record<string, HTMLCanvasElement>} getCanvases
- * @property {() => { width: number, height: number }} getDimensions
- * @property {() => { on: (event: string, fn: (e: SigmaMouseEvent) => void) => void }} [getMouseCaptor]
- * @property {(bbox: { x: [number, number], y: [number, number] } | null) => void} setCustomBBox
- * @property {(event: string, fn: (e: SigmaNodeEvent) => void) => void} on
- */
+/** The renderer surface this file uses -- Sigma's today, the engine's once github#58 lands. */
+/** @typedef {import("./engine/types").Renderer} SigmaLike */
 
 /** @typedef {new (graph: GraphLike, container: HTMLElement, settings: Record<string, unknown>) => SigmaLike} SigmaCtor */
 

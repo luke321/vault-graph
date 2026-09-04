@@ -6,7 +6,8 @@
   "scripts": {
     "build": "node scripts/build-plugin.mjs",
     "dev": "node scripts/build-plugin.mjs --watch",
-    "lint": "node scripts/lint.mjs"
+    "lint": "node scripts/lint.mjs",
+    "typecheck": "tsc --noEmit -p tsconfig.engine.json"
   },
   "devDependencies": {
     "esbuild": "^0.21.5",

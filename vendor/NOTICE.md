@@ -49,10 +49,14 @@ oversight rather than a design. Measured and asserted by
 MIT asks that the notice above be preserved in redistributions; stating what was changed is
 the other half of doing that honestly.
 
-> **Versions are not recorded.** These were vendored without pinning a version, which is a
-> gap worth closing: nobody — including us — can currently tell which release is in the
-> tree or whether it is behind on a fix. If you update either file, record the version here
-> in the same commit.
+> **Versions: sigma 3.0.2 and graphology 0.26.0.** They were vendored without pinning, and
+> identified on 2026-09-04 by hashing the files against the `dist/` builds in the npm
+> tarballs: `sigma.min.js` is byte-identical to `sigma@3.0.2/dist/sigma.min.js` (sha256
+> `be6f790d…`, 186,853 bytes; 3.0.1 and 3.0.3 differ) and `graphology.umd.min.js` to
+> `graphology@0.26.0/dist/graphology.umd.min.js` (sha256 `dc337efa…`, 73,629 bytes). Both
+> are being replaced by code of our own — `.ai-context/decisions/0012-*.md`, github#58 — so
+> this is a record for the port, not a pin to maintain. If you do update either file, record
+> the version here in the same commit.
 
 ---
 

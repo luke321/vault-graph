@@ -53,7 +53,7 @@ code instead of measuring it.
 Four commands, and all four are gates rather than suggestions:
 
 ```bash
-npm run lint                   # our own code under typescript-eslint; every finding is held at zero
+npm run lint                   # tsc --noEmit on the engine, then typescript-eslint on our own code; every finding is held at zero
 node scripts/smoke.mjs         # 17 invariants, over two vault shapes
 node scripts/check-scope.mjs   # the page cannot style, or be styled by, its host
 node scripts/check-network.mjs # nothing shipped can make a network request

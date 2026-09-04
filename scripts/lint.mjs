@@ -17,13 +17,38 @@
 //
 // Runs eslint through its Node API so the same results feed the formatter and the gate; the
 // scope (plugin, src, scripts) and the config are the ones eslint.config.mjs describes.
+//
+// TYPECHECK FIRST (github#58). src/engine is TypeScript, and a type error in it is the same
+// kind of finding as a lint error -- so `tsc --noEmit` over tsconfig.engine.json runs here,
+// ahead of eslint, and the hook and release.ps1 inherit it through `npm run lint` without a
+// second entry. That config is the engine alone under `strict`; the shared tsconfig.json the
+// lint rules read stays non-strict for the reasons written in both files. Fails closed like
+// the rest of this file: a checkout without node_modules has no tsc, and a gate that skips
+// when its tool is missing is the gate that runs when someone remembers.
 
 import { ESLint } from "eslint";
-import { dirname, resolve } from "node:path";
+import { spawnSync } from "node:child_process";
+import { existsSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const SCOPE = ["plugin", "src", "scripts"];
+
+const TSC = join(ROOT, "node_modules", "typescript", "bin", "tsc");
+if (!existsSync(TSC)) {
+  console.log("typecheck: FAIL -- node_modules/typescript is missing; run npm ci");
+  process.exit(1);
+}
+const tsc = spawnSync(process.execPath, [TSC, "--noEmit", "-p", join(ROOT, "tsconfig.engine.json")],
+                      { cwd: ROOT, encoding: "utf8" });
+if (tsc.stdout) process.stdout.write(tsc.stdout);
+if (tsc.stderr) process.stderr.write(tsc.stderr);
+if (tsc.status !== 0) {
+  console.log("typecheck: FAIL -- tsc --noEmit reported the errors above");
+  process.exit(1);
+}
+console.log("typecheck: ok -- tsc --noEmit clean");
 
 const eslint = new ESLint({ cwd: ROOT });
 const results = await eslint.lintFiles(SCOPE);
