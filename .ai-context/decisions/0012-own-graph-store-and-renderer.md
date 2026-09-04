@@ -129,13 +129,37 @@ Things Sigma's source did not say and the harness did.
   animation frame, and the page defers its edge-cap refresh to one; two tabs side by side
   measured a settled page against an unsettled one.
 
+## Landed
+
+2026-09-04, one branch, four commits, in the order the issue sequenced: the interface and
+toolchain; the store; the renderer behind a `--renderer sigma|own` switch, measured against the
+Sigma build of the same vault; then the switch. **Steps 3.6 and 4 merged into one commit**:
+once page.js constructs the engine's typed options the Sigma path is dead code, so the flag, the
+shim, `src/vendor.mjs`, the `vendor-no-network` esbuild plugin, the licence header and
+`vendor/` went with it. `deps.Sigma` is `deps.Renderer`, `preventSigmaDefault` is the payload's
+`preventDefault`, and the reducers keep their names (`nodeReducer`, `edgeReducer`) because the
+page talks about them by those names throughout.
+
+| | before | after |
+|---|---|---|
+| `main.js` | 694 KB | **417 KB** |
+| third-party code under lint | 261 KB, unpinned | none |
+| build-time patches on someone else's bundle | 2 | 0 |
+| WebGL contexts per renderer | 3 (+ a picking framebuffer) | 3 |
+| pixels differing from the Sigma build, 3 fixtures × 3 ratios, at rest and in a search | -- | **0** |
+
+The exporter needs `npm ci` once now (esbuild bundles the engine), so the release package
+carries `package.json` and the lockfile and `releasing.md` says so. `scripts/render-diff.mjs`
+stays as the before/after harness for any renderer change, comparing the current build against
+reference pages built from the commit the picture is held to.
+
 ## Verify
 
 ```bash
 npm run lint                                        # typecheck + eslint, 0 errors, 0 warnings
 node scripts/smoke.mjs --only "golden snapshot"     # positions unchanged, all three fixtures
-node scripts/render-diff.mjs                        # camera |d| 0, 0 pixels differing, every fixture
-node scripts/render-diff.mjs --query note           # the same in a search
+node scripts/render-diff.mjs --against-dir <refs>   # camera |d| 0, 0 pixels differing, every fixture
+node scripts/render-diff.mjs --against-dir <refs> --query note   # the same in a search
 ```
 
 Measured at step 1 (interface + toolchain, no runtime change): plugin bundle byte-identical to

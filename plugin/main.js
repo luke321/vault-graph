@@ -31,9 +31,9 @@ import { Plugin, ItemView, Notice, PluginSettingTab, Setting, normalizePath, add
 // page.css is absent on purpose -- it is no longer the plugin's business. It ships as
 // styles.css, which Obsidian loads itself; see scripts/build-plugin.mjs.
 import { mountVaultGraph } from "../src/page.js";
-// The graph store is ours (github#58); esbuild compiles the TypeScript as part of bundling.
-import { GraphStore } from "../src/engine/index";
-import sigma from "../vendor/sigma.min.js";
+// The graph store and the renderer are ours (github#58); esbuild compiles the TypeScript as
+// part of bundling.
+import { GraphStore, Renderer } from "../src/engine/index";
 // When a note was written. The SAME module build-graph.mjs uses -- the two crawls stay
 // separate on purpose, the date rule does not. github#6
 import { localDay, resolveCreated, dateTally } from "../src/dates.mjs";
@@ -541,9 +541,10 @@ class VaultGraphView extends ItemView {
     this.teardown();
   }
 
-  // FREE THE WEBGL CONTEXT. Sigma holds one per renderer and a browser allows a small
-  // number of them; opening and closing this view a dozen times without killing the
-  // renderer exhausts them and the thirteenth mount draws nothing at all.
+  // FREE THE WEBGL CONTEXTS. The renderer holds three (edges, nodes, hoverNodes) and a
+  // browser allows a small number per page; opening and closing this view a few times without
+  // killing the renderer exhausts them and the next mount draws nothing at all. kill() loses
+  // them (WEBGL_lose_context) along with the listeners and the layers.
   teardown() {
     const api = this.handle && this.handle.api;
     if (api && api.renderer) {
@@ -615,12 +616,10 @@ class VaultGraphView extends ItemView {
 
     const t0 = performance.now();
     this.handle = mountVaultGraph(page, data, {
-      // Real module imports, not globals: the engine is our own module and the Sigma UMD
-      // wrapper takes its `module.exports` branch under esbuild, so nothing is ever assigned
-      // to `window`. This is exactly why page.js takes its libraries as arguments.
+      // Real module imports, not globals: the engine is our own module and nothing is ever
+      // assigned to `window`. This is exactly why page.js takes its constructors as arguments.
       Graph: GraphStore,
-      Sigma: sigma.Sigma || sigma,
-      rendering: sigma.rendering || {},
+      Renderer: Renderer,
       logoMask: "data:image/png;base64," + LOGO_MASK_B64,
       // The saved per-folder and per-subfolder palette slots, and visibility defaults.
       folderColors: this.plugin.settings.folderColors,

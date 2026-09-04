@@ -109,8 +109,8 @@ export class Renderer extends Emitter<EventMap> implements RendererApi {
   private readonly settings: RendererSettings;
   private readonly win: Window;
   private readonly doc: Document;
-  private readonly nodeStyle: RendererOptions["nodeStyle"];
-  private readonly edgeStyle: RendererOptions["edgeStyle"];
+  private readonly nodeReducer: RendererOptions["nodeReducer"];
+  private readonly edgeReducer: RendererOptions["edgeReducer"];
   private readonly drawHover: RendererOptions["drawHover"];
 
   private readonly elements = new Map<string, HTMLCanvasElement>();
@@ -156,12 +156,12 @@ export class Renderer extends Emitter<EventMap> implements RendererApi {
     options: RendererOptions,
   ) {
     super();
-    const { win, nodeStyle, edgeStyle, drawHover, ...settings } = options;
+    const { win, nodeReducer, edgeReducer, drawHover, ...settings } = options;
     this.settings = { ...settings };
     this.win = win;
     this.doc = container.ownerDocument;
-    this.nodeStyle = nodeStyle;
-    this.edgeStyle = edgeStyle;
+    this.nodeReducer = nodeReducer;
+    this.edgeReducer = edgeReducer;
     this.drawHover = drawHover;
 
     // The layers, in stacking order.
@@ -386,7 +386,7 @@ export class Renderer extends Emitter<EventMap> implements RendererApi {
   /* ------------------------------------------------------------- indexing */
 
   private addNode(id: string): void {
-    const styled = this.nodeStyle(id, { ...this.graph.getNodeAttributes(id) });
+    const styled = this.nodeReducer(id, { ...this.graph.getNodeAttributes(id) });
     const data = applyNodeDefaults(id, styled);
     this.nodeData.set(id, data);
     this.forcedLabels.delete(id);
@@ -405,7 +405,7 @@ export class Renderer extends Emitter<EventMap> implements RendererApi {
   }
 
   private addEdge(edge: string): void {
-    const styled = this.edgeStyle(edge, { ...this.graph.getEdgeAttributes(edge) });
+    const styled = this.edgeReducer(edge, { ...this.graph.getEdgeAttributes(edge) });
     const data = applyEdgeDefaults(styled);
     this.edgeData.set(edge, data);
     const z = data.zIndex ?? 0;
@@ -641,7 +641,7 @@ export class Renderer extends Emitter<EventMap> implements RendererApi {
   /* --------------------------------------------------------------- events */
 
   private bindCaptor(): void {
-    const base = (event: Coords): StageEvent => ({ event, preventSigmaDefault: () => event.preventSigmaDefault() });
+    const base = (event: Coords): StageEvent => ({ event, preventDefault: () => event.preventDefault() });
 
     this.captor.on("mousemove", (e) => {
       const ev = base(e);

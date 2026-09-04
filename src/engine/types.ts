@@ -162,10 +162,10 @@ export interface EdgeDisplayData {
   zIndex?: number;
 }
 
-/** The node style function: today's `nodeReducer`. Called for every node on every refresh. */
-export type NodeStyle = (id: string, attrs: NodeAttrs) => NodeDisplayData;
-/** The edge style function: today's `edgeReducer`. */
-export type EdgeStyle = (id: string, attrs: EdgeAttrs) => EdgeAttrs & Partial<EdgeDisplayData>;
+/** The page's node reducer: attributes in, display data out. Called for every node on every refresh. */
+export type NodeReducer = (id: string, attrs: NodeAttrs) => NodeDisplayData;
+/** The page's edge reducer. */
+export type EdgeReducer = (id: string, attrs: EdgeAttrs) => EdgeAttrs & Partial<EdgeDisplayData>;
 
 /* ------------------------------------------------------------- settings */
 
@@ -207,8 +207,8 @@ export type DrawHover = (
 export interface RendererOptions extends RendererSettings {
   /** The window the view lives in -- a popout's, not the global one. Timers and rAF go through it. */
   win: Window;
-  nodeStyle: NodeStyle;
-  edgeStyle: EdgeStyle;
+  nodeReducer: NodeReducer;
+  edgeReducer: EdgeReducer;
   drawHover: DrawHover;
 }
 
@@ -216,26 +216,26 @@ export interface RendererOptions extends RendererSettings {
 
 /**
  * The pointer payload every event carries. `x`/`y` are viewport px relative to the container;
- * `original` is the DOM event. `preventSigmaDefault` keeps Sigma's name until the vendor layer
- * goes (three call sites in page.js); it stops the renderer's own handling of the gesture --
- * a pan, or the wheel zoom -- for this event.
+ * `original` is the DOM event. `preventDefault` is the payload's, not the DOM event's: it stops
+ * the renderer's own handling of the gesture -- a pan, or the wheel zoom -- for this event.
+ * page.js calls it in its node drag and on double click.
  */
 export interface MouseCoords {
   x: number;
   y: number;
   original: MouseEvent;
-  preventSigmaDefault(): void;
+  preventDefault(): void;
 }
 
 export interface NodeEvent {
   node: string;
   event: MouseCoords;
-  preventSigmaDefault(): void;
+  preventDefault(): void;
 }
 
 export interface StageEvent {
   event: MouseCoords;
-  preventSigmaDefault(): void;
+  preventDefault(): void;
 }
 
 /** The nine events the page listens to, with their payloads. */

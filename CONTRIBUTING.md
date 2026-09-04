@@ -77,6 +77,13 @@ point it at a generated vault. It is the only harness that covers the whole roun
 write a file, Obsidian notices, rebuild, remount, the note is on the disc — which is what
 `Refresh doesn't seem to pick up new files` turned out to be about.
 
+One more if you touch the renderer (`src/engine/`): the suite asserts numbers, and none of
+them can see a disc in the wrong colour. `node scripts/render-diff.mjs --against-dir <dir>`
+compares the current build of every fixture, pixel by pixel and node by node, against
+reference builds of the same vaults made from the commit you are holding the picture to. The
+bar and how to make the references are in `.ai-context/invariants.md` ("The engine draws
+Sigma's picture").
+
 Since Obsidian 1.7.2 a tab restored in the background is **deferred**: the leaf is real and
 `getLeavesOfType` finds it, but `leaf.view` is a placeholder until something reveals it. Both
 other harnesses open the graph in the foreground, which is the one state where that never

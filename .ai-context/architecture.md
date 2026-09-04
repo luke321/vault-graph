@@ -11,8 +11,8 @@ crawl vault ─┐
              ├─ nodes + edges ─┐
 read .obsidian config ─────────┼──► window.VAULT_DATA ──► graph (src/engine/store.ts)
                                │                              │
-vendored lib/*.js ─────────────┘                              ▼
-                                                    plan ──► layout ──► render (sigma)
+src/engine (bundled) ──────────┘                              ▼
+                                                    plan ──► layout ──► render (src/engine)
                                                      ▲          │
                                                      └── cascade ┘
 ```
@@ -63,7 +63,7 @@ Locked once at load, from the whole vault, and never re-derived from what is vis
 |---|---|---|
 | `bandLock` | which band each group is in | otherwise enabling something in one ring re-packs the other |
 | `geomLock` | `r0`, `rOuter`, `maxR` | the hub radius and the outer base, so the rings are independent |
-| normalisation box | sigma's `autoRescale` extent | hiding one folder otherwise moved the origin 13px and zoomed 8.2% |
+| normalisation box | the renderer's custom bbox | hiding one folder otherwise moved the origin 13px and zoomed 8.2% |
 
 ### 3. Cascade — the reveal/hide animation
 
@@ -76,10 +76,12 @@ Both endpoints come from `staticPlan(presentFn)`, which derives every argument f
 jump chased on 2026-08-22 was the animation planner and the static planner being called
 with *different arguments* and drifting apart one argument at a time.
 
-### 4. Render — sigma
+### 4. Render — the engine (`src/engine/`)
 
-Node reducers apply colour, size, halo and the highlight push. `skipIndexation: true`
-while animating; `settle()` rebuilds the quadtree once at the end.
+Node reducers apply colour, size, halo and the highlight push; the renderer (ours since
+github#58, a port of sigma 3.0.2's camera math and programs) draws them in WebGL2. It keeps no
+spatial index -- picking is geometric -- so the `skipIndexation: true` the page still passes
+while animating is accepted and ignored; `settle()` refreshes once at the end.
 
 ## The through-line
 

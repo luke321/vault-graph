@@ -389,9 +389,11 @@ deleted `mark today` checks were the only cover for.
 
 ## `skipIndexation` is a promise, and only hlWalk can keep it
 
-`renderer.refresh({ skipIndexation: true })` tells Sigma "nothing moved, do not rebuild the
+`renderer.refresh({ skipIndexation: true })` told Sigma "nothing moved, do not rebuild the
 spatial index". Inside `hlWalk` that is true by construction: its loop writes `hl[id]` and
-nothing else, so it earns the flag and needs it — it runs every frame of a ramp.
+nothing else, so it earns the flag and needs it — it runs every frame of a ramp. (Since
+github#58 the engine keeps no spatial index and accepts the flag without reading it; the rule
+stands as a statement about which code may claim nothing moved, which is what it always was.)
 
 **Anything driven by a person's pointer has not earned it.** Hover highlight was written
 with the flag copied from `hlWalk`, on the reasoning that a halo does not move anything.
@@ -483,8 +485,9 @@ node scripts/smoke.mjs      # "hover re-arms after the pointer leaves the stage"
 It did not, for as long as this project has existed. Sigma's `handleLeave` emits
 `leaveNode` without clearing its own `hoveredNode`, so on re-entry
 `hoveredNode !== nodeAtPosition` is false and nothing is emitted — glance at the sidebar,
-come back to the note you were reading, no highlight. `src/vendor.mjs` patches it at read
-time; `handleMove`, two lines earlier in the same bundle, always did it correctly.
+come back to the note you were reading, no highlight. Until github#58 `src/vendor.mjs`
+patched the bundle at read time; the engine's own captor clears it (`src/engine/renderer.ts`,
+the mouseleave handler), and this check is what says so.
 
 It is also what made this suite flaky, which is the more expensive half of the story: the
 hover checks failed whenever anything earlier had moved the pointer off the canvas.
@@ -1017,9 +1020,10 @@ __vg.edgeInk()      // -> the web's own coverage, with no note or label mixed in
 
 **Two assertions, and they do different jobs:**
 
-- `minEdgeThickness <= 1.0`. Blunt on purpose — the real regression risk is a sigma upgrade
+- `minEdgeThickness <= 1.0`. Blunt on purpose — the regression risk was a sigma upgrade
   restoring its default, and since the value was never set explicitly for the whole life of
-  the file, nothing would have said so.
+  the file, nothing would have said so. The engine has no default to restore (github#58); the
+  assertion stays because the number is a measured one.
 - **The floor is at most 2x the median natural resting width.** This is *why* 1.0 rather than
   some other smaller number, and it is what a later change to `edgeAttrsOf`'s width would trip
   — make links thinner without revisiting the floor and the floor becomes dominant again.
@@ -1392,12 +1396,17 @@ assert numbers and none reads a disc's colour or a curve's bow. So the compariso
 harness:
 
 ```bash
-node scripts/render-diff.mjs                  # every fixture, ratios 1.08 / 0.35 / 4.2
-node scripts/render-diff.mjs --query note     # the same, in a search: labels and pills lit
+node scripts/render-diff.mjs --against-dir <dir>              # every fixture, ratios 1.08 / 0.35 / 4.2
+node scripts/render-diff.mjs --against-dir <dir> --query note # the same, in a search: labels and pills lit
 ```
 
-It builds a fixture with `--renderer sigma` and `--renderer own`, loads each in one Chrome tab
-in turn, puts the camera in the same state, and compares two things per ratio: **camera** --
+It builds each fixture from the current tree and compares it against a reference build of the
+same vault -- `<dir>/<fixture>*.html`, made from whatever commit the picture is being held to
+(a worktree at that commit, its `node_modules` junctioned in, `src/build-graph.mjs --vault ...
+--out ...`). Until the switch the reference was the same tree's `--renderer sigma` build; the
+three Sigma-rendered references the switch was measured against are not kept in the repo,
+because a built page carries every note title of its vault. It loads each build in one Chrome
+tab in turn, puts the camera in the same state, and compares two things per ratio: **camera** --
 `graphToViewport` for every node and `scaleSize` of its size, bar 1e-6 px; **pixels** -- the
 composited `edges`, `nodes`, `labels`, `hovers` and `hoverNodes` layers over the surface colour,
 bar 0.05 % of the stage differing by more than 8/255 in any channel, and `edgeInk` within 1 %

@@ -1,23 +1,30 @@
 #!/usr/bin/env node
-// Does the engine draw the same picture as Sigma? (github#58, step 3)
+// Does this build draw the same picture as a reference build? (github#58)
 //
-//   node scripts/render-diff.mjs                       # every fixture in the store, 3 ratios
-//   node scripts/render-diff.mjs --vault <dir> [--vault <dir>]...
-//   node scripts/render-diff.mjs --ratios 1.08,0.35,4.2 --threshold 8 --mode all|camera|pixels
-//   node scripts/render-diff.mjs --query note            # compare in a search: labels + pills lit
-//   node scripts/render-diff.mjs --headed              # a visible window instead of off-screen
+//   node scripts/render-diff.mjs --against-dir <dir>                # every fixture in the store
+//   node scripts/render-diff.mjs --vault <dir> --against <ref.html> # one vault, one reference
+//   node scripts/render-diff.mjs ... --ratios 1.08,0.35,4.2 --threshold 8 --mode all|camera|pixels
+//   node scripts/render-diff.mjs ... --query note                   # compare in a search: labels + pills lit
+//   node scripts/render-diff.mjs ... --headed                       # a visible window instead of off-screen
 //
 // WHY THIS EXISTS. The invariant suite asserts numbers about the layout and the camera, and
 // none of them can see that a disc is the wrong colour, a curve bows the wrong way, or a layer
-// is missing. Replacing the renderer is exactly the change those checks are blind to, so this
-// builds the same vault twice -- `--renderer sigma` and `--renderer own` -- opens each in turn
-// in one Chrome tab, puts the camera in the same state, and compares:
+// is missing. Replacing the renderer was exactly the change those checks are blind to, so this
+// builds each vault from the current tree, loads it and a REFERENCE build of the same vault in
+// turn in one Chrome tab, puts the camera in the same state, and compares:
 //
 //   camera   graphToViewport for every node and scaleSize of its size, both builds, at each
 //            ratio. Pure math; the bar is 1e-6 px (decision 0012, step 3.1).
 //   pixels   the composited layers (edges, nodes, labels, hovers, hoverNodes on the surface
 //            colour), pixel by pixel. The bar is 0.05 % of the stage differing by more than
 //            `--threshold` (8) in any channel, plus edgeInk within 1 % (decision 0012, D-5).
+//
+// THE REFERENCE is a vault-graph.html built from whatever commit the picture is being held to:
+// a worktree at that commit with node_modules junctioned in, then its own
+// `src/build-graph.mjs --vault <fixture> --out <dir>/<fixture>.html`. `--against-dir` finds
+// `<basename of vault>*.html` there. Until the switch the reference was the same tree's
+// `--renderer sigma` build, and the three Sigma-rendered pages the switch was measured against
+// are not in the repo: a built page carries every note title of its vault.
 //
 // ONE TAB, TWO LOADS. Two tabs in one window would leave one a background tab, where
 // requestAnimationFrame never fires -- and the page defers its own edge-cap refresh to a
@@ -27,7 +34,7 @@
 // is the trap edgeInk in page.js already documents.
 //
 // Node built-ins plus scripts/cdp.mjs, like every harness here. Not a gate: it launches Chrome
-// and takes a minute, and it is what the step commits cite rather than what the hook runs.
+// and takes a minute, and it is what a renderer change cites rather than what the hook runs.
 
 import { spawn, spawnSync } from "node:child_process";
 import { existsSync, mkdtempSync, readdirSync, rmSync, statSync } from "node:fs";
@@ -53,6 +60,7 @@ const HEADED = flag("headed");
 // is the one deterministic state that paints the labels, hovers and hoverNodes layers. Hover
 // itself rides a timed ramp and is left to the suite's own checks.
 const QUERY = arg("query", "");
+const AGAINST_DIR = arg("against-dir", "");
 const PIXEL_BAR = 0.0005;     // share of the stage allowed past the threshold
 const INK_BAR = 0.01;         // relative edgeInk difference allowed
 const CAMERA_BAR = 1e-6;      // px
@@ -82,11 +90,19 @@ function fixtureVaults() {
     .filter((d) => statSync(d).isDirectory() && existsSync(join(d, ".obsidian")));
 }
 
-function build(vault, out, renderer) {
-  const r = spawnSync(process.execPath,
-    [join(ROOT, "src", "build-graph.mjs"), "--vault", vault, "--out", out, "--renderer", renderer],
-    { encoding: "utf8" });
-  if (r.status !== 0) throw new Error("build-graph (" + renderer + ") failed for " + vault + ":\n" + r.stdout + "\n" + r.stderr);
+/** The reference page for a vault: the one given for it, or `<against-dir>/<basename>*.html`. */
+function referenceFor(vault, i) {
+  const given = argAll("against")[i];
+  if (given) return given;
+  if (!AGAINST_DIR) return null;
+  const want = basename(vault);
+  const hit = readdirSync(AGAINST_DIR).find((f) => f.startsWith(want) && f.endsWith(".html"));
+  return hit ? join(AGAINST_DIR, hit) : null;
+}
+
+function build(vault, out) {
+  const r = spawnSync(process.execPath, [join(ROOT, "src", "build-graph.mjs"), "--vault", vault, "--out", out], { encoding: "utf8" });
+  if (r.status !== 0) throw new Error("build-graph failed for " + vault + ":\n" + r.stdout + "\n" + r.stderr);
 }
 
 const toUrl = (p) => "file:///" + resolve(p).replace(/\\/g, "/") + "?rest";
@@ -215,7 +231,7 @@ function comparePixels(a, b) {
     detail: a.w + "x" + a.h + ": " + over + " px over " + THRESHOLD + "/255 (" + pct(share) + ", bar " + pct(PIXEL_BAR) + "); " +
             "any diff " + any + " (" + pct(any / n) + "), max " + maxD + "; hist 1-8:" + hist[1] + " 9-32:" + hist[2] + " 33+:" + hist[3] +
             (over ? "; box x " + x0 + ".." + x1 + " y " + y0 + ".." + y1 : "") +
-            "; edgeInk sigma " + a.ink + " own " + b.ink + (inkOk ? "" : " (over 1%)"),
+            "; edgeInk ref " + a.ink + " now " + b.ink + (inkOk ? "" : " (over 1%)"),
   };
 }
 
@@ -234,11 +250,10 @@ async function sampleBuild(p, label) {
   return out;
 }
 
-async function runVault(vault, chrome) {
+async function runVault(vault, reference, chrome) {
   const dir = mkdtempSync(join(tmpdir(), "vg-render-diff-"));
-  const sigmaHtml = join(dir, "sigma.html"), ownHtml = join(dir, "own.html");
-  build(vault, sigmaHtml, "sigma");
-  build(vault, ownHtml, "own");
+  const nowHtml = join(dir, "now.html");
+  build(vault, nowHtml);
   const profile = mkdtempSync(join(tmpdir(), "vg-render-diff-profile-"));
   const proc = spawn(chrome, [
     "--remote-debugging-port=" + PORT, "--user-data-dir=" + profile,
@@ -248,35 +263,36 @@ async function runVault(vault, chrome) {
     "--disable-backgrounding-occluded-windows", "--disable-renderer-backgrounding", "--disable-background-timer-throttling",
     "--force-device-scale-factor=1",
     ...(HEADED ? [] : ["--window-position=-2400,0"]), "--window-size=1600,1000",
-    "--app=" + toUrl(sigmaHtml),
+    "--app=" + toUrl(reference),
   ], { stdio: "ignore" });
   const results = [];
   try {
     let page = null;
     const deadline = Date.now() + 25000;
+    const refName = basename(reference);
     for (;;) {
-      try { page = await attach(PORT, "sigma.html"); break; }
+      try { page = await attach(PORT, refName); break; }
       catch (e) { if (Date.now() > deadline) throw e; await sleep(400); }
     }
-    const sigma = await sampleBuild(page, "sigma build");
-    const sigmaErrors = page.firstError();
+    const ref = await sampleBuild(page, "reference build");
+    const refErrors = page.firstError();
     await page.send("Page.enable").catch(() => {});
-    await page.send("Page.navigate", { url: toUrl(ownHtml) });
+    await page.send("Page.navigate", { url: toUrl(nowHtml) });
     const nav = Date.now() + 15000;
     for (;;) {
       const here = await page.eval("location.href").catch(() => "");
-      if (String(here).includes("own.html")) break;
-      if (Date.now() > nav) throw new Error("the tab never reached the engine build");
+      if (String(here).includes("now.html")) break;
+      if (Date.now() > nav) throw new Error("the tab never reached the current build");
       await sleep(200);
     }
-    const own = await sampleBuild(page, "own build");
+    const now = await sampleBuild(page, "current build");
     for (const ratio of RATIOS) {
-      const s = sigma.get(ratio), o = own.get(ratio);
-      if (s.camera) results.push({ ratio, kind: "camera", ...compareCamera(s.camera, o.camera) });
-      if (s.pixels) results.push({ ratio, kind: "pixels", ...comparePixels(s.pixels, o.pixels) });
+      const r = ref.get(ratio), n = now.get(ratio);
+      if (r.camera) results.push({ ratio, kind: "camera", ...compareCamera(r.camera, n.camera) });
+      if (r.pixels) results.push({ ratio, kind: "pixels", ...comparePixels(r.pixels, n.pixels) });
     }
     const err = page.firstError();
-    if (sigmaErrors || err) results.push({ ratio: "-", kind: "errors", ok: false, detail: [sigmaErrors, err].filter(Boolean).join(" | ") });
+    if (refErrors || err) results.push({ ratio: "-", kind: "errors", ok: false, detail: [refErrors, err].filter(Boolean).join(" | ") });
     page.close();
   } finally {
     try { proc.kill(); } catch { /* already gone */ }
@@ -294,9 +310,15 @@ if (!vaults.length) {
 }
 const chrome = findChrome();
 let failed = 0;
-for (const vault of vaults) {
+for (const [i, vault] of vaults.entries()) {
   console.log("== " + basename(vault));
-  const results = await runVault(vault, chrome);
+  const reference = referenceFor(vault, i);
+  if (!reference || !existsSync(reference)) {
+    console.log("  FAIL no reference build -- pass --against <ref.html> or --against-dir <dir> holding " + basename(vault) + "*.html");
+    failed++;
+    continue;
+  }
+  const results = await runVault(vault, reference, chrome);
   for (const r of results) {
     console.log("  " + (r.ok ? "ok  " : "FAIL") + " ratio " + r.ratio + " " + String(r.kind).padEnd(7) + " " + r.detail);
     if (!r.ok) failed++;

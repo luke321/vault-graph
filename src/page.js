@@ -7,9 +7,10 @@
  *       class="vault-graph", since every rule in page.css is scoped under it and every
  *       custom property is declared on it.
  * data  what build-graph.mjs or the plugin's adapter produced.
- * deps  { Graph, Sigma, rendering, logoMask } -- INJECTED rather than read off `window`,
- *       because in a plugin the libraries are bundled module imports and never become
- *       globals at all. The standalone page passes its UMD globals in; see shell.html.
+ * deps  { Graph, Renderer, logoMask } -- INJECTED rather than read off `window`, because in
+ *       a plugin the engine (src/engine, github#58) is a bundled module import and never
+ *       becomes a global at all. The standalone page reads the same two constructors off the
+ *       `VaultGraphEngine` global its build inlines; see shell.html.
  *
  *       Also, optionally:
  *         folderColors      { "<folder>": "g7" } -- the saved per-folder palette slots.
@@ -137,35 +138,25 @@
 /** @typedef {import("./engine/types").NodeDisplayData} NodeDisplayData */
 /** @typedef {import("./engine/types").EdgeDisplayData} EdgeDisplayData */
 /** The settings this file reads or writes after construction, and the ones drawHover reads. */
-/** @typedef {import("./engine/types").RendererSettings} SigmaSettings */
+/** @typedef {import("./engine/types").RendererSettings} RendererSettings */
 /** The mouse payload the renderer passes to node and stage events. */
-/** @typedef {import("./engine/types").MouseCoords} SigmaMouseEvent */
+/** @typedef {import("./engine/types").MouseCoords} MouseCoords */
 /** Node events carry `node`; stage events (clickStage, doubleClickStage) and afterRender do not. */
-/** @typedef {{ node?: string, event: SigmaMouseEvent, preventSigmaDefault?: () => void }} SigmaNodeEvent */
-/** The renderer surface this file uses -- Sigma's today, the engine's once github#58 lands. */
-/** @typedef {import("./engine/types").Renderer} SigmaLike */
-
-/** @typedef {new (graph: GraphLike, container: HTMLElement, settings: Record<string, unknown>) => SigmaLike} SigmaCtor */
-
-/**
- * `Sigma.rendering` off the UMD namespace: the two programs this file may register. Both
- * optional -- an older bundle without them gets straight edges and no halo.
- * @typedef {Object} RenderingLike
- * @property {(opts: Record<string, unknown>) => unknown} [createNodeBorderProgram]
- * @property {unknown} [EdgeCurveProgram]
- */
+/** @typedef {{ node?: string, event: MouseCoords, preventDefault?: () => void }} RendererEvent */
+/** The renderer surface this file uses: the engine's (src/engine/renderer.ts, github#58). */
+/** @typedef {import("./engine/types").Renderer} RendererLike */
+/** @typedef {import("./engine/types").RendererCtor} RendererCtor */
 
 /** A slot map as the host stores it: folder (or "folder/sub") -> "g1".."g12". */
 /** @typedef {Record<string, string>} SlotMap */
 
 /**
  * What mountVaultGraph is handed as `deps`. The header comment above says what each one is
- * for; this is the shape. Two constructors and the rendering namespace are required, the
- * rest is optional and absent means the documented default.
+ * for; this is the shape. Two constructors are required, the rest is optional and absent
+ * means the documented default.
  * @typedef {Object} MountDeps
  * @property {GraphCtor} Graph
- * @property {SigmaCtor} Sigma
- * @property {RenderingLike} [rendering]
+ * @property {RendererCtor} Renderer
  * @property {string} [logoMask]
  * @property {Window} [win]
  * @property {Document} [doc]
@@ -218,7 +209,7 @@
  * let the plugin claim members it does not have.
  * @typedef {Object} VgApi
  * @property {GraphLike} graph
- * @property {SigmaLike | undefined} renderer   set by makeRenderer() before the api exists; a getter, so a host reads the live one
+ * @property {RendererLike | undefined} renderer   set by makeRenderer() before the api exists; a getter, so a host reads the live one
  * @property {() => void} readTheme
  * @property {() => void} placeLogo
  * @property {() => PaletteSlot[]} palette
@@ -274,14 +265,7 @@ function mountVaultGraph(root, data, deps) {
 
   var DATA = data;
   var Graph = deps.Graph;
-  var SigmaCls = deps.Sigma;
-  // The programs hang off the UMD NAMESPACE object, not off the Sigma class that
-  // SigmaCls resolves to -- the bundle sets both `Sigma.Sigma` and
-  // `Sigma.rendering` on the same export, so `SigmaCls.rendering` is undefined and
-  // reaching for a program through it throws during construction. That kills the
-  // whole init inside its setTimeout, which surfaces as a page stuck on
-  // "Laying out graph..." with nothing in the console.
-  var RENDERING = deps.rendering || {};
+  var RendererCls = deps.Renderer;
   var LOGO_MASK = deps.logoMask || "";
   // The window this view lives in. Obsidian passes activeWindow so a popout schedules its
   // own timers; the standalone page passes nothing and gets its own window. Never the bare
@@ -4966,7 +4950,7 @@ function mountVaultGraph(root, data, deps) {
       // and panned the stage: measured, the camera left (0.5, 0.5) for (0.4601, 0.5207)
       // over one drag. The press already belongs to the note by then; the threshold only
       // decides whether the note MOVES, never who owns the gesture.
-      if (e.preventSigmaDefault) e.preventSigmaDefault();
+      if (e.preventDefault) e.preventDefault();
       if (e.original) { e.original.preventDefault(); e.original.stopPropagation(); }
       if (!nodeDrag.moved) {
         if (nodeDrag.x0 === undefined) { nodeDrag.x0 = e.x; nodeDrag.y0 = e.y; }
@@ -7752,7 +7736,7 @@ function mountVaultGraph(root, data, deps) {
 
   /* ---------------------------------------------------------------- render */
 
-  /** @type {SigmaLike | undefined} */
+  /** @type {RendererLike | undefined} */
   var renderer;
   /** @type {Record<string, string[]> | null} */
   var neighbourCache = null;
@@ -8109,7 +8093,7 @@ function mountVaultGraph(root, data, deps) {
   /**
    * @param {CanvasRenderingContext2D} ctx
    * @param {import("./engine/types").HoverData} data   the display data plus the node key, as the renderer hands it over
-   * @param {SigmaSettings & { labelSize: number, labelWeight: string, labelFont: string }} settings
+   * @param {RendererSettings & { labelSize: number, labelWeight: string, labelFont: string }} settings
    */
   function drawHover(ctx, data, settings) {
     drawFocusWeb(ctx, data);
@@ -8169,7 +8153,7 @@ function mountVaultGraph(root, data, deps) {
         // The halo is the same for both highlight sources. It is drawn in the extreme of
         // the neutral axis for the same reason the today colour is: it must not be
         // mistakable for one of the ten group hues.
-        if (haloOn && hv > 0.004) {
+        if (hv > 0.004) {
           r.type = "halo";
           // Mixed from the note's own colour rather than faded with an alpha: the ring
           // then emerges from the dot instead of ghosting over it, and it stays a solid
@@ -8632,11 +8616,6 @@ function mountVaultGraph(root, data, deps) {
   // display px = ramp.m * attr size + ramp.b, never below ramp.lo, per band. See BAND.
   var sizeScale = 1;      // kept for the probe and the report; = the outer ramp at NODE_MAX
 
-  // Whether the border program actually loaded. If the bundle ever ships without it,
-  // highlighting still works -- the radial push carries it on its own -- rather than
-  // asking Sigma for a node type it cannot draw.
-  var haloOn = !!RENDERING.createNodeBorderProgram;
-
   function measureSizeScale() {
     if (!renderer) return sizeScale;
     // One row of spacing is lastSP LATTICE units, i.e. lastSP * UNIT graph units. That
@@ -8983,34 +8962,32 @@ function mountVaultGraph(root, data, deps) {
   }
 
   function makeRenderer() {
-    renderer = new SigmaCls(graph, $("graph"), {
-      allowInvalidContainer: true,
-      renderLabels: true,
-      labelRenderedSizeThreshold: 11,
-      labelDensity: 0.2,
-      labelGridCellSize: 150,
+    renderer = new RendererCls(graph, $("graph"), {
+      // The window this view lives in: the renderer's frames, timers and resize listener go
+      // through it, for the same popout reason WIN exists at all.
+      win: WIN,
       labelFont: 'ui-sans-serif, "Segoe UI", system-ui, sans-serif',
       labelSize: 11,
       labelWeight: "500",
-      // Sigma defaults these to black-on-anything and a hardcoded #FFF hover pill,
-      // which is illegible / jarring on the dark surface.
-      labelColor: { color: THEME.text },
-      defaultDrawNodeHover: drawHover,
-      zIndex: true,
+      // Sigma defaulted these to black-on-anything and a hardcoded #FFF hover pill, which is
+      // illegible / jarring on the dark surface. The engine takes the theme's text colour and
+      // draws the pill with the page's own drawHover.
+      labelColor: THEME.text,
+      drawHover: drawHover,
       // SIZES SCALE WITH THE LATTICE, NOT WITH ITS SQUARE ROOT.
       //
-      // Sigma's default zoomToSizeRatioFunction is Math.sqrt, so a node's drawn radius goes as
-      // 1/sqrt(ratio) while its POSITION goes as 1/ratio. The two therefore diverge on every
-      // zoom, and no choice of size can hold a dot at a fixed fraction of the gap to its
+      // Sigma's default zoomToSizeRatioFunction was Math.sqrt, so a node's drawn radius went as
+      // 1/sqrt(ratio) while its POSITION went as 1/ratio. The two therefore diverged on every
+      // zoom, and no choice of size could hold a dot at a fixed fraction of the gap to its
       // neighbour. Measured, drawn diameter over row pitch: 0.76 at rest, 1.44 three notches
       // in, 3.51 at the far end -- dots that end up swallowing their neighbours, which is
       // exactly what "they still touch when zooming in" was.
       //
       // Identity makes the multiplier 1/ratio, the same law the positions follow, so the
       // relationship between a dot and the space it has is the one thing that does NOT change
-      // as the camera moves. The sizes fed in are then pinned to the lattice once (see
-      // measureSizeScale) rather than re-derived per frame.
-      zoomToSizeRatioFunction: /** @param {number} x */ function (x) { return x; },
+      // as the camera moves. The engine's scaleSize is size / ratio by construction -- there
+      // is no setting left to get wrong (github#58) -- and the sizes fed in are pinned to the
+      // lattice once (see measureSizeScale) rather than re-derived per frame.
       minCameraRatio: 0.02,
       maxCameraRatio: 12,
       // PANNING IS ON, and the centre lock that used to fight it is gone.
@@ -9022,15 +8999,14 @@ function mountVaultGraph(root, data, deps) {
       // moves, so zooming in on one wedge walks it off the far edge instead. Panning plus a
       // reset is the ordinary answer, and it costs nothing that a reset does not give back.
       //
-      // Rotation stays off: the wedge labels and the heatmap's day rows both assume up is up.
+      // Rotation is not a setting any more: the wedge labels and the heatmap's day rows both
+      // assume up is up, and the engine has no rotation to switch off.
       //
       // The initial value is the SETTING rather than a literal: the host may have persisted
       // it off, and starting on and correcting afterwards would let one drag through before
       // the lock arrived.
       enableCameraPanning: panEnabled,
-      enableCameraRotation: false,
-      enableCameraZooming: true,
-      // ONE WHEEL NOTCH WAS 70%. Sigma's default zoomingRatio is 1.7, so every notch
+      // ONE WHEEL NOTCH WAS 70%. Sigma's default zoomingRatio was 1.7, so every notch
       // multiplied or divided the ratio by that -- three notches and the disc has gone from
       // filling the stage to a sixth of it. 1.2 is about 32 notches across the whole
       // 0.02..12 range, which is a scroll rather than a teleport.
@@ -9067,27 +9043,14 @@ function mountVaultGraph(root, data, deps) {
       // of a range: every link asks for 0.556px at rest and is floored to 1.0px, an inflation
       // of 1.80x for the whole web rather than for its median.
       minEdgeThickness: 1.0,
-      defaultEdgeType: "line",
-      // Both programs are registered up front so the toggle is a per-edge `type`
-      // in the reducer rather than a renderer rebuild. Sigma merges these with its
-      // own defaults, so "line" survives. NB the programs live on
-      // Sigma.rendering, NOT on Sigma -- getting that wrong makes a program
-      // silently never appear, with no error anywhere.
-      edgeProgramClasses: RENDERING.EdgeCurveProgram
-        ? { curve: RENDERING.EdgeCurveProgram } : {},
-      // A ring around highlighted notes. borders[0] is the OUTER band and the
-      // {fill:true} entry is the CORE -- the reverse of what the option order
-      // suggests, which is worth stating because getting it backwards silently
-      // draws a solid blob in the halo colour.
-      nodeProgramClasses: RENDERING.createNodeBorderProgram ? {
-        halo: RENDERING.createNodeBorderProgram({
-          borders: [
-            { size: { value: 0.26 }, color: { attribute: "haloColor" } },
-            { size: { fill: true }, color: { attribute: "color" } },
-          ],
-        }),
-      } : {},
-      enableEdgeEvents: false,
+      // THE TWO TYPED DRAW PATHS. A link is a straight "line" unless its reducer says "curve"
+      // and gives a `curvature`; a note is a plain disc unless its reducer says "halo": a ring
+      // 0.26 of the radius wide in `haloColor` around a core in `color`. Both used to be Sigma
+      // programs registered here (and the border one had its own trap: borders[0] was the
+      // OUTER band and the {fill:true} entry the core, the reverse of what the order
+      // suggests). They are the engine's two fixed paths now, in src/engine/programs.ts,
+      // chosen per item by the `type` the reducers below set.
+      //
       // Opacity is applied here, once, rather than at each of nodeStyle's five
       // exits. Everything below 0.004 is genuinely hidden, so a fully faded note
       // costs nothing to render and drops out of hit-testing.
@@ -9148,7 +9111,7 @@ function mountVaultGraph(root, data, deps) {
         var x = graph.extremities(id);
         var al = Math.min(alpha[x[0]] || 0, alpha[x[1]] || 0);
         if (al <= 0.004) { r.hidden = true; return r; }
-        if (state.curveEdges && RENDERING.EdgeCurveProgram) {
+        if (state.curveEdges) {
           r.type = "curve";
           r.curvature = curvatureFor(graph.getNodeAttributes(x[0]),
                                      graph.getNodeAttributes(x[1]));
@@ -9200,7 +9163,7 @@ function mountVaultGraph(root, data, deps) {
       // because a pan does not change the ratio. skipIndexation because nothing moved here;
       // only the width did.
       var edgeRaf = 0;
-      // Seeded, AND repainted if the seed moved it. Sigma has already run the reducers once by
+      // Seeded, AND repainted if the seed moved it. The renderer has already run the reducers once by
       // now, so a camera that starts below the knee would otherwise draw its first frame
       // unclamped. In practice fit() flies from ratio 1 to 1.08 and both are above it, which
       // is exactly the kind of "cannot happen today" that a persisted camera would break.
@@ -9285,17 +9248,18 @@ function mountVaultGraph(root, data, deps) {
 
     // DOUBLE CLICK RESETS THE VIEW, on the stage and on a note alike.
     //
-    // preventSigmaDefault() is what makes it a reset rather than a reset AND sigma's own
-    // double-click zoom: the captor emits the event and then checks that flag before doing
-    // its own thing, synchronously, so setting it here is seen. Without it the two fight and
-    // the camera lands somewhere neither asked for.
+    // preventDefault() on the payload stays although the engine's captor has no double-click
+    // zoom of its own to prevent (github#58 dropped it, because this call stopped Sigma's on
+    // every double click there ever was): it costs nothing, and it is the contract -- the
+    // captor emits, then reads the flag synchronously -- that would matter again the day a
+    // default is added.
     //
     // A note gets the same treatment as the stage on purpose. "Double click zooms to this
     // note" is a defensible other answer, but then double click means two things depending
     // on a 6px target, and one of them is not what the tooltip says.
-    /** @param {SigmaNodeEvent} e */
+    /** @param {RendererEvent} e */
     var onDoubleClick = function (e) {
-      if (e && e.preventSigmaDefault) e.preventSigmaDefault();
+      if (e && e.preventDefault) e.preventDefault();
       fit();
     };
     renderer.on("doubleClickStage", onDoubleClick);

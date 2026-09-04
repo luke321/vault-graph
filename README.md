@@ -87,11 +87,12 @@ darker grey, and start hidden. All three are defaults: pick a colour or click th
 your choice wins. It is a rule about folders, not files — `_scratch.md` is a note like any
 other.
 
-<sub>**Zero network calls, and greppable.** The bundled Sigma.js ships two `fetch` calls in
-its image-loading path, for a node-image program this plugin never registers. They were
-unreachable, and they are now removed at build time rather than explained away — so
-`main.js` contains none, and `node scripts/check-network.mjs` is the gate that keeps it that
-way. See [`0008-zero-network-calls`](.ai-context/decisions/0008-zero-network-calls.md).</sub>
+<sub>**Zero network calls, and greppable.** Nothing shipped makes a request. The graph store
+and the WebGL renderer are the plugin's own code (`src/engine/`, TypeScript), so there is no
+third-party bundle to explain away, and `node scripts/check-network.mjs` is the gate that keeps
+`main.js` and the exporter at zero. See
+[`0008-zero-network-calls`](.ai-context/decisions/0008-zero-network-calls.md) and
+[`0012-own-graph-store-and-renderer`](.ai-context/decisions/0012-own-graph-store-and-renderer.md).</sub>
 
 ---
 
@@ -409,7 +410,7 @@ the plugin puts them in an Obsidian view.
 | `src/build-graph.mjs` | crawls the vault, resolves links, emits one HTML file |
 | `plugin/main.js` | the Obsidian plugin: reads the metadata cache, mounts the page in a view |
 | `manifest.json` | the plugin manifest, at the repo root because Obsidian requires it there |
-| `vendor/` | Sigma.js + graphology, committed rather than installed |
+| `src/engine/` | the graph store and the WebGL renderer, TypeScript, ours |
 
 **Tooling.**
 
@@ -433,9 +434,9 @@ the plugin puts them in an Obsidian view.
 
 ## Licence
 
-MIT — see [LICENSE](LICENSE). The bundled libraries in `vendor/` are MIT too and are
-inlined into every build; their notices are in [`vendor/NOTICE.md`](vendor/NOTICE.md) and
-must be preserved in redistributions.
+MIT — see [LICENSE](LICENSE). The renderer's camera math and shaders under `src/engine/`
+are ported from Sigma.js 3.0.2 (MIT); the attribution is in
+[`src/engine/NOTICE.md`](src/engine/NOTICE.md).
 
 ## Design notes
 

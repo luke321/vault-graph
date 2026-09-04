@@ -16,8 +16,8 @@
  * - the WHEEL zooms toward the pointer by `zoomingRatio` per notch over `zoomDuration`
  *   (quadraticOut), and notches in the same direction closer than a fifth of that are dropped
  *   so a fast scroll does not queue a dozen tweens;
- * - a listener that calls `preventSigmaDefault()` on the payload stops the pan or the zoom for
- *   that event. page.js does it in its node drag and on double click.
+ * - a listener that calls `preventDefault()` on the payload stops the pan or the zoom for that
+ *   event. page.js does it in its node drag and on double click.
  *
  * Every timer is the window's the view lives in.
  */
@@ -28,7 +28,7 @@ import type { CameraState, MouseCaptor as MouseCaptorApi, MouseCoords, Point } f
 
 /** The payload with the flag the captor reads back after emitting. */
 export interface Coords extends MouseCoords {
-  sigmaDefaultPrevented: boolean;
+  defaultPrevented: boolean;
 }
 
 export interface WheelCoords extends Coords {
@@ -71,9 +71,9 @@ function getPosition(e: MouseEvent, dom: HTMLElement): Point {
 function getMouseCoords(e: MouseEvent, dom: HTMLElement): Coords {
   const res: Coords = {
     ...getPosition(e, dom),
-    sigmaDefaultPrevented: false,
-    preventSigmaDefault: () => {
-      res.sigmaDefaultPrevented = true;
+    defaultPrevented: false,
+    preventDefault: () => {
+      res.defaultPrevented = true;
     },
     original: e,
   };
@@ -167,7 +167,7 @@ export class MouseCaptor extends Emitter<CaptorEvents> implements MouseCaptorApi
     this.emit("mousemovebody", coords);
     // Only over the stage itself, so nothing gets hovered from outside it.
     if (e.target === this.container || e.composedPath()[0] === this.container) this.emit("mousemove", coords);
-    if (coords.sigmaDefaultPrevented) return;
+    if (coords.defaultPrevented) return;
 
     if (this.isMouseDown) {
       this.isMoving = true;
@@ -205,7 +205,7 @@ export class MouseCaptor extends Emitter<CaptorEvents> implements MouseCaptorApi
     if (!delta) return;
     const coords: WheelCoords = { ...getMouseCoords(e, this.container), delta };
     this.emit("wheel", coords);
-    if (coords.sigmaDefaultPrevented) {
+    if (coords.defaultPrevented) {
       e.preventDefault();
       e.stopPropagation();
       return;

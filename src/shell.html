@@ -40,10 +40,10 @@ html, body { height: 100%; margin: 0; }
  * Here that is this block; in the plugin it is main.js.
  *
  * The dependencies are read off `window` HERE, at the one place that knows they are
- * globals -- this page loaded them as <script> tags: our own engine as the IIFE
- * build-graph.mjs bundles (`VaultGraphEngine`, github#58), Sigma as its UMD. Inside a plugin
- * they are bundled module imports and never touch `window` at all, which is exactly why
- * page.js takes them as arguments rather than reaching for them.
+ * globals -- this page loaded the engine as a <script> tag, the IIFE build-graph.mjs bundles
+ * from src/engine (`VaultGraphEngine`, github#58). Inside a plugin the same module is a
+ * bundled import and never touches `window` at all, which is exactly why page.js takes its
+ * constructors as arguments rather than reaching for them.
  *
  * A classic script, not type="module", deliberately: a module served from file:// is
  * blocked by CORS, and being openable straight off a disk is the whole point of this file.
@@ -82,29 +82,12 @@ function saveSettings(patch) {
   } catch (e) { /* no store, or full: the colours just do not outlive the tab */ }
 }
 
-/* WHICH RENDERER -- transitional (github#58, step 3). build-graph.mjs writes VAULT_RENDERER
- * from its --renderer flag. "own" hands the page the engine's renderer through a shim that
- * turns the Sigma-shaped settings bag page.js still builds into the engine's typed options;
- * "sigma" hands it the vendored bundle as before. The `rendering` stub for the engine carries
- * the two truthy markers page.js checks before it emits the "halo" and "curve" types -- the
- * engine draws both natively and never reads the stub. At the switch (step 3.6) page.js
- * constructs the engine's options itself and everything in this block but the mount goes.
- */
-var OWN_RENDERER = window.VAULT_RENDERER === "own";
-function OwnRenderer(graph, container, settings) {
-  return new window.VaultGraphEngine.Renderer(graph, container,
-    window.VaultGraphEngine.optionsFromSigmaSettings(settings, window));
-}
-
 mountVaultGraph(
   document.getElementById("vg-app"),
   window.VAULT_DATA,
   {
     Graph: window.VaultGraphEngine.GraphStore,
-    Sigma: OWN_RENDERER ? OwnRenderer : ((window.Sigma && window.Sigma.Sigma) || window.Sigma),
-    rendering: OWN_RENDERER
-      ? { EdgeCurveProgram: true, createNodeBorderProgram: function () { return {}; } }
-      : ((window.Sigma && window.Sigma.rendering) || {}),
+    Renderer: window.VaultGraphEngine.Renderer,
     logoMask: window.VAULT_LOGO_MASK || "",
     // The gear is the standalone's only settings surface, so it is turned on here. The
     // plugin leaves it off and uses Obsidian's own settings tab for the same rows.

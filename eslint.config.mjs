@@ -16,8 +16,8 @@
 // THREE SCOPES. The plugin and the page run inside Obsidian, so every guideline rule and the
 // type-aware set apply to them. The exporter (src/*.mjs) and scripts/ are Node programs that
 // never run inside Obsidian, so Obsidian's rules say nothing about them and are off there;
-// the syntax rules and no-unused-vars still run. vendor/ is third-party and ignored -- the
-// directory scans it too, and its findings are github#58's, not ours to fix.
+// the syntax rules and no-unused-vars still run. (vendor/ was a fourth, ignored scope until
+// github#58 replaced the two bundles it held with the engine.)
 
 import obsidianmd from "eslint-plugin-obsidianmd";
 import globals from "globals";
@@ -144,7 +144,7 @@ export default defineConfig([
     // modules), not code -- there is nothing in one for a rule to say, and the preset's
     // `**/*.ts` scoping would otherwise run its type-aware rules on it with no
     // parserOptions and abort the whole run. tsconfig.json names them; this file need not.
-    ignores: ["node_modules/**", "vendor/**", "dist/**", "test-vault/**", "demo-vault/**",
+    ignores: ["node_modules/**", "dist/**", "test-vault/**", "demo-vault/**",
               ".fixtures/**", "scripts/layout-snapshots/**", "plugin/**/*.d.ts"],
   },
 ]);
