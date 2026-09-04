@@ -352,6 +352,23 @@
 function mountVaultGraph(root, data, deps) {
   "use strict";
 
+  /**
+   * A prototype-less dictionary, typed. Object.create(null) is `any` to the type program
+   * and a cast at the call site is read as the expression inside it, so this is the ONE
+   * place that any is laundered -- through unknown, once -- and every dictionary in this
+   * file declares its own shape where it is made: `@type {Record<string, number>}` on the
+   * var, `= dict()` after it. Same object as Object.create(null) gave (no prototype, so a
+   * folder named "constructor" or "toString" is just a key); nothing about behaviour
+   * changed. github#60.
+   * @template T
+   * @returns {Record<string, T>}
+   */
+  function dict() {
+    /** @type {unknown} */
+    var o = Object.create(null);
+    return /** @type {Record<string, T>} */ (o);
+  }
+
   var DATA = data;
   var Graph = deps.Graph;
   var SigmaCls = deps.Sigma;
@@ -423,28 +440,34 @@ function mountVaultGraph(root, data, deps) {
   // Parsed in an inert document -- no browsing context, so nothing executes during the
   // parse -- and the resulting nodes are moved across. Every caller escapes its
   // interpolations with esc(); the rest is this page's own constants.
+  /** @param {HTMLElement} el @param {string} html */
   var setHTML = function (el, html) {
     var parsed = new DOMParser().parseFromString("<body>" + html + "</body>", "text/html");
     el.replaceChildren.apply(el, Array.prototype.slice.call(parsed.body.childNodes));
   };
 
+  /** @param {string} name */
   var css = function (name) {
     return getComputedStyle(ROOT).getPropertyValue(name).trim();
   };
 
   // --- OKLCH, so a subfolder tint can rotate hue and nudge lightness without
   // --- drifting off the perceptual band the base palette was validated on.
+  /** @param {number} c */
   var s2lin = function (c) { return c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4); };
+  /** @param {number} c */
   var lin2s = function (c) {
     c = Math.max(0, Math.min(1, c));
     return c <= 0.0031308 ? 12.92 * c : 1.055 * Math.pow(c, 1 / 2.4) - 0.055;
   };
+  /** @param {string} h */
   function relLum(h) {
     h = String(h).trim().replace(/^#/, "");
     if (h.length === 3) h = h[0] + h[0] + h[1] + h[1] + h[2] + h[2];
     var c = [0, 2, 4].map(function (i) { return s2lin(parseInt(h.slice(i, i + 2), 16) / 255); });
     return 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
   }
+  /** @param {string} h @returns {number[]} OKLab, [L, a, b] */
   function hex2lab(h) {
     h = String(h).trim().replace(/^#/, "");
     if (h.length === 3) h = h[0] + h[0] + h[1] + h[1] + h[2] + h[2];
@@ -458,6 +481,7 @@ function mountVaultGraph(root, data, deps) {
             1.9779984951 * l - 2.4285922050 * m + 0.4505937099 * s2,
             0.0259040371 * l + 0.7827717662 * m - 0.8086757660 * s2];
   }
+  /** @param {number} L @param {number} A @param {number} B */
   function lab2hex(L, A, B) {
     var l = Math.pow(L + 0.3963377774 * A + 0.2158037573 * B, 3),
         m = Math.pow(L - 0.1055613458 * A - 0.0638541728 * B, 3),
@@ -473,6 +497,7 @@ function mountVaultGraph(root, data, deps) {
     }).join("");
   }
   // Rotate hue by dh degrees and shift lightness by dL, keeping chroma.
+  /** @param {string} hex @param {number} dh hue turn, degrees @param {number} dL lightness step */
   function shade(hex, dh, dL) {
     var lab = hex2lab(hex), C = Math.hypot(lab[1], lab[2]);
     var h = Math.atan2(lab[2], lab[1]) + dh * Math.PI / 180;
@@ -500,7 +525,24 @@ function mountVaultGraph(root, data, deps) {
   var SLOT_NAMES = ["Blue", "Orange", "Aqua", "Yellow", "Green", "Magenta",
                     "Violet", "Red", "Cyan", "Orchid", "Grey", "Slate"];
 
-  var THEME = {};
+  /**
+   * The palette, snapshotted from CSS by readTheme() -- once at init, again when the host
+   * says the theme changed.
+   * @typedef {Object} Theme
+   * @property {boolean} dark
+   * @property {string} text
+   * @property {string} dim
+   * @property {string} today
+   * @property {string} edge
+   * @property {string} edgeHi
+   * @property {string} surface
+   * @property {string} hoverBg
+   * @property {string} hoverBorder
+   * @property {string[]} slots          the twelve group colours, g1..g12
+   * @property {string[]} neutrals
+   * @property {Record<string, string>} byKey   "g7" -> its hex
+   */
+  var THEME = /** @type {Theme} */ ({});
   function readTheme() {
     var surf = css("--surface-1");
     THEME = {
@@ -522,7 +564,7 @@ function mountVaultGraph(root, data, deps) {
     };
     // key -> live hex, rebuilt on every theme read so an override follows the theme
     // instead of freezing whichever one was current when it was picked.
-    THEME.byKey = Object.create(null);
+    THEME.byKey = dict();
     THEME.slots.forEach(function (hex, i) { THEME.byKey["g" + (i + 1)] = hex; });
   }
   readTheme();
@@ -536,7 +578,8 @@ function mountVaultGraph(root, data, deps) {
   // different shape needing different validation.
   /** @param {Record<string, unknown> | undefined} raw @returns {SlotMap} */
   function cleanSlotMap(raw) {
-    var out = Object.create(null);
+    /** @type {SlotMap} */
+    var out = dict();
     if (!raw || typeof raw !== "object") return out;
     Object.keys(raw).forEach(function (k) {
       var v = raw[k];
@@ -594,6 +637,7 @@ function mountVaultGraph(root, data, deps) {
   // per folder, and none of them is a rule about FILES -- `_scratch.md` is a note like
   // any other. This asks about the top-level group name, which is the only level that
   // owns a wedge.
+  /** @param {string} g */
   function isArchiveGroup(g) { return String(g).charAt(0) === "_"; }
 
   // THE ARCHIVE GREY IS A PALETTE SLOT, not a neutral off to one side.
@@ -611,6 +655,7 @@ function mountVaultGraph(root, data, deps) {
   // The eye, shared between the legend and the settings panel: same mark for the live
   // filter and for the default it returns to, because they are the same question asked
   // about two different moments.
+  /** @param {boolean} on */
   function eyeSvg(on) {
     var lid = '<path d="M1.6 8S4 3.9 8 3.9 14.4 8 14.4 8 12 12.1 8 12.1 1.6 8 1.6 8z"' +
               ' fill="none" stroke="currentColor" stroke-width="1.25"/>';
@@ -622,6 +667,7 @@ function mountVaultGraph(root, data, deps) {
 
   // A filled vs. outlined dot -- not the eye, because this is not a visibility question.
   // Used only by the (unlinked) row's own context-menu toggle (github#3, reopened).
+  /** @param {boolean} on */
   function dotSvg(on) {
     return '<svg viewBox="0 0 16 16" aria-hidden="true">' +
       (on ? '<circle cx="8" cy="8" r="5" fill="currentColor"/>'
@@ -631,6 +677,7 @@ function mountVaultGraph(root, data, deps) {
 
   // A thumbtack: filled head when pinned, outline otherwise -- the same on/off
   // convention eyeSvg uses, for the detail card's hub toggle.
+  /** @param {boolean} on */
   function pinSvg(on) {
     var head = '<circle cx="8" cy="5.6" r="3.35" ' +
       (on ? 'fill="currentColor"' : 'fill="none" stroke="currentColor" stroke-width="1.25"') + '/>';
@@ -641,6 +688,7 @@ function mountVaultGraph(root, data, deps) {
   // A disclosure twisty, or an invisible placeholder so labels stay aligned. Shared
   // between the legend and the settings panel now that both nest subfolder rows under a
   // folder -- the same reason eyeSvg above is shared.
+  /** @param {string} attrs "" for a leaf, which gets a spacer instead of a button @param {boolean} open */
   function twBtn(attrs, open) {
     return attrs
       ? '<button class="tw" ' + attrs + ' aria-expanded="' + open + '">' +
@@ -654,7 +702,8 @@ function mountVaultGraph(root, data, deps) {
   // anything about it, and a later change to the default could not reach it.
   /** @param {Record<string, unknown> | undefined} raw @returns {Record<string, boolean>} */
   function cleanFolderShown(raw) {
-    var out = Object.create(null);
+    /** @type {Record<string, boolean>} */
+    var out = dict();
     if (!raw || typeof raw !== "object") return out;
     Object.keys(raw).forEach(function (g) {
       if (typeof raw[g] === "boolean") out[g] = raw[g];
@@ -664,6 +713,7 @@ function mountVaultGraph(root, data, deps) {
   var folderShown = cleanFolderShown(deps.folderShown);
 
   // Hidden unless something says otherwise: an explicit choice first, then the `_` rule.
+  /** @param {string} g */
   function hiddenByDefault(g) {
     if (typeof folderShown[g] === "boolean") return !folderShown[g];
     return isArchiveGroup(g);
@@ -677,18 +727,48 @@ function mountVaultGraph(root, data, deps) {
 
   /* ------------------------------------------------------------------ state */
 
+  /**
+   * Everything the disc is currently showing, and how. One object, mutated in place; the
+   * cascade and the legend read it, the UI writes it.
+   * @typedef {Object} State
+   * @property {string} dim                                    grouping dimension; "folder"
+   * @property {string} layout
+   * @property {Record<string, boolean>} hiddenSub             "folder/sub" -> true
+   * @property {Record<string, Record<string, boolean>>} hidden   dim -> { group: true }
+   * @property {Record<string, boolean>} highlight             group -> true
+   * @property {Record<string, boolean>} highlightSub          "folder/sub" -> true
+   * @property {string | null} hoverGroup
+   * @property {Record<string, boolean>} hoverSub
+   * @property {Record<string, boolean>} collapsed
+   * @property {Record<string, boolean>} tailOpen
+   * @property {Record<string, boolean>} pathOpen
+   * @property {string | null} selected                        node id
+   * @property {string | null} hovered                         node id
+   * @property {string | null} markDay                         heatmap cell key
+   * @property {string | null} hoverDay
+   * @property {number | null} hoverYear
+   * @property {string} query
+   * @property {number | null} until                           timeline rank, or null for all
+   * @property {number | null} from                            ms, UTC midnight (heatParse)
+   * @property {number | null} to
+   * @property {number | null} heatEnd
+   * @property {boolean} curveEdges
+   * @property {boolean} logoTwoRing
+   * @property {string[]} pinned
+   */
+  /** @type {State} */
   var state = {
     // Grouping is fixed to the PARA folder and there is only one layout now, so
     // both are constants rather than switchable state.
     dim: "folder",
     layout: "rings",
-    hiddenSub: Object.create(null),   // "folder/sub" -> true
-    hidden: Object.create(null),   // dim -> {group: true}
+    hiddenSub: dict(),   // "folder/sub" -> true
+    hidden: dict(),   // dim -> {group: true}
     // Highlighting is a SEPARATE axis from visibility, which is the whole point of
     // the eye icons: the row used to hide a group, so there was no way to say "show
     // me where this one is" without hiding everything else.
-    highlight: Object.create(null),   // group -> true: pushed out and haloed
-    highlightSub: Object.create(null),// "folder/sub" -> true: same, one subfolder
+    highlight: dict(),   // group -> true: pushed out and haloed
+    highlightSub: dict(),// "folder/sub" -> true: same, one subfolder
     // Hovering a legend row haloes its notes for as long as the pointer is on it. A
     // SEPARATE axis again, and transient: it never survives a rebuild of the legend and
     // it is never persisted, so it cannot leave the disc in a state nobody chose.
@@ -697,7 +777,7 @@ function mountVaultGraph(root, data, deps) {
     // stand for several subfolders at once -- the "N smaller subfolders" tail row carries
     // every index it pools -- so one row is not one key, and hovering it has to light all
     // of them or it lights the wrong part of the wedge it points at.
-    hoverSub: Object.create(null),
+    hoverSub: dict(),
     // Every group starts COLLAPSED, so the legend opens as a list of the vault's
     // top-level folders and nothing else. It used to open with one level of subfolders
     // showing, on the reasoning that that level is what the pie already draws as
@@ -706,11 +786,11 @@ function mountVaultGraph(root, data, deps) {
     // tree is still one click deep; it just is not unfolded for you.
     //
     // Filled by regroup(), which is the first place the group names exist.
-    collapsed: Object.create(null),   // group -> true: its subfolder rows folded away
-    tailOpen: Object.create(null),    // group -> true: "N smaller subfolders" unfolded
+    collapsed: dict(),   // group -> true: its subfolder rows folded away
+    tailOpen: dict(),    // group -> true: "N smaller subfolders" unfolded
     // "PARA/a/b/..." -> true: that folder's children are unfolded. Any depth; the tree
     // comes from each note's own `dirs` chain, so nothing here assumes a level count.
-    pathOpen: Object.create(null),
+    pathOpen: dict(),
     selected: null,
     hovered: null,
     // Days marked on the heatmap: one picked by clicking, one under the pointer.
@@ -794,7 +874,8 @@ function mountVaultGraph(root, data, deps) {
    *  neighbourhood truth in both modes -- neighboursOf() reads this, never graph.neighbors(),
    *  so the halo, the focus web and the detail panel work identically whether or not the
    *  edges are materialised. */
-  var adj = Object.create(null);
+  /** @type {Record<string, { o: string, w: number }[]>} */   // node -> [other end, weight]
+  var adj = dict();
   var EDGE_TOTAL = 0;
   /**
    * EVERY LINK IS THE SAME WIDTH. Weight is not a visual channel here, and the channel it
@@ -863,11 +944,15 @@ function mountVaultGraph(root, data, deps) {
    *  materialised link's weight is legible at all -- from the console, and for whatever
    *  channel weight is eventually given if a real vault turns out to have a spread worth
    *  showing. One number per edge, against 38k edges on the largest fixture. */
+  /** @param {number} w @returns {EdgeAttrs} */
   var edgeAttrsOf = function (w) { return { weight: w, size: EDGE_SIZE }; };
   var EDGE_SHOWN = 0;
   var lazyEdges = false;   // true when the resting web is partial; probes read this
   (function () {
-    var seen = Object.create(null), list = [];
+    /** @type {Record<string, number>} */
+    var seen = dict();
+    /** @type {{ a: string, b: string, w: number, k: string }[]} */
+    var list = [];
     DATA.edges.forEach(function (e) {
       var a = String(e.s), b = String(e.t);
       var k = a < b ? a + "\u0000" + b : b + "\u0000" + a;
@@ -915,7 +1000,8 @@ function mountVaultGraph(root, data, deps) {
   // all compete for one grid cell. That made the choice effectively arbitrary and
   // could drop rank 1 entirely, so the ranking is decided here. Ties break on label
   // so the labelled set is identical on every reload.
-  var hubRank = Object.create(null);
+  /** @type {Record<string, number>} */
+  var hubRank = dict();
   (function () {
     graph.nodes().slice().sort(function (a, b) {
       return graph.getNodeAttribute(b, "deg") - graph.getNodeAttribute(a, "deg") ||
@@ -925,17 +1011,20 @@ function mountVaultGraph(root, data, deps) {
   })();
 
   // Stable subfolder ordering per PARA folder: biggest first, name as tie-break.
-  var subOrder = Object.create(null);
+  /** @type {Record<string, string[]>} */
+  var subOrder = dict();
   // "folder/sub" -> note count, from the SAME tally subOrder sorts by -- not a second
   // graph walk. buildLegend used to keep its own local copy of this, recomputed on every
   // render; it now reads this one, and the settings panel and the __vg api do too, since
   // all three need to say how big a subfolder is.
-  var subCount = Object.create(null);
+  /** @type {Record<string, number>} */
+  var subCount = dict();
   (function () {
-    var tally = Object.create(null);
+    /** @type {Record<string, Record<string, number>>} */
+    var tally = dict();
     graph.forEachNode(function (_id, a) {
       var f = a.folder, sb = a.sub || "";
-      if (!tally[f]) tally[f] = Object.create(null);
+      if (!tally[f]) tally[f] = dict();
       tally[f][sb] = (tally[f][sb] || 0) + 1;
     });
     Object.keys(tally).forEach(function (f) {
@@ -982,8 +1071,10 @@ function mountVaultGraph(root, data, deps) {
   // Keyed by note and cleared as each one crosses, not a single global flag: the whole point
   // is that at any instant some notes have crossed and others have not, which is what makes
   // the leaving and the arriving read as one flowing movement rather than two phases.
+  /** @type {Record<string, string> | null} */
   var moveFrom = null;
 
+  /** @param {string} id @returns {string} */
   function groupOf(id) {
     if (moveFrom) { var mf = moveFrom[id]; if (mf !== undefined) return mf; }
     // From the ADJACENCY, not graph.degree(): in a budgeted vault the graph holds only the
@@ -1003,18 +1094,25 @@ function mountVaultGraph(root, data, deps) {
   // channel: each group owns a contiguous wedge separated by a 2 degree gap, carries a
   // label on the rim, and is listed in the legend with its count.
   var SLOT_COUNT = 12;
-  var groupColor = Object.create(null);   // group -> literal hex, rebuilt on regroup
-  var groupSlot = Object.create(null);    // group -> slot key it is on, "" for none
+  /** @type {Record<string, string>} */
+  var groupColor = dict();   // group -> literal hex, rebuilt on regroup
+  /** @type {Record<string, string>} */
+  var groupSlot = dict();    // group -> slot key it is on, "" for none
   // group -> the slot it would be on with no override at all. Recorded rather than left
   // to be recomputed, for the same reason groupSlot is: an override discards the
   // automatic key right after using it to advance the rotation counter, and nothing else
   // reproduces "i % 12, archives skipped" without duplicating the loop that does it.
-  var groupAutoSlot = Object.create(null);
+  /** @type {Record<string, string>} */
+  var groupAutoSlot = dict();
+  /** @type {Record<string, string[]>} */
   var order = {};   // dim -> [group names, biggest first]
 
+  /** @returns {Record<string, number>} group -> note count, for the current dim */
   function computeOrder() {
+    /** @type {Record<string, number>} */
     var count = {};
-    var filed = Object.create(null);
+    /** @type {Record<string, number>} */
+    var filed = dict();
     graph.forEachNode(function (id, a) {
       var g = groupOf(id);
       count[g] = (count[g] || 0) + 1;
@@ -1072,6 +1170,7 @@ function mountVaultGraph(root, data, deps) {
       // buildColors below) it does not consume a rotation slot any more than an archive
       // does, so its position here cannot move anyone else's colour the way vault root's
       // did.
+      /** @param {string} s */
       var rank = function (s) {
         if (s === UNLINKED) return 3;
         var c = s.charAt(0);
@@ -1083,15 +1182,17 @@ function mountVaultGraph(root, data, deps) {
     return count;
   }
 
+  /** @type {Record<string, number>} */
   var counts = {};
   // folder -> how many notes are FILED there, whatever group each one is standing in. Beside
   // counts because it is the other half of the same tally: counts says what a wedge draws,
   // this says what the folder holds, and the legend shows both whenever they disagree
   // (github#50). Only meaningful in the folder dimension -- computeOrder leaves it empty
   // otherwise, and an empty map reads as "holds nothing extra" everywhere it is consulted.
-  var folderCount = Object.create(null);
+  /** @type {Record<string, number>} */
+  var folderCount = dict();
   function buildColors() {
-    groupColor = Object.create(null);
+    groupColor = dict();
 
     var names = order[state.dim] || [];
 
@@ -1107,7 +1208,8 @@ function mountVaultGraph(root, data, deps) {
     //
     // Overrides only apply to the folder dimension: they are keyed by folder name, and
     // any other grouping would be matching those names against something else entirely.
-    var byFolder = state.dim === "folder" ? folderColors : Object.create(null);
+    /** @type {SlotMap} */
+    var byFolder = state.dim === "folder" ? folderColors : dict();
 
     // AN OVERRIDE CHANGES EXACTLY ONE FOLDER. Position decides every other colour, and
     // nothing here looks at what anyone else picked.
@@ -1134,8 +1236,8 @@ function mountVaultGraph(root, data, deps) {
     // panels have to mark it, and the arithmetic is no longer `i % 12`: archives are
     // skipped, so the only thing that knows is the loop that did the skipping. Both UIs
     // read it back through the api.
-    groupSlot = Object.create(null);
-    groupAutoSlot = Object.create(null);
+    groupSlot = dict();
+    groupAutoSlot = dict();
     var auto = 0;
     names.forEach(function (g) {
       var k = byFolder[g];
@@ -1184,6 +1286,7 @@ function mountVaultGraph(root, data, deps) {
 
   // The settings UIs need three things and none of them should reach into internals:
   // what can be picked, what is picked now, and what the groups are called.
+  /** @returns {PaletteSlot[]} */
   function paletteInfo() {
     return SLOT_NAMES.map(function (name, i) {
       return { key: "g" + (i + 1), name: name, hex: THEME.slots[i] };
@@ -1200,11 +1303,13 @@ function mountVaultGraph(root, data, deps) {
   // applies it to the live filter -- see pickVisible -- because a *default* changing and
   // the disc changing are two decisions, and only one of them belongs to a host that is
   // loading saved settings at boot.
+  /** @param {Record<string, unknown>} map */
   function applyFolderShown(map) {
     folderShown = cleanFolderShown(map);
     return folderShown;
   }
 
+  /** @param {Record<string, unknown>} map */
   function applyFolderColors(map) {
     folderColors = cleanSlotMap(map);
     buildColors();
@@ -1220,6 +1325,7 @@ function mountVaultGraph(root, data, deps) {
   // things that did not change. buildSubShades() alone is enough, and it is also what
   // applyFolderColors ends in (via buildColors()), which is why a folder recolour keeps
   // respecting every subfolder pin without this file needing to say so twice.
+  /** @param {Record<string, unknown>} map */
   function applySubfolderColors(map) {
     subfolderColors = cleanSlotMap(map);
     buildSubShades();
@@ -1240,6 +1346,7 @@ function mountVaultGraph(root, data, deps) {
   // vault. A single differentiated subfolder is ordinarily nothing to nest -- see
   // buildSubShades' own `subs.length < 2` skip -- but a PIN is a deliberate choice, made
   // through a UI that has to stay reachable for as long as the pin exists.
+  /** @param {string} g */
   function groupHasPinnedSub(g) {
     return (subOrder[g] || []).some(function (sb) {
       return !!subfolderColors[g + "/" + sb];
@@ -1256,8 +1363,11 @@ function mountVaultGraph(root, data, deps) {
   //
   // colorShown exists only WHILE a walk is running, so at rest this falls straight through to
   // groupColor and nothing pays for it.
-  var colorShown = null, colorRaf = 0, colorPrev = 0;
+  /** @type {Record<string, string> | null} */   // group -> hex mid-walk; null when settled
+  var colorShown = null;
+  var colorRaf = 0, colorPrev = 0;
 
+  /** @param {string} group @returns {string} */
   function colorOf(group) {
     if (colorShown) { var c = colorShown[group]; if (c) return c; }
     return groupColor[group] || THEME.neutrals[0];
@@ -1267,12 +1377,14 @@ function mountVaultGraph(root, data, deps) {
   // groups that existed at both ends and actually changed are walked: one appearing has no
   // previous colour to come from, and fading it up from nothing would be a different effect
   // than the one this is for.
+  /** @param {Record<string, string> | null} before group -> hex, as it was */
   function colorWalk(before) {
     if (!before || !renderer) return;
+    /** @type {Record<string, string> | null} */
     var origin = null;
     Object.keys(groupColor).forEach(function (g) {
       var was = before[g];
-      if (was && was !== groupColor[g]) (origin || (origin = Object.create(null)))[g] = was;
+      if (was && was !== groupColor[g]) (origin || (origin = dict()))[g] = was;
     });
     if (!origin) return;
     if (colorRaf) { WIN.cancelAnimationFrame(colorRaf); colorRaf = 0; }
@@ -1287,7 +1399,8 @@ function mountVaultGraph(root, data, deps) {
       t += Math.min(dt, TWEEN_MS) / (TWEEN_MS * TIME_SCALE);
       if (t > 1) t = 1;
       var e = t * t * (3 - 2 * t);
-      var next = Object.create(null);
+      /** @type {Record<string, string>} */
+      var next = dict();
       Object.keys(origin).forEach(function (g) { next[g] = mixHex(origin[g], groupColor[g], e); });
       colorShown = next;
       renderer.refresh({ skipIndexation: true });     // colour only; nothing moved
@@ -1308,17 +1421,20 @@ function mountVaultGraph(root, data, deps) {
   // one of the twelve slots instead -- a full-strength colour with none of the
   // "below the floor" restraint above, because a pin is a deliberate choice to make one
   // subfolder stand out, not a nested cue.
-  var subShade = Object.create(null);
+  /** @type {Record<string, string>} */
+  var subShade = dict();
   // "folder/sub" -> the slot key it is ON: the pinned one, or "" for the automatic
   // ladder. "" on purpose rather than omitting the key -- an automatic tint is never one
   // of the twelve slot hexes, so there is nothing among them to ring as "current", and
   // the settings UIs need to say that rather than guess.
-  var subSlot = Object.create(null);
+  /** @type {Record<string, string>} */
+  var subSlot = dict();
 
   // The distinct folder colours currently worn by unlinked notes, capped -- built by
   // buildUnlinkedTint() below, read only by the (unlinked) legend row's own swatch when
   // unlinkedTintByFolder is on. Empty is a perfectly good answer (no unlinked notes, or the
   // toggle is off): the swatch falls back to the flat colorOf(UNLINKED) either way.
+  /** @type {string[]} */
   var unlinkedTintColors = [];
 
   // Four steps, not one per subfolder. Spreading N tints evenly across one hue
@@ -1495,7 +1611,20 @@ function mountVaultGraph(root, data, deps) {
   //
   // A function declaration is hoisted and a var initialiser is not, so the construction lives
   // inside bandOf and every writer goes through it too. Nothing may touch BAND directly.
+  /**
+   * One of the two bands the disc is laid out in.
+   * @typedef {Object} Band
+   * @property {"i" | "o"} key
+   * @property {number} sp        row pitch, in units
+   * @property {number} rows
+   * @property {number} room
+   * @property {{ m: number, b: number, lo: number }} ramp
+   * @property {number} gapDeg
+   * @property {number} nG
+   */
+  /** @type {{ i: Band, o: Band } | null} */
   var BAND = null;
+  /** @param {string} k "i" or "o" @returns {Band} */
   function bandOf(k) {
     if (!BAND) {
       BAND = {
@@ -1508,6 +1637,7 @@ function mountVaultGraph(root, data, deps) {
   // The factor a band's radii are DRAWN at, read rather than stored for the same reason:
   // INNER_SCALE is declared below the first caller too, so a descriptor built early would
   // capture undefined and keep it for the session.
+  /** @param {string} k */
   function bandScale(k) { return k === "i" ? INNER_SCALE : 1; }
 
   // ONE ROW OF THE LATTICE AT FULL VAULT, IN GRAPH UNITS -- and deliberately NOT the live
@@ -1545,6 +1675,7 @@ function mountVaultGraph(root, data, deps) {
   //
   // Per band and never one shared number, which is the error that made the inner ring's gaps
   // grow while outer folders were toggled.
+  /** @param {string} band */
   function pitchUnits(band) {
     return UNIT * (bandOf(band).sp || 1) * bandScale(band);
   }
@@ -1561,11 +1692,13 @@ function mountVaultGraph(root, data, deps) {
   var SUB_L_SPAN = 0.28;            // how far the ladder travels in lightness
   var SUB_L_LIMIT = 0.90;           // stop before the top step washes out
 
+  /** @param {string} hex */
   function hueOf(hex) {
     var l = hex2lab(hex);
     return ((Math.atan2(l[2], l[1]) * 180 / Math.PI) % 360 + 360) % 360;
   }
   // Degrees this group may rotate before it starts impersonating another group.
+  /** @param {string} basecol */
   function hueBudget(basecol) {
     var h = hueOf(basecol), gap = 180;
     Object.keys(groupColor).forEach(function (g) {
@@ -1580,6 +1713,7 @@ function mountVaultGraph(root, data, deps) {
     return gap * HUE_BUDGET_FRACTION;
   }
 
+  /** @param {string} folder @param {string} sub */
   function subTintIndex(folder, sub) {
     var subs = subOrder[folder] || [];
     var k = subs.indexOf(sub || "");
@@ -1601,6 +1735,7 @@ function mountVaultGraph(root, data, deps) {
   // subfolder clear the bar on notes that were not even on screen under a date range or
   // hidden-folder filter -- the same class of bug already documented above for the
   // folder-level gate ("it also cannot see a filter").
+  /** @param {string} folder @param {string} sub @param {number} n @param {number} [depth] */
   function subCellIndex(folder, sub, n, depth) {
     var idx = subTintIndex(folder, sub);
     if (idx === SUB_SLOTS - 1) return idx;
@@ -1608,8 +1743,8 @@ function mountVaultGraph(root, data, deps) {
   }
 
   function buildSubShades() {
-    subShade = Object.create(null);
-    subSlot = Object.create(null);
+    subShade = dict();
+    subSlot = dict();
     Object.keys(subOrder).forEach(function (f) {
       var subs = subOrder[f];
       var basecol = colorOf(f);
@@ -1663,7 +1798,8 @@ function mountVaultGraph(root, data, deps) {
   // buildLegend, which runs on nearly every legend click.
   function buildUnlinkedTint() {
     unlinkedTintColors = [];
-    var seen = Object.create(null);
+    /** @type {Record<string, boolean>} */
+    var seen = dict();
     graph.forEachNode(function (id) {
       if (unlinkedTintColors.length >= UNLINKED_TINT_CAP) return;
       if (groupOf(id) !== UNLINKED) return;
@@ -1691,6 +1827,7 @@ function mountVaultGraph(root, data, deps) {
   // has, or its own folder's tint while staying put. A note that has already joined its
   // folder (groupOf returns something other than UNLINKED) never reaches the tint check at
   // all -- it is already on the ordinary fallthrough, same as any other note in that folder.
+  /** @param {string} id @returns {string} */
   function nodeColor(id) {
     var a = graph.getNodeAttributes(id);
     if (state.dim !== "folder") return colorOf(groupOf(id));
@@ -1698,6 +1835,7 @@ function mountVaultGraph(root, data, deps) {
     return subShade[a.folder + "/" + (a.sub || "")] || colorOf(a.folder);
   }
 
+  /** @param {string} group */
   function isHidden(group) {
     var h = state.hidden[state.dim];
     return !!(h && h[group]);
@@ -7362,6 +7500,7 @@ function mountVaultGraph(root, data, deps) {
   // nothing visible and costs two cbrt per channel. Cached on a hundredth of t, which is
   // finer than the eye and coarse enough that the cache actually hits.
   var mixCache = Object.create(null);
+  /** @param {string} from hex @param {string} to hex @param {number} t 0..1 @returns {string} */
   function mixHex(from, to, t) {
     if (t <= 0) return from;
     if (t >= 1) return to;
