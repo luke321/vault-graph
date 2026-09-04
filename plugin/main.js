@@ -47,11 +47,9 @@ const ICON_ID = "vault-graph-disc";
  * typescript-eslint reads these through tsconfig.json's allowJs, so every value that gets
  * a type here takes findings off the no-unsafe meter in scripts/lint.mjs. github#60.
  *
- * Two kinds of shape live here. The plugin's own -- Settings, the rows the settings tab
- * draws -- and the plugin's VIEW of two contracts that belong to src/page.js: what
- * mountVaultGraph hands back, and the members of the __vg api this file reaches for. Those
- * two are deliberately the SUBSET this file uses, not the whole api; #60's second batch
- * types the full object where it is built, in page.js, and this file will import that.
+ * The plugin's own shapes live here -- Settings, the rows the settings tab draws. The two
+ * contracts shared with src/page.js (what mountVaultGraph takes and hands back) are declared
+ * there, where the objects are built, and imported below.
  */
 
 /** @typedef {import("obsidian").App} App */
@@ -98,37 +96,11 @@ const ICON_ID = "vault-graph-disc";
 /** @typedef {Awaited<ReturnType<typeof buildData>>} BuildResult */
 
 /**
- * The members of page.js's __vg api that THIS FILE reaches. Every one of them lives
- * outside the demo/debug region the plugin build strips, or the guards below would be
- * load-bearing rather than defensive. `renderer` and `graph` are Sigma and graphology
- * objects; both libraries are vendored without typings, so only the members read here
- * are named.
- * @typedef {Object} VgApi
- * @property {{ order: number, size: number }} graph
- * @property {{ kill(): void, refresh(): void } | null} renderer
- * @property {() => void} readTheme
- * @property {() => void} placeLogo
- * @property {() => void} heatBuild
- * @property {unknown} palette
- * @property {() => string[]} groupOrder
- * @property {(group: string) => number} groupCount
- * @property {(group: string) => string} slotOf
- * @property {(group: string) => string} autoSlotOf
- * @property {(map: Record<string, string>) => void} setFolderColors
- * @property {(map: Record<string, string>) => void} setSubfolderColors
- * @property {(map: Record<string, boolean>) => void} setFolderShown
- * @property {(v: boolean) => void} setPanEnabled
- * @property {(v: boolean) => void} setCompactAxis
- * @property {(v: boolean) => void} setUnlinkedByFolder
- * @property {(v: boolean) => void} setUnlinkedTintByFolder
- * @property {() => void} applyHiddenDefaults
- * @property {() => unknown} checkPlanParity
- */
-
-/**
- * What mountVaultGraph returns: a getter onto the api, which does not exist until the
- * page's deferred init has run (see VaultGraphView's constructor for why a getter).
- * @typedef {{ readonly api: VgApi | null, readonly ready: boolean }} MountHandle
+ * The page's own boundary types, declared where the object is built (src/page.js, the
+ * `types` section): what mountVaultGraph returns, and the __vg api it builds. Every member
+ * `VgApi` names ships in the plugin; the debug surface the standalone adds is not in it.
+ * @typedef {import("../src/page.js").MountHandle} MountHandle
+ * @typedef {import("../src/page.js").MountDeps} MountDeps
  */
 
 /** One folder row in the settings tab. `slot` is the slot in use, `autoSlot` the one with no override. */
@@ -640,12 +612,18 @@ class VaultGraphView extends ItemView {
     // between a view that is themed and one that happened to match at startup.
     this.registerEvent(this.app.workspace.on("css-change", () => this.syncTheme()));
 
+    // The graphology bundle is a vendored UMD with no typings, so what it exports is
+    // `unknown` to the type program and is asserted to the constructor type page.js declares
+    // at the one place it is handed over. `.Graph || graphology`: the namespace exposes the
+    // class as a member or IS the class, depending on the build.
+    /** @type {unknown} */
+    const graphCtor = graphology.Graph || graphology;
     const t0 = performance.now();
     this.handle = mountVaultGraph(page, data, {
       // Real module imports, not globals: the UMD wrappers take their `module.exports`
       // branch under esbuild, so nothing is ever assigned to `window`. This is exactly why
       // page.js takes its libraries as arguments.
-      Graph: graphology.Graph || graphology,
+      Graph: /** @type {MountDeps["Graph"]} */ (graphCtor),
       Sigma: sigma.Sigma || sigma,
       rendering: sigma.rendering || {},
       logoMask: "data:image/png;base64," + LOGO_MASK_B64,

@@ -52,6 +52,303 @@
  * WAS AN IIFE. Nothing about the body changed when it stopped being one: it already kept
  * every name to itself, which is what made this a signature change rather than a rewrite.
  */
+
+/* ===================================================================== types ==
+ * The three boundaries of this file, as JSDoc (github#60, batch 2): what comes IN as data
+ * and deps, and what goes OUT as the __vg api. Comments only -- the exporter still inlines
+ * this file as text and the plugin still bundles it as JavaScript; typescript-eslint reads
+ * these through tsconfig.json's allowJs, and plugin/main.js imports them as
+ * `import("../src/page.js").X`. Typedefs live at module scope for that reason: one declared
+ * inside mountVaultGraph would be local to it.
+ *
+ * GRAPHOLOGY AND SIGMA ARE TYPED STRUCTURALLY, as exactly the members this file calls and
+ * nothing more. Both are vendored bundles with no typings (vendor/NOTICE.md), and github#58
+ * replaces them with code of our own -- which can implement these same interfaces. Anything
+ * a future caller needs that is not named here shows up on the meter, which is the point.
+ */
+
+/**
+ * One note, as both producers emit it: src/build-graph.mjs into the standalone file, and
+ * plugin/main.js's buildData from Obsidian's metadata cache. Nothing checked the two agreed
+ * before this typedef; now the plugin's buildData is read against it.
+ * @typedef {Object} VaultNode
+ * @property {string} id           vault-relative path with "/" separators, or "ghost:<name>"
+ * @property {string} label        the note's basename
+ * @property {string} folder       first path segment; "(vault root)" or "(unresolved)"
+ * @property {string[]} dirs       the named folders below it, month folders handled
+ * @property {string} sub          dirs[0] or ""
+ * @property {string} type         inferred note type ("note", "daily", "person", ...)
+ * @property {string[]} tags
+ * @property {string} created      YYYY-MM-DD, or ""
+ * @property {string} touched      YYYY-MM-DD, or ""
+ * @property {number} words
+ * @property {number} deg          link degree, counted by the producer
+ * @property {boolean} [ghost]     true for an unresolved-link placeholder
+ */
+
+/** One link: node indexes into `nodes`, and how many times the link occurs. */
+/** @typedef {{ s: number, t: number, w: number }} VaultEdge */
+
+/**
+ * @typedef {Object} VaultStats
+ * @property {number} files
+ * @property {number} nodes
+ * @property {number} edges
+ * @property {number} unresolved
+ * @property {number} orphans
+ * @property {{ frontmatter: number, filename: number, stamp: number, none: number }} dates
+ * @property {boolean} templatesExcluded
+ * @property {boolean} ghostsIncluded
+ */
+
+/**
+ * What mountVaultGraph is handed as `data`, from either producer.
+ * @typedef {Object} VaultData
+ * @property {string} vault          the vault's name
+ * @property {string} generated      "YYYY-MM-DD HH:mm"
+ * @property {VaultNode[]} nodes
+ * @property {VaultEdge[]} edges
+ * @property {VaultStats} stats
+ * @property {boolean} [dev]         a --dev build of the standalone; nothing else sets it
+ */
+
+/**
+ * The attributes this file puts on every graph node at addNode, and reads back.
+ * @typedef {Object} NodeAttrs
+ * @property {string} label
+ * @property {number} x
+ * @property {number} y
+ * @property {number} size
+ * @property {string} folder
+ * @property {string} sub
+ * @property {string[]} dirs
+ * @property {string} ntype
+ * @property {string[]} tags
+ * @property {string} path
+ * @property {number} deg
+ * @property {string} created
+ * @property {string} touched
+ * @property {number} words
+ * @property {boolean} ghost
+ */
+
+/** @typedef {{ weight: number, size: number }} EdgeAttrs */
+
+/** A listener as graphology hands it back from rawListeners and takes it for on(). */
+/** @typedef {(...args: unknown[]) => void} GraphListener */
+
+/**
+ * The graphology surface this file uses -- an undirected graph keyed by node id.
+ * @typedef {Object} GraphLike
+ * @property {number} order
+ * @property {number} size
+ * @property {(id: string, attrs: NodeAttrs) => string} addNode
+ * @property {(a: string, b: string, attrs?: EdgeAttrs) => string} addUndirectedEdge
+ * @property {(id: string) => boolean} hasNode
+ * @property {(a: string, b: string) => boolean} hasEdge
+ * @property {(e: string) => void} dropEdge
+ * @property {(e: string) => [string, string]} extremities
+ * @property {(id: string) => number} degree
+ * @property {(id: string) => string[]} neighbors
+ * @property {() => string[]} nodes
+ * @property {(fn: (id: string, attrs: NodeAttrs) => void) => void} forEachNode
+ * @property {{ (fn: (e: string, attrs: EdgeAttrs, s: string, t: string) => void): void,
+ *              (id: string, fn: (e: string, attrs: EdgeAttrs, s: string, t: string) => void): void }} forEachEdge
+ * @property {<K extends keyof NodeAttrs>(id: string, name: K) => NodeAttrs[K]} getNodeAttribute
+ * @property {(id: string) => NodeAttrs} getNodeAttributes
+ * @property {<K extends keyof NodeAttrs>(id: string, name: K, value: NodeAttrs[K]) => void} setNodeAttribute
+ * @property {(id: string, attrs: Partial<NodeAttrs>) => void} mergeNodeAttributes
+ * @property {(event: string, fn: GraphListener) => void} on
+ * @property {(event: string, fn: GraphListener) => void} removeListener
+ * @property {(event: string) => GraphListener[]} rawListeners
+ */
+
+/** @typedef {new (opts?: { type?: string }) => GraphLike} GraphCtor */
+
+/** @typedef {{ x: number, y: number }} Point */
+
+/** @typedef {{ x: number, y: number, ratio: number, angle: number }} CameraState */
+
+/**
+ * @typedef {Object} CameraLike
+ * @property {number} x
+ * @property {number} y
+ * @property {number} ratio
+ * @property {() => CameraState} getState
+ * @property {(to: Partial<CameraState>, opts?: { duration?: number }, done?: () => void) => void} animate
+ * @property {(event: string, fn: () => void) => void} on
+ */
+
+/**
+ * What sigma's reducers return and getNodeDisplayData reads back: our attributes plus
+ * sigma's own display fields.
+ * @typedef {Object} NodeDisplayData
+ * @property {number} x
+ * @property {number} y
+ * @property {number} size
+ * @property {string} color
+ * @property {string | null} label
+ * @property {boolean} hidden
+ * @property {boolean} [highlighted]
+ * @property {boolean} [forceLabel]
+ * @property {number} [zIndex]
+ * @property {string} [type]
+ */
+
+/**
+ * @typedef {Object} EdgeDisplayData
+ * @property {number} size
+ * @property {string} color
+ * @property {boolean} hidden
+ * @property {string} [type]
+ * @property {number} [curvature]
+ * @property {string | null} [label]
+ */
+
+/** The sigma settings this file reads or writes after construction. */
+/**
+ * @typedef {Object} SigmaSettings
+ * @property {number} minCameraRatio
+ * @property {number} maxCameraRatio
+ * @property {number} minEdgeThickness
+ * @property {number} zoomDuration
+ * @property {number} zoomingRatio
+ * @property {boolean} enableCameraPanning
+ */
+
+/** The mouse payload sigma passes to node and stage events. */
+/** @typedef {{ x: number, y: number, original: MouseEvent, preventSigmaDefault: () => void }} SigmaMouseEvent */
+/** Node events carry `node`; stage events (clickStage, doubleClickStage) and afterRender do not. */
+/** @typedef {{ node?: string, event: SigmaMouseEvent }} SigmaNodeEvent */
+
+/**
+ * The sigma renderer surface this file uses.
+ * @typedef {Object} SigmaLike
+ * @property {(opts?: { partialGraph?: { nodes?: string[], edges?: string[] }, skipIndexation?: boolean, schedule?: boolean }) => void} refresh
+ * @property {() => void} render
+ * @property {() => void} kill
+ * @property {(p: Point) => Point} graphToViewport
+ * @property {(p: Point) => Point} viewportToGraph
+ * @property {() => CameraLike} getCamera
+ * @property {(size: number) => number} scaleSize
+ * @property {(id: string) => NodeDisplayData | undefined} getNodeDisplayData
+ * @property {(e: string) => EdgeDisplayData | undefined} getEdgeDisplayData
+ * @property {<K extends keyof SigmaSettings>(name: K) => SigmaSettings[K]} getSetting
+ * @property {<K extends keyof SigmaSettings>(name: K, value: SigmaSettings[K]) => void} setSetting
+ * @property {() => Record<string, HTMLCanvasElement>} getCanvases
+ * @property {() => { width: number, height: number }} getDimensions
+ * @property {() => { on: (event: string, fn: (e: SigmaMouseEvent) => void) => void }} [getMouseCaptor]
+ * @property {(bbox: { x: [number, number], y: [number, number] } | null) => void} setCustomBBox
+ * @property {(event: string, fn: (e: SigmaNodeEvent) => void) => void} on
+ */
+
+/** @typedef {new (graph: GraphLike, container: HTMLElement, settings: Record<string, unknown>) => SigmaLike} SigmaCtor */
+
+/**
+ * `Sigma.rendering` off the UMD namespace: the two programs this file may register. Both
+ * optional -- an older bundle without them gets straight edges and no halo.
+ * @typedef {Object} RenderingLike
+ * @property {(opts: Record<string, unknown>) => unknown} [createNodeBorderProgram]
+ * @property {unknown} [EdgeCurveProgram]
+ */
+
+/** A slot map as the host stores it: folder (or "folder/sub") -> "g1".."g12". */
+/** @typedef {Record<string, string>} SlotMap */
+
+/**
+ * What mountVaultGraph is handed as `deps`. The header comment above says what each one is
+ * for; this is the shape. Two constructors and the rendering namespace are required, the
+ * rest is optional and absent means the documented default.
+ * @typedef {Object} MountDeps
+ * @property {GraphCtor} Graph
+ * @property {SigmaCtor} Sigma
+ * @property {RenderingLike} [rendering]
+ * @property {string} [logoMask]
+ * @property {Window} [win]
+ * @property {Document} [doc]
+ * @property {SlotMap} [folderColors]
+ * @property {SlotMap} [subfolderColors]
+ * @property {Record<string, boolean>} [folderShown]
+ * @property {boolean} [panEnabled]
+ * @property {boolean} [compactAxis]
+ * @property {boolean} [unlinkedByFolder]
+ * @property {boolean} [unlinkedTintByFolder]
+ * @property {string[]} [pinned]
+ * @property {boolean} [settingsUI]
+ * @property {() => void} [openSettings]
+ * @property {(map: SlotMap) => void | Promise<void>} [onFolderColors]
+ * @property {(map: SlotMap) => void | Promise<void>} [onSubfolderColors]
+ * @property {(map: Record<string, boolean>) => void | Promise<void>} [onFolderShown]
+ * @property {(v: boolean) => void | Promise<void>} [onPanEnabled]
+ * @property {(v: boolean) => void | Promise<void>} [onCompactAxis]
+ * @property {(v: boolean) => void | Promise<void>} [onUnlinkedByFolder]
+ * @property {(v: boolean) => void | Promise<void>} [onUnlinkedTintByFolder]
+ * @property {(ids: string[]) => void | Promise<void>} [onPinned]
+ * @property {() => void} [onRefresh]
+ */
+
+/** One palette slot as paletteInfo() lists it. */
+/** @typedef {{ key: string, name: string, hex: string }} PaletteSlot */
+
+/** What checkPlanParity() returns -- see its own comment for what parity means. */
+/**
+ * @typedef {Object} PlanParityReport
+ * @property {number} shown
+ * @property {number} threshold
+ * @property {boolean} onlyVisible
+ * @property {number} staticMaxR
+ * @property {number} liveMaxR
+ * @property {boolean} maxRMatches
+ * @property {number} cellsStatic
+ * @property {number} cellsLive
+ * @property {Record<string, { staticPlan: number, livePlan: number }>} rowDiffs
+ * @property {boolean} parityOK
+ */
+
+/**
+ * The __vg api: what mountVaultGraph builds once its deferred init has run, and what
+ * plugin/main.js and the settings UIs call. THESE 21 MEMBERS SHIP IN THE PLUGIN. The
+ * standalone build adds ~70 more -- state, alpha, demo, probe and the rest of the debug
+ * surface the invariant suite drives -- through Object.defineProperties inside the region
+ * scripts/build-plugin.mjs strips, so they are deliberately not part of this type: nothing
+ * typed consumes them (the suite reaches them by name over CDP), and naming them here would
+ * let the plugin claim members it does not have.
+ * @typedef {Object} VgApi
+ * @property {GraphLike} graph
+ * @property {SigmaLike | undefined} renderer   set by makeRenderer() before the api exists; a getter, so a host reads the live one
+ * @property {() => void} readTheme
+ * @property {() => void} placeLogo
+ * @property {() => PaletteSlot[]} palette
+ * @property {() => string[]} groupOrder
+ * @property {(group: string) => number} groupCount
+ * @property {(group: string) => string} slotOf
+ * @property {(group: string) => string} autoSlotOf
+ * @property {(map: SlotMap) => void} setFolderColors
+ * @property {(map: SlotMap) => void} setSubfolderColors
+ * @property {(map: Record<string, boolean>) => void} setFolderShown
+ * @property {(v: boolean) => void} setPanEnabled
+ * @property {(v: boolean) => void} setCompactAxis
+ * @property {(v: boolean) => void} setUnlinkedByFolder
+ * @property {(v: boolean) => void} setUnlinkedTintByFolder
+ * @property {() => void} applyHiddenDefaults
+ * @property {() => void} heatBuild
+ * @property {() => PlanParityReport} checkPlanParity
+ * @property {() => unknown} checkFocusWeb
+ * @property {() => unknown} debugDump
+ */
+
+/**
+ * What mountVaultGraph returns: a getter onto the api, which does not exist until the
+ * deferred init has run -- see the comment at the return statement for why a getter.
+ * @typedef {{ readonly api: VgApi | null, readonly ready: boolean }} MountHandle
+ */
+
+/**
+ * @param {HTMLElement} root
+ * @param {VaultData} data
+ * @param {MountDeps} deps
+ * @returns {MountHandle}
+ */
 function mountVaultGraph(root, data, deps) {
   "use strict";
 
@@ -98,6 +395,7 @@ function mountVaultGraph(root, data, deps) {
   // promises, with the element's own document ahead of the window's, since it is the one that
   // stays right when the view is dragged into a popout.
   var DOC = deps.doc || (root && root.ownerDocument) || (WIN && WIN.document) || null;
+  /** @type {VgApi | null} */
   var API = null;
 
   // Ids carry a `vg-` prefix so they cannot collide with the host document, and the
@@ -236,6 +534,7 @@ function mountVaultGraph(root, data, deps) {
   // cleaner for both maps: a subfolder key is just "<folder>/<sub>" (matching subShade
   // and subOrder's own keys, "" for notes sitting directly in the folder) rather than a
   // different shape needing different validation.
+  /** @param {Record<string, unknown> | undefined} raw @returns {SlotMap} */
   function cleanSlotMap(raw) {
     var out = Object.create(null);
     if (!raw || typeof raw !== "object") return out;
@@ -353,6 +652,7 @@ function mountVaultGraph(root, data, deps) {
   // above. Tri-state on purpose -- "absent" has to stay distinguishable from "false", or
   // turning `_ Archives` off by hand would be indistinguishable from never having said
   // anything about it, and a later change to the default could not reach it.
+  /** @param {Record<string, unknown> | undefined} raw @returns {Record<string, boolean>} */
   function cleanFolderShown(raw) {
     var out = Object.create(null);
     if (!raw || typeof raw !== "object") return out;
@@ -6944,7 +7244,9 @@ function mountVaultGraph(root, data, deps) {
 
   /* ---------------------------------------------------------------- render */
 
-  var renderer, neighbourCache = null;
+  /** @type {SigmaLike | undefined} */
+  var renderer;
+  var neighbourCache = null;
 
   function neighboursOf(id) {
     // From the adjacency, not graph.neighbors(): in a budgeted vault the graph is missing

@@ -1389,18 +1389,20 @@ listed 77 findings against our 28 for exactly this reason, and its per-rule coun
 
 | | `plugin/main.js` | `src/page.js` | total |
 |---|---:|---:|---:|
-| `no-unsafe-member-access` | 0 | 3,860 | 3,860 |
-| `no-unsafe-assignment` | 1 | 1,365 | 1,366 |
-| `no-unsafe-call` | 0 | 870 | 870 |
-| `no-unsafe-argument` | 0 | 212 | 212 |
-| `no-unsafe-return` | 0 | 160 | 160 |
-| **budget** | **1** | **6,467** | **6,468** |
+| `no-unsafe-member-access` | 0 | 2,643 | 2,643 |
+| `no-unsafe-assignment` | 0 | 989 | 989 |
+| `no-unsafe-call` | 0 | 355 | 355 |
+| `no-unsafe-argument` | 0 | 252 | 252 |
+| `no-unsafe-return` | 0 | 138 | 138 |
+| **budget** | **0** | **4,377** | **4,377** |
 
 The gate landed 2026-09-03 on `develop@972daca` at **6,977** -- 510 on the plugin, matching
 the directory's board figure for figure (278 / 101 / 99 / 19 / 13), and 6,467 on the page.
-github#60 is the ratchet down from there, and its first batch (2026-09-04) typed the plugin
-with JSDoc alone: 510 → 1, the one being the vendored graphology namespace, which has no
-typings until #60's boundary batch names it. `scripts/lint.mjs` runs eslint and fails on any
+github#60 is the ratchet down from there, in batches, each recorded in `changelog-detail.md`
+with the numbers it moved: batch 1 (2026-09-04) typed the plugin with JSDoc alone, 510 → 1;
+batch 2 (same day) declared the page's three boundaries -- `VaultData`, `MountDeps` with
+structural `GraphLike`/`SigmaLike`, and the `VgApi` -- at the top of `src/page.js`, which
+took the page 6,467 → 4,377 and the plugin's last one to 0. `scripts/lint.mjs` runs eslint and fails on any
 error, on any warning outside the meter, and on a meter that differs from the budget in
 EITHER direction -- a count below it means something was typed and the budget stopped
 describing the code, so it is lowered in the same commit. eslint's own `--max-warnings`
@@ -1418,8 +1420,8 @@ the rules allow `any` to flow into an `unknown`-typed variable, and nothing else
 
 ```bash
 npm run lint                          # 0 errors, 0 actionable warnings, meter = budget, 4 s
-node scripts/lint.mjs --budget 6467   # one under: must fail
-node scripts/lint.mjs --budget 6469   # one over: must fail too
+node scripts/lint.mjs --budget 4376   # one under: must fail
+node scripts/lint.mjs --budget 4378   # one over: must fail too
 ```
 
 **The five reach `src/page.js` two ways, and `tsconfig.json` names it so only one has to
