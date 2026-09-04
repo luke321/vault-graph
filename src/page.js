@@ -4678,6 +4678,7 @@ function mountVaultGraph(root, data, deps) {
     }
   }
 
+  /** @param {number} n @param {number} r0 @returns {Point[]} */
   function hubSlots(n, r0) {
     if (n <= 0) return [];
     if (n === 1) return [{ x: 0, y: 0 }];
@@ -4801,6 +4802,7 @@ function mountVaultGraph(root, data, deps) {
     return true;
   }
 
+  /** @param {string} id */
   function togglePin(id) {
     if (!unpin(id)) pin(id);
     hubChanged(true);
@@ -7785,6 +7787,13 @@ function mountVaultGraph(root, data, deps) {
     // than every dot cutting a straight line across the middle. Force keeps
     // cartesian interpolation, since that layout is not centred on the origin.
     var polar = state.layout === "rings";
+    /**
+     * Where each note starts, and where it is going. Two shapes, one per branch of `polar`:
+     * cartesian carries x/y and the target tx/ty, polar carries the start radius and angle
+     * plus the deltas to walk. Both are read back in the step below under the same `polar`.
+     * @type {Record<string, { x?: number, y?: number, tx?: number, ty?: number,
+     *                         r?: number, h?: number, dr?: number, dh?: number }>}
+     */
     var from = {};
     graph.forEachNode(function (id, a) {
       var t = targets[id] || { x: a.x, y: a.y };
@@ -9420,6 +9429,7 @@ function mountVaultGraph(root, data, deps) {
 
   /* ------------------------------------------------------------ tooltip */
 
+  /** @param {string} id */
   function showTip(id) {
     var a = graph.getNodeAttributes(id), t = $("tip");
     var p = renderer.graphToViewport({ x: a.x, y: a.y });
@@ -9442,6 +9452,7 @@ function mountVaultGraph(root, data, deps) {
 
   /* ------------------------------------------------------- detail panel */
 
+  /** @param {string | null} id */
   function select(id) {
     state.selected = id;
     syncLazyEdges();
@@ -9503,6 +9514,7 @@ function mountVaultGraph(root, data, deps) {
 
   // The camera lives in framed-graph space, not graph space, so read the node's
   // display coords rather than its raw x/y.
+  /** @param {string} id */
   function centerOn(id) {
     var d = renderer.getNodeDisplayData(id);
     if (!d) return;
@@ -12516,6 +12528,7 @@ function mountVaultGraph(root, data, deps) {
     return span > 0 ? ((ms - dateSpan.lo) / span) * w : 0;
   }
   /** @param {number} x @param {number} w */
+  /** @param {number} x @param {number} w */
   function ribbonMsLinear(x, w) {
     return dateSpan.lo + (Math.max(0, Math.min(w, x)) / w) * (dateSpan.hi - dateSpan.lo);
   }
@@ -12831,6 +12844,7 @@ function mountVaultGraph(root, data, deps) {
    * the old formula gave -- centring by pixel and centring by time are the same statement
    * there, so nothing about the non-compact behaviour changes.
    */
+  /** @param {number} px @param {number} w */
   function winEndCentredAtPx(px, w) {
     var span = winSpan(), todayMs = heatParse(TODAY);
     var lo = Math.min(dateSpan.lo + span, todayMs), hi = todayMs;
@@ -12875,6 +12889,7 @@ function mountVaultGraph(root, data, deps) {
    * #vg-htip uses. Clamped to the band so a handle at either extreme does not push its own
    * label off the edge, which is the failure every tooltip in this page has had once.
    */
+  /** @param {number} x @param {string} text */
   function showRTip(x, text) {
     var t = $("rtip"), rib = $("ribbon"), band = $("heat");
     if (!t || !rib || !band) return;
@@ -13225,7 +13240,30 @@ function mountVaultGraph(root, data, deps) {
   // A beat's target -> the actual element. Looked up by the attribute the handler reads,
   // never by position, so re-ordering the legend cannot silently aim a beat at a
   // different folder.
-  /** @param {string} kind @param {string} arg */
+  /**
+   * Resolve a beat's [kind, arg] target. Returns either a real element, or a plain rect-like
+   * stand-in that demoNoteRect / demoBigInnerNote / demoPoint build for things with no
+   * element of their own -- a note on the disc, a heatmap cell, a point on the ribbon. Both
+   * shapes answer the three questions demoWhere asks of them, which is why they are
+   * interchangeable here; DemoTarget states that duck-typed contract rather than pretending
+   * one is the other.
+   * @typedef {Object} DemoTarget
+   * @property {number} [left]
+   * @property {number} [top]
+   * @property {number} [width]
+   * @property {number} [height]
+   * @property {unknown} [expect]
+   * @property {number} [gap]
+   * @property {string} [demoLabel]
+   * @property {string} [id]
+   * @property {() => DOMRect} [getBoundingClientRect]
+   * @property {(opts?: unknown) => void} [scrollIntoView]
+   * @property {(name: string) => string | null} [getAttribute]
+   * @property {(sel: string) => Element | null} [querySelector]
+   *
+   * @param {string} kind @param {string} arg
+   * @returns {DemoTarget | null}
+   */
   function demoFind(kind, arg) {
     if (kind === "id") return $(arg);
     // A point on the STAGE, for the camera beats. "centre", or a fraction pair like "0.3,0.4"
@@ -13429,7 +13467,9 @@ function mountVaultGraph(root, data, deps) {
     // where those numbers land on the page. #tip gets away with the raw numbers because
     // it is positioned inside #canvas, whose box is exactly the sigma container's.
     var org = $("graph").getBoundingClientRect();
-    var pts = [], maxR = 0;
+    /** @type {{ id: string, x: number, y: number, r: number, mine: boolean, label: string }[]} */
+    var pts = [];
+    var maxR = 0;
     graph.forEachNode(function (id, a) {
       if ((alpha[id] || 0) < 0.5) return;                 // not on screen right now
       var v = renderer.graphToViewport({ x: a.x, y: a.y });
@@ -13504,6 +13544,7 @@ function mountVaultGraph(root, data, deps) {
     if (!renderer || !geomLock || !geomLock.bandR) return null;
     var org = $("graph").getBoundingClientRect();
     var lo = geomLock.bandR.i[0], hi = geomLock.bandR.i[1];
+    /** @type {{ id: string, x: number, y: number, r: number, size: number, label: string }[]} */
     var pts = [];
     graph.forEachNode(function (id, a) {
       if ((alpha[id] || 0) < 0.5) return;                 // not on screen right now
@@ -13577,6 +13618,7 @@ function mountVaultGraph(root, data, deps) {
   }
 
   /** Where a ribbon handle is, in page coordinates. */
+  /** @param {string} which */
   function demoRibbonPoint(which) {
     var rib = $("ribbon");
     if (!rib || !dateSpan) return null;

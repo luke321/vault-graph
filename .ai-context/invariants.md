@@ -1404,12 +1404,12 @@ listed 77 findings against our 28 for exactly this reason, and its per-rule coun
 
 | | `plugin/main.js` | `src/page.js` | total |
 |---|---:|---:|---:|
-| `no-unsafe-member-access` | 0 | 124 | 124 |
-| `no-unsafe-assignment` | 0 | 42 | 42 |
-| `no-unsafe-call` | 0 | 25 | 25 |
-| `no-unsafe-argument` | 0 | 61 | 61 |
-| `no-unsafe-return` | 0 | 11 | 11 |
-| **budget** | **0** | **263** | **263** |
+| `no-unsafe-member-access` | 0 | 75 | 75 |
+| `no-unsafe-assignment` | 0 | 28 | 28 |
+| `no-unsafe-call` | 0 | 20 | 20 |
+| `no-unsafe-argument` | 0 | 43 | 43 |
+| `no-unsafe-return` | 0 | 10 | 10 |
+| **budget** | **0** | **176** | **176** |
 
 The gate landed 2026-09-03 on `develop@972daca` at **6,977** -- 510 on the plugin, matching
 the directory's board figure for figure (278 / 101 / 99 / 19 / 13), and 6,467 on the page.
@@ -1431,9 +1431,10 @@ the heatmap -- `Heat`, `HeatDay`, and the canvas elements the band and the ribbo
 1,112 → 810; batch 3g (same day) typed the render path -- the hub, the note drag, the tween,
 the hover and highlight ramps, edge curvature, Sigma's two reducers and the date ribbon --
 810 → 343, batch 3h the last of the shipped code -- 343 → 314 -- and batch 3i the demo
-storyboard and the last `Object.create(null)` sites, 314 → 263. **At 263 the meter is
-almost entirely the demo/debug surface** (108) and the `go` block (105), both inside the
-markers `scripts/build-plugin.mjs` strips, so what ships in the plugin is typed.
+storyboard and the last `Object.create(null)` sites, 314 → 263, and batch 3j the demo
+driver's own contracts, 263 → 176. **At 176 the meter is almost entirely the debug surface**
+-- 106 in the `go` block and 49 in the demo region, both inside the markers
+`scripts/build-plugin.mjs` strips, so what ships in the plugin is typed.
 `scripts/lint.mjs` runs eslint and fails on any
 error, on any warning outside the meter, and on a meter that differs from the budget in
 EITHER direction -- a count below it means something was typed and the budget stopped
@@ -1452,8 +1453,8 @@ the rules allow `any` to flow into an `unknown`-typed variable, and nothing else
 
 ```bash
 npm run lint                          # 0 errors, 0 actionable warnings, meter = budget, 4 s
-node scripts/lint.mjs --budget 262    # one under: must fail
-node scripts/lint.mjs --budget 264    # one over: must fail too
+node scripts/lint.mjs --budget 175    # one under: must fail
+node scripts/lint.mjs --budget 177    # one over: must fail too
 ```
 
 **The five reach `src/page.js` two ways, and `tsconfig.json` names it so only one has to
