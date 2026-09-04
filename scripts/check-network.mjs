@@ -21,7 +21,7 @@
 // It is STATIC and takes milliseconds: no build, no browser. That is what makes it cheap
 // enough to run on every push with no skip flag.
 
-import { readFileSync, existsSync } from "node:fs";
+import { readFileSync, readdirSync, existsSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { EXPECTED_FETCHES, findNetworkPrimitives, readVendorSource } from "../src/vendor.mjs";
@@ -34,6 +34,10 @@ const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const OURS = [
   "plugin/main.js",   // the plugin entry point
   "src/page.js",      // the page, bundled into main.js and inlined into the HTML
+  // The engine (github#58): every .ts under src/engine, bundled into both artifacts. Listed
+  // by reading the directory so a file added there is checked without anyone remembering.
+  ...readdirSync(join(ROOT, "src", "engine")).filter((f) => f.endsWith(".ts")).sort()
+    .map((f) => "src/engine/" + f),
   "src/page.html",
   "src/shell.html",
   "src/page.css",

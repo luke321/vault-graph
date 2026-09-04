@@ -9,7 +9,7 @@
 // vendor/*.js out of its own plugin folder at runtime, which works when a script copied
 // them there and fails for every real user, because those files are never installed.
 //
-// So the page, both libraries and the logo are compiled INTO main.js. That is the only
+// So the page, the engine, Sigma and the logo are compiled INTO main.js. That is the only
 // shape that survives installation.
 //
 // The exporter in src/ is untouched and still node-builtins-only: it assembles the same
@@ -51,7 +51,7 @@ const rawLoader = {
 };
 
 /* ------------------------------------------------------------------ vendor --
- * The two UMD bundles do not come off disk verbatim. Sigma ships two fetch() calls inside
+ * The Sigma UMD bundle does not come off disk verbatim. It ships two fetch() calls inside
  * loadSVGImage, for a node-image program this page never registers, and the directory's
  * automated review counts them and asks users to trust that we never take that path
  * (github#1). readVendorSource replaces them with a thrower and fails the build if the

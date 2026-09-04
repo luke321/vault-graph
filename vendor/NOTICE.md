@@ -7,18 +7,18 @@
 
 
 This directory contains third-party code committed rather than installed — the project
-uses no package manager and no network at build time. Both libraries are **inlined into
-every generated `vault-graph.html`**, so this notice travels with the output as well as
-with the source (see the header `src/build-graph.mjs` emits).
+uses no package manager and no network at build time. The library is **inlined into every
+generated `vault-graph.html`**, so this notice travels with the output as well as with the
+source (see the header `src/build-graph.mjs` emits).
 
-Both are MIT licensed. The minified builds shipped here have had their comment headers
-stripped by their own build pipelines, which is why the notices are reproduced in full
-below rather than living in the files.
+It is MIT licensed. The minified build shipped here has had its comment header stripped by
+its own build pipeline, which is why the notice is reproduced in full below rather than
+living in the file. graphology sat beside it until github#58 replaced it with our own graph
+store (`src/engine/store.ts`); Sigma follows in the same issue.
 
 | file | library | upstream |
 |---|---|---|
 | `sigma.min.js` | Sigma.js — WebGL graph renderer | https://github.com/jacomyal/sigma.js |
-| `graphology.umd.min.js` | graphology — graph data structure | https://github.com/graphology/graphology |
 
 ## Modifications
 
@@ -49,14 +49,13 @@ oversight rather than a design. Measured and asserted by
 MIT asks that the notice above be preserved in redistributions; stating what was changed is
 the other half of doing that honestly.
 
-> **Versions: sigma 3.0.2 and graphology 0.26.0.** They were vendored without pinning, and
-> identified on 2026-09-04 by hashing the files against the `dist/` builds in the npm
-> tarballs: `sigma.min.js` is byte-identical to `sigma@3.0.2/dist/sigma.min.js` (sha256
-> `be6f790d…`, 186,853 bytes; 3.0.1 and 3.0.3 differ) and `graphology.umd.min.js` to
-> `graphology@0.26.0/dist/graphology.umd.min.js` (sha256 `dc337efa…`, 73,629 bytes). Both
-> are being replaced by code of our own — `.ai-context/decisions/0012-*.md`, github#58 — so
-> this is a record for the port, not a pin to maintain. If you do update either file, record
-> the version here in the same commit.
+> **Version: sigma 3.0.2.** It was vendored without pinning, and identified on 2026-09-04 by
+> hashing the file against the `dist/` builds in the npm tarballs: `sigma.min.js` is
+> byte-identical to `sigma@3.0.2/dist/sigma.min.js` (sha256 `be6f790d…`, 186,853 bytes;
+> 3.0.1 and 3.0.3 differ). The graphology bundle that used to sit beside it was
+> `graphology@0.26.0` (sha256 `dc337efa…`, 73,629 bytes) and is gone. Sigma is being replaced
+> by code of our own — `.ai-context/decisions/0012-*.md`, github#58 — so this is a record for
+> the port, not a pin to maintain.
 
 ---
 
@@ -65,32 +64,6 @@ the other half of doing that honestly.
 MIT License
 
 Copyright (c) 2013-2024 Alexis Jacomy, Guillaume Plique and Sigma.js contributors
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
-
----
-
-## graphology
-
-MIT License
-
-Copyright (c) 2016-2024 Guillaume Plique (Yomguithereal) and graphology contributors
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal

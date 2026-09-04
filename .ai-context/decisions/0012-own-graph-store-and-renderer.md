@@ -63,7 +63,10 @@ the same picture** -- and inject them where the bundles are injected today.
   over visible nodes); program registries (`type` stays a field, "halo" and "curve"/"line" are
   fixed draw paths); and **the graph subscription**. The store has no event emitter. The one
   write that leaned on Sigma's reaction -- the node-drag frame -- gets an explicit `refresh()`,
-  and `quietWrites` leaves with the thing it worked around.
+  and `quietWrites` leaves with the thing it worked around. (Until step 3.6 the store also
+  carries a marked transitional facet for Sigma itself, which holds the graph and validates it
+  with graphology-utils' `isGraph`: no-op `on`/`removeListener`, `getEdgeAttributes`, `edges()`,
+  `multi`, and the two members `isGraph` probes. It goes with Sigma.)
 - **The exporter gains a compile step.** `src/build-graph.mjs` bundles `src/engine/index.ts`
   with esbuild into one IIFE `<script>`, inlined where the two vendor scripts sit. That ends the
   exporter's node-builtins-only stance (`package.json`'s description, the header of

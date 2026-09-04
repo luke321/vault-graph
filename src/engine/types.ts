@@ -64,8 +64,8 @@ export interface GraphStore {
   readonly size: number;
   /** Adds a node; returns its id. Throws if the id exists. */
   addNode(id: string, attrs: NodeAttrs): string;
-  /** Adds an undirected edge; returns its key. Throws if either end is missing. */
-  addUndirectedEdge(source: string, target: string, attrs?: EdgeAttrs): string;
+  /** Adds an undirected edge; returns its key. Throws if either end is missing or the edge exists. */
+  addUndirectedEdge(source: string, target: string, attrs: EdgeAttrs): string;
   hasNode(id: string): boolean;
   hasEdge(source: string, target: string): boolean;
   /** Removes the edge between two nodes, if any. */

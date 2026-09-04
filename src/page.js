@@ -61,10 +61,11 @@
  * `import("../src/page.js").X`. Typedefs live at module scope for that reason: one declared
  * inside mountVaultGraph would be local to it.
  *
- * GRAPHOLOGY AND SIGMA ARE TYPED STRUCTURALLY, as exactly the members this file calls and
- * nothing more. Both are vendored bundles with no typings (vendor/NOTICE.md), and github#58
- * replaces them with code of our own -- which can implement these same interfaces. Anything
- * a future caller needs that is not named here shows up on the meter, which is the point.
+ * THE STORE AND THE RENDERER ARE TYPED AS EXACTLY THE MEMBERS THIS FILE CALLS and nothing
+ * more -- the interfaces in src/engine/types.ts, which github#58 measured off the two vendored
+ * bundles before replacing them. The store is ours already; the renderer is still Sigma's
+ * bundle behind the same interface until the rest of #58 lands. Anything a future caller
+ * needs that is not named there shows up on the meter, which is the point.
  */
 
 /**
@@ -121,22 +122,13 @@
  * @typedef {import("./engine/types").EdgeAttrs} EdgeAttrs
  */
 
-/** A listener as graphology hands it back from rawListeners and takes it for on(). */
-/** @typedef {(...args: unknown[]) => void} GraphListener */
-
 /**
- * The graph store, plus graphology's event surface. The listener trio exists only for
- * quietWrites, which silences Sigma's subscription to the graph during bulk position writes;
- * both go when graphology does (github#58, step 2), so they stay declared here rather than in
- * the engine's own GraphStore.
- * @typedef {import("./engine/types").GraphStore & {
- *   on: (event: string, fn: GraphListener) => void,
- *   removeListener: (event: string, fn: GraphListener) => void,
- *   rawListeners: (event: string) => GraphListener[],
- * }} GraphLike
+ * The graph store: a keyed attribute bag with degree, ours since github#58 (src/engine/store.ts).
+ * It has no event surface -- graphology's listener trio was used here for one thing, silencing
+ * Sigma's subscription to the graph during bulk position writes, and both went together.
+ * @typedef {import("./engine/types").GraphStore} GraphLike
+ * @typedef {import("./engine/types").GraphStoreCtor} GraphCtor
  */
-
-/** @typedef {new (opts?: { type?: string }) => GraphLike} GraphCtor */
 
 /** @typedef {import("./engine/types").Point} Point */
 /** @typedef {import("./engine/types").CameraState} CameraState */
@@ -760,7 +752,7 @@ function mountVaultGraph(root, data, deps) {
 
   /* ------------------------------------------------- graph + base layout */
 
-  var graph = new Graph({ type: "undirected" });
+  var graph = new Graph();
 
   DATA.nodes.forEach(function (n, i) {
     graph.addNode(String(i), {
@@ -5000,6 +4992,12 @@ function mountVaultGraph(root, data, deps) {
         if (!nodeDrag || nodeDrag.id !== dragId) return;    // dropped, or a new drag since
         graph.setNodeAttribute(dragId, "x", p.x);
         graph.setNodeAttribute(dragId, "y", p.y);
+        // THE ONE WRITE THAT NEVER HAD ITS OWN REFRESH. Every other position write in this file
+        // is followed by an explicit renderer.refresh; this one leaned on Sigma's subscription
+        // to the graph, whose handler for a changed node was exactly this call -- a partial
+        // update of that node, scheduled for the next frame. The store has no events to
+        // subscribe to (github#58), so the call is made here instead, unchanged.
+        renderer.refresh({ partialGraph: { nodes: [dragId] }, skipIndexation: false, schedule: true });
         placeHubDrop();
       });
     });
@@ -7422,10 +7420,9 @@ function mountVaultGraph(root, data, deps) {
       var ez = pr < 1 ? RADIAL_EASE
                       : Math.min(1, RADIAL_EASE + tailFrames * 0.15);
       var resid = 0;
-      // quietWrites: sigma is subscribed to the graph, and every write in this loop otherwise
-      // costs two whole-vault nodeReducer passes that the refresh at the bottom of the frame
-      // discards. See quietWrites for the measurement and for why it cannot change the picture.
-      if (targets) quietWrites(function () { graph.forEachNode(function (id) {
+      // A plain loop into the store; the refresh at the bottom of the frame is what draws it
+      // (see assignPositions for where quietWrites went).
+      if (targets) graph.forEachNode(function (id) {
         var q = targets[id];
         if (!q) return;
         // The ANGLE is taken exactly while its target moves the way a wedge sweeps --
@@ -7476,7 +7473,7 @@ function mountVaultGraph(root, data, deps) {
         if (gap < 0 ? -gap > resid : gap > resid) resid = gap < 0 ? -gap : gap;
         var r = rNow + gap * ez;
         graph.mergeNodeAttributes(id, { x: r * Math.cos(h), y: r * Math.sin(h) });
-      }); });
+      });
       if (pr >= 1) tailFrames++;
       // skipIndexation while animating: the quadtree is only needed for hit
       // testing, and settle() rebuilds it. Re-indexing 442 nodes and 1409 edges
@@ -7625,62 +7622,24 @@ function mountVaultGraph(root, data, deps) {
   var animGuard = null;   // its force-complete timer
 
   /**
-   * Write positions for the whole vault WITHOUT SIGMA WATCHING OVER OUR SHOULDER (github#19).
+   * THE BULK POSITION LOOPS WRITE STRAIGHT INTO THE STORE, and nothing watches them do it.
    *
-   * Sigma subscribes to the graph. Every `mergeNodeAttributes` therefore emits
-   * `nodeAttributesUpdated`, and sigma's handler for one node is
+   * With graphology this took a helper, `quietWrites` (github#19): Sigma subscribed to the
+   * graph, every `mergeNodeAttributes` emitted `nodeAttributesUpdated`, and Sigma's handler ran
+   * the node reducer and scheduled a partial refresh for each of the 10,002 notes -- work the
+   * explicit full refresh at the bottom of the same frame then discarded (5.5 ms per position
+   * loop with Sigma listening, 0.5 ms without, measured on the 10k fixture). The helper
+   * detached the listeners around each loop and restored them in a `finally`.
    *
-   *     updateNode(id);                                        // runs nodeReducer for it
-   *     refresh({ partialGraph: { nodes: [id] }, skipIndexation: false, schedule: true });
-   *
-   * -- and `refresh` runs `updateNode(id)` AGAIN before arming `needToProcess`. So each of the
-   * three bulk position loops in this file (the cascade's follower, the tween's step,
-   * assignPositions) was paying two extra nodeReducer passes over the entire vault, on top of
-   * the one the explicit refresh that immediately follows it performs anyway.
-   *
-   * ALL OF IT IS THROWN AWAY, which is why suppressing it cannot change a pixel. Every one of
-   * those loops is followed by `renderer.refresh(...)` with no `partialGraph`, and sigma's own
-   * source shows what that does: `clearNodeIndices(); clearEdgeIndices();` then `addNode` for
-   * every node and `addEdge` for every edge, then `process()` on the render. The caches the
-   * listener spent the frame filling are wiped and rebuilt from the graph. (`skipIndexation:
-   * true` does not change that -- without a `partialGraph` it takes the identical branch and
-   * only skips arming a flag that the same branch arms unconditionally. That is why
-   * github#19 measured the "cheap" refresh at 35.6 ms against 30.3 for the full one: they are
-   * the same code.)
-   *
-   * Measured on the 10k fixture at rest, a full 10 002-note position loop:
-   * 5.5 ms with sigma listening, 0.5 ms without. Over a folder-toggle cascade the saving is
-   * larger than that difference, because the listener's discarded passes drag nodeStyle,
-   * nodeColor, dotPx and isPushed along with them.
-   *
-   * THE LISTENERS ARE TAKEN FROM THE EMITTER, not from sigma. `renderer.activeListeners
-   * .updateNodeGraphUpdate` is the same function and reads more directly, but it is a private
-   * field of a vendored bundle; `rawListeners` is graphology's own public API, so this keeps
-   * working if either library is updated, and degrades to a plain call if the event has no
-   * subscribers at all. `rawListeners`, not `listeners`: the latter unwraps a `once`
-   * subscription to its inner function, so re-registering what it returns would silently
-   * promote a one-shot listener to a permanent one.
-   *
-   * Scoped to the loop and restored in a `finally`, because a page whose renderer has
-   * permanently stopped listening to its graph is a much worse bug than a slow one.
+   * The store has no event emitter (github#58, src/engine/store.ts), so there is nothing to
+   * detach: the three loops (the cascade's follower, the tween's step, assignPositions) are
+   * plain loops again, each still followed by the refresh that was always the one that drew.
    */
-  /** @param {() => void} fn */
-  function quietWrites(fn) {
-    var EV = "nodeAttributesUpdated";
-    var raw = typeof graph.rawListeners === "function" ? graph.rawListeners(EV) : null;
-    if (!raw || !raw.length) { fn(); return; }
-    var ls = raw.slice();
-    for (var i = 0; i < ls.length; i++) graph.removeListener(EV, ls[i]);
-    try { fn(); } finally { for (var j = 0; j < ls.length; j++) graph.on(EV, ls[j]); }
-  }
-
   /** @param {Record<string, Point>} targets */
   function assignPositions(targets) {
-    quietWrites(function () {
-      graph.forEachNode(function (id) {
-        var t = targets[id];
-        if (t) graph.mergeNodeAttributes(id, { x: t.x, y: t.y });
-      });
+    graph.forEachNode(function (id) {
+      var t = targets[id];
+      if (t) graph.mergeNodeAttributes(id, { x: t.x, y: t.y });
     });
   }
 
@@ -7755,10 +7714,9 @@ function mountVaultGraph(root, data, deps) {
       if (adv > 1 / MIN_FRAMES) adv = 1 / MIN_FRAMES;
       p = Math.min(1, p + adv);
       var e = p < 0.5 ? 4 * p * p * p : 1 - Math.pow(-2 * p + 2, 3) / 2;
-      // quietWrites for the same reason the cascade's follower uses it: the refresh two lines
-      // down rebuilds every index from the graph, so sigma's per-write reaction is work whose
-      // only product is discarded.
-      quietWrites(function () { graph.forEachNode(function (id) {
+      // A plain loop into the store; the refresh two lines down is what draws it (see
+      // assignPositions for where quietWrites went).
+      graph.forEachNode(function (id) {
         var f = from[id];
         if (!f) return;
         if (polar) {
@@ -7770,7 +7728,7 @@ function mountVaultGraph(root, data, deps) {
             y: f.y + (f.ty - f.y) * e
           });
         }
-      }); });
+      });
       probeSample("tween");
       renderer.refresh({ skipIndexation: false });
       if (p < 1) { anim = WIN.requestAnimationFrame(step); }

@@ -9,7 +9,7 @@ build-graph.mjs                          template.html
 ─────────────────                        ─────────────
 crawl vault ─┐
              ├─ nodes + edges ─┐
-read .obsidian config ─────────┼──► window.VAULT_DATA ──► graph (graphology)
+read .obsidian config ─────────┼──► window.VAULT_DATA ──► graph (src/engine/store.ts)
                                │                              │
 vendored lib/*.js ─────────────┘                              ▼
                                                     plan ──► layout ──► render (sigma)

@@ -42,8 +42,8 @@ import { join } from "node:path";
  * in the same commit as the bundle, having read what the new call does. */
 export const EXPECTED_FETCHES = {
   // Both inside loadSVGImage(): one with `credentials: "include"`, one without.
+  // (graphology.umd.min.js had an entry of 0 here until github#58 replaced it.)
   "sigma.min.js": 2,
-  "graphology.umd.min.js": 0,
 };
 
 // A bare `fetch(` -- not `.fetch(`, which would be a method on somebody's object and none
@@ -105,7 +105,6 @@ const LEAVE_BUG = [
 /* Which files carry the leave bug, and how many of its two halves each one has. */
 export const EXPECTED_LEAVE_FIXES = {
   "sigma.min.js": 2,
-  "graphology.umd.min.js": 0,
 };
 
 /* Everything that would make a request. Names, not call shapes, so a check over the

@@ -19,8 +19,8 @@ import { Plugin, ItemView, Notice, PluginSettingTab, Setting, normalizePath, add
 
 // Compiled in by scripts/build-plugin.mjs. Obsidian installs only main.js, manifest.json
 // and styles.css, so anything read from disk at runtime does not exist for a real user --
-// the page and both libraries have to BE the bundle. `raw:` and `b64:` are the bundler's
-// namespace loaders; see the esbuild plugin in that script.
+// the page, the engine and the renderer have to BE the bundle. `raw:` and `b64:` are the
+// bundler's namespace loaders; see the esbuild plugin in that script.
 // THE PAGE, AS CODE RATHER THAN AS TEXT.
 //
 // The iframe needed the page as one HTML string. Mounting it in the DOM needs the opposite:
@@ -31,7 +31,8 @@ import { Plugin, ItemView, Notice, PluginSettingTab, Setting, normalizePath, add
 // page.css is absent on purpose -- it is no longer the plugin's business. It ships as
 // styles.css, which Obsidian loads itself; see scripts/build-plugin.mjs.
 import { mountVaultGraph } from "../src/page.js";
-import graphology from "../vendor/graphology.umd.min.js";
+// The graph store is ours (github#58); esbuild compiles the TypeScript as part of bundling.
+import { GraphStore } from "../src/engine/index";
 import sigma from "../vendor/sigma.min.js";
 // When a note was written. The SAME module build-graph.mjs uses -- the two crawls stay
 // separate on purpose, the date rule does not. github#6
@@ -612,18 +613,12 @@ class VaultGraphView extends ItemView {
     // between a view that is themed and one that happened to match at startup.
     this.registerEvent(this.app.workspace.on("css-change", () => this.syncTheme()));
 
-    // The graphology bundle is a vendored UMD with no typings, so what it exports is
-    // `unknown` to the type program and is asserted to the constructor type page.js declares
-    // at the one place it is handed over. `.Graph || graphology`: the namespace exposes the
-    // class as a member or IS the class, depending on the build.
-    /** @type {unknown} */
-    const graphCtor = graphology.Graph || graphology;
     const t0 = performance.now();
     this.handle = mountVaultGraph(page, data, {
-      // Real module imports, not globals: the UMD wrappers take their `module.exports`
-      // branch under esbuild, so nothing is ever assigned to `window`. This is exactly why
-      // page.js takes its libraries as arguments.
-      Graph: /** @type {MountDeps["Graph"]} */ (graphCtor),
+      // Real module imports, not globals: the engine is our own module and the Sigma UMD
+      // wrapper takes its `module.exports` branch under esbuild, so nothing is ever assigned
+      // to `window`. This is exactly why page.js takes its libraries as arguments.
+      Graph: GraphStore,
       Sigma: sigma.Sigma || sigma,
       rendering: sigma.rendering || {},
       logoMask: "data:image/png;base64," + LOGO_MASK_B64,

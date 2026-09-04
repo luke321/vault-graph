@@ -3,8 +3,9 @@
  * build-graph.mjs -- turn this Obsidian vault into ONE self-contained HTML page.
  *
  * Walks every .md file, resolves [[wikilinks]] (body + frontmatter), derives four
- * grouping dimensions, and inlines the data + Sigma/graphology bundles into
- * vault-graph.html. No server, no network, no build step at view time.
+ * grouping dimensions, and inlines the data, our own engine (bundled here with esbuild,
+ * github#58) and the Sigma bundle into vault-graph.html. No server, no network, no build
+ * step at view time.
  *
  * Usage:  node "03 - Resources/Vault Graph/build-graph.mjs"
  *          [--ghosts] [--templates] [--flat-months] [--no-nav] [--dev] [--out FILE]
@@ -17,9 +18,16 @@
 import { readFileSync, writeFileSync, readdirSync, statSync, existsSync } from "node:fs";
 import { join, relative, sep, basename, dirname, resolve as resolvePath } from "node:path";
 import { fileURLToPath } from "node:url";
-// The libraries are read through this rather than straight off disk: it strips Sigma's
-// two unreachable fetch() calls, so the generated page makes no network requests at
-// all. Same module the plugin build uses -- see src/vendor.mjs. github#1
+// THE ONE DEPENDENCY THIS SCRIPT HAS, and it used to have none. The engine -- the graph store,
+// and the renderer as github#58 lands it -- is TypeScript under src/engine, and a .ts file
+// cannot be pasted into a <script> the way page.js is. esbuild bundles it here, on demand,
+// into one IIFE; the same tool the plugin build has always used, already installed, no network
+// at build time. The alternative was a committed dist/engine.js, which is guaranteed to drift
+// from its source (.ai-context/decisions/0012-*.md).
+import { buildSync } from "esbuild";
+// Sigma is read through this rather than straight off disk: it strips Sigma's two
+// unreachable fetch() calls, so the generated page makes no network requests at all. Same
+// module the plugin build uses -- see src/vendor.mjs. github#1
 import { readVendorSource } from "./vendor.mjs";
 // When a note was written -- the one rule, shared with plugin/main.js so the two
 // mounts cannot drift. See src/dates.mjs for the order and why. github#6
@@ -524,30 +532,45 @@ const data = {
 
 /* ------------------------------------------------------------------ emit */
 
-// graphology-extras (ForceAtlas2 + Louvain) is no longer inlined: the layouts are
-// analytic and grouping is fixed to the PARA folder, so nothing used it.
-// The output REDISTRIBUTES both libraries, so it carries their notice. Their minified
-// builds had their own headers stripped upstream, so the notice cannot ride along inside
-// them -- it is emitted here instead. Full texts in vendor/NOTICE.md.
+// THE ENGINE, BUNDLED ON DEMAND. src/engine/index.ts and everything it imports become one
+// classic script that sets `window.VaultGraphEngine`; shell.html reads the constructors off
+// it, the same way it read graphology's and Sigma's UMD globals. Unminified, like the plugin
+// bundle: the shipped file is read by people. `write: false` keeps it in memory -- there is
+// no dist/ to drift. esbuild's output is deterministic for a fixed input, so
+// check-build-order-determinism still holds byte-for-byte.
+const engine = buildSync({
+  entryPoints: [join(ROOT, "src", "engine", "index.ts")],
+  bundle: true,
+  write: false,
+  format: "iife",
+  globalName: "VaultGraphEngine",
+  platform: "browser",
+  target: "es2020",
+  minify: false,
+  logLevel: "silent",
+}).outputFiles[0].text;
+
+// The output REDISTRIBUTES Sigma, so it carries Sigma's notice. The minified build had its
+// own header stripped upstream, so the notice cannot ride along inside it -- it is emitted
+// here instead. Full text in vendor/NOTICE.md. (graphology used to be inlined beside it; the
+// graph store is our own since github#58.)
 const LIB_NOTICE = `<!--
-  This file inlines two MIT-licensed libraries:
-    graphology  (c) Guillaume Plique and graphology contributors
-                https://github.com/graphology/graphology
+  This file inlines one MIT-licensed library:
     Sigma.js    (c) Alexis Jacomy, Guillaume Plique and Sigma.js contributors
                 https://github.com/jacomyal/sigma.js
-  Full licence texts: vendor/NOTICE.md in the vault-graph repository.
+  Full licence text: vendor/NOTICE.md in the vault-graph repository.
 -->`;
 
-const libs = LIB_NOTICE + "\n" + ["graphology.umd.min.js", "sigma.min.js"]
-  .map((f) => `<script>\n${readVendorSource(ROOT, f)}\n</script>`)
-  .join("\n");
+const libs = `<script>\n${engine.trimEnd()}\n</script>\n` + LIB_NOTICE + "\n" +
+  `<script>\n${readVendorSource(ROOT, "sigma.min.js")}\n</script>`;
 
 // The logo and favicon are inlined as data URIs for the same reason the libraries
 // are: one self-contained file, no network, and `file://` will not fetch a sibling
 // image reliably either. They are pre-sized derivatives of logo-source.png -- see
 // make-logo.ps1, which exists because this script is node-builtins-only and node
 // has no image decoder, so it can base64 a PNG but cannot resize one. Both are
-// optional: a missing file just means no logo, not a broken build.
+// optional: a missing file just means no logo, not a broken build. (The script's only
+// dependency is esbuild, which bundles code and does not decode images either.)
 const dataUri = (f) => {
   try {
     return "data:image/png;base64," + readFileSync(join(ROOT, "assets", f)).toString("base64");
