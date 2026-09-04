@@ -1960,6 +1960,32 @@ function mountVaultGraph(root, data, deps) {
    * two wedge fractions, converted to an angle per radius by seamAt) -- not a copy of the
    * answer in another form. On by default in a --dev build; `?wedges` / `?nowedges` override.
    */
+  /**
+   * One cell as the wedge-debug overlay records it: not a Cell, but the arc it was actually
+   * drawn at this frame, in the fractions the seam maths works in.
+   * @typedef {Object} DbgCell
+   * @property {string} g
+   * @property {string} k
+   * @property {boolean} inner
+   * @property {number} nB
+   * @property {string} bandKey
+   * @property {number} seams     how many seams precede it around the ring
+   * @property {number} f0        leading edge, as a fraction of the arc going
+   * @property {number} f1        trailing edge
+   * @property {number} [pLead]   set once the cell has a locked lead/trail
+   * @property {number} [pTrail]
+   * @property {string[]} ids
+   */
+  /**
+   * The overlay's own state: off by default, its canvas made on first use.
+   * @typedef {Object} DebugState
+   * @property {boolean} on
+   * @property {DbgCell[] | null} cells
+   * @property {HTMLCanvasElement | null} canvas
+   * @property {unknown[] | null} [trace]
+   * @property {number} [traceR]
+   */
+  /** @type {DebugState} */
   var DBG = { on: false, cells: null, canvas: null };
   // The overlay's structural hue -- band radii and seam centres, the two things that belong to
   // the disc rather than to a folder. Kept as one constant so they cannot drift apart.
@@ -3938,6 +3964,7 @@ function mountVaultGraph(root, data, deps) {
     // exactly on the hub boundary. See HUB_ROW0_FRAC and dotPx.
     /** @type {Record<string, boolean>} */
     var hubRow0Next = dict();
+    /** @type {DbgCell[] | null} */
     var dbgCells = DBG.on ? [] : null;
     if (probe) { lastStart = dict(); lastArc = dict(); lastBand = dict(); }
     [true, false].forEach(function (isInner) {
@@ -5051,21 +5078,47 @@ function mountVaultGraph(root, data, deps) {
   // going through the rank -- so the handle says "everything left of here is on screen",
   // which is the same thing it says under a hand, and the crawl through the empty years is
   // the vault's own shape rather than a mapping artefact.
-  var tlRank = Object.create(null), tlDate = [], tlMax = 0;
+  /**
+   * The date axis (github#60, batch 3d), declared beside the objects that build it.
+   * @typedef {{ key: string, y: number, m: number, ms: number, n: number }} Month
+   * @typedef {{ y: number, n: number }} YearCount
+   * @typedef {{ i: number, w0: number, w1: number }} AxisSeg
+   * @typedef {Object} DateSpan
+   * @property {Month[]} months
+   * @property {YearCount[]} years
+   * @property {Record<string, number>} index    "YYYY-MM" -> index into months
+   * @property {number} lo                       ms, first month
+   * @property {number} hi                       ms, the end of the newest day
+   * @property {number} nMax
+   * @property {number} nRef
+   * @property {number} yMax
+   * @property {number} dated
+   * @property {number} undated
+   * @property {{ segs: AxisSeg[], totalW: number, segOfMonth: number[] }} axis
+   */
+  /** @type {Record<string, number>} */   // id -> 1-based rank, oldest first
+  var tlRank = dict();
+  /** @type {string[]} */
+  var tlDate = [];
+  var tlMax = 0;
   // The same dates as tlDate, in ms, so the intro's sweep can turn a progress fraction into
   // a position on the ribbon without parsing a string on every one of its ~270 frames.
+  /** @type {number[]} */
   var tlDateMs = [];
   // id -> created, in ms UTC. Absent for an undated note, which is what timeFactor keys on.
-  var tlMs = Object.create(null);
+  /** @type {Record<string, number>} */   // id -> its day as ms
+  var tlMs = dict();
   // The whole vault's dates, bucketed, built once. Every one of the three concepts needs
   // the same two things -- how many notes per month, and per year -- and building it once
   // is also what stops three controls disagreeing about where the vault starts.
+  /** @type {DateSpan | null} */
   var dateSpan = null;
   function buildTimeline() {
+    /** @type {[string, string][]} */   // [id, YYYY-MM-DD]
     var dated = [];
     graph.forEachNode(function (id, a) { if (a.created) dated.push([id, a.created]); });
     dated.sort(function (x, y) { return x[1] < y[1] ? -1 : x[1] > y[1] ? 1 : 0; });
-    tlRank = Object.create(null); tlDate = []; tlDateMs = []; tlMs = Object.create(null);
+    tlRank = dict(); tlDate = []; tlDateMs = []; tlMs = dict();
     dated.forEach(function (pair, i) {
       tlRank[pair[0]] = i + 1;
       tlDate.push(pair[1]);
@@ -5097,6 +5150,7 @@ function mountVaultGraph(root, data, deps) {
    * (2021), and a control built from only the months that exist would silently close that
    * gap up and lie about the shape of the history.
    */
+  /** @param {[string, string][]} dated */
   function buildDateSpan(dated) {
     dateSpan = null;
     if (!dated.length) return;
@@ -5105,20 +5159,25 @@ function mountVaultGraph(root, data, deps) {
     var d0 = new Date(lo), d1 = new Date(hi);
     var y0 = d0.getUTCFullYear(), m0 = d0.getUTCMonth();
     var y1 = d1.getUTCFullYear(), m1 = d1.getUTCMonth();
-    var months = [], index = Object.create(null);
+    /** @type {Month[]} */
+    var months = [];
+    /** @type {Record<string, number>} */
+    var index = dict();
     for (var y = y0, m = m0; y < y1 || (y === y1 && m <= m1);) {
       var key = y + "-" + (m < 9 ? "0" : "") + (m + 1);
       index[key] = months.length;
       months.push({ key: key, y: y, m: m, ms: Date.UTC(y, m, 1), n: 0 });
       if (++m > 11) { m = 0; y++; }
     }
-    var years = Object.create(null);
+    /** @type {Record<string, number>} */
+    var years = dict();
     for (var i = 0; i < dated.length; i++) {
       var s = dated[i][1], k = s.slice(0, 7), ix = index[k];
       if (ix !== undefined) months[ix].n++;
       var yy = s.slice(0, 4);
       years[yy] = (years[yy] || 0) + 1;
     }
+    /** @type {YearCount[]} */
     var ylist = [];
     for (var yk = y0; yk <= y1; yk++) ylist.push({ y: yk, n: years[String(yk)] || 0 });
     var nMax = 1, tot = 0;
@@ -5227,10 +5286,15 @@ function mountVaultGraph(root, data, deps) {
     // for a day every month. It also makes this the more generous of the two readings by
     // one day, which is the right direction for a control you have to be able to touch.
     var lastFrac = new Date(endMs).getUTCDate() / new Date(lastMonthEnd).getUTCDate();
-    var segs = [], segW = 0, segOfMonth = new Array(months.length);
+    /** @type {AxisSeg[]} */
+    var segs = [];
+    var segW = 0;
+    /** @type {number[]} */
+    var segOfMonth = new Array(months.length);
     ylist.forEach(function (yy) {
       var yFrac = Math.min(1, yy.n / yearRef);
       var yearWeight = YEAR_FLOOR_MS + yFrac * (YEAR_CEIL_MS - YEAR_FLOOR_MS);
+      /** @type {number[]} */
       var idxs = [];
       for (var mi = 0; mi < months.length; mi++) if (months[mi].y === yy.y) idxs.push(mi);
       var mw = yearWeight / idxs.length;
@@ -5275,6 +5339,7 @@ function mountVaultGraph(root, data, deps) {
     if (!dateSpan) return "";
     var f = state.from === null ? dateSpan.lo : state.from;
     var t = state.to === null ? dateSpan.hi : state.to;
+    /** @param {number} ms */
     var iso = function (ms) { return new Date(ms).toISOString().slice(0, 10); };
     return iso(f) + "  \u2192  " + iso(t);
   }
@@ -5288,6 +5353,7 @@ function mountVaultGraph(root, data, deps) {
    * Now the date fields and the year labels go through the same door, so they cannot get that
    * rule subtly different -- or forget it, which is the more likely of the two.
    */
+  /** @param {number | null} from @param {number | null} to */
   function setRangeMs(from, to) {
     if (!dateSpan) return;
     if (from !== null && to !== null && from > to) { var sw = from; from = to; to = sw; }
@@ -5364,6 +5430,7 @@ function mountVaultGraph(root, data, deps) {
   // mtimes in a day, none of which was a note written. Two things answering "today"
   // differently in one view is worse than one answering it plainly, and the band is the one
   // that draws the number.
+  /** @param {string} id */
   function isMarkedDay(id) {
     if (!state.markDay && !state.hoverDay && state.hoverYear === null) return false;
     var c = graph.getNodeAttribute(id, "created");
@@ -5377,6 +5444,7 @@ function mountVaultGraph(root, data, deps) {
   // hovered year. Whether a source also MOVES its notes is a separate question, asked of
   // isPushed: a group owns a contiguous wedge and can move as a block, while a day's notes
   // are scattered through every wedge and cannot.
+  /** @param {string} id */
   function isHighlighted(id) {
     if (isMarkedDay(id)) return true;
     var g = groupOf(id);
@@ -5412,6 +5480,7 @@ function mountVaultGraph(root, data, deps) {
    * depend on where the note sits. The dot's half-width goes in as an angle at that radius,
    * so the edge clears the ink rather than the centre.
    */
+  /** @param {DbgCell} c */
   function cellNoteFrac(c) {
     if (!renderer || !c || !c.ids || !c.ids.length) return null;
     var q0 = renderer.graphToViewport({ x: 0, y: 0 });
@@ -5445,9 +5514,11 @@ function mountVaultGraph(root, data, deps) {
    * `centre` is the midpoint between this wedge's two ANGULAR NEIGHBOURS' facing edges --
    * wedge plus both half-seams -- which is where a single-column note should sit.
    */
+  /** @param {number} [rLattice] radius to measure at, in units; the band's own when absent */
   function wedgeEdges(rLattice) {
     var cells = DBG.cells;
     if (!cells || !cells.length) return [];
+    /** @type {Record<string, number | string | null>[]} */
     var out = [];
     ["i", "o"].forEach(function (bk) {
       var band = cells.filter(function (c) { return (c.inner ? "i" : "o") === bk; });
@@ -5459,17 +5530,24 @@ function mountVaultGraph(root, data, deps) {
       var sm = seamAt(r * UNIT, band[0].nB, bk);
       // Straight through edgeSweep -- the placement's own expression. The pre-ray form stays
       // for a capture taken before geomLock existed, where there is no reference radius.
+      /**
+       * @param {{ seams: number, f0: number, f1?: number, pLead?: number, pTrail?: number, nB?: number, bandKey?: string }} c
+       * @param {string} which "f0" (leading) or "f1" (trailing)
+       */
       var sw = function (c, which) {
-        if (c.pLead !== undefined) return edgeSweep(c, which === "f0" ? "lead" : "trail", r * UNIT);
+        if (c.pLead !== undefined) return edgeSweep(/** @type {Cell} */ (/** @type {unknown} */ (c)),
+                                                    which === "f0" ? "lead" : "trail", r * UNIT);
         return sm.gap * c.seams + sm.avail * c[which] - sm.gap / 2;
       };
       // Fold adjacent cells of the same group into one wedge, in sweep order.
+      /** @type {{ g: string, band: string, a: DbgCell, b: DbgCell }[]} */
       var runs = [];
       band.slice().sort(function (x, y) { return x.f0 - y.f0; }).forEach(function (c) {
         var last = runs[runs.length - 1];
         if (last && last.g === c.g) { last.b = c; return; }
         runs.push({ g: c.g, band: bk, a: c, b: c });
       });
+      /** @param {{ g: string, a: DbgCell, b: DbgCell }} run */
       var noteFrac = function (run) {
         var lo = Infinity, hi = -Infinity;
         band.filter(function (c) { return c.g === run.g && c.f0 >= run.a.f0 && c.f1 <= run.b.f1; })
@@ -5488,6 +5566,7 @@ function mountVaultGraph(root, data, deps) {
         var lo = sw(prev.b, "f1"), hi = sw(next.a, "f0");
         if (runs.length < 2) { lo = sw(run.a, "f0") - sm.gap; hi = sw(run.b, "f1") + sm.gap; }
         else { while (hi < lo) hi += 2 * Math.PI; }
+        /** @param {number} x */
         var deg = function (x) { return sweepAngle(x) * 180 / Math.PI; };
         var nf = noteFrac(run);
         out.push({ g: run.g, band: bk, r: r,
@@ -5524,7 +5603,7 @@ function mountVaultGraph(root, data, deps) {
       cv.width = Math.round(w * dpr); cv.height = Math.round(h * dpr);
       cv.style.width = w + "px"; cv.style.height = h + "px";
     }
-    var g2 = cv.getContext("2d");
+    var g2 = /** @type {CanvasRenderingContext2D} */ (cv.getContext("2d"));
     g2.setTransform(dpr, 0, 0, dpr, 0, 0);
     g2.clearRect(0, 0, w, h);
     // THE BANDS AS DRAWN, measured off the dots themselves -- outer edge of the outermost
@@ -5541,6 +5620,7 @@ function mountVaultGraph(root, data, deps) {
       var d0 = Math.hypot(b0.x - a0.x, b0.y - a0.y);
       return d0 > 1e-3 ? UNIT / d0 : 0;
     })();
+    /** @type {Record<string, { lo: number, hi: number } | null>} */
     var seen = { i: null, o: null };
     graph.forEachNode(function (id, a) {
       if ((alpha[id] || 0) < 0.5 || isOrphan(id)) return;
@@ -5554,16 +5634,19 @@ function mountVaultGraph(root, data, deps) {
       if (rl + dot > bb.hi) bb.hi = rl + dot;
     });
     var thickI = (geomLock.rOuter - geomLock.r0) * INNER_FILL;
+    /** @type {Record<string, number[]>} */
     var bandR = { i: [geomLock.r0, geomLock.r0 + thickI], o: [geomLock.rOuter, geomLock.maxR] };
     ["i", "o"].forEach(function (k) {
       if (seen[k] && seen[k].lo < seen[k].hi) bandR[k] = [seen[k].lo, seen[k].hi];
     });
+    /** @param {number} rl @param {number} ang */
     var vp = function (rl, ang) {
       return renderer.graphToViewport({ x: rl * UNIT * Math.cos(ang), y: rl * UNIT * Math.sin(ang) });
     };
     // The folder's own colour at a given alpha. colorOf answers in whatever CSS form the
     // palette holds (hex or a colour function), so the alpha rides in globalAlpha rather
     // than being spliced into the string.
+    /** @param {string} g0 @param {number} a @returns {{ c: string, a: number }} */
     var tint = function (g0, a) { return { c: colorOf(g0), a: a }; };
     // The band radii first, underneath: r0, the inner band's fill edge, rOuter, maxR.
     g2.lineWidth = 1;
@@ -5615,6 +5698,7 @@ function mountVaultGraph(root, data, deps) {
       // it put 06's three notes 0.08, 0.32 and 0.73 degrees off their own centre. Two points,
       // one line: every note of every single-column wedge now measures 0 units off it.
       (function () {
+        /** @type {{ g: string, cells: DbgCell[] }[]} */
         var runs = [];
         band.slice().sort(function (x, y) { return x.f0 - y.f0; }).forEach(function (c0) {
           var last = runs[runs.length - 1];
@@ -5629,14 +5713,16 @@ function mountVaultGraph(root, data, deps) {
           void b0c;
           // The run's own middle: halfway between its first cell's leading boundary and its
           // last cell's trailing one, both from edgeSweep. Nothing reconstructed.
+          /** @param {number} rl */
           var mid = function (rl) {
             if (a0c.pLead !== undefined) {
-              return sweepAngle((edgeSweep(a0c, "lead", rl * UNIT)
-                                 + edgeSweep(b0c, "trail", rl * UNIT)) / 2);
+              return sweepAngle((edgeSweep(/** @type {Cell} */ (/** @type {unknown} */ (a0c)), "lead", rl * UNIT)
+                                 + edgeSweep(/** @type {Cell} */ (/** @type {unknown} */ (b0c)), "trail", rl * UNIT)) / 2);
             }
             var sm0 = seamAt(rl * UNIT, host0.nB, host0.inner ? "i" : "o");
             return sweepAngle(sm0.gap * host0.seams + sm0.avail * fMid - sm0.gap / 2);
           };
+          /** @type {Point[]} */
           var pts = [];
           for (var qq = 0; qq <= 24; qq++) {
             var rq = lo + (hi - lo) * qq / 24;
@@ -5677,9 +5763,11 @@ function mountVaultGraph(root, data, deps) {
         // One construction for all three: take the angle at lo, take it at hi, join. The lines
         // are chords of the curves they represent, they agree with each other everywhere, and
         // the seam's centre is the midpoint of its two edges by arithmetic at both ends.
+        /** @param {DbgCell} cell @param {string} which "f0" or "f1" @param {number} rl */
         var angOf = function (cell, which, rl) {
           if (cell.pLead !== undefined) {
-            return edgeSweep(cell, which === "f0" ? "lead" : "trail", rl * UNIT);
+            return edgeSweep(/** @type {Cell} */ (/** @type {unknown} */ (cell)),
+                             which === "f0" ? "lead" : "trail", rl * UNIT);
           }
           var sm0 = seamAt(rl * UNIT, cell.nB, cell.inner ? "i" : "o");
           return sm0.gap * cell.seams + sm0.avail * cell[which] - sm0.gap / 2;
@@ -5700,6 +5788,14 @@ function mountVaultGraph(root, data, deps) {
         // is theta = theta0 + d/r, so it swings as the radius falls away, and near the hub the
         // swing is all there is. seamAt's own cap (SEAM_CAP, 45% of the circle) is what keeps
         // it finite. Drawing it makes both facts visible at once.
+        /**
+         * @param {(rl: number) => number} fn        the sweep angle at a radius
+         * @param {{ c: string, a: number }} style
+         * @param {number} width
+         * @param {number[] | null} dash
+         * @param {string} [tag]
+         * @param {number} [rFrom]
+         */
         var chord = function (fn, style, width, dash, tag, rFrom) {
           if (DBG.trace) DBG.trace.push({ tag: tag || "?", c: c.k, next: next.k,
                                           deg: sweepAngle(fn(DBG.traceR)) * 180 / Math.PI });
@@ -5716,7 +5812,9 @@ function mountVaultGraph(root, data, deps) {
           if (dash) g2.setLineDash([]);
           g2.globalAlpha = 1;
         };
+        /** @param {number} rl */
         var sweepA = function (rl) { return angOf(c, "f1", rl); };
+        /** @param {number} rl */
         var sweepB = function (rl) {
           var a = angOf(next, "f0", rl), b = sweepA(rl);
           while (a < b) a += 2 * Math.PI;            // the wrap: B follows A in sweep
@@ -5732,6 +5830,7 @@ function mountVaultGraph(root, data, deps) {
         // each one misses. They are not all radial: every boundary has its own perpendicular
         // offset d = (seams - 0.5) * W, so each misses the centre by its own d.
         (function () {
+          /** @param {number} rl */
           var mid = function (rl) { return sweepAngle((sweepA(rl) + sweepB(rl)) / 2); };
           var pOut = { x: hi * UNIT * Math.cos(mid(hi)), y: hi * UNIT * Math.sin(mid(hi)) };
           var pIn = { x: lo * UNIT * Math.cos(mid(lo)), y: lo * UNIT * Math.sin(mid(lo)) };
@@ -5777,7 +5876,9 @@ function mountVaultGraph(root, data, deps) {
    * the build it came from. Half the confusion in that morning was two Chrome windows open on
    * two different builds, which no amount of zooming can tell apart.
    */
+  /** @param {CanvasRenderingContext2D} g2 */
   function drawWedgeLegend(g2) {
+    /** @type {string[][]} */
     var rows = [
       ["solid, folder colour", "wedge edge"],
       ["dashed white", "wedge centre"],
@@ -5847,9 +5948,11 @@ function mountVaultGraph(root, data, deps) {
   // worth having.
   // `keys` is an array of path keys, or null. Compared as a joined string rather than by
   // identity so that re-entering the same row does not repaint.
+  /** @param {string | null} group @param {string[]} [keys] */
   function hoverHighlight(group, keys) {
     group = group || null;
-    var next = Object.create(null);
+    /** @type {Record<string, boolean>} */
+    var next = dict();
     (keys || []).forEach(function (k) { if (k) next[k] = true; });
     var a = Object.keys(state.hoverSub).sort().join(","),
         b = Object.keys(next).sort().join(",");
@@ -5877,6 +5980,7 @@ function mountVaultGraph(root, data, deps) {
   //
   // The exception is real: if the tail slot has exactly ONE occupant, it is that
   // folder's own wedge and it moves like a named one.
+  /** @param {string} folder @param {string} sub */
   function ownsWedge(folder, sub) {
     var subs = subOrder[folder] || [];
     var k = subs.indexOf(sub || "");
@@ -5891,6 +5995,7 @@ function mountVaultGraph(root, data, deps) {
   // slides a subset out THROUGH its own cell-mates, and the push meant to make the
   // selection legible is what creates the overlaps. Those are identified by the
   // ring alone.
+  /** @param {string} id */
   function isPushed(id) {
     // NOT a marked day. Its notes are scattered across every folder, so pushing them slides
     // a subset out through their own cell-mates at the same angles -- the same reason a
@@ -5929,9 +6034,11 @@ function mountVaultGraph(root, data, deps) {
    * The epsilon matches present(): a note part-way through a timeline ramp is on screen and
    * belongs in the packing, and only one at rest at zero does not.
    */
+  /** @param {string} id */
   function willShow(id) { return visible(id) && timeFactor(id) > 0.004; }
 
   var TL_FADE = 8;
+  /** @param {string} id */
   function timeFactor(id) {
     // THE DATE CAP FIRST, because it is a hard bound and the rank cutoff is a ramp: a note
     // outside the range is out whatever the rank cutoff says, and multiplying a ramp by zero
