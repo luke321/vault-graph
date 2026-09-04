@@ -52,7 +52,12 @@ export default function summarise(results, context) {
     const file = relative(cwd, r.filePath).split("\\").join("/");
     for (const m of r.messages) {
       if (m.severity === 2) errors++; else warnings++;
-      if (meter.has(m.ruleId)) {
+      // FOLDED INTO A COUNT ONLY WHILE THEY ARE WARNINGS. That was the whole point when
+      // there were ~7,000 of them: a run printing 7,000 lines is a run nobody reads. They
+      // are ERRORS now (github#60 took the count to zero), and an error has to be printed
+      // in full or a failing run says "1 error" and not where -- which is the opposite of
+      // what this formatter exists for.
+      if (m.severity === 1 && meter.has(m.ruleId)) {
         metered++;
         perRule.set(m.ruleId, (perRule.get(m.ruleId) || 0) + 1);
         perFile.set(file, (perFile.get(file) || 0) + 1);

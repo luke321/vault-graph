@@ -1384,83 +1384,60 @@ animated — and it is what the defect actually moves. Verified by disabling the
 re-running: **7 groups, 6 disturbed — lost `(vault root)`, `tiny`; renumbered `misc`, `notes`,
 `projects`, `refs`.**
 
-## The lint warning count does not grow
+## Our own code lints clean
 
 `npm run lint` runs typescript-eslint over the plugin, the page, the exporter and `scripts/`
-(github#55). Two kinds of finding come out of it, and they are held to different rules.
+(github#55, github#60). **Every finding is held at zero — errors and warnings alike.** There
+is no budget and no headroom: a value that lost its type fails the push, in the same run and
+by the same rule as an unused variable.
 
-**Actionable findings are zero.** Every syntax and unused-value rule the Obsidian preset
-enables, plus `no-unsupported-api`, on all of our own code. Measured before the gate existed:
-27 warnings (26 × `no-unused-vars` in `src/page.js`, one settings-tab rule), and 40 more when
-the scope was first widened to the exporter and scripts under the same rules -- 25 of them the
-`catch {}` teardown idiom the Node-side block now allows, the other 15 fixed. Zero after; the
-formatter prints any that come back in full, the way eslint would.
+**The five type-aware rules are errors.** `@typescript-eslint/no-unsafe-{member-access,
+assignment,call,argument,return}` — the ones the community directory's review applies to every
+published version, and the ones `eslint-plugin-obsidianmd` 0.4.1 ships off. Its board for
+1.9.0 listed 77 findings against our 28 for exactly this reason. They are on here, as errors,
+so a finding is caught on this machine rather than on the directory's board.
 
-**The meter is held at its count.** The five type-aware `@typescript-eslint/no-unsafe-*`
-rules the community directory's review runs on every published version (its board for 1.9.0
-listed 77 findings against our 28 for exactly this reason, and its per-rule counts for
-`plugin/main.js` are the 510 in the table below), at `warn`, with `--budget` in
-`package.json`'s `lint` script set to exactly the total:
+**How they got to zero, and why there was a budget at all.** Switched on, they fired **6,977**
+times: 510 in `plugin/main.js`, 6,467 in `src/page.js`. As errors that would have been a wall,
+so they ran as warnings under `scripts/lint.mjs --budget N`, held at exactly the measured
+count and failing in EITHER direction — a new finding failed the push, and taking one off
+meant lowering N in the same commit. That made the number a ratchet rather than a ceiling.
+github#60 walked it down in eleven batches on 2026-09-04, typing `plugin/main.js` against
+`obsidian.d.ts` and `src/page.js` section by section with JSDoc; `changelog-detail.md` carries
+each batch with the count it moved. At zero the budget said nothing "error" does not say
+better, so it is retired: `eslint.config.mjs` sets the five to `error`, `lint.mjs` fails on any
+finding, and a `--budget` argument is accepted and ignored so an old hook does not break.
 
-| | `plugin/main.js` | `src/page.js` | total |
-|---|---:|---:|---:|
-| `no-unsafe-member-access` | 0 | 0 | 0 |
-| `no-unsafe-assignment` | 0 | 0 | 0 |
-| `no-unsafe-call` | 0 | 0 | 0 |
-| `no-unsafe-argument` | 0 | 0 | 0 |
-| `no-unsafe-return` | 0 | 0 | 0 |
-| **budget** | **0** | **0** | **0** |
+**Verified the gate catches what it exists for**, the same way the golden-snapshot check was:
+added `function gateProbe(x) { return x.nope; }` to `src/page.js`, and the run failed with
+`3 errors, 1 warning`, naming the file, the line and the rule. Removed again.
 
-The gate landed 2026-09-03 on `develop@972daca` at **6,977** -- 510 on the plugin, matching
-the directory's board figure for figure (278 / 101 / 99 / 19 / 13), and 6,467 on the page.
-github#60 is the ratchet down from there, in batches, each recorded in `changelog-detail.md`
-with the numbers it moved: batch 1 (2026-09-04) typed the plugin with JSDoc alone, 510 → 1;
-batch 2 (same day) declared the page's three boundaries -- `VaultData`, `MountDeps` with
-structural `GraphLike`/`SigmaLike`, and the `VgApi` -- at the top of `src/page.js`, which
-took the page 6,467 → 4,377 and the plugin's last one to 0; batch 3a (same day) typed the
-page's preamble through grouping -- theme, state, graph + base layout, grouping -- and gave
-the file its one typed `dict()` for what `Object.create(null)` used to be, 4,377 → 3,653;
-batch 3b (same day) typed the rings layout section -- the wedge planner's `Cell`, `Slot`,
-`Plan`, `GeomLock` and the cascade state it shares -- 3,653 → 2,531; batch 3c (same day)
-typed the reveal cascade -- `CascadeOpts`, `WalkPair`, the in-flight record and every
-per-note map -- 2,531 → 2,057; batch 3d (same day) typed the timeline and the wedge-debug
-overlay -- `DateSpan`, `Month`, `DbgCell` and a typed `DBG` -- 2,057 → 1,499; batch 3e (same
-day) typed the legend, settings panel, search and context menu, where one line -- `$()`
-returning `HTMLElement` -- was worth 51 on its own, 1,499 → 1,112; batch 3f (same day) typed
-the heatmap -- `Heat`, `HeatDay`, and the canvas elements the band and the ribbon draw on --
-1,112 → 810; batch 3g (same day) typed the render path -- the hub, the note drag, the tween,
-the hover and highlight ramps, edge curvature, Sigma's two reducers and the date ribbon --
-810 → 343, batch 3h the last of the shipped code -- 343 → 314 -- and batch 3i the demo
-storyboard and the last `Object.create(null)` sites, 314 → 263, batch 3j the demo driver's
-own contracts, 263 → 176, and batch 3k the remainder, **176 → 0**. Both files are fully
-typed; the meter is retired as a budget and the five rules are errors (below).
-`scripts/lint.mjs` runs eslint and fails on any
-error, on any warning outside the meter, and on a meter that differs from the budget in
-EITHER direction -- a count below it means something was typed and the budget stopped
-describing the code, so it is lowered in the same commit. eslint's own `--max-warnings`
-gates only the total, and ten meter findings removed without lowering it would have let ten
-unused values through inside the headroom. The formatter (`scripts/lint-summary.mjs`) prints
-budget and meter on every run so the edit is made against the figure in front of you. This
-is the progress meter for #55's later phases: every `any` that gets a type takes findings
-off it.
+**Two things the typing taught, both of which cost time before they were understood:**
 
-**JSDoc is read, JSDoc casts are not.** typescript-eslint takes the type of the expression
-inside `/** @type {T} */ (expr)`, not the cast, so a cast at a use site changes nothing on the
-meter (measured: `parseFromString(/** @type {string} */ (PAGE_HTML), ...)` kept its finding).
-A cast only counts once its value sits in a declared variable. `unknown` is the other tool:
-the rules allow `any` to flow into an `unknown`-typed variable, and nothing else.
+- **JSDoc is read; JSDoc casts are not.** typescript-eslint takes the type of the expression
+  *inside* `/** @type {T} */ (expr)`, not the cast, so a cast at a use site moves nothing.
+  A cast counts only once its value is bound to a declared variable. `unknown` is the other
+  tool: `any` may flow into an `unknown`-typed variable and nowhere else.
+- **An escaped comment terminator inside a JSDoc block silently breaks the whole block**, and
+  the count goes UP rather than down — 1,112 to 1,816 on the run that found it. The number is
+  the only tell; nothing else complains.
 
-```bash
-npm run lint                          # 0 errors, 0 actionable warnings, meter = budget, 4 s
-node scripts/lint.mjs --budget 1      # one over zero: must fail
-```
+**`check-scope.mjs` pins the `$()` accessor line verbatim**, so the page's element helper is
+typed through its JSDoc rather than by a cast inside the line. A cast there fails that check —
+correctly, since the check is asserting the accessor is still root-scoped.
 
 **The five reach `src/page.js` two ways, and `tsconfig.json` names it so only one has to
 hold.** With `include` at `plugin/**/*.js` alone the page was in the type program as the
 plugin's import, and the rules did run on it -- measured, the same 6,467 either way. It is
 named in `include` regardless: a file in the program only because something imports it drops
 out silently the day that import moves, and #55's Phase 1 runs `tsc` over the same config,
-where an unlisted file is simply not checked.
+where an unlisted file is simply not checked. `plugin/bundler-modules.d.ts` is named there too
+— it declares the bundler's `raw:`/`b64:` modules, which are otherwise an unresolved module
+and an error type at every use.
+
+```bash
+npm run lint                          # 0 errors, 0 warnings, ~5 s
+```
 
 Wired into `.githooks/pre-push` after the two determinism checks and ahead of `SKIP_SMOKE`,
 and into `scripts/release.ps1` right after the dirty-tree check: about five seconds, no
