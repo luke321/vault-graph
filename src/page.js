@@ -4669,6 +4669,7 @@ function mountVaultGraph(root, data, deps) {
   // A BALL, built from hex rings: 1 in the middle, 6 around it, the rest outside those.
   // Below seven there is no centre -- a middle dot among three or four reads as one of them
   // being late rather than as a core -- so those counts are a plain ring.
+  /** @param {Point[]} out @param {number} count @param {number} r @param {number} phase */
   function hubRing(out, count, r, phase) {
     for (var k = 0; k < count; k++) {
       // 12 o'clock, clockwise, matching the wedge order around it.
@@ -4792,6 +4793,7 @@ function mountVaultGraph(root, data, deps) {
   }
 
 
+  /** @param {string} id */
   function unpin(id) {
     var i = state.pinned.indexOf(id);
     if (i < 0) return false;
@@ -4929,6 +4931,7 @@ function mountVaultGraph(root, data, deps) {
   // hole" (the HOLE=0.3-of-disc invariant is solved against it) -- INNER_SCALE only
   // corrects for the inner ring being drawn pulled in from that boundary, which every
   // caller of the ring's OWN geometry already accounts for and this one had not.
+  /** @param {number} gx @param {number} gy */
   function inHubHole(gx, gy) {
     if (!geomLock) return false;
     return Math.hypot(gx, gy) / UNIT < geomLock.r0 * INNER_SCALE;
@@ -5010,11 +5013,13 @@ function mountVaultGraph(root, data, deps) {
     /** @type {(() => void) | null} */
     var pend = null;
     var raf = 0;
+    /** Run whatever was queued for this frame. */
     var flush = function () {
       raf = 0;
       var f = pend; pend = null;
       if (f) f();
     };
+    /** @param {() => void} fn */
     return function onFrame(fn) {
       pend = fn;
       if (!raf) raf = WIN.requestAnimationFrame(flush);
@@ -8392,6 +8397,7 @@ function mountVaultGraph(root, data, deps) {
 
   // One colour per angular bucket, shared by the CSS gradient and the PNG export so
   // the two cannot drift apart.
+  /** @returns {string[]} one colour per ring bucket */
   function ringColors() {
     // Sample ONE band. The outer ring is what reads as "the disc" -- it is the big
     // one, it is what surrounds the mark, and its wedges are the subfolder tints worth
@@ -8814,6 +8820,7 @@ function mountVaultGraph(root, data, deps) {
   // note whose row neighbours sit closer than that gets scaled down to keep the same
   // proportion to the gap it actually has. Both directions matter and the nearer one wins,
   // which is what dotFit already holds.
+  /** @param {number} size @param {string} [id] */
   function dotPx(size, id) {
     // Which band this note is in, so both the ramp and the room it is measured against are
     // the ones that belong to it.
@@ -9034,6 +9041,7 @@ function mountVaultGraph(root, data, deps) {
   // A named function rather than a closure built inside the reducer: that is a hot path, 3737
   // calls per refresh on the 10k shape, and the reducer's own per-call cost is the thing the
   // resting-web budget above exists to bound.
+  /** @param {EdgeAttrs & Partial<EdgeDisplayData>} r @param {EdgeAttrs} a */
   function capEdge(r, a) {
     if (edgeMult < 1) r.size = (r.size === undefined ? (a.size || 1) : r.size) * edgeMult;
     return r;
@@ -9071,6 +9079,7 @@ function mountVaultGraph(root, data, deps) {
     return geomLock && geomLock.maxR ? geomLock.maxR * UNIT : 1;
   }
 
+  /** @param {Point} s @param {Point} t */
   function curvatureFor(s, t) {
     var dx = t.x - s.x, dy = t.y - s.y;
     var len = Math.sqrt(dx * dx + dy * dy);
