@@ -1204,14 +1204,29 @@ them by hand, on request — never from the check, never from the pre-push hook.
 layout change is intentional: run that script, review the diff, commit the new snapshot in
 the same change as the code that moved the layout.
 
-**Why a snapshot taken today stays valid indefinitely.** The three fixture generators
-default `--end` to today (so the heatmap's 52-week window stays exercised), which means the
-fixture store's weekly refresh (`FIXTURE_MAX_AGE_DAYS`, `smoke.mjs`) regenerates each vault
-with a different `--end` periodically. Measured before trusting this at all: built the demo
-and shape vaults twice each, 3.5 years apart in `--end`, and compared band assignment plus
-every note's exact `(x, y)` — identical to the full float64, both vaults, both dates. Layout
-depends on the seeded structure and each note's link weight, neither of which `--end`
-touches.
+**Why a snapshot taken today stays valid indefinitely — for two of the three.** The fixture
+generators default `--end` to today (so the heatmap's 52-week window stays exercised), which
+means the fixture store's weekly refresh (`FIXTURE_MAX_AGE_DAYS`, `smoke.mjs`) regenerates
+each vault with a different `--end` periodically. Measured before trusting this at all: built
+the demo and shape vaults twice each, 3.5 years apart in `--end`, and compared band
+assignment plus every note's exact `(x, y)` — identical to the full float64, both vaults,
+both dates. Layout depends on the seeded structure and each note's link weight, neither of
+which `--end` touches there.
+
+**The 10k vault was never in that measurement, and is not day-invariant.** Its daily notes
+are filed into year-month subfolders derived from their dates (`make-test-vault.mjs`,
+`YM(18)`), so moving `--end` moves notes between subfolders and the subfolder cells move with
+them. Found 2026-09-04, the first weekly refresh after the goldens were recorded on
+2026-08-28: the regenerated 10k vault failed this check with **893 notes moved, worst #5296:
+radius 9317.1 → 9637.1, angle −80.4° → 169.1°**, identically on `develop@3aa9401`, on a
+typing-only branch, and on the comment-strip branch — while the demo and shape goldens
+survived the same regeneration. Since then the 10k fixture is generated with `--end
+2026-08-28`, the day its golden was taken, in both `smoke.mjs` and
+`update-layout-snapshots.mjs` (the args are part of the store digest, so the two must agree),
+and a pinned fixture does not age in the store — regenerating it would write the same bytes.
+The cost is the live half of the heatmap-window check on that one vault, which the two
+ageing vaults still carry. Re-recording the 10k golden means choosing a new `--end` in both
+scripts in the same commit.
 
 **Reading raw positions off `demo.busy() === false` is NOT enough, on its own.** This is the
 same defect as the section just above (github#21), for POSITION rather than SIZE: a

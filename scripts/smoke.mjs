@@ -4415,6 +4415,18 @@ async function killBrowser(child, PORT) {
  * reuses. A leftover fixture directory in a checkout root is ignored with a one-line notice;
  * --vault remains the explicit override for pointing the suite at any vault on purpose.
  *
+ * EXCEPT THE 10k VAULT, WHOSE --end IS PINNED. Its golden layout snapshot is not
+ * day-invariant: the daily notes there are filed into year-month subfolders derived from
+ * their dates, so moving --end moves notes between subfolders, and the subfolder cells move
+ * with them. Measured 2026-09-04, the first weekly refresh after the goldens were recorded:
+ * the regenerated 10k vault failed "layout matches its golden snapshot" with 893 notes moved
+ * (worst #5296, radius 9317 -> 9637, angle -80 -> 169 degrees) on develop itself, while the
+ * demo and shape vaults -- which have no date-derived folders -- stayed byte-identical, as
+ * invariants.md had measured for those two. So the 10k is generated with --end fixed at the
+ * day its golden was taken, and a pinned fixture does not age (there is nothing for a weekly
+ * refresh to change). It costs the 10k vault the live half of the heatmap-window check,
+ * which the two ageing vaults still carry.
+ *
  * All three are gitignored and generated on demand, and NONE NEEDS A VAULT OF YOURS. The
  * demo vault used to be a mirror of the author's real one, which meant it needed
  * OBSIDIAN_VAULT and was skipped with a notice when there was none -- so on a contributor's
@@ -4473,8 +4485,11 @@ function resolveVaults() {
     if (existsSync(stampPath)) {
       try {
         const st = JSON.parse(readFileSync(stampPath, "utf8"));
+        // A fixture with a pinned --end cannot go stale: regenerating it would write the
+        // same bytes. Only the ageing ones expire (see the header on the 10k vault).
+        const pinned = args.indexOf("--end") >= 0;
         fresh = st.digest === digest &&
-                typeof st.day === "string" && ageDays(st.day) <= FIXTURE_MAX_AGE_DAYS;
+                (pinned || (typeof st.day === "string" && ageDays(st.day) <= FIXTURE_MAX_AGE_DAYS));
       } catch { fresh = false; }   // a torn stamp is a stale fixture, not a crash
     }
     if (!fresh) {
@@ -4515,7 +4530,9 @@ function resolveVaults() {
   };
 
   gen("make-demo-vault.mjs", [], "demo-vault", "the demo vault (sparse tail, 2 dense years)");
-  gen("make-test-vault.mjs", ["--notes", "10000", "--years", "10"],
+  // --end pinned to the day scripts/layout-snapshots/test-vault.json was recorded; see the
+  // header. update-layout-snapshots.mjs carries the same args and must keep agreeing.
+  gen("make-test-vault.mjs", ["--notes", "10000", "--years", "10", "--end", "2026-08-28"],
       "test-vault", "the 10k synthetic vault (10 years)");
   gen("make-shape-vault.mjs", [], "shape-vault", "the dominant-folder vault");
 
