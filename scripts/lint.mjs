@@ -1,21 +1,19 @@
-// `npm run lint`: eslint over our own code, with two gates eslint alone cannot express.
+// `npm run lint`: eslint over our own code, with the one gate eslint alone cannot express.
 //
-// eslint's own `--max-warnings N` gates one number, the total. That leaves a hole this repo
-// would fall into: the five no-unsafe-* rules (the "meter", see lint-summary.mjs) are ~7,000
-// warnings on purpose, so if a later change takes ten of them away without lowering N, ten NEW
-// warnings of any other kind pass inside the headroom -- an unused value, an undefined name --
-// and the lint is back to being ignored, this time with a green tick. Hence this wrapper:
+// EVERY FINDING IS ZERO NOW -- errors and warnings alike -- so the gate is simply "nothing at
+// all". eslint's own `--max-warnings 0` would express that; this wrapper stays because the
+// formatter it drives is what makes a failing run readable, and because "no findings" is a
+// claim worth stating in one line rather than inferring from silence.
 //
-//   1. errors: zero.
-//   2. actionable warnings -- every warning that is NOT one of the five meter rules: zero.
-//   3. the meter: EXACTLY --budget. Not at most: a count below the budget means somebody typed
-//      something and did not record it, and the budget would quietly stop describing the code.
-//      Whoever takes findings off the meter lowers --budget in package.json in the same commit;
-//      whoever adds one either types it or raises the budget knowingly, with the new number.
-//
-// Rule 3 is what makes the budget an invariant rather than a ceiling -- .ai-context/invariants.md
-// ("The lint warning count does not grow") records the figure, and this is what keeps that file
-// and the code in step. github#55, Phase 0.
+// IT WAS NOT ALWAYS THIS SIMPLE. The five type-aware no-unsafe-* rules (the "meter", see
+// lint-summary.mjs) fired 6,977 times when they were first switched on -- 510 in
+// plugin/main.js, 6,467 in src/page.js -- far too many to be errors, so they ran as warnings
+// under `--budget N` held at exactly the measured count, failing in EITHER direction: a new
+// finding failed the push, and taking one off meant lowering N in the same commit. That made
+// the number a ratchet rather than a ceiling, and github#60 walked it down to zero in eleven
+// batches on 2026-09-04. With the count at zero the budget says nothing "error" does not say
+// better, so eslint.config.mjs sets the five to error and the budget is gone. A `--budget`
+// argument is still accepted and ignored, so an old hook or script does not break on it.
 //
 // Runs eslint through its Node API so the same results feed the formatter and the gate; the
 // scope (plugin, src, scripts) and the config are the ones eslint.config.mjs describes.
@@ -23,48 +21,25 @@
 import { ESLint } from "eslint";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { METER_RULES } from "./lint-summary.mjs";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const SCOPE = ["plugin", "src", "scripts"];
-
-function budgetFromArgv(argv) {
-  for (let i = 0; i < argv.length; i++) {
-    if (argv[i] === "--budget" && argv[i + 1] !== undefined) return Number(argv[i + 1]);
-    if (argv[i].startsWith("--budget=")) return Number(argv[i].slice("--budget=".length));
-  }
-  return null;
-}
-
-const budget = budgetFromArgv(process.argv);
-if (budget === null || !Number.isInteger(budget) || budget < 0) {
-  console.error("lint: pass --budget <N>, the meter count recorded in package.json");
-  process.exit(2);
-}
 
 const eslint = new ESLint({ cwd: ROOT });
 const results = await eslint.lintFiles(SCOPE);
 const formatter = await eslint.loadFormatter("./scripts/lint-summary.mjs");
 process.stdout.write(await formatter.format(results));
 
-const meter = new Set(METER_RULES);
-let errors = 0, actionable = 0, metered = 0;
+let errors = 0, warnings = 0;
 for (const r of results) for (const m of r.messages) {
-  if (m.severity === 2) errors++;
-  else if (meter.has(m.ruleId)) metered++;
-  else actionable++;
+  if (m.severity === 2) errors++; else warnings++;
 }
 
-const failures = [];
-if (errors) failures.push(`${errors} error${errors === 1 ? "" : "s"}`);
-if (actionable) failures.push(`${actionable} actionable warning${actionable === 1 ? "" : "s"} -- these are held at zero`);
-if (metered !== budget) {
-  failures.push(metered > budget
-    ? `meter at ${metered}, budget ${budget}: ${metered - budget} new no-unsafe finding${metered - budget === 1 ? "" : "s"} -- type the value, or raise --budget in package.json knowingly`
-    : `meter at ${metered}, budget ${budget}: the count fell by ${budget - metered} -- lower --budget in package.json to ${metered} so the budget keeps describing the code`);
-}
-if (failures.length) {
-  console.log(`\nlint: FAIL -- ${failures.join("; ")}`);
+if (errors || warnings) {
+  const parts = [];
+  if (errors) parts.push(`${errors} error${errors === 1 ? "" : "s"}`);
+  if (warnings) parts.push(`${warnings} warning${warnings === 1 ? "" : "s"}`);
+  console.log(`\nlint: FAIL -- ${parts.join(", ")}; this repo holds every finding at zero`);
   process.exit(1);
 }
-console.log(`lint: ok -- 0 errors, 0 actionable warnings, meter ${metered} = budget`);
+console.log("lint: ok -- 0 errors, 0 warnings");

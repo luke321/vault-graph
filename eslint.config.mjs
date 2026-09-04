@@ -22,16 +22,20 @@ import globals from "globals";
 import { defineConfig } from "eslint/config";
 import { METER_RULES } from "./scripts/lint-summary.mjs";
 
-// THE METER: the five rules the directory's review runs and the 0.4.1 preset leaves off.
-// WARN, NOT ERROR -- measured on develop@972daca they fire 6,977 times (510 in plugin/main.js,
-// 6,467 in src/page.js), so as errors they would be a wall. The gate is on the COUNT instead:
-// package.json's lint script runs scripts/lint.mjs with `--budget N` at exactly the measured
-// total, and the wrapper fails when the meter differs from N in EITHER direction: a new one
-// fails the push, and taking one off means lowering N in the same commit. That makes this the
-// progress meter for #55's later phases -- every `any` that gets a type takes findings off it --
-// and scripts/lint-summary.mjs is what keeps a 7,000-warning run readable. The list lives there,
-// imported here, so what is counted and what is warned cannot drift apart.
-const METER = Object.fromEntries(METER_RULES.map((rule) => [rule, "warn"]));
+// THE FIVE no-unsafe RULES, AS ERRORS. The community directory's review runs them on every
+// published version and the 0.4.1 preset leaves them off, so a finding here is a rejected
+// release later rather than a style opinion.
+//
+// They were WARNINGS under a budget until github#60 finished. Measured on develop@972daca
+// they fired 6,977 times (510 in plugin/main.js, 6,467 in src/page.js) -- as errors that
+// would have been a wall, so the gate was on the COUNT: `--budget N` at exactly the measured
+// total, failing in either direction, which made the number a progress meter that could only
+// go down. It went down in eleven batches over 2026-09-04 and reached zero, and a budget that
+// reads zero is just a slower way of saying "error". So: error, and the budget is retired.
+//
+// The list lives in scripts/lint-summary.mjs and is imported here, so what the formatter
+// counts and what this file enables cannot drift apart.
+const METER = Object.fromEntries(METER_RULES.map((rule) => [rule, "error"]));
 
 // Every obsidianmd rule, off -- for the Node-side scope below. Generated from the plugin's own
 // rule list rather than written out, so a rule the next preset version adds is off there too.
@@ -120,7 +124,11 @@ export default defineConfig([
     },
   },
   {
+    // plugin/**/*.d.ts: declarations for the type program (the bundler's `raw:`/`b64:`
+    // modules), not code -- there is nothing in one for a rule to say, and the preset's
+    // `**/*.ts` scoping would otherwise run its type-aware rules on it with no
+    // parserOptions and abort the whole run. tsconfig.json names them; this file need not.
     ignores: ["node_modules/**", "vendor/**", "dist/**", "test-vault/**", "demo-vault/**",
-              ".fixtures/**", "scripts/layout-snapshots/**"],
+              ".fixtures/**", "scripts/layout-snapshots/**", "plugin/**/*.d.ts"],
   },
 ]);

@@ -136,14 +136,14 @@ try {
 
   # LINT, FIRST OF THE GATES, because it is the cheapest -- about five seconds, no Chrome --
   # and because failing here still costs nothing: no tag, no build, no notes read. The same
-  # `npm run lint` the pre-push hook runs on develop and main (github#55): zero actionable
-  # findings, and the five type-aware no-unsafe-* rules the Obsidian directory's review runs on
-  # every published version held at exactly their budget, so a release cannot ship a
-  # count the directory's board would show growing. Sits here rather than beside the invariant
+  # `npm run lint` the pre-push hook runs on develop and main (github#55): zero findings of any
+  # kind, including the five type-aware no-unsafe-* rules the Obsidian directory's review runs
+  # on every published version, so a release cannot ship what that board would flag. Sits here
+  # rather than beside the invariant
   # suite so it stays out of the way of the release-flow rewrite in github#10.
   Write-Host "`n=== lint ===" -ForegroundColor Cyan
-  # THROUGH Invoke-Native, NOT A BARE `&`: over budget, eslint reports on stderr, and under this
-  # script's 'Stop' preference that would end the run before the throw below could say why.
+  # THROUGH Invoke-Native, NOT A BARE `&`: on a finding, eslint reports on stderr, and under
+  # this script's 'Stop' preference that would end the run before the throw below could say why.
   try { Invoke-Native npm @('run', 'lint', '--silent') }
   catch { throw "lint failed -- not releasing (npm ci first, if this is a fresh clone)" }
 

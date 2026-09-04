@@ -12,14 +12,20 @@
 // after, and the after is committed on purpose" discipline changelog-detail.md already asks
 // for everywhere else.
 //
-// WHY THIS IS SOUND AT ALL: the three fixture generators default --end to today, so two
-// runs of the same generator on two different days produce different note dates -- but
-// measured (see the github#37 plan/issue), band assignment and every note's exact (x, y)
-// come out byte-for-byte identical across a 3.5-year --end shift, on both the demo and
-// shape vaults. Layout depends on the SEEDED structure and each note's link weight, neither
-// of which --end touches, so a snapshot taken today stays valid indefinitely -- it does not
-// need regenerating on the fixture store's own weekly refresh, only when the layout logic
-// itself changes on purpose.
+// WHY THIS IS SOUND AT ALL: the fixture generators default --end to today, so two runs of
+// the same generator on two different days produce different note dates -- but measured
+// (see the github#37 plan/issue), band assignment and every note's exact (x, y) come out
+// byte-for-byte identical across a 3.5-year --end shift, on both the demo and shape vaults.
+// Layout depends on the SEEDED structure and each note's link weight, neither of which
+// --end touches there, so those two snapshots stay valid across the fixture store's weekly
+// refresh and need regenerating only when the layout logic itself changes on purpose.
+//
+// THE 10k VAULT IS THE EXCEPTION, and was never in that measurement: its daily notes are
+// filed into year-month subfolders derived from their dates, so --end moves notes between
+// subfolders and the layout with them (2026-09-04: 893 notes moved on the first weekly
+// refresh after the goldens were recorded, on develop itself). Its --end is therefore
+// pinned below, and in smoke.mjs, to the day its golden was taken; a pinned fixture does not
+// age in the store.
 //
 // Positions are rounded to 2 decimal places (graph units): plenty of headroom over the
 // float noise floor (measured exact-equal to float64 in the determinism check above), and
@@ -43,7 +49,9 @@ const OUT_DIR = join(ROOT, "scripts", "layout-snapshots");
 // header comment for why these three and not some other set.
 const FIXTURES = [
   { script: "make-demo-vault.mjs", args: [], name: "demo-vault" },
-  { script: "make-test-vault.mjs", args: ["--notes", "10000", "--years", "10"], name: "test-vault" },
+  // --end pinned, and it has to match smoke.mjs's resolveVaults() exactly -- the args are
+  // part of the store digest, so a mismatch means two different vaults. See the header.
+  { script: "make-test-vault.mjs", args: ["--notes", "10000", "--years", "10", "--end", "2026-08-28"], name: "test-vault" },
   { script: "make-shape-vault.mjs", args: [], name: "shape-vault" },
 ];
 
