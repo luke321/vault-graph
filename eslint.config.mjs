@@ -120,7 +120,11 @@ export default defineConfig([
     },
   },
   {
+    // plugin/**/*.d.ts: declarations for the type program (the bundler's `raw:`/`b64:`
+    // modules), not code -- there is nothing in one for a rule to say, and the preset's
+    // `**/*.ts` scoping would otherwise run its type-aware rules on it with no
+    // parserOptions and abort the whole run. tsconfig.json names them; this file need not.
     ignores: ["node_modules/**", "vendor/**", "dist/**", "test-vault/**", "demo-vault/**",
-              ".fixtures/**", "scripts/layout-snapshots/**"],
+              ".fixtures/**", "scripts/layout-snapshots/**", "plugin/**/*.d.ts"],
   },
 ]);

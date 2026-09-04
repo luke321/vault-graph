@@ -42,6 +42,106 @@ import LOGO_MASK_B64 from "b64:../assets/logo-mask.png";
 const VIEW_TYPE = "vault-graph-view";
 const ICON_ID = "vault-graph-disc";
 
+/* ===================================================================== types ==
+ * JSDoc, not TypeScript: the file stays plain JavaScript (see the header) and
+ * typescript-eslint reads these through tsconfig.json's allowJs, so every value that gets
+ * a type here takes findings off the no-unsafe meter in scripts/lint.mjs. github#60.
+ *
+ * Two kinds of shape live here. The plugin's own -- Settings, the rows the settings tab
+ * draws -- and the plugin's VIEW of two contracts that belong to src/page.js: what
+ * mountVaultGraph hands back, and the members of the __vg api this file reaches for. Those
+ * two are deliberately the SUBSET this file uses, not the whole api; #60's second batch
+ * types the full object where it is built, in page.js, and this file will import that.
+ */
+
+/** @typedef {import("obsidian").App} App */
+/** @typedef {import("obsidian").TFile} TFile */
+
+/**
+ * What data.json holds. Mirrors DEFAULTS below, which is the one place a default is
+ * written; a saved file may carry any subset, and loading merges it over DEFAULTS.
+ * @typedef {Object} Settings
+ * @property {boolean} ghosts
+ * @property {boolean} templates
+ * @property {boolean} flatMonths
+ * @property {boolean} words
+ * @property {Record<string, string>} folderColors      folder name -> slot key ("g7")
+ * @property {Record<string, string>} subfolderColors   "folder/sub" -> slot key
+ * @property {Record<string, boolean>} folderShown      folder name -> shown by default
+ * @property {string[]} pinned                          note ids in the hub, in slot order
+ * @property {boolean} panEnabled
+ * @property {boolean} compactAxis
+ * @property {boolean} unlinkedByFolder
+ * @property {boolean} unlinkedTintByFolder
+ */
+
+/**
+ * One note as buildData emits it -- the same shape src/build-graph.mjs writes into the
+ * standalone file, which is the whole point of the adapter (see SPIKE.md). `_file` is the
+ * plugin-side handle used for the one read left, and is stripped before the data leaves.
+ * @typedef {Object} GraphNode
+ * @property {string} id
+ * @property {string} label
+ * @property {string} folder
+ * @property {string[]} dirs
+ * @property {string} sub
+ * @property {string} type
+ * @property {string[]} tags
+ * @property {string} created
+ * @property {string} touched
+ * @property {number} words
+ * @property {boolean} [ghost]
+ * @property {TFile} [_file]
+ */
+
+/** What buildData resolves to; the plugin's half of the contract page.js consumes. */
+/** @typedef {Awaited<ReturnType<typeof buildData>>} BuildResult */
+
+/**
+ * The members of page.js's __vg api that THIS FILE reaches. Every one of them lives
+ * outside the demo/debug region the plugin build strips, or the guards below would be
+ * load-bearing rather than defensive. `renderer` and `graph` are Sigma and graphology
+ * objects; both libraries are vendored without typings, so only the members read here
+ * are named.
+ * @typedef {Object} VgApi
+ * @property {{ order: number, size: number }} graph
+ * @property {{ kill(): void, refresh(): void } | null} renderer
+ * @property {() => void} readTheme
+ * @property {() => void} placeLogo
+ * @property {() => void} heatBuild
+ * @property {unknown} palette
+ * @property {() => string[]} groupOrder
+ * @property {(group: string) => number} groupCount
+ * @property {(group: string) => string} slotOf
+ * @property {(group: string) => string} autoSlotOf
+ * @property {(map: Record<string, string>) => void} setFolderColors
+ * @property {(map: Record<string, string>) => void} setSubfolderColors
+ * @property {(map: Record<string, boolean>) => void} setFolderShown
+ * @property {(v: boolean) => void} setPanEnabled
+ * @property {(v: boolean) => void} setCompactAxis
+ * @property {(v: boolean) => void} setUnlinkedByFolder
+ * @property {(v: boolean) => void} setUnlinkedTintByFolder
+ * @property {() => void} applyHiddenDefaults
+ * @property {() => unknown} checkPlanParity
+ */
+
+/**
+ * What mountVaultGraph returns: a getter onto the api, which does not exist until the
+ * page's deferred init has run (see VaultGraphView's constructor for why a getter).
+ * @typedef {{ readonly api: VgApi | null, readonly ready: boolean }} MountHandle
+ */
+
+/** One folder row in the settings tab. `slot` is the slot in use, `autoSlot` the one with no override. */
+/** @typedef {{ name: string, n: number, slot: string, autoSlot: string }} GroupRow */
+/** One subfolder row under it. */
+/** @typedef {{ name: string, n: number }} SubRow */
+
+/**
+ * `app.setting` is NOT in the public API and so not in obsidian.d.ts. This is the shape
+ * openSettings() below guards for, and nothing more.
+ * @typedef {App & { setting?: { open?: () => void, openTabById?: (id: string) => void } }} AppWithSetting
+ */
+
 /* ====================================================================== icon ==
  * The ribbon started on Lucide's `git-fork`, which already sits in this vault's ribbon
  * for something else -- two identical icons, one of them ours. So the mark is its own.
@@ -98,6 +198,7 @@ function discIcon() {
  */
 
 const MONTHISH = /^\d{4}(?:[-_ ]?(?:\d{2}|Q[1-4]|W\d{1,2}))?$/i;
+/** @type {Record<string, string>} */
 const TYPE_ALIAS = {
   people: "person", person: "person",
   "zettel/permanent": "zettel", "zettel/fleeting": "zettel", "zettel/literature": "zettel",
@@ -105,19 +206,27 @@ const TYPE_ALIAS = {
 
 const SKIP_FILES = new Set(["claude.md", "readme.md", "license.md"]);
 
+/** @param {unknown} s */
 const deNumber = (s) => String(s).replace(/^[\s\d._)-]+/, "").trim();
+/** @param {unknown} s */
 const slug = (s) => deNumber(s).toLowerCase().replace(/[\s_]+/g, "-");
+/** @param {string} s */
 const singular = (s) => s.replace(/ies$/, "y").replace(/([^aeious])s$/, "$1");
+/** @param {unknown} s */
 const norm = (s) => String(s).split(/[\\/]/).filter(Boolean).join("/");
+/** @param {string} rel @param {string} dir */
 const under = (rel, dir) => !!dir && (rel === dir || rel.startsWith(dir + "/"));
 
+/** @param {string} path */
 const paraFolder = (path) => {
   const seg = path.split("/");
   return seg.length > 1 ? seg[0] : "(vault root)";
 };
 
+/** @param {string} path @param {boolean} flatMonths */
 const paraDirs = (path, flatMonths) => {
   const seg = path.split("/").slice(1, -1);
+  /** @type {string[]} */
   const out = [];
   for (let i = 0; i < seg.length; i++) {
     if (MONTHISH.test(seg[i])) {
@@ -129,6 +238,13 @@ const paraDirs = (path, flatMonths) => {
   return out;
 };
 
+/**
+ * @param {Record<string, unknown>} fm      the note's frontmatter, or {}
+ * @param {string} path
+ * @param {string[]} tags
+ * @param {string} dailyDir                 "" when the vault has no daily-notes folder
+ * @param {(path: string) => boolean} isTemplate
+ */
 function inferType(fm, path, tags, dailyDir, isTemplate) {
   const raw = typeof fm.type === "string" ? fm.type.toLowerCase() : "";
   if (raw) return TYPE_ALIAS[raw] || raw;
@@ -150,26 +266,49 @@ function inferType(fm, path, tags, dailyDir, isTemplate) {
  * (hardcoded-config-path), and it is wrong anyway in a vault whose config folder was
  * renamed.
  */
+/**
+ * @param {App} app
+ * @param {string} name   path under the config dir
+ * @returns {Promise<unknown>}   the parsed file, or null when absent or unreadable. `unknown`
+ *   on purpose: none of these files has a schema this plugin owns, so a caller has to check
+ *   what it reads -- which is what strField below does, and what every caller already did.
+ */
 async function readConfigJson(app, name) {
   try {
     const p = normalizePath(app.vault.configDir + "/" + name);
     if (!(await app.vault.adapter.exists(p))) return null;
-    return JSON.parse(await app.vault.adapter.read(p));
+    /** @type {unknown} */
+    const parsed = JSON.parse(await app.vault.adapter.read(p));
+    return parsed;
   } catch {
     return null;   // a vault that never configured this plugin is normal, not broken
   }
 }
 
+/**
+ * One string field of a parsed config object, or "" when the object or the field is not
+ * what it should be. Untrimmed: the caller decides what blank means.
+ * @param {unknown} obj @param {string} key
+ */
+const strField = (obj, key) => {
+  if (!obj || typeof obj !== "object" || !(key in obj)) return "";
+  // After the `in` check `obj` is still a bare `object` to the type program (measured: the
+  // plain `obj[key]` read stayed on the meter), so the read goes through an explicit view of
+  // it as a string-keyed record of unknowns -- which is exactly what a parsed JSON object is.
+  const v = /** @type {Record<string, unknown>} */ (obj)[key];
+  return typeof v === "string" ? v : "";
+};
+
+/** @param {App} app */
 async function readFolders(app) {
+  /** @type {Set<string>} */
   const dirs = new Set();
-  const core = await readConfigJson(app, "templates.json");
-  if (core && typeof core.folder === "string" && core.folder.trim()) dirs.add(norm(core.folder));
-  const templater = await readConfigJson(app, "plugins/templater-obsidian/data.json");
-  if (templater && typeof templater.templates_folder === "string" && templater.templates_folder.trim()) {
-    dirs.add(norm(templater.templates_folder));
-  }
-  const dn = await readConfigJson(app, "daily-notes.json");
-  const dailyDir = dn && typeof dn.folder === "string" && dn.folder.trim() ? norm(dn.folder) : "";
+  const core = strField(await readConfigJson(app, "templates.json"), "folder");
+  if (core.trim()) dirs.add(norm(core));
+  const templater = strField(await readConfigJson(app, "plugins/templater-obsidian/data.json"), "templates_folder");
+  if (templater.trim()) dirs.add(norm(templater));
+  const dn = strField(await readConfigJson(app, "daily-notes.json"), "folder");
+  const dailyDir = dn.trim() ? norm(dn) : "";
   return { templateDirs: Array.from(dirs), dailyDir: dailyDir };
 }
 
@@ -187,10 +326,15 @@ async function readFolders(app) {
  * Only `words` still needs a file body, and that is the only I/O left in the whole
  * build.
  */
+/**
+ * @param {App} app
+ * @param {Settings} opts   only the four build settings are read
+ */
 async function buildData(app, opts) {
   const t0 = performance.now();
   const folders = await readFolders(app);
   const templateDirs = folders.templateDirs, dailyDir = folders.dailyDir;
+  /** @param {string} path */
   const isTemplate = (path) => templateDirs.some((d) => under(path, d));
 
   const files = app.vault.getMarkdownFiles().filter((f) => {
@@ -198,20 +342,31 @@ async function buildData(app, opts) {
     return opts.templates ? true : !isTemplate(f.path);
   });
 
+  /** @type {Map<string, number>} */
   const index = new Map();          // path -> node index
+  /** @type {GraphNode[]} */
   const nodes = [];
   const dates = dateTally();        // how each note got dated; reported in stats
 
   for (const file of files) {
     const cache = app.metadataCache.getFileCache(file) || {};
+    // FrontMatterCache is `{ [key: string]: any }` in obsidian.d.ts. Read it as unknown
+    // instead: every field below is checked with `typeof` before it is used, and `unknown`
+    // is what makes those checks the type's contract rather than habit.
+    /** @type {Record<string, unknown>} */
     const fm = cache.frontmatter || {};
 
     // Frontmatter tags only, matching the Node builder exactly. getAllTags(cache) would
     // ALSO return inline #tags from the body, which the builder never saw -- a free
     // improvement, but not one to smuggle into a comparison run.
-    const tags = []
+    //
+    // `tags:` may be a string, a list, or a comma-separated string inside a list, and
+    // `tag:` the same -- hence unknown[] in, one flat string list out.
+    /** @type {unknown[]} */
+    const rawTags = [];
+    const tags = rawTags
       .concat(fm.tags || [], fm.tag || [])
-      .reduce((acc, t) => acc.concat(String(t).split(/[,\s]+/)), [])
+      .flatMap((t) => String(t).split(/[,\s]+/))
       .map((t) => t.replace(/^#/, "").trim())
       .filter(Boolean);
 
@@ -243,7 +398,9 @@ async function buildData(app, opts) {
   // aliases, shortest-unique-path, frontmatter links, all of it. Non-markdown
   // destinations (attachments) and filtered-out templates simply miss the index; both
   // are counted so the comparison in SPIKE.md can account for every link.
+  /** @type {Map<string, number>} */
   const weight = new Map();
+  /** @param {number} i @param {number} j @param {number} w */
   const addEdge = (i, j, w) => {
     if (i === j) return;
     const key = i < j ? i + " " + j : j + " " + i;
@@ -269,6 +426,7 @@ async function buildData(app, opts) {
   /* ---- ghosts: unresolvedLinks, for free --------------------------------- */
   const unresolvedMap = app.metadataCache.unresolvedLinks || {};
   let unresolved = 0;
+  /** @type {Map<string, [number, number][]>} */   // ghost name -> [source index, link count]
   const ghosts = new Map();
   for (const src of Object.keys(unresolvedMap)) {
     const i = index.get(src);
@@ -316,7 +474,7 @@ async function buildData(app, opts) {
     return { s: Number(ab[0]), t: Number(ab[1]), w: entry[1] };
   });
 
-  const degree = new Array(nodes.length).fill(0);
+  const degree = /** @type {number[]} */ (new Array(nodes.length).fill(0));
   for (const e of edges) { degree[e.s]++; degree[e.t]++; }
 
   const out = nodes.map((n, i) => {
@@ -380,6 +538,10 @@ async function buildData(app, opts) {
  */
 
 class VaultGraphView extends ItemView {
+  /**
+   * @param {import("obsidian").WorkspaceLeaf} leaf
+   * @param {VaultGraphPlugin} plugin
+   */
   constructor(leaf, plugin) {
     super(leaf);
     this.plugin = plugin;
@@ -387,7 +549,9 @@ class VaultGraphView extends ItemView {
     // the api, so anything captured here would be null forever -- and null reads exactly
     // like "no api" to every guard below, which is how the theme repaint, the renderer
     // teardown and the diagnostics all became silent no-ops together.
+    /** @type {MountHandle | null} */
     this.handle = null;
+    /** @type {BuildResult | null} */
     this.lastData = null;
     this.mountMs = 0;
   }
@@ -494,10 +658,12 @@ class VaultGraphView extends ItemView {
       // which write the same two settings keys and then push into the view through
       // applyFolderColors()/applySubfolderColors() -- neither of which calls this callback,
       // so there is no write-back loop between the two paths.
+      /** @param {Record<string, string>} map */
       onFolderColors: async (map) => {
         this.plugin.settings.folderColors = map;
         await this.plugin.saveSettings();
       },
+      /** @param {Record<string, string>} map */
       onSubfolderColors: async (map) => {
         this.plugin.settings.subfolderColors = map;
         await this.plugin.saveSettings();
@@ -511,6 +677,7 @@ class VaultGraphView extends ItemView {
       // was listening. Caught while wiring an unrelated new setting through this same block
       // for github#3 and fixed here rather than filed separately, since the wiring is
       // identical.
+      /** @param {Record<string, boolean>} map */
       onFolderShown: async (map) => {
         this.plugin.settings.folderShown = map;
         await this.plugin.saveSettings();
@@ -519,6 +686,7 @@ class VaultGraphView extends ItemView {
       // Pan DOES get a writer, unlike the two maps above: the control that flips it is in
       // the view rather than in the settings tab, so the view is what has to persist it.
       panEnabled: this.plugin.settings.panEnabled,
+      /** @param {boolean} v */
       onPanEnabled: async (v) => {
         this.plugin.settings.panEnabled = !!v;
         await this.plugin.saveSettings();
@@ -529,6 +697,7 @@ class VaultGraphView extends ItemView {
       // what has to persist a click there. The settings-tab toggle below saves and pushes
       // live itself either way, same as it already does for pan.
       compactAxis: this.plugin.settings.compactAxis,
+      /** @param {boolean} v */
       onCompactAxis: async (v) => {
         this.plugin.settings.compactAxis = !!v;
         await this.plugin.saveSettings();
@@ -538,6 +707,7 @@ class VaultGraphView extends ItemView {
       // toggle on the (unlinked) row) as well as the settings tab below, so the view has to
       // persist a click made there too.
       unlinkedByFolder: this.plugin.settings.unlinkedByFolder,
+      /** @param {boolean} v */
       onUnlinkedByFolder: async (v) => {
         this.plugin.settings.unlinkedByFolder = !!v;
         await this.plugin.saveSettings();
@@ -546,6 +716,7 @@ class VaultGraphView extends ItemView {
       // STILL standing in the (unlinked) group wears its own folder's colour instead of the
       // flat swatch. Same view-level-control shape as unlinkedByFolder just above.
       unlinkedTintByFolder: this.plugin.settings.unlinkedTintByFolder,
+      /** @param {boolean} v */
       onUnlinkedTintByFolder: async (v) => {
         this.plugin.settings.unlinkedTintByFolder = !!v;
         await this.plugin.saveSettings();
@@ -555,6 +726,7 @@ class VaultGraphView extends ItemView {
       // persist it. Not in the settings tab either -- "which notes are in the hub" is a
       // thing you point at, not a thing you type.
       pinned: this.plugin.settings.pinned,
+      /** @param {string[]} ids */
       onPinned: async (ids) => {
         this.plugin.settings.pinned = ids;
         await this.plugin.saveSettings();
@@ -582,7 +754,7 @@ class VaultGraphView extends ItemView {
         if (this.rebuilding) return;
         this.rebuilding = true;
         this.render()
-          .catch((e) => new Notice("Vault Graph: rebuild failed -- " + e.message))
+          .catch(/** @param {Error} e */ (e) => new Notice("Vault Graph: rebuild failed -- " + e.message))
           // Cleared on the NEW view state, not the old one: render() replaces
           // this.handle, and the flag lives on the view rather than the mount.
           .finally(() => { this.rebuilding = false; });
@@ -608,6 +780,7 @@ class VaultGraphView extends ItemView {
 
 /* ==================================================================== plugin ==*/
 
+/** @type {Settings} */
 const DEFAULTS = {
   ghosts: false,        // --ghosts
   templates: false,     // --templates
@@ -655,6 +828,7 @@ const DEFAULTS = {
 
 // The four build settings, described once. They live here rather than inline in display()
 // so the tab is a list of what exists rather than 60 lines of chained calls.
+/** @type {{ key: "ghosts" | "templates" | "flatMonths" | "words", name: string, desc: string }[]} */
 const BUILD_SETTINGS = [
   { key: "ghosts", name: "Include notes that do not exist yet",
     desc: "Wikilinks pointing at a note nobody has written. They are intentions rather than notes, so they are off by default." },
@@ -675,6 +849,7 @@ const SLOT_NAMES = ["Blue", "Orange", "Aqua", "Yellow", "Green", "Magenta",
 
 // Same rule as page.js's isArchiveGroup, and a copy for the same reason. A leading
 // underscore means archive: out of the colour rotation, grey, hidden by default.
+/** @param {string} name */
 const isArchiveGroup = (name) => String(name).charAt(0) === "_";
 // ...and the slot it lands on, matching ARCHIVE_SLOT in page.js. g11 of the two greys:
 // the lower-contrast one against the surface in both themes, which is what recede means.
@@ -688,7 +863,12 @@ const ARCHIVE_SLOT = "g11";
 // to work with no graph open. One knowing difference from buildData: templates are not
 // filtered out, which needs an async folder read. It only matters for a vault whose
 // template folder is a TOP-LEVEL one, and then it shows a row that colours nothing.
+/**
+ * @param {App} app
+ * @returns {{ name: string, n: number }[]}
+ */
 function topFolders(app) {
+  /** @type {Map<string, number>} */
   const count = new Map();
   for (const file of app.vault.getMarkdownFiles()) {
     if (SKIP_FILES.has(file.name.toLowerCase())) continue;
@@ -697,6 +877,7 @@ function topFolders(app) {
   }
   // Same three ranks as computeOrder in page.js: archives, then the pseudo-folders, then
   // the folders the vault actually filed. A copy for the same reason SLOT_NAMES is one.
+  /** @param {string} s */
   const rank = (s) => (s.charAt(0) === "_" ? 0 : s.charAt(0) === "(" ? 1 : 2);
   return Array.from(count.entries())
     .sort((a, b) => rank(a[0]) - rank(b[0]) ||
@@ -712,19 +893,30 @@ function topFolders(app) {
 // no-view-open role as topFolders: the settings tab needs this before any graph has
 // been opened, and there is nothing for refreshFromView to correct it against once one
 // has (see renderColours' own comment on why).
+/**
+ * @param {App} app
+ * @param {boolean} flatMonths
+ * @returns {Map<string, SubRow[]>}   top folder -> its subfolder rows, biggest first
+ */
 function allSubfolders(app, flatMonths) {
+  /** @type {Map<string, Map<string, number>>} */
   const byFolder = new Map();
   for (const file of app.vault.getMarkdownFiles()) {
     if (SKIP_FILES.has(file.name.toLowerCase())) continue;
     const g = paraFolder(file.path);
     let count = byFolder.get(g);
-    if (!count) byFolder.set(g, count = new Map());
+    if (!count) {
+      /** @type {Map<string, number>} */
+      const fresh = new Map();
+      byFolder.set(g, count = fresh);
+    }
     const sb = paraDirs(file.path, flatMonths)[0] || "";
     count.set(sb, (count.get(sb) || 0) + 1);
   }
   // Same tie-break subOrder uses in page.js: biggest first, plain name compare (no
   // {numeric:true} -- that is topFolders' own choice for top-level folder names, not
   // subOrder's).
+  /** @type {Map<string, SubRow[]>} */
   const out = new Map();
   for (const [g, count] of byFolder) {
     out.set(g, Array.from(count.entries())
@@ -735,6 +927,10 @@ function allSubfolders(app, flatMonths) {
 }
 
 class VaultGraphSettingTab extends PluginSettingTab {
+  /**
+   * @param {App} app
+   * @param {VaultGraphPlugin} plugin
+   */
   constructor(app, plugin) {
     super(app, plugin);
     this.plugin = plugin;
@@ -743,6 +939,7 @@ class VaultGraphSettingTab extends PluginSettingTab {
     // in this.plugin.settings. display() rebuilds the whole tab but never touches this,
     // which is the point: a pick calls this.display() too, and reopening after a click
     // must not collapse the section the click was made in.
+    /** @type {Record<string, boolean>} */
     this.subOpen = {};
   }
 
@@ -914,6 +1111,7 @@ class VaultGraphSettingTab extends PluginSettingTab {
   // Marking only the chosen one meant a folder on Auto -- every folder, until somebody
   // changes something -- had no mark anywhere, so the panel showed twelve colours and
   // would not say which of them the folder was.
+  /** @param {GroupRow[]} groups */
   renderColours(groups) {
     const scope = this.scope;
     scope.empty();
@@ -1008,6 +1206,11 @@ class VaultGraphSettingTab extends PluginSettingTab {
   // slot hexes, so there is nothing among them to ring -- exactly the same distinction
   // page.js's own settings panel draws for the same reason. Only the Auto button's own
   // pressed state says "this one is automatic".
+  /**
+   * @param {HTMLElement} scope
+   * @param {string} folder
+   * @param {SubRow[]} subs
+   */
   renderSubRows(scope, folder, subs) {
     for (const s of subs) {
       const pk = folder + "/" + s.name;
@@ -1039,6 +1242,7 @@ class VaultGraphSettingTab extends PluginSettingTab {
 
   // Shown unless something says otherwise: an explicit choice first, then the `_` rule.
   // Mirrors hiddenByDefault in page.js.
+  /** @param {string} folder */
   shownByDefault(folder) {
     const saved = this.plugin.settings.folderShown[folder];
     if (typeof saved === "boolean") return saved;
@@ -1048,6 +1252,7 @@ class VaultGraphSettingTab extends PluginSettingTab {
   // Flip one folder's DEFAULT visibility. Written as an explicit boolean rather than by
   // deleting the key, so "shown, and I said so" survives a later change to what the `_`
   // rule does.
+  /** @param {string} folder */
   async pickVisible(folder) {
     const map = Object.assign({}, this.plugin.settings.folderShown);
     map[folder] = !this.shownByDefault(folder);
@@ -1062,6 +1267,12 @@ class VaultGraphSettingTab extends PluginSettingTab {
   // the same slot on purpose. Shared by pick() and pickSub(), which only differ in which
   // settings map they touch, how the map key is built, and which apply method re-derives
   // colours from it.
+  /**
+   * @param {"folderColors" | "subfolderColors"} settingsKey
+   * @param {string} mapKey
+   * @param {string | null} key
+   * @param {"applyFolderColors" | "applySubfolderColors"} applyMethod
+   */
   async setOverride(settingsKey, mapKey, key, applyMethod) {
     const map = Object.assign({}, this.plugin.settings[settingsKey]);
     if (key) map[mapKey] = key; else delete map[mapKey];
@@ -1072,12 +1283,14 @@ class VaultGraphSettingTab extends PluginSettingTab {
   }
 
   // One folder's slot.
+  /** @param {string} folder @param {string | null} key */
   async pick(folder, key) {
     return this.setOverride("folderColors", folder, key, "applyFolderColors");
   }
 
   // As pick(), one level down. this.display() re-collapses nothing -- see this.subOpen
   // in the constructor -- so the section this pick was made in stays open.
+  /** @param {string} folder @param {string} sub @param {string | null} key */
   async pickSub(folder, sub, key) {
     return this.setOverride("subfolderColors", folder + "/" + sub, key, "applySubfolderColors");
   }
@@ -1085,7 +1298,13 @@ class VaultGraphSettingTab extends PluginSettingTab {
 
 class VaultGraphPlugin extends Plugin {
   async onload() {
-    this.settings = Object.assign({}, DEFAULTS, await this.loadData());
+    // loadData() is `Promise<any>`: the file is whatever was last saved, by any version of
+    // this plugin, so it is held as `unknown` and merged over the defaults rather than
+    // trusted to be a Settings. A field missing from an older file gets its default.
+    /** @type {unknown} */
+    const saved = await this.loadData();
+    /** @type {Settings} */
+    this.settings = Object.assign({}, DEFAULTS, saved);
     this.addSettingTab(new VaultGraphSettingTab(this.app, this));
 
     this.registerView(VIEW_TYPE, (leaf) => new VaultGraphView(leaf, this));
@@ -1168,7 +1387,7 @@ class VaultGraphPlugin extends Plugin {
   // throwing inside a click handler. If a future Obsidian drops it, the gear degrades to a
   // signpost instead of doing nothing.
   openSettings() {
-    const setting = this.app.setting;
+    const setting = /** @type {AppWithSetting} */ (this.app).setting;
     if (!setting || typeof setting.open !== "function") {
       // Worded to survive obsidianmd/ui/sentence-case, which flags any capitalised word
       // mid-string -- and its suggested fix lowercased the plugin's own name.

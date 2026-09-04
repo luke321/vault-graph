@@ -1389,28 +1389,37 @@ listed 77 findings against our 28 for exactly this reason, and its per-rule coun
 
 | | `plugin/main.js` | `src/page.js` | total |
 |---|---:|---:|---:|
-| `no-unsafe-member-access` | 278 | 3,860 | 4,138 |
-| `no-unsafe-assignment` | 101 | 1,365 | 1,466 |
-| `no-unsafe-call` | 99 | 870 | 969 |
-| `no-unsafe-argument` | 19 | 212 | 231 |
-| `no-unsafe-return` | 13 | 160 | 173 |
-| **budget** | **510** | **6,467** | **6,977** |
+| `no-unsafe-member-access` | 0 | 3,860 | 3,860 |
+| `no-unsafe-assignment` | 1 | 1,365 | 1,366 |
+| `no-unsafe-call` | 0 | 870 | 870 |
+| `no-unsafe-argument` | 0 | 212 | 212 |
+| `no-unsafe-return` | 0 | 160 | 160 |
+| **budget** | **1** | **6,467** | **6,468** |
 
-Measured 2026-09-03 on `develop@972daca` plus the dead-code removal that landed with the
-gate; the plugin's 510 match the directory's board figure for figure. `scripts/lint.mjs` runs
-eslint and fails on any error, on any warning outside the meter, and on a meter that differs
-from the budget in EITHER direction -- a count below it means something was typed and the
-budget stopped describing the code, so it is lowered in the same commit. eslint's own
-`--max-warnings` gates only the total, and ten meter findings removed without lowering it
-would have let ten unused values through inside the headroom. The formatter
-(`scripts/lint-summary.mjs`) prints budget and meter on every run so the edit is made against
-the figure in front of you. This is the
-progress meter for #55's later phases: every `any` that gets a type takes findings off it.
+The gate landed 2026-09-03 on `develop@972daca` at **6,977** -- 510 on the plugin, matching
+the directory's board figure for figure (278 / 101 / 99 / 19 / 13), and 6,467 on the page.
+github#60 is the ratchet down from there, and its first batch (2026-09-04) typed the plugin
+with JSDoc alone: 510 → 1, the one being the vendored graphology namespace, which has no
+typings until #60's boundary batch names it. `scripts/lint.mjs` runs eslint and fails on any
+error, on any warning outside the meter, and on a meter that differs from the budget in
+EITHER direction -- a count below it means something was typed and the budget stopped
+describing the code, so it is lowered in the same commit. eslint's own `--max-warnings`
+gates only the total, and ten meter findings removed without lowering it would have let ten
+unused values through inside the headroom. The formatter (`scripts/lint-summary.mjs`) prints
+budget and meter on every run so the edit is made against the figure in front of you. This
+is the progress meter for #55's later phases: every `any` that gets a type takes findings
+off it.
+
+**JSDoc is read, JSDoc casts are not.** typescript-eslint takes the type of the expression
+inside `/** @type {T} */ (expr)`, not the cast, so a cast at a use site changes nothing on the
+meter (measured: `parseFromString(/** @type {string} */ (PAGE_HTML), ...)` kept its finding).
+A cast only counts once its value sits in a declared variable. `unknown` is the other tool:
+the rules allow `any` to flow into an `unknown`-typed variable, and nothing else.
 
 ```bash
 npm run lint                          # 0 errors, 0 actionable warnings, meter = budget, 4 s
-node scripts/lint.mjs --budget 6976   # one under: must fail
-node scripts/lint.mjs --budget 6978   # one over: must fail too
+node scripts/lint.mjs --budget 6467   # one under: must fail
+node scripts/lint.mjs --budget 6469   # one over: must fail too
 ```
 
 **The five reach `src/page.js` two ways, and `tsconfig.json` names it so only one has to
