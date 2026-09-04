@@ -1404,12 +1404,12 @@ listed 77 findings against our 28 for exactly this reason, and its per-rule coun
 
 | | `plugin/main.js` | `src/page.js` | total |
 |---|---:|---:|---:|
-| `no-unsafe-member-access` | 0 | 2,210 | 2,210 |
-| `no-unsafe-assignment` | 0 | 774 | 774 |
-| `no-unsafe-call` | 0 | 310 | 310 |
-| `no-unsafe-argument` | 0 | 262 | 262 |
-| `no-unsafe-return` | 0 | 97 | 97 |
-| **budget** | **0** | **3,653** | **3,653** |
+| `no-unsafe-member-access` | 0 | 1,497 | 1,497 |
+| `no-unsafe-assignment` | 0 | 473 | 473 |
+| `no-unsafe-call` | 0 | 258 | 258 |
+| `no-unsafe-argument` | 0 | 228 | 228 |
+| `no-unsafe-return` | 0 | 75 | 75 |
+| **budget** | **0** | **2,531** | **2,531** |
 
 The gate landed 2026-09-03 on `develop@972daca` at **6,977** -- 510 on the plugin, matching
 the directory's board figure for figure (278 / 101 / 99 / 19 / 13), and 6,467 on the page.
@@ -1419,7 +1419,9 @@ batch 2 (same day) declared the page's three boundaries -- `VaultData`, `MountDe
 structural `GraphLike`/`SigmaLike`, and the `VgApi` -- at the top of `src/page.js`, which
 took the page 6,467 → 4,377 and the plugin's last one to 0; batch 3a (same day) typed the
 page's preamble through grouping -- theme, state, graph + base layout, grouping -- and gave
-the file its one typed `dict()` for what `Object.create(null)` used to be, 4,377 → 3,653.
+the file its one typed `dict()` for what `Object.create(null)` used to be, 4,377 → 3,653;
+batch 3b (same day) typed the rings layout section -- the wedge planner's `Cell`, `Slot`,
+`Plan`, `GeomLock` and the cascade state it shares -- 3,653 → 2,531.
 `scripts/lint.mjs` runs eslint and fails on any
 error, on any warning outside the meter, and on a meter that differs from the budget in
 EITHER direction -- a count below it means something was typed and the budget stopped
@@ -1438,8 +1440,8 @@ the rules allow `any` to flow into an `unknown`-typed variable, and nothing else
 
 ```bash
 npm run lint                          # 0 errors, 0 actionable warnings, meter = budget, 4 s
-node scripts/lint.mjs --budget 3652   # one under: must fail
-node scripts/lint.mjs --budget 3654   # one over: must fail too
+node scripts/lint.mjs --budget 2530   # one under: must fail
+node scripts/lint.mjs --budget 2532   # one over: must fail too
 ```
 
 **The five reach `src/page.js` two ways, and `tsconfig.json` names it so only one has to
