@@ -4,16 +4,23 @@ The renderer under this directory is a port (github#58). Its camera and viewport
 (`viewport.ts`, `camera.ts`), its pointer handling (`captor.ts`), its colour packing
 (`colors.ts`) and the four WebGL programs with their GLSL (`programs.ts`) were written from
 **Sigma.js 3.0.2** -- the core package and its `@sigma/edge-curve` and `@sigma/node-border`
-satellites -- with the arithmetic kept as it was, because every measured constant in
-`src/page.js` was calibrated against the pixels it produced. What Sigma did that this page
-never used (the label density grid, the picking framebuffer, touch input, edge events,
-WebGL1) was left out; what remains is ours to maintain, and is typed and linted as ours.
+satellites, all three released from one repository under the one licence below -- with the
+arithmetic kept as it was, because every measured constant in `src/page.js` was calibrated
+against the pixels it produced. What Sigma did that this page never used (the label density
+grid, the picking framebuffer, touch input, edge events, WebGL1) was left out; what remains is
+ours to maintain, and is typed and linted as ours.
 
-Sigma.js is MIT licensed. Its notice is reproduced here as the licence asks:
+Sigma.js is MIT licensed. Its notice is reproduced here as the licence asks, and **travels
+with both built artifacts**: `notice.mjs` beside this file lifts the block below into a `/*!`
+legal comment that `scripts/build-plugin.mjs` puts at the top of `main.js` and
+`src/build-graph.mjs` puts at the top of the engine `<script>` in every exported
+`vault-graph.html`. (esbuild drops the source files' own comments, so without that banner a
+copy of the port shipped with no notice at all.) The copyright line is upstream's, copied from
+`LICENSE.txt` at the `sigma@3.0.2` tag rather than reconstructed.
 
 MIT License
 
-Copyright (c) 2013-2024 Alexis Jacomy, Guillaume Plique and Sigma.js contributors
+Copyright (C) 2013-2025, Alexis Jacomy, Guillaume Plique, Benoît Simard https://www.sigmajs.org
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
