@@ -364,13 +364,24 @@ export class Renderer extends Emitter<EventMap> implements RendererApi {
     return ctx;
   }
 
-  /** Reads the container's size; sizes every layer to it when it changed. */
+  /**
+   * Reads the container's size and the window's pixel ratio; sizes every layer to them when
+   * either changed. THE PIXEL RATIO IS PART OF THE TEST. Sigma compared only the CSS size, and
+   * a window carried onto a monitor with another scale factor keeps its CSS size while
+   * devicePixelRatio changes -- so the backing stores stayed at the old ratio while every
+   * program drew into a viewport sized for the new one: the disc came out scaled and cropped,
+   * and picking no longer met the pixels. Measured with Chrome's DPR emulation at a constant
+   * 1312x770 container: 1 -> 2 resized (the CSS size moved with it), 2 -> 3 did not -- canvases
+   * 2624x1540 under a 3936x2310 viewport, 0 of 12 sampled note centres lit. This runs on every
+   * render, so the change is picked up by the next frame anything asks for; a ratio change that
+   * arrives with no resize event and nothing else to draw waits for that frame.
+   */
   private resize(force = false): void {
-    const prevW = this.width, prevH = this.height;
+    const prevW = this.width, prevH = this.height, prevRatio = this.pixelRatio;
     this.width = this.container.offsetWidth || 1;
     this.height = this.container.offsetHeight || 1;
     this.pixelRatio = this.win.devicePixelRatio || 1;
-    if (!force && prevW === this.width && prevH === this.height) return;
+    if (!force && prevW === this.width && prevH === this.height && prevRatio === this.pixelRatio) return;
     const w = this.width * this.pixelRatio, h = this.height * this.pixelRatio;
     for (const el of this.elements.values()) {
       el.style.width = this.width + "px";
@@ -405,12 +416,20 @@ export class Renderer extends Emitter<EventMap> implements RendererApi {
     const z = data.zIndex ?? 0;
     if (z < this.nodeZExtent[0]) this.nodeZExtent[0] = z;
     if (z > this.nodeZExtent[1]) this.nodeZExtent[1] = z;
+    // INTO THE FRAMED SQUARE AT ONCE, with the normalisation the last frame used; process()
+    // re-derives it from the attributes before drawing, so nothing on screen depends on this.
+    // Picking does: a scheduled refresh (setSetting, a window resize) rebuilds this map and
+    // leaves the render to the next frame, and a pointer move in between hit-tests against
+    // whatever is here. In graph units every node was hundreds of px off and the node under
+    // the pointer read as left -- a spurious leaveNode, the tip gone and the hover ramp reset
+    // while the pointer never moved off the note. Measured: 1 leaveNode per setSetting while
+    // hovering, 0 with this line. Sigma picked from the previous frame's colour buffer and so
+    // never saw the gap; this is the same answer by the same normalisation.
+    this.normalization.applyTo(data);
   }
 
   private updateNode(id: string): void {
     this.addNode(id);
-    const data = this.nodeData.get(id);
-    if (data) this.normalization.applyTo(data);
   }
 
   private addEdge(edge: string): void {

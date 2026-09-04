@@ -465,6 +465,13 @@ function mountVaultGraph(root, data, deps) {
     // instead of freezing whichever one was current when it was picked.
     THEME.byKey = dict();
     THEME.slots.forEach(function (hex, i) { THEME.byKey["g" + (i + 1)] = hex; });
+    // THE RENDERER'S LABEL COLOUR FOLLOWS. It was handed THEME.text once, at construction, and
+    // nothing re-read it: the plugin's theme switch calls readTheme() and refresh(), which
+    // recolours every node and edge, but the forced labels -- search hits, the focused note --
+    // kept drawing in the old theme's text colour, white on the light surface. Measured on
+    // the standalone with the plugin's exact sequence: --text-1 #0b0b0b, labelColor #ffffff.
+    // Guarded because the first read runs before makeRenderer(); that call passes the colour.
+    if (renderer) renderer.setSetting("labelColor", THEME.text);
   }
   readTheme();
 
