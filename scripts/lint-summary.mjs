@@ -3,9 +3,9 @@
 // Five type-aware rules -- @typescript-eslint/no-unsafe-* -- run on the plugin and the page
 // as warnings because the Obsidian directory's review runs them on every published version
 // (github#55). They fire ~7,000 times on code that was never typed, and a run that prints
-// 7,000 lines is a run nobody reads, so the 26 actionable findings hiding among them were
-// left alone for months. This formatter prints the actionable ones the way eslint would,
-// and reduces the five to per-rule and per-file counts plus the budget line.
+// 7,000 lines is a run nobody reads -- a handful of actionable findings would vanish into it
+// and the lint would go back to being ignored. This formatter prints the actionable ones the
+// way eslint would, and reduces the five to per-rule and per-file counts plus the budget line.
 //
 // THE BUDGET is `--max-warnings N` in package.json's lint script, held at exactly the
 // measured total: any new warning of any kind fails the gate, and lowering N is a deliberate

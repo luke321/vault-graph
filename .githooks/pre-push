@@ -220,8 +220,8 @@ EOF
 fi
 
 # LINT NEXT, same bar again -- about five seconds, no Chrome -- and no skip flag, for a
-# different reason: a lint that runs when someone remembers was 28 warnings deep when it was
-# made a gate (github#55), every one of them a value assigned and never read. The same run
+# different reason: a lint that runs when someone remembers was 27 warnings deep when it was
+# made a gate (github#55), 26 of them values assigned and never read. The same run
 # also carries the five type-aware no-unsafe-* rules the Obsidian directory's review applies
 # to every published version, held at exactly their current count by --max-warnings in
 # package.json -- so a new one is caught here rather than on the directory's board.

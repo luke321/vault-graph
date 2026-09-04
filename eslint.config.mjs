@@ -94,6 +94,18 @@ export default defineConfig([
     files: ["src/**/*.mjs", "scripts/**/*.mjs"],
     rules: {
       ...OBSIDIAN_OFF,
+      // AND THE PRESET'S OBSIDIAN-FLAVOURED CORE RULES. Beyond obsidianmd/*, the recommended set
+      // configures a few core and third-party rules for code that runs inside Obsidian -- a
+      // global `fetch` is told to use `requestUrl`, DOM sinks are policed -- and a Node script
+      // that fetches, or has no DOM, is not what they are about. import/no-extraneous-dependencies
+      // stays on: a script importing a package that package.json does not declare is a finding.
+      "no-restricted-globals": "off",
+      "@typescript-eslint/no-restricted-imports": "off",
+      "no-alert": "off",
+      "@microsoft/sdl/no-document-write": "off",
+      "@microsoft/sdl/no-inner-html": "off",
+      "no-unsanitized/method": "off",
+      "no-unsanitized/property": "off",
       // `try { ... } catch {}` is the teardown idiom in every harness here -- kill the child,
       // close the socket, remove the profile -- and none of those failing is news. All 25
       // empty blocks the widened scope found were that shape. The plugin and the page keep

@@ -1737,9 +1737,9 @@ check("the resting web is not floored wider than it asks for", async (p) => {
  * the order the suite happens to run in.
  */
 
-// The ribbon's three lanes, so a press can be aimed at one of them. Mirrors the constants in
-// page.js; a mismatch shows up as a check aiming at the wrong lane rather than as a wrong
-// number, which is why each helper reports what it hit.
+// The ribbon's bar lane, so a press can be aimed at it. Mirrors the constant in page.js; a
+// mismatch shows up as a check aiming at the wrong lane rather than as a wrong number, which
+// is why each helper reports what it hit.
 const RIB_BARS = 26;
 
 async function ribbonBox(p) {

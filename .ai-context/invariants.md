@@ -1376,13 +1376,15 @@ re-running: **7 groups, 6 disturbed — lost `(vault root)`, `tiny`; renumbered 
 
 **Actionable findings are zero.** Every syntax and unused-value rule the Obsidian preset
 enables, plus `no-unsupported-api`, on all of our own code. Measured before the gate existed:
-27 warnings (26 × `no-unused-vars` in `src/page.js`, one settings-tab rule), and 40 more the
-moment the scope widened from two paths to the exporter and scripts. Zero after; the
+27 warnings (26 × `no-unused-vars` in `src/page.js`, one settings-tab rule), and 40 more when
+the scope was first widened to the exporter and scripts under the same rules -- 25 of them the
+`catch {}` teardown idiom the Node-side block now allows, the other 15 fixed. Zero after; the
 formatter prints any that come back in full, the way eslint would.
 
 **The meter is held at its count.** The five type-aware `@typescript-eslint/no-unsafe-*`
 rules the community directory's review runs on every published version (its board for 1.9.0
-showed 77 findings against our 28 for exactly this reason), at `warn`, with `--max-warnings`
+listed 77 findings against our 28 for exactly this reason, and its per-rule counts for
+`plugin/main.js` are the 510 in the table below), at `warn`, with `--max-warnings`
 in `package.json`'s `lint` script set to exactly the total:
 
 | | `plugin/main.js` | `src/page.js` | total |

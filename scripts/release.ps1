@@ -142,8 +142,10 @@ try {
   # count the directory's board would show growing. Sits here rather than beside the invariant
   # suite so it stays out of the way of the release-flow rewrite in github#10.
   Write-Host "`n=== lint ===" -ForegroundColor Cyan
-  & npm run lint --silent
-  if ($LASTEXITCODE -ne 0) { throw "lint failed -- not releasing (npm ci first, if this is a fresh clone)" }
+  # THROUGH Invoke-Native, NOT A BARE `&`: over budget, eslint reports on stderr, and under this
+  # script's 'Stop' preference that would end the run before the throw below could say why.
+  try { Invoke-Native npm @('run', 'lint', '--silent') }
+  catch { throw "lint failed -- not releasing (npm ci first, if this is a fresh clone)" }
 
   # A tag already ON THIS COMMIT is a resumed run, not a mistake -- the first version of
   # this script died between pushing and publishing, and refusing to continue would have
