@@ -9,6 +9,7 @@
  *
  * Usage:  node "03 - Resources/Vault Graph/build-graph.mjs"
  *          [--ghosts] [--templates] [--flat-months] [--no-nav] [--dev] [--out FILE]
+ *          [--renderer sigma|own]   (transitional, github#58: which renderer draws the page)
  *
  * Vault-agnostic: it crawls every folder and reads which folders are templates
  * and daily notes from the vault's own .obsidian config, so no folder name or
@@ -561,7 +562,22 @@ const LIB_NOTICE = `<!--
   Full licence text: vendor/NOTICE.md in the vault-graph repository.
 -->`;
 
-const libs = `<script>\n${engine.trimEnd()}\n</script>\n` + LIB_NOTICE + "\n" +
+// WHICH RENDERER DRAWS THE PAGE -- transitional (github#58, step 3). While the engine's
+// renderer is being brought up to Sigma's picture, both ship in the file and shell.html hands
+// the page whichever this flag names, so scripts/render-diff.mjs can build the same vault twice
+// and compare the two frame for frame. Sigma stays the default until the switch (step 3.6);
+// after it the flag, the Sigma script and the notice above all go.
+// VG_RENDERER in the environment is the default for the flag, so a harness that builds through
+// this script without passing flags -- scripts/smoke.mjs -- can be pointed at the engine too:
+// `VG_RENDERER=own node scripts/smoke.mjs --only hover` runs the suite's own checks against it.
+const RENDERER = opt("renderer", process.env.VG_RENDERER || "sigma");
+if (RENDERER !== "sigma" && RENDERER !== "own") {
+  console.error(`build-graph: --renderer must be "sigma" or "own", not "${RENDERER}"`);
+  process.exit(2);
+}
+
+const libs = `<script>window.VAULT_RENDERER=${JSON.stringify(RENDERER)};</script>\n` +
+  `<script>\n${engine.trimEnd()}\n</script>\n` + LIB_NOTICE + "\n" +
   `<script>\n${readVendorSource(ROOT, "sigma.min.js")}\n</script>`;
 
 // The logo and favicon are inlined as data URIs for the same reason the libraries

@@ -3,8 +3,9 @@
  * more (github#58).
  *
  * These interfaces were measured, not designed. They are the members src/page.js actually
- * called on graphology and Sigma on develop@79d829a -- 16 of graphology's methods, 16 of
- * Sigma's, one camera, one mouse captor, nine events -- lifted out of the JSDoc typedefs that
+ * called on graphology and Sigma on develop@79d829a -- 16 of graphology's methods plus the two
+ * Sigma itself read the edges through, 16 of Sigma's, one camera, one mouse captor, nine
+ * events -- lifted out of the JSDoc typedefs that
  * github#60 wrote for the two vendored bundles. page.js re-points its typedefs here
  * (`@typedef {import("./engine/types").Renderer} SigmaLike`), so the page and the engine are
  * checked against one declaration and a member that is not named here shows up on the lint
@@ -79,6 +80,10 @@ export interface GraphStore {
   /** Every edge, or every edge of one node. */
   forEachEdge(fn: EdgeVisitor): void;
   forEachEdge(node: string, fn: EdgeVisitor): void;
+  /** Every edge key, in insertion order. The renderer's indexation walks this. */
+  edges(): string[];
+  /** The attribute object addUndirectedEdge was given, by reference. The renderer styles from it. */
+  getEdgeAttributes(edge: string): EdgeAttrs;
   getNodeAttribute<K extends keyof NodeAttrs>(id: string, name: K): NodeAttrs[K];
   getNodeAttributes(id: string): NodeAttrs;
   setNodeAttribute<K extends keyof NodeAttrs>(id: string, name: K, value: NodeAttrs[K]): void;
@@ -121,7 +126,7 @@ export interface Camera {
    */
   animate(to: Partial<CameraState>, opts?: { duration?: number }, done?: () => void): void;
   /** Fires on every state change, including each frame of an animate. */
-  on(event: "updated", fn: () => void): void;
+  on(event: "updated", fn: (state: CameraState) => void): void;
 }
 
 /* --------------------------------------------------------------- display */
@@ -181,10 +186,20 @@ export interface RendererSettings {
   labelColor: string;
 }
 
+/**
+ * What the hover drawer is handed: the node's display data with `x`, `y` in viewport px and
+ * `size` in drawn px, plus the node's `key`. Sigma added the key the same way, and the page's
+ * drawFocusWeb reads it to know whose web it is drawing -- measured: without it the focus web
+ * never painted, and `focus web stays above dim notes` failed on every fixture.
+ */
+export interface HoverData extends NodeDisplayData {
+  key: string;
+}
+
 /** Draws the hovered (or highlighted) node's pill onto the hovers canvas: the page's drawHover. */
 export type DrawHover = (
   ctx: CanvasRenderingContext2D,
-  data: NodeDisplayData,
+  data: HoverData,
   settings: RendererSettings,
 ) => void;
 

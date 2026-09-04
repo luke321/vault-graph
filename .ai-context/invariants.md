@@ -1384,6 +1384,38 @@ animated — and it is what the defect actually moves. Verified by disabling the
 re-running: **7 groups, 6 disturbed — lost `(vault root)`, `tiny`; renumbered `misc`, `notes`,
 `projects`, `refs`.**
 
+## The engine draws Sigma's picture
+
+github#58. The renderer under `src/engine/` replaced sigma 3.0.2, and the only acceptance
+criterion was that nothing on screen changes. The suite cannot see that: sixteen of its checks
+assert numbers and none reads a disc's colour or a curve's bow. So the comparison is its own
+harness:
+
+```bash
+node scripts/render-diff.mjs                  # every fixture, ratios 1.08 / 0.35 / 4.2
+node scripts/render-diff.mjs --query note     # the same, in a search: labels and pills lit
+```
+
+It builds a fixture with `--renderer sigma` and `--renderer own`, loads each in one Chrome tab
+in turn, puts the camera in the same state, and compares two things per ratio: **camera** --
+`graphToViewport` for every node and `scaleSize` of its size, bar 1e-6 px; **pixels** -- the
+composited `edges`, `nodes`, `labels`, `hovers` and `hoverNodes` layers over the surface colour,
+bar 0.05 % of the stage differing by more than 8/255 in any channel, and `edgeInk` within 1 %
+(decision 0012, D-5). Two builds in two tabs would not do: the background tab never gets a
+frame, and the page defers its edge-cap refresh to one.
+
+**Measured 2026-09-04 on all three fixtures at all three ratios, at rest and in a search: max
+camera |Δ| 0 px, 0 pixels differing, edgeInk equal to five decimals.** The bar was set before
+the numbers were known, and the numbers came in at zero; the bar stays where it was recorded,
+because a later change that costs 0.01 % of pixels is a finding to look at, not a failure to
+argue about.
+
+Two behaviours are different on purpose and were decided before the port: picking is by
+geometry (within `size / ratio` px of the centre, the last-drawn node winning -- the answer
+Sigma's half-resolution colour buffer gave, without the 2 px quantisation), and the label
+density grid is gone, with the occasional plain label it drew for the hovered note during the
+first half of the hover ramp.
+
 ## Our own code lints clean
 
 `npm run lint` runs typescript-eslint over the plugin, the page, the exporter and `scripts/`

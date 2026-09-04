@@ -8058,7 +8058,7 @@ function mountVaultGraph(root, data, deps) {
   // No `settings` parameter any more: the one thing it was read for was minEdgeThickness, and
   // that now lives inside edgePx so this and edgeReport cannot disagree about a width.
   // drawHover keeps its own -- it reads labelSize and labelFont, and sigma decides its shape.
-  /** @param {CanvasRenderingContext2D} ctx @param {NodeDisplayData & { key?: string }} data */
+  /** @param {CanvasRenderingContext2D} ctx @param {import("./engine/types").HoverData} data */
   function drawFocusWeb(ctx, data) {
     var f = state.hovered || state.selected;
     if (!f || data.key !== f || state.query) return;
@@ -8108,7 +8108,7 @@ function mountVaultGraph(root, data, deps) {
   // Geometry matches its label drawer: text at x + size + 3, y + labelSize/3.
   /**
    * @param {CanvasRenderingContext2D} ctx
-   * @param {NodeDisplayData} data
+   * @param {import("./engine/types").HoverData} data   the display data plus the node key, as the renderer hands it over
    * @param {SigmaSettings & { labelSize: number, labelWeight: string, labelFont: string }} settings
    */
   function drawHover(ctx, data, settings) {

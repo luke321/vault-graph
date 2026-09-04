@@ -82,13 +82,29 @@ function saveSettings(patch) {
   } catch (e) { /* no store, or full: the colours just do not outlive the tab */ }
 }
 
+/* WHICH RENDERER -- transitional (github#58, step 3). build-graph.mjs writes VAULT_RENDERER
+ * from its --renderer flag. "own" hands the page the engine's renderer through a shim that
+ * turns the Sigma-shaped settings bag page.js still builds into the engine's typed options;
+ * "sigma" hands it the vendored bundle as before. The `rendering` stub for the engine carries
+ * the two truthy markers page.js checks before it emits the "halo" and "curve" types -- the
+ * engine draws both natively and never reads the stub. At the switch (step 3.6) page.js
+ * constructs the engine's options itself and everything in this block but the mount goes.
+ */
+var OWN_RENDERER = window.VAULT_RENDERER === "own";
+function OwnRenderer(graph, container, settings) {
+  return new window.VaultGraphEngine.Renderer(graph, container,
+    window.VaultGraphEngine.optionsFromSigmaSettings(settings, window));
+}
+
 mountVaultGraph(
   document.getElementById("vg-app"),
   window.VAULT_DATA,
   {
     Graph: window.VaultGraphEngine.GraphStore,
-    Sigma: (window.Sigma && window.Sigma.Sigma) || window.Sigma,
-    rendering: (window.Sigma && window.Sigma.rendering) || {},
+    Sigma: OWN_RENDERER ? OwnRenderer : ((window.Sigma && window.Sigma.Sigma) || window.Sigma),
+    rendering: OWN_RENDERER
+      ? { EdgeCurveProgram: true, createNodeBorderProgram: function () { return {}; } }
+      : ((window.Sigma && window.Sigma.rendering) || {}),
     logoMask: window.VAULT_LOGO_MASK || "",
     // The gear is the standalone's only settings surface, so it is turned on here. The
     // plugin leaves it off and uses Obsidian's own settings tab for the same rows.

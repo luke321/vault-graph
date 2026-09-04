@@ -98,11 +98,44 @@ the same picture** -- and inject them where the bundles are injected today.
 - A new `scripts/render-diff.mjs` compares the Sigma build and the engine build of one fixture
   at three camera ratios, and `invariants.md` records the bar above.
 
+## Measured while porting
+
+Things Sigma's source did not say and the harness did.
+
+- **`stagePadding` is 30 by default and the page never set it.** The first camera comparison
+  was off by a constant ≈28 px × ratio at every ratio (25.9 / 79.8 / 6.65 px at 1.08 / 0.35 /
+  4.2); one constant later, 0. Every measured pixel constant in page.js assumes that padding.
+- **The hover drawer is handed the node's key.** Sigma spread `{ key: node, ...data }` into the
+  data it gave `defaultDrawNodeHover`, and page.js's `drawFocusWeb` opens with
+  `if (data.key !== f) return`. Without the key the focus web never painted and `focus web
+  stays above dim notes` failed on every fixture (shape: 23 blue, 921 dim samples; 985 / 0
+  after). The interface now says so: `HoverData extends NodeDisplayData { key }`.
+- **Two type programs must agree on variance.** The lint reads the shared `tsconfig.json`, the
+  engine's `tsc` reads `tsconfig.engine.json` with `strict`; with `strictFunctionTypes` only in
+  the second, a listener cast was "unnecessary" to one and required by the other. The shared
+  config sets that one flag. It changes no JavaScript report.
+- **The label grid held every visible node, empty labels included**, and its
+  `getLabelsToDisplay` admits at least one candidate per cell at any ratio. So the "dead" grid
+  did draw one thing: the hovered note's plain label during the first half of the hover ramp
+  (before `forceLabel` takes over at `ht > 0.5`), whenever that note happened to be the largest
+  in its 150 px cell. D-3 stands -- forced set only -- and that intermittent label is the one
+  thing about labels the engine does not reproduce.
+- **Picking is exact where Sigma's was quantised.** Sigma rendered node ids into a colour
+  framebuffer at half resolution (`pickingDownSizingRatio` = 2 × DPR) and read one pixel; the
+  engine tests the pointer against each drawn radius (`size / ratio` px) in draw order, last hit
+  winning, haloed notes over plain. Same answer to within 2 px, no framebuffer, no texture per
+  resize.
+- **The two builds must be compared one at a time in one tab.** A background tab gets no
+  animation frame, and the page defers its edge-cap refresh to one; two tabs side by side
+  measured a settled page against an unsettled one.
+
 ## Verify
 
 ```bash
 npm run lint                                        # typecheck + eslint, 0 errors, 0 warnings
 node scripts/smoke.mjs --only "golden snapshot"     # positions unchanged, all three fixtures
+node scripts/render-diff.mjs                        # camera |d| 0, 0 pixels differing, every fixture
+node scripts/render-diff.mjs --query note           # the same in a search
 ```
 
 Measured at step 1 (interface + toolchain, no runtime change): plugin bundle byte-identical to

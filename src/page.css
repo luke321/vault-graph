@@ -538,6 +538,12 @@
   }
   .vault-graph canvas.vg-wedge-debug[hidden] { display: none; }
   .vault-graph #vg-graph { position: absolute; inset: 0; }
+  /* The renderer's layers (src/engine/renderer.ts, github#58): six canvases stacked in DOM
+   * order inside #vg-graph, sized by the renderer, positioned here. The mouse layer is the one
+   * the pointer lands on; touch-action and user-select off keep a drag from scrolling or
+   * selecting the page, as Sigma set them inline. */
+  .vault-graph #vg-graph .vg-layer { position: absolute; }
+  .vault-graph #vg-graph .vg-layer-mouse { touch-action: none; user-select: none; }
   /* The camera cluster, in the stage's own BOTTOM-right corner (github#4). Quiet until
      wanted: the graph is the subject, and lit buttons in front of it compete with the thing
      they are there to move.

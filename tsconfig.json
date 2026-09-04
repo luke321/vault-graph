@@ -29,6 +29,13 @@
   // allowJs with checkJs off: give the rules a type graph to read, without turning every
   // loose annotation in 14k lines of JS into a lint error. checkJs is #55's Phase 1.
   //
+  // strictFunctionTypes IS ON, alone of the strict family, so this program and the engine's
+  // agree on what a cast means. Measured: with it off here, a listener widened to
+  // Listener<unknown> in src/engine/emitter.ts was "unnecessary" to the lint (bivariant
+  // parameters make the narrow type assignable) and required to tsc under strict; two programs
+  // reading one file cannot disagree on that, or every fix for one fails the other. It reports
+  // nothing on the JavaScript (checkJs is off) and esbuild does not read it.
+  //
   // plugin/**/*.d.ts is the one thing here that is not linted: declarations for the
   // bundler's own `raw:` and `b64:` modules (plugin/bundler-modules.d.ts), which the program
   // needs or every import from them is an error type (github#60). eslint.config.mjs ignores
@@ -42,6 +49,7 @@
     "noEmit": true,
     "skipLibCheck": true,
     "strict": false,
+    "strictFunctionTypes": true,
     "types": []
   },
   "include": ["plugin/**/*.js", "plugin/**/*.d.ts", "src/page.js", "src/engine/**/*.ts"]

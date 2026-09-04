@@ -176,13 +176,26 @@ export class GraphStore implements GraphStoreApi {
     Object.assign(this.attrsOf(id), attrs);
   }
 
+  /** Every edge key, in insertion order. The renderer's indexation walks this. */
+  edges(): string[] {
+    return Array.from(this.edgeRecords.keys());
+  }
+
+  /** The attribute object addUndirectedEdge was given, by reference; the renderer styles from it. */
+  getEdgeAttributes(edge: string): EdgeAttrs {
+    const rec = this.edgeRecords.get(edge);
+    if (!rec) throw new Error(`GraphStore: edge "${edge}" not found`);
+    return rec.attrs;
+  }
+
   /* ------------------------------------------------ sigma 3.0.2 compatibility, transitional --
    * Until github#58 step 3.6 replaces it, the renderer is still Sigma's bundle, and Sigma
    * holds the graph itself: its constructor validates the object with graphology-utils'
    * isGraph (which asks for addUndirectedEdgeWithKey and dropNode as functions and throws
-   * "Sigma: invalid graph instance." otherwise), subscribes to graph events, and its
-   * indexation reads getEdgeAttributes and edges(). None of this is in the GraphStore
-   * interface and none of it is called by page.js; every member below goes when Sigma does.
+   * "Sigma: invalid graph instance." otherwise) and subscribes to graph events. None of this is
+   * in the GraphStore interface and none of it is called by page.js; every member below goes
+   * when Sigma does. (edges() and getEdgeAttributes, which Sigma's indexation also reads, are
+   * on the interface: the engine's own renderer reads the edges the same way.)
    *
    * on/removeListener are no-ops. The store emits nothing, so Sigma never reacts to a
    * write -- which is what quietWrites used to arrange around every bulk loop (github#19)
@@ -201,18 +214,6 @@ export class GraphStore implements GraphStoreApi {
   /** The other half of Sigma's subscription, called from its kill(). */
   removeListener(_event: string, _fn: (...args: unknown[]) => void): this {
     return this;
-  }
-
-  /** Read by Sigma's edge indexation; the same object addUndirectedEdge was given. */
-  getEdgeAttributes(edge: string): EdgeAttrs {
-    const rec = this.edgeRecords.get(edge);
-    if (!rec) throw new Error(`GraphStore: edge "${edge}" not found`);
-    return rec.attrs;
-  }
-
-  /** Every edge key, in insertion order. */
-  edges(): string[] {
-    return Array.from(this.edgeRecords.keys());
   }
 
   /** Probed by isGraph, never called: page.js keys nothing itself. */

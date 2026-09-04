@@ -129,6 +129,17 @@ export default defineConfig([
     },
   },
   {
+    // THE ENGINE IS HOST-AGNOSTIC: the same src/engine code draws inside Obsidian and inside the
+    // standalone page opened off a disk, where Obsidian's DOM helpers (createEl, setCssProps) do
+    // not exist. So the one preset rule that asks for them is off here, with this as the reason;
+    // everything else in the Obsidian block above still applies to it. Static styles are not
+    // set from the engine at all -- page.css positions its layers -- so that rule stays on.
+    files: ["src/engine/**/*.ts"],
+    rules: {
+      "obsidianmd/prefer-create-el": "off",
+    },
+  },
+  {
     // plugin/**/*.d.ts: declarations for the type program (the bundler's `raw:`/`b64:`
     // modules), not code -- there is nothing in one for a rule to say, and the preset's
     // `**/*.ts` scoping would otherwise run its type-aware rules on it with no
