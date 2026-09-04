@@ -1396,14 +1396,22 @@ async function biggestGroup(p) {
 // Polls the camera while __vg.demo.busy() says the cascade is running, then waits past fit()'s
 // own 380ms tween once it is not. Returns whether the ratio ever moved from its starting value
 // WHILE busy, and the ratio once everything (cascade AND any deferred fit) has truly landed.
+//
+// BUSY AND RATIO IN ONE EVAL, so they describe the same instant. Read in two round trips, the
+// cascade could end and fit()'s tween begin BETWEEN them: `busy` came back true, the ratio
+// read after it had already started moving, and "moved while busy" was asserted on a camera
+// that had waited exactly as it should. Invisible with one Chrome on the machine (round trips
+// of a few ms against a 380ms tween), and the dominant-folder vault's check failed on it twice
+// in a row under the pre-push hook, where three fixtures' Chromes share the machine -- while
+// passing 72/72 on the same commit run alone (github#55).
 async function watchDuringCascade(p, startRatio, capMs = 8000) {
   var movedWhileBusy = false;
   var deadline = Date.now() + capMs;
   for (;;) {
-    var busy = await p.j(`!!__vg.demo.busy()`);
-    var r = (await camState(p)).ratio;
-    if (Math.abs(r - startRatio) > 0.01) movedWhileBusy = true;
-    if (!busy || Date.now() > deadline) break;
+    var s = await p.j(`(function(){ return { busy: !!__vg.demo.busy(),
+      ratio: +__vg.renderer.getCamera().getState().ratio.toFixed(4) }; })()`);
+    if (Math.abs(s.ratio - startRatio) > 0.01) movedWhileBusy = true;
+    if (!s.busy || Date.now() > deadline) break;
     await sleep(60);
   }
   await sleep(500);   // past any fit() tween that only started once busy went false
