@@ -1419,6 +1419,15 @@ the numbers were known, and the numbers came in at zero; the bar stays where it 
 because a later change that costs 0.01 % of pixels is a finding to look at, not a failure to
 argue about.
 
+**Verified a second way, against develop's own build.** `--mode screenshot` (part of `all`)
+captures two `Page.captureScreenshot` clips per ratio, the stage and the whole page, so the
+overlays the page paints from `graphToViewport` -- logo, heatmap band, ribbon, legend, wedge
+labels -- are compared too, as PNG bytes first and decoded pixels when the bytes differ. Against
+pages built from `develop@79d829a` (no engine at all), at five ratios, at rest and in a search:
+stage screenshots PNG-byte-identical in every one of 30 cases; whole-page screenshots differ
+only in the last digit of the sidebar's "Generated …" stamp, because the two builds were minutes
+apart. A reference built at the same minute would be byte-identical throughout.
+
 Two behaviours are different on purpose and were decided before the port: picking is by
 geometry (within `size / ratio` px of the centre, the last-drawn node winning -- the answer
 Sigma's half-resolution colour buffer gave, without the 2 px quantisation), and the label

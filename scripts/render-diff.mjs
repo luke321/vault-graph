@@ -3,7 +3,7 @@
 //
 //   node scripts/render-diff.mjs --against-dir <dir>                # every fixture in the store
 //   node scripts/render-diff.mjs --vault <dir> --against <ref.html> # one vault, one reference
-//   node scripts/render-diff.mjs ... --ratios 1.08,0.35,4.2 --threshold 8 --mode all|camera|pixels
+//   node scripts/render-diff.mjs ... --ratios 1.08,0.35,4.2 --threshold 8 --mode all|camera|pixels|screenshot
 //   node scripts/render-diff.mjs ... --query note                   # compare in a search: labels + pills lit
 //   node scripts/render-diff.mjs ... --headed                       # a visible window instead of off-screen
 //
@@ -41,6 +41,7 @@ import { existsSync, mkdtempSync, readdirSync, rmSync, statSync } from "node:fs"
 import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { inflateSync } from "node:zlib";
 import { attach } from "./cdp.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -235,7 +236,87 @@ function comparePixels(a, b) {
   };
 }
 
-/** Samples one build at every ratio: Map ratio -> { camera?, pixels? }. */
+/* ---- screenshots: what a person sees, overlays and chrome included ---------------------------
+ * The layer diff above reads the renderer's canvases and nothing else. The logo, the heatmap
+ * band, the ribbon, the legend and the wedge labels are the page's own, painted from
+ * graphToViewport and afterRender, so a renderer that got a coordinate wrong would show it
+ * there first. Page.captureScreenshot sees all of it. Two clips: the stage (#vg-stage) and the
+ * whole page (#vg-app). Compared as PNGs first -- the same Chrome encodes identical pixels to
+ * identical bytes -- and decoded only when the bytes differ, to say how many pixels and where.
+ */
+
+/** Minimal PNG decoder for Chrome's screenshots: 8-bit RGB or RGBA, no interlace. */
+function decodePng(buf) {
+  if (buf.readUInt32BE(0) !== 0x89504e47) throw new Error("not a PNG");
+  let pos = 8, w = 0, h = 0, colorType = 0, bitDepth = 0, interlace = 0;
+  const idat = [];
+  while (pos < buf.length) {
+    const len = buf.readUInt32BE(pos), type = buf.toString("latin1", pos + 4, pos + 8);
+    const data = buf.subarray(pos + 8, pos + 8 + len);
+    if (type === "IHDR") {
+      w = data.readUInt32BE(0); h = data.readUInt32BE(4); bitDepth = data[8]; colorType = data[9]; interlace = data[12];
+    } else if (type === "IDAT") idat.push(data);
+    else if (type === "IEND") break;
+    pos += 12 + len;
+  }
+  if (bitDepth !== 8 || interlace !== 0 || (colorType !== 2 && colorType !== 6)) {
+    throw new Error("unexpected PNG layout: depth " + bitDepth + " type " + colorType + " interlace " + interlace);
+  }
+  const bpp = colorType === 6 ? 4 : 3;
+  const raw = inflateSync(Buffer.concat(idat));
+  const stride = w * bpp;
+  const out = Buffer.alloc(w * h * 4);
+  let prev = Buffer.alloc(stride);
+  for (let y = 0; y < h; y++) {
+    const filter = raw[y * (stride + 1)];
+    const line = Buffer.from(raw.subarray(y * (stride + 1) + 1, (y + 1) * (stride + 1)));
+    for (let i = 0; i < stride; i++) {
+      const a = i >= bpp ? line[i - bpp] : 0, b = prev[i], c = i >= bpp ? prev[i - bpp] : 0;
+      let v = line[i];
+      if (filter === 1) v += a;
+      else if (filter === 2) v += b;
+      else if (filter === 3) v += (a + b) >> 1;
+      else if (filter === 4) { const pa = Math.abs(b - c), pb = Math.abs(a - c), pc = Math.abs(a + b - 2 * c); v += pa <= pb && pa <= pc ? a : pb <= pc ? b : c; }
+      line[i] = v & 255;
+    }
+    for (let x = 0; x < w; x++) {
+      const o = (y * w + x) * 4, s = x * bpp;
+      out[o] = line[s]; out[o + 1] = line[s + 1]; out[o + 2] = line[s + 2]; out[o + 3] = bpp === 4 ? line[s + 3] : 255;
+    }
+    prev = line;
+  }
+  return { w, h, data: out };
+}
+
+async function screenshotSample(p) {
+  await p.send("Page.enable").catch(() => {});
+  const shots = {};
+  for (const [name, sel] of [["stage", "#vg-stage"], ["page", "#vg-app"]]) {
+    const r = await p.eval("(function () { var r = document.querySelector(" + JSON.stringify(sel) + ").getBoundingClientRect(); " +
+                           "return { x: Math.round(r.left), y: Math.round(r.top), w: Math.round(r.width), h: Math.round(r.height) }; })()");
+    // Rendered synchronously first, so the capture is of this camera state and not the last frame's.
+    await p.eval("__vg.renderer.render(); void 0");
+    const shot = await p.send("Page.captureScreenshot", { format: "png", clip: { x: r.x, y: r.y, width: r.w, height: r.h, scale: 1 } });
+    shots[name] = shot.data;
+  }
+  return shots;
+}
+
+function compareShots(a, b) {
+  const parts = [];
+  let ok = true;
+  for (const name of ["stage", "page"]) {
+    if (a[name] === b[name]) { parts.push(name + ": PNG bytes identical"); continue; }
+    const A = decodePng(Buffer.from(a[name], "base64")), B = decodePng(Buffer.from(b[name], "base64"));
+    if (A.w !== B.w || A.h !== B.h) { ok = false; parts.push(name + ": sizes differ " + A.w + "x" + A.h + " vs " + B.w + "x" + B.h); continue; }
+    const r = comparePixels({ w: A.w, h: A.h, ink: null, data: A.data }, { w: B.w, h: B.h, ink: null, data: B.data });
+    if (!r.ok) ok = false;
+    parts.push(name + ": " + r.detail);
+  }
+  return { ok, detail: parts.join(" | ") };
+}
+
+/** Samples one build at every ratio: Map ratio -> { camera?, pixels?, shots? }. */
 async function sampleBuild(p, label) {
   await waitReady(p, label);
   if (QUERY) await p.eval("__vg.state.query = " + JSON.stringify(QUERY.toLowerCase()) + "; __vg.renderer.refresh(); void 0");
@@ -245,6 +326,7 @@ async function sampleBuild(p, label) {
     const s = {};
     if (MODE === "all" || MODE === "camera") s.camera = await cameraSample(p);
     if (MODE === "all" || MODE === "pixels") s.pixels = await pixelSample(p);
+    if (MODE === "all" || MODE === "screenshot") s.shots = await screenshotSample(p);
     out.set(ratio, s);
   }
   return out;
@@ -290,6 +372,7 @@ async function runVault(vault, reference, chrome) {
       const r = ref.get(ratio), n = now.get(ratio);
       if (r.camera) results.push({ ratio, kind: "camera", ...compareCamera(r.camera, n.camera) });
       if (r.pixels) results.push({ ratio, kind: "pixels", ...comparePixels(r.pixels, n.pixels) });
+      if (r.shots) results.push({ ratio, kind: "shots", ...compareShots(r.shots, n.shots) });
     }
     const err = page.firstError();
     if (refErrors || err) results.push({ ratio: "-", kind: "errors", ok: false, detail: [refErrors, err].filter(Boolean).join(" | ") });
