@@ -4680,7 +4680,9 @@ function mountVaultGraph(root, data, deps) {
   function hubSlots(n, r0) {
     if (n <= 0) return [];
     if (n === 1) return [{ x: 0, y: 0 }];
-    var R = r0 * HUB_R1, out = [];
+    var R = r0 * HUB_R1;
+    /** @type {Point[]} */
+    var out = [];
     if (n <= 6) {
       // Tighter for the small counts, so three notes read as a cluster in the middle
       // rather than as three notes stuck to the rim of the hole.
@@ -4716,6 +4718,7 @@ function mountVaultGraph(root, data, deps) {
   // notes in the hub are drawn small enough to be thirteen notes rather than one blob.
   var hubSep = 0;
 
+  /** @param {Record<string, Point>} out @param {number} r0 @param {number} scale */
   function hubPlace(out, r0, scale) {
     var ids = pinnedIds();
     hubSep = 0;
@@ -4764,6 +4767,7 @@ function mountVaultGraph(root, data, deps) {
     return Math.max(HUB_SIZE_MIN, Math.min(HUB_SIZE_MAX, HUB_SIZE_K * hubSep));
   }
 
+  /** @param {string} id */
   function isPinned(id) { return state.pinned.indexOf(id) >= 0; }
 
   // Pin, unpin, or move a note already pinned. `at` is an insert position for a drop; left
@@ -4772,6 +4776,7 @@ function mountVaultGraph(root, data, deps) {
   // A CAP RATHER THAN A REFUSAL: the hole does not grow, so the oldest pin gives way and
   // the gesture always does something. A refusal at thirteen would read as the drag having
   // missed.
+  /** @param {string} id @param {number} [at] slot to insert at */
   function pin(id, at) {
     var i = state.pinned.indexOf(id);
     if (i >= 0) state.pinned.splice(i, 1);
@@ -4861,7 +4866,10 @@ function mountVaultGraph(root, data, deps) {
   function seedPins() {
     var want = deps.pinned;
     if (!want || !want.length || typeof want.length !== "number") return;
-    var seen = Object.create(null), out = [];
+    /** @type {Record<string, number>} */
+    var seen = dict();
+    /** @type {string[]} */
+    var out = [];
     for (var i = 0; i < want.length && out.length < PIN_MAX; i++) {
       var id = want[i];
       if (typeof id !== "string" || seen[id] || !graph.hasNode(id)) continue;
@@ -4881,6 +4889,18 @@ function mountVaultGraph(root, data, deps) {
   // being moved is the thing under the hand, and the disc it came from stays put behind it.
   // On release the layout reclaims it -- into a hub slot, or back to its lattice seat --
   // and that snap is what tells you which of the two happened.
+  /**
+   * The note currently under a drag, or null. `x0`/`y0` are set on the first move, so the
+   * NODE_DRAG_MIN threshold measures from where the pointer actually started moving.
+   * @typedef {Object} NodeDrag
+   * @property {string} id
+   * @property {boolean} moved
+   * @property {boolean} over        pointer is inside the hub hole
+   * @property {boolean} wasPinned
+   * @property {number} [x0]
+   * @property {number} [y0]
+   */
+  /** @type {NodeDrag | null} */
   var nodeDrag = null;
   // How far the pointer must travel before a press becomes a drag. Same threshold the
   // ribbon uses, and for the same reason: a click with a shaky hand is still a click.
@@ -4894,6 +4914,7 @@ function mountVaultGraph(root, data, deps) {
   // effect nobody asked for. Set the moment the THRESHOLD is crossed rather than in
   // drop(), which runs too late to matter: it is on the same "mousemovebody" tick that
   // decides the gesture is a drag at all, well before the eventual release.
+  /** @type {string | null} */
   var dragJustMoved = null;
 
   // Where the hub is, in graph units, and whether a point is in it.
@@ -4986,7 +5007,9 @@ function mountVaultGraph(root, data, deps) {
   // ever matters. Shared by buildDateUI's ribbon drag and bindNodeDrag's hub-pin drag,
   // which both used to carry their own separate copy of this same four-line pattern.
   function makeFrameCoalescer() {
-    var pend = null, raf = 0;
+    /** @type {(() => void) | null} */
+    var pend = null;
+    var raf = 0;
     var flush = function () {
       raf = 0;
       var f = pend; pend = null;
@@ -7595,8 +7618,12 @@ function mountVaultGraph(root, data, deps) {
   function probeSample(tag) {
     if (!probe) return;
     var iMin = Infinity, iMax = 0, oMin = Infinity, oMax = 0, iN = 0, oN = 0;
-    var prev = probe.prevAng, now = Object.create(null);
-    var prevR = probe.prevR, nowR = Object.create(null);
+    var prev = probe.prevAng;
+    /** @type {Record<string, number>} */
+    var now = dict();
+    var prevR = probe.prevR;
+    /** @type {Record<string, number>} */
+    var nowR = dict();
     var tanStep = 0, tanId = null, tanOver = 0, tanSum = 0, tanN = 0;
     // PER-NOTE RADIAL STEP, which is what the tangential half has always measured and the
     // radial half never did. Both band extents below are a MAX OVER A SET, and the set churns
@@ -7717,6 +7744,7 @@ function mountVaultGraph(root, data, deps) {
    * Scoped to the loop and restored in a `finally`, because a page whose renderer has
    * permanently stopped listening to its graph is a much worse bug than a slow one.
    */
+  /** @param {() => void} fn */
   function quietWrites(fn) {
     var EV = "nodeAttributesUpdated";
     var raw = typeof graph.rawListeners === "function" ? graph.rawListeners(EV) : null;
@@ -7726,6 +7754,7 @@ function mountVaultGraph(root, data, deps) {
     try { fn(); } finally { for (var j = 0; j < ls.length; j++) graph.on(EV, ls[j]); }
   }
 
+  /** @param {Record<string, Point>} targets */
   function assignPositions(targets) {
     quietWrites(function () {
       graph.forEachNode(function (id) {
@@ -7741,6 +7770,7 @@ function mountVaultGraph(root, data, deps) {
   // smeared between their old and new positions -- which is what sank the first
   // wall-clock attempt, before there was a backstop.
 
+  /** @param {Record<string, Point> | null} targets @param {(() => void)} [done] */
   function animateTo(targets, done) {
     if (anim) { WIN.cancelAnimationFrame(anim); anim = null; }
     if (animGuard) WIN.clearTimeout(animGuard);
@@ -7823,6 +7853,7 @@ function mountVaultGraph(root, data, deps) {
 
 
 
+  /** @param {boolean} [animate] @param {() => void} [done] */
   function applyLayout(animate, done) {
     var targets = ringsLayout();
     if (!targets) { if (done) done(); return; }
@@ -7838,8 +7869,10 @@ function mountVaultGraph(root, data, deps) {
 
   /** @type {SigmaLike | undefined} */
   var renderer;
+  /** @type {Record<string, string[]> | null} */
   var neighbourCache = null;
 
+  /** @param {string} id @returns {string[]} */
   function neighboursOf(id) {
     // From the adjacency, not graph.neighbors(): in a budgeted vault the graph is missing
     // every trimmed link (see syncLazyEdges), so asking it would undercount everywhere -- and
@@ -7863,7 +7896,10 @@ function mountVaultGraph(root, data, deps) {
    * re-derived: deciding what to remove by re-asking the budget would couple this to the
    * selection rule, and a tracked list cannot disagree with what was actually added.
    */
-  var lazyShown = null, lazyAdded = [];
+  /** @type {string | null} */
+  var lazyShown = null;
+  /** @type {[string, string][]} */
+  var lazyAdded = [];
   function syncLazyEdges() {
     if (!lazyEdges) return;
     var want = state.hovered || state.selected || null;
@@ -7888,6 +7924,7 @@ function mountVaultGraph(root, data, deps) {
   // ancestor per visible() and once per isPushed(), i.e. on the order of a hundred thousand
   // times per animated frame on the 10k fixture, where the profile put visible() at 4.3 ms a
   // frame and isPushed() -- whose whole body is one of these -- at 1.5.
+  /** @param {NodeAttrs} a @param {number} k how many folder levels deep */
   function pathKey(a, k) {
     var d = a.dirs;
     if (!d || !d.length) return a.folder + "/";
@@ -7905,6 +7942,7 @@ function mountVaultGraph(root, data, deps) {
     return out;
   }
 
+  /** @param {string} id */
   function visible(id) {
     var a = graph.getNodeAttributes(id);
     if (isHidden(groupOf(id))) return false;
@@ -7953,7 +7991,8 @@ function mountVaultGraph(root, data, deps) {
   // endpoints are a group hue and the neutral dim -- a perceptual path between them buys
   // nothing visible and costs two cbrt per channel. Cached on a hundredth of t, which is
   // finer than the eye and coarse enough that the cache actually hits.
-  var mixCache = Object.create(null);
+  /** @type {Record<string, string>} */
+  var mixCache = dict();
   /** @param {string} from hex @param {string} to hex @param {number} t 0..1 @returns {string} */
   function mixHex(from, to, t) {
     if (t <= 0) return from;
@@ -7978,6 +8017,7 @@ function mountVaultGraph(root, data, deps) {
     return (state.hovered && state.hovered !== state.selected) ? hoverT : 1;
   }
 
+  /** @param {number} aim */
   function hoverTo(aim) {
     hoverAim = aim;
     if (hoverRaf) return;            // already walking -- it will pick up the new aim
@@ -8011,7 +8051,8 @@ function mountVaultGraph(root, data, deps) {
   // one whole set for another. A single ramp would pop the second set in at whatever
   // value the first had left it, and could not fade one set out while another fades in.
   // `alpha` already establishes the pattern -- a per-note value that something walks.
-  var hl = Object.create(null);            // id -> 0..1
+  /** @type {Record<string, number>} */
+  var hl = dict();            // id -> 0..1
   var hlRaf = 0, hlPrev = 0, hlSig = "";
   // Deliberately TWEEN_MS, the same duration as the radial push in animateTo. Becoming
   // highlighted is ONE event that moves a note and grows it, so the two have to land
@@ -8081,10 +8122,12 @@ function mountVaultGraph(root, data, deps) {
   // so it cannot go stale under a given f the way something reading live budgeted edges
   // could. Caching by `f` alone -- not "once per frame" -- means it also survives
   // unchanged across a whole hover, not just a single frame of it.
+  /** @type {{ key: string | null | undefined, set: Record<string, boolean> | null }} */
   var focusSetCache = { key: undefined, set: null };
   function focusSet() {
     var f = state.hovered || state.selected;
     if (focusSetCache.key === f) return focusSetCache.set;
+    /** @type {Record<string, boolean> | null} */
     var set = null;
     if (f) {
       set = Object.create(null);
@@ -8100,6 +8143,7 @@ function mountVaultGraph(root, data, deps) {
   // is actually drawn: the viewport-projected endpoints and the quadratic control point
   // for one edge (control point = chord midpoint + curvature x the chord normal, matching
   // curvatureFor's own sign and magnitude). null for a hidden edge.
+  /** @param {string} e edge key @param {string} s @param {string} t */
   function edgeCurveGeom(e, s, t) {
     var ed = renderer.getEdgeDisplayData(e);
     if (!ed || ed.hidden) return null;
@@ -8129,6 +8173,7 @@ function mountVaultGraph(root, data, deps) {
   // No `settings` parameter any more: the one thing it was read for was minEdgeThickness, and
   // that now lives inside edgePx so this and edgeReport cannot disagree about a width.
   // drawHover keeps its own -- it reads labelSize and labelFont, and sigma decides its shape.
+  /** @param {CanvasRenderingContext2D} ctx @param {NodeDisplayData & { key?: string }} data */
   function drawFocusWeb(ctx, data) {
     var f = state.hovered || state.selected;
     if (!f || data.key !== f || state.query) return;
@@ -8137,7 +8182,9 @@ function mountVaultGraph(root, data, deps) {
     // Every edge with BOTH ends in the focus set is lit by the edge reducer -- the
     // neighbour-to-neighbour ones too, not only those touching the focus note -- so the
     // overlay walks the whole set, each edge once.
-    var set = focusSet(), seen = Object.create(null);
+    var set = focusSet();
+    /** @type {Record<string, boolean>} */
+    var seen = dict();
     ctx.save();
     ctx.globalAlpha = ht;
     ctx.lineCap = "round";
@@ -8174,6 +8221,11 @@ function mountVaultGraph(root, data, deps) {
 
   // Replaces Sigma's built-in hover label, whose pill is hardcoded to #FFF.
   // Geometry matches its label drawer: text at x + size + 3, y + labelSize/3.
+  /**
+   * @param {CanvasRenderingContext2D} ctx
+   * @param {NodeDisplayData} data
+   * @param {SigmaSettings & { labelSize: number, labelWeight: string, labelFont: string }} settings
+   */
   function drawHover(ctx, data, settings) {
     drawFocusWeb(ctx, data);
     if (typeof data.label !== "string" || !data.label) return;
@@ -8202,6 +8254,7 @@ function mountVaultGraph(root, data, deps) {
 
   // The node's styling, independent of how far it has faded in. Visibility is
   // NOT decided here any more -- the reducer gates on opacity instead.
+  /** @param {string} id @param {NodeAttrs} a @returns {NodeDisplayData & { haloColor?: string }} */
   function nodeStyle(id, a) {
         var r = Object.assign({}, a);
         r.color = nodeColor(id);
@@ -8397,6 +8450,7 @@ function mountVaultGraph(root, data, deps) {
     return t * t * (3 - 2 * t);
   }
 
+  /** @param {string[]} a @param {string[]} b @param {number} t */
   function mixColorArrays(a, b, t) {
     var out = new Array(RING_BUCKETS);
     for (var i = 0; i < RING_BUCKETS; i++) {
@@ -8735,6 +8789,7 @@ function mountVaultGraph(root, data, deps) {
     //
     // The floor is the one thing that IS about pixels on screen -- a dot has to stay visible --
     // so it is converted the other way, from px to the size units sigma will divide by ratio.
+    /** @param {number} units */
     var rampFor = function (units) {
       var bb = renderer.graphToViewport({ x: units, y: 0 });
       var pit = Math.hypot(bb.x - a.x, bb.y - a.y) * cam;
@@ -8990,6 +9045,7 @@ function mountVaultGraph(root, data, deps) {
   // overlay -- which has to stroke exactly what the GPU would -- and by edgeReport, for the
   // reason edgeCurveGeom is shared with checkFocusWeb: a diagnostic that computes its own
   // answer eventually disagrees with the canvas, and then it is worse than nothing.
+  /** @param {number} size */
   function edgePx(size) {
     if (!renderer) return 0;
     return Math.max(renderer.getSetting("minEdgeThickness"), renderer.scaleSize(size || 1));
@@ -9061,7 +9117,7 @@ function mountVaultGraph(root, data, deps) {
       // relationship between a dot and the space it has is the one thing that does NOT change
       // as the camera moves. The sizes fed in are then pinned to the lattice once (see
       // measureSizeScale) rather than re-derived per frame.
-      zoomToSizeRatioFunction: function (x) { return x; },
+      zoomToSizeRatioFunction: /** @param {number} x */ function (x) { return x; },
       minCameraRatio: 0.02,
       maxCameraRatio: 12,
       // PANNING IS ON, and the centre lock that used to fight it is gone.
@@ -9142,6 +9198,7 @@ function mountVaultGraph(root, data, deps) {
       // Opacity is applied here, once, rather than at each of nodeStyle's five
       // exits. Everything below 0.004 is genuinely hidden, so a fully faded note
       // costs nothing to render and drops out of hit-testing.
+      /** @param {string} id @param {NodeAttrs} a */
       nodeReducer: function (id, a) {
         var al = alpha[id] || 0;
         if (al <= 0.004) { var h = Object.assign({}, a); h.hidden = true; return h; }
@@ -9188,6 +9245,7 @@ function mountVaultGraph(root, data, deps) {
         }
         return r;
       },
+      /** @param {string} id @param {EdgeAttrs & Partial<EdgeDisplayData>} a */
       edgeReducer: function (id, a) {
         var r = Object.assign({}, a);
         var x = graph.extremities(id);
@@ -12231,6 +12289,22 @@ function mountVaultGraph(root, data, deps) {
   var GRAB_PX = 6;           // how close to an edge counts as grabbing it
   var DRAG_MIN = 3;          // px before a press counts as a drag rather than a click
 
+  /**
+   * An in-flight drag on the date ribbon. `mode` says which part was grabbed; `pFrom`/`pTo`
+   * are the pending range, which brushEnds() reads back while the drag is live -- state.from
+   * and state.to are untouched until the pointer is released.
+   * @typedef {Object} BrushDrag
+   * @property {string} mode        "win" | "body" | "from" | "to" | "new"
+   * @property {number} x0
+   * @property {boolean} moved
+   * @property {number} grab        ms under the pointer when the drag began
+   * @property {number} [anchor]
+   * @property {number} [from0]
+   * @property {number} [to0]
+   * @property {number} [pFrom]
+   * @property {number} [pTo]
+   */
+  /** @type {BrushDrag | null} */
   var brushDrag = null;
   /**
    * The intro's right-hand scrubber, mid-flight, in ms -- or null when nothing is sweeping.
@@ -12248,6 +12322,7 @@ function mountVaultGraph(root, data, deps) {
    * and cascade stops playback. The disc's reveal stays the cascade's; this is the strip
    * saying where the reveal has got to.
    */
+  /** @type {number | null} */
   var brushSweep = null;
 
   // REMEASURE FIRST. Every path that redraws the strip is also a path where the slot may
@@ -12337,11 +12412,12 @@ function mountVaultGraph(root, data, deps) {
 
   // A canvas sized for the device, drawn in CSS pixels. Same treatment the heat band gets;
   // without it every one-pixel rule in here lands on a half pixel and greys out.
+  /** @param {HTMLCanvasElement} cv @param {number} w @param {number} h @returns {CanvasRenderingContext2D} */
   function fitCanvas(cv, w, h) {
     var dpr = Math.min(2, WIN.devicePixelRatio || 1);
     cv.width = Math.round(w * dpr); cv.height = Math.round(h * dpr);
     cv.style.width = w + "px"; cv.style.height = h + "px";
-    var cx = cv.getContext("2d");
+    var cx = /** @type {CanvasRenderingContext2D} */ (cv.getContext("2d"));
     cx.setTransform(dpr, 0, 0, dpr, 0, 0);
     cx.clearRect(0, 0, w, h);
     return cx;
@@ -12355,6 +12431,7 @@ function mountVaultGraph(root, data, deps) {
    * been the whole function. Written as what it does. The accent is a validated colour and
    * "the mean of the group palette" was a guess, so this is the better of the two anyway.
    */
+  /** @param {number} t 0..1 */
   function dateRamp(t) {
     return t <= 0 ? css("--dim")
                   : mixHex(css("--surface-2"), css("--accent"), 0.25 + 0.75 * Math.min(1, t));
@@ -12372,6 +12449,7 @@ function mountVaultGraph(root, data, deps) {
   function scrubColor() { return mixHex(css("--accent"), css("--text-1"), 0.3); }
 
   // withAlpha takes an rgba string and mixHex takes two hexes; neither does this one thing.
+  /** @param {string} hex @param {number} a */
   function rgbaHex(hex, a) {
     var c = toRgb(hex);
     return "rgba(" + c[0] + "," + c[1] + "," + c[2] + "," + a + ")";
@@ -12423,10 +12501,12 @@ function mountVaultGraph(root, data, deps) {
     if (!ribW) ribW = measureRibbon();
     return ribW || 600;
   }
+  /** @param {number} ms @param {number} w */
   function ribbonXLinear(ms, w) {
     var span = dateSpan.hi - dateSpan.lo;
     return span > 0 ? ((ms - dateSpan.lo) / span) * w : 0;
   }
+  /** @param {number} x @param {number} w */
   function ribbonMsLinear(x, w) {
     return dateSpan.lo + (Math.max(0, Math.min(w, x)) / w) * (dateSpan.hi - dateSpan.lo);
   }
@@ -12451,6 +12531,7 @@ function mountVaultGraph(root, data, deps) {
   // it, and the segment stops where the calendar has actually got to rather than where the
   // month will eventually end. So the last month is the one month whose ms range is SHORTER
   // than the calendar month it names -- which is exactly the width buildDateSpan pays it.
+  /** @param {number} i index into dateSpan.months */
   function monthEndMs(i) {
     return (i + 1 < dateSpan.months.length) ? dateSpan.months[i + 1].ms : dateSpan.hi;
   }
@@ -12487,9 +12568,11 @@ function mountVaultGraph(root, data, deps) {
     return span[0] + frac * (span[1] - span[0]);
   }
 
+  /** @param {number} ms @param {number} w */
   function ribbonX(ms, w) {
     return (compactAxis && dateSpan.axis) ? ribbonXCompact(ms, w) : ribbonXLinear(ms, w);
   }
+  /** @param {number} x @param {number} w */
   function ribbonMs(x, w) {
     return (compactAxis && dateSpan.axis) ? ribbonMsCompact(x, w) : ribbonMsLinear(x, w);
   }
@@ -12795,6 +12878,7 @@ function mountVaultGraph(root, data, deps) {
   function hideRTip() { var t = $("rtip"); if (t) t.hidden = true; }
 
   /** A range end as a plain ISO day. */
+  /** @param {number} ms */
   function isoDay(ms) { return new Date(ms).toISOString().slice(0, 10); }
 
   /** What the grid above is currently drawing, for the track's tooltip. */
@@ -12981,6 +13065,7 @@ function mountVaultGraph(root, data, deps) {
       if (renderer) renderer.refresh();
     };
     if (yrHost) {
+      /** @param {MouseEvent} ev */
       var yrOf = function (ev) {
         var b = ev.target && ev.target.closest && ev.target.closest("button[data-yr]");
         return b ? b.getAttribute("data-yr") : null;
@@ -13085,6 +13170,7 @@ function mountVaultGraph(root, data, deps) {
   //
   // That matters for a tool other people run: a storyboard that names this vault's
   // folders would silently skip half its beats on anyone else's.
+  /** @param {string} spec a name prefix, or "#N" for the Nth biggest */
   function demoGroup(spec) {
     var names = order[state.dim] || [];
     if (!names.length) return null;
@@ -13099,6 +13185,7 @@ function mountVaultGraph(root, data, deps) {
   // A beat's target -> the actual element. Looked up by the attribute the handler reads,
   // never by position, so re-ordering the legend cannot silently aim a beat at a
   // different folder.
+  /** @param {string} kind @param {string} arg */
   function demoFind(kind, arg) {
     if (kind === "id") return $(arg);
     // A point on the STAGE, for the camera beats. "centre", or a fraction pair like "0.3,0.4"
@@ -13413,6 +13500,7 @@ function mountVaultGraph(root, data, deps) {
 
   // Heatmap cells are PAINTED, not DOM, so there is no element to hand back -- a
   // synthetic rect in viewport coordinates is what the driver needs and all it needs.
+  /** @param {HeatDay | null | undefined} d */
   function demoCellRect(d) {
     if (!d || !heat) return null;
     var b = $("heatc").getBoundingClientRect();
