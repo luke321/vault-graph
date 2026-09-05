@@ -1,17 +1,3 @@
-// Does the graph survive being restored as a DEFERRED leaf?
-//
-// WHY A SEPARATE SCRIPT. Since Obsidian 1.7.2 a leaf restored from a saved workspace in the
-// BACKGROUND is deferred: the leaf is real, getLeavesOfType finds it, and `leaf.view` is a
-// DeferredView placeholder rather than the plugin's own view. Nothing in smoke.mjs or
-// spike-check.mjs can see that, because both open the graph in the foreground and look at it
-// immediately -- the one state where deferral never happens.
-//
-// Reproducing it needs a RESTART, which is why this is two phases against one profile:
-//
-//   phase 1  open the graph, then leave a different tab active, and save the layout
-//   phase 2  relaunch -- the graph leaf now restores deferred -- and drive the two commands
-//
-//   node scripts/deferred-check.mjs --vault ./demo-vault
 import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
@@ -93,8 +79,6 @@ try {
     "phase 1: the graph opened in the foreground",
     opened.leaves + " leaf, real view " + opened.realView + ", deferred " + opened.deferred + ", " + opened.canvases + " canvases");
 
-  // Make a DIFFERENT tab active so the graph tab is saved as a BACKGROUND tab. That is the
-  // only thing that makes it come back deferred.
   await phase.cdp.eval(
     "(async () => {" +
     "  const f = app.vault.getMarkdownFiles()[0];" +
@@ -133,9 +117,6 @@ try {
     "  return {" +
     "    leaves: ls.length," +
     "    isDeferred: l ? l.isDeferred : null," +
-    // THE OLD BUG, measured rather than asserted: this is exactly what the previous
-    // currentView() handed to "Rebuild", and whether `render` exists on it is the
-    // difference between a working command and a TypeError.
     "    hasRender: !!(l && l.view && typeof l.view.render === 'function')," +
     "    hasLoadIfDeferred: !!(l && typeof l.loadIfDeferred === 'function')" +
     "  };" +
@@ -149,7 +130,6 @@ try {
       : "leaf.view.render is undefined -- that is the TypeError");
   check(state.hasLoadIfDeferred === true, "loadIfDeferred is available", "1.7.2+ API present");
 
-  // Now the actual fix: the commands must work anyway.
   const rebuild = await phase.cdp.eval(
     "(async () => {" +
     "  const errs = [];" +
@@ -173,9 +153,6 @@ try {
     "\"Rebuild from the metadata cache\" survives a deferred leaf",
     rebuild.thrown ? "threw: " + rebuild.thrown
       : (rebuild.errs.length ? rebuild.errs.join(" | ") : "no throw, no window error"));
-  // NOT constructor.name: the bundler minifies every class to a single letter, so the name
-  // identifies nothing. `render` is the right discriminator anyway -- it is the method
-  // "Rebuild" calls and the one a DeferredView does not have.
   check(rebuild.realView === true && rebuild.deferredNow === false,
     "the guard loaded the real view instead of the placeholder",
     "view has render(): " + rebuild.realView + ", still deferred: " + rebuild.deferredNow);

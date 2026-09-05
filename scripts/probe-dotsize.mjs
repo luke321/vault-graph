@@ -1,28 +1,4 @@
 #!/usr/bin/env node
-// DOES A DOT GET BIGGER MID-CASCADE THAN IT IS AT EITHER END?
-//
-//   node scripts/probe-dotsize.mjs --vault <vault>
-//   node scripts/probe-dotsize.mjs --vault <vault> --scale 4 --group "04 - Daily Notes"
-//
-// Reported symptom: "notes touch during animation because some become very big early".
-// The suite's overlap check (`filtered to the bone, the disc stays drawable`) measures the
-// disc AT REST -- deliberately, after settle() plus a 600ms beat, because notes in flight
-// reported overlaps "on a disc that has none at rest". That beat makes a transient
-// invisible to the suite, and a transient is exactly what is being reported.
-//
-// So this measures the frames the suite skips. Per frame, for every note drawn:
-//
-//   dot radius, in GRAPH UNITS, through renderer.scaleSize -- the node attribute is the
-//   reducer's INPUT and is off by the camera ratio (.ai-context/animation.md, "Two traps").
-//
-// and against the two RESTING sizes of the same note (before the toggle, and after it):
-//
-//   overshoot   dot(frame) / max(dotRestA, dotRestB). A dot bigger than at both ends is
-//               growing for a reason that is not the layout it is travelling between.
-//   overlaps    two dots intersecting, per row, among notes actually visible this frame.
-//
-// Rest is sampled twice, so a note that legitimately grows because its wedge got roomier
-// is not counted: it can end anywhere between its two endpoint sizes for free.
 
 import { attach } from "./cdp.mjs";
 import { spawn, spawnSync } from "node:child_process";
@@ -36,7 +12,7 @@ const ROOT = dirname(HERE);
 const argv = process.argv.slice(2);
 const arg = (n, d) => { const i = argv.indexOf("--" + n); return i >= 0 && argv[i + 1] ? argv[i + 1] : d; };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-const SCALE = Number(arg("scale", "4"));          // slow motion: more frames to look at
+const SCALE = Number(arg("scale", "4"));
 const ONLY_GROUP = arg("group", "");
 const WATCH = arg("watch", "").split(",").map((s) => s.trim()).filter(Boolean);
 const HEADED = argv.includes("--headed");
@@ -82,9 +58,6 @@ const chrome = spawn(findChrome(), [
 
 // ---------------------------------------------------------------- in-page instrumentation
 
-// One resting snapshot: every drawn note's dot radius in graph units, plus where it sits.
-// The locked ring geometry, in graph units. __vg.rings() is four numbers and no node walk, so
-// it is cheap enough to read per cascade -- report() would walk every node to answer it.
 const RINGS = "(__vg.rings ? __vg.rings() : null)";
 const REST = `(function () {
   var a0 = __vg.renderer.graphToViewport({ x: 0, y: 0 });
@@ -101,8 +74,6 @@ const REST = `(function () {
   return out;
 })()`;
 
-// The sampler. Runs on its own rAF, which is the same clock the page draws on, and keeps
-// one aggregate row per frame -- 10k notes x 150 frames cannot come back over CDP.
 const INSTALL = `(function () {
   window.__dot = { rows: [], on: false, restMax: null };
   function perPx() {
@@ -409,7 +380,7 @@ let page = null;
 try {
   for (let i = 0; i < 60 && !page; i++) {
     await sleep(500);
-    try { page = await attach(PORT, ""); } catch { /* not up yet */ }
+    try { page = await attach(PORT, ""); } catch { }
   }
   if (!page) throw new Error("could not attach");
   page.j = async (e) => JSON.parse(await page.eval("JSON.stringify(" + e + ")"));
@@ -419,8 +390,6 @@ try {
   }
   await sleep(2000);
   await page.eval(`__vg.timeScale = ${SCALE}; void 0`);
-  // The experiment's toggle. One build, both modes, so nothing but the flag differs between
-  // the two sets of numbers -- no rebuild, no second Chrome, no fixture drift.
   const FITCAP = arg("fitcap", "");
   if (FITCAP) {
     const got = await page.j(`(function(){ __vg.fitCap = ${FITCAP === "on"}; return __vg.fitCap; })()`);
@@ -443,18 +412,11 @@ try {
   let groups = await page.j("__vg.groupOrder()");
   if (ONLY_GROUP) groups = groups.filter((g) => g === ONLY_GROUP);
 
-  // THE OTHER CASCADE THE SUITE DRIVES. `filtered to the bone` squeezes the date range as
-  // well as hiding folders, and a range change moves the same two quantities -- the walked
-  // spacing and each note's integer row -- so it is the same question asked of the control
-  // a person actually uses most.
   const RANGES = argv.includes("--range");
   const YEARS = argv.includes("--years");
   const GROWTH = argv.includes("--growth");
   const cascades = [];
   if (YEARS) {
-    // A YEAR CHIP MOVES BOTH ENDS AT ONCE, which no "last N%" squeeze does -- and the demo
-    // storyboard's timeline act is year chips and handle drags. Reported as the moves that
-    // look worst, so they get measured rather than assumed to behave like the squeezes.
     const years = await page.j(`(function () {
       var out = [];
       var els = document.querySelectorAll("[data-yr]");
@@ -471,16 +433,11 @@ try {
     }
     if (!pick.length) console.log("no year chips found on this page");
   } else if (GROWTH) {
-    // THE INTRO / REFRESH GROWTH ANIMATION -- the disc built from an empty screen through the
-    // same cascade() a toggle uses, over TIMELINE_MS instead of CASCADE_MS. Nothing had
-    // measured it, and it is the longest animation the page has.
     cascades.push({
       label: "growth (Refresh)",
-      // "vg-refresh", not "refresh": the page namespaces every id, and the click silently
-      // finding nothing is why the first run of this reported an empty sweep.
       go: () => page.j(`(function(){ var b = document.getElementById("vg-refresh");
         if (!b) return false; b.click(); return true; })()`),
-      back: async () => { /* growth ends at the whole vault, which is where it starts */ },
+      back: async () => { },
     });
   } else if (RANGES) {
     const span = await page.j(`(function(){
@@ -513,21 +470,17 @@ try {
     await settle();
     const restA = await page.j(REST);
     const rings = await page.j(RINGS).catch(() => null);
-    // Both endpoints first, without recording, so the sampler has real numbers to
-    // compare against rather than one end and a guess.
     if ((await cas.go()) === false) continue;
     await settle();
     const restB = await page.j(REST);
     await cas.back();
     await settle();
 
-    // restMax per note: bigger of the two endpoint sizes.
     const restMax = Object.create(null);
     for (const id of Object.keys(restA)) restMax[id] = restA[id][0];
     for (const id of Object.keys(restB)) {
       if (restMax[id] === undefined || restB[id][0] > restMax[id]) restMax[id] = restB[id][0];
     }
-    // The radial band a stayer is entitled to: between its two resting radii, and nowhere else.
     const restR = Object.create(null);
     for (const id of Object.keys(restA)) {
       if (restB[id] === undefined) continue;
@@ -535,7 +488,6 @@ try {
       restR[id] = [Math.min(a, bb), Math.max(a, bb)];
     }
 
-    // 2 = drawn at rest at BOTH ends (a stayer), 1 = one end only (arriving or leaving).
     const kind = Object.create(null);
     for (const id of Object.keys(restMax)) {
       kind[id] = (restA[id] !== undefined && restB[id] !== undefined) ? 2 : 1;
@@ -573,9 +525,6 @@ try {
         console.log(`     of ${worstOv.overlaps} pair(s), ${worstOv.both} are stayer-vs-stayer`);
       }
       const pk = await page.j("__dot.peaks(1.05)");
-      // HOW LONG, not just how bad. A single frame of overlap is invisible; a third of the
-      // animation with a thousand dots merged is the thing being reported as "does not look
-      // good". Measured over the frames the cascade was actually busy for.
       const busy = rows.filter((r) => r.busy);
       const dirty = busy.filter((r) => r.overlaps > 0);
       let run = 0, best = 0;
@@ -584,10 +533,6 @@ try {
         ? dirty.map((r) => r.overlaps).sort((x, y) => x - y)[Math.floor(dirty.length / 2)] : 0;
       const msPerFrame = busy.length > 1
         ? (busy[busy.length - 1].ms - busy[0].ms) / (busy.length - 1) : 0;
-      // THE WHOLE DISTRIBUTION, not one summary number. A median taken over "dirty" frames only
-      // answers a different question from a median over the animation, and the two disagreed
-      // badly enough here to look like a measurement error -- so both are printed, over every
-      // busy frame, with quartiles either side.
       const pct2 = (arr, q) => arr.length ? arr[Math.min(arr.length - 1, Math.floor(arr.length * q))] : 0;
       const allP = busy.map((r) => r.overlaps).sort((x, y) => x - y);
       console.log(`   pairs per busy frame: p25 ${pct2(allP, 0.25)}  p50 ${pct2(allP, 0.5)}  ` +
@@ -638,10 +583,6 @@ try {
               (w[0] && w[1] ? ` clear ${Math.round(sep - w[0].rad - w[1].rad)}` : "") : ""));
         }
       }
-      // The shape of it over time, which is what "very big EARLY" is a claim about.
-      // THE FIRST FEW FRAMES VERBATIM. A quantity that is computed one way at rest and
-      // another way inside a cascade steps on frame 1, and a table sampled every twelfth
-      // frame cannot tell that from a fast ramp.
       console.log("   first 8 frames:  " + rows.slice(0, 8).map((r) =>
         `${r.ms}ms ${r.over.toFixed(2)}x/${r.overlaps}p`).join("  "));
       const step = Math.max(1, Math.floor(rows.length / 12));
@@ -688,6 +629,6 @@ try {
   const mr = verdicts.reduce((m, v) => Math.max(m, v.rel), 0);
   console.log(`\n  worst overshoot ${mo.toFixed(2)}x, worst overlap ${mr}% of a row median\n`);
 } finally {
-  try { if (page) await page.send("Browser.close"); } catch { /* going anyway */ }
-  try { chrome.kill(); } catch { /* ditto */ }
+  try { if (page) await page.send("Browser.close"); } catch { }
+  try { chrome.kill(); } catch { }
 }

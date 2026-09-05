@@ -1,32 +1,9 @@
-/**
- * The mouse captor: DOM pointer events to the renderer's own (github#58, step 3.5).
- *
- * Ported from sigma 3.0.2's MouseCaptor (MIT), minus what the page never used: touch, and the
- * default double-click zoom (page.js prevents it on every double click and calls fit()
- * instead, so it never happened). What stays is exactly the gesture grammar the page and the
- * suite were written against:
- *
- * - a CLICK is a click only if fewer than `draggedEventsTolerance` (3) moves happened while
- *   the button was down; two clicks inside `doubleClickTimeout` (300 ms) are a double click and
- *   not two clicks;
- * - DRAG-TO-PAN moves the camera by the framed-graph distance the pointer travelled, then on
- *   release glides on by `inertiaRatio` (3) times the last step over `inertiaDuration` (200 ms,
- *   quadraticOut); the drag is tracked on the DOCUMENT, so a pointer that leaves the stage
- *   mid-drag keeps panning, which is what `mousemovebody` is for;
- * - the WHEEL zooms toward the pointer by `zoomingRatio` per notch over `zoomDuration`
- *   (quadraticOut), and notches in the same direction closer than a fifth of that are dropped
- *   so a fast scroll does not queue a dozen tweens;
- * - a listener that calls `preventDefault()` on the payload stops the pan or the zoom for that
- *   event. page.js does it in its node drag and on double click.
- *
- * Every timer is the window's the view lives in.
- */
+// github#58
 
 import type { Camera } from "./camera";
 import { Emitter } from "./emitter";
 import type { CameraState, MouseCaptor as MouseCaptorApi, MouseCoords, Point } from "./types";
 
-/** The payload with the flag the captor reads back after emitting. */
 export interface Coords extends MouseCoords {
   defaultPrevented: boolean;
 }
@@ -48,7 +25,6 @@ export interface CaptorEvents {
   wheel: WheelCoords;
 }
 
-/** What the captor needs from the renderer, and nothing more. */
 export interface CaptorHost {
   getCamera(): Camera;
   viewportToFramedGraph(p: Point): Point;
@@ -112,7 +88,6 @@ export class MouseCaptor extends Emitter<CaptorEvents> implements MouseCaptorApi
       this.clicks = 0;
       this.doubleClickTimeout = null;
     }, DOUBLE_CLICK_TIMEOUT);
-    // No click after a drag.
     if (this.draggedEvents < DRAGGED_EVENTS_TOLERANCE) this.emit("click", getMouseCoords(e, this.container));
   };
 
@@ -121,7 +96,6 @@ export class MouseCaptor extends Emitter<CaptorEvents> implements MouseCaptorApi
   };
 
   private readonly handleDown = (e: MouseEvent): void => {
-    // Only the left button starts a drag.
     if (e.button === 0) {
       const { x, y } = getPosition(e, this.container);
       this.lastMouseX = x;
@@ -152,8 +126,6 @@ export class MouseCaptor extends Emitter<CaptorEvents> implements MouseCaptorApi
       camera.setState({ x: cameraState.x, y: cameraState.y });
     }
     this.isMoving = false;
-    // The drag count is cleared a tick later, so the click this same release fires can still
-    // see that it followed a drag.
     this.win.setTimeout(() => {
       this.draggedEvents = 0;
     }, 0);
@@ -162,9 +134,7 @@ export class MouseCaptor extends Emitter<CaptorEvents> implements MouseCaptorApi
 
   private readonly handleMove = (e: MouseEvent): void => {
     const coords = getMouseCoords(e, this.container);
-    // Always, so a drag that left the stage can still be followed.
     this.emit("mousemovebody", coords);
-    // Only over the stage itself, so nothing gets hovered from outside it.
     if (e.target === this.container || e.composedPath()[0] === this.container) this.emit("mousemove", coords);
     if (coords.defaultPrevented) return;
 
@@ -214,11 +184,9 @@ export class MouseCaptor extends Emitter<CaptorEvents> implements MouseCaptorApi
     const newRatio = camera.getBoundedRatio(currentRatio * ratioDiff);
     const wheelDirection = delta > 0 ? 1 : -1;
     const now = Date.now();
-    // Against a clamp there is nothing to do, and the page may scroll.
     if (currentRatio === newRatio) return;
     e.preventDefault();
     e.stopPropagation();
-    // Notches too close together in the same direction are dropped.
     if (this.currentWheelDirection === wheelDirection && this.lastWheelTriggerTime !== null &&
         now - this.lastWheelTriggerTime < this.host.zoomDuration / 5) {
       return;
@@ -269,8 +237,6 @@ export class MouseCaptor extends Emitter<CaptorEvents> implements MouseCaptorApi
   private handleDoubleClick(e: MouseEvent): void {
     e.preventDefault();
     e.stopPropagation();
-    // Emitted, and that is all: the default zoom-on-double-click is not here, because the
-    // page prevented it on every double click and fit() instead.
     this.emit("doubleClick", getMouseCoords(e, this.container));
   }
 }

@@ -1,22 +1,4 @@
-/**
- * The camera: where the view is, in Sigma's normalised space (github#58, step 3.1).
- *
- * Ported from sigma 3.0.2 (MIT). (0.5, 0.5) is the centre of the custom bbox, `ratio` is how
- * many framed units a viewport unit shows -- smaller is closer -- and `angle` is always 0:
- * rotation was off in the page and the field only survives because every state the suite
- * writes carries it. Three behaviours the page leans on are kept exactly:
- *
- * - `validateState` DROPS x AND y WHILE PANNING IS OFF. That is why page.js's fit() switches
- *   panning on for the flight home and off again in the callback -- with panning off, a state
- *   that carries x and y applies only its ratio (github#4).
- * - `updated` fires on every change, including each frame of an animate, and only when the
- *   state actually changed. page.js's camAtRest logic reads it that way.
- * - `animate` interrupted by another animate calls the interrupted one's callback at once,
- *   which is what lets fit()'s callback re-lock panning even when a wheel notch cuts in.
- *
- * Timers go through the window the view lives in, never the global: a popout window in
- * Obsidian has its own requestAnimationFrame, and the obsidianmd lint rule says so.
- */
+// github#58, github#4
 
 import { Emitter } from "./emitter";
 import type { Camera as CameraApi, CameraState } from "./types";
@@ -57,7 +39,6 @@ export class Camera extends Emitter<{ updated: CameraState }> implements CameraA
     return this.x === state.x && this.y === state.y && this.ratio === state.ratio && this.angle === state.angle;
   }
 
-  /** The state before the last setState -- what the captor's release inertia extrapolates from. */
   getPreviousState(): CameraState {
     const s = this.previousState;
     return { x: s.x, y: s.y, angle: s.angle, ratio: s.ratio };
@@ -70,7 +51,6 @@ export class Camera extends Emitter<{ updated: CameraState }> implements CameraA
     return r;
   }
 
-  /** What of a requested state is allowed to apply: x/y only while panning, ratio clamped. */
   validateState(state: Partial<CameraState>): Partial<CameraState> {
     const valid: Partial<CameraState> = {};
     if (this.enabledPanning && typeof state.x === "number") valid.x = state.x;
@@ -89,7 +69,6 @@ export class Camera extends Emitter<{ updated: CameraState }> implements CameraA
     return this;
   }
 
-  /** Cancels a running tween and drops every listener. The renderer's kill() calls it. */
   kill(): void {
     if (this.nextFrame !== null) this.win.cancelAnimationFrame(this.nextFrame);
     this.nextFrame = null;
@@ -127,8 +106,6 @@ export class Camera extends Emitter<{ updated: CameraState }> implements CameraA
 
     if (this.nextFrame !== null) {
       this.win.cancelAnimationFrame(this.nextFrame);
-      // The interrupted animation's callback runs now, as Sigma's did: a landing that never
-      // comes would leave page.js's fit() waiting to re-lock panning.
       if (this.animationCallback) this.animationCallback();
       this.nextFrame = this.win.requestAnimationFrame(step);
     } else {

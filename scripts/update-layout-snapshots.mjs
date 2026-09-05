@@ -1,36 +1,6 @@
 #!/usr/bin/env node
-// Write the golden layout snapshots scripts/layout-snapshots/*.json checked against by
-// smoke.mjs's "layout matches its golden snapshot" check (github#37).
-//
-//   node scripts/update-layout-snapshots.mjs
-//
-// DELIBERATE AND EXPLICIT ONLY. This never runs on its own -- not from the pre-push hook,
-// not from smoke.mjs itself -- because a snapshot that regenerates itself on every failure
-// is not a regression test, it is a check that can never fail. Run this by hand when a
-// layout change is INTENDED, review the diff it produces, and commit the new snapshot in
-// the same change as the code that moved the layout -- the same "measured before, measured
-// after, and the after is committed on purpose" discipline changelog-detail.md already asks
-// for everywhere else.
-//
-// WHY THIS IS SOUND AT ALL: the fixture generators default --end to today, so two runs of
-// the same generator on two different days produce different note dates -- but measured
-// (see the github#37 plan/issue), band assignment and every note's exact (x, y) come out
-// byte-for-byte identical across a 3.5-year --end shift, on both the demo and shape vaults.
-// Layout depends on the SEEDED structure and each note's link weight, neither of which
-// --end touches there, so those two snapshots stay valid across the fixture store's weekly
-// refresh and need regenerating only when the layout logic itself changes on purpose.
-//
-// THE 10k VAULT IS THE EXCEPTION, and was never in that measurement: its daily notes are
-// filed into year-month subfolders derived from their dates, so --end moves notes between
-// subfolders and the layout with them (2026-09-04: 893 notes moved on the first weekly
-// refresh after the goldens were recorded, on develop itself). Its --end is therefore
-// pinned below, and in smoke.mjs, to the day its golden was taken; a pinned fixture does not
-// age in the store.
-//
-// Positions are rounded to 2 decimal places (graph units): plenty of headroom over the
-// float noise floor (measured exact-equal to float64 in the determinism check above), and
-// it keeps the checked-in file diffable and reasonably sized (~250-350KB for the 10k vault
-// at this precision, a few tens of KB for the other two).
+// github#37
+// github#37
 
 import { spawnSync, spawn } from "node:child_process";
 import { existsSync, mkdtempSync, mkdirSync, writeFileSync, rmSync, readFileSync } from "node:fs";
@@ -45,26 +15,12 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(HERE, "..");
 const OUT_DIR = join(ROOT, "scripts", "layout-snapshots");
 
-// Same three shapes and args smoke.mjs's resolveVaults() builds -- see that function's own
-// header comment for why these three and not some other set.
 const FIXTURES = [
   { script: "make-demo-vault.mjs", args: [], name: "demo-vault" },
-  // --end pinned, and it has to match smoke.mjs's resolveVaults() exactly -- the args are
-  // part of the store digest, so a mismatch means two different vaults. See the header.
   { script: "make-test-vault.mjs", args: ["--notes", "10000", "--years", "10", "--end", "2026-08-28"], name: "test-vault" },
   { script: "make-shape-vault.mjs", args: [], name: "shape-vault" },
 ];
 
-// THE SAME SHARED STORE resolveVaults() uses in smoke.mjs, duplicated rather than imported
-// (smoke.mjs is a script, not a module with exports -- check-generator-determinism.mjs
-// duplicates its own minimal generator-calling logic the same way). This has to resolve to
-// the EXACT SAME directory smoke.mjs's own check will read its vault from: a first attempt
-// at this script built its own private temp vault per fixture instead, and even though
-// --end doesn't affect layout (measured, see this script's header), a completely SEPARATE
-// generation of the 10k vault came out close but not byte-identical to smoke.mjs's cached
-// one -- 9282 of 10002 notes off by a fraction of a degree, which is not float noise, it's
-// two different builds. Reusing the identical cached directory removes the question
-// entirely: the snapshot and the check are then always reading the SAME vault.
 const GENERATORS = ["make-demo-vault.mjs", "make-test-vault.mjs", "make-shape-vault.mjs"];
 const FIXTURE_FORMAT = 1;
 
@@ -100,10 +56,6 @@ function findChrome() {
 
 function sleep(ms) { return new Promise((r) => setTimeout(r, ms)); }
 
-// Resolve (generating if missing) the SAME shared-store vault directory smoke.mjs's
-// resolveVaults() would use for this fixture, then build vault-graph.html from it into a
-// scratch location. Returns the built HTML's absolute path; caller owns cleanup of
-// `htmlDir` (the vault directory itself is the shared store's and is never removed here).
 function buildFixture(fx) {
   const digest = digestOf(fx.args);
   const dir = join(storeRoot(), `${fx.name}-${digest}`);
@@ -125,8 +77,6 @@ function buildFixture(fx) {
   return { dir: htmlDir, htmlPath };
 }
 
-// Launch Chrome on `htmlPath?rest` (skip the intro, same as every non-intro smoke.mjs
-// check), wait for the page to be ready, measure band + positions, close, return the data.
 async function measure(htmlPath) {
   const port = await new Promise((res, rej) => {
     const srv = createServer();
@@ -163,9 +113,6 @@ async function measure(htmlPath) {
       if (Date.now() > ready) throw new Error("page never finished its intro");
       await sleep(300);
     }
-    // AND STILL, THE SAME WAY smoke.mjs's settle() DOES: state.until===null only means the
-    // intro/date-sweep finished, not that every one of demo.busy()'s conditions (cascades,
-    // ramps) has too.
     const settleDeadline = Date.now() + 6000;
     for (;;) {
       const busy = await page.eval("!!__vg.demo.busy()").catch(() => false);
@@ -173,16 +120,7 @@ async function measure(htmlPath) {
       if (Date.now() > settleDeadline) throw new Error("page never settled (demo.busy() stayed true)");
       await sleep(120);
     }
-    // __vg.relayout() (the debug API's, not applyLayout directly): cancels any in-flight
-    // cascade frame, clears roomNow/cellNow/edgeNow/bandLock/geomLock, and rebuilds from
-    // scratch. Plain applyLayout(false) -- once, even twice -- was NOT enough on its own:
-    // measured, two consecutive runs of the identical build disagreed by up to several
-    // graph units on 90%+ of notes on the demo and 10k vaults (shape-vault, smaller and
-    // simpler, happened not to show it). relayout()'s own comment explains why a bare
-    // applyLayout can still disagree with itself -- "a still-running cascade's next
-    // animation frame lands after this snap and silently overwrites it" -- and it is
-    // exactly the class of bug github#21 fixed for dot SIZE, here for POSITION. With
-    // relayout(), repeated measurements of the identical build are byte-for-byte identical.
+    // github#21
     await page.eval(`__vg.relayout(); void 0`).catch(() => {});
     const data = await page.eval(`JSON.stringify((function(){
       var plan = __vg.buildWedgePlan(false), band = {};

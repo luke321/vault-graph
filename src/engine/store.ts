@@ -1,42 +1,7 @@
-/**
- * The graph store: a keyed attribute bag with degree, which is all the page ever asked of
- * graphology (github#58, step 2).
- *
- * Three maps. `nodes` holds each node's attribute object BY REFERENCE, exactly as graphology
- * did -- getNodeAttributes hands back the object addNode was given, and mergeNodeAttributes
- * writes into it -- so nothing that held one of those objects can tell the difference.
- * `edgeRecords` holds every edge in insertion order, keyed by a string of our own. `adjacency` maps
- * a node to its neighbours, each to the edge between them, and is what degree, neighbors,
- * hasEdge and the per-node forEachEdge read.
- *
- * ITERATION ORDER IS GRAPHOLOGY'S, and that is the one place a store could silently change
- * the picture. graphology kept a node's undirected edges in a plain object keyed by neighbour
- * id, so `neighbors()` and `forEachEdge(node, fn)` came back in JavaScript property order:
- * array-index keys ascending, then the rest in insertion order. The page's node ids are
- * indexes into the vault's node list, so in practice that is numeric order. The graph-wide
- * walks (nodes, forEachNode, forEachEdge) were Map-backed and came back in insertion order,
- * which a Map still gives. `inPropertyOrder` below reproduces the object case; the golden
- * layout snapshots and the focus-web check are the proof that nothing reads any other order.
- *
- * NO EVENT EMITTER. graphology's `on`/`removeListener`/`rawListeners` were used for one thing:
- * `quietWrites` in page.js detached Sigma's subscription during the bulk position loops so
- * that 10,000 mergeNodeAttributes calls did not each schedule a render nothing would see. Every
- * one of those loops, and every other write in the page, is followed by an explicit refresh,
- * so the renderer has nothing to subscribe to and the store has nothing to emit.
- *
- * NO PARALLEL EDGES; SELF-LOOPS AS GRAPHOLOGY HAD THEM. page.js guards every addUndirectedEdge
- * with hasEdge, and graphology threw on a duplicate, so a duplicate is an error here too. A
- * note linking to itself is a different matter: nothing in either producer promises to drop
- * one, and graphology accepted it -- a self-loop counted two toward the node's degree and the
- * node appeared once among its own neighbours -- so the store does the same rather than turn
- * an odd vault into a page that does not boot. Edge keys are source + U+0001 + target in the
- * order the edge was added -- unique for a simple graph, and nothing outside the store
- * persists one.
- */
+// github#58
 
 import type { EdgeAttrs, EdgeVisitor, GraphStore as GraphStoreApi, NodeAttrs } from "./types";
 
-/** Source and target as they were given to addUndirectedEdge, plus the attribute object. */
 interface EdgeRecord {
   readonly key: string;
   readonly source: string;
@@ -46,16 +11,11 @@ interface EdgeRecord {
 
 const KEY_SEP = "\u0001";
 
-/** A canonical array index: what JavaScript orders numerically when enumerating an object. */
 function isArrayIndex(key: string): boolean {
   const n = Number(key);
   return Number.isInteger(n) && n >= 0 && n < 4294967295 && String(n) === key;
 }
 
-/**
- * The order a plain object would enumerate these keys in: array indexes ascending, then the
- * rest as they were inserted.
- */
 function inPropertyOrder(keys: Iterable<string>): string[] {
   const indexes: number[] = [];
   const rest: string[] = [];
@@ -129,7 +89,6 @@ export class GraphStore implements GraphStoreApi {
 
   degree(id: string): number {
     const around = this.neighboursOf(id);
-    // A self-loop is one neighbour entry and two ends, and graphology counted the ends.
     return around.size + (around.has(id) ? 1 : 0);
   }
 
@@ -176,12 +135,10 @@ export class GraphStore implements GraphStoreApi {
     Object.assign(this.attrsOf(id), attrs);
   }
 
-  /** Every edge key, in insertion order. The renderer's indexation walks this. */
   edges(): string[] {
     return Array.from(this.edgeRecords.keys());
   }
 
-  /** The attribute object addUndirectedEdge was given, by reference; the renderer styles from it. */
   getEdgeAttributes(edge: string): EdgeAttrs {
     const rec = this.edgeRecords.get(edge);
     if (!rec) throw new Error(`GraphStore: edge "${edge}" not found`);

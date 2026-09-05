@@ -1,40 +1,5 @@
 #!/usr/bin/env node
-// Does this build draw the same picture as a reference build? (github#58)
-//
-//   node scripts/render-diff.mjs --against-dir <dir>                # every fixture in the store
-//   node scripts/render-diff.mjs --vault <dir> --against <ref.html> # one vault, one reference
-//   node scripts/render-diff.mjs ... --ratios 1.08,0.35,4.2 --threshold 8 --mode all|camera|pixels|screenshot
-//   node scripts/render-diff.mjs ... --query note                   # compare in a search: labels + pills lit
-//   node scripts/render-diff.mjs ... --headed                       # a visible window instead of off-screen
-//
-// WHY THIS EXISTS. The invariant suite asserts numbers about the layout and the camera, and
-// none of them can see that a disc is the wrong colour, a curve bows the wrong way, or a layer
-// is missing. Replacing the renderer was exactly the change those checks are blind to, so this
-// builds each vault from the current tree, loads it and a REFERENCE build of the same vault in
-// turn in one Chrome tab, puts the camera in the same state, and compares:
-//
-//   camera   graphToViewport for every node and scaleSize of its size, both builds, at each
-//            ratio. Pure math; the bar is 1e-6 px (decision 0012, step 3.1).
-//   pixels   the composited layers (edges, nodes, labels, hovers, hoverNodes on the surface
-//            colour), pixel by pixel. The bar is 0.05 % of the stage differing by more than
-//            `--threshold` (8) in any channel, plus edgeInk within 1 % (decision 0012, D-5).
-//
-// THE REFERENCE is a vault-graph.html built from whatever commit the picture is being held to:
-// a worktree at that commit with node_modules junctioned in, then its own
-// `src/build-graph.mjs --vault <fixture> --out <dir>/<fixture>.html`. `--against-dir` finds
-// `<basename of vault>*.html` there. Until the switch the reference was the same tree's
-// `--renderer sigma` build, and the three Sigma-rendered pages the switch was measured against
-// are not in the repo: a built page carries every note title of its vault.
-//
-// ONE TAB, TWO LOADS. Two tabs in one window would leave one a background tab, where
-// requestAnimationFrame never fires -- and the page defers its own edge-cap refresh to a
-// frame, so a background build would settle differently from a foreground one. Each page is
-// rendered synchronously inside the same evaluate call that reads its canvases: with
-// preserveDrawingBuffer off, a WebGL canvas read in a later task can come back blank, which
-// is the trap edgeInk in page.js already documents.
-//
-// Node built-ins plus scripts/cdp.mjs, like every harness here. Not a gate: it launches Chrome
-// and takes a minute, and it is what a renderer change cites rather than what the hook runs.
+// github#58
 
 import { spawn, spawnSync } from "node:child_process";
 import { existsSync, mkdtempSync, readdirSync, rmSync, statSync } from "node:fs";
@@ -57,14 +22,11 @@ const RATIOS = String(arg("ratios", "1.08,0.35,4.2")).split(",").map(Number);
 const THRESHOLD = Number(arg("threshold", "8"));
 const MODE = arg("mode", "all");
 const HEADED = flag("headed");
-// --query puts both pages into a search: every hit is highlighted and force-labelled, which
-// is the one deterministic state that paints the labels, hovers and hoverNodes layers. Hover
-// itself rides a timed ramp and is left to the suite's own checks.
 const QUERY = arg("query", "");
 const AGAINST_DIR = arg("against-dir", "");
-const PIXEL_BAR = 0.0005;     // share of the stage allowed past the threshold
-const INK_BAR = 0.01;         // relative edgeInk difference allowed
-const CAMERA_BAR = 1e-6;      // px
+const PIXEL_BAR = 0.0005;
+const INK_BAR = 0.01;
+const CAMERA_BAR = 1e-6;
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -82,7 +44,6 @@ function findChrome() {
   throw new Error("Chrome not found; pass --chrome <path>");
 }
 
-/** The fixture store the suite uses: <main repo>/.fixtures, one directory per fixture. */
 function fixtureVaults() {
   const common = spawnSync("git", ["rev-parse", "--git-common-dir"], { cwd: ROOT, encoding: "utf8" }).stdout.trim();
   const store = join(dirname(resolve(ROOT, common)), ".fixtures");
@@ -91,7 +52,6 @@ function fixtureVaults() {
     .filter((d) => statSync(d).isDirectory() && existsSync(join(d, ".obsidian")));
 }
 
-/** The reference page for a vault: the one given for it, or `<against-dir>/<basename>*.html`. */
 function referenceFor(vault, i) {
   const given = argAll("against")[i];
   if (given) return given;
@@ -125,12 +85,9 @@ async function waitReady(p, label) {
   }
 }
 
-/** Puts the camera at `ratio`, refreshes, and lets the page's own follow-up frames settle. */
 async function placeCamera(p, ratio) {
   await p.eval("__vg.renderer.getCamera().setState({ x: 0.5, y: 0.5, ratio: " + ratio + ", angle: 0 }); " +
                "__vg.renderer.refresh(); void 0");
-  // Two frames, bounded: a tab that is not being painted never fires requestAnimationFrame,
-  // and a wait that hangs there says less than one that returns and lets the numbers speak.
   await p.eval(
     "new Promise(function (r) {" +
     "  var done = false, fin = function () { if (!done) { done = true; r(true); } };" +
@@ -139,7 +96,6 @@ async function placeCamera(p, ratio) {
     "})");
 }
 
-/** Every node's viewport position and drawn radius, straight off the renderer the page holds. */
 async function cameraSample(p) {
   return p.eval(
     "(function () {" +
@@ -155,7 +111,6 @@ async function cameraSample(p) {
     "})()");
 }
 
-/** Renders and composites the layers over the surface colour; the pixels come back in base64. */
 async function pixelSample(p) {
   const meta = await p.eval(
     "(function () {" +
@@ -205,7 +160,7 @@ function comparePixels(a, b) {
   const n = a.w * a.h;
   let over = 0, any = 0, maxD = 0;
   let x0 = a.w, y0 = a.h, x1 = -1, y1 = -1;
-  const hist = [0, 0, 0, 0];   // 0 · 1-8 · 9-32 · 33+
+  const hist = [0, 0, 0, 0];
   for (let i = 0; i < n; i++) {
     const o = i * 4;
     const d = Math.max(Math.abs(a.data[o] - b.data[o]), Math.abs(a.data[o + 1] - b.data[o + 1]),
@@ -245,7 +200,6 @@ function comparePixels(a, b) {
  * identical bytes -- and decoded only when the bytes differ, to say how many pixels and where.
  */
 
-/** Minimal PNG decoder for Chrome's screenshots: 8-bit RGB or RGBA, no interlace. */
 function decodePng(buf) {
   if (buf.readUInt32BE(0) !== 0x89504e47) throw new Error("not a PNG");
   let pos = 8, w = 0, h = 0, colorType = 0, bitDepth = 0, interlace = 0;
@@ -294,7 +248,6 @@ async function screenshotSample(p) {
   for (const [name, sel] of [["stage", "#vg-stage"], ["page", "#vg-app"]]) {
     const r = await p.eval("(function () { var r = document.querySelector(" + JSON.stringify(sel) + ").getBoundingClientRect(); " +
                            "return { x: Math.round(r.left), y: Math.round(r.top), w: Math.round(r.width), h: Math.round(r.height) }; })()");
-    // Rendered synchronously first, so the capture is of this camera state and not the last frame's.
     await p.eval("__vg.renderer.render(); void 0");
     const shot = await p.send("Page.captureScreenshot", { format: "png", clip: { x: r.x, y: r.y, width: r.w, height: r.h, scale: 1 } });
     shots[name] = shot.data;
@@ -316,7 +269,6 @@ function compareShots(a, b) {
   return { ok, detail: parts.join(" | ") };
 }
 
-/** Samples one build at every ratio: Map ratio -> { camera?, pixels?, shots? }. */
 async function sampleBuild(p, label) {
   await waitReady(p, label);
   if (QUERY) await p.eval("__vg.state.query = " + JSON.stringify(QUERY.toLowerCase()) + "; __vg.renderer.refresh(); void 0");
@@ -378,10 +330,10 @@ async function runVault(vault, reference, chrome) {
     if (refErrors || err) results.push({ ratio: "-", kind: "errors", ok: false, detail: [refErrors, err].filter(Boolean).join(" | ") });
     page.close();
   } finally {
-    try { proc.kill(); } catch { /* already gone */ }
+    try { proc.kill(); } catch { }
     await sleep(300);
-    try { rmSync(dir, { recursive: true, force: true }); } catch { /* temp */ }
-    try { rmSync(profile, { recursive: true, force: true }); } catch { /* chrome may still hold it */ }
+    try { rmSync(dir, { recursive: true, force: true }); } catch { }
+    try { rmSync(profile, { recursive: true, force: true }); } catch { }
   }
   return results;
 }

@@ -1,15 +1,3 @@
-// A minimal Chrome DevTools Protocol client. No dependencies, on purpose.
-//
-// CDP commands need a WebSocket -- Chrome's /json HTTP endpoints only list and open
-// targets, everything else is over the socket. Node 18 has no WebSocket global (it
-// landed in 22), and this repo installs nothing, so the ~80 lines below are a WebSocket
-// client: HTTP Upgrade, then RFC 6455 frames.
-//
-// It implements exactly what driving a page needs and no more: text frames, client
-// masking (mandatory), server frames unmasked, close and ping. No compression
-// (`permessage-deflate` is never offered), no fragmentation on send, and continuation
-// frames on receive are reassembled because a big Runtime.evaluate result does arrive
-// split.
 
 import { createConnection } from "node:net";
 import { randomBytes, createHash } from "node:crypto";
@@ -17,7 +5,6 @@ import { get } from "node:http";
 
 const GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
 
-/** GET a JSON endpoint on the debugging port. */
 function json(port, path) {
   return new Promise((resolve, reject) => {
     const req = get({ host: "127.0.0.1", port, path }, (res) => {
@@ -36,7 +23,7 @@ class Socket {
   constructor(sock) {
     this.sock = sock;
     this.buf = Buffer.alloc(0);
-    this.frag = [];      // continuation reassembly
+    this.frag = [];
     this.onText = () => {};
     sock.on("data", (d) => this.feed(d));
   }
@@ -47,7 +34,6 @@ class Socket {
       if (this.buf.length < 2) return;
       const b0 = this.buf[0], b1 = this.buf[1];
       const fin = (b0 & 0x80) !== 0, op = b0 & 0x0f;
-      // Server-to-client frames are never masked, per spec; Chrome obeys.
       let len = b1 & 0x7f, off = 2;
       if (len === 126) {
         if (this.buf.length < 4) return;
@@ -62,9 +48,9 @@ class Socket {
       const payload = this.buf.subarray(off, off + len);
       this.buf = this.buf.subarray(off + len);
 
-      if (op === 0x8) { this.sock.end(); return; }          // close
-      if (op === 0x9) { this.send(payload, 0xa); continue; } // ping -> pong
-      if (op === 0xa) continue;                             // pong
+      if (op === 0x8) { this.sock.end(); return; }
+      if (op === 0x9) { this.send(payload, 0xa); continue; }
+      if (op === 0xa) continue;
       if (op === 0x0 || op === 0x1) {
         this.frag.push(payload);
         if (fin) {
@@ -74,7 +60,6 @@ class Socket {
         }
         continue;
       }
-      // any other opcode: ignore rather than die -- nothing we send provokes one
     }
   }
 
@@ -82,7 +67,6 @@ class Socket {
     const data = Buffer.isBuffer(payload) ? payload : Buffer.from(payload, "utf8");
     const n = data.length;
     const head = n < 126 ? 2 : n < 65536 ? 4 : 10;
-    // +4 for the mask: every client frame MUST be masked or Chrome closes the socket.
     const out = Buffer.alloc(head + 4 + n);
     out[0] = 0x80 | op;
     if (head === 2) out[1] = 0x80 | n;
@@ -122,7 +106,6 @@ function upgrade(url) {
         return reject(new Error("bad Sec-WebSocket-Accept"));
       }
       const ws = new Socket(sock);
-      // Bytes after the header belong to the first frame.
       const rest = Buffer.from(head.slice(i + 4), "latin1");
       resolve(ws);
       if (rest.length) ws.feed(rest);
@@ -131,19 +114,6 @@ function upgrade(url) {
   });
 }
 
-/**
- * Attach to a page target on `port` whose URL contains `match`.
- *
- * A NON-EMPTY `match` IS A REQUIREMENT, NOT A PREFERENCE. This used to fall back to any
- * page when the match found nothing, which is the worst of both: the caller asks for a
- * specific page, does not get it, and is handed a different one silently.
- *
- * What that cost: a killed run leaves its Chrome behind, still listening. The next run
- * launches its own, attaches to the LEFTOVER, and drives a page from a previous build --
- * so the checks report real-looking failures about code that is fine. Diagnosed as three
- * different bugs before the note count gave it away (`1402 notes` under a build that had
- * just said 455). Failing here turns that into one clear error instead.
- */
 export async function attach(port, match = "") {
   const targets = await json(port, "/json/list");
   const pages = targets.filter((t) => t.type === "page");
@@ -164,15 +134,6 @@ export async function attach(port, match = "") {
   const pending = new Map();
   const listeners = [];
 
-  // A DEAD SOCKET HAS TO SAY SO. There was no close or error handler here, so when the
-  // connection went the driver did not notice: onText simply never fired again and every
-  // subsequent command sat until its own 30-second timeout. One dropped socket therefore
-  // presented as a long tail of unrelated failures, each costing 30s -- measured once as 13
-  // checks failing over 390 seconds, reported as "the tests are slow" and looking for all the
-  // world like thirteen separate bugs in thirteen separate features.
-  //
-  // Now the first command after the drop fails immediately and says what happened, and any
-  // command already in flight is rejected rather than left to time out.
   let dead = null;
   const die = (why) => {
     if (dead) return;
@@ -203,21 +164,6 @@ export async function attach(port, match = "") {
         return;
       }
       const id = ++seq;
-      // The timeout is CLEARED on completion, and that matters far more than it looks.
-      // An outstanding setTimeout keeps Node's event loop alive, so leaving one armed per
-      // command made the driver process linger a full 30s past its last command -- and
-      // because record-demo.ps1 stops ffmpeg when the driver RETURNS, every recording came
-      // out 30s longer than the demo. Measured: a 6.9s walkthrough produced a 39.2s video,
-      // 32s of it a still frame. The driver's own log said 6.94s throughout, which is what
-      // made it invisible: the process was done, it just would not exit.
-      // TEN SECONDS, NOT THIRTY, and the error says what was being asked.
-      //
-      // Thirty was a value chosen when nothing here could plausibly take that long, and it
-      // became the cost of every command issued after a page stopped answering: a wedged
-      // renderer produced a tail of thirty-second waits, once totalling 390 seconds across
-      // thirteen checks and reading as thirteen unrelated bugs. The slowest legitimate command
-      // in this repo is a screenshot of a 10k-note page, comfortably under a second, so ten is
-      // still thirty times the headroom -- and it turns a six-minute mystery into a minute.
       const label = method === "Runtime.evaluate"
         ? "Runtime.evaluate " + JSON.stringify(String(params.expression || "").slice(0, 70))
         : method;
@@ -231,16 +177,6 @@ export async function attach(port, match = "") {
       ws.send(JSON.stringify({ id, method, params }));
     });
 
-  // EVERY UNCAUGHT PAGE ERROR, kept from the moment we attach.
-  //
-  // Without this a page that fails to BOOT is nearly undiagnosable from out here: eval() only
-  // reports exceptions from the expression IT ran, so a script that threw during setup shows up
-  // only as `window.__vg is undefined` with no reason attached. Diagnosing one such failure took
-  // six rounds of narrowing by hand, and the answer was still not in reach -- the module body
-  // re-ran clean when evaluated a second time, so the throw was in the boot path and invisible.
-  //
-  // Runtime.enable is what makes exceptionThrown arrive; console errors come with it, since a
-  // page that logs an error before dying is saying the same thing.
   const errors = [];
   listeners.push((msg) => {
     if (msg.method === "Runtime.exceptionThrown") {
@@ -264,21 +200,16 @@ export async function attach(port, match = "") {
     target: page,
     send,
     on: (fn) => listeners.push(fn),
-    /** Uncaught page errors and console.error calls, oldest first. */
     get errors() { return errors.slice(); },
-    /** The first page error as a one-line string, or null. For "why is the page dead". */
     firstError() {
       if (!errors.length) return null;
       const e = errors[0];
       return e.kind + ": " + String(e.text).split(String.fromCharCode(10))[0] +
              (e.line != null ? " (line " + (e.line + 1) + ")" : "");
     },
-    // Why the connection went, or null while it is up. A long run can then stop at the first
-    // sign of it rather than working through every remaining step against a closed socket.
     get lost() { return dead; },
     close: () => ws.close(),
 
-    /** Evaluate an expression in the page and return its value. */
     async eval(expr) {
       const r = await send("Runtime.evaluate", {
         expression: expr, returnByValue: true, awaitPromise: true

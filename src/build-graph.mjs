@@ -1,58 +1,29 @@
 #!/usr/bin/env node
-/**
- * build-graph.mjs -- turn this Obsidian vault into ONE self-contained HTML page.
- *
- * Walks every .md file, resolves [[wikilinks]] (body + frontmatter), derives four
- * grouping dimensions, and inlines the data and our own engine (bundled here with esbuild,
- * github#58) into vault-graph.html. No server, no network, no build step at view time.
- *
- * Usage:  node src/build-graph.mjs [--vault PATH | --vault-name NAME]
- *          [--ghosts] [--templates] [--flat-months] [--no-nav] [--dev] [--out FILE]
- *
- * Vault-agnostic: it crawls every folder and reads which folders are templates
- * and daily notes from the vault's own .obsidian config, so no folder name or
- * numbering is baked in.
- */
+// github#58
 
 import { readFileSync, writeFileSync, readdirSync, statSync, existsSync } from "node:fs";
 import { join, relative, sep, basename, dirname, resolve as resolvePath } from "node:path";
 import { fileURLToPath } from "node:url";
-// THE ONE DEPENDENCY THIS SCRIPT HAS, and it used to have none. The engine -- the graph store
-// and the renderer, github#58 -- is TypeScript under src/engine, and a .ts file cannot be
-// pasted into a <script> the way page.js is. esbuild bundles it here, on demand, into one
-// IIFE; the same tool the plugin build has always used, already installed, no network at
-// build time. The alternative was a committed dist/engine.js, which is guaranteed to drift
-// from its source (.ai-context/decisions/0012-*.md).
+// github#58
+// decisions/0012
 import { buildSync } from "esbuild";
-// When a note was written -- the one rule, shared with plugin/main.js so the two
-// mounts cannot drift. See src/dates.mjs for the order and why. github#6
+// github#6
 import { localDay, resolveCreated, dateTally } from "./dates.mjs";
-// Sigma's MIT notice, which the ported engine obliges every exported page to carry.
 import { engineBanner } from "./engine/notice.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-// Repo root. Everything this script reads that is not source lives beside src/,
-// not inside it: assets/ for the logo and favicon. Derived from HERE so the layout is
-// declared in one place.
 const ROOT = resolvePath(HERE, "..");
 
 const argv = process.argv.slice(2);
 const flag = (n) => argv.includes("--" + n);
 const opt = (n, d) => { const i = argv.indexOf("--" + n); return i >= 0 ? argv[i + 1] : d; };
 
-// ASK OBSIDIAN WHERE ITS VAULTS ARE.
-//
-// Obsidian keeps a registry of every vault it knows, with absolute paths and which one
-// is open. Reading it is how this stays machine-independent: the same vault lives on a
-// different drive, path and user profile on each machine, so any hardcoded default is
-// wrong on at least one of them. Same rule as the rest of the script -- read the answer
-// from Obsidian's own config rather than assuming a layout.
 const obsidianVaults = () => {
   const home = process.env.USERPROFILE || process.env.HOME || "";
   const candidates = [
     process.env.APPDATA && join(process.env.APPDATA, "obsidian", "obsidian.json"),
-    join(home, "Library", "Application Support", "obsidian", "obsidian.json"),  // macOS
-    join(home, ".config", "obsidian", "obsidian.json"),                          // Linux
+    join(home, "Library", "Application Support", "obsidian", "obsidian.json"),
+    join(home, ".config", "obsidian", "obsidian.json"),
   ].filter(Boolean);
   for (const p of candidates) {
     if (!existsSync(p)) continue;
@@ -61,27 +32,11 @@ const obsidianVaults = () => {
       return Object.values(reg.vaults || {})
         .filter((v) => v && v.path && existsSync(join(v.path, ".obsidian")))
         .map((v) => ({ path: resolvePath(v.path), open: !!v.open, ts: v.ts || 0 }));
-    } catch { /* a malformed registry is not fatal -- fall through to the walk-up */ }
+    } catch { }
   }
   return [];
 };
 
-// WHICH VAULT, in order:
-//   1. --vault <path>            explicit wins, always
-//   2. VAULT_GRAPH_VAULT         this tool's own override
-//   3. OBSIDIAN_VAULT            the machine's general "where is my vault" variable
-//   4. --vault-name <name>       pick from Obsidian's registry by folder name
-//   5. Obsidian's registry       the only entry, or the one currently open
-//   6. walk up for .obsidian     so dropping this folder inside a vault still works
-//
-// The script only ever walked up (6), which was right while it lived inside the vault
-// and threw the moment the source moved out to its own repo on 2026-08-22. A hardcoded
-// default replaced it briefly and was wrong for the same reason a hardcoded anything is
-// here: the vault is at a different absolute path on each of the two machines.
-//
-// Both env vars are honoured, tool-specific first: OBSIDIAN_VAULT is the machine-wide
-// answer other tooling can share, VAULT_GRAPH_VAULT overrides it for this tool alone
-// (pointing the graph at a second vault without disturbing anything else).
 const VAULT = (() => {
   const check = (v, why) => {
     const p = resolvePath(v);
@@ -133,45 +88,22 @@ const VAULT = (() => {
   );
 })();
 
-const INCLUDE_GHOSTS = flag("ghosts");        // unresolved [[links]] as phantom nodes
-// A DEVELOPMENT BUILD: turns the wedge overlay (wedge edges, band radii, envelope centres)
-// on by default. It is off in every normal build, and `?nowedges` turns it off in a dev one --
-// the flag decides the DEFAULT, not the availability, so a shipped page can still be asked
-// for it with `?wedges` when a reported animation bug needs looking at.
+const INCLUDE_GHOSTS = flag("ghosts");
 const DEV_BUILD = flag("dev");
 const INCLUDE_TEMPLATES = flag("templates");
-// Default output goes INTO THE VAULT, not next to the source: the HTML is what has to
-// travel to the other devices, and the vault is what syncs. At the vault's ROOT, because
-// that is the one place every vault has. It used to default to a numbered PARA folder
-// ("03 - Resources/Vault Graph/") -- the convention of the vault this was written for, and
-// the last folder name baked into a tool whose one rule is that nothing about a vault is
-// (decisions/0005). writeFileSync creates no directories, so on any vault without that exact
-// folder pair the documented one-call launch died with ENOENT (github#64). A dot-folder
-// (.obsidian/plugins/...) was the other candidate and is ruled out by the same ADR: it does
-// not sync. --out still puts the file anywhere.
+// decisions/0005
+// github#64
 const OUT = opt("out", join(VAULT, "vault-graph.html"));
-// Month buckets (04 - Daily Notes/2026-08) are real subfolders and shown as such.
-// Pass --flat-months to fold them into their parent instead.
 const FLAT_MONTHS = flag("flat-months");
-// The daily-note prev/next line IS a real link and counts by default. It was
-// stripped originally because chaining 55 dailies into a spine dominated the old
-// force layout -- that layout is gone, and measured on this vault counting the
-// chain leaves the deepest core untouched (8-core, 33 notes) while removing the
-// two phantom "orphans" it created. Pass --no-nav to strip it again.
 const STRIP_NAV = flag("no-nav");
 
 /* ---------------------------------------------------------------- discovery */
 
-// Read a vault config file, tolerating absence -- every vault differs in which
-// core plugins and community plugins it has ever configured.
 const readJson = (rel) => {
   try { return JSON.parse(readFileSync(join(VAULT, rel), "utf8")); } catch { return null; }
 };
 const norm = (s) => String(s).split(/[\\/]/).filter(Boolean).join("/");
 
-// Folders THIS vault declares, rather than folder names we assume. Hardcoding
-// "05 - Templates" broke the moment the vault was renumbered.   path-check: ok
-// It would never have matched anybody else's vault either -- Obsidian records the answer.
 const TEMPLATE_DIRS = (() => {
   const out = new Set();
   const core = readJson(".obsidian/templates.json");
@@ -183,37 +115,20 @@ const TEMPLATE_DIRS = (() => {
   return [...out];
 })();
 
-// The daily-notes folder, so a daily note can be typed without guessing at a
-// folder number. Same idea: the vault tells us.
 const DAILY_DIR = (() => {
   const dn = readJson(".obsidian/daily-notes.json");
   return dn && typeof dn.folder === "string" && dn.folder.trim() ? norm(dn.folder) : "";
 })();
 
-// Infrastructure only. Dot-folders are skipped by the crawl itself, so this is
-// just the one directory that is never notes. Everything else in the vault --
-// archives, attachments folders, whatever a given vault happens to call things
-// -- is crawled, because the whole point is to graph the whole vault.
 const SKIP_DIRS = new Set(["node_modules"]);
 
-// Agent/tooling config that lives in the vault but is not a note. The graph's
-// own doc is NOT here: it is a real note ("Vault Graph.md"), linked from the
-// daily note, so it belongs in the graph like any other.
 const SKIP_FILES = new Set(["claude.md", "readme.md", "license.md"]);
 
 const under = (rel, dir) => dir && (rel === dir || rel.startsWith(dir + "/"));
 const isTemplate = (rel) => TEMPLATE_DIRS.some((d) => under(rel, d));
 
 function walk(dir, acc = []) {
-  // SORTED, not whatever order the filesystem hands back. readdirSync's order is not
-  // part of any contract -- Node documents it as filesystem-dependent -- and this walk's
-  // order becomes `notes`' order (the loop below reads `files` in the order `walk`
-  // returns it, no sort after), which becomes graph node insertion order, which becomes
-  // the group iteration order `balanceBands()` searches over (github#32). That search
-  // is exhaustive-with-ties: candidates of equal cost keep whichever the loop reached
-  // first, so a tie that used to break on unspecified disk order could pick a different
-  // inner/outer split for the SAME vault content from one build to the next -- see
-  // .ai-context/invariants.md.
+  // github#32
   for (const entry of readdirSync(dir).sort()) {
     const p = join(dir, entry);
     let st; try { st = statSync(p); } catch { continue; }
@@ -229,7 +144,6 @@ function walk(dir, acc = []) {
 
 /* ------------------------------------------------------------- frontmatter */
 
-// Minimal YAML: `k: v`, `k: [a, b]`, and `k:` + `- item` blocks. Enough for a vault.
 function parseFrontmatter(raw) {
   const text = raw.replace(/^\uFEFF/, "");
   const m = /^---\r?\n([\s\S]*?)\r?\n---/.exec(text);
@@ -260,13 +174,11 @@ const unquote = (s) => String(s).trim().replace(/^["']|["']$/g, "").trim();
 
 /* -------------------------------------------------------------- link mining */
 
-// Fenced code (dataview/dataviewjs) and inline code hold no real links.
 const stripCode = (s) =>
   s.replace(/^```[\s\S]*?^```/gm, "\n")
    .replace(/^~~~[\s\S]*?^~~~/gm, "\n")
    .replace(/`[^`\n]*`/g, " ");
 
-// Daily-note nav scaffolding: `[[2026-08-20]] <- | -> [[2026-08-22]]`.
 const NAV_LINE = new RegExp(
   "^\\s*!?\\[\\[[^\\]]+\\]\\]\\s*(?:\\u2190|<-|<)\\s*\\|\\s*(?:\\u2192|->|>)\\s*!?\\[\\[[^\\]]+\\]\\]\\s*$",
   "gm"
@@ -290,7 +202,6 @@ function mineLinks(body, fm) {
   scan(clean, WIKILINK);
   scan(clean, MDLINK);
 
-  // Frontmatter links are real links in Obsidian: `person: "[[Ada Lovelace]]"`.
   for (const v of Object.values(fm)) {
     for (const s of (Array.isArray(v) ? v : [v])) {
       if (typeof s === "string" && s.includes("[[")) scan(s, WIKILINK);
@@ -301,10 +212,6 @@ function mineLinks(body, fm) {
 
 /* ------------------------------------------------------------ note taxonomy */
 
-// Date-bucket folders: "2026", "2026-08", "2026-Q3", "2026-W34". They say when a
-// note was filed, not what it is, so neither the type nor the subfolder tint
-// should come from them. Quarters and ISO weeks are here because vaults bucket by
-// them too -- this vault's weekly reviews sit in "2026-Q3".
 const MONTHISH = /^\d{4}(?:[-_ ]?(?:\d{2}|Q[1-4]|W\d{1,2}))?$/i;
 
 const TYPE_ALIAS = {
@@ -312,11 +219,6 @@ const TYPE_ALIAS = {
   "zettel/permanent": "zettel", "zettel/fleeting": "zettel", "zettel/literature": "zettel",
 };
 
-// Type comes from the note itself where it can, and otherwise from the folder
-// that holds it -- whatever that folder is called. The old version mapped
-// hardcoded numeric prefixes ("06" -> daily, "09" -> meeting), which silently
-// mistyped every note the day the vault was renumbered and meant nothing in any
-// other vault.
 const deNumber = (s) => String(s).replace(/^[\s\d._)-]+/, "").trim();
 const slug = (s) => deNumber(s).toLowerCase().replace(/[\s_]+/g, "-");
 const singular = (s) => s.replace(/ies$/, "y").replace(/([^aeious])s$/, "$1");
@@ -330,8 +232,6 @@ function inferType(fm, relPath, tags) {
   if (under(rel, DAILY_DIR)) return "daily";
   if (isTemplate(rel)) return "template";
 
-  // The deepest folder that actually names something: date buckets like
-  // "2026-08" describe when, not what, so they are skipped.
   const dirs = relPath.split(sep).slice(0, -1).filter(Boolean);
   const named = dirs.filter((d) => !MONTHISH.test(d));
   const pick = named.length ? named[named.length - 1] : dirs[0];
@@ -344,32 +244,8 @@ const paraFolder = (relPath) => {
   return seg.length > 1 ? seg[0] : "(vault root)";
 };
 
-// Subfolder path inside the PARA folder, used to tint nodes and to cut sub-wedges.
-//
-// TWO levels deep, because one was not enough for this vault: it read only the
-// immediate child, so `08 - Meeting Notes/00 1 on 1/<person>` collapsed 62 notes into
-// a single "00 1 on 1" wedge and hid *who* the 1-on-1s are with, and
-// `03 - Resources/People/{Professional,Personal}` collapsed 81 the same way. Measured,
-// 136 notes sat in meaningfully-named second-level folders that the graph was
-// flattening.
-//
-// Date buckets stop the walk, on the same reasoning inferType already uses: a folder
-// called "2026-06" says WHEN a note was filed, not what it is. As the FIRST level it
-// is still the only division its folder has -- that is what Daily Notes are -- so it
-// is kept; deeper down it sits under a real name and is noise, so
-// `03 Sprint Reviews/2026-06` stays "03 Sprint Reviews".
-// The WHOLE folder chain below the PARA folder, however deep it happens to go. No
-// level count is baked in anywhere: the page builds its legend tree by recursing over
-// this array, so a folder nested five deep works the same as one nested one deep, on
-// any vault.
-//
-// The one rule applied is the date-bucket rule inferType already uses: a folder called
-// `2026-06` says WHEN a note was filed, not what it is. As the FIRST segment it is
-// still the only division its folder has -- that is what Daily Notes are -- so it is
-// kept; anywhere deeper it sits under a real name and is noise, so
-// `03 Sprint Reviews/2026-06` stops at `03 Sprint Reviews`.
 const paraDirs = (relPath) => {
-  const seg = relPath.split(sep).slice(1, -1);   // drop the PARA folder and the filename
+  const seg = relPath.split(sep).slice(1, -1);
   const out = [];
   for (let i = 0; i < seg.length; i++) {
     if (MONTHISH.test(seg[i])) {
@@ -381,7 +257,6 @@ const paraDirs = (relPath) => {
   return out;
 };
 
-// How every note got dated, for the summary line. See src/dates.mjs.
 const dates = dateTally();
 
 /* ------------------------------------------------------------------- build */
@@ -391,16 +266,13 @@ const files = walk(VAULT).filter((abs) => {
   return !isTemplate(relative(VAULT, abs).split(sep).join("/"));
 });
 const notes = [];
-const byKey = new Map();   // lowercased basename / alias / relpath -> note index
+const byKey = new Map();
 
 for (const abs of files) {
   const relPath = relative(VAULT, abs);
   const raw = readFileSync(abs, "utf8");
   const { fm, body } = parseFrontmatter(raw);
   const name = basename(abs, ".md");
-  // ONE stat call, feeding both dates below. It used to be made inside `touched` alone;
-  // `created` needs the creation stamp now, and statting the same file twice per note is
-  // the kind of thing that only shows up on somebody else's 10,000-note vault.
   let st = null; try { st = statSync(abs); } catch { st = null; }
   const dated = resolveCreated(fm, name, st && st.ctimeMs, st && st.mtimeMs);
   dates[dated.source]++;
@@ -415,26 +287,12 @@ for (const abs of files) {
     id: relPath.split(sep).join("/"),
     label: name,
     folder: paraFolder(relPath),
-    // `dirs` is the full chain; `sub` is just its first segment, kept because that is
-    // the level that owns a wedge and a tint. That is a RENDERING limit (the tint
-    // ladder has four usable steps, and a wedge is one folder on the disc), not an
-    // assumption about how deep vaults nest -- everything below it lives in `dirs`.
     dirs: paraDirs(relPath),
     sub: paraDirs(relPath)[0] || "",
     type: inferType(fm, relPath, tags),
     tags,
-    // Frontmatter, then a date at the front of the filename, then the file's own
-    // creation stamp -- see src/dates.mjs. It was frontmatter or nothing until
-    // github#6, which left a vault that does not write `created:` with an empty
-    // heatmap and everything piled into "undated".
+    // github#6
     created: dated.day,
-    // When the FILE was last written, which is not the same question as `created`
-    // and is the one "mark today" actually wants to answer. Frontmatter `created`
-    // on a daily note is its IMPORT stamp -- this vault pre-creates dailies from
-    // the calendar, so 2026-08-21's note carries created: 2026-08-17 -- and
-    // `created` wins over `date`, so "created today" matched 0 notes on a day when
-    // nothing new was imported, and the button looked broken. Measured here: 3
-    // files touched today against 0 created today.
     touched: st ? localDay(st.mtimeMs) : "",
     words: body.split(/\s+/).filter(Boolean).length,
     _links: mineLinks(body, fm),
@@ -449,7 +307,6 @@ for (const abs of files) {
   }
 }
 
-// Resolve links. Obsidian resolves by shortest unique path, so try full path then basename.
 const edgeWeight = new Map();
 const ghosts = new Map();
 let unresolved = 0;
@@ -509,8 +366,6 @@ const nodes = notes.map((n, i) => {
 
 const data = {
   vault: basename(VAULT),
-  // Local time, not UTC: the page footer is how you tell which build you are
-  // looking at, and a UTC stamp read two hours behind the wall clock here.
   generated: (() => {
     const d = new Date(), p2 = (n) => String(n).padStart(2, "0");
     return `${d.getFullYear()}-${p2(d.getMonth() + 1)}-${p2(d.getDate())} ` +
@@ -524,9 +379,7 @@ const data = {
     edges: edges.length,
     unresolved,
     orphans: degree.filter((d) => d === 0).length,
-    // Where every note's date came from. Carried into the page (and the plugin's
-    // diagnostics command) so "why is everything undated" is a question the build
-    // already answered. github#6
+    // github#6
     dates,
     templatesExcluded: !INCLUDE_TEMPLATES,
     ghostsIncluded: INCLUDE_GHOSTS,
@@ -536,18 +389,7 @@ const data = {
 
 /* ------------------------------------------------------------------ emit */
 
-// THE ENGINE, BUNDLED ON DEMAND. src/engine/index.ts and everything it imports become one
-// classic script that sets `window.VaultGraphEngine`; shell.html reads the constructors off
-// it, the way it read graphology's and Sigma's UMD globals until github#58. Unminified, like the plugin
-// bundle: the shipped file is read by people. `write: false` keeps it in memory -- there is
-// no dist/ to drift.
-//
-// absWorkingDir IS THE REPO ROOT, NOT process.cwd(). esbuild labels every module in its
-// output with a comment holding the module's path RELATIVE TO THE WORKING DIRECTORY, so the
-// same build from two directories produced two different files (measured: identical to line
-// 1247, then `// src/engine/index.ts` against a `// ../../../../..` climb). This script is
-// run from the vault by refresh-graph.ps1 and from the repo by the harnesses, and the output
-// has to be the same bytes from both -- check-build-order-determinism holds it to that.
+// github#58
 const engine = (() => {
   try {
     return buildSync({
@@ -564,58 +406,27 @@ const engine = (() => {
       banner: { js: engineBanner() },
     }).outputFiles[0].text;
   } catch (e) {
-    // esbuild's error carries its messages as a list; the default stack shows none of them.
     const messages = Array.isArray(e.errors) ? e.errors.map((m) => m.text + (m.location ? ` (${m.location.file}:${m.location.line})` : "")) : [String(e.message || e)];
     console.error("build-graph: the engine did not bundle:\n  " + messages.join("\n  "));
     process.exit(1);
   }
 })();
 
-// The engine's camera math and shaders are ported from Sigma.js (MIT). The attribution is
-// src/engine/NOTICE.md, and its MIT block rides at the top of this bundle as the `/*!` banner
-// esbuild was handed above -- esbuild strips the source files' own comments, so the bundle
-// carried no notice at all until the banner was added. That is the output's licence header.
 const libs = `<script>\n${engine.trimEnd()}\n</script>`;
 
-// The logo and favicon are inlined as data URIs for the same reason the libraries
-// are: one self-contained file, no network, and `file://` will not fetch a sibling
-// image reliably either. They are pre-sized derivatives of logo-source.png -- see
-// make-logo.ps1, which exists because this script is node-builtins-only and node
-// has no image decoder, so it can base64 a PNG but cannot resize one. Both are
-// optional: a missing file just means no logo, not a broken build. (The script's only
-// dependency is esbuild, which bundles code and does not decode images either.)
 const dataUri = (f) => {
   try {
     return "data:image/png;base64," + readFileSync(join(ROOT, "assets", f)).toString("base64");
   } catch { return ""; }
 };
-// The centre logo is a MASK, not a picture: white art on transparent, whose alpha the
-// page paints with the disc's own wedge colours. The favicon stays full-colour, having
-// no disc behind it to borrow from.
 const LOGO_MASK = dataUri("logo-mask.png");
 const FAVICON = dataUri("favicon.png");
 const assets =
   (FAVICON ? `<link rel="icon" href="${FAVICON}">` : "") +
   `\n<script>window.VAULT_LOGO_MASK=${JSON.stringify(LOGO_MASK)};</script>`;
 
-// ONE PAGE, TWO MOUNTS.
-//
-// This used to be one read of template.html. The page is four files now -- shell.html plus
-// page.css, page.html and page.js -- because the Obsidian plugin has to mount the same page
-// INSIDE an existing document, where a doctype, a <head> and a stylesheet full of `:root`
-// tokens are not things it can use. The plugin imports the three parts and puts them in a
-// view; this assembles them into a standalone document, which is the shape that travels to
-// a phone.
-//
-// Neither mount is the other's poor relation, and the split is exactly a split: at the
-// commit that introduced it, the file produced here was byte-identical to the one the
-// single template produced, apart from its own build timestamp.
 const part = (f) => readFileSync(join(HERE, f), "utf8");
 
-// page.js is an ES module because the plugin imports it. A standalone page cannot be one:
-// a module served from file:// is blocked by CORS, and opening this file straight off a
-// disk is its entire reason to exist. So the export statement -- which is a syntax error in
-// a classic script -- comes off on the way in, and shell.html calls the function directly.
 const asScript = (js) => js.replace(/^export \{[^}]*\};?\s*$/m, "").trimEnd();
 
 const html = part("shell.html")

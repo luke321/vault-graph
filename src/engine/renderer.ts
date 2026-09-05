@@ -1,34 +1,4 @@
-/**
- * The renderer: the page's picture, drawn by code we own (github#58, step 3).
- *
- * This is Sigma 3.0.2's Sigma class (MIT) cut down to what src/page.js used, and ported with
- * the same order of operations wherever the order shows: the layers stack in the same order in
- * the DOM, the two node programs and the two edge programs draw in the same order, labels and
- * hovers paint in the same order, and every number the page reads back -- graphToViewport,
- * scaleSize, getNodeDisplayData -- is computed the same way. The golden snapshots and the
- * pixel diff against the Sigma build are the proof; the comments say why where it matters.
- *
- * WHAT IS NOT HERE, and why: the label density grid (every label the page does not force is
- * empty, so the grid never drew one); the picking framebuffer (nodes are picked by geometry --
- * a pointer is on a node when it is within the node's drawn radius, the last-drawn one wins,
- * exactly what reading the colour-coded buffer answered); edge events, edge labels, touch, the
- * hide-on-move settings; the graph subscription (the store has no events and every write in
- * the page is followed by a refresh); WebGL1.
- *
- * LAYERS, bottom to top, all absolutely positioned inside the container the page hands over:
- *   edges       WebGL2   the line and curve programs
- *   nodes       WebGL2   the circle and halo programs
- *   labels      2D       forced labels (search hits, the focused note past the dim)
- *   hovers      2D       the page's drawHover: the focus web and the pill
- *   hoverNodes  WebGL2   the highlighted discs again, above the pills, as Sigma stacked them
- *   mouse       2D       nothing drawn; it is what the pointer events land on
- * getCanvases() hands them back by those names; edgeInk, checkFocusWeb and savePng read them.
- *
- * THE HOVER-LEAVE FIX IS NATIVE. Sigma's handleLeave emitted leaveNode and forgot to clear its
- * own hoveredNode, so coming back onto the same note emitted nothing (github#7, patched by
- * regex in src/vendor.mjs until now). onLeave below clears it. `hover re-arms after the pointer
- * leaves the stage` in the suite is the check.
- */
+// github#58, github#7
 
 import { Camera } from "./camera";
 import { MouseCaptor, type CaptorHost, type Coords } from "./captor";
@@ -41,7 +11,6 @@ import type { EdgeDisplayData, GraphStore, NodeDisplayData, NodeEvent, Point, Re
 import { createNormalization, getMatrixImpact, graphExtent, identity, matrixFromCamera,
          multiplyVec2, type Extent, type Mat3, type Normalization } from "./viewport";
 
-/** The events emitted; the page's nine plus the stage halves it never listened to. */
 interface EventMap extends RendererEvents {
   rightClickStage: StageEvent;
   downStage: StageEvent;
@@ -55,27 +24,15 @@ type CanvasLayer = "labels" | "hovers" | "mouse";
 const X_LABEL_MARGIN = 150;
 const Y_LABEL_MARGIN = 50;
 const ANTI_ALIASING_FEATHER = 1;
-// Sigma's default stagePadding, which the page never overrode: the disc is framed inside the stage
-// with this many px to spare on the smaller side, and every measured pixel constant assumes it.
 const STAGE_PADDING = 30;
 const DEFAULT_NODE_COLOR = "#999";
 const DEFAULT_EDGE_COLOR = "#ccc";
 
-/**
- * Sigma's applyNodeDefaults: the fields a style function may leave out, filled in -- on the
- * same object, so whatever else the page put on it (folder, tags, haloColor) rides along.
- */
 function applyNodeDefaults(key: string, styled: Partial<NodeDisplayData> & Point): NodeDisplayData {
   if (typeof styled.x !== "number" || typeof styled.y !== "number") {
     throw new Error(`vault-graph: node "${key}" has no position; the style function must keep x and y`);
   }
-  // IN PLACE, AND ONLY WHAT IS MISSING. This runs once per node per refresh -- 10,002 times a
-  // frame on the 10k vault -- and a first version built a second object per node here; the
-  // profile put the renderer's addNode at 6.7 ms a frame against Sigma's 3.1 and the garbage
-  // collector at 3 ms. Conditional writes on the reducer's own object, as Sigma did, keep
-  // one allocation per node (the copy the reducer already makes) and leave its shape alone.
   if (!styled.color) styled.color = DEFAULT_NODE_COLOR;
-  // A string is a label, "" included; anything else the reducer left there is no label.
   if (typeof styled.label !== "string") styled.label = null;
   if (!styled.size) styled.size = 2;
   if (styled.hidden === undefined) styled.hidden = false;
@@ -83,7 +40,6 @@ function applyNodeDefaults(key: string, styled: Partial<NodeDisplayData> & Point
   if (styled.forceLabel === undefined) styled.forceLabel = false;
   if (!styled.type) styled.type = "circle";
   if (!styled.zIndex) styled.zIndex = 0;
-  // Every required field has been written above; the cast states that rather than a copy.
   return styled as NodeDisplayData;
 }
 
@@ -97,7 +53,6 @@ function applyEdgeDefaults(styled: Partial<EdgeDisplayData> & { size: number }):
   return styled as EdgeDisplayData;
 }
 
-/** A stable sort by zIndex: equal z keeps the incoming (graph) order, as Sigma's did. */
 function byZIndex<T>(items: T[], z: (item: T) => number): T[] {
   return items.sort((a, b) => {
     const za = z(a) || 0, zb = z(b) || 0;
@@ -128,7 +83,6 @@ export class Renderer extends Emitter<EventMap> implements RendererApi {
   private readonly forcedLabels = new Set<string>();
   private readonly highlighted = new Set<string>();
   private hoveredNode: string | null = null;
-  /** Node ids in draw order (z-sorted), for picking: the last hit is the one on top. */
   private nodeOrder: string[] = [];
   private nodeZExtent: [number, number] = [Infinity, -Infinity];
   private edgeZExtent: [number, number] = [Infinity, -Infinity];
@@ -165,7 +119,6 @@ export class Renderer extends Emitter<EventMap> implements RendererApi {
     this.edgeReducer = edgeReducer;
     this.drawHover = drawHover;
 
-    // The layers, in stacking order.
     const edges = this.createWebGL("edges");
     const nodes = this.createWebGL("nodes");
     const labels = this.create2D("labels");
@@ -184,7 +137,6 @@ export class Renderer extends Emitter<EventMap> implements RendererApi {
     this.applyCameraSettings();
     this.camera.on("updated", () => this.scheduleRender());
 
-    // The settings object is mutated in place by setSetting, so these reads stay live.
     const live = this.settings;
     const host: CaptorHost = {
       getCamera: () => this.camera,
@@ -213,10 +165,6 @@ export class Renderer extends Emitter<EventMap> implements RendererApi {
       for (const id of partial.nodes ?? []) this.updateNode(id);
       for (const e of partial.edges ?? []) this.addEdge(e);
     }
-    // Every refresh reprocesses. Sigma skipped the reprocess for a partial refresh that
-    // claimed nothing moved, and wrote the item into its program slot instead; a full process
-    // draws the identical frame and costs a few milliseconds on the 10k vault, so the two
-    // paths are one here.
     this.needToProcess = true;
     if (opts?.schedule) this.scheduleRender();
     else this.render();
@@ -245,8 +193,6 @@ export class Renderer extends Emitter<EventMap> implements RendererApi {
     this.correctionRatio = getMatrixImpact(this.matrix, state, dims);
 
     const params = this.renderParams();
-    // Program order is Sigma's: the default program first, then the registered one -- so
-    // haloed notes draw above every plain disc, and curves above every straight line.
     this.nodePrograms.circle.render(params);
     this.nodePrograms.halo.render(params);
     this.edgePrograms.line.render(params);
@@ -257,10 +203,6 @@ export class Renderer extends Emitter<EventMap> implements RendererApi {
   }
 
   kill(): void {
-    // KILLED FIRST, so nothing that fires afterwards -- the page's timers, a camera tween cut
-    // short, fit()'s landing callback calling setSetting -- can schedule work on a renderer
-    // whose contexts are gone. Sigma had no such guard, and its detached renderer would go on
-    // processing 10,000 nodes per stray frame; nothing threw, so nothing said so.
     this.killed = true;
     this.removeAllListeners();
     this.camera.kill();
@@ -293,7 +235,6 @@ export class Renderer extends Emitter<EventMap> implements RendererApi {
     return this.camera;
   }
 
-  /** A size attribute in drawn px: size / ratio. The identity size law the page was tuned to. */
   scaleSize(size = 1, cameraRatio = this.camera.ratio): number {
     return size / cameraRatio;
   }
@@ -340,16 +281,10 @@ export class Renderer extends Emitter<EventMap> implements RendererApi {
   /* ---------------------------------------------------------------- layers */
 
   private createCanvas(id: string): HTMLCanvasElement {
-    // THE HOST'S OWN HELPER WHEN IT HAS ONE. Inside Obsidian every element carries createEl,
-    // and the directory's linter asks that it be used over document.createElement; in the
-    // standalone page it does not exist. So: createEl when the container offers it, and the
-    // namespaced DOM call otherwise -- the same HTML canvas element either way.
     const host = this.container as HTMLElement & { createEl?: (tag: "canvas") => HTMLCanvasElement };
     const canvas = host.createEl
       ? host.createEl("canvas")
       : (this.doc.createElementNS("http://www.w3.org/1999/xhtml", "canvas") as HTMLCanvasElement);
-    // Positioned by page.css (.vault-graph .vg-layer), which both hosts load; the mouse layer's
-    // touch-action and user-select come from there too.
     canvas.className = "vg-layer vg-layer-" + id;
     this.container.appendChild(canvas);
     this.elements.set(id, canvas);
@@ -371,18 +306,6 @@ export class Renderer extends Emitter<EventMap> implements RendererApi {
     return ctx;
   }
 
-  /**
-   * Reads the container's size and the window's pixel ratio; sizes every layer to them when
-   * either changed. THE PIXEL RATIO IS PART OF THE TEST. Sigma compared only the CSS size, and
-   * a window carried onto a monitor with another scale factor keeps its CSS size while
-   * devicePixelRatio changes -- so the backing stores stayed at the old ratio while every
-   * program drew into a viewport sized for the new one: the disc came out scaled and cropped,
-   * and picking no longer met the pixels. Measured with Chrome's DPR emulation at a constant
-   * 1312x770 container: 1 -> 2 resized (the CSS size moved with it), 2 -> 3 did not -- canvases
-   * 2624x1540 under a 3936x2310 viewport, 0 of 12 sampled note centres lit. This runs on every
-   * render, so the change is picked up by the next frame anything asks for; a ratio change that
-   * arrives with no resize event and nothing else to draw waits for that frame.
-   */
   private resize(force = false): void {
     const prevW = this.width, prevH = this.height, prevRatio = this.pixelRatio;
     this.width = this.container.offsetWidth || 1;
@@ -396,7 +319,6 @@ export class Renderer extends Emitter<EventMap> implements RendererApi {
       el.width = w;
       el.height = h;
     }
-    // Setting a canvas's size resets its 2D transform, so the DPR scale goes back on.
     if (this.pixelRatio !== 1) for (const ctx of Object.values(this.ctx)) ctx.scale(this.pixelRatio, this.pixelRatio);
     for (const gl of Object.values(this.gl)) gl.viewport(0, 0, w, h);
   }
@@ -423,15 +345,6 @@ export class Renderer extends Emitter<EventMap> implements RendererApi {
     const z = data.zIndex ?? 0;
     if (z < this.nodeZExtent[0]) this.nodeZExtent[0] = z;
     if (z > this.nodeZExtent[1]) this.nodeZExtent[1] = z;
-    // INTO THE FRAMED SQUARE AT ONCE, with the normalisation the last frame used; process()
-    // re-derives it from the attributes before drawing, so nothing on screen depends on this.
-    // Picking does: a scheduled refresh (setSetting, a window resize) rebuilds this map and
-    // leaves the render to the next frame, and a pointer move in between hit-tests against
-    // whatever is here. In graph units every node was hundreds of px off and the node under
-    // the pointer read as left -- a spurious leaveNode, the tip gone and the hover ramp reset
-    // while the pointer never moved off the note. Measured: 1 leaveNode per setSetting while
-    // hovering, 0 with this line. Sigma picked from the previous frame's colour buffer and so
-    // never saw the gap; this is the same answer by the same normalisation.
     this.normalization.applyTo(data);
   }
 
@@ -458,14 +371,10 @@ export class Renderer extends Emitter<EventMap> implements RendererApi {
     this.nodeExtent = { x: [0, 1], y: [0, 1] };
   }
 
-  /** Normalises positions, orders by z, and fills the programs. Sigma's process(). */
   private process(): void {
     this.nodeExtent = graphExtent(this.graph);
     this.normalization = createNormalization(this.customBBox ?? this.nodeExtent);
 
-    // One walk collects the ids and their data side by side, so the second pass -- and the
-    // z-sort, when there is one -- never looks a node up again. Measured: the two-lookup
-    // version put process() at 3.7 ms a frame on the 10k vault against Sigma's 2.5.
     const ids = this.graph.nodes();
     const datas: NodeDisplayData[] = [];
     const order: string[] = [];
@@ -549,7 +458,6 @@ export class Renderer extends Emitter<EventMap> implements RendererApi {
     };
   }
 
-  /** The forced labels: Sigma's geometry (x + size + 3, y + labelSize / 3), nothing else drawn. */
   private renderLabels(): void {
     const ctx = this.ctx.labels;
     const { labelSize, labelFont, labelWeight, labelColor } = this.settings;
@@ -565,7 +473,6 @@ export class Renderer extends Emitter<EventMap> implements RendererApi {
     }
   }
 
-  /** The hovered node, then the highlighted ones, through drawHover; then their discs on top. */
   private renderHighlightedNodes(): void {
     const ctx = this.ctx.hovers;
     ctx.clearRect(0, 0, this.width, this.height);
@@ -649,7 +556,6 @@ export class Renderer extends Emitter<EventMap> implements RendererApi {
     return res;
   }
 
-  /** The camera state that zooms to `newRatio` while keeping the point under `target` still. */
   private getViewportZoomedState(target: Point, newRatio: number): ReturnType<Camera["getState"]> {
     const { ratio, angle, x, y } = this.camera.getState();
     const { minCameraRatio, maxCameraRatio } = this.settings;
@@ -668,11 +574,6 @@ export class Renderer extends Emitter<EventMap> implements RendererApi {
 
   /* -------------------------------------------------------------- picking */
 
-  /**
-   * The node under a viewport point: within its drawn radius (size / ratio px), the last one
-   * drawn winning -- haloed notes over plain discs, higher z over lower, later over earlier.
-   * That is the answer Sigma's colour-coded framebuffer gave, without the framebuffer.
-   */
   private getNodeAtPosition(p: Point): string | null {
     let lastCircle: string | null = null;
     let lastHalo: string | null = null;
@@ -714,7 +615,6 @@ export class Renderer extends Emitter<EventMap> implements RendererApi {
     });
 
     this.captor.on("mouseleave", (e) => {
-      // THE #7 FIX: the node left is forgotten, so coming back onto it is an enter again.
       if (this.hoveredNode !== null) {
         const node = this.hoveredNode;
         this.hoveredNode = null;

@@ -1,28 +1,5 @@
 #!/usr/bin/env node
-// Assert the synthetic vault generators produce the same folder/subfolder note COUNTS no
-// matter which real calendar day they're run on.
-//
-//   node scripts/check-generator-determinism.mjs
-//
-// WHY THIS EXISTS. make-demo-vault.mjs and make-shape-vault.mjs both default their `--end`
-// date to today, deliberately (so the heatmap's last-52-weeks window has notes in it --
-// see make-demo-vault.mjs's own header). That's a real day-to-day difference in the
-// generated output, and chasing what it does or doesn't affect by re-reasoning about it
-// from scratch is exactly the kind of thing this repo's own convention says to measure
-// instead (github#31/#32 both cost real time to a layout difference that turned out to
-// have nothing to do with which day the fixture was built). This makes the actual claim
-// -- that structure is unaffected, only the calendar labels shift -- a permanent, gated
-// fact instead of something re-derived by hand each time it's in doubt.
-//
-// NOT covered: make-mirror-vault.mjs, deliberately -- it reproduces a REAL vault's own
-// structure and dates rather than generating synthetic ones, so "does the generation day
-// change the structure" isn't a question that applies to it.
-//
-// Each generator is run twice, `--end` dates chosen far enough apart (different year,
-// different month, different quarter) that a real day-dependence would have to show up
-// somewhere. The comparison is FOLDER/SUBFOLDER NOTE COUNTS -- not file contents, which
-// are expected to differ (titles, frontmatter dates, links) -- because that's the thing
-// `buildWedgePlan`'s row/band math actually reads.
+// github#31
 
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdtempSync, readdirSync, rmSync, statSync } from "node:fs";
@@ -67,9 +44,6 @@ const problems = [];
 for (const g of GENERATORS) {
   const outA = mkdtempSync(join(tmpdir(), "vg-detA-"));
   const outB = mkdtempSync(join(tmpdir(), "vg-detB-"));
-  // try/finally, not a trailing cleanup line -- a thrown fs error while walking a freshly
-  // written tree (countTree) would otherwise skip cleanup entirely and leak both temp
-  // vaults into %TEMP% on every run that hits it.
   try {
     const base = [join(HERE, g.script), ...g.args];
     const rA = spawnSync(process.execPath, [...base, "--out", outA, "--end", END_A],

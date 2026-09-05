@@ -1,19 +1,4 @@
 #!/usr/bin/env node
-// ONE NOTE, EVERY LAYOUT PASS, TERM BY TERM.
-//
-//   node scripts/probe-trace.mjs --vault <vault> --id 8705 --what edge
-//   node scripts/probe-trace.mjs --vault <vault> --id 3997 --what place
-//
-// Two claims in .ai-context/finding-notes-touch-mid-cascade.md were inferred from the shape of
-// a trajectory rather than measured at the source:
-//
-//   defect 1  "SP walks every frame while `row` is an integer that ticks late, so rows slide
-//             out of step" -- from outside, only the PRODUCT (base + row*SP)*scale is visible.
-//   defect 2  "edgeSrc disagrees with the resting edgeCap" -- true, but WHICH of dEdge's four
-//             terms disagrees was open, and the answer decides where a fix goes.
-//
-// __vg.traceOn(id) (investigation branch only) records one row per layout pass, tagged with
-// which pass it was: "rest", "frame", "endpoint-A", "endpoint-B". This prints them.
 
 import { attach } from "./cdp.mjs";
 import { spawn, spawnSync } from "node:child_process";
@@ -28,8 +13,8 @@ const argv = process.argv.slice(2);
 const arg = (n, d) => { const i = argv.indexOf("--" + n); return i >= 0 && argv[i + 1] ? argv[i + 1] : d; };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const ID = arg("id", "8705");
-const WHAT = arg("what", "edge");                 // "edge" | "place" | "both"
-const MOVE = arg("move", "range");                // "range" | "year" | "folder" | "timeline"
+const WHAT = arg("what", "edge");
+const MOVE = arg("move", "range");
 const FRAC = Number(arg("frac", "0.1"));
 const GROUP = arg("group", "02 - Areas");
 
@@ -78,7 +63,7 @@ let page = null;
 try {
   for (let i = 0; i < 60 && !page; i++) {
     await sleep(500);
-    try { page = await attach(PORT, ""); } catch { /* not up yet */ }
+    try { page = await attach(PORT, ""); } catch { }
   }
   if (!page) throw new Error("could not attach");
   page.j = async (e) => JSON.parse(await page.eval("JSON.stringify(" + e + ")"));
@@ -108,9 +93,6 @@ try {
     return f ? { min: f.min, max: f.max } : null; })()`);
   const lo = Date.parse(span.min), hi = Date.parse(span.max);
 
-  // THE MOVE. "certain timeline moves" was the report, so the year chip and the growth
-  // animation are here alongside the squeeze the first pass measured -- a year chip moves
-  // BOTH ends of the range at once and can land anywhere, which a "last N%" squeeze never does.
   const moves = {
     range: async () => {
       const from = new Date(hi - (hi - lo) * FRAC).toISOString().slice(0, 10);
@@ -126,16 +108,12 @@ try {
         if (!b) return false; b.click(); return true; })()`);
     },
     timeline: async () => {
-      // The intro / Refresh growth animation, which nothing has measured yet: the disc grows
-      // from an empty screen to the whole vault through the same cascade() a toggle uses.
       await page.eval(`(function(){ var b = document.getElementById("vg-refresh");
         if (b) b.click(); return !!b; })(); void 0`);
     },
   };
   if (!moves[MOVE]) throw new Error(`unknown --move ${MOVE}`);
 
-  // Rest first, so there is a resting row to compare the cascade's against. A layout pass only
-  // happens when something asks for one, so the range is nudged and put back.
   await page.eval(`__vg.traceOn(${JSON.stringify(ID)}); void 0`);
   await page.eval(`__vg.setRange(null, null); void 0`);
   await settle();
@@ -148,9 +126,6 @@ try {
   await page.eval(`__vg.traceOff(); void 0`);
 
   const all = restRows.concat(rows);
-  // passEnd alongside pass: roomIn is recorded at function ENTRY, before the roomNow override
-  // is applied, so a frame's roomIn looks stale even when the override then corrects it. Only
-  // the pair (roomIn, roomOut) says whether a pass actually placed with the wrong room.
   const want = (r) => WHAT === "both" || r.what === WHAT ||
                       (WHAT === "pass" && r.what === "passEnd");
   const sel = all.filter(want);
@@ -178,10 +153,7 @@ try {
       : ["tag", "u", "arc", "mgA", "mgB", "sideClear", "sideRoom", "sideEA", "sideEB",
          "rGraph", "slotR", "dEdge", "nRow"];
     const w = 11;
-    if (WHAT === "pass") { /* already printed above */ }
-    else console.log("  " + cols.map((c) => c.padStart(w)).join(""));
-    // Every distinct pass ONCE, plus the first and last frame of the cascade: the interesting
-    // rows are the boundaries between passes, and a 200-frame cascade would bury them.
+    if (WHAT !== "pass") console.log("  " + cols.map((c) => c.padStart(w)).join(""));
     const seen = new Set();
     const keep = [];
     sel.forEach((r, i) => {
@@ -191,8 +163,6 @@ try {
       if (i === sel.length - 1 || sel[i + 1].tag !== "frame") keep.push(r);
     });
     if (WHAT === "place") {
-      // EVERY frame, not the boundaries: the claim is about how `row` and `SP` move relative to
-      // each other over the whole cascade, which is a series and not two endpoints.
       let prev = null;
       sel.forEach((r) => {
         const flag = prev && prev.row !== r.row ? "  <-- ROW TICK" : "";
@@ -203,13 +173,7 @@ try {
       for (const r of keep) console.log("  " + cols.map((c) => num(r[c]).padStart(w)).join(""));
     }
     console.log("");
-    // THE DIFF THAT MATTERS: the resting record against the first endpoint-A record, since
-    // endpoint-A is supposed to BE the rest the cascade starts from.
     const rest = sel.find((r) => r.tag === "rest");
-    // THE LAST endpoint-A record, not the first. roomOf runs the endpoint twice on purpose --
-    // pass one measures the packing's own room, pass two places against it -- and pass two is
-    // the one whose edgeCap is kept. Taking the first record reports the measuring pass, which
-    // is still contaminated by design and is not what the cascade walks from.
     const epAs = sel.filter((r) => r.tag === "endpoint-A");
     const epA = epAs.length ? epAs[epAs.length - 1] : undefined;
     if (epAs.length > 1) console.log(`  (${epAs.length} endpoint-A passes; comparing the last)`);
@@ -229,6 +193,6 @@ try {
     }
   }
 } finally {
-  try { if (page) await page.send("Browser.close"); } catch { /* going anyway */ }
-  try { chrome.kill(); } catch { /* ditto */ }
+  try { if (page) await page.send("Browser.close"); } catch { }
+  try { chrome.kill(); } catch { }
 }

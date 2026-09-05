@@ -1,23 +1,4 @@
-/**
- * The viewport math: how a graph coordinate becomes a pixel (github#58, step 3.1).
- *
- * Ported from sigma 3.0.2 (MIT) with the arithmetic kept exactly as it was, because every
- * measured constant in page.js -- the dot ramp, the edge cap, the logo placement, the wedge
- * labels -- was calibrated against the pixels these functions produce. The chain is:
- *
- *   graph units  --normalise-->  framed graph ([0,1]², the custom bbox mapped onto it)
- *                --matrixFromCamera-->  clip space ([-1,1]²)
- *                --(1+x)·w/2, (1-y)·h/2-->  viewport px
- *
- * `angle` is carried through the matrix so the camera state keeps its shape, but nothing here
- * ever sets it to anything but 0: rotation was switched off in the page long before this file
- * existed.
- *
- * `getMatrixImpact` is the one function whose author admits not fully explaining it (the
- * comment is Sigma's own, kept). It is also the one the shaders cannot do without: it turns a
- * pixel length into the framed-graph length that the matrix will map back onto that many
- * pixels, which is how a node's `size` ends up as exactly `size / ratio` px on screen.
- */
+// github#58
 
 import type { GraphStore, Point } from "./types";
 
@@ -68,7 +49,6 @@ function translate(m: Mat3, x: number, y: number): Mat3 {
   return m;
 }
 
-/** a = a · b, in place, exactly Sigma's operand order. */
 function multiply(a: Mat3, b: Mat3): Mat3 {
   const a00 = a[0], a01 = a[1], a02 = a[2];
   const a10 = a[3], a11 = a[4], a12 = a[5];
@@ -88,7 +68,6 @@ function multiply(a: Mat3, b: Mat3): Mat3 {
   return a;
 }
 
-/** Applies the matrix to a point; `z` 0 transforms a direction rather than a position. */
 export function multiplyVec2(a: Mat3, b: Point, z = 1): Point {
   const a00 = a[0], a01 = a[1], a10 = a[3], a11 = a[4], a20 = a[6], a21 = a[7];
   return {
@@ -99,20 +78,13 @@ export function multiplyVec2(a: Mat3, b: Point, z = 1): Point {
 
 /* ---------------------------------------------------------------- camera */
 
-/**
- * The graph is normalised into a [0,1]² square, then rescaled so that two nodes touch
- * opposite sides of the stage at the default camera. This is that rescaling factor.
- */
 export function getCorrectionRatio(viewport: Dimensions, graph: Dimensions): number {
   const viewportRatio = viewport.height / viewport.width;
   const graphRatio = graph.height / graph.width;
-  // Stage and graph in different directions: the nodes already touch opposite sides.
   if ((viewportRatio < 1 && graphRatio > 1) || (viewportRatio > 1 && graphRatio < 1)) return 1;
-  // Otherwise fit the squarer one inside the other.
   return Math.min(Math.max(graphRatio, 1 / graphRatio), Math.max(1 / viewportRatio, viewportRatio));
 }
 
-/** The matrix from the camera state -- framed graph to clip space, or its inverse. */
 export function matrixFromCamera(
   state: CameraStateLike,
   viewport: Dimensions,
@@ -143,14 +115,6 @@ export function matrixFromCamera(
   return matrix;
 }
 
-/**
- * Sigma's own words: "All these transformations we apply on the matrix to get it rescale the
- * graph as we want make it very hard to get pixel-perfect distances in WebGL. This function
- * returns a factor that properly cancels the matrix effect on lengths. [...] I notice that
- * the following ratio works: R = size(V) / size(M * V) / W, as long as M * V is in the
- * direction of W. Also, note that we use `angle` and not `-angle`, because the image is
- * vertically swapped in WebGL."
- */
 export function getMatrixImpact(matrix: Mat3, state: CameraStateLike, viewport: Dimensions): number {
   const { x, y } = multiplyVec2(matrix, { x: Math.cos(state.angle), y: Math.sin(state.angle) }, 0);
   return 1 / Math.sqrt(x * x + y * y) / viewport.width;
@@ -159,13 +123,9 @@ export function getMatrixImpact(matrix: Mat3, state: CameraStateLike, viewport: 
 /* --------------------------------------------------------- normalisation */
 
 export interface Normalization {
-  /** Graph units to the framed [0,1]² square. */
   apply(p: Point): Point;
-  /** The same, in place, on anything carrying x and y. */
   applyTo(p: Point): void;
-  /** Framed square back to graph units. */
   inverse(p: Point): Point;
-  /** The graph extent's larger side: framed units times this are graph units. */
   readonly ratio: number;
 }
 
@@ -189,7 +149,6 @@ export function createNormalization(extent: Extent): Normalization {
   };
 }
 
-/** The graph's node extent in x and y; the unit square when it has no nodes. */
 export function graphExtent(graph: GraphStore): Extent {
   if (!graph.order) return { x: [0, 1], y: [0, 1] };
   let xMin = Infinity, xMax = -Infinity, yMin = Infinity, yMax = -Infinity;

@@ -1,33 +1,6 @@
 #!/usr/bin/env node
-// WHAT DOES ONE ANIMATED FRAME COST, AND WHICH TERM IS IT? (github#19)
-//
-//   node scripts/probe-frame.mjs --vault .fixtures/test-vault-4476580a
-//   node scripts/probe-frame.mjs --vault <vault> --group "06 - Zettelkasten" --reps 8
-//
-// github#19 reports 14 fps on a 10k vault and attributes it to three terms measured one at a
-// time through `__vg` -- buildWedgePlan, ringsLayout and renderer.refresh. This is that
-// measurement, written down so a change can be argued from a before and an after rather than
-// from a plausible story.
-//
-// TWO HALVES, and they answer different questions.
-//
-//   TERMS      each candidate call timed on its own, at rest, `reps` times, median reported.
-//              Medians rather than means: the first call of anything in a fresh page pays for
-//              JIT and for a cold GPU buffer, and a mean over eight reps is mostly that.
-//
-//   FRAMES     the real thing -- a folder toggle from rest, sampled by a plain
-//              requestAnimationFrame chain installed from here. The delta between successive
-//              rAF timestamps IS the frame period, so this measures what a person sees and
-//              cannot be fooled by work moving between functions.
-//
-// WHY NOT __vg.probe(true) FOR THE FRAME HALF: probeSample walks every node with a hypot and
-// an atan2 per note, which on 10 002 notes is a term of the same order as the ones being
-// measured. It reports `ms` per sample, so it looks like a frame timer and is really a frame
-// timer plus itself. The rAF chain here costs one array push per frame.
-//
-// The rAF chain is installed BEFORE the toggle and read after `__vg.demo.busy()` clears, and
-// only the frames between the toggle and the clear are scored -- an idle page runs at the
-// display's refresh rate and averaging that in would flatter every number here.
+// github#19
+// github#19
 
 import { attach } from "./cdp.mjs";
 import { spawn, spawnSync } from "node:child_process";
@@ -92,7 +65,7 @@ let page = null;
 try {
   for (let i = 0; i < 60 && !page; i++) {
     await sleep(500);
-    try { page = await attach(PORT, ""); } catch { /* not up yet */ }
+    try { page = await attach(PORT, ""); } catch { }
   }
   if (!page) throw new Error("could not attach");
   page.j = async (e) => JSON.parse(await page.eval("JSON.stringify(" + e + ")"));
@@ -113,10 +86,6 @@ try {
   console.log(`\n${size.nodes} notes, ${size.edges} links in the graph\n`);
 
   // ---------------------------------------------------------------- the terms
-  //
-  // `weightOf` is the resting one -- alpha, which is visible ? 1 : 0 at rest -- so this is
-  // the same call ringsLayout makes when nothing is animating. Timing it with a constant 1
-  // instead would measure a plan the page never builds.
   const terms = await page.j(`(function () {
     var g = __vg.graph, R = __vg.renderer;
     var W = function (id) { return __vg.alpha[id] || 0; };
@@ -181,11 +150,7 @@ try {
     gs.forEach(function (g) { var n = __vg.groupCount(g); if (n > bn) { bn = n; best = g; } });
     return best;
   })()`);
-  // WHERE THE FRAME GOES, by sampling rather than by argument. The three terms above are the
-  // ones github#19 timed by hand, and they do not add up to the measured frame -- so the frame
-  // is profiled too, and the self-time table says what the missing third is instead of leaving
-  // it to be guessed at. 100us samples: a 45 ms frame is then ~450 samples, enough that a 1 ms
-  // term is visible above the noise.
+  // github#19
   const profile = has("profile");
   if (profile) {
     await page.send("Profiler.enable", {});
@@ -211,11 +176,6 @@ try {
     if (!clicked) throw new Error(`no eye button for ${group}`);
     if (profile) await page.send("Profiler.start", {});
     const m0 = await metrics();
-    // WAIT FOR busy() TO GO UP FIRST. A cascade starts on the next animation frame, so the
-    // first poll after the click can legitimately read false -- and the loop below then exits
-    // on the frame before the one it meant to measure. Measured, the hide direction reported
-    // 31 frames at a flat 16.7 ms against the page's own count of 0 cascade frames, i.e. it
-    // had timed an idle page and called it a toggle.
     for (let k = 0; k < 40; k++) {
       if (await page.j("!!__vg.demo.busy()").catch(() => false)) break;
       await sleep(50);
@@ -229,8 +189,6 @@ try {
     const t1 = await page.j("performance.now()");
     const ft = await page.j("window.__ft");
     const t0 = await page.j("window.__t0");
-    // Only the frames inside the cascade window. The tail after busy() clears is settle() plus
-    // an idle page, and an idle page's 16 ms would drag every percentile down.
     const inWin = ft.filter((t) => t >= t0 && t <= t1);
     const gaps = [];
     for (let i = 1; i < inWin.length; i++) gaps.push(inWin[i] - inWin[i - 1]);
@@ -244,22 +202,12 @@ try {
     if (lc) console.log(`        the page's own count: ${lc.frames} cascade frames in ${lc.ms} ms` +
                         ` (${r1(lc.ms / Math.max(1, lc.frames))} ms/frame)` +
                         `  [${lc.path}; in ${lc.ins} out ${lc.outs}; exit ${lc.exit}]`);
-    // THE UNQUANTIZED HALF, and the reason it is here. A rAF delta is a multiple of the
-    // display's period -- 16.7 / 33.3 / 50.0 at 60 Hz -- so the percentiles above cannot see
-    // an improvement until it crosses a vsync boundary, and a change that takes 46 ms of work
-    // down to 35 reports the identical 50.0. Chrome's ScriptDuration counter is the actual
-    // JavaScript time the renderer spent, so it moves with the work rather than with the
-    // display, and dividing by the page's own frame count gives the per-frame cost of the
-    // cascade's step().
     const scriptMs = (m1.ScriptDuration - m0.ScriptDuration) * 1000;
     const layoutMs = (m1.LayoutDuration - m0.LayoutDuration) * 1000;
     const nf = Math.max(1, lc ? lc.frames : gaps.length);
     console.log(`        script ${r1(scriptMs)} ms total, ${r1(scriptMs / nf)} ms/frame` +
                 ` (layout+style ${r1(layoutMs)} ms total)`);
     if (prof && prof.profile) {
-      // SELF TIME, not total: a tree that says "step() costs the whole frame" is true and
-      // useless. Self time attributes each sample to the function that was actually running,
-      // which is the only view that tells one term from another.
       const p = prof.profile;
       const byId = new Map(p.nodes.map((n) => [n.id, n]));
       const self = new Map();
@@ -285,6 +233,6 @@ try {
 
   if (has("keep")) { console.log("\n  --keep: leaving the page open, ^C to quit\n"); await sleep(600000); }
 } finally {
-  try { if (page) await page.send("Browser.close"); } catch { /* going anyway */ }
-  try { chrome.kill(); } catch { /* ditto */ }
+  try { if (page) await page.send("Browser.close"); } catch { }
+  try { chrome.kill(); } catch { }
 }

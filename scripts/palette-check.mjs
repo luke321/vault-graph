@@ -1,22 +1,4 @@
-// Measure the palette in src/page.css: chroma, hue, contrast against the surface, and the
-// worst all-pairs separation, for both themes.
-//
-//   node scripts/palette-check.mjs src/page.css
-//
-// WHY THIS EXISTS. Every number in .ai-context/design/0004-group-colours.md came out of
-// here, and the one that matters is the last line of each block: the palette's worst pair.
-// Twelve slots and two much stronger hues cost it nothing -- Orange vs Red at dE 7.1 before
-// and after -- and that is only knowable by measuring, because the binding pair is not one
-// of the ones that changed. The first attempt at documenting the pastel swap guessed
-// "chroma around 0.09" and was wrong: their chroma was mid-pack, and it was LIGHTNESS that
-// made them read as pale.
-//
-// NOT part of the smoke suite, on purpose. smoke.mjs checks behaviour that a change can
-// break silently; a palette does not drift on its own, and what makes a hue right is
-// looking at it. This is for the moment somebody edits a colour and wants the numbers.
-//
-// Same OKLab math as src/page.js, so these numbers and the ones the page computes at
-// runtime are directly comparable. Node builtins only, like the rest of src/.
+// design/0004
 import { readFileSync } from "node:fs";
 
 const css = readFileSync(process.argv[2] || "src/page.css", "utf8");
@@ -42,7 +24,7 @@ const lab = (h) => {
 };
 const chroma = (h) => { const [, A, B] = lab(h); return Math.hypot(A, B); };
 const hueDeg = (h) => { const [, A, B] = lab(h); return (Math.atan2(B, A) * 180 / Math.PI + 360) % 360; };
-// dE in the same units design/0004 quotes: OKLab distance x 100.
+// design/0004
 const dE = (a, b) => {
   const p = lab(a), q = lab(b);
   return Math.hypot(p[0] - q[0], p[1] - q[1], p[2] - q[2]) * 100;
@@ -52,7 +34,6 @@ const contrast = (a, b) => {
   return (hi + 0.05) / (lo + 0.05);
 };
 
-// Blocks: the bare :root-ish rule is light; the [data-theme="dark"] rule is dark.
 const block = (re) => {
   const m = css.match(re);
   if (!m) throw new Error("block not found: " + re);
@@ -84,7 +65,6 @@ for (const [label, text] of [["LIGHT", light], ["DARK", dark]]) {
       contrast(s.hex, surface).toFixed(2).padStart(9),
     );
   }
-  // Only hues carry a chroma claim; the greys are meant to be flat.
   const hues = slots.slice(0, 10);
   const cs = hues.map((s) => chroma(s.hex));
   console.log(`hue chroma range: ${Math.min(...cs).toFixed(3)} - ${Math.max(...cs).toFixed(3)}`);

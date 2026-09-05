@@ -1,17 +1,5 @@
 #!/usr/bin/env node
-// Generate the two navigation files an agent (or a person) needs to move around this repo,
-// from the source itself, so they cannot disagree with it (github#61):
-//
-//   .ai-context/code-map.md     the section banners and function declarations of the two
-//                               files nobody can read top to bottom, with line numbers
-//   .ai-context/code-index.md   the inverted index over the markers already in the source:
-//                               issue -> code sites, ADR/DDR -> code sites, invariant
-//                               section -> the check that enforces it, __vg.* -> callers
-//
-//   node scripts/code-map.mjs            # write both
-//   node scripts/code-map.mjs --check    # exit 1 if either is stale (the pre-push hook)
-//
-// Nothing here is hand-maintained; `npm run build` regenerates and the hook asserts.
+// github#61
 
 import { readFileSync, writeFileSync, readdirSync, statSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
@@ -25,7 +13,6 @@ const read = (p) => readFileSync(join(ROOT, p), "utf8");
 /* ------------------------------------------------------------------ the map -- */
 
 const MAP_FILES = ["src/page.js", "scripts/smoke.mjs"];
-// A section banner: a comment line whose text is a run of dashes or equals signs with a name.
 const BANNER = /^\s*(?:\/\*|\/\/)\s*[-=]{4,}\s*(.+?)\s*[-=]*\s*(?:\*\/)?\s*$/;
 const BANNER_PAIR = /^\s*\/\*\s*----\s*(BEGIN|END): ([^-]+?)\s*-.*\*\/\s*$/;
 const FN_DECL = /^(\s*)(?:async\s+)?function\s+([A-Za-z_$][\w$]*)\s*\(/;
@@ -37,7 +24,7 @@ function mapFile(file) {
   const sections = [];
   const fns = [];
   const checks = [];
-  let before = null;   // the regular section a stripped region interrupts, resumed at its END
+  let before = null;
   lines.forEach((line, i) => {
     const n = i + 1;
     const pair = BANNER_PAIR.exec(line);
@@ -110,9 +97,9 @@ function buildIndex() {
     ["decisions", "design"].flatMap((d) => readdirSync(join(ROOT, ".ai-context", d)).map((f) => `.ai-context/${d}/${f}`)));
   const prose = [...new Set(proseFiles)].filter((f) => f.endsWith(".md") && !/code-(map|index)\.md$/.test(f));
 
-  const issues = {};       // n -> [{file, line}]
-  const records = {};      // decisions/NNNN | design/NNNN -> [{file, line}]
-  const vgCalls = {};      // name -> [{file, line}]
+  const issues = {};
+  const records = {};
+  const vgCalls = {};
   const add = (dict, key, file, line) => (dict[key] || (dict[key] = [])).push({ file, line });
 
   for (const file of codeFiles) {
@@ -131,8 +118,6 @@ function buildIndex() {
     });
   }
 
-  // Invariant sections -> the check each names in its own code fence (`--only "..."`, or a
-  // quoted check name) -> that check's line in smoke.mjs.
   const smoke = read("scripts/smoke.mjs").split("\n");
   const checkLines = {};
   smoke.forEach((line, i) => { const c = CHECK_NAME.exec(line); if (c) checkLines[c[1]] = i + 1; });
@@ -142,8 +127,6 @@ function buildIndex() {
   inv.forEach((line, i) => {
     if (line.startsWith("## ")) { cur = { name: line.slice(3).trim(), line: i + 1, checks: new Set() }; invariants.push(cur); return; }
     if (!cur) return;
-    // A section names its check the way the suite is invoked -- `--only "<substring>"` -- or
-    // quotes the name in a fence comment; either way a quoted substring of the check's name.
     for (const m of line.matchAll(/"([^"]{10,})"|(?<![*\w])\*([^*]{10,120})\*(?![*\w])/g)) {
       const q = (m[1] || m[2]).toLowerCase();
       for (const name of Object.keys(checkLines)) if (name.toLowerCase().includes(q)) cur.checks.add(name);
@@ -198,7 +181,7 @@ const outputs = [
 let stale = 0;
 for (const [file, text] of outputs) {
   let cur = null;
-  try { cur = read(file); } catch { /* not yet written */ }
+  try { cur = read(file); } catch { }
   if (CHECK) {
     if (cur !== text) { stale++; console.error(`code-map: ${file} is stale -- run: node scripts/code-map.mjs`); }
   } else {

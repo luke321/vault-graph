@@ -1,32 +1,9 @@
-/**
- * The four WebGL programs that draw the picture (github#58, steps 3.2 and 3.3).
- *
- * Ported from sigma 3.0.2 (MIT): NodeCircleProgram, the border program `createNodeBorderProgram`
- * generates for `[{ size 0.26, haloColor }, { fill, color }]` (the only configuration the page
- * ever registered, here expanded by hand from that generator's template), EdgeRectangleProgram,
- * and @sigma/edge-curve's program without its arrow-head branch. The GLSL is Sigma's, minus the
- * `#ifdef PICKING_MODE` branches: the page picks nodes by geometry, not by reading a colour-coded
- * framebuffer, so the picking attribute and its shader variant are gone. Nothing in the normal
- * path changed, which is what lets the pixel diff against the Sigma build be held tight.
- *
- * HOW A PROGRAM DRAWS. Every program is instanced: one Float32Array holds one record per item
- * (a node, an edge), and a small constant buffer holds the per-vertex data -- three angles for a
- * disc's triangle, six corner coefficients for an edge's quad. `drawArraysInstanced` then draws
- * `vertices` vertices `capacity` times. Colours ride in the float array packed as four bytes (see
- * colors.ts) and are read back as a normalised `vec4` attribute over the same memory.
- *
- * A hidden item is written as zeros, exactly as Sigma wrote it: a degenerate instance at the
- * origin with size 0 draws nothing, and keeping the slot means no item shifts index mid-frame.
- *
- * WEBGL2 ONLY. Sigma fell back to WebGL1 with the ANGLE_instanced_arrays extension; Obsidian is
- * Electron and the standalone is a modern browser, so the fallback was dead weight.
- */
+// github#58
 
 import { floatColor } from "./colors";
 import type { EdgeDisplayData, NodeDisplayData } from "./types";
 import type { Mat3 } from "./viewport";
 
-/** What every program is handed for a frame. Names are Sigma's, for the shaders' sake. */
 export interface RenderParams {
   matrix: Mat3;
   width: number;
@@ -41,7 +18,6 @@ export interface RenderParams {
 
 interface AttributeDef {
   name: string;
-  /** Components: 1..4. */
   size: number;
   type: "float" | "ubyte";
 }
@@ -58,12 +34,10 @@ interface ProgramDefinition {
 
 const BIAS = "const float bias = 255.0 / 254.0;";
 
-/** Float slots one attribute takes in the array: a normalised ubyte vec4 packs into one float. */
 function slots(attr: AttributeDef): number {
   return attr.type === "ubyte" ? 1 : attr.size;
 }
 
-/** Bytes one attribute takes in the buffer. */
 function bytes(attr: AttributeDef): number {
   return attr.type === "ubyte" ? attr.size : attr.size * 4;
 }
@@ -84,7 +58,6 @@ function compile(gl: WebGL2RenderingContext, type: number, source: string): WebG
 export abstract class Program {
   protected array = new Float32Array(0);
   protected capacity = 0;
-  /** Float slots per item. */
   protected readonly stride: number;
 
   private readonly constantArray: Float32Array;
@@ -141,7 +114,6 @@ export abstract class Program {
     }
   }
 
-  /** Sizes the item array for `capacity` items; a no-op when unchanged. */
   reallocate(capacity: number): void {
     if (capacity === this.capacity) return;
     this.capacity = capacity;
@@ -175,19 +147,16 @@ export abstract class Program {
     return this.uniforms.get(name) ?? null;
   }
 
-  /** Zeroes an item's slot: the hidden case. */
   protected zero(index: number): void {
     this.array.fill(0, index, index + this.stride);
   }
 
   private bind(): void {
     const gl = this.gl;
-    // The per-vertex constants, shared by every instance.
     gl.bindBuffer(gl.ARRAY_BUFFER, this.constantBuffer);
     let offset = 0;
     for (const attr of this.def.constantAttributes) offset += this.bindAttribute(attr, offset, this.constantSlots * 4, 0);
     gl.bufferData(gl.ARRAY_BUFFER, this.constantArray, gl.STATIC_DRAW);
-    // The per-item data.
     gl.bindBuffer(gl.ARRAY_BUFFER, this.buffer);
     offset = 0;
     for (const attr of this.def.attributes) offset += this.bindAttribute(attr, offset, this.stride * 4, 1);
@@ -222,7 +191,6 @@ export abstract class Program {
 /* ------------------------------------------------------------------ nodes */
 
 export abstract class NodeProgram extends Program {
-  /** Writes item `offset` from a node's display data (positions already normalised). */
   process(offset: number, data: NodeDisplayData): void {
     const i = offset * this.stride;
     if (data.hidden) {
@@ -298,7 +266,6 @@ void main(void) {
 }
 `;
 
-/** A plain disc, antialiased over a two-correction-unit rim. */
 export class NodeCircleProgram extends NodeProgram {
   constructor(gl: WebGL2RenderingContext, doc: Document) {
     super(gl, doc, {
@@ -369,8 +336,6 @@ void main() {
 }
 `;
 
-// The border generator's template, expanded for two borders: an outer ring 0.26 of the radius
-// in the halo colour, and the disc's own colour filling what is left.
 const HALO_FRAGMENT = `
 precision highp float;
 
@@ -427,7 +392,6 @@ void main(void) {
 
 const DEFAULT_HALO_COLOR = "#000000";
 
-/** The "halo" type: a ring in `haloColor` around a disc in `color`. */
 export class NodeHaloProgram extends NodeProgram {
   constructor(gl: WebGL2RenderingContext, doc: Document) {
     super(gl, doc, {
@@ -559,7 +523,6 @@ void main(void) {
 }
 `;
 
-/** A straight edge as a quad with a feathered rim; Sigma's EdgeRectangleProgram, the "line" type. */
 export class EdgeLineProgram extends EdgeProgram {
   constructor(gl: WebGL2RenderingContext, doc: Document) {
     super(gl, doc, {
@@ -574,7 +537,6 @@ export class EdgeLineProgram extends EdgeProgram {
         { name: "a_color", size: 4, type: "ubyte" },
       ],
       constantAttributes: [
-        // 0 puts the vertex at a_positionStart, 1 at a_positionEnd; the coef picks the side.
         { name: "a_positionCoef", size: 1, type: "float" },
         { name: "a_normalCoef", size: 1, type: "float" },
       ],
@@ -752,7 +714,6 @@ void main(void) {
 
 const DEFAULT_CURVATURE = 0.25;
 
-/** A quadratic curve bowed by `curvature`; @sigma/edge-curve's program, the "curve" type. */
 export class EdgeCurveProgram extends EdgeProgram {
   constructor(gl: WebGL2RenderingContext, doc: Document) {
     super(gl, doc, {

@@ -1,35 +1,3 @@
-// Generate a synthetic Obsidian vault for development and for recording the demo.
-// Writes nothing outside its output directory, and that directory is gitignored.
-//
-//   node scripts/make-test-vault.mjs                    # ./test-vault, ~3000 notes
-//   node scripts/make-test-vault.mjs --notes 8000
-//   node scripts/make-test-vault.mjs --notes 10000 --years 10
-//   node scripts/make-test-vault.mjs --out /tmp/tv --seed 7
-//
-// WHY THIS EXISTS. Every measurement in .ai-context/ was taken against ONE vault: ~450
-// notes, 9 top-level folders, one dominant folder. Anyone else's vault is a different
-// shape, and the constants that look like tuning are the ones most likely to break on it --
-// twelve colour slots, three named tint slots, a 6-degree minimum wedge. This generates the
-// shapes that vault cannot produce:
-//
-//   * MORE top-level folders than there are colour slots (12), so the palette has to wrap
-//     and the wedge minimum gets exercised. 17 folders means slots g1-g12 and then g1-g5
-//     again -- the only shape that proves the cycle, since a 9-folder vault never reaches
-//     the end of the palette at all
-//   * SLIVER folders at root with 1-3 notes, beside a folder holding a third of the vault
-//   * DEEP nesting, five levels, past the point the legend indents
-//   * MANY subfolders in one folder, past the three that get their own tint
-//   * date-named folders at several depths, to exercise the date-bucket rule
-//   * notes with no frontmatter, no links, no tags -- and some with all three
-//
-// The names are DELIBERATELY REALISTIC. It is the vault the demo is recorded against, and
-// a recording made from a real vault publishes that vault's note titles -- so the public
-// video is made from this one instead. Realistic names also surface layout problems that
-// `foo-12` hides: real titles are long, they collide, and they truncate.
-//
-// Every person, project and place here is invented. Any resemblance is coincidence.
-//
-// Deterministic: the same --seed gives the same vault, so a measurement is repeatable.
 
 import { mkdirSync, writeFileSync, rmSync, existsSync, utimesSync } from "node:fs";
 import { join, dirname } from "node:path";
@@ -42,8 +10,6 @@ const OUT = arg("out", join(HERE, "..", "test-vault"));
 const TARGET = Number(arg("notes", 3000));
 let seed = Number(arg("seed", 1));
 
-// mulberry32. Math.random would make every run a different vault and every measurement
-// unrepeatable, which defeats the point of having a fixture at all.
 const rnd = () => {
   seed |= 0; seed = (seed + 0x6D2B79F5) | 0;
   let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
@@ -106,22 +72,15 @@ const WORDS = ("the argument here is less about tooling than about attention whi
 
 /* -------------------------------------------------------------------- shape */
 
-// share: fraction of the vault. subs: explicit subfolder names, or a generator.
 const YM = (n) => Array.from({ length: n }, (_, i) =>
   `${2025 + Math.floor(i / 12)}-${String((i % 12) + 1).padStart(2, "0")}`);
 const YQ = (n) => Array.from({ length: n }, (_, i) =>
   `${2025 + Math.floor(i / 4)}-Q${(i % 4) + 1}`);
 
 const FOLDERS = [
-  // FIXED, not shared -- an exact count regardless of --notes, the same way the three
-  // slivers at the bottom of this list already are. Daily Notes was the biggest share
-  // by far (0.26) and is deliberately cut down here, well below several folders it
-  // used to dwarf.
   { name: "04 - Daily Notes",   fixed: 50, subs: YM(18), kind: "daily" },
   { name: "05 - Meeting Notes", share: 0.17, subs: YM(14), kind: "meeting",
     deep: { "2025-03": ["Acme Corp", "Northwind"], "2025-09": ["Acme Corp"] } },
-  // Resources deliberately smaller than Zettelkasten now, rather than the other way
-  // share alone would have given it.
   { name: "03 - Resources",     fixed: 60, kind: "resource",
     subs: ["Books", "Articles", "Concepts", "People", "Recipes", "Travel", "Quotes", "Software", "Languages"],
     deep: { People: ["Colleagues", "Family", "Authors"], Travel: ["Europe", "Asia"],
@@ -136,16 +95,10 @@ const FOLDERS = [
     deep: { "2025-01": ["Old projects"], "2025-05": ["Old projects", "Superseded"] } },
   { name: "09 - Maps of Content", share: 0.02, kind: "moc", subs: [] },
   { name: "10 - Literature Notes", share: 0.015, kind: "literature", subs: [] },
-  // Past the twelve colour slots on purpose: everything below wraps to the start of the
-  // palette, so the same hue appears on two wedges and the cycle is actually exercised.
   { name: "11 - Clippings",     share: 0.01, kind: "article", subs: [] },
   { name: "12 - Journal",       share: 0.005, kind: "daily", subs: [] },
-  // One more, so the wedge count is still past what a ten-slot palette can name. Two
-  // siblings of this one (Media Log, Ideas) were trimmed to thin the outer ring --
-  // this is the one of the three with real subfolder structure to lose testing it.
   { name: "15 - Courses",       share: 0.02, kind: "literature",
     subs: ["Enrolled", "Completed", "Wishlist"] },
-  // Slivers, beside a folder holding a quarter of the vault.
   { name: "00 - Inbox",         fixed: 3, kind: "fleeting", subs: [] },
   { name: "13 - Someday Maybe", fixed: 2, kind: "fleeting", subs: [] },
   { name: "14 - Reading List",  fixed: 1, kind: "fleeting", subs: [] }
@@ -179,31 +132,11 @@ const FOLDERS = [
 const endStr = arg("end", new Date().toISOString().slice(0, 10));
 const END = Date.parse(endStr + "T00:00:00Z");
 const YEARS = Number(arg("years", 0));
-/**
- * Fraction of notes dated within the last twelve months.
- *
- * 0.55 for the default 560-day span, which is the shape described above and is what that
- * fixture has always had. For a MULTI-YEAR span it is 1.4 / YEARS -- the last year gets 1.4x
- * an even share and the rest spread out -- because at 0.55 a ten-year vault is not a ten-year
- * vault. Measured before this: 4707 notes in 2026 and 1310 in 2025 out of 10 001, against
- * 300-600 for each of the nine years before, so 60% of it sat in the last twenty months and
- * every year-scale control was reading one year with a tail.
- *
- * --recent 0.55 restores the old shape on any span.
- */
 const RECENT_SHARE = Number(arg("recent", YEARS > 1 ? 1.4 / YEARS : 0.55));
 const DAYS = YEARS > 0 ? Math.round(YEARS * 365.25) : 560;
 const DAY0 = END - DAYS * 86400000;
 const dayStr = (i) => new Date(DAY0 + i * 86400000).toISOString().slice(0, 10);
 
-/**
- * A day index for one note, 0 = oldest, DAYS = the end date.
- *
- * `Math.pow(rnd(), 0.45)` is what this was, and it is kept for the single-span default so
- * the existing fixture is unchanged. The mixture only engages once --years asks for a span
- * longer than the recent window it is meant to sit behind.
- */
-// The day drawn for each note, so the file stamp below can reuse it rather than draw again.
 const dayByNote = new WeakMap();
 const createdDayOf = (n) => dayByNote.get(n);
 createdDayOf.set = (n, d) => dayByNote.set(n, d);
@@ -211,27 +144,10 @@ createdDayOf.set = (n, d) => dayByNote.set(n, d);
 function createdDay() {
   if (YEARS <= 0 || DAYS <= 365) return Math.floor(Math.pow(rnd(), 0.45) * DAYS);
   if (rnd() < RECENT_SHARE) {
-    // The burst: the last twelve months, leaning to the most recent weeks.
-    //
-    // THE EXPONENT HAS TO BE ABOVE 1 HERE and below 1 in the tail below, which is not
-    // symmetry it is the opposite: this one is a distance BACK from the end of the span, the
-    // other is a distance FORWARD from the start, and both want to lean toward the present.
-    // It was 0.55, which leans a distance-back toward LARGER -- so the burst landed at the
-    // beginning of its own twelve months and the newest weeks came out emptiest. Visible as a
-    // heatmap whose right-hand edge, the part that is today, was the sparsest thing on it.
     return DAYS - Math.floor(Math.pow(rnd(), 1.8) * 365);
   }
-  // The tail: everything before that, spread EVENLY. Never reaches into the burst, so the two
-  // shares stay the shares they say they are.
-  //
-  // This leaned later, at pow(rnd(), 0.75), which compounded with the burst: the years nearest
-  // the burst took the most of the remainder and the oldest took the least, so a ten-year vault
-  // ramped instead of spanning. Uniform here, and the recency lean lives entirely in
-  // RECENT_SHARE, where it can be set.
   return Math.floor(rnd() * Math.max(1, DAYS - 365));
 }
-// Anchored to the span's own first year rather than a hardcoded 2025, or a --years 10 vault
-// files a decade of weekly reviews under years it has no notes in.
 const YEAR0 = new Date(DAY0).getUTCFullYear();
 const weekStr = (i) => `${YEAR0 + Math.floor(i / 52)}-W${String((i % 52) + 1).padStart(2, "0")}`;
 
@@ -250,7 +166,6 @@ function titleFor(kind) {
     case "moc":       return `${pick(["Systems", "Writing", "Cooking", "Travel", "Software", "Health"])} MOC`;
     case "fleeting":  return `${pick(["Look into", "Ask about", "Try", "Read"])} ${pick(CONCEPTS).toLowerCase()}`;
     default:
-      // resources: pick by the subfolder they landed in, handled by the caller
       return pick(CONCEPTS) + " " + nth;
   }
 }
@@ -276,7 +191,6 @@ function pathsFor(f) {
     out.push(p);
     for (const d of (f.deep && f.deep[s]) || []) {
       out.push(`${p}/${d}`);
-      // one more level, so something in the vault is five deep
       if (rnd() < 0.5) out.push(`${p}/${d}/${pick(["Drafts", "Archive", "Assets", "Sources"])}`);
     }
   }
@@ -302,8 +216,6 @@ const plan = FOLDERS.map((f) => ({
        : Math.max(1, Math.round((TARGET - fixedTotal) * f.share / shareTotal))
 }));
 
-// Titles first, so links can point at notes that exist. Keyed by folder so a note in
-// People links mostly to other people.
 const notes = [];
 for (const f of plan) {
   for (let i = 0; i < f.count; i++) {
@@ -314,8 +226,6 @@ for (const f of plan) {
     notes.push({ dir, title, kind: f.kind, peopleKind });
   }
 }
-// De-duplicate titles -- a real vault cannot have two notes with the same name in one
-// folder, and Obsidian's basename link resolution gets ambiguous across folders too.
 const used = new Set();
 for (const n of notes) {
   let t = n.title, k = 2;
@@ -324,17 +234,6 @@ for (const n of notes) {
   n.title = t;
 }
 
-// A HANDFUL OF NOTES ARE DELIBERATELY UNLINKED, so every orphan-dependent check (this
-// generator fed nothing but incidental, seed-dependent orphans before this -- the demo
-// fixture has run at 0 unlinked notes) always has something real to measure instead of
-// skipping gracefully. make-shape-vault.mjs already guarantees this for the
-// dominant-folder fixture; this generator (which the demo fixture delegates to, and which
-// the 10k fixture is built from directly) had nothing. Fixed and small regardless of
-// --notes, since the point is "at least one exists," not a realistic unlinked rate.
-//
-// Never a People/Colleagues/Family/Authors note: `person: "[[Name]]"` below draws from the
-// raw PEOPLE array, not from `titles`, so it bypasses the exclusion just below entirely --
-// an orphan-marked person note could still pick up a real incoming link that way.
 const ORPHAN_COUNT = Math.min(6, notes.length);
 const orphanPool = notes.map((n, i) => i).filter((i) => !notes[i].peopleKind);
 for (let k = 0; k < ORPHAN_COUNT && orphanPool.length; k++) {
@@ -349,26 +248,17 @@ for (const n of notes) {
   const dir = join(OUT, n.dir);
   mkdirSync(dir, { recursive: true });
 
-  const bare = rnd() < 0.2;                              // some notes have no frontmatter
-  // One draw per note, used by BOTH the frontmatter line and the file stamp below -- drawing
-  // twice would date a note's text and its stamp differently, which is a disagreement the
-  // builder would then have to resolve and this fixture has no business creating.
+  const bare = rnd() < 0.2;
   const day = createdDay();
   createdDayOf.set(n, day);
   const created = dayStr(day);
   const tags = rnd() < 0.55 ? some(TAGS, int(1, 2)) : [];
-  // !n.orphan on the meeting/person line too -- that field is the OTHER path to a real
-  // link (see the comment above ORPHAN_COUNT), independent of the outs loop below.
   const fm = bare ? "" : ["---", `created: ${created}`,
     tags.length ? `tags: [${tags.join(", ")}]` : null,
     n.kind === "meeting" && !n.orphan && rnd() < 0.7 ? `person: "[[${pick(PEOPLE)}]]"` : null,
     rnd() < 0.05 ? `aliases: ["${n.title.split(" ")[0]} note"]` : null,
     "---", ""].filter(Boolean).join("\n");
 
-  // Power-law-ish out-degree: most notes link to a few, a handful are hubs, some links
-  // point at nothing (unresolved links are normal and must not break the build). Zero for
-  // an orphan-marked note, unconditionally -- it must have no edges in either direction,
-  // and `titles` above already keeps everything else from creating the other half.
   const outs = n.orphan ? 0 : (rnd() < 0.04 ? int(20, 55) : int(0, 5));
   const links = [];
   for (let k = 0; k < outs; k++) {
@@ -386,25 +276,16 @@ for (const n of notes) {
   const file = join(dir, n.title.replace(/[\\/:*?"<>|]/g, "-") + ".md");
   writeFileSync(file,
     `${fm}# ${n.title}\n\n${paras.join("\n\n")}\n${fence}\n${links.join(" ")}\n`);
-  // THE FILE STAMP IS A DATE SOURCE, so it has to carry the note's own date.
-  //
-  // A fifth of these notes deliberately have no frontmatter, which is what exercises the
-  // builder's fallback path -- and the fallback is the file's mtime, which is the moment the
-  // generator ran. So every one of them landed on the same day: measured, 1173 notes of 10 001
-  // all dated today, on top of the burst. Stamping the file with the date the note was supposed
-  // to have keeps the fallback path exercised AND lets those notes spread like the rest.
   const stamp = new Date(DAY0 + createdDayOf(n) * 86400000);
-  try { utimesSync(file, stamp, stamp); } catch { /* a stamp is a nicety, not a requirement */ }
+  try { utimesSync(file, stamp, stamp); } catch { }
   written++;
 }
 
-// Templates, which the builder must EXCLUDE by default.
 mkdirSync(join(OUT, "99 - Templates"), { recursive: true });
 for (const t of ["Daily Note", "Meeting Note", "Person Note", "Book Note"]) {
   writeFileSync(join(OUT, "99 - Templates", t + ".md"),
     `---\ncreated: {{date:YYYY-MM-DD}}\n---\n# {{title}}\n\nTemplate for ${t}.\n`);
 }
-// Loose at the root -- the "(vault root)" pseudo-folder.
 for (const t of ["Home", "Dashboard"]) {
   writeFileSync(join(OUT, t + ".md"),
     `# ${t}\n\n[[${titles[0]}]] · [[${titles[1]}]] · [[${titles[2]}]]\n`);

@@ -1,26 +1,7 @@
-// The lint formatter: every finding in full, except the meter, which is counted.
-//
-// Five type-aware rules -- @typescript-eslint/no-unsafe-* -- run on the plugin and the page
-// as warnings because the Obsidian directory's review runs them on every published version
-// (github#55). They fire ~7,000 times on code that was never typed, and a run that prints
-// 7,000 lines is a run nobody reads -- a handful of actionable findings would vanish into it
-// and the lint would go back to being ignored. This formatter prints the actionable ones the
-// way eslint would, and reduces the five to per-rule and per-file counts plus the budget line.
-//
-// THE BUDGET is `--budget N` in package.json's lint script, held at exactly the measured
-// total: scripts/lint.mjs fails the run when the meter differs from N in either direction,
-// and when any warning outside the meter appears at all. This formatter only shows where the
-// count stands, so whoever is about to change N sees what it was and why. Read from argv
-// because the wrapper is the process this runs in (eslint's own `--max-warnings` is read too,
-// for a bare `eslint -f ./scripts/lint-summary.mjs` run).
-//
-// Node built-ins only, like every script here. Loaded by scripts/lint.mjs, or by eslint
-// directly via `-f ./scripts/lint-summary.mjs`.
+// github#55
 
 import { relative } from "node:path";
 
-// The meter. eslint.config.mjs imports this list rather than repeating it, so the rules
-// that are counted here are exactly the rules that are set to warn there.
 export const METER_RULES = [
   "@typescript-eslint/no-unsafe-assignment",
   "@typescript-eslint/no-unsafe-member-access",
@@ -52,11 +33,7 @@ export default function summarise(results, context) {
     const file = relative(cwd, r.filePath).split("\\").join("/");
     for (const m of r.messages) {
       if (m.severity === 2) errors++; else warnings++;
-      // FOLDED INTO A COUNT ONLY WHILE THEY ARE WARNINGS. That was the whole point when
-      // there were ~7,000 of them: a run printing 7,000 lines is a run nobody reads. They
-      // are ERRORS now (github#60 took the count to zero), and an error has to be printed
-      // in full or a failing run says "1 error" and not where -- which is the opposite of
-      // what this formatter exists for.
+      // github#60
       if (m.severity === 1 && meter.has(m.ruleId)) {
         metered++;
         perRule.set(m.ruleId, (perRule.get(m.ruleId) || 0) + 1);
