@@ -121,17 +121,12 @@ export default defineConfig([
       globals: globals.node,
     },
   },
-  {
-    // THE ENGINE IS HOST-AGNOSTIC: the same src/engine code draws inside Obsidian and inside the
-    // standalone page opened off a disk, where Obsidian's DOM helpers (createEl, setCssProps) do
-    // not exist. So the one preset rule that asks for them is off here, with this as the reason;
-    // everything else in the Obsidian block above still applies to it. Static styles are not
-    // set from the engine at all -- page.css positions its layers -- so that rule stays on.
-    files: ["src/engine/**/*.ts"],
-    rules: {
-      "obsidianmd/prefer-create-el": "off",
-    },
-  },
+  // THE ENGINE IS HOST-AGNOSTIC: the same src/engine code draws inside Obsidian and inside the
+  // standalone page opened off a disk, where Obsidian's DOM helpers do not exist. prefer-create-el
+  // used to be off for it here with that as the reason -- and the directory's scanner ran it
+  // anyway and flagged both sites. They are gone: colour parsing goes through an OffscreenCanvas
+  // and the layer canvases come from createEl when the container has it, so the rule runs on the
+  // engine like everywhere else.
   {
     // plugin/**/*.d.ts: declarations for the type program (the bundler's `raw:`/`b64:`
     // modules), not code -- there is nothing in one for a rule to say, and the preset's

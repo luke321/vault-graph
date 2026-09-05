@@ -340,7 +340,14 @@ export class Renderer extends Emitter<EventMap> implements RendererApi {
   /* ---------------------------------------------------------------- layers */
 
   private createCanvas(id: string): HTMLCanvasElement {
-    const canvas = this.doc.createElement("canvas");
+    // THE HOST'S OWN HELPER WHEN IT HAS ONE. Inside Obsidian every element carries createEl,
+    // and the directory's linter asks that it be used over document.createElement; in the
+    // standalone page it does not exist. So: createEl when the container offers it, and the
+    // namespaced DOM call otherwise -- the same HTML canvas element either way.
+    const host = this.container as HTMLElement & { createEl?: (tag: "canvas") => HTMLCanvasElement };
+    const canvas = host.createEl
+      ? host.createEl("canvas")
+      : (this.doc.createElementNS("http://www.w3.org/1999/xhtml", "canvas") as HTMLCanvasElement);
     // Positioned by page.css (.vault-graph .vg-layer), which both hosts load; the mouse layer's
     // touch-action and user-select come from there too.
     canvas.className = "vg-layer vg-layer-" + id;

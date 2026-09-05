@@ -68,11 +68,16 @@ function rgbaToFloat(r: number, g: number, b: number, a: number): number {
 // limit for the life of the page.
 const CACHE_LIMIT = 200000;
 const cache = new Map<string, number>();
-let scratch: CanvasRenderingContext2D | null = null;
+let scratch: OffscreenCanvasRenderingContext2D | null = null;
 
-/** Normalises a colour the regexes do not know through the browser's own parser. */
-function normalise(val: string, doc: Document): string {
-  if (!scratch) scratch = doc.createElement("canvas").getContext("2d");
+/**
+ * Normalises a colour the regexes do not know through the browser's own parser -- an
+ * OffscreenCanvas, not a canvas ELEMENT: nothing here needs a node, and the engine runs in the
+ * standalone page as well as inside Obsidian, where the directory's linter asks for its own
+ * DOM helpers over document.createElement. A 1x1 offscreen context parses `fillStyle` the same.
+ */
+function normalise(val: string): string {
+  if (!scratch) scratch = new OffscreenCanvas(1, 1).getContext("2d");
   if (!scratch) return "#000000";
   scratch.fillStyle = "#000000";
   scratch.fillStyle = val;
@@ -80,17 +85,17 @@ function normalise(val: string, doc: Document): string {
 }
 
 /**
- * The packed float for a colour string. `doc` is only touched for a string that is neither
- * hex nor rgba, and only the first time that string is seen.
+ * The packed float for a colour string. The browser's parser is only consulted for a string
+ * that is neither hex nor rgba, and only the first time that string is seen.
  */
-export function floatColor(val: string, doc: Document): number {
+export function floatColor(val: string): number {
   const direct = cache.get(val);
   if (direct !== undefined) return direct;
   const key = val.toLowerCase();
   let color = cache.get(key);
   if (color === undefined) {
     let parsed = parseColor(key);
-    if (!parsed) parsed = parseColor(normalise(key, doc).toLowerCase()) ?? { r: 0, g: 0, b: 0, a: 1 };
+    if (!parsed) parsed = parseColor(normalise(key).toLowerCase()) ?? { r: 0, g: 0, b: 0, a: 1 };
     color = rgbaToFloat(parsed.r, parsed.g, parsed.b, (parsed.a * 255) | 0);
     if (cache.size >= CACHE_LIMIT) cache.clear();
     cache.set(key, color);
