@@ -2484,12 +2484,24 @@ check("filtered to the bone, the disc stays drawable", async (p) => {
              holeRatio: Math.round(holeRatio * 100) / 100,
              seamRatio: Math.round(seamRatio * 100) / 100, seamAt: seamAt,
              ds: medStep > 0 ? Math.round(2 * medDot / medStep * 100) / 100 : 0,
+             // How many rows were dense enough to measure a step at all. ds is 0 when
+             // this is 0, and that 0 is "unmeasured", not "collapsed" -- see judge().
+             stepped: steps.length,
+             // Dot radii in PIXELS (rad above is graph units, so the arcs compare to it):
+             // the smallest one on screen, and the median. The legibility floor below reads
+             // these when there is no step to size a dot against.
+             minDotPx: dots.length ? Math.round(dots[0] / perPx * 100) / 100 : 0,
+             medDotPx: Math.round(medDot / perPx * 100) / 100,
              rows: Object.keys(rows).length };
   })()`;
+  // THE RESTING DISC'S MEDIAN DOT, in px, as the floor a sparse state is held to. Read once,
+  // here, before anything is hidden or filtered.
+  const rest = await p.j(probe);
   const bad = [];
   const seen = [];
   const judge = (label, r) => {
-    seen.push(`${label}: ${r.shown}n ${r.rows}r d/s ${r.ds} hole ${r.holeRatio}x ` +
+    seen.push(`${label}: ${r.shown}n ${r.rows}r d/s ${r.stepped ? r.ds : "n/a"} ` +
+      `dot ${r.medDotPx}px hole ${r.holeRatio}x ` +
       `seam ${r.seamRatio}x${r.seamAt ? " (" + r.seamAt + ")" : ""} ` +
               `clear ${r.worstClear}${r.worstRel ? " (-" + r.worstRel + "%)" : ""}`);
     if (r.shown < 4) return;                     // nothing left to be wrong about
@@ -2509,7 +2521,23 @@ check("filtered to the bone, the disc stays drawable", async (p) => {
       bad.push(`${label}: ${r.overlaps} overlapping pair(s), worst ${r.worstClear} = ` +
                `${r.worstRel}% of the row median`);
     }
-    if (r.ds < 0.15) bad.push(`${label}: dots collapsed, diameter/step ${r.ds}`);
+    // ONLY WHEN A STEP WAS MEASURED. `ds` divides the median dot by the median step of the
+    // rows that hold four or more notes, and a state with four to seven notes spread over two
+    // rows has no such row -- so medStep is 0, `ds` is reported as 0, and this line read that
+    // 0 as "collapsed" for as long as the check existed. github#65: the dominant-folder fixture's last-0.5% window held
+    // 8 notes on the day it was generated (4 per row, d/s 0.22) and 6 the day after (3 per row,
+    // nothing to divide by), and the gate failed on the calendar. Measured in that state: the
+    // smallest dot was 5.3px against a resting median of 3.1px -- nothing had collapsed.
+    if (r.stepped) {
+      if (r.ds < 0.15) bad.push(`${label}: dots collapsed, diameter/step ${r.ds}`);
+    } else if (r.minDotPx < rest.medDotPx) {
+      // THE FLOOR FOR A HANDFUL OF NOTES, which is what the collapse bound was standing in
+      // for here: a state with almost nothing on screen must never draw a note smaller than
+      // the full disc draws its typical one. That is the github#53 class -- a band with almost
+      // nothing in it reporting zero room and sizing its notes off it -- stated as a number.
+      bad.push(`${label}: no row holds four notes, and the smallest dot (${r.minDotPx}px) is ` +
+               `under the resting median (${rest.medDotPx}px)`);
+    }
     // 3.2x. This was 4.5x, parked there as a baseline while a 4.24x gap on the demo vault was
     // thought to need the arc allocated per ROW to fix. It did not: the gap was FOUR sub-wedges
     // of 15 - Courses, 7 and 6 and 6 and 6 notes each, in a band 9 rows deep -- none of them
@@ -2565,9 +2593,25 @@ check("filtered to the bone, the disc stays drawable", async (p) => {
 
   // A RANGE SQUEEZED UNTIL THE BANDS ARE SHALLOW. Taken off the vault's own extent so it works
   // on any fixture: the last tenth, then the last fortieth, then the last two hundredth.
+  //
+  // THE EXTENT IS THE NOTES', NOT THE STRIP'S. This read #vg-from's min/max, and the strip's
+  // right edge is TODAY whenever the vault has reached it (github#57) -- so "the last 0.5%"
+  // was 0.5% of a span that grew a day every day, measured back from a moving end. The
+  // ageing fixtures date their newest notes to their generation day, so the window's
+  // population changed with the calendar: 8 notes on the day the dominant-folder fixture was
+  // generated, 6 the next day, then 4, 2, 0 -- and the gate failed on the second (github#65).
+  // Read off the oldest and newest DATED NOTE the population of every window is a property of
+  // the fixture, on any day, which is the same rule the gap-reservation check below already
+  // states for its cut. `to` stays open, so today never enters the arithmetic at all.
   const span = await p.j(`(function(){
-    var f = document.querySelector("#vg-from");
-    return f ? { min: f.min, max: f.max } : null; })()`);
+    var lo = null, hi = null;
+    __vg.graph.forEachNode(function (id, a) {
+      var d = a.created ? String(a.created).slice(0, 10) : "";
+      if (Number.isNaN(Date.parse(d))) return;      // undated, or an unrendered placeholder
+      if (lo === null || d < lo) lo = d;
+      if (hi === null || d > hi) hi = d;
+    });
+    return lo !== null ? { min: lo, max: hi } : null; })()`);
   if (span && span.min && span.max) {
     const lo = Date.parse(span.min), hi = Date.parse(span.max);
     for (const frac of [0.1, 0.025, 0.005]) {

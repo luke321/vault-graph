@@ -1302,6 +1302,42 @@ first hit, since which folder balloons worst shifts with the vault's own generat
 — none of the three fixtures' resting state hits this shape at all, which is how it
 shipped unnoticed the first time.
 
+## A handful of notes is still drawable, on any calendar day
+
+`"filtered to the bone, the disc stays drawable"` squeezes the date range to the last
+10 % / 2.5 % / 0.5 % of the history and judges each state. Two things about how it judges,
+both settled by github#65 on 2026-09-05, when the gate failed on the dominant-folder fixture
+one day after that fixture was generated and on nothing else.
+
+**The windows are taken off the notes' own dated extent, never off the strip.** The strip's
+right edge is today whenever the vault has reached it (github#57), so "the last 0.5 %" of
+the strip was 0.5 % of a span that grew a day every day, measured back from a moving end;
+the ageing fixtures date their newest notes to their generation day, so the window's
+population followed the calendar: **8 notes on generation day, 6 the next, then 4, 2, 0**.
+Measured off the oldest and newest *dated note* instead, with `to` left open, the population
+is a property of the fixture: the shape vault generated for `--end 2026-08-20`, for
+`2026-09-05` and the store's own copy all print **86 / 24 / 8 notes** for the three windows;
+the demo and 10k fixtures print 1104 / 478 / 196 and 1306 / 591 / 195, the same regime the
+thresholds were tuned in.
+
+**`d/s` is asserted only when a step was measured.** The probe's step is the median arc of
+the rows holding four or more notes; a state with four to seven notes spread over two rows
+has no such row, `medStep` is 0, and the `0` it reported was read as "collapsed" for as long
+as this check existed. Measured in that state (6 notes, 3 per row): **the smallest dot was
+5.3 px against a resting median of 3.1 px** — nothing had collapsed. So when no row is dense
+enough, the check asserts the github#53 class directly instead: **the smallest visible dot's
+radius may not fall under the resting disc's median dot radius.** A handful of notes must
+never be drawn smaller than the full disc draws its typical one. The detail line carries the
+median dot in px beside `d/s`, and prints `d/s n/a` rather than `0` when there was no step.
+
+```bash
+node scripts/smoke.mjs --only "filtered to the bone"           # all three fixtures
+node scripts/make-shape-vault.mjs --out /tmp/sv --end 2026-08-20   # then --vault /tmp/sv: same 86/24/8
+```
+
+The layout was not changed for this: the measurement said the dots were legible, and the
+large outer-ring dots in a two-note ring (42–74 px) are `DOT_ROOM_MAX` doing what it is for.
+
 ## A folder that holds notes keeps its row, its slot and its colour
 
 The twelve automatic colour slots are handed out by POSITION in `order[state.dim]`
