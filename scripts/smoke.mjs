@@ -955,7 +955,11 @@ async function watchDuringCascade(p, startRatio, capMs = 8000) {
   var movedWhileBusy = false;
   var deadline = Date.now() + capMs;
   for (;;) {
-    var s = await p.j(`(function(){ return { busy: !!__vg.demo.busy(),
+    // THE CASCADE, not busy(): the question is whether the camera moved while notes were still
+    // leaving, and busy() also counts the hover-highlight ramp the eye click starts, which can
+    // outlast the cascade under load -- measured once as "moved early: true" in a gate run and
+    // 0 of 3 alone, the fit having begun after the last note left but with that ramp still up.
+    var s = await p.j(`(function(){ var w = __vg.demo.busyWhy(); return { busy: !!(w.cascade || w.play || w.anim),
       ratio: +__vg.renderer.getCamera().getState().ratio.toFixed(4) }; })()`);
     if (Math.abs(s.ratio - startRatio) > 0.01) movedWhileBusy = true;
     if (!s.busy || Date.now() > deadline) break;
