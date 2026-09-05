@@ -87,6 +87,17 @@ scaled by the same factor.
 | `bandRoom` | 10th percentile of `arc * r * rowsUsed / c.live` over the band | per frame, continuous |
 | `cellRoom[id]` | the same expression for the note's own cell | per frame, continuous |
 | `DOT_LO` | pixel floor, scaled by the room factor | continuous |
+| `sizeCap[id]` | the larger of the note's two RESTING radii, measured by `roomOf()` at each end | constant across the cascade; a bound, not a walk |
+
+**The product of walked terms is not walked.** `room`, `pitch` and the ramp are each walked
+between the two packings, and `dotPx` multiplies them; two quantities walked on the same clock
+keep their ratio only when the ends are proportional. Soloing a four-note folder on a ~500-note
+vault walked the inner room 96 → 923 against a pitch of 191 → 573, so `room / pitch` rose
+0.5 → 1.88 mid-walk while the ramp top rose 8.4 → 21.8, and the notes still waiting to leave
+were drawn at 36 px against a destination of 9 px (github#66). The destination is the hub cap
+for a row-0 inner note, which only takes hold on the frame the survivors arrive. So every note
+is held to the larger of what the two resting packings draw it at — never smaller than either
+end, never past both. The bound lives on `cascadeRun` and dies with it.
 
 Size must stay **monotone in link weight**: notes are laid down in weight order from the inside
 out, so the innermost note is the most connected one, and anything that modulates size by

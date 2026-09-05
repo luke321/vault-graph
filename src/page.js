@@ -6148,7 +6148,7 @@ function mountVaultGraph(root, data, deps) {
   var fullRing = false;
   /** @type {((id: string) => boolean) | null} */
   var planKeep = null;       // during a cascade: visible-or-still-on-screen
-  /** @type {{ raf: number, tick: number, guard: number } | null} */
+  /** @type {{ raf: number, tick: number, guard: number, sizeCap: Record<string, number> | null } | null} */
   var cascadeRun = null;     // in-flight cascade
   /** @type {Plan | null} */
   var pinnedPlan = null;     // plan held still for the duration of one cascade
@@ -6897,6 +6897,10 @@ function mountVaultGraph(root, data, deps) {
     var cellPair = null;
     /** @type {WalkPair | null} */
     var edgePair = null;
+    // The larger of each note's two resting radii, for the frame loop's cap (github#66) -- see
+    // where it is filled, below the endpoint capture.
+    /** @type {Record<string, number> | null} */
+    var sizeCap = null;
     /** @type {Record<string, number>} */   // cell key -> rows, before
     var rowsSrc = dict();
     /** @type {Record<string, number>} */   // cell key -> rows, after
@@ -7056,18 +7060,31 @@ function mountVaultGraph(root, data, deps) {
           graph.forEachNode(function (id) { keepAlpha[id] = alpha[id]; alpha[id] = alphaFn(id); });
         }
         var keepI = bandOf("i").room, keepO = bandOf("o").room;
-        var keepFit = dotFit, keepCell = cellRoom, keepEdge = edgeCap;
+        var keepFit = dotFit, keepCell = cellRoom, keepEdge = edgeCap, keepHub = hubRow0;
+        var keepRampI = bandOf("i").ramp, keepRampO = bandOf("o").ramp, keepScale = sizeScale;
         var keepPin = pinnedPlan, keepKeep = planKeep;
         var saved = roomNow, savedCell = cellNow, savedEdge = edgeNow;
         roomNow = null; cellNow = null; edgeNow = null; edgeNow = null;
         outPos = ringsLayout(pl, true);
+        // AND THE DRAWN RADIUS OF EVERY NOTE AT THIS END (github#66). The pass has just set
+        // this packing's room, cell rooms, wedge-edge caps and row-0 marks; measureSizeScale()
+        // gives it this packing's ramp (from the spacing it solved), and dotPx() then answers
+        // what each note would be drawn at if the disc were resting here. The frame loop holds
+        // every note to the larger of its two ends -- see sizeCap below.
+        measureSizeScale();
+        /** @type {Record<string, number>} */
+        var sizes = dict();
+        graph.forEachNode(function (id, at) {
+          if ((alpha[id] || 0) > 0.004) sizes[id] = dotPx(at.size, id);
+        });
         var got = { i: bandOf("i").room, o: bandOf("o").room, pos: outPos,
-                    cells: cellRoom, edges: edgeCap };
+                    cells: cellRoom, edges: edgeCap, sizes: sizes };
         roomNow = saved; cellNow = savedCell; edgeNow = savedEdge;
         // Everything that pass wrote as a side effect is put back: it was a measurement, not a
         // frame, and the disc must not be able to tell it happened.
         bandOf("i").room = keepI; bandOf("o").room = keepO;
-        dotFit = keepFit; cellRoom = keepCell; edgeCap = keepEdge;
+        bandOf("i").ramp = keepRampI; bandOf("o").ramp = keepRampO; sizeScale = keepScale;
+        dotFit = keepFit; cellRoom = keepCell; edgeCap = keepEdge; hubRow0 = keepHub;
         pinnedPlan = keepPin; planKeep = keepKeep;
         if (keepAlpha) graph.forEachNode(function (id) { alpha[id] = keepAlpha[id]; });
         return got;
@@ -7080,6 +7097,31 @@ function mountVaultGraph(root, data, deps) {
       if (rB) roomDstB = { i: rB.i || 0, o: rB.o || 0 };
       cellSrc = (rA && rA.cells) || null; cellDst = (rB && rB.cells) || null;
       edgeSrc = (rA && rA.edges) || null; edgeDst = (rB && rB.edges) || null;
+      // A DOT MAY NOT OUTGROW BOTH OF ITS ENDS (github#66). The room, the pitch and the ramp
+      // are each walked between the two packings, and dotPx multiplies them: room over pitch
+      // times the ramp. Two quantities walked on the same clock keep their ratio only when the
+      // ends are proportional, and here they are not -- soloing a four-note folder on a
+      // ~500-note vault walked the inner room 96 -> 923 against a pitch of 191 -> 573, so the
+      // ratio rose 0.5 -> 1.88 mid-walk while the ramp top rose 8.4 -> 21.8, and the notes
+      // still waiting to leave were drawn at 36px on a 1.08 camera. Their destination size was
+      // 9px the whole time: the survivors land in row 0 of the inner band and HUB_ROW0_FRAC
+      // holds them there, but that cap only takes hold on the frame they arrive. So every note
+      // is held to the LARGER of what the two resting packings would draw it at -- never smaller
+      // than either end, so nothing is made to shrink early, and never past both, so nothing
+      // balloons in the middle. A note absent from one end takes the other end's figure, the
+      // same rule pairUp applies to the rooms. A maximum, not a walk: a bound needs no clock.
+      if (rA || rB) {
+        sizeCap = dict();
+        /** @param {Record<string, number>} m */
+        var takeCap = function (m) {
+          Object.keys(m).forEach(function (id) {
+            var v = m[id];
+            if (sizeCap && (sizeCap[id] === undefined || v > sizeCap[id])) sizeCap[id] = v;
+          });
+        };
+        if (rA) takeCap(rA.sizes);
+        if (rB) takeCap(rB.sizes);
+      }
       // RESOLVED HERE, NOT ON EVERY FRAME (github#19).
       //
       // These two pairs of maps hold one number per note, and the frame loop used to walk them
@@ -7174,7 +7216,7 @@ function mountVaultGraph(root, data, deps) {
     var MIN_FRAMES = 20;
     var maxAdv = Math.max(1, span) / MIN_FRAMES;
     var frame = 0, tPrev = NOW(), tailFrames = 0;
-    cascadeRun = { raf: 0, tick: NOW(), guard: WIN.setTimeout(watchdog, STALL_MS) };
+    cascadeRun = { raf: 0, tick: NOW(), guard: WIN.setTimeout(watchdog, STALL_MS), sizeCap: sizeCap };
     (function step() {
       var tn = NOW();
       var adv = (tn - tPrev) / msPerFrame;
@@ -8839,6 +8881,15 @@ function mountVaultGraph(root, data, deps) {
         var hubVMax = hubCapV * (hubU / hiH);
         if (v > hubVMax) v = hubVMax;
       }
+    }
+    // AND, WHILE A CASCADE WALKS, NEVER PAST THE LARGER OF ITS TWO RESTING SIZES (github#66).
+    // Measured at both ends by roomOf() with this same function; see sizeCap in cascade() for
+    // why the walked terms above can multiply to a size neither end would draw. Read off the
+    // run rather than a variable of its own so it cannot outlive the cascade: settle() and
+    // every cancel site null cascadeRun, and this goes with it.
+    if (id !== undefined && cascadeRun && cascadeRun.sizeCap) {
+      var scap = cascadeRun.sizeCap[id];
+      if (scap !== undefined && v > scap) v = scap;
     }
     return v;
   }
