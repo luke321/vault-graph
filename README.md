@@ -105,7 +105,7 @@ browser.
 
 ### Getting the exporter
 
-**Requirements: Node 18 or newer, and one `npm ci --omit=dev` after unzipping.** That
+**Requirements: Node 18 or newer, and one `npm ci --omit=dev` after cloning.** That
 installs a single package, esbuild, which bundles the graph engine into the page; nothing
 else is downloaded, and the generator itself never touches the network. (Until the engine
 replaced the vendored libraries there was no install step at all; the trade is recorded in
