@@ -117,10 +117,8 @@ any browser, like any other file on your disk. Two steps, and the second one is 
 
 ### 1. Get it
 
-Download the latest [**release**](../../releases/latest) — every tagged version has a
-`vault-graph-<version>.zip` attached with everything needed to run, so a tag is always a
-downloadable build rather than just a source snapshot — and unzip it. Or clone, if you want
-the design records and the dev tooling too:
+Clone the repo. (Releases carry only the Obsidian plugin's three files; the exporter is not
+packaged separately.)
 
 ```bash
 git clone https://github.com/luke321/vault-graph.git

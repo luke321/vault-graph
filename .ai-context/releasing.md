@@ -1,9 +1,11 @@
 # Releasing
 
-**Every release gets a git tag, a GitHub Release, and a ready-to-run package attached.**
-The tag alone is not a release: GitHub's auto-generated source archives include
-`.ai-context/` (a few thousand lines of design records) and the dev tooling, which is not
-what someone wanting to *run* this needs.
+**Every release gets a git tag and a GitHub Release with the plugin's three files attached:
+`main.js`, `manifest.json`, `styles.css`.** The tag alone is not a release: Obsidian installs
+from those three assets and nothing else. Until 2026-09-05 the Release also carried a
+`vault-graph-<version>.zip` of the exporter; the release is plugin-only now. The exporter
+and the standalone page stay in the repo — the invariant suite drives them — and anyone
+wanting to run the exporter clones.
 
 ## One command
 
@@ -19,8 +21,8 @@ until 1.5.3, which is why 1.5.0–1.5.2 were cut by hand.)
 
 It refuses to release a dirty tree (a release must be reproducible from its tag), refuses a
 version with no `## <version>` section in `CHANGELOG.md` (a version whose changes nobody
-wrote down), runs the invariant suite, then tags, packages, pushes and creates the GitHub
-Release with the zip attached. `-DryRun` stops after the suite. The tag message is the same
+wrote down), runs the invariant suite, then tags, pushes and creates the GitHub Release with
+the three plugin files attached. `-DryRun` stops after the suite. The tag message is the same
 text as the release notes, so `git show <tag>` and the Release page agree.
 
 
@@ -143,17 +145,15 @@ over-warn (a `colours`-only change flags every feature) but never under-warns si
 4. **Run the suite.** `node scripts/smoke.mjs` — and it runs again on push via
    `.githooks/pre-push`, so a red suite cannot be released.
 5. **Tag, annotated**, with the release summary as the message.
-6. **Build the package** — `node scripts/make-package.mjs` writes
-   `dist/vault-graph-<version>.zip` containing only what is needed to run: `src/`,
-   `scripts/`, `assets/`, `package.json` and the lockfile (the exporter bundles the engine
-   with esbuild, a runtime dependency, so `npm ci --omit=dev` once), `README.md`, `LICENSE`,
-   `CHANGELOG.md`.
-7. **Create the release** and attach it:
-   `gh release create <version> dist/vault-graph-<version>.zip --notes-file <notes>`
+6. **Build the plugin** — `node scripts/build-plugin.mjs` writes `main.js` and `styles.css`
+   at the repo root (gitignored); `manifest.json` is tracked.
+7. **Create the release** and attach exactly those three:
+   `gh release create <version> main.js manifest.json styles.css --notes-file <notes>`
 
-## What the package must NOT contain
+## What the release must NOT contain
 
 - **Any built `vault-graph.html`.** It embeds the note titles and folder structure of
-  whichever vault produced it. Publishing one publishes that.
-- `test-vault/` — generated, and large.
-- `.ai-context/` — it belongs to the repo, not to a user of the tool.
+  whichever vault produced it. Publishing one publishes that. (The exporter's zip used to
+  carry its own check for this; with the zip gone, the rule is that nothing but the three
+  plugin files is attached.)
+- Anything else: the directory's scanner calls every other asset an extra unsupported file.
