@@ -494,6 +494,30 @@ hover checks failed whenever anything earlier had moved the pointer off the canv
 Measured on the 450-note vault by repeating the hover: **1 hit in 40 before, 40 in 40
 after.**
 
+**The aim has to wait for the camera, not just the layout (github#63).** Run right after
+`"layout matches its golden snapshot"` on the dominant-folder fixture this check failed 7 of
+7 with `on 710, off null, back on null`, which reads exactly like the defect above — and was
+not it. The page boots with `fit()`'s 380 ms camera flight (ratio 1.0 → 1.08) in progress,
+and `settle()` waits only for the page's own animations (play, cascade, tween, hover,
+highlight), never for the camera. Alone, `settle()` happened to wait ~600 ms behind the boot
+tween, which outlasts the flight; the golden check's `relayout()` cancels that tween and
+leaves the flight running, so `settle()` returned at once and the aim was taken at ratio
+**1.0004**. The first hover landed (pick and aim agree at the same instant), the pointer left,
+and by the return the camera had landed at 1.08 and carried the note **20,4 px** away from a
+**3.1 px** dot. Measured through the check's own miss diagnostics: `camera ratio 1.0004 at
+the aim -> 1.08 now`. Both pointer-aiming hover checks now `camSettle()` before computing the
+aim, and a miss reports the target's drift, the element under the aim and the camera ratio at
+aim vs now, so the two kinds of `back on null` can never be confused again.
+
+The frames-arriving guard in `runOne` turned out to be a no-op found on the same trail: it
+went through `page.j`, which `JSON.stringify`s a pending promise to `{}`, so `fps.frames` was
+undefined and `undefined < 5` never fired. It awaits the promise now — after `settle()`, and
+retaken up to five times before it refuses a job: its first live full run refused two demo
+shards with **3 frames in 1421 ms** while twelve browsers booted at once, which is a page
+struggling, not a page that has stopped, and the bar exists to tell those apart. A
+backgrounded renderer never produces a frame however often it is asked; a starved boot
+recovers within a second or two.
+
 ## The heatmap grid always fits its box
 
 Weeks are dropped before pixels: `heatGeom` picks columns from what fits at the 7px cell

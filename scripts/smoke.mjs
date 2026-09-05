@@ -709,7 +709,12 @@ check("hovering a note ramps in and releases at zero", async (p) => {
   // check missed roughly one run in six with 19.9px of clearance, which is far more than
   // an aiming problem and exactly the size of the drift. The miss looked like a hover bug
   // and was a timing bug -- the flavour of flake that trains you to re-run instead of read.
+  //
+  // AND FOR THE CAMERA TO STOP, which settle() does not cover (github#63, found on the re-arm
+  // check below and just as true here): a camera flight moves every note's PIXEL while the
+  // layout stands still, so an aim taken mid-flight is 20px stale by the time it is read back.
   await settle(p);
+  await camSettle(p);
   const w = await p.j(`__vg.demo.where("note","04") || __vg.demo.where("note","03")`);
   if (!w) return { ok: false, detail: "no note target resolved at all" };
   await p.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: w.x, y: w.y, buttons: 0 });
@@ -822,9 +827,24 @@ check("hover re-arms after the pointer leaves the stage", async (p) => {
   //
   // The sequence is the whole point -- on, OFF THE CANVAS, on again. Measured before the
   // fix: 1 hit in 40. After: 40 in 40.
+  //
+  // AND THE CAMERA HAS TO BE STILL BEFORE AIMING (github#63). This failed 7 of 7 on the
+  // dominant-folder fixture whenever it ran right after "layout matches its golden snapshot",
+  // and 8 of 8 alone, and the miss read as the github#7 class: "on 710, off null, back on
+  // null". It was not. The page boots with fit()'s 380ms camera flight (ratio 1.0 -> 1.08)
+  // in progress, and settle() only waits for the page's OWN animations -- play, cascade,
+  // tween, hover, highlight -- never for the camera. Alone, settle() happened to wait ~600ms
+  // behind the boot tween, which outlasts the flight; the golden check's relayout() cancels
+  // that tween and leaves the flight running, so settle() returned at once and the aim was
+  // taken at ratio 1.0004. The first hover landed (pick and aim agree at the same instant),
+  // the pointer left, and by the return the camera had landed at 1.08 and carried the note
+  // 20,4px away from a 3.1px dot. Measured through the diagnostics below, on the tree where
+  // it was reported: "camera ratio 1.0004 at the aim -> 1.08 now". The hover was never lost.
   await settle(p);
+  await camSettle(p);
   const w = await p.j(`__vg.demo.where("note","04") || __vg.demo.where("note","03")`);
   if (!w) return { ok: false, detail: "no note target resolved at all" };
+  const camAtAim = await p.j(`__vg.renderer.getCamera().getState().ratio`);
 
   const enter = async (x, y) => {
     await p.send("Input.dispatchMouseEvent", { type: "mouseMoved", x, y, buttons: 0 });
@@ -849,10 +869,33 @@ check("hover re-arms after the pointer leaves the stage", async (p) => {
                      `never landed, so there is nothing to re-arm` };
   }
   const ok = first.hovered === w.expect && away.hovered === null && back.hovered === w.expect;
+  // ON A MISS, SAY WHICH KIND. "back on null" has two readings that call for opposite fixes:
+  // the renderer still believes the pointer is on the note (the github#7 class, nothing to
+  // re-enter), or the note is no longer under the pixel the first hover found it at -- the
+  // layout moved, or something is painted over it. The hover check above already tells them
+  // apart on its own miss; this one did not, and github#63 read a stuck hover into what
+  // turned out to be the other thing.
+  let why = "";
+  if (!ok) {
+    const dg = await p.j(`(function(){
+      var a = __vg.graph.getNodeAttributes(${JSON.stringify(w.expect)});
+      var o = document.getElementById("vg-graph").getBoundingClientRect();
+      var v = __vg.renderer.graphToViewport({x: a.x, y: a.y});
+      var el = document.elementFromPoint(${w.x}, ${w.y});
+      var d = __vg.renderer.getNodeDisplayData(${JSON.stringify(w.expect)});
+      return {dx: +(v.x + o.left - ${w.x}).toFixed(1), dy: +(v.y + o.top - ${w.y}).toFixed(1),
+              r: d ? +__vg.renderer.scaleSize(d.size).toFixed(1) : null, hidden: d ? !!d.hidden : null,
+              el: el ? (el.id || el.tagName + "." + el.className) : null, busy: __vg.demo.busy(),
+              cam: +__vg.renderer.getCamera().getState().ratio.toFixed(4)};
+    })()`).catch(() => null);
+    if (dg) why = `; target now ${dg.dx},${dg.dy}px from the aim (radius ${dg.r}px` +
+                  `${dg.hidden ? ", hidden" : ""}), element at aim ${dg.el || "none"}, ` +
+                  `camera ratio ${(+camAtAim).toFixed(4)} at the aim -> ${dg.cam} now` +
+                  `${dg.busy ? ", disc still moving" : ""}`;
+  }
   return { ok,
            detail: `on ${first.hovered} (t ${first.t}), off ${away.hovered} (t ${away.t}), ` +
-                   `back on ${back.hovered} (t ${back.t})` +
-                   (back.hovered === null ? "  <- stuck: sigma still thinks it is hovered" : "") };
+                   `back on ${back.hovered} (t ${back.t})` + why };
 });
 
 check("a highlighted note is drawn larger", async (p) => {
@@ -1577,7 +1620,14 @@ check("the pan toggle locks the camera and flies home", async (p) => {
   const moved = await camSettle(p);
 
   await p.eval(`document.querySelector("#vg-pan").click(); void 0`);
-  const home = await camSettle(p);
+  // THE FLIGHT HOME IS fit(), and camSettle() can return before it has visibly begun: two
+  // samples 60ms apart inside the ease's first frames read equal, the same trap the auto-fit
+  // helper above records. Measured once in six full runs on the dominant-folder fixture as
+  // "toggling off flew home to (0.6465, 0.4186)" -- the camera read a frame into a flight it
+  // then completed. camAtRest is fit()'s own landing signal (a manual drag clears it, the
+  // landing callback sets it), so wait for that, then read where the camera is.
+  for (const dl = Date.now() + 4000; Date.now() < dl && !(await p.j(`!!__vg.camAtRest`));) await sleep(60);
+  const home = await camState(p);
   const off = await p.j(`(function(){
     return { pressed: document.querySelector("#vg-pan").getAttribute("aria-pressed"),
              setting: !!__vg.renderer.getSetting("enableCameraPanning"),
@@ -4271,12 +4321,35 @@ async function runOne(vault, work) {
     // designed to survive a slow machine -- animations stretch rather than leap below
     // ~20fps, which is an invariant of its own -- so this must catch a renderer that has
     // STOPPED, not one that is merely struggling.
-    const fps = await page.j(`new Promise(function(r){
+    // THROUGH page.eval, NOT page.j. j() wraps its expression in JSON.stringify(), and
+    // JSON.stringify of a pending promise is "{}" -- so this guard returned {} at once,
+    // `fps.frames` was undefined, `undefined < 5` is false, and the check never ran. It was
+    // a no-op from the day it was written; found while chasing github#63, where it also
+    // meant the first check in every browser started ~0ms after readiness, mid-boot-flight.
+    // eval() sets awaitPromise and returns the settled value.
+    //
+    // AND MORE THAN ONCE. The first full run with the guard live refused two demo shards on
+    // the spot -- "3 frame(s) in 1421ms" -- and every other job in the same run passed
+    // everything. Twelve browsers were booting on one machine, each laying out 1,400 notes on
+    // its main thread, and one frame per half second for the first second is what that looks
+    // like: a page struggling, which the bar above says it must NOT catch, not a page that has
+    // stopped. So the sample is retaken up to five times with a beat between; a backgrounded
+    // renderer never produces a frame however often it is asked, and a starved boot recovers
+    // within a second or two. NOT behind settle(): the frame-sensitive jobs load the page with
+    // its intro playing on purpose, and waiting that out here cost six seconds per job for
+    // nothing ("settle gave up after 6000ms, still busy: play, cascade").
+    const FRAME_PROBE = `new Promise(function(r){
       var n = 0, t0 = performance.now();
       (function tick(){ n++; if (performance.now() - t0 < 600) requestAnimationFrame(tick);
                         else r({frames: n, ms: Math.round(performance.now() - t0)}); })();
-    })`).catch(() => ({ frames: 0, ms: 0 }));
-    if (fps.frames < 5) {
+    })`;
+    let fps = null;
+    for (let attempt = 0; attempt < 5; attempt++) {
+      fps = await page.eval(FRAME_PROBE).catch(() => ({ frames: 0, ms: 0 }));
+      if (fps && fps.frames >= 5) break;
+      await sleep(500);
+    }
+    if (!fps || fps.frames < 5) {
       throw new Error(
         `the page is not animating -- ${fps.frames} frame(s) in ${fps.ms}ms.\n` +
         "Every check here measures something a frame produced, so the run would report six\n" +
