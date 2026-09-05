@@ -105,6 +105,15 @@ position makes the most connected note the smallest. That is why the room figure
 per band rather than one per note, and why a per-note `dotFit` cap was removed rather than
 softened.
 
+**A schedule is decided once, from numbers that stand still.** Each note's fade delay is
+set before the frame loop; the block that spreads a ramped group's fades across the whole
+cascade orders a hide by where the notes *are* (`posSrc`) and a show by where they are
+*going* (`finalPos`). It sat inside the frame loop until github#67 and re-sorted each set by
+the notes' *current* radius every frame — arriving notes are being walked, so two of them swap
+radial order between frames, swap delays with it, and each fade restarts from wherever the
+other's delay puts it. Measured on a solo-to-solo switch: an arriving note's alpha read
+0.43 0.5 0.58 0.65 1 0.79 0.82 0.87 0.07 0.11 0.99 across consecutive frames.
+
 ## Membership is part of the layout
 
 This one cost the most to find, so it gets its own section.

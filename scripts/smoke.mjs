@@ -247,6 +247,7 @@ const FRAME_READING = [
   "animates instead of snapping", // per-frame radial steps
   "gap reservation holds still",  // per-frame gap steps
   "outgrows",                     // per-frame dot sizes through a solo (github#66)
+  "fade never reverses",          // per-frame alphas through a solo-to-solo switch (github#67)
   "waits for the release",        // during-drag sampling
   "haloes but never pushes",      // reads a canvas mid-interaction
   // Reads a frame, so it belongs here -- but note that this classification is precautionary
@@ -2765,6 +2766,76 @@ check("a dot never outgrows its resting size while a cascade walks", async (p) =
                    `-> peak ${peak} at ${peakAt}ms over ${frames} frames -> ${after.max} at rest ` +
                    `(${after.n} shown); bound ${Math.round(bound * 10) / 10}` +
                    (ok ? "" : `  <- overshoots both resting sizes by ${(peak / Math.max(before.max, after.max)).toFixed(2)}x`) };
+});
+
+// AN ARRIVING NOTE'S FADE NEVER REVERSES (github#67). Solo one small group, let it land, then
+// solo another: the second group's notes fade in while the first's fade out. Their alpha must
+// climb monotonically -- and it did not: the block that spreads a ramped group's fades across
+// the cascade sat inside the frame loop and re-sorted the arriving notes by their CURRENT
+// radius every frame, so two notes that swapped radial order swapped delays and each fade
+// restarted from wherever the other's delay put it. One arriving note read 0.43 0.5 0.58 0.65
+// 1 0.79 0.82 0.87 0.07 0.11 0.99 across consecutive frames, and its dot flickered with it.
+// The schedule is computed once now, from positions that do not move. This samples every
+// full-cascade frame and counts, per arriving note, the times alpha falls after having risen.
+check("an arriving note's fade never reverses during a solo switch", async (p) => {
+  await clearRange(p);
+  await settle(p);
+  await camSettle(p);
+  // The two smallest groups with two or more notes: A is soloed first, then B.
+  const pair = await p.j(`(function(){
+    var gs = __vg.groupOrder().map(function (g) { return { g: g, n: __vg.groupCount(g) }; })
+      .filter(function (x) { return x.n >= 2; }).sort(function (x, y) { return x.n - y.n; });
+    return gs.length >= 2 ? [gs[0], gs[1]] : null; })()`);
+  if (!pair) return { ok: true, detail: "fewer than two groups with two or more notes -- nothing to switch between" };
+  const solo = async (g) => {
+    const w = await p.j(`__vg.demo.where("only", ${JSON.stringify(g)})`);
+    if (!w) throw new Error(`no "only" chip resolved for ${g}`);
+    await p.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: w.x, y: w.y, buttons: 0 });
+    await p.send("Input.dispatchMouseEvent", { type: "mousePressed", x: w.x, y: w.y, button: "left", clickCount: 1, buttons: 1 });
+    await p.send("Input.dispatchMouseEvent", { type: "mouseReleased", x: w.x, y: w.y, button: "left", clickCount: 1, buttons: 0 });
+  };
+  await solo(pair[0].g);
+  await settle(p);
+  await camSettle(p);
+  const arriving = await p.j(`(function(){ var out = []; __vg.graph.forEachNode(function (id) {
+    if (__vg.groupOf(id) === ${JSON.stringify(pair[1].g)}) out.push(id); }); return out; })()`);
+  await solo(pair[1].g);
+  // Sample as fast as the page answers; a reversal is alpha dropping by more than rounding
+  // after it has risen, which no monotone fade can produce whatever the frame rate.
+  const last = {}, drops = {}, peakDrop = {};
+  let samples = 0;
+  const t0 = Date.now();
+  for (;;) {
+    const s = await p.j(`(function(){ var a = {}; ${JSON.stringify(arriving)}.forEach(function (id) { a[id] = __vg.alpha[id] || 0; }); return { a: a, busy: __vg.demo.busy() }; })()`);
+    samples++;
+    for (const id of arriving) {
+      const v = s.a[id];
+      if (last[id] !== undefined && v < last[id] - 0.02) {
+        drops[id] = (drops[id] || 0) + 1;
+        peakDrop[id] = Math.max(peakDrop[id] || 0, last[id] - v);
+      }
+      last[id] = v;
+    }
+    if (!s.busy && samples > 3) break;
+    if (Date.now() - t0 > 12000) break;
+  }
+  await settle(p);
+  // Back to everything.
+  const groups = await p.j(`__vg.groupOrder()`);
+  for (const g of groups) {
+    await p.j(`(function(){
+      var b = document.querySelector('[data-eye="' + ${JSON.stringify(g)}.replace(/"/g, '\\"') + '"]');
+      if (b && b.getAttribute("aria-pressed") === "false") b.click();
+      return true; })()`).catch(() => 0);
+  }
+  await settle(p);
+  await camSettle(p);
+  const flickering = arriving.filter((id) => drops[id]);
+  const worst = flickering.sort((x, y) => (drops[y] || 0) - (drops[x] || 0))[0];
+  return { ok: flickering.length === 0,
+           detail: `${pair[0].g} (${pair[0].n}) -> ${pair[1].g} (${pair[1].n}): ${arriving.length} arriving notes over ` +
+                   `${samples} samples, ${flickering.length} with a reversed fade` +
+                   (worst ? ` (worst #${worst}: ${drops[worst]} drops, biggest ${peakDrop[worst].toFixed(2)})` : "") };
 });
 
 check("the gap reservation holds still while groups only thin", async (p) => {

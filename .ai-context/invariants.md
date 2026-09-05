@@ -1189,6 +1189,32 @@ new. Dense solos are untouched: the demo vault's 200-note folder grows monotonic
 with and without the cap (peak = rest, 1.00x). On the three fixtures the peak equals the resting
 size after the solo exactly (shape 84.2, demo 102.2, 10k 286.2 graph units).
 
+## An arriving note's fade never reverses during a solo switch
+
+Solo the smallest group with two or more notes, let it land, then solo the next smallest: every
+arriving note's alpha must climb monotonically until it rests at its target. Sampled every frame
+until the cascade lands; a drop of more than 0.02 after a rise is a reversal, which no monotone
+fade produces at any frame rate.
+
+```bash
+node scripts/smoke.mjs --only "fade never reverses"
+```
+
+Why (github#67): the block that spreads a ramped group's fades across the whole cascade sat
+inside the frame loop and re-sorted the arriving notes by their **current** radius every frame,
+handing the sorted delays back out in that order. Arriving notes are being walked, so two that
+swap radial order swap delays, and each fade restarts from wherever the other's delay puts it.
+Accessors on the alpha entries showed **121 of 127 writes from the cascade's own `step`** — one
+writer, two schedules; an arriving note read **0.43 0.5 0.58 0.65 1 0.79 0.82 0.87 0.07 0.11
+0.99** across consecutive frames, and its dot flickered with it (the radius rides the alpha).
+The schedule is computed once now, before the loop, hides ordered by `posSrc` and shows by
+`finalPos`.
+
+Measured on a mirror of the reporting vault, soloing a one-note folder then a four-note one:
+before, 3 of 4 arriving notes reversed (9, 5 and 2 radius reversals; 8, 5 and 3 alpha
+reversals); after, **0 reversals on all four**, alphas 0.01 → 1 monotone. Identical before and
+after github#66, so unrelated to the size cap.
+
 ## A settled dot is the SAME size a fresh relayout gives it, not just the same position
 
 github#21. `settle()` (the function every cascade hands off to once its frames are done)
