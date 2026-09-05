@@ -541,14 +541,16 @@ class VaultGraphView extends ItemView {
     this.teardown();
   }
 
-  // FREE THE WEBGL CONTEXTS. The renderer holds three (edges, nodes, hoverNodes) and a
-  // browser allows a small number per page; opening and closing this view a few times without
-  // killing the renderer exhausts them and the next mount draws nothing at all. kill() loses
-  // them (WEBGL_lose_context) along with the listeners and the layers.
+  // RELEASE THE MOUNT, not just its WebGL contexts. This used to reach in for
+  // api.renderer.kill(), which frees the three contexts (edges, nodes, hoverNodes -- a browser
+  // allows a small number per page, and a few open/close cycles without it left the next
+  // mount drawing nothing) and nothing else: the mount stayed alive through the document and
+  // window listeners and the ResizeObservers page.js had registered, so every close, popout
+  // and Refresh retained a whole graph (github#62). The handle's destroy() undoes all of it
+  // and kills the renderer last; it is idempotent and safe before the deferred init has run.
   teardown() {
-    const api = this.handle && this.handle.api;
-    if (api && api.renderer) {
-      try { api.renderer.kill(); } catch { /* already gone */ }
+    if (this.handle) {
+      try { this.handle.destroy(); } catch { /* already gone */ }
     }
     this.handle = null;
     this.contentEl.empty();

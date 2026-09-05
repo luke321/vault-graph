@@ -1470,6 +1470,41 @@ Sigma's half-resolution colour buffer gave, without the 2 px quantisation), and 
 density grid is gone, with the occasional plain label it drew for the hovered note during the
 first half of the hover ramp.
 
+## A torn-down mount holds nothing outside its root
+
+`mountVaultGraph`'s handle has a `destroy()`, and the plugin's `teardown()` calls it. After
+it, nothing this mount registered outside its own element is still registered: the
+`ResizeObserver` on the root and the two on the heatmap band are disconnected, the document's
+`mousemove` and `visibilitychange` listeners and the window `resize` fallbacks are removed,
+every animation frame and timer in flight is cancelled, `cascade()` refuses to start, and the
+renderer is killed last. The host still owns the root and empties it itself.
+
+```bash
+node scripts/teardown-check.mjs --vault ./demo-vault           # six destroy+remount cycles, at rest
+node scripts/teardown-check.mjs --vault ./demo-vault --quick   # teardown mid-intro
+```
+
+Measured on the 10k fixture, six cycles of the plugin's sequence (destroy or `renderer.kill()`,
+replace the root with fresh `page.html`, mount again), heap collected twice before each read:
+
+| | heap MB (post-GC) | DOM nodes | JS listeners | document mousemove | document visibilitychange |
+|---|---|---|---|---|---|
+| before, load → cycle 6 | 14.1 → 55.9 | 632 → 4107 | 140 → 926 | 2 → 8 | 1 → 7 |
+| after, load → cycle 6 | 14.1 → 14.4 | 632 → 633 | 140 → 140 | 2 → 2 | 1 → 1 |
+
+Before: **+579 DOM nodes, +131 listeners, one more of each document listener and ~7 MB per
+cycle**, every cycle. After: the load baseline, held. The harness keeps a reference to the
+previous mount only long enough to ask about its cascade and drops it before counting, so a
+retained mount shows up as growth and nothing else does; `--kill` runs the old sequence so
+the leak can be seen on demand. Mid-intro
+(`--quick`), the second half of github#62 shows: **a mount killed with `renderer.kill()` alone
+was still `busy` 400 ms and 1.2 s after its teardown, its cascade at 159 then 182 frames,
+converging at 207** — three seconds of main thread per close on a 10k vault, drawn to nothing;
+with `destroy()` the same cascade stops where it stands (155 frames, `busy` false at 400 ms).
+
+The check is manual and not in `smoke.mjs`: a cycle replaces the page's root and its `__vg`,
+and the suite's checks share one page.
+
 ## Our own code lints clean
 
 `npm run lint` runs typescript-eslint over the plugin, the page, the exporter and `scripts/`
