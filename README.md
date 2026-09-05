@@ -143,7 +143,7 @@ It reads the vault, writes the HTML, prints where it went, and exits:
 
 ```
 vault-graph: 449 notes, 1489 links, 0 orphans, 120 unresolved link(s)
-wrote /path/to/your/vault/03 - Resources/Vault Graph/vault-graph.html (732 KB)
+wrote /path/to/your/vault/vault-graph.html (732 KB)
 ```
 
 ### 3. Open that file
@@ -247,13 +247,12 @@ Registry: `%APPDATA%\obsidian\obsidian.json` (Windows),
 ```
 <this repo>/                              source: the page, the exporter, the engine (src/engine)
   └─ .ai-context/                         architecture + decision records
-<vault>/03 - Resources/Vault Graph/       ...or anywhere: --out FILE
-  ├─ vault-graph.html                     build output, opened directly in a browser
-  └─ Vault Graph.md                       optional stub note so [[Vault Graph]] resolves
+<vault>/vault-graph.html                  build output, opened directly in a browser
+                                          ...or anywhere: --out FILE
 ```
 
-That default path is the **PARA convention of the vault this was written for**, not a
-requirement — `--out` puts the file wherever you like:
+The default is the vault's root, because that is the one folder every vault has — nothing
+about your folder names or numbering is assumed. `--out` puts the file wherever you like:
 
 ```bash
 node src/build-graph.mjs --out ~/Desktop/my-vault.html
