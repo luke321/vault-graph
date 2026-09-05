@@ -60,16 +60,9 @@ export default defineConfig([
       // checks and what the directory checks; the five below close the other one.
       "obsidianmd/no-unsupported-api": "error",
       ...METER,
-      // OFF, WITH THE REASON, and off HERE rather than by a disable comment: the preset's
-      // eslint-comments/no-restricted-disable forbids disabling any obsidianmd/* inline.
-      // The rule asks the PluginSettingTab for getSettingDefinitions() so its settings show
-      // up in 1.13's settings search. On 1.13 a non-empty return REPLACES display() -- the
-      // tab is rendered from the definitions -- and this tab is ~350 lines of folder-colour
-      // picker that would need `render`-type definitions plus display() kept as the fallback
-      // for minAppVersion 1.7.2, against typings (obsidian 1.13.1) this repo does not pin.
-      // That is its own change, github#59. An empty-array stub would satisfy the rule and
-      // gain nothing. The directory's board keeps this one warning until #59 lands.
-      "obsidianmd/settings-tab/prefer-setting-definitions": "off",
+      // settings-tab/prefer-setting-definitions was off here until github#59 landed: the tab
+      // implements getSettingDefinitions() now, with display() kept as the fallback for
+      // minAppVersion 1.7.2 through 1.12, against obsidian 1.13.1's typings.
     },
     languageOptions: {
       ecmaVersion: 2022,
@@ -128,17 +121,12 @@ export default defineConfig([
       globals: globals.node,
     },
   },
-  {
-    // THE ENGINE IS HOST-AGNOSTIC: the same src/engine code draws inside Obsidian and inside the
-    // standalone page opened off a disk, where Obsidian's DOM helpers (createEl, setCssProps) do
-    // not exist. So the one preset rule that asks for them is off here, with this as the reason;
-    // everything else in the Obsidian block above still applies to it. Static styles are not
-    // set from the engine at all -- page.css positions its layers -- so that rule stays on.
-    files: ["src/engine/**/*.ts"],
-    rules: {
-      "obsidianmd/prefer-create-el": "off",
-    },
-  },
+  // THE ENGINE IS HOST-AGNOSTIC: the same src/engine code draws inside Obsidian and inside the
+  // standalone page opened off a disk, where Obsidian's DOM helpers do not exist. prefer-create-el
+  // used to be off for it here with that as the reason -- and the directory's scanner ran it
+  // anyway and flagged both sites. They are gone: colour parsing goes through an OffscreenCanvas
+  // and the layer canvases come from createEl when the container has it, so the rule runs on the
+  // engine like everywhere else.
   {
     // plugin/**/*.d.ts: declarations for the type program (the bundler's `raw:`/`b64:`
     // modules), not code -- there is nothing in one for a rule to say, and the preset's

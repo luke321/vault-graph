@@ -232,8 +232,9 @@
 
 /**
  * What mountVaultGraph returns: a getter onto the api, which does not exist until the
- * deferred init has run -- see the comment at the return statement for why a getter.
- * @typedef {{ readonly api: VgApi | null, readonly ready: boolean }} MountHandle
+ * deferred init has run -- see the comment at the return statement for why a getter -- and
+ * destroy(), which releases everything the mount holds outside its root (github#62).
+ * @typedef {{ readonly api: VgApi | null, readonly ready: boolean, destroy: () => void }} MountHandle
  */
 
 /**
@@ -300,6 +301,22 @@ function mountVaultGraph(root, data, deps) {
   var DOC = deps.doc || (root && root.ownerDocument) || (WIN && WIN.document) || null;
   /** @type {VgApi | null} */
   var API = null;
+  /**
+   * TEARDOWN. Everything this mount registers OUTSIDE its own root -- a ResizeObserver, a
+   * listener on the document or the window, a timer that would call back into it -- pushes
+   * the function that undoes it here, at the site that registered it, and destroy() runs
+   * the list in reverse. Kept as a list rather than as named fields because the sites are
+   * scattered across ten thousand lines and a field somebody forgets to add is exactly the
+   * leak this exists to stop (github#62): before it, every view close and every Refresh in
+   * Obsidian left the whole mount -- graph, layout arrays, legend DOM -- alive through one
+   * more document mousemove listener and one more visibilitychange listener that nothing
+   * removed. Measured over six kill+remount cycles on the 10k fixture: +579 DOM nodes,
+   * +131 listeners and +7 MB of post-GC heap per cycle.
+   * @type {(() => void)[]}
+   */
+  var onDestroy = [];
+  /** Set by destroy(); anything scheduled that outlives the call checks it and does nothing. */
+  var dead = false;
 
   // Ids carry a `vg-` prefix so they cannot collide with the host document, and the
   // prefix is added HERE rather than at the ~200 call sites, which stay $("graph").
@@ -6354,6 +6371,7 @@ function mountVaultGraph(root, data, deps) {
    * @param {CascadeOpts} [opts]
    */
   function cascade(done, opts) {
+    if (dead) return;                      // a torn-down mount animates nothing (github#62)
     opts = opts || {};
     stopPlay();                            // a filter change interrupts playback
     if (anim) { WIN.cancelAnimationFrame(anim); anim = null; }
@@ -9203,11 +9221,19 @@ function mountVaultGraph(root, data, deps) {
     // container is sized from the window in the standalone.
     /** Debounced: a resize storm should re-measure once, not per event. */
     var onResize = function () {
+      if (dead) return;
       if (rzTimer) WIN.clearTimeout(rzTimer);
       rzTimer = WIN.setTimeout(function () { rzTimer = null; refreshSizeScale(); placeLogo(); }, 120);
     };
-    if (window.ResizeObserver) new ResizeObserver(onResize).observe(root);
-    else window.addEventListener("resize", onResize);
+    if (window.ResizeObserver) {
+      var rootRO = new ResizeObserver(onResize);
+      rootRO.observe(root);
+      onDestroy.push(function () { rootRO.disconnect(); });
+    } else {
+      window.addEventListener("resize", onResize);
+      onDestroy.push(function () { window.removeEventListener("resize", onResize); });
+    }
+    onDestroy.push(function () { if (rzTimer) { WIN.clearTimeout(rzTimer); rzTimer = null; } });
 
     // afterRender covers the cases a camera event does not: the first paint, a
     // container resize (Sigma re-reads its dimensions and renders without the camera
@@ -10192,10 +10218,15 @@ function mountVaultGraph(root, data, deps) {
   if (DOC && typeof DOC.addEventListener === "function") {
     // Passive and capturing, so it still sees the move when something above it stops
     // propagation, and so it can never delay a scroll. See `ptr`'s own note.
-    DOC.addEventListener("mousemove", function (ev) {
+    /** @param {MouseEvent} ev */
+    var onDocMove = function (ev) {
       ptr = { x: ev.clientX, y: ev.clientY };
-    }, { capture: true, passive: true });
-    DOC.addEventListener("visibilitychange", function () {
+    };
+    DOC.addEventListener("mousemove", onDocMove, { capture: true, passive: true });
+    // Removed with the SAME capture flag it was added with, or the browser looks for a
+    // different registration and leaves this one in place.
+    onDestroy.push(function () { DOC.removeEventListener("mousemove", onDocMove, true); });
+    var onVisibility = function () {
       var away = typeof DOC.visibilityState === "string"
         ? DOC.visibilityState === "hidden" : !!DOC.hidden;
       if (!away) {
@@ -10239,7 +10270,9 @@ function mountVaultGraph(root, data, deps) {
       // An intro cut short is still owed, so it plays when the tab is next looked at rather
       // than being lost because the tab happened to be focused for a moment while loading.
       if (wasPlaying) introOwed = true;
-    });
+    };
+    DOC.addEventListener("visibilitychange", onVisibility);
+    onDestroy.push(function () { DOC.removeEventListener("visibilitychange", onVisibility); });
   }
 
   function stopPlay() {
@@ -10683,6 +10716,8 @@ function mountVaultGraph(root, data, deps) {
       DOC.removeEventListener("keydown", ctxKey, true);
       WIN.removeEventListener("resize", closeCtxMenu);
     }
+    // An open menu holds two document listeners and a window one; closing it is the teardown.
+    onDestroy.push(closeCtxMenu);
     /** @param {MouseEvent} ev */
     function ctxOutside(ev) {
       var el = $("ctxmenu");
@@ -12083,6 +12118,7 @@ function mountVaultGraph(root, data, deps) {
     // wrapper's scroll width and not its client width. Guarded on the derived cell
     // size anyway, so an observation that changes nothing costs nothing.
     var reflow = function () {
+      if (dead) return;
       if (heatRz) WIN.clearTimeout(heatRz);
       heatRz = WIN.setTimeout(function () {
         heatRz = null;
@@ -12091,8 +12127,15 @@ function mountVaultGraph(root, data, deps) {
         heatBuild();
       }, 60);
     };
-    if (window.ResizeObserver) new ResizeObserver(reflow).observe($("heatwrap"));
-    else window.addEventListener("resize", reflow);
+    if (window.ResizeObserver) {
+      var heatRO = new ResizeObserver(reflow);
+      heatRO.observe($("heatwrap"));
+      onDestroy.push(function () { heatRO.disconnect(); });
+    } else {
+      window.addEventListener("resize", reflow);
+      onDestroy.push(function () { window.removeEventListener("resize", reflow); });
+    }
+    onDestroy.push(function () { if (heatRz) { WIN.clearTimeout(heatRz); heatRz = null; } });
   }
 
   /* ---------------------------------------------------------------- demo */
@@ -12996,6 +13039,7 @@ function mountVaultGraph(root, data, deps) {
     // canvas repaint and a dozen DOM writes for no change.
     /** Re-measure the ribbon's slot; a no-op when the width has not moved. */
     var onSlot = function () {
+      if (dead) return;
       var w = measureRibbon();
       if (w && Math.abs(w - ribW) < 0.5) return;
       ribW = w;
@@ -13007,9 +13051,15 @@ function mountVaultGraph(root, data, deps) {
     // ResizeObserver is a global constructor, not a member of TypeScript's Window, so the
       // window this view lives in is viewed through a shape that names it. WIN rather than the
       // bare global on purpose: a popout has its own (see WIN's own comment).
-      var winRO = /** @type {{ ResizeObserver?: new (cb: () => void) => { observe: (el: Element) => void } }} */ (WIN);
-      if (winRO.ResizeObserver) new winRO.ResizeObserver(onSlot).observe($("heat"));
-    else WIN.addEventListener("resize", onSlot);
+      var winRO = /** @type {{ ResizeObserver?: new (cb: () => void) => { observe: (el: Element) => void, disconnect: () => void } }} */ (WIN);
+    if (winRO.ResizeObserver) {
+      var slotRO = new winRO.ResizeObserver(onSlot);
+      slotRO.observe($("heat"));
+      onDestroy.push(function () { slotRO.disconnect(); });
+    } else {
+      WIN.addEventListener("resize", onSlot);
+      onDestroy.push(function () { WIN.removeEventListener("resize", onSlot); });
+    }
     applyRange();
   }
 
@@ -14114,7 +14164,8 @@ function mountVaultGraph(root, data, deps) {
 
   /* ------------------------------------------------------------------ go */
 
-  WIN.setTimeout(function () {
+  var bootTimer = WIN.setTimeout(function () {
+    if (dead) return;                      // destroyed before it ever came up
     makeRenderer();
     // Debug handle: lets a test page inspect live layout state from outside.
     API = window.__vg = { graph: graph,
@@ -15123,6 +15174,10 @@ function mountVaultGraph(root, data, deps) {
                     // needed the identical reset for a second live caller) rather than left
                     // as a second copy of it here.
                     relayout: function () { hardRelayout(false); },
+                    // The handle's destroy(), reachable from the console and from CDP: the
+                    // standalone keeps no reference to its own handle, and the teardown
+                    // measurement (github#62) needs to tear the first mount down too.
+                    destroy: destroy,
     };
     Object.defineProperties(window.__vg, Object.getOwnPropertyDescriptors(debugAPI));
     /* ---- END: demo automation + debug API ---- */
@@ -15221,7 +15276,57 @@ function mountVaultGraph(root, data, deps) {
   // said #333330, and a manual readTheme() + refresh() fixed it instantly.
   //
   // A getter cannot go stale, and it cannot be mistaken for a value that never arrived.
-  return { get api() { return API; }, get ready() { return API !== null; } };
+  //
+  // AND A destroy(), which is the other half of mounting (github#62). The plugin's teardown
+  // used to reach in for api.renderer.kill() and empty the container, and that released the
+  // WebGL contexts and nothing else: the mount stayed alive through the listeners it had put
+  // on the document and the observers it had put on its root, and a ResizeObserver firing on
+  // the removed root could still start a cascade in it. So every view close, every popout and
+  // every Refresh in Obsidian retained a whole mount. Measured on the 10k fixture over six
+  // kill+remount cycles: +579 DOM nodes, +131 listeners, one more document mousemove and one
+  // more visibilitychange listener, +7 MB of post-GC heap, per cycle.
+  return { get api() { return API; }, get ready() { return API !== null; }, destroy: destroy };
+
+  /**
+   * Release everything this mount holds outside its own root, then kill the renderer.
+   * Idempotent, and safe before the deferred init has run. The host still owns the root and
+   * empties it itself; this only stops the mount from reaching anything once it is gone.
+   */
+  function destroy() {
+    if (dead) return;
+    dead = true;
+    WIN.clearTimeout(bootTimer);
+    // Every animation in flight, cancelled rather than landed: landing runs layout code, and
+    // there is nothing left to lay out for.
+    if (play) {
+      WIN.cancelAnimationFrame(play.raf);
+      if (play.guard) WIN.clearTimeout(play.guard);
+      play = null;
+    }
+    if (cascadeRun) {
+      WIN.cancelAnimationFrame(cascadeRun.raf);
+      WIN.clearTimeout(cascadeRun.guard);
+      cascadeRun = null;
+    }
+    if (anim) { WIN.cancelAnimationFrame(anim); anim = null; }
+    if (animGuard) { WIN.clearTimeout(animGuard); animGuard = null; }
+    if (hoverRaf) { WIN.cancelAnimationFrame(hoverRaf); hoverRaf = 0; }
+    if (hlRaf) { WIN.cancelAnimationFrame(hlRaf); hlRaf = 0; }
+    if (colorRaf) { WIN.cancelAnimationFrame(colorRaf); colorRaf = 0; }
+    // The registrations, newest first. Each one is independent, so one that throws (an
+    // observer on an element the host already removed) must not keep the rest in place.
+    for (var i = onDestroy.length - 1; i >= 0; i--) {
+      try { onDestroy[i](); } catch { /* already gone */ }
+    }
+    onDestroy.length = 0;
+    // Last, because the engine's kill() is idempotent and guards every later call, so the
+    // order is free -- and killing first would only make the cancellations above race it.
+    if (renderer) { try { renderer.kill(); } catch { /* already gone */ } }
+    // The debug handle pointed at THIS mount's api; left in place it would keep the whole
+    // graph reachable from the window after the view that owned it is gone.
+    if (window.__vg === API) delete window.__vg;
+    API = null;
+  }
 }
 
 export { mountVaultGraph };

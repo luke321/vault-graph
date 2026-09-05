@@ -11,10 +11,12 @@
 # v1.4.4 keep their prefix because renaming a published tag breaks every link to it; from
 # 1.5.0 on there is no prefix. See CHANGELOG.md's versioning section.
 #
-# One command, because a tag without its package is the failure mode this exists to
-# prevent: GitHub's auto-generated source archive ships `.ai-context/` and the dev tooling,
-# which is not what someone wanting to *run* this needs. Every tag gets a Release with
-# `vault-graph-<version>.zip` attached, so a tag is always a downloadable build.
+# One command, because a tag without its Release is the failure mode this exists to prevent:
+# Obsidian installs a plugin from the three files attached to the Release for the version
+# manifest.json claims, so a bare tag is a version nobody can install. The Release used to
+# carry a `vault-graph-<version>.zip` of the exporter as well; that went on 2026-09-05 when the
+# release became plugin-only. The exporter stays in the repo, where the suite drives it, and
+# anyone wanting to run it clones.
 #
 # RUN IT ON `main`. That is where a release is tagged, and the script refuses to run
 # anywhere else (-AllowAnyBranch overrides). See github#47 for what the absence of that
@@ -246,22 +248,10 @@ try {
   if (-not $tagExists) { Invoke-Native git @('tag', '-a', $Version, '-F', $msgFile) }
   Remove-Item $msgFile -ErrorAction SilentlyContinue
 
-  Write-Host "`n=== package ===" -ForegroundColor Cyan
-  & node (Join-Path $here 'make-package.mjs') $Version
-  if ($LASTEXITCODE -ne 0) {
-    if (-not $tagExists) { & git tag -d $Version | Out-Null }
-    throw "packaging failed"
-  }
-  $zip = Join-Path $repo "dist\vault-graph-$Version.zip"
-  if (-not (Test-Path $zip)) {
-    if (-not $tagExists) { & git tag -d $Version | Out-Null }
-    throw "no package at $zip"
-  }
-
   Write-Host "`n=== publish ===" -ForegroundColor Cyan
   $gh = (Get-Command gh -ErrorAction SilentlyContinue).Source
   if (-not $gh) { $gh = "$env:ProgramFiles\GitHub CLI\gh.exe" }
-  if (-not (Test-Path $gh)) { throw "gh CLI not found -- install it, or push the tag and attach $zip by hand" }
+  if (-not (Test-Path $gh)) { throw "gh CLI not found -- install it, or push the tag and attach main.js, manifest.json and styles.css by hand" }
 
   Invoke-Native git @('push', 'origin', 'HEAD')
   Invoke-Native git @('push', 'origin', $Version)
@@ -269,23 +259,20 @@ try {
   $notesFile = Join-Path $env:TEMP "vg-notes-$Version.md"
   $body = if ($Notes) { "$Notes`n`n$section" } else { $section }
   [IO.File]::WriteAllText($notesFile, $body, $utf8)
-  # THE THREE LOOSE FILES ARE WHAT OBSIDIAN ACTUALLY INSTALLS, and they are not optional.
+  # THE THREE FILES ARE WHAT OBSIDIAN ACTUALLY INSTALLS, and they are the whole release.
   #
   # Obsidian downloads main.js, manifest.json and styles.css directly from the release
-  # assets. It never opens the zip -- the directory's own scanner says so in as many words,
-  # "All other files will not be downloaded by Obsidian" -- so a release carrying only the
-  # zip is a release nobody can install or update to.
-  #
-  # 1.6.0 shipped exactly that way and the scan came back with two errors: "the release
-  # 1.6.0 specified in manifest.json is missing the main.js file", and the same for
-  # manifest.json. The releases before it looked fine only because they were cut BY HAND
-  # (see the version-regex note above) and attaching the loose files is what one does by
+  # assets -- the directory's own scanner says so in as many words, "All other files will
+  # not be downloaded by Obsidian" -- so a release without them is one nobody can install or
+  # update to. 1.6.0 shipped with only the exporter's zip and the scan came back with two
+  # errors: "the release 1.6.0 specified in manifest.json is missing the main.js file", and
+  # the same for manifest.json. The releases before it looked fine only because they were cut
+  # BY HAND (see the version-regex note above) and attaching these files is what one does by
   # hand. 1.6.0 was this script's first real run, which is when the omission could first
   # show up.
   #
-  # The zip stays: it is what someone wanting to RUN the exporter needs, since GitHub's
-  # source archive ships .ai-context/ and the dev tooling. The scanner calls it an extra
-  # unsupported file, which is a recommendation and is the intended trade.
+  # The zip is gone since 2026-09-05: the release is the plugin, and the scanner called the
+  # zip an extra unsupported file. Someone wanting to run the exporter clones the repo.
   $loose = @('main.js', 'manifest.json', 'styles.css') | ForEach-Object { Join-Path $repo $_ }
   $missing = $loose | Where-Object { -not (Test-Path $_) }
   if ($missing) {
@@ -295,11 +282,11 @@ try {
   }
 
   $releaseTitle = if ($Title) { "$Version - $Title" } else { $Version }
-  Invoke-Native $gh (@('release', 'create', $Version) + $loose + @($zip) +
+  Invoke-Native $gh (@('release', 'create', $Version) + $loose +
                      @('--title', $releaseTitle, '--notes-file', $notesFile))
   Remove-Item $notesFile -ErrorAction SilentlyContinue
 
-  Write-Host "`nreleased $Version with $(Split-Path $zip -Leaf)" -ForegroundColor Green
+  Write-Host "`nreleased $Version with main.js, manifest.json and styles.css" -ForegroundColor Green
   Invoke-Native $gh @('release', 'view', $Version, '--json', 'tagName,assets')
 } finally {
   Pop-Location

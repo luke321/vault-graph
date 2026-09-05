@@ -486,16 +486,27 @@
      one of those verified positions, by the same amount regardless of which formula
      placed it there -- which points at how Chrome RASTERISES a zero-content-width
      border-triangle's diagonal edges at fractional sub-pixel widths, not at anything
-     this file controls. `clip-path` paints a genuinely sized box instead of exploiting
-     border geometry, going through a different rasteriser path entirely. */
+     this file controls. A genuinely sized box painted as a triangle goes through a different
+     rasteriser path entirely. It was `clip-path: polygon(...)` for that, and the directory's
+     CSS lint flagged clip-path as only partially supported by Obsidian 1.6.5 -- the same call
+     the .sr helper above took `clip` for. So the triangle is two linear gradients instead,
+     each half of the box filled from its outer corner to the apex: fully supported everywhere
+     this runs, still a real box with real edges, and it still takes the colour from a
+     variable, which an SVG data URI could not. */
   .vault-graph .swatch[data-auto="1"]:not([aria-checked="true"])::after {
     content: "";
     position: absolute;
     left: 50%; bottom: -4px;
     width: 6px; height: 4px;
     transform: translateX(-50%);
-    background: var(--today);
-    clip-path: polygon(50% 0%, 100% 100%, 0% 100%);
+    /* Each half's gradient axis runs PERPENDICULAR to the diagonal it paints: the left
+       half's edge goes from its top-right corner (the apex) down to its bottom-left, so
+       its axis runs top-left to bottom-right and the colour is the far side of the 50%
+       line. Written the other way round once, and the screenshot showed a notch, not a
+       triangle -- the same rasteriser lesson as above, caught the same way. */
+    background:
+      linear-gradient(to bottom right, transparent 50%, var(--today) 50%) left / 50% 100% no-repeat,
+      linear-gradient(to bottom left, transparent 50%, var(--today) 50%) right / 50% 100% no-repeat;
   }
   .vault-graph .scr .auto {
     font: inherit; font-size: 10px; padding: 2px 6px; cursor: pointer; margin-left: 2px;

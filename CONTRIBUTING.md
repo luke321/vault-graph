@@ -59,10 +59,10 @@ node scripts/check-scope.mjs   # the page cannot style, or be styled by, its hos
 node scripts/check-network.mjs # nothing shipped can make a network request
 ```
 
-Two more are manual, because they launch a real Obsidian and take a minute or two each.
-Run the first if you touch the view's lifecycle — `onOpen`, `currentView`, `activate`, or
-anything that reaches for `leaf.view`; run the second if you touch what Refresh does, or
-how the plugin builds its data:
+Three more are manual, because each launches a real browser or a real Obsidian and takes a
+minute or two. Run the first if you touch the view's lifecycle — `onOpen`, `currentView`,
+`activate`, or anything that reaches for `leaf.view`; run the second if you touch what
+Refresh does, or how the plugin builds its data:
 
 ```bash
 node scripts/deferred-check.mjs --vault ./demo-vault
@@ -76,6 +76,20 @@ The second one writes a probe note into the vault you point it at and deletes it
 point it at a generated vault. It is the only harness that covers the whole round trip —
 write a file, Obsidian notices, rebuild, remount, the note is on the disc — which is what
 `Refresh doesn't seem to pick up new files` turned out to be about.
+
+Run the third if you register anything outside the page's own root — a listener on the
+document or the window, a `ResizeObserver`, a timer or animation frame that calls back into
+the mount — or touch the handle's `destroy()`:
+
+```bash
+node scripts/teardown-check.mjs --vault ./demo-vault
+```
+
+It runs the plugin's own teardown sequence six times on the standalone build (destroy, replace
+the root, mount again) and reads heap, DOM nodes and listener counts after every cycle. Before
+`destroy()` existed each cycle retained a whole mount — +579 DOM nodes, +131 listeners, +7 MB on
+the 10k fixture — through two document listeners nothing removed. `--quick` tears down
+mid-intro, which is the case where a dead mount used to keep animating.
 
 One more if you touch the renderer (`src/engine/`): the suite asserts numbers, and none of
 them can see a disc in the wrong colour. `node scripts/render-diff.mjs --against-dir <dir>`

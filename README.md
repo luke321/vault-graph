@@ -105,7 +105,7 @@ browser.
 
 ### Getting the exporter
 
-**Requirements: Node 18 or newer, and one `npm ci --omit=dev` after unzipping.** That
+**Requirements: Node 18 or newer, and one `npm ci --omit=dev` after cloning.** That
 installs a single package, esbuild, which bundles the graph engine into the page; nothing
 else is downloaded, and the generator itself never touches the network. (Until the engine
 replaced the vendored libraries there was no install step at all; the trade is recorded in
@@ -117,10 +117,8 @@ any browser, like any other file on your disk. Two steps, and the second one is 
 
 ### 1. Get it
 
-Download the latest [**release**](../../releases/latest) — every tagged version has a
-`vault-graph-<version>.zip` attached with everything needed to run, so a tag is always a
-downloadable build rather than just a source snapshot — and unzip it. Or clone, if you want
-the design records and the dev tooling too:
+Clone the repo. (Releases carry only the Obsidian plugin's three files; the exporter is not
+packaged separately.)
 
 ```bash
 git clone https://github.com/luke321/vault-graph.git
@@ -143,7 +141,7 @@ It reads the vault, writes the HTML, prints where it went, and exits:
 
 ```
 vault-graph: 449 notes, 1489 links, 0 orphans, 120 unresolved link(s)
-wrote /path/to/your/vault/03 - Resources/Vault Graph/vault-graph.html (732 KB)
+wrote /path/to/your/vault/vault-graph.html (732 KB)
 ```
 
 ### 3. Open that file
@@ -247,13 +245,12 @@ Registry: `%APPDATA%\obsidian\obsidian.json` (Windows),
 ```
 <this repo>/                              source: the page, the exporter, the engine (src/engine)
   └─ .ai-context/                         architecture + decision records
-<vault>/03 - Resources/Vault Graph/       ...or anywhere: --out FILE
-  ├─ vault-graph.html                     build output, opened directly in a browser
-  └─ Vault Graph.md                       optional stub note so [[Vault Graph]] resolves
+<vault>/vault-graph.html                  build output, opened directly in a browser
+                                          ...or anywhere: --out FILE
 ```
 
-That default path is the **PARA convention of the vault this was written for**, not a
-requirement — `--out` puts the file wherever you like:
+The default is the vault's root, because that is the one folder every vault has — nothing
+about your folder names or numbering is assumed. `--out` puts the file wherever you like:
 
 ```bash
 node src/build-graph.mjs --out ~/Desktop/my-vault.html

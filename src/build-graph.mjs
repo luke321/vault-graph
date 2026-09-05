@@ -6,7 +6,7 @@
  * grouping dimensions, and inlines the data and our own engine (bundled here with esbuild,
  * github#58) into vault-graph.html. No server, no network, no build step at view time.
  *
- * Usage:  node "03 - Resources/Vault Graph/build-graph.mjs"
+ * Usage:  node src/build-graph.mjs [--vault PATH | --vault-name NAME]
  *          [--ghosts] [--templates] [--flat-months] [--no-nav] [--dev] [--out FILE]
  *
  * Vault-agnostic: it crawls every folder and reads which folders are templates
@@ -140,9 +140,16 @@ const INCLUDE_GHOSTS = flag("ghosts");        // unresolved [[links]] as phantom
 // for it with `?wedges` when a reported animation bug needs looking at.
 const DEV_BUILD = flag("dev");
 const INCLUDE_TEMPLATES = flag("templates");
-// Default output goes NEXT TO THE VAULT'S copy, not next to the source: the HTML is what
-// has to travel to the other devices, and the vault is what syncs.
-const OUT = opt("out", join(VAULT, "03 - Resources", "Vault Graph", "vault-graph.html"));
+// Default output goes INTO THE VAULT, not next to the source: the HTML is what has to
+// travel to the other devices, and the vault is what syncs. At the vault's ROOT, because
+// that is the one place every vault has. It used to default to a numbered PARA folder
+// ("03 - Resources/Vault Graph/") -- the convention of the vault this was written for, and
+// the last folder name baked into a tool whose one rule is that nothing about a vault is
+// (decisions/0005). writeFileSync creates no directories, so on any vault without that exact
+// folder pair the documented one-call launch died with ENOENT (github#64). A dot-folder
+// (.obsidian/plugins/...) was the other candidate and is ruled out by the same ADR: it does
+// not sync. --out still puts the file anywhere.
+const OUT = opt("out", join(VAULT, "vault-graph.html"));
 // Month buckets (04 - Daily Notes/2026-08) are real subfolders and shown as such.
 // Pass --flat-months to fold them into their parent instead.
 const FLAT_MONTHS = flag("flat-months");

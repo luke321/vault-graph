@@ -494,6 +494,30 @@ hover checks failed whenever anything earlier had moved the pointer off the canv
 Measured on the 450-note vault by repeating the hover: **1 hit in 40 before, 40 in 40
 after.**
 
+**The aim has to wait for the camera, not just the layout (github#63).** Run right after
+`"layout matches its golden snapshot"` on the dominant-folder fixture this check failed 7 of
+7 with `on 710, off null, back on null`, which reads exactly like the defect above — and was
+not it. The page boots with `fit()`'s 380 ms camera flight (ratio 1.0 → 1.08) in progress,
+and `settle()` waits only for the page's own animations (play, cascade, tween, hover,
+highlight), never for the camera. Alone, `settle()` happened to wait ~600 ms behind the boot
+tween, which outlasts the flight; the golden check's `relayout()` cancels that tween and
+leaves the flight running, so `settle()` returned at once and the aim was taken at ratio
+**1.0004**. The first hover landed (pick and aim agree at the same instant), the pointer left,
+and by the return the camera had landed at 1.08 and carried the note **20,4 px** away from a
+**3.1 px** dot. Measured through the check's own miss diagnostics: `camera ratio 1.0004 at
+the aim -> 1.08 now`. Both pointer-aiming hover checks now `camSettle()` before computing the
+aim, and a miss reports the target's drift, the element under the aim and the camera ratio at
+aim vs now, so the two kinds of `back on null` can never be confused again.
+
+The frames-arriving guard in `runOne` turned out to be a no-op found on the same trail: it
+went through `page.j`, which `JSON.stringify`s a pending promise to `{}`, so `fps.frames` was
+undefined and `undefined < 5` never fired. It awaits the promise now — after `settle()`, and
+retaken up to five times before it refuses a job: its first live full run refused two demo
+shards with **3 frames in 1421 ms** while twelve browsers booted at once, which is a page
+struggling, not a page that has stopped, and the bar exists to tell those apart. A
+backgrounded renderer never produces a frame however often it is asked; a starved boot
+recovers within a second or two.
+
 ## The heatmap grid always fits its box
 
 Weeks are dropped before pixels: `heatGeom` picks columns from what fits at the 7px cell
@@ -1302,6 +1326,42 @@ first hit, since which folder balloons worst shifts with the vault's own generat
 — none of the three fixtures' resting state hits this shape at all, which is how it
 shipped unnoticed the first time.
 
+## A handful of notes is still drawable, on any calendar day
+
+`"filtered to the bone, the disc stays drawable"` squeezes the date range to the last
+10 % / 2.5 % / 0.5 % of the history and judges each state. Two things about how it judges,
+both settled by github#65 on 2026-09-05, when the gate failed on the dominant-folder fixture
+one day after that fixture was generated and on nothing else.
+
+**The windows are taken off the notes' own dated extent, never off the strip.** The strip's
+right edge is today whenever the vault has reached it (github#57), so "the last 0.5 %" of
+the strip was 0.5 % of a span that grew a day every day, measured back from a moving end;
+the ageing fixtures date their newest notes to their generation day, so the window's
+population followed the calendar: **8 notes on generation day, 6 the next, then 4, 2, 0**.
+Measured off the oldest and newest *dated note* instead, with `to` left open, the population
+is a property of the fixture: the shape vault generated for `--end 2026-08-20`, for
+`2026-09-05` and the store's own copy all print **86 / 24 / 8 notes** for the three windows;
+the demo and 10k fixtures print 1104 / 478 / 196 and 1306 / 591 / 195, the same regime the
+thresholds were tuned in.
+
+**`d/s` is asserted only when a step was measured.** The probe's step is the median arc of
+the rows holding four or more notes; a state with four to seven notes spread over two rows
+has no such row, `medStep` is 0, and the `0` it reported was read as "collapsed" for as long
+as this check existed. Measured in that state (6 notes, 3 per row): **the smallest dot was
+5.3 px against a resting median of 3.1 px** — nothing had collapsed. So when no row is dense
+enough, the check asserts the github#53 class directly instead: **the smallest visible dot's
+radius may not fall under the resting disc's median dot radius.** A handful of notes must
+never be drawn smaller than the full disc draws its typical one. The detail line carries the
+median dot in px beside `d/s`, and prints `d/s n/a` rather than `0` when there was no step.
+
+```bash
+node scripts/smoke.mjs --only "filtered to the bone"           # all three fixtures
+node scripts/make-shape-vault.mjs --out /tmp/sv --end 2026-08-20   # then --vault /tmp/sv: same 86/24/8
+```
+
+The layout was not changed for this: the measurement said the dots were legible, and the
+large outer-ring dots in a two-note ring (42–74 px) are `DOT_ROOM_MAX` doing what it is for.
+
 ## A folder that holds notes keeps its row, its slot and its colour
 
 The twelve automatic colour slots are handed out by POSITION in `order[state.dim]`
@@ -1433,6 +1493,41 @@ geometry (within `size / ratio` px of the centre, the last-drawn node winning --
 Sigma's half-resolution colour buffer gave, without the 2 px quantisation), and the label
 density grid is gone, with the occasional plain label it drew for the hovered note during the
 first half of the hover ramp.
+
+## A torn-down mount holds nothing outside its root
+
+`mountVaultGraph`'s handle has a `destroy()`, and the plugin's `teardown()` calls it. After
+it, nothing this mount registered outside its own element is still registered: the
+`ResizeObserver` on the root and the two on the heatmap band are disconnected, the document's
+`mousemove` and `visibilitychange` listeners and the window `resize` fallbacks are removed,
+every animation frame and timer in flight is cancelled, `cascade()` refuses to start, and the
+renderer is killed last. The host still owns the root and empties it itself.
+
+```bash
+node scripts/teardown-check.mjs --vault ./demo-vault           # six destroy+remount cycles, at rest
+node scripts/teardown-check.mjs --vault ./demo-vault --quick   # teardown mid-intro
+```
+
+Measured on the 10k fixture, six cycles of the plugin's sequence (destroy or `renderer.kill()`,
+replace the root with fresh `page.html`, mount again), heap collected twice before each read:
+
+| | heap MB (post-GC) | DOM nodes | JS listeners | document mousemove | document visibilitychange |
+|---|---|---|---|---|---|
+| before, load → cycle 6 | 14.1 → 55.9 | 632 → 4107 | 140 → 926 | 2 → 8 | 1 → 7 |
+| after, load → cycle 6 | 14.1 → 14.4 | 632 → 633 | 140 → 140 | 2 → 2 | 1 → 1 |
+
+Before: **+579 DOM nodes, +131 listeners, one more of each document listener and ~7 MB per
+cycle**, every cycle. After: the load baseline, held. The harness keeps a reference to the
+previous mount only long enough to ask about its cascade and drops it before counting, so a
+retained mount shows up as growth and nothing else does; `--kill` runs the old sequence so
+the leak can be seen on demand. Mid-intro
+(`--quick`), the second half of github#62 shows: **a mount killed with `renderer.kill()` alone
+was still `busy` 400 ms and 1.2 s after its teardown, its cascade at 159 then 182 frames,
+converging at 207** — three seconds of main thread per close on a 10k vault, drawn to nothing;
+with `destroy()` the same cascade stops where it stands (155 frames, `busy` false at 400 ms).
+
+The check is manual and not in `smoke.mjs`: a cycle replaces the page's root and its `__vg`,
+and the suite's checks share one page.
 
 ## Our own code lints clean
 

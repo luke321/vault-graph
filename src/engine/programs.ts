@@ -320,7 +320,7 @@ export class NodeCircleProgram extends NodeProgram {
     a[i++] = data.x;
     a[i++] = data.y;
     a[i++] = data.size;
-    a[i++] = floatColor(data.color, this.doc);
+    a[i++] = floatColor(data.color);
   }
 
   protected setUniforms(p: RenderParams): void {
@@ -450,8 +450,8 @@ export class NodeHaloProgram extends NodeProgram {
     a[i++] = data.x;
     a[i++] = data.y;
     a[i++] = data.size;
-    a[i++] = floatColor(data.haloColor || DEFAULT_HALO_COLOR, this.doc);
-    a[i++] = floatColor(data.color || DEFAULT_HALO_COLOR, this.doc);
+    a[i++] = floatColor(data.haloColor || DEFAULT_HALO_COLOR);
+    a[i++] = floatColor(data.color || DEFAULT_HALO_COLOR);
   }
 
   protected setUniforms(p: RenderParams): void {
@@ -600,7 +600,7 @@ export class EdgeLineProgram extends EdgeProgram {
     a[i++] = y2;
     a[i++] = n1;
     a[i++] = n2;
-    a[i++] = floatColor(data.color, this.doc);
+    a[i++] = floatColor(data.color);
   }
 
   protected setUniforms(p: RenderParams): void {
@@ -783,7 +783,7 @@ export class EdgeCurveProgram extends EdgeProgram {
     a[i++] = target.y;
     a[i++] = data.size || 1;
     a[i++] = data.curvature ?? DEFAULT_CURVATURE;
-    a[i++] = floatColor(data.color, this.doc);
+    a[i++] = floatColor(data.color);
   }
 
   protected setUniforms(p: RenderParams): void {
