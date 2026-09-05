@@ -27,6 +27,8 @@ import { buildSync } from "esbuild";
 // When a note was written -- the one rule, shared with plugin/main.js so the two
 // mounts cannot drift. See src/dates.mjs for the order and why. github#6
 import { localDay, resolveCreated, dateTally } from "./dates.mjs";
+// Sigma's MIT notice, which the ported engine obliges every exported page to carry.
+import { engineBanner } from "./engine/notice.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 // Repo root. Everything this script reads that is not source lives beside src/,
@@ -552,6 +554,7 @@ const engine = (() => {
       target: "es2020",
       minify: false,
       logLevel: "silent",
+      banner: { js: engineBanner() },
     }).outputFiles[0].text;
   } catch (e) {
     // esbuild's error carries its messages as a list; the default stack shows none of them.
@@ -561,9 +564,10 @@ const engine = (() => {
   }
 })();
 
-// The engine's camera math and shaders are ported from Sigma.js (MIT); the attribution rides
-// in the engine source itself (src/engine/NOTICE.md) and in the bundle's own comments, so the
-// output no longer needs a licence header of its own.
+// The engine's camera math and shaders are ported from Sigma.js (MIT). The attribution is
+// src/engine/NOTICE.md, and its MIT block rides at the top of this bundle as the `/*!` banner
+// esbuild was handed above -- esbuild strips the source files' own comments, so the bundle
+// carried no notice at all until the banner was added. That is the output's licence header.
 const libs = `<script>\n${engine.trimEnd()}\n</script>`;
 
 // The logo and favicon are inlined as data URIs for the same reason the libraries

@@ -19,6 +19,7 @@ import { build, context } from "esbuild";
 import { readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { engineBanner } from "../src/engine/notice.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(HERE, "..");
@@ -130,8 +131,11 @@ const options = {
   minify: false,
   logLevel: "info",
   plugins: [rawLoader, stripDemoAndDebugPlugin],
+  // The second block is Sigma's MIT notice, which the ported engine obliges this file to
+  // carry (src/engine/NOTICE.md). A `/*!` comment, so a minifier would keep it too.
   banner: {
-    js: "/* Vault Graph -- built by scripts/build-plugin.mjs. Source: plugin/ and src/. */",
+    js: "/* Vault Graph -- built by scripts/build-plugin.mjs. Source: plugin/ and src/. */\n" +
+        engineBanner(),
   },
 };
 
