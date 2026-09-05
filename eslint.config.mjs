@@ -60,6 +60,10 @@ export default defineConfig([
       // checks and what the directory checks; the five below close the other one.
       "obsidianmd/no-unsupported-api": "error",
       ...METER,
+      // An empty catch is the teardown idiom here as much as in the scripts (kill what may
+      // already be gone), and github#61 took the comment out of every one of them; the block
+      // is the statement. Anything else empty is still a finding.
+      "no-empty": ["error", { allowEmptyCatch: true }],
       // settings-tab/prefer-setting-definitions was off here until github#59 landed: the tab
       // implements getSettingDefinitions() now, with display() kept as the fallback for
       // minAppVersion 1.7.2 through 1.12, against obsidian 1.13.1's typings.

@@ -134,6 +134,18 @@ commit and neither mechanism can see the other:
 `main` also carries a ruleset: pull request required, that check required, no force pushes,
 no deletion.
 
+## Comments are pointers
+
+A comment in `plugin/`, `src/` or `scripts/` carries a reference and nothing else: a bare
+`github#N`, `decisions/NNNN` or `design/NNNN`. The reasoning, the measurements and the
+rejected alternatives live in `.ai-context/` — `changelog-detail.md` for what was measured,
+the ADRs for why not the other thing, `invariants.md` for what a check asserts — and
+`.ai-context/code-index.md` (generated) says which code cites which record. What stays in
+the code besides pointers: JSDoc blocks carrying a tag (the type-aware lint reads them),
+section banners (the code map reads them), the build's `BEGIN`/`END` strip markers, and
+PowerShell `<# .SYNOPSIS #>` help blocks (Get-Help reads them). github#61 set this rule and
+applied it: 15,399 → 8,173 lines in `src/page.js` alone.
+
 ## Commit messages
 
 Reference the issue with a **closing keyword** — `Closes #7` on its own line in the body:
