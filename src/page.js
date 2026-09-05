@@ -7216,6 +7216,58 @@ function mountVaultGraph(root, data, deps) {
     var MIN_FRAMES = 20;
     var maxAdv = Math.max(1, span) / MIN_FRAMES;
     var frame = 0, tPrev = NOW(), tailFrames = 0;
+    // A RAMPED GROUP'S FADES FILL THE WHOLE CASCADE. The wedge's arc walks the full span, and
+    // the default stagger window is far shorter for a small group -- so its notes were gone by
+    // a third in, the ramped wedge closed EMPTY for the rest, and when the last note's cull
+    // took the cell out of the plan the arc fell off a cliff: measured 6.92 degrees in one
+    // frame on the single-note folder, 84x the mean step. Spread across span - FADE, the last
+    // fade lands at the cascade's end, where the arc is ~0 and the cull costs nothing. Order:
+    // inner to outer on a hide (the column winks out from the hub), outer to inner on a show
+    // (it materialises from the rim) -- the two are time-mirrors, like the arc itself.
+    //
+    // ONCE, BEFORE THE FRAME LOOP, AND ORDERED BY POSITIONS THAT DO NOT MOVE (github#67). This
+    // block sat inside step() and re-sorted each set by the notes' CURRENT radius every frame.
+    // Arriving notes are being walked, so two of them swap radial order from one frame to the
+    // next, swap delays with it, and each fade restarts from wherever the other's delay puts
+    // it: soloing a one-note folder and then a four-note one, an arriving note's alpha read
+    // 0.43 0.5 0.58 0.65 1 0.79 0.82 0.87 0.07 0.11 0.99 -- one writer, two schedules -- and
+    // the dot flickered with it. A hide is ordered by where the notes ARE (posSrc), a show by
+    // where they are GOING (finalPos, the destination the cascade has already laid out): a
+    // schedule is a decision about the run, so it is made once, from numbers that stand still.
+    (function () {
+      var stretch = Math.max(1, span - FADE_FRAMES * TIME_SCALE);
+      /** @param {string} id @param {boolean} out */
+      var radiusOf = function (id, out) {
+        var pt = out ? posSrc[id] : finalPos[id];
+        if (!pt) { var a0 = graph.getNodeAttributes(id); pt = { x: a0.x, y: a0.y }; }
+        return Math.hypot(pt.x, pt.y);
+      };
+      Object.keys(tglDir).forEach(function (g0) {
+        var out = tglDir[g0] === "out";
+        var set = (out ? outs : ins).filter(function (id) {
+          return groupOf(id) === g0;
+        });
+        if (!set.length) return;
+        set.sort(function (p, q) {
+          var d = radiusOf(p, out) - radiusOf(q, out);
+          return out ? d : -d;   // hide: inner first; show: outer first
+        });
+        // HIDES ONLY. The cliff this fixes is a hide phenomenon -- the last note's fade
+        // culls the cell and the arc falls off whatever it was still holding -- and a show
+        // has no equivalent: its cell exists from the first frame. Stretching the arrivals
+        // too left two of a three-note column standing in a part-open wedge for 28 frames,
+        // against 1 on develop. So a show keeps the natural stagger and only its ORDER is
+        // ours: outer first, so the column materialises from the rim inward.
+        if (out) {
+          set.forEach(function (id, i) {
+            delay[id] = set.length < 2 ? stretch : stretch * i / (set.length - 1);
+          });
+        } else {
+          var base0 = set.map(function (id) { return delay[id] || 0; }).sort(function (x, y) { return x - y; });
+          set.forEach(function (id, i) { delay[id] = base0[i]; });
+        }
+      });
+    })();
     cascadeRun = { raf: 0, tick: NOW(), guard: WIN.setTimeout(watchdog, STALL_MS), sizeCap: sizeCap };
     (function step() {
       var tn = NOW();
@@ -7274,43 +7326,6 @@ function mountVaultGraph(root, data, deps) {
       // as the blended rows, spread across the whole fade.
       // Membership is the union of staying and still-on-screen (planKeep), and
       // the weights do the densifying.
-    // A RAMPED GROUP'S FADES FILL THE WHOLE CASCADE. The wedge's arc walks the full span, and
-    // the default stagger window is far shorter for a small group -- so its notes were gone by
-    // a third in, the ramped wedge closed EMPTY for the rest, and when the last note's cull
-    // took the cell out of the plan the arc fell off a cliff: measured 6.92 degrees in one
-    // frame on the single-note folder, 84x the mean step. Spread across span - FADE, the last
-    // fade lands at the cascade's end, where the arc is ~0 and the cull costs nothing. Order:
-    // inner to outer on a hide (the column winks out from the hub), outer to inner on a show
-    // (it materialises from the rim) -- the two are time-mirrors, like the arc itself.
-    (function () {
-      var stretch = Math.max(1, span - FADE_FRAMES * TIME_SCALE);
-      Object.keys(tglDir).forEach(function (g0) {
-        var set = (tglDir[g0] === "out" ? outs : ins).filter(function (id) {
-          return groupOf(id) === g0;
-        });
-        if (!set.length) return;
-        set.sort(function (p, q) {
-          var ap = graph.getNodeAttributes(p), aq = graph.getNodeAttributes(q);
-          var d = Math.hypot(ap.x, ap.y) - Math.hypot(aq.x, aq.y);
-          return tglDir[g0] === "out" ? d : -d;   // hide: inner first; show: outer first
-        });
-        // HIDES ONLY. The cliff this fixes is a hide phenomenon -- the last note's fade
-        // culls the cell and the arc falls off whatever it was still holding -- and a show
-        // has no equivalent: its cell exists from the first frame. Stretching the arrivals
-        // too left two of a three-note column standing in a part-open wedge for 28 frames,
-        // against 1 on develop. So a show keeps the natural stagger and only its ORDER is
-        // ours: outer first, so the column materialises from the rim inward.
-        if (tglDir[g0] === "out") {
-          set.forEach(function (id, i) {
-            delay[id] = set.length < 2 ? stretch : stretch * i / (set.length - 1);
-          });
-        } else {
-          var base0 = set.map(function (id) { return delay[id] || 0; }).sort(function (x, y) { return x - y; });
-          set.forEach(function (id, i) { delay[id] = base0[i]; });
-        }
-      });
-    })();
-
       /** @param {Cell} c */
       var rowsAt = function (c) {
         var s = rowsSrc[c.k], d = rowsDst[c.k];
