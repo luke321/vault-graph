@@ -426,6 +426,7 @@ the plugin puts them in an Obsidian view.
 | `scripts/install-plugin.ps1` | copies exactly the three files Obsidian installs, and nothing else |
 | `scripts/smoke.mjs` | the invariant suite, over both vault shapes |
 | `scripts/check-scope.mjs` | asserts the page cannot style or be styled by its host |
+| `scripts/code-map.mjs` | generates `.ai-context/code-map.md` and `code-index.md` from the source; `--check` gates them |
 | `scripts/check-pii.mjs` | refuses to publish other people's names; no skip flag |
 | `scripts/check-network.mjs` | asserts nothing shipped can make a request; no skip flag |
 | `scripts/refresh-check.mjs` | drives a real Obsidian: write a note, click Refresh, is it there? |

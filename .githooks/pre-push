@@ -219,6 +219,22 @@ EOF
   exit 1
 fi
 
+# THE GENERATED NAVIGATION FILES NEXT, same bar -- a read of the tree, well under a second.
+# .ai-context/code-map.md and code-index.md are written from the source by
+# scripts/code-map.mjs (github#61) and are only worth having while they agree with it; a
+# stale map sends the next reader to the wrong line range, which is worse than no map.
+echo "pre-push: checking the code map and index are current..."
+if ! node "$root/scripts/code-map.mjs" --check </dev/null; then
+  cat >&2 <<'EOF'
+
+pre-push: the generated code map or index is stale -- push blocked.
+
+Run: node scripts/code-map.mjs   and commit .ai-context/code-map.md and code-index.md.
+`npm run build` regenerates them too. There is no skip flag for this check.
+EOF
+  exit 1
+fi
+
 # LINT NEXT, same bar again -- about five seconds, no Chrome -- and no skip flag, for a
 # different reason: a lint that runs when someone remembers was 27 warnings deep when it was
 # made a gate (github#55), 26 of them values assigned and never read. The same run

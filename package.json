@@ -4,7 +4,7 @@
   "private": true,
   "description": "Build tooling for the Vault Graph Obsidian plugin and its HTML exporter. Both bundle the TypeScript engine under src/engine with esbuild; the exporter needs nothing else here.",
   "scripts": {
-    "build": "node scripts/build-plugin.mjs",
+    "build": "node scripts/code-map.mjs && node scripts/build-plugin.mjs",
     "dev": "node scripts/build-plugin.mjs --watch",
     "lint": "node scripts/lint.mjs",
     "typecheck": "tsc --noEmit -p tsconfig.engine.json"

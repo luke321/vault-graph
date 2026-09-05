@@ -105,8 +105,10 @@ happens — so this one quits and relaunches to get the leaf into the state a pe
 restart of the day puts it in.
 
 `git config core.hooksPath .githooks` once per clone runs those on every push to `develop` or
-`main`, along with a check that refuses to publish other people's names and two that keep the
-generated fixtures deterministic. Only the invariant suite has a skip flag, on purpose:
+`main`, along with a check that refuses to publish other people's names, two that keep the
+generated fixtures deterministic, and one that keeps the generated navigation files
+(`.ai-context/code-map.md`, `.ai-context/code-index.md`, from `node scripts/code-map.mjs`)
+in step with the source. Only the invariant suite has a skip flag, on purpose:
 everything else is a static read costing seconds at most, and what most of it prevents is
 damage to somebody else's software, or to somebody else. The lint gate fails closed on a
 clone that has not run `npm ci` — run it, then push.
