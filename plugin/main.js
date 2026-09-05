@@ -814,6 +814,38 @@ const BUILD_SETTINGS = [
     desc: "Sizes each note by its length. The one setting that costs real I/O: it reads every file rather than answering from the metadata cache." },
 ];
 
+// VIEW, not build: these change how you look rather than what you see, so each applies live
+// through the view's api and never rebuilds. One table for both render paths -- display() for
+// Obsidian before 1.13, getSettingDefinitions() from 1.13 -- so the two cannot drift.
+//
+// `defaultOn` is the "absent means on" rule: three of these read `!== false` so a settings
+// file written before they existed shows the toggle on, and the fourth is opt-in (`=== true`).
+// The graph's own controls -- the corner pan button, the (unlinked) row's context menu --
+// write the SAME settings, which is the point: the control is how you find the feature and
+// this is where the default lives.
+/**
+ * @typedef {Object} ViewSetting
+ * @property {"panEnabled" | "compactAxis" | "unlinkedByFolder" | "unlinkedTintByFolder"} key
+ * @property {string} name
+ * @property {string} desc
+ * @property {boolean} defaultOn
+ * @property {"setPanEnabled" | "setCompactAxis" | "setUnlinkedByFolder" | "setUnlinkedTintByFolder"} api
+ */
+/** @type {ViewSetting[]} */
+const VIEW_SETTINGS = [
+  { key: "panEnabled", name: "Drag to pan", defaultOn: true, api: "setPanEnabled",
+    desc: "Drag the graph to move it, and zoom toward the pointer. Off pins the disc to the centre of the view. The control in the graph's bottom-right corner flips it too, and lands back here." },
+  { key: "compactAxis", name: "Compact date axis", defaultOn: true, api: "setCompactAxis",
+    desc: "Give each year on the date strip width by how many notes it holds, instead of every year and month reading the same width regardless of content." },
+  { key: "unlinkedByFolder", name: "Unlinked notes join their folder", defaultOn: true, api: "setUnlinkedByFolder",
+    desc: "A note with no links takes its own folder's wedge and colour, instead of sitting apart in a separate unlinked group. The (unlinked) row's right-click menu flips this too, and lands back here." },
+  { key: "unlinkedTintByFolder", name: "Colour unlinked notes by folder", defaultOn: false, api: "setUnlinkedTintByFolder",
+    desc: "While unlinked notes are kept as their own group (the toggle just above is off), give each one its own folder's colour instead of the flat unlinked swatch. The (unlinked) row's right-click menu carries this too." },
+];
+
+// The one sentence under the Folder colours heading, shared by both render paths.
+const COLOURS_DESC = "Twelve slots, handed out in folder order and round again. Setting one folder never moves another, and two folders may share a colour.";
+
 // MUST MATCH src/page.js's SLOT_NAMES: ten hues, then two greys. Kept as a copy rather
 // than imported because page.js keeps every name inside mountVaultGraph, and it has to --
 // the standalone build turns that module into a plain <script>, where anything at module
@@ -910,11 +942,89 @@ class VaultGraphSettingTab extends PluginSettingTab {
     this.plugin = plugin;
     // Which folders' subfolder rows are expanded. Tab-local UI state, not settings -- it
     // does not need to survive a restart, only a re-render, so it lives here rather than
-    // in this.plugin.settings. display() rebuilds the whole tab but never touches this,
-    // which is the point: a pick calls this.display() too, and reopening after a click
-    // must not collapse the section the click was made in.
+    // in this.plugin.settings. A pick redraws the colour rows (redrawColours) and never
+    // touches this, which is the point: reopening after a click must not collapse the
+    // section the click was made in.
     /** @type {Record<string, boolean>} */
     this.subOpen = {};
+    /** @type {HTMLElement | null} */
+    this.scope = null;
+  }
+
+  /* ----------------------------------------------------------- two render paths --
+   * Obsidian 1.13 renders a settings tab from getSettingDefinitions() -- that is also what
+   * its settings search indexes -- and does not call display() when the definitions are
+   * non-empty. Below 1.13 only display() exists. minAppVersion is 1.7.2, so both are here,
+   * built from the same tables (BUILD_SETTINGS, VIEW_SETTINGS) and the same colour section
+   * (renderColourSection), so that what one path shows the other shows too. github#59. */
+
+  /**
+   * The declarative tab: the four build toggles, the four view toggles under a heading, and
+   * the folder-colour picker as one imperatively rendered row, since a per-folder swatch grid
+   * with expandable subfolder rows is nothing a declarative control expresses.
+   * @returns {import("obsidian").SettingDefinitionItem[]}
+   */
+  getSettingDefinitions() {
+    /** @param {{ key: string, name: string, desc: string }} s @param {boolean} defaultOn */
+    const toggle = (s, defaultOn) => ({
+      name: s.name, desc: s.desc,
+      control: { type: /** @type {"toggle"} */ ("toggle"), key: s.key, defaultValue: defaultOn },
+    });
+    return [
+      ...BUILD_SETTINGS.map((s) => toggle(s, false)),
+      { type: /** @type {"group"} */ ("group"), heading: "View",
+        items: VIEW_SETTINGS.map((s) => toggle(s, s.defaultOn)) },
+      { type: /** @type {"group"} */ ("group"), heading: "Folder colours",
+        items: [{
+          name: "Folder and subfolder colours", desc: COLOURS_DESC,
+          aliases: ["colour", "color", "swatch", "palette", "subfolder", "hidden by default", "archive"],
+          // The row's own parent is the group's list element -- the swatch rows go right
+          // under this row. Read off settingEl rather than the SettingGroup handed in,
+          // whose listEl is 1.11 API and this plugin's floor is 1.7.2 (the callback itself
+          // only ever runs on 1.13, but the API check cannot know that).
+          /** @param {Setting} setting */
+          render: (setting) => {
+            this.renderColourSection(setting);
+            // Torn down with the row: the scope holds the swatch rows and is what
+            // redrawColours() writes into, so a stale one must not outlive its tab.
+            return () => { if (this.scope) { this.scope.remove(); this.scope = null; } };
+          },
+        }] },
+    ];
+  }
+
+  // The two accessors the declarative controls go through. Reading is a plain lookup --
+  // `defaultValue` on each control carries the absent-means-on rule -- and writing is where
+  // the side effects live: a build setting changes what is IN the graph and rebuilds the
+  // view, a view setting pushes the change through the live api. The same two branches
+  // display() has always taken, in one place.
+  /** @param {string} key */
+  getControlValue(key) {
+    return this.plugin.settings[/** @type {keyof Settings} */ (key)];
+  }
+  /** @param {string} key @param {unknown} value */
+  async setControlValue(key, value) {
+    const build = BUILD_SETTINGS.find((s) => s.key === key);
+    const view = VIEW_SETTINGS.find((s) => s.key === key);
+    if (!build && !view) return;
+    this.plugin.settings[/** @type {"ghosts" | "templates" | "flatMonths" | "words" | ViewSetting["key"]} */ (key)] = !!value;
+    await this.plugin.saveSettings();
+    if (build) { await this.plugin.rebuildViews(); return; }
+    if (view) await this.applyView(view, !!value);
+  }
+
+  /** What a view toggle shows: the setting, with the absent-means-on rule applied. */
+  /** @param {ViewSetting} def */
+  viewValue(def) {
+    const v = this.plugin.settings[def.key];
+    return def.defaultOn ? v !== false : v === true;
+  }
+  /** Push a view setting through the open view's api, if there is one. */
+  /** @param {ViewSetting} def @param {boolean} v */
+  async applyView(def, v) {
+    const view = await this.plugin.currentView();
+    const api = view && view.handle && view.handle.api;
+    if (api && api[def.api]) api[def.api](v);
   }
 
   display() {
@@ -936,91 +1046,58 @@ class VaultGraphSettingTab extends PluginSettingTab {
           }));
     }
 
-    // VIEW, not build: it changes how you look rather than what you see, so it applies
-    // live through the api and never rebuilds. Same reasoning as the curve switch.
-    //
-    // The toggle and the corner control write the SAME setting, which is the point -- the
-    // button is how you find the feature and this is where the default lives. Reading
-    // `!== false` rather than a plain truthiness keeps "absent means on" true here too, so
-    // a settings file written before this existed shows the toggle on.
+    // The view toggles: same table as getSettingDefinitions(), same rule for what "on" means.
     new Setting(containerEl).setName("View").setHeading();
-
-    new Setting(containerEl)
-      .setName("Drag to pan")
-      .setDesc("Drag the graph to move it, and zoom toward the pointer. Off pins the disc to the centre of the view. The control in the graph's bottom-right corner flips it too, and lands back here.")
-      .addToggle((t) => t
-        .setValue(this.plugin.settings.panEnabled !== false)
-        .onChange(async (v) => {
-          this.plugin.settings.panEnabled = v;
-          await this.plugin.saveSettings();
-          const view = await this.plugin.currentView();
-          const api = view && view.handle && view.handle.api;
-          if (api && api.setPanEnabled) api.setPanEnabled(v);
-        }));
-
-    new Setting(containerEl)
-      .setName("Compact date axis")
-      .setDesc("Give each year on the date strip width by how many notes it holds, instead of every year and month reading the same width regardless of content.")
-      .addToggle((t) => t
-        .setValue(this.plugin.settings.compactAxis !== false)
-        .onChange(async (v) => {
-          this.plugin.settings.compactAxis = v;
-          await this.plugin.saveSettings();
-          const view = await this.plugin.currentView();
-          const api = view && view.handle && view.handle.api;
-          if (api && api.setCompactAxis) api.setCompactAxis(v);
-        }));
-
-    new Setting(containerEl)
-      .setName("Unlinked notes join their folder")
-      .setDesc("A note with no links takes its own folder's wedge and colour, instead of sitting apart in a separate unlinked group. The (unlinked) row's right-click menu flips this too, and lands back here.")
-      .addToggle((t) => t
-        .setValue(this.plugin.settings.unlinkedByFolder !== false)
-        .onChange(async (v) => {
-          this.plugin.settings.unlinkedByFolder = v;
-          await this.plugin.saveSettings();
-          const view = await this.plugin.currentView();
-          const api = view && view.handle && view.handle.api;
-          if (api && api.setUnlinkedByFolder) api.setUnlinkedByFolder(v);
-        }));
-
-    new Setting(containerEl)
-      .setName("Colour unlinked notes by folder")
-      .setDesc("While unlinked notes are kept as their own group (the toggle just above is off), give each one its own folder's colour instead of the flat unlinked swatch. The (unlinked) row's right-click menu carries this too.")
-      .addToggle((t) => t
-        .setValue(this.plugin.settings.unlinkedTintByFolder === true)
-        .onChange(async (v) => {
-          this.plugin.settings.unlinkedTintByFolder = v;
-          await this.plugin.saveSettings();
-          const view = await this.plugin.currentView();
-          const api = view && view.handle && view.handle.api;
-          if (api && api.setUnlinkedTintByFolder) api.setUnlinkedTintByFolder(v);
-        }));
+    for (const s of VIEW_SETTINGS) {
+      new Setting(containerEl)
+        .setName(s.name)
+        .setDesc(s.desc)
+        .addToggle((t) => t
+          .setValue(this.viewValue(s))
+          .onChange(async (v) => {
+            this.plugin.settings[s.key] = v;
+            await this.plugin.saveSettings();
+            await this.applyView(s, v);
+          }));
+    }
 
     new Setting(containerEl).setName("Folder colours").setHeading();
+    this.renderColourSection(new Setting(containerEl).setDesc(COLOURS_DESC));
+  }
 
-    new Setting(containerEl)
-      .setDesc("Twelve slots, handed out in folder order and round again. Setting one folder never moves another, and two folders may share a colour.")
-      .addButton((b) => b
-        .setButtonText("Reset all")
-        .setTooltip("Also drops every subfolder override")
-        .onClick(async () => {
-          // BOTH MAPS, not just folderColors -- "Reset all" under a "Folder colours"
-          // heading that now covers subfolders too should not leave a subfolder pin
-          // behind for the user to go find and clear by hand.
-          this.plugin.settings.folderColors = {};
-          this.plugin.settings.subfolderColors = {};
-          await this.plugin.saveSettings();
-          await this.plugin.applyFolderColors();
-          await this.plugin.applySubfolderColors();
-          this.display();
-        }));
+  /**
+   * The folder-colours section: the Reset-all button on `row`, then the swatch rows in a
+   * palette-scoped wrapper INSIDE the row, which is told to wrap so the wrapper takes the
+   * next line (styles.css, .vg-colour-row). Inside the row rather than after it, and this
+   * was measured: Obsidian 1.13's declarative renderer replaces the group list's children
+   * once the render callbacks have run, so a wrapper appended beside the row was created,
+   * filled with 18 swatch rows and detached before the tab was shown. The row itself is
+   * ours to fill in both paths -- display() hands over a row it just made, the render item
+   * the row Obsidian made for the definition.
+   * @param {Setting} row
+   */
+  renderColourSection(row) {
+    row.addButton((b) => b
+      .setButtonText("Reset all")
+      .setTooltip("Also drops every subfolder override")
+      .onClick(async () => {
+        // BOTH MAPS, not just folderColors -- "Reset all" under a "Folder colours"
+        // heading that now covers subfolders too should not leave a subfolder pin
+        // behind for the user to go find and clear by hand.
+        this.plugin.settings.folderColors = {};
+        this.plugin.settings.subfolderColors = {};
+        await this.plugin.saveSettings();
+        await this.plugin.applyFolderColors();
+        await this.plugin.applySubfolderColors();
+        this.redrawColours();
+      }));
 
     // THE PALETTE TOKENS LIVE ON .vault-graph, and this pane is not inside one. The
     // wrapper carries that class so `var(--g7)` resolves here; `vg-tokens` turns off the
     // page's own grid layout, which comes with the class and is not wanted in a settings
     // pane. Nothing in this file knows a single hex.
-    const scope = containerEl.createDiv({ cls: ["vault-graph", "vg-tokens"] });
+    row.settingEl.addClass("vg-colour-row");
+    const scope = row.settingEl.createDiv({ cls: ["vault-graph", "vg-tokens"] });
 
     // AND IT NEEDS THE THEME, for the same reason the view does -- page.css carries a
     // light palette and a dark one, and picks between them on this attribute. Without it
@@ -1032,6 +1109,17 @@ class VaultGraphSettingTab extends PluginSettingTab {
       activeDocument.body.classList.contains("theme-light") ? "light" : "dark");
 
     this.scope = scope;
+    this.redrawColours();
+  }
+
+  /**
+   * Redraw the colour rows into the current scope: the path-derived list first, then the
+   * live view's own grouping when there is one. This is what a pick calls -- it used to
+   * call display(), which rebuilt the whole tab and, from 1.13 on, would have drawn the
+   * imperative tab on top of the declarative one.
+   */
+  redrawColours() {
+    if (!this.scope) return;
     // Archives are skipped in the rotation here too, or the fallback would disagree with
     // the disc about which slot every folder after an archive is on. Hence the separate
     // counter -- the same reason buildColors has one.
@@ -1053,7 +1141,7 @@ class VaultGraphSettingTab extends PluginSettingTab {
     // marked one slot out. Close enough to look right and wrong on exactly the vaults
     // that have orphans.
     //
-    // A view can only be reached asynchronously and display() cannot wait, so the
+    // A view can only be reached asynchronously and a render cannot wait, so the
     // path-derived list renders first and this corrects it. With no view open there is
     // nothing to correct against, and the fallback is what stands.
     this.refreshFromView();
@@ -1233,7 +1321,7 @@ class VaultGraphSettingTab extends PluginSettingTab {
     this.plugin.settings.folderShown = map;
     await this.plugin.saveSettings();
     await this.plugin.applyHiddenDefaults();
-    this.display();
+    this.redrawColours();
   }
 
   // Set-or-clear one slot override in a settings map, save, apply live, re-render. `key`
@@ -1253,7 +1341,7 @@ class VaultGraphSettingTab extends PluginSettingTab {
     this.plugin.settings[settingsKey] = map;
     await this.plugin.saveSettings();
     await this.plugin[applyMethod]();
-    this.display();
+    this.redrawColours();
   }
 
   // One folder's slot.
@@ -1262,7 +1350,7 @@ class VaultGraphSettingTab extends PluginSettingTab {
     return this.setOverride("folderColors", folder, key, "applyFolderColors");
   }
 
-  // As pick(), one level down. this.display() re-collapses nothing -- see this.subOpen
+  // As pick(), one level down. redrawColours() re-collapses nothing -- see this.subOpen
   // in the constructor -- so the section this pick was made in stays open.
   /** @param {string} folder @param {string} sub @param {string | null} key */
   async pickSub(folder, sub, key) {
@@ -1271,6 +1359,15 @@ class VaultGraphSettingTab extends PluginSettingTab {
 }
 
 class VaultGraphPlugin extends Plugin {
+  // DECLARED HERE, on the subclass. Obsidian 1.13 added `settings?: unknown` to Plugin as the
+  // conventional slot ("assign loaded data here in onload; declare a concrete type on your
+  // subclass to type it"), which is what this field has always been -- but without the
+  // declaration every `plugin.settings` resolved to the base class's 1.13 member and
+  // no-unsupported-api reported 74 uses of an API newer than minAppVersion. The concrete
+  // declaration is what the typings ask for, and it is what makes those reads ours.
+  /** @type {Settings} */
+  settings = DEFAULTS;
+
   async onload() {
     // loadData() is `Promise<any>`: the file is whatever was last saved, by any version of
     // this plugin, so it is held as `unknown` and merged over the defaults rather than

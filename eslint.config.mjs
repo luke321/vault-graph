@@ -60,16 +60,9 @@ export default defineConfig([
       // checks and what the directory checks; the five below close the other one.
       "obsidianmd/no-unsupported-api": "error",
       ...METER,
-      // OFF, WITH THE REASON, and off HERE rather than by a disable comment: the preset's
-      // eslint-comments/no-restricted-disable forbids disabling any obsidianmd/* inline.
-      // The rule asks the PluginSettingTab for getSettingDefinitions() so its settings show
-      // up in 1.13's settings search. On 1.13 a non-empty return REPLACES display() -- the
-      // tab is rendered from the definitions -- and this tab is ~350 lines of folder-colour
-      // picker that would need `render`-type definitions plus display() kept as the fallback
-      // for minAppVersion 1.7.2, against typings (obsidian 1.13.1) this repo does not pin.
-      // That is its own change, github#59. An empty-array stub would satisfy the rule and
-      // gain nothing. The directory's board keeps this one warning until #59 lands.
-      "obsidianmd/settings-tab/prefer-setting-definitions": "off",
+      // settings-tab/prefer-setting-definitions was off here until github#59 landed: the tab
+      // implements getSettingDefinitions() now, with display() kept as the fallback for
+      // minAppVersion 1.7.2 through 1.12, against obsidian 1.13.1's typings.
     },
     languageOptions: {
       ecmaVersion: 2022,

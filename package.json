@@ -13,7 +13,7 @@
     "eslint": "^9.9.0",
     "eslint-plugin-obsidianmd": "^0.4.1",
     "globals": "^14.0.0",
-    "obsidian": "^1.12.3",
+    "obsidian": "^1.13.1",
     "typescript": "^5.4.5",
     "typescript-eslint": "^8.67.0"
   },

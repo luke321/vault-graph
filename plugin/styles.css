@@ -37,3 +37,9 @@
    * from a real vault, its first in-app screenshot showing `fit` behind the bar. */
   --controls-inset: 44px;
 }
+
+/* The Folder-colours row hosts the swatch rows INSIDE itself (see renderColourSection in
+   main.js for why not beside it): a setting row is a flex line, so it is allowed to wrap and
+   the palette-scoped wrapper takes the whole next line. */
+.vg-colour-row { flex-wrap: wrap; }
+.vg-colour-row > .vault-graph.vg-tokens { flex: 1 1 100%; width: 100%; margin-top: 8px; }
