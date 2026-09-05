@@ -246,6 +246,7 @@ const FRAME_READING = [
   "drawn larger",                 // the highlight size ratio, read mid-ramp
   "animates instead of snapping", // per-frame radial steps
   "gap reservation holds still",  // per-frame gap steps
+  "outgrows",                     // per-frame dot sizes through a solo (github#66)
   "waits for the release",        // during-drag sampling
   "haloes but never pushes",      // reads a canvas mid-interaction
   // Reads a frame, so it belongs here -- but note that this classification is precautionary
@@ -2678,6 +2679,92 @@ check("filtered to the bone, the disc stays drawable", async (p) => {
     detail: bad.length ? bad.slice(0, 4).join("; ")
                        : seen.slice(-4).join(" | "),
   };
+});
+
+// A DOT NEVER OUTGROWS BOTH OF ITS RESTING SIZES WHILE A CASCADE WALKS (github#66).
+//
+// The room, the pitch and the ramp are each walked between the two packings and dotPx
+// multiplies them, and two quantities walked on the same clock keep their ratio only when the
+// ends are proportional. Soloing a four-note folder on a ~500-note vault walked the inner room
+// 96 -> 923 against a pitch of 191 -> 573, so the notes still waiting to leave were drawn at
+// 36px against a destination size of 9px -- and the destination size was the hub cap for a
+// row-0 note, which only takes hold on the frame the survivors arrive. Reported as "they grow
+// a lot and overlap, then shrink again", which is exactly the picture.
+//
+// Fixed by holding every note to the larger of what the two RESTING packings draw it at
+// (cascade()'s sizeCap). This solos the smallest group with two or more notes through its own
+// `only` chip -- the shape that showed it -- and samples the biggest full-alpha dot every frame
+// until the cascade lands. IN GRAPH UNITS, not pixels: the auto-fit that follows a solo zooms
+// the camera (github#14), and a bound stated in pixels would be met or missed by the zoom
+// rather than by the dot. Measured on the mirror that reported it: before 6.8 -> peak 36 ->
+// rest 9.1px (a 3.9x overshoot); after, peak 9.1 = rest.
+check("a dot never outgrows its resting size while a cascade walks", async (p) => {
+  await clearRange(p);
+  await settle(p);
+  await camSettle(p);
+  const pick = await p.j(`(function(){
+    var best = null;
+    __vg.groupOrder().forEach(function (g) {
+      var n = __vg.groupCount(g);
+      if (n >= 2 && (!best || n < best.n)) best = { g: g, n: n };
+    });
+    return best; })()`);
+  if (!pick) return { ok: true, detail: "no group with two or more notes to solo -- nothing to walk" };
+  // Biggest dot at FULL alpha, in graph units: scaleSize gives viewport px, and 160 graph units
+  // measured through graphToViewport gives the conversion at whatever the camera is doing.
+  const SAMPLE = `(function(){
+    var a0 = __vg.renderer.graphToViewport({ x: 0, y: 0 });
+    var b0 = __vg.renderer.graphToViewport({ x: 160, y: 0 });
+    var perPx = 160 / Math.hypot(b0.x - a0.x, b0.y - a0.y);
+    var mx = 0, n = 0;
+    __vg.graph.forEachNode(function (id) {
+      var d = __vg.renderer.getNodeDisplayData(id);
+      if (!d || d.hidden || (__vg.alpha[id] || 0) < 0.999) return;
+      n++;
+      var r = __vg.renderer.scaleSize(d.size) * perPx;
+      if (r > mx) mx = r;
+    });
+    return { n: n, max: Math.round(mx * 10) / 10, busy: __vg.demo.busy() }; })()`;
+  const before = await p.j(SAMPLE);
+  const w = await p.j(`__vg.demo.where("only", ${JSON.stringify(pick.g)})`);
+  if (!w) return { ok: false, detail: `no "only" chip resolved for ${pick.g}` };
+  // Real input, as the demo drives it: the chip's handler is what a person reaches.
+  await p.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: w.x, y: w.y, buttons: 0 });
+  await p.send("Input.dispatchMouseEvent", { type: "mousePressed", x: w.x, y: w.y, button: "left", clickCount: 1, buttons: 1 });
+  await p.send("Input.dispatchMouseEvent", { type: "mouseReleased", x: w.x, y: w.y, button: "left", clickCount: 1, buttons: 0 });
+  let peak = 0, peakAt = 0, frames = 0;
+  const t0 = Date.now();
+  for (;;) {
+    const smp = await p.j(SAMPLE);
+    frames++;
+    if (smp.max > peak) { peak = smp.max; peakAt = Date.now() - t0; }
+    if (!smp.busy && frames > 3) break;
+    if (Date.now() - t0 > 12000) break;
+    await sleep(30);
+  }
+  await settle(p);
+  await camSettle(p);
+  await sleep(300);
+  const after = await p.j(SAMPLE);
+  // Back to everything, the way the other filter checks do it.
+  const groups = await p.j(`__vg.groupOrder()`);
+  for (const g of groups) {
+    await p.j(`(function(){
+      var b = document.querySelector('[data-eye="' + ${JSON.stringify(g)}.replace(/"/g, '\\"') + '"]');
+      if (b && b.getAttribute("aria-pressed") === "false") b.click();
+      return true; })()`).catch(() => 0);
+  }
+  await settle(p);
+  await camSettle(p);
+  // 5% over the larger resting size: the two endpoint measurements and the per-frame samples
+  // convert through the same perPx, and the cap is exact, so the slack is for rounding only.
+  const bound = Math.max(before.max, after.max) * 1.05;
+  const ok = peak <= bound;
+  return { ok,
+           detail: `soloed ${pick.g} (${pick.n} notes): biggest dot ${before.max} units at rest ` +
+                   `-> peak ${peak} at ${peakAt}ms over ${frames} frames -> ${after.max} at rest ` +
+                   `(${after.n} shown); bound ${Math.round(bound * 10) / 10}` +
+                   (ok ? "" : `  <- overshoots both resting sizes by ${(peak / Math.max(before.max, after.max)).toFixed(2)}x`) };
 });
 
 check("the gap reservation holds still while groups only thin", async (p) => {

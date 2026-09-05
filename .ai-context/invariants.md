@@ -1159,6 +1159,36 @@ split.
 Wired into `.githooks/pre-push` alongside the generator-determinism check: two tiny
 subprocess builds, no Chrome, well under a second, so no skip flag.
 
+## A dot never outgrows its resting size while a cascade walks
+
+Solo the smallest group with two or more notes through its `only` chip and sample the biggest
+full-alpha dot every frame until the cascade lands: no frame may draw it larger than the larger
+of the two resting sizes, before and after (5 % over, for rounding). In **graph units**, because
+the auto-fit that follows a solo zooms the camera (github#14) and a bound in pixels would be
+met or missed by the zoom rather than by the dot.
+
+```bash
+node scripts/smoke.mjs --only "outgrows"
+```
+
+Why (github#66): `dotPx` is `ramp × room / pitch`, and all three are walked between the two
+packings. Two quantities walked on the same clock keep their ratio only when the ends are
+proportional; soloing a four-note folder on a ~500-note vault walked the inner room 96 → 923
+against a pitch of 191 → 573 (ratio 0.5 → 1.88 mid-walk) while the ramp top rose 8.4 → 21.8,
+so the notes still waiting to leave were drawn at **36 px** against a destination size of
+**9 px** — the hub cap for a row-0 inner note, which only takes hold on the frame the survivors
+arrive. Reported as "they grow a lot and overlap, then shrink again". Now `cascade()` measures
+every note's drawn radius at both resting packings (the same `roomOf()` pass that measures the
+room) and holds each note to the larger of the two for the run's duration.
+
+Measured on the mirror that reported it, soloing its four-note folder: before, biggest dot
+6.8 → **36.0** → 9.1 px and 12 overlapping pairs at worst 34 px; after, 6.8 → **9.1** → 9.1 px
+and 9 pairs at worst 9.6 px (the leaving notes crossing as they fade). The check itself, on the
+same mirror's two-note folder: **1.61x over** the bound on the old build, at the bound on the
+new. Dense solos are untouched: the demo vault's 200-note folder grows monotonically to 14.8 px
+with and without the cap (peak = rest, 1.00x). On the three fixtures the peak equals the resting
+size after the solo exactly (shape 84.2, demo 102.2, 10k 286.2 graph units).
+
 ## A settled dot is the SAME size a fresh relayout gives it, not just the same position
 
 github#21. `settle()` (the function every cascade hands off to once its frames are done)
