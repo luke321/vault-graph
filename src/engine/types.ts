@@ -24,7 +24,6 @@
 
 /* ------------------------------------------------------------------ graph */
 
-/** The attributes the page puts on every node at addNode and reads back. */
 export interface NodeAttrs {
   label: string;
   x: number;
@@ -43,46 +42,29 @@ export interface NodeAttrs {
   ghost: boolean;
 }
 
-/** The attributes the page puts on every edge. `size` is what the renderer draws with. */
 export interface EdgeAttrs {
   weight: number;
   size: number;
 }
 
-/** What forEachEdge hands its callback: the edge key, its attributes, and both ends. */
 export type EdgeVisitor = (edge: string, attrs: EdgeAttrs, source: string, target: string) => void;
 
-/**
- * An undirected graph keyed by node id: a keyed attribute bag with degree. Nodes and edges
- * iterate in insertion order; a node's own edges and neighbours iterate the way graphology's
- * did (integer-like ids ascending, then insertion order), so no consumer can tell the two
- * apart. Edge keys are the store's own and nothing outside it persists one.
- */
 export interface GraphStore {
-  /** Number of nodes. */
   readonly order: number;
-  /** Number of edges. */
   readonly size: number;
-  /** Adds a node; returns its id. Throws if the id exists. */
   addNode(id: string, attrs: NodeAttrs): string;
-  /** Adds an undirected edge; returns its key. Throws if either end is missing or the edge exists. */
   addUndirectedEdge(source: string, target: string, attrs: EdgeAttrs): string;
   hasNode(id: string): boolean;
   hasEdge(source: string, target: string): boolean;
-  /** Removes the edge between two nodes, if any. */
   dropEdge(source: string, target: string): void;
-  /** Both ends of an edge, in the order they were given to addUndirectedEdge. */
   extremities(edge: string): [string, string];
   degree(id: string): number;
   neighbors(id: string): string[];
   nodes(): string[];
   forEachNode(fn: (id: string, attrs: NodeAttrs) => void): void;
-  /** Every edge, or every edge of one node. */
   forEachEdge(fn: EdgeVisitor): void;
   forEachEdge(node: string, fn: EdgeVisitor): void;
-  /** Every edge key, in insertion order. The renderer's indexation walks this. */
   edges(): string[];
-  /** The attribute object addUndirectedEdge was given, by reference. The renderer styles from it. */
   getEdgeAttributes(edge: string): EdgeAttrs;
   getNodeAttribute<K extends keyof NodeAttrs>(id: string, name: K): NodeAttrs[K];
   getNodeAttributes(id: string): NodeAttrs;
@@ -90,7 +72,6 @@ export interface GraphStore {
   mergeNodeAttributes(id: string, attrs: Partial<NodeAttrs>): void;
 }
 
-/** The store's constructor, as the hosts hand it into `deps.Graph`. */
 export type GraphStoreCtor = new () => GraphStore;
 
 /* ----------------------------------------------------------------- camera */
@@ -100,11 +81,6 @@ export interface Point {
   y: number;
 }
 
-/**
- * The camera, in Sigma's normalised space: (0.5, 0.5) is the centre of the custom bbox and
- * `ratio` is graph units per viewport unit -- smaller is closer. `angle` is always 0 here;
- * it stays in the record because every setState the suite issues carries it.
- */
 export interface CameraState {
   x: number;
   y: number;
@@ -118,24 +94,13 @@ export interface Camera {
   readonly ratio: number;
   readonly angle: number;
   getState(): CameraState;
-  /** Sets the state at once, clamped and gated exactly as animate's landing would be. */
   setState(state: Partial<CameraState>): void;
-  /**
-   * Tweens to `to` over `duration` ms (quadraticInOut) and calls `done` on landing -- also
-   * when the tween is cut short by another, which page.js's fit() relies on to re-lock panning.
-   */
   animate(to: Partial<CameraState>, opts?: { duration?: number }, done?: () => void): void;
-  /** Fires on every state change, including each frame of an animate. */
   on(event: "updated", fn: (state: CameraState) => void): void;
 }
 
 /* --------------------------------------------------------------- display */
 
-/**
- * What the page's node style function returns and getNodeDisplayData reads back: the node's
- * attributes plus the display fields the renderer consumes. Colours are CSS strings as the
- * page produces them (hex, or rgba() from withAlpha).
- */
 export interface NodeDisplayData {
   x: number;
   y: number;
@@ -146,7 +111,6 @@ export interface NodeDisplayData {
   highlighted?: boolean;
   forceLabel?: boolean;
   zIndex?: number;
-  /** "halo" draws the border program (a ring in haloColor around the disc); anything else a disc. */
   type?: string;
   haloColor?: string;
 }
@@ -155,29 +119,22 @@ export interface EdgeDisplayData {
   size: number;
   color: string;
   hidden: boolean;
-  /** "curve" bows the edge by `curvature`; anything else is a straight line. */
   type?: string;
   curvature?: number;
   label?: string | null;
   zIndex?: number;
 }
 
-/** The page's node reducer: attributes in, display data out. Called for every node on every refresh. */
 export type NodeReducer = (id: string, attrs: NodeAttrs) => NodeDisplayData;
-/** The page's edge reducer. */
 export type EdgeReducer = (id: string, attrs: EdgeAttrs) => EdgeAttrs & Partial<EdgeDisplayData>;
 
 /* ------------------------------------------------------------- settings */
 
-/** The settings the page reads or writes after construction, and the ones drawHover reads. */
 export interface RendererSettings {
   minCameraRatio: number;
   maxCameraRatio: number;
-  /** Floor on a drawn edge, in px. */
   minEdgeThickness: number;
-  /** Per wheel notch, ms. */
   zoomDuration: number;
-  /** Per wheel notch, as a factor on the ratio. */
   zoomingRatio: number;
   enableCameraPanning: boolean;
   labelSize: number;
@@ -186,26 +143,17 @@ export interface RendererSettings {
   labelColor: string;
 }
 
-/**
- * What the hover drawer is handed: the node's display data with `x`, `y` in viewport px and
- * `size` in drawn px, plus the node's `key`. Sigma added the key the same way, and the page's
- * drawFocusWeb reads it to know whose web it is drawing -- measured: without it the focus web
- * never painted, and `focus web stays above dim notes` failed on every fixture.
- */
 export interface HoverData extends NodeDisplayData {
   key: string;
 }
 
-/** Draws the hovered (or highlighted) node's pill onto the hovers canvas: the page's drawHover. */
 export type DrawHover = (
   ctx: CanvasRenderingContext2D,
   data: HoverData,
   settings: RendererSettings,
 ) => void;
 
-/** Everything the renderer is constructed with. Typed, so the host and the engine agree. */
 export interface RendererOptions extends RendererSettings {
-  /** The window the view lives in -- a popout's, not the global one. Timers and rAF go through it. */
   win: Window;
   nodeReducer: NodeReducer;
   edgeReducer: EdgeReducer;
@@ -214,12 +162,6 @@ export interface RendererOptions extends RendererSettings {
 
 /* --------------------------------------------------------------- events */
 
-/**
- * The pointer payload every event carries. `x`/`y` are viewport px relative to the container;
- * `original` is the DOM event. `preventDefault` is the payload's, not the DOM event's: it stops
- * the renderer's own handling of the gesture -- a pan, or the wheel zoom -- for this event.
- * page.js calls it in its node drag and on double click.
- */
 export interface MouseCoords {
   x: number;
   y: number;
@@ -238,7 +180,6 @@ export interface StageEvent {
   preventDefault(): void;
 }
 
-/** The nine events the page listens to, with their payloads. */
 export interface RendererEvents {
   clickNode: NodeEvent;
   doubleClickNode: NodeEvent;
@@ -251,7 +192,6 @@ export interface RendererEvents {
   afterRender: void;
 }
 
-/** The raw pointer stream, for the page's node drag: moves anywhere in the document, and releases. */
 export interface MouseCaptor {
   on(event: "mousemovebody" | "mouseup" | "mouseleave", fn: (e: MouseCoords) => void): void;
 }
@@ -259,40 +199,30 @@ export interface MouseCaptor {
 /* ------------------------------------------------------------- renderer */
 
 export interface RefreshOptions {
-  /** Accepted for compatibility with the page's call sites; the engine keeps no spatial index. */
   skipIndexation?: boolean;
   partialGraph?: { nodes?: string[]; edges?: string[] };
-  /** Coalesce into the next animation frame instead of rendering now. */
   schedule?: boolean;
 }
 
 export interface Renderer {
-  /** Re-runs the style functions over the graph and renders (or schedules a render). */
   refresh(opts?: RefreshOptions): void;
-  /** Draws every layer now, synchronously. */
   render(): void;
-  /** Releases listeners, observers and GL contexts. The renderer is unusable afterwards. */
   kill(): void;
   graphToViewport(p: Point): Point;
   viewportToGraph(p: Point): Point;
   getCamera(): Camera;
-  /** A size attribute in drawn px at the current camera: size / ratio (the identity size law). */
   scaleSize(size: number): number;
   getNodeDisplayData(id: string): NodeDisplayData | undefined;
   getEdgeDisplayData(edge: string): EdgeDisplayData | undefined;
   getSetting<K extends keyof RendererSettings>(name: K): RendererSettings[K];
   setSetting<K extends keyof RendererSettings>(name: K, value: RendererSettings[K]): void;
-  /** The layer canvases by name: edges, nodes, labels, hovers, hoverNodes, mouse. */
   getCanvases(): Record<string, HTMLCanvasElement>;
-  /** The container's size in CSS px. */
   getDimensions(): { width: number; height: number };
   getMouseCaptor(): MouseCaptor;
-  /** Pins the normalisation box; null returns to the graph's own extent. */
   setCustomBBox(bbox: { x: [number, number]; y: [number, number] } | null): void;
   on<K extends keyof RendererEvents>(event: K, fn: (e: RendererEvents[K]) => void): void;
 }
 
-/** The renderer's constructor, as the hosts hand it into `deps.Sigma`. */
 export type RendererCtor = new (
   graph: GraphStore,
   container: HTMLElement,

@@ -1,18 +1,4 @@
-/* Vault Graph -- host chrome.
- *
- * How the view's element behaves inside Obsidian, and nothing else. The page's own styling
- * is src/page.css, appended after this by scripts/build-plugin.mjs with every rule scoped
- * under `.vault-graph`.
- *
- * Deliberately tiny, and it uses Obsidian's own variables rather than literal values,
- * because the things a user notices first about a view -- does it fill the pane, does it
- * scroll when it should not -- belong to the host rather than to the graph.
- */
 
-/* Obsidian gives `.view-content` padding and lets it scroll. The graph wants neither, and
- * it needs a DEFINITE height: the page's own root asks for `height: 100%`, which against an
- * auto-height parent resolves to zero and draws nothing. That failure is silent and looks
- * like a broken renderer, so it is worth being explicit about both sides of the contract. */
 .workspace-leaf-content[data-type="vault-graph-view"] .view-content {
   padding: 0;
   overflow: hidden;
@@ -24,22 +10,12 @@
   overflow: hidden;
 }
 
-/* The parent side of the page's `height: 100%`. */
 .vault-graph-view > .vault-graph {
   height: 100%;
   min-height: 0;
-  /* THE STATUS BAR FLOATS OVER THIS CORNER. The camera cluster sits in the stage's
-   * bottom-right, which on the standalone page is empty and in Obsidian is where
-   * "1234 words" and the sync indicator live -- so at the page's own 12px the bottom
-   * button ends up underneath them. Raised here rather than in page.css because it is a
-   * fact about the HOST, and the page deliberately never learns which host it is in: it
-   * reads a number and puts its buttons that far from the edge. github#4 reported this
-   * from a real vault, its first in-app screenshot showing `fit` behind the bar. */
+  /* github#4 */
   --controls-inset: 44px;
 }
 
-/* The Folder-colours row hosts the swatch rows INSIDE itself (see renderColourSection in
-   main.js for why not beside it): a setting row is a flex line, so it is allowed to wrap and
-   the palette-scoped wrapper takes the whole next line. */
 .vg-colour-row { flex-wrap: wrap; }
 .vg-colour-row > .vault-graph.vg-tokens { flex: 1 1 100%; width: 100%; margin-top: 8px; }

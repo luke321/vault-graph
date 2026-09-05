@@ -12,6 +12,8 @@ changing the layout or the animation.
 | `decisions/` | **ADRs** — structural choices, what they cost, and what was rejected |
 | `design/` | **DDRs** — the as-built design of each part of the disc |
 | `vault-findings.md` | What the graph revealed about the vault it was built for — observations, not decisions |
+| `code-map.md` | **Generated** (`node scripts/code-map.mjs`): sections and functions of `src/page.js` and `scripts/smoke.mjs` with line numbers. Open the range, not the file |
+| `code-index.md` | **Generated**: issue → code sites, ADR/DDR → code sites, invariant → check, `__vg.*` → callers |
 
 ### ADRs — `decisions/`
 

@@ -1,41 +1,10 @@
-/**
- * Vault Graph -- the Obsidian plugin.
- *
- * Grew out of the spike recorded in plugin/SPIKE.md, which established three things by
- * measurement: the page runs unchanged inside Obsidian, Obsidian's own index can produce
- * its data in ~12ms, and the iframe that made proving that cheap has to go.
- *
- * The iframe is gone. The page mounts directly into the view's element, so __vg is in this
- * window, the theme comes from Obsidian's own CSS variables, and the invariant suite can
- * reach the page without a message bridge.
- *
- * AN ES MODULE, not a script, and that is load-bearing rather than fashion: a script's
- * top-level `const Plugin` IS a global, so it collides with the DOM's own `Plugin` and
- * every top-level function trips no-implicit-globals. Seven of the twelve lint errors in
- * the first clean run were that one fact. esbuild emits CommonJS for Obsidian's loader.
- */
 
 import { Plugin, ItemView, Notice, PluginSettingTab, Setting, normalizePath, addIcon } from "obsidian";
 
-// Compiled in by scripts/build-plugin.mjs. Obsidian installs only main.js, manifest.json
-// and styles.css, so anything read from disk at runtime does not exist for a real user --
-// the page, the engine and the renderer have to BE the bundle. `raw:` and `b64:` are the
-// bundler's namespace loaders; see the esbuild plugin in that script.
-// THE PAGE, AS CODE RATHER THAN AS TEXT.
-//
-// The iframe needed the page as one HTML string. Mounting it in the DOM needs the opposite:
-// the script as a real import so it can be CALLED, the libraries as real imports so they
-// can be passed to it, and only the markup still as text, because markup has to be parsed
-// into nodes either way.
-//
-// page.css is absent on purpose -- it is no longer the plugin's business. It ships as
-// styles.css, which Obsidian loads itself; see scripts/build-plugin.mjs.
 import { mountVaultGraph } from "../src/page.js";
-// The graph store and the renderer are ours (github#58); esbuild compiles the TypeScript as
-// part of bundling.
+// github#58
 import { GraphStore, Renderer } from "../src/engine/index";
-// When a note was written. The SAME module build-graph.mjs uses -- the two crawls stay
-// separate on purpose, the date rule does not. github#6
+// github#6
 import { localDay, resolveCreated, dateTally } from "../src/dates.mjs";
 import PAGE_HTML from "raw:../src/page.html";
 import LOGO_MASK_B64 from "b64:../assets/logo-mask.png";
@@ -93,7 +62,6 @@ const ICON_ID = "vault-graph-disc";
  * @property {TFile} [_file]
  */
 
-/** What buildData resolves to; the plugin's half of the contract page.js consumes. */
 /** @typedef {Awaited<ReturnType<typeof buildData>>} BuildResult */
 
 /**
@@ -104,9 +72,7 @@ const ICON_ID = "vault-graph-disc";
  * @typedef {import("../src/page.js").MountDeps} MountDeps
  */
 
-/** One folder row in the settings tab. `slot` is the slot in use, `autoSlot` the one with no override. */
 /** @typedef {{ name: string, n: number, slot: string, autoSlot: string }} GroupRow */
-/** One subfolder row under it. */
 /** @typedef {{ name: string, n: number }} SubRow */
 
 /**
@@ -154,7 +120,6 @@ function discIcon() {
     }
     return out;
   };
-  // currentColor, so it follows the theme and the ribbon's own hover state.
   return '<g fill="currentColor" stroke="none">' +
          ring(36, 8.5, 8, 0) + ring(16, 6.5, 4, 22.5) +
          "</g>";
@@ -254,7 +219,7 @@ async function readConfigJson(app, name) {
     const parsed = JSON.parse(await app.vault.adapter.read(p));
     return parsed;
   } catch {
-    return null;   // a vault that never configured this plugin is normal, not broken
+    return null;
   }
 }
 
@@ -265,9 +230,6 @@ async function readConfigJson(app, name) {
  */
 const strField = (obj, key) => {
   if (!obj || typeof obj !== "object" || !(key in obj)) return "";
-  // After the `in` check `obj` is still a bare `object` to the type program (measured: the
-  // plain `obj[key]` read stayed on the meter), so the read goes through an explicit view of
-  // it as a string-keyed record of unknowns -- which is exactly what a parsed JSON object is.
   const v = /** @type {Record<string, unknown>} */ (obj)[key];
   return typeof v === "string" ? v : "";
 };
@@ -316,25 +278,16 @@ async function buildData(app, opts) {
   });
 
   /** @type {Map<string, number>} */
-  const index = new Map();          // path -> node index
+  const index = new Map();
   /** @type {GraphNode[]} */
   const nodes = [];
-  const dates = dateTally();        // how each note got dated; reported in stats
+  const dates = dateTally();
 
   for (const file of files) {
     const cache = app.metadataCache.getFileCache(file) || {};
-    // FrontMatterCache is `{ [key: string]: any }` in obsidian.d.ts. Read it as unknown
-    // instead: every field below is checked with `typeof` before it is used, and `unknown`
-    // is what makes those checks the type's contract rather than habit.
     /** @type {Record<string, unknown>} */
     const fm = cache.frontmatter || {};
 
-    // Frontmatter tags only, matching the Node builder exactly. getAllTags(cache) would
-    // ALSO return inline #tags from the body, which the builder never saw -- a free
-    // improvement, but not one to smuggle into a comparison run.
-    //
-    // `tags:` may be a string, a list, or a comma-separated string inside a list, and
-    // `tag:` the same -- hence unknown[] in, one flat string list out.
     /** @type {unknown[]} */
     const rawTags = [];
     const tags = rawTags
@@ -344,9 +297,7 @@ async function buildData(app, opts) {
       .filter(Boolean);
 
     const dirs = paraDirs(file.path, opts.flatMonths);
-    // Frontmatter, then a date at the front of the filename, then the file's own creation
-    // stamp -- the same chain build-graph.mjs walks, from the same module. `file.stat` is
-    // Obsidian's own cached stat, so this costs nothing and needs no read. github#6
+    // github#6
     const dated = resolveCreated(fm, file.basename, file.stat.ctime, file.stat.mtime);
     dates[dated.source]++;
     index.set(file.path, nodes.length);
@@ -360,17 +311,13 @@ async function buildData(app, opts) {
       tags: tags,
       created: dated.day,
       touched: localDay(file.stat.mtime),
-      words: 0,                     // filled below; the one field still needing a read
+      words: 0,
       _file: file,
     });
   }
   const tIndex = performance.now();
 
   /* ---- edges: Obsidian's resolution, not ours ----------------------------- */
-  // resolvedLinks is { src: { dest: count } } over EVERY link Obsidian resolved --
-  // aliases, shortest-unique-path, frontmatter links, all of it. Non-markdown
-  // destinations (attachments) and filtered-out templates simply miss the index; both
-  // are counted so the comparison in SPIKE.md can account for every link.
   /** @type {Map<string, number>} */
   const weight = new Map();
   /** @param {number} i @param {number} j @param {number} w */
@@ -399,7 +346,7 @@ async function buildData(app, opts) {
   /* ---- ghosts: unresolvedLinks, for free --------------------------------- */
   const unresolvedMap = app.metadataCache.unresolvedLinks || {};
   let unresolved = 0;
-  /** @type {Map<string, [number, number][]>} */   // ghost name -> [source index, link count]
+  /** @type {Map<string, [number, number][]>} */
   const ghosts = new Map();
   for (const src of Object.keys(unresolvedMap)) {
     const i = index.get(src);
@@ -426,9 +373,6 @@ async function buildData(app, opts) {
   }
 
   /* ---- words: the only remaining I/O ------------------------------------- */
-  // cachedRead, not read: Obsidian keeps recently-read bodies around, so on a warm vault
-  // many of these never touch the disk. Timed separately, because "what does the one
-  // expensive field cost" is a thing the spike exists to measure.
   const tEdges = performance.now();
   if (opts.words) {
     await Promise.all(nodes.filter((n) => n._file).map(async (n) => {
@@ -471,14 +415,11 @@ async function buildData(app, opts) {
       edges: edges.length,
       unresolved: unresolved,
       orphans: degree.filter((d) => d === 0).length,
-      // Where every note's date came from. Surfaced by the "Report diagnostics" command,
-      // so "why is everything undated" is answerable without a rebuild. github#6
+      // github#6
       dates: dates,
       templatesExcluded: !opts.templates,
       ghostsIncluded: !!opts.ghosts,
     },
-    // Spike-only. Not part of the shape the page reads; the view prints it and the CDP
-    // harness asserts on it.
     _spike: {
       msIndex: Math.round(tIndex - t0),
       msEdges: Math.round(tEdges - tIndex),
@@ -518,10 +459,6 @@ class VaultGraphView extends ItemView {
   constructor(leaf, plugin) {
     super(leaf);
     this.plugin = plugin;
-    // A HANDLE, not the api. mountVaultGraph returns before its deferred init has built
-    // the api, so anything captured here would be null forever -- and null reads exactly
-    // like "no api" to every guard below, which is how the theme repaint, the renderer
-    // teardown and the diagnostics all became silent no-ops together.
     /** @type {MountHandle | null} */
     this.handle = null;
     /** @type {BuildResult | null} */
@@ -541,37 +478,21 @@ class VaultGraphView extends ItemView {
     this.teardown();
   }
 
-  // RELEASE THE MOUNT, not just its WebGL contexts. This used to reach in for
-  // api.renderer.kill(), which frees the three contexts (edges, nodes, hoverNodes -- a browser
-  // allows a small number per page, and a few open/close cycles without it left the next
-  // mount drawing nothing) and nothing else: the mount stayed alive through the document and
-  // window listeners and the ResizeObservers page.js had registered, so every close, popout
-  // and Refresh retained a whole graph (github#62). The handle's destroy() undoes all of it
-  // and kills the renderer last; it is idempotent and safe before the deferred init has run.
+  // github#62
   teardown() {
     if (this.handle) {
-      try { this.handle.destroy(); } catch { /* already gone */ }
+      try { this.handle.destroy(); } catch { }
     }
     this.handle = null;
     this.contentEl.empty();
   }
 
-  // activeDocument, not document: a view torn out into a popout window lives in a different
-  // document, and reading the main window's theme there gives the wrong answer.
   syncTheme() {
     if (!this.page) return;
     const want = activeDocument.body.classList.contains("theme-light") ? "light" : "dark";
     if (this.page.getAttribute("data-theme") === want) return;
     this.page.setAttribute("data-theme", want);
 
-    // READ THE PALETTE AGAIN FIRST. The page snapshots its colours into one object at init,
-    // so the attribute alone restyles the DOM and leaves every canvas colour behind -- the
-    // disc keeps the old theme's node and edge colours. That is subtle in one direction and
-    // ugly in the other: dark-theme edges are near-black, and on a white background they
-    // read as a hard grey scribble over the whole disc rather than as faint connections.
-    //
-    // Then repaint: the renderer only draws when asked, and the logo and heatmap band paint
-    // from `afterRender`, so a refresh carries them along.
     const api = this.handle && this.handle.api;
     if (api) {
       try {
@@ -579,10 +500,7 @@ class VaultGraphView extends ItemView {
         if (api.renderer) api.renderer.refresh();
         if (api.placeLogo) api.placeLogo();
         if (api.heatBuild) api.heatBuild();
-      } catch { /* a half-built view is not worth an exception here */ }
-    } else {
-      // Still initialising. It will mount with the current theme anyway, because render()
-      // sets the attribute before calling mountVaultGraph.
+      } catch { }
     }
   }
 
@@ -594,44 +512,23 @@ class VaultGraphView extends ItemView {
     const data = await buildData(this.app, this.plugin.settings);
     this.lastData = data;
 
-    // PARSED, NOT ASSIGNED. innerHTML with this markup would be safe -- it is a constant
-    // from our own bundle, with no vault content in it -- but `prefer-create-el` is an
-    // error under Obsidian's lint config and a reviewer should not have to take my word
-    // for which strings are constants. DOMParser builds the same tree without ever
-    // handing a string to the DOM.
     const parsed = new DOMParser().parseFromString(PAGE_HTML, "text/html");
     const page = parsed.body.firstElementChild;
     if (!page) throw new Error("page markup did not parse to an element");
     root.appendChild(page);
 
-    // The page's palette lives on this element (page.css is scoped to it), so the theme is
-    // set here rather than on <html> -- which is not ours to write.
     this.page = page;
     this.syncTheme();
 
-    // AND IT HAS TO FOLLOW. Setting it once at mount was the first version, and a
-    // screenshot of Obsidian in its light theme showed why that is not enough: light
-    // chrome, black view. `css-change` is Obsidian's own signal for exactly this -- it
-    // fires when the theme or a CSS snippet changes -- and it is the whole difference
-    // between a view that is themed and one that happened to match at startup.
     this.registerEvent(this.app.workspace.on("css-change", () => this.syncTheme()));
 
     const t0 = performance.now();
     this.handle = mountVaultGraph(page, data, {
-      // Real module imports, not globals: the engine is our own module and nothing is ever
-      // assigned to `window`. This is exactly why page.js takes its constructors as arguments.
       Graph: GraphStore,
       Renderer: Renderer,
       logoMask: "data:image/png;base64," + LOGO_MASK_B64,
-      // The saved per-folder and per-subfolder palette slots, and visibility defaults.
       folderColors: this.plugin.settings.folderColors,
       subfolderColors: this.plugin.settings.subfolderColors,
-      // COLOURS GET A WRITER: the settings tab is no longer the only place a pick can
-      // happen, since #22 put a right-click menu in the view itself, and a pick made there
-      // has nowhere else to be saved. Mirrors the settings tab's own pick()/pickSub(),
-      // which write the same two settings keys and then push into the view through
-      // applyFolderColors()/applySubfolderColors() -- neither of which calls this callback,
-      // so there is no write-back loop between the two paths.
       /** @param {Record<string, string>} map */
       onFolderColors: async (map) => {
         this.plugin.settings.folderColors = map;
@@ -642,103 +539,60 @@ class VaultGraphView extends ItemView {
         this.plugin.settings.subfolderColors = map;
         await this.plugin.saveSettings();
       },
-      // FOLDER SHOWN ALSO GETS A WRITER, for the same #22-shaped reason as colours above --
-      // this used to read "the eye in the settings tab is still the only way to change one,
-      // so this stays read-only," which was true until github#34 put a "hidden by default"
-      // toggle in the view's own right-click menu. That toggle called page.js's existing
-      // pickVisible(), which already tried to persist through this callback -- so on this
-      // host it applied live and then silently reverted on the next reload, because nothing
-      // was listening. Caught while wiring an unrelated new setting through this same block
-      // for github#3 and fixed here rather than filed separately, since the wiring is
-      // identical.
+      // github#34
+      // github#3
       /** @param {Record<string, boolean>} map */
       onFolderShown: async (map) => {
         this.plugin.settings.folderShown = map;
         await this.plugin.saveSettings();
       },
       folderShown: this.plugin.settings.folderShown,
-      // Pan DOES get a writer, unlike the two maps above: the control that flips it is in
-      // the view rather than in the settings tab, so the view is what has to persist it.
       panEnabled: this.plugin.settings.panEnabled,
       /** @param {boolean} v */
       onPanEnabled: async (v) => {
         this.plugin.settings.panEnabled = !!v;
         await this.plugin.saveSettings();
       },
-      // Compact date axis (github#23) DOES get a writer, same reasoning as pan just above
-      // -- it has its own view-level icon now (beside the date range, since the gear on
-      // this host leads to Obsidian's settings tab, not an in-view panel), so the view is
-      // what has to persist a click there. The settings-tab toggle below saves and pushes
-      // live itself either way, same as it already does for pan.
+      // github#23
       compactAxis: this.plugin.settings.compactAxis,
       /** @param {boolean} v */
       onCompactAxis: async (v) => {
         this.plugin.settings.compactAxis = !!v;
         await this.plugin.saveSettings();
       },
-      // Whether an unlinked note joins its own folder's group (github#3, reopened) -- same
-      // shape as compactAxis just above: a view-level control (the right-click menu's own
-      // toggle on the (unlinked) row) as well as the settings tab below, so the view has to
-      // persist a click made there too.
+      // github#3
       unlinkedByFolder: this.plugin.settings.unlinkedByFolder,
       /** @param {boolean} v */
       onUnlinkedByFolder: async (v) => {
         this.plugin.settings.unlinkedByFolder = !!v;
         await this.plugin.saveSettings();
       },
-      // A separate question from the one above (github#3, re-read again): whether a note
-      // STILL standing in the (unlinked) group wears its own folder's colour instead of the
-      // flat swatch. Same view-level-control shape as unlinkedByFolder just above.
+      // github#3
       unlinkedTintByFolder: this.plugin.settings.unlinkedTintByFolder,
       /** @param {boolean} v */
       onUnlinkedTintByFolder: async (v) => {
         this.plugin.settings.unlinkedTintByFolder = !!v;
         await this.plugin.saveSettings();
       },
-      // The hub, for the same reason pan gets a writer: it is changed in the view, by
-      // right-clicking a note or dragging one into the middle, so the view is what has to
-      // persist it. Not in the settings tab either -- "which notes are in the hub" is a
-      // thing you point at, not a thing you type.
       pinned: this.plugin.settings.pinned,
       /** @param {string[]} ids */
       onPinned: async (ids) => {
         this.plugin.settings.pinned = ids;
         await this.plugin.saveSettings();
       },
-      // The gear IS shown here -- it is where somebody looking at the disc goes to look
-      // for the colours -- but it opens Obsidian's settings tab rather than a second
-      // panel inside the view saying the same things. `settingsUI` is deliberately not
-      // set: that is the standalone's mode, where nothing else can hold a setting.
       openSettings: () => this.plugin.openSettings(),
-      // The window this view is actually in. A view dragged out into a popout must schedule
-      // its timers and animation frames there, not on the main window -- which is what
-      // obsidianmd/prefer-active-window-timers is about. The standalone page passes nothing
-      // and gets its own window, because `activeWindow` is an Obsidian global.
       win: activeWindow,
-      // What the standalone page cannot do. There the data is baked into the file, so
-      // Refresh can only reset filters and replay -- and it was reported, fairly, as a
-      // button that does not pick up new files (github#6). Here the vault is right
-      // there: render() tears this view down, rebuilds from the metadata cache and
-      // mounts again, so the button means what its label says.
-      //
-      // Guarded, because a rebuild triggered from inside the mount it is about to
-      // destroy will re-enter if the user leans on it. render() is async and the click
-      // handler cannot await it.
+      // github#6
       onRefresh: () => {
         if (this.rebuilding) return;
         this.rebuilding = true;
         this.render()
           .catch(/** @param {Error} e */ (e) => new Notice("Vault Graph: rebuild failed -- " + e.message))
-          // Cleared on the NEW view state, not the old one: render() replaces
-          // this.handle, and the flag lives on the view rather than the mount.
           .finally(() => { this.rebuilding = false; });
       },
     });
     this.mountMs = Math.round(performance.now() - t0);
 
-    // The page renders `obsidian://open?...` links for each note. Following the URI would
-    // work, but openLinkText is the thing that respects panes, history and modifier keys --
-    // and it does not need the vault name, which the URI form has to guess at.
     this.registerDomEvent(page, "click", (ev) => {
       const a = ev.target instanceof Element ? ev.target.closest('a[href^="obsidian://"]') : null;
       if (!a) return;
@@ -756,52 +610,23 @@ class VaultGraphView extends ItemView {
 
 /** @type {Settings} */
 const DEFAULTS = {
-  ghosts: false,        // --ghosts
-  templates: false,     // --templates
-  flatMonths: false,    // --flat-months
-  words: true,          // the one field that still costs I/O
-  // folder name -> palette slot key ("g7"). A SLOT, not a hex: the palette has separate
-  // light and dark values, so a saved hex would be right in one Obsidian theme and wrong
-  // in the other. Empty means every folder takes the slot its position gives it.
+  ghosts: false,
+  templates: false,
+  flatMonths: false,
+  words: true,
   folderColors: {},
-  // "folder/sub" -> palette slot key, one level down. Same slot-not-hex reasoning, and
-  // the same "" means the automatic tint -- which for a subfolder is a computed shade,
-  // never one of the twelve slots, so there is nothing to fall back to but the ladder.
   subfolderColors: {},
-  // folder name -> true (shown) / false (hidden), as a DEFAULT. Absent means the `_` rule
-  // decides: a folder whose name starts with an underscore is an archive, so it is out of
-  // the colour rotation, grey, and hidden until somebody says otherwise.
   folderShown: {},
-  // Note ids pinned into the hub, in slot order. Empty means the mark is in the middle,
-  // which is the state the graph has always opened in. The plugin rebuilds in place, so
-  // these are re-checked against the graph on every mount -- a renamed or deleted note
-  // drops out rather than holding a slot nothing can fill.
   pinned: [],
-  // Drag-to-pan in the view. ON by default: the rim of a big vault is unreachable without
-  // it, and the corner control is a cheaper way to discover that than a settings tab is.
-  // Held here so a vault where dragging gets in the way can start locked.
   panEnabled: true,
-  // Weight the date strip's years and months by note count instead of giving every one
-  // equal width, so a sparse decade doesn't cost the same room as one busy year. ON by
-  // default -- the better axis should not need anyone to find a toggle first (github#23).
+  // github#23
   compactAxis: true,
-  // An unlinked note joins its own folder's group -- wedge, band, colour, count, filter,
-  // all of it -- instead of sitting apart with every other unlinked note. ON by default, at
-  // explicit request (github#3, reopened): a note with no links is still filed somewhere,
-  // and the disc should read that way unless told otherwise. OFF is the escape hatch for
-  // anyone who wants the unlinked population kept visible and separate, same as the
-  // original fix under this issue number shipped it.
+  // github#3
   unlinkedByFolder: true,
-  // A separate question from the one above (github#3, re-read again): while a note is
-  // still standing in the (unlinked) group (unlinkedByFolder off), does it wear its own
-  // folder's colour instead of the flat swatch every note in that group has always worn.
-  // OFF by default -- this is the smaller, opt-in half of the reopen comment's ask, not the
-  // shipped-behaviour-changing half unlinkedByFolder's own default is.
+  // github#3
   unlinkedTintByFolder: false,
 };
 
-// The four build settings, described once. They live here rather than inline in display()
-// so the tab is a list of what exists rather than 60 lines of chained calls.
 /** @type {{ key: "ghosts" | "templates" | "flatMonths" | "words", name: string, desc: string }[]} */
 const BUILD_SETTINGS = [
   { key: "ghosts", name: "Include notes that do not exist yet",
@@ -814,15 +639,6 @@ const BUILD_SETTINGS = [
     desc: "Sizes each note by its length. The one setting that costs real I/O: it reads every file rather than answering from the metadata cache." },
 ];
 
-// VIEW, not build: these change how you look rather than what you see, so each applies live
-// through the view's api and never rebuilds. One table for both render paths -- display() for
-// Obsidian before 1.13, getSettingDefinitions() from 1.13 -- so the two cannot drift.
-//
-// `defaultOn` is the "absent means on" rule: three of these read `!== false` so a settings
-// file written before they existed shows the toggle on, and the fourth is opt-in (`=== true`).
-// The graph's own controls -- the corner pan button, the (unlinked) row's context menu --
-// write the SAME settings, which is the point: the control is how you find the feature and
-// this is where the default lives.
 /**
  * @typedef {Object} ViewSetting
  * @property {"panEnabled" | "compactAxis" | "unlinkedByFolder" | "unlinkedTintByFolder"} key
@@ -843,32 +659,15 @@ const VIEW_SETTINGS = [
     desc: "While unlinked notes are kept as their own group (the toggle just above is off), give each one its own folder's colour instead of the flat unlinked swatch. The (unlinked) row's right-click menu carries this too." },
 ];
 
-// The one sentence under the Folder colours heading, shared by both render paths.
 const COLOURS_DESC = "Twelve slots, handed out in folder order and round again. Setting one folder never moves another, and two folders may share a colour.";
 
-// MUST MATCH src/page.js's SLOT_NAMES: ten hues, then two greys. Kept as a copy rather
-// than imported because page.js keeps every name inside mountVaultGraph, and it has to --
-// the standalone build turns that module into a plain <script>, where anything at module
-// scope would become a browser global.
 const SLOT_NAMES = ["Blue", "Orange", "Aqua", "Yellow", "Green", "Magenta",
                     "Violet", "Red", "Cyan", "Orchid", "Grey", "Slate"];
 
-// Same rule as page.js's isArchiveGroup, and a copy for the same reason. A leading
-// underscore means archive: out of the colour rotation, grey, hidden by default.
 /** @param {string} name */
 const isArchiveGroup = (name) => String(name).charAt(0) === "_";
-// ...and the slot it lands on, matching ARCHIVE_SLOT in page.js. g11 of the two greys:
-// the lower-contrast one against the surface in both themes, which is what recede means.
 const ARCHIVE_SLOT = "g11";
 
-// The folders the graph will group by, in the order it will lay them out: first path
-// segment, "(vault root)" for a note sitting loose at the top. Sorted exactly as
-// computeOrder does it, so the third row here is the third wedge on the disc.
-//
-// Derived from the vault rather than read off an open view, because the settings tab has
-// to work with no graph open. One knowing difference from buildData: templates are not
-// filtered out, which needs an async folder read. It only matters for a vault whose
-// template folder is a TOP-LEVEL one, and then it shows a row that colours nothing.
 /**
  * @param {App} app
  * @returns {{ name: string, n: number }[]}
@@ -881,8 +680,6 @@ function topFolders(app) {
     const g = paraFolder(file.path);
     count.set(g, (count.get(g) || 0) + 1);
   }
-  // Same three ranks as computeOrder in page.js: archives, then the pseudo-folders, then
-  // the folders the vault actually filed. A copy for the same reason SLOT_NAMES is one.
   /** @param {string} s */
   const rank = (s) => (s.charAt(0) === "_" ? 0 : s.charAt(0) === "(" ? 1 : 2);
   return Array.from(count.entries())
@@ -891,14 +688,6 @@ function topFolders(app) {
     .map(([name, n]) => ({ name, n }));
 }
 
-// As topFolders, one level down: every depth-1 subfolder of EVERY top folder, in one
-// pass over the vault rather than one per folder -- a per-folder version was tried
-// first and rescanned app.vault.getMarkdownFiles() once per row renderColours draws,
-// which is O(folders x files) on every render of the settings tab. Reuses paraDirs --
-// the same helper buildData calls -- rather than reparsing paths a second way. Same
-// no-view-open role as topFolders: the settings tab needs this before any graph has
-// been opened, and there is nothing for refreshFromView to correct it against once one
-// has (see renderColours' own comment on why).
 /**
  * @param {App} app
  * @param {boolean} flatMonths
@@ -919,9 +708,6 @@ function allSubfolders(app, flatMonths) {
     const sb = paraDirs(file.path, flatMonths)[0] || "";
     count.set(sb, (count.get(sb) || 0) + 1);
   }
-  // Same tie-break subOrder uses in page.js: biggest first, plain name compare (no
-  // {numeric:true} -- that is topFolders' own choice for top-level folder names, not
-  // subOrder's).
   /** @type {Map<string, SubRow[]>} */
   const out = new Map();
   for (const [g, count] of byFolder) {
@@ -940,11 +726,6 @@ class VaultGraphSettingTab extends PluginSettingTab {
   constructor(app, plugin) {
     super(app, plugin);
     this.plugin = plugin;
-    // Which folders' subfolder rows are expanded. Tab-local UI state, not settings -- it
-    // does not need to survive a restart, only a re-render, so it lives here rather than
-    // in this.plugin.settings. A pick redraws the colour rows (redrawColours) and never
-    // touches this, which is the point: reopening after a click must not collapse the
-    // section the click was made in.
     /** @type {Record<string, boolean>} */
     this.subOpen = {};
     /** @type {HTMLElement | null} */
@@ -978,26 +759,15 @@ class VaultGraphSettingTab extends PluginSettingTab {
         items: [{
           name: "Folder and subfolder colours", desc: COLOURS_DESC,
           aliases: ["colour", "color", "swatch", "palette", "subfolder", "hidden by default", "archive"],
-          // The row's own parent is the group's list element -- the swatch rows go right
-          // under this row. Read off settingEl rather than the SettingGroup handed in,
-          // whose listEl is 1.11 API and this plugin's floor is 1.7.2 (the callback itself
-          // only ever runs on 1.13, but the API check cannot know that).
           /** @param {Setting} setting */
           render: (setting) => {
             this.renderColourSection(setting);
-            // Torn down with the row: the scope holds the swatch rows and is what
-            // redrawColours() writes into, so a stale one must not outlive its tab.
             return () => { if (this.scope) { this.scope.remove(); this.scope = null; } };
           },
         }] },
     ];
   }
 
-  // The two accessors the declarative controls go through. Reading is a plain lookup --
-  // `defaultValue` on each control carries the absent-means-on rule -- and writing is where
-  // the side effects live: a build setting changes what is IN the graph and rebuilds the
-  // view, a view setting pushes the change through the live api. The same two branches
-  // display() has always taken, in one place.
   /** @param {string} key */
   getControlValue(key) {
     return this.plugin.settings[/** @type {keyof Settings} */ (key)];
@@ -1013,13 +783,11 @@ class VaultGraphSettingTab extends PluginSettingTab {
     if (view) await this.applyView(view, !!value);
   }
 
-  /** What a view toggle shows: the setting, with the absent-means-on rule applied. */
   /** @param {ViewSetting} def */
   viewValue(def) {
     const v = this.plugin.settings[def.key];
     return def.defaultOn ? v !== false : v === true;
   }
-  /** Push a view setting through the open view's api, if there is one. */
   /** @param {ViewSetting} def @param {boolean} v */
   async applyView(def, v) {
     const view = await this.plugin.currentView();
@@ -1040,13 +808,10 @@ class VaultGraphSettingTab extends PluginSettingTab {
           .onChange(async (v) => {
             this.plugin.settings[s.key] = v;
             await this.plugin.saveSettings();
-            // These four change what is IN the graph, so the view is built again.
-            // A colour, below, only repaints.
             await this.plugin.rebuildViews();
           }));
     }
 
-    // The view toggles: same table as getSettingDefinitions(), same rule for what "on" means.
     new Setting(containerEl).setName("View").setHeading();
     for (const s of VIEW_SETTINGS) {
       new Setting(containerEl)
@@ -1081,9 +846,6 @@ class VaultGraphSettingTab extends PluginSettingTab {
       .setButtonText("Reset all")
       .setTooltip("Also drops every subfolder override")
       .onClick(async () => {
-        // BOTH MAPS, not just folderColors -- "Reset all" under a "Folder colours"
-        // heading that now covers subfolders too should not leave a subfolder pin
-        // behind for the user to go find and clear by hand.
         this.plugin.settings.folderColors = {};
         this.plugin.settings.subfolderColors = {};
         await this.plugin.saveSettings();
@@ -1092,19 +854,9 @@ class VaultGraphSettingTab extends PluginSettingTab {
         this.redrawColours();
       }));
 
-    // THE PALETTE TOKENS LIVE ON .vault-graph, and this pane is not inside one. The
-    // wrapper carries that class so `var(--g7)` resolves here; `vg-tokens` turns off the
-    // page's own grid layout, which comes with the class and is not wanted in a settings
-    // pane. Nothing in this file knows a single hex.
     row.settingEl.addClass("vg-colour-row");
     const scope = row.settingEl.createDiv({ cls: ["vault-graph", "vg-tokens"] });
 
-    // AND IT NEEDS THE THEME, for the same reason the view does -- page.css carries a
-    // light palette and a dark one, and picks between them on this attribute. Without it
-    // the wrapper falls through to prefers-color-scheme, which is the OS's answer to a
-    // question only Obsidian can answer: a light OS running a dark Obsidian would show
-    // twelve light-theme swatches in a dark settings pane, none of them the colour the
-    // disc is actually painting. Same source as VaultGraphView.syncTheme.
     scope.setAttribute("data-theme",
       activeDocument.body.classList.contains("theme-light") ? "light" : "dark");
 
@@ -1112,52 +864,23 @@ class VaultGraphSettingTab extends PluginSettingTab {
     this.redrawColours();
   }
 
-  /**
-   * Redraw the colour rows into the current scope: the path-derived list first, then the
-   * live view's own grouping when there is one. This is what a pick calls -- it used to
-   * call display(), which rebuilt the whole tab and, from 1.13 on, would have drawn the
-   * imperative tab on top of the declarative one.
-   */
   redrawColours() {
     if (!this.scope) return;
-    // Archives are skipped in the rotation here too, or the fallback would disagree with
-    // the disc about which slot every folder after an archive is on. Hence the separate
-    // counter -- the same reason buildColors has one.
     let auto = 0;
-    // `slot` doubles as `autoSlot` here: this list is path-derived and never consults
-    // settings.folderColors, so what it computes already IS the automatic guess -- there
-    // is no override applied yet for autoSlot to differ from.
     this.renderColours(topFolders(this.app).map((f) => {
       const s = isArchiveGroup(f.name) ? ARCHIVE_SLOT : "g" + ((auto++ % SLOT_NAMES.length) + 1);
       return { name: f.name, n: f.n, slot: s, autoSlot: s };
     }));
 
-    // ...and then ask the graph itself, which is the only thing that actually knows.
-    //
-    // The list above is derived from paths, and the disc's is not quite: a note with no
-    // links at all is grouped under "(unlinked)" rather than under its folder, so a vault
-    // with unlinked notes has one group here that no path produces -- and since the
-    // automatic slot is decided by POSITION in that list, every folder after it would be
-    // marked one slot out. Close enough to look right and wrong on exactly the vaults
-    // that have orphans.
-    //
-    // A view can only be reached asynchronously and a render cannot wait, so the
-    // path-derived list renders first and this corrects it. With no view open there is
-    // nothing to correct against, and the fallback is what stands.
     this.refreshFromView();
   }
 
-  // Re-render the colour rows from the live graph's own grouping and colours.
   async refreshFromView() {
     const scope = this.scope;
     const view = await this.plugin.currentView();
     const api = view && view.handle && view.handle.api;
     if (!api || !api.groupOrder || !api.palette || !scope || !scope.isConnected) return;
 
-    // api.slotOf, not a hex lookup against the palette. An archive folder is on NO slot --
-    // it takes a neutral, which is deliberately not one of the twelve -- so matching by
-    // colour returns nothing for it, and the first version filtered those rows out
-    // entirely. The archives were the rows most in need of the eye.
     const groups = api.groupOrder().map((name) => ({
       name,
       n: api.groupCount(name),
@@ -1167,12 +890,6 @@ class VaultGraphSettingTab extends PluginSettingTab {
     if (groups.length) this.renderColours(groups);
   }
 
-  // One row per group: its name, its note count, and the twelve slots.
-  //
-  // `slot` is the slot the group is CURRENTLY USING, whether or not anybody chose it.
-  // Marking only the chosen one meant a folder on Auto -- every folder, until somebody
-  // changes something -- had no mark anywhere, so the panel showed twelve colours and
-  // would not say which of them the folder was.
   /** @param {GroupRow[]} groups */
   renderColours(groups) {
     const scope = this.scope;
@@ -1182,13 +899,6 @@ class VaultGraphSettingTab extends PluginSettingTab {
       return;
     }
 
-    // ONE SCAN FOR THE WHOLE RENDER, not one per group -- see allSubfolders' own
-    // comment. Path-derived, not from the live api: unlike a top-level folder, a
-    // subfolder's identity never needs an open view to resolve (there is no
-    // "(unlinked)"-style group at this level), so there is nothing for refreshFromView
-    // to correct here. The one thing the live api could add is a note count adjusted
-    // for ghosts/templates, which is not worth a second async round trip for a
-    // settings pane.
     const subsByFolder = allSubfolders(this.app, this.plugin.settings.flatMonths);
 
     for (const group of groups) {
@@ -1196,24 +906,10 @@ class VaultGraphSettingTab extends PluginSettingTab {
       const current = pinned || group.slot;
       const shown = this.shownByDefault(group.name);
       const subs = subsByFolder.get(group.name) || [];
-      // A PIN BYPASSES THE SIZE GATE -- mirrors page.js's own groupHasPinnedSub. Without
-      // it, pinning a folder's one differentiated subfolder and then letting it shrink
-      // to a single subfolder (notes moved elsewhere) makes the twisty vanish here with
-      // the pin still silently in effect and no remaining control in this tab to clear
-      // it short of "Reset all", which drops every override in the vault.
       const hasPin = subs.some((s) => this.plugin.settings.subfolderColors[group.name + "/" + s.name]);
       const hasSubs = subs.length > 1 || hasPin;
       const open = hasSubs && !!this.subOpen[group.name];
 
-      // The eye comes FIRST (after the twisty, when there is one), because "am I
-      // looking at this folder at all" comes before what colour it is. Obsidian's own
-      // `eye` / `eye-off` icons through an extra button, rather than a glyph of our
-      // own: it is the mark the rest of the app uses for exactly this, it comes with
-      // the hover and focus treatment for free, and it stays right if Obsidian
-      // restyles its icons.
-      //
-      // It sets a DEFAULT. The legend's eye inside the graph is the live filter; this
-      // is what the disc comes back to.
       const row = new Setting(scope)
         .setName(group.name)
         .setDesc((group.n === 1 ? "1 note" : group.n + " notes") +
@@ -1236,10 +932,6 @@ class VaultGraphSettingTab extends PluginSettingTab {
       SLOT_NAMES.forEach((name, i) => {
         const key = "g" + (i + 1);
         const on = current === key;
-        // The slot with no override at all -- distinct from `current` exactly when the
-        // folder is pinned to something else, and marked regardless of `on` so it stays
-        // visible after a pin. Before this, the mark and the checked ring were the same
-        // fact and a pin erased the only trace of what Auto would give back.
         const isAuto = group.autoSlot === key;
         const attr = {
           role: "radio", "aria-checked": String(on), "aria-label": name,
@@ -1262,12 +954,6 @@ class VaultGraphSettingTab extends PluginSettingTab {
     }
   }
 
-  // One row per subfolder, indented (see .vg-subrow in styles.css). Same twelve
-  // swatches a folder row gets, but NEVER marking one "current" while unpinned: unlike
-  // a folder, a subfolder's automatic colour is a computed tint, not one of the twelve
-  // slot hexes, so there is nothing among them to ring -- exactly the same distinction
-  // page.js's own settings panel draws for the same reason. Only the Auto button's own
-  // pressed state says "this one is automatic".
   /**
    * @param {HTMLElement} scope
    * @param {string} folder
@@ -1302,8 +988,6 @@ class VaultGraphSettingTab extends PluginSettingTab {
     }
   }
 
-  // Shown unless something says otherwise: an explicit choice first, then the `_` rule.
-  // Mirrors hiddenByDefault in page.js.
   /** @param {string} folder */
   shownByDefault(folder) {
     const saved = this.plugin.settings.folderShown[folder];
@@ -1311,9 +995,6 @@ class VaultGraphSettingTab extends PluginSettingTab {
     return !isArchiveGroup(folder);
   }
 
-  // Flip one folder's DEFAULT visibility. Written as an explicit boolean rather than by
-  // deleting the key, so "shown, and I said so" survives a later change to what the `_`
-  // rule does.
   /** @param {string} folder */
   async pickVisible(folder) {
     const map = Object.assign({}, this.plugin.settings.folderShown);
@@ -1324,11 +1005,6 @@ class VaultGraphSettingTab extends PluginSettingTab {
     this.redrawColours();
   }
 
-  // Set-or-clear one slot override in a settings map, save, apply live, re-render. `key`
-  // null clears the override. Nothing else in the map is touched -- two entries may hold
-  // the same slot on purpose. Shared by pick() and pickSub(), which only differ in which
-  // settings map they touch, how the map key is built, and which apply method re-derives
-  // colours from it.
   /**
    * @param {"folderColors" | "subfolderColors"} settingsKey
    * @param {string} mapKey
@@ -1344,14 +1020,11 @@ class VaultGraphSettingTab extends PluginSettingTab {
     this.redrawColours();
   }
 
-  // One folder's slot.
   /** @param {string} folder @param {string | null} key */
   async pick(folder, key) {
     return this.setOverride("folderColors", folder, key, "applyFolderColors");
   }
 
-  // As pick(), one level down. redrawColours() re-collapses nothing -- see this.subOpen
-  // in the constructor -- so the section this pick was made in stays open.
   /** @param {string} folder @param {string} sub @param {string | null} key */
   async pickSub(folder, sub, key) {
     return this.setOverride("subfolderColors", folder + "/" + sub, key, "applySubfolderColors");
@@ -1359,19 +1032,10 @@ class VaultGraphSettingTab extends PluginSettingTab {
 }
 
 class VaultGraphPlugin extends Plugin {
-  // DECLARED HERE, on the subclass. Obsidian 1.13 added `settings?: unknown` to Plugin as the
-  // conventional slot ("assign loaded data here in onload; declare a concrete type on your
-  // subclass to type it"), which is what this field has always been -- but without the
-  // declaration every `plugin.settings` resolved to the base class's 1.13 member and
-  // no-unsupported-api reported 74 uses of an API newer than minAppVersion. The concrete
-  // declaration is what the typings ask for, and it is what makes those reads ours.
   /** @type {Settings} */
   settings = DEFAULTS;
 
   async onload() {
-    // loadData() is `Promise<any>`: the file is whatever was last saved, by any version of
-    // this plugin, so it is held as `unknown` and merged over the defaults rather than
-    // trusted to be a Settings. A field missing from an older file gets its default.
     /** @type {unknown} */
     const saved = await this.loadData();
     /** @type {Settings} */
@@ -1380,8 +1044,6 @@ class VaultGraphPlugin extends Plugin {
 
     this.registerView(VIEW_TYPE, (leaf) => new VaultGraphView(leaf, this));
 
-    // Registered before anything asks for it: the ribbon button and the view tab both
-    // resolve the id at creation time, and an unknown id renders as an empty box.
     addIcon(ICON_ID, discIcon());
 
     this.addRibbonIcon(ICON_ID, "Vault graph", () => this.activate());
@@ -1402,9 +1064,6 @@ class VaultGraphPlugin extends Plugin {
       },
     });
 
-    // Diagnostics, for the CDP harness and for anyone wondering where the time went.
-    // No console.log: "avoid unnecessary logging" is a guideline and the linter enforces
-    // it, and nothing was ever reading the log.
     this.addCommand({
       id: "report",
       name: "Report diagnostics",
@@ -1430,14 +1089,6 @@ class VaultGraphPlugin extends Plugin {
     });
   }
 
-  // Guidelines: don't hold a reference to the view, and don't detach leaves in onunload.
-  //
-  // The `instanceof` is NOT belt and braces, and neither is the await. Since 1.7.2 a leaf
-  // restored from a saved workspace is DEFERRED: the leaf is real and getLeavesOfType finds
-  // it, but until something reveals it `leaf.view` is a DeferredView placeholder rather than
-  // this plugin's view. Handing that placeholder back made "Rebuild" a TypeError -- the stub
-  // has no `render` -- and made the diagnostics report say hasApi:false about a graph that
-  // was perfectly fine. Both read as bugs in the graph, and neither is.
   async currentView() {
     for (const leaf of this.app.workspace.getLeavesOfType(VIEW_TYPE)) {
       await leaf.loadIfDeferred();
@@ -1450,18 +1101,9 @@ class VaultGraphPlugin extends Plugin {
     await this.saveData(this.settings);
   }
 
-  // Open this plugin's own settings tab, for the gear in the view.
-  //
-  // `app.setting` is NOT in the public API. It is what every plugin uses for this, because
-  // there is nothing else -- there is no documented "open my settings tab" -- so it is
-  // guarded at both steps and falls back to telling the user where to click rather than
-  // throwing inside a click handler. If a future Obsidian drops it, the gear degrades to a
-  // signpost instead of doing nothing.
   openSettings() {
     const setting = /** @type {AppWithSetting} */ (this.app).setting;
     if (!setting || typeof setting.open !== "function") {
-      // Worded to survive obsidianmd/ui/sentence-case, which flags any capitalised word
-      // mid-string -- and its suggested fix lowercased the plugin's own name.
       new Notice("Open the plugin's settings tab from the community plugins list.");
       return;
     }
@@ -1469,26 +1111,18 @@ class VaultGraphPlugin extends Plugin {
     if (typeof setting.openTabById === "function") setting.openTabById(this.manifest.id);
   }
 
-  // A COLOUR CHANGE REPAINTS. It does not rebuild, and the difference is the whole
-  // reason setFolderColors exists on the page's api: colour is not an input to the
-  // layout, so going through render() would throw away a settled disc and replay the
-  // reveal animation because somebody clicked a swatch.
   async applyFolderColors() {
     const view = await this.currentView();
     const api = view && view.handle && view.handle.api;
     if (api && api.setFolderColors) api.setFolderColors(this.settings.folderColors);
   }
 
-  // As applyFolderColors, one level down.
   async applySubfolderColors() {
     const view = await this.currentView();
     const api = view && view.handle && view.handle.api;
     if (api && api.setSubfolderColors) api.setSubfolderColors(this.settings.subfolderColors);
   }
 
-  // Visibility defaults changed: push them into the live filter and let the notes fade.
-  // Like a colour, this repaints rather than rebuilding -- the notes are all still in the
-  // graph, they are just not being drawn.
   async applyHiddenDefaults() {
     const view = await this.currentView();
     const api = view && view.handle && view.handle.api;
@@ -1501,15 +1135,11 @@ class VaultGraphPlugin extends Plugin {
     if (api.applyHiddenDefaults) api.applyHiddenDefaults();
   }
 
-  // The four build settings DO change the data, so they get the full path.
   async rebuildViews() {
     const view = await this.currentView();
     if (view) await view.render();
   }
 
-  // `revealLeaf` is awaited on purpose: since 1.7.2 it resolves once the view is really
-  // loaded rather than merely fronted, which is the difference between a tab that shows a
-  // graph and a tab that shows nothing until you click it.
   async activate() {
     const existing = this.app.workspace.getLeavesOfType(VIEW_TYPE);
     if (existing.length) { await this.app.workspace.revealLeaf(existing[0]); return; }

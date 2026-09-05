@@ -105,8 +105,10 @@ happens — so this one quits and relaunches to get the leaf into the state a pe
 restart of the day puts it in.
 
 `git config core.hooksPath .githooks` once per clone runs those on every push to `develop` or
-`main`, along with a check that refuses to publish other people's names and two that keep the
-generated fixtures deterministic. Only the invariant suite has a skip flag, on purpose:
+`main`, along with a check that refuses to publish other people's names, two that keep the
+generated fixtures deterministic, and one that keeps the generated navigation files
+(`.ai-context/code-map.md`, `.ai-context/code-index.md`, from `node scripts/code-map.mjs`)
+in step with the source. Only the invariant suite has a skip flag, on purpose:
 everything else is a static read costing seconds at most, and what most of it prevents is
 damage to somebody else's software, or to somebody else. The lint gate fails closed on a
 clone that has not run `npm ci` — run it, then push.
@@ -131,6 +133,18 @@ commit and neither mechanism can see the other:
 
 `main` also carries a ruleset: pull request required, that check required, no force pushes,
 no deletion.
+
+## Comments are pointers
+
+A comment in `plugin/`, `src/` or `scripts/` carries a reference and nothing else: a bare
+`github#N`, `decisions/NNNN` or `design/NNNN`. The reasoning, the measurements and the
+rejected alternatives live in `.ai-context/` — `changelog-detail.md` for what was measured,
+the ADRs for why not the other thing, `invariants.md` for what a check asserts — and
+`.ai-context/code-index.md` (generated) says which code cites which record. What stays in
+the code besides pointers: JSDoc blocks carrying a tag (the type-aware lint reads them),
+section banners (the code map reads them), the build's `BEGIN`/`END` strip markers, and
+PowerShell `<# .SYNOPSIS #>` help blocks (Get-Help reads them). github#61 set this rule and
+applied it: 15,399 → 8,173 lines in `src/page.js` alone.
 
 ## Commit messages
 
