@@ -1,6 +1,17 @@
 # 0008 — Zero network calls, enforced at read time
 
-**Date** 2026-08-23 · **Status** accepted · **Issue** [#1](https://github.com/luke321/vault-graph/issues/1)
+**Date** 2026-08-23 · **Status** superseded by [0012](0012-own-graph-store-and-renderer.md) on 2026-09-04 · **Issue** [#1](https://github.com/luke321/vault-graph/issues/1)
+
+## What changed since
+
+The two `fetch` calls this record strips were Sigma's, and Sigma is gone: github#58 replaced
+the vendored graphology and Sigma bundles with the graph store and renderer under `src/engine/`.
+There is nothing to strip any more. **"Zero network calls" is a property of code we wrote**,
+and `scripts/check-network.mjs` keeps it that way from two directions instead of three -- our
+own sources (the plugin, the page, every `.ts` under `src/engine`, the markup and stylesheets)
+and the built artifacts; the network-primitive list that lived in `src/vendor.mjs` lives in the
+check itself now. The reasoning below stands as the record of why the count had to be zero
+rather than disclosed, and of what was tried before the bundles were replaced outright.
 
 ## Context
 

@@ -69,8 +69,9 @@ three fixtures.
 The first attempt was the same patch. It passed `node --check` and the page **did not boot**:
 `TypeError: Cannot read properties of undefined (reading 'i')` inside `bandOf`.
 
-`mountVaultGraph` calls `measureDotTyp()` near the top of its body, which reaches `dotUnits` and so
-`pitchUnits` — **above every one of these declarations**. A `var` initialiser has not run at that
+`mountVaultGraph` called `measureDotTyp()` near the top of its body (both gone since github#55's
+dead-code pass), which reached `dotUnits` and so `pitchUnits` — **above every one of these
+declarations**. A `var` initialiser has not run at that
 point. The pairs of scalars survived it by accident, because `(lastSPI || 1)` reads `undefined` and
 carries on with 1; `BAND.i` on `undefined` throws.
 

@@ -1,33 +1,87 @@
 # Releasing
 
-**Every release gets a git tag, a GitHub Release, and a ready-to-run package attached.**
-The tag alone is not a release: GitHub's auto-generated source archives include
-`.ai-context/` (a few thousand lines of design records) and the dev tooling, which is not
-what someone wanting to *run* this needs.
+**Every release gets a git tag and a GitHub Release with the plugin's three files attached —
+`main.js`, `manifest.json`, `styles.css` — each carrying a build provenance attestation.** The
+tag alone is not a release: Obsidian installs from those three assets and nothing else. Until
+2026-09-05 the Release also carried a `vault-graph-<version>.zip` of the exporter; the release
+is plugin-only now. The exporter and the standalone page stay in the repo — the invariant suite
+drives them — and anyone wanting to run the exporter clones.
 
-## One command
+## Two halves: a command, then a workflow
 
 ```powershell
-.\scripts\release.ps1 1.5.3
+.\scripts\release.ps1 2.0.0            # the local half: check, gate, tag, push
 ```
 
-**The version is bare semver, with no `v`.** Obsidian installs a plugin by matching the
-release tag against `manifest.json`'s `version`, which cannot carry a prefix — so a
-`v`-tagged release is one nobody can install. The script rejects a `v` with that reason,
-and rejects a version the manifest does not already claim. (Its own check said `^v...`
-until 1.5.3, which is why 1.5.0–1.5.2 were cut by hand.)
+**`release.ps1` does what only a person can do, and stops at the tag push.** It refuses a `v`
+(Obsidian matches the release tag against `manifest.json`'s `version`, which cannot carry a
+prefix, so a `v`-tagged release is one nobody can install), a version the manifest does not
+claim, a version with no `## <version>` section in `CHANGELOG.md`, a branch other than `main`
+(github#47), a dirty tree and a `main` behind `origin`; prints the hero and feature-clip
+warnings; runs lint, `check-notice.mjs` and the invariant suite; builds the plugin once as a
+pre-flight (the one failure the split introduces is a build that only fails in CI, leaving a
+tag with no release, and a tag cannot be re-cut); then writes the annotated tag with the
+CHANGELOG section as its message and pushes the branch, then the tag. `-DryRun` stops after
+the suite.
 
-It refuses to release a dirty tree (a release must be reproducible from its tag), refuses a
-version with no `## <version>` section in `CHANGELOG.md` (a version whose changes nobody
-wrote down), runs the invariant suite, then tags, packages, pushes and creates the GitHub
-Release with the zip attached. `-DryRun` stops after the suite. The tag message is the same
-text as the release notes, so `git show <tag>` and the Release page agree.
+**`.github/workflows/release.yml` is the publisher (github#10).** The tag push triggers it. It
+checks out the tagged commit, resolves and re-checks the version against the manifest and the
+CHANGELOG, refuses a commit that is not in `origin/main`'s history, runs the static gates
+(lint, scope, PII, comments, code map, and `check-notice.mjs`, which builds `main.js` and reads
+the Sigma copyright line back out of it and of a fresh exported page), refuses to publish
+without all three files, **attests** them with `actions/attest-build-provenance`, drafts the
+release body from the `## <version>` section, names the release from that heading, and creates
+the Release (or re-uploads over one that exists). Its step summary prints the SHA-256 of each
+file and the attestation URL.
 
+**Why publication had to move.** An attestation is signed through Sigstore with the run's OIDC
+token, and `id-token: write` is a permission only an Actions run can hold — no script on a
+laptop can mint one. After it, anyone can check a downloaded file:
+
+```bash
+gh attestation verify main.js --repo luke321/vault-graph
+```
+
+The invariant suite stays local: it drives a real Chrome against three generated vaults for
+minutes, `release.ps1` runs it before the tag, and `.githooks/pre-push` runs it again on the
+push of `main` that carries the tagged commit. The workflow trusts the tag.
+
+**The dry run, and the escape hatch.** A tag-triggered run executes the version of the file
+that is *at* the tag, so a bug in it shows up on the first real release and cannot be fixed by
+re-running or by fixing `main`. Two things answer that. `workflow_dispatch` with a `tag` input
+runs the dispatched branch's file against an existing tag — fix, re-run, still attested. And
+**every push to a `release/*` branch runs the workflow as a dry run**: it builds, gates and
+attests the three files from that commit, taking the version from `manifest.json`, and creates
+no Release — so the whole publishing half is rehearsed on the release branch before any tag
+exists. (`workflow_dispatch` with `dry_run` ticked does the same from any branch, but GitHub
+only lets a workflow be dispatched once its file is on the default branch, which a new
+`release.yml` is not yet.)
+
+```bash
+git push origin release/2.0.0      # the dry run starts on its own
+gh run list --workflow=release.yml --limit 1
+gh run watch
+```
+
+What to look at afterwards: the run's summary (three SHA-256 lines and an attestation URL);
+`gh attestation verify main.js --repo luke321/vault-graph --format json` against the `main.js`
+downloaded from the run's artifact or rebuilt locally from the same commit, which must name the
+repository, the workflow file and the commit; and that no Release was created. A dry run's
+attestation is a real one, recorded in the repository's attestation store for bytes that were
+never published — harmless, and the reason the dry run is not a substitute for the tag run.
+
+Measured 2026-09-06 on `release/2.0.0`: the dry run passed every gate, attested the three files
+and skipped the Release; `gh attestation verify main.js --repo luke321/vault-graph` against a
+`main.js` built locally from the same commit succeeded, the SHA-256s equal on Windows and on the
+Linux runner — the bundle is byte-reproducible across platforms since the loaders resolve
+repo-relative. The first attempt failed at the code-map gate: the generator walked directories
+in filesystem order, which NTFS sorts and ext4 does not. A gate that only runs on one platform
+is the kind of thing the dry run exists to find.
 
 ## The release body is a highlight reel ON TOP of the CHANGELOG section, not instead of it
 
-`release.ps1` drops the raw `## <version>` section from `CHANGELOG.md` straight into the
-release notes by default — fine as a first draft, wrong as the finished thing.
+The workflow drops the raw `## <version>` section from `CHANGELOG.md` straight into the
+release notes — fine as a first draft, wrong as the finished thing.
 `CHANGELOG.md` is the technical record: dense, bug-by-bug, written for someone reading the
 project's history. The GitHub Release page is what someone deciding whether to update
 actually reads first, and a wall of bug-fix prose with no picture buries the one or two
@@ -91,10 +145,18 @@ notices. Re-record and re-encode as part of cutting a release, before the tag:
 
 ```powershell
 .\scripts\record-demo.ps1     # takes the physical mouse for ~30s, so ask first
-.\scripts\make-hero.ps1       # animated WebP, 30fps, 1200px
+.\scripts\make-hero.ps1       # animated WebP, 15fps, 960px, quality 60
 ```
 
 Then commit the new asset, because `release.ps1` refuses a dirty tree.
+
+**The encoder's defaults are what a phone can play.** The 2.0.0 takes first went out at 30 fps and
+1200 px, quality 70 — the hero 30.1 MB, 3,722 frames — and Safari on an iPhone played them
+visibly slowly off the GitHub README. Measured re-encodes of the same take: 15 fps / 1200 px
+17.8 MB, 15 / 960 / q70 12.9 MB, **15 / 960 / q60 11.0 MB** (the default now: a third of the pixels per
+second to decode, the cascades still read as motion), 12 / 800 / q60 7.1 MB (choppy on the
+cascades, the next step down if a phone still struggles). The feature clips scale the same way;
+the biggest, `folders`, went 10.3 → 3.8 MB.
 
 `release.ps1` prints a `=== hero ===` warning when `src/` has commits newer than
 `assets/demo.webp`. It is a warning rather than a gate on purpose: only a person can say
@@ -140,18 +202,36 @@ over-warn (a `colours`-only change flags every feature) but never under-warns si
    `record-demo.ps1` to take the recording, `make-hero.ps1` to encode it. **Re-record any
    feature clip** this release changed, same two commands with `-Act <name>` — see above;
    this one's a judgment call, not "always."
-4. **Run the suite.** `node scripts/smoke.mjs` — and it runs again on push via
-   `.githooks/pre-push`, so a red suite cannot be released.
-5. **Tag, annotated**, with the release summary as the message.
-6. **Build the package** — `node scripts/make-package.mjs` writes
-   `dist/vault-graph-<version>.zip` containing only what is needed to run: `src/`,
-   `vendor/`, `scripts/`, `assets/`, `README.md`, `LICENSE`, `CHANGELOG.md`.
-7. **Create the release** and attach it:
-   `gh release create <version> dist/vault-graph-<version>.zip --notes-file <notes>`
+4. **Run the gates.** `npm run lint`, `node scripts/check-notice.mjs`, `node scripts/smoke.mjs`
+   — and they run again on push via `.githooks/pre-push`, so a red suite cannot be released.
+5. **Tag, annotated**, with the release summary as the message, on `main`.
+6. **Push `main`, then the tag.** That order, so the workflow's main-ancestry guard cannot
+   lose the race. Everything below is what the workflow then does for you.
+7. **Build the plugin** — `node scripts/build-plugin.mjs` writes `main.js` and `styles.css`
+   at the repo root (gitignored); `manifest.json` is tracked.
+8. **Create the release** and attach exactly those three:
+   `gh release create <version> main.js manifest.json styles.css --notes-file <notes>`
 
-## What the package must NOT contain
+**Steps 7–8 by hand produce an unattested release**, and there is no way around that from a
+laptop. They are the *second* fallback for a broken workflow: try
+`gh workflow run release.yml --ref main -f tag=<version>` first, which runs a fixed
+`release.yml` against the tag that already exists and still attests. Hand-publishing is the
+last resort, and what it produces is the thing github#10 was filed about.
+
+## What the release must carry: the Sigma notice
+
+The engine is a port of Sigma.js under MIT, and a `main.js` or exported page without its
+copyright and permission notice is a licence violation, not a cosmetic slip. It went missing
+once (github#58): esbuild keeps only `/*!` comments, and the banner was a plain one. Since
+2.0.0 `node scripts/check-notice.mjs` builds both artifacts and reads the copyright line back
+out of each, and the pre-push hook runs it with no skip flag on every push to `develop` or
+`main` — the merge into `main` that *is* the release included. A release cannot be cut from a
+tree whose builds lack the notice, and the three attached files are the ones that build makes.
+
+## What the release must NOT contain
 
 - **Any built `vault-graph.html`.** It embeds the note titles and folder structure of
-  whichever vault produced it. Publishing one publishes that.
-- `test-vault/` — generated, and large.
-- `.ai-context/` — it belongs to the repo, not to a user of the tool.
+  whichever vault produced it. Publishing one publishes that. (The exporter's zip used to
+  carry its own check for this; with the zip gone, the rule is that nothing but the three
+  plugin files is attached.)
+- Anything else: the directory's scanner calls every other asset an extra unsupported file.

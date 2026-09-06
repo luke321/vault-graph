@@ -42,6 +42,17 @@ Enable. Open it from the ribbon icon or the command palette (*Vault graph: Open 
 
 **From source** — `npm install && npm run build`, then `./scripts/install-plugin.ps1`.
 
+<sub>**Check what you downloaded, if you like.** `main.js` is a ~390 KB bundle — the page, the
+plugin host and the engine, a Sigma.js port — and nothing about downloading a file tells you
+where it came from. Every
+release asset now carries a [GitHub build provenance
+attestation](https://docs.github.com/en/actions/security-for-github-actions/using-artifact-attestations/using-artifact-attestations-to-establish-provenance-for-builds),
+signed by the workflow that built it — so you can verify it came from this repository at
+the tagged commit rather than being assembled by hand: `gh attestation verify main.js
+--repo luke321/vault-graph`. Releases published before this landed (1.9.0 and earlier)
+have none, because an attestation can only be produced by a workflow and those were
+published from a laptop.</sub>
+
 It reads your vault through Obsidian's own metadata cache, so it sees the same links
 Obsidian does, aliases and frontmatter links included. It builds in about a tenth of a
 second on a 450-note vault. **Nothing leaves your machine** — it makes no network requests,
@@ -87,11 +98,14 @@ darker grey, and start hidden. All three are defaults: pick a colour or click th
 your choice wins. It is a rule about folders, not files — `_scratch.md` is a note like any
 other.
 
-<sub>**Zero network calls, and greppable.** The bundled Sigma.js ships two `fetch` calls in
-its image-loading path, for a node-image program this plugin never registers. They were
-unreachable, and they are now removed at build time rather than explained away — so
-`main.js` contains none, and `node scripts/check-network.mjs` is the gate that keeps it that
-way. See [`0008-zero-network-calls`](.ai-context/decisions/0008-zero-network-calls.md).</sub>
+<sub>**Zero network calls, and greppable.** Nothing shipped makes a request. The graph store
+and the WebGL renderer are the plugin's own code (`src/engine/`, TypeScript), so there is no
+third-party bundle to explain away — though not no third-party code: the renderer is a port of
+[Sigma.js](https://www.sigmajs.org) 3.0.2 under MIT, whose notice ships in every build and is
+recorded in [`src/engine/NOTICE.md`](src/engine/NOTICE.md) — and `node scripts/check-network.mjs`
+is the gate that keeps `main.js` and the exporter at zero. See
+[`0008-zero-network-calls`](.ai-context/decisions/0008-zero-network-calls.md) and
+[`0012-own-graph-store-and-renderer`](.ai-context/decisions/0012-own-graph-store-and-renderer.md).</sub>
 
 ---
 
@@ -104,8 +118,11 @@ browser.
 
 ### Getting the exporter
 
-**Requirements: Node 18 or newer. That is the whole list.** No `npm install`, no network
-access, no build tooling.
+**Requirements: Node 18 or newer, and one `npm ci --omit=dev` after cloning.** That
+installs a single package, esbuild, which bundles the graph engine into the page; nothing
+else is downloaded, and the generator itself never touches the network. (Until the engine
+replaced the vendored libraries there was no install step at all; the trade is recorded in
+[`0012`](.ai-context/decisions/0012-own-graph-store-and-renderer.md).)
 
 **This is not an app you run — it is a generator.** The script reads your vault once and
 writes **one HTML file**. Nothing is listening afterwards; you open that file yourself, in
@@ -113,14 +130,18 @@ any browser, like any other file on your disk. Two steps, and the second one is 
 
 ### 1. Get it
 
-Download the latest [**release**](../../releases/latest) — every tagged version has a
-`vault-graph-<version>.zip` attached with everything needed to run, so a tag is always a
-downloadable build rather than just a source snapshot — and unzip it. Or clone, if you want
-the design records and the dev tooling too:
+Clone the repo. (Releases carry only the Obsidian plugin's three files; the exporter is not
+packaged separately.)
 
 ```bash
 git clone https://github.com/luke321/vault-graph.git
 cd vault-graph
+```
+
+Either way, once:
+
+```bash
+npm ci --omit=dev        # esbuild only; the dev tooling is not needed to generate
 ```
 
 ### 2. Generate the file
@@ -133,7 +154,7 @@ It reads the vault, writes the HTML, prints where it went, and exits:
 
 ```
 vault-graph: 449 notes, 1489 links, 0 orphans, 120 unresolved link(s)
-wrote /path/to/your/vault/03 - Resources/Vault Graph/vault-graph.html (732 KB)
+wrote /path/to/your/vault/vault-graph.html (732 KB)
 ```
 
 ### 3. Open that file
@@ -235,15 +256,14 @@ Registry: `%APPDATA%\obsidian\obsidian.json` (Windows),
 ## Where the output goes
 
 ```
-<this repo>/                              source: template, build script, vendored libs
+<this repo>/                              source: the page, the exporter, the engine (src/engine)
   └─ .ai-context/                         architecture + decision records
-<vault>/03 - Resources/Vault Graph/       ...or anywhere: --out FILE
-  ├─ vault-graph.html                     build output, opened directly in a browser
-  └─ Vault Graph.md                       optional stub note so [[Vault Graph]] resolves
+<vault>/vault-graph.html                  build output, opened directly in a browser
+                                          ...or anywhere: --out FILE
 ```
 
-That default path is the **PARA convention of the vault this was written for**, not a
-requirement — `--out` puts the file wherever you like:
+The default is the vault's root, because that is the one folder every vault has — nothing
+about your folder names or numbering is assumed. `--out` puts the file wherever you like:
 
 ```bash
 node src/build-graph.mjs --out ~/Desktop/my-vault.html
@@ -409,7 +429,7 @@ the plugin puts them in an Obsidian view.
 | `src/build-graph.mjs` | crawls the vault, resolves links, emits one HTML file |
 | `plugin/main.js` | the Obsidian plugin: reads the metadata cache, mounts the page in a view |
 | `manifest.json` | the plugin manifest, at the repo root because Obsidian requires it there |
-| `vendor/` | Sigma.js + graphology, committed rather than installed |
+| `src/engine/` | the graph store and the WebGL renderer, TypeScript, ours |
 
 **Tooling.**
 
@@ -419,6 +439,7 @@ the plugin puts them in an Obsidian view.
 | `scripts/install-plugin.ps1` | copies exactly the three files Obsidian installs, and nothing else |
 | `scripts/smoke.mjs` | the invariant suite, over both vault shapes |
 | `scripts/check-scope.mjs` | asserts the page cannot style or be styled by its host |
+| `scripts/code-map.mjs` | generates `.ai-context/code-map.md` and `code-index.md` from the source; `--check` gates them |
 | `scripts/check-pii.mjs` | refuses to publish other people's names; no skip flag |
 | `scripts/check-network.mjs` | asserts nothing shipped can make a request; no skip flag |
 | `scripts/refresh-check.mjs` | drives a real Obsidian: write a note, click Refresh, is it there? |
@@ -433,9 +454,9 @@ the plugin puts them in an Obsidian view.
 
 ## Licence
 
-MIT — see [LICENSE](LICENSE). The bundled libraries in `vendor/` are MIT too and are
-inlined into every build; their notices are in [`vendor/NOTICE.md`](vendor/NOTICE.md) and
-must be preserved in redistributions.
+MIT — see [LICENSE](LICENSE). The renderer's camera math and shaders under `src/engine/`
+are ported from Sigma.js 3.0.2 (MIT); the attribution is in
+[`src/engine/NOTICE.md`](src/engine/NOTICE.md).
 
 ## Design notes
 

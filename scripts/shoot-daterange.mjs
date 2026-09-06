@@ -1,13 +1,4 @@
 #!/usr/bin/env node
-// Screenshot the date-range ribbon, at rest and with a range applied.
-//
-//   node scripts/shoot-daterange.mjs --vault path/to/vault --out shots/daterange
-//
-// WHY ITS OWN SHOOTER. The concepts live in the heatmap band, which is 115px of a 1000px
-// window -- shoot.mjs frames the disc and the band is a strip at the top of it. What has to
-// be judged here is that strip: whether a year is findable, whether a brush reads as a
-// selection, whether the empty years look like information or like a bug. So every frame is
-// clipped to the band, plus one full frame per concept to check the disc is responding.
 
 import { attach } from "./cdp.mjs";
 import { spawn, spawnSync } from "node:child_process";
@@ -62,7 +53,7 @@ let page = null;
 try {
   for (let i = 0; i < 60 && !page; i++) {
     await sleep(500);
-    try { page = await attach(PORT, ""); } catch { /* not up yet */ }
+    try { page = await attach(PORT, ""); } catch { }
   }
   if (!page) throw new Error("could not attach to Chrome");
   page.j = async (e) => JSON.parse(await page.eval("JSON.stringify(" + e + ")"));
@@ -102,10 +93,6 @@ try {
     await settle();
     await shoot(ui + "-1-rest");
 
-    // DATES COME FROM THE VAULT, not from this file. They were hardcoded to 2019-2020, which
-    // was fine while every fixture spanned a decade and produced an entirely empty band the
-    // moment one spanned two years -- a screenshot of nothing, captioned as a range in the
-    // middle of the history.
     const span = await page.j(`(function(){
       var d = __vg.dateSpan;
       var iso = function (ms) { return new Date(ms).toISOString().slice(0, 10); };
@@ -114,14 +101,11 @@ try {
     })()`);
     console.log("    span " + span.lo + " -> " + span.hi);
 
-    // A range in the MIDDLE of the history -- the part the 52-week window cannot reach, and
-    // the whole reason this control exists.
     await page.eval(`__vg.setRange("${span.q1}", "${span.q2}"); __vg.setHeatEnd("${span.q2}"); void 0`);
     await settle();
     await shoot(ui + "-2-mid-history");
     console.log("    " + JSON.stringify(await page.j("__vg.rangeReport()")));
 
-    // And a recent slice, where the density is.
     await page.eval(`__vg.setRange("${span.late}", null); __vg.setHeatEnd(null); void 0`);
     await settle();
     await shoot(ui + "-3-recent");
@@ -130,7 +114,7 @@ try {
 
   await page.eval(`__vg.setRange(null, null); __vg.setHeatEnd(null); void 0`);
 } finally {
-  if (page && page.close) { try { await page.close(); } catch { /* going away anyway */ } }
+  if (page && page.close) { try { await page.close(); } catch { } }
   chrome.kill();
 }
 console.log("wrote " + OUT);

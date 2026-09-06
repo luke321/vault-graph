@@ -1,40 +1,4 @@
 #!/usr/bin/env node
-// Build a MIRROR of a real vault: structurally identical, containing none of its content.
-//
-//   node scripts/make-mirror-vault.mjs                        # from $OBSIDIAN_VAULT
-//   node scripts/make-mirror-vault.mjs --vault D:/Notes --out mirror-vault --seed 7
-//
-// THIS IS FOR BUG REPORTS, not for the demo. It was make-demo-vault.mjs until the demo vault
-// became a fixed invented structure -- see that file for why. What it does is still worth
-// having and nothing else does it: if the layout misbehaves on YOUR vault, the shape is the
-// bug report, and this is how to hand that over without handing over the notes. A generic
-// fixture cannot reproduce a shape it does not have.
-//
-// WHY THIS EXISTS. The README's demo GIF was recorded against the real vault, so it
-// publishes the vault's name, every folder, and the counts. Nothing catastrophic, but it
-// is somebody's private structure in a public repo, and the moment a hover tooltip lands
-// on a note in a future recording it becomes note titles too. A demo needs a vault that
-// LOOKS like the real one -- same shape, same density, same growth over time, because
-// those are what the layout is tuned against -- and shares none of its words.
-//
-// WHAT IS PRESERVED, because the disc is a picture of exactly these things:
-//   * the folder tree, to whatever depth it goes
-//   * how many notes sit in each folder
-//   * each note's `created` date, so the heatmap and the timeline look the same
-//   * each note's word count, so node sizes land in the same places
-//   * the LINK GRAPH: every edge is reproduced between the renamed notes, so degree,
-//     orphan count and the hub structure come out identical
-//
-// WHAT IS REPLACED:
-//   * every note's filename and title
-//   * every folder name that looks like a person's name
-//   * every body: filler prose of the same length, carrying the rewritten links
-//
-// WHAT IS DROPPED ENTIRELY: the real body text, real tags' meanings (tag NAMES are
-// synthesised too), aliases, and anything in frontmatter that is not a date.
-//
-// Deterministic: same vault and same seed produce the same demo vault, so a re-recorded
-// GIF differs only where the tool changed.
 
 import { readFileSync, writeFileSync, readdirSync, statSync, existsSync, mkdirSync, rmSync } from "node:fs";
 import { join, relative, sep, basename, dirname, resolve } from "node:path";
@@ -114,30 +78,8 @@ const ISO_DAY = /^\d{4}-\d{2}-\d{2}$/;
 const DATEISH = /^\d{4}(?:[-_ ]?(?:\d{2}|Q[1-4]|W\d{1,2}))?$/i;
 const WIKILINK = /!?\[\[([^[\]|#^]+)(?:[#^][^[\]|]*)?(?:\|[^[\]]*)?\]\]/g;
 
-// A name that belongs to a person.
-//
-// TIGHTENED after measuring: "two or more capitalised words" alone renamed
-// `03 - Resources/Technical Notes` into a person, because that is also two capitalised
-// words. A false positive here is worse than a miss -- it corrupts the structure the demo
-// exists to show, and the structure is the whole point.
-//
-// So the CONTEXT decides, not the shape: a name is a person's only where the vault has
-// already said this folder holds people. Everywhere else a capitalised phrase is a topic.
 const PEOPLE_PARENT = /1\s*on\s*1|one.on.one|(^|\/)people(\/|$)|(^|\/)partners(\/|$)/i;
 
-// Inside a people container, EVERYTHING is a person -- no shape test.
-//
-// A shape test here leaked the exact names it existed to catch. Requiring
-// `[A-Z][a-z]+( [A-Z][a-z'-]+)*` let two real folder names through: one whose surname
-// carries a non-ASCII letter, which `[a-z]` does not cover, and one whose first name is a
-// pair of initials, which `[A-Z][a-z]+` does not match. Names do not have a shape; a
-// folder that the vault files under "1 on 1" is a person and that is the end of it.
-//
-// (Naming the two examples here is what the PII gate blocked on the first push of this
-// file -- documenting a leak is a way of committing it again.)
-//
-// The exception is the handful of words that are structure rather than people, which do
-// appear inside those containers -- `People/Professional`, `People/Personal`, an `_old`.
 const STRUCTURAL = new Set(["professional", "personal", "archive", "archived", "old",
   "team", "internal", "external", "inactive", "former", "misc", "other"]);
 const isPeopleContainer = (parentPath) => PEOPLE_PARENT.test(parentPath || "");
@@ -164,10 +106,6 @@ for (const abs of files) {
 
   const links = [];
   let m; WIKILINK.lastIndex = 0;
-  // SAME EXCLUSIONS AS THE BUILDER. A [[link]] inside a dataview fence is not a link, and
-  // harvesting it anyway wrote query text out as real edges -- measured, that was where 57
-  // extra unresolved links came from, because most fenced links name notes that do not
-  // exist as such.
   const stripCode = (t) => t
     .replace(/^```[\s\S]*?^```/gm, "\n")
     .replace(/^~~~[\s\S]*?^~~~/gm, "\n")
@@ -175,10 +113,6 @@ for (const abs of files) {
   const scanText = fmRaw + "\n" + stripCode(body);
   while ((m = WIKILINK.exec(scanText))) links.push(m[1].trim());
 
-  // ALIASES MATTER TO THE EDGE COUNT. Obsidian and the builder both resolve `[[An Alias]]`
-  // to the note that declares it, so a demo vault that drops aliases turns every
-  // alias-link into a dangling one -- measured, that alone accounted for most of the 113
-  // extra unresolved links in the first run.
   const aliases = [];
   const flow = /^alias(?:es)?:\s*\[(.*)\]\s*$/m.exec(fmRaw);
   if (flow) {
@@ -210,8 +144,7 @@ for (const abs of files) {
 
 /* ------------------------------------------------------------ build the map */
 
-// Folders first, so a renamed person-folder is renamed consistently everywhere.
-const dirMap = new Map();          // real folder segment path -> demo segment path
+const dirMap = new Map();
 const usedPeople = new Set();
 const newPerson = () => {
   for (let i = 0; i < 500; i++) {
@@ -227,11 +160,6 @@ const mapDir = (dir) => {
   const parent = dirname(dir) === "." ? "" : dirname(dir);
   const name = basename(dir);
   const mappedParent = mapDir(parent);
-  // Structural names are kept: numbered PARA folders and date buckets carry no personal
-  // information and ARE the structure the demo is meant to show.
-  // `parent`, NOT `dir`. Handing a folder its own path made `03 - Resources/People` satisfy
-  // the people-parent test and rename ITSELF, so People and Partners disappeared into
-  // invented person names -- the containers vanished while their contents stayed.
   const keep = DATEISH.test(name) || /^[_\d]/.test(name) || !looksLikePerson(name, parent);
   const mappedName = keep ? name : newPerson();
   const full = mappedParent ? mappedParent + "/" + name.replace(name, mappedName) : mappedName;
@@ -239,8 +167,6 @@ const mapDir = (dir) => {
   return full;
 };
 
-// Note names. A date-named note keeps its date -- that is not personal, and the heatmap
-// and timeline are built from exactly those names.
 const usedNames = new Set();
 const newTitle = () => {
   for (let i = 0; i < 800; i++) {
@@ -251,11 +177,7 @@ const newTitle = () => {
   return "Note " + usedNames.size;
 };
 
-// THE RESOLUTION TABLE, keyed the way the builder resolves: basename, full path, path
-// without the extension, and every alias. Keying it by basename alone was the other half
-// of the first run's link deficit -- a link written as `[[03 - Resources/Beta]]` missed the
-// map, got treated as dangling, and invented a target that did not exist.
-const nameMap = new Map();         // any real key (lowercased) -> demo link text
+const nameMap = new Map();
 const key = (s) => s.toLowerCase().trim().replace(/\.md$/, "");
 const register = (k, v) => { const kk = key(k); if (kk && !nameMap.has(kk)) nameMap.set(kk, v); };
 
@@ -263,7 +185,7 @@ for (const n of notes) {
   const demoDir = mapDir(n.dir);
   let demoBase;
   if (ISO_DAY.test(n.base) || DATEISH.test(n.base)) {
-    demoBase = n.base;                                  // dates stay
+    demoBase = n.base;
   } else if (looksLikePerson(n.base, n.dir)) {
     demoBase = newPerson();
   } else {
@@ -277,8 +199,6 @@ for (const n of notes) {
   register(n.rel, demoBase);
   register((n.dir ? n.dir + "/" : "") + n.base, demoBase);
 
-  // One synthetic alias per real alias, registered so alias-links resolve here too, and
-  // emitted into the demo note's frontmatter so the builder can see it.
   n.demoAliases = n.aliases.map(() => newTitle());
   n.aliases.forEach((a, i) => register(a, n.demoAliases[i]));
 }
@@ -291,7 +211,6 @@ mkdirSync(OUT, { recursive: true });
 const filler = (count) => {
   const out = [];
   for (let i = 0; i < count; i++) out.push(WORDS[Math.floor(rnd() * WORDS.length)]);
-  // Break into sentences so it reads as prose rather than a word salad.
   let s = "", lines = [];
   out.forEach((w, i) => {
     s += (s ? " " : "") + w;
@@ -302,22 +221,16 @@ const filler = (count) => {
 };
 
 let written = 0, edges = 0, dangling = 0;
-const ghostMap = new Map();   // missing real name -> the one invented name standing in for it
+const ghostMap = new Map();
 for (const n of notes) {
   const abs = join(OUT, n.demoRel);
   mkdirSync(dirname(abs), { recursive: true });
 
-  // Rewrite every link through the same table, so an edge that resolved still resolves and
-  // one that dangled still dangles -- the unresolved count is part of the picture the disc
-  // draws, not noise.
   const demoLinks = n.links.map((t) => {
     const full = nameMap.get(key(t));
     if (full) { edges++; return full; }
     const base = nameMap.get(key(basename(t.split("/").pop(), ".md")));
     if (base) { edges++; return base; }
-    // A STABLE invented target per missing name. Inventing a fresh one per link made every
-    // dangling link its own ghost, so `--ghosts` drew 226 phantoms where the real vault
-    // draws far fewer: several notes linking the same missing note is one ghost, not many.
     dangling++;
     if (!ghostMap.has(key(t))) ghostMap.set(key(t), newTitle());
     return ghostMap.get(key(t));
@@ -356,13 +269,10 @@ mkdirSync(cfg, { recursive: true });
 const copyCfg = (name, fallback) => {
   const src = join(VAULT, ".obsidian", name);
   if (existsSync(src)) {
-    try { writeFileSync(join(cfg, name), readFileSync(src, "utf8"), "utf8"); return; } catch { /* fall through */ }
+    try { writeFileSync(join(cfg, name), readFileSync(src, "utf8"), "utf8"); return; } catch { }
   }
   if (fallback) writeFileSync(join(cfg, name), fallback, "utf8");
 };
-// Folder names are preserved for structural folders, so these point at real folders in the
-// demo vault too -- which is the point: the builder must classify daily notes and
-// templates here exactly as it does in the original.
 copyCfg("daily-notes.json", "{}");
 copyCfg("templates.json", "{}");
 copyCfg("app.json", "{}");

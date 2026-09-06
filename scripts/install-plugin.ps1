@@ -39,8 +39,6 @@ if (-not (Test-Path $manifestPath)) { throw "no manifest.json at the repo root" 
 $manifest = Get-Content -Raw -Encoding UTF8 $manifestPath | ConvertFrom-Json
 $pluginId = $manifest.id
 
-# The three files, and the check that they exist. A missing main.js means the build was
-# not run, which is worth saying plainly rather than installing a half-plugin.
 $assets = @('main.js', 'manifest.json', 'styles.css')
 foreach ($a in $assets) {
   if (-not (Test-Path (Join-Path $repo $a))) {
@@ -66,8 +64,6 @@ if ($TestVault) {
 $dest = Join-Path $vaultRoot ".obsidian/plugins/$pluginId"
 New-Item -ItemType Directory -Force -Path $dest | Out-Null
 
-# Clear out anything a previous spike install left behind, so a stale template.html cannot
-# make a broken build look like a working one.
 foreach ($stale in @('template.html', 'vendor', 'assets')) {
   $p = Join-Path $dest $stale
   if (Test-Path $p) {

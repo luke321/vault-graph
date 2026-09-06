@@ -8,9 +8,12 @@ changing the layout or the animation.
 | `architecture.md` | The pipeline, the data shapes, and where each decision is enforced |
 | `animation.md` | How a cascade works: the two packings, which quantities are walked between them, and the one invariant. Read before touching the cascade, the seam, dot size or plan membership |
 | `invariants.md` | Properties that must not regress, and the command that checks each one |
+| `perf-cascade-frame-cost.md` | What an animated frame costs on a 10k vault, term by term; what was taken out of it and what is left (github#19). Read before optimising the cascade, and before believing anything about `renderer.refresh`'s options |
 | `decisions/` | **ADRs** — structural choices, what they cost, and what was rejected |
 | `design/` | **DDRs** — the as-built design of each part of the disc |
 | `vault-findings.md` | What the graph revealed about the vault it was built for — observations, not decisions |
+| `code-map.md` | **Generated** (`node scripts/code-map.mjs`): sections and functions of `src/page.js` and `scripts/smoke.mjs` with line numbers. Open the range, not the file |
+| `code-index.md` | **Generated**: issue → code sites, ADR/DDR → code sites, invariant → check, `__vg.*` → callers |
 
 ### ADRs — `decisions/`
 
@@ -41,6 +44,7 @@ changing the layout or the animation.
 | `0008-logo-and-favicon` | Two sources for two jobs |
 | `0009-theme` | Dark only |
 | `0010-heatmap` | The band above the disc: which date, and why no colour is an average |
+| `0011-per-frame-dot-size` | Experiment (github#41): dots capped from the drawn frame, and where that stands against the two-resting-sizes law |
 
 **ADR or DDR?** An ADR is a choice with alternatives that were weighed and one that won —
 it explains *why not the other thing*. A DDR describes how a part actually works and the

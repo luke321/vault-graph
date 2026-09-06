@@ -113,3 +113,12 @@ open; an earlier version defaulted to folded and buried the level worth seeing.
 
 Twisties never touch the layout — the pie already draws every sub-wedge whether or
 not the legend lists it, so unfolding is pure disclosure and runs no cascade.
+
+## The `only` chip does not highlight
+
+Hovering a legend row hover-highlights its group -- bigger dots, pushed outward by `HL_PUSH`.
+The `only` chip sits inside the row, and the click it invites starts a cascade with the pointer
+still on the chip, so the highlight rode the whole cascade and overlapped the notes in flight
+(seen 2026-09-06, side by side on a mirror of the reporting vault). The chip's own `mouseenter`
+clears the hover highlight; leaving it for the rest of the row hands the row's highlight back;
+hovering the row anywhere else is unchanged.

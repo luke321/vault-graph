@@ -1,21 +1,5 @@
 #!/usr/bin/env node
-// Measure whether the disc on screen depends on the notes on screen (github#13).
-//
-//   node scripts/measure-density.mjs
-//   node scripts/measure-density.mjs --notes 1500 --steps 6
-//
-// WHY A SEPARATE SCRIPT AND NOT A CHECK. This one is here to produce NUMBERS while the
-// fix is being written -- a check answers pass/fail, and what is wanted first is the
-// curve: how pitch, reach and dot size move as the vault is filtered down. Once the
-// numbers settle, the invariant that falls out of them goes into smoke.mjs and this
-// stays as the thing you run when you doubt it.
-//
-// THE MEASUREMENT. Two vaults of different sizes, each filtered down in steps, and one
-// question at each step: is `pitchPx * sqrt(shown)` the same number? Screen row pitch is
-// what decides whether two notes in a column touch. If a filtered disc refilled its box,
-// area per note would scale as 1/n and pitch as its root, so that product would hold
-// still -- across filter states AND across vaults. It does not need two vaults to be
-// meaningful, but two vaults are what turn "consistent with itself" into "the same disc".
+// github#13
 
 import { attach } from "./cdp.mjs";
 import { spawn, spawnSync } from "node:child_process";
@@ -34,8 +18,6 @@ const SIZES = (arg("sizes", "500,1500")).split(",").map(Number);
 function findChrome() {
   const named = arg("chrome", "");
   if (named) return named;
-  // Built with join() rather than backslash literals: this file is edited through shells
-  // that eat one level of escaping, and a mangled path here reads as "Chrome not found".
   const win = ["PROGRAMFILES", "PROGRAMFILES(X86)", "LOCALAPPDATA"]
     .map((v) => process.env[v])
     .filter(Boolean)
@@ -74,12 +56,6 @@ function buildVault(notes) {
   return pathToFileURL(html).href;
 }
 
-// Hide whole groups one at a time. Folders, not dates: a date cut leaves every folder
-// present but thinned, which is the gentler case; hiding groups is what the reported
-// symptom was reached by, and it is the one the band balancer has to survive.
-// state.hidden.folder is the LIVE filter; setFolderShown is the saved default the host
-// owns and does not move the disc. syncAlpha then applyLayout is the resting path -- no
-// animation, so what is measured is the packing rather than a frame of the way there.
 const STEP_SCRIPT = (keepFrac) => `(function () {
   var order = __vg.groupOrder();
   var keep = Math.max(1, Math.round(order.length * ${keepFrac}));
@@ -110,7 +86,7 @@ async function measureOne(notes, steps) {
   try {
     for (let i = 0; i < 60 && !page; i++) {
       await sleep(500);
-      try { page = await attach(PORT, ""); } catch { /* not up yet */ }
+      try { page = await attach(PORT, ""); } catch { }
     }
     if (!page) throw new Error("could not attach to Chrome");
     page.j = async (e) => JSON.parse(await page.eval("JSON.stringify(" + e + ")"));
@@ -124,15 +100,13 @@ async function measureOne(notes, steps) {
       const frac = 1 - s / (steps + 1);
       if (s > 0) {
         await page.eval(STEP_SCRIPT(frac));
-        // applyLayout(false) does not animate, but sizeScale is synced from render-time
-        // events -- so give it a frame or two before reading anything back.
         await sleep(500);
       }
       rows.push(await page.j("__vg.densityReport()"));
     }
   } finally {
-    try { if (page) await page.send("Browser.close"); } catch { /* going anyway */ }
-    try { chrome.kill(); } catch { /* ditto */ }
+    try { if (page) await page.send("Browser.close"); } catch { }
+    try { chrome.kill(); } catch { }
   }
   return rows;
 }
@@ -158,8 +132,6 @@ for (const n of SIZES) {
   all.push({ n, rows, spread });
 }
 
-// The cross-vault question, which is the one that was actually asked: does a big vault
-// filtered down to N look like a vault that holds N?
 if (all.length > 1) {
   console.log("--- across vaults, at comparable visible counts ---");
   console.log("  a note count reached two ways should give the same pitch");

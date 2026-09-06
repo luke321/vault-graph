@@ -1,18 +1,5 @@
 #!/usr/bin/env node
-// Is a radial step during a cascade a JUMP or just a coarse frame? (github#13)
-//
-//   node scripts/probe-cascade.mjs --vault test-vault
-//
-// The suite's threshold on `a range change animates instead of snapping` is 40 graph units
-// per frame, argued as a RATE limit: RADIAL_EASE closes at most a quarter of a note's gap
-// per frame and a row is 160. That argument assumes the disc's extent barely moves across
-// a range cascade. Once the lattice spacing follows the visible count it moves a lot, by
-// design, so the same threshold can flag a perfectly smooth animation drawn over few
-// frames.
-//
-// This tells the two apart, which a single number cannot. Run the SAME cascade at several
-// time scales: a smooth animation's worst per-frame step falls in proportion to the frames
-// it is given, and a genuine discontinuity does not move at all.
+// github#13
 
 import { attach } from "./cdp.mjs";
 import { spawn, spawnSync } from "node:child_process";
@@ -71,7 +58,7 @@ let page = null;
 try {
   for (let i = 0; i < 60 && !page; i++) {
     await sleep(500);
-    try { page = await attach(PORT, ""); } catch { /* not up yet */ }
+    try { page = await attach(PORT, ""); } catch { }
   }
   if (!page) throw new Error("could not attach");
   page.j = async (e) => JSON.parse(await page.eval("JSON.stringify(" + e + ")"));
@@ -90,7 +77,6 @@ try {
     await page.eval(`__vg.timeScale = ${sc}; __vg.probe(true); void 0`);
     await page.eval(`__vg.setRange("${FROM}", "${TO}"); void 0`);
     await sleep(300);
-    // Wait it out: the whole point is to let every frame land.
     for (let k = 0; k < 400; k++) {
       if (!(await page.j("!!__vg.demo.busy()").catch(() => false))) break;
       await sleep(150);
@@ -103,9 +89,6 @@ try {
     console.log("  " + pad(sc, 5) + pad(r.frames, 8) + pad(r.spanMs, 9) +
                 pad(r.outerMaxStep, 12) + pad(r.innerMaxStep, 11) +
                 pad(Math.round(r.outerMaxStep * r.frames), 14));
-    // WHERE the worst step lands matters as much as its size: at the very end it is the
-    // settle() handover, mid-animation it is the interpolation, and a watchdog snap shows
-    // up as a big step at a moment nothing else explains.
     console.log(`         worst outer step at ${r.outerStepAtMs}ms of ${r.spanMs}` +
                 ` (${Math.round(100 * r.outerStepAtMs / Math.max(1, r.spanMs))}% through),` +
                 ` travelled ${Math.round(r.outerTravel)}`);
@@ -115,6 +98,6 @@ try {
   console.log("  measuring frame count rather than smoothness.");
   console.log("  step roughly constant instead   => a real discontinuity, independent of frames.\n");
 } finally {
-  try { if (page) await page.send("Browser.close"); } catch { /* going anyway */ }
-  try { chrome.kill(); } catch { /* ditto */ }
+  try { if (page) await page.send("Browser.close"); } catch { }
+  try { chrome.kill(); } catch { }
 }

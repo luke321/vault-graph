@@ -1,21 +1,5 @@
 #!/usr/bin/env node
-// Does the Refresh button pick up a note written after the graph was drawn?
-//
-//   node scripts/refresh-check.mjs --vault ./demo-vault
-//
-// WHY THIS EXISTS. "Refresh doesn't seem to pick up new files" (github#6) was true, and
-// for the standalone page it is unfixable: that file's data is baked in at build time. In
-// Obsidian it never had to be true -- the vault is right there, and the view can rebuild
-// from the metadata cache. The button does that now, and this is the check that it does,
-// because the claim is a whole round trip -- write a file, Obsidian notices, rebuild,
-// remount, the note is on the disc -- and every harness we already have stops short of one
-// end or the other. smoke.mjs drives the standalone page, which cannot do this at all;
-// deferred-check.mjs drives the commands, and the commands were never what was reported.
-//
-// It writes a probe note INTO the vault you point it at and deletes it again. Point it at
-// a generated vault -- demo-vault or test-vault -- not at anything you care about.
-//
-// One launch, unlike deferred-check.mjs: nothing here needs a restart.
+// github#6
 
 import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, writeFileSync, copyFileSync, rmSync } from "node:fs";
@@ -27,7 +11,7 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(HERE, "..");
 const argv = process.argv.slice(2);
 const arg = (n, d) => { const i = argv.indexOf("--" + n); return i >= 0 && argv[i + 1] ? argv[i + 1] : d; };
-const PORT = Number(arg("port", 9447));      // not 9333 / 9444 / 9446: do not fight the others
+const PORT = Number(arg("port", 9447));
 const VAULT = resolve(arg("vault", join(ROOT, "demo-vault")));
 const USER_DATA = join(process.env.TEMP || "/tmp", "vault-graph-refresh-profile");
 const VT = "vault-graph-view";
@@ -48,9 +32,6 @@ function findObsidian() {
 const exe = findObsidian();
 if (!existsSync(VAULT)) { console.error("no vault at " + VAULT); process.exit(1); }
 
-// INSTALL WHAT WAS JUST BUILT, not whatever the vault already has. The point is to test
-// this working copy; attaching to a stale installed plugin would pass or fail about
-// somebody else's code. Exactly the three files Obsidian installs, and nothing else.
 const pluginDir = join(VAULT, ".obsidian", "plugins", "vault-graph");
 mkdirSync(pluginDir, { recursive: true });
 for (const f of ["main.js", "manifest.json", "styles.css"]) {
@@ -82,9 +63,6 @@ const check = (ok, label, detail) => {
   console.log("  " + (ok ? "ok  " : "NO  ") + label + (detail ? "\n         " + detail : ""));
 };
 
-// How many notes the live graph is drawing, asked through the plugin's own diagnostics
-// command -- so this measures what the view believes rather than re-deriving it here and
-// grading its own homework.
 const ORDER =
   "(async () => {" +
   "  await app.commands.executeCommandById('vault-graph:report');" +
@@ -96,9 +74,6 @@ const ORDER =
 const session = await launch();
 try {
   console.log("\n=== open the graph ===");
-  // setEnable(true) FIRST. On a vault in restricted mode enablePlugin() registers the id
-  // without loading anything, which reads as "the command did nothing" -- the trap
-  // deferred-check.mjs fell into and documents.
   await session.cdp.eval(
     "(async () => {" +
     "  app.plugins.setEnable(true);" +
@@ -114,8 +89,7 @@ try {
   check(before.hasApi && before.order > 0, "the graph is up and drawing notes",
     "order " + before.order);
 
-  // Not this script's subject, but free here and it is the other half of github#6: a build
-  // that cannot say how it dated things is how "118 undated" went unexplained.
+  // github#6
   if (before.dates) {
     check(before.dates.none === 0, "every note got a date", JSON.stringify(before.dates));
   }
@@ -127,7 +101,7 @@ try {
     "  const old = app.vault.getAbstractFileByPath(p);" +
     "  if (old) await app.vault.delete(old);" +
     "  await app.vault.create(p, '# Probe\\n\\nWritten after the graph was drawn.\\n');" +
-    "  await new Promise((r) => setTimeout(r, 2500));" +   // let the metadata cache catch up
+    "  await new Promise((r) => setTimeout(r, 2500));" +
     "  return app.vault.getMarkdownFiles().length;" +
     "})()"
   );
@@ -138,8 +112,6 @@ try {
     "still " + stale.order + " -- which is the whole complaint in github#6");
 
   console.log("\n=== click Refresh ===");
-  // The BUTTON, not the command. "Rebuild from the metadata cache" already worked; what
-  // was reported is the control people actually reach for.
   const clicked = await session.cdp.eval(
     "(() => {" +
     "  const b = document.querySelector('#vg-refresh');" +
@@ -174,8 +146,6 @@ try {
   } catch {}
   try { await session.cdp.close(); } catch {}
   try { session.child.kill(); } catch {}
-  // Belt and braces: if the app died before that delete, the probe is still on disk and
-  // the next run of any harness would count it as a note.
   try { rmSync(join(VAULT, PROBE), { force: true }); } catch {}
 }
 

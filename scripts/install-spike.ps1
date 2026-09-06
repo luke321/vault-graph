@@ -10,7 +10,6 @@
 
       plugin/main.js  manifest.json  styles.css
       src/template.html                     -> the page, verbatim
-      vendor/*.js                           -> sigma + graphology, inlined at view time
       assets/logo-mask.png                  -> optional
 
   Vault resolution matches src/build-graph.mjs on purpose: -Vault, then
@@ -48,8 +47,6 @@ $repo = Split-Path -Parent $PSScriptRoot
 $pluginId = 'vault-graph-spike'
 
 function Write-Utf8NoBom([string] $Path, [string] $Text) {
-  # Not Set-Content: on PS 5.1 it writes the system ANSI codepage, and a BOM breaks
-  # JSON.parse on the Obsidian side.
   $enc = New-Object System.Text.UTF8Encoding($false)
   [System.IO.File]::WriteAllText($Path, $Text, $enc)
 }
@@ -59,14 +56,6 @@ function New-TestVault {
   if (Test-Path $root) { Remove-Item -Recurse -Force $root }
   New-Item -ItemType Directory -Force -Path $root | Out-Null
 
-  # Shaped to stress the layout rather than to look like the author's vault: a flat root
-  # note (no wedge of its own), a folder with nested named subfolders, a daily-notes
-  # folder with a month bucket, an alias that only resolves through the metadata cache,
-  # and a link that resolves to nothing.
-  # Three literal backticks, built rather than escaped: a fence written inline inside a
-  # PowerShell string is six backticks and unreadable, and getting it wrong silently
-  # produces a note whose fence is not a fence -- which is the exact thing the note is
-  # there to test.
   $fence = [string]([char]96) * 3
 
   $notes = @{
@@ -100,7 +89,6 @@ function New-TestVault {
   return $root
 }
 
-# ---------------------------------------------------------------- which vault
 if ($TestVault) {
   $vaultRoot = New-TestVault
   Write-Host "test vault: $vaultRoot" -ForegroundColor Cyan
@@ -116,10 +104,8 @@ if ($TestVault) {
   }
 }
 
-# ------------------------------------------------------------------- install
 $dest = Join-Path $vaultRoot ".obsidian/plugins/$pluginId"
 New-Item -ItemType Directory -Force -Path $dest | Out-Null
-New-Item -ItemType Directory -Force -Path (Join-Path $dest 'vendor') | Out-Null
 New-Item -ItemType Directory -Force -Path (Join-Path $dest 'assets') | Out-Null
 
 $copies = @(
@@ -127,8 +113,6 @@ $copies = @(
   @{ From = 'plugin/manifest.json'; To = 'manifest.json' }
   @{ From = 'plugin/styles.css';    To = 'styles.css' }
   @{ From = 'src/template.html';    To = 'template.html' }
-  @{ From = 'vendor/graphology.umd.min.js'; To = 'vendor/graphology.umd.min.js' }
-  @{ From = 'vendor/sigma.min.js';          To = 'vendor/sigma.min.js' }
   @{ From = 'assets/logo-mask.png';         To = 'assets/logo-mask.png' }
 )
 
@@ -143,7 +127,6 @@ foreach ($c in $copies) {
 }
 Write-Host ("installed {0:N0} KB into {1}" -f ($total / 1KB), $dest) -ForegroundColor Green
 
-# -------------------------------------------------------------------- enable
 if ($Enable -and -not $TestVault) {
   $cpj = Join-Path $vaultRoot '.obsidian/community-plugins.json'
   $list = @()

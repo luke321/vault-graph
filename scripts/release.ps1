@@ -1,41 +1,52 @@
-# Cut a release: tag, package, publish, attach.
-#
-#   .\scripts\release.ps1 1.5.3
-#   .\scripts\release.ps1 1.5.3 -Notes "one-line summary"
-#   .\scripts\release.ps1 1.6.0 -Title "The Color Picker Update"
-#   .\scripts\release.ps1 1.5.3 -DryRun
-#
-# THE VERSION IS BARE SEMVER, WITH NO `v`. Obsidian installs a plugin by matching the
-# release tag against the `version` string in manifest.json, and a manifest version must
-# be bare semver -- so a `v`-prefixed tag makes the plugin uninstallable. The tags up to
-# v1.4.4 keep their prefix because renaming a published tag breaks every link to it; from
-# 1.5.0 on there is no prefix. See CHANGELOG.md's versioning section.
-#
-# One command, because a tag without its package is the failure mode this exists to
-# prevent: GitHub's auto-generated source archive ships `.ai-context/` and the dev tooling,
-# which is not what someone wanting to *run* this needs. Every tag gets a Release with
-# `vault-graph-<version>.zip` attached, so a tag is always a downloadable build.
-#
-# RUN IT ON `main`. That is where a release is tagged, and the script refuses to run
-# anywhere else (-AllowAnyBranch overrides). See github#47 for what the absence of that
-# check cost: 1.8.0's tag sits on a develop commit rather than on main's own history.
-#
-# Requires the `gh` CLI, authenticated. See .ai-context/releasing.md.
+<#
+.SYNOPSIS
+  The local half of a release: check, gate, tag, push. The publishing half is
+  .github/workflows/release.yml, which the tag push triggers.
 
+.DESCRIPTION
+  Refuses a v-prefixed or non-semver version, a version the manifest does not claim, a
+  version with no CHANGELOG section, a branch other than main (github#47), a dirty tree and a
+  main behind origin; prints the hero and feature-clip warnings; runs lint, the Sigma notice
+  check and the invariant suite; builds the plugin once as a pre-flight; then writes the
+  annotated tag and pushes the branch and the tag. Everything after that -- build, provenance
+  attestation, Release, assets -- is the workflow's (github#10). .ai-context/releasing.md is
+  the authority on the two halves.
+
+.PARAMETER Version
+  Bare semver, e.g. 2.0.0. No v.
+
+.PARAMETER DryRun
+  Stop after the suite, before the tag and the push.
+
+.PARAMETER AllowDirty
+  Tag a dirty tree anyway.
+
+.PARAMETER AllowAnyBranch
+  Tag off main anyway; the workflow's main-ancestry guard will then refuse to publish.
+
+.EXAMPLE
+  .\scripts\release.ps1 2.0.0 -DryRun
+#>
 [CmdletBinding()]
 param(
   [Parameter(Mandatory = $true)][string] $Version,
-  [string] $Notes = "",
-  # A NAME for the release, shown on the Release page as "<version> - <title>". The version
-  # alone was the only option before, which is fine for a patch and thin for a release
-  # anyone is meant to remember.
+  # -Notes AND -Title ARE GONE, and their jobs did not disappear -- they moved.
   #
-  # Joined with an ASCII hyphen, not an em dash, and that is a decision rather than
-  # laziness: the notes reach `gh` as a FILE written as UTF-8, and survive, while the title
-  # reaches it as a native command-line ARGUMENT -- which PowerShell 5.1 re-encodes on the
-  # way out. This repo has already published mojibake that way once, and a release title
-  # cannot be quietly fixed afterwards without the old one having been seen.
-  [string] $Title = "",
+  # -Notes prepended a one-line summary to the release body. The body is now drafted by
+  # the workflow from the `## <version>` CHANGELOG section -- the same text this script
+  # writes into the tag message, so `git show <tag>` and the Release page still agree --
+  # and then rewritten by hand: a highlight reel on top, the CHANGELOG section verbatim
+  # underneath. See .ai-context/releasing.md for that shape. A one-liner passed at tag
+  # time has nowhere useful to land in it.
+  #
+  # -Title named the release ("1.8.0 - The Hub"). The workflow reads that name out of the
+  # CHANGELOG heading instead -- `## 1.9.0 -- "Belonging" -- 2026-09-02` -- so the title
+  # and the changelog section it sits above can no longer disagree, which a hand-typed
+  # argument allowed. The ASCII-hyphen decision survives in the workflow: the original
+  # reason was that PowerShell 5.1 re-encodes a native command-line argument on the way
+  # out and this repo published mojibake that way once, and although a UTF-8 runner has no
+  # such problem, every published title uses a hyphen and a title cannot be quietly fixed
+  # after it has been seen.
   [switch] $DryRun,
   [switch] $AllowDirty,
   # Cut the release from wherever HEAD is standing, instead of requiring main. The escape
@@ -217,11 +228,31 @@ try {
                 "`".ai-context/releasing.md`". Not every one; that call is yours.") -ForegroundColor Yellow
   }
 
+  # THE PLUGIN BUILD IS A PRE-FLIGHT, not an artifact any more. Nothing local consumes
+  # main.js at release time -- the workflow builds its own copy from the tagged commit and
+  # attests that -- but a build that fails in CI leaves a TAG WITH NO RELEASE, and a
+  # published tag cannot be re-cut. Ten seconds here buys the one failure mode the new
+  # split introduces. Both outputs are gitignored, so this cannot dirty the tree.
+  Write-Host "`n=== lint ===" -ForegroundColor Cyan
+  try { Invoke-Native npm @('run', 'lint', '--silent') }
+  catch { throw "lint failed -- not releasing (npm ci first, if this is a fresh clone)" }
+
+  Write-Host "`n=== notice ===" -ForegroundColor Cyan
+  & node (Join-Path $here 'check-notice.mjs')
+  if ($LASTEXITCODE -ne 0) { throw "the Sigma notice is missing from a build -- not releasing" }
+
+  Write-Host "`n=== build (pre-flight) ===" -ForegroundColor Cyan
+  & node (Join-Path $here 'build-plugin.mjs')
+  if ($LASTEXITCODE -ne 0) {
+    throw ("the plugin build failed -- the workflow would fail the same way and leave a tag " +
+           "with no release. Fix it first (npm ci, if this is a fresh clone).")
+  }
+
   Write-Host "`n=== invariants ===" -ForegroundColor Cyan
   & node (Join-Path $here 'smoke.mjs')
   if ($LASTEXITCODE -ne 0) { throw "the invariant suite failed -- not releasing" }
 
-  if ($DryRun) { Write-Host "`n-DryRun: stopping before tag, package and publish." -ForegroundColor Yellow; return }
+  if ($DryRun) { Write-Host "`n-DryRun: stopping before the tag and the push." -ForegroundColor Yellow; return }
 
   Write-Host "`n=== tag ===" -ForegroundColor Cyan
   # Annotated, with the notes as the message, so `git show <tag>` tells the same story as
@@ -233,61 +264,38 @@ try {
   if (-not $tagExists) { Invoke-Native git @('tag', '-a', $Version, '-F', $msgFile) }
   Remove-Item $msgFile -ErrorAction SilentlyContinue
 
-  Write-Host "`n=== package ===" -ForegroundColor Cyan
-  & node (Join-Path $here 'make-package.mjs') $Version
-  if ($LASTEXITCODE -ne 0) {
-    if (-not $tagExists) { & git tag -d $Version | Out-Null }
-    throw "packaging failed"
-  }
-  $zip = Join-Path $repo "dist\vault-graph-$Version.zip"
-  if (-not (Test-Path $zip)) {
-    if (-not $tagExists) { & git tag -d $Version | Out-Null }
-    throw "no package at $zip"
-  }
-
-  Write-Host "`n=== publish ===" -ForegroundColor Cyan
-  $gh = (Get-Command gh -ErrorAction SilentlyContinue).Source
-  if (-not $gh) { $gh = "$env:ProgramFiles\GitHub CLI\gh.exe" }
-  if (-not (Test-Path $gh)) { throw "gh CLI not found -- install it, or push the tag and attach $zip by hand" }
-
+  # THE BRANCH FIRST, THEN THE TAG, and the order is load-bearing in a way it was not when
+  # this script published on its own. The workflow refuses to publish a tag that is not in
+  # origin/main's history (github#47, server-side this time), and it starts the moment the
+  # tag lands -- so a tag pushed before its commit is on origin/main can race its own
+  # guard. Pushing HEAD first closes the window. If it fails anyway, main has caught up by
+  # then and re-running the workflow is the whole fix.
+  Write-Host "`n=== push ===" -ForegroundColor Cyan
   Invoke-Native git @('push', 'origin', 'HEAD')
   Invoke-Native git @('push', 'origin', $Version)
 
-  $notesFile = Join-Path $env:TEMP "vg-notes-$Version.md"
-  $body = if ($Notes) { "$Notes`n`n$section" } else { $section }
-  [IO.File]::WriteAllText($notesFile, $body, $utf8)
-  # THE THREE LOOSE FILES ARE WHAT OBSIDIAN ACTUALLY INSTALLS, and they are not optional.
-  #
-  # Obsidian downloads main.js, manifest.json and styles.css directly from the release
-  # assets. It never opens the zip -- the directory's own scanner says so in as many words,
-  # "All other files will not be downloaded by Obsidian" -- so a release carrying only the
-  # zip is a release nobody can install or update to.
-  #
-  # 1.6.0 shipped exactly that way and the scan came back with two errors: "the release
-  # 1.6.0 specified in manifest.json is missing the main.js file", and the same for
-  # manifest.json. The releases before it looked fine only because they were cut BY HAND
-  # (see the version-regex note above) and attaching the loose files is what one does by
-  # hand. 1.6.0 was this script's first real run, which is when the omission could first
-  # show up.
-  #
-  # The zip stays: it is what someone wanting to RUN the exporter needs, since GitHub's
-  # source archive ships .ai-context/ and the dev tooling. The scanner calls it an extra
-  # unsupported file, which is a recommendation and is the intended trade.
-  $loose = @('main.js', 'manifest.json', 'styles.css') | ForEach-Object { Join-Path $repo $_ }
-  $missing = $loose | Where-Object { -not (Test-Path $_) }
-  if ($missing) {
-    if (-not $tagExists) { & git tag -d $Version | Out-Null }
-    throw ("not attaching an uninstallable release -- missing " +
-           (($missing | Split-Path -Leaf) -join ', ') + ". Run: node scripts/build-plugin.mjs")
-  }
+  # AND STOP. .github/workflows/release.yml takes it from here: it builds main.js and
+  # styles.css from the tagged commit, attests the three files with build provenance, and
+  # creates the Release with the CHANGELOG section as a first-draft body. That draft still
+  # has to be rewritten by hand -- see .ai-context/releasing.md -- and nothing fails if it
+  # is not, which is why it is the last thing printed here.
+  Write-Host "`npushed $Version. The release is the workflow's now." -ForegroundColor Green
+  Write-Host @"
 
-  $releaseTitle = if ($Title) { "$Version - $Title" } else { $Version }
-  Invoke-Native $gh (@('release', 'create', $Version) + $loose + @($zip) +
-                     @('--title', $releaseTitle, '--notes-file', $notesFile))
-  Remove-Item $notesFile -ErrorAction SilentlyContinue
+  Watch it:      gh run watch
+  Or open it:    gh run list --workflow=release.yml --limit 1
 
-  Write-Host "`nreleased $Version with $(Split-Path $zip -Leaf)" -ForegroundColor Green
-  Invoke-Native $gh @('release', 'view', $Version, '--json', 'tagName,assets')
+  When it is green, the Release exists with main.js, manifest.json and styles.css
+  attached -- the three files Obsidian installs -- each with a build-provenance attestation:
+
+    gh attestation verify main.js --repo luke321/vault-graph
+
+  STILL YOURS TO DO: the release body is the raw CHANGELOG section. Write the highlight
+  reel on top of it (.ai-context/releasing.md has the shape and the reasoning) and edit
+  it in place:
+
+    gh release edit $Version --notes-file <file>
+"@ -ForegroundColor Cyan
 } finally {
   Pop-Location
 }

@@ -18,8 +18,14 @@ anywhere. Resolve `[[wikilinks]]` the way Obsidian does — basename, then alias
 path, from body *and* frontmatter, skipping fenced code blocks so Dataview queries don't
 invent edges.
 
-The one remaining literal is the output path `03 - Resources/Vault Graph/`, which is a
-*default*, overridable with `--out`.
+The one remaining literal was the output path `03 - Resources/Vault Graph/`, a *default*
+overridable with `--out` — and it went the same way as the templates folder (github#64,
+2026-09-05): the folder pair stopped existing in the vault it was written for, and
+`writeFileSync` creates no directories, so the documented one-call launch failed with
+`ENOENT` on that vault and on every vault that did not happen to contain it. The default is
+now the vault's **root**, `<vault>/vault-graph.html` — the one folder every vault has. A
+dot-folder such as `.obsidian/plugins/…` was the other candidate and is ruled out below: it
+does not sync.
 
 ## Source in the repo, output in the vault
 

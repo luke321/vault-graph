@@ -1,5 +1,6 @@
 #!/bin/sh
-# Run the invariant suite before letting a push through -- to develop or main only.
+# Run the gate checks and the invariant suite before letting a push through -- to develop or
+# main only.
 #
 # Enable it in a fresh clone with:
 #
@@ -53,11 +54,11 @@ root=$(git rev-parse --show-toplevel)
 #
 # ONE PASS OVER STDIN DOES TWO JOBS, because stdin can only be read once: the main-ancestry
 # policy below, and deciding whether this push touches develop or main at all. gated_push
-# is what the PII/scope/network/smoke block further down reads -- those checks build the
-# page and drive real Chrome, twice, and paying that on every push to a feature branch
-# nobody has asked to merge yet is the wrong price for the wrong moment. develop and main
-# are where the checks earn their keep: that is what everything else eventually merges
-# into, so that is where a regression has to be caught.
+# is what the gate block further down reads (PII, scope, network, determinism, lint, smoke)
+# -- those checks build the page and drive real Chrome, twice, and paying that on every
+# push to a feature branch nobody has asked to merge yet is the wrong price for the wrong
+# moment. develop and main are where the checks earn their keep: that is what everything
+# else eventually merges into, so that is where a regression has to be caught.
 policy_fail=""
 gated_push=""
 while read -r _local_ref local_sha remote_ref _remote_sha; do
@@ -104,7 +105,8 @@ fi
 # stdin read the main-ancestry policy already consumed -- develop and main only, matching
 # what "feature branches don't get gated" actually means: a branch push still gets the
 # main-ancestry check above for free (it only ever fires for a push to main anyway), just
-# not the PII/scope/network/smoke checks, which is the part that costs real time.
+# not the gate checks (PII, scope, network, determinism, lint, smoke), which is the part
+# that costs real time.
 if [ -z "$gated_push" ]; then
   echo "pre-push: not pushing to develop or main -- skipping the gate checks"
   exit 0
@@ -162,9 +164,45 @@ pre-push: network check failed -- push blocked.
 
 This plugin promises to make no network requests, and the directory's review checks
 that promise on every submission. If a request is genuinely needed it must be
-disclosed to users, not slipped in. If it arrived with a vendored bundle, read what
-it does and account for it in src/vendor.mjs.
+disclosed to users, not slipped in -- the reasoning and the record are in
+.ai-context/decisions/0008-zero-network-calls.md.
 
+There is no skip flag for this check.
+EOF
+  exit 1
+fi
+
+# THE SIGMA NOTICE NEXT, unskippable for the same reason as the network check: what it protects
+# is somebody else's licence. The engine under src/engine is a port of Sigma.js (MIT), whose
+# notice must ride in every copy; esbuild keeps only /*! comments, which is how the notice went
+# missing once (github#58). This builds both artifacts and reads the copyright line back out.
+echo "pre-push: checking the Sigma notice is in both builds..."
+if ! node "$root/scripts/check-notice.mjs" </dev/null; then
+  cat >&2 <<'EOF'
+
+pre-push: notice check failed -- push blocked.
+
+main.js and an exported page must open with the /*! banner from src/engine/notice.mjs,
+carrying the copyright line from src/engine/NOTICE.md. Restore the banner; do not remove
+the line from NOTICE.md. There is no skip flag for this check.
+EOF
+  exit 1
+fi
+
+# COMMENTS ARE POINTERS NEXT (github#61), unskippable and a ratchet: scripts/check-comments.mjs
+# counts comment lines in plugin/, src/ and scripts/ that are neither a bare github#N /
+# decisions/NNNN / design/NNNN pointer nor a JSDoc type annotation, and holds the count at
+# exactly its baseline -- over fails, and under fails until the baseline is lowered to match,
+# the way the no-unsafe budget worked in github#60.
+echo "pre-push: checking comments are pointers..."
+if ! node "$root/scripts/check-comments.mjs" </dev/null; then
+  cat >&2 <<'EOF'
+
+pre-push: comment check failed -- push blocked.
+
+Read the counts above. A comment in plugin/, src/ or scripts/ is a pointer; the reasoning
+goes to .ai-context/ (CONTRIBUTING.md, "Comments are pointers"). If the count went DOWN,
+lower BASELINE in scripts/check-comments.mjs to the number printed, in this commit.
 There is no skip flag for this check.
 EOF
   exit 1
@@ -211,6 +249,59 @@ pre-push: build order determinism check failed -- push blocked.
 build-graph.mjs's note order depended on filesystem enumeration order again -- read the
 FAIL lines above. walk() in src/build-graph.mjs must sort each directory's entries
 (readdirSync(dir).sort()) before recursing or collecting files.
+
+There is no skip flag for this check.
+EOF
+  exit 1
+fi
+
+# THE GENERATED NAVIGATION FILES NEXT, same bar -- a read of the tree, well under a second.
+# .ai-context/code-map.md and code-index.md are written from the source by
+# scripts/code-map.mjs (github#61) and are only worth having while they agree with it; a
+# stale map sends the next reader to the wrong line range, which is worse than no map.
+echo "pre-push: checking the code map and index are current..."
+if ! node "$root/scripts/code-map.mjs" --check </dev/null; then
+  cat >&2 <<'EOF'
+
+pre-push: the generated code map or index is stale -- push blocked.
+
+Run: node scripts/code-map.mjs   and commit .ai-context/code-map.md and code-index.md.
+`npm run build` regenerates them too. There is no skip flag for this check.
+EOF
+  exit 1
+fi
+
+# LINT NEXT, same bar again -- about five seconds, no Chrome -- and no skip flag, for a
+# different reason: a lint that runs when someone remembers was 27 warnings deep when it was
+# made a gate (github#55), 26 of them values assigned and never read. The same run
+# also carries the five type-aware no-unsafe-* rules the Obsidian directory's review applies
+# to every published version. They ran as warnings under a --budget until github#60 took the
+# count from 6,977 to zero; they are ERRORS now, so a new one is caught here rather than on
+# the directory's board.
+#
+# FAILS CLOSED WITHOUT node_modules. eslint is the one gate here that is not a Node built-in,
+# and a fresh clone or worktree has not run `npm ci` yet. Skipping in that case would be the
+# runs-when-someone-remembers gate again, with a different excuse; npm ci takes twenty seconds.
+echo "pre-push: linting..."
+if [ ! -e "$root/node_modules/.bin/eslint" ] || ! command -v npm >/dev/null 2>&1; then
+  cat >&2 <<'EOF'
+
+pre-push: lint cannot run -- push blocked.
+
+node_modules/.bin/eslint is missing (or npm is not on PATH), so this checkout has not run
+`npm ci`. Run it, then push again. There is no skip flag for this check.
+EOF
+  exit 1
+fi
+if ! (cd "$root" && npm run lint --silent </dev/null); then
+  cat >&2 <<'EOF'
+
+pre-push: lint failed -- push blocked.
+
+Read the findings above. Every finding in this repo's own code is held at zero, errors and
+warnings alike -- including the five type-aware no-unsafe-* rules, which means a value that
+lost its type. Type it rather than suppressing it.
+.ai-context/invariants.md ("Our own code lints clean") says why.
 
 There is no skip flag for this check.
 EOF

@@ -87,12 +87,32 @@ scaled by the same factor.
 | `bandRoom` | 10th percentile of `arc * r * rowsUsed / c.live` over the band | per frame, continuous |
 | `cellRoom[id]` | the same expression for the note's own cell | per frame, continuous |
 | `DOT_LO` | pixel floor, scaled by the room factor | continuous |
+| `sizeCap[id]` | the larger of the note's two RESTING radii, measured by `roomOf()` at each end | constant across the cascade; a bound, not a walk |
+
+**The product of walked terms is not walked.** `room`, `pitch` and the ramp are each walked
+between the two packings, and `dotPx` multiplies them; two quantities walked on the same clock
+keep their ratio only when the ends are proportional. Soloing a four-note folder on a ~500-note
+vault walked the inner room 96 → 923 against a pitch of 191 → 573, so `room / pitch` rose
+0.5 → 1.88 mid-walk while the ramp top rose 8.4 → 21.8, and the notes still waiting to leave
+were drawn at 36 px against a destination of 9 px (github#66). The destination is the hub cap
+for a row-0 inner note, which only takes hold on the frame the survivors arrive. So every note
+is held to the larger of what the two resting packings draw it at — never smaller than either
+end, never past both. The bound lives on `cascadeRun` and dies with it.
 
 Size must stay **monotone in link weight**: notes are laid down in weight order from the inside
 out, so the innermost note is the most connected one, and anything that modulates size by
 position makes the most connected note the smallest. That is why the room figure is one number
 per band rather than one per note, and why a per-note `dotFit` cap was removed rather than
 softened.
+
+**A schedule is decided once, from numbers that stand still.** Each note's fade delay is
+set before the frame loop; the block that spreads a ramped group's fades across the whole
+cascade orders a hide by where the notes *are* (`posSrc`) and a show by where they are
+*going* (`finalPos`). It sat inside the frame loop until github#67 and re-sorted each set by
+the notes' *current* radius every frame — arriving notes are being walked, so two of them swap
+radial order between frames, swap delays with it, and each fade restarts from wherever the
+other's delay puts it. Measured on a solo-to-solo switch: an arriving note's alpha read
+0.43 0.5 0.58 0.65 1 0.79 0.82 0.87 0.07 0.11 0.99 across consecutive frames.
 
 ## Membership is part of the layout
 

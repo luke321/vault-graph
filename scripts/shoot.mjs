@@ -1,18 +1,4 @@
 #!/usr/bin/env node
-// Screenshot a built page, at rest, in both themes.
-//
-//   node scripts/shoot.mjs --url file:///.../vault-graph.html --out shots/before
-//   node scripts/shoot.mjs --vault ./demo-vault --out shots/after
-//
-// WHY THIS EXISTS. The invariant suite asserts numbers; nothing asserts how the thing
-// LOOKS, and that is deliberate -- colour and spacing are decided by looking. But "decided
-// by looking" needs something to look at, and after a change like scoping every CSS rule
-// and re-rooting every DOM lookup, the useful question is not "does it still pass" but
-// "does it still look identical". Two runs of this, one per commit, answers that.
-//
-// Reuses the same Chrome plumbing as smoke.mjs: a real window at a fixed size, because a
-// headless software rasteriser is not what ships, and half of what is worth looking at is
-// canvas pixels.
 
 import { attach } from "./cdp.mjs";
 import { spawn, spawnSync } from "node:child_process";
@@ -68,12 +54,10 @@ let page = null;
 try {
   for (let i = 0; i < 40 && !page; i++) {
     await sleep(500);
-    try { page = await attach(PORT, ""); } catch { /* not up yet */ }
+    try { page = await attach(PORT, ""); } catch { }
   }
   if (!page) throw new Error("could not attach to Chrome");
 
-  // Wait for the intro to land, the same way the suite does: `until === null` means the
-  // timeline is showing everything, and demo.busy() false means nothing is animating.
   for (let i = 0; i < 60; i++) {
     const ok = await page.eval("!!window.__vg && __vg.state.until === null").catch(() => false);
     if (ok) break;
@@ -87,7 +71,6 @@ try {
   }
   await sleep(600);
 
-  // Busy while anything is animating; the page exposes it for exactly this.
   const settle = async (ms) => {
     const deadline = Date.now() + (ms || 8000);
     for (;;) {
@@ -107,15 +90,6 @@ try {
 
   await shoot("01-dark");
 
-  // VERSION-AGNOSTIC ON PURPOSE, so this can shoot an older commit for comparison. Before
-  // the page was scoped the palette lived on `:root` and the ids were unprefixed; after,
-  // both belong to `.vault-graph`. A comparison tool that only understands the new shape
-  // cannot produce the "before" half of the comparison.
-  // AND RE-READ THE PALETTE. The page snapshots its colours at init, so setting the
-  // attribute alone restyles the DOM and leaves the canvas painted in the other theme.
-  // The first version of this script did exactly that, and its "light" screenshot showed
-  // near-black dark-theme edges scribbled over a white disc -- a screenshot bug that looked
-  // convincingly like a design problem.
   const setTheme = (t) => page.eval(
     `(function(){ var el = document.querySelector(".vault-graph") || document.documentElement;
                   el.setAttribute("data-theme", ${JSON.stringify(t)});
@@ -129,10 +103,6 @@ try {
   await setTheme("dark");
   await sleep(900);
 
-  // A HIGHLIGHTED FOLDER, IN THE LIGHT THEME. The halo ring mixes the node colour toward
-  // `--today`, which is near-black in light and white in dark -- so this is the shot that
-  // proves the palette was actually re-read rather than carried over. A white ring on a
-  // white background is invisible, and that is precisely the symptom a stale palette gives.
   await setTheme("light");
   await sleep(700);
   await page.eval(`(function(){
@@ -150,17 +120,10 @@ try {
   })(); void 0`);
   await sleep(900);
 
-  // One folder hidden, to show the disc close around the gap -- the behaviour the whole
-  // layout exists for.
   await page.eval(`(function(){
     var e = document.querySelector("#vg-legend .eye") || document.querySelector("#legend .eye");
     if (e) e.click();
   })(); void 0`);
-  // WAIT FOR REST, do not guess at it. A fixed sleep after a click that starts the reveal
-  // cascade samples a MOVING disc, and two runs then differ by a sub-pixel offset across
-  // every dot -- which reads as a rendering regression in a comparison and is only timing.
-  // Measured: 1200 differing samples between two runs of identical code, against 3 for
-  // every static shot.
   await settle();
   await shoot("03-one-folder-hidden");
 
