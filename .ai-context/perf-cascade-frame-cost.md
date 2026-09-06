@@ -18,11 +18,25 @@ re-measured on the 2.0.0 engine on 2026-09-06; that section is at the end and su
 ```bash
 node scripts/probe-frame.mjs --vault .fixtures/test-vault-<digest>
 node scripts/probe-frame.mjs --vault .fixtures/test-vault-<digest> --profile
+node scripts/probe-frame.mjs --html <built page> --fit --nofit --rounds 2 --profile
 ```
 
-(The digest is in the fixture directory's name under `.fixtures/`; it changes when a generator
-changes. `probe-frame.mjs` cannot yet open the page with `?nofit`; the 2026-09-06 numbers came
-from a scratch copy that appended it to the `--app` URL.)
+The digest is in the fixture directory's name under `.fixtures/`; it changes when a generator
+changes. `--fit` / `--nofit` pick the page's mode (`?nofit` is appended to the URL; the default
+is the page's default, fit on), `--rounds N` alternates the requested modes N times so machine
+drift shows up as disagreement between rounds rather than as a result, and `--html` reuses a
+build. With `--profile` the inclusive table is per function per frame and the self-time rows
+are mapped back to `page.js` line numbers (the exporter inlines the page; the offset is taken
+from the `function mountVaultGraph(` anchor).
+
+**Wait for the intro to converge before the first click.** Until 2026-09-06 the harness waited
+for `state.until === null`, which is the date range's upper bound and is null from the first
+frame; the first click therefore landed inside the intro cascade, where `cascade()` read the
+half-faded alphas as "nothing to move" and reported `instant` — the earlier note here that
+"`05 - Meeting Notes` is hidden by default there" was that harness bug misread. The terms at
+rest in those runs were also timed against a running intro. The wait is now
+`__vg.lastCascade().exit && !__vg.demo.busy()`, and a folder visible at rest hides on the first
+click and shows on the second, so both directions are measured.
 
 Two halves, and they answer different questions.
 
@@ -191,10 +205,10 @@ Against the issue's four routes:
   old form over 200 000 random folder/`dirs`/`hiddenSub` shapes, 120 000 of which hit the
   hidden path, and `pathKey` over 1.6 million comparisons — but **no suite check hides a
   subfolder**, so nothing in the repo covers it. That is a gap worth closing on its own.
-- **The `hide` direction of a folder toggle on the 10k fixture.** `05 - Meeting Notes` is hidden
-  by default there, so `probe-frame.mjs`'s first click reports `instant: nothing to move` and
-  only the `show` direction exercises a cascade. Pass `--group` to pick a folder that is visible
-  at rest if the hide direction is what you need.
+- **The `hide` direction of a folder toggle on the 10k fixture.** *Measured on 2026-09-06 — see
+  the last section.* The earlier reading that `05 - Meeting Notes` is hidden by default there was
+  wrong: the harness clicked during the intro (see *How to measure it*), and every folder on
+  that fixture is visible at rest.
 
 ## Re-measured on the 2.0.0 engine (2026-09-06)
 
@@ -202,9 +216,12 @@ Against the issue's four routes:
 dots from the frame** on by default (`design/0011`, `?nofit` turns it off). 10k fixture
 `.fixtures/test-vault-f0a57814` (10 002 notes, 3 815 edges in the graph at rest, 40 cells),
 showing `05 - Meeting Notes` (4 358 notes) from rest, two alternating fit / nofit rounds on one
-machine; `06 - Zettelkasten` (200 notes on this fixture) once in each mode. Both folders are
-hidden at rest here, so only the show direction cascades. Profile at a 100 µs sampling interval,
-inclusive time per function divided by the page's own cascade frame count.
+machine; `06 - Zettelkasten` (200 notes on this fixture) once in each mode. These runs still
+carried the intro-wait bug described under *How to measure it*: the first click landed
+mid-intro and was swallowed, so the frame tables below are all **show** cascades from a settled
+disc, and the "terms at rest" were timed against a running intro (read them as ±2 ms). Profile
+at a 100 µs sampling interval, inclusive time per function divided by the page's own cascade
+frame count.
 
 ### The terms at rest (one call, median of 8, ms)
 
@@ -275,11 +292,20 @@ engine's `addNode` (2.2–2.5) and the planner's hottest loop (2.0–2.2). On th
 | `roomOf` | 1.3 | a sort of every slot's step |
 | `wsum` loop | 0.45 | |
 
-Within a cascade `planKeep`, the visible set, `liveN`, `liveSub` and therefore every split gate
-are constant (`splitHold` pins them besides), so `members`, the cell keys and each cell's
-hub-ranked order are the same on every frame; only the weights, `planTotal`, `presMax`, `wsum`
-and what follows from them change. The first three rows — about 3.5 ms — are re-derivations of
-a constant.
+Within a cascade `willShow` is constant per note and the split gates read `liveN`, a count of
+members rather than a weight — **but `planKeep` is `willShow || present`**, so a *departing*
+note is a member only while its alpha is above the plan's floor (0.004) and leaves membership
+mid-cascade as it fades, taking one from `liveN`, one from `liveSub`, and sometimes its whole
+cell with it. In the show direction nothing leaves, and `members`, the cell keys and each
+cell's hub-ranked order are the same on every frame; in the hide direction the member set
+shrinks on most frames, because departures are staggered across the cascade. This was written
+down as "constant" first and measured second: the step-C parity assertion reported 0 mismatches
+on every show cascade, **61 of 69 frames** mismatched on hiding `02 - Areas` (`total` off by
+0.011 — a few notes at alpha ≈ 0.003), and a **10-vs-9 cell count** on the shape fixture's
+range change. `bandDepth` is weight-derived as well (`depthOfBand` reads `bandLive`), so a split
+gate can flip on a weight, rarely. The first three rows — about 3.5 ms — are re-derivations of
+a constant on a show; on a hide only the membership walk (1.8) is, and the seating and the sort
+have to run whenever a note has left.
 
 ### Where `ringsLayout` spends its 6.5–7.2 ms
 
@@ -295,3 +321,52 @@ among all cells — so "only cells whose inputs changed" is every cell on every 
 cascade, and an incremental `ringsLayout` has nothing to skip. What it does have is a 1.5–1.8 ms
 predicate whose answer is `false` on every note whenever `state.highlight` and
 `state.highlightSub` are empty.
+
+## What is left after the second pass (2026-09-06, end of the day)
+
+Three steps landed on `perf/planner-frame-cost`, each bit-identical in output and each measured
+on its own (`changelog-detail.md`, 2026-09-06): `measureFit` on integer grid keys (step A, the
+sizing 6.8 → 1.0 ms/frame), `isPushed` asked only when something is highlighted (step B,
+`ringsLayout` 6.9 → 4.9), and the plan skeleton a cascade carries (step C, `buildWedgePlan`
+7.5 → 3.5 on a show, 4.1 on a hide). The 10k frame, `05 - Meeting Notes` in both directions,
+two alternating rounds, harness waiting for the intro:
+
+| ms of script per cascade frame | before this pass | after |
+|---|---|---|
+| Size dots from the frame on (the default) | 37.3 / 39.3 | **23.6 / 23.8** show, **24.2 / 24.4** hide |
+| `?nofit` | 30.0 / 28.7 | **23.0 / 22.7** show, **23.1 / 23.6** hide |
+| cascade frames drawn in ~2.3 s | 56–59 (fit), 67–72 | **81–89** |
+| rAF period p50 | 33.4 | **16.8** on every show and the nofit hide; 33.3 on the fit hide |
+
+The frame is now roughly (fit on, show, ms): `refresh` 12.4 (reducer pass 6, `process` 2,
+`placeLogo` 2.4 + `heatDraw` 1.2 from `afterRender`, edges 0.9), `ringsLayout` 4.5,
+`buildWedgePlan` 3.6, GC 1.7, follower loop + `probeSample` ~1, `measureFit` 1.0.
+
+Against the issue's four routes, as they stand now:
+
+1. **Make the refresh cheap, or rarer.** It is the largest term again, at about half the frame,
+   and it is real per-frame work: alpha and size change for every note every frame, so the
+   reducer pass has something to compute. What is not the reducer's: `placeLogo` and `heatDraw`
+   repaint from `afterRender` on every frame (3.6 ms together). Left alone **on purpose** —
+   throttling them changes what is drawn mid-cascade (the ring colours and the heat band would
+   trail the disc), and that was decided at the plan gate against doing it (D-4). A cheaper
+   `bandColors` walk at the same cadence would keep the drawn frame and is the one thing here
+   with no law against it.
+2. **Make `ringsLayout` incremental.** Dropped (D-6), with the reason measured rather than
+   argued: `allocateBand` shares a band among all its cells, so every cell's arc start moves
+   whenever any weight moves and there is no cell to skip mid-cascade. Its 4.5 ms is the per-slot
+   placement (2.1) and the `rowN` / `geom` loops; `isPushed` was the removable part.
+3. **Cache what the plan re-derives.** Done, as far as it is sound: the show direction reuses
+   everything but the weight sums; the hide direction reuses the member walk and re-seats when a
+   departing note crosses the plan's floor, which on a staggered hide is most frames. The next
+   cut here, if wanted, is re-seating only the *groups* a departure touched (the others' keys
+   and lists are provably unchanged) — worth about 1 ms on a hide, and a fair amount of code in
+   the hottest function; not taken.
+4. **Drop the frame rate deliberately at scale.** Dropped from github#19 (D-3). With the frame
+   at ~24 ms the disc already runs at the display's every-other-vsync on this box in both
+   directions, and the show direction touches 60 Hz (rAF p50 16.8); a planned cadence would now
+   be spending smoothness to buy nothing the other routes have not already bought. The door
+   stays open for a vault where the frame is still over 33 ms.
+
+Still unmeasured: mid-cascade label selection (nothing samples the drawn label set per frame),
+and no suite check hides a subfolder — both unchanged from the first pass.
