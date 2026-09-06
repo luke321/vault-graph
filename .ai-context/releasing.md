@@ -70,6 +70,14 @@ repository, the workflow file and the commit; and that no Release was created. A
 attestation is a real one, recorded in the repository's attestation store for bytes that were
 never published — harmless, and the reason the dry run is not a substitute for the tag run.
 
+Measured 2026-09-06 on `release/2.0.0`: the dry run passed every gate, attested the three files
+and skipped the Release; `gh attestation verify main.js --repo luke321/vault-graph` against a
+`main.js` built locally from the same commit succeeded, the SHA-256s equal on Windows and on the
+Linux runner — the bundle is byte-reproducible across platforms since the loaders resolve
+repo-relative. The first attempt failed at the code-map gate: the generator walked directories
+in filesystem order, which NTFS sorts and ext4 does not. A gate that only runs on one platform
+is the kind of thing the dry run exists to find.
+
 ## The release body is a highlight reel ON TOP of the CHANGELOG section, not instead of it
 
 The workflow drops the raw `## <version>` section from `CHANGELOG.md` straight into the
