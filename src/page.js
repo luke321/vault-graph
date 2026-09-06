@@ -203,6 +203,11 @@ function mountVaultGraph(root, data, deps) {
     try { fn(); return null; } catch (e) { return e; }
   }
 
+  /** @param {Record<string, unknown>} o */
+  function hasKeys(o) {
+    for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) return true;
+    return false;
+  }
   function dict() {
     /** @type {unknown} */
     var o = Object.create(null);
@@ -1850,6 +1855,8 @@ function mountVaultGraph(root, data, deps) {
     /** @type {DbgCell[] | null} */
     var dbgCells = DBG.on ? [] : null;
     if (probe) { lastStart = dict(); lastArc = dict(); lastBand = dict(); }
+    // github#19
+    var pushOn = hasKeys(state.highlight) || hasKeys(state.highlightSub);
     [true, false].forEach(function (isInner) {
       var band = shown.filter(function (c) { return !!c.inner === isInner; });
       if (!band.length) return;
@@ -2030,7 +2037,7 @@ function mountVaultGraph(root, data, deps) {
           }
           lastAt[sl.r] = { t: t, id: sl.id };
           if (firstAt[sl.r] === undefined) firstAt[sl.r] = { t: t, id: sl.id };
-          var rr = sl.r + (isPushed(sl.id) ? HL_PUSH : 0);
+          var rr = sl.r + (pushOn && isPushed(sl.id) ? HL_PUSH : 0);
           pos[sl.id] = { x: rr * Math.cos(t), y: rr * Math.sin(t) };
         });
         fracBefore += frac * open;
