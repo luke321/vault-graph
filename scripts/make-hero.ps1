@@ -3,16 +3,16 @@
 param(
   [Parameter(Mandatory = $true)][string] $In,
   [string] $Out = "",
-  [int] $Width = 1200,
+  [int] $Width = 960,
   [int] $Fps = 0,
   [ValidateSet('webp', 'gif')][string] $Format = 'webp',
-  [int] $Quality = 70
+  [int] $Quality = 60
 )
 
 $ErrorActionPreference = 'Stop'
 $here = Split-Path -Parent $MyInvocation.MyCommand.Path
 $repo = Split-Path -Parent $here
-if (-not $Fps) { $Fps = if ($Format -eq 'gif') { 15 } else { 30 } }
+if (-not $Fps) { $Fps = 15 }
 if (-not $Out) { $Out = Join-Path $repo "assets\demo.$Format" }
 if (-not (Test-Path $In)) { throw "no such take: $In" }
 if ([IO.Path]::GetExtension($In) -eq '.gif') {

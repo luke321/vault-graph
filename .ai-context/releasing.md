@@ -145,10 +145,18 @@ notices. Re-record and re-encode as part of cutting a release, before the tag:
 
 ```powershell
 .\scripts\record-demo.ps1     # takes the physical mouse for ~30s, so ask first
-.\scripts\make-hero.ps1       # animated WebP, 30fps, 1200px
+.\scripts\make-hero.ps1       # animated WebP, 15fps, 960px, quality 60
 ```
 
 Then commit the new asset, because `release.ps1` refuses a dirty tree.
+
+**The encoder's defaults are what a phone can play.** The 2.0.0 takes first went out at 30 fps and
+1200 px, quality 70 — the hero 30.1 MB, 3,722 frames — and Safari on an iPhone played them
+visibly slowly off the GitHub README. Measured re-encodes of the same take: 15 fps / 1200 px
+17.8 MB, 15 / 960 / q70 12.9 MB, **15 / 960 / q60 11.0 MB** (the default now: a third of the pixels per
+second to decode, the cascades still read as motion), 12 / 800 / q60 7.1 MB (choppy on the
+cascades, the next step down if a phone still struggles). The feature clips scale the same way;
+the biggest, `folders`, went 10.3 → 3.8 MB.
 
 `release.ps1` prints a `=== hero ===` warning when `src/` has commits newer than
 `assets/demo.webp`. It is a warning rather than a gate on purpose: only a person can say
