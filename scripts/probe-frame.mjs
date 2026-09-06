@@ -46,6 +46,7 @@ function freePort() {
 
 const vault = resolve(arg("vault", join(ROOT, "test-vault")));
 let html = arg("html", "");
+if (html && has("vault")) console.log("--html given: --vault is ignored, and the page.js line mapping assumes the build is from this tree");
 if (!html) {
   html = join(mkdtempSync(join(tmpdir(), "vg-fr-")), "vault-graph.html");
   const b = spawnSync(process.execPath,
@@ -164,10 +165,12 @@ async function runMode(mode, round) {
       for (const m of r.metrics) o[m.name] = m.value;
       return o;
     };
-    for (let i = 0; i < 120; i++) {
-      if (await page.j("!!(window.__vg && __vg.lastCascade().exit && !__vg.demo.busy())").catch(() => false)) break;
-      await sleep(300);
+    let settled = false;
+    for (let i = 0; i < 120 && !settled; i++) {
+      settled = await page.j("!!(window.__vg && __vg.lastCascade().exit && !__vg.demo.busy())").catch(() => false);
+      if (!settled) await sleep(300);
     }
+    if (!settled) console.log("  no intro cascade settled within 36 s (a ?rest or ?demo page, or one loaded hidden); measuring anyway");
     await sleep(2000);
 
     const info = await page.j(`({ nodes: __vg.graph.order, edges: __vg.graph.size, fit: !!__vg.fitCap })`);

@@ -1293,7 +1293,7 @@ function mountVaultGraph(root, data, deps) {
     // github#19
     var skel = planSkel && !moveFrom ? planSkel : null;
     var useSkel = !!skel && skel.filled && skel.keep === planKeep && skel.dim === state.dim &&
-                  skel.order === all && skel.pinned === state.pinned.length &&
+                  skel.order === all && skel.pinned === state.pinned.join(SEP) &&
                   skel.onlyVisible === !!onlyVisible;
     /** @type {string[]} */
     var members = [];
@@ -1360,8 +1360,9 @@ function mountVaultGraph(root, data, deps) {
       return rw < 1 ? 1 : rw > 200 ? 200 : rw;
     };
     /** @type {BandNum} */
-    var bandDepth = { i: depthOfBand(true), o: depthOfBand(false) };
-    var useCells = useSkel && !dropped && !!skel && skel.depthI === bandDepth.i && skel.depthO === bandDepth.o;
+    var bandDepth = { i: 0, o: 0 };
+    var depthNow = { i: depthOfBand(true), o: depthOfBand(false) };
+    var useCells = useSkel && !dropped && !!skel && skel.depthI === depthNow.i && skel.depthO === depthNow.o;
     /** @type {Record<string, boolean>} */
     var splitOf = useCells && skel ? skel.splitOf : dict();
     /** @param {string} g */
@@ -1437,10 +1438,10 @@ function mountVaultGraph(root, data, deps) {
         skel.members = members; skel.memberG = memberG; skel.leaving = leaving;
         skel.liveN = liveN; skel.liveSub = liveSub;
         skel.keep = planKeep; skel.dim = state.dim; skel.order = all;
-        skel.pinned = state.pinned.length; skel.onlyVisible = !!onlyVisible;
+        skel.pinned = state.pinned.join(SEP); skel.onlyVisible = !!onlyVisible;
       }
       if (!useCells) {
-        skel.depthI = bandDepth.i; skel.depthO = bandDepth.o; skel.splitOf = splitOf;
+        skel.depthI = depthNow.i; skel.depthO = depthNow.o; skel.splitOf = splitOf;
         skel.byCell = byCell; skel.cellsOf = cellsOf; skel.big = big; skel.smallIds = smallIds;
         skel.merged = ringsMerged;
       }
@@ -3023,7 +3024,7 @@ function mountVaultGraph(root, data, deps) {
    * @property {((id: string) => boolean) | null} keep
    * @property {string} dim
    * @property {string[]} order
-   * @property {number} pinned
+   * @property {string} pinned   the pinned ids joined, so a swap that keeps the count still misses
    * @property {boolean} onlyVisible
    * @property {number} depthI
    * @property {number} depthO
@@ -3044,7 +3045,7 @@ function mountVaultGraph(root, data, deps) {
   var planSkelCheck = false;
   /** @returns {PlanSkel} */
   function freshSkel() {
-    return { filled: false, keep: null, dim: "", order: [], pinned: 0, onlyVisible: false,
+    return { filled: false, keep: null, dim: "", order: [], pinned: "", onlyVisible: false,
              depthI: 0, depthO: 0, members: [], memberG: [], leaving: [], liveN: dict(), liveSub: dict(),
              splitOf: dict(), byCell: dict(), cellsOf: dict(), big: [], smallIds: [], merged: dict() };
   }
@@ -3102,7 +3103,7 @@ function mountVaultGraph(root, data, deps) {
   /** @type {Record<string, number> | null} */
   var fitNow = null;
 
-  var FIT_GRID_MAX = 1 << 22;
+  var FIT_GRID_MAX = 1 << 20;
   function measureFit() {
     fitVer = posVer;
     if (!fitCap) { fitNow = null; return; }
@@ -3814,9 +3815,11 @@ function mountVaultGraph(root, data, deps) {
       if (cellPair) cellNow = walkPair(cellPair);
       if (edgePair) edgeNow = walkPair(edgePair);
       // github#19
+      /** @type {Plan | null} */
+      var plan = null;
       planSkel = cascadeRun ? cascadeRun.skel : null;
-      var plan = buildWedgePlan(ovAfter, weightOf, rowsAt, spNow);
-      planSkel = null;
+      try { plan = buildWedgePlan(ovAfter, weightOf, rowsAt, spNow); }
+      finally { planSkel = null; }
       if (planSkelCheck && cascadeRun && cascadeRun.skel) {
         var why = planDiff(plan, buildWedgePlan(ovAfter, weightOf, rowsAt, spNow));
         lastCascade.skelFrames++;
