@@ -172,6 +172,25 @@ EOF
   exit 1
 fi
 
+# COMMENTS ARE POINTERS NEXT (github#61), unskippable and a ratchet: scripts/check-comments.mjs
+# counts comment lines in plugin/, src/ and scripts/ that are neither a bare github#N /
+# decisions/NNNN / design/NNNN pointer nor a JSDoc type annotation, and holds the count at
+# exactly its baseline -- over fails, and under fails until the baseline is lowered to match,
+# the way the no-unsafe budget worked in github#60.
+echo "pre-push: checking comments are pointers..."
+if ! node "$root/scripts/check-comments.mjs" </dev/null; then
+  cat >&2 <<'EOF'
+
+pre-push: comment check failed -- push blocked.
+
+Read the counts above. A comment in plugin/, src/ or scripts/ is a pointer; the reasoning
+goes to .ai-context/ (CONTRIBUTING.md, "Comments are pointers"). If the count went DOWN,
+lower BASELINE in scripts/check-comments.mjs to the number printed, in this commit.
+There is no skip flag for this check.
+EOF
+  exit 1
+fi
+
 # GENERATOR DETERMINISM NEXT, same "cheap enough there's no reason to skip" bar as the
 # three above -- two Node subprocess runs per generator, no Chrome, a few seconds total.
 # Unlike those three this isn't about damage to someone else; it's about the test fixtures

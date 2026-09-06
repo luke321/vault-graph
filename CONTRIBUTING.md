@@ -53,10 +53,11 @@ code instead of measuring it.
 Four commands, and all four are gates rather than suggestions:
 
 ```bash
-npm run lint                   # tsc --noEmit on the engine, then typescript-eslint on our own code; every finding is held at zero
-node scripts/smoke.mjs         # 17 invariants, over two vault shapes
-node scripts/check-scope.mjs   # the page cannot style, or be styled by, its host
-node scripts/check-network.mjs # nothing shipped can make a network request
+npm run lint                    # tsc --noEmit on the engine, then typescript-eslint on our own code; every finding is held at zero
+node scripts/smoke.mjs          # the invariant suite, over three vault shapes
+node scripts/check-scope.mjs    # the page cannot style, or be styled by, its host
+node scripts/check-network.mjs  # nothing shipped can make a network request
+node scripts/check-comments.mjs # comments are pointers; the count of prose lines only goes down
 ```
 
 Three more are manual, because each launches a real browser or a real Obsidian and takes a
@@ -129,9 +130,10 @@ restart of the day puts it in.
 
 `git config core.hooksPath .githooks` once per clone runs those on every push to `develop` or
 `main`, along with a check that refuses to publish other people's names, two that keep the
-generated fixtures deterministic, and one that keeps the generated navigation files
+generated fixtures deterministic, one that keeps the generated navigation files
 (`.ai-context/code-map.md`, `.ai-context/code-index.md`, from `node scripts/code-map.mjs`)
-in step with the source. Only the invariant suite has a skip flag, on purpose:
+in step with the source, and one that counts the comment lines that are not pointers and
+refuses a push that raises the count. Only the invariant suite has a skip flag, on purpose:
 everything else is a static read costing seconds at most, and what most of it prevents is
 damage to somebody else's software, or to somebody else. The lint gate fails closed on a
 clone that has not run `npm ci` — run it, then push.
@@ -168,6 +170,14 @@ the code besides pointers: JSDoc blocks carrying a tag (the type-aware lint read
 section banners (the code map reads them), the build's `BEGIN`/`END` strip markers, and
 PowerShell `<# .SYNOPSIS #>` help blocks (Get-Help reads them). github#61 set this rule and
 applied it: 15,399 → 8,173 lines in `src/page.js` alone.
+
+`node scripts/check-comments.mjs` enforces it in the pre-push hook. It counts every comment
+line in those three directories that is neither a bare pointer (`github#N`, `decisions/NNNN`,
+`design/NNNN`, alone or with a short label) nor a JSDoc type annotation (`/**`, `* @param`,
+`* @returns`, `* @typedef`, `* @property`, `* @type`, `*/`), nor a `/*!` licence banner, a
+shebang, a lint directive or a section banner, prints the count per file, and holds the total
+at exactly `BASELINE` — over fails, and under fails until the baseline is lowered to the new
+count in the same commit, so the number can only go down. `--list` prints every counted line.
 
 ## Commit messages
 

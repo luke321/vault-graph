@@ -1693,6 +1693,29 @@ workspace under the pointer — activate the leaf and click the stage once befor
 The layout is byte-identical to the exporter's only once all three hold; measured mid-intro it
 read as 1,357 notes moved.
 
+## Comments are pointers, and the count only goes down
+
+github#61 cut every comment in `plugin/`, `src/` and `scripts/` to a pointer — a bare
+`github#N`, `decisions/NNNN` or `design/NNNN` — and moved the reasoning to `.ai-context/`,
+with JSDoc type annotations, `/*!` licence banners, shebangs, lint directives and section
+banners kept. What it did not do was stop the prose coming back, and 386 lines of it were
+still there on 2026-09-06 (392 on `develop@fc7d157`): JSDoc blocks whose lines carry no tag,
+the ribbon icon's design notes in `plugin/main.js`, the `.d.ts` file's explanation of itself,
+`build-plugin.mjs`'s strip-marker essay.
+
+```bash
+node scripts/check-comments.mjs          # counts per file, the total, the baseline
+node scripts/check-comments.mjs --list   # every counted line
+```
+
+The scanner tokenises strings, template literals and regex literals so a `//` inside them is
+not a comment, and counts a line when it is neither a pointer (optionally with a label of up
+to 60 characters after `--`, `-` or `:`), a JSDoc tag line, a directive, a banner rule nor a
+`/*!` block line. `BASELINE` in the script is held at **exactly** the count: a push that adds
+prose fails, and a commit that removes some fails too until the baseline is lowered to match,
+so the number can only go down — the ratchet github#60 used for the no-unsafe meter. In the
+pre-push hook next to the network check, with no skip flag.
+
 ## Our own code lints clean
 
 `npm run lint` runs typescript-eslint over the plugin, the page, the exporter and `scripts/`
