@@ -2904,6 +2904,8 @@ function mountVaultGraph(root, data, deps) {
   function present(id) { return (alpha[id] || 0) > 0.004; }
   function syncAlpha() {
     graph.forEachNode(function (id) { alpha[id] = visible(id) ? timeFactor(id) : 0; });
+    // github#40, design/0012
+    trailRefresh();
   }
   function clearAlpha() { graph.forEachNode(function (id) { alpha[id] = 0; }); }
 
@@ -3082,6 +3084,7 @@ function mountVaultGraph(root, data, deps) {
     if (dead) return;                      // github#62
     opts = opts || {};
     stopPlay();
+    trailRefresh();                        // github#40, design/0012
     if (anim) { WIN.cancelAnimationFrame(anim); anim = null; }
     if (animGuard) { WIN.clearTimeout(animGuard); animGuard = null; }
     if (cascadeRun) {
@@ -4699,12 +4702,114 @@ function mountVaultGraph(root, data, deps) {
 
   /* ------------------------------------------------------- detail panel */
 
+  // github#40, design/0012
+  /** @type {string[]} */
+  var trail = [];
+  var TRAIL_CAP = 30;
+  var trailHop = false;
+
+  /** @param {string} id */
+  function goTo(id) {
+    if (state.selected && state.selected !== id) {
+      trail.push(state.selected);
+      if (trail.length > TRAIL_CAP) trail.splice(1, 1);
+    }
+    trailHop = true;
+    select(id); centerOn(id);
+  }
+
+  /** @param {number} i */
+  function trailBackTo(i) {
+    var id = trail[i];
+    trail.length = i;
+    if (!graph.hasNode(id)) { select(null); return; }
+    trailHop = true;
+    select(id); centerOn(id);
+  }
+
+  /** @param {string} id */
+  function trailLabel(id) {
+    return graph.hasNode(id) ? graph.getNodeAttribute(id, "label") : "?";
+  }
+
+  /** @param {string} id */
+  function trailOff(id) { return graph.hasNode(id) && !(visible(id) && timeFactor(id) > 0); }
+
+  function trailRefresh() {
+    var d = $("detail");
+    if (!d || d.hidden) return;
+    Array.prototype.forEach.call(d.querySelectorAll("button.crumb"), /** @param {HTMLElement} b */ function (b) {
+      var id = trail[+b.getAttribute("data-tr")];
+      var off = !!id && trailOff(id);
+      b.classList.toggle("off", off);
+      b.title = trailLabel(id) + (off ? " (hidden by a filter)" : "");
+    });
+  }
+
+  function trailHTML() {
+    if (!trail.length) return "";
+    /** @param {number} i */
+    var crumb = function (i) {
+      var id = trail[i], lb = trailLabel(id);
+      var off = trailOff(id);
+      return '<li><button type="button" class="crumb' + (off ? ' off' : '') + '" data-tr="' + i +
+             '" title="' + esc(lb) + (off ? ' (hidden by a filter)' : '') + '">' + esc(lb) + '</button></li>';
+    };
+    var parts = [];
+    if (trail.length <= 3) {
+      for (var i = 0; i < trail.length; i++) parts.push(crumb(i));
+    } else {
+      parts.push(crumb(0),
+                 '<li class="dots"><span aria-hidden="true">&hellip;</span><span class="sr">' +
+                 (trail.length - 3) + ' more hops</span></li>',
+                 crumb(trail.length - 2), crumb(trail.length - 1));
+    }
+    return '<nav class="crumbs" aria-label="Hop trail">' +
+           '<button type="button" class="nvb" data-tr="' + (trail.length - 1) +
+           '" aria-label="Back to ' + esc(trailLabel(trail[trail.length - 1])) +
+           '" aria-keyshortcuts="Alt+ArrowLeft Backspace" title="Back (Alt+Left or Backspace)">&#8592;</button>' +
+           '<ol>' + parts.join('') + '</ol></nav>';
+  }
+
+  ROOT.tabIndex = -1;
+  /** @param {KeyboardEvent} ev */
+  var trailKey = function (ev) {
+    var t = ev.target instanceof HTMLElement ? ev.target : null;
+    var typing = !!t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" ||
+                         t.tagName === "SELECT" || t.isContentEditable);
+    if (typing) {
+      if (ev.key === "Escape") { t.blur(); ROOT.focus({ preventScroll: true }); }
+      return;
+    }
+    var ctx = $("ctxmenu");
+    if (ctx && !ctx.hidden) return;
+    if (ev.key === "Escape") {
+      var sp = $("settings"), gear = $("gear");
+      if (sp && !sp.hidden && gear && !gear.hidden) { gear.click(); ev.preventDefault(); return; }
+      if (state.selected) { select(null); ev.preventDefault(); }
+      return;
+    }
+    if ((ev.key === "ArrowLeft" && ev.altKey) ||
+        (ev.key === "Backspace" && !ev.altKey && !ev.ctrlKey && !ev.metaKey)) {
+      if (trail.length) { trailBackTo(trail.length - 1); ev.preventDefault(); }
+    }
+  };
+  ROOT.addEventListener("keydown", trailKey);
+
   /** @param {string | null} id */
   function select(id) {
+    // github#40, design/0012
+    if (!trailHop && (!id || id !== state.selected)) trail.length = 0;
+    trailHop = false;
     state.selected = id;
     syncLazyEdges();
     var d = $("detail");
-    if (!id) { d.hidden = true; renderer.refresh(); return; }
+    if (!id) {
+      d.hidden = true; renderer.refresh();
+      var ae = DOC ? DOC.activeElement : null;
+      if (!ae || ae === DOC.body || ROOT.contains(ae)) ROOT.focus({ preventScroll: true });
+      return;
+    }
 
     var a = graph.getNodeAttributes(id);
     var nb = neighboursOf(id).slice().sort(function (p, q) {
@@ -4714,6 +4819,7 @@ function mountVaultGraph(root, data, deps) {
     var file = encodeURIComponent(a.path.replace(/\.md$/, ""));
 
     var h = '<button class="x" title="Close">&times;</button>' +
+      trailHTML() +
       '<h2>' + esc(a.label) + '</h2>' +
       '<div class="meta">' +
         '<span><b style="color:' + colorOf(groupOf(id)) + '">&#9632;</b> ' + esc(groupOf(id)) + '</span>' +
@@ -4746,10 +4852,18 @@ function mountVaultGraph(root, data, deps) {
 
     setHTML(d, h);
     d.hidden = false;
+    // github#40, design/0012
+    d.tabIndex = -1;
+    d.setAttribute("role", "region");
+    d.setAttribute("aria-label", a.label);
+    d.focus({ preventScroll: true });
     d.querySelector(".x").onclick = function () { select(null); };
     d.querySelector(".pin").onclick = function () { togglePin(id); select(id); };
     Array.prototype.forEach.call(d.querySelectorAll("[data-go]"), /** @param {HTMLElement} b */ function (b) {
-      b.onclick = function () { select(b.getAttribute("data-go")); centerOn(b.getAttribute("data-go")); };
+      b.onclick = function () { goTo(b.getAttribute("data-go")); };
+    });
+    Array.prototype.forEach.call(d.querySelectorAll("[data-tr]"), /** @param {HTMLElement} b */ function (b) {
+      b.onclick = function () { trailBackTo(+b.getAttribute("data-tr")); };
     });
     renderer.refresh();
   }

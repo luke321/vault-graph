@@ -1833,3 +1833,74 @@ and into `scripts/release.ps1` right after the dirty-tree check: about five seco
 Chrome, so no skip flag. It **fails closed** on a checkout without `node_modules` -- eslint is
 the one gate that is not a Node built-in, and a gate that skips when its tool is missing is the
 gate that runs when someone remembers, which is how 27 warnings accumulated in the first place.
+
+## Only a hop lengthens the trail
+
+The card's hop trail (github#40, design/0012) records the linked-notes walk and nothing else. A
+hop is a click on a linked-notes row; a disc click, a search hit, a stage click, the close button,
+Escape and the reset button are not hops, and each of them starts a fresh trail. Re-selecting the
+note already selected -- which is what the pin button does to re-render the card -- keeps it.
+
+```bash
+node scripts/smoke.mjs --only "only a hop"
+node scripts/smoke.mjs --only "re-selecting"
+```
+
+Measured 2026-09-06 on all three fixtures: a search hit shows 0 crumbs, three hops show 3, a
+fresh search hit shows 0 again, one more hop shows 1; the pin toggle keeps 3 of 3. Hiding the
+folder of a crumb's note through the legend eye leaves the crumb count at 3 and marks the crumbs
+whose notes are now hidden (2 of 3 on the demo and 10k fixtures, 3 of 3 on the dominant-folder
+one); showing the folder again unmarks them. The marks are refreshed at the start of every
+cascade, because that is the one path every visibility and range change goes through.
+
+## Stepping back never re-collects a hop, and never leaves the page
+
+Backspace and Alt+ArrowLeft step back one hop each, and the place just left is not pushed onto
+the trail again, so two steps back leave n-2 crumbs, not n. Both keys `preventDefault` when they
+act: Alt+ArrowLeft is history-back in every browser and on a `file://` page that leaves the
+graph, which is what github#40 reported.
+
+```bash
+node scripts/smoke.mjs --only "re-collects"
+```
+
+Measured 2026-09-06 on all three fixtures: after four hops the card shows 3 crumbs and an
+ellipsis (first, ellipsis, last two); Backspace shows 3 with no ellipsis; Alt+ArrowLeft shows 2;
+`location.href` is unchanged throughout.
+
+## A crumb click truncates the trail at the crumb
+
+Clicking crumb i selects that note and cuts the trail to the i crumbs before it.
+
+```bash
+node scripts/smoke.mjs --only "crumb click"
+```
+
+Measured 2026-09-06: three crumbs, the second clicked, one crumb left, the card names the
+clicked note -- on all three fixtures.
+
+## The trail is not layout
+
+Walking the trail moves the camera and re-renders one panel. No position, no plan, no room
+changes: the serpentine, the rings, the hub and the lattice never hear about it.
+
+```bash
+node scripts/smoke.mjs --only "not layout"
+```
+
+Measured 2026-09-06: five hops and two steps back move 0 of 1,403 / 10,002 / 954 notes (worst
+0.000 units) and leave `buildWedgePlan(false)` identical, cell for cell, on all three fixtures.
+
+## Keys in an input stay the input's
+
+The trail's keys are bound on the mount root, not the document (design/0012, binding B), and
+a key whose target is an input, textarea, select or contenteditable is left to it. Escape in the
+search box blurs it and hands focus back to the root, so the next Backspace steps the trail.
+
+```bash
+node scripts/smoke.mjs --only "input stay"
+```
+
+Measured 2026-09-06 on all three fixtures: with two crumbs and the search box holding `ab`,
+Backspace leaves `a` and the trail at 2; Alt+ArrowLeft changes neither; Escape leaves the card
+open and focus on the page root.

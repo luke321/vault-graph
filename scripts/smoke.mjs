@@ -3147,6 +3147,159 @@ check("focus web stays above dim notes", async (p) => {
                    `${r.dimAtGaps} dim, ${r.underLabel} under label/disc of ${r.geomGaps} in-disc samples` };
 });
 
+// github#40, design/0012
+const KEYS = { Backspace: 8, ArrowLeft: 37, Escape: 27 };
+async function pressKey(p, key, modifiers = 0) {
+  const ev = { key, code: key, windowsVirtualKeyCode: KEYS[key] || 0, modifiers };
+  await p.send("Input.dispatchKeyEvent", { type: "keyDown", ...ev });
+  await p.send("Input.dispatchKeyEvent", { type: "keyUp", ...ev });
+  await sleep(150);
+}
+const TRAIL = `(function(){
+  var d = document.querySelector("#vg-detail"), c = d.hidden ? null : d.querySelector(".crumbs");
+  return { open: !d.hidden, sel: __vg.state.selected,
+           crumbs: c ? [].map.call(c.querySelectorAll("button.crumb"), function (b) { return b.textContent; }) : [],
+           dots: !!(c && c.querySelector(".dots")), href: location.href,
+           active: document.activeElement ? document.activeElement.tagName + "#" + document.activeElement.id : "" }; })()`;
+async function trailState(p) { return p.j(TRAIL); }
+async function selectBySearch(p) {
+  return p.j(`(function(){
+    var best = null, bd = -1;
+    __vg.graph.forEachNode(function (id, a) { if (a.deg > bd) { bd = a.deg; best = id; } });
+    var q = document.querySelector("#vg-q"); q.value = __vg.graph.getNodeAttribute(best, "label").slice(0, 12);
+    q.dispatchEvent(new Event("input"));
+    var hit = document.querySelector("#vg-hits [data-hit]"); if (!hit) return null;
+    hit.click(); return { id: best, deg: bd }; })()`);
+}
+async function hop(p, n) {
+  for (let i = 0; i < n; i++) {
+    const ok = await p.j(`(function(){ var bs = document.querySelectorAll("#vg-detail [data-go]");
+      var b = bs[Math.min(1, bs.length - 1)]; if (!b) return false; b.click(); return true; })()`);
+    if (!ok) return i;
+    await sleep(120);
+  }
+  return n;
+}
+async function closeCard(p) { await p.eval(`(function(){ var x = document.querySelector("#vg-detail .x"); if (x) x.click(); })(); void 0`); }
+
+check("only a hop lengthens the trail", async (p) => {
+  await settle(p);
+  const start = await selectBySearch(p);
+  if (!start) return { ok: false, detail: "no search hit to select" };
+  const s0 = await trailState(p);
+  const n = await hop(p, 3);
+  const s1 = await trailState(p);
+  await selectBySearch(p);
+  const s2 = await trailState(p);
+  await hop(p, 1);
+  const s3 = await trailState(p);
+  await p.eval(`__vg.renderer.emit("clickStage", {}); void 0`).catch(() => {});
+  await closeCard(p);
+  const s4 = await trailState(p);
+  const ok = s0.crumbs.length === 0 && n === 3 && s1.crumbs.length === 3 && s2.crumbs.length === 0 && s3.crumbs.length === 1 && !s4.open;
+  return { ok, detail: `search hit: ${s0.crumbs.length} crumbs; after ${n} hops: ${s1.crumbs.length}; ` +
+                       `a fresh search hit: ${s2.crumbs.length}; one more hop: ${s3.crumbs.length}; closed: card ${s4.open ? "STILL OPEN" : "hidden"}` };
+});
+
+check("stepping back never re-collects a hop, and never leaves the page", async (p) => {
+  await settle(p);
+  if (!(await selectBySearch(p))) return { ok: false, detail: "no search hit to select" };
+  const n = await hop(p, 4);
+  const s4 = await trailState(p);
+  await pressKey(p, "Backspace");
+  const s3 = await trailState(p);
+  await pressKey(p, "ArrowLeft", 1);
+  const s2 = await trailState(p);
+  await closeCard(p);
+  const ok = n === 4 && s4.crumbs.length === 3 && s4.dots && s3.crumbs.length === 3 && !s3.dots &&
+             s2.crumbs.length === 2 && s2.href === s4.href && s4.sel !== s3.sel && s3.sel !== s2.sel;
+  return { ok, detail: `after ${n} hops: ${s4.crumbs.length} crumbs shown${s4.dots ? " + ellipsis" : ""}; ` +
+                       `Backspace: ${s3.crumbs.length}${s3.dots ? " + ellipsis" : ""}; Alt+ArrowLeft: ${s2.crumbs.length}; ` +
+                       `href ${s2.href === s4.href ? "unchanged" : "CHANGED to " + s2.href}` };
+});
+
+check("a crumb click truncates the trail at the crumb", async (p) => {
+  await settle(p);
+  if (!(await selectBySearch(p))) return { ok: false, detail: "no search hit to select" };
+  const n = await hop(p, 3);
+  const before = await trailState(p);
+  const target = await p.j(`(function(){ var b = document.querySelectorAll("#vg-detail .crumbs button.crumb")[1]; if (!b) return null; var t = b.textContent; b.click(); return t; })()`);
+  await sleep(120);
+  const after = await trailState(p);
+  const title = await p.j(`document.querySelector("#vg-detail h2").textContent`);
+  await closeCard(p);
+  const ok = n === 3 && before.crumbs.length === 3 && after.crumbs.length === 1 && title === target;
+  return { ok, detail: `${before.crumbs.length} crumbs, clicked the second (${JSON.stringify(target)}): ` +
+                       `${after.crumbs.length} crumb left, card names ${JSON.stringify(title)}` };
+});
+
+check("the trail is not layout", async (p) => {
+  await settle(p);
+  const snap = `(function(){ var xs = []; __vg.graph.forEachNode(function (id, a) { xs.push(a.x, a.y); });
+    return { pos: xs, plan: JSON.stringify(__vg.buildWedgePlan(false).cells.map(function (c) { return [c.key || c.g, c.rows, c.n]; })) }; })()`;
+  const a = await p.j(snap);
+  if (!(await selectBySearch(p))) return { ok: false, detail: "no search hit to select" };
+  const n = await hop(p, 5);
+  await pressKey(p, "Backspace");
+  await pressKey(p, "Backspace");
+  await sleep(500);
+  const b = await p.j(snap);
+  await closeCard(p);
+  let moved = 0, worst = 0;
+  for (let i = 0; i < a.pos.length; i += 2) {
+    const d = Math.abs(a.pos[i] - b.pos[i]) + Math.abs(a.pos[i + 1] - b.pos[i + 1]);
+    if (d > 1e-6) moved++;
+    if (d > worst) worst = d;
+  }
+  const ok = n === 5 && moved === 0 && a.plan === b.plan;
+  return { ok, detail: `${n} hops and 2 steps back: ${moved} of ${a.pos.length / 2} notes moved (worst ${worst.toFixed(3)} units), ` +
+                       `plan ${a.plan === b.plan ? "identical" : "CHANGED"}` };
+});
+
+check("keys in an input stay the input's", async (p) => {
+  await settle(p);
+  if (!(await selectBySearch(p))) return { ok: false, detail: "no search hit to select" };
+  const n = await hop(p, 2);
+  await p.eval(`(function(){ var q = document.querySelector("#vg-q"); q.value = "ab"; q.focus(); })(); void 0`);
+  await pressKey(p, "Backspace");
+  await pressKey(p, "ArrowLeft", 1);
+  const typed = await p.j(`document.querySelector("#vg-q").value`);
+  const s = await trailState(p);
+  await pressKey(p, "Escape");
+  const afterEsc = await trailState(p);
+  await p.eval(`(function(){ var q = document.querySelector("#vg-q"); q.value = ""; q.dispatchEvent(new Event("input")); })(); void 0`);
+  await closeCard(p);
+  const ok = n === 2 && s.crumbs.length === 2 && typed === "a" && s.open && afterEsc.open && afterEsc.crumbs.length === 2 &&
+             afterEsc.active.indexOf("INPUT") !== 0;
+  return { ok, detail: `Backspace in the search box: value "ab" -> ${JSON.stringify(typed)}, trail ${s.crumbs.length} crumbs, card ${s.open ? "open" : "CLOSED"}; ` +
+                       `Escape there: card ${afterEsc.open ? "still open" : "CLOSED"}, focus on ${afterEsc.active || "nothing"}` };
+});
+
+check("re-selecting the same note keeps the trail, and a filter does not clear it", async (p) => {
+  await settle(p);
+  if (!(await selectBySearch(p))) return { ok: false, detail: "no search hit to select" };
+  const n = await hop(p, 3);
+  const s0 = await trailState(p);
+  await p.eval(`document.querySelector("#vg-detail .pin").click(); void 0`);
+  await settle(p);
+  const s1 = await trailState(p);
+  await p.eval(`document.querySelector("#vg-detail .pin").click(); void 0`);
+  await settle(p);
+  const g = await p.j(`(function(){ var b = document.querySelector("#vg-detail .crumbs button.crumb"); var lb = b.textContent, id = null;
+    __vg.graph.forEachNode(function (i, a) { if (id === null && a.label === lb) id = i; }); return __vg.graph.getNodeAttribute(id, "folder"); })()`);
+  await clickEye(p, g);
+  await settle(p);
+  const s2 = await trailState(p);
+  const off = await p.j(`document.querySelectorAll("#vg-detail .crumbs button.crumb.off").length`);
+  await clickEye(p, g);
+  await settle(p);
+  const s3 = await trailState(p);
+  await closeCard(p);
+  const ok = n === 3 && s0.crumbs.length === 3 && s1.crumbs.length === 3 && s2.crumbs.length === 3 && s2.open && off >= 1 && s3.crumbs.length === 3;
+  return { ok, detail: `${s0.crumbs.length} crumbs; pin toggle: ${s1.crumbs.length}; hiding ${g}: ${s2.crumbs.length} crumbs, ` +
+                       `${off} marked hidden, card ${s2.open ? "open" : "CLOSED"}; shown again: ${s3.crumbs.length}` };
+});
+
 async function settle(p, ms = 6000) {
   const deadline = Date.now() + ms;
   for (;;) {

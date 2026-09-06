@@ -532,6 +532,29 @@
   }
   .vault-graph #vg-detail a.open:hover { background: color-mix(in srgb, var(--accent) 12%, transparent); }
   .vault-graph #vg-detail .pin svg { width: 13px; height: 13px; vertical-align: -2px; margin-right: 3px; }
+  /* github#40, design/0012 */
+  .vault-graph:focus { outline: none; }
+  .vault-graph #vg-detail .crumbs { display: flex; align-items: center; gap: 4px; margin: 0 22px 7px 0; }
+  .vault-graph #vg-detail .crumbs ol {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 2px 0;
+    list-style: none; margin: 0; padding: 0; min-width: 0;
+  }
+  .vault-graph #vg-detail .crumbs li { display: flex; align-items: center; min-width: 0; }
+  .vault-graph #vg-detail .crumbs li + li::before {
+    content: "\203A" / ""; color: var(--text-3); font-size: 10px; padding: 0 3px;
+  }
+  .vault-graph #vg-detail .crumbs button {
+    font: inherit; font-size: 10px; color: var(--text-2); background: none; border: 0;
+    padding: 1px 2px; cursor: pointer; border-radius: 4px;
+    max-width: 110px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .vault-graph #vg-detail .crumbs button:hover { color: var(--text-1); background: var(--surface-1); }
+  .vault-graph #vg-detail .crumbs button.off { color: var(--text-3); font-style: italic; }
+  .vault-graph #vg-detail .crumbs .nvb {
+    flex: none; font-size: 13px; line-height: 1; color: var(--text-1);
+    border: 1px solid var(--border); padding: 1px 7px;
+  }
+  .vault-graph #vg-detail .crumbs .dots { color: var(--text-3); font-size: 10px; }
   .vault-graph #vg-detail ul { list-style: none; margin: 0; padding: 0; }
   .vault-graph #vg-detail li button {
     background: none; border: 0; padding: 2px 0; font: inherit; font-size: 12px;

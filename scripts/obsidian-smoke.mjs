@@ -563,6 +563,85 @@ try {
       "definitions: " + defs.top + " top-level, " + defs.items + " items; rendered " + shown.rows + " rows, " + shown.toggles + " toggles, " + shown.headings + " headings; compact axis button " + pressedBefore + " -> " + pressedAfter + ", data.json compactAxis " + saved);
   }
 
+  // github#40, design/0012
+  const TRAIL = "(function(){ var v = " + VIEW + "; if (!v) return null; var d = v.contentEl.querySelector('#vg-detail'); var cr = d && !d.hidden ? d.querySelector('.crumbs') : null;" +
+                " var doc = v.contentEl.ownerDocument, ae = doc.activeElement; return { open: !!d && !d.hidden," +
+                " title: d && !d.hidden ? d.querySelector('h2').textContent : null, crumbs: cr ? cr.querySelectorAll('button.crumb').length : 0," +
+                " active: ae ? ae.tagName + '#' + ae.id : '', inMount: !!(ae && v.contentEl.contains(ae)) }; })()";
+  const HOP = "(function(){ var v = " + VIEW + "; var bs = v.contentEl.querySelectorAll('#vg-detail [data-go]'); var b = bs[Math.min(1, bs.length - 1)]; if (!b) return false; b.click(); return true; })()";
+  const keyIn = async (key, mods = 0) => {
+    const ev = { key, code: key, windowsVirtualKeyCode: key === "Backspace" ? 8 : key === "ArrowLeft" ? 37 : 0, modifiers: mods };
+    await c.send("Input.dispatchKeyEvent", { type: "keyDown", ...ev });
+    await c.send("Input.dispatchKeyEvent", { type: "keyUp", ...ev });
+    await sleep(200);
+  };
+  const clickNote = async () => {
+    const at = await noteAt(c, id);
+    await mouse(c, "mouseMoved", at.x, at.y, { buttons: 0 });
+    await sleep(150);
+    await mouse(c, "mousePressed", at.x, at.y, { button: "left", clickCount: 1, buttons: 1 });
+    await mouse(c, "mouseReleased", at.x, at.y, { button: "left", clickCount: 1, buttons: 0 });
+    await sleep(400);
+    await mouse(c, "mouseMoved", 3, 3, { buttons: 0 });
+    return at;
+  };
+  if (selected("trail")) {
+    const n0 = errorsBefore();
+    await clickNote();
+    const s0 = await E(TRAIL);
+    await E(HOP); await sleep(200); await E(HOP); await sleep(200);
+    const s2 = await E(TRAIL);
+    await keyIn("Backspace");
+    const s1 = await E(TRAIL);
+    await keyIn("ArrowLeft", 1);
+    const s1b = await E(TRAIL);
+    await closeGraph(c);
+    await openGraph(c);
+    await clickNote();
+    await E(HOP); await sleep(200); await E(HOP); await sleep(200);
+    const r2 = await E(TRAIL);
+    await keyIn("Backspace");
+    const r1 = await E(TRAIL);
+    await E("(function(){ var v = " + VIEW + "; var x = v.contentEl.querySelector('#vg-detail .x'); if (x) x.click(); })(); void 0");
+    const errs = errorsSince(n0);
+    report(s0.open && s0.inMount && s0.crumbs === 0 && s2.crumbs === 2 && s1.crumbs === 1 && s1b.crumbs === 0 && s1b.open &&
+           r2.crumbs === 2 && r1.crumbs === 1 && errs.length === 0,
+      "the hop trail works inside the view: hop twice, Backspace and Alt+ArrowLeft step back one each, and a reopened view starts fresh",
+      "click: card " + (s0.open ? "open" : "CLOSED") + ", focus " + (s0.inMount ? "inside the mount" : "OUTSIDE (" + s0.active + ")") + "; 2 hops: " + s2.crumbs + " crumbs; Backspace: " + s1.crumbs +
+      "; Alt+ArrowLeft: " + s1b.crumbs + " (card " + (s1b.open ? "open" : "closed") + "); reopened, 2 hops: " + r2.crumbs + ", Backspace: " + r1.crumbs + "; " + errs.length + " errors");
+  }
+  if (selected("moved-out")) {
+    const n0 = errorsBefore();
+    await clickNote();
+    await E(HOP); await sleep(600); await E(HOP); await sleep(600);
+    const before = await E(TRAIL);
+    const moved = await E("(async function(){ var ls = app.workspace.getLeavesOfType(" + JSON.stringify(VT) + "); if (!ls[0]) return 'no leaf'; var v0 = ls[0].view; var api0 = v0.handle.api;" +
+                          " window.__vgSmokeEv = []; ['clickNode','clickStage','downStage'].forEach(function (k) { api0.renderer.on(k, function (e) { window.__vgSmokeEv.push(k + (e && e.node ? ':' + e.node : '')); }); });" +
+                          " var d0 = v0.contentEl.querySelector('#vg-detail'); var t0 = d0.querySelector('h2').textContent; var log = [];" +
+                          " var snap = function (why) { var h = d0.querySelector('h2'); log.push(why + ':' + (d0.hidden ? 'hidden' : (h ? h.textContent : '?')) + '/' + [].map.call(d0.querySelectorAll('button.crumb'), function (b) { return b.textContent; }).join('>')); };" +
+                          " snap('before'); var mo = new MutationObserver(function () { snap('mut'); }); mo.observe(d0, { childList: true, attributes: true, attributeFilter: ['hidden'] });" +
+                          " app.workspace.moveLeafToPopout(ls[0]); await new Promise(function (r) { setTimeout(r, 1500); }); mo.disconnect(); snap('after');" +
+                          " var v = ls[0].view; var doc = v.contentEl.ownerDocument; var d = v.contentEl.querySelector('#vg-detail'); var t1 = d && !d.hidden ? d.querySelector('h2').textContent : null;" +
+                          " return { otherDoc: doc !== document, sameView: v === v0 && v.handle && v.handle.api === api0, crumbs: v.contentEl.querySelectorAll('#vg-detail button.crumb').length," +
+                          " open: !!d && !d.hidden, title: t1 === t0 ? 'same' : 'CHANGED ' + t0 + ' -> ' + t1, events: window.__vgSmokeEv.join(' ') || 'none', log: log.join(' | ') }; })()").catch((e) => e.message);
+    // design/0012 -- synthetic keydown: one CDP target cannot reach the popout
+    const afterPop = await E("(function(){ var v = " + VIEW + "; var d = v.contentEl.querySelector('#vg-detail'); d.focus();" +
+                             " d.dispatchEvent(new (v.contentEl.ownerDocument.defaultView.KeyboardEvent)('keydown', { key: 'Backspace', bubbles: true, cancelable: true }));" +
+                             " return v.contentEl.querySelectorAll('#vg-detail button.crumb').length; })()").catch((e) => e.message);
+    await E("document.body.focus(); document.activeElement && document.activeElement.blur(); void 0");
+    await keyIn("Backspace");
+    const afterMain = await E("(function(){ var v = " + VIEW + "; return v.contentEl.querySelectorAll('#vg-detail button.crumb').length; })()").catch((e) => e.message);
+    await E("(function(){ app.workspace.getLeavesOfType(" + JSON.stringify(VT) + ").forEach(function (l) { l.detach(); }); })(); void 0");
+    await sleep(800);
+    const popouts = await E("(function(){ var fs = app.workspace.floatingSplit; return fs && fs.children ? fs.children.length : 0; })()").catch(() => -1);
+    const errs = errorsSince(n0);
+    report(before.crumbs === 2 && moved && moved.otherDoc && moved.sameView && moved.crumbs === 2 && afterPop === 1 && afterMain === 1 && popouts === 0 && errs.length === 0,
+      "keys still step the trail in a view moved out to a popout, and a key in the main window leaves it alone",
+      "2 crumbs before; moved to a popout: " + JSON.stringify(moved) + "; Backspace on the moved card: " + afterPop + " crumb(s); Backspace in the main window with the body focused: " + afterMain +
+      "; popout windows left open: " + popouts + "; " + errs.length + " errors");
+    await openGraph(c);
+  }
+
   if (selected("popout")) {
     const n0 = errorsBefore();
     await closeGraph(c);

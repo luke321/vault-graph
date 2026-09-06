@@ -1,8 +1,13 @@
 # The hop trail
 
-**Status** concept · github#40 · 2026-09-06 · not implemented. Written against `develop@745aacf`
-(the 2.0.0 state). The numbers below come from a throwaway port of the contributor's patch onto
-that tree in a scratch copy; nothing of it is in the repo.
+**Status** implemented on `feature/hop-trail` (2026-09-06, awaiting review) · github#40. Written
+as a concept against `develop@745aacf` (the 2.0.0 state) the same day; the numbers in the body
+come from a throwaway port of the contributor's patch onto that tree in a scratch copy. The
+implementation took the record's own proposals on every open question below: Route 2 with a
+`Co-authored-by` trailer, binding B, Escape closes the card, `/` left out, filtered crumbs grey and
+clickable, the cap keeps the origin. The five checks it added are in `invariants.md` from *Only a
+hop lengthens the trail* on; the two Obsidian checks are in `scripts/obsidian-smoke.mjs`
+(`--only trail`, `--only moved-out`).
 
 > Clicking a linked note on the card walks the graph, and three hops in the starting point is
 > gone: the card names only the current note, and the browser's Back key leaves a `file://` page
