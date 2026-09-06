@@ -2,7 +2,7 @@
 // github#58
 
 import { spawn, spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -30,6 +30,8 @@ const DPR = Number(arg("dpr", "1"));
 const WINDOW = String(arg("window", "1600x1000")).split("x").map(Number);
 const OUT_JSON = arg("out", "");
 const LABEL = arg("label", "");
+const SETTLE_MS = Number(arg("settle-ms", "1500"));
+const DUMP_DIR = arg("dump", "");
 const ALL_STATES = ["rest", "search", "hidden", "solo", "range", "hover", "click", "cascade"];
 const STATES = (() => {
   const given = argAll("state");
@@ -121,7 +123,7 @@ async function settle(p, ms = 20000) {
 
 async function snapRest(p) {
   await settle(p);
-  await sleep(1500);
+  await sleep(SETTLE_MS);
   await p.eval("__vg.syncAlpha(); __vg.applyLayout(false); void 0");
   await twoFrames(p);
   await sleep(300);
@@ -279,7 +281,7 @@ async function enterState(p, state) {
     await clickEye(p, g);
     await settle(p, 60000);
     await camSettle(p);
-    await sleep(1500);
+    await sleep(SETTLE_MS);
     await twoFrames(p);
     const report = await p.eval("(function(){ var r = __vg.probeReport(); __vg.probe(false); return typeof r === 'string' ? { note: r } : r; })()");
     const cam = await p.eval("(function(){ var c = __vg.renderer.getCamera().getState(); return { x: c.x, y: c.y, ratio: c.ratio }; })()");
@@ -485,6 +487,7 @@ function decodePng(buf) {
   return { w, h, data: out };
 }
 
+const shotTag = { side: "", vault: "", state: "", ratio: "" };
 const SHOT_REGIONS = [["stage", "#vg-stage"], ["page", "#vg-app"], ["canvas", "#vg-graph"], ["heatmap", "#vg-heatwrap"], ["ribbon", "#vg-ribbon"], ["legend", "#vg-legend"]];
 
 async function screenshotSample(p) {
@@ -497,6 +500,10 @@ async function screenshotSample(p) {
     await p.eval("__vg.renderer.render(); void 0");
     const shot = await p.send("Page.captureScreenshot", { format: "png", clip: { x: r.x, y: r.y, width: r.w, height: r.h, scale: 1 } });
     shots[name] = shot.data;
+    if (DUMP_DIR) {
+      mkdirSync(DUMP_DIR, { recursive: true });
+      writeFileSync(join(DUMP_DIR, [shotTag.side, shotTag.vault, shotTag.state, shotTag.ratio, name].join("__") + ".png"), Buffer.from(shot.data, "base64"));
+    }
   }
   return shots;
 }
@@ -548,10 +555,12 @@ async function sampleBuild(p, url, label) {
     await settle(p);
     const info = await enterState(p, state);
     const per = new Map();
+    shotTag.side = label.split(" ")[0]; shotTag.state = state; shotTag.ratio = "landed";
     if (state === "cascade") {
       per.set("landed", await sampleAt(p));
     } else if (!info.skipped) {
       for (const ratio of RATIOS) {
+        shotTag.ratio = String(ratio);
         await placeCamera(p, ratio);
         let extra = {};
         if (info.perRatio) extra = await hoverNote(p, info.note);
@@ -568,7 +577,7 @@ async function sampleBuild(p, url, label) {
 
 function compareState(state, ref, now) {
   const results = [];
-  const push = (ratio, kind, r, more = {}) => results.push({ state, ratio, kind, ok: r.ok, detail: r.detail, ...more });
+  const push = (ratio, kind, r, more = {}) => results.push({ ...r, state, ratio, kind, ...more });
   if (ref.info.skipped || now.info.skipped) {
     push("-", "state", { ok: !!ref.info.skipped === !!now.info.skipped, detail: "skipped: ref " + (ref.info.skipped || "no") + ", now " + (now.info.skipped || "no") });
     return results;
@@ -621,6 +630,7 @@ async function runVault(vault, reference, current, chrome) {
     "--app=data:text/html,render-diff",
   ], { stdio: "ignore" });
   const results = [];
+  shotTag.vault = basename(vault).replace(/-[0-9a-f]{8}$/, "");
   try {
     let page = null;
     const deadline = Date.now() + 25000;
