@@ -363,6 +363,31 @@ Measured: **0 of 48 cells partially filled**; the busiest day tiles 180 blocks i
 13px cell, i.e. 0.94px per note. `blocksAtBusiest` must equal the busiest day's count —
 if it is lower, notes are being dropped from the tiling rather than drawn sub-pixel.
 
+## The heatmap band is painted for the state it landed in
+
+`heatDraw()` repaints only when its signature changes, and the signature quantised each
+day's count to quarter-notes with `Math.round(n * 4)`. A fading note takes a day from
+`n = 1` through `0.1` to `0`, and everything under `0.125` rounds to the same signature as
+zero — so the last repaint of a fade happened while the tile was still faintly there, and
+the band kept that tint after the note was gone. Which cells carried the residue depended on
+the fade order, which is why the 2.0.0 comparison found the solo-state band differing between
+consecutive merges (github#19's frame work, github#67's fade schedule) while the counts
+underneath were identical. Present in 1.9.0 and every build since the band existed.
+
+```bash
+node scripts/smoke.mjs --only "band is painted"
+```
+
+The check hides the biggest folder, lets the cascade land, reads the band's canvas as painted,
+forces a repaint from the same state (through the hover-day signature) and compares. Measured
+2026-09-06 on the demo and 10k fixtures **before: 718 and 1,788 pixels differing, max 232 and
+238 of 255** — whole tiles left at a pre-fade colour; **after: 63 and 45 pixels, max 1 of
+255**, 0 on the dominant-folder fixture. The bar is 2 of 255. Two changes: the signature uses
+`Math.ceil(n * 4)`, so any count above zero is distinct from zero, and `settle()` clears the
+signature so the frame the cascade lands on is painted from the landed alphas. The residual
+1 of 255 on two fixtures is measured, repeatable and below anything a person can see; it was
+not traced further.
+
 ## A heatmap day haloes and recolours, but never pushes
 
 Clicking a day recolours its notes to `--today` — the neutral extreme, deliberately not one
@@ -472,6 +497,35 @@ and which element sits at the aim point, which separates the three candidate cau
 moving layout, a stale hit-test index, something painted over the canvas). **Read that line
 rather than re-running** — the whole reason the diagnostic exists is that a flaky check
 otherwise trains you to re-run instead of measure.
+
+## A sub-pixel dot is still a target
+
+The pointer reaches the page as whole CSS pixels — `MouseEvent.clientX` is the floored
+position, in Chrome and in Electron alike, measured by dispatching fractional coordinates
+over CDP and reading what the listener saw (1005.586 → 1005, 700.75 → 700). The engine's
+picking (decision 0012) is exact geometry: a dot is hit when the pointer is within its drawn
+radius. Put the two together and a dot drawn under about 1.4 px of radius can be hovered
+only when its centre happens to sit near a pixel corner. Sigma's colour-buffer picking had the
+same quantisation and a different catchment (a 2 px block), so the two builds missed in
+different places, and across the 2.0.0 comparison matrix the engine missed where Sigma hit six
+times and the reverse once — the 10k fixture's hub note at camera ratio 2 (0.84 px radius),
+zoomed out on a 1100 px window, at pixel ratio 2.
+
+```bash
+node scripts/smoke.mjs --only "sub-pixel dot"
+```
+
+The check zooms until the top-degree note draws at 0.6 px of radius, aims the pointer at the
+four whole-pixel corners around its centre, and asserts that the nearest corner hovers that
+note and that every corner hovers *some* note. `getNodeAtPosition` keeps the exact test and its
+last-drawn-wins rule, and adds a floor: when nothing is hit exactly, the nearest centre within
+`PICK_FLOOR_PX` (1.5 px, just over the 1.41 px a floored pointer can be from a true centre)
+wins. Nothing changes for a dot the pointer is already inside.
+
+Measured 2026-09-06: before, the 10k page hovered the note from **0 of 4** corners and the demo
+page from 1 of 4; after, the nearest corner hovers it on all three fixtures (0.16–0.61 px off)
+and **4 of 4** corners hover a note. `render-diff` at rest, in a search and in every filter
+state is unchanged by this — picking draws nothing.
 
 ## Hover re-arms after the pointer leaves the stage
 

@@ -3206,6 +3206,7 @@ function mountVaultGraph(root, data, deps) {
       }
       probeSample("pre-settle");
       moving.forEach(function (id) { alpha[id] = to[id]; });
+      heatSig = "";
       pinnedPlan = null;
       planKeep = null;
       roomNow = null; cellNow = null; edgeNow = null; posSrc = null;
@@ -6046,7 +6047,7 @@ function mountVaultGraph(root, data, deps) {
     /** @type {(string | number)[]} */
     var sig = [];
     for (var i = 0; i < heat.keys.length; i++) {
-      sig.push(Math.round(heat.days[heat.keys[i]].n * 4));
+      sig.push(Math.ceil(heat.days[heat.keys[i]].n * 4));
     }
     sig.push(state.markDay || "", state.hoverDay || "", heat.cell);
     sig = sig.join(",");
