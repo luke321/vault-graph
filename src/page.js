@@ -2978,42 +2978,66 @@ function mountVaultGraph(root, data, deps) {
   /** @type {Record<string, number> | null} */
   var fitNow = null;
 
+  var FIT_GRID_MAX = 1 << 22;
   function measureFit() {
     fitVer = posVer;
     if (!fitCap) { fitNow = null; return; }
-    /** @type {{ id: string, x: number, y: number, gx: number, gy: number }[]} */
-    var pts = [];
+    /** @type {string[]} */
+    var ids = [];
+    /** @type {number[]} */
+    var xs = [];
+    /** @type {number[]} */
+    var ys = [];
     graph.forEachNode(function (id, a) {
       var al = alpha[id];
       if (al === undefined) al = 1;
       if (al < 0.35) return;
-      pts.push({ id: id, x: a.x, y: a.y, gx: 0, gy: 0 });
+      if (!(isFinite(a.x) && isFinite(a.y))) return;
+      ids.push(id); xs.push(a.x); ys.push(a.y);
     });
     /** @type {Record<string, number>} */
     var map = dict();
-    if (pts.length < 2) { fitNow = map; return; }
+    var n = ids.length;
+    if (n < 2) { fitNow = map; return; }
     var cell = Math.max(1, pitchUnits("o"));
-    /** @type {Record<string, typeof pts>} */
-    var grid = dict();
-    for (var i = 0; i < pts.length; i++) {
-      var p = pts[i];
-      p.gx = Math.floor(p.x / cell); p.gy = Math.floor(p.y / cell);
-      var k = p.gx + ":" + p.gy;
-      (grid[k] || (grid[k] = [])).push(p);
+    // github#19
+    var gxs = new Int32Array(n), gys = new Int32Array(n);
+    var gx0 = Infinity, gy0 = Infinity, gx1 = -Infinity, gy1 = -Infinity;
+    for (var i = 0; i < n; i++) {
+      var gx = Math.floor(xs[i] / cell), gy = Math.floor(ys[i] / cell);
+      gxs[i] = gx; gys[i] = gy;
+      if (gx < gx0) gx0 = gx; if (gx > gx1) gx1 = gx;
+      if (gy < gy0) gy0 = gy; if (gy > gy1) gy1 = gy;
     }
-    for (var q = 0; q < pts.length; q++) {
-      var a2 = pts[q], nn = Infinity;
-      for (var dx = -1; dx <= 1; dx++) for (var dy = -1; dy <= 1; dy++) {
-        var bucket = grid[(a2.gx + dx) + ":" + (a2.gy + dy)];
-        if (!bucket) continue;
-        for (var bi = 0; bi < bucket.length; bi++) {
-          var b2 = bucket[bi];
-          if (b2 === a2) continue;
-          var d2 = (b2.x - a2.x) * (b2.x - a2.x) + (b2.y - a2.y) * (b2.y - a2.y);
-          if (d2 < nn) nn = d2;
+    var nx = gx1 - gx0 + 1, ny = gy1 - gy0 + 1;
+    var dense = nx * ny <= FIT_GRID_MAX;
+    var head = dense ? new Int32Array(nx * ny).fill(-1) : null;
+    /** @type {Map<number, number> | null} */
+    var headMap = dense ? null : new Map();
+    var next = new Int32Array(n);
+    for (var j = 0; j < n; j++) {
+      var c = (gxs[j] - gx0) * ny + (gys[j] - gy0);
+      if (head) { next[j] = head[c]; head[c] = j; }
+      else if (headMap) { var prev = headMap.get(c); next[j] = prev === undefined ? -1 : prev; headMap.set(c, j); }
+    }
+    for (var q = 0; q < n; q++) {
+      var qx = xs[q], qy = ys[q], cx0 = gxs[q] - gx0, cy0 = gys[q] - gy0, nn = Infinity;
+      for (var dx = -1; dx <= 1; dx++) {
+        var cx = cx0 + dx;
+        if (cx < 0 || cx >= nx) continue;
+        for (var dy = -1; dy <= 1; dy++) {
+          var cy = cy0 + dy;
+          if (cy < 0 || cy >= ny) continue;
+          var ck = cx * ny + cy;
+          var b = head ? head[ck] : (headMap && headMap.has(ck) ? /** @type {number} */ (headMap.get(ck)) : -1);
+          for (; b >= 0; b = next[b]) {
+            if (b === q) continue;
+            var d2 = (xs[b] - qx) * (xs[b] - qx) + (ys[b] - qy) * (ys[b] - qy);
+            if (d2 < nn) nn = d2;
+          }
         }
       }
-      if (nn < Infinity) map[a2.id] = Math.sqrt(nn);
+      if (nn < Infinity) map[ids[q]] = Math.sqrt(nn);
     }
     fitNow = map;
   }
@@ -4399,7 +4423,8 @@ function mountVaultGraph(root, data, deps) {
       pitch: pitchUnits(bk),
       edgeCap: edgeCap[id], hubRow0: !!hubRow0[id],
       walking: { room: !!roomNow, cell: !!cellNow, edge: !!edgeNow },
-      out: dotPx(size, id)
+      out: dotPx(size, id),
+      fit: fitNow ? fitNow[id] : undefined
     };
   }
 
