@@ -89,8 +89,10 @@ other.
 
 <sub>**Zero network calls, and greppable.** Nothing shipped makes a request. The graph store
 and the WebGL renderer are the plugin's own code (`src/engine/`, TypeScript), so there is no
-third-party bundle to explain away, and `node scripts/check-network.mjs` is the gate that keeps
-`main.js` and the exporter at zero. See
+third-party bundle to explain away — though not no third-party code: the renderer is a port of
+[Sigma.js](https://www.sigmajs.org) 3.0.2 under MIT, whose notice ships in every build and is
+recorded in [`src/engine/NOTICE.md`](src/engine/NOTICE.md) — and `node scripts/check-network.mjs`
+is the gate that keeps `main.js` and the exporter at zero. See
 [`0008-zero-network-calls`](.ai-context/decisions/0008-zero-network-calls.md) and
 [`0012-own-graph-store-and-renderer`](.ai-context/decisions/0012-own-graph-store-and-renderer.md).</sub>
 
