@@ -1881,10 +1881,14 @@ check("filtered to the bone, the disc stays drawable", async (p) => {
 
 // github#66
 // github#14
-check("a dot never outgrows its resting size while a cascade walks", async (p) => {
+// design/0011
+async function walkSolo(p, fitOn) {
   await clearRange(p);
   await settle(p);
   await camSettle(p);
+  const hasFit = await p.j(`typeof __vg.fitCap === "boolean"`);
+  if (fitOn && !hasFit) return { skip: "this build has no per-frame dot-size cap to switch on" };
+  await p.eval(`__vg.fitCap = ${fitOn ? "true" : "false"}; void 0`);
   const pick = await p.j(`(function(){
     var best = null;
     __vg.groupOrder().forEach(function (g) {
@@ -1892,7 +1896,7 @@ check("a dot never outgrows its resting size while a cascade walks", async (p) =
       if (n >= 2 && (!best || n < best.n)) best = { g: g, n: n };
     });
     return best; })()`);
-  if (!pick) return { ok: true, detail: "no group with two or more notes to solo -- nothing to walk" };
+  if (!pick) return { skip: "no group with two or more notes to solo -- nothing to walk" };
   const SAMPLE = `(function(){
     var a0 = __vg.renderer.graphToViewport({ x: 0, y: 0 });
     var b0 = __vg.renderer.graphToViewport({ x: 160, y: 0 });
@@ -1908,16 +1912,17 @@ check("a dot never outgrows its resting size while a cascade walks", async (p) =
     return { n: n, max: Math.round(mx * 10) / 10, busy: __vg.demo.busy() }; })()`;
   const before = await p.j(SAMPLE);
   const w = await p.j(`__vg.demo.where("only", ${JSON.stringify(pick.g)})`);
-  if (!w) return { ok: false, detail: `no "only" chip resolved for ${pick.g}` };
+  if (!w) return { fail: `no "only" chip resolved for ${pick.g}` };
   await p.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: w.x, y: w.y, buttons: 0 });
   await p.send("Input.dispatchMouseEvent", { type: "mousePressed", x: w.x, y: w.y, button: "left", clickCount: 1, buttons: 1 });
   await p.send("Input.dispatchMouseEvent", { type: "mouseReleased", x: w.x, y: w.y, button: "left", clickCount: 1, buttons: 0 });
-  let peak = 0, peakAt = 0, frames = 0;
+  let peak = 0, peakAt = 0, frames = 0, trough = Infinity;
   const t0 = Date.now();
   for (;;) {
     const smp = await p.j(SAMPLE);
     frames++;
     if (smp.max > peak) { peak = smp.max; peakAt = Date.now() - t0; }
+    if (smp.n && smp.max < trough) trough = smp.max;
     if (!smp.busy && frames > 3) break;
     if (Date.now() - t0 > 12000) break;
     await sleep(30);
@@ -1935,13 +1940,34 @@ check("a dot never outgrows its resting size while a cascade walks", async (p) =
   }
   await settle(p);
   await camSettle(p);
+  if (hasFit) await p.eval(`__vg.fitCap = false; void 0`);
   const bound = Math.max(before.max, after.max) * 1.05;
-  const ok = peak <= bound;
-  return { ok,
-           detail: `soloed ${pick.g} (${pick.n} notes): biggest dot ${before.max} units at rest ` +
-                   `-> peak ${peak} at ${peakAt}ms over ${frames} frames -> ${after.max} at rest ` +
-                   `(${after.n} shown); bound ${Math.round(bound * 10) / 10}` +
-                   (ok ? "" : `  <- overshoots both resting sizes by ${(peak / Math.max(before.max, after.max)).toFixed(2)}x`) };
+  const floor = Math.min(before.max, after.max);
+  return { pick, before, after, peak, peakAt, frames, trough, bound, floor, ok: peak <= bound };
+}
+
+function soloDetail(r) {
+  return `soloed ${r.pick.g} (${r.pick.n} notes): biggest dot ${r.before.max} units at rest ` +
+         `-> peak ${r.peak} at ${r.peakAt}ms over ${r.frames} frames -> ${r.after.max} at rest ` +
+         `(${r.after.n} shown); bound ${Math.round(r.bound * 10) / 10}` +
+         (r.ok ? "" : `  <- overshoots both resting sizes by ${(r.peak / Math.max(r.before.max, r.after.max)).toFixed(2)}x`);
+}
+
+check("a dot never outgrows its resting size while a cascade walks", async (p) => {
+  const r = await walkSolo(p, false);
+  if (r.skip) return { ok: true, detail: r.skip };
+  if (r.fail) return { ok: false, detail: r.fail };
+  return { ok: r.ok, detail: soloDetail(r) };
+});
+
+// design/0011
+check("with Size dots from the frame on, a walking dot is held under its two resting sizes, never above", async (p) => {
+  const r = await walkSolo(p, true);
+  if (r.skip) return { ok: true, detail: r.skip };
+  if (r.fail) return { ok: false, detail: r.fail };
+  const dip = r.floor > 0 ? Math.round((1 - r.trough / r.floor) * 1000) / 10 : 0;
+  return { ok: r.ok,
+           detail: soloDetail(r) + `; lowest mid-walk ${r.trough} units, ${dip}% under the smaller resting size (the cap may hold a dot below, never above)` };
 });
 
 // github#67

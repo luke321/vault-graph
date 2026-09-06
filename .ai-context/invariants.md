@@ -1243,6 +1243,26 @@ new. Dense solos are untouched: the demo vault's 200-note folder grows monotonic
 with and without the cap (peak = rest, 1.00x). On the three fixtures the peak equals the resting
 size after the solo exactly (shape 84.2, demo 102.2, 10k 286.2 graph units).
 
+### What the law says when "Size dots from the frame" is on
+
+2.0.0 ships the per-frame dot-size cap (`design/0011`, github#41) behind a view setting, **off by
+default**, and `?fit` on the standalone page. With it on, `dotPx` also caps each dot at 0.46 of
+its distance to the nearest visible note on the frame being drawn. The cap only ever lowers a
+size, so the upper bound above is untouched; what changes is the lower one. **The law with the
+setting on: a walking dot never outgrows the larger of its two resting sizes, and may be held
+below both of them by its neighbours' clearance while rows slide — never above.** `design/0011`
+records the spirit it gives up (a dot can shrink and grow back mid-walk, the motion github#66
+was filed against in the other direction) and why the setting exists anyway.
+
+```bash
+node scripts/smoke.mjs --only "frame on"
+```
+
+The second check walks the same solo with `__vg.fitCap = true`, asserts the same upper bound,
+and prints the trough: the lowest the biggest full-alpha dot went mid-walk, as a share under the
+smaller resting size. With the setting off the three fixtures are unchanged: goldens
+byte-identical, peak = rest.
+
 ## An arriving note's fade never reverses during a solo switch
 
 Solo the smallest group with two or more notes, let it land, then solo the next smallest: every
