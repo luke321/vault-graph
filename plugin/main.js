@@ -603,7 +603,7 @@ class VaultGraphView extends ItemView {
         await this.plugin.saveSettings();
       },
       // github#41, design/0011
-      fitCap: this.plugin.settings.fitCap === true,
+      fitCap: this.plugin.settings.fitCap !== false,
       pinned: this.plugin.settings.pinned,
       /** @param {string[]} ids */
       onPinned: async (ids) => {
@@ -663,7 +663,7 @@ const DEFAULTS = {
   // github#3
   unlinkedTintByFolder: false,
   // github#41, design/0011
-  fitCap: false,
+  fitCap: true,
 };
 
 /** @type {{ key: "ghosts" | "templates" | "flatMonths" | "words", name: string, desc: string }[]} */
@@ -697,7 +697,7 @@ const VIEW_SETTINGS = [
   { key: "unlinkedTintByFolder", name: "Colour unlinked notes by folder", defaultOn: false, api: "setUnlinkedTintByFolder",
     desc: "While unlinked notes are kept as their own group (the toggle just above is off), give each one its own folder's colour instead of the flat unlinked swatch. The (unlinked) row's right-click menu carries this too." },
   // github#41, design/0011
-  { key: "fitCap", name: "Size dots from the frame", defaultOn: false, api: "setFitCap",
+  { key: "fitCap", name: "Size dots from the frame", defaultOn: true, api: "setFitCap",
     desc: "While the disc animates, cap every dot at just under half its distance to the nearest visible note, measured on the frame being drawn, so dots stay apart while rows slide. The disc at rest is unchanged. Experimental: dots breathe while a cascade walks." },
 ];
 
@@ -1174,7 +1174,7 @@ class VaultGraphPlugin extends Plugin {
     if (api.setCompactAxis) api.setCompactAxis(this.settings.compactAxis !== false);
     if (api.setUnlinkedByFolder) api.setUnlinkedByFolder(this.settings.unlinkedByFolder !== false);
     if (api.setUnlinkedTintByFolder) api.setUnlinkedTintByFolder(this.settings.unlinkedTintByFolder === true);
-    if (api.setFitCap) api.setFitCap(this.settings.fitCap === true);
+    if (api.setFitCap) api.setFitCap(this.settings.fitCap !== false);
     if (api.applyHiddenDefaults) api.applyHiddenDefaults();
   }
 

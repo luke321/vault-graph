@@ -2965,9 +2965,10 @@ function mountVaultGraph(root, data, deps) {
 
   // github#41, design/0011
   var FIT_SHARE = 0.46;
-  var fitCap = deps.fitCap === true ||
-               /(^|[?&#])fit\b/.test(String(WIN.location ? WIN.location.search : "") + " " +
-                                     String(WIN.location ? WIN.location.hash : ""));
+  var fitQuery = String(WIN.location ? WIN.location.search : "") + " " + String(WIN.location ? WIN.location.hash : "");
+  var fitCap = /(^|[?&#])nofit\b/.test(fitQuery) ? false
+             : /(^|[?&#])fit\b/.test(fitQuery) ? true
+             : deps.fitCap !== false;
   var posVer = 0;
   var fitVer = -1;
   /** @type {Record<string, number> | null} */

@@ -162,16 +162,17 @@ setting changes meaning.
   reaction to bulk position writes, a graph walk into a value nothing read, a membership test
   applied twice, and a doubled reducer pass. The re-plan every frame stays; that is the design.
 
-- **New, off by default: Size dots from the frame** (github#41, design record 0011). Every
+- **New, on by default: Size dots from the frame** (github#41, design record 0011). Every
   other rule that sizes a dot describes the layout the disc is heading for; while a cascade
-  walks, that is not where the dots are, and rows that tick while spacing slides can fuse. With
-  this view setting on (Settings › Vault Graph › View; `?fit` on the exported page) each dot is
-  also capped at just under half its distance to the nearest visible note, measured on the
-  frame being drawn, so dots stay apart while rows slide. The disc at rest is unchanged and the
-  golden snapshots are byte-identical either way. It bends one law's spirit: a walking dot may
-  be held *below* its two resting sizes, never above — `CLAUDE.md` and `invariants.md` say so,
-  and a second suite check walks a solo with it on. A hovered **only** chip also stopped
-  highlighting its row, so the highlight cannot ride the cascade the click starts.
+  walks, that is not where the dots are, and rows that tick while spacing slides can fuse. Each
+  dot is now also capped at just under half its distance to the nearest visible note, measured
+  on the frame being drawn, so dots stay apart while rows slide. Off in Settings › Vault Graph ›
+  View, or `?nofit` on the exported page. The disc at rest is unchanged on every fixture and the
+  golden snapshots are byte-identical either way; after a folder hides, the tightest pair on a
+  small vault can end a hair smaller. It bends one law's spirit: a walking dot may be held
+  *below* its two resting sizes, never above — `CLAUDE.md` and `invariants.md` say so, and a
+  second suite check walks a solo with it on. A hovered **only** chip also stopped highlighting
+  its row, so the highlight cannot ride the cascade the click starts.
 
 - **Soloing a small folder no longer balloons the departing notes** (github#66). Two walked
   quantities kept their ratio only while their ends were proportional; a dot is now held to the

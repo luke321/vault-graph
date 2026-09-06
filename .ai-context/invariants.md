@@ -1245,8 +1245,9 @@ size after the solo exactly (shape 84.2, demo 102.2, 10k 286.2 graph units).
 
 ### What the law says when "Size dots from the frame" is on
 
-2.0.0 ships the per-frame dot-size cap (`design/0011`, github#41) behind a view setting, **off by
-default**, and `?fit` on the standalone page. With it on, `dotPx` also caps each dot at 0.46 of
+2.0.0 ships the per-frame dot-size cap (`design/0011`, github#41) as a view setting, **on by
+default** (off in Settings › Vault Graph › View, or `?nofit` on the standalone page; `?fit`
+forces it on). With it on, `dotPx` also caps each dot at 0.46 of
 its distance to the nearest visible note on the frame being drawn. The cap only ever lowers a
 size, so the upper bound above is untouched; what changes is the lower one. **The law with the
 setting on: a walking dot never outgrows the larger of its two resting sizes, and may be held
@@ -1260,8 +1261,11 @@ node scripts/smoke.mjs --only "frame on"
 
 The second check walks the same solo with `__vg.fitCap = true`, asserts the same upper bound,
 and prints the trough: the lowest the biggest full-alpha dot went mid-walk, as a share under the
-smaller resting size. With the setting off the three fixtures are unchanged: goldens
-byte-identical, peak = rest.
+smaller resting size (demo 0.8 %, 10k 20.9 %, dominant-folder 1.1 %). Measured off against on,
+2026-09-06, every fixture: the resting disc, the search and the solo are identical to the pixel;
+after the biggest folder hides, one demo dot is capped 0.14 px smaller at ratio 1.08 (0.44 px at
+0.35) — the tightest resting pair, as `design/0011` predicted — and no pixel crosses the bar.
+Goldens are byte-identical either way, since the cap never moves a note.
 
 ## An arriving note's fade never reverses during a solo switch
 

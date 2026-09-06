@@ -1,6 +1,6 @@
 # Per-frame dot size
 
-**Status** shipped in 2.0.0 as the view setting **Size dots from the frame**, off by default (merged from `feature/per-frame-dot-size` on 2026-09-06) · github#41
+**Status** shipped in 2.0.0 as the view setting **Size dots from the frame**, on by default (merged from `feature/per-frame-dot-size` on 2026-09-06; `?nofit` turns it off on the page) · github#41
 
 > Every dot capped at just under half its distance to the nearest visible note, measured on
 > the frame being drawn rather than on the packing -- and where that stands against the
