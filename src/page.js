@@ -106,6 +106,7 @@
  * @property {boolean} [compactAxis]
  * @property {boolean} [unlinkedByFolder]
  * @property {boolean} [unlinkedTintByFolder]
+ * @property {boolean} [fitCap]               github#41 experiment: size dots from the drawn frame
  * @property {string[]} [pinned]
  * @property {boolean} [settingsUI]
  * @property {() => void} [openSettings]
@@ -161,6 +162,7 @@
  * @property {(v: boolean) => void} setCompactAxis
  * @property {(v: boolean) => void} setUnlinkedByFolder
  * @property {(v: boolean) => void} setUnlinkedTintByFolder
+ * @property {(v: boolean) => void} setFitCap
  * @property {() => void} applyHiddenDefaults
  * @property {() => void} heatBuild
  * @property {() => PlanParityReport} checkPlanParity
@@ -2971,8 +2973,10 @@ function mountVaultGraph(root, data, deps) {
   var FIT_SHARE = 0.46;
   // `?fit` ARMS IT AT BOOT, through the door `?rest` and `?rowarc` already use: a recording can
   // only click what the page puts on screen, so a flag a recording has to reach cannot live only
-  // on `__vg`. Without it the page sizes dots as develop does.
-  var fitCap = /(^|[?&#])fit\b/.test(String(WIN.location ? WIN.location.search : "") + " " +
+  // on `__vg`. Without it the page sizes dots as develop does. The plugin has no URL, so its
+  // host passes deps.fitCap from a setting instead.
+  var fitCap = deps.fitCap === true ||
+               /(^|[?&#])fit\b/.test(String(WIN.location ? WIN.location.search : "") + " " +
                                      String(WIN.location ? WIN.location.hash : ""));
   var posVer = 0;                    // bumped once by every writer of x/y, per pass -- see measureFit
   var fitVer = -1;                   // the posVer fitNow was measured at
@@ -3022,6 +3026,12 @@ function mountVaultGraph(root, data, deps) {
       if (nn < Infinity) map[a2.id] = Math.sqrt(nn);
     }
     fitNow = map;
+  }
+  /** @param {boolean} on */
+  function setFitCap(on) {
+    fitCap = !!on; fitVer = -1; fitNow = null;
+    if (renderer) renderer.refresh({ skipIndexation: true });
+    return fitCap;
   }
   var lastMinArc = 0;
   /** @type {BandNum | null} */
@@ -7632,6 +7642,8 @@ function mountVaultGraph(root, data, deps) {
                     setCompactAxis: function (v) { return setCompactAxis(v !== false, false); },
                     // github#3
                     setUnlinkedByFolder: function (v) { return setUnlinkedByFolder(v !== false, false, true); },
+                    // github#41 experiment
+                    setFitCap: function (v) { return setFitCap(v === true); },
                     setUnlinkedTintByFolder: function (v) { return setUnlinkedTintByFolder(v === true, false); },
                     applyHiddenDefaults: function () {
                       seedHidden();
@@ -7996,7 +8008,7 @@ function mountVaultGraph(root, data, deps) {
                     set fullRing(v) { fullRing = v; },
                     // github#41 experiment -- see measureFit: per-note size from the drawn frame, live
                     get fitCap() { return fitCap; },
-                    set fitCap(v) { fitCap = !!v; fitVer = -1; fitNow = null; renderer.refresh({ skipIndexation: true }); },
+                    set fitCap(v) { setFitCap(!!v); },
                     get fitShare() { return FIT_SHARE; },
                     set fitShare(v) { FIT_SHARE = +v > 0 ? +v : 0.46; fitVer = -1; renderer.refresh({ skipIndexation: true }); },
                     get timeScale() { return TIME_SCALE; },

@@ -41,6 +41,7 @@ const ICON_ID = "vault-graph-disc";
  * @property {boolean} compactAxis
  * @property {boolean} unlinkedByFolder
  * @property {boolean} unlinkedTintByFolder
+ * @property {boolean} fitCap                           github#41 experiment
  */
 
 /**
@@ -574,6 +575,8 @@ class VaultGraphView extends ItemView {
         this.plugin.settings.unlinkedTintByFolder = !!v;
         await this.plugin.saveSettings();
       },
+      // github#41 experiment -- the view has no URL to arm it from, so the setting does
+      fitCap: this.plugin.settings.fitCap === true,
       pinned: this.plugin.settings.pinned,
       /** @param {string[]} ids */
       onPinned: async (ids) => {
@@ -625,6 +628,8 @@ const DEFAULTS = {
   unlinkedByFolder: true,
   // github#3
   unlinkedTintByFolder: false,
+  // github#41 experiment
+  fitCap: false,
 };
 
 /** @type {{ key: "ghosts" | "templates" | "flatMonths" | "words", name: string, desc: string }[]} */
@@ -641,11 +646,11 @@ const BUILD_SETTINGS = [
 
 /**
  * @typedef {Object} ViewSetting
- * @property {"panEnabled" | "compactAxis" | "unlinkedByFolder" | "unlinkedTintByFolder"} key
+ * @property {"panEnabled" | "compactAxis" | "unlinkedByFolder" | "unlinkedTintByFolder" | "fitCap"} key
  * @property {string} name
  * @property {string} desc
  * @property {boolean} defaultOn
- * @property {"setPanEnabled" | "setCompactAxis" | "setUnlinkedByFolder" | "setUnlinkedTintByFolder"} api
+ * @property {"setPanEnabled" | "setCompactAxis" | "setUnlinkedByFolder" | "setUnlinkedTintByFolder" | "setFitCap"} api
  */
 /** @type {ViewSetting[]} */
 const VIEW_SETTINGS = [
@@ -657,6 +662,9 @@ const VIEW_SETTINGS = [
     desc: "A note with no links takes its own folder's wedge and colour, instead of sitting apart in a separate unlinked group. The (unlinked) row's right-click menu flips this too, and lands back here." },
   { key: "unlinkedTintByFolder", name: "Colour unlinked notes by folder", defaultOn: false, api: "setUnlinkedTintByFolder",
     desc: "While unlinked notes are kept as their own group (the toggle just above is off), give each one its own folder's colour instead of the flat unlinked swatch. The (unlinked) row's right-click menu carries this too." },
+  // github#41 experiment
+  { key: "fitCap", name: "Size dots from the frame (experiment)", defaultOn: false, api: "setFitCap",
+    desc: "While the disc animates, cap every dot at just under half its distance to the nearest visible note, measured on the frame being drawn, so dots stay apart while rows slide. The disc at rest is unchanged. Experimental: dots breathe while a cascade walks." },
 ];
 
 const COLOURS_DESC = "Twelve slots, handed out in folder order and round again. Setting one folder never moves another, and two folders may share a colour.";
@@ -1132,6 +1140,7 @@ class VaultGraphPlugin extends Plugin {
     if (api.setCompactAxis) api.setCompactAxis(this.settings.compactAxis !== false);
     if (api.setUnlinkedByFolder) api.setUnlinkedByFolder(this.settings.unlinkedByFolder !== false);
     if (api.setUnlinkedTintByFolder) api.setUnlinkedTintByFolder(this.settings.unlinkedTintByFolder === true);
+    if (api.setFitCap) api.setFitCap(this.settings.fitCap === true);
     if (api.applyHiddenDefaults) api.applyHiddenDefaults();
   }
 
