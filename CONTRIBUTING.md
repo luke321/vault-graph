@@ -94,9 +94,32 @@ mid-intro, which is the case where a dead mount used to keep animating.
 One more if you touch the renderer (`src/engine/`): the suite asserts numbers, and none of
 them can see a disc in the wrong colour. `node scripts/render-diff.mjs --against-dir <dir>`
 compares the current build of every fixture, pixel by pixel and node by node, against
-reference builds of the same vaults made from the commit you are holding the picture to. The
-bar and how to make the references are in `.ai-context/invariants.md` ("The engine draws
-Sigma's picture").
+reference builds of the same vaults made from the commit you are holding the picture to —
+at rest by default, and with `--state all` also in a search, after a hidden folder, a solo
+and a date range, with a note hovered and clicked, and at the landing frame of a cascade;
+`--theme light`, `--dpr 2` and `--window WxH` change the viewing conditions, `--now-dir`
+compares two prebuilt trees. The bar and how to make the references are in
+`.ai-context/invariants.md` ("The engine draws Sigma's picture").
+
+And one that needs Obsidian itself, for the things the exporter cannot stand in for — the
+metadata cache, the view lifecycle, popout windows, the settings tab, the theme switch:
+
+```bash
+node scripts/build-plugin.mjs
+node scripts/obsidian-smoke.mjs                  # the demo fixture; --fixture shape | 10k
+node scripts/obsidian-smoke.mjs --only "reopen"  # one check by substring, like smoke.mjs
+```
+
+It copies a store fixture into a throwaway vault under `%TEMP%`, installs the three built
+plugin files into it exactly as a release installs them, launches a **separate** Obsidian
+with its own user-data directory and a remote-debugging port (the Obsidian you have open is
+not touched and not reused), drives it over CDP, and prints the number behind every check:
+how long the cache, the build, the mount and the intro took; whether the layout matches the
+exporter's build of the same vault; hover, click, right-click and double-click; six
+close-and-reopen cycles with heap, DOM and listener counts (github#62); the Refresh button; a
+theme switch; the settings tab (github#59); a popout window. It is opt-in and not in the
+pre-push hook: it needs Obsidian installed and takes minutes. The numbers it measured on the
+release day are in `.ai-context/invariants.md` ("The plugin behaves inside a real Obsidian").
 
 Since Obsidian 1.7.2 a tab restored in the background is **deferred**: the leaf is real and
 `getLeavesOfType` finds it, but `leaf.view` is a placeholder until something reveals it. Both

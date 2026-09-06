@@ -155,6 +155,17 @@ const norm = (s) => String(s).split(/[\\/]/).filter(Boolean).join("/");
 /** @param {string} rel @param {string} dir */
 const under = (rel, dir) => !!dir && (rel === dir || rel.startsWith(dir + "/"));
 
+// github#32
+/** @param {string} a @param {string} b */
+const walkOrder = (a, b) => {
+  const sa = a.split("/"), sb = b.split("/");
+  const n = Math.min(sa.length, sb.length);
+  for (let i = 0; i < n; i++) {
+    if (sa[i] !== sb[i]) return sa[i] < sb[i] ? -1 : 1;
+  }
+  return sa.length - sb.length;
+};
+
 /** @param {string} path */
 const paraFolder = (path) => {
   const seg = path.split("/");
@@ -276,6 +287,8 @@ async function buildData(app, opts) {
     if (SKIP_FILES.has(f.name.toLowerCase())) return false;
     return opts.templates ? true : !isTemplate(f.path);
   });
+  // github#32
+  files.sort((a, b) => walkOrder(a.path, b.path));
 
   /** @type {Map<string, number>} */
   const index = new Map();

@@ -1639,6 +1639,60 @@ with `destroy()` the same cascade stops where it stands (155 frames, `busy` fals
 The check is manual and not in `smoke.mjs`: a cycle replaces the page's root and its `__vg`,
 and the suite's checks share one page.
 
+## The plugin behaves inside a real Obsidian
+
+The exporter and the standalone page are what the suite drives; the plugin's host is
+Obsidian, and a fix can be right in one and wrong in the other (github#34 was). Since
+2.0.0 the things only Obsidian can answer are measured there:
+
+```bash
+node scripts/build-plugin.mjs
+node scripts/obsidian-smoke.mjs                    # demo fixture; --fixture shape | 10k
+node scripts/obsidian-smoke.mjs --only "reopen"    # one check by substring
+```
+
+It copies a store fixture into a throwaway vault under `%TEMP%\vault-graph-obsidian-smoke`,
+installs the three built plugin files the way a release does, launches a **separate** Obsidian
+with its own user-data directory on a debugging port (the running Obsidian and its vault are
+never touched), drives it over CDP, and prints a number per check. Opt-in and not in the
+pre-push hook: it needs Obsidian installed and takes two to four minutes. Fourteen checks:
+
+| check | demo fixture (1,403 notes, 3,286 links) | 10k fixture (10,002 notes, 3,815 links) |
+|---|---|---|
+| the plugin loads and the cache resolves (fresh vault: Obsidian indexes every file) | cache stopped growing 2.8 s after enable | 38.4 s |
+| the view opens with no console errors | 0 errors; open → `__vg` 446 ms (build 22 ms, mount 9 ms), intro landed and disc at rest 6.3 s | 0 errors; open → `__vg` 1,058 ms (build 136 ms: index 63, edges 16, words 58; mount 56 ms), at rest 7.0 s |
+| **cold start** — a second launch of the same vault, cache restored from disk, file contents not | cache restored 150 ms after attach; open → `__vg` 685 ms (build 229 ms, **words 215**), at rest 6.6 s | open → `__vg` **2,837 ms** (build 1,917 ms: index 55, edges 16, **words 1,845**; mount 49 ms), at rest 8.9 s |
+| layout positions match the exporter's build of the same vault | 0 of 1,403 moved, max \|d\| 0 | 0 of 10,002 moved, max \|d\| 0 |
+| hover shows the tip and lifts | tip on, tip off | same |
+| click opens the card, its close button closes it | downNode, upNode, clickNode; card names the note | same |
+| right-click pins and persists, a second releases | pinned 0 → 1 → 0, one plugin instance | same |
+| double-click fits the camera back | 1.08 → 0.432 → 1.08 | same |
+| six close-and-reopen cycles (github#62) | heap 26.4 → 27.4 MB (0.20 MB/cycle), DOM 7,917 → 7,917, listeners 1,412 → 1,412, document mousemove 2 → 2 | heap 67.7 → 68.2 MB (0.10 MB/cycle), DOM 33,715 → 33,715, listeners 1,414 → 1,414 |
+| Refresh rebuilds and remounts, destroying the old mount | 6.3 s (build 21 ms, mount 7 ms), old api gone | 7.0 s (build 130 ms, mount 44 ms) |
+| theme switch recolours labels | `labelColor` #ffffff → #0b0b0b with `--text-1` | same |
+| the settings tab renders from `getSettingDefinitions` (github#59) | 6 definitions, 9 items, 29 rows, 8 toggles; compact axis round-trips to the view and `data.json` | same |
+| the view mounts in a popout window | separate document and window, 6 canvases, ready in 468 ms, 0 popouts left | ready in 1,056 ms |
+
+Measured 2026-09-06, Obsidian 1.13.7, Windows 11, before the word counts moved off the
+mount (see the entry below in `changelog-detail.md`).
+
+**Where the time goes.** On a fresh vault it is Obsidian's own indexing (38 s for 10k notes)
+and nothing the plugin does. On the launch a person actually experiences — the cache restored
+from disk — the plugin's build is **96 % word counts**: `cachedRead` of every note, cold, 1.85 s
+of the 1.92 s build on the 10k fixture. The index and the edges come out of the cache in
+under 80 ms, the mount takes 50 ms, and then the intro plays for six to nine seconds, which is
+the animation's fixed length, not loading.
+
+**Three things the harness had to learn**, each a false failure until measured: a view
+opened before the cache had finished indexing builds from a partial cache (41 sources and
+138 links of 3,286) and nobody tells it — wait until the file and link counts stop moving;
+the intro has not landed when `timelineUntil` is null, because it is null *before* the intro
+starts as well — wait until every note is shown, the row counts are whole and the positions
+have stopped changing; and a first click on the view activates its leaf, which shifts the
+workspace under the pointer — activate the leaf and click the stage once before aiming.
+The layout is byte-identical to the exporter's only once all three hold; measured mid-intro it
+read as 1,357 notes moved.
+
 ## Our own code lints clean
 
 `npm run lint` runs typescript-eslint over the plugin, the page, the exporter and `scripts/`
