@@ -1,21 +1,5 @@
 #!/usr/bin/env node
-// A MID-CASCADE FRAME, AS A PNG, FRAMED THE SAME WAY EVERY RUN.
-//
-//   node scripts/shoot-cascade-frame.mjs --vault <vault> --out shots/before --label before
-//
-// github#41 is about what a frame LOOKS like, and every other probe in this repo answers with
-// numbers. This one answers with the frame. Run it on two checkouts with the same arguments and
-// the two PNGs are comparable, because everything that decides framing is pinned:
-//
-//   * the same cascade (one folder's eye), at the same --scale, captured at the same ELAPSED
-//     MILLISECONDS after the click -- so the same interpolation point, not the same frame index,
-//     which would depend on how fast the machine drew;
-//   * the crop is centred on ONE NAMED NOTE's resting viewport position. The resting layout is
-//     identical across the branches this compares (`the resting disc is on the lattice` reports
-//     the same numbers), so the same note puts the same pixels in the box.
-//
-// It writes the full pane and a tight crop. The crop is the point: at 10k notes a dot is about
-// 4 CSS px across, so a full-pane shot cannot show two of them touching.
+// github#41, design/0011
 
 import { attach } from "./cdp.mjs";
 import { spawn, spawnSync } from "node:child_process";
@@ -33,24 +17,13 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const OUT = resolve(arg("out", join(ROOT, "shots")));
 const LABEL = arg("label", "frame");
 const GROUP = arg("group", "02 - Areas");
-// A YEAR CHIP INSTEAD OF A FOLDER EYE. Defect 2 -- the dot drawn 1.74-1.81x its resting radius
-// from the first cascade frame -- shows on range changes, and a year chip is the range change a
-// person actually clicks. Both ends of the range move at once, which no folder toggle does.
 const YEAR = arg("year", "");
-const CENTRE = arg("centre", "2163");          // the note the crop is centred on
-const SCALE = Number(arg("scale", "8"));       // slow motion, so a target ms is reachable
-const CROP = Number(arg("crop", "460"));       // CSS px, square
-const DSF = Number(arg("dsf", "3"));           // deviceScaleFactor for the crop
-// CAMERA RATIO, or 0 to leave the camera where the page put it. At 10k notes a dot is ~4 CSS px
-// across, so a crop of the fitted view cannot show two of them touching however far it is
-// upscaled -- upscaling adds pixels, not detail. Zooming the CAMERA adds detail. Pinned to the
-// same number and the same centre note in both runs, so the two frames stay comparable.
+const CENTRE = arg("centre", "2163");
+const SCALE = Number(arg("scale", "8"));
+const CROP = Number(arg("crop", "460"));
+const DSF = Number(arg("dsf", "3"));
 const ZOOM = Number(arg("zoom", "0"));
-// The github#41 experiment's toggle, so the same build shoots both modes and nothing but the
-// flag differs between the two PNGs.
 const FITCAP = arg("fitcap", "");
-// WHEN. Elapsed ms after the click, at --scale. CASCADE_MS is 1600 and TIME_SCALE 1.25, so at
-// scale 8 a cascade runs ~12.8s and these three land near 25%, 40% and 55% of it.
 const ATS = (arg("at", "3200,5100,7000")).split(",").map(Number);
 
 function findChrome() {
@@ -97,7 +70,7 @@ let page = null;
 try {
   for (let i = 0; i < 60 && !page; i++) {
     await sleep(500);
-    try { page = await attach(PORT, ""); } catch { /* not up yet */ }
+    try { page = await attach(PORT, ""); } catch { }
   }
   if (!page) throw new Error("could not attach");
   page.j = async (e) => JSON.parse(await page.eval("JSON.stringify(" + e + ")"));
@@ -116,9 +89,6 @@ try {
   };
   await settle();
 
-  // ZOOM AND CENTRE, before anything is measured or captured: everything below reads the
-  // camera, so it has to be settled first. Sigma's camera lives in framed-graph coordinates,
-  // hence the round trip through the viewport rather than assigning graph coordinates to it.
   if (ZOOM > 0) {
     await page.eval(`(function () {
       var a = __vg.graph.getNodeAttributes(${JSON.stringify(CENTRE)});
@@ -129,7 +99,6 @@ try {
     await sleep(900);
   }
 
-  // Where the crop goes: the centre note's RESTING viewport position, in CSS px.
   const at = await page.j(`(function () {
     var a = __vg.graph.getNodeAttributes(${JSON.stringify(CENTRE)});
     if (!a) return null;
@@ -146,7 +115,6 @@ try {
   console.log(`crop ${CROP}x${CROP} CSS px at (${clip.x}, ${clip.y}) around note ${CENTRE}, ` +
               `x${DSF}; stage ${at.stage.w}x${at.stage.h}`);
 
-  // The crop centre in GRAPH coordinates, so the frame's own numbers can be restricted to it.
   await page.eval(`(function () {
     var a = __vg.graph.getNodeAttributes(${JSON.stringify(CENTRE)});
     var k = ${CROP} / 2;
@@ -173,7 +141,6 @@ try {
     return d ? Math.round(__vg.renderer.scaleSize(d.size) * k * 10) / 10 : null; })()`);
   console.log(`note ${CENTRE} at rest: ${restRad}u drawn`);
 
-  // A resting reference, so a reader can see what the same pixels look like with nothing moving.
   await shoot("rest-crop", true);
   await shoot("rest-full", false);
 
@@ -183,8 +150,6 @@ try {
     await sleep(400);
   }
   await page.eval(`__vg.timeScale = ${SCALE}; void 0`);
-  // Hidden first, so the captured cascade is the SHOW -- the direction that measured worst, and
-  // the one where the disc has to open up for a wedge arriving.
   const clickEye = () => (YEAR
     ? page.j(`(function(){ var b = document.querySelector('[data-yr="${YEAR}"]');
         if (!b) return false; b.click(); return true; })()`)
@@ -192,19 +157,14 @@ try {
         var b = document.querySelector('[data-eye="' + ${JSON.stringify(GROUP)}.replace(/"/g, '\\"') + '"]');
         if (!b) return false; b.click(); return true; })()`));
   if (YEAR) {
-    // A year chip has no "off", so the captured cascade is the chip pressed from the whole
-    // vault -- the direction the size step appears in. No pre-click to undo.
     if (!(await page.j(`!!document.querySelector('[data-yr="${YEAR}"]')`))) {
       throw new Error(`no year chip for ${YEAR}`);
     }
   } else {
-    // Hidden first, so the captured cascade is the SHOW -- the direction that measured worst.
     if (!(await clickEye())) throw new Error(`no legend eye for ${GROUP}`);
     await settle();
   }
 
-  // Live overlap count for the captured frame, from the same geometry the probes use, so the
-  // picture carries its own number instead of being asserted about afterwards.
   const COUNT = `(function () {
     var a0 = __vg.renderer.graphToViewport({ x: 0, y: 0 });
     var b0 = __vg.renderer.graphToViewport({ x: 160, y: 0 });
@@ -239,17 +199,12 @@ try {
         });
       }
     });
-    // The biggest dot on screen, and the biggest one INSIDE THE CROP -- defect 2 is a dot drawn
-    // too large, so the picture needs the number that describes it.
     var big = 0, bigIn = 0;
     var cx = window.__shotClip ? window.__shotClip.gx : null;
     pts.forEach(function (p) {
       if (p.rad > big) big = p.rad;
       if (cx && Math.abs(p.x - cx.x) < cx.r && Math.abs(p.y - cx.y) < cx.r && p.rad > bigIn) bigIn = p.rad;
     });
-    // THE CENTRE NOTE'S OWN DRAWN RADIUS. Defect 2 is one dot drawn too large, so the frame has
-    // to carry that dot's number and not only the crowd's. Through scaleSize, per the trap in
-    // .ai-context/animation.md.
     var me = null;
     var dm = __vg.renderer.getNodeDisplayData(${JSON.stringify(CENTRE)});
     if (dm && !dm.hidden) me = Math.round(__vg.renderer.scaleSize(dm.size) * k * 10) / 10;
@@ -279,6 +234,6 @@ try {
                                  crop: CROP, dsf: DSF, clip: clip, frames: notes }, null, 2) + "\n");
   console.log(`\n${LABEL}: ${notes.map((n) => `${n.ms}ms ${n.pairs}p`).join("  ")}`);
 } finally {
-  try { if (page) await page.send("Browser.close"); } catch { /* going anyway */ }
-  try { chrome.kill(); } catch { /* ditto */ }
+  try { if (page) await page.send("Browser.close"); } catch { }
+  try { chrome.kill(); } catch { }
 }

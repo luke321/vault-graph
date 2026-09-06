@@ -106,7 +106,7 @@
  * @property {boolean} [compactAxis]
  * @property {boolean} [unlinkedByFolder]
  * @property {boolean} [unlinkedTintByFolder]
- * @property {boolean} [fitCap]               github#41 experiment: size dots from the drawn frame
+ * @property {boolean} [fitCap]               github#41, design/0011
  * @property {string[]} [pinned]
  * @property {boolean} [settingsUI]
  * @property {() => void} [openSettings]
@@ -1714,7 +1714,7 @@ function mountVaultGraph(root, data, deps) {
         if (t < 0) t = 0; else if (t > 1) t = 1;
         rowAcc[r.row] = before + r.w;
         var rr = (base + r.row * SP) * (c.inner ? INNER_SCALE : 1);
-        // github#41 -- the terms, not the product; see trace
+        // github#41, design/0011
         if (trace && trace.id === r.id) {
           tracePut({ what: "place", cell: c.k, g: c.g, base: base, SP: SP, row: r.row,
                      rows: rows, bandRows: bandRows, nEff: nEff, wTot: wTot,
@@ -1779,7 +1779,7 @@ function mountVaultGraph(root, data, deps) {
    * @returns {Record<string, Point> | null}   node id -> position, or null with nothing to show
    */
   function ringsLayout(planIn, strict) {
-    // github#41 -- every pass, not every placed note; see trace
+    // github#41, design/0011
     if (trace) {
       tracePut({ what: "pass", roomIn_i: bandOf("i").room, roomIn_o: bandOf("o").room,
                  hasRoomNow: !!roomNow, hasCellNow: !!cellNow, hasEdgeNow: !!edgeNow,
@@ -2005,7 +2005,7 @@ function mountVaultGraph(root, data, deps) {
           var spanArc = arc - mgA - mgB;
           var dEdge = Math.min(mgA + spanArc * sl.u, mgB + spanArc * (1 - sl.u)) * rGraph;
           if (dEdge > 0) edgeCapNext[sl.id] = dEdge;
-          // github#41 -- the terms dEdge is made of, side()'s own inputs included; see trace
+          // github#41, design/0011
           if (trace && trace.id === sl.id) {
             tracePut({ what: "edge", cell: c.k, g: c.g, u: sl.u, arc: arc, mgA: mgA, mgB: mgB,
                        spanArc: spanArc, rGraph: rGraph, slotR: sl.r, dEdge: dEdge,
@@ -2933,9 +2933,7 @@ function mountVaultGraph(root, data, deps) {
   var SPREAD_MAX  = 78;
   var SPREAD_PER  = 0.17;
   var SPREAD_MIN  = 24;
-  // `?slow=3` SETS IT AT BOOT, for the same reason `?fit` exists (github#41 experiment): a
-  // recording cannot reach `__vg`, and at full speed a mid-cascade defect is a fraction of a
-  // second. Default unchanged at 1.25.
+  // github#41, design/0011
   var TIME_SCALE  = (function () {
     var m = /(^|[?&#])slow=([0-9.]+)/.exec(String(WIN.location ? WIN.location.search : "") + " " +
                                            String(WIN.location ? WIN.location.hash : ""));
@@ -2965,21 +2963,13 @@ function mountVaultGraph(root, data, deps) {
   /** @type {Record<string, number>} */
   var dotFit = dict();
 
-  // github#41 experiment -- per-note size from the frame actually on screen: each dot is capped
-  // at FIT_SHARE of its distance to the nearest visible note, taken from the drawn positions,
-  // not from the packing. Off unless armed; live toggle __vg.fitCap. Reasoning, measurements
-  // and where this contradicts the two-resting-sizes law (github#66) are in
-  // .ai-context/finding-notes-touch-mid-cascade.md.
+  // github#41, design/0011
   var FIT_SHARE = 0.46;
-  // `?fit` ARMS IT AT BOOT, through the door `?rest` and `?rowarc` already use: a recording can
-  // only click what the page puts on screen, so a flag a recording has to reach cannot live only
-  // on `__vg`. Without it the page sizes dots as develop does. The plugin has no URL, so its
-  // host passes deps.fitCap from a setting instead.
   var fitCap = deps.fitCap === true ||
                /(^|[?&#])fit\b/.test(String(WIN.location ? WIN.location.search : "") + " " +
                                      String(WIN.location ? WIN.location.hash : ""));
-  var posVer = 0;                    // bumped once by every writer of x/y, per pass -- see measureFit
-  var fitVer = -1;                   // the posVer fitNow was measured at
+  var posVer = 0;
+  var fitVer = -1;
   /** @type {Record<string, number> | null} */
   var fitNow = null;
 
@@ -2991,15 +2981,12 @@ function mountVaultGraph(root, data, deps) {
     graph.forEachNode(function (id, a) {
       var al = alpha[id];
       if (al === undefined) al = 1;
-      // Only notes a person can see, on both sides: a fading dot is not something to make room for.
       if (al < 0.35) return;
       pts.push({ id: id, x: a.x, y: a.y, gx: 0, gy: 0 });
     });
     /** @type {Record<string, number>} */
     var map = dict();
     if (pts.length < 2) { fitNow = map; return; }
-    // Cell = one row pitch: the 3x3 neighbourhood holds anything closer than a pitch, and no dot
-    // is ever drawn bigger than DOT_OF_PITCH of one.
     var cell = Math.max(1, pitchUnits("o"));
     /** @type {Record<string, typeof pts>} */
     var grid = dict();
@@ -3021,8 +3008,6 @@ function mountVaultGraph(root, data, deps) {
           if (d2 < nn) nn = d2;
         }
       }
-      // Nothing within a pitch means nothing to clear: uncapped, rather than a cap taken from the
-      // grid's own arbitrary reach.
       if (nn < Infinity) map[a2.id] = Math.sqrt(nn);
     }
     fitNow = map;
@@ -3050,9 +3035,7 @@ function mountVaultGraph(root, data, deps) {
   var edgeNow = null;
   /** @type {Record<string, number>} */
   var edgeCap = dict();
-  // github#41 -- a placement tracer for one note: one row per layout pass, tagged with the pass
-  // that produced it. An investigation aid, off unless an id is set. See
-  // .ai-context/finding-notes-touch-mid-cascade.md.
+  // github#41, design/0011
   /** @typedef {Record<string, number | string | boolean | undefined>} TraceRow */
   /** @type {{ id: string, tag: string, rows: TraceRow[] } | null} */
   var trace = null;
@@ -3696,7 +3679,7 @@ function mountVaultGraph(root, data, deps) {
         var r = rNow + gap * ez;
         graph.mergeNodeAttributes(id, { x: r * Math.cos(h), y: r * Math.sin(h) });
       });
-      posVer++;                                  // once per frame; see assignPositions
+      posVer++;
       if (pr >= 1) tailFrames++;
       probeSample("cascade");
       lastCascade.frames++;
@@ -3802,10 +3785,7 @@ function mountVaultGraph(root, data, deps) {
       var t = targets[id];
       if (t) graph.mergeNodeAttributes(id, { x: t.x, y: t.y });
     });
-    // github#41 experiment -- ONE bump per pass, never per node: mergeNodeAttributes fires a graph
-    // event that reaches dotPx, so a per-node bump makes the lazy measureFit run per node. That is
-    // O(n^2); measured at 2,001 notes it cut a toggle from 148 frames to 46, and at 10,002 it took
-    // the tab down.
+    // github#41, design/0011
     posVer++;
   }
 
@@ -3873,7 +3853,7 @@ function mountVaultGraph(root, data, deps) {
           });
         }
       });
-      posVer++;                                  // once per frame; see assignPositions
+      posVer++;
       probeSample("tween");
       renderer.refresh({ skipIndexation: false });
       if (p < 1) { anim = WIN.requestAnimationFrame(step); }
@@ -4397,8 +4377,7 @@ function mountVaultGraph(root, data, deps) {
     return ro.hi / NODE_MAX;
   }
 
-  // github#41 -- which term of dotPx decided a dot's size; an investigation accessor, nothing
-  // reads it. See .ai-context/finding-notes-touch-mid-cascade.md.
+  // github#41, design/0011
   /** @param {number} size @param {string} id */
   function dotWhy(size, id) {
     var isIn = !!bandLock && !!bandLock[groupOf(id)];
@@ -4452,9 +4431,7 @@ function mountVaultGraph(root, data, deps) {
         if (v > vMax) v = vMax;
       }
     }
-    // github#41 experiment -- and never into the note next to it, measured on this frame. See
-    // measureFit. Above the pixel floor for the same reason edgeCap is: a dot that cannot be both
-    // visible and separate is drawn separate.
+    // github#41, design/0011
     if (fitCap && id !== undefined) {
       if (fitVer !== posVer) measureFit();
       var nnU = fitNow ? fitNow[id] : undefined;
@@ -4986,9 +4963,7 @@ function mountVaultGraph(root, data, deps) {
       });
     };
 
-    // A hovered "only" chip highlights nothing: the click it invites starts a cascade, and the
-    // row's hover highlight would ride that cascade and overlap the notes it draws bigger.
-    // Leaving the chip for the rest of its row hands the row's own highlight back.
+    // design/0006
     each("[data-only]", function (b) {
       b.onmouseenter = function () { hoverHighlight(null, null); };
       b.onmouseleave = function (ev) {
@@ -7549,9 +7524,7 @@ function mountVaultGraph(root, data, deps) {
         why: "...and put the default back, so the clip leaves nothing behind" },
       { settle: true, act: "hiddenbydefault", why: "the wedges settle back" },
 
-      // github#41 experiment -- CLIP-ONLY: the year chip is the cascade that still overlaps with the
-      // cap off, on its own so the same ten seconds record twice, `?demo&fit` against `?demo`.
-      // See .ai-context/finding-notes-touch-mid-cascade.md.
+      // github#41, design/0011
       { click: true, target: ["year", "busiest"], act: "yearchip",
         why: "filter to the busiest year -- the cascade that overlaps with the cap off" },
       { settle: true, act: "yearchip", why: "let the disc thin down to one year" },
@@ -7559,9 +7532,7 @@ function mountVaultGraph(root, data, deps) {
         why: "clear it again -- the growth back is the other half of the same question" },
       { settle: true, act: "yearchip", why: "let the whole vault come back" },
 
-      // github#41 experiment -- CLIP-ONLY: `only` on an inner-band folder, where the rows have the
-      // shortest arcs and the cap the least room to work with; solo and restore both on camera.
-      // See .ai-context/finding-notes-touch-mid-cascade.md.
+      // github#41, design/0011
       { click: true, target: ["only", "05"], act: "only05",
         why: "solo 05 -- an inner-ring folder, twelve notes" },
       { settle: true, act: "only05", why: "let everything else recede" },
@@ -7642,7 +7613,7 @@ function mountVaultGraph(root, data, deps) {
                     setCompactAxis: function (v) { return setCompactAxis(v !== false, false); },
                     // github#3
                     setUnlinkedByFolder: function (v) { return setUnlinkedByFolder(v !== false, false, true); },
-                    // github#41 experiment
+                    // github#41, design/0011
                     setFitCap: function (v) { return setFitCap(v === true); },
                     setUnlinkedTintByFolder: function (v) { return setUnlinkedTintByFolder(v === true, false); },
                     applyHiddenDefaults: function () {
@@ -8006,7 +7977,7 @@ function mountVaultGraph(root, data, deps) {
                     get planMs() { return planMs; },
                     get fullRing() { return fullRing; },
                     set fullRing(v) { fullRing = v; },
-                    // github#41 experiment -- see measureFit: per-note size from the drawn frame, live
+                    // github#41, design/0011
                     get fitCap() { return fitCap; },
                     set fitCap(v) { setFitCap(!!v); },
                     get fitShare() { return FIT_SHARE; },
@@ -8276,7 +8247,7 @@ function mountVaultGraph(root, data, deps) {
                         maxR: geomLock.maxR * UNIT
                       };
                     },
-                    // github#41 -- see trace: __vg.traceOn(id); <do the thing>; __vg.traceRows(); __vg.traceOff()
+                    // github#41, design/0011
                     traceOn: /** @param {string | number} id */ function (id) {
                       trace = { id: String(id), tag: "", rows: [] };
                       return trace.id;
@@ -8288,7 +8259,7 @@ function mountVaultGraph(root, data, deps) {
                       if (clear !== false) trace.rows = [];
                       return r;
                     },
-                    // github#41 -- see dotWhy
+                    // github#41, design/0011
                     dotWhy: /** @param {string} id */ function (id) {
                       var a = graph.getNodeAttributes(id);
                       return a ? dotWhy(a.size, id) : null;

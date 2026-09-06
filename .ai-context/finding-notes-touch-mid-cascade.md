@@ -275,77 +275,13 @@ frame; the walk is wrong for a hundred.
 Whatever fixes this has to keep the row assignment discrete while making the **spacing** absorb
 the tick, so the two cancel per frame the way they already cancel at rest.
 
-## The experiment, brought onto develop (`feature/per-frame-dot-size`, 2026-09-06)
+## The experiment, brought onto develop
 
-The ten commits of `experiment/per-frame-dot-size` (off `fd7e461`) were re-applied onto
-`develop@fc7d157` by cherry-pick. Every `src/page.js` hunk conflicted -- the page was typed
-(github#55, github#60), its comments cut to pointers (github#61) and its renderer replaced
-(github#58) in between -- so the page-side pieces are written again in that style; the scripts and
-this note came over as they were. Two commits were dropped because their fix had landed:
-`fec9d25` (github#53, on develop as `bacfc64`) and `b407e51` (github#41, closed). The frame
-harness and the write-up `b407e51` carried are kept. **One thing to check before trusting the
-"landed" for github#41:** develop's `roomOf` (the endpoint pass under `cascade()`) lays each
-endpoint out once, and no commit between `fd7e461` and `fc7d157` names the two-pass change
-described above under "Defect 2 -- FIXED". `probe-dotwhy.mjs` answers whether `edgeCap` still
-steps on frame 1; it was not run for this rebase (another session held Chrome).
-
-### What the experiment is
-
-Every other cap in `dotPx` is a statistic over a **packing** -- the band's tenth-percentile room,
-the cell's tightest pair, the note's distance to its own wedge edge. All of them describe where the
-layout meant to put things, and during a cascade that is not where things are (Defect 1 above).
-`measureFit` asks the other question: how much room does this note have **right now**, from the
-drawn positions, per note, per frame. Each dot is capped at `FIT_SHARE` (0.46) of the distance to
-its nearest visible neighbour (alpha >= 0.35), found through a uniform grid one row pitch wide.
-The cap sits at the end of `dotPx`, above the pixel floor and beside github#66's `sizeCap`; both
-only ever lower a size.
-
-Two differences from the per-note cap that was tried and reverted before (see the note on
-`dotFit`): it is a full 2-D nearest neighbour, not a within-row one, so it does not jump when a
-note's nearest row-neighbour changes; and it depends on positions only, so there is no loop
-between sizes to oscillate in.
-
-The map is lazy: `posVer` is bumped **once per pass** by every writer of x/y (the cascade frame,
-`assignPositions`, the tween) and `dotPx` re-measures when it is stale. Bumping per node instead
-makes the recompute fire per node -- O(n^2), measured as a toggle falling from 148 frames to 46 at
-2,001 notes and the tab going down at 10,002.
-
-### How it is driven
-
-| | |
-|---|---|
-| `?fit` | arms the cap at boot. **Off by default on this branch** -- develop's law (below) is what the page does unasked. |
-| `?slow=3` | time scale at boot (default 1.25), so two takes are slowed the same. Works with or without `?fit`. |
-| `__vg.fitCap`, `__vg.fitShare` | the live toggle and the share, no reload. |
-| `?demo` acts `yearchip`, `only05` | clip-only acts: the year chip that still overlaps with the cap off, and a solo of an inner-band folder. |
-| `scripts/probe-dotsize.mjs --fitcap on\|off`, `scripts/shoot-cascade-frame.mjs --fitcap on\|off` | the same build measured or shot in both modes. |
-| `scripts/probe-dotwhy.mjs`, `__vg.traceOn/traceRows/traceOff`, `__vg.dotWhy` | the investigation accessors, additive. |
-
-Measured on the original branch (10k fixture, `02 - Areas`, cap on against off): intersecting
-pairs per busy frame mean 631 -> 0, p90 1085 -> 0; per-frame radius change p90 0.01px -> 0.45px,
-worst frame 0.36px -> 1.36px, no note ever moving more than 2px; median dot dips ~15% mid-walk
-(48.4 -> 41.3) and recovers; resting disc untouched (median 49.4 at the start, 47.5 at the end,
-either way). 57 frames per cascade against 50.
-
-### Where it contradicts the laws
-
-- **"A dot never outgrows its two resting sizes while a cascade walks" (github#66, CLAUDE.md).**
-  The letter holds: the cap only lowers a size, so `--only outgrows` cannot fail because of it.
-  The spirit does not: the law says a walking dot's size is bounded by what the two packings give
-  it, and the experiment sizes dots from the frame instead. Mid-walk a dot goes **below both** of
-  its resting sizes and grows back as its neighbours clear -- the shrink-then-grow motion github#66
-  was filed against, in the other direction. The two-resting-sizes bound and the per-frame cap are
-  two answers to the same question, and a page that ships both is not sizing dots from one model.
-- **"A zero-weight member costs nothing: a fading note changes no plan, no row, no room" (ADR
-  0006).** A note under alpha 0.35 is excluded from the measurement, so a near-zero note costs
-  nothing. A note between 0.35 and 1 is not excluded: while it fades in or out it shrinks the dots
-  around it. No plan, row or room changes; a **size** does, which is what the law's "costs nothing"
-  was written to rule out.
-- **"A settled dot is the size a fresh relayout gives it."** The check passes, because a relayout
-  puts every note where it already is and the cap reads positions. But the resting size is no
-  longer the packing's alone: the band room is a tenth-percentile statistic, so the tightest tenth
-  of pairs are closer than it, and the cap can bind on them at rest. On the 10k fixture it measured
-  as not binding (medians above); on a smaller vault it may.
-
-The golden layout snapshots are unaffected either way -- the cap never moves a note -- and pass on
-all three fixtures with the experiment disarmed (2026-09-06).
+The per-frame cap this investigation led to lives on `feature/per-frame-dot-size` (off
+`develop@fc7d157`, 2026-09-06) and is described in `design/0011-per-frame-dot-size.md`: how it
+sizes a dot from the drawn frame, how it is armed (`?fit`, the plugin setting, `?slow=N`), the
+harnesses, what it measured, and where it stands against the two-resting-sizes law
+(github#66). Of the ten experiment commits, `fec9d25` (github#53) and `b407e51` (github#41's
+edgeCap fix) were dropped as landed; the frame harness and the fix's write-up above are kept.
+Whether develop still shows defect 2 is open -- its `roomOf` lays each endpoint out once -- and
+`probe-dotwhy.mjs` is the way to find out.

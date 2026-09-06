@@ -1,13 +1,5 @@
 #!/usr/bin/env node
-// WHICH TERM IN dotPx STEPS ON THE FIRST FRAME OF A CASCADE?
-//
-//   node scripts/probe-dotwhy.mjs --vault <vault> --id 8705
-//
-// probe-dotsize.mjs measures that a few hundred dots jump to as much as 1.8x their resting
-// radius on frame 1 of a range cascade and hold it until the animation ends. That is the
-// answer; this is the reason. It reads dotPx's own intermediate terms (__vg.dotWhy) at rest
-// and then on every frame of the cascade, so the step can be attributed to the term that
-// moved rather than to the one that seems likeliest.
+// github#41, design/0011
 
 import { attach } from "./cdp.mjs";
 import { spawn, spawnSync } from "node:child_process";
@@ -66,7 +58,7 @@ let page = null;
 try {
   for (let i = 0; i < 60 && !page; i++) {
     await sleep(500);
-    try { page = await attach(PORT, ""); } catch { /* not up yet */ }
+    try { page = await attach(PORT, ""); } catch { }
   }
   if (!page) throw new Error("could not attach");
   page.j = async (e) => JSON.parse(await page.eval("JSON.stringify(" + e + ")"));
@@ -88,7 +80,6 @@ try {
     await sleep(700);
   };
 
-  // Sample dotWhy for the watched notes on every frame, in-page.
   await page.eval(`(function () {
     window.__why = { rows: [], on: false, ids: ${JSON.stringify(IDS)} };
     function loop() {
@@ -145,8 +136,6 @@ try {
   for (let i = 6; i < rows.length; i += step) show(rows[i]);
   console.log("  ...");
   rows.slice(-2).forEach(show);
-  // ONE LINE PER WATCHED NOTE: rest, then the first cascade frame, term by term. The claim
-  // "edgeCap is what steps" is only worth making if it holds for more than one note.
   console.log("\nREST vs FIRST CASCADE FRAME, per note:");
   const f1 = rows[0];
   for (let i = 0; i < IDS.length; i++) {
@@ -163,6 +152,6 @@ try {
   console.log("\nAT REST AFTER:");
   console.log("  " + JSON.stringify(await page.j(`__vg.dotWhy(${JSON.stringify(IDS[0])})`)));
 } finally {
-  try { if (page) await page.send("Browser.close"); } catch { /* going anyway */ }
-  try { chrome.kill(); } catch { /* ditto */ }
+  try { if (page) await page.send("Browser.close"); } catch { }
+  try { chrome.kill(); } catch { }
 }
