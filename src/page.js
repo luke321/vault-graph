@@ -4976,6 +4976,19 @@ function mountVaultGraph(root, data, deps) {
       });
     };
 
+    // A hovered "only" chip highlights nothing: the click it invites starts a cascade, and the
+    // row's hover highlight would ride that cascade and overlap the notes it draws bigger.
+    // Leaving the chip for the rest of its row hands the row's own highlight back.
+    each("[data-only]", function (b) {
+      b.onmouseenter = function () { hoverHighlight(null, null); };
+      b.onmouseleave = function (ev) {
+        var row = b.parentElement;
+        while (row && !row.onmouseenter && row.id !== "vg-legend") row = row.parentElement;
+        if (row && row.onmouseenter && row.contains(/** @type {Node | null} */ (ev.relatedTarget))) {
+          row.onmouseenter.call(row, ev);
+        }
+      };
+    });
     each("[data-tw]", function (b) {
       var g = b.getAttribute("data-tw");
       b.onmouseenter = function () { hoverHighlight(g, null); };
