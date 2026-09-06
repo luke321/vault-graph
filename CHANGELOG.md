@@ -188,10 +188,16 @@ setting changes meaning.
   folder name from the vault it was written for, which no vault is required to have and which
   it did not create, so a bare `refresh-graph.ps1` failed with ENOENT. `--out` is unchanged.
 
-- **The release is plugin-only.** `release.ps1` attaches `main.js`, `manifest.json` and
-  `styles.css` and nothing else; the directory's scanner called the exporter's zip an extra
-  unsupported file. The exporter, the standalone page and the fixtures stay in the repo, where
-  the invariant suite drives them.
+- **The release is plugin-only, and published from a workflow with attested assets**
+  (github#10). `release.ps1` is the local half — the gates, the tag, the push — and
+  `.github/workflows/release.yml` builds `main.js`, `manifest.json` and `styles.css` from the
+  tagged commit on the runner, attests them with GitHub build provenance and creates the
+  Release. Anyone can check a downloaded file with `gh attestation verify main.js --repo
+  luke321/vault-graph`; the directory's review had recommended this on every release since
+  1.5.2. The exporter's zip is no longer attached (the scanner called it an extra unsupported
+  file); the exporter, the standalone page and the fixtures stay in the repo, where the
+  invariant suite drives them. A `dry_run` dispatch rehearses the whole publishing half on a
+  branch without creating a Release.
 
 - **Everything we ship is typed and lint-gated at zero** (github#55, github#60). The plugin,
   the page, the exporter and the scripts pass typescript-eslint with the five `no-unsafe-*`

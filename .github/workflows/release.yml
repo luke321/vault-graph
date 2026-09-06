@@ -1,0 +1,285 @@
+# Build, attest and publish a release. A tag push is the trigger; this file is the publisher.
+#
+# WHY PUBLICATION LIVES HERE (github#10): an artifact attestation can only be produced by a
+# workflow. `actions/attest-build-provenance` signs through Sigstore using the run's OIDC
+# token, which needs `id-token: write`, a permission only an Actions run can hold. A local
+# `gh release create` has no such token, so "attest the release assets" was never a flag for
+# scripts/release.ps1 -- it is this file. release.ps1 is the local half (the gate suite, the
+# tag, the push); the tag push hands over to this, the publishing half.
+#
+# WHAT AN ATTESTATION BUYS. main.js is a ~390 KB bundle: the page, the plugin host and the
+# engine under src/engine (a Sigma.js port, whose MIT notice opens the file). Nothing about
+# downloading it says it was built from this repository at this tag rather than assembled by
+# hand, and the Obsidian directory's review has recommended attestations on every release
+# since 1.5.2. After this, anyone can check:
+#
+#   gh attestation verify main.js --repo luke321/vault-graph
+#
+# WHAT STAYED LOCAL. The invariant suite drives a real Chrome against three generated vaults
+# for minutes; release.ps1 runs it before it writes the tag, and .githooks/pre-push runs it
+# again on the push of main that carries the tagged commit. This workflow TRUSTS THE TAG and
+# runs the static gates instead -- lint, scope, network, PII, the Sigma notice, the comment
+# rule, the code map -- which need no vault and no browser and are about what the release
+# ships. The flow the two halves make up is written down in .ai-context/releasing.md, which
+# is the authority; change it in the same commit as this file.
+
+name: release
+
+on:
+  push:
+    tags:
+      # BARE SEMVER ONLY. Obsidian installs a plugin by matching the release tag against
+      # manifest.json's version, which cannot carry a prefix, so a v-tagged release is one
+      # nobody can install. The tags up to v1.4.4 keep their prefix (renaming a published tag
+      # breaks every link to it) and this pattern deliberately does not match them.
+      - '[0-9]+.[0-9]+.[0-9]+'
+
+  # THE ESCAPE HATCH, AND THE REHEARSAL. A tag-triggered run executes the version of this
+  # file that is AT the tag: a bug here shows up on the first real release, re-running re-runs
+  # the broken file, fixing main changes nothing for that tag, and a published tag cannot be
+  # re-cut. Dispatching from a branch runs THIS branch's file against the tag you name, which
+  # turns that into fix-and-re-run.
+  #
+  # `dry_run` builds, gates and attests the three files from the ref the workflow was
+  # dispatched on (a branch, or a tag named in `tag`) and creates no Release, so the whole
+  # publishing half can be exercised on a branch before a tag exists.
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing tag to build, attest and publish (bare semver, e.g. 2.0.0). Leave empty for a dry run of the dispatched branch.'
+        required: false
+        default: ''
+      dry_run:
+        description: 'Build, gate and attest, but create no Release'
+        type: boolean
+        required: false
+        default: false
+
+# Nothing by default; the one job asks for exactly what it needs.
+permissions: {}
+
+concurrency:
+  # Per tag (per branch for a dry run), and NEVER cancel-in-progress: cancelling between the
+  # signed attestation and the created release leaves a tag with a signed bundle nobody can
+  # download, the one state that is awkward to recover from by hand.
+  group: release-${{ inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: ${{ inputs.dry_run && 'dry run' || 'attest and publish' }} ${{ inputs.tag || github.ref_name }}
+    runs-on: ubuntu-latest
+
+    permissions:
+      # Create the release and upload the three assets to it.
+      contents: write
+      # The Sigstore OIDC token -- the permission the whole issue turns on.
+      id-token: write
+      # Record the attestation in this repository's store, which `gh attestation verify` reads.
+      attestations: write
+
+    env:
+      # Empty on a dry run dispatched from a branch; resolved from manifest.json below.
+      TAG: ${{ inputs.tag || (github.ref_type == 'tag' && github.ref_name) || '' }}
+      DRY_RUN: ${{ inputs.dry_run && 'true' || 'false' }}
+
+    steps:
+      # An explicit ref: a dispatched run would otherwise check out the branch it was
+      # dispatched from and publish that as if it were the tag. On a dry run with no tag the
+      # dispatched ref is exactly what is wanted. fetch-depth 0 for the main-ancestry guard.
+      - name: Check out the release commit
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.tag || github.ref_name }}
+          fetch-depth: 0
+
+      # The three actions are pinned to a major tag, all GitHub's own, the token scoped to this
+      # job. Majors checked with `gh api repos/actions/<name>/releases/latest` on 2026-09-06:
+      # checkout v7.0.1, setup-node v7.0.0, attest-build-provenance v4.2.2.
+      - name: Set up Node
+        uses: actions/setup-node@v7
+        with:
+          # The major the releases are cut on locally, so a local build of the same tag can be
+          # diffed against this one byte for byte.
+          node-version: '24'
+          cache: npm
+
+      # `npm ci` installs exactly package-lock.json; an attestation is a claim about bytes.
+      - name: Install the build toolchain
+        run: npm ci
+
+      - name: Resolve the version
+        run: |
+          set -euo pipefail
+          manifest=$(node -p 'JSON.parse(require("node:fs").readFileSync("manifest.json", "utf8")).version')
+          if [ -z "$TAG" ]; then
+            if [ "$DRY_RUN" != "true" ]; then
+              echo "::error::no tag to publish -- dispatch with a tag, or tick dry_run to rehearse on this branch"
+              exit 1
+            fi
+            echo "dry run on ${GITHUB_REF_NAME}: taking the version from manifest.json ($manifest)"
+            echo "VERSION=$manifest" >> "$GITHUB_ENV"
+          else
+            echo "VERSION=$TAG" >> "$GITHUB_ENV"
+          fi
+
+      - name: The version, the manifest and the CHANGELOG must agree
+        run: |
+          set -euo pipefail
+          if ! printf '%s' "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "::error::'$VERSION' is not bare semver. Obsidian matches the release tag against"
+            echo "::error::manifest.json's version, which cannot carry a 'v' prefix."
+            exit 1
+          fi
+          manifest=$(node -p 'JSON.parse(require("node:fs").readFileSync("manifest.json", "utf8")).version')
+          if [ "$manifest" != "$VERSION" ]; then
+            echo "::error::manifest.json says $manifest, the tag says $VERSION. The two have to match --"
+            echo "::error::Obsidian installs a plugin by matching the tag against the manifest version."
+            exit 1
+          fi
+          if ! grep -q "^## $VERSION" CHANGELOG.md; then
+            echo "::error::CHANGELOG.md has no '## $VERSION' section. Write the release notes first."
+            exit 1
+          fi
+          echo "manifest and version agree on $VERSION, and the CHANGELOG has a section for it"
+
+      # main only ever receives develop, and a release is tagged on main (github#47). A tag can
+      # be pushed by hand with none of release.ps1's guards, so the rule is enforced here too.
+      # Skipped on a dry run, whose whole point is a branch.
+      - name: The tagged commit must be on main
+        if: env.DRY_RUN != 'true'
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin '+refs/heads/main:refs/remotes/origin/main'
+          sha=$(git rev-parse HEAD)
+          if git merge-base --is-ancestor "$sha" refs/remotes/origin/main; then
+            echo "$sha is in origin/main's history"
+            exit 0
+          fi
+          echo "::error::$sha is not on main. main is what the Obsidian directory installs from,"
+          echo "::error::and a tag cut elsewhere stays off main's history for good (github#47)."
+          echo "::error::If main simply has not caught up yet -- release.ps1 pushes the branch and then"
+          echo "::error::the tag, and this run can start between the two -- push main and RE-RUN this run."
+          exit 1
+
+      # The static gates, the same ones .githooks/pre-push runs on a push to develop or main.
+      # The invariant suite is not among them: it needs a real Chrome and minutes, and
+      # release.ps1 has already run it against this commit.
+      - name: Lint, and typecheck the engine
+        run: npm run lint --silent
+      - name: The page cannot style, or be styled by, its host
+        run: node scripts/check-scope.mjs
+      - name: No other people's names or identifiers
+        run: node scripts/check-pii.mjs
+      - name: Comments are pointers
+        run: node scripts/check-comments.mjs
+      - name: The generated code map and index are current
+        run: node scripts/code-map.mjs --check
+
+      # The bundle is built HERE, from the checked-out commit, so the attestation below is a
+      # claim about bytes this runner produced from this source. check-notice builds it and
+      # reads the Sigma copyright line back out of it and of a fresh exported page.
+      - name: Build the plugin, and check the Sigma notice opens both builds
+        run: node scripts/check-notice.mjs
+
+      - name: Nothing shipped can make a network request
+        run: node scripts/check-network.mjs
+
+      - name: Refuse to publish an uninstallable release
+        run: |
+          set -euo pipefail
+          missing=""
+          for f in main.js manifest.json styles.css; do
+            [ -s "$f" ] || missing="$missing $f"
+          done
+          if [ -n "$missing" ]; then
+            echo "::error::missing or empty:$missing -- Obsidian downloads exactly these three files"
+            echo "::error::from the release and nothing else, so a release without them installs nothing."
+            exit 1
+          fi
+          ls -l main.js manifest.json styles.css
+          sha256sum main.js manifest.json styles.css | tee "$RUNNER_TEMP/sha256.txt"
+
+      - name: Attest build provenance for the three release assets
+        id: attest
+        uses: actions/attest-build-provenance@v4
+        with:
+          subject-path: |
+            main.js
+            manifest.json
+            styles.css
+
+      - name: Draft the release notes from the CHANGELOG
+        run: |
+          set -euo pipefail
+          awk -v hdr="## $VERSION" '
+            index($0, hdr) == 1 && (length($0) == length(hdr) || substr($0, length(hdr) + 1, 1) == " ") {
+              inside = 1; print; next
+            }
+            inside && index($0, "## ") == 1 { exit }
+            inside { print }
+          ' CHANGELOG.md > "$RUNNER_TEMP/notes.md"
+          if [ ! -s "$RUNNER_TEMP/notes.md" ]; then
+            echo "::error::extracted an empty '## $VERSION' section from CHANGELOG.md"
+            exit 1
+          fi
+          heading=$(head -n 1 "$RUNNER_TEMP/notes.md")
+          name=$(printf '%s\n' "$heading" | sed -n 's/.*"\([^"]*\)".*/\1/p')
+          if [ -n "$name" ]; then
+            echo "RELEASE_TITLE=$VERSION - $name" >> "$GITHUB_ENV"
+          else
+            echo "RELEASE_TITLE=$VERSION" >> "$GITHUB_ENV"
+          fi
+          echo "notes: $(wc -l < "$RUNNER_TEMP/notes.md") lines, starting: $heading"
+
+      - name: Create the release, or re-upload over it
+        if: env.DRY_RUN != 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          assets="main.js manifest.json styles.css"
+          if gh release view "$VERSION" >/dev/null 2>&1; then
+            echo "$VERSION already has a release -- re-uploading assets over it, notes untouched"
+            gh release upload "$VERSION" $assets --clobber
+          else
+            gh release create "$VERSION" $assets \
+              --title "$RELEASE_TITLE" \
+              --notes-file "$RUNNER_TEMP/notes.md"
+          fi
+          gh release view "$VERSION" --json tagName,name,isDraft,assets
+
+      - name: Say what happened, and what is left for a human
+        env:
+          ATTESTATION_URL: ${{ steps.attest.outputs.attestation-url }}
+        run: |
+          {
+            if [ "$DRY_RUN" = "true" ]; then
+              echo "## dry run of $VERSION on \`$GITHUB_REF_NAME\` -- no Release created"
+            else
+              echo "## $VERSION published"
+            fi
+            echo
+            echo "Three assets built from \`$(git rev-parse --short HEAD)\` on this runner and attested with build provenance:"
+            echo
+            echo '```'
+            cat "$RUNNER_TEMP/sha256.txt"
+            echo '```'
+            echo
+            echo "Attestation: $ATTESTATION_URL"
+            echo
+            echo "Anyone can check a downloaded file with:"
+            echo
+            echo '```'
+            echo "gh attestation verify main.js --repo $GITHUB_REPOSITORY"
+            echo '```'
+            if [ "$DRY_RUN" != "true" ]; then
+              echo
+              echo "**Still to do by hand:** the release body is the raw CHANGELOG section, a first draft."
+              echo "Write the highlight reel on top of it (.ai-context/releasing.md has the shape) and edit it in place:"
+              echo
+              echo '```'
+              echo "gh release edit $VERSION --notes-file <file>"
+              echo '```'
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
