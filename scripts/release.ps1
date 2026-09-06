@@ -238,19 +238,19 @@ try {
   catch { throw "lint failed -- not releasing (npm ci first, if this is a fresh clone)" }
 
   Write-Host "`n=== notice ===" -ForegroundColor Cyan
-  & node (Join-Path $here 'check-notice.mjs')
-  if ($LASTEXITCODE -ne 0) { throw "the Sigma notice is missing from a build -- not releasing" }
+  try { Invoke-Native node @((Join-Path $here 'check-notice.mjs')) }
+  catch { throw "the Sigma notice is missing from a build -- not releasing" }
 
   Write-Host "`n=== build (pre-flight) ===" -ForegroundColor Cyan
-  & node (Join-Path $here 'build-plugin.mjs')
-  if ($LASTEXITCODE -ne 0) {
+  try { Invoke-Native node @((Join-Path $here 'build-plugin.mjs')) }
+  catch {
     throw ("the plugin build failed -- the workflow would fail the same way and leave a tag " +
            "with no release. Fix it first (npm ci, if this is a fresh clone).")
   }
 
   Write-Host "`n=== invariants ===" -ForegroundColor Cyan
-  & node (Join-Path $here 'smoke.mjs')
-  if ($LASTEXITCODE -ne 0) { throw "the invariant suite failed -- not releasing" }
+  try { Invoke-Native node @((Join-Path $here 'smoke.mjs')) }
+  catch { throw "the invariant suite failed -- not releasing" }
 
   if ($DryRun) { Write-Host "`n-DryRun: stopping before the tag and the push." -ForegroundColor Yellow; return }
 

@@ -46,6 +46,18 @@ The invariant suite stays local: it drives a real Chrome against three generated
 minutes, `release.ps1` runs it before the tag, and `.githooks/pre-push` runs it again on the
 push of `main` that carries the tagged commit. The workflow trusts the tag.
 
+**Rehearse the local half too.** The workflow's dry run runs on a Linux runner, where
+`release.ps1` never executes; the first cut of 2.0.0 stopped at the script's own pre-flight
+build (esbuild writing its summary to stderr under `$ErrorActionPreference = 'Stop'`), a
+failure no workflow run could have shown. Before every cut, run the script as it will run:
+
+```powershell
+.\scriptselease.ps1 <version> -DryRun -AllowAnyBranch *> dryrun.log   # on the release branch, redirected
+```
+
+It runs every gate and the suite and stops before the tag; a green dry run of both halves is
+what "ready to cut" means.
+
 **The dry run, and the escape hatch.** A tag-triggered run executes the version of the file
 that is *at* the tag, so a bug in it shows up on the first real release and cannot be fixed by
 re-running or by fixing `main`. Two things answer that. `workflow_dispatch` with a `tag` input
