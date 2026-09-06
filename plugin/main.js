@@ -41,6 +41,7 @@ const ICON_ID = "vault-graph-disc";
  * @property {boolean} compactAxis
  * @property {boolean} unlinkedByFolder
  * @property {boolean} unlinkedTintByFolder
+ * @property {boolean} fitCap                           github#41, design/0011
  */
 
 /**
@@ -154,6 +155,21 @@ const singular = (s) => s.replace(/ies$/, "y").replace(/([^aeious])s$/, "$1");
 const norm = (s) => String(s).split(/[\\/]/).filter(Boolean).join("/");
 /** @param {string} rel @param {string} dir */
 const under = (rel, dir) => !!dir && (rel === dir || rel.startsWith(dir + "/"));
+
+// github#62
+/** @param {() => void} fn @returns {unknown} */
+const attempt = (fn) => { try { fn(); return null; } catch (e) { return e; } };
+
+// github#32
+/** @param {string} a @param {string} b */
+const walkOrder = (a, b) => {
+  const sa = a.split("/"), sb = b.split("/");
+  const n = Math.min(sa.length, sb.length);
+  for (let i = 0; i < n; i++) {
+    if (sa[i] !== sb[i]) return sa[i] < sb[i] ? -1 : 1;
+  }
+  return sa.length - sb.length;
+};
 
 /** @param {string} path */
 const paraFolder = (path) => {
@@ -276,6 +292,8 @@ async function buildData(app, opts) {
     if (SKIP_FILES.has(f.name.toLowerCase())) return false;
     return opts.templates ? true : !isTemplate(f.path);
   });
+  // github#32
+  files.sort((a, b) => walkOrder(a.path, b.path));
 
   /** @type {Map<string, number>} */
   const index = new Map();
@@ -372,18 +390,30 @@ async function buildData(app, opts) {
     }
   }
 
-  /* ---- words: the only remaining I/O ------------------------------------- */
+  /* ---- words: the only remaining I/O, read after the mount ---------------- */
   const tEdges = performance.now();
-  if (opts.words) {
-    await Promise.all(nodes.filter((n) => n._file).map(async (n) => {
+  const wordFiles = opts.words ? nodes.map((n) => n._file || null) : null;
+  // github#58
+  /**
+   * @param {(index: number, words: number) => void} apply
+   * @returns {Promise<number>}
+   */
+  const readWords = async (apply) => {
+    const t = performance.now();
+    if (!wordFiles) return 0;
+    await Promise.all(wordFiles.map(async (file, i) => {
+      if (!file) return;
+      let words = 0;
       try {
-        const raw = await app.vault.cachedRead(n._file);
+        const raw = await app.vault.cachedRead(file);
         const m = /^---\r?\n[\s\S]*?\r?\n---/.exec(raw.replace(/^\uFEFF/, ""));
         const body = m ? raw.slice(m[0].length) : raw;
-        n.words = body.split(/\s+/).filter(Boolean).length;
-      } catch { n.words = 0; }
+        words = body.split(/\s+/).filter(Boolean).length;
+      } catch { words = 0; }
+      apply(i, words);
     }));
-  }
+    return Math.round(performance.now() - t);
+  };
   const tWords = performance.now();
 
   const edges = Array.from(weight).map((entry) => {
@@ -420,10 +450,12 @@ async function buildData(app, opts) {
       templatesExcluded: !opts.templates,
       ghostsIncluded: !!opts.ghosts,
     },
+    readWords: readWords,
     _spike: {
       msIndex: Math.round(tIndex - t0),
       msEdges: Math.round(tEdges - tIndex),
       msWords: Math.round(tWords - tEdges),
+      msWordsBackground: /** @type {number | null} */ (null),
       msTotal: Math.round(tWords - t0),
       templateDirs: templateDirs,
       dailyDir: dailyDir,
@@ -481,7 +513,7 @@ class VaultGraphView extends ItemView {
   // github#62
   teardown() {
     if (this.handle) {
-      try { this.handle.destroy(); } catch { }
+      attempt(() => this.handle.destroy());
     }
     this.handle = null;
     this.contentEl.empty();
@@ -495,12 +527,12 @@ class VaultGraphView extends ItemView {
 
     const api = this.handle && this.handle.api;
     if (api) {
-      try {
+      attempt(() => {
         if (api.readTheme) api.readTheme();
         if (api.renderer) api.renderer.refresh();
         if (api.placeLogo) api.placeLogo();
         if (api.heatBuild) api.heatBuild();
-      } catch { }
+      });
     }
   }
 
@@ -574,6 +606,8 @@ class VaultGraphView extends ItemView {
         this.plugin.settings.unlinkedTintByFolder = !!v;
         await this.plugin.saveSettings();
       },
+      // github#41, design/0011
+      fitCap: this.plugin.settings.fitCap !== false,
       pinned: this.plugin.settings.pinned,
       /** @param {string[]} ids */
       onPinned: async (ids) => {
@@ -592,6 +626,13 @@ class VaultGraphView extends ItemView {
       },
     });
     this.mountMs = Math.round(performance.now() - t0);
+
+    const handle = this.handle;
+    void data.readWords((i, words) => {
+      data.nodes[i].words = words;
+      const api = handle.api;
+      if (api && api.graph && this.handle === handle) api.graph.setNodeAttribute(String(i), "words", words);
+    }).then((ms) => { data._spike.msWordsBackground = ms; }, () => {});
 
     this.registerDomEvent(page, "click", (ev) => {
       const a = ev.target instanceof Element ? ev.target.closest('a[href^="obsidian://"]') : null;
@@ -625,6 +666,8 @@ const DEFAULTS = {
   unlinkedByFolder: true,
   // github#3
   unlinkedTintByFolder: false,
+  // github#41, design/0011
+  fitCap: true,
 };
 
 /** @type {{ key: "ghosts" | "templates" | "flatMonths" | "words", name: string, desc: string }[]} */
@@ -641,11 +684,11 @@ const BUILD_SETTINGS = [
 
 /**
  * @typedef {Object} ViewSetting
- * @property {"panEnabled" | "compactAxis" | "unlinkedByFolder" | "unlinkedTintByFolder"} key
+ * @property {"panEnabled" | "compactAxis" | "unlinkedByFolder" | "unlinkedTintByFolder" | "fitCap"} key
  * @property {string} name
  * @property {string} desc
  * @property {boolean} defaultOn
- * @property {"setPanEnabled" | "setCompactAxis" | "setUnlinkedByFolder" | "setUnlinkedTintByFolder"} api
+ * @property {"setPanEnabled" | "setCompactAxis" | "setUnlinkedByFolder" | "setUnlinkedTintByFolder" | "setFitCap"} api
  */
 /** @type {ViewSetting[]} */
 const VIEW_SETTINGS = [
@@ -657,6 +700,9 @@ const VIEW_SETTINGS = [
     desc: "A note with no links takes its own folder's wedge and colour, instead of sitting apart in a separate unlinked group. The (unlinked) row's right-click menu flips this too, and lands back here." },
   { key: "unlinkedTintByFolder", name: "Colour unlinked notes by folder", defaultOn: false, api: "setUnlinkedTintByFolder",
     desc: "While unlinked notes are kept as their own group (the toggle just above is off), give each one its own folder's colour instead of the flat unlinked swatch. The (unlinked) row's right-click menu carries this too." },
+  // github#41, design/0011
+  { key: "fitCap", name: "Size dots from the frame", defaultOn: true, api: "setFitCap",
+    desc: "While the disc animates, cap every dot at just under half its distance to the nearest visible note, measured on the frame being drawn, so dots stay apart while rows slide. The disc at rest is unchanged. Experimental: dots breathe while a cascade walks." },
 ];
 
 const COLOURS_DESC = "Twelve slots, handed out in folder order and round again. Setting one folder never moves another, and two folders may share a colour.";
@@ -1132,6 +1178,7 @@ class VaultGraphPlugin extends Plugin {
     if (api.setCompactAxis) api.setCompactAxis(this.settings.compactAxis !== false);
     if (api.setUnlinkedByFolder) api.setUnlinkedByFolder(this.settings.unlinkedByFolder !== false);
     if (api.setUnlinkedTintByFolder) api.setUnlinkedTintByFolder(this.settings.unlinkedTintByFolder === true);
+    if (api.setFitCap) api.setFitCap(this.settings.fitCap !== false);
     if (api.applyHiddenDefaults) api.applyHiddenDefaults();
   }
 

@@ -53,10 +53,12 @@ code instead of measuring it.
 Four commands, and all four are gates rather than suggestions:
 
 ```bash
-npm run lint                   # tsc --noEmit on the engine, then typescript-eslint on our own code; every finding is held at zero
-node scripts/smoke.mjs         # 17 invariants, over two vault shapes
-node scripts/check-scope.mjs   # the page cannot style, or be styled by, its host
-node scripts/check-network.mjs # nothing shipped can make a network request
+npm run lint                    # tsc --noEmit on the engine, then typescript-eslint on our own code; every finding is held at zero
+node scripts/smoke.mjs          # the invariant suite, over three vault shapes
+node scripts/check-scope.mjs    # the page cannot style, or be styled by, its host
+node scripts/check-network.mjs  # nothing shipped can make a network request
+node scripts/check-notice.mjs   # the Sigma notice opens a fresh main.js and a fresh exported page
+node scripts/check-comments.mjs # comments are pointers; the count of prose lines only goes down
 ```
 
 Three more are manual, because each launches a real browser or a real Obsidian and takes a
@@ -94,9 +96,32 @@ mid-intro, which is the case where a dead mount used to keep animating.
 One more if you touch the renderer (`src/engine/`): the suite asserts numbers, and none of
 them can see a disc in the wrong colour. `node scripts/render-diff.mjs --against-dir <dir>`
 compares the current build of every fixture, pixel by pixel and node by node, against
-reference builds of the same vaults made from the commit you are holding the picture to. The
-bar and how to make the references are in `.ai-context/invariants.md` ("The engine draws
-Sigma's picture").
+reference builds of the same vaults made from the commit you are holding the picture to —
+at rest by default, and with `--state all` also in a search, after a hidden folder, a solo
+and a date range, with a note hovered and clicked, and at the landing frame of a cascade;
+`--theme light`, `--dpr 2` and `--window WxH` change the viewing conditions, `--now-dir`
+compares two prebuilt trees. The bar and how to make the references are in
+`.ai-context/invariants.md` ("The engine draws Sigma's picture").
+
+And one that needs Obsidian itself, for the things the exporter cannot stand in for — the
+metadata cache, the view lifecycle, popout windows, the settings tab, the theme switch:
+
+```bash
+node scripts/build-plugin.mjs
+node scripts/obsidian-smoke.mjs                  # the demo fixture; --fixture shape | 10k
+node scripts/obsidian-smoke.mjs --only "reopen"  # one check by substring, like smoke.mjs
+```
+
+It copies a store fixture into a throwaway vault under `%TEMP%`, installs the three built
+plugin files into it exactly as a release installs them, launches a **separate** Obsidian
+with its own user-data directory and a remote-debugging port (the Obsidian you have open is
+not touched and not reused), drives it over CDP, and prints the number behind every check:
+how long the cache, the build, the mount and the intro took; whether the layout matches the
+exporter's build of the same vault; hover, click, right-click and double-click; six
+close-and-reopen cycles with heap, DOM and listener counts (github#62); the Refresh button; a
+theme switch; the settings tab (github#59); a popout window. It is opt-in and not in the
+pre-push hook: it needs Obsidian installed and takes minutes. The numbers it measured on the
+release day are in `.ai-context/invariants.md` ("The plugin behaves inside a real Obsidian").
 
 Since Obsidian 1.7.2 a tab restored in the background is **deferred**: the leaf is real and
 `getLeavesOfType` finds it, but `leaf.view` is a placeholder until something reveals it. Both
@@ -106,9 +131,11 @@ restart of the day puts it in.
 
 `git config core.hooksPath .githooks` once per clone runs those on every push to `develop` or
 `main`, along with a check that refuses to publish other people's names, two that keep the
-generated fixtures deterministic, and one that keeps the generated navigation files
+generated fixtures deterministic, one that keeps the generated navigation files
 (`.ai-context/code-map.md`, `.ai-context/code-index.md`, from `node scripts/code-map.mjs`)
-in step with the source. Only the invariant suite has a skip flag, on purpose:
+in step with the source, one that reads the Sigma copyright line back out of both freshly
+built artifacts, and one that counts the comment lines that are not pointers and refuses a
+push that raises the count. Only the invariant suite has a skip flag, on purpose:
 everything else is a static read costing seconds at most, and what most of it prevents is
 damage to somebody else's software, or to somebody else. The lint gate fails closed on a
 clone that has not run `npm ci` — run it, then push.
@@ -130,6 +157,7 @@ commit and neither mechanism can see the other:
 |---|---|
 | `.github/workflows/branch-policy.yml` | a pull request into `main` fails unless its head is `develop` in this repository — GitHub has no branch-protection setting for "the PR must come from X", so it is a required check |
 | `.githooks/pre-push` | a `git push` to `main` is refused unless `develop` is already an ancestor of it — a merge of `develop` passes, a commit made straight on `main` does not |
+| `.github/workflows/release.yml` | a release tag whose commit is not in `origin/main`'s history is refused before anything is built, signed or published — the same rule again, at the one moment it still matters, since a published tag cannot be moved |
 
 `main` also carries a ruleset: pull request required, that check required, no force pushes,
 no deletion.
@@ -145,6 +173,14 @@ the code besides pointers: JSDoc blocks carrying a tag (the type-aware lint read
 section banners (the code map reads them), the build's `BEGIN`/`END` strip markers, and
 PowerShell `<# .SYNOPSIS #>` help blocks (Get-Help reads them). github#61 set this rule and
 applied it: 15,399 → 8,173 lines in `src/page.js` alone.
+
+`node scripts/check-comments.mjs` enforces it in the pre-push hook. It counts every comment
+line in those three directories that is neither a bare pointer (`github#N`, `decisions/NNNN`,
+`design/NNNN`, alone or with a short label) nor a JSDoc type annotation (`/**`, `* @param`,
+`* @returns`, `* @typedef`, `* @property`, `* @type`, `*/`), nor a `/*!` licence banner, a
+shebang, a lint directive or a section banner, prints the count per file, and holds the total
+at exactly `BASELINE` — over fails, and under fails until the baseline is lowered to the new
+count in the same commit, so the number can only go down. `--list` prints every counted line.
 
 ## Commit messages
 

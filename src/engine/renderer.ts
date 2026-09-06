@@ -18,6 +18,8 @@ interface EventMap extends RendererEvents {
   upStage: StageEvent;
 }
 
+// github#58
+const PICK_FLOOR_PX = 1.5;
 type WebGLLayer = "edges" | "nodes" | "hoverNodes";
 type CanvasLayer = "labels" | "hovers" | "mouse";
 
@@ -577,6 +579,8 @@ export class Renderer extends Emitter<EventMap> implements RendererApi {
   private getNodeAtPosition(p: Point): string | null {
     let lastCircle: string | null = null;
     let lastHalo: string | null = null;
+    let nearest: string | null = null;
+    let nearestD2 = PICK_FLOOR_PX * PICK_FLOOR_PX;
     const inv = 1 / this.camera.ratio;
     for (const id of this.nodeOrder) {
       const data = this.nodeData.get(id);
@@ -584,11 +588,15 @@ export class Renderer extends Emitter<EventMap> implements RendererApi {
       const v = this.framedGraphToViewport(data);
       const r = data.size * inv;
       const dx = v.x - p.x, dy = v.y - p.y;
-      if (dx * dx + dy * dy > r * r) continue;
+      const d2 = dx * dx + dy * dy;
+      if (d2 > r * r) {
+        if (d2 <= nearestD2) { nearestD2 = d2; nearest = id; }
+        continue;
+      }
       if (data.type === "halo") lastHalo = id;
       else lastCircle = id;
     }
-    return lastHalo ?? lastCircle;
+    return lastHalo ?? lastCircle ?? nearest;
   }
 
   /* --------------------------------------------------------------- events */

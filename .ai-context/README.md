@@ -44,6 +44,7 @@ changing the layout or the animation.
 | `0008-logo-and-favicon` | Two sources for two jobs |
 | `0009-theme` | Dark only |
 | `0010-heatmap` | The band above the disc: which date, and why no colour is an average |
+| `0011-per-frame-dot-size` | Experiment (github#41): dots capped from the drawn frame, and where that stands against the two-resting-sizes law |
 
 **ADR or DDR?** An ADR is a choice with alternatives that were weighed and one that won —
 it explains *why not the other thing*. A DDR describes how a part actually works and the

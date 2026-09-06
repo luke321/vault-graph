@@ -42,6 +42,17 @@ Enable. Open it from the ribbon icon or the command palette (*Vault graph: Open 
 
 **From source** — `npm install && npm run build`, then `./scripts/install-plugin.ps1`.
 
+<sub>**Check what you downloaded, if you like.** `main.js` is a ~390 KB bundle — the page, the
+plugin host and the engine, a Sigma.js port — and nothing about downloading a file tells you
+where it came from. Every
+release asset now carries a [GitHub build provenance
+attestation](https://docs.github.com/en/actions/security-for-github-actions/using-artifact-attestations/using-artifact-attestations-to-establish-provenance-for-builds),
+signed by the workflow that built it — so you can verify it came from this repository at
+the tagged commit rather than being assembled by hand: `gh attestation verify main.js
+--repo luke321/vault-graph`. Releases published before this landed (1.9.0 and earlier)
+have none, because an attestation can only be produced by a workflow and those were
+published from a laptop.</sub>
+
 It reads your vault through Obsidian's own metadata cache, so it sees the same links
 Obsidian does, aliases and frontmatter links included. It builds in about a tenth of a
 second on a 450-note vault. **Nothing leaves your machine** — it makes no network requests,
@@ -89,8 +100,10 @@ other.
 
 <sub>**Zero network calls, and greppable.** Nothing shipped makes a request. The graph store
 and the WebGL renderer are the plugin's own code (`src/engine/`, TypeScript), so there is no
-third-party bundle to explain away, and `node scripts/check-network.mjs` is the gate that keeps
-`main.js` and the exporter at zero. See
+third-party bundle to explain away — though not no third-party code: the renderer is a port of
+[Sigma.js](https://www.sigmajs.org) 3.0.2 under MIT, whose notice ships in every build and is
+recorded in [`src/engine/NOTICE.md`](src/engine/NOTICE.md) — and `node scripts/check-network.mjs`
+is the gate that keeps `main.js` and the exporter at zero. See
 [`0008-zero-network-calls`](.ai-context/decisions/0008-zero-network-calls.md) and
 [`0012-own-graph-store-and-renderer`](.ai-context/decisions/0012-own-graph-store-and-renderer.md).</sub>
 

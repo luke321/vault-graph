@@ -60,10 +60,12 @@ export default defineConfig([
       // checks and what the directory checks; the five below close the other one.
       "obsidianmd/no-unsupported-api": "error",
       ...METER,
-      // An empty catch is the teardown idiom here as much as in the scripts (kill what may
-      // already be gone), and github#61 took the comment out of every one of them; the block
-      // is the statement. Anything else empty is still a finding.
-      "no-empty": ["error", { allowEmptyCatch: true }],
+      // THE DIRECTORY'S FORM OF THE RULE, with no allowance for an empty catch. github#61 took
+      // the comment out of every teardown catch and allowed the empty block that left; the
+      // review board for 2.0.0's release branch then listed all eighteen of them as warnings,
+      // because the directory runs no-empty as shipped. The idiom is `attempt(fn)` now, a
+      // helper in the page and in the plugin that swallows and returns the error.
+      "no-empty": "error",
       // settings-tab/prefer-setting-definitions was off here until github#59 landed: the tab
       // implements getSettingDefinitions() now, with display() kept as the fallback for
       // minAppVersion 1.7.2 through 1.12, against obsidian 1.13.1's typings.
@@ -114,9 +116,9 @@ export default defineConfig([
       "no-unsanitized/method": "off",
       "no-unsanitized/property": "off",
       // `try { ... } catch {}` is the teardown idiom in every harness here -- kill the child,
-      // close the socket, remove the profile -- and none of those failing is news. All 25
-      // empty blocks the widened scope found were that shape. The plugin and the page keep
-      // the strict rule; they have none.
+      // close the socket, remove the profile -- and none of those failing is news. The scripts
+      // are not shipped and the directory does not scan them; the plugin, the page and the
+      // exporter run the strict rule above.
       "no-empty": ["error", { allowEmptyCatch: true }],
     },
     languageOptions: {

@@ -363,6 +363,31 @@ Measured: **0 of 48 cells partially filled**; the busiest day tiles 180 blocks i
 13px cell, i.e. 0.94px per note. `blocksAtBusiest` must equal the busiest day's count —
 if it is lower, notes are being dropped from the tiling rather than drawn sub-pixel.
 
+## The heatmap band is painted for the state it landed in
+
+`heatDraw()` repaints only when its signature changes, and the signature quantised each
+day's count to quarter-notes with `Math.round(n * 4)`. A fading note takes a day from
+`n = 1` through `0.1` to `0`, and everything under `0.125` rounds to the same signature as
+zero — so the last repaint of a fade happened while the tile was still faintly there, and
+the band kept that tint after the note was gone. Which cells carried the residue depended on
+the fade order, which is why the 2.0.0 comparison found the solo-state band differing between
+consecutive merges (github#19's frame work, github#67's fade schedule) while the counts
+underneath were identical. Present in 1.9.0 and every build since the band existed.
+
+```bash
+node scripts/smoke.mjs --only "band is painted"
+```
+
+The check hides the biggest folder, lets the cascade land, reads the band's canvas as painted,
+forces a repaint from the same state (through the hover-day signature) and compares. Measured
+2026-09-06 on the demo and 10k fixtures **before: 718 and 1,788 pixels differing, max 232 and
+238 of 255** — whole tiles left at a pre-fade colour; **after: 63 and 45 pixels, max 1 of
+255**, 0 on the dominant-folder fixture. The bar is 2 of 255. Two changes: the signature uses
+`Math.ceil(n * 4)`, so any count above zero is distinct from zero, and `settle()` clears the
+signature so the frame the cascade lands on is painted from the landed alphas. The residual
+1 of 255 on two fixtures is measured, repeatable and below anything a person can see; it was
+not traced further.
+
 ## A heatmap day haloes and recolours, but never pushes
 
 Clicking a day recolours its notes to `--today` — the neutral extreme, deliberately not one
@@ -472,6 +497,35 @@ and which element sits at the aim point, which separates the three candidate cau
 moving layout, a stale hit-test index, something painted over the canvas). **Read that line
 rather than re-running** — the whole reason the diagnostic exists is that a flaky check
 otherwise trains you to re-run instead of measure.
+
+## A sub-pixel dot is still a target
+
+The pointer reaches the page as whole CSS pixels — `MouseEvent.clientX` is the floored
+position, in Chrome and in Electron alike, measured by dispatching fractional coordinates
+over CDP and reading what the listener saw (1005.586 → 1005, 700.75 → 700). The engine's
+picking (decision 0012) is exact geometry: a dot is hit when the pointer is within its drawn
+radius. Put the two together and a dot drawn under about 1.4 px of radius can be hovered
+only when its centre happens to sit near a pixel corner. Sigma's colour-buffer picking had the
+same quantisation and a different catchment (a 2 px block), so the two builds missed in
+different places, and across the 2.0.0 comparison matrix the engine missed where Sigma hit six
+times and the reverse once — the 10k fixture's hub note at camera ratio 2 (0.84 px radius),
+zoomed out on a 1100 px window, at pixel ratio 2.
+
+```bash
+node scripts/smoke.mjs --only "sub-pixel dot"
+```
+
+The check zooms until the top-degree note draws at 0.6 px of radius, aims the pointer at the
+four whole-pixel corners around its centre, and asserts that the nearest corner hovers that
+note and that every corner hovers *some* note. `getNodeAtPosition` keeps the exact test and its
+last-drawn-wins rule, and adds a floor: when nothing is hit exactly, the nearest centre within
+`PICK_FLOOR_PX` (1.5 px, just over the 1.41 px a floored pointer can be from a true centre)
+wins. Nothing changes for a dot the pointer is already inside.
+
+Measured 2026-09-06: before, the 10k page hovered the note from **0 of 4** corners and the demo
+page from 1 of 4; after, the nearest corner hovers it on all three fixtures (0.16–0.61 px off)
+and **4 of 4** corners hover a note. `render-diff` at rest, in a search and in every filter
+state is unchanged by this — picking draws nothing.
 
 ## Hover re-arms after the pointer leaves the stage
 
@@ -1189,6 +1243,30 @@ new. Dense solos are untouched: the demo vault's 200-note folder grows monotonic
 with and without the cap (peak = rest, 1.00x). On the three fixtures the peak equals the resting
 size after the solo exactly (shape 84.2, demo 102.2, 10k 286.2 graph units).
 
+### What the law says when "Size dots from the frame" is on
+
+2.0.0 ships the per-frame dot-size cap (`design/0011`, github#41) as a view setting, **on by
+default** (off in Settings › Vault Graph › View, or `?nofit` on the standalone page; `?fit`
+forces it on). With it on, `dotPx` also caps each dot at 0.46 of
+its distance to the nearest visible note on the frame being drawn. The cap only ever lowers a
+size, so the upper bound above is untouched; what changes is the lower one. **The law with the
+setting on: a walking dot never outgrows the larger of its two resting sizes, and may be held
+below both of them by its neighbours' clearance while rows slide — never above.** `design/0011`
+records the spirit it gives up (a dot can shrink and grow back mid-walk, the motion github#66
+was filed against in the other direction) and why the setting exists anyway.
+
+```bash
+node scripts/smoke.mjs --only "frame on"
+```
+
+The second check walks the same solo with `__vg.fitCap = true`, asserts the same upper bound,
+and prints the trough: the lowest the biggest full-alpha dot went mid-walk, as a share under the
+smaller resting size (demo 0.8 %, 10k 20.9 %, dominant-folder 1.1 %). Measured off against on,
+2026-09-06, every fixture: the resting disc, the search and the solo are identical to the pixel;
+after the biggest folder hides, one demo dot is capped 0.14 px smaller at ratio 1.08 (0.44 px at
+0.35) — the tightest resting pair, as `design/0011` predicted — and no pixel crosses the bar.
+Goldens are byte-identical either way, since the cap never moves a note.
+
 ## An arriving note's fade never reverses during a solo switch
 
 Solo the smallest group with two or more notes, let it land, then solo the next smallest: every
@@ -1550,6 +1628,27 @@ Sigma's half-resolution colour buffer gave, without the 2 px quantisation), and 
 density grid is gone, with the occasional plain label it drew for the hovered note during the
 first half of the hover ramp.
 
+## The Sigma notice ships in both artifacts
+
+`src/engine` is a port of Sigma.js 3.0.2 under MIT, and the licence asks for the copyright
+and permission notice in every copy or substantial portion. `src/engine/notice.mjs` hands it
+to esbuild as a `/*!` banner for `main.js` and for the engine `<script>` of every exported
+page; esbuild keeps `/*!` comments and drops every other comment, which is how both builds
+shipped without a notice for two commits in 2026-09 (github#58) while the exporter's comment
+claimed they carried one.
+
+```bash
+node scripts/check-notice.mjs
+```
+
+It builds the plugin and exports a two-note vault, then asserts that the `Copyright (C)` line
+of `src/engine/NOTICE.md` (the URL trimmed) appears inside the run of comments each artifact
+opens with — `main.js` from its first byte, the page from its engine `<script>` — and that a
+`/*!` banner precedes it. Measured 2026-09-06: the line at byte 367 of `main.js` (after the
+build's own header comment) and byte 101,719 of the page, each inside its banner. It runs in
+the pre-push hook next to the network check, with no skip flag, and `releasing.md` says why a
+release cannot go out without it.
+
 ## A torn-down mount holds nothing outside its root
 
 `mountVaultGraph`'s handle has a `destroy()`, and the plugin's `teardown()` calls it. After
@@ -1584,6 +1683,84 @@ with `destroy()` the same cascade stops where it stands (155 frames, `busy` fals
 
 The check is manual and not in `smoke.mjs`: a cycle replaces the page's root and its `__vg`,
 and the suite's checks share one page.
+
+## The plugin behaves inside a real Obsidian
+
+The exporter and the standalone page are what the suite drives; the plugin's host is
+Obsidian, and a fix can be right in one and wrong in the other (github#34 was). Since
+2.0.0 the things only Obsidian can answer are measured there:
+
+```bash
+node scripts/build-plugin.mjs
+node scripts/obsidian-smoke.mjs                    # demo fixture; --fixture shape | 10k
+node scripts/obsidian-smoke.mjs --only "reopen"    # one check by substring
+```
+
+It copies a store fixture into a throwaway vault under `%TEMP%\vault-graph-obsidian-smoke`,
+installs the three built plugin files the way a release does, launches a **separate** Obsidian
+with its own user-data directory on a debugging port (the running Obsidian and its vault are
+never touched), drives it over CDP, and prints a number per check. Opt-in and not in the
+pre-push hook: it needs Obsidian installed and takes two to four minutes. Fifteen checks:
+
+| check | demo fixture (1,403 notes, 3,286 links) | 10k fixture (10,002 notes, 3,815 links) |
+|---|---|---|
+| the plugin loads and the cache resolves (fresh vault: Obsidian indexes every file) | cache stopped growing 2.8 s after enable | 38.4 s |
+| the view opens with no console errors | 0 errors; open → `__vg` 446 ms (build 22 ms, mount 9 ms), intro landed and disc at rest 6.3 s | 0 errors; open → `__vg` 1,058 ms (build 136 ms: index 63, edges 16, words 58; mount 56 ms), at rest 7.0 s |
+| **cold start** — a second launch of the same vault, cache restored from disk, file contents not | cache restored 150 ms after attach; open → `__vg` 685 ms (build 229 ms, **words 215**), at rest 6.6 s | open → `__vg` **2,837 ms** (build 1,917 ms: index 55, edges 16, **words 1,845**; mount 49 ms), at rest 8.9 s |
+| layout positions match the exporter's build of the same vault | 0 of 1,403 moved, max \|d\| 0 | 0 of 10,002 moved, max \|d\| 0 |
+| hover shows the tip and lifts | tip on, tip off | same |
+| click opens the card, its close button closes it | downNode, upNode, clickNode; card names the note | same |
+| right-click pins and persists, a second releases | pinned 0 → 1 → 0, one plugin instance | same |
+| double-click fits the camera back | 1.08 → 0.432 → 1.08 | same |
+| six close-and-reopen cycles (github#62) | heap 26.4 → 27.4 MB (0.20 MB/cycle), DOM 7,917 → 7,917, listeners 1,412 → 1,412, document mousemove 2 → 2 | heap 67.7 → 68.2 MB (0.10 MB/cycle), DOM 33,715 → 33,715, listeners 1,414 → 1,414 |
+| Refresh rebuilds and remounts, destroying the old mount | 6.3 s (build 21 ms, mount 7 ms), old api gone | 7.0 s (build 130 ms, mount 44 ms) |
+| theme switch recolours labels | `labelColor` #ffffff → #0b0b0b with `--text-1` | same |
+| the settings tab renders from `getSettingDefinitions` (github#59) | 6 definitions, 9 items, 29 rows, 8 toggles; compact axis round-trips to the view and `data.json` | same |
+| the view mounts in a popout window | separate document and window, 6 canvases, ready in 468 ms, 0 popouts left | ready in 1,056 ms |
+| disabling and re-enabling the plugin with the view open (what `plugin:reload` does) | 0 canvases left after disable, view reopened in 6.3 s, 0 errors | — |
+
+Measured 2026-09-06, Obsidian 1.13.7, Windows 11, before the word counts moved off the
+mount (see the entry below in `changelog-detail.md`).
+
+**Where the time goes.** On a fresh vault it is Obsidian's own indexing (38 s for 10k notes)
+and nothing the plugin does. On the launch a person actually experiences — the cache restored
+from disk — the plugin's build is **96 % word counts**: `cachedRead` of every note, cold, 1.85 s
+of the 1.92 s build on the 10k fixture. The index and the edges come out of the cache in
+under 80 ms, the mount takes 50 ms, and then the intro plays for six to nine seconds, which is
+the animation's fixed length, not loading.
+
+**Three things the harness had to learn**, each a false failure until measured: a view
+opened before the cache had finished indexing builds from a partial cache (41 sources and
+138 links of 3,286) and nobody tells it — wait until the file and link counts stop moving;
+the intro has not landed when `timelineUntil` is null, because it is null *before* the intro
+starts as well — wait until every note is shown, the row counts are whole and the positions
+have stopped changing; and a first click on the view activates its leaf, which shifts the
+workspace under the pointer — activate the leaf and click the stage once before aiming.
+The layout is byte-identical to the exporter's only once all three hold; measured mid-intro it
+read as 1,357 notes moved.
+
+## Comments are pointers, and the count only goes down
+
+github#61 cut every comment in `plugin/`, `src/` and `scripts/` to a pointer — a bare
+`github#N`, `decisions/NNNN` or `design/NNNN` — and moved the reasoning to `.ai-context/`,
+with JSDoc type annotations, `/*!` licence banners, shebangs, lint directives and section
+banners kept. What it did not do was stop the prose coming back, and 386 lines of it were
+still there on 2026-09-06 (392 on `develop@fc7d157`): JSDoc blocks whose lines carry no tag,
+the ribbon icon's design notes in `plugin/main.js`, the `.d.ts` file's explanation of itself,
+`build-plugin.mjs`'s strip-marker essay.
+
+```bash
+node scripts/check-comments.mjs          # counts per file, the total, the baseline
+node scripts/check-comments.mjs --list   # every counted line
+```
+
+The scanner tokenises strings, template literals and regex literals so a `//` inside them is
+not a comment, and counts a line when it is neither a pointer (optionally with a label of up
+to 60 characters after `--`, `-` or `:`), a JSDoc tag line, a directive, a banner rule nor a
+`/*!` block line. `BASELINE` in the script is held at **exactly** the count: a push that adds
+prose fails, and a commit that removes some fails too until the baseline is lowered to match,
+so the number can only go down — the ratchet github#60 used for the no-unsafe meter. In the
+pre-push hook next to the network check, with no skip flag.
 
 ## Our own code lints clean
 

@@ -253,6 +253,37 @@ check("no note is dropped from a heatmap cell's tiling", async (p) => {
                               : `busiest ${r.busiest.day}: ${r.busiest.n} notes, ${r.busiest.parts} blocks` };
 });
 
+// github#58
+check("the heatmap band is painted for the state it landed in", async (p) => {
+  await settle(p);
+  const g = await biggestGroup(p);
+  if (!g) return { ok: false, detail: "no group to hide" };
+  await clickEye(p, g);
+  await settle(p);
+  await sleep(1200);
+  const r = await p.j(`(function(){
+    var cv = document.getElementById("vg-heatc"), ctx = cv.getContext("2d");
+    var before = ctx.getImageData(0, 0, cv.width, cv.height).data;
+    var k = __vg.heat.keys[0];
+    __vg.state.hoverDay = k; __vg.heatDraw();
+    __vg.state.hoverDay = null; __vg.heatDraw();
+    var after = ctx.getImageData(0, 0, cv.width, cv.height).data;
+    var px = 0, mx = 0;
+    for (var i = 0; i < before.length; i += 4) {
+      var d = Math.max(Math.abs(before[i] - after[i]), Math.abs(before[i + 1] - after[i + 1]),
+                       Math.abs(before[i + 2] - after[i + 2]), Math.abs(before[i + 3] - after[i + 3]));
+      if (d) { px++; if (d > mx) mx = d; }
+    }
+    var lit = 0; __vg.heat.keys.forEach(function (key) { if (__vg.heat.days[key].n > 0.004) lit++; });
+    return { px: px, max: mx, lit: lit, days: __vg.heat.keys.length, w: cv.width, h: cv.height }; })()`);
+  await clickEye(p, g);
+  await settle(p);
+  const BAR = 2;
+  return { ok: r.max <= BAR,
+           detail: `hid ${g}: ${r.lit} of ${r.days} days lit; the band as painted vs repainted from its own state differs ` +
+                   `in ${r.px} px (max ${r.max}/255, bar ${BAR}) of ${r.w}x${r.h}` };
+});
+
 check("plan parity at full vault", async (p) => {
   await p.eval(`__vg.state.hidden.folder = {}; __vg.syncAlpha(); __vg.applyLayout(false); void 0`);
   const r = await p.j(`__vg.checkPlanParity()`);
@@ -588,6 +619,54 @@ check("hover re-arms after the pointer leaves the stage", async (p) => {
   return { ok,
            detail: `on ${first.hovered} (t ${first.t}), off ${away.hovered} (t ${away.t}), ` +
                    `back on ${back.hovered} (t ${back.t})` + why };
+});
+
+// github#58
+check("a sub-pixel dot can still be hovered", async (p) => {
+  await settle(p);
+  await camSettle(p);
+  const pick = await p.j(`(function(){
+    var best = null, bd = -1;
+    __vg.graph.forEachNode(function (id) {
+      if ((__vg.alpha[id] || 0) < 0.999) return;
+      var d = __vg.graph.degree(id);
+      if (d > bd || (d === bd && id < best)) { bd = d; best = id; }
+    });
+    if (!best) return null;
+    var dd = __vg.renderer.getNodeDisplayData(best);
+    return { id: best, size: dd.size, ratio: __vg.renderer.getCamera().getState().ratio }; })()`);
+  if (!pick) return { ok: false, detail: "no visible note to aim at" };
+  const WANT_PX = 0.6;
+  const ratio = Math.min(40, Math.max(pick.ratio, pick.size / WANT_PX));
+  await p.eval(`__vg.renderer.getCamera().setState({ x: 0.5, y: 0.5, ratio: ${ratio}, angle: 0 }); __vg.renderer.refresh(); void 0`);
+  await p.eval(`new Promise(function (r) { requestAnimationFrame(function () { requestAnimationFrame(r); }); })`);
+  const at = await p.j(`(function(){
+    var a = __vg.graph.getNodeAttributes(${JSON.stringify(pick.id)});
+    var o = document.getElementById("vg-graph").getBoundingClientRect();
+    var v = __vg.renderer.graphToViewport({ x: a.x, y: a.y });
+    return { x: v.x + o.left, y: v.y + o.top, r: __vg.renderer.scaleSize(__vg.renderer.getNodeDisplayData(${JSON.stringify(pick.id)}).size) }; })()`);
+  const corners = [[Math.floor(at.x), Math.floor(at.y)], [Math.ceil(at.x), Math.floor(at.y)],
+                   [Math.floor(at.x), Math.ceil(at.y)], [Math.ceil(at.x), Math.ceil(at.y)]];
+  let hitSelf = 0, hitAny = 0, nearestHit = null;
+  let nearest = corners[0], nd = Infinity;
+  for (const c of corners) { const d = Math.hypot(c[0] - at.x, c[1] - at.y); if (d < nd) { nd = d; nearest = c; } }
+  for (const c of corners) {
+    await p.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: 5, y: 5, buttons: 0 });
+    await sleep(120);
+    await p.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: c[0], y: c[1], buttons: 0 });
+    await sleep(200);
+    const h = await p.j(`__vg.state.hovered`);
+    if (h) hitAny++;
+    if (h === pick.id) hitSelf++;
+    if (c === nearest) nearestHit = h;
+  }
+  await p.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: 5, y: 5, buttons: 0 });
+  await sleep(300);
+  await camReset(p);
+  const ok = nearestHit === pick.id && hitAny === 4;
+  return { ok,
+           detail: `note ${pick.id} drawn at ${at.r.toFixed(2)}px radius (ratio ${ratio.toFixed(2)}): the nearest whole-pixel ` +
+                   `pointer (${nd.toFixed(2)}px off) hovered ${nearestHit}; ${hitSelf}/4 whole-pixel corners hit it, ${hitAny}/4 hit a note` };
 });
 
 check("a highlighted note is drawn larger", async (p) => {
@@ -1802,10 +1881,14 @@ check("filtered to the bone, the disc stays drawable", async (p) => {
 
 // github#66
 // github#14
-check("a dot never outgrows its resting size while a cascade walks", async (p) => {
+// design/0011
+async function walkSolo(p, fitOn) {
   await clearRange(p);
   await settle(p);
   await camSettle(p);
+  const hasFit = await p.j(`typeof __vg.fitCap === "boolean"`);
+  if (fitOn && !hasFit) return { skip: "this build has no per-frame dot-size cap to switch on" };
+  await p.eval(`__vg.fitCap = ${fitOn ? "true" : "false"}; void 0`);
   const pick = await p.j(`(function(){
     var best = null;
     __vg.groupOrder().forEach(function (g) {
@@ -1813,7 +1896,7 @@ check("a dot never outgrows its resting size while a cascade walks", async (p) =
       if (n >= 2 && (!best || n < best.n)) best = { g: g, n: n };
     });
     return best; })()`);
-  if (!pick) return { ok: true, detail: "no group with two or more notes to solo -- nothing to walk" };
+  if (!pick) return { skip: "no group with two or more notes to solo -- nothing to walk" };
   const SAMPLE = `(function(){
     var a0 = __vg.renderer.graphToViewport({ x: 0, y: 0 });
     var b0 = __vg.renderer.graphToViewport({ x: 160, y: 0 });
@@ -1829,16 +1912,17 @@ check("a dot never outgrows its resting size while a cascade walks", async (p) =
     return { n: n, max: Math.round(mx * 10) / 10, busy: __vg.demo.busy() }; })()`;
   const before = await p.j(SAMPLE);
   const w = await p.j(`__vg.demo.where("only", ${JSON.stringify(pick.g)})`);
-  if (!w) return { ok: false, detail: `no "only" chip resolved for ${pick.g}` };
+  if (!w) return { fail: `no "only" chip resolved for ${pick.g}` };
   await p.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: w.x, y: w.y, buttons: 0 });
   await p.send("Input.dispatchMouseEvent", { type: "mousePressed", x: w.x, y: w.y, button: "left", clickCount: 1, buttons: 1 });
   await p.send("Input.dispatchMouseEvent", { type: "mouseReleased", x: w.x, y: w.y, button: "left", clickCount: 1, buttons: 0 });
-  let peak = 0, peakAt = 0, frames = 0;
+  let peak = 0, peakAt = 0, frames = 0, trough = Infinity;
   const t0 = Date.now();
   for (;;) {
     const smp = await p.j(SAMPLE);
     frames++;
     if (smp.max > peak) { peak = smp.max; peakAt = Date.now() - t0; }
+    if (smp.n && smp.max < trough) trough = smp.max;
     if (!smp.busy && frames > 3) break;
     if (Date.now() - t0 > 12000) break;
     await sleep(30);
@@ -1856,13 +1940,34 @@ check("a dot never outgrows its resting size while a cascade walks", async (p) =
   }
   await settle(p);
   await camSettle(p);
+  if (hasFit) await p.eval(`__vg.fitCap = false; void 0`);
   const bound = Math.max(before.max, after.max) * 1.05;
-  const ok = peak <= bound;
-  return { ok,
-           detail: `soloed ${pick.g} (${pick.n} notes): biggest dot ${before.max} units at rest ` +
-                   `-> peak ${peak} at ${peakAt}ms over ${frames} frames -> ${after.max} at rest ` +
-                   `(${after.n} shown); bound ${Math.round(bound * 10) / 10}` +
-                   (ok ? "" : `  <- overshoots both resting sizes by ${(peak / Math.max(before.max, after.max)).toFixed(2)}x`) };
+  const floor = Math.min(before.max, after.max);
+  return { pick, before, after, peak, peakAt, frames, trough, bound, floor, ok: peak <= bound };
+}
+
+function soloDetail(r) {
+  return `soloed ${r.pick.g} (${r.pick.n} notes): biggest dot ${r.before.max} units at rest ` +
+         `-> peak ${r.peak} at ${r.peakAt}ms over ${r.frames} frames -> ${r.after.max} at rest ` +
+         `(${r.after.n} shown); bound ${Math.round(r.bound * 10) / 10}` +
+         (r.ok ? "" : `  <- overshoots both resting sizes by ${(r.peak / Math.max(r.before.max, r.after.max)).toFixed(2)}x`);
+}
+
+check("a dot never outgrows its resting size while a cascade walks", async (p) => {
+  const r = await walkSolo(p, false);
+  if (r.skip) return { ok: true, detail: r.skip };
+  if (r.fail) return { ok: false, detail: r.fail };
+  return { ok: r.ok, detail: soloDetail(r) };
+});
+
+// design/0011
+check("with Size dots from the frame on, a walking dot is held under its two resting sizes, never above", async (p) => {
+  const r = await walkSolo(p, true);
+  if (r.skip) return { ok: true, detail: r.skip };
+  if (r.fail) return { ok: false, detail: r.fail };
+  const dip = r.floor > 0 ? Math.round((1 - r.trough / r.floor) * 1000) / 10 : 0;
+  return { ok: r.ok,
+           detail: soloDetail(r) + `; lowest mid-walk ${r.trough} units, ${dip}% under the smaller resting size (the cap may hold a dot below, never above)` };
 });
 
 // github#67

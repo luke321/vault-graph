@@ -13,7 +13,9 @@ measuring it: serve the page, drive it, read the numbers.
 - **The resting disc is on the lattice**, and a settled dot is the size a fresh relayout gives it.
 - **`settle()` is a no-op**: the cascade converges before it lands; a jump at the end is a bug.
 - **A zero-weight member costs nothing**: a fading note changes no plan, no row, no room.
-- **A dot never outgrows its two resting sizes** while a cascade walks; a fade never reverses.
+- **A dot never outgrows its two resting sizes** while a cascade walks; a fade never reverses. With
+  **Size dots from the frame** on (a view setting, on by default; `?nofit` turns it off on the page) a
+  walking dot may also be held *below* them by its clearance on the frame being drawn, never above.
 - **Only depth-1 subfolders with their own tint slot are pushed**; a sub-wedge earns a slot only if it can fill one.
 - **The page is scoped**: every CSS rule under `.vault-graph`, every id through `$()`; nothing shipped reaches the network.
 - **The layout matches its golden snapshot** on all three fixtures — never regenerate a golden to make a check pass.

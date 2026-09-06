@@ -30,4 +30,4 @@ Commit `assets/features/intro.webp` and update `Last re-recorded` below in the s
 | | |
 |---|---|
 | **Introduced in** | `v1.0` |
-| **Last re-recorded** | `1.9.0 — 2026-09-02` |
+| **Last re-recorded** | `2.0.0 — 2026-09-06` |

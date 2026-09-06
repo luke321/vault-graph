@@ -2,7 +2,7 @@
 
 import { build, context } from "esbuild";
 import { readFileSync, writeFileSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { dirname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { engineBanner } from "../src/engine/notice.mjs";
 
@@ -20,12 +20,13 @@ const rawLoader = {
   setup(b) {
     for (const [prefix, loader] of [["raw:", "text"], ["b64:", "base64"]]) {
       const filter = new RegExp("^" + prefix);
+      // github#10
       b.onResolve({ filter }, (args) => ({
-        path: resolve(dirname(args.importer), args.path.slice(prefix.length)),
+        path: relative(ROOT, resolve(dirname(args.importer), args.path.slice(prefix.length))).split(sep).join("/"),
         namespace: prefix,
       }));
       b.onLoad({ filter: /.*/, namespace: prefix }, (args) => ({
-        contents: readFileSync(args.path),
+        contents: readFileSync(join(ROOT, args.path)),
         loader,
       }));
     }
