@@ -150,6 +150,16 @@ over-warn (a `colours`-only change flags every feature) but never under-warns si
 7. **Create the release** and attach exactly those three:
    `gh release create <version> main.js manifest.json styles.css --notes-file <notes>`
 
+## What the release must carry: the Sigma notice
+
+The engine is a port of Sigma.js under MIT, and a `main.js` or exported page without its
+copyright and permission notice is a licence violation, not a cosmetic slip. It went missing
+once (github#58): esbuild keeps only `/*!` comments, and the banner was a plain one. Since
+2.0.0 `node scripts/check-notice.mjs` builds both artifacts and reads the copyright line back
+out of each, and the pre-push hook runs it with no skip flag on every push to `develop` or
+`main` — the merge into `main` that *is* the release included. A release cannot be cut from a
+tree whose builds lack the notice, and the three attached files are the ones that build makes.
+
 ## What the release must NOT contain
 
 - **Any built `vault-graph.html`.** It embeds the note titles and folder structure of

@@ -1624,6 +1624,27 @@ Sigma's half-resolution colour buffer gave, without the 2 px quantisation), and 
 density grid is gone, with the occasional plain label it drew for the hovered note during the
 first half of the hover ramp.
 
+## The Sigma notice ships in both artifacts
+
+`src/engine` is a port of Sigma.js 3.0.2 under MIT, and the licence asks for the copyright
+and permission notice in every copy or substantial portion. `src/engine/notice.mjs` hands it
+to esbuild as a `/*!` banner for `main.js` and for the engine `<script>` of every exported
+page; esbuild keeps `/*!` comments and drops every other comment, which is how both builds
+shipped without a notice for two commits in 2026-09 (github#58) while the exporter's comment
+claimed they carried one.
+
+```bash
+node scripts/check-notice.mjs
+```
+
+It builds the plugin and exports a two-note vault, then asserts that the `Copyright (C)` line
+of `src/engine/NOTICE.md` (the URL trimmed) appears inside the run of comments each artifact
+opens with — `main.js` from its first byte, the page from its engine `<script>` — and that a
+`/*!` banner precedes it. Measured 2026-09-06: the line at byte 367 of `main.js` (after the
+build's own header comment) and byte 101,719 of the page, each inside its banner. It runs in
+the pre-push hook next to the network check, with no skip flag, and `releasing.md` says why a
+release cannot go out without it.
+
 ## A torn-down mount holds nothing outside its root
 
 `mountVaultGraph`'s handle has a `destroy()`, and the plugin's `teardown()` calls it. After

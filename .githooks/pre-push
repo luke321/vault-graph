@@ -172,6 +172,23 @@ EOF
   exit 1
 fi
 
+# THE SIGMA NOTICE NEXT, unskippable for the same reason as the network check: what it protects
+# is somebody else's licence. The engine under src/engine is a port of Sigma.js (MIT), whose
+# notice must ride in every copy; esbuild keeps only /*! comments, which is how the notice went
+# missing once (github#58). This builds both artifacts and reads the copyright line back out.
+echo "pre-push: checking the Sigma notice is in both builds..."
+if ! node "$root/scripts/check-notice.mjs" </dev/null; then
+  cat >&2 <<'EOF'
+
+pre-push: notice check failed -- push blocked.
+
+main.js and an exported page must open with the /*! banner from src/engine/notice.mjs,
+carrying the copyright line from src/engine/NOTICE.md. Restore the banner; do not remove
+the line from NOTICE.md. There is no skip flag for this check.
+EOF
+  exit 1
+fi
+
 # COMMENTS ARE POINTERS NEXT (github#61), unskippable and a ratchet: scripts/check-comments.mjs
 # counts comment lines in plugin/, src/ and scripts/ that are neither a bare github#N /
 # decisions/NNNN / design/NNNN pointer nor a JSDoc type annotation, and holds the count at

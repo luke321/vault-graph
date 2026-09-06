@@ -57,6 +57,7 @@ npm run lint                    # tsc --noEmit on the engine, then typescript-es
 node scripts/smoke.mjs          # the invariant suite, over three vault shapes
 node scripts/check-scope.mjs    # the page cannot style, or be styled by, its host
 node scripts/check-network.mjs  # nothing shipped can make a network request
+node scripts/check-notice.mjs   # the Sigma notice opens a fresh main.js and a fresh exported page
 node scripts/check-comments.mjs # comments are pointers; the count of prose lines only goes down
 ```
 
@@ -132,8 +133,9 @@ restart of the day puts it in.
 `main`, along with a check that refuses to publish other people's names, two that keep the
 generated fixtures deterministic, one that keeps the generated navigation files
 (`.ai-context/code-map.md`, `.ai-context/code-index.md`, from `node scripts/code-map.mjs`)
-in step with the source, and one that counts the comment lines that are not pointers and
-refuses a push that raises the count. Only the invariant suite has a skip flag, on purpose:
+in step with the source, one that reads the Sigma copyright line back out of both freshly
+built artifacts, and one that counts the comment lines that are not pointers and refuses a
+push that raises the count. Only the invariant suite has a skip flag, on purpose:
 everything else is a static read costing seconds at most, and what most of it prevents is
 damage to somebody else's software, or to somebody else. The lint gate fails closed on a
 clone that has not run `npm ci` — run it, then push.
