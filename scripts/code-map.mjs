@@ -79,7 +79,7 @@ const CODE_EXT = new Set([".js", ".mjs", ".ts", ".css", ".html", ".ps1"]);
 const SKIP = new Set(["scripts/layout-snapshots", "src/engine/NOTICE.md"]);
 
 function walk(dir, acc) {
-  for (const name of readdirSync(dir)) {
+  for (const name of readdirSync(dir).sort()) {
     const p = join(dir, name);
     const r = rel(p);
     if (SKIP.has(r) || name === "node_modules") continue;
@@ -93,8 +93,8 @@ function walk(dir, acc) {
 function buildIndex() {
   const codeFiles = CODE_DIRS.flatMap((d) => walk(join(ROOT, d), []));
   const proseFiles = walk(join(ROOT, ".ai-context"), []).concat(
-    readdirSync(join(ROOT, ".ai-context")).filter((f) => f.endsWith(".md")).map((f) => ".ai-context/" + f),
-    ["decisions", "design"].flatMap((d) => readdirSync(join(ROOT, ".ai-context", d)).map((f) => `.ai-context/${d}/${f}`)));
+    readdirSync(join(ROOT, ".ai-context")).sort().filter((f) => f.endsWith(".md")).map((f) => ".ai-context/" + f),
+    ["decisions", "design"].flatMap((d) => readdirSync(join(ROOT, ".ai-context", d)).sort().map((f) => `.ai-context/${d}/${f}`)));
   const prose = [...new Set(proseFiles)].filter((f) => f.endsWith(".md") && !/code-(map|index)\.md$/.test(f));
 
   const issues = {};
