@@ -1700,7 +1700,7 @@ It copies a store fixture into a throwaway vault under `%TEMP%\vault-graph-obsid
 installs the three built plugin files the way a release does, launches a **separate** Obsidian
 with its own user-data directory on a debugging port (the running Obsidian and its vault are
 never touched), drives it over CDP, and prints a number per check. Opt-in and not in the
-pre-push hook: it needs Obsidian installed and takes two to four minutes. Fourteen checks:
+pre-push hook: it needs Obsidian installed and takes two to four minutes. Fifteen checks:
 
 | check | demo fixture (1,403 notes, 3,286 links) | 10k fixture (10,002 notes, 3,815 links) |
 |---|---|---|
@@ -1717,6 +1717,7 @@ pre-push hook: it needs Obsidian installed and takes two to four minutes. Fourte
 | theme switch recolours labels | `labelColor` #ffffff → #0b0b0b with `--text-1` | same |
 | the settings tab renders from `getSettingDefinitions` (github#59) | 6 definitions, 9 items, 29 rows, 8 toggles; compact axis round-trips to the view and `data.json` | same |
 | the view mounts in a popout window | separate document and window, 6 canvases, ready in 468 ms, 0 popouts left | ready in 1,056 ms |
+| disabling and re-enabling the plugin with the view open (what `plugin:reload` does) | 0 canvases left after disable, view reopened in 6.3 s, 0 errors | — |
 
 Measured 2026-09-06, Obsidian 1.13.7, Windows 11, before the word counts moved off the
 mount (see the entry below in `changelog-detail.md`).

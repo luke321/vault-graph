@@ -584,6 +584,28 @@ try {
       "popout document " + ready.otherDoc + ", window " + ready.otherWin + " (" + ready.w + "x" + ready.h + " @" + ready.dpr + "x), " + ready.canvases + " canvases, stage " + ready.stage + ", ready in " + ms + " ms, " + errs.length + " errors, popout windows left open: " + popouts);
     await openGraph(c);
   }
+  if (selected("plugin reload")) {
+    const n0 = errorsBefore();
+    const t0 = Date.now();
+    let alive = true, detail = "";
+    try {
+      await E("(async function(){ await app.plugins.disablePlugin('" + PLUGIN_ID + "'); return true; })()");
+      const gone = await E("(function(){ return { leaves: app.workspace.getLeavesOfType(" + JSON.stringify(VT) + ").length, plugin: !!app.plugins.getPlugin('" + PLUGIN_ID + "'), canvases: document.querySelectorAll('#vg-graph canvas').length }; })()");
+      await sleep(500);
+      await E("(async function(){ await app.plugins.enablePlugin('" + PLUGIN_ID + "'); return true; })()");
+      const back = await waitFor(c, "!!app.plugins.getPlugin('" + PLUGIN_ID + "')", 30000, "the plugin's second load");
+      const open = await openGraph(c);
+      const errs = errorsSince(n0);
+      detail = "disabled: " + gone.leaves + " leaf, plugin " + gone.plugin + ", " + gone.canvases + " canvases left; re-enabled " + back + "; reopened in " + open.msToRest + " ms, " + open.order + " notes, " + open.canvases + " canvases, " + errs.length + " errors; " + (Date.now() - t0) + " ms in all";
+      report(gone.canvases === 0 && errs.length === 0 && open.canvases > 0, "disabling and re-enabling the plugin with the view open (plugin:reload) leaves a working view", detail);
+    } catch (e) {
+      alive = !c.lost;
+      report(false, "disabling and re-enabling the plugin with the view open (plugin:reload) leaves a working view",
+        (alive ? "" : "THE OBSIDIAN WINDOW WENT AWAY: ") + e.message + (c.lost ? " (CDP: " + c.lost + ")" : ""));
+      if (!alive) throw e;
+    }
+  }
+
   if (selected("cold start")) {
     await closeGraph(c);
     await E("(async function(){ if (app.workspace.requestSaveLayout) app.workspace.requestSaveLayout(); else await app.workspace.saveLayout(); return true; })()").catch(() => 0);
