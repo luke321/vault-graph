@@ -50,12 +50,16 @@ push of `main` that carries the tagged commit. The workflow trusts the tag.
 that is *at* the tag, so a bug in it shows up on the first real release and cannot be fixed by
 re-running or by fixing `main`. Two things answer that. `workflow_dispatch` with a `tag` input
 runs the dispatched branch's file against an existing tag — fix, re-run, still attested. And
-`workflow_dispatch` with `dry_run` ticked and no tag builds, gates and attests the three files
-from the dispatched branch, taking the version from `manifest.json`, and creates no Release —
-so the whole publishing half can be rehearsed on a branch before any tag exists:
+**every push to a `release/*` branch runs the workflow as a dry run**: it builds, gates and
+attests the three files from that commit, taking the version from `manifest.json`, and creates
+no Release — so the whole publishing half is rehearsed on the release branch before any tag
+exists. (`workflow_dispatch` with `dry_run` ticked does the same from any branch, but GitHub
+only lets a workflow be dispatched once its file is on the default branch, which a new
+`release.yml` is not yet.)
 
 ```bash
-gh workflow run release.yml --ref release/2.0.0 -f dry_run=true
+git push origin release/2.0.0      # the dry run starts on its own
+gh run list --workflow=release.yml --limit 1
 gh run watch
 ```
 

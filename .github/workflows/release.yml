@@ -27,6 +27,12 @@ name: release
 
 on:
   push:
+    # A push to a release branch is a DRY RUN: the whole publishing half runs -- gates, build,
+    # attestation -- and no Release is created. workflow_dispatch cannot start a workflow that
+    # is not yet on the default branch, so this is how a new or changed release.yml gets its
+    # first run before any tag exists.
+    branches:
+      - 'release/*'
     tags:
       # BARE SEMVER ONLY. Obsidian installs a plugin by matching the release tag against
       # manifest.json's version, which cannot carry a prefix, so a v-tagged release is one
@@ -41,8 +47,8 @@ on:
   # turns that into fix-and-re-run.
   #
   # `dry_run` builds, gates and attests the three files from the ref the workflow was
-  # dispatched on (a branch, or a tag named in `tag`) and creates no Release, so the whole
-  # publishing half can be exercised on a branch before a tag exists.
+  # dispatched on (a branch, or a tag named in `tag`) and creates no Release -- the same run a
+  # push to a release/* branch gets by itself.
   workflow_dispatch:
     inputs:
       tag:
@@ -67,7 +73,7 @@ concurrency:
 
 jobs:
   publish:
-    name: ${{ inputs.dry_run && 'dry run' || 'attest and publish' }} ${{ inputs.tag || github.ref_name }}
+    name: ${{ (inputs.dry_run || (github.event_name == 'push' && github.ref_type == 'branch')) && 'dry run' || 'attest and publish' }} ${{ inputs.tag || github.ref_name }}
     runs-on: ubuntu-latest
 
     permissions:
@@ -81,7 +87,7 @@ jobs:
     env:
       # Empty on a dry run dispatched from a branch; resolved from manifest.json below.
       TAG: ${{ inputs.tag || (github.ref_type == 'tag' && github.ref_name) || '' }}
-      DRY_RUN: ${{ inputs.dry_run && 'true' || 'false' }}
+      DRY_RUN: ${{ (inputs.dry_run || (github.event_name == 'push' && github.ref_type == 'branch')) && 'true' || 'false' }}
 
     steps:
       # An explicit ref: a dispatched run would otherwise check out the branch it was
