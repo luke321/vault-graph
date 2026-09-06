@@ -156,6 +156,10 @@ const norm = (s) => String(s).split(/[\\/]/).filter(Boolean).join("/");
 /** @param {string} rel @param {string} dir */
 const under = (rel, dir) => !!dir && (rel === dir || rel.startsWith(dir + "/"));
 
+// github#62
+/** @param {() => void} fn @returns {unknown} */
+const attempt = (fn) => { try { fn(); return null; } catch (e) { return e; } };
+
 // github#32
 /** @param {string} a @param {string} b */
 const walkOrder = (a, b) => {
@@ -509,7 +513,7 @@ class VaultGraphView extends ItemView {
   // github#62
   teardown() {
     if (this.handle) {
-      try { this.handle.destroy(); } catch { }
+      attempt(() => this.handle.destroy());
     }
     this.handle = null;
     this.contentEl.empty();
@@ -523,12 +527,12 @@ class VaultGraphView extends ItemView {
 
     const api = this.handle && this.handle.api;
     if (api) {
-      try {
+      attempt(() => {
         if (api.readTheme) api.readTheme();
         if (api.renderer) api.renderer.refresh();
         if (api.placeLogo) api.placeLogo();
         if (api.heatBuild) api.heatBuild();
-      } catch { }
+      });
     }
   }
 

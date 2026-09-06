@@ -197,6 +197,12 @@ function mountVaultGraph(root, data, deps) {
    * @template T
    * @returns {Record<string, T>}
    */
+  // github#62
+  /** @param {() => void} fn @returns {unknown} */
+  function attempt(fn) {
+    try { fn(); return null; } catch (e) { return e; }
+  }
+
   function dict() {
     /** @type {unknown} */
     var o = Object.create(null);
@@ -715,9 +721,7 @@ function mountVaultGraph(root, data, deps) {
     folderColors = cleanSlotMap(map);
     buildColors();
     if (renderer) renderer.refresh();
-    try { placeLogo(); } catch { }
-    try { heatBuild(); } catch { }
-    try { buildLegend(); } catch { }
+    attempt(placeLogo); attempt(heatBuild); attempt(buildLegend);
     return folderColors;
   }
 
@@ -726,9 +730,7 @@ function mountVaultGraph(root, data, deps) {
     subfolderColors = cleanSlotMap(map);
     buildSubShades();
     if (renderer) renderer.refresh();
-    try { placeLogo(); } catch { }
-    try { heatBuild(); } catch { }
-    try { buildLegend(); } catch { }
+    attempt(placeLogo); attempt(heatBuild); attempt(buildLegend);
     return subfolderColors;
   }
 
@@ -5861,9 +5863,7 @@ function mountVaultGraph(root, data, deps) {
     var btn = $("opt-unlinkedByFolder");
     if (btn) btn.setAttribute("aria-pressed", unlinkedByFolder ? "true" : "false");
     hardRelayout(false, !!n);
-    try { placeLogo(); } catch { }
-    try { heatBuild(); } catch { }
-    try { buildLegend(); } catch { }
+    attempt(placeLogo); attempt(heatBuild); attempt(buildLegend);
     if (persist && onUnlinkedByFolder) onUnlinkedByFolder(unlinkedByFolder);
     if (n) cascade(null, { colToggle: true, movesFrom: movesFrom });
     return unlinkedByFolder;
@@ -5876,9 +5876,7 @@ function mountVaultGraph(root, data, deps) {
     var btn = $("opt-unlinkedTintByFolder");
     if (btn) btn.setAttribute("aria-pressed", unlinkedTintByFolder ? "true" : "false");
     if (renderer) renderer.refresh();
-    try { placeLogo(); } catch { }
-    try { heatBuild(); } catch { }
-    try { buildLegend(); } catch { }
+    attempt(placeLogo); attempt(heatBuild); attempt(buildLegend);
     if (persist && onUnlinkedTintByFolder) onUnlinkedTintByFolder(unlinkedTintByFolder);
     return unlinkedTintByFolder;
   }
@@ -6851,7 +6849,7 @@ function mountVaultGraph(root, data, deps) {
                     anchor: mode === "from" ? e[1] : e[0],
                     from0: e[0], to0: e[1], grab: ribbonMs(x, w),
                     winEnd0: heat ? heat.start + heat.cols * WEEK_MS : 0 };
-      try { rib.setPointerCapture(ev.pointerId); } catch { }
+      attempt(function () { rib.setPointerCapture(ev.pointerId); });
       rib.setAttribute("data-grab", mode === "win" ? "moving"
                                   : mode === "body" ? "moving" : "edge");
       if (mode === "win") {
@@ -6930,7 +6928,7 @@ function mountVaultGraph(root, data, deps) {
       brushDrag = null;
       rib.removeAttribute("data-grab");
       hideRTip();
-      try { rib.releasePointerCapture(ev.pointerId); } catch { }
+      attempt(function () { rib.releasePointerCapture(ev.pointerId); });
 
       if (d.mode === "win") return;
       if (d.moved && d.pFrom !== undefined) {
@@ -8352,10 +8350,10 @@ function mountVaultGraph(root, data, deps) {
     if (hlRaf) { WIN.cancelAnimationFrame(hlRaf); hlRaf = 0; }
     if (colorRaf) { WIN.cancelAnimationFrame(colorRaf); colorRaf = 0; }
     for (var i = onDestroy.length - 1; i >= 0; i--) {
-      try { onDestroy[i](); } catch { }
+      attempt(onDestroy[i]);
     }
     onDestroy.length = 0;
-    if (renderer) { try { renderer.kill(); } catch { } }
+    if (renderer) attempt(function () { renderer.kill(); });
     if (window.__vg === API) delete window.__vg;
     API = null;
   }

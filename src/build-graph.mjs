@@ -32,7 +32,7 @@ const obsidianVaults = () => {
       return Object.values(reg.vaults || {})
         .filter((v) => v && v.path && existsSync(join(v.path, ".obsidian")))
         .map((v) => ({ path: resolvePath(v.path), open: !!v.open, ts: v.ts || 0 }));
-    } catch { }
+    } catch { continue; }
   }
   return [];
 };
