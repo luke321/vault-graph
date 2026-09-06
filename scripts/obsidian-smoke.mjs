@@ -340,7 +340,7 @@ try {
     const open = await openGraph(c);
     const errs = errorsSince(n0);
     const b = open.build || {};
-    const line = "open -> __vg " + open.msToVg + " ms (build " + b.msTotal + " ms: index " + b.msIndex + ", edges " + b.msEdges + ", words " + b.msWords +
+    const line = "open -> __vg " + open.msToVg + " ms (build " + b.msTotal + " ms: index " + b.msIndex + ", edges " + b.msEdges + ", words " + b.msWords + (b.msWordsBackground !== undefined ? " (+" + b.msWordsBackground + " in the background)" : "") +
                  "; mount " + open.mountMs + " ms), -> intro landed and the disc at rest " + open.msToRest + " ms; " + open.order + " notes, " + open.size + " links, " + open.canvases + " canvases, stage " + open.stage;
     if (selected("no console errors")) report(errs.length === 0, "the view opens with no console errors", errs.length ? errs.slice(0, 3).join(" | ") : "0 errors; " + line);
     if (selected("load time")) report(open.msToRest > 0, "load time breakdown (informational)", line);
@@ -613,7 +613,7 @@ try {
     const b = open.build || {};
     report(errorsSince(n0).length === 0 && open.order > 0, "cold start: a second launch of the same vault opens the graph",
       "attach " + ob.attachedAfterMs + " ms after spawn (" + (Date.now() - spawnedAt) + " ms total); " + snap.files + " files and " + snap.sources + " resolved sources restored, stable " + Math.max(0, msCache) + " ms after attach" +
-      (snap.resolvedAt !== null ? " ('resolved' fired)" : " (no 'resolved' event)") + "; open -> __vg " + open.msToVg + " ms (build " + b.msTotal + " ms: index " + b.msIndex + ", edges " + b.msEdges + ", words " + b.msWords +
+      (snap.resolvedAt !== null ? " ('resolved' fired)" : " (no 'resolved' event)") + "; open -> __vg " + open.msToVg + " ms (build " + b.msTotal + " ms: index " + b.msIndex + ", edges " + b.msEdges + ", words " + b.msWords + (b.msWordsBackground !== undefined ? " (+" + b.msWordsBackground + " in the background)" : "") +
       "; mount " + open.mountMs + " ms), -> at rest " + open.msToRest + " ms; stage " + open.stage);
   }
 } catch (e) {

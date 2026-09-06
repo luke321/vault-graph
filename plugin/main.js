@@ -385,18 +385,30 @@ async function buildData(app, opts) {
     }
   }
 
-  /* ---- words: the only remaining I/O ------------------------------------- */
+  /* ---- words: the only remaining I/O, read after the mount ---------------- */
   const tEdges = performance.now();
-  if (opts.words) {
-    await Promise.all(nodes.filter((n) => n._file).map(async (n) => {
+  const wordFiles = opts.words ? nodes.map((n) => n._file || null) : null;
+  // github#58
+  /**
+   * @param {(index: number, words: number) => void} apply
+   * @returns {Promise<number>}
+   */
+  const readWords = async (apply) => {
+    const t = performance.now();
+    if (!wordFiles) return 0;
+    await Promise.all(wordFiles.map(async (file, i) => {
+      if (!file) return;
+      let words = 0;
       try {
-        const raw = await app.vault.cachedRead(n._file);
+        const raw = await app.vault.cachedRead(file);
         const m = /^---\r?\n[\s\S]*?\r?\n---/.exec(raw.replace(/^\uFEFF/, ""));
         const body = m ? raw.slice(m[0].length) : raw;
-        n.words = body.split(/\s+/).filter(Boolean).length;
-      } catch { n.words = 0; }
+        words = body.split(/\s+/).filter(Boolean).length;
+      } catch { words = 0; }
+      apply(i, words);
     }));
-  }
+    return Math.round(performance.now() - t);
+  };
   const tWords = performance.now();
 
   const edges = Array.from(weight).map((entry) => {
@@ -433,10 +445,12 @@ async function buildData(app, opts) {
       templatesExcluded: !opts.templates,
       ghostsIncluded: !!opts.ghosts,
     },
+    readWords: readWords,
     _spike: {
       msIndex: Math.round(tIndex - t0),
       msEdges: Math.round(tEdges - tIndex),
       msWords: Math.round(tWords - tEdges),
+      msWordsBackground: /** @type {number | null} */ (null),
       msTotal: Math.round(tWords - t0),
       templateDirs: templateDirs,
       dailyDir: dailyDir,
@@ -605,6 +619,13 @@ class VaultGraphView extends ItemView {
       },
     });
     this.mountMs = Math.round(performance.now() - t0);
+
+    const handle = this.handle;
+    void data.readWords((i, words) => {
+      data.nodes[i].words = words;
+      const api = handle.api;
+      if (api && api.graph && this.handle === handle) api.graph.setNodeAttribute(String(i), "words", words);
+    }).then((ms) => { data._spike.msWordsBackground = ms; }, () => {});
 
     this.registerDomEvent(page, "click", (ev) => {
       const a = ev.target instanceof Element ? ev.target.closest('a[href^="obsidian://"]') : null;
