@@ -3419,9 +3419,34 @@ check("legend count bars measure the vault, not the disc", async (p) => {
     }
   }
 
+  // github#50, github#3
+  const startOn = await p.eval(`__vg.unlinkedByFolder`);
+  await p.eval(`__vg.setUnlinkedByFolder(false); void 0`);
+  await sleep(700);
+  const sep = await read();
+  let paren = 0;
+  for (const r of sep.rows) {
+    const wantBar = /^\d+$/.test(r.ct) && r.count > 0;
+    if (!wantBar && !r.bar && /^\(\d+\)$/.test(r.ct)) paren++;
+    if (r.bar !== wantBar) {
+      wrong.push(`kept separate, ${r.g}: ct "${r.ct}" but bar=${r.bar}`);
+      continue;
+    }
+    if (!wantBar) continue;
+    const want = (r.count / sep.order) * 100;
+    if (r.pct === null || !r.applied || Math.abs(r.pct - want) > 0.01) {
+      wrong.push(`kept separate, ${r.g}: ${r.pct}% declared, ${want.toFixed(3)}% is its share`);
+    }
+  }
+  await p.eval(`__vg.setUnlinkedByFolder(${startOn}); void 0`);
+  await sleep(700);
+
   return {
-    ok: wrong.length === 0 && barred > 0,
+    ok: wrong.length === 0 && barred > 0 && paren > 0,
     detail: `${barred} of ${base.rows.length} rows barred over ${base.order} notes; ` +
+            (paren ? `${paren} parenthesised row(s) bare while kept separate; `
+                   : `NOT ASSERTED: no parenthesised row on this shape, so the ` +
+                     `no-bar-on-brackets rule had nothing to bite on; `) +
             `widest ${widest.g} ${widest.px.toFixed(1)}px, thinnest ${thinnest.g} ` +
             `${thinnest.px.toFixed(1)}px (1px floor); ${subs.n} sub rows bare; ` +
             `selection kept it=${sel}, hover kept it=${hov === null ? "no :hover from the harness" : hov}, ` +

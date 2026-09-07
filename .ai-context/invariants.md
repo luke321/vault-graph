@@ -1049,10 +1049,41 @@ same list, unlabelled. The sub-wedge on the disc already shows the within-parent
 ### Hover and selection must not wipe it
 
 `.lg:hover` and `.lg[data-hl="on"]` both used the `background` **shorthand**, which resets
-`background-image`; both are `background-color` now. This is measured with a real mouse move
-through `Input.dispatchMouseEvent` and a real click, not inferred — a first cut walked
+`background-image`; both are `background-color` now. Measured with a real mouse move through
+`Input.dispatchMouseEvent` and a real click, never inferred — a first cut walked
 `document.styleSheets` instead and flagged `.lg`'s own `background: none`, which is harmless
 because it cannot out-specify `.lg.bar`.
+
+**Be precise about what that edit actually buys, because the obvious claim is wrong.**
+`.vault-graph .lg:hover` and `.vault-graph .lg.bar` have the **same specificity** (two
+classes and a pseudo-class against three classes), so order decides, and `.lg.bar` is
+written after both shorthand rules. Measured: putting `background:` back on `:hover` leaves
+the bar **intact and this check green**. What the longhand buys is independence from rule
+order — move `.lg.bar` *above* `:hover` with the shorthand restored and the bar dies on
+hover, which is the case the check does catch. So the shorthand is a latent hazard for
+whoever next reorders this block, not a live one today.
+
+### The check was proved to have teeth, one regression at a time
+
+A check that cannot fail is worse than none. Each of these was applied to a green tree, run,
+and reverted:
+
+| break it like this | result |
+|---|---|
+| delete the `.lg.bar` rule (the `develop` state) | **FAIL** — 17 rows `size=auto`, and hover reads wiped |
+| scale to the largest folder instead of the vault | **FAIL** — `05 - Meeting Notes` declares 100%, its share is 28.938% |
+| draw a bar on the parenthesised rows | **FAIL** — `(unlinked)`: ct "(33)" but bar=true |
+| move `.lg.bar` above `:hover`, shorthand restored | **FAIL** — hovering wiped the bar |
+
+**The third one passed until the check learned to flip the membership toggle**, and that is
+the lesson worth keeping: a parenthesised count only *exists* while `(unlinked)` is kept
+separate, which is not the default state, so the entire no-bar-on-brackets rule — the most
+carefully argued edge case in the issue — went unasserted on the first cut. The check now
+sets `unlinkedByFolder` false, re-reads every row, and restores it. Parenthesised rows
+found bare that way: **1 on demo, 1 on the 10k, 3 on the shape vault** (`(vault root)`,
+`tiny`, `(unlinked)` — the shape vault is the only fixture carrying github#50's
+notes-stand-elsewhere case). A shape with none reports that it had nothing to bite on
+rather than passing.
 
 **And the layout must not move at all**, because the bar exists to cost `.nm` nothing:
 
