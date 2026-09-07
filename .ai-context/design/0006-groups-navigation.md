@@ -177,3 +177,29 @@ shape vault whose `projects` holds 77.4% of it; thinnest 1.0px on all three.
 **The denominator is every note on the page, not the visible ones**, so hiding a folder
 moves no bar — the same way it moves no count. `invariants.md` carries the check, the
 before/after layout table, and the pixel measurement of the painted length.
+
+### The bar's colour goes stale on an Obsidian theme flip, exactly as the swatch already does
+
+The bar takes `colorOf(g)` as an inline hex in a `--vg-bar` custom property, which is the
+same treatment the swatch beside it already has (`style="background:"`). **Measured**, running
+the exact sequence `plugin/main.js` performs on `css-change` — set `data-theme`, `readTheme()`,
+`renderer.refresh()` — on `05 - Meeting Notes`:
+
+| | dark | after the flip to light |
+|---|---|---|
+| `--g7` (the CSS variable) | `#9085e9` | **`#4a3aa7`** — correct |
+| the swatch | `#9085e9` | **`#9085e9`** — stale |
+| the bar | `#9085e9` | **`#9085e9`** — stale |
+
+`readTheme()` refreshes `THEME`, but nothing rebuilds `groupColor` or the legend, so `colorOf`
+keeps answering with the old palette. **This is pre-existing and not the bar's doing** — the
+swatch has always behaved this way, and the bar now goes stale with it, so the two never
+disagree, which is the property that matters for a row reading coherently. The standalone page
+is dark only (design/0009) and never flips at runtime, so only the plugin can reach it.
+
+Two things follow, neither of them done here. **design/0004 claims swatches are coloured by a
+`.vg-g7` class resolving `var(--g7)` "not by an inline style", and that is not what the code
+does** — there is no `.vg-g*` class anywhere in `page.js`, which is why the staleness exists at
+all. And the fix, whenever it is wanted, belongs to the swatch and the whole legend rather than
+to this bar: the theme handler would have to reach `buildColors()` and `buildLegend()`, which
+is a change to the plugin's contract with the page and wants its own issue.

@@ -3366,11 +3366,13 @@ check("legend count bars measure the vault, not the disc", async (p) => {
   if (subs.drawn) wrong.push(`${subs.drawn} of ${subs.n} subfolder rows draw a bar`);
 
   // github#78
+  const biggest = base.rows.filter((r) => r.bar).sort((a, b) => b.count - a.count)[0];
+  const sel1 = (attr, g) => `[${attr}="${g.replace(/"/g, '\\"')}"]`;
+
   let hov = null;
-  const hoverRow = base.rows.filter((r) => r.bar).sort((a, b) => b.count - a.count)[0];
-  if (hoverRow) {
+  if (biggest) {
     const box = await p.j(`(function(){
-      var el = document.querySelector('[data-g="${hoverRow.g.replace(/"/g, '\\"')}"]');
+      var el = document.querySelector('${sel1("data-g", biggest.g)}');
       var b = el.getBoundingClientRect();
       return { x: Math.round(b.left + 30), y: Math.round(b.top + b.height / 2) };
     })()`);
@@ -3378,34 +3380,35 @@ check("legend count bars measure the vault, not the disc", async (p) => {
                  { type: "mouseMoved", x: box.x, y: box.y, button: "none", clickCount: 0 });
     await sleep(250);
     const h = await p.j(`(function(){
-      var el = document.querySelector('[data-g="${hoverRow.g.replace(/"/g, '\\"')}"]');
+      var el = document.querySelector('${sel1("data-g", biggest.g)}');
       var cs = getComputedStyle(el);
       return { size: cs.backgroundSize, drawn: cs.backgroundImage !== 'none',
                hovered: el.matches(':hover') };
     })()`);
-    hov = h.hovered ? (h.drawn && h.size === hoverRow.size) : null;
-    if (h.hovered && !hov) wrong.push(`hovering ${hoverRow.g} wiped the bar (${h.size})`);
+    hov = h.hovered ? (h.drawn && h.size === biggest.size) : null;
+    if (h.hovered && !hov) wrong.push(`hovering ${biggest.g} wiped the bar (${h.size})`);
     await p.send("Input.dispatchMouseEvent",
                  { type: "mouseMoved", x: 5, y: 5, button: "none", clickCount: 0 });
     await sleep(150);
   }
 
   // github#78
-  const pick = base.rows.filter((r) => r.bar).sort((a, b) => b.count - a.count)[0];
   let sel = null, hid = null;
-  if (pick) {
-    await p.eval(`document.querySelector('[data-g="${pick.g.replace(/"/g, '\\"')}"]').click(); void 0`);
+  if (biggest) {
+    const click = async (attr, g) =>
+      p.eval(`document.querySelector('${sel1(attr, g)}').click(); void 0`);
+    await click("data-g", biggest.g);
     await sleep(400);
     const after = await read();
-    const row = after.rows.find((r) => r.g === pick.g);
-    sel = row && row.bar && Math.abs(row.pct - pick.pct) < 0.001;
-    if (!sel) wrong.push(`selecting ${pick.g} changed its bar (${row && row.size})`);
-    await p.eval(`document.querySelector('[data-g="${pick.g.replace(/"/g, '\\"')}"]').click(); void 0`);
+    const row = after.rows.find((r) => r.g === biggest.g);
+    sel = row && row.bar && Math.abs(row.pct - biggest.pct) < 0.001;
+    if (!sel) wrong.push(`selecting ${biggest.g} changed its bar (${row && row.size})`);
+    await click("data-g", biggest.g);
     await sleep(400);
 
-    const eye = base.rows.find((r) => r.bar && r.g !== pick.g);
+    const eye = base.rows.find((r) => r.bar && r.g !== biggest.g);
     if (eye) {
-      await p.eval(`document.querySelector('[data-eye="${eye.g.replace(/"/g, '\\"')}"]').click(); void 0`);
+      await click("data-eye", eye.g);
       await sleep(600);
       const h = await read();
       const moved = h.rows.filter((r) => {
@@ -3414,7 +3417,7 @@ check("legend count bars measure the vault, not the disc", async (p) => {
       });
       hid = moved.length;
       if (moved.length) wrong.push(`hiding ${eye.g} moved ${moved.length} bar(s)`);
-      await p.eval(`document.querySelector('[data-eye="${eye.g.replace(/"/g, '\\"')}"]').click(); void 0`);
+      await click("data-eye", eye.g);
       await sleep(600);
     }
   }
