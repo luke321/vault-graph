@@ -52,7 +52,8 @@ build (esbuild writing its summary to stderr under `$ErrorActionPreference = 'St
 failure no workflow run could have shown. Before every cut, run the script as it will run:
 
 ```powershell
-.\scriptselease.ps1 <version> -DryRun -AllowAnyBranch *> dryrun.log   # on the release branch, redirected
+.\scripts
+elease.ps1 <version> -DryRun -AllowAnyBranch *> dryrun.log   # on the release branch, redirected
 ```
 
 It runs every gate and the suite and stops before the tag; a green dry run of both halves is
@@ -113,7 +114,9 @@ reverse-engineered from it, not invented.
    releases did carry it, and this file used to say "every release gets this, whether or not
    anything else does" — that was written when the hero was 3 MB and there were no
    per-feature clips to carry the page.)
-3. **One `###` (h3, not h2) section per genuinely new or visibly-changed feature**, each
+3. **One `###` (h3, not h2) section per genuinely new or visibly-changed feature** — and the
+   set of them comes from the merge list in *First, list what is actually in the release*, not
+   from memory, so nothing in the range goes unmentioned. Each
    with its matching clip from `assets/features/*.webp` embedded the same way. Only
    feature clips that exist and are current belong here; don't call something "new" that
    already shipped in an earlier release — check the source at the previous tag first
@@ -204,24 +207,59 @@ predates a commit touching `src/page.js` — the same non-blocking severity as `
 re-recording. It checks the whole file rather than which `act:` a commit touched, so it can
 over-warn (a `colours`-only change flags every feature) but never under-warns silently.
 
+## First, list what is actually in the release
+
+**A release is the RANGE, not the work you happen to have just finished.** Before the bump is
+decided or a word of the section is written, enumerate everything between the previous tag and
+the commit being cut, and account for every line of it:
+
+```bash
+git log --oneline --merges <prev-tag>..HEAD          # one line per body of work
+git log <prev-tag>..HEAD --format=%s%n%b | grep -oE "(Closes|Refs) #[0-9]+" | sort | uniq -c
+git diff --stat <prev-tag>..HEAD -- src plugin       # did the page itself change?
+```
+
+Then walk the merge list and ask of each one: **is it in the CHANGELOG section?** A body of work
+that is not named there ships invisibly — the tag carries it, the release page does not mention
+it, and nobody reading the release ever learns it exists.
+
+**This is written down because 2.1.0 shipped that way once.** Its section described the mobile
+view and nothing else, while the range also held the hop trail (github#40, a whole user-visible
+feature with its own gallery entry) and a pass at the cascade's per-frame planner cost
+(github#19, script per frame 37.3 → 23.6 ms on the 10k fixture). The section had been written
+from the work in hand rather than from the range. The instruction further up to *check the source
+at the previous tag* had been read only as "do not call something new that already shipped" — the
+inverse mistake, saying nothing about something that did ship, was not covered until now. The
+release was deleted and re-cut.
+
+The same pass catches the other half of it: **a claim about the picture has to name the tree it
+was measured against.** That release said "compared against 2.0.0's page, nothing on the desktop
+moved", when the reference pages had been built from `develop`'s own source — which already
+carried the hop trail, and the hop trail *does* change the desktop picture, since it adds a back
+arrow and crumbs to a note's card. A render-diff run is only ever a statement about the two trees
+it compared. Name them.
+
 ## What it does, in case you need to do it by hand
 
-1. **Decide the bump** from `CHANGELOG.md`'s own table — MAJOR breaks output or invocation,
+1. **List the range** as above, and check every merge in it against the section you are about to
+   write.
+
+2. **Decide the bump** from `CHANGELOG.md`'s own table — MAJOR breaks output or invocation,
    MINOR is a new capability or an intentional visual change, PATCH is fixes and docs.
-2. **Write the release section in `CHANGELOG.md`** — human-readable, what shipped, no
+3. **Write the release section in `CHANGELOG.md`** — human-readable, what shipped, no
    before/after numbers. Those go in `changelog-detail.md`, which is the regression suite.
-3. **Re-record the hero** if the page changed visually, then commit `assets/demo.webp` —
+4. **Re-record the hero** if the page changed visually, then commit `assets/demo.webp` —
    `record-demo.ps1` to take the recording, `make-hero.ps1` to encode it. **Re-record any
    feature clip** this release changed, same two commands with `-Act <name>` — see above;
    this one's a judgment call, not "always."
-4. **Run the gates.** `npm run lint`, `node scripts/check-notice.mjs`, `node scripts/smoke.mjs`
+5. **Run the gates.** `npm run lint`, `node scripts/check-notice.mjs`, `node scripts/smoke.mjs`
    — and they run again on push via `.githooks/pre-push`, so a red suite cannot be released.
-5. **Tag, annotated**, with the release summary as the message, on `main`.
-6. **Push `main`, then the tag.** That order, so the workflow's main-ancestry guard cannot
+6. **Tag, annotated**, with the release summary as the message, on `main`.
+7. **Push `main`, then the tag.** That order, so the workflow's main-ancestry guard cannot
    lose the race. Everything below is what the workflow then does for you.
-7. **Build the plugin** — `node scripts/build-plugin.mjs` writes `main.js` and `styles.css`
+8. **Build the plugin** — `node scripts/build-plugin.mjs` writes `main.js` and `styles.css`
    at the repo root (gitignored); `manifest.json` is tracked.
-8. **Create the release** and attach exactly those three:
+9. **Create the release** and attach exactly those three:
    `gh release create <version> main.js manifest.json styles.css --notes-file <notes>`
 
 **Steps 7–8 by hand produce an unattested release**, and there is no way around that from a

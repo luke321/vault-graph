@@ -32,12 +32,49 @@ tapped.
 The iPad keeps the two-column desktop layout on purpose: at 744 px it is above the breakpoint, and
 there it is the better one.
 
-### Nothing on the desktop moved
+### Walking the links, and back
 
-Compared against 2.0.0's page across all three fixtures, seven states and three camera ratios:
-node positions identical, drawn radii identical, not one stage pixel different, and the stage,
-canvas, heatmap, ribbon and legend screenshots byte-identical. The only pixels that differ
-anywhere are the build clock in the sidebar's footer.
+<img src="https://raw.githubusercontent.com/luke321/vault-graph/develop/assets/features/hoptrail.webp" width="100%" alt="A card opened on a well-linked note, four of its linked notes clicked in turn so the trail grows a back arrow and crumbs, folded to the first and the last two, then two steps back with the arrow and a jump straight to the first crumb, which truncates the walk there">
+
+The linked notes on a card are clickable, and clicking one walks the graph — a hop. Each hop is
+remembered: the card grows a back arrow and a trail of where you came from, oldest first, folded
+to the first and the last two once the walk gets long. The arrow steps back one hop; any crumb
+jumps straight to that note and drops everything after it. A crumb whose note a filter or the
+date range is currently hiding greys out and stays clickable. Opening a note from the disc or the
+search box starts a new walk, and closing the card ends it.
+
+**It claims no keyboard shortcut, and that is a decision rather than an omission.** The first cut
+bound Backspace, Alt+ArrowLeft and Escape; they came out a day later, because Obsidian users bind
+their own hotkeys and a view that takes a key overrules a setting the user made, invisibly. The
+trail is pointer-only: the back arrow and the crumbs. The keyboard cost is real and unmitigated —
+Tab reaches the crumbs, which are buttons in a nav, and that is the whole keyboard story.
+
+The feature came from a contributor's patch (github#40), reworked; the credit is in the README.
+
+### Cascades draw nearly twice the frames on a big vault
+
+Every frame of a cascade used to re-derive the whole plan. It now carries a skeleton through the
+frame loop — the membership walk, the seating walk and the per-cell hub-rank sort are cached,
+while everything the weights actually change is re-summed each frame — and `isPushed` is only
+asked when something is highlighted.
+
+Measured on the 10,000-note fixture, hiding and showing one folder: script per cascade frame
+**37.3 / 39.3 → 23.6 / 23.8 ms** with *Size dots from the frame* on, **30.0 / 28.7 → 23.0 / 22.7**
+with it off, and **56–59 → 85–89 frames** drawn per cascade. The disc at rest is untouched.
+
+This is a pass at github#19 rather than the end of it, so the issue stays open.
+
+### The mobile work moved nothing on the desktop
+
+Compared against the page as it stood immediately before it — `develop`'s own source, which
+already carried the hop trail and the cascade work above — across all three fixtures, seven
+states and three camera ratios: node positions identical, drawn radii identical, not one stage
+pixel different, and the stage, canvas, heatmap, ribbon and legend screenshots byte-identical.
+The only pixels that differ anywhere are the build clock in the sidebar's footer.
+
+That is a claim about the mobile change alone, and it is worth being exact about the baseline:
+the hop trail *does* change the desktop picture, because it adds the back arrow and the crumbs to
+a note's card.
 
 ### Smaller things
 
