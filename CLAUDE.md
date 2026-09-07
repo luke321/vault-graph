@@ -26,6 +26,13 @@ measuring it: serve the page, drive it, read the numbers.
   the push to `develop` (the pre-push hook); do not run it by hand unless asked.
 - `git push` and merging into `develop` are separate asks, every time. `main` only ever
   receives `develop`.
+- **A release is the range, not the work in hand.** Everything it needs — a `CHANGELOG.md`
+  section accounting for *every* merge since the last tag, every clip it embeds, every doc naming
+  the version, the release body itself — is finished on `release/<version>` and read there before
+  anything merges down. **Once the tag exists nothing changes**: a fix is the next patch version,
+  because editing after the fact leaves the tag disagreeing with the published page. 2.1.0 was
+  cut twice for skipping this; `.ai-context/releasing.md` opens with the commands that enumerate
+  a range.
 - Measure before and after; the numbers go into `.ai-context/changelog-detail.md`, which is
   the regression suite. A changed constant means `invariants.md` changes in the same commit.
 - Fixtures: three generated vaults (`scripts/make-*-vault.mjs`) in the shared store; never a
