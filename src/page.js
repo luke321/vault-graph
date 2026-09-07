@@ -4801,7 +4801,8 @@ function mountVaultGraph(root, data, deps) {
     var onResize = function () {
       if (dead) return;
       if (rzTimer) WIN.clearTimeout(rzTimer);
-      rzTimer = WIN.setTimeout(function () { rzTimer = null; refreshSizeScale(); placeLogo(); }, 120);
+      rzTimer = WIN.setTimeout(function () { rzTimer = null; refreshSizeScale(); placeLogo();
+                                             syncCanvasTop(); }, 120);
     };
     if (window.ResizeObserver) {
       var rootRO = new ResizeObserver(onResize);
@@ -6079,6 +6080,14 @@ function mountVaultGraph(root, data, deps) {
   }
 
   /* github#73, design/0013 */
+  function syncCanvasTop() {
+    var c = $("canvas");
+    if (!c) return;
+    var r = c.getBoundingClientRect(), o = ROOT.getBoundingClientRect();
+    ROOT.style.setProperty("--vg-canvas-top", Math.max(0, Math.round(r.top - o.top)) + "px");
+  }
+
+  /* github#73, design/0013 */
   function afterPanel() {
     refreshSizeScale();
     placeLogo();
@@ -6094,6 +6103,7 @@ function mountVaultGraph(root, data, deps) {
       b.setAttribute("aria-expanded", sheetOpen ? "true" : "false");
       b.setAttribute("aria-label", sheetOpen ? "Hide the folder list" : "Show the folder list");
     }
+    syncCanvasTop();
     if (!quiet) afterPanel();
   }
 
@@ -6106,6 +6116,7 @@ function mountVaultGraph(root, data, deps) {
       b.setAttribute("aria-pressed", bandOpen ? "true" : "false");
       b.setAttribute("aria-label", bandOpen ? "Hide the calendar" : "Show the calendar");
     }
+    syncCanvasTop();
     if (!quiet) afterPanel();
   }
 

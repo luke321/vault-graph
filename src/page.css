@@ -630,6 +630,13 @@
       visibility: hidden;
     }
     .vault-graph[data-sheet="on"] #vg-sidebar { transform: translateY(0); visibility: visible; }
+    /* The sheet stops where the disc starts, so it covers the disc and never the band, and
+       its own heading row is where the floating buttons already are. --vg-canvas-top is
+       published by syncCanvasTop(); the min() keeps it to 72% when the band is away. */
+    .vault-graph[data-sheet="on"] #vg-sidebar {
+      max-height: min(72%, calc(100% - var(--vg-canvas-top, 0px)));
+    }
+    .vault-graph[data-band="on"][data-sheet="on"] .brand { padding-left: 100px; }
     .vault-graph #vg-heat { display: none; }
     .vault-graph[data-band="on"] #vg-heat:not([hidden]) { display: flex; }
     /* With the band hidden, #vg-canvas would inherit the stage's auto row and collapse to

@@ -156,6 +156,17 @@ now sits at `z-index: 9`, above the sheet, and the harness asserts the round tri
 stacking order. **A tap on what is left of the disc also closes the sheet**, which is what a
 scrim would do and is a second way out that does not depend on a z-index at all.
 
+**The sheet stops where the disc starts, and the buttons land on its heading.** Raising the
+cluster above the sheet made it reachable and put it over the search box, which reads like a
+mistake. The two anchors are independent -- the cluster is offset from `#vg-canvas`, which the
+band pushes down, and the sheet is anchored to the bottom of the viewport -- so the fix is to
+make them meet: `syncCanvasTop()` publishes the disc area's own top as `--vg-canvas-top`, the
+open sheet takes `min(72%, calc(100% - var(--vg-canvas-top)))`, and the heading row steps aside
+with a left indent while the band is up. The sheet then covers the disc and never the band, and
+the buttons read as part of its header rather than as something floating over the search box.
+The variable is republished by both toggles, quiet or not, and on the resize beat, because the
+band's own height moves with the viewport.
+
 **Selecting a note closes the sheet.** The card is pinned to the foot and the sheet covers the
 bottom 72% at a higher z-index, so tapping a note — or a search hit inside the sheet itself —
 would otherwise open the card invisibly underneath it.
