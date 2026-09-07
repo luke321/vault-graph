@@ -3307,15 +3307,7 @@ check("the (unlinked) row's count is parenthesised while kept separate, plain on
   return { ok, detail: `kept separate: "${r.ctSeparate}" (want "(N)"), joined: "${r.ctJoined}" (want "N")` };
 });
 
-// github#78
-/**
- * The bar is a background layer on `.lg`, and Chrome leaves `max()` UNRESOLVED in computed
- * style -- `max(1px, 14.255%) 2px` on a barred row against `auto` on a plain one. That is
- * what makes this checkable at all: had a `background` shorthand elsewhere in the cascade
- * won, the longhand would read `auto` and the percentage would be gone, so parsing it back
- * out proves both that the rule applied AND what share it declared. The painted length is
- * then arithmetic on the 217px positioning area, floored at 1px.
- */
+// github#78, design/0006
 check("legend count bars measure the vault, not the disc", async (p) => {
   const read = () => p.j(`(function(){
     var order = __vg.graph.order;
@@ -3323,13 +3315,7 @@ check("legend count bars measure the vault, not the disc", async (p) => {
       var lg = lgr.querySelector('.lg');
       if (!lg) return null;
       var cs = getComputedStyle(lg), g = lg.getAttribute('data-g');
-      // No regex here on purpose. This whole block is a template literal, so an escape
-      // written for the page is consumed before the page ever sees it: an escaped open
-      // paren arrived as a bare one, turning the intended literal into a capturing group
-      // that matches nothing -- which read as "all 17 rows are broken" rather than as a
-      // broken test. The two facts are read apart instead: --vg-share is the share the
-      // row declared, and a background-size still starting with max proves that .lg.bar
-      // won the cascade rather than one of the background shorthands.
+      // github#78 -- no regex: an escape in this template literal never reaches the page
       var declared = cs.getPropertyValue('--vg-share').trim();
       return { g: g, ct: lgr.querySelector('.ct').textContent,
                bar: lg.classList.contains('bar'),
@@ -3345,8 +3331,7 @@ check("legend count bars measure the vault, not the disc", async (p) => {
   const wrong = [];
   let barred = 0, widest = { g: null, px: 0 }, thinnest = { g: null, px: 1e9 };
   for (const r of base.rows) {
-    // A bar belongs to a plain, non-zero count and to nothing else: a parenthesised count
-    // means the notes are tallied off this row's own wedge (github#50, github#3).
+    // github#50, github#3
     const wantBar = /^\d+$/.test(r.ct) && r.count > 0;
     if (r.bar !== wantBar) { wrong.push(`${r.g}: ct "${r.ct}" but bar=${r.bar}`); continue; }
     if (!wantBar) {
@@ -3367,11 +3352,7 @@ check("legend count bars measure the vault, not the disc", async (p) => {
     if (px < thinnest.px) thinnest = { g: r.g, px };
   }
 
-  // Sub rows are deliberately bare: subCount is within one parent, so a vault-scaled
-  // sub-bar would be a stub and a parent-scaled one a second denominator in one list.
-  // Idempotent on purpose: every check shares one page and `nav counts share one right
-  // edge` already leaves the tree open, so a blind click would FOLD it and make this
-  // assertion vacuous -- it passed on zero sub rows the first time it was written.
+  // github#78 -- idempotent: the tree may already be open
   await p.eval(`(function(){ var b = document.querySelectorAll('#vg-legend [data-tw]');
                 for (var i = 0; i < b.length; i++) {
                   if (b[i].getAttribute('aria-expanded') !== 'true') b[i].click();
@@ -3384,11 +3365,7 @@ check("legend count bars measure the vault, not the disc", async (p) => {
   })()`);
   if (subs.drawn) wrong.push(`${subs.drawn} of ${subs.n} subfolder rows draw a bar`);
 
-  // Hover is measured with a REAL pointer, not inferred from the stylesheet. `.lg:hover`
-  // and `.lg[data-hl="on"]` both used the `background` shorthand, which resets
-  // background-image, so either could wipe the bar; a first cut of this check read
-  // document.styleSheets instead and flagged `.lg`'s own `background: none` reset, which
-  // is harmless (lower specificity). What matters is what the row paints under a pointer.
+  // github#78
   let hov = null;
   const hoverRow = base.rows.filter((r) => r.bar).sort((a, b) => b.count - a.count)[0];
   if (hoverRow) {
@@ -3413,8 +3390,7 @@ check("legend count bars measure the vault, not the disc", async (p) => {
     await sleep(150);
   }
 
-  // Selecting a row must not drop its bar, and hiding a folder must not move any bar:
-  // the denominator is every note on the page, not the visible ones.
+  // github#78
   const pick = base.rows.filter((r) => r.bar).sort((a, b) => b.count - a.count)[0];
   let sel = null, hid = null;
   if (pick) {

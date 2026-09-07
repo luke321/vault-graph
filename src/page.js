@@ -5087,20 +5087,8 @@ function mountVaultGraph(root, data, deps) {
     return !counts[g] && held ? "(" + held + ")" : String(counts[g]);
   }
 
-  // github#78
-  /**
-   * This row's share of the whole vault, or 0 for a row that draws no bar.
-   *
-   * Mirrors `countText` above: a bar belongs to a plain count and never to a parenthesised
-   * one. Brackets mean the notes are counted somewhere other than this row's own wedge --
-   * a folder whose notes stand elsewhere, or the unlinked group kept separate -- so a bar
-   * under them would claim a share of the disc the row does not have. `legend count bars`
-   * in the smoke suite asserts the two agree row by row rather than trusting this comment.
-   *
-   * The denominator is every note on the page, not the visible ones, so hiding a folder
-   * moves no bar -- the same way it moves no count. design/0006
-   * @param {string} g
-   */
+  // github#78, design/0006
+  /** @param {string} g */
   function barShare(g) {
     if (!counts[g]) return 0;
     if (g === UNLINKED && !unlinkedByFolder) return 0;
@@ -5179,8 +5167,7 @@ function mountVaultGraph(root, data, deps) {
       var live = !!counts[g];
       var lgrClass = "lgr" + (live ? "" : " lgr-empty");
 
-      // github#78 -- the bar is decoration, so it adds no element and no target: the row
-      // keeps its four (twisty, eye, label, only) and carries the bar as its own background.
+      // github#78, design/0006
       var share = barShare(g);
       var lgAttrs = share
         ? ' class="lg bar" style="--vg-share:' + (share * 100).toFixed(3) +

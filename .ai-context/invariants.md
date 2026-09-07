@@ -990,6 +990,87 @@ edge at 266px with the tree open, and 9 / 9 / one edge at the folded default. Th
 button is laid out at every depth with only its opacity changing on hover, so this holds
 while hovering too.
 
+## The legend's count bar is a share of the vault, not of the wedge beside it
+
+Each legend row whose count is a plain number carries a 2px rule along the bottom of `.lg`,
+its length that row's share of **every note on the page**. The bar measures notes; the wedge
+next to it measures notes *within its own ring*, because angular share is allocated per band
+(design/0001). **The two will therefore disagree, and that is the honest reading** — a small
+inner-band folder can hold a wide wedge and still draw a short bar. Nothing in the UI may
+imply otherwise; the count's title says "of the vault" in those words.
+
+```javascript
+// the share each row declares, against the share its count actually is
+(function () {
+  var order = __vg.graph.order;
+  return [].map.call(document.querySelectorAll("#vg-legend .lg.bar"), function (el) {
+    var g = el.getAttribute("data-g");
+    return { g: g,
+             declared: parseFloat(getComputedStyle(el).getPropertyValue("--vg-share")),
+             is: (__vg.groupCount(g) / order) * 100,
+             applied: getComputedStyle(el).backgroundSize.indexOf("max(1px,") === 0 };
+  }).filter(function (r) { return !r.applied || Math.abs(r.declared - r.is) > 0.01; });
+})()
+```
+
+Must be **empty**. Measured: **17 of 18 rows barred over 1403 notes** (demo) and over 10002
+(10k), **6 of 7 over 954** (shape vault). Widest bar 62.8px / 94.5px / 167.9px, thinnest
+**1.0px everywhere** — floored, so a one-note folder still marks its row instead of
+vanishing.
+
+**`getComputedStyle` cannot resolve the `max()`, and that is what makes this checkable.**
+Chrome reports `background-size: max(1px, 28.938%) 2px` on a barred row and `auto` on a
+plain one, so a size still beginning `max(1px,` proves `.lg.bar` won the cascade rather
+than one of the `background` shorthands. The share is read from `--vg-share` beside it.
+Do not try to parse it with a regex written inside the check's template literal: an escaped
+open paren is consumed before the page sees it, the intended literal became a capturing
+group, and all 17 rows read as broken when nothing was.
+
+**The painted length was verified against the declaration, in pixels**, by clipping each row
+out of a screenshot and counting the run of bar-coloured pixels — Chrome decoding its own
+PNG through a canvas, since no computed style can answer it. Worst disagreement across the
+demo's 17 rows: **0.36 CSS px**, which is antialiasing. 1 note painted 1.00px against the
+1px floor; 406 notes painted 62.50px against 62.80px declared.
+
+### A bar belongs to a plain count and to nothing else
+
+A parenthesised count means the notes are tallied somewhere other than this row's own wedge
+— github#50's folder whose notes stand elsewhere, and the unlinked group kept separate — so
+those rows **draw nothing**, and neither do the `.lgr-empty` rows at zero. Verified byte for
+byte: the `(unlinked)` row's crop is **identical before and after the change**, 6715 bytes
+both times. One consequence, and it is intended: with `(unlinked)` kept separate the folder
+bars sum to less than the whole vault (1370 of 1403 on the demo), and that row is the
+remainder.
+
+**Subfolder rows are bare.** `subCount` is within one parent, so a vault-scaled sub-bar
+would be a stub on every row and a parent-scaled one would put a second denominator in the
+same list, unlabelled. The sub-wedge on the disc already shows the within-parent share.
+
+### Hover and selection must not wipe it
+
+`.lg:hover` and `.lg[data-hl="on"]` both used the `background` **shorthand**, which resets
+`background-image`; both are `background-color` now. This is measured with a real mouse move
+through `Input.dispatchMouseEvent` and a real click, not inferred — a first cut walked
+`document.styleSheets` instead and flagged `.lg`'s own `background: none`, which is harmless
+because it cannot out-specify `.lg.bar`.
+
+**And the layout must not move at all**, because the bar exists to cost `.nm` nothing:
+
+| | before | after |
+|---|---|---|
+| `.lg` row width | 219px every row | **219px** |
+| `.nm` width (3-digit / 4-digit / no-`only` row) | 122 / 117 / 141px | **122 / 117 / 141px** |
+| `.lgr` height | 28.84px | **28.84px** |
+| names truncating (demo, 10k / shape) | 1 of 18 / 0 of 7 | **1 of 18 / 0 of 7** |
+| `nav counts share one right edge` | 1 folded, 1 open | **1 folded, 1 open** |
+| golden snapshot, all three fixtures | — | **band and positions unchanged** |
+
+```bash
+node scripts/smoke.mjs --only "count bars"      # the share, the edge cases, hover, selection
+node scripts/smoke.mjs --only "right edge"      # 1 edge, not 2 -- the column survived
+node scripts/smoke.mjs --only "golden"          # the disc did not move
+```
+
 ## Animations are a fixed length, unless the page can't draw them
 
 Durations are wall-clock (`TIMELINE_MS` 4500, `CASCADE_MS` 1600, `TWEEN_MS` 380), so

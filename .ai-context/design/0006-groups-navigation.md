@@ -122,3 +122,58 @@ still on the chip, so the highlight rode the whole cascade and overlapped the no
 (seen 2026-09-06, side by side on a mirror of the reporting vault). The chip's own `mouseenter`
 clears the hover highlight; leaving it for the rest of the row hands the row's highlight back;
 hovering the row anywhere else is unchanged.
+
+## Each row draws its share of the vault
+
+**Status** as-built · github#78 · 2026-09-08
+
+The disc makes a lopsided vault obvious at a glance. The legend did not: every row was the
+same height and the same weight, and the imbalance survived only as `.ct` — 11px,
+`--text-3`, tabular, and the least prominent thing in the row. On the demo mirror that meant
+**406 notes and 1 note got the same row**, a 406x spread rendered eighteen times identically.
+
+Each row whose count is a **plain number** now carries a 2px rule along the bottom of `.lg`,
+in the group's own colour, its length that row's share of every note on the page.
+
+**It measures notes, and the wedge beside it measures notes within its own ring.** Angular
+share is allocated per band (design/0001), so a small inner-band folder can hold a wide
+wedge and still draw a short bar. The two disagree by design, and the count's title says
+"of the vault" in those words so nothing pretends otherwise. Scaling to the largest folder
+instead was rejected for exactly this reason: the bar's fraction of its track would then
+mean one thing while its label meant another.
+
+**The bar is a background layer, not a fifth grid column, and the numbers are why.** `.nm`
+is the only `1fr` cell and is already truncating — 122px against the 123px that
+`09 - Maps of Content` needs, on both the demo and the 10k fixture. Worse, `.nm` is not one
+width down a single list: **122px on a three-digit row, 117px on a four-digit one, 141px on
+the row that drops its `only` chip**. So the issue's own first suggestion, a rule behind
+`.nm`, would have handed the biggest rows a 4% shorter track than their neighbours. `.lg` is
+**219px on every row**, which makes the row the only honest track. An inset shadow cannot
+take a percentage at all, and `box-shadow: inset 2px 0 0 0` is already the third channel
+selection uses.
+
+**It adds no element and no target.** The row already carries four (eye, twisty, label,
+`only`); a fifth would be a lie about what is clickable. The bar has no handler, no
+`tabindex`, and lives entirely in `.lg`'s own background.
+
+**A bar belongs to a plain count and to nothing else.** A parenthesised count means the
+notes are tallied somewhere other than this row's own wedge — github#50's folder whose notes
+stand elsewhere, and the unlinked group kept separate — so those rows draw nothing, as do the
+`.lgr-empty` rows at zero. Brackets already mean "no share of the disc"; a bar under them
+would say the opposite. The consequence is intended and worth knowing: with `(unlinked)`
+kept separate the folder bars sum to **1370 of 1403** on the demo, and that row is the
+remainder.
+
+**Subfolder rows are bare.** `subCount` is within one parent, so a vault-scaled sub-bar is a
+stub on every row, and a parent-scaled one puts a second denominator in the same list — in a
+list that already truncates 2 of its 36 sub-names at 100px. The sub-wedge on the disc already
+carries the within-parent share. Parent-scaled sub-bars remain a thing that could be added,
+with a label; two silent denominators in one list is the thing that must not be.
+
+**A one-note folder is floored at 1px** rather than dropped, so every folder standing on the
+disc marks its row. Measured: widest 62.8px on the demo, 94.5px on the 10k, 167.9px on the
+shape vault whose `projects` holds 77.4% of it; thinnest 1.0px on all three.
+
+**The denominator is every note on the page, not the visible ones**, so hiding a folder
+moves no bar — the same way it moves no count. `invariants.md` carries the check, the
+before/after layout table, and the pixel measurement of the painted length.
