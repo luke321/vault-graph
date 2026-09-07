@@ -92,7 +92,7 @@ changes to match — the disc takes the screen, the folders, search and view but
 sheet from two buttons at the top left, the calendar stays on and can be put away, and a note's
 card rises as a sheet at the foot so the disc is still visible above what you tapped.
 
-<img src="../assets/features/mobile.webp" width="420" alt="A phone-sized window with a fingertip for a pointer: the disc zoomed in until its dots are finger-sized, a note tapped so its card rises as a sheet at the foot, the folder list slid up as a sheet and a folder hidden from inside it, the disc re-packing when the sheet goes away, the calendar put away and brought back, then a double-tap fitting the whole disc back into view">
+<img src="../assets/features/mobile.webp" width="420" alt="A phone-sized window with a fingertip for a pointer, each tap leaving a ring: the disc zoomed in until its dots are finger-sized, a note tapped so its card rises as a sheet at the foot, the folder list slid up as a sheet, one folder soloed from inside it, the sheet put away so the rest recedes, then a double-tap fitting what is left back into view">
 
 ## The camera
 

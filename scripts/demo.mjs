@@ -22,8 +22,49 @@ const ease = (p) => (p < 0.5 ? 2 * p * p : 1 - 2 * (1 - p) * (1 - p));
 
 let at = { x: 0, y: 0 };
 
+// github#73, design/0013
+let touchMode = false;
+const DISC_KINDS = ["note", "stage", "biginner", "busiest"];
+const isDisc = (target) => Array.isArray(target) && DISC_KINDS.includes(target[0]);
+
 async function cursorTo(page, x, y) {
   await page.eval(`__vg.demo.cursorAt(${Math.round(x)}, ${Math.round(y)})`).catch(() => {});
+}
+
+async function fingerTo(page, x, y) {
+  const x0 = at.x, y0 = at.y;
+  const steps = Math.max(1, Math.round(MOVE_MS / STEP_MS));
+  for (let i = 1; i <= steps; i++) {
+    const e = ease(i / steps);
+    await cursorTo(page, Math.round(x0 + (x - x0) * e), Math.round(y0 + (y - y0) * e));
+    await sleep(STEP_MS);
+  }
+  at = { x, y };
+}
+
+async function tapAt(page, x, y) {
+  await page.send("Input.synthesizeTapGesture",
+                  { x: Math.round(x), y: Math.round(y), duration: 70, gestureSourceType: "touch" });
+}
+
+async function pressAt(page, x, y) {
+  const base = { x, y, button: "left", buttons: 1, clickCount: 1 };
+  await page.send("Input.dispatchMouseEvent", { type: "mousePressed", ...base });
+  await sleep(60);
+  await page.send("Input.dispatchMouseEvent", { type: "mouseReleased", ...base, buttons: 0 });
+}
+
+async function reach(page, x, y) {
+  if (touchMode) return fingerTo(page, x, y);
+  return moveTo(page, x, y);
+}
+
+async function activate(page, target, x, y) {
+  if (!touchMode) return click(page, x, y);
+  // github#73, design/0013
+  await page.eval(`__vg.demo.tapAt(${Math.round(x)}, ${Math.round(y)})`).catch(() => {});
+  if (isDisc(target)) return tapAt(page, x, y);
+  return pressAt(page, x, y);
 }
 
 function cursorHide(page) {
@@ -182,8 +223,16 @@ async function main() {
     }
     if (beat.park) {
       console.log(`[${el()}] ${n} park — ${beat.why || ""}`);
-      await moveTo(page, parkAt.x, parkAt.y);
+      await reach(page, parkAt.x, parkAt.y);
       trace.push(`park: ${beat.why || ""}`);
+      continue;
+    }
+    if (beat.touchmode) {
+      touchMode = true;
+      await page.send("Emulation.setTouchEmulationEnabled", { enabled: true, maxTouchPoints: 5 })
+        .catch((e) => console.warn(`${n} ! touch emulation refused: ${e.message}`));
+      console.log(`[${el()}] ${n} touch mode — ${beat.why || ""}`);
+      trace.push("touchmode");
       continue;
     }
     if (beat.click || beat.hover || beat.dblclick || beat.drag || beat.wheel || beat.rightclick) {
@@ -243,24 +292,32 @@ async function main() {
       if (beat.wheel) {
         console.log(`[${el()}] ${n} wheel ${beat.wheel > 0 ? "in" : "out"} x${Math.abs(beat.wheel)} ` +
                     `over ${w.label} — ${beat.why || ""}`);
-        await moveTo(page, w.x, w.y);
+        await reach(page, w.x, w.y);
         await sleep(DWELL_MS);
         await wheel(page, w.x, w.y, beat.wheel);
         trace.push(`wheel: ${w.label} ${beat.wheel}`);
         continue;
       }
       if (beat.dblclick) {
-        console.log(`[${el()}] ${n} double-click ${w.label} at ${w.x},${w.y} — ${beat.why || ""}`);
-        await moveTo(page, w.x, w.y);
+        console.log(`[${el()}] ${n} ${touchMode ? "double-tap" : "double-click"} ${w.label} ` +
+                    `at ${w.x},${w.y} — ${beat.why || ""}`);
+        await reach(page, w.x, w.y);
         await sleep(DWELL_MS);
-        await doubleClick(page, w.x, w.y);
+        if (touchMode) {
+          await activate(page, beat.target, w.x, w.y);
+          await sleep(90);
+          await activate(page, beat.target, w.x, w.y);
+        } else {
+          await doubleClick(page, w.x, w.y);
+        }
         trace.push(`dblclick: ${w.label}`);
         continue;
       }
-      console.log(`[${el()}] ${n} ${beat.click ? "click" : "hover"} ${w.label} at ${w.x},${w.y} — ${beat.why || ""}`);
-      await moveTo(page, w.x, w.y);
+      console.log(`[${el()}] ${n} ${beat.click ? (touchMode ? "tap" : "click") : "hover"} ` +
+                  `${w.label} at ${w.x},${w.y} — ${beat.why || ""}`);
+      await reach(page, w.x, w.y);
       await sleep(DWELL_MS);
-      if (w.expect) {
+      if (w.expect && !touchMode) {
         const got = await page.eval("JSON.stringify(__vg.demo.hovered())");
         const hit = got && JSON.parse(got);
         if (hit !== w.expect) {
@@ -268,7 +325,7 @@ async function main() {
           trace.push(`MISSED: ${beat.target.join(" ")}`);
         }
       }
-      if (beat.click) await click(page, w.x, w.y);
+      if (beat.click) await activate(page, beat.target, w.x, w.y);
       trace.push(`${beat.click ? "click" : "hover"}: ${w.label}`);
       continue;
     }

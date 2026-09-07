@@ -569,6 +569,27 @@
   }
   .vault-graph #vg-detail .x:hover { color: var(--text-1); }
 
+  /* github#73 -- geometry only; demoTapAt drives the two rings with transitions, because
+     this file has no keyframes and does not need any for one ripple. */
+  .vault-graph #vg-demotap {
+    position: absolute; left: 0; top: 0; z-index: 49; pointer-events: none;
+  }
+  .vault-graph #vg-demotap[hidden] { display: none; }
+  .vault-graph #vg-demotap span {
+    position: absolute; left: 0; top: 0; display: block;
+    width: 30px; height: 30px; margin: -15px 0 0 -15px;
+    border: 2px solid #fff; border-radius: 50%;
+    opacity: 0; transform: scale(.3);
+  }
+  .vault-graph #vg-demotap span:last-child {
+    border-color: var(--accent); border-width: 3px;
+  }
+  .vault-graph #vg-demotap span.armed { opacity: .95; transform: scale(.3); transition: none; }
+  .vault-graph #vg-demotap span.go {
+    opacity: 0; transform: scale(2.7);
+    transition: transform .45s ease-out, opacity .45s ease-out;
+  }
+
   .vault-graph #vg-democursor {
     position: absolute; left: 0; top: 0; z-index: 50; pointer-events: none;
     filter: drop-shadow(0 1px 2px rgba(0,0,0,.45));
@@ -668,6 +689,9 @@
     .vault-graph #vg-rangebox { order: 4; }
     .vault-graph #vg-democursor .arrow { display: none; }
     .vault-graph #vg-democursor .finger { display: block; }
+    /* Solo is opacity 0 until its row is hovered, which on a finger means never.
+       github#73, design/0013 */
+    .vault-graph .lg .only, .vault-graph .lgs .only { opacity: 1; }
   }
   @media (max-width: 720px) and (prefers-reduced-motion: reduce) {
     .vault-graph #vg-sidebar { transition: none; }
