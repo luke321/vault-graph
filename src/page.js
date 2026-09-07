@@ -5087,6 +5087,33 @@ function mountVaultGraph(root, data, deps) {
     return !counts[g] && held ? "(" + held + ")" : String(counts[g]);
   }
 
+  // github#78
+  /**
+   * This row's share of the whole vault, or 0 for a row that draws no bar.
+   *
+   * Mirrors `countText` above: a bar belongs to a plain count and never to a parenthesised
+   * one. Brackets mean the notes are counted somewhere other than this row's own wedge --
+   * a folder whose notes stand elsewhere, or the unlinked group kept separate -- so a bar
+   * under them would claim a share of the disc the row does not have. `legend count bars`
+   * in the smoke suite asserts the two agree row by row rather than trusting this comment.
+   *
+   * The denominator is every note on the page, not the visible ones, so hiding a folder
+   * moves no bar -- the same way it moves no count. design/0006
+   * @param {string} g
+   */
+  function barShare(g) {
+    if (!counts[g]) return 0;
+    if (g === UNLINKED && !unlinkedByFolder) return 0;
+    return graph.order ? counts[g] / graph.order : 0;
+  }
+
+  // github#78
+  /** @param {number} share */
+  function shareText(share) {
+    var pct = share * 100;
+    return (pct < 0.1 ? "<0.1" : pct.toFixed(1)) + "%";
+  }
+
   // github#46
   /** @type {Point | null} */
   var ptr = null;
@@ -5151,11 +5178,24 @@ function mountVaultGraph(root, data, deps) {
       // github#50
       var live = !!counts[g];
       var lgrClass = "lgr" + (live ? "" : " lgr-empty");
+
+      // github#78 -- the bar is decoration, so it adds no element and no target: the row
+      // keeps its four (twisty, eye, label, only) and carries the bar as its own background.
+      var share = barShare(g);
+      var lgAttrs = share
+        ? ' class="lg bar" style="--vg-share:' + (share * 100).toFixed(3) +
+          '%;--vg-bar:' + colorOf(g) + '"'
+        : ' class="lg"';
+      var ctTitle = share
+        ? ' title="' + counts[g] + (counts[g] === 1 ? " note" : " notes") + " · " +
+          shareText(share) + ' of the vault"'
+        : '';
+
       var row = '<div class="' + lgrClass + '">' +
         twBtn(hasSubs ? 'data-tw="' + esc(g) + '"' : null, open) +
         (live ? eyeBtn('data-eye="' + esc(g) + '"', vis, g)
               : '<button class="eye none" disabled aria-hidden="true"></button>') +
-        '<button class="lg" data-g="' + esc(g) + '" data-hl="' + (hl ? "on" : "off") +
+        '<button' + lgAttrs + ' data-g="' + esc(g) + '" data-hl="' + (hl ? "on" : "off") +
           '" aria-pressed="' + vis + '" title="Highlight ' + esc(g) + '">' +
         '<span class="sw' + (bandLock && bandLock[g] ? ' sw-in' : '') +
           '" title="' + swatchTitle(g, bandLock) +
@@ -5163,8 +5203,8 @@ function mountVaultGraph(root, data, deps) {
         '<span class="nm" title="' + esc(g) + '">' + esc(g) + '</span>' +
         (live ? '<span class="only" data-only="1" title="Show only ' + esc(g) + '">only</span>'
               : '<span class="only none" aria-hidden="true"></span>') +
-        // github#50
-        '<span class="ct">' + countText(g) + '</span></button>' +
+        // github#50, github#78
+        '<span class="ct"' + ctTitle + '>' + countText(g) + '</span></button>' +
         '</div>';
 
       if (open && vis) {

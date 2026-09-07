@@ -131,6 +131,7 @@ const POINTER_DRIVEN = [
   "density follows the notes",
   "auto-fits the camera",
   "left alone by a visibility toggle",
+  "count bars",                   // github#78 -- reads :hover from a real mouse move
 ];
 
 const FAST = argv.includes("--fast");
@@ -3304,6 +3305,153 @@ check("the (unlinked) row's count is parenthesised while kept separate, plain on
   })()`);
   const ok = /^\(\d+\)$/.test(r.ctSeparate || "") && /^\d+$/.test(r.ctJoined || "");
   return { ok, detail: `kept separate: "${r.ctSeparate}" (want "(N)"), joined: "${r.ctJoined}" (want "N")` };
+});
+
+// github#78
+/**
+ * The bar is a background layer on `.lg`, and Chrome leaves `max()` UNRESOLVED in computed
+ * style -- `max(1px, 14.255%) 2px` on a barred row against `auto` on a plain one. That is
+ * what makes this checkable at all: had a `background` shorthand elsewhere in the cascade
+ * won, the longhand would read `auto` and the percentage would be gone, so parsing it back
+ * out proves both that the rule applied AND what share it declared. The painted length is
+ * then arithmetic on the 217px positioning area, floored at 1px.
+ */
+check("legend count bars measure the vault, not the disc", async (p) => {
+  const read = () => p.j(`(function(){
+    var order = __vg.graph.order;
+    var rows = [].map.call(document.querySelectorAll('#vg-legend .lgr'), function (lgr) {
+      var lg = lgr.querySelector('.lg');
+      if (!lg) return null;
+      var cs = getComputedStyle(lg), g = lg.getAttribute('data-g');
+      // No regex here on purpose. This whole block is a template literal, so an escape
+      // written for the page is consumed before the page ever sees it: an escaped open
+      // paren arrived as a bare one, turning the intended literal into a capturing group
+      // that matches nothing -- which read as "all 17 rows are broken" rather than as a
+      // broken test. The two facts are read apart instead: --vg-share is the share the
+      // row declared, and a background-size still starting with max proves that .lg.bar
+      // won the cascade rather than one of the background shorthands.
+      var declared = cs.getPropertyValue('--vg-share').trim();
+      return { g: g, ct: lgr.querySelector('.ct').textContent,
+               bar: lg.classList.contains('bar'),
+               pct: declared.charAt(declared.length - 1) === '%' ? parseFloat(declared) : null,
+               applied: cs.backgroundSize.indexOf('max(1px,') === 0,
+               size: cs.backgroundSize, drawn: cs.backgroundImage !== 'none',
+               count: __vg.groupCount(g) };
+    }).filter(Boolean);
+    return { order: order, rows: rows };
+  })()`);
+
+  const base = await read();
+  const wrong = [];
+  let barred = 0, widest = { g: null, px: 0 }, thinnest = { g: null, px: 1e9 };
+  for (const r of base.rows) {
+    // A bar belongs to a plain, non-zero count and to nothing else: a parenthesised count
+    // means the notes are tallied off this row's own wedge (github#50, github#3).
+    const wantBar = /^\d+$/.test(r.ct) && r.count > 0;
+    if (r.bar !== wantBar) { wrong.push(`${r.g}: ct "${r.ct}" but bar=${r.bar}`); continue; }
+    if (!wantBar) {
+      if (r.drawn || r.size !== "auto") wrong.push(`${r.g}: no-bar row still paints (${r.size})`);
+      continue;
+    }
+    barred++;
+    const want = (r.count / base.order) * 100;
+    if (r.pct === null || !r.drawn || !r.applied) {
+      wrong.push(`${r.g}: barred but size=${r.size} share=${r.pct}`);
+      continue;
+    }
+    if (Math.abs(r.pct - want) > 0.01) {
+      wrong.push(`${r.g}: ${r.pct}% declared, ${want.toFixed(3)}% is its share`);
+    }
+    const px = Math.max(1, (r.count / base.order) * 217);
+    if (px > widest.px) widest = { g: r.g, px };
+    if (px < thinnest.px) thinnest = { g: r.g, px };
+  }
+
+  // Sub rows are deliberately bare: subCount is within one parent, so a vault-scaled
+  // sub-bar would be a stub and a parent-scaled one a second denominator in one list.
+  // Idempotent on purpose: every check shares one page and `nav counts share one right
+  // edge` already leaves the tree open, so a blind click would FOLD it and make this
+  // assertion vacuous -- it passed on zero sub rows the first time it was written.
+  await p.eval(`(function(){ var b = document.querySelectorAll('#vg-legend [data-tw]');
+                for (var i = 0; i < b.length; i++) {
+                  if (b[i].getAttribute('aria-expanded') !== 'true') b[i].click();
+                } })(); void 0`);
+  await sleep(300);
+  const subs = await p.j(`(function(){
+    var img = [].map.call(document.querySelectorAll('#vg-legend .lgs'),
+      function (e) { return getComputedStyle(e).backgroundImage; });
+    return { n: img.length, drawn: img.filter(function (v) { return v !== 'none'; }).length };
+  })()`);
+  if (subs.drawn) wrong.push(`${subs.drawn} of ${subs.n} subfolder rows draw a bar`);
+
+  // Hover is measured with a REAL pointer, not inferred from the stylesheet. `.lg:hover`
+  // and `.lg[data-hl="on"]` both used the `background` shorthand, which resets
+  // background-image, so either could wipe the bar; a first cut of this check read
+  // document.styleSheets instead and flagged `.lg`'s own `background: none` reset, which
+  // is harmless (lower specificity). What matters is what the row paints under a pointer.
+  let hov = null;
+  const hoverRow = base.rows.filter((r) => r.bar).sort((a, b) => b.count - a.count)[0];
+  if (hoverRow) {
+    const box = await p.j(`(function(){
+      var el = document.querySelector('[data-g="${hoverRow.g.replace(/"/g, '\\"')}"]');
+      var b = el.getBoundingClientRect();
+      return { x: Math.round(b.left + 30), y: Math.round(b.top + b.height / 2) };
+    })()`);
+    await p.send("Input.dispatchMouseEvent",
+                 { type: "mouseMoved", x: box.x, y: box.y, button: "none", clickCount: 0 });
+    await sleep(250);
+    const h = await p.j(`(function(){
+      var el = document.querySelector('[data-g="${hoverRow.g.replace(/"/g, '\\"')}"]');
+      var cs = getComputedStyle(el);
+      return { size: cs.backgroundSize, drawn: cs.backgroundImage !== 'none',
+               hovered: el.matches(':hover') };
+    })()`);
+    hov = h.hovered ? (h.drawn && h.size === hoverRow.size) : null;
+    if (h.hovered && !hov) wrong.push(`hovering ${hoverRow.g} wiped the bar (${h.size})`);
+    await p.send("Input.dispatchMouseEvent",
+                 { type: "mouseMoved", x: 5, y: 5, button: "none", clickCount: 0 });
+    await sleep(150);
+  }
+
+  // Selecting a row must not drop its bar, and hiding a folder must not move any bar:
+  // the denominator is every note on the page, not the visible ones.
+  const pick = base.rows.filter((r) => r.bar).sort((a, b) => b.count - a.count)[0];
+  let sel = null, hid = null;
+  if (pick) {
+    await p.eval(`document.querySelector('[data-g="${pick.g.replace(/"/g, '\\"')}"]').click(); void 0`);
+    await sleep(400);
+    const after = await read();
+    const row = after.rows.find((r) => r.g === pick.g);
+    sel = row && row.bar && Math.abs(row.pct - pick.pct) < 0.001;
+    if (!sel) wrong.push(`selecting ${pick.g} changed its bar (${row && row.size})`);
+    await p.eval(`document.querySelector('[data-g="${pick.g.replace(/"/g, '\\"')}"]').click(); void 0`);
+    await sleep(400);
+
+    const eye = base.rows.find((r) => r.bar && r.g !== pick.g);
+    if (eye) {
+      await p.eval(`document.querySelector('[data-eye="${eye.g.replace(/"/g, '\\"')}"]').click(); void 0`);
+      await sleep(600);
+      const h = await read();
+      const moved = h.rows.filter((r) => {
+        const was = base.rows.find((b) => b.g === r.g);
+        return was && was.bar && r.bar && Math.abs(r.pct - was.pct) > 0.001;
+      });
+      hid = moved.length;
+      if (moved.length) wrong.push(`hiding ${eye.g} moved ${moved.length} bar(s)`);
+      await p.eval(`document.querySelector('[data-eye="${eye.g.replace(/"/g, '\\"')}"]').click(); void 0`);
+      await sleep(600);
+    }
+  }
+
+  return {
+    ok: wrong.length === 0 && barred > 0,
+    detail: `${barred} of ${base.rows.length} rows barred over ${base.order} notes; ` +
+            `widest ${widest.g} ${widest.px.toFixed(1)}px, thinnest ${thinnest.g} ` +
+            `${thinnest.px.toFixed(1)}px (1px floor); ${subs.n} sub rows bare; ` +
+            `selection kept it=${sel}, hover kept it=${hov === null ? "no :hover from the harness" : hov}, ` +
+            `bars moved by a hidden folder=${hid}` +
+            (wrong.length ? `  <- ${wrong.join(" | ")}` : "")
+  };
 });
 
 check("focus web stays above dim notes", async (p) => {
