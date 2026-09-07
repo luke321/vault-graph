@@ -88,6 +88,13 @@ distance, and that is stated rather than faked.
 The 0.62 margin is what makes case 2 legible: a footprint up to about 1.6× the disc *diameter*
 still closes inside the tile, and beyond that it runs off, which is the honest picture.
 
+**`OV_FILL_A` is 0.18 because 0.10 failed a visual pass.** In case 2 only one edge of the
+rectangle crosses the tile, so the whole reading rests on which side of that line is tinted — and
+at 0.10 white on the dark surface the two sides were indistinguishable, leaving a bare hairline
+across the disc. At 0.18 the covered side reads while the small rectangle of case 1 is still an
+outline rather than a blob. This is exactly the class of defect the suite cannot see: the checks
+asserted the rectangle's coordinates, and its coordinates were right the whole time.
+
 **Rejected: fit-both scaling** — shrink the schematic until disc and footprint both fit. It keeps
 the rectangle closed and makes the disc a dot at large pans, unreadable exactly when orientation
 is the point, and it makes the tile breathe on every pan. A schematic that moves while you are

@@ -7179,6 +7179,7 @@ function mountVaultGraph(root, data, deps) {
   var OV_DISC_FRAC = 0.62;
   var OV_CHEV_PX = 6;
   var OV_SECTOR_A = 0.55;
+  var OV_FILL_A = 0.18;
   /**
    * @typedef {Object} OvSector
    * @property {string} g
@@ -7333,7 +7334,7 @@ function mountVaultGraph(root, data, deps) {
 
     if (sh.chevron === null) {
       g2.fillStyle = THEME.text;
-      g2.globalAlpha = 0.1;
+      g2.globalAlpha = OV_FILL_A;
       g2.fillRect(sh.rect[0], sh.rect[1], sh.rect[2] - sh.rect[0], sh.rect[3] - sh.rect[1]);
       g2.globalAlpha = 0.85;
       g2.strokeStyle = THEME.text;

@@ -417,14 +417,24 @@ node scripts/render-diff.mjs --against-dir <a develop build> --ratios 1.08,0.35,
 ```
 
 Against pages built from `develop@598a6b9`, dark, 1600x1000, all three fixtures: at **ratio 1.08
-every clip is identical** — stage, page, canvas, heatmap, ribbon, legend — and so is **ratio 4.2**,
-where the disc is small enough to be contained and the tile stays away. At **ratio 0.35** the only
-pixels that differ anywhere on the page are one 96x96 box at the tile's own position
-(`x 1188..1283, y 703..798` on the stage): **6903, 6946 and 6636 px** on the demo, shape and 10k
-fixtures. `positions`, `camera`, `labels` and the layer-composite `pixels` compare are **0 at every
-ratio** — the tile is not one of the renderer's canvases, so it costs the disc nothing and
-`savePng` cannot pick it up. The goldens do not move: the overview reads `geomLock` and the plan
-and writes neither.
+the stage, canvas, heatmap, ribbon and legend clips are identical**, and so are all of them at
+**ratio 4.2**, where the disc is small enough to be contained and the tile stays away. At **ratio
+0.35** the only pixels that differ anywhere on the page are one 96x96 box at the tile's own
+position (`x 1188..1283, y 703..798` on the stage): **6970, 6985 and 6696 px** on the demo, shape
+and 10k fixtures. `positions`, `camera`, `labels` and the layer-composite `pixels` compare are
+**0 at every ratio** — the tile is not one of the renderer's canvases, so it costs the disc
+nothing and `savePng` cannot pick it up. The goldens do not move: the overview reads `geomLock`
+and the plan and writes neither.
+
+The whole-`page` clip additionally differs by **68 px at `x 242..253`** at every ratio including
+1.08. That is the sidebar's "Generated …" stamp between two builds minutes apart, the artifact
+this file already records for the engine port — not the overview, which cannot reach the sidebar.
+
+The three constants: `OV_DISC_FRAC` **0.62** (the disc's share of the half-tile, which is what
+leaves room for a footprint up to ~1.6x the disc diameter to close inside the tile), `OV_SECTOR_A`
+**0.55** and `OV_FILL_A` **0.18**. The fill was 0.10 until a visual pass: with the footprint wider
+than the tile only one edge crosses it, and at 0.10 the covered side was indistinguishable from
+the uncovered one, so the case the law is about read as a bare hairline.
 
 **A still camera draws nothing.** `ovSync` runs from `afterRender` and returns before touching the
 canvas unless a signature changed. The signature is the drawing's own inputs quantised to what
