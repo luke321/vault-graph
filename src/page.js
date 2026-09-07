@@ -2323,6 +2323,26 @@ function mountVaultGraph(root, data, deps) {
     var el = $("democursor");
     if (el) el.hidden = true;
   }
+  /** @param {number} x @param {number} y */
+  function demoTapAt(x, y) {
+    var el = $("demotap");
+    if (!el) return;
+    var b = ROOT.getBoundingClientRect();
+    el.style.left = (x - b.left) + "px";
+    el.style.top = (y - b.top) + "px";
+    el.hidden = false;
+    var rings = el.querySelectorAll("span");
+    for (var i = 0; i < rings.length; i++) {
+      (function (ring, delay) {
+        ring.classList.remove("go");
+        ring.classList.add("armed");
+        WIN.setTimeout(function () {
+          ring.classList.remove("armed");
+          ring.classList.add("go");
+        }, 20 + delay);
+      })(rings[i], i * 90);
+    }
+  }
   /* ---- END: demo automation + debug API ---- */
 
   function placeHubDrop() {
@@ -7310,6 +7330,7 @@ function mountVaultGraph(root, data, deps) {
    * The demo storyboard's own shapes (github#60, batch 3i). Every beat field is optional:
    * a beat is one of settle / click / dblclick / rightclick / hover / drag / wheel / park,
    * and `act` and `why` label it. `target` is a [kind, arg] pair demoFind resolves.
+   * github#73, design/0013
    * @typedef {Object} DemoBeat
    * @property {string} [act]
    * @property {string} [why]
@@ -7320,6 +7341,7 @@ function mountVaultGraph(root, data, deps) {
    * @property {boolean} [rightclick]
    * @property {boolean} [hover]
    * @property {boolean} [drag]
+   * @property {boolean} [touchmode]
    * @property {number} [wheel]
    * @property {string[]} [target]
    * @property {string[]} [to]
@@ -7872,12 +7894,38 @@ function mountVaultGraph(root, data, deps) {
       { settle: true, act: "only05", why: "let everything else recede" },
       { click: true, target: ["id", "allon"], act: "only05",
         why: "...and bring the whole vault back" },
-      { settle: true, act: "only05", why: "let the disc refill" }
+      { settle: true, act: "only05", why: "let the disc refill" },
+
+      // github#73, design/0013 -- record this one narrow: -Width 420 -Height 900
+      { touchmode: true, act: "mobile",
+        why: "a finger from here on: no pointer moves, so no hover a phone could never produce" },
+      { wheel: 4, target: ["note", "05"], act: "mobile",
+        why: "zoom in on the note first -- at a phone's resting zoom a dot is under 2px, and " +
+             "nobody taps that" },
+      { wheel: 4, target: ["note", "05"], act: "mobile",
+        why: "...and again, until the dots are finger-sized" },
+      { settle: true, act: "mobile", why: "let the camera land" },
+      { click: true, target: ["note", "05"], act: "mobile",
+        why: "tap a note -- the card rises as a sheet at the foot, the disc still above it" },
+      { settle: true, act: "mobile", why: "let the card land and the links light" },
+      { click: true, target: ["detailclose"], act: "mobile", why: "close the card" },
+      { click: true, target: ["id", "sheet"], act: "mobile",
+        why: "the folder list, search and view buttons slide up as a sheet" },
+      { settle: true, act: "mobile", why: "let the sheet arrive" },
+      { click: true, target: ["only", "01"], act: "mobile",
+        why: "solo a folder -- the pill is always there on a phone, since there is no hover to " +
+             "reveal it with" },
+      { click: true, target: ["id", "sheet"], act: "mobile",
+        why: "put the sheet away -- everything else has gone behind it" },
+      { settle: true, act: "mobile", why: "let the rest recede" },
+      { dblclick: true, target: ["stage", "centre"], act: "mobile",
+        why: "double-tap fits what is left back into view, the way a double-click does" },
+      { settle: true, act: "mobile", why: "let it fly home" }
     ];
   }
 
-  // github#34
-  var FULL_RUN_EXCLUDES = ["subfoldercolor", "hiddenbydefault", "yearchip", "only05"];
+  // github#34, github#73
+  var FULL_RUN_EXCLUDES = ["subfoldercolor", "hiddenbydefault", "yearchip", "only05", "mobile"];
 
   /** @returns {DemoBeat[]} */
   function demoFullStoryboard() {
@@ -7916,6 +7964,7 @@ function mountVaultGraph(root, data, deps) {
     where: demoWhere,
     cursorAt: demoCursorAt,
     cursorHide: demoCursorHide,
+    tapAt: demoTapAt,
     hovered: function () { return state.hovered; },
     finish: /** @param {number} ms @param {unknown[]} [trace] */ function (ms, trace) {
       /** @type {Window & { __vgDemoDone?: { ms: number, trace: unknown[] } }} */ (window).__vgDemoDone = { ms: ms, trace: trace || [] };
