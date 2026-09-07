@@ -658,6 +658,10 @@ function mountVaultGraph(root, data, deps) {
     var base = absOf(g);
     return sb ? base + "/" + sb : base;
   }
+  /** @param {string} p an absolute folder path @returns {string} the group it falls in */
+  function groupOfPath(p) {
+    return p.split("/")[rootDepth] || DIRECT;
+  }
 
   /** @type {Record<string, string[]>} */
   var subOrder = dict();
@@ -5274,9 +5278,10 @@ function mountVaultGraph(root, data, deps) {
          * @param {number} depth @param {string | null} twAttrs @param {boolean} twOpen
          */
         var srow = function (col, nm, ct, idx, depth, twAttrs, twOpen) {
-          var on = !state.hiddenSub[g + "/" + subs[idx[0]]];
+          // github#76: a tint is keyed by the rebased group, a filter by the absolute path
+          var on = !state.hiddenSub[keyOf(g, subs[+idx[0]])];
           var hlSub = idx.every(function (i) {
-            return !!state.highlightSub[g + "/" + subs[+i]];
+            return !!state.highlightSub[keyOf(g, subs[+i])];
           });
           return '<div class="lgr ' + (depth === 2 ? "sub2" : "sub") + '">' +
             twBtn(twAttrs || null, !!twOpen) +
@@ -5291,8 +5296,9 @@ function mountVaultGraph(root, data, deps) {
             '</div>';
         };
         subs.slice(0, SUB_NAMED).forEach(function (sb, k) {
-          var pk = g + "/" + sb, tint = subShade[pk] || colorOf(g);
-          row += srow(tint, sb || "(directly in folder)", subCount[pk] || 0, [k], 1,
+          // github#76
+          var tk = g + "/" + sb, pk = keyOf(g, sb), tint = subShade[tk] || colorOf(g);
+          row += srow(tint, sb || "(directly in folder)", subCount[tk] || 0, [k], 1,
                       (sb && kids[pk]) ? 'data-twp="' + esc(pk) + '"' : null,
                       !!state.pathOpen[pk]);
           if (sb) row += subtree(pk, 2, tint);
@@ -5308,8 +5314,9 @@ function mountVaultGraph(root, data, deps) {
                       'data-twtail="' + esc(g) + '"', tOpen);
           if (tOpen) {
             tail.forEach(function (sb, j) {
-              var pk = g + "/" + sb, tint = subShade[pk] || colorOf(g);
-              row += srow(tint, sb || "(directly in folder)", subCount[pk] || 0,
+              // github#76
+              var tk = g + "/" + sb, pk = keyOf(g, sb), tint = subShade[tk] || colorOf(g);
+              row += srow(tint, sb || "(directly in folder)", subCount[tk] || 0,
                           [SUB_NAMED + j], 2,
                           (sb && kids[pk]) ? 'data-twp="' + esc(pk) + '"' : null,
                           !!state.pathOpen[pk]);
@@ -5332,29 +5339,47 @@ function mountVaultGraph(root, data, deps) {
       Array.prototype.forEach.call($("legend").querySelectorAll(sel), fn);
     };
 
+    /**
+     * Hide every group but `g`. github#76: under a root a group is a folder path,
+     * so it is hidden by its own absolute `hiddenSub` key rather than by the vault's
+     * top-level hidden map.
+     * @param {string} g
+     */
+    var soloGroup = function (g) {
+      state.hiddenSub = dict();
+      var gs = order[state.dim] || [];
+      if (rootDepth) {
+        gs.forEach(function (n) {
+          if (n !== g && n !== UNLINKED) state.hiddenSub[keyOf(n, "")] = true;
+        });
+        var h0 = state.hidden[state.dim] || (state.hidden[state.dim] = dict());
+        h0[UNLINKED] = g !== UNLINKED;
+        return;
+      }
+      var h = state.hidden[state.dim] || (state.hidden[state.dim] = dict());
+      gs.forEach(function (n) { h[n] = (n !== g); });
+    };
+
     /** @param {string} g @param {string[]} keep */
     var onlySubs = function (g, keep) {
-      var h = state.hidden[state.dim] || (state.hidden[state.dim] = dict());
-      (order[state.dim] || []).forEach(function (n) { h[n] = (n !== g); });
-      state.hiddenSub = dict();
+      soloGroup(g);
       (subOrder[g] || []).forEach(function (sb) {
-        if (keep.indexOf(sb) < 0) state.hiddenSub[g + "/" + sb] = true;
+        if (keep.indexOf(sb) < 0) state.hiddenSub[keyOf(g, sb)] = true;
       });
     };
 
-    /** @param {string} g @param {string} path */
+    /** @param {string} g @param {string} path an absolute folder path */
     var onlyUnder = function (g, path) {
-      var h = state.hidden[state.dim] || (state.hidden[state.dim] = dict());
-      (order[state.dim] || []).forEach(function (n) { h[n] = (n !== g); });
-      state.hiddenSub = dict();
-      var rest = path.slice(g.length + 1);
-      var want = rest ? rest.split("/") : [];
+      soloGroup(g);
+      // github#76: `want` is the path below the top-level folder, which is what the
+      // note's own `dirs` chain is measured in, root or no root.
+      var want = path.split("/").slice(1);
       graph.forEachNode(function (_id, a) {
-        if (a.folder !== g) return;
+        if (relGroup(a) !== g) return;
         var d = a.dirs || [], i = 0;
         while (i < want.length && i < d.length && d[i] === want[i]) i++;
         if (i === want.length) return;
-        state.hiddenSub[g + "/" + d.slice(0, i + 1).join("/")] = true;
+        state.hiddenSub[a.folder + "/" + d.slice(0, i + 1).join("/")] = true;
       });
     };
 
@@ -5401,7 +5426,7 @@ function mountVaultGraph(root, data, deps) {
       b.onclick = function (ev) {
         var p = b.getAttribute("data-hpath");
         if (ev && ev.target && /** @type {Element} */ (ev.target).getAttribute("data-only")) {
-          onlyUnder(p.slice(0, p.indexOf("/")), p);
+          onlyUnder(groupOfPath(p), p);
           buildLegend();
           cascade(null, { colToggle: true });
           return;
@@ -5425,6 +5450,14 @@ function mountVaultGraph(root, data, deps) {
     each("[data-eye]", function (b) {
       var g = b.getAttribute("data-eye");
       b.onclick = function () {
+        // github#76
+        if (rootDepth && g !== UNLINKED) {
+          var pk = keyOf(g, "");
+          if (state.hiddenSub[pk]) delete state.hiddenSub[pk]; else state.hiddenSub[pk] = true;
+          buildLegend();
+          cascade(null, { colToggle: true });
+          return;
+        }
         var h = state.hidden[state.dim] || (state.hidden[state.dim] = dict());
         h[g] = !h[g];
         buildLegend();
@@ -5437,7 +5470,7 @@ function mountVaultGraph(root, data, deps) {
         var subs = subOrder[f] || [];
         var off = b.getAttribute("aria-pressed") === "true";
         b.getAttribute("data-idx").split(",").forEach(function (i) {
-          var key = f + "/" + subs[+i];
+          var key = keyOf(f, subs[+i]);
           if (off) state.hiddenSub[key] = true; else delete state.hiddenSub[key];
         });
         buildLegend();
@@ -5450,7 +5483,7 @@ function mountVaultGraph(root, data, deps) {
         var f = b.getAttribute("data-hsub");
         var subs = subOrder[f] || [];
         return b.getAttribute("data-idx").split(",").map(function (i) {
-          return f + "/" + subs[+i];
+          return keyOf(f, subs[+i]);
         });
       };
       b.onmouseenter = function () { hoverHighlight(null, hoverKeys()); };
@@ -5465,9 +5498,9 @@ function mountVaultGraph(root, data, deps) {
           cascade(null, { colToggle: true });
           return;
         }
-        var allOn = idx.every(function (i) { return !!state.highlightSub[f + "/" + subs[+i]]; });
+        var allOn = idx.every(function (i) { return !!state.highlightSub[keyOf(f, subs[+i])]; });
         idx.forEach(function (i) {
-          var key = f + "/" + subs[+i];
+          var key = keyOf(f, subs[+i]);
           if (allOn) delete state.highlightSub[key]; else state.highlightSub[key] = true;
         });
         buildLegend();
@@ -5482,9 +5515,8 @@ function mountVaultGraph(root, data, deps) {
       b.onmouseleave = function () { hoverHighlight(null, null); };
       b.onclick = function (ev) {
         if (ev.target && /** @type {Element} */ (ev.target).getAttribute("data-only")) {
-          var h = state.hidden[state.dim] || (state.hidden[state.dim] = dict());
-          (order[state.dim] || []).forEach(function (n) { h[n] = (n !== g); });
-          state.hiddenSub = dict();
+          // github#76
+          soloGroup(g);
           buildLegend();
           cascade(null, { colToggle: true });
           return;
