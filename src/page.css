@@ -172,8 +172,9 @@
     color: var(--text-1);
   }
   .vault-graph .lg[data-hl="on"] .ct, .vault-graph .lgs[data-hl="on"] .ct { color: var(--text-2); }
-  /* github#78 -- background-COLOR, not the shorthand: the shorthand resets
-     background-image and would wipe .lg.bar's rule on hover and on selection. */
+  /* github#78 -- background-COLOR, not the shorthand. The shorthand resets
+     background-image; .lg.bar out-orders it as written, so this buys independence
+     from rule order rather than fixing a live bug. Measured: invariants.md. */
   .vault-graph .lg:hover { background-color: var(--surface-2); border-color: var(--border); }
   /* github#78 -- the count bar: this row's share of the vault, drawn along the bottom of
      the row in the group's own colour. A background layer rather than a fifth grid cell
