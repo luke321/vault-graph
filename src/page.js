@@ -184,6 +184,11 @@
  * @property {() => void} readTheme
  * @property {() => void} placeLogo
  * @property {() => PaletteSlot[]} palette
+ * @property {(key: string) => { light: number, dark: number }} slotContrast
+ * @property {(key: string, name: string) => string} slotTitle
+ * @property {(key: string, suffix: string) => string[]} previewLadder
+ * @property {(key: string) => string} swatchPreview
+ * @property {() => number[]} previewSizes
  * @property {() => string[]} groupOrder
  * @property {(dim: string) => { name: string, n: number, slot: string, autoSlot: string, pinned: boolean, shown: boolean, subs: { name: string, n: number, pin: string }[] }[]} groupsOf   github#86
  * @property {(group: string) => number} groupCount
@@ -377,7 +382,31 @@ function mountVaultGraph(root, data, deps) {
    * @property {string[]} slots          the twelve group colours, g1..g12
    * @property {string[]} neutrals
    * @property {Record<string, string>} byKey   "g7" -> its hex
+   * @property {{ l: Palette, d: Palette }} pal  both themes at once, github#77
    */
+
+  /**
+   * @typedef {Object} Palette
+   * @property {boolean} dark
+   * @property {string} surface
+   * @property {string[]} slots
+   * @property {Record<string, string>} byKey
+   */
+
+  var SLOT_VARS = ["--g1", "--g2", "--g3", "--g4", "--g5", "--g6",
+                   "--g7", "--g8", "--g9", "--g10", "--g11", "--g12"];
+
+  // github#77
+  /** @param {string} suffix "l" or "d" @returns {Palette} */
+  function readPalette(suffix) {
+    var slots = SLOT_VARS.map(function (v) { return css(v + "-" + suffix); });
+    /** @type {Record<string, string>} */
+    var byKey = dict();
+    slots.forEach(function (hex, i) { byKey["g" + (i + 1)] = hex; });
+    return { dark: suffix === "d", surface: css("--surface-1-" + suffix),
+             slots: slots, byKey: byKey };
+  }
+
   var THEME = /** @type {Theme} */ ({});
   function readTheme() {
     var surf = css("--surface-1");
@@ -391,9 +420,10 @@ function mountVaultGraph(root, data, deps) {
       surface:     surf,
       hoverBg:     css("--surface-2"),
       hoverBorder: css("--border-strong"),
-      slots:    ["--g1", "--g2", "--g3", "--g4", "--g5", "--g6",
-                 "--g7", "--g8", "--g9", "--g10", "--g11", "--g12"].map(css),
-      neutrals: ["--n1", "--n2", "--n3"].map(css)
+      slots:    SLOT_VARS.map(css),
+      neutrals: ["--n1", "--n2", "--n3"].map(css),
+      // github#77
+      pal: { l: readPalette("l"), d: readPalette("d") }
     };
     THEME.byKey = dict();
     THEME.slots.forEach(function (hex, i) { THEME.byKey["g" + (i + 1)] = hex; });
@@ -1095,6 +1125,36 @@ function mountVaultGraph(root, data, deps) {
     });
   }
 
+  // github#77, design/0004
+  var CONTRAST_FLOOR = 3;
+
+  /** @param {string} a @param {string} b @returns {number} */
+  function contrastOf(a, b) {
+    var x = relLum(a), y = relLum(b);
+    var hi = Math.max(x, y), lo = Math.min(x, y);
+    return (hi + 0.05) / (lo + 0.05);
+  }
+
+  // github#77
+  /** @param {string} key @returns {{ light: number, dark: number }} */
+  function slotContrast(key) {
+    return {
+      light: contrastOf(THEME.pal.l.byKey[key], THEME.pal.l.surface),
+      dark:  contrastOf(THEME.pal.d.byKey[key], THEME.pal.d.surface)
+    };
+  }
+
+  // github#77
+  /** @param {string} key @param {string} name @returns {string} */
+  function slotTitle(key, name) {
+    var c = slotContrast(key);
+    /** @param {number} v */
+    var say = function (v) {
+      return v.toFixed(2) + (v < CONTRAST_FLOOR ? " (under 3:1)" : "");
+    };
+    return name + " · light " + say(c.light) + " · dark " + say(c.dark);
+  }
+
   /** @param {Record<string, unknown>} map @param {string} [dim] */
   function applyFolderShown(map, dim) {
     var d = dim === "tag" ? "tag" : "folder";
@@ -1278,11 +1338,11 @@ function mountVaultGraph(root, data, deps) {
     var l = hex2lab(hex);
     return ((Math.atan2(l[2], l[1]) * 180 / Math.PI) % 360 + 360) % 360;
   }
-  /** @param {string} basecol */
-  function hueBudget(basecol) {
+  // github#77
+  /** @param {string} basecol @param {string[]} others @returns {number} */
+  function hueBudget(basecol, others) {
     var h = hueOf(basecol), gap = 180;
-    Object.keys(groupColor).forEach(function (g) {
-      var c = groupColor[g];
+    others.forEach(function (c) {
       if (c === basecol) return;
       var lab = hex2lab(c);
       if (Math.hypot(lab[1], lab[2]) < 0.02) return;
@@ -1291,6 +1351,41 @@ function mountVaultGraph(root, data, deps) {
       if (d < gap) gap = d;
     });
     return gap * HUE_BUDGET_FRACTION;
+  }
+
+  /** @returns {string[]} */
+  function groupColours() {
+    return Object.keys(groupColor).map(function (g) { return groupColor[g]; });
+  }
+
+  // design/0003, github#77
+  /**
+   * @param {string} basecol @param {number} k @param {boolean} dark @param {number} budget
+   * @returns {string}
+   */
+  function ladderStep(basecol, k, dark, budget) {
+    var lab = hex2lab(basecol);
+    if (Math.hypot(lab[1], lab[2]) < 0.02) return basecol;
+    var Lend = dark ? Math.min(SUB_L_LIMIT, lab[0] + SUB_L_SPAN)
+                    : Math.max(1 - SUB_L_LIMIT, lab[0] - SUB_L_SPAN);
+    var t = k / (SUB_SLOTS - 1);
+    return shade(basecol, (dark ? 1 : -1) * budget * t, (Lend - lab[0]) * t);
+  }
+
+  // github#77
+  /** @param {string} key @param {string} suffix "l" or "d" @returns {string[]} */
+  function previewLadder(key, suffix) {
+    var pal = suffix === "d" ? THEME.pal.d : THEME.pal.l;
+    var basecol = pal && pal.byKey ? pal.byKey[key] : "";
+    if (!basecol) return [];
+    var others = Object.keys(groupSlot).map(function (g) {
+      return pal.byKey[groupSlot[g]] || "";
+    }).filter(Boolean);
+    var budget = hueBudget(basecol, others.concat([basecol]));
+    /** @type {string[]} */
+    var out = [];
+    for (var k = 1; k < SUB_SLOTS; k++) out.push(ladderStep(basecol, k, pal.dark, budget));
+    return out;
   }
 
   /** @param {string} folder @param {string} sub */
@@ -1312,18 +1407,14 @@ function mountVaultGraph(root, data, deps) {
   function buildSubShades() {
     subShade = dict();
     subSlot = dict();
+    var others = groupColours();
     Object.keys(subOrder).forEach(function (f) {
       var subs = subOrder[f];
       var basecol = colorOf(f);
       var lab = hex2lab(basecol);
       var grey = Math.hypot(lab[1], lab[2]) < 0.02;
       var haveLadder = subs.length >= 2 && !grey;
-      var sign = THEME.dark ? 1 : -1;
-      var budget = haveLadder ? hueBudget(basecol) : 0;
-      var Lend = haveLadder
-        ? (THEME.dark ? Math.min(SUB_L_LIMIT, lab[0] + SUB_L_SPAN)
-                      : Math.max(1 - SUB_L_LIMIT, lab[0] - SUB_L_SPAN))
-        : 0;
+      var budget = haveLadder ? hueBudget(basecol, others) : 0;
       subs.forEach(function (sb) {
         var pk = f + "/" + sb;
         var pin = subPin(pk);
@@ -1335,8 +1426,7 @@ function mountVaultGraph(root, data, deps) {
         subSlot[pk] = "";
         if (subs.length < 2) return;
         if (grey) { subShade[pk] = basecol; return; }
-        var t = subTintIndex(f, sb) / (SUB_SLOTS - 1);
-        subShade[pk] = shade(basecol, sign * budget * t, (Lend - lab[0]) * t);
+        subShade[pk] = ladderStep(basecol, subTintIndex(f, sb), THEME.dark, budget);
       });
     });
   }
@@ -5130,6 +5220,25 @@ function mountVaultGraph(root, data, deps) {
   var DOT_ROOM_MAX = DENSITY_MAX;
   var sizeScale = 1;
 
+  // github#77, design/0013
+  var PREVIEW_R_PX = [0.65, 1.38, 2.19, 4.06];
+  var PREVIEW_HALF_W = 28;
+  var PREVIEW_H = 40;
+  var PREVIEW_ROW_H = PREVIEW_H / SUB_SLOTS;
+  var PREVIEW_CX = (function () {
+    var i, wide = 0;
+    for (i = 0; i < PREVIEW_R_PX.length; i++) wide += 2 * PREVIEW_R_PX[i];
+    var gap = (PREVIEW_HALF_W - wide) / (PREVIEW_R_PX.length + 1);
+    /** @type {number[]} */
+    var out = [];
+    var x = gap;
+    for (i = 0; i < PREVIEW_R_PX.length; i++) {
+      out.push(Math.round((x + PREVIEW_R_PX[i]) * 100) / 100);
+      x += 2 * PREVIEW_R_PX[i] + gap;
+    }
+    return out;
+  })();
+
   function measureSizeScale() {
     if (!renderer) return sizeScale;
     var a = renderer.graphToViewport({ x: 0, y: 0 });
@@ -5686,6 +5795,31 @@ function mountVaultGraph(root, data, deps) {
     var filed = folderCount[g] || 0;
     if (carried === undefined || carried === filed) return base;
     return base + " -- " + filed + " filed here, " + carried + " carry this tag";
+  }
+
+  // github#77, design/0004, design/0003
+  /** @param {string} key @returns {string} */
+  function swatchPreviewHTML(key) {
+    var L = previewLadder(key, "l"), D = previewLadder(key, "d");
+    var W = PREVIEW_HALF_W * 2, marks = "";
+    for (var r = 0; r < SUB_SLOTS; r++) {
+      var cy = PREVIEW_ROW_H * r + PREVIEW_ROW_H / 2;
+      var fl = r === 0 ? "" : (L[r - 1] || "");
+      var fd = r === 0 ? "" : (D[r - 1] || "");
+      for (var c = 0; c < PREVIEW_R_PX.length; c++) {
+        var rad = PREVIEW_R_PX[c], cx = PREVIEW_CX[c];
+        marks += '<circle class="' + (fl ? "t-l" : "d-l") + '" cx="' + cx + '" cy="' + cy +
+                 '" r="' + rad + '"' + (fl ? ' fill="' + fl + '"' : "") + '/>' +
+                 '<circle class="' + (fd ? "t-d" : "d-d") + '" cx="' + (cx + PREVIEW_HALF_W) +
+                 '" cy="' + cy + '" r="' + rad + '"' + (fd ? ' fill="' + fd + '"' : "") + '/>';
+      }
+    }
+    return '<svg class="prev" width="' + W + '" height="' + PREVIEW_H +
+           '" viewBox="0 0 ' + W + ' ' + PREVIEW_H + '" aria-hidden="true" focusable="false">' +
+           '<rect class="gnd-l" x="0" y="0" width="' + PREVIEW_HALF_W +
+           '" height="' + PREVIEW_H + '"/>' +
+           '<rect class="gnd-d" x="' + PREVIEW_HALF_W + '" y="0" width="' + PREVIEW_HALF_W +
+           '" height="' + PREVIEW_H + '"/>' + marks + '</svg>';
   }
 
   // github#50
@@ -6678,8 +6812,9 @@ function mountVaultGraph(root, data, deps) {
                (opts.dataAttr ? ' data-' + opts.dataAttr + '="' + esc(opts.dataValue) + '"' : '') +
                ' data-key="' + p.key + '" aria-checked="' + on + '"' +
                (isAuto ? ' data-auto="1"' : '') +
-               ' title="' + esc(p.name) + (opts.titleFor ? opts.titleFor(on, isAuto) : "") +
-               '" aria-label="' + esc(p.name) + '"></button>';
+               ' title="' + esc(slotTitle(p.key, p.name)) +
+               (opts.titleFor ? opts.titleFor(on, isAuto) : "") +
+               '" aria-label="' + esc(p.name) + '">' + swatchPreviewHTML(p.key) + '</button>';
       }).join("");
     }
 
@@ -9467,6 +9602,12 @@ function mountVaultGraph(root, data, deps) {
                     readTheme: readTheme, get renderer() { return renderer; },
                     placeLogo: placeLogo,
                     palette: paletteInfo,
+                    // github#77
+                    slotContrast: slotContrast,
+                    slotTitle: slotTitle,
+                    previewLadder: previewLadder,
+                    swatchPreview: swatchPreviewHTML,
+                    previewSizes: function () { return PREVIEW_R_PX.slice(); },
                     groupOrder: function () { return (order[state.dim] || []).slice(); },
                     // github#86, design/0015 -- one grouping's rows, whichever disc is on screen:
                     // github#86 -- what a settings surface needs to offer colours for it
