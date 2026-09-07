@@ -2999,3 +2999,87 @@ while its tree is not; not by time because `develop` moves several times a day a
 green run" cannot say which tree it saw. While it runs, both gates hold the machine-wide
 `suite` lock (`scripts/lock.mjs`) and release it on every exit path; a lock that cannot be had
 blocks the push and names the holder rather than running on top of it.
+
+## A colour slot is previewed as the dots it will draw, on both grounds
+
+A swatch used to be a filled square. The disc draws that colour as **dots**, and on the
+fixtures measured those run from **0.39 px of radius** (the 10k vault in a small window) to
+**5.93 px** (the shape vault at 1600 px) — so a square was never the test the choice needed.
+Every swatch is now an inline `<svg>` of the slot at four radii, on the light ground and the
+dark ground side by side, with the slot's subfolder tint ladder on the rows below. github#77,
+design/0004, design/0003.
+
+**Both grounds are drawn whatever theme the page is in.** This is the whole point rather than a
+nicety: measured on `develop`, three of twelve slots fail 3:1 on light and **none** fail on
+dark, so a preview showing only the current theme would hide exactly the defect it exists to
+expose. Painting the other theme's ground means the other theme's values must be reachable from
+CSS, which is why `page.css` declares every palette hex once as a **pair** — `--gN-l` / `--gN-d`
+and `--surface-1-l` / `--surface-1-d` — and the three theme blocks only map `--gN` onto one of
+them.
+
+**No palette hex may be declared anywhere else.** `palette-check.mjs` fails on any `--gN:` or
+`--surface-1:` written as a hex. Before this, the dark palette was written out **twice**, in the
+`prefers-color-scheme` block and again in `[data-theme="dark"]`, and the harness read only the
+second; one copy could have drifted with no gate saying so.
+
+**`var()` does not work in an SVG presentation attribute.** The base dots take their fill from a
+CSS rule (`.swatch .d-l { fill: var(--sl) }`), and only the computed ladder tints carry a `fill`
+attribute. The two must not share a class: a CSS rule beats a presentation attribute, so a
+shared class silently flattens every tint row to the base colour. This was written wrong first
+and caught by reading the cascade, not the screen — the failure looks like a design choice.
+
+**The svg is one unit to one CSS pixel and must never be scaled.** Scale it and the radii stop
+being the ones the disc draws, which is the only thing the preview is claiming.
+
+### The quartet is a reference scale, not a bound
+
+`PREVIEW_R_PX` is `[0.65, 1.38, 2.19, 4.06]` — measured on the demo fixture as the phone's
+min/median and the desktop's median/max. It **cannot** bound every disc: a radius falls out of
+the vault's size and the viewport's together, and the three fixtures span 0.39 to 5.93 px. The
+first cut of the check asserted every live dot fell inside the quartet and **failed on the 10k
+fixture at 0.42 px**, which was the assertion being wrong rather than the code.
+
+What must stay true is that the reference still resembles a real disc, so the check asserts the
+previewed range **brackets the disc's median dot**:
+
+| fixture | dots | drawn radius min / p50 / max | median inside 0.65–4.06 |
+|---|---|---|---|
+| demo (1403 notes) | 1403 | 0.67 / **1.47** / 2.10 px | yes |
+| 10k synthetic | 10002 | 0.42 / **1.02** / 1.03 px | yes |
+| dominant-folder | 954 | 1.38 / **2.10** / 3.07 px | yes |
+
+Doubling or halving dot size breaks it, which is what it is for.
+
+### The numbers come from the harness, never from a second table
+
+`scripts/palette-check.mjs` is the authority. It exports `measurePalette(cssText)`, the page
+computes the same figure from the same pair tokens with its own `relLum`, and a check compares
+all **12 slots × 2 themes to two decimals**. The swatch title reads
+`Yellow · light 2.11 (under 3:1) · dark 5.67`, and the check also asserts the `under 3:1` flag
+appears on exactly `g3, g4, g9` for light and on nothing for dark.
+
+### Geometry
+
+| | before | after |
+|---|---|---|
+| swatch | 23×23 px (menu), 15.4 px (settings, desktop) | **58×42 px everywhere** |
+| context menu | 176×122 px | **202×279 px** |
+| menu columns | 6 | **3** |
+| settings-body columns | 12 | **4** |
+| settings row height | ~20 px | **159 px** |
+
+Measured inside the mount on the iPhone 14, on a 320 px sidebar and at 1600 px. The mount clamp
+in `openCtxMenu` is what keeps it there and is asserted rather than assumed.
+
+```bash
+node scripts/smoke.mjs --only picker            # all three fixtures, five checks
+node scripts/palette-check.mjs                  # the authority; output is quoted in design/0004
+node scripts/mobile-check.mjs --device iphone14 # "colour picker box"
+node scripts/mobile-check.mjs --device sidebar  # the 320px case
+```
+
+**The ladder is not a second implementation.** `ladderStep()` is extracted from
+`buildSubShades` and both call it; `hueBudget()` takes the colours to measure against so the
+preview can ask the same question of the other theme's palette. Verified as a no-op the only way
+that means anything: every one of **1403 nodes on the demo fixture draws the same colour as
+`develop`, in both themes**, compared by hash.
