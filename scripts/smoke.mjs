@@ -4693,6 +4693,225 @@ check("count bars are on by default, and the settings toggle removes every bar",
   };
 });
 
+/* ---------------------------------------------------------------- github#77
+ * The colour picker previews each slot as the dots it will draw. Five things have
+ * to hold, and each has already been wrong once in a way that looked fine: the
+ * numbers must be palette-check.mjs's, both grounds must be drawn in either theme,
+ * the radii must be the disc's own, the tint ladder must be the disc's own, and the
+ * menu must still fit the mount. .ai-context/invariants.md
+ */
+
+const PALETTE = await import("./palette-check.mjs");
+
+check("the picker's contrast numbers are the harness's", async (p) => {
+  const want = PALETTE.measurePalette(readFileSync(join(ROOT, "src", "page.css"), "utf8"));
+  const got = await p.j(`(function(){
+    var out = {};
+    __vg.palette().forEach(function (s) {
+      var c = __vg.slotContrast(s.key);
+      out[s.key] = [Math.round(c.light * 100) / 100, Math.round(c.dark * 100) / 100];
+    });
+    var row = document.querySelector('.lg[data-g]');
+    var rect = row.getBoundingClientRect();
+    row.dispatchEvent(new MouseEvent("contextmenu", {
+      bubbles: true, clientX: rect.left + 5, clientY: rect.top + 5 }));
+    var menu = document.querySelector('[id$="ctxmenu"]');
+    var titles = {};
+    Array.prototype.forEach.call(menu.querySelectorAll(".swatch[data-key]"), function (b) {
+      titles[b.getAttribute("data-key")] = b.getAttribute("title") || "";
+    });
+    menu.hidden = true;
+    return { contrast: out, titles: titles };
+  })()`);
+
+  const bad = [];
+  for (const s of want.light.slots) {
+    const w = [+want.light.slots.find((x) => x.key === s.key).contrast.toFixed(2),
+               +want.dark.slots.find((x) => x.key === s.key).contrast.toFixed(2)];
+    const g = got.contrast[s.key];
+    if (!g || Math.abs(g[0] - w[0]) > 0.005 || Math.abs(g[1] - w[1]) > 0.005) {
+      bad.push(`${s.key} page ${g ? g.join("/") : "?"} vs harness ${w.join("/")}`);
+    }
+    const t = got.titles[s.key] || "";
+    if (!t.includes(w[0].toFixed(2)) || !t.includes(w[1].toFixed(2))) {
+      bad.push(`${s.key} title "${t}" names neither ${w[0].toFixed(2)} nor ${w[1].toFixed(2)}`);
+    }
+    const saysLight = /light [\d.]+ \(under 3:1\)/.test(t);
+    const saysDark = /dark [\d.]+ \(under 3:1\)/.test(t);
+    if (saysLight !== want.light.under3.includes(s.key)) bad.push(`${s.key} light flag wrong`);
+    if (saysDark !== want.dark.under3.includes(s.key)) bad.push(`${s.key} dark flag wrong`);
+  }
+  return { ok: bad.length === 0 && want.strays.length === 0,
+           detail: bad.length
+             ? bad.slice(0, 4).join("; ")
+             : `12 slots x 2 themes agree with palette-check.mjs to 2dp; under 3:1 light ` +
+               `${want.light.under3.join(",") || "none"}, dark ${want.dark.under3.join(",") || "none"}` };
+});
+
+check("the picker shows both grounds whatever the theme", async (p) => {
+  const r = await p.j(`(function(){
+    var root = document.getElementById("vg-app");
+    var was = root.getAttribute("data-theme");
+    var read = function () {
+      var row = document.querySelector('.lg[data-g]');
+      var rect = row.getBoundingClientRect();
+      row.dispatchEvent(new MouseEvent("contextmenu", {
+        bubbles: true, clientX: rect.left + 5, clientY: rect.top + 5 }));
+      var menu = document.querySelector('[id$="ctxmenu"]');
+      var sw = menu.querySelector('.swatch[data-key="g4"]');
+      var f = function (sel) {
+        var el = sw.querySelector(sel);
+        return el ? getComputedStyle(el).fill : null;
+      };
+      var out = { gl: f(".gnd-l"), gd: f(".gnd-d"), bl: f(".d-l"), bd: f(".d-d"),
+                  tl: f(".t-l"), td: f(".t-d") };
+      menu.hidden = true;
+      return out;
+    };
+    var seen = {};
+    ["dark", "light"].forEach(function (t) {
+      root.setAttribute("data-theme", t);
+      __vg.readTheme();
+      seen[t] = read();
+    });
+    if (was) root.setAttribute("data-theme", was); else root.removeAttribute("data-theme");
+    __vg.readTheme();
+    return seen;
+  })()`);
+  const rgb = (h) => {
+    const n = h.replace("#", "");
+    return `rgb(${parseInt(n.slice(0, 2), 16)}, ${parseInt(n.slice(2, 4), 16)}, ${parseInt(n.slice(4, 6), 16)})`;
+  };
+  const wantGl = rgb("#fcfcfb"), wantGd = rgb("#1a1a19");
+  const wantBl = rgb("#eda100"), wantBd = rgb("#c98500");
+  const bad = [];
+  for (const t of ["dark", "light"]) {
+    const s = r[t];
+    if (s.gl !== wantGl) bad.push(`${t}: light ground ${s.gl} not ${wantGl}`);
+    if (s.gd !== wantGd) bad.push(`${t}: dark ground ${s.gd} not ${wantGd}`);
+    if (s.bl !== wantBl) bad.push(`${t}: g4 light dot ${s.bl} not ${wantBl}`);
+    if (s.bd !== wantBd) bad.push(`${t}: g4 dark dot ${s.bd} not ${wantBd}`);
+    if (!s.tl || s.tl === s.bl) bad.push(`${t}: light tint row did not differ from the base`);
+    if (!s.td || s.td === s.bd) bad.push(`${t}: dark tint row did not differ from the base`);
+  }
+  return { ok: bad.length === 0,
+           detail: bad.length ? bad.slice(0, 3).join("; ")
+             : `both grounds and both g4 values identical in a dark page and a light one ` +
+               `(${wantGl} / ${wantGd}, dots ${wantBl} / ${wantBd}), tint rows differ from the base in both` };
+});
+
+check("the picker draws the disc's own dot sizes", async (p) => {
+  await settle(p);
+  await camSettle(p);
+  const r = await p.j(`(function(){
+    var row = document.querySelector('.lg[data-g]');
+    var rect = row.getBoundingClientRect();
+    row.dispatchEvent(new MouseEvent("contextmenu", {
+      bubbles: true, clientX: rect.left + 5, clientY: rect.top + 5 }));
+    var menu = document.querySelector('[id$="ctxmenu"]');
+    var sw = menu.querySelector('.swatch[data-key="g4"]');
+    var svg = sw.querySelector("svg.prev");
+    var box = svg.getBoundingClientRect();
+    var vb = (svg.getAttribute("viewBox") || "").split(/\\s+/).map(Number);
+    var radii = Array.prototype.map.call(svg.querySelectorAll("circle"), function (c) {
+      return +c.getAttribute("r");
+    });
+    var uniq = radii.filter(function (v, i, a) { return a.indexOf(v) === i; })
+                    .sort(function (a, b) { return a - b; });
+    menu.hidden = true;
+
+    var live = [];
+    __vg.graph.forEachNode(function (id) {
+      if ((__vg.alpha[id] || 0) < 0.999) return;
+      var d = __vg.renderer.getNodeDisplayData(id);
+      if (!d || d.hidden) return;
+      live.push(__vg.renderer.scaleSize(d.size));
+    });
+    live.sort(function (a, b) { return a - b; });
+    return { want: __vg.previewSizes(), uniq: uniq, n: radii.length,
+             boxW: Math.round(box.width * 100) / 100, boxH: Math.round(box.height * 100) / 100,
+             vbW: vb[2], vbH: vb[3],
+             liveMin: live.length ? Math.round(live[0] * 100) / 100 : null,
+             liveMed: live.length ? Math.round(live[Math.floor(live.length / 2)] * 100) / 100 : null,
+             liveMax: live.length ? Math.round(live[live.length - 1] * 100) / 100 : null,
+             liveN: live.length };
+  })()`);
+  const same = r.uniq.length === r.want.length &&
+               r.uniq.every((v, i) => Math.abs(v - r.want[i]) < 1e-9);
+  // one svg unit must be one CSS pixel, or the radii on screen are not the disc's
+  const oneToOne = Math.abs(r.boxW - r.vbW) < 0.01 && Math.abs(r.boxH - r.vbH) < 0.01;
+  // The quartet is a fixed reference scale, NOT a bound: a dot's radius falls out of the
+  // vault's size and the viewport's, so no four numbers can bracket every disc -- measured,
+  // the same three fixtures span 0.39px (10k in a small window) to 5.93px (shape at 1600px).
+  // What must stay true is that the reference still resembles a real disc, so the range has
+  // to bracket the TYPICAL dot. .ai-context/invariants.md
+  const lo = r.want[0], hi = r.want[r.want.length - 1];
+  const brackets = r.liveMed === null || (r.liveMed >= lo - 0.005 && r.liveMed <= hi + 0.005);
+  return { ok: same && oneToOne && brackets,
+           detail: `preview radii ${r.uniq.join("/")} (want ${r.want.join("/")}), ` +
+                   `${r.n} circles, svg ${r.boxW}x${r.boxH} for viewBox ${r.vbW}x${r.vbH} ` +
+                   `(1 unit = 1px ${oneToOne ? "ok" : "NO"}); disc draws ` +
+                   `${r.liveMin}/${r.liveMed}/${r.liveMax}px over ${r.liveN} dots, median ` +
+                   `${brackets ? "inside" : "OUTSIDE"} the previewed ${lo}-${hi}` };
+});
+
+check("the picker's ladder is the ladder the disc draws", async (p) => {
+  const r = await p.j(`(function(){
+    var cs = getComputedStyle(document.getElementById("vg-app"));
+    var now = cs.getPropertyValue("--surface-1").trim().toLowerCase();
+    var suffix = now === cs.getPropertyValue("--surface-1-d").trim().toLowerCase() ? "d" : "l";
+    var pins = __vg.subfolderColors;
+    var picked = null;
+    __vg.groupOrder().forEach(function (g) {
+      if (picked || g.charAt(0) === "(") return;
+      var subs = __vg.subOrderOf(g);
+      if (!subs || subs.length < 2) return;
+      var pinned = subs.some(function (sb) { return !!pins[g + "/" + sb]; });
+      if (pinned) return;
+      picked = { g: g, subs: subs };
+    });
+    if (!picked) return { skip: true };
+    var slot = __vg.slotOf(picked.g);
+    var ladder = __vg.previewLadder(slot, suffix);
+    var disc = [];
+    for (var k = 1; k < picked.subs.length && k < 4; k++) {
+      disc.push(String(__vg.subColorOf(picked.g, picked.subs[k])).toLowerCase());
+    }
+    return { skip: false, group: picked.g, slot: slot, suffix: suffix,
+             ladder: ladder.map(function (h) { return String(h).toLowerCase(); }),
+             disc: disc };
+  })()`);
+  if (r.skip) return { ok: true, detail: "no unpinned folder with two or more subfolders on this shape" };
+  const n = r.disc.length;
+  const same = n > 0 && r.disc.every((h, i) => h === r.ladder[i]);
+  return { ok: same,
+           detail: `${r.group} on ${r.slot}: preview ladder ${r.ladder.slice(0, n).join(",")} ` +
+                   `vs the disc's ${r.disc.join(",")} (${same ? "same" : "DIFFERENT"})` };
+});
+
+check("the picker stays inside the mount", async (p) => {
+  const r = await p.j(`(function(){
+    var root = document.getElementById("vg-app");
+    var rows = document.querySelectorAll('.lg[data-g]');
+    var row = rows[rows.length - 1];
+    var rect = row.getBoundingClientRect();
+    row.dispatchEvent(new MouseEvent("contextmenu", {
+      bubbles: true, clientX: rect.left + 5, clientY: rect.bottom - 2 }));
+    var menu = document.querySelector('[id$="ctxmenu"]');
+    var m = menu.getBoundingClientRect(), rr = root.getBoundingClientRect();
+    var out = { w: Math.round(m.width), h: Math.round(m.height),
+                rootW: Math.round(rr.width), rootH: Math.round(rr.height),
+                inside: m.left >= rr.left - 0.5 && m.top >= rr.top - 0.5 &&
+                        m.right <= rr.right + 0.5 && m.bottom <= rr.bottom + 0.5,
+                sws: menu.querySelectorAll(".swatch").length };
+    menu.hidden = true;
+    return out;
+  })()`);
+  return { ok: r.inside && r.sws === 12,
+           detail: `menu ${r.w}x${r.h} in a ${r.rootW}x${r.rootH} mount, ${r.sws} swatches, ` +
+                   `${r.inside ? "inside" : "OUTSIDE the mount"}` };
+});
+
 check("focus web stays above dim notes", async (p) => {
   const r = await p.j(`__vg.checkFocusWeb()`);
   if (!r.geomGaps) return { ok: true, detail: `${r.node} (degree ${r.degree}): no in-disc samples on this shape, nothing to measure` };
