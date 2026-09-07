@@ -22,6 +22,16 @@ for. `.ai-context/design/0013-touch-input.md` carries that and the rest of the r
 plays it — the beats only read as mobile in a narrow window, and the hero is recorded at
 1600x1000.
 
+**It zooms in before it taps anything.** At a phone's resting zoom a dot is under 2 px, and a
+clip that taps one of those is showing something nobody would do: the act spends its first two
+beats zooming toward the note it is about to open. The zoom is a wheel, because only one pointer
+glyph is drawn and a pinch would look identical on camera; what proves the pinch itself works is
+the harness, below. It ends on a double-tap, which fits the whole disc back into view.
+
+**The pointer is a finger below the breakpoint.** `#vg-democursor` carries two glyphs and the CSS
+swaps them at 720 px, so a narrow recording shows a fingertip and a desktop one shows the arrow.
+Nothing decides this per act — it follows the layout, so it cannot be forgotten.
+
 ## Regenerating this feature's clip
 
 **Record this one narrow.** The act itself is only choreography; what makes it the phone layout
@@ -48,4 +58,4 @@ selects nothing. See `.ai-context/mobile-harness.md`.
 | | |
 |---|---|
 | **Introduced in** | `2.1.0 (github#73)` |
-| **Last re-recorded** | `2026-09-07` — 20.3 s at 406x892, encoded at native width (729 KB) |
+| **Last re-recorded** | `2026-09-07` — 26.5 s at 406x892, encoded at native width (1.04 MB) |

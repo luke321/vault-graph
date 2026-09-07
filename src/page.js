@@ -7875,6 +7875,12 @@ function mountVaultGraph(root, data, deps) {
       { settle: true, act: "only05", why: "let the disc refill" },
 
       // github#73, design/0013 -- record this one narrow: -Width 420 -Height 900
+      { wheel: 4, target: ["note", "05"], act: "mobile",
+        why: "zoom in on the note first -- at a phone's resting zoom a dot is under 2px, and " +
+             "nobody taps that" },
+      { wheel: 4, target: ["note", "05"], act: "mobile",
+        why: "...and again, until the dots are finger-sized" },
+      { settle: true, act: "mobile", why: "let the camera land" },
       { click: true, target: ["note", "05"], act: "mobile",
         why: "tap a note -- the card rises as a sheet at the foot, the disc still above it" },
       { settle: true, act: "mobile", why: "let the card land and the links light" },
@@ -7894,7 +7900,10 @@ function mountVaultGraph(root, data, deps) {
         why: "put the calendar away -- the disc takes the whole screen" },
       { settle: true, act: "mobile", why: "let the disc grow into it" },
       { click: true, target: ["id", "band"], act: "mobile", why: "and bring it back" },
-      { settle: true, act: "mobile", why: "let the band settle" }
+      { settle: true, act: "mobile", why: "let the band settle" },
+      { dblclick: true, target: ["stage", "centre"], act: "mobile",
+        why: "double-tap fits the whole disc back into view, the way a double-click does" },
+      { settle: true, act: "mobile", why: "let it fly home" }
     ];
   }
 

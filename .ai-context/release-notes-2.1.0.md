@@ -4,7 +4,7 @@ and the desktop picture is unchanged — asserted rather than assumed.
 
 ### A finger drives the disc
 
-<img src="https://raw.githubusercontent.com/luke321/vault-graph/develop/assets/features/mobile.webp" width="406" alt="A phone-sized window: a note tapped so its card rises as a sheet at the foot, the folder list slid up as a sheet and a folder hidden from inside it, the disc re-packing when the sheet goes away, then the calendar put away and brought back">
+<img src="https://raw.githubusercontent.com/luke321/vault-graph/develop/assets/features/mobile.webp" width="406" alt="A phone-sized window with a fingertip for a pointer: the disc zoomed in until its dots are finger-sized, a note tapped so its card rises as a sheet at the foot, the folder list slid up as a sheet and a folder hidden from inside it, the disc re-packing when the sheet goes away, the calendar put away and brought back, then a double-tap fitting the whole disc back into view">
 
 One finger pans, two pinch about their midpoint, a tap raises a note and opens its card, and a
 double-tap fits the disc back into view — the same meaning the desktop double-click has.

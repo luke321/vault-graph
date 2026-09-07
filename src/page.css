@@ -574,6 +574,8 @@
     filter: drop-shadow(0 1px 2px rgba(0,0,0,.45));
   }
   .vault-graph #vg-democursor[hidden] { display: none; }
+  /* github#73 -- a recording at a phone's width shows a finger, not a mouse pointer */
+  .vault-graph #vg-democursor .finger { display: none; }
 
   .vault-graph .ctxmenu {
     position: absolute; z-index: 9; width: 176px;
@@ -664,6 +666,8 @@
     .vault-graph #vg-heatnote { flex-basis: 100%; order: 3; }
     .vault-graph #vg-heatscale { margin-left: 0; }
     .vault-graph #vg-rangebox { order: 4; }
+    .vault-graph #vg-democursor .arrow { display: none; }
+    .vault-graph #vg-democursor .finger { display: block; }
   }
   @media (max-width: 720px) and (prefers-reduced-motion: reduce) {
     .vault-graph #vg-sidebar { transition: none; }
