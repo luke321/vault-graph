@@ -385,7 +385,7 @@ function mountVaultGraph(root, data, deps) {
 
   // github#73, design/0013
   var sheetOpen = false;
-  var bandOpen = false;
+  var bandOpen = true;
 
   // github#3
   var unlinkedByFolder = deps.unlinkedByFolder === false ? false : true;
@@ -5690,7 +5690,7 @@ function mountVaultGraph(root, data, deps) {
     if ($("sheet")) $("sheet").onclick = function () { setSheet(!sheetOpen); };
     if ($("band")) $("band").onclick = function () { setBand(!bandOpen); };
     setSheet(false, true);
-    setBand(false, true);
+    setBand(true, true);
     $("png").onclick = savePng;
     if ($("dbg")) $("dbg").onclick = function () {
       var txt = JSON.stringify(API.debugDump(), null, 2);

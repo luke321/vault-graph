@@ -1995,9 +1995,12 @@ number on this page looked right, because the harness was sending a tap with no 
 
 ## The disc gets a phone's screen, and the desktop layout does not move
 
-Below 720 px the disc takes the whole viewport; the legend, search and view buttons slide up as
-a sheet, and the band and date strip are hidden until asked for -- never overlaid, because
-design/0010 puts the band in its own grid row precisely so it cannot collide with the disc. The
+Below 720 px the disc takes the rest of the viewport and the legend, search and view buttons
+slide up as a sheet. The band and date strip stay on and can be put away, never overlaid,
+because design/0010 puts the band in its own grid row precisely so it cannot collide with the
+disc. Showing the band costs no dot size at all, 1.38 px median with it and without, since the
+disc is fit to the narrower axis; its control row wraps below the breakpoint, or the stage clips
+the second date field and All dates off the right edge. The
 detail card becomes a sheet at the foot at 46% and both control clusters move to the top
 corners, clear of it. design/0013.
 
@@ -2018,7 +2021,7 @@ Measured 2026-09-07, demo fixture, 1403 notes:
 
 | | before | after |
 |---|---|---|
-| iPhone 14, disc box | 390x260, 31% of screen | **390x844, 100%** |
+| iPhone 14, disc box | 390x260, 31% of screen | **390x564 with the band, 390x844 without** |
 | iPhone 14, dot radius p50 | 1.10 px | **1.38 px** |
 | iPhone 14, dots under 1 px | 496 of 1403 | **153 of 1403** |
 | Pixel 7, dot radius p50 | 1.19 px | **1.43 px** |

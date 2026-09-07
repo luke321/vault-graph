@@ -125,12 +125,26 @@ legend and the search box.
 - **The legend, search and view buttons** slide up as a sheet: `#vg-sidebar` leaves the grid
   (`position: absolute`, `translateY(101%)`), and `[data-sheet="on"]` on the root brings it in.
   It keeps its own scrolling, so the whole legend is reachable.
-- **The band and the date strip** are hidden and shown, never overlaid. `design/0010` states
+- **The band and the date strip stay on by default**, and can be put away. `design/0010` states
   the band sits in its own grid row of `#stage` "so the disc is centred in what is left and the
   two cannot collide however short the window gets" — hiding the row honours that, floating the
   band over the disc would not. `HEAT_WEEKS` stays the sanctioned lever if the axis ever needs
   to be shorter; the band must never grow a horizontal scrollbar, which `0010` records as an
   already-shipped, already-reported regression.
+
+  **Showing it costs the disc no dot size**, which is why it is the default. Measured on the
+  iPhone 14 viewport: with the band the disc box is 390x564 and the dot radius median is
+  1.38 px; without it the box is 390x844 and the median is **the same 1.38 px**, because the
+  disc is fit to the narrower axis and the extra height buys margin rather than radius. So the
+  choice is between a calendar and empty space, and `bandOpen` starts true at every width,
+  which also makes `data-band` tell the truth above the breakpoint where the band is always
+  drawn.
+
+  **Its control row has to wrap there.** That row is one line of five things: the label, the
+  scale, the compact toggle, two date fields and All dates. At 390 px the stage clipped the
+  second date field and the button off the right edge, unreachable. Below the breakpoint it
+  wraps with the note line on its own row, so the band goes from 230 px to 280 px and every
+  control is reachable.
 
 **Selecting a note closes the sheet.** The card is pinned to the foot and the sheet covers the
 bottom 72% at a higher z-index, so tapping a note — or a search hit inside the sheet itself —

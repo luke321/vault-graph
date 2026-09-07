@@ -649,6 +649,12 @@
       display: flex; flex-direction: row; gap: 6px;
     }
     .vault-graph #vg-mob button { opacity: .8; width: 44px; height: 44px; }
+    /* The band's control row is one line of five things and the stage clips it at this
+       width: the second date field and All dates were cut off and unreachable. */
+    .vault-graph #vg-heat .hrow { flex-wrap: wrap; row-gap: 6px; }
+    .vault-graph #vg-heatnote { flex-basis: 100%; order: 3; }
+    .vault-graph #vg-heatscale { margin-left: 0; }
+    .vault-graph #vg-rangebox { order: 4; }
   }
   @media (max-width: 720px) and (prefers-reduced-motion: reduce) {
     .vault-graph #vg-sidebar { transition: none; }
