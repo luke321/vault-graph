@@ -427,6 +427,7 @@ function mountVaultGraph(root, data, deps) {
     };
     THEME.byKey = dict();
     THEME.slots.forEach(function (hex, i) { THEME.byKey["g" + (i + 1)] = hex; });
+    clearPreviewCache();
     if (renderer) renderer.setSetting("labelColor", THEME.text);
   }
   readTheme();
@@ -1405,6 +1406,7 @@ function mountVaultGraph(root, data, deps) {
   }
 
   function buildSubShades() {
+    clearPreviewCache();
     subShade = dict();
     subSlot = dict();
     var others = groupColours();
@@ -5797,9 +5799,16 @@ function mountVaultGraph(root, data, deps) {
     return base + " -- " + filed + " filed here, " + carried + " carry this tag";
   }
 
+  // github#77
+  /** @type {Record<string, string>} */
+  var previewCache = dict();
+  function clearPreviewCache() { previewCache = dict(); }
+
   // github#77, design/0004, design/0003
   /** @param {string} key @returns {string} */
   function swatchPreviewHTML(key) {
+    var hit = previewCache[key];
+    if (hit !== undefined) return hit;
     var L = previewLadder(key, "l"), D = previewLadder(key, "d");
     var W = PREVIEW_HALF_W * 2, marks = "";
     for (var r = 0; r < SUB_SLOTS; r++) {
@@ -5814,12 +5823,14 @@ function mountVaultGraph(root, data, deps) {
                  '" cy="' + cy + '" r="' + rad + '"' + (fd ? ' fill="' + fd + '"' : "") + '/>';
       }
     }
-    return '<svg class="prev" width="' + W + '" height="' + PREVIEW_H +
+    var html = '<svg class="prev" width="' + W + '" height="' + PREVIEW_H +
            '" viewBox="0 0 ' + W + ' ' + PREVIEW_H + '" aria-hidden="true" focusable="false">' +
            '<rect class="gnd-l" x="0" y="0" width="' + PREVIEW_HALF_W +
            '" height="' + PREVIEW_H + '"/>' +
            '<rect class="gnd-d" x="' + PREVIEW_HALF_W + '" y="0" width="' + PREVIEW_HALF_W +
            '" height="' + PREVIEW_H + '"/>' + marks + '</svg>';
+    previewCache[key] = html;
+    return html;
   }
 
   // github#50

@@ -4860,22 +4860,42 @@ check("the picker's ladder is the ladder the disc draws", async (p) => {
       picked = { g: g, subs: subs };
     });
     if (!picked) return { skip: true };
-    var slot = __vg.slotOf(picked.g);
-    var ladder = __vg.previewLadder(slot, suffix);
-    var disc = [];
-    for (var k = 1; k < picked.subs.length && k < 4; k++) {
-      disc.push(String(__vg.subColorOf(picked.g, picked.subs[k])).toLowerCase());
-    }
-    return { skip: false, group: picked.g, slot: slot, suffix: suffix,
-             ladder: ladder.map(function (h) { return String(h).toLowerCase(); }),
-             disc: disc };
+    var lower = function (a) { return a.map(function (h) { return String(h).toLowerCase(); }); };
+    var read = function () {
+      var slot = __vg.slotOf(picked.g);
+      var disc = [];
+      for (var k = 1; k < picked.subs.length && k < 4; k++) {
+        disc.push(String(__vg.subColorOf(picked.g, picked.subs[k])).toLowerCase());
+      }
+      return { slot: slot, ladder: lower(__vg.previewLadder(slot, suffix)), disc: disc };
+    };
+    var rest = read();
+
+    // github#77 -- the preview is memoised per slot, so a pick must invalidate it
+    var was = __vg.folderColors;
+    var other = rest.slot === "g7" ? "g1" : "g7";
+    var next = Object.assign({}, was); next[picked.g] = other;
+    __vg.setFolderColors(next);
+    var moved = read();
+    __vg.setFolderColors(was);
+    var back = read();
+
+    return { skip: false, group: picked.g, suffix: suffix, other: other,
+             rest: rest, moved: moved, back: back };
   })()`);
   if (r.skip) return { ok: true, detail: "no unpinned folder with two or more subfolders on this shape" };
-  const n = r.disc.length;
-  const same = n > 0 && r.disc.every((h, i) => h === r.ladder[i]);
-  return { ok: same,
-           detail: `${r.group} on ${r.slot}: preview ladder ${r.ladder.slice(0, n).join(",")} ` +
-                   `vs the disc's ${r.disc.join(",")} (${same ? "same" : "DIFFERENT"})` };
+  const agrees = (s) => s.disc.length > 0 && s.disc.every((h, i) => h === s.ladder[i]);
+  const atRest = agrees(r.rest), afterPick = agrees(r.moved), restored = agrees(r.back);
+  const invalidated = r.moved.ladder[0] !== r.rest.ladder[0];
+  const cameBack = r.back.ladder.join() === r.rest.ladder.join() &&
+                   r.back.slot === r.rest.slot;
+  const n = r.rest.disc.length;
+  return { ok: atRest && afterPick && restored && invalidated && cameBack,
+           detail: `${r.group} on ${r.rest.slot}: preview ${r.rest.ladder.slice(0, n).join(",")} ` +
+                   `vs the disc's ${r.rest.disc.join(",")} (${atRest ? "same" : "DIFFERENT"}); ` +
+                   `pinned to ${r.other} the preview ${invalidated ? "followed" : "DID NOT FOLLOW"} ` +
+                   `and still ${afterPick ? "agrees" : "DISAGREES"}; ` +
+                   `restored ${cameBack && restored ? "exactly" : "WRONG"}` };
 });
 
 check("the picker stays inside the mount", async (p) => {
