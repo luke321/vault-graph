@@ -7872,12 +7872,34 @@ function mountVaultGraph(root, data, deps) {
       { settle: true, act: "only05", why: "let everything else recede" },
       { click: true, target: ["id", "allon"], act: "only05",
         why: "...and bring the whole vault back" },
-      { settle: true, act: "only05", why: "let the disc refill" }
+      { settle: true, act: "only05", why: "let the disc refill" },
+
+      // github#73, design/0013 -- record this one narrow: -Width 420 -Height 900
+      { click: true, target: ["note", "05"], act: "mobile",
+        why: "tap a note -- the card rises as a sheet at the foot, the disc still above it" },
+      { settle: true, act: "mobile", why: "let the card land and the links light" },
+      { click: true, target: ["detailclose"], act: "mobile", why: "close the card" },
+      { click: true, target: ["id", "sheet"], act: "mobile",
+        why: "the folder list, search and view buttons slide up as a sheet" },
+      { settle: true, act: "mobile", why: "let the sheet arrive" },
+      { click: true, target: ["eye", "06"], act: "mobile", why: "hide a folder from inside it" },
+      { click: true, target: ["id", "sheet"], act: "mobile",
+        why: "put the sheet away -- the disc has re-packed behind it" },
+      { settle: true, act: "mobile", why: "let the wedges close the gap" },
+      { click: true, target: ["id", "sheet"], act: "mobile", why: "back into the sheet" },
+      { click: true, target: ["id", "allon"], act: "mobile", why: "show everything again" },
+      { click: true, target: ["id", "sheet"], act: "mobile", why: "and away" },
+      { settle: true, act: "mobile", why: "let the folder come back" },
+      { click: true, target: ["id", "band"], act: "mobile",
+        why: "put the calendar away -- the disc takes the whole screen" },
+      { settle: true, act: "mobile", why: "let the disc grow into it" },
+      { click: true, target: ["id", "band"], act: "mobile", why: "and bring it back" },
+      { settle: true, act: "mobile", why: "let the band settle" }
     ];
   }
 
-  // github#34
-  var FULL_RUN_EXCLUDES = ["subfoldercolor", "hiddenbydefault", "yearchip", "only05"];
+  // github#34, github#73
+  var FULL_RUN_EXCLUDES = ["subfoldercolor", "hiddenbydefault", "yearchip", "only05", "mobile"];
 
   /** @returns {DemoBeat[]} */
   function demoFullStoryboard() {
