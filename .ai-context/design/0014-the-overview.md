@@ -154,6 +154,47 @@ top right below 720px and `#vg-mob` owns the top left; the tile takes 72px and t
 below the cluster. Measured iPhone 14: **72x72 at 306,442**, overlapping neither cluster, with the
 disc's dot radius median unchanged at 1.38px and the desktop control unchanged at 2.19px.
 
+## Four things an adversarial pass found that the checks could not
+
+Recorded because each one was invisible to a green suite, which is this repo's recurring shape.
+
+**The repaint guard had no coverage at all.** Every paint reading in the first cut was taken while
+the tile was *hidden*, and `ovSync` returns on the hide path before it builds a signature — so the
+readings were guaranteed by the early return, not by the guard, and deleting
+`if (sig === ovSig) return;` left all four checks passing. The fix is one more reading taken with
+the tile **shown** and the camera still. Proved by mutation: with the guard removed, five forced
+refreshes and 500 ms of stillness add **5 paints** and the check fails; with it, 0.
+
+**The canvas was two pixels smaller than the space it drew in.** `#vg-ov` is `--ov-size` (96 px)
+under the page's `border-box`, so a 1 px border left the canvas a 94 px content box while
+`ovPaint` drew in the 96-unit space the token names. The browser then resampled 96 → 94 and every
+1 px stroke landed off-pixel: exactly the crispness the `devicePixelRatio` backing store exists to
+buy, given away by a 2 % mismatch. No check could see it, because they all compare 96-space
+numbers with each other and the cluster check measures the *button*, which really is 96. The ring
+is a `box-shadow` now — it takes no layout room — and `ovSize()` reads the canvas's own
+`clientWidth` first, so the drawing space is the space it is displayed in whatever the CSS does
+later.
+
+**`data-ov="on"` silently overrode the phone's card cap.** `design/0013` caps `#vg-detail` at 46 %
+below 720 px, and `.vault-graph[data-ov="on"] #vg-detail` outranks `.vault-graph #vg-detail` —
+media queries add no specificity — so the desktop calc took over the moment the tile appeared on a
+phone: 302 px of an iPhone 14 instead of 259, which is the failure `design/0013` records as "48
+linked notes filled the whole screen and the disc was gone". It is also backwards there, since the
+tile is top-anchored below the breakpoint and the card is bottom-anchored and the two cannot
+collide. The cap is restated inside the media query.
+
+**`ovCells` went stale on the bail-out paths.** `ringsLayout` returns early when there is no plan
+and when nothing is visible, and the assignment sits after both; it was also missing from
+`roomOf`'s save/restore list, which exists precisely so a probe layout cannot leak into live
+state. Filter every folder off while zoomed in and the tile would draw sectors for folders that
+had left, with a signature that never changes to paint them out again. `ovCells` is cleared on
+both returns and restored with its siblings.
+
+Two assertions that could not fail were removed rather than left as decoration: waiting for
+`camAtRest` after the pan-restore wait (that callback sets `camAtRest` in the same synchronous
+block, so it was already true), and `discPx > 8` (the `geomLock` term cancels out of
+`k * rings.maxR`, leaving `OV_DISC_FRAC * s / 2` — a constant compared with a constant).
+
 ## What it deliberately does not do
 
 **It does not own the pan gesture.** Dragging the footprint to pan is an attractive second feature

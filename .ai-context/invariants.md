@@ -419,16 +419,33 @@ node scripts/render-diff.mjs --against-dir <a develop build> --ratios 1.08,0.35,
 Against pages built from `develop@598a6b9`, dark, 1600x1000, all three fixtures: at **ratio 1.08
 the stage, canvas, heatmap, ribbon and legend clips are identical**, and so are all of them at
 **ratio 4.2**, where the disc is small enough to be contained and the tile stays away. At **ratio
-0.35** the only pixels that differ anywhere on the page are one 96x96 box at the tile's own
-position (`x 1188..1283, y 703..798` on the stage): **6970, 6985 and 6696 px** on the demo, shape
+0.35** the only pixels that differ anywhere on the page are one 98x98 box at the tile's own
+position (`x 1187..1284, y 702..799` on the stage -- the 96 px control plus its 1 px ring):
+**7205, 7244 and 6934 px** on the demo, shape
 and 10k fixtures. `positions`, `camera`, `labels` and the layer-composite `pixels` compare are
 **0 at every ratio** — the tile is not one of the renderer's canvases, so it costs the disc
 nothing and `savePng` cannot pick it up. The goldens do not move: the overview reads `geomLock`
 and the plan and writes neither.
 
-The whole-`page` clip additionally differs by **68 px at `x 242..253`** at every ratio including
+The whole-`page` clip additionally differs by **64 px at `x 241..253`** at every ratio including
 1.08. That is the sidebar's "Generated …" stamp between two builds minutes apart, the artifact
 this file already records for the engine port — not the overview, which cannot reach the sidebar.
+
+**The tile's ring is a `box-shadow`, not a border, and that is load-bearing.** Under the page's
+`border-box` a 1 px border would leave the canvas a 94 px content box while `ovPaint` drew in the
+96 px space `--ov-size` names, so every 1 px stroke was resampled by 0.979 and landed off-pixel --
+the crispness the `devicePixelRatio` backing store exists to buy, given away by a 2% mismatch, and
+invisible to every check because they all compare 96-space numbers with each other. A `box-shadow`
+takes no layout room, so the canvas gets the whole tile; `ovSize()` also reads the canvas's own
+`clientWidth` first, so the drawing space is the space it is displayed in whatever the CSS does
+later.
+
+**Below 720 px the card's 46% cap has to be restated.** `design/0013` caps `#vg-detail` at 46% of
+the screen there, and `.vault-graph[data-ov="on"] #vg-detail` outranks `.vault-graph #vg-detail` --
+media queries add no specificity -- so the desktop calc silently took over the moment the tile
+appeared on a phone, giving the card 302 px of an iPhone 14 instead of 259. It is also backwards
+there: the tile is top-anchored below the breakpoint and the card is bottom-anchored, so they
+cannot collide at all.
 
 The three constants: `OV_DISC_FRAC` **0.62** (the disc's share of the half-tile, which is what
 leaves room for a footprint up to ~1.6x the disc diameter to close inside the tile), `OV_SECTOR_A`
@@ -436,7 +453,12 @@ leaves room for a footprint up to ~1.6x the disc diameter to close inside the ti
 than the tile only one edge crosses it, and at 0.10 the covered side was indistinguishable from
 the uncovered one, so the case the law is about read as a bare hairline.
 
-**A still camera draws nothing.** `ovSync` runs from `afterRender` and returns before touching the
+**A still camera draws nothing** -- and the check for it has to be taken **with the tile shown**.
+Every other paint reading here is taken while the tile is hidden, where `ovSync` returns before it
+builds a signature at all, so those readings are guaranteed by the hide path and would still pass
+with the guard deleted. Verified by mutation: removing `if (sig === ovSig) return;` leaves five
+forced refreshes and 500 ms of stillness adding **5 paints** with the tile up and the check fails;
+with the guard it adds 0. `ovSync` runs from `afterRender` and returns before touching the
 canvas unless a signature changed. The signature is the drawing's own inputs quantised to what
 moves a pixel — the rect to a quarter pixel, the ring radii to half a pixel, each sector to one
 degree — so quantising the *output* makes the guard true by construction rather than by argument.

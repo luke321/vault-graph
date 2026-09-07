@@ -476,10 +476,11 @@
     bottom: calc(var(--controls-inset) + var(--controls-h) + 8px);
     z-index: 6; width: var(--ov-size); height: var(--ov-size); padding: 0;
     cursor: pointer; background: var(--surface-2); color: var(--text-3);
-    border: 1px solid var(--border); border-radius: 8px; overflow: hidden;
-    opacity: .8; transition: opacity .12s, border-color .12s;
+    border: 0; border-radius: 8px; overflow: hidden;
+    box-shadow: 0 0 0 1px var(--border);
+    opacity: .8; transition: opacity .12s, box-shadow .12s;
   }
-  .vault-graph #vg-ov:hover { opacity: 1; border-color: var(--border-strong); }
+  .vault-graph #vg-ov:hover { opacity: 1; box-shadow: 0 0 0 1px var(--border-strong); }
   .vault-graph #vg-ov:focus-visible { opacity: 1; outline: 2px solid var(--accent); outline-offset: 1px; }
   .vault-graph #vg-ov[hidden] { display: none; }
   .vault-graph #vg-ov canvas { display: block; width: 100%; height: 100%; }
@@ -858,6 +859,7 @@
     .vault-graph #vg-cam { top: var(--controls-inset); bottom: auto; }
     /* github#79 -- under the cluster, which is at the top here, and away from #vg-mob's corner */
     .vault-graph { --ov-size: 72px; }
+    .vault-graph[data-ov="on"] #vg-detail { max-height: 46%; }
     .vault-graph #vg-ov {
       top: calc(var(--controls-inset) + var(--controls-h) + 8px); bottom: auto;
     }

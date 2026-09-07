@@ -181,6 +181,16 @@ async function main() {
     "               return !(q.right < r.left || q.left > r.right || q.bottom < r.top || q.top > r.bottom); };" +
     "             var res = { w: Math.round(r.width), h: Math.round(r.height), x: Math.round(r.left)," +
     "                         y: Math.round(r.top), hitsMob: hit(m), hitsCam: hit(c) };" +
+    "             var d = document.getElementById('vg-detail');" +
+    "             var root = document.querySelector('.vault-graph');" +
+    "             var capOf = function (v) { var w = root.getAttribute('data-ov');" +
+    "               if (v === null) root.removeAttribute('data-ov'); else root.setAttribute('data-ov', v);" +
+    "               var hid = d.hasAttribute('hidden'); d.removeAttribute('hidden');" +
+    "               var mh = getComputedStyle(d).maxHeight;" +
+    "               if (hid) d.setAttribute('hidden', '');" +
+    "               if (w === null) root.removeAttribute('data-ov'); else root.setAttribute('data-ov', w);" +
+    "               return mh; };" +
+    "             res.cardCapOff = capOf('off'); res.cardCapOn = capOf('on');" +
     "             o.hidden = was; return res; })()," +
     "           legendHidden: leg ? Math.max(0, leg.scrollHeight - leg.clientHeight) : null," +
     "           sidebarHidden: (function () { var sb = document.getElementById('vg-sidebar');" +
@@ -488,6 +498,10 @@ async function main() {
     console.log("  " + pad("#vg-ov", 12) + pad(layout.ov.w + "x" + layout.ov.h, 12) +
                 ` at ${layout.ov.x},${layout.ov.y}` +
                 `   overlaps #vg-mob ${layout.ov.hitsMob}, #vg-cam ${layout.ov.hitsCam}`);
+    console.log(`  ${pad("card cap", 12)}${pad(layout.ov.cardCapOff, 12)} without the tile, ` +
+                `${layout.ov.cardCapOn} with it` +
+                (W > 720 || layout.ov.cardCapOff === layout.ov.cardCapOn
+                  ? "" : "   <- THE TILE MOVED THE CARD, and below the breakpoint it must not"));
   }
   console.log("");
   console.log(`  horizontal overflow      ${layout.overflowX} px`);

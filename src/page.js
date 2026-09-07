@@ -2405,6 +2405,8 @@ function mountVaultGraph(root, data, deps) {
       /** @type {Record<string, Point>} */
       var hubOut = {};
       hubPlace(hubOut, geomLock ? geomLock.r0 : 1.5, UNIT);
+      // github#79
+      ovCells = null;
       return hubOut;
     }
 
@@ -2424,7 +2426,8 @@ function mountVaultGraph(root, data, deps) {
       live += c.geom;
     });
     var shown = plan.cells.filter(function (c) { return c.geom > 1e-4; });
-    if (!shown.length || !live) return null;
+    // github#79
+    if (!shown.length || !live) { ovCells = null; return null; }
     lastMaxR = plan.maxR || lastMaxR;
     if (plan.sp > 0) bandOf("o").sp = plan.sp;
     if (plan.spInner > 0) bandOf("i").sp = plan.spInner;
@@ -4263,6 +4266,8 @@ function mountVaultGraph(root, data, deps) {
         var keepFit = dotFit, keepCell = cellRoom, keepEdge = edgeCap, keepHub = hubRow0;
         var keepRampI = bandOf("i").ramp, keepRampO = bandOf("o").ramp, keepScale = sizeScale;
         var keepPin = pinnedPlan, keepKeep = planKeep;
+        // github#79
+        var keepOv = ovCells;
         var saved = roomNow, savedCell = cellNow, savedEdge = edgeNow;
         roomNow = null; cellNow = null; edgeNow = null; edgeNow = null;
         var keepTag = trace ? trace.tag : "";
@@ -4283,6 +4288,7 @@ function mountVaultGraph(root, data, deps) {
         bandOf("i").ramp = keepRampI; bandOf("o").ramp = keepRampO; sizeScale = keepScale;
         dotFit = keepFit; cellRoom = keepCell; edgeCap = keepEdge; hubRow0 = keepHub;
         pinnedPlan = keepPin; planKeep = keepKeep;
+        ovCells = keepOv;
         if (keepAlpha) graph.forEachNode(function (id) { alpha[id] = keepAlpha[id]; });
         return got;
       };
@@ -7208,6 +7214,10 @@ function mountVaultGraph(root, data, deps) {
   var ovLast = null;
 
   function ovSize() {
+    var host = $("ov");
+    var cv = host ? host.querySelector("canvas") : null;
+    var w = cv ? cv.clientWidth : 0;
+    if (w > 0) return w;
     var v = parseFloat(css("--ov-size"));
     return v > 0 ? v : 96;
   }
@@ -7366,7 +7376,14 @@ function mountVaultGraph(root, data, deps) {
     if (ovShown === on) return;
     ovShown = on;
     var host = $("ov");
-    if (host) host.hidden = !on;
+    if (host) {
+      // github#79 -- a control that hides itself hands focus on, never drops it
+      if (!on && DOC && DOC.activeElement === host) {
+        var back = $("reset");
+        if (back) back.focus();
+      }
+      host.hidden = !on;
+    }
     ROOT.setAttribute("data-ov", on ? "on" : "off");
     if (!on) { ovSig = ""; ovLast = null; }
   }
@@ -7374,10 +7391,9 @@ function mountVaultGraph(root, data, deps) {
   function ovSync() {
     if (dead || !$("ov")) return;
     var fp = geomLock ? ovFootprint() : null;
-    if (!fp || !ovCropped(fp)) { ovShow(false); return; }
+    var sh = fp && ovCropped(fp) ? ovShape(fp) : null;
+    if (!sh) { ovShow(false); return; }
     ovShow(true);
-    var sh = ovShape(fp);
-    if (!sh) return;
     var sig = ovSigOf(sh);
     if (sig === ovSig) return;
     ovSig = sig;
