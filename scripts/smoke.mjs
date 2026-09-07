@@ -1028,8 +1028,10 @@ async function watchDuringCascade(p, startRatio, capMs = 8000) {
     // 0 of 3 alone, the fit having begun after the last note left but with that ramp still up.
     var s = await p.j(`(function(){ var w = __vg.demo.busyWhy(); return { busy: !!(w.cascade || w.play || w.anim),
       ratio: +__vg.renderer.getCamera().getState().ratio.toFixed(4) }; })()`);
+    // github#19
+    if (!s.busy) break;
     if (Math.abs(s.ratio - startRatio) > 0.01) movedWhileBusy = true;
-    if (!s.busy || Date.now() > deadline) break;
+    if (Date.now() > deadline) break;
     await sleep(60);
   }
   await sleep(500);

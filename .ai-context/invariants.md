@@ -230,6 +230,23 @@ click and finished by ~450ms, well inside the same ~1.8s fade.
 untouched by this — the fix is entirely in what decides to call `fit()` and when, never in
 what `fit()` computes.
 
+**How the check samples, and the race it used to lose (github#19, 2026-09-07).**
+`watchDuringCascade` polls `busyWhy()` and the camera ratio every 60 ms and answers one
+question: did the ratio leave `startRatio` *while the cascade was running*. It used to record
+the ratio and only then break on `!busy`, so the final sample — the one that observes the
+cascade already finished — still counted toward `movedWhileBusy`. A deferred fit is called
+inside `settle()`, which is also what clears `busy`, and it animates over `zoomDuration`
+(120 ms); so any poll landing more than ~20 ms after settle read a camera that had legitimately
+started moving and reported it as having moved early. Measured on the dominant-folder fixture,
+where the shrink is largest: **2 of 3 runs failed, on this branch and on develop's untouched
+`page.js` alike** (same `0.6497` against `0.6502`, `moved early` flipping run to run), and it
+blocked a develop push. The loop now breaks before recording anything from a sample taken after
+`busy` went false. The cost is bounded and deliberate: a fit that began inside the last 60 ms
+of a cascade is no longer caught, which is the width of one poll against a ~1.8 s fade, and the
+defect the check exists for — a shrink fitting *instead of* deferring — moves the camera from
+the first frames. The opposite-direction check is the control that it is still sensitive: a
+growth must report `moved while notes arrived: true`, and does, on all three fixtures.
+
 ## The rings are independent
 
 Toggling an inner-band group must not move the outer band. Measured, an `05` toggle
