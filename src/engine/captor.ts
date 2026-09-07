@@ -228,10 +228,8 @@ export class MouseCaptor extends Emitter<CaptorEvents> implements MouseCaptorApi
     this.lastWheelTriggerTime = now;
   };
 
-  /* ----------------------------------------------------------------- touch
-   * github#73. One finger pans, two pinch, a release that travelled less than the slop is a
-   * tap, and a second tap inside the mouse path's own double-click window is a double-tap.
-   * Nothing here emits `mousedown`, so the node drag armed on `downNode` stays mouse-only.
+  /* ------------------------------------------------------------------ touch
+   * github#73, design/0013
    */
 
   private readonly handleTouchStart = (e: TouchEvent): void => {
@@ -267,7 +265,7 @@ export class MouseCaptor extends Emitter<CaptorEvents> implements MouseCaptorApi
       return;
     }
 
-    // A finger lifted out of a pinch leaves one behind: re-seat rather than jump.
+    // design/0013
     if (this.pinchSpread !== null) {
       this.pinchSpread = null;
       this.lastTouch = pts[0];
@@ -289,7 +287,7 @@ export class MouseCaptor extends Emitter<CaptorEvents> implements MouseCaptorApi
   private readonly handleTouchEnd = (e: TouchEvent): void => {
     e.preventDefault();
     if (e.touches.length) {
-      // Still a finger down: re-seat the pan and the pinch on what is left.
+      // design/0013
       const pts = touchPoints(e, this.container);
       this.lastTouch = pts.length > 1 ? midpoint(pts[0], pts[1]) : (pts[0] ?? this.lastTouch);
       this.pinchSpread = pts.length > 1 ? spread(pts[0], pts[1]) : null;

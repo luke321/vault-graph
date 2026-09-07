@@ -332,17 +332,19 @@
     position: absolute; right: var(--controls-inset); bottom: var(--controls-inset);
     z-index: 6; display: flex; flex-direction: column; gap: 6px;
   }
-  .vault-graph #vg-cam button {
+  /* github#73 -- the phone's two panel buttons wear the camera cluster's look */
+  .vault-graph #vg-mob { display: none; }
+  .vault-graph #vg-cam button, .vault-graph #vg-mob button {
     display: flex; align-items: center; justify-content: center;
     width: 31px; height: 31px; padding: 0; cursor: pointer;
     background: var(--surface-2); color: var(--text-3);
     border: 1px solid var(--border); border-radius: 8px;
     opacity: .55; transition: opacity .12s, color .12s, border-color .12s, background-color .12s;
   }
-  .vault-graph #vg-cam button:hover { opacity: 1; color: var(--text-1); border-color: var(--border-strong); }
-  .vault-graph #vg-cam button:focus-visible { opacity: 1; outline: 2px solid var(--accent); outline-offset: 1px; }
+  .vault-graph #vg-cam button:hover, .vault-graph #vg-mob button:hover { opacity: 1; color: var(--text-1); border-color: var(--border-strong); }
+  .vault-graph #vg-cam button:focus-visible, .vault-graph #vg-mob button:focus-visible { opacity: 1; outline: 2px solid var(--accent); outline-offset: 1px; }
   .vault-graph #vg-pan { margin-top: 4px; }
-  .vault-graph #vg-pan[aria-pressed="true"] {
+  .vault-graph #vg-pan[aria-pressed="true"], .vault-graph #vg-band[aria-pressed="true"], .vault-graph #vg-sheet[aria-expanded="true"] {
     opacity: .8; color: var(--accent); border-color: var(--accent);
     background: color-mix(in oklab, var(--accent) 12%, var(--surface-2));
   }
@@ -615,8 +617,38 @@
     background: var(--surface-1); z-index: 20; font-size: 13px; color: var(--text-2);
   }
 
+  /* github#73 -- the disc gets the screen; the legend and the band are summoned */
   @media (max-width: 720px) {
-    .vault-graph { grid-template-columns: 1fr; grid-template-rows: 42% 58%; }
-    .vault-graph #vg-sidebar { border-right: 0; border-bottom: 1px solid var(--border); }
-    .vault-graph #vg-detail { width: auto; left: 12px; }
+    .vault-graph { grid-template-columns: 1fr; grid-template-rows: 1fr; }
+    .vault-graph #vg-sidebar {
+      position: absolute; left: 0; right: 0; bottom: 0; z-index: 8;
+      max-height: 72%; width: auto;
+      border-right: 0; border-top: 1px solid var(--border-strong);
+      border-radius: 12px 12px 0 0;
+      box-shadow: 0 -10px 28px rgb(0 0 0 / .38);
+      transform: translateY(101%); transition: transform .18s ease-out;
+    }
+    .vault-graph[data-sheet="on"] #vg-sidebar { transform: translateY(0); }
+    .vault-graph #vg-heat { display: none; }
+    .vault-graph[data-band="on"] #vg-heat { display: flex; }
+    /* With the band hidden, #vg-canvas would inherit the stage's auto row and collapse to
+       nothing: every child of it is absolutely positioned. github#73, design/0013 */
+    .vault-graph #vg-stage { grid-template-rows: 1fr; }
+    .vault-graph[data-band="on"] #vg-stage { grid-template-rows: auto 1fr; }
+    /* The card is a sheet at the foot, not a panel over the disc: 48 linked notes filled the
+       whole screen and the disc was gone. github#73, design/0013 */
+    .vault-graph #vg-detail {
+      left: 12px; right: 12px; width: auto;
+      top: auto; bottom: 12px; max-height: 46%;
+    }
+    /* Both control clusters move to the top corners, clear of that sheet. */
+    .vault-graph #vg-cam { top: var(--controls-inset); bottom: auto; }
+    .vault-graph #vg-mob {
+      position: absolute; left: 12px; top: 12px; z-index: 7;
+      display: flex; flex-direction: row; gap: 6px;
+    }
+    .vault-graph #vg-mob button { opacity: .8; }
+  }
+  @media (max-width: 720px) and (prefers-reduced-motion: reduce) {
+    .vault-graph #vg-sidebar { transition: none; }
   }

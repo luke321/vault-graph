@@ -145,7 +145,7 @@ async function main() {
     await sleep(250);
   }
 
-  // github#73 -- no metrics override; see the harness note
+  // github#73
   const got = await fitViewport(p, W, H);
   let settled = false;
   for (let i = 0; i < 200 && !settled; i++) {
@@ -219,9 +219,7 @@ async function main() {
   await sleep(800);
   const afterPinch = await cam();
 
-  // github#73 -- pan parity. The same pixel travel by pointer and by finger must move the
-  // camera by the same amount, because both go through the captor's one panFrom helper. This
-  // is the check that a touch pan is right rather than merely present.
+  // github#73, design/0013 -- pan parity: pointer and finger, one code path
   const reseat = async () => {
     await p.eval("__vg.renderer.getCamera().setState({ x: 0.5, y: 0.5, ratio: 1.08, angle: 0 });" +
                  " __vg.renderer.refresh(); void 0");
@@ -249,9 +247,7 @@ async function main() {
   await sleep(700);
   const panTouch = await cam();
 
-  // github#73 -- the gestures above leave the camera where they put it, and a fling plus a
-  // pinch can carry the target dot clean off the stage. Reset before aiming, the way every
-  // pointer check in smoke.mjs does, so the tap is measured on its own.
+  // github#73 -- reset before aiming; see .ai-context/mobile-harness.md
   await p.eval("__vg.renderer.getCamera().setState({ x: 0.5, y: 0.5, ratio: 1.08, angle: 0 });" +
                " __vg.renderer.refresh(); void 0");
   await sleep(600);
@@ -286,7 +282,15 @@ async function main() {
     "    .forEach(function (t) { el.addEventListener(t, function () { window.__seen.push(t); }, true); });" +
     "  return true;" +
     "})()");
-  const clear = () => p.eval("window.__seen = []; __vg.state.selected = null; __vg.state.hovered = null; void 0");
+  // github#73 -- see .ai-context/mobile-harness.md
+  const clear = () => p.eval(
+    "(function () {" +
+    "  window.__seen = [];" +
+    "  var x = document.querySelector('#vg-detail .x'); if (x) x.click();" +
+    "  __vg.state.selected = null; __vg.state.hovered = null;" +
+    "  __vg.renderer.refresh();" +
+    "  return true;" +
+    "})()");
   const seen = () => p.eval("(window.__seen || []).join(',')");
   const taps = [];
   if (tap) {
@@ -323,6 +327,8 @@ async function main() {
 
   const shot = arg("shot", "");
   if (shot) {
+    // github#73 -- shoot the resting page, not whatever the last tap selected
+    if (!flag("shot-selected")) { await clear(); await sleep(500); }
     const img = await p.send("Page.captureScreenshot", { format: "png" });
     writeFileSync(shot, Buffer.from(img.data, "base64"));
   }

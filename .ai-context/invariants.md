@@ -1930,3 +1930,78 @@ card still open, in the same run that proves the back arrow does step it.
 **This is a claim about what the page does NOT register**, which is the kind that rots quietly:
 the check drives the keys rather than reading the source, so a listener added anywhere -- root,
 document, or a card element -- fails it.
+
+## A finger reaches the disc, and the pointer's pick floor is untouched
+
+One finger pans, two pinch about their midpoint, a tap selects and a second tap resets the
+view. All four exist because `captor.ts` binds `touchstart`/`touchmove`/`touchend`/
+`touchcancel`; before github#73 it bound eight mouse listeners and nothing else, and a tap did
+not even fall back to a click, because `touch-action: none` on the mouse layer suppresses the
+browser's tap-to-click. design/0013.
+
+**Two constants, and they are not interchangeable.** `PICK_FLOOR_PX` is **1.5 px**, sized for a
+*floored pointer* being at most 1.41 px from a true centre, and is checked by "a sub-pixel dot
+can still be hovered". `TOUCH_PICK_FLOOR_PX` is **14 px**, about half a fingertip, and applies
+only to coords a finger produced (`fat` on the coords). `getNodeAtPosition` takes the floor per
+call, so widening one never widens the other. `TOUCH_TAP_SLOP_PX` is **10 px**: a release that
+travelled further is a pan, not a tap.
+
+**Pan is one code path for both inputs.** `panFrom()` and `glide()` were extracted from the
+mouse handlers rather than written twice, and the check is a number: the same travel must move
+the camera by the same amount whichever input delivered it.
+
+```bash
+node scripts/mobile-check.mjs --device desktop    # the control: pointer, the suite's window
+node scripts/mobile-check.mjs --device iphone14
+node scripts/smoke.mjs --only "sub-pixel"         # the pointer's 1.5 px, unchanged
+```
+
+Measured 2026-09-07 on the demo fixture, 60 px of travel:
+
+| viewport | pointer dx | finger dx | ratio |
+|---|---|---|---|
+| desktop 1600x1000 | 0.1460 | 0.1460 | **1.000** |
+| iPhone 14 390x844 | 0.3142 | 0.3142 | **1.000** |
+| Pixel 7 412x915 | 0.2945 | 0.2945 | **1.000** |
+| iPad mini 744x1133 | 0.2618 | 0.2618 | **1.000** |
+| a 320 px leaf | 0.3988 | 0.3988 | **1.000** |
+
+And a tap delivers `pointerdown, touchstart, touchend` with **no synthesized click behind it**,
+on every phone viewport -- the check that a tap selects once rather than twice.
+
+## The disc gets a phone's screen, and the desktop layout does not move
+
+Below 720 px the disc takes the whole viewport; the legend, search and view buttons slide up as
+a sheet, and the band and date strip are hidden until asked for -- never overlaid, because
+design/0010 puts the band in its own grid row precisely so it cannot collide with the disc. The
+detail card becomes a sheet at the foot at 46% and both control clusters move to the top
+corners, clear of it. design/0013.
+
+**Two traps, both measured rather than reasoned.** With the band hidden, `#vg-canvas` inherits
+the stage's `auto` row and collapses to **zero height**, because every child of it is absolutely
+positioned -- the row is pinned to `1fr` instead, and `[data-band="on"]` restores `auto 1fr`.
+And both panels change the canvas box without changing the root's, so neither the engine's
+window listener nor the page's root observer fires: every toggle calls `refreshSizeScale()`,
+`placeLogo()` and an explicit `renderer.refresh()`.
+
+```bash
+node scripts/mobile-check.mjs --device iphone14 --shot after.png
+node scripts/mobile-check.mjs --device desktop        # must be unchanged
+node scripts/smoke.mjs --only "camera cluster"
+```
+
+Measured 2026-09-07, demo fixture, 1403 notes:
+
+| | before | after |
+|---|---|---|
+| iPhone 14, disc box | 390x260, 31% of screen | **390x844, 100%** |
+| iPhone 14, dot radius p50 | 1.10 px | **1.38 px** |
+| iPhone 14, dots under 1 px | 496 of 1403 | **153 of 1403** |
+| Pixel 7, dot radius p50 | 1.19 px | **1.43 px** |
+| desktop, sidebar / disc box | 288x1000 / 1312x770 | **unchanged** |
+| desktop, dot radius min/p50/max | 0.89 / 2.19 / 4.06 px | **unchanged** |
+| iPad mini (above the breakpoint) | 456x903 | **unchanged** |
+
+Every dot on a phone is still under 2 px: the disc is fit to the narrower axis, so the extra
+height buys margin rather than radius. The catchment is what makes a tap work; more radius
+needs a filter or a zoom.

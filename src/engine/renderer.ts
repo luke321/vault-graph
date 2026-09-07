@@ -578,7 +578,7 @@ export class Renderer extends Emitter<EventMap> implements RendererApi {
 
   /* -------------------------------------------------------------- picking */
 
-  // github#73 -- floorPx is per call: a finger's catchment is not a pointer's
+  // github#73, design/0013
   private getNodeAtPosition(p: Point, floorPx = PICK_FLOOR_PX): string | null {
     let lastCircle: string | null = null;
     let lastHalo: string | null = null;

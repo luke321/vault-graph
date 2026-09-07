@@ -69,28 +69,42 @@ down rather than fixed silently.
    `render-diff.mjs` both do. Add `#vg-graph`'s own page offset, or the aim lands in another
    panel.
 
-## The measurement that opened github#73
+## The measurement that opened github#73, and what it reads now
 
-Demo fixture, 1403 notes, dark, at rest. The desktop column is the control.
+Demo fixture, 1403 notes, dark, at rest. The desktop column is the control. Before is
+2026-09-07 on `develop`; after is the same day with github#73 landed.
 
-| | iPhone 14 390x844 | Pixel 7 412x915 | iPad mini 744x1133 | desktop 1600x1000 |
+| | iPhone 14 before | iPhone 14 after | iPad mini after | desktop control |
 |---|---|---|---|---|
-| disc gets | 390x260 | 412x301 | 456x903 | 1312x770 |
-| share of screen | 31% | 33% | 40% | 77% |
-| sidebar below the fold | 536 px | — | 0 | 0 |
-| dot radius min/p50/max | 0.46 / 1.10 / 1.14 | 0.55 / 1.19 / 1.38 | 0.69 / 1.53 / 2.27 | 0.89 / 2.19 / 4.06 |
-| dots under 2 px | 1403 of 1403 | 1403 of 1403 | 1355 of 1403 | 515 of 1403 |
-| one-finger drag | nothing moved | nothing moved | nothing moved | ratio 1.46x |
-| two-finger pinch | nothing moved | nothing moved | nothing moved | ratio 0.60x |
-| tap, gesture | nothing selected | nothing selected | nothing selected | selected |
-| tap, injected | selected | selected | selected | selected |
+| disc gets | 390x260 | **390x844** | 456x903 | 1312x770 |
+| share of screen | 31% | **100%** | 40% | 77% |
+| dot radius p50 | 1.10 px | **1.38 px** | 1.53 px | 2.19 px |
+| dots under 1 px | 496 of 1403 | **153 of 1403** | 30 | 4 |
+| one-finger drag | nothing moved | **pans** | pans | ratio 1.55x |
+| two-finger pinch | nothing moved | **ratio 0.403x** | 0.403x | 0.596x |
+| tap, gesture | nothing selected | **selects** | selects | selects |
+| pan parity, 60 px | n/a | **1.000x** | 1.000x | 1.000x |
 
-The last two rows are the finding. A real tap delivers `pointerdown, touchstart, touchend`
-and no click, because `page.css` sets `touch-action: none` on the mouse layer — right for
-stopping the browser panning the page under a drag, and it suppresses the tap-to-click the
-captor depends on, while `src/engine/captor.ts` binds no touch listener to take over.
-Picking and selection are fine: the same coordinates with a `click` select the right note.
+The row that was the finding: a real tap used to deliver `pointerdown, touchstart, touchend`
+and no click, because `page.css` sets `touch-action: none` on the mouse layer -- right for
+stopping the browser panning the page under a drag, and it suppressed the tap-to-click the
+captor depended on, while `src/engine/captor.ts` bound no touch listener to take over. Picking
+and selection were always fine: the same coordinates with a `click` selected the right note.
+
+It still delivers only those three events, and now that is the point -- there is no synthesized
+click behind the tap, so a tap selects once rather than twice. design/0013 has the rest.
 
 The iPad mini keeps the two-column desktop layout, since 744 px is above the 720 px
-breakpoint, and it is the one viewport where the disc has a sensible size. Its touch is just
-as dead.
+breakpoint, and it is the one viewport where the disc always had a sensible size.
+
+## Three more traps, found while verifying the fix
+
+- **The fixture store is not under a worktree.** `ROOT/.fixtures` exists beside the *main*
+  repo, so the harness resolves it through `git rev-parse --git-common-dir`, the way
+  `smoke.mjs` does.
+- **A fling plus a pinch can carry the target dot off the stage**, so the run resets the camera
+  before aiming a tap. Without it the tap reported nothing selected while pan and pinch were
+  working perfectly.
+- **The detail card covers the disc on a phone**, and the second tap path was landing on one of
+  its own links and selecting a neighbour. The run closes the card through its own button
+  between the two paths. `--shot-selected` keeps it open on purpose, for looking at.

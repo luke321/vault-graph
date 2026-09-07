@@ -18,9 +18,7 @@
  * (every bulk write is followed by an explicit refresh), and graphology's event emitter (used
  * only to silence that subscription -- see quietWrites in page.js, which goes with it).
  *
- * Touch input was on that list until github#73 and is not any more. It is the engine's own,
- * not a port: `original` therefore carries a TouchEvent as well, and `fat` marks the coords a
- * finger produced so picking can widen its catchment for one.
+ * github#73, design/0013 -- touch input left that list
  *
  * TYPES ONLY. Nothing here reaches a runtime: esbuild erases it from the plugin bundle and the
  * exporter's engine bundle alike, and tsc reads it under tsconfig.json's include.
@@ -169,7 +167,7 @@ export interface RendererOptions extends RendererSettings {
 export interface MouseCoords {
   x: number;
   y: number;
-  // github#73
+  // github#73, design/0013
   original: MouseEvent | TouchEvent;
   fat?: boolean;
   preventDefault(): void;

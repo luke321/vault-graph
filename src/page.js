@@ -383,6 +383,10 @@ function mountVaultGraph(root, data, deps) {
   var compactAxis = deps.compactAxis === false ? false : true;
   var onCompactAxis = typeof deps.onCompactAxis === "function" ? deps.onCompactAxis : null;
 
+  // github#73, design/0013
+  var sheetOpen = false;
+  var bandOpen = false;
+
   // github#3
   var unlinkedByFolder = deps.unlinkedByFolder === false ? false : true;
   var onUnlinkedByFolder = typeof deps.onUnlinkedByFolder === "function" ? deps.onUnlinkedByFolder : null;
@@ -5680,6 +5684,11 @@ function mountVaultGraph(root, data, deps) {
     // github#23
     if ($("compact")) $("compact").onclick = function () { setCompactAxis(!compactAxis, true); };
     setCompactAxis(compactAxis, false);
+    // github#73
+    if ($("sheet")) $("sheet").onclick = function () { setSheet(!sheetOpen); };
+    if ($("band")) $("band").onclick = function () { setBand(!bandOpen); };
+    setSheet(false);
+    setBand(false);
     $("png").onclick = savePng;
     if ($("dbg")) $("dbg").onclick = function () {
       var txt = JSON.stringify(API.debugDump(), null, 2);
@@ -6064,6 +6073,37 @@ function mountVaultGraph(root, data, deps) {
     if (typeof lo === "number" && r < lo) r = lo;
     if (typeof hi === "number" && r > hi) r = hi;
     cam.animate({ ratio: r }, { duration: renderer.getSetting("zoomDuration") || 120 });
+  }
+
+  /* github#73, design/0013 */
+  function afterPanel() {
+    refreshSizeScale();
+    placeLogo();
+    if (renderer) renderer.refresh();
+  }
+
+  /** @param {boolean} on */
+  function setSheet(on) {
+    sheetOpen = !!on;
+    ROOT.setAttribute("data-sheet", sheetOpen ? "on" : "off");
+    var b = $("sheet");
+    if (b) {
+      b.setAttribute("aria-expanded", sheetOpen ? "true" : "false");
+      b.setAttribute("aria-label", sheetOpen ? "Hide the folder list" : "Show the folder list");
+    }
+    afterPanel();
+  }
+
+  /** @param {boolean} on */
+  function setBand(on) {
+    bandOpen = !!on;
+    ROOT.setAttribute("data-band", bandOpen ? "on" : "off");
+    var b = $("band");
+    if (b) {
+      b.setAttribute("aria-pressed", bandOpen ? "true" : "false");
+      b.setAttribute("aria-label", bandOpen ? "Hide the calendar" : "Show the calendar");
+    }
+    afterPanel();
   }
 
   function setPan(on, persist) {
