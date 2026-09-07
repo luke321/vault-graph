@@ -4829,7 +4829,8 @@ function mountVaultGraph(root, data, deps) {
       if (dragJustMoved === e.node) { dragJustMoved = null; return; }
       select(e.node);
     });
-    renderer.on("clickStage", function () { select(null); });
+    // github#73, design/0013
+    renderer.on("clickStage", function () { if (sheetOpen) setSheet(false); select(null); });
     renderer.on("rightClickNode", function (e) {
       if (e.event && e.event.original) e.event.original.preventDefault();
       togglePin(e.node);

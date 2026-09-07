@@ -2004,7 +2004,19 @@ the second date field and All dates off the right edge. The
 detail card becomes a sheet at the foot at 46% and both control clusters move to the top
 corners, clear of it. design/0013.
 
-**Two traps, both measured rather than reasoned.** With the band hidden, `#vg-canvas` inherits
+**A panel never covers its own toggle.** The panel buttons live in `#vg-canvas`, which the band
+pushes down by its own height, so they land under a sheet that is anchored to the bottom. The
+cluster therefore outranks the sheet, and a tap on the remaining disc closes the sheet too. The
+harness asserts the round trip: open, what is under the toggle, close.
+
+```bash
+node scripts/mobile-check.mjs --device iphone14      # "sheet toggle round trip"
+```
+
+Measured 2026-09-07 before the fix: `opened on; under it while open: #vg-sidebar; second tap ->
+on`. After: `under it while open: the toggle; second tap -> off`.
+
+**Two more traps, both measured rather than reasoned.** With the band hidden, `#vg-canvas` inherits
 the stage's `auto` row and collapses to **zero height**, because every child of it is absolutely
 positioned -- the row is pinned to `1fr` instead, and `[data-band="on"]` restores `auto 1fr`.
 And both panels change the canvas box without changing the root's, so neither the engine's

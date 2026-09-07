@@ -375,10 +375,56 @@ async function main() {
                 (same(c4, c5) ? ", camera held" : ", CAMERA MOVED");
   }
 
+  // github#73, design/0013 -- a panel that covers its own toggle cannot be closed
+  let sheetProbe = "n/a";
+  if (touch) {
+    const btn = await p.eval(
+      "(function () {" +
+      "  var b = document.getElementById('vg-sheet'); if (!b) return null;" +
+      "  var r = b.getBoundingClientRect();" +
+      "  return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2)," +
+      "           w: Math.round(r.width), h: Math.round(r.height) };" +
+      "})()");
+    if (btn) {
+      const press = async (x, y) => {
+        await p.send("Input.dispatchMouseEvent", { type: "mouseMoved", x, y, buttons: 0 });
+        await sleep(80);
+        for (const type of ["mousePressed", "mouseReleased"]) {
+          await p.send("Input.dispatchMouseEvent", {
+            type, x, y, button: "left", buttons: type === "mousePressed" ? 1 : 0, clickCount: 1,
+          }).catch(() => {});
+        }
+      };
+      await press(btn.x, btn.y);
+      await sleep(600);
+      const open = await p.eval("document.querySelector('.vault-graph').getAttribute('data-sheet')");
+      const over = await p.eval(
+        "(function () {" +
+        "  var el = document.elementFromPoint(" + btn.x + ", " + btn.y + ");" +
+        "  if (!el) return 'nothing';" +
+        "  var b = document.getElementById('vg-sheet');" +
+        "  if (el === b || (b && b.contains(el))) return 'the toggle';" +
+        "  var id = el.id || (el.closest && el.closest('[id]') ? el.closest('[id]').id : '');" +
+        "  return id ? '#' + id : el.tagName.toLowerCase();" +
+        "})()");
+      await press(btn.x, btn.y);
+      await sleep(600);
+      const shut = await p.eval("document.querySelector('.vault-graph').getAttribute('data-sheet')");
+      sheetProbe = `${btn.w}x${btn.h} at ${btn.x},${btn.y}; opened ${open}; ` +
+                   `under it while open: ${over}; second tap -> ${shut}` +
+                   (shut === "off" ? "" : "  <-- CANNOT BE CLOSED");
+    }
+  }
+
   const shot = arg("shot", "");
   if (shot) {
     // github#73 -- shoot the resting page, not whatever the last tap selected
     if (!flag("shot-selected")) { await clear(); await sleep(500); }
+    if (flag("shot-sheet")) {
+      await p.eval("(function () { var b = document.getElementById('vg-sheet');" +
+                   " if (b) b.click(); return true; })()");
+      await sleep(600);
+    }
     const img = await p.send("Page.captureScreenshot", { format: "png" });
     writeFileSync(shot, Buffer.from(img.data, "base64"));
   }
@@ -419,6 +465,7 @@ async function main() {
   console.log(`  tap after a 5px wobble   ${wobble}`);
   console.log(`  a 45px swipe             ${swipe}`);
   console.log(`  a two-finger tap         ${twoFinger}`);
+  console.log(`  sheet toggle round trip  ${sheetProbe}`);
   console.log(`  page errors              ${p.firstError() || "none"}`);
   if (shot) console.log(`  screenshot               ${shot}`);
   console.log("");

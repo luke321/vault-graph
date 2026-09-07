@@ -146,6 +146,16 @@ legend and the search box.
   wraps with the note line on its own row, so the band goes from 230 px to 280 px and every
   control is reachable.
 
+**A panel may never cover its own toggle**, and this is the one defect the band's new default
+produced rather than exposed. `#vg-mob` lives in `#vg-canvas`, so the band pushes it down by the
+band's own height: with the band on, the two buttons sit at y 292 on an 844 px screen while the
+sheet's top edge is at 236, and at `z-index: 7` against the sheet's 8 the sheet covered them.
+The sheet opened and could not be closed. Measured before the fix: `elementFromPoint` at the
+toggle's centre returned `#vg-sidebar`, and a second press left `data-sheet` at `on`. The cluster
+now sits at `z-index: 9`, above the sheet, and the harness asserts the round trip rather than the
+stacking order. **A tap on what is left of the disc also closes the sheet**, which is what a
+scrim would do and is a second way out that does not depend on a z-index at all.
+
 **Selecting a note closes the sheet.** The card is pinned to the foot and the sheet covers the
 bottom 72% at a higher z-index, so tapping a note — or a search hit inside the sheet itself —
 would otherwise open the card invisibly underneath it.
