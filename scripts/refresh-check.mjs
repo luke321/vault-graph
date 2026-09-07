@@ -6,6 +6,7 @@ import { existsSync, mkdirSync, writeFileSync, copyFileSync, rmSync } from "node
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { attach } from "./cdp.mjs";
+import { placeElectronLeft } from "./screen.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(HERE, "..");
@@ -50,7 +51,7 @@ async function launch() {
     await sleep(1000);
     let c = null;
     try { c = await attach(PORT, "app://obsidian.md"); } catch { continue; }
-    try { if (await c.eval("typeof app !== 'undefined' && !!app.workspace")) return { child, cdp: c }; } catch {}
+    try { if (await c.eval("typeof app !== 'undefined' && !!app.workspace")) { await placeElectronLeft((x) => c.eval(x)).catch(() => {}); return { child, cdp: c }; } } catch {}
     try { await c.close(); } catch {}
   }
   try { child.kill(); } catch {}

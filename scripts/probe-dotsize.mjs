@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import { attach } from "./cdp.mjs";
+import { leftWindowPos } from "./screen.mjs";
 import { spawn, spawnSync } from "node:child_process";
 import { existsSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -52,7 +53,7 @@ const chrome = spawn(findChrome(), [
   "--disable-features=Translate,TranslateUI,CalculateNativeWinOcclusion",
   "--disable-backgrounding-occluded-windows", "--disable-renderer-backgrounding",
   "--disable-background-timer-throttling",
-  ...(HEADED ? [] : ["--window-position=-2400,0"]),
+  ...(HEADED ? [] : [leftWindowPos()]),
   "--window-size=1600,1000", `--app=${pathToFileURL(html).href}`,
 ], { stdio: "ignore" });
 

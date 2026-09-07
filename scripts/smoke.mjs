@@ -1,5 +1,6 @@
 
 import { attach, json } from "./cdp.mjs";
+import { leftmostScreen, leftWindowPos } from "./screen.mjs";
 import { spawn, spawnSync } from "node:child_process";
 import { existsSync, mkdtempSync, rmSync, readFileSync, writeFileSync, readdirSync,
          renameSync, mkdirSync } from "node:fs";
@@ -89,19 +90,6 @@ const GRID = argv.includes("--no-grid") ? false
           : argv.includes("--grid") ? true
           : JOBS > 1;
 
-function leftmostScreen() {
-  const fallback = { x: 0, y: 0, w: 1920, h: 1080 };
-  if (process.platform !== "win32") return fallback;
-  const ps = spawnSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command",
-    "Add-Type -AssemblyName System.Windows.Forms; " +
-    "[System.Windows.Forms.Screen]::AllScreens | " +
-    "Sort-Object { $_.Bounds.Left } | Select-Object -First 1 | " +
-    "ForEach-Object { '{0} {1} {2} {3}' -f $_.Bounds.Left, $_.Bounds.Top, " +
-    "$_.Bounds.Width, $_.Bounds.Height }"], { encoding: "utf8" });
-  const m = /(-?\d+) (-?\d+) (\d+) (\d+)/.exec((ps.stdout || "").trim());
-  if (!m) return fallback;
-  return { x: +m[1], y: +m[2], w: +m[3], h: +m[4] };
-}
 let SCREEN = null;
 
 function gridSlot(i, k) {
@@ -3377,7 +3365,7 @@ async function runOne(vault, work) {
     "--disable-renderer-backgrounding",
     "--disable-background-timer-throttling",
     ...(slot ? [`--window-position=${slot.x},${slot.y}`]
-             : HEADED ? [] : ["--window-position=-2400,0"]),
+             : HEADED ? [] : [leftWindowPos()]),
     slot ? `--window-size=${slot.w},${slot.h}` : "--window-size=1600,1000", `--app=${url}`
   ], { stdio: ["ignore", "ignore", "pipe"], detached: false });
 

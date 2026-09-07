@@ -8,6 +8,7 @@ import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { attach } from "./cdp.mjs";
+import { leftmostScreen, leftWindow, leftWindowArgs, placeElectronLeft } from "./screen.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(HERE, "..");
@@ -30,22 +31,9 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 /* ------------------------------------------------------------------ inputs -- */
 
 // design/0012 -- the harness belongs off the user's main screen
-function leftmostScreen() {
-  const fallback = { x: -2400, y: 40, w: 1600, h: 1000 };
-  if (process.platform !== "win32") return fallback;
-  const ps = spawnSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command",
-    "Add-Type -AssemblyName System.Windows.Forms; " +
-    "[System.Windows.Forms.Screen]::AllScreens | Sort-Object { $_.WorkingArea.Left } | Select-Object -First 1 | " +
-    "ForEach-Object { '{0} {1} {2} {3}' -f $_.WorkingArea.Left, $_.WorkingArea.Top, $_.WorkingArea.Width, $_.WorkingArea.Height }"],
-    { encoding: "utf8" });
-  const m = /(-?\d+) (-?\d+) (\d+) (\d+)/.exec((ps.stdout || "").trim());
-  return m ? { x: +m[1], y: +m[2], w: +m[3], h: +m[4] } : fallback;
-}
 const SCREEN = leftmostScreen();
-const WIN_W = Math.min(1600, SCREEN.w - 40);
-const WIN_H = Math.min(1000, SCREEN.h - 40);
-const WIN_X = SCREEN.x + Math.max(0, Math.floor((SCREEN.w - WIN_W) / 2));
-const WIN_Y = SCREEN.y + Math.max(0, Math.floor((SCREEN.h - WIN_H) / 2));
+const MAIN = leftWindow(1600, 1000);
+const WIN_W = MAIN.w, WIN_H = MAIN.h;
 const POPOUT = JSON.stringify({ x: SCREEN.x + 70, y: SCREEN.y + 70,
                                 size: { width: Math.min(1200, SCREEN.w - 140), height: Math.min(860, SCREEN.h - 140) } });
 
@@ -133,7 +121,7 @@ async function exporterPositions(vault) {
     "--disable-component-update", "--no-service-autorun", "--metrics-recording-only", "--no-pings", "--mute-audio",
     "--disable-features=Translate,TranslateUI,CalculateNativeWinOcclusion",
     "--disable-backgrounding-occluded-windows", "--disable-renderer-backgrounding", "--disable-background-timer-throttling",
-    "--force-device-scale-factor=1", "--window-position=-2400,0", "--window-size=1600,1000",
+    "--force-device-scale-factor=1", ...leftWindowArgs(1600, 1000),
     "--app=" + pathToFileURL(out).href + "?rest",
   ], { stdio: "ignore" });
   let p = null;
@@ -317,13 +305,8 @@ try {
           " app.metadataCache.on('resolved', function () { if (window.__vgSmoke.resolvedAt === null) window.__vgSmoke.resolvedAt = performance.now(); });" +
           " app.workspace.onLayoutReady(function () { window.__vgSmoke.layoutReadyAt = performance.now(); }); })(); void 0");
 
-  // design/0012 -- Electron ignores moveTo for its own main window
   const shapeWindow = async () => {
-    await E("(function(){ try { var e = window.require && window.require('electron');" +
-            " var r = e && (e.remote || (window.require('@electron/remote')));" +
-            " if (r && r.getCurrentWindow) { r.getCurrentWindow().setBounds({ x: " + WIN_X + ", y: " + WIN_Y +
-            ", width: " + WIN_W + ", height: " + WIN_H + " }); return; } } catch (err) { }" +
-            " try { window.moveTo(" + WIN_X + ", " + WIN_Y + "); window.resizeTo(" + WIN_W + ", " + WIN_H + "); } catch (err) { } })(); void 0");
+    await placeElectronLeft(E, WIN_W, WIN_H);
     await E("new Promise(function (r) { app.workspace.onLayoutReady(function () { try { app.workspace.leftSplit.collapse(); app.workspace.rightSplit.collapse(); } catch (e) { } r(true); }); })");
     await sleep(500);
     return E("window.outerWidth + 'x' + window.outerHeight + ' at ' + window.screenX + ',' + window.screenY");
