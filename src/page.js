@@ -482,6 +482,7 @@ function mountVaultGraph(root, data, deps) {
    * @property {string | null} hoverDay
    * @property {number | null} hoverYear
    * @property {string} query
+   * @property {string | null} root                            github#76: drill root, an absolute folder path
    * @property {number | null} until                           timeline rank, or null for all
    * @property {number | null} from                            ms, UTC midnight (heatParse)
    * @property {number | null} to
@@ -509,6 +510,7 @@ function mountVaultGraph(root, data, deps) {
     hoverDay: null,
     hoverYear: null,
     query: "",
+    root: null,
     until: null,
     from: null,
     to: null,
@@ -592,15 +594,83 @@ function mountVaultGraph(root, data, deps) {
     }).forEach(function (id, i) { hubRank[id] = i; });
   })();
 
+  /* --------------------------------------------------------- the drill root
+   * github#76. A root is two things and nothing else: which notes are MEMBERS,
+   * and which folder level the wedges are cut at. Both are read off the note's
+   * own path chain -- [folder].concat(dirs) -- so a root needs no new per-note
+   * data and no change to the exporter or the plugin.
+   *
+   * A note OUTSIDE the root keeps its VAULT identity rather than being given a
+   * rebased one, because the cascade builds its source packing from planA (the
+   * disc as it was, src/page.js:3559) and that plan has to still be the vault's.
+   * Membership is what the root decides; identity outside it is not the root's
+   * business.
+   */
+
+  var DIRECT = "(directly in folder)";
+  /** @type {string[]} */
+  var rootSegs = [];
+  var rootDepth = 0;
+
+  /** @param {NodeAttrs} a @param {number} i @returns {string} */
+  function segAt(a, i) {
+    if (i === 0) return a.folder;
+    var d = a.dirs;
+    return d && i <= d.length ? d[i - 1] : "";
+  }
+  /** @param {NodeAttrs} a @returns {number} folder segments in this note's path */
+  function segLen(a) { return 1 + ((a.dirs && a.dirs.length) || 0); }
+
+  /** @param {NodeAttrs} a @returns {boolean} */
+  function inRootA(a) {
+    if (!rootDepth) return true;
+    for (var i = 0; i < rootDepth; i++) if (segAt(a, i) !== rootSegs[i]) return false;
+    return true;
+  }
+  /** @param {string} id */
+  function inRoot(id) { return inRootA(graph.getNodeAttributes(id)); }
+
+  /** @param {NodeAttrs} a @returns {string} the group this note sits in, rebased on the root */
+  function relGroup(a) {
+    if (!rootDepth || !inRootA(a)) return a.folder;
+    return segLen(a) > rootDepth ? segAt(a, rootDepth) : DIRECT;
+  }
+  /** @param {NodeAttrs} a @returns {string} the subfolder it sits in, rebased on the root */
+  function relSub(a) {
+    if (!rootDepth || !inRootA(a)) return a.sub || "";
+    return segLen(a) > rootDepth + 1 ? segAt(a, rootDepth + 1) : "";
+  }
+  /** @param {string} g a rebased group @returns {string} the folder path it stands for */
+  function absOf(g) {
+    if (!rootDepth) return g;
+    var r = state.root || "";
+    return g === DIRECT ? r + "/" : r + "/" + g;
+  }
+  /**
+   * The `hiddenSub` key for a (group, subfolder) pair. At the vault's own level
+   * "directly in g" has its own sentinel `g + "/"`; one level down it collapses
+   * onto the child's own key, exactly as a vault note in `F/S` is already
+   * filtered by `F/S` and not by `F/S/`.
+   * @param {string} g @param {string} sb
+   */
+  function keyOf(g, sb) {
+    if (!rootDepth) return g + "/" + (sb || "");
+    var base = absOf(g);
+    return sb ? base + "/" + sb : base;
+  }
+
   /** @type {Record<string, string[]>} */
   var subOrder = dict();
   /** @type {Record<string, number>} */
   var subCount = dict();
-  (function () {
+  function buildSubTables() {
+    subOrder = dict();
+    subCount = dict();
     /** @type {Record<string, Record<string, number>>} */
     var tally = dict();
     graph.forEachNode(function (_id, a) {
-      var f = a.folder, sb = a.sub || "";
+      if (!inRootA(a)) return;
+      var f = relGroup(a), sb = relSub(a);
       if (!tally[f]) tally[f] = dict();
       tally[f][sb] = (tally[f][sb] || 0) + 1;
     });
@@ -610,7 +680,8 @@ function mountVaultGraph(root, data, deps) {
       });
       subOrder[f].forEach(function (sb) { subCount[f + "/" + sb] = tally[f][sb]; });
     });
-  })();
+  }
+  buildSubTables();
 
   var UNIT = 160;
 
@@ -627,8 +698,13 @@ function mountVaultGraph(root, data, deps) {
   /** @param {string} id @returns {string} */
   function groupOf(id) {
     if (moveFrom) { var mf = moveFrom[id]; if (mf !== undefined) return mf; }
-    if (!adj[id]) return unlinkedByFolder ? graph.getNodeAttribute(id, "folder") : UNLINKED;
-    return graph.getNodeAttribute(id, "folder");
+    // github#76
+    if (!rootDepth) {
+      if (!adj[id]) return unlinkedByFolder ? graph.getNodeAttribute(id, "folder") : UNLINKED;
+      return graph.getNodeAttribute(id, "folder");
+    }
+    if (!adj[id] && !unlinkedByFolder) return UNLINKED;
+    return relGroup(graph.getNodeAttributes(id));
   }
 
   var SLOT_COUNT = 12;
@@ -648,9 +724,14 @@ function mountVaultGraph(root, data, deps) {
     /** @type {Record<string, number>} */
     var filed = dict();
     graph.forEachNode(function (id, a) {
+      // github#76
+      if (!inRootA(a)) return;
       var g = groupOf(id);
       count[g] = (count[g] || 0) + 1;
-      if (state.dim === "folder") filed[a.folder] = (filed[a.folder] || 0) + 1;
+      if (state.dim === "folder") {
+        var f = relGroup(a);
+        filed[f] = (filed[f] || 0) + 1;
+      }
     });
     folderCount = filed;
     // github#50
@@ -659,15 +740,23 @@ function mountVaultGraph(root, data, deps) {
       if (count[f] === undefined) count[f] = 0;
     });
     if (count[UNLINKED] === undefined) count[UNLINKED] = 0;
+    // github#76: under a root the wedge order is the order the vault disc already
+    // gave these children -- subOrder's own count-desc-then-name -- so a drill
+    // cannot silently re-sort what you were just looking at.
+    var byRoot = !!rootDepth;
     var names = Object.keys(count).sort(function (a, b) {
       // github#3
       /** @param {string} s */
       var rank = function (s) {
         if (s === UNLINKED) return 3;
+        if (byRoot) return 2;
         var c = s.charAt(0);
         return c === "_" ? 0 : c === "(" ? 1 : 2;
       };
-      return rank(a) - rank(b) || a.localeCompare(b, undefined, { numeric: true });
+      var r = rank(a) - rank(b);
+      if (r) return r;
+      if (byRoot && count[b] !== count[a]) return count[b] - count[a];
+      return a.localeCompare(b, undefined, { numeric: true });
     });
     order[state.dim] = names;
     return count;
@@ -683,8 +772,12 @@ function mountVaultGraph(root, data, deps) {
 
     var names = order[state.dim] || [];
 
+    // github#76: a saved pin is keyed by a TOP-LEVEL folder name, so under a root a
+    // child that happens to share a top-level folder's name would inherit its colour
+    // and the legend's picker would write one back. Until the colour-identity question
+    // is settled, a drilled disc reads no pin and writes none.
     /** @type {SlotMap} */
-    var byFolder = state.dim === "folder" ? folderColors : dict();
+    var byFolder = state.dim === "folder" && !rootDepth ? folderColors : dict();
 
     groupSlot = dict();
     groupAutoSlot = dict();
@@ -911,7 +1004,8 @@ function mountVaultGraph(root, data, deps) {
         : 0;
       subs.forEach(function (sb) {
         var pk = f + "/" + sb;
-        var pin = subfolderColors[pk];
+        // github#76
+        var pin = rootDepth ? "" : subfolderColors[pk];
         if (pin && THEME.byKey[pin]) {
           subShade[pk] = THEME.byKey[pin];
           subSlot[pk] = pin;
@@ -950,11 +1044,17 @@ function mountVaultGraph(root, data, deps) {
     var a = graph.getNodeAttributes(id);
     if (state.dim !== "folder") return colorOf(groupOf(id));
     if (groupOf(id) === UNLINKED && !unlinkedTintByFolder) return colorOf(UNLINKED);
-    return subShade[a.folder + "/" + (a.sub || "")] || colorOf(a.folder);
+    // github#76
+    var g = relGroup(a);
+    return subShade[g + "/" + relSub(a)] || colorOf(g);
   }
 
   /** @param {string} group */
   function isHidden(group) {
+    // github#76: under a root a group IS a folder path, so it is filtered by the
+    // same absolute hiddenSub key the vault disc's own subfolder eye writes --
+    // hiding a child here hides it there, and the way back needs no translation.
+    if (rootDepth && group !== UNLINKED) return !!state.hiddenSub[keyOf(group, "")];
     var h = state.hidden[state.dim];
     return !!(h && h[group]);
   }
@@ -1298,7 +1398,7 @@ function mountVaultGraph(root, data, deps) {
     var skel = planSkel && !moveFrom ? planSkel : null;
     var useSkel = !!skel && skel.filled && skel.keep === planKeep && skel.dim === state.dim &&
                   skel.order === all && skel.pinned === state.pinned.join(SEP) &&
-                  skel.onlyVisible === !!onlyVisible;
+                  skel.onlyVisible === !!onlyVisible && skel.root === (state.root || "");
     /** @type {string[]} */
     var members = [];
     /** @type {string[]} */
@@ -1323,7 +1423,7 @@ function mountVaultGraph(root, data, deps) {
           var cid = skel.members[ci], cg = skel.memberG[ci];
           if (gone[cid]) {
             liveN[cg] -= 1;
-            liveSub[cg + "/" + (graph.getNodeAttributes(cid).sub || "")] -= 1;
+            liveSub[cg + "/" + relSub(graph.getNodeAttributes(cid))] -= 1;
             continue;
           }
           members.push(cid); memberG.push(cg);
@@ -1334,7 +1434,12 @@ function mountVaultGraph(root, data, deps) {
         liveG[gm] = (liveG[gm] || 0) + (wm > 1 ? 1 : wm < 0 ? 0 : wm);
       }
     } else graph.forEachNode(function (id) {
-      if (onlyVisible && !(planKeep || willShow)(id)) return;
+      // github#76: the ROOT is the basis, filters re-pack inside it. So the root
+      // gates the whole-basis call (onlyVisible false) that regroup locks the rings
+      // from, while a note leaving the root is carried by planKeep like any other
+      // departing note and its space closes continuously.
+      if (onlyVisible) { if (!(planKeep || willShow)(id)) return; }
+      else if (!inRoot(id)) return;
       // github#18
       if (isPinned(id)) return;
       members.push(id);
@@ -1344,7 +1449,7 @@ function mountVaultGraph(root, data, deps) {
       var wv = W(id);
       liveG[g0] = (liveG[g0] || 0) + (wv > 1 ? 1 : wv < 0 ? 0 : wv);
       liveN[g0] = (liveN[g0] || 0) + 1;
-      var sk = g0 + "/" + (graph.getNodeAttributes(id).sub || "");
+      var sk = g0 + "/" + relSub(graph.getNodeAttributes(id));
       liveSub[sk] = (liveSub[sk] || 0) + 1;
     });
     var bandLive = { i: 0, o: 0 };
@@ -1389,8 +1494,10 @@ function mountVaultGraph(root, data, deps) {
       if (!useCells) {
         var mA = graph.getNodeAttributes(mId);
         var mBk = bandLock && bandLock[mG] ? "i" : "o";
+        // github#76
+        var mSub = relSub(mA);
         var mKey = splitFor(mG)
-          ? mG + SEP + subCellIndex(mG, mA.sub, liveSub[mG + "/" + (mA.sub || "")] || 0, bandDepth[mBk])
+          ? mG + SEP + subCellIndex(mG, mSub, liveSub[mG + "/" + mSub] || 0, bandDepth[mBk])
           : mG;
         if (!byCell[mKey]) {
           byCell[mKey] = [];
@@ -1443,6 +1550,8 @@ function mountVaultGraph(root, data, deps) {
         skel.liveN = liveN; skel.liveSub = liveSub;
         skel.keep = planKeep; skel.dim = state.dim; skel.order = all;
         skel.pinned = state.pinned.join(SEP); skel.onlyVisible = !!onlyVisible;
+        // github#76
+        skel.root = state.root || "";
       }
       if (!useCells) {
         skel.depthI = depthNow.i; skel.depthO = depthNow.o; skel.splitOf = splitOf;
@@ -2964,7 +3073,10 @@ function mountVaultGraph(root, data, deps) {
   function isPushed(id) {
     if (state.highlight[groupOf(id)]) return true;
     var a = graph.getNodeAttributes(id);
-    return !!state.highlightSub[pathKey(a, 1)] && ownsWedge(a.folder, a.sub || "");
+    // github#76: keyOf/relGroup/relSub are pathKey(a, 1) and (folder, sub) exactly
+    // when there is no root, so decisions/0004 is the same rule one level down.
+    var g = relGroup(a), sb = relSub(a);
+    return !!state.highlightSub[keyOf(g, sb)] && ownsWedge(g, sb);
   }
 
   /** @param {string} id */
@@ -3050,6 +3162,7 @@ function mountVaultGraph(root, data, deps) {
    * @property {string[]} order
    * @property {string} pinned   the pinned ids joined, so a swap that keeps the count still misses
    * @property {boolean} onlyVisible
+   * @property {string} root     github#76: the drill root, so a drilled frame is never planned against a vault-shaped skeleton
    * @property {number} depthI
    * @property {number} depthO
    * @property {string[]} members
@@ -3069,7 +3182,7 @@ function mountVaultGraph(root, data, deps) {
   var planSkelCheck = false;
   /** @returns {PlanSkel} */
   function freshSkel() {
-    return { filled: false, keep: null, dim: "", order: [], pinned: "", onlyVisible: false,
+    return { filled: false, keep: null, dim: "", order: [], pinned: "", onlyVisible: false, root: "",
              depthI: 0, depthO: 0, members: [], memberG: [], leaving: [], liveN: dict(), liveSub: dict(),
              splitOf: dict(), byCell: dict(), cellsOf: dict(), big: [], smallIds: [], merged: dict() };
   }
@@ -4120,18 +4233,22 @@ function mountVaultGraph(root, data, deps) {
   /** @param {string} id */
   function visible(id) {
     var a = graph.getNodeAttributes(id);
+    // github#76: outside the root is not a filtered member, it is not a member --
+    // which is what makes a leaving note an `out` the cascade fades.
+    if (!inRootA(a)) return false;
     if (isHidden(groupOf(id))) return false;
     if (state.dim === "folder") {
       var d = a.dirs || [];
       if (!d.length) {
-        if (state.hiddenSub[a.folder + "/"]) return false;
+        if (!rootDepth && state.hiddenSub[a.folder + "/"]) return false;
       } else {
         // github#19
-        var key = a.folder + "/" + d[0];
-        if (state.hiddenSub[key]) return false;
-        for (var k = 1; k < d.length; k++) {
+        // github#76: a key at or above the root is the drilled disc's own ancestry,
+        // and the root's level is already answered by isHidden(groupOf) above.
+        var key = a.folder;
+        for (var k = 0; k < d.length; k++) {
           key += "/" + d[k];
-          if (state.hiddenSub[key]) return false;
+          if (k >= rootDepth && state.hiddenSub[key]) return false;
         }
       }
     }
@@ -5474,7 +5591,12 @@ function mountVaultGraph(root, data, deps) {
   }
 
   // github#3
-  function hardRelayout(animate, deferLayout) {
+  /**
+   * @param {boolean} [animate]
+   * @param {boolean} [deferLayout]
+   * @param {boolean} [freshGeom] github#76: rebuild the ring geometry instead of restoring it
+   */
+  function hardRelayout(animate, deferLayout, freshGeom) {
     stopPlay();
     if (cascadeRun) {
       WIN.cancelAnimationFrame(cascadeRun.raf);
@@ -5492,7 +5614,10 @@ function mountVaultGraph(root, data, deps) {
     if (deferLayout && prevBand) {
       regroup(true, prevBand, true);
       // github#49
-      if (prevGeom) geomLock = prevGeom;
+      // github#76: "the rings are independent, and their thickness is locked" is a law
+      // about FILTERS -- a filter re-packs inside the rings it was given. A root is a
+      // new basis, so its disc gets its own geometry and the old lock must not return.
+      if (prevGeom && !freshGeom) geomLock = prevGeom;
       return;
     }
     // github#45
@@ -5654,6 +5779,14 @@ function mountVaultGraph(root, data, deps) {
 
   function resetView() {
     stopPlay();
+    // github#76: leave the drilled disc first, so seedHidden reads the vault's order
+    // rather than writing child names into the vault's hidden map.
+    if (state.root) {
+      state.root = null; rootSegs = []; rootDepth = 0;
+      buildSubTables();
+      counts = computeOrder();
+      buildColors();
+    }
     seedHidden();
     state.hiddenSub = dict();
     state.highlight = dict();
@@ -6199,6 +6332,58 @@ function mountVaultGraph(root, data, deps) {
     attempt(placeLogo); attempt(heatBuild); attempt(buildLegend);
     if (persist && onUnlinkedTintByFolder) onUnlinkedTintByFolder(unlinkedTintByFolder);
     return unlinkedTintByFolder;
+  }
+
+  // github#76
+  /**
+   * Make a folder the whole disc. Its depth-1 children become the wedges and their
+   * own children become the tint ladder, so a pooled subfolder -- one that shares the
+   * tail slot and is structurally unable to be seen (decisions/0004) -- gets a wedge
+   * of its own. Null goes back to the vault.
+   *
+   * A surviving note is a MOVE (github#49): it changes group, and the cascade already
+   * knows how to carry a note between groups. A note that leaves the root is an
+   * ordinary `out` -- it fades, and `planKeep` holds its seat while it does, so the
+   * space closes continuously instead of the disc snapping shut around it.
+   *
+   * @param {string | null} path a vault-relative folder path, or null for the vault
+   * @param {boolean} [instant] skip the cascade (the checks and the first paint use this)
+   * @returns {string | null} the root now in force
+   */
+  function setRoot(path, instant) {
+    var next = path ? String(path).replace(/^\/+/, "").replace(/\/+$/, "") : "";
+    if ((next || null) === (state.root || null)) return state.root;
+
+    var live = !!renderer && !instant;
+    /** @type {Record<string, string>} */
+    var was = dict();
+    if (live) {
+      graph.forEachNode(function (id) {
+        if (visible(id) && (alpha[id] || 0) > 0.004) was[id] = groupOf(id);
+      });
+    }
+
+    state.root = next || null;
+    rootSegs = next ? next.split("/") : [];
+    rootDepth = rootSegs.length;
+    buildSubTables();
+
+    /** @type {Record<string, string> | null} */
+    var movesFrom = null;
+    if (live) {
+      Object.keys(was).forEach(function (id) {
+        if (!inRoot(id)) return;
+        if (groupOf(id) === was[id]) return;
+        if (!movesFrom) movesFrom = dict();
+        movesFrom[id] = was[id];
+      });
+    }
+
+    hardRelayout(false, live, true);
+    attempt(placeLogo); attempt(heatBuild); attempt(buildLegend);
+    if (live) cascade(null, movesFrom ? { colToggle: true, movesFrom: movesFrom } : { colToggle: true });
+    else if (renderer) renderer.refresh();
+    return state.root;
   }
 
   function savePng() {
@@ -8239,6 +8424,14 @@ function mountVaultGraph(root, data, deps) {
                                n: (c.ids || []).length }; }); },
                     seamDeg: /** @param {string} bk */ function (bk) { return bandOf(bk).gapDeg || 0; },
                     seamNB: /** @param {string} bk */ function (bk) { return (bandOf(bk).nG || 0) + (bandOf(bk).nSub || 0); },
+                    // github#76
+                    setRoot: /** @param {string | null} p @param {boolean} [instant] */
+                             function (p, instant) { return setRoot(p, instant); },
+                    get root() { return state.root; },
+                    rootGroupOf: /** @param {string} id */ function (id) { return groupOf(id); },
+                    rootSubOf: /** @param {string} id */
+                               function (id) { return relSub(graph.getNodeAttributes(id)); },
+                    inRoot: /** @param {string} id */ function (id) { return inRoot(id); },
                     clearAlpha: clearAlpha, buildWedgePlan: buildWedgePlan,
                     applyLayout: applyLayout, isHighlighted: isHighlighted,
                     ringColors: ringColors,
