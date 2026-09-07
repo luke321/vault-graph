@@ -3065,11 +3065,17 @@ appears on exactly `g3, g4, g9` for light and on nothing for dark.
 | swatch | 23×23 px (menu), 15.4 px (settings, desktop) | **58×42 px everywhere** |
 | context menu | 176×122 px | **202×279 px** |
 | menu columns | 6 | **3** |
-| settings-body columns | 12 | **4** |
-| settings row height | ~20 px | **159 px** |
+| settings-body columns | 12 | **3**, auto-filled to the panel's width |
+| settings row height | ~20 px | **205 px** |
 
 Measured inside the mount on the iPhone 14, on a 320 px sidebar and at 1600 px. The mount clamp
 in `openCtxMenu` is what keeps it there and is asserted rather than assumed.
+
+**The settings body auto-fills, and a fixed column count was wrong.** Four fixed 58 px columns
+overflowed the 288 px panel -- measured, its scrolling box is **244 px wide with 229 px of usable
+width** -- and put the twelfth slot behind a horizontal scrollbar, unreachable. `repeat(auto-fill,
+58px)` gives three columns there and adapts if the panel ever changes; after the fix `scrollWidth`
+equals `clientWidth` at 229 px and all twelve swatches are inside the box.
 
 ```bash
 node scripts/smoke.mjs --only picker            # all three fixtures, five checks

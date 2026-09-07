@@ -341,8 +341,11 @@
   .vault-graph .dimseg.setseg { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; margin: 0 0 9px; }
   .vault-graph .dimseg.setseg button { text-align: center; padding: 5px 8px; }
   .vault-graph #vg-setbody { max-height: 46vh; overflow-y: auto; }
+  /* github#77 -- auto-fill, never a fixed count: the panel is 288px wide minus its
+     padding and a scrollbar, and four fixed columns overflowed it, putting the
+     twelfth slot behind a horizontal scrollbar. */
   .vault-graph #vg-setbody .sws {
-    display: grid; grid-template-columns: repeat(4, max-content); gap: 4px;
+    display: grid; grid-template-columns: repeat(auto-fill, 58px); gap: 4px;
     justify-content: start;
   }
   /* github#77 -- a swatch is the dots the slot will draw, on both grounds at
