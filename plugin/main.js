@@ -98,6 +98,7 @@ function bareMap() {
  * `types` section): what mountVaultGraph returns, and the __vg api it builds. Every member
  * `VgApi` names ships in the plugin; the debug surface the standalone adds is not in it.
  * @typedef {import("../src/page.js").MountHandle} MountHandle
+ * @typedef {import("../src/page.js").VgApi} VgApi
  * @typedef {import("../src/page.js").MountDeps} MountDeps
  */
 
@@ -1027,6 +1028,9 @@ class VaultGraphSettingTab extends PluginSettingTab {
     this.subOpen = bareMap();
     /** @type {HTMLElement | null} */
     this.scope = null;
+    // github#77
+    /** @type {VgApi | null} */
+    this.api = null;
   }
 
   /* ----------------------------------------------------------- two render paths --
@@ -1191,6 +1195,8 @@ class VaultGraphSettingTab extends PluginSettingTab {
     const view = await this.plugin.currentView();
     const api = view && view.handle && view.handle.api;
     if (!api || !api.groupOrder || !api.palette || !scope || !scope.isConnected) return;
+    // github#77
+    this.api = api;
 
     // github#86 -- the page answers for the tab's grouping, on screen or not
     const groups = api.groupsOf
@@ -1202,6 +1208,17 @@ class VaultGraphSettingTab extends PluginSettingTab {
         autoSlot: api.autoSlotOf ? api.autoSlotOf(name) : "",
       }));
     if (groups.length) this.renderColours(groups);
+  }
+
+  // github#77
+  /** @param {HTMLElement} btn @param {string} key @param {string} name @param {string} tail */
+  fillSwatch(btn, key, name, tail) {
+    const api = this.api;
+    if (!api || !api.swatchPreview) return;
+    const doc = new DOMParser().parseFromString(
+      "<body>" + api.swatchPreview(key) + "</body>", "text/html");
+    btn.replaceChildren.apply(btn, Array.prototype.slice.call(doc.body.childNodes));
+    if (api.slotTitle) btn.setAttribute("title", api.slotTitle(key, name) + tail);
   }
 
   /** @param {GroupRow[]} groups */
@@ -1265,13 +1282,15 @@ class VaultGraphSettingTab extends PluginSettingTab {
         const key = "g" + (i + 1);
         const on = current === key;
         const isAuto = group.autoSlot === key;
+        const tail = on ? (pinned ? " (chosen)" : " (automatic)")
+                        : (isAuto ? " (automatic default)" : "");
         const attr = {
           role: "radio", "aria-checked": String(on), "aria-label": name,
-          title: name + (on ? (pinned ? " (chosen)" : " (automatic)") :
-                         (isAuto ? " (automatic default)" : "")),
+          title: name + tail,
         };
         if (isAuto) attr["data-auto"] = "1";
         const b = row.controlEl.createEl("button", { cls: ["swatch", "vg-" + key], attr });
+        this.fillSwatch(b, key, name, tail);
         b.addEventListener("click", () => this.pick(group.name, key));
       });
 
@@ -1309,6 +1328,7 @@ class VaultGraphSettingTab extends PluginSettingTab {
           attr: { role: "radio", "aria-checked": String(on), "aria-label": name,
                   title: name + (on ? " (chosen)" : "") },
         });
+        this.fillSwatch(b, key, name, on ? " (chosen)" : "");
         b.addEventListener("click", () => this.pickSub(folder, s.name, key));
       });
 
