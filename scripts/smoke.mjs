@@ -4693,14 +4693,7 @@ check("count bars are on by default, and the settings toggle removes every bar",
   };
 });
 
-/* ---------------------------------------------------------------- github#77
- * The colour picker previews each slot as the dots it will draw. Five things have
- * to hold, and each has already been wrong once in a way that looked fine: the
- * numbers must be palette-check.mjs's, both grounds must be drawn in either theme,
- * the radii must be the disc's own, the tint ladder must be the disc's own, and the
- * menu must still fit the mount. .ai-context/invariants.md
- */
-
+// github#77
 const PALETTE = await import("./palette-check.mjs");
 
 check("the picker's contrast numbers are the harness's", async (p) => {
@@ -4838,13 +4831,9 @@ check("the picker draws the disc's own dot sizes", async (p) => {
   })()`);
   const same = r.uniq.length === r.want.length &&
                r.uniq.every((v, i) => Math.abs(v - r.want[i]) < 1e-9);
-  // one svg unit must be one CSS pixel, or the radii on screen are not the disc's
+  // github#77
   const oneToOne = Math.abs(r.boxW - r.vbW) < 0.01 && Math.abs(r.boxH - r.vbH) < 0.01;
-  // The quartet is a fixed reference scale, NOT a bound: a dot's radius falls out of the
-  // vault's size and the viewport's, so no four numbers can bracket every disc -- measured,
-  // the same three fixtures span 0.39px (10k in a small window) to 5.93px (shape at 1600px).
-  // What must stay true is that the reference still resembles a real disc, so the range has
-  // to bracket the TYPICAL dot. .ai-context/invariants.md
+  // github#77
   const lo = r.want[0], hi = r.want[r.want.length - 1];
   const brackets = r.liveMed === null || (r.liveMed >= lo - 0.005 && r.liveMed <= hi + 0.005);
   return { ok: same && oneToOne && brackets,
