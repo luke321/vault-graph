@@ -8,6 +8,7 @@ import { existsSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, dirname, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { leftWindowArgs } from "./screen.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = dirname(HERE);
@@ -53,7 +54,7 @@ const chrome = spawn(findChrome(), [
   "--disable-features=Translate,TranslateUI,CalculateNativeWinOcclusion",
   "--disable-backgrounding-occluded-windows", "--disable-renderer-backgrounding",
   "--disable-background-timer-throttling",
-  "--window-position=-2400,0", "--window-size=1600,1000", `--app=${pathToFileURL(html).href}`,
+  ...leftWindowArgs(1600, 1000), `--app=${pathToFileURL(html).href}`,
 ], { stdio: "ignore" });
 
 const pad = (v, w) => String(v).padStart(w);

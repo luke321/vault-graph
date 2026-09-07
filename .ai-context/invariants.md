@@ -1833,3 +1833,83 @@ and into `scripts/release.ps1` right after the dirty-tree check: about five seco
 Chrome, so no skip flag. It **fails closed** on a checkout without `node_modules` -- eslint is
 the one gate that is not a Node built-in, and a gate that skips when its tool is missing is the
 gate that runs when someone remembers, which is how 27 warnings accumulated in the first place.
+
+## Only a hop lengthens the trail
+
+The card's hop trail (github#40, design/0012) records the linked-notes walk and nothing else. A
+hop is a click on a linked-notes row; a disc click, a search hit, a stage click, the close button
+and the reset button are not hops, and each of them starts a fresh trail. Re-selecting the
+note already selected -- which is what the pin button does to re-render the card -- keeps it.
+
+```bash
+node scripts/smoke.mjs --only "only a hop"
+node scripts/smoke.mjs --only "re-selecting"
+```
+
+Measured 2026-09-06 on all three fixtures: a search hit shows 0 crumbs, three hops show 3, a
+fresh search hit shows 0 again, one more hop shows 1; the pin toggle keeps 3 of 3. Hiding the
+folder of a crumb's note through the legend eye leaves the crumb count at 3 and marks the crumbs
+whose notes are now hidden (2 of 3 on the demo and 10k fixtures, 3 of 3 on the dominant-folder
+one); showing the folder again unmarks them. The marks are refreshed at the start of every
+cascade, because that is the one path every visibility and range change goes through.
+
+## Stepping back never re-collects a hop
+
+The back arrow steps back one hop, and the place just left is not pushed onto the trail again,
+so two steps back leave n-2 crumbs, not n.
+
+```bash
+node scripts/smoke.mjs --only "re-collects"
+```
+
+Measured 2026-09-07 on all three fixtures: after four hops the card shows 3 crumbs and an
+ellipsis (first, ellipsis, last two); one press of the back arrow shows 3 with no ellipsis; a
+second shows 2; `location.href` is unchanged throughout -- every crumb is a `<button>`, and
+nothing in the card is a link that could navigate.
+
+## A crumb click truncates the trail at the crumb
+
+Clicking crumb i selects that note and cuts the trail to the i crumbs before it.
+
+```bash
+node scripts/smoke.mjs --only "crumb click"
+```
+
+Measured 2026-09-06: three crumbs, the second clicked, one crumb left, the card names the
+clicked note -- on all three fixtures.
+
+## The trail is not layout
+
+Walking the trail moves the camera and re-renders one panel. No position, no plan, no room
+changes: the serpentine, the rings, the hub and the lattice never hear about it.
+
+```bash
+node scripts/smoke.mjs --only "not layout"
+```
+
+Measured 2026-09-06: five hops and two steps back move 0 of 1,403 / 10,002 / 954 notes (worst
+0.000 units) and leave `buildWedgePlan(false)` identical, cell for cell, on all three fixtures.
+
+## The page claims no keyboard shortcut
+
+The trail is driven by pointer alone, and that is a decision rather than an omission. The first
+cut bound Backspace, Alt+ArrowLeft and Escape on the mount root; they came out on 2026-09-07
+because **Obsidian users bind their own hotkeys, and a view that grabs keys of its own overrules
+them** (design/0012, superseding its binding A/B question). The page's only key handling is the
+two listeners that were always there and each belong to something already open: the context
+menu's own Escape, and the search box's Enter.
+
+```bash
+node scripts/smoke.mjs --only "no keyboard shortcut"
+node scripts/obsidian-smoke.mjs --only trail
+```
+
+Measured 2026-09-07 on all three fixtures: with the card open on two crumbs, Backspace,
+Alt+ArrowLeft and Escape each change nothing -- 2 crumbs before and after, the card still open,
+the selection and `location.href` unchanged -- while the search box still gets its own Backspace
+(`ab` -> `a`). In a real Obsidian the same two keys leave a one-crumb trail at one crumb with the
+card still open, in the same run that proves the back arrow does step it.
+
+**This is a claim about what the page does NOT register**, which is the kind that rots quietly:
+the check drives the keys rather than reading the source, so a listener added anywhere -- root,
+document, or a card element -- fails it.

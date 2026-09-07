@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { attach } from "./cdp.mjs";
+import { placeElectronLeft } from "./screen.mjs";
 
 const argv = process.argv.slice(2);
 const arg = (n, d) => { const i = argv.indexOf("--" + n); return i >= 0 && argv[i + 1] ? argv[i + 1] : d; };
@@ -36,7 +37,7 @@ async function launch() {
     await sleep(1000);
     let c = null;
     try { c = await attach(PORT, "app://obsidian.md"); } catch { continue; }
-    try { if (await c.eval("typeof app !== 'undefined' && !!app.workspace")) return { child, cdp: c }; } catch {}
+    try { if (await c.eval("typeof app !== 'undefined' && !!app.workspace")) { await placeElectronLeft((x) => c.eval(x)).catch(() => {}); return { child, cdp: c }; } } catch {}
     try { await c.close(); } catch {}
   }
   try { child.kill(); } catch {}

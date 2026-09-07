@@ -2904,6 +2904,8 @@ function mountVaultGraph(root, data, deps) {
   function present(id) { return (alpha[id] || 0) > 0.004; }
   function syncAlpha() {
     graph.forEachNode(function (id) { alpha[id] = visible(id) ? timeFactor(id) : 0; });
+    // github#40, design/0012
+    trailRefresh();
   }
   function clearAlpha() { graph.forEachNode(function (id) { alpha[id] = 0; }); }
 
@@ -3082,6 +3084,7 @@ function mountVaultGraph(root, data, deps) {
     if (dead) return;                      // github#62
     opts = opts || {};
     stopPlay();
+    trailRefresh();                        // github#40, design/0012
     if (anim) { WIN.cancelAnimationFrame(anim); anim = null; }
     if (animGuard) { WIN.clearTimeout(animGuard); animGuard = null; }
     if (cascadeRun) {
@@ -4699,8 +4702,80 @@ function mountVaultGraph(root, data, deps) {
 
   /* ------------------------------------------------------- detail panel */
 
+  // github#40, design/0012
+  /** @type {string[]} */
+  var trail = [];
+  var TRAIL_CAP = 30;
+  var trailHop = false;
+
+  /** @param {string} id */
+  function goTo(id) {
+    if (state.selected && state.selected !== id) {
+      trail.push(state.selected);
+      if (trail.length > TRAIL_CAP) trail.splice(1, 1);
+    }
+    trailHop = true;
+    select(id); centerOn(id);
+  }
+
+  /** @param {number} i */
+  function trailBackTo(i) {
+    var id = trail[i];
+    trail.length = i;
+    if (!graph.hasNode(id)) { select(null); return; }
+    trailHop = true;
+    select(id); centerOn(id);
+  }
+
+  /** @param {string} id */
+  function trailLabel(id) {
+    return graph.hasNode(id) ? graph.getNodeAttribute(id, "label") : "?";
+  }
+
+  /** @param {string} id */
+  function trailOff(id) { return graph.hasNode(id) && !(visible(id) && timeFactor(id) > 0); }
+
+  function trailRefresh() {
+    var d = $("detail");
+    if (!d || d.hidden) return;
+    Array.prototype.forEach.call(d.querySelectorAll("button.crumb"), /** @param {HTMLElement} b */ function (b) {
+      var id = trail[+b.getAttribute("data-tr")];
+      var off = !!id && trailOff(id);
+      b.classList.toggle("off", off);
+      b.title = trailLabel(id) + (off ? " (hidden by a filter)" : "");
+    });
+  }
+
+  function trailHTML() {
+    if (!trail.length) return "";
+    /** @param {number} i */
+    var crumb = function (i) {
+      var id = trail[i], lb = trailLabel(id);
+      var off = trailOff(id);
+      return '<li><button type="button" class="crumb' + (off ? ' off' : '') + '" data-tr="' + i +
+             '" title="' + esc(lb) + (off ? ' (hidden by a filter)' : '') + '">' + esc(lb) + '</button></li>';
+    };
+    var parts = [];
+    if (trail.length <= 3) {
+      for (var i = 0; i < trail.length; i++) parts.push(crumb(i));
+    } else {
+      parts.push(crumb(0),
+                 '<li class="dots"><span aria-hidden="true">&hellip;</span><span class="sr">' +
+                 (trail.length - 3) + ' more hops</span></li>',
+                 crumb(trail.length - 2), crumb(trail.length - 1));
+    }
+    return '<nav class="crumbs" aria-label="Hop trail">' +
+           '<button type="button" class="nvb" data-tr="' + (trail.length - 1) +
+           '" aria-label="Back to ' + esc(trailLabel(trail[trail.length - 1])) +
+           '" title="Back to ' + esc(trailLabel(trail[trail.length - 1])) + '">&#8592;</button>' +
+           '<ol>' + parts.join('') + '</ol></nav>';
+  }
+
   /** @param {string | null} id */
   function select(id) {
+    // github#40, design/0012
+    if (!trailHop && (!id || id !== state.selected)) trail.length = 0;
+    trailHop = false;
     state.selected = id;
     syncLazyEdges();
     var d = $("detail");
@@ -4714,6 +4789,7 @@ function mountVaultGraph(root, data, deps) {
     var file = encodeURIComponent(a.path.replace(/\.md$/, ""));
 
     var h = '<button class="x" title="Close">&times;</button>' +
+      trailHTML() +
       '<h2>' + esc(a.label) + '</h2>' +
       '<div class="meta">' +
         '<span><b style="color:' + colorOf(groupOf(id)) + '">&#9632;</b> ' + esc(groupOf(id)) + '</span>' +
@@ -4746,10 +4822,16 @@ function mountVaultGraph(root, data, deps) {
 
     setHTML(d, h);
     d.hidden = false;
+    // github#40, design/0012
+    d.setAttribute("role", "region");
+    d.setAttribute("aria-label", a.label);
     d.querySelector(".x").onclick = function () { select(null); };
     d.querySelector(".pin").onclick = function () { togglePin(id); select(id); };
     Array.prototype.forEach.call(d.querySelectorAll("[data-go]"), /** @param {HTMLElement} b */ function (b) {
-      b.onclick = function () { select(b.getAttribute("data-go")); centerOn(b.getAttribute("data-go")); };
+      b.onclick = function () { goTo(b.getAttribute("data-go")); };
+    });
+    Array.prototype.forEach.call(d.querySelectorAll("[data-tr]"), /** @param {HTMLElement} b */ function (b) {
+      b.onclick = function () { trailBackTo(+b.getAttribute("data-tr")); };
     });
     renderer.refresh();
   }
@@ -7200,6 +7282,18 @@ function mountVaultGraph(root, data, deps) {
       var dc2 = $("detail");
       return dc2 && !dc2.hidden ? dc2.querySelector(".x") : null;
     }
+    // github#40, design/0012
+    if (kind === "hop" || kind === "crumb") {
+      var dc3 = $("detail");
+      if (!dc3 || dc3.hidden) return null;
+      var picks = dc3.querySelectorAll(kind === "hop" ? "[data-go]" : ".crumbs button.crumb");
+      if (!picks.length) return null;
+      return picks[Math.max(0, Math.min(picks.length - 1, parseInt(arg, 10) || 0))];
+    }
+    if (kind === "crumbback") {
+      var dc4 = $("detail");
+      return dc4 && !dc4.hidden ? dc4.querySelector(".crumbs .nvb") : null;
+    }
     if (kind === "day") return demoCellRect(heat && heat.days[arg]);
     if (kind === "busiest") {
       if (!heat) return null;
@@ -7358,6 +7452,28 @@ function mountVaultGraph(root, data, deps) {
 
       { hover: true, target: ["note", "04"], act: "note", why: "hover a daily note" },
       { hover: true, target: ["note", "05"], act: "note", why: "hover a meeting note" },
+
+      // github#40, design/0012
+      { click: true, target: ["note", "05"], act: "hoptrail", why: "open a well-linked note's card" },
+      { settle: true, act: "hoptrail", why: "let the card land" },
+      { click: true, target: ["hop", "1"], act: "hoptrail",
+        why: "click a linked note -- the walk begins, and the card grows a back arrow and a crumb" },
+      { settle: true, act: "hoptrail", why: "let the camera fly to it" },
+      { click: true, target: ["hop", "1"], act: "hoptrail", why: "hop again -- the trail remembers where you came from" },
+      { settle: true, act: "hoptrail", why: "let it land" },
+      { click: true, target: ["hop", "1"], act: "hoptrail", why: "...and again" },
+      { settle: true, act: "hoptrail", why: "let it land" },
+      { click: true, target: ["hop", "1"], act: "hoptrail",
+        why: "four hops in: first crumb, an ellipsis, the last two -- the start of the walk is still there" },
+      { settle: true, act: "hoptrail", why: "let it land" },
+      { click: true, target: ["crumbback"], act: "hoptrail", why: "the back arrow steps back one hop" },
+      { settle: true, act: "hoptrail", why: "let the camera fly back" },
+      { click: true, target: ["crumbback"], act: "hoptrail", why: "...and one more" },
+      { settle: true, act: "hoptrail", why: "let it land" },
+      { click: true, target: ["crumb", "0"], act: "hoptrail",
+        why: "or click a crumb to jump straight back to it -- the trail truncates there" },
+      { settle: true, act: "hoptrail", why: "let the walk unwind" },
+      { click: true, target: ["detailclose"], act: "hoptrail", why: "close the card -- the trail ends with it" },
 
       { drag: true, target: ["biginner"], act: "pin", to: ["stage", "centre"],
         why: "drag a note into the hole to pin it" },

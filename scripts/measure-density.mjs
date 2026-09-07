@@ -7,6 +7,7 @@ import { existsSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { leftWindowArgs } from "./screen.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = dirname(HERE);
@@ -78,7 +79,7 @@ async function measureOne(notes, steps) {
     "--disable-features=Translate,TranslateUI,CalculateNativeWinOcclusion",
     "--disable-backgrounding-occluded-windows", "--disable-renderer-backgrounding",
     "--disable-background-timer-throttling",
-    "--window-position=-2400,0", "--window-size=1600,1000", `--app=${url}`,
+    ...leftWindowArgs(1600, 1000), `--app=${url}`,
   ], { stdio: "ignore" });
 
   const rows = [];

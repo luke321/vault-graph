@@ -1,5 +1,6 @@
 
 import { attach, json } from "./cdp.mjs";
+import { placeElectronLeft } from "./screen.mjs";
 import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, writeFileSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -66,7 +67,7 @@ try {
     let c = null;
     try { c = await attach(PORT, "app://obsidian.md"); } catch { continue; }
     try {
-      if (await c.eval("typeof app !== 'undefined' && !!app.workspace")) { attached = c; break; }
+      if (await c.eval("typeof app !== 'undefined' && !!app.workspace")) { await placeElectronLeft((x) => c.eval(x)).catch(() => {}); attached = c; break; }
     } catch { }
     try { await c.close(); } catch {}
     if (i === 20) {
