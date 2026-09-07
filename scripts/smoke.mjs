@@ -3299,6 +3299,262 @@ check("re-selecting the same note keeps the trail, and a filter does not clear i
                        `${off} marked hidden, card ${s2.open ? "open" : "CLOSED"}; shown again: ${s3.crumbs.length}` };
 });
 
+/* ------------------------------------------------------------- the drill root
+ *
+ * github#76. A drilled disc is a DISC, not a special view, so these checks assert the
+ * same laws the vault disc is held to rather than a reduced set: it matches a golden of
+ * its own, its plan agrees with the live one, a zero-weight member still costs nothing,
+ * it rests on the lattice, and the cascade that gets there converges before it lands.
+ *
+ * The root each fixture is drilled at is READ OUT OF ITS SNAPSHOT, never named here --
+ * one place decides it (scripts/update-layout-snapshots.mjs) and everything else follows,
+ * so the check cannot drift away from the golden it is comparing against.
+ */
+
+function drillSnapshot(vaultName) {
+  const fixture = ["demo-vault", "test-vault", "shape-vault"].find((f) => vaultName.startsWith(f + "-"));
+  if (!fixture) return null;
+  const path = join(ROOT, "scripts", "layout-snapshots", `${fixture}.drill.json`);
+  if (!existsSync(path)) return null;
+  return { fixture, path, snap: JSON.parse(readFileSync(path, "utf8")) };
+}
+
+async function withRoot(p, root) {
+  await p.eval(`__vg.setRoot(${JSON.stringify(root)}, true); void 0`);
+  await p.eval(`__vg.relayout(); void 0`).catch(() => {});
+}
+
+check("a drilled disc matches its golden snapshot", async (p) => {
+  const dd = await p.j("__vg.debugDump()");
+  const found = drillSnapshot(dd.vault.name);
+  if (!found) {
+    return { ok: true, detail: `NOT ASSERTED: "${dd.vault.name}" has no drilled golden` };
+  }
+  const { fixture, snap } = found;
+  await withRoot(p, snap.root);
+  const r = await p.j(`(function(){
+    var plan = __vg.buildWedgePlan(false), band = {};
+    plan.cells.forEach(function(c){ band[c.g] = c.inner ? "inner" : "outer"; });
+    var pos = {};
+    __vg.graph.forEachNode(function(id, a){ if (__vg.inRoot(id)) pos[id] = [a.x, a.y]; });
+    return { band: band, positions: pos, order: __vg.groupOrder() };
+  })()`);
+  await withRoot(p, null);
+
+  const flipped = [];
+  for (const f of Object.keys(snap.band)) {
+    if (r.band[f] !== undefined && r.band[f] !== snap.band[f]) flipped.push(`${f}: ${snap.band[f]} -> ${r.band[f]}`);
+  }
+  const snapIds = new Set(Object.keys(snap.positions));
+  const curIds = new Set(Object.keys(r.positions));
+  const added = [...curIds].filter((id) => !snapIds.has(id));
+  const removed = [...snapIds].filter((id) => !curIds.has(id));
+  if (added.length || removed.length) {
+    return { ok: false, detail: `MEMBERSHIP changed under root ${JSON.stringify(snap.root)}: ` +
+      `${added.length} note(s) added, ${removed.length} removed. Regenerate deliberately with ` +
+      `node scripts/update-layout-snapshots.mjs if the fixture's generator changed on purpose` };
+  }
+  const TOL = 0.1;
+  let worst = null, moved = 0;
+  for (const id of curIds) {
+    const [sx, sy] = snap.positions[id];
+    const [cx, cy] = r.positions[id];
+    const d = Math.hypot(cx - sx, cy - sy);
+    if (d <= TOL) continue;
+    moved++;
+    if (!worst || d > worst.d) worst = { id, d, sr: Math.hypot(sx, sy), cr: Math.hypot(cx, cy) };
+  }
+  const ok = flipped.length === 0 && moved === 0;
+  const parts = [`root ${JSON.stringify(snap.root)}: ${curIds.size} notes against ` +
+                 `scripts/layout-snapshots/${fixture}.drill.json, ${r.order.length} wedges`];
+  parts.push(flipped.length ? `${flipped.length} flipped band: ${flipped.join(", ")}` : "band unchanged");
+  parts.push(moved ? `${moved} moved past ${TOL}u, worst #${worst.id}: radius ${worst.sr.toFixed(1)} -> ${worst.cr.toFixed(1)}`
+                   : "positions unchanged");
+  return { ok, detail: parts.join("; ") };
+});
+
+check("drilling into a folder and coming straight back is the identity", async (p) => {
+  const dd = await p.j("__vg.debugDump()");
+  const found = drillSnapshot(dd.vault.name);
+  if (!found) return { ok: true, detail: `NOT ASSERTED: "${dd.vault.name}" has no drilled golden` };
+  const root = found.snap.root;
+
+  const snapJs = `(function(){
+    var pos = {}; __vg.graph.forEachNode(function(id, a){ pos[id] = [a.x, a.y]; });
+    return { pos: pos, plan: JSON.stringify(__vg.buildWedgePlan(false).cells.map(function(c){
+      return [c.k, c.g, c.rows, c.inner ? 1 : 0]; })), order: __vg.groupOrder().join("|") };
+  })()`;
+  await p.eval(`__vg.relayout(); void 0`).catch(() => {});
+  const a = await p.j(snapJs);
+  await withRoot(p, root);
+  await withRoot(p, null);
+  const b = await p.j(snapJs);
+
+  let moved = 0, worst = 0;
+  for (const id of Object.keys(a.pos)) {
+    const d = Math.hypot(a.pos[id][0] - b.pos[id][0], a.pos[id][1] - b.pos[id][1]);
+    if (d > 0.1) moved++;
+    if (d > worst) worst = d;
+  }
+  const ok = moved === 0 && a.plan === b.plan && a.order === b.order;
+  return { ok, detail: `in and out of ${JSON.stringify(root)}: ${moved} of ${Object.keys(a.pos).length} ` +
+    `notes moved past 0.1u (worst ${worst.toFixed(3)}), plan ${a.plan === b.plan ? "identical" : "CHANGED"}, ` +
+    `wedge order ${a.order === b.order ? "identical" : "CHANGED"}` };
+});
+
+check("a drilled disc obeys the same laws as the vault disc", async (p) => {
+  const dd = await p.j("__vg.debugDump()");
+  const found = drillSnapshot(dd.vault.name);
+  if (!found) return { ok: true, detail: `NOT ASSERTED: "${dd.vault.name}" has no drilled golden` };
+  const root = found.snap.root;
+  await withRoot(p, root);
+
+  const r = await p.j(`(function(){
+    var parity = __vg.checkPlanParity();
+    var plan = __vg.buildWedgePlan(false);
+    // the lattice: every drilled note sits on a row of its own band's pitch
+    var band = {}; plan.cells.forEach(function(c){ band[c.g] = c.inner; });
+    var offGrid = 0, n = 0;
+    plan.cells.forEach(function(c){
+      c.slots.forEach(function(sl){
+        n++;
+        var want = sl.r * 160;
+        var a = __vg.graph.getNodeAttributes(sl.id);
+        if (Math.abs(Math.hypot(a.x, a.y) - want) > 0.5) offGrid++;
+      });
+    });
+    // github#35: a row-0 dot may not eat past HUB_ROW0_FRAC of the hub's own radius.
+    // The drilled disc has few notes and a small r0 -- the same shape that broke this
+    // once -- and geomLock is now the DRILLED r0, so the cap has to scale with it.
+    var a0 = __vg.renderer.graphToViewport({ x: 0, y: 0 });
+    var b0 = __vg.renderer.graphToViewport({ x: 160, y: 0 });
+    var perPx = 160 / Math.hypot(b0.x - a0.x, b0.y - a0.y);
+    var hubCap = 0.08 * plan.r0 * 0.8 * 160;
+    var row0 = 0, hubBad = 0, hubWorst = 0;
+    __vg.graph.forEachNode(function (id) {
+      if (!__vg.inRoot(id)) return;
+      var why = __vg.dotWhy(id);
+      if (!why || !why.hubRow0) return;
+      row0++;
+      var d = __vg.renderer.getNodeDisplayData(id);
+      if (!d || d.hidden) return;
+      var rad = __vg.renderer.scaleSize(d.size) * perPx;
+      if (rad > hubWorst) hubWorst = rad;
+      if (rad > hubCap + 1e-6) hubBad++;
+    });
+    return { parity: parity.parityOK, cells: plan.cells.length, n: n, offGrid: offGrid,
+             r0: Math.round(plan.r0 * 100) / 100, maxR: Math.round(plan.maxR * 100) / 100,
+             hubFrac: Math.round((plan.r0 / plan.maxR) * 1000) / 1000,
+             row0: row0, hubBad: hubBad,
+             hubCap: Math.round(hubCap * 10) / 10, hubWorst: Math.round(hubWorst * 10) / 10 };
+  })()`);
+
+  // a zero-weight member costs nothing: it is vacuous at full disc, so hide one child first
+  const zero = await p.j(`(function(){
+    var g = __vg.groupOrder().filter(function(x){ return __vg.groupCount(x) > 0; })[0];
+    var key = ${JSON.stringify(root)} + "/" + g;
+    __vg.state.hiddenSub[key] = true;
+    var out = __vg.checkZeroWeightInvariance();
+    delete __vg.state.hiddenSub[key];
+    return { g: g, ok: out.invariantOK, lean: out.leanMaxR, padded: out.paddedMaxR };
+  })()`);
+  await withRoot(p, null);
+
+  const ok = r.parity && r.offGrid === 0 && zero.ok && r.hubBad === 0;
+  return { ok, detail: `root ${JSON.stringify(root)}: ${r.cells} cells, ${r.n} notes, parity ${r.parity}, ` +
+    `${r.offGrid} off the lattice, r0 ${r.r0} / maxR ${r.maxR} (hub ${r.hubFrac} of the disc); ` +
+    `${r.row0} row-0 dots, biggest ${r.hubWorst}u against a ${r.hubCap}u cap, ${r.hubBad} over; ` +
+    `zero-weight with ${JSON.stringify(zero.g)} hidden: ${zero.ok} (maxR ${zero.lean} vs ${zero.padded})` };
+});
+
+check("a drill animates, and settle() is still a no-op at the end of it", async (p) => {
+  const dd = await p.j("__vg.debugDump()");
+  const found = drillSnapshot(dd.vault.name);
+  if (!found) return { ok: true, detail: `NOT ASSERTED: "${dd.vault.name}" has no drilled golden` };
+  const root = found.snap.root;
+  await withRoot(p, null);
+  await settle(p);
+  await sleep(200);
+
+  const sampler = `(function (trigger) {
+    window.__DR = { last: null, rest: null, frames: 0 };
+    var snap = function () {
+      var a0 = __vg.renderer.graphToViewport({ x: 0, y: 0 });
+      var b0 = __vg.renderer.graphToViewport({ x: 160, y: 0 });
+      var perPx = 160 / Math.hypot(b0.x - a0.x, b0.y - a0.y);
+      var m = {};
+      __vg.graph.forEachNode(function (id, at) {
+        var d = __vg.renderer.getNodeDisplayData(id);
+        if (!d || d.hidden || (__vg.alpha[id] || 0) < 0.999) return;
+        m[id] = { r: Math.hypot(at.x, at.y), th: Math.atan2(at.y, at.x),
+                  dot: __vg.renderer.scaleSize(d.size) * perPx };
+      });
+      return m;
+    };
+    var tick = function () {
+      if (__vg.demo.busy()) { window.__DR.last = snap(); window.__DR.frames++; requestAnimationFrame(tick); }
+      else { window.__DR.last = snap(); window.__DR.frames++;
+             setTimeout(function () { window.__DR.rest = snap(); }, 320); }
+    };
+    trigger(); requestAnimationFrame(tick);
+  })`;
+
+  const run = async (label, trigger) => {
+    await p.eval(`${sampler}(function () { ${trigger} }); void 0`);
+    for (let i = 0; i < 600; i++) { if (await p.j(`!!window.__DR.rest`).catch(() => false)) break; await sleep(100); }
+    const r = await p.j(`(function () {
+      var L = window.__DR.last, R = window.__DR.rest;
+      if (!L || !R) return { frames: window.__DR.frames, n: 0 };
+      var dr = 0, dt = 0, dd = 0, n = 0;
+      Object.keys(R).forEach(function (id) {
+        if (!L[id]) return; n++;
+        var a = Math.abs(R[id].r - L[id].r);
+        var da = R[id].th - L[id].th;
+        while (da > Math.PI) da -= 2 * Math.PI;
+        while (da < -Math.PI) da += 2 * Math.PI;
+        var t = Math.abs(da) * R[id].r;
+        var s = L[id].dot > 0.01 ? Math.abs(R[id].dot - L[id].dot) / L[id].dot : 0;
+        if (a > dr) dr = a; if (t > dt) dt = t; if (s > dd) dd = s;
+      });
+      var lc = __vg.lastCascade();
+      return { frames: window.__DR.frames, n: n, cframes: lc.frames, outs: lc.outs, ins: lc.ins,
+               path: lc.path, dr: Math.round(dr*10)/10, dt: Math.round(dt*10)/10, dd: Math.round(dd*1000)/10 };
+    })()`);
+    // github#21: a settled dot is the size a FRESH relayout gives it, which the
+    // last-frame-versus-rest comparison above cannot see -- both read the same globals.
+    const sz = await p.j(`(function(){
+      var a0=__vg.renderer.graphToViewport({x:0,y:0}), b0=__vg.renderer.graphToViewport({x:160,y:0});
+      var perPx=160/Math.hypot(b0.x-a0.x,b0.y-a0.y), before={};
+      __vg.graph.forEachNode(function(id){ var d=__vg.renderer.getNodeDisplayData(id);
+        if(d && !d.hidden && (__vg.alpha[id]||0)>0.99) before[id]=__vg.renderer.scaleSize(d.size)*perPx; });
+      __vg.relayout();
+      var off=0, worst=0, n=0;
+      __vg.graph.forEachNode(function(id){ var d=__vg.renderer.getNodeDisplayData(id);
+        if(!d || d.hidden || before[id]===undefined) return; n++;
+        var now=__vg.renderer.scaleSize(d.size)*perPx;
+        var rel=before[id]>0.01?Math.abs(now-before[id])/before[id]:0;
+        if(rel>0.05) off++; if(rel>worst) worst=rel; });
+      return { n: n, off: off, worst: Math.round(worst*1000)/10 };
+    })()`);
+    return { label, ...r, szOff: sz.off, szN: sz.n, szWorst: sz.worst };
+  };
+
+  const out = [];
+  out.push(await run("in", `__vg.setRoot(${JSON.stringify(root)});`));
+  out.push(await run("out", `__vg.setRoot(null);`));
+  await withRoot(p, null);
+
+  const bad = out.filter((r) => !r.n || r.dr > 16 || r.dt > 16 || r.dd > 5 || r.szOff > 0 ||
+                                r.path.indexOf("instant") === 0);
+  return {
+    ok: !bad.length,
+    detail: out.map((r) => r.n
+      ? `${r.label}: ${r.cframes}f ${r.path} (${r.ins} in / ${r.outs} out), last-vs-rest dr ${r.dr} ` +
+        `dtan ${r.dt} dot ${r.dd}%, ${r.szOff} of ${r.szN} dots off after a fresh relayout (worst ${r.szWorst}%)`
+      : `${r.label}: nothing sampled`).join(" | "),
+  };
+});
+
 async function settle(p, ms = 6000) {
   const deadline = Date.now() + ms;
   for (;;) {

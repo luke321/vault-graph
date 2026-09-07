@@ -16,10 +16,13 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(HERE, "..");
 const OUT_DIR = join(ROOT, "scripts", "layout-snapshots");
 
+// github#76: `drill` is the folder each fixture's DRILLED golden is taken at -- the one
+// with the most depth-1 children, so the snapshot exercises children that the vault disc
+// could only pool into the shared tail slot.
 const FIXTURES = [
-  { script: "make-demo-vault.mjs", args: [], name: "demo-vault" },
-  { script: "make-test-vault.mjs", args: ["--notes", "10000", "--years", "10", "--end", "2026-08-28"], name: "test-vault" },
-  { script: "make-shape-vault.mjs", args: [], name: "shape-vault" },
+  { script: "make-demo-vault.mjs", args: [], name: "demo-vault", drill: "03 - Resources" },
+  { script: "make-test-vault.mjs", args: ["--notes", "10000", "--years", "10", "--end", "2026-08-28"], name: "test-vault", drill: "03 - Resources" },
+  { script: "make-shape-vault.mjs", args: [], name: "shape-vault", drill: "projects" },
 ];
 
 const GENERATORS = ["make-demo-vault.mjs", "make-test-vault.mjs", "make-shape-vault.mjs"];
@@ -78,7 +81,7 @@ function buildFixture(fx) {
   return { dir: htmlDir, htmlPath };
 }
 
-async function measure(htmlPath) {
+async function measure(htmlPath, drill) {
   const port = await new Promise((res, rej) => {
     const srv = createServer();
     srv.on("error", rej);
@@ -122,18 +125,27 @@ async function measure(htmlPath) {
       await sleep(120);
     }
     // github#21
-    await page.eval(`__vg.relayout(); void 0`).catch(() => {});
-    const data = await page.eval(`JSON.stringify((function(){
+    // github#76: the drilled read seats only the notes UNDER the root, so its positions
+    // map is the drilled disc's own membership and nothing else.
+    const read = `JSON.stringify((function(){
+      __vg.relayout();
       var plan = __vg.buildWedgePlan(false), band = {};
       plan.cells.forEach(function(c){ band[c.g] = c.inner ? "inner" : "outer"; });
-      var pos = {};
+      var pos = {}, n = 0;
       __vg.graph.forEachNode(function(id, a){
+        if (!__vg.inRoot(id)) return;
         pos[id] = [Math.round(a.x * 100) / 100, Math.round(a.y * 100) / 100];
+        n++;
       });
-      return { band: band, positions: pos, notes: __vg.graph.order };
-    })())`);
+      return { band: band, positions: pos, notes: n };
+    })())`;
+    await page.eval(`__vg.relayout(); void 0`).catch(() => {});
+    const vault = JSON.parse(await page.eval(read));
+    await page.eval(`__vg.setRoot(${JSON.stringify(drill)}, true); void 0`);
+    const drilled = JSON.parse(await page.eval(read));
+    drilled.root = drill;
     page.close();
-    return JSON.parse(data);
+    return { vault, drilled };
   } finally {
     chrome.kill();
   }
@@ -144,20 +156,26 @@ async function main() {
   for (const fx of FIXTURES) {
     const built = buildFixture(fx);
     try {
-      const { band, positions, notes } = await measure(built.htmlPath);
-      const folders = Object.keys(band).sort();
-      const sortedBand = {};
-      for (const f of folders) sortedBand[f] = band[f];
-      const sortedPositions = {};
-      for (const id of Object.keys(positions).sort((a, b) => Number(a) - Number(b))) {
-        sortedPositions[id] = positions[id];
+      const both = await measure(built.htmlPath, fx.drill);
+      for (const [kind, m] of [["", both.vault], [".drill", both.drilled]]) {
+        const { band, positions, notes } = m;
+        const folders = Object.keys(band).sort();
+        const sortedBand = {};
+        for (const f of folders) sortedBand[f] = band[f];
+        const sortedPositions = {};
+        for (const id of Object.keys(positions).sort((a, b) => Number(a) - Number(b))) {
+          sortedPositions[id] = positions[id];
+        }
+        const out = { vault: fx.name, notes, folders: folders.length, band: sortedBand, positions: sortedPositions };
+        // github#76: the root travels IN the snapshot, so the check never has to agree
+        // with this script about which folder a fixture is drilled at.
+        if (m.root) out.root = m.root;
+        const outPath = join(OUT_DIR, `${fx.name}${kind}.json`);
+        writeFileSync(outPath, JSON.stringify(out, null, 1) + "\n");
+        const inner = folders.filter((f) => band[f] === "inner").length;
+        console.log(`${fx.name}${kind}: wrote ${outPath} (${notes} notes, ${folders.length} folders, ` +
+          `${inner} inner / ${folders.length - inner} outer` + (m.root ? `, root ${JSON.stringify(m.root)}` : "") + `)`);
       }
-      const out = { vault: fx.name, notes, folders: folders.length, band: sortedBand, positions: sortedPositions };
-      const outPath = join(OUT_DIR, `${fx.name}.json`);
-      writeFileSync(outPath, JSON.stringify(out, null, 1) + "\n");
-      const inner = folders.filter((f) => band[f] === "inner").length;
-      console.log(`${fx.name}: wrote ${outPath} (${notes} notes, ${folders.length} folders, ` +
-        `${inner} inner / ${folders.length - inner} outer)`);
     } finally {
       rmSync(built.dir, { recursive: true, force: true });
     }

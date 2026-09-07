@@ -417,7 +417,7 @@ range, not the file. Stale when `node scripts/code-map.mjs --check` fails.
 | 8798 | · · · · · · · · · · `byPath` |
 | 8943 | `destroy` |
 
-## `scripts/smoke.mjs` — 3828 lines, 7 sections, 49 functions, 83 checks
+## `scripts/smoke.mjs` — 4084 lines, 8 sections, 53 functions, 87 checks
 
 ### Sections
 
@@ -427,9 +427,10 @@ range, not the file. Stale when `node scripts/code-map.mjs --check` fails.
 | 73–674 | the checks |
 | 675–1291 | camera |
 | 1292–2772 | date range |
-| 2773–3316 | the hub |
-| 3317–3547 | the run |
-| 3548–3828 | which vaults, and why |
+| 2773–3301 | the hub |
+| 3302–3572 | the drill root |
+| 3573–3803 | the run |
+| 3804–4084 | which vaults, and why |
 
 ### Functions
 
@@ -478,12 +479,16 @@ range, not the file. Stale when `node scripts/code-map.mjs --check` fails.
 | 3164 | `hop` |
 | 3173 | `closeCard` |
 | 3174 | `stepBack` |
-| 3302 | `settle` |
-| 3319 | `runOne` |
-| 3506 | `killBrowser` |
-| 3624 | `resolveVaults` |
-| 3706 | `buildFor` |
-| 3720 | `main` |
+| 3314 | `drillSnapshot` |
+| 3322 | `withRoot` |
+| 3481 | · `snap` |
+| 3494 | · `tick` |
+| 3558 | `settle` |
+| 3575 | `runOne` |
+| 3762 | `killBrowser` |
+| 3880 | `resolveVaults` |
+| 3962 | `buildFor` |
+| 3976 | `main` |
 
 ### Checks
 
@@ -572,3 +577,7 @@ range, not the file. Stale when `node scripts/code-map.mjs --check` fails.
 | 3231 | the trail is not layout |
 | 3254 | the page claims no keyboard shortcut |
 | 3277 | re-selecting the same note keeps the trail, and a filter does not clear it |
+| 3327 | a drilled disc matches its golden snapshot |
+| 3376 | drilling into a folder and coming straight back is the identity |
+| 3405 | a drilled disc obeys the same laws as the vault disc |
+| 3470 | a drill animates, and settle() is still a no-op at the end of it |
