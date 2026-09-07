@@ -1567,6 +1567,32 @@ check("the camera cluster is bottom-right, in order, and 31px", async (p) => {
       d.innerHTML = html;
       if (wasHidden) d.setAttribute("hidden", "");
     }
+    // github#79 -- the overview is a SIBLING of the cluster, so the four buttons above keep
+    // their box and the card's --controls-h calc keeps its meaning. Forced visible rather
+    // than by zooming, because the claim is about where it lands, not when it appears.
+    var ov = document.querySelector("#vg-ov");
+    out.ovInCluster = !!(ov && cam.contains(ov));
+    out.ovHiddenAtRest = !!(ov && ov.hidden);
+    if (ov) {
+      var wasOv = ov.hidden, wasAttr = document.querySelector(".vault-graph").getAttribute("data-ov");
+      ov.hidden = false;
+      document.querySelector(".vault-graph").setAttribute("data-ov", "on");
+      var or = ov.getBoundingClientRect();
+      out.ovBox = { w: Math.round(or.width), h: Math.round(or.height) };
+      out.ovAboveCluster = Math.round(cr.top - or.bottom);
+      out.ovFromRight = Math.round(g.right - or.right);
+      if (d) {
+        var wasH2 = d.hasAttribute("hidden"), html2 = d.innerHTML;
+        d.removeAttribute("hidden");
+        d.innerHTML = new Array(400).join("<p>tall</p>");
+        out.cardClearsOv = Math.round(or.top - d.getBoundingClientRect().bottom);
+        d.innerHTML = html2;
+        if (wasH2) d.setAttribute("hidden", "");
+      }
+      ov.hidden = wasOv;
+      if (wasAttr === null) document.querySelector(".vault-graph").removeAttribute("data-ov");
+      else document.querySelector(".vault-graph").setAttribute("data-ov", wasAttr);
+    }
     return out;
   })()`);
   if (!box) return { ok: false, detail: "no #vg-cam inside the stage" };
@@ -1579,14 +1605,22 @@ check("the camera cluster is bottom-right, in order, and 31px", async (p) => {
   return {
     ok: bad.length === 0 && ordered && !box.oldFit &&
         box.fromBottom >= 0 && box.fromBottom < 60 && box.fromRight >= 0 && box.fromRight < 60 &&
-        box.buttons.every((b) => b.inside) && box.cardClears > 0,
+        box.buttons.every((b) => b.inside) && box.cardClears > 0 &&
+        // github#79
+        !box.ovInCluster && box.ovHiddenAtRest && box.ovBox && box.ovBox.w === box.ovBox.h &&
+        box.ovAboveCluster > 0 && box.ovFromRight === box.fromRight && box.cardClearsOv > 0,
     detail: bad.length
       ? `wrong: ${bad.map((b) => b.missing ? b.id + " missing" : b.id + " " + b.w + "x" + b.h).join(", ")}`
       : `${box.buttons.length} buttons at ${box.buttons[0].w}x${box.buttons[0].h}px, ` +
         `${box.fromBottom}px from the bottom and ${box.fromRight}px from the right, ` +
         `top-to-bottom ${box.buttons.map((b) => b.id.replace("vg-", "")).join(" ")}` +
         `${box.oldFit ? "; #vg-fit IS STILL THERE" : "; #vg-fit gone"}` +
-        `; a full detail card clears it by ${box.cardClears}px`,
+        `; a full detail card clears it by ${box.cardClears}px` +
+        `; the overview is ${box.ovInCluster ? "INSIDE THE CLUSTER" : "a sibling"}, ` +
+        `hidden at rest ${box.ovHiddenAtRest}, ` +
+        `${box.ovBox ? box.ovBox.w + "x" + box.ovBox.h : "missing"}px ` +
+        `${box.ovAboveCluster}px above the cluster on the same right edge ` +
+        `(${box.ovFromRight}px), cleared by a full card by ${box.cardClearsOv}px`,
   };
 });
 
@@ -2147,6 +2181,161 @@ check("the pan toggle locks the camera and flies home", async (p) => {
     detail: `on by default ${on}; dragged to (${moved.x}, ${moved.y}), toggling off flew home ` +
             `to (${home.x}, ${home.y}); a drag while locked left it at (${locked.x}, ${locked.y}); ` +
             `toggles back to ${back}`,
+  };
+});
+
+// github#79
+async function ovState(p) {
+  return p.j(`(function(){ var o = __vg.overview();
+    return { shown: o.shown, hidden: o.hidden, paints: o.paints, cropped: o.cropped,
+             liveR: o.liveR,
+             fp: o.footprint ? { x0: +o.footprint.x0.toFixed(2), x1: +o.footprint.x1.toFixed(2),
+                                 y0: +o.footprint.y0.toFixed(2), y1: +o.footprint.y1.toFixed(2) } : null,
+             shape: o.shape ? { s: o.shape.s, k: o.shape.k, rect: o.shape.rect.map(function(v){ return +v.toFixed(2); }),
+                                chevron: o.shape.chevron, nSectors: o.shape.sectors.length,
+                                ringO: +o.shape.rings.o.toFixed(2) } : null }; })()`);
+}
+async function camTo(p, s) {
+  await p.eval(`__vg.renderer.getCamera().setState(${JSON.stringify(s)}); void 0`);
+  await sleep(260);
+}
+
+// github#79
+check("the overview is absent at rest and appears only while the disc is cropped", async (p) => {
+  await camReset(p);
+  const rest = await ovState(p);
+  await p.eval(`__vg.renderer.refresh(); __vg.renderer.refresh(); __vg.renderer.refresh();
+                __vg.placeLogo(); __vg.renderer.refresh(); __vg.renderer.refresh(); void 0`);
+  await sleep(400);
+  const still = await ovState(p);
+
+  await camTo(p, { x: 0.5, y: 0.5, ratio: 0.35, angle: 0 });
+  const zoomed = await ovState(p);
+  // Pan on the TIGHT axis. The stage is wider than it is tall, so fit() leaves far more
+  // room in x than in y, and a pan in x this size crops nothing -- measured, 1.282x the
+  // disc vertically against roughly twice that across.
+  await camTo(p, { x: 0.5, y: 0.9, ratio: 1.08, angle: 0 });
+  const panned = await ovState(p);
+  await camReset(p);
+  const back = await ovState(p);
+  const quiet = back.paints;
+  await sleep(500);
+  const quiet2 = await ovState(p);
+
+  // The margin fit() leaves: how much bigger the frame is than the disc on the short axis.
+  const margin = rest.fp ? Math.min(-rest.fp.x0, rest.fp.x1, -rest.fp.y0, rest.fp.y1) / rest.liveR : 0;
+  return {
+    ok: rest.hidden && !rest.shown && !rest.cropped &&
+        still.paints === rest.paints &&
+        zoomed.shown && !zoomed.hidden && zoomed.paints > rest.paints &&
+        panned.shown && back.hidden && !back.shown &&
+        quiet2.paints === quiet && margin > 1.02,
+    detail: `at rest hidden=${rest.hidden} cropped=${rest.cropped}, frame is ` +
+            `${margin.toFixed(3)}x the live disc radius; 5 forced refreshes added ` +
+            `${still.paints - rest.paints} paints; ratio 0.35 -> shown=${zoomed.shown} ` +
+            `(${zoomed.shape ? zoomed.shape.nSectors : 0} sectors, ` +
+            `${zoomed.paints - rest.paints} paint(s)); panned at fit ratio -> shown=${panned.shown}; ` +
+            `back at rest hidden=${back.hidden}, 500ms still added ${quiet2.paints - quiet}`,
+  };
+});
+
+// github#79
+check("the overview footprint is drawn to the disc's scale and is never clamped", async (p) => {
+  await camTo(p, { x: 0.5, y: 0.5, ratio: 0.35, angle: 0 });
+  const inside = await ovState(p);
+  const rings = await p.j(`__vg.rings()`);
+  // The rect's own width against the footprint's, both in the tile's units: the drawing
+  // must be the camera's rectangle at the disc's scale, not a shape fitted to the tile.
+  const wantW = inside.shape ? (inside.fp.x1 - inside.fp.x0) * inside.shape.k : 0;
+  const gotW = inside.shape ? inside.shape.rect[2] - inside.shape.rect[0] : 0;
+  const scaleErr = wantW > 0 ? Math.abs(gotW - wantW) / wantW : 1;
+  const discPx = inside.shape ? inside.shape.k * rings.maxR : 0;
+
+  // Cropped by a pan on the tight axis, and at fit's own ratio the frame is already wider
+  // than the whole tile: the rectangle has to run off both sides rather than be squeezed in.
+  await camTo(p, { x: 0.5, y: 0.9, ratio: 1.08, angle: 0 });
+  const wide = await ovState(p);
+  const overflows = !!wide.shape && wide.shape.rect[2] - wide.shape.rect[0] > wide.shape.s &&
+                    wide.shape.rect[0] < 0 && wide.shape.rect[2] > wide.shape.s;
+
+  await camTo(p, { x: 2.5, y: 0.5, ratio: 0.35, angle: 0 });
+  const away = await ovState(p);
+  const offTile = !!away.shape && away.shape.chevron !== null &&
+                  away.shape.rect[0] > away.shape.s;
+  // The arrow says where the FRAME is, not where the disc is. Panned to +x, the frame sits
+  // to the right of the disc the tile draws, so it points right: 0 canvas radians.
+  const chevOK = !!away.shape && away.shape.chevron !== null &&
+                 Math.abs(away.shape.chevron) < 0.02;
+  await camReset(p);
+  return {
+    ok: scaleErr < 0.01 && discPx > 8 && overflows && offTile && chevOK,
+    detail: `at ratio 0.35 the rect is ${gotW.toFixed(2)}px wide against ${wantW.toFixed(2)} ` +
+            `promised (${(scaleErr * 100).toFixed(3)}% off), disc drawn at ${discPx.toFixed(1)}px ` +
+            `radius in a ${inside.shape ? inside.shape.s : 0}px tile; at ratio 2.0 panned the rect ` +
+            `spans ${wide.shape ? (wide.shape.rect[0].toFixed(0) + ".." + wide.shape.rect[2].toFixed(0)) : "?"} ` +
+            `across a ${wide.shape ? wide.shape.s : 0}px tile (not clamped: ${overflows}); ` +
+            `panned right off the disc the rect starts at ` +
+            `${away.shape ? away.shape.rect[0].toFixed(0) : "?"} and the chevron reads ` +
+            `${away.shape && away.shape.chevron !== null ? (away.shape.chevron * 180 / Math.PI).toFixed(1) : "none"}deg`,
+  };
+});
+
+// github#79
+check("clicking the overview fits the disc through fit(), with panning on or off", async (p) => {
+  // fit() aims at fitRatio(), which is 1.08 scaled by how far the LIVE disc reaches -- 1.0373
+  // on the 10k vault, where the visible plan falls 4% short of the locked one. Ask the page
+  // rather than hardcoding the demo vault's answer.
+  const wantRatio = async () => {
+    const reach = await p.j(`__vg.densityReport().reach`);
+    return 1.08 * Math.max(0.12, Math.min(1.35, reach));
+  };
+  await camTo(p, { x: 0.5, y: 0.5, ratio: 0.35, angle: 0 });
+  const want1 = await wantRatio();
+  const shown = await p.j(`!document.querySelector("#vg-ov").hidden`);
+  await p.eval(`document.querySelector("#vg-ov").click(); void 0`);
+  const landed = await camSettle(p);
+  for (const dl = Date.now() + 4000; Date.now() < dl && !(await p.j(`!!__vg.camAtRest`));) await sleep(60);
+  const restOv = await ovState(p);
+
+  // NOT camSettle here. fit() lends panning back for its whole 380ms flight, and when the
+  // camera is already at the fit target nothing moves -- so camSettle returns while the
+  // loan is still outstanding and every later reading is of a page mid-fit. Wait for the
+  // postcondition itself.
+  const panRestored = async () => {
+    for (const dl = Date.now() + 4000; Date.now() < dl;) {
+      if (!(await p.j(`!!__vg.renderer.getSetting("enableCameraPanning")`))) return true;
+      await sleep(60);
+    }
+    return false;
+  };
+  await p.eval(`document.querySelector("#vg-pan").click(); void 0`);
+  const lentOnToggle = await p.j(`!!__vg.renderer.getSetting("enableCameraPanning")`);
+  const settledToggle = await panRestored();
+  await camTo(p, { x: 0.5, y: 0.5, ratio: 0.35, angle: 0 });
+  const want2 = await wantRatio();
+  await p.eval(`document.querySelector("#vg-ov").click(); void 0`);
+  const lentOnTile = await p.j(`!!__vg.renderer.getSetting("enableCameraPanning")`);
+  const settledTile = await panRestored();
+  const landed2 = await camSettle(p);
+  const panOff = await p.j(`(function(){ return { setting: !!__vg.renderer.getSetting("enableCameraPanning"),
+                                                  api: !!__vg.panEnabled }; })()`);
+  await p.eval(`document.querySelector("#vg-pan").click(); void 0`);
+  await camSettle(p);
+  await camReset(p);
+  return {
+    ok: shown === true &&
+        Math.abs(landed.x - 0.5) < 0.002 && Math.abs(landed.y - 0.5) < 0.002 &&
+        Math.abs(landed.ratio - want1) < 0.03 && restOv.hidden &&
+        Math.abs(landed2.x - 0.5) < 0.002 && Math.abs(landed2.ratio - want2) < 0.03 &&
+        lentOnToggle && settledToggle && lentOnTile && settledTile &&
+        !panOff.setting && !panOff.api,
+    detail: `from ratio 0.35 a click landed at (${landed.x}, ${landed.y}) ratio ${landed.ratio} ` +
+            `against ${want1.toFixed(4)} promised, and the tile hid itself again ` +
+            `(${restOv.hidden}); with panning off the tile landed at (${landed2.x}, ${landed2.y}) ` +
+            `ratio ${landed2.ratio} against ${want2.toFixed(4)}; fit() lent panning back mid-flight ` +
+            `from the toggle ${lentOnToggle} and from the tile ${lentOnTile}, and restored it ` +
+            `${settledToggle && settledTile ? "both times" : "NOT both times"} -- ended ` +
+            `${panOff.setting ? "ON, leaked" : "off"}, api ${panOff.api}`,
   };
 });
 

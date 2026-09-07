@@ -429,6 +429,8 @@ function mountVaultGraph(root, data, deps) {
     THEME.byKey = dict();
     THEME.slots.forEach(function (hex, i) { THEME.byKey["g" + (i + 1)] = hex; });
     clearPreviewCache();
+    // github#79
+    ovSig = "";
     if (renderer) renderer.setSetting("labelColor", THEME.text);
     // github#84, design/0004
     if (renderer) { buildColors(); attempt(buildLegend); }
@@ -2686,6 +2688,8 @@ function mountVaultGraph(root, data, deps) {
     hubRow0 = hubRow0Next;
     dotFit = fit;
     if (dbgCells) DBG.cells = dbgCells;
+    // github#79
+    ovCells = shown;
     hubPlace(out, plan.r0, scale);
     return out;
   }
@@ -5549,6 +5553,8 @@ function mountVaultGraph(root, data, deps) {
       if (DBG.on) drawWedgeDebug();
       placeLogo(); refreshSizeScale(); heatDraw(); hlSync();
       placeHubDrop();
+      // github#79
+      ovSync();
     });
 
     renderer.on("enterNode", function (e) {
@@ -6714,6 +6720,8 @@ function mountVaultGraph(root, data, deps) {
     if ($("zin")) $("zin").onclick = function () { zoomBy(1); };
     if ($("zout")) $("zout").onclick = function () { zoomBy(-1); };
     if ($("pan")) $("pan").onclick = function () { setPan(!panEnabled, true); };
+    // github#79
+    if ($("ov")) $("ov").onclick = fit;
     setPan(panEnabled, false);
     // github#23
     if ($("compact")) $("compact").onclick = function () { setCompactAxis(!compactAxis, true); };
@@ -7163,6 +7171,216 @@ function mountVaultGraph(root, data, deps) {
     if (typeof lo === "number" && r < lo) r = lo;
     if (typeof hi === "number" && r > hi) r = hi;
     cam.animate({ ratio: r }, { duration: renderer.getSetting("zoomDuration") || 120 });
+  }
+
+  /* --------------------------------------------------------------- overview */
+
+  // github#79
+  var OV_DISC_FRAC = 0.62;
+  var OV_CHEV_PX = 6;
+  var OV_SECTOR_A = 0.55;
+  /**
+   * @typedef {Object} OvSector
+   * @property {string} g
+   * @property {string} band     "i" or "o"
+   * @property {number} a0       leading edge, sweep radians
+   * @property {number} a1       trailing edge
+   * @property {string} c        the group's colour
+   */
+  /**
+   * @typedef {Object} OvShape
+   * @property {number} s        tile side, css px
+   * @property {number} k        graph units -> tile px
+   * @property {BandNum} rings   outer edge of each band
+   * @property {number[]} inner  inner edge of each band, [i, o]
+   * @property {OvSector[]} sectors
+   * @property {number[]} rect   the viewport footprint: x0, y0, x1, y1
+   * @property {number | null} chevron   canvas radians, set only when the rect misses the tile
+   */
+  /** @typedef {{ x0: number, x1: number, y0: number, y1: number }} OvExtent */
+  /** @type {Cell[] | null} */
+  var ovCells = null;
+  var ovSig = "";
+  var ovPaints = 0;
+  var ovShown = false;
+  /** @type {OvShape | null} */
+  var ovLast = null;
+
+  function ovSize() {
+    var v = parseFloat(css("--ov-size"));
+    return v > 0 ? v : 96;
+  }
+
+  // github#79, design/0014 -- after a frame, never off the camera event
+  /** @returns {OvExtent | null} */
+  function ovFootprint() {
+    if (!renderer) return null;
+    var d = renderer.getDimensions();
+    if (!(d.width > 0) || !(d.height > 0)) return null;
+    var a = renderer.viewportToGraph({ x: 0, y: 0 });
+    var b = renderer.viewportToGraph({ x: d.width, y: d.height });
+    if (!isFinite(a.x) || !isFinite(a.y) || !isFinite(b.x) || !isFinite(b.y)) return null;
+    return { x0: Math.min(a.x, b.x), x1: Math.max(a.x, b.x),
+             y0: Math.min(a.y, b.y), y1: Math.max(a.y, b.y) };
+  }
+
+  // github#79, design/0014 -- the LIVE radius, because fit() frames the live disc
+  /** @param {OvExtent} fp */
+  function ovCropped(fp) {
+    var r = (lastMaxR || 0) * UNIT;
+    if (!(r > 0)) return false;
+    return !(fp.x0 <= -r && fp.x1 >= r && fp.y0 <= -r && fp.y1 >= r);
+  }
+
+  /** @returns {OvSector[]} */
+  function ovSectors() {
+    /** @type {Record<string, OvSector>} */
+    var byKey = dict();
+    /** @type {OvSector[]} */
+    var out = [];
+    var list = ovCells || [];
+    for (var i = 0; i < list.length; i++) {
+      var c = list[i];
+      if (c.pLead === undefined || c.pTrail === undefined) continue;
+      if (!(c.pTrail > c.pLead)) continue;
+      var key = c.bandKey + " " + c.g;
+      var s = byKey[key];
+      if (!s) {
+        s = { g: c.g, band: c.bandKey, a0: c.pLead, a1: c.pTrail, c: colorOf(c.g) };
+        byKey[key] = s;
+        out.push(s);
+      } else {
+        if (c.pLead < s.a0) s.a0 = c.pLead;
+        if (c.pTrail > s.a1) s.a1 = c.pTrail;
+      }
+    }
+    return out;
+  }
+
+  /** @param {OvExtent} fp @returns {OvShape | null} */
+  function ovShape(fp) {
+    if (!geomLock) return null;
+    var outer = geomLock.maxR * UNIT;
+    if (!(outer > 0)) return null;
+    var s = ovSize(), half = s / 2;
+    var k = OV_DISC_FRAC * half / outer;
+    var bR = geomLock.bandR;
+    var iLo = geomLock.r0 * INNER_SCALE * UNIT;
+    var iHi = bR && bR.i > iLo ? bR.i : iLo;
+    var oLo = geomLock.rOuter * UNIT;
+    var oHi = bR && bR.o > oLo ? bR.o : outer;
+    var rect = [half + k * fp.x0, half - k * fp.y1, half + k * fp.x1, half - k * fp.y0];
+    var misses = rect[2] < 0 || rect[0] > s || rect[3] < 0 || rect[1] > s;
+    return { s: s, k: k, rings: { i: iHi * k, o: oHi * k }, inner: [iLo * k, oLo * k],
+             sectors: ovSectors(), rect: rect,
+             chevron: misses ? Math.atan2(-(fp.y0 + fp.y1) / 2, (fp.x0 + fp.x1) / 2) : null };
+  }
+
+  // github#79, design/0014, design/0010 -- the drawing's inputs, at what moves a pixel
+  /** @param {OvShape} sh */
+  function ovSigOf(sh) {
+    /** @type {(string | number)[]} */
+    var p = [Math.round(sh.s), Math.round((WIN.devicePixelRatio || 1) * 100),
+             Math.round(sh.rings.i * 2), Math.round(sh.rings.o * 2),
+             Math.round(sh.inner[0] * 2), Math.round(sh.inner[1] * 2),
+             sh.chevron === null ? "-" : Math.round(sh.chevron * 180 / Math.PI)];
+    for (var i = 0; i < 4; i++) p.push(Math.round(sh.rect[i] * 4));
+    for (var j = 0; j < sh.sectors.length; j++) {
+      var sc = sh.sectors[j];
+      p.push(sc.g, sc.band, sc.c, Math.round(sc.a0 * 180 / Math.PI),
+             Math.round(sc.a1 * 180 / Math.PI));
+    }
+    p.push(THEME.text, THEME.dim);
+    return p.join(",");
+  }
+
+  /** @param {OvShape} sh */
+  function ovPaint(sh) {
+    var host = $("ov");
+    if (!host) return;
+    var cv = /** @type {HTMLCanvasElement | null} */ (host.querySelector("canvas"));
+    if (!cv || !cv.getContext) return;
+    var s = sh.s, half = s / 2, dpr = WIN.devicePixelRatio || 1;
+    var w = Math.round(s * dpr);
+    if (cv.width !== w || cv.height !== w) { cv.width = w; cv.height = w; }
+    var g2 = /** @type {CanvasRenderingContext2D} */ (cv.getContext("2d"));
+    g2.setTransform(dpr, 0, 0, dpr, 0, 0);
+    g2.clearRect(0, 0, s, s);
+
+    g2.strokeStyle = THEME.dim;
+    g2.lineWidth = 1;
+    [sh.rings.i, sh.rings.o].forEach(function (r) {
+      if (!(r > 0.5)) return;
+      g2.beginPath();
+      g2.arc(half, half, r, 0, 2 * Math.PI);
+      g2.stroke();
+    });
+
+    g2.globalAlpha = OV_SECTOR_A;
+    sh.sectors.forEach(function (sc) {
+      var lo = sc.band === "i" ? sh.inner[0] : sh.inner[1];
+      var hi = sc.band === "i" ? sh.rings.i : sh.rings.o;
+      if (!(hi > lo)) return;
+      var a0 = sc.a0 - Math.PI / 2, a1 = sc.a1 - Math.PI / 2;
+      g2.fillStyle = sc.c;
+      g2.beginPath();
+      g2.arc(half, half, hi, a0, a1, false);
+      g2.arc(half, half, lo, a1, a0, true);
+      g2.closePath();
+      g2.fill();
+    });
+    g2.globalAlpha = 1;
+
+    if (sh.chevron === null) {
+      g2.fillStyle = THEME.text;
+      g2.globalAlpha = 0.1;
+      g2.fillRect(sh.rect[0], sh.rect[1], sh.rect[2] - sh.rect[0], sh.rect[3] - sh.rect[1]);
+      g2.globalAlpha = 0.85;
+      g2.strokeStyle = THEME.text;
+      g2.strokeRect(sh.rect[0] + 0.5, sh.rect[1] + 0.5,
+                    Math.max(1, sh.rect[2] - sh.rect[0] - 1),
+                    Math.max(1, sh.rect[3] - sh.rect[1] - 1));
+    } else {
+      var rr = half - OV_CHEV_PX - 1;
+      g2.save();
+      g2.translate(half + rr * Math.cos(sh.chevron), half + rr * Math.sin(sh.chevron));
+      g2.rotate(sh.chevron);
+      g2.fillStyle = THEME.text;
+      g2.globalAlpha = 0.85;
+      g2.beginPath();
+      g2.moveTo(OV_CHEV_PX, 0);
+      g2.lineTo(-OV_CHEV_PX * 0.6, OV_CHEV_PX * 0.7);
+      g2.lineTo(-OV_CHEV_PX * 0.6, -OV_CHEV_PX * 0.7);
+      g2.closePath();
+      g2.fill();
+      g2.restore();
+    }
+    g2.globalAlpha = 1;
+    ovPaints++;
+    ovLast = sh;
+  }
+
+  /** @param {boolean} on */
+  function ovShow(on) {
+    if (ovShown === on) return;
+    ovShown = on;
+    var host = $("ov");
+    if (host) host.hidden = !on;
+    ROOT.setAttribute("data-ov", on ? "on" : "off");
+    if (!on) { ovSig = ""; ovLast = null; }
+  }
+
+  function ovSync() {
+    if (dead || !$("ov")) return;
+    var fp = geomLock ? ovFootprint() : null;
+    if (!fp || !ovCropped(fp)) { ovShow(false); return; }
+    ovShow(true);
+    var sh = ovShape(fp);
+    if (!sh) return;
+    var sig = ovSigOf(sh);
+    if (sig === ovSig) return;
+    ovSig = sig;
+    ovPaint(sh);
   }
 
   /* github#73, design/0013 */
@@ -10324,6 +10542,16 @@ function mountVaultGraph(root, data, deps) {
                         rOuter: geomLock.rOuter * UNIT,
                         maxR: geomLock.maxR * UNIT
                       };
+                    },
+                    // github#79
+                    overview: function () {
+                      var fp = ovFootprint();
+                      return { shown: ovShown, paints: ovPaints, sig: ovSig,
+                               hidden: !!($("ov") && $("ov").hidden),
+                               cropped: fp ? ovCropped(fp) : null,
+                               footprint: fp,
+                               liveR: (lastMaxR || 0) * UNIT,
+                               shape: ovLast };
                     },
                     // github#41, design/0011
                     traceOn: /** @param {string | number} id */ function (id) {
