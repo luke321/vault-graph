@@ -20,6 +20,8 @@ interface EventMap extends RendererEvents {
 
 // github#58
 const PICK_FLOOR_PX = 1.5;
+// github#73
+const TOUCH_PICK_FLOOR_PX = 14;
 type WebGLLayer = "edges" | "nodes" | "hoverNodes";
 type CanvasLayer = "labels" | "hovers" | "mouse";
 
@@ -576,11 +578,12 @@ export class Renderer extends Emitter<EventMap> implements RendererApi {
 
   /* -------------------------------------------------------------- picking */
 
-  private getNodeAtPosition(p: Point): string | null {
+  // github#73, design/0013
+  private getNodeAtPosition(p: Point, floorPx = PICK_FLOOR_PX): string | null {
     let lastCircle: string | null = null;
     let lastHalo: string | null = null;
     let nearest: string | null = null;
-    let nearestD2 = PICK_FLOOR_PX * PICK_FLOOR_PX;
+    let nearestD2 = floorPx * floorPx;
     const inv = 1 / this.camera.ratio;
     for (const id of this.nodeOrder) {
       const data = this.nodeData.get(id);
@@ -633,7 +636,8 @@ export class Renderer extends Emitter<EventMap> implements RendererApi {
 
     const interaction = (kind: "click" | "doubleClick" | "rightClick" | "down" | "up") => (e: Coords): void => {
       const ev = base(e);
-      const at = this.getNodeAtPosition(e);
+      // github#73
+      const at = this.getNodeAtPosition(e, e.fat ? TOUCH_PICK_FLOOR_PX : PICK_FLOOR_PX);
       if (at !== null) {
         const payload: NodeEvent = { ...ev, node: at };
         if (kind === "click") this.emit("clickNode", payload);

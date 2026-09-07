@@ -59,7 +59,7 @@ the same picture** -- and inject them where the bundles are injected today.
   radii exact, `edgeInk` within ± 1 %. The context cap stays a fact, and the plugin's `kill()`
   stays with it.
 - **Dropped, not reimplemented**: the label grid and its three settings; node images; rotation;
-  edge events and labels; touch input; double-click zoom; the quadtree (picking is a linear scan
+  edge events and labels; double-click zoom; the quadtree (picking is a linear scan
   over visible nodes); program registries (`type` stays a field, "halo" and "curve"/"line" are
   fixed draw paths); and **the graph subscription**. The store has no event emitter. The one
   write that leaned on Sigma's reaction -- the node-drag frame -- gets an explicit `refresh()`,
@@ -68,6 +68,15 @@ the same picture** -- and inject them where the bundles are injected today.
   graph and validated it with graphology-utils' `isGraph`: no-op `on`/`removeListener`, `multi`,
   and the two members `isGraph` probes. It outlived the switch by one commit -- the adversarial
   review pass caught it -- and is gone.)
+- **Touch input was dropped here and came back on 2026-09-07** (github#73, design/0013). The
+  decision was right for a desktop page and wrong against a shipped promise: the plugin is not
+  desktop-only and the README calls the exported file how the graph reaches a phone, while a
+  finger could neither pan, pinch nor tap. What returned is the engine's own, not a port --
+  Sigma's `touch.ts` was not obtainable at the 3.0.2 tag -- and it shares `panFrom()` and
+  `glide()` with the mouse path, measured at a pan ratio of 1.000 between the two inputs.
+  Picking gained a per-call floor with it, since 1.5 px is a floored *pointer's* error and a
+  fingertip is not that. Everything else on the dropped list stands.
+
 - **The exporter gains a compile step.** `src/build-graph.mjs` bundles `src/engine/index.ts`
   with esbuild into one IIFE `<script>`, inlined where the two vendor scripts sit. That ends the
   exporter's node-builtins-only stance (`package.json`'s description, the header of
