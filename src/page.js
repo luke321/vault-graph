@@ -203,6 +203,11 @@ function mountVaultGraph(root, data, deps) {
     try { fn(); return null; } catch (e) { return e; }
   }
 
+  /** @param {Record<string, unknown>} o */
+  function hasKeys(o) {
+    for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) return true;
+    return false;
+  }
   function dict() {
     /** @type {unknown} */
     var o = Object.create(null);
@@ -1286,14 +1291,52 @@ function mountVaultGraph(root, data, deps) {
     /** @type {Record<string, number>} */
     var liveSub = dict();
     // github#19
+    var skel = planSkel && !moveFrom ? planSkel : null;
+    var useSkel = !!skel && skel.filled && skel.keep === planKeep && skel.dim === state.dim &&
+                  skel.order === all && skel.pinned === state.pinned.join(SEP) &&
+                  skel.onlyVisible === !!onlyVisible;
     /** @type {string[]} */
     var members = [];
-    graph.forEachNode(function (id) {
+    /** @type {string[]} */
+    var memberG = [];
+    /** @type {string[]} */
+    var leaving = [];
+    var dropped = false;
+    if (useSkel && skel) {
+      /** @type {Record<string, boolean>} */
+      var gone = dict();
+      for (var li = 0, ln = skel.leaving.length; li < ln; li++) {
+        var lid = skel.leaving[li];
+        if ((planKeep || willShow)(lid)) leaving.push(lid);
+        else { gone[lid] = true; dropped = true; }
+      }
+      if (!dropped) {
+        members = skel.members; memberG = skel.memberG; liveN = skel.liveN; liveSub = skel.liveSub;
+      } else {
+        liveN = Object.assign(dict(), skel.liveN);
+        liveSub = Object.assign(dict(), skel.liveSub);
+        for (var ci = 0, cn = skel.members.length; ci < cn; ci++) {
+          var cid = skel.members[ci], cg = skel.memberG[ci];
+          if (gone[cid]) {
+            liveN[cg] -= 1;
+            liveSub[cg + "/" + (graph.getNodeAttributes(cid).sub || "")] -= 1;
+            continue;
+          }
+          members.push(cid); memberG.push(cg);
+        }
+      }
+      for (var mi = 0, mn = members.length; mi < mn; mi++) {
+        var gm = memberG[mi], wm = W(members[mi]);
+        liveG[gm] = (liveG[gm] || 0) + (wm > 1 ? 1 : wm < 0 ? 0 : wm);
+      }
+    } else graph.forEachNode(function (id) {
       if (onlyVisible && !(planKeep || willShow)(id)) return;
       // github#18
       if (isPinned(id)) return;
       members.push(id);
       var g0 = groupOf(id);
+      memberG.push(g0);
+      if (skel && onlyVisible && !willShow(id)) leaving.push(id);
       var wv = W(id);
       liveG[g0] = (liveG[g0] || 0) + (wv > 1 ? 1 : wv < 0 ? 0 : wv);
       liveN[g0] = (liveN[g0] || 0) + 1;
@@ -1318,8 +1361,10 @@ function mountVaultGraph(root, data, deps) {
     };
     /** @type {BandNum} */
     var bandDepth = { i: 0, o: 0 };
+    var depthNow = { i: depthOfBand(true), o: depthOfBand(false) };
+    var useCells = useSkel && !dropped && !!skel && skel.depthI === depthNow.i && skel.depthO === depthNow.o;
     /** @type {Record<string, boolean>} */
-    var splitOf = dict();
+    var splitOf = useCells && skel ? skel.splitOf : dict();
     /** @param {string} g */
     var splitFor = function (g) {
       if (splitHold && splitHold[g] !== undefined) return splitHold[g];
@@ -1334,40 +1379,46 @@ function mountVaultGraph(root, data, deps) {
       return splitOf[g];
     };
 
-    members.forEach(function (id) {
-      var g = groupOf(id), a = graph.getNodeAttributes(id);
-      var split = splitFor(g);
-      var bk = bandLock && bandLock[g] ? "i" : "o";
-      var key = split
-        ? g + SEP + subCellIndex(g, a.sub, liveSub[g + "/" + (a.sub || "")] || 0, bandDepth[bk])
-        : g;
-      if (!byCell[key]) {
-        byCell[key] = [];
-        (cellsOf[g] || (cellsOf[g] = [])).push(key);
+    if (useCells && skel) { byCell = skel.byCell; cellsOf = skel.cellsOf; }
+    for (var mIdx = 0, mEnd = members.length; mIdx < mEnd; mIdx++) {
+      var mId = members[mIdx], mG = memberG[mIdx];
+      if (!useCells) {
+        var mA = graph.getNodeAttributes(mId);
+        var mBk = bandLock && bandLock[mG] ? "i" : "o";
+        var mKey = splitFor(mG)
+          ? mG + SEP + subCellIndex(mG, mA.sub, liveSub[mG + "/" + (mA.sub || "")] || 0, bandDepth[mBk])
+          : mG;
+        if (!byCell[mKey]) {
+          byCell[mKey] = [];
+          (cellsOf[mG] || (cellsOf[mG] = [])).push(mKey);
+        }
+        byCell[mKey].push(mId);
       }
-      byCell[key].push(id);
-      planTotal += W(id);
-      var pw = W(id);
-      if (colWalk && colWalk[g] !== undefined) pw = colWalk[g].f;
-      if (!(presMax[g] >= pw)) presMax[g] = pw;
-    });
+      var pw = W(mId);
+      planTotal += pw;
+      if (colWalk && colWalk[mG] !== undefined) pw = colWalk[mG].f;
+      if (!(presMax[mG] >= pw)) presMax[mG] = pw;
+    }
 
-    ringsMerged = dict();
     /** @type {string[]} */
-    var big = [];
+    var big = useCells && skel ? skel.big : [];
     /** @type {string[]} */
-    var smallIds = [];
-    all.filter(function (g) { return cellsOf[g]; }).forEach(function (g) {
-      if ((counts[g] || 0) >= SMALL_GROUP) { big.push(g); return; }
-      ringsMerged[g] = true;
-      cellsOf[g].forEach(function (k) { smallIds = smallIds.concat(byCell[k]); });
-    });
+    var smallIds = useCells && skel ? skel.smallIds : [];
+    if (useCells && skel) ringsMerged = skel.merged;
+    else {
+      ringsMerged = dict();
+      all.filter(function (g) { return cellsOf[g]; }).forEach(function (g) {
+        if ((counts[g] || 0) >= SMALL_GROUP) { big.push(g); return; }
+        ringsMerged[g] = true;
+        cellsOf[g].forEach(function (k) { smallIds = smallIds.concat(byCell[k]); });
+      });
+    }
 
     /** @type {Cell[]} */
     var cells = [];
     big.forEach(function (g) {
       var ks = cellsOf[g];
-      if (nested) {
+      if (nested && !useCells) {
         ks.sort(function (x, y) {
           return (+(x.split(SEP)[1] || 0)) - (+(y.split(SEP)[1] || 0));
         });
@@ -1378,10 +1429,24 @@ function mountVaultGraph(root, data, deps) {
     if (!cells.length) return null;
 
     cells.forEach(function (c) {
-      c.list.sort(function (a, b) { return hubRank[a] - hubRank[b]; });
+      if (!useCells) c.list.sort(function (a, b) { return hubRank[a] - hubRank[b]; });
       c.wsum = 0;
       c.list.forEach(function (id) { c.wsum += W(id); });
     });
+    if (skel) {
+      if (!useSkel || dropped) {
+        skel.members = members; skel.memberG = memberG; skel.leaving = leaving;
+        skel.liveN = liveN; skel.liveSub = liveSub;
+        skel.keep = planKeep; skel.dim = state.dim; skel.order = all;
+        skel.pinned = state.pinned.join(SEP); skel.onlyVisible = !!onlyVisible;
+      }
+      if (!useCells) {
+        skel.depthI = depthNow.i; skel.depthO = depthNow.o; skel.splitOf = splitOf;
+        skel.byCell = byCell; skel.cellsOf = cellsOf; skel.big = big; skel.smallIds = smallIds;
+        skel.merged = ringsMerged;
+      }
+      skel.filled = true;
+    }
 
     var TOTAL = planTotal;
     var MIN = MIN_SPAN, TWO = 2 * Math.PI;
@@ -1850,6 +1915,8 @@ function mountVaultGraph(root, data, deps) {
     /** @type {DbgCell[] | null} */
     var dbgCells = DBG.on ? [] : null;
     if (probe) { lastStart = dict(); lastArc = dict(); lastBand = dict(); }
+    // github#19
+    var pushOn = hasKeys(state.highlight) || hasKeys(state.highlightSub);
     [true, false].forEach(function (isInner) {
       var band = shown.filter(function (c) { return !!c.inner === isInner; });
       if (!band.length) return;
@@ -2030,7 +2097,7 @@ function mountVaultGraph(root, data, deps) {
           }
           lastAt[sl.r] = { t: t, id: sl.id };
           if (firstAt[sl.r] === undefined) firstAt[sl.r] = { t: t, id: sl.id };
-          var rr = sl.r + (isPushed(sl.id) ? HL_PUSH : 0);
+          var rr = sl.r + (pushOn && isPushed(sl.id) ? HL_PUSH : 0);
           pos[sl.id] = { x: rr * Math.cos(t), y: rr * Math.sin(t) };
         });
         fracBefore += frac * open;
@@ -2950,7 +3017,65 @@ function mountVaultGraph(root, data, deps) {
   var fullRing = false;
   /** @type {((id: string) => boolean) | null} */
   var planKeep = null;
-  /** @type {{ raf: number, tick: number, guard: number, sizeCap: Record<string, number> | null } | null} */
+  // github#19
+  /**
+   * @typedef {Object} PlanSkel
+   * @property {boolean} filled
+   * @property {((id: string) => boolean) | null} keep
+   * @property {string} dim
+   * @property {string[]} order
+   * @property {string} pinned   the pinned ids joined, so a swap that keeps the count still misses
+   * @property {boolean} onlyVisible
+   * @property {number} depthI
+   * @property {number} depthO
+   * @property {string[]} members
+   * @property {string[]} memberG
+   * @property {string[]} leaving   members kept only while present: they drop out as they fade
+   * @property {Record<string, number>} liveN
+   * @property {Record<string, number>} liveSub
+   * @property {Record<string, boolean>} splitOf
+   * @property {Record<string, string[]>} byCell
+   * @property {Record<string, string[]>} cellsOf
+   * @property {string[]} big
+   * @property {string[]} smallIds
+   * @property {Record<string, boolean>} merged
+   */
+  /** @type {PlanSkel | null} */
+  var planSkel = null;
+  var planSkelCheck = false;
+  /** @returns {PlanSkel} */
+  function freshSkel() {
+    return { filled: false, keep: null, dim: "", order: [], pinned: "", onlyVisible: false,
+             depthI: 0, depthO: 0, members: [], memberG: [], leaving: [], liveN: dict(), liveSub: dict(),
+             splitOf: dict(), byCell: dict(), cellsOf: dict(), big: [], smallIds: [], merged: dict() };
+  }
+  /** @param {Plan | null} a @param {Plan | null} b @returns {string} empty when the plans agree */
+  function planDiff(a, b) {
+    if (!a || !b) return a === b ? "" : "one plan is null";
+    if (a.cells.length !== b.cells.length) return "cells " + a.cells.length + " vs " + b.cells.length;
+    if (a.total !== b.total) return "total " + a.total + " vs " + b.total;
+    if (a.sp !== b.sp || a.spInner !== b.spInner) return "sp";
+    if (a.r0 !== b.r0 || a.rOuter !== b.rOuter || a.maxR !== b.maxR) return "radii";
+    if (a.density !== b.density) return "density";
+    if (a.rows.i !== b.rows.i || a.rows.o !== b.rows.o) return "rows";
+    for (var c = 0; c < a.cells.length; c++) {
+      var x = a.cells[c], y = b.cells[c];
+      if (x.k !== y.k || x.g !== y.g || !!x.inner !== !!y.inner) return "cell " + c + " identity";
+      if (x.wsum !== y.wsum || x.rows !== y.rows || x.band !== y.band) return "cell " + x.k + " wsum/rows/band";
+      if (x.list.length !== y.list.length) return "cell " + x.k + " list length";
+      for (var j = 0; j < x.list.length; j++) if (x.list[j] !== y.list[j]) return "cell " + x.k + " order at " + j;
+      if (x.slots.length !== y.slots.length) return "cell " + x.k + " slots";
+      for (var s = 0; s < x.slots.length; s++) {
+        var p = x.slots[s], q = y.slots[s];
+        if (p.id !== q.id || p.r !== q.r || p.u !== q.u || p.row !== q.row) return "cell " + x.k + " slot " + s;
+      }
+    }
+    var pa = Object.keys(a.presMax), pb = Object.keys(b.presMax);
+    if (pa.length !== pb.length) return "presMax keys";
+    for (var m = 0; m < pa.length; m++) if (a.presMax[pa[m]] !== b.presMax[pa[m]]) return "presMax " + pa[m];
+    return "";
+  }
+  /** @type {{ raf: number, tick: number, guard: number, sizeCap: Record<string, number> | null, skel: PlanSkel | null } | null} */
   var cascadeRun = null;
   /** @type {Plan | null} */
   var pinnedPlan = null;
@@ -2978,42 +3103,66 @@ function mountVaultGraph(root, data, deps) {
   /** @type {Record<string, number> | null} */
   var fitNow = null;
 
+  var FIT_GRID_MAX = 1 << 20;
   function measureFit() {
     fitVer = posVer;
     if (!fitCap) { fitNow = null; return; }
-    /** @type {{ id: string, x: number, y: number, gx: number, gy: number }[]} */
-    var pts = [];
+    /** @type {string[]} */
+    var ids = [];
+    /** @type {number[]} */
+    var xs = [];
+    /** @type {number[]} */
+    var ys = [];
     graph.forEachNode(function (id, a) {
       var al = alpha[id];
       if (al === undefined) al = 1;
       if (al < 0.35) return;
-      pts.push({ id: id, x: a.x, y: a.y, gx: 0, gy: 0 });
+      if (!(isFinite(a.x) && isFinite(a.y))) return;
+      ids.push(id); xs.push(a.x); ys.push(a.y);
     });
     /** @type {Record<string, number>} */
     var map = dict();
-    if (pts.length < 2) { fitNow = map; return; }
+    var n = ids.length;
+    if (n < 2) { fitNow = map; return; }
     var cell = Math.max(1, pitchUnits("o"));
-    /** @type {Record<string, typeof pts>} */
-    var grid = dict();
-    for (var i = 0; i < pts.length; i++) {
-      var p = pts[i];
-      p.gx = Math.floor(p.x / cell); p.gy = Math.floor(p.y / cell);
-      var k = p.gx + ":" + p.gy;
-      (grid[k] || (grid[k] = [])).push(p);
+    // github#19
+    var gxs = new Int32Array(n), gys = new Int32Array(n);
+    var gx0 = Infinity, gy0 = Infinity, gx1 = -Infinity, gy1 = -Infinity;
+    for (var i = 0; i < n; i++) {
+      var gx = Math.floor(xs[i] / cell), gy = Math.floor(ys[i] / cell);
+      gxs[i] = gx; gys[i] = gy;
+      if (gx < gx0) gx0 = gx; if (gx > gx1) gx1 = gx;
+      if (gy < gy0) gy0 = gy; if (gy > gy1) gy1 = gy;
     }
-    for (var q = 0; q < pts.length; q++) {
-      var a2 = pts[q], nn = Infinity;
-      for (var dx = -1; dx <= 1; dx++) for (var dy = -1; dy <= 1; dy++) {
-        var bucket = grid[(a2.gx + dx) + ":" + (a2.gy + dy)];
-        if (!bucket) continue;
-        for (var bi = 0; bi < bucket.length; bi++) {
-          var b2 = bucket[bi];
-          if (b2 === a2) continue;
-          var d2 = (b2.x - a2.x) * (b2.x - a2.x) + (b2.y - a2.y) * (b2.y - a2.y);
-          if (d2 < nn) nn = d2;
+    var nx = gx1 - gx0 + 1, ny = gy1 - gy0 + 1;
+    var dense = nx * ny <= FIT_GRID_MAX;
+    var head = dense ? new Int32Array(nx * ny).fill(-1) : null;
+    /** @type {Map<number, number> | null} */
+    var headMap = dense ? null : new Map();
+    var next = new Int32Array(n);
+    for (var j = 0; j < n; j++) {
+      var c = (gxs[j] - gx0) * ny + (gys[j] - gy0);
+      if (head) { next[j] = head[c]; head[c] = j; }
+      else if (headMap) { var prev = headMap.get(c); next[j] = prev === undefined ? -1 : prev; headMap.set(c, j); }
+    }
+    for (var q = 0; q < n; q++) {
+      var qx = xs[q], qy = ys[q], cx0 = gxs[q] - gx0, cy0 = gys[q] - gy0, nn = Infinity;
+      for (var dx = -1; dx <= 1; dx++) {
+        var cx = cx0 + dx;
+        if (cx < 0 || cx >= nx) continue;
+        for (var dy = -1; dy <= 1; dy++) {
+          var cy = cy0 + dy;
+          if (cy < 0 || cy >= ny) continue;
+          var ck = cx * ny + cy;
+          var b = head ? head[ck] : (headMap && headMap.has(ck) ? /** @type {number} */ (headMap.get(ck)) : -1);
+          for (; b >= 0; b = next[b]) {
+            if (b === q) continue;
+            var d2 = (xs[b] - qx) * (xs[b] - qx) + (ys[b] - qy) * (ys[b] - qy);
+            if (d2 < nn) nn = d2;
+          }
         }
       }
-      if (nn < Infinity) map[a2.id] = Math.sqrt(nn);
+      if (nn < Infinity) map[ids[q]] = Math.sqrt(nn);
     }
     fitNow = map;
   }
@@ -3054,7 +3203,8 @@ function mountVaultGraph(root, data, deps) {
   }
   /** @type {Record<string, boolean>} */
   var hubRow0 = dict();
-  var lastCascade = { ins: 0, outs: 0, span: 0, path: "none", frames: 0, ms: 0 };
+  var lastCascade = { ins: 0, outs: 0, span: 0, path: "none", frames: 0, ms: 0,
+                      skelFrames: 0, skelMismatch: 0, skelFirst: "" };
 
   function pinPlan() {
     var t0 = (window.performance || Date).now();
@@ -3164,7 +3314,8 @@ function mountVaultGraph(root, data, deps) {
     }
 
     if (!ins.length && !outs.length && !moves.length) {
-      lastCascade = { ins: 0, outs: 0, span: 0, path: "instant: nothing to move", frames: 0, ms: 0 };
+      lastCascade = { ins: 0, outs: 0, span: 0, path: "instant: nothing to move", frames: 0, ms: 0,
+                      skelFrames: 0, skelMismatch: 0, skelFirst: "" };
       pinnedPlan = null; roomNow = null; cellNow = null; edgeNow = null; posSrc = null; applyLayout(true); return;
     }
 
@@ -3298,7 +3449,8 @@ function mountVaultGraph(root, data, deps) {
 
     var moving = ins.concat(outs).concat(moves);
     lastCascade = { ins: ins.length, outs: outs.length, span: Math.round(span * 100) / 100,
-                    path: "animated", frames: 0, ms: 0, t0: NOW() };
+                    path: "animated", frames: 0, ms: 0, t0: NOW(),
+                    skelFrames: 0, skelMismatch: 0, skelFirst: "" };
 
     var settle = function () {
       if (!lastCascade.exit) lastCascade.exit = "settle() called from outside the loop";
@@ -3558,7 +3710,8 @@ function mountVaultGraph(root, data, deps) {
         }
       });
     })();
-    cascadeRun = { raf: 0, tick: NOW(), guard: WIN.setTimeout(watchdog, STALL_MS), sizeCap: sizeCap };
+    cascadeRun = { raf: 0, tick: NOW(), guard: WIN.setTimeout(watchdog, STALL_MS), sizeCap: sizeCap,
+                   skel: moveFrom ? null : freshSkel() };
     (function step() {
       var tn = NOW();
       var adv = (tn - tPrev) / msPerFrame;
@@ -3661,7 +3814,17 @@ function mountVaultGraph(root, data, deps) {
       };
       if (cellPair) cellNow = walkPair(cellPair);
       if (edgePair) edgeNow = walkPair(edgePair);
-      var plan = buildWedgePlan(ovAfter, weightOf, rowsAt, spNow);
+      // github#19
+      /** @type {Plan | null} */
+      var plan = null;
+      planSkel = cascadeRun ? cascadeRun.skel : null;
+      try { plan = buildWedgePlan(ovAfter, weightOf, rowsAt, spNow); }
+      finally { planSkel = null; }
+      if (planSkelCheck && cascadeRun && cascadeRun.skel) {
+        var why = planDiff(plan, buildWedgePlan(ovAfter, weightOf, rowsAt, spNow));
+        lastCascade.skelFrames++;
+        if (why) { lastCascade.skelMismatch++; if (!lastCascade.skelFirst) lastCascade.skelFirst = why; }
+      }
       traceTag("frame");
       var targets = plan ? ringsLayout(plan, true) : null;
       traceTag("");
@@ -4399,7 +4562,8 @@ function mountVaultGraph(root, data, deps) {
       pitch: pitchUnits(bk),
       edgeCap: edgeCap[id], hubRow0: !!hubRow0[id],
       walking: { room: !!roomNow, cell: !!cellNow, edge: !!edgeNow },
-      out: dotPx(size, id)
+      out: dotPx(size, id),
+      fit: fitNow ? fitNow[id] : undefined
     };
   }
 
@@ -8346,6 +8510,8 @@ function mountVaultGraph(root, data, deps) {
                     pinned: function () { return state.pinned.slice(); },
                     clearPins: function () { state.pinned = []; hubChanged(false); },
                     lastCascade: function () { return lastCascade; },
+                    get planSkelCheck() { return planSkelCheck; },
+                    set planSkelCheck(v) { planSkelCheck = !!v; },
                     ribbonXOf: /** @param {number} ms */ function (ms) { return ribbonX(ms, ribbonW()); },
                     brushNow: function () {
                       if (!dateSpan) return null;
