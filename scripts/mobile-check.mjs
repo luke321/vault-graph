@@ -325,6 +325,56 @@ async function main() {
                            await p.eval("__vg.state.hovered || null"), await seen()]);
   }
 
+  // github#73, design/0013 -- gestures a motionless tap cannot cover
+  const touchAt = async (type, points) => {
+    await p.send("Input.dispatchTouchEvent", {
+      type, touchPoints: points.map((q, i) => ({ x: q.x, y: q.y, id: i + 1 })),
+    }).catch(() => {});
+  };
+
+  let wobble = "n/a", swipe = "n/a", twoFinger = "n/a";
+  if (tap) {
+    await clear();
+    const c0 = await cam();
+    await touchAt("touchStart", [{ x: tap.x, y: tap.y }]);
+    await sleep(60);
+    await touchAt("touchMove", [{ x: tap.x + 5, y: tap.y - 3 }]);
+    await sleep(60);
+    await touchAt("touchEnd", []);
+    await sleep(900);
+    const sel = await p.eval("__vg.state.selected || null");
+    const c1 = await cam();
+    wobble = (sel ? "selected " + sel : "NOTHING SELECTED") +
+             (same(c0, c1) ? ", camera held" : ", CAMERA MOVED");
+
+    await clear();
+    const c2 = await cam();
+    await touchAt("touchStart", [{ x: tap.x, y: tap.y }]);
+    for (let k = 1; k <= 5; k++) {
+      await touchAt("touchMove", [{ x: tap.x - k * 9, y: tap.y }]);
+      await sleep(40);
+    }
+    await touchAt("touchEnd", []);
+    await sleep(900);
+    const sel2 = await p.eval("__vg.state.selected || null");
+    const c3 = await cam();
+    swipe = (same(c2, c3) ? "CAMERA HELD" : "panned") +
+            (sel2 ? ", SELECTED " + sel2 : ", nothing selected");
+
+    await clear();
+    const c4 = await cam();
+    await touchAt("touchStart", [{ x: tap.x - 30, y: tap.y }, { x: tap.x + 30, y: tap.y }]);
+    await sleep(80);
+    await touchAt("touchEnd", [{ x: tap.x + 30, y: tap.y }]);
+    await sleep(60);
+    await touchAt("touchEnd", []);
+    await sleep(900);
+    const sel3 = await p.eval("__vg.state.selected || null");
+    const c5 = await cam();
+    twoFinger = (sel3 ? "SELECTED " + sel3 : "nothing selected") +
+                (same(c4, c5) ? ", camera held" : ", CAMERA MOVED");
+  }
+
   const shot = arg("shot", "");
   if (shot) {
     // github#73 -- shoot the resting page, not whatever the last tap selected
@@ -366,6 +416,9 @@ async function main() {
                 "   events: " + (evs || "none"));
   }
   if (!taps.length) console.log("  tap                      n/a");
+  console.log(`  tap after a 5px wobble   ${wobble}`);
+  console.log(`  a 45px swipe             ${swipe}`);
+  console.log(`  a two-finger tap         ${twoFinger}`);
   console.log(`  page errors              ${p.firstError() || "none"}`);
   if (shot) console.log(`  screenshot               ${shot}`);
   console.log("");

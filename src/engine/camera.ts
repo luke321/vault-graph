@@ -76,6 +76,18 @@ export class Camera extends Emitter<{ updated: CameraState }> implements CameraA
     this.removeAllListeners();
   }
 
+  // github#73, design/0013
+  stopAnimation(): void {
+    if (this.nextFrame === null) return;
+    this.win.cancelAnimationFrame(this.nextFrame);
+    this.nextFrame = null;
+    if (this.animationCallback) {
+      const cb = this.animationCallback;
+      this.animationCallback = undefined;
+      cb();
+    }
+  }
+
   animate(state: Partial<CameraState>, opts: AnimateOptions = {}, done?: () => void): void {
     const options = { ...ANIMATE_DEFAULTS, ...opts };
     const valid = this.validateState(state);

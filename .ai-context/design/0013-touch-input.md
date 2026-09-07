@@ -46,11 +46,37 @@ Pinch reuses the wheel's own pair — `camera.getBoundedRatio` and
 point by the same arithmetic. The difference is that a pinch calls `setState` per move rather
 than `animate`, because it has to track the fingers rather than ease toward them.
 
-**A tap emits the events that already exist.** A release under `TOUCH_TAP_SLOP_PX` (10) of
-travel emits `click`, which the renderer already maps to `clickNode`; a second tap inside the
-mouse path's own `DOUBLE_CLICK_TIMEOUT` (300 ms) emits `doubleClick`, which the page already
-binds to `fit()`. So neither the renderer nor the page needed a new event, and a double-tap
-means what a desktop double-click means.
+**A tap emits the events that already exist.** A release that never left the slop emits
+`click`, which the renderer already maps to `clickNode`; a second tap emits `doubleClick`,
+which the page already binds to `fit()`. So neither the renderer nor the page needed a new
+event, and a double-tap means what a desktop double-click means.
+
+**The tap gate is the gesture, never the clock, and that took two passes to get right.** The
+first cut set `isMoving` on every single-finger move and then asked `isMoving` before it asked
+how far the finger had travelled. `isMoving` decays 100 ms after the last move, so a tap only
+survived if the finger held still for longer than that after its own wobble — on real hardware
+tap-to-select would have been a coin flip, while the record already claimed the 10 px slop
+decided it. An adversarial review pass found it by tracing the handlers; the harness could not,
+because it sent `touchStart` then `touchEnd` with no move in between at all.
+
+So: **under `TOUCH_TAP_SLOP_PX` (10 px) nothing happens at all** — no pan, no inertia, no
+`isMoving`. Crossing it hands the pan the point the finger is at, so the dead zone costs no
+jump. At release, `touchMoved` alone decides: a pan glides, anything else may be a tap. And two
+more rules the same review earned:
+
+- **A tap must have been one finger throughout.** `maxTouches` is tracked across the gesture,
+  because a two-finger tap otherwise emitted `click` at whichever finger lifted last, and two
+  of those reset the view.
+- **A double-tap must be in the same place.** `TOUCH_DOUBLE_TAP_PX` is 24 px. Without it,
+  tapping note A and then note B within 300 ms — the ordinary way to read a disc on a phone —
+  called `fit()` instead of selecting B. The mouse path is position-blind in exactly this way
+  and gets away with it because a pointer rarely double-clicks two different things by
+  accident.
+
+**A gesture also stops an inertia glide.** `touchstart` calls the camera's new
+`stopAnimation()`, because a `setState` during a running `animate` is overwritten by the next
+frame from the animation's own start state: without it a finger could not arrest a fling for
+200 ms, and a tap during one picked against a camera mid-flight.
 
 **A tap also does the hover's job for free.** `state.hovered || state.selected` is what drives
 the focus ramp, the lit links and the dimming, so selecting a note raises it and lights its
@@ -62,9 +88,13 @@ the same pin is one button on the note's own card. That is deliberate: a finger 
 and on a full disc there is almost no empty space to start a pan from if dots claimed the
 gesture.
 
-Two re-seating cases are worth knowing, because both otherwise read as a jump. A finger lifted
-**out of** a pinch leaves one behind, and a finger added **to** a pan starts one: in both the
-handler re-seats `lastTouch` and the pinch baseline instead of panning from a stale point.
+Three re-seating cases are worth knowing, because each otherwise reads as a jump or a phantom
+tap. A finger lifted **out of** a pinch leaves one behind; a **partial `touchcancel`** does the
+same; and a finger added **to** a pan starts one. The first two re-seat `lastTouch` and the
+pinch baseline instead of panning from a stale point. The third must *not* reset what the
+gesture is: an earlier cut reset `touchMoved` on every `touchstart`, so panning and then
+resting a second finger down turned a long pan into a tap on a note nobody aimed at. Only a
+gesture that begins with no fingers down resets it.
 
 ## A finger is not a pointer, and picking had to learn that
 
@@ -89,7 +119,8 @@ on an iPhone left the disc 260 px of an 844 px screen — 31% — with the band 
 the rest and 536 px of legend below the fold. The disc was a speckle under a page of controls.
 
 Now, below 720 px: one column, one row, the disc taking all of it, and two buttons at the top
-left of the stage summon what was in the way.
+left of the stage summon what was in the way, at 44 px on a coarse pointer since they are the only route to the
+legend and the search box.
 
 - **The legend, search and view buttons** slide up as a sheet: `#vg-sidebar` leaves the grid
   (`position: absolute`, `translateY(101%)`), and `[data-sheet="on"]` on the root brings it in.
@@ -100,6 +131,15 @@ left of the stage summon what was in the way.
   band over the disc would not. `HEAT_WEEKS` stays the sanctioned lever if the axis ever needs
   to be shorter; the band must never grow a horizontal scrollbar, which `0010` records as an
   already-shipped, already-reported regression.
+
+**Selecting a note closes the sheet.** The card is pinned to the foot and the sheet covers the
+bottom 72% at a higher z-index, so tapping a note — or a search hit inside the sheet itself —
+would otherwise open the card invisibly underneath it.
+
+**A closed sheet is `visibility: hidden`, not merely translated away.** Left visible it keeps
+every control inside it in the tab order and the accessibility tree while its button reports
+`aria-expanded="false"`, and focusing one lets the browser scroll the `overflow: hidden` root
+with no scrollbar to scroll back.
 
 **Both panels change the canvas box without changing the root's**, and that is the trap in this
 half. The engine listens for `resize` on the window only, and the page's own root
@@ -114,6 +154,17 @@ a panel toggle would fight "a manually moved camera is left alone by a visibilit
 Panel state is **session state, not a setting**: it is a fact about the screen in front of you,
 not about the vault, so `decisions/0009`'s settings channel is not involved and nothing is
 persisted.
+
+## Known limits, stated rather than discovered later
+
+- **`isMoving` and `movingTimeout` are shared with the mouse path.** On a hybrid device a touch
+  can cancel a mouse drag's inertia and the reverse. Separating them means per-input state, and
+  no such device has been measured here.
+- **Two fingers only zoom.** A two-finger drag at constant spread does nothing; the midpoint is
+  tracked for the pinch, not for a pan.
+- **The catchment can select a neighbour.** At a 1.4 px median radius a 14 px catchment is
+  coarse by construction. It is what makes a tap work at all; more radius wants a filter or a
+  zoom, not a smaller catchment.
 
 ## What this deliberately does not do
 

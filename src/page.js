@@ -4941,6 +4941,8 @@ function mountVaultGraph(root, data, deps) {
 
   /** @param {string | null} id */
   function select(id) {
+    // github#73, design/0013
+    if (id && sheetOpen) setSheet(false);
     // github#40, design/0012
     if (!trailHop && (!id || id !== state.selected)) trail.length = 0;
     trailHop = false;
@@ -5687,8 +5689,8 @@ function mountVaultGraph(root, data, deps) {
     // github#73
     if ($("sheet")) $("sheet").onclick = function () { setSheet(!sheetOpen); };
     if ($("band")) $("band").onclick = function () { setBand(!bandOpen); };
-    setSheet(false);
-    setBand(false);
+    setSheet(false, true);
+    setBand(false, true);
     $("png").onclick = savePng;
     if ($("dbg")) $("dbg").onclick = function () {
       var txt = JSON.stringify(API.debugDump(), null, 2);
@@ -6079,11 +6081,11 @@ function mountVaultGraph(root, data, deps) {
   function afterPanel() {
     refreshSizeScale();
     placeLogo();
-    if (renderer) renderer.refresh();
+    if (renderer) renderer.render();
   }
 
-  /** @param {boolean} on */
-  function setSheet(on) {
+  /** @param {boolean} on @param {boolean} [quiet] */
+  function setSheet(on, quiet) {
     sheetOpen = !!on;
     ROOT.setAttribute("data-sheet", sheetOpen ? "on" : "off");
     var b = $("sheet");
@@ -6091,11 +6093,11 @@ function mountVaultGraph(root, data, deps) {
       b.setAttribute("aria-expanded", sheetOpen ? "true" : "false");
       b.setAttribute("aria-label", sheetOpen ? "Hide the folder list" : "Show the folder list");
     }
-    afterPanel();
+    if (!quiet) afterPanel();
   }
 
-  /** @param {boolean} on */
-  function setBand(on) {
+  /** @param {boolean} on @param {boolean} [quiet] */
+  function setBand(on, quiet) {
     bandOpen = !!on;
     ROOT.setAttribute("data-band", bandOpen ? "on" : "off");
     var b = $("band");
@@ -6103,7 +6105,7 @@ function mountVaultGraph(root, data, deps) {
       b.setAttribute("aria-pressed", bandOpen ? "true" : "false");
       b.setAttribute("aria-label", bandOpen ? "Hide the calendar" : "Show the calendar");
     }
-    afterPanel();
+    if (!quiet) afterPanel();
   }
 
   function setPan(on, persist) {

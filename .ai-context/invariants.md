@@ -1939,12 +1939,25 @@ view. All four exist because `captor.ts` binds `touchstart`/`touchmove`/`touchen
 not even fall back to a click, because `touch-action: none` on the mouse layer suppresses the
 browser's tap-to-click. design/0013.
 
-**Two constants, and they are not interchangeable.** `PICK_FLOOR_PX` is **1.5 px**, sized for a
+**These two sections are checked by `scripts/mobile-check.mjs`, not by `smoke.mjs`.** That is a
+gap, and it is named rather than glossed: the suite drives one shared page, and hosting touch
+checks there means turning `Emulation.setTouchEmulationEnabled` on and off around them, which
+changes `pointer: coarse` and `hover` for every other check in the run. Until that is measured,
+the harness is the gate and it is manual. github#73 carries the follow-up.
+
+**Three constants, and they are not interchangeable.** `PICK_FLOOR_PX` is **1.5 px**, sized for a
 *floored pointer* being at most 1.41 px from a true centre, and is checked by "a sub-pixel dot
 can still be hovered". `TOUCH_PICK_FLOOR_PX` is **14 px**, about half a fingertip, and applies
 only to coords a finger produced (`fat` on the coords). `getNodeAtPosition` takes the floor per
-call, so widening one never widens the other. `TOUCH_TAP_SLOP_PX` is **10 px**: a release that
-travelled further is a pan, not a tap.
+call, so widening one never widens the other. `TOUCH_TAP_SLOP_PX` is **10 px**, and under it *nothing happens at all* -- no pan, no inertia.
+A release that never left the slop is a tap; one that did is a pan, and the decision is the
+gesture rather than any timer. `TOUCH_DOUBLE_TAP_PX` is **24 px**: a second tap further away
+than that is a fresh single tap, not a double.
+
+**A tap must also have been one finger throughout**, tracked as `maxTouches`. A two-finger tap
+selects nothing, and `touchstart` on a gesture already in progress must not reset what the
+gesture is -- both were live defects found by an adversarial review pass and are now what the
+harness's three gesture probes assert.
 
 **Pan is one code path for both inputs.** `panFrom()` and `glide()` were extracted from the
 mouse handlers rather than written twice, and the check is a number: the same travel must move
@@ -1968,6 +1981,17 @@ Measured 2026-09-07 on the demo fixture, 60 px of travel:
 
 And a tap delivers `pointerdown, touchstart, touchend` with **no synthesized click behind it**,
 on every phone viewport -- the check that a tap selects once rather than twice.
+
+Three gesture probes cover what a motionless tap cannot, all on the iPhone 14 viewport:
+
+| gesture | required | measured 2026-09-07 |
+|---|---|---|
+| tap after a 5 px wobble | selects, camera held | **selected, camera held** |
+| a 45 px swipe | pans, selects nothing | **panned, nothing selected** |
+| a two-finger tap | selects nothing, camera held | **nothing selected, camera held** |
+
+The first row is the one that matters: the first cut of the captor failed it while every other
+number on this page looked right, because the harness was sending a tap with no movement in it.
 
 ## The disc gets a phone's screen, and the desktop layout does not move
 

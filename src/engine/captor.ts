@@ -40,6 +40,7 @@ const INERTIA_DURATION = 200;
 const INERTIA_RATIO = 3;
 // github#73
 const TOUCH_TAP_SLOP_PX = 10;
+const TOUCH_DOUBLE_TAP_PX = 24;
 
 function getPosition(e: { clientX: number; clientY: number }, dom: HTMLElement): Point {
   const bbox = dom.getBoundingClientRect();
@@ -103,7 +104,8 @@ export class MouseCaptor extends Emitter<CaptorEvents> implements MouseCaptorApi
   private touchMoved = false;
   private pinchSpread: number | null = null;
   private pinchRatio = 1;
-  private taps = 0;
+  private maxTouches = 0;
+  private lastTapAt: Point | null = null;
   private tapTimeout: number | null = null;
   private readonly doc: Document;
 
@@ -236,9 +238,16 @@ export class MouseCaptor extends Emitter<CaptorEvents> implements MouseCaptorApi
     e.preventDefault();
     const pts = touchPoints(e, this.container);
     if (!pts.length) return;
-    this.touchMoved = false;
-    this.touchStart = pts[0];
-    this.lastTouch = pts[0];
+    // design/0013
+    this.host.getCamera().stopAnimation();
+    // design/0013
+    if (this.lastTouch === null) {
+      this.touchMoved = false;
+      this.touchStart = pts[0];
+      this.maxTouches = 0;
+    }
+    this.maxTouches = Math.max(this.maxTouches, e.touches.length);
+    this.lastTouch = pts.length > 1 ? midpoint(pts[0], pts[1]) : pts[0];
     if (pts.length > 1) {
       this.pinchSpread = spread(pts[0], pts[1]);
       this.pinchRatio = this.host.getCamera().getState().ratio;
@@ -265,16 +274,14 @@ export class MouseCaptor extends Emitter<CaptorEvents> implements MouseCaptorApi
       return;
     }
 
-    // design/0013
-    if (this.pinchSpread !== null) {
-      this.pinchSpread = null;
+    // design/0013 -- under the slop nothing moves at all
+    if (this.touchStart && spread(this.touchStart, pts[0]) > TOUCH_TAP_SLOP_PX) this.touchMoved = true;
+    if (!this.touchMoved) {
       this.lastTouch = pts[0];
       return;
     }
 
-    const prev = this.lastTouch ?? pts[0];
-    if (this.touchStart && spread(this.touchStart, pts[0]) > TOUCH_TAP_SLOP_PX) this.touchMoved = true;
-    this.panFrom(prev, pts[0]);
+    this.panFrom(this.lastTouch ?? pts[0], pts[0]);
     this.lastTouch = pts[0];
     this.isMoving = true;
     if (this.movingTimeout !== null) this.win.clearTimeout(this.movingTimeout);
@@ -287,7 +294,6 @@ export class MouseCaptor extends Emitter<CaptorEvents> implements MouseCaptorApi
   private readonly handleTouchEnd = (e: TouchEvent): void => {
     e.preventDefault();
     if (e.touches.length) {
-      // design/0013
       const pts = touchPoints(e, this.container);
       this.lastTouch = pts.length > 1 ? midpoint(pts[0], pts[1]) : (pts[0] ?? this.lastTouch);
       this.pinchSpread = pts.length > 1 ? spread(pts[0], pts[1]) : null;
@@ -297,45 +303,57 @@ export class MouseCaptor extends Emitter<CaptorEvents> implements MouseCaptorApi
 
     const at = this.lastTouch;
     const moved = this.touchMoved;
+    const fingers = this.maxTouches;
     this.touchStart = null;
     this.lastTouch = null;
     this.pinchSpread = null;
     this.touchMoved = false;
+    this.maxTouches = 0;
 
     if (this.movingTimeout !== null) {
       this.win.clearTimeout(this.movingTimeout);
       this.movingTimeout = null;
     }
-    if (this.isMoving) {
+    // design/0013 -- the gesture decides, never the clock
+    if (moved) {
+      if (this.isMoving) this.glide();
       this.isMoving = false;
-      this.glide();
       return;
     }
     this.isMoving = false;
-    if (moved || !at) return;
+    if (!at || fingers !== 1) return;
 
-    this.taps++;
-    if (this.taps === 2) {
-      this.taps = 0;
-      if (this.tapTimeout !== null) {
-        this.win.clearTimeout(this.tapTimeout);
-        this.tapTimeout = null;
-      }
+    const near = this.lastTapAt !== null && spread(this.lastTapAt, at) <= TOUCH_DOUBLE_TAP_PX;
+    if (this.tapTimeout !== null) {
+      this.win.clearTimeout(this.tapTimeout);
+      this.tapTimeout = null;
+    }
+    if (near) {
+      this.lastTapAt = null;
       this.emit("doubleClick", getTouchCoords(e, at));
       return;
     }
+    this.lastTapAt = at;
     this.tapTimeout = this.win.setTimeout(() => {
-      this.taps = 0;
+      this.lastTapAt = null;
       this.tapTimeout = null;
     }, DOUBLE_CLICK_TIMEOUT);
     this.emit("click", getTouchCoords(e, at));
   };
 
-  private readonly handleTouchCancel = (): void => {
+  private readonly handleTouchCancel = (e: TouchEvent): void => {
+    // design/0013 -- a partial cancel leaves fingers down
+    if (e.touches.length) {
+      const pts = touchPoints(e, this.container);
+      this.lastTouch = pts.length > 1 ? midpoint(pts[0], pts[1]) : (pts[0] ?? this.lastTouch);
+      this.pinchSpread = pts.length > 1 ? spread(pts[0], pts[1]) : null;
+      return;
+    }
     this.touchStart = null;
     this.lastTouch = null;
     this.pinchSpread = null;
     this.touchMoved = false;
+    this.maxTouches = 0;
     this.isMoving = false;
     if (this.movingTimeout !== null) {
       this.win.clearTimeout(this.movingTimeout);
@@ -358,7 +376,7 @@ export class MouseCaptor extends Emitter<CaptorEvents> implements MouseCaptorApi
     container.addEventListener("mouseenter", this.handleEnter);
     this.doc.addEventListener("mousemove", this.handleMove);
     this.doc.addEventListener("mouseup", this.handleUp);
-    // github#73 -- non-passive: every handler preventDefaults
+    // github#73 -- non-passive: the three cancelable ones preventDefault
     container.addEventListener("touchstart", this.handleTouchStart, { passive: false });
     container.addEventListener("touchmove", this.handleTouchMove, { passive: false });
     container.addEventListener("touchend", this.handleTouchEnd, { passive: false });
