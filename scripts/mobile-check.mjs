@@ -53,8 +53,18 @@ const freePort = () => new Promise((res, rej) => {
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+function fixtureStore() {
+  const g = spawnSync("git", ["-C", ROOT, "rev-parse", "--git-common-dir"], { encoding: "utf8" });
+  if (g.status === 0 && g.stdout.trim()) {
+    const common = g.stdout.trim();
+    const abs = /^[A-Za-z]:[\\/]|^\//.test(common) ? common : join(ROOT, common);
+    return join(dirname(abs), ".fixtures");
+  }
+  return join(ROOT, ".fixtures");
+}
+
 function fixtureVault(want) {
-  const dir = join(ROOT, ".fixtures");
+  const dir = fixtureStore();
   if (!existsSync(dir)) return "";
   const hit = readdirSync(dir).find((d) => d.startsWith(want + "-"));
   return hit ? join(dir, hit) : "";
@@ -209,6 +219,43 @@ async function main() {
   await sleep(800);
   const afterPinch = await cam();
 
+  // github#73 -- pan parity. The same pixel travel by pointer and by finger must move the
+  // camera by the same amount, because both go through the captor's one panFrom helper. This
+  // is the check that a touch pan is right rather than merely present.
+  const reseat = async () => {
+    await p.eval("__vg.renderer.getCamera().setState({ x: 0.5, y: 0.5, ratio: 1.08, angle: 0 });" +
+                 " __vg.renderer.refresh(); void 0");
+    await sleep(500);
+  };
+  const STEP = 12, STEPS = 5;
+  await reseat();
+  await p.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: cx, y: cy, buttons: 0 });
+  await p.send("Input.dispatchMouseEvent", { type: "mousePressed", x: cx, y: cy, button: "left", buttons: 1, clickCount: 1 });
+  for (let k = 1; k <= STEPS; k++) {
+    await p.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: cx - k * STEP, y: cy, button: "left", buttons: 1 });
+    await sleep(40);
+  }
+  await p.send("Input.dispatchMouseEvent", { type: "mouseReleased", x: cx - STEPS * STEP, y: cy, button: "left", buttons: 0, clickCount: 1 });
+  await sleep(700);
+  const panMouse = await cam();
+
+  await reseat();
+  await p.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ x: cx, y: cy, id: 1 }] }).catch(() => {});
+  for (let k = 1; k <= STEPS; k++) {
+    await p.send("Input.dispatchTouchEvent", { type: "touchMove", touchPoints: [{ x: cx - k * STEP, y: cy, id: 1 }] }).catch(() => {});
+    await sleep(40);
+  }
+  await p.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] }).catch(() => {});
+  await sleep(700);
+  const panTouch = await cam();
+
+  // github#73 -- the gestures above leave the camera where they put it, and a fling plus a
+  // pinch can carry the target dot clean off the stage. Reset before aiming, the way every
+  // pointer check in smoke.mjs does, so the tap is measured on its own.
+  await p.eval("__vg.renderer.getCamera().setState({ x: 0.5, y: 0.5, ratio: 1.08, angle: 0 });" +
+               " __vg.renderer.refresh(); void 0");
+  await sleep(600);
+
   const tap = await p.eval(
     "(function () {" +
     "  var R = __vg.renderer, G = __vg.graph, best = null, br = -1;" +
@@ -300,6 +347,9 @@ async function main() {
   console.log(`  radius under 1 px        ${dots.under1} of ${dots.n}`);
   console.log(`  radius under 2 px        ${dots.under2} of ${dots.n}`);
   console.log("");
+  const dxM = panMouse.x - 0.5, dxT = panTouch.x - 0.5;
+  console.log(`  pan parity, ${STEPS * STEP}px left    pointer dx ${dxM.toFixed(4)}  finger dx ${dxT.toFixed(4)}  ` +
+              `${Math.abs(dxM) < 1e-9 ? "n/a" : (dxT / dxM).toFixed(3) + "x"}`);
   console.log(`  one-finger drag          ${moved(before, afterDrag)}`);
   console.log(`  two-finger pinch         ${moved(afterDrag, afterPinch)}`);
   console.log(`  aimed at                 ${tap ? `note ${tap.id}, ${tap.r.toFixed(2)}px radius, at ${tap.x},${tap.y}` : "no dot found"}`);

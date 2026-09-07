@@ -38,8 +38,10 @@ const DRAG_TIMEOUT = 100;
 const DRAGGED_EVENTS_TOLERANCE = 3;
 const INERTIA_DURATION = 200;
 const INERTIA_RATIO = 3;
+// github#73
+const TOUCH_TAP_SLOP_PX = 10;
 
-function getPosition(e: MouseEvent, dom: HTMLElement): Point {
+function getPosition(e: { clientX: number; clientY: number }, dom: HTMLElement): Point {
   const bbox = dom.getBoundingClientRect();
   return { x: e.clientX - bbox.left, y: e.clientY - bbox.top };
 }
@@ -56,6 +58,30 @@ function getMouseCoords(e: MouseEvent, dom: HTMLElement): Coords {
   return res;
 }
 
+// github#73
+function getTouchCoords(e: TouchEvent, at: Point): Coords {
+  const res: Coords = {
+    ...at,
+    defaultPrevented: false,
+    fat: true,
+    preventDefault: () => {
+      res.defaultPrevented = true;
+    },
+    original: e,
+  };
+  return res;
+}
+
+// github#73
+function touchPoints(e: TouchEvent, dom: HTMLElement): Point[] {
+  const out: Point[] = [];
+  for (let i = 0; i < e.touches.length && i < 2; i++) out.push(getPosition(e.touches[i], dom));
+  return out;
+}
+
+const midpoint = (a: Point, b: Point): Point => ({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 });
+const spread = (a: Point, b: Point): number => Math.hypot(a.x - b.x, a.y - b.y);
+
 function getWheelDelta(e: WheelEvent): number {
   return (e.deltaY * -3) / 360;
 }
@@ -71,6 +97,14 @@ export class MouseCaptor extends Emitter<CaptorEvents> implements MouseCaptorApi
   private clicks = 0;
   private doubleClickTimeout: number | null = null;
   private lastWheelTriggerTime: number | null = null;
+  // github#73
+  private touchStart: Point | null = null;
+  private lastTouch: Point | null = null;
+  private touchMoved = false;
+  private pinchSpread: number | null = null;
+  private pinchRatio = 1;
+  private taps = 0;
+  private tapTimeout: number | null = null;
   private readonly doc: Document;
 
   private readonly handleClick = (e: MouseEvent): void => {
@@ -116,12 +150,8 @@ export class MouseCaptor extends Emitter<CaptorEvents> implements MouseCaptorApi
     }
     const { x, y } = getPosition(e, this.container);
     const cameraState = camera.getState();
-    const previous = camera.getPreviousState();
     if (this.isMoving) {
-      camera.animate({
-        x: cameraState.x + INERTIA_RATIO * (cameraState.x - previous.x),
-        y: cameraState.y + INERTIA_RATIO * (cameraState.y - previous.y),
-      }, { duration: INERTIA_DURATION, easing: "quadraticOut" });
+      this.glide();
     } else if (this.lastMouseX !== x || this.lastMouseY !== y) {
       camera.setState({ x: cameraState.x, y: cameraState.y });
     }
@@ -146,12 +176,8 @@ export class MouseCaptor extends Emitter<CaptorEvents> implements MouseCaptorApi
         this.movingTimeout = null;
         this.isMoving = false;
       }, DRAG_TIMEOUT);
-      const camera = this.host.getCamera();
       const { x: eX, y: eY } = getPosition(e, this.container);
-      const lastMouse = this.host.viewportToFramedGraph({ x: this.lastMouseX ?? eX, y: this.lastMouseY ?? eY });
-      const mouse = this.host.viewportToFramedGraph({ x: eX, y: eY });
-      const cameraState = camera.getState();
-      camera.setState({ x: cameraState.x + (lastMouse.x - mouse.x), y: cameraState.y + (lastMouse.y - mouse.y) });
+      this.panFrom({ x: this.lastMouseX ?? eX, y: this.lastMouseY ?? eY }, { x: eX, y: eY });
       this.lastMouseX = eX;
       this.lastMouseY = eY;
       e.preventDefault();
@@ -202,6 +228,123 @@ export class MouseCaptor extends Emitter<CaptorEvents> implements MouseCaptorApi
     this.lastWheelTriggerTime = now;
   };
 
+  /* ----------------------------------------------------------------- touch
+   * github#73. One finger pans, two pinch, a release that travelled less than the slop is a
+   * tap, and a second tap inside the mouse path's own double-click window is a double-tap.
+   * Nothing here emits `mousedown`, so the node drag armed on `downNode` stays mouse-only.
+   */
+
+  private readonly handleTouchStart = (e: TouchEvent): void => {
+    e.preventDefault();
+    const pts = touchPoints(e, this.container);
+    if (!pts.length) return;
+    this.touchMoved = false;
+    this.touchStart = pts[0];
+    this.lastTouch = pts[0];
+    if (pts.length > 1) {
+      this.pinchSpread = spread(pts[0], pts[1]);
+      this.pinchRatio = this.host.getCamera().getState().ratio;
+    } else {
+      this.pinchSpread = null;
+    }
+  };
+
+  private readonly handleTouchMove = (e: TouchEvent): void => {
+    e.preventDefault();
+    const pts = touchPoints(e, this.container);
+    if (!pts.length) return;
+
+    if (pts.length > 1) {
+      const now = spread(pts[0], pts[1]);
+      if (this.pinchSpread === null || this.pinchSpread <= 0) {
+        this.pinchSpread = now;
+        this.pinchRatio = this.host.getCamera().getState().ratio;
+      } else if (now > 0) {
+        this.touchMoved = true;
+        this.zoomAbout(midpoint(pts[0], pts[1]), this.pinchRatio * (this.pinchSpread / now));
+      }
+      this.lastTouch = midpoint(pts[0], pts[1]);
+      return;
+    }
+
+    // A finger lifted out of a pinch leaves one behind: re-seat rather than jump.
+    if (this.pinchSpread !== null) {
+      this.pinchSpread = null;
+      this.lastTouch = pts[0];
+      return;
+    }
+
+    const prev = this.lastTouch ?? pts[0];
+    if (this.touchStart && spread(this.touchStart, pts[0]) > TOUCH_TAP_SLOP_PX) this.touchMoved = true;
+    this.panFrom(prev, pts[0]);
+    this.lastTouch = pts[0];
+    this.isMoving = true;
+    if (this.movingTimeout !== null) this.win.clearTimeout(this.movingTimeout);
+    this.movingTimeout = this.win.setTimeout(() => {
+      this.movingTimeout = null;
+      this.isMoving = false;
+    }, DRAG_TIMEOUT);
+  };
+
+  private readonly handleTouchEnd = (e: TouchEvent): void => {
+    e.preventDefault();
+    if (e.touches.length) {
+      // Still a finger down: re-seat the pan and the pinch on what is left.
+      const pts = touchPoints(e, this.container);
+      this.lastTouch = pts.length > 1 ? midpoint(pts[0], pts[1]) : (pts[0] ?? this.lastTouch);
+      this.pinchSpread = pts.length > 1 ? spread(pts[0], pts[1]) : null;
+      if (pts.length > 1) this.pinchRatio = this.host.getCamera().getState().ratio;
+      return;
+    }
+
+    const at = this.lastTouch;
+    const moved = this.touchMoved;
+    this.touchStart = null;
+    this.lastTouch = null;
+    this.pinchSpread = null;
+    this.touchMoved = false;
+
+    if (this.movingTimeout !== null) {
+      this.win.clearTimeout(this.movingTimeout);
+      this.movingTimeout = null;
+    }
+    if (this.isMoving) {
+      this.isMoving = false;
+      this.glide();
+      return;
+    }
+    this.isMoving = false;
+    if (moved || !at) return;
+
+    this.taps++;
+    if (this.taps === 2) {
+      this.taps = 0;
+      if (this.tapTimeout !== null) {
+        this.win.clearTimeout(this.tapTimeout);
+        this.tapTimeout = null;
+      }
+      this.emit("doubleClick", getTouchCoords(e, at));
+      return;
+    }
+    this.tapTimeout = this.win.setTimeout(() => {
+      this.taps = 0;
+      this.tapTimeout = null;
+    }, DOUBLE_CLICK_TIMEOUT);
+    this.emit("click", getTouchCoords(e, at));
+  };
+
+  private readonly handleTouchCancel = (): void => {
+    this.touchStart = null;
+    this.lastTouch = null;
+    this.pinchSpread = null;
+    this.touchMoved = false;
+    this.isMoving = false;
+    if (this.movingTimeout !== null) {
+      this.win.clearTimeout(this.movingTimeout);
+      this.movingTimeout = null;
+    }
+  };
+
   constructor(
     private readonly container: HTMLElement,
     private readonly host: CaptorHost,
@@ -217,6 +360,11 @@ export class MouseCaptor extends Emitter<CaptorEvents> implements MouseCaptorApi
     container.addEventListener("mouseenter", this.handleEnter);
     this.doc.addEventListener("mousemove", this.handleMove);
     this.doc.addEventListener("mouseup", this.handleUp);
+    // github#73 -- non-passive: every handler preventDefaults
+    container.addEventListener("touchstart", this.handleTouchStart, { passive: false });
+    container.addEventListener("touchmove", this.handleTouchMove, { passive: false });
+    container.addEventListener("touchend", this.handleTouchEnd, { passive: false });
+    container.addEventListener("touchcancel", this.handleTouchCancel);
   }
 
   kill(): void {
@@ -229,8 +377,14 @@ export class MouseCaptor extends Emitter<CaptorEvents> implements MouseCaptorApi
     c.removeEventListener("mouseenter", this.handleEnter);
     this.doc.removeEventListener("mousemove", this.handleMove);
     this.doc.removeEventListener("mouseup", this.handleUp);
+    // github#73
+    c.removeEventListener("touchstart", this.handleTouchStart);
+    c.removeEventListener("touchmove", this.handleTouchMove);
+    c.removeEventListener("touchend", this.handleTouchEnd);
+    c.removeEventListener("touchcancel", this.handleTouchCancel);
     if (this.movingTimeout !== null) this.win.clearTimeout(this.movingTimeout);
     if (this.doubleClickTimeout !== null) this.win.clearTimeout(this.doubleClickTimeout);
+    if (this.tapTimeout !== null) this.win.clearTimeout(this.tapTimeout);
     this.removeAllListeners();
   }
 
@@ -238,5 +392,33 @@ export class MouseCaptor extends Emitter<CaptorEvents> implements MouseCaptorApi
     e.preventDefault();
     e.stopPropagation();
     this.emit("doubleClick", getMouseCoords(e, this.container));
+  }
+
+  /* -------------------------------------------------------- shared motion */
+
+  private panFrom(prev: Point, next: Point): void {
+    const camera = this.host.getCamera();
+    const from = this.host.viewportToFramedGraph(prev);
+    const to = this.host.viewportToFramedGraph(next);
+    const state = camera.getState();
+    camera.setState({ x: state.x + (from.x - to.x), y: state.y + (from.y - to.y) });
+  }
+
+  private glide(): void {
+    const camera = this.host.getCamera();
+    const state = camera.getState();
+    const previous = camera.getPreviousState();
+    camera.animate({
+      x: state.x + INERTIA_RATIO * (state.x - previous.x),
+      y: state.y + INERTIA_RATIO * (state.y - previous.y),
+    }, { duration: INERTIA_DURATION, easing: "quadraticOut" });
+  }
+
+  private zoomAbout(target: Point, ratio: number): void {
+    const camera = this.host.getCamera();
+    if (!camera.enabledZooming) return;
+    const bounded = camera.getBoundedRatio(ratio);
+    if (bounded === camera.getState().ratio) return;
+    camera.setState(this.host.getViewportZoomedState(target, bounded));
   }
 }
