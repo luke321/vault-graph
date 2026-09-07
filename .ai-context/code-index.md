@@ -5,7 +5,7 @@ markers already in the source: which code cites an issue, an ADR or a DDR; which
 enforces each invariant; who calls each `__vg` entry point. Stale when
 `node scripts/code-map.mjs --check` fails.
 
-## Issues — 55 cited (49 in code, 49 in `.ai-context/`)
+## Issues — 56 cited (50 in code, 50 in `.ai-context/`)
 
 | issue | code sites | prose sites |
 |---|---|---|
@@ -39,8 +39,8 @@ enforces each invariant; who calls each `__vg` entry point. Stale when
 | #37 | scripts/smoke.mjs:369, scripts/update-layout-snapshots.mjs:2, scripts/update-layout-snapshots.mjs:3 | .ai-context/changelog-detail.md:81, .ai-context/changelog-detail.md:82, .ai-context/invariants.md:1367, .ai-context/manual-test-1.9.0.md:164, .ai-context/release-notes-1.9.0.md:162 |
 | #38 | — | .ai-context/changelog-detail.md:80, .ai-context/manual-test-1.9.0.md:162, .ai-context/release-notes-1.9.0.md:195 |
 | #39 | src/page.js:4651, src/page.js:4653, src/page.js:4717, scripts/smoke.mjs:1208 | .ai-context/changelog-detail.md:77, .ai-context/changelog-detail.md:77, .ai-context/changelog-detail.md:78, .ai-context/invariants.md:1032, .ai-context/manual-test-1.9.0.md:159, .ai-context/release-notes-1.9.0.md:171, .ai-context/release-notes-2.0.0.md:56, .ai-context/design/0005-labels-and-edges.md:95, .ai-context/design/0005-labels-and-edges.md:117 |
-| #40 | src/page.css:535, src/page.js:2974, src/page.js:3237, src/page.js:4869, src/page.js:4940, src/page.js:4989, src/page.js:7449, src/page.js:7620, scripts/obsidian-smoke.mjs:575, scripts/screen.mjs:1, scripts/smoke.mjs:3140 | .ai-context/README.md:48, .ai-context/changelog-detail.md:17, .ai-context/changelog-detail.md:19, .ai-context/invariants.md:1856, .ai-context/design/0012-hop-trail.md:4, .ai-context/design/0012-hop-trail.md:50, .ai-context/design/0012-hop-trail.md:110 |
-| #41 | src/page.js:109, src/page.js:1784, src/page.js:1849, src/page.js:2077, src/page.js:3007, src/page.js:3095, src/page.js:3192, src/page.js:3837, src/page.js:3843, src/page.js:3844, src/page.js:3958, src/page.js:4550, src/page.js:4605, src/page.js:7807, src/page.js:7815, src/page.js:7896, src/page.js:8260, src/page.js:8532, src/page.js:8544, plugin/main.js:44, plugin/main.js:609, plugin/main.js:669, plugin/main.js:703, scripts/probe-dotwhy.mjs:2, scripts/shoot-cascade-frame.mjs:2 | .ai-context/README.md:47, .ai-context/changelog-detail.md:30, .ai-context/changelog-detail.md:36, .ai-context/changelog-detail.md:39, .ai-context/changelog-detail.md:39, .ai-context/changelog-detail.md:39, .ai-context/finding-notes-touch-mid-cascade.md:223, .ai-context/finding-notes-touch-mid-cascade.md:284, .ai-context/invariants.md:1265, .ai-context/release-notes-2.0.0.md:167, .ai-context/verification-2.0.0.md:80, .ai-context/design/0011-per-frame-dot-size.md:3, .ai-context/design/0011-per-frame-dot-size.md:112 |
+| #40 | src/page.css:535, src/page.js:2974, src/page.js:3237, src/page.js:4869, src/page.js:4940, src/page.js:4989, src/page.js:7449, src/page.js:7620, scripts/obsidian-smoke.mjs:575, scripts/screen.mjs:1, scripts/smoke.mjs:3140 | .ai-context/README.md:49, .ai-context/changelog-detail.md:17, .ai-context/changelog-detail.md:19, .ai-context/invariants.md:1856, .ai-context/design/0012-hop-trail.md:4, .ai-context/design/0012-hop-trail.md:50, .ai-context/design/0012-hop-trail.md:110 |
+| #41 | src/page.js:109, src/page.js:1784, src/page.js:1849, src/page.js:2077, src/page.js:3007, src/page.js:3095, src/page.js:3192, src/page.js:3837, src/page.js:3843, src/page.js:3844, src/page.js:3958, src/page.js:4550, src/page.js:4605, src/page.js:7807, src/page.js:7815, src/page.js:7896, src/page.js:8260, src/page.js:8532, src/page.js:8544, plugin/main.js:44, plugin/main.js:609, plugin/main.js:669, plugin/main.js:703, scripts/probe-dotwhy.mjs:2, scripts/shoot-cascade-frame.mjs:2 | .ai-context/README.md:48, .ai-context/changelog-detail.md:30, .ai-context/changelog-detail.md:36, .ai-context/changelog-detail.md:39, .ai-context/changelog-detail.md:39, .ai-context/changelog-detail.md:39, .ai-context/finding-notes-touch-mid-cascade.md:223, .ai-context/finding-notes-touch-mid-cascade.md:284, .ai-context/invariants.md:1265, .ai-context/release-notes-2.0.0.md:167, .ai-context/verification-2.0.0.md:80, .ai-context/design/0011-per-frame-dot-size.md:3, .ai-context/design/0011-per-frame-dot-size.md:112 |
 | #42 | src/page.js:535, src/page.js:4717, src/page.js:8176, scripts/smoke.mjs:1259 | .ai-context/changelog-detail.md:77, .ai-context/changelog-detail.md:78, .ai-context/invariants.md:1089, .ai-context/invariants.md:1108, .ai-context/manual-test-1.9.0.md:160, .ai-context/release-notes-1.9.0.md:184, .ai-context/design/0005-labels-and-edges.md:138, .ai-context/design/0005-labels-and-edges.md:227 |
 | #43 | src/page.js:530, src/page.js:535, src/page.js:538, src/page.js:4650, src/page.js:4652, src/page.js:4718, src/page.js:4763, scripts/smoke.mjs:1209, scripts/smoke.mjs:1282 | .ai-context/changelog-detail.md:31, .ai-context/invariants.md:1034, .ai-context/invariants.md:1053, .ai-context/invariants.md:1094, .ai-context/invariants.md:1126, .ai-context/release-notes-2.0.0.md:52, .ai-context/verification-2.0.0.md:47, .ai-context/verification-2.0.0.md:58, .ai-context/verification-2.0.0.md:74, .ai-context/verification-2.0.0.md:76, .ai-context/design/0005-labels-and-edges.md:90, .ai-context/design/0005-labels-and-edges.md:111, .ai-context/design/0005-labels-and-edges.md:117, .ai-context/design/0005-labels-and-edges.md:190, .ai-context/design/0005-labels-and-edges.md:264 |
 | #44 | src/page.js:3773 | .ai-context/manual-test-1.9.0.md:38, .ai-context/release-notes-1.9.0.md:217 |
@@ -64,13 +64,15 @@ enforces each invariant; who calls each `__vg` entry point. Stale when
 | #65 | scripts/smoke.mjs:1814, scripts/smoke.mjs:1844 | .ai-context/changelog-detail.md:49, .ai-context/invariants.md:1484, .ai-context/release-notes-2.0.0.md:217 |
 | #66 | src/page.js:3510, src/page.js:3599, src/page.js:3622, src/page.js:4629, scripts/smoke.mjs:109, scripts/smoke.mjs:1872 | .ai-context/animation.md:97, .ai-context/changelog-detail.md:39, .ai-context/changelog-detail.md:42, .ai-context/changelog-detail.md:43, .ai-context/finding-notes-touch-mid-cascade.md:284, .ai-context/invariants.md:1245, .ai-context/invariants.md:1272, .ai-context/invariants.md:1311, .ai-context/release-notes-2.0.0.md:179, .ai-context/release-notes-2.0.0.md:216, .ai-context/verification-2.0.0.md:53, .ai-context/design/0011-per-frame-dot-size.md:34, .ai-context/design/0011-per-frame-dot-size.md:57, .ai-context/design/0011-per-frame-dot-size.md:89, .ai-context/design/0011-per-frame-dot-size.md:93 |
 | #67 | src/page.js:3684, scripts/smoke.mjs:110, scripts/smoke.mjs:1963 | .ai-context/animation.md:111, .ai-context/changelog-detail.md:35, .ai-context/changelog-detail.md:42, .ai-context/invariants.md:391, .ai-context/invariants.md:1298, .ai-context/release-notes-2.0.0.md:184, .ai-context/release-notes-2.0.0.md:216, .ai-context/verification-2.0.0.md:54, .ai-context/verification-2.0.0.md:59 |
+| #73 | scripts/mobile-check.mjs:1, scripts/mobile-check.mjs:97, scripts/mobile-check.mjs:116, scripts/mobile-check.mjs:138, scripts/mobile-check.mjs:220 | .ai-context/README.md:14, .ai-context/mobile-harness.md:3, .ai-context/mobile-harness.md:39, .ai-context/mobile-harness.md:72 |
 
-## Decision and design records cited in code — 11
+## Decision and design records cited in code — 12
 
 | record | code sites |
 |---|---|
 | `decisions/0001` | src/page.js:1860 |
 | `decisions/0005` | src/build-graph.mjs:94 |
+| `decisions/0007` | scripts/mobile-check.mjs:2 |
 | `decisions/0008` | scripts/check-network.mjs:100 |
 | `decisions/0009` | src/page.js:2187 |
 | `decisions/0012` | src/build-graph.mjs:8 |
@@ -161,14 +163,14 @@ enforces each invariant; who calls each `__vg` entry point. Stale when
 | `__vg.compactAxis` | scripts/smoke.mjs ×4 |
 | `__vg.dateSpan` | scripts/shoot-daterange.mjs ×1, scripts/smoke.mjs ×6 |
 | `__vg.debugDump` | scripts/obsidian-smoke.mjs ×2, scripts/smoke.mjs ×3 |
-| `__vg.demo` | scripts/demo.mjs ×12, scripts/obsidian-smoke.mjs ×2, scripts/probe-cascade.mjs ×1, scripts/probe-dotsize.mjs ×4, scripts/probe-dotwhy.mjs ×1, scripts/probe-frame.mjs ×3, scripts/probe-trace.mjs ×1, scripts/render-diff.mjs ×3, scripts/shoot-cascade-frame.mjs ×1, scripts/shoot-daterange.mjs ×1, scripts/shoot.mjs ×6, scripts/smoke.mjs ×14, scripts/teardown-check.mjs ×2, scripts/update-layout-snapshots.mjs ×1 |
+| `__vg.demo` | scripts/demo.mjs ×12, scripts/mobile-check.mjs ×2, scripts/obsidian-smoke.mjs ×2, scripts/probe-cascade.mjs ×1, scripts/probe-dotsize.mjs ×4, scripts/probe-dotwhy.mjs ×1, scripts/probe-frame.mjs ×3, scripts/probe-trace.mjs ×1, scripts/render-diff.mjs ×3, scripts/shoot-cascade-frame.mjs ×1, scripts/shoot-daterange.mjs ×1, scripts/shoot.mjs ×6, scripts/smoke.mjs ×14, scripts/teardown-check.mjs ×2, scripts/update-layout-snapshots.mjs ×1 |
 | `__vg.densityReport` | scripts/measure-density.mjs ×1, scripts/smoke.mjs ×6 |
 | `__vg.dotWhy` | scripts/probe-dotwhy.mjs ×5 |
 | `__vg.edgeInk` | scripts/render-diff.mjs ×2, scripts/smoke.mjs ×1 |
 | `__vg.edgeReport` | scripts/smoke.mjs ×3 |
 | `__vg.fitCap` | scripts/probe-dotsize.mjs ×3, scripts/probe-frame.mjs ×1, scripts/shoot-cascade-frame.mjs ×3, scripts/smoke.mjs ×3 |
 | `__vg.folderShown` | scripts/smoke.mjs ×3 |
-| `__vg.graph` | scripts/obsidian-smoke.mjs ×4, scripts/probe-dotsize.mjs ×4, scripts/probe-frame.mjs ×3, scripts/render-diff.mjs ×5, scripts/shoot-cascade-frame.mjs ×4, scripts/smoke.mjs ×53, scripts/teardown-check.mjs ×1, scripts/update-layout-snapshots.mjs ×2 |
+| `__vg.graph` | scripts/mobile-check.mjs ×3, scripts/obsidian-smoke.mjs ×4, scripts/probe-dotsize.mjs ×4, scripts/probe-frame.mjs ×3, scripts/render-diff.mjs ×5, scripts/shoot-cascade-frame.mjs ×4, scripts/smoke.mjs ×53, scripts/teardown-check.mjs ×1, scripts/update-layout-snapshots.mjs ×2 |
 | `__vg.groupCount` | scripts/probe-frame.mjs ×2, scripts/render-diff.mjs ×2, scripts/smoke.mjs ×7 |
 | `__vg.groupOf` | scripts/smoke.mjs ×7 |
 | `__vg.groupOrder` | scripts/measure-density.mjs ×1, scripts/probe-dotsize.mjs ×1, scripts/probe-frame.mjs ×1, scripts/render-diff.mjs ×2, scripts/smoke.mjs ×16 |
@@ -194,7 +196,7 @@ enforces each invariant; who calls each `__vg` entry point. Stale when
 | `__vg.rangeReport` | scripts/shoot-daterange.mjs ×1, scripts/smoke.mjs ×7 |
 | `__vg.readTheme` | scripts/render-diff.mjs ×2, scripts/shoot.mjs ×2 |
 | `__vg.relayout` | scripts/smoke.mjs ×1, scripts/update-layout-snapshots.mjs ×1 |
-| `__vg.renderer` | scripts/measure-density.mjs ×1, scripts/obsidian-smoke.mjs ×1, scripts/probe-dotsize.mjs ×10, scripts/probe-frame.mjs ×1, scripts/render-diff.mjs ×10, scripts/shoot-cascade-frame.mjs ×17, scripts/shoot.mjs ×1, scripts/smoke.mjs ×67 |
+| `__vg.renderer` | scripts/measure-density.mjs ×1, scripts/mobile-check.mjs ×6, scripts/obsidian-smoke.mjs ×1, scripts/probe-dotsize.mjs ×10, scripts/probe-frame.mjs ×1, scripts/render-diff.mjs ×10, scripts/shoot-cascade-frame.mjs ×17, scripts/shoot.mjs ×1, scripts/smoke.mjs ×67 |
 | `__vg.ribbonXOf` | scripts/smoke.mjs ×11 |
 | `__vg.rings` | scripts/probe-dotsize.mjs ×2 |
 | `__vg.ringsLayout` | scripts/probe-frame.mjs ×1 |
@@ -205,7 +207,7 @@ enforces each invariant; who calls each `__vg` entry point. Stale when
 | `__vg.setUnlinkedByFolder` | scripts/smoke.mjs ×13 |
 | `__vg.setUnlinkedTintByFolder` | scripts/smoke.mjs ×4 |
 | `__vg.slotOf` | scripts/smoke.mjs ×2 |
-| `__vg.state` | scripts/demo.mjs ×1, scripts/measure-density.mjs ×2, scripts/probe-cascade.mjs ×1, scripts/probe-dotsize.mjs ×1, scripts/probe-dotwhy.mjs ×1, scripts/probe-trace.mjs ×1, scripts/render-diff.mjs ×3, scripts/shoot-cascade-frame.mjs ×1, scripts/shoot-daterange.mjs ×1, scripts/shoot.mjs ×1, scripts/smoke.mjs ×53, scripts/update-layout-snapshots.mjs ×1 |
+| `__vg.state` | scripts/demo.mjs ×1, scripts/measure-density.mjs ×2, scripts/mobile-check.mjs ×6, scripts/probe-cascade.mjs ×1, scripts/probe-dotsize.mjs ×1, scripts/probe-dotwhy.mjs ×1, scripts/probe-trace.mjs ×1, scripts/render-diff.mjs ×3, scripts/shoot-cascade-frame.mjs ×1, scripts/shoot-daterange.mjs ×1, scripts/shoot.mjs ×1, scripts/smoke.mjs ×53, scripts/update-layout-snapshots.mjs ×1 |
 | `__vg.subTailRank` | scripts/smoke.mjs ×2 |
 | `__vg.syncAlpha` | scripts/measure-density.mjs ×1, scripts/render-diff.mjs ×1, scripts/smoke.mjs ×22 |
 | `__vg.timeScale` | scripts/probe-cascade.mjs ×1, scripts/probe-dotsize.mjs ×1, scripts/probe-dotwhy.mjs ×1, scripts/probe-trace.mjs ×1, scripts/shoot-cascade-frame.mjs ×1, scripts/smoke.mjs ×6 |
