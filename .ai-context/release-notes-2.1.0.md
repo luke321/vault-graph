@@ -34,6 +34,8 @@ there it is the better one.
 
 ### Walking the links, and back
 
+<img src="https://raw.githubusercontent.com/luke321/vault-graph/develop/assets/features/hoptrail.webp" width="100%" alt="A card opened on a well-linked note, four of its linked notes clicked in turn so the trail grows a back arrow and crumbs, folded to the first and the last two, then two steps back with the arrow and a jump straight to the first crumb, which truncates the walk there">
+
 The linked notes on a card are clickable, and clicking one walks the graph — a hop. Each hop is
 remembered: the card grows a back arrow and a trail of where you came from, oldest first, folded
 to the first and the last two once the walk gets long. The arrow steps back one hop; any crumb

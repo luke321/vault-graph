@@ -50,6 +50,8 @@ any crumb jumps straight to that note and drops everything after it. A crumb who
 filter or the date range is currently hiding greys out and stays clickable. Opening a note
 from the disc or the search box starts a new walk, and closing the card ends it.
 
+<img src="../assets/features/hoptrail.webp" width="100%" alt="A card opened on a well-linked note, four of its linked notes clicked in turn so the trail grows a back arrow and crumbs, folded to the first and the last two, then two steps back with the arrow and a jump straight to the first crumb, which truncates the walk there">
+
 ## Filtering by folder
 
 Click a folder in the legend to hide it; the remaining wedges grow back into the angle it
