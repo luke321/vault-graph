@@ -2193,7 +2193,14 @@ async function ovState(p) {
                                  y0: +o.footprint.y0.toFixed(2), y1: +o.footprint.y1.toFixed(2) } : null,
              shape: o.shape ? { s: o.shape.s, k: o.shape.k, rect: o.shape.rect.map(function(v){ return +v.toFixed(2); }),
                                 chevron: o.shape.chevron, nSectors: o.shape.sectors.length,
-                                ringO: +o.shape.rings.o.toFixed(2) } : null }; })()`);
+                                ringO: +o.shape.rings.o.toFixed(2),
+                                ringI: +o.shape.rings.i.toFixed(2),
+                                inner: o.shape.inner.map(function(v){ return +v.toFixed(2); }),
+                                // github#79 -- how much of each ring the folder sectors cover
+                                cover: (function(){ var c = { i: 0, o: 0 };
+                                  o.shape.sectors.forEach(function(s){ c[s.band] += s.a1 - s.a0; });
+                                  return { i: +(c.i / (2*Math.PI)).toFixed(4),
+                                           o: +(c.o / (2*Math.PI)).toFixed(4) }; })() } : null }; })()`);
 }
 async function camTo(p, s) {
   await p.eval(`__vg.renderer.getCamera().setState(${JSON.stringify(s)}); void 0`);
@@ -2247,6 +2254,12 @@ check("the overview footprint is drawn to the disc's scale and is never clamped"
   const gotW = inside.shape ? inside.shape.rect[2] - inside.shape.rect[0] : 0;
   const scaleErr = wantW > 0 ? Math.abs(gotW - wantW) / wantW : 1;
   const discPx = inside.shape ? inside.shape.k * rings.maxR : 0;
+  // github#79, design/0014 -- the sectors must actually span the rings
+  const cov = inside.shape ? inside.shape.cover : { i: 0, o: 0 };
+  const bandsOK = cov.o > 0.8 && cov.o < 1.2 && cov.i > 0.8 && cov.i < 1.2 &&
+                  !!inside.shape && inside.shape.ringO > inside.shape.inner[1] &&
+                  inside.shape.ringI > inside.shape.inner[0] &&
+                  inside.shape.inner[1] > inside.shape.ringI;
 
   // github#79, design/0014 -- wider than the tile, so it must run off both sides
   await camTo(p, { x: 0.5, y: 0.9, ratio: 1.08, angle: 0 });
@@ -2263,10 +2276,14 @@ check("the overview footprint is drawn to the disc's scale and is never clamped"
                  Math.abs(away.shape.chevron) < 0.02;
   await camReset(p);
   return {
-    ok: scaleErr < 0.01 && discPx > 8 && overflows && offTile && chevOK,
+    ok: scaleErr < 0.01 && discPx > 8 && overflows && offTile && chevOK && bandsOK,
     detail: `at ratio 0.35 the rect is ${gotW.toFixed(2)}px wide against ${wantW.toFixed(2)} ` +
             `promised (${(scaleErr * 100).toFixed(3)}% off), disc drawn at ${discPx.toFixed(1)}px ` +
-            `radius in a ${inside.shape ? inside.shape.s : 0}px tile; at ratio 2.0 panned the rect ` +
+            `radius in a ${inside.shape ? inside.shape.s : 0}px tile; sectors cover ` +
+            `${(cov.o * 100).toFixed(1)}% of the outer ring and ${(cov.i * 100).toFixed(1)}% of ` +
+            `the inner, radii ${inside.shape ? inside.shape.inner[0].toFixed(1) + "/" +
+              inside.shape.ringI.toFixed(1) + " and " + inside.shape.inner[1].toFixed(1) + "/" +
+              inside.shape.ringO.toFixed(1) : "?"}px; at ratio 2.0 panned the rect ` +
             `spans ${wide.shape ? (wide.shape.rect[0].toFixed(0) + ".." + wide.shape.rect[2].toFixed(0)) : "?"} ` +
             `across a ${wide.shape ? wide.shape.s : 0}px tile (not clamped: ${overflows}); ` +
             `panned right off the disc the rect starts at ` +
