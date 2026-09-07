@@ -388,6 +388,77 @@ it: the two tabs exist, the rows are the tag dimension's own names, a pin lands 
 and shows on the tag disc, the folder map stays empty, and the folder disc's order and colours
 are unchanged. Rows listed per tab on the four fixtures: 7 against 2, 4 against 15, 18 against
 14, 18 against 14.
+## The overview is absent at rest, and its footprint is never clamped
+
+github#79, `design/0014`. The schematic beside Fit is **absent, not faded**, whenever the whole
+disc is visible, and a resting page must therefore be pixel-for-pixel what it was.
+
+```bash
+node scripts/smoke.mjs --only overview          # three checks, all three fixtures
+node scripts/smoke.mjs --only "camera cluster"  # it is a SIBLING of the cluster, not in it
+```
+
+**What decides it is containment, not the camera ratio.** The issue proposed the ratio against
+`fitRatio()`; that is right for a centred camera and wrong for a panned one, because a camera
+panned at exactly the fit ratio crops the disc too. The test is whether the circle of radius
+`lastMaxR * UNIT` — the **live** disc, the one `fit()` frames — lies inside the footprint from
+`viewportToGraph`. Reading `geomLock.maxR` instead would show the tile on a resting, filtered
+page.
+
+Because `fitRatio()` carries the same `live / locked` factor the radius does, the margin is
+scale-invariant. Measured 2026-09-08 after a Fit click: **1.200× the live disc radius, the same
+on all three fixtures**, because the margin is geometry (`FIT_RATIO` 1.08, the bbox's 1.02,
+`STAGE_PADDING`) rather than a fact about a vault. From a hardcoded 1.08 it reads 1.282.
+
+**The resting page is unchanged, and that is measured rather than argued.**
+
+```bash
+node scripts/render-diff.mjs --against-dir <a develop build> --ratios 1.08,0.35,4.2 --mode all
+```
+
+Against pages built from `develop@598a6b9`, dark, 1600x1000, all three fixtures: at **ratio 1.08
+every clip is identical** — stage, page, canvas, heatmap, ribbon, legend — and so is **ratio 4.2**,
+where the disc is small enough to be contained and the tile stays away. At **ratio 0.35** the only
+pixels that differ anywhere on the page are one 96x96 box at the tile's own position
+(`x 1188..1283, y 703..798` on the stage): **6903, 6946 and 6636 px** on the demo, shape and 10k
+fixtures. `positions`, `camera`, `labels` and the layer-composite `pixels` compare are **0 at every
+ratio** — the tile is not one of the renderer's canvases, so it costs the disc nothing and
+`savePng` cannot pick it up. The goldens do not move: the overview reads `geomLock` and the plan
+and writes neither.
+
+**A still camera draws nothing.** `ovSync` runs from `afterRender` and returns before touching the
+canvas unless a signature changed. The signature is the drawing's own inputs quantised to what
+moves a pixel — the rect to a quarter pixel, the ring radii to half a pixel, each sector to one
+degree — so quantising the *output* makes the guard true by construction rather than by argument.
+`design/0010`'s band guard is the precedent. Measured 2026-09-08 through `__vg.overview().paints`:
+
+| | paints |
+|---|---|
+| at rest, five forced `refresh()` plus `placeLogo()` | **0** |
+| at rest, 500 ms of stillness | **0** |
+| hiding the biggest folder — a whole cascade **and** its auto-fit | **0** |
+| 1.2 s of stillness while the tile is shown | **0** |
+| three zoom-in notches, the camera genuinely moving | 12–13 |
+
+The one case that paints unbidden is a **growth** auto-fit: re-showing a dominant folder paints
+**14** times on the shape fixture, because github#14 fits immediately while the disc is still
+expanding and for part of that flight the disc really is bigger than the frame. The tile is
+reporting the truth; whether a sub-second appearance there is wanted is an open question on
+github#79, not a defect.
+
+**The footprint is drawn to true scale and clipped by the canvas, never by the code.** Clamping it
+would draw a viewport that is not where the camera is. Measured on the demo fixture: at ratio 0.35
+the rect is **56.50px against 56.51 promised, 0.015% off**; panned on the tight axis at fit's own
+ratio it spans **-39..135 across a 96px tile**; panned clear of the disc it starts at **141**,
+wholly outside, and is replaced by a chevron reading **0°** — which points at the **frame**, not at
+the disc.
+
+**`fit()` lends panning back for its whole 380 ms flight, and `camSettle` cannot see that.** When
+the camera is already at the fit target nothing moves, so `camSettle` returns while the loan is
+outstanding and every later reading is of a page mid-fit — which is how the smoke check first
+reported a panning leak that did not exist. Wait for `getSetting("enableCameraPanning")` to go
+false, not for the camera to stop. Confirmed against `develop`'s own build: identical behaviour,
+and identical whether the click lands on `#vg-ov` or `#vg-reset`.
 
 ## The rings are independent
 

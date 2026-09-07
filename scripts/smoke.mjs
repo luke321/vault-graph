@@ -2211,9 +2211,7 @@ check("the overview is absent at rest and appears only while the disc is cropped
 
   await camTo(p, { x: 0.5, y: 0.5, ratio: 0.35, angle: 0 });
   const zoomed = await ovState(p);
-  // Pan on the TIGHT axis. The stage is wider than it is tall, so fit() leaves far more
-  // room in x than in y, and a pan in x this size crops nothing -- measured, 1.282x the
-  // disc vertically against roughly twice that across.
+  // github#79, design/0014 -- the tight axis; the stage is wider than tall
   await camTo(p, { x: 0.5, y: 0.9, ratio: 1.08, angle: 0 });
   const panned = await ovState(p);
   await camReset(p);
@@ -2222,7 +2220,7 @@ check("the overview is absent at rest and appears only while the disc is cropped
   await sleep(500);
   const quiet2 = await ovState(p);
 
-  // The margin fit() leaves: how much bigger the frame is than the disc on the short axis.
+  // github#79, design/0014
   const margin = rest.fp ? Math.min(-rest.fp.x0, rest.fp.x1, -rest.fp.y0, rest.fp.y1) / rest.liveR : 0;
   return {
     ok: rest.hidden && !rest.shown && !rest.cropped &&
@@ -2244,15 +2242,13 @@ check("the overview footprint is drawn to the disc's scale and is never clamped"
   await camTo(p, { x: 0.5, y: 0.5, ratio: 0.35, angle: 0 });
   const inside = await ovState(p);
   const rings = await p.j(`__vg.rings()`);
-  // The rect's own width against the footprint's, both in the tile's units: the drawing
-  // must be the camera's rectangle at the disc's scale, not a shape fitted to the tile.
+  // github#79, design/0014 -- true scale, not a shape fitted to the tile
   const wantW = inside.shape ? (inside.fp.x1 - inside.fp.x0) * inside.shape.k : 0;
   const gotW = inside.shape ? inside.shape.rect[2] - inside.shape.rect[0] : 0;
   const scaleErr = wantW > 0 ? Math.abs(gotW - wantW) / wantW : 1;
   const discPx = inside.shape ? inside.shape.k * rings.maxR : 0;
 
-  // Cropped by a pan on the tight axis, and at fit's own ratio the frame is already wider
-  // than the whole tile: the rectangle has to run off both sides rather than be squeezed in.
+  // github#79, design/0014 -- wider than the tile, so it must run off both sides
   await camTo(p, { x: 0.5, y: 0.9, ratio: 1.08, angle: 0 });
   const wide = await ovState(p);
   const overflows = !!wide.shape && wide.shape.rect[2] - wide.shape.rect[0] > wide.shape.s &&
@@ -2262,8 +2258,7 @@ check("the overview footprint is drawn to the disc's scale and is never clamped"
   const away = await ovState(p);
   const offTile = !!away.shape && away.shape.chevron !== null &&
                   away.shape.rect[0] > away.shape.s;
-  // The arrow says where the FRAME is, not where the disc is. Panned to +x, the frame sits
-  // to the right of the disc the tile draws, so it points right: 0 canvas radians.
+  // github#79, design/0014 -- the arrow says where the FRAME is
   const chevOK = !!away.shape && away.shape.chevron !== null &&
                  Math.abs(away.shape.chevron) < 0.02;
   await camReset(p);
@@ -2282,9 +2277,7 @@ check("the overview footprint is drawn to the disc's scale and is never clamped"
 
 // github#79
 check("clicking the overview fits the disc through fit(), with panning on or off", async (p) => {
-  // fit() aims at fitRatio(), which is 1.08 scaled by how far the LIVE disc reaches -- 1.0373
-  // on the 10k vault, where the visible plan falls 4% short of the locked one. Ask the page
-  // rather than hardcoding the demo vault's answer.
+  // github#79, design/0014 -- ask the page; the 10k vault fits to 1.0373
   const wantRatio = async () => {
     const reach = await p.j(`__vg.densityReport().reach`);
     return 1.08 * Math.max(0.12, Math.min(1.35, reach));
@@ -2292,15 +2285,20 @@ check("clicking the overview fits the disc through fit(), with panning on or off
   await camTo(p, { x: 0.5, y: 0.5, ratio: 0.35, angle: 0 });
   const want1 = await wantRatio();
   const shown = await p.j(`!document.querySelector("#vg-ov").hidden`);
+  // github#79, design/0014 -- camAtRest first: camSettle can beat fit()'s first frame
+  const flown = async () => {
+    for (const dl = Date.now() + 4000; Date.now() < dl;) {
+      if (await p.j(`!!__vg.camAtRest`)) return true;
+      await sleep(60);
+    }
+    return false;
+  };
   await p.eval(`document.querySelector("#vg-ov").click(); void 0`);
+  const flew1 = await flown();
   const landed = await camSettle(p);
-  for (const dl = Date.now() + 4000; Date.now() < dl && !(await p.j(`!!__vg.camAtRest`));) await sleep(60);
   const restOv = await ovState(p);
 
-  // NOT camSettle here. fit() lends panning back for its whole 380ms flight, and when the
-  // camera is already at the fit target nothing moves -- so camSettle returns while the
-  // loan is still outstanding and every later reading is of a page mid-fit. Wait for the
-  // postcondition itself.
+  // github#79, design/0014 -- NOT camSettle: fit() lends panning back mid-flight
   const panRestored = async () => {
     for (const dl = Date.now() + 4000; Date.now() < dl;) {
       if (!(await p.j(`!!__vg.renderer.getSetting("enableCameraPanning")`))) return true;
@@ -2316,6 +2314,7 @@ check("clicking the overview fits the disc through fit(), with panning on or off
   await p.eval(`document.querySelector("#vg-ov").click(); void 0`);
   const lentOnTile = await p.j(`!!__vg.renderer.getSetting("enableCameraPanning")`);
   const settledTile = await panRestored();
+  const flew2 = await flown();
   const landed2 = await camSettle(p);
   const panOff = await p.j(`(function(){ return { setting: !!__vg.renderer.getSetting("enableCameraPanning"),
                                                   api: !!__vg.panEnabled }; })()`);
@@ -2323,7 +2322,7 @@ check("clicking the overview fits the disc through fit(), with panning on or off
   await camSettle(p);
   await camReset(p);
   return {
-    ok: shown === true &&
+    ok: shown === true && flew1 && flew2 &&
         Math.abs(landed.x - 0.5) < 0.002 && Math.abs(landed.y - 0.5) < 0.002 &&
         Math.abs(landed.ratio - want1) < 0.03 && restOv.hidden &&
         Math.abs(landed2.x - 0.5) < 0.002 && Math.abs(landed2.ratio - want2) < 0.03 &&

@@ -173,6 +173,15 @@ async function main() {
     "           overflowX: d.scrollWidth - d.clientWidth," +
     "           sidebar: box('vg-sidebar'), stage: box('vg-stage')," +
     "           heat: box('vg-heat'), canvas: box('vg-canvas'), graph: box('vg-graph')," +
+    // github#79, design/0014 -- forced visible: where it lands, not when
+    "           ov: (function () { var o = document.getElementById('vg-ov'); if (!o) return null;" +
+    "             var was = o.hidden; o.hidden = false; var r = o.getBoundingClientRect();" +
+    "             var m = document.getElementById('vg-mob'), c = document.getElementById('vg-cam');" +
+    "             var hit = function (e) { if (!e) return false; var q = e.getBoundingClientRect();" +
+    "               return !(q.right < r.left || q.left > r.right || q.bottom < r.top || q.top > r.bottom); };" +
+    "             var res = { w: Math.round(r.width), h: Math.round(r.height), x: Math.round(r.left)," +
+    "                         y: Math.round(r.top), hitsMob: hit(m), hitsCam: hit(c) };" +
+    "             o.hidden = was; return res; })()," +
     "           legendHidden: leg ? Math.max(0, leg.scrollHeight - leg.clientHeight) : null," +
     "           sidebarHidden: (function () { var sb = document.getElementById('vg-sidebar');" +
     "             return sb ? Math.max(0, sb.scrollHeight - sb.clientHeight) : null; })()," +
@@ -473,6 +482,12 @@ async function main() {
     const b = layout[k];
     console.log("  " + pad("#vg-" + k, 12) +
                 (b ? `${pad(b.w + "x" + b.h, 12)} at ${b.x},${b.y}` : "absent"));
+  }
+  // github#79
+  if (layout.ov) {
+    console.log("  " + pad("#vg-ov", 12) + pad(layout.ov.w + "x" + layout.ov.h, 12) +
+                ` at ${layout.ov.x},${layout.ov.y}` +
+                `   overlaps #vg-mob ${layout.ov.hitsMob}, #vg-cam ${layout.ov.hitsCam}`);
   }
   console.log("");
   console.log(`  horizontal overflow      ${layout.overflowX} px`);
