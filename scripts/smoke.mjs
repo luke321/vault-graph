@@ -3181,6 +3181,11 @@ async function hop(p, n) {
   return n;
 }
 async function closeCard(p) { await p.eval(`(function(){ var x = document.querySelector("#vg-detail .x"); if (x) x.click(); })(); void 0`); }
+async function stepBack(p) {
+  const ok = await p.j(`(function(){ var b = document.querySelector("#vg-detail .crumbs .nvb"); if (!b) return false; b.click(); return true; })()`);
+  await sleep(160);
+  return ok;
+}
 
 check("only a hop lengthens the trail", async (p) => {
   await settle(p);
@@ -3201,20 +3206,20 @@ check("only a hop lengthens the trail", async (p) => {
                        `a fresh search hit: ${s2.crumbs.length}; one more hop: ${s3.crumbs.length}; closed: card ${s4.open ? "STILL OPEN" : "hidden"}` };
 });
 
-check("stepping back never re-collects a hop, and never leaves the page", async (p) => {
+check("stepping back never re-collects a hop", async (p) => {
   await settle(p);
   if (!(await selectBySearch(p))) return { ok: false, detail: "no search hit to select" };
   const n = await hop(p, 4);
   const s4 = await trailState(p);
-  await pressKey(p, "Backspace");
+  await stepBack(p);
   const s3 = await trailState(p);
-  await pressKey(p, "ArrowLeft", 1);
+  await stepBack(p);
   const s2 = await trailState(p);
   await closeCard(p);
   const ok = n === 4 && s4.crumbs.length === 3 && s4.dots && s3.crumbs.length === 3 && !s3.dots &&
              s2.crumbs.length === 2 && s2.href === s4.href && s4.sel !== s3.sel && s3.sel !== s2.sel;
   return { ok, detail: `after ${n} hops: ${s4.crumbs.length} crumbs shown${s4.dots ? " + ellipsis" : ""}; ` +
-                       `Backspace: ${s3.crumbs.length}${s3.dots ? " + ellipsis" : ""}; Alt+ArrowLeft: ${s2.crumbs.length}; ` +
+                       `back arrow: ${s3.crumbs.length}${s3.dots ? " + ellipsis" : ""}; again: ${s2.crumbs.length}; ` +
                        `href ${s2.href === s4.href ? "unchanged" : "CHANGED to " + s2.href}` };
 });
 
@@ -3240,8 +3245,8 @@ check("the trail is not layout", async (p) => {
   const a = await p.j(snap);
   if (!(await selectBySearch(p))) return { ok: false, detail: "no search hit to select" };
   const n = await hop(p, 5);
-  await pressKey(p, "Backspace");
-  await pressKey(p, "Backspace");
+  await stepBack(p);
+  await stepBack(p);
   await sleep(500);
   const b = await p.j(snap);
   await closeCard(p);
@@ -3256,23 +3261,27 @@ check("the trail is not layout", async (p) => {
                        `plan ${a.plan === b.plan ? "identical" : "CHANGED"}` };
 });
 
-check("keys in an input stay the input's", async (p) => {
+check("the page claims no keyboard shortcut", async (p) => {
   await settle(p);
   if (!(await selectBySearch(p))) return { ok: false, detail: "no search hit to select" };
   const n = await hop(p, 2);
-  await p.eval(`(function(){ var q = document.querySelector("#vg-q"); q.value = "ab"; q.focus(); })(); void 0`);
+  const before = await trailState(p);
   await pressKey(p, "Backspace");
   await pressKey(p, "ArrowLeft", 1);
-  const typed = await p.j(`document.querySelector("#vg-q").value`);
-  const s = await trailState(p);
   await pressKey(p, "Escape");
-  const afterEsc = await trailState(p);
-  await p.eval(`(function(){ var q = document.querySelector("#vg-q"); q.value = ""; q.dispatchEvent(new Event("input")); })(); void 0`);
+  const after = await trailState(p);
+  await p.eval(`(function(){ var q = document.querySelector("#vg-q"); q.value = "ab"; q.focus(); })(); void 0`);
+  await pressKey(p, "Backspace");
+  const typed = await p.j(`document.querySelector("#vg-q").value`);
+  await p.eval(`(function(){ var q = document.querySelector("#vg-q"); q.blur(); q.value = ""; q.dispatchEvent(new Event("input")); })(); void 0`);
   await closeCard(p);
-  const ok = n === 2 && s.crumbs.length === 2 && typed === "a" && s.open && afterEsc.open && afterEsc.crumbs.length === 2 &&
-             afterEsc.active.indexOf("INPUT") !== 0;
-  return { ok, detail: `Backspace in the search box: value "ab" -> ${JSON.stringify(typed)}, trail ${s.crumbs.length} crumbs, card ${s.open ? "open" : "CLOSED"}; ` +
-                       `Escape there: card ${afterEsc.open ? "still open" : "CLOSED"}, focus on ${afterEsc.active || "nothing"}` };
+  const ok = n === 2 && before.crumbs.length === 2 && after.crumbs.length === 2 && after.open &&
+             after.sel === before.sel && after.href === before.href && typed === "a";
+  return { ok, detail: `Backspace, Alt+ArrowLeft and Escape with the card open on ${before.crumbs.length} crumbs: ` +
+                       `${after.crumbs.length} crumbs, card ${after.open ? "still open" : "CLOSED"}, ` +
+                       `selection ${after.sel === before.sel ? "unchanged" : "CHANGED"}, ` +
+                       `href ${after.href === before.href ? "unchanged" : "CHANGED to " + after.href}; ` +
+                       `the search box still gets its own Backspace ("ab" -> ${JSON.stringify(typed)})` };
 });
 
 check("re-selecting the same note keeps the trail, and a filter does not clear it", async (p) => {

@@ -533,7 +533,6 @@
   .vault-graph #vg-detail a.open:hover { background: color-mix(in srgb, var(--accent) 12%, transparent); }
   .vault-graph #vg-detail .pin svg { width: 13px; height: 13px; vertical-align: -2px; margin-right: 3px; }
   /* github#40, design/0012 */
-  .vault-graph:focus { outline: none; }
   .vault-graph #vg-detail .crumbs { display: flex; align-items: center; gap: 4px; margin: 0 22px 7px 0; }
   .vault-graph #vg-detail .crumbs ol {
     display: flex; flex-wrap: wrap; align-items: center; gap: 2px 0;

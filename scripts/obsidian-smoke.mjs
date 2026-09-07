@@ -29,6 +29,26 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 /* ------------------------------------------------------------------ inputs -- */
 
+// design/0012 -- the harness belongs off the user's main screen
+function leftmostScreen() {
+  const fallback = { x: -2400, y: 40, w: 1600, h: 1000 };
+  if (process.platform !== "win32") return fallback;
+  const ps = spawnSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command",
+    "Add-Type -AssemblyName System.Windows.Forms; " +
+    "[System.Windows.Forms.Screen]::AllScreens | Sort-Object { $_.WorkingArea.Left } | Select-Object -First 1 | " +
+    "ForEach-Object { '{0} {1} {2} {3}' -f $_.WorkingArea.Left, $_.WorkingArea.Top, $_.WorkingArea.Width, $_.WorkingArea.Height }"],
+    { encoding: "utf8" });
+  const m = /(-?\d+) (-?\d+) (\d+) (\d+)/.exec((ps.stdout || "").trim());
+  return m ? { x: +m[1], y: +m[2], w: +m[3], h: +m[4] } : fallback;
+}
+const SCREEN = leftmostScreen();
+const WIN_W = Math.min(1600, SCREEN.w - 40);
+const WIN_H = Math.min(1000, SCREEN.h - 40);
+const WIN_X = SCREEN.x + Math.max(0, Math.floor((SCREEN.w - WIN_W) / 2));
+const WIN_Y = SCREEN.y + Math.max(0, Math.floor((SCREEN.h - WIN_H) / 2));
+const POPOUT = JSON.stringify({ x: SCREEN.x + 70, y: SCREEN.y + 70,
+                                size: { width: Math.min(1200, SCREEN.w - 140), height: Math.min(860, SCREEN.h - 140) } });
+
 function findObsidian() {
   const named = arg("obsidian", "");
   if (named) return named;
@@ -297,13 +317,19 @@ try {
           " app.metadataCache.on('resolved', function () { if (window.__vgSmoke.resolvedAt === null) window.__vgSmoke.resolvedAt = performance.now(); });" +
           " app.workspace.onLayoutReady(function () { window.__vgSmoke.layoutReadyAt = performance.now(); }); })(); void 0");
 
+  // design/0012 -- Electron ignores moveTo for its own main window
   const shapeWindow = async () => {
-    await E("(function(){ try { window.moveTo(-2400, 40); window.resizeTo(1600, 1000); } catch (e) { } })(); void 0");
+    await E("(function(){ try { var e = window.require && window.require('electron');" +
+            " var r = e && (e.remote || (window.require('@electron/remote')));" +
+            " if (r && r.getCurrentWindow) { r.getCurrentWindow().setBounds({ x: " + WIN_X + ", y: " + WIN_Y +
+            ", width: " + WIN_W + ", height: " + WIN_H + " }); return; } } catch (err) { }" +
+            " try { window.moveTo(" + WIN_X + ", " + WIN_Y + "); window.resizeTo(" + WIN_W + ", " + WIN_H + "); } catch (err) { } })(); void 0");
     await E("new Promise(function (r) { app.workspace.onLayoutReady(function () { try { app.workspace.leftSplit.collapse(); app.workspace.rightSplit.collapse(); } catch (e) { } r(true); }); })");
     await sleep(500);
-    return E("window.outerWidth + 'x' + window.outerHeight");
+    return E("window.outerWidth + 'x' + window.outerHeight + ' at ' + window.screenX + ',' + window.screenY");
   };
-  console.log("  window " + await shapeWindow());
+  console.log("  window " + await shapeWindow() +
+              " (leftmost screen " + SCREEN.w + "x" + SCREEN.h + " at " + SCREEN.x + "," + SCREEN.y + ")");
   const tEnable = Date.now();
   const already = await E("!!app.plugins.getPlugin('" + PLUGIN_ID + "')");
   if (!already) {
@@ -569,6 +595,13 @@ try {
                 " title: d && !d.hidden ? d.querySelector('h2').textContent : null, crumbs: cr ? cr.querySelectorAll('button.crumb').length : 0," +
                 " active: ae ? ae.tagName + '#' + ae.id : '', inMount: !!(ae && v.contentEl.contains(ae)) }; })()";
   const HOP = "(function(){ var v = " + VIEW + "; var bs = v.contentEl.querySelectorAll('#vg-detail [data-go]'); var b = bs[Math.min(1, bs.length - 1)]; if (!b) return false; b.click(); return true; })()";
+  const BACK = "(function(){ var v = " + VIEW + "; var b = v.contentEl.querySelector('#vg-detail .crumbs .nvb'); if (!b) return false; b.click(); return true; })()";
+  // design/0012 -- assert each hop; a missed one reads as a short trail
+  const cardOpen = () => waitFor(c, "(function(){ var v = " + VIEW + "; if (!v) return null;" +
+                                    " var d = v.contentEl.querySelector('#vg-detail'); return d && !d.hidden ? true : null; })()",
+                                 8000, "the detail card");
+  const hopOnce = async () => { const ok = await E(HOP); await sleep(600); return ok === true; };
+  const backOnce = async () => { const ok = await E(BACK); await sleep(400); return ok === true; };
   const keyIn = async (key, mods = 0) => {
     const ev = { key, code: key, windowsVirtualKeyCode: key === "Backspace" ? 8 : key === "ArrowLeft" ? 37 : 0, modifiers: mods };
     await c.send("Input.dispatchKeyEvent", { type: "keyDown", ...ev });
@@ -588,56 +621,73 @@ try {
   if (selected("trail")) {
     const n0 = errorsBefore();
     await clickNote();
+    await cardOpen();
     const s0 = await E(TRAIL);
-    await E(HOP); await sleep(200); await E(HOP); await sleep(200);
+    const hops = [await hopOnce(), await hopOnce()];
     const s2 = await E(TRAIL);
-    await keyIn("Backspace");
+    const backs = [await backOnce()];
     const s1 = await E(TRAIL);
+    await keyIn("Backspace");
     await keyIn("ArrowLeft", 1);
-    const s1b = await E(TRAIL);
+    const sKeys = await E(TRAIL);
+    backs.push(await backOnce());
+    const s0b = await E(TRAIL);
     await closeGraph(c);
     await openGraph(c);
     await clickNote();
-    await E(HOP); await sleep(200); await E(HOP); await sleep(200);
+    await cardOpen();
+    hops.push(await hopOnce(), await hopOnce());
     const r2 = await E(TRAIL);
-    await keyIn("Backspace");
+    backs.push(await backOnce());
     const r1 = await E(TRAIL);
     await E("(function(){ var v = " + VIEW + "; var x = v.contentEl.querySelector('#vg-detail .x'); if (x) x.click(); })(); void 0");
     const errs = errorsSince(n0);
-    report(s0.open && s0.inMount && s0.crumbs === 0 && s2.crumbs === 2 && s1.crumbs === 1 && s1b.crumbs === 0 && s1b.open &&
-           r2.crumbs === 2 && r1.crumbs === 1 && errs.length === 0,
-      "the hop trail works inside the view: hop twice, Backspace and Alt+ArrowLeft step back one each, and a reopened view starts fresh",
-      "click: card " + (s0.open ? "open" : "CLOSED") + ", focus " + (s0.inMount ? "inside the mount" : "OUTSIDE (" + s0.active + ")") + "; 2 hops: " + s2.crumbs + " crumbs; Backspace: " + s1.crumbs +
-      "; Alt+ArrowLeft: " + s1b.crumbs + " (card " + (s1b.open ? "open" : "closed") + "); reopened, 2 hops: " + r2.crumbs + ", Backspace: " + r1.crumbs + "; " + errs.length + " errors");
+    report(s0.open && s0.crumbs === 0 && s2.crumbs === 2 && s1.crumbs === 1 && sKeys.crumbs === 1 && sKeys.open &&
+           s0b.crumbs === 0 && s0b.open && r2.crumbs === 2 && r1.crumbs === 1 && errs.length === 0 &&
+           hops.every(Boolean) && backs.every(Boolean),
+      "the hop trail works inside the view, claims no key of Obsidian's, and a reopened view starts fresh",
+      "click: card " + (s0.open ? "open" : "CLOSED") + " with " + s0.crumbs + " crumbs; 2 hops: " + s2.crumbs + "; back arrow: " + s1.crumbs +
+      "; Backspace and Alt+ArrowLeft (the page must ignore both): " + sKeys.crumbs + " crumbs, card " + (sKeys.open ? "still open" : "CLOSED") +
+      "; back arrow: " + s0b.crumbs + " (card " + (s0b.open ? "open" : "closed") + "); reopened, 2 hops: " + r2.crumbs + ", back arrow: " + r1.crumbs + "; " + errs.length + " errors");
   }
   if (selected("moved-out")) {
     const n0 = errorsBefore();
+    // design/0012 -- a hop leaves the camera off-frame for the next click
+    await E("(function(){ var v = " + VIEW + "; var b = v.contentEl.querySelector('#vg-reset'); if (b) b.click(); })(); void 0");
+    await camSettle(c);
     await clickNote();
-    await E(HOP); await sleep(600); await E(HOP); await sleep(600);
+    await cardOpen();
+    const h0 = await E(TRAIL);
+    const hopped = [await hopOnce()];
+    const h1 = await E(TRAIL);
+    hopped.push(await hopOnce());
     const before = await E(TRAIL);
+    const walk = "card " + h0.crumbs + " crumbs -> hop " + h1.crumbs + " (" + JSON.stringify(h1.title) + ")" +
+                 " -> hop " + before.crumbs + " (" + JSON.stringify(before.title) + ")" +
+                 (hopped.every(Boolean) ? "" : " -- A HOP DID NOT LAND");
     const moved = await E("(async function(){ var ls = app.workspace.getLeavesOfType(" + JSON.stringify(VT) + "); if (!ls[0]) return 'no leaf'; var v0 = ls[0].view; var api0 = v0.handle.api;" +
                           " window.__vgSmokeEv = []; ['clickNode','clickStage','downStage'].forEach(function (k) { api0.renderer.on(k, function (e) { window.__vgSmokeEv.push(k + (e && e.node ? ':' + e.node : '')); }); });" +
                           " var d0 = v0.contentEl.querySelector('#vg-detail'); var t0 = d0.querySelector('h2').textContent; var log = [];" +
                           " var snap = function (why) { var h = d0.querySelector('h2'); log.push(why + ':' + (d0.hidden ? 'hidden' : (h ? h.textContent : '?')) + '/' + [].map.call(d0.querySelectorAll('button.crumb'), function (b) { return b.textContent; }).join('>')); };" +
                           " snap('before'); var mo = new MutationObserver(function () { snap('mut'); }); mo.observe(d0, { childList: true, attributes: true, attributeFilter: ['hidden'] });" +
-                          " app.workspace.moveLeafToPopout(ls[0]); await new Promise(function (r) { setTimeout(r, 1500); }); mo.disconnect(); snap('after');" +
+                          " app.workspace.moveLeafToPopout(ls[0], " + POPOUT + "); await new Promise(function (r) { setTimeout(r, 1500); }); mo.disconnect(); snap('after');" +
                           " var v = ls[0].view; var doc = v.contentEl.ownerDocument; var d = v.contentEl.querySelector('#vg-detail'); var t1 = d && !d.hidden ? d.querySelector('h2').textContent : null;" +
                           " return { otherDoc: doc !== document, sameView: v === v0 && v.handle && v.handle.api === api0, crumbs: v.contentEl.querySelectorAll('#vg-detail button.crumb').length," +
+                          " at: doc.defaultView.screenX + ',' + doc.defaultView.screenY," +
                           " open: !!d && !d.hidden, title: t1 === t0 ? 'same' : 'CHANGED ' + t0 + ' -> ' + t1, events: window.__vgSmokeEv.join(' ') || 'none', log: log.join(' | ') }; })()").catch((e) => e.message);
-    // design/0012 -- synthetic keydown: one CDP target cannot reach the popout
-    const afterPop = await E("(function(){ var v = " + VIEW + "; var d = v.contentEl.querySelector('#vg-detail'); d.focus();" +
-                             " d.dispatchEvent(new (v.contentEl.ownerDocument.defaultView.KeyboardEvent)('keydown', { key: 'Backspace', bubbles: true, cancelable: true }));" +
-                             " return v.contentEl.querySelectorAll('#vg-detail button.crumb').length; })()").catch((e) => e.message);
-    await E("document.body.focus(); document.activeElement && document.activeElement.blur(); void 0");
-    await keyIn("Backspace");
-    const afterMain = await E("(function(){ var v = " + VIEW + "; return v.contentEl.querySelectorAll('#vg-detail button.crumb').length; })()").catch((e) => e.message);
+    const afterPop = await E("(function(){ var v = " + VIEW + "; var b = v.contentEl.querySelector('#vg-detail .crumbs .nvb'); if (!b) return 'no back arrow';" +
+                             " b.click(); return v.contentEl.querySelectorAll('#vg-detail button.crumb').length; })()").catch((e) => e.message);
     await E("(function(){ app.workspace.getLeavesOfType(" + JSON.stringify(VT) + ").forEach(function (l) { l.detach(); }); })(); void 0");
     await sleep(800);
     const popouts = await E("(function(){ var fs = app.workspace.floatingSplit; return fs && fs.children ? fs.children.length : 0; })()").catch(() => -1);
     const errs = errorsSince(n0);
-    report(before.crumbs === 2 && moved && moved.otherDoc && moved.sameView && moved.crumbs === 2 && afterPop === 1 && afterMain === 1 && popouts === 0 && errs.length === 0,
-      "keys still step the trail in a view moved out to a popout, and a key in the main window leaves it alone",
-      "2 crumbs before; moved to a popout: " + JSON.stringify(moved) + "; Backspace on the moved card: " + afterPop + " crumb(s); Backspace in the main window with the body focused: " + afterMain +
+    const popAt = moved && typeof moved.at === "string" ? +moved.at.split(",")[0] : NaN;
+    const onLeft = popAt >= SCREEN.x - 80 && popAt < SCREEN.x + SCREEN.w;
+    report(hopped.every(Boolean) && before.crumbs === 2 && moved && moved.otherDoc && moved.sameView &&
+           moved.crumbs === 2 && moved.open && afterPop === 1 && popouts === 0 && errs.length === 0 && onLeft,
+      "the trail survives a view moved out to a popout, and its back arrow still steps there",
+      walk + "; moved to a popout: " + JSON.stringify(moved) + "; the back arrow on the moved card: " + afterPop + " crumb(s) left" +
+      "; popout " + (onLeft ? "on the leftmost screen" : "OFF the leftmost screen (" + SCREEN.x + ".." + (SCREEN.x + SCREEN.w) + ")") +
       "; popout windows left open: " + popouts + "; " + errs.length + " errors");
     await openGraph(c);
   }
@@ -646,11 +696,13 @@ try {
     const n0 = errorsBefore();
     await closeGraph(c);
     const t0 = Date.now();
-    const started = await E("(async function(){ var leaf = app.workspace.openPopoutLeaf(); await leaf.setViewState({ type: '" + VT + "', active: true }); return !!leaf; })()").catch((e) => e.message);
+    const started = await E("(async function(){ var leaf = app.workspace.openPopoutLeaf(" + POPOUT + "); await leaf.setViewState({ type: '" + VT + "', active: true }); return !!leaf; })()").catch((e) => e.message);
     const ready = await waitFor(c, "(function(){ var v = " + VIEW + "; if (!v || !v.handle || !v.handle.api || !v.handle.api.graph) return null;" +
                                    " var doc = v.contentEl.ownerDocument; var busy = v.contentEl.querySelector('#vg-busy'); if (busy && !busy.hidden) return null;" +
                                    " return { otherDoc: doc !== document, otherWin: doc.defaultView !== window, canvases: v.contentEl.querySelectorAll('#vg-graph canvas').length," +
-                                   " w: doc.defaultView.innerWidth, h: doc.defaultView.innerHeight, dpr: doc.defaultView.devicePixelRatio, stage: (function(){ var s = v.contentEl.querySelector('#vg-graph canvas'); return s ? s.width + 'x' + s.height : ''; })() }; })()",
+                                   " w: doc.defaultView.innerWidth, h: doc.defaultView.innerHeight, dpr: doc.defaultView.devicePixelRatio," +
+                                   " at: doc.defaultView.screenX + ',' + doc.defaultView.screenY," +
+                                   " stage: (function(){ var s = v.contentEl.querySelector('#vg-graph canvas'); return s ? s.width + 'x' + s.height : ''; })() }; })()",
                                 VG_TIMEOUT_MS, "the popout view");
     const ms = Date.now() - t0;
     await sleep(500);
@@ -660,7 +712,7 @@ try {
     const popouts = await E("(function(){ var fs = app.workspace.floatingSplit; return fs && fs.children ? fs.children.length : 0; })()").catch(() => -1);
     report(started === true && ready.otherDoc && ready.otherWin && ready.canvases > 0 && errs.length === 0 && popouts === 0,
       "the view mounts in a popout window and tears down with it",
-      "popout document " + ready.otherDoc + ", window " + ready.otherWin + " (" + ready.w + "x" + ready.h + " @" + ready.dpr + "x), " + ready.canvases + " canvases, stage " + ready.stage + ", ready in " + ms + " ms, " + errs.length + " errors, popout windows left open: " + popouts);
+      "popout document " + ready.otherDoc + ", window " + ready.otherWin + " (" + ready.w + "x" + ready.h + " @" + ready.dpr + "x at " + ready.at + "), " + ready.canvases + " canvases, stage " + ready.stage + ", ready in " + ms + " ms, " + errs.length + " errors, popout windows left open: " + popouts);
     await openGraph(c);
   }
   if (selected("plugin reload")) {

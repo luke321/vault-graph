@@ -4767,34 +4767,9 @@ function mountVaultGraph(root, data, deps) {
     return '<nav class="crumbs" aria-label="Hop trail">' +
            '<button type="button" class="nvb" data-tr="' + (trail.length - 1) +
            '" aria-label="Back to ' + esc(trailLabel(trail[trail.length - 1])) +
-           '" aria-keyshortcuts="Alt+ArrowLeft Backspace" title="Back (Alt+Left or Backspace)">&#8592;</button>' +
+           '" title="Back to ' + esc(trailLabel(trail[trail.length - 1])) + '">&#8592;</button>' +
            '<ol>' + parts.join('') + '</ol></nav>';
   }
-
-  ROOT.tabIndex = -1;
-  /** @param {KeyboardEvent} ev */
-  var trailKey = function (ev) {
-    var t = ev.target instanceof HTMLElement ? ev.target : null;
-    var typing = !!t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" ||
-                         t.tagName === "SELECT" || t.isContentEditable);
-    if (typing) {
-      if (ev.key === "Escape") { t.blur(); ROOT.focus({ preventScroll: true }); }
-      return;
-    }
-    var ctx = $("ctxmenu");
-    if (ctx && !ctx.hidden) return;
-    if (ev.key === "Escape") {
-      var sp = $("settings"), gear = $("gear");
-      if (sp && !sp.hidden && gear && !gear.hidden) { gear.click(); ev.preventDefault(); return; }
-      if (state.selected) { select(null); ev.preventDefault(); }
-      return;
-    }
-    if ((ev.key === "ArrowLeft" && ev.altKey) ||
-        (ev.key === "Backspace" && !ev.altKey && !ev.ctrlKey && !ev.metaKey)) {
-      if (trail.length) { trailBackTo(trail.length - 1); ev.preventDefault(); }
-    }
-  };
-  ROOT.addEventListener("keydown", trailKey);
 
   /** @param {string | null} id */
   function select(id) {
@@ -4804,12 +4779,7 @@ function mountVaultGraph(root, data, deps) {
     state.selected = id;
     syncLazyEdges();
     var d = $("detail");
-    if (!id) {
-      d.hidden = true; renderer.refresh();
-      var ae = DOC ? DOC.activeElement : null;
-      if (!ae || ae === DOC.body || ROOT.contains(ae)) ROOT.focus({ preventScroll: true });
-      return;
-    }
+    if (!id) { d.hidden = true; renderer.refresh(); return; }
 
     var a = graph.getNodeAttributes(id);
     var nb = neighboursOf(id).slice().sort(function (p, q) {
@@ -4853,10 +4823,8 @@ function mountVaultGraph(root, data, deps) {
     setHTML(d, h);
     d.hidden = false;
     // github#40, design/0012
-    d.tabIndex = -1;
     d.setAttribute("role", "region");
     d.setAttribute("aria-label", a.label);
-    d.focus({ preventScroll: true });
     d.querySelector(".x").onclick = function () { select(null); };
     d.querySelector(".pin").onclick = function () { togglePin(id); select(id); };
     Array.prototype.forEach.call(d.querySelectorAll("[data-go]"), /** @param {HTMLElement} b */ function (b) {
@@ -7314,6 +7282,18 @@ function mountVaultGraph(root, data, deps) {
       var dc2 = $("detail");
       return dc2 && !dc2.hidden ? dc2.querySelector(".x") : null;
     }
+    // github#40, design/0012
+    if (kind === "hop" || kind === "crumb") {
+      var dc3 = $("detail");
+      if (!dc3 || dc3.hidden) return null;
+      var picks = dc3.querySelectorAll(kind === "hop" ? "[data-go]" : ".crumbs button.crumb");
+      if (!picks.length) return null;
+      return picks[Math.max(0, Math.min(picks.length - 1, parseInt(arg, 10) || 0))];
+    }
+    if (kind === "crumbback") {
+      var dc4 = $("detail");
+      return dc4 && !dc4.hidden ? dc4.querySelector(".crumbs .nvb") : null;
+    }
     if (kind === "day") return demoCellRect(heat && heat.days[arg]);
     if (kind === "busiest") {
       if (!heat) return null;
@@ -7472,6 +7452,28 @@ function mountVaultGraph(root, data, deps) {
 
       { hover: true, target: ["note", "04"], act: "note", why: "hover a daily note" },
       { hover: true, target: ["note", "05"], act: "note", why: "hover a meeting note" },
+
+      // github#40, design/0012
+      { click: true, target: ["note", "05"], act: "hoptrail", why: "open a well-linked note's card" },
+      { settle: true, act: "hoptrail", why: "let the card land" },
+      { click: true, target: ["hop", "1"], act: "hoptrail",
+        why: "click a linked note -- the walk begins, and the card grows a back arrow and a crumb" },
+      { settle: true, act: "hoptrail", why: "let the camera fly to it" },
+      { click: true, target: ["hop", "1"], act: "hoptrail", why: "hop again -- the trail remembers where you came from" },
+      { settle: true, act: "hoptrail", why: "let it land" },
+      { click: true, target: ["hop", "1"], act: "hoptrail", why: "...and again" },
+      { settle: true, act: "hoptrail", why: "let it land" },
+      { click: true, target: ["hop", "1"], act: "hoptrail",
+        why: "four hops in: first crumb, an ellipsis, the last two -- the start of the walk is still there" },
+      { settle: true, act: "hoptrail", why: "let it land" },
+      { click: true, target: ["crumbback"], act: "hoptrail", why: "the back arrow steps back one hop" },
+      { settle: true, act: "hoptrail", why: "let the camera fly back" },
+      { click: true, target: ["crumbback"], act: "hoptrail", why: "...and one more" },
+      { settle: true, act: "hoptrail", why: "let it land" },
+      { click: true, target: ["crumb", "0"], act: "hoptrail",
+        why: "or click a crumb to jump straight back to it -- the trail truncates there" },
+      { settle: true, act: "hoptrail", why: "let the walk unwind" },
+      { click: true, target: ["detailclose"], act: "hoptrail", why: "close the card -- the trail ends with it" },
 
       { drag: true, target: ["biginner"], act: "pin", to: ["stage", "centre"],
         why: "drag a note into the hole to pin it" },

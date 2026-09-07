@@ -41,6 +41,15 @@ type, tags, word count, linked notes — each one clickable to jump across the d
 
 <img src="../assets/features/note.webp" width="100%" alt="A daily note hovered, then a meeting note hovered, each raising and haloing its own links while the rest of the disc dims">
 
+## Walking the links, and back
+
+The linked notes on a card are clickable, and clicking one walks the graph — a hop. Each hop
+is remembered: the card grows a back arrow and a trail of where you came from, oldest first,
+folded to the first and the last two once the walk gets long. The arrow steps back one hop;
+any crumb jumps straight to that note and drops everything after it. A crumb whose note a
+filter or the date range is currently hiding greys out and stays clickable. Opening a note
+from the disc or the search box starts a new walk, and closing the card ends it.
+
 ## Filtering by folder
 
 Click a folder in the legend to hide it; the remaining wedges grow back into the angle it

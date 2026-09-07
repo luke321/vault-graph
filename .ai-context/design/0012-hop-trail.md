@@ -1,13 +1,43 @@
 # The hop trail
 
-**Status** implemented on `feature/hop-trail` (2026-09-06, awaiting review) · github#40. Written
-as a concept against `develop@745aacf` (the 2.0.0 state) the same day; the numbers in the body
-come from a throwaway port of the contributor's patch onto that tree in a scratch copy. The
-implementation took the record's own proposals on every open question below: Route 2 with a
-`Co-authored-by` trailer, binding B, Escape closes the card, `/` left out, filtered crumbs grey and
-clickable, the cap keeps the origin. The five checks it added are in `invariants.md` from *Only a
-hop lengthens the trail* on; the two Obsidian checks are in `scripts/obsidian-smoke.mjs`
-(`--only trail`, `--only moved-out`).
+**Status** implemented on `feature/hop-trail` (2026-09-06, revised 2026-09-07, awaiting review) ·
+github#40. Written as a concept against `develop@745aacf` (the 2.0.0 state); the numbers in the
+body come from a throwaway port of the contributor's patch onto that tree in a scratch copy. The
+implementation took this record's own proposals on Route 2 with a `Co-authored-by` trailer,
+filtered crumbs grey and clickable, and a cap that keeps the origin. **The keyboard half is
+superseded — see the section below.** The checks are in `invariants.md` from *Only a hop lengthens
+the trail* on, and in `scripts/obsidian-smoke.mjs` (`--only trail`, `--only moved-out`).
+
+## Superseded on 2026-09-07: the trail claims no key
+
+**Everything below about Alt+ArrowLeft, Backspace, Escape and the A-versus-B binding question is
+history.** The feature ships pointer-only: the back arrow and the crumbs, and nothing bound to a
+key.
+
+The reason is one this record asked the wrong question about. It weighed *where* to bind the keys
+— the document, as the contributor's patch did, or the mount root, which is what shipped first —
+and treated a key the page could safely hear as a settled premise, because the exporter page in a
+browser is the whole world of that question. It is not: **Obsidian users bind their own hotkeys,
+and the plugin's view has no business overruling them.** Backspace and Alt+ArrowLeft are unbound
+in a default Obsidian, which is exactly what makes them attractive to bind, and a view that has
+quietly taken them is a view that breaks a user's own setup with no way for them to see why. The
+same argument reaches Escape, which is why it went too.
+
+Binding B still did what it claimed — the popout measurement below holds, and is why the check
+that replaced it can still be about a moved-out view — but "it works" was never the question
+worth answering here.
+
+What that costs, honestly: there is no keyboard path back along the walk. The crumbs are
+`<button>`s in a `<nav>`, so Tab reaches them and Enter activates them, and that is the whole
+keyboard story. If a way back by key is ever wanted, the shape that does not overrule anyone is
+Obsidian's own: the plugin registers a command, the user binds it if they want it, and the page
+exposes `api.trailBack()` for it to call. That is open question 7 below, now the only one of the
+keyboard questions still live.
+
+The removal also took the focus management that existed only to serve the keys — `ROOT.tabIndex`,
+the card taking focus on every selection, and the `.vault-graph:focus` rule. A card that grabs
+focus when you click a dot is its own small way of overruling the host, and with no key to
+receive it there was nothing left to argue for it.
 
 > Clicking a linked note on the card walks the graph, and three hops in the starting point is
 > gone: the card names only the current note, and the browser's Back key leaves a `file://` page
@@ -38,7 +68,7 @@ highest-degree note (`2019-01-26`, 125 links) and hopping along the second linke
 | **Hops, and only hops, lengthen the trail.** A hop is a click on a linked-notes row (`data-go`). A disc click, a search hit, a stage click, the reset button and a crumb click are not hops. | After a search hit: no crumbs. After 1 hop: `[2019-01-26]`. After 3: three crumbs. A search hit afterwards: no crumbs. |
 | **Back arrow first, then crumbs.** Oldest on the left; the current note is the card title and not a crumb. | Crumb row present from the first hop on; `back: true`, title is the current note. |
 | **First, ellipsis, last two** when the trail is longer than three. | At 4 hops: `[2019-01-26, …, 2018-03-18, Path dependence (4)]`, `dots: true`. At 3 or fewer: all of them, no dots. |
-| **Alt+ArrowLeft and Backspace step back one hop**, and the place just left is not re-collected: backing up twice gives n-2, not n. Both `preventDefault` when they act. | Backspace: 4 -> 3 crumbs, the current note is the one stepped back to. Alt+ArrowLeft: 3 -> 2. `location.href` unchanged throughout. |
+| ~~**Alt+ArrowLeft and Backspace step back one hop**~~ — **superseded: the back arrow steps back one hop**, and the place just left is not re-collected: backing up twice gives n-2, not n. | As measured with the keys: Backspace 4 -> 3 crumbs, Alt+ArrowLeft 3 -> 2, `location.href` unchanged. Re-measured through the back arrow 2026-09-07: identical, on all three fixtures. |
 | **A crumb click truncates the trail there.** The target and everything after it leave the trail. | Clicking the first crumb: current note `2019-01-26`, no crumbs. |
 | **A fresh selection resets.** Re-selecting the *same* note keeps the trail, because the pin toggle re-renders the card by re-selecting. | Pin, then unpin on the current note: 3 crumbs before, 3 after. |
 | **Close ends it.** The close button, a stage click, Escape and the reset button all `select(null)`. | Escape: card hidden, `selected: null`; the next selection has no crumbs. |
@@ -180,11 +210,10 @@ reaches the network or stores anything (decisions/0008, decisions/0009).
   `<button>` with the note's label as text -- the patch's `title="Back to X"` becomes
   `aria-label` on the back arrow, whose visible text is a glyph. The separators and the ellipsis
   are `aria-hidden`; the ellipsis carries a `title` saying how many are folded.
-- Focus moves into the card on every selection (binding B), onto the card container with
-  `aria-labelledby` pointing at its `<h2>`, so a screen reader announces the note reached; the
-  back arrow is one Tab away. The card already scrolls (`overflow-y: auto`) so focus never
-  scrolls the page.
-- `aria-keyshortcuts="Alt+ArrowLeft Backspace"` on the back arrow.
+- ~~Focus moves into the card on every selection~~ — superseded with the keys. The card carries
+  `role="region"` and an `aria-label` naming the note, and Tab reaches the back arrow and every
+  crumb in order. Nothing takes focus on its own.
+- ~~`aria-keyshortcuts` on the back arrow~~ — superseded; there are no shortcuts to announce.
 - Crumb text at 10 px matches the card's existing chip and `.nb` sizes; the truncation at 110 px
   keeps the full label in `title`.
 - The middle of a long trail is unreachable by any means other than stepping back through it.
@@ -256,19 +285,20 @@ survive and the author field should say who wrote them.
 
 ## Open questions for Lukas
 
-1. **Binding.** B (root-scoped, focus managed, proposed) or A (document, as the patch)? B's
-   first Obsidian measurement -- does focusing the card on select fight Obsidian's leaf focus --
-   decides it if the answer is yes.
-2. **Route.** Reimplement with `Co-authored-by` (proposed) or cherry-pick and adapt? Either way
-   the contributor is told which, and why, on the issue.
-3. **Scope of the keys.** Escape closes the card here (proposed yes); `/` focuses search
-   (proposed: its own issue).
+1. ~~**Binding.** B or A?~~ **Answered 2026-09-07: neither.** No key is bound at all.
+2. **Route.** Reimplement with `Co-authored-by` (done) or cherry-pick and adapt? Either way
+   the contributor is told which, and why, on the issue -- including that the keys their patch
+   introduced are not in the shipped feature, and why.
+3. ~~**Scope of the keys.** Escape closes the card; `/` focuses search.~~ **Answered: neither
+   ships.** The close button and a stage click close the card; `/` was never in.
 4. **Filtered crumbs.** Grey and clickable (proposed), unchanged, or dropped? And whether the
    same treatment goes onto the `data-go` rows in a follow-up.
 5. **The cap.** Keep 30 and always keep the origin (proposed), or drop the cap.
-6. **Mouse back button.** Button 3 is history-back in Chrome on `file://` too. Treat it as
-   Alt+ArrowLeft, or leave it to the browser?
-7. **Rebindable keys in Obsidian.** Page-owned (proposed) or a `View.scope` registration calling
-   `api.trailBack()` so users can rebind?
+6. **Mouse back button.** Button 3 is history-back in Chrome on `file://` too. Left to the
+   browser, by the same argument the keys lost on: it is the user's gesture, already bound.
+   Worth revisiting only if someone asks for it.
+7. **A way back by key, without taking one.** The live one. An Obsidian command the user binds
+   themselves, calling a new `api.trailBack()` -- opt-in, visible in the hotkeys list, and
+   overruling nobody. Wanted now, or left until someone asks?
 8. **`CONTRIBUTING.md`.** Whichever route: does the "pull requests are not being taken" line
    change now that the first patch has been useful?

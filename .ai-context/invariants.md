@@ -1837,8 +1837,8 @@ gate that runs when someone remembers, which is how 27 warnings accumulated in t
 ## Only a hop lengthens the trail
 
 The card's hop trail (github#40, design/0012) records the linked-notes walk and nothing else. A
-hop is a click on a linked-notes row; a disc click, a search hit, a stage click, the close button,
-Escape and the reset button are not hops, and each of them starts a fresh trail. Re-selecting the
+hop is a click on a linked-notes row; a disc click, a search hit, a stage click, the close button
+and the reset button are not hops, and each of them starts a fresh trail. Re-selecting the
 note already selected -- which is what the pin button does to re-render the card -- keeps it.
 
 ```bash
@@ -1853,20 +1853,19 @@ whose notes are now hidden (2 of 3 on the demo and 10k fixtures, 3 of 3 on the d
 one); showing the folder again unmarks them. The marks are refreshed at the start of every
 cascade, because that is the one path every visibility and range change goes through.
 
-## Stepping back never re-collects a hop, and never leaves the page
+## Stepping back never re-collects a hop
 
-Backspace and Alt+ArrowLeft step back one hop each, and the place just left is not pushed onto
-the trail again, so two steps back leave n-2 crumbs, not n. Both keys `preventDefault` when they
-act: Alt+ArrowLeft is history-back in every browser and on a `file://` page that leaves the
-graph, which is what github#40 reported.
+The back arrow steps back one hop, and the place just left is not pushed onto the trail again,
+so two steps back leave n-2 crumbs, not n.
 
 ```bash
 node scripts/smoke.mjs --only "re-collects"
 ```
 
-Measured 2026-09-06 on all three fixtures: after four hops the card shows 3 crumbs and an
-ellipsis (first, ellipsis, last two); Backspace shows 3 with no ellipsis; Alt+ArrowLeft shows 2;
-`location.href` is unchanged throughout.
+Measured 2026-09-07 on all three fixtures: after four hops the card shows 3 crumbs and an
+ellipsis (first, ellipsis, last two); one press of the back arrow shows 3 with no ellipsis; a
+second shows 2; `location.href` is unchanged throughout -- every crumb is a `<button>`, and
+nothing in the card is a link that could navigate.
 
 ## A crumb click truncates the trail at the crumb
 
@@ -1891,16 +1890,26 @@ node scripts/smoke.mjs --only "not layout"
 Measured 2026-09-06: five hops and two steps back move 0 of 1,403 / 10,002 / 954 notes (worst
 0.000 units) and leave `buildWedgePlan(false)` identical, cell for cell, on all three fixtures.
 
-## Keys in an input stay the input's
+## The page claims no keyboard shortcut
 
-The trail's keys are bound on the mount root, not the document (design/0012, binding B), and
-a key whose target is an input, textarea, select or contenteditable is left to it. Escape in the
-search box blurs it and hands focus back to the root, so the next Backspace steps the trail.
+The trail is driven by pointer alone, and that is a decision rather than an omission. The first
+cut bound Backspace, Alt+ArrowLeft and Escape on the mount root; they came out on 2026-09-07
+because **Obsidian users bind their own hotkeys, and a view that grabs keys of its own overrules
+them** (design/0012, superseding its binding A/B question). The page's only key handling is the
+two listeners that were always there and each belong to something already open: the context
+menu's own Escape, and the search box's Enter.
 
 ```bash
-node scripts/smoke.mjs --only "input stay"
+node scripts/smoke.mjs --only "no keyboard shortcut"
+node scripts/obsidian-smoke.mjs --only trail
 ```
 
-Measured 2026-09-06 on all three fixtures: with two crumbs and the search box holding `ab`,
-Backspace leaves `a` and the trail at 2; Alt+ArrowLeft changes neither; Escape leaves the card
-open and focus on the page root.
+Measured 2026-09-07 on all three fixtures: with the card open on two crumbs, Backspace,
+Alt+ArrowLeft and Escape each change nothing -- 2 crumbs before and after, the card still open,
+the selection and `location.href` unchanged -- while the search box still gets its own Backspace
+(`ab` -> `a`). In a real Obsidian the same two keys leave a one-crumb trail at one crumb with the
+card still open, in the same run that proves the back arrow does step it.
+
+**This is a claim about what the page does NOT register**, which is the kind that rots quietly:
+the check drives the keys rather than reading the source, so a listener added anywhere -- root,
+document, or a card element -- fails it.
