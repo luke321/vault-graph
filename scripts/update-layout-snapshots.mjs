@@ -16,9 +16,7 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(HERE, "..");
 const OUT_DIR = join(ROOT, "scripts", "layout-snapshots");
 
-// github#76: `drill` is the folder each fixture's DRILLED golden is taken at -- the one
-// with the most depth-1 children, so the snapshot exercises children that the vault disc
-// could only pool into the shared tail slot.
+// github#76
 const FIXTURES = [
   { script: "make-demo-vault.mjs", args: [], name: "demo-vault", drill: "03 - Resources" },
   { script: "make-test-vault.mjs", args: ["--notes", "10000", "--years", "10", "--end", "2026-08-28"], name: "test-vault", drill: "03 - Resources" },
@@ -125,8 +123,7 @@ async function measure(htmlPath, drill) {
       await sleep(120);
     }
     // github#21
-    // github#76: the drilled read seats only the notes UNDER the root, so its positions
-    // map is the drilled disc's own membership and nothing else.
+    // github#76
     const read = `JSON.stringify((function(){
       __vg.relayout();
       var plan = __vg.buildWedgePlan(false), band = {};
@@ -167,8 +164,7 @@ async function main() {
           sortedPositions[id] = positions[id];
         }
         const out = { vault: fx.name, notes, folders: folders.length, band: sortedBand, positions: sortedPositions };
-        // github#76: the root travels IN the snapshot, so the check never has to agree
-        // with this script about which folder a fixture is drilled at.
+        // github#76
         if (m.root) out.root = m.root;
         const outPath = join(OUT_DIR, `${fx.name}${kind}.json`);
         writeFileSync(outPath, JSON.stringify(out, null, 1) + "\n");

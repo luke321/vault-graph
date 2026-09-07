@@ -252,6 +252,24 @@ growth must report `moved while notes arrived: true`, and does, on all three fix
 Toggling an inner-band group must not move the outer band. Measured, an `05` toggle
 leaves the outer band constant — 0 units of movement.
 
+**A ROOT is not a filter, and its disc gets its own rings** (github#76). "Their thickness
+is locked; a filter re-packs inside them" is a statement about *filters* — a filter
+changes which of the disc's own members are drawn, so the rings it was given must hold
+still underneath it. A drill changes what the disc *is*: the member set and the level the
+wedges are cut at. So `hardRelayout`'s third argument, `freshGeom`, skips the
+`geomLock = prevGeom` restore that github#49 added for move cascades, and `regroup`
+rebuilds the lock from `buildWedgePlan(false)` over the root's members alone.
+
+Measured on the demo vault, drilling into `03 - Resources`: `r0` 6.65 → 1.50, `rOuter`
+15.25 → 5.10, `maxR` 25.25 → 7.10, 41 cells → 17. Restoring the vault's geometry instead
+would pack 60 notes into rings sized for 1403 — the drilled disc would be correct in its
+angles and wrong in every radius, and *plan parity would still pass*, because both plans
+would be reading the same wrong lock. The golden is what catches it.
+
+What holds the cascade together meanwhile is `splitHold`, not `geomLock`: a move cascade
+freezes each group's split decision for its duration (github#49), so rebuilding the
+geometry under it does not re-cut cells mid-flight.
+
 ## Only depth-1 subfolders with their own tint slot are pushed
 
 A group or a *named* subfolder moves as a block when highlighted. Pooled tail subfolders
@@ -1429,6 +1447,65 @@ to 0.75 (one folder's real band-assignment threshold), reran the check without r
 the snapshot. It failed on all three vaults, naming the exact folder that flipped band on
 the demo vault (`04 - Daily Notes: outer -> inner`) and reporting every moved note's id and
 delta on the other two. Reverted immediately after.
+
+## A drilled disc is a disc, and goes through the same suite
+
+github#76. Making a folder the whole disc replaces the wedge set entirely, which is the
+largest membership change the page can be asked for — a whole vault down to a few dozen
+notes. The temptation is to check it as its own kind of thing. It is not: it is a disc,
+so it is held to the laws in `CLAUDE.md` rather than to a reduced set of them.
+
+```
+node scripts/smoke.mjs --only "drill"      # 4 checks x 3 fixtures
+```
+
+| | demo | 10k | shape |
+|---|---|---|---|
+| root | `03 - Resources` | `03 - Resources` | `projects` |
+| notes, vault → drilled | 1403 → 60 | 10002 → 60 | 954 → 738 |
+| cells | 41 → 17 | 41 → 17 | 10 → 5 |
+| `r0` / `maxR` | 6.65/25.25 → 1.50/7.10 | → 1.50/7.10 | 5.48/20.08 → 5.30/17.90 |
+| wedges the vault could not name | 9 children, 3 named + a pool | same | 5 children |
+| row-0 dots, biggest vs cap | 11 · 11.8u / 15.4u | 12 · **15.4u / 15.4u** | 32 · 45.4u / 54.3u |
+
+The 10k figure in bold is the point of measuring it: the drilled hub is small enough that
+`HUB_ROW0_FRAC` is *binding*, not passing vacuously. A drilled disc is exactly the shape
+that broke this law once already (a band collapsed to one row, the section below), so the
+check asserts it rather than assuming `dotPx` still holds.
+
+**The golden is the check that catches a wrong lock.** Plan parity and zero-weight
+invariance both compare two plans against each other, so they pass just as happily when
+*both* are built on the wrong ring geometry. `scripts/layout-snapshots/<fixture>.drill.json`
+compares against recorded positions, and it is what fails if the drilled disc ever
+inherits the vault's rings again. **The root travels in the snapshot**, so the check reads
+which folder to open out of the file it is comparing against and cannot drift from it.
+
+## Drilling in and coming straight back is the identity
+
+github#76. The strongest single statement about a root: it adds state to the view and
+takes nothing away, so the way back is exact rather than approximately right.
+
+Measured, in and out with no other gesture: **0 of 1403 / 10002 / 954 notes moved past
+0.1 units** (worst 0.000 on every fixture), the whole-basis plan identical cell for cell,
+and the wedge order identical. The three vault goldens also regenerate byte-identical
+after the feature landed, which is the same statement made a second way.
+
+This is what makes the shared-filter decision safe. A filter set inside a drilled disc is
+written to the *absolute* `hiddenSub` key — the same key the vault disc's own subfolder
+eye writes — so there is nothing to translate on the way back and no second filter map to
+fall out of step. Measured: hiding `People` in the drilled demo disc takes it from 60
+notes to 44, and the vault disc then shows 1387 of 1403, the same 16 notes.
+
+## A drilled disc's wedge order is the order the vault disc already gave those children
+
+github#76. A drill must read as a closer look at what you were just looking at, so it may
+not silently re-sort. `computeOrder` sorts a rooted disc by note count descending, then
+name — which is `subOrder`'s own rule, the order the vault disc's legend already lists
+that folder's children in. `(unlinked)` stays last; `(directly in folder)` sorts by count
+with its siblings, because the vault's own child list already ranks that bucket by count.
+
+Checked as part of the identity check above: the wedge order after a round trip is
+compared as a string, so a re-sort in either direction fails.
 
 ## A row-0 dot may not eat past a fixed share of the hub's own radius
 

@@ -3299,17 +3299,8 @@ check("re-selecting the same note keeps the trail, and a filter does not clear i
                        `${off} marked hidden, card ${s2.open ? "open" : "CLOSED"}; shown again: ${s3.crumbs.length}` };
 });
 
-/* ------------------------------------------------------------- the drill root
- *
- * github#76. A drilled disc is a DISC, not a special view, so these checks assert the
- * same laws the vault disc is held to rather than a reduced set: it matches a golden of
- * its own, its plan agrees with the live one, a zero-weight member still costs nothing,
- * it rests on the lattice, and the cascade that gets there converges before it lands.
- *
- * The root each fixture is drilled at is READ OUT OF ITS SNAPSHOT, never named here --
- * one place decides it (scripts/update-layout-snapshots.mjs) and everything else follows,
- * so the check cannot drift away from the golden it is comparing against.
- */
+/* ------------------------------------------------------------- the drill root */
+// github#76
 
 function drillSnapshot(vaultName) {
   const fixture = ["demo-vault", "test-vault", "shape-vault"].find((f) => vaultName.startsWith(f + "-"));
@@ -3412,7 +3403,6 @@ check("a drilled disc obeys the same laws as the vault disc", async (p) => {
   const r = await p.j(`(function(){
     var parity = __vg.checkPlanParity();
     var plan = __vg.buildWedgePlan(false);
-    // the lattice: every drilled note sits on a row of its own band's pitch
     var band = {}; plan.cells.forEach(function(c){ band[c.g] = c.inner; });
     var offGrid = 0, n = 0;
     plan.cells.forEach(function(c){
@@ -3423,9 +3413,7 @@ check("a drilled disc obeys the same laws as the vault disc", async (p) => {
         if (Math.abs(Math.hypot(a.x, a.y) - want) > 0.5) offGrid++;
       });
     });
-    // github#35: a row-0 dot may not eat past HUB_ROW0_FRAC of the hub's own radius.
-    // The drilled disc has few notes and a small r0 -- the same shape that broke this
-    // once -- and geomLock is now the DRILLED r0, so the cap has to scale with it.
+    // github#35
     var a0 = __vg.renderer.graphToViewport({ x: 0, y: 0 });
     var b0 = __vg.renderer.graphToViewport({ x: 160, y: 0 });
     var perPx = 160 / Math.hypot(b0.x - a0.x, b0.y - a0.y);
@@ -3449,7 +3437,6 @@ check("a drilled disc obeys the same laws as the vault disc", async (p) => {
              hubCap: Math.round(hubCap * 10) / 10, hubWorst: Math.round(hubWorst * 10) / 10 };
   })()`);
 
-  // a zero-weight member costs nothing: it is vacuous at full disc, so hide one child first
   const zero = await p.j(`(function(){
     var g = __vg.groupOrder().filter(function(x){ return __vg.groupCount(x) > 0; })[0];
     var key = ${JSON.stringify(root)} + "/" + g;
@@ -3520,8 +3507,7 @@ check("a drill animates, and settle() is still a no-op at the end of it", async 
       return { frames: window.__DR.frames, n: n, cframes: lc.frames, outs: lc.outs, ins: lc.ins,
                path: lc.path, dr: Math.round(dr*10)/10, dt: Math.round(dt*10)/10, dd: Math.round(dd*1000)/10 };
     })()`);
-    // github#21: a settled dot is the size a FRESH relayout gives it, which the
-    // last-frame-versus-rest comparison above cannot see -- both read the same globals.
+    // github#21
     const sz = await p.j(`(function(){
       var a0=__vg.renderer.graphToViewport({x:0,y:0}), b0=__vg.renderer.graphToViewport({x:160,y:0});
       var perPx=160/Math.hypot(b0.x-a0.x,b0.y-a0.y), before={};
