@@ -452,6 +452,15 @@ the plugin puts them in an Obsidian view.
 | `.ai-context/` | architecture, invariants, and one record per decision |
 | `CHANGELOG.md` | what shipped, per release |
 
+## Credits
+
+**[@bartolli](https://github.com/bartolli)** — the hop trail on the note card
+([#40](https://github.com/luke321/vault-graph/issues/40)). Reported with a working patch on
+their own fork, tested inside Obsidian, and carrying a limitation they measured and wrote up
+rather than papered over. The semantics shipped are theirs; the commit names them as
+co-author, and [`design/0012`](.ai-context/design/0012-hop-trail.md) records what changed on
+the way in and why.
+
 ## Licence
 
 MIT — see [LICENSE](LICENSE). The renderer's camera math and shaders under `src/engine/`

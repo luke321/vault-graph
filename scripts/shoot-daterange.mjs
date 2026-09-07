@@ -6,6 +6,7 @@ import { existsSync, mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, dirname, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { leftWindowArgs } from "./screen.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = dirname(HERE);
@@ -46,7 +47,7 @@ const profile = mkdtempSync(join(tmpdir(), "vg-dr-prof-"));
 const chrome = spawn(findChrome(), [
   `--remote-debugging-port=${PORT}`, `--user-data-dir=${profile}`,
   "--no-first-run", "--no-default-browser-check",
-  "--window-position=-2400,0", "--window-size=1600,1000", `--app=${url}`,
+  ...leftWindowArgs(1600, 1000), `--app=${url}`,
 ], { stdio: "ignore" });
 
 let page = null;

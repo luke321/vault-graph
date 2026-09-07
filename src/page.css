@@ -332,17 +332,19 @@
     position: absolute; right: var(--controls-inset); bottom: var(--controls-inset);
     z-index: 6; display: flex; flex-direction: column; gap: 6px;
   }
-  .vault-graph #vg-cam button {
+  /* github#73 -- the phone's two panel buttons wear the camera cluster's look */
+  .vault-graph #vg-mob { display: none; }
+  .vault-graph #vg-cam button, .vault-graph #vg-mob button {
     display: flex; align-items: center; justify-content: center;
     width: 31px; height: 31px; padding: 0; cursor: pointer;
     background: var(--surface-2); color: var(--text-3);
     border: 1px solid var(--border); border-radius: 8px;
     opacity: .55; transition: opacity .12s, color .12s, border-color .12s, background-color .12s;
   }
-  .vault-graph #vg-cam button:hover { opacity: 1; color: var(--text-1); border-color: var(--border-strong); }
-  .vault-graph #vg-cam button:focus-visible { opacity: 1; outline: 2px solid var(--accent); outline-offset: 1px; }
+  .vault-graph #vg-cam button:hover, .vault-graph #vg-mob button:hover { opacity: 1; color: var(--text-1); border-color: var(--border-strong); }
+  .vault-graph #vg-cam button:focus-visible, .vault-graph #vg-mob button:focus-visible { opacity: 1; outline: 2px solid var(--accent); outline-offset: 1px; }
   .vault-graph #vg-pan { margin-top: 4px; }
-  .vault-graph #vg-pan[aria-pressed="true"] {
+  .vault-graph #vg-pan[aria-pressed="true"], .vault-graph #vg-band[aria-pressed="true"], .vault-graph #vg-sheet[aria-expanded="true"] {
     opacity: .8; color: var(--accent); border-color: var(--accent);
     background: color-mix(in oklab, var(--accent) 12%, var(--surface-2));
   }
@@ -532,6 +534,28 @@
   }
   .vault-graph #vg-detail a.open:hover { background: color-mix(in srgb, var(--accent) 12%, transparent); }
   .vault-graph #vg-detail .pin svg { width: 13px; height: 13px; vertical-align: -2px; margin-right: 3px; }
+  /* github#40, design/0012 */
+  .vault-graph #vg-detail .crumbs { display: flex; align-items: center; gap: 4px; margin: 0 22px 7px 0; }
+  .vault-graph #vg-detail .crumbs ol {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 2px 0;
+    list-style: none; margin: 0; padding: 0; min-width: 0;
+  }
+  .vault-graph #vg-detail .crumbs li { display: flex; align-items: center; min-width: 0; }
+  .vault-graph #vg-detail .crumbs li + li::before {
+    content: "\203A" / ""; color: var(--text-3); font-size: 10px; padding: 0 3px;
+  }
+  .vault-graph #vg-detail .crumbs button {
+    font: inherit; font-size: 10px; color: var(--text-2); background: none; border: 0;
+    padding: 1px 2px; cursor: pointer; border-radius: 4px;
+    max-width: 110px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .vault-graph #vg-detail .crumbs button:hover { color: var(--text-1); background: var(--surface-1); }
+  .vault-graph #vg-detail .crumbs button.off { color: var(--text-3); font-style: italic; }
+  .vault-graph #vg-detail .crumbs .nvb {
+    flex: none; font-size: 13px; line-height: 1; color: var(--text-1);
+    border: 1px solid var(--border); padding: 1px 7px;
+  }
+  .vault-graph #vg-detail .crumbs .dots { color: var(--text-3); font-size: 10px; }
   .vault-graph #vg-detail ul { list-style: none; margin: 0; padding: 0; }
   .vault-graph #vg-detail li button {
     background: none; border: 0; padding: 2px 0; font: inherit; font-size: 12px;
@@ -545,11 +569,34 @@
   }
   .vault-graph #vg-detail .x:hover { color: var(--text-1); }
 
+  /* github#73 -- geometry only; demoTapAt drives the two rings with transitions, because
+     this file has no keyframes and does not need any for one ripple. */
+  .vault-graph #vg-demotap {
+    position: absolute; left: 0; top: 0; z-index: 49; pointer-events: none;
+  }
+  .vault-graph #vg-demotap[hidden] { display: none; }
+  .vault-graph #vg-demotap span {
+    position: absolute; left: 0; top: 0; display: block;
+    width: 30px; height: 30px; margin: -15px 0 0 -15px;
+    border: 2px solid #fff; border-radius: 50%;
+    opacity: 0; transform: scale(.3);
+  }
+  .vault-graph #vg-demotap span:last-child {
+    border-color: var(--accent); border-width: 3px;
+  }
+  .vault-graph #vg-demotap span.armed { opacity: .95; transform: scale(.3); transition: none; }
+  .vault-graph #vg-demotap span.go {
+    opacity: 0; transform: scale(2.7);
+    transition: transform .45s ease-out, opacity .45s ease-out;
+  }
+
   .vault-graph #vg-democursor {
     position: absolute; left: 0; top: 0; z-index: 50; pointer-events: none;
     filter: drop-shadow(0 1px 2px rgba(0,0,0,.45));
   }
   .vault-graph #vg-democursor[hidden] { display: none; }
+  /* github#73 -- a recording at a phone's width shows a finger, not a mouse pointer */
+  .vault-graph #vg-democursor .finger { display: none; }
 
   .vault-graph .ctxmenu {
     position: absolute; z-index: 9; width: 176px;
@@ -593,8 +640,59 @@
     background: var(--surface-1); z-index: 20; font-size: 13px; color: var(--text-2);
   }
 
+  /* github#73 -- the disc gets the screen; the legend and the band are summoned */
   @media (max-width: 720px) {
-    .vault-graph { grid-template-columns: 1fr; grid-template-rows: 42% 58%; }
-    .vault-graph #vg-sidebar { border-right: 0; border-bottom: 1px solid var(--border); }
-    .vault-graph #vg-detail { width: auto; left: 12px; }
+    .vault-graph { grid-template-columns: 1fr; grid-template-rows: 1fr; }
+    .vault-graph #vg-sidebar {
+      position: absolute; left: 0; right: 0; bottom: 0; z-index: 8;
+      max-height: 72%; width: auto;
+      border-right: 0; border-top: 1px solid var(--border-strong);
+      border-radius: 12px 12px 0 0;
+      box-shadow: 0 -10px 28px rgb(0 0 0 / .38);
+      transform: translateY(101%); transition: transform .18s ease-out, visibility .18s;
+      visibility: hidden;
+    }
+    .vault-graph[data-sheet="on"] #vg-sidebar { transform: translateY(0); visibility: visible; }
+    /* The sheet stops where the disc starts, so it covers the disc and never the band, and
+       its own heading row is where the floating buttons already are. --vg-canvas-top is
+       published by syncCanvasTop(); the min() keeps it to 72% when the band is away. */
+    .vault-graph[data-sheet="on"] #vg-sidebar {
+      max-height: min(72%, calc(100% - var(--vg-canvas-top, 0px)));
+    }
+    .vault-graph[data-band="on"][data-sheet="on"] .brand { padding-left: 100px; }
+    .vault-graph #vg-heat { display: none; }
+    .vault-graph[data-band="on"] #vg-heat:not([hidden]) { display: flex; }
+    /* With the band hidden, #vg-canvas would inherit the stage's auto row and collapse to
+       nothing: every child of it is absolutely positioned. github#73, design/0013 */
+    .vault-graph #vg-stage { grid-template-rows: 1fr; }
+    .vault-graph[data-band="on"] #vg-stage { grid-template-rows: auto 1fr; }
+    /* The card is a sheet at the foot, not a panel over the disc: 48 linked notes filled the
+       whole screen and the disc was gone. github#73, design/0013 */
+    .vault-graph #vg-detail {
+      left: 12px; right: 12px; width: auto;
+      top: auto; bottom: 12px; max-height: 46%;
+    }
+    /* Both control clusters move to the top corners, clear of that sheet. */
+    .vault-graph #vg-cam { top: var(--controls-inset); bottom: auto; }
+    /* Above the sheet (z-index 8): #vg-mob sits in #vg-canvas, which the band pushes below
+       the sheet's top edge, and a panel that covers its own toggle cannot be closed. */
+    .vault-graph #vg-mob {
+      position: absolute; left: 12px; top: 12px; z-index: 9;
+      display: flex; flex-direction: row; gap: 6px;
+    }
+    .vault-graph #vg-mob button { opacity: .8; width: 44px; height: 44px; }
+    /* The band's control row is one line of five things and the stage clips it at this
+       width: the second date field and All dates were cut off and unreachable. */
+    .vault-graph #vg-heat .hrow { flex-wrap: wrap; row-gap: 6px; }
+    .vault-graph #vg-heatnote { flex-basis: 100%; order: 3; }
+    .vault-graph #vg-heatscale { margin-left: 0; }
+    .vault-graph #vg-rangebox { order: 4; }
+    .vault-graph #vg-democursor .arrow { display: none; }
+    .vault-graph #vg-democursor .finger { display: block; }
+    /* Solo is opacity 0 until its row is hovered, which on a finger means never.
+       github#73, design/0013 */
+    .vault-graph .lg .only, .vault-graph .lgs .only { opacity: 1; }
+  }
+  @media (max-width: 720px) and (prefers-reduced-motion: reduce) {
+    .vault-graph #vg-sidebar { transition: none; }
   }

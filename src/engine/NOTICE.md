@@ -7,8 +7,13 @@ The renderer under this directory is a port (github#58). Its camera and viewport
 satellites, all three released from one repository under the one licence below -- with the
 arithmetic kept as it was, because every measured constant in `src/page.js` was calibrated
 against the pixels it produced. What Sigma did that this page never used (the label density
-grid, the picking framebuffer, touch input, edge events, WebGL1) was left out; what remains is
+grid, the picking framebuffer, edge events, WebGL1) was left out; what remains is
 ours to maintain, and is typed and linted as ours.
+
+Touch input was on that list until github#73. **The touch captor is not a port**: Sigma's own
+`touch.ts` could not be obtained at the 3.0.2 tag, so the touch half of `captor.ts` is written
+in this engine's idiom, reusing the mouse path's own helpers. Nothing further is owed to the
+notice below for it. See `.ai-context/design/0013-touch-input.md`.
 
 Sigma.js is MIT licensed. Its notice is reproduced here as the licence asks, and **travels
 with both built artifacts**: `notice.mjs` beside this file lifts the block below into a `/*!`

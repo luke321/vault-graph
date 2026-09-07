@@ -38,8 +38,11 @@ const DRAG_TIMEOUT = 100;
 const DRAGGED_EVENTS_TOLERANCE = 3;
 const INERTIA_DURATION = 200;
 const INERTIA_RATIO = 3;
+// github#73
+const TOUCH_TAP_SLOP_PX = 10;
+const TOUCH_DOUBLE_TAP_PX = 24;
 
-function getPosition(e: MouseEvent, dom: HTMLElement): Point {
+function getPosition(e: { clientX: number; clientY: number }, dom: HTMLElement): Point {
   const bbox = dom.getBoundingClientRect();
   return { x: e.clientX - bbox.left, y: e.clientY - bbox.top };
 }
@@ -56,6 +59,30 @@ function getMouseCoords(e: MouseEvent, dom: HTMLElement): Coords {
   return res;
 }
 
+// github#73
+function getTouchCoords(e: TouchEvent, at: Point): Coords {
+  const res: Coords = {
+    ...at,
+    defaultPrevented: false,
+    fat: true,
+    preventDefault: () => {
+      res.defaultPrevented = true;
+    },
+    original: e,
+  };
+  return res;
+}
+
+// github#73
+function touchPoints(e: TouchEvent, dom: HTMLElement): Point[] {
+  const out: Point[] = [];
+  for (let i = 0; i < e.touches.length && i < 2; i++) out.push(getPosition(e.touches[i], dom));
+  return out;
+}
+
+const midpoint = (a: Point, b: Point): Point => ({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 });
+const spread = (a: Point, b: Point): number => Math.hypot(a.x - b.x, a.y - b.y);
+
 function getWheelDelta(e: WheelEvent): number {
   return (e.deltaY * -3) / 360;
 }
@@ -71,6 +98,15 @@ export class MouseCaptor extends Emitter<CaptorEvents> implements MouseCaptorApi
   private clicks = 0;
   private doubleClickTimeout: number | null = null;
   private lastWheelTriggerTime: number | null = null;
+  // github#73
+  private touchStart: Point | null = null;
+  private lastTouch: Point | null = null;
+  private touchMoved = false;
+  private pinchSpread: number | null = null;
+  private pinchRatio = 1;
+  private maxTouches = 0;
+  private lastTapAt: Point | null = null;
+  private tapTimeout: number | null = null;
   private readonly doc: Document;
 
   private readonly handleClick = (e: MouseEvent): void => {
@@ -116,12 +152,8 @@ export class MouseCaptor extends Emitter<CaptorEvents> implements MouseCaptorApi
     }
     const { x, y } = getPosition(e, this.container);
     const cameraState = camera.getState();
-    const previous = camera.getPreviousState();
     if (this.isMoving) {
-      camera.animate({
-        x: cameraState.x + INERTIA_RATIO * (cameraState.x - previous.x),
-        y: cameraState.y + INERTIA_RATIO * (cameraState.y - previous.y),
-      }, { duration: INERTIA_DURATION, easing: "quadraticOut" });
+      this.glide();
     } else if (this.lastMouseX !== x || this.lastMouseY !== y) {
       camera.setState({ x: cameraState.x, y: cameraState.y });
     }
@@ -146,12 +178,8 @@ export class MouseCaptor extends Emitter<CaptorEvents> implements MouseCaptorApi
         this.movingTimeout = null;
         this.isMoving = false;
       }, DRAG_TIMEOUT);
-      const camera = this.host.getCamera();
       const { x: eX, y: eY } = getPosition(e, this.container);
-      const lastMouse = this.host.viewportToFramedGraph({ x: this.lastMouseX ?? eX, y: this.lastMouseY ?? eY });
-      const mouse = this.host.viewportToFramedGraph({ x: eX, y: eY });
-      const cameraState = camera.getState();
-      camera.setState({ x: cameraState.x + (lastMouse.x - mouse.x), y: cameraState.y + (lastMouse.y - mouse.y) });
+      this.panFrom({ x: this.lastMouseX ?? eX, y: this.lastMouseY ?? eY }, { x: eX, y: eY });
       this.lastMouseX = eX;
       this.lastMouseY = eY;
       e.preventDefault();
@@ -202,6 +230,137 @@ export class MouseCaptor extends Emitter<CaptorEvents> implements MouseCaptorApi
     this.lastWheelTriggerTime = now;
   };
 
+  /* ------------------------------------------------------------------ touch
+   * github#73, design/0013
+   */
+
+  private readonly handleTouchStart = (e: TouchEvent): void => {
+    e.preventDefault();
+    const pts = touchPoints(e, this.container);
+    if (!pts.length) return;
+    // design/0013
+    this.host.getCamera().stopAnimation();
+    // design/0013
+    if (this.lastTouch === null) {
+      this.touchMoved = false;
+      this.touchStart = pts[0];
+      this.maxTouches = 0;
+    }
+    this.maxTouches = Math.max(this.maxTouches, e.touches.length);
+    this.lastTouch = pts.length > 1 ? midpoint(pts[0], pts[1]) : pts[0];
+    if (pts.length > 1) {
+      this.pinchSpread = spread(pts[0], pts[1]);
+      this.pinchRatio = this.host.getCamera().getState().ratio;
+    } else {
+      this.pinchSpread = null;
+    }
+  };
+
+  private readonly handleTouchMove = (e: TouchEvent): void => {
+    e.preventDefault();
+    const pts = touchPoints(e, this.container);
+    if (!pts.length) return;
+
+    if (pts.length > 1) {
+      const now = spread(pts[0], pts[1]);
+      if (this.pinchSpread === null || this.pinchSpread <= 0) {
+        this.pinchSpread = now;
+        this.pinchRatio = this.host.getCamera().getState().ratio;
+      } else if (now > 0) {
+        this.touchMoved = true;
+        this.zoomAbout(midpoint(pts[0], pts[1]), this.pinchRatio * (this.pinchSpread / now));
+      }
+      this.lastTouch = midpoint(pts[0], pts[1]);
+      return;
+    }
+
+    // design/0013 -- under the slop nothing moves at all
+    if (this.touchStart && spread(this.touchStart, pts[0]) > TOUCH_TAP_SLOP_PX) this.touchMoved = true;
+    if (!this.touchMoved) {
+      this.lastTouch = pts[0];
+      return;
+    }
+
+    this.panFrom(this.lastTouch ?? pts[0], pts[0]);
+    this.lastTouch = pts[0];
+    this.isMoving = true;
+    if (this.movingTimeout !== null) this.win.clearTimeout(this.movingTimeout);
+    this.movingTimeout = this.win.setTimeout(() => {
+      this.movingTimeout = null;
+      this.isMoving = false;
+    }, DRAG_TIMEOUT);
+  };
+
+  private readonly handleTouchEnd = (e: TouchEvent): void => {
+    e.preventDefault();
+    if (e.touches.length) {
+      const pts = touchPoints(e, this.container);
+      this.lastTouch = pts.length > 1 ? midpoint(pts[0], pts[1]) : (pts[0] ?? this.lastTouch);
+      this.pinchSpread = pts.length > 1 ? spread(pts[0], pts[1]) : null;
+      if (pts.length > 1) this.pinchRatio = this.host.getCamera().getState().ratio;
+      return;
+    }
+
+    const at = this.lastTouch;
+    const moved = this.touchMoved;
+    const fingers = this.maxTouches;
+    this.touchStart = null;
+    this.lastTouch = null;
+    this.pinchSpread = null;
+    this.touchMoved = false;
+    this.maxTouches = 0;
+
+    if (this.movingTimeout !== null) {
+      this.win.clearTimeout(this.movingTimeout);
+      this.movingTimeout = null;
+    }
+    // design/0013 -- the gesture decides, never the clock
+    if (moved) {
+      if (this.isMoving) this.glide();
+      this.isMoving = false;
+      return;
+    }
+    this.isMoving = false;
+    if (!at || fingers !== 1) return;
+
+    const near = this.lastTapAt !== null && spread(this.lastTapAt, at) <= TOUCH_DOUBLE_TAP_PX;
+    if (this.tapTimeout !== null) {
+      this.win.clearTimeout(this.tapTimeout);
+      this.tapTimeout = null;
+    }
+    if (near) {
+      this.lastTapAt = null;
+      this.emit("doubleClick", getTouchCoords(e, at));
+      return;
+    }
+    this.lastTapAt = at;
+    this.tapTimeout = this.win.setTimeout(() => {
+      this.lastTapAt = null;
+      this.tapTimeout = null;
+    }, DOUBLE_CLICK_TIMEOUT);
+    this.emit("click", getTouchCoords(e, at));
+  };
+
+  private readonly handleTouchCancel = (e: TouchEvent): void => {
+    // design/0013 -- a partial cancel leaves fingers down
+    if (e.touches.length) {
+      const pts = touchPoints(e, this.container);
+      this.lastTouch = pts.length > 1 ? midpoint(pts[0], pts[1]) : (pts[0] ?? this.lastTouch);
+      this.pinchSpread = pts.length > 1 ? spread(pts[0], pts[1]) : null;
+      return;
+    }
+    this.touchStart = null;
+    this.lastTouch = null;
+    this.pinchSpread = null;
+    this.touchMoved = false;
+    this.maxTouches = 0;
+    this.isMoving = false;
+    if (this.movingTimeout !== null) {
+      this.win.clearTimeout(this.movingTimeout);
+      this.movingTimeout = null;
+    }
+  };
+
   constructor(
     private readonly container: HTMLElement,
     private readonly host: CaptorHost,
@@ -217,6 +376,11 @@ export class MouseCaptor extends Emitter<CaptorEvents> implements MouseCaptorApi
     container.addEventListener("mouseenter", this.handleEnter);
     this.doc.addEventListener("mousemove", this.handleMove);
     this.doc.addEventListener("mouseup", this.handleUp);
+    // github#73 -- non-passive: the three cancelable ones preventDefault
+    container.addEventListener("touchstart", this.handleTouchStart, { passive: false });
+    container.addEventListener("touchmove", this.handleTouchMove, { passive: false });
+    container.addEventListener("touchend", this.handleTouchEnd, { passive: false });
+    container.addEventListener("touchcancel", this.handleTouchCancel);
   }
 
   kill(): void {
@@ -229,8 +393,14 @@ export class MouseCaptor extends Emitter<CaptorEvents> implements MouseCaptorApi
     c.removeEventListener("mouseenter", this.handleEnter);
     this.doc.removeEventListener("mousemove", this.handleMove);
     this.doc.removeEventListener("mouseup", this.handleUp);
+    // github#73
+    c.removeEventListener("touchstart", this.handleTouchStart);
+    c.removeEventListener("touchmove", this.handleTouchMove);
+    c.removeEventListener("touchend", this.handleTouchEnd);
+    c.removeEventListener("touchcancel", this.handleTouchCancel);
     if (this.movingTimeout !== null) this.win.clearTimeout(this.movingTimeout);
     if (this.doubleClickTimeout !== null) this.win.clearTimeout(this.doubleClickTimeout);
+    if (this.tapTimeout !== null) this.win.clearTimeout(this.tapTimeout);
     this.removeAllListeners();
   }
 
@@ -238,5 +408,33 @@ export class MouseCaptor extends Emitter<CaptorEvents> implements MouseCaptorApi
     e.preventDefault();
     e.stopPropagation();
     this.emit("doubleClick", getMouseCoords(e, this.container));
+  }
+
+  /* -------------------------------------------------------- shared motion */
+
+  private panFrom(prev: Point, next: Point): void {
+    const camera = this.host.getCamera();
+    const from = this.host.viewportToFramedGraph(prev);
+    const to = this.host.viewportToFramedGraph(next);
+    const state = camera.getState();
+    camera.setState({ x: state.x + (from.x - to.x), y: state.y + (from.y - to.y) });
+  }
+
+  private glide(): void {
+    const camera = this.host.getCamera();
+    const state = camera.getState();
+    const previous = camera.getPreviousState();
+    camera.animate({
+      x: state.x + INERTIA_RATIO * (state.x - previous.x),
+      y: state.y + INERTIA_RATIO * (state.y - previous.y),
+    }, { duration: INERTIA_DURATION, easing: "quadraticOut" });
+  }
+
+  private zoomAbout(target: Point, ratio: number): void {
+    const camera = this.host.getCamera();
+    if (!camera.enabledZooming) return;
+    const bounded = camera.getBoundedRatio(ratio);
+    if (bounded === camera.getState().ratio) return;
+    camera.setState(this.host.getViewportZoomedState(target, bounded));
   }
 }

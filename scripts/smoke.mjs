@@ -1,5 +1,6 @@
 
 import { attach, json } from "./cdp.mjs";
+import { leftmostScreen, leftWindowPos } from "./screen.mjs";
 import { spawn, spawnSync } from "node:child_process";
 import { existsSync, mkdtempSync, rmSync, readFileSync, writeFileSync, readdirSync,
          renameSync, mkdirSync } from "node:fs";
@@ -89,19 +90,6 @@ const GRID = argv.includes("--no-grid") ? false
           : argv.includes("--grid") ? true
           : JOBS > 1;
 
-function leftmostScreen() {
-  const fallback = { x: 0, y: 0, w: 1920, h: 1080 };
-  if (process.platform !== "win32") return fallback;
-  const ps = spawnSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command",
-    "Add-Type -AssemblyName System.Windows.Forms; " +
-    "[System.Windows.Forms.Screen]::AllScreens | " +
-    "Sort-Object { $_.Bounds.Left } | Select-Object -First 1 | " +
-    "ForEach-Object { '{0} {1} {2} {3}' -f $_.Bounds.Left, $_.Bounds.Top, " +
-    "$_.Bounds.Width, $_.Bounds.Height }"], { encoding: "utf8" });
-  const m = /(-?\d+) (-?\d+) (\d+) (\d+)/.exec((ps.stdout || "").trim());
-  if (!m) return fallback;
-  return { x: +m[1], y: +m[2], w: +m[3], h: +m[4] };
-}
 let SCREEN = null;
 
 function gridSlot(i, k) {
@@ -1040,8 +1028,10 @@ async function watchDuringCascade(p, startRatio, capMs = 8000) {
     // 0 of 3 alone, the fit having begun after the last note left but with that ramp still up.
     var s = await p.j(`(function(){ var w = __vg.demo.busyWhy(); return { busy: !!(w.cascade || w.play || w.anim),
       ratio: +__vg.renderer.getCamera().getState().ratio.toFixed(4) }; })()`);
+    // github#19
+    if (!s.busy) break;
     if (Math.abs(s.ratio - startRatio) > 0.01) movedWhileBusy = true;
-    if (!s.busy || Date.now() > deadline) break;
+    if (Date.now() > deadline) break;
     await sleep(60);
   }
   await sleep(500);
@@ -3147,6 +3137,168 @@ check("focus web stays above dim notes", async (p) => {
                    `${r.dimAtGaps} dim, ${r.underLabel} under label/disc of ${r.geomGaps} in-disc samples` };
 });
 
+// github#40, design/0012
+const KEYS = { Backspace: 8, ArrowLeft: 37, Escape: 27 };
+async function pressKey(p, key, modifiers = 0) {
+  const ev = { key, code: key, windowsVirtualKeyCode: KEYS[key] || 0, modifiers };
+  await p.send("Input.dispatchKeyEvent", { type: "keyDown", ...ev });
+  await p.send("Input.dispatchKeyEvent", { type: "keyUp", ...ev });
+  await sleep(150);
+}
+const TRAIL = `(function(){
+  var d = document.querySelector("#vg-detail"), c = d.hidden ? null : d.querySelector(".crumbs");
+  return { open: !d.hidden, sel: __vg.state.selected,
+           crumbs: c ? [].map.call(c.querySelectorAll("button.crumb"), function (b) { return b.textContent; }) : [],
+           dots: !!(c && c.querySelector(".dots")), href: location.href,
+           active: document.activeElement ? document.activeElement.tagName + "#" + document.activeElement.id : "" }; })()`;
+async function trailState(p) { return p.j(TRAIL); }
+async function selectBySearch(p) {
+  return p.j(`(function(){
+    var best = null, bd = -1;
+    __vg.graph.forEachNode(function (id, a) { if (a.deg > bd) { bd = a.deg; best = id; } });
+    var q = document.querySelector("#vg-q"); q.value = __vg.graph.getNodeAttribute(best, "label").slice(0, 12);
+    q.dispatchEvent(new Event("input"));
+    var hit = document.querySelector("#vg-hits [data-hit]"); if (!hit) return null;
+    hit.click(); return { id: best, deg: bd }; })()`);
+}
+async function hop(p, n) {
+  for (let i = 0; i < n; i++) {
+    const ok = await p.j(`(function(){ var bs = document.querySelectorAll("#vg-detail [data-go]");
+      var b = bs[Math.min(1, bs.length - 1)]; if (!b) return false; b.click(); return true; })()`);
+    if (!ok) return i;
+    await sleep(120);
+  }
+  return n;
+}
+async function closeCard(p) { await p.eval(`(function(){ var x = document.querySelector("#vg-detail .x"); if (x) x.click(); })(); void 0`); }
+async function stepBack(p) {
+  const ok = await p.j(`(function(){ var b = document.querySelector("#vg-detail .crumbs .nvb"); if (!b) return false; b.click(); return true; })()`);
+  await sleep(160);
+  return ok;
+}
+
+check("only a hop lengthens the trail", async (p) => {
+  await settle(p);
+  const start = await selectBySearch(p);
+  if (!start) return { ok: false, detail: "no search hit to select" };
+  const s0 = await trailState(p);
+  const n = await hop(p, 3);
+  const s1 = await trailState(p);
+  await selectBySearch(p);
+  const s2 = await trailState(p);
+  await hop(p, 1);
+  const s3 = await trailState(p);
+  await p.eval(`__vg.renderer.emit("clickStage", {}); void 0`).catch(() => {});
+  await closeCard(p);
+  const s4 = await trailState(p);
+  const ok = s0.crumbs.length === 0 && n === 3 && s1.crumbs.length === 3 && s2.crumbs.length === 0 && s3.crumbs.length === 1 && !s4.open;
+  return { ok, detail: `search hit: ${s0.crumbs.length} crumbs; after ${n} hops: ${s1.crumbs.length}; ` +
+                       `a fresh search hit: ${s2.crumbs.length}; one more hop: ${s3.crumbs.length}; closed: card ${s4.open ? "STILL OPEN" : "hidden"}` };
+});
+
+check("stepping back never re-collects a hop", async (p) => {
+  await settle(p);
+  if (!(await selectBySearch(p))) return { ok: false, detail: "no search hit to select" };
+  const n = await hop(p, 4);
+  const s4 = await trailState(p);
+  await stepBack(p);
+  const s3 = await trailState(p);
+  await stepBack(p);
+  const s2 = await trailState(p);
+  await closeCard(p);
+  const ok = n === 4 && s4.crumbs.length === 3 && s4.dots && s3.crumbs.length === 3 && !s3.dots &&
+             s2.crumbs.length === 2 && s2.href === s4.href && s4.sel !== s3.sel && s3.sel !== s2.sel;
+  return { ok, detail: `after ${n} hops: ${s4.crumbs.length} crumbs shown${s4.dots ? " + ellipsis" : ""}; ` +
+                       `back arrow: ${s3.crumbs.length}${s3.dots ? " + ellipsis" : ""}; again: ${s2.crumbs.length}; ` +
+                       `href ${s2.href === s4.href ? "unchanged" : "CHANGED to " + s2.href}` };
+});
+
+check("a crumb click truncates the trail at the crumb", async (p) => {
+  await settle(p);
+  if (!(await selectBySearch(p))) return { ok: false, detail: "no search hit to select" };
+  const n = await hop(p, 3);
+  const before = await trailState(p);
+  const target = await p.j(`(function(){ var b = document.querySelectorAll("#vg-detail .crumbs button.crumb")[1]; if (!b) return null; var t = b.textContent; b.click(); return t; })()`);
+  await sleep(120);
+  const after = await trailState(p);
+  const title = await p.j(`document.querySelector("#vg-detail h2").textContent`);
+  await closeCard(p);
+  const ok = n === 3 && before.crumbs.length === 3 && after.crumbs.length === 1 && title === target;
+  return { ok, detail: `${before.crumbs.length} crumbs, clicked the second (${JSON.stringify(target)}): ` +
+                       `${after.crumbs.length} crumb left, card names ${JSON.stringify(title)}` };
+});
+
+check("the trail is not layout", async (p) => {
+  await settle(p);
+  const snap = `(function(){ var xs = []; __vg.graph.forEachNode(function (id, a) { xs.push(a.x, a.y); });
+    return { pos: xs, plan: JSON.stringify(__vg.buildWedgePlan(false).cells.map(function (c) { return [c.key || c.g, c.rows, c.n]; })) }; })()`;
+  const a = await p.j(snap);
+  if (!(await selectBySearch(p))) return { ok: false, detail: "no search hit to select" };
+  const n = await hop(p, 5);
+  await stepBack(p);
+  await stepBack(p);
+  await sleep(500);
+  const b = await p.j(snap);
+  await closeCard(p);
+  let moved = 0, worst = 0;
+  for (let i = 0; i < a.pos.length; i += 2) {
+    const d = Math.abs(a.pos[i] - b.pos[i]) + Math.abs(a.pos[i + 1] - b.pos[i + 1]);
+    if (d > 1e-6) moved++;
+    if (d > worst) worst = d;
+  }
+  const ok = n === 5 && moved === 0 && a.plan === b.plan;
+  return { ok, detail: `${n} hops and 2 steps back: ${moved} of ${a.pos.length / 2} notes moved (worst ${worst.toFixed(3)} units), ` +
+                       `plan ${a.plan === b.plan ? "identical" : "CHANGED"}` };
+});
+
+check("the page claims no keyboard shortcut", async (p) => {
+  await settle(p);
+  if (!(await selectBySearch(p))) return { ok: false, detail: "no search hit to select" };
+  const n = await hop(p, 2);
+  const before = await trailState(p);
+  await pressKey(p, "Backspace");
+  await pressKey(p, "ArrowLeft", 1);
+  await pressKey(p, "Escape");
+  const after = await trailState(p);
+  await p.eval(`(function(){ var q = document.querySelector("#vg-q"); q.value = "ab"; q.focus(); })(); void 0`);
+  await pressKey(p, "Backspace");
+  const typed = await p.j(`document.querySelector("#vg-q").value`);
+  await p.eval(`(function(){ var q = document.querySelector("#vg-q"); q.blur(); q.value = ""; q.dispatchEvent(new Event("input")); })(); void 0`);
+  await closeCard(p);
+  const ok = n === 2 && before.crumbs.length === 2 && after.crumbs.length === 2 && after.open &&
+             after.sel === before.sel && after.href === before.href && typed === "a";
+  return { ok, detail: `Backspace, Alt+ArrowLeft and Escape with the card open on ${before.crumbs.length} crumbs: ` +
+                       `${after.crumbs.length} crumbs, card ${after.open ? "still open" : "CLOSED"}, ` +
+                       `selection ${after.sel === before.sel ? "unchanged" : "CHANGED"}, ` +
+                       `href ${after.href === before.href ? "unchanged" : "CHANGED to " + after.href}; ` +
+                       `the search box still gets its own Backspace ("ab" -> ${JSON.stringify(typed)})` };
+});
+
+check("re-selecting the same note keeps the trail, and a filter does not clear it", async (p) => {
+  await settle(p);
+  if (!(await selectBySearch(p))) return { ok: false, detail: "no search hit to select" };
+  const n = await hop(p, 3);
+  const s0 = await trailState(p);
+  await p.eval(`document.querySelector("#vg-detail .pin").click(); void 0`);
+  await settle(p);
+  const s1 = await trailState(p);
+  await p.eval(`document.querySelector("#vg-detail .pin").click(); void 0`);
+  await settle(p);
+  const g = await p.j(`(function(){ var b = document.querySelector("#vg-detail .crumbs button.crumb"); var lb = b.textContent, id = null;
+    __vg.graph.forEachNode(function (i, a) { if (id === null && a.label === lb) id = i; }); return __vg.graph.getNodeAttribute(id, "folder"); })()`);
+  await clickEye(p, g);
+  await settle(p);
+  const s2 = await trailState(p);
+  const off = await p.j(`document.querySelectorAll("#vg-detail .crumbs button.crumb.off").length`);
+  await clickEye(p, g);
+  await settle(p);
+  const s3 = await trailState(p);
+  await closeCard(p);
+  const ok = n === 3 && s0.crumbs.length === 3 && s1.crumbs.length === 3 && s2.crumbs.length === 3 && s2.open && off >= 1 && s3.crumbs.length === 3;
+  return { ok, detail: `${s0.crumbs.length} crumbs; pin toggle: ${s1.crumbs.length}; hiding ${g}: ${s2.crumbs.length} crumbs, ` +
+                       `${off} marked hidden, card ${s2.open ? "open" : "CLOSED"}; shown again: ${s3.crumbs.length}` };
+});
+
 async function settle(p, ms = 6000) {
   const deadline = Date.now() + ms;
   for (;;) {
@@ -3215,7 +3367,7 @@ async function runOne(vault, work) {
     "--disable-renderer-backgrounding",
     "--disable-background-timer-throttling",
     ...(slot ? [`--window-position=${slot.x},${slot.y}`]
-             : HEADED ? [] : ["--window-position=-2400,0"]),
+             : HEADED ? [] : [leftWindowPos()]),
     slot ? `--window-size=${slot.w},${slot.h}` : "--window-size=1600,1000", `--app=${url}`
   ], { stdio: ["ignore", "ignore", "pipe"], detached: false });
 

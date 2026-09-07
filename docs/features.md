@@ -41,6 +41,15 @@ type, tags, word count, linked notes — each one clickable to jump across the d
 
 <img src="../assets/features/note.webp" width="100%" alt="A daily note hovered, then a meeting note hovered, each raising and haloing its own links while the rest of the disc dims">
 
+## Walking the links, and back
+
+The linked notes on a card are clickable, and clicking one walks the graph — a hop. Each hop
+is remembered: the card grows a back arrow and a trail of where you came from, oldest first,
+folded to the first and the last two once the walk gets long. The arrow steps back one hop;
+any crumb jumps straight to that note and drops everything after it. A crumb whose note a
+filter or the date range is currently hiding greys out and stays clickable. Opening a note
+from the disc or the search box starts a new walk, and closing the card ends it.
+
 ## Filtering by folder
 
 Click a folder in the legend to hide it; the remaining wedges grow back into the angle it
@@ -74,6 +83,16 @@ Open a folder's twisty to reach the subfolders inside it — tinted from the par
 hoverable and clickable the same way a top-level folder is.
 
 <img src="../assets/features/subfolders.webp" width="100%" alt="A folder's twisty opened to reach its subfolders, one hovered to find it on the disc, then clicked to halo it and push its sub-wedge out, then let back down and folded away">
+
+## The disc on a phone
+
+A finger drives the disc: one finger pans, two pinch about their midpoint, a tap raises a note
+and opens its card, and a double-tap fits the disc back into view. Below 720 px the layout
+changes to match — the disc takes the screen, the folders, search and view buttons slide up as a
+sheet from two buttons at the top left, the calendar stays on and can be put away, and a note's
+card rises as a sheet at the foot so the disc is still visible above what you tapped.
+
+<img src="../assets/features/mobile.webp" width="420" alt="A phone-sized window with a fingertip for a pointer, each tap leaving a ring: the disc zoomed in until its dots are finger-sized, a note tapped so its card rises as a sheet at the foot, the folder list slid up as a sheet, one folder soloed from inside it, the sheet put away so the rest recedes, then a double-tap fitting what is left back into view">
 
 ## The camera
 

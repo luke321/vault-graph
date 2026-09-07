@@ -8,6 +8,7 @@ import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { inflateSync } from "node:zlib";
 import { attach } from "./cdp.mjs";
+import { leftWindowPos } from "./screen.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(HERE, "..");
@@ -626,7 +627,7 @@ async function runVault(vault, reference, current, chrome) {
     "--disable-features=Translate,TranslateUI,CalculateNativeWinOcclusion",
     "--disable-backgrounding-occluded-windows", "--disable-renderer-backgrounding", "--disable-background-timer-throttling",
     "--force-device-scale-factor=" + DPR,
-    ...(HEADED ? [] : ["--window-position=-2400,0"]), "--window-size=" + WINDOW[0] + "," + WINDOW[1],
+    ...(HEADED ? [] : [leftWindowPos(WINDOW[0], WINDOW[1])]), "--window-size=" + WINDOW[0] + "," + WINDOW[1],
     "--app=data:text/html,render-diff",
   ], { stdio: "ignore" });
   const results = [];

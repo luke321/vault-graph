@@ -230,6 +230,23 @@ click and finished by ~450ms, well inside the same ~1.8s fade.
 untouched by this — the fix is entirely in what decides to call `fit()` and when, never in
 what `fit()` computes.
 
+**How the check samples, and the race it used to lose (github#19, 2026-09-07).**
+`watchDuringCascade` polls `busyWhy()` and the camera ratio every 60 ms and answers one
+question: did the ratio leave `startRatio` *while the cascade was running*. It used to record
+the ratio and only then break on `!busy`, so the final sample — the one that observes the
+cascade already finished — still counted toward `movedWhileBusy`. A deferred fit is called
+inside `settle()`, which is also what clears `busy`, and it animates over `zoomDuration`
+(120 ms); so any poll landing more than ~20 ms after settle read a camera that had legitimately
+started moving and reported it as having moved early. Measured on the dominant-folder fixture,
+where the shrink is largest: **2 of 3 runs failed, on this branch and on develop's untouched
+`page.js` alike** (same `0.6497` against `0.6502`, `moved early` flipping run to run), and it
+blocked a develop push. The loop now breaks before recording anything from a sample taken after
+`busy` went false. The cost is bounded and deliberate: a fit that began inside the last 60 ms
+of a cascade is no longer caught, which is the width of one poll against a ~1.8 s fade, and the
+defect the check exists for — a shrink fitting *instead of* deferring — moves the camera from
+the first frames. The opposite-direction check is the control that it is still sensitive: a
+growth must report `moved while notes arrived: true`, and does, on all three fixtures.
+
 ## The rings are independent
 
 Toggling an inner-band group must not move the outer band. Measured, an `05` toggle
@@ -1833,3 +1850,197 @@ and into `scripts/release.ps1` right after the dirty-tree check: about five seco
 Chrome, so no skip flag. It **fails closed** on a checkout without `node_modules` -- eslint is
 the one gate that is not a Node built-in, and a gate that skips when its tool is missing is the
 gate that runs when someone remembers, which is how 27 warnings accumulated in the first place.
+
+## Only a hop lengthens the trail
+
+The card's hop trail (github#40, design/0012) records the linked-notes walk and nothing else. A
+hop is a click on a linked-notes row; a disc click, a search hit, a stage click, the close button
+and the reset button are not hops, and each of them starts a fresh trail. Re-selecting the
+note already selected -- which is what the pin button does to re-render the card -- keeps it.
+
+```bash
+node scripts/smoke.mjs --only "only a hop"
+node scripts/smoke.mjs --only "re-selecting"
+```
+
+Measured 2026-09-06 on all three fixtures: a search hit shows 0 crumbs, three hops show 3, a
+fresh search hit shows 0 again, one more hop shows 1; the pin toggle keeps 3 of 3. Hiding the
+folder of a crumb's note through the legend eye leaves the crumb count at 3 and marks the crumbs
+whose notes are now hidden (2 of 3 on the demo and 10k fixtures, 3 of 3 on the dominant-folder
+one); showing the folder again unmarks them. The marks are refreshed at the start of every
+cascade, because that is the one path every visibility and range change goes through.
+
+## Stepping back never re-collects a hop
+
+The back arrow steps back one hop, and the place just left is not pushed onto the trail again,
+so two steps back leave n-2 crumbs, not n.
+
+```bash
+node scripts/smoke.mjs --only "re-collects"
+```
+
+Measured 2026-09-07 on all three fixtures: after four hops the card shows 3 crumbs and an
+ellipsis (first, ellipsis, last two); one press of the back arrow shows 3 with no ellipsis; a
+second shows 2; `location.href` is unchanged throughout -- every crumb is a `<button>`, and
+nothing in the card is a link that could navigate.
+
+## A crumb click truncates the trail at the crumb
+
+Clicking crumb i selects that note and cuts the trail to the i crumbs before it.
+
+```bash
+node scripts/smoke.mjs --only "crumb click"
+```
+
+Measured 2026-09-06: three crumbs, the second clicked, one crumb left, the card names the
+clicked note -- on all three fixtures.
+
+## The trail is not layout
+
+Walking the trail moves the camera and re-renders one panel. No position, no plan, no room
+changes: the serpentine, the rings, the hub and the lattice never hear about it.
+
+```bash
+node scripts/smoke.mjs --only "not layout"
+```
+
+Measured 2026-09-06: five hops and two steps back move 0 of 1,403 / 10,002 / 954 notes (worst
+0.000 units) and leave `buildWedgePlan(false)` identical, cell for cell, on all three fixtures.
+
+## The page claims no keyboard shortcut
+
+The trail is driven by pointer alone, and that is a decision rather than an omission. The first
+cut bound Backspace, Alt+ArrowLeft and Escape on the mount root; they came out on 2026-09-07
+because **Obsidian users bind their own hotkeys, and a view that grabs keys of its own overrules
+them** (design/0012, superseding its binding A/B question). The page's only key handling is the
+two listeners that were always there and each belong to something already open: the context
+menu's own Escape, and the search box's Enter.
+
+```bash
+node scripts/smoke.mjs --only "no keyboard shortcut"
+node scripts/obsidian-smoke.mjs --only trail
+```
+
+Measured 2026-09-07 on all three fixtures: with the card open on two crumbs, Backspace,
+Alt+ArrowLeft and Escape each change nothing -- 2 crumbs before and after, the card still open,
+the selection and `location.href` unchanged -- while the search box still gets its own Backspace
+(`ab` -> `a`). In a real Obsidian the same two keys leave a one-crumb trail at one crumb with the
+card still open, in the same run that proves the back arrow does step it.
+
+**This is a claim about what the page does NOT register**, which is the kind that rots quietly:
+the check drives the keys rather than reading the source, so a listener added anywhere -- root,
+document, or a card element -- fails it.
+
+## A finger reaches the disc, and the pointer's pick floor is untouched
+
+One finger pans, two pinch about their midpoint, a tap selects and a second tap resets the
+view. All four exist because `captor.ts` binds `touchstart`/`touchmove`/`touchend`/
+`touchcancel`; before github#73 it bound eight mouse listeners and nothing else, and a tap did
+not even fall back to a click, because `touch-action: none` on the mouse layer suppresses the
+browser's tap-to-click. design/0013.
+
+**These two sections are checked by `scripts/mobile-check.mjs`, not by `smoke.mjs`.** That is a
+gap, and it is named rather than glossed: the suite drives one shared page, and hosting touch
+checks there means turning `Emulation.setTouchEmulationEnabled` on and off around them, which
+changes `pointer: coarse` and `hover` for every other check in the run. Until that is measured,
+the harness is the gate and it is manual. github#73 carries the follow-up.
+
+**Three constants, and they are not interchangeable.** `PICK_FLOOR_PX` is **1.5 px**, sized for a
+*floored pointer* being at most 1.41 px from a true centre, and is checked by "a sub-pixel dot
+can still be hovered". `TOUCH_PICK_FLOOR_PX` is **14 px**, about half a fingertip, and applies
+only to coords a finger produced (`fat` on the coords). `getNodeAtPosition` takes the floor per
+call, so widening one never widens the other. `TOUCH_TAP_SLOP_PX` is **10 px**, and under it *nothing happens at all* -- no pan, no inertia.
+A release that never left the slop is a tap; one that did is a pan, and the decision is the
+gesture rather than any timer. `TOUCH_DOUBLE_TAP_PX` is **24 px**: a second tap further away
+than that is a fresh single tap, not a double.
+
+**A tap must also have been one finger throughout**, tracked as `maxTouches`. A two-finger tap
+selects nothing, and `touchstart` on a gesture already in progress must not reset what the
+gesture is -- both were live defects found by an adversarial review pass and are now what the
+harness's three gesture probes assert.
+
+**Pan is one code path for both inputs.** `panFrom()` and `glide()` were extracted from the
+mouse handlers rather than written twice, and the check is a number: the same travel must move
+the camera by the same amount whichever input delivered it.
+
+```bash
+node scripts/mobile-check.mjs --device desktop    # the control: pointer, the suite's window
+node scripts/mobile-check.mjs --device iphone14
+node scripts/smoke.mjs --only "sub-pixel"         # the pointer's 1.5 px, unchanged
+```
+
+Measured 2026-09-07 on the demo fixture, 60 px of travel:
+
+| viewport | pointer dx | finger dx | ratio |
+|---|---|---|---|
+| desktop 1600x1000 | 0.1460 | 0.1460 | **1.000** |
+| iPhone 14 390x844 | 0.3142 | 0.3142 | **1.000** |
+| Pixel 7 412x915 | 0.2945 | 0.2945 | **1.000** |
+| iPad mini 744x1133 | 0.2618 | 0.2618 | **1.000** |
+| a 320 px leaf | 0.3988 | 0.3988 | **1.000** |
+
+And a tap delivers `pointerdown, touchstart, touchend` with **no synthesized click behind it**,
+on every phone viewport -- the check that a tap selects once rather than twice.
+
+Three gesture probes cover what a motionless tap cannot, all on the iPhone 14 viewport:
+
+| gesture | required | measured 2026-09-07 |
+|---|---|---|
+| tap after a 5 px wobble | selects, camera held | **selected, camera held** |
+| a 45 px swipe | pans, selects nothing | **panned, nothing selected** |
+| a two-finger tap | selects nothing, camera held | **nothing selected, camera held** |
+
+The first row is the one that matters: the first cut of the captor failed it while every other
+number on this page looked right, because the harness was sending a tap with no movement in it.
+
+## The disc gets a phone's screen, and the desktop layout does not move
+
+Below 720 px the disc takes the rest of the viewport and the legend, search and view buttons
+slide up as a sheet. The band and date strip stay on and can be put away, never overlaid,
+because design/0010 puts the band in its own grid row precisely so it cannot collide with the
+disc. Showing the band costs no dot size at all, 1.38 px median with it and without, since the
+disc is fit to the narrower axis; its control row wraps below the breakpoint, or the stage clips
+the second date field and All dates off the right edge. The
+detail card becomes a sheet at the foot at 46% and both control clusters move to the top
+corners, clear of it. design/0013.
+
+**A panel never covers its own toggle.** The panel buttons live in `#vg-canvas`, which the band
+pushes down by its own height, so they land under a sheet that is anchored to the bottom. The
+cluster therefore outranks the sheet, and a tap on the remaining disc closes the sheet too. The
+harness asserts the round trip: open, what is under the toggle, close.
+
+```bash
+node scripts/mobile-check.mjs --device iphone14      # "sheet toggle round trip"
+```
+
+Measured 2026-09-07 before the fix: `opened on; under it while open: #vg-sidebar; second tap ->
+on`. After: `under it while open: the toggle; second tap -> off`.
+
+**Two more traps, both measured rather than reasoned.** With the band hidden, `#vg-canvas` inherits
+the stage's `auto` row and collapses to **zero height**, because every child of it is absolutely
+positioned -- the row is pinned to `1fr` instead, and `[data-band="on"]` restores `auto 1fr`.
+And both panels change the canvas box without changing the root's, so neither the engine's
+window listener nor the page's root observer fires: every toggle calls `refreshSizeScale()`,
+`placeLogo()` and an explicit `renderer.refresh()`.
+
+```bash
+node scripts/mobile-check.mjs --device iphone14 --shot after.png
+node scripts/mobile-check.mjs --device desktop        # must be unchanged
+node scripts/smoke.mjs --only "camera cluster"
+```
+
+Measured 2026-09-07, demo fixture, 1403 notes:
+
+| | before | after |
+|---|---|---|
+| iPhone 14, disc box | 390x260, 31% of screen | **390x564 with the band, 390x844 without** |
+| iPhone 14, dot radius p50 | 1.10 px | **1.38 px** |
+| iPhone 14, dots under 1 px | 496 of 1403 | **153 of 1403** |
+| Pixel 7, dot radius p50 | 1.19 px | **1.43 px** |
+| desktop, sidebar / disc box | 288x1000 / 1312x770 | **unchanged** |
+| desktop, dot radius min/p50/max | 0.89 / 2.19 / 4.06 px | **unchanged** |
+| iPad mini (above the breakpoint) | 456x903 | **unchanged** |
+
+Every dot on a phone is still under 2 px: the disc is fit to the narrower axis, so the extra
+height buys margin rather than radius. The catchment is what makes a tap work; more radius
+needs a filter or a zoom.
