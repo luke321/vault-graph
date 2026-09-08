@@ -56,6 +56,8 @@ export interface GraphStore {
   readonly size: number;
   addNode(id: string, attrs: NodeAttrs): string;
   addUndirectedEdge(source: string, target: string, attrs: EdgeAttrs): string;
+  // github#72
+  clear(): void;
   hasNode(id: string): boolean;
   hasEdge(source: string, target: string): boolean;
   dropEdge(source: string, target: string): void;

@@ -542,15 +542,6 @@ function mountVaultGraph(root, data, deps) {
 
   var graph = new Graph();
 
-  DATA.nodes.forEach(function (n, i) {
-    graph.addNode(String(i), {
-      label: n.label, x: 0, y: 0, size: 4,
-      folder: n.folder, sub: n.sub || "", dirs: n.dirs || [], ntype: n.type || "note",
-      tags: n.tags || [], path: n.id, deg: n.deg,
-      created: n.created || "", touched: n.touched || "",
-      words: n.words || 0, ghost: !!n.ghost
-    });
-  });
   // github#43
   var EDGE_RAMP_START = 2000, EDGE_RAMP_END = 10000, EDGE_FLOOR = 0.10;
   /** @type {Record<string, { o: string, w: number }[]>} */
@@ -565,72 +556,127 @@ function mountVaultGraph(root, data, deps) {
   var edgeAttrsOf = function (w) { return { weight: w, size: EDGE_SIZE }; };
   var EDGE_SHOWN = 0;
   var lazyEdges = false;
-  (function () {
-    /** @type {Record<string, number>} */
-    var seen = dict();
-    /** @type {{ a: string, b: string, w: number, k: string }[]} */
-    var list = [];
-    DATA.edges.forEach(function (e) {
-      var a = String(e.s), b = String(e.t);
-      var k = a < b ? a + "\u0000" + b : b + "\u0000" + a;
-      if (seen[k]) return;
-      seen[k] = 1;
-      EDGE_TOTAL++;
-      list.push({ a: a, b: b, w: e.w, k: k });
-      (adj[a] || (adj[a] = [])).push({ o: b, w: e.w });
-      if (b !== a) (adj[b] || (adj[b] = [])).push({ o: a, w: e.w });
-    });
-    var share = EDGE_TOTAL <= EDGE_RAMP_START ? 1
-      : EDGE_TOTAL >= EDGE_RAMP_END ? EDGE_FLOOR
-      : 1 - (1 - EDGE_FLOOR) * (EDGE_TOTAL - EDGE_RAMP_START) / (EDGE_RAMP_END - EDGE_RAMP_START);
-    EDGE_SHOWN = Math.round(EDGE_TOTAL * share);
-    lazyEdges = EDGE_SHOWN < EDGE_TOTAL;
-    if (lazyEdges) {
-      list.sort(function (p, q) { return q.w - p.w || (p.k < q.k ? -1 : 1); });
-      list.length = EDGE_SHOWN;
-    }
-    list.forEach(function (e) {
-      if (!graph.hasEdge(e.a, e.b)) graph.addUndirectedEdge(e.a, e.b, edgeAttrsOf(e.w));
-    });
-  })();
 
   var NODE_MIN = 2.6, NODE_MAX = 11, NODE_ORPHAN = 6;
-  graph.forEachNode(function (id, a) {
-    graph.setNodeAttribute(id, "size", a.deg === 0
-      ? NODE_ORPHAN
-      : Math.min(NODE_MAX, NODE_MIN + 1.55 * Math.sqrt(a.deg)));
-  });
 
   // github#58
   /** @type {Record<string, number>} */
   var hubRank = dict();
-  (function () {
+  /** @type {Record<string, string[]>} */
+  var subOrder = dict();
+  /** @type {Record<string, number>} */
+  var subCount = dict();
+  // github#72
+  /** the id each note path holds, so a live rebuild can keep a surviving note's id */
+  /** @type {Record<string, string>} */
+  var idOfPath = dict();
+  var nextId = 0;
+
+  /**
+   * Build the graph, and everything derived from the note set, out of a data object.
+   *
+   * github#72: the mount and the live rebuild both come through here. An INCREMENTAL path --
+   * add what arrived, drop what left, patch the tallies -- would be a second construction, and
+   * two constructions drift: `hubRank` is a full sort, `subOrder` a full tally, and the edge
+   * budget a share of every edge, none of which patch correctly from a delta. The layout has
+   * no tolerance for the two disagreeing, so there is one of them.
+   *
+   * `keepId` answers with the id a path already holds; a path it does not answer for takes a
+   * fresh one. That is what makes an id survive a rebuild, which the cascade needs -- it walks
+   * FROM the positions the old ids are drawn at -- and which the mount gets for free by never
+   * having rebuilt.
+   *
+   * @param {VaultData} src
+   * @param {((path: string) => string | undefined) | null} keepId
+   */
+  function ingest(src, keepId) {
+    graph.clear();
+    adj = dict();
+    hubRank = dict();
+    subOrder = dict();
+    subCount = dict();
+    idOfPath = dict();
+    EDGE_TOTAL = 0;
+    EDGE_SHOWN = 0;
+    lazyEdges = false;
+
+    /** @type {string[]} */
+    var idAt = [];
+    src.nodes.forEach(function (n, i) {
+      var held = keepId ? keepId(n.id) : undefined;
+      var id = held === undefined ? String(nextId++) : held;
+      idAt[i] = id;
+      idOfPath[n.id] = id;
+      graph.addNode(id, {
+        label: n.label, x: 0, y: 0, size: 4,
+        folder: n.folder, sub: n.sub || "", dirs: n.dirs || [], ntype: n.type || "note",
+        tags: n.tags || [], path: n.id, deg: n.deg,
+        created: n.created || "", touched: n.touched || "",
+        words: n.words || 0, ghost: !!n.ghost
+      });
+    });
+
+    (function () {
+      /** @type {Record<string, number>} */
+      var seen = dict();
+      /** @type {{ a: string, b: string, w: number, k: string }[]} */
+      var list = [];
+      src.edges.forEach(function (e) {
+        var a = idAt[e.s], b = idAt[e.t];
+        if (a === undefined || b === undefined) return;
+        var k = a < b ? a + "\u0000" + b : b + "\u0000" + a;
+        if (seen[k]) return;
+        seen[k] = 1;
+        EDGE_TOTAL++;
+        list.push({ a: a, b: b, w: e.w, k: k });
+        (adj[a] || (adj[a] = [])).push({ o: b, w: e.w });
+        if (b !== a) (adj[b] || (adj[b] = [])).push({ o: a, w: e.w });
+      });
+      var share = EDGE_TOTAL <= EDGE_RAMP_START ? 1
+        : EDGE_TOTAL >= EDGE_RAMP_END ? EDGE_FLOOR
+        : 1 - (1 - EDGE_FLOOR) * (EDGE_TOTAL - EDGE_RAMP_START) / (EDGE_RAMP_END - EDGE_RAMP_START);
+      EDGE_SHOWN = Math.round(EDGE_TOTAL * share);
+      lazyEdges = EDGE_SHOWN < EDGE_TOTAL;
+      if (lazyEdges) {
+        list.sort(function (p, q) { return q.w - p.w || (p.k < q.k ? -1 : 1); });
+        list.length = EDGE_SHOWN;
+      }
+      list.forEach(function (e) {
+        if (!graph.hasEdge(e.a, e.b)) graph.addUndirectedEdge(e.a, e.b, edgeAttrsOf(e.w));
+      });
+    })();
+
+    graph.forEachNode(function (id, a) {
+      graph.setNodeAttribute(id, "size", a.deg === 0
+        ? NODE_ORPHAN
+        : Math.min(NODE_MAX, NODE_MIN + 1.55 * Math.sqrt(a.deg)));
+    });
+
+    // github#58
     graph.nodes().slice().sort(function (a, b) {
       return graph.getNodeAttribute(b, "deg") - graph.getNodeAttribute(a, "deg") ||
              String(graph.getNodeAttribute(a, "label"))
                .localeCompare(String(graph.getNodeAttribute(b, "label")));
     }).forEach(function (id, i) { hubRank[id] = i; });
-  })();
 
-  /** @type {Record<string, string[]>} */
-  var subOrder = dict();
-  /** @type {Record<string, number>} */
-  var subCount = dict();
-  (function () {
-    /** @type {Record<string, Record<string, number>>} */
-    var tally = dict();
-    graph.forEachNode(function (_id, a) {
-      var f = a.folder, sb = a.sub || "";
-      if (!tally[f]) tally[f] = dict();
-      tally[f][sb] = (tally[f][sb] || 0) + 1;
-    });
-    Object.keys(tally).forEach(function (f) {
-      subOrder[f] = Object.keys(tally[f]).sort(function (x, y) {
-        return tally[f][y] - tally[f][x] || x.localeCompare(y);
+    (function () {
+      /** @type {Record<string, Record<string, number>>} */
+      var tally = dict();
+      graph.forEachNode(function (_id, a) {
+        var f = a.folder, sb = a.sub || "";
+        if (!tally[f]) tally[f] = dict();
+        tally[f][sb] = (tally[f][sb] || 0) + 1;
       });
-      subOrder[f].forEach(function (sb) { subCount[f + "/" + sb] = tally[f][sb]; });
-    });
-  })();
+      Object.keys(tally).forEach(function (f) {
+        subOrder[f] = Object.keys(tally[f]).sort(function (x, y) {
+          return tally[f][y] - tally[f][x] || x.localeCompare(y);
+        });
+        subOrder[f].forEach(function (sb) { subCount[f + "/" + sb] = tally[f][sb]; });
+      });
+    })();
+  }
+
+  ingest(DATA, null);
 
   var UNIT = 160;
 

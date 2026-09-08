@@ -63,6 +63,19 @@ export class GraphStore implements GraphStoreApi {
     return key;
   }
 
+  /**
+   * Empty the store so the same instance can be re-ingested. github#72: the live rebuild
+   * reconstructs the graph from the new data with the SAME code the mount runs, rather than
+   * mutating node by node -- an incremental path is a second construction that can drift from
+   * the first, and the layout has no tolerance for the two disagreeing. The renderer holds this
+   * instance by reference, so the store is emptied rather than replaced.
+   */
+  clear(): void {
+    this.nodeAttrs.clear();
+    this.edgeRecords.clear();
+    this.adjacency.clear();
+  }
+
   hasNode(id: string): boolean {
     return this.nodeAttrs.has(id);
   }
