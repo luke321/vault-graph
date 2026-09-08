@@ -123,9 +123,9 @@ still on the chip, so the highlight rode the whole cascade and overlapped the no
 clears the hover highlight; leaving it for the rest of the row hands the row's highlight back;
 hovering the row anywhere else is unchanged.
 
-## Each row draws its share of the vault
+## Each row draws its share of the largest folder shown
 
-**Status** as-built · github#78 · 2026-09-08
+**Status** as-built · github#78 · 2026-09-08, denominator revised the same day
 
 The disc makes a lopsided vault obvious at a glance. The legend did not: every row was the
 same height and the same weight, and the imbalance survived only as `.ct` — 11px,
@@ -133,14 +133,23 @@ same height and the same weight, and the imbalance survived only as `.ct` — 11
 **406 notes and 1 note got the same row**, a 406x spread rendered eighteen times identically.
 
 Each row whose count is a **plain number** now carries a 2px rule along the bottom of `.lg`,
-in the group's own colour, its length that row's share of every note on the page.
+in the group's own colour, **its length that row's count against the largest count among the
+folders currently visible** — so the biggest folder on screen fills its row and every other
+bar is read against it.
 
 **It measures notes, and the wedge beside it measures notes within its own ring.** Angular
 share is allocated per band (design/0001), so a small inner-band folder can hold a wide
-wedge and still draw a short bar. The two disagree by design, and the count's title says
-"of the vault" in those words so nothing pretends otherwise. Scaling to the largest folder
-instead was rejected for exactly this reason: the bar's fraction of its track would then
-mean one thing while its label meant another.
+wedge and still draw a short bar. The two disagree by design, and the count's title names
+its reference so nothing pretends otherwise.
+
+**The vault-wide denominator shipped first and was replaced the same day.** Dividing by every
+note on the page is the more obviously *honest* number — the bar's fraction of its track is
+literally the fraction of the vault — but measured on the demo it made the largest bar 62.8px
+of a 217px track and left the small folders as stubs nobody could tell apart. Against the
+largest shown, 60 / 50 / 48 / 36 / 24 notes read as visibly different lengths and the biggest
+folder fills its row. The comparison a reader actually makes in a legend is *this folder
+against the biggest one*, not *this folder against a total that appears nowhere on screen*.
+The cost is that the number is relative, which is why the title carries the reference.
 
 **The bar is a background layer, not a fifth grid column, and the numbers are why.** `.nm`
 is the only `1fr` cell and is already truncating — 122px against the 123px that
@@ -171,12 +180,24 @@ carries the within-parent share. Parent-scaled sub-bars remain a thing that coul
 with a label; two silent denominators in one list is the thing that must not be.
 
 **A one-note folder is floored at 1px** rather than dropped, so every folder standing on the
-disc marks its row. Measured: widest 62.8px on the demo, 94.5px on the 10k, 167.9px on the
-shape vault whose `projects` holds 77.4% of it; thinnest 1.0px on all three.
+disc marks its row. Measured: exactly one full bar at the **217px** track on each fixture —
+basis 406 on the demo, 4358 on the 10k, 738 on the shape vault — and a thinnest of 1.0px on
+all three.
 
-**The denominator is every note on the page, not the visible ones**, so hiding a folder
-moves no bar — the same way it moves no count. `invariants.md` carries the check, the
-before/after layout table, and the pixel measurement of the painted length.
+**The bars re-scale on a visibility toggle**, which is the direct consequence of *visible*
+being in the denominator and the opposite of what the first version did. Hide the largest
+folder and the runner-up is promoted to a full bar; show it again and the basis returns.
+That is asserted rather than merely allowed: on the demo, hiding `05 - Meeting Notes` must
+move the basis to 200 with `01 - Projects` at 100%.
+
+**A hidden row keeps its bar, clamped at 100%.** Its count is still on screen, so a bar
+belongs there; but it is out of the basis, so it could otherwise exceed the track.
+
+**The tooltip names the reference**, because a proportion with an unnamed denominator is not
+a measurement: the largest row reads `406 notes · the largest folder shown`, every other row
+`143 notes · 35.2% of 05 - Meeting Notes`. If the denominator changes again, that string
+changes in the same commit. `invariants.md` carries the check, the before/after layout table,
+and the pixel measurement of the painted length.
 
 ### The bar's colour is cached, and goes stale with the swatch it sits under
 
@@ -228,10 +249,14 @@ sides does not parse. It needs a hand resolution.
 
 ### When drill-down lands, the denominator stays deliberate
 
-The bar and its title both say *of the vault*, and github#76's drill must not quietly change
-that. A drilled child may keep showing its percentage of the whole vault — that is the current,
-documented meaning and the tooltip says so in those words. Switching to a percentage of the
-current root would be **a separate decision with its own record and its own check**, because it
-changes what every bar on the page means without changing how any of them look. The check reads
-`__vg.graph.order` as the denominator, so it will follow whichever choice the code makes; the
-wording in the title is the part a person has to keep true.
+The basis is *the largest folder currently visible*, and github#76's drill must not quietly
+change what "currently visible" means. A drill that narrows the legend to one folder's children
+makes those children the visible set, so the basis would become the largest child — which is
+probably the right reading, but it is a **decision with its own record and its own check**, not
+a side effect to discover later. Whatever it resolves to, the tooltip must keep naming the
+folder the bar is measured against; that string is the only thing standing between a relative
+bar and a number that means nothing.
+
+**This section is itself the precedent.** The denominator has already changed once, from every
+note on the page to the largest folder shown, and what made that safe was that the check and
+the tooltip changed with it in the same commit. Do the same.

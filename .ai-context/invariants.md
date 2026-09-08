@@ -990,61 +990,99 @@ edge at 266px with the tree open, and 9 / 9 / one edge at the folded default. Th
 button is laid out at every depth with only its opacity changing on hover, so this holds
 while hovering too.
 
-## The legend's count bar is a share of the vault, not of the wedge beside it
+## The legend's count bar is a share of the largest folder currently shown
 
-Each legend row whose count is a plain number carries a 2px rule along the bottom of `.lg`,
-its length that row's share of **every note on the page**. The bar measures notes; the wedge
-next to it measures notes *within its own ring*, because angular share is allocated per band
-(design/0001). **The two will therefore disagree, and that is the honest reading** — a small
-inner-band folder can hold a wide wedge and still draw a short bar. Nothing in the UI may
-imply otherwise; the count's title says "of the vault" in those words.
+Each legend row whose count is a plain number carries a 2px rule along the bottom of `.lg`.
+**Its length is that row's count against the largest count among the folders currently
+visible**, so the biggest folder on screen fills its row and every other bar is read against
+it. The bar measures notes; the wedge next to it measures notes *within its own ring*, because
+angular share is allocated per band (design/0001), so the two still disagree by design.
+
+**The denominator is the largest VISIBLE folder, which means the bars re-scale on a visibility
+toggle.** That is the opposite of the first shipped version, which divided by every note on the
+page and therefore never moved when a folder was hidden. Chosen deliberately on 2026-09-08:
+against the whole vault the largest bar was 62.8px of a 217px track on the demo and the small
+folders were indistinguishable stubs; against the largest shown, 60 / 50 / 48 / 36 / 24 notes
+read as visibly different lengths.
 
 ```javascript
-// the share each row declares, against the share its count actually is
+// what each row declares, against what it should be
 (function () {
-  var order = __vg.graph.order;
-  return [].map.call(document.querySelectorAll("#vg-legend .lg.bar"), function (el) {
-    var g = el.getAttribute("data-g");
-    return { g: g,
-             declared: parseFloat(getComputedStyle(el).getPropertyValue("--vg-share")),
-             is: (__vg.groupCount(g) / order) * 100,
-             applied: getComputedStyle(el).backgroundSize.indexOf("max(1px,") === 0 };
-  }).filter(function (r) { return !r.applied || Math.abs(r.declared - r.is) > 0.01; });
+  var rows = [].map.call(document.querySelectorAll("#vg-legend .lgr"), function (lgr) {
+    var lg = lgr.querySelector(".lg");
+    if (!lg) return null;
+    var g = lg.getAttribute("data-g");
+    return { g: g, count: __vg.groupCount(g),
+             ct: lgr.querySelector(".ct").textContent,
+             visible: lg.getAttribute("aria-pressed") === "true",
+             declared: parseFloat(getComputedStyle(lg).getPropertyValue("--vg-share")),
+             applied: getComputedStyle(lg).backgroundSize.indexOf("max(1px,") === 0 };
+  }).filter(Boolean);
+  var basis = rows.filter(function (r) { return r.count > 0 && r.visible && /^\d+$/.test(r.ct); })
+                  .reduce(function (m, r) { return Math.max(m, r.count); }, 0);
+  return rows.filter(function (r) { return r.declared === r.declared; })
+             .filter(function (r) {
+    return !r.applied ||
+           Math.abs(r.declared - Math.min(100, (r.count / basis) * 100)) > 0.01;
+  });
 })()
 ```
 
-Must be **empty**. Measured: **17 of 18 rows barred over 1403 notes** (demo) and over 10002
-(10k), **6 of 7 over 954** (shape vault). Widest bar 62.8px / 94.5px / 167.9px, thinnest
-**1.0px everywhere** — floored, so a one-note folder still marks its row instead of
-vanishing.
+Must be **empty**. Measured: **17 of 18 rows barred** on the demo (basis **406**, `05 - Meeting
+Notes`) and on the 10k (basis **4358**, same folder), **6 of 7** on the shape vault (basis
+**738**, `projects`). Exactly **one row at a full bar** on each, at the full **217px** track;
+thinnest **1.0px everywhere**, floored so a one-note folder still marks its row.
+
+**Hiding the largest folder promotes the runner-up to a full bar**, and that is asserted, not
+merely allowed: hide `05 - Meeting Notes` on the demo and the basis must become 200 with
+`01 - Projects` declaring 100%. Showing it again must restore the basis to 406.
 
 **`getComputedStyle` cannot resolve the `max()`, and that is what makes this checkable.**
-Chrome reports `background-size: max(1px, 28.938%) 2px` on a barred row and `auto` on a
-plain one, so a size still beginning `max(1px,` proves `.lg.bar` won the cascade rather
-than one of the `background` shorthands. The share is read from `--vg-share` beside it.
-Do not try to parse it with a regex written inside the check's template literal: an escaped
-open paren is consumed before the page sees it, the intended literal became a capturing
-group, and all 17 rows read as broken when nothing was.
+Chrome reports `background-size: max(1px, 49.261%) 2px` on a barred row and `auto` on a plain
+one, so a size still beginning `max(1px,` proves `.lg.bar` won the cascade rather than one of
+the `background` shorthands. The share is read from `--vg-share` beside it. Do not try to parse
+it with a regex written inside the check's template literal: an escaped open paren is consumed
+before the page sees it, the intended literal becomes a capturing group, and every row reads as
+broken when nothing is.
 
 **The painted length was verified against the declaration, in pixels**, by clipping each row
-out of a screenshot and counting the run of bar-coloured pixels — Chrome decoding its own
-PNG through a canvas, since no computed style can answer it. Worst disagreement across the
-demo's 17 rows: **0.36 CSS px**, which is antialiasing. 1 note painted 1.00px against the
-1px floor; 406 notes painted 62.50px against 62.80px declared.
+out of a screenshot and counting the run of bar-coloured pixels — Chrome decoding its own PNG
+through a canvas, since no computed style can answer it. Re-measured on the demo at the new
+basis: `05 - Meeting Notes` declares 100% and paints **217.00px exactly**, `01 - Projects`
+declares 49.26% and paints 107.00px against 106.90px wanted, `14 - Reading List` paints
+**1.00px** on the floor, and the **worst disagreement over all 17 rows is 0.83 CSS px** on
+`11 - Clippings` — the antialiased tail of a 12.83px bar, which the pixel scan's colour
+tolerance drops.
+
+**What the new basis bought, in painted pixels.** The three folders that were indistinguishable
+before are now clearly ordered:
+
+| row | notes | painted, vault-wide | painted, largest shown |
+|---|---|---|---|
+| `03 - Resources` | 60 | 9.00px | **32.00px** |
+| `04 - Daily Notes` | 50 | 7.50px | **26.00px** |
+| `09 - Maps of Content` | 48 | 7.50px | **25.00px** |
+| `05 - Meeting Notes` | 406 | 62.50px | **217.00px** |
+
+### The tooltip has to say which folder the bar is measured against
+
+The count's `title` names the reference, because a proportion with an unnamed denominator is
+not a measurement. The largest row reads `406 notes · the largest folder shown`; every other
+row reads `143 notes · 35.2% of 05 - Meeting Notes`. **If the denominator ever changes again,
+this string changes in the same commit** — that is the whole guard against the bar quietly
+meaning something else.
 
 ### A bar belongs to a plain count and to nothing else
 
 A parenthesised count means the notes are tallied somewhere other than this row's own wedge
 — github#50's folder whose notes stand elsewhere, and the unlinked group kept separate — so
-those rows **draw nothing**, and neither do the `.lgr-empty` rows at zero. Verified byte for
-byte: the `(unlinked)` row's crop is **identical before and after the change**, 6715 bytes
-both times. One consequence, and it is intended: with `(unlinked)` kept separate the folder
-bars sum to less than the whole vault (1370 of 1403 on the demo), and that row is the
-remainder.
+those rows **draw nothing**, and neither do the `.lgr-empty` rows at zero. They are also left
+out of the basis, so a held count cannot set the scale for the rows that are drawn. Verified
+byte for byte at the vault-wide denominator: the `(unlinked)` row's crop was **identical before
+and after the change**, 6715 bytes both times.
 
-**Subfolder rows are bare.** `subCount` is within one parent, so a vault-scaled sub-bar
-would be a stub on every row and a parent-scaled one would put a second denominator in the
-same list, unlabelled. The sub-wedge on the disc already shows the within-parent share.
+**Subfolder rows are bare.** `subCount` is within one parent, so a sub-bar needs a second
+denominator in the same list. The sub-wedge on the disc already shows the within-parent share.
 
 ### Hover and selection must not wipe it
 
@@ -1055,35 +1093,13 @@ same list, unlabelled. The sub-wedge on the disc already shows the within-parent
 because it cannot out-specify `.lg.bar`.
 
 **Be precise about what that edit actually buys, because the obvious claim is wrong.**
-`.vault-graph .lg:hover` and `.vault-graph .lg.bar` have the **same specificity** (two
-classes and a pseudo-class against three classes), so order decides, and `.lg.bar` is
-written after both shorthand rules. Measured: putting `background:` back on `:hover` leaves
-the bar **intact and this check green**. What the longhand buys is independence from rule
-order — move `.lg.bar` *above* `:hover` with the shorthand restored and the bar dies on
-hover, which is the case the check does catch. So the shorthand is a latent hazard for
-whoever next reorders this block, not a live one today.
-
-### The check was proved to have teeth, one regression at a time
-
-A check that cannot fail is worse than none. Each of these was applied to a green tree, run,
-and reverted:
-
-| break it like this | result |
-|---|---|
-| delete the `.lg.bar` rule (the `develop` state) | **FAIL** — 17 rows `size=auto`, and hover reads wiped |
-| scale to the largest folder instead of the vault | **FAIL** — `05 - Meeting Notes` declares 100%, its share is 28.938% |
-| draw a bar on the parenthesised rows | **FAIL** — `(unlinked)`: ct "(33)" but bar=true |
-| move `.lg.bar` above `:hover`, shorthand restored | **FAIL** — hovering wiped the bar |
-
-**The third one passed until the check learned to flip the membership toggle**, and that is
-the lesson worth keeping: a parenthesised count only *exists* while `(unlinked)` is kept
-separate, which is not the default state, so the entire no-bar-on-brackets rule — the most
-carefully argued edge case in the issue — went unasserted on the first cut. The check now
-sets `unlinkedByFolder` false, re-reads every row, and restores it. Parenthesised rows
-found bare that way: **1 on demo, 1 on the 10k, 3 on the shape vault** (`(vault root)`,
-`tiny`, `(unlinked)` — the shape vault is the only fixture carrying github#50's
-notes-stand-elsewhere case). A shape with none reports that it had nothing to bite on
-rather than passing.
+`.vault-graph .lg:hover` and `.vault-graph .lg.bar` have the **same specificity** (two classes
+and a pseudo-class against three classes), so order decides, and `.lg.bar` is written after
+both shorthand rules. Measured: putting `background:` back on `:hover` leaves the bar **intact
+and this check green**. What the longhand buys is independence from rule order — move
+`.lg.bar` *above* `:hover` with the shorthand restored and the bar dies on hover, which is the
+case the check does catch. So the shorthand is a latent hazard for whoever next reorders this
+block, not a live one today.
 
 **And the layout must not move at all**, because the bar exists to cost `.nm` nothing:
 
@@ -1095,6 +1111,29 @@ rather than passing.
 | names truncating (demo, 10k / shape) | 1 of 18 / 0 of 7 | **1 of 18 / 0 of 7** |
 | `nav counts share one right edge` | 1 folded, 1 open | **1 folded, 1 open** |
 | golden snapshot, all three fixtures | — | **band and positions unchanged** |
+
+### The check was proved to have teeth, one regression at a time
+
+A check that cannot fail is worse than none. Each of these was applied to a green tree, run,
+and reverted:
+
+| break it like this | result |
+|---|---|
+| delete the `.lg.bar` rule (the `develop` state) | **FAIL** — rows read `size=auto`, and hover reads wiped |
+| divide by every note on the page instead of the largest shown | **FAIL** — `(vault root)`: 0.143% declared, 0.493% wanted |
+| take the basis over all folders, ignoring visibility | **FAIL** — hiding `05 - Meeting Notes` did not promote `01 - Projects` to a full bar (49.261%) |
+| draw a bar on the parenthesised rows | **FAIL** — `(unlinked)`: ct "(33)" but bar=true |
+| move `.lg.bar` above `:hover`, shorthand restored | **FAIL** — hovering wiped the bar |
+| make the bar resolve `var(--gN)` live while the swatch stays cached | **FAIL** — bar agrees with its swatch=false |
+
+**The bracketed-row one passed until the check learned to flip the membership toggle**, and
+that is the lesson worth keeping: a parenthesised count only *exists* while `(unlinked)` is
+kept separate, which is not the default state, so the entire no-bar-on-brackets rule — the most
+carefully argued edge case in the issue — went unasserted on the first cut. The check now sets
+`unlinkedByFolder` false, re-reads every row, and restores it. Parenthesised rows found bare
+that way: **1 on demo, 1 on the 10k, 3 on the shape vault** (`(vault root)`, `tiny`,
+`(unlinked)` — the shape vault is the only fixture carrying github#50's notes-stand-elsewhere
+case). A shape with none reports that it had nothing to bite on rather than passing.
 
 ### A row's bar and its own swatch never disagree
 
@@ -1122,7 +1161,7 @@ github#84 would take, which is the point of asserting it now.
 rather than a live one — the first cut of that mutation test reported exactly that.
 
 ```bash
-node scripts/smoke.mjs --only "count bars"      # the share, the edge cases, hover, selection
+node scripts/smoke.mjs --only "count bars"      # the basis, the edge cases, hover, selection
 node scripts/smoke.mjs --only "theme flip"      # the bar follows its swatch; github#84 reported
 node scripts/smoke.mjs --only "right edge"      # 1 edge, not 2 -- the column survived
 node scripts/smoke.mjs --only "golden"          # the disc did not move

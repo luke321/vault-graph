@@ -5088,11 +5088,25 @@ function mountVaultGraph(root, data, deps) {
   }
 
   // github#78, design/0006
-  /** @param {string} g */
-  function barShare(g) {
+  /** @returns {{ max: number, group: string }} */
+  function barBasis() {
+    var names = order[state.dim] || [], out = { max: 0, group: "" };
+    for (var i = 0; i < names.length; i++) {
+      var g = names[i];
+      if (!counts[g] || isHidden(g)) continue;
+      if (g === UNLINKED && !unlinkedByFolder) continue;
+      if (counts[g] > out.max) { out.max = counts[g]; out.group = g; }
+    }
+    return out;
+  }
+
+  // github#78, design/0006
+  /** @param {string} g @param {{ max: number, group: string }} basis */
+  function barShare(g, basis) {
     if (!counts[g]) return 0;
     if (g === UNLINKED && !unlinkedByFolder) return 0;
-    return graph.order ? counts[g] / graph.order : 0;
+    if (!basis.max) return 0;
+    return Math.min(1, counts[g] / basis.max);
   }
 
   // github#78
@@ -5155,6 +5169,9 @@ function mountVaultGraph(root, data, deps) {
       }).join("");
     };
 
+    // github#78
+    var basis = barBasis();
+
     setHTML($("legend"), names.map(function (g) {
       var vis = !isHidden(g);
       var hasSubs = state.dim === "folder" &&
@@ -5168,14 +5185,16 @@ function mountVaultGraph(root, data, deps) {
       var lgrClass = "lgr" + (live ? "" : " lgr-empty");
 
       // github#78, design/0006
-      var share = barShare(g);
+      var share = barShare(g, basis);
       var lgAttrs = share
         ? ' class="lg bar" style="--vg-share:' + (share * 100).toFixed(3) +
           '%;--vg-bar:' + colorOf(g) + '"'
         : ' class="lg"';
       var ctTitle = share
-        ? ' title="' + counts[g] + (counts[g] === 1 ? " note" : " notes") + " · " +
-          shareText(share) + ' of the vault"'
+        ? ' title="' + counts[g] + (counts[g] === 1 ? " note" : " notes") +
+          (g === basis.group
+            ? " · the largest folder shown"
+            : " · " + shareText(share) + " of " + esc(basis.group)) + '"'
         : '';
 
       var row = '<div class="' + lgrClass + '">' +

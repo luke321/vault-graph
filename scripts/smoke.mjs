@@ -3308,7 +3308,7 @@ check("the (unlinked) row's count is parenthesised while kept separate, plain on
 });
 
 // github#78, design/0006
-check("legend count bars measure the vault, not the disc", async (p) => {
+check("legend count bars scale to the largest visible folder", async (p) => {
   const read = () => p.j(`(function(){
     var order = __vg.graph.order;
     var rows = [].map.call(document.querySelectorAll('#vg-legend .lgr'), function (lgr) {
@@ -3322,14 +3322,22 @@ check("legend count bars measure the vault, not the disc", async (p) => {
                pct: declared.charAt(declared.length - 1) === '%' ? parseFloat(declared) : null,
                applied: cs.backgroundSize.indexOf('max(1px,') === 0,
                size: cs.backgroundSize, drawn: cs.backgroundImage !== 'none',
+               visible: lg.getAttribute('aria-pressed') === 'true',
+               title: lgr.querySelector('.ct').getAttribute('title'),
                count: __vg.groupCount(g) };
     }).filter(Boolean);
     return { order: order, rows: rows };
   })()`);
 
+  // github#78
+  const basisOf = (rows) => rows
+    .filter((r) => r.count > 0 && r.visible && /^\d+$/.test(r.ct))
+    .reduce((m, r) => Math.max(m, r.count), 0);
+
   const base = await read();
+  const basis = basisOf(base.rows);
   const wrong = [];
-  let barred = 0, widest = { g: null, px: 0 }, thinnest = { g: null, px: 1e9 };
+  let barred = 0, full = 0, widest = { g: null, px: 0 }, thinnest = { g: null, px: 1e9 };
   for (const r of base.rows) {
     // github#50, github#3
     const wantBar = /^\d+$/.test(r.ct) && r.count > 0;
@@ -3339,18 +3347,20 @@ check("legend count bars measure the vault, not the disc", async (p) => {
       continue;
     }
     barred++;
-    const want = (r.count / base.order) * 100;
     if (r.pct === null || !r.drawn || !r.applied) {
       wrong.push(`${r.g}: barred but size=${r.size} share=${r.pct}`);
       continue;
     }
+    const want = Math.min(100, (r.count / basis) * 100);
     if (Math.abs(r.pct - want) > 0.01) {
-      wrong.push(`${r.g}: ${r.pct}% declared, ${want.toFixed(3)}% is its share`);
+      wrong.push(`${r.g}: ${r.pct}% declared, ${want.toFixed(3)}% against the largest shown (${basis})`);
     }
-    const px = Math.max(1, (r.count / base.order) * 217);
+    if (Math.abs(r.pct - 100) < 0.01) full++;
+    const px = Math.max(1, (r.count / basis) * 217);
     if (px > widest.px) widest = { g: r.g, px };
     if (px < thinnest.px) thinnest = { g: r.g, px };
   }
+  if (barred && !full) wrong.push(`no row draws a full bar against a basis of ${basis}`);
 
   // github#78 -- idempotent: the tree may already be open
   await p.eval(`(function(){ var b = document.querySelectorAll('#vg-legend [data-tw]');
@@ -3393,7 +3403,7 @@ check("legend count bars measure the vault, not the disc", async (p) => {
   }
 
   // github#78
-  let sel = null, hid = null;
+  let sel = null, rescaled = null;
   if (biggest) {
     const click = async (attr, g) =>
       p.eval(`document.querySelector('${sel1(attr, g)}').click(); void 0`);
@@ -3406,19 +3416,29 @@ check("legend count bars measure the vault, not the disc", async (p) => {
     await click("data-g", biggest.g);
     await sleep(400);
 
-    const eye = base.rows.find((r) => r.bar && r.g !== biggest.g);
-    if (eye) {
-      await click("data-eye", eye.g);
-      await sleep(600);
-      const h = await read();
-      const moved = h.rows.filter((r) => {
-        const was = base.rows.find((b) => b.g === r.g);
-        return was && was.bar && r.bar && Math.abs(r.pct - was.pct) > 0.001;
-      });
-      hid = moved.length;
-      if (moved.length) wrong.push(`hiding ${eye.g} moved ${moved.length} bar(s)`);
-      await click("data-eye", eye.g);
-      await sleep(600);
+    // github#78, design/0006
+    const runnerUp = base.rows.filter((r) => r.bar && r.g !== biggest.g)
+      .sort((a, b) => b.count - a.count)[0];
+    if (runnerUp) {
+      await click("data-eye", biggest.g);
+      await sleep(700);
+      const h2 = await read();
+      const basis2 = basisOf(h2.rows);
+      const promoted = h2.rows.find((r) => r.g === runnerUp.g);
+      rescaled = basis2 === runnerUp.count &&
+                 promoted && Math.abs(promoted.pct - 100) < 0.01;
+      if (basis2 !== runnerUp.count) {
+        wrong.push(`hiding ${biggest.g} left the basis at ${basis2}, wanted ${runnerUp.count}`);
+      } else if (!promoted || Math.abs(promoted.pct - 100) > 0.01) {
+        wrong.push(`hiding ${biggest.g} did not promote ${runnerUp.g} to a full bar ` +
+                   `(${promoted && promoted.pct}%)`);
+      }
+      await click("data-eye", biggest.g);
+      await sleep(700);
+      const restored = await read();
+      if (basisOf(restored.rows) !== basis) {
+        wrong.push(`showing ${biggest.g} again left the basis at ${basisOf(restored.rows)}`);
+      }
     }
   }
 
@@ -3427,6 +3447,7 @@ check("legend count bars measure the vault, not the disc", async (p) => {
   await p.eval(`__vg.setUnlinkedByFolder(false); void 0`);
   await sleep(700);
   const sep = await read();
+  const sepBasis = basisOf(sep.rows);
   let paren = 0;
   for (const r of sep.rows) {
     const wantBar = /^\d+$/.test(r.ct) && r.count > 0;
@@ -3436,24 +3457,25 @@ check("legend count bars measure the vault, not the disc", async (p) => {
       continue;
     }
     if (!wantBar) continue;
-    const want = (r.count / sep.order) * 100;
+    const want = Math.min(100, (r.count / sepBasis) * 100);
     if (r.pct === null || !r.applied || Math.abs(r.pct - want) > 0.01) {
-      wrong.push(`kept separate, ${r.g}: ${r.pct}% declared, ${want.toFixed(3)}% is its share`);
+      wrong.push(`kept separate, ${r.g}: ${r.pct}% declared, ${want.toFixed(3)}% wanted`);
     }
   }
   await p.eval(`__vg.setUnlinkedByFolder(${startOn}); void 0`);
   await sleep(700);
 
+  const titled = base.rows.find((r) => r.g === (biggest && biggest.g));
   return {
-    ok: wrong.length === 0 && barred > 0 && paren > 0,
-    detail: `${barred} of ${base.rows.length} rows barred over ${base.order} notes; ` +
-            (paren ? `${paren} parenthesised row(s) bare while kept separate; `
-                   : `NOT ASSERTED: no parenthesised row on this shape, so the ` +
-                     `no-bar-on-brackets rule had nothing to bite on; `) +
-            `widest ${widest.g} ${widest.px.toFixed(1)}px, thinnest ${thinnest.g} ` +
-            `${thinnest.px.toFixed(1)}px (1px floor); ${subs.n} sub rows bare; ` +
+    ok: wrong.length === 0 && barred > 0 && paren > 0 && full > 0,
+    detail: `${barred} of ${base.rows.length} rows barred, basis ${basis} notes ` +
+            `(${JSON.stringify(widest.g)}), ${full} row(s) at a full bar; ` +
+            `widest ${widest.px.toFixed(1)}px, thinnest ${thinnest.g} ` +
+            `${thinnest.px.toFixed(1)}px (1px floor); ` +
+            `${paren} parenthesised row(s) bare while kept separate; ${subs.n} sub rows bare; ` +
             `selection kept it=${sel}, hover kept it=${hov === null ? "no :hover from the harness" : hov}, ` +
-            `bars moved by a hidden folder=${hid}` +
+            `hiding the largest rescaled the rest=${rescaled}; ` +
+            `title ${JSON.stringify(titled && titled.title)}` +
             (wrong.length ? `  <- ${wrong.join(" | ")}` : "")
   };
 });
