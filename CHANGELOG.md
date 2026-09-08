@@ -125,8 +125,18 @@ debugging port, so overlapping windows are harmless.
 
 - **The full demo walk ends on the fold.** The `collapse` act is the storyboard's last one, so
   nothing after it needs the legend it folds away, and the hero closes on the disc with the
-  window to itself. Every clip under `docs/features/` was re-recorded for this release, because
-  the two buttons are now part of the desktop disc and no clip taken before them showed it.
+  window to itself. All fifteen clips under `docs/features/` and the README's hero were
+  re-recorded for this release, because the two buttons are now part of the desktop disc and no
+  clip taken before them showed it — the hero is 159.9 s of the 126-beat walk.
+- **An act that flies the camera hands it back fitted, and the hero was broken without it.** The
+  linked-notes walk leaves the camera wherever its last hop flew, and the act that follows drags
+  a specific note into the hub. Re-recording found what that costs: two of the three pins missed,
+  because their notes were off-screen — one target at y **-1205**, another at **-1293** — so the
+  driver reported *the drop missed the hub* and skipped the card beats after it. It has been
+  broken since the walk was recorded, which is why nobody saw it: the hero last came out at
+  2.0.0, and the linked-notes walk landed in 2.1.0, so the two acts had never been filmed in
+  sequence. The walk now fits the disc before it hands over, and the whole 126 beats run with no
+  missed target.
 - **`scripts/mobile-check.mjs` reports its panel round trip at every width**, not only under
   touch emulation — it always pressed with mouse events, so nothing in it was ever
   touch-specific. It also re-reads the button's box between the two presses, because folding a

@@ -4,7 +4,7 @@
 declarations of the files too large to read top to bottom, with line numbers. Open the
 range, not the file. Stale when `node scripts/code-map.mjs --check` fails.
 
-## `src/page.js` — 8786 lines, 32 sections, 357 functions
+## `src/page.js` — 8790 lines, 32 sections, 357 functions
 
 ### Sections
 
@@ -37,11 +37,11 @@ range, not the file. Stale when `node scripts/code-map.mjs --check` fails.
 | 6328–6781 | heatmap |
 | 6782–6785 | demo |
 | 6786–7387 | date range |
-| 7388–8009 | demo automation + debug API — stripped from the plugin build |
-| 8010–8011 | date range (continued) |
-| 8012–8253 | go |
-| 8254–8717 | demo automation + debug API — stripped from the plugin build |
-| 8718–8786 | go (continued) |
+| 7388–8013 | demo automation + debug API — stripped from the plugin build |
+| 8014–8015 | date range (continued) |
+| 8016–8257 | go |
+| 8258–8721 | demo automation + debug API — stripped from the plugin build |
+| 8722–8790 | go (continued) |
 
 ### Functions
 
@@ -388,22 +388,22 @@ range, not the file. Stale when `node scripts/code-map.mjs --check` fails.
 | 7675 | `demoRibbonPoint` |
 | 7692 | `demoWhere` |
 | 7711 | `demoMode` |
-| 7965 | `demoFullStoryboard` |
-| 7974 | `demoAct` |
-| 8051 | · · · · · · · · · · `rows` |
-| 8088 | · · · · · · · · · · `at` |
-| 8096 | · · · · · · · · · · `dist` |
-| 8167 | · · · · · · · · · · `r3` |
-| 8168 | · · · · · · · · · · `r3n` |
-| 8170 | · · · · · · · · · · `bandStat` |
-| 8195 | · · · · · · · · · · · `q` |
-| 8344 | · · · · · · · · · · `take` |
-| 8353 | · · · · · · · · · · `r2` |
-| 8414 | · · · · · · · · · · `W` |
-| 8422 | · · · · · · · · · · `rows` |
-| 8472 | · · · · · · · · · · `r3` |
-| 8607 | · · · · · · · · · · `byPath` |
-| 8756 | `destroy` |
+| 7969 | `demoFullStoryboard` |
+| 7978 | `demoAct` |
+| 8055 | · · · · · · · · · · `rows` |
+| 8092 | · · · · · · · · · · `at` |
+| 8100 | · · · · · · · · · · `dist` |
+| 8171 | · · · · · · · · · · `r3` |
+| 8172 | · · · · · · · · · · `r3n` |
+| 8174 | · · · · · · · · · · `bandStat` |
+| 8199 | · · · · · · · · · · · `q` |
+| 8348 | · · · · · · · · · · `take` |
+| 8357 | · · · · · · · · · · `r2` |
+| 8418 | · · · · · · · · · · `W` |
+| 8426 | · · · · · · · · · · `rows` |
+| 8476 | · · · · · · · · · · `r3` |
+| 8611 | · · · · · · · · · · `byPath` |
+| 8760 | `destroy` |
 
 ## `scripts/smoke.mjs` — 3978 lines, 7 sections, 50 functions, 84 checks
 
