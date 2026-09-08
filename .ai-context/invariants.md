@@ -3009,13 +3009,31 @@ Every swatch is now an inline `<svg>` of the slot at four radii, on the light gr
 dark ground side by side, with the slot's subfolder tint ladder on the rows below. github#77,
 design/0004, design/0003.
 
-**Both grounds are drawn whatever theme the page is in.** This is the whole point rather than a
-nicety: measured on `develop`, three of twelve slots fail 3:1 on light and **none** fail on
-dark, so a preview showing only the current theme would hide exactly the defect it exists to
-expose. Painting the other theme's ground means the other theme's values must be reachable from
-CSS, which is why `page.css` declares every palette hex once as a **pair** — `--gN-l` / `--gN-d`
-and `--surface-1-l` / `--surface-1-d` — and the three theme blocks only map `--gN` onto one of
-them.
+**One ground: the one the page is on.** Drawing both side by side was tried and dropped -- a
+person picks a theme once and stays there, so half of every swatch showed dots they would never
+see and cost the width to do it. What the asymmetry needs is *naming*, not pixels: three of
+twelve slots fail 3:1 on light and **none** fail on dark, so the title carries the measured
+figure for **both** themes and flags which one fails, and the drawing shows only the ground in
+use.
+
+**Nothing rebuilds the swatch on a theme change, so every colour in it must be a token.** Neither
+host re-renders the picker when the theme flips. The ground is `--surface-1`, the base dots take
+the live `--gN` through a per-slot `--dot`, and the three ladder tints are emitted per swatch as
+`--k1`..`--k3` with `--k1d`..`--k3d` beside them, chosen by the same two theme blocks that choose
+everything else. A flip repaints the identical DOM nodes; the check asserts that by comparing
+`innerHTML` across it. Computing the other theme's tints still needs both palettes in JS, which
+is why `page.css` declares every palette hex once as a **pair** -- `--gN-l` / `--gN-d` and
+`--surface-1-l` / `--surface-1-d` -- and the three theme blocks only map `--gN` onto one of them.
+
+**Two host bugs hid behind the two-ground version, and only a real Obsidian found them.** With
+both grounds always drawn, a stale theme was invisible. With one, it is the whole swatch:
+
+- The settings tab stamped `data-theme` on its scope **once, at creation**, so its swatches kept
+  whatever theme the tab was first opened in. It follows the workspace `css-change` event now.
+- Reading `body.classList` inside that handler is **too early** -- the event fires before
+  Obsidian has flipped `theme-light`, so the first fix still read the old value and the check
+  still failed. The read is deferred a frame. Measured: ground `rgb(26,26,25)` ->
+  `rgb(252,252,251)` after a flip, having been unchanged before the fix.
 
 **No palette hex may be declared anywhere else.** `palette-check.mjs` fails on any `--gN:` or
 `--surface-1:` written as a hex. Before this, the dark palette was written out **twice**, in the
@@ -3091,19 +3109,21 @@ appears on exactly `g3, g4, g9` for light and on nothing for dark.
 
 | | before | after |
 |---|---|---|
-| swatch | 23x23 px (menu), 15.4 px (settings, desktop) | **66x42 px everywhere** |
-| context menu | 176x122 px | **226x279 px** |
-| menu columns | 6 | **3** |
-| settings-body columns | 12 | **3**, auto-filled to the panel's width |
-| settings row height | ~20 px | **205 px** |
+| swatch | 23x23 px (menu), 15.4 px (settings, desktop) | **34x42 px everywhere** |
+| context menu | 176x122 px | **176x233 px** -- the same width it always was |
+| menu columns | 6 | **4** |
+| settings-body columns | 12 | **6**, auto-filled to the panel's width |
+| settings row height | ~20 px | **113 px** |
+| settings scroll, 18 folders | ~360 px | **2025 px** |
+| circles per swatch | 0 | **20** |
+| settings panel DOM nodes | 396 | **5148** |
 
 Measured inside the mount on the iPhone 14, on a 320 px sidebar and at 1600 px. The mount clamp
 in `openCtxMenu` is what keeps it there and is asserted rather than assumed.
 
-**The settings body auto-fills, and a fixed column count was wrong.** Four fixed columns
-overflowed the 288 px panel -- measured, its scrolling box is **244 px wide with 229 px of usable
+**The settings body auto-fills, and a fixed column count was wrong.** Four fixed 58 px columns overflowed the 288 px panel -- measured, its scrolling box is **244 px wide with 229 px of usable
 width** -- and put the twelfth slot behind a horizontal scrollbar, unreachable. `repeat(auto-fill,
-66px)` gives three columns there and adapts if the panel ever changes; after the fix `scrollWidth`
+34px)` gives six columns there and adapts if the panel ever changes; after the fix `scrollWidth`
 equals `clientWidth` at 229 px and all twelve swatches are inside the box.
 
 ### Check the host surfaces, not one of them
