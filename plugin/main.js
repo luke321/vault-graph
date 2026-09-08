@@ -42,6 +42,8 @@ const ICON_ID = "vault-graph-disc";
  * @property {boolean} unlinkedByFolder
  * @property {boolean} unlinkedTintByFolder
  * @property {boolean} fitCap                           github#41, design/0011
+ * @property {boolean} [sheetOpen]                      github#82 -- absent until folded once
+ * @property {boolean} [bandOpen]                       github#82
  */
 
 /**
@@ -604,6 +606,19 @@ class VaultGraphView extends ItemView {
       /** @param {boolean} v */
       onUnlinkedTintByFolder: async (v) => {
         this.plugin.settings.unlinkedTintByFolder = !!v;
+        await this.plugin.saveSettings();
+      },
+      // github#82, decisions/0009 -- no tab row; absent = width decides
+      sheetOpen: this.plugin.settings.sheetOpen,
+      /** @param {boolean} v */
+      onSheetOpen: async (v) => {
+        this.plugin.settings.sheetOpen = !!v;
+        await this.plugin.saveSettings();
+      },
+      bandOpen: this.plugin.settings.bandOpen,
+      /** @param {boolean} v */
+      onBandOpen: async (v) => {
+        this.plugin.settings.bandOpen = !!v;
         await this.plugin.saveSettings();
       },
       // github#41, design/0011

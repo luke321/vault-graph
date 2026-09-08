@@ -96,6 +96,16 @@ card rises as a sheet at the foot so the disc is still visible above what you ta
 
 <img src="../assets/features/mobile.webp" width="420" alt="A phone-sized window with a fingertip for a pointer, each tap leaving a ring: the disc zoomed in until its dots are finger-sized, a note tapped so its card rises as a sheet at the foot, the folder list slid up as a sheet, one folder soloed from inside it, the sheet put away so the rest recedes, then a double-tap fitting what is left back into view">
 
+## Folding the panels away
+
+Two buttons at the top left of the disc: one folds the folder list, search and view buttons
+away, the other folds the notes-added calendar and its date strip. Fold both and the disc has
+the window to itself, and however you leave it is how the graph opens next time. On a phone the
+folder list is summoned as a sheet over the disc; on a PC it is a column beside it, so it
+collapses and hands its width to the graph. Only the calendar's fold makes the dots bigger — the
+disc is fitted to the shorter side of the window, and on a landscape monitor that is the height
+the calendar is eating.
+
 ## The camera
 
 Scroll to zoom, drag to pan, double-click or the corner button to reset.
