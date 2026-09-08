@@ -3022,33 +3022,62 @@ them.
 `prefers-color-scheme` block and again in `[data-theme="dark"]`, and the harness read only the
 second; one copy could have drifted with no gate saying so.
 
-**`var()` does not work in an SVG presentation attribute.** The base dots take their fill from a
-CSS rule (`.swatch .d-l { fill: var(--sl) }`), and only the computed ladder tints carry a `fill`
-attribute. The two must not share a class: a CSS rule beats a presentation attribute, so a
-shared class silently flattens every tint row to the base colour. This was written wrong first
-and caught by reading the cascade, not the screen — the failure looks like a design choice.
+**A CSS rule beats a `fill` presentation attribute, and that is the constraint.** The base dots
+take their fill from a CSS rule (`.swatch .d-l { fill: var(--sl) }`); only the computed ladder
+tints carry a `fill` attribute. **The two must not share a class** -- a class-based `fill` rule
+overrides the attribute, so a shared class silently flattens every tint row to the base colour,
+and the result reads as a design choice rather than a bug.
+
+Measured in Chrome 152, because the first version of this note asserted the wrong reason:
+
+| what was drawn | computed `fill` |
+|---|---|
+| `fill="var(--sl)"`, token on `:root` | `rgb(1, 123, 234)` -- **it works** |
+| `fill="var(--sl)"`, token on a parent element | `rgb(1, 123, 234)` -- it works |
+| a CSS rule using `var()` (what we ship) | `rgb(1, 123, 234)` |
+| `fill="#12ab34"` under a matching CSS `fill` rule | **the rule wins** |
+| `fill="var(--undefined)"`, no fallback | `rgb(0, 0, 0)` -- silently black |
+
+So `var()` in a presentation attribute is **not** the problem; an earlier note here claimed it
+was, from memory rather than from a run. Two things the table does establish: the class collision
+above is real, and an undefined token inside an attribute computes to black rather than failing
+loudly, so a typo there is invisible.
 
 **The svg is one unit to one CSS pixel and must never be scaled.** Scale it and the radii stop
 being the ones the disc draws, which is the only thing the preview is claiming.
 
 ### The quartet is a reference scale, not a bound
 
-`PREVIEW_R_PX` is `[0.65, 1.38, 2.19, 4.06]` — measured on the demo fixture as the phone's
-min/median and the desktop's median/max. It **cannot** bound every disc: a radius falls out of
-the vault's size and the viewport's together, and the three fixtures span 0.39 to 5.93 px. The
-first cut of the check asserted every live dot fell inside the quartet and **failed on the 10k
-fixture at 0.42 px**, which was the assertion being wrong rather than the code.
+`PREVIEW_R_PX` is `[0.35, 0.65, 1.38, 2.19, 4.06]`, a **reference scale, not a bound**. A radius
+falls out of the vault's size and the viewport's together, and the three fixtures span 0.39 to
+5.93 px, so no fixed set of numbers can bracket every disc. The first cut of the check asserted
+every live dot fell inside the scale and **failed on the 10k fixture at 0.42 px** -- the
+assertion was wrong, not the code.
 
-What must stay true is that the reference still resembles a real disc, so the check asserts the
-previewed range **brackets the disc's median dot**:
+**0.35 px is the sub-pixel sample, and it is load-bearing.** The issue asked for the sizes the
+disc really draws *including the smallest*, and a scale starting at 0.65 px did not show that:
+the 10k fixture draws 0.39 px. 0.35 sits below the smallest radius measured on any fixture at
+any viewport, so the preview always carries a mark at least as small as the disc's smallest.
 
-| fixture | dots | drawn radius min / p50 / max | median inside 0.65–4.06 |
-|---|---|---|---|
-| demo (1403 notes) | 1403 | 0.67 / **1.47** / 2.10 px | yes |
-| 10k synthetic | 10002 | 0.42 / **1.02** / 1.03 px | yes |
-| dominant-folder | 954 | 1.38 / **2.10** / 3.07 px | yes |
+Two criteria, both asserted on every fixture:
 
-Doubling or halving dot size breaks it, which is what it is for.
+1. **Coverage** -- the smallest previewed radius is no larger than the smallest the disc draws.
+2. **Resemblance** -- the previewed range brackets the disc's median dot.
+
+| fixture | dots | drawn radius min / p50 / max | smallest covered | median inside 0.35-4.06 |
+|---|---|---|---|---|
+| demo (1403 notes) | 1403 | 0.67 / **1.47** / 2.10 px | yes | yes |
+| 10k synthetic | 10002 | 0.39 / **0.95** / 0.95 px | yes | yes |
+| dominant-folder | 954 | 1.38 / **2.10** / 3.07 px | yes | yes |
+
+Doubling or halving dot size breaks the second; drawing anything under 0.35 px breaks the first.
+
+**A contrast ratio is for a solid area, and a mark is not one.** The figures in the swatch title
+are solid-colour ratios against the surface, which is the generous measure: a dot near a pixel
+across is mostly antialiasing and its effective contrast is lower, and worst exactly where the
+solid figure is already worst. The title says `solid-area contrast` and `a sub-pixel dot reads
+lower`, and both hosts' help text says the same. These ratios must not be quoted as if they
+described the drawn mark.
 
 ### The numbers come from the harness, never from a second table
 
@@ -3062,8 +3091,8 @@ appears on exactly `g3, g4, g9` for light and on nothing for dark.
 
 | | before | after |
 |---|---|---|
-| swatch | 23×23 px (menu), 15.4 px (settings, desktop) | **58×42 px everywhere** |
-| context menu | 176×122 px | **202×279 px** |
+| swatch | 23x23 px (menu), 15.4 px (settings, desktop) | **66x42 px everywhere** |
+| context menu | 176x122 px | **226x279 px** |
 | menu columns | 6 | **3** |
 | settings-body columns | 12 | **3**, auto-filled to the panel's width |
 | settings row height | ~20 px | **205 px** |
@@ -3071,11 +3100,32 @@ appears on exactly `g3, g4, g9` for light and on nothing for dark.
 Measured inside the mount on the iPhone 14, on a 320 px sidebar and at 1600 px. The mount clamp
 in `openCtxMenu` is what keeps it there and is asserted rather than assumed.
 
-**The settings body auto-fills, and a fixed column count was wrong.** Four fixed 58 px columns
+**The settings body auto-fills, and a fixed column count was wrong.** Four fixed columns
 overflowed the 288 px panel -- measured, its scrolling box is **244 px wide with 229 px of usable
 width** -- and put the twelfth slot behind a horizontal scrollbar, unreachable. `repeat(auto-fill,
-58px)` gives three columns there and adapts if the panel ever changes; after the fix `scrollWidth`
+66px)` gives three columns there and adapts if the panel ever changes; after the fix `scrollWidth`
 equals `clientWidth` at 229 px and all twelve swatches are inside the box.
+
+### Check the host surfaces, not one of them
+
+That overflow escaped every check because they all opened the **menu**, and the menu was always
+going to fit. Fitting there proves nothing about the panel, which is the narrower of the two.
+Coverage now runs at both, and in the plugin as well:
+
+- `smoke.mjs --only "settings surface"` drives the settings panel at rest, **after a colour pick
+  rebuilds it**, and **after a theme flip underneath it**, asserting 12 swatches, 12 previews, no
+  swatch past the right edge and zero horizontal overflow each time. Putting the four-column rule
+  back makes it fail with *3 swatches past the right edge by 32 px, 47 px of overflow*, so it
+  tests what it claims to.
+- `obsidian-smoke.mjs --only "colour picker"` covers five host states in a **real Obsidian**:
+  graph open, a colour pick, a live theme change, the graph torn down with the tab open, and the
+  tab reopened with no graph. Measured 2026-09-08 on the demo fixture: 216 swatches all previewed
+  in the first three, **216 flat squares and zero empty frames** in the last.
+
+**The settings tab keeps no api of its own.** It is passed one per render and stores nothing, so
+a tab cannot go on drawing previews from a graph the user has closed. The Obsidian check asserts
+the field is *absent*, not merely unused, because an unused field is one edit away from a used
+one.
 
 ```bash
 node scripts/smoke.mjs --only picker            # all three fixtures, five checks
