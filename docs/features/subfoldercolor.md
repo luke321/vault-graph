@@ -27,4 +27,4 @@ same commit -- that's what `release.ps1`'s staleness check reads.
 | | |
 |---|---|
 | **Introduced in** | `1.8.0` — "The Hub" |
-| **Last re-recorded** | `2026-09-08` — 13.9 s at 1586x992, encoded at 960 px (0.28 MB) |
+| **Last re-recorded** | `2026-09-08` — 13.7 s at 1586x992, encoded at 960 px (0.25 MB) |
