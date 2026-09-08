@@ -760,6 +760,84 @@ try {
       "definitions: " + defs.top + " top-level, " + defs.items + " items; rendered " + shown.rows + " rows, " + shown.toggles + " toggles, " + shown.headings + " headings; compact axis button " + pressedBefore + " -> " + pressedAfter + ", data.json compactAxis " + saved);
   }
 
+  // github#77
+  if (selected("colour picker")) {
+    const TAB = "app.setting.pluginTabs.find(function (t) { return t.id === '" + PLUGIN_ID + "'; })";
+    const LOOK = "(function(){" +
+      " var t = app.setting.activeTab; var el = t && (t.containerEl || t.contentEl);" +
+      " if (!el) return { open: false };" +
+      " var sws = el.querySelectorAll('.vault-graph .swatch');" +
+      " var prev = el.querySelectorAll('.vault-graph .swatch svg.prev');" +
+      " var empty = 0, flat = 0;" +
+      " Array.prototype.forEach.call(sws, function (s) {" +
+      "   if (s.querySelector('svg.prev')) return;" +
+      "   var bg = getComputedStyle(s).backgroundColor;" +
+      "   if (bg && bg !== 'rgba(0, 0, 0, 0)' && bg !== 'transparent') flat++; else empty++;" +
+      " });" +
+      " var one = sws[0], gl = one && one.querySelector('.gnd-l'), gd = one && one.querySelector('.gnd-d');" +
+      " var scope = el.querySelector('.vault-graph.vg-tokens');" +
+      " var over = 0;" +
+      " if (scope) over = Math.max(0, scope.scrollWidth - scope.clientWidth);" +
+      " return { open: true, sws: sws.length, previews: prev.length, flat: flat, empty: empty," +
+      "          groundL: gl ? getComputedStyle(gl).fill : null," +
+      "          groundD: gd ? getComputedStyle(gd).fill : null," +
+      "          overflowX: over, keptApi: Object.prototype.hasOwnProperty.call(" + TAB + " || {}, 'api') };" +
+      "})()";
+    const openTab = async () => {
+      await E("app.setting.open(); app.setting.openTabById('" + PLUGIN_ID + "'); void 0");
+      await sleep(900);
+    };
+
+    await openGraph(c);
+    await sleep(600);
+    await openTab();
+    const withGraph = await E(LOOK);
+
+    // github#77
+    await E("(function(){ var t = app.setting.activeTab; var b = (t.containerEl || t.contentEl)" +
+            ".querySelector('.vault-graph .swatch[aria-checked=\"false\"]'); if (b) b.click(); return !!b; })()");
+    await sleep(800);
+    const afterPick = await E(LOOK);
+
+    // github#77
+    const wasDark = await E("document.body.classList.contains('theme-dark')");
+    await E("app.changeTheme(" + (wasDark ? "'moonstone'" : "'obsidian'") + "); void 0");
+    await sleep(900);
+    const afterTheme = await E(LOOK);
+    await E("app.changeTheme(" + (wasDark ? "'obsidian'" : "'moonstone'") + "); void 0");
+    await sleep(700);
+
+    // github#77
+    await E("app.setting.close(); void 0");
+    await sleep(300);
+    await E("app.workspace.detachLeavesOfType(" + JSON.stringify(VT) + "); void 0");
+    await sleep(800);
+    await openTab();
+    const noGraph = await E(LOOK);
+    await E("app.setting.close(); void 0");
+    await sleep(300);
+    await openGraph(c);
+    await sleep(600);
+
+    const say = (s) => s.open
+      ? `${s.sws} swatches / ${s.previews} previewed / ${s.flat} flat / ${s.empty} EMPTY, overflow ${s.overflowX}px`
+      : "tab did not open";
+    const good = (s, wantPreviews) => s.open && s.sws > 0 && s.empty === 0 && s.overflowX === 0 &&
+      (wantPreviews ? s.previews === s.sws : true);
+    const bothGrounds = (s) => s.groundL === "rgb(252, 252, 251)" && s.groundD === "rgb(26, 26, 25)";
+    const ok = good(withGraph, true) && bothGrounds(withGraph) &&
+               good(afterPick, true) && good(afterTheme, true) && bothGrounds(afterTheme) &&
+               good(noGraph, false) && noGraph.previews === 0 &&
+               !withGraph.keptApi && !noGraph.keptApi;
+    report(ok,
+      "the settings tab's colour picker survives every host state, and keeps no handle on a closed graph",
+      "graph open: " + say(withGraph) + "; after a pick: " + say(afterPick) +
+      "; after a live theme change: " + say(afterTheme) + " (grounds " +
+      (bothGrounds(afterTheme) ? "both still drawn" : "WRONG") + ")" +
+      "; graph torn down and the tab reopened: " + say(noGraph) +
+      "; tab retains an api field: " + (withGraph.keptApi || noGraph.keptApi ? "YES" : "no"));
+  }
+
   // github#40, design/0012
   const TRAIL = "(function(){ var v = " + VIEW + "; if (!v) return null; var d = v.contentEl.querySelector('#vg-detail'); var cr = d && !d.hidden ? d.querySelector('.crumbs') : null;" +
                 " var doc = v.contentEl.ownerDocument, ae = doc.activeElement; return { open: !!d && !d.hidden," +

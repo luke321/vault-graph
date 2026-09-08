@@ -345,18 +345,18 @@
      padding and a scrollbar, and four fixed columns overflowed it, putting the
      twelfth slot behind a horizontal scrollbar. */
   .vault-graph #vg-setbody .sws {
-    display: grid; grid-template-columns: repeat(auto-fill, 58px); gap: 4px;
+    display: grid; grid-template-columns: repeat(auto-fill, 66px); gap: 4px;
     justify-content: start;
   }
   /* github#77 -- a swatch is the dots the slot will draw, on both grounds at
      once. The <svg> is 1 unit to 1 CSS pixel and must never be scaled, or the
      radii stop being the ones the disc draws. */
   .vault-graph .swatch {
-    width: 58px; height: 42px; padding: 0; cursor: pointer; border-radius: 5px;
+    width: 66px; height: 42px; padding: 0; cursor: pointer; border-radius: 5px;
     border: 1px solid var(--border); line-height: 0; flex: 0 0 auto;
   }
   .vault-graph .swatch .prev {
-    width: 56px; height: 40px; display: block; border-radius: 4px;
+    width: 64px; height: 40px; display: block; border-radius: 4px;
   }
   .vault-graph .swatch .gnd-l { fill: var(--surface-1-l); }
   .vault-graph .swatch .gnd-d { fill: var(--surface-1-d); }
@@ -723,7 +723,7 @@
   .vault-graph #vg-democursor .finger { display: none; }
 
   .vault-graph .ctxmenu {
-    position: absolute; z-index: 9; width: 202px;
+    position: absolute; z-index: 9; width: 226px;
     background: var(--surface-2); border: 1px solid var(--border-strong);
     border-radius: 8px; padding: 8px; box-shadow: 0 8px 28px rgba(0,0,0,.22);
   }

@@ -956,7 +956,8 @@ const VIEW_SETTINGS = [
     desc: "Take a note you have just written, moved or linked into the disc where it stands, instead of waiting for Refresh to rebuild the whole thing. Only a change that decides where a note SITS moves anything -- writing prose does not, so typing is still. Off, the disc is a snapshot until you press Refresh." },
 ];
 
-const COLOURS_DESC = "Twelve slots, handed out in group order and round again. Folders and tags keep their own colours; the tabs choose which. Setting one group never moves another, and two may share a colour.";
+const COLOURS_DESC = "Twelve slots, handed out in group order and round again. Folders and tags keep their own colours; the tabs choose which. Setting one group never moves another, and two may share a colour. Each swatch shows the slot at the sizes the disc really draws, over both grounds. Its contrast figure is for a solid area of the colour; a dot a pixel across is mostly antialiasing and reads lower than the number.";
+const COLOURS_DESC = "Twelve slots, handed out in folder order and round again. Setting one folder never moves another, and two folders may share a colour. Each swatch shows the slot at the sizes the disc really draws, over both grounds. Its contrast figure is for a solid area of the colour; a dot a pixel across is mostly antialiasing and reads lower than the number.";
 
 const SLOT_NAMES = ["Blue", "Orange", "Aqua", "Yellow", "Green", "Magenta",
                     "Violet", "Red", "Cyan", "Orchid", "Grey", "Slate"];
@@ -1028,9 +1029,6 @@ class VaultGraphSettingTab extends PluginSettingTab {
     this.subOpen = bareMap();
     /** @type {HTMLElement | null} */
     this.scope = null;
-    // github#77
-    /** @type {VgApi | null} */
-    this.api = null;
   }
 
   /* ----------------------------------------------------------- two render paths --
@@ -1195,9 +1193,6 @@ class VaultGraphSettingTab extends PluginSettingTab {
     const view = await this.plugin.currentView();
     const api = view && view.handle && view.handle.api;
     if (!api || !api.groupOrder || !api.palette || !scope || !scope.isConnected) return;
-    // github#77
-    this.api = api;
-
     // github#86 -- the page answers for the tab's grouping, on screen or not
     const groups = api.groupsOf
       ? api.groupsOf(this.colourDim).map((g) => ({ name: g.name, n: g.n, slot: g.slot, autoSlot: g.autoSlot }))
@@ -1207,13 +1202,15 @@ class VaultGraphSettingTab extends PluginSettingTab {
         slot: api.slotOf ? api.slotOf(name) : "",
         autoSlot: api.autoSlotOf ? api.autoSlotOf(name) : "",
       }));
-    if (groups.length) this.renderColours(groups);
+    if (groups.length) this.renderColours(groups, api);
   }
 
   // github#77
-  /** @param {HTMLElement} btn @param {string} key @param {string} name @param {string} tail */
-  fillSwatch(btn, key, name, tail) {
-    const api = this.api;
+  /**
+   * @param {VgApi | null} api @param {HTMLElement} btn
+   * @param {string} key @param {string} name @param {string} tail
+   */
+  fillSwatch(api, btn, key, name, tail) {
     if (!api || !api.swatchPreview) return;
     const doc = new DOMParser().parseFromString(
       "<body>" + api.swatchPreview(key) + "</body>", "text/html");
@@ -1221,8 +1218,9 @@ class VaultGraphSettingTab extends PluginSettingTab {
     if (api.slotTitle) btn.setAttribute("title", api.slotTitle(key, name) + tail);
   }
 
-  /** @param {GroupRow[]} groups */
-  renderColours(groups) {
+  // github#77
+  /** @param {GroupRow[]} groups @param {VgApi | null} [api] */
+  renderColours(groups, api) {
     const scope = this.scope;
     scope.empty();
     // github#86 -- one tab per grouping, above the rows
@@ -1269,7 +1267,7 @@ class VaultGraphSettingTab extends PluginSettingTab {
           .setTooltip(open ? "Hide subfolder colours" : "Subfolder colours")
           .onClick(() => {
             this.subOpen[group.name] = !open;
-            this.renderColours(groups);
+            this.renderColours(groups, api);
           }));
       }
       row.addExtraButton((b) => b
@@ -1290,7 +1288,7 @@ class VaultGraphSettingTab extends PluginSettingTab {
         };
         if (isAuto) attr["data-auto"] = "1";
         const b = row.controlEl.createEl("button", { cls: ["swatch", "vg-" + key], attr });
-        this.fillSwatch(b, key, name, tail);
+        this.fillSwatch(api, b, key, name, tail);
         b.addEventListener("click", () => this.pick(group.name, key));
       });
 
@@ -1301,7 +1299,7 @@ class VaultGraphSettingTab extends PluginSettingTab {
       });
       auto.addEventListener("click", () => this.pick(group.name, null));
 
-      if (open) this.renderSubRows(scope, group.name, subs);
+      if (open) this.renderSubRows(scope, group.name, subs, api);
     }
   }
 
@@ -1309,8 +1307,9 @@ class VaultGraphSettingTab extends PluginSettingTab {
    * @param {HTMLElement} scope
    * @param {string} folder
    * @param {SubRow[]} subs
+   * @param {VgApi | null} [api]
    */
-  renderSubRows(scope, folder, subs) {
+  renderSubRows(scope, folder, subs, api) {
     for (const s of subs) {
       const pk = folder + "/" + s.name;
       const pinned = this.plugin.settings.subfolderColors[pk] || "";
@@ -1328,7 +1327,7 @@ class VaultGraphSettingTab extends PluginSettingTab {
           attr: { role: "radio", "aria-checked": String(on), "aria-label": name,
                   title: name + (on ? " (chosen)" : "") },
         });
-        this.fillSwatch(b, key, name, on ? " (chosen)" : "");
+        this.fillSwatch(api, b, key, name, on ? " (chosen)" : "");
         b.addEventListener("click", () => this.pickSub(folder, s.name, key));
       });
 

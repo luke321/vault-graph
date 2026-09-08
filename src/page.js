@@ -1153,7 +1153,8 @@ function mountVaultGraph(root, data, deps) {
     var say = function (v) {
       return v.toFixed(2) + (v < CONTRAST_FLOOR ? " (under 3:1)" : "");
     };
-    return name + " · light " + say(c.light) + " · dark " + say(c.dark);
+    return name + " · solid-area contrast: light " + say(c.light) +
+           ", dark " + say(c.dark) + " · a sub-pixel dot reads lower";
   }
 
   /** @param {Record<string, unknown>} map @param {string} [dim] */
@@ -5223,8 +5224,8 @@ function mountVaultGraph(root, data, deps) {
   var sizeScale = 1;
 
   // github#77, design/0013
-  var PREVIEW_R_PX = [0.65, 1.38, 2.19, 4.06];
-  var PREVIEW_HALF_W = 28;
+  var PREVIEW_R_PX = [0.35, 0.65, 1.38, 2.19, 4.06];
+  var PREVIEW_HALF_W = 32;
   var PREVIEW_H = 40;
   var PREVIEW_ROW_H = PREVIEW_H / SUB_SLOTS;
   var PREVIEW_CX = (function () {

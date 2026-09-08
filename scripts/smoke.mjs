@@ -4833,15 +4833,17 @@ check("the picker draws the disc's own dot sizes", async (p) => {
                r.uniq.every((v, i) => Math.abs(v - r.want[i]) < 1e-9);
   // github#77
   const oneToOne = Math.abs(r.boxW - r.vbW) < 0.01 && Math.abs(r.boxH - r.vbH) < 0.01;
-  // github#77
+  // github#77 -- two criteria, see invariants.md
   const lo = r.want[0], hi = r.want[r.want.length - 1];
+  const covers = r.liveMin === null || r.liveMin >= lo - 0.005;
   const brackets = r.liveMed === null || (r.liveMed >= lo - 0.005 && r.liveMed <= hi + 0.005);
-  return { ok: same && oneToOne && brackets,
+  return { ok: same && oneToOne && covers && brackets,
            detail: `preview radii ${r.uniq.join("/")} (want ${r.want.join("/")}), ` +
                    `${r.n} circles, svg ${r.boxW}x${r.boxH} for viewBox ${r.vbW}x${r.vbH} ` +
                    `(1 unit = 1px ${oneToOne ? "ok" : "NO"}); disc draws ` +
-                   `${r.liveMin}/${r.liveMed}/${r.liveMax}px over ${r.liveN} dots, median ` +
-                   `${brackets ? "inside" : "OUTSIDE"} the previewed ${lo}-${hi}` };
+                   `${r.liveMin}/${r.liveMed}/${r.liveMax}px over ${r.liveN} dots — smallest ` +
+                   `${covers ? "covered by" : "SMALLER THAN"} the ${lo}px sample, median ` +
+                   `${brackets ? "inside" : "OUTSIDE"} ${lo}-${hi}` };
 });
 
 check("the picker's ladder is the ladder the disc draws", async (p) => {
@@ -4896,6 +4898,73 @@ check("the picker's ladder is the ladder the disc draws", async (p) => {
                    `pinned to ${r.other} the preview ${invalidated ? "followed" : "DID NOT FOLLOW"} ` +
                    `and still ${afterPick ? "agrees" : "DISAGREES"}; ` +
                    `restored ${cameBack && restored ? "exactly" : "WRONG"}` };
+});
+
+// github#77
+check("the picker's settings surface holds every slot without scrolling sideways", async (p) => {
+  const r = await p.j(`(function(){
+    var t = document.querySelector('[aria-controls="vg-settings"]');
+    var wasOpen = !document.getElementById("vg-settings").hidden;
+    if (!wasOpen && t) t.click();
+    var body = document.getElementById("vg-setbody");
+
+    var look = function () {
+      var rows = body.querySelectorAll(".scr");
+      var row = rows[0];
+      var sws = row ? row.querySelectorAll(".swatch") : [];
+      var br = body.getBoundingClientRect();
+      var worst = 0, offscreen = 0, previews = 0;
+      Array.prototype.forEach.call(sws, function (s) {
+        var q = s.getBoundingClientRect();
+        if (q.right > br.right + 0.5) { offscreen++; worst = Math.max(worst, q.right - br.right); }
+        if (s.querySelector("svg.prev")) previews++;
+      });
+      return { rows: rows.length, sws: sws.length, previews: previews,
+               offscreen: offscreen, worstPx: Math.round(worst * 10) / 10,
+               overflowX: body.scrollWidth - body.clientWidth,
+               clientW: body.clientWidth,
+               rowH: row ? Math.round(row.getBoundingClientRect().height) : 0 };
+    };
+
+    var atRest = look();
+
+    // a pick rebuilds the whole panel -- the state the overflow actually shipped in
+    var g = __vg.groupOrder().filter(function (x) { return x.charAt(0) !== "("; })[0];
+    var was = __vg.folderColors;
+    var next = Object.assign({}, was);
+    next[g] = __vg.slotOf(g) === "g7" ? "g1" : "g7";
+    __vg.setFolderColors(next);
+    var afterPick = look();
+    __vg.setFolderColors(was);
+
+    // and a theme flip with the panel open
+    var root = document.getElementById("vg-app");
+    var wasTheme = root.getAttribute("data-theme");
+    root.setAttribute("data-theme", wasTheme === "dark" ? "light" : "dark");
+    __vg.readTheme();
+    __vg.setFolderColors(was);
+    var afterTheme = look();
+    if (wasTheme) root.setAttribute("data-theme", wasTheme); else root.removeAttribute("data-theme");
+    __vg.readTheme();
+    __vg.setFolderColors(was);
+
+    if (!wasOpen && t) t.click();
+    return { atRest: atRest, afterPick: afterPick, afterTheme: afterTheme };
+  })()`);
+
+  const bad = [];
+  for (const [when, s] of [["at rest", r.atRest], ["after a pick", r.afterPick],
+                           ["after a theme flip", r.afterTheme]]) {
+    if (s.sws !== 12) bad.push(`${when}: ${s.sws} swatches, want 12`);
+    if (s.previews !== 12) bad.push(`${when}: ${s.previews} of 12 carry a preview`);
+    if (s.offscreen) bad.push(`${when}: ${s.offscreen} swatch(es) past the right edge by ${s.worstPx}px`);
+    if (s.overflowX > 0) bad.push(`${when}: ${s.overflowX}px of horizontal overflow`);
+  }
+  return { ok: bad.length === 0,
+           detail: bad.length ? bad.slice(0, 3).join("; ")
+             : `${r.atRest.rows} folder rows, 12 swatches each all previewed and inside a ` +
+               `${r.atRest.clientW}px box, 0 overflow at rest, after a pick and after a theme ` +
+               `flip; row ${r.atRest.rowH}px` };
 });
 
 check("the picker stays inside the mount", async (p) => {
