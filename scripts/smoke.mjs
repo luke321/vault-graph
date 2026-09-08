@@ -3531,8 +3531,8 @@ check("the thinnest count bar survives a hover in pixels, not just in CSS", asyn
         }
         if (rb > best) best = rb;
       }
-      var el = document.querySelector('[data-floorprobe]');
-      return { px: best, hovered: el.matches(':hover') };
+      var el = document.querySelector(${JSON.stringify(`[data-g=${JSON.stringify(row.g)}]`)});
+      return { px: best, hovered: !!el && el.matches(':hover') };
     })()`);
   };
 
@@ -3545,17 +3545,49 @@ check("the thinnest count bar survives a hover in pixels, not just in CSS", asyn
   const over = await painted();
   await p.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: 5, y: 5, button: "none", clickCount: 0 });
   await sleep(150);
+
+  // github#78 -- the state the bug was actually reported in
+  const sel = `[data-g=${JSON.stringify(row.g)}]`;
+  await p.eval(`document.querySelector(${JSON.stringify(sel)}).click(); void 0`);
+  await sleep(450);
+  const lit = await painted();
+  const wasLit = await p.j(`document.querySelector(${JSON.stringify(sel)}).getAttribute('data-hl')`);
+  await p.eval(`document.querySelector(${JSON.stringify(sel)}).click(); void 0`);
+  await sleep(400);
   await p.eval(`(function(){ var e = document.querySelector('[data-floorprobe]');
                 if (e) e.removeAttribute('data-floorprobe'); })(); void 0`);
 
+  // github#78
+  const nearAccent = await p.j(`(function(){
+    var root = document.querySelector('.vault-graph');
+    var norm = function (x) {
+      var d = document.createElement('span');
+      d.style.color = String(x).trim(); root.appendChild(d);
+      var out = getComputedStyle(d).color; d.parentNode.removeChild(d);
+      return out.replace('rgba(', '').replace('rgb(', '').replace(')', '')
+                .split(',').map(function (v) { return parseInt(v, 10); });
+    };
+    var a = norm(getComputedStyle(root).getPropertyValue('--accent'));
+    var b = norm(${JSON.stringify(row.col)});
+    if (a.length < 3 || b.length < 3) return false;
+    return Math.abs(a[0]-b[0]) + Math.abs(a[1]-b[1]) + Math.abs(a[2]-b[2]) < 120;
+  })()`);
+
   // github#78, design/0006
-  const ok = over.hovered === true && over.px >= 2 && rest.px >= 3;
+  const FLOOR_MIN = 3;
+  const states = [["rest", rest.px], ["hover", over.px]];
+  if (!nearAccent) states.push(["highlighted", lit.px]);
+  const weakest = Math.min(...states.map((s) => s[1]));
+  const ok = over.hovered === true && wasLit === "on" && weakest >= FLOOR_MIN;
   return {
     ok,
     detail: `${row.g} at ${row.share} of the basis, size ${row.size}: ` +
-            `${rest.px}px painted at rest, ${over.px}px hovering (hovered=${over.hovered})` +
-            (over.hovered ? "" : "  <- NO :hover from the harness, so this asserted nothing") +
-            (over.px < 2 ? "  <- the floor cannot survive the hover border" : "")
+            `${rest.px}px at rest, ${over.px}px hovering (hovered=${over.hovered}), ` +
+            `${lit.px}px highlighted (data-hl=${wasLit}); weakest asserted ${weakest}px of ` +
+            states.map((s) => s[0]).join("/") +
+            (nearAccent ? "  (highlighted NOT asserted: this bar's hue is the accent's)" : "") +
+            (over.hovered ? "" : "  <- NO :hover from the harness") +
+            (weakest < FLOOR_MIN ? `  <- a state paints under ${FLOOR_MIN}px` : "")
   };
 });
 

@@ -1032,8 +1032,9 @@ read as visibly different lengths.
 Must be **empty**. Measured: **17 of 18 rows barred** on the demo (basis **406**, `05 - Meeting
 Notes`) and on the 10k (basis **4358**, same folder), **6 of 7** on the shape vault (basis
 **738**, `projects`). Exactly **one row at a full bar** on each, at the full **217px** track;
-thinnest **3.0px everywhere**, floored so a one-note folder still marks its row — and so
-that the mark survives a hover, which is why the floor is 3 and not 1 (below).
+thinnest **4.0px everywhere**, floored so a one-note folder still marks its row — and so
+that the mark survives hover AND highlight, which is why the floor is 4 and the bar starts
+2px in (below).
 
 **Hiding the largest folder promotes the runner-up to a full bar**, and that is asserted, not
 merely allowed: hide `05 - Meeting Notes` on the demo and the basis must become 200 with
@@ -1052,7 +1053,7 @@ out of a screenshot and counting the run of bar-coloured pixels — Chrome decod
 through a canvas, since no computed style can answer it. Re-measured on the demo at the new
 basis: `05 - Meeting Notes` declares 100% and paints **217.00px exactly**, `01 - Projects`
 declares 49.26% and paints 107.00px against 106.90px wanted, `14 - Reading List` paints
-**3.00px** on the floor, and the **worst disagreement over all 17 rows is 0.83 CSS px** on
+**4.00px** on the floor, and the **worst disagreement over all 17 rows is 0.83 CSS px** on
 `11 - Clippings` — the antialiased tail of a 12.83px bar, which the pixel scan's colour
 tolerance drops.
 
@@ -1086,45 +1087,62 @@ rows, counts and alignment are untouched, only the bars go. On again: **17 barre
 node scripts/smoke.mjs --only "on by default"    # the default, the toggle, and what it removes
 ```
 
-### The floor is 3px because a hovered row eats a pixel
+### Two row states paint over the bar, and the bar starts 2px in because of it
 
-`.lg:hover` turns the row's `1px solid transparent` border into a visible one, and that
-border's antialiasing costs the bar its leftmost pixel. A bar wide enough not to care never
-notices. **A floored bar is exactly the case that does.** Measured on the demo's thinnest row,
-`14 - Reading List` at 0.246% of the basis, painting the row and counting bar-coloured pixels:
+The bar is a background layer, so **anything painted above a background eats into it**. Two
+row states do:
 
-| floor | at rest | hovering | reads as |
+| state | what it paints over the bar | cost |
+|---|---|---|
+| `:hover` | the row's `1px solid transparent` border turns visible, and antialiases | **1px** |
+| `[data-hl="on"]` | the highlight's leading channel is `box-shadow: inset 2px 0 0 0` — and **inset shadows paint over a background image** | **2px** |
+
+Both eat from the **leading** edge, which is exactly where a bar begins. So a bar flush to the
+edge loses its first pixels in precisely the states a person is looking at it. Measured on the
+demo at a 1px floor: three of eighteen rows lost their bar entirely on hover, and the same rows
+lost it on highlight. `00 - Inbox` sampled in colour: at rest one pixel is the full
+`rgb(217, 89, 38)` at contrast **4.83** against the sidebar; hovering, the brightest is
+`rgb(140, 67, 37)`, a half blend at contrast **2.21**.
+
+**The fix is `background-position: 2px 100%`** — the bar starts after the accent band, so
+neither overlay reaches it — **with the floor at 4px** so the worst state still paints 3px.
+Measured, every barred row on the demo:
+
+| | at rest | hovering | highlighted |
 |---|---|---|---|
-| 1px | 1px | **0px** | gone |
-| 2px | 2px | 1px | one blended pixel |
-| **3px** | **3px** | **2px** | a solid mark |
-| 4px | 4px | 3px | a solid mark |
+| floored rows (≤ 0.74% of the basis) | 4px | 4px | **3px** |
+| `01 - Projects` (49.26%) | 107px | 107px | 106px |
+| `05 - Meeting Notes` (100%) | 215px | 214px | 214px |
 
-So 3px is the smallest floor that still holds a mark under the pointer, and that is why it is
-3. At the 1px floor **three of eighteen rows on the demo lost their bar on hover** —
-`00 - Inbox`, `13 - Someday Maybe` and `14 - Reading List`, every row at or under 0.74% of the
-basis. Sampled in colour on `00 - Inbox`: at rest one pixel is the full `rgb(217, 89, 38)` at
-contrast 4.83 against the sidebar; hovering, the brightest is `rgb(140, 67, 37)`, a half blend
-at contrast 2.21.
+**Every state now keeps a mark, and the check asserts the weakest of the three is at least 3px.**
 
-**Every wider bar loses about one pixel too and nobody can tell** — 217 to 215, 107 to 106,
-76 to 75. Only the floored ones matter.
+**`background-origin: content-box` was tried first and is wrong.** It does put both overlays
+outside the track, but it lifts the bar out of the padding strip and into the content row —
+where the `only` chip lives, and that chip is an opaque element painted above the row's
+background. Measured, it took the full bar from 205px to **152px on hover**, the chip punching
+a hole in it. The bar belongs in the padding strip *below* the content, where no grid item can
+reach it.
 
-**It is not Obsidian's doing, and that was checked before the floor moved.** `.lg` is a
-`<button>`, the page never resets `box-shadow`, so Obsidian's own button shadow applies and
-roughly doubles on hover (white 9% to 16%, blur 0.5px to 1px, spread 0.5px), and inset shadows
-paint over a background image. Applying Obsidian's exact rest and hover shadows to the
-standalone page left the painted bar at **217px in all four states**. Wrong explanation,
-measured away rather than shipped.
+**Not Obsidian's doing, and that was checked before anything moved.** `.lg` is a `<button>`,
+the page never resets `box-shadow`, so Obsidian's own button shadow applies and roughly doubles
+on hover (white 9% to 16%, blur 0.5px to 1px, spread 0.5px). Applying Obsidian's exact rest and
+hover shadows to the standalone page left the painted bar at **217px in all four states**.
+Wrong explanation, measured away rather than shipped.
 
 ```bash
-node scripts/smoke.mjs --only "thinnest count bar"    # pixels, not CSS
-node scripts/obsidian-smoke.mjs --only "hover"        # the same row inside real Obsidian
+node scripts/smoke.mjs --only "thinnest count bar"    # pixels in all three row states
+node scripts/obsidian-smoke.mjs --only "hover"        # the CSS half, in real Obsidian
 ```
 
-A note on writing that check: `p.j` wraps its expression in `JSON.stringify`, so it returns
-`undefined` for an async IIFE. Anything that decodes a screenshot through a canvas has to go
-through `p.eval`, which awaits.
+Three things that check got wrong before it was right, all worth keeping:
+
+- **`p.j` wraps its expression in `JSON.stringify`**, so it returns `undefined` for an async
+  IIFE. Anything decoding a screenshot through a canvas must go through `p.eval`, which awaits.
+- **A click rebuilds the legend**, so a marker attribute put on a row before the click is gone
+  after it. Address rows by `data-g`, which `buildLegend` re-emits.
+- **A bar whose hue is the accent's cannot be told from the highlight fill**, and it reads
+  *high*, not low — 213px on the shape vault's `(vault root)`. That one reading is dropped
+  rather than trusted, because a false pass is the failure mode this check exists to prevent.
 
 ### The tooltip has to say which folder the bar is measured against
 
