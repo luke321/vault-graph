@@ -1287,6 +1287,8 @@ class VaultGraphSettingTab extends PluginSettingTab {
         .setTooltip(shown ? "Shown by default" : "Hidden by default")
         .onClick(() => this.pickVisible(group.name)));
       row.controlEl.addClass("sws");
+      // github#77
+      const grid = row.controlEl.createDiv({ cls: "sw-grid" });
 
       SLOT_NAMES.forEach((name, i) => {
         const key = "g" + (i + 1);
@@ -1299,7 +1301,7 @@ class VaultGraphSettingTab extends PluginSettingTab {
           title: name + tail,
         };
         if (isAuto) attr["data-auto"] = "1";
-        const b = row.controlEl.createEl("button", { cls: ["swatch", "vg-" + key], attr });
+        const b = grid.createEl("button", { cls: ["swatch", "vg-" + key], attr });
         this.fillSwatch(api, b, key, name, tail);
         b.addEventListener("click", () => this.pick(group.name, key));
       });
@@ -1330,11 +1332,13 @@ class VaultGraphSettingTab extends PluginSettingTab {
         .setDesc(s.n === 1 ? "1 note" : s.n + " notes");
       row.settingEl.addClass("vg-subrow");
       row.controlEl.addClass("sws");
+      // github#77
+      const grid = row.controlEl.createDiv({ cls: "sw-grid" });
 
       SLOT_NAMES.forEach((name, i) => {
         const key = "g" + (i + 1);
         const on = pinned === key;
-        const b = row.controlEl.createEl("button", {
+        const b = grid.createEl("button", {
           cls: ["swatch", "vg-" + key],
           attr: { role: "radio", "aria-checked": String(on), "aria-label": name,
                   title: name + (on ? " (chosen)" : "") },

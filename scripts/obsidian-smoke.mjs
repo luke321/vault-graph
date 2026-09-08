@@ -763,7 +763,31 @@ try {
   // github#77
   if (selected("colour picker")) {
     const TAB = "app.setting.pluginTabs.find(function (t) { return t.id === '" + PLUGIN_ID + "'; })";
-    const LOOK = "(function(){" +
+    const ALIGN = "var align = function (el) {" +
+      "  var out = [];" +
+      // github#77
+      "  Array.prototype.forEach.call(el.querySelectorAll('.sws'), function (row) {" +
+      "    var kids = row.querySelectorAll('.swatch');" +
+      "    if (!kids.length) return;" +
+      "    var lo = Infinity, hi = -Infinity, tops = [];" +
+      "    Array.prototype.forEach.call(kids, function (k) {" +
+      "      var b = k.getBoundingClientRect();" +
+      "      if (b.left < lo) lo = b.left;" +
+      "      if (b.right > hi) hi = b.right;" +
+      "      var t = Math.round(b.top);" +
+      "      if (tops.indexOf(t) < 0) tops.push(t);" +
+      "    });" +
+      "    tops.sort(function (x, y) { return x - y; });" +
+      "    var firstRun = 0;" +
+      "    Array.prototype.forEach.call(kids, function (k) {" +
+      "      if (Math.round(k.getBoundingClientRect().top) === tops[0]) firstRun++;" +
+      "    });" +
+      "    out.push({ left: Math.round(lo), w: Math.round(hi - lo)," +
+      "               n: kids.length, lines: tops.length, perLine: firstRun });" +
+      "  });" +
+      "  return out;" +
+      "};";
+    const LOOK = "(function(){" + ALIGN +
       " var t = app.setting.activeTab; var el = t && (t.containerEl || t.contentEl);" +
       " if (!el) return { open: false };" +
       " var sws = el.querySelectorAll('.vault-graph .swatch');" +
@@ -783,7 +807,8 @@ try {
       "          grounds: one ? one.querySelectorAll('.gnd').length : 0," +
       "          bodyTheme: document.body.classList.contains('theme-light') ? 'light' : 'dark'," +
       "          scopeTheme: scope ? scope.getAttribute('data-theme') : null," +
-      "          overflowX: over, keptApi: Object.prototype.hasOwnProperty.call(" + TAB + " || {}, 'api') };" +
+      "          overflowX: over, keptApi: Object.prototype.hasOwnProperty.call(" + TAB + " || {}, 'api')," +
+      "          rows: align(el) };" +
       "})()";
     const openTab = async () => {
       await E("app.setting.open(); app.setting.openTabById('" + PLUGIN_ID + "'); void 0");
@@ -828,7 +853,16 @@ try {
       (wantPreviews ? s.previews === s.sws : true);
     const lightGround = "rgb(252, 252, 251)", darkGround = "rgb(26, 26, 25)";
     const oneGround = (s) => s.grounds === 1 && (s.ground === lightGround || s.ground === darkGround);
-    const ok = good(withGraph, true) && oneGround(withGraph) &&
+    const rows = withGraph.rows || [];
+    const lefts = [...new Set(rows.map((r) => r.left))];
+    const widths = [...new Set(rows.map((r) => r.w))];
+    const counts = [...new Set(rows.map((r) => r.n))];
+    const lines = [...new Set(rows.map((r) => r.lines))];
+    const perLine = [...new Set(rows.map((r) => r.perLine))];
+    const aligned = rows.length > 1 && lefts.length === 1 && widths.length === 1 &&
+                    counts.length === 1 && lines.length === 1 && perLine.length === 1 &&
+                    widths[0] > 0;
+    const ok = aligned && good(withGraph, true) && oneGround(withGraph) &&
                good(afterPick, true) && good(afterTheme, true) && oneGround(afterTheme) &&
                afterTheme.ground !== withGraph.ground &&
                good(noGraph, false) && noGraph.previews === 0 &&
@@ -842,7 +876,13 @@ try {
       "; body/scope after the flip: " + afterTheme.bodyTheme + "/" + afterTheme.scopeTheme +
       " (was " + withGraph.bodyTheme + "/" + withGraph.scopeTheme + ")" +
       "; graph torn down and the tab reopened: " + say(noGraph) +
-      "; tab retains an api field: " + (withGraph.keptApi || noGraph.keptApi ? "YES" : "no"));
+      "; tab retains an api field: " + (withGraph.keptApi || noGraph.keptApi ? "YES" : "no") +
+      "; " + rows.length + " swatch grids, " +
+      (aligned ? "all at x=" + lefts[0] + ", " + widths[0] + "px, " + counts[0] +
+                 " swatches over " + lines[0] + " lines of " + perLine[0]
+               : "RAGGED -- lefts " + lefts.join('/') + ", widths " + widths.join('/') +
+                 ", counts " + counts.join('/') + ", lines " + lines.join('/') +
+                 ", per line " + perLine.join('/')));
   }
 
   // github#40, design/0012

@@ -393,7 +393,13 @@
   .vault-graph.vg-tokens .vg-subrow {
     margin-left: 24px; padding-top: 6px; padding-bottom: 6px; border-top: none;
   }
-  .vault-graph.vg-tokens .sws { flex-wrap: wrap; justify-content: flex-end; }
+  /* github#77 -- the swatches get their own fixed grid, so the chevron on a
+     folder with subfolders cannot shift them out of line with its neighbours */
+  .vault-graph.vg-tokens .sws { flex-wrap: nowrap; justify-content: flex-end; }
+  .vault-graph.vg-tokens .sw-grid {
+    display: grid; grid-template-columns: repeat(6, 34px); gap: 4px;
+    justify-content: start; flex: none;
+  }
   .vault-graph .swatch:hover { transform: scale(1.06); }
   .vault-graph .swatch[aria-checked="true"] {
     box-shadow: 0 0 0 1px var(--surface-0), 0 0 0 2px var(--text-1);
