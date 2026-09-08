@@ -1993,7 +1993,7 @@ Three gesture probes cover what a motionless tap cannot, all on the iPhone 14 vi
 The first row is the one that matters: the first cut of the captor failed it while every other
 number on this page looked right, because the harness was sending a tap with no movement in it.
 
-## The disc gets a phone's screen, and the desktop layout does not move
+## Either panel folds away at any width, and the resting layout does not move
 
 Below 720 px the disc takes the rest of the viewport and the legend, search and view buttons
 slide up as a sheet. The band and date strip stay on and can be put away, never overlaid,
@@ -2004,17 +2004,81 @@ the second date field and All dates off the right edge. The
 detail card becomes a sheet at the foot at 46% and both control clusters move to the top
 corners, clear of it. design/0013.
 
+**Above the breakpoint the same two toggles fold the same two panels, and the sidebar is a
+column rather than a sheet.** `[data-sheet="off"]` collapses the grid to `1fr` and takes
+`#vg-sidebar` out of the layout entirely, so the width goes to the stage; the sheet's
+`translateY` treatment stays inside the ≤720 px branch, which is why the desktop rules sit in
+`@media not all and (max-width: 720px)` — the exact complement, so no fractional viewport width
+falls into neither, and so a `display: none` scoped by an attribute cannot outrank the sheet
+rules on specificity and kill the phone's sheet. `display: none` rather than a zero-width
+clipped column for the same reason a closed sheet is `visibility: hidden`: a panel nobody can
+see must not keep its controls in the tab order while its own toggle says
+`aria-expanded="false"`. The band needs no branch at all — `[data-band="off"]` hides
+`#vg-heat` and pins the stage row at every width. github#82.
+
+**The two folds buy different things, and only one of them buys dot size.**
+`matrixFromCamera` scales by `min(width, height)`, so at a landscape window the constrained
+axis is the height the band is eating. Measured 2026-09-08 at 1600x1000 on the demo fixture,
+1403 notes:
+
+| state | canvas | drawn radius min/p50/max | under 2 px |
+|---|---|---|---|
+| both panels up | 1312x770 | 0.89 / **2.19** / 4.06 px | 515 of 1403 |
+| band folded | 1312x1000 | 1.05 / **2.68** / 5.38 px | **232** of 1403 |
+| band + sidebar folded | 1600x1000 | 1.05 / **2.68** / 5.38 px | 232 of 1403 |
+| sidebar folded alone | 1600x770 | 0.89 / **2.19** / 4.06 px | 515 of 1403 |
+| both back up | 1312x770 | 0.89 / 2.19 / 4.06 px | 515 of 1403 |
+
+The band is worth 22% of the median radius and halves the sub-2-px population; the sidebar is
+worth framing and not one pixel of radius. **The camera is not touched and needs none**: ratio
+1.08 at 0.5,0.5 through all five states, because the ratio is dimension-independent and
+`render()` → `resize()` re-frames the disc in the new box by itself. Auto-fitting on a fold
+would fight *a manually moved camera is left alone by a visibility toggle*.
+
+**The resting desktop layout is unchanged by all of this**, which is the other half of the
+claim: sidebar 288x1000, stage 1312x1000, heat 1312x230, canvas 1312x770, radius
+0.89/2.19/4.06 — identical before and after github#82.
+
+**Panel state is persisted, and the page still stores nothing.** It rides decisions/0009's
+channel like every other saved setting: `sheetOpen` / `onSheetOpen` and `bandOpen` /
+`onBandOpen` on the deps object, `localStorage` in `shell.html`, `data.json` in the plugin, and
+no settings-tab row — "is the folder list folded right now" is a fact about the window, and a
+tab row for it would be a second UI for one state. **The absence of the dep is load-bearing:**
+it means nobody has chosen yet, so the width decides the first open — a phone summons the
+legend, a desktop keeps it beside the disc. A write happens exactly when a call is not `quiet`,
+because the only quiet calls are the mount putting back what was stored. The known cost:
+Obsidian's `data.json` is shared between desktop and mobile, so a desktop user who has toggled
+the sidebar back on gives their phone a sheet open at mount. Closable, so a wart rather than a
+defect. This **reverses** design/0013's "panel state is session state ... nothing is
+persisted", and 0013 says so at the paragraph itself.
+
 **A panel never covers its own toggle.** The panel buttons live in `#vg-canvas`, which the band
 pushes down by its own height, so they land under a sheet that is anchored to the bottom. The
 cluster therefore outranks the sheet, and a tap on the remaining disc closes the sheet too. The
-harness asserts the round trip: open, what is under the toggle, close.
+harness asserts the round trip: press, what is under the toggle, press back.
 
 ```bash
 node scripts/mobile-check.mjs --device iphone14      # "sheet toggle round trip"
+node scripts/mobile-check.mjs --device desktop       # the same line, at every width now
 ```
 
 Measured 2026-09-07 before the fix: `opened on; under it while open: #vg-sidebar; second tap ->
-on`. After: `under it while open: the toggle; second tap -> off`.
+on`. After: `under it while open: the toggle; second tap -> off`. The probe **re-reads the
+button's box between the two presses**, and that is not caution: folding a grid column slides
+`#vg-canvas` and the cluster inside it left by the sidebar's whole width, so pressing where the
+button used to be lands on bare disc and reads as a toggle that cannot be put back.
+
+**Neither auto-close survives above the breakpoint.** `clickStage` and `select(id)` both put the
+sheet away — right for an overlay a tap should dismiss, and at desktop it would mean clicking
+bare disc or opening a note folds the sidebar for no reason anybody asked for. Both are gated
+on `narrow()`, whose `NARROW_PX` is `page.css`'s breakpoint duplicated on purpose and must
+match it — the same deal decisions/0009 records for `SLOT_NAMES`, and for the same reason:
+everything lives inside `mountVaultGraph`, so there is nothing to import. The check asserts the
+round trip rather than the reasoning.
+
+```bash
+node scripts/smoke.mjs --only "panel toggles"   # "fold each panel away and give the space back"
+```
 
 **Two more traps, both measured rather than reasoned.** With the band hidden, `#vg-canvas` inherits
 the stage's `auto` row and collapses to **zero height**, because every child of it is absolutely
@@ -2025,7 +2089,7 @@ window listener nor the page's root observer fires: every toggle calls `refreshS
 
 ```bash
 node scripts/mobile-check.mjs --device iphone14 --shot after.png
-node scripts/mobile-check.mjs --device desktop        # must be unchanged
+node scripts/mobile-check.mjs --device desktop        # resting layout must be unchanged
 node scripts/smoke.mjs --only "camera cluster"
 ```
 

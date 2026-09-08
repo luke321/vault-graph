@@ -107,6 +107,8 @@
  * @property {boolean} [unlinkedByFolder]
  * @property {boolean} [unlinkedTintByFolder]
  * @property {boolean} [fitCap]               github#41, design/0011
+ * @property {boolean} [sheetOpen]            github#82 -- absent means "decide from the width"
+ * @property {boolean} [bandOpen]             github#82
  * @property {string[]} [pinned]
  * @property {boolean} [settingsUI]
  * @property {() => void} [openSettings]
@@ -117,6 +119,8 @@
  * @property {(v: boolean) => void | Promise<void>} [onCompactAxis]
  * @property {(v: boolean) => void | Promise<void>} [onUnlinkedByFolder]
  * @property {(v: boolean) => void | Promise<void>} [onUnlinkedTintByFolder]
+ * @property {(v: boolean) => void | Promise<void>} [onSheetOpen]
+ * @property {(v: boolean) => void | Promise<void>} [onBandOpen]
  * @property {(ids: string[]) => void | Promise<void>} [onPinned]
  * @property {() => void} [onRefresh]
  */
@@ -384,8 +388,17 @@ function mountVaultGraph(root, data, deps) {
   var onCompactAxis = typeof deps.onCompactAxis === "function" ? deps.onCompactAxis : null;
 
   // github#73, design/0013
-  var sheetOpen = false;
-  var bandOpen = true;
+  // github#82 -- NARROW_PX must match the breakpoint in page.css
+  var NARROW_PX = 720;
+  function narrow() {
+    return !!(WIN.matchMedia && WIN.matchMedia("(max-width: " + NARROW_PX + "px)").matches);
+  }
+
+  // github#82, decisions/0009 -- absent means nobody chose; width decides
+  var sheetOpen = typeof deps.sheetOpen === "boolean" ? deps.sheetOpen : !narrow();
+  var onSheetOpen = typeof deps.onSheetOpen === "function" ? deps.onSheetOpen : null;
+  var bandOpen = typeof deps.bandOpen === "boolean" ? deps.bandOpen : true;
+  var onBandOpen = typeof deps.onBandOpen === "function" ? deps.onBandOpen : null;
 
   // github#3
   var unlinkedByFolder = deps.unlinkedByFolder === false ? false : true;
@@ -4851,7 +4864,11 @@ function mountVaultGraph(root, data, deps) {
       select(e.node);
     });
     // github#73, design/0013
-    renderer.on("clickStage", function () { if (sheetOpen) setSheet(false); select(null); });
+    // github#82 -- only a sheet closes itself; a column does not
+    renderer.on("clickStage", function () {
+      if (sheetOpen && narrow()) setSheet(false);
+      select(null);
+    });
     renderer.on("rightClickNode", function (e) {
       if (e.event && e.event.original) e.event.original.preventDefault();
       togglePin(e.node);
@@ -4964,7 +4981,8 @@ function mountVaultGraph(root, data, deps) {
   /** @param {string | null} id */
   function select(id) {
     // github#73, design/0013
-    if (id && sheetOpen) setSheet(false);
+    // github#82 -- same: only the phone's sheet gets out of the way
+    if (id && sheetOpen && narrow()) setSheet(false);
     // github#40, design/0012
     if (!trailHop && (!id || id !== state.selected)) trail.length = 0;
     trailHop = false;
@@ -5709,10 +5727,11 @@ function mountVaultGraph(root, data, deps) {
     if ($("compact")) $("compact").onclick = function () { setCompactAxis(!compactAxis, true); };
     setCompactAxis(compactAxis, false);
     // github#73
+    // github#82 -- restore what was stored, or what the width chose
     if ($("sheet")) $("sheet").onclick = function () { setSheet(!sheetOpen); };
     if ($("band")) $("band").onclick = function () { setBand(!bandOpen); };
-    setSheet(false, true);
-    setBand(true, true);
+    setSheet(sheetOpen, true);
+    setBand(bandOpen, true);
     $("png").onclick = savePng;
     if ($("dbg")) $("dbg").onclick = function () {
       var txt = JSON.stringify(API.debugDump(), null, 2);
@@ -6114,6 +6133,7 @@ function mountVaultGraph(root, data, deps) {
     if (renderer) renderer.render();
   }
 
+  // github#82 -- quiet is the mount restoring; else it is a change
   /** @param {boolean} on @param {boolean} [quiet] */
   function setSheet(on, quiet) {
     sheetOpen = !!on;
@@ -6124,7 +6144,9 @@ function mountVaultGraph(root, data, deps) {
       b.setAttribute("aria-label", sheetOpen ? "Hide the folder list" : "Show the folder list");
     }
     syncCanvasTop();
-    if (!quiet) afterPanel();
+    if (quiet) return;
+    afterPanel();
+    if (onSheetOpen) onSheetOpen(sheetOpen);
   }
 
   /** @param {boolean} on @param {boolean} [quiet] */
@@ -6137,7 +6159,9 @@ function mountVaultGraph(root, data, deps) {
       b.setAttribute("aria-label", bandOpen ? "Hide the calendar" : "Show the calendar");
     }
     syncCanvasTop();
-    if (!quiet) afterPanel();
+    if (quiet) return;
+    afterPanel();
+    if (onBandOpen) onBandOpen(bandOpen);
   }
 
   function setPan(on, persist) {
@@ -7896,7 +7920,16 @@ function mountVaultGraph(root, data, deps) {
         why: "...and bring the whole vault back" },
       { settle: true, act: "only05", why: "let the disc refill" },
 
+      // github#82 -- record wide; band first, it buys the radius
+      { click: true, target: ["id", "band"], act: "collapse",
+        why: "fold the calendar band away -- the disc grows into the row it had" },
+      { settle: true, act: "collapse", why: "let the disc take the band's height" },
+      { click: true, target: ["id", "sheet"], act: "collapse",
+        why: "fold the folder list away -- the grid column collapses and the stage takes its width" },
+      { settle: true, act: "collapse", why: "let the disc re-centre in the whole window" },
+
       // github#73, design/0013 -- record this one narrow: -Width 420 -Height 900
+      // github#73 -- nothing may follow: touchmode switches the rest
       { touchmode: true, act: "mobile",
         why: "a finger from here on: no pointer moves, so no hover a phone could never produce" },
       { wheel: 4, target: ["note", "05"], act: "mobile",
@@ -7925,7 +7958,9 @@ function mountVaultGraph(root, data, deps) {
   }
 
   // github#34, github#73
-  var FULL_RUN_EXCLUDES = ["subfoldercolor", "hiddenbydefault", "yearchip", "only05", "mobile"];
+  // github#82 -- collapse ends folded, so the hero must not play it
+  var FULL_RUN_EXCLUDES = ["subfoldercolor", "hiddenbydefault", "yearchip", "only05",
+                           "collapse", "mobile"];
 
   /** @returns {DemoBeat[]} */
   function demoFullStoryboard() {
@@ -8595,6 +8630,10 @@ function mountVaultGraph(root, data, deps) {
                     get hoverBusy() { return !!hoverRaf; },
                     // github#14
                     get camAtRest() { return camAtRest; },
+                    // github#82
+                    get sheetOpen() { return sheetOpen; },
+                    get bandOpen() { return bandOpen; },
+                    get narrow() { return narrow(); },
                     hl: hl,
                     get hlBusy() { return !!hlRaf; },
                     get dateSpan() { return dateSpan; },

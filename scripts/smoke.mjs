@@ -821,6 +821,156 @@ check("the camera cluster is bottom-right, in order, and 31px", async (p) => {
   };
 });
 
+// github#82
+check("the panel toggles fold each panel away and give the space back", async (p) => {
+  // github#82 -- pinned: this suite's own window is a grid slot
+  const dpr = await p.j(`window.devicePixelRatio || 1`);
+  await p.send("Emulation.setDeviceMetricsOverride",
+               { width: 1280, height: 900, deviceScaleFactor: dpr, mobile: false });
+  await sleep(400);
+
+  const shot = () => p.j(`(function(){
+    var root = document.querySelector(".vault-graph");
+    var box = function (sel) {
+      var el = document.querySelector(sel);
+      if (!el) return null;
+      var b = el.getBoundingClientRect();
+      return { x: Math.round(b.left), y: Math.round(b.top),
+               w: Math.round(b.width), h: Math.round(b.height),
+               // github#82 -- null offsetParent: not laid out at all
+               laidOut: el.offsetParent !== null };
+    };
+    var sheetBtn = document.getElementById("vg-sheet");
+    var bandBtn = document.getElementById("vg-band");
+    return {
+      root: box(".vault-graph"), sidebar: box("#vg-sidebar"), stage: box("#vg-stage"),
+      heat: box("#vg-heat"), canvas: box("#vg-canvas"),
+      sheet: root.getAttribute("data-sheet"), band: root.getAttribute("data-band"),
+      sheetOpen: __vg.sheetOpen, bandOpen: __vg.bandOpen, narrow: __vg.narrow,
+      expanded: sheetBtn ? sheetBtn.getAttribute("aria-expanded") : null,
+      pressed: bandBtn ? bandBtn.getAttribute("aria-pressed") : null
+    };
+  })()`);
+
+  const press = async (id) => {
+    await p.eval(`(function(){ var b = document.getElementById("vg-${id}");
+                               if (b) b.click(); })(); void 0`);
+    await sleep(320);
+  };
+  const stored = () => p.j(`(function(){
+    try { return JSON.parse(window.localStorage.getItem(SETTINGS_KEY) || "{}"); }
+    catch (e) { return { unreadable: String((e && e.name) || e) }; }
+  })()`);
+
+  const a = await shot();
+  if (a.narrow) {
+    await p.send("Emulation.clearDeviceMetricsOverride");
+    return { ok: false, detail: "the page still calls itself narrow at a 1280px override -- " +
+                                "NARROW_PX in page.js and the breakpoint in page.css disagree" };
+  }
+
+  // github#82 -- the cluster: 31px squares at the disc's corner
+  const btns = await p.j(`(function(){
+    var g = document.querySelector("#vg-canvas").getBoundingClientRect();
+    var mob = document.querySelector("#vg-mob");
+    var mr = mob ? mob.getBoundingClientRect() : null;
+    var out = { fromLeft: mr ? Math.round(mr.left - g.left) : null,
+                fromTop: mr ? Math.round(mr.top - g.top) : null, buttons: [] };
+    ["vg-sheet", "vg-band"].forEach(function (id) {
+      var b = document.getElementById(id);
+      if (!b) { out.buttons.push({ id: id, missing: true }); return; }
+      var r = b.getBoundingClientRect();
+      out.buttons.push({ id: id, w: Math.round(r.width), h: Math.round(r.height),
+                         left: Math.round(r.left), svg: !!b.querySelector("svg"),
+                         label: b.getAttribute("aria-label"),
+                         inside: mr ? r.left >= mr.left - 1 && r.right <= mr.right + 1 : false });
+    });
+    return out;
+  })()`);
+
+  // github#82 -- neither auto-close may fold a column
+  await p.eval(`__vg.renderer.emit("clickStage", {}); void 0`).catch(() => {});
+  await sleep(200);
+  const afterStageClick = await shot();
+  const picked = await p.j(`(function(){
+    var best = null, bd = -1;
+    __vg.graph.forEachNode(function (id, at) { if (at.deg > bd) { bd = at.deg; best = id; } });
+    if (best === null) return null;
+    __vg.renderer.emit("clickNode", { node: best });
+    return best;
+  })()`);
+  await sleep(280);
+  const afterSelect = await shot();
+  await p.eval(`__vg.renderer.emit("clickStage", {}); void 0`).catch(() => {});
+  await sleep(200);
+
+  await press("sheet");
+  const b = await shot();
+  const afterSheetStore = await stored();
+  await press("band");
+  const c = await shot();
+  const afterBandStore = await stored();
+
+  await press("sheet");
+  await press("band");
+  const d = await shot();
+  await p.send("Emulation.clearDeviceMetricsOverride");
+  await sleep(360);
+
+  const badBtn = btns.buttons.filter((x) => x.missing || x.w !== 31 || x.h !== 31 ||
+                                            !x.svg || !x.label || !x.inside);
+  const cluster = badBtn.length === 0 &&
+                  btns.fromLeft !== null && btns.fromLeft >= 0 && btns.fromLeft < 60 &&
+                  btns.fromTop !== null && btns.fromTop >= 0 && btns.fromTop < 60 &&
+                  btns.buttons[1].left > btns.buttons[0].left;
+
+  const heldOnStageClick = afterStageClick.sheet === "on" && afterStageClick.sheetOpen === true;
+  const heldOnSelect = afterSelect.sheet === "on" && afterSelect.sheetOpen === true;
+
+  const widthGain = b.canvas.w - a.canvas.w;
+  const sheetFolds = b.sheet === "off" && b.sheetOpen === false && b.expanded === "false" &&
+                     b.sidebar !== null && !b.sidebar.laidOut &&
+                     widthGain === a.sidebar.w && b.stage.x === b.root.x &&
+                     b.canvas.w === b.root.w;
+
+  const heightGain = c.canvas.h - b.canvas.h;
+  const bandFolds = c.band === "off" && c.bandOpen === false && c.pressed === "false" &&
+                    c.heat !== null && !c.heat.laidOut &&
+                    heightGain === a.heat.h && c.canvas.y === c.root.y &&
+                    c.canvas.h === c.root.h && c.canvas.w === c.root.w;
+
+  const restored = d.sheet === a.sheet && d.band === a.band &&
+                   d.canvas.w === a.canvas.w && d.canvas.h === a.canvas.h;
+
+  // github#82 -- an unreadable store is reported, never failed on
+  const storeLive = !afterSheetStore.unreadable && !afterBandStore.unreadable;
+  const persists = !storeLive ||
+                   (afterSheetStore.sheetOpen === false && afterBandStore.bandOpen === false);
+
+  return {
+    ok: cluster && heldOnStageClick && heldOnSelect && sheetFolds && bandFolds &&
+        restored && persists,
+    detail: badBtn.length
+      ? `wrong: ${badBtn.map((x) => x.missing ? x.id + " missing"
+                                              : x.id + " " + x.w + "x" + x.h).join(", ")}`
+      : `2 buttons at ${btns.buttons[0].w}x${btns.buttons[0].h}px, ${btns.fromLeft}px from ` +
+        `the canvas left edge and ${btns.fromTop}px from its top; canvas ` +
+        `${a.canvas.w}x${a.canvas.h} -> ${b.canvas.w}x${b.canvas.h} folding the ` +
+        `${a.sidebar.w}px sidebar -> ${c.canvas.w}x${c.canvas.h} folding the ${a.heat.h}px ` +
+        `band (= the root's ${c.root.w}x${c.root.h}); back to ${d.canvas.w}x${d.canvas.h}; ` +
+        `a stage click and opening note ${picked} left data-sheet ` +
+        `${afterStageClick.sheet}/${afterSelect.sheet}; stored ${storeLive
+          ? `sheetOpen ${afterSheetStore.sheetOpen}, bandOpen ${afterBandStore.bandOpen}`
+          : `NOT MEASURED (localStorage ${afterSheetStore.unreadable})`}` +
+        (cluster ? "" : "  <- THE CLUSTER IS NOT AT THE DISC'S TOP-LEFT") +
+        (heldOnStageClick && heldOnSelect ? "" : "  <- THE SIDEBAR FOLDED ITSELF") +
+        (sheetFolds ? "" : "  <- THE SIDEBAR DID NOT GIVE ITS WIDTH BACK") +
+        (bandFolds ? "" : "  <- THE BAND DID NOT GIVE ITS HEIGHT BACK") +
+        (restored ? "" : "  <- THE ROUND TRIP DID NOT RESTORE THE BOX") +
+        (persists ? "" : "  <- THE FOLD WAS NOT WRITTEN THROUGH"),
+  };
+});
+
 // github#13
 
 // github#13
