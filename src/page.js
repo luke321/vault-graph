@@ -58,10 +58,8 @@
  * @property {boolean} [dev]         a --dev build of the standalone; nothing else sets it
  */
 
+// github#72, design/0014
 /**
- * What a live rebuild reports back (github#72). `applied` false with `queued` true means the
- * data is held and will land once the frame loop is free; `applied` false with a `churn` means
- * the host should rebuild instead.
  * @typedef {Object} LiveResult
  * @property {boolean} applied
  * @property {string} reason
@@ -557,21 +555,8 @@ function mountVaultGraph(root, data, deps) {
     pinned: []
   };
 
-  // github#72
-  /**
-   * WHAT A CHANGED NOTE SET INVALIDATES.
-   *
-   * `ingest()` rebuilds the graph and everything derived from it, and `regroup()` rebuilds the
-   * grouping. Neither reaches a cache keyed by a note id that the layout does not own -- the
-   * timeline ranks, the heat signature, the hop trail, the selection, the pins, the search hit
-   * list. Those are listed here rather than inline in `applyData`, so that a feature which adds
-   * another one registers it at its own definition site and does not have to find, understand
-   * and edit the live-rebuild path to stay correct.
-   *
-   * A handler runs at rest, after the graph holds the new note set and before either cascade
-   * endpoint is built. It may read the graph; it must not start an animation.
-   * @type {{ name: string, fn: () => void }[]}
-   */
+  // github#72, design/0014
+  /** @type {{ name: string, fn: () => void }[]} */
   var onData = [];
   /** @param {string} name @param {() => void} fn */
   function invalidatesOnData(name, fn) { onData.push({ name: name, fn: fn }); }
@@ -605,25 +590,12 @@ function mountVaultGraph(root, data, deps) {
   /** @type {Record<string, number>} */
   var subCount = dict();
   // github#72
-  /** the id each note path holds, so a live rebuild can keep a surviving note's id */
   /** @type {Record<string, string>} */
   var idOfPath = dict();
   var nextId = 0;
 
+  // github#72, design/0014
   /**
-   * Build the graph, and everything derived from the note set, out of a data object.
-   *
-   * github#72: the mount and the live rebuild both come through here. An INCREMENTAL path --
-   * add what arrived, drop what left, patch the tallies -- would be a second construction, and
-   * two constructions drift: `hubRank` is a full sort, `subOrder` a full tally, and the edge
-   * budget a share of every edge, none of which patch correctly from a delta. The layout has
-   * no tolerance for the two disagreeing, so there is one of them.
-   *
-   * `keepId` answers with the id a path already holds; a path it does not answer for takes a
-   * fresh one. That is what makes an id survive a rebuild, which the cascade needs -- it walks
-   * FROM the positions the old ids are drawn at -- and which the mount gets for free by never
-   * having rebuilt.
-   *
    * @param {VaultData} src
    * @param {((path: string) => string | undefined) | null} keepId
    */
@@ -2564,9 +2536,7 @@ function mountVaultGraph(root, data, deps) {
   var tlMs = dict();
   /** @type {DateSpan | null} */
   var dateSpan = null;
-  // github#72: every rank here is a position in the note set, so all of it is stale the moment
-  // a note arrives or leaves. `timeFactor` reads it, and `willShow` reads `timeFactor`, so this
-  // has to be current before either cascade endpoint decides who is a member.
+  // github#72, design/0014
   invalidatesOnData("timeline", function () { buildTimeline(); });
   function buildTimeline() {
     /** @type {[string, string][]} */
@@ -5014,8 +4984,7 @@ function mountVaultGraph(root, data, deps) {
   var trail = [];
   var TRAIL_CAP = 30;
   var trailHop = false;
-  // github#72: a hop to a note that has since been deleted is not a hop back to anywhere.
-  // design/0012's rule that only a hop lengthens the trail still holds -- this shortens it.
+  // github#72, design/0012, design/0014
   invalidatesOnData("hop trail", function () {
     var kept = trail.filter(function (id) { return graph.hasNode(id); });
     trail.length = 0;
@@ -5085,10 +5054,7 @@ function mountVaultGraph(root, data, deps) {
            '<ol>' + parts.join('') + '</ol></nav>';
   }
 
-  // github#72: three ids the page holds outside the graph. A deleted note must not stay
-  // selected (the card would name a note that is gone), stay hovered (the renderer looks its
-  // attributes up and throws), or stay pinned (`pinnedIds` filters, but the saved list would
-  // keep growing stale entries). The pins are re-saved so the host's copy drops it too.
+  // github#72, design/0014
   invalidatesOnData("selection, hover and pins", function () {
     if (state.selected && !graph.hasNode(state.selected)) select(null);
     if (state.hovered && !graph.hasNode(state.hovered)) state.hovered = null;
@@ -5696,13 +5662,7 @@ function mountVaultGraph(root, data, deps) {
     bandLock = null; geomLock = null;
     if (deferLayout && prevBand) {
       regroup(true, prevBand, true);
-      // github#49: a toggle moves no note into or out of the vault, so the disc's extent is
-      // genuinely unchanged, and holding the lock is what keeps a cascade's two endpoints under
-      // one geometry.
-      // github#72, decisions/0011: a live rebuild DOES change the note set, so the extent
-      // genuinely moves. The new lock is taken HERE, at rest, before either endpoint exists --
-      // which is what keeps settle() a no-op. Holding the old one and swapping at the end would
-      // put the same step on the last frame, which is the bug bar.
+      // github#49; github#72, decisions/0011
       if (prevGeom && !freshGeom) geomLock = prevGeom;
       return;
     }
@@ -5712,9 +5672,7 @@ function mountVaultGraph(root, data, deps) {
     if (renderer) renderer.refresh();
   }
 
-  // github#72: the hit list is a rendered snapshot of ids, and a click on a stale one throws.
-  // Re-running the query is not worth it -- the box still holds the text, so the next keystroke
-  // rebuilds it -- but the dead buttons have to go.
+  // github#72, design/0014
   invalidatesOnData("search hits", function () {
     var hits = $("hits");
     if (hits && hits.firstChild) hits.replaceChildren();
@@ -6663,9 +6621,8 @@ function mountVaultGraph(root, data, deps) {
   var heatSig = "";
   /** @type {number | null} */
   var heatRz = null;
-  // github#72: the band is a tally over the notes on screen and the signature is what stops it
-  // being redrawn when nothing changed. A changed note set is exactly the case it cannot see.
-  invalidatesOnData("heatmap tally", function () { heatSig = ""; });
+  // github#72, design/0014
+  invalidatesOnData("heatmap tally", function () { heatSig = ""; if (heat) heatBuild(); });
 
   /** @param {string} s @returns {number} ms, or NaN */
   function heatParse(s) {
@@ -8313,14 +8270,7 @@ function mountVaultGraph(root, data, deps) {
 
   /* ------------------------------------------------------- live rebuild */
 
-  // github#72, decisions/0011
-  /**
-   * Past this many arrived, departed or re-placed notes, a diff is not an edit -- it is a sync,
-   * a bulk import or a folder move -- and the host is told to rebuild instead. The cascade's
-   * SETUP is what sets the number: two static plans and two roomOf() passes run once per diff,
-   * and their cost does not depend on how many notes changed, but the disc reading as "one
-   * thing arrived" does.
-   */
+  // github#72, design/0014
   var LIVE_MAX_CHANGED = 200;
 
   /** @type {{ data: VaultData, renames: Record<string, string> } | null} */
@@ -8329,24 +8279,18 @@ function mountVaultGraph(root, data, deps) {
   var liveTimer = null;
   var LIVE_IDLE_MS = 120;
 
-  /** anything that owns the frame loop, and so owns every position on screen */
   function liveBusy() { return !!(cascadeRun || anim || play); }
 
-  /**
-   * A note's PLACE depends on these and nothing else. `words` is deliberately absent: Obsidian
-   * saves the open note every couple of seconds and each save reaches the metadata cache, so a
-   * word count that entered the key would make typing a prose paragraph an endless cascade.
-   * @param {VaultNode} n
-   */
+  // github#72, design/0014 -- `words` is deliberately not in the key
+  /** @param {VaultNode} n */
   function placeKeyOf(n) {
     return n.label + "\t" + n.folder + "\t" + (n.sub || "") + "\t" + (n.dirs || []).join("/") +
            "\t" + (n.type || "") + "\t" + (n.tags || []).join(",") + "\t" + (n.created || "") +
            "\t" + (n.touched || "") + "\t" + n.deg + "\t" + (n.ghost ? "1" : "");
   }
 
+  // github#72, design/0014
   /**
-   * Every link weight, keyed by the two paths it joins. Two levels rather than one joined key,
-   * so no separator has to be a character a note path cannot hold.
    * @param {VaultData} src
    * @returns {Record<string, Record<string, number>>}
    */
@@ -8364,11 +8308,11 @@ function mountVaultGraph(root, data, deps) {
 
   /**
    * @typedef {Object} LiveDiff
-   * @property {string[]} added     paths present only in the new data
-   * @property {string[]} removed   paths present only in the old
-   * @property {string[]} replaced  paths whose place-deciding fields moved
-   * @property {boolean} links      any link weight changed
-   * @property {string[]} words     paths whose word count changed and nothing else
+   * @property {string[]} added
+   * @property {string[]} removed
+   * @property {string[]} replaced
+   * @property {boolean} links
+   * @property {string[]} words     changed word count and nothing else
    */
   /** @param {VaultData} was @param {VaultData} now @returns {LiveDiff} */
   function diffData(was, now) {
@@ -8400,24 +8344,10 @@ function mountVaultGraph(root, data, deps) {
     return d;
   }
 
+  // github#72, design/0014, decisions/0006, decisions/0011
   /**
-   * Take a new build of the vault and walk the disc to it, instead of tearing the mount down.
-   *
-   * THE RULE THAT MAKES THIS SAFE is not in this function: an arriving note is seated at alpha 0
-   * BEFORE either cascade endpoint is built, and `decisions/0006` already guarantees that a
-   * zero-weight member changes no plan, no row and no maxR. So endpoint A is the disc exactly as
-   * it is drawn, endpoint B is the new rest, and the ordinary cascade walks between them. There
-   * is no second animation path here, and there must not be one.
-   *
-   * Nothing is touched while a cascade, a tween or the timeline owns the frame loop: the data is
-   * held and re-offered once they are done. A second edit arriving in the meantime REPLACES the
-   * held one, so a burst of saves is one cascade after the burst rather than a queue of them --
-   * which is also what keeps `#67`'s rule true, that a fade schedule is decided once from
-   * numbers that stand still.
-   *
    * @param {VaultData} next
-   * @param {{ renames?: Record<string, string> }} [opts]  oldPath -> newPath, so a renamed note
-   *        keeps its id and takes the `#49` moves tween instead of dying and being reborn
+   * @param {{ renames?: Record<string, string> }} [opts]  oldPath -> newPath; github#49
    * @returns {LiveResult}
    */
   function applyData(next, opts) {
@@ -8459,8 +8389,7 @@ function mountVaultGraph(root, data, deps) {
       return { applied: false, reason: "too much changed", churn: churn, limit: LIVE_MAX_CHANGED };
     }
 
-    // Nothing that decides a position moved. Land the word counts, which no layout reads, and
-    // leave the disc alone -- this is the path a person typing spends all their time on.
+    // design/0014 -- the path a person typing spends all their time on
     if (!churn && !d.links) {
       /** @type {Record<string, number>} */
       var wordsOf = dict();
@@ -8477,9 +8406,7 @@ function mountVaultGraph(root, data, deps) {
     DATA = next;
     ingest(next, function (path) { return held[path]; });
 
-    // Put every surviving note back where it is DRAWN, not where the last plan wanted it, and
-    // seat every arrival at zero. A note at alpha 0 is teleported to its target on the first
-    // frame and fades in there, which is the path the timeline reveal already takes.
+    // decisions/0006 -- survivors back where they are DRAWN, arrivals seated at zero
     graph.forEachNode(function (id, a) {
       var p = posOf[a.path];
       if (p) graph.mergeNodeAttributes(id, { x: p.x, y: p.y });
@@ -8488,8 +8415,7 @@ function mountVaultGraph(root, data, deps) {
 
     onData.forEach(function (h) { attempt(h.fn); });
 
-    // decisions/0011: the note set changed, so the disc's extent genuinely moved and the new
-    // geometry lock is taken here, at rest, before either endpoint exists.
+    // decisions/0011
     hardRelayout(false, true, true);
 
     /** @type {Record<string, string> | null} */
@@ -8504,25 +8430,18 @@ function mountVaultGraph(root, data, deps) {
       moved++;
     });
 
-    attempt(placeLogo); attempt(heatBuild); attempt(buildLegend); attempt(buildStats);
+    attempt(placeLogo); attempt(buildLegend); attempt(buildStats);
     if (dateSpan) attempt(drawDateUI);
     cascade(null, { colToggle: true, movesFrom: movesFrom });
     return { applied: true, reason: "", added: d.added.length, removed: d.removed.length,
              replaced: d.replaced.length, moved: moved, cascaded: true };
   }
 
+  // github#72, design/0014
   /**
-   * Land one note's word count, addressed by PATH.
-   *
-   * github#72: the host reads word counts in the background, after the mount, and used to apply
-   * them with `graph.setNodeAttribute(String(i), ...)` -- the note's index in the build. That
-   * held only while a node's id WAS its index, which was true exactly until this file learned to
-   * rebuild: after one arrival, index i and id i are different notes, and every count still in
-   * flight lands on the wrong one. A path is what the host and the page actually agree on.
-   *
    * @param {string} path
    * @param {number} words
-   * @returns {boolean} false when the note is no longer in the graph -- deleted mid-read
+   * @returns {boolean}
    */
   function setWords(path, words) {
     var id = idOfPath[path];
@@ -9253,6 +9172,7 @@ function mountVaultGraph(root, data, deps) {
                     // github#3
                     relayout: function () { hardRelayout(false); },
                     // github#72
+                    data: function () { return DATA; },
                     invalidations: function () { return onData.map(function (h) { return h.name; }); },
                     liveState: function () {
                       return { pending: !!livePending, draining: liveTimer !== null,

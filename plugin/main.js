@@ -11,23 +11,11 @@ import LOGO_MASK_B64 from "b64:../assets/logo-mask.png";
 
 const VIEW_TYPE = "vault-graph-view";
 const ICON_ID = "vault-graph-disc";
-/**
- * github#72. How long the vault has to be quiet before the disc follows it.
- *
- * The floor is what a build costs, since a debounce shorter than that just queues builds: the
- * index and the edges come out of the metadata cache in under 80ms on a 10k vault. The ceiling
- * is what reads as "it noticed". Obsidian saves the open note every couple of seconds, so this
- * also decides how many cascades a burst of saves turns into -- one, because the timer restarts
- * on every event and only the last one fires.
- */
+// github#72, design/0014
 const LIVE_DEBOUNCE_MS = 1000;
 
-/**
- * An empty path -> path map with no prototype, so a note called "constructor" is just a key.
- * Object.create(null) is `any` to the type program, so the cast is laundered through unknown
- * once here rather than at each of the three call sites -- the same idiom as page.js's dict().
- * @returns {Record<string, string>}
- */
+// github#60
+/** @returns {Record<string, string>} */
 function pathMap() {
   /** @type {unknown} */
   const o = Object.create(null);
@@ -532,8 +520,7 @@ class VaultGraphView extends ItemView {
     this.dirtyPaths = new Set();
     this.liveBuilding = false;
     this.liveAgain = false;
-    /** what the last live rebuild did, for the harnesses to read
-     *  @type {import("../src/page.js").LiveResult | null} */
+    /** @type {import("../src/page.js").LiveResult | null} */
     this.lastLive = null;
   }
 
@@ -571,24 +558,12 @@ class VaultGraphView extends ItemView {
     this.liveAgain = false;
   }
 
-  /** The setting was toggled: off drops whatever was queued, on simply waits for the next edit. */
+  // github#72, design/0014
   liveSettingChanged() {
     if (!this.liveOn()) this.cancelLive();
   }
 
-  /**
-   * Wire the vault and the metadata cache to the disc.
-   *
-   * Subscribed unconditionally and gated inside the handler, rather than subscribed and
-   * unsubscribed as the setting flips: registerEvent's refs are released when the view closes,
-   * and a detach path would be a second lifetime to get wrong for the sake of skipping a
-   * function call that does nothing.
-   *
-   * `resolved` is the cache's own settle signal and is what a new wikilink arrives on; the four
-   * vault events carry the cases the cache never sees (a delete resolves nothing) and are also
-   * where a rename gives up its old path, which is the only way to tell a moved note from a
-   * deleted one plus a created one.
-   */
+  // github#72, design/0014
   subscribeLive() {
     const cache = this.app.metadataCache, vault = this.app.vault;
     this.registerEvent(cache.on("resolved", () => this.scheduleLive()));
@@ -598,8 +573,7 @@ class VaultGraphView extends ItemView {
     this.registerEvent(vault.on("rename", (file, oldPath) => {
       const to = file && file.path;
       if (to && oldPath) {
-        // A -> B then B -> C has to read as A -> C, or the id is handed to a path that no
-        // longer exists and the note dies and is reborn instead of moving.
+        // design/0014
         let from = oldPath;
         for (const k of Object.keys(this.pendingRenames)) {
           if (this.pendingRenames[k] === oldPath) { from = k; break; }
@@ -622,15 +596,7 @@ class VaultGraphView extends ItemView {
     }, LIVE_DEBOUNCE_MS);
   }
 
-  /**
-   * Build the vault again and hand it to the disc.
-   *
-   * Two things are deliberately NOT done here. The word counts of notes nobody touched are
-   * carried across rather than re-read -- they are 96% of a cold build (1.85s of 1.92s on a
-   * 10k vault) and no layout reads them. And nothing decides whether the disc should move:
-   * that is `applyData`'s call, because the page is what knows whether it is mid-cascade and
-   * what the last data actually was.
-   */
+  // github#72, design/0014 -- whether the disc MOVES is applyData's call, not this one's
   async liveRebuild() {
     const handle = this.handle;
     const api = handle && handle.api;
@@ -643,11 +609,9 @@ class VaultGraphView extends ItemView {
     this.pendingRenames = pathMap();
     try {
       const next = await buildData(this.app, this.plugin.settings);
-      if (this.handle !== handle || handle.api !== api) return;   // remounted underneath us
+      if (this.handle !== handle || handle.api !== api) return;   // github#62
 
-      // buildData leaves every count at 0 and fills them in afterwards, so a note nobody
-      // touched would arrive at zero words and lose the count it already had. A renamed note
-      // kept its content, so its count comes across from the path it used to have.
+      // github#58, design/0014
       /** @type {Map<string, number>} */
       const had = new Map();
       for (const n of (this.lastData ? this.lastData.nodes : [])) had.set(n.id, n.words || 0);
@@ -667,7 +631,7 @@ class VaultGraphView extends ItemView {
       const r = api.applyData(next, { renames: renames });
       this.lastLive = r;
       if (r && r.churn !== undefined) {
-        // A sync, an import or a folder move -- not an edit. Do what Refresh does.
+        // design/0014 -- a sync, an import or a folder move. Do what Refresh does.
         this.lastData = null;
         await this.render();
         return;
@@ -821,12 +785,7 @@ class VaultGraphView extends ItemView {
     this.mountMs = Math.round(performance.now() - t0);
 
     const handle = this.handle;
-    // github#58, github#72
-    // Word counts are read in the background, after the mount, and land one note at a time.
-    // They are addressed by PATH: until github#72 this passed `String(i)`, the note's index in
-    // the build, which was the same string as its graph id only because nothing had ever
-    // rebuilt the graph. A live rebuild breaks that on its first arrival -- index i and id i
-    // become different notes -- and every count still in flight would land on the wrong one.
+    // github#58; github#72, design/0014 -- by PATH, never by index
     void data.readWords((i, words) => {
       const node = data.nodes[i];
       if (!node) return;
@@ -1052,9 +1011,7 @@ class VaultGraphSettingTab extends PluginSettingTab {
   /** @param {ViewSetting} def @param {boolean} v */
   async applyView(def, v) {
     const view = await this.plugin.currentView();
-    // github#72: a host-owned setting has no page api to call. The view reads the setting on
-    // every cache event rather than subscribing and unsubscribing, so flipping it takes effect
-    // on the next edit with nothing to detach -- but a rebuild already queued has to be dropped.
+    // github#72, design/0014 -- a host-owned setting has no page api to call
     if (def.host) { if (view) view.liveSettingChanged(); return; }
     const api = view && view.handle && view.handle.api;
     if (api && def.api && api[def.api]) api[def.api](v);
