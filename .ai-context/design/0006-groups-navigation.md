@@ -187,10 +187,17 @@ list that already truncates 2 of its 36 sub-names at 100px. The sub-wedge on the
 carries the within-parent share. Parent-scaled sub-bars remain a thing that could be added,
 with a label; two silent denominators in one list is the thing that must not be.
 
-**A one-note folder is floored at 1px** rather than dropped, so every folder standing on the
+**A one-note folder is floored at 3px** rather than dropped, so every folder standing on the
 disc marks its row. Measured: exactly one full bar at the **217px** track on each fixture —
-basis 406 on the demo, 4358 on the 10k, 738 on the shape vault — and a thinnest of 1.0px on
+basis 406 on the demo, 4358 on the 10k, 738 on the shape vault — and a thinnest of 3.0px on
 all three.
+
+**The floor is 3px because a hovered row eats a pixel.** `.lg:hover` makes the row's
+transparent border visible, and its antialiasing costs the bar its leftmost pixel. At a 1px
+floor that left nothing: three of eighteen rows on the demo lost their bar on hover, every one
+at or under 0.74% of the basis. 2px leaves a single blended pixel; 3px still holds a solid
+mark. Wider bars lose a pixel too (217 to 215) and nobody can tell. `invariants.md` carries
+the sweep, the sampled pixel colours, and the wrong explanation that was measured away first.
 
 **The bars re-scale on a visibility toggle**, which is the direct consequence of *visible*
 being in the denominator and the opposite of what the first version did. Hide the largest

@@ -3320,7 +3320,7 @@ check("legend count bars scale to the largest visible folder", async (p) => {
       return { g: g, ct: lgr.querySelector('.ct').textContent,
                bar: lg.classList.contains('bar'),
                pct: declared.charAt(declared.length - 1) === '%' ? parseFloat(declared) : null,
-               applied: cs.backgroundSize.indexOf('max(1px,') === 0,
+               applied: cs.backgroundSize.indexOf('max(') === 0,
                size: cs.backgroundSize, drawn: cs.backgroundImage !== 'none',
                visible: lg.getAttribute('aria-pressed') === 'true',
                title: lgr.querySelector('.ct').getAttribute('title'),
@@ -3477,6 +3477,85 @@ check("legend count bars scale to the largest visible folder", async (p) => {
             `hiding the largest rescaled the rest=${rescaled}; ` +
             `title ${JSON.stringify(titled && titled.title)}` +
             (wrong.length ? `  <- ${wrong.join(" | ")}` : "")
+  };
+});
+
+// github#78, design/0006
+check("the thinnest count bar survives a hover in pixels, not just in CSS", async (p) => {
+  const row = await p.j(`(function(){
+    var rows = [].slice.call(document.querySelectorAll('#vg-legend .lg.bar'));
+    if (!rows.length) return null;
+    rows.sort(function (a, b) {
+      return parseFloat(getComputedStyle(a).getPropertyValue('--vg-share')) -
+             parseFloat(getComputedStyle(b).getPropertyValue('--vg-share'));
+    });
+    var lg = rows[0];
+    lg.setAttribute('data-floorprobe', '1');
+    // github#78 -- earlier checks open the whole tree, so this row can be below the fold;
+    // a clip outside the viewport captures nothing and reads as 0px painted.
+    lg.scrollIntoView({ block: 'center' });
+    var b = lg.getBoundingClientRect();
+    if (b.top < 0 || b.bottom > innerHeight) return { offscreen: true, g: lg.getAttribute('data-g') };
+    return { g: lg.getAttribute('data-g'),
+             col: getComputedStyle(lg).getPropertyValue('--vg-bar').trim(),
+             share: getComputedStyle(lg).getPropertyValue('--vg-share').trim(),
+             size: getComputedStyle(lg).backgroundSize,
+             x: b.left, y: b.top, w: b.width, h: b.height,
+             cx: Math.round(b.left + 40), cy: Math.round(b.top + b.height / 2) };
+  })()`);
+  if (!row) return { ok: true, detail: "no barred row on this shape -- nothing to floor" };
+  if (row.offscreen) {
+    return { ok: true, detail: `${row.g} would not scroll into view -- nothing measurable here` };
+  }
+
+  const painted = async () => {
+    const shot = await p.send("Page.captureScreenshot", {
+      format: "png", captureBeyondViewport: false,
+      clip: { x: row.x, y: row.y, width: row.w, height: row.h, scale: 1 }
+    });
+    return p.eval(`(async function(){
+      var img = new Image();
+      await new Promise(function (res, rej) { img.onload = res; img.onerror = rej;
+        img.src = "data:image/png;base64," + ${JSON.stringify(shot.data)}; });
+      var cv = document.createElement('canvas');
+      cv.width = img.naturalWidth; cv.height = img.naturalHeight;
+      var cx = cv.getContext('2d'); cx.drawImage(img, 0, 0);
+      var hex = ${JSON.stringify(row.col)}.replace('#','');
+      var tr = parseInt(hex.slice(0,2),16), tg = parseInt(hex.slice(2,4),16), tb = parseInt(hex.slice(4,6),16);
+      var best = 0;
+      for (var y = cv.height - 1; y >= Math.max(0, cv.height - 8); y--) {
+        var d = cx.getImageData(0, y, cv.width, 1).data, run = 0, rb = 0;
+        for (var x = 0; x < cv.width; x++) {
+          var s = Math.abs(d[x*4]-tr) + Math.abs(d[x*4+1]-tg) + Math.abs(d[x*4+2]-tb);
+          if (s < 90) { run++; if (run > rb) rb = run; } else { run = 0; }
+        }
+        if (rb > best) best = rb;
+      }
+      var el = document.querySelector('[data-floorprobe]');
+      return { px: best, hovered: el.matches(':hover') };
+    })()`);
+  };
+
+  await p.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: 5, y: 5, button: "none", clickCount: 0 });
+  await sleep(250);
+  const rest = await painted();
+  await p.send("Input.dispatchMouseEvent",
+               { type: "mouseMoved", x: row.cx, y: row.cy, button: "none", clickCount: 0 });
+  await sleep(350);
+  const over = await painted();
+  await p.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: 5, y: 5, button: "none", clickCount: 0 });
+  await sleep(150);
+  await p.eval(`(function(){ var e = document.querySelector('[data-floorprobe]');
+                if (e) e.removeAttribute('data-floorprobe'); })(); void 0`);
+
+  // github#78, design/0006
+  const ok = over.hovered === true && over.px >= 2 && rest.px >= 3;
+  return {
+    ok,
+    detail: `${row.g} at ${row.share} of the basis, size ${row.size}: ` +
+            `${rest.px}px painted at rest, ${over.px}px hovering (hovered=${over.hovered})` +
+            (over.hovered ? "" : "  <- NO :hover from the harness, so this asserted nothing") +
+            (over.px < 2 ? "  <- the floor cannot survive the hover border" : "")
   };
 });
 

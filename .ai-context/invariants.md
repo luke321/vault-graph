@@ -1017,7 +1017,7 @@ read as visibly different lengths.
              ct: lgr.querySelector(".ct").textContent,
              visible: lg.getAttribute("aria-pressed") === "true",
              declared: parseFloat(getComputedStyle(lg).getPropertyValue("--vg-share")),
-             applied: getComputedStyle(lg).backgroundSize.indexOf("max(1px,") === 0 };
+             applied: getComputedStyle(lg).backgroundSize.indexOf("max(") === 0 };
   }).filter(Boolean);
   var basis = rows.filter(function (r) { return r.count > 0 && r.visible && /^\d+$/.test(r.ct); })
                   .reduce(function (m, r) { return Math.max(m, r.count); }, 0);
@@ -1032,15 +1032,16 @@ read as visibly different lengths.
 Must be **empty**. Measured: **17 of 18 rows barred** on the demo (basis **406**, `05 - Meeting
 Notes`) and on the 10k (basis **4358**, same folder), **6 of 7** on the shape vault (basis
 **738**, `projects`). Exactly **one row at a full bar** on each, at the full **217px** track;
-thinnest **1.0px everywhere**, floored so a one-note folder still marks its row.
+thinnest **3.0px everywhere**, floored so a one-note folder still marks its row — and so
+that the mark survives a hover, which is why the floor is 3 and not 1 (below).
 
 **Hiding the largest folder promotes the runner-up to a full bar**, and that is asserted, not
 merely allowed: hide `05 - Meeting Notes` on the demo and the basis must become 200 with
 `01 - Projects` declaring 100%. Showing it again must restore the basis to 406.
 
 **`getComputedStyle` cannot resolve the `max()`, and that is what makes this checkable.**
-Chrome reports `background-size: max(1px, 49.261%) 2px` on a barred row and `auto` on a plain
-one, so a size still beginning `max(1px,` proves `.lg.bar` won the cascade rather than one of
+Chrome reports `background-size: max(3px, 49.261%) 2px` on a barred row and `auto` on a plain
+one, so a size still beginning `max(3px,` proves `.lg.bar` won the cascade rather than one of
 the `background` shorthands. The share is read from `--vg-share` beside it. Do not try to parse
 it with a regex written inside the check's template literal: an escaped open paren is consumed
 before the page sees it, the intended literal becomes a capturing group, and every row reads as
@@ -1051,7 +1052,7 @@ out of a screenshot and counting the run of bar-coloured pixels — Chrome decod
 through a canvas, since no computed style can answer it. Re-measured on the demo at the new
 basis: `05 - Meeting Notes` declares 100% and paints **217.00px exactly**, `01 - Projects`
 declares 49.26% and paints 107.00px against 106.90px wanted, `14 - Reading List` paints
-**1.00px** on the floor, and the **worst disagreement over all 17 rows is 0.83 CSS px** on
+**3.00px** on the floor, and the **worst disagreement over all 17 rows is 0.83 CSS px** on
 `11 - Clippings` — the antialiased tail of a 12.83px bar, which the pixel scan's colour
 tolerance drops.
 
@@ -1084,6 +1085,46 @@ rows, counts and alignment are untouched, only the bars go. On again: **17 barre
 ```bash
 node scripts/smoke.mjs --only "on by default"    # the default, the toggle, and what it removes
 ```
+
+### The floor is 3px because a hovered row eats a pixel
+
+`.lg:hover` turns the row's `1px solid transparent` border into a visible one, and that
+border's antialiasing costs the bar its leftmost pixel. A bar wide enough not to care never
+notices. **A floored bar is exactly the case that does.** Measured on the demo's thinnest row,
+`14 - Reading List` at 0.246% of the basis, painting the row and counting bar-coloured pixels:
+
+| floor | at rest | hovering | reads as |
+|---|---|---|---|
+| 1px | 1px | **0px** | gone |
+| 2px | 2px | 1px | one blended pixel |
+| **3px** | **3px** | **2px** | a solid mark |
+| 4px | 4px | 3px | a solid mark |
+
+So 3px is the smallest floor that still holds a mark under the pointer, and that is why it is
+3. At the 1px floor **three of eighteen rows on the demo lost their bar on hover** —
+`00 - Inbox`, `13 - Someday Maybe` and `14 - Reading List`, every row at or under 0.74% of the
+basis. Sampled in colour on `00 - Inbox`: at rest one pixel is the full `rgb(217, 89, 38)` at
+contrast 4.83 against the sidebar; hovering, the brightest is `rgb(140, 67, 37)`, a half blend
+at contrast 2.21.
+
+**Every wider bar loses about one pixel too and nobody can tell** — 217 to 215, 107 to 106,
+76 to 75. Only the floored ones matter.
+
+**It is not Obsidian's doing, and that was checked before the floor moved.** `.lg` is a
+`<button>`, the page never resets `box-shadow`, so Obsidian's own button shadow applies and
+roughly doubles on hover (white 9% to 16%, blur 0.5px to 1px, spread 0.5px), and inset shadows
+paint over a background image. Applying Obsidian's exact rest and hover shadows to the
+standalone page left the painted bar at **217px in all four states**. Wrong explanation,
+measured away rather than shipped.
+
+```bash
+node scripts/smoke.mjs --only "thinnest count bar"    # pixels, not CSS
+node scripts/obsidian-smoke.mjs --only "hover"        # the same row inside real Obsidian
+```
+
+A note on writing that check: `p.j` wraps its expression in `JSON.stringify`, so it returns
+`undefined` for an async IIFE. Anything that decodes a screenshot through a canvas has to go
+through `p.eval`, which awaits.
 
 ### The tooltip has to say which folder the bar is measured against
 

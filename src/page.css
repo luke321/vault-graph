@@ -180,12 +180,14 @@
      the row in the group's own colour. A background layer rather than a fifth grid cell
      because .nm is the only 1fr and already truncates; the row is one width on every row
      (219px measured) while .nm is not (122/117/141px), so the row is the honest track.
-     The 1px floor keeps a one-note folder visible. design/0006 */
+     The floor is 3px, measured: on hover the row gains a visible border whose
+     antialiasing eats a pixel, so 1px leaves nothing and 2px leaves one blend.
+     3px is the smallest floor that still holds a solid mark. design/0006 */
   .vault-graph .lg.bar {
     background-image: linear-gradient(var(--vg-bar), var(--vg-bar));
     background-repeat: no-repeat;
     background-position: 0 100%;
-    background-size: max(1px, var(--vg-share)) 2px;
+    background-size: max(3px, var(--vg-share)) 2px;
   }
   .vault-graph .lg .sw { width: 11px; height: 11px; border-radius: 50%; }
   .vault-graph .lg .sw.sw-in { transform: scale(0.6); }

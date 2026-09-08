@@ -410,7 +410,7 @@ range, not the file. Stale when `node scripts/code-map.mjs --check` fails.
 | 8698 | · · · · · · · · · · `byPath` |
 | 8847 | `destroy` |
 
-## `scripts/smoke.mjs` — 4310 lines, 7 sections, 55 functions, 87 checks
+## `scripts/smoke.mjs` — 4389 lines, 7 sections, 55 functions, 88 checks
 
 ### Sections
 
@@ -420,9 +420,9 @@ range, not the file. Stale when `node scripts/code-map.mjs --check` fails.
 | 73–675 | the checks |
 | 676–1469 | camera |
 | 1470–2950 | date range |
-| 2951–3798 | the hub |
-| 3799–4029 | the run |
-| 4030–4310 | which vaults, and why |
+| 2951–3877 | the hub |
+| 3878–4108 | the run |
+| 4109–4389 | which vaults, and why |
 
 ### Functions
 
@@ -468,21 +468,21 @@ range, not the file. Stale when `node scripts/code-map.mjs --check` fails.
 | 2907 | · `hiddenByDefault` |
 | 2953 | `topByDegree` |
 | 2960 | `pinN` |
-| 3489 | · `norm` |
-| 3570 | · `bars` |
-| 3571 | · `rows` |
-| 3624 | `pressKey` |
-| 3636 | `trailState` |
-| 3637 | `selectBySearch` |
-| 3646 | `hop` |
-| 3655 | `closeCard` |
-| 3656 | `stepBack` |
-| 3784 | `settle` |
-| 3801 | `runOne` |
-| 3988 | `killBrowser` |
-| 4106 | `resolveVaults` |
-| 4188 | `buildFor` |
-| 4202 | `main` |
+| 3568 | · `norm` |
+| 3649 | · `bars` |
+| 3650 | · `rows` |
+| 3703 | `pressKey` |
+| 3715 | `trailState` |
+| 3716 | `selectBySearch` |
+| 3725 | `hop` |
+| 3734 | `closeCard` |
+| 3735 | `stepBack` |
+| 3863 | `settle` |
+| 3880 | `runOne` |
+| 4067 | `killBrowser` |
+| 4185 | `resolveVaults` |
+| 4267 | `buildFor` |
+| 4281 | `main` |
 
 ### Checks
 
@@ -566,12 +566,13 @@ range, not the file. Stale when `node scripts/code-map.mjs --check` fails.
 | 3247 | the (unlinked) row opens its menu with no notes in it |
 | 3294 | the (unlinked) row's count is parenthesised while kept separate, plain once joined |
 | 3311 | legend count bars scale to the largest visible folder |
-| 3484 | the count bar follows its own swatch across a theme flip |
-| 3562 | count bars are on by default, and the settings toggle removes every bar |
-| 3614 | focus web stays above dim notes |
-| 3662 | only a hop lengthens the trail |
-| 3681 | stepping back never re-collects a hop |
-| 3698 | a crumb click truncates the trail at the crumb |
-| 3713 | the trail is not layout |
-| 3736 | the page claims no keyboard shortcut |
-| 3759 | re-selecting the same note keeps the trail, and a filter does not clear it |
+| 3484 | the thinnest count bar survives a hover in pixels, not just in CSS |
+| 3563 | the count bar follows its own swatch across a theme flip |
+| 3641 | count bars are on by default, and the settings toggle removes every bar |
+| 3693 | focus web stays above dim notes |
+| 3741 | only a hop lengthens the trail |
+| 3760 | stepping back never re-collects a hop |
+| 3777 | a crumb click truncates the trail at the crumb |
+| 3792 | the trail is not layout |
+| 3815 | the page claims no keyboard shortcut |
+| 3838 | re-selecting the same note keeps the trail, and a filter does not clear it |
