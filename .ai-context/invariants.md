@@ -3142,6 +3142,20 @@ Coverage now runs at both, and in the plugin as well:
   tab reopened with no graph. Measured 2026-09-08 on the demo fixture: 216 swatches all previewed
   in the first three, **216 flat squares and zero empty frames** in the last.
 
+**A folder's chevron must not be able to move its swatches.** In the Obsidian tab the chevron
+and the eye sit in the same flex container as the twelve swatches, so a folder with subfolders
+had less room than one without and its wrap point moved: measured on the real tab, left edges
+of 402 / 440 / 478 px and 11 / 10 / 9 swatches on the first line. At the old 18 px dots all
+twelve fitted on one line and it never showed. The swatches have their own fixed six-column
+grid now, and the check asserts every row agrees: **all at x=536, 224 px, 12 swatches over 2
+lines of 6** across 18 folders.
+
+**Measure the swatches, not their wrapper.** The first version of that check measured the grid
+element, and a wrapper set to `display: contents` has no box of its own -- every row reported
+`left=0 width=0` and the check passed on a layout that was visibly broken. It reads the
+swatches' own rectangles now, and reinstating the old flex layout reproduces the reported
+numbers exactly.
+
 **The settings tab keeps no api of its own.** It is passed one per render and stores nothing, so
 a tab cannot go on drawing previews from a graph the user has closed. The Obsidian check asserts
 the field is *absent*, not merely unused, because an unused field is one edit away from a used
