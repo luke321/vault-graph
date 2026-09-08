@@ -3109,11 +3109,11 @@ appears on exactly `g3, g4, g9` for light and on nothing for dark.
 
 | | before | after |
 |---|---|---|
-| swatch | 23x23 px (menu), 15.4 px (settings, desktop) | **34x42 px everywhere** |
-| context menu | 176x122 px | **176x233 px** -- the same width it always was |
-| menu columns | 6 | **4** |
-| settings-body columns | 12 | **6**, auto-filled to the panel's width |
-| settings row height | ~20 px | **113 px** |
+| swatch | 23x23 px (menu), 15.4 px (settings, desktop) | **50x42 px everywhere** |
+| context menu | 176x122 px | **176x279 px** -- the same width it always was |
+| menu columns | 6 | **3** |
+| settings-body columns | 12 | **4** |
+| settings row height | ~20 px | **159 px** |
 | settings scroll, 18 folders | ~360 px | **2025 px** |
 | circles per swatch | 0 | **20** |
 | settings panel DOM nodes | 396 | **5148** |
@@ -3141,6 +3141,20 @@ Coverage now runs at both, and in the plugin as well:
   graph open, a colour pick, a live theme change, the graph torn down with the tab open, and the
   tab reopened with no graph. Measured 2026-09-08 on the demo fixture: 216 swatches all previewed
   in the first three, **216 flat squares and zero empty frames** in the last.
+
+**The chip has to be big enough to read, and 34 px was not.** Twenty dots in a 32x40 drawing
+leaves about 2.4 px between them and nothing reads at a glance. The drawing is **48x40** and the
+chip **50x42**, giving roughly 5 px of gap, which is what lets the 0.35 px sample read as a
+smudge beside an 8 px dot rather than as noise. Measured before changing anything, because the
+obvious guess was wrong: Obsidian's `setting-item-control` is a fixed **369 px at both a 1600 px
+and a 900 px window**, and the chip measured exactly 34x42 in both. They were never compressed,
+only small. The cost is height -- four per line instead of six, three lines instead of two, and
+a settings row **113 -> 159 px**.
+
+**The chosen swatch is marked with an outline, not a shadow.** Two stacked box-shadows sat on
+top of Obsidian's own button shadow and read as a blob rather than an edge. An `outline` at
+`outline-offset: 2px` follows the 5 px radius, reads unambiguously as a rectangle, and leaves
+the host's own button shading alone instead of replacing it.
 
 **A folder's chevron must not be able to move its swatches.** In the Obsidian tab the chevron
 and the eye sit in the same flex container as the twelve swatches, so a folder with subfolders
