@@ -5225,13 +5225,13 @@ function mountVaultGraph(root, data, deps) {
 
   // github#77, design/0013
   var PREVIEW_R_PX = [0.35, 0.65, 1.38, 2.19, 4.06];
-  var PREVIEW_HALF_W = 32;
+  var PREVIEW_W = 32;
   var PREVIEW_H = 40;
   var PREVIEW_ROW_H = PREVIEW_H / SUB_SLOTS;
   var PREVIEW_CX = (function () {
     var i, wide = 0;
     for (i = 0; i < PREVIEW_R_PX.length; i++) wide += 2 * PREVIEW_R_PX[i];
-    var gap = (PREVIEW_HALF_W - wide) / (PREVIEW_R_PX.length + 1);
+    var gap = (PREVIEW_W - wide) / (PREVIEW_R_PX.length + 1);
     /** @type {number[]} */
     var out = [];
     var x = gap;
@@ -5811,24 +5811,23 @@ function mountVaultGraph(root, data, deps) {
     var hit = previewCache[key];
     if (hit !== undefined) return hit;
     var L = previewLadder(key, "l"), D = previewLadder(key, "d");
-    var W = PREVIEW_HALF_W * 2, marks = "";
+    var marks = "", vars = "";
     for (var r = 0; r < SUB_SLOTS; r++) {
       var cy = PREVIEW_ROW_H * r + PREVIEW_ROW_H / 2;
-      var fl = r === 0 ? "" : (L[r - 1] || "");
-      var fd = r === 0 ? "" : (D[r - 1] || "");
+      var cls = r === 0 ? "d" : "t" + r;
+      if (r > 0) {
+        vars += "--k" + r + ":" + (L[r - 1] || "currentColor") + ";" +
+                "--k" + r + "d:" + (D[r - 1] || "currentColor") + ";";
+      }
       for (var c = 0; c < PREVIEW_R_PX.length; c++) {
-        var rad = PREVIEW_R_PX[c], cx = PREVIEW_CX[c];
-        marks += '<circle class="' + (fl ? "t-l" : "d-l") + '" cx="' + cx + '" cy="' + cy +
-                 '" r="' + rad + '"' + (fl ? ' fill="' + fl + '"' : "") + '/>' +
-                 '<circle class="' + (fd ? "t-d" : "d-d") + '" cx="' + (cx + PREVIEW_HALF_W) +
-                 '" cy="' + cy + '" r="' + rad + '"' + (fd ? ' fill="' + fd + '"' : "") + '/>';
+        marks += '<circle class="' + cls + '" cx="' + PREVIEW_CX[c] + '" cy="' + cy +
+                 '" r="' + PREVIEW_R_PX[c] + '"/>';
       }
     }
-    var html = '<svg class="prev" width="' + W + '" height="' + PREVIEW_H +
-           '" viewBox="0 0 ' + W + ' ' + PREVIEW_H + '" aria-hidden="true" focusable="false">' +
-           '<rect class="gnd-l" x="0" y="0" width="' + PREVIEW_HALF_W +
-           '" height="' + PREVIEW_H + '"/>' +
-           '<rect class="gnd-d" x="' + PREVIEW_HALF_W + '" y="0" width="' + PREVIEW_HALF_W +
+    var html = '<svg class="prev" width="' + PREVIEW_W + '" height="' + PREVIEW_H +
+           '" viewBox="0 0 ' + PREVIEW_W + ' ' + PREVIEW_H +
+           '" style="' + vars + '" aria-hidden="true" focusable="false">' +
+           '<rect class="gnd" x="0" y="0" width="' + PREVIEW_W +
            '" height="' + PREVIEW_H + '"/>' + marks + '</svg>';
     previewCache[key] = html;
     return html;

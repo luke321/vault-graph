@@ -4741,56 +4741,65 @@ check("the picker's contrast numbers are the harness's", async (p) => {
                `${want.light.under3.join(",") || "none"}, dark ${want.dark.under3.join(",") || "none"}` };
 });
 
-check("the picker shows both grounds whatever the theme", async (p) => {
+check("the picker repaints itself on a theme change, with no rebuild", async (p) => {
   const r = await p.j(`(function(){
     var root = document.getElementById("vg-app");
     var was = root.getAttribute("data-theme");
-    var read = function () {
-      var row = document.querySelector('.lg[data-g]');
-      var rect = row.getBoundingClientRect();
-      row.dispatchEvent(new MouseEvent("contextmenu", {
-        bubbles: true, clientX: rect.left + 5, clientY: rect.top + 5 }));
-      var menu = document.querySelector('[id$="ctxmenu"]');
-      var sw = menu.querySelector('.swatch[data-key="g4"]');
-      var f = function (sel) {
-        var el = sw.querySelector(sel);
-        return el ? getComputedStyle(el).fill : null;
-      };
-      var out = { gl: f(".gnd-l"), gd: f(".gnd-d"), bl: f(".d-l"), bd: f(".d-d"),
-                  tl: f(".t-l"), td: f(".t-d") };
-      menu.hidden = true;
-      return out;
+
+    var row = document.querySelector('.lg[data-g]');
+    var rect = row.getBoundingClientRect();
+    row.dispatchEvent(new MouseEvent("contextmenu", {
+      bubbles: true, clientX: rect.left + 5, clientY: rect.top + 5 }));
+    var menu = document.querySelector('[id$="ctxmenu"]');
+    var sw = menu.querySelector('.swatch[data-key="g4"]');
+    var markup = sw.innerHTML;
+
+    var f = function (sel) {
+      var el = sw.querySelector(sel);
+      return el ? getComputedStyle(el).fill : null;
     };
+    var read = function () {
+      return { gnd: f(".gnd"), base: f(".d"), t1: f(".t1"), t3: f(".t3"),
+               grounds: sw.querySelectorAll(".gnd").length };
+    };
+
     var seen = {};
     ["dark", "light"].forEach(function (t) {
       root.setAttribute("data-theme", t);
-      __vg.readTheme();
       seen[t] = read();
     });
+    // the SAME nodes must have repainted -- nothing re-rendered them
+    var sameMarkup = sw.innerHTML === markup;
+    menu.hidden = true;
     if (was) root.setAttribute("data-theme", was); else root.removeAttribute("data-theme");
     __vg.readTheme();
-    return seen;
+    return { dark: seen.dark, light: seen.light, sameMarkup: sameMarkup };
   })()`);
   const rgb = (h) => {
     const n = h.replace("#", "");
     return `rgb(${parseInt(n.slice(0, 2), 16)}, ${parseInt(n.slice(2, 4), 16)}, ${parseInt(n.slice(4, 6), 16)})`;
   };
-  const wantGl = rgb("#fcfcfb"), wantGd = rgb("#1a1a19");
-  const wantBl = rgb("#eda100"), wantBd = rgb("#c98500");
+  const want = {
+    light: { gnd: rgb("#fcfcfb"), base: rgb("#eda100") },
+    dark: { gnd: rgb("#1a1a19"), base: rgb("#c98500") },
+  };
   const bad = [];
-  for (const t of ["dark", "light"]) {
+  for (const t of ["light", "dark"]) {
     const s = r[t];
-    if (s.gl !== wantGl) bad.push(`${t}: light ground ${s.gl} not ${wantGl}`);
-    if (s.gd !== wantGd) bad.push(`${t}: dark ground ${s.gd} not ${wantGd}`);
-    if (s.bl !== wantBl) bad.push(`${t}: g4 light dot ${s.bl} not ${wantBl}`);
-    if (s.bd !== wantBd) bad.push(`${t}: g4 dark dot ${s.bd} not ${wantBd}`);
-    if (!s.tl || s.tl === s.bl) bad.push(`${t}: light tint row did not differ from the base`);
-    if (!s.td || s.td === s.bd) bad.push(`${t}: dark tint row did not differ from the base`);
+    if (s.grounds !== 1) bad.push(`${t}: ${s.grounds} grounds drawn, want exactly 1`);
+    if (s.gnd !== want[t].gnd) bad.push(`${t}: ground ${s.gnd} not ${want[t].gnd}`);
+    if (s.base !== want[t].base) bad.push(`${t}: g4 base dot ${s.base} not ${want[t].base}`);
+    if (!s.t1 || s.t1 === s.base) bad.push(`${t}: tint row 1 did not differ from the base`);
+    if (!s.t3 || s.t3 === s.t1) bad.push(`${t}: tint row 3 matched row 1`);
   }
+  if (r.light.gnd === r.dark.gnd) bad.push("the ground did not change with the theme");
+  if (r.light.t1 === r.dark.t1) bad.push("the tint ladder did not change with the theme");
+  if (!r.sameMarkup) bad.push("the markup changed -- the swatch was rebuilt, not repainted");
   return { ok: bad.length === 0,
            detail: bad.length ? bad.slice(0, 3).join("; ")
-             : `both grounds and both g4 values identical in a dark page and a light one ` +
-               `(${wantGl} / ${wantGd}, dots ${wantBl} / ${wantBd}), tint rows differ from the base in both` };
+             : `one ground, following the theme: ${r.light.gnd} -> ${r.dark.gnd}, g4 ` +
+               `${r.light.base} -> ${r.dark.base}, first tint ${r.light.t1} -> ${r.dark.t1}; ` +
+               `identical markup throughout, so nothing rebuilt it` };
 });
 
 check("the picker draws the disc's own dot sizes", async (p) => {

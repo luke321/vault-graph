@@ -774,13 +774,15 @@ try {
       "   var bg = getComputedStyle(s).backgroundColor;" +
       "   if (bg && bg !== 'rgba(0, 0, 0, 0)' && bg !== 'transparent') flat++; else empty++;" +
       " });" +
-      " var one = sws[0], gl = one && one.querySelector('.gnd-l'), gd = one && one.querySelector('.gnd-d');" +
+      " var one = sws[0], gnd = one && one.querySelector('.gnd');" +
       " var scope = el.querySelector('.vault-graph.vg-tokens');" +
       " var over = 0;" +
       " if (scope) over = Math.max(0, scope.scrollWidth - scope.clientWidth);" +
       " return { open: true, sws: sws.length, previews: prev.length, flat: flat, empty: empty," +
-      "          groundL: gl ? getComputedStyle(gl).fill : null," +
-      "          groundD: gd ? getComputedStyle(gd).fill : null," +
+      "          ground: gnd ? getComputedStyle(gnd).fill : null," +
+      "          grounds: one ? one.querySelectorAll('.gnd').length : 0," +
+      "          bodyTheme: document.body.classList.contains('theme-light') ? 'light' : 'dark'," +
+      "          scopeTheme: scope ? scope.getAttribute('data-theme') : null," +
       "          overflowX: over, keptApi: Object.prototype.hasOwnProperty.call(" + TAB + " || {}, 'api') };" +
       "})()";
     const openTab = async () => {
@@ -824,16 +826,21 @@ try {
       : "tab did not open";
     const good = (s, wantPreviews) => s.open && s.sws > 0 && s.empty === 0 && s.overflowX === 0 &&
       (wantPreviews ? s.previews === s.sws : true);
-    const bothGrounds = (s) => s.groundL === "rgb(252, 252, 251)" && s.groundD === "rgb(26, 26, 25)";
-    const ok = good(withGraph, true) && bothGrounds(withGraph) &&
-               good(afterPick, true) && good(afterTheme, true) && bothGrounds(afterTheme) &&
+    const lightGround = "rgb(252, 252, 251)", darkGround = "rgb(26, 26, 25)";
+    const oneGround = (s) => s.grounds === 1 && (s.ground === lightGround || s.ground === darkGround);
+    const ok = good(withGraph, true) && oneGround(withGraph) &&
+               good(afterPick, true) && good(afterTheme, true) && oneGround(afterTheme) &&
+               afterTheme.ground !== withGraph.ground &&
                good(noGraph, false) && noGraph.previews === 0 &&
                !withGraph.keptApi && !noGraph.keptApi;
     report(ok,
       "the settings tab's colour picker survives every host state, and keeps no handle on a closed graph",
       "graph open: " + say(withGraph) + "; after a pick: " + say(afterPick) +
-      "; after a live theme change: " + say(afterTheme) + " (grounds " +
-      (bothGrounds(afterTheme) ? "both still drawn" : "WRONG") + ")" +
+      "; after a live theme change: " + say(afterTheme) + " (ground " +
+      withGraph.ground + " -> " + afterTheme.ground +
+      (afterTheme.ground !== withGraph.ground ? ", followed" : ", DID NOT FOLLOW") + ")" +
+      "; body/scope after the flip: " + afterTheme.bodyTheme + "/" + afterTheme.scopeTheme +
+      " (was " + withGraph.bodyTheme + "/" + withGraph.scopeTheme + ")" +
       "; graph torn down and the tab reopened: " + say(noGraph) +
       "; tab retains an api field: " + (withGraph.keptApi || noGraph.keptApi ? "YES" : "no"));
   }

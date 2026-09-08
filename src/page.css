@@ -345,35 +345,45 @@
      padding and a scrollbar, and four fixed columns overflowed it, putting the
      twelfth slot behind a horizontal scrollbar. */
   .vault-graph #vg-setbody .sws {
-    display: grid; grid-template-columns: repeat(auto-fill, 66px); gap: 4px;
+    display: grid; grid-template-columns: repeat(auto-fill, 34px); gap: 4px;
     justify-content: start;
   }
-  /* github#77 -- a swatch is the dots the slot will draw, on both grounds at
-     once. The <svg> is 1 unit to 1 CSS pixel and must never be scaled, or the
-     radii stop being the ones the disc draws. */
+  /* github#77 -- a swatch is the dots the slot will draw, on the ground it will
+     draw them on. The <svg> is 1 unit to 1 CSS pixel and must never be scaled,
+     or the radii stop being the ones the disc draws. Every colour in it comes
+     from a token, so a theme change repaints it with no rebuild. */
   .vault-graph .swatch {
-    width: 66px; height: 42px; padding: 0; cursor: pointer; border-radius: 5px;
+    width: 34px; height: 42px; padding: 0; cursor: pointer; border-radius: 5px;
     border: 1px solid var(--border); line-height: 0; flex: 0 0 auto;
   }
   .vault-graph .swatch .prev {
-    width: 64px; height: 40px; display: block; border-radius: 4px;
+    width: 32px; height: 40px; display: block; border-radius: 4px;
   }
-  .vault-graph .swatch .gnd-l { fill: var(--surface-1-l); }
-  .vault-graph .swatch .gnd-d { fill: var(--surface-1-d); }
-  .vault-graph .swatch .d-l { fill: var(--sl); }
-  .vault-graph .swatch .d-d { fill: var(--sd); }
-  .vault-graph .swatch.vg-g1  { --sl: var(--g1-l);  --sd: var(--g1-d); background: var(--g1); }
-  .vault-graph .swatch.vg-g2  { --sl: var(--g2-l);  --sd: var(--g2-d); background: var(--g2); }
-  .vault-graph .swatch.vg-g3  { --sl: var(--g3-l);  --sd: var(--g3-d); background: var(--g3); }
-  .vault-graph .swatch.vg-g4  { --sl: var(--g4-l);  --sd: var(--g4-d); background: var(--g4); }
-  .vault-graph .swatch.vg-g5  { --sl: var(--g5-l);  --sd: var(--g5-d); background: var(--g5); }
-  .vault-graph .swatch.vg-g6  { --sl: var(--g6-l);  --sd: var(--g6-d); background: var(--g6); }
-  .vault-graph .swatch.vg-g7  { --sl: var(--g7-l);  --sd: var(--g7-d); background: var(--g7); }
-  .vault-graph .swatch.vg-g8  { --sl: var(--g8-l);  --sd: var(--g8-d); background: var(--g8); }
-  .vault-graph .swatch.vg-g9  { --sl: var(--g9-l);  --sd: var(--g9-d); background: var(--g9); }
-  .vault-graph .swatch.vg-g10 { --sl: var(--g10-l); --sd: var(--g10-d); background: var(--g10); }
-  .vault-graph .swatch.vg-g11 { --sl: var(--g11-l); --sd: var(--g11-d); background: var(--g11); }
-  .vault-graph .swatch.vg-g12 { --sl: var(--g12-l); --sd: var(--g12-d); background: var(--g12); }
+  .vault-graph .swatch .gnd { fill: var(--surface-1); }
+  .vault-graph .swatch .d  { fill: var(--dot); }
+  .vault-graph .swatch .t1 { fill: var(--k1); }
+  .vault-graph .swatch .t2 { fill: var(--k2); }
+  .vault-graph .swatch .t3 { fill: var(--k3); }
+  @media (prefers-color-scheme: dark) {
+    .vault-graph:not([data-theme="light"]) .swatch .t1 { fill: var(--k1d); }
+    .vault-graph:not([data-theme="light"]) .swatch .t2 { fill: var(--k2d); }
+    .vault-graph:not([data-theme="light"]) .swatch .t3 { fill: var(--k3d); }
+  }
+  .vault-graph[data-theme="dark"] .swatch .t1 { fill: var(--k1d); }
+  .vault-graph[data-theme="dark"] .swatch .t2 { fill: var(--k2d); }
+  .vault-graph[data-theme="dark"] .swatch .t3 { fill: var(--k3d); }
+  .vault-graph .swatch.vg-g1  { --dot: var(--g1); background: var(--g1); }
+  .vault-graph .swatch.vg-g2  { --dot: var(--g2); background: var(--g2); }
+  .vault-graph .swatch.vg-g3  { --dot: var(--g3); background: var(--g3); }
+  .vault-graph .swatch.vg-g4  { --dot: var(--g4); background: var(--g4); }
+  .vault-graph .swatch.vg-g5  { --dot: var(--g5); background: var(--g5); }
+  .vault-graph .swatch.vg-g6  { --dot: var(--g6); background: var(--g6); }
+  .vault-graph .swatch.vg-g7  { --dot: var(--g7); background: var(--g7); }
+  .vault-graph .swatch.vg-g8  { --dot: var(--g8); background: var(--g8); }
+  .vault-graph .swatch.vg-g9  { --dot: var(--g9); background: var(--g9); }
+  .vault-graph .swatch.vg-g10 { --dot: var(--g10); background: var(--g10); }
+  .vault-graph .swatch.vg-g11 { --dot: var(--g11); background: var(--g11); }
+  .vault-graph .swatch.vg-g12 { --dot: var(--g12); background: var(--g12); }
 
   .vault-graph.vg-tokens {
     display: block; height: auto; overflow: visible; position: static;
@@ -723,13 +733,13 @@
   .vault-graph #vg-democursor .finger { display: none; }
 
   .vault-graph .ctxmenu {
-    position: absolute; z-index: 9; width: 226px;
+    position: absolute; z-index: 9; width: 176px;
     background: var(--surface-2); border: 1px solid var(--border-strong);
     border-radius: 8px; padding: 8px; box-shadow: 0 8px 28px rgba(0,0,0,.22);
   }
   /* github#77 */
   .vault-graph .ctxmenu .sws {
-    display: grid; grid-template-columns: repeat(3, max-content); gap: 4px;
+    display: grid; grid-template-columns: repeat(4, max-content); gap: 4px;
     margin-bottom: 6px; justify-content: center;
   }
   .vault-graph .ctxmenu .auto { width: 100%; }

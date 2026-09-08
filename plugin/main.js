@@ -1164,11 +1164,23 @@ class VaultGraphSettingTab extends PluginSettingTab {
     row.settingEl.addClass("vg-colour-row");
     const scope = row.settingEl.createDiv({ cls: ["vault-graph", "vg-tokens"] });
 
-    scope.setAttribute("data-theme",
-      activeDocument.body.classList.contains("theme-light") ? "light" : "dark");
-
     this.scope = scope;
+    this.syncScopeTheme(false);
+    // github#77
+    this.plugin.registerEvent(
+      this.app.workspace.on("css-change", () => this.syncScopeTheme(true)));
     this.redrawColours();
+  }
+
+  // github#77
+  syncScopeTheme(defer) {
+    if (defer) {
+      window.requestAnimationFrame(() => this.syncScopeTheme(false));
+      return;
+    }
+    if (!this.scope) return;
+    this.scope.setAttribute("data-theme",
+      activeDocument.body.classList.contains("theme-light") ? "light" : "dark");
   }
 
   redrawColours() {
