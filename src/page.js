@@ -653,6 +653,24 @@ function mountVaultGraph(root, data, deps) {
   var groupAutoSlot = dict();
   /** @type {Record<string, string[]>} */
   var order = {};
+  // github#71 -- the order the wedges are DRAWN in may leave name order (a file-explorer spec,
+  // or size); the order the colour slots are handed out in never does. Keeping the two apart is
+  // what lets a wedge move to a new bearing and keep its hue. See buildColors.
+  /** @type {Record<string, string[]>} */
+  var slotOrder = {};
+
+  // github#3 -- archives first, then the bracketed pseudo-groups, then real folders, unlinked
+  // last. This rank is the OUTER key of every group sort; nothing reorders across it.
+  /** @param {string} s */
+  function groupRank(s) {
+    if (s === UNLINKED) return 3;
+    var c = s.charAt(0);
+    return c === "_" ? 0 : c === "(" ? 1 : 2;
+  }
+  /** @param {string} a @param {string} b */
+  function byGroupName(a, b) {
+    return groupRank(a) - groupRank(b) || a.localeCompare(b, undefined, { numeric: true });
+  }
 
   /** @returns {Record<string, number>} group -> note count, for the current dim */
   function computeOrder() {
@@ -672,16 +690,10 @@ function mountVaultGraph(root, data, deps) {
       if (count[f] === undefined) count[f] = 0;
     });
     if (count[UNLINKED] === undefined) count[UNLINKED] = 0;
-    var names = Object.keys(count).sort(function (a, b) {
-      // github#3
-      /** @param {string} s */
-      var rank = function (s) {
-        if (s === UNLINKED) return 3;
-        var c = s.charAt(0);
-        return c === "_" ? 0 : c === "(" ? 1 : 2;
-      };
-      return rank(a) - rank(b) || a.localeCompare(b, undefined, { numeric: true });
-    });
+    var names = Object.keys(count).sort(byGroupName);
+    // github#71 -- a separate copy, not the same array: the draw order is re-sorted in place
+    // below once it leaves name order, and the slot order must not follow it.
+    slotOrder[state.dim] = names.slice();
     order[state.dim] = names;
     return count;
   }
@@ -694,7 +706,12 @@ function mountVaultGraph(root, data, deps) {
   function buildColors() {
     groupColor = dict();
 
-    var names = order[state.dim] || [];
+    // github#71, design/0004 -- SLOTS COME FROM THE NAME ORDER, NEVER THE DRAW ORDER. The
+    // automatic slot is `auto++ % SLOT_COUNT`, i.e. a group's position in the array it is
+    // walked in, so walking the draw order here would repaint the whole disc the moment the
+    // wedges were laid out in anything but name order. Under "name" the two arrays are equal
+    // and this is byte-identical to what it replaced.
+    var names = slotOrder[state.dim] || order[state.dim] || [];
 
     /** @type {SlotMap} */
     var byFolder = state.dim === "folder" ? folderColors : dict();
