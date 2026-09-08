@@ -2,9 +2,9 @@
 
 **Status** as-built · 2026-09-08 · github#79
 
-> A 96px schematic left of the pan button, disabled while the whole disc is in view. It says
-> where the frame is and fits when clicked. Why it reads the plan and never a node, why its
-> footprint is never clamped, and what a persistent control costs the resting page.
+> A 96px schematic left of the pan button, absent entirely while the whole disc is in view. It
+> says where the frame is and fits when clicked. Why it reads the plan and never a node, and why
+> its footprint is never clamped.
 
 ## What was missing
 
@@ -39,18 +39,17 @@ in each band and already carries `INNER_SCALE`, so the outlines sit where the do
 Note that `drawWedgeDebug`'s planned inner band omits `INNER_SCALE` and then overwrites itself
 from measured dots — the overview uses the lock, not that.
 
-## It disables itself, and the test is containment rather than the ratio
+## It hides itself, and the test is containment rather than the ratio
 
 github#79 proposed the camera ratio against `fitRatio()`. That is right for a centred camera and
 wrong for a panned one: **a camera panned at exactly the fit ratio crops the disc too**, and the
-ratio test would leave the control dark in precisely the panned-away case the feature exists
-for. So the condition is containment — is the circle of radius `lastMaxR * UNIT` inside the
-footprint.
+ratio test would hide the tile in precisely the panned-away case the feature exists for. So the
+condition is containment — is the circle of radius `lastMaxR * UNIT` inside the footprint.
 
 **The LIVE radius, not the locked one.** `fit()` frames the live disc through `fitRatio()`, so
-after filtering down and fitting, nothing is cropped and the control has no business being lit.
-Using `geomLock.maxR` would leave a big locked circle poking out of a small frame and light it on
-a resting, filtered page.
+after filtering down and fitting, nothing is cropped and the tile has no business appearing. Using
+`geomLock.maxR` would leave a big locked circle poking out of a small frame and show the tile on a
+resting, filtered page.
 
 That choice buys a property worth stating: because `fitRatio()` carries the same `live / locked`
 factor the radius does, **the margin `fit()` leaves is the same at every filter level**. Measured
@@ -61,7 +60,7 @@ There is no hysteresis and none is needed at that distance from the boundary.
 
 The one case where the margin can vanish is `fitRatio()`'s own clamp: `live / locked` is held to
 1.35, so a live disc more than 35% larger than the locked one cannot be framed by Fit at all, and
-the control then correctly stays enabled.
+the tile then correctly stays up.
 
 ## The footprint is never clamped, and that is the hard part
 
@@ -73,7 +72,6 @@ The canvas clips it; the code never does. Three cases, one code path:
 
 | | what is drawn |
 |---|---|
-| the whole disc in frame | no rectangle at all, and the control is disabled |
 | zoomed in | a small rectangle inside the rings, tinted |
 | larger than the disc, partly off | edges cross the tile, the near side tinted, the far edges genuinely absent |
 | entirely off the disc | no rectangle at all; a 6px chevron on the tile's rim, pointing at the frame |
@@ -107,15 +105,12 @@ trying to read your place in it is worse than one that runs off its own edge.
 `design/0010`'s band guard is the precedent, and the rule is the same: **a still camera draws
 nothing**. `ovSync` runs from `afterRender` after `heatDraw`, and:
 
-- disable the control when the disc fits, enable it when it does not; either way, build the
-  signature and compare. Equal → return without touching the canvas.
-- the schematic is drawn in both states. The **footprint** is drawn only while cropped, so at rest
-  the drawing is the rings and the sectors, dimmed by CSS, and nothing else.
+- not cropped → hide the tile and return. No string built, no canvas touched.
+- cropped → build the signature and compare. Equal → return.
 
 The signature is **the drawing's own inputs quantised to what moves a pixel**: the rect to a
 quarter pixel, ring radii to half a pixel, each sector's group, band, colour and edges to one
-degree, **whether the footprint is drawn at all**, plus tile size, device pixel ratio and the two
-theme colours. A camera nudge too small to
+degree, plus tile size, device pixel ratio and the two theme colours. A camera nudge too small to
 shift the rect a quarter pixel is not a repaint, and neither is a cascade frame that leaves every
 wedge inside the degree it was already in. Quantising the *output* rather than the camera is what
 makes that true by construction rather than by argument.
@@ -129,53 +124,50 @@ Measured 2026-09-08, all three fixtures:
 
 | | paints |
 |---|---|
-| the first frame at rest | **1** — the dimmed schematic, no footprint |
+| at rest, ever | **0** — there is nothing on the page to paint |
 | at rest, five forced `refresh()` plus `placeLogo()` | **0** |
 | at rest, 500 ms of stillness | **0** |
 | three zoom-in notches (the camera genuinely moving) | 12–13 |
-| 1.2 s of stillness while the control is enabled | **0** |
+| 1.2 s of stillness while the tile is shown | **0** |
 
-The reading that matters is the one taken **with the control enabled**: while it is disabled the
-schematic is painted once and then never again, so a disabled reading is guaranteed by that rather
-than by the guard, and would still pass with the signature compare deleted. The mutation test
-below is what closes that.
+The reading that matters is the one taken **with the tile shown**: every reading taken while it is
+hidden is guaranteed by the hide path, which returns before a signature is built at all, and would
+still pass with the signature compare deleted. The mutation test below is what closes that.
 
-## A persistent control, not one that appears and vanishes
+## Absent at rest, after a detour through a persistent control
 
-The first cut hid the tile entirely whenever the disc fitted, which bought a resting page that was
-pixel-for-pixel what it was before — a property worth having and, as it turned out, not the one
-being asked for. Lukas asked for it **left of the pan button, enabled only when the whole disc is
-not in view**, and that is a different object: a control that is always there, whose *state* tells
-you whether there is anything to fit.
+The placement went through Lukas twice and the visibility went through him twice, and the record is
+worth keeping because the second answer overturned the first.
 
-The trade is explicit. **A resting page is no longer identical to `develop`** — it differs by the
-control's own 98x98 box, at most 54 of 255 per pixel while dimmed, and by nothing else. What
-survives intact is the part that matters for the disc: `positions`, `camera`, `labels` and the
-layer-composite `pixels` compare are 0 at every ratio on every fixture, because the tile is not one
-of the renderer's canvases. `savePng` still cannot pick it up, and the goldens still do not move.
+He first asked for it **left of the pan button, enabled only when the whole disc is not in view** —
+a control always on the page whose *state* said whether there was anything to fit. That was built
+and measured: a resting page then differed from `develop` by the control's own 98x98 box, 2399–2616
+px at most 54 of 255 while dimmed. Then: **"don't show the control at default at all."** So it is
+absent again, and the resting page is byte-identical once more.
 
-What it draws while disabled is the vault's shape and nothing else: the two band outlines and the
-folder sectors, dimmed to 0.45, **with no footprint rectangle**. That reads as "here is your vault,
-there is nothing to fit" rather than as a rectangle around everything, which is what a true
-footprint would be when the whole disc is in frame.
+What survives from the detour is the **placement**, which is better than where it started, and the
+measurement of what the alternative cost. Neither is wasted: the numbers are here if a persistent
+control is ever wanted, and the reason the card no longer has to yield is entirely down to moving
+the tile beside the cluster instead of above it.
 
-## Where it lives, and why the card no longer yields
+## Where it lives, and why the card does not yield
 
 `#vg-ov` is a **sibling** of `#vg-cam`, not a fifth button inside it: the cluster's own check pins
 four 31px buttons and their box, and a 96px tile inside the flex column would move it.
 
 It sits **left of the pan button, bottom-aligned with the cluster**, and that placement pays for
 itself. The cluster is four 31px buttons and three 6px gaps — 142px, which is exactly what
-`--controls-h` names — and `#vg-detail`'s `max-height` already subtracts that. A 96px control
+`--controls-h` names — and `#vg-detail`'s `max-height` already subtracts that. A 96px tile
 bottom-aligned with the cluster therefore sits **entirely inside the band the card already
-clears**, so neither has to give way: the `data-ov` rule that used to shrink the card is gone, and
-`data-ov` survives only as a state hook the harness reads.
+clears**, so neither has to give way. The first cut put the tile *above* the cluster and had to
+shrink the card by 104px to make room; that rule is gone, and `data-ov` survives only as a state
+hook the harness reads.
 
-Measured desktop, 1600x1000: **96x96 at 1453,892**, bottom gap to the cluster **0px**, **8px** to
-its left, **51px** from the stage edge, and the card's computed `max-height` is
-`calc(100% - 182px)` **both** with the control lit and without it.
+Measured desktop, 1600x1000, forced visible: **96x96**, bottom gap to the cluster **0px**, **8px**
+to its left, **51px** from the stage edge, the card's computed `max-height` `calc(100% - 182px)`
+**with `data-ov` on and off alike**, and a 400-paragraph card clearing the tile by 62px.
 
-**On the phone the cluster moves to the top right, so the control goes left of it there too**,
+**On the phone the cluster moves to the top right, so the tile goes left of it there too**,
 top-aligned, clear of `#vg-mob`'s corner on the left. Measured iPhone 14: **72x72 at 267,292**,
 overlapping neither cluster, with the disc's dot radius median unchanged at 1.38px and the desktop
 control unchanged at 2.19px.
@@ -233,7 +225,6 @@ grounds that a 3× crop proves inspectability and not orientation. Measured 2026
 | ratio 0.16 | a clear small box, off-centre; orientation plain | readable |
 | ratio 0.06 | **a ~8×5 px box — position reads, shape does not** | **~5×4 px, effectively a dot** |
 | off the disc | the glyph is legible | legible |
-| at rest, disabled | the schematic reads, dimmed, with no footprint | reads |
 
 So orientation is established at ordinary and deep zoom at both sizes, and **degrades at very deep
 zoom**, where the footprint is honestly only a few pixels across. A minimum drawn size would keep
@@ -257,7 +248,7 @@ Whether the glyph itself should stop being an arrowhead — a hollow marker in t
 visual language instead — is the remaining half, and it is a preference on github#79 rather than a
 correctness fix.
 
-## The programmatic auto-fit does not light the control, and the gate is narrow
+## The programmatic auto-fit does not raise the tile, and the gate is narrow
 
 Measured on the dominant-folder fixture by sampling `#vg-ov.hidden` at animation rate in the page,
 because the thing being measured is shorter than a CDP round trip is reliable: re-showing the big
@@ -271,14 +262,14 @@ The gate is one condition, and its narrowness is the whole point:
 if (cropped && !ovOn && cascadeRun && fitting) cropped = false;
 ```
 
-- **`!ovOn`** — it only ever suppresses a *new* enable. A control already lit during a toggle stays
-  lit, so anyone already oriented keeps their orientation.
+- **`!ovOn`** — it only ever suppresses a *new* appearance. A tile already up during a toggle stays
+  up, so anyone already oriented keeps their orientation.
 - **`cascadeRun && fitting`** — both, so it cannot catch a deliberate zoom, a pan, or a Fit the
   user pressed: none of those runs a cascade.
 
-**After: 0 ms enabled**, with the positive control in the same check — a deliberate zoom
-immediately afterwards still enables it. A blanket "stay disabled while `fitting`" was rejected for
-exactly the reason the review gave: it would also swallow the feedback when Fit is pressed.
+**After: 0 ms visible and 0 paints**, with the positive control in the same check — a deliberate
+zoom immediately afterwards still shows it. A blanket "stay hidden while `fitting`" was rejected
+for exactly the reason the review gave: it would also swallow the feedback when Fit is pressed.
 
 ## To exercise when the branches combine
 

@@ -1573,8 +1573,10 @@ check("the camera cluster is bottom-right, in order, and 31px", async (p) => {
     var ov = document.querySelector("#vg-ov");
     var vgroot = document.querySelector(".vault-graph");
     out.ovInCluster = !!(ov && cam.contains(ov));
-    out.ovDisabledAtRest = !!(ov && ov.disabled);
+    out.ovHiddenAtRest = !!(ov && ov.hidden);
     if (ov) {
+      var wasOv = ov.hidden;
+      ov.hidden = false;
       var or = ov.getBoundingClientRect();
       out.ovBox = { w: Math.round(or.width), h: Math.round(or.height) };
       out.ovBottomGap = Math.round(cr.bottom - or.bottom);
@@ -1602,6 +1604,7 @@ check("the camera cluster is bottom-right, in order, and 31px", async (p) => {
         d.innerHTML = html2;
         if (wasH2) d.setAttribute("hidden", "");
       }
+      ov.hidden = wasOv;
     }
     return out;
   })()`);
@@ -1617,7 +1620,7 @@ check("the camera cluster is bottom-right, in order, and 31px", async (p) => {
         box.fromBottom >= 0 && box.fromBottom < 60 && box.fromRight >= 0 && box.fromRight < 60 &&
         box.buttons.every((b) => b.inside) && box.cardClears > 0 &&
         // github#79
-        !box.ovInCluster && box.ovDisabledAtRest && box.ovBox && box.ovBox.w === box.ovBox.h &&
+        !box.ovInCluster && box.ovHiddenAtRest && box.ovBox && box.ovBox.w === box.ovBox.h &&
         box.ovBottomGap === 0 && box.ovSideGap === 8 && box.ovInStage &&
         box.cardCapOff === box.cardCapOn && box.cardClearsOv > 0,
     detail: bad.length
@@ -1628,7 +1631,7 @@ check("the camera cluster is bottom-right, in order, and 31px", async (p) => {
         `${box.oldFit ? "; #vg-fit IS STILL THERE" : "; #vg-fit gone"}` +
         `; a full detail card clears it by ${box.cardClears}px` +
         `; the overview is ${box.ovInCluster ? "INSIDE THE CLUSTER" : "a sibling"}, ` +
-        `disabled at rest ${box.ovDisabledAtRest}, ` +
+        `hidden at rest ${box.ovHiddenAtRest}, ` +
         `${box.ovBox ? box.ovBox.w + "x" + box.ovBox.h : "missing"}px, ` +
         `bottom-aligned with the cluster (${box.ovBottomGap}px) and ${box.ovSideGap}px left of ` +
         `it, ${box.ovFromRight}px from the stage edge; the card's cap is ` +
@@ -2201,12 +2204,12 @@ check("the pan toggle locks the camera and flies home", async (p) => {
 // github#79
 async function ovState(p) {
   return p.j(`(function(){ var o = __vg.overview();
-    return { enabled: o.enabled, disabled: o.disabled, paints: o.paints, cropped: o.cropped,
+    return { shown: o.shown, hidden: o.hidden, paints: o.paints, cropped: o.cropped,
              liveR: o.liveR,
              fp: o.footprint ? { x0: +o.footprint.x0.toFixed(2), x1: +o.footprint.x1.toFixed(2),
                                  y0: +o.footprint.y0.toFixed(2), y1: +o.footprint.y1.toFixed(2) } : null,
-             shape: o.shape ? { s: o.shape.s, k: o.shape.k, cropped: o.shape.cropped,
-                                rect: o.shape.rect ? o.shape.rect.map(function(v){ return +v.toFixed(2); }) : null,
+             shape: o.shape ? { s: o.shape.s, k: o.shape.k,
+                                rect: o.shape.rect.map(function(v){ return +v.toFixed(2); }),
                                 chevron: o.shape.chevron, nSectors: o.shape.sectors.length,
                                 ringO: +o.shape.rings.o.toFixed(2),
                                 ringI: +o.shape.rings.i.toFixed(2),
@@ -2223,7 +2226,7 @@ async function camTo(p, s) {
 }
 
 // github#79
-check("the overview is disabled at rest and enabled only while the disc is cropped", async (p) => {
+check("the overview is absent at rest and appears only while the disc is cropped", async (p) => {
   await camReset(p);
   const rest = await ovState(p);
   await p.eval(`__vg.renderer.refresh(); __vg.renderer.refresh(); __vg.renderer.refresh();
@@ -2250,24 +2253,20 @@ check("the overview is disabled at rest and enabled only while the disc is cropp
   // github#79, design/0014
   const margin = rest.fp ? Math.min(-rest.fp.x0, rest.fp.x1, -rest.fp.y0, rest.fp.y1) / rest.liveR : 0;
   return {
-    ok: rest.disabled && !rest.enabled && !rest.cropped &&
-        rest.paints > 0 && !!rest.shape && rest.shape.nSectors > 0 &&
-        !rest.shape.cropped && rest.shape.rect === null &&
+    ok: rest.hidden && !rest.shown && !rest.cropped && rest.paints === 0 &&
         still.paints === rest.paints &&
-        zoomed.enabled && !zoomed.disabled && zoomed.paints > rest.paints &&
-        heldUp.enabled && heldUp.paints === zoomed.paints &&
-        panned.enabled && back.disabled && !back.enabled &&
+        zoomed.shown && !zoomed.hidden && zoomed.paints > rest.paints &&
+        heldUp.shown && heldUp.paints === zoomed.paints &&
+        panned.shown && back.hidden && !back.shown &&
         quiet2.paints === quiet && margin > 1.02,
-    detail: `at rest disabled=${rest.disabled} cropped=${rest.cropped}, and drawn: ` +
-            `${rest.shape ? rest.shape.nSectors : 0} sectors, footprint ` +
-            `${rest.shape && rest.shape.rect ? "DRAWN" : "absent"}; the frame is ` +
-            `${margin.toFixed(3)}x the live disc radius; 5 forced refreshes added ` +
-            `${still.paints - rest.paints} paints; ratio 0.35 -> enabled=${zoomed.enabled} ` +
+    detail: `at rest hidden=${rest.hidden} cropped=${rest.cropped} with ${rest.paints} paints ` +
+            `ever; the frame is ${margin.toFixed(3)}x the live disc radius; 5 forced refreshes ` +
+            `added ${still.paints - rest.paints}; ratio 0.35 -> shown=${zoomed.shown} ` +
             `(${zoomed.shape ? zoomed.shape.nSectors : 0} sectors, ` +
             `${zoomed.paints - rest.paints} paint(s)); then 5 more refreshes and 500ms with it ` +
-            `ENABLED and the camera still added ${heldUp.paints - zoomed.paints}; ` +
-            `panned at fit ratio -> enabled=${panned.enabled}; ` +
-            `back at rest disabled=${back.disabled}, 500ms still added ${quiet2.paints - quiet}`,
+            `SHOWN and the camera still added ${heldUp.paints - zoomed.paints}; ` +
+            `panned at fit ratio -> shown=${panned.shown}; ` +
+            `back at rest hidden=${back.hidden}, 500ms still added ${quiet2.paints - quiet}`,
   };
 });
 
@@ -2334,7 +2333,7 @@ check("clicking the overview fits the disc through fit(), with panning on or off
   };
   await camTo(p, { x: 0.5, y: 0.5, ratio: 0.35, angle: 0 });
   const want1 = await wantRatio();
-  const shown = await p.j(`!document.querySelector("#vg-ov").disabled`);
+  const shown = await p.j(`!document.querySelector("#vg-ov").hidden`);
   // github#79, design/0014 -- camAtRest first: camSettle can beat fit()'s first frame
   const flown = async () => {
     for (const dl = Date.now() + 4000; Date.now() < dl;) {
@@ -2373,13 +2372,13 @@ check("clicking the overview fits the disc through fit(), with panning on or off
   return {
     ok: shown === true && flew1 &&
         Math.abs(landed.x - 0.5) < 0.002 && Math.abs(landed.y - 0.5) < 0.002 &&
-        Math.abs(landed.ratio - want1) < 0.03 && restOv.disabled &&
+        Math.abs(landed.ratio - want1) < 0.03 && restOv.hidden &&
         Math.abs(landed2.x - 0.5) < 0.002 && Math.abs(landed2.ratio - want2) < 0.03 &&
         lentOnToggle && settledToggle && lentOnTile && settledTile &&
         !panOff.setting && !panOff.api,
     detail: `from ratio 0.35 a click landed at (${landed.x}, ${landed.y}) ratio ${landed.ratio} ` +
-            `against ${want1.toFixed(4)} promised, and it disabled itself again ` +
-            `(${restOv.disabled}); with panning off it landed at (${landed2.x}, ${landed2.y}) ` +
+            `against ${want1.toFixed(4)} promised, and it hid itself again ` +
+            `(${restOv.hidden}); with panning off it landed at (${landed2.x}, ${landed2.y}) ` +
             `ratio ${landed2.ratio} against ${want2.toFixed(4)}; fit() lent panning back mid-flight ` +
             `from the toggle ${lentOnToggle} and from the tile ${lentOnTile}, and restored it ` +
             `${settledToggle && settledTile ? "both times" : "NOT both times"} -- ended ` +
@@ -2388,7 +2387,7 @@ check("clicking the overview fits the disc through fit(), with panning on or off
 });
 
 // github#79
-check("the overview stays disabled while a programmatic auto-fit crops the disc", async (p) => {
+check("the overview stays away while a programmatic auto-fit crops the disc", async (p) => {
   await camReset(p);
   await toRest(p);
   const g = await biggestGroup(p);
@@ -2398,7 +2397,7 @@ check("the overview stays disabled while a programmatic auto-fit crops the disc"
   // github#79, design/0014 -- sampled in-page: a CDP round trip cannot see 214ms
   await p.eval(`(function(){ window.__ovT = { on: [], t0: performance.now(), last: null };
     var el = document.querySelector("#vg-ov");
-    var tick = function(){ var v = !el.disabled;
+    var tick = function(){ var v = !el.hidden;
       if (v !== window.__ovT.last) {
         window.__ovT.on.push([Math.round(performance.now() - window.__ovT.t0), v]);
         window.__ovT.last = v;
@@ -2420,12 +2419,12 @@ check("the overview stays disabled while a programmatic auto-fit crops the disc"
   await camReset(p);
   await toRest(p);
   return {
-    ok: before.disabled && after.disabled && shownMs === 0 &&
-        onZoom.enabled && !onZoom.disabled,
-    detail: `hiding then re-showing "${g}" with the camera at rest: the control was enabled for ` +
-            `${shownMs}ms across ${tr.length} transition(s), and repainted ` +
-            `${after.paints - before.paints} time(s) as the wedges moved under it; a deliberate ` +
-            `zoom straight after still enables it (${onZoom.enabled})`,
+    ok: before.hidden && after.hidden && shownMs === 0 &&
+        after.paints === before.paints && onZoom.shown && !onZoom.hidden,
+    detail: `hiding then re-showing "${g}" with the camera at rest: the control was visible for ` +
+            `${shownMs}ms across ${tr.length} transition(s) and painted ` +
+            `${after.paints - before.paints} time(s); a deliberate zoom straight after still ` +
+            `shows it (${onZoom.shown})`,
   };
 });
 

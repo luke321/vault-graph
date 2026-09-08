@@ -482,9 +482,9 @@
     box-shadow: 0 0 0 1px var(--border);
     opacity: .8; transition: opacity .12s, box-shadow .12s;
   }
-  .vault-graph #vg-ov:hover:not(:disabled) { opacity: 1; box-shadow: 0 0 0 1px var(--border-strong); }
+  .vault-graph #vg-ov:hover { opacity: 1; box-shadow: 0 0 0 1px var(--border-strong); }
   .vault-graph #vg-ov:focus-visible { opacity: 1; outline: 2px solid var(--accent); outline-offset: 1px; }
-  .vault-graph #vg-ov:disabled { cursor: default; opacity: .45; }
+  .vault-graph #vg-ov[hidden] { display: none; }
   .vault-graph #vg-ov canvas { display: block; width: 100%; height: 100%; }
   @media (prefers-reduced-motion: reduce) {
     .vault-graph #vg-ov { transition: none; }
