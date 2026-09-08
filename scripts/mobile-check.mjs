@@ -376,15 +376,20 @@ async function main() {
   }
 
   // github#73, design/0013 -- a panel that covers its own toggle cannot be closed
+  // github#82 -- the toggle is drawn at every width now
   let sheetProbe = "n/a";
-  if (touch) {
-    const btn = await p.eval(
+  {
+    // github#82 -- folding a column moves the button; re-read it
+    const btnAt = () => p.eval(
       "(function () {" +
       "  var b = document.getElementById('vg-sheet'); if (!b) return null;" +
       "  var r = b.getBoundingClientRect();" +
       "  return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2)," +
       "           w: Math.round(r.width), h: Math.round(r.height) };" +
       "})()");
+    const sheetNow = () =>
+      p.eval("document.querySelector('.vault-graph').getAttribute('data-sheet')");
+    const btn = await btnAt();
     if (btn) {
       const press = async (x, y) => {
         await p.send("Input.dispatchMouseEvent", { type: "mouseMoved", x, y, buttons: 0 });
@@ -395,24 +400,27 @@ async function main() {
           }).catch(() => {});
         }
       };
+      const was = await sheetNow();
       await press(btn.x, btn.y);
       await sleep(600);
-      const open = await p.eval("document.querySelector('.vault-graph').getAttribute('data-sheet')");
+      const open = await sheetNow();
+      const flipped = (await btnAt()) || btn;
       const over = await p.eval(
         "(function () {" +
-        "  var el = document.elementFromPoint(" + btn.x + ", " + btn.y + ");" +
+        "  var el = document.elementFromPoint(" + flipped.x + ", " + flipped.y + ");" +
         "  if (!el) return 'nothing';" +
         "  var b = document.getElementById('vg-sheet');" +
         "  if (el === b || (b && b.contains(el))) return 'the toggle';" +
         "  var id = el.id || (el.closest && el.closest('[id]') ? el.closest('[id]').id : '');" +
         "  return id ? '#' + id : el.tagName.toLowerCase();" +
         "})()");
-      await press(btn.x, btn.y);
+      await press(flipped.x, flipped.y);
       await sleep(600);
-      const shut = await p.eval("document.querySelector('.vault-graph').getAttribute('data-sheet')");
-      sheetProbe = `${btn.w}x${btn.h} at ${btn.x},${btn.y}; opened ${open}; ` +
-                   `under it while open: ${over}; second tap -> ${shut}` +
-                   (shut === "off" ? "" : "  <-- CANNOT BE CLOSED");
+      const shut = await sheetNow();
+      // github#82 -- the round trip is "back where it started"
+      sheetProbe = `${btn.w}x${btn.h} at ${btn.x},${btn.y}; ${was} -> ${open}; ` +
+                   `under it while flipped: ${over}; second press -> ${shut}` +
+                   (shut === was ? "" : "  <-- CANNOT BE PUT BACK");
     }
   }
 

@@ -239,6 +239,40 @@ carried the hop trail, and the hop trail *does* change the desktop picture, sinc
 arrow and crumbs to a note's card. A render-diff run is only ever a statement about the two trees
 it compared. Name them.
 
+**The body's images are pinned to the tag, never to a branch.** Write
+`raw.githubusercontent.com/luke321/vault-graph/<version>/assets/...`, not `.../develop/...`.
+A branch ref makes the release page's pictures change every time that branch moves, which is
+the same rule as *once the tag exists nothing changes* -- broken by construction rather than by
+anyone editing. It is not hypothetical: on 2.2.0's branch the reel pointed at `develop`, where
+`collapse.webp` was still the take from before that day's storyboard fix, so the page would have
+shown a clip the release did not contain. 2.1.0's body has the same branch refs and its pictures
+are still moving.
+
+**And a count in the section is a measurement like any other.** 2.2.0's first draft said
+"all fifteen clips" with sixteen in `docs/features/`; `ls docs/features/*.md | grep -v _template
+| wc -l` is the answer, not memory.
+
+## The release branch is where everything lands, and the tag is the end of it
+
+**Everything the release needs is finished ON `release/<version>` and checked there**: the
+CHANGELOG section covering the whole range, every clip the section will embed, every doc that
+mentions the version, and the release body itself. Only then does it go
+`release/<version>` → `develop` → `main` → tag → publish.
+
+**After the tag exists, nothing changes.** Not the body, not the docs, not the changelog. If
+something is wrong enough to fix, it is the next patch version — an edit after the fact leaves
+the tag's tree disagreeing with the published page, and nobody can tell afterwards which one was
+meant.
+
+**2.1.0 was cut twice and edited after both, which is what this section is for.** The branch was
+used as a version-bump holder: the bump and the changelog went on it, and the work of finding out
+what the release actually contained happened after the tag. So the release was deleted and re-cut
+with the hop trail and the planner pass named and the hop trail's clip finally recorded — and
+then the body was edited twice more, because the highlight reel was written in the same voice as
+the changelog it sits above and the published page said everything twice. The tag and `develop`
+still differ by the commit that trimmed it. The order below is not bureaucracy; every one of
+those edits was avoidable by doing it on the branch.
+
 ## What it does, in case you need to do it by hand
 
 1. **List the range** as above, and check every merge in it against the section you are about to

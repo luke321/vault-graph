@@ -81,6 +81,12 @@ mountVaultGraph(
     // github#3
     unlinkedTintByFolder: loadSettings().unlinkedTintByFolder,
     onUnlinkedTintByFolder: function (v) { saveSettings({ unlinkedTintByFolder: v }); },
+    // github#82 -- undefined until the panel has been folded once, and the page reads that
+    // absence as "nobody has chosen, so decide from the width"
+    sheetOpen: loadSettings().sheetOpen,
+    onSheetOpen: function (v) { saveSettings({ sheetOpen: v }); },
+    bandOpen: loadSettings().bandOpen,
+    onBandOpen: function (v) { saveSettings({ bandOpen: v }); },
     pinned: loadSettings().pinned,
     onPinned: function (ids) { saveSettings({ pinned: ids }); }
   }

@@ -327,13 +327,25 @@
   .vault-graph {
     --controls-inset: 12px;
     --controls-h: 142px;
+    /* github#82 -- the panel cluster's own inset, and deliberately NOT --controls-inset:
+       the plugin raises that one to 44px because Obsidian's status bar floats over the
+       bottom-right corner (github#4). Nothing floats over the top-left, so the toggles
+       would have been pushed 44px into the disc for a reason that is not theirs. */
+    --panels-inset: 12px;
   }
   .vault-graph #vg-cam {
     position: absolute; right: var(--controls-inset); bottom: var(--controls-inset);
     z-index: 6; display: flex; flex-direction: column; gap: 6px;
   }
-  /* github#73 -- the phone's two panel buttons wear the camera cluster's look */
-  .vault-graph #vg-mob { display: none; }
+  /* github#73 -- the two panel buttons wear the camera cluster's look
+     github#82 -- and are drawn at every width. They were the phone's alone until two users
+     asked for the same fold on a PC; the state machine behind them never was touch-specific.
+     The cluster sits in the opposite corner from #vg-cam and at the same z-index; only the
+     phone raises it, because only there is a panel drawn over it. */
+  .vault-graph #vg-mob {
+    position: absolute; left: var(--panels-inset); top: var(--panels-inset);
+    z-index: 6; display: flex; flex-direction: row; gap: 6px;
+  }
   .vault-graph #vg-cam button, .vault-graph #vg-mob button {
     display: flex; align-items: center; justify-content: center;
     width: 31px; height: 31px; padding: 0; cursor: pointer;
@@ -422,6 +434,15 @@
     border-bottom: 1px solid var(--border); background: var(--surface-0);
     display: flex; flex-direction: column; gap: 6px; min-width: 0;
   }
+  /* github#82 -- the band folds away at every width, so these two live outside the
+     breakpoint. design/0010 gives the band its own grid row precisely so it cannot collide
+     with the disc, and hiding the row honours that where floating the band over the disc
+     would not. The row has to be pinned to 1fr with the band gone or #vg-canvas inherits the
+     stage's `auto` and collapses to nothing -- every child of it is absolutely positioned.
+     The phone's branch keys the same two properties off [data-band="on"]; one attribute
+     cannot hold both values, so the two can never fight. */
+  .vault-graph[data-band="off"] #vg-heat { display: none; }
+  .vault-graph[data-band="off"] #vg-stage { grid-template-rows: 1fr; }
   .vault-graph #vg-heat .hrow { display: flex; align-items: center; gap: 10px; min-width: 0; }
   .vault-graph #vg-heat .hrow .lbl {
     font-size: 10px; text-transform: uppercase; letter-spacing: .08em;
@@ -640,6 +661,22 @@
     background: var(--surface-1); z-index: 20; font-size: 13px; color: var(--text-2);
   }
 
+  /* github#82 -- above the breakpoint the sidebar is a grid column, not a sheet, so folding
+     it means collapsing the column to nothing and handing its width to the stage. The sheet
+     treatment below is the phone's alone; a `display: none` scoped by an attribute outranks
+     every one of those sheet rules on specificity, so this branch has to be a media query or
+     it would kill the sheet at 720px and under. `not all and (max-width: 720px)` rather than
+     `min-width: 721px`: the two branches are then exact complements, and no fractional
+     viewport width can fall into neither. */
+  @media not all and (max-width: 720px) {
+    .vault-graph[data-sheet="off"] { grid-template-columns: 1fr; }
+    /* Not a zero-width clipped column: left in the flow, every control inside it stays
+       focusable while its own toggle reports aria-expanded="false". github#73 fixed exactly
+       that on the phone by making the closed sheet visibility: hidden rather than merely
+       translated away. */
+    .vault-graph[data-sheet="off"] #vg-sidebar { display: none; }
+  }
+
   /* github#73 -- the disc gets the screen; the legend and the band are summoned */
   @media (max-width: 720px) {
     .vault-graph { grid-template-columns: 1fr; grid-template-rows: 1fr; }
@@ -675,11 +712,9 @@
     /* Both control clusters move to the top corners, clear of that sheet. */
     .vault-graph #vg-cam { top: var(--controls-inset); bottom: auto; }
     /* Above the sheet (z-index 8): #vg-mob sits in #vg-canvas, which the band pushes below
-       the sheet's top edge, and a panel that covers its own toggle cannot be closed. */
-    .vault-graph #vg-mob {
-      position: absolute; left: 12px; top: 12px; z-index: 9;
-      display: flex; flex-direction: row; gap: 6px;
-    }
+       the sheet's top edge, and a panel that covers its own toggle cannot be closed. The rest
+       of the cluster -- where it sits and which way it runs -- is the base rule's, github#82. */
+    .vault-graph #vg-mob { z-index: 9; }
     .vault-graph #vg-mob button { opacity: .8; width: 44px; height: 44px; }
     /* The band's control row is one line of five things and the stage clips it at this
        width: the second date field and All dates were cut off and unreachable. */

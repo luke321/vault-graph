@@ -12,6 +12,10 @@ left; the notes-added calendar and its date strip stay on and can be put away; a
 rises as a sheet at the foot, so the disc stays visible above whatever you tapped. A tap on the
 disc, or on the button that opened it, puts a sheet away again.
 
+Those two buttons are drawn at every width now, and above 720 px they *fold* the panels
+rather than summoning them — the folder list is a column there, not a sheet. See
+[`collapse.md`](collapse.md). github#82.
+
 A finger is not a pointer, so picking learned the difference: a tap reaches for the nearest note
 within about half a fingertip, while the mouse keeps the pixel-precise catchment it was measured
 for. `.ai-context/design/0013-touch-input.md` carries that and the rest of the reasoning.
@@ -71,4 +75,4 @@ selects nothing. See `.ai-context/mobile-harness.md`.
 | | |
 |---|---|
 | **Introduced in** | `2.1.0 (github#73)` |
-| **Last re-recorded** | `2026-09-07` — 17.7 s at 406x892, encoded at native width (1.08 MB) |
+| **Last re-recorded** | `2026-09-08` — 17.7 s at 406x892, encoded at native width (1.03 MB) |

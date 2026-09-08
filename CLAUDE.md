@@ -24,8 +24,33 @@ measuring it: serve the page, drive it, read the numbers.
 
 - `node scripts/smoke.mjs --only "<substring>"` is the iteration loop. The full suite runs on
   the push to `develop` (the pre-push hook); do not run it by hand unless asked.
+- **Two things may not run twice at once, and `scripts/lock.mjs` is how you know.** Several
+  agents work this repo in parallel worktrees, and two of them collide invisibly: a **screen
+  recording** (`record-demo.ps1`, `make-hero.ps1`) grabs a display region, so a second take
+  captures the first one's window; the **full suite** drives Chrome over CDP, so two runs fight
+  for ports and each blames the code. Take the lock, do the thing, release it — always release,
+  even on failure, or everyone else waits out the stale window (20 min for `record`, 30 for
+  `suite`):
+
+  ```bash
+  node scripts/lock.mjs acquire record --owner "#77 palette"   # blocks; exit 1 = give up, do not record
+  node scripts/lock.mjs release record --owner "#77 palette"
+  node scripts/lock.mjs status                                  # who holds what
+  ```
+
+  The lock lives in the OS temp dir, not the worktree, so **every worktree shares one**. A
+  `mkdir` is the lock — atomic, and it survives a killed session as a stale entry rather than a
+  permanent one. Screenshots need no lock: `shoot.mjs` captures over CDP, so overlapping windows
+  are harmless — but pass your own `--port`.
 - `git push` and merging into `develop` are separate asks, every time. `main` only ever
   receives `develop`.
+- **A release is the range, not the work in hand.** Everything it needs — a `CHANGELOG.md`
+  section accounting for *every* merge since the last tag, every clip it embeds, every doc naming
+  the version, the release body itself — is finished on `release/<version>` and read there before
+  anything merges down. **Once the tag exists nothing changes**: a fix is the next patch version,
+  because editing after the fact leaves the tag disagreeing with the published page. 2.1.0 was
+  cut twice for skipping this; `.ai-context/releasing.md` opens with the commands that enumerate
+  a range.
 - Measure before and after; the numbers go into `.ai-context/changelog-detail.md`, which is
   the regression suite. A changed constant means `invariants.md` changes in the same commit.
 - Fixtures: three generated vaults (`scripts/make-*-vault.mjs`) in the shared store; never a
