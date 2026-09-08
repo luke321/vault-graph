@@ -5,7 +5,7 @@ way you leave it is how the graph opens next time.
 
 ### The disc gets the window
 
-<img src="https://raw.githubusercontent.com/luke321/vault-graph/develop/assets/features/collapse.webp" width="100%" alt="A desktop-width window with the folder list beside the disc and the calendar band above it: the band folded away first, so the disc grows into the row it had, then the folder list folded away, so its column collapses and the disc re-centres in the whole window with nothing beside it">
+<img src="https://raw.githubusercontent.com/luke321/vault-graph/2.2.0/assets/features/collapse.webp" width="100%" alt="A desktop-width window with the folder list beside the disc and the calendar band above it: the band folded away first, so the disc grows into the row it had, then the folder list folded away, so its column collapses and the disc re-centres in the whole window with nothing beside it">
 
 Two buttons at the top left of the disc. A phone summons its folder list as a sheet over the
 disc; a PC collapses the column and hands its width to the graph, so the panel leaves the layout
@@ -123,7 +123,7 @@ debugging port, so overlapping windows are harmless.
 
 - **The full demo walk ends on the fold.** The `collapse` act is the storyboard's last one, so
   nothing after it needs the legend it folds away, and the hero closes on the disc with the
-  window to itself. All fifteen clips under `docs/features/` and the README's hero were
+  window to itself. All sixteen clips under `docs/features/` and the README's hero were
   re-recorded for this release, because the two buttons are now part of the desktop disc and no
   clip taken before them showed it — the hero is 159.9 s of the 126-beat walk.
 - **An act that flies the camera hands it back fitted, and the hero was broken without it.** The

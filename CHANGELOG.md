@@ -125,7 +125,7 @@ debugging port, so overlapping windows are harmless.
 
 - **The full demo walk ends on the fold.** The `collapse` act is the storyboard's last one, so
   nothing after it needs the legend it folds away, and the hero closes on the disc with the
-  window to itself. All fifteen clips under `docs/features/` and the README's hero were
+  window to itself. All sixteen clips under `docs/features/` and the README's hero were
   re-recorded for this release, because the two buttons are now part of the desktop disc and no
   clip taken before them showed it — the hero is 159.9 s of the 126-beat walk.
 - **An act that flies the camera hands it back fitted, and the hero was broken without it.** The
