@@ -1096,10 +1096,37 @@ rather than passing.
 | `nav counts share one right edge` | 1 folded, 1 open | **1 folded, 1 open** |
 | golden snapshot, all three fixtures | — | **band and positions unchanged** |
 
+### A row's bar and its own swatch never disagree
+
+The bar's colour is an inline hex from `colorOf()`, the same as the swatch it sits under, so
+both keep the old palette after a live theme flip while the picker's `.swatch.vg-g7` — a class
+resolving `var(--g7)` — repaints. **That divergence is github#84 and predates this work**; it is
+reported by the check, not asserted, so a known defect stays visible instead of failing a gate.
+
+What IS asserted is the row staying internally coherent: the bar and its swatch move together
+or not at all. Measured, dark to light on the demo fixture, slot `g7`:
+
+| surface | dark | after |
+|---|---|---|
+| `--g7` token | `rgb(144, 133, 233)` | **`rgb(74, 58, 167)`** |
+| picker `.swatch.vg-g7` | `rgb(144, 133, 233)` | **`rgb(74, 58, 167)`** |
+| legend swatch | `rgb(144, 133, 233)` | `rgb(144, 133, 233)` |
+| count bar | `rgb(144, 133, 233)` | `rgb(144, 133, 233)` |
+
+Making the bar resolve `var(--gN)` live while the swatch stays cached fails it — measured, bar
+moves, swatch stale, `bar agrees with its swatch=false`. That is the shape a partial fix to
+github#84 would take, which is the point of asserting it now.
+
+**The probe span must be appended inside `.vault-graph`.** `--gN` is scoped to that root, so a
+`var()` normalised from `document.body` returns `rgb(0, 0, 0)` and reads as a broken colour
+rather than a live one — the first cut of that mutation test reported exactly that.
+
 ```bash
 node scripts/smoke.mjs --only "count bars"      # the share, the edge cases, hover, selection
+node scripts/smoke.mjs --only "theme flip"      # the bar follows its swatch; github#84 reported
 node scripts/smoke.mjs --only "right edge"      # 1 edge, not 2 -- the column survived
 node scripts/smoke.mjs --only "golden"          # the disc did not move
+node scripts/obsidian-smoke.mjs --only "theme"  # the same, through a real css-change
 ```
 
 ## Animations are a fixed length, unless the page can't draw them

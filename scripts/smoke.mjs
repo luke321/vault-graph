@@ -3458,6 +3458,84 @@ check("legend count bars measure the vault, not the disc", async (p) => {
   };
 });
 
+// github#84, github#78, design/0004
+check("the count bar follows its own swatch across a theme flip", async (p) => {
+  const read = () => p.j(`(function(){
+    var root = document.querySelector('.vault-graph'), cs = getComputedStyle(root);
+    // github#84 -- resolve INSIDE .vault-graph: --gN is scoped to it, so a var() probed
+    // from document.body comes back black and reads as a broken colour, not a live one.
+    var norm = function (x) {
+      if (!x) return "";
+      var d = document.createElement('span');
+      d.style.color = String(x).trim();
+      root.appendChild(d);
+      var out = getComputedStyle(d).color;
+      d.parentNode.removeChild(d);
+      return out;
+    };
+    var g = __vg.groupOrder().filter(function (n) { return __vg.groupCount(n) > 0; })
+      .sort(function (a, b) { return __vg.groupCount(b) - __vg.groupCount(a); })[0];
+    var slot = g ? __vg.slotOf(g) : "";
+    var lg = g ? document.querySelector('[data-g="' + g + '"]') : null;
+    var sw = lg ? lg.querySelector('.sw') : null;
+    var pick = slot ? document.querySelector('.swatch.vg-' + slot) : null;
+    return { group: g, slot: slot,
+             token: norm(cs.getPropertyValue('--' + slot)),
+             swatch: sw ? norm(sw.style.background) : null,
+             barred: !!(lg && lg.classList.contains('bar')),
+             bar: lg ? norm(lg.style.getPropertyValue('--vg-bar')) : null,
+             picker: pick ? getComputedStyle(pick).backgroundColor : null };
+  })()`);
+
+  const started = await p.j(`(function(){
+    var root = document.querySelector('.vault-graph');
+    var was = root.getAttribute('data-theme');
+    root.setAttribute('data-theme', 'dark');
+    var g = document.getElementById('vg-gear');
+    if (g) { g.removeAttribute('hidden'); if (g.getAttribute('aria-expanded') !== 'true') g.click(); }
+    return { was: was, gear: !!g };
+  })()`);
+  await sleep(500);
+  const before = await read();
+  if (!before.barred) {
+    return { ok: true, detail: `no barred row on this shape -- nothing to compare` };
+  }
+
+  await p.eval(`(function(){
+    document.querySelector('.vault-graph').setAttribute('data-theme', 'light');
+    __vg.readTheme();
+    if (__vg.renderer) __vg.renderer.refresh();
+  })(); void 0`);
+  await sleep(700);
+  const after = await read();
+
+  await p.eval(`(function(){
+    var root = document.querySelector('.vault-graph');
+    if (${JSON.stringify(started.was)} === null) root.removeAttribute('data-theme');
+    else root.setAttribute('data-theme', ${JSON.stringify(started.was)});
+    __vg.readTheme();
+    if (__vg.renderer) __vg.renderer.refresh();
+  })(); void 0`);
+  await sleep(400);
+
+  const tokenMoved = before.token !== after.token;
+  const swatchMoved = before.swatch !== after.swatch;
+  const barMoved = before.bar !== after.bar;
+  const pickerMoved = before.picker !== null && before.picker !== after.picker;
+  const coherent = barMoved === swatchMoved && after.bar === after.swatch;
+
+  const bits = [`slot ${after.slot} on ${JSON.stringify(before.group)}`,
+    `token ${before.token} -> ${after.token}${tokenMoved ? " (moved)" : " (SAME -- flip did nothing)"}`,
+    `swatch ${before.swatch} -> ${after.swatch}${swatchMoved ? " (moved)" : " (stale)"}`,
+    `bar ${before.bar} -> ${after.bar}${barMoved ? " (moved)" : " (stale)"}`,
+    before.picker === null ? "no picker swatch rendered"
+                           : `picker ${before.picker} -> ${after.picker}${pickerMoved ? " (moved)" : " (stale)"}`,
+    `bar agrees with its swatch=${coherent}`];
+  if (tokenMoved && !swatchMoved) bits.push("github#84: the legend keeps the old theme while the picker repaints");
+  if (!coherent) bits.push("<- the bar and its swatch disagree, which no row may do");
+  return { ok: coherent && tokenMoved, detail: bits.join("; ") };
+});
+
 check("focus web stays above dim notes", async (p) => {
   const r = await p.j(`__vg.checkFocusWeb()`);
   if (!r.geomGaps) return { ok: true, detail: `${r.node} (degree ${r.degree}): no in-disc samples on this shape, nothing to measure` };

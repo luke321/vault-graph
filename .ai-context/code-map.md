@@ -406,7 +406,7 @@ range, not the file. Stale when `node scripts/code-map.mjs --check` fails.
 | 8600 | · · · · · · · · · · `byPath` |
 | 8745 | `destroy` |
 
-## `scripts/smoke.mjs` — 3980 lines, 7 sections, 49 functions, 84 checks
+## `scripts/smoke.mjs` — 4058 lines, 7 sections, 50 functions, 85 checks
 
 ### Sections
 
@@ -416,9 +416,9 @@ range, not the file. Stale when `node scripts/code-map.mjs --check` fails.
 | 73–675 | the checks |
 | 676–1292 | camera |
 | 1293–2773 | date range |
-| 2774–3468 | the hub |
-| 3469–3699 | the run |
-| 3700–3980 | which vaults, and why |
+| 2774–3546 | the hub |
+| 3547–3777 | the run |
+| 3778–4058 | which vaults, and why |
 
 ### Functions
 
@@ -461,18 +461,19 @@ range, not the file. Stale when `node scripts/code-map.mjs --check` fails.
 | 2730 | · `hiddenByDefault` |
 | 2776 | `topByDegree` |
 | 2783 | `pinN` |
-| 3294 | `pressKey` |
-| 3306 | `trailState` |
-| 3307 | `selectBySearch` |
-| 3316 | `hop` |
-| 3325 | `closeCard` |
-| 3326 | `stepBack` |
-| 3454 | `settle` |
-| 3471 | `runOne` |
-| 3658 | `killBrowser` |
-| 3776 | `resolveVaults` |
-| 3858 | `buildFor` |
-| 3872 | `main` |
+| 3290 | · `norm` |
+| 3372 | `pressKey` |
+| 3384 | `trailState` |
+| 3385 | `selectBySearch` |
+| 3394 | `hop` |
+| 3403 | `closeCard` |
+| 3404 | `stepBack` |
+| 3532 | `settle` |
+| 3549 | `runOne` |
+| 3736 | `killBrowser` |
+| 3854 | `resolveVaults` |
+| 3936 | `buildFor` |
+| 3950 | `main` |
 
 ### Checks
 
@@ -555,10 +556,11 @@ range, not the file. Stale when `node scripts/code-map.mjs --check` fails.
 | 3070 | the (unlinked) row opens its menu with no notes in it |
 | 3117 | the (unlinked) row's count is parenthesised while kept separate, plain once joined |
 | 3134 | legend count bars measure the vault, not the disc |
-| 3284 | focus web stays above dim notes |
-| 3332 | only a hop lengthens the trail |
-| 3351 | stepping back never re-collects a hop |
-| 3368 | a crumb click truncates the trail at the crumb |
-| 3383 | the trail is not layout |
-| 3406 | the page claims no keyboard shortcut |
-| 3429 | re-selecting the same note keeps the trail, and a filter does not clear it |
+| 3285 | the count bar follows its own swatch across a theme flip |
+| 3362 | focus web stays above dim notes |
+| 3410 | only a hop lengthens the trail |
+| 3429 | stepping back never re-collects a hop |
+| 3446 | a crumb click truncates the trail at the crumb |
+| 3461 | the trail is not layout |
+| 3484 | the page claims no keyboard shortcut |
+| 3507 | re-selecting the same note keeps the trail, and a filter does not clear it |

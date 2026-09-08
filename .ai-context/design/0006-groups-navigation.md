@@ -178,28 +178,60 @@ shape vault whose `projects` holds 77.4% of it; thinnest 1.0px on all three.
 moves no bar — the same way it moves no count. `invariants.md` carries the check, the
 before/after layout table, and the pixel measurement of the painted length.
 
-### The bar's colour goes stale on an Obsidian theme flip, exactly as the swatch already does
+### The bar's colour is cached, and goes stale with the swatch it sits under
 
-The bar takes `colorOf(g)` as an inline hex in a `--vg-bar` custom property, which is the
-same treatment the swatch beside it already has (`style="background:"`). **Measured**, running
-the exact sequence `plugin/main.js` performs on `css-change` — set `data-theme`, `readTheme()`,
-`renderer.refresh()` — on `05 - Meeting Notes`:
+The bar takes `colorOf(g)` as an inline hex in `--vg-bar`, which is exactly the treatment the
+swatch beside it already has. Both therefore keep the old palette after a live theme flip.
+**Measured on the demo mirror, running precisely what `syncTheme()` does** — set `data-theme`,
+`readTheme()`, `renderer.refresh()` — for slot `g7` (`05 - Meeting Notes`), dark to light:
 
-| | dark | after the flip to light |
-|---|---|---|
-| `--g7` (the CSS variable) | `#9085e9` | **`#4a3aa7`** — correct |
-| the swatch | `#9085e9` | **`#9085e9`** — stale |
-| the bar | `#9085e9` | **`#9085e9`** — stale |
+| surface | mechanism | dark | after the flip |
+|---|---|---|---|
+| `--g7` token | CSS | `#9085e9` | **`#4a3aa7`** |
+| the picker's `.swatch.vg-g7` | class + `var(--g7)` | `#9085e9` | **`#4a3aa7`** |
+| the legend row's swatch | inline hex | `#9085e9` | `#9085e9` |
+| **the count bar** | inline hex | `#9085e9` | `#9085e9` |
 
-`readTheme()` refreshes `THEME`, but nothing rebuilds `groupColor` or the legend, so `colorOf`
-keeps answering with the old palette. **This is pre-existing and not the bar's doing** — the
-swatch has always behaved this way, and the bar now goes stale with it, so the two never
-disagree, which is the property that matters for a row reading coherently. The standalone page
-is dark only (design/0009) and never flips at runtime, so only the plugin can reach it.
+**This is not the bar's doing and the bar does not make it worse.** The picker has always
+repainted and the legend has always gone stale — verified on a `develop` build with neither
+open colour branch applied. What the bar adds is one more surface that is stale *in step with
+its own swatch*, which is the property that keeps a row internally coherent: the two never
+disagree with each other, even while the panel above them does. Tracked as **github#84**, with
+design/0004 corrected to state both mechanisms rather than claiming the whole DOM uses classes.
 
-Two things follow, neither of them done here. **design/0004 claims swatches are coloured by a
-`.vg-g7` class resolving `var(--g7)` "not by an inline style", and that is not what the code
-does** — there is no `.vg-g*` class anywhere in `page.js`, which is why the staleness exists at
-all. And the fix, whenever it is wanted, belongs to the swatch and the whole legend rather than
-to this bar: the theme handler would have to reach `buildColors()` and `buildLegend()`, which
-is a change to the plugin's contract with the page and wants its own issue.
+**Checked in both places, and both have teeth.** `smoke.mjs --only "theme flip"` opens the
+gear on the standalone page, flips, and asserts the bar agrees with its own swatch while
+*reporting* the token divergence and naming github#84 — a known defect stays visible instead
+of failing the gate. `obsidian-smoke.mjs --only "theme"` does the same through the real
+`css-change` path in a real Obsidian. Making the bar resolve `var(--gN)` live while the swatch
+stays cached fails both, which is the regression that a partial fix to github#84 would be.
+
+One trap worth keeping: the check normalises colours by probing a throwaway span, and that span
+must be appended **inside `.vault-graph`**. `--gN` is scoped to that root, so a `var()` probed
+from `document.body` comes back `rgb(0, 0, 0)` and reads as a broken colour rather than a live
+one — which is what the first cut of the mutation test reported.
+
+### With github#77 applied, the disagreement widens but does not change in kind
+
+github#77 declares the palette as `--gN-l` / `--gN-d` pairs and previews a slot as the dots it
+will draw, filled from `var(--sl)` / `var(--sd)`. That adds live surfaces, so the combined
+branch shows the picker and its preview correct after a flip while the legend row and its bar
+are not. **Measured on a real merge of both feature branches into `develop`**: identical to the
+table above — token and picker move, legend swatch and bar stay. Neither branch introduces the
+divergence and neither alone reveals it, which is why it is github#84's rather than either
+one's.
+
+Two integration notes for whoever merges them. `src/page.css` and `src/page.js` merge **cleanly**
+between the two branches — the colour work and the bar do not touch the same rules. `smoke.mjs`
+does **not**: both branches append checks at the same point, and the naive union of the two
+sides does not parse. It needs a hand resolution.
+
+### When drill-down lands, the denominator stays deliberate
+
+The bar and its title both say *of the vault*, and github#76's drill must not quietly change
+that. A drilled child may keep showing its percentage of the whole vault — that is the current,
+documented meaning and the tooltip says so in those words. Switching to a percentage of the
+current root would be **a separate decision with its own record and its own check**, because it
+changes what every bar on the page means without changing how any of them look. The check reads
+`__vg.graph.order` as the denominator, so it will follow whichever choice the code makes; the
+wording in the title is the part a person has to keep true.
