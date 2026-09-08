@@ -15,6 +15,12 @@ that decision and what it cost.
 
 `act: "hoptrail"` in `demoMode()` (`src/page.js`).
 
+**It ends by fitting the disc, and that click is on camera on purpose.** A walk moves the camera,
+and the act after it in the full run drags a named note into the hub — with the camera left where
+the last hop flew, that note is off-screen and the drag grabs nothing. So the act hands the
+camera back fitted. Standalone it costs a click on a disc that is already fitted; in the full
+walk it is what makes everything after it aim at something. github#82.
+
 ## Regenerating this feature's clip
 
 ```powershell
