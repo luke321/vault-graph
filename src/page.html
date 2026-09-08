@@ -120,11 +120,11 @@
         </button>
       </div>
       <!-- github#79 -- a sibling of the cluster, not a fifth button in it: the cluster's own
-           check pins four 31px buttons and the card's max-height is written against a fixed
-           --controls-h, and a tile that appears and vanishes inside it would move both. -->
-      <button id="vg-ov" type="button" hidden
-              title="Where the frame sits on the disc. Click to fit."
-              aria-label="Where the frame sits on the disc. Click to fit.">
+           check pins four 31px buttons and their box. Always present, and disabled while the
+           whole disc is in view. -->
+      <button id="vg-ov" type="button" disabled
+              title="The whole disc is in view."
+              aria-label="The whole disc is in view.">
         <canvas aria-hidden="true"></canvas>
       </button>
       <div id="vg-tip" hidden></div>

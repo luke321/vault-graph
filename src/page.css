@@ -470,19 +470,21 @@
     position: absolute; left: var(--panels-inset); top: var(--panels-inset);
     z-index: 6; display: flex; flex-direction: row; gap: 6px;
   }
-  /* github#79 */
+  /* github#79 -- beside the cluster at the pan button's row, bottom-aligned with it. The
+     cluster is 142px tall (--controls-h) and the tile is 96, so it sits entirely inside the
+     band the detail card's max-height already clears: the card does not have to yield. */
   .vault-graph #vg-ov {
-    position: absolute; right: var(--controls-inset);
-    bottom: calc(var(--controls-inset) + var(--controls-h) + 8px);
+    position: absolute; bottom: var(--controls-inset);
+    right: calc(var(--controls-inset) + 31px + 8px);
     z-index: 6; width: var(--ov-size); height: var(--ov-size); padding: 0;
     cursor: pointer; background: var(--surface-2); color: var(--text-3);
     border: 0; border-radius: 8px; overflow: hidden;
     box-shadow: 0 0 0 1px var(--border);
     opacity: .8; transition: opacity .12s, box-shadow .12s;
   }
-  .vault-graph #vg-ov:hover { opacity: 1; box-shadow: 0 0 0 1px var(--border-strong); }
+  .vault-graph #vg-ov:hover:not(:disabled) { opacity: 1; box-shadow: 0 0 0 1px var(--border-strong); }
   .vault-graph #vg-ov:focus-visible { opacity: 1; outline: 2px solid var(--accent); outline-offset: 1px; }
-  .vault-graph #vg-ov[hidden] { display: none; }
+  .vault-graph #vg-ov:disabled { cursor: default; opacity: .45; }
   .vault-graph #vg-ov canvas { display: block; width: 100%; height: 100%; }
   @media (prefers-reduced-motion: reduce) {
     .vault-graph #vg-ov { transition: none; }
@@ -677,10 +679,6 @@
     box-shadow: 0 8px 28px rgba(0,0,0,.16); overflow-y: auto;
     max-height: calc(100% - 28px - var(--controls-h) - var(--controls-inset));
   }
-  /* github#79 -- of the two the card gives way, as it already does to the cluster */
-  .vault-graph[data-ov="on"] #vg-detail {
-    max-height: calc(100% - 36px - var(--controls-h) - var(--controls-inset) - var(--ov-size));
-  }
   .vault-graph #vg-detail h2 { font-size: 13px; margin: 0 22px 6px 0; line-height: 1.3; }
   .vault-graph #vg-detail .meta { font-size: 11px; color: var(--text-2); margin-bottom: 9px; }
   .vault-graph #vg-detail .meta span { display: inline-block; margin-right: 8px; }
@@ -857,12 +855,10 @@
     }
     /* Both control clusters move to the top corners, clear of that sheet. */
     .vault-graph #vg-cam { top: var(--controls-inset); bottom: auto; }
-    /* github#79 -- under the cluster, which is at the top here, and away from #vg-mob's corner */
+    /* github#79 -- the cluster is top-right here, so the tile goes left of it, top-aligned,
+       clear of #vg-mob's own corner on the left. */
     .vault-graph { --ov-size: 72px; }
-    .vault-graph[data-ov="on"] #vg-detail { max-height: 46%; }
-    .vault-graph #vg-ov {
-      top: calc(var(--controls-inset) + var(--controls-h) + 8px); bottom: auto;
-    }
+    .vault-graph #vg-ov { top: var(--controls-inset); bottom: auto; }
     /* Above the sheet (z-index 8): #vg-mob sits in #vg-canvas, which the band pushes below
        the sheet's top edge, and a panel that covers its own toggle cannot be closed. The rest
        of the cluster -- where it sits and which way it runs -- is the base rule's, github#82. */

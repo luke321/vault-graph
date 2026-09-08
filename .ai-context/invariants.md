@@ -388,129 +388,142 @@ it: the two tabs exist, the rows are the tag dimension's own names, a pin lands 
 and shows on the tag disc, the folder map stays empty, and the folder disc's order and colours
 are unchanged. Rows listed per tab on the four fixtures: 7 against 2, 4 against 15, 18 against
 14, 18 against 14.
-## The overview is absent at rest, and its footprint is never clamped
+## The overview is disabled at rest, and its footprint is never clamped
 
-github#79, `design/0014`. The schematic beside Fit is **absent, not faded**, whenever the whole
-disc is visible, and a resting page must therefore be pixel-for-pixel what it was.
+github#79, `design/0014`. The schematic sits **left of the pan button, bottom-aligned with the
+camera cluster**. It is always present and always draws the vault's shape; it is **disabled while
+the whole disc is in view**, and enabled -- with the camera's footprint drawn in it -- the moment
+zoom or a pan crops the disc. Clicking it calls `fit()`.
 
 ```bash
-node scripts/smoke.mjs --only overview          # three checks, all three fixtures
-node scripts/smoke.mjs --only "camera cluster"  # it is a SIBLING of the cluster, not in it
+node scripts/smoke.mjs --only overview          # four checks, all three fixtures
+node scripts/smoke.mjs --only "camera cluster"  # a SIBLING left of the cluster, not in it
 ```
 
-**What decides it is containment, not the camera ratio.** The issue proposed the ratio against
+**A persistent control was chosen over one that appears and vanishes, and it costs the resting
+page.** The first cut hid the tile entirely at rest, which made a resting page pixel-for-pixel what
+it was before. That is gone on purpose: the control is always drawn now, so **a resting page
+differs from `develop` by exactly the control's own box and nothing else**. Measured against
+`develop@598a6b9`, dark, 1600x1000, all three fixtures:
+
+| ratio | what differs | px |
+|---|---|---|
+| 1.08 (at rest, disabled) | one 98x98 box at `x 1148..1245, y 852..949` | **2399 / 2292 / 2616**, max 54 of 255 |
+| 4.20 (disc contained, disabled) | the same box, the same numbers | **2399 / 2292 / 2616** |
+| 0.35 (cropped, enabled) | the same box, brighter, with the footprint | **7291 / 6613 / 5691**, max 177 |
+
+The `positions`, `camera`, `labels` and layer-composite `pixels` comparisons are **0 at every ratio
+on every fixture** -- the disc itself is untouched, the tile is not one of the renderer's canvases,
+and `savePng` cannot pick it up. The goldens do not move: the overview reads `geomLock` and the
+plan and writes neither.
+
+**Where it sits, and why the card no longer yields.** The cluster is four 31px buttons and three
+6px gaps -- 142px, which is what `--controls-h` names -- and `#vg-detail`'s `max-height` already
+subtracts that. A 96px control bottom-aligned with the cluster therefore sits **entirely inside the
+band the card already clears**, so neither has to give way, and the earlier `data-ov` rule that
+shrank the card is gone. Measured desktop 1600x1000: **96x96 at 1453,892**, bottom gap to the
+cluster **0px**, **8px** to its left, **51px** from the stage edge, and the card's computed
+`max-height` is `calc(100% - 182px)` **with the control lit and without it**. Phone (iPhone 14,
+where the cluster moves to the top right): **72x72 at 267,292**, top-aligned, overlapping neither
+`#vg-cam` nor `#vg-mob`, with the disc's dot radius median unchanged at 1.38px and the desktop
+control unchanged at 2.19px.
+
+**What decides enabled is containment, not the camera ratio.** The issue proposed the ratio against
 `fitRatio()`; that is right for a centred camera and wrong for a panned one, because a camera
 panned at exactly the fit ratio crops the disc too. The test is whether the circle of radius
-`lastMaxR * UNIT` — the **live** disc, the one `fit()` frames — lies inside the footprint from
-`viewportToGraph`. Reading `geomLock.maxR` instead would show the tile on a resting, filtered
+`lastMaxR * UNIT` -- the **live** disc, the one `fit()` frames -- lies inside the footprint from
+`viewportToGraph`. Reading `geomLock.maxR` instead would light the control on a resting, filtered
 page.
 
-Because `fitRatio()` carries the same `live / locked` factor the radius does, the margin is
-scale-invariant. Measured 2026-09-08 after a Fit click: **1.200× the live disc radius, the same
-on all three fixtures**, because the margin is geometry (`FIT_RATIO` 1.08, the bbox's 1.02,
-`STAGE_PADDING`) rather than a fact about a vault. From a hardcoded 1.08 it reads 1.282.
+Because `fitRatio()` carries the same `live / locked` factor the radius does, the margin does not
+depend on the vault. Measured after a Fit click at 1600x1000: **1.200x the live disc radius, the
+same on all three fixtures**. It *does* depend on the stage's aspect ratio, since the footprint is
+fitted to the shorter axis -- the suite's own sharded windows read 1.164 and 1.282 for the same
+three fixtures. The invariant is that it exceeds 1 and agrees across fixtures at a given window,
+not that it is any particular number; the check's bar is 1.02.
 
-**The resting page is unchanged, and that is measured rather than argued.**
+The one case where the margin can vanish is `fitRatio()`'s own clamp: `live / locked` is held to
+1.35, so a live disc more than 35% larger than the locked one cannot be framed by Fit at all, and
+the control then correctly stays enabled.
 
-```bash
-node scripts/render-diff.mjs --against-dir <a develop build> --ratios 1.08,0.35,4.2 --mode all
-```
+**A still camera draws nothing** -- and the check for it has to be taken **with the control
+enabled**. At rest the schematic is painted **once** and then never again; every reading taken
+while it is disabled is guaranteed by that rather than by the guard, so those alone would still
+pass with the signature compare deleted. Verified by mutation: removing `if (sig === ovSig) return;`
+leaves five forced refreshes and 500 ms of stillness adding **5 paints** with the control enabled
+and the check fails; with the guard it adds 0. `ovSync` runs from `afterRender` and returns before
+touching the canvas unless a signature changed.
 
-Against pages built from `develop@598a6b9`, dark, 1600x1000, all three fixtures: at **ratio 1.08
-the stage, canvas, heatmap, ribbon and legend clips are identical**, and so are all of them at
-**ratio 4.2**, where the disc is small enough to be contained and the tile stays away. At **ratio
-0.35** the only pixels that differ anywhere on the page are one 98x98 box at the tile's own
-position (`x 1187..1284, y 702..799` on the stage -- the 96 px control plus its 1 px ring):
-**7205, 7244 and 6934 px** on the demo, shape
-and 10k fixtures. `positions`, `camera`, `labels` and the layer-composite `pixels` compare are
-**0 at every ratio** — the tile is not one of the renderer's canvases, so it costs the disc
-nothing and `savePng` cannot pick it up. The goldens do not move: the overview reads `geomLock`
-and the plan and writes neither.
-
-The whole-`page` clip additionally differs by **64 px at `x 241..253`** at every ratio including
-1.08. That is the sidebar's "Generated …" stamp between two builds minutes apart, the artifact
-this file already records for the engine port — not the overview, which cannot reach the sidebar.
-
-**The tile's ring is a `box-shadow`, not a border, and that is load-bearing.** Under the page's
-`border-box` a 1 px border would leave the canvas a 94 px content box while `ovPaint` drew in the
-96 px space `--ov-size` names, so every 1 px stroke was resampled by 0.979 and landed off-pixel --
-the crispness the `devicePixelRatio` backing store exists to buy, given away by a 2% mismatch, and
-invisible to every check because they all compare 96-space numbers with each other. A `box-shadow`
-takes no layout room, so the canvas gets the whole tile; `ovSize()` also reads the canvas's own
-`clientWidth` first, so the drawing space is the space it is displayed in whatever the CSS does
-later.
-
-**Below 720 px the card's 46% cap has to be restated.** `design/0013` caps `#vg-detail` at 46% of
-the screen there, and `.vault-graph[data-ov="on"] #vg-detail` outranks `.vault-graph #vg-detail` --
-media queries add no specificity -- so the desktop calc silently took over the moment the tile
-appeared on a phone, giving the card 302 px of an iPhone 14 instead of 259. It is also backwards
-there: the tile is top-anchored below the breakpoint and the card is bottom-anchored, so they
-cannot collide at all.
-
-The three constants: `OV_DISC_FRAC` **0.62** (the disc's share of the half-tile, which is what
-leaves room for a footprint up to ~1.6x the disc diameter to close inside the tile), `OV_SECTOR_A`
-**0.55** and `OV_FILL_A` **0.18**. The fill was 0.10 until a visual pass: with the footprint wider
-than the tile only one edge crosses it, and at 0.10 the covered side was indistinguishable from
-the uncovered one, so the case the law is about read as a bare hairline.
-
-**A still camera draws nothing** -- and the check for it has to be taken **with the tile shown**.
-Every other paint reading here is taken while the tile is hidden, where `ovSync` returns before it
-builds a signature at all, so those readings are guaranteed by the hide path and would still pass
-with the guard deleted. Verified by mutation: removing `if (sig === ovSig) return;` leaves five
-forced refreshes and 500 ms of stillness adding **5 paints** with the tile up and the check fails;
-with the guard it adds 0. `ovSync` runs from `afterRender` and returns before touching the
-canvas unless a signature changed. The signature is the drawing's own inputs quantised to what
-moves a pixel — the rect to a quarter pixel, the ring radii to half a pixel, each sector to one
-degree — so quantising the *output* makes the guard true by construction rather than by argument.
-`design/0010`'s band guard is the precedent. Measured 2026-09-08 through `__vg.overview().paints`:
+The signature is **the drawing's own inputs quantised to what moves a pixel**: the rect to a
+quarter pixel, ring radii to half a pixel, each sector's group, band, colour and edges to one
+degree, whether the footprint is drawn at all, plus tile size, device pixel ratio and the two theme
+colours. Quantising the *output* rather than the camera is what makes the guard true by
+construction. `design/0010`'s band guard is the precedent, and `readTheme()` clears the signature
+the way `regroup` clears `heatSig`. Measured 2026-09-08 through `__vg.overview().paints`:
 
 | | paints |
 |---|---|
+| the first frame at rest | **1** -- the dimmed schematic, no footprint |
 | at rest, five forced `refresh()` plus `placeLogo()` | **0** |
 | at rest, 500 ms of stillness | **0** |
-| hiding the biggest folder — a whole cascade **and** its auto-fit | **0** |
-| 1.2 s of stillness while the tile is shown | **0** |
-| re-showing a dominant folder — a growth auto-fit | **0** (was 14, over 214 ms) |
-| three zoom-in notches, the camera genuinely moving | 12–13 |
+| 1.2 s of stillness while enabled | **0** |
+| three zoom-in notches, the camera genuinely moving | 12-13 |
 
-**A programmatic auto-fit no longer shows the tile at all, and the gate is one condition wide.**
-Re-showing a dominant folder used to make the tile appear at 81 ms and vanish at 295 ms --
-**214 ms, once, 14 paints** -- because github#14 fits immediately while the disc is still expanding,
-so for those frames the disc really is bigger than the frame. True, and still a flicker with
-nothing in it. `ovSync` now returns early on `!ovShown && cascadeRun && fitting`: it suppresses only
-a *new* appearance, and only while a cascade and a fit are both running, so a deliberate zoom, a
-pan and a Fit the user pressed are all untouched -- none of them runs a cascade. A blanket
-"hide while fitting" was rejected because it would also swallow the feedback when Fit is pressed.
-**After: 0 ms and 0 paints**, sampled at animation rate in the page because the thing measured is
-shorter than a CDP round trip is reliable; the same check carries the positive control, that a
-deliberate zoom straight afterwards still shows the tile.
+**A programmatic auto-fit does not light the control, and the gate is one condition wide.**
+Re-showing a dominant folder used to raise the tile at 81 ms and drop it at 295 ms -- **214 ms,
+once** -- because github#14 fits immediately while the disc is still expanding, so for those frames
+the disc really is bigger than the frame. True, and still a flicker with nothing in it. `ovSync`
+now suppresses the crop on `!ovOn && cascadeRun && fitting`: only a *new* enable, and only while a
+cascade and a fit are both running, so a deliberate zoom, a pan and a Fit the user pressed are all
+untouched -- none of them runs a cascade. A blanket "stay disabled while fitting" was rejected
+because it would also swallow the feedback when Fit is pressed. **After: 0 ms enabled**, sampled at
+animation rate in the page because the thing measured is shorter than a CDP round trip is reliable;
+the same check carries the positive control, that a deliberate zoom straight afterwards still
+enables it.
+
+**The footprint is drawn to true scale and clipped by the canvas, never by the code.** Clamping it
+would draw a viewport that is not where the camera is. Measured on the demo fixture: at ratio 0.35
+the rect is **56.50px against 56.51 promised, 0.015% off**; panned on the tight axis at fit's own
+ratio it spans **-39..135 across a 96px tile**; panned clear of the disc it starts at **141**,
+wholly outside, and is replaced by a chevron reading **0 degrees** -- which points at the **frame**,
+not at the disc.
 
 **The offscreen glyph says what it means.** At 1:1 the filled triangle on the rim reads as a
 navigation arrow, and it points *opposite* to the disc -- two readings, and the wrong one sends the
 user the wrong way. The sign was **not** flipped, because the glyph stands in for the footprint and
 that is what the control reports. Instead the direction is spoken: `title` and the accessible name
 are derived from the same angle the glyph is drawn at, over eight compass words -- "Viewport right
-of the disc. Click to fit." The check reads the string back.
+of the disc. Click to fit." -- and read "The whole disc is in view." while disabled. The check reads
+the string back.
 
 **Orientation holds at 1:1 down to ratio 0.16 and degrades below it.** Cropped at `scale: 1` and
-viewed at native size: at 0.35 and 0.16 the rectangle's position and shape both read on the 96 px
-desktop tile and the 72 px phone tile; at **0.06 it is ~8x5 px on desktop and ~5x4 px on the
+viewed at native size: at 0.35 and 0.16 the rectangle's position and shape both read on the 96px
+desktop control and the 72px phone one; at **0.06 it is ~8x5 px on desktop and ~5x4 px on the
 phone** -- position still reads, shape does not. Nothing is clamped and no minimum size is imposed;
 whether one should be is an open question on github#79.
 
-**The footprint is drawn to true scale and clipped by the canvas, never by the code.** Clamping it
-would draw a viewport that is not where the camera is. Measured on the demo fixture: at ratio 0.35
-the rect is **56.50px against 56.51 promised, 0.015% off**; panned on the tight axis at fit's own
-ratio it spans **-39..135 across a 96px tile**; panned clear of the disc it starts at **141**,
-wholly outside, and is replaced by a chevron reading **0°** — which points at the **frame**, not at
-the disc.
+**The tile's ring is a `box-shadow`, not a border, and that is load-bearing.** Under the page's
+`border-box` a 1px border would leave the canvas a 94px content box while `ovPaint` drew in the 96px
+space `--ov-size` names, so every 1px stroke was resampled by 0.979 and landed off-pixel -- the
+crispness the `devicePixelRatio` backing store exists to buy, given away by a 2% mismatch, and
+invisible to every check because they all compare 96-space numbers with each other. A `box-shadow`
+takes no layout room, so the canvas gets the whole tile; `ovSize()` also reads the canvas's own
+`clientWidth` first, so the drawing space is the space it is displayed in whatever the CSS does
+later.
+
+The four constants: `OV_DISC_FRAC` **0.62** (the disc's share of the half-tile, which is what
+leaves room for a footprint up to ~1.6x the disc diameter to close inside the tile), `OV_SECTOR_A`
+**0.55**, `OV_FILL_A` **0.18**, and the disabled opacity **0.45**. The fill was 0.10 until a visual
+pass: with the footprint wider than the tile only one edge crosses it, and at 0.10 the covered side
+was indistinguishable from the uncovered one, so the case the law is about read as a bare hairline.
 
 **`fit()` lends panning back for its whole 380 ms flight, and `camSettle` cannot see that.** When
 the camera is already at the fit target nothing moves, so `camSettle` returns while the loan is
-outstanding and every later reading is of a page mid-fit — which is how the smoke check first
+outstanding and every later reading is of a page mid-fit -- which is how the smoke check first
 reported a panning leak that did not exist. Wait for `getSetting("enableCameraPanning")` to go
-false, not for the camera to stop. Confirmed against `develop`'s own build: identical behaviour,
-and identical whether the click lands on `#vg-ov` or `#vg-reset`.
+false, not for the camera to stop. `camSettle` can also beat `fit()`'s first animation frame and
+return the ratio the camera started at. Confirmed against `develop`'s own build: identical
+behaviour, and identical whether the click lands on `#vg-ov` or `#vg-reset`.
 
 ## The rings are independent
 

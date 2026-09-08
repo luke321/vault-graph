@@ -7201,7 +7201,8 @@ function mountVaultGraph(root, data, deps) {
    * @property {BandNum} rings   outer edge of each band
    * @property {number[]} inner  inner edge of each band, [i, o]
    * @property {OvSector[]} sectors
-   * @property {number[]} rect   the viewport footprint: x0, y0, x1, y1
+   * @property {boolean} cropped  is any of the disc off screen
+   * @property {number[] | null} rect   the viewport footprint: x0, y0, x1, y1; null while whole
    * @property {number | null} chevron   canvas radians, set only when the rect misses the tile
    */
   /** @typedef {{ x0: number, x1: number, y0: number, y1: number }} OvExtent */
@@ -7209,7 +7210,7 @@ function mountVaultGraph(root, data, deps) {
   var ovCells = null;
   var ovSig = "";
   var ovPaints = 0;
-  var ovShown = false;
+  var ovOn = false;
   /** @type {OvShape | null} */
   var ovLast = null;
 
@@ -7268,8 +7269,8 @@ function mountVaultGraph(root, data, deps) {
     return out;
   }
 
-  /** @param {OvExtent} fp @returns {OvShape | null} */
-  function ovShape(fp) {
+  /** @param {OvExtent} fp @param {boolean} cropped @returns {OvShape | null} */
+  function ovShape(fp, cropped) {
     if (!geomLock) return null;
     var outer = geomLock.maxR * UNIT;
     if (!(outer > 0)) return null;
@@ -7280,11 +7281,18 @@ function mountVaultGraph(root, data, deps) {
     var iHi = bR && bR.i > iLo ? bR.i : iLo;
     var oLo = geomLock.rOuter * UNIT;
     var oHi = bR && bR.o > oLo ? bR.o : outer;
-    var rect = [half + k * fp.x0, half - k * fp.y1, half + k * fp.x1, half - k * fp.y0];
-    var misses = rect[2] < 0 || rect[0] > s || rect[3] < 0 || rect[1] > s;
+    /** @type {number[] | null} */
+    var rect = null;
+    /** @type {number | null} */
+    var chev = null;
+    if (cropped) {
+      rect = [half + k * fp.x0, half - k * fp.y1, half + k * fp.x1, half - k * fp.y0];
+      if (rect[2] < 0 || rect[0] > s || rect[3] < 0 || rect[1] > s) {
+        chev = Math.atan2(-(fp.y0 + fp.y1) / 2, (fp.x0 + fp.x1) / 2);
+      }
+    }
     return { s: s, k: k, rings: { i: iHi * k, o: oHi * k }, inner: [iLo * k, oLo * k],
-             sectors: ovSectors(), rect: rect,
-             chevron: misses ? Math.atan2(-(fp.y0 + fp.y1) / 2, (fp.x0 + fp.x1) / 2) : null };
+             sectors: ovSectors(), cropped: cropped, rect: rect, chevron: chev };
   }
 
   // github#79, design/0014, design/0010 -- the drawing's inputs, at what moves a pixel
@@ -7294,8 +7302,9 @@ function mountVaultGraph(root, data, deps) {
     var p = [Math.round(sh.s), Math.round((WIN.devicePixelRatio || 1) * 100),
              Math.round(sh.rings.i * 2), Math.round(sh.rings.o * 2),
              Math.round(sh.inner[0] * 2), Math.round(sh.inner[1] * 2),
+             sh.cropped ? 1 : 0,
              sh.chevron === null ? "-" : Math.round(sh.chevron * 180 / Math.PI)];
-    for (var i = 0; i < 4; i++) p.push(Math.round(sh.rect[i] * 4));
+    if (sh.rect) for (var i = 0; i < 4; i++) p.push(Math.round(sh.rect[i] * 4));
     for (var j = 0; j < sh.sectors.length; j++) {
       var sc = sh.sectors[j];
       p.push(sc.g, sc.band, sc.c, Math.round(sc.a0 * 180 / Math.PI),
@@ -7318,9 +7327,11 @@ function mountVaultGraph(root, data, deps) {
   function ovLabel(sh) {
     var host = $("ov");
     if (!host) return;
-    var t = sh.chevron === null
-      ? "Where the frame sits on the disc. Click to fit."
-      : "Viewport " + ovDirWord(sh.chevron) + " of the disc. Click to fit.";
+    var t = !sh.cropped
+      ? "The whole disc is in view."
+      : sh.chevron === null
+        ? "Where the frame sits on the disc. Click to fit."
+        : "Viewport " + ovDirWord(sh.chevron) + " of the disc. Click to fit.";
     if (host.title !== t) {
       host.title = t;
       host.setAttribute("aria-label", t);
@@ -7364,15 +7375,22 @@ function mountVaultGraph(root, data, deps) {
     });
     g2.globalAlpha = 1;
 
+    if (!sh.cropped) {
+      g2.globalAlpha = 1;
+      ovLabel(sh);
+      ovPaints++;
+      ovLast = sh;
+      return;
+    }
+    var r = sh.rect || [0, 0, 0, 0];
     if (sh.chevron === null) {
       g2.fillStyle = THEME.text;
       g2.globalAlpha = OV_FILL_A;
-      g2.fillRect(sh.rect[0], sh.rect[1], sh.rect[2] - sh.rect[0], sh.rect[3] - sh.rect[1]);
+      g2.fillRect(r[0], r[1], r[2] - r[0], r[3] - r[1]);
       g2.globalAlpha = 0.85;
       g2.strokeStyle = THEME.text;
-      g2.strokeRect(sh.rect[0] + 0.5, sh.rect[1] + 0.5,
-                    Math.max(1, sh.rect[2] - sh.rect[0] - 1),
-                    Math.max(1, sh.rect[3] - sh.rect[1] - 1));
+      g2.strokeRect(r[0] + 0.5, r[1] + 0.5,
+                    Math.max(1, r[2] - r[0] - 1), Math.max(1, r[3] - r[1] - 1));
     } else {
       var rr = half - OV_CHEV_PX - 1;
       g2.save();
@@ -7395,30 +7413,32 @@ function mountVaultGraph(root, data, deps) {
   }
 
   /** @param {boolean} on */
-  function ovShow(on) {
-    if (ovShown === on) return;
-    ovShown = on;
+  function ovEnable(on) {
+    if (ovOn === on) return;
+    ovOn = on;
     var host = $("ov");
     if (host) {
-      // github#79 -- a control that hides itself hands focus on, never drops it
+      // github#79 -- a disabled control hands focus on, never drops it
       if (!on && DOC && DOC.activeElement === host) {
         var back = $("reset");
         if (back) back.focus();
       }
-      host.hidden = !on;
+      if (on) host.removeAttribute("disabled");
+      else host.setAttribute("disabled", "");
     }
     ROOT.setAttribute("data-ov", on ? "on" : "off");
-    if (!on) { ovSig = ""; ovLast = null; }
   }
 
   function ovSync() {
     if (dead || !$("ov")) return;
     var fp = geomLock ? ovFootprint() : null;
-    var sh = fp && ovCropped(fp) ? ovShape(fp) : null;
-    if (!sh) { ovShow(false); return; }
+    if (!fp) return;
+    var cropped = ovCropped(fp);
     // github#79, design/0014
-    if (!ovShown && cascadeRun && fitting) return;
-    ovShow(true);
+    if (cropped && !ovOn && cascadeRun && fitting) cropped = false;
+    var sh = ovShape(fp, cropped);
+    if (!sh) return;
+    ovEnable(cropped);
     var sig = ovSigOf(sh);
     if (sig === ovSig) return;
     ovSig = sig;
@@ -10588,8 +10608,8 @@ function mountVaultGraph(root, data, deps) {
                     // github#79
                     overview: function () {
                       var fp = ovFootprint();
-                      return { shown: ovShown, paints: ovPaints, sig: ovSig,
-                               hidden: !!($("ov") && $("ov").hidden),
+                      return { enabled: ovOn, paints: ovPaints, sig: ovSig,
+                               disabled: !!($("ov") && $("ov").disabled),
                                cropped: fp ? ovCropped(fp) : null,
                                footprint: fp,
                                liveR: (lastMaxR || 0) * UNIT,
