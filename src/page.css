@@ -345,7 +345,7 @@
      padding and a scrollbar, and four fixed columns overflowed it, putting the
      twelfth slot behind a horizontal scrollbar. */
   .vault-graph #vg-setbody .sws {
-    display: grid; grid-template-columns: repeat(auto-fill, 34px); gap: 4px;
+    display: grid; grid-template-columns: repeat(auto-fill, 50px); gap: 4px;
     justify-content: start;
   }
   /* github#77 -- a swatch is the dots the slot will draw, on the ground it will
@@ -353,11 +353,11 @@
      or the radii stop being the ones the disc draws. Every colour in it comes
      from a token, so a theme change repaints it with no rebuild. */
   .vault-graph .swatch {
-    width: 34px; height: 42px; padding: 0; cursor: pointer; border-radius: 5px;
+    width: 50px; height: 42px; padding: 0; cursor: pointer; border-radius: 5px;
     border: 1px solid var(--border); line-height: 0; flex: 0 0 auto;
   }
   .vault-graph .swatch .prev {
-    width: 32px; height: 40px; display: block; border-radius: 4px;
+    width: 48px; height: 40px; display: block; border-radius: 4px;
   }
   .vault-graph .swatch .gnd { fill: var(--surface-1); }
   .vault-graph .swatch .d  { fill: var(--dot); }
@@ -397,15 +397,16 @@
      folder with subfolders cannot shift them out of line with its neighbours */
   .vault-graph.vg-tokens .sws { flex-wrap: nowrap; justify-content: flex-end; }
   .vault-graph.vg-tokens .sw-grid {
-    display: grid; grid-template-columns: repeat(6, 34px); gap: 4px;
+    display: grid; grid-template-columns: repeat(4, 50px); gap: 4px;
     justify-content: start; flex: none;
   }
   .vault-graph .swatch:hover { transform: scale(1.06); }
   .vault-graph .swatch[aria-checked="true"] {
-    box-shadow: 0 0 0 1px var(--surface-0), 0 0 0 2px var(--text-1);
+    outline: 2px solid var(--text-1); outline-offset: 2px;
+    border-color: var(--text-1);
   }
   .vault-graph .swatch[aria-checked="true"][data-auto="1"] {
-    box-shadow: 0 0 0 1px var(--surface-0), 0 0 0 2px var(--text-3);
+    outline-color: var(--text-3); border-color: var(--text-3);
   }
   .vault-graph .swatch[data-auto="1"]:not([aria-checked="true"]) {
     position: relative;
@@ -745,7 +746,7 @@
   }
   /* github#77 */
   .vault-graph .ctxmenu .sws {
-    display: grid; grid-template-columns: repeat(4, max-content); gap: 4px;
+    display: grid; grid-template-columns: repeat(3, max-content); gap: 4px;
     margin-bottom: 6px; justify-content: center;
   }
   .vault-graph .ctxmenu .auto { width: 100%; }
