@@ -87,6 +87,10 @@ mountVaultGraph(
     onSheetOpen: function (v) { saveSettings({ sheetOpen: v }); },
     bandOpen: loadSettings().bandOpen,
     onBandOpen: function (v) { saveSettings({ bandOpen: v }); },
+    // github#70 -- deliberately NOT passed. This page is a snapshot: its data was baked in
+    // when it was built, so "since the graph was last open" would measure a window whose
+    // notes cannot be in the file. The page leaves the third chip out rather than showing
+    // one that can only ever say zero. The plugin, which rebuilds live, passes it.
     pinned: loadSettings().pinned,
     onPinned: function (ids) { saveSettings({ pinned: ids }); }
   }

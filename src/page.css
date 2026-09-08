@@ -452,6 +452,39 @@
     font-size: 11px; color: var(--text-3); min-width: 0; flex: 1 1 auto;
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
+  /* ------------------------------------------------- the recent lens, github#70 ----- */
+  /* The label is a button now, so it has to be talked back out of being one: it keeps the
+     .lbl type and colour and gains only a pointer and a hover tint. A control that looks
+     like a control here would compete with the chips beside it for the same glance. */
+  /* font-FAMILY only, not the `font` shorthand: this rule outranks `.hrow .lbl` on
+     specificity, so `font: inherit` here would silently take the size, weight, transform and
+     letter-spacing away from the rule that owns them and the label would stop matching its
+     siblings. Everything typographic stays where it was. */
+  .vault-graph #vg-heatlbl {
+    background: none; border: 0; padding: 0; margin: 0;
+    cursor: pointer; font-family: inherit;
+  }
+  .vault-graph #vg-heatlbl:hover { color: var(--text-1); }
+  .vault-graph #vg-heatlbl[aria-pressed="true"] { color: var(--today); }
+  .vault-graph #vg-recent { display: flex; align-items: center; gap: 4px; flex: 0 0 auto; }
+  .vault-graph #vg-recent .rl {
+    font-size: 10px; text-transform: uppercase; letter-spacing: .08em;
+    color: var(--text-3); font-weight: 600;
+  }
+  .vault-graph #vg-recent .chip {
+    display: inline-flex; align-items: center; gap: 4px; white-space: nowrap;
+  }
+  /* --today is the halo's own colour, so an armed chip and the notes it lit are the same
+     hue. It is deliberately not one of the ten group tints (design/0010). */
+  .vault-graph #vg-recent .chip[aria-pressed="true"] {
+    border-color: var(--today); color: var(--today);
+  }
+  .vault-graph #vg-recent .chip .n {
+    font-variant-numeric: tabular-nums; color: var(--text-3); font-size: 10px;
+  }
+  .vault-graph #vg-recent .chip[aria-pressed="true"] .n { color: var(--today); }
+  /* A chip matching nothing still says so -- see syncRecentUI. */
+  .vault-graph #vg-recent .chip:disabled { opacity: .45; cursor: default; }
   .vault-graph #vg-heatscale {
     margin-left: auto; flex: 0 0 auto; display: flex; align-items: center; gap: 3px;
     font-size: 10px; color: var(--text-3);
@@ -722,6 +755,9 @@
     .vault-graph #vg-heatnote { flex-basis: 100%; order: 3; }
     .vault-graph #vg-heatscale { margin-left: 0; }
     .vault-graph #vg-rangebox { order: 4; }
+    /* github#70 -- the chips are the widest new thing in a row that already wrapped at this
+       width, so they take a line of their own rather than pushing the scale off the edge. */
+    .vault-graph #vg-recent { order: 2; flex-basis: 100%; flex-wrap: wrap; row-gap: 4px; }
     .vault-graph #vg-democursor .arrow { display: none; }
     .vault-graph #vg-democursor .finger { display: block; }
     /* Solo is opacity 0 until its row is hovered, which on a finger means never.

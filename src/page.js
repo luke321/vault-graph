@@ -109,6 +109,10 @@
  * @property {boolean} [fitCap]               github#41, design/0011
  * @property {boolean} [sheetOpen]            github#82 -- absent means "decide from the width"
  * @property {boolean} [bandOpen]             github#82
+ * @property {number} [lastOpen]              github#70 -- ms, when the host last had the graph
+ *                                            open. Absent means the host cannot know (the
+ *                                            exported page), and the third recent chip is
+ *                                            not built at all rather than built dead.
  * @property {string[]} [pinned]
  * @property {boolean} [settingsUI]
  * @property {() => void} [openSettings]
@@ -169,6 +173,9 @@
  * @property {(v: boolean) => void} setFitCap
  * @property {() => void} applyHiddenDefaults
  * @property {() => void} heatBuild
+ * @property {(a: NodeAttrs) => string} heatDateOf
+ * @property {(kind: string | null, refMs?: number) => void} setRecent
+ * @property {(src: string) => void} setHeatSource
  * @property {() => PlanParityReport} checkPlanParity
  * @property {() => unknown} checkFocusWeb
  * @property {() => unknown} debugDump
@@ -400,6 +407,12 @@ function mountVaultGraph(root, data, deps) {
   var bandOpen = typeof deps.bandOpen === "boolean" ? deps.bandOpen : true;
   var onBandOpen = typeof deps.onBandOpen === "function" ? deps.onBandOpen : null;
 
+  // github#70, decisions/0009 -- the host owns the clock. The page never writes this back:
+  // "since last open" is the host's memory of its own lifecycle, not a page setting. Absent
+  // (the exported page, which is a snapshot and cannot know) means the chip is never built.
+  var lastOpen = typeof deps.lastOpen === "number" && isFinite(deps.lastOpen)
+    ? deps.lastOpen : null;
+
   // github#3
   var unlinkedByFolder = deps.unlinkedByFolder === false ? false : true;
   var onUnlinkedByFolder = typeof deps.onUnlinkedByFolder === "function" ? deps.onUnlinkedByFolder : null;
@@ -494,6 +507,8 @@ function mountVaultGraph(root, data, deps) {
    * @property {string | null} markDay                         heatmap cell key
    * @property {string | null} hoverDay
    * @property {number | null} hoverYear
+   * @property {string} heatSource                             "created" | "touched"; github#70
+   * @property {string | null} recent                          "today" | "week" | "open"; github#70
    * @property {string} query
    * @property {number | null} until                           timeline rank, or null for all
    * @property {number | null} from                            ms, UTC midnight (heatParse)
@@ -521,6 +536,9 @@ function mountVaultGraph(root, data, deps) {
     markDay: null,
     hoverDay: null,
     hoverYear: null,
+    // github#70
+    heatSource: "created",
+    recent: null,
     query: "",
     until: null,
     from: null,
@@ -2612,16 +2630,107 @@ function mountVaultGraph(root, data, deps) {
     return d.getFullYear() + "-" + p(d.getMonth() + 1) + "-" + p(d.getDate());
   })();
 
+  /**
+   * The date the BAND is counting, github#70. `created` is still the default and
+   * design/0010's argument for it stands unchanged -- this is the one accessor every band
+   * reader goes through so the tally, the picked day and the tooltip cannot disagree about
+   * which of a note's two dates they meant. Also the seam a day-contents list would read.
+   * @param {NodeAttrs} a
+   */
+  function heatDateOf(a) {
+    return (state.heatSource === "touched" ? a.touched : a.created) || "";
+  }
+
   /** @param {string} id */
   function isMarkedDay(id) {
     if (!state.markDay && !state.hoverDay && state.hoverYear === null) return false;
-    var c = graph.getNodeAttribute(id, "created");
+    var c = heatDateOf(graph.getNodeAttributes(id));
     if (c === state.markDay || c === state.hoverDay) return true;
     return state.hoverYear !== null && !!c && c.slice(0, 4) === state.hoverYear;
   }
 
+  /* --------------------------------------------------------- the recent lens */
+
+  /**
+   * github#70. The chips are ALWAYS about `touched`, whichever date the band is counting,
+   * and they say so on their face -- the group is labelled "Touched" and every tooltip
+   * repeats the word. Two controls in one row answering to two different dates is exactly
+   * the lie design/0010 exists to prevent, so the fix is to name it, not to hide it.
+   * @type {Record<string, boolean>}
+   */
+  var recentSet = dict();
+  /** How far the non-matching notes have dimmed, 0..1. Walked by hlWalk. */
+  var recentT = 0;
+
+  /**
+   * The window a chip stands for, in day keys -- `touched` is a YYYY-MM-DD string, so a day
+   * is the honest granularity and the tooltip says "on or after" rather than pretending to
+   * an hour. `refMs` exists so a check can ask what a chip WOULD match on a given day: no
+   * fixture has a note touched today, and one keyed to the real clock rots by the morning.
+   * @param {string | null} kind @param {number} [refMs]
+   * @returns {{ lo: string, hi: string, label: string } | null}
+   */
+  function recentWindow(kind, refMs) {
+    var ref = typeof refMs === "number" && isFinite(refMs) ? refMs : heatParse(TODAY);
+    if (!isFinite(ref)) return null;
+    var hi = heatKey(ref);
+    if (kind === "today") return { lo: hi, hi: hi, label: "touched today" };
+    if (kind === "week") {
+      var lo = heatKey(heatMonday(ref));
+      return { lo: lo, hi: hi, label: "touched since Monday " + lo };
+    }
+    if (kind === "open" && lastOpen !== null) {
+      var lk = heatKey(lastOpen);
+      // The host's stamp can outrun the newest touched day (it is a clock, not a file), and
+      // a window whose start is after its end matches nothing rather than everything.
+      return { lo: lk, hi: hi > lk ? hi : lk, label: "touched on or after " + lk };
+    }
+    return null;
+  }
+
+  /**
+   * Recompute which notes a chip matches. Done once per change rather than per node per
+   * ramp frame: hlWalk asks isHighlighted for all 10,002 nodes on every frame of a ramp.
+   * @param {string | null} kind @param {number} [refMs]
+   */
+  function setRecent(kind, refMs) {
+    var win = kind ? recentWindow(kind, refMs) : null;
+    state.recent = win ? kind : null;
+    recentSet = dict();
+    if (win) {
+      graph.forEachNode(function (id, a) { if (inRecent(win, a)) recentSet[id] = true; });
+    }
+  }
+
+  /**
+   * Day-key string compare, which is why the format is worth keeping: YYYY-MM-DD sorts
+   * as a date. `touched` always, whatever the band is counting -- see recentSet.
+   * @param {{ lo: string, hi: string }} win @param {NodeAttrs} a
+   */
+  function inRecent(win, a) {
+    var t = a.touched || "";
+    return !!t && t >= win.lo && t <= win.hi;
+  }
+
+  /** @param {string} src "created" or "touched" */
+  function setHeatSource(src) {
+    var want = src === "touched" ? "touched" : "created";
+    if (state.heatSource === want) return;
+    state.heatSource = want;
+    // The picked day was a key in the OTHER date's tally, so it names notes this one may
+    // not have. Clearing it is the honest move -- design/0010's rule is that clicking a
+    // square marks exactly the notes that square counted.
+    state.markDay = null;
+    state.hoverDay = null;
+    heatBuild();
+    syncRecentUI();
+    hlSync();
+    renderer.refresh();
+  }
+
   /** @param {string} id */
   function isHighlighted(id) {
+    if (recentSet[id]) return true;
     if (isMarkedDay(id)) return true;
     var g = groupOf(id);
     if (state.highlight[g]) return true;
@@ -4210,7 +4319,10 @@ function mountVaultGraph(root, data, deps) {
            Object.keys(state.highlightSub).join(",") + "|" +
            (state.markDay || "") + "|" + (state.hoverDay || "") + "|" +
            (state.hoverGroup || "") + "|" + Object.keys(state.hoverSub).join(",") + "|" +
-           (state.hoverYear || "");
+           (state.hoverYear || "") + "|" +
+           // github#70 -- both of them. The source decides which date isMarkedDay reads,
+           // so it changes who is lit without state.markDay itself moving.
+           (state.recent || "") + "|" + state.heatSource;
   }
 
   function hlWalk() {
@@ -4221,6 +4333,16 @@ function mountVaultGraph(root, data, deps) {
       hlPrev = now;
       var adv = Math.min(dt, TWEEN_MS) / (TWEEN_MS * TIME_SCALE);
       var moving = false;
+      // github#70 -- the recent lens dims what it did not match, on the same ramp as the
+      // halo it is the other half of. One page-level number, not a per-note one: every
+      // non-match dims by the same amount, the way the focus web already treats non-members.
+      var rAim = state.recent ? 1 : 0;
+      if (recentT !== rAim) {
+        recentT += rAim > recentT ? adv : -adv;
+        if (recentT > 1) recentT = 1;
+        if (recentT < 0) recentT = 0;
+        if (recentT !== rAim) moving = true;
+      }
       graph.forEachNode(function (id) {
         var aim = isHighlighted(id) ? 1 : 0, v = hl[id] || 0;
         if (v === aim) return;
@@ -4347,7 +4469,7 @@ function mountVaultGraph(root, data, deps) {
         var r = /** @type {NodeDisplayData & { haloColor?: string }} */ (Object.assign({}, a));
         r.color = nodeColor(id);
         var hv = hl[id] || 0;
-        if (state.markDay && graph.getNodeAttribute(id, "created") === state.markDay) {
+        if (state.markDay && heatDateOf(a) === state.markDay) {
           r.color = mixHex(r.color, THEME.today, hv);
           r.zIndex = 3;
         }
@@ -4356,6 +4478,17 @@ function mountVaultGraph(root, data, deps) {
           r.haloColor = mixHex(nodeColor(id), THEME.today, hv);
           r.size = (r.size || a.size) * (1 + (0.3 + HL_GROW) * hv);
           r.zIndex = 4;
+        }
+        // github#70 -- the other half of the lens. A match keeps its folder colour and its
+        // halo; everything else recedes. Colour only: no size and no alpha multiplier, so a
+        // dot the cascade is still walking is untouched by this (the law about resting sizes).
+        // The note under the pointer is exempt: asking what something is must always answer,
+        // and a lens is a way of looking rather than a filter that removes.
+        if (recentT > 0.004 && !recentSet[id] &&
+            id !== state.hovered && id !== state.selected) {
+          r.color = mixHex(r.color || nodeColor(id), THEME.dim, recentT);
+          r.label = "";
+          r.zIndex = 0;
         }
 
         if (state.query) {
@@ -5005,7 +5138,11 @@ function mountVaultGraph(root, data, deps) {
         '<span><b style="color:' + colorOf(groupOf(id)) + '">&#9632;</b> ' + esc(groupOf(id)) + '</span>' +
         '<span>' + a.deg + ' link' + (a.deg === 1 ? "" : "s") + '</span>' +
         (a.words ? '<span>' + a.words + ' words</span>' : "") +
-        (a.created ? '<span>' + esc(a.created) + '</span>' : "") +
+        (a.created ? '<span title="added">' + esc(a.created) + '</span>' : "") +
+        // github#70 -- only when the two disagree, so most cards are unchanged. This is the
+        // one place a person can see WHY a recent chip lit a note whose added date is old.
+        (a.touched && a.touched !== a.created
+          ? '<span title="last touched">&#8635; ' + esc(a.touched) + '</span>' : "") +
       '</div>' +
       '<div>' + (a.tags || []).slice(0, 8).map(function (t) {
         return '<span class="chip">#' + esc(t) + '</span>';
@@ -5681,6 +5818,11 @@ function mountVaultGraph(root, data, deps) {
     state.pathOpen = dict();
     state.markDay = null;
     state.hoverDay = null;
+    // github#70 -- neither is persisted (decisions/0009 keeps filters and highlights out of
+    // the store), so Refresh returns the band to the date it opens on and drops the lens.
+    state.heatSource = "created";
+    setRecent(null);
+    recentT = 0;
     state.until = null;
     state.query = "";
     state.hovered = null;
@@ -6350,6 +6492,8 @@ function mountVaultGraph(root, data, deps) {
   var HEAT_MONTH_H = 12;
   var HEAT_ARROW_W = 9;
   var HEAT_EMPTY_A = 0.5;
+  // github#70 -- all three measured on the three fixtures, see invariants.md.
+  var BULK_MIN = 25, BULK_X = 20, BULK_SHARE = 0.15;
   var DAY_MS = 86400000, WEEK_MS = 7 * DAY_MS;
   var MONTH_ABBR = ["Jan", "Feb", "Mar", "Apr", "May", "Jun",
                     "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
@@ -6363,6 +6507,8 @@ function mountVaultGraph(root, data, deps) {
    * @property {string[]} ids
    * @property {{ c: string, w: number }[]} parts   colour and weight per note drawn in the tile
    * @property {number} n        weighted count currently on screen
+   * @property {boolean} [bulk]  github#70 -- too big to be a day's work; see heatBuild
+   * @property {number} [bulkX]  how many times the median day this one is
    * @typedef {Object} Heat
    * @property {number} cols
    * @property {number} cell
@@ -6375,6 +6521,8 @@ function mountVaultGraph(root, data, deps) {
    * @property {number} before
    * @property {number} after
    * @property {number} undated
+   * @property {number} median    the median non-zero day, the bulk rule's yardstick
+   * @property {number} bulkDays
    * @property {number} dated
    * @property {number} w
    * @property {number} h
@@ -6441,7 +6589,7 @@ function mountVaultGraph(root, data, deps) {
     /** @type {Record<string, number>} */
     var all = dict();
     graph.forEachNode(function (id, a) {
-      var k = a.created;
+      var k = heatDateOf(a);
       if (!heatParse(k)) { undated++; return; }
       all[k] = (all[k] || 0) + 1;
       var d = days[k];
@@ -6466,9 +6614,42 @@ function mountVaultGraph(root, data, deps) {
       if (wn > nMax) nMax = wn;
     }
 
+    /**
+     * github#70. `mtime` is not a record of work: a rename pass, a sync or an import rewrites
+     * it in bulk, and design/0010 measured this vault's own worst case at 240 files "touched"
+     * on the day the folders were renumbered. So a day that cannot plausibly be a day's work
+     * is NAMED -- the tile is still painted full and its notes still count, because hiding
+     * data to make a lens look tidy is the failure this whole file argues against.
+     *
+     * TWO tests, because either alone has a measured hole:
+     *
+     *   - a MULTIPLE of the median day catches the renumbering case in a vault with a normal
+     *     spread of days -- but the median is dragged by the outlier itself when there are
+     *     few days. Measured on the dominant-folder fixture, whose 954 notes all carry one
+     *     mtime: 1 distinct day, median 954, so the day was 1x its own median and the one
+     *     genuine bulk day in the whole suite went unflagged.
+     *   - a SHARE of every dated note catches exactly that, and needs no spread to work. The
+     *     real vault's import day was 180 of 934, 19%; the renumbering day 240 of 934, 26%.
+     *
+     * The floor keeps both off a small vault, where 6x the median can be four notes.
+     */
+    var median = counts.length ? counts[Math.floor(counts.length / 2)] : 0;
+    var datedTotal = 0;
+    for (var t2 = 0; t2 < counts.length; t2++) datedTotal += counts[t2];
+    var bulkDays = 0;
+    for (var b = 0; b < keys.length; b++) {
+      var bd = days[keys[b]], bn = bd.ids.length;
+      bd.bulk = bn >= BULK_MIN &&
+        ((median > 0 && bn >= BULK_X * median) ||
+         (datedTotal > 0 && bn >= BULK_SHARE * datedTotal));
+      bd.bulkX = median > 0 ? Math.round(bn / median) : 0;
+      if (bd.bulk) bulkDays++;
+    }
+
     heat = {
       cols: cols, cell: cell, pitch: pitch, start: start, days: days, keys: keys,
       cuts: cuts, nMax: nMax, before: before, after: after, undated: undated,
+      median: median, bulkDays: bulkDays,
       dated: counts.length,
       w: HEAT_GUTTER + cols * pitch - HEAT_GAP + HEAT_ARROW_W,
       h: HEAT_MONTH_H + 7 * pitch - HEAT_GAP
@@ -6498,7 +6679,10 @@ function mountVaultGraph(root, data, deps) {
       "last " + cols + " weeks · " + inWin + " of " + graph.order + " notes" +
       (before ? " · " + before + " earlier" : "") +
       (after ? " · " + after + " later" : "") +
-      (undated ? " · " + undated + " undated" : "");
+      (undated ? " · " + undated + " undated" : "") +
+      // github#70 -- said in the readout as well as the tooltip, because a bulk day changes
+      // how the whole band should be read and a tooltip is only seen on purpose.
+      (bulkDays ? " · " + bulkDays + " bulk day" + (bulkDays === 1 ? "" : "s") : "");
 
     heatSig = "";
     heatDraw();
@@ -6560,10 +6744,11 @@ function mountVaultGraph(root, data, deps) {
     for (var i = 0; i < heat.keys.length; i++) {
       sig.push(Math.ceil(heat.days[heat.keys[i]].n * 4));
     }
-    sig.push(state.markDay || "", state.hoverDay || "", heat.cell);
+    sig.push(state.markDay || "", state.hoverDay || "", heat.cell, state.heatSource);
     sig = sig.join(",");
     if (sig === heatSig) return;
     heatSig = sig;
+    syncRecentUI();
 
     var dpr = window.devicePixelRatio || 1;
     var ctx = /** @type {CanvasRenderingContext2D} */ (cv.getContext("2d"));
@@ -6729,13 +6914,19 @@ function mountVaultGraph(root, data, deps) {
     }
     var top = Object.keys(by).sort(function (a, b) { return by[b] - by[a]; }).slice(0, 3);
     var wd = HEAT_WD[(new Date(d.ms).getUTCDay() + 6) % 7];
+    // github#70 -- the tooltip has always named the number; now it names the DATE too,
+    // because there are two and the reader cannot see which one the band chose.
+    var verb = state.heatSource === "touched" ? "touched" : "added";
     setHTML(t, '<div class="t">' + esc(d.key) + " · " + wd +
       (d.key === TODAY ? " · today" : "") + "</div>" +
       '<div class="m">' +
-      (n ? n + " note" + (n === 1 ? "" : "s") + " added" : "nothing added") +
+      (n ? n + " note" + (n === 1 ? "" : "s") + " " + verb : "nothing " + verb) +
       (top.length ? "<br>" + top.map(function (g2) {
         return '<b style="color:' + colorOf(g2) + '">■ </b> ' + esc(g2) + " " + by[g2];
       }).join("<br>") : "") +
+      (d.bulk ? "<br><i>" + (d.bulkX > 1 ? d.bulkX + "&times; the typical day here. " : "") +
+                "A sync, an import or a rename does this &mdash; it is not " +
+                "necessarily work.</i>" : "") +
       (n ? "<br><i>click to mark them on the disc</i>" : "") +
       "</div>");
     t.hidden = false;
@@ -6748,8 +6939,114 @@ function mountVaultGraph(root, data, deps) {
     t.style.top = (above >= 2 ? above : cy + heat.cell + 8) + "px";
   }
 
+  /**
+   * github#70. Every chip, every run: how many notes it would light RIGHT NOW -- counted
+   * against alpha, so a chip composes with the folder filter and the date range the way the
+   * band's own tiles do ("meeting notes touched this week" is two clicks, not a query).
+   * @param {string} kind
+   */
+  function recentCount(kind) {
+    var win = recentWindow(kind);
+    if (!win) return { n: 0, bulk: 0, win: null };
+    var n = 0, bulk = 0;
+    graph.forEachNode(function (id, a) {
+      if (!inRecent(win, a) || (alpha[id] || 0) <= 0.004) return;
+      n++;
+      // Only meaningful while the band is keyed by the same date the chips are; on `created`
+      // heat.days is keyed by the other one and the lookup would answer about a different day.
+      var d = heat && state.heatSource === "touched" ? heat.days[a.touched] : null;
+      if (d && d.bulk) bulk++;
+    });
+    return { n: n, bulk: bulk, win: win };
+  }
+
+  /**
+   * github#70 -- refresh the chip labels, counts and pressed state. Each chip costs a walk
+   * of the graph, so this is NOT called per frame: heatDraw calls it once it has decided to
+   * repaint, which is the same guard and the same cadence the band's own tiles get. A chip
+   * click calls it directly, because that changes no day count and so passes no guard.
+   */
+  function syncRecentUI() {
+    var box = $("recent");
+    if (!box) return;
+    var lbl = $("heatlbl");
+    if (lbl) {
+      var touched = state.heatSource === "touched";
+      lbl.textContent = touched ? "Notes touched" : "Notes added";
+      lbl.setAttribute("aria-pressed", touched ? "true" : "false");
+      lbl.title = touched
+        ? "The band is counting when each note was last TOUCHED (the file's own timestamp). " +
+          "A sync or a rename rewrites that in bulk, so a big day here is not always work. " +
+          "Click for notes added instead."
+        : "The band is counting when each note was ADDED. Click to count when it was last " +
+          "touched instead.";
+    }
+    var chips = box.querySelectorAll("button[data-kind]");
+    for (var i = 0; i < chips.length; i++) {
+      var btn = /** @type {HTMLButtonElement} */ (chips[i]);
+      var kind = btn.getAttribute("data-kind") || "";
+      var c = recentCount(kind);
+      var on = state.recent === kind;
+      btn.setAttribute("aria-pressed", on ? "true" : "false");
+      // A chip that matches nothing stays visible and says zero. Hiding it would make the
+      // page look as though the question could not be asked, which is a different claim.
+      btn.disabled = c.n === 0 && !on;
+      var cnt = btn.querySelector(".n");
+      if (cnt) cnt.textContent = String(c.n);
+      btn.title = c.win
+        ? c.n + " note" + (c.n === 1 ? "" : "s") + " " + c.win.label +
+          (c.bulk ? " · " + c.bulk + " of them on a bulk day, so probably a sync or a rename" : "") +
+          (c.n ? "" : " · nothing here yet")
+        : "";
+    }
+  }
+
+  function buildRecentUI() {
+    var box = $("recent");
+    if (!box) return;
+    // github#70, decisions/0009 -- the third chip exists only where a host can answer it.
+    // The exported page is a snapshot: it cannot know when it was last open, so the chip is
+    // never built rather than built and disabled, which would read as a broken feature.
+    var kinds = [
+      { kind: "today", label: "Today" },
+      { kind: "week", label: "This week" }
+    ];
+    if (lastOpen !== null) kinds.push({ kind: "open", label: "Since last open" });
+
+    kinds.forEach(function (k) {
+      var b = DOC.createElement("button");
+      b.type = "button";
+      b.className = "btn chip";
+      b.setAttribute("data-kind", k.kind);
+      b.setAttribute("aria-pressed", "false");
+      var t = DOC.createElement("span");
+      t.textContent = k.label;
+      var n = DOC.createElement("span");
+      n.className = "n";
+      b.appendChild(t);
+      b.appendChild(n);
+      b.addEventListener("click", function () {
+        // Radio-like: the active chip clears rather than re-applying. There is no "all"
+        // chip because no lens is the resting state, and that is what Refresh returns to.
+        setRecent(state.recent === k.kind ? null : k.kind);
+        syncRecentUI();
+        hlSync();
+        renderer.refresh();
+      });
+      box.appendChild(b);
+    });
+    syncRecentUI();
+  }
+
   function buildHeatmapUI() {
     var cv = /** @type {HTMLCanvasElement} */ ($("heatc"));
+    var lbl = $("heatlbl");
+    if (lbl) {
+      lbl.addEventListener("click", function () {
+        setHeatSource(state.heatSource === "touched" ? "created" : "touched");
+      });
+    }
+    buildRecentUI();
     /** @param {string | null} key */
     var setHover = function (key) {
       if (state.hoverDay === key) return;
@@ -8059,6 +8356,17 @@ function mountVaultGraph(root, data, deps) {
                       cascade(null, { colToggle: true });
                     },
                     heatBuild: heatBuild,
+                    // github#70 -- heatDateOf is the seam a day-contents list reads,
+                    // setRecent takes a reference day so a check need not wait for
+                    // the calendar to agree with the fixture.
+                    heatDateOf: heatDateOf,
+                    recentWindow: recentWindow,
+                    setHeatSource: setHeatSource,
+                    /** @param {string | null} kind @param {number} [refMs] */
+                    setRecent: function (kind, refMs) {
+                      setRecent(kind || null, refMs);
+                      syncRecentUI(); hlSync(); renderer.refresh();
+                    },
                     checkPlanParity: function () {
                       var shown = 0;
                       graph.forEachNode(function (id) { if (visible(id)) shown++; });
@@ -8248,7 +8556,8 @@ function mountVaultGraph(root, data, deps) {
                                    range: rangeLabel(),
                                    from: state.from, to: state.to, heatEnd: state.heatEnd,
                                    timelineUntil: state.until,
-                                   markDay: state.markDay, shown: pts.length },
+                                   markDay: state.markDay, shown: pts.length,
+                                   heatSource: state.heatSource, recent: state.recent },
                         room: { i: r3n(bandOf("i").room), o: r3n(bandOf("o").room) },
                         minArcDeg: r3(lastMinArc * 180 / Math.PI),
                         spacing: { spOuter: r3(bandOf("o").sp),
@@ -8406,7 +8715,12 @@ function mountVaultGraph(root, data, deps) {
                         busiest: top, inWindow: heat.keys.reduce(function (a, k) {
                           return a + heat.days[k].ids.length; }, 0),
                         earlier: heat.before, later: heat.after, undated: heat.undated,
-                        markDay: state.markDay, hoverDay: state.hoverDay
+                        markDay: state.markDay, hoverDay: state.hoverDay,
+                        // github#70
+                        heatSource: state.heatSource, recent: state.recent,
+                        median: heat.median, bulkDays: heat.bulkDays,
+                        bulk: heat.keys.filter(function (k) { return heat.days[k].bulk; }),
+                        recentLit: Object.keys(recentSet).length, recentT: recentT
                       };
                       return out;
                     },

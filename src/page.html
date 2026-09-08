@@ -52,7 +52,16 @@
   <main id="vg-stage">
     <div id="vg-heat">
       <div class="hrow">
-        <div class="lbl">Notes added</div>
+        <!-- github#70: the label IS the two-state control. What the band counts must always
+             be nameable (design/0010), and the name is already in this slot. -->
+        <button id="vg-heatlbl" class="lbl" type="button" aria-pressed="false">Notes added</button>
+        <div id="vg-recent" role="group" aria-label="Halo the notes touched recently">
+          <!-- github#70: the word is on screen, not only in the tooltips. The chips read
+               `touched` whatever the band counts, and a row where one control says
+               "added" and the next silently means "touched" is the lie design/0010 is
+               about. Rebuilt from script, so the span is the one static child. -->
+          <span class="rl">touched</span>
+        </div>
         <span id="vg-heatnote"></span>
         <div id="vg-heatscale" aria-hidden="true">
           <span>fewer</span><canvas id="vg-heatkey"></canvas><span>more</span>
@@ -129,7 +138,7 @@
           </svg>
         </button>
         <button id="vg-band" type="button" aria-pressed="false"
-                title="The notes-added calendar and the date strip" aria-label="Show the calendar">
+                title="The calendar of notes added or touched, and the date strip" aria-label="Show the calendar">
           <svg viewBox="0 0 16 16" width="17" height="17" aria-hidden="true" focusable="false">
             <rect x="2.2" y="3.2" width="11.6" height="9.6" rx="1.4" fill="none"
                   stroke="currentColor" stroke-width="1.4"/>

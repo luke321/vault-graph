@@ -429,6 +429,87 @@ button owned moved onto `state.markDay`, and `smoke.mjs` follows it: *a marked h
 recolours its notes* asserts the fill changes on pick and comes back on clear, which the two
 deleted `mark today` checks were the only cover for.
 
+## A recent chip haloes and dims, but never pushes (github#70)
+
+The three chips above the band — Today, This week, Since last open — light the notes whose
+`touched` falls in their window and mix everything else toward `--dim`. Both halves ride the
+existing highlight ramp; neither moves anything, for the reason a marked day does not: a
+day's notes are scattered across every wedge, so pushing a subset slides it out *through*
+its cell-mates.
+
+```bash
+node scripts/smoke.mjs --only "recent chip"
+```
+
+Measured on the three fixtures, each against **its own newest touched day** rather than the
+clock (see the next paragraph): demo **115 haloed, 0 pushed, 0 moved**; dominant-folder
+**954 haloed, 0 pushed, 0 moved**; 10k **2 haloed, 0 pushed, 0 moved**. The dim is colour
+only — no size and no alpha multiplier — so a dot the cascade is still walking is untouched
+by it, and the resting-size law is not in play. Round trip on the demo: a non-matching note
+goes `#d95926 → #2a2a28 → #d95926`.
+
+**No check here may key on the real clock, and this is not a style preference.** Measured
+2026-09-08: the newest `touched` day is 2026-09-05 on the demo and dominant-folder fixtures
+and 2026-08-28 on the 10k, so *Today* and *This week* light **0 notes on all three** — a
+check written against `new Date()` passes by asserting nothing, and does so more thoroughly
+every day as the two ageing fixtures regenerate forward and the pinned 10k does not. This is
+the same trap the 10k's pinned `--end` exists to avoid. `__vg.setRecent(kind, refMs)` and
+`__vg.recentWindow(kind, refMs)` both take a reference day for exactly this reason.
+
+## The band counts the date it names (github#70)
+
+`design/0010` already required that clicking a square mark exactly the notes that square
+counted. With two possible sources the rule needs enforcing rather than observing, so every
+band reader goes through one accessor, `heatDateOf`, and a check drives both sources and
+asserts that every note in a tile carries that tile's own date.
+
+```bash
+node scripts/smoke.mjs --only "band counts" --only "picked day marks"
+```
+
+Measured, added → touched: demo **1,091 → 1,165** notes in window (busiest day 37 → 40),
+dominant-folder **762 → 954** (busiest 3 on 2025-09-15 → 954 on 2026-09-05), 10k
+**1,275 → 1,295** (busiest 50 → 54). Wrong-dated notes in a tile: **0 of 1,165 / 954 /
+1,295**. Picked-day mismatches at each busiest day, both sources: **0**. Positions moved by
+the switch: **0** on all three — `touched` is read by nothing upstream of the plan, so the
+golden snapshots cannot move and do not.
+
+The label itself is the control (`Notes added` / `Notes touched`), because the count must be
+nameable and the name was already in that slot.
+
+## A bulk day is named, not hidden (github#70)
+
+`mtime` is not a record of work: a sync, an import or a rename rewrites it in bulk, and
+`design/0010` measured this vault's own worst case at 240 files "touched" on the day the
+folders were renumbered. A day too big to be a day's work is therefore **flagged and said
+aloud** — in the tooltip, in the readout, and in every chip's count — while its tile stays
+painted in full and its notes stay counted. Hiding data to make a lens look tidy is the
+failure this project keeps re-learning.
+
+```bash
+node scripts/smoke.mjs --only "bulk day is named"
+```
+
+`BULK_MIN = 25`, `BULK_X = 20`, `BULK_SHARE = 0.15`: a day is bulk when it holds at least 25
+notes **and** is either 20× the median day **or** 15% of every dated note.
+
+| Fixture | Notes | Days | Median | Busiest | Flagged |
+|---|---:|---:|---:|---:|---|
+| demo | 1,403 | 553 | 1 | 40 | 2026-09-05 |
+| 10k | 10,002 | 3,397 | 3 | 54 | none |
+| dominant-folder | 954 | **1** | **954** | **954** | 2026-09-05 |
+
+**Both clauses are load-bearing, and the multiple alone was measured failing.** The
+dominant-folder generator never stamps mtime, so all 954 notes share one day — and with a
+single day in the distribution the median *is* the outlier, making it 1× its own median.
+Built with the multiple test alone, the rule left the only genuine bulk day in the whole
+suite unflagged while flagging two ordinary busy days on the 10k (25 and 54 notes out of
+10,002). The share clause catches the degenerate case and needs no spread to work; the real
+vault's import day (180 of 934, 19%) and renumbering day (240 of 934, 26%) clear both.
+
+The check recomputes the rule from the day counts on its own rather than asking the page —
+a check that reads back the page's own answer agrees with any rule, including a broken one.
+
 ## `skipIndexation` is a promise, and only hlWalk can keep it
 
 `renderer.refresh({ skipIndexation: true })` told Sigma "nothing moved, do not rebuild the
@@ -485,9 +566,12 @@ Get-CimInstance Win32_Process -Filter "Name='chrome.exe'" |
 ## Every highlight source belongs in the signature
 
 `isHighlighted` answers yes for a clicked group, a clicked subfolder path, a marked heatmap
-day, a hovered day or year, and — since 2026-08-23 — a hovered legend row
-(`state.hoverGroup` / `state.hoverPath`). ("Mark today" was a sixth until 1.7.0 removed the
-button; the band's picked day absorbed it.) Every one of them feeds the same per-note ramp,
+day, a hovered day or year, since 2026-08-23 a hovered legend row (`state.hoverGroup` /
+`state.hoverPath`), and since github#70 **an armed recent chip** (`state.recent`) — plus
+`state.heatSource`, which is not itself a highlight but decides *which date* `isMarkedDay`
+compares, so it changes who is lit without `state.markDay` moving at all. ("Mark today" was
+a sixth until 1.7.0 removed the button; the band's picked day absorbed it.)
+Every one of them feeds the same per-note ramp,
 and every one must appear in `hlSignature`: that signature decides whether the per-note
 sweep runs at all, so a source missing from it is a source whose highlight silently never
 ramps.
