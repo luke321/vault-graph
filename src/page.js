@@ -449,7 +449,9 @@ function mountVaultGraph(root, data, deps) {
 
   /** @param {string} g */
   function hiddenByDefault(g) {
-    if (typeof folderShown[g] === "boolean") return !folderShown[g];
+    // github#76
+    var k = identOf(g);
+    if (typeof folderShown[k] === "boolean") return !folderShown[k];
     return isArchiveGroup(g);
   }
   var SETTINGS_UI = !!deps.settingsUI;
@@ -648,6 +650,21 @@ function mountVaultGraph(root, data, deps) {
     return p.split("/")[rootDepth] || DIRECT;
   }
 
+  /* ---------------------------------------------------- identity vs display name */
+  // github#76
+
+  /** @param {string} g a group of the CURRENT basis @returns {string} the folder path it is */
+  function identOf(g) {
+    if (!rootDepth || g === UNLINKED) return g;
+    return absOf(g);
+  }
+  /** @param {string} id @returns {string} the folder path of the wedge this note sits in */
+  function identOfNode(id) {
+    var g = groupOf(id);
+    if (!rootDepth || g === UNLINKED) return g;
+    return inRootA(graph.getNodeAttributes(id)) ? absOf(g) : g;
+  }
+
   /** @type {Record<string, string[]>} */
   var subOrder = dict();
   /** @type {Record<string, number>} */
@@ -759,15 +776,15 @@ function mountVaultGraph(root, data, deps) {
 
     var names = order[state.dim] || [];
 
-    // github#76
     /** @type {SlotMap} */
-    var byFolder = state.dim === "folder" && !rootDepth ? folderColors : dict();
+    var byFolder = state.dim === "folder" ? folderColors : dict();
 
     groupSlot = dict();
     groupAutoSlot = dict();
     var auto = 0;
     names.forEach(function (g) {
-      var k = byFolder[g];
+      // github#76
+      var k = byFolder[identOf(g)];
       var picked = (k && THEME.byKey[k]) ? k : "";
 
       // github#3
@@ -822,8 +839,9 @@ function mountVaultGraph(root, data, deps) {
 
   /** @param {string} g */
   function groupHasPinnedSub(g) {
+    // github#76
     return (subOrder[g] || []).some(function (sb) {
-      return !!subfolderColors[g + "/" + sb];
+      return !!subfolderColors[keyOf(g, sb)];
     });
   }
 
@@ -986,10 +1004,11 @@ function mountVaultGraph(root, data, deps) {
         ? (THEME.dark ? Math.min(SUB_L_LIMIT, lab[0] + SUB_L_SPAN)
                       : Math.max(1 - SUB_L_LIMIT, lab[0] - SUB_L_SPAN))
         : 0;
+      // github#76
       subs.forEach(function (sb) {
         var pk = f + "/" + sb;
         // github#76
-        var pin = rootDepth ? "" : subfolderColors[pk];
+        var pin = subfolderColors[keyOf(f, sb)];
         if (pin && THEME.byKey[pin]) {
           subShade[pk] = THEME.byKey[pin];
           subSlot[pk] = pin;
@@ -2698,7 +2717,8 @@ function mountVaultGraph(root, data, deps) {
   /** @param {string} id */
   function isHighlighted(id) {
     if (isMarkedDay(id)) return true;
-    var g = groupOf(id);
+    // github#76
+    var g = identOfNode(id);
     if (state.highlight[g]) return true;
     if (state.hoverGroup === g) return true;
     var a = graph.getNodeAttributes(id), d = a.dirs || [];
@@ -3050,7 +3070,8 @@ function mountVaultGraph(root, data, deps) {
 
   /** @param {string} id */
   function isPushed(id) {
-    if (state.highlight[groupOf(id)]) return true;
+    // github#76
+    if (state.highlight[identOfNode(id)]) return true;
     var a = graph.getNodeAttributes(id);
     // github#76, decisions/0004
     var g = relGroup(a), sb = relSub(a);
@@ -5220,8 +5241,8 @@ function mountVaultGraph(root, data, deps) {
       var hasSubs = state.dim === "folder" &&
                     (groupHasPinnedSub(g) ||
                      ((subOrder[g] || []).length > 1 && (counts[g] || 0) >= NEST_MIN));
-      var open = hasSubs && !state.collapsed[g];
-      var hl = !!state.highlight[g];
+      var open = hasSubs && !state.collapsed[identOf(g)];
+      var hl = !!state.highlight[identOf(g)];
 
       // github#50
       var live = !!counts[g];
@@ -5279,7 +5300,7 @@ function mountVaultGraph(root, data, deps) {
         if (tail.length) {
           var n = 0;
           tail.forEach(function (sb) { n += subCount[g + "/" + sb] || 0; });
-          var tOpen = !!state.tailOpen[g];
+          var tOpen = !!state.tailOpen[identOf(g)];
           row += srow(subShade[g + "/" + tail[0]] || colorOf(g),
                       tail.length + " smaller subfolders", n,
                       tail.map(function (_, j) { return SUB_NAMED + j; }), 1,
@@ -5363,10 +5384,11 @@ function mountVaultGraph(root, data, deps) {
     });
     each("[data-tw]", function (b) {
       var g = b.getAttribute("data-tw");
-      b.onmouseenter = function () { hoverHighlight(g, null); };
+      b.onmouseenter = function () { hoverHighlight(identOf(g), null); };
       b.onmouseleave = function () { hoverHighlight(null, null); };
       b.onclick = function () {
-        if (state.collapsed[g]) delete state.collapsed[g]; else state.collapsed[g] = true;
+        var ck = identOf(g);
+        if (state.collapsed[ck]) delete state.collapsed[ck]; else state.collapsed[ck] = true;
         buildLegend();
         if (refreshSettingsPanel) refreshSettingsPanel();
       };
@@ -5409,7 +5431,8 @@ function mountVaultGraph(root, data, deps) {
     each("[data-twtail]", function (b) {
       b.onclick = function () {
         var g = b.getAttribute("data-twtail");
-        if (state.tailOpen[g]) delete state.tailOpen[g]; else state.tailOpen[g] = true;
+        var tk = identOf(g);
+        if (state.tailOpen[tk]) delete state.tailOpen[tk]; else state.tailOpen[tk] = true;
         buildLegend();
       };
     });
@@ -5478,7 +5501,7 @@ function mountVaultGraph(root, data, deps) {
 
     each(".lg[data-g]", function (b) {
       var g = b.getAttribute("data-g");
-      b.onmouseenter = function () { hoverHighlight(g, null); };
+      b.onmouseenter = function () { hoverHighlight(identOf(g), null); };
       b.onmouseleave = function () { hoverHighlight(null, null); };
       b.onclick = function (ev) {
         if (ev.target && /** @type {Element} */ (ev.target).getAttribute("data-only")) {
@@ -5488,7 +5511,9 @@ function mountVaultGraph(root, data, deps) {
           cascade(null, { colToggle: true });
           return;
         }
-        if (state.highlight[g]) delete state.highlight[g]; else state.highlight[g] = true;
+        // github#76
+        var hk = identOf(g);
+        if (state.highlight[hk]) delete state.highlight[hk]; else state.highlight[hk] = true;
         buildLegend();
         applyLayout(true);
         renderer.refresh();
@@ -5517,13 +5542,21 @@ function mountVaultGraph(root, data, deps) {
       } else if (hitPath) {
         hoverHighlight(null, [hitPath.getAttribute("data-hpath")]);
       } else if (hit) {
-        hoverHighlight(hit.getAttribute("data-g"), null);
+        hoverHighlight(identOf(hit.getAttribute("data-g")), null);
       }
     }
   }
 
   function seedHidden() {
     var h = state.hidden[state.dim] = dict();
+    // github#76
+    if (rootDepth) {
+      (order[state.dim] || []).forEach(function (g) {
+        if (!hiddenByDefault(g)) return;
+        if (g === UNLINKED) h[g] = true; else state.hiddenSub[identOf(g)] = true;
+      });
+      return;
+    }
     (order[state.dim] || []).forEach(function (g) {
       if (hiddenByDefault(g)) h[g] = true;
     });
@@ -5531,7 +5564,7 @@ function mountVaultGraph(root, data, deps) {
 
   function collapseAll() {
     state.collapsed = dict();
-    (order[state.dim] || []).forEach(function (g) { state.collapsed[g] = true; });
+    (order[state.dim] || []).forEach(function (g) { state.collapsed[identOf(g)] = true; });
   }
   var collapsedInit = false;
 
@@ -5897,7 +5930,8 @@ function mountVaultGraph(root, data, deps) {
         var tw = t.closest("[data-stw]");
         if (tw) {
           var fg = tw.getAttribute("data-stw");
-          if (state.collapsed[fg]) delete state.collapsed[fg]; else state.collapsed[fg] = true;
+          var fk = identOf(fg);
+          if (state.collapsed[fk]) delete state.collapsed[fk]; else state.collapsed[fk] = true;
           buildSettings();
           buildLegend();
           return;
@@ -6030,7 +6064,8 @@ function mountVaultGraph(root, data, deps) {
         var g = gBtn.getAttribute("data-g");
         var isUnlinked = g === UNLINKED;
         var keptSeparate = isUnlinked && !unlinkedByFolder;
-        openCtxMenu(ev.clientX, ev.clientY, folderColors[g] || groupSlot[g] || "",
+        // github#76
+        openCtxMenu(ev.clientX, ev.clientY, folderColors[identOf(g)] || groupSlot[g] || "",
                     function (key) { pickColor(g, key); }, groupAutoSlot[g] || "",
                     !hiddenByDefault(g), function () { pickVisible(g); },
                     isUnlinked ? unlinkedByFolder : undefined,
@@ -6046,7 +6081,8 @@ function mountVaultGraph(root, data, deps) {
         var subs = subOrder[f] || [];
         var idx = subBtn.getAttribute("data-idx").split(",").map(Number);
         var picked = idx.map(function (i) { return subs[i]; });
-        var cur = idx.length === 1 ? (subfolderColors[f + "/" + picked[0]] || "") : "";
+        // github#76
+        var cur = idx.length === 1 ? (subfolderColors[keyOf(f, picked[0])] || "") : "";
         openCtxMenu(ev.clientX, ev.clientY, cur,
                     function (key) { pickSubColors(f, picked, key); });
         return;
@@ -6059,8 +6095,10 @@ function mountVaultGraph(root, data, deps) {
       /** @type {SlotMap} */
       var next = dict();
       if (folder) {
+        // github#76
+        var fk = identOf(folder);
         Object.keys(folderColors).forEach(function (g) { next[g] = folderColors[g]; });
-        if (key) next[folder] = key; else delete next[folder];
+        if (key) next[fk] = key; else delete next[fk];
       }
       var saved = applyFolderColors(next);
       if (saveFolderColors) saveFolderColors(Object.assign({}, saved));
@@ -6072,8 +6110,9 @@ function mountVaultGraph(root, data, deps) {
       /** @type {SlotMap} */
       var next = dict();
       Object.keys(subfolderColors).forEach(function (k) { next[k] = subfolderColors[k]; });
+      // github#76
       subs.forEach(function (sb) {
-        var pk = folder + "/" + sb;
+        var pk = keyOf(folder, sb);
         if (key) next[pk] = key; else delete next[pk];
       });
       var saved = applySubfolderColors(next);
@@ -6085,12 +6124,20 @@ function mountVaultGraph(root, data, deps) {
     function pickVisible(folder) {
       /** @type {Record<string, boolean>} */
       var next = dict();
+      // github#76
+      var vk = identOf(folder);
       Object.keys(folderShown).forEach(function (g) { next[g] = folderShown[g]; });
-      next[folder] = hiddenByDefault(folder);
+      next[vk] = hiddenByDefault(folder);
       var saved = applyFolderShown(next);
       if (saveFolderShown) saveFolderShown(Object.assign({}, saved));
-      var h = state.hidden[state.dim] || (state.hidden[state.dim] = dict());
-      if (hiddenByDefault(folder)) h[folder] = true; else delete h[folder];
+      // github#76
+      var nowHidden = !next[vk];
+      if (rootDepth && folder !== UNLINKED) {
+        if (nowHidden) state.hiddenSub[vk] = true; else delete state.hiddenSub[vk];
+      } else {
+        var h = state.hidden[state.dim] || (state.hidden[state.dim] = dict());
+        if (nowHidden) h[folder] = true; else delete h[folder];
+      }
       buildLegend();
       cascade(null, { colToggle: true });
       buildSettings();
@@ -6099,8 +6146,9 @@ function mountVaultGraph(root, data, deps) {
     /** @param {string} g @param {PaletteSlot[]} pal */
     function subfolderRows(g, pal) {
       return (subOrder[g] || []).map(function (sb) {
+        // github#76
         var pk = g + "/" + sb;
-        var pin = subfolderColors[pk] || "";
+        var pin = subfolderColors[keyOf(g, sb)] || "";
         var tint = subShade[pk] || colorOf(g);
         var nm = sb || "(directly in folder)";
         var sws = swatchButtonsHTML(pal, {
@@ -6152,7 +6200,8 @@ function mountVaultGraph(root, data, deps) {
     function buildSettings() {
       var pal = paletteInfo();
       var rows = (order[state.dim] || []).map(function (g) {
-        var pinned = folderColors[g] || "";
+        // github#76
+        var pinned = folderColors[identOf(g)] || "";
         var cur = pinned || groupSlot[g] || "";
         // github#29
         var autoKey = groupAutoSlot[g] || "";
@@ -6166,7 +6215,7 @@ function mountVaultGraph(root, data, deps) {
         var hasSubs = state.dim === "folder" &&
                       (groupHasPinnedSub(g) ||
                        ((subOrder[g] || []).length > 1 && (counts[g] || 0) >= NEST_MIN));
-        var open = hasSubs && !state.collapsed[g];
+        var open = hasSubs && !state.collapsed[identOf(g)];
         return '<div class="scr" role="radiogroup" aria-label="Colour for ' + esc(g) + '">' +
                '<div class="scrh">' +
                twBtn(hasSubs ? 'data-stw="' + esc(g) + '"' : null, open) +

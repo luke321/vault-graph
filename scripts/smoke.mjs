@@ -3454,6 +3454,61 @@ check("a drilled disc obeys the same laws as the vault disc", async (p) => {
     `zero-weight with ${JSON.stringify(zero.g)} hidden: ${zero.ok} (maxR ${zero.lean} vs ${zero.padded})` };
 });
 
+// github#76
+check("a drilled control writes an absolute folder identity, not a display name", async (p) => {
+  const dd = await p.j("__vg.debugDump()");
+  const found = drillSnapshot(dd.vault.name);
+  if (!found) return { ok: true, detail: `NOT ASSERTED: "${dd.vault.name}" has no drilled golden` };
+  const root = found.snap.root;
+  await withRoot(p, root);
+
+  const r = await p.j(`(function(){
+    var g = __vg.groupOrder().filter(function (x) { return __vg.groupCount(x) > 0; })[0];
+    var sel = '#vg-legend .lg[data-g="' + g.replace(/"/g, '\\\\"') + '"]';
+    var row = document.querySelector(sel);
+    if (!row) return { g: g, row: false };
+    row.click();
+    var hlKeys = Object.keys(__vg.state.highlight);
+
+    // github#76
+    row = document.querySelector(sel);
+    var rect = row.getBoundingClientRect();
+    row.dispatchEvent(new MouseEvent("contextmenu",
+      { bubbles: true, cancelable: true, clientX: rect.left + 8, clientY: rect.top + 8 }));
+    var menu = document.querySelector("#vg-ctxmenu");
+    var sw = menu && !menu.hidden ? menu.querySelector('[data-key="g9"]') : null;
+    if (sw) sw.click();
+    var colKeys = Object.keys(__vg.folderColors);
+
+    var outside = 0;
+    __vg.graph.forEachNode(function (id) {
+      if (__vg.isHighlighted(id) && !__vg.inRoot(id)) outside++;
+    });
+    return { g: g, row: true, picked: !!sw, hlKeys: hlKeys, colKeys: colKeys, outside: outside };
+  })()`);
+
+  const want = root + "/" + r.g;
+  const hlOk = r.hlKeys.length === 1 && (r.hlKeys[0] === want || r.hlKeys[0] === root + "/");
+  // github#76
+  const colOk = r.picked && r.colKeys.length > 0 &&
+                r.colKeys.every((k) => k.indexOf(root + "/") === 0);
+
+  await p.eval(`__vg.state.highlight = {}; __vg.setFolderColors({}); void 0`);
+  await withRoot(p, null);
+  const leaked = await p.j(`(function(){ var n = 0;
+    __vg.graph.forEachNode(function (id) { if (__vg.isHighlighted(id)) n++; });
+    return { hl: n, colours: Object.keys(__vg.folderColors).length }; })()`);
+
+  const ok = r.row && hlOk && colOk && r.outside === 0 && leaked.hl === 0 && leaked.colours === 0;
+  return {
+    ok,
+    detail: `root ${JSON.stringify(root)}, child ${JSON.stringify(r.g)}: highlight keys ` +
+      `${JSON.stringify(r.hlKeys)} (want ["${want}"]), ${r.outside} highlighted notes outside the root; ` +
+      `colour pick ${r.picked ? "made" : "NOT OFFERED"}, saved keys ${JSON.stringify(r.colKeys)}; ` +
+      `after leaving: ${leaked.hl} highlighted, ${leaked.colours} overrides`,
+  };
+});
+
 check("a drill animates, and settle() is still a no-op at the end of it", async (p) => {
   const dd = await p.j("__vg.debugDump()");
   const found = drillSnapshot(dd.vault.name);

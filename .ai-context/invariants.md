@@ -1507,6 +1507,50 @@ with its siblings, because the vault's own child list already ranks that bucket 
 Checked as part of the identity check above: the wedge order after a round trip is
 compared as a string, so a re-sort in either direction fails.
 
+## What a group IS is not what the legend CALLS it
+
+github#76, found by review on 2026-09-08 and reproduced in a browser before being fixed.
+`groupOf` returns a **display name**. Under a root that name is a child folder's name,
+and a child can share it with a completely different top-level folder. Anything that
+stores a group in state which **outlives the drill** must store the folder's absolute
+path instead.
+
+The collision vault: a top-level `People`, and a `Resources/People`.
+
+```
+node scripts/drill-identity-check.mjs        # 9 assertions, its own 4-note vault
+node scripts/smoke.mjs --only "absolute folder identity"
+```
+
+Four channels were wrong, all measured on that vault before the fix:
+
+| channel | what it did while rooted at `Resources` |
+|---|---|
+| saved colour | picking g9 on the child saved `folderColors: { People: g9 }`, and the **top-level** `People` went g1 → g9 on return |
+| default visibility | the toggle saved `folderShown: { People: false }` and **hid `People/Outside.md`** in the vault disc |
+| group highlight | `state.highlight.People` lit `People/Outside.md` and not `Resources/People/Inside.md` |
+| subfolder colour | the picker saved the vault-level key `People/` |
+
+After: every one of those keys is `Resources/People`, the top-level folder holds g1, and
+`People/Outside.md` stays visible and unhighlighted. The child still recolours — the
+override is *applied*, not merely made safe, which is the half a "disable it" fix would
+have missed.
+
+**The contract.** `identOf(g)` maps a group of the current basis to its folder path;
+`identOfNode(id)` maps a note to the path of the wedge it sits in. At root depth 0 both
+return the name unchanged, so the vault disc is byte-identical and existing saved maps —
+keyed by top-level folder name, which *is* that folder's path — keep working untouched.
+One rule decides where the mapping happens: **the pick functions own it**, so every caller
+keeps passing what the legend shows. `state.collapsed` and `state.tailOpen` went the same
+way; they are only chrome, but a drilled child was inheriting a top-level folder's twisty.
+
+**Two traps this hit while being checked, both worth knowing.** A group row's `click()`
+rebuilds the legend, so the node you clicked is **detached** and a `contextmenu` dispatched
+on it never reaches the delegated handler on `#vg-legend` — re-query between the two, or
+the colour half of the assertion silently never runs. And an assertion over "keys that look
+wrong" passes vacuously when there are no keys at all: both this check and the harness
+require the pick to have actually been offered and made.
+
 ## A row-0 dot may not eat past a fixed share of the hub's own radius
 
 github#35, the dot-sizing half (the hub-boundary-*position* half shipped separately in
