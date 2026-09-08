@@ -79,7 +79,7 @@ the notes whose `touched` falls in its window and dims the rest -- 0 moved, 0 pu
 measured on all three fixtures, the same result and for the same reason as a picked day.
 
 They read `touched` **always**, whichever date the band is counting, and they say so: the
-group is labelled "touched", every tooltip repeats it. Two controls in one row quietly
+word sits on screen beside them and every tooltip repeats it. Two controls in one row quietly
 answering to two different dates is exactly the lie this file exists to prevent, so the fix
 is to name it rather than to make the chips follow the band and lose the question the issue
 was raised to answer.

@@ -467,22 +467,25 @@
   .vault-graph #vg-heatlbl:hover { color: var(--text-1); }
   .vault-graph #vg-heatlbl[aria-pressed="true"] { color: var(--today); }
   .vault-graph #vg-recent { display: flex; align-items: center; gap: 4px; flex: 0 0 auto; }
+  /* The colon and the rule are doing one job: "NOTES ADDED" and "TOUCHED" sit next to each
+     other and without a break they read as one phrase, which says the opposite of what the
+     two controls mean. */
   .vault-graph #vg-recent .rl {
     font-size: 10px; text-transform: uppercase; letter-spacing: .08em;
     color: var(--text-3); font-weight: 600;
+    padding-left: 10px; border-left: 1px solid var(--border);
   }
   .vault-graph #vg-recent .chip {
     display: inline-flex; align-items: center; gap: 4px; white-space: nowrap;
   }
-  /* --today is the halo's own colour, so an armed chip and the notes it lit are the same
-     hue. It is deliberately not one of the ten group tints (design/0010). */
-  .vault-graph #vg-recent .chip[aria-pressed="true"] {
-    border-color: var(--today); color: var(--today);
-  }
+  /* An armed chip wears the page's ONE pressed treatment (button.btn[aria-pressed]),
+     accent-filled like every other toggle here. Colouring it --today to match the halo it
+     casts was tried and dropped: a second "on" colour makes the reader learn two, and the
+     halo is already named by the disc lighting up underneath. */
   .vault-graph #vg-recent .chip .n {
     font-variant-numeric: tabular-nums; color: var(--text-3); font-size: 10px;
   }
-  .vault-graph #vg-recent .chip[aria-pressed="true"] .n { color: var(--today); }
+  .vault-graph #vg-recent .chip[aria-pressed="true"] .n { color: #fff; opacity: .8; }
   /* A chip matching nothing still says so -- see syncRecentUI. */
   .vault-graph #vg-recent .chip:disabled { opacity: .45; cursor: default; }
   .vault-graph #vg-heatscale {

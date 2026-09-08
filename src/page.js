@@ -2661,6 +2661,14 @@ function mountVaultGraph(root, data, deps) {
   var recentSet = dict();
   /** How far the non-matching notes have dimmed, 0..1. Walked by hlWalk. */
   var recentT = 0;
+  /**
+   * The reference day the armed window was built from, or null for "ask the clock". It has
+   * to be remembered rather than re-derived: a check arms a chip against the fixture's own
+   * newest touched day, and a chip whose label counted a different window from the one
+   * lighting the disc would be the band's own dishonesty problem in miniature.
+   * @type {number | null}
+   */
+  var recentRef = null;
 
   /**
    * The window a chip stands for, in day keys -- `touched` is a YYYY-MM-DD string, so a day
@@ -2696,6 +2704,7 @@ function mountVaultGraph(root, data, deps) {
   function setRecent(kind, refMs) {
     var win = kind ? recentWindow(kind, refMs) : null;
     state.recent = win ? kind : null;
+    recentRef = win && typeof refMs === "number" && isFinite(refMs) ? refMs : null;
     recentSet = dict();
     if (win) {
       graph.forEachNode(function (id, a) { if (inRecent(win, a)) recentSet[id] = true; });
@@ -6946,7 +6955,8 @@ function mountVaultGraph(root, data, deps) {
    * @param {string} kind
    */
   function recentCount(kind) {
-    var win = recentWindow(kind);
+    var win = recentWindow(kind, state.recent === kind && recentRef !== null
+      ? recentRef : undefined);
     if (!win) return { n: 0, bulk: 0, win: null };
     var n = 0, bulk = 0;
     graph.forEachNode(function (id, a) {
