@@ -7958,9 +7958,8 @@ function mountVaultGraph(root, data, deps) {
   }
 
   // github#34, github#73
-  // github#82 -- collapse ends folded, so the hero must not play it
-  var FULL_RUN_EXCLUDES = ["subfoldercolor", "hiddenbydefault", "yearchip", "only05",
-                           "collapse", "mobile"];
+  // github#82 -- collapse closes the hero: it is the last act and ends folded
+  var FULL_RUN_EXCLUDES = ["subfoldercolor", "hiddenbydefault", "yearchip", "only05", "mobile"];
 
   /** @returns {DemoBeat[]} */
   function demoFullStoryboard() {

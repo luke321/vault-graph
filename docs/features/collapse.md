@@ -30,9 +30,10 @@ already makes.
 
 ## Where it lives in the storyboard
 
-`act: "collapse"` in `demoMode()` (`src/page.js`). It is in `FULL_RUN_EXCLUDES`, so the hero
-never plays it — the act ends with both panels folded, and the hero's later beats point at a
-legend that would no longer be drawn.
+`act: "collapse"` in `demoMode()` (`src/page.js`). It **closes the full walk**: it is the last
+act in the storyboard, so nothing after it needs the legend it folds away, and the hero ends on
+the disc with the window to itself. It was excluded from the full run when it first landed, for
+exactly the reason that ordering removes.
 
 **Record this one wide.** Below 720 px the same two buttons summon a sheet instead, so the fold
 has nothing to show there. The calendar goes first, because it is the fold that changes the dot
@@ -72,5 +73,5 @@ node scripts/mobile-check.mjs --device iphone14  # the sheet below the breakpoin
 
 | | |
 |---|---|
-| **Introduced in** | `github#82` |
+| **Introduced in** | `2.2.0 (github#82)` |
 | **Last re-recorded** | `2026-09-08` — 6.7 s at 1586x992, encoded at 960 px (0.12 MB) |
