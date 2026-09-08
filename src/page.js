@@ -6133,11 +6133,27 @@ function mountVaultGraph(root, data, deps) {
     if (renderer) renderer.render();
   }
 
+  // github#82 -- it rides a corner that moves; animate the gap away
+  /** @param {() => void} apply */
+  function glidePanels(apply) {
+    var el = $("mob");
+    var still = WIN.matchMedia && WIN.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    if (!el || still || !el.animate) { apply(); return; }
+    var was = el.getBoundingClientRect();
+    apply();
+    var now = el.getBoundingClientRect();
+    var dx = Math.round(was.left - now.left), dy = Math.round(was.top - now.top);
+    if (!dx && !dy) return;
+    el.animate([{ transform: "translate(" + dx + "px, " + dy + "px)" },
+                { transform: "none" }],
+               { duration: 180, easing: "ease-out" });
+  }
+
   // github#82 -- quiet is the mount restoring; else it is a change
   /** @param {boolean} on @param {boolean} [quiet] */
   function setSheet(on, quiet) {
     sheetOpen = !!on;
-    ROOT.setAttribute("data-sheet", sheetOpen ? "on" : "off");
+    glidePanels(function () { ROOT.setAttribute("data-sheet", sheetOpen ? "on" : "off"); });
     var b = $("sheet");
     if (b) {
       b.setAttribute("aria-expanded", sheetOpen ? "true" : "false");
@@ -6152,7 +6168,7 @@ function mountVaultGraph(root, data, deps) {
   /** @param {boolean} on @param {boolean} [quiet] */
   function setBand(on, quiet) {
     bandOpen = !!on;
-    ROOT.setAttribute("data-band", bandOpen ? "on" : "off");
+    glidePanels(function () { ROOT.setAttribute("data-band", bandOpen ? "on" : "off"); });
     var b = $("band");
     if (b) {
       b.setAttribute("aria-pressed", bandOpen ? "true" : "false");
@@ -7738,6 +7754,10 @@ function mountVaultGraph(root, data, deps) {
         why: "or click a crumb to jump straight back to it -- the trail truncates there" },
       { settle: true, act: "hoptrail", why: "let the walk unwind" },
       { click: true, target: ["detailclose"], act: "hoptrail", why: "close the card -- the trail ends with it" },
+      // github#82 -- an act that flies the camera hands it back fitted
+      { click: true, target: ["id", "reset"], act: "hoptrail",
+        why: "fit the disc again -- a walk moves the camera, and the acts after it aim at notes" },
+      { settle: true, act: "hoptrail", why: "let the camera come home" },
 
       { drag: true, target: ["biginner"], act: "pin", to: ["stage", "centre"],
         why: "drag a note into the hole to pin it" },
@@ -7958,9 +7978,8 @@ function mountVaultGraph(root, data, deps) {
   }
 
   // github#34, github#73
-  // github#82 -- collapse ends folded, so the hero must not play it
-  var FULL_RUN_EXCLUDES = ["subfoldercolor", "hiddenbydefault", "yearchip", "only05",
-                           "collapse", "mobile"];
+  // github#82 -- collapse closes the hero: it is the last act and ends folded
+  var FULL_RUN_EXCLUDES = ["subfoldercolor", "hiddenbydefault", "yearchip", "only05", "mobile"];
 
   /** @returns {DemoBeat[]} */
   function demoFullStoryboard() {

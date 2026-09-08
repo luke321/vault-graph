@@ -75,4 +75,4 @@ selects nothing. See `.ai-context/mobile-harness.md`.
 | | |
 |---|---|
 | **Introduced in** | `2.1.0 (github#73)` |
-| **Last re-recorded** | `2026-09-07` — 17.7 s at 406x892, encoded at native width (1.08 MB) |
+| **Last re-recorded** | `2026-09-08` — 17.7 s at 406x892, encoded at native width (1.03 MB) |

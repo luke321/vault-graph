@@ -157,6 +157,37 @@ now sits at `z-index: 9`, above the sheet, and the harness asserts the round tri
 stacking order. **A tap on what is left of the disc also closes the sheet**, which is what a
 scrim would do and is a second way out that does not depend on a z-index at all.
 
+**The cluster rides a corner that moves, and the move is animated rather than removed.**
+The pair sits one inset inside the disc box's top-left — where the year strip meets the legend
+counts — and that is the corner folding changes: 288px off the box's left edge when the folder
+list goes, 230px off its top when the calendar does. github#82 kept the placement and animated
+the difference: `glidePanels()` measures the cluster's box, applies the attribute, measures
+again, and plays the delta out with `el.animate()` over 180ms. It is a transform, so it costs no
+layout, and it works wherever the element happens to live — which is why the element stayed
+inside `#vg-canvas` instead of being re-parented.
+
+**A CSS transition was tried first and cannot do this job.** Inside `#vg-canvas` the cluster's
+own `left`/`top` never change — 12px throughout — and only the container moves, which CSS has
+nothing to interpolate. Re-anchoring to the root with the offsets in a `calc()` over published
+edge variables was the next attempt and was abandoned for the simpler measured animation.
+
+**Proximity and stability cannot both be had, and proximity wins.** Folding moves exactly the
+box's left and top edges, so every placement near what it controls moves, and the only ones that
+hold still are the bottom corners where `#vg-cam` already sits. Both alternatives were built and
+looked at on 2026-09-08: the view's own top-left, which matches `#vg-cam`'s 12px arithmetically
+and puts the buttons on top of the folder list they fold; and the bottom-right beside the camera
+cluster, which holds still and is 1500px from that same folder list. A button that far from its
+panel has stopped being a handle.
+
+**Reduced motion is not a detail here.** `glidePanels()` returns early under
+`prefers-reduced-motion: reduce`, so the fold snaps — the same treatment the sheet's own
+transition already gets. Measured on the author's own machine 2026-09-08: Chrome reports
+`reduce: true`, so the glide never plays there at all, and the setting is why. With motion
+emulated to `no-preference` the same fold produces **11 interpolated transforms**, opening at
+exactly `matrix(1,0,0,1,0,230)` for the calendar and `matrix(1,0,0,1,288,0)` for the folder
+list — the deltas themselves — and easing to `none`. Neither reading is a bug; they are the two
+answers the setting asks for.
+
 **The sheet stops where the disc starts, and the buttons land on its heading.** Raising the
 cluster above the sheet made it reachable and put it over the search box, which reads like a
 mistake. The two anchors are independent -- the cluster is offset from `#vg-canvas`, which the
