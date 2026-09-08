@@ -7305,6 +7305,28 @@ function mountVaultGraph(root, data, deps) {
     return p.join(",");
   }
 
+  var OV_DIRS = ["right", "lower right", "below", "lower left",
+                 "left", "upper left", "above", "upper right"];
+  /** @param {number} a canvas radians @returns {string} */
+  function ovDirWord(a) {
+    var i = Math.round(a / (Math.PI / 4));
+    while (i < 0) i += 8;
+    return OV_DIRS[i % 8];
+  }
+
+  /** @param {OvShape} sh */
+  function ovLabel(sh) {
+    var host = $("ov");
+    if (!host) return;
+    var t = sh.chevron === null
+      ? "Where the frame sits on the disc. Click to fit."
+      : "Viewport " + ovDirWord(sh.chevron) + " of the disc. Click to fit.";
+    if (host.title !== t) {
+      host.title = t;
+      host.setAttribute("aria-label", t);
+    }
+  }
+
   /** @param {OvShape} sh */
   function ovPaint(sh) {
     var host = $("ov");
@@ -7367,6 +7389,7 @@ function mountVaultGraph(root, data, deps) {
       g2.restore();
     }
     g2.globalAlpha = 1;
+    ovLabel(sh);
     ovPaints++;
     ovLast = sh;
   }
@@ -7393,6 +7416,8 @@ function mountVaultGraph(root, data, deps) {
     var fp = geomLock ? ovFootprint() : null;
     var sh = fp && ovCropped(fp) ? ovShape(fp) : null;
     if (!sh) { ovShow(false); return; }
+    // github#79, design/0014
+    if (!ovShown && cascadeRun && fitting) return;
     ovShow(true);
     var sig = ovSigOf(sh);
     if (sig === ovSig) return;

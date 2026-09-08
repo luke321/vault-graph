@@ -470,13 +470,33 @@ degree — so quantising the *output* makes the guard true by construction rathe
 | at rest, 500 ms of stillness | **0** |
 | hiding the biggest folder — a whole cascade **and** its auto-fit | **0** |
 | 1.2 s of stillness while the tile is shown | **0** |
+| re-showing a dominant folder — a growth auto-fit | **0** (was 14, over 214 ms) |
 | three zoom-in notches, the camera genuinely moving | 12–13 |
 
-The one case that paints unbidden is a **growth** auto-fit: re-showing a dominant folder paints
-**14** times on the shape fixture, because github#14 fits immediately while the disc is still
-expanding and for part of that flight the disc really is bigger than the frame. The tile is
-reporting the truth; whether a sub-second appearance there is wanted is an open question on
-github#79, not a defect.
+**A programmatic auto-fit no longer shows the tile at all, and the gate is one condition wide.**
+Re-showing a dominant folder used to make the tile appear at 81 ms and vanish at 295 ms --
+**214 ms, once, 14 paints** -- because github#14 fits immediately while the disc is still expanding,
+so for those frames the disc really is bigger than the frame. True, and still a flicker with
+nothing in it. `ovSync` now returns early on `!ovShown && cascadeRun && fitting`: it suppresses only
+a *new* appearance, and only while a cascade and a fit are both running, so a deliberate zoom, a
+pan and a Fit the user pressed are all untouched -- none of them runs a cascade. A blanket
+"hide while fitting" was rejected because it would also swallow the feedback when Fit is pressed.
+**After: 0 ms and 0 paints**, sampled at animation rate in the page because the thing measured is
+shorter than a CDP round trip is reliable; the same check carries the positive control, that a
+deliberate zoom straight afterwards still shows the tile.
+
+**The offscreen glyph says what it means.** At 1:1 the filled triangle on the rim reads as a
+navigation arrow, and it points *opposite* to the disc -- two readings, and the wrong one sends the
+user the wrong way. The sign was **not** flipped, because the glyph stands in for the footprint and
+that is what the control reports. Instead the direction is spoken: `title` and the accessible name
+are derived from the same angle the glyph is drawn at, over eight compass words -- "Viewport right
+of the disc. Click to fit." The check reads the string back.
+
+**Orientation holds at 1:1 down to ratio 0.16 and degrades below it.** Cropped at `scale: 1` and
+viewed at native size: at 0.35 and 0.16 the rectangle's position and shape both read on the 96 px
+desktop tile and the 72 px phone tile; at **0.06 it is ~8x5 px on desktop and ~5x4 px on the
+phone** -- position still reads, shape does not. Nothing is clamped and no minimum size is imposed;
+whether one should be is an open question on github#79.
 
 **The footprint is drawn to true scale and clipped by the canvas, never by the code.** Clamping it
 would draw a viewport that is not where the camera is. Measured on the demo fixture: at ratio 0.35

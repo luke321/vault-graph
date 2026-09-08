@@ -195,6 +195,74 @@ Two assertions that could not fail were removed rather than left as decoration: 
 block, so it was already true), and `discPx > 8` (the `geomLock` term cancels out of
 `k * rings.maxR`, leaving `OV_DISC_FRAC * s / 2` — a constant compared with a constant).
 
+## Checked at actual size, which is the only size that counts
+
+A second review asked for the indicator at **1:1** rather than in the enlarged close-ups, on the
+grounds that a 3× crop proves inspectability and not orientation. Measured 2026-09-08, cropped at
+`scale: 1` and viewed at native size on both the 96 px desktop tile and the 72 px phone tile:
+
+| camera | 96 px | 72 px |
+|---|---|---|
+| ratio 0.35 | the rectangle spans much of the ring; orientation plain | readable, tighter |
+| ratio 0.16 | a clear small box, off-centre; orientation plain | readable |
+| ratio 0.06 | **a ~8×5 px box — position reads, shape does not** | **~5×4 px, effectively a dot** |
+| off the disc | the glyph is legible | legible |
+
+So orientation is established at ordinary and deep zoom at both sizes, and **degrades at very deep
+zoom**, where the footprint is honestly only a few pixels across. A minimum drawn size would keep
+it legible at the cost of overstating the frame's extent; that is a question on github#79, not a
+defect, and nothing is clamped today.
+
+## The offscreen glyph: one meaning, now spoken
+
+At 1:1 the review's concern is confirmed rather than softened — the filled triangle on the rim
+reads as a **navigation arrow**, and in the worked example it points right while the disc is off
+to the left. The two readings are opposite, and picking the wrong one sends the user the wrong way.
+
+**The sign was not flipped**, because that changes what the control means: the glyph stands in for
+the footprint, so it marks where the *viewport* is. What was missing was that nothing said so. The
+control's `title` and its accessible name are now derived from the same angle the glyph is drawn
+at — *"Viewport right of the disc. Click to fit."* — over eight compass words. An arrow that
+explains itself is a different object from an unexplained one, and the accessible name went from a
+static string to the actual state in the same change.
+
+Whether the glyph itself should stop being an arrowhead — a hollow marker in the footprint's own
+visual language instead — is the remaining half, and it is a preference on github#79 rather than a
+correctness fix.
+
+## The programmatic auto-fit's appearance is gated, narrowly
+
+Measured on the dominant-folder fixture by sampling `#vg-ov.hidden` at animation rate in the page,
+because the thing being measured is shorter than a CDP round trip is reliable: re-showing the big
+folder made the tile appear at **81 ms and vanish at 295 ms — 214 ms, once**. A growth auto-fits
+immediately (github#14) while the disc is still expanding, so for those frames the disc really is
+bigger than the frame. True, and still a flicker with no information in it.
+
+The gate is one condition, and its narrowness is the whole point:
+
+```javascript
+if (!ovShown && cascadeRun && fitting) return;
+```
+
+- **`!ovShown`** — it only ever suppresses a *new* appearance. A tile already up during a toggle
+  stays up, so anyone already oriented keeps their orientation.
+- **`cascadeRun && fitting`** — both, so it cannot catch a deliberate zoom, a pan, or a Fit the
+  user pressed: none of those runs a cascade.
+
+**After: 0 ms and 0 paints**, with the positive control in the same check — a deliberate zoom
+immediately afterwards still shows the tile. A blanket "hide while `fitting`" was rejected for
+exactly the reason the review gave: it would also swallow the feedback when Fit is pressed.
+
+## To exercise when the branches combine
+
+- **After github#76 (roots):** the radii, the sectors and the signature all read `geomLock` and
+  the plan, so a root change is a cache-invalidation question. Test a root change and the return to
+  the whole vault, **including a root with no visible notes** — `ringsLayout` bails out there and
+  `ovCells` is cleared on that path, which should leave bare rings rather than a stale wedge.
+- **After github#80 (selected-note layout):** the tile's position and the card's `max-height` both
+  assume today's host layout, and the card yields via `data-ov`. Re-measure both, and re-run the
+  phone card cap, since that is the assumption that changes.
+
 ## What it deliberately does not do
 
 **It does not own the pan gesture.** Dragging the footprint to pan is an attractive second feature

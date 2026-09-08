@@ -2279,12 +2279,17 @@ check("the overview footprint is drawn to the disc's scale and is never clamped"
   const away = await ovState(p);
   const offTile = !!away.shape && away.shape.chevron !== null &&
                   away.shape.rect[0] > away.shape.s;
+  // github#79, design/0014 -- the arrow's meaning is spoken, not left to be guessed
+  const said = await p.j(`(function(){ var o = document.querySelector("#vg-ov");
+    return { title: o.title, aria: o.getAttribute("aria-label") }; })()`);
+  const saysRight = /viewport right of the disc/i.test(said.title) &&
+                    said.aria === said.title;
   // github#79, design/0014 -- the arrow says where the FRAME is
   const chevOK = !!away.shape && away.shape.chevron !== null &&
                  Math.abs(away.shape.chevron) < 0.02;
   await camReset(p);
   return {
-    ok: scaleErr < 0.01 && overflows && offTile && chevOK && bandsOK,
+    ok: scaleErr < 0.01 && overflows && offTile && chevOK && bandsOK && saysRight,
     detail: `at ratio 0.35 the rect is ${gotW.toFixed(2)}px wide against ${wantW.toFixed(2)} ` +
             `promised (${(scaleErr * 100).toFixed(3)}% off), disc drawn at ${discPx.toFixed(1)}px ` +
             `radius in a ${inside.shape ? inside.shape.s : 0}px tile; sectors cover ` +
@@ -2296,7 +2301,8 @@ check("the overview footprint is drawn to the disc's scale and is never clamped"
             `across a ${wide.shape ? wide.shape.s : 0}px tile (not clamped: ${overflows}); ` +
             `panned right off the disc the rect starts at ` +
             `${away.shape ? away.shape.rect[0].toFixed(0) : "?"} and the chevron reads ` +
-            `${away.shape && away.shape.chevron !== null ? (away.shape.chevron * 180 / Math.PI).toFixed(1) : "none"}deg`,
+            `${away.shape && away.shape.chevron !== null ? (away.shape.chevron * 180 / Math.PI).toFixed(1) : "none"}deg ` +
+            `and the control says "${said.title}"`,
   };
 });
 
@@ -2359,6 +2365,48 @@ check("clicking the overview fits the disc through fit(), with panning on or off
             `from the toggle ${lentOnToggle} and from the tile ${lentOnTile}, and restored it ` +
             `${settledToggle && settledTile ? "both times" : "NOT both times"} -- ended ` +
             `${panOff.setting ? "ON, leaked" : "off"}, api ${panOff.api}`,
+  };
+});
+
+// github#79
+check("the overview stays away while a programmatic auto-fit crops the disc", async (p) => {
+  await camReset(p);
+  await toRest(p);
+  const g = await biggestGroup(p);
+  await clickEye(p, g);
+  await toRest(p);
+  const before = await ovState(p);
+  // github#79, design/0014 -- sampled in-page: a CDP round trip cannot see 214ms
+  await p.eval(`(function(){ window.__ovT = { on: [], t0: performance.now(), last: null };
+    var el = document.querySelector("#vg-ov");
+    var tick = function(){ var v = !el.hidden;
+      if (v !== window.__ovT.last) {
+        window.__ovT.on.push([Math.round(performance.now() - window.__ovT.t0), v]);
+        window.__ovT.last = v;
+      }
+      if (performance.now() - window.__ovT.t0 < 5000) requestAnimationFrame(tick); };
+    requestAnimationFrame(tick); })(); void 0`);
+  await sleep(60);
+  await clickEye(p, g);
+  await sleep(5200);
+  const tr = await p.j(`window.__ovT.on`);
+  let shownMs = 0;
+  for (let i = 0; i < tr.length; i++) {
+    if (tr[i][1]) shownMs += (i + 1 < tr.length ? tr[i + 1][0] : 5000) - tr[i][0];
+  }
+  const after = await ovState(p);
+  // github#79, design/0014 -- the control: the gate is scoped, not a blanket
+  await camTo(p, { x: 0.5, y: 0.5, ratio: 0.35, angle: 0 });
+  const onZoom = await ovState(p);
+  await camReset(p);
+  await toRest(p);
+  return {
+    ok: before.hidden && after.hidden && shownMs === 0 &&
+        after.paints === before.paints && onZoom.shown && !onZoom.hidden,
+    detail: `hiding then re-showing "${g}" with the camera at rest: the tile was visible for ` +
+            `${shownMs}ms across ${tr.length} transition(s) and painted ` +
+            `${after.paints - before.paints} time(s); a deliberate zoom straight after still ` +
+            `shows it (${onZoom.shown})`,
   };
 });
 
