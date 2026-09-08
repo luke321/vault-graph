@@ -148,7 +148,7 @@ legend and the search box.
   control is reachable.
 
 **A panel may never cover its own toggle**, and this is the one defect the band's new default
-produced rather than exposed. `#vg-mob` lives in `#vg-canvas`, so the band pushes it down by the
+produced rather than exposed. `#vg-mob` used to live in `#vg-canvas`, so the band pushed it down by the
 band's own height: with the band on, the two buttons sit at y 292 on an 844 px screen while the
 sheet's top edge is at 236, and at `z-index: 7` against the sheet's 8 the sheet covered them.
 The sheet opened and could not be closed. Measured before the fix: `elementFromPoint` at the
@@ -156,6 +156,18 @@ toggle's centre returned `#vg-sidebar`, and a second press left `data-sheet` at 
 now sits at `z-index: 9`, above the sheet, and the harness asserts the round trip rather than the
 stacking order. **A tap on what is left of the disc also closes the sheet**, which is what a
 scrim would do and is a second way out that does not depend on a z-index at all.
+
+**The cluster is a child of the root now, and the band's height reaches it as a variable.**
+github#82 moved it out of `#vg-canvas` so that above the breakpoint it can sit at the *view's*
+top-left rather than the disc area's -- inside the canvas, the same 12px read as 300 px from the
+view's left and 242 px from its top, because the folder list and the band are in between, while
+`#vg-cam`'s 12px is a real 12px. The phone's y is unchanged and unchanged *by construction*
+rather than by re-measurement: `top: calc(var(--vg-canvas-top) + 12px)` is the same arithmetic
+being inside the canvas performed, using the variable `syncCanvasTop()` already published for the
+sheet. Measured after the move on the iPhone 14 viewport: the cluster is 44x44 centred at 34,314,
+the disc box is 390x564, the median dot 1.38 px and the round trip still closes -- every number
+identical to before it. `position: fixed` would have been the shorter route and is wrong: in a
+plugin pane it anchors to the Obsidian window, not to the view.
 
 **The sheet stops where the disc starts, and the buttons land on its heading.** Raising the
 cluster above the sheet made it reachable and put it over the search box, which reads like a

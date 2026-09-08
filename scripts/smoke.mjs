@@ -869,13 +869,17 @@ check("the panel toggles fold each panel away and give the space back", async (p
                                 "NARROW_PX in page.js and the breakpoint in page.css disagree" };
   }
 
-  // github#82 -- the cluster: 31px squares at the disc's corner
+  // github#82 -- 31px squares, inset from the view like #vg-cam
   const btns = await p.j(`(function(){
-    var g = document.querySelector("#vg-canvas").getBoundingClientRect();
+    var g = document.querySelector(".vault-graph").getBoundingClientRect();
     var mob = document.querySelector("#vg-mob");
+    var cam = document.querySelector("#vg-cam");
     var mr = mob ? mob.getBoundingClientRect() : null;
+    var cr = cam ? cam.getBoundingClientRect() : null;
     var out = { fromLeft: mr ? Math.round(mr.left - g.left) : null,
-                fromTop: mr ? Math.round(mr.top - g.top) : null, buttons: [] };
+                fromTop: mr ? Math.round(mr.top - g.top) : null,
+                camFromRight: cr ? Math.round(g.right - cr.right) : null,
+                camFromBottom: cr ? Math.round(g.bottom - cr.bottom) : null, buttons: [] };
     ["vg-sheet", "vg-band"].forEach(function (id) {
       var b = document.getElementById(id);
       if (!b) { out.buttons.push({ id: id, missing: true }); return; }
@@ -923,6 +927,8 @@ check("the panel toggles fold each panel away and give the space back", async (p
                   btns.fromLeft !== null && btns.fromLeft >= 0 && btns.fromLeft < 60 &&
                   btns.fromTop !== null && btns.fromTop >= 0 && btns.fromTop < 60 &&
                   btns.buttons[1].left > btns.buttons[0].left;
+  // github#82 -- the same gap to the view's edge the pan cluster has
+  const symmetric = btns.fromLeft === btns.camFromRight && btns.fromTop === btns.camFromBottom;
 
   const heldOnStageClick = afterStageClick.sheet === "on" && afterStageClick.sheetOpen === true;
   const heldOnSelect = afterSelect.sheet === "on" && afterSelect.sheetOpen === true;
@@ -948,13 +954,14 @@ check("the panel toggles fold each panel away and give the space back", async (p
                    (afterSheetStore.sheetOpen === false && afterBandStore.bandOpen === false);
 
   return {
-    ok: cluster && heldOnStageClick && heldOnSelect && sheetFolds && bandFolds &&
+    ok: cluster && symmetric && heldOnStageClick && heldOnSelect && sheetFolds && bandFolds &&
         restored && persists,
     detail: badBtn.length
       ? `wrong: ${badBtn.map((x) => x.missing ? x.id + " missing"
                                               : x.id + " " + x.w + "x" + x.h).join(", ")}`
       : `2 buttons at ${btns.buttons[0].w}x${btns.buttons[0].h}px, ${btns.fromLeft}px from ` +
-        `the canvas left edge and ${btns.fromTop}px from its top; canvas ` +
+        `the view's left and ${btns.fromTop}px from its top against the pan cluster's ` +
+        `${btns.camFromRight}/${btns.camFromBottom}; canvas ` +
         `${a.canvas.w}x${a.canvas.h} -> ${b.canvas.w}x${b.canvas.h} folding the ` +
         `${a.sidebar.w}px sidebar -> ${c.canvas.w}x${c.canvas.h} folding the ${a.heat.h}px ` +
         `band (= the root's ${c.root.w}x${c.root.h}); back to ${d.canvas.w}x${d.canvas.h}; ` +
@@ -962,7 +969,8 @@ check("the panel toggles fold each panel away and give the space back", async (p
         `${afterStageClick.sheet}/${afterSelect.sheet}; stored ${storeLive
           ? `sheetOpen ${afterSheetStore.sheetOpen}, bandOpen ${afterBandStore.bandOpen}`
           : `NOT MEASURED (localStorage ${afterSheetStore.unreadable})`}` +
-        (cluster ? "" : "  <- THE CLUSTER IS NOT AT THE DISC'S TOP-LEFT") +
+        (cluster ? "" : "  <- THE CLUSTER IS NOT AT THE VIEW'S TOP-LEFT") +
+        (symmetric ? "" : "  <- ITS INSET DOES NOT MATCH THE PAN CLUSTER'S") +
         (heldOnStageClick && heldOnSelect ? "" : "  <- THE SIDEBAR FOLDED ITSELF") +
         (sheetFolds ? "" : "  <- THE SIDEBAR DID NOT GIVE ITS WIDTH BACK") +
         (bandFolds ? "" : "  <- THE BAND DID NOT GIVE ITS HEIGHT BACK") +

@@ -405,7 +405,7 @@ range, not the file. Stale when `node scripts/code-map.mjs --check` fails.
 | 8611 | · · · · · · · · · · `byPath` |
 | 8760 | `destroy` |
 
-## `scripts/smoke.mjs` — 3978 lines, 7 sections, 50 functions, 84 checks
+## `scripts/smoke.mjs` — 3986 lines, 7 sections, 50 functions, 84 checks
 
 ### Sections
 
@@ -413,11 +413,11 @@ range, not the file. Stale when `node scripts/code-map.mjs --check` fails.
 |---|---|
 | 57–72 | chrome |
 | 73–674 | the checks |
-| 675–1441 | camera |
-| 1442–2922 | date range |
-| 2923–3466 | the hub |
-| 3467–3697 | the run |
-| 3698–3978 | which vaults, and why |
+| 675–1449 | camera |
+| 1450–2930 | date range |
+| 2931–3474 | the hub |
+| 3475–3705 | the run |
+| 3706–3986 | which vaults, and why |
 
 ### Functions
 
@@ -437,42 +437,42 @@ range, not the file. Stale when `node scripts/code-map.mjs --check` fails.
 | 694 | `camReset` |
 | 699 | `camSettle` |
 | 834 | · `box` |
-| 1143 | `toRest` |
-| 1152 | `clickEye` |
-| 1161 | `biggestGroup` |
-| 1171 | `watchDuringCascade` |
-| 1422 | · `r3` |
-| 1455 | `ribbonBox` |
-| 1462 | `rangeSnap` |
-| 1478 | `xOfMs` |
-| 1482 | `trackPress` |
-| 1493 | `winTravel` |
-| 1506 | `ribbonDrag` |
-| 1522 | `clearRange` |
-| 1758 | · `snap` |
-| 1772 | · `tick` |
-| 2025 | `walkSolo` |
-| 2089 | `soloDetail` |
-| 2539 | · `isDay` |
-| 2546 | · `pad` |
-| 2556 | · `wOf` |
-| 2845 | · `snap` |
-| 2856 | · `diff` |
-| 2879 | · `hiddenByDefault` |
-| 2925 | `topByDegree` |
-| 2932 | `pinN` |
-| 3292 | `pressKey` |
-| 3304 | `trailState` |
-| 3305 | `selectBySearch` |
-| 3314 | `hop` |
-| 3323 | `closeCard` |
-| 3324 | `stepBack` |
-| 3452 | `settle` |
-| 3469 | `runOne` |
-| 3656 | `killBrowser` |
-| 3774 | `resolveVaults` |
-| 3856 | `buildFor` |
-| 3870 | `main` |
+| 1151 | `toRest` |
+| 1160 | `clickEye` |
+| 1169 | `biggestGroup` |
+| 1179 | `watchDuringCascade` |
+| 1430 | · `r3` |
+| 1463 | `ribbonBox` |
+| 1470 | `rangeSnap` |
+| 1486 | `xOfMs` |
+| 1490 | `trackPress` |
+| 1501 | `winTravel` |
+| 1514 | `ribbonDrag` |
+| 1530 | `clearRange` |
+| 1766 | · `snap` |
+| 1780 | · `tick` |
+| 2033 | `walkSolo` |
+| 2097 | `soloDetail` |
+| 2547 | · `isDay` |
+| 2554 | · `pad` |
+| 2564 | · `wOf` |
+| 2853 | · `snap` |
+| 2864 | · `diff` |
+| 2887 | · `hiddenByDefault` |
+| 2933 | `topByDegree` |
+| 2940 | `pinN` |
+| 3300 | `pressKey` |
+| 3312 | `trailState` |
+| 3313 | `selectBySearch` |
+| 3322 | `hop` |
+| 3331 | `closeCard` |
+| 3332 | `stepBack` |
+| 3460 | `settle` |
+| 3477 | `runOne` |
+| 3664 | `killBrowser` |
+| 3782 | `resolveVaults` |
+| 3864 | `buildFor` |
+| 3878 | `main` |
 
 ### Checks
 
@@ -504,61 +504,61 @@ range, not the file. Stale when `node scripts/code-map.mjs --check` fails.
 | 747 | double-clicking the graph resets the view |
 | 766 | the camera cluster is bottom-right, in order, and 31px |
 | 825 | the panel toggles fold each panel away and give the space back |
-| 977 | the disc's density follows the notes on screen |
-| 1071 | the hub stays the same share of the disc as it is filtered |
-| 1104 | fit frames the disc that is actually there |
-| 1192 | hiding the biggest group auto-fits the camera, but only once it has finished leaving |
-| 1226 | showing a hidden group auto-fits the camera while it is still arriving |
-| 1261 | a manually moved camera is left alone by a visibility toggle |
-| 1295 | the zoom buttons step by one wheel notch |
-| 1312 | the pan toggle locks the camera and flies home |
-| 1357 | a link's stroke holds its width at any zoom |
-| 1408 | the resting web is not floored wider than it asks for |
-| 1528 | a drag on the ribbon caps the date range |
-| 1540 | dragging one brush edge leaves the other alone |
-| 1562 | dragging inside the brush pans it and keeps its width |
-| 1578 | the band's window and the brush move independently |
-| 1613 | a press on the window track centres the window there |
-| 1656 | the disc waits for the release |
-| 1686 | All dates clears the range and the window |
-| 1701 | a range change animates instead of snapping |
-| 1751 | the last frame of a cascade is the resting layout |
-| 1860 | filtered to the bone, the disc stays drawable |
-| 2096 | a dot never outgrows its resting size while a cascade walks |
-| 2104 | with Size dots from the frame on, a walking dot is held under its two resting sizes, never above |
-| 2114 | an arriving note's fade never reverses during a solo switch |
-| 2171 | the gap reservation holds still while groups only thin |
-| 2217 | the date fields set the range and follow it |
-| 2266 | the year buttons select a year and halo it on hover |
-| 2373 | the ribbon rescales with its slot |
-| 2418 | the intro sweeps the range end across the strip |
-| 2464 | compact axis: a year's width tracks its own note count |
-| 2503 | compact axis: sparse years cluster near the same floor width |
-| 2532 | the ribbon's right edge is a day the vault has actually reached |
-| 2613 | compact axis: the settings-panel toggle actually flips the live state |
-| 2644 | colour unlinked by folder: the settings-panel toggle actually flips the live state |
-| 2674 | colour unlinked notes by folder: the settings-panel toggle actually flips the live state |
-| 2703 | compact axis: the view-level icon actually flips the live state, and persists |
-| 2726 | no non-tail split cell holds fewer notes than its band's row depth |
-| 2751 | the row-depth gate reads LIVE counts, not the whole-vault tally, under a filter |
-| 2788 | undated notes survive every range |
-| 2808 | overriding one folder recolours exactly one group |
-| 2836 | a folder keeps its slot across the membership toggle |
-| 2876 | a folder's legend row toggles \"hidden by default\" from its context menu |
-| 2940 | a pinned note leaves no gap in the ring it came from |
-| 2981 | the hub's dots shrink as it fills |
-| 2997 | a soloed hub-adjacent note stays inside the hub's own radius |
-| 3046 | the mark yields to the hub and comes back |
-| 3068 | a pin hidden by a filter is skipped, not released |
-| 3092 | every unlinked note wears the (unlinked) swatch |
-| 3124 | the (unlinked) row's right-click toggle moves unlinked notes into their folder |
-| 3170 | the (unlinked) row's right-click tint toggle recolours notes without moving them |
-| 3219 | the (unlinked) row opens its menu with no notes in it |
-| 3266 | the (unlinked) row's count is parenthesised while kept separate, plain once joined |
-| 3282 | focus web stays above dim notes |
-| 3330 | only a hop lengthens the trail |
-| 3349 | stepping back never re-collects a hop |
-| 3366 | a crumb click truncates the trail at the crumb |
-| 3381 | the trail is not layout |
-| 3404 | the page claims no keyboard shortcut |
-| 3427 | re-selecting the same note keeps the trail, and a filter does not clear it |
+| 985 | the disc's density follows the notes on screen |
+| 1079 | the hub stays the same share of the disc as it is filtered |
+| 1112 | fit frames the disc that is actually there |
+| 1200 | hiding the biggest group auto-fits the camera, but only once it has finished leaving |
+| 1234 | showing a hidden group auto-fits the camera while it is still arriving |
+| 1269 | a manually moved camera is left alone by a visibility toggle |
+| 1303 | the zoom buttons step by one wheel notch |
+| 1320 | the pan toggle locks the camera and flies home |
+| 1365 | a link's stroke holds its width at any zoom |
+| 1416 | the resting web is not floored wider than it asks for |
+| 1536 | a drag on the ribbon caps the date range |
+| 1548 | dragging one brush edge leaves the other alone |
+| 1570 | dragging inside the brush pans it and keeps its width |
+| 1586 | the band's window and the brush move independently |
+| 1621 | a press on the window track centres the window there |
+| 1664 | the disc waits for the release |
+| 1694 | All dates clears the range and the window |
+| 1709 | a range change animates instead of snapping |
+| 1759 | the last frame of a cascade is the resting layout |
+| 1868 | filtered to the bone, the disc stays drawable |
+| 2104 | a dot never outgrows its resting size while a cascade walks |
+| 2112 | with Size dots from the frame on, a walking dot is held under its two resting sizes, never above |
+| 2122 | an arriving note's fade never reverses during a solo switch |
+| 2179 | the gap reservation holds still while groups only thin |
+| 2225 | the date fields set the range and follow it |
+| 2274 | the year buttons select a year and halo it on hover |
+| 2381 | the ribbon rescales with its slot |
+| 2426 | the intro sweeps the range end across the strip |
+| 2472 | compact axis: a year's width tracks its own note count |
+| 2511 | compact axis: sparse years cluster near the same floor width |
+| 2540 | the ribbon's right edge is a day the vault has actually reached |
+| 2621 | compact axis: the settings-panel toggle actually flips the live state |
+| 2652 | colour unlinked by folder: the settings-panel toggle actually flips the live state |
+| 2682 | colour unlinked notes by folder: the settings-panel toggle actually flips the live state |
+| 2711 | compact axis: the view-level icon actually flips the live state, and persists |
+| 2734 | no non-tail split cell holds fewer notes than its band's row depth |
+| 2759 | the row-depth gate reads LIVE counts, not the whole-vault tally, under a filter |
+| 2796 | undated notes survive every range |
+| 2816 | overriding one folder recolours exactly one group |
+| 2844 | a folder keeps its slot across the membership toggle |
+| 2884 | a folder's legend row toggles \"hidden by default\" from its context menu |
+| 2948 | a pinned note leaves no gap in the ring it came from |
+| 2989 | the hub's dots shrink as it fills |
+| 3005 | a soloed hub-adjacent note stays inside the hub's own radius |
+| 3054 | the mark yields to the hub and comes back |
+| 3076 | a pin hidden by a filter is skipped, not released |
+| 3100 | every unlinked note wears the (unlinked) swatch |
+| 3132 | the (unlinked) row's right-click toggle moves unlinked notes into their folder |
+| 3178 | the (unlinked) row's right-click tint toggle recolours notes without moving them |
+| 3227 | the (unlinked) row opens its menu with no notes in it |
+| 3274 | the (unlinked) row's count is parenthesised while kept separate, plain once joined |
+| 3290 | focus web stays above dim notes |
+| 3338 | only a hop lengthens the trail |
+| 3357 | stepping back never re-collects a hop |
+| 3374 | a crumb click truncates the trail at the crumb |
+| 3389 | the trail is not layout |
+| 3412 | the page claims no keyboard shortcut |
+| 3435 | re-selecting the same note keeps the trail, and a filter does not clear it |

@@ -42,6 +42,8 @@ Two buttons at the top left of the disc, wearing the camera cluster's look in th
 corner of the same canvas. One folds the folder list, search and view buttons; the other folds
 the calendar and its date strip. Fold both and the disc has the window to itself.
 
+**The two buttons keep the same distance to the view's edge that the camera cluster does.** That took moving them out of the disc area: both clusters were 12px from `#vg-canvas`, but the canvas' bottom-right corner *is* the view's corner while its top-left sits 288px right of the folder list and 230px below the calendar, so the toggles read as 300px and 242px in while the pan button read as 12. They are anchored to the view now, 12px from its top-left whatever is folded, and the vault name steps aside rather than sitting under them.
+
 **A wide window gets a different fold from a phone's, and that is the only new thing here.** On
 a phone the folder list is a sheet that slides up over the disc. On a PC it is a grid column, and
 a column gets out of the way by collapsing rather than overlaying: it goes to zero and hands its

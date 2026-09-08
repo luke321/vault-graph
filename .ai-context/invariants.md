@@ -2004,6 +2004,15 @@ the second date field and All dates off the right edge. The
 detail card becomes a sheet at the foot at 46% and both control clusters move to the top
 corners, clear of it. design/0013.
 
+**The cluster is inset from the VIEW, not from the disc area, and that is the claim the check
+makes.** `#vg-cam` sits 12px from the view's bottom-right because its corner of `#vg-canvas` *is*
+the view's corner; `#vg-mob` inside the same canvas sat 12px from a corner that is 300px right of
+the folder list and 242px below the band, so the two clusters looked nothing alike while a panel
+was up. It is a child of the root now, at 12px from the view's top-left in every panel state, and
+the check asserts equality with `#vg-cam`'s own inset rather than a literal 12. The phone keeps
+design/0013's y through `calc(var(--vg-canvas-top) + 12px)`. `position: fixed` is the wrong tool:
+in a plugin pane it anchors to the Obsidian window. github#82.
+
 **Above the breakpoint the same two toggles fold the same two panels, and the sidebar is a
 column rather than a sheet.** `[data-sheet="off"]` collapses the grid to `1fr` and takes
 `#vg-sidebar` out of the layout entirely, so the width goes to the stage; the sheet's
@@ -2052,7 +2061,7 @@ the sidebar back on gives their phone a sheet open at mount. Closable, so a wart
 defect. This **reverses** design/0013's "panel state is session state ... nothing is
 persisted", and 0013 says so at the paragraph itself.
 
-**A panel never covers its own toggle.** The panel buttons live in `#vg-canvas`, which the band
+**A panel never covers its own toggle.** The panel buttons used to live in `#vg-canvas`, which the band
 pushes down by its own height, so they land under a sheet that is anchored to the bottom. The
 cluster therefore outranks the sheet, and a tap on the remaining disc closes the sheet too. The
 harness asserts the round trip: press, what is under the toggle, press back.
