@@ -139,7 +139,7 @@
 
 /**
  * The __vg api: what mountVaultGraph builds once its deferred init has run, and what
- * plugin/main.js and the settings UIs call. THESE 21 MEMBERS SHIP IN THE PLUGIN. The
+ * plugin/main.js and the settings UIs call. THESE 23 MEMBERS SHIP IN THE PLUGIN. The
  * standalone build adds ~70 more -- state, alpha, demo, probe and the rest of the debug
  * surface the invariant suite drives -- through Object.defineProperties inside the region
  * scripts/build-plugin.mjs strips, so they are deliberately not part of this type: nothing
@@ -168,6 +168,8 @@
  * @property {() => PlanParityReport} checkPlanParity
  * @property {() => unknown} checkFocusWeb
  * @property {() => unknown} debugDump
+ * @property {(path: string | null, instant?: boolean) => string | null} setRoot   github#76
+ * @property {string | null} root                                                 github#76
  */
 
 /**
@@ -8229,6 +8231,10 @@ function mountVaultGraph(root, data, deps) {
     makeRenderer();
     API = window.__vg = { graph: graph,
                     readTheme: readTheme, get renderer() { return renderer; },
+                    // github#76
+                    setRoot: /** @param {string | null} p @param {boolean} [instant] */
+                             function (p, instant) { return setRoot(p, instant); },
+                    get root() { return state.root; },
                     placeLogo: placeLogo,
                     palette: paletteInfo,
                     groupOrder: function () { return (order[state.dim] || []).slice(); },
@@ -8487,9 +8493,6 @@ function mountVaultGraph(root, data, deps) {
                     seamDeg: /** @param {string} bk */ function (bk) { return bandOf(bk).gapDeg || 0; },
                     seamNB: /** @param {string} bk */ function (bk) { return (bandOf(bk).nG || 0) + (bandOf(bk).nSub || 0); },
                     // github#76
-                    setRoot: /** @param {string | null} p @param {boolean} [instant] */
-                             function (p, instant) { return setRoot(p, instant); },
-                    get root() { return state.root; },
                     rootGroupOf: /** @param {string} id */ function (id) { return groupOf(id); },
                     rootSubOf: /** @param {string} id */
                                function (id) { return relSub(graph.getNodeAttributes(id)); },
