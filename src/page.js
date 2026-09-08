@@ -6119,13 +6119,11 @@ function mountVaultGraph(root, data, deps) {
   }
 
   /* github#73, design/0013 */
-  // github#82 -- the left edge too, so the cluster can ride the corner
   function syncCanvasTop() {
     var c = $("canvas");
     if (!c) return;
     var r = c.getBoundingClientRect(), o = ROOT.getBoundingClientRect();
     ROOT.style.setProperty("--vg-canvas-top", Math.max(0, Math.round(r.top - o.top)) + "px");
-    ROOT.style.setProperty("--vg-canvas-left", Math.max(0, Math.round(r.left - o.left)) + "px");
   }
 
   /* github#73, design/0013 */
@@ -6135,11 +6133,27 @@ function mountVaultGraph(root, data, deps) {
     if (renderer) renderer.render();
   }
 
+  // github#82 -- it rides a corner that moves; animate the gap away
+  /** @param {() => void} apply */
+  function glidePanels(apply) {
+    var el = $("mob");
+    var still = WIN.matchMedia && WIN.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    if (!el || still || !el.animate) { apply(); return; }
+    var was = el.getBoundingClientRect();
+    apply();
+    var now = el.getBoundingClientRect();
+    var dx = Math.round(was.left - now.left), dy = Math.round(was.top - now.top);
+    if (!dx && !dy) return;
+    el.animate([{ transform: "translate(" + dx + "px, " + dy + "px)" },
+                { transform: "none" }],
+               { duration: 180, easing: "ease-out" });
+  }
+
   // github#82 -- quiet is the mount restoring; else it is a change
   /** @param {boolean} on @param {boolean} [quiet] */
   function setSheet(on, quiet) {
     sheetOpen = !!on;
-    ROOT.setAttribute("data-sheet", sheetOpen ? "on" : "off");
+    glidePanels(function () { ROOT.setAttribute("data-sheet", sheetOpen ? "on" : "off"); });
     var b = $("sheet");
     if (b) {
       b.setAttribute("aria-expanded", sheetOpen ? "true" : "false");
@@ -6154,7 +6168,7 @@ function mountVaultGraph(root, data, deps) {
   /** @param {boolean} on @param {boolean} [quiet] */
   function setBand(on, quiet) {
     bandOpen = !!on;
-    ROOT.setAttribute("data-band", bandOpen ? "on" : "off");
+    glidePanels(function () { ROOT.setAttribute("data-band", bandOpen ? "on" : "off"); });
     var b = $("band");
     if (b) {
       b.setAttribute("aria-pressed", bandOpen ? "true" : "false");

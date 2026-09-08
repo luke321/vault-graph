@@ -333,17 +333,13 @@
     z-index: 6; display: flex; flex-direction: column; gap: 6px;
   }
   /* github#73 -- the two panel buttons wear the camera cluster's look
-     github#82 -- and are drawn at every width. They sit in the disc's own top-left corner,
-     which is the corner that MOVES: folding the folder list takes 288px off the disc box's
-     left edge and folding the calendar 230px off its top. The cluster rides that corner
-     rather than jumping to it, and gliding is the whole reason it is a child of the root
-     with the offsets in a calc: inside #vg-canvas its own left/top stayed 12px and only the
-     container moved, which CSS cannot transition. syncCanvasTop() publishes both edges. */
+     github#82 -- and are drawn at every width. They were the phone's alone until two users
+     asked for the same fold on a PC; the state machine behind them never was touch-specific.
+     The cluster sits in the opposite corner from #vg-cam and at the same z-index; only the
+     phone raises it, because only there is a panel drawn over it. */
   .vault-graph #vg-mob {
-    position: absolute; z-index: 6; display: flex; flex-direction: row; gap: 6px;
-    left: calc(var(--vg-canvas-left, 0px) + var(--controls-inset));
-    top: calc(var(--vg-canvas-top, 0px) + var(--controls-inset));
-    transition: left .18s ease-out, top .18s ease-out;
+    position: absolute; left: var(--controls-inset); top: var(--controls-inset);
+    z-index: 6; display: flex; flex-direction: row; gap: 6px;
   }
   .vault-graph #vg-cam button, .vault-graph #vg-mob button {
     display: flex; align-items: center; justify-content: center;
@@ -362,8 +358,6 @@
   .vault-graph #vg-pan[aria-pressed="true"]:hover { opacity: 1; color: var(--accent); }
   @media (prefers-reduced-motion: reduce) {
     .vault-graph #vg-cam button { transition: none; }
-    /* github#82 */
-    .vault-graph #vg-mob { transition: none; }
   }
 
   .vault-graph #vg-compact {
@@ -712,10 +706,9 @@
     }
     /* Both control clusters move to the top corners, clear of that sheet. */
     .vault-graph #vg-cam { top: var(--controls-inset); bottom: auto; }
-    /* Above the sheet (z-index 8): the band pushes the cluster below the sheet's top edge,
-       and a panel that covers its own toggle cannot be closed. Where it sits is the base
-       rule's --vg-canvas-top arithmetic, which is what being inside #vg-canvas used to do
-       for free -- design/0013's 292px on an 844px screen, unchanged. github#82 */
+    /* Above the sheet (z-index 8): #vg-mob sits in #vg-canvas, which the band pushes below
+       the sheet's top edge, and a panel that covers its own toggle cannot be closed. The rest
+       of the cluster -- where it sits and which way it runs -- is the base rule's, github#82. */
     .vault-graph #vg-mob { z-index: 9; }
     .vault-graph #vg-mob button { opacity: .8; width: 44px; height: 44px; }
     /* The band's control row is one line of five things and the stage clips it at this

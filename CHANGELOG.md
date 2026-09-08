@@ -44,7 +44,7 @@ Two buttons at the top left of the disc, wearing the camera cluster's look in th
 corner of the same canvas. One folds the folder list, search and view buttons; the other folds
 the calendar and its date strip. Fold both and the disc has the window to itself.
 
-**The two buttons ride the disc's corner and glide when it moves.** They sit where the year strip meets the legend counts, which is the corner folding a panel actually moves — 288px left when the folder list goes, 230px up when the calendar does. Rather than teleport, the pair now follows over 180ms, and reduced motion drops that. Two tidier-sounding placements were tried and thrown away: the view's own corner puts the buttons on top of the folder list they fold, and the only spot that holds still is the far bottom corner, where a button has stopped being a handle for the panel beside it.
+**The two buttons ride the disc's corner, and follow it rather than jumping.** They sit where the year strip meets the legend counts, which is the corner a fold actually moves — 288px left when the folder list goes, 230px up when the calendar does. The pair now slides over 180ms instead of teleporting. If your system asks for reduced motion it snaps instead, like every other animation here.
 
 **A wide window gets a different fold from a phone's, and that is the only new thing here.** On
 a phone the folder list is a sheet that slides up over the disc. On a PC it is a grid column, and

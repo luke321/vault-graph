@@ -2004,23 +2004,27 @@ the second date field and All dates off the right edge. The
 detail card becomes a sheet at the foot at 46% and both control clusters move to the top
 corners, clear of it. design/0013.
 
-**The cluster rides the disc's corner off two published variables.** It sits one
-`--controls-inset` in from the disc box's top-left — the corner where the year strip meets the
-legend counts — and that corner is the one that moves: folding the folder list takes 288px off
-the box's left edge, folding the calendar 230px off its top. So the element is a child of the
-root offset by `calc(var(--vg-canvas-left) + 12px)` / `calc(var(--vg-canvas-top) + 12px)` rather
-than a child of `#vg-canvas`, because inside the canvas its own offsets never changed and CSS
-cannot transition a container moving — the pair teleported. Both edges are published by
-`syncCanvasTop()`, the move glides over 180ms, and reduced motion drops it. Measured at 1280x900:
-300,242 with both panels up, 12,242 with the folder list folded, 12,12 with both, and 12px from
-the box in every one. **A stale edge variable leaves the buttons behind with nothing else
-failing**, so the check asserts the variables against the box in all four states, not just the
-rendered inset. github#82.
+**The cluster rides the disc's corner, and the movement is animated rather than designed out.**
+It sits one `--controls-inset` inside the disc box's top-left, the corner where the year strip
+meets the legend counts — and that corner moves, by 288px left when the folder list folds and
+230px up when the calendar does. `glidePanels()` measures the box either side of the attribute
+write and plays the delta out with `el.animate()` over 180ms, a transform so it costs no layout.
+Measured 2026-09-08 at 1600x1000 with motion allowed: 11 interpolated transforms per fold,
+opening at exactly `matrix(1,0,0,1,0,230)` and `matrix(1,0,0,1,288,0)`, easing to `none`. Under
+`prefers-reduced-motion: reduce` it creates no animation at all and the fold snaps, which is the
+sheet's own treatment — and the author's machine reports `reduce: true`, so the glide does not
+play there.
 
-**Proximity and stability are exclusive here.** Every placement near what it controls moves;
-every placement that holds still is the bottom-right corner `#vg-cam` already holds. Moving the
-toggles there was tried and rejected — far from the panels they fold, and it flattens the
-distinction from zoom and pan. Proximity wins and the movement is made legible.
+**A CSS transition cannot do it, and that was measured rather than assumed.** Inside
+`#vg-canvas` the cluster's own `left`/`top` stay 12px and only the container moves; CSS has
+nothing to interpolate. Re-anchoring to the root with the offsets in a `calc()` over published
+edge variables was tried and dropped in favour of the animation, which needs no re-parenting.
+
+**Proximity and stability are exclusive here.** Folding moves exactly the box's left and top
+edges, so every placement near what it controls moves, and the only still ones are the bottom
+corners `#vg-cam` holds. The view's own top-left was built and rejected — it matches `#vg-cam`'s
+inset arithmetically and puts the buttons over the folder list they fold — as was the
+bottom-right, which holds still and is 1500px from that folder list. github#82.
 
 **Above the breakpoint the same two toggles fold the same two panels, and the sidebar is a
 column rather than a sheet.** `[data-sheet="off"]` collapses the grid to `1fr` and takes
@@ -2070,7 +2074,7 @@ the sidebar back on gives their phone a sheet open at mount. Closable, so a wart
 defect. This **reverses** design/0013's "panel state is session state ... nothing is
 persisted", and 0013 says so at the paragraph itself.
 
-**A panel never covers its own toggle.** The panel buttons used to live in `#vg-canvas`, which the band
+**A panel never covers its own toggle.** The panel buttons live in `#vg-canvas`, which the band
 pushes down by its own height, so they land under a sheet that is anchored to the bottom. The
 cluster therefore outranks the sheet, and a tap on the remaining disc closes the sheet too. The
 harness asserts the round trip: press, what is under the toggle, press back.

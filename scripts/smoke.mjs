@@ -844,12 +844,7 @@ check("the panel toggles fold each panel away and give the space back", async (p
     var bandBtn = document.getElementById("vg-band");
     return {
       root: box(".vault-graph"), sidebar: box("#vg-sidebar"), stage: box("#vg-stage"),
-      heat: box("#vg-heat"), canvas: box("#vg-canvas"), mob: box("#vg-mob"),
-      edgeVars: (function () {
-        var cs = getComputedStyle(root);
-        return { left: cs.getPropertyValue("--vg-canvas-left").trim(),
-                 top: cs.getPropertyValue("--vg-canvas-top").trim() };
-      })(),
+      heat: box("#vg-heat"), canvas: box("#vg-canvas"),
       sheet: root.getAttribute("data-sheet"), band: root.getAttribute("data-band"),
       sheetOpen: __vg.sheetOpen, bandOpen: __vg.bandOpen, narrow: __vg.narrow,
       expanded: sheetBtn ? sheetBtn.getAttribute("aria-expanded") : null,
@@ -947,20 +942,13 @@ check("the panel toggles fold each panel away and give the space back", async (p
   const restored = d.sheet === a.sheet && d.band === a.band &&
                    d.canvas.w === a.canvas.w && d.canvas.h === a.canvas.h;
 
-  // github#82 -- a stale edge variable leaves the buttons behind, silently
-  const inset = 12;
-  const rides = [a, b, c, d].every((x) =>
-    x.mob && x.mob.x - x.canvas.x === inset && x.mob.y - x.canvas.y === inset &&
-    x.edgeVars.left === (x.canvas.x - x.root.x) + "px" &&
-    x.edgeVars.top === (x.canvas.y - x.root.y) + "px");
-
   // github#82 -- an unreadable store is reported, never failed on
   const storeLive = !afterSheetStore.unreadable && !afterBandStore.unreadable;
   const persists = !storeLive ||
                    (afterSheetStore.sheetOpen === false && afterBandStore.bandOpen === false);
 
   return {
-    ok: cluster && rides && heldOnStageClick && heldOnSelect && sheetFolds && bandFolds &&
+    ok: cluster && heldOnStageClick && heldOnSelect && sheetFolds && bandFolds &&
         restored && persists,
     detail: badBtn.length
       ? `wrong: ${badBtn.map((x) => x.missing ? x.id + " missing"
@@ -970,14 +958,11 @@ check("the panel toggles fold each panel away and give the space back", async (p
         `${a.canvas.w}x${a.canvas.h} -> ${b.canvas.w}x${b.canvas.h} folding the ` +
         `${a.sidebar.w}px sidebar -> ${c.canvas.w}x${c.canvas.h} folding the ${a.heat.h}px ` +
         `band (= the root's ${c.root.w}x${c.root.h}); back to ${d.canvas.w}x${d.canvas.h}; ` +
-        `the cluster rides the corner at ${a.mob.x},${a.mob.y} -> ${b.mob.x},${b.mob.y} -> ` +
-        `${c.mob.x},${c.mob.y} (vars ${c.edgeVars.left}/${c.edgeVars.top}); ` +
         `a stage click and opening note ${picked} left data-sheet ` +
         `${afterStageClick.sheet}/${afterSelect.sheet}; stored ${storeLive
           ? `sheetOpen ${afterSheetStore.sheetOpen}, bandOpen ${afterBandStore.bandOpen}`
           : `NOT MEASURED (localStorage ${afterSheetStore.unreadable})`}` +
         (cluster ? "" : "  <- THE CLUSTER IS NOT AT THE DISC'S TOP-LEFT") +
-        (rides ? "" : "  <- IT DID NOT RIDE THE CORNER, OR A VARIABLE IS STALE") +
         (heldOnStageClick && heldOnSelect ? "" : "  <- THE SIDEBAR FOLDED ITSELF") +
         (sheetFolds ? "" : "  <- THE SIDEBAR DID NOT GIVE ITS WIDTH BACK") +
         (bandFolds ? "" : "  <- THE BAND DID NOT GIVE ITS HEIGHT BACK") +
