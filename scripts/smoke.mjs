@@ -3339,9 +3339,12 @@ check("legend count bars scale to the largest visible folder", async (p) => {
   const wrong = [];
   let barred = 0, full = 0, widest = { g: null, px: 0 }, thinnest = { g: null, px: 1e9 };
   for (const r of base.rows) {
-    // github#50, github#3
-    const wantBar = /^\d+$/.test(r.ct) && r.count > 0;
-    if (r.bar !== wantBar) { wrong.push(`${r.g}: ct "${r.ct}" but bar=${r.bar}`); continue; }
+    // github#50, github#3, github#78
+    const wantBar = /^\d+$/.test(r.ct) && r.count > 0 && r.visible;
+    if (r.bar !== wantBar) {
+      wrong.push(`${r.g}: ct "${r.ct}" visible=${r.visible} but bar=${r.bar}`);
+      continue;
+    }
     if (!wantBar) {
       if (r.drawn || r.size !== "auto") wrong.push(`${r.g}: no-bar row still paints (${r.size})`);
       continue;
@@ -3425,8 +3428,13 @@ check("legend count bars scale to the largest visible folder", async (p) => {
       const h2 = await read();
       const basis2 = basisOf(h2.rows);
       const promoted = h2.rows.find((r) => r.g === runnerUp.g);
+      const hiddenRow = h2.rows.find((r) => r.g === biggest.g);
+      if (hiddenRow && hiddenRow.bar) {
+        wrong.push(`hidden ${biggest.g} still draws a bar (${hiddenRow.size})`);
+      }
       rescaled = basis2 === runnerUp.count &&
-                 promoted && Math.abs(promoted.pct - 100) < 0.01;
+                 promoted && Math.abs(promoted.pct - 100) < 0.01 &&
+                 !!hiddenRow && !hiddenRow.bar;
       if (basis2 !== runnerUp.count) {
         wrong.push(`hiding ${biggest.g} left the basis at ${basis2}, wanted ${runnerUp.count}`);
       } else if (!promoted || Math.abs(promoted.pct - 100) > 0.01) {
@@ -3442,6 +3450,36 @@ check("legend count bars scale to the largest visible folder", async (p) => {
     }
   }
 
+  // github#78
+  let onlyState = null;
+  if (biggest) {
+    const before = await read();
+    await p.eval(`(function(){
+      var lg = document.querySelector('${sel1("data-g", biggest.g)}');
+      var chip = lg && lg.querySelector('[data-only]');
+      if (chip) chip.click();
+    })(); void 0`);
+    await sleep(900);
+    const only = await read();
+    const barred = only.rows.filter((r) => r.bar);
+    const full = barred.filter((r) => Math.abs(r.pct - 100) < 0.01);
+    onlyState = `${barred.length} barred, ${full.length} at 100%`;
+    if (barred.length !== 1 || full.length !== 1 || barred[0].g !== biggest.g) {
+      wrong.push(`only ${biggest.g}: ${barred.length} barred row(s) ` +
+                 `(${barred.map((r) => r.g).join(", ")}), ${full.length} at 100%`);
+    }
+    await p.eval(`(function(){
+      var all = document.getElementById('vg-allon');
+      if (all) all.click();
+    })(); void 0`);
+    await sleep(900);
+    const back = await read();
+    if (back.rows.filter((r) => r.bar).length !== before.rows.filter((r) => r.bar).length) {
+      wrong.push(`showing all again left ${back.rows.filter((r) => r.bar).length} barred, ` +
+                 `was ${before.rows.filter((r) => r.bar).length}`);
+    }
+  }
+
   // github#50, github#3
   const startOn = await p.eval(`__vg.unlinkedByFolder`);
   await p.eval(`__vg.setUnlinkedByFolder(false); void 0`);
@@ -3450,7 +3488,7 @@ check("legend count bars scale to the largest visible folder", async (p) => {
   const sepBasis = basisOf(sep.rows);
   let paren = 0;
   for (const r of sep.rows) {
-    const wantBar = /^\d+$/.test(r.ct) && r.count > 0;
+    const wantBar = /^\d+$/.test(r.ct) && r.count > 0 && r.visible;
     if (!wantBar && !r.bar && /^\(\d+\)$/.test(r.ct)) paren++;
     if (r.bar !== wantBar) {
       wrong.push(`kept separate, ${r.g}: ct "${r.ct}" but bar=${r.bar}`);
@@ -3474,7 +3512,8 @@ check("legend count bars scale to the largest visible folder", async (p) => {
             `${thinnest.px.toFixed(1)}px (1px floor); ` +
             `${paren} parenthesised row(s) bare while kept separate; ${subs.n} sub rows bare; ` +
             `selection kept it=${sel}, hover kept it=${hov === null ? "no :hover from the harness" : hov}, ` +
-            `hiding the largest rescaled the rest=${rescaled}; ` +
+            `hiding the largest rescaled the rest and dropped its own bar=${rescaled}; ` +
+            `only-this-folder: ${onlyState}; ` +
             `title ${JSON.stringify(titled && titled.title)}` +
             (wrong.length ? `  <- ${wrong.join(" | ")}` : "")
   };

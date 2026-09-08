@@ -164,6 +164,10 @@
     gap: 8px; padding: 4px 6px; border-radius: 5px; cursor: pointer;
     border: 1px solid transparent; text-align: left; background: none;
     font: inherit; color: var(--text-1); flex: 1; min-width: 0;
+    /* github#78 -- this is a <button>, and Obsidian gives every button an inset
+       shadow that paints OVER a background image. Reset it or the host decides
+       whether the count bar is visible. design/0006 */
+    box-shadow: none;
   }
   .vault-graph .lg[data-hl="on"], .vault-graph .lgs[data-hl="on"] {
     background-color: color-mix(in srgb, var(--accent) 22%, transparent);

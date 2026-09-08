@@ -5111,10 +5111,10 @@ function mountVaultGraph(root, data, deps) {
   /** @param {string} g @param {{ max: number, group: string }} basis */
   function barShare(g, basis) {
     if (!countBars) return 0;
-    if (!counts[g]) return 0;
+    if (!counts[g] || isHidden(g)) return 0;
     if (g === UNLINKED && !unlinkedByFolder) return 0;
     if (!basis.max) return 0;
-    return Math.min(1, counts[g] / basis.max);
+    return counts[g] / basis.max;
   }
 
   // github#78

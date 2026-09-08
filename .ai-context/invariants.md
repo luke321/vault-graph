@@ -1032,9 +1032,9 @@ read as visibly different lengths.
 Must be **empty**. Measured: **17 of 18 rows barred** on the demo (basis **406**, `05 - Meeting
 Notes`) and on the 10k (basis **4358**, same folder), **6 of 7** on the shape vault (basis
 **738**, `projects`). Exactly **one row at a full bar** on each, at the full **217px** track;
-thinnest **4.0px everywhere**, floored so a one-note folder still marks its row — and so
-that the mark survives hover AND highlight, which is why the floor is 4 and the bar starts
-2px in (below).
+thinnest **4.0px everywhere** among the folders that are *visible*, floored so a one-note
+folder still marks its row — and so that the mark survives hover AND highlight, which is why
+the floor is 4 and the bar starts 2px in (below). A hidden folder draws nothing at all.
 
 **Hiding the largest folder promotes the runner-up to a full bar**, and that is asserted, not
 merely allowed: hide `05 - Meeting Notes` on the demo and the basis must become 200 with
@@ -1123,11 +1123,19 @@ background. Measured, it took the full bar from 205px to **152px on hover**, the
 a hole in it. The bar belongs in the padding strip *below* the content, where no grid item can
 reach it.
 
-**Not Obsidian's doing, and that was checked before anything moved.** `.lg` is a `<button>`,
-the page never resets `box-shadow`, so Obsidian's own button shadow applies and roughly doubles
-on hover (white 9% to 16%, blur 0.5px to 1px, spread 0.5px). Applying Obsidian's exact rest and
-hover shadows to the standalone page left the painted bar at **217px in all four states**.
-Wrong explanation, measured away rather than shipped.
+**It WAS Obsidian's doing as well, and the test that cleared it was measuring the wrong bar.**
+`.lg` is a `<button>`, and Obsidian gives every button an inset shadow: white 9% at rest with
+0.5px blur and 0.5px **spread**, roughly doubling on hover. Spread means it wraps all four
+edges, including the bottom 2px strip where the bar lives, and inset shadows paint over a
+background image. The earlier test applied Obsidian's exact shadows to the standalone page and
+got **217px in all four states** — on the 100% bar, where a 1.5px haze at the edges is
+invisible. On a **4px** bar it is the whole mark. Measuring the widest bar to clear a defect
+that only shows on the thinnest one proves nothing, and this is the second time in this issue
+that reading CSS or the wrong row passed a real bug.
+
+**`.lg` resets `box-shadow` now**, so the host cannot decide whether the bar is visible.
+Measured inside real Obsidian: `shadow=none` at rest and on hover, and the check asserts it —
+`obsidian-smoke.mjs --only "hover"` fails if the host's shadow ever paints on this row again.
 
 ```bash
 node scripts/smoke.mjs --only "thinnest count bar"    # pixels in all three row states
@@ -1143,6 +1151,27 @@ Three things that check got wrong before it was right, all worth keeping:
 - **A bar whose hue is the accent's cannot be told from the highlight fill**, and it reads
   *high*, not low — 213px on the shape vault's `(vault root)`. That one reading is dropped
   rather than trusted, because a false pass is the failure mode this check exists to prevent.
+
+### A hidden folder draws no bar
+
+The bar counts what is **on the disc**, so a folder hidden by its eye contributes nothing and
+draws nothing — not a clamped bar, nothing. It is also out of the basis, so it cannot set the
+scale for the rows that are still drawn. Measured on the demo:
+
+| action | barred rows | basis |
+|---|---|---|
+| at rest | 17 of 18 | 406, `05 - Meeting Notes` |
+| hide the largest | 16, and the hidden row has none | 200, `01 - Projects` at 100% |
+| `only` one folder | **1**, at 100% | that folder |
+| All again | 17 | 406 |
+
+**`only` is the case worth naming**: it hides every other folder, so exactly one bar remains
+and it fills its row. That is asserted.
+
+Before this rule a hidden row kept a bar clamped at 100%, and the clamp was hiding a real
+absurdity: with the largest folder hidden, its own row declared **`max(4px, 203%)`** — 203% of
+a basis it was no longer part of. Removing the visibility test brings that straight back, which
+is how the check catches it.
 
 ### The tooltip has to say which folder the bar is measured against
 

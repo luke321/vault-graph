@@ -625,14 +625,17 @@ try {
         var lg = v.contentEl.querySelector('[data-hoverprobe]');
         if (lg) lg.removeAttribute('data-hoverprobe'); })()`);
 
-      const kept = over.image === "gradient" && over.size === rest.size;
+      // github#78, design/0006
+      const clean = rest.shadow === "none" && over.shadow === "none";
+      const kept = over.image === "gradient" && over.size === rest.size && clean;
       const detail = pick.g + " of " + pick.n + " barred rows; at rest image=" + rest.image +
         " size=" + rest.size + " shadow=" + rest.shadow +
         "; hovered=" + over.hovered + " image=" + over.image + " size=" + over.size +
         " bg=" + over.color + " shadow=" + over.shadow +
         (over.hovered ? "" : "  <- NO :hover from the harness, so this asserted nothing");
       report(kept && over.hovered === true,
-             "the legend's count bar survives a hover inside Obsidian", detail);
+             "the legend's count bar survives a hover inside Obsidian",
+             detail + (clean ? "" : "  <- the host's button shadow is painting on this row"));
     }
   }
 

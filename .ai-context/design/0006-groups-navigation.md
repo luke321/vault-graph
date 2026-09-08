@@ -221,6 +221,21 @@ a measurement: the largest row reads `406 notes · the largest folder shown`, ev
 changes in the same commit. `invariants.md` carries the check, the before/after layout table,
 and the pixel measurement of the painted length.
 
+### A hidden folder draws no bar, and the host may not paint over one
+
+The bar counts what is **on the disc**. A folder behind a closed eye contributes nothing, so it
+draws nothing — not a clamped bar. It is out of the basis too, so it cannot set the scale for
+the rows still drawn. `only` therefore leaves exactly one bar, filling its row, which is the
+reading a person expects from "show only this folder". The clamp this replaced was concealing
+an absurdity: a hidden largest folder declared **203%** of a basis it was no longer part of.
+
+**The page resets `box-shadow` on `.lg`.** It is a `<button>`, and Obsidian gives every button
+an inset shadow with 0.5px spread — which wraps all four edges and paints over a background
+image, including the bottom strip the bar occupies. Without the reset the host decides whether
+the bar is visible, and on a 4px bar it decided no. An earlier note here cleared Obsidian of
+this; that test was run on the 100% bar, where a 1.5px edge haze is invisible, and it was
+wrong. `obsidian-smoke.mjs --only "hover"` now asserts `shadow: none` in a real Obsidian.
+
 ### The bar's colour is cached, and goes stale with the swatch it sits under
 
 The bar takes `colorOf(g)` as an inline hex in `--vg-bar`, which is exactly the treatment the
