@@ -42,6 +42,8 @@ Two buttons at the top left of the disc, wearing the camera cluster's look in th
 corner of the same canvas. One folds the folder list, search and view buttons; the other folds
 the calendar and its date strip. Fold both and the disc has the window to itself.
 
+**The toggles sit 12px into the disc's corner in the plugin too.** They had been taking the camera cluster's inset, which the plugin widens to 44px so Obsidian's floating status bar clears the corner that cluster sits in — a problem the opposite corner does not have. The panel buttons have their own spacing now, the same in the exported file and in the plugin.
+
 **The two buttons ride the disc's corner, and follow it rather than jumping.** They sit where the year strip meets the legend counts, which is the corner a fold actually moves — 288px left when the folder list goes, 230px up when the calendar does. The pair now slides over 180ms instead of teleporting. If your system asks for reduced motion it snaps instead, like every other animation here.
 
 **A wide window gets a different fold from a phone's, and that is the only new thing here.** On

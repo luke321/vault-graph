@@ -942,13 +942,37 @@ check("the panel toggles fold each panel away and give the space back", async (p
   const restored = d.sheet === a.sheet && d.band === a.band &&
                    d.canvas.w === a.canvas.w && d.canvas.h === a.canvas.h;
 
+  // github#82, github#4 -- the plugin's 44px is the other corner's problem
+  const host = await p.j(`(function(){
+    var root = document.querySelector(".vault-graph");
+    var box = function (sel) { var b = document.querySelector(sel).getBoundingClientRect();
+                               return { x: Math.round(b.left), y: Math.round(b.top),
+                                        r: Math.round(b.right), b: Math.round(b.bottom) }; };
+    var canvas = box("#vg-canvas");
+    var read = function () {
+      var m = box("#vg-mob"), c = box("#vg-cam");
+      return { mob: m.x - canvas.x, mobTop: m.y - canvas.y,
+               cam: canvas.r - c.r, camBottom: canvas.b - c.b };
+    };
+    var before = read();
+    var had = root.style.getPropertyValue("--controls-inset");
+    root.style.setProperty("--controls-inset", "44px");
+    var after = read();
+    if (had) root.style.setProperty("--controls-inset", had);
+    else root.style.removeProperty("--controls-inset");
+    return { before: before, after: after };
+  })()`);
+  const insetIsOwn = host.before.mob === host.after.mob &&
+                     host.before.mobTop === host.after.mobTop &&
+                     host.after.cam === 44 && host.after.camBottom === 44;
+
   // github#82 -- an unreadable store is reported, never failed on
   const storeLive = !afterSheetStore.unreadable && !afterBandStore.unreadable;
   const persists = !storeLive ||
                    (afterSheetStore.sheetOpen === false && afterBandStore.bandOpen === false);
 
   return {
-    ok: cluster && heldOnStageClick && heldOnSelect && sheetFolds && bandFolds &&
+    ok: cluster && insetIsOwn && heldOnStageClick && heldOnSelect && sheetFolds && bandFolds &&
         restored && persists,
     detail: badBtn.length
       ? `wrong: ${badBtn.map((x) => x.missing ? x.id + " missing"
@@ -958,11 +982,14 @@ check("the panel toggles fold each panel away and give the space back", async (p
         `${a.canvas.w}x${a.canvas.h} -> ${b.canvas.w}x${b.canvas.h} folding the ` +
         `${a.sidebar.w}px sidebar -> ${c.canvas.w}x${c.canvas.h} folding the ${a.heat.h}px ` +
         `band (= the root's ${c.root.w}x${c.root.h}); back to ${d.canvas.w}x${d.canvas.h}; ` +
+        `at --controls-inset 44px (the plugin's) the toggles hold ${host.after.mob}/` +
+        `${host.after.mobTop} while the camera moves to ${host.after.cam}/${host.after.camBottom}; ` +
         `a stage click and opening note ${picked} left data-sheet ` +
         `${afterStageClick.sheet}/${afterSelect.sheet}; stored ${storeLive
           ? `sheetOpen ${afterSheetStore.sheetOpen}, bandOpen ${afterBandStore.bandOpen}`
           : `NOT MEASURED (localStorage ${afterSheetStore.unreadable})`}` +
         (cluster ? "" : "  <- THE CLUSTER IS NOT AT THE DISC'S TOP-LEFT") +
+        (insetIsOwn ? "" : "  <- IT FOLLOWS --controls-inset, SO OBSIDIAN PUSHES IT 44px IN") +
         (heldOnStageClick && heldOnSelect ? "" : "  <- THE SIDEBAR FOLDED ITSELF") +
         (sheetFolds ? "" : "  <- THE SIDEBAR DID NOT GIVE ITS WIDTH BACK") +
         (bandFolds ? "" : "  <- THE BAND DID NOT GIVE ITS HEIGHT BACK") +

@@ -327,6 +327,11 @@
   .vault-graph {
     --controls-inset: 12px;
     --controls-h: 142px;
+    /* github#82 -- the panel cluster's own inset, and deliberately NOT --controls-inset:
+       the plugin raises that one to 44px because Obsidian's status bar floats over the
+       bottom-right corner (github#4). Nothing floats over the top-left, so the toggles
+       would have been pushed 44px into the disc for a reason that is not theirs. */
+    --panels-inset: 12px;
   }
   .vault-graph #vg-cam {
     position: absolute; right: var(--controls-inset); bottom: var(--controls-inset);
@@ -338,7 +343,7 @@
      The cluster sits in the opposite corner from #vg-cam and at the same z-index; only the
      phone raises it, because only there is a panel drawn over it. */
   .vault-graph #vg-mob {
-    position: absolute; left: var(--controls-inset); top: var(--controls-inset);
+    position: absolute; left: var(--panels-inset); top: var(--panels-inset);
     z-index: 6; display: flex; flex-direction: row; gap: 6px;
   }
   .vault-graph #vg-cam button, .vault-graph #vg-mob button {

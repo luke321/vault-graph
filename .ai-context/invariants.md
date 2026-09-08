@@ -2005,7 +2005,7 @@ detail card becomes a sheet at the foot at 46% and both control clusters move to
 corners, clear of it. design/0013.
 
 **The cluster rides the disc's corner, and the movement is animated rather than designed out.**
-It sits one `--controls-inset` inside the disc box's top-left, the corner where the year strip
+It sits one `--panels-inset` inside the disc box's top-left, the corner where the year strip
 meets the legend counts — and that corner moves, by 288px left when the folder list folds and
 230px up when the calendar does. `glidePanels()` measures the box either side of the attribute
 write and plays the delta out with `el.animate()` over 180ms, a transform so it costs no layout.
@@ -2014,6 +2014,15 @@ opening at exactly `matrix(1,0,0,1,0,230)` and `matrix(1,0,0,1,288,0)`, easing t
 `prefers-reduced-motion: reduce` it creates no animation at all and the fold snaps, which is the
 sheet's own treatment — and the author's machine reports `reduce: true`, so the glide does not
 play there.
+
+**The panel cluster has its own inset, and `--controls-inset` is the wrong one to reuse.** The
+plugin raises that variable to **44px** because Obsidian's status bar floats over the
+bottom-right corner where `#vg-cam` sits (github#4). Nothing floats over the top-left, so
+inheriting it pushed the toggles 44px into the disc for a reason that was never theirs — and the
+standalone hid it completely, since there the variable is 12px and every check read 12. Reported
+from a real vault, not caught here. `--panels-inset` is 12px in both hosts, and the check now
+applies the plugin's own override before measuring: the toggles must hold 12/12 while the camera
+cluster moves to 44/44. It fails without the fix with that exact line. github#82.
 
 **A CSS transition cannot do it, and that was measured rather than assumed.** Inside
 `#vg-canvas` the cluster's own `left`/`top` stay 12px and only the container moves; CSS has
