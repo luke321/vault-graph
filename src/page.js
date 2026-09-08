@@ -8602,6 +8602,20 @@ function mountVaultGraph(root, data, deps) {
     /* ---- BEGIN: demo automation + debug API -- stripped from the plugin build, see scripts/build-plugin.mjs (stripDemoAndDebug) ---- */
     var debugAPI = {
                     state: state,
+                    // github#71 -- the spec GRAMMAR as a pure function, so the suite can
+                    // check a malformed spec, an unknown directive and a section naming a
+                    // folder that no longer exists without a fixture for each.
+                    parseSortSpec: parseSortSpec,
+                    /**
+                     * @param {{ folder: string, text: string, origin: string }[]} src
+                     * @param {string} path @param {string[]} names
+                     */
+                    sortOrderFor: function (src, path, names) {
+                      var spec = parseSortSpec(src);
+                      var sec = sortSectionFor(spec, path);
+                      return { ok: spec.ok, matched: !!sec, skipped: spec.skipped.slice(),
+                               names: sec ? orderBySortSection(names, sec) : names.slice() };
+                    },
                     ringsLayout: ringsLayout, visible: visible, groupOf: groupOf,
                     alpha: alpha, cascade: cascade, syncAlpha: syncAlpha,
                     syncLazyEdges: syncLazyEdges,

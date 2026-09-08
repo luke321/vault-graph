@@ -16,10 +16,16 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(HERE, "..");
 const OUT_DIR = join(ROOT, "scripts", "layout-snapshots");
 
+/* MUST AGREE WITH resolveVaults() IN smoke.mjs, args included -- the args are part of the
+ * store digest, so a difference here silently points the two scripts at two different
+ * fixtures and the golden is recorded against a vault the suite never checks. */
 const FIXTURES = [
   { script: "make-demo-vault.mjs", args: [], name: "demo-vault" },
   { script: "make-test-vault.mjs", args: ["--notes", "10000", "--years", "10", "--end", "2026-08-28"], name: "test-vault" },
   { script: "make-shape-vault.mjs", args: [], name: "shape-vault" },
+  // github#71 -- --end pinned for the same reason the 10k vault's is: dated subfolders
+  { script: "make-spec-vault.mjs", args: ["--end", "2026-09-08"], name: "spec-vault",
+    gens: ["make-spec-vault.mjs"], build: ["--folder-order", "explorer"] },
 ];
 
 const GENERATORS = ["make-demo-vault.mjs", "make-test-vault.mjs", "make-shape-vault.mjs"];
@@ -35,10 +41,10 @@ function storeRoot() {
   return join(ROOT, ".fixtures");
 }
 
-function digestOf(args) {
+function digestOf(args, gens) {
   const h = createHash("sha256");
   h.update("format:" + FIXTURE_FORMAT);
-  for (const g of GENERATORS) h.update(readFileSync(join(HERE, g)));
+  for (const g of gens || GENERATORS) h.update(readFileSync(join(HERE, g)));
   h.update(JSON.stringify(args));
   return h.digest("hex").slice(0, 8);
 }
@@ -58,7 +64,7 @@ function findChrome() {
 function sleep(ms) { return new Promise((r) => setTimeout(r, ms)); }
 
 function buildFixture(fx) {
-  const digest = digestOf(fx.args);
+  const digest = digestOf(fx.args, fx.gens);
   const dir = join(storeRoot(), `${fx.name}-${digest}`);
   if (!existsSync(join(dir, ".stamp.json"))) {
     console.log(`  ${fx.name}: not in the shared fixture store yet, generating ...`);
@@ -72,7 +78,7 @@ function buildFixture(fx) {
   const htmlDir = mkdtempSync(join(tmpdir(), `vg-snap-${fx.name}-`));
   const htmlPath = join(htmlDir, "vault-graph.html");
   const build = spawnSync(process.execPath,
-    [join(ROOT, "src", "build-graph.mjs"), "--vault", dir, "--out", htmlPath],
+    [join(ROOT, "src", "build-graph.mjs"), "--vault", dir, "--out", htmlPath, ...(fx.build || [])],
     { encoding: "utf8" });
   if (build.status !== 0) throw new Error(`build-graph.mjs failed:\n${build.stderr || ""}`);
   return { dir: htmlDir, htmlPath };

@@ -371,7 +371,9 @@ check("band assignment obeys its two hard rules", async (p) => {
 check("layout matches its golden snapshot", async (p) => {
   const dd = await p.j("__vg.debugDump()");
   const vaultName = dd.vault.name;
-  const fixture = ["demo-vault", "test-vault", "shape-vault"].find((f) => vaultName.startsWith(f + "-"));
+  // github#71 -- spec-vault is the fourth, and the only one laid out in anything but name order
+  const fixture = ["demo-vault", "test-vault", "shape-vault", "spec-vault"]
+    .find((f) => vaultName.startsWith(f + "-"));
   if (!fixture) {
     return { ok: true, detail: `NOT ASSERTED: "${vaultName}" is not one of the three named ` +
                                 `fixtures -- no golden snapshot to compare against` };
@@ -435,6 +437,165 @@ check("layout matches its golden snapshot", async (p) => {
     parts.push("positions unchanged");
   }
   return { ok, detail: parts.join("; ") };
+});
+
+/* ---------------------------------------------------------------- github#71 --
+ * The file-explorer order. Five checks: one that the spec actually reorders the disc, one
+ * that a vault without a spec is untouched, two on the grammar's failure paths, and one on
+ * the thing the golden snapshots cannot see -- colour.
+ */
+
+check("the wedge order follows the file explorer spec", async (p) => {
+  const r = await p.j(`(function(){
+    var was = __vg.folderOrder();
+    __vg.setFolderOrder("name");
+    var byName = __vg.groupOrder(), nameSubs = __vg.subOrderOf("alpha");
+    __vg.setFolderOrder("explorer");
+    var bySpec = __vg.groupOrder(), specSubs = __vg.subOrderOf("alpha");
+    var spec = __vg.sortSpec();
+    __vg.setFolderOrder(was);
+    return { byName: byName, bySpec: bySpec, nameSubs: nameSubs, specSubs: specSubs,
+             sections: spec.sections.length, ok: spec.ok };
+  })()`);
+  if (!r.sections) {
+    return { ok: true, detail: `NOT ASSERTED: this vault ships no sortspec -- only the ` +
+                                `spec fixture can show the order moving` };
+  }
+  // The fixture pins zeta then alpha at the root, and "00 pinned tiny" then "04 smaller"
+  // inside alpha. Both are deliberately AGAINST name order and against size order, so
+  // neither can pass by accident.
+  const real = r.bySpec.filter((g) => g.charAt(0) !== "(");
+  const wedgesOk = real[0] === "zeta" && real[1] === "alpha";
+  const subsOk = r.specSubs[0] === "00 pinned tiny" && r.specSubs[1] === "04 smaller";
+  const moved = r.byName.join("|") !== r.bySpec.join("|");
+  return {
+    ok: wedgesOk && subsOk && moved,
+    detail: `wedges name [${r.byName.join(", ")}] -> spec [${r.bySpec.join(", ")}]` +
+            (wedgesOk ? "" : "  <- EXPECTED zeta then alpha first") +
+            `; alpha's subs name [${r.nameSubs.join(", ")}] -> spec [${r.specSubs.join(", ")}]` +
+            (subsOk ? "" : "  <- EXPECTED the pinned pair first") +
+            (moved ? "" : "; NOTHING MOVED")
+  };
+});
+
+check("a vault with no sortspec is laid out in name order", async (p) => {
+  const r = await p.j(`(function(){
+    var spec = __vg.sortSpec();
+    var was = __vg.folderOrder();
+    __vg.setFolderOrder("explorer");
+    var drawn = __vg.groupOrder(), name = __vg.nameOrder();
+    __vg.setFolderOrder(was);
+    return { sections: spec.sections.length, drawn: drawn, name: name };
+  })()`);
+  if (r.sections) {
+    return { ok: true, detail: `NOT ASSERTED: this vault ships a sortspec (${r.sections} ` +
+                                `section(s)), so the explorer order is expected to differ` };
+  }
+  // Asking for the explorer order in a vault that has no spec must be a no-op, not an
+  // empty order or a half-applied one.
+  const same = r.drawn.join("|") === r.name.join("|");
+  return { ok: same, detail: same
+    ? `no spec found; "File explorer" left all ${r.drawn.length} groups in name order`
+    : `no spec found but the order still moved: [${r.name.join(", ")}] -> [${r.drawn.join(", ")}]` };
+});
+
+check("an unreadable sortspec falls back to name order and names the line", async (p) => {
+  const r = await p.j(`(function(){
+    var names = ["alpha", "beta", "gamma"];
+    // a spec whose target-folder is empty, plus two lines outside the ordering subset
+    var broken = __vg.sortOrderFor(
+      [{ folder: "", origin: "broken.md",
+         text: "target-folder:\\n> a-z\\norder-asc: modified\\ngamma" }], "", names);
+    // and one that is simply not a spec at all
+    var junk = __vg.sortOrderFor(
+      [{ folder: "", origin: "junk.md", text: "%%%\\n/folders\\n" }], "", names);
+    return { broken: broken, junk: junk, names: names };
+  })()`);
+  // The empty target-folder must not silently become "the vault root": its section is
+  // dropped, and the pin under it goes with it.
+  const brokenSkips = r.broken.skipped.map((s) => s.line + ":" + s.text);
+  const keptOrder = r.broken.names.join("|") === r.names.join("|") ||
+                    r.broken.names.join("|") === "gamma|alpha|beta";
+  const namedTheLine = r.broken.skipped.length >= 2 &&
+                       r.broken.skipped.some((s) => /modified/.test(s.text)) &&
+                       r.broken.skipped.every((s) => s.line > 0 && !!s.why);
+  const junkIgnored = r.junk.names.join("|") === r.names.join("|") && r.junk.skipped.length >= 2;
+  return {
+    ok: namedTheLine && junkIgnored && keptOrder,
+    detail: `broken spec: ${r.broken.skipped.length} line(s) skipped [${brokenSkips.join(", ")}]` +
+            (namedTheLine ? "" : "  <- a skipped line must carry its number and a reason") +
+            `; order [${r.broken.names.join(", ")}]` +
+            `; a non-spec file skipped ${r.junk.skipped.length} line(s) and left the order alone` +
+            (junkIgnored ? "" : "  <- IT DID NOT")
+  };
+});
+
+check("a sortspec naming a folder that is gone is ignored, not fatal", async (p) => {
+  const r = await p.j(`(function(){
+    var names = ["alpha", "beta", "gamma"];
+    var text = [
+      "target-folder: /",
+      "deleted-folder",
+      "gamma",
+      "also-gone",
+      "",
+      "target-folder: vanished/*",
+      "order-desc: a-z"
+    ].join("\\n");
+    var got = __vg.sortOrderFor([{ folder: "", origin: "stale.md", text: text }], "", names);
+    // the section aimed at a folder that no longer exists must not match anything either
+    var vanished = __vg.sortOrderFor([{ folder: "", origin: "stale.md", text: text }], "alpha", names);
+    return { got: got, vanishedMatched: vanished.matched, names: names };
+  })()`);
+  // Two of the three pins name folders that are not here. The one that IS here still leads,
+  // and nothing is skipped -- a stale pin is normal wear on a spec, not a syntax error.
+  const led = r.got.names[0] === "gamma";
+  const kept = r.got.names.join("|") === "gamma|alpha|beta";
+  const quiet = r.got.skipped.length === 0;
+  return {
+    ok: led && kept && quiet && r.got.ok,
+    detail: `3 pins, 2 naming folders that do not exist -> [${r.got.names.join(", ")}]` +
+            (kept ? "" : "  <- EXPECTED gamma, alpha, beta") +
+            `; ${r.got.skipped.length} line(s) skipped` +
+            (quiet ? " (a stale pin is not a syntax error)" : "  <- SHOULD BE NONE") +
+            `; a section aimed at a vanished folder matched something else: ${r.vanishedMatched}`
+  };
+});
+
+check("a folder keeps its colour when the wedge order changes", async (p) => {
+  const r = await p.j(`(function(){
+    var was = __vg.folderOrder();
+    var read = function(){
+      var out = {};
+      __vg.groupOrder().forEach(function(g){ out[g] = __vg.autoSlotOf(g); });
+      return { slots: out, order: __vg.groupOrder() };
+    };
+    __vg.setFolderOrder("name");   var byName = read();
+    __vg.setFolderOrder("size");   var bySize = read();
+    __vg.setFolderOrder("explorer"); var bySpec = read();
+    __vg.setFolderOrder(was);
+    return { byName: byName, bySize: bySize, bySpec: bySpec };
+  })()`);
+  // THE GOLDEN SNAPSHOTS CANNOT CATCH THIS. They hold positions and band, not colour, so a
+  // reordering that repainted every wedge would pass every other check in this suite
+  // (github#71). The automatic slot must come from the name order, never the draw order.
+  const drift = [];
+  for (const g of Object.keys(r.byName.slots)) {
+    for (const [label, m] of [["size", r.bySize], ["explorer", r.bySpec]]) {
+      if (m.slots[g] !== undefined && m.slots[g] !== r.byName.slots[g]) {
+        drift.push(`${g} ${r.byName.slots[g]}->${m.slots[g]} under ${label}`);
+      }
+    }
+  }
+  const sizeMoved = r.byName.order.join("|") !== r.bySize.order.join("|");
+  const specMoved = r.byName.order.join("|") !== r.bySpec.order.join("|");
+  return {
+    ok: drift.length === 0,
+    detail: `${Object.keys(r.byName.slots).length} groups; order actually moved under ` +
+            `size: ${sizeMoved}, explorer: ${specMoved}` +
+            (drift.length ? `; ${drift.length} REPAINTED: ${drift.slice(0, 4).join(", ")}`
+                          : "; every automatic slot unchanged")
+  };
 });
 
 check("a marked heatmap day haloes but never pushes", async (p) => {
@@ -3805,7 +3966,12 @@ function resolveVaults() {
 
   const out = [];
   const FIXTURE_MAX_AGE_DAYS = 7;
+  // The original trio share one digest input list because make-demo-vault delegates to
+  // make-test-vault, so editing either must invalidate both. github#71's spec vault
+  // delegates to nothing, so it gets its OWN list -- otherwise adding it here would
+  // invalidate the other three and regenerate all of them for a file they never read.
   const GENERATORS = ["make-demo-vault.mjs", "make-test-vault.mjs", "make-shape-vault.mjs"];
+  const SPEC_GENERATORS = ["make-spec-vault.mjs"];
   const FIXTURE_FORMAT = 1;
 
   const storeRoot = (() => {
@@ -3819,10 +3985,10 @@ function resolveVaults() {
     return join(ROOT, ".fixtures");
   })();
 
-  const digestOf = (args) => {
+  const digestOf = (args, gens) => {
     const h = createHash("sha256");
     h.update("format:" + FIXTURE_FORMAT);
-    for (const g of GENERATORS) h.update(readFileSync(join(HERE, g)));
+    for (const g of gens || GENERATORS) h.update(readFileSync(join(HERE, g)));
     h.update(JSON.stringify(args));
     return h.digest("hex").slice(0, 8);
   };
@@ -3830,8 +3996,8 @@ function resolveVaults() {
   const todayDay = () => new Date().toISOString().slice(0, 10);
   const ageDays = (day) => Math.floor((Date.parse(todayDay()) - Date.parse(day)) / 86400000);
 
-  const gen = (script, args, name, label) => {
-    const digest = digestOf(args);
+  const gen = (script, args, name, label, gens, build) => {
+    const digest = digestOf(args, gens);
     const dir = join(storeRoot, `${name}-${digest}`);
     const stampPath = join(dir, ".stamp.json");
     let fresh = false;
@@ -3868,13 +4034,20 @@ function resolveVaults() {
       console.log(`  note: ${name}/ exists in this checkout and is IGNORED -- the suite uses ` +
                   `the shared store (${dir}); pass --vault to use a specific vault on purpose`);
     }
-    out.push({ path: dir, label });
+    out.push({ path: dir, label, build: build || [] });
   };
 
   gen("make-demo-vault.mjs", [], "demo-vault", "the demo vault (sparse tail, 2 dense years)");
   gen("make-test-vault.mjs", ["--notes", "10000", "--years", "10", "--end", "2026-08-28"],
       "test-vault", "the 10k synthetic vault (10 years)");
   gen("make-shape-vault.mjs", [], "shape-vault", "the dominant-folder vault");
+  // github#71. --end is PINNED, like the 10k vault's and for the same reason: gamma/ files
+  // its notes into YYYY-MM subfolders derived from their dates, so a moving --end would
+  // move notes between subfolders and fail this fixture's own golden every week -- which
+  // teaches exactly the "regenerate the golden to make it pass" habit the repo forbids.
+  gen("make-spec-vault.mjs", ["--end", "2026-09-08"], "spec-vault",
+      "the sortspec vault (wedges out of name order)", SPEC_GENERATORS,
+      ["--folder-order", "explorer"]);
 
   if (!out.length) throw new Error("no vault to check, and none could be generated");
   return out;
@@ -3885,7 +4058,8 @@ async function buildFor(v) {
   const scratch = join(mkdtempSync(join(tmpdir(), "vg-smoke-build-")), "vault-graph.html");
   const b = spawnSync(process.execPath,
                       [join(HERE, "..", "src", "build-graph.mjs"), "--out", scratch]
-                        .concat(v.path ? ["--vault", v.path] : []),
+                        .concat(v.path ? ["--vault", v.path] : [])
+                        .concat(v.build || []),
                       { encoding: "utf8" });
   if (b.status !== 0) return "";
   const m = /^wrote (.+) \(/m.exec(b.stdout || "");
