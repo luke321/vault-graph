@@ -333,20 +333,14 @@
     z-index: 6; display: flex; flex-direction: column; gap: 6px;
   }
   /* github#73 -- the two panel buttons wear the camera cluster's look
-     github#82 -- drawn at every width, and anchored to the VIEW rather than to the disc area.
-     It is a child of the root for that reason: inside #vg-canvas the same 12px read as 300px
-     from the view's left and 242px from its top, because the folder list and the band sit in
-     between, while #vg-cam's 12px is a real 12px -- its corner of the canvas IS the view's
-     corner. position: fixed would anchor to the window instead, which is wrong in a plugin
-     pane. The phone keeps the position design/0013 measured, through the same
-     --vg-canvas-top syncCanvasTop() already publishes. */
+     github#82 -- and are drawn at every width. They were the phone's alone until two users
+     asked for the same fold on a PC; the state machine behind them never was touch-specific.
+     The cluster sits in the opposite corner from #vg-cam and at the same z-index; only the
+     phone raises it, because only there is a panel drawn over it. */
   .vault-graph #vg-mob {
     position: absolute; left: var(--controls-inset); top: var(--controls-inset);
     z-index: 6; display: flex; flex-direction: row; gap: 6px;
   }
-  /* The vault name steps aside rather than sitting under the buttons -- the same move the
-     phone's heading row makes while the band is up. github#82 */
-  .vault-graph[data-sheet="on"] .brand { padding-left: 80px; }
   .vault-graph #vg-cam button, .vault-graph #vg-mob button {
     display: flex; align-items: center; justify-content: center;
     width: 31px; height: 31px; padding: 0; cursor: pointer;
@@ -712,17 +706,10 @@
     }
     /* Both control clusters move to the top corners, clear of that sheet. */
     .vault-graph #vg-cam { top: var(--controls-inset); bottom: auto; }
-    /* Above the sheet (z-index 8), and below the band: a panel that covers its own toggle
-       cannot be closed, and the band must not be covered either. The cluster is a root child
-       now, so the band's height comes from --vg-canvas-top instead of from being inside
-       #vg-canvas -- the same y design/0013 measured, 292px on an 844px screen. github#82 */
-    .vault-graph #vg-mob {
-      top: calc(var(--vg-canvas-top, 0px) + var(--controls-inset));
-      z-index: 9;
-    }
-    /* The desktop indent would push the vault name off a 390px sheet; the phone has its own,
-       and only while the band is up. github#82 */
-    .vault-graph[data-sheet="on"] .brand { padding-left: 0; }
+    /* Above the sheet (z-index 8): #vg-mob sits in #vg-canvas, which the band pushes below
+       the sheet's top edge, and a panel that covers its own toggle cannot be closed. The rest
+       of the cluster -- where it sits and which way it runs -- is the base rule's, github#82. */
+    .vault-graph #vg-mob { z-index: 9; }
     .vault-graph #vg-mob button { opacity: .8; width: 44px; height: 44px; }
     /* The band's control row is one line of five things and the stage clips it at this
        width: the second date field and All dates were cut off and unreachable. */
