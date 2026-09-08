@@ -11,6 +11,28 @@ import LOGO_MASK_B64 from "b64:../assets/logo-mask.png";
 
 const VIEW_TYPE = "vault-graph-view";
 const ICON_ID = "vault-graph-disc";
+/**
+ * github#72. How long the vault has to be quiet before the disc follows it.
+ *
+ * The floor is what a build costs, since a debounce shorter than that just queues builds: the
+ * index and the edges come out of the metadata cache in under 80ms on a 10k vault. The ceiling
+ * is what reads as "it noticed". Obsidian saves the open note every couple of seconds, so this
+ * also decides how many cascades a burst of saves turns into -- one, because the timer restarts
+ * on every event and only the last one fires.
+ */
+const LIVE_DEBOUNCE_MS = 1000;
+
+/**
+ * An empty path -> path map with no prototype, so a note called "constructor" is just a key.
+ * Object.create(null) is `any` to the type program, so the cast is laundered through unknown
+ * once here rather than at each of the three call sites -- the same idiom as page.js's dict().
+ * @returns {Record<string, string>}
+ */
+function pathMap() {
+  /** @type {unknown} */
+  const o = Object.create(null);
+  return /** @type {Record<string, string>} */ (o);
+}
 
 /* ===================================================================== types ==
  * JSDoc, not TypeScript: the file stays plain JavaScript (see the header) and
@@ -43,6 +65,7 @@ const ICON_ID = "vault-graph-disc";
  * @property {boolean} unlinkedTintByFolder
  * @property {boolean} countBars                        github#78, design/0006
  * @property {boolean} fitCap                           github#41, design/0011
+ * @property {boolean} liveRefresh                      github#72
  * @property {boolean} [sheetOpen]                      github#82 -- absent until folded once
  * @property {boolean} [bandOpen]                       github#82
  */
@@ -399,13 +422,15 @@ async function buildData(app, opts) {
   // github#58
   /**
    * @param {(index: number, words: number) => void} apply
+   * @param {Set<string>} [only]   github#72: read just these paths, for a live rebuild
    * @returns {Promise<number>}
    */
-  const readWords = async (apply) => {
+  const readWords = async (apply, only) => {
     const t = performance.now();
     if (!wordFiles) return 0;
     await Promise.all(wordFiles.map(async (file, i) => {
       if (!file) return;
+      if (only && !only.has(file.path)) return;
       let words = 0;
       try {
         const raw = await app.vault.cachedRead(file);
@@ -499,6 +524,17 @@ class VaultGraphView extends ItemView {
     /** @type {BuildResult | null} */
     this.lastData = null;
     this.mountMs = 0;
+    // github#72
+    /** @type {number | null} */
+    this.liveTimer = null;
+    this.pendingRenames = pathMap();
+    /** @type {Set<string>} */
+    this.dirtyPaths = new Set();
+    this.liveBuilding = false;
+    this.liveAgain = false;
+    /** what the last live rebuild did, for the harnesses to read
+     *  @type {import("../src/page.js").LiveResult | null} */
+    this.lastLive = null;
   }
 
   getViewType() { return VIEW_TYPE; }
@@ -515,11 +551,145 @@ class VaultGraphView extends ItemView {
 
   // github#62
   teardown() {
+    // github#72
+    this.cancelLive();
     if (this.handle) {
       attempt(() => this.handle.destroy());
     }
     this.handle = null;
     this.contentEl.empty();
+  }
+
+  /* ------------------------------------------------------- live rebuild (github#72) */
+
+  liveOn() { return this.plugin.settings.liveRefresh !== false; }
+
+  cancelLive() {
+    if (this.liveTimer !== null) { window.clearTimeout(this.liveTimer); this.liveTimer = null; }
+    this.dirtyPaths.clear();
+    this.pendingRenames = pathMap();
+    this.liveAgain = false;
+  }
+
+  /** The setting was toggled: off drops whatever was queued, on simply waits for the next edit. */
+  liveSettingChanged() {
+    if (!this.liveOn()) this.cancelLive();
+  }
+
+  /**
+   * Wire the vault and the metadata cache to the disc.
+   *
+   * Subscribed unconditionally and gated inside the handler, rather than subscribed and
+   * unsubscribed as the setting flips: registerEvent's refs are released when the view closes,
+   * and a detach path would be a second lifetime to get wrong for the sake of skipping a
+   * function call that does nothing.
+   *
+   * `resolved` is the cache's own settle signal and is what a new wikilink arrives on; the four
+   * vault events carry the cases the cache never sees (a delete resolves nothing) and are also
+   * where a rename gives up its old path, which is the only way to tell a moved note from a
+   * deleted one plus a created one.
+   */
+  subscribeLive() {
+    const cache = this.app.metadataCache, vault = this.app.vault;
+    this.registerEvent(cache.on("resolved", () => this.scheduleLive()));
+    this.registerEvent(cache.on("changed", (file) => this.scheduleLive(file && file.path)));
+    this.registerEvent(vault.on("create", (file) => this.scheduleLive(file && file.path)));
+    this.registerEvent(vault.on("delete", (file) => this.scheduleLive(file && file.path)));
+    this.registerEvent(vault.on("rename", (file, oldPath) => {
+      const to = file && file.path;
+      if (to && oldPath) {
+        // A -> B then B -> C has to read as A -> C, or the id is handed to a path that no
+        // longer exists and the note dies and is reborn instead of moving.
+        let from = oldPath;
+        for (const k of Object.keys(this.pendingRenames)) {
+          if (this.pendingRenames[k] === oldPath) { from = k; break; }
+        }
+        this.pendingRenames[from] = to;
+        this.dirtyPaths.add(oldPath);
+      }
+      this.scheduleLive(to);
+    }));
+  }
+
+  /** @param {string} [path] */
+  scheduleLive(path) {
+    if (!this.liveOn() || !this.handle) return;
+    if (path) this.dirtyPaths.add(path);
+    if (this.liveTimer !== null) window.clearTimeout(this.liveTimer);
+    this.liveTimer = window.setTimeout(() => {
+      this.liveTimer = null;
+      void this.liveRebuild();
+    }, LIVE_DEBOUNCE_MS);
+  }
+
+  /**
+   * Build the vault again and hand it to the disc.
+   *
+   * Two things are deliberately NOT done here. The word counts of notes nobody touched are
+   * carried across rather than re-read -- they are 96% of a cold build (1.85s of 1.92s on a
+   * 10k vault) and no layout reads them. And nothing decides whether the disc should move:
+   * that is `applyData`'s call, because the page is what knows whether it is mid-cascade and
+   * what the last data actually was.
+   */
+  async liveRebuild() {
+    const handle = this.handle;
+    const api = handle && handle.api;
+    if (!api || typeof api.applyData !== "function") return;
+    if (this.liveBuilding) { this.liveAgain = true; return; }
+    this.liveBuilding = true;
+    const dirty = this.dirtyPaths;
+    this.dirtyPaths = new Set();
+    const renames = this.pendingRenames;
+    this.pendingRenames = pathMap();
+    try {
+      const next = await buildData(this.app, this.plugin.settings);
+      if (this.handle !== handle || handle.api !== api) return;   // remounted underneath us
+
+      // buildData leaves every count at 0 and fills them in afterwards, so a note nobody
+      // touched would arrive at zero words and lose the count it already had. A renamed note
+      // kept its content, so its count comes across from the path it used to have.
+      /** @type {Map<string, number>} */
+      const had = new Map();
+      for (const n of (this.lastData ? this.lastData.nodes : [])) had.set(n.id, n.words || 0);
+      /** @type {Map<string, string>} */
+      const cameFrom = new Map();
+      for (const from of Object.keys(renames)) cameFrom.set(renames[from], from);
+      /** @param {string} path */
+      const wordsBefore = (path) => {
+        const was = cameFrom.get(path);
+        return had.has(path) ? had.get(path) : (was !== undefined ? had.get(was) : undefined);
+      };
+      for (const n of next.nodes) {
+        const before = wordsBefore(n.id);
+        if (!dirty.has(n.id) && before !== undefined) n.words = before;
+      }
+
+      const r = api.applyData(next, { renames: renames });
+      this.lastLive = r;
+      if (r && r.churn !== undefined) {
+        // A sync, an import or a folder move -- not an edit. Do what Refresh does.
+        this.lastData = null;
+        await this.render();
+        return;
+      }
+      this.lastData = next;
+      if (!this.plugin.settings.words) return;
+      /** @type {Set<string>} */
+      const want = new Set(dirty);
+      for (const n of next.nodes) if (wordsBefore(n.id) === undefined) want.add(n.id);
+      if (!want.size) return;
+      void next.readWords((i, words) => {
+        const node = next.nodes[i];
+        if (!node) return;
+        node.words = words;
+        if (this.handle === handle && handle.api === api) api.setWords(node.id, words);
+      }, want).catch(() => {});
+    } catch (e) {
+      new Notice("Vault Graph: live refresh failed -- " + (e instanceof Error ? e.message : String(e)));
+    } finally {
+      this.liveBuilding = false;
+      if (this.liveAgain) { this.liveAgain = false; this.scheduleLive(); }
+    }
   }
 
   syncTheme() {
@@ -651,11 +821,22 @@ class VaultGraphView extends ItemView {
     this.mountMs = Math.round(performance.now() - t0);
 
     const handle = this.handle;
+    // github#58, github#72
+    // Word counts are read in the background, after the mount, and land one note at a time.
+    // They are addressed by PATH: until github#72 this passed `String(i)`, the note's index in
+    // the build, which was the same string as its graph id only because nothing had ever
+    // rebuilt the graph. A live rebuild breaks that on its first arrival -- index i and id i
+    // become different notes -- and every count still in flight would land on the wrong one.
     void data.readWords((i, words) => {
-      data.nodes[i].words = words;
+      const node = data.nodes[i];
+      if (!node) return;
+      node.words = words;
       const api = handle.api;
-      if (api && api.graph && this.handle === handle) api.graph.setNodeAttribute(String(i), "words", words);
+      if (api && api.setWords && this.handle === handle) api.setWords(node.id, words);
     }).then((ms) => { data._spike.msWordsBackground = ms; }, () => {});
+
+    // github#72
+    this.subscribeLive();
 
     this.registerDomEvent(page, "click", (ev) => {
       const a = ev.target instanceof Element ? ev.target.closest('a[href^="obsidian://"]') : null;
@@ -693,6 +874,8 @@ const DEFAULTS = {
   countBars: true,
   // github#41, design/0011
   fitCap: true,
+  // github#72
+  liveRefresh: true,
 };
 
 /** @type {{ key: "ghosts" | "templates" | "flatMonths" | "words", name: string, desc: string }[]} */
@@ -709,11 +892,12 @@ const BUILD_SETTINGS = [
 
 /**
  * @typedef {Object} ViewSetting
- * @property {"panEnabled" | "compactAxis" | "unlinkedByFolder" | "unlinkedTintByFolder" | "countBars" | "fitCap"} key
+ * @property {"panEnabled" | "compactAxis" | "unlinkedByFolder" | "unlinkedTintByFolder" | "countBars" | "fitCap" | "liveRefresh"} key
  * @property {string} name
  * @property {string} desc
  * @property {boolean} defaultOn
- * @property {"setPanEnabled" | "setCompactAxis" | "setUnlinkedByFolder" | "setUnlinkedTintByFolder" | "setCountBars" | "setFitCap"} api
+ * @property {"setPanEnabled" | "setCompactAxis" | "setUnlinkedByFolder" | "setUnlinkedTintByFolder" | "setCountBars" | "setFitCap" | ""} api
+ * @property {boolean} [host]   the HOST owns this one, not the page, so there is no api to call
  */
 /** @type {ViewSetting[]} */
 const VIEW_SETTINGS = [
@@ -731,6 +915,9 @@ const VIEW_SETTINGS = [
   // github#41, design/0011
   { key: "fitCap", name: "Size dots from the frame", defaultOn: true, api: "setFitCap",
     desc: "While the disc animates, cap every dot at just under half its distance to the nearest visible note, measured on the frame being drawn, so dots stay apart while rows slide. The disc at rest is unchanged. Experimental: dots breathe while a cascade walks." },
+  // github#72
+  { key: "liveRefresh", name: "Follow the vault", defaultOn: true, api: "", host: true,
+    desc: "Take a note you have just written, moved or linked into the disc where it stands, instead of waiting for Refresh to rebuild the whole thing. Only a change that decides where a note SITS moves anything -- writing prose does not, so typing is still. Off, the disc is a snapshot until you press Refresh." },
 ];
 
 const COLOURS_DESC = "Twelve slots, handed out in folder order and round again. Setting one folder never moves another, and two folders may share a colour.";
@@ -865,8 +1052,12 @@ class VaultGraphSettingTab extends PluginSettingTab {
   /** @param {ViewSetting} def @param {boolean} v */
   async applyView(def, v) {
     const view = await this.plugin.currentView();
+    // github#72: a host-owned setting has no page api to call. The view reads the setting on
+    // every cache event rather than subscribing and unsubscribing, so flipping it takes effect
+    // on the next edit with nothing to detach -- but a rebuild already queued has to be dropped.
+    if (def.host) { if (view) view.liveSettingChanged(); return; }
     const api = view && view.handle && view.handle.api;
-    if (api && api[def.api]) api[def.api](v);
+    if (api && def.api && api[def.api]) api[def.api](v);
   }
 
   display() {
