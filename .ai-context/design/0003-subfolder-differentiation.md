@@ -10,6 +10,20 @@ ladder within the folder's own family, and by position — each one owns a conti
 sub-wedge of the pie. All nodes are plain circles. The three largest subfolders are
 named in the legend; the rest share the last tint step, and the legend says how many.
 
+**The ladder survives a re-ordered sub-wedge sequence, because it keys off POSITION, not
+size.** `subTintIndex()` is `subOrder.indexOf(sub)` capped at `SUB_SLOTS - 1`, so when
+github#71's `File explorer` order re-sorts `subOrder` the gradient is still monotone around
+the parent's arc — it is simply a gradient over a different sequence. Nothing here needed
+re-measuring for that change. What *does* change is that a given subfolder's tint moves when
+the setting flips, since its position moved: the same folder is a different step of the same
+ladder. That is a visible repaint of the sub-wedges, and it is expected.
+
+**"The three largest" also stops being literally true under a spec** — it is the first three
+of `subOrder`, which is pinned-then-largest there. A pinned subfolder can therefore be both
+first in the ladder and tiny, which is the one case where `ownsWedge()` (position) and
+`subCellIndex()` (rows) answer differently; `decisions/0004` is the law that governs it and
+the `spec-vault` fixture pins a four-note subfolder first on purpose so it is measured.
+
 **Subfolder rows in the legend are clickable** — each hides or shows that subfolder,
 and the tail row toggles every folder it stands for.
 

@@ -30,6 +30,9 @@ changing the layout or the animation.
 | `0008-zero-network-calls` | Why the vendored bundles are stripped at read time rather than patched, forked or disclosed |
 | `0009-the-host-persists-settings-not-the-page` | Settings go in and come back out; the page stores nothing, and only one host gets a gear |
 | `0010-one-browser-per-run` | Why the suite takes a free port per run, and how a lost race read as a flaky renderer |
+| `0011-band-state-is-a-keyed-descriptor` | Why every layout quantity is per band, and the six bugs that came from reading the unqualified name |
+| `0012-own-graph-store-and-renderer` | The vendored engine: what was ported, what was dropped, and what is reimplemented |
+| `0013-mirror-the-explorer-not-its-api` | Why the file-explorer order is parsed from the sortspec text, which subset, and why it falls back loudly |
 
 ### DDRs — `design/`
 

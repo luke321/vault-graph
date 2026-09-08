@@ -12,16 +12,32 @@ switchable dimensions; the folder view is the one that got used, so the control 
 gone and Louvain along with it — which is also why `graphology-extras` is no longer
 inlined.
 
-Groups run in **name order**, which for PARA folders is their numbered order, led by
+Groups run in **name order by default**, which for PARA folders is their numbered order, led by
 `(vault root)` (loose notes at the top of the vault), starting at **12 o'clock and
 running clockwise**. (Sigma renders graph +y upward, so a plain accumulating angle sweeps
 anticlockwise from 6 o'clock; `sweepAngle()` is the single place that converts.) That means wedges go round the disc in the
-same sequence as the vault's own folder list, and — more importantly — a group keeps
-its colour as the vault grows, instead of being repainted whenever note counts
-change the size ranking.
+same sequence as the vault's own folder list.
 
-Subfolder order stays **size**-based: the "N smaller subfolders" fold depends on
-knowing which ones are smallest.
+**Since github#71 the order is a setting** — `Name` (this), `File explorer`, `Size` — because
+"the vault's own folder list" was only ever true while the explorer was *also* sorted by name.
+A vault using Custom File Explorer sorting had the two disagree, and the sentence above was
+simply false there. `File explorer` reads that plugin's sortspec; `decisions/0013` says which
+subset and why the spec text rather than the plugin.
+
+**The colour does not follow the order, and that is deliberate.** The sentence this paragraph
+used to end with — a group keeps its colour as the vault grows, instead of being repainted
+whenever note counts change the size ranking — was true only as a *side effect* of name order
+being the only order. The automatic palette slot is `auto++ % SLOT_COUNT`, a group's index in
+the array being walked, so once the draw order could move, walking it would have repainted the
+whole disc. `computeOrder()` therefore emits two arrays: the draw order, and a stable
+name-ordered copy that is the only thing `buildColors()` reads. A wedge changes bearing and
+keeps its hue.
+
+Subfolder order is **size**-based by default — the "N smaller subfolders" fold depends on
+knowing which ones are smallest — and follows the spec under `File explorer`, pinned names
+first and the rest still biggest-first behind them. When the order is not size the tail row
+says "N **other** subfolders", because pins can float a small folder past a large one and
+"smaller" stops being true.
 
 ## Layout
 
