@@ -583,8 +583,16 @@ function mountVaultGraph(root, data, deps) {
     ? /** @type {"name" | "explorer" | "size"} */ (deps.folderOrder) : "name";
   var onFolderOrder = typeof deps.onFolderOrder === "function" ? deps.onFolderOrder : null;
   var sortSpec = parseSortSpec(DATA.sortSpecs || []);
-  /** True only when the explorer order can actually be applied. */
-  function usingSpec() { return folderOrder === "explorer" && sortSpec.ok; }
+  /**
+   * True only when the explorer order can actually be applied. The section count matters as
+   * much as `ok`: an empty spec parses fine, and without this a vault with no sortspec at all
+   * would still take the spec BRANCH when the setting was flipped -- same order, but the
+   * legend's tail row would start calling its subfolders "other" instead of "smaller" with
+   * nothing anywhere to have reordered them.
+   */
+  function usingSpec() {
+    return folderOrder === "explorer" && sortSpec.ok && sortSpec.sections.length > 0;
+  }
 
   // github#73, design/0013
   // github#82 -- NARROW_PX must match the breakpoint in page.css
@@ -6295,6 +6303,8 @@ function mountVaultGraph(root, data, deps) {
     // radio rather than a fourth Enabled button. The subset note in the title is deliberate:
     // the page reads the parts of a sortspec that decide order, and the disc has only two
     // levels to apply them to, so a spec can be doing more in the explorer than here.
+    // Keys must match FOLDER_ORDERS; a key only here would set an unknown mode, which
+    // setFolderOrder() floors to "name", so a drift shows up as a dead button.
     var FOLDER_ORDER_ROW = [
       { key: "name", label: "Name",
         title: "Folders run in their own name order, numbers read as numbers -- the disc's original order" },
@@ -6502,7 +6512,8 @@ function mountVaultGraph(root, data, deps) {
 
   // github#71
   /** @param {string} v @param {boolean} [persist] */
-  function setFolderOrder(v, persist) {
+  /** @param {string} v @param {boolean} [persist] @param {boolean} [instant] */
+  function setFolderOrder(v, persist, instant) {
     var next = FOLDER_ORDERS.indexOf(v) >= 0 ? /** @type {"name" | "explorer" | "size"} */ (v) : "name";
     if (next === folderOrder) return folderOrder;
     folderOrder = next;
@@ -6513,9 +6524,12 @@ function mountVaultGraph(root, data, deps) {
       var btn = $("fo-" + k);
       if (btn) btn.setAttribute("aria-checked", k === folderOrder ? "true" : "false");
     });
-    // Wedges change bearing, so this is a real relayout, not a repaint. Animated: the
-    // reflow interpolates in polar space like every other regroup (design/0001).
-    hardRelayout(true);
+    // Wedges change bearing, so this is a real relayout, not a repaint. Animated for a
+    // person: the reflow interpolates in polar space like every other regroup
+    // (design/0001). `instant` exists for the SUITE -- a check that flips two or three
+    // modes in one eval would otherwise leave a cascade in flight for whatever runs next
+    // in its shard, which is a flake nobody can reproduce on purpose.
+    hardRelayout(!instant);
     attempt(placeLogo); attempt(heatBuild); attempt(buildLegend);
     if (persist && onFolderOrder) onFolderOrder(folderOrder);
     return folderOrder;
@@ -8359,7 +8373,10 @@ function mountVaultGraph(root, data, deps) {
                     // github#71
                     nameOrder: function () { return (slotOrder[state.dim] || []).slice(); },
                     folderOrder: function () { return folderOrder; },
-                    setFolderOrder: /** @param {string} v */ function (v) { return setFolderOrder(v, false); },
+                    // instant, like setUnlinkedByFolder above: the host calls this to restore
+                    // a stored setting or from its own settings tab, where nobody is watching
+                    // the disc -- only the page's own radio animates the reflow.
+                    setFolderOrder: /** @param {string} v */ function (v) { return setFolderOrder(v, false, true); },
                     sortSpec: function () {
                       return { ok: sortSpec.ok, skipped: sortSpec.skipped.slice(),
                                sections: sortSpec.sections.map(function (x) {
