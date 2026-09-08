@@ -848,12 +848,21 @@ function mountVaultGraph(root, data, deps) {
   // github#48
   /** @type {Record<string, string> | null} */
   var colorShown = null;
+  // github#76
+  /** @type {Record<string, string> | null} */
+  var preRootColor = null;
+  /** @type {Record<string, string> | null} */
+  var preRootShade = null;
   var colorRaf = 0, colorPrev = 0;
 
   /** @param {string} group @returns {string} */
   function colorOf(group) {
     if (colorShown) { var c = colorShown[group]; if (c) return c; }
-    return groupColor[group] || THEME.neutrals[0];
+    var live = groupColor[group];
+    if (live) return live;
+    // github#76
+    if (preRootColor) { var was = preRootColor[group]; if (was) return was; }
+    return THEME.neutrals[0];
   }
 
   /** @param {Record<string, string> | null} before group -> hex, as it was */
@@ -1049,7 +1058,11 @@ function mountVaultGraph(root, data, deps) {
     if (groupOf(id) === UNLINKED && !unlinkedTintByFolder) return colorOf(UNLINKED);
     // github#76
     var g = relGroup(a);
-    return subShade[g + "/" + relSub(a)] || colorOf(g);
+    var k = g + "/" + relSub(a);
+    var sh = subShade[k];
+    if (sh) return sh;
+    if (preRootShade) { var pre = preRootShade[k]; if (pre) return pre; }
+    return colorOf(g);
   }
 
   /** @param {string} group */
@@ -5812,6 +5825,7 @@ function mountVaultGraph(root, data, deps) {
     // github#76
     if (state.root) {
       state.root = null; rootSegs = []; rootDepth = 0;
+      preRootColor = null; preRootShade = null;
       buildSubTables();
       counts = computeOrder();
       buildColors();
@@ -6398,6 +6412,17 @@ function mountVaultGraph(root, data, deps) {
       });
     }
 
+    // github#76
+    if (live) {
+      /** @type {Record<string, string>} */
+      var pc = dict();
+      /** @type {Record<string, string>} */
+      var ps = dict();
+      Object.keys(groupColor).forEach(function (g) { pc[g] = groupColor[g]; });
+      Object.keys(subShade).forEach(function (k) { ps[k] = subShade[k]; });
+      preRootColor = pc; preRootShade = ps;
+    }
+
     state.root = next || null;
     rootSegs = next ? next.split("/") : [];
     rootDepth = rootSegs.length;
@@ -6416,7 +6441,9 @@ function mountVaultGraph(root, data, deps) {
 
     hardRelayout(false, live, true);
     attempt(placeLogo); attempt(heatBuild); attempt(buildLegend);
-    if (live) cascade(null, movesFrom ? { colToggle: true, movesFrom: movesFrom } : { colToggle: true });
+    // github#76
+    var landed = function () { preRootColor = null; preRootShade = null; };
+    if (live) cascade(landed, movesFrom ? { colToggle: true, movesFrom: movesFrom } : { colToggle: true });
     else if (renderer) renderer.refresh();
     return state.root;
   }
