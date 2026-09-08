@@ -106,6 +106,7 @@
  * @property {boolean} [compactAxis]
  * @property {boolean} [unlinkedByFolder]
  * @property {boolean} [unlinkedTintByFolder]
+ * @property {boolean} [countBars]              github#78, design/0006
  * @property {boolean} [fitCap]               github#41, design/0011
  * @property {boolean} [sheetOpen]            github#82 -- absent means "decide from the width"
  * @property {boolean} [bandOpen]             github#82
@@ -121,6 +122,7 @@
  * @property {(v: boolean) => void | Promise<void>} [onUnlinkedTintByFolder]
  * @property {(v: boolean) => void | Promise<void>} [onSheetOpen]
  * @property {(v: boolean) => void | Promise<void>} [onBandOpen]
+ * @property {(v: boolean) => void | Promise<void>} [onCountBars]
  * @property {(ids: string[]) => void | Promise<void>} [onPinned]
  * @property {() => void} [onRefresh]
  */
@@ -166,6 +168,7 @@
  * @property {(v: boolean) => void} setCompactAxis
  * @property {(v: boolean) => void} setUnlinkedByFolder
  * @property {(v: boolean) => void} setUnlinkedTintByFolder
+ * @property {(v: boolean) => void} setCountBars
  * @property {(v: boolean) => void} setFitCap
  * @property {() => void} applyHiddenDefaults
  * @property {() => void} heatBuild
@@ -407,6 +410,10 @@ function mountVaultGraph(root, data, deps) {
   // github#3
   var unlinkedTintByFolder = deps.unlinkedTintByFolder === true ? true : false;
   var onUnlinkedTintByFolder = typeof deps.onUnlinkedTintByFolder === "function" ? deps.onUnlinkedTintByFolder : null;
+
+  // github#78, design/0006
+  var countBars = deps.countBars === false ? false : true;
+  var onCountBars = typeof deps.onCountBars === "function" ? deps.onCountBars : null;
 
   /** @param {string} g */
   function isArchiveGroup(g) { return String(g).charAt(0) === "_"; }
@@ -5103,6 +5110,7 @@ function mountVaultGraph(root, data, deps) {
   // github#78, design/0006
   /** @param {string} g @param {{ max: number, group: string }} basis */
   function barShare(g, basis) {
+    if (!countBars) return 0;
     if (!counts[g]) return 0;
     if (g === UNLINKED && !unlinkedByFolder) return 0;
     if (!basis.max) return 0;
@@ -6070,7 +6078,12 @@ function mountVaultGraph(root, data, deps) {
       { key: "unlinkedTintByFolder", label: "Colour unlinked notes by folder",
         title: "While unlinked notes are kept as their own group, give each one its own folder's colour instead of the flat unlinked swatch -- also reachable by right-clicking the (unlinked) row",
         get: function () { return unlinkedTintByFolder; },
-        set: function (v) { setUnlinkedTintByFolder(v, true); } }
+        set: function (v) { setUnlinkedTintByFolder(v, true); } },
+      // github#78, design/0006
+      { key: "countBars", label: "Count bars in the legend",
+        title: "Draw a short rule along the bottom of each folder row, in that folder's own colour, scaled so the largest folder currently shown fills its row -- the count alone makes 406 notes and 1 note look the same",
+        get: function () { return countBars; },
+        set: function (v) { setCountBars(v, true); } }
     ];
     function buildOptions() {
       var host = $("optbody");
@@ -6285,6 +6298,16 @@ function mountVaultGraph(root, data, deps) {
     attempt(placeLogo); attempt(heatBuild); attempt(buildLegend);
     if (persist && onUnlinkedTintByFolder) onUnlinkedTintByFolder(unlinkedTintByFolder);
     return unlinkedTintByFolder;
+  }
+
+  // github#78, design/0006
+  function setCountBars(on, persist) {
+    countBars = !!on;
+    var btn = $("opt-countBars");
+    if (btn) btn.setAttribute("aria-pressed", countBars ? "true" : "false");
+    attempt(buildLegend);
+    if (persist && onCountBars) onCountBars(countBars);
+    return countBars;
   }
 
   function savePng() {
@@ -8099,6 +8122,7 @@ function mountVaultGraph(root, data, deps) {
                     // github#41, design/0011
                     setFitCap: function (v) { return setFitCap(v === true); },
                     setUnlinkedTintByFolder: function (v) { return setUnlinkedTintByFolder(v === true, false); },
+                    setCountBars: function (v) { return setCountBars(v !== false, false); },
                     applyHiddenDefaults: function () {
                       seedHidden();
                       buildLegend();
@@ -8366,6 +8390,7 @@ function mountVaultGraph(root, data, deps) {
                     get compactAxis() { return compactAxis; },
                     get unlinkedByFolder() { return unlinkedByFolder; },
                     get unlinkedTintByFolder() { return unlinkedTintByFolder; },
+                    get countBars() { return countBars; },
                     get unlinkedTintColors() { return unlinkedTintColors.slice(); },
                     get subTailRank() { return SUB_SLOTS - 1; },
                     hiddenByDefault: hiddenByDefault,

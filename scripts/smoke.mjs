@@ -3558,6 +3558,59 @@ check("the count bar follows its own swatch across a theme flip", async (p) => {
   return { ok: coherent && tokenMoved, detail: bits.join("; ") };
 });
 
+// github#78, design/0006
+check("count bars are on by default, and the settings toggle removes every bar", async (p) => {
+  const r = await p.j(`(function(){
+    var gear = document.querySelector("#vg-gear");
+    if (!gear || gear.hidden) return { noGear: true };
+    gear.click();
+    var btn = document.querySelector("#vg-opt-countBars");
+    if (!btn) return { noButton: true };
+
+    var bars = function () { return document.querySelectorAll("#vg-legend .lg.bar").length; };
+    var rows = function () { return document.querySelectorAll("#vg-legend .lg[data-g]").length; };
+    var out = { defaultPressed: btn.getAttribute("aria-pressed"),
+                defaultState: __vg.countBars,
+                barsOn: bars(), rows: rows() };
+
+    btn.click();
+    var off = document.querySelector("#vg-opt-countBars");
+    out.offPressed = off && off.getAttribute("aria-pressed");
+    out.offState = __vg.countBars;
+    out.barsOff = bars();
+    out.rowsOff = rows();
+    out.sizeOff = (function () {
+      var lg = document.querySelector("#vg-legend .lg[data-g]");
+      return lg ? getComputedStyle(lg).backgroundSize : null;
+    })();
+
+    var back = document.querySelector("#vg-opt-countBars");
+    if (back) back.click();
+    out.backPressed = (document.querySelector("#vg-opt-countBars") || {}).getAttribute
+      ? document.querySelector("#vg-opt-countBars").getAttribute("aria-pressed") : null;
+    out.backState = __vg.countBars;
+    out.barsBack = bars();
+    gear.click();
+    return out;
+  })()`);
+  if (r.noGear) return { ok: false, detail: "no #vg-gear on this build -- standalone only" };
+  if (r.noButton) {
+    return { ok: false, detail: "gear opened but #vg-opt-countBars was not found -- the rendered " +
+      "row id and the $() lookup setCountBars uses have drifted apart" };
+  }
+  const ok = r.defaultPressed === "true" && r.defaultState === true && r.barsOn > 0 &&
+             r.offPressed === "false" && r.offState === false && r.barsOff === 0 &&
+             r.sizeOff === "auto" && r.rowsOff === r.rows &&
+             r.backPressed === "true" && r.backState === true && r.barsBack === r.barsOn;
+  return {
+    ok,
+    detail: `default pressed=${r.defaultPressed} state=${r.defaultState} with ` +
+      `${r.barsOn} of ${r.rows} rows barred; off -> pressed=${r.offPressed} state=${r.offState}, ` +
+      `${r.barsOff} barred, first row background-size=${r.sizeOff}, rows still ${r.rowsOff}; ` +
+      `on again -> pressed=${r.backPressed} state=${r.backState}, ${r.barsBack} barred`
+  };
+});
+
 check("focus web stays above dim notes", async (p) => {
   const r = await p.j(`__vg.checkFocusWeb()`);
   if (!r.geomGaps) return { ok: true, detail: `${r.node} (degree ${r.degree}): no in-disc samples on this shape, nothing to measure` };

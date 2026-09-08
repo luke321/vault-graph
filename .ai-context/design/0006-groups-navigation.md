@@ -137,6 +137,14 @@ in the group's own colour, **its length that row's count against the largest cou
 folders currently visible** — so the biggest folder on screen fills its row and every other
 bar is read against it.
 
+**It is a view setting, `countBars`, on by default.** The gear carries it as "Count bars in
+the legend" beside the other three view options, and the plugin's settings tab gets the same
+row from `VIEW_SETTINGS`, so it persists per vault. Per decisions/0009 the page stores
+nothing: the host hands `countBars` in and takes `onCountBars` back. Turning it off removes
+the bars and nothing else — measured, 17 of 18 rows barred becomes 0 barred with all 18 rows,
+their counts and their shared right edge untouched. `setCountBars` rebuilds only the legend,
+because a bar is sidebar DOM and CSS: no relayout, no cascade, no renderer refresh.
+
 **It measures notes, and the wedge beside it measures notes within its own ring.** Angular
 share is allocated per band (design/0001), so a small inner-band folder can hold a wide
 wedge and still draw a short bar. The two disagree by design, and the count's title names

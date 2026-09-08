@@ -995,7 +995,8 @@ while hovering too.
 Each legend row whose count is a plain number carries a 2px rule along the bottom of `.lg`.
 **Its length is that row's count against the largest count among the folders currently
 visible**, so the biggest folder on screen fills its row and every other bar is read against
-it. The bar measures notes; the wedge next to it measures notes *within its own ring*, because
+it. It is a **view setting, `countBars`, on by default** — the gear's "Count bars in the
+legend" row on the page, and a toggle in the plugin's settings tab. The bar measures notes; the wedge next to it measures notes *within its own ring*, because
 angular share is allocated per band (design/0001), so the two still disagree by design.
 
 **The denominator is the largest VISIBLE folder, which means the bars re-scale on a visibility
@@ -1063,6 +1064,26 @@ before are now clearly ordered:
 | `04 - Daily Notes` | 50 | 7.50px | **26.00px** |
 | `09 - Maps of Content` | 48 | 7.50px | **25.00px** |
 | `05 - Meeting Notes` | 406 | 62.50px | **217.00px** |
+
+### Turning the setting off leaves the rows and removes only the bars
+
+`countBars` follows decisions/0009: the page holds no storage, the host hands it in as a dep
+and gets it back through `onCountBars`. One gate inside `barShare` covers every caller, and
+`setCountBars` rebuilds only the legend — the bar is sidebar DOM and CSS, so there is no
+relayout, no cascade and no `renderer.refresh()`.
+
+Measured on the demo: default **pressed=true, `__vg.countBars` true, 17 of 18 rows barred**.
+Off: **0 barred, the first row's `background-size` back to `auto`, and still 18 rows** — the
+rows, counts and alignment are untouched, only the bars go. On again: **17 barred**.
+
+| break it like this | result |
+|---|---|
+| default the setting off | **FAIL** — default pressed=false state=false with 0 of 18 rows barred |
+| `setCountBars` forgets to rebuild the legend | **FAIL** — state flips to false while 17 rows stay barred |
+
+```bash
+node scripts/smoke.mjs --only "on by default"    # the default, the toggle, and what it removes
+```
 
 ### The tooltip has to say which folder the bar is measured against
 
