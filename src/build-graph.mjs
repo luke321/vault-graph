@@ -2,7 +2,7 @@
 // github#58
 
 import { readFileSync, writeFileSync, readdirSync, statSync, existsSync } from "node:fs";
-import { join, relative, sep, basename, dirname, resolve as resolvePath } from "node:path";
+import { join, relative, sep, basename, dirname, isAbsolute, resolve as resolvePath } from "node:path";
 import { fileURLToPath } from "node:url";
 // github#58
 // decisions/0012
@@ -96,6 +96,16 @@ const INCLUDE_TEMPLATES = flag("templates");
 const OUT = opt("out", join(VAULT, "vault-graph.html"));
 const FLAT_MONTHS = flag("flat-months");
 const STRIP_NAV = flag("no-nav");
+// github#71 -- a standalone page has no host to remember a setting in (decisions/0009), so
+// the build picks the order it opens in. --sortspec only ADDS a source; it does not switch
+// the mode by implication.
+const SORTSPEC_ARG = opt("sortspec", "");
+const FOLDER_ORDER = (() => {
+  const v = String(opt("folder-order", "name"));
+  if (["name", "explorer", "size"].includes(v)) return v;
+  console.error(`build-graph: --folder-order ${v} is not name|explorer|size -- using name`);
+  return "name";
+})();
 
 /* ---------------------------------------------------------------- discovery */
 
@@ -171,6 +181,40 @@ function parseFrontmatter(raw) {
   return { fm, body: text.slice(m[0].length) };
 }
 const unquote = (s) => String(s).trim().replace(/^["']|["']$/g, "").trim();
+
+/* ------------------------------------------------------------------ sortspec --
+ * github#71. parseFrontmatter() above flattens every value to a string and knows nothing
+ * about block scalars, which is exactly how a `sorting-spec: |-` is always written -- so
+ * this reads that one key properly rather than teaching the general parser YAML it has
+ * never needed. The page owns the spec GRAMMAR (src/page.js, parseSortSpec); this only
+ * gets the text out of the file.
+ */
+function readSortingSpec(raw) {
+  const text = String(raw).replace(/^\uFEFF/, "");
+  const m = /^---\r?\n([\s\S]*?)\r?\n---/.exec(text);
+  if (!m) return "";
+  const lines = m[1].split(/\r?\n/);
+  for (let i = 0; i < lines.length; i++) {
+    const kv = /^sorting-spec\s*:\s*(.*)$/.exec(lines[i]);
+    if (!kv) continue;
+    const head = kv[1].trim();
+    if (!/^[|>][-+]?$/.test(head)) return unquote(head);
+    // a block scalar: every following line indented at least as far as the first one
+    const body = [];
+    let indent = -1;
+    for (let j = i + 1; j < lines.length; j++) {
+      const line = lines[j];
+      if (!line.trim()) { body.push(""); continue; }
+      const lead = line.length - line.replace(/^\s+/, "").length;
+      if (indent < 0) indent = lead;
+      if (lead < indent) break;
+      body.push(line.slice(indent));
+    }
+    while (body.length && !body[body.length - 1].trim()) body.pop();
+    return body.join("\n");
+  }
+  return "";
+}
 
 /* -------------------------------------------------------------- link mining */
 
@@ -265,6 +309,50 @@ const files = walk(VAULT).filter((abs) => {
   if (INCLUDE_TEMPLATES) return true;
   return !isTemplate(relative(VAULT, abs).split(sep).join("/"));
 });
+/* github#71 -- the three places that plugin reads a spec, plus --sortspec for a build that
+ * points at one outside the vault. A sortspec.md stays an ordinary note on the disc (it is
+ * still in `files`); it is additionally read as a spec here.
+ *
+ * `home` is the folder the spec file sits in, which is what a section with no
+ * `target-folder:` and what `target-folder: .` both mean. A spec registered globally from
+ * inside some folder therefore has to say `target-folder: /` to reach the vault root -- the
+ * page resolves that, this only records where the file was found. */
+const SORT_SPECS = (() => {
+  const out = [];
+  const seen = new Set();
+  const add = (abs, origin) => {
+    const key = resolvePath(abs);
+    if (seen.has(key)) return;
+    seen.add(key);
+    let raw; try { raw = readFileSync(abs, "utf8"); } catch { return; }
+    const text = readSortingSpec(raw);
+    if (!text.trim()) return;
+    const rel = relative(VAULT, abs).split(sep).join("/");
+    const home = rel.indexOf("/") < 0 ? "" : rel.slice(0, rel.lastIndexOf("/"));
+    out.push({ folder: home, text, origin: origin || rel });
+  };
+
+  for (const abs of files) {
+    const rel = relative(VAULT, abs).split(sep).join("/");
+    const name = basename(abs, ".md");
+    const dir = rel.indexOf("/") < 0 ? "" : rel.slice(0, rel.lastIndexOf("/"));
+    const parent = dir.indexOf("/") < 0 ? dir : dir.slice(dir.lastIndexOf("/") + 1);
+    // a sortspec.md in any folder, or a folder note carrying the key in its frontmatter
+    if (name.toLowerCase() === "sortspec" || (parent && name === parent)) add(abs, rel);
+  }
+
+  const cfg = readJson(".obsidian/plugins/custom-sort/data.json");
+  if (cfg && typeof cfg.additionalSortspecFile === "string" && cfg.additionalSortspecFile.trim()) {
+    add(join(VAULT, norm(cfg.additionalSortspecFile)), norm(cfg.additionalSortspecFile));
+  }
+  if (SORTSPEC_ARG) {
+    const abs = isAbsolute(SORTSPEC_ARG) ? SORTSPEC_ARG : join(VAULT, norm(SORTSPEC_ARG));
+    if (!existsSync(abs)) console.error(`build-graph: --sortspec ${SORTSPEC_ARG} does not exist -- ignored`);
+    else add(abs, "--sortspec");
+  }
+  return out;
+})();
+
 const notes = [];
 const byKey = new Map();
 
@@ -385,6 +473,9 @@ const data = {
     ghostsIncluded: INCLUDE_GHOSTS,
   },
   dev: DEV_BUILD,
+  // github#71
+  folderOrder: FOLDER_ORDER,
+  sortSpecs: SORT_SPECS,
 };
 
 /* ------------------------------------------------------------------ emit */
@@ -442,6 +533,13 @@ writeFileSync(OUT, html, "utf8");
 const kb = (Buffer.byteLength(html) / 1024).toFixed(0);
 console.log(`vault-graph: ${data.stats.nodes} notes, ${data.stats.edges} links, ` +
             `${data.stats.orphans} orphans, ${unresolved} unresolved link(s)`);
+if (SORT_SPECS.length) {
+  console.log(`sortspec: ${SORT_SPECS.length} source(s) -- ` +
+              SORT_SPECS.map((x) => x.origin).join(", ") + `; folder order: ${FOLDER_ORDER}`);
+} else if (FOLDER_ORDER === "explorer") {
+  console.log("sortspec: --folder-order explorer, but no sortspec was found -- the page will " +
+              "fall back to name order");
+}
 console.log(`dated: ${dates.frontmatter} from frontmatter, ${dates.filename} from the ` +
             `filename, ${dates.stamp} from the file stamp` +
             (dates.none ? `, ${dates.none} UNDATED` : ", none undated"));

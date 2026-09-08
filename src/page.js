@@ -56,6 +56,9 @@
  * @property {VaultEdge[]} edges
  * @property {VaultStats} stats
  * @property {boolean} [dev]         a --dev build of the standalone; nothing else sets it
+ * @property {{ folder: string, text: string, origin: string }[]} [sortSpecs]  github#71 --
+ *   raw `sorting-spec` text as the host found it; the page parses it, so the two hosts do not
+ *   each carry a copy of the parser
  */
 
 /**
@@ -104,6 +107,7 @@
  * @property {Record<string, boolean>} [folderShown]
  * @property {boolean} [panEnabled]
  * @property {boolean} [compactAxis]
+ * @property {"name" | "explorer" | "size"} [folderOrder]   github#71 -- default "name"
  * @property {boolean} [unlinkedByFolder]
  * @property {boolean} [unlinkedTintByFolder]
  * @property {boolean} [fitCap]               github#41, design/0011
@@ -117,6 +121,7 @@
  * @property {(map: Record<string, boolean>) => void | Promise<void>} [onFolderShown]
  * @property {(v: boolean) => void | Promise<void>} [onPanEnabled]
  * @property {(v: boolean) => void | Promise<void>} [onCompactAxis]
+ * @property {(v: "name" | "explorer" | "size") => void | Promise<void>} [onFolderOrder]
  * @property {(v: boolean) => void | Promise<void>} [onUnlinkedByFolder]
  * @property {(v: boolean) => void | Promise<void>} [onUnlinkedTintByFolder]
  * @property {(v: boolean) => void | Promise<void>} [onSheetOpen]
@@ -167,6 +172,7 @@
  * @property {(v: boolean) => void} setUnlinkedByFolder
  * @property {(v: boolean) => void} setUnlinkedTintByFolder
  * @property {(v: boolean) => void} setFitCap
+ * @property {(v: "name" | "explorer" | "size") => void} setFolderOrder   github#71
  * @property {() => void} applyHiddenDefaults
  * @property {() => void} heatBuild
  * @property {() => PlanParityReport} checkPlanParity
@@ -180,6 +186,190 @@
  * destroy(), which releases everything the mount holds outside its root (github#62).
  * @typedef {{ readonly api: VgApi | null, readonly ready: boolean, destroy: () => void }} MountHandle
  */
+
+/* ------------------------------------------------------ file-explorer order --
+ * github#71, decisions/0013.
+ *
+ * The subset of the Custom File Explorer sorting plugin's sortspec that decides ORDER,
+ * and nothing else. That plugin exposes no resolved order to call -- it patches the
+ * explorer's own sort -- so this mirrors the spec TEXT. Reading the explorer's DOM would
+ * be a private-API dependency this repo has stayed clear of.
+ *
+ * ONLY TWO QUESTIONS EVER REACH THIS, because paraDirs() keeps dirs[0] and stops at the
+ * first YYYY-MM segment: the disc has exactly two levels. So the wedge order comes from
+ * the section targeting the vault root, and one folder's sub-wedge order from the section
+ * targeting that folder. Sections aimed deeper are parsed, kept, and never asked about --
+ * they are not errors, they are simply invisible here, and the setting's own description
+ * says so.
+ *
+ * Lives at module scope, outside the three BEGIN/END regions scripts/build-plugin.mjs
+ * strips: the plugin needs this, unlike the demo and debug surfaces.
+ */
+
+/**
+ * One resolved section of a spec.
+ * @typedef {Object} SortSection
+ * @property {string} target   normalised folder path the section aims at; "" is the vault root
+ * @property {number} rank     the plugin's precedence: 3 exact path, 2 exact name, 1 regexp, 0 wildcard
+ * @property {RegExp | null} re   compiled pattern, rank 1 only
+ * @property {string[]} pins   item names to float to the top, in the order they were listed
+ * @property {"asc" | "desc" | null} dir
+ * @property {string} origin   which spec file this came from, for notices
+ */
+
+/**
+ * @typedef {{ origin: string, line: number, text: string, why: string }} SortSkip
+ * @typedef {{ sections: SortSection[], skipped: SortSkip[], ok: boolean }} SortSpec
+ */
+
+/** A line that names a directive rather than an item to pin. */
+var SORT_DIRECTIVE = /^([a-z][a-z-]*)\s*:\s*(.*)$/;
+/** The plugin's punctuation-led syntax -- none of it decides order, all of it is skipped loudly. */
+var SORT_MARKER = /^[/<>%!\\.]/;
+
+/** @param {string} s */
+function sortTrimPath(s) {
+  return String(s).split(/[\\/]/).filter(Boolean).join("/");
+}
+
+/**
+ * Read a `target-folder:` value into a target + precedence rank.
+ * @param {string} raw @param {string} home the folder the spec file itself lives in
+ * @returns {{ target: string, rank: number, re: RegExp | null } | null}
+ */
+function sortTarget(raw, home) {
+  var v = String(raw).trim();
+  if (!v) return null;
+  // A regexp target is written /pattern/ -- but a bare "/" is the vault root and "/*" is
+  // the root wildcard, so both are settled before the delimiters are considered.
+  if (v === "/" || v === ".") return { target: v === "/" ? "" : home, rank: 3, re: null };
+  if (v === "/*" || v === "./*") return { target: v === "/*" ? "" : home, rank: 0, re: null };
+  if (v.length > 2 && v.charAt(0) === "/" && v.charAt(v.length - 1) === "/") {
+    try { return { target: v, rank: 1, re: new RegExp(v.slice(1, -1)) }; } catch { return null; }
+  }
+  var wild = /\/\*$/.test(v);
+  if (wild) v = v.slice(0, -2);
+  if (v.charAt(0) === ".") v = home + "/" + v.replace(/^\.\/?/, "");
+  var target = sortTrimPath(v);
+  if (!target && !wild) return null;
+  // No slash means the plugin matches the folder's NAME at any depth, which outranks a
+  // wildcard but loses to an exact path.
+  return { target: target, rank: wild ? 0 : (target.indexOf("/") < 0 ? 2 : 3), re: null };
+}
+
+/**
+ * Parse every spec source into ordered sections. Never throws: a source that cannot be
+ * read at all takes the WHOLE spec down to `ok: false`, because a half-applied order is
+ * worse than none -- the caller then falls back to name order (github#71).
+ * @param {{ folder: string, text: string, origin: string }[]} sources
+ * @returns {SortSpec}
+ */
+function parseSortSpec(sources) {
+  /** @type {SortSection[]} */
+  var sections = [];
+  /** @type {SortSkip[]} */
+  var skipped = [];
+  try {
+    (sources || []).forEach(function (src) {
+      var home = sortTrimPath(src.folder || "");
+      var origin = src.origin || "sortspec";
+      /** @type {SortSection} */
+      var cur = { target: home, rank: 3, re: null, pins: [], dir: null, origin: origin };
+      var used = false;
+      String(src.text || "").split(/\r?\n/).forEach(function (raw, i) {
+        var line = raw.trim(), n = i + 1;
+        if (!line || line.indexOf("//") === 0) return;
+        var m = SORT_DIRECTIVE.exec(line);
+        var key = m ? m[1] : "";
+        if (key === "target-folder") {
+          if (used || cur.pins.length || cur.dir) sections.push(cur);
+          var t = sortTarget(m[2], home);
+          if (!t) {
+            skipped.push({ origin: origin, line: n, text: line, why: "target-folder is not a path this page can resolve" });
+            cur = { target: home, rank: 3, re: null, pins: [], dir: null, origin: origin };
+            used = false;
+            return;
+          }
+          cur = { target: t.target, rank: t.rank, re: t.re, pins: [], dir: null, origin: origin };
+          used = true;
+          return;
+        }
+        if (key === "order-asc" || key === "order-desc") {
+          var by = m[2].trim().toLowerCase();
+          if (by !== "a-z") {
+            // github#71 D-9: `created` and `modified` are understood and deliberately not
+            // applied. The plugin sorts folders by their FILESYSTEM timestamps; the only
+            // dates this page has are the notes inside a folder, which is a different
+            // answer wearing the same name. Skipping loudly beats quietly disagreeing.
+            skipped.push({ origin: origin, line: n, text: line,
+                           why: "only `a-z` is applied; `" + by + "` needs folder timestamps the page does not have" });
+            return;
+          }
+          cur.dir = key === "order-desc" ? "desc" : "asc";
+          return;
+        }
+        if (m || SORT_MARKER.test(line)) {
+          skipped.push({ origin: origin, line: n, text: line, why: "not part of the ordering subset this page reads" });
+          return;
+        }
+        cur.pins.push(line);
+      });
+      if (used || cur.pins.length || cur.dir) sections.push(cur);
+    });
+  } catch (e) {
+    return { sections: [], skipped: [{ origin: "sortspec", line: 0, text: "",
+             why: "the spec could not be parsed (" + String(e) + ") -- falling back to name order" }], ok: false };
+  }
+  return { sections: sections, skipped: skipped, ok: true };
+}
+
+/**
+ * The section that governs `path`, by the plugin's precedence: exact path over exact name
+ * over regexp over wildcard. Ties inside one rank go to the first listed, which is
+ * arbitrary but deterministic -- the plugin itself warns that two competing wildcards are
+ * the fragile case.
+ * @param {SortSpec | null} spec @param {string} path "" is the vault root
+ * @returns {SortSection | null}
+ */
+function sortSectionFor(spec, path) {
+  if (!spec || !spec.ok) return null;
+  var name = path.indexOf("/") < 0 ? path : path.slice(path.lastIndexOf("/") + 1);
+  /** @type {SortSection | null} */
+  var best = null;
+  spec.sections.forEach(function (s) {
+    var hit = s.rank === 3 ? s.target === path
+      : s.rank === 2 ? (!!path && s.target === name)
+      : s.rank === 1 ? (!!path && !!s.re && s.re.test(name))
+      : s.target === "" || s.target === path || path.indexOf(s.target + "/") === 0;
+    if (hit && (!best || s.rank > best.rank)) best = s;
+  });
+  return best;
+}
+
+/**
+ * Pinned names first in the order the spec listed them, then everything else by the
+ * section's own direction. A pin naming something that is not here -- a folder since
+ * renamed or deleted, or one of the FILES a root section usually pins -- simply does not
+ * appear; it is not an error and not a notice.
+ *
+ * `a-z` is compared plainly, the way the plugin's own `a-z` reads, and deliberately NOT
+ * with the numeric collation computeOrder() uses for name order (github#71 D-11).
+ * @param {string[]} names @param {SortSection} section
+ * @returns {string[]}
+ */
+function orderBySortSection(names, section) {
+  /** @type {string[]} */
+  var pinned = [];
+  section.pins.forEach(function (p) {
+    if (names.indexOf(p) >= 0 && pinned.indexOf(p) < 0) pinned.push(p);
+  });
+  var rest = names.filter(function (n) { return pinned.indexOf(n) < 0; });
+  if (section.dir) {
+    rest.sort(function (a, b) { return a.localeCompare(b); });
+    if (section.dir === "desc") rest.reverse();
+  }
+  return pinned.concat(rest);
+}
 
 /**
  * @param {HTMLElement} root
@@ -386,6 +576,15 @@ function mountVaultGraph(root, data, deps) {
   // github#23
   var compactAxis = deps.compactAxis === false ? false : true;
   var onCompactAxis = typeof deps.onCompactAxis === "function" ? deps.onCompactAxis : null;
+
+  // github#71
+  var FOLDER_ORDERS = ["name", "explorer", "size"];
+  var folderOrder = FOLDER_ORDERS.indexOf(String(deps.folderOrder)) >= 0
+    ? /** @type {"name" | "explorer" | "size"} */ (deps.folderOrder) : "name";
+  var onFolderOrder = typeof deps.onFolderOrder === "function" ? deps.onFolderOrder : null;
+  var sortSpec = parseSortSpec(DATA.sortSpecs || []);
+  /** True only when the explorer order can actually be applied. */
+  function usingSpec() { return folderOrder === "explorer" && sortSpec.ok; }
 
   // github#73, design/0013
   // github#82 -- NARROW_PX must match the breakpoint in page.css
@@ -609,21 +808,39 @@ function mountVaultGraph(root, data, deps) {
   var subOrder = dict();
   /** @type {Record<string, number>} */
   var subCount = dict();
+  /** @type {Record<string, Record<string, number>>} */
+  var subTally = dict();
   (function () {
-    /** @type {Record<string, Record<string, number>>} */
-    var tally = dict();
     graph.forEachNode(function (_id, a) {
       var f = a.folder, sb = a.sub || "";
-      if (!tally[f]) tally[f] = dict();
-      tally[f][sb] = (tally[f][sb] || 0) + 1;
+      if (!subTally[f]) subTally[f] = dict();
+      subTally[f][sb] = (subTally[f][sb] || 0) + 1;
     });
-    Object.keys(tally).forEach(function (f) {
-      subOrder[f] = Object.keys(tally[f]).sort(function (x, y) {
-        return tally[f][y] - tally[f][x] || x.localeCompare(y);
-      });
-      subOrder[f].forEach(function (sb) { subCount[f + "/" + sb] = tally[f][sb]; });
-    });
+    buildSubOrder();
   })();
+
+  /**
+   * Sub-wedge order. github#71: the tally is fixed by the vault, only the order over it
+   * answers to the setting, so this is what re-runs when the setting changes.
+   *
+   * The size sort is the INPUT, not an alternative to the spec: a section with pins but no
+   * `order-` line floats those subfolders to the front and leaves everything behind them
+   * biggest-first, which is the issue's "pinned ones first, then the biggest". `size` mode
+   * therefore does nothing here -- sub-wedges have always been size-ordered (design/0001).
+   */
+  function buildSubOrder() {
+    subOrder = dict();
+    Object.keys(subTally).forEach(function (f) {
+      var tally = subTally[f];
+      var subs = Object.keys(tally).sort(function (x, y) {
+        return tally[y] - tally[x] || x.localeCompare(y);
+      });
+      var sec = usingSpec() ? sortSectionFor(sortSpec, f) : null;
+      if (sec) subs = orderBySortSection(subs, sec);
+      subOrder[f] = subs;
+      subs.forEach(function (sb) { subCount[f + "/" + sb] = tally[sb]; });
+    });
+  }
 
   var UNIT = 160;
 
@@ -672,6 +889,28 @@ function mountVaultGraph(root, data, deps) {
     return groupRank(a) - groupRank(b) || a.localeCompare(b, undefined, { numeric: true });
   }
 
+  /**
+   * The sequence the wedges are DRAWN in. github#71 D-7: the archive/root/unlinked rank is
+   * still the outer key in every mode, so no reordering ever floats a pseudo-group into the
+   * middle of the real folders -- only the real-folder bucket is re-sorted, and `(vault
+   * root)`, the archives and `(unlinked)` keep the places design/0001 gave them.
+   * @param {string[]} names already in name order @param {Record<string, number>} count
+   * @returns {string[]}
+   */
+  function drawOrder(names, count) {
+    if (folderOrder === "name") return names;
+    var body = names.filter(function (n) { return groupRank(n) === 2; });
+    if (folderOrder === "size") {
+      body.sort(function (a, b) { return (count[b] || 0) - (count[a] || 0) || byGroupName(a, b); });
+    } else {
+      var sec = usingSpec() ? sortSectionFor(sortSpec, "") : null;
+      if (!sec) return names;
+      body = orderBySortSection(body, sec);
+    }
+    return names.filter(function (n) { return groupRank(n) < 2; })
+      .concat(body, names.filter(function (n) { return groupRank(n) > 2; }));
+  }
+
   /** @returns {Record<string, number>} group -> note count, for the current dim */
   function computeOrder() {
     /** @type {Record<string, number>} */
@@ -694,7 +933,7 @@ function mountVaultGraph(root, data, deps) {
     // github#71 -- a separate copy, not the same array: the draw order is re-sorted in place
     // below once it leaves name order, and the slot order must not follow it.
     slotOrder[state.dim] = names.slice();
-    order[state.dim] = names;
+    order[state.dim] = drawOrder(names, count);
     return count;
   }
 
@@ -5220,8 +5459,10 @@ function mountVaultGraph(root, data, deps) {
           var n = 0;
           tail.forEach(function (sb) { n += subCount[g + "/" + sb] || 0; });
           var tOpen = !!state.tailOpen[g];
+          // github#71 -- "smaller" is only true while the order IS size. Under a spec the
+          // tail can hold subfolders bigger than the named ones, so the row says "other".
           row += srow(subShade[g + "/" + tail[0]] || colorOf(g),
-                      tail.length + " smaller subfolders", n,
+                      tail.length + (usingSpec() ? " other subfolders" : " smaller subfolders"), n,
                       tail.map(function (_, j) { return SUB_NAMED + j; }), 1,
                       'data-twtail="' + esc(g) + '"', tOpen);
           if (tOpen) {
@@ -5827,6 +6068,13 @@ function mountVaultGraph(root, data, deps) {
         var row = OPTION_ROWS.filter(function (o) { return o.key === key; })[0];
         if (row) { row.set(!row.get()); buildOptions(); }
       });
+      // github#71
+      $("optbody").addEventListener("click", function (ev) {
+        var t = ev.target instanceof Element ? ev.target : null;
+        var b = t && t.closest("[data-fo]");
+        if (!b) return;
+        setFolderOrder(b.getAttribute("data-fo") || "name", true);
+      });
     }
 
     function closeCtxMenu() {
@@ -6043,10 +6291,41 @@ function mountVaultGraph(root, data, deps) {
         get: function () { return unlinkedTintByFolder; },
         set: function (v) { setUnlinkedTintByFolder(v, true); } }
     ];
+    // github#71 -- the first setting here that is not a boolean, so it gets a segmented
+    // radio rather than a fourth Enabled button. The subset note in the title is deliberate:
+    // the page reads the parts of a sortspec that decide order, and the disc has only two
+    // levels to apply them to, so a spec can be doing more in the explorer than here.
+    var FOLDER_ORDER_ROW = [
+      { key: "name", label: "Name",
+        title: "Folders run in their own name order, numbers read as numbers -- the disc's original order" },
+      { key: "explorer", label: "File explorer",
+        title: "Follow a Custom File Explorer sorting sortspec: pinned names first, then order-asc/order-desc a-z, by the plugin's own precedence. Only the sections aimed at the vault root and at a top-level folder can reach the disc, which has two levels" },
+      { key: "size", label: "Size",
+        title: "Biggest folder first. Sub-wedges are already size-ordered, so this changes the wedges only" }
+    ];
+    function folderOrderHTML() {
+      var note = sortSpec.ok
+        ? (sortSpec.sections.length ? "" : "no sortspec found in this vault")
+        : "the sortspec could not be read -- showing name order";
+      var skips = sortSpec.skipped.length;
+      if (!skips && !note) return "";
+      return '<div class="lbl" style="margin:2px 0 0;opacity:.7">' +
+             esc([note, skips ? skips + " line(s) skipped" : ""].filter(Boolean).join("; ")) +
+             '</div>';
+    }
     function buildOptions() {
       var host = $("optbody");
       if (!host) return;
-      setHTML(host, OPTION_ROWS.map(function (o) {
+      var seg = '<div class="row" style="margin-bottom:7px">' +
+                '<div class="lbl" style="margin:0">Folder order</div>' +
+                '<div class="mini" role="radiogroup" aria-label="Folder order">' +
+                FOLDER_ORDER_ROW.map(function (o) {
+                  return '<button id="vg-fo-' + o.key + '" data-fo="' + o.key + '" role="radio"' +
+                         ' aria-checked="' + (folderOrder === o.key) + '"' +
+                         ' title="' + esc(o.title) + '">' + esc(o.label) + '</button>';
+                }).join("") +
+                '</div></div>' + folderOrderHTML();
+      setHTML(host, seg + OPTION_ROWS.map(function (o) {
         var on = !!o.get();
         return '<div class="row" style="margin-bottom:7px">' +
                '<div class="lbl" style="margin:0">' + esc(o.label) + '</div>' +
@@ -6219,6 +6498,27 @@ function mountVaultGraph(root, data, deps) {
     if (dateSpan) drawDateUI();
     if (persist && onCompactAxis) onCompactAxis(compactAxis);
     return compactAxis;
+  }
+
+  // github#71
+  /** @param {string} v @param {boolean} [persist] */
+  function setFolderOrder(v, persist) {
+    var next = FOLDER_ORDERS.indexOf(v) >= 0 ? /** @type {"name" | "explorer" | "size"} */ (v) : "name";
+    if (next === folderOrder) return folderOrder;
+    folderOrder = next;
+    // The sub-wedge order answers to the setting too (D-2), and it is built from a tally
+    // that does not -- so rebuild it before anything reads subOrder.
+    buildSubOrder();
+    FOLDER_ORDERS.forEach(function (k) {
+      var btn = $("fo-" + k);
+      if (btn) btn.setAttribute("aria-checked", k === folderOrder ? "true" : "false");
+    });
+    // Wedges change bearing, so this is a real relayout, not a repaint. Animated: the
+    // reflow interpolates in polar space like every other regroup (design/0001).
+    hardRelayout(true);
+    attempt(placeLogo); attempt(heatBuild); attempt(buildLegend);
+    if (persist && onFolderOrder) onFolderOrder(folderOrder);
+    return folderOrder;
   }
 
   // github#3
@@ -8056,6 +8356,17 @@ function mountVaultGraph(root, data, deps) {
                     placeLogo: placeLogo,
                     palette: paletteInfo,
                     groupOrder: function () { return (order[state.dim] || []).slice(); },
+                    // github#71
+                    nameOrder: function () { return (slotOrder[state.dim] || []).slice(); },
+                    folderOrder: function () { return folderOrder; },
+                    setFolderOrder: /** @param {string} v */ function (v) { return setFolderOrder(v, false); },
+                    sortSpec: function () {
+                      return { ok: sortSpec.ok, skipped: sortSpec.skipped.slice(),
+                               sections: sortSpec.sections.map(function (x) {
+                                 return { target: x.target, rank: x.rank, pins: x.pins.slice(),
+                                          dir: x.dir, origin: x.origin };
+                               }) };
+                    },
                     groupCount: /** @param {string} g */ function (g) { return counts[g] || 0; },
                     slotOf: /** @param {string} g */ function (g) { return groupSlot[g] || ""; },
                     autoSlotOf: /** @param {string} g */ function (g) { return groupAutoSlot[g] || ""; },

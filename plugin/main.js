@@ -40,6 +40,7 @@ const ICON_ID = "vault-graph-disc";
  * @property {boolean} panEnabled
  * @property {boolean} compactAxis
  * @property {boolean} unlinkedByFolder
+ * @property {"name" | "explorer" | "size"} folderOrder
  * @property {boolean} unlinkedTintByFolder
  * @property {boolean} fitCap                           github#41, design/0011
  * @property {boolean} [sheetOpen]                      github#82 -- absent until folded once
@@ -265,6 +266,47 @@ async function readFolders(app) {
   return { templateDirs: Array.from(dirs), dailyDir: dailyDir };
 }
 
+/** github#71 -- the three places the Custom File Explorer sorting plugin reads a spec.
+ * Obsidian's metadata cache has already parsed the YAML, so a `sorting-spec: |-` block
+ * arrives as one string and nothing here needs to know YAML -- src/build-graph.mjs pays
+ * that cost instead, because it has no cache to ask. The spec GRAMMAR lives in
+ * src/page.js (parseSortSpec), the one file both hosts share, so it exists once.
+ *
+ * `folder` is where the spec file sits, which is what a section with no `target-folder:`
+ * means. A spec registered globally from inside some folder must therefore say
+ * `target-folder: /` to reach the vault root; the page resolves that.
+ * @param {import("obsidian").App} app
+ */
+async function readSortSpecs(app) {
+  /** @type {{ folder: string, text: string, origin: string }[]} */
+  const out = [];
+  const seen = new Set();
+  /** @param {import("obsidian").TFile} file */
+  const add = (file) => {
+    if (!file || seen.has(file.path)) return;
+    seen.add(file.path);
+    const fm = (app.metadataCache.getFileCache(file) || {}).frontmatter || {};
+    const text = typeof fm["sorting-spec"] === "string" ? fm["sorting-spec"] : "";
+    if (!text.trim()) return;
+    const dir = file.parent && file.parent.path && file.parent.path !== "/" ? file.parent.path : "";
+    out.push({ folder: dir, text: text, origin: file.path });
+  };
+
+  for (const file of app.vault.getMarkdownFiles()) {
+    const dir = file.parent && file.parent.path && file.parent.path !== "/" ? file.parent.path : "";
+    const parent = dir.indexOf("/") < 0 ? dir : dir.slice(dir.lastIndexOf("/") + 1);
+    // a sortspec.md in any folder, or a folder note carrying the key in its frontmatter
+    if (file.basename.toLowerCase() === "sortspec" || (parent && file.basename === parent)) add(file);
+  }
+
+  const extra = strField(await readConfigJson(app, "plugins/custom-sort/data.json"), "additionalSortspecFile");
+  if (extra.trim()) {
+    const f = app.vault.getFileByPath(normalizePath(norm(extra)));
+    if (f) add(/** @type {import("obsidian").TFile} */ (f));
+  }
+  return out;
+}
+
 /* ================================================================ the adapter ==
  * The crawl in build-graph.mjs, replaced by asking Obsidian. What used to be a walk, a
  * YAML parser, a wikilink miner, a resolver and an alias table is now four reads of an
@@ -286,6 +328,8 @@ async function readFolders(app) {
 async function buildData(app, opts) {
   const t0 = performance.now();
   const folders = await readFolders(app);
+  // github#71
+  const sortSpecs = await readSortSpecs(app);
   const templateDirs = folders.templateDirs, dailyDir = folders.dailyDir;
   /** @param {string} path */
   const isTemplate = (path) => templateDirs.some((d) => under(path, d));
@@ -453,6 +497,8 @@ async function buildData(app, opts) {
       ghostsIncluded: !!opts.ghosts,
     },
     readWords: readWords,
+    // github#71
+    sortSpecs: sortSpecs,
     _spike: {
       msIndex: Math.round(tIndex - t0),
       msEdges: Math.round(tEdges - tIndex),
@@ -594,6 +640,13 @@ class VaultGraphView extends ItemView {
         this.plugin.settings.compactAxis = !!v;
         await this.plugin.saveSettings();
       },
+      // github#71
+      folderOrder: this.plugin.settings.folderOrder || "name",
+      /** @param {"name" | "explorer" | "size"} v */
+      onFolderOrder: async (v) => {
+        this.plugin.settings.folderOrder = v;
+        await this.plugin.saveSettings();
+      },
       // github#3
       unlinkedByFolder: this.plugin.settings.unlinkedByFolder,
       /** @param {boolean} v */
@@ -683,6 +736,23 @@ const DEFAULTS = {
   unlinkedTintByFolder: false,
   // github#41, design/0011
   fitCap: true,
+  // github#71
+  folderOrder: "name",
+};
+
+/* github#71 -- the one view setting that is not a boolean, so it sits beside VIEW_SETTINGS
+ * rather than in it. The description names the subset on purpose: a sortspec can be doing
+ * more in the explorer than the disc can show, because the disc has two levels. */
+const FOLDER_ORDER_SETTING = {
+  key: /** @type {const} */ ("folderOrder"),
+  name: "Folder order",
+  desc: "Which way the wedges run round the disc. Name is the vault's own folder order, " +
+        "numbers reading as numbers. File explorer follows a Custom File Explorer sorting " +
+        "sortspec -- pinned names first, then order-asc/order-desc a-z, by that plugin's own " +
+        "precedence; only the sections aimed at the vault root and at a top-level folder can " +
+        "reach the disc, and a spec that cannot be read falls back to Name. Size puts the " +
+        "biggest folder first. A folder keeps its colour whichever you pick.",
+  options: { name: "Name", explorer: "File explorer", size: "Size" },
 };
 
 /** @type {{ key: "ghosts" | "templates" | "flatMonths" | "words", name: string, desc: string }[]} */
@@ -815,7 +885,14 @@ class VaultGraphSettingTab extends PluginSettingTab {
     return [
       ...BUILD_SETTINGS.map((s) => toggle(s, false)),
       { type: /** @type {"group"} */ ("group"), heading: "View",
-        items: VIEW_SETTINGS.map((s) => toggle(s, s.defaultOn)) },
+        items: [
+          // github#71
+          { name: FOLDER_ORDER_SETTING.name, desc: FOLDER_ORDER_SETTING.desc,
+            aliases: ["sortspec", "sort", "order", "explorer", "custom sort"],
+            control: { type: /** @type {"dropdown"} */ ("dropdown"), key: FOLDER_ORDER_SETTING.key,
+                       defaultValue: "name", options: FOLDER_ORDER_SETTING.options } },
+          ...VIEW_SETTINGS.map((s) => toggle(s, s.defaultOn)),
+        ] },
       { type: /** @type {"group"} */ ("group"), heading: "Folder colours",
         items: [{
           name: "Folder and subfolder colours", desc: COLOURS_DESC,
@@ -835,6 +912,11 @@ class VaultGraphSettingTab extends PluginSettingTab {
   }
   /** @param {string} key @param {unknown} value */
   async setControlValue(key, value) {
+    // github#71 -- the only non-boolean, so it is settled before the !!value below
+    if (key === FOLDER_ORDER_SETTING.key) {
+      await this.setFolderOrder(String(value));
+      return;
+    }
     const build = BUILD_SETTINGS.find((s) => s.key === key);
     const view = VIEW_SETTINGS.find((s) => s.key === key);
     if (!build && !view) return;
@@ -856,6 +938,18 @@ class VaultGraphSettingTab extends PluginSettingTab {
     if (api && api[def.api]) api[def.api](v);
   }
 
+  // github#71
+  /** @param {string} v */
+  async setFolderOrder(v) {
+    const next = ["name", "explorer", "size"].includes(v)
+      ? /** @type {"name" | "explorer" | "size"} */ (v) : "name";
+    this.plugin.settings.folderOrder = next;
+    await this.plugin.saveSettings();
+    const view = await this.plugin.currentView();
+    const api = view && view.handle && view.handle.api;
+    if (api && api.setFolderOrder) api.setFolderOrder(next);
+  }
+
   display() {
     const { containerEl } = this;
     containerEl.empty();
@@ -874,6 +968,14 @@ class VaultGraphSettingTab extends PluginSettingTab {
     }
 
     new Setting(containerEl).setName("View").setHeading();
+    // github#71
+    new Setting(containerEl)
+      .setName(FOLDER_ORDER_SETTING.name)
+      .setDesc(FOLDER_ORDER_SETTING.desc)
+      .addDropdown((d) => d
+        .addOptions(FOLDER_ORDER_SETTING.options)
+        .setValue(this.plugin.settings.folderOrder || "name")
+        .onChange(async (v) => { await this.setFolderOrder(v); }));
     for (const s of VIEW_SETTINGS) {
       new Setting(containerEl)
         .setName(s.name)
@@ -1194,6 +1296,8 @@ class VaultGraphPlugin extends Plugin {
     if (api.setUnlinkedByFolder) api.setUnlinkedByFolder(this.settings.unlinkedByFolder !== false);
     if (api.setUnlinkedTintByFolder) api.setUnlinkedTintByFolder(this.settings.unlinkedTintByFolder === true);
     if (api.setFitCap) api.setFitCap(this.settings.fitCap !== false);
+    // github#71
+    if (api.setFolderOrder) api.setFolderOrder(this.settings.folderOrder || "name");
     if (api.applyHiddenDefaults) api.applyHiddenDefaults();
   }
 

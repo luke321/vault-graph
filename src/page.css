@@ -223,6 +223,11 @@
   .vault-graph .mini button[aria-pressed="true"], .vault-graph button.btn[aria-pressed="true"] {
     background: var(--accent); border-color: var(--accent); color: #fff;
   }
+  /* github#71 -- the segmented Folder order radio; the only non-boolean setting, so it
+     borrows the pressed look rather than inventing a second one. */
+  .vault-graph .mini button[role="radio"][aria-checked="true"] {
+    background: var(--accent); border-color: var(--accent); color: #fff;
+  }
 
   /* --------------------------------------------------------- settings ----- */
   .vault-graph .gear {
