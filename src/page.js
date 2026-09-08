@@ -6119,11 +6119,13 @@ function mountVaultGraph(root, data, deps) {
   }
 
   /* github#73, design/0013 */
+  // github#82 -- the left edge too, so the cluster can ride the corner
   function syncCanvasTop() {
     var c = $("canvas");
     if (!c) return;
     var r = c.getBoundingClientRect(), o = ROOT.getBoundingClientRect();
     ROOT.style.setProperty("--vg-canvas-top", Math.max(0, Math.round(r.top - o.top)) + "px");
+    ROOT.style.setProperty("--vg-canvas-left", Math.max(0, Math.round(r.left - o.left)) + "px");
   }
 
   /* github#73, design/0013 */

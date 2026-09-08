@@ -148,7 +148,7 @@ legend and the search box.
   control is reachable.
 
 **A panel may never cover its own toggle**, and this is the one defect the band's new default
-produced rather than exposed. `#vg-mob` lives in `#vg-canvas`, so the band pushes it down by the
+produced rather than exposed. `#vg-mob` used to live in `#vg-canvas`, so the band pushed it down by the
 band's own height: with the band on, the two buttons sit at y 292 on an 844 px screen while the
 sheet's top edge is at 236, and at `z-index: 7` against the sheet's 8 the sheet covered them.
 The sheet opened and could not be closed. Measured before the fix: `elementFromPoint` at the
@@ -156,6 +156,27 @@ toggle's centre returned `#vg-sidebar`, and a second press left `data-sheet` at 
 now sits at `z-index: 9`, above the sheet, and the harness asserts the round trip rather than the
 stacking order. **A tap on what is left of the disc also closes the sheet**, which is what a
 scrim would do and is a second way out that does not depend on a z-index at all.
+
+**The cluster rides the disc's corner rather than living in it, and that is what lets it
+glide.** github#82 kept the placement design/0013 chose — the disc box's own top-left, where the
+year strip meets the legend counts — and moved the element to a child of the root, offset by
+`calc(var(--vg-canvas-left) + 12px)` and `calc(var(--vg-canvas-top) + 12px)`. Inside `#vg-canvas`
+its own `left`/`top` stayed 12px and only the container moved, which CSS cannot transition, so
+folding a panel teleported the pair 230px or 288px. `syncCanvasTop()` publishes both edges now
+and the offsets are real values that change, so the move animates over 180ms and reads as the
+cluster following the disc's edge. Position at rest is unchanged in every state — 300,242 with
+both panels up, 300,12 with the calendar folded, 12,12 with both — and the phone is unchanged
+too, 44x44 centred at 34,314 with the disc box 390x564 and the median dot 1.38px, because the
+calc is exactly the arithmetic being inside the canvas performed. Reduced motion drops the
+transition, like the sheet's own. `position: fixed` was rejected: in a plugin pane it anchors to
+the Obsidian window rather than the view.
+
+**Proximity and stability cannot both be had here, and the choice is proximity.** Folding moves
+exactly the disc box's left and top edges, so every placement near what it controls moves, and
+every placement that holds still is the far bottom-right corner where `#vg-cam` already is.
+Putting the toggles there was tried on 2026-09-08 and rejected on sight: a button 1500px from
+the folder list it folds has stopped being a handle. So the pair stays on the corner it belongs
+to and the movement is made legible instead of removed.
 
 **The sheet stops where the disc starts, and the buttons land on its heading.** Raising the
 cluster above the sheet made it reachable and put it over the search box, which reads like a

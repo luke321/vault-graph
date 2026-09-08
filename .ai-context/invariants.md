@@ -2004,6 +2004,24 @@ the second date field and All dates off the right edge. The
 detail card becomes a sheet at the foot at 46% and both control clusters move to the top
 corners, clear of it. design/0013.
 
+**The cluster rides the disc's corner off two published variables.** It sits one
+`--controls-inset` in from the disc box's top-left — the corner where the year strip meets the
+legend counts — and that corner is the one that moves: folding the folder list takes 288px off
+the box's left edge, folding the calendar 230px off its top. So the element is a child of the
+root offset by `calc(var(--vg-canvas-left) + 12px)` / `calc(var(--vg-canvas-top) + 12px)` rather
+than a child of `#vg-canvas`, because inside the canvas its own offsets never changed and CSS
+cannot transition a container moving — the pair teleported. Both edges are published by
+`syncCanvasTop()`, the move glides over 180ms, and reduced motion drops it. Measured at 1280x900:
+300,242 with both panels up, 12,242 with the folder list folded, 12,12 with both, and 12px from
+the box in every one. **A stale edge variable leaves the buttons behind with nothing else
+failing**, so the check asserts the variables against the box in all four states, not just the
+rendered inset. github#82.
+
+**Proximity and stability are exclusive here.** Every placement near what it controls moves;
+every placement that holds still is the bottom-right corner `#vg-cam` already holds. Moving the
+toggles there was tried and rejected — far from the panels they fold, and it flattens the
+distinction from zoom and pan. Proximity wins and the movement is made legible.
+
 **Above the breakpoint the same two toggles fold the same two panels, and the sidebar is a
 column rather than a sheet.** `[data-sheet="off"]` collapses the grid to `1fr` and takes
 `#vg-sidebar` out of the layout entirely, so the width goes to the stage; the sheet's
@@ -2052,7 +2070,7 @@ the sidebar back on gives their phone a sheet open at mount. Closable, so a wart
 defect. This **reverses** design/0013's "panel state is session state ... nothing is
 persisted", and 0013 says so at the paragraph itself.
 
-**A panel never covers its own toggle.** The panel buttons live in `#vg-canvas`, which the band
+**A panel never covers its own toggle.** The panel buttons used to live in `#vg-canvas`, which the band
 pushes down by its own height, so they land under a sheet that is anchored to the bottom. The
 cluster therefore outranks the sheet, and a tap on the remaining disc closes the sheet too. The
 harness asserts the round trip: press, what is under the toggle, press back.
