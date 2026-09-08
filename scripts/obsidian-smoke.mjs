@@ -581,6 +581,61 @@ try {
     }
   }
 
+  // github#78, design/0006
+  if (selected("hover")) {
+    const pick = await E(`(function(){
+      var v = ${VIEW};
+      var rows = [].slice.call(v.contentEl.querySelectorAll('#vg-legend .lg.bar'));
+      if (!rows.length) return null;
+      rows.sort(function (a, b) {
+        return parseFloat(getComputedStyle(b).getPropertyValue('--vg-share')) -
+               parseFloat(getComputedStyle(a).getPropertyValue('--vg-share'));
+      });
+      var lg = rows[0], b = lg.getBoundingClientRect();
+      lg.setAttribute('data-hoverprobe', '1');
+      return { g: lg.getAttribute('data-g'), n: rows.length,
+               x: Math.round(b.left + 40), y: Math.round(b.top + b.height / 2) };
+    })()`);
+    if (!pick) {
+      report(false, "the legend's count bar survives a hover inside Obsidian",
+             "no barred row in the plugin's legend -- countBars off, or no bar is drawn at all");
+    } else {
+      const read = () => E(`(function(){
+        var v = ${VIEW};
+        var lg = v.contentEl.querySelector('[data-hoverprobe]');
+        var cs = getComputedStyle(lg);
+        return { hovered: lg.matches(':hover'),
+                 image: cs.backgroundImage === 'none' ? 'none' : 'gradient',
+                 size: cs.backgroundSize,
+                 color: cs.backgroundColor,
+                 shadow: cs.boxShadow === 'none' ? 'none' : cs.boxShadow };
+      })()`);
+      await c.send("Input.dispatchMouseEvent",
+                   { type: "mouseMoved", x: 5, y: 5, button: "none", clickCount: 0 });
+      await sleep(250);
+      const rest = await read();
+      await c.send("Input.dispatchMouseEvent",
+                   { type: "mouseMoved", x: pick.x, y: pick.y, button: "none", clickCount: 0 });
+      await sleep(400);
+      const over = await read();
+      await c.send("Input.dispatchMouseEvent",
+                   { type: "mouseMoved", x: 5, y: 5, button: "none", clickCount: 0 });
+      await sleep(200);
+      await E(`(function(){ var v = ${VIEW};
+        var lg = v.contentEl.querySelector('[data-hoverprobe]');
+        if (lg) lg.removeAttribute('data-hoverprobe'); })()`);
+
+      const kept = over.image === "gradient" && over.size === rest.size;
+      const detail = pick.g + " of " + pick.n + " barred rows; at rest image=" + rest.image +
+        " size=" + rest.size + " shadow=" + rest.shadow +
+        "; hovered=" + over.hovered + " image=" + over.image + " size=" + over.size +
+        " bg=" + over.color + " shadow=" + over.shadow +
+        (over.hovered ? "" : "  <- NO :hover from the harness, so this asserted nothing");
+      report(kept && over.hovered === true,
+             "the legend's count bar survives a hover inside Obsidian", detail);
+    }
+  }
+
   if (selected("settings tab")) {
     const defs = await E("(function(){ var p = app.plugins.getPlugin('" + PLUGIN_ID + "'); var tab = app.setting.pluginTabs.find(function (t) { return t.id === '" + PLUGIN_ID + "'; });" +
                          " var d = tab && typeof tab.getSettingDefinitions === 'function' ? tab.getSettingDefinitions() : null;" +
