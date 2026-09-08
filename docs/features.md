@@ -106,6 +106,8 @@ collapses and hands its width to the graph. Only the calendar's fold makes the d
 disc is fitted to the shorter side of the window, and on a landscape monitor that is the height
 the calendar is eating.
 
+<img src="../assets/features/collapse.webp" width="100%" alt="A desktop-width window with the folder list beside the disc and the calendar band above it: the band folded away first, so the disc grows into the row it had, then the folder list folded away, so its column collapses and the disc re-centres in the whole window with nothing beside it">
+
 ## The camera
 
 Scroll to zoom, drag to pan, double-click or the corner button to reset.
