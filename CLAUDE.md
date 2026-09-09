@@ -26,23 +26,34 @@ measuring it: serve the page, drive it, read the numbers.
   the push to `develop` whose tree it has not measured yet (the pre-push hook; see
   `scripts/suite-stamp.mjs`); do not run it by hand unless asked.
 - **Two things may not run twice at once, and `scripts/lock.mjs` is how you know.** Several
-  agents work this repo in parallel worktrees, and two of them collide invisibly: a **screen
-  recording** (`record-demo.ps1`, `make-hero.ps1`) grabs a display region, so a second take
-  captures the first one's window; the **full suite** drives Chrome over CDP, so two runs fight
-  for ports and each blames the code. Take the lock, do the thing, release it — always release,
-  even on failure, or everyone else waits out the stale window (20 min for `record`, 30 for
-  `suite`):
+  agents work this repo in parallel worktrees, and they collide over two different resources.
+
+  **A screen.** `record-demo.ps1` captures with `gdigrab -i desktop` — it copies a *region of the
+  display*, so anything else drawn there lands in the take and ruins it silently: the file exists
+  and looks plausible. A recording is not the only claimant — spike tests take the rightmost
+  monitor, and the full suite parks Chrome on the leftmost — so the lock is named after the
+  **screen**, not the job: `screen-left`, `screen-right`, `screen-primary`. That is what lets a
+  spike test and a recording find each other; `record` alone never could. `record-demo.ps1` takes
+  its own screen lock and releases it in a `finally`, so you do not have to remember (github#87).
+
+  **The shared fixture store.** Two full-suite runs do *not* fight over ports — ports are
+  allocated free and each run gets its own Chrome profile. They fight over `.fixtures/`: a run that
+  regenerates deletes every `<name>-*` directory there, including the one a concurrent run is
+  reading. That is the `suite` lock, and it only bites when a fixture is stale, which is why it is
+  rare and reads as a regression in your branch.
 
   ```bash
-  node scripts/lock.mjs acquire record --owner "#77 palette"   # blocks; exit 1 = give up, do not record
-  node scripts/lock.mjs release record --owner "#77 palette"
-  node scripts/lock.mjs status                                  # who holds what
+  node scripts/lock.mjs acquire screen-right --owner "#77 palette"   # blocks; exit 1 = give up
+  node scripts/lock.mjs release screen-right --owner "#77 palette"   # always, even on failure
+  node scripts/lock.mjs status                                       # who holds what
   ```
 
-  The lock lives in the OS temp dir, not the worktree, so **every worktree shares one**. A
-  `mkdir` is the lock — atomic, and it survives a killed session as a stale entry rather than a
-  permanent one. Screenshots need no lock: `shoot.mjs` captures over CDP, so overlapping windows
-  are harmless — but pass your own `--port`.
+  The lock lives in the OS temp dir, not the worktree, so **every worktree shares one** — and the
+  root is shared with Vault Shelf (`obsidian-vault-locks`), so the two plugins' jobs contend with
+  each other, not just their own (github#92). A `mkdir` is the lock — atomic, and it survives a
+  killed session as a stale entry (20 min) rather than a permanent one. **`make-hero.ps1` needs no
+  lock**: it is an ffmpeg file-to-file transcode, not a capture. Screenshots need none either:
+  `shoot.mjs` captures over CDP, so overlapping windows are harmless — but pass your own `--port`.
 
   **`.githooks/pre-push` takes the `suite` lock itself, around its own run, and releases it on
   every way out (github#92).** Do not also wrap a `git push` in an outer acquire/release — the

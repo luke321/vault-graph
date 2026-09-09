@@ -21,7 +21,15 @@ function legacyHold(n) {
   }
   return null;
 }
-const STALE_MS = { record: 20 * 60 * 1000, suite: 30 * 60 * 1000 };
+// github#87
+const STALE_MS = {
+  record: 20 * 60 * 1000, suite: 30 * 60 * 1000,
+  "screen-left": 20 * 60 * 1000, "screen-right": 20 * 60 * 1000, "screen-primary": 20 * 60 * 1000
+};
+// github#87
+const SCREENS = ["screen-left", "screen-right", "screen-primary"];
+const aliasesOf = (n) => (n === "record" ? SCREENS : SCREENS.includes(n) ? ["record"] : []);
+
 const DEFAULT_STALE = 20 * 60 * 1000;
 const DEFAULT_TIMEOUT = 45 * 60 * 1000;
 const POLL_MS = 5000;
@@ -49,8 +57,20 @@ function ageOf(meta) {
   return meta && meta.at ? Date.now() - meta.at : Infinity;
 }
 
+// github#87
+function aliasHold(n) {
+  for (const a of aliasesOf(n)) {
+    const legacy = legacyHold(a);
+    if (legacy) return { name: a, root: legacy.root, meta: legacy.meta };
+    const meta = readMeta(a);
+    if (meta && ageOf(meta) <= staleWindow(a)) return { name: a, root: ROOT, meta: meta };
+  }
+  return null;
+}
+
 function usage(code) {
-  console.error("usage: node scripts/lock.mjs <acquire|release|status> <record|suite> --owner <id>");
+  console.error("usage: node scripts/lock.mjs <acquire|release|status> <name> --owner <id>");
+  console.error("  names: suite | screen-left | screen-right | screen-primary | record (legacy)");
   process.exit(code);
 }
 
@@ -69,6 +89,24 @@ async function acquire() {
         console.log("WAITING for " + name + " -- held in a legacy root (" + stale.root + ") by " +
                     (stale.meta.owner || "unknown") + " for " +
                     Math.round((Date.now() - stale.meta.at) / 1000) + "s");
+        announced = true;
+      }
+      if (Date.now() > deadline) {
+        console.log("BUSY " + name + " -- gave up after " + Math.round(timeoutMs / 1000) + "s");
+        process.exit(1);
+      }
+      await sleep(POLL_MS);
+      continue;
+    }
+
+    // github#87
+    const alias = aliasHold(name);
+    if (alias) {
+      if (!announced) {
+        console.log("WAITING for " + name + " -- the same screen is held as " + alias.name +
+                    " by " + (alias.meta.owner || "unknown") + " for " +
+                    Math.round((Date.now() - alias.meta.at) / 1000) + "s" +
+                    (alias.root === ROOT ? "" : " (legacy root " + alias.root + ")"));
         announced = true;
       }
       if (Date.now() > deadline) {
@@ -133,7 +171,7 @@ function release() {
 }
 
 function status() {
-  for (const n of ["record", "suite"]) {
+  for (const n of ["record", "suite", ...SCREENS]) {
     const stale = legacyHold(n);
     if (stale) {
       console.log(n + "  owner=" + (stale.meta.owner || "unknown") + "  age=" +
