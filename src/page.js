@@ -5211,10 +5211,8 @@ function mountVaultGraph(root, data, deps) {
       var share = barShare(g, basis);
       rendered[g] = share;
       var shown = cascadeRun && barShown && barShown[g] !== undefined ? barShown[g] : share;
-      var lgAttrs = share || shown
-        ? ' class="lg bar' + (share ? "" : " bar-out") + '" style="--vg-share:' +
-          (shown * 100).toFixed(3) + '%;--vg-bar:' + colorOf(g) + '"'
-        : ' class="lg"';
+      var lgAttrs = ' class="lg' + (shown ? " bar" + (share ? "" : " bar-out") : "") +
+        '" style="--vg-share:' + (shown * 100).toFixed(3) + '%;--vg-bar:' + colorOf(g) + '"';
       var ctTitle = share
         ? ' title="' + counts[g] + (counts[g] === 1 ? " note" : " notes") +
           (g === basis.group

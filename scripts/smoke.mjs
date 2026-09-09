@@ -3764,11 +3764,53 @@ check("a bar that loses its folder shrinks over the cascade instead of blinking 
     chip.click();
   })(); void 0`);
 
+  // github#78, design/0006
+  const inkOn = async (g, share) => {
+    const box = await p.j(`(function(){
+      var lg = document.querySelector('#vg-legend .lg[data-g=' + JSON.stringify(${JSON.stringify(g)}) + ']');
+      if (!lg) return null;
+      var b = lg.getBoundingClientRect();
+      if (b.top < 0 || b.bottom > innerHeight) return null;
+      return { x: b.left, y: b.top, w: b.width, h: b.height };
+    })()`);
+    if (!box) return -1;
+    const shot = await p.send("Page.captureScreenshot", { format: "png", captureBeyondViewport: false,
+      clip: { x: box.x, y: box.y, width: box.w, height: box.h, scale: 1 } });
+    return p.eval(`(async function(){
+      var img = new Image();
+      await new Promise(function (res, rej) { img.onload = res; img.onerror = rej;
+        img.src = "data:image/png;base64," + ${JSON.stringify(shot.data)}; });
+      var cv = document.createElement('canvas');
+      cv.width = img.naturalWidth; cv.height = img.naturalHeight;
+      var cx = cv.getContext('2d'); cx.drawImage(img, 0, 0);
+      var end = Math.round(cv.width * ${share});
+      var inA = 4, inB = Math.max(6, Math.round(end * 0.6));
+      var outA = Math.min(cv.width - 6, end + 8), outB = cv.width - 3;
+      if (inB - inA < 4 || outB - outA < 4) return -1;
+      var best = 0;
+      for (var y = cv.height - 1; y >= Math.max(0, cv.height - 3); y--) {
+        var d = cx.getImageData(0, y, cv.width, 1).data;
+        var mean = function (a, b) {
+          var r = 0, g2 = 0, bl = 0, n = 0;
+          for (var x = a; x < b; x++) { r += d[x*4]; g2 += d[x*4+1]; bl += d[x*4+2]; n++; }
+          return [r / n, g2 / n, bl / n];
+        };
+        var i = mean(inA, inB), o = mean(outA, outB);
+        var dl = Math.abs(i[0]-o[0]) + Math.abs(i[1]-o[1]) + Math.abs(i[2]-o[2]);
+        if (dl > best) best = dl;
+      }
+      return Math.round(best);
+    })()`);
+  };
+
+
   const seenW = [], seenT = [];
+  let inkMid = -1;
   for (let i = 0; i < 26; i++) {
     const a = pct(await one(wide.g)), b = pct(await one(thin.g));
     if (a >= 0 && seenW[seenW.length - 1] !== a) seenW.push(a);
     if (b >= 0 && seenT[seenT.length - 1] !== b) seenT.push(b);
+    if (inkMid < 0 && a > 25 && a < 85) inkMid = await inkOn(wide.g, a / 100);
     if (a < 0 && b < 0) break;
     await sleep(70);
   }
@@ -3781,16 +3823,21 @@ check("a bar that loses its folder shrinks over the cascade instead of blinking 
   await settle();
   const restored = await p.j(`document.querySelectorAll('#vg-legend .lg[data-g].bar').length`);
 
-  const ok = fell && seenT.length >= 3 && gone && after === 1 && restored === barred.length;
+  // github#78, design/0006
+  const inked = inkMid < 0 || inkMid >= 30;
+  const ok = fell && seenT.length >= 3 && gone && after === 1 &&
+             restored === barred.length && inked;
   return {
     ok,
     detail: `only ${JSON.stringify(target.g)}: ${JSON.stringify(wide.g)} fell through ` +
             `${seenW.length} width(s) [${seenW.slice(0, 5).map((v) => v.toFixed(1) + "%").join(" ")} ...] ` +
             `and ${JSON.stringify(thin.g)} through ${seenT.length} ` +
             `[${seenT.slice(0, 3).map((v) => v.toFixed(3) + "%").join(" ")} ...]; ` +
+            `ink inside vs beyond the bar mid-shrink: ${inkMid < 0 ? "not sampled" : inkMid}; ` +
             `${after} bar left, ${restored} back on All (was ${barred.length})` +
             (!fell ? `  <- it did NOT descend smoothly (${seenW.length} width(s))` : "") +
-            (!gone ? "  <- a bar survived its hidden folder" : "")
+            (!gone ? "  <- a bar survived its hidden folder" : "") +
+            (!inked ? `  <- the shrinking bar was DECLARED but not painted (ink ${inkMid})` : "")
   };
 });
 

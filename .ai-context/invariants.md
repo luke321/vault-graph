@@ -1344,6 +1344,25 @@ stub that blinks out anyway. Measured on `only`:
 The check asserts the descent is **monotone** — never a step back up — because a bar that walks
 from the wrong endpoint bounces, and a bounce reads as a glitch rather than as a mistake.
 
+**Every legend row carries its own bar colour, whether it has a bar or not** — and that is not
+tidiness, it is the fix for a shrink that declared itself and painted nothing. The colour used to
+be emitted only on rows that already had a bar; a row that *gained* one mid-walk (`paintBars`
+adding the class) therefore had `--vg-bar` empty, `background-image: none`, and a perfectly
+correct-looking `background-size: max(0px, 74.961%) 2px`. The CSS read right and the screen was
+blank.
+
+**The check that missed it read CSS, and that is the third time in this issue.** It asserted the
+class, the share and the descent, all of which were correct. It now measures ink: mid-shrink it
+compares the mean colour *inside* the bar against the mean *beyond its end*, in the same pixel
+rows, from a real screenshot. Inside-vs-beyond rather than strip-vs-strip because the row
+separator spans the full width and cancels out of a vertical comparison — the first cut of this
+instrument passed the mutation for exactly that reason. Measured: **175 on the demo and the 10k,
+119 on the shape vault**; with the colour restricted to already-barred rows the same reading is
+**0** and the check fails with `the shrinking bar was DECLARED but not painted (ink 0)`.
+
+A shrinking row sits at `opacity: .38`, so its bar is fainter than at rest and that is right: the
+folder is leaving. Faint is not absent, and only a painted measurement can tell the two apart.
+
 **Measured in the running Obsidian, not only on the page**, on his own 520-note vault at
 ~60fps, sampling every legend row's `--vg-share` on `requestAnimationFrame` from inside the
 page:

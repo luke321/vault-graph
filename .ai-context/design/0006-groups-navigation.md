@@ -256,6 +256,11 @@ bar when its painted width rises above zero and loses it when the walk reaches z
 presence floor is lifted by `.bar-out` on a row on its way out, or the shrink ends in a 4px stub
 that blinks out regardless.
 
+Because `paintBars` can add the class, **every row carries `--vg-bar` whether it has a bar or
+not**. A row that gained its bar mid-walk otherwise had no colour to draw with:
+`background-image: none` under a `background-size` that read perfectly correct. The class and the
+width live in two places, so the colour has to live in the one place that is always rendered.
+
 The state is three maps mirroring `colorShown`: `barPrev` and `barNow` are the endpoints
 recorded per render, and `barShown` is what is painted mid-walk — `null` at rest so the resting
 value is authoritative, and read only while `cascadeRun` is live so a stuck walk is
