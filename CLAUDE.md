@@ -42,6 +42,14 @@ measuring it: serve the page, drive it, read the numbers.
   `mkdir` is the lock — atomic, and it survives a killed session as a stale entry rather than a
   permanent one. Screenshots need no lock: `shoot.mjs` captures over CDP, so overlapping windows
   are harmless — but pass your own `--port`.
+- **A vault that is not Lukas's own opens behind a trust prompt, and the plugin does not load
+  until you clear it.** Any fixture or generated vault — `demo-vault`, `test-vault`, a
+  scratch mirror — is a *new* vault to Obsidian, so the first open shows **"Trust author and
+  enable plugins?"** and leaves a Settings window behind. Until both are dealt with the plugin
+  is not loaded **at all**: no ribbon icon, no view, no `__vg`. That looks exactly like a
+  broken build, and has been misdiagnosed as one. So the order is always: open the vault,
+  confirm the trust prompt, close Settings, **then** judge what the plugin is doing. This
+  applies to `deferred-check.mjs` and `refresh-check.mjs` too — they launch a real Obsidian.
 - `git push` and merging into `develop` are separate asks, every time. `main` only ever
   receives `develop`.
 - **A release is the range, not the work in hand.** Everything it needs — a `CHANGELOG.md`

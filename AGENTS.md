@@ -4,7 +4,7 @@
 so an agent that looks for `AGENTS.md` by convention finds its way there instead of guessing, and
 it deliberately does not restate the laws: two copies of a rule become two different rules.
 
-Three things are worth knowing before you touch anything, all expanded in `CLAUDE.md`:
+Four things are worth knowing before you touch anything, all expanded in `CLAUDE.md`:
 
 - **Measure, don't reason.** The recurring failure here is arguing about the code instead of
   driving it: serve the page, drive it, read the numbers. `node scripts/smoke.mjs --only
@@ -24,6 +24,11 @@ Three things are worth knowing before you touch anything, all expanded in `CLAUD
   CDP, so overlapping windows are harmless — but pass your own `--port`.
 - **`git push`, merging into `develop`, and a full-suite run are each a separate ask, every
   time.** None of them is implied by permission to do the work, or by how the last one went.
+- **A fixture vault opens behind a trust prompt, and the plugin does not load until it is
+  cleared.** Any vault that is not the author's own is new to Obsidian, so the first open asks
+  **"Trust author and enable plugins?"** and leaves a Settings window open. Before that is
+  confirmed there is no ribbon icon, no view and no `__vg` — which reads exactly like a broken
+  build and has been misdiagnosed as one. Confirm the prompt, close Settings, then judge.
 
 `.ai-context/README.md` maps the design records; `.ai-context/code-map.md` and `code-index.md` are
 generated and let you jump to a line range instead of reading an 8,700-line file top to bottom.
