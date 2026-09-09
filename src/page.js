@@ -2652,10 +2652,11 @@ function mountVaultGraph(root, data, deps) {
   /* --------------------------------------------------------- the recent lens */
 
   /**
-   * github#70. The chips are ALWAYS about `touched`, whichever date the band is counting,
-   * and they say so on their face -- the group is labelled "Touched" and every tooltip
-   * repeats the word. Two controls in one row answering to two different dates is exactly
-   * the lie design/0010 exists to prevent, so the fix is to name it, not to hide it.
+   * github#70. The chips read whatever date the segment names -- ONE date governs the whole
+   * row. They were pinned to `touched` at first, on the reasoning that "what did I touch" is
+   * the question the issue was raised to answer; that put two dates in one row and forced a
+   * "touched:" heading next to a button already saying Touched. With the segment visible the
+   * heading is redundant: the row states its date once, and both controls obey it.
    * @type {Record<string, boolean>}
    */
   var recentSet = dict();
@@ -2682,16 +2683,18 @@ function mountVaultGraph(root, data, deps) {
     var ref = typeof refMs === "number" && isFinite(refMs) ? refMs : heatParse(TODAY);
     if (!isFinite(ref)) return null;
     var hi = heatKey(ref);
-    if (kind === "today") return { lo: hi, hi: hi, label: "touched today" };
+    // The verb follows the segment, so a chip never claims a date the band is not counting.
+    var v = state.heatSource === "touched" ? "touched" : "added";
+    if (kind === "today") return { lo: hi, hi: hi, label: v + " today" };
     if (kind === "week") {
       var lo = heatKey(heatMonday(ref));
-      return { lo: lo, hi: hi, label: "touched since Monday " + lo };
+      return { lo: lo, hi: hi, label: v + " since Monday " + lo };
     }
     if (kind === "open" && lastOpen !== null) {
       var lk = heatKey(lastOpen);
-      // The host's stamp can outrun the newest touched day (it is a clock, not a file), and
-      // a window whose start is after its end matches nothing rather than everything.
-      return { lo: lk, hi: hi > lk ? hi : lk, label: "touched on or after " + lk };
+      // The host's stamp can outrun the newest dated day (it is a clock, not a file), and a
+      // window whose start is after its end matches nothing rather than everything.
+      return { lo: lk, hi: hi > lk ? hi : lk, label: v + " on or after " + lk };
     }
     return null;
   }
@@ -2712,12 +2715,13 @@ function mountVaultGraph(root, data, deps) {
   }
 
   /**
-   * Day-key string compare, which is why the format is worth keeping: YYYY-MM-DD sorts
-   * as a date. `touched` always, whatever the band is counting -- see recentSet.
+   * Day-key string compare, which is why the format is worth keeping: YYYY-MM-DD sorts as a
+   * date. Through heatDateOf, so a chip lights exactly the notes the band's own tiles counted
+   * over the same span.
    * @param {{ lo: string, hi: string }} win @param {NodeAttrs} a
    */
   function inRecent(win, a) {
-    var t = a.touched || "";
+    var t = heatDateOf(a);
     return !!t && t >= win.lo && t <= win.hi;
   }
 
@@ -2731,6 +2735,9 @@ function mountVaultGraph(root, data, deps) {
     // square marks exactly the notes that square counted.
     state.markDay = null;
     state.hoverDay = null;
+    // An armed chip means a window, and the window is now over the other date -- so it has to
+    // be recomputed, against the same reference it was armed with.
+    if (state.recent) setRecent(state.recent, recentRef === null ? undefined : recentRef);
     heatBuild();
     syncRecentUI();
     hlSync();
@@ -6971,9 +6978,9 @@ function mountVaultGraph(root, data, deps) {
     graph.forEachNode(function (id, a) {
       if (!inRecent(win, a) || (alpha[id] || 0) <= 0.004) return;
       n++;
-      // Only meaningful while the band is keyed by the same date the chips are; on `created`
-      // heat.days is keyed by the other one and the lookup would answer about a different day.
-      var d = heat && state.heatSource === "touched" ? heat.days[a.touched] : null;
+      // Same key the band tiled by, so a chip's "of them on a bulk day" counts the same days
+      // the band flagged.
+      var d = heat ? heat.days[heatDateOf(a)] : null;
       if (d && d.bulk) bulk++;
     });
     return { n: n, bulk: bulk, win: win };

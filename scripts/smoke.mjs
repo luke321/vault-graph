@@ -491,17 +491,19 @@ check("a marked heatmap day recolours its notes", async (p) => {
  * passes by measuring nothing -- the same trap the pinned 10k --end exists to avoid. The
  * reference is the newest `touched` day the graph actually holds.
  */
-const newestTouched = (p) => p.j(`(function(){
+const newestDay = (p) => p.j(`(function(){
+  // The date the band is currently counting, through the page's own accessor -- the chips
+  // follow the segment, so a reference taken from the other date would light the wrong notes.
   var newest = ""; __vg.graph.forEachNode(function(i,a){
-    if (a.touched && a.touched > newest) newest = a.touched; });
+    var d = __vg.heatDateOf(a); if (d && d > newest) newest = d; });
   return newest ? { key: newest,
                     ms: Date.UTC(+newest.slice(0,4), +newest.slice(5,7)-1, +newest.slice(8,10)) }
                 : null;
 })()`);
 
 check("a recent chip haloes but never pushes", async (p) => {
-  const ref = await newestTouched(p);
-  if (!ref) return { ok: false, detail: "no note in this vault carries a touched date" };
+  const ref = await newestDay(p);
+  if (!ref) return { ok: false, detail: "no note in this vault carries the date the band counts" };
   const r = await p.j(`(function(){
     var pos = {}; __vg.graph.forEachNode(function(i,a){ pos[i] = a.x.toFixed(4)+','+a.y.toFixed(4); });
     __vg.setRecent("week", ${ref.ms});
@@ -519,8 +521,8 @@ check("a recent chip haloes but never pushes", async (p) => {
 
 check("a recent chip dims what it did not match, and gives it back", async (p) => {
   await settle(p);
-  const ref = await newestTouched(p);
-  if (!ref) return { ok: false, detail: "no note in this vault carries a touched date" };
+  const ref = await newestDay(p);
+  if (!ref) return { ok: false, detail: "no note in this vault carries the date the band counts" };
   const pick = await p.j(`(function(){
     __vg.setRecent("week", ${ref.ms});
     var out = null;
@@ -657,10 +659,10 @@ check("the band's control row does not move when its state changes", async (p) =
   // going 0 -> 115 widened and shoved its neighbours again. Worst measured shift across the
   // five states was 19px. A control that walks away from the pointer between clicks is a
   // defect the suite cannot see, so it is pinned here by number.
-  const ref = await newestTouched(p);
-  if (!ref) return { ok: false, detail: "no note in this vault carries a touched date" };
+  const ref = await newestDay(p);
+  if (!ref) return { ok: false, detail: "no note in this vault carries the date the band counts" };
   const r = await p.j(`(function(){
-    var sel = { source: "#vg-heatsrc", touchedLabel: "#vg-recent .rl",
+    var sel = { source: "#vg-heatsrc",
                 today: '#vg-recent [data-kind="today"]', week: '#vg-recent [data-kind="week"]',
                 readout: "#vg-heatnote", scale: "#vg-heatscale", compact: "#vg-compact",
                 range: "#vg-rangebox", band: "#vg-heatc" };

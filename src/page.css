@@ -483,14 +483,6 @@
     background: var(--accent); color: #fff;
   }
   .vault-graph #vg-recent { display: flex; align-items: center; gap: 4px; flex: 0 0 auto; }
-  /* The colon and the rule are doing one job: "NOTES ADDED" and "TOUCHED" sit next to each
-     other and without a break they read as one phrase, which says the opposite of what the
-     two controls mean. */
-  .vault-graph #vg-recent .rl {
-    font-size: 10px; text-transform: uppercase; letter-spacing: .08em;
-    color: var(--text-3); font-weight: 600;
-    padding-left: 10px; border-left: 1px solid var(--border);
-  }
   .vault-graph #vg-recent .chip {
     display: inline-flex; align-items: center; gap: 4px; white-space: nowrap;
   }

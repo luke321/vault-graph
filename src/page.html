@@ -62,13 +62,11 @@
           <button type="button" data-src="created" aria-pressed="true">Added</button>
           <button type="button" data-src="touched" aria-pressed="false">Touched</button>
         </div>
-        <div id="vg-recent" role="group" aria-label="Halo the notes touched recently">
-          <!-- github#70: the word is on screen, not only in the tooltips. The chips read
-               `touched` whatever the band counts, and a row where one control says
-               "added" and the next silently means "touched" is the lie design/0010 is
-               about. Rebuilt from script, so the span is the one static child. -->
-          <span class="rl">touched:</span>
-        </div>
+        <!-- github#70: no heading. The chips read the date the segment names, so the row
+             states it once and both controls obey it. A "touched:" label lived here while
+             the chips were pinned to that date, and sat next to a button already saying
+             Touched. Filled from script. -->
+        <div id="vg-recent" role="group" aria-label="Halo the notes from a recent window"></div>
         <span id="vg-heatnote"></span>
         <div id="vg-heatscale" aria-hidden="true">
           <span>fewer</span><canvas id="vg-heatkey"></canvas><span>more</span>

@@ -431,19 +431,22 @@ deleted `mark today` checks were the only cover for.
 
 ## A recent chip haloes and dims, but never pushes (github#70)
 
-The three chips above the band — Today, This week, Since last open — light the notes whose
-`touched` falls in their window and mix everything else toward `--dim`. Both halves ride the
-existing highlight ramp; neither moves anything, for the reason a marked day does not: a
-day's notes are scattered across every wedge, so pushing a subset slides it out *through*
-its cell-mates.
+The chips above the band — Today, This week, Since last open — light the notes whose date
+falls in their window and mix everything else toward `--dim`. **Which date is the segment's**,
+through `heatDateOf`, so a chip lights exactly the notes the band's own tiles counted over the
+same span. Both halves ride the existing highlight ramp; neither moves anything, for the
+reason a marked day does not: a day's notes are scattered across every wedge, so pushing a
+subset slides it out *through* its cell-mates.
 
 ```bash
 node scripts/smoke.mjs --only "recent chip"
 ```
 
-Measured on the three fixtures, each against **its own newest touched day** rather than the
-clock (see the next paragraph): demo **115 haloed, 0 pushed, 0 moved**; dominant-folder
-**954 haloed, 0 pushed, 0 moved**; 10k **2 haloed, 0 pushed, 0 moved**. The dim is colour
+Measured on the three fixtures, each against **its own newest counted day** rather than the
+clock (see the next paragraph), on the default `created`: demo **109 haloed, 0 pushed, 0
+moved**; dominant-folder **12 / 0 / 0**; 10k **2 / 0 / 0**. On `touched` the same windows give
+115, 954 and 2 — the dominant-folder jump from 12 to 954 is that fixture's single mtime day,
+and it is the clearest demonstration that the chips really do follow the segment. The dim is colour
 only — no size and no alpha multiplier — so a dot the cascade is still walking is untouched
 by it, and the resting-size law is not in play. Round trip on the demo: a non-matching note
 goes `#d95926 → #2a2a28 → #d95926`.

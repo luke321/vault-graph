@@ -78,11 +78,17 @@ Three buttons beside the label: **Today**, **This week**, **Since last open**. E
 the notes whose `touched` falls in its window and dims the rest -- 0 moved, 0 pushed,
 measured on all three fixtures, the same result and for the same reason as a picked day.
 
-They read `touched` **always**, whichever date the band is counting, and they say so: the
-word sits on screen beside them and every tooltip repeats it. Two controls in one row quietly
-answering to two different dates is exactly the lie this file exists to prevent, so the fix
-is to name it rather than to make the chips follow the band and lose the question the issue
-was raised to answer.
+They read **whichever date the segment names**. One date governs the whole row.
+
+This was the other way round first, and the reversal is worth recording. The chips were
+pinned to `touched` on the reasoning that "what did I touch" is the question the issue was
+raised to answer, and the row then had to carry a `touched:` heading so the second date was
+not silent — which put that word on screen twice, once as a segment position and once as a
+heading beside it. The heading was a symptom. With one date governing the row the honesty
+requirement is met by the segment alone: the band, the chips, the picked day and the tooltip
+all read `heatDateOf`, and there is no second date to disclose. *What did I touch this week*
+is two visible clicks — **Touched**, then **This week** — rather than a default nobody can
+see the alternative to.
 
 A chip that matches nothing shows **0** and disables itself rather than disappearing --
 absent reads as "this cannot be asked", zero reads as "asked, and the answer is none". Day
