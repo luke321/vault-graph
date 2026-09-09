@@ -131,6 +131,7 @@ const POINTER_DRIVEN = [
   "density follows the notes",
   "auto-fits the camera",
   "left alone by a visibility toggle",
+  "count bars",                   // github#78 -- reads :hover from a real mouse move
 ];
 
 const FAST = argv.includes("--fast");
@@ -3304,6 +3305,671 @@ check("the (unlinked) row's count is parenthesised while kept separate, plain on
   })()`);
   const ok = /^\(\d+\)$/.test(r.ctSeparate || "") && /^\d+$/.test(r.ctJoined || "");
   return { ok, detail: `kept separate: "${r.ctSeparate}" (want "(N)"), joined: "${r.ctJoined}" (want "N")` };
+});
+
+// github#78, design/0006
+check("legend count bars scale to the largest visible folder", async (p) => {
+  const read = () => p.j(`(function(){
+    var order = __vg.graph.order;
+    var rows = [].map.call(document.querySelectorAll('#vg-legend .lgr'), function (lgr) {
+      var lg = lgr.querySelector('.lg');
+      if (!lg) return null;
+      var cs = getComputedStyle(lg), g = lg.getAttribute('data-g');
+      // github#78 -- no regex: an escape in this template literal never reaches the page
+      var declared = cs.getPropertyValue('--vg-share').trim();
+      return { g: g, ct: lgr.querySelector('.ct').textContent,
+               bar: lg.classList.contains('bar'),
+               pct: declared.charAt(declared.length - 1) === '%' ? parseFloat(declared) : null,
+               applied: cs.backgroundSize.indexOf('max(') === 0,
+               size: cs.backgroundSize, drawn: cs.backgroundImage !== 'none',
+               visible: lg.getAttribute('aria-pressed') === 'true',
+               title: lgr.querySelector('.ct').getAttribute('title'),
+               count: __vg.groupCount(g) };
+    }).filter(Boolean);
+    return { order: order, rows: rows };
+  })()`);
+
+  // github#78, design/0006
+  const settleBars = async () => {
+    let last = null;
+    for (let i = 0; i < 60; i++) {
+      const now = await p.j(`(function(){
+        return [].map.call(document.querySelectorAll('#vg-legend .lg[data-g]'), function (lg) {
+          return getComputedStyle(lg).getPropertyValue('--vg-share').trim();
+        }).join(",");
+      })()`);
+      if (now === last) return true;
+      last = now;
+      await sleep(150);
+    }
+    return false;
+  };
+
+  // github#78
+  const basisOf = (rows) => rows
+    .filter((r) => r.count > 0 && r.visible && /^\d+$/.test(r.ct))
+    .reduce((m, r) => Math.max(m, r.count), 0);
+
+  const base = await read();
+  const basis = basisOf(base.rows);
+  const wrong = [];
+  let barred = 0, full = 0, widest = { g: null, px: 0 }, thinnest = { g: null, px: 1e9 };
+  for (const r of base.rows) {
+    // github#50, github#3, github#78
+    const wantBar = /^\d+$/.test(r.ct) && r.count > 0 && r.visible;
+    if (r.bar !== wantBar) {
+      wrong.push(`${r.g}: ct "${r.ct}" visible=${r.visible} but bar=${r.bar}`);
+      continue;
+    }
+    if (!wantBar) {
+      if (r.drawn || r.size !== "auto") wrong.push(`${r.g}: no-bar row still paints (${r.size})`);
+      continue;
+    }
+    barred++;
+    if (r.pct === null || !r.drawn || !r.applied) {
+      wrong.push(`${r.g}: barred but size=${r.size} share=${r.pct}`);
+      continue;
+    }
+    const want = Math.min(100, (r.count / basis) * 100);
+    if (Math.abs(r.pct - want) > 0.01) {
+      wrong.push(`${r.g}: ${r.pct}% declared, ${want.toFixed(3)}% against the largest shown (${basis})`);
+    }
+    if (Math.abs(r.pct - 100) < 0.01) full++;
+    const px = Math.max(1, (r.count / basis) * 217);
+    if (px > widest.px) widest = { g: r.g, px };
+    if (px < thinnest.px) thinnest = { g: r.g, px };
+  }
+  if (barred && !full) wrong.push(`no row draws a full bar against a basis of ${basis}`);
+
+  // github#78 -- idempotent: the tree may already be open
+  await p.eval(`(function(){ var b = document.querySelectorAll('#vg-legend [data-tw]');
+                for (var i = 0; i < b.length; i++) {
+                  if (b[i].getAttribute('aria-expanded') !== 'true') b[i].click();
+                } })(); void 0`);
+  await sleep(300);
+  const subs = await p.j(`(function(){
+    var img = [].map.call(document.querySelectorAll('#vg-legend .lgs'),
+      function (e) { return getComputedStyle(e).backgroundImage; });
+    return { n: img.length, drawn: img.filter(function (v) { return v !== 'none'; }).length };
+  })()`);
+  if (subs.drawn) wrong.push(`${subs.drawn} of ${subs.n} subfolder rows draw a bar`);
+
+  // github#78, design/0006
+  const spec = await p.j(`(function(){
+    for (var i = 0; i < document.styleSheets.length; i++) {
+      var rules;
+      try { rules = document.styleSheets[i].cssRules; } catch (e) { continue; }
+      for (var j = 0; j < rules.length; j++) {
+        var sel = rules[j].selectorText;
+        if (sel && sel.indexOf('.lg.bar') >= 0) return sel;
+      }
+    }
+    return null;
+  })()`);
+  if (!spec) wrong.push("no .lg.bar rule found in any stylesheet");
+  else if (spec.indexOf("#") < 0) {
+    wrong.push(`the bar rule is "${spec}" -- no id, so a host's background shorthand ` +
+               `on .lg:hover ties and wins on order`);
+  }
+
+  // github#78
+  const biggest = base.rows.filter((r) => r.bar).sort((a, b) => b.count - a.count)[0];
+  const sel1 = (attr, g) => `[${attr}="${g.replace(/"/g, '\\"')}"]`;
+
+  let hov = null;
+  if (biggest) {
+    const box = await p.j(`(function(){
+      var el = document.querySelector('${sel1("data-g", biggest.g)}');
+      var b = el.getBoundingClientRect();
+      return { x: Math.round(b.left + 30), y: Math.round(b.top + b.height / 2) };
+    })()`);
+    await p.send("Input.dispatchMouseEvent",
+                 { type: "mouseMoved", x: box.x, y: box.y, button: "none", clickCount: 0 });
+    await sleep(250);
+    const h = await p.j(`(function(){
+      var el = document.querySelector('${sel1("data-g", biggest.g)}');
+      var cs = getComputedStyle(el);
+      return { size: cs.backgroundSize, drawn: cs.backgroundImage !== 'none',
+               hovered: el.matches(':hover') };
+    })()`);
+    hov = h.hovered ? (h.drawn && h.size === biggest.size) : null;
+    if (h.hovered && !hov) wrong.push(`hovering ${biggest.g} wiped the bar (${h.size})`);
+    await p.send("Input.dispatchMouseEvent",
+                 { type: "mouseMoved", x: 5, y: 5, button: "none", clickCount: 0 });
+    await sleep(150);
+  }
+
+  // github#78
+  let sel = null, rescaled = null;
+  if (biggest) {
+    const click = async (attr, g) =>
+      p.eval(`document.querySelector('${sel1(attr, g)}').click(); void 0`);
+    await click("data-g", biggest.g);
+    await settleBars();
+    const after = await read();
+    const row = after.rows.find((r) => r.g === biggest.g);
+    sel = row && row.bar && Math.abs(row.pct - biggest.pct) < 0.001;
+    if (!sel) wrong.push(`selecting ${biggest.g} changed its bar (${row && row.size})`);
+    await click("data-g", biggest.g);
+    await settleBars();
+
+    // github#78, design/0006
+    const runnerUp = base.rows.filter((r) => r.bar && r.g !== biggest.g)
+      .sort((a, b) => b.count - a.count)[0];
+    if (runnerUp) {
+      await click("data-eye", biggest.g);
+      await settleBars();
+      const h2 = await read();
+      const basis2 = basisOf(h2.rows);
+      const promoted = h2.rows.find((r) => r.g === runnerUp.g);
+      const hiddenRow = h2.rows.find((r) => r.g === biggest.g);
+      if (hiddenRow && hiddenRow.bar) {
+        wrong.push(`hidden ${biggest.g} still draws a bar (${hiddenRow.size})`);
+      }
+      rescaled = basis2 === runnerUp.count &&
+                 promoted && Math.abs(promoted.pct - 100) < 0.01 &&
+                 !!hiddenRow && !hiddenRow.bar;
+      if (basis2 !== runnerUp.count) {
+        wrong.push(`hiding ${biggest.g} left the basis at ${basis2}, wanted ${runnerUp.count}`);
+      } else if (!promoted || Math.abs(promoted.pct - 100) > 0.01) {
+        wrong.push(`hiding ${biggest.g} did not promote ${runnerUp.g} to a full bar ` +
+                   `(${promoted && promoted.pct}%)`);
+      }
+      await click("data-eye", biggest.g);
+      await settleBars();
+      const restored = await read();
+      if (basisOf(restored.rows) !== basis) {
+        wrong.push(`showing ${biggest.g} again left the basis at ${basisOf(restored.rows)}`);
+      }
+    }
+  }
+
+  // github#78
+  let onlyState = null;
+  if (biggest) {
+    const before = await read();
+    await p.eval(`(function(){
+      var lg = document.querySelector('${sel1("data-g", biggest.g)}');
+      var chip = lg && lg.querySelector('[data-only]');
+      if (chip) chip.click();
+    })(); void 0`);
+    await settleBars();
+    const only = await read();
+    const barred = only.rows.filter((r) => r.bar);
+    const full = barred.filter((r) => Math.abs(r.pct - 100) < 0.01);
+    onlyState = `${barred.length} barred, ${full.length} at 100%`;
+    if (barred.length !== 1 || full.length !== 1 || barred[0].g !== biggest.g) {
+      wrong.push(`only ${biggest.g}: ${barred.length} barred row(s) ` +
+                 `(${barred.map((r) => r.g).join(", ")}), ${full.length} at 100%`);
+    }
+    await p.eval(`(function(){
+      var all = document.getElementById('vg-allon');
+      if (all) all.click();
+    })(); void 0`);
+    await settleBars();
+    const back = await read();
+    if (back.rows.filter((r) => r.bar).length !== before.rows.filter((r) => r.bar).length) {
+      wrong.push(`showing all again left ${back.rows.filter((r) => r.bar).length} barred, ` +
+                 `was ${before.rows.filter((r) => r.bar).length}`);
+    }
+  }
+
+  // github#50, github#3
+  const startOn = await p.eval(`__vg.unlinkedByFolder`);
+  await p.eval(`__vg.setUnlinkedByFolder(false); void 0`);
+  await settleBars();
+  const sep = await read();
+  const sepBasis = basisOf(sep.rows);
+  let paren = 0;
+  for (const r of sep.rows) {
+    const wantBar = /^\d+$/.test(r.ct) && r.count > 0 && r.visible;
+    if (!wantBar && !r.bar && /^\(\d+\)$/.test(r.ct)) paren++;
+    if (r.bar !== wantBar) {
+      wrong.push(`kept separate, ${r.g}: ct "${r.ct}" but bar=${r.bar}`);
+      continue;
+    }
+    if (!wantBar) continue;
+    const want = Math.min(100, (r.count / sepBasis) * 100);
+    if (r.pct === null || !r.applied || Math.abs(r.pct - want) > 0.01) {
+      wrong.push(`kept separate, ${r.g}: ${r.pct}% declared, ${want.toFixed(3)}% wanted`);
+    }
+  }
+  await p.eval(`__vg.setUnlinkedByFolder(${startOn}); void 0`);
+  await settleBars();
+
+  const titled = base.rows.find((r) => r.g === (biggest && biggest.g));
+  return {
+    ok: wrong.length === 0 && barred > 0 && paren > 0 && full > 0,
+    detail: `${barred} of ${base.rows.length} rows barred, basis ${basis} notes ` +
+            `(${JSON.stringify(widest.g)}), ${full} row(s) at a full bar; ` +
+            `widest ${widest.px.toFixed(1)}px, thinnest ${thinnest.g} ` +
+            `${thinnest.px.toFixed(1)}px (1px floor); ` +
+            `${paren} parenthesised row(s) bare while kept separate; ${subs.n} sub rows bare; ` +
+            `selection kept it=${sel}, hover kept it=${hov === null ? "no :hover from the harness" : hov}, ` +
+            `hiding the largest rescaled the rest and dropped its own bar=${rescaled}; ` +
+            `only-this-folder: ${onlyState}; bar rule "${spec}"; ` +
+            `title ${JSON.stringify(titled && titled.title)}` +
+            (wrong.length ? `  <- ${wrong.join(" | ")}` : "")
+  };
+});
+
+// github#78, design/0006
+check("the thinnest count bar survives a hover in pixels, not just in CSS", async (p) => {
+  const row = await p.j(`(function(){
+    var rows = [].slice.call(document.querySelectorAll('#vg-legend .lg.bar'));
+    if (!rows.length) return null;
+    rows.sort(function (a, b) {
+      return parseFloat(getComputedStyle(a).getPropertyValue('--vg-share')) -
+             parseFloat(getComputedStyle(b).getPropertyValue('--vg-share'));
+    });
+    var lg = rows[0];
+    lg.setAttribute('data-floorprobe', '1');
+    // github#78 -- earlier checks open the whole tree, so this row can be below the fold;
+    // a clip outside the viewport captures nothing and reads as 0px painted.
+    lg.scrollIntoView({ block: 'center' });
+    var b = lg.getBoundingClientRect();
+    if (b.top < 0 || b.bottom > innerHeight) return { offscreen: true, g: lg.getAttribute('data-g') };
+    return { g: lg.getAttribute('data-g'),
+             col: getComputedStyle(lg).getPropertyValue('--vg-bar').trim(),
+             share: getComputedStyle(lg).getPropertyValue('--vg-share').trim(),
+             size: getComputedStyle(lg).backgroundSize,
+             x: b.left, y: b.top, w: b.width, h: b.height,
+             cx: Math.round(b.left + 40), cy: Math.round(b.top + b.height / 2) };
+  })()`);
+  if (!row) return { ok: true, detail: "no barred row on this shape -- nothing to floor" };
+  if (row.offscreen) {
+    return { ok: true, detail: `${row.g} would not scroll into view -- nothing measurable here` };
+  }
+
+  const painted = async () => {
+    const shot = await p.send("Page.captureScreenshot", {
+      format: "png", captureBeyondViewport: false,
+      clip: { x: row.x, y: row.y, width: row.w, height: row.h, scale: 1 }
+    });
+    return p.eval(`(async function(){
+      var img = new Image();
+      await new Promise(function (res, rej) { img.onload = res; img.onerror = rej;
+        img.src = "data:image/png;base64," + ${JSON.stringify(shot.data)}; });
+      var cv = document.createElement('canvas');
+      cv.width = img.naturalWidth; cv.height = img.naturalHeight;
+      var cx = cv.getContext('2d'); cx.drawImage(img, 0, 0);
+      var hex = ${JSON.stringify(row.col)}.replace('#','');
+      var tr = parseInt(hex.slice(0,2),16), tg = parseInt(hex.slice(2,4),16), tb = parseInt(hex.slice(4,6),16);
+      var best = 0;
+      for (var y = cv.height - 1; y >= Math.max(0, cv.height - 8); y--) {
+        var d = cx.getImageData(0, y, cv.width, 1).data, run = 0, rb = 0;
+        for (var x = 0; x < cv.width; x++) {
+          var s = Math.abs(d[x*4]-tr) + Math.abs(d[x*4+1]-tg) + Math.abs(d[x*4+2]-tb);
+          if (s < 90) { run++; if (run > rb) rb = run; } else { run = 0; }
+        }
+        if (rb > best) best = rb;
+      }
+      var el = document.querySelector(${JSON.stringify(`[data-g=${JSON.stringify(row.g)}]`)});
+      return { px: best, hovered: !!el && el.matches(':hover') };
+    })()`);
+  };
+
+  await p.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: 5, y: 5, button: "none", clickCount: 0 });
+  await sleep(250);
+  const rest = await painted();
+  await p.send("Input.dispatchMouseEvent",
+               { type: "mouseMoved", x: row.cx, y: row.cy, button: "none", clickCount: 0 });
+  await sleep(350);
+  const over = await painted();
+  await p.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: 5, y: 5, button: "none", clickCount: 0 });
+  await sleep(150);
+
+  // github#78 -- the state the bug was actually reported in
+  const sel = `[data-g=${JSON.stringify(row.g)}]`;
+  await p.eval(`document.querySelector(${JSON.stringify(sel)}).click(); void 0`);
+  await sleep(450);
+  const lit = await painted();
+  const wasLit = await p.j(`document.querySelector(${JSON.stringify(sel)}).getAttribute('data-hl')`);
+  await p.eval(`document.querySelector(${JSON.stringify(sel)}).click(); void 0`);
+  await sleep(400);
+  await p.eval(`(function(){ var e = document.querySelector('[data-floorprobe]');
+                if (e) e.removeAttribute('data-floorprobe'); })(); void 0`);
+
+  // github#78
+  const nearAccent = await p.j(`(function(){
+    var root = document.querySelector('.vault-graph');
+    var norm = function (x) {
+      var d = document.createElement('span');
+      d.style.color = String(x).trim(); root.appendChild(d);
+      var out = getComputedStyle(d).color; d.parentNode.removeChild(d);
+      return out.replace('rgba(', '').replace('rgb(', '').replace(')', '')
+                .split(',').map(function (v) { return parseInt(v, 10); });
+    };
+    var a = norm(getComputedStyle(root).getPropertyValue('--accent'));
+    var b = norm(${JSON.stringify(row.col)});
+    if (a.length < 3 || b.length < 3) return false;
+    return Math.abs(a[0]-b[0]) + Math.abs(a[1]-b[1]) + Math.abs(a[2]-b[2]) < 120;
+  })()`);
+
+  // github#78, design/0006
+  const FLOOR_MIN = 3;
+  const states = [["rest", rest.px], ["hover", over.px]];
+  if (!nearAccent) states.push(["highlighted", lit.px]);
+  const weakest = Math.min(...states.map((s) => s[1]));
+  const ok = over.hovered === true && wasLit === "on" && weakest >= FLOOR_MIN;
+  return {
+    ok,
+    detail: `${row.g} at ${row.share} of the basis, size ${row.size}: ` +
+            `${rest.px}px at rest, ${over.px}px hovering (hovered=${over.hovered}), ` +
+            `${lit.px}px highlighted (data-hl=${wasLit}); weakest asserted ${weakest}px of ` +
+            states.map((s) => s[0]).join("/") +
+            (nearAccent ? "  (highlighted NOT asserted: this bar's hue is the accent's)" : "") +
+            (over.hovered ? "" : "  <- NO :hover from the harness") +
+            (weakest < FLOOR_MIN ? `  <- a state paints under ${FLOOR_MIN}px` : "")
+  };
+});
+
+// github#78, design/0006
+check("the count bars walk on the cascade's clock and land on the resting layout", async (p) => {
+  const shareOf = (g) => p.j(`(function(){
+    var lg = document.querySelector('[data-g=' + JSON.stringify(${JSON.stringify(g)}) + ']');
+    return lg ? getComputedStyle(lg).getPropertyValue('--vg-share').trim() : null;
+  })()`);
+  const pct = (v) => (v && v.slice(-1) === "%" ? parseFloat(v) : NaN);
+
+  const order = await p.j(`(function(){
+    return __vg.groupOrder().filter(function (g) { return __vg.groupCount(g) > 0; })
+      .map(function (g) { return { g: g, n: __vg.groupCount(g) }; })
+      .sort(function (a, b) { return b.n - a.n; });
+  })()`);
+  if (order.length < 2) return { ok: true, detail: `only ${order.length} non-empty group -- nothing to rescale` };
+  const biggest = order[0], runnerUp = order[1];
+
+  const before = pct(await shareOf(runnerUp.g));
+  // github#78
+  await p.eval(`document.querySelector('[data-eye=' + JSON.stringify(${JSON.stringify(biggest.g)}) + ']').click(); void 0`);
+
+  const seen = [];
+  for (let i = 0; i < 24; i++) {
+    const v = pct(await shareOf(runnerUp.g));
+    if (!Number.isNaN(v) && (seen.length === 0 || seen[seen.length - 1] !== v)) seen.push(v);
+    if (v >= 99.99) break;
+    await sleep(60);
+  }
+  let last = null, landed = null;
+  for (let i = 0; i < 60; i++) {
+    const v = await shareOf(runnerUp.g);
+    if (v === last) { landed = v; break; }
+    last = v;
+    await sleep(150);
+  }
+  const target = pct(landed);
+  const mid = seen.filter((v) => v > before + 0.01 && v < 99.99);
+
+  await p.eval(`document.querySelector('[data-eye=' + JSON.stringify(${JSON.stringify(biggest.g)}) + ']').click(); void 0`);
+  let back = null, prev = null;
+  for (let i = 0; i < 60; i++) {
+    const v = await shareOf(runnerUp.g);
+    if (v === prev) { back = v; break; }
+    prev = v;
+    await sleep(150);
+  }
+
+  const ok = mid.length >= 2 && Math.abs(target - 100) < 0.01 &&
+             Math.abs(pct(back) - before) < 0.01;
+  return {
+    ok,
+    detail: `${runnerUp.g} grew ${before.toFixed(3)}% -> ${target.toFixed(3)}% when ` +
+            `${JSON.stringify(biggest.g)} was hidden, through ${mid.length} intermediate ` +
+            `value(s) [${mid.slice(0, 4).map((v) => v.toFixed(1)).join(", ")}...]; ` +
+            `restored to ${pct(back).toFixed(3)}%` +
+            (mid.length < 2 ? "  <- it SNAPPED, no walk" : "") +
+            (Math.abs(target - 100) >= 0.01 ? "  <- did not land on the resting 100%" : "")
+  };
+});
+
+// github#78, design/0006
+check("a bar that loses its folder shrinks over the cascade instead of blinking out", async (p) => {
+  const settle = async () => {
+    let last = null;
+    for (let i = 0; i < 60; i++) {
+      const now = await p.j(`(function(){
+        return [].map.call(document.querySelectorAll('#vg-legend .lg[data-g]'), function (lg) {
+          return lg.className + ':' + getComputedStyle(lg).getPropertyValue('--vg-share').trim();
+        }).join(",");
+      })()`);
+      if (now === last) return;
+      last = now;
+      await sleep(150);
+    }
+  };
+  const one = (g) => p.j(`(function(){
+    var lg = document.querySelector('#vg-legend .lg[data-g=' + JSON.stringify(${JSON.stringify(g)}) + ']');
+    if (!lg) return null;
+    return { bar: lg.classList.contains('bar'), out: lg.classList.contains('bar-out'),
+             share: getComputedStyle(lg).getPropertyValue('--vg-share').trim() || null };
+  })()`);
+  const pct = (v) => (v && v.bar && v.share ? parseFloat(v.share) : -1);
+
+  const barred = await p.j(`(function(){
+    var out = [];
+    [].forEach.call(document.querySelectorAll('#vg-legend .lg[data-g].bar'), function (lg) {
+      out.push({ g: lg.getAttribute('data-g'),
+                 share: parseFloat(getComputedStyle(lg).getPropertyValue('--vg-share')) });
+    });
+    return out.sort(function (a, b) { return b.share - a.share; });
+  })()`);
+  if (barred.length < 3) return { ok: true, detail: `only ${barred.length} barred row(s) -- nothing to shrink` };
+  const target = barred[1], wide = barred[0], thin = barred[barred.length - 1];
+
+  await p.eval(`(function(){
+    var lg = document.querySelector('#vg-legend .lg[data-g=' + JSON.stringify(${JSON.stringify(target.g)}) + ']');
+    var chip = lg && lg.querySelector('[data-only]');
+    if (!chip) throw new Error('no only chip');
+    chip.click();
+  })(); void 0`);
+
+  // github#78, design/0006
+  const inkOn = async (g, share) => {
+    const box = await p.j(`(function(){
+      var lg = document.querySelector('#vg-legend .lg[data-g=' + JSON.stringify(${JSON.stringify(g)}) + ']');
+      if (!lg) return null;
+      var b = lg.getBoundingClientRect();
+      if (b.top < 0 || b.bottom > innerHeight) return null;
+      return { x: b.left, y: b.top, w: b.width, h: b.height };
+    })()`);
+    if (!box) return -1;
+    const shot = await p.send("Page.captureScreenshot", { format: "png", captureBeyondViewport: false,
+      clip: { x: box.x, y: box.y, width: box.w, height: box.h, scale: 1 } });
+    return p.eval(`(async function(){
+      var img = new Image();
+      await new Promise(function (res, rej) { img.onload = res; img.onerror = rej;
+        img.src = "data:image/png;base64," + ${JSON.stringify(shot.data)}; });
+      var cv = document.createElement('canvas');
+      cv.width = img.naturalWidth; cv.height = img.naturalHeight;
+      var cx = cv.getContext('2d'); cx.drawImage(img, 0, 0);
+      var end = Math.round(cv.width * ${share});
+      var inA = 4, inB = Math.max(6, Math.round(end * 0.6));
+      var outA = Math.min(cv.width - 6, end + 8), outB = cv.width - 3;
+      if (inB - inA < 4 || outB - outA < 4) return -1;
+      var best = 0;
+      for (var y = cv.height - 1; y >= Math.max(0, cv.height - 3); y--) {
+        var d = cx.getImageData(0, y, cv.width, 1).data;
+        var mean = function (a, b) {
+          var r = 0, g2 = 0, bl = 0, n = 0;
+          for (var x = a; x < b; x++) { r += d[x*4]; g2 += d[x*4+1]; bl += d[x*4+2]; n++; }
+          return [r / n, g2 / n, bl / n];
+        };
+        var i = mean(inA, inB), o = mean(outA, outB);
+        var dl = Math.abs(i[0]-o[0]) + Math.abs(i[1]-o[1]) + Math.abs(i[2]-o[2]);
+        if (dl > best) best = dl;
+      }
+      return Math.round(best);
+    })()`);
+  };
+
+
+  const seenW = [], seenT = [];
+  let inkMid = -1;
+  for (let i = 0; i < 26; i++) {
+    const a = pct(await one(wide.g)), b = pct(await one(thin.g));
+    if (a >= 0 && seenW[seenW.length - 1] !== a) seenW.push(a);
+    if (b >= 0 && seenT[seenT.length - 1] !== b) seenT.push(b);
+    if (inkMid < 0 && a > 25 && a < 85) inkMid = await inkOn(wide.g, a / 100);
+    if (a < 0 && b < 0) break;
+    await sleep(70);
+  }
+  await settle();
+  const after = await p.j(`document.querySelectorAll('#vg-legend .lg[data-g].bar').length`);
+  const gone = pct(await one(wide.g)) < 0 && pct(await one(thin.g)) < 0;
+  const fell = seenW.length >= 4 && seenW.every((v, i) => i === 0 || v < seenW[i - 1]);
+
+  await p.eval(`(function(){ var a = document.getElementById('vg-allon'); if (a) a.click(); })(); void 0`);
+  await settle();
+  const restored = await p.j(`document.querySelectorAll('#vg-legend .lg[data-g].bar').length`);
+
+  // github#78, design/0006
+  const inked = inkMid < 0 || inkMid >= 30;
+  const ok = fell && seenT.length >= 3 && gone && after === 1 &&
+             restored === barred.length && inked;
+  return {
+    ok,
+    detail: `only ${JSON.stringify(target.g)}: ${JSON.stringify(wide.g)} fell through ` +
+            `${seenW.length} width(s) [${seenW.slice(0, 5).map((v) => v.toFixed(1) + "%").join(" ")} ...] ` +
+            `and ${JSON.stringify(thin.g)} through ${seenT.length} ` +
+            `[${seenT.slice(0, 3).map((v) => v.toFixed(3) + "%").join(" ")} ...]; ` +
+            `ink inside vs beyond the bar mid-shrink: ${inkMid < 0 ? "not sampled" : inkMid}; ` +
+            `${after} bar left, ${restored} back on All (was ${barred.length})` +
+            (!fell ? `  <- it did NOT descend smoothly (${seenW.length} width(s))` : "") +
+            (!gone ? "  <- a bar survived its hidden folder" : "") +
+            (!inked ? `  <- the shrinking bar was DECLARED but not painted (ink ${inkMid})` : "")
+  };
+});
+
+// github#84, github#78, design/0004
+check("the count bar follows its own swatch across a theme flip", async (p) => {
+  const read = () => p.j(`(function(){
+    var root = document.querySelector('.vault-graph'), cs = getComputedStyle(root);
+    // github#84 -- resolve INSIDE .vault-graph: --gN is scoped to it, so a var() probed
+    // from document.body comes back black and reads as a broken colour, not a live one.
+    var norm = function (x) {
+      if (!x) return "";
+      var d = document.createElement('span');
+      d.style.color = String(x).trim();
+      root.appendChild(d);
+      var out = getComputedStyle(d).color;
+      d.parentNode.removeChild(d);
+      return out;
+    };
+    var g = __vg.groupOrder().filter(function (n) { return __vg.groupCount(n) > 0; })
+      .sort(function (a, b) { return __vg.groupCount(b) - __vg.groupCount(a); })[0];
+    var slot = g ? __vg.slotOf(g) : "";
+    var lg = g ? document.querySelector('[data-g="' + g + '"]') : null;
+    var sw = lg ? lg.querySelector('.sw') : null;
+    var pick = slot ? document.querySelector('.swatch.vg-' + slot) : null;
+    return { group: g, slot: slot,
+             token: norm(cs.getPropertyValue('--' + slot)),
+             swatch: sw ? norm(sw.style.background) : null,
+             barred: !!(lg && lg.classList.contains('bar')),
+             bar: lg ? norm(lg.style.getPropertyValue('--vg-bar')) : null,
+             picker: pick ? getComputedStyle(pick).backgroundColor : null };
+  })()`);
+
+  const started = await p.j(`(function(){
+    var root = document.querySelector('.vault-graph');
+    var was = root.getAttribute('data-theme');
+    root.setAttribute('data-theme', 'dark');
+    var g = document.getElementById('vg-gear');
+    if (g) { g.removeAttribute('hidden'); if (g.getAttribute('aria-expanded') !== 'true') g.click(); }
+    return { was: was, gear: !!g };
+  })()`);
+  await sleep(500);
+  const before = await read();
+  if (!before.barred) {
+    return { ok: true, detail: `no barred row on this shape -- nothing to compare` };
+  }
+
+  await p.eval(`(function(){
+    document.querySelector('.vault-graph').setAttribute('data-theme', 'light');
+    __vg.readTheme();
+    if (__vg.renderer) __vg.renderer.refresh();
+  })(); void 0`);
+  await sleep(700);
+  const after = await read();
+
+  await p.eval(`(function(){
+    var root = document.querySelector('.vault-graph');
+    if (${JSON.stringify(started.was)} === null) root.removeAttribute('data-theme');
+    else root.setAttribute('data-theme', ${JSON.stringify(started.was)});
+    __vg.readTheme();
+    if (__vg.renderer) __vg.renderer.refresh();
+  })(); void 0`);
+  await sleep(400);
+
+  const tokenMoved = before.token !== after.token;
+  const swatchMoved = before.swatch !== after.swatch;
+  const barMoved = before.bar !== after.bar;
+  const pickerMoved = before.picker !== null && before.picker !== after.picker;
+  const coherent = barMoved === swatchMoved && after.bar === after.swatch;
+
+  const bits = [`slot ${after.slot} on ${JSON.stringify(before.group)}`,
+    `token ${before.token} -> ${after.token}${tokenMoved ? " (moved)" : " (SAME -- flip did nothing)"}`,
+    `swatch ${before.swatch} -> ${after.swatch}${swatchMoved ? " (moved)" : " (stale)"}`,
+    `bar ${before.bar} -> ${after.bar}${barMoved ? " (moved)" : " (stale)"}`,
+    before.picker === null ? "no picker swatch rendered"
+                           : `picker ${before.picker} -> ${after.picker}${pickerMoved ? " (moved)" : " (stale)"}`,
+    `bar agrees with its swatch=${coherent}`];
+  if (tokenMoved && !swatchMoved) bits.push("github#84: the legend keeps the old theme while the picker repaints");
+  if (!coherent) bits.push("<- the bar and its swatch disagree, which no row may do");
+  return { ok: coherent && tokenMoved, detail: bits.join("; ") };
+});
+
+// github#78, design/0006
+check("count bars are on by default, and the settings toggle removes every bar", async (p) => {
+  const r = await p.j(`(function(){
+    var gear = document.querySelector("#vg-gear");
+    if (!gear || gear.hidden) return { noGear: true };
+    gear.click();
+    var btn = document.querySelector("#vg-opt-countBars");
+    if (!btn) return { noButton: true };
+
+    var bars = function () { return document.querySelectorAll("#vg-legend .lg.bar").length; };
+    var rows = function () { return document.querySelectorAll("#vg-legend .lg[data-g]").length; };
+    var out = { defaultPressed: btn.getAttribute("aria-pressed"),
+                defaultState: __vg.countBars,
+                barsOn: bars(), rows: rows() };
+
+    btn.click();
+    var off = document.querySelector("#vg-opt-countBars");
+    out.offPressed = off && off.getAttribute("aria-pressed");
+    out.offState = __vg.countBars;
+    out.barsOff = bars();
+    out.rowsOff = rows();
+    out.sizeOff = (function () {
+      var lg = document.querySelector("#vg-legend .lg[data-g]");
+      return lg ? getComputedStyle(lg).backgroundSize : null;
+    })();
+
+    var back = document.querySelector("#vg-opt-countBars");
+    if (back) back.click();
+    out.backPressed = (document.querySelector("#vg-opt-countBars") || {}).getAttribute
+      ? document.querySelector("#vg-opt-countBars").getAttribute("aria-pressed") : null;
+    out.backState = __vg.countBars;
+    out.barsBack = bars();
+    gear.click();
+    return out;
+  })()`);
+  if (r.noGear) return { ok: false, detail: "no #vg-gear on this build -- standalone only" };
+  if (r.noButton) {
+    return { ok: false, detail: "gear opened but #vg-opt-countBars was not found -- the rendered " +
+      "row id and the $() lookup setCountBars uses have drifted apart" };
+  }
+  const ok = r.defaultPressed === "true" && r.defaultState === true && r.barsOn > 0 &&
+             r.offPressed === "false" && r.offState === false && r.barsOff === 0 &&
+             r.sizeOff === "auto" && r.rowsOff === r.rows &&
+             r.backPressed === "true" && r.backState === true && r.barsBack === r.barsOn;
+  return {
+    ok,
+    detail: `default pressed=${r.defaultPressed} state=${r.defaultState} with ` +
+      `${r.barsOn} of ${r.rows} rows barred; off -> pressed=${r.offPressed} state=${r.offState}, ` +
+      `${r.barsOff} barred, first row background-size=${r.sizeOff}, rows still ${r.rowsOff}; ` +
+      `on again -> pressed=${r.backPressed} state=${r.backState}, ${r.barsBack} barred`
+  };
 });
 
 check("focus web stays above dim notes", async (p) => {

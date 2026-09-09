@@ -106,6 +106,7 @@
  * @property {boolean} [compactAxis]
  * @property {boolean} [unlinkedByFolder]
  * @property {boolean} [unlinkedTintByFolder]
+ * @property {boolean} [countBars]              github#78, design/0006
  * @property {boolean} [fitCap]               github#41, design/0011
  * @property {boolean} [sheetOpen]            github#82 -- absent means "decide from the width"
  * @property {boolean} [bandOpen]             github#82
@@ -121,6 +122,7 @@
  * @property {(v: boolean) => void | Promise<void>} [onUnlinkedTintByFolder]
  * @property {(v: boolean) => void | Promise<void>} [onSheetOpen]
  * @property {(v: boolean) => void | Promise<void>} [onBandOpen]
+ * @property {(v: boolean) => void | Promise<void>} [onCountBars]
  * @property {(ids: string[]) => void | Promise<void>} [onPinned]
  * @property {() => void} [onRefresh]
  */
@@ -166,6 +168,7 @@
  * @property {(v: boolean) => void} setCompactAxis
  * @property {(v: boolean) => void} setUnlinkedByFolder
  * @property {(v: boolean) => void} setUnlinkedTintByFolder
+ * @property {(v: boolean) => void} setCountBars
  * @property {(v: boolean) => void} setFitCap
  * @property {() => void} applyHiddenDefaults
  * @property {() => void} heatBuild
@@ -407,6 +410,10 @@ function mountVaultGraph(root, data, deps) {
   // github#3
   var unlinkedTintByFolder = deps.unlinkedTintByFolder === true ? true : false;
   var onUnlinkedTintByFolder = typeof deps.onUnlinkedTintByFolder === "function" ? deps.onUnlinkedTintByFolder : null;
+
+  // github#78, design/0006
+  var countBars = deps.countBars === false ? false : true;
+  var onCountBars = typeof deps.onCountBars === "function" ? deps.onCountBars : null;
 
   /** @param {string} g */
   function isArchiveGroup(g) { return String(g).charAt(0) === "_"; }
@@ -3749,6 +3756,9 @@ function mountVaultGraph(root, data, deps) {
     })();
     cascadeRun = { raf: 0, tick: NOW(), guard: WIN.setTimeout(watchdog, STALL_MS), sizeCap: sizeCap,
                    skel: moveFrom ? null : freshSkel() };
+    // github#78, design/0006
+    var barWalking = barWalkStart();
+
     (function step() {
       var tn = NOW();
       var adv = (tn - tPrev) / msPerFrame;
@@ -3758,6 +3768,8 @@ function mountVaultGraph(root, data, deps) {
       if (cascadeRun) cascadeRun.tick = tn;
       var pr = Math.min(1, frame / Math.max(1, span));
       var ease = pr * pr * (3 - 2 * pr);
+      // github#78
+      if (barWalking) barWalkTick(ease);
       var busy = false;
       for (var i = 0; i < moving.length; i++) {
         var id = moving[i];
@@ -3898,7 +3910,7 @@ function mountVaultGraph(root, data, deps) {
                            msPerFrame: Math.round(msPerFrame * 1000) / 1000,
                            moving: moving.length, run: !!cascadeRun };
       if (busy || pr < 1 || resid > 0.5) cascadeRun.raf = WIN.requestAnimationFrame(step);
-      else { lastCascade.exit = "converged"; settle(); }
+      else { lastCascade.exit = "converged"; barWalkEnd(); settle(); }
     })();
   }
 
@@ -5087,6 +5099,44 @@ function mountVaultGraph(root, data, deps) {
     return !counts[g] && held ? "(" + held + ")" : String(counts[g]);
   }
 
+  // github#78, design/0006
+  /** @type {Record<string, number> | null} */
+  var barShown = null;
+  /** @type {Record<string, number> | null} */
+  var barNow = null;
+  /** @type {Record<string, number> | null} */
+  var barPrev = null;
+
+  // github#78, design/0006
+  /** @returns {{ max: number, group: string }} */
+  function barBasis() {
+    var names = order[state.dim] || [], out = { max: 0, group: "" };
+    for (var i = 0; i < names.length; i++) {
+      var g = names[i];
+      if (!counts[g] || isHidden(g)) continue;
+      if (g === UNLINKED && !unlinkedByFolder) continue;
+      if (counts[g] > out.max) { out.max = counts[g]; out.group = g; }
+    }
+    return out;
+  }
+
+  // github#78, design/0006
+  /** @param {string} g @param {{ max: number, group: string }} basis */
+  function barShare(g, basis) {
+    if (!countBars) return 0;
+    if (!counts[g] || isHidden(g)) return 0;
+    if (g === UNLINKED && !unlinkedByFolder) return 0;
+    if (!basis.max) return 0;
+    return counts[g] / basis.max;
+  }
+
+  // github#78
+  /** @param {number} share */
+  function shareText(share) {
+    var pct = share * 100;
+    return (pct < 0.1 ? "<0.1" : pct.toFixed(1)) + "%";
+  }
+
   // github#46
   /** @type {Point | null} */
   var ptr = null;
@@ -5140,6 +5190,11 @@ function mountVaultGraph(root, data, deps) {
       }).join("");
     };
 
+    // github#78
+    var basis = barBasis();
+    /** @type {Record<string, number>} */
+    var rendered = dict();
+
     setHTML($("legend"), names.map(function (g) {
       var vis = !isHidden(g);
       var hasSubs = state.dim === "folder" &&
@@ -5151,11 +5206,25 @@ function mountVaultGraph(root, data, deps) {
       // github#50
       var live = !!counts[g];
       var lgrClass = "lgr" + (live ? "" : " lgr-empty");
+
+      // github#78, design/0006
+      var share = barShare(g, basis);
+      rendered[g] = share;
+      var shown = cascadeRun && barShown && barShown[g] !== undefined ? barShown[g] : share;
+      var lgAttrs = ' class="lg' + (shown ? " bar" + (share ? "" : " bar-out") : "") +
+        '" style="--vg-share:' + (shown * 100).toFixed(3) + '%;--vg-bar:' + colorOf(g) + '"';
+      var ctTitle = share
+        ? ' title="' + counts[g] + (counts[g] === 1 ? " note" : " notes") +
+          (g === basis.group
+            ? " · the largest folder shown"
+            : " · " + shareText(share) + " of " + esc(basis.group)) + '"'
+        : '';
+
       var row = '<div class="' + lgrClass + '">' +
         twBtn(hasSubs ? 'data-tw="' + esc(g) + '"' : null, open) +
         (live ? eyeBtn('data-eye="' + esc(g) + '"', vis, g)
               : '<button class="eye none" disabled aria-hidden="true"></button>') +
-        '<button class="lg" data-g="' + esc(g) + '" data-hl="' + (hl ? "on" : "off") +
+        '<button' + lgAttrs + ' data-g="' + esc(g) + '" data-hl="' + (hl ? "on" : "off") +
           '" aria-pressed="' + vis + '" title="Highlight ' + esc(g) + '">' +
         '<span class="sw' + (bandLock && bandLock[g] ? ' sw-in' : '') +
           '" title="' + swatchTitle(g, bandLock) +
@@ -5163,8 +5232,8 @@ function mountVaultGraph(root, data, deps) {
         '<span class="nm" title="' + esc(g) + '">' + esc(g) + '</span>' +
         (live ? '<span class="only" data-only="1" title="Show only ' + esc(g) + '">only</span>'
               : '<span class="only none" aria-hidden="true"></span>') +
-        // github#50
-        '<span class="ct">' + countText(g) + '</span></button>' +
+        // github#50, github#78
+        '<span class="ct"' + ctTitle + '>' + countText(g) + '</span></button>' +
         '</div>';
 
       if (open && vis) {
@@ -5221,6 +5290,10 @@ function mountVaultGraph(root, data, deps) {
       }
       return row;
     }).join(""));
+
+    // github#78, design/0006
+    if (!barShown) { barPrev = barNow; }
+    barNow = rendered;
 
     /**
      * Every legend element matching a selector. The callback takes an HTMLElement: these are
@@ -6024,7 +6097,12 @@ function mountVaultGraph(root, data, deps) {
       { key: "unlinkedTintByFolder", label: "Colour unlinked notes by folder",
         title: "While unlinked notes are kept as their own group, give each one its own folder's colour instead of the flat unlinked swatch -- also reachable by right-clicking the (unlinked) row",
         get: function () { return unlinkedTintByFolder; },
-        set: function (v) { setUnlinkedTintByFolder(v, true); } }
+        set: function (v) { setUnlinkedTintByFolder(v, true); } },
+      // github#78, design/0006
+      { key: "countBars", label: "Count bars in the legend",
+        title: "Draw a short rule along the bottom of each folder row, in that folder's own colour, scaled so the largest folder currently shown fills its row -- the count alone makes 406 notes and 1 note look the same",
+        get: function () { return countBars; },
+        set: function (v) { setCountBars(v, true); } }
     ];
     function buildOptions() {
       var host = $("optbody");
@@ -6239,6 +6317,79 @@ function mountVaultGraph(root, data, deps) {
     attempt(placeLogo); attempt(heatBuild); attempt(buildLegend);
     if (persist && onUnlinkedTintByFolder) onUnlinkedTintByFolder(unlinkedTintByFolder);
     return unlinkedTintByFolder;
+  }
+
+  // github#78, design/0006
+  /** @param {Record<string, number>} map */
+  function paintBars(map) {
+    var host = $("legend");
+    if (!host) return;
+    Array.prototype.forEach.call(host.querySelectorAll(".lg[data-g]"),
+      /** @param {HTMLElement} el */ function (el) {
+        var g = el.getAttribute("data-g");
+        if (g === null || map[g] === undefined) return;
+        var v = map[g];
+        if (v <= 0) {
+          el.classList.remove("bar");
+          el.classList.remove("bar-out");
+          el.style.removeProperty("--vg-share");
+          return;
+        }
+        el.classList.add("bar");
+        el.classList.toggle("bar-out", !!barNow && !barNow[g]);
+        el.style.setProperty("--vg-share", (v * 100).toFixed(3) + "%");
+      });
+  }
+
+  // github#78, design/0006
+  /** @returns {boolean} whether a walk is worth running */
+  function barWalkStart() {
+    barShown = null;
+    if (!countBars || !barPrev || !barNow) return false;
+    var moved = false;
+    Object.keys(barNow).forEach(function (g) {
+      var a = barPrev[g] === undefined ? 0 : barPrev[g];
+      if (Math.abs(a - barNow[g]) > 0.0005) moved = true;
+    });
+    if (!moved) return false;
+    /** @type {Record<string, number>} */
+    var from = dict();
+    Object.keys(barNow).forEach(function (g) {
+      from[g] = barPrev && barPrev[g] !== undefined ? barPrev[g] : 0;
+    });
+    barShown = from;
+    paintBars(from);
+    return true;
+  }
+
+  // github#78, design/0006
+  /** @param {number} e eased progress, 0..1, the disc's own */
+  function barWalkTick(e) {
+    if (!barShown || !barNow) return;
+    /** @type {Record<string, number>} */
+    var at = dict();
+    Object.keys(barNow).forEach(function (g) {
+      var a = barShown[g] === undefined ? 0 : barShown[g];
+      at[g] = a + (barNow[g] - a) * e;
+    });
+    paintBars(at);
+  }
+
+  // github#78, design/0006
+  function barWalkEnd() {
+    if (!barShown) return;
+    barShown = null;
+    if (barNow) paintBars(barNow);
+  }
+
+  // github#78, design/0006
+  function setCountBars(on, persist) {
+    countBars = !!on;
+    var btn = $("opt-countBars");
+    if (btn) btn.setAttribute("aria-pressed", countBars ? "true" : "false");
+    attempt(buildLegend);
+    if (persist && onCountBars) onCountBars(countBars);
+    return countBars;
   }
 
   function savePng() {
@@ -8053,6 +8204,7 @@ function mountVaultGraph(root, data, deps) {
                     // github#41, design/0011
                     setFitCap: function (v) { return setFitCap(v === true); },
                     setUnlinkedTintByFolder: function (v) { return setUnlinkedTintByFolder(v === true, false); },
+                    setCountBars: function (v) { return setCountBars(v !== false, false); },
                     applyHiddenDefaults: function () {
                       seedHidden();
                       buildLegend();
@@ -8320,6 +8472,7 @@ function mountVaultGraph(root, data, deps) {
                     get compactAxis() { return compactAxis; },
                     get unlinkedByFolder() { return unlinkedByFolder; },
                     get unlinkedTintByFolder() { return unlinkedTintByFolder; },
+                    get countBars() { return countBars; },
                     get unlinkedTintColors() { return unlinkedTintColors.slice(); },
                     get subTailRank() { return SUB_SLOTS - 1; },
                     hiddenByDefault: hiddenByDefault,

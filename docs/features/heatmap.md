@@ -27,4 +27,4 @@ commit.
 | | |
 |---|---|
 | **Introduced in** | `predates versioning` |
-| **Last re-recorded** | `2026-09-08` — 10.8 s at 1586x992, encoded at 960 px (0.34 MB) |
+| **Last re-recorded** | `2026-09-09` — 10.8 s at 1586x992, encoded at 960 px (0.31 MB) |

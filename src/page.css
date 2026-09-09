@@ -164,15 +164,47 @@
     gap: 8px; padding: 4px 6px; border-radius: 5px; cursor: pointer;
     border: 1px solid transparent; text-align: left; background: none;
     font: inherit; color: var(--text-1); flex: 1; min-width: 0;
+    /* github#78 -- this is a <button>, and Obsidian gives every button an inset
+       shadow that paints OVER a background image. Reset it or the host decides
+       whether the count bar is visible. design/0006 */
+    box-shadow: none;
   }
   .vault-graph .lg[data-hl="on"], .vault-graph .lgs[data-hl="on"] {
-    background: color-mix(in srgb, var(--accent) 22%, transparent);
+    background-color: color-mix(in srgb, var(--accent) 22%, transparent);
     border-color: var(--accent);
     box-shadow: inset 2px 0 0 0 var(--accent);
     color: var(--text-1);
   }
   .vault-graph .lg[data-hl="on"] .ct, .vault-graph .lgs[data-hl="on"] .ct { color: var(--text-2); }
-  .vault-graph .lg:hover { background: var(--surface-2); border-color: var(--border); }
+  /* github#78 -- background-COLOR, not the shorthand. The shorthand resets
+     background-image; .lg.bar out-orders it as written, so this buys independence
+     from rule order rather than fixing a live bug. Measured: invariants.md. */
+  .vault-graph .lg:hover { background-color: var(--surface-2); border-color: var(--border); }
+  /* github#78 -- the count bar: this row's share of the vault, drawn along the bottom of
+     the row in the group's own colour. A background layer rather than a fifth grid cell
+     because .nm is the only 1fr and already truncates; the row is one width on every row
+     (219px measured) while .nm is not (122/117/141px), so the row is the honest track.
+     The selector carries #vg-legend for SPECIFICITY, not for scoping: a plain
+     `.vault-graph .lg.bar` ties with `.vault-graph .lg:hover` and loses to whichever
+     comes last, and a stale plugin stylesheet in the host document put a `background`
+     SHORTHAND on hover after it -- wiping every longhand and the bar with them. An id
+     makes the rule win on merit rather than on order. github#78
+
+     It starts 2px in, which is what keeps it: the highlight's leading accent band is
+     an `inset 2px` shadow and inset shadows paint OVER a background image, so a bar
+     flush to the edge lost its first 2px and a floored one vanished. It stays in the
+     padding strip BELOW the content, where no grid item can cover it -- moving the
+     origin to content-box fixed the band and let the `only` chip cover the bar
+     instead. The floor is 4px so that no state paints fewer than 3px — lifted to 0 by
+     `--vg-floor` on a row walking down to nothing, or the shrink ends in a 4px stub
+     that blinks out. design/0006 */
+  .vault-graph #vg-legend .lg.bar {
+    background-image: linear-gradient(var(--vg-bar), var(--vg-bar));
+    background-repeat: no-repeat;
+    background-position: 2px 100%;
+    background-size: max(var(--vg-floor, 4px), var(--vg-share)) 2px;
+  }
+  .vault-graph #vg-legend .lg.bar.bar-out { --vg-floor: 0px; }
   .vault-graph .lg .sw { width: 11px; height: 11px; border-radius: 50%; }
   .vault-graph .lg .sw.sw-in { transform: scale(0.6); }
   .vault-graph .lg .nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

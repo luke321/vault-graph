@@ -18,6 +18,14 @@ A corollary that is easy to miss: it is not enough for the last frame to *conver
 resting layout is computed by a different call with different arguments, and if any argument
 differs, the two answers differ — however smooth the frames leading up to it were.
 
+## It is not only the disc
+
+The legend's count bars are widths derived from the same layout, so they walk on the same loop
+and the same eased progress rather than on a CSS transition of their own — and `barWalkEnd()`
+paints the resting widths **by assignment** at the `converged` exit, because converging on rest
+is not the same as being rest. Two clocks means two answers to "where is it now", which is this
+document's failure mode wearing different clothes. github#78, design/0006.
+
 ## The two packings
 
 A cascade is not an animation of a layout. It is an interpolation between **two complete

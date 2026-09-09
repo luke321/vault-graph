@@ -60,6 +60,12 @@ something big enough and the camera reframes to match, as long as you haven't al
 panned or zoomed yourself. The same right-click menu also carries **hidden by default** —
 its own entry, next.
 
+**Each row's own share reads off the bar under it.** The largest folder currently shown fills
+its row and every other bar is measured against it, so hiding or soloing something rescales
+the lot — and the bars walk down and up on the same clock the disc does rather than snapping.
+This clip is where to watch that: the solo beat sends every other bar to nothing over the
+cascade. It is a view setting, on by default.
+
 <img src="../assets/features/folders.webp" width="100%" alt="A folder hidden, the disc re-packing to fill the angle it vacated, then the biggest folder right-clicked and hidden by default from its own menu, then one folder soloed to hide everything else, then everything shown again">
 
 ## A folder hidden by default

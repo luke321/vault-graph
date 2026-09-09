@@ -84,4 +84,22 @@ foreach ($a in $assets) {
 Write-Host ("installed {0} v{1} ({2:N0} KB) into {3}" -f `
   $pluginId, $manifest.version, ($total / 1KB), $dest) -ForegroundColor Green
 Write-Host ''
-Write-Host 'Reload plugins in Settings -> Community plugins, then run "Vault Graph: Open the graph".'
+
+# github#78 -- copying files under a running Obsidian leaves the OLD plugin live. It caches
+# main.js and styles.css until the plugin is reloaded, so the files on disk can match the
+# build byte for byte while the window still runs the previous one. That gap cost a round
+# trip: the install was verified by hashing files and the running instance was assumed from
+# launch order, which is not a measurement.
+$live = Get-Process obsidian -ErrorAction SilentlyContinue
+if ($live) {
+  Write-Host 'OBSIDIAN IS RUNNING -- it is still on the PREVIOUS build.' -ForegroundColor Red
+  Write-Host 'The files on disk are new; the window is not. Do one of:' -ForegroundColor Yellow
+  Write-Host '  - Ctrl+R in Obsidian (reloads the app, and the plugin with it)'
+  Write-Host '  - Settings -> Community plugins -> toggle vault-graph off and on'
+  Write-Host '  - close Obsidian, run this script again, then start it'
+  Write-Host ''
+  Write-Host 'Do not judge a fix until you have done one of those.' -ForegroundColor Yellow
+} else {
+  Write-Host 'Obsidian is not running, so the next start loads this build.' -ForegroundColor Green
+}
+Write-Host 'Then run "Vault Graph: Open the graph".'

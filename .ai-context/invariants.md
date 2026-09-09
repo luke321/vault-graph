@@ -990,6 +990,422 @@ edge at 266px with the tree open, and 9 / 9 / one edge at the folded default. Th
 button is laid out at every depth with only its opacity changing on hover, so this holds
 while hovering too.
 
+## The legend's count bar is a share of the largest folder currently shown
+
+Each legend row whose count is a plain number carries a 2px rule along the bottom of `.lg`.
+**Its length is that row's count against the largest count among the folders currently
+visible**, so the biggest folder on screen fills its row and every other bar is read against
+it. It is a **view setting, `countBars`, on by default** — the gear's "Count bars in the
+legend" row on the page, and a toggle in the plugin's settings tab. The bar measures notes; the wedge next to it measures notes *within its own ring*, because
+angular share is allocated per band (design/0001), so the two still disagree by design.
+
+**The denominator is the largest VISIBLE folder, which means the bars re-scale on a visibility
+toggle.** That is the opposite of the first shipped version, which divided by every note on the
+page and therefore never moved when a folder was hidden. Chosen deliberately on 2026-09-08:
+against the whole vault the largest bar was 62.8px of a 217px track on the demo and the small
+folders were indistinguishable stubs; against the largest shown, 60 / 50 / 48 / 36 / 24 notes
+read as visibly different lengths.
+
+```javascript
+// what each row declares, against what it should be
+(function () {
+  var rows = [].map.call(document.querySelectorAll("#vg-legend .lgr"), function (lgr) {
+    var lg = lgr.querySelector(".lg");
+    if (!lg) return null;
+    var g = lg.getAttribute("data-g");
+    return { g: g, count: __vg.groupCount(g),
+             ct: lgr.querySelector(".ct").textContent,
+             visible: lg.getAttribute("aria-pressed") === "true",
+             declared: parseFloat(getComputedStyle(lg).getPropertyValue("--vg-share")),
+             applied: getComputedStyle(lg).backgroundSize.indexOf("max(") === 0 };
+  }).filter(Boolean);
+  var basis = rows.filter(function (r) { return r.count > 0 && r.visible && /^\d+$/.test(r.ct); })
+                  .reduce(function (m, r) { return Math.max(m, r.count); }, 0);
+  return rows.filter(function (r) { return r.declared === r.declared; })
+             .filter(function (r) {
+    return !r.applied ||
+           Math.abs(r.declared - Math.min(100, (r.count / basis) * 100)) > 0.01;
+  });
+})()
+```
+
+Must be **empty**. Measured: **17 of 18 rows barred** on the demo (basis **406**, `05 - Meeting
+Notes`) and on the 10k (basis **4358**, same folder), **6 of 7** on the shape vault (basis
+**738**, `projects`). Exactly **one row at a full bar** on each, at the full **217px** track;
+thinnest **4.0px everywhere** among the folders that are *visible*, floored so a one-note
+folder still marks its row — and so that the mark survives hover AND highlight, which is why
+the floor is 4 and the bar starts 2px in (below). A hidden folder draws nothing at all.
+
+**Hiding the largest folder promotes the runner-up to a full bar**, and that is asserted, not
+merely allowed: hide `05 - Meeting Notes` on the demo and the basis must become 200 with
+`01 - Projects` declaring 100%. Showing it again must restore the basis to 406.
+
+**`getComputedStyle` cannot resolve the `max()`, and that is what makes this checkable.**
+Chrome reports `background-size: max(3px, 49.261%) 2px` on a barred row and `auto` on a plain
+one, so a size still beginning `max(3px,` proves `.lg.bar` won the cascade rather than one of
+the `background` shorthands. The share is read from `--vg-share` beside it. Do not try to parse
+it with a regex written inside the check's template literal: an escaped open paren is consumed
+before the page sees it, the intended literal becomes a capturing group, and every row reads as
+broken when nothing is.
+
+**The painted length was verified against the declaration, in pixels**, by clipping each row
+out of a screenshot and counting the run of bar-coloured pixels — Chrome decoding its own PNG
+through a canvas, since no computed style can answer it. Re-measured on the demo at the new
+basis: `05 - Meeting Notes` declares 100% and paints **217.00px exactly**, `01 - Projects`
+declares 49.26% and paints 107.00px against 106.90px wanted, `14 - Reading List` paints
+**4.00px** on the floor, and the **worst disagreement over all 17 rows is 0.83 CSS px** on
+`11 - Clippings` — the antialiased tail of a 12.83px bar, which the pixel scan's colour
+tolerance drops.
+
+**What the new basis bought, in painted pixels.** The three folders that were indistinguishable
+before are now clearly ordered:
+
+| row | notes | painted, vault-wide | painted, largest shown |
+|---|---|---|---|
+| `03 - Resources` | 60 | 9.00px | **32.00px** |
+| `04 - Daily Notes` | 50 | 7.50px | **26.00px** |
+| `09 - Maps of Content` | 48 | 7.50px | **25.00px** |
+| `05 - Meeting Notes` | 406 | 62.50px | **217.00px** |
+
+### Turning the setting off leaves the rows and removes only the bars
+
+`countBars` follows decisions/0009: the page holds no storage, the host hands it in as a dep
+and gets it back through `onCountBars`. One gate inside `barShare` covers every caller, and
+`setCountBars` rebuilds only the legend — the bar is sidebar DOM and CSS, so there is no
+relayout, no cascade and no `renderer.refresh()`.
+
+Measured on the demo: default **pressed=true, `__vg.countBars` true, 17 of 18 rows barred**.
+Off: **0 barred, the first row's `background-size` back to `auto`, and still 18 rows** — the
+rows, counts and alignment are untouched, only the bars go. On again: **17 barred**.
+
+| break it like this | result |
+|---|---|
+| default the setting off | **FAIL** — default pressed=false state=false with 0 of 18 rows barred |
+| `setCountBars` forgets to rebuild the legend | **FAIL** — state flips to false while 17 rows stay barred |
+
+```bash
+node scripts/smoke.mjs --only "on by default"    # the default, the toggle, and what it removes
+```
+
+### Two row states paint over the bar, and the bar starts 2px in because of it
+
+The bar is a background layer, so **anything painted above a background eats into it**. Two
+row states do:
+
+| state | what it paints over the bar | cost |
+|---|---|---|
+| `:hover` | the row's `1px solid transparent` border turns visible, and antialiases | **1px** |
+| `[data-hl="on"]` | the highlight's leading channel is `box-shadow: inset 2px 0 0 0` — and **inset shadows paint over a background image** | **2px** |
+
+Both eat from the **leading** edge, which is exactly where a bar begins. So a bar flush to the
+edge loses its first pixels in precisely the states a person is looking at it. Measured on the
+demo at a 1px floor: three of eighteen rows lost their bar entirely on hover, and the same rows
+lost it on highlight. `00 - Inbox` sampled in colour: at rest one pixel is the full
+`rgb(217, 89, 38)` at contrast **4.83** against the sidebar; hovering, the brightest is
+`rgb(140, 67, 37)`, a half blend at contrast **2.21**.
+
+**The fix is `background-position: 2px 100%`** — the bar starts after the accent band, so
+neither overlay reaches it — **with the floor at 4px** so the worst state still paints 3px.
+Measured, every barred row on the demo:
+
+| | at rest | hovering | highlighted |
+|---|---|---|---|
+| floored rows (≤ 0.74% of the basis) | 4px | 4px | **3px** |
+| `01 - Projects` (49.26%) | 107px | 107px | 106px |
+| `05 - Meeting Notes` (100%) | 215px | 214px | 214px |
+
+**Every state now keeps a mark, and the check asserts the weakest of the three is at least 3px.**
+
+**`background-origin: content-box` was tried first and is wrong.** It does put both overlays
+outside the track, but it lifts the bar out of the padding strip and into the content row —
+where the `only` chip lives, and that chip is an opaque element painted above the row's
+background. Measured, it took the full bar from 205px to **152px on hover**, the chip punching
+a hole in it. The bar belongs in the padding strip *below* the content, where no grid item can
+reach it.
+
+**It WAS Obsidian's doing as well, and the test that cleared it was measuring the wrong bar.**
+`.lg` is a `<button>`, and Obsidian gives every button an inset shadow: white 9% at rest with
+0.5px blur and 0.5px **spread**, roughly doubling on hover. Spread means it wraps all four
+edges, including the bottom 2px strip where the bar lives, and inset shadows paint over a
+background image. The earlier test applied Obsidian's exact shadows to the standalone page and
+got **217px in all four states** — on the 100% bar, where a 1.5px haze at the edges is
+invisible. On a **4px** bar it is the whole mark. Measuring the widest bar to clear a defect
+that only shows on the thinnest one proves nothing, and this is the second time in this issue
+that reading CSS or the wrong row passed a real bug.
+
+**`.lg` resets `box-shadow` now**, so the host cannot decide whether the bar is visible.
+Measured inside real Obsidian: `shadow=none` at rest and on hover, and the check asserts it —
+`obsidian-smoke.mjs --only "hover"` fails if the host's shadow ever paints on this row again.
+
+```bash
+node scripts/smoke.mjs --only "thinnest count bar"    # pixels in all three row states
+node scripts/obsidian-smoke.mjs --only "hover"        # the CSS half, in real Obsidian
+```
+
+**A file check is not an instance check, and this cost a round trip.** Obsidian caches
+`main.js` and `styles.css` until the plugin reloads, so the files on disk can match the build
+**byte for byte** while the open window still runs the previous one. The install was verified
+by hashing all three files against the build, which passed, and the running instance was then
+*assumed* from launch order. That assumption was wrong and the bug looked unfixed for another
+round. `install-plugin.ps1` now prints a red warning naming the three ways to reload whenever
+it copies under a live Obsidian, and a green line when it does not. **Do not judge a fix in
+the plugin without a reload**, and prefer closing Obsidian, installing, then starting it —
+that is the only order with nothing to remember.
+
+Three things that check got wrong before it was right, all worth keeping:
+
+- **`p.j` wraps its expression in `JSON.stringify`**, so it returns `undefined` for an async
+  IIFE. Anything decoding a screenshot through a canvas must go through `p.eval`, which awaits.
+- **A click rebuilds the legend**, so a marker attribute put on a row before the click is gone
+  after it. Address rows by `data-g`, which `buildLegend` re-emits.
+- **A bar whose hue is the accent's cannot be told from the highlight fill**, and it reads
+  *high*, not low — 213px on the shape vault's `(vault root)`. That one reading is dropped
+  rather than trusted, because a false pass is the failure mode this check exists to prevent.
+
+### The bar rule carries an id, and that is the whole reason it survives a host
+
+`.vault-graph .lg.bar` and `.vault-graph .lg:hover` have **identical specificity** (0,3,0), so
+whichever comes last wins. Inside Obsidian that is not the page's decision: measured in a live
+window, `document.styleSheets` held **two** inline sheets for this page — #8 with 224 rules and
+the current CSS, and #9 with 241 rules, a stale copy carrying
+`.vault-graph .lg:hover { background: var(--surface-2); }`. The **shorthand** resets every
+background longhand, #9 came after #8, and the bar died on hover. On the same row: at rest
+`background-image: linear-gradient(...)`, `background-size: max(4px, 0.405%) 2px`; hovering,
+`background-image: none`, `background-size: auto`, `background-repeat: repeat`,
+`background-position: 0% 0%`.
+
+**The selector is `.vault-graph #vg-legend .lg.bar` for specificity, not scoping.** (1,3,0)
+beats any `.lg:hover` rule a host or a stale sheet can produce without `!important`, so the
+rule wins on merit instead of on document order. The check asserts the selector still contains
+an id and reports it: `bar rule ".vault-graph #vg-legend .lg.bar"`.
+
+**Neither harness could have caught this**, and that is worth knowing before trusting them.
+`smoke.mjs` drives the standalone page, where nothing else styles `.lg`.
+`obsidian-smoke.mjs` builds a **throwaway vault with a fresh profile**, so it has no stale
+plugin stylesheet and reported `image=gradient` under a real hover while the user's window was
+broken. It took attaching to the **user's own running Obsidian** on a debug port to see it:
+4px at rest, **0px** hovering, `hovered=true`. After the fix, the same probe on the same row
+reads 4px and 4px.
+
+### A hidden folder draws no bar
+
+The bar counts what is **on the disc**, so a folder hidden by its eye contributes nothing and
+draws nothing — not a clamped bar, nothing. It is also out of the basis, so it cannot set the
+scale for the rows that are still drawn. Measured on the demo:
+
+| action | barred rows | basis |
+|---|---|---|
+| at rest | 17 of 18 | 406, `05 - Meeting Notes` |
+| hide the largest | 16, and the hidden row has none | 200, `01 - Projects` at 100% |
+| `only` one folder | **1**, at 100% | that folder |
+| All again | 17 | 406 |
+
+**`only` is the case worth naming**: it hides every other folder, so exactly one bar remains
+and it fills its row. That is asserted.
+
+Before this rule a hidden row kept a bar clamped at 100%, and the clamp was hiding a real
+absurdity: with the largest folder hidden, its own row declared **`max(4px, 203%)`** — 203% of
+a basis it was no longer part of. Removing the visibility test brings that straight back, which
+is how the check catches it.
+
+### The tooltip has to say which folder the bar is measured against
+
+The count's `title` names the reference, because a proportion with an unnamed denominator is
+not a measurement. The largest row reads `406 notes · the largest folder shown`; every other
+row reads `143 notes · 35.2% of 05 - Meeting Notes`. **If the denominator ever changes again,
+this string changes in the same commit** — that is the whole guard against the bar quietly
+meaning something else.
+
+### A bar belongs to a plain count and to nothing else
+
+A parenthesised count means the notes are tallied somewhere other than this row's own wedge
+— github#50's folder whose notes stand elsewhere, and the unlinked group kept separate — so
+those rows **draw nothing**, and neither do the `.lgr-empty` rows at zero. They are also left
+out of the basis, so a held count cannot set the scale for the rows that are drawn. Verified
+byte for byte at the vault-wide denominator: the `(unlinked)` row's crop was **identical before
+and after the change**, 6715 bytes both times.
+
+**Subfolder rows are bare.** `subCount` is within one parent, so a sub-bar needs a second
+denominator in the same list. The sub-wedge on the disc already shows the within-parent share.
+
+### Hover and selection must not wipe it
+
+`.lg:hover` and `.lg[data-hl="on"]` both used the `background` **shorthand**, which resets
+`background-image`; both are `background-color` now. Measured with a real mouse move through
+`Input.dispatchMouseEvent` and a real click, never inferred — a first cut walked
+`document.styleSheets` instead and flagged `.lg`'s own `background: none`, which is harmless
+because it cannot out-specify `.lg.bar`.
+
+**Be precise about what that edit actually buys, because the obvious claim is wrong.**
+`.vault-graph .lg:hover` and `.vault-graph .lg.bar` have the **same specificity** (two classes
+and a pseudo-class against three classes), so order decides, and `.lg.bar` is written after
+both shorthand rules. Measured: putting `background:` back on `:hover` leaves the bar **intact
+and this check green**. What the longhand buys is independence from rule order — move
+`.lg.bar` *above* `:hover` with the shorthand restored and the bar dies on hover, which is the
+case the check does catch. So the shorthand is a latent hazard for whoever next reorders this
+block, not a live one today.
+
+**And the layout must not move at all**, because the bar exists to cost `.nm` nothing:
+
+| | before | after |
+|---|---|---|
+| `.lg` row width | 219px every row | **219px** |
+| `.nm` width (3-digit / 4-digit / no-`only` row) | 122 / 117 / 141px | **122 / 117 / 141px** |
+| `.lgr` height | 28.84px | **28.84px** |
+| names truncating (demo, 10k / shape) | 1 of 18 / 0 of 7 | **1 of 18 / 0 of 7** |
+| `nav counts share one right edge` | 1 folded, 1 open | **1 folded, 1 open** |
+| golden snapshot, all three fixtures | — | **band and positions unchanged** |
+
+### The check was proved to have teeth, one regression at a time
+
+A check that cannot fail is worse than none. Each of these was applied to a green tree, run,
+and reverted:
+
+| break it like this | result |
+|---|---|
+| delete the `.lg.bar` rule (the `develop` state) | **FAIL** — rows read `size=auto`, and hover reads wiped |
+| divide by every note on the page instead of the largest shown | **FAIL** — `(vault root)`: 0.143% declared, 0.493% wanted |
+| take the basis over all folders, ignoring visibility | **FAIL** — hiding `05 - Meeting Notes` did not promote `01 - Projects` to a full bar (49.261%) |
+| draw a bar on the parenthesised rows | **FAIL** — `(unlinked)`: ct "(33)" but bar=true |
+| move `.lg.bar` above `:hover`, shorthand restored | **FAIL** — hovering wiped the bar |
+| make the bar resolve `var(--gN)` live while the swatch stays cached | **FAIL** — bar agrees with its swatch=false |
+
+**The bracketed-row one passed until the check learned to flip the membership toggle**, and
+that is the lesson worth keeping: a parenthesised count only *exists* while `(unlinked)` is
+kept separate, which is not the default state, so the entire no-bar-on-brackets rule — the most
+carefully argued edge case in the issue — went unasserted on the first cut. The check now sets
+`unlinkedByFolder` false, re-reads every row, and restores it. Parenthesised rows found bare
+that way: **1 on demo, 1 on the 10k, 3 on the shape vault** (`(vault root)`, `tiny`,
+`(unlinked)` — the shape vault is the only fixture carrying github#50's notes-stand-elsewhere
+case). A shape with none reports that it had nothing to bite on rather than passing.
+
+### A row's bar and its own swatch never disagree
+
+The bar's colour is an inline hex from `colorOf()`, the same as the swatch it sits under, so
+both keep the old palette after a live theme flip while the picker's `.swatch.vg-g7` — a class
+resolving `var(--g7)` — repaints. **That divergence is github#84 and predates this work**; it is
+reported by the check, not asserted, so a known defect stays visible instead of failing a gate.
+
+What IS asserted is the row staying internally coherent: the bar and its swatch move together
+or not at all. Measured, dark to light on the demo fixture, slot `g7`:
+
+| surface | dark | after |
+|---|---|---|
+| `--g7` token | `rgb(144, 133, 233)` | **`rgb(74, 58, 167)`** |
+| picker `.swatch.vg-g7` | `rgb(144, 133, 233)` | **`rgb(74, 58, 167)`** |
+| legend swatch | `rgb(144, 133, 233)` | `rgb(144, 133, 233)` |
+| count bar | `rgb(144, 133, 233)` | `rgb(144, 133, 233)` |
+
+Making the bar resolve `var(--gN)` live while the swatch stays cached fails it — measured, bar
+moves, swatch stale, `bar agrees with its swatch=false`. That is the shape a partial fix to
+github#84 would take, which is the point of asserting it now.
+
+**The probe span must be appended inside `.vault-graph`.** `--gN` is scoped to that root, so a
+`var()` normalised from `document.body` returns `rgb(0, 0, 0)` and reads as a broken colour
+rather than a live one — the first cut of that mutation test reported exactly that.
+
+### The bars walk on the disc's own clock, and the last frame is the resting layout
+
+A bar's width is a fact about the layout, so when the layout walks the bar walks with it — on
+the same frame loop, the same `pr = frame / span`, and the same `ease = pr * pr * (3 - 2 * pr)`
+the notes use. There is no second timer and no CSS transition: a transition would run on its own
+clock and land whenever it liked, which is precisely the class of bug `animation.md` forbids.
+
+**The last frame of a bar's walk is the resting layout**, and it lands there by assignment, not
+by convergence: `barWalkEnd()` paints `barNow` exactly at the cascade's `converged` exit rather
+than trusting the final lerp. Measured on each fixture — hide the largest folder, watch the
+runner-up grow to fill the row:
+
+| fixture | row | rest to target | distinct values seen | restored |
+|---|---|---|---|---|
+| demo | `01 - Projects` | 49.261% to **100.000%** | 23 | 49.261% |
+| 10k | `02 - Areas` | 35.291% to **100.000%** | 24 | 35.291% |
+| shape | `notes` | 13.550% to **100.000%** | 23 | 13.550% |
+
+A separate harness sampled the bar and a moving note's radius on the same ticks: the share went
+49.261% to 100.000% while the watched note's radius moved on those same ticks (3328, 3405,
+3302, 3252, 3354), and the settled frame was **identical to a fresh render on all 18 rows**.
+
+**A bar that loses its folder shrinks; it does not blink out.** Pressing `only` hides every
+other folder, so their resting share is 0 — and the first cut dropped the `bar` class on that
+render, which took the bar off screen in one frame while the disc took 1600ms to re-pack. Three
+things had to change together: `paintBars` owns the class (a row gains or loses its bar as its
+painted width crosses zero, so `querySelectorAll` looks for `.lg[data-g]`, not `.lg.bar`), a
+rebuild mid-cascade keeps the class while `shown` is still above zero, and the 4px presence floor
+is lifted by `.bar-out` on a row walking down to nothing — otherwise the shrink ends in a 4px
+stub that blinks out anyway. Measured on `only`:
+
+| fixture | the widest row falls | the thinnest row | after | on All |
+|---|---|---|---|---|
+| demo | `05 - Meeting Notes` 100.0% → gone, 23 widths | `14 - Reading List` 0.246% → gone, 23 | 1 bar | 17 |
+| 10k | `05 - Meeting Notes` 99.8% → gone, 17 widths | `14 - Reading List` 0.023% → gone, 15 | 1 bar | 17 |
+| shape | `projects` 100.0% → gone, 25 widths | `(vault root)` 0.135% → gone, 24 | 1 bar | 6 |
+
+The check asserts the descent is **monotone** — never a step back up — because a bar that walks
+from the wrong endpoint bounces, and a bounce reads as a glitch rather than as a mistake.
+
+**Every legend row carries its own bar colour, whether it has a bar or not** — and that is not
+tidiness, it is the fix for a shrink that declared itself and painted nothing. The colour used to
+be emitted only on rows that already had a bar; a row that *gained* one mid-walk (`paintBars`
+adding the class) therefore had `--vg-bar` empty, `background-image: none`, and a perfectly
+correct-looking `background-size: max(0px, 74.961%) 2px`. The CSS read right and the screen was
+blank.
+
+**The check that missed it read CSS, and that is the third time in this issue.** It asserted the
+class, the share and the descent, all of which were correct. It now measures ink: mid-shrink it
+compares the mean colour *inside* the bar against the mean *beyond its end*, in the same pixel
+rows, from a real screenshot. Inside-vs-beyond rather than strip-vs-strip because the row
+separator spans the full width and cancels out of a vertical comparison — the first cut of this
+instrument passed the mutation for exactly that reason. Measured: **175 on the demo and the 10k,
+119 on the shape vault**; with the colour restricted to already-barred rows the same reading is
+**0** and the check fails with `the shrinking bar was DECLARED but not painted (ink 0)`.
+
+A shrinking row sits at `opacity: .38`, so its bar is fainter than at rest and that is right: the
+folder is leaving. Faint is not absent, and only a painted measurement can tell the two apart.
+
+**Measured in the running Obsidian, not only on the page**, on his own 520-note vault at
+~60fps, sampling every legend row's `--vg-share` on `requestAnimationFrame` from inside the
+page:
+
+| action | `03 - Resources` (the new basis) | `08 - Meeting Notes` (widest) | `07 - Yearly Reviews` (thinnest) |
+|---|---|---|---|
+| `only` the runner-up | 58.70% → 100%, **123 widths** | 100% → gone, 123 | 0.405% → gone, 116 |
+| hide the widest by its eye | 58.70% → 100%, **123 widths** | 100% → gone, 124 | 0.405% → gone, 112 |
+
+**Sample inside the page, not over CDP.** A probe that round-trips one `Runtime.evaluate` per
+reading first reported *no walk at all* in Obsidian — every row already at its resting value on
+the first sample — while an in-page rAF sampler on the same window recorded 123 distinct widths.
+A round-trip cannot be aligned to a frame, so it reports whatever the page happens to look like
+between two of them; only a sampler running in the page can be trusted about per-frame motion.
+That is the same class of error as the fixed `sleep`, which is the next paragraph.
+
+**Three maps, and the null at rest is the load-bearing part.** `barNow` and `barPrev` are the two
+endpoints a cascade interpolates between, recorded once per render; `barShown` is what is on
+screen mid-walk and is `null` at rest, so the resting value is authoritative — the same shape as
+`colorShown` for a hue walk. The override is also gated on `cascadeRun`, so a walk that somehow
+never ended cannot be observed: with no cascade running, `buildLegend` renders the resting share.
+
+**A rebuild mid-cascade may not snap the bar back.** A click rebuilds the legend, so the row's
+*class* comes from the resting share (which folders have a bar at all) while its *width* comes
+from `barShown` (where the walk has got to). Deciding both from the same value gives either a
+snap or a bar that outlives its folder.
+
+**This is what made the bar checks flaky, and the fix was to stop sleeping.** Once the bars
+moved, `count bars` read **63.807%** mid-walk where it expected 100% — a `sleep(700)` racing a
+1600ms cascade. Every fixed sleep after a state change is now `settleBars()`, which polls until
+no `--vg-share` changes. A time-based wait against an animation is a false failure waiting for
+a slow machine.
+
+```bash
+node scripts/smoke.mjs --only "count bars"      # the basis, the edge cases, hover, selection
+node scripts/smoke.mjs --only "walk on the"     # the bars ride the cascade's clock and land on rest
+node scripts/smoke.mjs --only "last frame"      # the disc's own version of the same law
+node scripts/smoke.mjs --only "theme flip"      # the bar follows its swatch; github#84 reported
+node scripts/smoke.mjs --only "right edge"      # 1 edge, not 2 -- the column survived
+node scripts/smoke.mjs --only "golden"          # the disc did not move
+node scripts/obsidian-smoke.mjs --only "theme"  # the same, through a real css-change
+```
+
 ## Animations are a fixed length, unless the page can't draw them
 
 Durations are wall-clock (`TIMELINE_MS` 4500, `CASCADE_MS` 1600, `TWEEN_MS` 380), so
