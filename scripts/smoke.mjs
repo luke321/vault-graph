@@ -302,7 +302,10 @@ check("the resting disc is on the lattice", async (p) => {
     __vg.graph.forEachNode(function(id, a){
       if ((__vg.alpha[id] || 0) < 0.999) return;
       if (__vg.graph.degree(id) === 0) return;
-      (band[a.folder] ? rad.inner : rad.outer).push(Math.hypot(a.x, a.y));
+      // github#86 -- the group the dot is DRAWN in, which is the grouping answer in either
+      // dimension. Identical to a.folder while grouped by folder with unlinked notes joining
+      // their folder, and right when either of those is not the case.
+      (band[__vg.groupOf(id)] ? rad.inner : rad.outer).push(Math.hypot(a.x, a.y));
     });
     var lattice = function(rs){
       if (rs.length < 3) return {notes: rs.length, rows: 0, skipped: true};
@@ -436,6 +439,239 @@ check("layout matches its golden snapshot", async (p) => {
     parts.push("positions unchanged");
   }
   return { ok, detail: parts.join("; ") };
+});
+
+/* ------------------------------------------------------------ github#86, design/0014 --
+ * The grouping dimension. The check that protects everyone else is the golden snapshot
+ * directly above: folder is the default, so a page nobody switches must lay out to the
+ * byte it did before. These add what only the second dimension can be wrong about.
+ */
+
+check("tags: folders is the default, and the switch is in the group list's own heading",
+async (p) => {
+  const r = await p.j(`(function(){
+    var sel = document.querySelector("#vg-dim");
+    return { dim: __vg.state.dim, has: !!sel, value: sel ? sel.value : null,
+             options: sel ? Array.prototype.map.call(sel.options, function (o) {
+               return o.value + ":" + o.textContent; }) : [],
+             gcount: (document.querySelector("#vg-gcount") || {}).textContent,
+             groups: __vg.groupOrder().length };
+  })()`);
+  if (!r.has) return { ok: false, detail: "no #vg-dim in the group list heading" };
+  const wanted = "folder:Folders,tag:Tags";
+  const ok = r.dim === "folder" && r.value === "folder" &&
+             r.options.join(",") === wanted && r.gcount === "(" + r.groups + ")";
+  return {
+    ok,
+    detail: `dim ${r.dim}, select ${r.value}, options [${r.options.join(" | ")}]` +
+            (r.options.join(",") === wanted ? "" : ` <- wanted ${wanted}`) +
+            `, heading reads ${r.gcount} for ${r.groups} groups`,
+  };
+});
+
+check("tags: every note is filed in exactly one wedge, in either dimension", async (p) => {
+  const r = await p.j(`(function(){
+    var look = function () {
+      var plan = __vg.buildWedgePlan(false), members = 0, seen = {}, twice = 0;
+      plan.cells.forEach(function (c) {
+        c.list.forEach(function (id) { if (seen[id]) twice++; seen[id] = 1; members++; });
+      });
+      var summed = 0;
+      __vg.groupOrder().forEach(function (g) { summed += __vg.groupCount(g); });
+      return { members: members, twice: twice, summed: summed, cells: plan.cells.length,
+               groups: __vg.groupOrder().length };
+    };
+    var nodes = __vg.graph.nodes().length;
+    var pinned = __vg.state.pinned.length;
+    var folder = look();
+    __vg.setDim("tag");
+    var tag = look();
+    // D-1 -- the first tag listed files the note, and a note with none goes to (untagged).
+    // (unlinked) is the one legitimate exception: that setting moves a note out of its group
+    // in either dimension.
+    var misfiled = [], untagged = 0, noTag = 0, multi = 0;
+    __vg.graph.forEachNode(function (id, a) {
+      var tags = a.tags || [];
+      if (!tags.length) noTag++;
+      if (tags.length > 1) multi++;
+      var want = tags.length ? String(tags[0]).split("/")[0] : "(untagged)";
+      var got = __vg.groupOf(id);
+      if (got === "(untagged)") untagged++;
+      if (got !== want && got !== "(unlinked)") {
+        if (misfiled.length < 4) misfiled.push(id + ": " + got + " not " + want);
+      }
+    });
+    __vg.setDim("folder");
+    return { nodes: nodes, pinned: pinned, folder: folder, tag: tag,
+             misfiled: misfiled, untagged: untagged, noTag: noTag, multi: multi };
+  })()`);
+  // The hub holds pinned notes, which leave the ring and so are not plan members.
+  const want = r.nodes - r.pinned;
+  const ok = r.folder.members === want && r.tag.members === want &&
+             !r.folder.twice && !r.tag.twice &&
+             r.folder.summed === r.nodes && r.tag.summed === r.nodes &&
+             !r.misfiled.length;
+  return {
+    ok,
+    detail: `${r.nodes} notes: folder ${r.folder.members} members in ${r.folder.cells} cells / ` +
+            `${r.folder.groups} groups, tag ${r.tag.members} in ${r.tag.cells} / ${r.tag.groups}` +
+            ` (wanted ${want} each, counts sum to ${r.folder.summed}/${r.tag.summed})` +
+            `; ${r.noTag} notes carry no tag and ${r.untagged} are filed (untagged)` +
+            `; ${r.multi} carry more than one` +
+            (r.folder.twice + r.tag.twice ? `; ${r.folder.twice + r.tag.twice} note(s) in TWO cells` : "") +
+            (r.misfiled.length ? `; MISFILED ${r.misfiled.join(", ")}` : ""),
+  };
+});
+
+check("tags: the switch lands where a fresh relayout would, and comes home exactly",
+async (p) => {
+  await settle(p);
+  const r = await p.j(`(function(){
+    var pos = function () {
+      var o = {}; __vg.graph.forEachNode(function (id, a) { o[id] = [a.x, a.y]; }); return o;
+    };
+    var drift = function (a, b) {
+      var moved = 0, worst = 0, who = "";
+      Object.keys(a).forEach(function (id) {
+        var d = Math.hypot(b[id][0] - a[id][0], b[id][1] - a[id][1]);
+        if (d > 0.1) moved++;
+        if (d > worst) { worst = d; who = id; }
+      });
+      return { moved: moved, worst: +worst.toFixed(3), who: who };
+    };
+    var boot = pos();
+    __vg.setDim("tag");
+    var landed = pos();
+    __vg.relayout();
+    var fresh = pos();
+    __vg.setDim("folder");
+    var home = pos();
+    __vg.relayout();
+    var homeFresh = pos();
+    return { tag: drift(landed, fresh), folder: drift(home, homeFresh),
+             trip: drift(boot, home), n: Object.keys(boot).length };
+  })()`);
+  // invariants.md, "A settled dot is the SAME size a fresh relayout gives it": room and
+  // position are a fixed point, so a switch that lays out once lands off its own lattice.
+  const ok = !r.tag.moved && !r.folder.moved && !r.trip.moved;
+  return {
+    ok,
+    detail: `${r.n} notes: landing vs a fresh relayout -- tag ${r.tag.moved} moved ` +
+            `(worst ${r.tag.worst}), folder ${r.folder.moved} (worst ${r.folder.worst}); ` +
+            `round trip ${r.trip.moved} moved (worst ${r.trip.worst}` +
+            (r.trip.who ? `, #${r.trip.who}` : "") + ")",
+  };
+});
+
+check("tags: the two buckets stay out of the hue rotation and sort last", async (p) => {
+  const r = await p.j(`(function(){
+    __vg.setDim("tag");
+    var order = __vg.groupOrder();
+    var slots = {};
+    order.forEach(function (g) { slots[g] = __vg.slotOf(g); });
+    var tail = order.slice(-2);
+    var hues = order.filter(function (g) { return g.charAt(0) !== "("; })
+                    .map(function (g) { return __vg.slotOf(g); });
+    var dup = {}, repeats = 0;
+    hues.forEach(function (s) { if (dup[s]) repeats++; dup[s] = 1; });
+    __vg.setDim("folder");
+    return { order: order, tail: tail, slots: slots, hues: hues, repeats: repeats,
+             untagged: slots["(untagged)"], unlinked: slots["(unlinked)"] };
+  })()`);
+  const hasUntagged = r.order.indexOf("(untagged)") >= 0;
+  if (!hasUntagged) {
+    return { ok: true, detail: `NOT ASSERTED: every note on this vault carries a tag, ` +
+                               `so there is no (untagged) bucket to place` };
+  }
+  // github#86 D-2 -- neither bucket is a group anyone chose, so a hue would claim it was.
+  const ok = r.tail.join(",") === "(untagged),(unlinked)" &&
+             r.untagged === "g11" && r.unlinked === "g11";
+  return {
+    ok,
+    detail: `${r.order.length} groups, last two [${r.tail.join(", ")}]; (untagged) slot ` +
+            `${r.untagged}, (unlinked) ${r.unlinked} (both want the archive grey g11); ` +
+            `${r.hues.length} real tags take ${r.hues.length - r.repeats} distinct slots`,
+  };
+});
+
+check("tags: each dimension keeps its own hidden and collapsed state", async (p) => {
+  const r = await p.j(`(function(){
+    var live = function () {
+      var h = __vg.state.hidden[__vg.state.dim] || {};
+      return Object.keys(h).filter(function (k) { return h[k]; }).sort();
+    };
+    var hideFirst = function () {
+      var g = __vg.groupOrder().filter(function (x) { return __vg.groupCount(x) > 0; })[0];
+      var h = __vg.state.hidden[__vg.state.dim] || (__vg.state.hidden[__vg.state.dim] = {});
+      h[g] = true;
+      __vg.state.hiddenSub[g + "/"] = true;
+      return g;
+    };
+    var folderHid = hideFirst();
+    var folderBefore = live();
+    var folderSubBefore = Object.keys(__vg.state.hiddenSub).sort();
+    __vg.setDim("tag");
+    var tagFresh = live();
+    var tagSubFresh = Object.keys(__vg.state.hiddenSub).sort();
+    var tagHid = hideFirst();
+    var tagAfter = live();
+    __vg.setDim("folder");
+    var folderAgain = live();
+    var folderSubAgain = Object.keys(__vg.state.hiddenSub).sort();
+    __vg.setDim("tag");
+    var tagAgain = live();
+    // leave the page as the shard found it
+    __vg.state.hidden.tag = {};
+    __vg.setDim("folder");
+    __vg.state.hidden.folder = {};
+    __vg.state.hiddenSub = {};
+    __vg.relayout();
+    return { folderHid: folderHid, tagHid: tagHid,
+             folderBefore: folderBefore, folderAgain: folderAgain,
+             folderSubBefore: folderSubBefore, folderSubAgain: folderSubAgain,
+             tagFresh: tagFresh, tagSubFresh: tagSubFresh,
+             tagAfter: tagAfter, tagAgain: tagAgain };
+  })()`);
+  const ok = r.tagFresh.length === 0 && r.tagSubFresh.length === 0 &&
+             r.folderAgain.join(",") === r.folderBefore.join(",") &&
+             r.folderSubAgain.join(",") === r.folderSubBefore.join(",") &&
+             r.tagAgain.join(",") === r.tagAfter.join(",");
+  return {
+    ok,
+    detail: `hid ${r.folderHid} by folder and ${r.tagHid} by tag; the tag list opened with ` +
+            `${r.tagFresh.length} hidden and ${r.tagSubFresh.length} hidden sub-wedges; ` +
+            `folder came back [${r.folderBefore.join(" ")}] -> [${r.folderAgain.join(" ")}], ` +
+            `subs ${r.folderSubBefore.length} -> ${r.folderSubAgain.length}; ` +
+            `tag came back [${r.tagAfter.join(" ")}] -> [${r.tagAgain.join(" ")}]`,
+  };
+});
+
+check("tags: the colour panel says which dimension owns it", async (p) => {
+  const r = await p.j(`(function(){
+    var gear = document.querySelector("#vg-gear");
+    if (!gear || gear.hidden) return { noGear: true };
+    gear.click();
+    var folderRows = document.querySelectorAll("#vg-setbody .scr").length;
+    __vg.setDim("tag");
+    var body = document.querySelector("#vg-setbody");
+    var tagRows = body ? body.querySelectorAll(".scr").length : -1;
+    var says = body ? (body.textContent || "").trim() : "";
+    __vg.setDim("folder");
+    var backRows = document.querySelectorAll("#vg-setbody .scr").length;
+    gear.click();
+    return { folderRows: folderRows, tagRows: tagRows, backRows: backRows, says: says };
+  })()`);
+  if (r.noGear) {
+    return { ok: true, detail: "NOT ASSERTED: no gear on this build -- standalone only" };
+  }
+  // The rows write folderColors / subfolderColors / folderShown, all keyed by folder name.
+  const ok = r.folderRows > 0 && r.tagRows === 0 && r.backRows === r.folderRows &&
+             /per folder/i.test(r.says);
+  return {
+    ok,
+    detail: `${r.folderRows} folder rows, ${r.tagRows} while grouped by tag, ` +
+            `${r.backRows} again after switching back; it says ${JSON.stringify(r.says.slice(0, 60))}`,
+  };
 });
 
 check("a marked heatmap day haloes but never pushes", async (p) => {

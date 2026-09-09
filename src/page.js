@@ -6515,6 +6515,10 @@ function mountVaultGraph(root, data, deps) {
     // instant path -- with movers the cascade lands it.
     if (!n) applyLayout(false);
     attempt(placeLogo); attempt(heatBuild); attempt(buildLegend);
+    // The colour panel is dimension-dependent now (it owns folders and says so), and it is
+    // only ever rebuilt when something asks -- so a panel left open across a switch would
+    // otherwise keep showing the rows it was built with.
+    if (refreshSettingsPanel) refreshSettingsPanel();
     if (persist && onDim) onDim(state.dim);
     if (n) cascade(null, { colToggle: true, movesFrom: movesFrom });
     return state.dim;
