@@ -184,6 +184,37 @@ committed 2026-08-23 from the 2026-08-22 recording, so the check would have stay
 on a hero that was already behind. Silence means no *evidence* of staleness, not that the
 hero is current.
 
+### The hero take failed for a day, and the bug was in the driver's own arithmetic
+
+Between 2026-09-08 and 2026-09-09 the whole-storyboard take died every time at the first `pin`
+beat: `! dragged 371 but it is not pinned afterward — the drop missed the hub`, always at ~32.6 s
+of a ~32.5 s drive. Recording a single act worked, so it read like state the preceding act left
+behind. It was not.
+
+`demo.mjs` measured the drag delta from where the target *was*, then corrected the press point
+for drift and applied the stale delta to the corrected point:
+
+```js
+dx = w2.x - w.x;                            // delta from the ORIGINAL resolution
+press = fresh;                              // press point corrected for drift
+drag(press.x, press.y, press.x + dx, ...);  // ...stale delta applied to it
+```
+
+So a drop aimed at an absolute destination landed short by exactly how far the disc had moved
+between resolving the target and pressing it. Back to back after `hoptrail`'s camera flight the
+drift was enough to miss the hub; with a few seconds' pause — which is what recording one act in
+isolation gives you — there was no drift and it passed. **An absolute destination is now
+re-resolved and aimed at; only a relative `drag: [dx, dy]` keeps its delta**, because there the
+delta is the intent.
+
+Measured: the hero take went from dying at 32.6 s to a complete **162 s** run with zero missed
+beats. Two lessons worth more than the fix. **A harness that passes in isolation and fails in
+sequence is suspect in the harness, not only in the thing it drives** — the same shape as the
+count-bar check that passed alone and failed after earlier checks had scrolled its row off
+screen. And **a correction applied to one half of a computed pair is a bug waiting for a
+deadline**: correcting the press without recomputing the destination was strictly worse than
+correcting neither, because it looked careful.
+
 ## Feature clips are different from the hero — regenerate on judgment, not every release
 
 `docs/features.md` and `assets/features/*.webp` are the per-feature gallery (see
