@@ -3466,6 +3466,7 @@ function mountVaultGraph(root, data, deps) {
    * @property {(id: string) => number} [order]       arrival rank; clockwise when absent
    * @property {number} [spread]                      stagger window, frames
    * @property {boolean} [cross]                       github#76: swap two discs in one sweep
+   * @property {boolean} [hand]                        github#86: one clock sweep, by angle
    * @property {number} [totalMs]
    * @property {(pr: number) => void} [onFrame]
    */
@@ -3602,8 +3603,29 @@ function mountVaultGraph(root, data, deps) {
     var arriveAt = dict();
     /** @type {Record<string, number>} */
     var crossAt = dict();
+    // github#86, design/0014 -- a clock hand: one sweep, keyed on angle not rank
+    if (opts.hand) {
+      var handGap = 2.5 * FADE_FRAMES * TIME_SCALE;
+      var handW = Math.max(1, span - handGap);
+      var TWO_PI = 2 * Math.PI;
+      /** @param {string} id @returns {number} */
+      var handAt = function (id) {
+        var a = graph.getNodeAttributes(id);
+        // github#86 -- a dot not on the disc has no bearing; use the one it goes to
+        var here = (a.x || a.y) ? angleSweep(Math.atan2(a.y, a.x)) : sweepOf[id];
+        return handW * here / TWO_PI;
+      };
+      outs.forEach(function (id) { delay[id] = handAt(id); });
+      ins.forEach(function (id) { delay[id] = handW * sweepOf[id] / TWO_PI; });
+      moves.forEach(function (id) {
+        delay[id] = handAt(id);
+        arriveAt[id] = delay[id] + handGap;
+        crossAt[id] = delay[id] + FADE_FRAMES * TIME_SCALE;
+      });
+    }
     if (moves.length) (function () {
       // github#76, github#86 -- a constant gap, so no-reverse holds by construction
+      if (opts.hand) return;
       if (opts.cross) {
         moves.forEach(function (id, i) {
           var f = moves.length < 2 ? 0 : i / (moves.length - 1);
@@ -3667,7 +3689,7 @@ function mountVaultGraph(root, data, deps) {
     })();
 
     // github#76, github#86
-    if (moves.length && !opts.cross) (function () {
+    if (moves.length && !opts.cross && !opts.hand) (function () {
       /** @type {Record<string, string[]>} */
       var byG = dict();
       moves.forEach(function (id) {
@@ -3690,7 +3712,7 @@ function mountVaultGraph(root, data, deps) {
     })();
 
     // github#76, github#86
-    if (moves.length && !opts.cross) (function () {
+    if (moves.length && !opts.cross && !opts.hand) (function () {
       var save = moveFrom;
       moveFrom = null;
       /** @type {Record<string, string[]>} */
@@ -6624,7 +6646,7 @@ function mountVaultGraph(root, data, deps) {
     if (refreshSettingsPanel) refreshSettingsPanel();
     if (persist && onDim) onDim(state.dim);
     // github#76, github#86 -- every wedge changes, so cross the two discs in one sweep
-    if (n) cascade(null, { colToggle: true, cross: true, movesFrom: movesFrom });
+    if (n) cascade(null, { colToggle: true, hand: true, movesFrom: movesFrom });
     return state.dim;
   }
 
@@ -6667,7 +6689,7 @@ function mountVaultGraph(root, data, deps) {
       attempt(placeLogo); attempt(heatBuild); attempt(buildLegend); attempt(buildStats);
       if (refreshSettingsPanel) refreshSettingsPanel();
       // github#76, github#86
-      if (n) cascade(null, { colToggle: true, cross: true, movesFrom: movesFrom });
+      if (n) cascade(null, { colToggle: true, hand: true, movesFrom: movesFrom });
     }
     syncDimUI();
     if (persist && onMultiTag) onMultiTag(multiTag);

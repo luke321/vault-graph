@@ -168,32 +168,46 @@ The tag vault **hashes only its own generator**. One shared list would have move
 digests and made every worktree re-cut every fixture on the shared store, which is a race
 several agents lose at once.
 
-## The two discs cross, they do not take turns
+## A clock hand sweeps the old disc away and the new one in
 
-A dimension switch moves **every** note, and the cascade's default schedule is tuned for the
-opposite case — a handful of movers among a settled disc (github#49). It staggers departures
-across the first 35% of the span and forces every arrival into the back 45%, so the old disc
-**empties before the new one lands**: a swap, with a hole in the middle of it.
+A dimension switch moves **every** note, and the cascade default is tuned for the opposite
+case — a handful of movers among a settled disc (github#49). It staggers departures across the
+first 35% of the span and forces arrivals into the back 45%, so the old disc **empties before
+the new one lands**.
 
-`cascade`'s `cross` opt, borrowed verbatim from github#76's root change and passed by `setDim`
-and `setMultiTag`, puts every set on one sweep. Departures and arrivals share the window and a
-moving note re-arrives a fixed **2.5 fade lengths** behind its own departure. The gap is
-constant across the sweep, so *a fade never reverses* holds by construction rather than by a
-floor. The two github#49 blocks are skipped while it is on, for the same reason.
+github#76 already fixed that emptying for a root change with its `cross` opt, which puts
+departures and arrivals on one sweep. Borrowing it kept the disc on screen, and it still did
+not read as motion. The reason was the **order**, not the pacing: `ins` and `outs` are sorted
+clockwise, but **`moves` are not** — they keep `Object.keys(movesFrom)` order, which is
+note-index order. On a dimension switch every note is a move, so every dot left at a time
+unrelated to where it sat. A dissolve.
 
-**Measured on the demo fixture, sampling every animation frame of a folder → tag switch:**
+`hand` keys the schedule on **angle** instead of on rank — `delay = W × angleSweep(where the
+dot is) ÷ 2π` — so one hand crosses the disc at constant angular speed. The wedge under the
+hand switches off, and each note re-arrives a constant **2.5 fade lengths** behind its own
+departure, so the new disc lights up just behind the hand. That constant gap is what keeps *a
+fade never reverses* true by construction rather than by a floor. A dot with no bearing of its
+own yet — an arrival — is keyed on the bearing it is going to.
 
-| | dots up at 20 / 30 / 40 / 50 / 60 / 80% | emptiest frame |
-|---|---|---|
-| sequential | 1125 / 951 / 779 / 606 / 626 / 1068, **0 arrived before 60%** | **526** of 1403 |
-| `cross` | 1123 / 1122 / 1123 / 1122 / 1123 / 1122, arrivals 2 / 184 / 367 / 549 / 718 / 1082 | **1122** of 1403 |
+**Measured on the demo fixture, binning the dots still sitting in their old seats into 12
+clock sectors** (`#` full, `+` half, `.` a few, blank empty), sampling every animation frame:
 
-So the disc keeps four fifths of itself on screen throughout instead of losing nearly two
-thirds, and notes start taking their new places at 20% rather than waiting for 60%.
+| | 15% | 30% | 45% | 60% | arcs at the midpoint |
+|---|---|---|---|---|---|
+| `cross` (rank) | `[############]` | `[++++++++##++]` | `[+++++...++++]` | `[............]` | **0** |
+| `hand` (angle) | `[ +##########]` | `[    ########]` | `[      +#####]` | `[        +###]` | **1** |
 
-Unlike github#76's root change — 60 incoming notes against 1403, which the commit notes does
-not yet *look* like a cross — here both discs are the whole vault, so the crossover is the
-picture. Re-measure with the frame sampler in the scratchpad harness, or by eye.
+The dot totals at those points are within 1% of each other — 1208 vs 1221, 941 vs 940, 660 vs
+669 — so this changed the **direction** of the motion, not its pace. The void grows clockwise
+from 12 o'clock and the survivors stay one contiguous arc; under `cross` every sector thinned
+at once.
+
+The disc also never empties: the emptiest frame holds **1122 of 1403** dots, against **526** on
+the sequential schedule that shipped before either opt.
+
+Positions are untouched — this is a schedule — so the serpentine, the lattice and the resting
+sizes are the same numbers they were. `cross` is left exactly as github#76 wrote it, for the
+root change it was built for.
 
 ## The switch needs two layout passes
 
