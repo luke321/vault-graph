@@ -4006,6 +4006,9 @@ function mountVaultGraph(root, data, deps) {
       var resid = 0;
       if (targets) graph.forEachNode(function (id) {
         var q = targets[id];
+        // github#76
+        if (opts.cross && isMove[id] && finalPos[id] &&
+            (!moveFrom || moveFrom[id] === undefined)) q = finalPos[id];
         if (!q) return;
         // github#41
         var h = Math.atan2(q.y, q.x);
