@@ -96,6 +96,14 @@ measuring it: serve the page, drive it, read the numbers.
   a range.
 - Measure before and after; the numbers go into `.ai-context/changelog-detail.md`, which is
   the regression suite. A changed constant means `invariants.md` changes in the same commit.
+- **Obsidian does not load the plugin in a vault it has not been told to trust.** Open any vault
+  that is not the daily one -- a fixture vault, a generated test vault, anything under a temp dir
+  -- and Obsidian asks *Trust author and enable plugins?* the first time, behind a Settings window.
+  Until that is confirmed the plugin does not load **at all**, so skipping it leaves you staring at
+  a plugin that looks broken for a reason that is nowhere in the code. Confirm the prompt, close
+  Settings, then judge what the plugin is doing. `scripts/obsidian-smoke.mjs` handles this itself
+  -- it writes `community-plugins.json` and calls `enablePluginAndSave` -- a hand-launched Obsidian
+  does not.
 - Fixtures: three generated vaults (`scripts/make-*-vault.mjs`) in the shared store; never a
   real vault, never a built `vault-graph.html`, in anything that reaches the repo.
 - `npm run lint` holds every finding at zero. `check-pii`, `check-scope`, `check-network` and
