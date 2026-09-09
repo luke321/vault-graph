@@ -30,6 +30,134 @@ published tag breaks every link to it.
 
 ---
 
+## 2.3.0 — "Share" — 2026-09-09
+
+**Every legend row rendered identically, so a 406-note folder and a 1-note folder looked the
+same.** The count was there in figures, and figures at the end of eighteen rows are something you
+read one at a time rather than see. Each row whose count is a plain number now draws a 2px rule
+along the bottom of the row, in that folder's own colour: the largest folder currently shown
+fills its row, and every other bar is that row's share of it.
+
+### The bar measures what is on the disc
+
+**The denominator is the largest folder currently shown, not the whole vault.** Against the whole
+vault every bar is short and the differences between the small folders vanish; against the
+largest thing you can actually see, one row is always full and the rest are read off it. Hide the
+biggest folder and the next one grows to fill its row — on the demo fixture, hiding
+`05 - Meeting Notes` (406) promotes `01 - Projects` (200) from 49.3% to a full bar.
+
+**Because the denominator is a choice, the tooltip names it.** The largest row reads
+`406 notes · the largest folder shown`; every other row reads `143 notes · 35.2% of
+05 - Meeting Notes`. A proportion with an unnamed denominator is not a measurement, and if the
+denominator ever changes again that string changes in the same commit.
+
+**A hidden folder draws no bar at all** — not a clamped one. The bar counts what is on the disc,
+so a folder behind a closed eye contributes nothing and is out of the basis. **Solo a folder and
+exactly one bar remains, filling its row**, which is the reading "show only this folder" asks
+for. The clamp this replaced was concealing an absurdity: with the largest folder hidden, its own
+row declared `max(4px, 203%)` — 203% of a basis it was no longer part of.
+
+**A bar belongs to a plain count and to nothing else.** A parenthesised count means the notes are
+tallied somewhere other than this row's own wedge, so those rows draw nothing and stay out of the
+basis; subfolder rows are bare too, because a sub-count is within one parent and would need a
+second denominator in the same list. The sub-wedge on the disc already shows that share.
+
+### The bars walk on the disc's own clock
+
+A bar's width is a fact about the layout, so when the layout walks the bar walks with it — the
+same frame loop, the same eased progress the notes get. Not a CSS transition: that would run on
+its own clock and land when its own duration expired, which puts a second answer to "where is the
+bar now" next to the cascade's. Hide the largest folder and the promoted row climbs to full
+through 23 distinct widths on the demo, 24 on the 10k, 23 on the dominant-folder vault, and lands
+on the resting layout by assignment rather than by convergence.
+
+**A bar that loses its folder shrinks rather than blinking out.** Soloing a folder sends every
+other bar down to nothing over the whole cascade — the widest row 100% to gone through 23 widths,
+the thinnest 0.246% to gone through 23 — each in its own colour, fading as its row dims, because
+the folder is leaving. The first cut dropped each bar the instant its folder was hidden, which
+took it off screen in one frame while the disc took 1600 ms to re-pack.
+
+Measured in Obsidian on a 520-note vault at ~60 fps, sampling every row on
+`requestAnimationFrame`: 123 distinct widths per row, on both the solo and the eye.
+
+### It is a view setting, on by default
+
+`countBars` sits beside the other three view options, enabled. Turn it off and only the bars go —
+eighteen rows, their counts and their shared right edge are untouched. The page stores nothing:
+the host hands the value in and takes a callback back, so the plugin persists it per vault and
+the gear and the settings tab agree.
+
+### Three different things were painting over a 2px bar in Obsidian
+
+Each one erased the bar on its own, each looked like the same bug, and the third was only visible
+in a real Obsidian rather than in the exported page.
+
+- **A hover's border.** A 1px bar and a 1px focus border land on the same pixel row, and
+  antialiasing eats the bar. The floor is 4px now, which is what keeps at least 3px painted in
+  every state.
+- **The highlight's leading accent band**, which is an `inset 2px` box-shadow — and an inset
+  shadow paints *over* a background image. The bar starts 2px in, inside the padding strip below
+  the content, where no grid item can cover it either.
+- **Obsidian's own button shadow.** `.lg` is a `<button>` and Obsidian gives every button an
+  inset shadow with 0.5px spread, which wraps all four edges including the strip the bar
+  occupies. The page resets `box-shadow` on the row, so the host cannot decide whether the bar is
+  visible.
+
+**And a stale stylesheet in the host document, which is the one worth knowing about.** Obsidian
+kept two copies of the plugin's CSS in the same document — the current one and a previous one
+still holding a `background` *shorthand* on hover. Identical specificity, the stale copy last, so
+the shorthand reset every longhand and took the bar with it. The bar's rule carries an id now, so
+it wins on merit rather than on document order. Both harnesses were structurally blind to this:
+one drives the exported page, the other a fresh Obsidian profile with no stale sheet.
+
+### The picture is otherwise unchanged
+
+Compared against 2.2.0's page — the same source exactly, since nothing between that tag and this
+work touched `src` or `plugin` — the disc has not moved: the golden layout snapshot is identical
+on all three fixtures, and the legend's counts still share one right edge rather than growing a
+second column. The bar is a background layer on a row that is already one width on every row
+(219px measured), not a fifth grid cell.
+
+The invariant suite is **90/90 on each of the three fixtures**, and it gained checks for the
+basis, the edge cases, the hover, the selection, the setting, the walk landing on the resting
+layout, and — after CSS alone passed a real defect three times in this issue — for the bar being
+*painted* rather than merely declared.
+
+### A known divergence, filed rather than papered over
+
+**github#84**: the bar's colour is an inline hex, like the swatch it sits under, so both keep the
+old palette after a live theme switch while the settings picker's swatch — a class resolving a
+CSS variable — repaints. That divergence predates this work and is reported by the suite rather
+than asserted, so it stays visible instead of failing a gate. What *is* asserted is that a row
+stays internally coherent: its bar and its own swatch move together or not at all.
+
+### Smaller things
+
+- **Every clip in the gallery was re-recorded, and the hero with it.** The legend is on screen in
+  all sixteen acts, so all sixteen were stale the moment the bars landed. The `folders` clip is
+  the one that shows the animation: its solo beat sends every other bar walking down to nothing
+  while the soloed one fills its row.
+- **The hero take was broken again, by a second cause with the same face as the first.** 2.2.0
+  fixed the whole-storyboard take by fitting the disc before the act that drags a note into the
+  hub, after finding two pins missing their off-screen targets. This time the same beat failed
+  for a different reason: the driver measured the drag delta from where the target was first
+  resolved, then corrected the press point for drift and applied the stale delta to the corrected
+  point, so the drop landed short by exactly how far the disc had moved. Recording that one act
+  alone passed, because a pause leaves no drift — which is why it read as state rather than
+  arithmetic for a day. An absolute destination is re-resolved and aimed at now; a relative drag
+  keeps its delta. The take goes from dying at 32.6 s to a complete 162 s run with no missed
+  beats.
+- **`install-plugin.ps1` says when Obsidian is still running**, because a running Obsidian keeps
+  the previous `main.js` and `styles.css` until the plugin reloads — so the files on disk can be
+  correct while the window measures the old build. Verifying the install and then inferring the
+  running instance from launch order is how an afternoon went missing.
+- **A vault Obsidian has not been told to trust never loads the plugin at all**, and the brief
+  now says so. Open any vault that is not the daily one and Obsidian asks *Trust author and
+  enable plugins?* behind a Settings window; until that is confirmed the plugin looks broken for
+  a reason that is nowhere in the code.
+
+---
+
 ## 2.2.0 — "Fold" — 2026-09-08
 
 **Either panel folds away, at any width.** The folder list and the notes-added calendar could
