@@ -456,6 +456,35 @@ every day as the two ageing fixtures regenerate forward and the pinned 10k does 
 the same trap the 10k's pinned `--end` exists to avoid. `__vg.setRecent(kind, refMs)` and
 `__vg.recentWindow(kind, refMs)` both take a reference day for exactly this reason.
 
+## The band's control row does not move when its state changes (github#70)
+
+A control that walks away from the pointer between clicks is a defect no numeric check was
+looking for, and this row grew two of them in one change. Every element in it now holds its
+left edge **and its width** across every state the row can be in.
+
+```bash
+node scripts/smoke.mjs --only "control row does not move"
+```
+
+Measured at 1440x900 on the demo fixture across five states (rest, week armed, released,
+source flipped, armed again): **worst shift 19px before, 0px after**. Three separate causes,
+all found by measuring rather than by looking:
+
+| Cause | Before | Fix |
+|---|---|---|
+| the label swapped its text | `Notes added` 76px → `Notes touched` 90px, shoving everything right of it by **14px** | both words live in the markup, stacked in one grid cell, and `aria-pressed` hides one — the button is always the width of the longer |
+| a chip's count grew a digit | `This week 0` 75px → `This week 115` 85px, **10px** | the count slot is reserved at `--vg-count-ch`, set from the note count at mount, with tabular figures: 3ch / 4ch / 5ch on the three fixtures |
+| the heat key lost swatches | **17px**, on the dominant-folder fixture only | `heatDrawKey` always sizes the canvas for `HEAT_KEY_ANCHORS` (5 — four cuts plus nMax) and centres however many survived the dedup |
+
+The third was not introduced here and is the interesting one: the key has always shrunk when
+a vault's quantiles collapsed, but nothing could change a vault's tally at runtime until the
+band's date became a control. **A pre-existing wobble that only a new control could expose.**
+It shows only where the anchors actually collapse — the dominant-folder fixture, whose 954
+notes share one `touched` day, so all four cuts and `nMax` dedup to a single swatch.
+
+The check compares both `left` and `width`, because an element that keeps its position while
+changing width still pushes whatever the flex row gives the slack to.
+
 ## The band counts the date it names (github#70)
 
 `design/0010` already required that clicking a square mark exactly the notes that square

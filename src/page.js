@@ -6503,6 +6503,9 @@ function mountVaultGraph(root, data, deps) {
   var HEAT_EMPTY_A = 0.5;
   // github#70 -- all three measured on the three fixtures, see invariants.md.
   var BULK_MIN = 25, BULK_X = 20, BULK_SHARE = 0.15;
+  // Four quantile cuts plus nMax -- the most swatches heatDrawKey can ever show, and so the
+  // width it always reserves. See the comment there.
+  var HEAT_KEY_ANCHORS = 5;
   var DAY_MS = 86400000, WEEK_MS = 7 * DAY_MS;
   var MONTH_ABBR = ["Jan", "Feb", "Mar", "Apr", "May", "Jun",
                     "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
@@ -6857,7 +6860,13 @@ function mountVaultGraph(root, data, deps) {
     });
     var pitch = cell + 4;
     var dpr = window.devicePixelRatio || 1;
-    var w = anchors.length * pitch - 4;
+    // The canvas is always sized for the MOST anchors this key can ever have -- four cuts
+    // plus nMax -- and the strip is centred in it, rather than the element shrinking to fit
+    // however many survived the dedup. github#70: switching the band's date changes the
+    // tally, which changes the quantiles, which collapsed this key from 4 swatches to 1 on
+    // the dominant-folder fixture and pulled 17px out of the row on a single click.
+    var w = HEAT_KEY_ANCHORS * pitch - 4;
+    var pad = (w - (anchors.length * pitch - 4)) / 2;
     if (cv.width !== Math.round(w * dpr) || cv.height !== Math.round(cell * dpr)) {
       cv.width = Math.round(w * dpr);
       cv.height = Math.round(cell * dpr);
@@ -6873,9 +6882,9 @@ function mountVaultGraph(root, data, deps) {
       var parts = [];
       for (var j = 0; j < anchors[i]; j++) parts.push({ c: greys[j % 2], w: 1 });
       ctx.save();
-      heatRect(ctx, i * pitch, 0, cell, cell, R);
+      heatRect(ctx, pad + i * pitch, 0, cell, cell, R);
       ctx.clip();
-      heatTile(ctx, i * pitch, 0, cell, parts);
+      heatTile(ctx, pad + i * pitch, 0, cell, parts);
       ctx.restore();
     }
     cv.title = anchors.map(function (a) {
@@ -6982,8 +6991,10 @@ function mountVaultGraph(root, data, deps) {
     var lbl = $("heatlbl");
     if (lbl) {
       var touched = state.heatSource === "touched";
-      lbl.textContent = touched ? "Notes touched" : "Notes added";
+      // The two words are both in the markup, stacked; the attribute picks which one shows.
+      // Writing textContent here is what used to resize the button and shove the whole row.
       lbl.setAttribute("aria-pressed", touched ? "true" : "false");
+      lbl.setAttribute("data-source", state.heatSource);
       lbl.title = touched
         ? "The band is counting when each note was last TOUCHED (the file's own timestamp). " +
           "A sync or a rename rewrites that in bulk, so a big day here is not always work. " +
@@ -7014,6 +7025,10 @@ function mountVaultGraph(root, data, deps) {
   function buildRecentUI() {
     var box = $("recent");
     if (!box) return;
+    // Reserve the count slot for the widest number this vault could put in it. A chip going
+    // 0 -> 115 otherwise widens and shoves its neighbours along, which is the same class of
+    // fidget as the label swap above -- measured at 19px across the row before both fixes.
+    box.style.setProperty("--vg-count-ch", String(graph.order).length + "ch");
     // github#70, decisions/0009 -- the third chip exists only where a host can answer it.
     // The exported page is a snapshot: it cannot know when it was last open, so the chip is
     // never built rather than built and disabled, which would read as a broken feature.

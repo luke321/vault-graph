@@ -463,7 +463,14 @@
   .vault-graph #vg-heatlbl {
     background: none; border: 0; padding: 0; margin: 0;
     cursor: pointer; font-family: inherit;
+    display: inline-grid; align-items: center; text-align: left;
   }
+  /* Both words occupy the same cell; the button takes the width of the wider and keeps it
+     through the toggle. visibility, not display, because a hidden grid item still sizes the
+     track -- which is the entire point -- and screen readers skip it either way. */
+  .vault-graph #vg-heatlbl > span { grid-area: 1 / 1; }
+  .vault-graph #vg-heatlbl[aria-pressed="false"] > .t,
+  .vault-graph #vg-heatlbl[aria-pressed="true"]  > .a { visibility: hidden; }
   .vault-graph #vg-heatlbl:hover { color: var(--text-1); }
   .vault-graph #vg-heatlbl[aria-pressed="true"] { color: var(--today); }
   .vault-graph #vg-recent { display: flex; align-items: center; gap: 4px; flex: 0 0 auto; }
@@ -482,8 +489,12 @@
      accent-filled like every other toggle here. Colouring it --today to match the halo it
      casts was tried and dropped: a second "on" colour makes the reader learn two, and the
      halo is already named by the disc lighting up underneath. */
+  /* The count slot is reserved for the widest number this vault could ever put in it
+     (--vg-count-ch, set from the note count at mount), so a chip going 0 -> 115 does not
+     shove its neighbours along. Tabular figures make the reservation exact. */
   .vault-graph #vg-recent .chip .n {
     font-variant-numeric: tabular-nums; color: var(--text-3); font-size: 10px;
+    min-width: var(--vg-count-ch, 3ch); text-align: right;
   }
   .vault-graph #vg-recent .chip[aria-pressed="true"] .n { color: #fff; opacity: .8; }
   /* A chip matching nothing still says so -- see syncRecentUI. */

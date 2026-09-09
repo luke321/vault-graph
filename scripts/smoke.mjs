@@ -553,10 +553,16 @@ check("the band counts the date it names", async (p) => {
   const r = await p.j(`(function(){
     var pos = {}; __vg.graph.forEachNode(function(i,a){ pos[i] = a.x.toFixed(4)+','+a.y.toFixed(4); });
     var lbl = document.getElementById("vg-heatlbl");
-    var a = { label: lbl.textContent, inWindow: __vg.heatReport().inWindow,
+    // Both words are in the button so it cannot change width; the visible one is whichever
+    // the pressed state is not hiding. Reading textContent here would get them both.
+    var shown = function () {
+      return lbl.querySelector(lbl.getAttribute("aria-pressed") === "true" ? ".t" : ".a")
+                .textContent;
+    };
+    var a = { label: shown(), inWindow: __vg.heatReport().inWindow,
               src: __vg.state.heatSource };
     __vg.setHeatSource("touched");
-    var t = { label: lbl.textContent, inWindow: __vg.heatReport().inWindow,
+    var t = { label: shown(), inWindow: __vg.heatReport().inWindow,
               src: __vg.state.heatSource };
     // Every note in a tile must carry the date that tile is keyed by, or the square counts
     // one date while naming another -- which is design/0010's whole argument.
@@ -638,6 +644,54 @@ check("a bulk day is named rather than hidden", async (p) => {
   return { ok, detail: `flagged [${r.got.join(" ")}] want [${r.want.join(" ")}] ` +
                        `(median ${r.median} of ${r.total} dated), ${r.dropped} tiles thinned, ` +
                        `readout ${r.said ? "says so" : "silent"}` };
+});
+
+check("the band's control row does not move when its state changes", async (p) => {
+  // github#70. Every control in the row was fidgeting: the label swapped "Notes added" for
+  // "Notes touched" and grew 76px -> 90px, shoving everything to its right by 14, and a chip
+  // going 0 -> 115 widened and shoved its neighbours again. Worst measured shift across the
+  // five states was 19px. A control that walks away from the pointer between clicks is a
+  // defect the suite cannot see, so it is pinned here by number.
+  const ref = await newestTouched(p);
+  if (!ref) return { ok: false, detail: "no note in this vault carries a touched date" };
+  const r = await p.j(`(function(){
+    var sel = { label: "#vg-heatlbl", touchedLabel: "#vg-recent .rl",
+                today: '#vg-recent [data-kind="today"]', week: '#vg-recent [data-kind="week"]',
+                readout: "#vg-heatnote", scale: "#vg-heatscale", compact: "#vg-compact",
+                range: "#vg-rangebox", band: "#vg-heatc" };
+    var snap = function () {
+      var o = {};
+      for (var k in sel) {
+        var e = document.querySelector(sel[k]);
+        if (e) { var b = e.getBoundingClientRect();
+                 o[k] = [Math.round(b.left), Math.round(b.width)]; }
+      }
+      return o;
+    };
+    var seen = [snap()];
+    __vg.setRecent("week", ${ref.ms});           seen.push(snap());
+    __vg.setRecent(null);                        seen.push(snap());
+    __vg.setHeatSource("touched");               seen.push(snap());
+    __vg.setRecent("today", ${ref.ms});          seen.push(snap());
+    __vg.setRecent(null); __vg.setHeatSource("created");
+    seen.push(snap());
+    var worst = 0, who = "";
+    for (var k in seen[0]) {
+      for (var i = 1; i < seen.length; i++) {
+        if (!seen[i][k]) continue;
+        var dx = Math.abs(seen[i][k][0] - seen[0][k][0]);
+        var dw = Math.abs(seen[i][k][1] - seen[0][k][1]);
+        var d = Math.max(dx, dw);
+        if (d > worst) { worst = d; who = k + " (dx " + dx + ", dw " + dw + ")"; }
+      }
+    }
+    return { worst: worst, who: who, states: seen.length,
+             countCh: getComputedStyle(document.getElementById("vg-recent"))
+                        .getPropertyValue("--vg-count-ch").trim() };
+  })()`);
+  return { ok: r.worst === 0,
+           detail: `${r.states} states, worst shift ${r.worst}px` +
+                   (r.worst ? `  <- ${r.who}` : "") + `, count slot ${r.countCh}` };
 });
 
 check("the exported page offers no since-last-open chip", async (p) => {

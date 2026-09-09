@@ -54,7 +54,13 @@
       <div class="hrow">
         <!-- github#70: the label IS the two-state control. What the band counts must always
              be nameable (design/0010), and the name is already in this slot. -->
-        <button id="vg-heatlbl" class="lbl" type="button" aria-pressed="false">Notes added</button>
+        <button id="vg-heatlbl" class="lbl" type="button" aria-pressed="false"
+                data-source="created">
+          <!-- Both strings, stacked in one grid cell with the inactive one hidden, so
+               the button is always as wide as the longer of them. Swapping the text
+               outright moved every control to its right by 14px on each toggle. -->
+          <span class="a">Notes added</span><span class="t">Notes touched</span>
+        </button>
         <div id="vg-recent" role="group" aria-label="Halo the notes touched recently">
           <!-- github#70: the word is on screen, not only in the tooltips. The chips read
                `touched` whatever the band counts, and a row where one control says
