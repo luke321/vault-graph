@@ -44,4 +44,4 @@ commit.
 | | |
 |---|---|
 | **Introduced in** | `v1.0` |
-| **Last re-recorded** | `2026-09-08` — 29.4 s at 1586x992, encoded at 960 px (3.81 MB) |
+| **Last re-recorded** | `2026-09-09` — 29.9 s at 1586x992, encoded at 960 px (4.04 MB) |

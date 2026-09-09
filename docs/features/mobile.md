@@ -52,13 +52,15 @@ disc needed a touch captor in the first place.
 ## Regenerating this feature's clip
 
 **Record this one narrow.** The act itself is only choreography; what makes it the phone layout
-is the window it is recorded in, so both commands carry the size:
+is the window it is recorded in, so both commands carry the size — `make-hero.ps1` defaults
+to 960 px, and on a 406 px capture that is an upscale costing 2.5x the bytes for no more
+detail (1.09 MB against 2.67 MB, measured):
 
 ```powershell
 .\scripts\record-demo.ps1 -Act mobile -Width 420 -Height 900 -Monitor right
 # wrote demo-mobile-<timestamp>.mp4
 
-.\scripts\make-hero.ps1 -In demo-mobile-<timestamp>.mp4 -Out assets\features\mobile.webp
+.\scripts\make-hero.ps1 -In demo-mobile-<timestamp>.mp4 -Out assets\features\mobile.webp -Width 406
 ```
 
 Commit `assets/features/mobile.webp` and update `Last re-recorded` below in the same commit —
@@ -75,4 +77,4 @@ selects nothing. See `.ai-context/mobile-harness.md`.
 | | |
 |---|---|
 | **Introduced in** | `2.1.0 (github#73)` |
-| **Last re-recorded** | `2026-09-08` — 17.7 s at 406x892, encoded at native width (1.03 MB) |
+| **Last re-recorded** | `2026-09-09` — 17.7 s at 406x892, encoded at native width (1.09 MB) |
