@@ -526,9 +526,23 @@ try {
   }
 
   if (selected("theme")) {
+    // github#84, design/0004
     const readColours = "(function(){ var v = " + VIEW + ", api = v.handle.api, root = v.contentEl.querySelector('#vg-app'); var cs = getComputedStyle(root);" +
+                        " var norm = function (x) { if (!x) return ''; var d = document.createElement('span'); d.style.color = String(x).trim();" +
+                        "   root.appendChild(d); var out = getComputedStyle(d).color; d.parentNode.removeChild(d); return out; };" +
+                        " var g = api.groupOrder ? api.groupOrder().filter(function (n) { return api.groupCount(n) > 0; })" +
+                        "   .sort(function (a, b) { return api.groupCount(b) - api.groupCount(a); })[0] : null;" +
+                        " var slot = g && api.slotOf ? api.slotOf(g) : '';" +
+                        " var lg = g ? v.contentEl.querySelector('[data-g=\"' + g + '\"]') : null;" +
+                        " var lsw = lg ? lg.querySelector('.sw') : null;" +
+                        " var pick = slot ? document.querySelector('.swatch.vg-' + slot) : null;" +
                         " return { theme: v.page.getAttribute('data-theme'), bodyLight: document.body.classList.contains('theme-light'), text: cs.getPropertyValue('--text-1').trim()," +
-                        " surface: cs.getPropertyValue('--surface-1').trim(), labelColor: api.renderer.getSetting ? api.renderer.getSetting('labelColor') : null }; })()";
+                        " surface: cs.getPropertyValue('--surface-1').trim(), labelColor: api.renderer.getSetting ? api.renderer.getSetting('labelColor') : null," +
+                        " group: g, slot: slot, token: norm(cs.getPropertyValue('--' + slot))," +
+                        " legendSwatch: lsw ? norm(lsw.style.background) : null," +
+                        " barred: !!(lg && lg.classList.contains('bar'))," +
+                        " bar: lg ? norm(lg.style.getPropertyValue('--vg-bar')) : null," +
+                        " picker: pick ? getComputedStyle(pick).backgroundColor : null }; })()";
     const before = await E(readColours);
     const other = before.bodyLight ? "obsidian" : "moonstone";
     const changer = await E("typeof app.changeTheme === 'function' ? 'changeTheme' : (typeof app.setTheme === 'function' ? 'setTheme' : 'none')");
@@ -546,6 +560,82 @@ try {
       report(flipped && labelsFollow && restored.theme === before.theme, "switching Obsidian's theme recolours nodes, edges and labels",
         "data-theme " + before.theme + " -> " + after.theme + " -> " + restored.theme + "; --text-1 " + before.text + " -> " + after.text + "; labelColor " + before.labelColor + " -> " + after.labelColor +
         (labelsFollow ? " (follows)" : " (STALE)") + "; surface " + before.surface + " -> " + after.surface);
+
+      // github#84, github#78, design/0004
+      if (selected("theme")) {
+        const tokenMoved = before.token !== after.token;
+        const legendMoved = before.legendSwatch !== after.legendSwatch;
+        const pickerMoved = before.picker !== null && before.picker !== after.picker;
+        const barMoved = before.bar !== after.bar;
+        const coherent = !before.barred || (barMoved === legendMoved && after.bar === after.legendSwatch);
+        const parts = ["slot " + after.slot + " on " + JSON.stringify(before.group),
+          "token " + before.token + " -> " + after.token + (tokenMoved ? " (moved)" : " (SAME)"),
+          "legend swatch " + before.legendSwatch + " -> " + after.legendSwatch + (legendMoved ? " (moved)" : " (stale)"),
+          before.barred ? "count bar " + before.bar + " -> " + after.bar + (barMoved ? " (moved)" : " (stale)")
+                        : "no count bar on this build",
+          before.picker === null ? "picker not rendered (settings tab closed)"
+                                 : "picker " + before.picker + " -> " + after.picker + (pickerMoved ? " (moved)" : " (stale)")];
+        if (tokenMoved && !legendMoved) parts.push("github#84: the legend keeps the old theme");
+        report(coherent, "a theme flip leaves a legend row's bar and its own swatch agreeing", parts.join("; "));
+      }
+    }
+  }
+
+  // github#78, design/0006
+  if (selected("hover")) {
+    const pick = await E(`(function(){
+      var v = ${VIEW};
+      var rows = [].slice.call(v.contentEl.querySelectorAll('#vg-legend .lg.bar'));
+      if (!rows.length) return null;
+      rows.sort(function (a, b) {
+        return parseFloat(getComputedStyle(b).getPropertyValue('--vg-share')) -
+               parseFloat(getComputedStyle(a).getPropertyValue('--vg-share'));
+      });
+      var lg = rows[0], b = lg.getBoundingClientRect();
+      lg.setAttribute('data-hoverprobe', '1');
+      return { g: lg.getAttribute('data-g'), n: rows.length,
+               x: Math.round(b.left + 40), y: Math.round(b.top + b.height / 2) };
+    })()`);
+    if (!pick) {
+      report(false, "the legend's count bar survives a hover inside Obsidian",
+             "no barred row in the plugin's legend -- countBars off, or no bar is drawn at all");
+    } else {
+      const read = () => E(`(function(){
+        var v = ${VIEW};
+        var lg = v.contentEl.querySelector('[data-hoverprobe]');
+        var cs = getComputedStyle(lg);
+        return { hovered: lg.matches(':hover'),
+                 image: cs.backgroundImage === 'none' ? 'none' : 'gradient',
+                 size: cs.backgroundSize,
+                 color: cs.backgroundColor,
+                 shadow: cs.boxShadow === 'none' ? 'none' : cs.boxShadow };
+      })()`);
+      await c.send("Input.dispatchMouseEvent",
+                   { type: "mouseMoved", x: 5, y: 5, button: "none", clickCount: 0 });
+      await sleep(250);
+      const rest = await read();
+      await c.send("Input.dispatchMouseEvent",
+                   { type: "mouseMoved", x: pick.x, y: pick.y, button: "none", clickCount: 0 });
+      await sleep(400);
+      const over = await read();
+      await c.send("Input.dispatchMouseEvent",
+                   { type: "mouseMoved", x: 5, y: 5, button: "none", clickCount: 0 });
+      await sleep(200);
+      await E(`(function(){ var v = ${VIEW};
+        var lg = v.contentEl.querySelector('[data-hoverprobe]');
+        if (lg) lg.removeAttribute('data-hoverprobe'); })()`);
+
+      // github#78, design/0006
+      const clean = rest.shadow === "none" && over.shadow === "none";
+      const kept = over.image === "gradient" && over.size === rest.size && clean;
+      const detail = pick.g + " of " + pick.n + " barred rows; at rest image=" + rest.image +
+        " size=" + rest.size + " shadow=" + rest.shadow +
+        "; hovered=" + over.hovered + " image=" + over.image + " size=" + over.size +
+        " bg=" + over.color + " shadow=" + over.shadow +
+        (over.hovered ? "" : "  <- NO :hover from the harness, so this asserted nothing");
+      report(kept && over.hovered === true,
+             "the legend's count bar survives a hover inside Obsidian",
+             detail + (clean ? "" : "  <- the host's button shadow is painting on this row"));
     }
   }
 

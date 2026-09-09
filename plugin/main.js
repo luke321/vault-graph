@@ -41,6 +41,7 @@ const ICON_ID = "vault-graph-disc";
  * @property {boolean} compactAxis
  * @property {boolean} unlinkedByFolder
  * @property {boolean} unlinkedTintByFolder
+ * @property {boolean} countBars                        github#78, design/0006
  * @property {boolean} fitCap                           github#41, design/0011
  * @property {boolean} [sheetOpen]                      github#82 -- absent until folded once
  * @property {boolean} [bandOpen]                       github#82
@@ -601,6 +602,13 @@ class VaultGraphView extends ItemView {
         this.plugin.settings.unlinkedByFolder = !!v;
         await this.plugin.saveSettings();
       },
+      // github#78, design/0006
+      countBars: this.plugin.settings.countBars,
+      /** @param {boolean} v */
+      onCountBars: async (v) => {
+        this.plugin.settings.countBars = !!v;
+        await this.plugin.saveSettings();
+      },
       // github#3
       unlinkedTintByFolder: this.plugin.settings.unlinkedTintByFolder,
       /** @param {boolean} v */
@@ -681,6 +689,8 @@ const DEFAULTS = {
   unlinkedByFolder: true,
   // github#3
   unlinkedTintByFolder: false,
+  // github#78, design/0006
+  countBars: true,
   // github#41, design/0011
   fitCap: true,
 };
@@ -699,11 +709,11 @@ const BUILD_SETTINGS = [
 
 /**
  * @typedef {Object} ViewSetting
- * @property {"panEnabled" | "compactAxis" | "unlinkedByFolder" | "unlinkedTintByFolder" | "fitCap"} key
+ * @property {"panEnabled" | "compactAxis" | "unlinkedByFolder" | "unlinkedTintByFolder" | "countBars" | "fitCap"} key
  * @property {string} name
  * @property {string} desc
  * @property {boolean} defaultOn
- * @property {"setPanEnabled" | "setCompactAxis" | "setUnlinkedByFolder" | "setUnlinkedTintByFolder" | "setFitCap"} api
+ * @property {"setPanEnabled" | "setCompactAxis" | "setUnlinkedByFolder" | "setUnlinkedTintByFolder" | "setCountBars" | "setFitCap"} api
  */
 /** @type {ViewSetting[]} */
 const VIEW_SETTINGS = [
@@ -715,6 +725,9 @@ const VIEW_SETTINGS = [
     desc: "A note with no links takes its own folder's wedge and colour, instead of sitting apart in a separate unlinked group. The (unlinked) row's right-click menu flips this too, and lands back here." },
   { key: "unlinkedTintByFolder", name: "Colour unlinked notes by folder", defaultOn: false, api: "setUnlinkedTintByFolder",
     desc: "While unlinked notes are kept as their own group (the toggle just above is off), give each one its own folder's colour instead of the flat unlinked swatch. The (unlinked) row's right-click menu carries this too." },
+  // github#78, design/0006
+  { key: "countBars", name: "Count bars in the legend", defaultOn: true, api: "setCountBars",
+    desc: "Draw a short rule along the bottom of each folder row in the legend, in that folder's own colour, scaled so the largest folder currently shown fills its row and the rest are read against it. The count alone makes a 406-note folder and a 1-note folder look identical. Hovering a count says which folder the bar is measured against." },
   // github#41, design/0011
   { key: "fitCap", name: "Size dots from the frame", defaultOn: true, api: "setFitCap",
     desc: "While the disc animates, cap every dot at just under half its distance to the nearest visible note, measured on the frame being drawn, so dots stay apart while rows slide. The disc at rest is unchanged. Experimental: dots breathe while a cascade walks." },
@@ -1193,6 +1206,7 @@ class VaultGraphPlugin extends Plugin {
     if (api.setCompactAxis) api.setCompactAxis(this.settings.compactAxis !== false);
     if (api.setUnlinkedByFolder) api.setUnlinkedByFolder(this.settings.unlinkedByFolder !== false);
     if (api.setUnlinkedTintByFolder) api.setUnlinkedTintByFolder(this.settings.unlinkedTintByFolder === true);
+    if (api.setCountBars) api.setCountBars(this.settings.countBars !== false);
     if (api.setFitCap) api.setFitCap(this.settings.fitCap !== false);
     if (api.applyHiddenDefaults) api.applyHiddenDefaults();
   }

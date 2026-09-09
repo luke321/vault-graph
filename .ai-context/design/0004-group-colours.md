@@ -84,9 +84,34 @@ hex would sit there looking like the other theme's palette. Storing the slot als
 every reachable colour inside the measured set — there is no picker path to a colour that
 never went through the numbers above.
 
-The same reasoning runs one level down into the DOM: swatches are coloured by a
-`.vg-g7` class resolving `var(--g7)`, not by an inline style. A `var()` re-resolves on a
-theme flip; a hex written into a style attribute does not.
+The same reasoning runs one level down into the DOM — but **only the picker actually
+follows it, and this paragraph used to claim the whole DOM did.** Two surfaces draw a
+slot, by two different mechanisms:
+
+| surface | mechanism | on a live theme flip |
+|---|---|---|
+| the picker's swatches, `.swatch.vg-g7` | a class resolving `var(--g7)` | **repaints** |
+| the legend row's swatch, and its count bar (github#78) | an inline hex from `colorOf()` | **stays on the old theme** |
+
+A `var()` re-resolves on a theme flip; a hex written into a style attribute does not. So
+the picker is right after a flip and the legend is not. Measured on the demo mirror,
+running exactly what `syncTheme()` does and flipping dark to light: `--g7` moves
+`#9085e9` → `#4a3aa7` and `.swatch.vg-g7` moves with it, while the legend's swatch and
+the count bar both stay `#9085e9`. `readTheme()` re-snapshots `THEME`, but nothing
+rebuilds `groupColor` — so `colorOf` keeps answering from the old palette — and nothing
+rebuilds the legend, so the hex already written into each row's `style` attribute stays.
+
+**The limitation is tracked as github#84, not fixed here.** It predates both open colour
+branches: `.swatch.vg-g7 { background: var(--g7); }` is already on `develop`, verified on
+a build with neither feature branch applied. github#78's bar is stale in exactly the same
+way as the swatch it sits under, which is deliberate — the two never disagree with *each
+other*, so a row stays internally coherent even while the panel above it does not.
+`obsidian-smoke.mjs --only "theme"` drives the real `css-change` path and reports every
+surface.
+
+There is no `.vg-g*` class on a legend row, and until github#84 there was no note saying
+so — which is how this paragraph stayed wrong. If you are about to rely on a slot's
+colour re-resolving, check which of the two surfaces you are on.
 
 ## An override changes exactly one folder
 
