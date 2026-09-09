@@ -759,8 +759,9 @@ check("multi: a dot per tag, and the vault still has the notes it has", async (p
       __vg.groupOrder().forEach(function (g) { summed += __vg.groupCount(g); });
       var heat = 0;
       __vg.heat.keys.forEach(function (k) { heat += __vg.heat.days[k].ids.length; });
+      var strip = (document.querySelector("#vg-heatnote") || {}).textContent || "";
       return { nodes: nodes, sats: sats, wantDots: dots, multi: multi,
-               members: members, summed: summed, heat: heat };
+               members: members, summed: summed, heat: heat, strip: strip };
     };
     __vg.setDim("tag");
     var off = tally();
@@ -781,7 +782,9 @@ check("multi: a dot per tag, and the vault still has the notes it has", async (p
              r.on.summed === r.on.nodes &&
              // github#86 -- a copy is not a note: these must not budge
              r.on.heat === r.off.heat &&
-             r.footer.indexOf(String(r.off.nodes) + " notes") >= 0;
+             r.footer.indexOf(String(r.off.nodes) + " notes") >= 0 &&
+             // github#86 -- every sentence that says notes must count notes
+             r.on.strip.indexOf("of " + r.off.nodes + " notes") >= 0;
   return {
     ok,
     detail: `${r.off.nodes} notes, ${r.off.multi} of them carrying more than one tag -> ` +

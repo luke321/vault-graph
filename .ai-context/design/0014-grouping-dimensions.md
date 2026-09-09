@@ -99,8 +99,10 @@ itself.
 
 ## Where the switch lives
 
-The group list's own heading — `GROUPS (18)` becomes a dropdown reading `FOLDERS (18)` /
-`TAGS (12)`, in those words. **The control belongs to the thing it changes**: not the view
+The group list's own heading — `Groups (18)` becomes a dropdown reading `Folders (18)` /
+`Tags (12)`, in those words. (Sentence case, not caps: the `text-transform: uppercase` on
+`.block > .lbl` has never matched this label, which is nested a `.row` deeper. So the heading
+reads as it always has.) **The control belongs to the thing it changes**: not the view
 settings, not the top bar, not a hidden context-menu item, and not a pair of always-lit tabs.
 Semi-obvious is the brief: no border or fill at rest so it reads as the heading it replaced,
 and a chevron that is always there so anyone looking for a control finds one.

@@ -6613,11 +6613,12 @@ function mountVaultGraph(root, data, deps) {
     multiTag = next;
     // github#86 -- only the tag dimension has copies to make
     if (state.dim === "tag") {
+      // github#86 -- the copies are the movers in both directions
       /** @type {Record<string, string> | null} */
       var movesFrom = null;
       var n = 0;
-      if (renderer && !instant && !next) {
-        // github#86 -- going off, the copies are the ones leaving
+      var walk = !!renderer && !instant;
+      if (walk && !next) {
         graph.forEachNode(function (id, a) {
           if (!a.dupOf || !visible(id) || (alpha[id] || 0) <= 0.004) return;
           if (!movesFrom) movesFrom = dict();
@@ -6626,11 +6627,20 @@ function mountVaultGraph(root, data, deps) {
         });
       }
       if (next) addSatellites(); else dropSatellites();
+      if (walk && next) {
+        // github#86 -- a new copy walks out of the wedge its note is standing in
+        satellites.forEach(function (sid) {
+          var from = noteOf(sid);
+          if (!visible(sid) || (alpha[from] || 0) <= 0.004) return;
+          if (!movesFrom) movesFrom = dict();
+          movesFrom[sid] = groupOf(from);
+          n++;
+        });
+      }
       buildSubOrder();
       hardRelayout(false, false);
       // github#86 -- same fixed point as a dimension switch
       applyLayout(false);
-      if (renderer) renderer.refresh();
       attempt(placeLogo); attempt(heatBuild); attempt(buildLegend); attempt(buildStats);
       if (refreshSettingsPanel) refreshSettingsPanel();
       if (n) cascade(null, { colToggle: true, movesFrom: movesFrom });
@@ -7009,8 +7019,10 @@ function mountVaultGraph(root, data, deps) {
 
     var inWin = 0;
     for (var i = 0; i < keys.length; i++) inWin += days[keys[i]].ids.length;
+    // github#86 -- graph.order counts DOTS, and this sentence says notes
     $("heatnote").textContent =
-      "last " + cols + " weeks · " + inWin + " of " + graph.order + " notes" +
+      "last " + cols + " weeks · " + inWin + " of " +
+      (graph.order - satellites.length) + " notes" +
       (before ? " · " + before + " earlier" : "") +
       (after ? " · " + after + " later" : "") +
       (undated ? " · " + undated + " undated" : "");
