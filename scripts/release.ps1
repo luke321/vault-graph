@@ -261,7 +261,10 @@ try {
   # No BOM -- git and gh both read these as bytes, and a BOM ends up in the tag message.
   $utf8 = New-Object System.Text.UTF8Encoding($false)
   [IO.File]::WriteAllText($msgFile, $section, $utf8)
-  if (-not $tagExists) { Invoke-Native git @('tag', '-a', $Version, '-F', $msgFile) }
+  # --cleanup=verbatim: git's default strips every line starting with '#' from a tag message
+  # as a comment, which silently ate the '## <version>' heading and every '###' section from
+  # 2.0.0, 2.1.0 and 2.2.0's tags. github#47
+  if (-not $tagExists) { Invoke-Native git @('tag', '-a', $Version, '--cleanup=verbatim', '-F', $msgFile) }
   Remove-Item $msgFile -ErrorAction SilentlyContinue
 
   # THE BRANCH FIRST, THEN THE TAG, and the order is load-bearing in a way it was not when
