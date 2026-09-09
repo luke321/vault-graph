@@ -42,6 +42,31 @@ it fades.
 | A dot never outgrows its two resting sizes | Free. `sizeCap` is the max over `roomOf(a)` and `roomOf(b)`, and `roomOf` records a size only above alpha 0.004 — so an arrival is absent from endpoint A and capped by B alone, which is its one resting size. A departure gets A alone. No change was needed. |
 | A fade never reverses | github#67's rule is that a schedule is decided once, before the frame loop, from numbers that stand still. Because a diff never lands mid-cascade, no schedule is ever recomputed under a running fade. A second edit during a burst *replaces* the held one rather than queueing, so a burst is one cascade. |
 
+## A cascade nobody can see is one they did not get
+
+Measured in a real Obsidian (`obsidian-smoke.mjs --only live`, demo fixture) before this existed:
+open the graph, switch to another note, write a new one, switch back. The note was taken in
+1,315 ms after the write and the cascade **ran to completion behind the hidden leaf** -- the disc
+moved on 20 of the samples taken while it was hidden and **0 after switching back**. The reader
+came back to a disc that had silently changed, which is the opposite of what this is for.
+
+So a rebuild is **held while the leaf is hidden**: `liveVisible()` is `containerEl.offsetParent
+!== null`, which Obsidian makes false exactly while an inactive leaf is `display: none`
+(measured false on 83 of 83 samples while hidden, and the leaf's own container hidden on 83 of
+83). The dirty paths keep accumulating, nothing is built, and the whole burst lands as one
+cascade when the leaf comes back. After the fix, the same run reports **0 samples moved while
+hidden and 20 after switching back**, twice in a row.
+
+**The wake is a poll, and that is not laziness.** `active-leaf-change` and `layout-change` were
+tried first and do not carry the case that matters: instrumented, switching *away* fired **five**
+of them and `revealLeaf` fired **none**, so a wake hung on those events never arrived and the
+note stayed invisible until the next unrelated edit. A 500 ms interval runs only while a rebuild
+is actually waiting to be seen, and stops the moment it lands.
+
+An earlier attempt tested visibility inside the event handler instead of after the debounce; that
+failed differently and is worth knowing about, because both events fire *before* Obsidian re-lays
+out the workspace, so `offsetParent` is still null at handler time.
+
 ## One construction, not two
 
 `ingest(src, keepId)` builds the graph, the edge budget, the dot sizes, `hubRank` and the

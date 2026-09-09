@@ -483,6 +483,103 @@ try {
       "fit ratio " + fitRatio.toFixed(4) + " -> zoomed " + zoomed.toFixed(4) + " -> after double-click " + back.toFixed(4));
   }
 
+  // github#72, design/0014
+  if (selected("live")) {
+    const n0 = errorsBefore();
+    const probe = "03 - Resources/Zz Live Refresh Probe.md";
+    // design/0014
+    const POS = "(function(){ var v = " + VIEW + "; if (!v || !v.handle || !v.handle.api) return null;" +
+      " var api = v.handle.api, sum = 0; api.graph.forEachNode(function (id, a) { sum += a.x * 0.7 + a.y * 1.3; });" +
+      " return { sum: Math.round(sum * 1000) / 1000, order: api.graph.order, live: v.lastLive || null," +
+      " vis: v.liveVisible(), leafHidden: !!(v.leaf && v.leaf.containerEl && v.leaf.containerEl.offsetParent === null)," +
+      " same: v.handle === window.__vgLive.h }; })()";
+
+    const before = await E("(function(){ var v = " + VIEW + "; window.__vgLive = { h: v.handle, api: v.handle.api };" +
+      " return { order: v.handle.api.graph.order, ratio: v.handle.api.renderer.getCamera().getState().ratio," +
+      " groups: v.handle.api.groupOrder().length }; })()");
+    const base = await E(POS);
+
+    await E("(function(){ var f = app.vault.getMarkdownFiles()[0];" +
+      " return app.workspace.getLeaf(false).openFile(f).then(function(){ return 1; }); })()");
+    await sleep(600);
+    const hidden = await E("(function(){ var ls = app.workspace.getLeavesOfType(" + JSON.stringify(VT) + ");" +
+      " var el = ls[0] && ls[0].containerEl; return !!el && el.offsetParent === null; })()");
+
+    const t0 = Date.now();
+    await E("(function(){ return app.vault.create(" + JSON.stringify(probe) +
+      ", '---\\ncreated: 2026-09-09\\n---\\n# Zz Live Refresh Probe\\n\\nWritten while the graph was hidden.\\n')" +
+      ".then(function(){ return 1; }, function(e){ return 'ERR ' + e.message; }); })()");
+
+    let movesHidden = 0, orderAtMs = null, prev = base.sum, order = before.order, live = null;
+    let visWhileHidden = 0, leafHiddenSamples = 0, samples = 0;
+    for (const deadline = Date.now() + 9000; Date.now() < deadline;) {
+      const st = await E(POS).catch(() => null);
+      if (st) {
+        if (st.sum !== prev) { movesHidden++; prev = st.sum; }
+        if (st.vis) visWhileHidden++;
+        if (st.leafHidden) leafHiddenSamples++;
+        if (st.live) live = st.live;
+        if (st.order !== order) { order = st.order; if (orderAtMs === null) orderAtMs = Date.now() - t0; }
+      }
+      samples++;
+      await sleep(100);
+    }
+
+    await E("(function(){ var ls = app.workspace.getLeavesOfType(" + JSON.stringify(VT) + ");" +
+      " if (ls[0]) app.workspace.revealLeaf(ls[0]); void 0; })()");
+    let movesBack = 0;
+    await sleep(300);
+    const wake = await E("(function(){ var v = " + VIEW + ";" +
+      " return { deferred: !!v.liveDeferred, visible: v.liveVisible(), timer: v.liveTimer !== null," +
+      " dirty: v.dirtyPaths ? v.dirtyPaths.size : -1, building: !!v.liveBuilding, wakes: v.wakeCount || 0," +
+      " offsetParent: !!(v.containerEl && v.containerEl.offsetParent) }; })()");
+    const shown = await E(POS);
+    prev = shown.sum;
+    for (const deadline = Date.now() + 4000; Date.now() < deadline;) {
+      const st = await E(POS).catch(() => null);
+      if (st && st.sum !== prev) { movesBack++; prev = st.sum; }
+      await sleep(100);
+    }
+
+    const after = await E("(function(){ var v = " + VIEW + "; var api = v.handle.api; var found = null;" +
+      " api.graph.forEachNode(function (id, a) { if (a.path === " + JSON.stringify(probe) + ") found = id; });" +
+      " return { order: api.graph.order, same: v.handle === window.__vgLive.h, sameApi: api === window.__vgLive.api," +
+      " ratio: api.renderer.getCamera().getState().ratio, groups: api.groupOrder().length," +
+      " live: v.lastLive || null, probe: found }; })()");
+
+    // design/0014
+    await E("(function(){ var f = app.vault.getAbstractFileByPath(" + JSON.stringify(probe) + ");" +
+      " return f ? app.vault.delete(f).then(function(){ return 1; }, function(){ return 0; }) : 0; })()");
+    await sleep(3000);
+    const cleaned = await E("(function(){ var v = " + VIEW + "; return v.handle.api.graph.order; })()");
+    const errs = errorsSince(n0);
+
+    const L = after.live || live;
+    const grew = after.order === before.order + 1;
+    const noRemount = after.same === true && after.sameApi === true;
+    const cascaded = !!(L && L.cascaded === true && L.added === 1);
+    // design/0014
+    const heldWhileHidden = movesHidden === 0 && orderAtMs === null;
+    const kept = Math.abs(after.ratio - before.ratio) < 1e-6 && after.groups === before.groups;
+    report(grew && noRemount && cascaded && heldWhileHidden && movesBack > 1 && kept && errs.length === 0,
+      "a note written while the graph is hidden waits, then animates when it is looked at",
+      "hidden while writing: " + (hidden ? "yes" : "NO -- the leaf stayed visible") +
+      "; " + before.order + " -> " + after.order + " notes" +
+      (orderAtMs !== null ? " -- but it arrived " + orderAtMs + " ms after the write, WHILE HIDDEN"
+                          : " -- held back until the leaf was looked at") +
+      "; applyData " + (L ? JSON.stringify(L) : "never reported") +
+      "; the disc moved on " + movesHidden + " sample(s) while hidden (must be 0) and " +
+        movesBack + " after switching back" +
+      "; mount " + (noRemount ? "kept" : "REPLACED") +
+      ", camera " + (Math.abs(after.ratio - before.ratio) < 1e-6 ? "unmoved" : "moved") +
+      ", groups " + before.groups + " -> " + after.groups +
+      "; while hidden: liveVisible() true on " + visWhileHidden + "/" + samples +
+        " samples, leaf.containerEl hidden on " + leafHiddenSamples + "/" + samples +
+      "; on reveal " + JSON.stringify(wake) +
+      "; probe note " + (after.probe ? "in the graph as " + after.probe : "MISSING") +
+      "; deleted again -> " + cleaned + " notes; " + errs.length + " errors");
+  }
+
   if (selected("close and reopen")) {
     const rows = [];
     const load = await counters(c);

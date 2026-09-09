@@ -13,6 +13,8 @@ const VIEW_TYPE = "vault-graph-view";
 const ICON_ID = "vault-graph-disc";
 // github#72, design/0014
 const LIVE_DEBOUNCE_MS = 1000;
+// github#72, design/0014
+const LIVE_WAKE_MS = 500;
 
 // github#60
 /** @returns {Record<string, string>} */
@@ -520,6 +522,9 @@ class VaultGraphView extends ItemView {
     this.dirtyPaths = new Set();
     this.liveBuilding = false;
     this.liveAgain = false;
+    this.liveDeferred = false;
+    /** @type {number | null} */
+    this.liveWake = null;
     /** @type {import("../src/page.js").LiveResult | null} */
     this.lastLive = null;
   }
@@ -553,9 +558,31 @@ class VaultGraphView extends ItemView {
 
   cancelLive() {
     if (this.liveTimer !== null) { window.clearTimeout(this.liveTimer); this.liveTimer = null; }
+    this.stopLiveWake();
     this.dirtyPaths.clear();
     this.pendingRenames = pathMap();
     this.liveAgain = false;
+    this.liveDeferred = false;
+  }
+
+  // github#72, design/0014
+  startLiveWake() {
+    if (this.liveWake !== null) return;
+    this.liveWake = window.setInterval(() => {
+      if (!this.liveVisible()) return;
+      this.stopLiveWake();
+      this.scheduleLive();
+    }, LIVE_WAKE_MS);
+  }
+
+  stopLiveWake() {
+    if (this.liveWake !== null) { window.clearInterval(this.liveWake); this.liveWake = null; }
+  }
+
+  // github#72, design/0014
+  liveVisible() {
+    const el = this.containerEl;
+    return !!(el && el.offsetParent !== null);
   }
 
   // github#72, design/0014
@@ -601,6 +628,10 @@ class VaultGraphView extends ItemView {
     const handle = this.handle;
     const api = handle && handle.api;
     if (!api || typeof api.applyData !== "function") return;
+    // github#72, design/0014
+    if (!this.liveVisible()) { this.liveDeferred = true; this.startLiveWake(); return; }
+    this.liveDeferred = false;
+    this.stopLiveWake();
     if (this.liveBuilding) { this.liveAgain = true; return; }
     this.liveBuilding = true;
     const dirty = this.dirtyPaths;

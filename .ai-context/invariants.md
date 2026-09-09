@@ -2230,6 +2230,19 @@ harness's frame pacing under CDP, not the live path. `decisions/0003`'s rule is 
 positions still land exactly; the checks assert the landing, not the exit reason, for the reason
 `perf-cascade-frame-cost.md` gives about automation's frame pacing.
 
+**A rebuild waits for the leaf to be looked at.** Obsidian hides an inactive leaf with
+`display: none`, and before this was handled the cascade ran to completion behind it: measured in
+a real Obsidian, the disc moved on 20 samples **while hidden** and 0 after switching back, so the
+reader returned to a disc that had silently changed. Held now, and the same run reports **0 while
+hidden, 20 after** -- twice in a row. The wake is a 500 ms poll that runs only while a rebuild is
+waiting, because `active-leaf-change` / `layout-change` do not carry the case: switching away
+fired five of them and `revealLeaf` fired none.
+
+```bash
+node scripts/build-plugin.mjs
+node scripts/obsidian-smoke.mjs --only live      # a real Obsidian, throwaway copy of a fixture
+```
+
 ## Word counts land by path, and an index stopped meaning a node
 
 github#72. The host reads word counts in the background after the mount and applies them one at a
