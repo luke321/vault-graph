@@ -20,10 +20,7 @@ const FIXTURES = [
   { script: "make-demo-vault.mjs", args: [], name: "demo-vault" },
   { script: "make-test-vault.mjs", args: ["--notes", "10000", "--years", "10", "--end", "2026-08-28"], name: "test-vault" },
   { script: "make-shape-vault.mjs", args: [], name: "shape-vault" },
-  // github#86, design/0014 -- recorded in the TAG dimension, because that is the picture
-  // this fixture exists for: its folder disc is one folder holding 82% of the vault, and
-  // its tag disc is the nested, thirteen-family one nothing else can show. The other three
-  // stay on the default, so between them the goldens gate both dimensions.
+  // github#86, design/0014 -- recorded in the TAG dimension; that is its picture
   { script: "make-tag-vault.mjs", args: ["--end", "2026-09-09"], name: "tag-vault",
     gens: ["make-tag-vault.mjs"], dim: "tag" },
 ];
@@ -41,8 +38,7 @@ function storeRoot() {
   return join(ROOT, ".fixtures");
 }
 
-// github#86 -- `gens` must match the list scripts/smoke.mjs hashes for the same fixture, or
-// the two disagree on the digest and each cuts its own copy in the shared store.
+// github#86 -- `gens` must match the list scripts/smoke.mjs hashes
 function digestOf(args, gens) {
   const h = createHash("sha256");
   h.update("format:" + FIXTURE_FORMAT);
@@ -129,7 +125,7 @@ async function measure(htmlPath, dim) {
       if (Date.now() > settleDeadline) throw new Error("page never settled (demo.busy() stayed true)");
       await sleep(120);
     }
-    // github#86 -- before the relayout below, so the disc being measured is this one
+    // github#86 -- before the relayout, so this is the disc measured
     if (dim && dim !== "folder") {
       await page.eval(`__vg.setDim(${JSON.stringify(dim)}); void 0`);
     }

@@ -618,16 +618,14 @@ class VaultGraphView extends ItemView {
         this.plugin.settings.unlinkedTintByFolder = !!v;
         await this.plugin.saveSettings();
       },
-      // github#86, design/0014 -- the dropdown in the group list is the control; the host
-      // only remembers what it was left on (decisions/0009), so there is no settings row.
+      // github#86, design/0014, decisions/0009 -- the host only remembers it
       dim: this.plugin.settings.dim,
       /** @param {"folder" | "tag"} v */
       onDim: async (v) => {
         this.plugin.settings.dim = v === "tag" ? "tag" : "folder";
         await this.plugin.saveSettings();
       },
-      // github#86 -- D-9, and the same story: the toggle under the group list is the
-      // control, the host only remembers where it was left
+      // github#86 -- D-9: the host only remembers where it was left
       multiTag: this.plugin.settings.multiTag,
       /** @param {boolean} v */
       onMultiTag: async (v) => {
@@ -711,7 +709,7 @@ const DEFAULTS = {
   countBars: true,
   // github#41, design/0011
   fitCap: true,
-  // github#86 -- folder is the default, and a vault nobody switches is unchanged
+  // github#86 -- folder is the default
   dim: "folder",
   multiTag: false,
 };

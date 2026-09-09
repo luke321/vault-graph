@@ -132,6 +132,40 @@ Rejected: keeping the satellites permanently and hiding them behind a predicate.
 band-and-geometry basis plan (`buildWedgePlan(false)`) walks every node, so a not-present
 satellite would still shape the rings — membership has to be real.
 
+## The tag fixture
+
+`scripts/make-tag-vault.mjs`, 891 notes. The other three fixtures are all folder-organised and
+carry **zero nested tags between them** — the demo vault and the 10k synthetic leave 55% and
+56% of their notes untagged, and the dominant-folder vault has no tags at all. All three are
+worth keeping: an untagged majority is the honest picture of a folder-organised vault seen
+through its tags, and the 100% case has to lay out too. But none of them is the vault the
+request came from, and none can run the nesting path at all.
+
+Four things about its shape are deliberate, each provoking something:
+
+| | |
+|---|---|
+| **nested tags** | `area/health`, `project/greenhouse` and the rest. design/0004 grants a sub-wedge to a depth-1 subfolder with its own tint slot and D-3 maps a nested tag onto that — this is the only fixture where that code runs |
+| **more tags than slots** | 13 top-level tags against `SLOT_COUNT` 12, so the rotation is walked to its end and comes round; the thirteenth takes `g1` again (design/0004, *it goes round*). Both buckets sit out of the rotation |
+| **a deep tag** | `area/health/sleep` is depth 2, where the legend nests a third level and decisions/0004 stops the push |
+| **an untagged minority** | ~8%, against the demo vault's 55% and the dominant-folder vault's 100%, so the bucket is a normal small group here and the whole disc over there |
+
+One folder holds 82% of the notes, because a tag-organised vault usually has an inbox or a flat
+notes folder everything sits in — which also makes this fixture's *folder* dimension the
+degenerate one, a free extra case for the default view.
+
+**Its golden is recorded in the tag dimension, and it is the only one that is.** Its folder disc
+is the degenerate picture; its tag disc is the one nothing else can show. So between the four
+fixtures the goldens gate both dimensions. Each snapshot records the dimension it was taken in.
+
+`--end` is pinned by every caller, for the reason invariants.md gives under *A synthetic vault's
+folder counts do not depend on which day it was built*: a fixture whose golden fails on a weekly
+refresh teaches everyone to regenerate goldens to make a check pass.
+
+The tag vault **hashes only its own generator**. One shared list would have moved all four
+digests and made every worktree re-cut every fixture on the shared store, which is a race
+several agents lose at once.
+
 ## The switch needs two layout passes
 
 **Room and position are a fixed point** (invariants.md, *A settled dot is the SAME size a fresh

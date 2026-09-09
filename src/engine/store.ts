@@ -50,10 +50,8 @@ export class GraphStore implements GraphStoreApi {
   }
 
   /**
-   * github#86 -- drop a node and every edge touching it. Added for the satellite dots that
-   * "Notes in every tag" puts on the disc and takes off again; nothing else removes a node,
-   * because a vault's notes arrive once at mount. The renderer holds its own index, so a
-   * caller must follow this with a full refresh rather than one that skips indexation.
+   * github#86 -- drop a node and its edges; for the satellite dots
+   * github#86 -- the caller must follow with a full refresh
    */
   dropNode(id: string): void {
     const around = this.adjacency.get(id);

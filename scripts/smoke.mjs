@@ -391,9 +391,7 @@ check("layout matches its golden snapshot", async (p) => {
                                  `run node scripts/update-layout-snapshots.mjs` };
   }
   const snap = JSON.parse(readFileSync(snapPath, "utf8"));
-  // github#86 -- each golden records the dimension it was taken in, and tag-vault's is the
-  // tag one (scripts/update-layout-snapshots.mjs says why). Switch before measuring and back
-  // after: the checks in a shard share one page.
+  // github#86 -- each golden records the dimension it was taken in
   const dim = snap.dim === "tag" ? "tag" : "folder";
   if (dim !== "folder") await p.eval(`__vg.setDim(${JSON.stringify(dim)}); void 0`);
   await p.eval(`__vg.relayout(); void 0`).catch(() => {});
@@ -453,11 +451,7 @@ check("layout matches its golden snapshot", async (p) => {
   return { ok, detail: parts.join("; ") };
 });
 
-/* ------------------------------------------------------------ github#86, design/0014 --
- * The grouping dimension. The check that protects everyone else is the golden snapshot
- * directly above: folder is the default, so a page nobody switches must lay out to the
- * byte it did before. These add what only the second dimension can be wrong about.
- */
+/* ---------------------------------------------------- github#86, design/0014 */
 
 check("tags: folders is the default, and the switch is in the group list's own heading",
 async (p) => {
@@ -517,7 +511,7 @@ check("tags: every note is filed in exactly one wedge, in either dimension", asy
     return { nodes: nodes, pinned: pinned, folder: folder, tag: tag,
              misfiled: misfiled, untagged: untagged, noTag: noTag, multi: multi };
   })()`);
-  // The hub holds pinned notes, which leave the ring and so are not plan members.
+  // github#86 -- the hub holds pinned notes, which are not plan members
   const want = r.nodes - r.pinned;
   const ok = r.folder.members === want && r.tag.members === want &&
              !r.folder.twice && !r.tag.twice &&
@@ -563,8 +557,7 @@ async (p) => {
     return { tag: drift(landed, fresh), folder: drift(home, homeFresh),
              trip: drift(boot, home), n: Object.keys(boot).length };
   })()`);
-  // invariants.md, "A settled dot is the SAME size a fresh relayout gives it": room and
-  // position are a fixed point, so a switch that lays out once lands off its own lattice.
+  // github#86, design/0014 -- room and position are a fixed point
   const ok = !r.tag.moved && !r.folder.moved && !r.trip.moved;
   return {
     ok,
@@ -595,7 +588,7 @@ check("tags: the two buckets stay out of the hue rotation and sort last", async 
     return { ok: true, detail: `NOT ASSERTED: every note on this vault carries a tag, ` +
                                `so there is no (untagged) bucket to place` };
   }
-  // github#86 D-2 -- neither bucket is a group anyone chose, so a hue would claim it was.
+  // github#86 -- D-2: neither bucket is a group anyone chose
   const ok = r.tail.join(",") === "(untagged),(unlinked)" &&
              r.untagged === "g11" && r.unlinked === "g11";
   return {
@@ -706,7 +699,7 @@ check("tags: a nested tag earns a sub-wedge, exactly as a subfolder does", async
     return { ok: true, detail: `NOT ASSERTED: no tag on this vault nests -- only the ` +
                                `tag-organised fixture carries an a/b tag` };
   }
-  // D-3 -- one sub-wedge per child, its own tint step, and the legend unfolds it
+  // github#86 -- D-3: a sub-wedge per child, with its own tint
   const ok = r.cells === r.subs.length && r.distinct === r.subs.length && r.twisty;
   return {
     ok,
@@ -736,7 +729,7 @@ check("tags: the colour panel says which dimension owns it", async (p) => {
   if (r.noGear) {
     return { ok: true, detail: "NOT ASSERTED: no gear on this build -- standalone only" };
   }
-  // The rows write folderColors / subfolderColors / folderShown, all keyed by folder name.
+  // github#86, decisions/0009 -- those rows write FOLDER-keyed maps
   const ok = r.folderRows > 0 && r.tagRows === 0 && r.backRows === r.folderRows &&
              /per folder/i.test(r.says);
   return {
@@ -746,10 +739,7 @@ check("tags: the colour panel says which dimension owns it", async (p) => {
   };
 });
 
-/* ------------------------------------------------------- github#86 D-9, design/0014 --
- * "Notes in every tag": one dot per tag a note carries. The whole risk is that a copy gets
- * counted as a note somewhere, so most of these count something twice on purpose.
- */
+/* ------------------------------------------------- github#86 D-9, design/0014 */
 
 check("multi: a dot per tag, and the vault still has the notes it has", async (p) => {
   const r = await p.j(`(function(){
@@ -789,7 +779,7 @@ check("multi: a dot per tag, and the vault still has the notes it has", async (p
              r.on.sats === r.off.wantDots - r.off.nodes &&
              r.on.members === r.on.nodes - r.pinned &&
              r.on.summed === r.on.nodes &&
-             // a copy is not a note: the day cells and the note count must not budge
+             // github#86 -- a copy is not a note: these must not budge
              r.on.heat === r.off.heat &&
              r.footer.indexOf(String(r.off.nodes) + " notes") >= 0;
   return {
@@ -892,7 +882,7 @@ check("multi: a copy's links are drawn only while it is hovered", async (p) => {
   if (r.none) {
     return { ok: true, detail: "NOT ASSERTED: no linked note on this vault carries two tags" };
   }
-  // D-10 -- at rest the web is the NOTES' web, so the link count keeps meaning what it says
+  // github#86 -- D-10: at rest the web is the NOTES' web
   const ok = r.degRest === 0 && r.degHover === r.want && r.after === r.rest &&
              r.hovered > r.rest;
   return {
@@ -5007,10 +4997,7 @@ function resolveVaults() {
   const out = [];
   const FIXTURE_MAX_AGE_DAYS = 7;
   const GENERATORS = ["make-demo-vault.mjs", "make-test-vault.mjs", "make-shape-vault.mjs"];
-  // github#86 -- the tag vault hashes ONLY its own generator, so adding it leaves the other
-  // three digests byte-identical and no worktree regenerates a fixture it already has. Every
-  // generator in one list would have re-cut all four in every checkout on the shared store,
-  // which is a race several agents lose at once.
+  // github#86 -- hashes ONLY its own generator; the other three do not move
   const TAG_GENERATORS = ["make-tag-vault.mjs"];
   const FIXTURE_FORMAT = 1;
 
@@ -5081,9 +5068,7 @@ function resolveVaults() {
   gen("make-test-vault.mjs", ["--notes", "10000", "--years", "10", "--end", "2026-08-28"],
       "test-vault", "the 10k synthetic vault (10 years)");
   gen("make-shape-vault.mjs", [], "shape-vault", "the dominant-folder vault");
-  // github#86, design/0014 -- the only tag-ORGANISED fixture, and the only one with a nested
-  // tag anywhere in it. --end is pinned for the same reason spec-vault's and the 10k's are:
-  // a golden that fails on a weekly refresh teaches everyone to regenerate goldens.
+  // github#86, design/0014 -- the only tag-ORGANISED fixture; --end pinned
   gen("make-tag-vault.mjs", ["--end", "2026-09-09"], "tag-vault",
       "the tag-organised vault (nested tags, 8% untagged)", TAG_GENERATORS);
 

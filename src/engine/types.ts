@@ -42,11 +42,7 @@ export interface NodeAttrs {
   touched: string;
   words: number;
   ghost: boolean;
-  /**
-   * github#86, design/0014 -- set only on a SATELLITE: the id of the note this dot is a
-   * second copy of, while "Notes in every tag" is on. Absent on every real note, which is
-   * what every walk that counts or ranks notes tests for.
-   */
+  /** github#86, design/0014 -- set only on a satellite: the note it copies */
   dupOf?: string;
 }
 

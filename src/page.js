@@ -485,10 +485,7 @@ function mountVaultGraph(root, data, deps) {
 
   /** @param {string} g */
   function hiddenByDefault(g) {
-    // github#86 -- folderShown is a map of FOLDERS the host persists, and a tag that happens
-    // to share a folder's name is not that folder, so it does not answer here. (untagged) is
-    // shown like everything else (D-2); a leading underscore still reads as an archive in
-    // either dimension.
+    // github#86, design/0014 -- folderShown is a folder map; D-2 shows (untagged)
     if (state.dim === "folder" && typeof folderShown[g] === "boolean") return !folderShown[g];
     return isArchiveGroup(g);
   }
@@ -636,11 +633,7 @@ function mountVaultGraph(root, data, deps) {
   var subOrder = dict();
   /** @type {Record<string, number>} */
   var subCount = dict();
-  // github#86 -- the sub-wedges belong to the DIMENSION, not to the vault: grouped by tag,
-  // `area/health` nests under `area` exactly as a subfolder nests under its folder
-  // (design/0014, D-3). So this is a function the dimension switch re-runs, and it is
-  // CALLED from the grouping section below rather than here -- the filing it reads does not
-  // exist yet at this point in the mount.
+  // github#86, design/0014 -- per dimension (D-3); called below, after the filing
   function buildSubOrder() {
     subOrder = dict();
     subCount = dict();
@@ -667,49 +660,23 @@ function mountVaultGraph(root, data, deps) {
 
   // github#3
   var UNLINKED = "(unlinked)";
-  // github#86, design/0014 -- the bucket for a note the current dimension cannot file. Only
-  // the tag dimension has one: every note has a folder, and not every note has a tag (775 of
-  // 1,407 on the demo fixture). D-2 shows it like any other group -- grey and last, but
-  // SHOWN, because a switch that silently drops half a vault is not a picture of it.
+  // github#86, design/0014 -- D-2: the bucket, shown, grey, second to last
   var UNTAGGED = "(untagged)";
 
-  /**
-   * THE FILING. github#86, design/0014.
-   *
-   * A note has one folder and any number of tags, and the lattice gives every note exactly
-   * one cell in exactly one wedge. So grouping does not read a note's attributes any more --
-   * it asks where the note is FILED in the dimension on screen: which group, which sub-wedge
-   * inside it, and the path that nests it in the legend.
-   *
-   * In the FOLDER dimension the filing IS the three attributes this code used to read
-   * directly (`folder`, `sub`, `dirs`), returned unchanged, so a page nobody switches lays
-   * out to the byte it laid out to before. That is the whole reason the accessors return
-   * scalars rather than one `{ g, sub, dirs }` object: `buildWedgePlan` walks every node of
-   * a 10k vault inside a cascade frame, and an object per node per frame is a cost the
-   * folder dimension must not pay for a feature it is not using.
-   *
-   * `a` is optional and is passed wherever the caller already holds the attributes -- the
-   * node walks all do -- so the seam costs those callers no second lookup.
-   */
+  // github#86, design/0014 -- the filing: where a note sits in this dimension
   /** @type {Record<string, { g: string, sub: string, dirs: string[] }>} */
   var tagFiling = dict();
-  // github#86 D-4 -- how many notes CARRY each tag, anywhere in their list, against the
-  // number filed under it. A tag has no path to disclose, so this is what its legend row
-  // has to say instead: the count on the row is the dots on the disc, and where a note is
-  // filed under an earlier tag the two differ and the row says by how much.
+  // github#86 -- D-4: notes carrying each tag, against those filed under it
   /** @type {Record<string, number>} */
   var tagCarried = dict();
   var tagFilingBuilt = false;
 
   /** @param {string[]} tags @returns {{ g: string, sub: string, dirs: string[] }} */
   function fileTags(tags) {
-    // D-1 -- the FIRST tag listed files the note. Half of everything tagged on the demo
-    // fixture carries more than one tag, and frontmatter order is the only order its author
-    // can see and control; the legend row and the detail panel disclose the choice.
+    // github#86 -- D-1: the first tag listed files the note
     var t = tags && tags.length ? String(tags[0]) : "";
     if (!t) return { g: UNTAGGED, sub: "", dirs: [] };
-    // D-3 -- `area/health` is a hierarchy Obsidian already writes, and the disc already has
-    // a mechanism for one, so the segments map onto folder/subfolder/deeper exactly.
+    // github#86 -- D-3: a/b maps onto folder, subfolder, deeper
     var seg = t.split("/").filter(Boolean);
     if (!seg.length) return { g: UNTAGGED, sub: "", dirs: [] };
     return { g: seg[0], sub: seg[1] || "", dirs: seg.slice(1) };
@@ -761,28 +728,13 @@ function mountVaultGraph(root, data, deps) {
   /** @param {string} id @returns {string} */
   function groupOf(id) {
     if (moveFrom) { var mf = moveFrom[id]; if (mf !== undefined) return mf; }
-    // github#3, github#86 -- "unlinked notes join their folder" reads as "join their group"
-    // in either dimension: one setting, one meaning, whichever axis the disc is cut on.
+    // github#3, github#86 -- "join their folder" means "join their group"
     if (!adj[id]) return unlinkedByFolder ? fileGroup(id) : UNLINKED;
     return fileGroup(id);
   }
 
-  /**
-   * SATELLITES. github#86, design/0014 -- D-9, "Notes in every tag".
-   *
-   * A note carries any number of tags and the lattice gives every node exactly one cell, so
-   * the only way to show one note in three tags is to put three dots on the disc. With the
-   * toggle on, a note with k distinct tags is its PRIMARY (filed under the first, D-1) plus
-   * k-1 SATELLITES, one per further tag, each a real graph node so the planner, the cascade
-   * and the renderer need to know nothing about them.
-   *
-   * What a satellite is NOT is a second note. It shares its primary's adjacency array, its
-   * hub rank and its place in the timeline, and every walk that counts or ranks NOTES skips
-   * it on `dupOf` -- the heatmap, the search, the hub, the timeline and the footer. So the
-   * vault still has the number of notes it has, and only the disc has more dots.
-   */
-  // A NUL cannot occur in a vault path, so a satellite id can never collide with a
-  // note's. Same separator, same reason, as the cell key in buildWedgePlan.
+  // github#86, design/0014 -- D-9: one dot per tag; a copy is not a note
+  // github#86 -- a NUL cannot occur in a vault path
   var SAT_SEP = "\u0000";
   var multiTag = deps.multiTag === true;
   var onMultiTag = typeof deps.onMultiTag === "function" ? deps.onMultiTag : null;
@@ -792,12 +744,9 @@ function mountVaultGraph(root, data, deps) {
   var satsOf = dict();
 
   /**
+   * github#86 -- the early return keeps isPinned's per-node cost a branch
    * @param {string} id
    * @returns {string} the note a dot stands for; itself, for a real note
-   *
-   * The early return is not a micro-optimisation for its own sake: isPinned() asks this for
-   * every node of every plan, and with no copies on the disc -- which is always, in the
-   * folder dimension -- it must cost a branch rather than two map lookups.
    */
   function noteOf(id) {
     if (!satellites.length) return id;
@@ -824,8 +773,7 @@ function mountVaultGraph(root, data, deps) {
     });
     multi.forEach(function (pair) {
       var id = pair[0], tags = pair[1], a = graph.getNodeAttributes(id);
-      // One dot per DISTINCT tag: the first is the primary's, and a note that lists the same
-      // tag twice is still in that tag once.
+      // github#86 -- one dot per DISTINCT tag; the first is the primary's
       /** @type {Record<string, boolean>} */
       var seen = dict();
       seen[String(tags[0])] = true;
@@ -842,8 +790,7 @@ function mountVaultGraph(root, data, deps) {
           dupOf: id
         });
         tagFiling[sid] = fileTags([t]);
-        // The SAME array, deliberately: a copy is as linked as the note is, and an orphan's
-        // copy is an orphan (isOrphan asks adj). Its edges are drawn on hover only (D-10).
+        // github#86 -- the same array: a copy is as linked as its note
         if (adj[id]) adj[sid] = adj[id];
         hubRank[sid] = hubRank[id];
         if (tlRank[id] !== undefined) tlRank[sid] = tlRank[id];
@@ -866,13 +813,13 @@ function mountVaultGraph(root, data, deps) {
     });
     satellites = [];
     satsOf = dict();
-    // Anything keyed by node id and rebuilt on demand has to let go of them too.
+    // github#86 -- anything keyed by node id must let go of them too
     lazyAdded = []; lazyShown = null;
     neighbourCache = null;
     focusSetCache = { key: undefined, set: null };
   }
 
-  // The filing exists from here down, and subOrder is its first reader.
+  // github#86 -- the filing exists from here; subOrder is its first reader
   if (state.dim === "tag") buildTagFiling();
   if (multiTag && state.dim === "tag") addSatellites();
   buildSubOrder();
@@ -887,9 +834,7 @@ function mountVaultGraph(root, data, deps) {
   /** @type {Record<string, string[]>} */
   var order = {};
 
-  // github#3 -- archives first, then the bracketed pseudo-groups, then the real groups, and
-  // the two buckets last: (untagged) is a bucket of real notes, (unlinked) is the terminal
-  // one. This rank is the OUTER key of every group sort; nothing reorders across it.
+  // github#3, github#86 -- archives, brackets, groups, (untagged), (unlinked)
   /** @param {string} s */
   function groupRank(s) {
     if (s === UNTAGGED) return 3;
@@ -911,9 +856,7 @@ function mountVaultGraph(root, data, deps) {
     graph.forEachNode(function (id, a) {
       var g = groupOf(id);
       count[g] = (count[g] || 0) + 1;
-      // github#86 -- what the dimension FILES here, whether or not any of it is on the disc
-      // right now. A tag whose every note is filtered out keeps its row for the same reason
-      // a folder does (github#50).
+      // github#86, github#50 -- what this dimension FILES, on the disc or not
       var f = fileGroup(id, a);
       filed[f] = (filed[f] || 0) + 1;
     });
@@ -949,8 +892,7 @@ function mountVaultGraph(root, data, deps) {
       var k = byFolder[g];
       var picked = (k && THEME.byKey[k]) ? k : "";
 
-      // github#3, github#86 -- both buckets sit out of the twelve-slot rotation and wear the
-      // archive grey: neither is a group anyone chose, and a hue would claim it was.
+      // github#3, github#86 -- both buckets sit out of the hue rotation
       if (isArchiveGroup(g) || g === UNLINKED || g === UNTAGGED) {
         var akey = picked || ARCHIVE_SLOT;
         groupColor[g] = THEME.byKey[akey];
@@ -1000,10 +942,7 @@ function mountVaultGraph(root, data, deps) {
     return subfolderColors;
   }
 
-  // github#86 -- folderColors and subfolderColors are maps of FOLDER names the host persists
-  // (decisions/0009). A tag that happens to spell a folder's name is not that folder, so no
-  // pin reaches the tag dimension and every tag takes its automatic slot. A tagColors map is
-  // its own feature if anyone wants one.
+  // github#86, decisions/0009 -- the pins are FOLDER maps; no tag takes one
   /** @param {string} pk "group/sub" @returns {string} */
   function subPin(pk) {
     return state.dim === "folder" ? (subfolderColors[pk] || "") : "";
@@ -1202,7 +1141,7 @@ function mountVaultGraph(root, data, deps) {
       if (unlinkedTintColors.length >= UNLINKED_TINT_CAP) return;
       if (groupOf(id) !== UNLINKED) return;
       var a = graph.getNodeAttributes(id);
-      // github#86 -- the group it WOULD have been filed under, in the dimension on screen
+      // github#86 -- the group it would have been filed under
       var g = fileGroup(id, a);
       var c = subShade[g + "/" + fileSub(id, a)] || colorOf(g);
       if (seen[c]) return;
@@ -1217,9 +1156,7 @@ function mountVaultGraph(root, data, deps) {
   function nodeColor(id) {
     var a = graph.getNodeAttributes(id);
     if (groupOf(id) === UNLINKED && !unlinkedTintByFolder) return colorOf(UNLINKED);
-    // github#86 -- the tint ladder answers to the filing, so a nested tag gets its parent's
-    // family exactly as a subfolder does (D-3). The `dim !== "folder"` early return this
-    // replaces was unreachable while there was only one dimension.
+    // github#86 -- D-3: the tint ladder answers to the filing
     var g = fileGroup(id, a);
     return subShade[g + "/" + fileSub(id, a)] || colorOf(g);
   }
@@ -1548,8 +1485,7 @@ function mountVaultGraph(root, data, deps) {
   function buildWedgePlan(onlyVisible, weightOf, rowsOf, spIn) {
     var W = weightOf || function () { return 1; };
     var all = order[state.dim] || [];
-    // github#86 -- both dimensions nest (D-3), so the sub-wedge split is no longer gated on
-    // which one is on screen. `var nested = state.dim === "folder"` was that gate.
+    // github#86 -- D-3: both dimensions nest, so the split is not gated
     var SEP = "\u0000";
     /** @type {Record<string, string[]>} */
     var byCell = {};
@@ -2500,12 +2436,6 @@ function mountVaultGraph(root, data, deps) {
   }
 
   /** @param {string} id */
-  // github#86 -- THE HUB HOLDS NOTES. Every copy of one is the same note, so a copy reads as
-  // pinned when its note is and leaves the ring with it (buildWedgePlan drops a plan member
-  // on this predicate), and no synthetic satellite id can reach state.pinned -- which the
-  // host persists, and which would then name a node that does not exist on the next open.
-  // Resolving here rather than at the call sites covers the hub drag as well as the button.
-  /** @param {string} id */
   function isPinned(id) { return state.pinned.indexOf(noteOf(id)) >= 0; }
 
   /** @param {string} id @param {number} [at] slot to insert at */
@@ -2743,9 +2673,7 @@ function mountVaultGraph(root, data, deps) {
   function buildTimeline() {
     /** @type {[string, string][]} */
     var dated = [];
-    // github#86 -- the timeline reveals NOTES oldest first (design/0007), so a copy takes
-    // its note's rank rather than a rank of its own; giving it one would stretch tlMax and
-    // shift every note's place in the reveal.
+    // github#86, design/0007 -- a copy takes its note's rank, not its own
     graph.forEachNode(function (id, a) {
       if (!a.dupOf && a.created) dated.push([id, a.created]);
     });
@@ -4386,10 +4314,7 @@ function mountVaultGraph(root, data, deps) {
   /** @type {[string, string][]} */
   var lazyAdded = [];
   function syncLazyEdges() {
-    // github#86 D-10 -- a satellite carries NO edges of its own at rest, so the web at rest
-    // stays the notes' web and the link count keeps meaning what it says. Its links are drawn
-    // the way a big vault's thinned links already are: on hover, from the same adjacency its
-    // note has. So this runs whenever there is a copy on the disc, lazy vault or not.
+    // github#86 -- D-10: a copy's links are drawn on hover only
     if (!lazyEdges && !satellites.length) return;
     var want = state.hovered || state.selected || null;
     if (want === lazyShown) return;
@@ -4406,9 +4331,7 @@ function mountVaultGraph(root, data, deps) {
     lazyShown = want;
   }
 
-  // github#19, github#86 -- keyed on the FILING, so one key builder answers for a folder path
-  // and for a nested tag, and every map keyed by it (hiddenSub, highlightSub, pathOpen)
-  // follows the dimension without knowing there is one.
+  // github#19, github#86 -- keyed on the filing, so one builder answers both
   /** @param {string} id @param {number} k how many levels deep @param {NodeAttrs} [a] */
   function pathKey(id, k, a) {
     var g = fileGroup(id, a), d = fileDirs(id, a);
@@ -4541,9 +4464,7 @@ function mountVaultGraph(root, data, deps) {
       set = dict();
       set[f] = true;
       neighboursOf(f).forEach(function (n) { set[n] = true; });
-      // github#86 -- a note's other copies ARE that note, so they light with it. Their
-      // neighbours' copies are not lit: no line is drawn to those, and a lit dot with
-      // nothing joining it to the focus reads as a neighbour it is not.
+      // github#86 -- a note's other copies ARE that note; they light with it
       if (satellites.length) copiesOf(f).forEach(function (c) { set[c] = true; });
     }
     focusSetCache.key = f;
@@ -5271,8 +5192,7 @@ function mountVaultGraph(root, data, deps) {
 
   /** @param {string | null} id */
   function select(id) {
-    // github#86 -- clicking any copy selects the NOTE, so the detail panel, the hop trail
-    // and the pin are all about the note. focusSet() lights every copy of it in return.
+    // github#86 -- clicking any copy selects the NOTE
     if (id) id = noteOf(id);
     // github#73, design/0013
     // github#82 -- same: only the phone's sheet gets out of the way
@@ -5301,10 +5221,9 @@ function mountVaultGraph(root, data, deps) {
         (a.words ? '<span>' + a.words + ' words</span>' : "") +
         (a.created ? '<span>' + esc(a.created) + '</span>' : "") +
       '</div>' +
-      // github#86 D-1 -- grouped by tag, say which of them put the note where it is
+      // github#86 -- D-1: say which tag put the note where it is
       '<div>' + (a.tags || []).slice(0, 8).map(function (t, ti) {
-        // Only worth saying while the filing EXCLUDES the others; with a dot in every tag
-        // there is nothing to choose between them.
+        // github#86 -- only while the filing excludes the other tags
         var files = state.dim === "tag" && !multiTag && ti === 0;
         return '<span class="chip"' +
                (files ? ' style="border-style:solid" title="Filed under this tag"' : '') +
@@ -5380,10 +5299,7 @@ function mountVaultGraph(root, data, deps) {
   }
 
   /**
-   * github#86 D-4 -- what a legend row says when you point at it. A folder row discloses its
-   * subfolders by unfolding; a tag has no path, so the one thing worth disclosing is the gap
-   * between the dots in its wedge and the notes that carry it. With "Notes in every tag" on
-   * there is no gap, and the row says nothing extra.
+   * github#86 -- D-4: what a tag row has to say instead of a path
    * @param {string} g
    */
   function rowTitle(g) {
@@ -5453,8 +5369,7 @@ function mountVaultGraph(root, data, deps) {
 
     /** @type {Record<string, Record<string, number>>} */
     var kids = dict();
-    // github#86 -- nesting is per dimension, so a nested tag discloses its children in the
-    // legend exactly as a subfolder does (D-3).
+    // github#86 -- D-3: nesting is per dimension
     graph.forEachNode(function (id, a) {
       var d = fileDirs(id, a), g0 = fileGroup(id, a);
       for (var i = 0; i < d.length; i++) {
@@ -5811,8 +5726,7 @@ function mountVaultGraph(root, data, deps) {
     state.collapsed = dict();
     (order[state.dim] || []).forEach(function (g) { state.collapsed[g] = true; });
   }
-  // github#86 -- once per dimension, not once per mount: entering the tag list for the first
-  // time collapses and seeds it exactly as the folder list was on boot.
+  // github#86 -- once per dimension, not once per mount
   /** @type {Record<string, boolean>} */
   var dimSeeded = dict();
 
@@ -6073,14 +5987,11 @@ function mountVaultGraph(root, data, deps) {
     buildLegend();
   }
 
-  // github#86, design/0014 -- the control belongs to the thing it changes, so it is the
-  // group list's own heading rather than a view setting or a tab row: discoverable by
-  // anyone looking for it, and quiet for everyone who never wants it.
+  // github#86, design/0014 -- the control belongs to the thing it changes
   function syncDimUI() {
     var sel = /** @type {HTMLSelectElement | null} */ ($("dim"));
     if (sel && sel.value !== state.dim) sel.value = state.dim;
-    // github#86 D-9 -- the copies only mean anything while the disc is cut by tag, so the
-    // toggle is only there then. A folder view is the folder view it always was.
+    // github#86 -- D-9: the toggle is only there while cut by tag
     var row = $("multirow");
     if (row) row.hidden = state.dim !== "tag";
     var btn = $("multitag");
@@ -6448,12 +6359,7 @@ function mountVaultGraph(root, data, deps) {
 
     function buildSettings() {
       var pal = paletteInfo();
-      // github#86, decisions/0009 -- every row here writes folderColors, subfolderColors or
-      // folderShown, and the host persists all three BY FOLDER NAME. Grouped by tag there is
-      // nothing here to write: a tag is not a folder, and a swatch that quietly pinned a
-      // same-named folder instead would be a control that appears to do nothing. So the panel
-      // says which dimension owns it rather than listing rows that cannot work. Tag colours
-      // would be a tagColors map, and that is its own feature.
+      // github#86, decisions/0009 -- these rows write FOLDER-keyed maps
       if (state.dim !== "folder") {
         setHTML($("setbody"),
           '<div class="lbl" style="margin:0;opacity:.7">Colours and default visibility are set ' +
@@ -6623,16 +6529,14 @@ function mountVaultGraph(root, data, deps) {
   }
 
   /**
-   * github#86, design/0014 -- one set of nav state per dimension.
-   *
-   * Every map the nav keeps is keyed by GROUP NAME, and a tag may spell a folder's name --
-   * a vault with an `03 - Resources` folder and an `idea` tag is fine, but a vault with both
-   * a folder and a tag called `Projects` would have one hiding the other. So each dimension
-   * keeps its own set and gets it back untouched on the way home. `state.hidden` is already
-   * keyed by dimension and stays where it is.
-   * @typedef {{ hiddenSub: Record<string, boolean>, highlight: Record<string, boolean>,
-   *             highlightSub: Record<string, boolean>, collapsed: Record<string, boolean>,
-   *             tailOpen: Record<string, boolean>, pathOpen: Record<string, boolean> }} DimNav
+   * github#86, design/0014 -- one nav state per dimension: names may collide
+   * @typedef {Object} DimNav
+   * @property {Record<string, boolean>} hiddenSub
+   * @property {Record<string, boolean>} highlight
+   * @property {Record<string, boolean>} highlightSub
+   * @property {Record<string, boolean>} collapsed
+   * @property {Record<string, boolean>} tailOpen
+   * @property {Record<string, boolean>} pathOpen
    */
   /** @type {Record<string, DimNav>} */
   var dimNav = dict();
@@ -6665,15 +6569,13 @@ function mountVaultGraph(root, data, deps) {
     if (next === state.dim) return state.dim;
     if (next === "tag") buildTagFiling();
 
-    // Every note changes wedge, so every visible note is a mover -- the cascade walks each
-    // one out of the wedge it is standing in rather than teleporting the disc (D-8).
+    // github#86 -- D-8: every visible note is a mover, so the cascade walks it
     /** @type {Record<string, string> | null} */
     var movesFrom = null;
     var n = 0;
     if (renderer && !instant) {
       graph.forEachNode(function (id, a) {
-        // A copy does not survive a switch -- only the tag dimension has any -- so it is
-        // not a mover, it is a dot that leaves.
+        // github#86 -- a copy does not survive a switch; it leaves
         if (a.dupOf) return;
         if (!visible(id) || (alpha[id] || 0) <= 0.004) return;
         if (!movesFrom) movesFrom = dict();
@@ -6687,25 +6589,16 @@ function mountVaultGraph(root, data, deps) {
     restoreDimNav(next);
     state.hoverGroup = null;
     state.hoverSub = dict();
-    // github#86 D-9 -- the copies belong to the tag dimension, and only while asked for
+    // github#86 -- D-9: the copies belong to the tag dimension
     if (next === "tag" && multiTag) addSatellites(); else dropSatellites();
-    // The sub-wedges answer to the dimension too, and everything below reads them.
+    // github#86 -- the sub-wedges answer to the dimension too
     buildSubOrder();
     syncDimUI();
     hardRelayout(false, !!n);
-    // invariants.md "A settled dot is the SAME size a fresh relayout gives it" -- ROOM AND
-    // POSITION ARE A FIXED POINT, and one layout pass measures its margins against the room
-    // the OTHER dimension left behind. Every wedge changes here, so that residue is visible:
-    // measured on the demo fixture with a single pass, 1,335 of 1,403 notes settled up to
-    // 12.1 units off where a fresh relayout puts them, in both directions, with an identical
-    // plan. A second pass converges all of them, and a third changes nothing. settle()
-    // converges the animated path the same way and for the same reason, so this is only the
-    // instant path -- with movers the cascade lands it.
+    // github#86, design/0014 -- room and position are a fixed point: converge
     if (!n) applyLayout(false);
     attempt(placeLogo); attempt(heatBuild); attempt(buildLegend);
-    // The colour panel is dimension-dependent now (it owns folders and says so), and it is
-    // only ever rebuilt when something asks -- so a panel left open across a switch would
-    // otherwise keep showing the rows it was built with.
+    // github#86 -- the colour panel is dimension-dependent now
     if (refreshSettingsPanel) refreshSettingsPanel();
     if (persist && onDim) onDim(state.dim);
     if (n) cascade(null, { colToggle: true, movesFrom: movesFrom });
@@ -6718,14 +6611,13 @@ function mountVaultGraph(root, data, deps) {
     var next = !!on;
     if (next === multiTag) return multiTag;
     multiTag = next;
-    // Only the tag dimension has copies to make. Left on, it takes effect the moment the
-    // disc is grouped by tag again -- which is what setDim reads it for.
+    // github#86 -- only the tag dimension has copies to make
     if (state.dim === "tag") {
       /** @type {Record<string, string> | null} */
       var movesFrom = null;
       var n = 0;
       if (renderer && !instant && !next) {
-        // Going off, the copies are the ones leaving; the notes that stay do not move house.
+        // github#86 -- going off, the copies are the ones leaving
         graph.forEachNode(function (id, a) {
           if (!a.dupOf || !visible(id) || (alpha[id] || 0) <= 0.004) return;
           if (!movesFrom) movesFrom = dict();
@@ -6736,7 +6628,7 @@ function mountVaultGraph(root, data, deps) {
       if (next) addSatellites(); else dropSatellites();
       buildSubOrder();
       hardRelayout(false, false);
-      // Same fixed point as a dimension switch: the room changed, so converge before landing.
+      // github#86 -- same fixed point as a dimension switch
       applyLayout(false);
       if (renderer) renderer.refresh();
       attempt(placeLogo); attempt(heatBuild); attempt(buildLegend); attempt(buildStats);
@@ -6943,7 +6835,7 @@ function mountVaultGraph(root, data, deps) {
     $("vname").textContent = DATA.vault + " graph";
     setHTML($("stats"), "<b>" + s.nodes + "</b> notes &middot; <b>" + s.edges + "</b> links &middot; <b>" +
       s.orphans + "</b> unlinked<br>" +
-      // github#86 D-9 -- the vault has the notes it has; only the disc has more dots
+      // github#86 -- D-9: the disc has more dots, the vault has its notes
       (satellites.length
         ? "<b>" + (s.nodes + satellites.length) + "</b> dots, one per tag a note carries<br>"
         : "") +
@@ -8222,7 +8114,7 @@ function mountVaultGraph(root, data, deps) {
       v = { x: v.x + org.left, y: v.y + org.top };
       var r = renderer.scaleSize ? renderer.scaleSize(dotPx(a.size, id)) : dotPx(a.size, id);
       if (r > maxR) maxR = r;
-      // github#86 -- which wedge the dot is DRAWN in, which is the grouping answer
+      // github#86 -- which wedge the dot is DRAWN in
       pts.push({ id: id, x: v.x, y: v.y, r: r, mine: groupOf(id) === g, label: a.label });
     });
     var best = null, bestGap = -1;
@@ -8912,8 +8804,7 @@ function mountVaultGraph(root, data, deps) {
                     ringsLayout: ringsLayout, visible: visible, groupOf: groupOf,
                     alpha: alpha, cascade: cascade, syncAlpha: syncAlpha,
                     syncLazyEdges: syncLazyEdges,
-                    // github#86 -- a copy has to answer as its note everywhere it is asked,
-                    // and these are the places the suite asks
+                    // github#86 -- where the suite asks a copy who it is
                     select: select, togglePin: togglePin, isPinned: isPinned,
                     adj: adj, focusSet: focusSet,
                     rankOf: /** @param {string} id */ function (id) { return tlRank[String(id)] || 0; },
