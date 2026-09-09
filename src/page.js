@@ -3465,6 +3465,7 @@ function mountVaultGraph(root, data, deps) {
    * @property {Record<string, string>} [movesFrom]   id -> the group it is leaving
    * @property {(id: string) => number} [order]       arrival rank; clockwise when absent
    * @property {number} [spread]                      stagger window, frames
+   * @property {boolean} [cross]                       github#76: swap two discs in one sweep
    * @property {number} [totalMs]
    * @property {(pr: number) => void} [onFrame]
    */
@@ -3588,11 +3589,30 @@ function mountVaultGraph(root, data, deps) {
     var span = Math.max(windowFor(ins.length), windowFor(outs.length))
              + FADE_FRAMES * TIME_SCALE;
     if (moveSpan > span) span = moveSpan;
+    // github#76, github#86 -- departures and arrivals on ONE sweep
+    var crossGap = 0, crossW = 0;
+    if (opts.cross) {
+      crossGap = 2.5 * FADE_FRAMES * TIME_SCALE;
+      crossW = Math.max(1, span - crossGap);
+      [ins, outs].forEach(function (set) {
+        set.forEach(function (id, i) { delay[id] = set.length < 2 ? 0 : crossW * i / (set.length - 1); });
+      });
+    }
     /** @type {Record<string, number>} */
     var arriveAt = dict();
     /** @type {Record<string, number>} */
     var crossAt = dict();
     if (moves.length) (function () {
+      // github#76, github#86 -- a constant gap, so no-reverse holds by construction
+      if (opts.cross) {
+        moves.forEach(function (id, i) {
+          var f = moves.length < 2 ? 0 : i / (moves.length - 1);
+          delay[id] = crossW * f;
+          arriveAt[id] = delay[id] + crossGap;
+          crossAt[id] = delay[id] + FADE_FRAMES * TIME_SCALE;
+        });
+        return;
+      }
       var leaveW = span * 0.35;
       var landW = Math.max(1, span * 0.45 - FADE_FRAMES * TIME_SCALE);
       moves.forEach(function (id, i) {
@@ -3646,7 +3666,8 @@ function mountVaultGraph(root, data, deps) {
       });
     })();
 
-    if (moves.length) (function () {
+    // github#76, github#86
+    if (moves.length && !opts.cross) (function () {
       /** @type {Record<string, string[]>} */
       var byG = dict();
       moves.forEach(function (id) {
@@ -3668,7 +3689,8 @@ function mountVaultGraph(root, data, deps) {
       });
     })();
 
-    if (moves.length) (function () {
+    // github#76, github#86
+    if (moves.length && !opts.cross) (function () {
       var save = moveFrom;
       moveFrom = null;
       /** @type {Record<string, string[]>} */
@@ -6601,7 +6623,8 @@ function mountVaultGraph(root, data, deps) {
     // github#86 -- the colour panel is dimension-dependent now
     if (refreshSettingsPanel) refreshSettingsPanel();
     if (persist && onDim) onDim(state.dim);
-    if (n) cascade(null, { colToggle: true, movesFrom: movesFrom });
+    // github#76, github#86 -- every wedge changes, so cross the two discs in one sweep
+    if (n) cascade(null, { colToggle: true, cross: true, movesFrom: movesFrom });
     return state.dim;
   }
 
@@ -6643,7 +6666,8 @@ function mountVaultGraph(root, data, deps) {
       applyLayout(false);
       attempt(placeLogo); attempt(heatBuild); attempt(buildLegend); attempt(buildStats);
       if (refreshSettingsPanel) refreshSettingsPanel();
-      if (n) cascade(null, { colToggle: true, movesFrom: movesFrom });
+      // github#76, github#86
+      if (n) cascade(null, { colToggle: true, cross: true, movesFrom: movesFrom });
     }
     syncDimUI();
     if (persist && onMultiTag) onMultiTag(multiTag);

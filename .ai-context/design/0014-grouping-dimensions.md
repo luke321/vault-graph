@@ -168,6 +168,33 @@ The tag vault **hashes only its own generator**. One shared list would have move
 digests and made every worktree re-cut every fixture on the shared store, which is a race
 several agents lose at once.
 
+## The two discs cross, they do not take turns
+
+A dimension switch moves **every** note, and the cascade's default schedule is tuned for the
+opposite case — a handful of movers among a settled disc (github#49). It staggers departures
+across the first 35% of the span and forces every arrival into the back 45%, so the old disc
+**empties before the new one lands**: a swap, with a hole in the middle of it.
+
+`cascade`'s `cross` opt, borrowed verbatim from github#76's root change and passed by `setDim`
+and `setMultiTag`, puts every set on one sweep. Departures and arrivals share the window and a
+moving note re-arrives a fixed **2.5 fade lengths** behind its own departure. The gap is
+constant across the sweep, so *a fade never reverses* holds by construction rather than by a
+floor. The two github#49 blocks are skipped while it is on, for the same reason.
+
+**Measured on the demo fixture, sampling every animation frame of a folder → tag switch:**
+
+| | dots up at 20 / 30 / 40 / 50 / 60 / 80% | emptiest frame |
+|---|---|---|
+| sequential | 1125 / 951 / 779 / 606 / 626 / 1068, **0 arrived before 60%** | **526** of 1403 |
+| `cross` | 1123 / 1122 / 1123 / 1122 / 1123 / 1122, arrivals 2 / 184 / 367 / 549 / 718 / 1082 | **1122** of 1403 |
+
+So the disc keeps four fifths of itself on screen throughout instead of losing nearly two
+thirds, and notes start taking their new places at 20% rather than waiting for 60%.
+
+Unlike github#76's root change — 60 incoming notes against 1403, which the commit notes does
+not yet *look* like a cross — here both discs are the whole vault, so the crossover is the
+picture. Re-measure with the frame sampler in the scratchpad harness, or by eye.
+
 ## The switch needs two layout passes
 
 **Room and position are a fixed point** (invariants.md, *A settled dot is the SAME size a fresh
