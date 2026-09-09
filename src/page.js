@@ -107,6 +107,7 @@
  * @property {boolean} [unlinkedByFolder]
  * @property {boolean} [unlinkedTintByFolder]
  * @property {boolean} [countBars]              github#78, design/0006
+ * @property {"folder" | "tag"} [dim]         github#86, design/0014 -- absent means "folder"
  * @property {boolean} [fitCap]               github#41, design/0011
  * @property {boolean} [sheetOpen]            github#82 -- absent means "decide from the width"
  * @property {boolean} [bandOpen]             github#82
@@ -120,6 +121,7 @@
  * @property {(v: boolean) => void | Promise<void>} [onCompactAxis]
  * @property {(v: boolean) => void | Promise<void>} [onUnlinkedByFolder]
  * @property {(v: boolean) => void | Promise<void>} [onUnlinkedTintByFolder]
+ * @property {(v: "folder" | "tag") => void | Promise<void>} [onDim]   github#86
  * @property {(v: boolean) => void | Promise<void>} [onSheetOpen]
  * @property {(v: boolean) => void | Promise<void>} [onBandOpen]
  * @property {(v: boolean) => void | Promise<void>} [onCountBars]
@@ -169,6 +171,8 @@
  * @property {(v: boolean) => void} setUnlinkedByFolder
  * @property {(v: boolean) => void} setUnlinkedTintByFolder
  * @property {(v: boolean) => void} setCountBars
+ * @property {(v: string) => string} setDim                        github#86
+ * @property {(id: string) => { g: string, sub: string, dirs: string[] }} filingOf
  * @property {(v: boolean) => void} setFitCap
  * @property {() => void} applyHiddenDefaults
  * @property {() => void} heatBuild
@@ -414,6 +418,12 @@ function mountVaultGraph(root, data, deps) {
   // github#78, design/0006
   var countBars = deps.countBars === false ? false : true;
   var onCountBars = typeof deps.onCountBars === "function" ? deps.onCountBars : null;
+  // github#86, design/0014
+  /** @type {("folder" | "tag")[]} */
+  var DIMS = ["folder", "tag"];
+  var dimStart = DIMS.indexOf(/** @type {"folder" | "tag"} */ (deps.dim)) >= 0
+    ? /** @type {"folder" | "tag"} */ (deps.dim) : "folder";
+  var onDim = typeof deps.onDim === "function" ? deps.onDim : null;
 
   /** @param {string} g */
   function isArchiveGroup(g) { return String(g).charAt(0) === "_"; }
@@ -469,7 +479,11 @@ function mountVaultGraph(root, data, deps) {
 
   /** @param {string} g */
   function hiddenByDefault(g) {
-    if (typeof folderShown[g] === "boolean") return !folderShown[g];
+    // github#86 -- folderShown is a map of FOLDERS the host persists, and a tag that happens
+    // to share a folder's name is not that folder, so it does not answer here. (untagged) is
+    // shown like everything else (D-2); a leading underscore still reads as an archive in
+    // either dimension.
+    if (state.dim === "folder" && typeof folderShown[g] === "boolean") return !folderShown[g];
     return isArchiveGroup(g);
   }
   var SETTINGS_UI = !!deps.settingsUI;
@@ -485,7 +499,7 @@ function mountVaultGraph(root, data, deps) {
    * Everything the disc is currently showing, and how. One object, mutated in place; the
    * cascade and the legend read it, the UI writes it.
    * @typedef {Object} State
-   * @property {string} dim                                    grouping dimension; "folder"
+   * @property {"folder" | "tag"} dim                          grouping dimension; github#86
    * @property {string} layout
    * @property {Record<string, boolean>} hiddenSub             "folder/sub" -> true
    * @property {Record<string, Record<string, boolean>>} hidden   dim -> { group: true }
@@ -512,7 +526,7 @@ function mountVaultGraph(root, data, deps) {
    */
   /** @type {State} */
   var state = {
-    dim: "folder",
+    dim: dimStart,
     layout: "rings",
     hiddenSub: dict(),
     hidden: dict(),
@@ -616,11 +630,18 @@ function mountVaultGraph(root, data, deps) {
   var subOrder = dict();
   /** @type {Record<string, number>} */
   var subCount = dict();
-  (function () {
+  // github#86 -- the sub-wedges belong to the DIMENSION, not to the vault: grouped by tag,
+  // `area/health` nests under `area` exactly as a subfolder nests under its folder
+  // (design/0014, D-3). So this is a function the dimension switch re-runs, and it is
+  // CALLED from the grouping section below rather than here -- the filing it reads does not
+  // exist yet at this point in the mount.
+  function buildSubOrder() {
+    subOrder = dict();
+    subCount = dict();
     /** @type {Record<string, Record<string, number>>} */
     var tally = dict();
-    graph.forEachNode(function (_id, a) {
-      var f = a.folder, sb = a.sub || "";
+    graph.forEachNode(function (id, a) {
+      var f = fileGroup(id, a), sb = fileSub(id, a);
       if (!tally[f]) tally[f] = dict();
       tally[f][sb] = (tally[f][sb] || 0) + 1;
     });
@@ -630,7 +651,7 @@ function mountVaultGraph(root, data, deps) {
       });
       subOrder[f].forEach(function (sb) { subCount[f + "/" + sb] = tally[f][sb]; });
     });
-  })();
+  }
 
   var UNIT = 160;
 
@@ -640,6 +661,80 @@ function mountVaultGraph(root, data, deps) {
 
   // github#3
   var UNLINKED = "(unlinked)";
+  // github#86, design/0014 -- the bucket for a note the current dimension cannot file. Only
+  // the tag dimension has one: every note has a folder, and not every note has a tag (775 of
+  // 1,407 on the demo fixture). D-2 shows it like any other group -- grey and last, but
+  // SHOWN, because a switch that silently drops half a vault is not a picture of it.
+  var UNTAGGED = "(untagged)";
+
+  /**
+   * THE FILING. github#86, design/0014.
+   *
+   * A note has one folder and any number of tags, and the lattice gives every note exactly
+   * one cell in exactly one wedge. So grouping does not read a note's attributes any more --
+   * it asks where the note is FILED in the dimension on screen: which group, which sub-wedge
+   * inside it, and the path that nests it in the legend.
+   *
+   * In the FOLDER dimension the filing IS the three attributes this code used to read
+   * directly (`folder`, `sub`, `dirs`), returned unchanged, so a page nobody switches lays
+   * out to the byte it laid out to before. That is the whole reason the accessors return
+   * scalars rather than one `{ g, sub, dirs }` object: `buildWedgePlan` walks every node of
+   * a 10k vault inside a cascade frame, and an object per node per frame is a cost the
+   * folder dimension must not pay for a feature it is not using.
+   *
+   * `a` is optional and is passed wherever the caller already holds the attributes -- the
+   * node walks all do -- so the seam costs those callers no second lookup.
+   */
+  /** @type {Record<string, { g: string, sub: string, dirs: string[] }>} */
+  var tagFiling = dict();
+  var tagFilingBuilt = false;
+
+  /** @param {string[]} tags @returns {{ g: string, sub: string, dirs: string[] }} */
+  function fileTags(tags) {
+    // D-1 -- the FIRST tag listed files the note. Half of everything tagged on the demo
+    // fixture carries more than one tag, and frontmatter order is the only order its author
+    // can see and control; the legend row and the detail panel disclose the choice.
+    var t = tags && tags.length ? String(tags[0]) : "";
+    if (!t) return { g: UNTAGGED, sub: "", dirs: [] };
+    // D-3 -- `area/health` is a hierarchy Obsidian already writes, and the disc already has
+    // a mechanism for one, so the segments map onto folder/subfolder/deeper exactly.
+    var seg = t.split("/").filter(Boolean);
+    if (!seg.length) return { g: UNTAGGED, sub: "", dirs: [] };
+    return { g: seg[0], sub: seg[1] || "", dirs: seg.slice(1) };
+  }
+
+  /** @param {string} [only] one node id, for a node added after the table was built */
+  function buildTagFiling(only) {
+    if (only !== undefined) {
+      if (tagFilingBuilt) tagFiling[only] = fileTags(graph.getNodeAttribute(only, "tags"));
+      return;
+    }
+    if (tagFilingBuilt) return;
+    tagFilingBuilt = true;
+    tagFiling = dict();
+    graph.forEachNode(function (id, a) { tagFiling[id] = fileTags(a.tags); });
+  }
+
+  /** @param {string} id @param {NodeAttrs} [a] @returns {string} */
+  function fileGroup(id, a) {
+    if (state.dim === "folder") return (a || graph.getNodeAttributes(id)).folder;
+    var f = tagFiling[id];
+    return f ? f.g : UNTAGGED;
+  }
+
+  /** @param {string} id @param {NodeAttrs} [a] @returns {string} */
+  function fileSub(id, a) {
+    if (state.dim === "folder") return (a || graph.getNodeAttributes(id)).sub || "";
+    var f = tagFiling[id];
+    return f ? f.sub : "";
+  }
+
+  /** @param {string} id @param {NodeAttrs} [a] @returns {string[]} */
+  function fileDirs(id, a) {
+    if (state.dim === "folder") return (a || graph.getNodeAttributes(id)).dirs || [];
+    var f = tagFiling[id];
+    return f ? f.dirs : [];
+  }
 
   /** @type {Record<string, string> | null} */
   var moveFrom = null;
@@ -647,9 +742,15 @@ function mountVaultGraph(root, data, deps) {
   /** @param {string} id @returns {string} */
   function groupOf(id) {
     if (moveFrom) { var mf = moveFrom[id]; if (mf !== undefined) return mf; }
-    if (!adj[id]) return unlinkedByFolder ? graph.getNodeAttribute(id, "folder") : UNLINKED;
-    return graph.getNodeAttribute(id, "folder");
+    // github#3, github#86 -- "unlinked notes join their folder" reads as "join their group"
+    // in either dimension: one setting, one meaning, whichever axis the disc is cut on.
+    if (!adj[id]) return unlinkedByFolder ? fileGroup(id) : UNLINKED;
+    return fileGroup(id);
   }
+
+  // The filing exists from here down, and subOrder is its first reader.
+  if (state.dim === "tag") buildTagFiling();
+  buildSubOrder();
 
   var SLOT_COUNT = 12;
   /** @type {Record<string, string>} */
@@ -661,6 +762,21 @@ function mountVaultGraph(root, data, deps) {
   /** @type {Record<string, string[]>} */
   var order = {};
 
+  // github#3 -- archives first, then the bracketed pseudo-groups, then the real groups, and
+  // the two buckets last: (untagged) is a bucket of real notes, (unlinked) is the terminal
+  // one. This rank is the OUTER key of every group sort; nothing reorders across it.
+  /** @param {string} s */
+  function groupRank(s) {
+    if (s === UNTAGGED) return 3;
+    if (s === UNLINKED) return 4;
+    var c = s.charAt(0);
+    return c === "_" ? 0 : c === "(" ? 1 : 2;
+  }
+  /** @param {string} a @param {string} b */
+  function byGroupName(a, b) {
+    return groupRank(a) - groupRank(b) || a.localeCompare(b, undefined, { numeric: true });
+  }
+
   /** @returns {Record<string, number>} group -> note count, for the current dim */
   function computeOrder() {
     /** @type {Record<string, number>} */
@@ -670,7 +786,11 @@ function mountVaultGraph(root, data, deps) {
     graph.forEachNode(function (id, a) {
       var g = groupOf(id);
       count[g] = (count[g] || 0) + 1;
-      if (state.dim === "folder") filed[a.folder] = (filed[a.folder] || 0) + 1;
+      // github#86 -- what the dimension FILES here, whether or not any of it is on the disc
+      // right now. A tag whose every note is filtered out keeps its row for the same reason
+      // a folder does (github#50).
+      var f = fileGroup(id, a);
+      filed[f] = (filed[f] || 0) + 1;
     });
     folderCount = filed;
     // github#50
@@ -679,16 +799,7 @@ function mountVaultGraph(root, data, deps) {
       if (count[f] === undefined) count[f] = 0;
     });
     if (count[UNLINKED] === undefined) count[UNLINKED] = 0;
-    var names = Object.keys(count).sort(function (a, b) {
-      // github#3
-      /** @param {string} s */
-      var rank = function (s) {
-        if (s === UNLINKED) return 3;
-        var c = s.charAt(0);
-        return c === "_" ? 0 : c === "(" ? 1 : 2;
-      };
-      return rank(a) - rank(b) || a.localeCompare(b, undefined, { numeric: true });
-    });
+    var names = Object.keys(count).sort(byGroupName);
     order[state.dim] = names;
     return count;
   }
@@ -713,8 +824,9 @@ function mountVaultGraph(root, data, deps) {
       var k = byFolder[g];
       var picked = (k && THEME.byKey[k]) ? k : "";
 
-      // github#3
-      if (isArchiveGroup(g) || g === UNLINKED) {
+      // github#3, github#86 -- both buckets sit out of the twelve-slot rotation and wear the
+      // archive grey: neither is a group anyone chose, and a hue would claim it was.
+      if (isArchiveGroup(g) || g === UNLINKED || g === UNTAGGED) {
         var akey = picked || ARCHIVE_SLOT;
         groupColor[g] = THEME.byKey[akey];
         groupSlot[g] = akey;
@@ -763,10 +875,19 @@ function mountVaultGraph(root, data, deps) {
     return subfolderColors;
   }
 
+  // github#86 -- folderColors and subfolderColors are maps of FOLDER names the host persists
+  // (decisions/0009). A tag that happens to spell a folder's name is not that folder, so no
+  // pin reaches the tag dimension and every tag takes its automatic slot. A tagColors map is
+  // its own feature if anyone wants one.
+  /** @param {string} pk "group/sub" @returns {string} */
+  function subPin(pk) {
+    return state.dim === "folder" ? (subfolderColors[pk] || "") : "";
+  }
+
   /** @param {string} g */
   function groupHasPinnedSub(g) {
     return (subOrder[g] || []).some(function (sb) {
-      return !!subfolderColors[g + "/" + sb];
+      return !!subPin(g + "/" + sb);
     });
   }
 
@@ -931,7 +1052,7 @@ function mountVaultGraph(root, data, deps) {
         : 0;
       subs.forEach(function (sb) {
         var pk = f + "/" + sb;
-        var pin = subfolderColors[pk];
+        var pin = subPin(pk);
         if (pin && THEME.byKey[pin]) {
           subShade[pk] = THEME.byKey[pin];
           subSlot[pk] = pin;
@@ -956,7 +1077,9 @@ function mountVaultGraph(root, data, deps) {
       if (unlinkedTintColors.length >= UNLINKED_TINT_CAP) return;
       if (groupOf(id) !== UNLINKED) return;
       var a = graph.getNodeAttributes(id);
-      var c = subShade[a.folder + "/" + (a.sub || "")] || colorOf(a.folder);
+      // github#86 -- the group it WOULD have been filed under, in the dimension on screen
+      var g = fileGroup(id, a);
+      var c = subShade[g + "/" + fileSub(id, a)] || colorOf(g);
       if (seen[c]) return;
       seen[c] = true;
       unlinkedTintColors.push(c);
@@ -968,9 +1091,12 @@ function mountVaultGraph(root, data, deps) {
   /** @param {string} id @returns {string} */
   function nodeColor(id) {
     var a = graph.getNodeAttributes(id);
-    if (state.dim !== "folder") return colorOf(groupOf(id));
     if (groupOf(id) === UNLINKED && !unlinkedTintByFolder) return colorOf(UNLINKED);
-    return subShade[a.folder + "/" + (a.sub || "")] || colorOf(a.folder);
+    // github#86 -- the tint ladder answers to the filing, so a nested tag gets its parent's
+    // family exactly as a subfolder does (D-3). The `dim !== "folder"` early return this
+    // replaces was unreachable while there was only one dimension.
+    var g = fileGroup(id, a);
+    return subShade[g + "/" + fileSub(id, a)] || colorOf(g);
   }
 
   /** @param {string} group */
@@ -1297,7 +1423,8 @@ function mountVaultGraph(root, data, deps) {
   function buildWedgePlan(onlyVisible, weightOf, rowsOf, spIn) {
     var W = weightOf || function () { return 1; };
     var all = order[state.dim] || [];
-    var nested = state.dim === "folder";
+    // github#86 -- both dimensions nest (D-3), so the sub-wedge split is no longer gated on
+    // which one is on screen. `var nested = state.dim === "folder"` was that gate.
     var SEP = "\u0000";
     /** @type {Record<string, string[]>} */
     var byCell = {};
@@ -1343,7 +1470,7 @@ function mountVaultGraph(root, data, deps) {
           var cid = skel.members[ci], cg = skel.memberG[ci];
           if (gone[cid]) {
             liveN[cg] -= 1;
-            liveSub[cg + "/" + (graph.getNodeAttributes(cid).sub || "")] -= 1;
+            liveSub[cg + "/" + fileSub(cid)] -= 1;
             continue;
           }
           members.push(cid); memberG.push(cg);
@@ -1364,7 +1491,7 @@ function mountVaultGraph(root, data, deps) {
       var wv = W(id);
       liveG[g0] = (liveG[g0] || 0) + (wv > 1 ? 1 : wv < 0 ? 0 : wv);
       liveN[g0] = (liveN[g0] || 0) + 1;
-      var sk = g0 + "/" + (graph.getNodeAttributes(id).sub || "");
+      var sk = g0 + "/" + fileSub(id);
       liveSub[sk] = (liveSub[sk] || 0) + 1;
     });
     var bandLive = { i: 0, o: 0 };
@@ -1397,7 +1524,7 @@ function mountVaultGraph(root, data, deps) {
         if (!bandDepth[bk]) bandDepth[bk] = depthOfBand(bk === "i");
         var nSubs = (subOrder[g] || []).length;
         var splitPieces = Math.min(nSubs, SUB_SLOTS);
-        splitOf[g] = nested && nSubs > 1 &&
+        splitOf[g] = nSubs > 1 &&
                      (liveN[g] || 0) >= Math.max(NEST_MIN, splitPieces * bandDepth[bk]);
       }
       return splitOf[g];
@@ -1408,9 +1535,10 @@ function mountVaultGraph(root, data, deps) {
       var mId = members[mIdx], mG = memberG[mIdx];
       if (!useCells) {
         var mA = graph.getNodeAttributes(mId);
+        var mSub = fileSub(mId, mA);
         var mBk = bandLock && bandLock[mG] ? "i" : "o";
         var mKey = splitFor(mG)
-          ? mG + SEP + subCellIndex(mG, mA.sub, liveSub[mG + "/" + (mA.sub || "")] || 0, bandDepth[mBk])
+          ? mG + SEP + subCellIndex(mG, mSub, liveSub[mG + "/" + mSub] || 0, bandDepth[mBk])
           : mG;
         if (!byCell[mKey]) {
           byCell[mKey] = [];
@@ -1442,7 +1570,7 @@ function mountVaultGraph(root, data, deps) {
     var cells = [];
     big.forEach(function (g) {
       var ks = cellsOf[g];
-      if (nested && !useCells) {
+      if (!useCells) {
         ks.sort(function (x, y) {
           return (+(x.split(SEP)[1] || 0)) - (+(y.split(SEP)[1] || 0));
         });
@@ -2633,9 +2761,9 @@ function mountVaultGraph(root, data, deps) {
     var g = groupOf(id);
     if (state.highlight[g]) return true;
     if (state.hoverGroup === g) return true;
-    var a = graph.getNodeAttributes(id), d = a.dirs || [];
+    var a = graph.getNodeAttributes(id), d = fileDirs(id, a);
     for (var k = 1; k <= d.length; k++) {
-      var pk = pathKey(a, k);
+      var pk = pathKey(id, k, a);
       if (state.highlightSub[pk]) return true;
       if (state.hoverSub[pk]) return true;
     }
@@ -2984,7 +3112,8 @@ function mountVaultGraph(root, data, deps) {
   function isPushed(id) {
     if (state.highlight[groupOf(id)]) return true;
     var a = graph.getNodeAttributes(id);
-    return !!state.highlightSub[pathKey(a, 1)] && ownsWedge(a.folder, a.sub || "");
+    return !!state.highlightSub[pathKey(id, 1, a)] &&
+           ownsWedge(fileGroup(id, a), fileSub(id, a));
   }
 
   /** @param {string} id */
@@ -4131,13 +4260,15 @@ function mountVaultGraph(root, data, deps) {
     lazyShown = want;
   }
 
-  // github#19
-  /** @param {NodeAttrs} a @param {number} k how many folder levels deep */
-  function pathKey(a, k) {
-    var d = a.dirs;
-    if (!d || !d.length) return a.folder + "/";
-    if (!(k >= 1)) return a.folder + "/" + d.slice(0, k).join("/");
-    var out = a.folder + "/" + d[0];
+  // github#19, github#86 -- keyed on the FILING, so one key builder answers for a folder path
+  // and for a nested tag, and every map keyed by it (hiddenSub, highlightSub, pathOpen)
+  // follows the dimension without knowing there is one.
+  /** @param {string} id @param {number} k how many levels deep @param {NodeAttrs} [a] */
+  function pathKey(id, k, a) {
+    var g = fileGroup(id, a), d = fileDirs(id, a);
+    if (!d.length) return g + "/";
+    if (!(k >= 1)) return g + "/" + d.slice(0, k).join("/");
+    var out = g + "/" + d[0];
     for (var i = 1; i < k && i < d.length; i++) out += "/" + d[i];
     return out;
   }
@@ -4146,18 +4277,16 @@ function mountVaultGraph(root, data, deps) {
   function visible(id) {
     var a = graph.getNodeAttributes(id);
     if (isHidden(groupOf(id))) return false;
-    if (state.dim === "folder") {
-      var d = a.dirs || [];
-      if (!d.length) {
-        if (state.hiddenSub[a.folder + "/"]) return false;
-      } else {
-        // github#19
-        var key = a.folder + "/" + d[0];
+    var d = fileDirs(id, a);
+    if (!d.length) {
+      if (state.hiddenSub[fileGroup(id, a) + "/"]) return false;
+    } else {
+      // github#19
+      var key = fileGroup(id, a) + "/" + d[0];
+      if (state.hiddenSub[key]) return false;
+      for (var k = 1; k < d.length; k++) {
+        key += "/" + d[k];
         if (state.hiddenSub[key]) return false;
-        for (var k = 1; k < d.length; k++) {
-          key += "/" + d[k];
-          if (state.hiddenSub[key]) return false;
-        }
       }
     }
     return true;
@@ -5149,16 +5278,16 @@ function mountVaultGraph(root, data, deps) {
 
     /** @type {Record<string, Record<string, number>>} */
     var kids = dict();
-    if (state.dim === "folder") {
-      graph.forEachNode(function (_id, a) {
-        var d = a.dirs || [];
-        for (var i = 0; i < d.length; i++) {
-          var pk = a.folder + "/" + d.slice(0, i).join("/");
-          if (!kids[pk]) kids[pk] = dict();
-          kids[pk][d[i]] = (kids[pk][d[i]] || 0) + 1;
-        }
-      });
-    }
+    // github#86 -- nesting is per dimension, so a nested tag discloses its children in the
+    // legend exactly as a subfolder does (D-3).
+    graph.forEachNode(function (id, a) {
+      var d = fileDirs(id, a), g0 = fileGroup(id, a);
+      for (var i = 0; i < d.length; i++) {
+        var pk = g0 + "/" + d.slice(0, i).join("/");
+        if (!kids[pk]) kids[pk] = dict();
+        kids[pk][d[i]] = (kids[pk][d[i]] || 0) + 1;
+      }
+    });
 
     /** @param {string} attrs @param {boolean} on @param {string} what */
     var eyeBtn = function (attrs, on, what) {
@@ -5197,9 +5326,8 @@ function mountVaultGraph(root, data, deps) {
 
     setHTML($("legend"), names.map(function (g) {
       var vis = !isHidden(g);
-      var hasSubs = state.dim === "folder" &&
-                    (groupHasPinnedSub(g) ||
-                     ((subOrder[g] || []).length > 1 && (counts[g] || 0) >= NEST_MIN));
+      var hasSubs = groupHasPinnedSub(g) ||
+                    ((subOrder[g] || []).length > 1 && (counts[g] || 0) >= NEST_MIN);
       var open = hasSubs && !state.collapsed[g];
       var hl = !!state.highlight[g];
 
@@ -5323,9 +5451,9 @@ function mountVaultGraph(root, data, deps) {
       state.hiddenSub = dict();
       var rest = path.slice(g.length + 1);
       var want = rest ? rest.split("/") : [];
-      graph.forEachNode(function (_id, a) {
-        if (a.folder !== g) return;
-        var d = a.dirs || [], i = 0;
+      graph.forEachNode(function (id, a) {
+        if (fileGroup(id, a) !== g) return;
+        var d = fileDirs(id, a), i = 0;
         while (i < want.length && i < d.length && d[i] === want[i]) i++;
         if (i === want.length) return;
         state.hiddenSub[g + "/" + d.slice(0, i + 1).join("/")] = true;
@@ -5508,7 +5636,10 @@ function mountVaultGraph(root, data, deps) {
     state.collapsed = dict();
     (order[state.dim] || []).forEach(function (g) { state.collapsed[g] = true; });
   }
-  var collapsedInit = false;
+  // github#86 -- once per dimension, not once per mount: entering the tag list for the first
+  // time collapses and seeds it exactly as the folder list was on boot.
+  /** @type {Record<string, boolean>} */
+  var dimSeeded = dict();
 
   // github#45
   /**
@@ -5525,7 +5656,7 @@ function mountVaultGraph(root, data, deps) {
     });
     buildColors();
     colorWalk(colorsBefore);
-    if (!collapsedInit) { collapsedInit = true; collapseAll(); seedHidden(); }
+    if (!dimSeeded[state.dim]) { dimSeeded[state.dim] = true; collapseAll(); seedHidden(); }
     if (!bandLock) {
       var base = buildWedgePlan(false);
       if (base) {
@@ -5765,8 +5896,23 @@ function mountVaultGraph(root, data, deps) {
     buildLegend();
   }
 
+  // github#86, design/0014 -- the control belongs to the thing it changes, so it is the
+  // group list's own heading rather than a view setting or a tab row: discoverable by
+  // anyone looking for it, and quiet for everyone who never wants it.
+  function syncDimUI() {
+    var sel = /** @type {HTMLSelectElement | null} */ ($("dim"));
+    if (sel && sel.value !== state.dim) sel.value = state.dim;
+  }
+
   function buildTools() {
     refreshSettingsPanel = buildSettings;
+
+    // github#86
+    var dimSel = /** @type {HTMLSelectElement | null} */ ($("dim"));
+    if (dimSel) {
+      syncDimUI();
+      dimSel.onchange = function () { setDim(dimSel.value, true); };
+    }
 
     $("allon").onclick = function () {
       seedHidden();
@@ -6119,6 +6265,18 @@ function mountVaultGraph(root, data, deps) {
 
     function buildSettings() {
       var pal = paletteInfo();
+      // github#86, decisions/0009 -- every row here writes folderColors, subfolderColors or
+      // folderShown, and the host persists all three BY FOLDER NAME. Grouped by tag there is
+      // nothing here to write: a tag is not a folder, and a swatch that quietly pinned a
+      // same-named folder instead would be a control that appears to do nothing. So the panel
+      // says which dimension owns it rather than listing rows that cannot work. Tag colours
+      // would be a tagColors map, and that is its own feature.
+      if (state.dim !== "folder") {
+        setHTML($("setbody"),
+          '<div class="lbl" style="margin:0;opacity:.7">Colours and default visibility are set ' +
+          'per folder. Switch the group list back to Folders to change them.</div>');
+        return;
+      }
       var rows = (order[state.dim] || []).map(function (g) {
         var pinned = folderColors[g] || "";
         var cur = pinned || groupSlot[g] || "";
@@ -6131,9 +6289,8 @@ function mountVaultGraph(root, data, deps) {
           }
         });
         var shown = !hiddenByDefault(g);
-        var hasSubs = state.dim === "folder" &&
-                      (groupHasPinnedSub(g) ||
-                       ((subOrder[g] || []).length > 1 && (counts[g] || 0) >= NEST_MIN));
+        var hasSubs = groupHasPinnedSub(g) ||
+                      ((subOrder[g] || []).length > 1 && (counts[g] || 0) >= NEST_MIN);
         var open = hasSubs && !state.collapsed[g];
         return '<div class="scr" role="radiogroup" aria-label="Colour for ' + esc(g) + '">' +
                '<div class="scrh">' +
@@ -6280,6 +6437,87 @@ function mountVaultGraph(root, data, deps) {
     if (dateSpan) drawDateUI();
     if (persist && onCompactAxis) onCompactAxis(compactAxis);
     return compactAxis;
+  }
+
+  /**
+   * github#86, design/0014 -- one set of nav state per dimension.
+   *
+   * Every map the nav keeps is keyed by GROUP NAME, and a tag may spell a folder's name --
+   * a vault with an `03 - Resources` folder and an `idea` tag is fine, but a vault with both
+   * a folder and a tag called `Projects` would have one hiding the other. So each dimension
+   * keeps its own set and gets it back untouched on the way home. `state.hidden` is already
+   * keyed by dimension and stays where it is.
+   * @typedef {{ hiddenSub: Record<string, boolean>, highlight: Record<string, boolean>,
+   *             highlightSub: Record<string, boolean>, collapsed: Record<string, boolean>,
+   *             tailOpen: Record<string, boolean>, pathOpen: Record<string, boolean> }} DimNav
+   */
+  /** @type {Record<string, DimNav>} */
+  var dimNav = dict();
+
+  /** @param {string} dim */
+  function stashDimNav(dim) {
+    dimNav[dim] = {
+      hiddenSub: state.hiddenSub, highlight: state.highlight,
+      highlightSub: state.highlightSub, collapsed: state.collapsed,
+      tailOpen: state.tailOpen, pathOpen: state.pathOpen
+    };
+  }
+
+  /** @param {string} dim */
+  function restoreDimNav(dim) {
+    var b = dimNav[dim];
+    state.hiddenSub = b ? b.hiddenSub : dict();
+    state.highlight = b ? b.highlight : dict();
+    state.highlightSub = b ? b.highlightSub : dict();
+    state.collapsed = b ? b.collapsed : dict();
+    state.tailOpen = b ? b.tailOpen : dict();
+    state.pathOpen = b ? b.pathOpen : dict();
+  }
+
+  // github#86, design/0014
+  /** @param {string} v @param {boolean} [persist] @param {boolean} [instant] */
+  function setDim(v, persist, instant) {
+    var next = DIMS.indexOf(/** @type {"folder" | "tag"} */ (v)) >= 0
+      ? /** @type {"folder" | "tag"} */ (v) : "folder";
+    if (next === state.dim) return state.dim;
+    if (next === "tag") buildTagFiling();
+
+    // Every note changes wedge, so every visible note is a mover -- the cascade walks each
+    // one out of the wedge it is standing in rather than teleporting the disc (D-8).
+    /** @type {Record<string, string> | null} */
+    var movesFrom = null;
+    var n = 0;
+    if (renderer && !instant) {
+      graph.forEachNode(function (id) {
+        if (!visible(id) || (alpha[id] || 0) <= 0.004) return;
+        if (!movesFrom) movesFrom = dict();
+        movesFrom[id] = groupOf(id);
+        n++;
+      });
+    }
+
+    stashDimNav(state.dim);
+    state.dim = next;
+    restoreDimNav(next);
+    state.hoverGroup = null;
+    state.hoverSub = dict();
+    // The sub-wedges answer to the dimension too, and everything below reads them.
+    buildSubOrder();
+    syncDimUI();
+    hardRelayout(false, !!n);
+    // invariants.md "A settled dot is the SAME size a fresh relayout gives it" -- ROOM AND
+    // POSITION ARE A FIXED POINT, and one layout pass measures its margins against the room
+    // the OTHER dimension left behind. Every wedge changes here, so that residue is visible:
+    // measured on the demo fixture with a single pass, 1,335 of 1,403 notes settled up to
+    // 12.1 units off where a fresh relayout puts them, in both directions, with an identical
+    // plan. A second pass converges all of them, and a third changes nothing. settle()
+    // converges the animated path the same way and for the same reason, so this is only the
+    // instant path -- with movers the cascade lands it.
+    if (!n) applyLayout(false);
+    attempt(placeLogo); attempt(heatBuild); attempt(buildLegend);
+    if (persist && onDim) onDim(state.dim);
+    if (n) cascade(null, { colToggle: true, movesFrom: movesFrom });
+    return state.dim;
   }
 
   // github#3
@@ -7750,7 +7988,8 @@ function mountVaultGraph(root, data, deps) {
       v = { x: v.x + org.left, y: v.y + org.top };
       var r = renderer.scaleSize ? renderer.scaleSize(dotPx(a.size, id)) : dotPx(a.size, id);
       if (r > maxR) maxR = r;
-      pts.push({ id: id, x: v.x, y: v.y, r: r, mine: a.folder === g, label: a.label });
+      // github#86 -- which wedge the dot is DRAWN in, which is the grouping answer
+      pts.push({ id: id, x: v.x, y: v.y, r: r, mine: groupOf(id) === g, label: a.label });
     });
     var best = null, bestGap = -1;
     for (var i = 0; i < pts.length; i++) {
@@ -8201,6 +8440,12 @@ function mountVaultGraph(root, data, deps) {
                     setCompactAxis: function (v) { return setCompactAxis(v !== false, false); },
                     // github#3
                     setUnlinkedByFolder: function (v) { return setUnlinkedByFolder(v !== false, false, true); },
+                    // github#86, design/0014
+                    setDim: /** @param {string} v */ function (v) { return setDim(String(v), false, true); },
+                    filingOf: /** @param {string} id */ function (id) {
+                      return { g: fileGroup(String(id)), sub: fileSub(String(id)),
+                               dirs: fileDirs(String(id)).slice() };
+                    },
                     // github#41, design/0011
                     setFitCap: function (v) { return setFitCap(v === true); },
                     setUnlinkedTintByFolder: function (v) { return setUnlinkedTintByFolder(v === true, false); },
@@ -8328,7 +8573,7 @@ function mountVaultGraph(root, data, deps) {
                         var d = renderer && renderer.getNodeDisplayData(id);
                         pts.push({ r: Math.hypot(a.x, a.y), th: Math.atan2(a.y, a.x),
                                    rad: (d && renderer ? renderer.scaleSize(d.size)
-                                                       : 4) * perPx, g: a.folder });
+                                                       : 4) * perPx, g: groupOf(id) });
                       });
                       pts.sort(function (x, y) { return x.r - y.r; });
                       var gi = 0, gap = 0;
@@ -8782,7 +9027,7 @@ function mountVaultGraph(root, data, deps) {
                         var m = dict();
                         ids.forEach(function (id) {
                           var a = graph.getNodeAttributes(id);
-                          var k = a.folder + "/" + (a.dirs || []).join("/");
+                          var k = fileGroup(id, a) + "/" + fileDirs(id, a).join("/");
                           m[k] = (m[k] || 0) + 1;
                         });
                         return m;

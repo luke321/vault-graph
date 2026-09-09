@@ -43,6 +43,7 @@ const ICON_ID = "vault-graph-disc";
  * @property {boolean} unlinkedTintByFolder
  * @property {boolean} countBars                        github#78, design/0006
  * @property {boolean} fitCap                           github#41, design/0011
+ * @property {"folder" | "tag"} dim                     github#86 -- grouping dimension
  * @property {boolean} [sheetOpen]                      github#82 -- absent until folded once
  * @property {boolean} [bandOpen]                       github#82
  */
@@ -616,6 +617,14 @@ class VaultGraphView extends ItemView {
         this.plugin.settings.unlinkedTintByFolder = !!v;
         await this.plugin.saveSettings();
       },
+      // github#86, design/0014 -- the dropdown in the group list is the control; the host
+      // only remembers what it was left on (decisions/0009), so there is no settings row.
+      dim: this.plugin.settings.dim,
+      /** @param {"folder" | "tag"} v */
+      onDim: async (v) => {
+        this.plugin.settings.dim = v === "tag" ? "tag" : "folder";
+        await this.plugin.saveSettings();
+      },
       // github#82, decisions/0009 -- no tab row; absent = width decides
       sheetOpen: this.plugin.settings.sheetOpen,
       /** @param {boolean} v */
@@ -693,6 +702,8 @@ const DEFAULTS = {
   countBars: true,
   // github#41, design/0011
   fitCap: true,
+  // github#86 -- folder is the default, and a vault nobody switches is unchanged
+  dim: "folder",
 };
 
 /** @type {{ key: "ghosts" | "templates" | "flatMonths" | "words", name: string, desc: string }[]} */

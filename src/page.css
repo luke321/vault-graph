@@ -112,6 +112,28 @@
     color: var(--text-3); margin-bottom: 7px; font-weight: 600;
   }
 
+  /* github#86, design/0014 -- the grouping dimension, in the group list's own heading.
+     Semi-obvious: no border or fill at rest, so it reads as the heading it replaced, and a
+     chevron that is always there so anyone looking for a control finds one. */
+  .vault-graph .dimpick { position: relative; display: inline-flex; align-items: center; }
+  .vault-graph .dimpick select {
+    font: inherit; font-weight: inherit; text-transform: inherit; letter-spacing: inherit;
+    color: inherit; background: none; border: 0; border-radius: 4px; cursor: pointer;
+    padding: 2px 16px 2px 4px; margin: -2px 0 -2px -4px;
+    -webkit-appearance: none; appearance: none;
+  }
+  .vault-graph .dimpick::after {
+    content: ""; position: absolute; right: 6px; top: 50%; margin-top: -3px;
+    width: 4px; height: 4px; pointer-events: none; opacity: .7;
+    border-right: 1px solid currentColor; border-bottom: 1px solid currentColor;
+    transform: rotate(45deg);
+  }
+  .vault-graph .dimpick:hover select, .vault-graph .dimpick select:focus-visible {
+    background: var(--surface-2); color: var(--text-2);
+  }
+  /* the popup is the OS's, and it is a list of names -- not a heading */
+  .vault-graph .dimpick option { text-transform: none; letter-spacing: normal; }
+
   .vault-graph .seg { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; }
   .vault-graph .seg button {
     font: inherit; font-size: 12px; padding: 6px 8px; cursor: pointer;
