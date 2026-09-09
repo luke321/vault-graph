@@ -499,8 +499,10 @@ try {
       " groups: v.handle.api.groupOrder().length }; })()");
     const base = await E(POS);
 
+    // design/0014 -- a NEW tab: getLeaf(false) reuses the active leaf, which replaces the graph
+    // view outright whenever the graph is the active one
     await E("(function(){ var f = app.vault.getMarkdownFiles()[0];" +
-      " return app.workspace.getLeaf(false).openFile(f).then(function(){ return 1; }); })()");
+      " return app.workspace.getLeaf('tab').openFile(f).then(function(){ return 1; }); })()");
     await sleep(600);
     const hidden = await E("(function(){ var ls = app.workspace.getLeavesOfType(" + JSON.stringify(VT) + ");" +
       " var el = ls[0] && ls[0].containerEl; return !!el && el.offsetParent === null; })()");

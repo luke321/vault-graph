@@ -64,6 +64,7 @@
  * @property {boolean} applied
  * @property {string} reason
  * @property {boolean} [queued]
+ * @property {string} [busy]     which of cascade / tween / timeline holds the frame loop
  * @property {number} [churn]
  * @property {number} [limit]
  * @property {number} [added]
@@ -8280,6 +8281,10 @@ function mountVaultGraph(root, data, deps) {
   var LIVE_IDLE_MS = 120;
 
   function liveBusy() { return !!(cascadeRun || anim || play); }
+  // github#72, design/0014
+  function liveWhy() {
+    return cascadeRun ? "cascade" : anim ? "tween" : play ? "timeline" : "";
+  }
 
   // github#72, design/0014 -- `words` is deliberately not in the key
   /** @param {VaultNode} n */
@@ -8358,7 +8363,7 @@ function mountVaultGraph(root, data, deps) {
     if (liveBusy()) {
       livePending = { data: next, renames: renames };
       if (liveTimer === null) liveTimer = WIN.setInterval(drainLive, LIVE_IDLE_MS);
-      return { applied: false, reason: "busy", queued: true };
+      return { applied: false, reason: "busy", busy: liveWhy(), queued: true };
     }
 
     /** @type {Record<string, string>} */
