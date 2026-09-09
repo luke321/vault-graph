@@ -10,6 +10,8 @@ import { buildSync } from "esbuild";
 // github#6
 import { localDay, resolveCreated, dateTally } from "./dates.mjs";
 import { engineBanner } from "./engine/notice.mjs";
+// github#71
+import { readSortingSpec } from "./sortspec-file.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolvePath(HERE, "..");
@@ -181,40 +183,6 @@ function parseFrontmatter(raw) {
   return { fm, body: text.slice(m[0].length) };
 }
 const unquote = (s) => String(s).trim().replace(/^["']|["']$/g, "").trim();
-
-/* ------------------------------------------------------------------ sortspec --
- * github#71. parseFrontmatter() above flattens every value to a string and knows nothing
- * about block scalars, which is exactly how a `sorting-spec: |-` is always written -- so
- * this reads that one key properly rather than teaching the general parser YAML it has
- * never needed. The page owns the spec GRAMMAR (src/page.js, parseSortSpec); this only
- * gets the text out of the file.
- */
-function readSortingSpec(raw) {
-  const text = String(raw).replace(/^\uFEFF/, "");
-  const m = /^---\r?\n([\s\S]*?)\r?\n---/.exec(text);
-  if (!m) return "";
-  const lines = m[1].split(/\r?\n/);
-  for (let i = 0; i < lines.length; i++) {
-    const kv = /^sorting-spec\s*:\s*(.*)$/.exec(lines[i]);
-    if (!kv) continue;
-    const head = kv[1].trim();
-    if (!/^[|>][-+]?$/.test(head)) return unquote(head);
-    // a block scalar: every following line indented at least as far as the first one
-    const body = [];
-    let indent = -1;
-    for (let j = i + 1; j < lines.length; j++) {
-      const line = lines[j];
-      if (!line.trim()) { body.push(""); continue; }
-      const lead = line.length - line.replace(/^\s+/, "").length;
-      if (indent < 0) indent = lead;
-      if (lead < indent) break;
-      body.push(line.slice(indent));
-    }
-    while (body.length && !body[body.length - 1].trim()) body.pop();
-    return body.join("\n");
-  }
-  return "";
-}
 
 /* -------------------------------------------------------------- link mining */
 
