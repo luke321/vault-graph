@@ -378,7 +378,9 @@ check("band assignment obeys its two hard rules", async (p) => {
 check("layout matches its golden snapshot", async (p) => {
   const dd = await p.j("__vg.debugDump()");
   const vaultName = dd.vault.name;
-  const fixture = ["demo-vault", "test-vault", "shape-vault"].find((f) => vaultName.startsWith(f + "-"));
+  // github#86 -- tag-vault is the fourth, and the only one organised by tag
+  const fixture = ["demo-vault", "test-vault", "shape-vault", "tag-vault"]
+    .find((f) => vaultName.startsWith(f + "-"));
   if (!fixture) {
     return { ok: true, detail: `NOT ASSERTED: "${vaultName}" is not one of the three named ` +
                                 `fixtures -- no golden snapshot to compare against` };
@@ -389,6 +391,11 @@ check("layout matches its golden snapshot", async (p) => {
                                  `run node scripts/update-layout-snapshots.mjs` };
   }
   const snap = JSON.parse(readFileSync(snapPath, "utf8"));
+  // github#86 -- each golden records the dimension it was taken in, and tag-vault's is the
+  // tag one (scripts/update-layout-snapshots.mjs says why). Switch before measuring and back
+  // after: the checks in a shard share one page.
+  const dim = snap.dim === "tag" ? "tag" : "folder";
+  if (dim !== "folder") await p.eval(`__vg.setDim(${JSON.stringify(dim)}); void 0`);
   await p.eval(`__vg.relayout(); void 0`).catch(() => {});
   const r = await p.j(`(function(){
     var plan = __vg.buildWedgePlan(false), band = {};
@@ -397,6 +404,7 @@ check("layout matches its golden snapshot", async (p) => {
     __vg.graph.forEachNode(function(id, a){ pos[id] = [a.x, a.y]; });
     return { band: band, positions: pos };
   })()`);
+  if (dim !== "folder") await p.eval(`__vg.setDim("folder"); void 0`);
 
   const flipped = [];
   for (const f of Object.keys(snap.band)) {
@@ -432,7 +440,8 @@ check("layout matches its golden snapshot", async (p) => {
     }
   }
   const ok = flipped.length === 0 && moved === 0;
-  const parts = [`${curIds.size} notes checked against scripts/layout-snapshots/${fixture}.json`];
+  const parts = [`${curIds.size} notes checked against scripts/layout-snapshots/${fixture}.json` +
+                 (dim === "folder" ? "" : `, grouped by ${dim}`)];
   parts.push(flipped.length ? `${flipped.length} folder(s) flipped band: ${flipped.join(", ")}` : "band unchanged");
   if (moved) {
     parts.push(`${moved} note(s) moved past ${TOL} units, worst is #${worst.id}: ` +
@@ -646,6 +655,66 @@ check("tags: each dimension keeps its own hidden and collapsed state", async (p)
             `folder came back [${r.folderBefore.join(" ")}] -> [${r.folderAgain.join(" ")}], ` +
             `subs ${r.folderSubBefore.length} -> ${r.folderSubAgain.length}; ` +
             `tag came back [${r.tagAfter.join(" ")}] -> [${r.tagAgain.join(" ")}]`,
+  };
+});
+
+check("tags: a nested tag earns a sub-wedge, exactly as a subfolder does", async (p) => {
+  const r = await p.j(`(function(){
+    __vg.setDim("tag");
+    var order = __vg.groupOrder();
+    /** groups whose tags nest: area -> [health, finance, career] */
+    var families = {};
+    order.forEach(function (g) {
+      var s = __vg.subOrderOf(g).filter(function (x) { return x !== ""; });
+      if (s.length > 1) families[g] = s;
+    });
+    var names = Object.keys(families);
+    if (!names.length) { __vg.setDim("folder"); return { none: true }; }
+    var g = names[0];
+    var plan = __vg.buildWedgePlan(false);
+    var cells = 0;
+    plan.cells.forEach(function (c) { if (c.g === g) cells++; });
+    // the tint ladder: design/0003, a hue+lightness step per sub-wedge inside the family
+    var shades = families[g].map(function (sb) { return __vg.subColorOf(g, sb); });
+    var distinct = {};
+    shades.forEach(function (h) { if (h) distinct[h] = 1; });
+    // the legend nests it, and a depth-2 tag appears a level below its parent
+    var tw = document.querySelector('#vg-legend [data-tw="' + g + '"]');
+    var twisty = !!tw;
+    var deeper = [];
+    if (tw) {
+      tw.click();
+      var kids = Array.prototype.map.call(
+        document.querySelectorAll('#vg-legend [data-twp]'),
+        function (b) { return b.getAttribute("data-twp"); });
+      kids.forEach(function (k) {
+        var b = document.querySelector('#vg-legend [data-twp="' + k + '"]');
+        if (b) b.click();
+      });
+      deeper = Array.prototype.map.call(
+        document.querySelectorAll('#vg-legend [data-hpath]'),
+        function (b) { return b.getAttribute("data-hpath"); })
+        .filter(function (k) { return k.split("/").length > 2; });
+      if (tw) tw.click();
+    }
+    __vg.setDim("folder");
+    return { g: g, subs: families[g], families: names.length, cells: cells,
+             shades: shades, distinct: Object.keys(distinct).length,
+             twisty: twisty, deeper: deeper };
+  })()`);
+  if (r.none) {
+    return { ok: true, detail: `NOT ASSERTED: no tag on this vault nests -- only the ` +
+                               `tag-organised fixture carries an a/b tag` };
+  }
+  // D-3 -- one sub-wedge per child, its own tint step, and the legend unfolds it
+  const ok = r.cells === r.subs.length && r.distinct === r.subs.length && r.twisty;
+  return {
+    ok,
+    detail: `${r.families} nesting tag(s); ${r.g} holds [${r.subs.join(", ")}] and is drawn ` +
+            `as ${r.cells} cell(s) with ${r.distinct} distinct tints (${r.shades.join(" ")})` +
+            `; the legend gives it a twisty ${r.twisty ? "yes" : "NO"}` +
+            (r.deeper.length ? `, and a depth-2 tag nests below it: ${r.deeper.join(", ")}`
+                             : "; no depth-2 tag was reachable"),
   };
 });
 
@@ -4925,6 +4994,11 @@ function resolveVaults() {
   const out = [];
   const FIXTURE_MAX_AGE_DAYS = 7;
   const GENERATORS = ["make-demo-vault.mjs", "make-test-vault.mjs", "make-shape-vault.mjs"];
+  // github#86 -- the tag vault hashes ONLY its own generator, so adding it leaves the other
+  // three digests byte-identical and no worktree regenerates a fixture it already has. Every
+  // generator in one list would have re-cut all four in every checkout on the shared store,
+  // which is a race several agents lose at once.
+  const TAG_GENERATORS = ["make-tag-vault.mjs"];
   const FIXTURE_FORMAT = 1;
 
   const storeRoot = (() => {
@@ -4938,10 +5012,10 @@ function resolveVaults() {
     return join(ROOT, ".fixtures");
   })();
 
-  const digestOf = (args) => {
+  const digestOf = (args, gens) => {
     const h = createHash("sha256");
     h.update("format:" + FIXTURE_FORMAT);
-    for (const g of GENERATORS) h.update(readFileSync(join(HERE, g)));
+    for (const g of gens || GENERATORS) h.update(readFileSync(join(HERE, g)));
     h.update(JSON.stringify(args));
     return h.digest("hex").slice(0, 8);
   };
@@ -4949,8 +5023,8 @@ function resolveVaults() {
   const todayDay = () => new Date().toISOString().slice(0, 10);
   const ageDays = (day) => Math.floor((Date.parse(todayDay()) - Date.parse(day)) / 86400000);
 
-  const gen = (script, args, name, label) => {
-    const digest = digestOf(args);
+  const gen = (script, args, name, label, gens) => {
+    const digest = digestOf(args, gens);
     const dir = join(storeRoot, `${name}-${digest}`);
     const stampPath = join(dir, ".stamp.json");
     let fresh = false;
@@ -4994,6 +5068,11 @@ function resolveVaults() {
   gen("make-test-vault.mjs", ["--notes", "10000", "--years", "10", "--end", "2026-08-28"],
       "test-vault", "the 10k synthetic vault (10 years)");
   gen("make-shape-vault.mjs", [], "shape-vault", "the dominant-folder vault");
+  // github#86, design/0014 -- the only tag-ORGANISED fixture, and the only one with a nested
+  // tag anywhere in it. --end is pinned for the same reason spec-vault's and the 10k's are:
+  // a golden that fails on a weekly refresh teaches everyone to regenerate goldens.
+  gen("make-tag-vault.mjs", ["--end", "2026-09-09"], "tag-vault",
+      "the tag-organised vault (nested tags, 8% untagged)", TAG_GENERATORS);
 
   if (!out.length) throw new Error("no vault to check, and none could be generated");
   return out;

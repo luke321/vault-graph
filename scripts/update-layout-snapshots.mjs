@@ -20,6 +20,12 @@ const FIXTURES = [
   { script: "make-demo-vault.mjs", args: [], name: "demo-vault" },
   { script: "make-test-vault.mjs", args: ["--notes", "10000", "--years", "10", "--end", "2026-08-28"], name: "test-vault" },
   { script: "make-shape-vault.mjs", args: [], name: "shape-vault" },
+  // github#86, design/0014 -- recorded in the TAG dimension, because that is the picture
+  // this fixture exists for: its folder disc is one folder holding 82% of the vault, and
+  // its tag disc is the nested, thirteen-family one nothing else can show. The other three
+  // stay on the default, so between them the goldens gate both dimensions.
+  { script: "make-tag-vault.mjs", args: ["--end", "2026-09-09"], name: "tag-vault",
+    gens: ["make-tag-vault.mjs"], dim: "tag" },
 ];
 
 const GENERATORS = ["make-demo-vault.mjs", "make-test-vault.mjs", "make-shape-vault.mjs"];
@@ -35,10 +41,12 @@ function storeRoot() {
   return join(ROOT, ".fixtures");
 }
 
-function digestOf(args) {
+// github#86 -- `gens` must match the list scripts/smoke.mjs hashes for the same fixture, or
+// the two disagree on the digest and each cuts its own copy in the shared store.
+function digestOf(args, gens) {
   const h = createHash("sha256");
   h.update("format:" + FIXTURE_FORMAT);
-  for (const g of GENERATORS) h.update(readFileSync(join(HERE, g)));
+  for (const g of gens || GENERATORS) h.update(readFileSync(join(HERE, g)));
   h.update(JSON.stringify(args));
   return h.digest("hex").slice(0, 8);
 }
@@ -58,7 +66,7 @@ function findChrome() {
 function sleep(ms) { return new Promise((r) => setTimeout(r, ms)); }
 
 function buildFixture(fx) {
-  const digest = digestOf(fx.args);
+  const digest = digestOf(fx.args, fx.gens);
   const dir = join(storeRoot(), `${fx.name}-${digest}`);
   if (!existsSync(join(dir, ".stamp.json"))) {
     console.log(`  ${fx.name}: not in the shared fixture store yet, generating ...`);
@@ -78,7 +86,7 @@ function buildFixture(fx) {
   return { dir: htmlDir, htmlPath };
 }
 
-async function measure(htmlPath) {
+async function measure(htmlPath, dim) {
   const port = await new Promise((res, rej) => {
     const srv = createServer();
     srv.on("error", rej);
@@ -121,6 +129,10 @@ async function measure(htmlPath) {
       if (Date.now() > settleDeadline) throw new Error("page never settled (demo.busy() stayed true)");
       await sleep(120);
     }
+    // github#86 -- before the relayout below, so the disc being measured is this one
+    if (dim && dim !== "folder") {
+      await page.eval(`__vg.setDim(${JSON.stringify(dim)}); void 0`);
+    }
     // github#21
     await page.eval(`__vg.relayout(); void 0`).catch(() => {});
     const data = await page.eval(`JSON.stringify((function(){
@@ -144,7 +156,7 @@ async function main() {
   for (const fx of FIXTURES) {
     const built = buildFixture(fx);
     try {
-      const { band, positions, notes } = await measure(built.htmlPath);
+      const { band, positions, notes } = await measure(built.htmlPath, fx.dim);
       const folders = Object.keys(band).sort();
       const sortedBand = {};
       for (const f of folders) sortedBand[f] = band[f];
@@ -152,12 +164,13 @@ async function main() {
       for (const id of Object.keys(positions).sort((a, b) => Number(a) - Number(b))) {
         sortedPositions[id] = positions[id];
       }
-      const out = { vault: fx.name, notes, folders: folders.length, band: sortedBand, positions: sortedPositions };
+      const out = { vault: fx.name, dim: fx.dim || "folder", notes, folders: folders.length,
+                    band: sortedBand, positions: sortedPositions };
       const outPath = join(OUT_DIR, `${fx.name}.json`);
       writeFileSync(outPath, JSON.stringify(out, null, 1) + "\n");
       const inner = folders.filter((f) => band[f] === "inner").length;
-      console.log(`${fx.name}: wrote ${outPath} (${notes} notes, ${folders.length} folders, ` +
-        `${inner} inner / ${folders.length - inner} outer)`);
+      console.log(`${fx.name}: wrote ${outPath} (${notes} notes, ${folders.length} groups, ` +
+        `${inner} inner / ${folders.length - inner} outer, grouped by ${fx.dim || "folder"})`);
     } finally {
       rmSync(built.dir, { recursive: true, force: true });
     }

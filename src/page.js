@@ -693,6 +693,12 @@ function mountVaultGraph(root, data, deps) {
    */
   /** @type {Record<string, { g: string, sub: string, dirs: string[] }>} */
   var tagFiling = dict();
+  // github#86 D-4 -- how many notes CARRY each tag, anywhere in their list, against the
+  // number filed under it. A tag has no path to disclose, so this is what its legend row
+  // has to say instead: the count on the row is the dots on the disc, and where a note is
+  // filed under an earlier tag the two differ and the row says by how much.
+  /** @type {Record<string, number>} */
+  var tagCarried = dict();
   var tagFilingBuilt = false;
 
   /** @param {string[]} tags @returns {{ g: string, sub: string, dirs: string[] }} */
@@ -709,16 +715,23 @@ function mountVaultGraph(root, data, deps) {
     return { g: seg[0], sub: seg[1] || "", dirs: seg.slice(1) };
   }
 
-  /** @param {string} [only] one node id, for a node added after the table was built */
-  function buildTagFiling(only) {
-    if (only !== undefined) {
-      if (tagFilingBuilt) tagFiling[only] = fileTags(graph.getNodeAttribute(only, "tags"));
-      return;
-    }
+  function buildTagFiling() {
     if (tagFilingBuilt) return;
     tagFilingBuilt = true;
     tagFiling = dict();
-    graph.forEachNode(function (id, a) { tagFiling[id] = fileTags(a.tags); });
+    tagCarried = dict();
+    graph.forEachNode(function (id, a) {
+      if (a.dupOf) return;
+      tagFiling[id] = fileTags(a.tags);
+      /** @type {Record<string, boolean>} */
+      var once = dict();
+      (a.tags || []).forEach(function (t) {
+        var g = String(t).split("/").filter(Boolean)[0];
+        if (!g || once[g]) return;
+        once[g] = true;
+        tagCarried[g] = (tagCarried[g] || 0) + 1;
+      });
+    });
   }
 
   /** @param {string} id @param {NodeAttrs} [a] @returns {string} */
@@ -5276,8 +5289,14 @@ function mountVaultGraph(root, data, deps) {
         (a.words ? '<span>' + a.words + ' words</span>' : "") +
         (a.created ? '<span>' + esc(a.created) + '</span>' : "") +
       '</div>' +
-      '<div>' + (a.tags || []).slice(0, 8).map(function (t) {
-        return '<span class="chip">#' + esc(t) + '</span>';
+      // github#86 D-1 -- grouped by tag, say which of them put the note where it is
+      '<div>' + (a.tags || []).slice(0, 8).map(function (t, ti) {
+        // Only worth saying while the filing EXCLUDES the others; with a dot in every tag
+        // there is nothing to choose between them.
+        var files = state.dim === "tag" && !multiTag && ti === 0;
+        return '<span class="chip"' +
+               (files ? ' style="border-style:solid" title="Filed under this tag"' : '') +
+               '>#' + esc(t) + '</span>';
       }).join("") + '</div>' +
       '<div class="chip" style="border-style:dashed">' + esc(a.folder) +
         (a.sub ? ' / ' + esc(a.sub) : '') + ' / ' + esc(a.ntype) + '</div>' +
@@ -5346,6 +5365,22 @@ function mountVaultGraph(root, data, deps) {
     // github#3, github#50
     if (!counts[g]) return "No notes on the disc";
     return bandLock && bandLock[g] ? "Inner ring" : "Outer ring";
+  }
+
+  /**
+   * github#86 D-4 -- what a legend row says when you point at it. A folder row discloses its
+   * subfolders by unfolding; a tag has no path, so the one thing worth disclosing is the gap
+   * between the dots in its wedge and the notes that carry it. With "Notes in every tag" on
+   * there is no gap, and the row says nothing extra.
+   * @param {string} g
+   */
+  function rowTitle(g) {
+    var base = "Highlight " + g;
+    if (state.dim !== "tag") return base;
+    var carried = tagCarried[g];
+    var filed = folderCount[g] || 0;
+    if (carried === undefined || carried === filed) return base;
+    return base + " -- " + filed + " filed here, " + carried + " carry this tag";
   }
 
   // github#50
@@ -5482,6 +5517,8 @@ function mountVaultGraph(root, data, deps) {
               : '<button class="eye none" disabled aria-hidden="true"></button>') +
         '<button' + lgAttrs + ' data-g="' + esc(g) + '" data-hl="' + (hl ? "on" : "off") +
           '" aria-pressed="' + vis + '" title="Highlight ' + esc(g) + '">' +
+        '<button class="lg" data-g="' + esc(g) + '" data-hl="' + (hl ? "on" : "off") +
+          '" aria-pressed="' + vis + '" title="' + esc(rowTitle(g)) + '">' +
         '<span class="sw' + (bandLock && bandLock[g] ? ' sw-in' : '') +
           '" title="' + swatchTitle(g, bandLock) +
           '" style="background:' + swatchFill(g) + '"></span>' +
