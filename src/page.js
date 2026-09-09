@@ -3756,6 +3756,9 @@ function mountVaultGraph(root, data, deps) {
     })();
     cascadeRun = { raf: 0, tick: NOW(), guard: WIN.setTimeout(watchdog, STALL_MS), sizeCap: sizeCap,
                    skel: moveFrom ? null : freshSkel() };
+    // github#78, design/0006
+    var barWalking = barWalkStart();
+
     (function step() {
       var tn = NOW();
       var adv = (tn - tPrev) / msPerFrame;
@@ -3765,6 +3768,8 @@ function mountVaultGraph(root, data, deps) {
       if (cascadeRun) cascadeRun.tick = tn;
       var pr = Math.min(1, frame / Math.max(1, span));
       var ease = pr * pr * (3 - 2 * pr);
+      // github#78
+      if (barWalking) barWalkTick(ease);
       var busy = false;
       for (var i = 0; i < moving.length; i++) {
         var id = moving[i];
@@ -3905,7 +3910,7 @@ function mountVaultGraph(root, data, deps) {
                            msPerFrame: Math.round(msPerFrame * 1000) / 1000,
                            moving: moving.length, run: !!cascadeRun };
       if (busy || pr < 1 || resid > 0.5) cascadeRun.raf = WIN.requestAnimationFrame(step);
-      else { lastCascade.exit = "converged"; settle(); }
+      else { lastCascade.exit = "converged"; barWalkEnd(); settle(); }
     })();
   }
 
@@ -5095,6 +5100,14 @@ function mountVaultGraph(root, data, deps) {
   }
 
   // github#78, design/0006
+  /** @type {Record<string, number> | null} */
+  var barShown = null;
+  /** @type {Record<string, number> | null} */
+  var barNow = null;
+  /** @type {Record<string, number> | null} */
+  var barPrev = null;
+
+  // github#78, design/0006
   /** @returns {{ max: number, group: string }} */
   function barBasis() {
     var names = order[state.dim] || [], out = { max: 0, group: "" };
@@ -5179,6 +5192,8 @@ function mountVaultGraph(root, data, deps) {
 
     // github#78
     var basis = barBasis();
+    /** @type {Record<string, number>} */
+    var rendered = dict();
 
     setHTML($("legend"), names.map(function (g) {
       var vis = !isHidden(g);
@@ -5194,8 +5209,10 @@ function mountVaultGraph(root, data, deps) {
 
       // github#78, design/0006
       var share = barShare(g, basis);
+      rendered[g] = share;
+      var shown = cascadeRun && barShown && barShown[g] !== undefined ? barShown[g] : share;
       var lgAttrs = share
-        ? ' class="lg bar" style="--vg-share:' + (share * 100).toFixed(3) +
+        ? ' class="lg bar" style="--vg-share:' + (shown * 100).toFixed(3) +
           '%;--vg-bar:' + colorOf(g) + '"'
         : ' class="lg"';
       var ctTitle = share
@@ -5275,6 +5292,10 @@ function mountVaultGraph(root, data, deps) {
       }
       return row;
     }).join(""));
+
+    // github#78, design/0006
+    if (!barShown) { barPrev = barNow; }
+    barNow = rendered;
 
     /**
      * Every legend element matching a selector. The callback takes an HTMLElement: these are
@@ -6298,6 +6319,60 @@ function mountVaultGraph(root, data, deps) {
     attempt(placeLogo); attempt(heatBuild); attempt(buildLegend);
     if (persist && onUnlinkedTintByFolder) onUnlinkedTintByFolder(unlinkedTintByFolder);
     return unlinkedTintByFolder;
+  }
+
+  // github#78, design/0006
+  /** @param {Record<string, number>} map */
+  function paintBars(map) {
+    var host = $("legend");
+    if (!host) return;
+    Array.prototype.forEach.call(host.querySelectorAll(".lg.bar[data-g]"),
+      /** @param {HTMLElement} el */ function (el) {
+        var g = el.getAttribute("data-g");
+        if (g === null || map[g] === undefined) return;
+        el.style.setProperty("--vg-share", (map[g] * 100).toFixed(3) + "%");
+      });
+  }
+
+  // github#78, design/0006
+  /** @returns {boolean} whether a walk is worth running */
+  function barWalkStart() {
+    barShown = null;
+    if (!countBars || !barPrev || !barNow) return false;
+    var moved = false;
+    Object.keys(barNow).forEach(function (g) {
+      var a = barPrev[g] === undefined ? 0 : barPrev[g];
+      if (Math.abs(a - barNow[g]) > 0.0005) moved = true;
+    });
+    if (!moved) return false;
+    /** @type {Record<string, number>} */
+    var from = dict();
+    Object.keys(barNow).forEach(function (g) {
+      from[g] = barPrev && barPrev[g] !== undefined ? barPrev[g] : 0;
+    });
+    barShown = from;
+    paintBars(from);
+    return true;
+  }
+
+  // github#78, design/0006
+  /** @param {number} e eased progress, 0..1, the disc's own */
+  function barWalkTick(e) {
+    if (!barShown || !barNow) return;
+    /** @type {Record<string, number>} */
+    var at = dict();
+    Object.keys(barNow).forEach(function (g) {
+      var a = barShown[g] === undefined ? 0 : barShown[g];
+      at[g] = a + (barNow[g] - a) * e;
+    });
+    paintBars(at);
+  }
+
+  // github#78, design/0006
+  function barWalkEnd() {
+    if (!barShown) return;
+    barShown = null;
+    if (barNow) paintBars(barNow);
   }
 
   // github#78, design/0006

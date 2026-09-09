@@ -3329,6 +3329,22 @@ check("legend count bars scale to the largest visible folder", async (p) => {
     return { order: order, rows: rows };
   })()`);
 
+  // github#78, design/0006
+  const settleBars = async () => {
+    let last = null;
+    for (let i = 0; i < 60; i++) {
+      const now = await p.j(`(function(){
+        return [].map.call(document.querySelectorAll('#vg-legend .lg[data-g]'), function (lg) {
+          return getComputedStyle(lg).getPropertyValue('--vg-share').trim();
+        }).join(",");
+      })()`);
+      if (now === last) return true;
+      last = now;
+      await sleep(150);
+    }
+    return false;
+  };
+
   // github#78
   const basisOf = (rows) => rows
     .filter((r) => r.count > 0 && r.visible && /^\d+$/.test(r.ct))
@@ -3429,20 +3445,20 @@ check("legend count bars scale to the largest visible folder", async (p) => {
     const click = async (attr, g) =>
       p.eval(`document.querySelector('${sel1(attr, g)}').click(); void 0`);
     await click("data-g", biggest.g);
-    await sleep(400);
+    await settleBars();
     const after = await read();
     const row = after.rows.find((r) => r.g === biggest.g);
     sel = row && row.bar && Math.abs(row.pct - biggest.pct) < 0.001;
     if (!sel) wrong.push(`selecting ${biggest.g} changed its bar (${row && row.size})`);
     await click("data-g", biggest.g);
-    await sleep(400);
+    await settleBars();
 
     // github#78, design/0006
     const runnerUp = base.rows.filter((r) => r.bar && r.g !== biggest.g)
       .sort((a, b) => b.count - a.count)[0];
     if (runnerUp) {
       await click("data-eye", biggest.g);
-      await sleep(700);
+      await settleBars();
       const h2 = await read();
       const basis2 = basisOf(h2.rows);
       const promoted = h2.rows.find((r) => r.g === runnerUp.g);
@@ -3460,7 +3476,7 @@ check("legend count bars scale to the largest visible folder", async (p) => {
                    `(${promoted && promoted.pct}%)`);
       }
       await click("data-eye", biggest.g);
-      await sleep(700);
+      await settleBars();
       const restored = await read();
       if (basisOf(restored.rows) !== basis) {
         wrong.push(`showing ${biggest.g} again left the basis at ${basisOf(restored.rows)}`);
@@ -3477,7 +3493,7 @@ check("legend count bars scale to the largest visible folder", async (p) => {
       var chip = lg && lg.querySelector('[data-only]');
       if (chip) chip.click();
     })(); void 0`);
-    await sleep(900);
+    await settleBars();
     const only = await read();
     const barred = only.rows.filter((r) => r.bar);
     const full = barred.filter((r) => Math.abs(r.pct - 100) < 0.01);
@@ -3490,7 +3506,7 @@ check("legend count bars scale to the largest visible folder", async (p) => {
       var all = document.getElementById('vg-allon');
       if (all) all.click();
     })(); void 0`);
-    await sleep(900);
+    await settleBars();
     const back = await read();
     if (back.rows.filter((r) => r.bar).length !== before.rows.filter((r) => r.bar).length) {
       wrong.push(`showing all again left ${back.rows.filter((r) => r.bar).length} barred, ` +
@@ -3501,7 +3517,7 @@ check("legend count bars scale to the largest visible folder", async (p) => {
   // github#50, github#3
   const startOn = await p.eval(`__vg.unlinkedByFolder`);
   await p.eval(`__vg.setUnlinkedByFolder(false); void 0`);
-  await sleep(700);
+  await settleBars();
   const sep = await read();
   const sepBasis = basisOf(sep.rows);
   let paren = 0;
@@ -3519,7 +3535,7 @@ check("legend count bars scale to the largest visible folder", async (p) => {
     }
   }
   await p.eval(`__vg.setUnlinkedByFolder(${startOn}); void 0`);
-  await sleep(700);
+  await settleBars();
 
   const titled = base.rows.find((r) => r.g === (biggest && biggest.g));
   return {
@@ -3645,6 +3661,65 @@ check("the thinnest count bar survives a hover in pixels, not just in CSS", asyn
             (nearAccent ? "  (highlighted NOT asserted: this bar's hue is the accent's)" : "") +
             (over.hovered ? "" : "  <- NO :hover from the harness") +
             (weakest < FLOOR_MIN ? `  <- a state paints under ${FLOOR_MIN}px` : "")
+  };
+});
+
+// github#78, design/0006
+check("the count bars walk on the cascade's clock and land on the resting layout", async (p) => {
+  const shareOf = (g) => p.j(`(function(){
+    var lg = document.querySelector('[data-g=' + JSON.stringify(${JSON.stringify(g)}) + ']');
+    return lg ? getComputedStyle(lg).getPropertyValue('--vg-share').trim() : null;
+  })()`);
+  const pct = (v) => (v && v.slice(-1) === "%" ? parseFloat(v) : NaN);
+
+  const order = await p.j(`(function(){
+    return __vg.groupOrder().filter(function (g) { return __vg.groupCount(g) > 0; })
+      .map(function (g) { return { g: g, n: __vg.groupCount(g) }; })
+      .sort(function (a, b) { return b.n - a.n; });
+  })()`);
+  if (order.length < 2) return { ok: true, detail: `only ${order.length} non-empty group -- nothing to rescale` };
+  const biggest = order[0], runnerUp = order[1];
+
+  const before = pct(await shareOf(runnerUp.g));
+  // github#78
+  await p.eval(`document.querySelector('[data-eye=' + JSON.stringify(${JSON.stringify(biggest.g)}) + ']').click(); void 0`);
+
+  const seen = [];
+  for (let i = 0; i < 24; i++) {
+    const v = pct(await shareOf(runnerUp.g));
+    if (!Number.isNaN(v) && (seen.length === 0 || seen[seen.length - 1] !== v)) seen.push(v);
+    if (v >= 99.99) break;
+    await sleep(60);
+  }
+  let last = null, landed = null;
+  for (let i = 0; i < 60; i++) {
+    const v = await shareOf(runnerUp.g);
+    if (v === last) { landed = v; break; }
+    last = v;
+    await sleep(150);
+  }
+  const target = pct(landed);
+  const mid = seen.filter((v) => v > before + 0.01 && v < 99.99);
+
+  await p.eval(`document.querySelector('[data-eye=' + JSON.stringify(${JSON.stringify(biggest.g)}) + ']').click(); void 0`);
+  let back = null, prev = null;
+  for (let i = 0; i < 60; i++) {
+    const v = await shareOf(runnerUp.g);
+    if (v === prev) { back = v; break; }
+    prev = v;
+    await sleep(150);
+  }
+
+  const ok = mid.length >= 2 && Math.abs(target - 100) < 0.01 &&
+             Math.abs(pct(back) - before) < 0.01;
+  return {
+    ok,
+    detail: `${runnerUp.g} grew ${before.toFixed(3)}% -> ${target.toFixed(3)}% when ` +
+            `${JSON.stringify(biggest.g)} was hidden, through ${mid.length} intermediate ` +
+            `value(s) [${mid.slice(0, 4).map((v) => v.toFixed(1)).join(", ")}...]; ` +
+            `restored to ${pct(back).toFixed(3)}%` +
+            (mid.length < 2 ? "  <- it SNAPPED, no walk" : "") +
+            (Math.abs(target - 100) >= 0.01 ? "  <- did not land on the resting 100%" : "")
   };
 });
 

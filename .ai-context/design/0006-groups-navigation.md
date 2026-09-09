@@ -236,6 +236,26 @@ the bar is visible, and on a 4px bar it decided no. An earlier note here cleared
 this; that test was run on the 100% bar, where a 1.5px edge haze is invisible, and it was
 wrong. `obsidian-smoke.mjs --only "hover"` now asserts `shadow: none` in a real Obsidian.
 
+### The bars walk on the cascade's clock, not on a clock of their own
+
+A bar's width is part of the layout, so it animates the way the layout animates: inside the
+cascade's own frame loop, off the same eased progress the notes get. `barWalkStart()` runs once
+where the loop is armed, `barWalkTick(ease)` runs beside the note interpolation, and
+`barWalkEnd()` fires at the `converged` exit and paints the resting values **by assignment** —
+so the last frame IS the resting layout rather than something that merely converged on it.
+
+A CSS transition was the obvious alternative and is the wrong one: it would run on its own
+clock, land whenever its own duration expired, and put a second source of truth for "where is
+the bar now" next to the cascade's. `animation.md`'s core invariant only holds if one clock owns
+the frame.
+
+The state is three maps mirroring `colorShown`: `barPrev` and `barNow` are the endpoints
+recorded per render, and `barShown` is what is painted mid-walk — `null` at rest so the resting
+value is authoritative, and read only while `cascadeRun` is live so a stuck walk is
+unobservable. Because a click rebuilds the legend, the row's class comes from the resting share
+and its width from `barShown`; taking both from one value gives either a snap or a bar that
+outlives its folder.
+
 ### The bar's colour is cached, and goes stale with the swatch it sits under
 
 The bar takes `colorOf(g)` as an inline hex in `--vg-bar`, which is exactly the treatment the

@@ -1304,8 +1304,49 @@ github#84 would take, which is the point of asserting it now.
 `var()` normalised from `document.body` returns `rgb(0, 0, 0)` and reads as a broken colour
 rather than a live one — the first cut of that mutation test reported exactly that.
 
+### The bars walk on the disc's own clock, and the last frame is the resting layout
+
+A bar's width is a fact about the layout, so when the layout walks the bar walks with it — on
+the same frame loop, the same `pr = frame / span`, and the same `ease = pr * pr * (3 - 2 * pr)`
+the notes use. There is no second timer and no CSS transition: a transition would run on its own
+clock and land whenever it liked, which is precisely the class of bug `animation.md` forbids.
+
+**The last frame of a bar's walk is the resting layout**, and it lands there by assignment, not
+by convergence: `barWalkEnd()` paints `barNow` exactly at the cascade's `converged` exit rather
+than trusting the final lerp. Measured on each fixture — hide the largest folder, watch the
+runner-up grow to fill the row:
+
+| fixture | row | rest to target | distinct values seen | restored |
+|---|---|---|---|---|
+| demo | `01 - Projects` | 49.261% to **100.000%** | 23 | 49.261% |
+| 10k | `02 - Areas` | 35.291% to **100.000%** | 24 | 35.291% |
+| shape | `notes` | 13.550% to **100.000%** | 23 | 13.550% |
+
+A separate harness sampled the bar and a moving note's radius on the same ticks: the share went
+49.261% to 100.000% while the watched note's radius moved on those same ticks (3328, 3405,
+3302, 3252, 3354), and the settled frame was **identical to a fresh render on all 18 rows**.
+
+**Three maps, and the null at rest is the load-bearing part.** `barNow` and `barPrev` are the two
+endpoints a cascade interpolates between, recorded once per render; `barShown` is what is on
+screen mid-walk and is `null` at rest, so the resting value is authoritative — the same shape as
+`colorShown` for a hue walk. The override is also gated on `cascadeRun`, so a walk that somehow
+never ended cannot be observed: with no cascade running, `buildLegend` renders the resting share.
+
+**A rebuild mid-cascade may not snap the bar back.** A click rebuilds the legend, so the row's
+*class* comes from the resting share (which folders have a bar at all) while its *width* comes
+from `barShown` (where the walk has got to). Deciding both from the same value gives either a
+snap or a bar that outlives its folder.
+
+**This is what made the bar checks flaky, and the fix was to stop sleeping.** Once the bars
+moved, `count bars` read **63.807%** mid-walk where it expected 100% — a `sleep(700)` racing a
+1600ms cascade. Every fixed sleep after a state change is now `settleBars()`, which polls until
+no `--vg-share` changes. A time-based wait against an animation is a false failure waiting for
+a slow machine.
+
 ```bash
 node scripts/smoke.mjs --only "count bars"      # the basis, the edge cases, hover, selection
+node scripts/smoke.mjs --only "walk on the"     # the bars ride the cascade's clock and land on rest
+node scripts/smoke.mjs --only "last frame"      # the disc's own version of the same law
 node scripts/smoke.mjs --only "theme flip"      # the bar follows its swatch; github#84 reported
 node scripts/smoke.mjs --only "right edge"      # 1 edge, not 2 -- the column survived
 node scripts/smoke.mjs --only "golden"          # the disc did not move
