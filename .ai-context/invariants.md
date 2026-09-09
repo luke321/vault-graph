@@ -1142,6 +1142,16 @@ node scripts/smoke.mjs --only "thinnest count bar"    # pixels in all three row 
 node scripts/obsidian-smoke.mjs --only "hover"        # the CSS half, in real Obsidian
 ```
 
+**A file check is not an instance check, and this cost a round trip.** Obsidian caches
+`main.js` and `styles.css` until the plugin reloads, so the files on disk can match the build
+**byte for byte** while the open window still runs the previous one. The install was verified
+by hashing all three files against the build, which passed, and the running instance was then
+*assumed* from launch order. That assumption was wrong and the bug looked unfixed for another
+round. `install-plugin.ps1` now prints a red warning naming the three ways to reload whenever
+it copies under a live Obsidian, and a green line when it does not. **Do not judge a fix in
+the plugin without a reload**, and prefer closing Obsidian, installing, then starting it —
+that is the only order with nothing to remember.
+
 Three things that check got wrong before it was right, all worth keeping:
 
 - **`p.j` wraps its expression in `JSON.stringify`**, so it returns `undefined` for an async
