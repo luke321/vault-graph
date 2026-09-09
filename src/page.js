@@ -3374,6 +3374,7 @@ function mountVaultGraph(root, data, deps) {
    * @property {(id: string) => number} [order]       arrival rank; clockwise when absent
    * @property {number} [spread]                      stagger window, frames
    * @property {boolean} [cross]                       github#76: swap two discs in one sweep
+   * @property {(pr: number) => void} [onFrame]         called each frame with progress 0..1
    * @property {number} [totalMs]
    * @property {(pr: number) => void} [onFrame]
    */
@@ -6437,6 +6438,8 @@ function mountVaultGraph(root, data, deps) {
     }
 
     // github#76
+    // github#76
+    var spanWas = live && renderer && geomLock ? geomLock.maxR * UNIT * 1.02 : 0;
     if (live) {
       /** @type {Record<string, string>} */
       var pc = dict();
@@ -6465,10 +6468,30 @@ function mountVaultGraph(root, data, deps) {
 
     hardRelayout(false, live, true);
     attempt(placeLogo); attempt(heatBuild); attempt(buildLegend);
+
     // github#76
-    var landed = function () { preRootColor = null; preRootShade = null; };
-    if (live) cascade(landed, movesFrom ? { colToggle: true, cross: true, movesFrom: movesFrom }
-                                        : { colToggle: true, cross: true });
+    var spanNow = live && renderer && geomLock ? geomLock.maxR * UNIT * 1.02 : 0;
+    /** @type {((pr: number) => void) | null} */
+    var zoom = null;
+    if (spanWas > 0 && spanNow > 0 && Math.abs(spanWas - spanNow) > 1) {
+      var setSpan = /** @param {number} v */ function (v) {
+        if (renderer) renderer.setCustomBBox({ x: [-v, v], y: [-v, v] });
+      };
+      setSpan(spanWas);
+      zoom = /** @param {number} pr */ function (pr) {
+        var e = pr < 0 ? 0 : pr > 1 ? 1 : pr;
+        setSpan(spanWas + (spanNow - spanWas) * (e * e * (3 - 2 * e)));
+      };
+    }
+    var landed = function () {
+      preRootColor = null; preRootShade = null;
+      if (zoom) zoom(1);
+    };
+    /** @type {CascadeOpts} */
+    var copts = { colToggle: true, cross: true };
+    if (movesFrom) copts.movesFrom = movesFrom;
+    if (zoom) copts.onFrame = zoom;
+    if (live) cascade(landed, copts);
     else if (renderer) renderer.refresh();
     return state.root;
   }
