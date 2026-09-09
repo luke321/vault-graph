@@ -301,7 +301,10 @@ check("the resting disc is on the lattice", async (p) => {
     var rad = {inner: [], outer: []};
     __vg.graph.forEachNode(function(id, a){
       if ((__vg.alpha[id] || 0) < 0.999) return;
-      if (__vg.graph.degree(id) === 0) return;
+      // github#86 -- ask the predicate the LAYOUT asks. graph.degree() is 0 for a satellite
+      // too, whose links are drawn on hover only, and those dots are on the lattice like any
+      // other; isOrphan() names the sunflower-packed notes this exclusion is actually about.
+      if (__vg.isOrphan(id)) return;
       // github#86 -- the group the dot is DRAWN in, which is the grouping answer in either
       // dimension. Identical to a.folder while grouped by folder with unlinked notes joining
       // their folder, and right when either of those is not the case.
@@ -671,6 +674,220 @@ check("tags: the colour panel says which dimension owns it", async (p) => {
     ok,
     detail: `${r.folderRows} folder rows, ${r.tagRows} while grouped by tag, ` +
             `${r.backRows} again after switching back; it says ${JSON.stringify(r.says.slice(0, 60))}`,
+  };
+});
+
+/* ------------------------------------------------------- github#86 D-9, design/0014 --
+ * "Notes in every tag": one dot per tag a note carries. The whole risk is that a copy gets
+ * counted as a note somewhere, so most of these count something twice on purpose.
+ */
+
+check("multi: a dot per tag, and the vault still has the notes it has", async (p) => {
+  const r = await p.j(`(function(){
+    var tally = function () {
+      var nodes = 0, sats = 0, dots = 0, multi = 0;
+      __vg.graph.forEachNode(function (id, a) {
+        nodes++;
+        if (a.dupOf) { sats++; return; }
+        var seen = {}, k = 0;
+        (a.tags || []).forEach(function (t) { if (!seen[t]) { seen[t] = 1; k++; } });
+        if (k > 1) multi++;
+        dots += k > 1 ? k : 1;
+      });
+      var plan = __vg.buildWedgePlan(false), members = 0;
+      plan.cells.forEach(function (c) { members += c.list.length; });
+      var summed = 0;
+      __vg.groupOrder().forEach(function (g) { summed += __vg.groupCount(g); });
+      var heat = 0;
+      __vg.heat.keys.forEach(function (k) { heat += __vg.heat.days[k].ids.length; });
+      return { nodes: nodes, sats: sats, wantDots: dots, multi: multi,
+               members: members, summed: summed, heat: heat };
+    };
+    __vg.setDim("tag");
+    var off = tally();
+    __vg.setMultiTag(true);
+    var on = tally();
+    var footer = (document.querySelector("#vg-stats") || {}).textContent || "";
+    __vg.setMultiTag(false);
+    __vg.setDim("folder");
+    return { off: off, on: on, footer: footer, pinned: __vg.state.pinned.length };
+  })()`);
+  if (!r.off.multi) {
+    return { ok: true, detail: `NOT ASSERTED: no note on this vault carries two tags, ` +
+                               `so there is no second copy to make` };
+  }
+  const ok = r.on.nodes === r.off.wantDots &&
+             r.on.sats === r.off.wantDots - r.off.nodes &&
+             r.on.members === r.on.nodes - r.pinned &&
+             r.on.summed === r.on.nodes &&
+             // a copy is not a note: the day cells and the note count must not budge
+             r.on.heat === r.off.heat &&
+             r.footer.indexOf(String(r.off.nodes) + " notes") >= 0;
+  return {
+    ok,
+    detail: `${r.off.nodes} notes, ${r.off.multi} of them carrying more than one tag -> ` +
+            `${r.on.nodes} dots (wanted ${r.off.wantDots}), ${r.on.sats} of them copies; ` +
+            `plan ${r.on.members} members, counts sum to ${r.on.summed}; ` +
+            `heatmap holds ${r.off.heat} note-days with the copies off and ${r.on.heat} with ` +
+            `them on; the footer still says ${r.off.nodes} notes`,
+  };
+});
+
+check("multi: a copy is the same note, everywhere it is asked", async (p) => {
+  const r = await p.j(`(function(){
+    __vg.setDim("tag");
+    __vg.setMultiTag(true);
+    var sat = null;
+    __vg.graph.forEachNode(function (id, a) { if (!sat && a.dupOf) sat = id; });
+    if (!sat) { __vg.setMultiTag(false); __vg.setDim("folder"); return { none: true }; }
+    var note = __vg.noteOf(sat);
+    var copies = __vg.copiesOf(sat);
+    // the timeline reveals a copy with its note, so the date range takes them together
+    var sameRank = __vg.rankOf(sat) === __vg.rankOf(note) && __vg.rankOf(note) > 0;
+    // clicking a copy selects the NOTE
+    __vg.select(sat);
+    var selected = __vg.state.selected;
+    var panel = (document.querySelector("#vg-detail") || {}).hidden;
+    __vg.select(null);
+    // hovering a copy lights every copy of it, and its note's neighbours
+    __vg.state.hovered = sat;
+    var focus = __vg.focusSet() || {};
+    var focusHas = copies.every(function (c) { return !!focus[c]; });
+    var nb = (__vg.adj[note] || []).map(function (e) { return e.o; });
+    var neighboursLit = nb.length === 0 || nb.every(function (n) { return !!focus[n]; });
+    __vg.state.hovered = null;
+    // and pinning a copy pins the note
+    __vg.togglePin(sat);
+    var pinnedIsNote = __vg.state.pinned.indexOf(note) >= 0 &&
+                       __vg.state.pinned.indexOf(sat) < 0;
+    __vg.togglePin(sat);
+    var unpinned = __vg.state.pinned.length === 0;
+    __vg.setMultiTag(false);
+    __vg.setDim("folder");
+    return { sat: sat, note: note, copies: copies.length, sameRank: sameRank,
+             selected: selected, panelHidden: panel, focusHas: focusHas,
+             neighboursLit: neighboursLit, pinnedIsNote: pinnedIsNote, unpinned: unpinned };
+  })()`);
+  if (r.none) {
+    return { ok: true, detail: "NOT ASSERTED: no note on this vault carries two tags" };
+  }
+  const ok = r.selected === r.note && r.panelHidden === false && r.sameRank &&
+             r.focusHas && r.neighboursLit && r.pinnedIsNote && r.unpinned;
+  return {
+    ok,
+    detail: `${r.copies} copies of one note: selecting one selected ${JSON.stringify(r.selected)} ` +
+            `(the note is ${JSON.stringify(r.note)}) and opened the panel; timeline rank ` +
+            `${r.sameRank ? "shared" : "DIFFERENT"}; hovering lit every copy ` +
+            `${r.focusHas ? "yes" : "NO"} and the note's neighbours ${r.neighboursLit ? "yes" : "NO"}; ` +
+            `pinning pinned the note ${r.pinnedIsNote ? "yes" : "NO"}`,
+  };
+});
+
+check("multi: a copy's links are drawn only while it is hovered", async (p) => {
+  const r = await p.j(`(function(){
+    __vg.setDim("tag");
+    __vg.setMultiTag(true);
+    var sat = null;
+    __vg.graph.forEachNode(function (id, a) {
+      if (!sat && a.dupOf && (__vg.adj[a.dupOf] || []).length) sat = id;
+    });
+    if (!sat) { __vg.setMultiTag(false); __vg.setDim("folder"); return { none: true }; }
+    var note = __vg.noteOf(sat);
+    var want = (__vg.adj[note] || []).length;
+    var rest = __vg.graph.edges().length;
+    var degRest = __vg.graph.degree(sat);
+    __vg.state.hovered = sat; __vg.syncLazyEdges();
+    var hovered = __vg.graph.edges().length;
+    var degHover = __vg.graph.degree(sat);
+    __vg.state.hovered = null; __vg.syncLazyEdges();
+    var after = __vg.graph.edges().length;
+    __vg.setMultiTag(false);
+    __vg.setDim("folder");
+    return { rest: rest, hovered: hovered, after: after, want: want,
+             degRest: degRest, degHover: degHover,
+             noteDeg: __vg.graph.degree(note), lazy: __vg.lazyEdges };
+  })()`);
+  if (r.none) {
+    return { ok: true, detail: "NOT ASSERTED: no linked note on this vault carries two tags" };
+  }
+  // D-10 -- at rest the web is the NOTES' web, so the link count keeps meaning what it says
+  const ok = r.degRest === 0 && r.degHover === r.want && r.after === r.rest &&
+             r.hovered > r.rest;
+  return {
+    ok,
+    detail: `a copy of a note with ${r.want} links: degree ${r.degRest} at rest, ` +
+            `${r.degHover} while hovered; the graph held ${r.rest} edges at rest, ` +
+            `${r.hovered} while hovered, ${r.after} after` +
+            (r.lazy ? " (this vault thins links, so the note's own are lazy too)" : ""),
+  };
+});
+
+check("multi: turning it off puts every note back exactly", async (p) => {
+  await settle(p);
+  const r = await p.j(`(function(){
+    var pos = function () {
+      var o = {};
+      __vg.graph.forEachNode(function (id, a) { if (!a.dupOf) o[id] = [a.x, a.y]; });
+      return o;
+    };
+    var drift = function (a, b) {
+      var moved = 0, worst = 0, who = "";
+      Object.keys(a).forEach(function (id) {
+        if (!b[id]) { moved++; return; }
+        var d = Math.hypot(b[id][0] - a[id][0], b[id][1] - a[id][1]);
+        if (d > 0.1) moved++;
+        if (d > worst) { worst = d; who = id; }
+      });
+      return { moved: moved, worst: +worst.toFixed(3), who: who };
+    };
+    __vg.setDim("tag");
+    var before = pos();
+    __vg.setMultiTag(true);
+    var landed = pos();
+    __vg.relayout();
+    var fresh = pos();
+    __vg.setMultiTag(false);
+    var back = pos();
+    __vg.setDim("folder");
+    return { onVsFresh: drift(landed, fresh), roundTrip: drift(before, back),
+             n: Object.keys(before).length };
+  })()`);
+  const ok = !r.onVsFresh.moved && !r.roundTrip.moved;
+  return {
+    ok,
+    detail: `${r.n} notes: with the copies on, ${r.onVsFresh.moved} sit anywhere but where a ` +
+            `fresh relayout puts them (worst ${r.onVsFresh.worst}); turning them off again ` +
+            `left ${r.roundTrip.moved} moved (worst ${r.roundTrip.worst}` +
+            (r.roundTrip.who ? `, #${r.roundTrip.who}` : "") + ")",
+  };
+});
+
+check("multi: the toggle is only offered while the disc is cut by tag", async (p) => {
+  const r = await p.j(`(function(){
+    var row = function () {
+      var el = document.querySelector("#vg-multirow");
+      var b = document.querySelector("#vg-multitag");
+      return { hidden: el ? !!el.hidden : null, pressed: b ? b.getAttribute("aria-pressed") : null,
+               label: b ? (b.textContent || "").trim() : null };
+    };
+    var folder = row();
+    __vg.setDim("tag");
+    var tag = row();
+    __vg.setMultiTag(true);
+    var on = row();
+    __vg.setMultiTag(false);
+    __vg.setDim("folder");
+    return { folder: folder, tag: tag, on: on, after: row() };
+  })()`);
+  if (r.folder.hidden === null) return { ok: false, detail: "no #vg-multirow on this build" };
+  const ok = r.folder.hidden === true && r.tag.hidden === false &&
+             r.tag.pressed === "false" && r.on.pressed === "true" &&
+             r.after.hidden === true && r.folder.label === "Notes in every tag";
+  return {
+    ok,
+    detail: `hidden by folder ${r.folder.hidden}, by tag ${r.tag.hidden}; pressed reads ` +
+            `${r.tag.pressed} then ${r.on.pressed}; back to hidden ${r.after.hidden}; ` +
+            `it is labelled ${JSON.stringify(r.folder.label)}`,
   };
 });
 

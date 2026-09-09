@@ -49,6 +49,24 @@ export class GraphStore implements GraphStoreApi {
     return id;
   }
 
+  /**
+   * github#86 -- drop a node and every edge touching it. Added for the satellite dots that
+   * "Notes in every tag" puts on the disc and takes off again; nothing else removes a node,
+   * because a vault's notes arrive once at mount. The renderer holds its own index, so a
+   * caller must follow this with a full refresh rather than one that skips indexation.
+   */
+  dropNode(id: string): void {
+    const around = this.adjacency.get(id);
+    if (!around) throw new Error(`GraphStore: node "${id}" not found`);
+    for (const rec of Array.from(around.values())) {
+      const other = rec.source === id ? rec.target : rec.source;
+      this.neighboursOf(other).delete(id);
+      this.edgeRecords.delete(rec.key);
+    }
+    this.adjacency.delete(id);
+    this.nodeAttrs.delete(id);
+  }
+
   addUndirectedEdge(source: string, target: string, attrs: EdgeAttrs): string {
     const a = this.adjacency.get(source);
     const b = this.adjacency.get(target);

@@ -108,6 +108,7 @@
  * @property {boolean} [unlinkedTintByFolder]
  * @property {boolean} [countBars]              github#78, design/0006
  * @property {"folder" | "tag"} [dim]         github#86, design/0014 -- absent means "folder"
+ * @property {boolean} [multiTag]             github#86 -- a dot per tag; absent means off
  * @property {boolean} [fitCap]               github#41, design/0011
  * @property {boolean} [sheetOpen]            github#82 -- absent means "decide from the width"
  * @property {boolean} [bandOpen]             github#82
@@ -122,6 +123,7 @@
  * @property {(v: boolean) => void | Promise<void>} [onUnlinkedByFolder]
  * @property {(v: boolean) => void | Promise<void>} [onUnlinkedTintByFolder]
  * @property {(v: "folder" | "tag") => void | Promise<void>} [onDim]   github#86
+ * @property {(v: boolean) => void | Promise<void>} [onMultiTag]       github#86
  * @property {(v: boolean) => void | Promise<void>} [onSheetOpen]
  * @property {(v: boolean) => void | Promise<void>} [onBandOpen]
  * @property {(v: boolean) => void | Promise<void>} [onCountBars]
@@ -173,6 +175,10 @@
  * @property {(v: boolean) => void} setCountBars
  * @property {(v: string) => string} setDim                        github#86
  * @property {(id: string) => { g: string, sub: string, dirs: string[] }} filingOf
+ * @property {(v: boolean) => boolean} setMultiTag                 github#86
+ * @property {boolean} multiTag
+ * @property {(id: string) => string} noteOf
+ * @property {(id: string) => string[]} copiesOf
  * @property {(v: boolean) => void} setFitCap
  * @property {() => void} applyHiddenDefaults
  * @property {() => void} heatBuild
@@ -748,8 +754,106 @@ function mountVaultGraph(root, data, deps) {
     return fileGroup(id);
   }
 
+  /**
+   * SATELLITES. github#86, design/0014 -- D-9, "Notes in every tag".
+   *
+   * A note carries any number of tags and the lattice gives every node exactly one cell, so
+   * the only way to show one note in three tags is to put three dots on the disc. With the
+   * toggle on, a note with k distinct tags is its PRIMARY (filed under the first, D-1) plus
+   * k-1 SATELLITES, one per further tag, each a real graph node so the planner, the cascade
+   * and the renderer need to know nothing about them.
+   *
+   * What a satellite is NOT is a second note. It shares its primary's adjacency array, its
+   * hub rank and its place in the timeline, and every walk that counts or ranks NOTES skips
+   * it on `dupOf` -- the heatmap, the search, the hub, the timeline and the footer. So the
+   * vault still has the number of notes it has, and only the disc has more dots.
+   */
+  // A NUL cannot occur in a vault path, so a satellite id can never collide with a
+  // note's. Same separator, same reason, as the cell key in buildWedgePlan.
+  var SAT_SEP = "\u0000";
+  var multiTag = deps.multiTag === true;
+  var onMultiTag = typeof deps.onMultiTag === "function" ? deps.onMultiTag : null;
+  /** @type {string[]} */
+  var satellites = [];
+  /** @type {Record<string, string[]>} */
+  var satsOf = dict();
+
+  /** @param {string} id @returns {string} the note a dot stands for; itself, for a real note */
+  function noteOf(id) {
+    var d = graph.hasNode(id) ? graph.getNodeAttribute(id, "dupOf") : "";
+    return d ? String(d) : id;
+  }
+
+  /** @param {string} id @returns {string[]} every dot standing for this note, primary first */
+  function copiesOf(id) {
+    var n = noteOf(id);
+    var s = satsOf[n];
+    return s ? [n].concat(s) : [n];
+  }
+
+  function addSatellites() {
+    if (satellites.length) return;
+    buildTagFiling();
+    /** @type {[string, string[]][]} */
+    var multi = [];
+    graph.forEachNode(function (id, a) {
+      if (a.dupOf) return;
+      var tags = a.tags || [];
+      if (tags.length > 1) multi.push([id, tags]);
+    });
+    multi.forEach(function (pair) {
+      var id = pair[0], tags = pair[1], a = graph.getNodeAttributes(id);
+      // One dot per DISTINCT tag: the first is the primary's, and a note that lists the same
+      // tag twice is still in that tag once.
+      /** @type {Record<string, boolean>} */
+      var seen = dict();
+      seen[String(tags[0])] = true;
+      for (var i = 1; i < tags.length; i++) {
+        var t = String(tags[i]);
+        if (seen[t]) continue;
+        seen[t] = true;
+        var sid = id + SAT_SEP + i;
+        graph.addNode(sid, {
+          label: a.label, x: a.x, y: a.y, size: a.size,
+          folder: a.folder, sub: a.sub, dirs: a.dirs, ntype: a.ntype,
+          tags: [t], path: a.path, deg: a.deg,
+          created: a.created, touched: a.touched, words: a.words, ghost: a.ghost,
+          dupOf: id
+        });
+        tagFiling[sid] = fileTags([t]);
+        // The SAME array, deliberately: a copy is as linked as the note is, and an orphan's
+        // copy is an orphan (isOrphan asks adj). Its edges are drawn on hover only (D-10).
+        if (adj[id]) adj[sid] = adj[id];
+        hubRank[sid] = hubRank[id];
+        if (tlRank[id] !== undefined) tlRank[sid] = tlRank[id];
+        if (tlMs[id] !== undefined) tlMs[sid] = tlMs[id];
+        alpha[sid] = alpha[id] !== undefined ? alpha[id] : 1;
+        satellites.push(sid);
+        (satsOf[id] || (satsOf[id] = [])).push(sid);
+      }
+    });
+  }
+
+  function dropSatellites() {
+    if (!satellites.length) return;
+    satellites.forEach(function (sid) {
+      if (state.hovered === sid) state.hovered = null;
+      if (state.selected === sid) state.selected = null;
+      graph.dropNode(sid);
+      delete tagFiling[sid]; delete adj[sid]; delete hubRank[sid];
+      delete tlRank[sid]; delete tlMs[sid]; delete alpha[sid];
+    });
+    satellites = [];
+    satsOf = dict();
+    // Anything keyed by node id and rebuilt on demand has to let go of them too.
+    lazyAdded = []; lazyShown = null;
+    neighbourCache = null;
+    focusSetCache = { key: undefined, set: null };
+  }
+
   // The filing exists from here down, and subOrder is its first reader.
   if (state.dim === "tag") buildTagFiling();
+  if (multiTag && state.dim === "tag") addSatellites();
   buildSubOrder();
 
   var SLOT_COUNT = 12;
@@ -2399,6 +2503,9 @@ function mountVaultGraph(root, data, deps) {
 
   /** @param {string} id */
   function togglePin(id) {
+    // github#86 -- the hub holds NOTES, and every copy of one is the same note: pinning a
+    // copy pins the note, and its other copies leave the ring with it.
+    id = noteOf(id);
     if (!unpin(id)) pin(id);
     hubChanged(true);
   }
@@ -2611,7 +2718,12 @@ function mountVaultGraph(root, data, deps) {
   function buildTimeline() {
     /** @type {[string, string][]} */
     var dated = [];
-    graph.forEachNode(function (id, a) { if (a.created) dated.push([id, a.created]); });
+    // github#86 -- the timeline reveals NOTES oldest first (design/0007), so a copy takes
+    // its note's rank rather than a rank of its own; giving it one would stretch tlMax and
+    // shift every note's place in the reveal.
+    graph.forEachNode(function (id, a) {
+      if (!a.dupOf && a.created) dated.push([id, a.created]);
+    });
     dated.sort(function (x, y) { return x[1] < y[1] ? -1 : x[1] > y[1] ? 1 : 0; });
     tlRank = dict(); tlDate = []; tlDateMs = []; tlMs = dict();
     dated.forEach(function (pair, i) {
@@ -2622,6 +2734,11 @@ function mountVaultGraph(root, data, deps) {
       tlDateMs.push(ms);
     });
     tlMax = dated.length;
+    satellites.forEach(function (sid) {
+      var n = noteOf(sid);
+      if (tlRank[n] !== undefined) tlRank[sid] = tlRank[n];
+      if (tlMs[n] !== undefined) tlMs[sid] = tlMs[n];
+    });
     buildDateSpan(dated);
   }
 
@@ -4244,7 +4361,11 @@ function mountVaultGraph(root, data, deps) {
   /** @type {[string, string][]} */
   var lazyAdded = [];
   function syncLazyEdges() {
-    if (!lazyEdges) return;
+    // github#86 D-10 -- a satellite carries NO edges of its own at rest, so the web at rest
+    // stays the notes' web and the link count keeps meaning what it says. Its links are drawn
+    // the way a big vault's thinned links already are: on hover, from the same adjacency its
+    // note has. So this runs whenever there is a copy on the disc, lazy vault or not.
+    if (!lazyEdges && !satellites.length) return;
     var want = state.hovered || state.selected || null;
     if (want === lazyShown) return;
     lazyAdded.forEach(function (pr) {
@@ -4395,6 +4516,10 @@ function mountVaultGraph(root, data, deps) {
       set = dict();
       set[f] = true;
       neighboursOf(f).forEach(function (n) { set[n] = true; });
+      // github#86 -- a note's other copies ARE that note, so they light with it. Their
+      // neighbours' copies are not lit: no line is drawn to those, and a lit dot with
+      // nothing joining it to the focus reads as a neighbour it is not.
+      if (satellites.length) copiesOf(f).forEach(function (c) { set[c] = true; });
     }
     focusSetCache.key = f;
     focusSetCache.set = set;
@@ -5121,6 +5246,9 @@ function mountVaultGraph(root, data, deps) {
 
   /** @param {string | null} id */
   function select(id) {
+    // github#86 -- clicking any copy selects the NOTE, so the detail panel, the hop trail
+    // and the pin are all about the note. focusSet() lights every copy of it in return.
+    if (id) id = noteOf(id);
     // github#73, design/0013
     // github#82 -- same: only the phone's sheet gets out of the way
     if (id && sheetOpen && narrow()) setSheet(false);
@@ -5732,6 +5860,8 @@ function mountVaultGraph(root, data, deps) {
       /** @type {string[]} */
       var found = [];
       graph.forEachNode(function (id, a) {
+        // github#86 -- one hit per note, not one per copy of it
+        if (a.dupOf) return;
         if (a.label.toLowerCase().indexOf(state.query) > -1) found.push(id);
       });
       found.sort(function (p, o) { return graph.getNodeAttribute(o, "deg") - graph.getNodeAttribute(p, "deg"); });
@@ -5902,6 +6032,12 @@ function mountVaultGraph(root, data, deps) {
   function syncDimUI() {
     var sel = /** @type {HTMLSelectElement | null} */ ($("dim"));
     if (sel && sel.value !== state.dim) sel.value = state.dim;
+    // github#86 D-9 -- the copies only mean anything while the disc is cut by tag, so the
+    // toggle is only there then. A folder view is the folder view it always was.
+    var row = $("multirow");
+    if (row) row.hidden = state.dim !== "tag";
+    var btn = $("multitag");
+    if (btn) btn.setAttribute("aria-pressed", multiTag ? "true" : "false");
   }
 
   function buildTools() {
@@ -5909,10 +6045,10 @@ function mountVaultGraph(root, data, deps) {
 
     // github#86
     var dimSel = /** @type {HTMLSelectElement | null} */ ($("dim"));
-    if (dimSel) {
-      syncDimUI();
-      dimSel.onchange = function () { setDim(dimSel.value, true); };
-    }
+    if (dimSel) dimSel.onchange = function () { setDim(dimSel.value, true); };
+    var multiBtn = $("multitag");
+    if (multiBtn) multiBtn.onclick = function () { setMultiTag(!multiTag, true); };
+    syncDimUI();
 
     $("allon").onclick = function () {
       seedHidden();
@@ -6488,7 +6624,10 @@ function mountVaultGraph(root, data, deps) {
     var movesFrom = null;
     var n = 0;
     if (renderer && !instant) {
-      graph.forEachNode(function (id) {
+      graph.forEachNode(function (id, a) {
+        // A copy does not survive a switch -- only the tag dimension has any -- so it is
+        // not a mover, it is a dot that leaves.
+        if (a.dupOf) return;
         if (!visible(id) || (alpha[id] || 0) <= 0.004) return;
         if (!movesFrom) movesFrom = dict();
         movesFrom[id] = groupOf(id);
@@ -6501,6 +6640,8 @@ function mountVaultGraph(root, data, deps) {
     restoreDimNav(next);
     state.hoverGroup = null;
     state.hoverSub = dict();
+    // github#86 D-9 -- the copies belong to the tag dimension, and only while asked for
+    if (next === "tag" && multiTag) addSatellites(); else dropSatellites();
     // The sub-wedges answer to the dimension too, and everything below reads them.
     buildSubOrder();
     syncDimUI();
@@ -6522,6 +6663,42 @@ function mountVaultGraph(root, data, deps) {
     if (persist && onDim) onDim(state.dim);
     if (n) cascade(null, { colToggle: true, movesFrom: movesFrom });
     return state.dim;
+  }
+
+  // github#86, design/0014 -- D-9
+  /** @param {boolean} on @param {boolean} [persist] @param {boolean} [instant] */
+  function setMultiTag(on, persist, instant) {
+    var next = !!on;
+    if (next === multiTag) return multiTag;
+    multiTag = next;
+    // Only the tag dimension has copies to make. Left on, it takes effect the moment the
+    // disc is grouped by tag again -- which is what setDim reads it for.
+    if (state.dim === "tag") {
+      /** @type {Record<string, string> | null} */
+      var movesFrom = null;
+      var n = 0;
+      if (renderer && !instant && !next) {
+        // Going off, the copies are the ones leaving; the notes that stay do not move house.
+        graph.forEachNode(function (id, a) {
+          if (!a.dupOf || !visible(id) || (alpha[id] || 0) <= 0.004) return;
+          if (!movesFrom) movesFrom = dict();
+          movesFrom[id] = groupOf(id);
+          n++;
+        });
+      }
+      if (next) addSatellites(); else dropSatellites();
+      buildSubOrder();
+      hardRelayout(false, false);
+      // Same fixed point as a dimension switch: the room changed, so converge before landing.
+      applyLayout(false);
+      if (renderer) renderer.refresh();
+      attempt(placeLogo); attempt(heatBuild); attempt(buildLegend); attempt(buildStats);
+      if (refreshSettingsPanel) refreshSettingsPanel();
+      if (n) cascade(null, { colToggle: true, movesFrom: movesFrom });
+    }
+    syncDimUI();
+    if (persist && onMultiTag) onMultiTag(multiTag);
+    return multiTag;
   }
 
   // github#3
@@ -6719,6 +6896,10 @@ function mountVaultGraph(root, data, deps) {
     $("vname").textContent = DATA.vault + " graph";
     setHTML($("stats"), "<b>" + s.nodes + "</b> notes &middot; <b>" + s.edges + "</b> links &middot; <b>" +
       s.orphans + "</b> unlinked<br>" +
+      // github#86 D-9 -- the vault has the notes it has; only the disc has more dots
+      (satellites.length
+        ? "<b>" + (s.nodes + satellites.length) + "</b> dots, one per tag a note carries<br>"
+        : "") +
       "<b>" + s.unresolved + "</b> link(s) point at notes that do not exist" +
       (s.ghostsIncluded ? " (shown as ghosts)" : " (hidden)") + "<br>" +
       (s.templatesExcluded ? "Templates excluded. " : "") +
@@ -6834,6 +7015,8 @@ function mountVaultGraph(root, data, deps) {
     /** @type {Record<string, number>} */
     var all = dict();
     graph.forEachNode(function (id, a) {
+      // github#86 -- a day counts NOTES written that day, not dots on the disc
+      if (a.dupOf) return;
       var k = a.created;
       if (!heatParse(k)) { undated++; return; }
       all[k] = (all[k] || 0) + 1;
@@ -8446,6 +8629,10 @@ function mountVaultGraph(root, data, deps) {
                     setUnlinkedByFolder: function (v) { return setUnlinkedByFolder(v !== false, false, true); },
                     // github#86, design/0014
                     setDim: /** @param {string} v */ function (v) { return setDim(String(v), false, true); },
+                    setMultiTag: /** @param {boolean} v */ function (v) { return setMultiTag(v === true, false, true); },
+                    get multiTag() { return multiTag; },
+                    noteOf: /** @param {string} id */ function (id) { return noteOf(String(id)); },
+                    copiesOf: /** @param {string} id */ function (id) { return copiesOf(String(id)); },
                     filingOf: /** @param {string} id */ function (id) {
                       return { g: fileGroup(String(id)), sub: fileSub(String(id)),
                                dirs: fileDirs(String(id)).slice() };
@@ -8678,6 +8865,10 @@ function mountVaultGraph(root, data, deps) {
                     ringsLayout: ringsLayout, visible: visible, groupOf: groupOf,
                     alpha: alpha, cascade: cascade, syncAlpha: syncAlpha,
                     syncLazyEdges: syncLazyEdges,
+                    // github#86 -- a copy has to answer as its note everywhere it is asked,
+                    // and these are the places the suite asks
+                    select: select, togglePin: togglePin, adj: adj, focusSet: focusSet,
+                    rankOf: /** @param {string} id */ function (id) { return tlRank[String(id)] || 0; },
                     get lazyEdges() { return lazyEdges; },
                     isOrphan: isOrphan,
                     wedgeDebug: wedgeDebug, wedgeEdges: wedgeEdges,

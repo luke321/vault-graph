@@ -84,6 +84,8 @@ mountVaultGraph(
     // github#86 -- absent means "folder", so a page nobody has switched is today's page
     dim: loadSettings().dim,
     onDim: function (v) { saveSettings({ dim: v }); },
+    multiTag: loadSettings().multiTag,
+    onMultiTag: function (v) { saveSettings({ multiTag: v }); },
     // github#82 -- undefined until the panel has been folded once, and the page reads that
     // absence as "nobody has chosen, so decide from the width"
     sheetOpen: loadSettings().sheetOpen,

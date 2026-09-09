@@ -42,6 +42,12 @@ export interface NodeAttrs {
   touched: string;
   words: number;
   ghost: boolean;
+  /**
+   * github#86, design/0014 -- set only on a SATELLITE: the id of the note this dot is a
+   * second copy of, while "Notes in every tag" is on. Absent on every real note, which is
+   * what every walk that counts or ranks notes tests for.
+   */
+  dupOf?: string;
 }
 
 export interface EdgeAttrs {
@@ -55,6 +61,7 @@ export interface GraphStore {
   readonly order: number;
   readonly size: number;
   addNode(id: string, attrs: NodeAttrs): string;
+  dropNode(id: string): void;
   addUndirectedEdge(source: string, target: string, attrs: EdgeAttrs): string;
   hasNode(id: string): boolean;
   hasEdge(source: string, target: string): boolean;

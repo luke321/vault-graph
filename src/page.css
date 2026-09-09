@@ -152,6 +152,8 @@
   .vault-graph input[type="search"]:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
 
   .vault-graph .row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+  /* github#86 -- the display above would otherwise beat the hidden attribute */
+  .vault-graph .row[hidden] { display: none; }
   .vault-graph .row .val { font-variant-numeric: tabular-nums; color: var(--text-2); font-size: 11px; }
 
   .vault-graph #vg-legend { display: flex; flex-direction: column; gap: 1px; }
