@@ -791,8 +791,16 @@ function mountVaultGraph(root, data, deps) {
   /** @type {Record<string, string[]>} */
   var satsOf = dict();
 
-  /** @param {string} id @returns {string} the note a dot stands for; itself, for a real note */
+  /**
+   * @param {string} id
+   * @returns {string} the note a dot stands for; itself, for a real note
+   *
+   * The early return is not a micro-optimisation for its own sake: isPinned() asks this for
+   * every node of every plan, and with no copies on the disc -- which is always, in the
+   * folder dimension -- it must cost a branch rather than two map lookups.
+   */
   function noteOf(id) {
+    if (!satellites.length) return id;
     var d = graph.hasNode(id) ? graph.getNodeAttribute(id, "dupOf") : "";
     return d ? String(d) : id;
   }
@@ -2492,10 +2500,17 @@ function mountVaultGraph(root, data, deps) {
   }
 
   /** @param {string} id */
-  function isPinned(id) { return state.pinned.indexOf(id) >= 0; }
+  // github#86 -- THE HUB HOLDS NOTES. Every copy of one is the same note, so a copy reads as
+  // pinned when its note is and leaves the ring with it (buildWedgePlan drops a plan member
+  // on this predicate), and no synthetic satellite id can reach state.pinned -- which the
+  // host persists, and which would then name a node that does not exist on the next open.
+  // Resolving here rather than at the call sites covers the hub drag as well as the button.
+  /** @param {string} id */
+  function isPinned(id) { return state.pinned.indexOf(noteOf(id)) >= 0; }
 
   /** @param {string} id @param {number} [at] slot to insert at */
   function pin(id, at) {
+    id = noteOf(id);
     var i = state.pinned.indexOf(id);
     if (i >= 0) state.pinned.splice(i, 1);
     if (at === undefined || at > state.pinned.length) at = state.pinned.length;
@@ -2508,7 +2523,7 @@ function mountVaultGraph(root, data, deps) {
 
   /** @param {string} id */
   function unpin(id) {
-    var i = state.pinned.indexOf(id);
+    var i = state.pinned.indexOf(noteOf(id));
     if (i < 0) return false;
     state.pinned.splice(i, 1);
     return true;
@@ -2516,9 +2531,6 @@ function mountVaultGraph(root, data, deps) {
 
   /** @param {string} id */
   function togglePin(id) {
-    // github#86 -- the hub holds NOTES, and every copy of one is the same note: pinning a
-    // copy pins the note, and its other copies leave the ring with it.
-    id = noteOf(id);
     if (!unpin(id)) pin(id);
     hubChanged(true);
   }
@@ -8902,7 +8914,8 @@ function mountVaultGraph(root, data, deps) {
                     syncLazyEdges: syncLazyEdges,
                     // github#86 -- a copy has to answer as its note everywhere it is asked,
                     // and these are the places the suite asks
-                    select: select, togglePin: togglePin, adj: adj, focusSet: focusSet,
+                    select: select, togglePin: togglePin, isPinned: isPinned,
+                    adj: adj, focusSet: focusSet,
                     rankOf: /** @param {string} id */ function (id) { return tlRank[String(id)] || 0; },
                     get lazyEdges() { return lazyEdges; },
                     isOrphan: isOrphan,

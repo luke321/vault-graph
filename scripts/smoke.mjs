@@ -825,30 +825,43 @@ check("multi: a copy is the same note, everywhere it is asked", async (p) => {
     var nb = (__vg.adj[note] || []).map(function (e) { return e.o; });
     var neighboursLit = nb.length === 0 || nb.every(function (n) { return !!focus[n]; });
     __vg.state.hovered = null;
-    // and pinning a copy pins the note
+    // and pinning a copy pins the NOTE -- no synthetic id may reach state.pinned, which the
+    // host persists -- and takes every copy of it out of the ring
     __vg.togglePin(sat);
     var pinnedIsNote = __vg.state.pinned.indexOf(note) >= 0 &&
                        __vg.state.pinned.indexOf(sat) < 0;
+    var copiesReadPinned = copies.every(function (c) { return __vg.isPinned(c); });
+    __vg.relayout();
+    var stillOnDisc = 0;
+    __vg.buildWedgePlan(false).cells.forEach(function (c) {
+      c.list.forEach(function (dot) { if (copies.indexOf(dot) >= 0) stillOnDisc++; });
+    });
+    // toggling from the copy again unpins the note rather than re-pinning it
     __vg.togglePin(sat);
     var unpinned = __vg.state.pinned.length === 0;
+    __vg.relayout();
     __vg.setMultiTag(false);
     __vg.setDim("folder");
     return { sat: sat, note: note, copies: copies.length, sameRank: sameRank,
              selected: selected, panelHidden: panel, focusHas: focusHas,
-             neighboursLit: neighboursLit, pinnedIsNote: pinnedIsNote, unpinned: unpinned };
+             neighboursLit: neighboursLit, pinnedIsNote: pinnedIsNote, unpinned: unpinned,
+             copiesReadPinned: copiesReadPinned, stillOnDisc: stillOnDisc };
   })()`);
   if (r.none) {
     return { ok: true, detail: "NOT ASSERTED: no note on this vault carries two tags" };
   }
   const ok = r.selected === r.note && r.panelHidden === false && r.sameRank &&
-             r.focusHas && r.neighboursLit && r.pinnedIsNote && r.unpinned;
+             r.focusHas && r.neighboursLit && r.pinnedIsNote && r.unpinned &&
+             r.copiesReadPinned && r.stillOnDisc === 0;
   return {
     ok,
     detail: `${r.copies} copies of one note: selecting one selected ${JSON.stringify(r.selected)} ` +
             `(the note is ${JSON.stringify(r.note)}) and opened the panel; timeline rank ` +
             `${r.sameRank ? "shared" : "DIFFERENT"}; hovering lit every copy ` +
             `${r.focusHas ? "yes" : "NO"} and the note's neighbours ${r.neighboursLit ? "yes" : "NO"}; ` +
-            `pinning pinned the note ${r.pinnedIsNote ? "yes" : "NO"}`,
+            `pinning it pinned the note ${r.pinnedIsNote ? "yes" : "NO"}, all ${r.copies} copies ` +
+            `then read as pinned ${r.copiesReadPinned ? "yes" : "NO"} and ${r.stillOnDisc} of ` +
+            `them stayed in the ring; toggling again unpinned ${r.unpinned ? "yes" : "NO"}`,
   };
 });
 
