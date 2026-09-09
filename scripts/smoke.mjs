@@ -552,12 +552,12 @@ check("a recent chip dims what it did not match, and gives it back", async (p) =
 check("the band counts the date it names", async (p) => {
   const r = await p.j(`(function(){
     var pos = {}; __vg.graph.forEachNode(function(i,a){ pos[i] = a.x.toFixed(4)+','+a.y.toFixed(4); });
-    var lbl = document.getElementById("vg-heatlbl");
-    // Both words are in the button so it cannot change width; the visible one is whichever
-    // the pressed state is not hiding. Reading textContent here would get them both.
+    // Both positions are always rendered; the pressed one is what the band claims to count.
     var shown = function () {
-      return lbl.querySelector(lbl.getAttribute("aria-pressed") === "true" ? ".t" : ".a")
-                .textContent;
+      var on = document.querySelector('#vg-heatsrc button[aria-pressed="true"]');
+      var all = document.querySelectorAll("#vg-heatsrc button[data-src]");
+      return { word: on ? on.textContent : "(none)", positions: all.length,
+               pressed: document.querySelectorAll('#vg-heatsrc button[aria-pressed="true"]').length };
     };
     var a = { label: shown(), inWindow: __vg.heatReport().inWindow,
               src: __vg.state.heatSource };
@@ -579,10 +579,15 @@ check("the band counts the date it names", async (p) => {
     return { a: a, t: t, wrong: wrong, checked: checked, moved: moved,
              back: __vg.state.heatSource };
   })()`);
-  const ok = r.a.label === "Notes added" && r.t.label === "Notes touched" &&
+  // Exactly one of the two positions is pressed at any moment, and it is the one whose word
+  // matches the date the tally actually used -- the control cannot show a state the band is
+  // not in, which is the whole point of putting both positions on screen.
+  const ok = r.a.label.word === "Added" && r.t.label.word === "Touched" &&
+             r.a.label.positions === 2 && r.a.label.pressed === 1 && r.t.label.pressed === 1 &&
              r.a.src === "created" && r.t.src === "touched" && r.back === "created" &&
              r.wrong === 0 && r.moved === 0;
-  return { ok, detail: `"${r.a.label}" ${r.a.inWindow} -> "${r.t.label}" ${r.t.inWindow} in window, ` +
+  return { ok, detail: `"${r.a.label.word}" ${r.a.inWindow} -> "${r.t.label.word}" ${r.t.inWindow} in window, ` +
+                       `${r.a.label.pressed} of ${r.a.label.positions} pressed, ` +
                        `${r.checked} tiled notes carry their tile's date (${r.wrong} wrong), ` +
                        `${r.moved} moved` };
 });
@@ -655,7 +660,7 @@ check("the band's control row does not move when its state changes", async (p) =
   const ref = await newestTouched(p);
   if (!ref) return { ok: false, detail: "no note in this vault carries a touched date" };
   const r = await p.j(`(function(){
-    var sel = { label: "#vg-heatlbl", touchedLabel: "#vg-recent .rl",
+    var sel = { source: "#vg-heatsrc", touchedLabel: "#vg-recent .rl",
                 today: '#vg-recent [data-kind="today"]', week: '#vg-recent [data-kind="week"]',
                 readout: "#vg-heatnote", scale: "#vg-heatscale", compact: "#vg-compact",
                 range: "#vg-rangebox", band: "#vg-heatc" };

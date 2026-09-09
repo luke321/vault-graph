@@ -6988,19 +6988,23 @@ function mountVaultGraph(root, data, deps) {
   function syncRecentUI() {
     var box = $("recent");
     if (!box) return;
-    var lbl = $("heatlbl");
-    if (lbl) {
-      var touched = state.heatSource === "touched";
-      // The two words are both in the markup, stacked; the attribute picks which one shows.
-      // Writing textContent here is what used to resize the button and shove the whole row.
-      lbl.setAttribute("aria-pressed", touched ? "true" : "false");
-      lbl.setAttribute("data-source", state.heatSource);
-      lbl.title = touched
-        ? "The band is counting when each note was last TOUCHED (the file's own timestamp). " +
-          "A sync or a rename rewrites that in bulk, so a big day here is not always work. " +
-          "Click for notes added instead."
-        : "The band is counting when each note was ADDED. Click to count when it was last " +
-          "touched instead.";
+    var src = $("heatsrc");
+    if (src) {
+      /** @type {Record<string, string>} */
+      var TITLES = {
+        created: "Count each note on the day it was ADDED. The band's default, and the date " +
+                 "the timeline and the date range use.",
+        touched: "Count each note on the day it was last TOUCHED -- the file's own timestamp. " +
+                 "A sync, an import or a rename rewrites that in bulk, so a big day here is " +
+                 "not always work; the band says so when it sees one."
+      };
+      var btns = src.querySelectorAll("button[data-src]");
+      for (var b = 0; b < btns.length; b++) {
+        var sb = /** @type {HTMLButtonElement} */ (btns[b]);
+        var key = sb.getAttribute("data-src") || "";
+        sb.setAttribute("aria-pressed", key === state.heatSource ? "true" : "false");
+        sb.title = TITLES[key] || "";
+      }
     }
     var chips = box.querySelectorAll("button[data-kind]");
     for (var i = 0; i < chips.length; i++) {
@@ -7065,10 +7069,14 @@ function mountVaultGraph(root, data, deps) {
 
   function buildHeatmapUI() {
     var cv = /** @type {HTMLCanvasElement} */ ($("heatc"));
-    var lbl = $("heatlbl");
-    if (lbl) {
-      lbl.addEventListener("click", function () {
-        setHeatSource(state.heatSource === "touched" ? "created" : "touched");
+    var srcBox = $("heatsrc");
+    if (srcBox) {
+      // Each position sets its own date rather than toggling. A two-state control whose
+      // buttons both mean "the other one" is how the label version confused its reader.
+      srcBox.addEventListener("click", function (ev) {
+        var t = /** @type {HTMLElement} */ (ev.target);
+        var btn = t && t.closest ? t.closest("button[data-src]") : null;
+        if (btn) setHeatSource(btn.getAttribute("data-src") || "created");
       });
     }
     buildRecentUI();

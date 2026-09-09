@@ -467,12 +467,13 @@ node scripts/smoke.mjs --only "control row does not move"
 ```
 
 Measured at 1440x900 on the demo fixture across five states (rest, week armed, released,
-source flipped, armed again): **worst shift 19px before, 0px after**. Three separate causes,
-all found by measuring rather than by looking:
+source flipped, armed again): **worst shift 19px before, 0px after**. Four separate causes,
+each found by measuring rather than by looking:
 
 | Cause | Before | Fix |
 |---|---|---|
-| the label swapped its text | `Notes added` 76px → `Notes touched` 90px, shoving everything right of it by **14px** | both words live in the markup, stacked in one grid cell, and `aria-pressed` hides one — the button is always the width of the longer |
+| the label swapped its text | `Notes added` 76px → `Notes touched` 90px, shoving everything right of it by **14px** | the label is a static word and the choice is a two-position segment; both positions are always rendered, so the control has one width |
+| the pressed position was bolder | **1px**, as the bold moved between `Added` and `Touched` | both positions carry the same weight; the accent fill is what says which is on |
 | a chip's count grew a digit | `This week 0` 75px → `This week 115` 85px, **10px** | the count slot is reserved at `--vg-count-ch`, set from the note count at mount, with tabular figures: 3ch / 4ch / 5ch on the three fixtures |
 | the heat key lost swatches | **17px**, on the dominant-folder fixture only | `heatDrawKey` always sizes the canvas for `HEAT_KEY_ANCHORS` (5 — four cuts plus nMax) and centres however many survived the dedup |
 

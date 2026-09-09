@@ -460,19 +460,28 @@
      specificity, so `font: inherit` here would silently take the size, weight, transform and
      letter-spacing away from the rule that owns them and the label would stop matching its
      siblings. Everything typographic stays where it was. */
-  .vault-graph #vg-heatlbl {
-    background: none; border: 0; padding: 0; margin: 0;
-    cursor: pointer; font-family: inherit;
-    display: inline-grid; align-items: center; text-align: left;
+  /* One joined control rather than two loose buttons, so the pair reads as a single choice
+     with two positions -- the same thing .seg does in the sidebar, at row scale. Both are
+     always rendered, which is also what keeps the row's width fixed. */
+  .vault-graph #vg-heatsrc {
+    display: inline-flex; flex: 0 0 auto; border: 1px solid var(--border);
+    border-radius: 6px; overflow: hidden;
   }
-  /* Both words occupy the same cell; the button takes the width of the wider and keeps it
-     through the toggle. visibility, not display, because a hidden grid item still sizes the
-     track -- which is the entire point -- and screen readers skip it either way. */
-  .vault-graph #vg-heatlbl > span { grid-area: 1 / 1; }
-  .vault-graph #vg-heatlbl[aria-pressed="false"] > .t,
-  .vault-graph #vg-heatlbl[aria-pressed="true"]  > .a { visibility: hidden; }
-  .vault-graph #vg-heatlbl:hover { color: var(--text-1); }
-  .vault-graph #vg-heatlbl[aria-pressed="true"] { color: var(--today); }
+  /* Both weights are the SAME on purpose. Bolding only the pressed one moved the segment's
+     sub-pixel width as the bold moved between "Added" and "Touched", which put a 1px wobble
+     back into the row -- the fill already says which is on, far louder than 100 units of
+     weight would. */
+  .vault-graph #vg-heatsrc button {
+    font: inherit; font-size: 11px; font-weight: 500; line-height: 1.5;
+    padding: 2px 9px; cursor: pointer;
+    background: var(--surface-2); color: var(--text-2);
+    border: 0; border-left: 1px solid var(--border);
+  }
+  .vault-graph #vg-heatsrc button:first-child { border-left: 0; }
+  .vault-graph #vg-heatsrc button:hover { color: var(--text-1); }
+  .vault-graph #vg-heatsrc button[aria-pressed="true"] {
+    background: var(--accent); color: #fff;
+  }
   .vault-graph #vg-recent { display: flex; align-items: center; gap: 4px; flex: 0 0 auto; }
   /* The colon and the rule are doing one job: "NOTES ADDED" and "TOUCHED" sit next to each
      other and without a break they read as one phrase, which says the opposite of what the
