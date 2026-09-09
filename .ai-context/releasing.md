@@ -238,6 +238,19 @@ predates a commit touching `src/page.js` — the same non-blocking severity as `
 re-recording. It checks the whole file rather than which `act:` a commit touched, so it can
 over-warn (a `colours`-only change flags every feature) but never under-warns silently.
 
+### A tag message loses every markdown heading unless you say `--cleanup=verbatim`
+
+`git tag -F` defaults to `--cleanup=strip`, which treats a line starting with `#` as a comment
+and deletes it. The tag message is the CHANGELOG section, so that quietly ate the
+`## <version>` heading and every `###` section heading from it — measured on the tags
+themselves: **2.0.0, 2.1.0 and 2.2.0 each carry zero heading lines**, against 8 in 2.3.0's
+source section. `git show <tag>` was supposed to tell the same story as the Release page and
+had been telling a flattened one since the script was written.
+
+`release.ps1` passes `--cleanup=verbatim` now. Caught before 2.3.0's tag was pushed, so that
+one has its headings; the three older tags keep the defect, because a published tag is not
+edited.
+
 ## First, list what is actually in the release
 
 **A release is the RANGE, not the work you happen to have just finished.** Before the bump is
