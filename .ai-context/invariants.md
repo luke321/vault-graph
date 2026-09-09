@@ -1344,6 +1344,22 @@ stub that blinks out anyway. Measured on `only`:
 The check asserts the descent is **monotone** — never a step back up — because a bar that walks
 from the wrong endpoint bounces, and a bounce reads as a glitch rather than as a mistake.
 
+**Measured in the running Obsidian, not only on the page**, on his own 520-note vault at
+~60fps, sampling every legend row's `--vg-share` on `requestAnimationFrame` from inside the
+page:
+
+| action | `03 - Resources` (the new basis) | `08 - Meeting Notes` (widest) | `07 - Yearly Reviews` (thinnest) |
+|---|---|---|---|
+| `only` the runner-up | 58.70% → 100%, **123 widths** | 100% → gone, 123 | 0.405% → gone, 116 |
+| hide the widest by its eye | 58.70% → 100%, **123 widths** | 100% → gone, 124 | 0.405% → gone, 112 |
+
+**Sample inside the page, not over CDP.** A probe that round-trips one `Runtime.evaluate` per
+reading first reported *no walk at all* in Obsidian — every row already at its resting value on
+the first sample — while an in-page rAF sampler on the same window recorded 123 distinct widths.
+A round-trip cannot be aligned to a frame, so it reports whatever the page happens to look like
+between two of them; only a sampler running in the page can be trusted about per-frame motion.
+That is the same class of error as the fixed `sleep`, which is the next paragraph.
+
 **Three maps, and the null at rest is the load-bearing part.** `barNow` and `barPrev` are the two
 endpoints a cascade interpolates between, recorded once per render; `barShown` is what is on
 screen mid-walk and is `null` at rest, so the resting value is authoritative — the same shape as
