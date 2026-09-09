@@ -3378,6 +3378,24 @@ check("legend count bars scale to the largest visible folder", async (p) => {
   })()`);
   if (subs.drawn) wrong.push(`${subs.drawn} of ${subs.n} subfolder rows draw a bar`);
 
+  // github#78, design/0006
+  const spec = await p.j(`(function(){
+    for (var i = 0; i < document.styleSheets.length; i++) {
+      var rules;
+      try { rules = document.styleSheets[i].cssRules; } catch (e) { continue; }
+      for (var j = 0; j < rules.length; j++) {
+        var sel = rules[j].selectorText;
+        if (sel && sel.indexOf('.lg.bar') >= 0) return sel;
+      }
+    }
+    return null;
+  })()`);
+  if (!spec) wrong.push("no .lg.bar rule found in any stylesheet");
+  else if (spec.indexOf("#") < 0) {
+    wrong.push(`the bar rule is "${spec}" -- no id, so a host's background shorthand ` +
+               `on .lg:hover ties and wins on order`);
+  }
+
   // github#78
   const biggest = base.rows.filter((r) => r.bar).sort((a, b) => b.count - a.count)[0];
   const sel1 = (attr, g) => `[${attr}="${g.replace(/"/g, '\\"')}"]`;
@@ -3513,7 +3531,7 @@ check("legend count bars scale to the largest visible folder", async (p) => {
             `${paren} parenthesised row(s) bare while kept separate; ${subs.n} sub rows bare; ` +
             `selection kept it=${sel}, hover kept it=${hov === null ? "no :hover from the harness" : hov}, ` +
             `hiding the largest rescaled the rest and dropped its own bar=${rescaled}; ` +
-            `only-this-folder: ${onlyState}; ` +
+            `only-this-folder: ${onlyState}; bar rule "${spec}"; ` +
             `title ${JSON.stringify(titled && titled.title)}` +
             (wrong.length ? `  <- ${wrong.join(" | ")}` : "")
   };

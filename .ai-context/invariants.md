@@ -1162,6 +1162,31 @@ Three things that check got wrong before it was right, all worth keeping:
   *high*, not low — 213px on the shape vault's `(vault root)`. That one reading is dropped
   rather than trusted, because a false pass is the failure mode this check exists to prevent.
 
+### The bar rule carries an id, and that is the whole reason it survives a host
+
+`.vault-graph .lg.bar` and `.vault-graph .lg:hover` have **identical specificity** (0,3,0), so
+whichever comes last wins. Inside Obsidian that is not the page's decision: measured in a live
+window, `document.styleSheets` held **two** inline sheets for this page — #8 with 224 rules and
+the current CSS, and #9 with 241 rules, a stale copy carrying
+`.vault-graph .lg:hover { background: var(--surface-2); }`. The **shorthand** resets every
+background longhand, #9 came after #8, and the bar died on hover. On the same row: at rest
+`background-image: linear-gradient(...)`, `background-size: max(4px, 0.405%) 2px`; hovering,
+`background-image: none`, `background-size: auto`, `background-repeat: repeat`,
+`background-position: 0% 0%`.
+
+**The selector is `.vault-graph #vg-legend .lg.bar` for specificity, not scoping.** (1,3,0)
+beats any `.lg:hover` rule a host or a stale sheet can produce without `!important`, so the
+rule wins on merit instead of on document order. The check asserts the selector still contains
+an id and reports it: `bar rule ".vault-graph #vg-legend .lg.bar"`.
+
+**Neither harness could have caught this**, and that is worth knowing before trusting them.
+`smoke.mjs` drives the standalone page, where nothing else styles `.lg`.
+`obsidian-smoke.mjs` builds a **throwaway vault with a fresh profile**, so it has no stale
+plugin stylesheet and reported `image=gradient` under a real hover while the user's window was
+broken. It took attaching to the **user's own running Obsidian** on a debug port to see it:
+4px at rest, **0px** hovering, `hovered=true`. After the fix, the same probe on the same row
+reads 4px and 4px.
+
 ### A hidden folder draws no bar
 
 The bar counts what is **on the disc**, so a folder hidden by its eye contributes nothing and

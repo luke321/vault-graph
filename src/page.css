@@ -184,13 +184,19 @@
      the row in the group's own colour. A background layer rather than a fifth grid cell
      because .nm is the only 1fr and already truncates; the row is one width on every row
      (219px measured) while .nm is not (122/117/141px), so the row is the honest track.
+     The selector carries #vg-legend for SPECIFICITY, not for scoping: a plain
+     `.vault-graph .lg.bar` ties with `.vault-graph .lg:hover` and loses to whichever
+     comes last, and a stale plugin stylesheet in the host document put a `background`
+     SHORTHAND on hover after it -- wiping every longhand and the bar with them. An id
+     makes the rule win on merit rather than on order. github#78
+
      It starts 2px in, which is what keeps it: the highlight's leading accent band is
      an `inset 2px` shadow and inset shadows paint OVER a background image, so a bar
      flush to the edge lost its first 2px and a floored one vanished. It stays in the
      padding strip BELOW the content, where no grid item can cover it -- moving the
      origin to content-box fixed the band and let the `only` chip cover the bar
      instead. The floor is 4px so that no state paints fewer than 3px. design/0006 */
-  .vault-graph .lg.bar {
+  .vault-graph #vg-legend .lg.bar {
     background-image: linear-gradient(var(--vg-bar), var(--vg-bar));
     background-repeat: no-repeat;
     background-position: 2px 100%;
