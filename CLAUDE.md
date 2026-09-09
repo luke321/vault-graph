@@ -42,12 +42,6 @@ measuring it: serve the page, drive it, read the numbers.
   `mkdir` is the lock — atomic, and it survives a killed session as a stale entry rather than a
   permanent one. Screenshots need no lock: `shoot.mjs` captures over CDP, so overlapping windows
   are harmless — but pass your own `--port`.
-- **A vault that is not the daily one shows a trust prompt, and until you confirm it the
-  plugin does not load at all.** Open a fixture or throwaway vault in Obsidian and you get
-  *“Trust author and enable plugins?”* plus a Settings window; skip either and the plugin looks
-  broken while nothing is wrong with it. Confirm the prompt, close Settings, and only then judge
-  what the plugin is doing — `obsidian-smoke.mjs` handles this itself, a hand-launched Obsidian
-  does not.
 - `git push` and merging into `develop` are separate asks, every time. `main` only ever
   receives `develop`.
 - **A release is the range, not the work in hand.** Everything it needs — a `CHANGELOG.md`
