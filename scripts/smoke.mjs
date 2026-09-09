@@ -3723,6 +3723,77 @@ check("the count bars walk on the cascade's clock and land on the resting layout
   };
 });
 
+// github#78, design/0006
+check("a bar that loses its folder shrinks over the cascade instead of blinking out", async (p) => {
+  const settle = async () => {
+    let last = null;
+    for (let i = 0; i < 60; i++) {
+      const now = await p.j(`(function(){
+        return [].map.call(document.querySelectorAll('#vg-legend .lg[data-g]'), function (lg) {
+          return lg.className + ':' + getComputedStyle(lg).getPropertyValue('--vg-share').trim();
+        }).join(",");
+      })()`);
+      if (now === last) return;
+      last = now;
+      await sleep(150);
+    }
+  };
+  const one = (g) => p.j(`(function(){
+    var lg = document.querySelector('#vg-legend .lg[data-g=' + JSON.stringify(${JSON.stringify(g)}) + ']');
+    if (!lg) return null;
+    return { bar: lg.classList.contains('bar'), out: lg.classList.contains('bar-out'),
+             share: getComputedStyle(lg).getPropertyValue('--vg-share').trim() || null };
+  })()`);
+  const pct = (v) => (v && v.bar && v.share ? parseFloat(v.share) : -1);
+
+  const barred = await p.j(`(function(){
+    var out = [];
+    [].forEach.call(document.querySelectorAll('#vg-legend .lg[data-g].bar'), function (lg) {
+      out.push({ g: lg.getAttribute('data-g'),
+                 share: parseFloat(getComputedStyle(lg).getPropertyValue('--vg-share')) });
+    });
+    return out.sort(function (a, b) { return b.share - a.share; });
+  })()`);
+  if (barred.length < 3) return { ok: true, detail: `only ${barred.length} barred row(s) -- nothing to shrink` };
+  const target = barred[1], wide = barred[0], thin = barred[barred.length - 1];
+
+  await p.eval(`(function(){
+    var lg = document.querySelector('#vg-legend .lg[data-g=' + JSON.stringify(${JSON.stringify(target.g)}) + ']');
+    var chip = lg && lg.querySelector('[data-only]');
+    if (!chip) throw new Error('no only chip');
+    chip.click();
+  })(); void 0`);
+
+  const seenW = [], seenT = [];
+  for (let i = 0; i < 26; i++) {
+    const a = pct(await one(wide.g)), b = pct(await one(thin.g));
+    if (a >= 0 && seenW[seenW.length - 1] !== a) seenW.push(a);
+    if (b >= 0 && seenT[seenT.length - 1] !== b) seenT.push(b);
+    if (a < 0 && b < 0) break;
+    await sleep(70);
+  }
+  await settle();
+  const after = await p.j(`document.querySelectorAll('#vg-legend .lg[data-g].bar').length`);
+  const gone = pct(await one(wide.g)) < 0 && pct(await one(thin.g)) < 0;
+  const fell = seenW.length >= 4 && seenW.every((v, i) => i === 0 || v < seenW[i - 1]);
+
+  await p.eval(`(function(){ var a = document.getElementById('vg-allon'); if (a) a.click(); })(); void 0`);
+  await settle();
+  const restored = await p.j(`document.querySelectorAll('#vg-legend .lg[data-g].bar').length`);
+
+  const ok = fell && seenT.length >= 3 && gone && after === 1 && restored === barred.length;
+  return {
+    ok,
+    detail: `only ${JSON.stringify(target.g)}: ${JSON.stringify(wide.g)} fell through ` +
+            `${seenW.length} width(s) [${seenW.slice(0, 5).map((v) => v.toFixed(1) + "%").join(" ")} ...] ` +
+            `and ${JSON.stringify(thin.g)} through ${seenT.length} ` +
+            `[${seenT.slice(0, 3).map((v) => v.toFixed(3) + "%").join(" ")} ...]; ` +
+            `${after} bar left, ${restored} back on All (was ${barred.length})` +
+            (!fell ? `  <- it did NOT descend smoothly (${seenW.length} width(s))` : "") +
+            (!gone ? "  <- a bar survived its hidden folder" : "")
+  };
+});
+
 // github#84, github#78, design/0004
 check("the count bar follows its own swatch across a theme flip", async (p) => {
   const read = () => p.j(`(function(){

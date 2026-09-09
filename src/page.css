@@ -195,13 +195,16 @@
      flush to the edge lost its first 2px and a floored one vanished. It stays in the
      padding strip BELOW the content, where no grid item can cover it -- moving the
      origin to content-box fixed the band and let the `only` chip cover the bar
-     instead. The floor is 4px so that no state paints fewer than 3px. design/0006 */
+     instead. The floor is 4px so that no state paints fewer than 3px — lifted to 0 by
+     `--vg-floor` on a row walking down to nothing, or the shrink ends in a 4px stub
+     that blinks out. design/0006 */
   .vault-graph #vg-legend .lg.bar {
     background-image: linear-gradient(var(--vg-bar), var(--vg-bar));
     background-repeat: no-repeat;
     background-position: 2px 100%;
-    background-size: max(4px, var(--vg-share)) 2px;
+    background-size: max(var(--vg-floor, 4px), var(--vg-share)) 2px;
   }
+  .vault-graph #vg-legend .lg.bar.bar-out { --vg-floor: 0px; }
   .vault-graph .lg .sw { width: 11px; height: 11px; border-radius: 50%; }
   .vault-graph .lg .sw.sw-in { transform: scale(0.6); }
   .vault-graph .lg .nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

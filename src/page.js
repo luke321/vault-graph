@@ -5211,9 +5211,9 @@ function mountVaultGraph(root, data, deps) {
       var share = barShare(g, basis);
       rendered[g] = share;
       var shown = cascadeRun && barShown && barShown[g] !== undefined ? barShown[g] : share;
-      var lgAttrs = share
-        ? ' class="lg bar" style="--vg-share:' + (shown * 100).toFixed(3) +
-          '%;--vg-bar:' + colorOf(g) + '"'
+      var lgAttrs = share || shown
+        ? ' class="lg bar' + (share ? "" : " bar-out") + '" style="--vg-share:' +
+          (shown * 100).toFixed(3) + '%;--vg-bar:' + colorOf(g) + '"'
         : ' class="lg"';
       var ctTitle = share
         ? ' title="' + counts[g] + (counts[g] === 1 ? " note" : " notes") +
@@ -6326,11 +6326,20 @@ function mountVaultGraph(root, data, deps) {
   function paintBars(map) {
     var host = $("legend");
     if (!host) return;
-    Array.prototype.forEach.call(host.querySelectorAll(".lg.bar[data-g]"),
+    Array.prototype.forEach.call(host.querySelectorAll(".lg[data-g]"),
       /** @param {HTMLElement} el */ function (el) {
         var g = el.getAttribute("data-g");
         if (g === null || map[g] === undefined) return;
-        el.style.setProperty("--vg-share", (map[g] * 100).toFixed(3) + "%");
+        var v = map[g];
+        if (v <= 0) {
+          el.classList.remove("bar");
+          el.classList.remove("bar-out");
+          el.style.removeProperty("--vg-share");
+          return;
+        }
+        el.classList.add("bar");
+        el.classList.toggle("bar-out", !!barNow && !barNow[g]);
+        el.style.setProperty("--vg-share", (v * 100).toFixed(3) + "%");
       });
   }
 

@@ -249,6 +249,13 @@ clock, land whenever its own duration expired, and put a second source of truth 
 the bar now" next to the cascade's. `animation.md`'s core invariant only holds if one clock owns
 the frame.
 
+A row losing its folder is the case that decides the design. Its resting share is 0, so the
+obvious render drops the `bar` class — and the bar leaves in one frame while the disc takes the
+whole cascade to re-pack. So `paintBars` owns the class rather than the markup: a row gains its
+bar when its painted width rises above zero and loses it when the walk reaches zero, and the 4px
+presence floor is lifted by `.bar-out` on a row on its way out, or the shrink ends in a 4px stub
+that blinks out regardless.
+
 The state is three maps mirroring `colorShown`: `barPrev` and `barNow` are the endpoints
 recorded per render, and `barShown` is what is painted mid-walk — `null` at rest so the resting
 value is authoritative, and read only while `cascadeRun` is live so a stuck walk is

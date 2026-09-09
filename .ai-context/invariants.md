@@ -1326,6 +1326,24 @@ A separate harness sampled the bar and a moving note's radius on the same ticks:
 49.261% to 100.000% while the watched note's radius moved on those same ticks (3328, 3405,
 3302, 3252, 3354), and the settled frame was **identical to a fresh render on all 18 rows**.
 
+**A bar that loses its folder shrinks; it does not blink out.** Pressing `only` hides every
+other folder, so their resting share is 0 — and the first cut dropped the `bar` class on that
+render, which took the bar off screen in one frame while the disc took 1600ms to re-pack. Three
+things had to change together: `paintBars` owns the class (a row gains or loses its bar as its
+painted width crosses zero, so `querySelectorAll` looks for `.lg[data-g]`, not `.lg.bar`), a
+rebuild mid-cascade keeps the class while `shown` is still above zero, and the 4px presence floor
+is lifted by `.bar-out` on a row walking down to nothing — otherwise the shrink ends in a 4px
+stub that blinks out anyway. Measured on `only`:
+
+| fixture | the widest row falls | the thinnest row | after | on All |
+|---|---|---|---|---|
+| demo | `05 - Meeting Notes` 100.0% → gone, 23 widths | `14 - Reading List` 0.246% → gone, 23 | 1 bar | 17 |
+| 10k | `05 - Meeting Notes` 99.8% → gone, 17 widths | `14 - Reading List` 0.023% → gone, 15 | 1 bar | 17 |
+| shape | `projects` 100.0% → gone, 25 widths | `(vault root)` 0.135% → gone, 24 | 1 bar | 6 |
+
+The check asserts the descent is **monotone** — never a step back up — because a bar that walks
+from the wrong endpoint bounces, and a bounce reads as a glitch rather than as a mistake.
+
 **Three maps, and the null at rest is the load-bearing part.** `barNow` and `barPrev` are the two
 endpoints a cascade interpolates between, recorded once per render; `barShown` is what is on
 screen mid-walk and is `null` at rest, so the resting value is authoritative — the same shape as
