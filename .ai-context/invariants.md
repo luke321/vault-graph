@@ -247,6 +247,54 @@ defect the check exists for — a shrink fitting *instead of* deferring — move
 the first frames. The opposite-direction check is the control that it is still sensitive: a
 growth must report `moved while notes arrived: true`, and does, on all three fixtures.
 
+## Every note is filed exactly once, in either dimension
+
+github#86, design/0014. The lattice gives every note one cell in one wedge. A folder
+guarantees that by itself; a tag does not, so the tag dimension has to be held to it.
+
+```bash
+node scripts/smoke.mjs --only "tags:" --only "multi:"
+```
+
+Four claims, and the counts are the whole check:
+
+- **Plan members equal the note count** less whatever the hub holds, in both dimensions, and
+  no note appears in two cells.
+- **The group counts sum to the vault.** Measured: demo 1,403 members in 41 cells by folder
+  and 11 by tag; 10k 10,002 in 37 and 11; the dominant-folder vault 954 in 10 and **1** —
+  that vault carries no tags at all, so its tag disc is one `(untagged)` wedge, and it lays
+  out clean.
+- **Every note's group is the first tag it lists, or `(untagged)`** (design/0014 D-1).
+  `(unlinked)` is the one legitimate exception, because that setting moves a note out of its
+  group in either dimension.
+- **`folder` is the default and a page nobody switches is the page it was** — the golden
+  snapshots on the three folder-organised fixtures are that check, and the tag fixture's
+  golden, recorded in the tag dimension, is the other half.
+
+**With "Notes in every tag" on the count changes on purpose and nothing else may.** A note
+with *k* distinct tags becomes *k* dots, so members and counts rise to the dot count — while
+the heatmap's note-days, the search's hits per note, the timeline's `tlMax` and the footer's
+note count all stay exactly what they were. Measured: demo 1,403 notes → **1,721 dots** with
+the heatmap holding **1,091 note-days either way**; 10k 10,002 → **12,208 dots**, heatmap
+**1,275** either way. A walk that forgets its `dupOf` skip shows up here as a doubled count,
+which is why these are counted twice on purpose.
+
+**A copy carries no edges at rest.** Measured: a copy of an 8-link note has degree 0 at rest
+and 8 while hovered, and the graph goes 3,286 → 3,294 → 3,286 edges. The web at rest is the
+notes' web, so the link count keeps meaning what it says.
+
+### A dimension switch lands on the lattice, which takes two passes
+
+Room and position are a fixed point — the same one the settle-size invariant below is about —
+and one layout pass measures its margins against the room the *other* dimension left behind.
+Every wedge changes across a switch, so the residue a folder toggle hides is visible here.
+
+Measured on the demo fixture with a single pass: **1,335 of 1,403 notes settled up to 12.1
+units off** where a fresh relayout puts them, in both directions, with an identical plan. Two
+passes leave **0**, and a third changes nothing. The check compares the landing against a
+fresh relayout in both dimensions and asserts the round trip is exact — 0 of 1,403, 0 of
+10,002, 0 of 954, 0 of 891.
+
 ## The rings are independent
 
 Toggling an inner-band group must not move the outer band. Measured, an `05` toggle

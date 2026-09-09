@@ -48,6 +48,7 @@ changing the layout or the animation.
 | `0011-per-frame-dot-size` | Experiment (github#41): dots capped from the drawn frame, and where that stands against the two-resting-sizes law |
 | `0012-hop-trail` | Concept (github#40): a way back along the linked-notes walk — hops only, crumbs, Backspace and Alt+ArrowLeft; two routes to land the contributor’s patch |
 | `0013-touch-input` | Touch: one finger pans, two pinch, a tap selects and does the hover's job; the phone's two panels, and why picking needed a second floor (github#73) |
+| `0014-grouping-dimensions` | Folders or tags: the filing that replaced three attribute reads, what a multi-tag note does, what the untagged bucket is, and the copies "Notes in every tag" puts on the disc (github#86) |
 
 **ADR or DDR?** An ADR is a choice with alternatives that were weighed and one that won —
 it explains *why not the other thing*. A DDR describes how a part actually works and the

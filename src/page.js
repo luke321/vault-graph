@@ -5516,8 +5516,6 @@ function mountVaultGraph(root, data, deps) {
         (live ? eyeBtn('data-eye="' + esc(g) + '"', vis, g)
               : '<button class="eye none" disabled aria-hidden="true"></button>') +
         '<button' + lgAttrs + ' data-g="' + esc(g) + '" data-hl="' + (hl ? "on" : "off") +
-          '" aria-pressed="' + vis + '" title="Highlight ' + esc(g) + '">' +
-        '<button class="lg" data-g="' + esc(g) + '" data-hl="' + (hl ? "on" : "off") +
           '" aria-pressed="' + vis + '" title="' + esc(rowTitle(g)) + '">' +
         '<span class="sw' + (bandLock && bandLock[g] ? ' sw-in' : '') +
           '" title="' + swatchTitle(g, bandLock) +
