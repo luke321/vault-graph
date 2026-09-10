@@ -414,6 +414,9 @@ const engine = (() => {
 
 const libs = `<script>\n${engine.trimEnd()}\n</script>`;
 
+// github#96
+const jsonForScript = (v) => JSON.stringify(v).replace(/</g, "\\u003c");
+
 const dataUri = (f) => {
   try {
     return "data:image/png;base64," + readFileSync(join(ROOT, "assets", f)).toString("base64");
@@ -423,7 +426,7 @@ const LOGO_MASK = dataUri("logo-mask.png");
 const FAVICON = dataUri("favicon.png");
 const assets =
   (FAVICON ? `<link rel="icon" href="${FAVICON}">` : "") +
-  `\n<script>window.VAULT_LOGO_MASK=${JSON.stringify(LOGO_MASK)};</script>`;
+  `\n<script>window.VAULT_LOGO_MASK=${jsonForScript(LOGO_MASK)};</script>`;
 
 const part = (f) => readFileSync(join(HERE, f), "utf8");
 
@@ -435,7 +438,7 @@ const html = part("shell.html")
   .replace("<!--SCRIPT-->", () => asScript(part("page.js")))
   .replace("<!--LIBS-->", () => libs)
   .replace("<!--ASSETS-->", () => assets)
-  .replace("<!--DATA-->", () => `<script>window.VAULT_DATA=${JSON.stringify(data)};</script>`);
+  .replace("<!--DATA-->", () => `<script>window.VAULT_DATA=${jsonForScript(data)};</script>`);
 
 writeFileSync(OUT, html, "utf8");
 

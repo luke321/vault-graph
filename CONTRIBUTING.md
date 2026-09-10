@@ -59,6 +59,7 @@ node scripts/check-scope.mjs    # the page cannot style, or be styled by, its ho
 node scripts/check-network.mjs  # nothing shipped can make a network request
 node scripts/check-notice.mjs   # the Sigma notice opens a fresh main.js and a fresh exported page
 node scripts/check-comments.mjs # comments are pointers; the count of prose lines only goes down
+node scripts/check-data-escape.mjs # a note's frontmatter cannot close the exported data script
 ```
 
 Three more are manual, because each launches a real browser or a real Obsidian and takes a

@@ -1,5 +1,6 @@
 
 import { attach, json } from "./cdp.mjs";
+import { buildPayloadVault, PAYLOAD, NOTE_COUNT } from "./check-data-escape.mjs";
 import { leftmostScreen, leftWindowPos } from "./screen.mjs";
 import { spawn, spawnSync } from "node:child_process";
 import { existsSync, mkdtempSync, rmSync, readFileSync, writeFileSync, readdirSync,
@@ -7,7 +8,7 @@ import { existsSync, mkdtempSync, rmSync, readFileSync, writeFileSync, readdirSy
 import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
 import { createServer } from "node:net";
-import { join, dirname } from "node:path";
+import { join, dirname, basename } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -148,6 +149,48 @@ check("page loads with no console errors", async (p, ctx) => {
 check("__vg is present and the intro landed", async (p) => {
   const r = await p.j(`{hasVg: !!window.__vg, until: __vg.state.until, notes: __vg.graph.order}`);
   return { ok: r.hasVg && r.until === null, detail: `${r.notes} notes, until=${r.until}` };
+});
+
+// github#96
+check("a closing-script marker in frontmatter cannot escape the data script", async (p) => {
+  const dir = mkdtempSync(join(tmpdir(), "vg-smoke-escape-"));
+  const port = Number(new URL(p.target.webSocketDebuggerUrl).port);
+  let tab = null, q = null;
+  try {
+    const url = pathToFileURL(buildPayloadVault(dir)).href;
+    tab = await p.send("Target.createTarget", { url, background: true });
+    for (const deadline = Date.now() + 15000; ;) {
+      try { q = await attach(port, basename(dir)); break; }
+      catch (e) { if (Date.now() > deadline) throw e; await sleep(250); }
+    }
+    for (const deadline = Date.now() + 10000; Date.now() < deadline;) {
+      if (await q.eval("!!(window.__vg && window.__vg.graph)").catch(() => false)) break;
+      await sleep(200);
+    }
+    const r = await q.eval(`(function () {
+      var d = window.VAULT_DATA, marked = null;
+      if (d && d.nodes) d.nodes.forEach(function (n) { if (n.label === "Marked") marked = n; });
+      return { ranType: window.__vg_escaped_type, ranTag: window.__vg_escaped_tag,
+               nodes: d && d.nodes ? d.nodes.length : -1,
+               type: marked ? marked.type : null, tags: marked ? marked.tags : [],
+               order: window.__vg && window.__vg.graph ? window.__vg.graph.order : -1 };
+    })()`);
+    const bad = [];
+    if (r.ranType !== undefined || r.ranTag !== undefined) bad.push("a marker script ran");
+    if (r.nodes !== NOTE_COUNT) bad.push("VAULT_DATA holds " + r.nodes + " notes, not " + NOTE_COUNT);
+    if (r.type !== PAYLOAD.type) bad.push("type decoded as " + JSON.stringify(r.type));
+    if (!r.tags.includes(PAYLOAD.tag)) bad.push("tags decoded as " + JSON.stringify(r.tags));
+    if (r.order !== NOTE_COUNT) bad.push("the graph mounted " + r.order + " notes, not " + NOTE_COUNT);
+    if (q.errors.length) bad.push(q.firstError());
+    return { ok: !bad.length,
+             detail: bad.length ? bad.join(" | ")
+               : "no marker ran, " + r.nodes + " notes decoded with both markers intact as text, " +
+                 r.order + " mounted" };
+  } finally {
+    if (q) q.close();
+    if (tab) await p.send("Target.closeTarget", { targetId: tab.targetId }).catch(() => {});
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 check("legend opens folded to top-level folders", async (p) => {
