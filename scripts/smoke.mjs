@@ -548,14 +548,17 @@ async (p) => {
       });
       return { moved: moved, worst: +worst.toFixed(3), who: who };
     };
+    // github#86 -- a switch keeps the rings; only a hard relayout re-derives them, in whatever
+    // dimension is on screen. So "fresh" here is the fixed point inside the kept rings: two
+    // layout passes, not a relayout.
     var boot = pos();
     __vg.setDim("tag");
     var landed = pos();
-    __vg.relayout();
+    __vg.applyLayout(false); __vg.applyLayout(false);
     var fresh = pos();
     __vg.setDim("folder");
     var home = pos();
-    __vg.relayout();
+    __vg.applyLayout(false); __vg.applyLayout(false);
     var homeFresh = pos();
     return { tag: drift(landed, fresh), folder: drift(home, homeFresh),
              trip: drift(boot, home), n: Object.keys(boot).length };
@@ -1092,7 +1095,8 @@ check("multi: turning it off puts every note back exactly", async (p) => {
     var before = pos();
     __vg.setMultiTag(true);
     var landed = pos();
-    __vg.relayout();
+    // github#86 -- the copies re-pack inside the kept rings; a relayout would re-derive them
+    __vg.applyLayout(false); __vg.applyLayout(false);
     var fresh = pos();
     __vg.setMultiTag(false);
     var back = pos();

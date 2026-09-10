@@ -927,9 +927,13 @@ function mountVaultGraph(root, data, deps) {
     /** @type {Record<string, number>} */
     var filed = dict();
     graph.forEachNode(function (id, a) {
-      // github#86 -- a stand-in is its note, already counted
+      // github#86 -- a stand-in is its note, already counted; a leaving note counts where this
+      // github#86 -- dimension files it, or the old groups sit in the new order, in the legend
+      // github#86 -- and in the colour rotation, for as long as the switch runs
       if (a.standIn) return;
-      var g = groupOf(id);
+      var g = leaving[id]
+        ? (!adj[id] && !unlinkedByFolder ? UNLINKED : fileGroup(id, a))
+        : groupOf(id);
       count[g] = (count[g] || 0) + 1;
       // github#86, github#50 -- what this dimension FILES, on the disc or not
       var f = fileGroup(id, a);
@@ -6030,6 +6034,9 @@ function mountVaultGraph(root, data, deps) {
     }
     // github#45
     regroup(true);
+    // github#21, github#86 -- one pass lays out with the previous pass's room; a fresh disc
+    // github#86 -- is the fixed point, so an instant relayout runs two (a cascade converges itself)
+    if (!deferLayout && !animate) applyLayout(false);
     if (!deferLayout) applyLayout(!!animate);
     if (renderer) renderer.refresh();
   }
@@ -6783,6 +6790,20 @@ function mountVaultGraph(root, data, deps) {
     state.pathOpen = b ? b.pathOpen : dict();
   }
 
+  // github#86, design/0014 -- the rings belong to the page, not to a dimension: the disc
+  // github#86 -- arriving re-packs inside the rings the disc being left had, as a filter does,
+  // github#86 -- so the two discs of a switch share a hub and an outer edge
+  /** @param {GeomLock | null} rings */
+  function keepRings(rings) {
+    if (!rings || !geomLock) return;
+    geomLock.r0 = rings.r0; geomLock.rOuter = rings.rOuter; geomLock.maxR = rings.maxR;
+    geomLock.bandR = rings.bandR;
+    if (renderer) {
+      var span = rings.maxR * UNIT * 1.02;
+      renderer.setCustomBBox({ x: [-span, span], y: [-span, span] });
+    }
+  }
+
   // github#86, design/0014
   /** @param {string} v @param {boolean} [persist] @param {boolean} [instant] */
   function setDim(v, persist, instant) {
@@ -6815,6 +6836,7 @@ function mountVaultGraph(root, data, deps) {
     /** @type {LeftDisc} */
     var from = { dim: state.dim, subOrder: subOrder, bandLock: bandLock, geomLock: geomLock,
                  color: leftColors };
+    var rings = geomLock;
     stashDimNav(state.dim);
     state.dim = next;
     restoreDimNav(next);
@@ -6833,9 +6855,12 @@ function mountVaultGraph(root, data, deps) {
       // github#86 -- alpha is the cascade's to walk: a note this disc hides and the next one
       // github#86 -- shows is an ARRIVAL for the fill edge, not a dot lit at the switch
       regroup(true, undefined, true);
+      keepRings(rings);
     } else {
       hardRelayout(false, false);
+      keepRings(rings);
       // github#86, design/0014 -- room and position are a fixed point: converge
+      applyLayout(false);
       applyLayout(false);
     }
     attempt(placeLogo); attempt(heatBuild); attempt(buildLegend);
@@ -6880,8 +6905,12 @@ function mountVaultGraph(root, data, deps) {
         });
       }
       buildSubOrder();
+      // github#86 -- the copies re-pack inside the page's rings, as a switch does
+      var rings = geomLock;
       hardRelayout(false, false);
+      keepRings(rings);
       // github#86 -- same fixed point as a dimension switch
+      applyLayout(false);
       applyLayout(false);
       attempt(placeLogo); attempt(heatBuild); attempt(buildLegend); attempt(buildStats);
       if (refreshSettingsPanel) refreshSettingsPanel();

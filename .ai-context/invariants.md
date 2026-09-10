@@ -367,6 +367,16 @@ at bearings up to 266°; with `keepAlpha` alone, one lit at 206° while the edge
 Toggling an inner-band group must not move the outer band. Measured, an `05` toggle
 leaves the outer band constant — 0 units of movement.
 
+**A dimension switch keeps the rings** (github#86, design/0014, `keepRings`): the dimension
+arriving takes the hub radius, ring radii and band reference of the disc being left and
+re-solves its rows inside them, on the animated and the instant switch alike — the two discs
+of a switch share a hub and an outer edge. Only a hard relayout re-derives the rings, in
+whatever dimension is on screen, and **an instant relayout runs two layout passes**, because
+one pass lays out with the previous pass's room and is not the fixed point (github#21). The
+round-trip check holds the landing against two passes inside the kept rings and home against
+boot, exact on all four fixtures; the tag fixture's golden, taken after a hard relayout, holds
+without a re-take.
+
 ## Only depth-1 subfolders with their own tint slot are pushed
 
 A group or a *named* subfolder moves as a block when highlighted. Pooled tail subfolders

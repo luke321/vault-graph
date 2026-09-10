@@ -196,7 +196,10 @@ them:
   set by `inWorld`), the legend never counts a stand-in, and at settle the note takes its
   stand-in's seat and presence and the stand-in goes (`dropStandIns`, the cascade's `done`;
   any other cascade, or a switch cut short, takes them home first). No dot ever waits for
-  another.
+  another. The legend and the colour rotation see the disc arriving from the first frame:
+  `computeOrder` counts a leaving note where the dimension on screen files it, not under the
+  group it is fading out of, or the old names sit in the new order — rows in the legend, slots
+  in the rotation, and no bars for the tags, all three of which were reported at once.
 - **The erase edge** sweeps once at constant angular speed and takes a dot when it passes the
   dot's bearing (`delay = W × sweep ÷ 2π`). The dot fades where it stands — a fade also shrinks
   a dot, so the vicinity of the edge is where dots grow smaller and vanish — **in the colour
@@ -216,6 +219,19 @@ them:
 - **The inner ring sweeps counter-clockwise**, for effect: a dot in the inner ring of either
   disc is keyed on `2π − bearing` (`sweepAt`, with `innerOld` reading the left disc's
   `bandLock` and `innerNew` the arriving one's).
+- **The two discs share their rings.** "Why do both disks not have the same outer and inner
+  diameters?" Each dimension locked its own rings from its own visible total, and the folder
+  view of the tag fixture hides its archive folder by default: rings for 793 notes against
+  891, hub radius 712 against 813, outer edge 2,906 against 3,033. `keepRings` now carries the
+  hub radius, ring radii and band reference of the disc being left into the dimension arriving,
+  on the animated and the instant switch alike, and the arriving disc re-solves its rows inside
+  them — which is exactly what a filter does (*the rings are independent, and their thickness
+  is locked; a filter re-packs inside them*). Measured after: the tag fixture's two discs are
+  identical, 712..1142 and 1786..2906 in both. What can still differ is the inner ring's
+  outer edge, because a band's last row sits at `(rows − 1) ÷ rows` of its thickness and the
+  row count is solved from the band's own note count: on the maintainer's vault 3 rows against
+  4, 1,061 against 1,108, on a disc of 2,384. The rings are re-derived only by a hard
+  relayout, in whatever dimension is on screen.
 - One lap of the erase edge is at least `HAND_SWEEP` (12) fades of the resting kind long, the
   span is that lap plus one blade plus a fade, and the cascade reports the edge's angle as
   `lastCascade().handDeg` (with `handLap`) for the checks. `__vg.handBlade` and
