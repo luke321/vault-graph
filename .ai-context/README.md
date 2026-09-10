@@ -30,6 +30,7 @@ changing the layout or the animation.
 | `0008-zero-network-calls` | Why the vendored bundles are stripped at read time rather than patched, forked or disclosed |
 | `0009-the-host-persists-settings-not-the-page` | Settings go in and come back out; the page stores nothing, and only one host gets a gear |
 | `0010-one-browser-per-run` | Why the suite takes a free port per run, and how a lost race read as a flaky renderer |
+| `0011-a-live-rebuild-retakes-the-geometry-lock-at-rest` | Where the geometry lock's step goes when the note set changes, and the two routes rejected (github#72) |
 
 ### DDRs — `design/`
 
@@ -48,6 +49,7 @@ changing the layout or the animation.
 | `0011-per-frame-dot-size` | Experiment (github#41): dots capped from the drawn frame, and where that stands against the two-resting-sizes law |
 | `0012-hop-trail` | Concept (github#40): a way back along the linked-notes walk — hops only, crumbs, Backspace and Alt+ArrowLeft; two routes to land the contributor’s patch |
 | `0013-touch-input` | Touch: one finger pans, two pinch, a tap selects and does the hover's job; the phone's two panels, and why picking needed a second floor (github#73) |
+| `0014-live-rebuild` | How the disc follows the vault while the view is open: the diff, one construction not two, and how each law survives an edit (github#72) |
 
 **ADR or DDR?** An ADR is a choice with alternatives that were weighed and one that won —
 it explains *why not the other thing*. A DDR describes how a part actually works and the

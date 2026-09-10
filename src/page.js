@@ -58,6 +58,22 @@
  * @property {boolean} [dev]         a --dev build of the standalone; nothing else sets it
  */
 
+// github#72, design/0014
+/**
+ * @typedef {Object} LiveResult
+ * @property {boolean} applied
+ * @property {string} reason
+ * @property {boolean} [queued]
+ * @property {string} [busy]     which of cascade / tween / timeline holds the frame loop
+ * @property {number} [churn]
+ * @property {number} [limit]
+ * @property {number} [added]
+ * @property {number} [removed]
+ * @property {number} [replaced]
+ * @property {number} [moved]
+ * @property {boolean} [cascaded]
+ */
+
 /**
  * The attributes this file puts on every graph node at addNode, and reads back. Declared in
  * src/engine/types.ts since github#58 -- the store and the renderer are checked against the
@@ -154,6 +170,8 @@
  * @typedef {Object} VgApi
  * @property {GraphLike} graph
  * @property {RendererLike | undefined} renderer   set by makeRenderer() before the api exists; a getter, so a host reads the live one
+ * @property {(next: VaultData, opts?: { renames?: Record<string, string> }) => LiveResult} applyData   github#72
+ * @property {(path: string, words: number) => boolean} setWords   github#72: by PATH, never by index
  * @property {() => void} readTheme
  * @property {() => void} placeLogo
  * @property {() => PaletteSlot[]} palette
@@ -538,19 +556,16 @@ function mountVaultGraph(root, data, deps) {
     pinned: []
   };
 
+  // github#72, design/0014
+  /** @type {{ name: string, fn: () => void }[]} */
+  var onData = [];
+  /** @param {string} name @param {() => void} fn */
+  function invalidatesOnData(name, fn) { onData.push({ name: name, fn: fn }); }
+
   /* ------------------------------------------------- graph + base layout */
 
   var graph = new Graph();
 
-  DATA.nodes.forEach(function (n, i) {
-    graph.addNode(String(i), {
-      label: n.label, x: 0, y: 0, size: 4,
-      folder: n.folder, sub: n.sub || "", dirs: n.dirs || [], ntype: n.type || "note",
-      tags: n.tags || [], path: n.id, deg: n.deg,
-      created: n.created || "", touched: n.touched || "",
-      words: n.words || 0, ghost: !!n.ghost
-    });
-  });
   // github#43
   var EDGE_RAMP_START = 2000, EDGE_RAMP_END = 10000, EDGE_FLOOR = 0.10;
   /** @type {Record<string, { o: string, w: number }[]>} */
@@ -565,72 +580,114 @@ function mountVaultGraph(root, data, deps) {
   var edgeAttrsOf = function (w) { return { weight: w, size: EDGE_SIZE }; };
   var EDGE_SHOWN = 0;
   var lazyEdges = false;
-  (function () {
-    /** @type {Record<string, number>} */
-    var seen = dict();
-    /** @type {{ a: string, b: string, w: number, k: string }[]} */
-    var list = [];
-    DATA.edges.forEach(function (e) {
-      var a = String(e.s), b = String(e.t);
-      var k = a < b ? a + "\u0000" + b : b + "\u0000" + a;
-      if (seen[k]) return;
-      seen[k] = 1;
-      EDGE_TOTAL++;
-      list.push({ a: a, b: b, w: e.w, k: k });
-      (adj[a] || (adj[a] = [])).push({ o: b, w: e.w });
-      if (b !== a) (adj[b] || (adj[b] = [])).push({ o: a, w: e.w });
-    });
-    var share = EDGE_TOTAL <= EDGE_RAMP_START ? 1
-      : EDGE_TOTAL >= EDGE_RAMP_END ? EDGE_FLOOR
-      : 1 - (1 - EDGE_FLOOR) * (EDGE_TOTAL - EDGE_RAMP_START) / (EDGE_RAMP_END - EDGE_RAMP_START);
-    EDGE_SHOWN = Math.round(EDGE_TOTAL * share);
-    lazyEdges = EDGE_SHOWN < EDGE_TOTAL;
-    if (lazyEdges) {
-      list.sort(function (p, q) { return q.w - p.w || (p.k < q.k ? -1 : 1); });
-      list.length = EDGE_SHOWN;
-    }
-    list.forEach(function (e) {
-      if (!graph.hasEdge(e.a, e.b)) graph.addUndirectedEdge(e.a, e.b, edgeAttrsOf(e.w));
-    });
-  })();
 
   var NODE_MIN = 2.6, NODE_MAX = 11, NODE_ORPHAN = 6;
-  graph.forEachNode(function (id, a) {
-    graph.setNodeAttribute(id, "size", a.deg === 0
-      ? NODE_ORPHAN
-      : Math.min(NODE_MAX, NODE_MIN + 1.55 * Math.sqrt(a.deg)));
-  });
 
   // github#58
   /** @type {Record<string, number>} */
   var hubRank = dict();
-  (function () {
+  /** @type {Record<string, string[]>} */
+  var subOrder = dict();
+  /** @type {Record<string, number>} */
+  var subCount = dict();
+  // github#72
+  /** @type {Record<string, string>} */
+  var idOfPath = dict();
+  var nextId = 0;
+
+  // github#72, design/0014
+  /**
+   * @param {VaultData} src
+   * @param {((path: string) => string | undefined) | null} keepId
+   */
+  function ingest(src, keepId) {
+    graph.clear();
+    adj = dict();
+    hubRank = dict();
+    subOrder = dict();
+    subCount = dict();
+    idOfPath = dict();
+    EDGE_TOTAL = 0;
+    EDGE_SHOWN = 0;
+    lazyEdges = false;
+
+    /** @type {string[]} */
+    var idAt = [];
+    src.nodes.forEach(function (n, i) {
+      var held = keepId ? keepId(n.id) : undefined;
+      var id = held === undefined ? String(nextId++) : held;
+      idAt[i] = id;
+      idOfPath[n.id] = id;
+      graph.addNode(id, {
+        label: n.label, x: 0, y: 0, size: 4,
+        folder: n.folder, sub: n.sub || "", dirs: n.dirs || [], ntype: n.type || "note",
+        tags: n.tags || [], path: n.id, deg: n.deg,
+        created: n.created || "", touched: n.touched || "",
+        words: n.words || 0, ghost: !!n.ghost
+      });
+    });
+
+    (function () {
+      /** @type {Record<string, number>} */
+      var seen = dict();
+      /** @type {{ a: string, b: string, w: number, k: string }[]} */
+      var list = [];
+      src.edges.forEach(function (e) {
+        var a = idAt[e.s], b = idAt[e.t];
+        if (a === undefined || b === undefined) return;
+        var k = a < b ? a + "\u0000" + b : b + "\u0000" + a;
+        if (seen[k]) return;
+        seen[k] = 1;
+        EDGE_TOTAL++;
+        list.push({ a: a, b: b, w: e.w, k: k });
+        (adj[a] || (adj[a] = [])).push({ o: b, w: e.w });
+        if (b !== a) (adj[b] || (adj[b] = [])).push({ o: a, w: e.w });
+      });
+      var share = EDGE_TOTAL <= EDGE_RAMP_START ? 1
+        : EDGE_TOTAL >= EDGE_RAMP_END ? EDGE_FLOOR
+        : 1 - (1 - EDGE_FLOOR) * (EDGE_TOTAL - EDGE_RAMP_START) / (EDGE_RAMP_END - EDGE_RAMP_START);
+      EDGE_SHOWN = Math.round(EDGE_TOTAL * share);
+      lazyEdges = EDGE_SHOWN < EDGE_TOTAL;
+      if (lazyEdges) {
+        list.sort(function (p, q) { return q.w - p.w || (p.k < q.k ? -1 : 1); });
+        list.length = EDGE_SHOWN;
+      }
+      list.forEach(function (e) {
+        if (!graph.hasEdge(e.a, e.b)) graph.addUndirectedEdge(e.a, e.b, edgeAttrsOf(e.w));
+      });
+    })();
+
+    graph.forEachNode(function (id, a) {
+      graph.setNodeAttribute(id, "size", a.deg === 0
+        ? NODE_ORPHAN
+        : Math.min(NODE_MAX, NODE_MIN + 1.55 * Math.sqrt(a.deg)));
+    });
+
+    // github#58
     graph.nodes().slice().sort(function (a, b) {
       return graph.getNodeAttribute(b, "deg") - graph.getNodeAttribute(a, "deg") ||
              String(graph.getNodeAttribute(a, "label"))
                .localeCompare(String(graph.getNodeAttribute(b, "label")));
     }).forEach(function (id, i) { hubRank[id] = i; });
-  })();
 
-  /** @type {Record<string, string[]>} */
-  var subOrder = dict();
-  /** @type {Record<string, number>} */
-  var subCount = dict();
-  (function () {
-    /** @type {Record<string, Record<string, number>>} */
-    var tally = dict();
-    graph.forEachNode(function (_id, a) {
-      var f = a.folder, sb = a.sub || "";
-      if (!tally[f]) tally[f] = dict();
-      tally[f][sb] = (tally[f][sb] || 0) + 1;
-    });
-    Object.keys(tally).forEach(function (f) {
-      subOrder[f] = Object.keys(tally[f]).sort(function (x, y) {
-        return tally[f][y] - tally[f][x] || x.localeCompare(y);
+    (function () {
+      /** @type {Record<string, Record<string, number>>} */
+      var tally = dict();
+      graph.forEachNode(function (_id, a) {
+        var f = a.folder, sb = a.sub || "";
+        if (!tally[f]) tally[f] = dict();
+        tally[f][sb] = (tally[f][sb] || 0) + 1;
       });
-      subOrder[f].forEach(function (sb) { subCount[f + "/" + sb] = tally[f][sb]; });
-    });
-  })();
+      Object.keys(tally).forEach(function (f) {
+        subOrder[f] = Object.keys(tally[f]).sort(function (x, y) {
+          return tally[f][y] - tally[f][x] || x.localeCompare(y);
+        });
+        subOrder[f].forEach(function (sb) { subCount[f + "/" + sb] = tally[f][sb]; });
+      });
+    })();
+  }
+
+  ingest(DATA, null);
 
   var UNIT = 160;
 
@@ -2480,6 +2537,8 @@ function mountVaultGraph(root, data, deps) {
   var tlMs = dict();
   /** @type {DateSpan | null} */
   var dateSpan = null;
+  // github#72, design/0014
+  invalidatesOnData("timeline", function () { buildTimeline(); });
   function buildTimeline() {
     /** @type {[string, string][]} */
     var dated = [];
@@ -3504,6 +3563,8 @@ function mountVaultGraph(root, data, deps) {
         WIN.clearTimeout(cascadeRun.guard);
         cascadeRun = null;
       }
+      // github#78, design/0006 -- see changelog-detail
+      barWalkEnd();
       probeSample("pre-settle");
       moving.forEach(function (id) { alpha[id] = to[id]; });
       heatSig = "";
@@ -3910,7 +3971,7 @@ function mountVaultGraph(root, data, deps) {
                            msPerFrame: Math.round(msPerFrame * 1000) / 1000,
                            moving: moving.length, run: !!cascadeRun };
       if (busy || pr < 1 || resid > 0.5) cascadeRun.raf = WIN.requestAnimationFrame(step);
-      else { lastCascade.exit = "converged"; barWalkEnd(); settle(); }
+      else { lastCascade.exit = "converged"; settle(); }
     })();
   }
 
@@ -4926,6 +4987,12 @@ function mountVaultGraph(root, data, deps) {
   var trail = [];
   var TRAIL_CAP = 30;
   var trailHop = false;
+  // github#72, design/0012, design/0014
+  invalidatesOnData("hop trail", function () {
+    var kept = trail.filter(function (id) { return graph.hasNode(id); });
+    trail.length = 0;
+    trail.push.apply(trail, kept);
+  });
 
   /** @param {string} id */
   function goTo(id) {
@@ -4989,6 +5056,17 @@ function mountVaultGraph(root, data, deps) {
            '" title="Back to ' + esc(trailLabel(trail[trail.length - 1])) + '">&#8592;</button>' +
            '<ol>' + parts.join('') + '</ol></nav>';
   }
+
+  // github#72, design/0014
+  invalidatesOnData("selection, hover and pins", function () {
+    if (state.selected && !graph.hasNode(state.selected)) select(null);
+    if (state.hovered && !graph.hasNode(state.hovered)) state.hovered = null;
+    var pins = state.pinned.filter(function (id) { return graph.hasNode(id); });
+    if (pins.length !== state.pinned.length) {
+      state.pinned = pins;
+      if (savePinned) savePinned(pins.slice());
+    }
+  });
 
   /** @param {string | null} id */
   function select(id) {
@@ -5565,7 +5643,12 @@ function mountVaultGraph(root, data, deps) {
   }
 
   // github#3
-  function hardRelayout(animate, deferLayout) {
+  /**
+   * @param {boolean} animate
+   * @param {boolean} [deferLayout]
+   * @param {boolean} [freshGeom]  take a NEW geometry lock instead of holding the old one
+   */
+  function hardRelayout(animate, deferLayout, freshGeom) {
     stopPlay();
     if (cascadeRun) {
       WIN.cancelAnimationFrame(cascadeRun.raf);
@@ -5582,8 +5665,8 @@ function mountVaultGraph(root, data, deps) {
     bandLock = null; geomLock = null;
     if (deferLayout && prevBand) {
       regroup(true, prevBand, true);
-      // github#49
-      if (prevGeom) geomLock = prevGeom;
+      // github#49; github#72, decisions/0011
+      if (prevGeom && !freshGeom) geomLock = prevGeom;
       return;
     }
     // github#45
@@ -5591,6 +5674,12 @@ function mountVaultGraph(root, data, deps) {
     if (!deferLayout) applyLayout(!!animate);
     if (renderer) renderer.refresh();
   }
+
+  // github#72, design/0014
+  invalidatesOnData("search hits", function () {
+    var hits = $("hits");
+    if (hits && hits.firstChild) hits.replaceChildren();
+  });
 
   function buildSearch() {
     var q = /** @type {HTMLInputElement} */ ($("q"));
@@ -6535,6 +6624,8 @@ function mountVaultGraph(root, data, deps) {
   var heatSig = "";
   /** @type {number | null} */
   var heatRz = null;
+  // github#72, design/0014
+  invalidatesOnData("heatmap tally", function () { heatSig = ""; if (heat) heatBuild(); });
 
   /** @param {string} s @returns {number} ms, or NaN */
   function heatParse(s) {
@@ -7533,6 +7624,7 @@ function mountVaultGraph(root, data, deps) {
    * @property {boolean} [hover]
    * @property {boolean} [drag]
    * @property {boolean} [touchmode]
+   * @property {string} [live]       "outer" or "inner": hand the page one more note on that ring
    * @property {number} [wheel]
    * @property {string[]} [target]
    * @property {string[]} [to]
@@ -7704,6 +7796,8 @@ function mountVaultGraph(root, data, deps) {
       return pickY;
     }
     if (kind === "note") return demoNoteRect(arg);
+    // github#72, design/0014
+    if (kind === "arrival") return demoArrivalRect();
     if (kind === "biginner") return demoBigInnerNote();
     if (kind === "pin") {
       var dcard = $("detail");
@@ -8091,6 +8185,17 @@ function mountVaultGraph(root, data, deps) {
         why: "...and bring the whole vault back" },
       { settle: true, act: "only05", why: "let the disc refill" },
 
+      // github#72, design/0014
+      { live: "outer", act: "live",
+        why: "a note is written into the biggest folder -- the outer ring absorbs it in one cascade" },
+      { settle: true, act: "live", why: "let the disc re-pack around it, nothing torn down" },
+      { hover: true, target: ["arrival"], act: "live", why: "hover the note that just arrived" },
+      { park: true, act: "live", why: "let go of it" },
+      { live: "inner", act: "live",
+        why: "...and one into a small folder, on the inner ring" },
+      { settle: true, act: "live", why: "let the inner ring take it" },
+      { hover: true, target: ["arrival"], act: "live", why: "hover that one too" },
+
       // github#82 -- record wide; band first, it buys the radius
       { click: true, target: ["id", "band"], act: "collapse",
         why: "fold the calendar band away -- the disc grows into the row it had" },
@@ -8130,7 +8235,8 @@ function mountVaultGraph(root, data, deps) {
 
   // github#34, github#73
   // github#82 -- collapse closes the hero: it is the last act and ends folded
-  var FULL_RUN_EXCLUDES = ["subfoldercolor", "hiddenbydefault", "yearchip", "only05", "mobile"];
+  // github#72, design/0014
+  var FULL_RUN_EXCLUDES = ["subfoldercolor", "hiddenbydefault", "yearchip", "only05", "live", "mobile"];
 
   /** @returns {DemoBeat[]} */
   function demoFullStoryboard() {
@@ -8139,6 +8245,81 @@ function mountVaultGraph(root, data, deps) {
       beats = beats.concat([{ park: true, act: beats[beats.length - 1].act, why: "leave the final frame clean" }]);
     }
     return beats;
+  }
+
+  // github#72, design/0014
+  /** @type {string} */
+  var demoArrival = "";
+
+  /**
+   * @param {string} which   "outer" or "inner"
+   */
+  function demoLive(which) {
+    if (!DATA) return { applied: false, reason: "no data" };
+    var wantInner = which === "inner";
+    /** @type {Record<string, number>} */
+    var shown = dict();
+    /** @type {Record<string, boolean>} */
+    var innerOf = dict();
+    buildWedgePlan(false).cells.forEach(function (c) {
+      if (c.g === MERGED || c.g === UNLINKED) return;
+      shown[c.g] = (shown[c.g] || 0) + c.list.length;
+      innerOf[c.g] = !!c.inner;
+    });
+    var folder = "", most = -1;
+    Object.keys(shown).forEach(function (g) {
+      if (innerOf[g] !== wantInner || shown[g] <= most) return;
+      most = shown[g]; folder = g;
+    });
+    if (!folder) return { applied: false, reason: "no folder on the " + which + " ring" };
+
+    /** @type {VaultData} */
+    var next = {
+      vault: DATA.vault, generated: DATA.generated, dev: DATA.dev,
+      nodes: DATA.nodes.map(function (n) {
+        return Object.assign({}, n, { dirs: (n.dirs || []).slice(), tags: (n.tags || []).slice() });
+      }),
+      edges: DATA.edges.map(function (e) { return { s: e.s, t: e.t, w: e.w }; }),
+      stats: Object.assign({}, DATA.stats)
+    };
+    var host = -1, hostScore = -Infinity, taken = 0, newest = "";
+    next.nodes.forEach(function (n, i) {
+      if (/^Untitled( \d+)?$/.test(n.label)) taken++;
+      if (n.ghost) return;
+      if ((n.created || "") > newest) newest = n.created;
+      if (n.folder !== folder) return;
+      var score = n.deg - 1e6 * n.id.split("/").length;
+      if (score > hostScore) { hostScore = score; host = i; }
+    });
+    if (host < 0) return { applied: false, reason: "no note in " + folder };
+    var h = next.nodes[host];
+    var label = taken ? "Untitled " + taken : "Untitled";
+    var path = h.id.slice(0, h.id.lastIndexOf("/") + 1) + label + ".md";
+    // design/0014
+    var day = newest || h.created || "";
+    next.nodes.push({ id: path, label: label, folder: h.folder, dirs: (h.dirs || []).slice(),
+                      sub: h.sub || "", type: "note", tags: [], created: day, touched: day,
+                      words: 0, deg: 1 });
+    next.edges.push({ s: host, t: next.nodes.length - 1, w: 1 });
+    h.deg += 1;
+    if (next.stats) { next.stats.nodes += 1; next.stats.edges += 1; next.stats.files += 1; }
+    demoArrival = path;
+    var res = applyData(next);
+    return { applied: res.applied, reason: res.reason, added: res.added, cascaded: res.cascaded,
+             ring: which, folder: folder, path: path, linkedTo: h.label };
+  }
+
+  // github#72, design/0014
+  function demoArrivalRect() {
+    var id = demoArrival ? idOfPath[demoArrival] : undefined;
+    if (id === undefined || !graph.hasNode(id) || !renderer) return null;
+    var a = graph.getNodeAttributes(id);
+    var org = $("graph").getBoundingClientRect();
+    var v = renderer.graphToViewport({ x: a.x, y: a.y });
+    var r = renderer.scaleSize ? renderer.scaleSize(dotPx(a.size, id)) : dotPx(a.size, id);
+    var box = Math.max(6, r * 1.5);
+    return { left: v.x + org.left - box / 2, top: v.y + org.top - box / 2, width: box, height: box,
+             expect: id, demoLabel: "note " + a.label + ", just arrived" };
   }
 
   /** @param {string} name @returns {DemoBeat[]} */
@@ -8161,6 +8342,7 @@ function mountVaultGraph(root, data, deps) {
     doneTitle: DEMO_DONE_TITLE,
     storyboard: demoFullStoryboard,
     act: demoAct,
+    live: demoLive,
     busy: demoBusy,
     busyWhy: function () {
       return { play: !!play, cascade: !!cascadeRun, anim: !!anim,
@@ -8180,12 +8362,215 @@ function mountVaultGraph(root, data, deps) {
 
   /* ---- END: demo automation + debug API ---- */
 
+  /* ------------------------------------------------------- live rebuild */
+
+  // github#72, design/0014
+  var LIVE_MAX_CHANGED = 200;
+
+  /** @type {{ data: VaultData, renames: Record<string, string> } | null} */
+  var livePending = null;
+  /** @type {number | null} */
+  var liveTimer = null;
+  var LIVE_IDLE_MS = 120;
+
+  function liveBusy() { return !!(cascadeRun || anim || play); }
+  // github#72, design/0014
+  function liveWhy() {
+    return cascadeRun ? "cascade" : anim ? "tween" : play ? "timeline" : "";
+  }
+
+  // github#72, design/0014 -- `words` is deliberately not in the key
+  /** @param {VaultNode} n */
+  function placeKeyOf(n) {
+    return n.label + "\t" + n.folder + "\t" + (n.sub || "") + "\t" + (n.dirs || []).join("/") +
+           "\t" + (n.type || "") + "\t" + (n.tags || []).join(",") + "\t" + (n.created || "") +
+           "\t" + (n.touched || "") + "\t" + n.deg + "\t" + (n.ghost ? "1" : "");
+  }
+
+  // github#72, design/0014
+  /**
+   * @param {VaultData} src
+   * @returns {Record<string, Record<string, number>>}
+   */
+  function linkWeights(src) {
+    /** @type {Record<string, Record<string, number>>} */
+    var m = dict();
+    src.edges.forEach(function (e) {
+      var a = src.nodes[e.s], b = src.nodes[e.t];
+      if (!a || !b) return;
+      var lo = a.id < b.id ? a.id : b.id, hi = a.id < b.id ? b.id : a.id;
+      (m[lo] || (m[lo] = dict()))[hi] = e.w;
+    });
+    return m;
+  }
+
+  /**
+   * @typedef {Object} LiveDiff
+   * @property {string[]} added
+   * @property {string[]} removed
+   * @property {string[]} replaced
+   * @property {boolean} links
+   * @property {string[]} words     changed word count and nothing else
+   */
+  /** @param {VaultData} was @param {VaultData} now @returns {LiveDiff} */
+  function diffData(was, now) {
+    /** @type {Record<string, VaultNode>} */
+    var old = dict();
+    was.nodes.forEach(function (n) { old[n.id] = n; });
+    /** @type {LiveDiff} */
+    var d = { added: [], removed: [], replaced: [], links: false, words: [] };
+    /** @type {Record<string, number>} */
+    var seen = dict();
+    now.nodes.forEach(function (n) {
+      seen[n.id] = 1;
+      var o = old[n.id];
+      if (!o) { d.added.push(n.id); return; }
+      if (placeKeyOf(o) !== placeKeyOf(n)) d.replaced.push(n.id);
+      else if ((o.words || 0) !== (n.words || 0)) d.words.push(n.id);
+    });
+    was.nodes.forEach(function (n) { if (!seen[n.id]) d.removed.push(n.id); });
+
+    var wa = linkWeights(was), wb = linkWeights(now);
+    /** @param {Record<string, Record<string, number>>} x @param {Record<string, Record<string, number>>} y */
+    var missing = function (x, y) {
+      return Object.keys(x).some(function (lo) {
+        var row = x[lo], other = y[lo];
+        return Object.keys(row).some(function (hi) { return !other || other[hi] !== row[hi]; });
+      });
+    };
+    d.links = missing(wa, wb) || missing(wb, wa);
+    return d;
+  }
+
+  // github#72, design/0014, decisions/0006, decisions/0011
+  /**
+   * @param {VaultData} next
+   * @param {{ renames?: Record<string, string> }} [opts]  oldPath -> newPath; github#49
+   * @returns {LiveResult}
+   */
+  function applyData(next, opts) {
+    if (dead) return { applied: false, reason: "torn down" };
+    if (!next || !next.nodes || !next.edges) return { applied: false, reason: "not a build" };
+    /** @type {Record<string, string>} */
+    var renames = (opts && opts.renames) || dict();
+    if (liveBusy()) {
+      livePending = { data: next, renames: renames };
+      if (liveTimer === null) liveTimer = WIN.setInterval(drainLive, LIVE_IDLE_MS);
+      return { applied: false, reason: "busy", busy: liveWhy(), queued: true };
+    }
+
+    /** @type {Record<string, string>} */
+    var held = dict();
+    /** @type {Record<string, Point>} */
+    var posOf = dict();
+    /** @type {Record<string, number>} */
+    var alphaOf = dict();
+    /** @type {Record<string, string>} */
+    var groupWas = dict();
+    graph.forEachNode(function (id, a) {
+      held[a.path] = id;
+      posOf[a.path] = { x: a.x, y: a.y };
+      alphaOf[a.path] = alpha[id] || 0;
+      groupWas[a.path] = groupOf(id);
+    });
+    Object.keys(renames).forEach(function (from) {
+      var to = renames[from];
+      if (!to || held[from] === undefined) return;
+      held[to] = held[from]; posOf[to] = posOf[from];
+      alphaOf[to] = alphaOf[from]; groupWas[to] = groupWas[from];
+      delete held[from];
+    });
+
+    var d = diffData(DATA, next);
+    var churn = d.added.length + d.removed.length + d.replaced.length;
+    if (churn > LIVE_MAX_CHANGED) {
+      return { applied: false, reason: "too much changed", churn: churn, limit: LIVE_MAX_CHANGED };
+    }
+
+    // design/0014 -- the path a person typing spends all their time on
+    if (!churn && !d.links) {
+      /** @type {Record<string, number>} */
+      var wordsOf = dict();
+      next.nodes.forEach(function (n) { wordsOf[n.id] = n.words || 0; });
+      d.words.forEach(function (path) {
+        var id = idOfPath[path];
+        if (id !== undefined) graph.setNodeAttribute(id, "words", wordsOf[path] || 0);
+      });
+      DATA = next;
+      return { applied: true, reason: "words only", added: 0, removed: 0, replaced: 0,
+               moved: 0, cascaded: false };
+    }
+
+    DATA = next;
+    ingest(next, function (path) { return held[path]; });
+
+    // decisions/0006 -- survivors back where they are DRAWN, arrivals seated at zero
+    graph.forEachNode(function (id, a) {
+      var p = posOf[a.path];
+      if (p) graph.mergeNodeAttributes(id, { x: p.x, y: p.y });
+      alpha[id] = p ? (alphaOf[a.path] || 0) : 0;
+    });
+
+    onData.forEach(function (h) { attempt(h.fn); });
+
+    // decisions/0011
+    hardRelayout(false, true, true);
+
+    /** @type {Record<string, string> | null} */
+    var movesFrom = null;
+    var moved = 0;
+    graph.forEachNode(function (id, a) {
+      var g0 = groupWas[a.path];
+      if (g0 === undefined || (alphaOf[a.path] || 0) <= 0.004) return;
+      if (g0 === groupOf(id)) return;
+      if (!movesFrom) movesFrom = dict();
+      movesFrom[id] = g0;
+      moved++;
+    });
+
+    attempt(placeLogo); attempt(buildLegend); attempt(buildStats);
+    if (dateSpan) attempt(drawDateUI);
+    cascade(null, { colToggle: true, movesFrom: movesFrom });
+    return { applied: true, reason: "", added: d.added.length, removed: d.removed.length,
+             replaced: d.replaced.length, moved: moved, cascaded: true };
+  }
+
+  // github#72, design/0014
+  /**
+   * @param {string} path
+   * @param {number} words
+   * @returns {boolean}
+   */
+  function setWords(path, words) {
+    var id = idOfPath[path];
+    if (id === undefined || !graph.hasNode(id)) return false;
+    graph.setNodeAttribute(id, "words", words);
+    return true;
+  }
+
+  function drainLive() {
+    if (dead || !livePending) { stopDrain(); return; }
+    if (liveBusy()) return;
+    var held = livePending;
+    livePending = null;
+    stopDrain();
+    attempt(function () { applyData(held.data, { renames: held.renames }); });
+  }
+  function stopDrain() {
+    if (liveTimer !== null) { WIN.clearInterval(liveTimer); liveTimer = null; }
+  }
+  // github#62
+  onDestroy.push(function () { livePending = null; stopDrain(); });
+
   /* ------------------------------------------------------------------ go */
 
   var bootTimer = WIN.setTimeout(function () {
     if (dead) return;
     makeRenderer();
     API = window.__vg = { graph: graph,
+                    // github#72
+                    applyData: applyData,
+                    setWords: setWords,
                     readTheme: readTheme, get renderer() { return renderer; },
                     placeLogo: placeLogo,
                     palette: paletteInfo,
@@ -8884,6 +9269,14 @@ function mountVaultGraph(root, data, deps) {
                     // github#31
                     // github#3
                     relayout: function () { hardRelayout(false); },
+                    // github#72
+                    data: function () { return DATA; },
+                    invalidations: function () { return onData.map(function (h) { return h.name; }); },
+                    liveState: function () {
+                      return { pending: !!livePending, draining: liveTimer !== null,
+                               busy: liveBusy(), limit: LIVE_MAX_CHANGED, nextId: nextId,
+                               paths: Object.keys(idOfPath).length };
+                    },
                     // github#62
                     destroy: destroy,
     };

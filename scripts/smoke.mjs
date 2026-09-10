@@ -83,7 +83,7 @@ const selected = () => (ONLY.length
   ? all.filter((c) => ONLY.some((q) => c.name.toLowerCase().includes(q)))
   : all);
 
-// github#7, github#15
+// github#7, github#15, github#78 -- see changelog-detail
 const JOBS = Math.max(1, Number(arg("jobs", "4")) || 4);
 
 const GRID = argv.includes("--no-grid") ? false
@@ -108,6 +108,8 @@ const FRAME_READING = [
   "gap reservation holds still",
   "outgrows",                     // github#66
   "fade never reverses",          // github#67
+  "live rebuild",                 // github#72
+  "land by path",                 // github#72
   "waits for the release",
   "haloes but never pushes",
   "resting layout",
@@ -488,7 +490,9 @@ check("hovering a note ramps in and releases at zero", async (p) => {
   const w = await p.j(`__vg.demo.where("note","04") || __vg.demo.where("note","03")`);
   if (!w) return { ok: false, detail: "no note target resolved at all" };
   await p.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: w.x, y: w.y, buttons: 0 });
-  await sleep(400);
+  // github#78 -- see changelog-detail
+  await sleep(50);
+  await settle(p);
   const on = await p.j(`(function(){
     var f = __vg.state.hovered, nb = f ? __vg.graph.neighbors(f) : [], far = null;
     __vg.graph.forEachNode(function(i){ if (far || i === f || nb.indexOf(i) >= 0) return;
@@ -501,7 +505,8 @@ check("hovering a note ramps in and releases at zero", async (p) => {
             dim: getComputedStyle(document.getElementById('vg-app')).getPropertyValue('--dim').trim()};
   })()`);
   await p.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: 5, y: 5, buttons: 0 });
-  await sleep(400);
+  await sleep(50);
+  await settle(p);
   const off = await p.j(`{t: __vg.hoverT, held: !!__vg.state.hovered}`);
   const dimmed = on.farColour && on.dim && on.farColour.toLowerCase() === on.dim.toLowerCase();
   const AIMABLE_PX = 10;
@@ -3329,21 +3334,8 @@ check("legend count bars scale to the largest visible folder", async (p) => {
     return { order: order, rows: rows };
   })()`);
 
-  // github#78, design/0006
-  const settleBars = async () => {
-    let last = null;
-    for (let i = 0; i < 60; i++) {
-      const now = await p.j(`(function(){
-        return [].map.call(document.querySelectorAll('#vg-legend .lg[data-g]'), function (lg) {
-          return getComputedStyle(lg).getPropertyValue('--vg-share').trim();
-        }).join(",");
-      })()`);
-      if (now === last) return true;
-      last = now;
-      await sleep(150);
-    }
-    return false;
-  };
+  // github#78, design/0006 -- see changelog-detail
+  const settleBars = () => settle(p);
 
   // github#78
   const basisOf = (rows) => rows
@@ -4140,6 +4132,154 @@ check("re-selecting the same note keeps the trail, and a filter does not clear i
   const ok = n === 3 && s0.crumbs.length === 3 && s1.crumbs.length === 3 && s2.crumbs.length === 3 && s2.open && off >= 1 && s3.crumbs.length === 3;
   return { ok, detail: `${s0.crumbs.length} crumbs; pin toggle: ${s1.crumbs.length}; hiding ${g}: ${s2.crumbs.length} crumbs, ` +
                        `${off} marked hidden, card ${s2.open ? "open" : "CLOSED"}; shown again: ${s3.crumbs.length}` };
+});
+
+/* ------------------------------------------------- live rebuild (github#72) */
+
+// github#72, design/0014
+const LIVE_JS = `
+  window.__live = {
+    snap: function () {
+      var pos = {}, band = {}, size = {};
+      __vg.buildWedgePlan(false).cells.forEach(function (c) { band[c.g] = !!c.inner; });
+      __vg.graph.forEachNode(function (id, a) {
+        pos[a.path] = [a.x, a.y];
+        size[a.path] = __vg.renderer.scaleSize(__vg.renderer.getNodeDisplayData(id).size);
+      });
+      return { pos: pos, band: band, size: size, n: __vg.graph.order };
+    },
+    drift: function (a, b) {
+      var moved = 0, worst = 0, who = "", bands = 0, sized = 0, worstSize = 0;
+      Object.keys(a.pos).forEach(function (k) {
+        var p = a.pos[k], q = b.pos[k];
+        if (!q) return;
+        var d = Math.hypot(p[0] - q[0], p[1] - q[1]);
+        if (d > worst) { worst = d; who = k; }
+        if (d > 0.0001) moved++;
+        var s = Math.abs((a.size[k] || 0) - (b.size[k] || 0));
+        if (s > worstSize) worstSize = s;
+        if (s > 0.0001) sized++;
+      });
+      Object.keys(a.band).forEach(function (g) {
+        if (b.band[g] !== undefined && b.band[g] !== a.band[g]) bands++;
+      });
+      return { moved: moved, worst: +worst.toFixed(4), who: who, bands: bands,
+               sized: sized, worstSize: +worstSize.toFixed(4) };
+    },
+    clone: function () { return JSON.parse(JSON.stringify(__vg.data())); },
+    // design/0014
+    withOneMore: function (path) {
+      var d = window.__live.clone();
+      var host = d.nodes[Math.floor(d.nodes.length / 2)];
+      d.nodes.push({ id: path, label: "Zz Live Probe", folder: host.folder,
+                     dirs: (host.dirs || []).slice(), sub: host.sub || "", type: "note",
+                     tags: [], created: host.created, touched: host.touched, words: 0, deg: 0 });
+      return d;
+    },
+    // Drop one note, and renumber the edges the way a real build of that vault would.
+    without: function (at) {
+      var d = window.__live.clone();
+      d.nodes.splice(at, 1);
+      d.edges = d.edges.filter(function (e) { return e.s !== at && e.t !== at; })
+                       .map(function (e) { return { s: e.s > at ? e.s - 1 : e.s,
+                                                    t: e.t > at ? e.t - 1 : e.t, w: e.w }; });
+      return d;
+    }
+  }; void 0`;
+
+check("a live rebuild with the same data moves nothing", async (p) => {
+  await settle(p);
+  await p.eval(LIVE_JS);
+  const r = await p.j(`(function(){
+    var was = window.__live.snap();
+    var res = __vg.applyData(window.__live.clone());
+    return { res: res, d: window.__live.drift(was, window.__live.snap()), busy: !!__vg.demo.busy() };
+  })()`);
+  const ok = r.res.applied && r.res.cascaded === false && r.d.moved === 0 && !r.busy;
+  return { ok, detail: (r.res.applied ? `applied "${r.res.reason}"` : `REFUSED (${r.res.reason})`) +
+                       `, cascaded ${r.res.cascaded}, ${r.d.moved} note(s) moved, ` +
+                       `worst ${r.d.worst}, no cascade started` };
+});
+
+check("the invalidation registry names every cache a live rebuild stales", async (p) => {
+  const names = await p.j("__vg.invalidations()");
+  const want = ["timeline", "heatmap tally", "hop trail", "selection, hover and pins", "search hits"];
+  const missing = want.filter((w) => !names.includes(w));
+  return { ok: missing.length === 0,
+           detail: missing.length ? `MISSING: ${missing.join(", ")}` : `${names.length}: ${names.join("; ")}` };
+});
+
+check("a live rebuild lands on the layout a fresh relayout gives", async (p) => {
+  await settle(p);
+  await p.eval(LIVE_JS);
+  const start = await p.j(`(function(){ window.__live.a = window.__live.snap();
+                                        return { n: window.__live.a.n }; })()`);
+  const res = await p.j(`__vg.applyData(window.__live.withOneMore("__live/Zz Live Probe.md"))`);
+  await settle(p);
+  // decisions/0011, github#21
+  const after = await p.j(`(function(){
+    var landed = window.__live.snap();
+    __vg.relayout();
+    return { d: window.__live.drift(landed, window.__live.snap()),
+             zero: __vg.checkZeroWeightInvariance(),
+             lattice: __vg.buildWedgePlan(false).cells.length,
+             exit: __vg.lastCascade().exit };
+  })()`);
+  const moved = await p.j(`window.__live.drift(window.__live.a, window.__live.snap())`);
+  // design/0014
+  await p.j(`__vg.applyData(window.__live.clone().nodes.length > ${start.n}
+                            ? window.__live.without(window.__live.clone().nodes.length - 1)
+                            : window.__live.clone())`);
+  await settle(p);
+  const back = await p.j(`window.__live.drift(window.__live.a, window.__live.snap())`);
+  const ok = res.applied && res.added === 1 && res.cascaded &&
+             after.d.moved === 0 && after.d.sized === 0 && after.d.bands === 0 &&
+             after.zero.invariantOK !== false && back.moved === 0;
+  return { ok, detail: `${start.n} -> ${start.n + 1} notes, cascade ${after.exit}; ` +
+                       `settle vs fresh relayout: ${after.d.moved} moved / ${after.d.sized} resized, ` +
+                       `${after.d.bands} band flip(s); the add moved ${moved.moved} of ${start.n} ` +
+                       `notes, worst ${moved.worst}; restored to ${back.moved} off original` };
+});
+
+check("word counts land by path, which is the only thing a live rebuild keeps", async (p) => {
+  await settle(p);
+  await p.eval(LIVE_JS);
+  const start = await p.j(`window.__live.snap().n`);
+  // design/0014
+  const r = await p.j(`(function(){
+    var res = __vg.applyData(window.__live.without(1));
+    var ids = __vg.graph.nodes(), d = __vg.data();
+    var diverged = 0, sample = null;
+    for (var i = 0; i < d.nodes.length; i++) {
+      var byIndex = String(i), byPath = d.nodes[i].id;
+      var here = __vg.graph.hasNode(byIndex)
+        ? __vg.graph.getNodeAttribute(byIndex, "path") : null;
+      if (here !== byPath) diverged++;
+      // design/0014
+      if (!sample && here !== null && here !== byPath) sample = { i: i, path: byPath, atIndex: here };
+    }
+    var landed = null, bystander = null;
+    if (sample) {
+      __vg.setWords(sample.path, 424242);
+      __vg.graph.forEachNode(function (id, a) {
+        if (a.path === sample.path) landed = a.words;
+        if (sample.atIndex && a.path === sample.atIndex) bystander = a.words;
+      });
+    }
+    return { res: res, n: ids.length, diverged: diverged, sample: sample,
+             landed: landed, bystander: bystander,
+             missing: __vg.setWords("__live/not a note.md", 1) };
+  })()`);
+  await settle(p);
+  await p.j(`__vg.applyData(window.__live.clone())`);
+  await settle(p);
+  const ok = r.res.applied && r.diverged > 0 && r.landed === 424242 &&
+             r.bystander !== null && r.bystander !== 424242 && r.missing === false;
+  return { ok, detail: r.sample
+    ? `${start} notes, one removed; index and id disagree for ${r.diverged} note(s) ` +
+      `(index ${r.sample.i} now holds a different note); setWords by path landed on the right ` +
+      `one (${r.landed}), the note at that index kept ${r.bystander}; a deleted path returns false`
+    : `index and id never diverged -- this check cannot see the defect it exists for` };
 });
 
 async function settle(p, ms = 6000) {

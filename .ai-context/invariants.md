@@ -1312,8 +1312,12 @@ the notes use. There is no second timer and no CSS transition: a transition woul
 clock and land whenever it liked, which is precisely the class of bug `animation.md` forbids.
 
 **The last frame of a bar's walk is the resting layout**, and it lands there by assignment, not
-by convergence: `barWalkEnd()` paints `barNow` exactly at the cascade's `converged` exit rather
-than trusting the final lerp. Measured on each fixture — hide the largest folder, watch the
+by convergence: `barWalkEnd()` paints `barNow` exactly rather than trusting the final lerp. It is
+called from inside `settle()` itself, not only from the cascade's `converged` exit branch — the
+400ms stall watchdog also calls `settle()` directly, and until github#78 that path skipped
+`barWalkEnd()` entirely, leaving a bar stuck at whatever share the last tick reached on any
+machine that stalls a frame. `settle()` is the one place every exit path converges, so that is
+where the bar walk gets landed too. Measured on each fixture — hide the largest folder, watch the
 runner-up grow to fill the row:
 
 | fixture | row | rest to target | distinct values seen | restored |
@@ -1392,9 +1396,14 @@ snap or a bar that outlives its folder.
 
 **This is what made the bar checks flaky, and the fix was to stop sleeping.** Once the bars
 moved, `count bars` read **63.807%** mid-walk where it expected 100% — a `sleep(700)` racing a
-1600ms cascade. Every fixed sleep after a state change is now `settleBars()`, which polls until
-no `--vg-share` changes. A time-based wait against an animation is a false failure waiting for
-a slow machine.
+1600ms cascade. Every fixed sleep after a state change became `settleBars()`, polling until no
+`--vg-share` changed between two 150ms reads — which was itself a false-positive trap, and
+github#78 is the second fix here: two equal CSS reads mean the page painted nothing between
+them, and a real machine can stall its own `requestAnimationFrame` loop for a beat without being
+done. `settleBars()` now polls `__vg.demo.busy()` to actual completion, the same primitive the
+suite's own `settle(p)` already used. A time-based wait, or a wait for "nothing changed," against
+an animation is a false failure waiting for a slow machine either way — only a flag the animation
+loop itself sets is authoritative.
 
 ```bash
 node scripts/smoke.mjs --only "count bars"      # the basis, the edge cases, hover, selection
@@ -2171,6 +2180,98 @@ have stopped changing; and a first click on the view activates its leaf, which s
 workspace under the pointer — activate the leaf and click the stage once before aiming.
 The layout is byte-identical to the exporter's only once all three hold; measured mid-intro it
 read as 1,357 notes moved.
+
+## A live rebuild lands on the layout a fresh build gives
+
+github#72, `design/0014`, `decisions/0011`. The disc follows the vault while the view is open:
+`api.applyData(next)` diffs a fresh build against the mounted graph and walks the disc to it
+through the ordinary cascade, instead of tearing the mount down.
+
+What makes it safe is `decisions/0006`, not new machinery. An arriving note is seated at
+**alpha 0 before either cascade endpoint is built**, and a zero-weight member is already
+guaranteed to change no plan, no row and no `maxR` -- so endpoint A is the disc exactly as
+drawn, endpoint B is the new rest, and there is no second animation path.
+
+Three properties, one check each, all three fixtures:
+
+| | measured |
+|---|---|
+| the same data moves nothing and starts no cascade | 0 notes moved, `applied "words only"`, `cascaded false` |
+| a one-note add settles on the resting layout | **0 moved / 0 resized / 0 band flips** against a fresh `relayout()`, on all three |
+| a removed note re-added restores the disc exactly | 0 notes off their original position |
+
+The second row is `settle()` staying a no-op, measured the way the law states it: the disc it
+landed on IS the resting layout, so rebuilding from scratch moves nothing. `relayout()` is the
+instrument, for the reason the golden-snapshot section gives -- a bare `applyLayout(false)` can
+be overwritten by a still-running frame.
+
+```bash
+node scripts/smoke.mjs --only "live rebuild"    # three checks
+node scripts/smoke.mjs --only "land by path"    # the index/id defect below
+```
+
+**A one-note add is NOT a small motion, and the ticket assumed it was.** Measured by building
+each fixture, adding one note and rebuilding: **23% of notes move** on both the demo and the 10k
+fixture (318 of 1,403; 2,339 of 10,002), worst 185 u, max |dr| **0.82 of a row**. Wedges *before*
+the edited one in the sweep hold exactly; everything after it shifts by the one note's share of
+arc. That is the deterministic layout being correct, not the diff being wrong, and it is why the
+check asserts convergence rather than stillness.
+
+**What it costs to apply, and this is the open number.** `applyData` is synchronous and blocks
+the main thread before the cascade starts:
+
+| | demo (1,403) | 10k (10,002) |
+|---|---|---|
+| total block | **1,081 ms** | **1,896 ms** |
+| of which `hardRelayout` | 309 ms | 446 ms |
+| of which cascade setup (2x `staticPlan`, 2x `roomOf`) | 237 ms | 152 ms |
+| diff / ingest / invalidations | 4 / 8 / 7 ms | 30 / 63 / 28 ms |
+
+The remainder is GC from dropping the old graph and building a new one. **Most of it is not
+new**: a bare `__vg.relayout()` on the demo fixture already blocks 840 ms, so the relayout and
+cascade-setup terms are the page's existing cost, which a folder toggle pays too. What is new is
+paying it once per edit rather than once per interaction.
+
+**Watchdog exits on these fixtures are pre-existing.** A live cascade on the demo fixture reports
+`exit: "settle() called from outside the loop"` rather than `converged`, 3 runs of 3. So does an
+ordinary folder toggle on the same page, same machine (35 frames, 2,110 ms) -- so this is the
+harness's frame pacing under CDP, not the live path. `decisions/0003`'s rule is unchanged and the
+positions still land exactly; the checks assert the landing, not the exit reason, for the reason
+`perf-cascade-frame-cost.md` gives about automation's frame pacing.
+
+**A rebuild waits for the leaf to be looked at.** Obsidian hides an inactive leaf with
+`display: none`, and before this was handled the cascade ran to completion behind it: measured in
+a real Obsidian, the disc moved on 20 samples **while hidden** and 0 after switching back, so the
+reader returned to a disc that had silently changed. Held now, and the same run reports **0 while
+hidden, 20 after** -- twice in a row. The wake is a 500 ms poll that runs only while a rebuild is
+waiting, because `active-leaf-change` / `layout-change` do not carry the case: switching away
+fired five of them and `revealLeaf` fired none.
+
+```bash
+node scripts/build-plugin.mjs
+node scripts/obsidian-smoke.mjs --only live      # a real Obsidian, throwaway copy of a fixture
+```
+
+## Word counts land by path, and an index stopped meaning a node
+
+github#72. The host reads word counts in the background after the mount and applies them one at a
+time. It addressed them by the note's **index in the build** -- `setNodeAttribute(String(i), ...)`
+-- which was the same string as the note's graph id only because nothing had ever rebuilt the
+graph.
+
+A live rebuild breaks that on its first arrival. Measured: after one note is removed from the
+front of the demo fixture, **index and id disagree for 1,401 of 1,403 notes**; 10,000 of 10,002 on
+the 10k fixture. Every count still in flight would then land on the wrong note -- a plausible
+number on the wrong dot, which nothing would ever report.
+
+`api.setWords(path, words)` is the fix, addressed by the one thing the host and the page agree on.
+Verified the check catches it: with `setWords` reverted to index addressing, the check fails and
+names the defect -- the count landed on the bystander at that index (`424242`) instead of the note
+asked for.
+
+```bash
+node scripts/smoke.mjs --only "land by path"
+```
 
 ## Comments are pointers, and the count only goes down
 
