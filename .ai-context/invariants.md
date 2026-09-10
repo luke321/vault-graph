@@ -341,22 +341,24 @@ than the one they had, on the four fixtures. Before: 787,308 of 787,308; 709,555
 
 github#86, design/0014. Each dimension keeps its own hidden state, so a note the folder disc
 hides and the tag disc shows is an **arrival** on the switch, and an arrival is lit by the fill
-edge **at its seat** — never at the switch itself, never ahead of the edge. Two things break
-it. `setDim` must hand `regroup` `keepAlpha`, or `syncAlpha` lights the note before the
+edge — never at the switch itself, never before the edge has reached its wedge. Two things
+break it. `setDim` must hand `regroup` `keepAlpha`, or `syncAlpha` lights the note before the
 cascade starts and the cascade has nothing to arrive. And the block after the schedule that
-re-deals a fully-arriving group's delays by radius must be skipped for `hand`: under the hand
-every delay is an angle, and re-dealing them hands one seat the delay of another.
+re-deals a fully-arriving group's delays by radius must be skipped for `hand`: the hand deals
+each wedge itself, and re-dealing hands one seat the delay of another.
 
 ```bash
 node scripts/smoke.mjs --only "arrives with the fill edge"
 ```
 
 The check hides the smallest non-archive folder with three or more notes in the folder disc
-only, drives the real select, and on every sample compares each such note that is lit against
-the fill edge, taken as the lowest standing old bearing plus one fade for the lag minus the
-blade. **0 lit at the switch itself, 0 dot-frames ahead of the edge, all lit at the end** on
-the four fixtures. Before, on the maintainer's vault: 16 notes lit at the first sample at
-bearings up to 266°; with `keepAlpha` alone, one lit at 206° while the edge was near 78°.
+only, drives the real select, and records for each such note the fill edge's position when it
+first lit — the lowest standing old bearing plus one fade for the lag minus the blade — then
+compares that against its wedge's start in the settled tag disc, because a wedge under the
+edge flows row by row from the moment the edge reaches it. **0 lit at the switch itself, 0 lit
+before the edge reached their wedge, all lit at the end** on the four fixtures. Before, on the
+maintainer's vault: 16 notes lit at the first sample at bearings up to 266°; with `keepAlpha`
+alone, one lit at 206° while the edge was near 78°.
 
 ## The rings are independent
 

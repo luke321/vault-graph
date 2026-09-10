@@ -184,16 +184,25 @@ after another and enabling the new ones one after another, with the two discs ne
 
 `hand` keys the schedule on **angle**, not rank, and it has two edges of one rotating hand:
 
-- **The erase edge** sweeps once at constant angular speed. A note starts fading when the edge
-  passes its **old** bearing (`delay = W × angleSweep(where it sits) ÷ 2π`) and has left one
-  fade later. The old disc is **not re-laid-out**: a dot fades where it stands, **in the colour
-  it had**. `state.dim` has already flipped by then and `nodeColor` files through `fileGroup`,
-  so `setDim` snapshots every mover's colour into `LeftDisc.color` before the flip and
-  `nodeColor` answers from it for as long as `moveFrom` holds the note — the first take of the
-  hand skipped this and every standing dot repainted on the first frame.
-- **The fill edge** trails the erase edge by a fixed **blade** (`HAND_BLADE_DEG`, 90°). A note
-  that has left takes its **final** seat straight from `finalPos` and waits there, dark, until
-  the fill edge reaches its **new** bearing. `arriveAt = max(fillAt(new bearing), crossAt)`.
+- **The erase edge** sweeps once at constant angular speed. It reaches the old disc's wedges
+  in clock order, and **inside a wedge the notes flow the way a toggled wedge does**: rows
+  outermost first, clockwise within a row, spread over the time the edge takes to cross the
+  wedge (`flow()` — a wedge's window is `[W × start ÷ 2π, W × end ÷ 2π]` from its members'
+  bearings, and the members are dealt into it in that order). The first take keyed every dot
+  on its own bearing, which erased as a crisp radial front and drew no serpentine; the user
+  asked for the toggled wedge's motion. The old disc is **not re-laid-out**: a dot fades where
+  it stands, **in the colour it had**. `state.dim` has already flipped by then and `nodeColor`
+  files through `fileGroup`, so `setDim` snapshots every mover's colour into
+  `LeftDisc.color` before the flip and `nodeColor` answers from it for as long as `moveFrom`
+  holds the note — the first take skipped this and every standing dot repainted on the first
+  frame.
+- **The fill edge** trails the erase edge by a fixed **blade** (`HAND_BLADE_DEG`, 45° — it
+  was 90°, and the user asked for the two hands closer together). It reaches the new disc's
+  wedges in clock order and each wedge fills with the same row flow, from its members' **new**
+  bearings. A note that has left takes its **final** seat straight from `finalPos` and waits
+  there, dark, until its turn. `arriveAt = max(lightAt, crossAt)`.
+- A wedge that spans the seam at 12 o'clock has no one window; its dots are keyed on their own
+  bearings, as the first take keyed everything.
 
 A note the old disc **hides** and the new one shows is an arrival, keyed like every other
 delay on its new bearing. That needs `setDim` to hand `regroup` `keepAlpha` — otherwise
@@ -207,29 +216,34 @@ So the frame needs **no plan at all**: targets are `finalPos` for every dot that
 nothing for a dot still fading out. One lap of the erase edge is at least `HAND_SWEEP` (12)
 fades long, and the span is that lap plus one blade plus a fade.
 
-**Measured on the demo fixture, every animation frame**, binning dots by bearing into 24
-sectors of 15° and classifying each against its old seat and its final seat:
+**Measured with the first take (a crisp radial front, blade 90°) on the demo fixture**, every
+animation frame, binning dots by bearing into 24 sectors of 15°: the old disc's lowest
+standing bearing ran 129 / 180 / 230 / 279 / 329° against the new disc's highest lit 37 / 89 /
+140 / 189 / 239° at 30–70%, the gap being the blade, and the two discs never shared a sector.
+Every lit dot is at its final seat — median radius error **0**, median bearing error **0** —
+against 32,530 dot-frames "near neither seat" for the arc-planned attempt below, and the frame
+stays at the 60 fps cadence because nothing is planned. That property survives the wedge flow
+unchanged: seats still come from `finalPos`.
 
-| | 30% | 40% | 50% | 60% | 70% |
-|---|---|---|---|---|---|
-| old disc, lowest bearing still standing | 129° | 180° | 230° | 279° | 329° |
-| new disc, highest bearing lit | 37° | 89° | 140° | 189° | 239° |
-| sectors holding both | **0** | **0** | **0** | **0** | **0** |
-
-The two discs **never share a sector**; the gap between them is the blade. Every lit dot is at
-its final seat — median radius error **0**, median bearing error **0** — against 32,530
-dot-frames "near neither seat" for the arc-planned attempt below. The old disc erases as one
-contiguous clockwise void (`[ +##########]` → `[    ########]` → `[      +#####]`), and the
-frame stays at the 60 fps cadence because nothing is planned.
+**Measured with the wedge flow (blade 45°) on the maintainer's vault**, 525 notes, every
+frame: dealing every wedge's dots in toggled-wedge order — rows outermost first, clockwise
+within a row — and counting consecutive pairs whose event does not come earlier, the **erase
+is in order for 494 of 500 pairs** and the **fill for 369 of 493**; the fill's misses are the
+late pops below, whose arrival is pinned to their departure rather than their turn. The discs
+now overlap on purpose: a wide wedge is still emptying its inner rows while the fill edge, a
+blade behind, has started lighting the new wedge under it — that is the crossing the user
+asked for, not a defect.
 
 ### The cost, and the knob
 
 A note may not arrive before it has left (*a fade never reverses*), so a note whose new bearing
 is more than one blade **behind** its old one lights **late**: its seat is already behind the
 fill edge when it becomes free, and it pops in there. The fraction is a formula in the blade:
-`(1 − blade/360°)² ÷ 2`. Measured **373 of 1,370** movers at 90° (formula 28%); it would be
-39% at 43° and 12.5% at 180°, and 0 only when the fill edge waits a whole lap — which is the
-sequential swap that was rejected. `__vg.handBlade = <degrees>` sets it live.
+`(1 − blade/360°)² ÷ 2`. Measured **373 of 1,370** movers at 90° on the demo fixture (formula
+28%); on the maintainer's vault **118 of 525** notes first lit more than 90° behind the edge
+at 90°, and **163 of 525** at 45° (47 of them more than 180° behind). It would be 12.5% at
+180°, and 0 only when the fill edge waits a whole lap — which is the sequential swap that was
+rejected. `__vg.handBlade = <degrees>` sets it live.
 
 ### Why the new disc is not re-planned into the swept arc
 

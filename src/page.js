@@ -3272,7 +3272,7 @@ function mountVaultGraph(root, data, deps) {
   // github#86, design/0014 -- one lap of the erase edge is at least this many fades long
   var HAND_SWEEP = 12;
   // github#86, design/0014 -- the fill edge trails the erase edge by this much
-  var HAND_BLADE_DEG = 90;
+  var HAND_BLADE_DEG = 45;
   var RADIAL_EASE = 0.25;
   var SPREAD_MAX  = 78;
   var SPREAD_PER  = 0.17;
@@ -3636,30 +3636,83 @@ function mountVaultGraph(root, data, deps) {
     var arriveAt = dict();
     /** @type {Record<string, number>} */
     var crossAt = dict();
+    // github#86 -- frames per lap of the erase edge; 0 when there is no hand
+    var handLap = 0;
     // github#86, design/0014 -- a clock hand: one sweep, keyed on angle not rank
     if (opts.hand) {
       var TWO_PI = 2 * Math.PI;
       var handF = FADE_FRAMES * TIME_SCALE;
       var handW = Math.max(span, HAND_SWEEP * handF);
+      handLap = handW;
       var blade = HAND_BLADE_DEG * Math.PI / 180;
       // github#86 -- the fill edge ends a blade after the erase edge, plus a fade
       span = handW * (1 + blade / TWO_PI) + handF;
       /** @param {string} id @returns {number} */
-      var handAt = function (id) {
+      var bearingNow = function (id) {
         var a = graph.getNodeAttributes(id);
         // github#86 -- a dot not on the disc has no bearing; use the one it goes to
-        var here = (a.x || a.y) ? angleSweep(Math.atan2(a.y, a.x)) : sweepOf[id];
-        return handW * here / TWO_PI;
+        return (a.x || a.y) ? angleSweep(Math.atan2(a.y, a.x)) : sweepOf[id];
       };
-      /** @param {string} id when the fill edge reaches the seat this dot ends in */
-      var fillAt = function (id) { return handW * (sweepOf[id] + blade) / TWO_PI; };
-      outs.forEach(function (id) { delay[id] = handAt(id); });
-      ins.forEach(function (id) { delay[id] = fillAt(id); });
+      /** @param {string} id */
+      var radiusNow = function (id) { var a = graph.getNodeAttributes(id); return Math.hypot(a.x || 0, a.y || 0); };
+      /** @param {string} id */
+      var radiusNew = function (id) { var q = finalPos[id]; return q ? Math.hypot(q.x, q.y) : 0; };
+      /** @param {string} id the group a dot is leaving */
+      var oldGroup = function (id) {
+        return moveFrom && moveFrom[id] !== undefined ? moveFrom[id] : groupOf(id);
+      };
+      /** @param {string} id the group a dot is joining */
+      var newGroup = function (id) {
+        var save = moveFrom;
+        moveFrom = null;
+        try { return groupOf(id); } finally { moveFrom = save; }
+      };
+      // github#86, design/0014 -- the wedge under an edge flows the way a toggled wedge does:
+      // github#86 -- rows outermost first, clockwise within a row, over the time the edge takes
+      // github#86 -- to cross the wedge. The edge reaches wedges in clock order; the rows are
+      // github#86 -- what the eye follows inside one.
+      /**
+       * @param {string[]} ids
+       * @param {(id: string) => string} groupKey
+       * @param {(id: string) => number} bearing
+       * @param {(id: string) => number} radius
+       * @param {number} offset  the edge's lag behind 12 o'clock, radians
+       * @returns {Record<string, number>} frame at which the edge takes each dot
+       */
+      var flow = function (ids, groupKey, bearing, radius, offset) {
+        /** @type {Record<string, string[]>} */
+        var byG = dict();
+        ids.forEach(function (id) { var g = groupKey(id); (byG[g] || (byG[g] = [])).push(id); });
+        /** @type {Record<string, number>} */
+        var at = dict();
+        Object.keys(byG).forEach(function (g) {
+          var set = byG[g];
+          var lo = Infinity, hi = -Infinity;
+          set.forEach(function (id) { var b = bearing(id); if (b < lo) lo = b; if (b > hi) hi = b; });
+          // github#86 -- a wedge across the seam has no one window; key each dot on its own angle
+          if (hi - lo > Math.PI) {
+            set.forEach(function (id) { at[id] = handW * (bearing(id) + offset) / TWO_PI; });
+            return;
+          }
+          set.sort(function (p, q) {
+            var dr = radius(q) - radius(p);
+            return Math.abs(dr) > 0.5 ? dr : bearing(p) - bearing(q);
+          });
+          var t0 = handW * (lo + offset) / TWO_PI, t1 = handW * (hi + offset) / TWO_PI;
+          set.forEach(function (id, i) { at[id] = set.length < 2 ? t0 : t0 + (t1 - t0) * i / (set.length - 1); });
+        });
+        return at;
+      };
+      var leaveAt = flow(outs.concat(moves), oldGroup, bearingNow, radiusNow, 0);
+      var lightAt = flow(ins.concat(moves), newGroup,
+                         function (id) { return sweepOf[id]; }, radiusNew, blade);
+      outs.forEach(function (id) { delay[id] = leaveAt[id]; });
+      ins.forEach(function (id) { delay[id] = lightAt[id]; });
       moves.forEach(function (id) {
-        delay[id] = handAt(id);
+        delay[id] = leaveAt[id];
         crossAt[id] = delay[id] + handF;
         // github#86 -- lit by the fill edge, never before the note has left
-        arriveAt[id] = Math.max(fillAt(id), crossAt[id]);
+        arriveAt[id] = Math.max(lightAt[id], crossAt[id]);
       });
     }
     if (moves.length) (function () {
@@ -4062,6 +4115,8 @@ function mountVaultGraph(root, data, deps) {
       frame += adv;
       if (cascadeRun) cascadeRun.tick = tn;
       var pr = Math.min(1, frame / Math.max(1, span));
+      // github#86 -- where the erase edge is, in degrees from 12 o'clock; the checks read it
+      if (handLap) lastCascade.handDeg = 360 * frame / handLap;
       var ease = pr * pr * (3 - 2 * pr);
       // github#78
       if (barWalking) barWalkTick(ease);

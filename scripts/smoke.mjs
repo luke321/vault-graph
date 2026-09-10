@@ -654,36 +654,48 @@ check("tags: a note one disc hides and the other shows arrives with the fill edg
     var litNow = hid.filter(function (id) { return (__vg.alpha[id] || 0) > 0.004; }).length;
     return { hid: hid.length, litNow: litNow };
   })()`);
-  let samples = 0, ahead = 0, first = "", litEnd = 0;
+  let samples = 0, litEnd = 0;
+  const firstFill = {};
   const t0 = Date.now();
   for (;;) {
     const s = await p.j(`(function(){
-      var H = window.__smokeHid, TWO = 2 * Math.PI, D = 180 / Math.PI;
-      var sweep = function (a) { return (Math.PI / 2 - Math.atan2(a.y, a.x) + 2 * TWO) % TWO; };
-      var standing = TWO;
-      Object.keys(H.b).forEach(function (id) {
-        var o = H.b[id], a = __vg.graph.getNodeAttributes(id);
-        if (a.x !== o.x || a.y !== o.y || __vg.groupOf(id) !== o.g) return;
-        if ((__vg.alpha[id] || 0) <= 0.004) return;
-        var sw = sweep(a); if (sw < standing) standing = sw;
-      });
-      // the lowest STANDING bearing lags the erase edge by up to one fade, a twelfth of a lap
-      var fill = standing + TWO / 12 - H.blade / D;
-      var ahead = 0, ex = "", lit = 0;
-      H.hid.forEach(function (id) {
-        if ((__vg.alpha[id] || 0) <= 0.004) return;
-        lit++;
-        var sw = sweep(__vg.graph.getNodeAttributes(id));
-        if (standing < TWO && sw > fill + 6 / D) { ahead++; if (!ex) ex = "#" + id + " at " + (sw * D).toFixed(0) + " deg, fill edge at most " + (fill * D).toFixed(0); }
-      });
-      return { ahead: ahead, ex: ex, lit: lit, busy: __vg.demo.busy() };
+      var H = window.__smokeHid, D = 180 / Math.PI;
+      // the cascade reports the erase edge's angle; the fill edge trails it by the blade
+      var hand = __vg.lastCascade().handDeg;
+      var fill = typeof hand === "number" ? (hand - H.blade) / D : null;
+      var lit = H.hid.filter(function (id) { return (__vg.alpha[id] || 0) > 0.004; });
+      return { fill: fill, lit: lit, busy: __vg.demo.busy() };
     })()`);
     samples++;
-    ahead += s.ahead;
-    if (s.ahead && !first) first = s.ex;
-    litEnd = s.lit;
+    for (const id of s.lit) if (firstFill[id] === undefined) firstFill[id] = s.fill;
+    litEnd = s.lit.length;
     if (!s.busy && samples > 3) break;
     if (Date.now() - t0 > 20000) break;
+  }
+  // github#86 -- the wedge under the fill edge flows row by row from the moment the edge
+  // reaches it, so a note may light anywhere in its wedge once the edge is at the wedge's start
+  const starts = await p.j(`(function(){
+    var TWO = 2 * Math.PI, D = 180 / Math.PI;
+    var sweep = function (a) { return (Math.PI / 2 - Math.atan2(a.y, a.x) + 2 * TWO) % TWO; };
+    var start = {}, of = {};
+    __vg.graph.forEachNode(function (id, a) {
+      if ((__vg.alpha[id] || 0) < 0.5) return;
+      var g = __vg.groupOf(id), sw = sweep(a);
+      if (start[g] === undefined || sw < start[g]) start[g] = sw;
+    });
+    window.__smokeHid.hid.forEach(function (id) { of[id] = __vg.groupOf(id); });
+    return { start: start, of: of };
+  })()`);
+  let ahead = 0, first = "";
+  for (const id of Object.keys(firstFill)) {
+    const f = firstFill[id];
+    if (f === null) continue;
+    const st = starts.start[starts.of[id]];
+    if (st === undefined) continue;
+    if (f < st - 6 * Math.PI / 180) {
+      ahead++;
+      if (!first) first = `#${id} lit with the fill edge at most ${(f * 180 / Math.PI).toFixed(0)} deg, its wedge ${starts.of[id]} starting at ${(st * 180 / Math.PI).toFixed(0)}`;
+    }
   }
   await p.j(`(function(){ delete window.__smokeHid; __vg.setDim("folder"); return true; })()`);
   await settle(p);
@@ -693,7 +705,7 @@ check("tags: a note one disc hides and the other shows arrives with the fill edg
   return {
     ok: n.litNow === 0 && ahead === 0 && litEnd === n.hid && samples > 3,
     detail: `${pick.g} (${n.hid} notes) hidden in the folder disc: ${n.litNow} lit at the switch itself, ` +
-            `${ahead} dot-frames lit ahead of the fill edge over ${samples} samples` +
+            `${ahead} lit before the fill edge reached their wedge over ${samples} samples` +
             (first ? ` (first: ${first})` : "") + `, ${litEnd} of ${n.hid} lit at the end`,
   };
 });
