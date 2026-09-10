@@ -110,6 +110,7 @@ const stripDemoAndDebugPlugin = {
  * file itself dies on that rename. The price is that a CSS edit rebuilds main.js too --
  * ~150ms, and the bytes are identical.
  */
+const ENTRY = join(ROOT, "plugin", "main.js");
 const STYLE_INPUTS = [join(ROOT, "plugin", "styles.css"), join(ROOT, "src", "page.css")];
 
 function copyStyles() {
@@ -125,17 +126,16 @@ function copyStyles() {
 const stylesPlugin = {
   name: "styles",
   setup(b) {
-    b.onLoad({ filter: /[\\/]plugin[\\/]main\.js$/, namespace: "file" }, (args) => ({
-      contents: readFileSync(args.path),
-      loader: "js",
-      watchFiles: STYLE_INPUTS,
-    }));
+    b.onLoad({ filter: /[\\/]main\.js$/, namespace: "file" }, (args) =>
+      args.path === ENTRY
+        ? { contents: readFileSync(ENTRY), loader: "js", watchFiles: STYLE_INPUTS }
+        : null);
     b.onEnd(copyStyles);
   },
 };
 
 const options = {
-  entryPoints: [join(ROOT, "plugin", "main.js")],
+  entryPoints: [ENTRY],
   outfile: join(ROOT, "main.js"),
   bundle: true,
   format: "cjs",
