@@ -12,7 +12,7 @@ const DIRS = ["plugin", "src", "scripts"];
 const EXT = /\.(m?js|ts)$/;
 
 // github#61
-const BASELINE = 384;
+const BASELINE = 383;
 
 const VERBOSE = argv.includes("--verbose");
 const LIST = argv.includes("--list");

@@ -499,8 +499,7 @@ try {
       " groups: v.handle.api.groupOrder().length }; })()");
     const base = await E(POS);
 
-    // design/0014 -- a NEW tab: getLeaf(false) reuses the active leaf, which replaces the graph
-    // view outright whenever the graph is the active one
+    // design/0014
     await E("(function(){ var f = app.vault.getMarkdownFiles()[0];" +
       " return app.workspace.getLeaf('tab').openFile(f).then(function(){ return 1; }); })()");
     await sleep(600);

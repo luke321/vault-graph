@@ -28,6 +28,16 @@ to now.
 
 <img src="../assets/features/intro.webp" width="100%" alt="Refresh clicked, the whole vault regrowing from its first note to now while the date ribbon's range handle sweeps along with it">
 
+### The disc follows the vault
+
+Write a note and the disc takes it in: one two-second cascade, the new dot fading in where its
+folder puts it while everything around it re-packs. Nothing is torn down, so the filters, the
+date range, the pins and the camera all survive — which is what Refresh clears. Deleting or
+renaming a note runs the same cascade the other way. **Follow the vault** is a view setting,
+on by default.
+
+<img src="../assets/features/live.webp" width="100%" alt="Obsidian with the vault graph in one tab: a second tab opened, a meeting note typed into it, the graph tab clicked and the outer ring taking the new note in one cascade, the new dot hovered; then a weekly review written in another tab, the graph tab clicked again and the inner ring taking that one the same way">
+
 ### Subfolders
 
 Open a folder's twisty to reach the subfolders inside it — tinted from the parent's hue,

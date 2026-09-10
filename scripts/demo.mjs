@@ -227,6 +227,17 @@ async function main() {
       trace.push(`park: ${beat.why || ""}`);
       continue;
     }
+    // github#72, design/0014 -- the page writes the note itself; nothing to aim at
+    if (beat.live) {
+      const r = JSON.parse(await page.eval(`JSON.stringify(__vg.demo.live(${JSON.stringify(beat.live)}))`));
+      const what = r.applied
+        ? `+1 in ${r.folder} (${r.ring} ring), linked to ${r.linkedTo}`
+        : `REFUSED: ${r.reason}`;
+      console.log(`[${el()}] ${n} live ${beat.live} — ${beat.why || ""} → ${what}`);
+      if (!r.applied) console.warn(`${n} ! the page refused the note: ${r.reason}`);
+      trace.push(`live: ${beat.live} ${r.applied ? r.folder : "REFUSED " + r.reason}`);
+      continue;
+    }
     if (beat.touchmode) {
       touchMode = true;
       await page.send("Emulation.setTouchEmulationEnabled", { enabled: true, maxTouchPoints: 5 })

@@ -67,6 +67,36 @@ An earlier attempt tested visibility inside the event handler instead of after t
 failed differently and is worth knowing about, because both events fire *before* Obsidian re-lays
 out the workspace, so `offsetParent` is still null at handler time.
 
+## Filming it, and driving Obsidian at all
+
+`scripts/record-live.mjs` is the clip on the feature page, and it is the plugin doing the work
+in a real Obsidian: demo vault, built plugin, throwaway profile, the graph in one tab, a note
+written in a second, the graph tab clicked back. Everything it learned is a rule for the next
+harness that drives Obsidian:
+
+- **A new tab is `getLeaf('tab')`, never `getLeaf(false)`, and a note is opened into a leaf you
+  hold.** `getLeaf(false)` reuses the active leaf, which replaces the graph view outright when the
+  graph is the active one; `getMostRecentLeaf()` after a click on the `+` button answers the graph
+  leaf when the click did not land. The harness opens the note into the active leaf only when its
+  view type is `empty`, else into a fresh `getLeaf('tab')`.
+- **"At rest" is not "no dot moved".** The intro sweeps the date range and moves no dot, so a
+  settle that hashes positions declares rest while the sweep is still running -- the first take
+  started filming mid-intro. The rest signal is positions and sizes *plus* the range-end field,
+  the length of the page's text, and the number of notices on screen.
+- **`SetCursorPos` moves the cursor and injects no input.** Two takes had the pointer visibly on
+  the arrived dot and no tooltip: the page never saw a mousemove. Every move in
+  `scripts/win-input.ps1` is followed by two 1 px `mouse_event` nudges, which are real input, and
+  the harness reads the tooltip back rather than assuming the hover -- a rim dot is a pixel or two
+  wide, so a miss is nudged around the target before it is called a miss.
+- **Language.** A fresh profile speaks the machine's language; the clip sets
+  `localStorage.language` to `en` and reloads before anything is filmed.
+- **The note must be indexed before switching back**, or the disc takes an orphan and then fixes
+  it with a second cascade: the harness waits for `metadataCache.getCache(path).links` to be
+  non-empty (about 300 ms after typing stops, 600 ms for the second note).
+- **What the take measured, and the clip shows:** the note is on the disc ~1.4 s after the tab
+  click -- the 500 ms wake plus the 1 s debounce -- and the cascade is at rest ~2.5 s after that
+  (1,366 / 3,859 ms outer, 1,450 / 3,970 ms inner). The numbers are in `changelog-detail.md`.
+
 ## One construction, not two
 
 `ingest(src, keepId)` builds the graph, the edge budget, the dot sizes, `hubRank` and the

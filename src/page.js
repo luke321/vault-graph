@@ -7622,6 +7622,7 @@ function mountVaultGraph(root, data, deps) {
    * @property {boolean} [hover]
    * @property {boolean} [drag]
    * @property {boolean} [touchmode]
+   * @property {string} [live]       "outer" or "inner": hand the page one more note on that ring
    * @property {number} [wheel]
    * @property {string[]} [target]
    * @property {string[]} [to]
@@ -7793,6 +7794,8 @@ function mountVaultGraph(root, data, deps) {
       return pickY;
     }
     if (kind === "note") return demoNoteRect(arg);
+    // github#72, design/0014
+    if (kind === "arrival") return demoArrivalRect();
     if (kind === "biginner") return demoBigInnerNote();
     if (kind === "pin") {
       var dcard = $("detail");
@@ -8180,6 +8183,17 @@ function mountVaultGraph(root, data, deps) {
         why: "...and bring the whole vault back" },
       { settle: true, act: "only05", why: "let the disc refill" },
 
+      // github#72, design/0014
+      { live: "outer", act: "live",
+        why: "a note is written into the biggest folder -- the outer ring absorbs it in one cascade" },
+      { settle: true, act: "live", why: "let the disc re-pack around it, nothing torn down" },
+      { hover: true, target: ["arrival"], act: "live", why: "hover the note that just arrived" },
+      { park: true, act: "live", why: "let go of it" },
+      { live: "inner", act: "live",
+        why: "...and one into a small folder, on the inner ring" },
+      { settle: true, act: "live", why: "let the inner ring take it" },
+      { hover: true, target: ["arrival"], act: "live", why: "hover that one too" },
+
       // github#82 -- record wide; band first, it buys the radius
       { click: true, target: ["id", "band"], act: "collapse",
         why: "fold the calendar band away -- the disc grows into the row it had" },
@@ -8219,7 +8233,8 @@ function mountVaultGraph(root, data, deps) {
 
   // github#34, github#73
   // github#82 -- collapse closes the hero: it is the last act and ends folded
-  var FULL_RUN_EXCLUDES = ["subfoldercolor", "hiddenbydefault", "yearchip", "only05", "mobile"];
+  // github#72, design/0014
+  var FULL_RUN_EXCLUDES = ["subfoldercolor", "hiddenbydefault", "yearchip", "only05", "live", "mobile"];
 
   /** @returns {DemoBeat[]} */
   function demoFullStoryboard() {
@@ -8228,6 +8243,81 @@ function mountVaultGraph(root, data, deps) {
       beats = beats.concat([{ park: true, act: beats[beats.length - 1].act, why: "leave the final frame clean" }]);
     }
     return beats;
+  }
+
+  // github#72, design/0014
+  /** @type {string} */
+  var demoArrival = "";
+
+  /**
+   * @param {string} which   "outer" or "inner"
+   */
+  function demoLive(which) {
+    if (!DATA) return { applied: false, reason: "no data" };
+    var wantInner = which === "inner";
+    /** @type {Record<string, number>} */
+    var shown = dict();
+    /** @type {Record<string, boolean>} */
+    var innerOf = dict();
+    buildWedgePlan(false).cells.forEach(function (c) {
+      if (c.g === MERGED || c.g === UNLINKED) return;
+      shown[c.g] = (shown[c.g] || 0) + c.list.length;
+      innerOf[c.g] = !!c.inner;
+    });
+    var folder = "", most = -1;
+    Object.keys(shown).forEach(function (g) {
+      if (innerOf[g] !== wantInner || shown[g] <= most) return;
+      most = shown[g]; folder = g;
+    });
+    if (!folder) return { applied: false, reason: "no folder on the " + which + " ring" };
+
+    /** @type {VaultData} */
+    var next = {
+      vault: DATA.vault, generated: DATA.generated, dev: DATA.dev,
+      nodes: DATA.nodes.map(function (n) {
+        return Object.assign({}, n, { dirs: (n.dirs || []).slice(), tags: (n.tags || []).slice() });
+      }),
+      edges: DATA.edges.map(function (e) { return { s: e.s, t: e.t, w: e.w }; }),
+      stats: Object.assign({}, DATA.stats)
+    };
+    var host = -1, hostScore = -Infinity, taken = 0, newest = "";
+    next.nodes.forEach(function (n, i) {
+      if (/^Untitled( \d+)?$/.test(n.label)) taken++;
+      if (n.ghost) return;
+      if ((n.created || "") > newest) newest = n.created;
+      if (n.folder !== folder) return;
+      var score = n.deg - 1e6 * n.id.split("/").length;
+      if (score > hostScore) { hostScore = score; host = i; }
+    });
+    if (host < 0) return { applied: false, reason: "no note in " + folder };
+    var h = next.nodes[host];
+    var label = taken ? "Untitled " + taken : "Untitled";
+    var path = h.id.slice(0, h.id.lastIndexOf("/") + 1) + label + ".md";
+    // design/0014
+    var day = newest || h.created || "";
+    next.nodes.push({ id: path, label: label, folder: h.folder, dirs: (h.dirs || []).slice(),
+                      sub: h.sub || "", type: "note", tags: [], created: day, touched: day,
+                      words: 0, deg: 1 });
+    next.edges.push({ s: host, t: next.nodes.length - 1, w: 1 });
+    h.deg += 1;
+    if (next.stats) { next.stats.nodes += 1; next.stats.edges += 1; next.stats.files += 1; }
+    demoArrival = path;
+    var res = applyData(next);
+    return { applied: res.applied, reason: res.reason, added: res.added, cascaded: res.cascaded,
+             ring: which, folder: folder, path: path, linkedTo: h.label };
+  }
+
+  // github#72, design/0014
+  function demoArrivalRect() {
+    var id = demoArrival ? idOfPath[demoArrival] : undefined;
+    if (id === undefined || !graph.hasNode(id) || !renderer) return null;
+    var a = graph.getNodeAttributes(id);
+    var org = $("graph").getBoundingClientRect();
+    var v = renderer.graphToViewport({ x: a.x, y: a.y });
+    var r = renderer.scaleSize ? renderer.scaleSize(dotPx(a.size, id)) : dotPx(a.size, id);
+    var box = Math.max(6, r * 1.5);
+    return { left: v.x + org.left - box / 2, top: v.y + org.top - box / 2, width: box, height: box,
+             expect: id, demoLabel: "note " + a.label + ", just arrived" };
   }
 
   /** @param {string} name @returns {DemoBeat[]} */
@@ -8250,6 +8340,7 @@ function mountVaultGraph(root, data, deps) {
     doneTitle: DEMO_DONE_TITLE,
     storyboard: demoFullStoryboard,
     act: demoAct,
+    live: demoLive,
     busy: demoBusy,
     busyWhy: function () {
       return { play: !!play, cascade: !!cascadeRun, anim: !!anim,
