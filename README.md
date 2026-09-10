@@ -24,12 +24,10 @@ ringed by how well-connected they are. Click a folder to hide it and the rest re
 a note to see its links; search narrows to matching notes; scrub a date ribbon to watch the
 vault grow. Follows Obsidian's theme, including a live switch.
 
-**[Try it live](https://luke321.github.io/vault-graph/demo/)** — a real export of an invented
-1,400-note vault, click and hover it exactly like your own. **The full feature list, one short
-clip per feature, lives in [`docs/features.md`](docs/features.md)** — the disc itself,
-filtering, the heatmap and timeline, reading a note, the camera, and folder colours, each with
-what it does and how its clip gets regenerated. Both are also a
-[browsable site](https://luke321.github.io/vault-graph/).
+**Try it live** — a real export of an invented 1,400-note vault, click and hover it exactly like
+your own. The full feature list, one short clip per feature — the disc itself, filtering, the
+heatmap and timeline, reading a note, the camera, and folder colours — is a click away too. Both
+are going up as a proper site; this line gets its links the moment it's live.
 
 ---
 
