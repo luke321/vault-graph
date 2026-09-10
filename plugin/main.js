@@ -40,7 +40,7 @@ const ICON_ID = "vault-graph-disc";
  * @property {boolean} panEnabled
  * @property {boolean} compactAxis
  * @property {boolean} unlinkedByFolder
- * @property {"name" | "explorer" | "size"} folderOrder
+ * @property {"name" | "explorer" | "size" | undefined} folderOrder
  * @property {boolean} unlinkedTintByFolder
  * @property {boolean} fitCap                           github#41, design/0011
  * @property {boolean} [sheetOpen]                      github#82 -- absent until folded once
@@ -641,7 +641,8 @@ class VaultGraphView extends ItemView {
         await this.plugin.saveSettings();
       },
       // github#71
-      folderOrder: this.plugin.settings.folderOrder || "name",
+      // github#71 -- undefined until the reader picks; the page then decides from the vault
+      folderOrder: this.plugin.settings.folderOrder,
       /** @param {"name" | "explorer" | "size"} v */
       onFolderOrder: async (v) => {
         this.plugin.settings.folderOrder = v;
@@ -737,7 +738,9 @@ const DEFAULTS = {
   // github#41, design/0011
   fitCap: true,
   // github#71
-  folderOrder: "name",
+  // github#71 -- deliberately absent: "nobody has chosen yet", so a vault with a sortspec
+  // opens in its own order. A stored value only appears once the reader picks one.
+  folderOrder: undefined,
 };
 
 /* github#71 -- the one view setting that is not a boolean, so it sits beside VIEW_SETTINGS
@@ -974,7 +977,7 @@ class VaultGraphSettingTab extends PluginSettingTab {
       .setDesc(FOLDER_ORDER_SETTING.desc)
       .addDropdown((d) => d
         .addOptions(FOLDER_ORDER_SETTING.options)
-        .setValue(this.plugin.settings.folderOrder || "name")
+        .setValue(this.plugin.settings.folderOrder || "")
         .onChange(async (v) => { await this.setFolderOrder(v); }));
     for (const s of VIEW_SETTINGS) {
       new Setting(containerEl)
@@ -1297,7 +1300,9 @@ class VaultGraphPlugin extends Plugin {
     if (api.setUnlinkedTintByFolder) api.setUnlinkedTintByFolder(this.settings.unlinkedTintByFolder === true);
     if (api.setFitCap) api.setFitCap(this.settings.fitCap !== false);
     // github#71
-    if (api.setFolderOrder) api.setFolderOrder(this.settings.folderOrder || "name");
+    // github#71 -- only push a STORED choice; forcing "name" here would defeat the
+    // vault-decides default the page applies at mount.
+    if (api.setFolderOrder && this.settings.folderOrder) api.setFolderOrder(this.settings.folderOrder);
     if (api.applyHiddenDefaults) api.applyHiddenDefaults();
   }
 

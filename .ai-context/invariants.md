@@ -1430,6 +1430,21 @@ the snapshot. It failed on all three vaults, naming the exact folder that flippe
 the demo vault (`04 - Daily Notes: outer -> inner`) and reporting every moved note's id and
 delta on the other two. Reverted immediately after.
 
+**A VAULT THAT SHIPS A SORTSPEC OPENS IN ITS OWN ORDER.** Since github#71 the default is not
+`Name` — it is *whatever the vault says*. `folderOrder` absent from the deps means **nobody has
+chosen yet**, and the page then resolves it at mount: a parsed spec with at least one section gives
+`explorer`, anything else gives `name`. That is the `sheetOpen`/`bandOpen` idiom from github#82,
+where absence means "decide from the width".
+
+An explicit value always wins and always sticks, which is what makes this safe: the host persists
+on every change (`decisions/0009`), so a reader who picks `Name` on a spec-carrying vault keeps
+`Name`. All three hosts had to stop coercing absence into `"name"` for this to work — `shell.html`
+passes `undefined`, the plugin's `DEFAULTS.folderOrder` is deliberately absent and
+`applyHiddenDefaults` only pushes a *stored* choice, and the exporter omits `folderOrder` from the
+data entirely unless `--folder-order` was passed. **Any one of those regressing to `"name"` silently
+disables the feature for every vault**, and nothing would fail: the disc would simply be in name
+order.
+
 **THREE OF THE FOUR FIXTURES CARRY A SORTSPEC since github#71, and `shape-vault` deliberately
 does not.** `make-test-vault.mjs` writes one into `03 - Resources/sortspec.md` and registers it
 through `.obsidian/plugins/custom-sort/data.json`, so both fixtures it produces (the demo vault

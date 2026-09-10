@@ -4103,8 +4103,7 @@ function resolveVaults() {
   // move notes between subfolders and fail this fixture's own golden every week -- which
   // teaches exactly the "regenerate the golden to make it pass" habit the repo forbids.
   gen("make-spec-vault.mjs", ["--end", "2026-09-08"], "spec-vault",
-      "the sortspec vault (wedges out of name order)", SPEC_GENERATORS,
-      ["--folder-order", "explorer"]);
+      "the sortspec vault (wedges out of name order)", SPEC_GENERATORS);
 
   if (!out.length) throw new Error("no vault to check, and none could be generated");
   return out;

@@ -579,10 +579,22 @@ function mountVaultGraph(root, data, deps) {
 
   // github#71
   var FOLDER_ORDERS = ["name", "explorer", "size"];
-  var folderOrder = FOLDER_ORDERS.indexOf(String(deps.folderOrder)) >= 0
-    ? /** @type {"name" | "explorer" | "size"} */ (deps.folderOrder) : "name";
-  var onFolderOrder = typeof deps.onFolderOrder === "function" ? deps.onFolderOrder : null;
   var sortSpec = parseSortSpec(DATA.sortSpecs || []);
+  var onFolderOrder = typeof deps.onFolderOrder === "function" ? deps.onFolderOrder : null;
+  /**
+   * ABSENCE OF THE DEP MEANS NOBODY HAS CHOSEN YET, and then the vault decides: a vault that
+   * ships a sortspec is one whose owner has already said what order they want things in, so
+   * opening it in name order shows them an order they deliberately moved away from. Same
+   * idiom as `sheetOpen`/`bandOpen`, where absent means "decide from the width" (github#82).
+   *
+   * An explicit value always wins, which is what makes the choice stick: the host persists on
+   * every change (decisions/0009), so a reader who picks Name keeps Name even here.
+   */
+  var folderOrder = FOLDER_ORDERS.indexOf(String(deps.folderOrder)) >= 0
+    ? /** @type {"name" | "explorer" | "size"} */ (deps.folderOrder)
+    : (sortSpec.ok && sortSpec.sections.length
+        ? /** @type {"explorer"} */ ("explorer")
+        : /** @type {"name"} */ ("name"));
   /**
    * True only when the explorer order can actually be applied. The section count matters as
    * much as `ok`: an empty spec parses fine, and without this a vault with no sortspec at all

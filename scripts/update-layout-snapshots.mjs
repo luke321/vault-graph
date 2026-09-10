@@ -25,7 +25,7 @@ const FIXTURES = [
   { script: "make-shape-vault.mjs", args: [], name: "shape-vault" },
   // github#71 -- --end pinned for the same reason the 10k vault's is: dated subfolders
   { script: "make-spec-vault.mjs", args: ["--end", "2026-09-08"], name: "spec-vault",
-    gens: ["make-spec-vault.mjs"], build: ["--folder-order", "explorer"] },
+    gens: ["make-spec-vault.mjs"] },
 ];
 
 const GENERATORS = ["make-demo-vault.mjs", "make-test-vault.mjs", "make-shape-vault.mjs"];

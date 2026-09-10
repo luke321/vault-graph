@@ -98,15 +98,17 @@ const INCLUDE_TEMPLATES = flag("templates");
 const OUT = opt("out", join(VAULT, "vault-graph.html"));
 const FLAT_MONTHS = flag("flat-months");
 const STRIP_NAV = flag("no-nav");
-// github#71 -- a standalone page has no host to remember a setting in (decisions/0009), so
-// the build picks the order it opens in. --sortspec only ADDS a source; it does not switch
-// the mode by implication.
+// github#71 -- --folder-order OVERRIDES what the page would decide on its own; left off, the
+// order is not written into the build at all, and a vault that ships a sortspec opens in its
+// own order. --sortspec only ADDS a source; it does not switch the mode by implication, and
+// it does not need to any more.
 const SORTSPEC_ARG = opt("sortspec", "");
 const FOLDER_ORDER = (() => {
-  const v = String(opt("folder-order", "name"));
+  const v = String(opt("folder-order", ""));
+  if (!v) return "";   // absent: the page decides from the vault (a sortspec means explorer)
   if (["name", "explorer", "size"].includes(v)) return v;
-  console.error(`build-graph: --folder-order ${v} is not name|explorer|size -- using name`);
-  return "name";
+  console.error(`build-graph: --folder-order ${v} is not name|explorer|size -- letting the page decide`);
+  return "";
 })();
 
 /* ---------------------------------------------------------------- discovery */
@@ -441,8 +443,9 @@ const data = {
     ghostsIncluded: INCLUDE_GHOSTS,
   },
   dev: DEV_BUILD,
-  // github#71
-  folderOrder: FOLDER_ORDER,
+  // github#71 -- omitted unless the build was told, so absence reaches the page as
+  // "nobody has chosen" and a vault with a sortspec opens in its own order
+  ...(FOLDER_ORDER ? { folderOrder: FOLDER_ORDER } : {}),
   sortSpecs: SORT_SPECS,
 };
 
@@ -503,7 +506,7 @@ console.log(`vault-graph: ${data.stats.nodes} notes, ${data.stats.edges} links, 
             `${data.stats.orphans} orphans, ${unresolved} unresolved link(s)`);
 if (SORT_SPECS.length) {
   console.log(`sortspec: ${SORT_SPECS.length} source(s) -- ` +
-              SORT_SPECS.map((x) => x.origin).join(", ") + `; folder order: ${FOLDER_ORDER}`);
+              SORT_SPECS.map((x) => x.origin).join(", ") + `; folder order: ${FOLDER_ORDER || "from the vault (explorer)"}`);
 } else if (FOLDER_ORDER === "explorer") {
   console.log("sortspec: --folder-order explorer, but no sortspec was found -- the page will " +
               "fall back to name order");

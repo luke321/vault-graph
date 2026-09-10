@@ -77,8 +77,10 @@ mountVaultGraph(
     onCompactAxis: function (v) { saveSettings({ compactAxis: v }); },
     // github#71 -- the build picks the order the page OPENS in (--folder-order); once the
     // reader changes it, localStorage is the host that remembers (decisions/0009).
+    // github#71 -- left UNDEFINED when nobody has chosen and the build did not pick one, so
+    // the page decides from the vault: a vault shipping a sortspec opens in explorer order.
     folderOrder: loadSettings().folderOrder ||
-                 (window.VAULT_DATA && window.VAULT_DATA.folderOrder) || "name",
+                 (window.VAULT_DATA && window.VAULT_DATA.folderOrder) || undefined,
     onFolderOrder: function (v) { saveSettings({ folderOrder: v }); },
     // github#3
     unlinkedByFolder: loadSettings().unlinkedByFolder,
