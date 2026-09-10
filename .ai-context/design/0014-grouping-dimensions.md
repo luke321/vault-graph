@@ -187,20 +187,41 @@ after another and enabling the new ones one after another, with the two discs ne
 - **The erase edge** sweeps once at constant angular speed, and **the dots under it toggle in
   a serpentine along the circumference**. The circle is cut into columns of `HAND_COL` (9)
   frames of hand time — 22.5° at the default lap — a column's dots toggle in radial order
-  spread across that time, and every second column runs the other way (`flow()`). So the front
-  the eye follows zigzags in and out as it goes round. Two earlier takes were rejected by eye:
-  the first keyed every dot on its own bearing, a crisp radial front with no motion inside a
-  wedge; the second dealt each wedge rows outermost first, which reads as a radial peel. The
-  old disc is **not re-laid-out**: a dot fades where it stands, **in the colour it had**.
-  `state.dim` has already flipped by then and `nodeColor` files through `fileGroup`, so
-  `setDim` snapshots every mover's colour into `LeftDisc.color` before the flip and
-  `nodeColor` answers from it for as long as `moveFrom` holds the note — the first take
-  skipped this and every standing dot repainted on the first frame.
+  spread across that time, and every second column runs the other way (`flow()`). Two
+  earlier takes were rejected by eye: the first keyed every dot on its own bearing, a crisp
+  radial front with no motion inside a wedge; the second dealt each wedge rows outermost
+  first, which reads as a radial peel. A dot fades **in the colour it had**: `state.dim` has
+  already flipped by then and `nodeColor` files through `fileGroup`, so `setDim` snapshots
+  every mover's colour into `LeftDisc.color` before the flip and `nodeColor` answers from it
+  for as long as `moveFrom` holds the note — the first take skipped this and every standing
+  dot repainted on the first frame.
 - **The fill edge** trails the erase edge by a fixed **blade** (`HAND_BLADE_DEG`, 45° — it
   was 90°, and the user asked for the two hands closer together). Its columns are the same
-  serpentine, from the dots' **new** bearings. A note that has left takes its **final** seat
-  straight from `finalPos` and waits there, dark, until its column. `arriveAt = max(lightAt,
-  crossAt)`. `__vg.handCol` sets the column live, as `__vg.handBlade` sets the blade.
+  serpentine, from the dots' **new** bearings. `arriveAt = max(lightAt, crossAt)`.
+  `__vg.handCol` sets the column live, as `__vg.handBlade` sets the blade.
+- **Both discs stay packed while their arcs move.** Asked for on seeing the third take: "the
+  vanishing disk and appearing disk should be packed all the time while their angle moves".
+  Every frame builds two arc plans (`planArc`): the disc being left over `[erase, 2π]` in its
+  own dimension (`inWorld`), the disc arriving over `[0, fill]`. Both keep **every** note of
+  their disc as a member at weight = alpha, the way a toggled wedge does, so a note arriving
+  later slides into a place it already holds and a fading one closes its own hole. Each plan
+  is handed its resting disc's row counts and spacing (`rowsHeld`, `spHeld`), and **every
+  note is pinned to its resting row** (`rowPin`, read in `placeCell`): the planner packs each
+  row by live weight, and rows never tick. That pin was the last of four fixes, each found
+  by measuring: rows derived from a growing arc ticked (worst frame 4,649 units); with rows
+  held, the serpentine parity still flipped on sparse rows (3,376); rescaling each note's
+  resting place along its wedge's arc worked on the maintainer's vault (603) and then failed
+  on the 10k fixture (19,274), because a group's sub-wedges interleave along the serpentine
+  and overlap by 10–15° in bearing, so a wedge has no one arc to rescale over. A dot taking
+  its first seat in a disc takes it outright (`seated`); the frame's radial easing walks the
+  rest. The switch no longer takes seats from `finalPos`: the arc plan over `[0, 2π]` is the
+  resting disc (the `arc:` check), so `settle()` stays a no-op.
+- **Over an arc, seams and the minimum wedge scale with the arc's share of the circle**
+  (`arcScale()`, read by `gapFor`, `seamAt` and the `MIN_SPAN` floor). They are absolute
+  angles at rest — a seam is `SEAM_ROWS` pitches at the row's radius, a wedge is at least 6° —
+  and inside a 100° arc holding thirty-two tags the seam cap of 45% and thirty minimum wedges
+  ate most of it, so the arriving disc read as a scatter at its front. Scaled, a partial disc
+  keeps the resting disc's proportions, and at the full circle the scale is 1.
 
 A note the old disc **hides** and the new one shows is an arrival, keyed like every other
 delay on its new bearing. That needs `setDim` to hand `regroup` `keepAlpha` — otherwise
@@ -228,10 +249,16 @@ vault**, 525 notes, every frame, reading the edge's angle from `lastCascade().ha
 ordering the dots by column and, within a column, by radius in the column's direction, and
 counting consecutive pairs whose event does not come earlier, the **erase is in order for 469
 of 469 pairs** and the **fill for 360 of 485**; the fill's misses are the late pops below,
-whose arrival is pinned to their departure rather than their column. The highest lit bearing
-tracks the fill edge within a column at every sample (26 → 22, 84 → 72, 184 → 188, 260 → 261
-degrees, edge → highest lit) and 2 dots of 525 were ever more than 6° ahead of it. The
-row-by-row take had 83 ahead by construction, an outer row lighting to its wedge's end.
+whose arrival is pinned to their departure rather than their column.
+
+**Measured with the packed discs**, every sample, both switch directions: on the maintainer's
+vault **0 old dots ahead of the erase edge and 0 new dots beyond the fill edge** (48
+dot-samples at 359–360°, the seam), worst single-sample move of a visible dot **814 units**
+against 4,649 before the row pin, a fresh relayout after settle moving **0** notes, **16.3 ms
+a frame** for the two plans. On the 10k fixture: 0 ahead, 3 beyond, worst move 5,123 units —
+a 30° slide of the untagged wedge, which holds 56% of that disc, re-packing as its neighbours
+arrive — and **39 ms a frame**, so the 10k switch runs at about 25 fps. The frame cost is the
+two plans; the 525-note vault stays at the display cadence.
 
 ### The cost, and the knob
 

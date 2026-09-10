@@ -1350,7 +1350,7 @@ function mountVaultGraph(root, data, deps) {
 
   /** @param {number} nGroups @param {string} band */
   function gapFor(nGroups, band) {
-    var g = seamAngle(band, 1);
+    var g = seamAngle(band, 1) * arcScale();
     var half = arcSpan() / 2;
     return g * nGroups > half ? half / Math.max(1, nGroups) : g;
   }
@@ -1365,12 +1365,19 @@ function mountVaultGraph(root, data, deps) {
   // github#86, design/0014 -- a plan over an ARC of the circle; null is the whole disc
   /** @type {{ from: number, to: number } | null} */
   var planArc = null;
+  // github#86, design/0014 -- a note pinned to a row keeps it whatever its weight says;
+  // github#86 -- the hand pins every note to its resting row so a packed wedge never ticks
+  /** @type {Record<string, number> | null} */
+  var rowPin = null;
   function arcSpan() { return planArc ? planArc.to - planArc.from : 2 * Math.PI; }
   function arcFrom() { return planArc ? planArc.from : 0; }
+  // github#86, design/0014 -- over an arc, seams and the minimum wedge shrink with the arc's
+  // github#86 -- share of the circle, so a partial disc keeps the resting disc's proportions
+  function arcScale() { return planArc ? arcSpan() / (2 * Math.PI) : 1; }
 
   /** @param {number} r @param {number} nBoundaries @param {string} band */
   function seamAt(r, nBoundaries, band) {
-    var g = r > 1e-6 ? (SEAM_ROWS * pitchUnits(band)) / r : 0;
+    var g = r > 1e-6 ? (SEAM_ROWS * pitchUnits(band)) / r * arcScale() : 0;
     var tot = g * nBoundaries;
     var cap = arcSpan() * SEAM_CAP;
     if (tot > cap) { g *= cap / tot; tot = cap; }
@@ -1687,7 +1694,7 @@ function mountVaultGraph(root, data, deps) {
     }
 
     var TOTAL = planTotal;
-    var MIN = MIN_SPAN, TWO = arcSpan();
+    var MIN = MIN_SPAN * arcScale(), TWO = arcSpan();
     var smallAt = TOTAL * (MIN / TWO);
     /** @type {Record<string, boolean>} */
     var groupInner = {};
@@ -1984,7 +1991,8 @@ function mountVaultGraph(root, data, deps) {
           var top = Math.max(0, Math.ceil(nEff - 0.0001) - 1);
           cRow = cStart + Math.min(Math.floor(s * nEff), top);
         }
-        recs.push({ id: id, w: w, row: centred ? cRow : Math.floor(pp) });
+        var pin = rowPin ? rowPin[id] : undefined;
+        recs.push({ id: id, w: w, row: pin !== undefined ? pin : centred ? cRow : Math.floor(pp) });
       });
 
       /** @type {Record<string, number>} */
@@ -3592,6 +3600,13 @@ function mountVaultGraph(root, data, deps) {
         moves.forEach(function (id) { to[id] = visible(id) ? timeFactor(id) : 0; });
       } finally { moveFrom = saveMF; }
     }
+    // github#86 -- the hand's frame asks which disc a dot belongs to
+    /** @type {Record<string, boolean>} */
+    var isIn = dict();
+    ins.forEach(function (id) { isIn[id] = true; });
+    /** @type {Record<string, boolean>} */
+    var isOut = dict();
+    outs.forEach(function (id) { isOut[id] = true; });
 
     if (!ins.length && !outs.length && !moves.length) {
       lastCascade = { ins: 0, outs: 0, span: 0, path: "instant: nothing to move", frames: 0, ms: 0,
@@ -3907,8 +3922,14 @@ function mountVaultGraph(root, data, deps) {
       try { return fn(); }
       finally { state.dim = sDim; subOrder = sSub; bandLock = sBand; geomLock = sGeom; moveFrom = sMove; }
     };
+    // github#86 -- the two resting discs, for the hand's frame to keep every seat's row and place
+    /** @type {Plan | null} */
+    var finA = null;
+    /** @type {Plan | null} */
+    var finB = null;
     (function () {
       var a = inWorld(function () { return staticPlan(function (id) { return wasPresent[id]; }); });
+      finA = a;
       /** @param {Plan | null} p0 */
       var cellsOfG = function (p0) {
         /** @type {Record<string, number>} */
@@ -3922,6 +3943,7 @@ function mountVaultGraph(root, data, deps) {
         try { return staticPlan(function (id) { return willShow(id); }); }
         finally { moveFrom = save; }
       })();
+      finB = b;
       var aCells = cellsOfG(a), bCells = cellsOfG(b);
       if (moves.length) {
         splitHold = dict();
@@ -4048,6 +4070,19 @@ function mountVaultGraph(root, data, deps) {
         posSrc[id] = { x: graph.getNodeAttribute(id, "x"), y: graph.getNodeAttribute(id, "y") };
       });
     })();
+
+    // github#86, design/0014 -- the hand's frame: every note's resting row, per disc
+    /** @param {Plan | null} fin @returns {Record<string, number>} */
+    var rowPinOf = function (fin) {
+      /** @type {Record<string, number>} */
+      var out = dict();
+      if (fin) fin.cells.forEach(function (c) { (c.slots || []).forEach(function (sl) { out[sl.id] = sl.row; }); });
+      return out;
+    };
+    var pinA = rowPinOf(finA), pinB = rowPinOf(finB);
+    // github#86 -- which dots hold a seat in one of the two discs this frame
+    /** @type {Record<string, boolean>} */
+    var seated = dict();
 
     var STALL_MS = 400;
     var watchdog = function () {
@@ -4208,21 +4243,86 @@ function mountVaultGraph(root, data, deps) {
       /** @type {Record<string, Point> | null} */
       var targets = null;
       if (opts.hand && opts.from) {
-        // github#86, design/0014 -- the old disc fades where it stands; a dot that has left
-        // github#86 -- takes its FINAL seat and waits, dark, for the fill edge
+        // github#86, design/0014 -- both discs stay PACKED while their arcs move: the disc
+        // github#86 -- being left is laid out over the arc the erase edge has not reached, in
+        // github#86 -- its own dimension, and the disc arriving over the arc the fill edge has
+        // github#86 -- swept. A dot's weight is its alpha, so a fading dot closes its own hole.
         var mf = moveFrom;
         colWalk = null; cellNow = null; edgeNow = null;
         if (roomDstB.i > 1) bandOf("i").room = roomDstB.i;
         if (roomDstB.o > 1) bandOf("o").room = roomDstB.o;
+        var eraseA = Math.min(TWO_PI, TWO_PI * frame / handW);
+        var fillA = Math.max(0, Math.min(TWO_PI, TWO_PI * frame / handW - blade));
+        // github#86 -- a mover belongs to the old disc until it has crossed. Both plans keep
+        // github#86 -- EVERY note of their disc as a member, at weight 0 while it is not there,
+        // github#86 -- the way a toggled wedge does: a member arriving later slides into a
+        // github#86 -- place it already holds, where a member appearing shifts everyone's row.
+        /** @param {string} id still in the disc being left */
+        var oldMember = function (id) {
+          return (isMove[id] && !!mf && mf[id] !== undefined) || !!isOut[id];
+        };
+        /** @param {string} id was ever in the disc being left */
+        var oldKeep = function (id) { return !!isMove[id] || !!isOut[id]; };
+        /** @param {string} id will be in the disc arriving */
+        var newKeep = function (id) { return !isOut[id] && (!!isIn[id] || willShow(id)); };
+        /** @param {string} id */
+        var oldWeight = function (id) { return oldMember(id) ? (alpha[id] || 0) : 0; };
+        /** @param {string} id */
+        var newWeight = function (id) { return oldMember(id) ? 0 : (alpha[id] || 0); };
+        // github#86 -- each arc plan keeps ITS resting disc's rows and spacing: a row count
+        // github#86 -- derived from a growing arc ticks, and a tick is a teleport (design/0002)
+        /** @param {Record<string, number>} rows @param {BandNum} band */
+        var rowsHeld = function (rows, band) {
+          return /** @param {Cell} c */ function (c) {
+            var r = rows[c.k];
+            if (r === undefined) r = band[c.inner ? "i" : "o"];
+            return r === undefined ? c.rows : r;
+          };
+        };
+        /** @param {{ i: number, o: number }} sp @param {BandNum} band */
+        var spHeld = function (sp, band) {
+          return { i: sp.i, o: sp.o, depth: { i: band.i || 0, o: band.o || 0 } };
+        };
+        // github#86 -- every note is pinned to its RESTING row, and the planner packs each row
+        // github#86 -- by live weight: re-deriving rows from a growing arc ticks them and flips
+        // github#86 -- the serpentine while a wedge is sparse, which is a teleport.
+        /** @type {Record<string, Point> | null} */
+        var oldT = null;
+        if (eraseA < TWO_PI) oldT = inWorld(function () {
+          var saveKeep = planKeep;
+          planKeep = oldKeep;
+          planArc = { from: eraseA, to: TWO_PI };
+          rowPin = pinA;
+          try {
+            var p0 = buildWedgePlan(true, oldWeight, rowsHeld(rowsSrc, bandSrc), spHeld(spSrcB, bandSrc));
+            return p0 ? ringsLayout(p0, true) : null;
+          } finally { planKeep = saveKeep; planArc = null; rowPin = null; }
+        });
+        /** @type {Record<string, Point> | null} */
+        var newT = null;
+        if (fillA > 0) (function () {
+          var saveKeep = planKeep, saveMove = moveFrom;
+          planKeep = newKeep;
+          moveFrom = null;
+          planArc = fillA < TWO_PI ? { from: 0, to: fillA } : null;
+          rowPin = pinB;
+          try {
+            var p1 = buildWedgePlan(true, newWeight, rowsHeld(rowsDst, bandDst), spHeld(spDstB, bandDst));
+            newT = p1 ? ringsLayout(p1, true) : null;
+          } finally { planKeep = saveKeep; moveFrom = saveMove; planArc = null; rowPin = null; }
+        })();
         /** @type {Record<string, Point>} */
-        var seats = dict();
-        for (var mi = 0; mi < moving.length; mi++) {
-          var mid = moving[mi];
-          if (isMove[mid] && mf && mf[mid] !== undefined) continue;
-          var fq = finalPos[mid];
-          if (fq) seats[mid] = fq;
-        }
-        targets = seats;
+        var both = dict();
+        graph.forEachNode(function (id) {
+          var q = oldMember(id) ? (oldT && oldT[id]) : (newT && newT[id]);
+          if (!q) return;
+          both[id] = q;
+          // github#86 -- a dot taking its first seat in a disc takes it outright; easing
+          // github#86 -- from wherever it last stood would draw it crossing the disc
+          if (!seated[id]) { graph.mergeNodeAttributes(id, { x: q.x, y: q.y }); seated[id] = true; }
+        });
+        graph.forEachNode(function (id) { if (!both[id]) delete seated[id]; });
+        targets = both;
       } else {
         // github#19
         planSkel = cascadeRun ? cascadeRun.skel : null;

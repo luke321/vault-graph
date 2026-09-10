@@ -289,7 +289,10 @@ check("plan parity and zero-weight invariance with each folder hidden", async (p
     const r = await p.j(`{p: __vg.checkPlanParity().parityOK, z: __vg.checkZeroWeightInvariance().invariantOK}`);
     if (!r.p || !r.z) bad.push(`${g}${r.p ? "" : " parity"}${r.z ? "" : " zero-weight"}`);
   }
-  await p.eval(`__vg.state.hidden.folder = {}; __vg.syncAlpha(); __vg.applyLayout(false); void 0`);
+  // github#86 -- leave the page converged: one pass after a membership change lays out with
+  // the previous pass's room and is not the fixed point (github#21), so a check sharing this
+  // page would boot on positions no fresh layout reproduces, by under a unit
+  await p.eval(`__vg.state.hidden.folder = {}; __vg.syncAlpha(); __vg.applyLayout(false); __vg.applyLayout(false); void 0`);
   return { ok: bad.length === 0, detail: bad.length ? bad.join("; ") : `${groups.length} folders, all clean` };
 });
 
@@ -654,42 +657,33 @@ check("tags: a note one disc hides and the other shows arrives with the fill edg
     var litNow = hid.filter(function (id) { return (__vg.alpha[id] || 0) > 0.004; }).length;
     return { hid: hid.length, litNow: litNow };
   })()`);
-  let samples = 0, litEnd = 0;
-  const firstFill = {};
+  let samples = 0, litEnd = 0, ahead = 0, first = "";
   const t0 = Date.now();
   for (;;) {
     const s = await p.j(`(function(){
-      var H = window.__smokeHid, D = 180 / Math.PI;
-      // the cascade reports the erase edge's angle; the fill edge trails it by the blade
+      var H = window.__smokeHid, D = 180 / Math.PI, TWO = 2 * Math.PI;
+      var sweep = function (a) { return (Math.PI / 2 - Math.atan2(a.y, a.x) + 2 * TWO) % TWO; };
+      // the cascade reports the erase edge's angle; the fill edge trails it by the blade, and
+      // the arriving disc is packed inside the arc the fill edge has swept -- so a lit note sits
+      // inside that arc at every sample, wherever its resting seat is
       var hand = __vg.lastCascade().handDeg;
-      var fill = typeof hand === "number" ? (hand - H.blade) / D : null;
-      var lit = H.hid.filter(function (id) { return (__vg.alpha[id] || 0) > 0.004; });
-      return { fill: fill, lit: lit, busy: __vg.demo.busy() };
+      var fill = typeof hand === "number" ? Math.max(0, Math.min(360, hand - H.blade)) : null;
+      var lit = 0, ahead = 0, ex = "";
+      H.hid.forEach(function (id) {
+        if ((__vg.alpha[id] || 0) <= 0.004) return;
+        lit++;
+        if (fill === null) return;
+        var b = sweep(__vg.graph.getNodeAttributes(id)) * D;
+        if (b > fill + 6 && b < 354 && fill < 354) { ahead++; if (!ex) ex = "#" + id + " at " + b.toFixed(0) + " deg with the fill edge at " + fill.toFixed(0); }
+      });
+      return { lit: lit, ahead: ahead, ex: ex, busy: __vg.demo.busy() };
     })()`);
     samples++;
-    for (const id of s.lit) if (firstFill[id] === undefined) firstFill[id] = s.fill;
-    litEnd = s.lit.length;
+    ahead += s.ahead;
+    if (s.ahead && !first) first = s.ex;
+    litEnd = s.lit;
     if (!s.busy && samples > 3) break;
     if (Date.now() - t0 > 20000) break;
-  }
-  // github#86 -- the dots under the fill edge toggle in a serpentine along the circumference,
-  // one column of hand time at a time, so a note may light once the edge is at its own column
-  const seats = await p.j(`(function(){
-    var TWO = 2 * Math.PI;
-    var sweep = function (a) { return (Math.PI / 2 - Math.atan2(a.y, a.x) + 2 * TWO) % TWO; };
-    var sw = {};
-    window.__smokeHid.hid.forEach(function (id) { sw[id] = sweep(__vg.graph.getNodeAttributes(id)); });
-    return { sw: sw, colDeg: 360 * __vg.handCol / __vg.lastCascade().handLap };
-  })()`);
-  let ahead = 0, first = "";
-  for (const id of Object.keys(firstFill)) {
-    const f = firstFill[id];
-    if (f === null) continue;
-    const st = seats.sw[id] - seats.colDeg * Math.PI / 180;
-    if (f < st - 6 * Math.PI / 180) {
-      ahead++;
-      if (!first) first = `#${id} lit with the fill edge at most ${(f * 180 / Math.PI).toFixed(0)} deg, its seat at ${(seats.sw[id] * 180 / Math.PI).toFixed(0)} (columns of ${seats.colDeg.toFixed(1)})`;
-    }
   }
   await p.j(`(function(){ delete window.__smokeHid; __vg.setDim("folder"); return true; })()`);
   await settle(p);
@@ -699,7 +693,7 @@ check("tags: a note one disc hides and the other shows arrives with the fill edg
   return {
     ok: n.litNow === 0 && ahead === 0 && litEnd === n.hid && samples > 3,
     detail: `${pick.g} (${n.hid} notes) hidden in the folder disc: ${n.litNow} lit at the switch itself, ` +
-            `${ahead} lit before the fill edge reached their column over ${samples} samples` +
+            `${ahead} lit outside the arc the fill edge had swept over ${samples} samples` +
             (first ? ` (first: ${first})` : "") + `, ${litEnd} of ${n.hid} lit at the end`,
   };
 });

@@ -313,9 +313,10 @@ node scripts/smoke.mjs --only "arc:"
   arc shifts a dot in exact proportion to its bearing: 10% → median 18°, max 36°.
 - **Neither question touches the disc on screen** — 0 notes moved after both.
 
-The dimension switch does not use this to draw its new disc — it takes seats from `finalPos`,
-which is exact — but the primitive is what a half-disc comparison or a clockwise wipe would be
-built on, and this is the check that keeps it honest.
+Over an arc the seams and the 6° minimum wedge scale with the arc's share of the circle
+(`arcScale()`), so a partial disc keeps the resting disc's proportions; at the full circle the
+scale is 1, which is what keeps the first claim exact. The dimension switch draws both of its
+discs with this planner every frame (see below), and this is the check that keeps it honest.
 
 ## A dot in the disc being left keeps its colour until it has faded
 
@@ -341,24 +342,35 @@ than the one they had, on the four fixtures. Before: 787,308 of 787,308; 709,555
 
 github#86, design/0014. Each dimension keeps its own hidden state, so a note the folder disc
 hides and the tag disc shows is an **arrival** on the switch, and an arrival is lit by the fill
-edge — never at the switch itself, never before the edge is within one column of its seat. Two
-things break it. `setDim` must hand `regroup` `keepAlpha`, or `syncAlpha` lights the note
-before the cascade starts and the cascade has nothing to arrive. And the block after the
-schedule that re-deals a fully-arriving group's delays by radius must be skipped for `hand`:
-the hand deals every column itself, and re-dealing hands one seat the delay of another.
+edge — never at the switch itself, and while lit it sits **inside the arc the fill edge has
+swept**, because the arriving disc is packed into that arc every frame. Two things break it.
+`setDim` must hand `regroup` `keepAlpha`, or `syncAlpha` lights the note before the cascade
+starts and the cascade has nothing to arrive. And the block after the schedule that re-deals
+a fully-arriving group's delays by radius must be skipped for `hand`: the hand deals every
+column itself, and re-dealing hands one seat the delay of another.
 
 ```bash
 node scripts/smoke.mjs --only "arrives with the fill edge"
 ```
 
 The check hides the smallest non-archive folder with three or more notes in the folder disc
-only, drives the real select, and records for each such note the fill edge's position when it
-first lit — the erase edge's angle as the cascade reports it in `lastCascade().handDeg`, minus
-the blade — then compares that against the note's own settled bearing minus one column
-(`360 × handCol ÷ handLap` degrees). **0 lit at the switch itself, 0 lit before the edge
-reached their column, all lit at the end** on the four fixtures. Before, on the maintainer's
-vault: 16 notes lit at the first sample at bearings up to 266°; with `keepAlpha` alone, one lit
-at 206° while the edge was near 78°.
+only, drives the real select, and on every sample compares each such note that is lit against
+the fill edge — the erase edge's angle as the cascade reports it in `lastCascade().handDeg`,
+minus the blade. **0 lit at the switch itself, 0 lit outside the swept arc, all lit at the
+end** on the four fixtures. Before, on the maintainer's vault: 16 notes lit at the first sample
+at bearings up to 266°; with `keepAlpha` alone, one lit at 206° while the edge was near 78°.
+
+## Both discs stay packed while their arcs move
+
+github#86, design/0014. On a dimension switch the disc being left is laid out over
+`[erase, 2π]` and the disc arriving over `[0, fill]`, every frame, with every note pinned to
+its resting row. Measured with the probe in the design record, every sample: **0 old dots
+ahead of the erase edge, 0 new dots beyond the fill edge**, worst single-sample move of a
+visible dot 814 units on the maintainer's vault (4,649 before the row pin), and a fresh
+relayout after settle moving 0 notes — the arc plan over the whole circle is the resting disc,
+which the `arc:` check pins, so *`settle()` is a no-op* still holds. The suite's own guards
+here are the settle, last-frame, resting-size, fade-reversal and hidden-note checks, all green
+on the four fixtures.
 
 ## The rings are independent
 
