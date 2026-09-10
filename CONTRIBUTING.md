@@ -201,11 +201,11 @@ releases a day that left issues open for hours after their fix had landed and be
 for the keyword forms GitHub recognises (`close`, `fix`, `resolve` and their `-s`/`-d`
 spellings, any case, followed by `#n`, `owner/repo#n` or the issue's URL — anywhere in the
 message except inside a backtick code span, so a commit *about* the convention closes
-nothing), and closes each issue it names with a comment giving the commit and saying the fix is not yet released. The
-release merge into `main` then meets GitHub's own resolution on an issue already closed. A
-closed issue therefore means *landed on `develop`*; whether it has shipped is what the
-CHANGELOG is for. A bare `#7` links without closing, and is right for a commit that only
-touches an issue in passing.
+nothing), and closes each issue it names with a comment giving the commit and saying the fix
+is not yet released. The release merge into `main` then meets GitHub's own resolution on an
+issue already closed. A closed issue therefore means *landed on `develop`*; whether it has
+shipped is what the CHANGELOG is for. A bare `#7` links without closing, and is right for a
+commit that only touches an issue in passing.
 
 If a merge into `develop` needs to close issues its commits did not name, put the keywords in
 the merge commit message; the workflow reads that commit too. The scanning is
