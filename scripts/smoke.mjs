@@ -8,7 +8,7 @@ import { existsSync, mkdtempSync, rmSync, readFileSync, writeFileSync, readdirSy
 import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
 import { createServer } from "node:net";
-import { join, dirname } from "node:path";
+import { join, dirname, basename } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -158,9 +158,9 @@ check("a closing-script marker in frontmatter cannot escape the data script", as
   let tab = null, q = null;
   try {
     const url = pathToFileURL(buildPayloadVault(dir)).href;
-    tab = await p.send("Target.createTarget", { url });
+    tab = await p.send("Target.createTarget", { url, background: true });
     for (const deadline = Date.now() + 15000; ;) {
-      try { q = await attach(port, "vg-smoke-escape-"); break; }
+      try { q = await attach(port, basename(dir)); break; }
       catch (e) { if (Date.now() > deadline) throw e; await sleep(250); }
     }
     for (const deadline = Date.now() + 10000; Date.now() < deadline;) {

@@ -2674,7 +2674,7 @@ opened from disk in Chrome:
 
 | | before | after |
 |---|---|---|
-| data script closes after | 149 chars of 948 | the whole 948 |
+| data script closes after | 149 chars in | at its real end, 951 chars in (30 of them the escapes) |
 | marker scripts that ran | both | none |
 | `window.VAULT_DATA` | undefined | 3 notes, both markers intact as text |
 | page exceptions | `SyntaxError`, then `TypeError` reading `nodes` | none |
@@ -2699,7 +2699,7 @@ Two guards, one shape each:
 - **Static, in the pre-push hook, no skip flag**: builds the payload vault, asserts no inline
   `window.VAULT_*` script contains a raw `<`, parses the data back and asserts both marker
   strings decode verbatim; and reads the exporter's own source to assert `VAULT_DATA` still
-  goes through `jsonForScript(`. On the unfixed exporter it prints three FAIL lines.
+  goes through `jsonForScript(`. On the unfixed exporter it prints two FAIL lines: the source no longer routes through the helper, and six raw `<` in the data script -- the parse itself still succeeds, since a raw `<` is valid JSON, which is why the count of `<` is the assertion and not the parse.
 - **In the suite**: builds the same vault, opens it in a second tab of the run's own Chrome
   (`Target.createTarget` from the page session — the first check to do so), and asserts no
   marker ran, the data decoded, and the graph mounted all three notes. This is the
