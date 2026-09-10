@@ -337,6 +337,27 @@ group. **0 of 801,863 / 688,122 / 833,275 / 338,669 standing dot-frames** in a c
 than the one they had, on the four fixtures. Before: 787,308 of 787,308; 709,555 of 728,183;
 821,574 of 845,729; 289,999 of 302,058 — every dot, from the first frame.
 
+## A note one disc hides and the other shows arrives with the fill edge
+
+github#86, design/0014. Each dimension keeps its own hidden state, so a note the folder disc
+hides and the tag disc shows is an **arrival** on the switch, and an arrival is lit by the fill
+edge **at its seat** — never at the switch itself, never ahead of the edge. Two things break
+it. `setDim` must hand `regroup` `keepAlpha`, or `syncAlpha` lights the note before the
+cascade starts and the cascade has nothing to arrive. And the block after the schedule that
+re-deals a fully-arriving group's delays by radius must be skipped for `hand`: under the hand
+every delay is an angle, and re-dealing them hands one seat the delay of another.
+
+```bash
+node scripts/smoke.mjs --only "arrives with the fill edge"
+```
+
+The check hides the smallest non-archive folder with three or more notes in the folder disc
+only, drives the real select, and on every sample compares each such note that is lit against
+the fill edge, taken as the lowest standing old bearing plus one fade for the lag minus the
+blade. **0 lit at the switch itself, 0 dot-frames ahead of the edge, all lit at the end** on
+the four fixtures. Before, on the maintainer's vault: 16 notes lit at the first sample at
+bearings up to 266°; with `keepAlpha` alone, one lit at 206° while the edge was near 78°.
+
 ## The rings are independent
 
 Toggling an inner-band group must not move the outer band. Measured, an `05` toggle

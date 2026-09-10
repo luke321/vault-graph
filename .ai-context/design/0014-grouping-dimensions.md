@@ -195,6 +195,14 @@ after another and enabling the new ones one after another, with the two discs ne
   that has left takes its **final** seat straight from `finalPos` and waits there, dark, until
   the fill edge reaches its **new** bearing. `arriveAt = max(fillAt(new bearing), crossAt)`.
 
+A note the old disc **hides** and the new one shows is an arrival, keyed like every other
+delay on its new bearing. That needs `setDim` to hand `regroup` `keepAlpha` — otherwise
+`syncAlpha` lights it before the cascade starts — and the block after the schedule that
+re-deals a fully-arriving group's delays by radius to stand aside for `hand`, or one seat
+takes another seat's delay and lights far ahead of the edge. Both were found on the
+maintainer's vault the day after the hand landed: 16 notes lit at the first sample, up to
+266° from 12 o'clock.
+
 So the frame needs **no plan at all**: targets are `finalPos` for every dot that has left, and
 nothing for a dot still fading out. One lap of the erase edge is at least `HAND_SWEEP` (12)
 fades long, and the span is that lap plus one blade plus a fade.

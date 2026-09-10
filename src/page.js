@@ -4019,7 +4019,9 @@ function mountVaultGraph(root, data, deps) {
     var maxAdv = Math.max(1, span) / MIN_FRAMES;
     var frame = 0, tPrev = NOW(), tailFrames = 0;
     // github#67
-    (function () {
+    // github#86, design/0014 -- the hand keys every delay on angle; re-dealing a group's
+    // github#86 -- arrivals by radius would light a seat the fill edge has not reached
+    if (!opts.hand) (function () {
       var stretch = Math.max(1, span - FADE_FRAMES * TIME_SCALE);
       /** @param {string} id @param {boolean} out */
       var radiusOf = function (id, out) {
@@ -6721,7 +6723,9 @@ function mountVaultGraph(root, data, deps) {
       moveFrom = null; splitHold = null; pinnedPlan = null; planKeep = null;
       roomNow = null; cellNow = null; edgeNow = null; colWalk = null; posSrc = null;
       bandLock = null; geomLock = null;
-      regroup(true);
+      // github#86 -- alpha is the cascade's to walk: a note this disc hides and the next one
+      // github#86 -- shows is an ARRIVAL for the fill edge, not a dot lit at the switch
+      regroup(true, undefined, true);
     } else {
       hardRelayout(false, false);
       // github#86, design/0014 -- room and position are a fixed point: converge

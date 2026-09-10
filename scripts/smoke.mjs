@@ -621,6 +621,83 @@ check("tags: a dot in the disc being left keeps its colour until it has faded", 
   };
 });
 
+check("tags: a note one disc hides and the other shows arrives with the fill edge", async (p) => {
+  await clearRange(p);
+  await settle(p);
+  await camSettle(p);
+  // github#86, design/0014 -- hide one folder in the folder disc only; each dimension keeps its
+  // own hidden state, so in the tag disc those notes are ARRIVALS, and an arrival is lit by the
+  // fill edge at its seat -- never at the switch, never ahead of the edge
+  const pick = await p.j(`(function(){
+    var gs = __vg.groupOrder().map(function (g) { return { g: g, n: __vg.groupCount(g) }; })
+      .filter(function (x) { return x.n >= 3 && !__vg.isArchiveGroup(x.g); })
+      .sort(function (x, y) { return x.n - y.n; });
+    return gs.length ? gs[0] : null; })()`);
+  if (!pick) return { ok: true, detail: "no folder with three or more notes to hide -- nothing to switch" };
+  const eye = async (g) => p.j(`(function(){
+    var b = document.querySelector('[data-eye="' + ${JSON.stringify(g)}.replace(/"/g, '\\"') + '"]');
+    if (!b) return false; b.click(); return true; })()`);
+  if (!(await eye(pick.g))) return { ok: false, detail: `no eye toggle for ${pick.g}` };
+  await settle(p);
+  await camSettle(p);
+  const n = await p.j(`(function(){
+    var hid = [], b = {};
+    __vg.graph.forEachNode(function (id, a) {
+      if ((__vg.alpha[id] || 0) > 0.004) { b[id] = { g: __vg.groupOf(id), x: a.x, y: a.y }; return; }
+      if (__vg.groupOf(id) === ${JSON.stringify(pick.g)} && !a.dupOf) hid.push(id);
+    });
+    window.__smokeHid = { hid: hid, b: b, blade: __vg.handBlade };
+    var sel = document.querySelector("#vg-dim");
+    sel.value = "tag";
+    sel.dispatchEvent(new Event("change"));
+    // the very same tick: nothing hidden may be lit yet
+    var litNow = hid.filter(function (id) { return (__vg.alpha[id] || 0) > 0.004; }).length;
+    return { hid: hid.length, litNow: litNow };
+  })()`);
+  let samples = 0, ahead = 0, first = "", litEnd = 0;
+  const t0 = Date.now();
+  for (;;) {
+    const s = await p.j(`(function(){
+      var H = window.__smokeHid, TWO = 2 * Math.PI, D = 180 / Math.PI;
+      var sweep = function (a) { return (Math.PI / 2 - Math.atan2(a.y, a.x) + 2 * TWO) % TWO; };
+      var standing = TWO;
+      Object.keys(H.b).forEach(function (id) {
+        var o = H.b[id], a = __vg.graph.getNodeAttributes(id);
+        if (a.x !== o.x || a.y !== o.y || __vg.groupOf(id) !== o.g) return;
+        if ((__vg.alpha[id] || 0) <= 0.004) return;
+        var sw = sweep(a); if (sw < standing) standing = sw;
+      });
+      // the lowest STANDING bearing lags the erase edge by up to one fade, a twelfth of a lap
+      var fill = standing + TWO / 12 - H.blade / D;
+      var ahead = 0, ex = "", lit = 0;
+      H.hid.forEach(function (id) {
+        if ((__vg.alpha[id] || 0) <= 0.004) return;
+        lit++;
+        var sw = sweep(__vg.graph.getNodeAttributes(id));
+        if (standing < TWO && sw > fill + 6 / D) { ahead++; if (!ex) ex = "#" + id + " at " + (sw * D).toFixed(0) + " deg, fill edge at most " + (fill * D).toFixed(0); }
+      });
+      return { ahead: ahead, ex: ex, lit: lit, busy: __vg.demo.busy() };
+    })()`);
+    samples++;
+    ahead += s.ahead;
+    if (s.ahead && !first) first = s.ex;
+    litEnd = s.lit;
+    if (!s.busy && samples > 3) break;
+    if (Date.now() - t0 > 20000) break;
+  }
+  await p.j(`(function(){ delete window.__smokeHid; __vg.setDim("folder"); return true; })()`);
+  await settle(p);
+  await eye(pick.g);
+  await settle(p);
+  await camSettle(p);
+  return {
+    ok: n.litNow === 0 && ahead === 0 && litEnd === n.hid && samples > 3,
+    detail: `${pick.g} (${n.hid} notes) hidden in the folder disc: ${n.litNow} lit at the switch itself, ` +
+            `${ahead} dot-frames lit ahead of the fill edge over ${samples} samples` +
+            (first ? ` (first: ${first})` : "") + `, ${litEnd} of ${n.hid} lit at the end`,
+  };
+});
+
 check("tags: the two buckets stay out of the hue rotation and sort last", async (p) => {
   const r = await p.j(`(function(){
     __vg.setDim("tag");
