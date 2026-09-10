@@ -720,8 +720,9 @@ function mountVaultGraph(root, data, deps) {
 
   /** @returns {Record<string, number>} group -> note count, for the current dim */
   function computeOrder() {
+    // github#97
     /** @type {Record<string, number>} */
-    var count = {};
+    var count = dict();
     /** @type {Record<string, number>} */
     var filed = dict();
     graph.forEachNode(function (id, a) {
@@ -750,8 +751,9 @@ function mountVaultGraph(root, data, deps) {
     return count;
   }
 
+  // github#97
   /** @type {Record<string, number>} */
-  var counts = {};
+  var counts = dict();
   // github#50
   /** @type {Record<string, number>} */
   var folderCount = dict();
@@ -1356,10 +1358,11 @@ function mountVaultGraph(root, data, deps) {
     var all = order[state.dim] || [];
     var nested = state.dim === "folder";
     var SEP = "\u0000";
+    // github#97
     /** @type {Record<string, string[]>} */
-    var byCell = {};
+    var byCell = dict();
     /** @type {Record<string, string[]>} */
-    var cellsOf = {};
+    var cellsOf = dict();
     var planTotal = 0;
     /** @type {Record<string, number>} */
     var presMax = dict();
@@ -1532,8 +1535,9 @@ function mountVaultGraph(root, data, deps) {
     var TOTAL = planTotal;
     var MIN = MIN_SPAN, TWO = 2 * Math.PI;
     var smallAt = TOTAL * (MIN / TWO);
+    // github#97
     /** @type {Record<string, boolean>} */
-    var groupInner = {};
+    var groupInner = dict();
     cells.forEach(function (c) {
       var small = c.wsum < smallAt;
       if (groupInner[c.g] === undefined) groupInner[c.g] = small;
@@ -1620,20 +1624,21 @@ function mountVaultGraph(root, data, deps) {
       var names = [];
       cells.forEach(function (c) { if (names.indexOf(c.g) < 0) names.push(c.g); });
       if (names.length < 2) return;
+      // github#97
       /** @type {Record<string, boolean>} */
-      var assign = {};
+      var assign = dict();
       cells.forEach(function (c) { assign[c.g] = !!c.inner; });
 
       var PIN_BELOW = 10;
       /** @type {Record<string, number>} */
-      var groupNotes = {};
+      var groupNotes = dict();
       var totalNotes = 0;
       cells.forEach(function (c) {
         groupNotes[c.g] = (groupNotes[c.g] || 0) + c.list.length;
         totalNotes += c.list.length;
       });
       /** @type {Record<string, boolean>} */
-      var pinnedInner = {};
+      var pinnedInner = dict();
       names.forEach(function (g) {
         if (assign[g] && (groupNotes[g] || 0) < PIN_BELOW) pinnedInner[g] = true;
       });
@@ -5936,7 +5941,7 @@ function mountVaultGraph(root, data, deps) {
       $("fcreset").onclick = function () {
         pickColor(null, null);
         var savedSub = applySubfolderColors({});
-        if (saveSubfolderColors) saveSubfolderColors(Object.assign({}, savedSub));
+        if (saveSubfolderColors) saveSubfolderColors(Object.assign(dict(), savedSub));
         buildSettings();
       };
       $("setbody").addEventListener("click", function (ev) {
@@ -6113,7 +6118,7 @@ function mountVaultGraph(root, data, deps) {
         if (key) next[folder] = key; else delete next[folder];
       }
       var saved = applyFolderColors(next);
-      if (saveFolderColors) saveFolderColors(Object.assign({}, saved));
+      if (saveFolderColors) saveFolderColors(Object.assign(dict(), saved));
       buildSettings();
     }
 
@@ -6127,7 +6132,7 @@ function mountVaultGraph(root, data, deps) {
         if (key) next[pk] = key; else delete next[pk];
       });
       var saved = applySubfolderColors(next);
-      if (saveSubfolderColors) saveSubfolderColors(Object.assign({}, saved));
+      if (saveSubfolderColors) saveSubfolderColors(Object.assign(dict(), saved));
       buildSettings();
     }
 
@@ -6138,7 +6143,7 @@ function mountVaultGraph(root, data, deps) {
       Object.keys(folderShown).forEach(function (g) { next[g] = folderShown[g]; });
       next[folder] = hiddenByDefault(folder);
       var saved = applyFolderShown(next);
-      if (saveFolderShown) saveFolderShown(Object.assign({}, saved));
+      if (saveFolderShown) saveFolderShown(Object.assign(dict(), saved));
       var h = state.hidden[state.dim] || (state.hidden[state.dim] = dict());
       if (hiddenByDefault(folder)) h[folder] = true; else delete h[folder];
       buildLegend();

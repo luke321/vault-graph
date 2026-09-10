@@ -24,6 +24,14 @@ function pathMap() {
   return /** @type {Record<string, string>} */ (o);
 }
 
+// github#97
+/** @template T @returns {Record<string, T>} */
+function bareMap() {
+  /** @type {unknown} */
+  const o = Object.create(null);
+  return /** @type {Record<string, T>} */ (o);
+}
+
 /* ===================================================================== types ==
  * JSDoc, not TypeScript: the file stays plain JavaScript (see the header) and
  * typescript-eslint reads these through tsconfig.json's allowJs, so every value that gets
@@ -977,8 +985,9 @@ class VaultGraphSettingTab extends PluginSettingTab {
   constructor(app, plugin) {
     super(app, plugin);
     this.plugin = plugin;
+    // github#97
     /** @type {Record<string, boolean>} */
-    this.subOpen = {};
+    this.subOpen = bareMap();
     /** @type {HTMLElement | null} */
     this.scope = null;
   }
@@ -1155,7 +1164,9 @@ class VaultGraphSettingTab extends PluginSettingTab {
     const subsByFolder = allSubfolders(this.app, this.plugin.settings.flatMonths);
 
     for (const group of groups) {
-      const pinned = this.plugin.settings.folderColors[group.name] || "";
+      // github#97
+      const colors = this.plugin.settings.folderColors;
+      const pinned = (Object.prototype.hasOwnProperty.call(colors, group.name) && colors[group.name]) || "";
       const current = pinned || group.slot;
       const shown = this.shownByDefault(group.name);
       const subs = subsByFolder.get(group.name) || [];
@@ -1250,7 +1261,8 @@ class VaultGraphSettingTab extends PluginSettingTab {
 
   /** @param {string} folder */
   async pickVisible(folder) {
-    const map = Object.assign({}, this.plugin.settings.folderShown);
+    // github#97
+    const map = Object.assign(bareMap(), this.plugin.settings.folderShown);
     map[folder] = !this.shownByDefault(folder);
     this.plugin.settings.folderShown = map;
     await this.plugin.saveSettings();
@@ -1265,7 +1277,8 @@ class VaultGraphSettingTab extends PluginSettingTab {
    * @param {"applyFolderColors" | "applySubfolderColors"} applyMethod
    */
   async setOverride(settingsKey, mapKey, key, applyMethod) {
-    const map = Object.assign({}, this.plugin.settings[settingsKey]);
+    // github#97
+    const map = Object.assign(bareMap(), this.plugin.settings[settingsKey]);
     if (key) map[mapKey] = key; else delete map[mapKey];
     this.plugin.settings[settingsKey] = map;
     await this.plugin.saveSettings();

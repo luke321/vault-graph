@@ -295,6 +295,98 @@ check("plan parity and zero-weight invariance with each folder hidden", async (p
   return { ok: bad.length === 0, detail: bad.length ? bad.join("; ") : `${groups.length} folders, all clean` };
 });
 
+// github#97
+let hostilePages = null;
+function hostileVaults() {
+  if (hostilePages) return hostilePages;
+  hostilePages = (async () => {
+    const NAMES = ["constructor", "toString", "hasOwnProperty", "__proto__"];
+    const root = mkdtempSync(join(tmpdir(), "vg-smoke-hostile-"));
+    process.on("exit", () => { try { rmSync(root, { recursive: true, force: true }); } catch {} });
+    const vault = (label, folders) => {
+      const dir = join(root, label);
+      mkdirSync(join(dir, ".obsidian"), { recursive: true });
+      for (const f of folders) {
+        mkdirSync(join(dir, f), { recursive: true });
+        writeFileSync(join(dir, f, "Note.md"), "# Note\n\nA note in a folder named " + f + ".\n");
+      }
+      return { label, dir, folders };
+    };
+    const specs = NAMES.map((n) => vault(n, [n])).concat([
+      vault("all-four-and-plain", NAMES.concat(["Plain"])),
+      vault("empty", []),
+      vault("plain", ["Plain"]),
+    ]);
+    return specs.map((s) => {
+      const out = join(root, s.label + ".html");
+      const b = spawnSync(process.execPath,
+                          [join(HERE, "..", "src", "build-graph.mjs"), "--vault", s.dir, "--out", out],
+                          { encoding: "utf8" });
+      if (b.status !== 0) throw new Error("build-graph.mjs failed on " + s.label + ":\n" + (b.stderr || ""));
+      return { ...s, url: pathToFileURL(out).href + "?rest" };
+    });
+  })();
+  return hostilePages;
+}
+
+check("a folder named after an Object.prototype member still lays out", async (p, ctx) => {
+  const home = await p.eval("location.href");
+  const READY = "!!(window.__vg && __vg.heat && __vg.state.until === null)";
+  const goto = async (url) => {
+    await p.send("Page.navigate", { url });
+    for (const until = Date.now() + 15000; ;) {
+      const ok = await p.eval(`location.href === ${JSON.stringify(url)} && ${READY}`).catch(() => false);
+      if (ok) return true;
+      if (Date.now() > until) return false;
+      await sleep(200);
+    }
+  };
+  const firstLine = (e) => String(e).split("\n")[0];
+  const pages = await hostileVaults();
+  const mark = ctx.errors.length;
+  const rows = [];
+  let bad = 0, back = false;
+  try {
+    for (const v of pages) {
+      const before = ctx.errors.length;
+      const ready = await goto(v.url);
+      if (ready && v.folders.indexOf("__proto__") >= 0) {
+        await p.eval(`(function(){ var m = Object.create(null); m["__proto__"] = true;
+                                   __vg.setFolderShown(m); __vg.applyHiddenDefaults(); })(); void 0`);
+        await settle(p);
+      }
+      const r = ready ? await p.j(`(function(){
+        var busy = document.getElementById("vg-busy");
+        var n = 0, nonFinite = 0;
+        __vg.graph.forEachNode(function (id, a) { n++; if (!isFinite(a.x) || !isFinite(a.y)) nonFinite++; });
+        var groups = __vg.groupOrder().filter(function (g) { return __vg.groupCount(g) > 0; });
+        var par = null, parErr = null;
+        if (n) { try { par = __vg.checkPlanParity(); } catch (e) { parErr = e.message; } }
+        return { busyHidden: !!(busy && busy.hidden), n: n, nonFinite: nonFinite, groups: groups,
+                 shown: par ? par.shown : 0,
+                 parity: par ? par.parityOK : (parErr ? "threw: " + parErr : null) };
+      })()`) : null;
+      const errs = ctx.errors.slice(before).map(firstLine);
+      const want = v.folders.length;
+      const ok = ready && !errs.length && r.busyHidden && r.n === want && r.nonFinite === 0 &&
+                 (want === 0 ? r.groups.length === 0
+                             : v.folders.every((f) => r.groups.indexOf(f) >= 0) &&
+                               r.shown === want && r.parity === true);
+      if (!ok) bad++;
+      rows.push(`${ok ? "ok" : "FAIL"} ${v.label}: ` + (ready
+        ? `${r.n}/${want} notes, ${r.shown} shown, groups [${r.groups.join(", ")}], ` +
+          `busy ${r.busyHidden ? "hidden" : "SHOWN"}, parity ${r.parity}` +
+          (errs.length ? `, threw: ${errs[0]}` : "")
+        : "never ready" + (errs.length ? `: ${errs[0]}` : "")));
+    }
+  } finally {
+    ctx.errors.splice(mark);
+    back = await goto(home);
+  }
+  if (!back) throw new Error("could not return to the fixture page at " + home);
+  return { ok: bad === 0, detail: `${pages.length - bad}/${pages.length} pages: ` + rows.join("; ") };
+});
+
 check("the resting disc is on the lattice", async (p) => {
   await settle(p);
   const r = await p.j(`(function(){
