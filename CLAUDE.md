@@ -43,6 +43,13 @@ measuring it: serve the page, drive it, read the numbers.
   Settings, then judge what the plugin is doing. `scripts/obsidian-smoke.mjs` handles this itself
   -- it writes `community-plugins.json` and calls `enablePluginAndSave` -- a hand-launched Obsidian
   does not.
+- **Never serve Chrome unlabeled.** A page opened in Chrome from any worktree — a `smoke.mjs`
+  run, a `shoot.mjs` capture, a manual review build — sets the page's own top-left title to
+  `<worktree/feature> — <what it's showing>` (e.g. `tag-grouping — demo vault`), not the
+  default. Patch the built HTML's `vault` field in `window.VAULT_DATA` rather than the product
+  itself; the title is a review aid, not a feature. Several worktrees end up with visually
+  similar tabs open in Chrome at once — without a label there is no way to tell which build is
+  which, and judging a change against the wrong one is worse than not looking.
 - Fixtures: three generated vaults (`scripts/make-*-vault.mjs`) in the shared store; never a
   real vault, never a built `vault-graph.html`, in anything that reaches the repo.
 - `npm run lint` holds every finding at zero. `check-pii`, `check-scope`, `check-network` and
