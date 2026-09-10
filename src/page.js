@@ -749,6 +749,11 @@ function mountVaultGraph(root, data, deps) {
   var standIns = [];
   // github#86 -- true while planning in the dimension being left
   var oldWorld = false;
+  // github#86, design/0014 -- the nav bar during a switch: the rows of the disc being left,
+  // github#86 -- with their counts and colours as they were, dropping out as their notes fade
+  /** @typedef {{ dim: string, order: string[], counts: Record<string, number>, colors: Record<string, string>, hidden: Record<string, boolean>, basis: number }} LegendSwitch */
+  /** @type {LegendSwitch | null} */
+  var legendSwitch = null;
 
   /** @param {string} id @returns {string} */
   function groupOf(id) {
@@ -867,6 +872,19 @@ function mountVaultGraph(root, data, deps) {
       alpha[sid] = 0;
       standIns.push(sid);
     });
+    // github#86 -- and their notes' links, so the disc arriving is drawn with its web from the
+    // github#86 -- first frame; an edge to a note that is not leaving keeps that end
+    /** @param {string} id */
+    var seat = function (id) { return leaving[id] ? id + SAT_SEP + "s" : id; };
+    /** @type {[string, string, EdgeAttrs][]} */
+    var mirror = [];
+    graph.forEachEdge(function (e, attrs, a0, b0) {
+      if (!leaving[a0] && !leaving[b0]) return;
+      mirror.push([seat(a0), seat(b0), attrs]);
+    });
+    mirror.forEach(function (m) {
+      if (!graph.hasEdge(m[0], m[1])) graph.addUndirectedEdge(m[0], m[1], m[2]);
+    });
   }
 
   // github#86 -- the note takes its stand-in's seat and presence; the stand-in goes
@@ -890,6 +908,47 @@ function mountVaultGraph(root, data, deps) {
     lazyAdded = []; lazyShown = null;
     neighbourCache = null;
     focusSetCache = { key: undefined, set: null };
+    // github#86 -- the nav bar and the heat strip are the disc arriving's alone now
+    legendSwitch = null;
+    if (renderer) { attempt(buildLegend); heatSig = ""; attempt(heatBuild); attempt(heatDraw); }
+  }
+
+  // github#86, design/0014 -- what is on the disc right now, per group, in both dimensions:
+  // github#86 -- a leaving note under the group it is fading out of, everything else where
+  // github#86 -- the dimension on screen files it
+  function liveByGroup() {
+    /** @type {Record<string, number>} */
+    var old = dict();
+    /** @type {Record<string, number>} */
+    var now = dict();
+    graph.forEachNode(function (id) {
+      var w = alpha[id] || 0;
+      if (w <= 0.004) return;
+      if (leaving[id]) old[leftGroup[id]] = (old[leftGroup[id]] || 0) + w;
+      else now[groupOf(id)] = (now[groupOf(id)] || 0) + w;
+    });
+    return { old: old, now: now };
+  }
+
+  // github#86 -- one frame of the switch's nav bar: bars follow the notes, a row of the disc
+  // github#86 -- being left drops out when its last note has, a row arriving drops in with its first
+  function legendSwitchTick() {
+    var ls = legendSwitch;
+    if (!ls) return;
+    var live = liveByGroup();
+    var nowBasis = barBasis().max;
+    var rows = $("legend").querySelectorAll(".lgr[data-row]");
+    for (var i = 0; i < rows.length; i++) {
+      var row = /** @type {HTMLElement} */ (rows[i]);
+      var g = row.getAttribute("data-row") || "";
+      var isOld = row.hasAttribute("data-old");
+      var v = isOld ? (live.old[g] || 0) : (live.now[g] || 0);
+      var basis = isOld ? ls.basis : nowBasis;
+      var gone = v <= 0.004;
+      if (row.classList.contains("lgr-gone") !== gone) row.classList.toggle("lgr-gone", gone);
+      var b = /** @type {HTMLElement | null} */ (row.querySelector(".lg"));
+      if (b) b.style.setProperty("--vg-share", (basis > 0 ? (v / basis) * 100 : 0).toFixed(3) + "%");
+    }
   }
 
   // github#86 -- the filing exists from here; subOrder is its first reader
@@ -4154,7 +4213,8 @@ function mountVaultGraph(root, data, deps) {
     cascadeRun = { raf: 0, tick: NOW(), guard: WIN.setTimeout(watchdog, STALL_MS), sizeCap: sizeCap,
                    skel: moveFrom ? null : freshSkel() };
     // github#78, design/0006
-    var barWalking = barWalkStart();
+    // github#86 -- the switch's nav bar follows the notes directly (legendSwitchTick)
+    var barWalking = opts.hand && legendSwitch ? false : barWalkStart();
 
     (function step() {
       var tn = NOW();
@@ -4193,6 +4253,8 @@ function mountVaultGraph(root, data, deps) {
       }
 
       if (opts.onFrame) opts.onFrame(pr);
+      // github#86 -- rows drop out and drop in with the notes
+      if (opts.hand && legendSwitch) legendSwitchTick();
 
       /** @param {Cell} c */
       var rowsAt = function (c) {
@@ -5640,7 +5702,30 @@ function mountVaultGraph(root, data, deps) {
     /** @type {Record<string, number>} */
     var rendered = dict();
 
-    setHTML($("legend"), names.map(function (g) {
+    // github#86, design/0014 -- while a switch runs, the rows of the disc being left come
+    // github#86 -- first, inert, with the counts and colours they had; they drop out as their
+    // github#86 -- notes fade, and a row of the disc arriving drops in with its first note
+    var oldRows = "";
+    var liveNow = legendSwitch ? liveByGroup() : null;
+    if (legendSwitch) {
+      var ls = legendSwitch;
+      oldRows = ls.order.map(function (g) {
+        var c = ls.counts[g] || 0;
+        if (!c || ls.hidden[g]) return "";
+        var lv = liveNow ? (liveNow.old[g] || 0) : c;
+        var share = ls.basis > 0 ? lv / ls.basis : 0;
+        return '<div class="lgr' + (lv <= 0.004 ? " lgr-gone" : "") + '" data-row="' + esc(g) + '" data-old="1">' +
+          '<button class="tw none" disabled aria-hidden="true"></button>' +
+          '<button class="eye none" disabled aria-hidden="true"></button>' +
+          '<button class="lg bar" style="--vg-share:' + (share * 100).toFixed(3) + '%;--vg-bar:' + ls.colors[g] +
+            '" data-hl="off" tabindex="-1" aria-hidden="true">' +
+          '<span class="sw" style="background:' + ls.colors[g] + '"></span>' +
+          '<span class="nm">' + esc(g) + '</span>' +
+          '<span class="only none" aria-hidden="true"></span>' +
+          '<span class="ct">' + c + '</span></button></div>';
+      }).join("");
+    }
+    setHTML($("legend"), oldRows + names.map(function (g) {
       var vis = !isHidden(g);
       var hasSubs = groupHasPinnedSub(g) ||
                     ((subOrder[g] || []).length > 1 && (counts[g] || 0) >= NEST_MIN);
@@ -5664,7 +5749,9 @@ function mountVaultGraph(root, data, deps) {
             : " · " + shareText(share) + " of " + esc(basis.group)) + '"'
         : '';
 
-      var row = '<div class="' + lgrClass + '">' +
+      // github#86 -- a row of the disc arriving is collapsed until its first note is lit
+      if (liveNow && !(liveNow.now[g] > 0.004)) lgrClass += " lgr-gone";
+      var row = '<div class="' + lgrClass + '" data-row="' + esc(g) + '">' +
         twBtn(hasSubs ? 'data-tw="' + esc(g) + '"' : null, open) +
         (live ? eyeBtn('data-eye="' + esc(g) + '"', vis, g)
               : '<button class="eye none" disabled aria-hidden="true"></button>') +
@@ -6829,7 +6916,17 @@ function mountVaultGraph(root, data, deps) {
         leaving[id] = true;
         n++;
       });
-      if (n) addStandIns();
+      if (n) {
+        addStandIns();
+        /** @type {Record<string, number>} */
+        var oldCounts = dict();
+        /** @type {Record<string, string>} */
+        var oldColors = dict();
+        var oldBasis = barBasis();
+        (order[state.dim] || []).forEach(function (g) { oldCounts[g] = counts[g] || 0; oldColors[g] = colorOf(g); });
+        legendSwitch = { dim: state.dim, order: (order[state.dim] || []).slice(), counts: oldCounts,
+                         colors: oldColors, hidden: state.hidden[state.dim] || dict(), basis: oldBasis.max };
+      }
     }
 
     // github#86, design/0014 -- the disc being LEFT, so the cascade can draw both
@@ -7236,8 +7333,10 @@ function mountVaultGraph(root, data, deps) {
     /** @type {Record<string, number>} */
     var all = dict();
     graph.forEachNode(function (id, a) {
-      // github#86 -- a day counts NOTES written that day, not dots on the disc
-      if (a.dupOf) return;
+      // github#86 -- a day counts NOTES written that day, not dots on the disc; a stand-in is
+      // github#86 -- its note's dot in the disc arriving, so its weight and colour cross-fade
+      // github#86 -- the note's day from the colour it had to the colour it gets
+      if (a.dupOf && !a.standIn) return;
       var k = a.created;
       if (!heatParse(k)) { undated++; return; }
       all[k] = (all[k] || 0) + 1;
@@ -7360,6 +7459,8 @@ function mountVaultGraph(root, data, deps) {
       sig.push(Math.ceil(heat.days[heat.keys[i]].n * 4));
     }
     sig.push(state.markDay || "", state.hoverDay || "", heat.cell);
+    // github#86 -- while a switch runs the colours move under a steady count
+    if (standIns.length) sig.push("s" + lastCascade.frames);
     sig = sig.join(",");
     if (sig === heatSig) return;
     heatSig = sig;

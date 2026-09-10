@@ -200,6 +200,23 @@ them:
   `computeOrder` counts a leaving note where the dimension on screen files it, not under the
   group it is fading out of, or the old names sit in the new order — rows in the legend, slots
   in the rotation, and no bars for the tags, all three of which were reported at once.
+- **The stand-ins carry their notes' links, days and rows.** A stand-in gets every edge its
+  note has, to the other note's stand-in or to the note itself when that one is not leaving
+  (`addStandIns`), so the web of the disc arriving is drawn as it lights up and the web of the
+  disc being left fades with it; the edge count doubles for the switch and comes back when
+  the stand-ins go. The heat strip counts a stand-in for its note's day, weighted by its
+  alpha and in its new colour, so each day cross-fades from the colour it had to the colour it
+  gets, and its repaint signature carries the frame while stand-ins exist because the
+  colours move under a steady count. And the nav bar keeps the rows of the disc being left —
+  inert, with the counts and colours they had (`legendSwitch`) — above the rows arriving,
+  each bar following its notes' alpha every frame (`legendSwitchTick`, `liveByGroup`): a
+  row drops out when its last note has faded and drops in with its first lit one, through a
+  max-height transition on the row. So for a while folders and tags mix in the nav bar,
+  which is what was asked for: "folders drop out and tags drop in synchronized to the notes
+  with the gauges shrinking and growing". Measured on the maintainer's vault, sampled every
+  600 ms with the lap slowed threefold: stand-in edges drawn 34 → 243 → 496 → 1,012 → 1,811,
+  folder rows standing 7 → 6 → 5 → 4 → 3 while tag rows rise 4 → 7 → 13 → 21 → 28, and the
+  end state is 2,147 edges on the notes, 32 tag rows, no folder rows, no stand-ins.
 - **The erase edge** sweeps once at constant angular speed and takes a dot when it passes the
   dot's bearing (`delay = W × sweep ÷ 2π`). The dot fades where it stands — a fade also shrinks
   a dot, so the vicinity of the edge is where dots grow smaller and vanish — **in the colour

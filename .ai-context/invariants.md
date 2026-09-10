@@ -344,8 +344,10 @@ hides and the tag disc shows is an **arrival** on the switch, and an arrival is 
 edge — never at the switch itself, and while lit its seat is **behind the fill edge**, because
 an arrival sits at its final seat; the inner ring sweeps the other way round, so its bearings
 read mirrored. The switch draws the disc arriving with a **stand-in** per note of the disc
-being left, and the check also holds that every stand-in drawn is gone at the end and the
-graph has the node count it had. Two things break the arrival.
+being left — each carrying its note's links, counting for its note's day in the heat strip,
+and driving the nav bar's rows and bars frame by frame — and the check also holds that every
+stand-in drawn is gone at the end and the graph has the node count it had (the edge count
+follows, since dropping a node drops its edges). Two things break the arrival.
 `setDim` must hand `regroup` `keepAlpha`, or `syncAlpha` lights the note before the cascade
 starts and the cascade has nothing to arrive. And the block after the schedule that re-deals
 a fully-arriving group's delays by radius must be skipped for `hand`: the hand keys every
