@@ -446,35 +446,92 @@ check("layout matches its golden snapshot", async (p) => {
  */
 
 check("the wedge order follows the file explorer spec", async (p) => {
+  // The expectation is DERIVED FROM THE SPEC the fixture ships, not written down here: three
+  // fixtures carry one now and they pin different things. A check that hardcoded one vault's
+  // folder names would silently stop asserting on the other two (github#71).
   const r = await p.j(`(function(){
     var was = __vg.folderOrder();
-    __vg.setFolderOrder("name");
-    var byName = __vg.groupOrder(), nameSubs = __vg.subOrderOf("alpha");
-    __vg.setFolderOrder("explorer");
-    var bySpec = __vg.groupOrder(), specSubs = __vg.subOrderOf("alpha");
     var spec = __vg.sortSpec();
+    if (!spec.ok || !spec.sections.length) return { sections: 0 };
+
+    var root = null, subs = [];
+    spec.sections.forEach(function(s){
+      if (s.target === "" && s.rank === 3) root = s;
+      // a section aimed at a top-level folder is the only other kind the disc can see
+      else if (s.target.indexOf("/") < 0 && s.target) subs.push(s);
+    });
+
+    __vg.setFolderOrder("name");
+    var byName = __vg.groupOrder();
+    var nameSubs = {};
+    subs.forEach(function(s){ nameSubs[s.target] = __vg.subOrderOf(s.target); });
+
+    __vg.setFolderOrder("explorer");
+    var bySpec = __vg.groupOrder();
+    var specSubs = {};
+    subs.forEach(function(s){ specSubs[s.target] = __vg.subOrderOf(s.target); });
+
     __vg.setFolderOrder(was);
-    return { byName: byName, bySpec: bySpec, nameSubs: nameSubs, specSubs: specSubs,
-             sections: spec.sections.length, ok: spec.ok };
+    return { sections: spec.sections.length, byName: byName, bySpec: bySpec,
+             root: root ? { pins: root.pins, dir: root.dir } : null,
+             subs: subs.map(function(s){
+               return { target: s.target, pins: s.pins, dir: s.dir,
+                        name: nameSubs[s.target], spec: specSubs[s.target] };
+             }) };
   })()`);
+
   if (!r.sections) {
-    return { ok: true, detail: `NOT ASSERTED: this vault ships no sortspec -- only the ` +
-                                `spec fixture can show the order moving` };
+    return { ok: true, detail: `NOT ASSERTED: this vault ships no sortspec -- only a ` +
+                                `spec-carrying fixture can show the order moving` };
   }
-  // The fixture pins zeta then alpha at the root, and "00 pinned tiny" then "04 smaller"
-  // inside alpha. Both are deliberately AGAINST name order and against size order, so
-  // neither can pass by accident.
-  const real = r.bySpec.filter((g) => g.charAt(0) !== "(");
-  const wedgesOk = real[0] === "zeta" && real[1] === "alpha";
-  const subsOk = r.specSubs[0] === "00 pinned tiny" && r.specSubs[1] === "04 smaller";
-  const moved = r.byName.join("|") !== r.bySpec.join("|");
+
+  const notes = [];
+  const fail = [];
+
+  /** every pin that IS present must lead, in the order the spec listed them */
+  const leads = (list, pins, where) => {
+    const present = pins.filter((x) => list.includes(x));
+    if (!present.length) return null;                 // pins naming files, or folders now gone
+    const head = list.slice(0, present.length);
+    const ok = head.join("|") === present.join("|");
+    (ok ? notes : fail).push(`${where}: pinned [${present.join(", ")}] ` +
+      (ok ? "lead" : `EXPECTED to lead, got [${head.join(", ")}]`));
+    return ok;
+  };
+
+  if (r.root) {
+    const got = leads(r.bySpec.filter((g) => g.charAt(0) !== "("), r.root.pins, "wedges");
+    if (got === null) {
+      notes.push(`wedges: the root section pins ${r.root.pins.length} name(s), none of them a ` +
+                 `folder -- no wedge is expected to move`);
+    }
+  }
+  for (const s of r.subs) {
+    if (!s.spec || !s.spec.length) continue;
+    leads(s.spec, s.pins, `${s.target}'s subs`);
+    // a descending section must actually descend, once the pins are past
+    if (s.dir === "desc") {
+      const tail = s.spec.filter((x) => x && !s.pins.includes(x));
+      const sorted = tail.slice().sort((a, b) => a.localeCompare(b)).reverse();
+      if (tail.join("|") !== sorted.join("|")) {
+        fail.push(`${s.target}: order-desc did not descend -- [${tail.slice(0, 5).join(", ")}]`);
+      } else if (tail.length > 1) {
+        notes.push(`${s.target}: ${tail.length} unpinned entries descend (${tail[0]} first)`);
+      }
+    }
+  }
+
+  const wedgesMoved = r.byName.join("|") !== r.bySpec.join("|");
+  const anySubMoved = r.subs.some((s) => s.name && s.spec && s.name.join("|") !== s.spec.join("|"));
+  if (!wedgesMoved && !anySubMoved) {
+    fail.push("NOTHING MOVED -- the spec parsed but changed no order at all");
+  }
+
   return {
-    ok: wedgesOk && subsOk && moved,
-    detail: `wedges name [${r.byName.join(", ")}] -> spec [${r.bySpec.join(", ")}]` +
-            (wedgesOk ? "" : "  <- EXPECTED zeta then alpha first") +
-            `; alpha's subs name [${r.nameSubs.join(", ")}] -> spec [${r.specSubs.join(", ")}]` +
-            (subsOk ? "" : "  <- EXPECTED the pinned pair first") +
-            (moved ? "" : "; NOTHING MOVED")
+    ok: fail.length === 0,
+    detail: `${r.sections} section(s); wedges ${wedgesMoved ? "moved" : "unchanged"}, ` +
+            `sub-wedges ${anySubMoved ? "moved" : "unchanged"}; ` +
+            (fail.length ? fail.join("; ") : notes.join("; "))
   };
 });
 

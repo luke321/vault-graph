@@ -207,6 +207,66 @@ writeFileSync(join(OUT, ".obsidian", "templates.json"),
 writeFileSync(join(OUT, ".obsidian", "daily-notes.json"),
   JSON.stringify({ folder: "04 - Daily Notes", format: "YYYY-MM-DD" }, null, 2) + "\n");
 
+/* -------------------------------------------------------- sortspec (github#71) --
+ * Both fixtures this generator produces carry a spec, because a PARA vault with dated
+ * subfolders is precisely the kind that uses one -- a fixture without it is a shape real
+ * vaults have largely stopped having.
+ *
+ * This spec is REALISTIC, not adversarial. spec-vault is the one built to provoke (a pin
+ * against size order, a section aimed at a folder that is gone, a line outside the subset);
+ * these two exist to run the ordinary machinery -- discovery, parsing, a reordering at 1.4k
+ * and 10k notes -- over shapes that are otherwise the suite's most realistic.
+ *
+ * It lives in a folder and is registered through the plugin's own config rather than sitting
+ * at the vault root, which is the arrangement a real vault ends up with and the reason its
+ * first section has to say `target-folder: /` rather than `.`. That covers the
+ * additionalSortspecFile path, which nothing else in the suite does.
+ *
+ * The 10k vault is where this earns the most: 17 top-level folders against 12 colour slots,
+ * so the slot walk cycles. If a folder's slot ever followed the DRAW order, reordering there
+ * would swap hues between folders that share a slot -- the exact defect github#71's colour
+ * check exists for, on the only fixture big enough to show it.
+ */
+const SORTSPEC_DIR = "03 - Resources";
+const SORTSPEC = [
+  "---",
+  "sorting-spec: |-",
+  "  target-folder: /",
+  "  Home.md",
+  "  Dashboard.md",
+  "",
+  "  target-folder: 03 - Resources",
+  "  Concepts",
+  "  Software",
+  "  order-asc: a-z",
+  "",
+  "  target-folder: 04 - Daily Notes/*",
+  "  order-desc: a-z",
+  "",
+  "  target-folder: 05 - Meeting Notes/*",
+  "  order-desc: a-z",
+  "",
+  "  target-folder: 07 - Weekly Reviews/*",
+  "  order-desc: a-z",
+  "",
+  "  target-folder: 08 - Archive/*",
+  "  order-desc: a-z",
+  "---",
+  "",
+  "# sortspec",
+  "",
+  "File explorer ordering for the Custom File Explorer sorting plugin. The front matter",
+  "above is the whole config; this body is just notes.",
+  "",
+  "Dated trees run newest-first, which for ISO-prefixed names is plain descending",
+  "alphabetical. `03 - Resources` pins two subfolders that are not its largest, so the",
+  "legend's named three are a choice rather than a size ranking.",
+  "",
+].join("\n");
+mkdirSync(join(OUT, ".obsidian", "plugins", "custom-sort"), { recursive: true });
+writeFileSync(join(OUT, ".obsidian", "plugins", "custom-sort", "data.json"),
+  JSON.stringify({ additionalSortspecFile: SORTSPEC_DIR + "/sortspec.md", suspended: false }, null, 2) + "\n");
+
 const fixedTotal = FOLDERS.reduce((a, f) => a + (f.fixed || 0), 0);
 const shareTotal = FOLDERS.reduce((a, f) => a + (f.share || 0), 0);
 const plan = FOLDERS.map((f) => ({
@@ -291,8 +351,14 @@ for (const t of ["Home", "Dashboard"]) {
     `# ${t}\n\n[[${titles[0]}]] · [[${titles[1]}]] · [[${titles[2]}]]\n`);
 }
 
-console.log(`wrote ${written} notes + 4 templates + 2 root notes to ${OUT} ` +
+// github#71 -- the spec is an ordinary note in the vault, and counts as one
+mkdirSync(join(OUT, SORTSPEC_DIR), { recursive: true });
+writeFileSync(join(OUT, SORTSPEC_DIR, "sortspec.md"), SORTSPEC, "utf8");
+
+console.log(`wrote ${written} notes + 4 templates + 2 root notes + 1 sortspec to ${OUT} ` +
             `(${notes.filter((n) => n.orphan).length} deliberately unlinked)\n`);
+console.log(`sortspec: ${SORTSPEC_DIR}/sortspec.md, registered via ` +
+            `.obsidian/plugins/custom-sort/data.json\n`);
 console.log(`${plan.length} top-level folders (${plan.length - 10} past the colour slots):`);
 for (const f of plan) {
   console.log(`  ${String(f.count).padStart(5)}  ${f.name.padEnd(24)} ${String(f.paths.length).padStart(3)} folder(s)`);

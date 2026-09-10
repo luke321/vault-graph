@@ -1430,6 +1430,33 @@ the snapshot. It failed on all three vaults, naming the exact folder that flippe
 the demo vault (`04 - Daily Notes: outer -> inner`) and reporting every moved note's id and
 delta on the other two. Reverted immediately after.
 
+**THREE OF THE FOUR FIXTURES CARRY A SORTSPEC since github#71, and `shape-vault` deliberately
+does not.** `make-test-vault.mjs` writes one into `03 - Resources/sortspec.md` and registers it
+through `.obsidian/plugins/custom-sort/data.json`, so both fixtures it produces (the demo vault
+and the 10k) get a realistic one — pins on two `03 - Resources` subfolders that are not its
+largest, and `order-desc: a-z` on the four dated trees. Registering it from inside a folder rather
+than at the vault root is the arrangement a real vault ends up with, and the reason its first
+section must say `target-folder: /` rather than `.`; nothing else in the suite covers that path.
+
+The 10k vault is where it earns most: **17 top-level folders against 12 colour slots**, so the slot
+walk cycles. If a folder's slot ever followed the draw order, reordering there would swap hues
+between folders sharing a slot — the exact defect the colour check exists for, on the only fixture
+big enough to show it.
+
+**`shape-vault` is kept spec-free on purpose.** Its job is band balancing under a dominant group, to
+which a spec adds nothing — and with the other three carrying one it is the only fixture left that
+can assert *a vault with no sortspec is laid out in name order*. Giving all four a spec would have
+retired that check without anyone noticing.
+
+**Their goldens were regenerated for it, deliberately** (2026-09-10). A spec is a note, so the demo
+vault went 1403 → **1404** notes and the 10k 10002 → **10003**. Every recorded position changed,
+which is what adding one note to a fixture does: wedge angles are proportional to a folder's share,
+so one extra note in `03 - Resources` re-proportions the whole disc. **Band assignment is unchanged
+on both** (11 inner / 6 outer, and 13 / 4), which is the property that actually had to hold, and
+`shape-vault.json` and `spec-vault.json` came back **byte-identical** — the containment proof that
+nothing but the two intended fixtures moved. This is a fixture change, not a layout change: the
+check reports added/removed ids separately from position drift for exactly this reason.
+
 **A FOURTH FIXTURE since github#71: `spec-vault`.** 287 notes, and the only one laid out in
 anything but name order — it ships a sortspec and is built with `--folder-order explorer`, so
 the whole suite runs against a disc whose wedges are where a spec put them. Its `--end` is
