@@ -2656,3 +2656,51 @@ Measured 2026-09-07, demo fixture, 1403 notes:
 Every dot on a phone is still under 2 px: the disc is fit to the narrower axis, so the extra
 height buys margin rather than radius. The catchment is what makes a tap work; more radius
 needs a filter or a zoom.
+
+## A note cannot close the data script it is serialised into
+
+The standalone exporter inlines the whole vault as one `<script>window.VAULT_DATA=…;</script>`
+element, and `JSON.stringify` does not know it is inside HTML: it leaves `<` alone, so a
+frontmatter value carrying a literal `</script>` closed that element early. Everything after
+it was parsed as markup, a following `<script>` ran as script, `window.VAULT_DATA` never
+existed, and the page failed on its first read of `nodes`. Any exported string can carry it —
+`type`, a tag, the vault's own folder name on a filesystem that allows `<` — and a note only
+has to *contain* the substring, not mean anything by it (github#96). The plugin passes its
+data as an object and was never exposed.
+
+Measured on a three-note synthetic vault whose `Marked` note declares
+`type: "</script><script>window.__vg_escaped_type=1</script>"` and a tag of the same shape,
+opened from disk in Chrome:
+
+| | before | after |
+|---|---|---|
+| data script closes after | 149 chars of 948 | the whole 948 |
+| marker scripts that ran | both | none |
+| `window.VAULT_DATA` | undefined | 3 notes, both markers intact as text |
+| page exceptions | `SyntaxError`, then `TypeError` reading `nodes` | none |
+| `__vg.graph.order` | no mount | 3 |
+
+Fixed with `jsonForScript()` in `src/build-graph.mjs`: `JSON.stringify` followed by
+`.replace(/</g, "\u003c")`. The result is still JSON — `JSON.parse` decodes the escape —
+and still the JavaScript the browser evaluates, so nothing reading `window.VAULT_DATA`
+changed, including `check-build-order-determinism.mjs`, which regex-extracts the element and
+parses it. Escaping `<` alone is enough: it is the only character that can open a tag or an
+`<!--` in script data, and `>`, `&`, U+2028 and U+2029 are all inert there. Every
+`window.VAULT_*` assignment goes through the helper, the logo mask included, so the rule is
+"no inline data script carries a raw `<`", not "the data script escapes `</script>`".
+
+```bash
+node scripts/check-data-escape.mjs
+node scripts/smoke.mjs --only "closing-script"
+```
+
+Two guards, one shape each:
+
+- **Static, in the pre-push hook, no skip flag**: builds the payload vault, asserts no inline
+  `window.VAULT_*` script contains a raw `<`, parses the data back and asserts both marker
+  strings decode verbatim; and reads the exporter's own source to assert `VAULT_DATA` still
+  goes through `jsonForScript(`. On the unfixed exporter it prints three FAIL lines.
+- **In the suite**: builds the same vault, opens it in a second tab of the run's own Chrome
+  (`Target.createTarget` from the page session — the first check to do so), and asserts no
+  marker ran, the data decoded, and the graph mounted all three notes. This is the
+  acceptance criterion as written: an actual generated file, opened.

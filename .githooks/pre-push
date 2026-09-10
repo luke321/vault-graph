@@ -255,6 +255,27 @@ EOF
   exit 1
 fi
 
+# THE DATA SCRIPT NEXT, same bar -- one subprocess build of three notes, no Chrome, under a
+# second. The exporter inlines the vault as <script>window.VAULT_DATA=...</script>, and a
+# frontmatter value carrying a literal </script> used to close that element early: whatever
+# followed ran as script, and the page never mounted (github#96). jsonForScript() escapes
+# every '<' in the serialised JSON; this is what keeps it that way.
+echo "pre-push: checking a note cannot close the exported data script..."
+if ! node "$root/scripts/check-data-escape.mjs" </dev/null; then
+  cat >&2 <<'EOF'
+
+pre-push: data escape check failed -- push blocked.
+
+A '<' reached an inline data script in the exported page, or the marker payloads did not
+decode back to their text -- read the FAIL lines above. Every window.VAULT_* assignment in
+src/build-graph.mjs must go through jsonForScript(), which is what makes it impossible for
+a note to terminate the element it is serialised into.
+
+There is no skip flag for this check.
+EOF
+  exit 1
+fi
+
 # THE GENERATED NAVIGATION FILES NEXT, same bar -- a read of the tree, well under a second.
 # .ai-context/code-map.md and code-index.md are written from the source by
 # scripts/code-map.mjs (github#61) and are only worth having while they agree with it; a
