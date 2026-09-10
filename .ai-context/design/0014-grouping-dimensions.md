@@ -94,8 +94,8 @@ title reads `74 filed here, 82 carry this tag` when the two differ, and says not
 when they do not. The count on the row is always the dots on the disc, so the count bars, the
 `only` button and the wedge all agree.
 
-With **Notes in every tag** on there is no gap for any tag, and the disclosure disappears by
-itself.
+With **One dot per tag** on (the toggle read *Notes in every tag* until 2026-09-10; the new
+name says what it does) there is no gap for any tag, and the disclosure disappears by itself.
 
 ## Where the switch lives
 
@@ -110,7 +110,13 @@ and a chevron that is always there so anyone looking for a control finds one.
 The dimension is remembered by the host, not the page (decisions/0009), so there is no settings
 row for it — the dropdown is the control.
 
-## Notes in every tag (D-9)
+## One dot per tag (D-9) — removed 2026-09-10, github#91
+
+**Pulled out the same day the inner-ring limit below was measured**, to come back as its own
+feature: the toggle, the persistent copies and their checks are gone (github#91 carries the
+measurement and what a return needs); the copy machinery — `dupOf`, `SAT_SEP`, `noteOf`, every
+walk that skips a copy — stays, because the dimension switch's stand-ins are copies for the
+length of a switch. What follows is the record of the feature as it was built.
 
 Multi-membership was out of scope in the issue and was then asked for during planning, as an
 **opt-in toggle, off by default**, in a row under the heading and only while the disc is cut by
@@ -133,6 +139,33 @@ notes' web and the link count keeps meaning what it says.
 Rejected: keeping the satellites permanently and hiding them behind a predicate. The
 band-and-geometry basis plan (`buildWedgePlan(false)`) walks every node, so a not-present
 satellite would still shape the rings — membership has to be real.
+
+**Open, and measured (2026-09-10): the inner ring cannot take the copies.** On the
+maintainer's vault the toggle turns 528 notes into 1,226 dots and the inner ring holds 492 of
+them, at a median **0.38 px** against 1.91 px without copies — unreadable. Keeping the band
+split across the toggle is worse, 768 inner dots at 0.02 px, because the multi-tagged groups
+are the ones the balancer already put inside; growing the rings by the square root of the dot
+ratio changes nothing, because the view fits the disc to the screen and the inner band's share
+of that screen is what it is. The toggle re-splits the bands inside the page's rings, which is
+the least bad of the three, and the limit stands: copies need either a band rule that weighs
+them or a disc that gives the inner ring more of itself. The toggle reads **One dot per tag**.
+
+## The switch in the storyboard
+
+The `tags` act is the first act after the intro: a `dim` beat sets the real `#vg-dim` select
+and dispatches its change — a native select opens an OS popup under a real click, so the
+driver drives it the way the page's own handler is driven — then settles, switches back and
+settles. Driven on the demo vault it runs six beats in 8.3 s. The demo vault carries tags
+worth showing since 2026-09-10: `make-test-vault.mjs` gives one note in five a nested tag from
+two families, listed first, so the regenerated demo has 693 tagged notes, 353 with more than
+one tag, 207 with a nested one and 12 top-level tags.
+
+## One row template
+
+The legend builds every group row through `lgrHTML`, whichever dimension the group belongs to
+and whether the row is resting, arriving or leaving. Nothing in the legend is folder-only; a
+third grouping would need a `fileGroup` answer and an entry in `DIMS`, and the nav bar would
+follow.
 
 ## The tag fixture
 

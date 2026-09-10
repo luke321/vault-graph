@@ -44,7 +44,6 @@ const ICON_ID = "vault-graph-disc";
  * @property {boolean} countBars                        github#78, design/0006
  * @property {boolean} fitCap                           github#41, design/0011
  * @property {"folder" | "tag"} dim                     github#86 -- grouping dimension
- * @property {boolean} multiTag                         github#86 -- a dot per tag a note carries
  * @property {boolean} [sheetOpen]                      github#82 -- absent until folded once
  * @property {boolean} [bandOpen]                       github#82
  */
@@ -625,13 +624,6 @@ class VaultGraphView extends ItemView {
         this.plugin.settings.dim = v === "tag" ? "tag" : "folder";
         await this.plugin.saveSettings();
       },
-      // github#86 -- D-9: the host only remembers where it was left
-      multiTag: this.plugin.settings.multiTag,
-      /** @param {boolean} v */
-      onMultiTag: async (v) => {
-        this.plugin.settings.multiTag = !!v;
-        await this.plugin.saveSettings();
-      },
       // github#82, decisions/0009 -- no tab row; absent = width decides
       sheetOpen: this.plugin.settings.sheetOpen,
       /** @param {boolean} v */
@@ -711,7 +703,6 @@ const DEFAULTS = {
   fitCap: true,
   // github#86 -- folder is the default
   dim: "folder",
-  multiTag: false,
 };
 
 /** @type {{ key: "ghosts" | "templates" | "flatMonths" | "words", name: string, desc: string }[]} */

@@ -108,7 +108,6 @@
  * @property {boolean} [unlinkedTintByFolder]
  * @property {boolean} [countBars]              github#78, design/0006
  * @property {"folder" | "tag"} [dim]         github#86, design/0014 -- absent means "folder"
- * @property {boolean} [multiTag]             github#86 -- a dot per tag; absent means off
  * @property {boolean} [fitCap]               github#41, design/0011
  * @property {boolean} [sheetOpen]            github#82 -- absent means "decide from the width"
  * @property {boolean} [bandOpen]             github#82
@@ -123,7 +122,6 @@
  * @property {(v: boolean) => void | Promise<void>} [onUnlinkedByFolder]
  * @property {(v: boolean) => void | Promise<void>} [onUnlinkedTintByFolder]
  * @property {(v: "folder" | "tag") => void | Promise<void>} [onDim]   github#86
- * @property {(v: boolean) => void | Promise<void>} [onMultiTag]       github#86
  * @property {(v: boolean) => void | Promise<void>} [onSheetOpen]
  * @property {(v: boolean) => void | Promise<void>} [onBandOpen]
  * @property {(v: boolean) => void | Promise<void>} [onCountBars]
@@ -175,10 +173,7 @@
  * @property {(v: boolean) => void} setCountBars
  * @property {(v: string) => string} setDim                        github#86
  * @property {(id: string) => { g: string, sub: string, dirs: string[] }} filingOf
- * @property {(v: boolean) => boolean} setMultiTag                 github#86
- * @property {boolean} multiTag
  * @property {(id: string) => string} noteOf
- * @property {(id: string) => string[]} copiesOf
  * @property {(v: boolean) => void} setFitCap
  * @property {() => void} applyHiddenDefaults
  * @property {() => void} heatBuild
@@ -768,12 +763,8 @@ function mountVaultGraph(root, data, deps) {
   // github#86, design/0014 -- D-9: one dot per tag; a copy is not a note
   // github#86 -- a NUL cannot occur in a vault path
   var SAT_SEP = "\u0000";
-  var multiTag = deps.multiTag === true;
-  var onMultiTag = typeof deps.onMultiTag === "function" ? deps.onMultiTag : null;
-  /** @type {string[]} */
-  var satellites = [];
-  /** @type {Record<string, string[]>} */
-  var satsOf = dict();
+  // github#91 -- the persistent copies, one dot per tag a note carries, came out on 2026-09-10;
+  // github#91 -- the switch's stand-ins keep the copy machinery (dupOf, SAT_SEP, noteOf)
 
   /**
    * github#86 -- the early return keeps isPinned's per-node cost a branch
@@ -781,74 +772,10 @@ function mountVaultGraph(root, data, deps) {
    * @returns {string} the note a dot stands for; itself, for a real note
    */
   function noteOf(id) {
-    if (!satellites.length) return id;
+    // github#91 -- only a stand-in is a copy now, and only while a switch runs
+    if (!standIns.length) return id;
     var d = graph.hasNode(id) ? graph.getNodeAttribute(id, "dupOf") : "";
     return d ? String(d) : id;
-  }
-
-  /** @param {string} id @returns {string[]} every dot standing for this note, primary first */
-  function copiesOf(id) {
-    var n = noteOf(id);
-    var s = satsOf[n];
-    return s ? [n].concat(s) : [n];
-  }
-
-  function addSatellites() {
-    if (satellites.length) return;
-    buildTagFiling();
-    /** @type {[string, string[]][]} */
-    var multi = [];
-    graph.forEachNode(function (id, a) {
-      if (a.dupOf) return;
-      var tags = a.tags || [];
-      if (tags.length > 1) multi.push([id, tags]);
-    });
-    multi.forEach(function (pair) {
-      var id = pair[0], tags = pair[1], a = graph.getNodeAttributes(id);
-      // github#86 -- one dot per DISTINCT tag; the first is the primary's
-      /** @type {Record<string, boolean>} */
-      var seen = dict();
-      seen[String(tags[0])] = true;
-      for (var i = 1; i < tags.length; i++) {
-        var t = String(tags[i]);
-        if (seen[t]) continue;
-        seen[t] = true;
-        var sid = id + SAT_SEP + i;
-        graph.addNode(sid, {
-          label: a.label, x: a.x, y: a.y, size: a.size,
-          folder: a.folder, sub: a.sub, dirs: a.dirs, ntype: a.ntype,
-          tags: [t], path: a.path, deg: a.deg,
-          created: a.created, touched: a.touched, words: a.words, ghost: a.ghost,
-          dupOf: id
-        });
-        tagFiling[sid] = fileTags([t]);
-        // github#86 -- the same array: a copy is as linked as its note
-        if (adj[id]) adj[sid] = adj[id];
-        hubRank[sid] = hubRank[id];
-        if (tlRank[id] !== undefined) tlRank[sid] = tlRank[id];
-        if (tlMs[id] !== undefined) tlMs[sid] = tlMs[id];
-        alpha[sid] = alpha[id] !== undefined ? alpha[id] : 1;
-        satellites.push(sid);
-        (satsOf[id] || (satsOf[id] = [])).push(sid);
-      }
-    });
-  }
-
-  function dropSatellites() {
-    if (!satellites.length) return;
-    satellites.forEach(function (sid) {
-      if (state.hovered === sid) state.hovered = null;
-      if (state.selected === sid) state.selected = null;
-      graph.dropNode(sid);
-      delete tagFiling[sid]; delete adj[sid]; delete hubRank[sid];
-      delete tlRank[sid]; delete tlMs[sid]; delete alpha[sid];
-    });
-    satellites = [];
-    satsOf = dict();
-    // github#86 -- anything keyed by node id must let go of them too
-    lazyAdded = []; lazyShown = null;
-    neighbourCache = null;
-    focusSetCache = { key: undefined, set: null };
   }
 
   // github#86, design/0014 -- one stand-in per note of the disc being left, dark, at its seat
@@ -953,7 +880,6 @@ function mountVaultGraph(root, data, deps) {
 
   // github#86 -- the filing exists from here; subOrder is its first reader
   if (state.dim === "tag") buildTagFiling();
-  if (multiTag && state.dim === "tag") addSatellites();
   buildSubOrder();
 
   var SLOT_COUNT = 12;
@@ -2840,11 +2766,6 @@ function mountVaultGraph(root, data, deps) {
       tlDateMs.push(ms);
     });
     tlMax = dated.length;
-    satellites.forEach(function (sid) {
-      var n = noteOf(sid);
-      if (tlRank[n] !== undefined) tlRank[sid] = tlRank[n];
-      if (tlMs[n] !== undefined) tlMs[sid] = tlMs[n];
-    });
     buildDateSpan(dated);
   }
 
@@ -4600,8 +4521,7 @@ function mountVaultGraph(root, data, deps) {
   /** @type {[string, string][]} */
   var lazyAdded = [];
   function syncLazyEdges() {
-    // github#86 -- D-10: a copy's links are drawn on hover only
-    if (!lazyEdges && !satellites.length) return;
+    if (!lazyEdges) return;
     var want = state.hovered || state.selected || null;
     if (want === lazyShown) return;
     lazyAdded.forEach(function (pr) {
@@ -4752,8 +4672,6 @@ function mountVaultGraph(root, data, deps) {
       set = dict();
       set[f] = true;
       neighboursOf(f).forEach(function (n) { set[n] = true; });
-      // github#86 -- a note's other copies ARE that note; they light with it
-      if (satellites.length) copiesOf(f).forEach(function (c) { set[c] = true; });
     }
     focusSetCache.key = f;
     focusSetCache.set = set;
@@ -5512,7 +5430,7 @@ function mountVaultGraph(root, data, deps) {
       // github#86 -- D-1: say which tag put the note where it is
       '<div>' + (a.tags || []).slice(0, 8).map(function (t, ti) {
         // github#86 -- only while the filing excludes the other tags
-        var files = state.dim === "tag" && !multiTag && ti === 0;
+        var files = state.dim === "tag" && ti === 0;
         return '<span class="chip"' +
                (files ? ' style="border-style:solid" title="Filed under this tag"' : '') +
                '>#' + esc(t) + '</span>';
@@ -5649,6 +5567,27 @@ function mountVaultGraph(root, data, deps) {
   /** @type {Point | null} */
   var ptr = null;
 
+  /**
+   * github#86, design/0014 -- ONE row template for every group row the legend draws, whichever
+   * dimension the group belongs to and whether it is resting, arriving or leaving. A leaving
+   * row is drawn inert: no data-g, no handlers reach it, so nothing acts on a name from the
+   * other dimension.
+   * @param {{ g: string, cls: string, old: boolean, tw: string, eye: string, lgAttrs: string, hl: boolean,
+   *           vis: boolean, title: string, swClass: string, swTitle: string, swFill: string, only: string,
+   *           ctTitle: string, ct: string }} o
+   */
+  function lgrHTML(o) {
+    return '<div class="' + o.cls + '" data-row="' + esc(o.g) + '"' + (o.old ? ' data-old="1"' : '') + '>' +
+      o.tw + o.eye +
+      '<button' + o.lgAttrs + (o.old ? '' : ' data-g="' + esc(o.g) + '"') + ' data-hl="' + (o.hl ? "on" : "off") +
+        '" aria-pressed="' + o.vis + '" title="' + esc(o.title) + '">' +
+      '<span class="' + o.swClass + '" title="' + o.swTitle + '" style="background:' + o.swFill + '"></span>' +
+      '<span class="nm" title="' + esc(o.g) + '">' + esc(o.g) + '</span>' +
+      o.only +
+      '<span class="ct"' + o.ctTitle + '>' + o.ct + '</span></button>' +
+      '</div>';
+  }
+
   function buildLegend() {
     hoverHighlight(null, null);
 
@@ -5709,20 +5648,17 @@ function mountVaultGraph(root, data, deps) {
     var liveNow = legendSwitch ? liveByGroup() : null;
     if (legendSwitch) {
       var ls = legendSwitch;
+      // github#86 -- the same row as any other, drawn inert with what the row had
       oldRows = ls.order.map(function (g) {
         var c = ls.counts[g] || 0;
         if (!c || ls.hidden[g]) return "";
         var lv = liveNow ? (liveNow.old[g] || 0) : c;
-        var share = ls.basis > 0 ? lv / ls.basis : 0;
-        return '<div class="lgr' + (lv <= 0.004 ? " lgr-gone" : "") + '" data-row="' + esc(g) + '" data-old="1">' +
-          '<button class="tw none" disabled aria-hidden="true"></button>' +
-          '<button class="eye none" disabled aria-hidden="true"></button>' +
-          '<button class="lg bar" style="--vg-share:' + (share * 100).toFixed(3) + '%;--vg-bar:' + ls.colors[g] +
-            '" data-hl="off" tabindex="-1" aria-hidden="true">' +
-          '<span class="sw" style="background:' + ls.colors[g] + '"></span>' +
-          '<span class="nm">' + esc(g) + '</span>' +
-          '<span class="only none" aria-hidden="true"></span>' +
-          '<span class="ct">' + c + '</span></button></div>';
+        return lgrHTML({ g: g, cls: "lgr" + (lv <= 0.004 ? " lgr-gone" : ""), old: true,
+                         tw: twBtn(null, false), eye: '<button class="eye none" disabled aria-hidden="true"></button>',
+                         lgAttrs: ' class="lg bar" style="--vg-share:' + ((ls.basis > 0 ? lv / ls.basis : 0) * 100).toFixed(3) +
+                                  '%;--vg-bar:' + ls.colors[g] + '" tabindex="-1" aria-hidden="true"',
+                         hl: false, vis: true, title: g, swClass: "sw", swTitle: "", swFill: ls.colors[g],
+                         only: '<span class="only none" aria-hidden="true"></span>', ctTitle: "", ct: String(c) });
       }).join("");
     }
     setHTML($("legend"), oldRows + names.map(function (g) {
@@ -5751,21 +5687,17 @@ function mountVaultGraph(root, data, deps) {
 
       // github#86 -- a row of the disc arriving is collapsed until its first note is lit
       if (liveNow && !(liveNow.now[g] > 0.004)) lgrClass += " lgr-gone";
-      var row = '<div class="' + lgrClass + '" data-row="' + esc(g) + '">' +
-        twBtn(hasSubs ? 'data-tw="' + esc(g) + '"' : null, open) +
-        (live ? eyeBtn('data-eye="' + esc(g) + '"', vis, g)
-              : '<button class="eye none" disabled aria-hidden="true"></button>') +
-        '<button' + lgAttrs + ' data-g="' + esc(g) + '" data-hl="' + (hl ? "on" : "off") +
-          '" aria-pressed="' + vis + '" title="' + esc(rowTitle(g)) + '">' +
-        '<span class="sw' + (bandLock && bandLock[g] ? ' sw-in' : '') +
-          '" title="' + swatchTitle(g, bandLock) +
-          '" style="background:' + swatchFill(g) + '"></span>' +
-        '<span class="nm" title="' + esc(g) + '">' + esc(g) + '</span>' +
-        (live ? '<span class="only" data-only="1" title="Show only ' + esc(g) + '">only</span>'
-              : '<span class="only none" aria-hidden="true"></span>') +
+      var row = lgrHTML({ g: g, cls: lgrClass, old: false,
+        tw: twBtn(hasSubs ? 'data-tw="' + esc(g) + '"' : null, open),
+        eye: live ? eyeBtn('data-eye="' + esc(g) + '"', vis, g)
+                  : '<button class="eye none" disabled aria-hidden="true"></button>',
+        lgAttrs: lgAttrs, hl: hl, vis: vis, title: rowTitle(g),
+        swClass: "sw" + (bandLock && bandLock[g] ? " sw-in" : ""), swTitle: swatchTitle(g, bandLock),
+        swFill: swatchFill(g),
+        only: live ? '<span class="only" data-only="1" title="Show only ' + esc(g) + '">only</span>'
+                   : '<span class="only none" aria-hidden="true"></span>',
         // github#50, github#78
-        '<span class="ct"' + ctTitle + '>' + countText(g) + '</span></button>' +
-        '</div>';
+        ctTitle: ctTitle, ct: countText(g) });
 
       if (open && vis) {
         var subs = subOrder[g];
@@ -6308,10 +6240,6 @@ function mountVaultGraph(root, data, deps) {
     var sel = /** @type {HTMLSelectElement | null} */ ($("dim"));
     if (sel && sel.value !== state.dim) sel.value = state.dim;
     // github#86 -- D-9: the toggle is only there while cut by tag
-    var row = $("multirow");
-    if (row) row.hidden = state.dim !== "tag";
-    var btn = $("multitag");
-    if (btn) btn.setAttribute("aria-pressed", multiTag ? "true" : "false");
   }
 
   function buildTools() {
@@ -6320,8 +6248,6 @@ function mountVaultGraph(root, data, deps) {
     // github#86
     var dimSel = /** @type {HTMLSelectElement | null} */ ($("dim"));
     if (dimSel) dimSel.onchange = function () { setDim(dimSel.value, true); };
-    var multiBtn = $("multitag");
-    if (multiBtn) multiBtn.onclick = function () { setMultiTag(!multiTag, true); };
     syncDimUI();
 
     $("allon").onclick = function () {
@@ -6939,8 +6865,6 @@ function mountVaultGraph(root, data, deps) {
     restoreDimNav(next);
     state.hoverGroup = null;
     state.hoverSub = dict();
-    // github#86 -- D-9: the copies belong to the tag dimension
-    if (next === "tag" && multiTag) addSatellites(); else dropSatellites();
     // github#86 -- the sub-wedges answer to the dimension too
     buildSubOrder();
     syncDimUI();
@@ -6967,56 +6891,6 @@ function mountVaultGraph(root, data, deps) {
     // github#76, github#86 -- every wedge changes, so cross the two discs in one sweep
     if (n) cascade(dropStandIns, { colToggle: true, hand: true, from: from });
     return state.dim;
-  }
-
-  // github#86, design/0014 -- D-9
-  /** @param {boolean} on @param {boolean} [persist] @param {boolean} [instant] */
-  function setMultiTag(on, persist, instant) {
-    var next = !!on;
-    if (next === multiTag) return multiTag;
-    multiTag = next;
-    // github#86 -- only the tag dimension has copies to make
-    if (state.dim === "tag") {
-      // github#86 -- the copies are the movers in both directions
-      /** @type {Record<string, string> | null} */
-      var movesFrom = null;
-      var n = 0;
-      var walk = !!renderer && !instant;
-      if (walk && !next) {
-        graph.forEachNode(function (id, a) {
-          if (!a.dupOf || !visible(id) || (alpha[id] || 0) <= 0.004) return;
-          if (!movesFrom) movesFrom = dict();
-          movesFrom[id] = groupOf(id);
-          n++;
-        });
-      }
-      if (next) addSatellites(); else dropSatellites();
-      if (walk && next) {
-        // github#86 -- a new copy walks out of the wedge its note is standing in
-        satellites.forEach(function (sid) {
-          var from = noteOf(sid);
-          if (!visible(sid) || (alpha[from] || 0) <= 0.004) return;
-          if (!movesFrom) movesFrom = dict();
-          movesFrom[sid] = groupOf(from);
-          n++;
-        });
-      }
-      buildSubOrder();
-      // github#86 -- the copies re-pack inside the page's rings, as a switch does
-      var rings = geomLock;
-      hardRelayout(false, false);
-      keepRings(rings);
-      // github#86 -- same fixed point as a dimension switch
-      applyLayout(false);
-      applyLayout(false);
-      attempt(placeLogo); attempt(heatBuild); attempt(buildLegend); attempt(buildStats);
-      if (refreshSettingsPanel) refreshSettingsPanel();
-      // github#76, github#86
-      if (n) cascade(null, { colToggle: true, hand: true, movesFrom: movesFrom });
-    }
-    syncDimUI();
-    if (persist && onMultiTag) onMultiTag(multiTag);
-    return multiTag;
   }
 
   // github#3
@@ -7214,10 +7088,6 @@ function mountVaultGraph(root, data, deps) {
     $("vname").textContent = DATA.vault + " graph";
     setHTML($("stats"), "<b>" + s.nodes + "</b> notes &middot; <b>" + s.edges + "</b> links &middot; <b>" +
       s.orphans + "</b> unlinked<br>" +
-      // github#86 -- D-9: the disc has more dots, the vault has its notes
-      (satellites.length
-        ? "<b>" + (s.nodes + satellites.length) + "</b> dots, one per tag a note carries<br>"
-        : "") +
       "<b>" + s.unresolved + "</b> link(s) point at notes that do not exist" +
       (s.ghostsIncluded ? " (shown as ghosts)" : " (hidden)") + "<br>" +
       (s.templatesExcluded ? "Templates excluded. " : "") +
@@ -7393,7 +7263,7 @@ function mountVaultGraph(root, data, deps) {
     // github#86 -- graph.order counts DOTS, and this sentence says notes
     $("heatnote").textContent =
       "last " + cols + " weeks · " + inWin + " of " +
-      (graph.order - satellites.length) + " notes" +
+      (graph.order - standIns.length) + " notes" +
       (before ? " · " + before + " earlier" : "") +
       (after ? " · " + after + " later" : "") +
       (undated ? " · " + undated + " undated" : "");
@@ -8630,6 +8500,13 @@ function mountVaultGraph(root, data, deps) {
       { settle: true, act: "intro", why: "start from a disc at rest" },
       { click: true, target: ["id", "refresh"], act: "intro", why: "replay the intro on camera" },
       { settle: true, act: "intro", why: "the vault grows from its first note to now, and the range end sweeps with it" },
+      // github#86, design/0014 -- the second dimension: one hand erases the folder disc where it
+      // github#86 -- stands, the other lights the tag disc at its seats, links, heat strip and
+      // github#86 -- nav bar following the notes
+      { dim: "tag", act: "tags", why: "cut the disc by tag instead of by folder" },
+      { settle: true, act: "tags", why: "one hand takes the folders, the other brings the tags" },
+      { dim: "folder", act: "tags", why: "and back to folders" },
+      { settle: true, act: "tags", why: "the same swap the other way round" },
 
       { hover: true, target: ["note", "04"], act: "note", why: "hover a daily note" },
       { hover: true, target: ["note", "05"], act: "note", why: "hover a meeting note" },
@@ -8953,10 +8830,7 @@ function mountVaultGraph(root, data, deps) {
                     setUnlinkedByFolder: function (v) { return setUnlinkedByFolder(v !== false, false, true); },
                     // github#86, design/0014
                     setDim: /** @param {string} v */ function (v) { return setDim(String(v), false, true); },
-                    setMultiTag: /** @param {boolean} v */ function (v) { return setMultiTag(v === true, false, true); },
-                    get multiTag() { return multiTag; },
                     noteOf: /** @param {string} id */ function (id) { return noteOf(String(id)); },
-                    copiesOf: /** @param {string} id */ function (id) { return copiesOf(String(id)); },
                     filingOf: /** @param {string} id */ function (id) {
                       return { g: fileGroup(String(id)), sub: fileSub(String(id)),
                                dirs: fileDirs(String(id)).slice() };

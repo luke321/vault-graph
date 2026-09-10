@@ -52,6 +52,21 @@ from the disc or the search box starts a new walk, and closing the card ends it.
 
 <img src="../assets/features/hoptrail.webp" width="100%" alt="A card opened on a well-linked note, four of its linked notes clicked in turn so the trail grows a back arrow and crumbs, folded to the first and the last two, then two steps back with the arrow and a jump straight to the first crumb, which truncates the walk there">
 
+## Grouping by tag
+
+The group list's heading is a dropdown: **Folders** or **Tags**. Cut by tag, every note
+sits in one wedge — **the first tag it lists** files it, in the order its frontmatter gives,
+so a note tagged `[meeting, project]` is in the *meeting* wedge, and a nested tag such as
+`area/health` nests as a sub-wedge of *area* the way a subfolder does. A note with no tag goes
+to *(untagged)*, shown in grey. Where a tag's wedge holds fewer notes than carry the tag, its
+row says so: *74 filed here, 82 carry this tag*.
+
+Switching draws both discs at once: one hand erases the folder disc where it stands, the
+other lights the tag disc at its seats, with the links, the heat strip and the group list
+following the notes. The group list's own rows are the switch's clock — folder rows drop out
+as their notes fade, tag rows drop in with their first lit note — and the disc keeps its hub
+and its rings across the switch.
+
 ## Filtering by folder
 
 Click a folder in the legend to hide it; the remaining wedges grow back into the angle it

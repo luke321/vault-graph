@@ -377,7 +377,8 @@ whatever dimension is on screen, and **an instant relayout runs two layout passe
 one pass lays out with the previous pass's room and is not the fixed point (github#21). The
 round-trip check holds the landing against two passes inside the kept rings and home against
 boot, exact on all four fixtures; the tag fixture's golden, taken after a hard relayout, holds
-without a re-take.
+without a re-take. The copies toggle keeps the rings too and re-splits the bands inside them;
+the inner ring's share cannot take the copies, which is measured and open in design/0014.
 
 ## Only depth-1 subfolders with their own tint slot are pushed
 
