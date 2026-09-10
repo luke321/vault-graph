@@ -49,13 +49,13 @@ function fail(msg) {
 }
 
 function commitsIn(range) {
-  const m = /^([0-9a-f]{7,40})\.\.([0-9a-f]{7,40})$/i.exec(range);
+  const m = /^([^.\s]+)\.\.([^.\s]+)$/.exec(range);
   if (!m) usage(2);
   const [, before, after] = m;
   if (/^0+$/.test(before)) fail(`before is the zero SHA (${before}): a new branch has no range to scan, nothing closed`);
   for (const sha of [before, after]) {
     try { git("cat-file", "-e", `${sha}^{commit}`); }
-    catch { fail(`${sha} is not a commit this clone can see -- fetch the full history, nothing closed`); }
+    catch { fail(`${sha} is not a commit this clone can see: a shallow checkout, or the branch was rewritten under this push -- nothing closed`); }
   }
   try { git("merge-base", "--is-ancestor", before, after); }
   catch { fail(`${before} is not an ancestor of ${after}: the branch was rewritten under this push, nothing closed`); }
@@ -69,7 +69,7 @@ function commitsIn(range) {
 function issuesNamed(commits) {
   const found = new Map();
   for (const c of commits) {
-    for (const m of c.body.matchAll(KEYWORD)) {
+    for (const m of c.body.replace(/`[^`\n]*`/g, " ").matchAll(KEYWORD)) {
       const repo = (m[1] || m[2] || REPO).toLowerCase();
       if (repo !== REPO) continue;
       const n = Number(m[3]);
@@ -91,8 +91,8 @@ function lookup(n) {
 
 function close(n, c) {
   const body = `Closed by \`${c.short}\` on \`${BRANCH}\` — "${c.subject}". Not yet released: it ships with the next release, when \`${BRANCH}\` reaches \`main\`.`;
-  gh(["api", `repos/${REPO}/issues/${n}/comments`, "--input", "-"], JSON.stringify({ body }));
   gh(["api", "-X", "PATCH", `repos/${REPO}/issues/${n}`, "--input", "-"], JSON.stringify({ state: "closed", state_reason: "completed" }));
+  gh(["api", `repos/${REPO}/issues/${n}/comments`, "--input", "-"], JSON.stringify({ body }));
 }
 
 function main() {
