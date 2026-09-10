@@ -587,13 +587,20 @@ check("tags: a dot in the disc being left keeps its colour until it has faded", 
       b[id] = { c: __vg.nodeColor(id), g: __vg.groupOf(id), x: a.x, y: a.y };
     });
     window.__smokeLeft = b;
+    // github#86 -- and the legend's rows as they stand: swatch class, swatch fill, count text
+    var rows = {};
+    Array.prototype.forEach.call(document.querySelectorAll("#vg-legend .lgr[data-row]"), function (r) {
+      var sw = r.querySelector(".sw"), ct = r.querySelector(".ct");
+      rows[r.getAttribute("data-row")] = { sw: sw ? sw.className : "", fill: sw ? sw.style.background : "", ct: ct ? ct.textContent : "" };
+    });
+    window.__smokeRows = rows;
     var side = document.querySelector('#vg-dim button[data-dim="tag"]');
     if (!side) return -1;
     side.click();
     return Object.keys(b).length;
   })()`);
   if (n < 0) return { ok: false, detail: "no #vg-dim to switch with" };
-  let samples = 0, worstFrame = 0, dotFrames = 0, standingFrames = 0, example = "";
+  let samples = 0, worstFrame = 0, dotFrames = 0, standingFrames = 0, example = "", rowFrames = 0, rowExample = "";
   const t0 = Date.now();
   for (;;) {
     const s = await p.j(`(function(){
@@ -607,23 +614,35 @@ check("tags: a dot in the disc being left keeps its colour until it has faded", 
         var c = __vg.nodeColor(id);
         if (c !== b[id].c) { wrong++; if (!ex) ex = "#" + id + " " + b[id].c + " -> " + c; }
       });
-      return { standing: standing, wrong: wrong, ex: ex, busy: __vg.demo.busy() };
+      // a leaving row is the row it was: same swatch class and fill, same count
+      var rowsWrong = 0, rowEx = "";
+      Array.prototype.forEach.call(document.querySelectorAll("#vg-legend .lgr[data-old]"), function (r) {
+        var was = window.__smokeRows[r.getAttribute("data-row")]; if (!was) return;
+        var sw = r.querySelector(".sw"), ct = r.querySelector(".ct");
+        var now = { sw: sw ? sw.className : "", fill: sw ? sw.style.background : "", ct: ct ? ct.textContent : "" };
+        if (now.sw !== was.sw || now.fill !== was.fill || now.ct !== was.ct) { rowsWrong++; if (!rowEx) rowEx = r.getAttribute("data-row") + ": " + JSON.stringify(was) + " -> " + JSON.stringify(now); }
+      });
+      return { standing: standing, wrong: wrong, ex: ex, rowsWrong: rowsWrong, rowEx: rowEx, busy: __vg.demo.busy() };
     })()`);
     samples++;
     standingFrames += s.standing;
     dotFrames += s.wrong;
+    rowFrames += s.rowsWrong;
+    if (s.rowsWrong && !rowExample) rowExample = s.rowEx;
     if (s.wrong > worstFrame) { worstFrame = s.wrong; example = s.ex; }
     if (!s.busy && samples > 3) break;
     if (Date.now() - t0 > 20000) break;
   }
-  await p.j(`(function(){ delete window.__smokeLeft; __vg.setDim("folder"); return true; })()`);
+  await p.j(`(function(){ delete window.__smokeLeft; delete window.__smokeRows; __vg.setDim("folder"); return true; })()`);
   await settle(p);
   await camSettle(p);
   return {
-    ok: dotFrames === 0 && samples > 3,
+    ok: dotFrames === 0 && rowFrames === 0 && samples > 3,
     detail: `${n} dots standing in the folder disc, ${samples} samples over the switch: ` +
             `${dotFrames} of ${standingFrames} standing dot-frames in a colour other than the one they had` +
-            (worstFrame ? ` (worst frame ${worstFrame}, e.g. ${example})` : ""),
+            (worstFrame ? ` (worst frame ${worstFrame}, e.g. ${example})` : "") +
+            `; ${rowFrames} leaving-row-frames with a swatch or count other than the row's` +
+            (rowExample ? ` (e.g. ${rowExample})` : ""),
   };
 });
 

@@ -746,7 +746,7 @@ function mountVaultGraph(root, data, deps) {
   var oldWorld = false;
   // github#86, design/0014 -- the nav bar during a switch: the rows of the disc being left,
   // github#86 -- with their counts and colours as they were, dropping out as their notes fade
-  /** @typedef {{ dim: string, order: string[], counts: Record<string, number>, colors: Record<string, string>, hidden: Record<string, boolean>, basis: number }} LegendSwitch */
+  /** @typedef {{ dim: string, order: string[], counts: Record<string, number>, colors: Record<string, string>, fill: Record<string, string>, swTitle: Record<string, string>, bandLock: Record<string, boolean> | null, subs: Record<string, boolean>, open: Record<string, boolean>, hidden: Record<string, boolean>, basis: number, basisGroup: string }} LegendSwitch */
   /** @type {LegendSwitch | null} */
   var legendSwitch = null;
 
@@ -5644,64 +5644,86 @@ function mountVaultGraph(root, data, deps) {
     // github#86, design/0014 -- while a switch runs, the rows of the disc being left come
     // github#86 -- first, inert, with the counts and colours they had; they drop out as their
     // github#86 -- notes fade, and a row of the disc arriving drops in with its first note
-    var oldRows = "";
     var liveNow = legendSwitch ? liveByGroup() : null;
-    if (legendSwitch) {
+    /**
+     * github#86, design/0014 -- everything a group row reads, from ONE of two worlds: the
+     * dimension on screen, or the dimension being left as it stood when the switch began. A
+     * row of the left disc is the same row it was, drawn inert, with only its gauge following
+     * its notes; nothing else about it may change.
+     * @typedef {{ inert: boolean, counts: Record<string, number>, hidden: (g: string) => boolean,
+     *             color: (g: string) => string, fill: (g: string) => string, swTitle: (g: string) => string,
+     *             bandLock: Record<string, boolean> | null, basisMax: number, basisGroup: string,
+     *             share: (g: string) => number, live: (g: string) => number | null,
+     *             subs: (g: string) => boolean, open: (g: string) => boolean }} RowWorld
+     */
+    /** @type {RowWorld} */
+    var here = {
+      inert: false, counts: counts, hidden: isHidden, color: colorOf, fill: swatchFill,
+      swTitle: function (g) { return swatchTitle(g, bandLock); }, bandLock: bandLock,
+      basisMax: basis.max, basisGroup: basis.group,
+      share: function (g) { return barShare(g, basis); },
+      live: function (g) { return liveNow ? (liveNow.now[g] || 0) : null; },
+      subs: function (g) { return groupHasPinnedSub(g) || ((subOrder[g] || []).length > 1 && (counts[g] || 0) >= NEST_MIN); },
+      open: function (g) { return !state.collapsed[g]; }
+    };
+    /** @type {RowWorld | null} */
+    var left = null;
+    if (legendSwitch) (function () {
       var ls = legendSwitch;
-      // github#86 -- the same row as any other, drawn inert with what the row had
-      oldRows = ls.order.map(function (g) {
-        var c = ls.counts[g] || 0;
-        if (!c || ls.hidden[g]) return "";
-        var lv = liveNow ? (liveNow.old[g] || 0) : c;
-        return lgrHTML({ g: g, cls: "lgr" + (lv <= 0.004 ? " lgr-gone" : ""), old: true,
-                         tw: twBtn(null, false), eye: '<button class="eye none" disabled aria-hidden="true"></button>',
-                         lgAttrs: ' class="lg bar" style="--vg-share:' + ((ls.basis > 0 ? lv / ls.basis : 0) * 100).toFixed(3) +
-                                  '%;--vg-bar:' + ls.colors[g] + '" tabindex="-1" aria-hidden="true"',
-                         hl: false, vis: true, title: g, swClass: "sw", swTitle: "", swFill: ls.colors[g],
-                         only: '<span class="only none" aria-hidden="true"></span>', ctTitle: "", ct: String(c) });
-      }).join("");
-    }
-    // github#86 -- the collapse rules exist only while a switch runs
-    $("legend").classList.toggle("lg-switching", !!legendSwitch);
-    setHTML($("legend"), oldRows + names.map(function (g) {
-      var vis = !isHidden(g);
-      var hasSubs = groupHasPinnedSub(g) ||
-                    ((subOrder[g] || []).length > 1 && (counts[g] || 0) >= NEST_MIN);
-      var open = hasSubs && !state.collapsed[g];
-      var hl = !!state.highlight[g];
+      left = {
+        inert: true, counts: ls.counts, hidden: function (g) { return !!ls.hidden[g]; },
+        color: function (g) { return ls.colors[g] || ""; }, fill: function (g) { return ls.fill[g] || ls.colors[g] || ""; },
+        swTitle: function (g) { return ls.swTitle[g] || ""; }, bandLock: ls.bandLock,
+        basisMax: ls.basis, basisGroup: ls.basisGroup,
+        share: function (g) { var lv = liveNow ? (liveNow.old[g] || 0) : (ls.counts[g] || 0); return ls.basis > 0 ? lv / ls.basis : 0; },
+        live: function (g) { return liveNow ? (liveNow.old[g] || 0) : null; },
+        subs: function (g) { return !!ls.subs[g]; }, open: function (g) { return !!ls.open[g]; }
+      };
+    })();
+    /** @param {string} g @param {RowWorld} w */
+    var rowFor = function (g, w) {
+      var vis = !w.hidden(g);
+      var hasSubs = w.subs(g);
+      var open = hasSubs && w.open(g);
+      var hl = !w.inert && !!state.highlight[g];
 
       // github#50
-      var live = !!counts[g];
+      var live = !!w.counts[g];
       var lgrClass = "lgr" + (live ? "" : " lgr-empty");
 
       // github#78, design/0006
-      var share = barShare(g, basis);
-      rendered[g] = share;
-      var shown = cascadeRun && barShown && barShown[g] !== undefined ? barShown[g] : share;
+      var share = w.share(g);
+      if (!w.inert) rendered[g] = share;
+      var shown = !w.inert && cascadeRun && barShown && barShown[g] !== undefined ? barShown[g] : share;
       var lgAttrs = ' class="lg' + (shown ? " bar" + (share ? "" : " bar-out") : "") +
-        '" style="--vg-share:' + (shown * 100).toFixed(3) + '%;--vg-bar:' + colorOf(g) + '"';
+        '" style="--vg-share:' + (shown * 100).toFixed(3) + '%;--vg-bar:' + w.color(g) + '"' +
+        (w.inert ? ' tabindex="-1" aria-hidden="true"' : '');
       var ctTitle = share
-        ? ' title="' + counts[g] + (counts[g] === 1 ? " note" : " notes") +
-          (g === basis.group
+        ? ' title="' + w.counts[g] + (w.counts[g] === 1 ? " note" : " notes") +
+          (g === w.basisGroup
             ? " · the largest folder shown"
-            : " · " + shareText(share) + " of " + esc(basis.group)) + '"'
+            : " · " + shareText(share) + " of " + esc(w.basisGroup)) + '"'
         : '';
 
-      // github#86 -- a row of the disc arriving is collapsed until its first note is lit
-      if (liveNow && !(liveNow.now[g] > 0.004)) lgrClass += " lgr-gone";
-      var row = lgrHTML({ g: g, cls: lgrClass, old: false,
-        tw: twBtn(hasSubs ? 'data-tw="' + esc(g) + '"' : null, open),
-        eye: live ? eyeBtn('data-eye="' + esc(g) + '"', vis, g)
+      // github#86 -- a row of the disc arriving is collapsed until its first note is lit, and a
+      // github#86 -- row of the disc being left once its last note has faded
+      var lv = w.live(g);
+      if (lv !== null && !(lv > 0.004)) lgrClass += " lgr-gone";
+      var row = lgrHTML({ g: g, cls: lgrClass, old: w.inert,
+        // github#86 -- a leaving row keeps its twisty, eye and only chip where they were, disabled
+        tw: twBtn(hasSubs ? (w.inert ? 'disabled aria-disabled="true"' : 'data-tw="' + esc(g) + '"') : null, open),
+        eye: live ? eyeBtn(w.inert ? 'disabled aria-disabled="true"' : 'data-eye="' + esc(g) + '"', vis, g)
                   : '<button class="eye none" disabled aria-hidden="true"></button>',
-        lgAttrs: lgAttrs, hl: hl, vis: vis, title: rowTitle(g),
-        swClass: "sw" + (bandLock && bandLock[g] ? " sw-in" : ""), swTitle: swatchTitle(g, bandLock),
-        swFill: swatchFill(g),
-        only: live ? '<span class="only" data-only="1" title="Show only ' + esc(g) + '">only</span>'
+        lgAttrs: lgAttrs, hl: hl, vis: vis, title: w.inert ? g : rowTitle(g),
+        swClass: "sw" + (w.bandLock && w.bandLock[g] ? " sw-in" : ""), swTitle: w.swTitle(g),
+        swFill: w.fill(g),
+        only: live ? (w.inert ? '<span class="only" aria-hidden="true">only</span>'
+                             : '<span class="only" data-only="1" title="Show only ' + esc(g) + '">only</span>')
                    : '<span class="only none" aria-hidden="true"></span>',
         // github#50, github#78
-        ctTitle: ctTitle, ct: countText(g) });
+        ctTitle: ctTitle, ct: w.inert ? String(w.counts[g]) : countText(g) });
 
-      if (open && vis) {
+      if (open && vis && !w.inert) {
         var subs = subOrder[g];
         /**
          * @param {string} col @param {string} nm @param {number} ct
@@ -5754,7 +5776,13 @@ function mountVaultGraph(root, data, deps) {
         }
       }
       return row;
-    }).join(""));
+    };
+    var oldRows = left ? legendSwitch.order.map(function (g) {
+      return !legendSwitch.counts[g] || legendSwitch.hidden[g] ? "" : rowFor(g, /** @type {RowWorld} */ (left));
+    }).join("") : "";
+    // github#86 -- the collapse rules exist only while a switch runs
+    $("legend").classList.toggle("lg-switching", !!legendSwitch);
+    setHTML($("legend"), oldRows + names.map(function (g) { return rowFor(g, here); }).join(""));
 
     // github#78, design/0006
     if (!barShown) { barPrev = barNow; }
@@ -6858,9 +6886,23 @@ function mountVaultGraph(root, data, deps) {
         /** @type {Record<string, string>} */
         var oldColors = dict();
         var oldBasis = barBasis();
-        (order[state.dim] || []).forEach(function (g) { oldCounts[g] = counts[g] || 0; oldColors[g] = colorOf(g); });
+        /** @type {Record<string, string>} */
+        var oldFill = dict();
+        /** @type {Record<string, string>} */
+        var oldSwTitle = dict();
+        /** @type {Record<string, boolean>} */
+        var oldSubs = dict();
+        /** @type {Record<string, boolean>} */
+        var oldOpen = dict();
+        (order[state.dim] || []).forEach(function (g) {
+          oldCounts[g] = counts[g] || 0; oldColors[g] = colorOf(g);
+          oldFill[g] = swatchFill(g); oldSwTitle[g] = swatchTitle(g, bandLock);
+          oldSubs[g] = groupHasPinnedSub(g) || ((subOrder[g] || []).length > 1 && (counts[g] || 0) >= NEST_MIN);
+          oldOpen[g] = oldSubs[g] && !state.collapsed[g];
+        });
         legendSwitch = { dim: state.dim, order: (order[state.dim] || []).slice(), counts: oldCounts,
-                         colors: oldColors, hidden: state.hidden[state.dim] || dict(), basis: oldBasis.max };
+                         colors: oldColors, fill: oldFill, swTitle: oldSwTitle, bandLock: bandLock, subs: oldSubs, open: oldOpen,
+                         hidden: state.hidden[state.dim] || dict(), basis: oldBasis.max, basisGroup: oldBasis.group };
       }
     }
 

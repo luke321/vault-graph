@@ -166,12 +166,20 @@ worth showing since 2026-09-10: `make-test-vault.mjs` gives one note in five a n
 two families, listed first, so the regenerated demo has 693 tagged notes, 353 with more than
 one tag, 207 with a nested one and 12 top-level tags.
 
-## One row template
+## One row builder, two worlds
 
-The legend builds every group row through `lgrHTML`, whichever dimension the group belongs to
-and whether the row is resting, arriving or leaving. Nothing in the legend is folder-only; a
-third grouping would need a `fileGroup` answer and an entry in `DIMS`, and the nav bar would
-follow.
+The legend builds every group row through one function, `rowFor(g, world)`, and there are
+exactly two worlds: the dimension on screen, read live, and the dimension being left as it
+stood when the switch began — counts, colours, swatch fills and titles, band split, basis,
+twisty and open state, all captured into `legendSwitch` before `state.dim` flips. A leaving
+row differs from the row it was in two ways and no other: it is inert (no `data-g`,
+`data-eye`, `data-tw` or `data-only`, so no handler reaches it, and the eye and twisty are
+drawn `disabled` where they were) and its gauge follows its notes. The first cut hand-built
+the leaving rows' options and lost the inner ring's small swatch and the eye on the way —
+"how could that happen when only the gauge should change?" — which is the reason there is one
+builder and a world, not a template fed by two callers. Nothing in the legend is folder-only;
+a third grouping would need a `fileGroup` answer and an entry in `DIMS`, and the nav bar
+would follow.
 
 ## The tag fixture
 
