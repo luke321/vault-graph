@@ -25,7 +25,7 @@
   --text-2: #c3c2b7;
   --text-3: #8d8c84;
   --accent: #3987e5;
-  --accent-hi: #6aa6f0;
+  --accent-hi: #6aa6f0; /* the one token not in page.css: the accent, lifted for hover */
   --font: ui-sans-serif, -apple-system, "Segoe UI", system-ui, sans-serif;
   --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
@@ -46,7 +46,6 @@ h1, h2, h3, h4, h5, h6 {
   letter-spacing: -0.01em;
 }
 h2 { margin-top: 36px; }
-h3 { color: var(--text-1); }
 
 strong, th, dt {
   font-family: var(--font) !important;
@@ -65,7 +64,7 @@ hr {
   margin: 0 0 20px;
 }
 
-blockquote { border-left-color: var(--accent); color: var(--text-2); }
+blockquote { border-left-color: var(--accent); }
 
 /* ---- code ---------------------------------------------------------------------------- */
 
@@ -145,10 +144,8 @@ section img {
 /* ---- title block --------------------------------------------------------------------- */
 
 section #title h1 {
-  font-family: var(--font);
   font-weight: 600;
   letter-spacing: -0.02em;
-  color: var(--text-1);
 }
 section #title p {
   font-family: var(--font);
