@@ -598,7 +598,7 @@ check("tags: a dot in the disc being left keeps its colour until it has faded", 
       Object.keys(b).forEach(function (id) {
         // a dot that has left stands in its final seat, under its new group
         var a = __vg.graph.getNodeAttributes(id);
-        if (a.x !== b[id].x || a.y !== b[id].y || __vg.groupOf(id) !== b[id].g) return;
+        if (Math.abs(a.x - b[id].x) > 0.5 || Math.abs(a.y - b[id].y) > 0.5 || __vg.groupOf(id) !== b[id].g) return;
         if ((__vg.alpha[id] || 0) <= 0.004) return;
         standing++;
         var c = __vg.nodeColor(id);
@@ -650,21 +650,23 @@ check("tags: a note one disc hides and the other shows arrives with the fill edg
       if (__vg.groupOf(id) === ${JSON.stringify(pick.g)} && !a.dupOf) hid.push(id);
     });
     window.__smokeHid = { hid: hid, b: b, blade: __vg.handBlade };
+    var nodes = __vg.graph.order;
     var sel = document.querySelector("#vg-dim");
     sel.value = "tag";
     sel.dispatchEvent(new Event("change"));
     // the very same tick: nothing hidden may be lit yet
     var litNow = hid.filter(function (id) { return (__vg.alpha[id] || 0) > 0.004; }).length;
-    return { hid: hid.length, litNow: litNow };
+    return { hid: hid.length, litNow: litNow, nodes: nodes };
   })()`);
-  let samples = 0, litEnd = 0, ahead = 0, first = "";
+  let samples = 0, litEnd = 0, ahead = 0, first = "", standInsPeak = 0, nodesEnd = 0;
   const t0 = Date.now();
   for (;;) {
     const s = await p.j(`(function(){
       var H = window.__smokeHid, D = 180 / Math.PI, TWO = 2 * Math.PI;
       var sweep = function (a) { return (Math.PI / 2 - Math.atan2(a.y, a.x) + 2 * TWO) % TWO; };
       // the cascade reports the erase edge's angle; the fill edge trails it by the blade, and
-      // an arrival sits at its final seat -- so a lit note's seat is behind the fill edge
+      // an arrival sits at its final seat -- so a lit note's seat is behind the fill edge. The
+      // inner ring sweeps the other way round, so its bearings read mirrored.
       var hand = __vg.lastCascade().handDeg;
       var fill = typeof hand === "number" ? Math.max(0, Math.min(360, hand - H.blade)) : null;
       var lit = 0, ahead = 0, ex = "";
@@ -673,27 +675,33 @@ check("tags: a note one disc hides and the other shows arrives with the fill edg
         lit++;
         if (fill === null) return;
         var b = sweep(__vg.graph.getNodeAttributes(id)) * D;
+        if (__vg.isInner(id)) b = (360 - b) % 360;
         if (b > fill + 6 && b < 354 && fill < 354) { ahead++; if (!ex) ex = "#" + id + " at " + b.toFixed(0) + " deg with the fill edge at " + fill.toFixed(0); }
       });
-      return { lit: lit, ahead: ahead, ex: ex, busy: __vg.demo.busy() };
+      return { lit: lit, ahead: ahead, ex: ex, busy: __vg.demo.busy(), nodes: __vg.graph.order, standIns: __vg.standIns().length };
     })()`);
     samples++;
     ahead += s.ahead;
     if (s.ahead && !first) first = s.ex;
     litEnd = s.lit;
+    if (s.standIns > standInsPeak) standInsPeak = s.standIns;
+    nodesEnd = s.nodes;
     if (!s.busy && samples > 3) break;
     if (Date.now() - t0 > 20000) break;
   }
+  // github#86 -- the switch draws the arriving disc with stand-ins and takes every one home
+  const left = await p.j(`__vg.standIns().length`);
   await p.j(`(function(){ delete window.__smokeHid; __vg.setDim("folder"); return true; })()`);
   await settle(p);
   await eye(pick.g);
   await settle(p);
   await camSettle(p);
   return {
-    ok: n.litNow === 0 && ahead === 0 && litEnd === n.hid && samples > 3,
+    ok: n.litNow === 0 && ahead === 0 && litEnd === n.hid && samples > 3 && left === 0 && nodesEnd === n.nodes,
     detail: `${pick.g} (${n.hid} notes) hidden in the folder disc: ${n.litNow} lit at the switch itself, ` +
-            `${ahead} lit outside the arc the fill edge had swept over ${samples} samples` +
-            (first ? ` (first: ${first})` : "") + `, ${litEnd} of ${n.hid} lit at the end`,
+            `${ahead} lit ahead of the fill edge over ${samples} samples` +
+            (first ? ` (first: ${first})` : "") + `, ${litEnd} of ${n.hid} lit at the end; ` +
+            `${standInsPeak} stand-ins drawn, ${left} left behind, ${nodesEnd} of ${n.nodes} nodes after`,
   };
 });
 

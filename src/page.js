@@ -737,10 +737,24 @@ function mountVaultGraph(root, data, deps) {
   // github#86, design/0014 -- a dot still in the disc being left keeps the colour it had there
   /** @type {Record<string, string> | null} */
   var leftColor = null;
+  // github#86, design/0014 -- a dimension switch draws BOTH discs from its first frame: every
+  // github#86 -- note of the disc being left fades where it stands, and a stand-in per note
+  // github#86 -- (a copy, as a tag copy is) waits dark at the note's seat in the disc arriving.
+  // github#86 -- At settle the note takes the stand-in's seat and the stand-in goes.
+  /** @type {Record<string, boolean>} */
+  var leaving = dict();
+  /** @type {Record<string, string>} */
+  var leftGroup = dict();
+  /** @type {string[]} */
+  var standIns = [];
+  // github#86 -- true while planning in the dimension being left
+  var oldWorld = false;
 
   /** @param {string} id @returns {string} */
   function groupOf(id) {
     if (moveFrom) { var mf = moveFrom[id]; if (mf !== undefined) return mf; }
+    // github#86 -- a note fading out of the disc being left is still filed there
+    if (leftGroup[id] !== undefined) return leftGroup[id];
     // github#3, github#86 -- "join their folder" means "join their group"
     if (!adj[id]) return unlinkedByFolder ? fileGroup(id) : UNLINKED;
     return fileGroup(id);
@@ -832,6 +846,52 @@ function mountVaultGraph(root, data, deps) {
     focusSetCache = { key: undefined, set: null };
   }
 
+  // github#86, design/0014 -- one stand-in per note of the disc being left, dark, at its seat
+  function addStandIns() {
+    Object.keys(leaving).forEach(function (id) {
+      var a = graph.getNodeAttributes(id);
+      var sid = id + SAT_SEP + "s";
+      if (graph.hasNode(sid)) return;
+      graph.addNode(sid, {
+        label: a.label, x: a.x, y: a.y, size: a.size,
+        folder: a.folder, sub: a.sub, dirs: a.dirs, ntype: a.ntype,
+        tags: a.tags, path: a.path, deg: a.deg,
+        created: a.created, touched: a.touched, words: a.words, ghost: a.ghost,
+        dupOf: id, standIn: id
+      });
+      if (tagFiling[id]) tagFiling[sid] = tagFiling[id];
+      if (adj[id]) adj[sid] = adj[id];
+      hubRank[sid] = hubRank[id];
+      if (tlRank[id] !== undefined) tlRank[sid] = tlRank[id];
+      if (tlMs[id] !== undefined) tlMs[sid] = tlMs[id];
+      alpha[sid] = 0;
+      standIns.push(sid);
+    });
+  }
+
+  // github#86 -- the note takes its stand-in's seat and presence; the stand-in goes
+  function dropStandIns() {
+    if (!standIns.length && !Object.keys(leaving).length) return;
+    standIns.forEach(function (sid) {
+      var id = graph.getNodeAttribute(sid, "standIn");
+      if (graph.hasNode(id)) {
+        graph.mergeNodeAttributes(id, { x: graph.getNodeAttribute(sid, "x"), y: graph.getNodeAttribute(sid, "y") });
+        alpha[id] = alpha[sid] || 0;
+      }
+      if (state.hovered === sid) state.hovered = id;
+      if (state.selected === sid) state.selected = id;
+      graph.dropNode(sid);
+      delete tagFiling[sid]; delete adj[sid]; delete hubRank[sid];
+      delete tlRank[sid]; delete tlMs[sid]; delete alpha[sid];
+    });
+    standIns = [];
+    leaving = dict();
+    leftGroup = dict();
+    lazyAdded = []; lazyShown = null;
+    neighbourCache = null;
+    focusSetCache = { key: undefined, set: null };
+  }
+
   // github#86 -- the filing exists from here; subOrder is its first reader
   if (state.dim === "tag") buildTagFiling();
   if (multiTag && state.dim === "tag") addSatellites();
@@ -867,6 +927,8 @@ function mountVaultGraph(root, data, deps) {
     /** @type {Record<string, number>} */
     var filed = dict();
     graph.forEachNode(function (id, a) {
+      // github#86 -- a stand-in is its note, already counted
+      if (a.standIn) return;
       var g = groupOf(id);
       count[g] = (count[g] || 0) + 1;
       // github#86, github#50 -- what this dimension FILES, on the disc or not
@@ -1168,7 +1230,7 @@ function mountVaultGraph(root, data, deps) {
   /** @param {string} id @returns {string} */
   function nodeColor(id) {
     // github#86, design/0014 -- until the erase edge has passed it, a dot is in the old disc
-    if (leftColor && moveFrom && moveFrom[id] !== undefined) {
+    if (leftColor && (leaving[id] || (moveFrom && moveFrom[id] !== undefined))) {
       var lc = leftColor[id];
       if (lc) return lc;
     }
@@ -1567,6 +1629,8 @@ function mountVaultGraph(root, data, deps) {
         liveG[gm] = (liveG[gm] || 0) + (wm > 1 ? 1 : wm < 0 ? 0 : wm);
       }
     } else graph.forEachNode(function (id) {
+      // github#86 -- the disc being left has no stand-ins; the disc arriving has no leavers
+      if (oldWorld ? !!graph.getNodeAttribute(id, "standIn") : !!leaving[id]) return;
       if (onlyVisible && !(planKeep || willShow)(id)) return;
       // github#18
       if (isPinned(id)) return;
@@ -3272,7 +3336,9 @@ function mountVaultGraph(root, data, deps) {
   // github#86, design/0014 -- one lap of the erase edge is at least this many fades long
   var HAND_SWEEP = 12;
   // github#86, design/0014 -- the fill edge trails the erase edge by this much
-  var HAND_BLADE_DEG = 45;
+  var HAND_BLADE_DEG = 20;
+  // github#86, design/0014 -- a dot is fully gone, or fully lit, this far behind its edge
+  var HAND_FADE_DEG = 12;
   var RADIAL_EASE = 0.25;
   var SPREAD_MAX  = 78;
   var SPREAD_PER  = 0.17;
@@ -3450,6 +3516,9 @@ function mountVaultGraph(root, data, deps) {
   var roomNow = null;
   /** @type {Record<string, { f: number, n: number }> | null} */
   var colWalk = null;
+  // github#86, design/0014 -- while the hand sweeps, a fading dot shrinks to nothing and an
+  // github#86 -- arriving one grows from nothing, as a toggled wedge's dots do through its walk
+  var shrinkFade = false;
   /** @type {Record<string, boolean> | null} */
   var splitHold = null;
   /** @type {Record<string, Point> | null} */
@@ -3519,6 +3588,11 @@ function mountVaultGraph(root, data, deps) {
       cascadeRun = null;
     }
     moveFrom = null; splitHold = null; leftColor = null;
+    // github#86 -- only the switch's own cascade draws stand-ins
+    if (!opts.hand && standIns.length) dropStandIns();
+    // github#86 -- the disc being left is drawn in its own colours for as long as it stands
+    if (opts.from && opts.from.color) leftColor = opts.from.color;
+    shrinkFade = !!opts.hand;
 
     fullRing = false;
     graph.forEachNode(function (id) { if (present(id)) fullRing = true; });
@@ -3639,11 +3713,15 @@ function mountVaultGraph(root, data, deps) {
     // github#86 -- frames per lap of the erase edge; 0 when there is no hand
     var handLap = 0;
     // github#86, design/0014 -- a clock hand: one sweep, keyed on angle not rank
+    // github#86 -- one fade, in frames; the hand makes it an angle
+    var fadeLen = FADE_FRAMES * TIME_SCALE;
     if (opts.hand) {
       var TWO_PI = 2 * Math.PI;
-      var handF = FADE_FRAMES * TIME_SCALE;
-      var handW = Math.max(span, HAND_SWEEP * handF);
+      var handW = Math.max(span, HAND_SWEEP * FADE_FRAMES * TIME_SCALE);
       handLap = handW;
+      // github#86 -- a fixed distance behind the edge, whatever the lap takes
+      fadeLen = Math.max(1, handW * HAND_FADE_DEG / 360);
+      var handF = fadeLen;
       var blade = HAND_BLADE_DEG * Math.PI / 180;
       // github#86 -- the fill edge ends a blade after the erase edge, plus a fade
       span = handW * (1 + blade / TWO_PI) + handF;
@@ -3653,12 +3731,22 @@ function mountVaultGraph(root, data, deps) {
         // github#86 -- a dot not on the disc has no bearing; use the one it goes to
         return (a.x || a.y) ? angleSweep(Math.atan2(a.y, a.x)) : sweepOf[id];
       };
+      // github#86 -- the inner ring sweeps the other way round, for effect
+      /** @param {number} b @param {boolean} inner */
+      var sweepAt = function (b, inner) { return inner ? (TWO_PI - b) % TWO_PI : b; };
+      /** @param {string} id in the inner ring of the disc being left */
+      var innerOld = function (id) {
+        var bl = opts.from ? opts.from.bandLock : bandLock;
+        return !!(bl && bl[groupOf(id)]);
+      };
+      /** @param {string} id in the inner ring of the disc arriving */
+      var innerNew = function (id) { return !!(bandLock && bandLock[groupOf(id)]); };
       // github#86, design/0014 -- the simplest sweep: the erase edge takes a dot when it passes
       // github#86 -- the dot's bearing, and the fill edge, a blade behind, lights it at its seat
       /** @param {string} id @returns {number} */
-      var handAt = function (id) { return handW * bearingNow(id) / TWO_PI; };
+      var handAt = function (id) { return handW * sweepAt(bearingNow(id), innerOld(id)) / TWO_PI; };
       /** @param {string} id when the fill edge reaches the seat this dot ends in */
-      var fillAt = function (id) { return handW * (sweepOf[id] + blade) / TWO_PI; };
+      var fillAt = function (id) { return handW * (sweepAt(sweepOf[id], innerNew(id)) + blade) / TWO_PI; };
       outs.forEach(function (id) { delay[id] = handAt(id); });
       ins.forEach(function (id) { delay[id] = fillAt(id); });
       moves.forEach(function (id) {
@@ -3786,7 +3874,7 @@ function mountVaultGraph(root, data, deps) {
 
     var settle = function () {
       if (!lastCascade.exit) lastCascade.exit = "settle() called from outside the loop";
-      moveFrom = null; splitHold = null; leftColor = null;
+      moveFrom = null; splitHold = null; leftColor = null; shrinkFade = false;
       if (cascadeRun) {
         WIN.cancelAnimationFrame(cascadeRun.raf);
         WIN.clearTimeout(cascadeRun.guard);
@@ -3866,9 +3954,9 @@ function mountVaultGraph(root, data, deps) {
       if (!w) return fn();
       var sDim = state.dim, sSub = subOrder, sBand = bandLock, sGeom = geomLock, sMove = moveFrom;
       state.dim = w.dim; subOrder = w.subOrder; bandLock = w.bandLock; geomLock = w.geomLock;
-      moveFrom = null;
+      moveFrom = null; oldWorld = true;
       try { return fn(); }
-      finally { state.dim = sDim; subOrder = sSub; bandLock = sBand; geomLock = sGeom; moveFrom = sMove; }
+      finally { state.dim = sDim; subOrder = sSub; bandLock = sBand; geomLock = sGeom; moveFrom = sMove; oldWorld = false; }
     };
     (function () {
       var a = inWorld(function () { return staticPlan(function (id) { return wasPresent[id]; }); });
@@ -4083,18 +4171,18 @@ function mountVaultGraph(root, data, deps) {
         if (isMove[id]) {
           if (moveFrom && moveFrom[id] !== undefined && frame >= crossAt[id]) delete moveFrom[id];
           if (frame < arriveAt[id]) {
-            var q1 = (frame - delay[id]) / (FADE_FRAMES * TIME_SCALE);
+            var q1 = (frame - delay[id]) / fadeLen;
             q1 = q1 < 0 ? 0 : q1 > 1 ? 1 : q1;
             alpha[id] = (from[id] === undefined ? 1 : from[id]) * (1 - q1 * q1 * (3 - 2 * q1));
           } else {
-            var q2 = (frame - arriveAt[id]) / (FADE_FRAMES * TIME_SCALE);
+            var q2 = (frame - arriveAt[id]) / fadeLen;
             q2 = q2 < 0 ? 0 : q2 > 1 ? 1 : q2;
             alpha[id] = (to[id] === undefined ? 1 : to[id]) * (q2 * q2 * (3 - 2 * q2));
           }
-          if (frame < arriveAt[id] + FADE_FRAMES * TIME_SCALE) busy = true;
+          if (frame < arriveAt[id] + fadeLen) busy = true;
           continue;
         }
-        var q = (frame - delay[id]) / (FADE_FRAMES * TIME_SCALE);
+        var q = (frame - delay[id]) / fadeLen;
         q = q < 0 ? 0 : q > 1 ? 1 : q;
         alpha[id] = from[id] + (to[id] - from[id]) * (q * q * (3 - 2 * q));
         if (q < 1) busy = true;
@@ -4476,6 +4564,8 @@ function mountVaultGraph(root, data, deps) {
 
   /** @param {string} id */
   function visible(id) {
+    // github#86 -- a leaving note is in the disc being left only
+    if (leaving[id] && !oldWorld) return false;
     var a = graph.getNodeAttributes(id);
     if (isHidden(groupOf(id))) return false;
     var d = fileDirs(id, a);
@@ -5109,7 +5199,7 @@ function mountVaultGraph(root, data, deps) {
         var r = nodeStyle(id, a);
         if (al < 0.999) {
           r.color = withAlpha(r.color, al);
-          r.size = (r.size || a.size) * (0.45 + 0.55 * al);
+          r.size = (r.size || a.size) * (shrinkFade ? al : 0.45 + 0.55 * al);
           if (al < 0.62) { r.label = ""; r.forceLabel = false; r.highlighted = false; }
         }
         if (colWalk) {
@@ -6701,9 +6791,9 @@ function mountVaultGraph(root, data, deps) {
     if (next === state.dim) return state.dim;
     if (next === "tag") buildTagFiling();
 
-    // github#86 -- D-8: every visible note is a mover, so the cascade walks it
-    /** @type {Record<string, string> | null} */
-    var movesFrom = null;
+    // github#86, design/0014 -- a switch cut short leaves its stand-ins; take them home first
+    dropStandIns();
+    // github#86 -- D-8: every visible note leaves this disc, and a stand-in arrives in the next
     /** @type {Record<string, string>} */
     var leftColors = dict();
     var n = 0;
@@ -6712,12 +6802,13 @@ function mountVaultGraph(root, data, deps) {
         // github#86 -- a copy does not survive a switch; it leaves
         if (a.dupOf) return;
         if (!visible(id) || (alpha[id] || 0) <= 0.004) return;
-        if (!movesFrom) movesFrom = dict();
-        movesFrom[id] = groupOf(id);
-        // github#86 -- the colour it stands in, read while this is still its dimension
+        // github#86 -- the colour and group it stands in, read while this is still its dimension
         leftColors[id] = nodeColor(id);
+        leftGroup[id] = groupOf(id);
+        leaving[id] = true;
         n++;
       });
+      if (n) addStandIns();
     }
 
     // github#86, design/0014 -- the disc being LEFT, so the cascade can draw both
@@ -6752,7 +6843,7 @@ function mountVaultGraph(root, data, deps) {
     if (refreshSettingsPanel) refreshSettingsPanel();
     if (persist && onDim) onDim(state.dim);
     // github#76, github#86 -- every wedge changes, so cross the two discs in one sweep
-    if (n) cascade(null, { colToggle: true, hand: true, movesFrom: movesFrom, from: from });
+    if (n) cascade(dropStandIns, { colToggle: true, hand: true, from: from });
     return state.dim;
   }
 
@@ -9429,6 +9520,13 @@ function mountVaultGraph(root, data, deps) {
                     relayout: function () { hardRelayout(false); },
                     // github#86 -- the fill edge's lag behind the erase edge, in degrees
                     get handBlade() { return HAND_BLADE_DEG; },
+                    // github#86 -- the fade behind either edge, in degrees
+                    get handFade() { return HAND_FADE_DEG; },
+                    set handFade(v) { HAND_FADE_DEG = Math.max(1, Math.min(180, +v || 1)); },
+                    // github#86 -- whether a dot sits in the inner ring, as the checks ask
+                    isInner: /** @param {string} id */ function (id) { return !!(bandLock && bandLock[groupOf(id)]); },
+                    // github#86 -- the stand-ins a switch is drawing, none at rest
+                    standIns: function () { return standIns.slice(); },
                     set handBlade(v) { HAND_BLADE_DEG = Math.max(0, Math.min(360, +v || 0)); },
                     // github#86 -- lay the visible disc out over an arc, without touching it
                     arcLayout: /** @param {number} from @param {number} to */ function (from, to) {

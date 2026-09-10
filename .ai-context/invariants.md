@@ -342,7 +342,10 @@ than the one they had, on the four fixtures. Before: 787,308 of 787,308; 709,555
 github#86, design/0014. Each dimension keeps its own hidden state, so a note the folder disc
 hides and the tag disc shows is an **arrival** on the switch, and an arrival is lit by the fill
 edge — never at the switch itself, and while lit its seat is **behind the fill edge**, because
-an arrival sits at its final seat. Two things break it.
+an arrival sits at its final seat; the inner ring sweeps the other way round, so its bearings
+read mirrored. The switch draws the disc arriving with a **stand-in** per note of the disc
+being left, and the check also holds that every stand-in drawn is gone at the end and the
+graph has the node count it had. Two things break the arrival.
 `setDim` must hand `regroup` `keepAlpha`, or `syncAlpha` lights the note before the cascade
 starts and the cascade has nothing to arrive. And the block after the schedule that re-deals
 a fully-arriving group's delays by radius must be skipped for `hand`: the hand keys every

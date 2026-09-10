@@ -182,24 +182,44 @@ after another and enabling the new ones one after another, with the two discs ne
 
 ### The hand
 
-`hand` is the simplest sweep that reads as motion. **Both discs sit in the same place, one
-shown and one hidden**, and two edges of one rotating hand swap them:
+`hand` is the simplest sweep that reads as motion. **Both discs are drawn from the first
+frame, in the same place, one shown and one hidden**, and two edges of one rotating hand swap
+them:
 
+- **Both discs at once.** A note can end up earlier in the sweep than it started, and one dot
+  cannot appear at its new seat before it has left its old one — the first take of this hand
+  lit such notes late, a third of the vault, and it showed. So `setDim` marks every visible
+  note as **leaving** (`leaving`, `leftGroup`) and adds a **stand-in** per note
+  (`addStandIns`): a copy, exactly as a tag copy is made (`dupOf`, plus `standIn`), dark, that
+  is the note's dot in the disc arriving. The leaving note is invisible to the disc arriving
+  (`visible()`, the plan's membership) and the stand-in to the disc being left (`oldWorld`,
+  set by `inWorld`), the legend never counts a stand-in, and at settle the note takes its
+  stand-in's seat and presence and the stand-in goes (`dropStandIns`, the cascade's `done`;
+  any other cascade, or a switch cut short, takes them home first). No dot ever waits for
+  another.
 - **The erase edge** sweeps once at constant angular speed and takes a dot when it passes the
-  dot's **old** bearing (`delay = W × angleSweep(where it sits) ÷ 2π`). The dot fades over
-  one `FADE_FRAMES` where it stands — a fade also shrinks a dot, so the vicinity of the edge is
-  where dots grow smaller and vanish — **in the colour it had**: `state.dim` has already
-  flipped by then and `nodeColor` files through `fileGroup`, so `setDim` snapshots every
-  mover's colour into `LeftDisc.color` before the flip and `nodeColor` answers from it for as
-  long as `moveFrom` holds the note. The old disc is never re-laid-out.
-- **The fill edge** trails the erase edge by a fixed **blade** (`HAND_BLADE_DEG`, 45°) and
-  lights a dot at its **final** seat, taken straight from `finalPos` the moment the dot has
-  left, when it reaches the dot's **new** bearing. `arriveAt = max(fillAt(new bearing),
-  crossAt)`. A dot takes that seat outright (`seated`): easing it from where it stood would
-  draw it crossing the disc, and at 16 ms a frame the fade skips past any alpha threshold.
-- One lap of the erase edge is at least `HAND_SWEEP` (12) fades long, the span is that lap
-  plus one blade plus a fade, and the cascade reports the edge's angle as
-  `lastCascade().handDeg` (with `handLap`) for the checks. `__vg.handBlade` sets the blade.
+  dot's bearing (`delay = W × sweep ÷ 2π`). The dot fades where it stands — a fade also shrinks
+  a dot, so the vicinity of the edge is where dots grow smaller and vanish — **in the colour
+  it had** and **under the group it had**: `setDim` snapshots both before `state.dim` flips
+  (`LeftDisc.color`, `leftGroup`), and `nodeColor` and `groupOf` answer from them while the
+  note is leaving. The old disc is never re-laid-out.
+- **The fill edge** trails the erase edge by a fixed **blade** (`HAND_BLADE_DEG`, 20°) and
+  lights the stand-in at the note's **final** seat, taken straight from `finalPos` (`seated`).
+- **The fade is a distance, not a time**: a dot is fully gone, or fully lit, `HAND_FADE_DEG`
+  (12°) behind its edge whatever the lap takes (`fadeLen = W × 12° ÷ 360°`). Asked for as
+  "full visibility after a fixed amount of distance to the invisible hand … like it sucks in
+  the old and pops out the new"; the blade came down from 45° with it. And **the fade shrinks
+  a dot to nothing** (`shrinkFade`): a fading dot is normally drawn at `0.45 + 0.55 × alpha` of
+  its size, which is what leaves a fading disc looking moth-eaten; a toggled wedge's dots go
+  to nothing because the wedge's size walk (`colWalk`) multiplies in on top, and the user
+  pointed at that cascade as the one that fades right. While the hand sweeps, size is `alpha`.
+- **The inner ring sweeps counter-clockwise**, for effect: a dot in the inner ring of either
+  disc is keyed on `2π − bearing` (`sweepAt`, with `innerOld` reading the left disc's
+  `bandLock` and `innerNew` the arriving one's).
+- One lap of the erase edge is at least `HAND_SWEEP` (12) fades of the resting kind long, the
+  span is that lap plus one blade plus a fade, and the cascade reports the edge's angle as
+  `lastCascade().handDeg` (with `handLap`) for the checks. `__vg.handBlade` and
+  `__vg.handFade` set the two angles live; `__vg.standIns()` lists the stand-ins, none at rest.
 
 So the frame needs **no plan at all**, and nothing between a note's weight and its position
 changes: the serpentine, the lattice, the rings and the hub are the resting disc's.
