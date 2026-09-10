@@ -729,10 +729,14 @@ function mountVaultGraph(root, data, deps) {
    * @property {Record<string, string[]>} subOrder
    * @property {Record<string, boolean> | null} bandLock
    * @property {GeomLock | null} geomLock
+   * @property {Record<string, string>} color        id -> the colour it was drawn in there
    */
 
   /** @type {Record<string, string> | null} */
   var moveFrom = null;
+  // github#86, design/0014 -- a dot still in the disc being left keeps the colour it had there
+  /** @type {Record<string, string> | null} */
+  var leftColor = null;
 
   /** @param {string} id @returns {string} */
   function groupOf(id) {
@@ -1163,6 +1167,11 @@ function mountVaultGraph(root, data, deps) {
   // github#3
   /** @param {string} id @returns {string} */
   function nodeColor(id) {
+    // github#86, design/0014 -- until the erase edge has passed it, a dot is in the old disc
+    if (leftColor && moveFrom && moveFrom[id] !== undefined) {
+      var lc = leftColor[id];
+      if (lc) return lc;
+    }
     var a = graph.getNodeAttributes(id);
     if (groupOf(id) === UNLINKED && !unlinkedTintByFolder) return colorOf(UNLINKED);
     // github#86 -- D-3: the tint ladder answers to the filing
@@ -3509,7 +3518,7 @@ function mountVaultGraph(root, data, deps) {
       WIN.clearTimeout(cascadeRun.guard);
       cascadeRun = null;
     }
-    moveFrom = null; splitHold = null;
+    moveFrom = null; splitHold = null; leftColor = null;
 
     fullRing = false;
     graph.forEachNode(function (id) { if (present(id)) fullRing = true; });
@@ -3546,11 +3555,13 @@ function mountVaultGraph(root, data, deps) {
     var moves = [];
     if (opts.movesFrom) {
       moveFrom = opts.movesFrom;
+      // github#86 -- the old disc is drawn in its own colours for as long as it stands
+      leftColor = opts.from && opts.from.color ? opts.from.color : null;
       Object.keys(opts.movesFrom).forEach(function (id) {
         if (!graph.hasNode(id)) return;
         moves.push(id);
       });
-      if (!moves.length) moveFrom = null;
+      if (!moves.length) { moveFrom = null; leftColor = null; }
     }
     /** @type {Record<string, boolean>} */
     var isMove = dict();
@@ -3769,7 +3780,7 @@ function mountVaultGraph(root, data, deps) {
 
     var settle = function () {
       if (!lastCascade.exit) lastCascade.exit = "settle() called from outside the loop";
-      moveFrom = null; splitHold = null;
+      moveFrom = null; splitHold = null; leftColor = null;
       if (cascadeRun) {
         WIN.cancelAnimationFrame(cascadeRun.raf);
         WIN.clearTimeout(cascadeRun.guard);
@@ -6675,6 +6686,8 @@ function mountVaultGraph(root, data, deps) {
     // github#86 -- D-8: every visible note is a mover, so the cascade walks it
     /** @type {Record<string, string> | null} */
     var movesFrom = null;
+    /** @type {Record<string, string>} */
+    var leftColors = dict();
     var n = 0;
     if (renderer && !instant) {
       graph.forEachNode(function (id, a) {
@@ -6683,13 +6696,16 @@ function mountVaultGraph(root, data, deps) {
         if (!visible(id) || (alpha[id] || 0) <= 0.004) return;
         if (!movesFrom) movesFrom = dict();
         movesFrom[id] = groupOf(id);
+        // github#86 -- the colour it stands in, read while this is still its dimension
+        leftColors[id] = nodeColor(id);
         n++;
       });
     }
 
     // github#86, design/0014 -- the disc being LEFT, so the cascade can draw both
     /** @type {LeftDisc} */
-    var from = { dim: state.dim, subOrder: subOrder, bandLock: bandLock, geomLock: geomLock };
+    var from = { dim: state.dim, subOrder: subOrder, bandLock: bandLock, geomLock: geomLock,
+                 color: leftColors };
     stashDimNav(state.dim);
     state.dim = next;
     restoreDimNav(next);

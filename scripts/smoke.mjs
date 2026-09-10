@@ -568,6 +568,59 @@ async (p) => {
   };
 });
 
+check("tags: a dot in the disc being left keeps its colour until it has faded", async (p) => {
+  await clearRange(p);
+  await settle(p);
+  await camSettle(p);
+  // github#86, design/0014 -- the erase edge fades a dot where it stands, in the colour it had
+  const n = await p.j(`(function(){
+    var b = {};
+    __vg.graph.forEachNode(function (id, a) {
+      if ((__vg.alpha[id] || 0) <= 0.004) return;
+      b[id] = { c: __vg.nodeColor(id), g: __vg.groupOf(id), x: a.x, y: a.y };
+    });
+    window.__smokeLeft = b;
+    var sel = document.querySelector("#vg-dim");
+    if (!sel) return -1;
+    sel.value = "tag";
+    sel.dispatchEvent(new Event("change"));
+    return Object.keys(b).length;
+  })()`);
+  if (n < 0) return { ok: false, detail: "no #vg-dim to switch with" };
+  let samples = 0, worstFrame = 0, dotFrames = 0, standingFrames = 0, example = "";
+  const t0 = Date.now();
+  for (;;) {
+    const s = await p.j(`(function(){
+      var b = window.__smokeLeft, standing = 0, wrong = 0, ex = "";
+      Object.keys(b).forEach(function (id) {
+        // a dot that has left stands in its final seat, under its new group
+        var a = __vg.graph.getNodeAttributes(id);
+        if (a.x !== b[id].x || a.y !== b[id].y || __vg.groupOf(id) !== b[id].g) return;
+        if ((__vg.alpha[id] || 0) <= 0.004) return;
+        standing++;
+        var c = __vg.nodeColor(id);
+        if (c !== b[id].c) { wrong++; if (!ex) ex = "#" + id + " " + b[id].c + " -> " + c; }
+      });
+      return { standing: standing, wrong: wrong, ex: ex, busy: __vg.demo.busy() };
+    })()`);
+    samples++;
+    standingFrames += s.standing;
+    dotFrames += s.wrong;
+    if (s.wrong > worstFrame) { worstFrame = s.wrong; example = s.ex; }
+    if (!s.busy && samples > 3) break;
+    if (Date.now() - t0 > 20000) break;
+  }
+  await p.j(`(function(){ delete window.__smokeLeft; __vg.setDim("folder"); return true; })()`);
+  await settle(p);
+  await camSettle(p);
+  return {
+    ok: dotFrames === 0 && samples > 3,
+    detail: `${n} dots standing in the folder disc, ${samples} samples over the switch: ` +
+            `${dotFrames} of ${standingFrames} standing dot-frames in a colour other than the one they had` +
+            (worstFrame ? ` (worst frame ${worstFrame}, e.g. ${example})` : ""),
+  };
+});
+
 check("tags: the two buckets stay out of the hue rotation and sort last", async (p) => {
   const r = await p.j(`(function(){
     __vg.setDim("tag");

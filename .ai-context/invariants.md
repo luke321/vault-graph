@@ -317,6 +317,26 @@ The dimension switch does not use this to draw its new disc — it takes seats f
 which is exact — but the primitive is what a half-disc comparison or a clockwise wipe would be
 built on, and this is the check that keeps it honest.
 
+## A dot in the disc being left keeps its colour until it has faded
+
+github#86, design/0014. The erase edge fades a dot **where it stands, in the colour it had**.
+`state.dim` flips at the top of `setDim` and `nodeColor` files a note through `fileGroup`,
+which reads that flag — so without a record of the old colour every standing dot repaints in
+its tag colour the moment the switch begins, and the old disc reads as a recolour with a hole
+walking through it instead of one disc being erased. `setDim` snapshots `nodeColor(id)` for
+every mover **before** the flip into `LeftDisc.color`; `cascade` holds it as `leftColor` for
+exactly as long as `moveFrom` holds the note, and `nodeColor` answers from it first.
+
+```bash
+node scripts/smoke.mjs --only "keeps its colour"
+```
+
+The check reads every standing dot's colour before the switch, drives the real `#vg-dim`
+select, and on every sample compares each dot that is still in its old seat under its old
+group. **0 of 801,863 / 688,122 / 833,275 / 338,669 standing dot-frames** in a colour other
+than the one they had, on the four fixtures. Before: 787,308 of 787,308; 709,555 of 728,183;
+821,574 of 845,729; 289,999 of 302,058 — every dot, from the first frame.
+
 ## The rings are independent
 
 Toggling an inner-band group must not move the outer band. Measured, an `05` toggle

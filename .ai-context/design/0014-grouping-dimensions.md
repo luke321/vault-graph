@@ -186,7 +186,11 @@ after another and enabling the new ones one after another, with the two discs ne
 
 - **The erase edge** sweeps once at constant angular speed. A note starts fading when the edge
   passes its **old** bearing (`delay = W × angleSweep(where it sits) ÷ 2π`) and has left one
-  fade later. The old disc is **not re-laid-out**: a dot fades where it stands.
+  fade later. The old disc is **not re-laid-out**: a dot fades where it stands, **in the colour
+  it had**. `state.dim` has already flipped by then and `nodeColor` files through `fileGroup`,
+  so `setDim` snapshots every mover's colour into `LeftDisc.color` before the flip and
+  `nodeColor` answers from it for as long as `moveFrom` holds the note — the first take of the
+  hand skipped this and every standing dot repainted on the first frame.
 - **The fill edge** trails the erase edge by a fixed **blade** (`HAND_BLADE_DEG`, 90°). A note
   that has left takes its **final** seat straight from `finalPos` and waits there, dark, until
   the fill edge reaches its **new** bearing. `arriveAt = max(fillAt(new bearing), crossAt)`.
