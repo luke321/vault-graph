@@ -5,7 +5,7 @@
 # token, which needs `id-token: write`, a permission only an Actions run can hold. A local
 # `gh release create` has no such token, so "attest the release assets" was never a flag for
 # scripts/release.ps1 -- it is this file. release.ps1 is the local half (the gate suite, the
-# tag, the push); the tag push hands over to this, the publishing half.
+# tag, the tag push); the tag push hands over to this, the publishing half.
 #
 # WHAT AN ATTESTATION BUYS. main.js is a ~390 KB bundle: the page, the plugin host and the
 # engine under src/engine (a Sigma.js port, whose MIT notice opens the file). Nothing about
@@ -166,8 +166,9 @@ jobs:
           fi
           echo "::error::$sha is not on main. main is what the Obsidian directory installs from,"
           echo "::error::and a tag cut elsewhere stays off main's history for good (github#47)."
-          echo "::error::If main simply has not caught up yet -- release.ps1 pushes the branch and then"
-          echo "::error::the tag, and this run can start between the two -- push main and RE-RUN this run."
+          echo "::error::If the tag went out by hand, or from release.ps1 -AllowAnyBranch, before its commit"
+          echo "::error::reached origin/main: merge develop -> main on the website and RE-RUN this run. On"
+          echo "::error::main itself release.ps1 refuses to tag anything but origin/main (github#94)."
           exit 1
 
       # The static gates, the same ones .githooks/pre-push runs on a push to develop or main.

@@ -10,19 +10,23 @@ drives them — and anyone wanting to run the exporter clones.
 ## Two halves: a command, then a workflow
 
 ```powershell
-.\scripts\release.ps1 2.0.0            # the local half: check, gate, tag, push
+.\scripts\release.ps1 2.0.0            # the local half: check, gate, tag, push the tag
 ```
 
 **`release.ps1` does what only a person can do, and stops at the tag push.** It refuses a `v`
 (Obsidian matches the release tag against `manifest.json`'s `version`, which cannot carry a
 prefix, so a `v`-tagged release is one nobody can install), a version the manifest does not
 claim, a version with no `## <version>` section in `CHANGELOG.md`, a branch other than `main`
-(github#47), a dirty tree and a `main` behind `origin`; prints the hero and feature-clip
-warnings; runs lint, `check-notice.mjs` and the invariant suite; builds the plugin once as a
-pre-flight (the one failure the split introduces is a build that only fails in CI, leaving a
-tag with no release, and a tag cannot be re-cut); then writes the annotated tag with the
-CHANGELOG section as its message and pushes the branch, then the tag. `-DryRun` stops after
-the suite.
+(github#47), a dirty tree and a `main` that is not exactly `origin/main` (github#94: behind
+means missing what is already published, ahead means a local merge the ruleset will never let
+through); prints the hero and feature-clip warnings; runs lint, `check-notice.mjs` and the
+invariant suite; builds the plugin once as a pre-flight (the one failure the split introduces
+is a build that only fails in CI, leaving a tag with no release, and a tag cannot be re-cut);
+then writes the annotated tag with the CHANGELOG section as its message and pushes the tag.
+**It never pushes `main`.** The ruleset on `main` requires a pull request and has no bypass,
+so the `develop → main` merge happens on the website before the script runs; the first cut of
+2.4.0 made its tag and then had `git push origin HEAD` come back with GH013, which is the
+dangling-tag case this file warns about. `-DryRun` stops after the suite.
 
 **`.github/workflows/release.yml` is the publisher (github#10).** The tag push triggers it. It
 checks out the tagged commit, resolves and re-checks the version against the manifest and the
@@ -47,9 +51,10 @@ about ten minutes, and **a tree is gated once** (github#93, `decisions/0013`). A
 stamps the git tree it measured; `release.ps1` and `.githooks/pre-push` skip the suite when the
 tree in front of them already carries that stamp, and name the run they trust. The workflow
 trusts the tag. (This file used to say the hook runs the suite *again* on the push of `main`
-that carries the tagged commit. It never did: `main` is merged on the website, so by the time
-`release.ps1` pushes `HEAD` the branch is already up to date, and git hands a pre-push hook
-zero refs for an up-to-date push — measured against a bare remote, 2026-09-10.)
+that carries the tagged commit. It never did: `main` is merged on the website, so the `HEAD`
+push `release.ps1` used to make was already up to date, and git hands a pre-push hook zero
+refs for an up-to-date push — measured against a bare remote, 2026-09-10. Since github#94 the
+script pushes only the tag.)
 
 **Rehearse the local half too.** The workflow's dry run runs on a Linux runner, where
 `release.ps1` never executes; the first cut of 2.0.0 stopped at the script's own pre-flight
@@ -352,10 +357,11 @@ exactly once.
 5. Open `develop` → `main` on the website and merge it. The only required check is the
    branch-policy job (4 s). The merge commit carries `develop`'s tree byte for byte — measured
    on 2.3.0, 2.4.0 and 2.4.1.
-6. `git switch main && git pull --ff-only`, then `.\scripts\release.ps1 <version>`. It finds the
-   stamp for `HEAD`'s tree and skips the suite, tags, and pushes the branch (a no-op: `main` is
-   already up to date, and the hook receives no refs) and then the tag (never gated). The
-   workflow publishes.
+6. `git switch main && git pull --ff-only`, then `.\scripts\release.ps1 <version>`. It checks
+   that `main` is exactly `origin/main` (github#94: a `main` that is ahead is a local merge the
+   ruleset will never accept, and the script stops before any tag exists), finds the stamp for
+   `HEAD`'s tree and skips the suite, tags, and pushes the tag (never gated). The workflow
+   publishes.
 
 `node scripts/suite-stamp.mjs check` says what step 4 or 6 will do before you push, and
 `node scripts/suite-stamp.mjs list` shows every tree this machine has passed.
@@ -382,15 +388,18 @@ that can say what it trusted.
    this one's a judgment call, not "always."
 5. **Run the gates.** `npm run lint`, `node scripts/check-notice.mjs`, `node scripts/smoke.mjs`
    — and they run again on push via `.githooks/pre-push`, so a red suite cannot be released.
-6. **Tag, annotated**, with the release summary as the message, on `main`.
-7. **Push `main`, then the tag.** That order, so the workflow's main-ancestry guard cannot
-   lose the race. Everything below is what the workflow then does for you.
+6. **Get the commit onto `origin/main` first**: merge `develop → main` through a pull request
+   on the website — the ruleset refuses a direct push (github#94) — then `git switch main &&
+   git pull --ff-only`.
+7. **Tag, annotated**, with the release summary as the message, on that `main`, and **push the
+   tag.** The commit is already on `origin/main`, so the workflow's main-ancestry guard has no
+   race to lose. Everything below is what the workflow then does for you.
 8. **Build the plugin** — `node scripts/build-plugin.mjs` writes `main.js` and `styles.css`
    at the repo root (gitignored); `manifest.json` is tracked.
 9. **Create the release** and attach exactly those three:
    `gh release create <version> main.js manifest.json styles.css --notes-file <notes>`
 
-**Steps 7–8 by hand produce an unattested release**, and there is no way around that from a
+**Steps 8–9 by hand produce an unattested release**, and there is no way around that from a
 laptop. They are the *second* fallback for a broken workflow: try
 `gh workflow run release.yml --ref main -f tag=<version>` first, which runs a fixed
 `release.yml` against the tag that already exists and still attests. Hand-publishing is the
@@ -402,9 +411,10 @@ The engine is a port of Sigma.js under MIT, and a `main.js` or exported page wit
 copyright and permission notice is a licence violation, not a cosmetic slip. It went missing
 once (github#58): esbuild keeps only `/*!` comments, and the banner was a plain one. Since
 2.0.0 `node scripts/check-notice.mjs` builds both artifacts and reads the copyright line back
-out of each, and the pre-push hook runs it with no skip flag on every push to `develop` or
-`main` — the merge into `main` that *is* the release included. A release cannot be cut from a
-tree whose builds lack the notice, and the three attached files are the ones that build makes.
+out of each, and the pre-push hook runs it with no skip flag on every push to `develop`, and
+`release.yml` runs it again on the tag before anything is attested (the merge into `main`
+happens on the website, where no hook runs). A release cannot be cut from a tree whose builds
+lack the notice, and the three attached files are the ones that build makes.
 
 ## What the release must NOT contain
 
