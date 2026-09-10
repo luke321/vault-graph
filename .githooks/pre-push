@@ -358,7 +358,12 @@ EOF
 fi
 
 echo "pre-push: running the invariant suite (SKIP_SMOKE=1 to skip)..."
-node "$root/scripts/smoke.mjs" </dev/null
+# The suite is a child so a signal to this hook can take it down too: releasing the lock
+# while the run it guarded keeps driving Chrome would hand the next run a contended screen.
+node "$root/scripts/smoke.mjs" </dev/null &
+suite_pid=$!
+trap 'kill "$suite_pid" 2>/dev/null; release_lock; exit 1' INT TERM HUP
+wait "$suite_pid"
 suite_rc=$?
 release_lock
 trap - INT TERM HUP
