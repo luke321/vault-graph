@@ -1312,8 +1312,12 @@ the notes use. There is no second timer and no CSS transition: a transition woul
 clock and land whenever it liked, which is precisely the class of bug `animation.md` forbids.
 
 **The last frame of a bar's walk is the resting layout**, and it lands there by assignment, not
-by convergence: `barWalkEnd()` paints `barNow` exactly at the cascade's `converged` exit rather
-than trusting the final lerp. Measured on each fixture — hide the largest folder, watch the
+by convergence: `barWalkEnd()` paints `barNow` exactly rather than trusting the final lerp. It is
+called from inside `settle()` itself, not only from the cascade's `converged` exit branch — the
+400ms stall watchdog also calls `settle()` directly, and until github#78 that path skipped
+`barWalkEnd()` entirely, leaving a bar stuck at whatever share the last tick reached on any
+machine that stalls a frame. `settle()` is the one place every exit path converges, so that is
+where the bar walk gets landed too. Measured on each fixture — hide the largest folder, watch the
 runner-up grow to fill the row:
 
 | fixture | row | rest to target | distinct values seen | restored |
@@ -1392,9 +1396,14 @@ snap or a bar that outlives its folder.
 
 **This is what made the bar checks flaky, and the fix was to stop sleeping.** Once the bars
 moved, `count bars` read **63.807%** mid-walk where it expected 100% — a `sleep(700)` racing a
-1600ms cascade. Every fixed sleep after a state change is now `settleBars()`, which polls until
-no `--vg-share` changes. A time-based wait against an animation is a false failure waiting for
-a slow machine.
+1600ms cascade. Every fixed sleep after a state change became `settleBars()`, polling until no
+`--vg-share` changed between two 150ms reads — which was itself a false-positive trap, and
+github#78 is the second fix here: two equal CSS reads mean the page painted nothing between
+them, and a real machine can stall its own `requestAnimationFrame` loop for a beat without being
+done. `settleBars()` now polls `__vg.demo.busy()` to actual completion, the same primitive the
+suite's own `settle(p)` already used. A time-based wait, or a wait for "nothing changed," against
+an animation is a false failure waiting for a slow machine either way — only a flag the animation
+loop itself sets is authoritative.
 
 ```bash
 node scripts/smoke.mjs --only "count bars"      # the basis, the edge cases, hover, selection
