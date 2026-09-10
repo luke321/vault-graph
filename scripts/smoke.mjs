@@ -664,8 +664,7 @@ check("tags: a note one disc hides and the other shows arrives with the fill edg
       var H = window.__smokeHid, D = 180 / Math.PI, TWO = 2 * Math.PI;
       var sweep = function (a) { return (Math.PI / 2 - Math.atan2(a.y, a.x) + 2 * TWO) % TWO; };
       // the cascade reports the erase edge's angle; the fill edge trails it by the blade, and
-      // the arriving disc is packed inside the arc the fill edge has swept -- so a lit note sits
-      // inside that arc at every sample, wherever its resting seat is
+      // an arrival sits at its final seat -- so a lit note's seat is behind the fill edge
       var hand = __vg.lastCascade().handDeg;
       var fill = typeof hand === "number" ? Math.max(0, Math.min(360, hand - H.blade)) : null;
       var lit = 0, ahead = 0, ex = "";

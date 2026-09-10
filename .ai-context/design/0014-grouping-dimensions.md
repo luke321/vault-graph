@@ -182,83 +182,42 @@ after another and enabling the new ones one after another, with the two discs ne
 
 ### The hand
 
-`hand` keys the schedule on **angle**, not rank, and it has two edges of one rotating hand:
+`hand` is the simplest sweep that reads as motion. **Both discs sit in the same place, one
+shown and one hidden**, and two edges of one rotating hand swap them:
 
-- **The erase edge** sweeps once at constant angular speed, and **the dots under it toggle in
-  a serpentine along the circumference**. The circle is cut into columns of `HAND_COL` (9)
-  frames of hand time — 22.5° at the default lap — a column's dots toggle in radial order
-  spread across that time, and every second column runs the other way (`flow()`). Two
-  earlier takes were rejected by eye: the first keyed every dot on its own bearing, a crisp
-  radial front with no motion inside a wedge; the second dealt each wedge rows outermost
-  first, which reads as a radial peel. A dot fades **in the colour it had**: `state.dim` has
-  already flipped by then and `nodeColor` files through `fileGroup`, so `setDim` snapshots
-  every mover's colour into `LeftDisc.color` before the flip and `nodeColor` answers from it
-  for as long as `moveFrom` holds the note — the first take skipped this and every standing
-  dot repainted on the first frame.
-- **The fill edge** trails the erase edge by a fixed **blade** (`HAND_BLADE_DEG`, 45° — it
-  was 90°, and the user asked for the two hands closer together). Its columns are the same
-  serpentine, from the dots' **new** bearings. `arriveAt = max(lightAt, crossAt)`.
-  `__vg.handCol` sets the column live, as `__vg.handBlade` sets the blade.
-- **Both discs stay packed while their arcs move.** Asked for on seeing the third take: "the
-  vanishing disk and appearing disk should be packed all the time while their angle moves".
-  Every frame builds two arc plans (`planArc`): the disc being left over `[erase, 2π]` in its
-  own dimension (`inWorld`), the disc arriving over `[0, fill]`. Both keep **every** note of
-  their disc as a member at weight = alpha, the way a toggled wedge does, so a note arriving
-  later slides into a place it already holds and a fading one closes its own hole. Each plan
-  is handed its resting disc's row counts and spacing (`rowsHeld`, `spHeld`), and **every
-  note is pinned to its resting row** (`rowPin`, read in `placeCell`): the planner packs each
-  row by live weight, and rows never tick. That pin was the last of four fixes, each found
-  by measuring: rows derived from a growing arc ticked (worst frame 4,649 units); with rows
-  held, the serpentine parity still flipped on sparse rows (3,376); rescaling each note's
-  resting place along its wedge's arc worked on the maintainer's vault (603) and then failed
-  on the 10k fixture (19,274), because a group's sub-wedges interleave along the serpentine
-  and overlap by 10–15° in bearing, so a wedge has no one arc to rescale over. A dot taking
-  its first seat in a disc takes it outright (`seated`); the frame's radial easing walks the
-  rest. The switch no longer takes seats from `finalPos`: the arc plan over `[0, 2π]` is the
-  resting disc (the `arc:` check), so `settle()` stays a no-op.
-- **Over an arc, seams and the minimum wedge scale with the arc's share of the circle**
-  (`arcScale()`, read by `gapFor`, `seamAt` and the `MIN_SPAN` floor). They are absolute
-  angles at rest — a seam is `SEAM_ROWS` pitches at the row's radius, a wedge is at least 6° —
-  and inside a 100° arc holding thirty-two tags the seam cap of 45% and thirty minimum wedges
-  ate most of it, so the arriving disc read as a scatter at its front. Scaled, a partial disc
-  keeps the resting disc's proportions, and at the full circle the scale is 1.
+- **The erase edge** sweeps once at constant angular speed and takes a dot when it passes the
+  dot's **old** bearing (`delay = W × angleSweep(where it sits) ÷ 2π`). The dot fades over
+  one `FADE_FRAMES` where it stands — a fade also shrinks a dot, so the vicinity of the edge is
+  where dots grow smaller and vanish — **in the colour it had**: `state.dim` has already
+  flipped by then and `nodeColor` files through `fileGroup`, so `setDim` snapshots every
+  mover's colour into `LeftDisc.color` before the flip and `nodeColor` answers from it for as
+  long as `moveFrom` holds the note. The old disc is never re-laid-out.
+- **The fill edge** trails the erase edge by a fixed **blade** (`HAND_BLADE_DEG`, 45°) and
+  lights a dot at its **final** seat, taken straight from `finalPos` the moment the dot has
+  left, when it reaches the dot's **new** bearing. `arriveAt = max(fillAt(new bearing),
+  crossAt)`. A dot takes that seat outright (`seated`): easing it from where it stood would
+  draw it crossing the disc, and at 16 ms a frame the fade skips past any alpha threshold.
+- One lap of the erase edge is at least `HAND_SWEEP` (12) fades long, the span is that lap
+  plus one blade plus a fade, and the cascade reports the edge's angle as
+  `lastCascade().handDeg` (with `handLap`) for the checks. `__vg.handBlade` sets the blade.
 
-A note the old disc **hides** and the new one shows is an arrival, keyed like every other
-delay on its new bearing. That needs `setDim` to hand `regroup` `keepAlpha` — otherwise
-`syncAlpha` lights it before the cascade starts — and the block after the schedule that
-re-deals a fully-arriving group's delays by radius to stand aside for `hand`, or one seat
-takes another seat's delay and lights far ahead of the edge. Both were found on the
-maintainer's vault the day after the hand landed: 16 notes lit at the first sample, up to
-266° from 12 o'clock.
+So the frame needs **no plan at all**, and nothing between a note's weight and its position
+changes: the serpentine, the lattice, the rings and the hub are the resting disc's.
 
-So the frame needs **no plan at all**: targets are `finalPos` for every dot that has left, and
-nothing for a dot still fading out. One lap of the erase edge is at least `HAND_SWEEP` (12)
-fades long, and the span is that lap plus one blade plus a fade.
+**Four richer takes were built on 2026-09-10 and each rejected by eye**, and the record of
+them is the argument for this one. A row-by-row deal per wedge read as a radial peel. A column
+serpentine along the circumference, columns of nine frames alternating inward and outward, read
+as noise. Both discs re-packed every frame over their moving arcs — two arc plans a frame, every
+note pinned to its resting row, seams scaled with the arc — was measurably packed (0 dots
+outside their arc at every sample) and still not what was wanted: the wedges breathing as they
+re-packed. "Go back to a very simple animation: imagine both discs are in the same spot, one
+showing one hidden; the clock hand vanishes the showing one and shows the hidden one. No
+serpentine, no repacking, no wedge toggling." The arc planner (`planArc`, `__vg.arcLayout`)
+stays as the primitive it was; the switch does not use it.
 
-**Measured with the first take (a crisp radial front, blade 90°) on the demo fixture**, every
-animation frame, binning dots by bearing into 24 sectors of 15°: the old disc's lowest
-standing bearing ran 129 / 180 / 230 / 279 / 329° against the new disc's highest lit 37 / 89 /
-140 / 189 / 239° at 30–70%, the gap being the blade, and the two discs never shared a sector.
-Every lit dot is at its final seat — median radius error **0**, median bearing error **0** —
-against 32,530 dot-frames "near neither seat" for the arc-planned attempt below, and the frame
-stays at the 60 fps cadence because nothing is planned. That property survives the wedge flow
-unchanged: seats still come from `finalPos`.
-
-**Measured with the column serpentine (blade 45°, columns of 9 frames) on the maintainer's
-vault**, 525 notes, every frame, reading the edge's angle from `lastCascade().handDeg`:
-ordering the dots by column and, within a column, by radius in the column's direction, and
-counting consecutive pairs whose event does not come earlier, the **erase is in order for 469
-of 469 pairs** and the **fill for 360 of 485**; the fill's misses are the late pops below,
-whose arrival is pinned to their departure rather than their column.
-
-**Measured with the packed discs**, every sample, both switch directions: on the maintainer's
-vault **0 old dots ahead of the erase edge and 0 new dots beyond the fill edge** (48
-dot-samples at 359–360°, the seam), worst single-sample move of a visible dot **814 units**
-against 4,649 before the row pin, a fresh relayout after settle moving **0** notes, **16.3 ms
-a frame** for the two plans. On the 10k fixture: 0 ahead, 3 beyond, worst move 5,123 units —
-a 30° slide of the untagged wedge, which holds 56% of that disc, re-packing as its neighbours
-arrive — and **39 ms a frame**, so the 10k switch runs at about 25 fps. The frame cost is the
-two plans; the 525-note vault stays at the display cadence.
+**Measured on the maintainer's vault, every frame**, against `handDeg`: the highest lit
+bearing tracks the fill edge within one fade at every sample, 0 dots lit more than 6° ahead of
+it, 16 ms a frame with no plan.
 
 ### The cost, and the knob
 
