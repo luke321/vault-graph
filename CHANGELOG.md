@@ -30,6 +30,19 @@ published tag breaks every link to it.
 
 ---
 
+## 2.4.1 — 2026-09-10
+
+**The README's "Try it live" and feature-list links now go somewhere.** 2.4.0 shipped the docs
+as a real site but the README still carried the placeholder line from before the site resolved —
+"this line gets its links the moment it's live" — and GitHub Pages itself had never been switched
+on for the repository, so there was nothing to link to. Pages is enabled now, serving from
+`main`'s `docs/`, and the README points at it: [the live
+demo](https://luke321.github.io/vault-graph/demo/), [the feature
+gallery](https://luke321.github.io/vault-graph/features.html), and [the site
+itself](https://luke321.github.io/vault-graph/). Nothing in the plugin changed.
+
+---
+
 ## 2.4.0 — "Auto" — 2026-09-10
 
 **Write a note, link three people, and the disc beside you notices.** Refresh used to be the
