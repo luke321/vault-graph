@@ -98,18 +98,8 @@ const stripDemoAndDebugPlugin = {
   },
 };
 
-/* ------------------------------------------------------------------ styles --
- * styles.css is plugin/styles.css and src/page.css concatenated, and neither is anything
- * esbuild loads -- so on their own they are invisible to `--watch`, and a CSS edit never
- * reached the output while the process kept saying it was watching (github#98). This
- * registers both as watch inputs of the entry file, and regenerates the stylesheet from
- * `onEnd`, which esbuild fires after every build in either mode: the first one, and every
- * rebuild a change triggers. Registered as inputs rather than watched with `fs.watch`
- * because esbuild's watcher polls by path, so an editor that saves by writing a temp file
- * and renaming it over the original is seen like any other write; an `fs.watch` on the
- * file itself dies on that rename. The price is that a CSS edit rebuilds main.js too --
- * ~150ms, and the bytes are identical.
- */
+/* ------------------------------------------------------------------ styles -- */
+// github#98
 const ENTRY = join(ROOT, "plugin", "main.js");
 const STYLE_INPUTS = [join(ROOT, "plugin", "styles.css"), join(ROOT, "src", "page.css")];
 
