@@ -3563,6 +3563,8 @@ function mountVaultGraph(root, data, deps) {
         WIN.clearTimeout(cascadeRun.guard);
         cascadeRun = null;
       }
+      // github#78, design/0006 -- see changelog-detail
+      barWalkEnd();
       probeSample("pre-settle");
       moving.forEach(function (id) { alpha[id] = to[id]; });
       heatSig = "";
@@ -3969,7 +3971,7 @@ function mountVaultGraph(root, data, deps) {
                            msPerFrame: Math.round(msPerFrame * 1000) / 1000,
                            moving: moving.length, run: !!cascadeRun };
       if (busy || pr < 1 || resid > 0.5) cascadeRun.raf = WIN.requestAnimationFrame(step);
-      else { lastCascade.exit = "converged"; barWalkEnd(); settle(); }
+      else { lastCascade.exit = "converged"; settle(); }
     })();
   }
 
