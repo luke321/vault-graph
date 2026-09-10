@@ -64,6 +64,11 @@ measuring it: serve the page, drive it, read the numbers.
 
 - `git push` and merging into `develop` are separate asks, every time. `main` only ever
   receives `develop`.
+- **Only the orchestrator session pushes to `develop` or cuts a release.** A dispatched ticket
+  worktree implements, runs its own gates, and stops at its own branch — it never pushes past
+  that branch, never merges into `develop`, and never runs `release.ps1`, no matter how clean the
+  result. Integrating finished branches and shipping them is the orchestrator's job alone, so one
+  place is answerable for what's actually on `develop` and what a release contains.
 - **A release is the range, not the work in hand.** Everything it needs — a `CHANGELOG.md`
   section accounting for *every* merge since the last tag, every clip it embeds, every doc naming
   the version, the release body itself — is finished on `release/<version>` and read there before

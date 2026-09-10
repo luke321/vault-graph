@@ -4,7 +4,7 @@
 so an agent that looks for `AGENTS.md` by convention finds its way there instead of guessing, and
 it deliberately does not restate the laws: two copies of a rule become two different rules.
 
-Three things are worth knowing before you touch anything, all expanded in `CLAUDE.md`:
+Four things are worth knowing before you touch anything, all expanded in `CLAUDE.md`:
 
 - **Measure, don't reason.** The recurring failure here is arguing about the code instead of
   driving it: serve the page, drive it, read the numbers. `node scripts/smoke.mjs --only
@@ -28,7 +28,9 @@ Three things are worth knowing before you touch anything, all expanded in `CLAUD
   CDP, `app.plugins.setEnable(true)` then `enablePluginAndSave(id)`; never judge the plugin before
   `getPlugin(id)` is truthy.
 - **`git push`, merging into `develop`, and a full-suite run are each a separate ask, every
-  time.** None of them is implied by permission to do the work, or by how the last one went.
+  time.** None of them is implied by permission to do the work, or by how the last one went. A
+  dispatched ticket worktree stops at its own branch regardless — only the orchestrator pushes to
+  `develop` or cuts a release.
 
 `.ai-context/README.md` maps the design records; `.ai-context/code-map.md` and `code-index.md` are
 generated and let you jump to a line range instead of reading an 8,700-line file top to bottom.
