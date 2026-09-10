@@ -31,6 +31,7 @@ changing the layout or the animation.
 | `0009-the-host-persists-settings-not-the-page` | Settings go in and come back out; the page stores nothing, and only one host gets a gear |
 | `0010-one-browser-per-run` | Why the suite takes a free port per run, and how a lost race read as a flaky renderer |
 | `0011-a-live-rebuild-retakes-the-geometry-lock-at-rest` | Where the geometry lock's step goes when the note set changes, and the two routes rejected (github#72) |
+| `0013-a-tree-is-gated-once` | A green full suite run stamps the git tree it measured; the hook and `release.ps1` skip a stamped tree, and why not by commit, by time or by `SKIP_SMOKE` (github#93) |
 
 ### DDRs — `design/`
 

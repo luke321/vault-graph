@@ -141,6 +141,13 @@ everything else is a static read costing seconds at most, and what most of it pr
 damage to somebody else's software, or to somebody else. The lint gate fails closed on a
 clone that has not run `npm ci` — run it, then push.
 
+**A tree is gated once.** A green full run of `smoke.mjs` stamps the git *tree* it measured
+and the fixtures it ran against (`scripts/suite-stamp.mjs`, in the shared git common dir).
+The hook and `release.ps1` skip the suite when every commit being pushed carries such a
+stamp, and say which run they trust. A merge that changed the tree, or a fixture regenerated
+since, runs it as before. `node scripts/suite-stamp.mjs check [<rev>]` says what a push would
+do; `release.ps1 -ForceSuite` runs it anyway. `.ai-context/decisions/0013` has the reasoning.
+
 ## Branches, and how work reaches main
 
 **`develop` is where work lands. `main` only ever receives `develop`.**
@@ -151,7 +158,7 @@ your branch  ->  develop  ->  main
 
 `main` is what the Obsidian directory installs from and what a release is tagged on, so
 nothing should reach it that has not already been through `develop`, where the invariant
-suite runs on every push. The rule is enforced twice, because there are two ways to move a
+suite runs on every push whose tree it has not measured yet. The rule is enforced twice, because there are two ways to move a
 commit and neither mechanism can see the other:
 
 | | |

@@ -2746,3 +2746,46 @@ node scripts/smoke.mjs --only "Object.prototype"      # 7 pages per fixture, ~7s
 
 The layout equations were not touched: the golden snapshots on all three fixtures are the
 proof, and the check itself asserts plan parity on every page that has a plan.
+## A tree is gated once
+
+A green full run of the suite (no `--only`, `--vault`, `--url` or `--fast`, every fixture, no
+modified tracked files) stamps the git **tree** it measured together with the three fixtures it
+ran against (`scripts/suite-stamp.mjs`, one JSON file per tree under `suite-passed/` in the
+shared git common dir). `.githooks/pre-push` and `scripts/release.ps1` skip the suite when every
+commit in front of them carries a stamp against the fixtures now in the store, and print the
+run they trust. A partial run never stamps; a dirty tree never stamps; a stamp whose fixture
+has been regenerated, or whose unpinned fixture is older than the seven-day refresh, misses.
+
+```bash
+node scripts/suite-stamp.mjs --selftest       # hit on the same tree from a different commit, miss otherwise
+node scripts/suite-stamp.mjs check [<rev>]    # what a push of <rev> would do, and why
+node scripts/smoke.mjs --only "intro landed"  # ends with "not stamping this run: --only is not the full suite"
+```
+
+Why (github#93, decisions/0013): every release paid the suite more than once against one tree.
+`main` only ever receives `develop` — the ruleset requires a pull request with no bypass actors
+— and the merge commits for 2.3.0, 2.4.0 and 2.4.1 each have a tree byte-identical to the
+`develop` tip they merged, so a run on either measures the same content. Re-driving Chrome for
+identical content is cost with nothing it could catch that the first run would not.
+
+Measured 2026-09-10, one full run under the `suite` lock, 94/94 on all three fixtures:
+
+| Phase | Wall |
+|---|---|
+| build three pages | 8 s |
+| parallel lane, 4 Chromes, 60 checks per fixture | 133 s |
+| serial lane, 1 Chrome, 34 frame-sensitive checks per fixture | 446 s |
+| **total** | **587 s** |
+
+The static gates ahead of the suite total 10.5 s (lint 6.3 s). The PR into `main` is not a
+suite run: its one required check took 4 s on #95. `release.ps1`'s `git push origin HEAD` after
+a website merge runs nothing either: an up-to-date push hands a pre-push hook zero ref lines
+(tested against a bare remote), and a tag push is never gated. Tonight's two `develop` pushes
+landed 21 s and 29 s after their merge commits, so both were skipped by hand; the stamp is the
+same skip with a record of what it trusted.
+
+Keyed by tree and not by commit because the merge into `main` is a new commit by construction
+while its tree is not; not by time because `develop` moves several times a day and "a recent
+green run" cannot say which tree it saw. While it runs, both gates hold the machine-wide
+`suite` lock (`scripts/lock.mjs`) and release it on every exit path; a lock that cannot be had
+blocks the push and names the holder rather than running on top of it.
