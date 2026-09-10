@@ -64,6 +64,9 @@ state on the ordinary cascade instead.
 
 ### Smaller things
 
+- **The docs are a real site now**, not just files read on GitHub — a home page, the feature
+  gallery, and a live demo of the exported page anyone can click, hover and filter for
+  themselves, published alongside it. The README points at all three.
 - **The feature gallery is grouped by theme now**, seven of them, instead of sixteen sections in
   recording order — and the count bars, which shipped in 2.3.0 without ever getting an entry,
   finally have one: a crop of `folders`, where they actually move, rather than a recording of
