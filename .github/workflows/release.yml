@@ -16,12 +16,14 @@
 #   gh attestation verify main.js --repo luke321/vault-graph
 #
 # WHAT STAYED LOCAL. The invariant suite drives a real Chrome against three generated vaults
-# for minutes; release.ps1 runs it before it writes the tag, and .githooks/pre-push runs it
-# again on the push of main that carries the tagged commit. This workflow TRUSTS THE TAG and
-# runs the static gates instead -- lint, scope, network, PII, the Sigma notice, the comment
-# rule, the code map -- which need no vault and no browser and are about what the release
-# ships. The flow the two halves make up is written down in .ai-context/releasing.md, which
-# is the authority; change it in the same commit as this file.
+# for about ten minutes, and a tree is gated once (github#93): a green full run stamps the
+# tree it measured, and release.ps1 and .githooks/pre-push skip the suite for a tree that
+# already carries that stamp. The release branch's dry run is normally the one run; the
+# merge into main carries the same tree. This workflow TRUSTS THE TAG and runs the static
+# gates instead -- lint, scope, network, PII, the Sigma notice, the comment rule, the code
+# map -- which need no vault and no browser and are about what the release ships. The flow
+# the two halves make up is written down in .ai-context/releasing.md, which is the
+# authority; change it in the same commit as this file.
 
 name: release
 

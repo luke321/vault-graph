@@ -1,6 +1,7 @@
 
 import { attach, json } from "./cdp.mjs";
 import { leftmostScreen, leftWindowPos } from "./screen.mjs";
+import { FIXTURE_MAX_AGE_DAYS, describeFixture, record as recordPass } from "./suite-stamp.mjs";
 import { spawn, spawnSync } from "node:child_process";
 import { existsSync, mkdtempSync, rmSync, readFileSync, writeFileSync, readdirSync,
          renameSync, mkdirSync } from "node:fs";
@@ -4610,7 +4611,6 @@ function resolveVaults() {
   if (arg("url", "")) return [{ path: "", label: "the page passed with --url" }];
 
   const out = [];
-  const FIXTURE_MAX_AGE_DAYS = 7;
   const GENERATORS = ["make-demo-vault.mjs", "make-test-vault.mjs", "make-shape-vault.mjs"];
   const FIXTURE_FORMAT = 1;
 
@@ -4674,7 +4674,8 @@ function resolveVaults() {
       console.log(`  note: ${name}/ exists in this checkout and is IGNORED -- the suite uses ` +
                   `the shared store (${dir}); pass --vault to use a specific vault on purpose`);
     }
-    out.push({ path: dir, label });
+    const desc = describeFixture(dir);
+    out.push({ path: dir, label, fixture: desc ? { name, ...desc } : null });
   };
 
   gen("make-demo-vault.mjs", [], "demo-vault", "the demo vault (sparse tail, 2 dense years)");
@@ -4795,6 +4796,19 @@ async function main() {
       const f = failures.get(v.label) || 0, t = ran.get(v.label) || 0;
       console.log(`  ${f ? "FAIL" : " ok "}  ${t - f}/${t}  ${v.label}`);
     }
+  }
+
+  // github#93, decisions/0013
+  const partial = ONLY.length ? "--only" : argAll("vault").length ? "--vault" : arg("url", "") ? "--url"
+                : FAST ? "--fast" : vaults.some((v) => !v.fixture) ? "an unstamped fixture" : "";
+  if (!worst && !partial) {
+    let checks = 0;
+    for (const t of ran.values()) checks += t;
+    const r = recordPass({ fixtures: vaults.map((v) => v.fixture), checks });
+    console.log(r.wrote ? `stamped tree ${r.tree.slice(0, 7)} as passed: ${r.wrote}`
+                        : `not stamping this run: ${r.why}`);
+  } else if (!worst) {
+    console.log(`not stamping this run: ${partial} is not the full suite`);
   }
   if (worst) {
     console.log("");
