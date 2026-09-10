@@ -4,7 +4,34 @@ import { mkdirSync, writeFileSync, readFileSync, rmSync, existsSync, readdirSync
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
-const ROOT = join(tmpdir(), "vault-graph-locks");
+/**
+ * ONE ROOT FOR EVERY SISTER PROJECT. The lock exists because two suites cannot drive Chrome at
+ * once and two recorders cannot own the screen at once -- and a machine has one Chrome and one
+ * screen no matter which repository the suite belongs to. A per-repo lock directory looked
+ * right and protected nothing across them: Vault Graph's suite and Vault Shelf's suite each
+ * held a lock nobody else could see, and ran together anyway.
+ *
+ * Every worktree of every sister project shares this one directory, in the OS temp dir rather
+ * than in any worktree.
+ */
+const ROOT = join(tmpdir(), "obsidian-vault-locks");
+
+/* The per-repo roots this replaced. A run that took its lock before the change still holds it
+ * there, and a lock nobody can see is worse than no lock, so they are honoured until they age
+ * out and can then be deleted. */
+const LEGACY_ROOTS = [join(tmpdir(), "vault-graph-locks"), join(tmpdir(), "vault-shelf-locks")];
+
+/** A legacy lock of this name that is still inside its stale window, if there is one. */
+function legacyHold(n) {
+  for (const root of LEGACY_ROOTS) {
+    const meta = (() => {
+      try { return JSON.parse(readFileSync(join(root, n + ".lock", "owner.json"), "utf8")); }
+      catch { return null; }
+    })();
+    if (meta && meta.at && Date.now() - meta.at <= staleWindow(n)) return { root, meta };
+  }
+  return null;
+}
 const STALE_MS = { record: 20 * 60 * 1000, suite: 30 * 60 * 1000 };
 const DEFAULT_STALE = 20 * 60 * 1000;
 const DEFAULT_TIMEOUT = 45 * 60 * 1000;
@@ -46,6 +73,24 @@ async function acquire() {
   let announced = false;
 
   for (;;) {
+    /* BEFORE the directory is claimed, not after: a legacy lock lives somewhere else, so
+     * creating this one would succeed and the run would start on top of the other. */
+    const stale = legacyHold(name);
+    if (stale) {
+      if (!announced) {
+        console.log("WAITING for " + name + " -- held in a legacy root (" + stale.root + ") by " +
+                    (stale.meta.owner || "unknown") + " for " +
+                    Math.round((Date.now() - stale.meta.at) / 1000) + "s");
+        announced = true;
+      }
+      if (Date.now() > deadline) {
+        console.log("BUSY " + name + " -- gave up after " + Math.round(timeoutMs / 1000) + "s");
+        process.exit(1);
+      }
+      await sleep(POLL_MS);
+      continue;
+    }
+
     try {
       mkdirSync(dir);
       writeFileSync(metaFor(name), JSON.stringify({ owner: owner, at: Date.now(), pid: process.pid }, null, 1));
@@ -100,6 +145,14 @@ function release() {
 }
 
 function status() {
+  for (const n of ["record", "suite"]) {
+    const stale = legacyHold(n);
+    if (stale) {
+      console.log(n + "  owner=" + (stale.meta.owner || "unknown") + "  age=" +
+                  Math.round((Date.now() - stale.meta.at) / 1000) + "s  (legacy root " +
+                  stale.root + ")");
+    }
+  }
   if (!existsSync(ROOT)) { console.log("no locks held (" + ROOT + ")"); return; }
   const held = readdirSync(ROOT).filter((f) => f.endsWith(".lock"));
   if (!held.length) { console.log("no locks held (" + ROOT + ")"); return; }
