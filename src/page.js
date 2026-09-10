@@ -421,6 +421,14 @@ function mountVaultGraph(root, data, deps) {
       '</svg>';
   }
 
+  // github#76
+  function drillSvg() {
+    return '<svg viewBox="0 0 16 16" aria-hidden="true">' +
+      '<circle cx="8" cy="8" r="5.5" fill="none" stroke="currentColor" stroke-width="1.25"/>' +
+      '<circle cx="8" cy="8" r="2" fill="currentColor"/>' +
+      '</svg>';
+  }
+
   /** @param {boolean} on */
   function pinSvg(on) {
     var head = '<circle cx="8" cy="5.6" r="3.35" ' +
@@ -665,6 +673,18 @@ function mountVaultGraph(root, data, deps) {
     var g = groupOf(id);
     if (!rootDepth || g === UNLINKED) return g;
     return inRootA(graph.getNodeAttributes(id)) ? absOf(g) : g;
+  }
+
+  // github#76 -- the nav gestures: what a legend row would drill into, or null if it can't
+  /** @param {string} g a group of the CURRENT basis @returns {string | null} */
+  function drillTargetForGroup(g) {
+    if (!g || g === UNLINKED || g === DIRECT) return null;
+    return identOf(g);
+  }
+  /** @param {string} g a group of the CURRENT basis @param {string} sb its subfolder, "" for none @returns {string | null} */
+  function drillTargetForSub(g, sb) {
+    if (!sb) return null;
+    return keyOf(g, sb);
   }
 
   /** @type {Record<string, string[]>} */
@@ -5276,7 +5296,30 @@ function mountVaultGraph(root, data, deps) {
       }).join("");
     };
 
-    setHTML($("legend"), names.map(function (g) {
+    // github#76: the way back, at the top of the nav -- a root label and a back action,
+    // so a drill is never a one-way door. Crumb i's path is the root at depth i (i=0 is
+    // the vault itself); the trail is short (rootDepth deep) so no cap is needed here.
+    var rootBarHTML = "";
+    if (rootDepth) {
+      var crumbLabels = ["Vault"].concat(rootSegs);
+      var parentPath = rootDepth > 1 ? rootSegs.slice(0, rootDepth - 1).join("/") : "";
+      rootBarHTML = '<div class="lgroot">' +
+        '<button type="button" class="lgback" data-rootto="' + esc(parentPath) + '" title="Back to ' +
+          esc(crumbLabels[crumbLabels.length - 2]) + '">&#8592;</button>' +
+        '<nav class="lgcrumbs" aria-label="Current root">' +
+        crumbLabels.map(function (nm, i) {
+          var isLast = i === crumbLabels.length - 1;
+          var path = i === 0 ? "" : rootSegs.slice(0, i).join("/");
+          var sep = i > 0 ? '<span class="sep" aria-hidden="true">/</span>' : "";
+          return sep + (isLast
+            ? '<span class="lgcrumb cur">' + esc(nm) + '</span>'
+            : '<button type="button" class="lgcrumb" data-rootto="' + esc(path) +
+              '" title="' + esc(nm) + '">' + esc(nm) + '</button>');
+        }).join("") +
+        '</nav></div>';
+    }
+
+    setHTML($("legend"), rootBarHTML + names.map(function (g) {
       var vis = !isHidden(g);
       var hasSubs = state.dim === "folder" &&
                     (groupHasPinnedSub(g) ||
@@ -5410,6 +5453,11 @@ function mountVaultGraph(root, data, deps) {
         state.hiddenSub[a.folder + "/" + d.slice(0, i + 1).join("/")] = true;
       });
     };
+
+    // github#76: the root bar's crumbs and back action
+    each("[data-rootto]", function (b) {
+      b.onclick = function () { setRoot(b.getAttribute("data-rootto") || null); };
+    });
 
     // design/0006
     each("[data-only]", function (b) {
@@ -6033,19 +6081,29 @@ function mountVaultGraph(root, data, deps) {
 
     // github#34
     // github#3
-    // github#3
     /**
-     * @param {number} x @param {number} y
-     * @param {string} current                       slot key in use, "" for none
-     * @param {(key: string | null) => void} onPick
-     * @param {string} autoKey                       the slot with no override, "" for none
-     * @param {boolean} visShown @param {() => void} onToggleVisible
-     * @param {boolean} [byFolderOn] @param {(() => void) | null} [onToggleByFolder]
-     * @param {boolean} [tintOn] @param {(() => void) | null} [onToggleTint]
+     * @typedef {Object} CtxMenuOpts
+     * @property {string} current                        slot key in use, "" for none
+     * @property {(key: string | null) => void} onPick
+     * @property {string} [autoKey]                       the slot with no override, "" for none
+     * @property {boolean} [visShown] @property {(() => void) | null} [onToggleVisible]
+     * @property {boolean} [byFolderOn] @property {(() => void) | null} [onToggleByFolder]
+     * @property {boolean} [tintOn] @property {(() => void) | null} [onToggleTint]
+     * @property {string} [drillLabel]                    github#76: the folder a drill item names
+     * @property {(() => void) | null} [onDrill]           github#76
      */
-    function openCtxMenu(x, y, current, onPick, autoKey, visShown, onToggleVisible, byFolderOn, onToggleByFolder, tintOn, onToggleTint) {
+    // github#76: was ten positional args; a drill item is where that becomes one options bag
+    /**
+     * @param {number} x @param {number} y @param {CtxMenuOpts} opts
+     */
+    function openCtxMenu(x, y, opts) {
       var el = $("ctxmenu");
       if (!el) return;
+      var current = opts.current, onPick = opts.onPick, autoKey = opts.autoKey || "";
+      var visShown = opts.visShown, onToggleVisible = opts.onToggleVisible;
+      var byFolderOn = opts.byFolderOn, onToggleByFolder = opts.onToggleByFolder;
+      var tintOn = opts.tintOn, onToggleTint = opts.onToggleTint;
+      var onDrill = opts.onDrill, drillLabel = opts.drillLabel || "";
       var pal = paletteInfo();
       var sws = swatchButtonsHTML(pal, {
         role: "menuitemradio", current: current, autoKey: autoKey,
@@ -6070,9 +6128,14 @@ function mountVaultGraph(root, data, deps) {
         ? '<button class="vis" data-tint aria-pressed="' + tintOn + '" title="' +
           tintTitle + '">' + dotSvg(tintOn) + '<span>Colour by folder</span></button>'
         : "";
+      // github#76
+      var drillHTML = onDrill
+        ? '<button class="vis" data-drill title="Drill into ' + esc(drillLabel) + '">' +
+          drillSvg() + '<span>Drill into ' + esc(drillLabel) + '</span></button>'
+        : "";
       setHTML(el, '<div class="sws">' + sws + '</div>' +
                   '<button class="auto" data-key="" aria-pressed="' + !current +
-                  '" title="Back to automatic">Auto</button>' + visHTML + byFolderHTML + tintHTML);
+                  '" title="Back to automatic">Auto</button>' + visHTML + byFolderHTML + tintHTML + drillHTML);
       Array.prototype.forEach.call(el.querySelectorAll("[data-key]"), /** @param {HTMLElement} b */ function (b) {
         b.onclick = function () { onPick(b.getAttribute("data-key") || null); closeCtxMenu(); };
       });
@@ -6084,6 +6147,10 @@ function mountVaultGraph(root, data, deps) {
       }
       if (onToggleTint) {
         el.querySelector("[data-tint]").onclick = function () { onToggleTint(); closeCtxMenu(); };
+      }
+      // github#76
+      if (onDrill) {
+        el.querySelector("[data-drill]").onclick = function () { onDrill(); closeCtxMenu(); };
       }
       el.hidden = false;
       var root0 = ROOT.getBoundingClientRect();
@@ -6106,13 +6173,20 @@ function mountVaultGraph(root, data, deps) {
         var isUnlinked = g === UNLINKED;
         var keptSeparate = isUnlinked && !unlinkedByFolder;
         // github#76
-        openCtxMenu(ev.clientX, ev.clientY, folderColors[identOf(g)] || groupSlot[g] || "",
-                    function (key) { pickColor(g, key); }, groupAutoSlot[g] || "",
-                    !hiddenByDefault(g), function () { pickVisible(g); },
-                    isUnlinked ? unlinkedByFolder : undefined,
-                    isUnlinked ? function () { setUnlinkedByFolder(!unlinkedByFolder, true); } : undefined,
-                    keptSeparate ? unlinkedTintByFolder : undefined,
-                    keptSeparate ? function () { setUnlinkedTintByFolder(!unlinkedTintByFolder, true); } : undefined);
+        var gDrill = drillTargetForGroup(g);
+        openCtxMenu(ev.clientX, ev.clientY, {
+          current: folderColors[identOf(g)] || groupSlot[g] || "",
+          onPick: function (key) { pickColor(g, key); },
+          autoKey: groupAutoSlot[g] || "",
+          visShown: !hiddenByDefault(g),
+          onToggleVisible: function () { pickVisible(g); },
+          byFolderOn: isUnlinked ? unlinkedByFolder : undefined,
+          onToggleByFolder: isUnlinked ? function () { setUnlinkedByFolder(!unlinkedByFolder, true); } : undefined,
+          tintOn: keptSeparate ? unlinkedTintByFolder : undefined,
+          onToggleTint: keptSeparate ? function () { setUnlinkedTintByFolder(!unlinkedTintByFolder, true); } : undefined,
+          drillLabel: g,
+          onDrill: gDrill !== null ? function () { setRoot(gDrill); } : undefined
+        });
         return;
       }
       var subBtn = t.closest(".lgs[data-hsub]");
@@ -6124,11 +6198,42 @@ function mountVaultGraph(root, data, deps) {
         var picked = idx.map(function (i) { return subs[i]; });
         // github#76
         var cur = idx.length === 1 ? (subfolderColors[keyOf(f, picked[0])] || "") : "";
-        openCtxMenu(ev.clientX, ev.clientY, cur,
-                    function (key) { pickSubColors(f, picked, key); });
+        var subDrill = idx.length === 1 ? drillTargetForSub(f, picked[0]) : null;
+        openCtxMenu(ev.clientX, ev.clientY, {
+          current: cur,
+          onPick: function (key) { pickSubColors(f, picked, key); },
+          drillLabel: picked[0],
+          onDrill: subDrill !== null ? function () { setRoot(subDrill); } : undefined
+        });
         return;
       }
       // design/0003
+    });
+
+    // github#76: double-click a folder row in the nav to drill into it. Listens on "click"
+    // and reads ev.detail (the native double-click counter) instead of "dblclick" itself:
+    // the row's own single-click handler rebuilds the legend (buildLegend()) on every
+    // click, and swapping the target element out between the two clicks of a double-click
+    // stops Chrome from ever firing "dblclick" -- measured, not assumed. detail still
+    // reaches 2 because the browser counts clicks independently of target identity.
+    $("legend").addEventListener("click", function (ev) {
+      if (ev.detail < 2) return;
+      var t = ev.target instanceof Element ? ev.target : null;
+      if (!t) return;
+      var gBtn = t.closest(".lg[data-g]");
+      if (gBtn) {
+        var gPath = drillTargetForGroup(gBtn.getAttribute("data-g"));
+        if (gPath !== null) setRoot(gPath);
+        return;
+      }
+      var subBtn = t.closest(".lgs[data-hsub]");
+      if (subBtn) {
+        var f = subBtn.getAttribute("data-hsub");
+        var idx = subBtn.getAttribute("data-idx").split(",").map(Number);
+        if (idx.length !== 1) return;
+        var subPath = drillTargetForSub(f, (subOrder[f] || [])[idx[0]]);
+        if (subPath !== null) setRoot(subPath);
+      }
     });
 
     /** @param {string} folder @param {string | null} key */
