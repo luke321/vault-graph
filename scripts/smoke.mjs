@@ -711,6 +711,42 @@ check("tags: a nested tag earns a sub-wedge, exactly as a subfolder does", async
   };
 });
 
+check("arc: a plan over the whole circle is the resting disc, and over half of it stays in half",
+async (p) => {
+  await settle(p);
+  const r = await p.j(`(function(){
+    var TWO = 2 * Math.PI;
+    var sweep = function (x, y) { return ((Math.PI / 2 - Math.atan2(y, x)) % TWO + TWO) % TWO; };
+    var rest = {}, ids = [];
+    __vg.graph.forEachNode(function (id, a) {
+      if ((__vg.alpha[id] || 0) > 0.5 && !__vg.isOrphan(id)) { rest[id] = [a.x, a.y]; ids.push(id); }
+    });
+    var full = __vg.arcLayout(0, TWO) || {};
+    var off = 0, worst = 0;
+    ids.forEach(function (id) { var q = full[id]; if (!q) { off++; return; }
+      var d = Math.hypot(q.x - rest[id][0], q.y - rest[id][1]); if (d > 0.1) off++; if (d > worst) worst = d; });
+    var half = __vg.arcLayout(0, Math.PI) || {};
+    var inside = 0, outside = 0, worstOut = 0;
+    ids.forEach(function (id) { var q = half[id]; if (!q) { outside++; return; }
+      var sw = sweep(q.x, q.y);
+      if (sw <= Math.PI + 0.02) inside++; else { outside++; worstOut = Math.max(worstOut, sw - Math.PI); } });
+    // and the disc on screen is untouched by either question
+    var moved = 0;
+    __vg.graph.forEachNode(function (id, a) { var h = rest[id]; if (h && Math.hypot(a.x - h[0], a.y - h[1]) > 0.1) moved++; });
+    return { n: ids.length, off: off, worst: +worst.toFixed(3), inside: inside, outside: outside,
+             worstOut: +(worstOut * 180 / Math.PI).toFixed(2), moved: moved };
+  })()`);
+  // github#86, design/0014 -- the arc-bounded planner behind the dimension switch
+  const ok = r.off === 0 && r.outside === 0 && r.moved === 0;
+  return {
+    ok,
+    detail: `${r.n} ring notes: over [0, 2pi] ${r.off} sit off the resting disc (worst ${r.worst}); ` +
+            `over [0, pi] ${r.inside} inside the half and ${r.outside} outside` +
+            (r.outside ? ` (worst ${r.worstOut} deg over)` : "") +
+            `; the disc on screen moved ${r.moved}`,
+  };
+});
+
 check("tags: the colour panel says which dimension owns it", async (p) => {
   const r = await p.j(`(function(){
     var gear = document.querySelector("#vg-gear");

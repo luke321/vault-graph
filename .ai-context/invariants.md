@@ -295,6 +295,28 @@ passes leave **0**, and a third changes nothing. The check compares the landing 
 fresh relayout in both dimensions and asserts the round trip is exact — 0 of 1,403, 0 of
 10,002, 0 of 954, 0 of 891.
 
+## A plan over the whole circle is the resting disc, and over half of it stays in half
+
+github#86, design/0014. The planner can lay the disc out over an arc `[from, to]` instead of
+the circle (`planArc`, `__vg.arcLayout(from, to)`). Two claims hold it to the disc it already
+draws:
+
+```bash
+node scripts/smoke.mjs --only "arc:"
+```
+
+- **`arcLayout(0, 2π)` is the resting layout** — 0 ring notes off it, worst 0.000 units — on
+  all four fixtures. An arc of the whole circle must change nothing, or the arc maths has an
+  offset in it.
+- **`arcLayout(0, π)` puts every ring note inside the half** — 0 outside, on all four
+  fixtures (815 / 824 / 1,370 / 9,873 ring notes). Compressing the whole disc into a smaller
+  arc shifts a dot in exact proportion to its bearing: 10% → median 18°, max 36°.
+- **Neither question touches the disc on screen** — 0 notes moved after both.
+
+The dimension switch does not use this to draw its new disc — it takes seats from `finalPos`,
+which is exact — but the primitive is what a half-disc comparison or a clockwise wipe would be
+built on, and this is the check that keeps it honest.
+
 ## The rings are independent
 
 Toggling an inner-band group must not move the outer band. Measured, an `05` toggle

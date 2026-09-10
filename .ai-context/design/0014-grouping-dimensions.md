@@ -168,46 +168,77 @@ The tag vault **hashes only its own generator**. One shared list would have move
 digests and made every worktree re-cut every fixture on the shared store, which is a race
 several agents lose at once.
 
-## A clock hand sweeps the old disc away and the new one in
+## A clock hand with two edges, and a planner that can draw an arc
 
 A dimension switch moves **every** note, and the cascade default is tuned for the opposite
 case — a handful of movers among a settled disc (github#49). It staggers departures across the
 first 35% of the span and forces arrivals into the back 45%, so the old disc **empties before
-the new one lands**.
+the new one lands**. github#76's `cross` opt fixed the emptying and the switch still read as a
+dissolve, because `ins` and `outs` are sorted clockwise but **`moves` are not** — note-index
+order — and on a dimension switch every note is a move.
 
-github#76 already fixed that emptying for a root change with its `cross` opt, which puts
-departures and arrivals on one sweep. Borrowing it kept the disc on screen, and it still did
-not read as motion. The reason was the **order**, not the pacing: `ins` and `outs` are sorted
-clockwise, but **`moves` are not** — they keep `Object.keys(movesFrom)` order, which is
-note-index order. On a dimension switch every note is a move, so every dot left at a time
-unrelated to where it sat. A dissolve.
+What was asked for instead: *a clock hand moving over the disc, toggling the old wedges off one
+after another and enabling the new ones one after another, with the two discs never colliding.*
 
-`hand` keys the schedule on **angle** instead of on rank — `delay = W × angleSweep(where the
-dot is) ÷ 2π` — so one hand crosses the disc at constant angular speed. The wedge under the
-hand switches off, and each note re-arrives a constant **2.5 fade lengths** behind its own
-departure, so the new disc lights up just behind the hand. That constant gap is what keeps *a
-fade never reverses* true by construction rather than by a floor. A dot with no bearing of its
-own yet — an arrival — is keyed on the bearing it is going to.
+### The hand
 
-**Measured on the demo fixture, binning the dots still sitting in their old seats into 12
-clock sectors** (`#` full, `+` half, `.` a few, blank empty), sampling every animation frame:
+`hand` keys the schedule on **angle**, not rank, and it has two edges of one rotating hand:
 
-| | 15% | 30% | 45% | 60% | arcs at the midpoint |
+- **The erase edge** sweeps once at constant angular speed. A note starts fading when the edge
+  passes its **old** bearing (`delay = W × angleSweep(where it sits) ÷ 2π`) and has left one
+  fade later. The old disc is **not re-laid-out**: a dot fades where it stands.
+- **The fill edge** trails the erase edge by a fixed **blade** (`HAND_BLADE_DEG`, 90°). A note
+  that has left takes its **final** seat straight from `finalPos` and waits there, dark, until
+  the fill edge reaches its **new** bearing. `arriveAt = max(fillAt(new bearing), crossAt)`.
+
+So the frame needs **no plan at all**: targets are `finalPos` for every dot that has left, and
+nothing for a dot still fading out. One lap of the erase edge is at least `HAND_SWEEP` (12)
+fades long, and the span is that lap plus one blade plus a fade.
+
+**Measured on the demo fixture, every animation frame**, binning dots by bearing into 24
+sectors of 15° and classifying each against its old seat and its final seat:
+
+| | 30% | 40% | 50% | 60% | 70% |
 |---|---|---|---|---|---|
-| `cross` (rank) | `[############]` | `[++++++++##++]` | `[+++++...++++]` | `[............]` | **0** |
-| `hand` (angle) | `[ +##########]` | `[    ########]` | `[      +#####]` | `[        +###]` | **1** |
+| old disc, lowest bearing still standing | 129° | 180° | 230° | 279° | 329° |
+| new disc, highest bearing lit | 37° | 89° | 140° | 189° | 239° |
+| sectors holding both | **0** | **0** | **0** | **0** | **0** |
 
-The dot totals at those points are within 1% of each other — 1208 vs 1221, 941 vs 940, 660 vs
-669 — so this changed the **direction** of the motion, not its pace. The void grows clockwise
-from 12 o'clock and the survivors stay one contiguous arc; under `cross` every sector thinned
-at once.
+The two discs **never share a sector**; the gap between them is the blade. Every lit dot is at
+its final seat — median radius error **0**, median bearing error **0** — against 32,530
+dot-frames "near neither seat" for the arc-planned attempt below. The old disc erases as one
+contiguous clockwise void (`[ +##########]` → `[    ########]` → `[      +#####]`), and the
+frame stays at the 60 fps cadence because nothing is planned.
 
-The disc also never empties: the emptiest frame holds **1122 of 1403** dots, against **526** on
-the sequential schedule that shipped before either opt.
+### The cost, and the knob
 
-Positions are untouched — this is a schedule — so the serpentine, the lattice and the resting
-sizes are the same numbers they were. `cross` is left exactly as github#76 wrote it, for the
-root change it was built for.
+A note may not arrive before it has left (*a fade never reverses*), so a note whose new bearing
+is more than one blade **behind** its old one lights **late**: its seat is already behind the
+fill edge when it becomes free, and it pops in there. The fraction is a formula in the blade:
+`(1 − blade/360°)² ÷ 2`. Measured **373 of 1,370** movers at 90° (formula 28%); it would be
+39% at 43° and 12.5% at 180°, and 0 only when the fill edge waits a whole lap — which is the
+sequential swap that was rejected. `__vg.handBlade = <degrees>` sets it live.
+
+### Why the new disc is not re-planned into the swept arc
+
+The first version of this planned the new disc over the arc the hand had swept, `[0, φ]`, so
+it grew behind the blade. The planner can do that now — see below — and it was the wrong tool
+here: a group's arc share over a partial arc with partial membership does not reproduce its
+share of the final disc, so dots slid as the arc grew (`decision` +0.5°, `evergreen` +12°,
+`(untagged)` +30° at 75%, cumulative in order). `finalPos` is exact and free.
+
+### The planner can draw an arc
+
+`planArc = { from, to }` (sweep radians, 0 at 12 o'clock, clockwise; `null` is the whole
+disc) is honoured by `gapFor`, `seamAt`, `allocateBand`, the row and density formulas in
+`buildWedgePlan`, and every angle in `ringsLayout`; a partial disc has two open ends and skips
+the wrap-seam fit. `__vg.arcLayout(from, to)` lays the visible disc out over an arc without
+touching it. Checked on all four fixtures: over `[0, 2π]` it **is** the resting disc (0 notes
+off, worst 0.000), and over `[0, π]` every ring note lands inside the half. Compressing the
+whole disc into a smaller arc shifts a dot exactly in proportion to its bearing (10% → median
+18°, max 36°). This is the primitive that unlocks a half-disc comparison, a clockwise wipe, or
+a growing partial disc where that *is* the picture — none of which this switch turned out to
+need.
 
 ## The switch needs two layout passes
 

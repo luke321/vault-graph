@@ -722,6 +722,15 @@ function mountVaultGraph(root, data, deps) {
     return f ? f.dirs : [];
   }
 
+  /**
+   * github#86, design/0014 -- everything a dimension owns that the planner reads
+   * @typedef {Object} LeftDisc
+   * @property {"folder" | "tag"} dim
+   * @property {Record<string, string[]>} subOrder
+   * @property {Record<string, boolean> | null} bandLock
+   * @property {GeomLock | null} geomLock
+   */
+
   /** @type {Record<string, string> | null} */
   var moveFrom = null;
 
@@ -1333,7 +1342,8 @@ function mountVaultGraph(root, data, deps) {
   /** @param {number} nGroups @param {string} band */
   function gapFor(nGroups, band) {
     var g = seamAngle(band, 1);
-    return g * nGroups > Math.PI ? Math.PI / Math.max(1, nGroups) : g;
+    var half = arcSpan() / 2;
+    return g * nGroups > half ? half / Math.max(1, nGroups) : g;
   }
 
   var SEAM_CAP = 0.45;
@@ -1343,13 +1353,19 @@ function mountVaultGraph(root, data, deps) {
     return which === "lead" ? c.pLead + sm.gap / 2 : c.pTrail - sm.gap / 2;
   }
 
+  // github#86, design/0014 -- a plan over an ARC of the circle; null is the whole disc
+  /** @type {{ from: number, to: number } | null} */
+  var planArc = null;
+  function arcSpan() { return planArc ? planArc.to - planArc.from : 2 * Math.PI; }
+  function arcFrom() { return planArc ? planArc.from : 0; }
+
   /** @param {number} r @param {number} nBoundaries @param {string} band */
   function seamAt(r, nBoundaries, band) {
     var g = r > 1e-6 ? (SEAM_ROWS * pitchUnits(band)) / r : 0;
     var tot = g * nBoundaries;
-    var cap = 2 * Math.PI * SEAM_CAP;
+    var cap = arcSpan() * SEAM_CAP;
     if (tot > cap) { g *= cap / tot; tot = cap; }
-    return { gap: g, avail: 2 * Math.PI - tot };
+    return { gap: g, avail: arcSpan() - tot };
   }
 
   /**
@@ -1358,7 +1374,7 @@ function mountVaultGraph(root, data, deps) {
    * @param {AllocOpts} opts
    */
   function allocateBand(list, weightOf, opts) {
-    var TWO = 2 * Math.PI;
+    var TWO = arcSpan();
     var tot = 0;
     /** @type {Record<string, { w: number }>} */
     var gw = dict();
@@ -1568,7 +1584,7 @@ function mountVaultGraph(root, data, deps) {
       var base = isInner ? geomLock.r0 : geomLock.rOuter;
       if (!(thick > 0) || !(n > 0.5)) return REF_ROWS;
       var T = thick * scale, R = (base + thick / 2) * scale;
-      var rw = Math.round(T / Math.sqrt(2 * Math.PI * R * T / n));
+      var rw = Math.round(T / Math.sqrt(arcSpan() * R * T / n));
       return rw < 1 ? 1 : rw > 200 ? 200 : rw;
     };
     /** @type {BandNum} */
@@ -1662,7 +1678,7 @@ function mountVaultGraph(root, data, deps) {
     }
 
     var TOTAL = planTotal;
-    var MIN = MIN_SPAN, TWO = 2 * Math.PI;
+    var MIN = MIN_SPAN, TWO = arcSpan();
     var smallAt = TOTAL * (MIN / TWO);
     /** @type {Record<string, boolean>} */
     var groupInner = {};
@@ -1719,7 +1735,7 @@ function mountVaultGraph(root, data, deps) {
       return Math.min(DENSITY_MAX, Math.sqrt(full / now));
     };
     var r0 = geomLock ? geomLock.r0 : Math.max(1.5, HOLE * Math.sqrt(
-      Math.max(1, TOTAL) / (Math.PI * (1 - HOLE * HOLE))));
+      Math.max(1, TOTAL) / ((arcSpan() / 2) * (1 - HOLE * HOLE))));
 
     // github#5
     /** @param {number} span @param {number} n @param {number} st @param {number} [sp] */
@@ -1888,7 +1904,7 @@ function mountVaultGraph(root, data, deps) {
         return { sp: sp, rows: rk > 0 ? rk : 1 };
       }
       var T = thick * scale, R = (base + thick / 2) * scale;
-      var s = Math.sqrt(2 * Math.PI * R * T / n);
+      var s = Math.sqrt(arcSpan() * R * T / n);
       var rw = Math.round(T / s);
       if (rw < 1) rw = 1;
       if (rw > 200) rw = 200;
@@ -2207,7 +2223,7 @@ function mountVaultGraph(root, data, deps) {
         c.bandKey = isInner ? "i" : "o";
         c.nB = nB;
         if (sBand) {
-          var A0c = sBand.gap * seamsBefore + sBand.avail * fracBefore;
+          var A0c = arcFrom() + sBand.gap * seamsBefore + sBand.avail * fracBefore;
           c.pLead = A0c - sBand.gap;
           c.pTrail = A0c + sBand.avail * frac * open;
         } else {
@@ -2243,10 +2259,10 @@ function mountVaultGraph(root, data, deps) {
             a0 = edgeSweep(c, "lead", sl.r * UNIT);
             a1 = edgeSweep(c, "trail", sl.r * UNIT);
           } else if (rs && rs.frac[cIdx] > 0) {
-            a0 = sm.gap * rs.seams[cIdx] + sm.avail * rs.before[cIdx] - sm.gap / 2;
+            a0 = arcFrom() + sm.gap * rs.seams[cIdx] + sm.avail * rs.before[cIdx] - sm.gap / 2;
             a1 = a0 + sm.avail * rs.frac[cIdx] * open;
           } else {
-            a0 = sm.gap * seamsBefore + sm.avail * fracBefore - sm.gap / 2;
+            a0 = arcFrom() + sm.gap * seamsBefore + sm.avail * fracBefore - sm.gap / 2;
             a1 = a0 + sm.avail * frac * open;
           }
           if (probe && probe.watch === sl.id) {
@@ -2315,7 +2331,8 @@ function mountVaultGraph(root, data, deps) {
         });
         fracBefore += frac * open;
       });
-      Object.keys(firstAt).forEach(function (rk) {
+      // github#86 -- a partial disc has two open ends and no wrap seam
+      if (!planArc) Object.keys(firstAt).forEach(function (rk) {
         var fst = firstAt[rk], lst = lastAt[rk];
         if (!fst || !lst || fst.id === lst.id) return;
         var d = fst.t - lst.t;
@@ -3243,6 +3260,10 @@ function mountVaultGraph(root, data, deps) {
   }
 
   var FADE_FRAMES = 12;
+  // github#86, design/0014 -- one lap of the erase edge is at least this many fades long
+  var HAND_SWEEP = 12;
+  // github#86, design/0014 -- the fill edge trails the erase edge by this much
+  var HAND_BLADE_DEG = 90;
   var RADIAL_EASE = 0.25;
   var SPREAD_MAX  = 78;
   var SPREAD_PER  = 0.17;
@@ -3467,6 +3488,7 @@ function mountVaultGraph(root, data, deps) {
    * @property {number} [spread]                      stagger window, frames
    * @property {boolean} [cross]                       github#76: swap two discs in one sweep
    * @property {boolean} [hand]                        github#86: one clock sweep, by angle
+   * @property {LeftDisc} [from]                       github#86: the disc being left
    * @property {number} [totalMs]
    * @property {(pr: number) => void} [onFrame]
    */
@@ -3605,9 +3627,12 @@ function mountVaultGraph(root, data, deps) {
     var crossAt = dict();
     // github#86, design/0014 -- a clock hand: one sweep, keyed on angle not rank
     if (opts.hand) {
-      var handGap = 2.5 * FADE_FRAMES * TIME_SCALE;
-      var handW = Math.max(1, span - handGap);
       var TWO_PI = 2 * Math.PI;
+      var handF = FADE_FRAMES * TIME_SCALE;
+      var handW = Math.max(span, HAND_SWEEP * handF);
+      var blade = HAND_BLADE_DEG * Math.PI / 180;
+      // github#86 -- the fill edge ends a blade after the erase edge, plus a fade
+      span = handW * (1 + blade / TWO_PI) + handF;
       /** @param {string} id @returns {number} */
       var handAt = function (id) {
         var a = graph.getNodeAttributes(id);
@@ -3615,12 +3640,15 @@ function mountVaultGraph(root, data, deps) {
         var here = (a.x || a.y) ? angleSweep(Math.atan2(a.y, a.x)) : sweepOf[id];
         return handW * here / TWO_PI;
       };
+      /** @param {string} id when the fill edge reaches the seat this dot ends in */
+      var fillAt = function (id) { return handW * (sweepOf[id] + blade) / TWO_PI; };
       outs.forEach(function (id) { delay[id] = handAt(id); });
-      ins.forEach(function (id) { delay[id] = handW * sweepOf[id] / TWO_PI; });
+      ins.forEach(function (id) { delay[id] = fillAt(id); });
       moves.forEach(function (id) {
         delay[id] = handAt(id);
-        arriveAt[id] = delay[id] + handGap;
-        crossAt[id] = delay[id] + FADE_FRAMES * TIME_SCALE;
+        crossAt[id] = delay[id] + handF;
+        // github#86 -- lit by the fill edge, never before the note has left
+        arriveAt[id] = Math.max(fillAt(id), crossAt[id]);
       });
     }
     if (moves.length) (function () {
@@ -3814,8 +3842,19 @@ function mountVaultGraph(root, data, deps) {
       planKeep = save;
       return p;
     };
+    // github#86, design/0014 -- lay out in the dimension the disc is LEAVING
+    /** @template T @param {() => T} fn @returns {T} */
+    var inWorld = function (fn) {
+      var w = opts.from;
+      if (!w) return fn();
+      var sDim = state.dim, sSub = subOrder, sBand = bandLock, sGeom = geomLock, sMove = moveFrom;
+      state.dim = w.dim; subOrder = w.subOrder; bandLock = w.bandLock; geomLock = w.geomLock;
+      moveFrom = null;
+      try { return fn(); }
+      finally { state.dim = sDim; subOrder = sSub; bandLock = sBand; geomLock = sGeom; moveFrom = sMove; }
+    };
     (function () {
-      var a = staticPlan(function (id) { return wasPresent[id]; });
+      var a = inWorld(function () { return staticPlan(function (id) { return wasPresent[id]; }); });
       /** @param {Plan | null} p0 */
       var cellsOfG = function (p0) {
         /** @type {Record<string, number>} */
@@ -3900,7 +3939,7 @@ function mountVaultGraph(root, data, deps) {
         if (keepAlpha) graph.forEachNode(function (id) { alpha[id] = keepAlpha[id]; });
         return got;
       };
-      var rA = roomOf(a, null);
+      var rA = inWorld(function () { return roomOf(a, null); });
       var rB = roomOf(b, function (id) { return willShow(id) ? timeFactor(id) : 0; });
       if (rA) roomSrcB = { i: rA.i || 0, o: rA.o || 0 };
       if (rB) roomDstB = { i: rB.i || 0, o: rB.o || 0 };
@@ -4106,20 +4145,40 @@ function mountVaultGraph(root, data, deps) {
       };
       if (cellPair) cellNow = walkPair(cellPair);
       if (edgePair) edgeNow = walkPair(edgePair);
-      // github#19
       /** @type {Plan | null} */
       var plan = null;
-      planSkel = cascadeRun ? cascadeRun.skel : null;
-      try { plan = buildWedgePlan(ovAfter, weightOf, rowsAt, spNow); }
-      finally { planSkel = null; }
-      if (planSkelCheck && cascadeRun && cascadeRun.skel) {
-        var why = planDiff(plan, buildWedgePlan(ovAfter, weightOf, rowsAt, spNow));
-        lastCascade.skelFrames++;
-        if (why) { lastCascade.skelMismatch++; if (!lastCascade.skelFirst) lastCascade.skelFirst = why; }
+      /** @type {Record<string, Point> | null} */
+      var targets = null;
+      if (opts.hand && opts.from) {
+        // github#86, design/0014 -- the old disc fades where it stands; a dot that has left
+        // github#86 -- takes its FINAL seat and waits, dark, for the fill edge
+        var mf = moveFrom;
+        colWalk = null; cellNow = null; edgeNow = null;
+        if (roomDstB.i > 1) bandOf("i").room = roomDstB.i;
+        if (roomDstB.o > 1) bandOf("o").room = roomDstB.o;
+        /** @type {Record<string, Point>} */
+        var seats = dict();
+        for (var mi = 0; mi < moving.length; mi++) {
+          var mid = moving[mi];
+          if (isMove[mid] && mf && mf[mid] !== undefined) continue;
+          var fq = finalPos[mid];
+          if (fq) seats[mid] = fq;
+        }
+        targets = seats;
+      } else {
+        // github#19
+        planSkel = cascadeRun ? cascadeRun.skel : null;
+        try { plan = buildWedgePlan(ovAfter, weightOf, rowsAt, spNow); }
+        finally { planSkel = null; }
+        if (planSkelCheck && cascadeRun && cascadeRun.skel) {
+          var why = planDiff(plan, buildWedgePlan(ovAfter, weightOf, rowsAt, spNow));
+          lastCascade.skelFrames++;
+          if (why) { lastCascade.skelMismatch++; if (!lastCascade.skelFirst) lastCascade.skelFirst = why; }
+        }
+        traceTag("frame");
+        targets = plan ? ringsLayout(plan, true) : null;
+        traceTag("");
       }
-      traceTag("frame");
-      var targets = plan ? ringsLayout(plan, true) : null;
-      traceTag("");
       var ez = pr < 1 ? RADIAL_EASE
                       : Math.min(1, RADIAL_EASE + tailFrames * 0.15);
       var resid = 0;
@@ -6628,6 +6687,9 @@ function mountVaultGraph(root, data, deps) {
       });
     }
 
+    // github#86, design/0014 -- the disc being LEFT, so the cascade can draw both
+    /** @type {LeftDisc} */
+    var from = { dim: state.dim, subOrder: subOrder, bandLock: bandLock, geomLock: geomLock };
     stashDimNav(state.dim);
     state.dim = next;
     restoreDimNav(next);
@@ -6638,15 +6700,23 @@ function mountVaultGraph(root, data, deps) {
     // github#86 -- the sub-wedges answer to the dimension too
     buildSubOrder();
     syncDimUI();
-    hardRelayout(false, !!n);
-    // github#86, design/0014 -- room and position are a fixed point: converge
-    if (!n) applyLayout(false);
+    if (n) {
+      // github#86 -- fresh locks for the new dimension, positions untouched
+      moveFrom = null; splitHold = null; pinnedPlan = null; planKeep = null;
+      roomNow = null; cellNow = null; edgeNow = null; colWalk = null; posSrc = null;
+      bandLock = null; geomLock = null;
+      regroup(true);
+    } else {
+      hardRelayout(false, false);
+      // github#86, design/0014 -- room and position are a fixed point: converge
+      applyLayout(false);
+    }
     attempt(placeLogo); attempt(heatBuild); attempt(buildLegend);
     // github#86 -- the colour panel is dimension-dependent now
     if (refreshSettingsPanel) refreshSettingsPanel();
     if (persist && onDim) onDim(state.dim);
     // github#76, github#86 -- every wedge changes, so cross the two discs in one sweep
-    if (n) cascade(null, { colToggle: true, hand: true, movesFrom: movesFrom });
+    if (n) cascade(null, { colToggle: true, hand: true, movesFrom: movesFrom, from: from });
     return state.dim;
   }
 
@@ -9321,6 +9391,14 @@ function mountVaultGraph(root, data, deps) {
                     // github#31
                     // github#3
                     relayout: function () { hardRelayout(false); },
+                    // github#86 -- the fill edge's lag behind the erase edge, in degrees
+                    get handBlade() { return HAND_BLADE_DEG; },
+                    set handBlade(v) { HAND_BLADE_DEG = Math.max(0, Math.min(360, +v || 0)); },
+                    // github#86 -- lay the visible disc out over an arc, without touching it
+                    arcLayout: /** @param {number} from @param {number} to */ function (from, to) {
+                      planArc = { from: from, to: to };
+                      try { return ringsLayout(); } finally { planArc = null; }
+                    },
                     // github#62
                     destroy: destroy,
     };
