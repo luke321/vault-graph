@@ -184,25 +184,23 @@ after another and enabling the new ones one after another, with the two discs ne
 
 `hand` keys the schedule on **angle**, not rank, and it has two edges of one rotating hand:
 
-- **The erase edge** sweeps once at constant angular speed. It reaches the old disc's wedges
-  in clock order, and **inside a wedge the notes flow the way a toggled wedge does**: rows
-  outermost first, clockwise within a row, spread over the time the edge takes to cross the
-  wedge (`flow()` — a wedge's window is `[W × start ÷ 2π, W × end ÷ 2π]` from its members'
-  bearings, and the members are dealt into it in that order). The first take keyed every dot
-  on its own bearing, which erased as a crisp radial front and drew no serpentine; the user
-  asked for the toggled wedge's motion. The old disc is **not re-laid-out**: a dot fades where
-  it stands, **in the colour it had**. `state.dim` has already flipped by then and `nodeColor`
-  files through `fileGroup`, so `setDim` snapshots every mover's colour into
-  `LeftDisc.color` before the flip and `nodeColor` answers from it for as long as `moveFrom`
-  holds the note — the first take skipped this and every standing dot repainted on the first
-  frame.
+- **The erase edge** sweeps once at constant angular speed, and **the dots under it toggle in
+  a serpentine along the circumference**. The circle is cut into columns of `HAND_COL` (9)
+  frames of hand time — 22.5° at the default lap — a column's dots toggle in radial order
+  spread across that time, and every second column runs the other way (`flow()`). So the front
+  the eye follows zigzags in and out as it goes round. Two earlier takes were rejected by eye:
+  the first keyed every dot on its own bearing, a crisp radial front with no motion inside a
+  wedge; the second dealt each wedge rows outermost first, which reads as a radial peel. The
+  old disc is **not re-laid-out**: a dot fades where it stands, **in the colour it had**.
+  `state.dim` has already flipped by then and `nodeColor` files through `fileGroup`, so
+  `setDim` snapshots every mover's colour into `LeftDisc.color` before the flip and
+  `nodeColor` answers from it for as long as `moveFrom` holds the note — the first take
+  skipped this and every standing dot repainted on the first frame.
 - **The fill edge** trails the erase edge by a fixed **blade** (`HAND_BLADE_DEG`, 45° — it
-  was 90°, and the user asked for the two hands closer together). It reaches the new disc's
-  wedges in clock order and each wedge fills with the same row flow, from its members' **new**
-  bearings. A note that has left takes its **final** seat straight from `finalPos` and waits
-  there, dark, until its turn. `arriveAt = max(lightAt, crossAt)`.
-- A wedge that spans the seam at 12 o'clock has no one window; its dots are keyed on their own
-  bearings, as the first take keyed everything.
+  was 90°, and the user asked for the two hands closer together). Its columns are the same
+  serpentine, from the dots' **new** bearings. A note that has left takes its **final** seat
+  straight from `finalPos` and waits there, dark, until its column. `arriveAt = max(lightAt,
+  crossAt)`. `__vg.handCol` sets the column live, as `__vg.handBlade` sets the blade.
 
 A note the old disc **hides** and the new one shows is an arrival, keyed like every other
 delay on its new bearing. That needs `setDim` to hand `regroup` `keepAlpha` — otherwise
@@ -225,14 +223,15 @@ against 32,530 dot-frames "near neither seat" for the arc-planned attempt below,
 stays at the 60 fps cadence because nothing is planned. That property survives the wedge flow
 unchanged: seats still come from `finalPos`.
 
-**Measured with the wedge flow (blade 45°) on the maintainer's vault**, 525 notes, every
-frame: dealing every wedge's dots in toggled-wedge order — rows outermost first, clockwise
-within a row — and counting consecutive pairs whose event does not come earlier, the **erase
-is in order for 494 of 500 pairs** and the **fill for 369 of 493**; the fill's misses are the
-late pops below, whose arrival is pinned to their departure rather than their turn. The discs
-now overlap on purpose: a wide wedge is still emptying its inner rows while the fill edge, a
-blade behind, has started lighting the new wedge under it — that is the crossing the user
-asked for, not a defect.
+**Measured with the column serpentine (blade 45°, columns of 9 frames) on the maintainer's
+vault**, 525 notes, every frame, reading the edge's angle from `lastCascade().handDeg`:
+ordering the dots by column and, within a column, by radius in the column's direction, and
+counting consecutive pairs whose event does not come earlier, the **erase is in order for 469
+of 469 pairs** and the **fill for 360 of 485**; the fill's misses are the late pops below,
+whose arrival is pinned to their departure rather than their column. The highest lit bearing
+tracks the fill edge within a column at every sample (26 → 22, 84 → 72, 184 → 188, 260 → 261
+degrees, edge → highest lit) and 2 dots of 525 were ever more than 6° ahead of it. The
+row-by-row take had 83 ahead by construction, an outer row lighting to its wedge's end.
 
 ### The cost, and the knob
 

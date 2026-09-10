@@ -3273,6 +3273,8 @@ function mountVaultGraph(root, data, deps) {
   var HAND_SWEEP = 12;
   // github#86, design/0014 -- the fill edge trails the erase edge by this much
   var HAND_BLADE_DEG = 45;
+  // github#86, design/0014 -- frames of hand time per serpentine column under an edge
+  var HAND_COL = 9;
   var RADIAL_EASE = 0.25;
   var SPREAD_MAX  = 78;
   var SPREAD_PER  = 0.17;
@@ -3657,55 +3659,43 @@ function mountVaultGraph(root, data, deps) {
       var radiusNow = function (id) { var a = graph.getNodeAttributes(id); return Math.hypot(a.x || 0, a.y || 0); };
       /** @param {string} id */
       var radiusNew = function (id) { var q = finalPos[id]; return q ? Math.hypot(q.x, q.y) : 0; };
-      /** @param {string} id the group a dot is leaving */
-      var oldGroup = function (id) {
-        return moveFrom && moveFrom[id] !== undefined ? moveFrom[id] : groupOf(id);
-      };
-      /** @param {string} id the group a dot is joining */
-      var newGroup = function (id) {
-        var save = moveFrom;
-        moveFrom = null;
-        try { return groupOf(id); } finally { moveFrom = save; }
-      };
-      // github#86, design/0014 -- the wedge under an edge flows the way a toggled wedge does:
-      // github#86 -- rows outermost first, clockwise within a row, over the time the edge takes
-      // github#86 -- to cross the wedge. The edge reaches wedges in clock order; the rows are
-      // github#86 -- what the eye follows inside one.
+      // github#86, design/0014 -- the edge walks the circle, and the dots under it toggle in a
+      // github#86 -- SERPENTINE along the circumference: the circle is cut into columns of
+      // github#86 -- HAND_COL frames of hand time, a column's dots toggle in radial order across
+      // github#86 -- that time, and every second column runs the other way. The front the eye
+      // github#86 -- follows zigzags in and out as it goes round, instead of peeling rows.
+      var colAng = TWO_PI * HAND_COL / handW;
       /**
        * @param {string[]} ids
-       * @param {(id: string) => string} groupKey
        * @param {(id: string) => number} bearing
        * @param {(id: string) => number} radius
        * @param {number} offset  the edge's lag behind 12 o'clock, radians
        * @returns {Record<string, number>} frame at which the edge takes each dot
        */
-      var flow = function (ids, groupKey, bearing, radius, offset) {
+      var flow = function (ids, bearing, radius, offset) {
         /** @type {Record<string, string[]>} */
-        var byG = dict();
-        ids.forEach(function (id) { var g = groupKey(id); (byG[g] || (byG[g] = [])).push(id); });
+        var byCol = dict();
+        ids.forEach(function (id) {
+          var k = String(Math.floor(bearing(id) / colAng));
+          (byCol[k] || (byCol[k] = [])).push(id);
+        });
         /** @type {Record<string, number>} */
         var at = dict();
-        Object.keys(byG).forEach(function (g) {
-          var set = byG[g];
-          var lo = Infinity, hi = -Infinity;
-          set.forEach(function (id) { var b = bearing(id); if (b < lo) lo = b; if (b > hi) hi = b; });
-          // github#86 -- a wedge across the seam has no one window; key each dot on its own angle
-          if (hi - lo > Math.PI) {
-            set.forEach(function (id) { at[id] = handW * (bearing(id) + offset) / TWO_PI; });
-            return;
-          }
+        Object.keys(byCol).forEach(function (k) {
+          var set = byCol[k], col = +k;
+          var outward = col % 2 === 0;
           set.sort(function (p, q) {
-            var dr = radius(q) - radius(p);
-            return Math.abs(dr) > 0.5 ? dr : bearing(p) - bearing(q);
+            var dr = radius(p) - radius(q);
+            if (Math.abs(dr) > 0.5) return outward ? dr : -dr;
+            return bearing(p) - bearing(q);
           });
-          var t0 = handW * (lo + offset) / TWO_PI, t1 = handW * (hi + offset) / TWO_PI;
-          set.forEach(function (id, i) { at[id] = set.length < 2 ? t0 : t0 + (t1 - t0) * i / (set.length - 1); });
+          var t0 = handW * (col * colAng + offset) / TWO_PI;
+          set.forEach(function (id, i) { at[id] = t0 + HAND_COL * (i + 0.5) / set.length; });
         });
         return at;
       };
-      var leaveAt = flow(outs.concat(moves), oldGroup, bearingNow, radiusNow, 0);
-      var lightAt = flow(ins.concat(moves), newGroup,
-                         function (id) { return sweepOf[id]; }, radiusNew, blade);
+      var leaveAt = flow(outs.concat(moves), bearingNow, radiusNow, 0);
+      var lightAt = flow(ins.concat(moves), function (id) { return sweepOf[id]; }, radiusNew, blade);
       outs.forEach(function (id) { delay[id] = leaveAt[id]; });
       ins.forEach(function (id) { delay[id] = lightAt[id]; });
       moves.forEach(function (id) {
@@ -4116,7 +4106,7 @@ function mountVaultGraph(root, data, deps) {
       if (cascadeRun) cascadeRun.tick = tn;
       var pr = Math.min(1, frame / Math.max(1, span));
       // github#86 -- where the erase edge is, in degrees from 12 o'clock; the checks read it
-      if (handLap) lastCascade.handDeg = 360 * frame / handLap;
+      if (handLap) { lastCascade.handDeg = 360 * frame / handLap; lastCascade.handLap = handLap; }
       var ease = pr * pr * (3 - 2 * pr);
       // github#78
       if (barWalking) barWalkTick(ease);
@@ -9469,6 +9459,9 @@ function mountVaultGraph(root, data, deps) {
                     // github#86 -- the fill edge's lag behind the erase edge, in degrees
                     get handBlade() { return HAND_BLADE_DEG; },
                     set handBlade(v) { HAND_BLADE_DEG = Math.max(0, Math.min(360, +v || 0)); },
+                    // github#86 -- frames of hand time per serpentine column
+                    get handCol() { return HAND_COL; },
+                    set handCol(v) { HAND_COL = Math.max(1, +v || 1); },
                     // github#86 -- lay the visible disc out over an arc, without touching it
                     arcLayout: /** @param {number} from @param {number} to */ function (from, to) {
                       planArc = { from: from, to: to };

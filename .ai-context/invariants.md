@@ -341,11 +341,11 @@ than the one they had, on the four fixtures. Before: 787,308 of 787,308; 709,555
 
 github#86, design/0014. Each dimension keeps its own hidden state, so a note the folder disc
 hides and the tag disc shows is an **arrival** on the switch, and an arrival is lit by the fill
-edge — never at the switch itself, never before the edge has reached its wedge. Two things
-break it. `setDim` must hand `regroup` `keepAlpha`, or `syncAlpha` lights the note before the
-cascade starts and the cascade has nothing to arrive. And the block after the schedule that
-re-deals a fully-arriving group's delays by radius must be skipped for `hand`: the hand deals
-each wedge itself, and re-dealing hands one seat the delay of another.
+edge — never at the switch itself, never before the edge is within one column of its seat. Two
+things break it. `setDim` must hand `regroup` `keepAlpha`, or `syncAlpha` lights the note
+before the cascade starts and the cascade has nothing to arrive. And the block after the
+schedule that re-deals a fully-arriving group's delays by radius must be skipped for `hand`:
+the hand deals every column itself, and re-dealing hands one seat the delay of another.
 
 ```bash
 node scripts/smoke.mjs --only "arrives with the fill edge"
@@ -353,12 +353,12 @@ node scripts/smoke.mjs --only "arrives with the fill edge"
 
 The check hides the smallest non-archive folder with three or more notes in the folder disc
 only, drives the real select, and records for each such note the fill edge's position when it
-first lit — the lowest standing old bearing plus one fade for the lag minus the blade — then
-compares that against its wedge's start in the settled tag disc, because a wedge under the
-edge flows row by row from the moment the edge reaches it. **0 lit at the switch itself, 0 lit
-before the edge reached their wedge, all lit at the end** on the four fixtures. Before, on the
-maintainer's vault: 16 notes lit at the first sample at bearings up to 266°; with `keepAlpha`
-alone, one lit at 206° while the edge was near 78°.
+first lit — the erase edge's angle as the cascade reports it in `lastCascade().handDeg`, minus
+the blade — then compares that against the note's own settled bearing minus one column
+(`360 × handCol ÷ handLap` degrees). **0 lit at the switch itself, 0 lit before the edge
+reached their column, all lit at the end** on the four fixtures. Before, on the maintainer's
+vault: 16 notes lit at the first sample at bearings up to 266°; with `keepAlpha` alone, one lit
+at 206° while the edge was near 78°.
 
 ## The rings are independent
 

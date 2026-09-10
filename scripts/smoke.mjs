@@ -672,29 +672,23 @@ check("tags: a note one disc hides and the other shows arrives with the fill edg
     if (!s.busy && samples > 3) break;
     if (Date.now() - t0 > 20000) break;
   }
-  // github#86 -- the wedge under the fill edge flows row by row from the moment the edge
-  // reaches it, so a note may light anywhere in its wedge once the edge is at the wedge's start
-  const starts = await p.j(`(function(){
-    var TWO = 2 * Math.PI, D = 180 / Math.PI;
+  // github#86 -- the dots under the fill edge toggle in a serpentine along the circumference,
+  // one column of hand time at a time, so a note may light once the edge is at its own column
+  const seats = await p.j(`(function(){
+    var TWO = 2 * Math.PI;
     var sweep = function (a) { return (Math.PI / 2 - Math.atan2(a.y, a.x) + 2 * TWO) % TWO; };
-    var start = {}, of = {};
-    __vg.graph.forEachNode(function (id, a) {
-      if ((__vg.alpha[id] || 0) < 0.5) return;
-      var g = __vg.groupOf(id), sw = sweep(a);
-      if (start[g] === undefined || sw < start[g]) start[g] = sw;
-    });
-    window.__smokeHid.hid.forEach(function (id) { of[id] = __vg.groupOf(id); });
-    return { start: start, of: of };
+    var sw = {};
+    window.__smokeHid.hid.forEach(function (id) { sw[id] = sweep(__vg.graph.getNodeAttributes(id)); });
+    return { sw: sw, colDeg: 360 * __vg.handCol / __vg.lastCascade().handLap };
   })()`);
   let ahead = 0, first = "";
   for (const id of Object.keys(firstFill)) {
     const f = firstFill[id];
     if (f === null) continue;
-    const st = starts.start[starts.of[id]];
-    if (st === undefined) continue;
+    const st = seats.sw[id] - seats.colDeg * Math.PI / 180;
     if (f < st - 6 * Math.PI / 180) {
       ahead++;
-      if (!first) first = `#${id} lit with the fill edge at most ${(f * 180 / Math.PI).toFixed(0)} deg, its wedge ${starts.of[id]} starting at ${(st * 180 / Math.PI).toFixed(0)}`;
+      if (!first) first = `#${id} lit with the fill edge at most ${(f * 180 / Math.PI).toFixed(0)} deg, its seat at ${(seats.sw[id] * 180 / Math.PI).toFixed(0)} (columns of ${seats.colDeg.toFixed(1)})`;
     }
   }
   await p.j(`(function(){ delete window.__smokeHid; __vg.setDim("folder"); return true; })()`);
@@ -705,7 +699,7 @@ check("tags: a note one disc hides and the other shows arrives with the fill edg
   return {
     ok: n.litNow === 0 && ahead === 0 && litEnd === n.hid && samples > 3,
     detail: `${pick.g} (${n.hid} notes) hidden in the folder disc: ${n.litNow} lit at the switch itself, ` +
-            `${ahead} lit before the fill edge reached their wedge over ${samples} samples` +
+            `${ahead} lit before the fill edge reached their column over ${samples} samples` +
             (first ? ` (first: ${first})` : "") + `, ${litEnd} of ${n.hid} lit at the end`,
   };
 });
