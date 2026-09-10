@@ -1,0 +1,6 @@
+theme: jekyll-theme-midnight
+title: Vault Graph
+description: Your whole vault as one disc.
+show_downloads: false
+exclude:
+  - "features/"
