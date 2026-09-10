@@ -5661,6 +5661,8 @@ function mountVaultGraph(root, data, deps) {
                          only: '<span class="only none" aria-hidden="true"></span>', ctTitle: "", ct: String(c) });
       }).join("");
     }
+    // github#86 -- the collapse rules exist only while a switch runs
+    $("legend").classList.toggle("lg-switching", !!legendSwitch);
     setHTML($("legend"), oldRows + names.map(function (g) {
       var vis = !isHidden(g);
       var hasSubs = groupHasPinnedSub(g) ||

@@ -232,10 +232,11 @@
   /* github#86, design/0014 -- during a dimension switch the rows of the disc being left stay,
      inert, and drop out as their notes fade; a row of the disc arriving drops in with its
      first note. The height is animated through max-height because a row's height is what
-     the font makes it; 48px clears any row the legend draws. */
-  .vault-graph .lgr { max-height: 48px; transition: max-height .3s ease, opacity .25s ease; }
-  .vault-graph .lgr.lgr-gone { max-height: 0; opacity: 0; overflow: hidden; pointer-events: none; }
-  .vault-graph .lgr[data-old] { pointer-events: none; }
+     the font makes it; 48px clears any row the legend draws, and the cap exists only while
+     the legend carries lg-switching, so no host font can ever clip a resting row. */
+  .vault-graph #vg-legend.lg-switching .lgr { max-height: 48px; transition: max-height .3s ease, opacity .25s ease; }
+  .vault-graph #vg-legend.lg-switching .lgr.lgr-gone { max-height: 0; opacity: 0; overflow: hidden; pointer-events: none; }
+  .vault-graph #vg-legend.lg-switching .lgr[data-old] { pointer-events: none; }
   .vault-graph .lg .sw { width: 11px; height: 11px; border-radius: 50%; }
   .vault-graph .lg .sw.sw-in { transform: scale(0.6); }
   .vault-graph .lg .nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
