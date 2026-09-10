@@ -6239,17 +6239,24 @@ function mountVaultGraph(root, data, deps) {
 
   // github#86, design/0014 -- the control belongs to the thing it changes
   function syncDimUI() {
-    var sel = /** @type {HTMLSelectElement | null} */ ($("dim"));
-    if (sel && sel.value !== state.dim) sel.value = state.dim;
-    // github#86 -- D-9: the toggle is only there while cut by tag
+    var seg = $("dim");
+    if (!seg) return;
+    var btns = seg.querySelectorAll("button[data-dim]");
+    for (var i = 0; i < btns.length; i++) {
+      var b = /** @type {HTMLElement} */ (btns[i]);
+      b.setAttribute("aria-pressed", b.getAttribute("data-dim") === state.dim ? "true" : "false");
+    }
   }
 
   function buildTools() {
     refreshSettingsPanel = buildSettings;
 
-    // github#86
-    var dimSel = /** @type {HTMLSelectElement | null} */ ($("dim"));
-    if (dimSel) dimSel.onchange = function () { setDim(dimSel.value, true); };
+    // github#86 -- the segmented control: a side is a dimension
+    var dimSeg = $("dim");
+    if (dimSeg) dimSeg.addEventListener("click", function (ev) {
+      var t = /** @type {Element | null} */ (ev.target instanceof Element ? ev.target.closest("button[data-dim]") : null);
+      if (t) setDim(t.getAttribute("data-dim") || "folder", true);
+    });
     syncDimUI();
 
     $("allon").onclick = function () {
@@ -8217,6 +8224,8 @@ function mountVaultGraph(root, data, deps) {
    */
   function demoFind(kind, arg) {
     if (kind === "id") return $(arg);
+    // github#86 -- a side of the grouping control
+    if (kind === "dim") return $("dim") ? $("dim").querySelector('button[data-dim="' + arg + '"]') : null;
     if (kind === "stage") {
       var stageEl = $("graph");
       if (!stageEl) return null;
@@ -8505,9 +8514,9 @@ function mountVaultGraph(root, data, deps) {
       // github#86, design/0014 -- the second dimension: one hand erases the folder disc where it
       // github#86 -- stands, the other lights the tag disc at its seats, links, heat strip and
       // github#86 -- nav bar following the notes
-      { dim: "tag", act: "tags", why: "cut the disc by tag instead of by folder" },
+      { click: true, target: ["dim", "tag"], act: "tags", why: "cut the disc by tag instead of by folder" },
       { settle: true, act: "tags", why: "one hand takes the folders, the other brings the tags" },
-      { dim: "folder", act: "tags", why: "and back to folders" },
+      { click: true, target: ["dim", "folder"], act: "tags", why: "and back to folders" },
       { settle: true, act: "tags", why: "the same swap the other way round" },
 
       { hover: true, target: ["note", "04"], act: "note", why: "hover a daily note" },

@@ -227,15 +227,6 @@ async function main() {
       trace.push(`park: ${beat.why || ""}`);
       continue;
     }
-    // github#86 -- a native <select> opens a popup under a real click, so the switch is driven
-    // github#86 -- the way the page's own change handler is: set the value, dispatch change
-    if (beat.dim) {
-      await page.eval(`(function(){ var s = document.querySelector("#vg-dim"); if (!s) return false;
-        s.value = ${JSON.stringify(beat.dim)}; s.dispatchEvent(new Event("change")); return true; })()`);
-      console.log(`[${el()}] ${n} dimension -> ${beat.dim} — ${beat.why || ""}`);
-      trace.push(`dim: ${beat.dim}`);
-      continue;
-    }
     if (beat.touchmode) {
       touchMode = true;
       await page.send("Emulation.setTouchEmulationEnabled", { enabled: true, maxTouchPoints: 5 })

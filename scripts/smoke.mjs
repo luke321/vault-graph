@@ -460,9 +460,10 @@ check("tags: folders is the default, and the switch is in the group list's own h
 async (p) => {
   const r = await p.j(`(function(){
     var sel = document.querySelector("#vg-dim");
-    return { dim: __vg.state.dim, has: !!sel, value: sel ? sel.value : null,
-             options: sel ? Array.prototype.map.call(sel.options, function (o) {
-               return o.value + ":" + o.textContent; }) : [],
+    var btns = sel ? Array.prototype.slice.call(sel.querySelectorAll("button[data-dim]")) : [];
+    var on = btns.filter(function (b) { return b.getAttribute("aria-pressed") === "true"; });
+    return { dim: __vg.state.dim, has: !!sel, value: on.length === 1 ? on[0].getAttribute("data-dim") : null,
+             options: btns.map(function (b) { return b.getAttribute("data-dim") + ":" + b.textContent; }),
              gcount: (document.querySelector("#vg-gcount") || {}).textContent,
              groups: __vg.groupOrder().length };
   })()`);
@@ -472,7 +473,7 @@ async (p) => {
              r.options.join(",") === wanted && r.gcount === "(" + r.groups + ")";
   return {
     ok,
-    detail: `dim ${r.dim}, select ${r.value}, options [${r.options.join(" | ")}]` +
+    detail: `dim ${r.dim}, pressed ${r.value}, sides [${r.options.join(" | ")}]` +
             (r.options.join(",") === wanted ? "" : ` <- wanted ${wanted}`) +
             `, heading reads ${r.gcount} for ${r.groups} groups`,
   };
@@ -586,10 +587,9 @@ check("tags: a dot in the disc being left keeps its colour until it has faded", 
       b[id] = { c: __vg.nodeColor(id), g: __vg.groupOf(id), x: a.x, y: a.y };
     });
     window.__smokeLeft = b;
-    var sel = document.querySelector("#vg-dim");
-    if (!sel) return -1;
-    sel.value = "tag";
-    sel.dispatchEvent(new Event("change"));
+    var side = document.querySelector('#vg-dim button[data-dim="tag"]');
+    if (!side) return -1;
+    side.click();
     return Object.keys(b).length;
   })()`);
   if (n < 0) return { ok: false, detail: "no #vg-dim to switch with" };
@@ -654,9 +654,7 @@ check("tags: a note one disc hides and the other shows arrives with the fill edg
     });
     window.__smokeHid = { hid: hid, b: b, blade: __vg.handBlade };
     var nodes = __vg.graph.order;
-    var sel = document.querySelector("#vg-dim");
-    sel.value = "tag";
-    sel.dispatchEvent(new Event("change"));
+    document.querySelector('#vg-dim button[data-dim="tag"]').click();
     // the very same tick: nothing hidden may be lit yet
     var litNow = hid.filter(function (id) { return (__vg.alpha[id] || 0) > 0.004; }).length;
     return { hid: hid.length, litNow: litNow, nodes: nodes };

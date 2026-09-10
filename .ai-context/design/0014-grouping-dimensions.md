@@ -99,16 +99,22 @@ name says what it does) there is no gap for any tag, and the disclosure disappea
 
 ## Where the switch lives
 
-The group list's own heading — `Groups (18)` becomes a dropdown reading `Folders (18)` /
-`Tags (12)`, in those words. (Sentence case, not caps: the `text-transform: uppercase` on
-`.block > .lbl` has never matched this label, which is nested a `.row` deeper. So the heading
-reads as it always has.) **The control belongs to the thing it changes**: not the view
-settings, not the top bar, not a hidden context-menu item, and not a pair of always-lit tabs.
-Semi-obvious is the brief: no border or fill at rest so it reads as the heading it replaced,
-and a chevron that is always there so anyone looking for a control finds one.
+The group list's own heading — `Groups (18)` becomes a **segmented control** reading
+**Folders | Tags**, the active side filled with the accent, the count beside it: `Folders (18)`
+/ `Tags (12)`. **The control belongs to the thing it changes**: not the view settings, not the
+top bar, not a hidden context-menu item.
+
+It was a dropdown first, drawn as the heading it replaced with a chevron and no border or fill
+— "semi-obvious" was the brief. Asked on 2026-09-10, "is the dropdown obvious enough?", the
+answer from a screenshot was no: it read as a label with a decorative caret, and the All and
+None chips beside it carried more weight than the one control that changes what the whole disc
+is. The segmented control uses the look the settings segments already have, so it reads as a
+control, and it still fits a third grouping; past three it goes back to a menu. A real click on
+a side drives it, so the storyboard clicks `["dim", "tag"]` on camera rather than setting a
+select's value.
 
 The dimension is remembered by the host, not the page (decisions/0009), so there is no settings
-row for it — the dropdown is the control.
+row for it — the segmented control is the control.
 
 ## One dot per tag (D-9) — removed 2026-09-10, github#91
 
