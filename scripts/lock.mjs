@@ -4,24 +4,13 @@ import { mkdirSync, writeFileSync, readFileSync, rmSync, existsSync, readdirSync
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
-/**
- * ONE ROOT FOR EVERY SISTER PROJECT. The lock exists because two suites cannot drive Chrome at
- * once and two recorders cannot own the screen at once -- and a machine has one Chrome and one
- * screen no matter which repository the suite belongs to. A per-repo lock directory looked
- * right and protected nothing across them: Vault Graph's suite and Vault Shelf's suite each
- * held a lock nobody else could see, and ran together anyway.
- *
- * Every worktree of every sister project shares this one directory, in the OS temp dir rather
- * than in any worktree.
- */
+// github#92
 const ROOT = join(tmpdir(), "obsidian-vault-locks");
 
-/* The per-repo roots this replaced. A run that took its lock before the change still holds it
- * there, and a lock nobody can see is worse than no lock, so they are honoured until they age
- * out and can then be deleted. */
+// github#92
 const LEGACY_ROOTS = [join(tmpdir(), "vault-graph-locks"), join(tmpdir(), "vault-shelf-locks")];
 
-/** A legacy lock of this name that is still inside its stale window, if there is one. */
+// github#92
 function legacyHold(n) {
   for (const root of LEGACY_ROOTS) {
     const meta = (() => {
@@ -73,8 +62,7 @@ async function acquire() {
   let announced = false;
 
   for (;;) {
-    /* BEFORE the directory is claimed, not after: a legacy lock lives somewhere else, so
-     * creating this one would succeed and the run would start on top of the other. */
+    // github#92 -- checked before the directory is claimed, not after
     const stale = legacyHold(name);
     if (stale) {
       if (!announced) {
