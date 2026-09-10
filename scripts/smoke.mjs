@@ -83,7 +83,7 @@ const selected = () => (ONLY.length
   ? all.filter((c) => ONLY.some((q) => c.name.toLowerCase().includes(q)))
   : all);
 
-// github#7, github#15
+// github#7, github#15, github#78 -- see changelog-detail
 const JOBS = Math.max(1, Number(arg("jobs", "4")) || 4);
 
 const GRID = argv.includes("--no-grid") ? false
@@ -582,7 +582,9 @@ check("hovering a note ramps in and releases at zero", async (p) => {
   const w = await p.j(`__vg.demo.where("note","04") || __vg.demo.where("note","03")`);
   if (!w) return { ok: false, detail: "no note target resolved at all" };
   await p.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: w.x, y: w.y, buttons: 0 });
-  await sleep(400);
+  // github#78 -- see changelog-detail
+  await sleep(50);
+  await settle(p);
   const on = await p.j(`(function(){
     var f = __vg.state.hovered, nb = f ? __vg.graph.neighbors(f) : [], far = null;
     __vg.graph.forEachNode(function(i){ if (far || i === f || nb.indexOf(i) >= 0) return;
@@ -595,7 +597,8 @@ check("hovering a note ramps in and releases at zero", async (p) => {
             dim: getComputedStyle(document.getElementById('vg-app')).getPropertyValue('--dim').trim()};
   })()`);
   await p.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: 5, y: 5, buttons: 0 });
-  await sleep(400);
+  await sleep(50);
+  await settle(p);
   const off = await p.j(`{t: __vg.hoverT, held: !!__vg.state.hovered}`);
   const dimmed = on.farColour && on.dim && on.farColour.toLowerCase() === on.dim.toLowerCase();
   const AIMABLE_PX = 10;
@@ -3423,21 +3426,8 @@ check("legend count bars scale to the largest visible folder", async (p) => {
     return { order: order, rows: rows };
   })()`);
 
-  // github#78, design/0006
-  const settleBars = async () => {
-    let last = null;
-    for (let i = 0; i < 60; i++) {
-      const now = await p.j(`(function(){
-        return [].map.call(document.querySelectorAll('#vg-legend .lg[data-g]'), function (lg) {
-          return getComputedStyle(lg).getPropertyValue('--vg-share').trim();
-        }).join(",");
-      })()`);
-      if (now === last) return true;
-      last = now;
-      await sleep(150);
-    }
-    return false;
-  };
+  // github#78, design/0006 -- see changelog-detail
+  const settleBars = () => settle(p);
 
   // github#78
   const basisOf = (rows) => rows

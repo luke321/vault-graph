@@ -30,6 +30,67 @@ published tag breaks every link to it.
 
 ---
 
+## 2.4.1 — 2026-09-10
+
+**The README's "Try it live" and feature-list links now go somewhere.** 2.4.0 shipped the docs
+as a real site but the README still carried the placeholder line from before the site resolved —
+"this line gets its links the moment it's live" — and GitHub Pages itself had never been switched
+on for the repository, so there was nothing to link to. Pages is enabled now, serving from
+`main`'s `docs/`, and the README points at it: [the live
+demo](https://luke321.github.io/vault-graph/demo/), [the feature
+gallery](https://luke321.github.io/vault-graph/features.html), and [the site
+itself](https://luke321.github.io/vault-graph/). Nothing in the plugin changed.
+
+---
+
+## 2.4.0 — "Auto" — 2026-09-10
+
+**Write a note, link three people, and the disc beside you notices.** Refresh used to be the
+only way to see a change you just made — a full teardown, a fresh build and the intro cascade
+from the vault's first note, which also threw away your filters, your date range, your pins and
+wherever you'd moved the camera. The graph now watches the vault and walks itself to the new
+state on the ordinary cascade instead.
+
+<img src="https://raw.githubusercontent.com/luke321/vault-graph/2.4.0/assets/features/live.webp" width="100%" alt="Obsidian with the vault graph in one tab: a second tab opened, a meeting note typed into it, the graph tab clicked and the outer ring taking the new note in one cascade, the new dot hovered; then a weekly review written in another tab, the graph tab clicked again and the inner ring taking that one the same way">
+
+### The disc follows the vault
+
+- **A written, renamed or deleted note moves the disc, not a page load.** An added note fades in
+  where its folder puts it, sized zero-to-rest the same way the timeline's own reveal works; a
+  removed note fades out; a note whose link weight or folder changed takes the existing **moves**
+  tween. Filters, date range, pins and camera all survive — which is exactly what Refresh clears.
+- **Nothing animates while you aren't looking.** A rebuild is held while the graph's own tab is
+  hidden, so a burst of edits doesn't play out behind your back — it lands as one cascade the
+  moment you switch back to it, rather than as several you never saw.
+- **Typing prose moves nothing.** Word counts are deliberately left out of what triggers a
+  rebuild, so editing a note's text produces an empty diff and no motion at all — only a
+  structural change (a link, a folder, a rename, a date) starts a cascade.
+- **A big enough batch is a sync, not an edit.** Past 200 changed notes at once the plugin falls
+  back to a full rebuild instead of animating each one in.
+- **A view setting, on by default** — *Follow the vault*, per vault, in the plugin. Turn it off
+  and the graph waits for Refresh as it always did.
+- The standalone page can't watch a vault, so its own clip is honest about that: the storyboard
+  hands it exactly what the plugin would after a save, and the cascade from there is the same
+  code path.
+
+<img src="https://raw.githubusercontent.com/luke321/vault-graph/2.4.0/assets/features/live-page.webp" width="100%" alt="The standalone page handed one note into its biggest folder, the outer ring absorbing it in one cascade and the new dot hovered where it landed, then a second note into a small folder and the inner ring taking it the same way">
+
+### Smaller things
+
+- **The docs are a real site now**, not just files read on GitHub — a home page, the feature
+  gallery, and a live demo of the exported page anyone can click, hover and filter for
+  themselves, published alongside it. The README points at all three.
+- **The feature gallery is grouped by theme now**, seven of them, instead of sixteen sections in
+  recording order — and the count bars, which shipped in 2.3.0 without ever getting an entry,
+  finally have one: a crop of `folders`, where they actually move, rather than a recording of
+  their own.
+- **A vault that isn't yours opens in restricted mode, and no version of the plugin loads until
+  the trust prompt is confirmed and Settings is closed** — a standing trap for any fixture or
+  freshly generated vault, written down in `CLAUDE.md` for the next person who reads a blocked
+  plugin as a code fault.
+
+---
+
 ## 2.3.0 — "Gauge" — 2026-09-09
 
 **Every legend row rendered identically, so a 406-note folder and a 1-note folder looked the
