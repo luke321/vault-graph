@@ -4,7 +4,7 @@
 so an agent that looks for `AGENTS.md` by convention finds its way there instead of guessing, and
 it deliberately does not restate the laws: two copies of a rule become two different rules.
 
-Three things are worth knowing before you touch anything, all expanded in `CLAUDE.md`:
+Four things are worth knowing before you touch anything, all expanded in `CLAUDE.md`:
 
 - **Measure, don't reason.** The recurring failure here is arguing about the code instead of
   driving it: serve the page, drive it, read the numbers. `node scripts/smoke.mjs --only
@@ -25,6 +25,9 @@ Three things are worth knowing before you touch anything, all expanded in `CLAUD
 - **A non-default vault must be trusted before the plugin loads.** Opening a fixture or test
   vault in Obsidian raises *Trust author and enable plugins?* on first open; confirm it and close
   the Settings window it opens, or you will misread an untrusted vault as a broken plugin.
+- **Never serve Chrome unlabeled.** A page opened in Chrome from any worktree sets its own
+  top-left title to `<worktree/feature> — <what it's showing>` (e.g. `tag-grouping — demo
+  vault`), not the default — several worktrees end up with visually similar tabs open at once.
 - **`git push`, merging into `develop`, and a full-suite run are each a separate ask, every
   time.** None of them is implied by permission to do the work, or by how the last one went.
 

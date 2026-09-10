@@ -58,6 +58,13 @@ measuring it: serve the page, drive it, read the numbers.
   -- and Obsidian asks *Trust author and enable plugins?* the first time. Until that is confirmed
   the plugin does not load **at all**, and the Settings window it opens has to be closed too. Skip
   it and you are staring at a plugin that looks broken for a reason that is not in the code.
+- **Never serve Chrome unlabeled.** A page opened in Chrome from any worktree — a `smoke.mjs`
+  run, a `shoot.mjs` capture, a manual review build — sets the page's own top-left title to
+  `<worktree/feature> — <what it's showing>` (e.g. `tag-grouping — demo vault`), not the
+  default. Patch the built HTML's `vault` field in `window.VAULT_DATA` rather than the product
+  itself; the title is a review aid, not a feature. Several worktrees end up with visually
+  similar tabs open in Chrome at once — without a label there is no way to tell which build is
+  which, and judging a change against the wrong one is worse than not looking.
 - Fixtures: three generated vaults (`scripts/make-*-vault.mjs`) in the shared store; never a
   real vault, never a built `vault-graph.html`, in anything that reaches the repo.
 - `npm run lint` holds every finding at zero. `check-pii`, `check-scope`, `check-network` and
