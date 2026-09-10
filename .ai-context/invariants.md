@@ -2704,3 +2704,45 @@ Two guards, one shape each:
   (`Target.createTarget` from the page session — the first check to do so), and asserts no
   marker ran, the data decoded, and the graph mounted all three notes. This is the
   acceptance criterion as written: an actual generated file, opened.
+## A folder can be named after anything on `Object.prototype`
+
+`"a folder named after an Object.prototype member still lays out"` builds seven tiny vaults
+once per run — one-note vaults in folders named `constructor`, `toString`, `hasOwnProperty`
+and `__proto__`, one vault holding all four beside a plain folder, an empty vault, and a plain
+one-note vault — navigates the running page to each, and asserts that the page reached ready
+with no exception, the busy indicator is hidden, every note has a finite position, every
+folder is a group, every note is shown, and `checkPlanParity()` agrees with itself. Then it
+navigates back to the fixture page and waits for rest, so the checks after it start where
+they always did.
+
+The planner's maps are indexed by folder names, and a plain `{}` inherits `Object.prototype`:
+`byCell["constructor"]` is a function before anything was stored, so the `if (!byCell[mKey])`
+initialisation is skipped and `byCell[mKey].push(mId)` throws. Measured on `develop@f5e18f0`
+(github#97, 2026-09-11): the four names and the combined vault all died at boot with
+`TypeError: byCell[mKey].push is not a function`, the page never reached ready and the busy
+indicator stayed up, while the two controls loaded clean — **2/7 pages**. Every map keyed by
+a group name is now `dict()` (`Object.create(null)`): `count`/`counts`, `byCell`, `cellsOf`,
+`groupInner` and the ring balancer's `assign`, `groupNotes`, `pinnedInner` — **7/7 pages on
+all three fixtures**. The maps keyed by node id (`pos`, `out`, `from`, `hubOut`,
+`neighbourCache`) stay plain: ids are integer strings and cannot collide with a prototype
+member.
+
+`__proto__` is the odd one, twice over. It starts with `_`, so it is an archive folder and
+hidden by default — the check shows it explicitly through `setFolderShown` before judging,
+and asserts `shown` equals the note count so a hidden group cannot pass as laid out. And a
+plain object treats that key specially in both directions, measured in node 24: the literal
+`{ "__proto__": true }` sets the prototype and has **no keys**; `Object.assign({}, m)`
+**drops** the key on the way out; `JSON.parse` and `Object.assign(Object.create(null), m)`
+both keep it as an own property. So the four places the page hands the host a copy of a
+settings map (`saveFolderColors`, `saveSubfolderColors` twice, `saveFolderShown`) copy onto
+`dict()`, and the plugin's settings tab copies onto a null-prototype map as well and reads
+`folderColors[name]` through an own-property check. Without that, marking a `__proto__`
+folder as shown by default was dropped on the way to `saveData` and forgotten on the next
+load, and a `constructor` folder's colour row read `Object` as its pinned slot.
+
+```bash
+node scripts/smoke.mjs --only "Object.prototype"      # 7 pages per fixture, ~7s each
+```
+
+The layout equations were not touched: the golden snapshots on all three fixtures are the
+proof, and the check itself asserts plan parity on every page that has a plan.
