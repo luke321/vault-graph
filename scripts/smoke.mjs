@@ -904,31 +904,67 @@ async (p) => {
   };
 });
 
-check("tags: the colour panel says which dimension owns it", async (p) => {
+check("tags: each grouping keeps its own colours, and the settings tabs reach both", async (p) => {
   const r = await p.j(`(function(){
+    // github#86, design/0014 -- the panel is opened on the FOLDER disc and switched to the Tags
+    // tab: its rows are the tag dimension's, a pin lands in the tag map, and the folder map, the
+    // folder disc's order and its colours are all untouched.
     var gear = document.querySelector("#vg-gear");
-    if (!gear || gear.hidden) return { noGear: true };
+    if (!gear || gear.hidden) return { none: true };
+    if (document.querySelector("#vg-settings").hidden) gear.click();
+    var tabs = Array.prototype.map.call(document.querySelectorAll("#vg-setbody [data-setdim]"),
+      function (b) { return b.getAttribute("data-setdim"); });
+    var folderRows = document.querySelectorAll("#vg-setbody .scr:not(.scrsub)").length;
+    var foldersBefore = __vg.groupOrder().slice();
+    var coloursBefore = foldersBefore.map(function (g) { return __vg.colorOf(g); }).join(",");
+
+    var tagTab = document.querySelector("#vg-setbody [data-setdim='tag']");
+    if (!tagTab) return { none: true };
+    tagTab.click();
+    var rows = Array.prototype.slice.call(document.querySelectorAll("#vg-setbody .scr:not(.scrsub)"));
+    var names = rows.map(function (r) { var n = r.querySelector(".nm"); return n ? n.textContent : ""; });
+    var tagNames = __vg.groupsOf("tag").map(function (g) { return g.name; });
+
+    var pinned = "", key = "";
+    if (rows.length) {
+      var sw = rows[0].querySelectorAll("[data-fc]");
+      for (var i = 0; i < sw.length; i++) {
+        if (sw[i].getAttribute("data-key")) {
+          pinned = rows[0].querySelector(".nm").textContent;
+          key = sw[i].getAttribute("data-key");
+          sw[i].click();
+          break;
+        }
+      }
+    }
+    var appliedOnTagDisc = "";
+    if (pinned) { __vg.setDim("tag"); appliedOnTagDisc = __vg.slotOf(pinned); __vg.setDim("folder"); }
+    var out = {
+      tabs: tabs, dim: __vg.state.dim, folderRows: folderRows, tagRows: rows.length,
+      namesMatch: names.length > 0 && names.join("|") === tagNames.join("|"),
+      pinned: pinned, key: key,
+      inTagMap: pinned ? (__vg.tagColors[pinned] || "") : "",
+      folderMapSize: Object.keys(__vg.folderColors).length,
+      appliedOnTagDisc: appliedOnTagDisc,
+      foldersSame: __vg.groupOrder().join(",") === foldersBefore.join(","),
+      colourSame: __vg.groupOrder().map(function (g) { return __vg.colorOf(g); }).join(",") === coloursBefore
+    };
+    if (pinned) __vg.setTagColors({});
+    document.querySelector("#vg-setbody [data-setdim='folder']").click();
     gear.click();
-    var folderRows = document.querySelectorAll("#vg-setbody .scr").length;
-    __vg.setDim("tag");
-    var body = document.querySelector("#vg-setbody");
-    var tagRows = body ? body.querySelectorAll(".scr").length : -1;
-    var says = body ? (body.textContent || "").trim() : "";
-    __vg.setDim("folder");
-    var backRows = document.querySelectorAll("#vg-setbody .scr").length;
-    gear.click();
-    return { folderRows: folderRows, tagRows: tagRows, backRows: backRows, says: says };
+    return out;
   })()`);
-  if (r.noGear) {
-    return { ok: true, detail: "NOT ASSERTED: no gear on this build -- standalone only" };
-  }
-  // github#86, decisions/0009 -- those rows write FOLDER-keyed maps
-  const ok = r.folderRows > 0 && r.tagRows === 0 && r.backRows === r.folderRows &&
-             /per folder/i.test(r.says);
+  if (r.none) return { ok: true, detail: "no settings panel on this host -- the plugin owns it" };
+  const ok = r.tabs.join(",") === "folder,tag" && r.dim === "folder" && r.tagRows > 0 &&
+             r.namesMatch && r.folderMapSize === 0 && r.foldersSame && r.colourSame &&
+             (!r.pinned || (r.inTagMap === r.key && r.appliedOnTagDisc === r.key));
   return {
     ok,
-    detail: `${r.folderRows} folder rows, ${r.tagRows} while grouped by tag, ` +
-            `${r.backRows} again after switching back; it says ${JSON.stringify(r.says.slice(0, 60))}`,
+    detail: `tabs [${r.tabs.join(" | ")}], disc on ${r.dim}: ${r.folderRows} folder rows, ${r.tagRows} tag rows            (names are the tag dimension's: ${r.namesMatch})` +
+            (r.pinned
+              ? `; pinned ${r.pinned} to ${r.key}, tag map ${r.inTagMap || "(missing)"}, on the tag disc ${r.appliedOnTagDisc || "(not applied)"}`
+              : "; no tag row to pin") +
+            `; folder map ${r.folderMapSize} entries, folder order kept ${r.foldersSame}, folder colours kept ${r.colourSame}`,
   };
 });
 

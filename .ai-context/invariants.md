@@ -364,6 +364,26 @@ minus the blade. **0 lit at the switch itself, 0 lit ahead of the fill edge, all
 end** on the four fixtures. Before, on the maintainer's vault: 16 notes lit at the first sample
 at bearings up to 266°; with `keepAlpha` alone, one lit at 206° while the edge was near 78°.
 
+## Every grouping keeps its own colours, and a tab may be read off-screen
+
+github#86, design/0014 (D-11). Colour pins, sub-wedge tint pins and default visibility are per
+dimension (`dimColors`, `dimSubColors`, `dimShown`), read through `colorsFor`,
+`subColorsFor` and `shownFor`, which default to the dimension on screen. A settings tab shows
+its own dimension whichever disc is drawn, through `inDim(dim, fn)`: the disc's own builders
+run in a swapped world and every global they write is restored, so there is no second
+implementation of grouping, colour assignment or sub-wedge order and no way for the two to
+drift.
+
+```bash
+node scripts/smoke.mjs --only "each grouping keeps its own colours"
+```
+
+The check opens the panel on the **folder** disc, switches to the Tags tab, and holds all of
+it: the two tabs exist, the rows are the tag dimension's own names, a pin lands in the tag map
+and shows on the tag disc, the folder map stays empty, and the folder disc's order and colours
+are unchanged. Rows listed per tab on the four fixtures: 7 against 2, 4 against 15, 18 against
+14, 18 against 14.
+
 ## The rings are independent
 
 Toggling an inner-band group must not move the outer band. Measured, an `05` toggle

@@ -35,6 +35,9 @@ const ICON_ID = "vault-graph-disc";
  * @property {boolean} words
  * @property {Record<string, string>} folderColors      folder name -> slot key ("g7")
  * @property {Record<string, string>} subfolderColors   "folder/sub" -> slot key
+ * @property {Record<string, string>} tagColors         github#86 -- tag -> slot key
+ * @property {Record<string, string>} subtagColors      github#86 -- "tag/sub" -> slot key
+ * @property {Record<string, boolean>} tagShown         github#86 -- tag -> shown by default
  * @property {Record<string, boolean>} folderShown      folder name -> shown by default
  * @property {string[]} pinned                          note ids in the hub, in slot order
  * @property {boolean} panEnabled
@@ -565,6 +568,25 @@ class VaultGraphView extends ItemView {
       logoMask: "data:image/png;base64," + LOGO_MASK_B64,
       folderColors: this.plugin.settings.folderColors,
       subfolderColors: this.plugin.settings.subfolderColors,
+      // github#86 -- every grouping keeps its own pins
+      tagColors: this.plugin.settings.tagColors,
+      subtagColors: this.plugin.settings.subtagColors,
+      tagShown: this.plugin.settings.tagShown,
+      /** @param {Record<string, string>} map */
+      onTagColors: async (map) => {
+        this.plugin.settings.tagColors = map;
+        await this.plugin.saveSettings();
+      },
+      /** @param {Record<string, string>} map */
+      onSubtagColors: async (map) => {
+        this.plugin.settings.subtagColors = map;
+        await this.plugin.saveSettings();
+      },
+      /** @param {Record<string, boolean>} map */
+      onTagShown: async (map) => {
+        this.plugin.settings.tagShown = map;
+        await this.plugin.saveSettings();
+      },
       /** @param {Record<string, string>} map */
       onFolderColors: async (map) => {
         this.plugin.settings.folderColors = map;
@@ -688,6 +710,9 @@ const DEFAULTS = {
   words: true,
   folderColors: {},
   subfolderColors: {},
+  tagColors: {},
+  subtagColors: {},
+  tagShown: {},
   folderShown: {},
   pinned: [],
   panEnabled: true,
@@ -743,7 +768,7 @@ const VIEW_SETTINGS = [
     desc: "While the disc animates, cap every dot at just under half its distance to the nearest visible note, measured on the frame being drawn, so dots stay apart while rows slide. The disc at rest is unchanged. Experimental: dots breathe while a cascade walks." },
 ];
 
-const COLOURS_DESC = "Twelve slots, handed out in folder order and round again. Setting one folder never moves another, and two folders may share a colour.";
+const COLOURS_DESC = "Twelve slots, handed out in group order and round again. Folders and tags keep their own colours; the tabs choose which. Setting one group never moves another, and two may share a colour.";
 
 const SLOT_NAMES = ["Blue", "Orange", "Aqua", "Yellow", "Green", "Magenta",
                     "Violet", "Red", "Cyan", "Orchid", "Grey", "Slate"];
@@ -839,9 +864,9 @@ class VaultGraphSettingTab extends PluginSettingTab {
       ...BUILD_SETTINGS.map((s) => toggle(s, false)),
       { type: /** @type {"group"} */ ("group"), heading: "View",
         items: VIEW_SETTINGS.map((s) => toggle(s, s.defaultOn)) },
-      { type: /** @type {"group"} */ ("group"), heading: "Folder colours",
+      { type: /** @type {"group"} */ ("group"), heading: "Group colours",
         items: [{
-          name: "Folder and subfolder colours", desc: COLOURS_DESC,
+          name: "Group and sub-wedge colours", desc: COLOURS_DESC,
           aliases: ["colour", "color", "swatch", "palette", "subfolder", "hidden by default", "archive"],
           /** @param {Setting} setting */
           render: (setting) => {
@@ -910,9 +935,12 @@ class VaultGraphSettingTab extends PluginSettingTab {
           }));
     }
 
-    new Setting(containerEl).setName("Folder colours").setHeading();
+    new Setting(containerEl).setName("Group colours").setHeading();
     this.renderColourSection(new Setting(containerEl).setDesc(COLOURS_DESC));
   }
+
+  /** github#86 -- which grouping the colour section is showing @type {"folder" | "tag"} */
+  colourDim = "folder";
 
   /**
    * The folder-colours section: the Reset-all button on `row`, then the swatch rows in a
@@ -928,10 +956,12 @@ class VaultGraphSettingTab extends PluginSettingTab {
   renderColourSection(row) {
     row.addButton((b) => b
       .setButtonText("Reset all")
-      .setTooltip("Also drops every subfolder override")
+      .setTooltip("Also drops every sub-wedge override, for the grouping shown")
       .onClick(async () => {
-        this.plugin.settings.folderColors = {};
-        this.plugin.settings.subfolderColors = {};
+        // github#86 -- the tab you are on, not the other grouping's pins
+        const tag = this.colourDim === "tag";
+        this.plugin.settings[tag ? "tagColors" : "folderColors"] = {};
+        this.plugin.settings[tag ? "subtagColors" : "subfolderColors"] = {};
         await this.plugin.saveSettings();
         await this.plugin.applyFolderColors();
         await this.plugin.applySubfolderColors();
@@ -950,11 +980,17 @@ class VaultGraphSettingTab extends PluginSettingTab {
 
   redrawColours() {
     if (!this.scope) return;
-    let auto = 0;
-    this.renderColours(topFolders(this.app).map((f) => {
-      const s = isArchiveGroup(f.name) ? ARCHIVE_SLOT : "g" + ((auto++ % SLOT_NAMES.length) + 1);
-      return { name: f.name, n: f.n, slot: s, autoSlot: s };
-    }));
+    // github#86 -- the vault's own folders are the first guess, and only for the folder tab;
+    // github#86 -- the open view answers for either grouping a moment later
+    if (this.colourDim === "folder") {
+      let auto = 0;
+      this.renderColours(topFolders(this.app).map((f) => {
+        const s = isArchiveGroup(f.name) ? ARCHIVE_SLOT : "g" + ((auto++ % SLOT_NAMES.length) + 1);
+        return { name: f.name, n: f.n, slot: s, autoSlot: s };
+      }));
+    } else {
+      this.renderColours([]);
+    }
 
     this.refreshFromView();
   }
@@ -965,12 +1001,15 @@ class VaultGraphSettingTab extends PluginSettingTab {
     const api = view && view.handle && view.handle.api;
     if (!api || !api.groupOrder || !api.palette || !scope || !scope.isConnected) return;
 
-    const groups = api.groupOrder().map((name) => ({
-      name,
-      n: api.groupCount(name),
-      slot: api.slotOf ? api.slotOf(name) : "",
-      autoSlot: api.autoSlotOf ? api.autoSlotOf(name) : "",
-    }));
+    // github#86 -- the page answers for the grouping this tab is on, not only the one on screen
+    const groups = api.groupsOf
+      ? api.groupsOf(this.colourDim).map((g) => ({ name: g.name, n: g.n, slot: g.slot, autoSlot: g.autoSlot }))
+      : api.groupOrder().map((name) => ({
+        name,
+        n: api.groupCount(name),
+        slot: api.slotOf ? api.slotOf(name) : "",
+        autoSlot: api.autoSlotOf ? api.autoSlotOf(name) : "",
+      }));
     if (groups.length) this.renderColours(groups);
   }
 
@@ -978,8 +1017,24 @@ class VaultGraphSettingTab extends PluginSettingTab {
   renderColours(groups) {
     const scope = this.scope;
     scope.empty();
+    // github#86 -- one tab per grouping, above the rows
+    const tabs = scope.createDiv({ cls: ["dimseg", "setseg"] });
+    tabs.setAttribute("role", "group");
+    tabs.setAttribute("aria-label", "Set colours for");
+    for (const [dim, label] of [["folder", "Folders"], ["tag", "Tags"]]) {
+      const b = tabs.createEl("button", { text: label });
+      b.type = "button";
+      b.setAttribute("aria-pressed", String(dim === this.colourDim));
+      b.onclick = () => {
+        if (this.colourDim === dim) return;
+        this.colourDim = /** @type {"folder" | "tag"} */ (dim);
+        this.redrawColours();
+      };
+    }
     if (!groups.length) {
-      scope.createEl("p", { text: "No folders to colour yet." });
+      scope.createEl("p", { text: this.colourDim === "tag"
+        ? "Open the graph to colour this vault's tags."
+        : "No folders to colour yet." });
       return;
     }
 
@@ -1090,7 +1145,7 @@ class VaultGraphSettingTab extends PluginSettingTab {
   }
 
   /**
-   * @param {"folderColors" | "subfolderColors"} settingsKey
+   * @param {"folderColors" | "subfolderColors" | "tagColors" | "subtagColors"} settingsKey
    * @param {string} mapKey
    * @param {string | null} key
    * @param {"applyFolderColors" | "applySubfolderColors"} applyMethod
@@ -1106,12 +1161,15 @@ class VaultGraphSettingTab extends PluginSettingTab {
 
   /** @param {string} folder @param {string | null} key */
   async pick(folder, key) {
-    return this.setOverride("folderColors", folder, key, "applyFolderColors");
+    // github#86 -- into the grouping this tab is on
+    return this.setOverride(this.colourDim === "tag" ? "tagColors" : "folderColors",
+                            folder, key, "applyFolderColors");
   }
 
   /** @param {string} folder @param {string} sub @param {string | null} key */
   async pickSub(folder, sub, key) {
-    return this.setOverride("subfolderColors", folder + "/" + sub, key, "applySubfolderColors");
+    return this.setOverride(this.colourDim === "tag" ? "subtagColors" : "subfolderColors",
+                            folder + "/" + sub, key, "applySubfolderColors");
   }
 }
 

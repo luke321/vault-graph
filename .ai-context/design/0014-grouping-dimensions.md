@@ -116,6 +116,39 @@ select's value.
 The dimension is remembered by the host, not the page (decisions/0009), so there is no settings
 row for it — the segmented control is the control.
 
+## Every grouping keeps its own colours (D-11, 2026-09-10)
+
+The first cut pinned colours per FOLDER only, and guarded the settings panel and the palette so
+a tag disc could not be recoloured: *"colours are set per folder, switch the group list back to
+Folders"*. That was a stopgap and it read as one — the group list offers Tags, and then the one
+thing you want to do with a tag wedge is the thing the panel refuses.
+
+Each dimension now carries its own three maps, under the same shapes the folder maps always
+had: `dimColors[dim]` (group → palette slot), `dimSubColors[dim]` ("group/sub" → slot) and
+`dimShown[dim]` (group → shown by default). `colorsFor(dim)`, `subColorsFor(dim)` and
+`shownFor(dim)` default to the dimension on screen, so `buildColors`, `subPin` and
+`hiddenByDefault` read the right pins without knowing there are two of anything. The host
+persists six maps instead of three — `tagColors`, `subtagColors` and `tagShown` beside the
+folder three — and a vault that never opens the tag disc writes none of them.
+
+**The settings are tabbed**, in both surfaces, with the group list's own segmented control: the
+page's panel (`settingsDim`, which follows the disc on a switch and then stays where you put
+it) and the plugin's section in Obsidian's settings (`colourDim`). A tab shows its own
+dimension's groups **whichever disc is on screen** — you can colour tags while looking at
+folders — and that needs the off-screen dimension's group order, slots and sub-wedges.
+
+`inDim(dim, fn)` answers it without a second implementation: it swaps `state.dim`, runs the
+disc's own `computeOrder`, `buildColors` and `buildSubOrder`, hands their results to `fn`, and
+restores every global they wrote. It is the trick the cascade's `inWorld` already uses to plan
+the disc being left. One reader sits on top of it, `__vg.groupsOf(dim)`, and that is what the
+plugin's settings section asks — so that surface has no grouping logic of its own either.
+
+**Measured on a mirror of the maintainer's vault**, folder disc on screen: the Tags tab lists
+the tag dimension's 15 groups against the folder disc's 12, pinning a tag writes only the tag
+map, the pin shows on the tag disc when you switch to it, and the folder disc's order and every
+folder colour are unchanged. Across the four fixtures the two tabs list 7 against 2, 4 against
+15, 18 against 14, and 18 against 14 rows.
+
 ## One dot per tag (D-9) — removed 2026-09-10, github#91
 
 **Pulled out the same day the inner-ring limit below was measured**, to come back as its own

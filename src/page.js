@@ -101,6 +101,9 @@
  * @property {Document} [doc]
  * @property {SlotMap} [folderColors]
  * @property {SlotMap} [subfolderColors]
+ * @property {SlotMap} [tagColors]                github#86 -- tag name -> slot key
+ * @property {SlotMap} [subtagColors]             github#86 -- "tag/sub" -> slot key
+ * @property {Record<string, boolean>} [tagShown] github#86 -- tag name -> shown by default
  * @property {Record<string, boolean>} [folderShown]
  * @property {boolean} [panEnabled]
  * @property {boolean} [compactAxis]
@@ -116,6 +119,9 @@
  * @property {() => void} [openSettings]
  * @property {(map: SlotMap) => void | Promise<void>} [onFolderColors]
  * @property {(map: SlotMap) => void | Promise<void>} [onSubfolderColors]
+ * @property {(map: SlotMap) => void | Promise<void>} [onTagColors]        github#86
+ * @property {(map: SlotMap) => void | Promise<void>} [onSubtagColors]     github#86
+ * @property {(map: Record<string, boolean>) => void | Promise<void>} [onTagShown]  github#86
  * @property {(map: Record<string, boolean>) => void | Promise<void>} [onFolderShown]
  * @property {(v: boolean) => void | Promise<void>} [onPanEnabled]
  * @property {(v: boolean) => void | Promise<void>} [onCompactAxis]
@@ -160,11 +166,14 @@
  * @property {() => void} placeLogo
  * @property {() => PaletteSlot[]} palette
  * @property {() => string[]} groupOrder
+ * @property {(dim: string) => { name: string, n: number, slot: string, autoSlot: string, pinned: boolean, shown: boolean, subs: { name: string, n: number, pin: string }[] }[]} groupsOf   github#86
  * @property {(group: string) => number} groupCount
  * @property {(group: string) => string} slotOf
  * @property {(group: string) => string} autoSlotOf
  * @property {(map: SlotMap) => void} setFolderColors
  * @property {(map: SlotMap) => void} setSubfolderColors
+ * @property {(map: SlotMap) => void} setTagColors
+ * @property {(map: SlotMap) => void} setSubtagColors
  * @property {(map: Record<string, boolean>) => void} setFolderShown
  * @property {(v: boolean) => void} setPanEnabled
  * @property {(v: boolean) => void} setCompactAxis
@@ -384,8 +393,17 @@ function mountVaultGraph(root, data, deps) {
     });
     return out;
   }
-  var folderColors = cleanSlotMap(deps.folderColors);
-  var subfolderColors = cleanSlotMap(deps.subfolderColors);
+  // github#86, design/0014 -- every grouping keeps its OWN colour pins, sub-tint pins and
+  // github#86 -- default-visibility map, under the same three shapes. A dimension reads its
+  // github#86 -- own; the settings panel reads the tab you are on.
+  /** @type {Record<string, SlotMap>} */
+  var dimColors = { folder: cleanSlotMap(deps.folderColors), tag: cleanSlotMap(deps.tagColors) };
+  /** @type {Record<string, SlotMap>} */
+  var dimSubColors = { folder: cleanSlotMap(deps.subfolderColors), tag: cleanSlotMap(deps.subtagColors) };
+  /** @param {string} [dim] @returns {SlotMap} */
+  function colorsFor(dim) { return dimColors[dim || state.dim] || dimColors.folder; }
+  /** @param {string} [dim] @returns {SlotMap} */
+  function subColorsFor(dim) { return dimSubColors[dim || state.dim] || dimSubColors.folder; }
 
   // github#4
   var panEnabled = deps.panEnabled === false ? false : true;
@@ -422,8 +440,14 @@ function mountVaultGraph(root, data, deps) {
   // github#86, design/0014
   /** @type {("folder" | "tag")[]} */
   var DIMS = ["folder", "tag"];
+  // github#86, design/0014 -- which dimension the settings panel is showing. It follows the disc
+  // github#86 -- on a switch, so opening the panel after switching lands on the tab you expect,
+  // github#86 -- and stays where you put it while the panel is open.
+  /** @type {"folder" | "tag"} */
+  var settingsDim = "folder";
   var dimStart = DIMS.indexOf(/** @type {"folder" | "tag"} */ (deps.dim)) >= 0
     ? /** @type {"folder" | "tag"} */ (deps.dim) : "folder";
+  settingsDim = dimStart;
   var onDim = typeof deps.onDim === "function" ? deps.onDim : null;
 
   /** @param {string} g */
@@ -476,18 +500,42 @@ function mountVaultGraph(root, data, deps) {
     });
     return out;
   }
-  var folderShown = cleanFolderShown(deps.folderShown);
+  /** @type {Record<string, Record<string, boolean>>} */
+  var dimShown = { folder: cleanFolderShown(deps.folderShown), tag: cleanFolderShown(deps.tagShown) };
+  /** @param {string} [dim] @returns {Record<string, boolean>} */
+  function shownFor(dim) { return dimShown[dim || state.dim] || dimShown.folder; }
 
   /** @param {string} g */
   function hiddenByDefault(g) {
-    // github#86, design/0014 -- folderShown is a folder map; D-2 shows (untagged)
-    if (state.dim === "folder" && typeof folderShown[g] === "boolean") return !folderShown[g];
+    // github#86, design/0014 -- each dimension has its own map; D-2 shows (untagged) unless
+    // github#86 -- this dimension's map says otherwise
+    var m = shownFor()[g];
+    if (typeof m === "boolean") return !m;
     return isArchiveGroup(g);
   }
   var SETTINGS_UI = !!deps.settingsUI;
   var openHostSettings = typeof deps.openSettings === "function" ? deps.openSettings : null;
   var saveFolderColors = typeof deps.onFolderColors === "function" ? deps.onFolderColors : null;
   var saveSubfolderColors = typeof deps.onSubfolderColors === "function" ? deps.onSubfolderColors : null;
+  var saveTagColors = typeof deps.onTagColors === "function" ? deps.onTagColors : null;
+  var saveSubtagColors = typeof deps.onSubtagColors === "function" ? deps.onSubtagColors : null;
+  var saveTagShown = typeof deps.onTagShown === "function" ? deps.onTagShown : null;
+  // github#86 -- one host callback per map per dimension
+  /** @param {string} dim @param {SlotMap} map */
+  function saveColorsFor(dim, map) {
+    var fn = dim === "tag" ? saveTagColors : saveFolderColors;
+    if (fn) fn(map);
+  }
+  /** @param {string} dim @param {SlotMap} map */
+  function saveSubColorsFor(dim, map) {
+    var fn = dim === "tag" ? saveSubtagColors : saveSubfolderColors;
+    if (fn) fn(map);
+  }
+  /** @param {string} dim @param {Record<string, boolean>} map */
+  function saveShownFor(dim, map) {
+    var fn = dim === "tag" ? saveTagShown : saveFolderShown;
+    if (fn) fn(map);
+  }
   var saveFolderShown = typeof deps.onFolderShown === "function" ? deps.onFolderShown : null;
   var savePinned = typeof deps.onPinned === "function" ? deps.onPinned : null;
 
@@ -947,7 +995,8 @@ function mountVaultGraph(root, data, deps) {
     var names = order[state.dim] || [];
 
     /** @type {SlotMap} */
-    var byFolder = state.dim === "folder" ? folderColors : dict();
+    // github#86 -- the pins of the dimension on screen
+    var byFolder = colorsFor();
 
     groupSlot = dict();
     groupAutoSlot = dict();
@@ -982,34 +1031,69 @@ function mountVaultGraph(root, data, deps) {
     });
   }
 
-  /** @param {Record<string, unknown>} map */
-  function applyFolderShown(map) {
-    folderShown = cleanFolderShown(map);
-    return folderShown;
+  /** @param {Record<string, unknown>} map @param {string} [dim] */
+  function applyFolderShown(map, dim) {
+    var d = dim === "tag" ? "tag" : "folder";
+    dimShown[d] = cleanFolderShown(map);
+    return dimShown[d];
   }
 
-  /** @param {Record<string, unknown>} map */
-  function applyFolderColors(map) {
-    folderColors = cleanSlotMap(map);
+  /** @param {Record<string, unknown>} map @param {string} [dim] */
+  function applyFolderColors(map, dim) {
+    var d = dim === "tag" ? "tag" : "folder";
+    dimColors[d] = cleanSlotMap(map);
     buildColors();
     if (renderer) renderer.refresh();
     attempt(placeLogo); attempt(heatBuild); attempt(buildLegend);
-    return folderColors;
+    return dimColors[d];
   }
 
-  /** @param {Record<string, unknown>} map */
-  function applySubfolderColors(map) {
-    subfolderColors = cleanSlotMap(map);
+  /** @param {Record<string, unknown>} map @param {string} [dim] */
+  function applySubfolderColors(map, dim) {
+    var d = dim === "tag" ? "tag" : "folder";
+    dimSubColors[d] = cleanSlotMap(map);
     buildSubShades();
     if (renderer) renderer.refresh();
     attempt(placeLogo); attempt(heatBuild); attempt(buildLegend);
-    return subfolderColors;
+    return dimSubColors[d];
   }
 
-  // github#86, decisions/0009 -- the pins are FOLDER maps; no tag takes one
+  // github#86, design/0014 -- a sub-wedge's pinned tint, from this dimension's own map
   /** @param {string} pk "group/sub" @returns {string} */
   function subPin(pk) {
-    return state.dim === "folder" ? (subfolderColors[pk] || "") : "";
+    return subColorsFor()[pk] || "";
+  }
+
+  /**
+   * github#86, design/0014 -- read a dimension that is not on screen. The disc's own builders
+   * run in a swapped world and every global they write is restored, so the settings panel can
+   * show the tag tab while the folder disc is drawn (and the other way round) without a
+   * second implementation of grouping, colour assignment or sub-wedge ordering.
+   * @template T
+   * @param {string} dim
+   * @param {() => T} fn
+   * @returns {T}
+   */
+  function inDim(dim, fn) {
+    if (dim === state.dim || DIMS.indexOf(dim) < 0) return fn();
+    var sDim = state.dim, sCounts = counts, sFolderCount = folderCount,
+        sColor = groupColor, sSlot = groupSlot, sAuto = groupAutoSlot,
+        sShade = subShade, sSubSlot = subSlot, sTint = unlinkedTintColors,
+        sSubOrder = subOrder, sSubCount = subCount;
+    state.dim = /** @type {"folder" | "tag"} */ (dim);
+    try {
+      if (dim === "tag") buildTagFiling();
+      computeOrder();
+      buildColors();
+      buildSubOrder();
+      return fn();
+    } finally {
+      state.dim = /** @type {"folder" | "tag"} */ (sDim);
+      counts = sCounts; folderCount = sFolderCount;
+      groupColor = sColor; groupSlot = sSlot; groupAutoSlot = sAuto;
+      subShade = sShade; subSlot = sSubSlot; unlinkedTintColors = sTint;
+      subOrder = sSubOrder; subCount = sSubCount;
+    }
   }
 
   /** @param {string} g */
@@ -6365,17 +6449,21 @@ function mountVaultGraph(root, data, deps) {
         $("gear").setAttribute("aria-expanded", String(open));
         if (open) { buildOptions(); buildSettings(); }
       };
+      // github#86 -- the reset drops the tab's own pins, not the other dimension's
       $("fcreset").onclick = function () {
-        pickColor(null, null);
-        var savedSub = applySubfolderColors({});
-        if (saveSubfolderColors) saveSubfolderColors(Object.assign({}, savedSub));
+        pickColor(null, null, settingsDim);
+        var savedSub = applySubfolderColors({}, settingsDim);
+        saveSubColorsFor(settingsDim, Object.assign({}, savedSub));
         buildSettings();
       };
       $("setbody").addEventListener("click", function (ev) {
         var t = ev.target instanceof Element ? ev.target : null;
         if (!t) return;
+        // github#86 -- the tabs
+        var td = t.closest("[data-setdim]");
+        if (td) { settingsDim = td.getAttribute("data-setdim") === "tag" ? "tag" : "folder"; buildSettings(); return; }
         var v = t.closest("[data-vis]");
-        if (v) { pickVisible(v.getAttribute("data-vis")); return; }
+        if (v) { pickVisible(v.getAttribute("data-vis"), settingsDim); return; }
         var tw = t.closest("[data-stw]");
         if (tw) {
           var fg = tw.getAttribute("data-stw");
@@ -6388,11 +6476,11 @@ function mountVaultGraph(root, data, deps) {
         if (s) {
           var pk = s.getAttribute("data-sfc"), slash = pk.indexOf("/");
           pickSubColors(pk.slice(0, slash), [pk.slice(slash + 1)],
-                        s.getAttribute("data-key") || null);
+                        s.getAttribute("data-key") || null, settingsDim);
           return;
         }
         var b = t.closest("[data-fc]");
-        if (b) pickColor(b.getAttribute("data-fc"), b.getAttribute("data-key") || null);
+        if (b) pickColor(b.getAttribute("data-fc"), b.getAttribute("data-key") || null, settingsDim);
       });
       $("optbody").addEventListener("click", function (ev) {
         var t = ev.target instanceof Element ? ev.target : null;
@@ -6512,7 +6600,7 @@ function mountVaultGraph(root, data, deps) {
         var g = gBtn.getAttribute("data-g");
         var isUnlinked = g === UNLINKED;
         var keptSeparate = isUnlinked && !unlinkedByFolder;
-        openCtxMenu(ev.clientX, ev.clientY, folderColors[g] || groupSlot[g] || "",
+        openCtxMenu(ev.clientX, ev.clientY, colorsFor()[g] || groupSlot[g] || "",
                     function (key) { pickColor(g, key); }, groupAutoSlot[g] || "",
                     !hiddenByDefault(g), function () { pickVisible(g); },
                     isUnlinked ? unlinkedByFolder : undefined,
@@ -6528,7 +6616,7 @@ function mountVaultGraph(root, data, deps) {
         var subs = subOrder[f] || [];
         var idx = subBtn.getAttribute("data-idx").split(",").map(Number);
         var picked = idx.map(function (i) { return subs[i]; });
-        var cur = idx.length === 1 ? (subfolderColors[f + "/" + picked[0]] || "") : "";
+        var cur = idx.length === 1 ? (subColorsFor()[f + "/" + picked[0]] || "") : "";
         openCtxMenu(ev.clientX, ev.clientY, cur,
                     function (key) { pickSubColors(f, picked, key); });
         return;
@@ -6537,54 +6625,67 @@ function mountVaultGraph(root, data, deps) {
     });
 
     /** @param {string} folder @param {string | null} key */
-    function pickColor(folder, key) {
+    /** @param {string | null} folder @param {string | null} key @param {string} [dim] */
+    function pickColor(folder, key, dim) {
+      var d = dim || state.dim;
       /** @type {SlotMap} */
       var next = dict();
       if (folder) {
-        Object.keys(folderColors).forEach(function (g) { next[g] = folderColors[g]; });
+        var cur = colorsFor(d);
+        Object.keys(cur).forEach(function (g) { next[g] = cur[g]; });
         if (key) next[folder] = key; else delete next[folder];
       }
-      var saved = applyFolderColors(next);
-      if (saveFolderColors) saveFolderColors(Object.assign({}, saved));
+      var saved = applyFolderColors(next, d);
+      saveColorsFor(d, Object.assign({}, saved));
       buildSettings();
     }
 
-    /** @param {string} folder @param {string[]} subs @param {string | null} key */
-    function pickSubColors(folder, subs, key) {
+    /** @param {string} folder @param {string[]} subs @param {string | null} key @param {string} [dim] */
+    function pickSubColors(folder, subs, key, dim) {
+      var d = dim || state.dim;
       /** @type {SlotMap} */
       var next = dict();
-      Object.keys(subfolderColors).forEach(function (k) { next[k] = subfolderColors[k]; });
+      var curSub = subColorsFor(d);
+      Object.keys(curSub).forEach(function (k) { next[k] = curSub[k]; });
       subs.forEach(function (sb) {
         var pk = folder + "/" + sb;
         if (key) next[pk] = key; else delete next[pk];
       });
-      var saved = applySubfolderColors(next);
-      if (saveSubfolderColors) saveSubfolderColors(Object.assign({}, saved));
+      var saved = applySubfolderColors(next, d);
+      saveSubColorsFor(d, Object.assign({}, saved));
       buildSettings();
     }
 
     /** @param {string} folder */
-    function pickVisible(folder) {
+    /** @param {string} folder @param {string} [dim] */
+    function pickVisible(folder, dim) {
+      var d = dim || state.dim;
       /** @type {Record<string, boolean>} */
       var next = dict();
-      Object.keys(folderShown).forEach(function (g) { next[g] = folderShown[g]; });
-      next[folder] = hiddenByDefault(folder);
-      var saved = applyFolderShown(next);
-      if (saveFolderShown) saveFolderShown(Object.assign({}, saved));
-      var h = state.hidden[state.dim] || (state.hidden[state.dim] = dict());
-      if (hiddenByDefault(folder)) h[folder] = true; else delete h[folder];
-      buildLegend();
-      cascade(null, { colToggle: true });
+      var cur = shownFor(d);
+      Object.keys(cur).forEach(function (g) { next[g] = cur[g]; });
+      // github#86 -- flip THIS dimension's default, whether or not it is the one on screen
+      var wasHidden = typeof cur[folder] === "boolean" ? !cur[folder] : isArchiveGroup(folder);
+      next[folder] = wasHidden;
+      var saved = applyFolderShown(next, d);
+      saveShownFor(d, Object.assign({}, saved));
+      if (d === state.dim) {
+        var h = state.hidden[state.dim] || (state.hidden[state.dim] = dict());
+        if (hiddenByDefault(folder)) h[folder] = true; else delete h[folder];
+        buildLegend();
+        cascade(null, { colToggle: true });
+      }
       buildSettings();
     }
 
-    /** @param {string} g @param {PaletteSlot[]} pal */
-    function subfolderRows(g, pal) {
-      return (subOrder[g] || []).map(function (sb) {
+    /** @param {string} g @param {PaletteSlot[]} pal @param {string} [dim] */
+    function subfolderRows(g, pal, dim) {
+      var d = dim || state.dim;
+      return subsFor(d, g).map(function (sb) {
         var pk = g + "/" + sb;
-        var pin = subfolderColors[pk] || "";
-        var tint = subShade[pk] || colorOf(g);
-        var nm = sb || "(directly in folder)";
+        var pin = subColorsFor(d)[pk] || "";
+        var tint = subShadeFor(d, pk) || slotColor(slotFor(d, g));
+        var nm = sb || (d === "tag" ? "(no nested tag)" : "(directly in folder)");
         var sws = swatchButtonsHTML(pal, {
           role: "radio", dataAttr: "sfc", dataValue: pk, current: pin,
           titleFor: function (on, isAuto) { return on ? " (chosen)" : ""; }
@@ -6594,7 +6695,7 @@ function mountVaultGraph(root, data, deps) {
                '<div class="scrh">' +
                '<span class="sw" style="background:' + tint + ';border-radius:50%"></span>' +
                '<span class="nm" title="' + esc(nm) + '">' + esc(nm) + '</span>' +
-               '<span class="ct">' + (subCount[pk] || 0) + '</span>' +
+               '<span class="ct">' + subCountFor(d, pk) + '</span>' +
                '<button class="auto" data-sfc="' + esc(pk) + '" data-key=""' +
                ' aria-pressed="' + (!pin) + '"' +
                ' title="Back to the automatic tint">Auto</button>' +
@@ -6636,29 +6737,55 @@ function mountVaultGraph(root, data, deps) {
       }).join(""));
     }
 
+    /** @param {string} dim @returns {string[]} */
+    function orderFor(dim) { return inDim(dim, function () { return (order[dim] || []).slice(); }); }
+    /** @param {string} dim @param {string} g */
+    function slotFor(dim, g) { return inDim(dim, function () { return groupSlot[g] || ""; }); }
+    /** @param {string} dim @param {string} g */
+    function autoSlotFor(dim, g) { return inDim(dim, function () { return groupAutoSlot[g] || ""; }); }
+    /** @param {string} dim @param {string} g @returns {string[]} */
+    function subsFor(dim, g) { return inDim(dim, function () { return (subOrder[g] || []).slice(); }); }
+    /** @param {string} dim @param {string} pk */
+    function subCountFor(dim, pk) { return inDim(dim, function () { return subCount[pk] || 0; }); }
+    /** @param {string} dim @param {string} pk */
+    function subShadeFor(dim, pk) { return inDim(dim, function () { return subShade[pk] || ""; }); }
+    /** @param {string} key a palette slot @returns {string} */
+    function slotColor(key) { return THEME.byKey[key] || THEME.neutrals[0]; }
+
     function buildSettings() {
       var pal = paletteInfo();
-      // github#86, decisions/0009 -- these rows write FOLDER-keyed maps
-      if (state.dim !== "folder") {
-        setHTML($("setbody"),
-          '<div class="lbl" style="margin:0;opacity:.7">Colours and default visibility are set ' +
-          'per folder. Switch the group list back to Folders to change them.</div>');
+      // github#86, design/0014 -- one tab per grouping, the same control the group list uses.
+      // github#86 -- Each tab writes its own dimension's maps, whichever disc is on screen.
+      var d = settingsDim;
+      var tabs = '<span class="dimseg setseg" role="group" aria-label="Set colours for">' +
+        DIMS.map(function (k) {
+          return '<button type="button" data-setdim="' + k + '" aria-pressed="' + (k === d) +
+                 '" title="Colours and default visibility for ' + (k === "tag" ? "tags" : "folders") + '">' +
+                 (k === "tag" ? "Tags" : "Folders") + '</button>';
+        }).join("") + '</span>';
+      // github#86 -- a dimension the vault has nothing to show for still gets its tab
+      var names = orderFor(d);
+      if (!names.length) {
+        setHTML($("setbody"), tabs +
+          '<div class="lbl" style="margin:9px 0 0;opacity:.7">This vault has no ' +
+          (d === "tag" ? "tags" : "folders") + ' to colour.</div>');
         return;
       }
-      var rows = (order[state.dim] || []).map(function (g) {
-        var pinned = folderColors[g] || "";
-        var cur = pinned || groupSlot[g] || "";
+      var rows = names.map(function (g) {
+        var pinned = colorsFor(d)[g] || "";
+        var cur = pinned || slotFor(d, g) || "";
         // github#29
-        var autoKey = groupAutoSlot[g] || "";
+        var autoKey = autoSlotFor(d, g) || "";
         var sws = swatchButtonsHTML(pal, {
           role: "radio", dataAttr: "fc", dataValue: g, current: cur, autoKey: autoKey,
           titleFor: function (on, isAuto) {
             return on ? (pinned ? " (chosen)" : " (automatic)") : (isAuto ? " (automatic default)" : "");
           }
         });
-        var shown = !hiddenByDefault(g);
-        var hasSubs = groupHasPinnedSub(g) ||
-                      ((subOrder[g] || []).length > 1 && (counts[g] || 0) >= NEST_MIN);
+        var shownMap = shownFor(d)[g];
+        var shown = typeof shownMap === "boolean" ? shownMap : !isArchiveGroup(g);
+        var subs = subsFor(d, g);
+        var hasSubs = subs.length > 1 || subs.some(function (sb) { return !!subColorsFor(d)[g + "/" + sb]; });
         var open = hasSubs && !state.collapsed[g];
         return '<div class="scr" role="radiogroup" aria-label="Colour for ' + esc(g) + '">' +
                '<div class="scrh">' +
@@ -6673,9 +6800,9 @@ function mountVaultGraph(root, data, deps) {
                ' title="Back to the slot this folder gets automatically">Auto</button>' +
                '</div>' +
                '<span class="sws">' + sws + '</span></div>' +
-               (open ? subfolderRows(g, pal) : "");
+               (open ? subfolderRows(g, pal, d) : "");
       }).join("");
-      setHTML($("setbody"), rows);
+      setHTML($("setbody"), tabs + rows);
     }
   }
 
@@ -6913,6 +7040,7 @@ function mountVaultGraph(root, data, deps) {
     var rings = geomLock;
     stashDimNav(state.dim);
     state.dim = next;
+    settingsDim = next;
     restoreDimNav(next);
     state.hoverGroup = null;
     state.hoverSub = dict();
@@ -8870,11 +8998,34 @@ function mountVaultGraph(root, data, deps) {
                     placeLogo: placeLogo,
                     palette: paletteInfo,
                     groupOrder: function () { return (order[state.dim] || []).slice(); },
+                    // github#86, design/0014 -- one grouping's rows, whichever disc is on screen:
+                    // github#86 -- what a settings surface needs to offer colours for it
+                    groupsOf: /** @param {string} dim */ function (dim) {
+                      return inDim(String(dim), function () {
+                        return (order[state.dim] || []).map(function (g) {
+                          return {
+                            name: g, n: counts[g] || 0,
+                            slot: colorsFor()[g] || groupSlot[g] || "", autoSlot: groupAutoSlot[g] || "",
+                            pinned: !!colorsFor()[g],
+                            shown: !hiddenByDefault(g),
+                            subs: (subOrder[g] || []).map(function (sb) {
+                              return { name: sb, n: subCount[g + "/" + sb] || 0,
+                                       pin: subColorsFor()[g + "/" + sb] || "" };
+                            })
+                          };
+                        });
+                      });
+                    },
                     groupCount: /** @param {string} g */ function (g) { return counts[g] || 0; },
                     slotOf: /** @param {string} g */ function (g) { return groupSlot[g] || ""; },
                     autoSlotOf: /** @param {string} g */ function (g) { return groupAutoSlot[g] || ""; },
                     setFolderColors: applyFolderColors,
-                    setSubfolderColors: applySubfolderColors,
+                    setSubfolderColors: /** @param {Record<string, unknown>} m */ function (m) { return applySubfolderColors(m, "folder"); },
+                    setTagColors: /** @param {Record<string, unknown>} m */ function (m) { return applyFolderColors(m, "tag"); },
+                    setSubtagColors: /** @param {Record<string, unknown>} m */ function (m) { return applySubfolderColors(m, "tag"); },
+                    get tagColors() { return Object.assign(dict(), dimColors.tag); },
+                    get subtagColors() { return Object.assign(dict(), dimSubColors.tag); },
+                    get tagShown() { return Object.assign(dict(), dimShown.tag); },
                     setFolderShown: applyFolderShown,
                     setPanEnabled: function (v) { return setPan(v !== false, false); },
                     // github#23
@@ -9143,10 +9294,10 @@ function mountVaultGraph(root, data, deps) {
                     nodeColor: nodeColor,
                     isArchiveGroup: isArchiveGroup,
                     get folderColors() {
-                      return Object.assign(dict(), folderColors);
+                      return Object.assign(dict(), dimColors.folder);
                     },
                     get subfolderColors() {
-                      return Object.assign(dict(), subfolderColors);
+                      return Object.assign(dict(), dimSubColors.folder);
                     },
                     subColorOf: /** @param {string} folder @param {string} [sub] */ function (folder, sub) {
                       return subShade[folder + "/" + (sub || "")] || colorOf(folder);
@@ -9157,7 +9308,7 @@ function mountVaultGraph(root, data, deps) {
                     subOrderOf: /** @param {string} g */ function (g) { return (subOrder[g] || []).slice(); },
                     subCountOf: function (g, sub) { return subCount[g + "/" + (sub || "")] || 0; },
                     get folderShown() {
-                      return Object.assign(dict(), folderShown);
+                      return Object.assign(dict(), dimShown.folder);
                     },
                     get panEnabled() { return panEnabled; },
                     get compactAxis() { return compactAxis; },

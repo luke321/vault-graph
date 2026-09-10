@@ -314,6 +314,10 @@
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
   .vault-graph .sws { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
+  /* github#86, design/0014 -- the settings tabs are the group list's own segmented control,
+     one rule apart: it spans the panel and sits above the rows. */
+  .vault-graph .dimseg.setseg { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; margin: 0 0 9px; }
+  .vault-graph .dimseg.setseg button { text-align: center; padding: 5px 8px; }
   .vault-graph #vg-setbody { max-height: 46vh; overflow-y: auto; }
   .vault-graph #vg-setbody .sws {
     display: grid; grid-template-columns: repeat(12, 1fr); gap: 4px;
