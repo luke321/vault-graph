@@ -194,13 +194,28 @@ Fix the suite's flake, which was two bugs and neither was the settle
 Closes #7
 ```
 
-GitHub resolves closing keywords when the commit reaches the **default branch**, which is
-`main`. So an issue fixed on a branch stays open through `develop` and closes by itself
-when the release merge lands — which is exactly when it is true to say it is fixed. A bare
-`#7` links without closing, and is right for a commit that only touches an issue in passing.
+The issue closes when that commit reaches **`develop`**. GitHub itself resolves a closing
+keyword only on the default branch, `main`, and has no per-branch switch; at one or two
+releases a day that left issues open for hours after their fix had landed and been gated. So
+`.github/workflows/close-issues.yml` runs on every push to `develop`, scans the pushed commits
+for the keyword forms GitHub recognises (`close`, `fix`, `resolve` and their `-s`/`-d`
+spellings, any case, followed by `#n`, `owner/repo#n` or the issue's URL), and closes each
+issue it names with a comment giving the commit and saying the fix is not yet released. The
+release merge into `main` then meets GitHub's own resolution on an issue already closed. A
+closed issue therefore means *landed on `develop`*; whether it has shipped is what the
+CHANGELOG is for. A bare `#7` links without closing, and is right for a commit that only
+touches an issue in passing.
 
-If a merge into `main` needs to close issues its commits did not name, put the keywords in
-the merge commit message; that works the same way.
+If a merge into `develop` needs to close issues its commits did not name, put the keywords in
+the merge commit message; the workflow reads that commit too. The scanning is
+`scripts/close-issues.mjs`, which can be rehearsed on any range without writing anything:
+
+```bash
+node scripts/close-issues.mjs --range <before>..<after> --dry-run
+```
+
+A push whose starting commit the workflow cannot see — `develop` force-pushed, or created from
+nothing — fails the run and closes nothing, rather than guessing at the range.
 
 For a visual change, take before-and-after screenshots of the same vault and compare them:
 

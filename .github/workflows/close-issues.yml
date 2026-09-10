@@ -1,0 +1,55 @@
+# Close an issue when the commit that fixes it reaches develop, not only when it reaches main.
+#
+# WHY A WORKFLOW AND NOT A SETTING (github#102): GitHub resolves a closing keyword -- `Closes
+# #n`, `Fixes #n`, `Resolves #n` -- only when the commit reaches the repository's DEFAULT
+# branch, and there is no per-branch switch. main has to stay the default: the ruleset on it,
+# the Pages source and the release workflow's dispatch all hang off it. So this closes the
+# issue itself, at the push that lands the fix on develop, and says so in a comment naming the
+# commit. GitHub's own resolution on the later develop -> main merge then finds an issue
+# already closed, which is harmless.
+#
+# That timing used to be the point -- an issue stayed open until the release merge, "which is
+# exactly when it is true to say it is fixed". At one or two releases a day the gap between
+# "landed and gated on develop" and "released" is hours, and an open issue whose fix is already
+# verified is noise. A closed issue now means landed on develop; the CHANGELOG says what shipped.
+#
+# The work is in scripts/close-issues.mjs, not inline here, so it can be dry-run locally
+# against real history: a push-triggered workflow cannot run until its file is on the branch
+# it watches, so the first live run of this file is the merge that lands it.
+
+name: close issues
+
+on:
+  push:
+    branches: [develop]
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  close:
+    name: close the issues this push fixes
+    runs-on: ubuntu-latest
+    steps:
+      # The whole history: the pushed range is before..after, and a --no-ff merge brings in
+      # commits older than the push, whose bodies carry the keywords.
+      - name: Check out develop
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      # The same major release.yml builds on. The script has no dependencies, so no `npm ci`.
+      - name: Set up Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+
+      # A zero or rewritten `before` -- develop created from nothing, or force-pushed -- fails
+      # this step and closes nothing; the SHAs are in the log for whoever looks.
+      - name: Close each issue a commit in this push names
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BEFORE: ${{ github.event.before }}
+          AFTER: ${{ github.event.after }}
+        run: node scripts/close-issues.mjs --range "$BEFORE..$AFTER" --repo "$GITHUB_REPOSITORY" --branch "$GITHUB_REF_NAME"

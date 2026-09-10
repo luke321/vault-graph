@@ -78,7 +78,7 @@ measuring it: serve the page, drive it, read the numbers.
 - `npm run lint` holds every finding at zero. `check-pii`, `check-scope`, `check-network` and
   the two determinism checks gate every push and have no skip flag.
 - Commit messages are sentences; `Closes #n` on its own line closes the issue when the work
-  reaches `main`.
+  reaches `develop` — a workflow does it, since GitHub itself only resolves it on `main`.
 
 ## Where things are
 
