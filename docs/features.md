@@ -11,17 +11,18 @@ A short clip per feature — instead of one hero trying to show the whole vault 
 at the top of the README is still the full walkthrough; this page is the same page, broken into
 pieces small enough to actually watch.
 
-Grouped by what you are trying to do. Each entry's clip is recorded from just that feature's
-beats in the demo storyboard — or, where a feature has no beats of its own, cropped from the act
-that moves it — so it stays honest about what it's showing. The exact regeneration commands for
-each feature live alongside the source, not here — see
-[`docs/features/`](https://github.com/luke321/vault-graph/tree/main/docs/features) if you're the
-one recording a clip rather than watching one.
+| | |
+|---|---|
+| **The disc** | [The disc, growing](#the-disc-growing) · [The disc follows the vault](#the-disc-follows-the-vault) · [Subfolders](#subfolders) · [Reading each folder's share](#reading-each-folders-share) · [Unlinked notes join their folder](#unlinked-notes-join-their-folder) |
+| **Reading a note** | [Reading one note](#reading-one-note) · [Pin a note to the hub](#pin-a-note-to-the-hub) |
+| **Navigation** | [Walking the links, and back](#walking-the-links-and-back) · [The camera](#the-camera) |
+| **Narrowing what is shown** | [Filtering by folder](#filtering-by-folder) · [A folder hidden by default](#a-folder-hidden-by-default) |
+| **Time** | [The timeline](#the-timeline) · [The heatmap](#the-heatmap) · [Compact date axis](#compact-date-axis) |
+| **Colour** | [Folder colours](#folder-colours) · [Subfolder colours](#subfolder-colours) |
+| **Fitting the window** | [Folding the panels away](#folding-the-panels-away) · [The disc on a phone](#the-disc-on-a-phone) |
 
-**Clips are added as they're recorded, not all at once.** A feature listed below with no
-image yet is real and documented — just not filmed. `release.ps1` warns when a feature's
-source has changed since its clip was last recorded; nothing here is regenerated on a
-schedule.
+Regeneration commands for each clip live alongside its source, not here — see
+[`docs/features/`](https://github.com/luke321/vault-graph/tree/main/docs/features).
 
 ---
 
