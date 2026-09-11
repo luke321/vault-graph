@@ -27,10 +27,10 @@ a note to see its links; search narrows to matching notes; scrub a date ribbon t
 vault grow. Follows Obsidian's theme, including a live switch.
 
 **[Try it Live](https://luke321.github.io/vault-graph/demo/)** — a real export of an invented
-1,400-note vault, click and hover it exactly like your own. **[The full feature
-list](https://luke321.github.io/vault-graph/features.html)**, one short clip per feature — the
-disc itself, filtering, the heatmap and timeline, reading a note, the camera, and folder
-colours — is a click away too. Both live on the
+1,400-note vault, click and hover it exactly like your own.
+**[The full feature list](https://luke321.github.io/vault-graph/features.html)**, one short
+clip per feature — the disc itself, filtering, the heatmap and timeline, reading a note, the
+camera, and folder colours — is a click away too. Both live on the
 [docs site](https://luke321.github.io/vault-graph/).
 
 ---
@@ -48,9 +48,8 @@ Enable. Open it from the ribbon icon or the command palette (*Vault graph: Open 
 
 <sub>**Check what you downloaded, if you like.** `main.js` is a ~390 KB bundle — the page, the
 plugin host and the engine, a Sigma.js port — and nothing about downloading a file tells you
-where it came from. Every
-release asset now carries a [GitHub build provenance
-attestation](https://docs.github.com/en/actions/security-for-github-actions/using-artifact-attestations/using-artifact-attestations-to-establish-provenance-for-builds),
+where it came from. Every release asset now carries a
+[GitHub build provenance attestation](https://docs.github.com/en/actions/security-for-github-actions/using-artifact-attestations/using-artifact-attestations-to-establish-provenance-for-builds),
 signed by the workflow that built it — so you can verify it came from this repository at
 the tagged commit rather than being assembled by hand: `gh attestation verify main.js
 --repo luke321/vault-graph`. Releases published before this landed (1.9.0 and earlier)
