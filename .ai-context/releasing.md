@@ -1,5 +1,31 @@
 # Releasing
 
+**Show the status table after every step.** Whoever is driving a release — orchestrator or
+otherwise — keeps a table of every step the release still needs (the polish asks, the docs and
+clips it must carry, the version bump, the name, the merge-down sequence, the tag) and re-posts
+it, updated, after each step lands. Set 2026-09-11, cutting 2.5.0: Lukas asked for this after
+seeing one mid-release, and it stays standing practice, not a one-off. Columns: step, status.
+Call out what's newly done since the last table and what's still blocked or awaiting a decision
+(a release name, whether an in-flight ticket gates this release or becomes a follow-up). Template
+(drop rows that don't apply to a given release, add rows for its own polish asks):
+
+```markdown
+| # | Step | Status |
+|---|---|---|
+| 1 | <this release's own polish/fix asks, one row each> | |
+| 2 | Any new-feature doc page(s) + clip(s) under `docs/features/` | |
+| 3 | `CHANGELOG.md` section for `<version>`, covering every merge since the last tag | |
+| 4 | Version bump: `manifest.json` → `<version>` | |
+| 5 | Release name — propose 2-4 candidates, his pick | |
+| 6 | Merge `release/<version>` → `develop` (local) | |
+| 7 | **One** `git push origin develop` (suite lock held, one suite run) | |
+| 8 | PR/merge `develop` → `main` | |
+| 9 | `release.ps1` on `main` — gates, tag, push | |
+| 10 | GitHub Actions publishes the release (attestation, assets) — automatic once tagged | |
+```
+
+Status values: ✅ done, ⏳ not started / in progress, ⏸️ blocked (name what it's blocked on).
+
 **Every release gets a git tag and a GitHub Release with the plugin's three files attached —
 `main.js`, `manifest.json`, `styles.css` — each carrying a build provenance attestation.** The
 tag alone is not a release: Obsidian installs from those three assets and nothing else. Until
