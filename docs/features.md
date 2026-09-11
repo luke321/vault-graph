@@ -2,7 +2,7 @@
 title: Feature gallery
 ---
 
-[Home](index.html) · [Features](features.html) · [Try it live](demo/) · [GitHub](https://github.com/luke321/vault-graph)
+[Home](index.html) · [Features](features.html) · [Try it Live](demo/) · [GitHub](https://github.com/luke321/vault-graph)
 
 # Feature gallery
 

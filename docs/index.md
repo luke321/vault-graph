@@ -2,7 +2,7 @@
 title: Vault Graph
 ---
 
-[Home](index.html) · [Features](features.html) · [Try it live](demo/) · [GitHub](https://github.com/luke321/vault-graph)
+[Home](index.html) · [Features](features.html) · [Try it Live](demo/) · [GitHub](https://github.com/luke321/vault-graph)
 
 # Vault Graph
 
@@ -17,7 +17,7 @@ you can learn and recognise rather than a fresh tangle each time.
 
 <img src="https://raw.githubusercontent.com/luke321/vault-graph/main/assets/demo.webp" width="100%" alt="The disc growing from the vault's first note, a note hovered, its card opened and four of its linked notes walked in turn then stepped back along the trail, a note dragged into the hub to pin it and two more pinned by right-click and from their own detail card, the timeline scrubbed, three heatmap days hovered, a folder hidden, the biggest folder right-clicked and hidden by default from its own menu then put back, one folder soloed, a subfolder pushed out, the camera panned and reset, two folders right-clicked for their own colour, the (unlinked) row right-clicked to keep its notes separate, coloured by their own folder anyway, and both put back, and finally the calendar and the folder list folded away so the disc has the window to itself">
 
-## Try it live
+## Try it Live
 
 The demo below is a real export of an invented 1,400-note vault — click, hover, filter and scrub
 it exactly like your own. **[Open the live demo →](demo/)**

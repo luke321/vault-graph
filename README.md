@@ -24,7 +24,7 @@ ringed by how well-connected they are. Click a folder to hide it and the rest re
 a note to see its links; search narrows to matching notes; scrub a date ribbon to watch the
 vault grow. Follows Obsidian's theme, including a live switch.
 
-**[Try it live](https://luke321.github.io/vault-graph/demo/)** — a real export of an invented
+**[Try it Live](https://luke321.github.io/vault-graph/demo/)** — a real export of an invented
 1,400-note vault, click and hover it exactly like your own. **[The full feature
 list](https://luke321.github.io/vault-graph/features.html)**, one short clip per feature — the
 disc itself, filtering, the heatmap and timeline, reading a note, the camera, and folder
