@@ -1434,6 +1434,11 @@ block, not a live one today.
 | `nav counts share one right edge` | 1 folded, 1 open | **1 folded, 1 open** |
 | golden snapshot, all three fixtures | — | **band and positions unchanged** |
 
+(github#116 later reserved the sidebar's scrollbar gutter, which takes 15 px off every one of
+these widths at the same window -- row 204, `.nm` 107 / 102 / 126 -- and the demo names
+truncating went from 1 to 5 of 18. That is a chosen cost, recorded in its own section below.
+What this table asserts is that the count bar moved none of them, and that still holds.)
+
 ### The check was proved to have teeth, one regression at a time
 
 A check that cannot fail is worse than none. Each of these was applied to a green tree, run,
@@ -3223,3 +3228,53 @@ same with and without it, and recording the version writes the marker onto whate
 held — never the defaults onto a file that had none. **Check:** `scripts/update-note-check.mjs`,
 on real Obsidian, asserts the strip's placement (in the view, directly above the page root), the
 canvas height, the camera, `--vg-canvas-top`, and the bytes of `data.json` after each state.
+## The sidebar's scrollbar gutter is reserved, so a dimension switch moves nothing
+
+The legend never scrolls on its own: `#vg-sidebar` is the scroll container, and a
+Folders/Tags switch that tipped it past the viewport height -- or back under it -- brought a
+scrollbar that took its width out of every block in the sidebar. Measured on the tag fixture
+(4 folders, 15 tags) at an 800 px viewport, before: sidebar content **287 -> 272 px**, the gear
+**250 -> 235**, the Tags side of the segment **145.5 -> 138**, and the search box, the segment
+and the legend each 15 px narrower. github#116.
+
+`scrollbar-gutter: stable` on `#vg-sidebar` reserves the space whether or not a scrollbar is
+drawn. The property alone, no padding fallback: Chromium 94+ (Chrome, and Obsidian's Electron),
+Firefox 97+ and Safari 18.2+ all honour it, and a fallback would double-reserve wherever it is.
+Overlay scrollbars reserve nothing, which is right -- they take no space to begin with. The rule
+reaches the phone's bottom sheet too, since the sheet is the same element: at 600 px wide with
+classic scrollbars the sidebar is **585 px in both dimensions** (gear right edge 571 -> 571), and
+under mobile emulation, where scrollbars overlay, it is **600 px in both** (586 -> 586).
+
+**What it costs, and that it was chosen.** The non-scrolling state moved to match the scrolling
+one, so at the suite's 1600x1000 window on Windows the sidebar content is 272 px where it was
+287. Widening the column to 303 px would have kept 260 px of content in both states at the price
+of 15 px of stage and a measured constant; `both-edges` would have cost 30. The gutter was taken
+in place (D-1):
+
+| | before | after |
+|---|---|---|
+| sidebar content width, not scrolling / scrolling | 287 / 272 px | **272 / 272 px** |
+| `.lg` row width | 219 px | **204 px** |
+| `.nm` width (3-digit / 4-digit / no-`only` row) | 122 / 117 / 141 px | **107 / 102 / 126 px** |
+| `.lgr` height | 28.84 px | **28.84 px** |
+| names truncating (demo / 10k / shape) | 1 of 18 / 0 of 14 / 0 of 7 | **5 of 18 / 0 of 14 / 0 of 7** |
+| tag fixture, 685 px tall, folder -> tag: sidebar content | 287 -> 272 px | **272 -> 272 px** |
+| demo fixture, 896 px tall, folder -> tag: gear left edge | 235 -> 250 | **235 -> 235** |
+
+The four extra truncated names on the demo mirror are the visible price of that decision.
+
+```bash
+node scripts/smoke.mjs --only "sidebar chrome stays put"   # bites on all four fixtures
+```
+
+**The check computes the height that splits the two lists rather than guessing at one.** A
+first version stepped a viewport ladder (1000, 800, 650, 500, 400 px) and reported "no case" on
+the demo and 10k fixtures -- but their two legends differ by four rows, about 115 px, and the
+ladder's 200 px steps simply straddled it. Now the viewport is set to 300 px, where both lists
+overflow and `scrollHeight` is each one's true content height, and then to the midpoint of the
+two: **896 px on demo and 10k (18 vs 14 rows), 536 on shape (7 vs 2), 685 on tag (4 vs 15)**.
+At that height exactly one dimension scrolls on every fixture; the check fails if it does not,
+fails if any of the seven boxes is missing, and asserts the gear, search box, segment, its Tags
+side, All, the legend and Refresh are at the same left and right edges. With the property
+commented out it fails on every fixture, naming each box that moved and by how much; a vault
+whose two lists are the same height reports `NOT ASSERTED`.

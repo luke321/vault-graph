@@ -1123,6 +1123,75 @@ check("tags: each grouping keeps its own colours, and the settings tabs reach bo
   };
 });
 
+/* -------------------------------------------------------------- github#116 */
+
+check("the sidebar chrome stays put when a dimension switch adds or drops its scrollbar",
+async (p) => {
+  const dpr = await p.j(`window.devicePixelRatio || 1`);
+  const viewport = (h) => p.send("Emulation.setDeviceMetricsOverride",
+                                 { width: 1600, height: h, deviceScaleFactor: dpr, mobile: false });
+  const boxes = () => p.j(`(function(){
+    var sb = document.querySelector("#vg-sidebar");
+    var q = function (sel) {
+      var e = document.querySelector(sel);
+      if (!e) return null;
+      var r = e.getBoundingClientRect();
+      return [Math.round(r.left * 10) / 10, Math.round(r.right * 10) / 10];
+    };
+    return { scrolls: sb.scrollHeight > sb.clientHeight, client: sb.clientWidth,
+             content: sb.scrollHeight, viewport: sb.clientHeight,
+             rows: document.querySelectorAll("#vg-legend .lgr").length,
+             at: { gear: q("#vg-gear"), search: q("#vg-q"), dim: q("#vg-dim"),
+                   tags: q('#vg-dim button[data-dim="tag"]'), allon: q("#vg-allon"),
+                   legend: q("#vg-legend"), refresh: q("#vg-refresh") } };
+  })()`);
+  const inDim = async (dim) => {
+    await p.eval(`__vg.setDim(${JSON.stringify(dim)}); void 0`);
+    await sleep(400);
+    return boxes();
+  };
+  let r;
+  try {
+    // github#116
+    await viewport(300);
+    const short = { folder: await inDim("folder"), tag: await inDim("tag") };
+    const lo = Math.min(short.folder.content, short.tag.content);
+    const hi = Math.max(short.folder.content, short.tag.content);
+    const h = Math.floor((lo + hi) / 2);
+    const chrome = 300 - short.folder.viewport;
+    if (hi - lo < 4) {
+      r = { none: `the two lists are the same height (${short.folder.rows} folder rows ` +
+                  `${short.folder.content}px, ${short.tag.rows} tag rows ${short.tag.content}px)` };
+    } else {
+      await viewport(h + chrome);
+      r = { h, folder: await inDim("folder"), tag: await inDim("tag") };
+    }
+  } finally {
+    await p.send("Emulation.clearDeviceMetricsOverride").catch(() => {});
+    await p.eval(`__vg.setDim("folder"); void 0`).catch(() => {});
+    await sleep(400);
+  }
+  if (r.none) return { ok: true, detail: `NOT ASSERTED: ${r.none}` };
+  if (r.folder.scrolls === r.tag.scrolls) {
+    return { ok: false, detail: `at ${r.h}px the sidebar ${r.folder.scrolls ? "scrolls" : "fits"} in ` +
+                                `both dimensions (content ${r.folder.content} / ${r.tag.content}px) ` +
+                                `-- the height was meant to sit between them` };
+  }
+  const names = Object.keys(r.folder.at);
+  const missing = names.filter((k) => !r.folder.at[k] || !r.tag.at[k]);
+  const moved = names.filter((k) => JSON.stringify(r.folder.at[k]) !== JSON.stringify(r.tag.at[k]));
+  const which = r.tag.scrolls ? "tag scrolls, folder fits" : "folder scrolls, tag fits";
+  return {
+    ok: moved.length === 0 && missing.length === 0,
+    detail: `${r.h}px tall: ${which} (${r.folder.rows} vs ${r.tag.rows} rows); sidebar content ` +
+            `${r.folder.client} -> ${r.tag.client}px; ` +
+            (missing.length ? `MISSING ${missing.join(", ")}; ` : "") +
+            (moved.length === 0
+              ? `gear, search, segment, its Tags side, All, legend and Refresh all at the same edges`
+              : `MOVED ${moved.map((k) => `${k} [${r.folder.at[k]}] -> [${r.tag.at[k]}]`).join(", ")}`),
+  };
+});
+
 /* ------------------------------------------------- github#86 D-9, design/0015 */
 
 check("a marked heatmap day haloes but never pushes", async (p) => {
