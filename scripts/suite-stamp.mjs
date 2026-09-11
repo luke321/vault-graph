@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // github#93, decisions/0013
 
+import { chromeVersion, findChrome, normaliseVersion } from "./chrome.mjs";
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync,
          rmdirSync, statSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
@@ -44,6 +45,45 @@ export function treeOf(rev, cwd = ROOT) {
 export function modifiedTracked(cwd = ROOT) {
   const s = git(["status", "--porcelain", "--untracked-files=no"], cwd);
   return s === null ? null : s.split("\n").filter(Boolean);
+}
+
+// github#104 -- the tree the pages are built from
+export function startRun(cwd = ROOT) {
+  return { tree: treeOf("HEAD", cwd), dirty: modifiedTracked(cwd) };
+}
+
+// github#104
+export const DEFAULT_JOBS = 2;
+
+function defaultChrome() {
+  try { return findChrome(); } catch { return null; }
+}
+
+// github#104 -- the shape the two gates always push with
+export function defaultShape() {
+  return { jobs: DEFAULT_JOBS, grid: DEFAULT_JOBS > 1, headed: false, port: 0, chrome: defaultChrome() };
+}
+
+// github#104 -- takes the values the run USED, never a second parse of argv
+export function shapeDeltas(shape) {
+  const d = defaultShape();
+  const out = [];
+  if (shape.jobs !== d.jobs) out.push(`--jobs ${shape.jobs} (default ${d.jobs})`);
+  if (!!shape.grid !== d.grid) {
+    out.push(`the grid is ${shape.grid ? "on" : "off"} (default ${d.grid ? "on" : "off"})`);
+  }
+  if (shape.headed) out.push("--headed (default: positioned off-screen)");
+  if (shape.port) out.push(`--port ${shape.port} (default: a free port per lane)`);
+  const chrome = shape.chrome || d.chrome;
+  if (chrome !== d.chrome) {
+    out.push(`--chrome ${chrome} (default ${d.chrome || "the first Chrome on this machine"})`);
+  }
+  return out;
+}
+
+function currentChrome() {
+  const exe = defaultChrome();
+  return exe ? normaliseVersion(chromeVersion(exe)) : null;
 }
 
 const todayDay = () => new Date().toISOString().slice(0, 10);
@@ -146,10 +186,28 @@ export function lookup(rev = "HEAD", cwd = ROOT) {
                why: `fixture ${want.name} is ${ageDays(want.day)} days old and the next run would regenerate it` };
     }
   }
+  // github#104 -- a stamp older than the browser it was taken against
+  const drove = normaliseVersion(stamp.chrome);
+  const now = drove ? currentChrome() : null;
+  if (drove && now && now !== drove) {
+    return { ok: false, tree, stamp,
+             why: `the run that passed drove Chrome ${drove}, and Chrome is ${now} now` };
+  }
   return { ok: true, tree, stamp, file };
 }
 
-export function record({ fixtures, checks, cwd = ROOT }) {
+export function record({ fixtures, checks, started, chrome, cwd = ROOT }) {
+  // github#104 -- a caller that captured nothing cannot say what it built
+  if (!started) {
+    return { wrote: null, why: "this run did not capture the tree it built, so nothing can say what it measured" };
+  }
+  if (started.dirty === null) return { wrote: null, why: "not a git checkout" };
+  // github#104
+  if (started.dirty.length) {
+    return { wrote: null, why: `the working tree differed from HEAD in ${started.dirty.length} tracked file(s) ` +
+                               `when this run started, so it measured something no commit names` };
+  }
+  // github#104 -- the two moments the tree can be dirty
   const dirty = modifiedTracked(cwd);
   if (dirty === null) return { wrote: null, why: "not a git checkout" };
   if (dirty.length) {
@@ -163,6 +221,12 @@ export function record({ fixtures, checks, cwd = ROOT }) {
   const tree = treeOf("HEAD", cwd);
   const dir = stampDir(cwd);
   if (!tree || !dir) return { wrote: null, why: "cannot resolve HEAD's tree" };
+  if (!started.tree) return { wrote: null, why: "cannot resolve the tree this run built" };
+  // github#104 -- work landed while the suite ran
+  if (tree !== started.tree) {
+    return { wrote: null, why: `HEAD moved while this run was measuring: the pages were built from tree ` +
+                               `${started.tree.slice(0, 7)} and HEAD names ${tree.slice(0, 7)} now` };
+  }
   // github#103
   const ran = FIXTURE_NAMES.map((name) => (fixtures || []).find((f) => f && f.name === name));
   for (let i = 0; i < FIXTURE_NAMES.length; i++) {
@@ -174,11 +238,14 @@ export function record({ fixtures, checks, cwd = ROOT }) {
   }
   mkdirSync(dir, { recursive: true });
   const file = join(dir, tree + ".json");
+  const drove = normaliseVersion(chrome);
   const stamp = {
     tree,
     commit: git(["rev-parse", "HEAD"], cwd),
     at: new Date().toISOString(),
     checks,
+    // github#104
+    ...(drove ? { chrome: drove } : {}),
     fixtures: ran.map((f) => ({ name: f.name, digest: f.digest, day: f.day, pinned: !!f.pinned })),
   };
   writeFileSync(file, JSON.stringify(stamp, null, 2) + "\n");
@@ -189,6 +256,8 @@ export function describe(hit) {
   const s = hit.stamp;
   return `tree ${hit.tree.slice(0, 7)} passed the invariant suite at ${s.at} ` +
          `(${s.checks} checks, commit ${String(s.commit || "?").slice(0, 7)}, ` +
+         // github#104
+         `Chrome ${s.chrome || "unrecorded"}, ` +
          `fixtures ${s.fixtures.map((f) => f.name + "@" + f.day).join(" ")})`;
 }
 
@@ -205,6 +274,8 @@ function selftest() {
     console.log(`  ${cond ? "ok  " : "FAIL"} ${label}`);
     if (!cond) fails.push(label);
   };
+  // github#104 -- a run captures its tree before it builds
+  const pass = (opts) => record({ ...opts, started: startRun(opts.cwd) });
   try {
     mkdirSync(repo);
     sh(["init", "-q", "-b", "main"]);
@@ -236,7 +307,7 @@ function selftest() {
     seed("tag-vault", "dddddddd", "2026-09-09", true);
 
     expect("no stamp yet -> miss", !lookup("HEAD", repo).ok);
-    const wrote = record({ fixtures: currentFixtures(repo), checks: 3, cwd: repo });
+    const wrote = pass({ fixtures: currentFixtures(repo), checks: 3, cwd: repo });
     expect("a clean tree records a stamp", !!wrote.wrote);
     expect("the same commit hits", lookup("HEAD", repo).ok);
 
@@ -247,10 +318,50 @@ function selftest() {
     sh(["merge", "-q", "--no-ff", "-m", "merge", "side"]);
     expect("a merge commit with the same tree hits", lookup("HEAD", repo).ok);
 
+    // github#104 -- a run that captured nothing cannot say what it saw
+    const blind = record({ fixtures: currentFixtures(repo), checks: 3, cwd: repo });
+    expect("a run that captured no tree refuses to record",
+           !blind.wrote && /did not capture the tree it built/.test(blind.why));
+
+    // github#104 -- work landing mid-run stamped a tree nothing measured
+    const built = startRun(repo);
+    writeFileSync(join(repo, "a.txt"), "landed mid-run\n");
+    sh(["commit", "-q", "-am", "work landing while the suite runs"]);
+    const moved2 = record({ fixtures: currentFixtures(repo), checks: 3, started: built, cwd: repo });
+    expect("a commit during the run refuses to record",
+           !moved2.wrote && /HEAD moved while this run was measuring/.test(moved2.why));
+    expect("and the tree it never measured stays unstamped", !lookup("HEAD", repo).ok);
+    sh(["reset", "-q", "--hard", "HEAD~1"]);
+
     writeFileSync(join(repo, "a.txt"), "changed\n");
-    const dirty = record({ fixtures: currentFixtures(repo), checks: 3, cwd: repo });
-    expect("a dirty tree refuses to record", !dirty.wrote && /differs from HEAD/.test(dirty.why));
+    const dirty = pass({ fixtures: currentFixtures(repo), checks: 3, cwd: repo });
+    // github#104
+    expect("a tree dirty when the run started refuses to record",
+           !dirty.wrote && /differed from HEAD in 1 tracked file\(s\) when this run started/.test(dirty.why));
+    const late = record({ fixtures: currentFixtures(repo), checks: 3, cwd: repo,
+                          started: { tree: treeOf("HEAD", repo), dirty: [] } });
+    expect("a tree dirty only at the end refuses to record",
+           !late.wrote && /differs from HEAD/.test(late.why));
     expect("a dirty tree still hits for HEAD's own tree", lookup("HEAD", repo).ok);
+
+    // github#104 -- the browser the run drove is part of what it measured
+    let here = null;
+    try { here = normaliseVersion(chromeVersion(findChrome())); } catch { here = null; }
+    const chromeFile = lookup("HEAD", repo).file;
+    const noChrome = readFileSync(chromeFile, "utf8");
+    const withChrome = (v) =>
+      writeFileSync(chromeFile, JSON.stringify({ ...JSON.parse(noChrome), chrome: v }));
+    expect("a stamp that records no Chrome still hits", lookup("HEAD", repo).ok);
+    withChrome("1.2.3.4");
+    const elsewhere = lookup("HEAD", repo);
+    expect(here ? "a stamp from a different Chrome misses" : "no Chrome here, so the version cannot block",
+           here ? !elsewhere.ok && /drove Chrome 1\.2\.3\.4/.test(elsewhere.why) : elsewhere.ok);
+    if (here) {
+      withChrome(here);
+      expect("a stamp from the Chrome on this machine hits", lookup("HEAD", repo).ok);
+    }
+    writeFileSync(chromeFile, noChrome);
+
     sh(["commit", "-q", "-am", "changed"]);
     const miss = lookup("HEAD", repo);
     expect("a changed tree misses", !miss.ok && /no stamp/.test(miss.why));
@@ -276,7 +387,7 @@ function selftest() {
            !lost.ok && /corrupt \(2 notes on disk, the stamp says 3\)/.test(lost.why));
     writeFileSync(join(shapeDir, "notes", "n2.md"), "# n2\n");
     expect("restoring the note hits again", lookup("HEAD~1", repo).ok);
-    const bad = record({ fixtures: currentFixtures(repo).map((f) => f.name === "shape-vault" ? { ...f, corrupt: "x" } : f),
+    const bad = pass({ fixtures: currentFixtures(repo).map((f) => f.name === "shape-vault" ? { ...f, corrupt: "x" } : f),
                          checks: 3, cwd: repo });
     expect("a corrupt fixture refuses to record", !bad.wrote && /shape-vault is corrupt/.test(bad.why));
     const otherDir = seed("shape-vault", "dddddddd", today, false);
@@ -289,7 +400,7 @@ function selftest() {
     process.env.VG_FIXTURE_STORE = join(base, "elsewhere");
     expect("VG_FIXTURE_STORE redirects the store", fixtureStore(repo) === join(base, "elsewhere") &&
            currentFixtures(repo).every((f) => f.digest === null));
-    const scratch = record({ fixtures: currentFixtures(repo), checks: 3, cwd: repo });
+    const scratch = pass({ fixtures: currentFixtures(repo), checks: 3, cwd: repo });
     expect("a scratch-store run refuses to record", !scratch.wrote && /VG_FIXTURE_STORE/.test(scratch.why));
     delete process.env.VG_FIXTURE_STORE;
     expect("and only while it is set", fixtureStore(repo) === store);
@@ -297,20 +408,20 @@ function selftest() {
     const old = new Date(Date.now() - 8 * 86400000).toISOString().slice(0, 10);
     seed("shape-vault", "cccccccc", old, false);
     sh(["checkout", "-q", "HEAD~1"]);
-    record({ fixtures: currentFixtures(repo), checks: 3, cwd: repo });
+    pass({ fixtures: currentFixtures(repo), checks: 3, cwd: repo });
     const aged = lookup("HEAD", repo);
     expect("an aged unpinned fixture misses", !aged.ok && /would regenerate/.test(aged.why));
     seed("test-vault", "bbbbbbbb", "2026-08-28", true);
     seed("shape-vault", "cccccccc", today, false);
-    record({ fixtures: currentFixtures(repo), checks: 3, cwd: repo });
+    pass({ fixtures: currentFixtures(repo), checks: 3, cwd: repo });
     expect("a pinned fixture never ages", lookup("HEAD", repo).ok);
 
     // github#103
-    const two = record({ fixtures: currentFixtures(repo).filter((f) => f.name !== "test-vault"),
+    const two = pass({ fixtures: currentFixtures(repo).filter((f) => f.name !== "test-vault"),
                          checks: 3, cwd: repo });
     expect("a run missing a fixture refuses to record", !two.wrote && /test-vault did not run/.test(two.why));
     // github#86 -- the fourth fixture is required like the first three
-    const three = record({ fixtures: currentFixtures(repo).filter((f) => f.name !== "tag-vault"),
+    const three = pass({ fixtures: currentFixtures(repo).filter((f) => f.name !== "tag-vault"),
                            checks: 3, cwd: repo });
     expect("a run missing the tag vault refuses to record",
            !three.wrote && /tag-vault did not run/.test(three.why));
@@ -323,6 +434,20 @@ function selftest() {
     expect("a stamp naming two fixtures misses", !short.ok && /names no test-vault/.test(short.why));
     writeFileSync(stampFile, full);
     expect("the full stamp hits again", lookup("HEAD", repo).ok);
+
+    // github#104 -- a flag that changes what is measured is not the suite
+    const deltas = (o) => shapeDeltas({ ...defaultShape(), chrome: "", ...o });
+    expect("the default shape has no delta", deltas({}).length === 0);
+    expect("--jobs 1 is a delta, and takes the grid with it",
+           deltas({ jobs: 1, grid: false }).length === 2 && /--jobs 1/.test(deltas({ jobs: 1, grid: false })[0]));
+    expect("--no-grid is a delta on its own", deltas({ grid: false }).length === 1);
+    expect("--headed is a delta", deltas({ headed: true }).some((d) => /--headed/.test(d)));
+    expect("--port is a delta", deltas({ port: 9222 }).some((d) => /--port 9222/.test(d)));
+    expect("a port that parsed to NaN is not a delta", deltas({ port: NaN }).length === 0);
+    expect("--chrome elsewhere is a delta", deltas({ chrome: "C:/nowhere/chrome.exe" }).length === 1);
+    const sameChrome = defaultShape().chrome;
+    expect(sameChrome ? "--chrome naming the default Chrome is not a delta" : "no Chrome here to name",
+           sameChrome ? deltas({ chrome: sameChrome }).length === 0 : true);
 
     const link = join(base, "via-link");
     symlinkSync(HERE, link, "junction");
@@ -365,7 +490,8 @@ if (invokedDirectly) {
     for (const f of (dir && existsSync(dir) ? readdirSync(dir).sort() : [])) {
       try {
         const s = JSON.parse(readFileSync(join(dir, f), "utf8"));
-        console.log(`${s.tree.slice(0, 7)}  ${s.at}  commit ${String(s.commit || "?").slice(0, 7)}  ${s.checks} checks`);
+        console.log(`${s.tree.slice(0, 7)}  ${s.at}  commit ${String(s.commit || "?").slice(0, 7)}  ` +
+                    `${s.checks} checks  Chrome ${s.chrome || "unrecorded"}`);
       } catch { console.log(`${f}  (unreadable)`); }
     }
     process.exit(0);
