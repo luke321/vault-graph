@@ -5251,8 +5251,33 @@ check("the picker's ladder is the ladder the disc draws", async (p) => {
     __vg.setFolderColors(was);
     var back = read();
 
+    // github#77 -- AND A SLOT THE GROUP DOES NOT HOLD, which is where the two used to part.
+    // All three reads above preview __vg.slotOf(picked.g), and hueBudget skips the base, so
+    // they cannot see a budget computed against the group's OLD colour. Measured on the demo
+    // vault before the group was named: 4 of 88 (group, unheld slot) pairs disagreed, one of
+    // them by a whole step of hue. Walks the slots and stops at the first that parts.
+    var unheld = null;
+    var slots = __vg.palette().map(function (p) { return p.key; });
+    for (var si = 0; si < slots.length; si++) {
+      var target = slots[si];
+      if (target === rest.slot) continue;
+      var prev = lower(__vg.previewLadder(target, suffix, picked.g));
+      var nx = Object.assign({}, was); nx[picked.g] = target;
+      __vg.setFolderColors(nx);
+      var dsc = [];
+      for (var kk = 1; kk < picked.subs.length && kk < 4; kk++) {
+        dsc.push(String(__vg.subColorOf(picked.g, picked.subs[kk])).toLowerCase());
+      }
+      __vg.setFolderColors(was);
+      var same = dsc.length > 0 && dsc.every(function (h, i) { return h === prev[i]; });
+      if (!unheld || !same) {
+        unheld = { to: target, ok: same, disc: dsc, prev: prev.slice(0, dsc.length) };
+      }
+      if (!same) break;
+    }
+
     return { skip: false, group: picked.g, suffix: suffix, other: other,
-             rest: rest, moved: moved, back: back };
+             rest: rest, moved: moved, back: back, unheld: unheld };
   })()`);
   if (r.skip) return { ok: true, detail: "no unpinned folder with two or more subfolders on this shape" };
   const agrees = (s) => s.disc.length > 0 && s.disc.every((h, i) => h === s.ladder[i]);
@@ -5261,12 +5286,18 @@ check("the picker's ladder is the ladder the disc draws", async (p) => {
   const cameBack = r.back.ladder.join() === r.rest.ladder.join() &&
                    r.back.slot === r.rest.slot;
   const n = r.rest.disc.length;
-  return { ok: atRest && afterPick && restored && invalidated && cameBack,
+  // github#77 -- no qualifying slot is not a pass to claim, but it is not a failure either
+  const unheldOk = !r.unheld || r.unheld.ok;
+  return { ok: atRest && afterPick && restored && invalidated && cameBack && unheldOk,
            detail: `${r.group} on ${r.rest.slot}: preview ${r.rest.ladder.slice(0, n).join(",")} ` +
                    `vs the disc's ${r.rest.disc.join(",")} (${atRest ? "same" : "DIFFERENT"}); ` +
                    `pinned to ${r.other} the preview ${invalidated ? "followed" : "DID NOT FOLLOW"} ` +
                    `and still ${afterPick ? "agrees" : "DISAGREES"}; ` +
-                   `restored ${cameBack && restored ? "exactly" : "WRONG"}` };
+                   `restored ${cameBack && restored ? "exactly" : "WRONG"}; ` +
+                   (r.unheld
+                     ? `unheld ${r.unheld.to} ${r.unheld.ok ? "agrees" : "DISAGREES"} ` +
+                       `(preview ${r.unheld.prev.join(",")} vs disc ${r.unheld.disc.join(",")})`
+                     : "no unheld slot to try") };
 });
 
 // github#77

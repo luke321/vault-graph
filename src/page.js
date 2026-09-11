@@ -186,8 +186,8 @@
  * @property {() => PaletteSlot[]} palette
  * @property {(key: string) => { light: number, dark: number }} slotContrast
  * @property {(key: string, name: string) => string} slotTitle
- * @property {(key: string, suffix: string) => string[]} previewLadder
- * @property {(key: string) => string} swatchPreview
+ * @property {(key: string, suffix: string, group?: string) => string[]} previewLadder
+ * @property {(key: string, group?: string) => string} swatchPreview
  * @property {() => number[]} previewSizes
  * @property {() => string[]} groupOrder
  * @property {(dim: string) => { name: string, n: number, slot: string, autoSlot: string, pinned: boolean, shown: boolean, subs: { name: string, n: number, pin: string }[] }[]} groupsOf   github#86
@@ -1382,12 +1382,25 @@ function mountVaultGraph(root, data, deps) {
   }
 
   // github#77
-  /** @param {string} key @param {string} suffix "l" or "d" @returns {string[]} */
-  function previewLadder(key, suffix) {
+  /**
+   * THE BUDGET THE DISC WILL USE, NOT THE ONE IT USES NOW. buildSubShades runs AFTER the pick,
+   * against groupColours() with this group already moved: its old colour is gone from the set
+   * unless another group still holds it, and the new one is skipped as the base. Reading the
+   * slots as they stand counts the old colour too -- and hueBudget takes the MINIMUM hue gap, so
+   * whenever the old colour was the nearest hue the swatch promised a narrower ladder than the
+   * disc then drew. Naming the group drops it here as well, which makes the two agree.
+   * With no group named the slots as they stand are already right: a sub-wedge pin moves no
+   * group, so nothing leaves the set.
+   * @param {string} key @param {string} suffix "l" or "d" @param {string} [group]
+   * @returns {string[]}
+   */
+  function previewLadder(key, suffix, group) {
     var pal = suffix === "d" ? THEME.pal.d : THEME.pal.l;
     var basecol = pal && pal.byKey ? pal.byKey[key] : "";
     if (!basecol) return [];
-    var others = Object.keys(groupSlot).map(function (g) {
+    var others = Object.keys(groupSlot).filter(function (g) {
+      return !group || g !== group;
+    }).map(function (g) {
       return pal.byKey[groupSlot[g]] || "";
     }).filter(Boolean);
     var budget = hueBudget(basecol, others.concat([basecol]));
@@ -5834,11 +5847,15 @@ function mountVaultGraph(root, data, deps) {
   function clearPreviewCache() { previewCache = dict(); }
 
   // github#77, design/0004, design/0003
-  /** @param {string} key @returns {string} */
-  function swatchPreviewHTML(key) {
-    var hit = previewCache[key];
+  // Still built once per swatch grid, not once per swatch -- but a ladder now depends on WHICH
+  // group is picking, so the memo is keyed by both. The settings surface draws a grid per group
+  // either way, so this adds cache entries, not renders.
+  /** @param {string} key @param {string} [group] @returns {string} */
+  function swatchPreviewHTML(key, group) {
+    var ck = group ? "g" + group.length + ":" + group + ":" + key : key;
+    var hit = previewCache[ck];
     if (hit !== undefined) return hit;
-    var L = previewLadder(key, "l"), D = previewLadder(key, "d");
+    var L = previewLadder(key, "l", group), D = previewLadder(key, "d", group);
     var marks = "", vars = "";
     for (var r = 0; r < SUB_SLOTS; r++) {
       var cy = PREVIEW_ROW_H * r + PREVIEW_ROW_H / 2;
@@ -5857,7 +5874,7 @@ function mountVaultGraph(root, data, deps) {
            '" style="' + vars + '" aria-hidden="true" focusable="false">' +
            '<rect class="gnd" x="0" y="0" width="' + PREVIEW_W +
            '" height="' + PREVIEW_H + '"/>' + marks + '</svg>';
-    previewCache[key] = html;
+    previewCache[ck] = html;
     return html;
   }
 
@@ -6843,7 +6860,8 @@ function mountVaultGraph(root, data, deps) {
     /**
      * @param {PaletteSlot[]} pal
      * @param {{ role: string, current: string, autoKey?: string, dataAttr?: string,
-     *           dataValue?: string, titleFor?: (on: boolean, isAuto: boolean) => string }} opts
+     *           dataValue?: string, group?: string,
+     *           titleFor?: (on: boolean, isAuto: boolean) => string }} opts
      */
     function swatchButtonsHTML(pal, opts) {
       return pal.map(function (p) {
@@ -6855,7 +6873,7 @@ function mountVaultGraph(root, data, deps) {
                (isAuto ? ' data-auto="1"' : '') +
                ' title="' + esc(slotTitle(p.key, p.name)) +
                (opts.titleFor ? opts.titleFor(on, isAuto) : "") +
-               '" aria-label="' + esc(p.name) + '">' + swatchPreviewHTML(p.key) + '</button>';
+               '" aria-label="' + esc(p.name) + '">' + swatchPreviewHTML(p.key, opts.group) + '</button>';
       }).join("");
     }
 
@@ -6870,13 +6888,14 @@ function mountVaultGraph(root, data, deps) {
      * @param {boolean} visShown @param {() => void} onToggleVisible
      * @param {boolean} [byFolderOn] @param {(() => void) | null} [onToggleByFolder]
      * @param {boolean} [tintOn] @param {(() => void) | null} [onToggleTint]
+     * @param {string} [group]                        whose colour is being picked, for the preview
      */
-    function openCtxMenu(x, y, current, onPick, autoKey, visShown, onToggleVisible, byFolderOn, onToggleByFolder, tintOn, onToggleTint) {
+    function openCtxMenu(x, y, current, onPick, autoKey, visShown, onToggleVisible, byFolderOn, onToggleByFolder, tintOn, onToggleTint, group) {
       var el = $("ctxmenu");
       if (!el) return;
       var pal = paletteInfo();
       var sws = swatchButtonsHTML(pal, {
-        role: "menuitemradio", current: current, autoKey: autoKey,
+        role: "menuitemradio", current: current, autoKey: autoKey, group: group,
         titleFor: function (on, isAuto) { return isAuto ? " (automatic)" : ""; }
       });
       var visTitle = visShown ? "Hide this folder by default" : "Show this folder by default";
@@ -6939,7 +6958,8 @@ function mountVaultGraph(root, data, deps) {
                     isUnlinked ? unlinkedByFolder : undefined,
                     isUnlinked ? function () { setUnlinkedByFolder(!unlinkedByFolder, true); } : undefined,
                     keptSeparate ? unlinkedTintByFolder : undefined,
-                    keptSeparate ? function () { setUnlinkedTintByFolder(!unlinkedTintByFolder, true); } : undefined);
+                    keptSeparate ? function () { setUnlinkedTintByFolder(!unlinkedTintByFolder, true); } : undefined,
+                    g);
         return;
       }
       var subBtn = t.closest(".lgs[data-hsub]");
@@ -7110,7 +7130,7 @@ function mountVaultGraph(root, data, deps) {
         // github#29
         var autoKey = autoSlotFor(d, g) || "";
         var sws = swatchButtonsHTML(pal, {
-          role: "radio", dataAttr: "fc", dataValue: g, current: cur, autoKey: autoKey,
+          role: "radio", dataAttr: "fc", dataValue: g, group: g, current: cur, autoKey: autoKey,
           titleFor: function (on, isAuto) {
             return on ? (pinned ? " (chosen)" : " (automatic)") : (isAuto ? " (automatic default)" : "");
           }

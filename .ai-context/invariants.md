@@ -3470,6 +3470,16 @@ preview can ask the same question of the other theme's palette. Verified as a no
 that means anything: every one of **1403 nodes on the demo fixture draws the same colour as
 `develop`, in both themes**, compared by hash.
 
+**Same function, same palette -- and the same SET.** Sharing `hueBudget()` is not enough: it
+returns the minimum hue gap to whatever it is handed, and `buildSubShades` hands it the slots as
+they will be *after* the pick. A preview that reads them as they stand counts the picking
+group's old colour, which the disc will no longer see, so it under-promises whenever that old
+colour was the nearest hue. `previewLadder` therefore takes the group about to move and drops
+it. Measured over CDP across every (group, slot-it-does-not-hold) pair: **4 of 88 disagreed on
+the demo fixture and 2 of 22 on the shape fixture before, 0 and 0 after.** The check reads a
+slot the group does *not* hold for exactly this reason -- on the slot it does hold, `hueBudget`
+skips the base on both sides and the two agree however the set was built.
+
 ## The update note is text, and it is small
 
 github#83, `design/0016`. After a MINOR or MAJOR update the plugin shows `plugin/whats-new.md`

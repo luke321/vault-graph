@@ -1299,13 +1299,16 @@ class VaultGraphSettingTab extends PluginSettingTab {
 
   // github#77
   /**
+   * `group` is the group whose colour this grid picks, and the preview needs it: the ladder a
+   * slot draws depends on the hue gap to the OTHER groups, so the group about to move has to
+   * leave the set. A sub-wedge grid moves no group and passes none.
    * @param {VgApi | null} api @param {HTMLElement} btn
-   * @param {string} key @param {string} name @param {string} tail
+   * @param {string} key @param {string} name @param {string} tail @param {string} [group]
    */
-  fillSwatch(api, btn, key, name, tail) {
+  fillSwatch(api, btn, key, name, tail, group) {
     if (!api || !api.swatchPreview) return;
     const doc = new DOMParser().parseFromString(
-      "<body>" + api.swatchPreview(key) + "</body>", "text/html");
+      "<body>" + api.swatchPreview(key, group) + "</body>", "text/html");
     btn.replaceChildren.apply(btn, Array.prototype.slice.call(doc.body.childNodes));
     if (api.slotTitle) btn.setAttribute("title", api.slotTitle(key, name) + tail);
   }
@@ -1382,7 +1385,7 @@ class VaultGraphSettingTab extends PluginSettingTab {
         };
         if (isAuto) attr["data-auto"] = "1";
         const b = grid.createEl("button", { cls: ["swatch", "vg-" + key], attr });
-        this.fillSwatch(api, b, key, name, tail);
+        this.fillSwatch(api, b, key, name, tail, group.name);
         b.addEventListener("click", () => this.pick(group.name, key));
       });
 
