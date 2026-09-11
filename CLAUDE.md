@@ -109,7 +109,15 @@ measuring it: serve the page, drive it, read the numbers.
   Every other checkout — anything under `C:\git-personal\worktrees\`, i.e. any tree whose
   `git rev-parse --show-toplevel` is not that path — is a **dispatched worker**, whatever its
   branch says. Settle this before the first write: `git rev-parse --show-toplevel` and
-  `git worktree list` answer it in one call.
+  `git worktree list` answer it in one call. **And the orchestrator takes the name `Jarvis`** —
+  `/rename Jarvis` at the start, or `claude -n Jarvis` at launch. Named 2026-09-11 by Lukas,
+  replacing `vault-graph-orchestrator`; one capitalised word is findable in a list of sixty in a
+  way a 22-character slug that reads like a worktree is not. **Both repos' orchestrators share
+  the name on purpose** — Lukas addresses the role, not the instance (*"when I tell you to tell
+  something to jarvis send it with orca send to all jarvis running"*), so a message for Jarvis
+  goes to **every** running Jarvis and the worktree path is what tells two of them apart
+  afterwards. The session in the SecondBrain vault checkout is **Alfred**, and is the one that
+  does that sending.
 - **Only the orchestrator session pushes to `develop` or cuts a release.** A dispatched ticket
   worktree implements, runs its own gates, and stops at its own branch — it never pushes past
   that branch, never merges into `develop`, and never runs `release.ps1`, no matter how clean the
