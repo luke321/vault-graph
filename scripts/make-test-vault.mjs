@@ -76,6 +76,9 @@ const rnd2 = () => {
   t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
   return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
 };
+// github#106 -- tag enrichment draws only from rnd2, so tuning it never shifts a single
+// rnd() call and never re-rolls the folder/link goldens the main stream drives
+const pick2 = (a) => a[Math.floor(rnd2() * a.length)];
 
 const WORDS = ("the argument here is less about tooling than about attention which is the " +
   "scarce resource and the reason a system that demands upkeep tends to collapse into the " +
@@ -265,6 +268,11 @@ for (const n of notes) {
   createdDayOf.set(n, day);
   const created = dayStr(day);
   const tags = rnd() < 0.55 ? some(TAGS, int(1, 2)) : [];
+  // github#106 -- richer and less often empty, entirely off rnd2 so the main stream (and
+  // every link/layout draw after it) is untouched: an untagged note gets one tag most of the
+  // time, and a tagged note sometimes gets a third
+  if (!tags.length) { if (rnd2() < 0.8) tags.push(pick2(TAGS)); }
+  else if (tags.length < 3 && rnd2() < 0.35) { const t = pick2(TAGS); if (!tags.includes(t)) tags.push(t); }
   // github#86 -- one note in five leads with a nested tag: a nested wedge
   if (rnd2() < 0.2) tags.unshift(NESTED[Math.floor(rnd2() * NESTED.length)]);
   const fm = bare ? "" : ["---", `created: ${created}`,

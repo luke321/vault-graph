@@ -6962,7 +6962,7 @@ function mountVaultGraph(root, data, deps) {
     }
   }
 
-  var FIT_RATIO = 1.08;
+  var FIT_RATIO = 1.04;
 
   // github#14
   var camAtRest = true, fitting = false;
