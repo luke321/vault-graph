@@ -32,7 +32,7 @@ legible on a release page:
 # wrote demo-folders-<timestamp>.mp4
 
 ffmpeg -y -ss 18.5 -t 9 -i demo-folders-<timestamp>.mp4 `
-  -vf "crop=286:560:8:200,scale=572:-1:flags=lanczos,fps=15" `
+  -vf "crop=286:545:8:215,scale=572:-1:flags=lanczos,fps=15" `
   -c:v libwebp_anim -lossless 0 -quality 72 -compression_level 4 -loop 0 -an `
   assets\features\countbars.webp
 ```
@@ -40,6 +40,12 @@ ffmpeg -y -ss 18.5 -t 9 -i demo-folders-<timestamp>.mp4 `
 The `-ss` lands just before the solo, which is the part worth watching. `make-hero.ps1` is not
 used here because it scales to a fixed width from the top left of the whole window; this needs a
 crop first.
+
+**The `y` offset is 215, not 200 — check it again after any change above the legend.** The
+Folders/Tags segmented control (github#86) added a row above the legend that the old offset
+didn't know about, so a 200 crop caught its bottom edge. 215 lands just below it, at the
+All/None row; re-measure with a frame grab (`ffmpeg -ss 18.5 -i <take>.mp4 -frames:v 1 check.png`)
+if the legend's top ever moves again rather than guessing a new number.
 
 Commit `assets/features/countbars.webp` and update `Last re-recorded` below in the same commit —
 that pair is what `release.ps1`'s `=== features ===` warning reads.
@@ -49,4 +55,4 @@ that pair is what `release.ps1`'s `=== features ===` warning reads.
 | | |
 |---|---|
 | **Introduced in** | `2.3.0 (github#78)` |
-| **Last re-recorded** | `2.5.0 — 2026-09-11` — 9.0 s cropped from a 29.4 s `folders` take at 1586x992, encoded at 572 px (0.39 MB) |
+| **Last re-recorded** | `2.5.0 — 2026-09-11` — 9.0 s cropped from a 29.4 s `folders` take at 1586x992, encoded at 572 px (0.38 MB) — crop offset adjusted to clear the new Folders/Tags control |
