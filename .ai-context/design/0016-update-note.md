@@ -160,3 +160,14 @@ and the camera stays centred, on real Obsidian.
 A MINOR or MAJOR rewrites `plugin/whats-new.md` on the release branch beside the CHANGELOG entry
 (`releasing.md`, step 3). A PATCH leaves it. `release.ps1` enforces the first, and `release.yml`
 enforces it again at the tag, where a hand-pushed tag would otherwise slip past.
+
+## The dismiss button sits under the bullets, on the left (github#126)
+
+The bullets and **Got it** shared a flex line at first, which put the button to the right of the
+text. The bullets are left-aligned and read left to right, and dismissing is the next thing you
+do after reading them, so the button belongs where the eye already is. The `ul` takes the full
+line (`flex: 1 1 100%`) and the button wraps onto its own, held left by `margin-right: auto`.
+
+It costs the strip one line of height. Nothing measures that height as an absolute:
+`update-note-check.mjs` asserts the disc's canvas takes the strip's height back **within a pixel
+of whatever the strip is**, which is the property that matters and is unchanged.

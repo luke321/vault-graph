@@ -45,12 +45,13 @@
 .vault-graph-view .vg-whatsnew-head a { color: var(--text-accent); }
 .vault-graph-view .vg-whatsnew-chain { color: var(--text-muted); font-variant-numeric: tabular-nums; }
 .vault-graph-view .vg-whatsnew ul {
-  flex: 1 1 auto;
+  flex: 1 1 100%;
   margin: 0;
   padding-left: 1.2em;
 }
 .vault-graph-view .vg-whatsnew li { margin: 0; }
-.vault-graph-view .vg-whatsnew-ok { flex: 0 0 auto; }
+/* github#126 */
+.vault-graph-view .vg-whatsnew-ok { flex: 0 0 auto; margin-right: auto; }
 
 /* github#83, design/0016 -- what this release added, while the note is up */
 .vault-graph-view .vg-new {
