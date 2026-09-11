@@ -264,6 +264,15 @@ factor), which makes the assignment a bijection over distinct notes and scatters
 the folders — a tag dimension that merely re-drew the folder wedges would test nothing. Verified:
 *layout matches its golden snapshot* reports **positions unchanged** on all four fixtures.
 
+**The tail is two tails, and the second one is the point (github#119).** A 12x11 stem-leaf
+combinator clusters perfectly on a leading prefix, so a fixture made only of it would pass a
+name-clustering proposal that the real case fails -- measured on the real vault, only **13 of 66**
+tail tags share even three leading characters (20%), and 4 of 66 share four. Half the tail is
+unrelated words instead, aimed at that 20% rather than below it: a vault genuinely accumulates
+`foo` beside `foo-bar`, and a fixture with no hierarchical names would let a proposal skip the case
+that does cluster. Realised: **24% of the tail clusters at three leading characters, in 5
+clusters**, against the real vault's 20% in 6. The generator prints both figures.
+
 What it now exposes, and what is **not** fixed by github#107: 101 of the 122 groups hold three
 notes or fewer, so the inner ring fills with wedges of one or two dots each. Separately, the
 palette resolves **12 distinct colours across 122 groups**, 22 of which read as grey — measured on

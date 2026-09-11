@@ -81,9 +81,43 @@ const TAG_STEMS = ["anchor", "beacon", "cinder", "delta", "ember", "fathom",
                    "girder", "harbor", "ingot", "jetty", "kiln", "lumen"];
 const TAG_LEAVES = ["brief", "draft", "field", "guide", "index", "log",
                     "memo", "plan", "query", "sketch", "trace"];
-// 12 x 11 = 132 names, taken in a fixed order; the tail needs 115 of them
+/* github#119 -- TWO tails, and the second one is the point.
+ *
+ * The stem-leaf names above are a 12 x 11 combinator, so every eleven of them share a stem. A
+ * vocabulary like that clusters perfectly on a leading prefix, and a fixture made only of it
+ * would pass a name-clustering test that the real case fails: measured on the vault this shape
+ * came from, only 13 of 66 tail tags share even three leading characters (20%), and at four
+ * characters it is 4 of 66. A long tail of one-note tags is mostly unrelated words.
+ *
+ * So the tail is half hierarchical and half unrelated. Both halves are real -- a vault does
+ * accumulate `foo` beside `foo-bar` -- and a proposal that only handles the first half is
+ * supposed to be visibly incomplete here rather than green. */
+const TAIL_UNRELATED = [
+  "abacus", "ballast", "cadence", "dovetail", "eaves", "ferrule", "gantry", "halyard",
+  "isthmus", "jigsaw", "keystone", "lintel", "mortise", "nacelle", "obelisk", "plinth",
+  "quarry", "rafter", "spandrel", "tiller", "undertow", "vellum", "wainscot", "xylem",
+  "yardarm", "zephyr", "alcove", "brazier", "cistern", "dowel", "escarp", "flange",
+  "grommet", "hasp", "inglenook", "joist", "kerf", "louver", "mullion", "newel",
+  "oriel", "parapet", "quoin", "rebate", "soffit", "transom", "uprise", "valance",
+  "weir", "yoke", "apse", "buttress", "corbel", "dado", "embrasure", "finial",
+  "gable", "impost", "jamb", "keel", "lancet", "muntin", "nosing", "ogee",
+  "pilaster", "quirk", "reveal", "tracery", "undercroft", "verge", "wicket", "zinc",
+  "cupola", "dormer", "eyelet", "fascia", "gusset", "hinge", "inlay", "knurl",
+  "ledger", "mantel", "niche", "ochre",
+];
+const TAIL_HIERARCHICAL = [];
+for (const s of TAG_STEMS) for (const l of TAG_LEAVES) TAIL_HIERARCHICAL.push(`${s}-${l}`);
+/* The MIX is aimed at the real vault's 20%, not below it. Being harder than reality is right for
+ * the tail's LENGTH -- 83% of groups holding three notes or fewer against the real 72% -- but not
+ * for this: a vault genuinely accumulates `foo` beside `foo-bar`, and a fixture with no
+ * hierarchical names at all would let a proposal skip the case that does cluster. So the 4-9 band
+ * takes hierarchical names, and every fifth name in the three-or-fewer tail is hierarchical while
+ * the rest are unrelated. */
 const TAIL_NAMES = [];
-for (const s of TAG_STEMS) for (const l of TAG_LEAVES) TAIL_NAMES.push(`${s}-${l}`);
+for (let i = 0; i < 15; i++) TAIL_NAMES.push(TAIL_HIERARCHICAL[i]);
+for (let i = 0, h = 15, u = 0; i < 100; i++) {
+  TAIL_NAMES.push(i % 5 === 0 ? TAIL_HIERARCHICAL[h++] : TAIL_UNRELATED[u++]);
+}
 
 const DOMINANT = "inbox";
 // [name, notes carrying it] -- the mid band is named, the tail is generated
@@ -155,3 +189,17 @@ console.log(`  tail: ${atMost(1)} tags on exactly one note ` +
             `(${Math.round(atMost(3) / per.size * 100)}%)`);
 console.log(`  dominant tag: ${DOMINANT} ${per.get(DOMINANT)}/${notes.length} = ` +
             `${Math.round(per.get(DOMINANT) / notes.length * 100)}%`);
+// github#119 -- how much of the tail a leading-prefix clustering would actually catch, so a
+// proposal that only handles hierarchical names cannot look complete here
+const lcp = (a, b) => { let n = 0; while (n < a.length && n < b.length && a[n] === b[n]) n++; return n; };
+const smallNames = [...per.entries()].filter(([, v]) => v <= 3).map(([t]) => t).sort();
+for (const min of [3, 4]) {
+  let grouped = 0, runs = 0, run = 1;
+  for (let i = 1; i <= smallNames.length; i++) {
+    if (i < smallNames.length && lcp(smallNames[i - 1], smallNames[i]) >= min) { run++; continue; }
+    if (run > 1) { runs++; grouped += run; }
+    run = 1;
+  }
+  console.log(`  tail names sharing >=${min} leading chars: ${grouped}/${smallNames.length} ` +
+              `(${Math.round(grouped / smallNames.length * 100)}%) in ${runs} clusters`);
+}
