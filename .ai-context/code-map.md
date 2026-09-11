@@ -476,7 +476,7 @@ range, not the file. Stale when `node scripts/code-map.mjs --check` fails.
 | 10063 | · · · · · · · · · · `byPath` |
 | 10235 | `destroy` |
 
-## `scripts/smoke.mjs` — 5537 lines, 10 sections, 65 functions, 107 checks
+## `scripts/smoke.mjs` — 5540 lines, 10 sections, 65 functions, 107 checks
 
 ### Sections
 
@@ -491,7 +491,7 @@ range, not the file. Stale when `node scripts/code-map.mjs --check` fails.
 | 3663–4843 | the hub |
 | 4844–5007 | live rebuild (github#72) |
 | 5008–5238 | the run |
-| 5239–5537 | which vaults, and why |
+| 5239–5540 | which vaults, and why |
 
 ### Functions
 

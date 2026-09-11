@@ -2919,15 +2919,25 @@ proof, and the check itself asserts plan parity on every page that has a plan.
 ## A tree is gated once
 
 A green full run of the suite (no `--only`, `--vault`, `--url` or `--fast`, every fixture, no
-modified tracked files) stamps the git **tree** it measured together with the three fixtures it
+modified tracked files) stamps the git **tree** it measured together with the four fixtures it
 ran against (`scripts/suite-stamp.mjs`, one JSON file per tree under `suite-passed/` in the
 shared git common dir). `.githooks/pre-push` and `scripts/release.ps1` skip the suite when every
 commit in front of them carries a stamp against the fixtures now in the store, and print the
 run they trust. A partial run never stamps; a dirty tree never stamps; a stamp whose fixture
 has been regenerated, or whose unpinned fixture is older than the seven-day refresh, misses.
+A run in which a fixture could not be generated never stamps, and a stamp naming fewer than
+every fixture in `FIXTURE_NAMES` misses (github#103) — **four names since github#86 added the
+tag-organised fixture**, because a list that lags the suite is the same hole in a new place: the
+three older fixtures would go green, the run would stamp, and the hook would skip the suite for a
+tree the tag disc was never measured on. Both callers require the pass line, not exit 0 alone:
+the CLI realpaths itself against `argv[1]`, because through a junction (every Orca worktree)
+the two paths differed, the body never ran, and an empty exit 0 read as a stamp on every push.
 
 ```bash
-node scripts/suite-stamp.mjs --selftest       # hit on the same tree from a different commit, miss otherwise
+node scripts/suite-stamp.mjs --selftest       # hit on the same tree from a different commit, miss otherwise;
+                                              # a missing fixture (either of two cases) refuses to record,
+                                              # a short stamp misses,
+                                              # and the CLI answers through a junction
 node scripts/suite-stamp.mjs check [<rev>]    # what a push of <rev> would do, and why
 node scripts/smoke.mjs --only "intro landed"  # ends with "not stamping this run: --only is not the full suite"
 ```
