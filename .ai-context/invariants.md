@@ -3194,3 +3194,32 @@ node scripts/mobile-check.mjs --device sidebar  # the 320px case
 preview can ask the same question of the other theme's palette. Verified as a no-op the only way
 that means anything: every one of **1403 nodes on the demo fixture draws the same colour as
 `develop`, in both themes**, compared by hash.
+
+## The update note is text, and it is small
+
+github#83, `design/0016`. After a MINOR or MAJOR update the plugin shows `plugin/whats-new.md`
+once, as a strip above the disc. A release ships three files and nothing else reaches the user, so
+anything in that note travels inside `main.js`, downloaded by every user on every update, forever,
+for a note shown once. The smallest feature clip in the repo would add a third to the bundle.
+
+| | |
+|---|---|
+| `NOTE_MAX_BYTES` | 4096 — the whole file |
+| `NOTE_MAX_LINES` | 5 bullets |
+| `NOTE_MAX_LINE_CHARS` | 160 per bullet |
+| a `data:` URI, or any tag (`<` followed by a letter, `!` or `/`) in a bullet | refused |
+
+The constants live in `plugin/update-note.mjs`. **Check:** `scripts/build-plugin.mjs` refuses to
+build on any problem, and `scripts/update-note-selftest.mjs` holds the grammar and the decision
+table — the pre-push hook and `release.yml` both run it. **Measured:** the first note is 650 bytes; the bundle went 472,726 → 477,911 bytes with the
+whole feature in it (+5,185, 1.1%). A note that reaches the plugin is shown only when it is for
+the installed MAJOR.MINOR — a forgotten note shows nothing, never a stale one — and
+`scripts/release.ps1` refuses to cut an `x.y.0` whose note is for another version, as does
+`release.yml` at the tag, which a hand-pushed tag cannot skip.
+
+The strip sits outside the page root, so the page measures nothing about it: with the strip up the
+canvas is shorter by exactly the strip's height, the camera ratio and `--vg-canvas-top` are the
+same with and without it, and recording the version writes the marker onto whatever `data.json`
+held — never the defaults onto a file that had none. **Check:** `scripts/update-note-check.mjs`,
+on real Obsidian, asserts the strip's placement (in the view, directly above the page root), the
+canvas height, the camera, `--vg-canvas-top`, and the bytes of `data.json` after each state.

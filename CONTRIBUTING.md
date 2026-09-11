@@ -94,6 +94,19 @@ the root, mount again) and reads heap, DOM nodes and listener counts after every
 the 10k fixture — through two document listeners nothing removed. `--quick` tears down
 mid-intro, which is the case where a dead mount used to keep animating.
 
+Run the fourth if you touch the update note — `plugin/whats-new.md`, `plugin/update-note.mjs`,
+the strip `VaultGraphView.mountNote()` builds, or the `lastSeenVersion` bookkeeping in `onload()`
+(github#83, `design/0016`). It seeds `data.json` six ways (absent, present without a version,
+a MINOR behind, a PATCH behind, already seen, a note for another version), reloads the plugin
+with the throwaway manifest patched to each installed version, and reads the strip, its links
+and bullets, the written version, the canvas height and the camera back from a real Obsidian:
+
+```bash
+node scripts/build-plugin.mjs
+node scripts/update-note-check.mjs                # the demo fixture; --keep leaves Obsidian open
+node scripts/update-note-selftest.mjs             # the decision table and the note grammar, no Obsidian (the hook runs it too)
+```
+
 One more if you touch the renderer (`src/engine/`): the suite asserts numbers, and none of
 them can see a disc in the wrong colour. `node scripts/render-diff.mjs --against-dir <dir>`
 compares the current build of every fixture, pixel by pixel and node by node, against

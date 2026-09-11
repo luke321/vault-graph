@@ -14,7 +14,7 @@ Call out what's newly done since the last table and what's still blocked or awai
 |---|---|---|
 | 1 | <this release's own polish/fix asks, one row each> | |
 | 2 | Any new-feature doc page(s) + clip(s) under `docs/features/` | |
-| 3 | `CHANGELOG.md` section for `<version>`, covering every merge since the last tag | |
+| 3 | `CHANGELOG.md` section for `<version>`, covering every merge since the last tag — and, for a MINOR or MAJOR, `plugin/whats-new.md` rewritten for it: the three-to-five-line note the plugin shows once after the update (github#83, `design/0016`). A PATCH leaves the file alone. `release.ps1` refuses an `x.y.0` whose note is for another version | |
 | 4 | Version bump: `manifest.json` → `<version>` | |
 | 5 | Release name — propose 2-4 candidates, his pick | |
 | 6 | **Re-record every clip the UI change touches** — if anything visual changed this release (a constant like `FIT_RATIO`, a storyboard reorder, a sizing fix), the hero *and every existing feature-gallery clip* are stale, not just the ones whose own beats moved. Needs the `record` lock; ask before recording. Before merge, not after — the merged tree is what the clips should show. | |

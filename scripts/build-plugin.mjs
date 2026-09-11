@@ -5,6 +5,7 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { engineBanner } from "../src/engine/notice.mjs";
+import { parseNote } from "../plugin/update-note.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(HERE, "..");
@@ -98,6 +99,20 @@ const stripDemoAndDebugPlugin = {
   },
 };
 
+/* ------------------------------------------------------------- update note -- */
+// github#83, design/0016
+const NOTE_FILE = join(ROOT, "plugin", "whats-new.md");
+
+function checkWhatsNew() {
+  const text = readFileSync(NOTE_FILE, "utf8");
+  const { note, problems } = parseNote(text);
+  if (!note) {
+    throw new Error("plugin/whats-new.md is not an update note the plugin can show:\n  " +
+                    problems.join("\n  ") + "\nSee the comment at the top of that file.");
+  }
+  return { note, bytes: Buffer.byteLength(text) };
+}
+
 /* ------------------------------------------------------------------ styles -- */
 // github#98
 const ENTRY = join(ROOT, "plugin", "main.js");
@@ -123,6 +138,8 @@ const stylesPlugin = {
     b.onEnd(copyStyles);
   },
 };
+
+const whatsNew = checkWhatsNew();
 
 const options = {
   entryPoints: [ENTRY],
@@ -151,5 +168,7 @@ if (WATCH) {
   const kb = (n) => (n / 1024).toFixed(0) + " KB";
   const sizes = ["main.js", "styles.css", "manifest.json"]
     .map((f) => f + " " + kb(readFileSync(join(ROOT, f)).length));
-  console.log("built: " + sizes.join(", "));
+  console.log("built: " + sizes.join(", ") +
+              "; update note for " + whatsNew.note.version + ": " + whatsNew.note.lines.length +
+              " line" + (whatsNew.note.lines.length === 1 ? "" : "s") + ", " + whatsNew.bytes + " bytes");
 }

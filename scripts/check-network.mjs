@@ -10,6 +10,9 @@ const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
 const OURS = [
   "plugin/main.js",
+  // github#83
+  "plugin/update-note.mjs",
+  "plugin/whats-new.md",
   "src/page.js",
   // github#58
   ...readdirSync(join(ROOT, "src", "engine")).filter((f) => f.endsWith(".ts")).sort()
