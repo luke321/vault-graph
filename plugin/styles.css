@@ -4,18 +4,52 @@
   overflow: hidden;
 }
 
+/* github#83 -- a column, so the update note takes its own height and the page the rest */
 .vault-graph-view {
   height: 100%;
   min-height: 0;
   overflow: hidden;
+  display: flex;
+  flex-direction: column;
 }
 
 .vault-graph-view > .vault-graph {
-  height: 100%;
+  flex: 1 1 0%;
+  height: auto;
   min-height: 0;
   /* github#4 */
   --controls-inset: 44px;
 }
+
+/* github#83, design/0016 */
+.vault-graph-view .vg-whatsnew {
+  flex: 0 0 auto;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 16px;
+  padding: 8px 14px;
+  border-bottom: 1px solid var(--background-modifier-border);
+  background: var(--background-secondary);
+  color: var(--text-normal);
+  font-size: var(--font-ui-small);
+  line-height: 1.4;
+}
+.vault-graph-view .vg-whatsnew-head {
+  flex: 1 1 100%;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 14px;
+}
+.vault-graph-view .vg-whatsnew-head a { color: var(--text-accent); }
+.vault-graph-view .vg-whatsnew ul {
+  flex: 1 1 auto;
+  margin: 0;
+  padding-left: 1.2em;
+}
+.vault-graph-view .vg-whatsnew li { margin: 0; }
+.vault-graph-view .vg-whatsnew-ok { flex: 0 0 auto; }
 
 .vg-colour-row { flex-wrap: wrap; }
 .vg-colour-row > .vault-graph.vg-tokens { flex: 1 1 100%; width: 100%; margin-top: 8px; }

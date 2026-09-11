@@ -2999,3 +2999,29 @@ while its tree is not; not by time because `develop` moves several times a day a
 green run" cannot say which tree it saw. While it runs, both gates hold the machine-wide
 `suite` lock (`scripts/lock.mjs`) and release it on every exit path; a lock that cannot be had
 blocks the push and names the holder rather than running on top of it.
+
+## The update note is text, and it is small
+
+github#83, `design/0016`. After a MINOR or MAJOR update the plugin shows `plugin/whats-new.md`
+once, as a strip above the disc. A release ships three files and nothing else reaches the user, so
+anything in that note travels inside `main.js`, downloaded by every user on every update, forever,
+for a note shown once. The smallest feature clip in the repo would add a third to the bundle.
+
+| | |
+|---|---|
+| `NOTE_MAX_BYTES` | 4096 — the whole file |
+| `NOTE_MAX_LINES` | 5 bullets |
+| `NOTE_MAX_LINE_CHARS` | 160 per bullet |
+| `data:` URI, `<img>`, `<svg>`, `<video>`, `<script>` | refused |
+
+The constants live in `plugin/update-note.mjs`. **Check:** `scripts/build-plugin.mjs` refuses to
+build on any problem, and `scripts/update-note-selftest.mjs` holds the grammar and the decision
+table. **Measured:** the first note is 650 bytes; the bundle went 472,726 → 477,276 bytes with the
+whole feature in it (+4,550, under 1%). A note that reaches the plugin is shown only when it is for
+the installed MAJOR.MINOR — a forgotten note shows nothing, never a stale one — and
+`scripts/release.ps1` refuses to cut an `x.y.0` whose note is for another version.
+
+The strip sits outside the page root, so the page measures nothing about it: with the strip up the
+canvas is shorter by exactly the strip's height, the camera stays at (0.5, 0.5), and
+`--vg-canvas-top` does not move (measured 230 px in every state). **Check:**
+`scripts/update-note-check.mjs`, on real Obsidian.

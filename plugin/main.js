@@ -8,6 +8,9 @@ import { GraphStore, Renderer } from "../src/engine/index";
 import { localDay, resolveCreated, dateTally } from "../src/dates.mjs";
 import PAGE_HTML from "raw:../src/page.html";
 import LOGO_MASK_B64 from "b64:../assets/logo-mask.png";
+// github#83, design/0016
+import WHATS_NEW from "raw:./whats-new.md";
+import { decideNote, minorOf, parseNote } from "./update-note.mjs";
 
 const VIEW_TYPE = "vault-graph-view";
 const ICON_ID = "vault-graph-disc";
@@ -70,6 +73,7 @@ function bareMap() {
  * @property {boolean} liveRefresh                      github#72
  * @property {boolean} [sheetOpen]                      github#82 -- absent until folded once
  * @property {boolean} [bandOpen]                       github#82
+ * @property {string} [lastSeenVersion]                 github#83 -- absent until the first load records it
  */
 
 /**
@@ -187,6 +191,10 @@ const under = (rel, dir) => !!dir && (rel === dir || rel.startsWith(dir + "/"));
 // github#62
 /** @param {() => void} fn @returns {unknown} */
 const attempt = (fn) => { try { fn(); return null; } catch (e) { return e; } };
+
+// github#83, design/0016 -- built from the version; the note file carries text only
+const RELEASE_URL = "https://github.com/luke321/vault-graph/releases/tag/";
+const GALLERY_URL = "https://luke321.github.io/vault-graph/features.html";
 
 // github#32
 /** @param {string} a @param {string} b */
@@ -718,10 +726,38 @@ class VaultGraphView extends ItemView {
     }
   }
 
+  /* ------------------------------------------------------ update note (github#83) */
+
+  // github#83, design/0016 -- above the page root, so the page's own resize path re-fits
+  mountNote() {
+    const note = this.plugin.pendingNote;
+    if (!note) return;
+    const strip = this.contentEl.createDiv({ cls: "vg-whatsnew", attr: { role: "status" } });
+    const head = strip.createDiv({ cls: "vg-whatsnew-head" });
+    head.createEl("strong", { text: "What's new in Vault Graph " + minorOf(note.version) });
+    const links = { target: "_blank", rel: "noopener" };
+    head.createEl("a", { text: "Release notes", href: RELEASE_URL + note.version, attr: links });
+    head.createEl("a", { text: "Feature gallery", href: GALLERY_URL, attr: links });
+    const list = strip.createEl("ul");
+    for (const line of note.lines) list.createEl("li", { text: line });
+    const ok = strip.createEl("button", { text: "Got it", cls: "vg-whatsnew-ok", attr: { type: "button" } });
+    this.registerDomEvent(ok, "click", () => { void this.dismissNote(strip); });
+  }
+
+  // github#83 -- dismissing is the write that marks the version seen
+  /** @param {HTMLElement} strip */
+  async dismissNote(strip) {
+    strip.remove();
+    this.plugin.pendingNote = null;
+    this.plugin.settings.lastSeenVersion = this.plugin.manifest.version;
+    await this.plugin.saveSettings();
+  }
+
   async render() {
     this.teardown();
     const root = this.contentEl;
     root.addClass("vault-graph-view");
+    this.mountNote();
 
     const data = await buildData(this.app, this.plugin.settings, this.plugin.manifest.version);
     this.lastData = data;
@@ -1371,12 +1407,28 @@ class VaultGraphSettingTab extends PluginSettingTab {
 class VaultGraphPlugin extends Plugin {
   /** @type {Settings} */
   settings = DEFAULTS;
+  // github#83 -- the note the next view mount shows, until it is dismissed
+  /** @type {import("./update-note.mjs").UpdateNote | null} */
+  pendingNote = null;
 
   async onload() {
     /** @type {unknown} */
     const saved = await this.loadData();
     /** @type {Settings} */
     this.settings = Object.assign({}, DEFAULTS, saved);
+
+    // github#83, design/0016 -- decided once per load; a shown note is recorded on dismiss
+    const verdict = decideNote({
+      installed: this.manifest.version,
+      lastSeen: this.settings.lastSeenVersion,
+      hadData: saved !== null && saved !== undefined,
+      note: parseNote(WHATS_NEW).note,
+    });
+    this.pendingNote = verdict.show;
+    if (verdict.record) {
+      this.settings.lastSeenVersion = this.manifest.version;
+      await this.saveSettings();
+    }
     this.addSettingTab(new VaultGraphSettingTab(this.app, this));
 
     this.registerView(VIEW_TYPE, (leaf) => new VaultGraphView(leaf, this));
