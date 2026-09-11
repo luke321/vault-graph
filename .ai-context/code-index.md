@@ -80,7 +80,7 @@ enforces each invariant; who calls each `__vg` entry point. Stale when
 | #100 | — | .ai-context/changelog-detail.md:18 |
 | #101 | — | .ai-context/changelog-detail.md:19 |
 | #102 | scripts/close-issues.mjs:2, scripts/close-issues.mjs:19 | .ai-context/changelog-detail.md:21 |
-| #103 | scripts/close-issues.mjs:52, scripts/release.ps1:286, scripts/smoke.mjs:4939, scripts/suite-stamp.mjs:88, scripts/suite-stamp.mjs:119, scripts/suite-stamp.mjs:221, scripts/suite-stamp.mjs:253 | .ai-context/changelog-detail.md:16, .ai-context/invariants.md:2759 |
+| #103 | scripts/close-issues.mjs:52, scripts/release.ps1:286, scripts/smoke.mjs:4939, scripts/suite-stamp.mjs:88, scripts/suite-stamp.mjs:118, scripts/suite-stamp.mjs:220, scripts/suite-stamp.mjs:252 | .ai-context/changelog-detail.md:16, .ai-context/invariants.md:2759 |
 
 ## Decision and design records cited in code — 18
 

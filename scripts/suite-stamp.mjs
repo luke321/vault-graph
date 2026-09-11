@@ -85,8 +85,7 @@ export function lookup(rev = "HEAD", cwd = ROOT) {
   catch (e) { return { ok: false, tree, why: `unreadable stamp for tree ${tree.slice(0, 7)}: ${e.message}` }; }
   const have = currentFixtures(cwd);
   const stamped = Array.isArray(stamp.fixtures) ? stamp.fixtures : [];
-  // github#103: every fixture the suite requires must be in the stamp -- a stamp written by a
-  // run that lost a fixture (its generator failed) is not a full pass, whatever it names.
+  // github#103
   for (const name of FIXTURE_NAMES) {
     const want = stamped.find((f) => f && f.name === name);
     if (!want) {
@@ -116,7 +115,7 @@ export function record({ fixtures, checks, cwd = ROOT }) {
   const tree = treeOf("HEAD", cwd);
   const dir = stampDir(cwd);
   if (!tree || !dir) return { wrote: null, why: "cannot resolve HEAD's tree" };
-  // github#103: a run that lost a fixture is partial, whatever it measured on the others.
+  // github#103
   const ran = FIXTURE_NAMES.map((name) => (fixtures || []).find((f) => f && f.name === name));
   for (let i = 0; i < FIXTURE_NAMES.length; i++) {
     const f = ran[i];
@@ -250,9 +249,7 @@ function selftest() {
   return fails.length ? 1 : 0;
 }
 
-// github#103: realpath both sides. Node realpaths the main module, so through a junction
-// argv[1] as typed never equalled import.meta.url, the CLI body was skipped, and the process
-// exited 0 saying nothing -- which both callers read as "this tree is stamped".
+// github#103
 const invokedDirectly = (() => {
   if (!process.argv[1]) return false;
   const norm = (p) => realpathSync(p).replace(/\\/g, "/").toLowerCase();
