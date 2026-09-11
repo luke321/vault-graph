@@ -30,6 +30,67 @@ published tag breaks every link to it.
 
 ---
 
+## 2.5.0 — "Tags" — 2026-09-11
+
+**A second way to cut the disc: by tag instead of by folder.** The group list's heading is now
+a segmented control, **Folders** or **Tags** — switch and the whole disc redraws, one hand
+erasing the old wedges while the other brings in the new ones, with the links, the heat strip
+and the group list following the notes. A note's first listed tag files it; a nested tag such
+as `area/health` nests as a sub-wedge of *area*, opened and pushed out exactly the way a
+subfolder is — the same grouping-dimension mechanism underneath, just fed tags instead of
+folder paths. Untagged notes land in their own `(untagged)` bucket, grey like `(unlinked)`.
+
+*(clip pending — recorded before this release merges down)*
+
+### Grouping by tag
+
+- **Folders or Tags**, a segmented control above the legend. The disc keeps its hub and its
+  rings across the switch; nothing about walking a nested tag needed its own code.
+- Where a tag's wedge holds fewer notes than carry the tag, its row says so.
+- The grouping control now takes the full panel's width, split evenly between the two sides,
+  each carrying its own count — instead of one shared count sitting above four buttons that
+  used to read as one group.
+
+### The suite trusts its own gates less blindly
+
+- **A green run now stamps the tree it measured**, and the pre-push hook and `release.ps1`
+  trust that stamp instead of re-driving Chrome on a tree already proven — closing the
+  redundant second/third run per release that #93 named.
+- **Three ways a corrupt or dropped fixture could still pass silently, closed on adversarial
+  review of that change:** `suite-stamp.mjs`'s freshness check compared paths through an Orca
+  worktree's own junction against a realpath'd module path and always disagreed, so the CLI body
+  silently never ran — every Orca worktree's pre-push suite had effectively stopped running. A
+  fixture whose generator failed still earned a full stamp, naming only the fixtures that
+  succeeded. And the suite itself is walked structurally before a browser ever launches — a
+  fixture missing `.obsidian` (a shared-store race between two worktrees regenerating the same
+  fixture at once) used to surface as 0/107 at the end of an ~8-minute run; now it's caught in
+  milliseconds, before Chrome opens.
+- Escaped serialized vault data in the standalone export — a frontmatter value containing a
+  literal `</script>` could close the exported page's own data script and run whatever followed
+  it. Guarded by a hook-wired static check and a smoke check that proves the marker never runs.
+- Planner dictionaries (`byCell`, `cellsOf`, `groupInner`) are prototype-safe now — a folder
+  literally named `constructor` or `toString` no longer throws via inherited properties.
+- The plugin's generated `styles.css` rebuilds on every watch-mode edit to either source
+  stylesheet; it used to copy once at startup and silently go stale.
+- Issues close when their fix reaches `develop`, not only when the release merge reaches `main`
+  — a workflow watches the push, since GitHub's own closing-keyword resolution only fires on the
+  default branch.
+- `release.ps1` no longer pushes `main` directly (branch protection requires a PR) and refuses a
+  `main` that isn't exactly `origin/main`.
+
+### Also in this release
+
+- The docs site's theme moved off GitHub Pages' generic `jekyll-theme-midnight` to one closer to
+  the product's own dark palette.
+- The stats line now names the version that built the page, so a rebuilt-but-not-reloaded
+  install in Obsidian doesn't read as a stuck bug.
+- The disc-to-window margin is half what it was; the demo fixture's notes are tagged more often
+  and more richly (55% → 74%) without moving a single note or link; the hero clip's storyboard
+  walks the note trail after pinning to the hub instead of before, and previews the
+  heatmap/sidebar fold early instead of only at the very end.
+
+---
+
 ## 2.4.1 — 2026-09-10
 
 **The README's "Try it live" and feature-list links now go somewhere.** 2.4.0 shipped the docs
