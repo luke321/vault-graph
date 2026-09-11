@@ -660,8 +660,7 @@ try {
         "data-theme " + before.theme + " -> " + after.theme + " -> " + restored.theme + "; --text-1 " + before.text + " -> " + after.text + "; labelColor " + before.labelColor + " -> " + after.labelColor +
         (labelsFollow ? " (follows)" : " (STALE)") + "; surface " + before.surface + " -> " + after.surface);
 
-      // github#84, github#78, design/0004 -- the legend is an inline hex from colorOf(); it
-      // follows the token only because readTheme() rebuilds the colours and the legend
+      // github#84, github#78, design/0004
       if (selected("theme")) {
         const tokenMoved = before.token !== after.token;
         const legendMoved = before.legendSwatch !== after.legendSwatch;

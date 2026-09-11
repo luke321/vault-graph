@@ -430,8 +430,7 @@ function mountVaultGraph(root, data, deps) {
     THEME.slots.forEach(function (hex, i) { THEME.byKey["g" + (i + 1)] = hex; });
     clearPreviewCache();
     if (renderer) renderer.setSetting("labelColor", THEME.text);
-    // github#84, design/0004 -- everything derived from the palette follows it, in the same
-    // frame and with no colorWalk; before boot there is no plan to derive from
+    // github#84, design/0004
     if (renderer) { buildColors(); attempt(buildLegend); }
   }
   readTheme();

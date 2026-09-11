@@ -4562,8 +4562,7 @@ check("a bar that loses its folder shrinks over the cascade instead of blinking 
   };
 });
 
-// github#84, github#78, design/0004 -- the legend is an inline hex from colorOf(); it follows
-// the token only because readTheme() rebuilds the colours and the legend on every flip
+// github#84, github#78, design/0004
 check("the legend's swatch and count bar follow the token across a theme flip, with the picker", async (p) => {
   const read = () => p.j(`(function(){
     var root = document.querySelector('.vault-graph'), cs = getComputedStyle(root);
@@ -4629,7 +4628,7 @@ check("the legend's swatch and count bar follow the token across a theme flip, w
   const swatchMoved = before.swatch !== after.swatch;
   const barMoved = before.bar !== after.bar;
   const pickerMoved = before.picker !== null && before.picker !== after.picker;
-  // github#84 -- every surface lands on the moved token, and comes back with it
+  // github#84
   const colorOfFollows = after.colorOf === after.token && restored.colorOf === before.colorOf;
   const swatchFollows = swatchMoved && after.swatch === after.token;
   const barFollows = !before.barred || (barMoved && after.bar === after.token);
