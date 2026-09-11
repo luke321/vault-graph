@@ -61,3 +61,17 @@ would regenerate it and measure something else. `SKIP_SMOKE` stays as the manual
   the hit and miss cases against a throwaway repository.
 - The stamp is only as good as the store it was taken against. That is why the fixtures'
   identity is part of the key rather than assumed from the generator sources in the tree.
+- **A fixture's own stamp is not proof the vault is usable** (2026-09-11,
+  [#106](https://github.com/luke321/vault-graph/issues/106)). One was found with its note
+  folders and a valid stamp but no `.obsidian` — a half-written fixture from two worktrees
+  regenerating the same name at once, which the store does not exclude. `smoke.mjs` reused it
+  on the stamp alone, swallowed build-graph's refusal, and the dead jobs failed only when the
+  pool reached them: 0/107 at the end of an ~8-minute run. So `checkFixture()` walks every
+  fixture before a browser is launched — `.obsidian` is a directory and the `.md` count
+  outside dot-folders equals the `notes` the stamp records at generation (stamp format 2); 87 /
+  456 / 36 ms for the three. A fixture that fails is regenerated with a line saying why, the
+  same path a stale one takes; a vault that then does not build ends the run before Chrome
+  starts. `currentFixtures()` runs the same walk, so a suite stamp naming a fixture that has
+  since gone corrupt misses instead of skipping the suite over it. `VG_FIXTURE_STORE` points a
+  run at a scratch store, on purpose, so the path can be driven against a corrupt copy without
+  touching the shared one. The race itself is a separate fix.
