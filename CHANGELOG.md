@@ -40,54 +40,32 @@ as `area/health` nests as a sub-wedge of *area*, opened and pushed out exactly t
 subfolder is — the same grouping-dimension mechanism underneath, just fed tags instead of
 folder paths. Untagged notes land in their own `(untagged)` bucket, grey like `(unlinked)`.
 
-*(clip pending — recorded before this release merges down)*
+<img src="https://raw.githubusercontent.com/luke321/vault-graph/2.5.0/assets/features/tags.webp" width="100%" alt="The disc cut by tag instead of by folder, a nested tag's twisty opened to reach its sub-tag, clicked to halo and push the sub-wedge out then let back down, folded away again, and the disc switched back to folders">
 
 ### Grouping by tag
 
 - **Folders or Tags**, a segmented control above the legend. The disc keeps its hub and its
   rings across the switch; nothing about walking a nested tag needed its own code.
 - Where a tag's wedge holds fewer notes than carry the tag, its row says so.
-- The grouping control now takes the full panel's width, split evenly between the two sides,
+- The grouping control takes the full panel's width now, split evenly between the two sides,
   each carrying its own count — instead of one shared count sitting above four buttons that
   used to read as one group.
 
-### The suite trusts its own gates less blindly
+### Fixes
 
-- **A green run now stamps the tree it measured**, and the pre-push hook and `release.ps1`
-  trust that stamp instead of re-driving Chrome on a tree already proven — closing the
-  redundant second/third run per release that #93 named.
-- **Three ways a corrupt or dropped fixture could still pass silently, closed on adversarial
-  review of that change:** `suite-stamp.mjs`'s freshness check compared paths through an Orca
-  worktree's own junction against a realpath'd module path and always disagreed, so the CLI body
-  silently never ran — every Orca worktree's pre-push suite had effectively stopped running. A
-  fixture whose generator failed still earned a full stamp, naming only the fixtures that
-  succeeded. And the suite itself is walked structurally before a browser ever launches — a
-  fixture missing `.obsidian` (a shared-store race between two worktrees regenerating the same
-  fixture at once) used to surface as 0/107 at the end of an ~8-minute run; now it's caught in
-  milliseconds, before Chrome opens.
-- Escaped serialized vault data in the standalone export — a frontmatter value containing a
-  literal `</script>` could close the exported page's own data script and run whatever followed
-  it. Guarded by a hook-wired static check and a smoke check that proves the marker never runs.
-- Planner dictionaries (`byCell`, `cellsOf`, `groupInner`) are prototype-safe now — a folder
-  literally named `constructor` or `toString` no longer throws via inherited properties.
-- The plugin's generated `styles.css` rebuilds on every watch-mode edit to either source
-  stylesheet; it used to copy once at startup and silently go stale.
-- Issues close when their fix reaches `develop`, not only when the release merge reaches `main`
-  — a workflow watches the push, since GitHub's own closing-keyword resolution only fires on the
-  default branch.
-- `release.ps1` no longer pushes `main` directly (branch protection requires a PR) and refuses a
-  `main` that isn't exactly `origin/main`.
+- **A frontmatter value containing a literal `</script>` could close the standalone export's own
+  data script and run whatever followed it.** The exported data is escaped now, so this can't
+  happen.
+- **A folder literally named `constructor` or `toString` could crash the plugin**, via an
+  inherited property the planner mistook for its own. Fixed everywhere the layout keys a map by
+  folder or tag name.
 
 ### Also in this release
 
-- The docs site's theme moved off GitHub Pages' generic `jekyll-theme-midnight` to one closer to
-  the product's own dark palette.
 - The stats line now names the version that built the page, so a rebuilt-but-not-reloaded
   install in Obsidian doesn't read as a stuck bug.
-- The disc-to-window margin is half what it was; the demo fixture's notes are tagged more often
-  and more richly (55% → 74%) without moving a single note or link; the hero clip's storyboard
-  walks the note trail after pinning to the hub instead of before, and previews the
-  heatmap/sidebar fold early instead of only at the very end.
+- The disc-to-window margin is half what it was.
+- The docs site has its own dark theme instead of GitHub Pages' generic default.
 
 ---
 
