@@ -26,11 +26,11 @@ Five things are worth knowing before you touch anything, all expanded in `CLAUDE
   the `smoke.mjs` it spawns holds `screen-left`. All three window-placing harnesses take their
   own screen lock now (`smoke.mjs`, `spike-check.mjs`, `record-demo.ps1`), so you only do this by
   hand for something else that seizes a display — never wrap one of the three, or its own
-  acquire waits out your hold. The root is shared with Vault Shelf, so both plugins' jobs
-  contend. `make-hero.ps1` needs no lock — it transcodes a file. Screenshots need none —
+  acquire waits out your hold. The root is shared with a sister Obsidian plugin, so if you work on
+  both, their jobs contend. `make-hero.ps1` needs no lock — it transcodes a file. Screenshots need none —
   `shoot.mjs` goes over CDP — but pass your own `--port`. Never wrap a `git push` in an outer
   acquire/release of either name, or the hook's own attempt blocks on yours and the push hangs.
-- **A vault that is not Lukas's own opens in restricted mode.** A fixture or generated vault puts
+- **A vault Obsidian has not been told to trust opens in restricted mode.** A fixture or generated vault puts
   up "Trust author and enable plugins?" on first open, and until it is confirmed the plugin does
   not load at all -- which reads as a broken plugin rather than as an unconfirmed dialog. Over
   CDP, `app.plugins.setEnable(true)` then `enablePluginAndSave(id)`; never judge the plugin before
@@ -43,12 +43,16 @@ Five things are worth knowing before you touch anything, all expanded in `CLAUDE
   time.** None of them is implied by permission to do the work, or by how the last one went. A
   dispatched ticket worktree stops at its own branch regardless — only the orchestrator pushes to
   `develop` or cuts a release. **The checkout decides which of the two you are, not the task**: the
-  main one, `C:\git-personal\vault-graph`, is the orchestrator; anything under
-  `C:\git-personal\worktrees\` is a worker; `git rev-parse --show-toplevel` settles it. If you are
-  the orchestrator, **take the name**: `/rename Jarvis`. Every orchestrator in every repo is
-  `Jarvis`, so a message for Jarvis reaches all of them; Alfred, in the SecondBrain vault, is the
-  session that sends them. An orchestrator also stops spawning new worktrees once 6 are already
-  working — more than that starved CPU/disk enough to force a hard restart once already.
+  primary checkout is the orchestrator, any other worktree is a worker, and
+  `git rev-parse --show-toplevel` settles it. An orchestrator dispatches a ticket into its own
+  worktree rather than implementing it, and stops spawning new ones at the ceiling — past it,
+  parallel sessions starved CPU and disk enough to force a hard restart once already.
+
+**This repo is public, so both this file and `CLAUDE.md` stay machine-agnostic.** Absolute paths,
+session identity and naming, the session manager's own commands, which display a harness seizes,
+and the maintainer's personal workflow live in an untracked `CLAUDE.local.md`. If that file is
+present, read it too — it is the other half of the brief on this machine. If it is absent you are
+on a clone, that is normal, and nothing above depends on it.
 
 `.ai-context/README.md` maps the design records; `.ai-context/code-map.md` and `code-index.md` are
 generated and let you jump to a line range instead of reading an 8,700-line file top to bottom.
