@@ -1123,6 +1123,67 @@ check("tags: each grouping keeps its own colours, and the settings tabs reach bo
   };
 });
 
+/* -------------------------------------------------------------- github#116 */
+
+// github#116 -- the sidebar is the scroll container, so a scrollbar that a dimension switch
+// brings or takes away used to move everything in it by its own width. The viewport is
+// shrunk until exactly one side scrolls; where no height between 400 and 1000px does that
+// on this vault, there is nothing to measure and the check says so.
+check("the sidebar chrome stays put when a dimension switch adds or drops its scrollbar",
+async (p) => {
+  const dpr = await p.j(`window.devicePixelRatio || 1`);
+  const boxes = () => p.j(`(function(){
+    var sb = document.querySelector("#vg-sidebar");
+    var q = function (sel) {
+      var e = document.querySelector(sel);
+      if (!e) return null;
+      var r = e.getBoundingClientRect();
+      return [Math.round(r.left * 10) / 10, Math.round(r.right * 10) / 10];
+    };
+    return { scrolls: sb.scrollHeight > sb.clientHeight, client: sb.clientWidth,
+             rows: document.querySelectorAll("#vg-legend .lgr").length,
+             at: { gear: q("#vg-gear"), search: q("#vg-q"), dim: q("#vg-dim"),
+                   tags: q('#vg-dim button[data-dim="tag"]'), allon: q("#vg-allon"),
+                   legend: q("#vg-legend"), refresh: q("#vg-refresh") } };
+  })()`);
+  let found = null, seen = [];
+  try {
+    for (const h of [1000, 800, 650, 500, 400]) {
+      await p.send("Emulation.setDeviceMetricsOverride",
+                   { width: 1600, height: h, deviceScaleFactor: dpr, mobile: false });
+      await p.eval(`__vg.setDim("folder"); void 0`);
+      await sleep(400);
+      const folder = await boxes();
+      await p.eval(`__vg.setDim("tag"); void 0`);
+      await sleep(400);
+      const tag = await boxes();
+      seen.push(`${h}px: folder ${folder.rows} rows ${folder.scrolls ? "scrolls" : "fits"}, ` +
+                `tag ${tag.rows} rows ${tag.scrolls ? "scrolls" : "fits"}`);
+      if (folder.scrolls !== tag.scrolls) { found = { h, folder, tag }; break; }
+    }
+  } finally {
+    await p.send("Emulation.clearDeviceMetricsOverride");
+    await p.eval(`__vg.setDim("folder"); void 0`);
+    await sleep(400);
+  }
+  if (!found) {
+    return { ok: true, detail: `no height makes only one side scroll on this vault -- ` +
+                               seen.join("; ") };
+  }
+  const moved = Object.keys(found.folder.at).filter((k) =>
+    JSON.stringify(found.folder.at[k]) !== JSON.stringify(found.tag.at[k]));
+  const which = found.tag.scrolls ? "tag scrolls, folder fits" : "folder scrolls, tag fits";
+  return {
+    ok: moved.length === 0,
+    detail: `${found.h}px tall: ${which}; sidebar content ${found.folder.client} -> ` +
+            `${found.tag.client}px; ` +
+            (moved.length === 0
+              ? `gear, search, segment, All, legend and Refresh all at the same x`
+              : `MOVED ${moved.map((k) => `${k} [${found.folder.at[k]}] -> [${found.tag.at[k]}]`)
+                                .join(", ")}`),
+  };
+});
+
 /* ------------------------------------------------- github#86 D-9, design/0015 */
 
 check("a marked heatmap day haloes but never pushes", async (p) => {
