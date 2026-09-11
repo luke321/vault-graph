@@ -21,13 +21,15 @@ Five things are worth knowing before you touch anything, all expanded in `CLAUDE
   node scripts/lock.mjs status
   ```
 
-  Names: `screen-left`, `screen-right`, `screen-primary`, `suite`. `record-demo.ps1` takes its own
-  screen lock now, so you only do this by hand for something else that seizes a display. The root
-  is shared with Vault Shelf, so both plugins' jobs contend. `make-hero.ps1` needs no lock — it
-  transcodes a file. Screenshots need none — `shoot.mjs` goes over CDP — but pass your own
-  `--port`. `.githooks/pre-push` takes the `suite` lock itself around its own run — never also
-  wrap a `git push` in an outer acquire/release, or the hook's own attempt blocks on yours and the
-  push hangs.
+  Names: `screen-left`, `screen-right`, `screen-primary`, `suite` — and `suite` is aliased to
+  `screen-left`, because the suite and the spike harness both park their windows there.
+  `record-demo.ps1` and `spike-check.mjs` take their own screen lock now, so you only do this by
+  hand for something else that seizes a display. The root is shared with Vault Shelf, so both
+  plugins' jobs contend. `make-hero.ps1` needs no lock — it transcodes a file. Screenshots need
+  none — `shoot.mjs` goes over CDP — but pass your own `--port`. `.githooks/pre-push` takes the
+  `suite` lock itself around its own run — never also wrap a `git push` in an outer
+  acquire/release (`screen-left` counts as one, being aliased to `suite`), or the hook's own
+  attempt blocks on yours and the push hangs.
 - **A vault that is not Lukas's own opens in restricted mode.** A fixture or generated vault puts
   up "Trust author and enable plugins?" on first open, and until it is confirmed the plugin does
   not load at all -- which reads as a broken plugin rather than as an unconfirmed dialog. Over

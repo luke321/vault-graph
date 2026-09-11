@@ -28,7 +28,20 @@ const STALE_MS = {
 };
 // github#87
 const SCREENS = ["screen-left", "screen-right", "screen-primary"];
-const aliasesOf = (n) => (n === "record" ? SCREENS : SCREENS.includes(n) ? ["record"] : []);
+// github#87 -- `suite` IS A SCREEN CLAIM TOO, not only a claim on .fixtures/. The suite parks
+// every Chrome window it opens on the leftmost display (scripts/smoke.mjs, leftWindowPos) and
+// spike-check puts Obsidian there as well (screen.mjs, placeElectronLeft). A recording grabs a
+// region of the desktop, so a run that the recording cannot see draws into the take and ruins
+// it silently -- the file exists and looks plausible. That is the exact failure the rename was
+// for, and `record` alone never could see it: nothing in the tree but record-demo.ps1 takes a
+// screen lock, while pre-push and release.ps1 take `suite`.
+const SUITE_SCREEN = "screen-left";
+function aliasesOf(n) {
+  if (n === "record") return SCREENS.concat(["suite"]);
+  if (n === "suite") return [SUITE_SCREEN, "record"];
+  if (n === SUITE_SCREEN) return ["record", "suite"];
+  return SCREENS.includes(n) ? ["record"] : [];
+}
 
 const DEFAULT_STALE = 20 * 60 * 1000;
 const DEFAULT_TIMEOUT = 45 * 60 * 1000;
@@ -71,6 +84,7 @@ function aliasHold(n) {
 function usage(code) {
   console.error("usage: node scripts/lock.mjs <acquire|release|status> <name> --owner <id>");
   console.error("  names: suite | screen-left | screen-right | screen-primary | record (legacy)");
+  console.error("  suite and screen-left are the same claim: the suite drives Chrome on the left screen");
   process.exit(code);
 }
 
