@@ -8853,6 +8853,18 @@ function mountVaultGraph(root, data, deps) {
       { hover: true, target: ["note", "04"], act: "note", why: "hover a daily note" },
       { hover: true, target: ["note", "05"], act: "note", why: "hover a meeting note" },
 
+      { drag: true, target: ["biginner"], act: "pin", to: ["stage", "centre"],
+        why: "drag a note into the hole to pin it" },
+      { settle: true, act: "pin", why: "the hub opens and the ring closes around where it was" },
+      { rightclick: true, target: ["note", "05"], act: "pin", why: "right-click a note -- pins the same way" },
+      { settle: true, act: "pin", why: "let the second pin land" },
+      { click: true, target: ["note", "03"], act: "pin", why: "click a note to open its card" },
+      { click: true, target: ["pin"], act: "pin", why: "...and pin it from the card itself" },
+      { settle: true, act: "pin", why: "let the third pin land" },
+      { click: true, target: ["detailclose"], act: "pin", why: "close the card" },
+
+      // github#106 -- moved after pin (was before), and trimmed: one "back" step
+      // instead of two -- still four hops in, so the crumb-trail ellipsis still shows
       // github#40, design/0012
       { click: true, target: ["note", "05"], act: "hoptrail", why: "open a well-linked note's card" },
       { settle: true, act: "hoptrail", why: "let the card land" },
@@ -8868,8 +8880,6 @@ function mountVaultGraph(root, data, deps) {
       { settle: true, act: "hoptrail", why: "let it land" },
       { click: true, target: ["crumbback"], act: "hoptrail", why: "the back arrow steps back one hop" },
       { settle: true, act: "hoptrail", why: "let the camera fly back" },
-      { click: true, target: ["crumbback"], act: "hoptrail", why: "...and one more" },
-      { settle: true, act: "hoptrail", why: "let it land" },
       { click: true, target: ["crumb", "0"], act: "hoptrail",
         why: "or click a crumb to jump straight back to it -- the trail truncates there" },
       { settle: true, act: "hoptrail", why: "let the walk unwind" },
@@ -8878,16 +8888,6 @@ function mountVaultGraph(root, data, deps) {
       { click: true, target: ["id", "reset"], act: "hoptrail",
         why: "fit the disc again -- a walk moves the camera, and the acts after it aim at notes" },
       { settle: true, act: "hoptrail", why: "let the camera come home" },
-
-      { drag: true, target: ["biginner"], act: "pin", to: ["stage", "centre"],
-        why: "drag a note into the hole to pin it" },
-      { settle: true, act: "pin", why: "the hub opens and the ring closes around where it was" },
-      { rightclick: true, target: ["note", "05"], act: "pin", why: "right-click a note -- pins the same way" },
-      { settle: true, act: "pin", why: "let the second pin land" },
-      { click: true, target: ["note", "03"], act: "pin", why: "click a note to open its card" },
-      { click: true, target: ["pin"], act: "pin", why: "...and pin it from the card itself" },
-      { settle: true, act: "pin", why: "let the third pin land" },
-      { click: true, target: ["detailclose"], act: "pin", why: "close the card" },
 
       // github#23
       { click: true, target: ["id", "compact"], act: "compactaxis", why: "turn off the compact axis -- back to one width per month" },
