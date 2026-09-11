@@ -29,6 +29,8 @@ const argAll = (n) => {
 // github#7
 const PINNED_PORT = arg("port", "") ? Number(arg("port", "")) : 0;
 const HEADED = argv.includes("--headed");
+// github#87
+const NO_LOCK = argv.includes("--no-lock");
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 async function freePorts(k) {
@@ -6322,7 +6324,51 @@ async function main() {
   return worst ? 1 : 0;
 }
 
-main().then((code) => process.exit(code)).catch((e) => {
+// github#87
+const SCREEN_LOCK = "screen-left";
+const SCREEN_OWNER = (() => {
+  let branch = "?";
+  try {
+    const r = spawnSync("git", ["rev-parse", "--abbrev-ref", "HEAD"],
+      { cwd: ROOT, encoding: "utf8" });
+    branch = (r.stdout || "").trim() || "?";
+  } catch { void 0; }
+  return "smoke.mjs " + branch + " [" + process.pid + "]";
+})();
+
+// github#87
+function takeScreen() {
+  if (NO_LOCK) return false;
+  const r = spawnSync(process.execPath,
+    [join(HERE, "lock.mjs"), "acquire", SCREEN_LOCK, "--owner", SCREEN_OWNER],
+    { stdio: "inherit" });
+  if (r.status !== 0) {
+    console.error("");
+    console.error("could not take the " + SCREEN_LOCK + " lock -- something else is driving that");
+    console.error("display, and two runs on one screen spoil each other's captures and timings.");
+    console.error("Who holds it:  node scripts/lock.mjs status");
+    console.error("Pass --no-lock ONLY when the caller already holds it.");
+    process.exit(1);
+  }
+  return true;
+}
+
+// github#87
+function dropScreen(held) {
+  if (!held) return;
+  try {
+    spawnSync(process.execPath,
+      [join(HERE, "lock.mjs"), "release", SCREEN_LOCK, "--owner", SCREEN_OWNER],
+      { stdio: "ignore" });
+  } catch { void 0; }
+}
+
+const heldScreen = takeScreen();
+for (const sig of ["SIGINT", "SIGTERM", "SIGHUP"]) {
+  process.on(sig, () => { dropScreen(heldScreen); process.exit(1); });
+}
+main().then((code) => { dropScreen(heldScreen); process.exit(code); }).catch((e) => {
+  dropScreen(heldScreen);
   console.error("smoke failed to run:", e.message);
   process.exit(1);
 });

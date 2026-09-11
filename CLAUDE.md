@@ -30,26 +30,36 @@ measuring it: serve the page, drive it, read the numbers.
 
   **A screen.** `record-demo.ps1` captures with `gdigrab -i desktop` — it copies a *region of the
   display*, so anything else drawn there lands in the take and ruins it silently: the file exists
-  and looks plausible. A recording is not the only claimant — the spike harness and the full
-  suite both park their windows on the leftmost monitor — so the lock is named after the
-  **screen**, not the job: `screen-left`, `screen-right`, `screen-primary`. That is what lets a
-  spike test and a recording find each other; `record` alone never could. `record-demo.ps1` and
-  `spike-check.mjs` each take their own screen lock and release it on every way out, so you do
-  not have to remember (github#87).
+  and looks plausible. A recording is not the only claimant — `smoke.mjs` parks every Chrome
+  window it opens on the leftmost monitor, and `spike-check.mjs` puts Obsidian there — so the
+  lock is named after the **screen**, not the job: `screen-left`, `screen-right`,
+  `screen-primary`. **Every harness that places a window takes its own screen lock and releases
+  it on every way out** — `smoke.mjs`, `spike-check.mjs`, `record-demo.ps1` — so you do not have
+  to remember, and so the claim names the physical display rather than the activity (github#87).
 
   **The shared fixture store.** Two full-suite runs do *not* fight over ports — ports are
   allocated free and each run gets its own Chrome profile. They fight over `.fixtures/`: a run that
   regenerates deletes every `<name>-*` directory there, including the one a concurrent run is
-  reading. That is the `suite` lock — but it is **also a claim on `screen-left`**, because the
-  suite parks every Chrome window it opens there, and `lock.mjs` aliases the two so a recording
-  and a suite run block each other. Its fixture half only bites when a fixture is stale, which is
-  why that half reads as a regression in your branch; its screen half bites every run.
+  reading. That is the `suite` lock, and **it is only about `.fixtures/`** — the display is a
+  separate claim under its own name. It bites only when a fixture is stale, which is why it is
+  rare and reads as a regression in your branch.
+
+  Keeping them separate is what lets `pre-push` hold `suite` while the `smoke.mjs` it spawns
+  holds `screen-left`: two names, two resources, no nesting. Aliasing the two instead — which
+  this repo tried first — deadlocks that exact pair, because `aliasHold` blocks on whoever holds
+  the alias, the asker included. Vault Shelf measured it (`vault-shelf#37`) and reached the same
+  design independently.
 
   ```bash
   node scripts/lock.mjs acquire screen-right --owner "#77 palette"   # blocks; exit 1 = give up
   node scripts/lock.mjs release screen-right --owner "#77 palette"   # always, even on failure
   node scripts/lock.mjs status                                       # who holds what
   ```
+
+  You need those two by hand only for something that seizes a display and is **not** one of the
+  three harnesses — a manual Chrome you are driving yourself, say. Never wrap one of the three:
+  `smoke.mjs` takes `screen-left` itself, so an outer hold makes its own acquire wait out your
+  stale window. `--no-lock` exists for the one caller that legitimately already holds it.
 
   The lock lives in the OS temp dir, not the worktree, so **every worktree shares one** — and the
   root is shared with Vault Shelf (`obsidian-vault-locks`), so the two plugins' jobs contend with
@@ -59,10 +69,11 @@ measuring it: serve the page, drive it, read the numbers.
   `shoot.mjs` captures over CDP, so overlapping windows are harmless — but pass your own `--port`.
 
   **`.githooks/pre-push` takes the `suite` lock itself, around its own run, and releases it on
-  every way out (github#92).** Do not also wrap a `git push` in an outer acquire/release — the
-  hook's own attempt blocks on yours and the push hangs until the outer lock's stale window
-  expires. **`screen-left` counts as an outer `suite` lock** now that the two are aliased, so
-  that warning covers a screen lock too, not only `suite`. A plain `git push origin develop`/`main` is correctly gated on its own; the wrapping
+  every way out (github#92).** Do not also wrap a `git push` in an outer acquire/release, of
+  **either** name: the hook takes `suite` and the `smoke.mjs` it spawns takes `screen-left`, so
+  an outer hold of either one blocks the hook's own attempt and the push hangs until your stale
+  window expires. A plain `git push origin develop`/`main` is correctly gated on its own, and so
+  is a `smoke.mjs` run you drive directly — neither needs wrapping any more. A plain `git push origin develop`/`main` is correctly gated on its own; the wrapping
   above is only for a `smoke.mjs` run *you* are driving directly, never for a push.
 - **Never serve Chrome unlabeled.** Any vault-graph page opened in Chrome from this worktree
   — `smoke.mjs`, `shoot.mjs`, a manual review build — sets the page's own top-left title to

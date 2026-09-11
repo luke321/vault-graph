@@ -29,13 +29,7 @@ const STALE_MS = {
 // github#87
 const SCREENS = ["screen-left", "screen-right", "screen-primary"];
 // github#87
-const SUITE_SCREEN = "screen-left";
-function aliasesOf(n) {
-  if (n === "record") return SCREENS.concat(["suite"]);
-  if (n === "suite") return [SUITE_SCREEN, "record"];
-  if (n === SUITE_SCREEN) return ["record", "suite"];
-  return SCREENS.includes(n) ? ["record"] : [];
-}
+const aliasesOf = (n) => (n === "record" ? SCREENS : SCREENS.includes(n) ? ["record"] : []);
 
 const DEFAULT_STALE = 20 * 60 * 1000;
 const DEFAULT_TIMEOUT = 45 * 60 * 1000;
@@ -82,7 +76,7 @@ function aliasHold(n, asker) {
 function usage(code) {
   console.error("usage: node scripts/lock.mjs <acquire|release|status> <name> --owner <id>");
   console.error("  names: suite | screen-left | screen-right | screen-primary | record (legacy)");
-  console.error("  suite and screen-left are the same claim: the suite drives Chrome on the left screen");
+  console.error("  suite is the fixture store; a display is claimed by its own name");
   process.exit(code);
 }
 
