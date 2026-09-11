@@ -8853,6 +8853,18 @@ function mountVaultGraph(root, data, deps) {
       { hover: true, target: ["note", "04"], act: "note", why: "hover a daily note" },
       { hover: true, target: ["note", "05"], act: "note", why: "hover a meeting note" },
 
+      // github#106 -- a quick preview of the fold toggles early, so the hero shows them
+      // before the acts that need the legend visible; the real close-out fold stays at
+      // the end (act "collapse"), this one restores what it folded
+      { click: true, target: ["id", "band"], act: "collapsepreview", why: "fold the calendar band away -- a preview of the toggle" },
+      { settle: true, act: "collapsepreview", why: "let the disc take the band's height" },
+      { click: true, target: ["id", "sheet"], act: "collapsepreview", why: "...and the folder list too" },
+      { settle: true, act: "collapsepreview", why: "let the disc take the whole window" },
+      { click: true, target: ["id", "sheet"], act: "collapsepreview", why: "bring the folder list back -- the acts ahead need it" },
+      { settle: true, act: "collapsepreview", why: "let it return" },
+      { click: true, target: ["id", "band"], act: "collapsepreview", why: "...and the calendar band" },
+      { settle: true, act: "collapsepreview", why: "back to the starting layout" },
+
       { drag: true, target: ["biginner"], act: "pin", to: ["stage", "centre"],
         why: "drag a note into the hole to pin it" },
       { settle: true, act: "pin", why: "the hub opens and the ring closes around where it was" },
