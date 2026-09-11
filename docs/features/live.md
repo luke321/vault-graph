@@ -68,4 +68,4 @@ Commit both clips and update `Last re-recorded` below in the same commit — tha
 | | |
 |---|---|
 | **Introduced in** | `2.4.0 (github#72)` |
-| **Last re-recorded** | `2026-09-10` — Obsidian: 30.4 s at 1600x1000, encoded at 960 px (0.52 MB); page: 11.9 s at 1586x992, encoded at 960 px (0.43 MB) |
+| **Last re-recorded** | `2.5.0 — 2026-09-11` — Obsidian: 34.5 s at 1600x1000, encoded at 960 px (0.56 MB); page: 11.9 s at 1586x992, encoded at 960 px (0.41 MB) |
