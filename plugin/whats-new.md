@@ -16,4 +16,7 @@
   scripts/build-plugin.mjs refuses a file that breaks any of that.
 -->
 # 2.6.0
+- Zoom in far enough to crop the disc and a small overview appears beside Fit, showing where your view sits. Click it to fit the disc again.
+- Every colour swatch now draws the dots it will actually make, sub-wedge tints and all, so you can see a colour before you choose it.
 - After an update, the graph tells you what changed: this strip, once per release. Dismiss it and it is gone.
+> vg-ov
