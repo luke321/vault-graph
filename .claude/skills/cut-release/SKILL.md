@@ -57,11 +57,18 @@ prose what's newly done since the last table and what's still blocked or awaitin
 The release is the range since the last tag, not the work in hand. 2.1.0 shipped once having
 described only part of its own range and had to be deleted and re-cut; don't repeat that.
 
+**Do not use `git describe` to find the last tag here.** Tags are cut on `main`, and `main`
+only ever receives `develop`, so no release tag is an ancestor of `develop` --
+`git describe --tags --abbrev=0` walks past every 2.x tag and answers `1.8.0`. Measured on
+2026-09-11 cutting 2.6.0: `describe` gave a **455-commit** range where the real one was **88**.
+Sort the tags by creation date instead.
+
 ```bash
-git describe --tags --abbrev=0                                    # the last tag
-git log --oneline --merges <prev-tag>..HEAD                        # one line per body of work
-git log <prev-tag>..HEAD --format=%s%n%b | grep -oE "(Closes|Refs) #[0-9]+" | sort | uniq -c
-git diff --stat <prev-tag>..HEAD -- src plugin                     # did the page itself change?
+PREV_TAG=$(git tag --sort=-creatordate | head -1)                  # NOT git describe -- see above
+echo "$PREV_TAG"                                                   # sanity-check it against `gh release list`
+git log --oneline --merges "$PREV_TAG"..HEAD                       # one line per body of work
+git log "$PREV_TAG"..HEAD --format=%s%n%b | grep -oE "(Closes|Refs) #[0-9]+" | sort | uniq -c
+git diff --stat "$PREV_TAG"..HEAD -- src plugin                    # did the page itself change?
 ```
 
 Walk the merge list. Every entry either lands in the `CHANGELOG.md` section this release writes,

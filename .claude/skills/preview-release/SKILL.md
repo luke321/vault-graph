@@ -39,7 +39,33 @@ git diff --stat "$PREV_TAG"..develop -- src plugin
 If local `develop` **is** `$PREV_TAG` (nothing merged since the last release), say so plainly
 and stop -- there is nothing to preview, not an empty section.
 
-## 2. Walk the merge list, the same way a real cut does
+## 2. Read the last published release before drafting anything
+
+The house style is not in this file and cannot be inferred from the range -- read it off the
+thing itself, every time:
+
+```bash
+gh release view "$PREV_TAG" --json body -q .body
+```
+
+What it looks like, and what a draft keeps getting wrong if it skips this step:
+
+- **The lead is one bold sentence naming the problem or the thing**, then at most a sentence or
+  two of context. `**Tags.** A second way to cut the disc, alongside folders...` Not a thesis
+  about what the release "is about".
+- **Bullets carry the detail, each opening with a bold clause.** Prose paragraphs under a feature
+  heading are the tell of a draft written from the design records instead of from a release.
+- **The clip is embedded inside its section**, not described. `<img src="..." width="100%"
+  alt="...">` with a real alt that narrates the clip beat by beat.
+- **`### Smaller things` is a flat bullet list** at the end.
+- **It is short.** 2.5.0's whole reel is under 300 words. If a section runs past a short
+  paragraph plus four or five bullets, it is too long.
+- A known defect gets a `**Known:**` line rather than being left out.
+
+Release names are one word in quotes -- "Tags", "Auto", "Gauge" -- which is why this skill leaves
+the name as an empty slot rather than inventing one.
+
+## 3. Walk the merge list, the same way a real cut does
 
 For each merge in the range, ask: is this genuinely new or visibly changed, or is it a fix/
 tooling commit with nothing to show? Reuse the same two traps `releasing.md` names:
@@ -52,7 +78,7 @@ tooling commit with nothing to show? Reuse the same two traps `releasing.md` nam
 Sort into: features worth their own `###` section, and fixes/tooling that are not release-note
 material at all (skip these from the draft, same as a real release would).
 
-## 3. Check what clips exist for what you're about to claim
+## 4. Check what clips exist for what you're about to claim
 
 ```bash
 ls "docs/features/"*.md | grep -v _template
@@ -64,7 +90,7 @@ current, or would need recording before this could actually ship — **do not re
 here**, `cut-release`'s own step (with the `record` lock, and an ask first) owns that. This
 preview is allowed to say "needs a clip" and move on.
 
-## 4. Draft it
+## 5. Draft it
 
 Structure, matching `releasing.md` items 1–4 exactly (nothing from item 5 — no CHANGELOG
 appendix, no divider, this is only the reel):
@@ -73,15 +99,16 @@ appendix, no divider, this is only the reel):
    commit-log summary. There is no name yet (that's step 5 of a real cut, his pick), so head the
    draft `**[working title]**` or similar rather than inventing one that would look chosen.
 2. No hero image.
-3. One `###` per feature sorted into that bucket in step 2, each noting its clip status from
-   step 3 (`clip: assets/features/<name>.webp, current` / `clip: needed, not recorded`).
+3. One `###` per feature sorted into that bucket in step 3, in the shape step 2 read off the
+   last release -- bold-led bullets, not paragraphs -- each noting its clip status from step 4
+   (`clip: assets/features/<name>.webp, current` / `clip: needed, not recorded`).
 4. The standing line, verbatim, every time: `☕ If Vault Graph is useful to you, [support it on
    Ko-fi](https://ko-fi.com/luke321).`
 
 Mark the whole thing **DRAFT — <n> commits past `<PREV_TAG>`, unreleased** at the top so it's
 never mistaken for a real release body.
 
-## 5. Publish it and hand over the link
+## 6. Publish it and hand over the link
 
 Publish the draft as a Claude Artifact and hand over the link — same reason the real release
 review does: a person reading rendered markdown catches things a chat wall of text doesn't, and
