@@ -401,11 +401,13 @@ node scripts/smoke.mjs --only "camera cluster"  # a SIBLING left of the cluster,
 ```
 
 **A resting page is pixel-for-pixel what it was, and that is measured rather than argued.**
-Against pages built from `develop@598a6b9`, dark, 1600x1000, all three fixtures:
+Against pages built from `develop@0ff7d9d`, dark, 1600x1000, all three fixtures (re-measured
+after the rebase onto that develop, where `FIT_RATIO` is 1.04 rather than the 1.08 this branch
+was written against):
 
 | ratio | stage / canvas / band / strip / legend | px |
 |---|---|---|
-| 1.08 (at rest) | **identical** | **0** |
+| 1.04 (at rest) | **identical** | **0** |
 | 4.20 (disc contained, nothing cropped) | **identical** | **0** |
 | 0.35 (cropped) | one 98x98 box at `x 1148..1245, y 852..949` -- the control and its ring | **7291 / 6613 / 5691** |
 
@@ -440,11 +442,15 @@ camera panned at exactly the fit ratio crops the disc too. The test is whether t
 `viewportToGraph`. Reading `geomLock.maxR` instead would show the tile on a resting, filtered page.
 
 Because `fitRatio()` carries the same `live / locked` factor the radius does, the margin does not
-depend on the vault. Measured after a Fit click at 1600x1000: **1.200x the live disc radius, the
-same on all three fixtures**. It *does* depend on the stage's aspect ratio, since the footprint is
-fitted to the shorter axis -- the suite's own sharded windows read 1.164 and 1.282 for the same
-three fixtures. The invariant is that it exceeds 1 and agrees across fixtures at a given window,
+depend on the vault. Measured after a Fit click at 1600x1000: **1.156x the live disc radius, the
+same on all three fixtures**. It *does* depend on two things that are not the vault -- the stage's
+aspect ratio, since the footprint is fitted to the shorter axis (the suite's own windows read
+**1.130**), and `FIT_RATIO`, which develop halved from 1.08 to 1.04 while this branch was open and
+which moved the figure from 1.200 to 1.156. The invariant is that it exceeds 1 and agrees across fixtures at a given window,
 not that it is any particular number; the check's bar is 1.02.
+
+That is why no check names a ratio: the click check asks Fit where *it* lands and holds the tile
+to the same answer, rather than repeating a constant develop is free to move.
 
 The one case where the margin can vanish is `fitRatio()`'s own clamp: `live / locked` is held to
 1.35, so a live disc more than 35% larger than the locked one cannot be framed by Fit at all, and

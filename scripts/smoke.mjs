@@ -2287,10 +2287,25 @@ check("the overview footprint is drawn to the disc's scale and is never clamped"
                   inside.shape.ringI > inside.shape.inner[0] &&
                   inside.shape.inner[1] > inside.shape.ringI;
 
-  // github#79, design/0017 -- wider than the tile, so it must run off both sides
-  await camTo(p, { x: 0.5, y: 0.9, ratio: 1.08, angle: 0 });
-  const wide = await ovState(p);
-  const overflows = !!wide.shape && wide.shape.rect[2] - wide.shape.rect[0] > wide.shape.s &&
+  // github#79, design/0017 -- measured, not a fixed camera: the window shape varies
+  const wideCrop = async () => {
+    await camTo(p, { x: 0.5, y: 0.5, ratio: 0.35, angle: 0 });
+    const a = await ovState(p);
+    const span = a.fp ? a.fp.x1 - a.fp.x0 : 0;
+    if (!(span > 0) || !(a.liveR > 0)) return a;
+    const ratio = 0.35 * (3.4 * a.liveR) / span;
+    let last = a;
+    for (const dy of [0.3, 0.45, 0.6, 0.8, 1.1, 1.5]) {
+      await camTo(p, { x: 0.5, y: 0.5 + dy, ratio: ratio, angle: 0 });
+      last = await ovState(p);
+      if (last.shown && last.shape && last.shape.rect &&
+          last.shape.rect[0] < 0 && last.shape.rect[2] > last.shape.s) return last;
+    }
+    return last;
+  };
+  const wide = await wideCrop();
+  const overflows = !!wide.shape && !!wide.shape.rect &&
+                    wide.shape.rect[2] - wide.shape.rect[0] > wide.shape.s &&
                     wide.shape.rect[0] < 0 && wide.shape.rect[2] > wide.shape.s;
 
   await camTo(p, { x: 2.5, y: 0.5, ratio: 0.35, angle: 0 });
@@ -2314,7 +2329,7 @@ check("the overview footprint is drawn to the disc's scale and is never clamped"
             `${(cov.o * 100).toFixed(1)}% of the outer ring and ${(cov.i * 100).toFixed(1)}% of ` +
             `the inner, radii ${inside.shape ? inside.shape.inner[0].toFixed(1) + "/" +
               inside.shape.ringI.toFixed(1) + " and " + inside.shape.inner[1].toFixed(1) + "/" +
-              inside.shape.ringO.toFixed(1) : "?"}px; at ratio 2.0 panned the rect ` +
+              inside.shape.ringO.toFixed(1) : "?"}px; zoomed out and panned, the rect ` +
             `spans ${wide.shape ? (wide.shape.rect[0].toFixed(0) + ".." + wide.shape.rect[2].toFixed(0)) : "?"} ` +
             `across a ${wide.shape ? wide.shape.s : 0}px tile (not clamped: ${overflows}); ` +
             `panned right off the disc the rect starts at ` +
