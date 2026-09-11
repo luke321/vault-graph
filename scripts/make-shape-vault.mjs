@@ -81,7 +81,7 @@ const TAIL_UNRELATED = [
 ];
 const TAIL_HIERARCHICAL = [];
 for (const s of TAG_STEMS) for (const l of TAG_LEAVES) TAIL_HIERARCHICAL.push(`${s}-${l}`);
-// github#119 -- one in five of the tail is hierarchical, aimed at the real 20%
+// github#119 -- one in five of the tail is hierarchical
 const TAIL_NAMES = [];
 for (let i = 0; i < 15; i++) TAIL_NAMES.push(TAIL_HIERARCHICAL[i]);
 for (let i = 0, h = 15, u = 0; i < 100; i++) {
@@ -154,8 +154,7 @@ console.log(`  tail: ${atMost(1)} tags on exactly one note ` +
             `(${Math.round(atMost(3) / per.size * 100)}%)`);
 console.log(`  dominant tag: ${DOMINANT} ${per.get(DOMINANT)}/${notes.length} = ` +
             `${Math.round(per.get(DOMINANT) / notes.length * 100)}%`);
-// github#119 -- how much of the tail a leading-prefix clustering would actually catch, so a
-// proposal that only handles hierarchical names cannot look complete here
+// github#119 -- how much of the tail a leading-prefix clustering catches
 const lcp = (a, b) => { let n = 0; while (n < a.length && n < b.length && a[n] === b[n]) n++; return n; };
 const smallNames = [...per.entries()].filter(([, v]) => v <= 3).map(([t]) => t).sort();
 for (const min of [3, 4]) {
