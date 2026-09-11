@@ -49,4 +49,4 @@ that pair is what `release.ps1`'s `=== features ===` warning reads.
 | | |
 |---|---|
 | **Introduced in** | `2.3.0 (github#78)` |
-| **Last re-recorded** | `2026-09-09` — 9.0 s cropped from a 29.9 s `folders` take at 1586x992, encoded at 572 px (0.40 MB) |
+| **Last re-recorded** | `2.5.0 — 2026-09-11` — 9.0 s cropped from a 29.4 s `folders` take at 1586x992, encoded at 572 px (0.39 MB) |
