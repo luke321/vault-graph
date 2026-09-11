@@ -54,7 +54,7 @@ Four commands, and all four are gates rather than suggestions:
 
 ```bash
 npm run lint                    # tsc --noEmit on the engine, then typescript-eslint on our own code; every finding is held at zero
-node scripts/smoke.mjs          # the invariant suite, over three vault shapes
+node scripts/smoke.mjs          # the invariant suite: four fixtures, each check on the ones its assertion is about
 node scripts/check-scope.mjs    # the page cannot style, or be styled by, its host
 node scripts/check-network.mjs  # nothing shipped can make a network request
 node scripts/check-notice.mjs   # the Sigma notice opens a fresh main.js and a fresh exported page

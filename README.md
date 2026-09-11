@@ -360,19 +360,21 @@ for why an earlier version did and had to be replaced.
 node scripts/smoke.mjs
 ```
 
-Builds to a temp file, drives a real Chrome, and checks 17 measured properties of the
-layout — plan parity, the resting lattice, the heatmap's tiling, the hover and highlight
+Builds to a temp file, drives a real Chrome, and checks over a hundred measured properties of
+the layout — plan parity, the resting lattice, the heatmap's tiling, the hover and highlight
 ramps — printing the number it measured for each.
 
-With no arguments it checks **two vault shapes**, one after the other: a ~450-note mirror of
-a real vault and a 10,000-note synthetic, generating either on demand. That is not
-belt-and-braces — a small vault and a large one take different branches through the ring
-balancer and the gap scaling, and a change that passes at 450 notes can still break the band
-split at 10,000. The mirror is skipped with a notice when there is no real vault to mirror,
-never silently.
+With no arguments it checks **four generated fixtures**, two Chromes at a time: a ~1,400-note
+mirror of a real vault, a 10,000-note synthetic, a dominant-folder vault and a tag-organised
+one. That is not belt-and-braces — a small vault and a large one take different branches
+through the ring balancer and the gap scaling, and a change that passes at 1,400 notes can
+still break the band split at 10,000. Each check runs on the fixtures its assertion is about:
+one whose subject is the disc's shape runs on all four, one whose subject is a button runs on
+the mirror alone, and one that measures an animation frame by frame runs on the page's own
+clock while the rest run it at a tenth speed (same resting layout, measured).
 
-`--vault PATH` is repeatable and overrides that pair; `--url FILE` checks an already-built
-page.
+`--vault PATH` is repeatable, overrides the fixtures and runs every check on what you gave it;
+`--url FILE` checks an already-built page.
 
 ```bash
 node scripts/smoke.mjs --vault ./test-vault --vault ./demo-vault
@@ -441,7 +443,7 @@ the plugin puts them in an Obsidian view.
 |---|---|
 | `scripts/build-plugin.mjs` | bundles the plugin into `main.js` + `styles.css` (`npm run build`) |
 | `scripts/install-plugin.ps1` | copies exactly the three files Obsidian installs, and nothing else |
-| `scripts/smoke.mjs` | the invariant suite, over both vault shapes |
+| `scripts/smoke.mjs` | the invariant suite, over four generated fixtures |
 | `scripts/check-scope.mjs` | asserts the page cannot style or be styled by its host |
 | `scripts/code-map.mjs` | generates `.ai-context/code-map.md` and `code-index.md` from the source; `--check` gates them |
 | `scripts/check-pii.mjs` | refuses to publish other people's names; no skip flag |
