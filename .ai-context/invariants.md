@@ -2927,7 +2927,7 @@ The layout equations were not touched: the golden snapshots on all three fixture
 proof, and the check itself asserts plan parity on every page that has a plan.
 ## A tree is gated once
 
-A green full run of the suite (no `--only`, `--vault`, `--url` or `--fast`, every fixture, no
+A green full run of the suite (no `--only`, `--vault` or `--url`, every fixture, no
 modified tracked files) stamps the git **tree** it measured together with the four fixtures it
 ran against (`scripts/suite-stamp.mjs`, one JSON file per tree under `suite-passed/` in the
 shared git common dir). `.githooks/pre-push` and `scripts/release.ps1` skip the suite when every
@@ -2999,3 +2999,111 @@ while its tree is not; not by time because `develop` moves several times a day a
 green run" cannot say which tree it saw. While it runs, both gates hold the machine-wide
 `suite` lock (`scripts/lock.mjs`) and release it on every exit path; a lock that cannot be had
 blocks the push and names the holder rather than running on top of it.
+
+## Each check runs where its assertion lives, on the clock it needs
+
+Every `check()` in `scripts/smoke.mjs` carries two facts, and the default is the cheap pair
+(github#113): **`on`** — the fixtures it runs on, `["demo-vault"]` unless the assertion is
+about the fixture's own shape (`"all"`, or a list of fixture names) — and **`clock`** —
+`"fast"` unless the assertion is about the walk itself (`"real"`). `on` is validated against
+`FIXTURE_NAMES` at registration, a check that lands on no available fixture fails the run by
+name, and an explicit `--vault`/`--url` runs every check on what it was given, whatever its
+`on`.
+
+**A fast check runs with no animation.** The page honours the OS **`prefers-reduced-motion`**
+setting (`reducedMotion()` in `page.js`, beside the CSS that already stilled the camera
+cluster, the compact toggle, the year buttons and the sidebar under it): a cascade lands in
+one frame with no radial tail, and a camera tween snaps — the plan is the same, only the
+frames between are not drawn. The suite emulates that media feature over CDP around every
+fast check (`Emulation.setEmulatedMedia`) and clears it after; `__vg.timeScale = 0.1` rides
+along for what still ramps (hover, highlight), and the page's own clock — 1.25 as shipped,
+read once per page — is put back. Measured on all four fixtures against that clock, for
+hide/show of the biggest group and a range set/clear: the resting layout is byte-identical
+(0 notes moved past 0.1 units, 0 sizes changed, no alpha mismatch) and matches a fresh
+relayout exactly:
+
+| fixture | cascade on the page's clock | under reduced motion |
+|---|---|---|
+| demo (1,403 notes) | 2,128 ms / 129 frames | 12 ms / 2 frames |
+| 10k (10,002) | ~2,100 ms / 62 | 32–116 ms / 2 |
+| shape (954) | 2,015–2,142 ms / 128 | 1–3 ms / 1 |
+| tag (891) | ~2,100 ms | 1–3 ms / 1 |
+
+(The tenth-speed clock alone was measured first and also lands identically, but still walks
+the page's `MIN_FRAMES = 20` — 28 frames, ~440 ms — which is a visible animation on every
+end-state check; hence the media feature.)
+
+**Which checks claim more.** `on: "all"` (fast): the plan and its Laws (parity, lattice,
+band rules, golden), every `tags:` check that reads the plan, the heatmap tiling, the resting
+web's width, the density and hub share, filtered to the bone, the split-cell and orphan
+checks, the count-bar geometry, and every cheap single-read of the fixture's shape (a free
+run is not a free loss of coverage). **`on: WALK, clock: "real"`** — the sixteen Laws that
+watch a walk frame by frame (the two tag-switch samplers, the camera fit trio and the
+manually-moved camera, range change animates, last frame is resting, walkSolo ×2, fade never
+reverses, gap reservation, count bars on the cascade's clock, a bar shrinking over the
+cascade, and two live-rebuild checks) run on the **demo and 10k vaults only** — the two
+shapes that take different branches through the balancer and the sizing (D-6, decided on
+the numbers: those sixteen were 342 s of a 524 s run, 159 s of it on the dominant-folder and
+tag vaults, which keep every plan, layout and end-state check). `clock: "real"` on demo
+only: hover and highlight ramps, the mark's fade, the intro sweep, the hostile-vault pages.
+Everything else — the ribbon widget, the camera buttons, the panels, the settings toggles,
+the trail, the escape vault — is the default: demo only, no animation.
+
+**Per fixture: demo 106, 10k 61, shape 44, tag 44 — 255 checks where there were 428**, one
+Chrome per fixture plus one for the intro check (5 launches, not 12), and no fixture runs a
+check whose subject it cannot show.
+
+**A check that returns while the page is still walking has failed.** The runner settles the
+page once on arrival (the opening camera tween, or the intro without `?rest`), then after
+every check asks `__vg.demo.busyWhy()`; anything still busy is waited out — so one leak never
+fails two checks — and the check is marked FAIL with what was busy and how long it took:
+`left the page busy: cascade -- settled in 0.4s`. github#112 was one instance of this class
+(a raw plan read inheriting a stale `splitHold`); the rule is the class. Applying it, and
+taking the live-rebuild checks out of a Chrome of their own, found six more:
+
+- the hidden-state check cleared the tag disc's `hiddenSub` only after switching away, so
+  `"(untagged)/"` stayed hidden on the tag disc and every later switch to it drew nothing
+  on the shape vault — an arrival from a live rebuild then landed at (0, 0) with no display
+  data;
+- the context-menu check wrote `folderShown` and the hidden flag back by hand and left the
+  legend row's `aria-pressed` stale, so the count-bars check read the row as hidden while
+  the page counted the group as shown (`basis 98, wanted 62` on the tag vault) — it now
+  restores by clicking the same menu item again;
+- the golden check's relayout on the tag disc left tag-derived rings under every later
+  check on the tag vault (a switch keeps the rings it was switched into, decisions/0011), and
+  a live rebuild then "moved 891 of 891 notes" against a fresh relayout — the folder disc
+  re-derives its own before the check returns;
+- the hostile-vault check navigated back and returned before the fixture page's arrival
+  tween; the mark's halo check returned mid-ramp;
+- the `(unlinked)` row's move toggle read its repaint in the click's own tick, where a
+  walking note still wears the colour it left with (github#86), and agreed with the function
+  under test by accident — under reduced motion the first frame is the last, and 8 of 33
+  disagreed; it reads once the cascade has landed.
+
+Two more findings, not fixed here: `every heatmap day with notes fills its cell` had been
+registered twice, byte-identical, since the first commit (removed); and `undated notes
+survive every range` is NOT ASSERTED on every fixture, because no generator writes an
+undated note — a follow-up for the generators, since fixing it moves the goldens.
+
+```bash
+node scripts/smoke.mjs --only "wheel notch"            # demo only, one Chrome, no animation
+node scripts/smoke.mjs --only "page loads"             # on: "all" -- four Chromes
+node scripts/smoke.mjs --only "fade never"             # on: WALK -- demo and 10k, the real walk
+node scripts/smoke.mjs --timings /tmp/t.json           # every check's ms per fixture
+node scripts/smoke.mjs --vault <path>                  # every check, on that vault, whatever its `on`
+```
+
+Measured 2026-09-11, one full run under the `suite` lock, all four fixtures green, no check
+left the page busy:
+
+| | before (github#110, serialised) | after |
+|---|---|---|
+| check runs | 428 (107 × 4) | 255 (106 / 61 / 44 / 44) |
+| Chromes launched | 12 | 5 |
+| wall | ~9–10 min | **400 s** (checks: demo 188 s, 10k 163 s, shape 17 s, tag 18 s) |
+
+What is left is mostly the sixteen walk Laws on two fixtures (~183 s) and fixed `sleep()`s
+inside fast checks that no longer wait for anything — `filtered to the bone` (41.5 s over
+four fixtures) and `the disc's density follows the notes on screen` (17.5 s) alone are 59 s
+of sleeping under reduced motion. Converting those waits to `settle()` plus one frame is the
+next cut, taken separately so each check's own numbers are re-read when it changes.

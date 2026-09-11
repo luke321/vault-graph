@@ -11,10 +11,12 @@
 # have, and the whole point is that it should not depend on anyone remembering.
 #
 # WHY pre-push AND NOT pre-commit: the suite builds the page and drives a real Chrome, and
-# does that against THREE generated vaults -- a ~450-note mirror shape, a 10,000-note
-# synthetic and a dominant-folder one, because a change that passes at 450 notes can still
-# break the band split at 10,000. Measured 2026-09-10: 587 s for 94 checks x 3 fixtures, of
-# which 446 s is the serial lane of frame-sensitive checks (github#93). A fine price per
+# does that against FOUR generated vaults -- a ~1,400-note mirror shape, a 10,000-note
+# synthetic, a dominant-folder one and a tag-organised one, because a change that passes at
+# 1,400 notes can still break the band split at 10,000. Measured 2026-09-10: 587 s for 94
+# checks x 3 fixtures, of which 446 s was a serial lane of frame-sensitive checks (github#93);
+# since github#113 each check runs only on the fixtures its assertion is about and most run
+# with the page's clock at a tenth (.ai-context/invariants.md has the numbers). A fine price per
 # distinct tree pushed to develop or main, an intolerable one per commit -- and an unearned
 # one on a feature branch nobody has asked to merge yet, which is why the gate checks below
 # are scoped to gated_push and skip entirely on any other branch. The main-ancestry policy

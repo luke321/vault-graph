@@ -92,6 +92,11 @@ const all = [];
  */
 const FAST_CLOCK = 0.1;
 const DEFAULT_ON = ["demo-vault"];
+// github#113, D-6 -- the Laws that watch a walk frame by frame run on the two shapes that
+// take different branches through the balancer and the sizing (1,400 notes and 10,000);
+// the dominant-folder and tag vaults keep every plan, layout and end-state check. Measured:
+// those sixteen checks were 342 s of a 524 s run, 159 s of it on the two vaults dropped here.
+const WALK = ["demo-vault", "test-vault"];
 const check = (name, fn, opts) => {
   const on = (opts && opts.on !== undefined) ? opts.on : DEFAULT_ON;
   // a typo here would silently run the check nowhere; FIXTURE_NAMES is the vocabulary
@@ -780,7 +785,7 @@ check("tags: a dot in the disc being left keeps its colour until it has faded", 
             `; ${rowFrames} leaving-row-frames with a swatch or count other than the row's` +
             (rowExample ? ` (e.g. ${rowExample})` : ""),
   };
-}, { on: "all", clock: "real" });
+}, { on: WALK, clock: "real" });
 
 check("tags: a note one disc hides and the other shows arrives with the fill edge", async (p) => {
   await clearRange(p);
@@ -858,7 +863,7 @@ check("tags: a note one disc hides and the other shows arrives with the fill edg
             (first ? ` (first: ${first})` : "") + `, ${litEnd} of ${n.hid} lit at the end; ` +
             `${standInsPeak} stand-ins drawn, ${left} left behind, ${nodesEnd} of ${n.nodes} nodes after`,
   };
-}, { on: "all", clock: "real" });
+}, { on: WALK, clock: "real" });
 
 check("tags: the two buckets stay out of the hue rotation and sort last", async (p) => {
   const r = await p.j(`(function(){
@@ -1884,7 +1889,7 @@ check("fit frames the disc that is actually there", async (p) => {
             `gives ${small.ratio} against ${want.toFixed(4)} promised, centred at ` +
             `(${small.x}, ${small.y})`,
   };
-}, { on: "all", clock: "real" });
+}, { on: WALK, clock: "real" });
 
 // github#14
 async function toRest(p) {
@@ -1968,7 +1973,7 @@ check("hiding the biggest group auto-fits the camera, but only once it has finis
       : `hid "${g}": reach ${dens.reach} did not shrink the disc below its resting ratio on ` +
         `this fixture -- nothing to assert`,
   };
-}, { on: "all", clock: "real" });
+}, { on: WALK, clock: "real" });
 
 check("showing a hidden group auto-fits the camera while it is still arriving", async (p) => {
   await p.eval(`__vg.state.hidden.folder = {}; __vg.syncAlpha(); __vg.applyLayout(false); void 0`);
@@ -2003,7 +2008,7 @@ check("showing a hidden group auto-fits the camera while it is still arriving", 
       : `showed "${g}" again: reach ${dens.reach} did not grow the disc past its resting ` +
         `ratio on this fixture -- nothing to assert`,
   };
-}, { on: "all", clock: "real" });
+}, { on: WALK, clock: "real" });
 
 check("a manually moved camera is left alone by a visibility toggle", async (p) => {
   await p.eval(`__vg.state.hidden.folder = {}; __vg.syncAlpha(); __vg.applyLayout(false); void 0`);
@@ -2037,7 +2042,7 @@ check("a manually moved camera is left alone by a visibility toggle", async (p) 
     detail: `after a manual move: camAtRest=${atRestAfterMove} (must be false); camera before ` +
       `hiding "${g}" ${JSON.stringify(before)}, after ${JSON.stringify(after)} (must be identical)`,
   };
-}, { on: "all", clock: "real" });
+}, { on: WALK, clock: "real" });
 
 check("the zoom buttons step by one wheel notch", async (p) => {
   await camReset(p);
@@ -2493,7 +2498,7 @@ check("a range change animates instead of snapping", async (p) => {
             `${Math.round(100 * rad.atMs / Math.max(1, r.spanMs))}% through, mean note ` +
             `${r.radMeanStep}/frame; settle moved tan ${r.settleStep ? r.settleStep.tan : "?"}`,
   };
-}, { on: "all", clock: "real" });
+}, { on: WALK, clock: "real" });
 
 check("the last frame of a cascade is the resting layout", async (p) => {
   await clearRange(p);
@@ -2602,7 +2607,7 @@ check("the last frame of a cascade is the resting layout", async (p) => {
         (r.dt > 1 ? ` (${r.worst})` : "") + ` dot ${r.dd}%`
       : `${r.label}: nothing sampled`).join(" | "),
   };
-}, { on: "all", clock: "real" });
+}, { on: WALK, clock: "real" });
 
 check("filtered to the bone, the disc stays drawable", async (p) => {
   await clearRange(p);
@@ -2845,7 +2850,7 @@ check("a dot never outgrows its resting size while a cascade walks", async (p) =
   if (r.skip) return { ok: true, detail: r.skip };
   if (r.fail) return { ok: false, detail: r.fail };
   return { ok: r.ok, detail: soloDetail(r) };
-}, { on: "all", clock: "real" });
+}, { on: WALK, clock: "real" });
 
 // design/0011
 check("with Size dots from the frame on, a walking dot is held under its two resting sizes, never above", async (p) => {
@@ -2855,7 +2860,7 @@ check("with Size dots from the frame on, a walking dot is held under its two res
   const dip = r.floor > 0 ? Math.round((1 - r.trough / r.floor) * 1000) / 10 : 0;
   return { ok: r.ok,
            detail: soloDetail(r) + `; lowest mid-walk ${r.trough} units, ${dip}% under the smaller resting size (the cap may hold a dot below, never above)` };
-}, { on: "all", clock: "real" });
+}, { on: WALK, clock: "real" });
 
 // github#67
 check("an arriving note's fade never reverses during a solo switch", async (p) => {
@@ -2913,7 +2918,7 @@ check("an arriving note's fade never reverses during a solo switch", async (p) =
            detail: `${pair[0].g} (${pair[0].n}) -> ${pair[1].g} (${pair[1].n}): ${arriving.length} arriving notes over ` +
                    `${samples} samples, ${flickering.length} with a reversed fade` +
                    (worst ? ` (worst #${worst}: ${drops[worst]} drops, biggest ${peakDrop[worst].toFixed(2)})` : "") };
-}, { on: "all", clock: "real" });
+}, { on: WALK, clock: "real" });
 
 check("the gap reservation holds still while groups only thin", async (p) => {
   await clearRange(p);
@@ -2959,7 +2964,7 @@ check("the gap reservation holds still while groups only thin", async (p) => {
       : `cut at ${cut}: nG held (outer ${s1.ngO}, inner ${s1.ngI}) across ${r.frames} frames, ` +
         `worst step ${r.ngMaxStep}; lit ${before.lit} -> ${after.lit}`,
   };
-}, { on: "all", clock: "real" });
+}, { on: WALK, clock: "real" });
 
 check("the date fields set the range and follow it", async (p) => {
   await clearRange(p);
@@ -4453,7 +4458,7 @@ check("the count bars walk on the cascade's clock and land on the resting layout
             (mid.length < 2 ? "  <- it SNAPPED, no walk" : "") +
             (Math.abs(target - 100) >= 0.01 ? "  <- did not land on the resting 100%" : "")
   };
-}, { on: "all", clock: "real" });
+}, { on: WALK, clock: "real" });
 
 // github#78, design/0006
 check("a bar that loses its folder shrinks over the cascade instead of blinking out", async (p) => {
@@ -4571,7 +4576,7 @@ check("a bar that loses its folder shrinks over the cascade instead of blinking 
             (!gone ? "  <- a bar survived its hidden folder" : "") +
             (!inked ? `  <- the shrinking bar was DECLARED but not painted (ink ${inkMid})` : "")
   };
-}, { on: "all", clock: "real" });
+}, { on: WALK, clock: "real" });
 
 // github#84, github#78, design/0004
 check("the count bar follows its own swatch across a theme flip", async (p) => {
@@ -4980,7 +4985,7 @@ check("a live rebuild lands on the layout a fresh relayout gives", async (p) => 
                        `settle vs fresh relayout: ${after.d.moved} moved / ${after.d.sized} resized, ` +
                        `${after.d.bands} band flip(s); the add moved ${moved.moved} of ${start.n} ` +
                        `notes, worst ${moved.worst}; restored to ${back.moved} off original` };
-}, { on: "all", clock: "real" });
+}, { on: WALK, clock: "real" });
 
 check("word counts land by path, which is the only thing a live rebuild keeps", async (p) => {
   await settle(p);
@@ -5021,7 +5026,7 @@ check("word counts land by path, which is the only thing a live rebuild keeps", 
       `(index ${r.sample.i} now holds a different note); setWords by path landed on the right ` +
       `one (${r.landed}), the note at that index kept ${r.bystander}; a deleted path returns false`
     : `index and id never diverged -- this check cannot see the defect it exists for` };
-}, { on: "all", clock: "real" });
+}, { on: WALK, clock: "real" });
 
 async function settle(p, ms = 6000) {
   const deadline = Date.now() + ms;
