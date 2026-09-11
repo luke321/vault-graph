@@ -1291,6 +1291,8 @@ function mountVaultGraph(root, data, deps) {
   var INNER_FILL = 0.8;
   var GAP_BAND = { i: 0.5, o: 1 };
   var CLEAR_OF_ROOM = 0.12;
+  // github#107 -- which quantile of a band's own-step pool stands for the whole band, in pick()
+  var ROOM_PCTL = 0.5;
 
   var MIN_SPAN = 6 * Math.PI / 180;
   var HL_PUSH = 0.9;
@@ -2669,10 +2671,9 @@ function mountVaultGraph(root, data, deps) {
     // is the more dispersed of the two and its tenth percentile sits further below its median.
     // Measured p10/p50 per band -- demo 0.81 inner / 0.90 outer, 10k 0.94 / 0.98, dominant-folder
     // 0.95 / 0.98 -- so sizing every dot in a band off its tightest decile cost the inner band
-    // 6-19% that was arithmetic rather than geometry. The pool is tight either way (demo inner
+    // 5-19% that was arithmetic rather than geometry. The pool is tight either way (demo inner
     // spans 95 to 170 units over 315 entries), so the median is not a long-tail gamble, and
     // cellRoom still clamps each cell down to its own minimum step in dotPx.
-    var ROOM_PCTL = 0.5;
     /** @param {number[]} v */
     var pick = function (v) {
       if (!v.length) return undefined;

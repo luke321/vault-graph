@@ -183,7 +183,7 @@ each pool to the one number `dotPx` sizes that whole band against. **`ROOM_PCTL 
 `0.1`, and the tenth percentile is not band-neutral: the inner band packs fewer rows over more
 cells, so its pool is the more dispersed of the two and its tenth percentile sits further below
 its own median. Measured p10/p50 per band — **demo 0.81 inner / 0.90 outer, 10k 0.94 / 0.98,
-dominant-folder 0.95 / 0.98** — so a decile cost the inner band 6–19% that was arithmetic, not
+dominant-folder 0.95 / 0.98** — so a decile cost the inner band 5–19% that was arithmetic, not
 geometry. The pool is tight either way (the demo inner pool spans 95–170 units over 315 entries),
 so the median is not a long-tail gamble, and `cellRoom` still clamps each cell to its own minimum
 step inside `dotPx`.
