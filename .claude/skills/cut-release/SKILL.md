@@ -142,7 +142,9 @@ only step whose content isn't dictated by the release process itself.
 
 New or visibly-changed features get a `docs/features/<name>.md` page (copy
 `docs/features/_template.md`) and a clip. `docs/features.md`'s nav and inline sections get the
-new entry.
+new entry. Then `node scripts/gallery-nav.mjs` (github#127) so the gallery's "New in" strip picks
+up whatever this release's `Introduced in` lines make newest — pre-push checks this the same way
+it checks the code map, so a forgotten run is caught there if not here.
 
 ## 5. Write the `CHANGELOG.md` section
 

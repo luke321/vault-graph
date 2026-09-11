@@ -316,6 +316,21 @@ EOF
   exit 1
 fi
 
+# SAME BAR, ONE MORE GENERATED FILE: docs/features.md's "New in" strip (github#127) is written
+# from each docs/features/<name>.md's own "Introduced in" line by scripts/gallery-nav.mjs, so
+# it can drift the same way the code map can -- a new feature page lands, or a version gets
+# corrected, and nobody re-runs the generator.
+echo "pre-push: checking the gallery's 'New in' strip is current..."
+if ! node "$root/scripts/gallery-nav.mjs" --check </dev/null; then
+  cat >&2 <<'EOF'
+
+pre-push: the generated gallery nav strip is stale -- push blocked.
+
+Run: node scripts/gallery-nav.mjs   and commit docs/features.md. There is no skip flag.
+EOF
+  exit 1
+fi
+
 # LINT NEXT, same bar again -- about five seconds, no Chrome -- and no skip flag, for a
 # different reason: a lint that runs when someone remembers was 27 warnings deep when it was
 # made a gate (github#55), 26 of them values assigned and never read. The same run
