@@ -173,7 +173,7 @@ async function main() {
     "           overflowX: d.scrollWidth - d.clientWidth," +
     "           sidebar: box('vg-sidebar'), stage: box('vg-stage')," +
     "           heat: box('vg-heat'), canvas: box('vg-canvas'), graph: box('vg-graph')," +
-    // github#79, design/0014 -- forced visible: where it lands, not when
+    // github#79, design/0017 -- forced visible: where it lands, not when
     "           ov: (function () { var o = document.getElementById('vg-ov'); if (!o) return null;" +
     "             var was = o.hidden; o.hidden = false; var r = o.getBoundingClientRect();" +
     "             var m = document.getElementById('vg-mob'), c = document.getElementById('vg-cam');" +

@@ -390,7 +390,7 @@ are unchanged. Rows listed per tab on the four fixtures: 7 against 2, 4 against 
 14, 18 against 14.
 ## The overview is absent at rest, and its footprint is never clamped
 
-github#79, `design/0014`. The schematic appears **left of the pan button, bottom-aligned with the
+github#79, `design/0017`. The schematic appears **left of the pan button, bottom-aligned with the
 camera cluster**, while -- and only while -- zoom or a pan crops the disc. When the whole disc is in
 view it is **absent from the page entirely**: not dimmed, not disabled, not in the accessibility
 tree. Clicking it calls `fit()`.

@@ -7222,7 +7222,7 @@ function mountVaultGraph(root, data, deps) {
     return v > 0 ? v : 96;
   }
 
-  // github#79, design/0014 -- after a frame, never off the camera event
+  // github#79, design/0017 -- after a frame, never off the camera event
   /** @returns {OvExtent | null} */
   function ovFootprint() {
     if (!renderer) return null;
@@ -7235,7 +7235,7 @@ function mountVaultGraph(root, data, deps) {
              y0: Math.min(a.y, b.y), y1: Math.max(a.y, b.y) };
   }
 
-  // github#79, design/0014 -- the LIVE radius, because fit() frames the live disc
+  // github#79, design/0017 -- the LIVE radius, because fit() frames the live disc
   /** @param {OvExtent} fp */
   function ovCropped(fp) {
     var r = (lastMaxR || 0) * UNIT;
@@ -7287,7 +7287,7 @@ function mountVaultGraph(root, data, deps) {
              chevron: misses ? Math.atan2(-(fp.y0 + fp.y1) / 2, (fp.x0 + fp.x1) / 2) : null };
   }
 
-  // github#79, design/0014, design/0010 -- the drawing's inputs, at what moves a pixel
+  // github#79, design/0017, design/0010 -- the drawing's inputs, at what moves a pixel
   /** @param {OvShape} sh */
   function ovSigOf(sh) {
     /** @type {(string | number)[]} */
@@ -7415,7 +7415,7 @@ function mountVaultGraph(root, data, deps) {
     if (dead || !$("ov")) return;
     var fp = geomLock ? ovFootprint() : null;
     var cropped = !!fp && ovCropped(fp);
-    // github#79, design/0014
+    // github#79, design/0017
     if (cropped && !ovOn && cascadeRun && fitting) cropped = false;
     var sh = cropped && fp ? ovShape(fp) : null;
     if (!sh) { ovShow(false); return; }

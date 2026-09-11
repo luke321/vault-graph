@@ -2236,12 +2236,12 @@ check("the overview is absent at rest and appears only while the disc is cropped
 
   await camTo(p, { x: 0.5, y: 0.5, ratio: 0.35, angle: 0 });
   const zoomed = await ovState(p);
-  // github#79, design/0014 -- the guard itself, with the tile UP and the camera still
+  // github#79, design/0017 -- the guard itself, with the tile UP and the camera still
   await p.eval(`__vg.renderer.refresh(); __vg.renderer.refresh(); __vg.renderer.refresh();
                 __vg.placeLogo(); __vg.renderer.refresh(); __vg.renderer.refresh(); void 0`);
   await sleep(500);
   const heldUp = await ovState(p);
-  // github#79, design/0014 -- the tight axis; the stage is wider than tall
+  // github#79, design/0017 -- the tight axis; the stage is wider than tall
   await camTo(p, { x: 0.5, y: 0.9, ratio: 1.08, angle: 0 });
   const panned = await ovState(p);
   await camReset(p);
@@ -2250,7 +2250,7 @@ check("the overview is absent at rest and appears only while the disc is cropped
   await sleep(500);
   const quiet2 = await ovState(p);
 
-  // github#79, design/0014
+  // github#79, design/0017
   const margin = rest.fp ? Math.min(-rest.fp.x0, rest.fp.x1, -rest.fp.y0, rest.fp.y1) / rest.liveR : 0;
   return {
     ok: rest.hidden && !rest.shown && !rest.cropped && rest.paints === 0 &&
@@ -2275,19 +2275,19 @@ check("the overview footprint is drawn to the disc's scale and is never clamped"
   await camTo(p, { x: 0.5, y: 0.5, ratio: 0.35, angle: 0 });
   const inside = await ovState(p);
   const rings = await p.j(`__vg.rings()`);
-  // github#79, design/0014 -- true scale, not a shape fitted to the tile
+  // github#79, design/0017 -- true scale, not a shape fitted to the tile
   const wantW = inside.shape ? (inside.fp.x1 - inside.fp.x0) * inside.shape.k : 0;
   const gotW = inside.shape ? inside.shape.rect[2] - inside.shape.rect[0] : 0;
   const scaleErr = wantW > 0 ? Math.abs(gotW - wantW) / wantW : 1;
   const discPx = inside.shape ? inside.shape.k * rings.maxR : 0;
-  // github#79, design/0014 -- the sectors must actually span the rings
+  // github#79, design/0017 -- the sectors must actually span the rings
   const cov = inside.shape ? inside.shape.cover : { i: 0, o: 0 };
   const bandsOK = cov.o > 0.8 && cov.o < 1.2 && cov.i > 0.8 && cov.i < 1.2 &&
                   !!inside.shape && inside.shape.ringO > inside.shape.inner[1] &&
                   inside.shape.ringI > inside.shape.inner[0] &&
                   inside.shape.inner[1] > inside.shape.ringI;
 
-  // github#79, design/0014 -- wider than the tile, so it must run off both sides
+  // github#79, design/0017 -- wider than the tile, so it must run off both sides
   await camTo(p, { x: 0.5, y: 0.9, ratio: 1.08, angle: 0 });
   const wide = await ovState(p);
   const overflows = !!wide.shape && wide.shape.rect[2] - wide.shape.rect[0] > wide.shape.s &&
@@ -2297,12 +2297,12 @@ check("the overview footprint is drawn to the disc's scale and is never clamped"
   const away = await ovState(p);
   const offTile = !!away.shape && away.shape.chevron !== null &&
                   away.shape.rect[0] > away.shape.s;
-  // github#79, design/0014 -- the arrow's meaning is spoken, not left to be guessed
+  // github#79, design/0017 -- the arrow's meaning is spoken, not left to be guessed
   const said = await p.j(`(function(){ var o = document.querySelector("#vg-ov");
     return { title: o.title, aria: o.getAttribute("aria-label") }; })()`);
   const saysRight = /viewport right of the disc/i.test(said.title) &&
                     said.aria === said.title;
-  // github#79, design/0014 -- the arrow says where the FRAME is
+  // github#79, design/0017 -- the arrow says where the FRAME is
   const chevOK = !!away.shape && away.shape.chevron !== null &&
                  Math.abs(away.shape.chevron) < 0.02;
   await camReset(p);
@@ -2326,15 +2326,17 @@ check("the overview footprint is drawn to the disc's scale and is never clamped"
 
 // github#79
 check("clicking the overview fits the disc through fit(), with panning on or off", async (p) => {
-  // github#79, design/0014 -- ask the page; the 10k vault fits to 1.0373
-  const wantRatio = async () => {
-    const reach = await p.j(`__vg.densityReport().reach`);
-    return 1.08 * Math.max(0.12, Math.min(1.35, reach));
+  // github#79, design/0017 -- ask Fit where it lands; FIT_RATIO is develop's to move
+  const fitLanding = async () => {
+    await camTo(p, { x: 0.5, y: 0.5, ratio: 0.35, angle: 0 });
+    await p.eval(`document.querySelector("#vg-reset").click(); void 0`);
+    for (const dl = Date.now() + 4000; Date.now() < dl && !(await p.j(`!!__vg.camAtRest`));) await sleep(60);
+    return (await camSettle(p)).ratio;
   };
+  const want1 = await fitLanding();
   await camTo(p, { x: 0.5, y: 0.5, ratio: 0.35, angle: 0 });
-  const want1 = await wantRatio();
   const shown = await p.j(`!document.querySelector("#vg-ov").hidden`);
-  // github#79, design/0014 -- camAtRest first: camSettle can beat fit()'s first frame
+  // github#79, design/0017 -- camAtRest first: camSettle can beat fit()'s first frame
   const flown = async () => {
     for (const dl = Date.now() + 4000; Date.now() < dl;) {
       if (await p.j(`!!__vg.camAtRest`)) return true;
@@ -2347,7 +2349,7 @@ check("clicking the overview fits the disc through fit(), with panning on or off
   const landed = await camSettle(p);
   const restOv = await ovState(p);
 
-  // github#79, design/0014 -- NOT camSettle: fit() lends panning back mid-flight
+  // github#79, design/0017 -- NOT camSettle: fit() lends panning back mid-flight
   const panRestored = async () => {
     for (const dl = Date.now() + 4000; Date.now() < dl;) {
       if (!(await p.j(`!!__vg.renderer.getSetting("enableCameraPanning")`))) return true;
@@ -2359,7 +2361,7 @@ check("clicking the overview fits the disc through fit(), with panning on or off
   const lentOnToggle = await p.j(`!!__vg.renderer.getSetting("enableCameraPanning")`);
   const settledToggle = await panRestored();
   await camTo(p, { x: 0.5, y: 0.5, ratio: 0.35, angle: 0 });
-  const want2 = await wantRatio();
+  const want2 = want1;
   await p.eval(`document.querySelector("#vg-ov").click(); void 0`);
   const lentOnTile = await p.j(`!!__vg.renderer.getSetting("enableCameraPanning")`);
   const settledTile = await panRestored();
@@ -2394,7 +2396,7 @@ check("the overview stays away while a programmatic auto-fit crops the disc", as
   await clickEye(p, g);
   await toRest(p);
   const before = await ovState(p);
-  // github#79, design/0014 -- sampled in-page: a CDP round trip cannot see 214ms
+  // github#79, design/0017 -- sampled in-page: a CDP round trip cannot see 214ms
   await p.eval(`(function(){ window.__ovT = { on: [], t0: performance.now(), last: null };
     var el = document.querySelector("#vg-ov");
     var tick = function(){ var v = !el.hidden;
@@ -2413,7 +2415,7 @@ check("the overview stays away while a programmatic auto-fit crops the disc", as
     if (tr[i][1]) shownMs += (i + 1 < tr.length ? tr[i + 1][0] : 5000) - tr[i][0];
   }
   const after = await ovState(p);
-  // github#79, design/0014 -- the control: the gate is scoped, not a blanket
+  // github#79, design/0017 -- the control: the gate is scoped, not a blanket
   await camTo(p, { x: 0.5, y: 0.5, ratio: 0.35, angle: 0 });
   const onZoom = await ovState(p);
   await camReset(p);
