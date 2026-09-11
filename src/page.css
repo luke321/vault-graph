@@ -117,10 +117,8 @@
     background: var(--surface-0);
     border-right: 1px solid var(--border);
     overflow-y: auto;
-    /* github#116 -- the sidebar is the scroll container, not the legend, so a scrollbar that
-       comes and goes with a Folders/Tags switch took its width out of every block: the gear,
-       the Tags side of the segment and every 1fr control moved 15px. Reserve the gutter
-       whether or not a scrollbar is drawn. Measured: invariants.md. */
+    /* github#116 -- this is the scroll container, so its scrollbar's width came out of every
+       block until the gutter was reserved. Measured: invariants.md. */
     scrollbar-gutter: stable;
     padding: 14px 14px 28px;
     display: flex; flex-direction: column; gap: 18px;
