@@ -24,8 +24,41 @@ with this skill; after that, this file is enough to drive the mechanics. Where t
   a release." If this session is a dispatched ticket worktree, stop and say so instead of running
   any of this.
 - **Confirm no other release or suite run is in flight**: `node scripts/lock.mjs status`.
-- Ask for the release name only if the user hasn't given one; everything else below should not
-  need a question unless a step's own instructions say to stop and ask.
+
+## Ask everything first, then run
+
+**One gate at the front, then go.** A release is an hour of mechanical work with four or five
+decisions buried in it, and stopping at each one turns an hour into an afternoon. Gather the
+decisions up front, get them answered in one exchange, then run every step to the end without
+stopping again.
+
+**Front-load these, before step 1:**
+
+1. **The release name** (step 5) -- propose 2-4 candidates unless he has already said one.
+2. **Anything visual to re-record beyond the default.** Everything is re-recorded every release
+   (github#121); what needs asking is whether a feature shipped with *no* clip and no storyboard
+   act, because writing one is product work and changes what this cut is.
+3. **This release's own polish/fix asks**, if he has any.
+4. **The drafts, both of them, together:** the `CHANGELOG.md` section and the release body.
+   Write them from the range at step 1, publish the body as an Artifact, and get them approved in
+   the same exchange as the questions above. Do not draft the body at step 13 and ask then -- by
+   then he has been waiting through the suite, the clips and three pushes for a question you
+   could have asked at the start.
+
+**Then run steps 1-16 without stopping**, except for these, which are not optional:
+
+- **The clip review (step 8).** He looks at what was recorded before it is committed. This
+  catches a capture that grabbed the wrong window, which no gate can see.
+- **The `develop` -> `main` PR (step 12).** Merge it yourself if you can; the ruleset requires a
+  PR, not a human.
+- **Anything that fails.** A red gate, a failing check, a workflow that goes red: stop, fix it,
+  say what it was. Never route around a gate to keep the run moving.
+- **Anything genuinely new.** A decision the questions above did not cover, or a finding that
+  changes what the release contains.
+
+Everything else -- the branch, the bump, the dry run, the pushes, the tag, the Ko-fi post -- runs
+without asking. Invoking this skill is the authorization for all of it.
+
 
 ## Keep the chat short
 
@@ -308,7 +341,20 @@ gh release view <version> --json tagName,name,assets,isDraft
 
 ## 16. Post to Ko-fi
 
-Once the Release exists (step 14), post an update at ko-fi.com/luke321:
+Once the Release exists (step 15), post an update at ko-fi.com/luke321. **Do it yourself with the
+Claude in Chrome tools** -- he is signed in there; do not hand him a link and a block of text to
+paste. The flow, as measured on 2.6.0:
+
+- `ko-fi.com/Manage` -> the **Add something** button, then **Image** in the modal (not "Write a
+  quick update", which has no title field).
+- `read_page` gives the Title and Description fields; `form_input` fills them.
+- **The image needs `find`, not `read_page`.** The dropzone's `<input type=file>` is not in the
+  accessibility tree, and clicking **Add +** opens nothing useful. `find` for "hidden file input
+  for uploading post images (dropzone)" returns it, then `file_upload` attaches the PNG.
+- Screenshot the filled dialog, confirm the exact wording with him, then click **Post image** --
+  that publishes publicly and is the one click in this step that needs a yes.
+
+The content:
 
 - **Title**: `Vault Graph <version> - <Name>` — always the repo/plugin name first, exactly as the
   GitHub Release is titled but with the plugin name prefixed (`gh release view <version> --json

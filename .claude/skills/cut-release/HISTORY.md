@@ -1,5 +1,17 @@
 # cut-release — change log
 
+## 2026-09-11 - ask everything at the front, then run
+
+New "Ask everything first, then run" section: the name, any missing clip/act, this release's own
+asks, and BOTH drafts -- CHANGELOG section and release body -- are gathered and approved before
+step 1, and then every step runs to the end. Only four things still stop it: the clip review,
+the develop->main PR, a failure, and something genuinely new.
+
+Cutting 2.6.0 stopped at the name, then the clips, then the update note, then the clip review,
+then the body -- and the body was drafted at step 13, so he was asked for wording only after
+sitting through the suite, the recordings and three pushes. Every one of those questions could
+have been asked in the first exchange.
+
 ## 2026-09-11 - read the last release before writing the next one
 
 Step 13 now opens with `gh release view "$PREV_TAG"` and two checks the draft has to pass: plain
