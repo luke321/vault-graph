@@ -12,6 +12,8 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const GENERATORS = [
   { script: "make-demo-vault.mjs", args: ["--notes", "400"] },
   { script: "make-shape-vault.mjs", args: [] },
+  // github#86
+  { script: "make-tag-vault.mjs", args: [] },
 ];
 const END_A = "2024-02-10";
 const END_B = "2027-09-28";

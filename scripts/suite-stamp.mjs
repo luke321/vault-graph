@@ -12,7 +12,7 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = dirname(HERE);
 
 export const FIXTURE_MAX_AGE_DAYS = 7;
-export const FIXTURE_NAMES = ["demo-vault", "test-vault", "shape-vault"];
+export const FIXTURE_NAMES = ["demo-vault", "test-vault", "shape-vault", "tag-vault"];
 
 function git(args, cwd) {
   const r = spawnSync("git", ["-C", cwd, ...args], { encoding: "utf8" });
@@ -178,6 +178,8 @@ function selftest() {
     seed("demo-vault", "aaaaaaaa", today, false);
     seed("test-vault", "bbbbbbbb", "2026-08-28", true);
     seed("shape-vault", "cccccccc", today, false);
+    // github#86
+    seed("tag-vault", "dddddddd", "2026-09-09", true);
 
     expect("no stamp yet -> miss", !lookup("HEAD", repo).ok);
     const wrote = record({ fixtures: currentFixtures(repo), checks: 3, cwd: repo });
@@ -221,6 +223,11 @@ function selftest() {
     const two = record({ fixtures: currentFixtures(repo).filter((f) => f.name !== "test-vault"),
                          checks: 3, cwd: repo });
     expect("a run missing a fixture refuses to record", !two.wrote && /test-vault did not run/.test(two.why));
+    // github#86 -- the fourth fixture is required like the first three
+    const three = record({ fixtures: currentFixtures(repo).filter((f) => f.name !== "tag-vault"),
+                           checks: 3, cwd: repo });
+    expect("a run missing the tag vault refuses to record",
+           !three.wrote && /tag-vault did not run/.test(three.why));
     const stampFile = lookup("HEAD", repo).file;
     const full = readFileSync(stampFile, "utf8");
     const cut = JSON.parse(full);

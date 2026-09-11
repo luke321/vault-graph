@@ -5,6 +5,15 @@
 > The sidebar: eye vs label, three selection channels, and the tail block.
 
 
+**The heading is the grouping control** (github#86, design/0015). `Groups (18)` is a
+dropdown reading `Folders (18)` or `Tags (12)`, in those words, and everything below it
+is the list of whichever it says. The control belongs to the thing it changes — not the
+view settings, not the top bar, not a hidden context-menu item — and it is deliberately
+quiet: no border or fill at rest so it reads as the heading it replaced, with a chevron
+that is always there so anyone looking for a control finds one. A row under it appears
+only in the tag dimension, offering **Notes in every tag**: one dot per tag a note
+carries rather than only the first.
+
 Each legend row carries three separate controls, because it does three different
 things and one click could only ever mean one of them:
 

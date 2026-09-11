@@ -16,7 +16,7 @@ pieces small enough to actually watch.
 | **The disc** | [The disc, growing](#the-disc-growing) · [The disc follows the vault](#the-disc-follows-the-vault) · [Subfolders](#subfolders) · [Reading each folder's share](#reading-each-folders-share) · [Unlinked notes join their folder](#unlinked-notes-join-their-folder) |
 | **Reading a note** | [Reading one note](#reading-one-note) · [Pin a note to the hub](#pin-a-note-to-the-hub) |
 | **Navigation** | [Walking the links, and back](#walking-the-links-and-back) · [The camera](#the-camera) |
-| **Narrowing what is shown** | [Filtering by folder](#filtering-by-folder) · [A folder hidden by default](#a-folder-hidden-by-default) |
+| **Narrowing what is shown** | [Grouping by tag](#grouping-by-tag) · [Filtering by folder](#filtering-by-folder) · [A folder hidden by default](#a-folder-hidden-by-default) |
 | **Time** | [The timeline](#the-timeline) · [The heatmap](#the-heatmap) · [Compact date axis](#compact-date-axis) |
 | **Colour** | [Folder colours](#folder-colours) · [Subfolder colours](#subfolder-colours) |
 | **Fitting the window** | [Folding the panels away](#folding-the-panels-away) · [The disc on a phone](#the-disc-on-a-phone) |
@@ -114,6 +114,21 @@ Scroll to zoom, drag to pan, double-click or the corner button to reset.
 <img src="https://raw.githubusercontent.com/luke321/vault-graph/main/assets/features/camera.webp" width="100%" alt="Scrolling to zoom in, dragging to pan, double-clicking to reset, zooming in again, then the corner button resetting it">
 
 ## Narrowing what is shown
+
+### Grouping by tag
+
+The group list's heading is a segmented control: **Folders** or **Tags**. Cut by tag, every
+note sits in one wedge — **the first tag it lists** files it, in the order its frontmatter
+gives, so a note tagged `[meeting, project]` is in the *meeting* wedge, and a nested tag such as
+`area/health` nests as a sub-wedge of *area* the way a subfolder does. A note with no tag goes
+to *(untagged)*, shown in grey. Where a tag's wedge holds fewer notes than carry the tag, its
+row says so: *74 filed here, 82 carry this tag*.
+
+Switching draws both discs at once: one hand erases the folder disc where it stands, the
+other lights the tag disc at its seats, with the links, the heat strip and the group list
+following the notes. The group list's own rows are the switch's clock — folder rows drop out
+as their notes fade, tag rows drop in with their first lit note — and the disc keeps its hub
+and its rings across the switch.
 
 ### Filtering by folder
 

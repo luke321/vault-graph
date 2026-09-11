@@ -210,6 +210,14 @@ check("nav counts share one right edge", async (p) => {
     return {n: xs.length, distinct: Array.from(new Set(xs))};
   })()`);
   const folded = await edges();
+  // github#86 -- the shared edge is the invariant, not the opening
+  // github#86 -- a vault with no subfolder has no twisty to click
+  const twisties = await p.j(`document.querySelectorAll('#vg-legend [data-tw]').length`);
+  if (!twisties) {
+    return { ok: folded.distinct.length === 1,
+             detail: `folded ${folded.n} counts / ${folded.distinct.length} edge; ` +
+                     `no subfolder anywhere in this vault, so there is no tree to open` };
+  }
   await p.eval(`(function(){ var b = document.querySelectorAll('#vg-legend [data-tw]');
                 for (var i = 0; i < b.length; i++) b[i].click(); })(); void 0`);
   await sleep(300);
@@ -335,7 +343,8 @@ check("plan parity and zero-weight invariance with each folder hidden", async (p
     const r = await p.j(`{p: __vg.checkPlanParity().parityOK, z: __vg.checkZeroWeightInvariance().invariantOK}`);
     if (!r.p || !r.z) bad.push(`${g}${r.p ? "" : " parity"}${r.z ? "" : " zero-weight"}`);
   }
-  await p.eval(`__vg.state.hidden.folder = {}; __vg.syncAlpha(); __vg.applyLayout(false); void 0`);
+  // github#86, github#21 -- leave the page converged: two passes are the fixed point
+  await p.eval(`__vg.state.hidden.folder = {}; __vg.syncAlpha(); __vg.applyLayout(false); __vg.applyLayout(false); void 0`);
   return { ok: bad.length === 0, detail: bad.length ? bad.join("; ") : `${groups.length} folders, all clean` };
 });
 
@@ -439,8 +448,14 @@ check("the resting disc is on the lattice", async (p) => {
     var rad = {inner: [], outer: []};
     __vg.graph.forEachNode(function(id, a){
       if ((__vg.alpha[id] || 0) < 0.999) return;
-      if (__vg.graph.degree(id) === 0) return;
-      (band[a.folder] ? rad.inner : rad.outer).push(Math.hypot(a.x, a.y));
+      // github#86 -- ask the predicate the LAYOUT asks. graph.degree() is 0 for a satellite
+      // too, whose links are drawn on hover only, and those dots are on the lattice like any
+      // other; isOrphan() names the sunflower-packed notes this exclusion is actually about.
+      if (__vg.isOrphan(id)) return;
+      // github#86 -- the group the dot is DRAWN in, which is the grouping answer in either
+      // dimension. Identical to a.folder while grouped by folder with unlinked notes joining
+      // their folder, and right when either of those is not the case.
+      (band[__vg.groupOf(id)] ? rad.inner : rad.outer).push(Math.hypot(a.x, a.y));
     });
     var lattice = function(rs){
       if (rs.length < 3) return {notes: rs.length, rows: 0, skipped: true};
@@ -510,7 +525,9 @@ check("band assignment obeys its two hard rules", async (p) => {
 check("layout matches its golden snapshot", async (p) => {
   const dd = await p.j("__vg.debugDump()");
   const vaultName = dd.vault.name;
-  const fixture = ["demo-vault", "test-vault", "shape-vault"].find((f) => vaultName.startsWith(f + "-"));
+  // github#86 -- tag-vault is the fourth, and the only one organised by tag
+  const fixture = ["demo-vault", "test-vault", "shape-vault", "tag-vault"]
+    .find((f) => vaultName.startsWith(f + "-"));
   if (!fixture) {
     return { ok: true, detail: `NOT ASSERTED: "${vaultName}" is not one of the three named ` +
                                 `fixtures -- no golden snapshot to compare against` };
@@ -521,6 +538,9 @@ check("layout matches its golden snapshot", async (p) => {
                                  `run node scripts/update-layout-snapshots.mjs` };
   }
   const snap = JSON.parse(readFileSync(snapPath, "utf8"));
+  // github#86 -- each golden records the dimension it was taken in
+  const dim = snap.dim === "tag" ? "tag" : "folder";
+  if (dim !== "folder") await p.eval(`__vg.setDim(${JSON.stringify(dim)}); void 0`);
   await p.eval(`__vg.relayout(); void 0`).catch(() => {});
   const r = await p.j(`(function(){
     var plan = __vg.buildWedgePlan(false), band = {};
@@ -529,6 +549,7 @@ check("layout matches its golden snapshot", async (p) => {
     __vg.graph.forEachNode(function(id, a){ pos[id] = [a.x, a.y]; });
     return { band: band, positions: pos };
   })()`);
+  if (dim !== "folder") await p.eval(`__vg.setDim("folder"); void 0`);
 
   const flipped = [];
   for (const f of Object.keys(snap.band)) {
@@ -564,7 +585,8 @@ check("layout matches its golden snapshot", async (p) => {
     }
   }
   const ok = flipped.length === 0 && moved === 0;
-  const parts = [`${curIds.size} notes checked against scripts/layout-snapshots/${fixture}.json`];
+  const parts = [`${curIds.size} notes checked against scripts/layout-snapshots/${fixture}.json` +
+                 (dim === "folder" ? "" : `, grouped by ${dim}`)];
   parts.push(flipped.length ? `${flipped.length} folder(s) flipped band: ${flipped.join(", ")}` : "band unchanged");
   if (moved) {
     parts.push(`${moved} note(s) moved past ${TOL} units, worst is #${worst.id}: ` +
@@ -575,6 +597,521 @@ check("layout matches its golden snapshot", async (p) => {
   }
   return { ok, detail: parts.join("; ") };
 });
+
+/* ---------------------------------------------------- github#86, design/0015 */
+
+check("tags: folders is the default, and the switch is in the group list's own heading",
+async (p) => {
+  const r = await p.j(`(function(){
+    var sel = document.querySelector("#vg-dim");
+    var btns = sel ? Array.prototype.slice.call(sel.querySelectorAll("button[data-dim]")) : [];
+    var on = btns.filter(function (b) { return b.getAttribute("aria-pressed") === "true"; });
+    return { dim: __vg.state.dim, has: !!sel, value: on.length === 1 ? on[0].getAttribute("data-dim") : null,
+             options: btns.map(function (b) { return b.getAttribute("data-dim") + ":" + b.textContent; }),
+             gcount: (document.querySelector("#vg-gcount") || {}).textContent,
+             groups: __vg.groupOrder().length };
+  })()`);
+  if (!r.has) return { ok: false, detail: "no #vg-dim in the group list heading" };
+  const wanted = "folder:Folders,tag:Tags";
+  const ok = r.dim === "folder" && r.value === "folder" &&
+             r.options.join(",") === wanted && r.gcount === "(" + r.groups + ")";
+  return {
+    ok,
+    detail: `dim ${r.dim}, pressed ${r.value}, sides [${r.options.join(" | ")}]` +
+            (r.options.join(",") === wanted ? "" : ` <- wanted ${wanted}`) +
+            `, heading reads ${r.gcount} for ${r.groups} groups`,
+  };
+});
+
+check("tags: every note is filed in exactly one wedge, in either dimension", async (p) => {
+  const r = await p.j(`(function(){
+    var look = function () {
+      var plan = __vg.buildWedgePlan(false), members = 0, seen = {}, twice = 0;
+      plan.cells.forEach(function (c) {
+        c.list.forEach(function (id) { if (seen[id]) twice++; seen[id] = 1; members++; });
+      });
+      var summed = 0;
+      __vg.groupOrder().forEach(function (g) { summed += __vg.groupCount(g); });
+      return { members: members, twice: twice, summed: summed, cells: plan.cells.length,
+               groups: __vg.groupOrder().length };
+    };
+    var nodes = __vg.graph.nodes().length;
+    var pinned = __vg.state.pinned.length;
+    var folder = look();
+    __vg.setDim("tag");
+    var tag = look();
+    // D-1 -- the first tag listed files the note, and a note with none goes to (untagged).
+    // (unlinked) is the one legitimate exception: that setting moves a note out of its group
+    // in either dimension.
+    var misfiled = [], untagged = 0, noTag = 0, multi = 0;
+    __vg.graph.forEachNode(function (id, a) {
+      var tags = a.tags || [];
+      if (!tags.length) noTag++;
+      if (tags.length > 1) multi++;
+      var want = tags.length ? String(tags[0]).split("/")[0] : "(untagged)";
+      var got = __vg.groupOf(id);
+      if (got === "(untagged)") untagged++;
+      if (got !== want && got !== "(unlinked)") {
+        if (misfiled.length < 4) misfiled.push(id + ": " + got + " not " + want);
+      }
+    });
+    __vg.setDim("folder");
+    return { nodes: nodes, pinned: pinned, folder: folder, tag: tag,
+             misfiled: misfiled, untagged: untagged, noTag: noTag, multi: multi };
+  })()`);
+  // github#86 -- the hub holds pinned notes, which are not plan members
+  const want = r.nodes - r.pinned;
+  const ok = r.folder.members === want && r.tag.members === want &&
+             !r.folder.twice && !r.tag.twice &&
+             r.folder.summed === r.nodes && r.tag.summed === r.nodes &&
+             !r.misfiled.length;
+  return {
+    ok,
+    detail: `${r.nodes} notes: folder ${r.folder.members} members in ${r.folder.cells} cells / ` +
+            `${r.folder.groups} groups, tag ${r.tag.members} in ${r.tag.cells} / ${r.tag.groups}` +
+            ` (wanted ${want} each, counts sum to ${r.folder.summed}/${r.tag.summed})` +
+            `; ${r.noTag} notes carry no tag and ${r.untagged} are filed (untagged)` +
+            `; ${r.multi} carry more than one` +
+            (r.folder.twice + r.tag.twice ? `; ${r.folder.twice + r.tag.twice} note(s) in TWO cells` : "") +
+            (r.misfiled.length ? `; MISFILED ${r.misfiled.join(", ")}` : ""),
+  };
+});
+
+check("tags: the switch lands where a fresh relayout would, and comes home exactly",
+async (p) => {
+  await settle(p);
+  const r = await p.j(`(function(){
+    var pos = function () {
+      var o = {}; __vg.graph.forEachNode(function (id, a) { o[id] = [a.x, a.y]; }); return o;
+    };
+    var drift = function (a, b) {
+      var moved = 0, worst = 0, who = "";
+      Object.keys(a).forEach(function (id) {
+        var d = Math.hypot(b[id][0] - a[id][0], b[id][1] - a[id][1]);
+        if (d > 0.1) moved++;
+        if (d > worst) { worst = d; who = id; }
+      });
+      return { moved: moved, worst: +worst.toFixed(3), who: who };
+    };
+    // github#86 -- a switch keeps the rings; only a hard relayout re-derives them, in whatever
+    // dimension is on screen. So "fresh" here is the fixed point inside the kept rings: two
+    // layout passes, not a relayout.
+    var boot = pos();
+    __vg.setDim("tag");
+    var landed = pos();
+    __vg.applyLayout(false); __vg.applyLayout(false);
+    var fresh = pos();
+    __vg.setDim("folder");
+    var home = pos();
+    __vg.applyLayout(false); __vg.applyLayout(false);
+    var homeFresh = pos();
+    return { tag: drift(landed, fresh), folder: drift(home, homeFresh),
+             trip: drift(boot, home), n: Object.keys(boot).length };
+  })()`);
+  // github#86, design/0015 -- room and position are a fixed point
+  const ok = !r.tag.moved && !r.folder.moved && !r.trip.moved;
+  return {
+    ok,
+    detail: `${r.n} notes: landing vs a fresh relayout -- tag ${r.tag.moved} moved ` +
+            `(worst ${r.tag.worst}), folder ${r.folder.moved} (worst ${r.folder.worst}); ` +
+            `round trip ${r.trip.moved} moved (worst ${r.trip.worst}` +
+            (r.trip.who ? `, #${r.trip.who}` : "") + ")",
+  };
+});
+
+check("tags: a dot in the disc being left keeps its colour until it has faded", async (p) => {
+  await clearRange(p);
+  await settle(p);
+  await camSettle(p);
+  // github#86, design/0015 -- the erase edge fades a dot where it stands, in its colour
+  const n = await p.j(`(function(){
+    var b = {};
+    __vg.graph.forEachNode(function (id, a) {
+      if ((__vg.alpha[id] || 0) <= 0.004) return;
+      b[id] = { c: __vg.nodeColor(id), g: __vg.groupOf(id), x: a.x, y: a.y };
+    });
+    window.__smokeLeft = b;
+    // github#86 -- and the legend's rows as they stand: swatch class, swatch fill, count text
+    var rows = {};
+    Array.prototype.forEach.call(document.querySelectorAll("#vg-legend .lgr[data-row]"), function (r) {
+      var sw = r.querySelector(".sw"), ct = r.querySelector(".ct");
+      rows[r.getAttribute("data-row")] = { sw: sw ? sw.className : "", fill: sw ? sw.style.background : "", ct: ct ? ct.textContent : "" };
+    });
+    window.__smokeRows = rows;
+    var side = document.querySelector('#vg-dim button[data-dim="tag"]');
+    if (!side) return -1;
+    side.click();
+    return Object.keys(b).length;
+  })()`);
+  if (n < 0) return { ok: false, detail: "no #vg-dim to switch with" };
+  let samples = 0, worstFrame = 0, dotFrames = 0, standingFrames = 0, example = "", rowFrames = 0, rowExample = "";
+  const t0 = Date.now();
+  for (;;) {
+    const s = await p.j(`(function(){
+      var b = window.__smokeLeft, standing = 0, wrong = 0, ex = "";
+      Object.keys(b).forEach(function (id) {
+        // a dot that has left stands in its final seat, under its new group
+        var a = __vg.graph.getNodeAttributes(id);
+        if (Math.abs(a.x - b[id].x) > 0.5 || Math.abs(a.y - b[id].y) > 0.5 || __vg.groupOf(id) !== b[id].g) return;
+        if ((__vg.alpha[id] || 0) <= 0.004) return;
+        standing++;
+        var c = __vg.nodeColor(id);
+        if (c !== b[id].c) { wrong++; if (!ex) ex = "#" + id + " " + b[id].c + " -> " + c; }
+      });
+      // a leaving row is the row it was: same swatch class and fill, same count
+      var rowsWrong = 0, rowEx = "";
+      Array.prototype.forEach.call(document.querySelectorAll("#vg-legend .lgr[data-old]"), function (r) {
+        var was = window.__smokeRows[r.getAttribute("data-row")]; if (!was) return;
+        var sw = r.querySelector(".sw"), ct = r.querySelector(".ct");
+        var now = { sw: sw ? sw.className : "", fill: sw ? sw.style.background : "", ct: ct ? ct.textContent : "" };
+        if (now.sw !== was.sw || now.fill !== was.fill || now.ct !== was.ct) { rowsWrong++; if (!rowEx) rowEx = r.getAttribute("data-row") + ": " + JSON.stringify(was) + " -> " + JSON.stringify(now); }
+      });
+      return { standing: standing, wrong: wrong, ex: ex, rowsWrong: rowsWrong, rowEx: rowEx, busy: __vg.demo.busy() };
+    })()`);
+    samples++;
+    standingFrames += s.standing;
+    dotFrames += s.wrong;
+    rowFrames += s.rowsWrong;
+    if (s.rowsWrong && !rowExample) rowExample = s.rowEx;
+    if (s.wrong > worstFrame) { worstFrame = s.wrong; example = s.ex; }
+    if (!s.busy && samples > 3) break;
+    if (Date.now() - t0 > 20000) break;
+  }
+  await p.j(`(function(){ delete window.__smokeLeft; delete window.__smokeRows; __vg.setDim("folder"); return true; })()`);
+  await settle(p);
+  await camSettle(p);
+  return {
+    ok: dotFrames === 0 && rowFrames === 0 && samples > 3,
+    detail: `${n} dots standing in the folder disc, ${samples} samples over the switch: ` +
+            `${dotFrames} of ${standingFrames} standing dot-frames in a colour other than the one they had` +
+            (worstFrame ? ` (worst frame ${worstFrame}, e.g. ${example})` : "") +
+            `; ${rowFrames} leaving-row-frames with a swatch or count other than the row's` +
+            (rowExample ? ` (e.g. ${rowExample})` : ""),
+  };
+});
+
+check("tags: a note one disc hides and the other shows arrives with the fill edge", async (p) => {
+  await clearRange(p);
+  await settle(p);
+  await camSettle(p);
+  // github#86, design/0015 -- hide one folder in the folder disc only
+  // github#86 -- in the tag disc those notes ARRIVE with the fill edge
+  const pick = await p.j(`(function(){
+    var gs = __vg.groupOrder().map(function (g) { return { g: g, n: __vg.groupCount(g) }; })
+      .filter(function (x) { return x.n >= 3 && !__vg.isArchiveGroup(x.g); })
+      .sort(function (x, y) { return x.n - y.n; });
+    return gs.length ? gs[0] : null; })()`);
+  if (!pick) return { ok: true, detail: "no folder with three or more notes to hide -- nothing to switch" };
+  const eye = async (g) => p.j(`(function(){
+    var b = document.querySelector('[data-eye="' + ${JSON.stringify(g)}.replace(/"/g, '\\"') + '"]');
+    if (!b) return false; b.click(); return true; })()`);
+  if (!(await eye(pick.g))) return { ok: false, detail: `no eye toggle for ${pick.g}` };
+  await settle(p);
+  await camSettle(p);
+  const n = await p.j(`(function(){
+    var hid = [], b = {};
+    __vg.graph.forEachNode(function (id, a) {
+      if ((__vg.alpha[id] || 0) > 0.004) { b[id] = { g: __vg.groupOf(id), x: a.x, y: a.y }; return; }
+      if (__vg.groupOf(id) === ${JSON.stringify(pick.g)} && !a.dupOf) hid.push(id);
+    });
+    window.__smokeHid = { hid: hid, b: b, blade: __vg.handBlade };
+    var nodes = __vg.graph.order;
+    document.querySelector('#vg-dim button[data-dim="tag"]').click();
+    // the very same tick: nothing hidden may be lit yet
+    var litNow = hid.filter(function (id) { return (__vg.alpha[id] || 0) > 0.004; }).length;
+    return { hid: hid.length, litNow: litNow, nodes: nodes };
+  })()`);
+  let samples = 0, litEnd = 0, ahead = 0, first = "", standInsPeak = 0, nodesEnd = 0;
+  const t0 = Date.now();
+  for (;;) {
+    const s = await p.j(`(function(){
+      var H = window.__smokeHid, D = 180 / Math.PI, TWO = 2 * Math.PI;
+      var sweep = function (a) { return (Math.PI / 2 - Math.atan2(a.y, a.x) + 2 * TWO) % TWO; };
+      // the cascade reports the erase edge's angle; the fill edge trails it by the blade, and
+      // an arrival sits at its final seat -- so a lit note's seat is behind the fill edge. The
+      // inner ring sweeps the other way round, so its bearings read mirrored.
+      var hand = __vg.lastCascade().handDeg;
+      var fill = typeof hand === "number" ? Math.max(0, Math.min(360, hand - H.blade)) : null;
+      var lit = 0, ahead = 0, ex = "";
+      H.hid.forEach(function (id) {
+        if ((__vg.alpha[id] || 0) <= 0.004) return;
+        lit++;
+        if (fill === null) return;
+        var b = sweep(__vg.graph.getNodeAttributes(id)) * D;
+        if (__vg.isInner(id)) b = (360 - b) % 360;
+        if (b > fill + 6 && b < 354 && fill < 354) { ahead++; if (!ex) ex = "#" + id + " at " + b.toFixed(0) + " deg with the fill edge at " + fill.toFixed(0); }
+      });
+      return { lit: lit, ahead: ahead, ex: ex, busy: __vg.demo.busy(), nodes: __vg.graph.order, standIns: __vg.standIns().length };
+    })()`);
+    samples++;
+    ahead += s.ahead;
+    if (s.ahead && !first) first = s.ex;
+    litEnd = s.lit;
+    if (s.standIns > standInsPeak) standInsPeak = s.standIns;
+    nodesEnd = s.nodes;
+    if (!s.busy && samples > 3) break;
+    if (Date.now() - t0 > 20000) break;
+  }
+  // github#86 -- stand-ins draw the arriving disc; every one goes home
+  const left = await p.j(`__vg.standIns().length`);
+  await p.j(`(function(){ delete window.__smokeHid; __vg.setDim("folder"); return true; })()`);
+  await settle(p);
+  await eye(pick.g);
+  await settle(p);
+  await camSettle(p);
+  return {
+    ok: n.litNow === 0 && ahead === 0 && litEnd === n.hid && samples > 3 && left === 0 && nodesEnd === n.nodes,
+    detail: `${pick.g} (${n.hid} notes) hidden in the folder disc: ${n.litNow} lit at the switch itself, ` +
+            `${ahead} lit ahead of the fill edge over ${samples} samples` +
+            (first ? ` (first: ${first})` : "") + `, ${litEnd} of ${n.hid} lit at the end; ` +
+            `${standInsPeak} stand-ins drawn, ${left} left behind, ${nodesEnd} of ${n.nodes} nodes after`,
+  };
+});
+
+check("tags: the two buckets stay out of the hue rotation and sort last", async (p) => {
+  const r = await p.j(`(function(){
+    __vg.setDim("tag");
+    var order = __vg.groupOrder();
+    var slots = {};
+    order.forEach(function (g) { slots[g] = __vg.slotOf(g); });
+    var tail = order.slice(-2);
+    var hues = order.filter(function (g) { return g.charAt(0) !== "("; })
+                    .map(function (g) { return __vg.slotOf(g); });
+    var dup = {}, repeats = 0;
+    hues.forEach(function (s) { if (dup[s]) repeats++; dup[s] = 1; });
+    __vg.setDim("folder");
+    return { order: order, tail: tail, slots: slots, hues: hues, repeats: repeats,
+             untagged: slots["(untagged)"], unlinked: slots["(unlinked)"] };
+  })()`);
+  const hasUntagged = r.order.indexOf("(untagged)") >= 0;
+  if (!hasUntagged) {
+    return { ok: true, detail: `NOT ASSERTED: every note on this vault carries a tag, ` +
+                               `so there is no (untagged) bucket to place` };
+  }
+  // github#86 -- D-2: neither bucket is a group anyone chose
+  const ok = r.tail.join(",") === "(untagged),(unlinked)" &&
+             r.untagged === "g11" && r.unlinked === "g11";
+  return {
+    ok,
+    detail: `${r.order.length} groups, last two [${r.tail.join(", ")}]; (untagged) slot ` +
+            `${r.untagged}, (unlinked) ${r.unlinked} (both want the archive grey g11); ` +
+            `${r.hues.length} real tags take ${r.hues.length - r.repeats} distinct slots`,
+  };
+});
+
+check("tags: each dimension keeps its own hidden and collapsed state", async (p) => {
+  const r = await p.j(`(function(){
+    var live = function () {
+      var h = __vg.state.hidden[__vg.state.dim] || {};
+      return Object.keys(h).filter(function (k) { return h[k]; }).sort();
+    };
+    var hideFirst = function () {
+      var g = __vg.groupOrder().filter(function (x) { return __vg.groupCount(x) > 0; })[0];
+      var h = __vg.state.hidden[__vg.state.dim] || (__vg.state.hidden[__vg.state.dim] = {});
+      h[g] = true;
+      __vg.state.hiddenSub[g + "/"] = true;
+      return g;
+    };
+    var folderHid = hideFirst();
+    var folderBefore = live();
+    var folderSubBefore = Object.keys(__vg.state.hiddenSub).sort();
+    __vg.setDim("tag");
+    var tagFresh = live();
+    var tagSubFresh = Object.keys(__vg.state.hiddenSub).sort();
+    var tagHid = hideFirst();
+    var tagAfter = live();
+    __vg.setDim("folder");
+    var folderAgain = live();
+    var folderSubAgain = Object.keys(__vg.state.hiddenSub).sort();
+    __vg.setDim("tag");
+    var tagAgain = live();
+    // leave the page as the shard found it
+    __vg.state.hidden.tag = {};
+    __vg.setDim("folder");
+    __vg.state.hidden.folder = {};
+    __vg.state.hiddenSub = {};
+    __vg.relayout();
+    return { folderHid: folderHid, tagHid: tagHid,
+             folderBefore: folderBefore, folderAgain: folderAgain,
+             folderSubBefore: folderSubBefore, folderSubAgain: folderSubAgain,
+             tagFresh: tagFresh, tagSubFresh: tagSubFresh,
+             tagAfter: tagAfter, tagAgain: tagAgain };
+  })()`);
+  const ok = r.tagFresh.length === 0 && r.tagSubFresh.length === 0 &&
+             r.folderAgain.join(",") === r.folderBefore.join(",") &&
+             r.folderSubAgain.join(",") === r.folderSubBefore.join(",") &&
+             r.tagAgain.join(",") === r.tagAfter.join(",");
+  return {
+    ok,
+    detail: `hid ${r.folderHid} by folder and ${r.tagHid} by tag; the tag list opened with ` +
+            `${r.tagFresh.length} hidden and ${r.tagSubFresh.length} hidden sub-wedges; ` +
+            `folder came back [${r.folderBefore.join(" ")}] -> [${r.folderAgain.join(" ")}], ` +
+            `subs ${r.folderSubBefore.length} -> ${r.folderSubAgain.length}; ` +
+            `tag came back [${r.tagAfter.join(" ")}] -> [${r.tagAgain.join(" ")}]`,
+  };
+});
+
+check("tags: a nested tag earns a sub-wedge, exactly as a subfolder does", async (p) => {
+  const r = await p.j(`(function(){
+    __vg.setDim("tag");
+    var order = __vg.groupOrder();
+    /** groups whose tags nest: area -> [health, finance, career] */
+    var families = {};
+    order.forEach(function (g) {
+      var s = __vg.subOrderOf(g).filter(function (x) { return x !== ""; });
+      if (s.length > 1) families[g] = s;
+    });
+    var names = Object.keys(families);
+    if (!names.length) { __vg.setDim("folder"); return { none: true }; }
+    var g = names[0];
+    var plan = __vg.buildWedgePlan(false);
+    var cells = 0;
+    plan.cells.forEach(function (c) { if (c.g === g) cells++; });
+    // the tint ladder: design/0003, a hue+lightness step per sub-wedge inside the family
+    var shades = families[g].map(function (sb) { return __vg.subColorOf(g, sb); });
+    var distinct = {};
+    shades.forEach(function (h) { if (h) distinct[h] = 1; });
+    // the legend nests it, and a depth-2 tag appears a level below its parent
+    var tw = document.querySelector('#vg-legend [data-tw="' + g + '"]');
+    var twisty = !!tw;
+    var deeper = [];
+    if (tw) {
+      tw.click();
+      var kids = Array.prototype.map.call(
+        document.querySelectorAll('#vg-legend [data-twp]'),
+        function (b) { return b.getAttribute("data-twp"); });
+      kids.forEach(function (k) {
+        var b = document.querySelector('#vg-legend [data-twp="' + k + '"]');
+        if (b) b.click();
+      });
+      deeper = Array.prototype.map.call(
+        document.querySelectorAll('#vg-legend [data-hpath]'),
+        function (b) { return b.getAttribute("data-hpath"); })
+        .filter(function (k) { return k.split("/").length > 2; });
+      if (tw) tw.click();
+    }
+    __vg.setDim("folder");
+    return { g: g, subs: families[g], families: names.length, cells: cells,
+             shades: shades, distinct: Object.keys(distinct).length,
+             twisty: twisty, deeper: deeper };
+  })()`);
+  if (r.none) {
+    return { ok: true, detail: `NOT ASSERTED: no tag on this vault nests -- only the ` +
+                               `tag-organised fixture carries an a/b tag` };
+  }
+  // github#86 -- D-3: a sub-wedge per child, with its own tint
+  const ok = r.cells === r.subs.length && r.distinct === r.subs.length && r.twisty;
+  return {
+    ok,
+    detail: `${r.families} nesting tag(s); ${r.g} holds [${r.subs.join(", ")}] and is drawn ` +
+            `as ${r.cells} cell(s) with ${r.distinct} distinct tints (${r.shades.join(" ")})` +
+            `; the legend gives it a twisty ${r.twisty ? "yes" : "NO"}` +
+            (r.deeper.length ? `, and a depth-2 tag nests below it: ${r.deeper.join(", ")}`
+                             : "; no depth-2 tag was reachable"),
+  };
+});
+
+check("arc: a plan over the whole circle is the resting disc, and over half of it stays in half",
+async (p) => {
+  await settle(p);
+  const r = await p.j(`(function(){
+    var TWO = 2 * Math.PI;
+    var sweep = function (x, y) { return ((Math.PI / 2 - Math.atan2(y, x)) % TWO + TWO) % TWO; };
+    var rest = {}, ids = [];
+    __vg.graph.forEachNode(function (id, a) {
+      if ((__vg.alpha[id] || 0) > 0.5 && !__vg.isOrphan(id)) { rest[id] = [a.x, a.y]; ids.push(id); }
+    });
+    var full = __vg.arcLayout(0, TWO) || {};
+    var off = 0, worst = 0;
+    ids.forEach(function (id) { var q = full[id]; if (!q) { off++; return; }
+      var d = Math.hypot(q.x - rest[id][0], q.y - rest[id][1]); if (d > 0.1) off++; if (d > worst) worst = d; });
+    var half = __vg.arcLayout(0, Math.PI) || {};
+    var inside = 0, outside = 0, worstOut = 0;
+    ids.forEach(function (id) { var q = half[id]; if (!q) { outside++; return; }
+      var sw = sweep(q.x, q.y);
+      if (sw <= Math.PI + 0.02) inside++; else { outside++; worstOut = Math.max(worstOut, sw - Math.PI); } });
+    // and the disc on screen is untouched by either question
+    var moved = 0;
+    __vg.graph.forEachNode(function (id, a) { var h = rest[id]; if (h && Math.hypot(a.x - h[0], a.y - h[1]) > 0.1) moved++; });
+    return { n: ids.length, off: off, worst: +worst.toFixed(3), inside: inside, outside: outside,
+             worstOut: +(worstOut * 180 / Math.PI).toFixed(2), moved: moved };
+  })()`);
+  // github#86, design/0015 -- the arc-bounded planner behind the dimension switch
+  const ok = r.off === 0 && r.outside === 0 && r.moved === 0;
+  return {
+    ok,
+    detail: `${r.n} ring notes: over [0, 2pi] ${r.off} sit off the resting disc (worst ${r.worst}); ` +
+            `over [0, pi] ${r.inside} inside the half and ${r.outside} outside` +
+            (r.outside ? ` (worst ${r.worstOut} deg over)` : "") +
+            `; the disc on screen moved ${r.moved}`,
+  };
+});
+
+check("tags: each grouping keeps its own colours, and the settings tabs reach both", async (p) => {
+  const r = await p.j(`(function(){
+    // github#86, design/0015 -- the panel is opened on the FOLDER disc and switched to the Tags
+    // tab: its rows are the tag dimension's, a pin lands in the tag map, and the folder map, the
+    // folder disc's order and its colours are all untouched.
+    var gear = document.querySelector("#vg-gear");
+    if (!gear || gear.hidden) return { none: true };
+    if (document.querySelector("#vg-settings").hidden) gear.click();
+    var tabs = Array.prototype.map.call(document.querySelectorAll("#vg-setbody [data-setdim]"),
+      function (b) { return b.getAttribute("data-setdim"); });
+    var folderRows = document.querySelectorAll("#vg-setbody .scr:not(.scrsub)").length;
+    var foldersBefore = __vg.groupOrder().slice();
+    var coloursBefore = foldersBefore.map(function (g) { return __vg.colorOf(g); }).join(",");
+
+    var tagTab = document.querySelector("#vg-setbody [data-setdim='tag']");
+    if (!tagTab) return { none: true };
+    tagTab.click();
+    var rows = Array.prototype.slice.call(document.querySelectorAll("#vg-setbody .scr:not(.scrsub)"));
+    var names = rows.map(function (r) { var n = r.querySelector(".nm"); return n ? n.textContent : ""; });
+    var tagNames = __vg.groupsOf("tag").map(function (g) { return g.name; });
+
+    var pinned = "", key = "";
+    if (rows.length) {
+      var sw = rows[0].querySelectorAll("[data-fc]");
+      for (var i = 0; i < sw.length; i++) {
+        if (sw[i].getAttribute("data-key")) {
+          pinned = rows[0].querySelector(".nm").textContent;
+          key = sw[i].getAttribute("data-key");
+          sw[i].click();
+          break;
+        }
+      }
+    }
+    var appliedOnTagDisc = "";
+    if (pinned) { __vg.setDim("tag"); appliedOnTagDisc = __vg.slotOf(pinned); __vg.setDim("folder"); }
+    var out = {
+      tabs: tabs, dim: __vg.state.dim, folderRows: folderRows, tagRows: rows.length,
+      namesMatch: names.length > 0 && names.join("|") === tagNames.join("|"),
+      pinned: pinned, key: key,
+      inTagMap: pinned ? (__vg.tagColors[pinned] || "") : "",
+      folderMapSize: Object.keys(__vg.folderColors).length,
+      appliedOnTagDisc: appliedOnTagDisc,
+      foldersSame: __vg.groupOrder().join(",") === foldersBefore.join(","),
+      colourSame: __vg.groupOrder().map(function (g) { return __vg.colorOf(g); }).join(",") === coloursBefore
+    };
+    if (pinned) __vg.setTagColors({});
+    document.querySelector("#vg-setbody [data-setdim='folder']").click();
+    gear.click();
+    return out;
+  })()`);
+  if (r.none) return { ok: true, detail: "no settings panel on this host -- the plugin owns it" };
+  const ok = r.tabs.join(",") === "folder,tag" && r.dim === "folder" && r.tagRows > 0 &&
+             r.namesMatch && r.folderMapSize === 0 && r.foldersSame && r.colourSame &&
+             (!r.pinned || (r.inTagMap === r.key && r.appliedOnTagDisc === r.key));
+  return {
+    ok,
+    detail: `tabs [${r.tabs.join(" | ")}], disc on ${r.dim}: ${r.folderRows} folder rows, ${r.tagRows} tag rows            (names are the tag dimension's: ${r.namesMatch})` +
+            (r.pinned
+              ? `; pinned ${r.pinned} to ${r.key}, tag map ${r.inTagMap || "(missing)"}, on the tag disc ${r.appliedOnTagDisc || "(not applied)"}`
+              : "; no tag row to pin") +
+            `; folder map ${r.folderMapSize} entries, folder order kept ${r.foldersSame}, folder colours kept ${r.colourSame}`,
+  };
+});
+
+/* ------------------------------------------------- github#86 D-9, design/0015 */
 
 check("a marked heatmap day haloes but never pushes", async (p) => {
   const day = await p.j(`(function(){ var h = __vg.heat, b = null;
@@ -694,6 +1231,48 @@ check("highlighting ramps per note and is additive", async (p) => {
   const gone = await p.j(`{a: __vg.hl[${JSON.stringify(r.a)}] || 0, b: __vg.hl[${JSON.stringify(r.b)}] || 0}`);
   const ok = first.a === 1 && mid.a === 1 && mid.b > 0 && mid.b < 1 && gone.a === 0 && gone.b === 0;
   return { ok, detail: `first ${first.a}, then first ${mid.a} / second ${mid.b.toFixed(2)}, released ${gone.a}/${gone.b}` };
+});
+
+check("tags: a live rebuild in the tag disc refiles the arrival and keeps the rings it was switched into", async (p) => {
+  await settle(p);
+  await p.eval(LIVE_JS);
+  // github#72, github#86, decisions/0011 -- the filing is a cache a live rebuild stales
+  // github#86 -- an untagged arrival lands in (untagged)
+  // github#86, decisions/0011 -- a switched-to disc keeps its borrowed rings
+  // github#86 -- "fresh" is two passes inside the kept rings, not relayout()
+  await p.j(`(function(){ __vg.setDim("tag"); return true; })()`);
+  await settle(p);
+  const start = await p.j(`(function(){ window.__live.a = window.__live.snap();
+    var L = __vg.geomLock; window.__live.rings0 = L ? { r0: L.r0, maxR: L.maxR, dim: L.dim } : null;
+    return { n: window.__live.a.n, dim: __vg.state.dim, rings: window.__live.rings0 }; })()`);
+  const res = await p.j(`__vg.applyData(window.__live.withOneMore("__live/Zz Live Probe.md"))`);
+  await settle(p);
+  const after = await p.j(`(function(){
+    var landed = window.__live.snap(), id = null;
+    __vg.graph.forEachNode(function (i, a) { if (a.path === "__live/Zz Live Probe.md") id = i; });
+    __vg.applyLayout(false); __vg.applyLayout(false);
+    var L = __vg.geomLock;
+    return { d: window.__live.drift(landed, window.__live.snap()), found: id !== null,
+             g: id === null ? "" : __vg.groupOf(id), dim: __vg.state.dim, exit: __vg.lastCascade().exit,
+             rings: L ? { r0: L.r0, maxR: L.maxR, dim: L.dim } : null };
+  })()`);
+  await p.j(`__vg.applyData(window.__live.without(window.__live.clone().nodes.length - 1))`);
+  await settle(p);
+  const back = await p.j(`window.__live.drift(window.__live.a, window.__live.snap())`);
+  await p.j(`(function(){ __vg.setDim("folder"); return true; })()`);
+  await settle(p);
+  const r0Step = start.rings && after.rings ? Math.abs(after.rings.r0 - start.rings.r0) : NaN;
+  const ok = start.dim === "tag" && res.applied && res.added === 1 && res.cascaded &&
+             after.found && after.g === "(untagged)" && after.dim === "tag" &&
+             after.d.moved === 0 && after.d.sized === 0 && after.d.bands === 0 &&
+             !!start.rings && !!after.rings && start.rings.dim === "folder" && after.rings.dim === "folder" &&
+             r0Step < 0.01 && back.moved === 0 && back.sized === 0;
+  return { ok, detail: `on the ${start.dim} disc, ${start.n} -> ${start.n + 1} notes, cascade ${after.exit}; ` +
+                       `arrival filed under ${after.g || "(nowhere)"}; settle vs the fixed point: ` +
+                       `${after.d.moved} moved / ${after.d.sized} resized, ${after.d.bands} band flip(s); ` +
+                       `rings ${start.rings ? start.rings.dim : "none"} -> ${after.rings ? after.rings.dim : "none"}, ` +
+                       `r0 step ${isNaN(r0Step) ? "?" : r0Step.toFixed(4)}; restored to ${back.moved} off original` +
+                       (back.who ? ` (worst ${back.worst}, ${back.who})` : "") };
 });
 
 check("hover re-arms after the pointer leaves the stage", async (p) => {
@@ -4339,7 +4918,8 @@ check("a live rebuild with the same data moves nothing", async (p) => {
 
 check("the invalidation registry names every cache a live rebuild stales", async (p) => {
   const names = await p.j("__vg.invalidations()");
-  const want = ["timeline", "heatmap tally", "hop trail", "selection, hover and pins", "search hits"];
+  const want = ["timeline", "heatmap tally", "hop trail", "selection, hover and pins", "search hits",
+                "tag filing and sub order"];
   const missing = want.filter((w) => !names.includes(w));
   return { ok: missing.length === 0,
            detail: missing.length ? `MISSING: ${missing.join(", ")}` : `${names.length}: ${names.join("; ")}` };
@@ -4747,6 +5327,8 @@ function resolveVaults() {
 
   const out = [];
   const GENERATORS = ["make-demo-vault.mjs", "make-test-vault.mjs", "make-shape-vault.mjs"];
+  // github#86 -- hashes ONLY its own generator; the other three do not move
+  const TAG_GENERATORS = ["make-tag-vault.mjs"];
   const FIXTURE_FORMAT = 1;
 
   const storeRoot = (() => {
@@ -4760,10 +5342,10 @@ function resolveVaults() {
     return join(ROOT, ".fixtures");
   })();
 
-  const digestOf = (args) => {
+  const digestOf = (args, gens) => {
     const h = createHash("sha256");
     h.update("format:" + FIXTURE_FORMAT);
-    for (const g of GENERATORS) h.update(readFileSync(join(HERE, g)));
+    for (const g of gens || GENERATORS) h.update(readFileSync(join(HERE, g)));
     h.update(JSON.stringify(args));
     return h.digest("hex").slice(0, 8);
   };
@@ -4771,8 +5353,8 @@ function resolveVaults() {
   const todayDay = () => new Date().toISOString().slice(0, 10);
   const ageDays = (day) => Math.floor((Date.parse(todayDay()) - Date.parse(day)) / 86400000);
 
-  const gen = (script, args, name, label) => {
-    const digest = digestOf(args);
+  const gen = (script, args, name, label, gens) => {
+    const digest = digestOf(args, gens);
     const dir = join(storeRoot, `${name}-${digest}`);
     const stampPath = join(dir, ".stamp.json");
     let fresh = false;
@@ -4780,7 +5362,10 @@ function resolveVaults() {
       try {
         const st = JSON.parse(readFileSync(stampPath, "utf8"));
         const pinned = args.indexOf("--end") >= 0;
-        fresh = st.digest === digest &&
+        // github#86 -- a stamp is not proof the vault is usable
+        // github#86 -- one was found with its notes but no .obsidian
+        // github#86 -- a stamp-only test reuses that instead of rebuilding
+        fresh = st.digest === digest && existsSync(join(dir, ".obsidian")) &&
                 (pinned || (typeof st.day === "string" && ageDays(st.day) <= FIXTURE_MAX_AGE_DAYS));
       } catch { fresh = false; }
     }
@@ -4817,6 +5402,9 @@ function resolveVaults() {
   gen("make-test-vault.mjs", ["--notes", "10000", "--years", "10", "--end", "2026-08-28"],
       "test-vault", "the 10k synthetic vault (10 years)");
   gen("make-shape-vault.mjs", [], "shape-vault", "the dominant-folder vault");
+  // github#86, design/0015 -- the only tag-ORGANISED fixture; --end pinned
+  gen("make-tag-vault.mjs", ["--end", "2026-09-09"], "tag-vault",
+      "the tag-organised vault (nested tags, 8% untagged)", TAG_GENERATORS);
 
   if (!out.length) throw new Error("no vault to check, and none could be generated");
   return out;

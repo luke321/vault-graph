@@ -112,6 +112,28 @@
     color: var(--text-3); margin-bottom: 7px; font-weight: 600;
   }
 
+  /* github#86, design/0015 -- the grouping dimension, in the group list's own heading.
+     Semi-obvious: no border or fill at rest, so it reads as the heading it replaced, and a
+     chevron that is always there so anyone looking for a control finds one. */
+  /* github#86, design/0015 -- the grouping is a segmented control in the group list's own
+     heading, in the style the settings segments already use: two named sides, the active one
+     filled with the accent, so the one control that changes what the whole disc IS reads as a
+     control. It replaced a dropdown drawn as a heading with a chevron, which read as a label:
+     "is the dropdown obvious enough?" -- it was not. Inline, so the count sits beside it, and
+     the heading's uppercase does not reach the names. */
+  .vault-graph .dimseg { display: inline-grid; grid-auto-flow: column; gap: 2px; vertical-align: middle; margin: -3px 0; }
+  .vault-graph .dimseg button {
+    font: inherit; font-size: 11px; font-weight: 600; text-transform: none; letter-spacing: 0;
+    padding: 3px 9px; cursor: pointer; line-height: 1.3;
+    background: var(--surface-2); color: var(--text-2);
+    border: 1px solid var(--border); border-radius: 5px;
+  }
+  .vault-graph .dimseg button:hover { border-color: var(--border-strong); color: var(--text-1); }
+  .vault-graph .dimseg button[aria-pressed="true"] {
+    background: var(--accent); border-color: var(--accent); color: #fff;
+  }
+  .vault-graph .dimseg button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
   .vault-graph .seg { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; }
   .vault-graph .seg button {
     font: inherit; font-size: 12px; padding: 6px 8px; cursor: pointer;
@@ -130,6 +152,8 @@
   .vault-graph input[type="search"]:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
 
   .vault-graph .row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+  /* github#86 -- the display above would otherwise beat the hidden attribute */
+  .vault-graph .row[hidden] { display: none; }
   .vault-graph .row .val { font-variant-numeric: tabular-nums; color: var(--text-2); font-size: 11px; }
 
   .vault-graph #vg-legend { display: flex; flex-direction: column; gap: 1px; }
@@ -205,6 +229,14 @@
     background-size: max(var(--vg-floor, 4px), var(--vg-share)) 2px;
   }
   .vault-graph #vg-legend .lg.bar.bar-out { --vg-floor: 0px; }
+  /* github#86, design/0015 -- during a dimension switch the rows of the disc being left stay,
+     inert, and drop out as their notes fade; a row of the disc arriving drops in with its
+     first note. The height is animated through max-height because a row's height is what
+     the font makes it; 48px clears any row the legend draws, and the cap exists only while
+     the legend carries lg-switching, so no host font can ever clip a resting row. */
+  .vault-graph #vg-legend.lg-switching .lgr { max-height: 48px; transition: max-height .3s ease, opacity .25s ease; }
+  .vault-graph #vg-legend.lg-switching .lgr.lgr-gone { max-height: 0; opacity: 0; overflow: hidden; pointer-events: none; }
+  .vault-graph #vg-legend.lg-switching .lgr[data-old] { pointer-events: none; }
   .vault-graph .lg .sw { width: 11px; height: 11px; border-radius: 50%; }
   .vault-graph .lg .sw.sw-in { transform: scale(0.6); }
   .vault-graph .lg .nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -282,6 +314,10 @@
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
   .vault-graph .sws { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
+  /* github#86, design/0015 -- the settings tabs are the group list's own segmented control,
+     one rule apart: it spans the panel and sits above the rows. */
+  .vault-graph .dimseg.setseg { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; margin: 0 0 9px; }
+  .vault-graph .dimseg.setseg button { text-align: center; padding: 5px 8px; }
   .vault-graph #vg-setbody { max-height: 46vh; overflow-y: auto; }
   .vault-graph #vg-setbody .sws {
     display: grid; grid-template-columns: repeat(12, 1fr); gap: 4px;

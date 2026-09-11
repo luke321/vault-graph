@@ -54,6 +54,12 @@ measuring it: serve the page, drive it, read the numbers.
   git push origin develop
   node scripts/lock.mjs release suite --owner "orchestrator: push develop"
   ```
+- **Never serve Chrome unlabeled.** Any vault-graph page opened in Chrome from this worktree
+  — `smoke.mjs`, `shoot.mjs`, a manual review build — sets the page's own top-left title to
+  `<worktree/feature> — <what it's showing>`, e.g. `tag-grouping — demo vault`, instead of the
+  default. Patch `window.VAULT_DATA`'s `vault` field in the built HTML, never the product: the
+  title is a review aid, and several builds from different branches and vaults sit in tabs at
+  once, so an unlabeled one is judged against the wrong build.
 - **A vault that is not Lukas's own opens in restricted mode, and the plugin does not load at
   all.** Any fixture or generated vault is "untrusted" on its first open: Obsidian puts up **"Trust
   author and enable plugins?"** and opens its Settings window behind it. Until that is confirmed
