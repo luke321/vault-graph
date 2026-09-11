@@ -11,10 +11,12 @@
 # have, and the whole point is that it should not depend on anyone remembering.
 #
 # WHY pre-push AND NOT pre-commit: the suite builds the page and drives a real Chrome, and
-# does that against THREE generated vaults -- a ~450-note mirror shape, a 10,000-note
-# synthetic and a dominant-folder one, because a change that passes at 450 notes can still
-# break the band split at 10,000. Measured 2026-09-10: 587 s for 94 checks x 3 fixtures, of
-# which 446 s is the serial lane of frame-sensitive checks (github#93). A fine price per
+# does that against FOUR generated vaults -- a ~1,400-note mirror shape, a 10,000-note
+# synthetic, a dominant-folder one and a tag-organised one, because a change that passes at
+# 1,400 notes can still break the band split at 10,000. Measured 2026-09-10: 587 s for 94
+# checks x 3 fixtures, of which 446 s was a serial lane of frame-sensitive checks (github#93);
+# since github#113 each check runs only on the fixtures its assertion is about and most run
+# with the page's clock at a tenth (.ai-context/invariants.md has the numbers). A fine price per
 # distinct tree pushed to develop or main, an intolerable one per commit -- and an unearned
 # one on a feature branch nobody has asked to merge yet, which is why the gate checks below
 # are scoped to gated_push and skip entirely on any other branch. The main-ancestry policy
@@ -283,6 +285,21 @@ EOF
   exit 1
 fi
 
+# THE UPDATE NOTE'S DECISION TABLE NEXT, same bar -- pure functions, no Chrome, ~50 ms.
+# plugin/update-note.mjs decides whether the plugin announces a release (github#83); a flipped
+# branch there would pass lint and every other check here while announcing to nobody, or twice.
+echo "pre-push: checking the update note's grammar and decision table..."
+if ! node "$root/scripts/update-note-selftest.mjs" </dev/null; then
+  cat >&2 <<'EOF'
+
+pre-push: the update-note selftest failed -- push blocked.
+
+Read the FAIL lines above. plugin/update-note.mjs and scripts/update-note-selftest.mjs must
+agree; .ai-context/design/0016-update-note.md has the table. There is no skip flag for this check.
+EOF
+  exit 1
+fi
+
 # THE GENERATED NAVIGATION FILES NEXT, same bar -- a read of the tree, well under a second.
 # .ai-context/code-map.md and code-index.md are written from the source by
 # scripts/code-map.mjs (github#61) and are only worth having while they agree with it; a
@@ -346,10 +363,21 @@ fi
 # against, in the shared git common dir). main only ever receives develop, so the merge commit
 # that reaches main carries exactly the tree develop's push already gated -- measured on 2.3.0,
 # 2.4.0 and 2.4.1, byte-identical trees -- and re-driving Chrome for ten minutes against
-# identical content is cost, not a second opinion. So: if every commit being pushed has a
-# stamp, the suite is skipped and the stamp is named. A commit whose tree nobody has measured
-# -- a merge that brought new content, a fixture that was regenerated since -- runs it as
-# before. Nothing here trusts a commit hash, a branch name or a clock.
+# identical content is cost, not a second opinion. So: if the tip of every ref being pushed
+# has a stamp, the suite is skipped and the stamp is named. Only those tips are looked up --
+# not every commit in the range. A tip whose tree nobody has measured -- a merge that brought
+# new content, a fixture that was regenerated since -- runs it as before. Nothing here trusts
+# a commit hash, a branch name or a clock.
+#
+# github#105: a DELETION (git push origin :develop) pushes the all-zero sha, which names no
+# tree, so it is left out of gated_shas above and the loop below never runs. stamped=1 as an
+# initial value would then announce a suite pass for a push that carried no tree at all. An
+# empty list here means every develop/main ref in this push is a deletion -- a push that also
+# updates one of them still has that tip to look up, and falls through to the loop.
+if [ -z "$gated_shas" ]; then
+  echo "pre-push: nothing to gate -- the develop/main ref(s) here are deletions, which carry no tree"
+  exit 0
+fi
 stamped=1
 for sha in $gated_shas; do
   # github#103: exit 0 alone is not a stamp -- a CLI whose body never ran also exits 0 -- so
@@ -359,7 +387,7 @@ for sha in $gated_shas; do
   case "$out" in *"passed the invariant suite"*) ;; *) stamped="" ;; esac
 done
 if [ -n "$stamped" ]; then
-  echo "pre-push: every tree being pushed already passed the invariant suite -- skipping it"
+  echo "pre-push: the tip of every ref being pushed already passed the invariant suite -- skipping it"
   exit 0
 fi
 
@@ -368,7 +396,14 @@ fi
 # and released on every way out -- a lock held by a dead hook makes everyone else wait out its
 # stale window. A lock that cannot be had blocks the push rather than running on top of the
 # holder; the holder is named so the wait is a known one.
-lock_owner="pre-push $(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo '?')"
+#
+# THE PID IS PART OF THE OWNER, and the whole point (github#104). lock.mjs treats a same-owner
+# acquire as already held and exits 0, and lets that owner release -- so without $$ a second
+# push from this worktree while the first is still driving Chrome would start a second suite
+# immediately, which is the exact collision the lock exists to prevent, and whichever finished
+# first would delete the lock out from under the other. The branch name alone does not separate
+# them: two worktrees on detached HEAD both read "pre-push HEAD".
+lock_owner="pre-push $(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo '?') [$$]"
 release_lock() { node "$root/scripts/lock.mjs" release suite --owner "$lock_owner" </dev/null >/dev/null 2>&1; }
 trap 'release_lock; exit 1' INT TERM HUP
 if ! node "$root/scripts/lock.mjs" acquire suite --owner "$lock_owner" </dev/null; then

@@ -30,6 +30,38 @@ published tag breaks every link to it.
 
 ---
 
+## 2.6.0 — "Minimap" — 2026-09-11
+
+**Three things the disc used to leave you guessing about:** where you are when you zoom in, what a colour will do before you pick it, and what changed when the plugin updated.
+
+### Know where you are when you zoom in
+
+- Zoom in and a small map appears next to Fit, with a box marking the part you are looking at.
+- Click it to jump back to the whole disc.
+- It shows up only while the disc is cut off, and takes itself away when everything fits again.
+
+### See a colour before you pick it
+
+- Every swatch now shows the dots it will actually draw, including the lighter shades the
+  subfolders get.
+- The plugin's settings show the same swatches as the right-click menu.
+
+### The plugin tells you what is new
+
+- After an update, a strip at the top says what changed. Dismiss it and it stays gone.
+- Miss a few releases and it catches you up on all of them, oldest first.
+- Whatever the release added lights up while the strip is there, so you can see where to look.
+
+### Smaller things
+
+- The legend keeps up when you switch light and dark.
+- Switching between Folders and Tags no longer nudges the sidebar sideways.
+- Dots in the inner ring are sized against their own ring, so a busy one looks right.
+- Animations follow your system's reduced-motion setting.
+- The colour swatches in the plugin's settings line up, and are big enough to see.
+
+---
+
 ## 2.5.0 — "Tags" — 2026-09-11
 
 **A second way to cut the disc: by tag instead of by folder.** The group list's heading is now

@@ -14,14 +14,14 @@ Call out what's newly done since the last table and what's still blocked or awai
 |---|---|---|
 | 1 | <this release's own polish/fix asks, one row each> | |
 | 2 | Any new-feature doc page(s) + clip(s) under `docs/features/` | |
-| 3 | `CHANGELOG.md` section for `<version>`, covering every merge since the last tag | |
+| 3 | `CHANGELOG.md` section for `<version>`, covering every merge since the last tag — and, for a MINOR or MAJOR, `plugin/whats-new.md` rewritten for it: the three-to-five-line note the plugin shows once after the update (github#83, `design/0016`). A PATCH leaves the file alone. `release.ps1` refuses an `x.y.0` whose note is for another version | |
 | 4 | Version bump: `manifest.json` → `<version>` | |
 | 5 | Release name — propose 2-4 candidates, his pick | |
 | 6 | **Re-record every clip the UI change touches** — if anything visual changed this release (a constant like `FIT_RATIO`, a storyboard reorder, a sizing fix), the hero *and every existing feature-gallery clip* are stale, not just the ones whose own beats moved. Needs the `record` lock; ask before recording. Before merge, not after — the merged tree is what the clips should show. | |
 | 7 | Merge `release/<version>` → `develop` (local) | |
 | 8 | **One** plain `git push origin develop` (the hook takes the `suite` lock itself, github#92 — never wrap the push in your own acquire/release, it deadlocks against the hook's) | |
 | 9 | PR/merge `develop` → `main` | |
-| 10 | **Review the release body before the tag goes out** — `release.yml` publishes live the moment the tag lands, using the `## <version>` CHANGELOG section verbatim as the body and no `--draft` gate; read it as the page a stranger lands on, not as a changelog entry. This is the actual review step, not `release.ps1`'s pre-flight suite. | |
+| 10 | **Draft the release body, publish it as a Claude Artifact, and get an explicit go-ahead before the tag goes out** — `release.yml` publishes live the moment the tag lands, using the `## <version>` CHANGELOG section verbatim as the body and no `--draft` gate; the artifact is what puts the actual rendered page a stranger will land on in front of a human, not a changelog entry read back by the same session that wrote it. This is the actual review step, not `release.ps1`'s pre-flight suite. | |
 | 11 | `release.ps1` on `main` — gates, tag, push | |
 | 12 | GitHub Actions publishes the release (attestation, assets) — automatic once tagged | |
 ```
@@ -35,6 +35,21 @@ forbid ("once the tag exists nothing changes"). The workflow creates no GitHub d
 the CHANGELOG section going out is the actual publish. So the review has to happen before the tag,
 on `release/<version>`, not after — read the `## <version>` section once as the page it's about to
 become, not as a changelog entry, before `release.ps1` runs.
+
+**Step 10 was skipped by substitution, cutting 2.5.0, the same day it was written.** The highlight
+reel was drafted, read back by the same session that wrote it, judged fine, and pushed live with
+`gh release edit` — no human had seen it. Caught only because Lukas asked directly whether the
+guidelines had actually been followed. **"Review" means a human reviews it — publish the drafted
+body as a Claude Artifact (the rendered highlight reel, its clip, the verbatim CHANGELOG section
+underneath, exactly as it will read on the release page) and wait for an explicit reaction before
+running `release.ps1` or touching the live release with `gh release edit`.** A chat summary of the
+draft is not the artifact and does not satisfy this; neither does the agent's own read-through,
+however careful — the entire reason this step exists is that nobody but Lukas can tell whether the
+highlight reel reads as a page he'd want representing the release, and that judgment cannot be
+delegated to whoever wrote the draft. Mechanically, `gh release edit` can only run after
+`release.ps1` has created the release (the Release object doesn't exist before the tag), but the
+drafting, the artifact, and the go-ahead all happen before that — the edit that follows the tag is
+applying an already-approved body, not asking for approval after the fact.
 
 **Every release gets a git tag and a GitHub Release with the plugin's three files attached —
 `main.js`, `manifest.json`, `styles.css` — each carrying a build provenance attestation.** The
@@ -169,7 +184,13 @@ reverse-engineered from it, not invented.
    (`git show <prev-tag>:src/page.js | grep ...`). Bug fixes real enough to matter but not
    visually demonstrable go in prose under the nearest relevant `###`, or their own
    "Smaller things" `###` list, with no clip forced onto them.
-4. **A `---` divider**, then the CHANGELOG.md section **appended verbatim, unedited,
+4. **One line, every release, always the same spot** — right after the highlight reel,
+   right before the divider below: `☕ If Vault Graph is useful to you, [support it on
+   Ko-fi](https://ko-fi.com/luke321).` Added 2026-09-11, alongside the manifest `fundingUrl`,
+   the README badge and the GitHub Sponsor button — this is where it reaches someone who just
+   updated and is reading what's new, which is the natural moment for it. One line, never
+   embellished, never repeated elsewhere on the page.
+5. **A `---` divider**, then the CHANGELOG.md section **appended verbatim, unedited,
    heading included** (`## <version> — "<Name>" — <date>` through to its own trailing
    `---`). This is not a link out — the full technical writeup lives IN the release body,
    underneath the highlight reel, so nothing written for the changelog is lost and nothing
@@ -378,7 +399,10 @@ exactly once.
 2. Rehearse the local half: `.\scripts\release.ps1 <version> -DryRun -AllowAnyBranch`. **This is
    the run that pays the suite.** It ends with `stamped tree <sha> as passed`, which records the
    branch's tree and the three fixtures it ran against in the shared git common dir. A dirty tree
-   is never stamped; commit first.
+   is never stamped; commit first — and **do not commit while it runs**, because the tree is
+   captured before the first build and a moved HEAD refuses the stamp (github#104), which costs
+   the suite again at step 3. Nor with `--jobs`, `--chrome`, `--headed`, `--no-grid` or `--port`:
+   that is not the shape the gates push with, and it stamps nothing.
 3. Push the branch: the workflow's dry run builds, gates and attests the three files on a Linux
    runner (static gates only, no Chrome, under a minute). Read its summary.
 

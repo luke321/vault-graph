@@ -23,30 +23,57 @@ measuring it: serve the page, drive it, read the numbers.
 ## How to work here
 
 - `node scripts/smoke.mjs --only "<substring>"` is the iteration loop. The full suite runs on
-  the push to `develop` (the pre-push hook); do not run it by hand unless asked.
+  the push to `develop` whose tree it has not measured yet (the pre-push hook; see
+  `scripts/suite-stamp.mjs`); do not run it by hand unless asked.
 - **Two things may not run twice at once, and `scripts/lock.mjs` is how you know.** Several
-  agents work this repo in parallel worktrees, and two of them collide invisibly: a **screen
-  recording** (`record-demo.ps1`, `make-hero.ps1`) grabs a display region, so a second take
-  captures the first one's window; the **full suite** drives Chrome over CDP, so two runs fight
-  for ports and each blames the code. Take the lock, do the thing, release it — always release,
-  even on failure, or everyone else waits out the stale window (20 min for `record`, 30 for
-  `suite`):
+  agents work this repo in parallel worktrees, and they collide over two different resources.
+
+  **A screen.** `record-demo.ps1` captures with `gdigrab -i desktop` — it copies a *region of the
+  display*, so anything else drawn there lands in the take and ruins it silently: the file exists
+  and looks plausible. A recording is not the only claimant — `smoke.mjs` parks every Chrome
+  window it opens on the leftmost monitor, and `spike-check.mjs` puts Obsidian there — so the
+  lock is named after the **screen**, not the job: `screen-left`, `screen-right`,
+  `screen-primary`. **Every harness that places a window takes its own screen lock and releases
+  it on every way out** — `smoke.mjs`, `spike-check.mjs`, `record-demo.ps1` — so you do not have
+  to remember, and so the claim names the physical display rather than the activity (github#87).
+
+  **The shared fixture store.** Two full-suite runs do *not* fight over ports — ports are
+  allocated free and each run gets its own Chrome profile. They fight over `.fixtures/`: a run that
+  regenerates deletes every `<name>-*` directory there, including the one a concurrent run is
+  reading. That is the `suite` lock, and **it is only about `.fixtures/`** — the display is a
+  separate claim under its own name. It bites only when a fixture is stale, which is why it is
+  rare and reads as a regression in your branch.
+
+  Keeping them separate is what lets `pre-push` hold `suite` while the `smoke.mjs` it spawns
+  holds `screen-left`: two names, two resources, no nesting. Aliasing the two instead — which
+  this repo tried first — deadlocks that exact pair, because `aliasHold` blocks on whoever holds
+  the alias, the asker included. Vault Shelf measured it (`vault-shelf#37`) and reached the same
+  design independently.
 
   ```bash
-  node scripts/lock.mjs acquire record --owner "#77 palette"   # blocks; exit 1 = give up, do not record
-  node scripts/lock.mjs release record --owner "#77 palette"
-  node scripts/lock.mjs status                                  # who holds what
+  node scripts/lock.mjs acquire screen-right --owner "#77 palette"   # blocks; exit 1 = give up
+  node scripts/lock.mjs release screen-right --owner "#77 palette"   # always, even on failure
+  node scripts/lock.mjs status                                       # who holds what
   ```
 
-  The lock lives in the OS temp dir, not the worktree, so **every worktree shares one**. A
-  `mkdir` is the lock — atomic, and it survives a killed session as a stale entry rather than a
-  permanent one. Screenshots need no lock: `shoot.mjs` captures over CDP, so overlapping windows
-  are harmless — but pass your own `--port`.
+  You need those two by hand only for something that seizes a display and is **not** one of the
+  three harnesses — a manual Chrome you are driving yourself, say. Never wrap one of the three:
+  `smoke.mjs` takes `screen-left` itself, so an outer hold makes its own acquire wait out your
+  stale window. `--no-lock` exists for the one caller that legitimately already holds it.
+
+  The lock lives in the OS temp dir, not the worktree, so **every worktree shares one** — and the
+  root is shared with Vault Shelf (`obsidian-vault-locks`), so the two plugins' jobs contend with
+  each other, not just their own (github#92). A `mkdir` is the lock — atomic, and it survives a
+  killed session as a stale entry (20 min) rather than a permanent one. **`make-hero.ps1` needs no
+  lock**: it is an ffmpeg file-to-file transcode, not a capture. Screenshots need none either:
+  `shoot.mjs` captures over CDP, so overlapping windows are harmless — but pass your own `--port`.
 
   **`.githooks/pre-push` takes the `suite` lock itself, around its own run, and releases it on
-  every way out (github#92).** Do not also wrap a `git push` in an outer acquire/release — the
-  hook's own attempt blocks on yours and the push hangs until the outer lock's stale window
-  expires. A plain `git push origin develop`/`main` is correctly gated on its own; the wrapping
+  every way out (github#92).** Do not also wrap a `git push` in an outer acquire/release, of
+  **either** name: the hook takes `suite` and the `smoke.mjs` it spawns takes `screen-left`, so
+  an outer hold of either one blocks the hook's own attempt and the push hangs until your stale
+  window expires. A plain `git push origin develop`/`main` is correctly gated on its own, and so
+  is a `smoke.mjs` run you drive directly — neither needs wrapping any more. A plain `git push origin develop`/`main` is correctly gated on its own; the wrapping
   above is only for a `smoke.mjs` run *you* are driving directly, never for a push.
 - **Never serve Chrome unlabeled.** Any vault-graph page opened in Chrome from this worktree
   — `smoke.mjs`, `shoot.mjs`, a manual review build — sets the page's own top-left title to
@@ -76,6 +103,13 @@ measuring it: serve the page, drive it, read the numbers.
 
 - `git push` and merging into `develop` are separate asks, every time. `main` only ever
   receives `develop`.
+- **Which session you are is decided by the checkout you are in, not by what you were asked to
+  do.** The main checkout, `C:\git-personal\vault-graph` on `develop`, is the **orchestrator**:
+  one session, the only one that pushes to `develop`, merges branches down, or cuts a release.
+  Every other checkout — anything under `C:\git-personal\worktrees\`, i.e. any tree whose
+  `git rev-parse --show-toplevel` is not that path — is a **dispatched worker**, whatever its
+  branch says. Settle this before the first write: `git rev-parse --show-toplevel` and
+  `git worktree list` answer it in one call.
 - **Only the orchestrator session pushes to `develop` or cuts a release.** A dispatched ticket
   worktree implements, runs its own gates, and stops at its own branch — it never pushes past
   that branch, never merges into `develop`, and never runs `release.ps1`, no matter how clean the
@@ -93,7 +127,11 @@ measuring it: serve the page, drive it, read the numbers.
   anything merges down. **Once the tag exists nothing changes**: a fix is the next patch version,
   because editing after the fact leaves the tag disagreeing with the published page. 2.1.0 was
   cut twice for skipping this; `.ai-context/releasing.md` opens with the commands that enumerate
-  a range.
+  a range. **"Review the release body" means a human reviews it** — publish the drafted body as a
+  Claude Artifact and get an explicit go-ahead before `release.ps1` or `gh release edit` touches
+  anything live; self-review by the session that wrote the draft is not this step, however
+  careful, and skipping straight to publishing is what happened cutting 2.5.0 (`.ai-context/
+  releasing.md`, and the `cut-release` skill).
 - Measure before and after; the numbers go into `.ai-context/changelog-detail.md`, which is
   the regression suite. A changed constant means `invariants.md` changes in the same commit.
 - Fixtures: three generated vaults (`scripts/make-*-vault.mjs`) in the shared store; never a

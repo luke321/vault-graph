@@ -100,7 +100,10 @@ export default defineConfig([
     // THE EXPORTER AND THE TOOLING: Node programs, never loaded by Obsidian. No type program
     // here -- nothing type-aware is on for them, so none is built -- and Node's globals rather
     // than the page's.
-    files: ["src/**/*.mjs", "scripts/**/*.mjs"],
+    // plugin/**/*.mjs: the one plugin-side module Node also imports (the update-note
+    // decision, github#83) -- pure functions with no Obsidian API in them, run by
+    // scripts/update-note-selftest.mjs and scripts/build-plugin.mjs as well as bundled.
+    files: ["src/**/*.mjs", "scripts/**/*.mjs", "plugin/**/*.mjs"],
     rules: {
       ...OBSIDIAN_OFF,
       // AND THE PRESET'S OBSIDIAN-FLAVOURED CORE RULES. Beyond obsidianmd/*, the recommended set

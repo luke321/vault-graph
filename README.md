@@ -1,5 +1,7 @@
 # Vault Graph
 
+[![Latest release](https://img.shields.io/github/v/release/luke321/vault-graph?label=release)](https://github.com/luke321/vault-graph/releases/latest) [![License: MIT](https://img.shields.io/github/license/luke321/vault-graph)](LICENSE) [![GitHub stars](https://img.shields.io/github/stars/luke321/vault-graph)](https://github.com/luke321/vault-graph/stargazers) [![Obsidian downloads](https://img.shields.io/badge/dynamic/json?logo=obsidian&color=%23483699&label=downloads&query=%24%5B%27vault-graph%27%5D.downloads&url=https%3A%2F%2Fraw.githubusercontent.com%2Fobsidianmd%2Fobsidian-releases%2Fmaster%2Fcommunity-plugin-stats.json)](https://community.obsidian.md/plugins/vault-graph) [![Ko-fi](https://img.shields.io/badge/Ko--fi-support-3987e5?logo=ko-fi&logoColor=white)](https://ko-fi.com/luke321)
+
 **Your whole vault as one disc.** Every note is a dot; every top-level folder owns a wedge
 of the circle whose angle is its share of the vault. Notes fill concentric rings from the
 middle outwards, best-connected first, so the best-connected notes sit near the centre and
@@ -25,10 +27,10 @@ a note to see its links; search narrows to matching notes; scrub a date ribbon t
 vault grow. Follows Obsidian's theme, including a live switch.
 
 **[Try it Live](https://luke321.github.io/vault-graph/demo/)** — a real export of an invented
-1,400-note vault, click and hover it exactly like your own. **[The full feature
-list](https://luke321.github.io/vault-graph/features.html)**, one short clip per feature — the
-disc itself, filtering, the heatmap and timeline, reading a note, the camera, and folder
-colours — is a click away too. Both live on the
+1,400-note vault, click and hover it exactly like your own.
+**[The full feature list](https://luke321.github.io/vault-graph/features.html)**, one short
+clip per feature — the disc itself, filtering, the heatmap and timeline, reading a note, the
+camera, and folder colours — is a click away too. Both live on the
 [docs site](https://luke321.github.io/vault-graph/).
 
 ---
@@ -46,9 +48,8 @@ Enable. Open it from the ribbon icon or the command palette (*Vault graph: Open 
 
 <sub>**Check what you downloaded, if you like.** `main.js` is a ~390 KB bundle — the page, the
 plugin host and the engine, a Sigma.js port — and nothing about downloading a file tells you
-where it came from. Every
-release asset now carries a [GitHub build provenance
-attestation](https://docs.github.com/en/actions/security-for-github-actions/using-artifact-attestations/using-artifact-attestations-to-establish-provenance-for-builds),
+where it came from. Every release asset now carries a
+[GitHub build provenance attestation](https://docs.github.com/en/actions/security-for-github-actions/using-artifact-attestations/using-artifact-attestations-to-establish-provenance-for-builds),
 signed by the workflow that built it — so you can verify it came from this repository at
 the tagged commit rather than being assembled by hand: `gh attestation verify main.js
 --repo luke321/vault-graph`. Releases published before this landed (1.9.0 and earlier)
@@ -358,19 +359,21 @@ for why an earlier version did and had to be replaced.
 node scripts/smoke.mjs
 ```
 
-Builds to a temp file, drives a real Chrome, and checks 17 measured properties of the
-layout — plan parity, the resting lattice, the heatmap's tiling, the hover and highlight
+Builds to a temp file, drives a real Chrome, and checks over a hundred measured properties of
+the layout — plan parity, the resting lattice, the heatmap's tiling, the hover and highlight
 ramps — printing the number it measured for each.
 
-With no arguments it checks **two vault shapes**, one after the other: a ~450-note mirror of
-a real vault and a 10,000-note synthetic, generating either on demand. That is not
-belt-and-braces — a small vault and a large one take different branches through the ring
-balancer and the gap scaling, and a change that passes at 450 notes can still break the band
-split at 10,000. The mirror is skipped with a notice when there is no real vault to mirror,
-never silently.
+With no arguments it checks **four generated fixtures**, two Chromes at a time: a ~1,400-note
+mirror of a real vault, a 10,000-note synthetic, a dominant-folder vault and a tag-organised
+one. That is not belt-and-braces — a small vault and a large one take different branches
+through the ring balancer and the gap scaling, and a change that passes at 1,400 notes can
+still break the band split at 10,000. Each check runs on the fixtures its assertion is about:
+one whose subject is the disc's shape runs on all four, one whose subject is a button runs on
+the mirror alone, and one that measures an animation frame by frame runs on the page's own
+clock while the rest run it at a tenth speed (same resting layout, measured).
 
-`--vault PATH` is repeatable and overrides that pair; `--url FILE` checks an already-built
-page.
+`--vault PATH` is repeatable, overrides the fixtures and runs every check on what you gave it;
+`--url FILE` checks an already-built page.
 
 ```bash
 node scripts/smoke.mjs --vault ./test-vault --vault ./demo-vault
@@ -439,7 +442,7 @@ the plugin puts them in an Obsidian view.
 |---|---|
 | `scripts/build-plugin.mjs` | bundles the plugin into `main.js` + `styles.css` (`npm run build`) |
 | `scripts/install-plugin.ps1` | copies exactly the three files Obsidian installs, and nothing else |
-| `scripts/smoke.mjs` | the invariant suite, over both vault shapes |
+| `scripts/smoke.mjs` | the invariant suite, over four generated fixtures |
 | `scripts/check-scope.mjs` | asserts the page cannot style or be styled by its host |
 | `scripts/code-map.mjs` | generates `.ai-context/code-map.md` and `code-index.md` from the source; `--check` gates them |
 | `scripts/check-pii.mjs` | refuses to publish other people's names; no skip flag |

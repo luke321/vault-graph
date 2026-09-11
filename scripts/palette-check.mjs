@@ -1,7 +1,7 @@
 // design/0004
+// github#77
 import { readFileSync } from "node:fs";
-
-const css = readFileSync(process.argv[2] || "src/page.css", "utf8");
+import { pathToFileURL } from "node:url";
 
 const s2lin = (c) => (c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4));
 const hex = (h) => {
@@ -34,51 +34,84 @@ const contrast = (a, b) => {
   return (hi + 0.05) / (lo + 0.05);
 };
 
-const block = (re) => {
-  const m = css.match(re);
-  if (!m) throw new Error("block not found: " + re);
-  return m[0];
-};
-const light = block(/\.vault-graph \{[\s\S]*?\n {2}\}/);
-const dark = block(/\.vault-graph\[data-theme="dark"\] \{[\s\S]*?\n {2}\}/);
-
 const NAMES = ["Blue", "Orange", "Aqua", "Yellow", "Green", "Magenta",
                "Violet", "Red", "Cyan", "Orchid", "Grey", "Slate"];
 
-for (const [label, text] of [["LIGHT", light], ["DARK", dark]]) {
+// github#77, design/0004
+/** @param {string} cssText */
+export function measurePalette(cssText) {
   const grab = (name) => {
-    const m = text.match(new RegExp("--" + name + "\\s*:\\s*(#[0-9a-fA-F]{3,6})"));
+    const m = cssText.match(new RegExp("--" + name + "\\s*:\\s*(#[0-9a-fA-F]{3,6})"));
     return m ? m[1] : null;
   };
-  const surface = grab("surface-1");
-  const slots = NAMES.map((n, i) => ({ name: n, key: "g" + (i + 1), hex: grab("g" + (i + 1)) }));
-  const missing = slots.filter((s) => !s.hex);
-  if (missing.length) { console.log(`${label}: MISSING ${missing.map((s) => s.key).join(", ")}`); continue; }
 
-  console.log(`\n=== ${label}  surface ${surface} ===`);
-  console.log("slot  name      hex       chroma  hue    contrast");
-  for (const s of slots) {
-    console.log(
-      s.key.padEnd(5), s.name.padEnd(9), s.hex.padEnd(9),
-      chroma(s.hex).toFixed(3).padStart(6),
-      hueDeg(s.hex).toFixed(0).padStart(4),
-      contrast(s.hex, surface).toFixed(2).padStart(9),
-    );
+  // github#77
+  const strays = [];
+  for (const m of cssText.matchAll(/--(g\d+|surface-1)\s*:\s*(#[0-9a-fA-F]{3,6})/g)) {
+    strays.push(`--${m[1]}: ${m[2]}`);
   }
-  const hues = slots.slice(0, 10);
-  const cs = hues.map((s) => chroma(s.hex));
-  console.log(`hue chroma range: ${Math.min(...cs).toFixed(3)} - ${Math.max(...cs).toFixed(3)}`);
-  const lowC = slots.filter((s) => chroma(s.hex) < 0.10 && !["g11", "g12"].includes(s.key));
-  console.log(`hues under chroma 0.10: ${lowC.length ? lowC.map((s) => s.key + " " + s.name).join(", ") : "none"}`);
-  const under3 = slots.filter((s) => contrast(s.hex, surface) < 3);
-  console.log(`slots under 3:1 on the surface: ${under3.length ? under3.map((s) => s.key).join(", ") : "none"}`);
 
-  let worst = { d: Infinity };
-  for (let i = 0; i < slots.length; i++) {
-    for (let j = i + 1; j < slots.length; j++) {
-      const d = dE(slots[i].hex, slots[j].hex);
-      if (d < worst.d) worst = { d, a: slots[i], b: slots[j] };
+  const themes = {};
+  for (const [label, suffix] of [["LIGHT", "l"], ["DARK", "d"]]) {
+    const surface = grab("surface-1-" + suffix);
+    const slots = NAMES.map((n, i) => ({
+      name: n, key: "g" + (i + 1), hex: grab("g" + (i + 1) + "-" + suffix),
+    }));
+    const missing = slots.filter((s) => !s.hex).map((s) => s.key);
+    if (missing.length || !surface) { themes[label] = { label, surface, missing, slots: [] }; continue; }
+    for (const s of slots) {
+      s.chroma = chroma(s.hex);
+      s.hue = hueDeg(s.hex);
+      s.contrast = contrast(s.hex, surface);
     }
+    let worst = { d: Infinity };
+    for (let i = 0; i < slots.length; i++) {
+      for (let j = i + 1; j < slots.length; j++) {
+        const d = dE(slots[i].hex, slots[j].hex);
+        if (d < worst.d) worst = { d, a: slots[i], b: slots[j] };
+      }
+    }
+    themes[label] = {
+      label, surface, slots, missing: [], worst,
+      under3: slots.filter((s) => s.contrast < 3).map((s) => s.key),
+      lowChroma: slots.filter((s) => s.chroma < 0.10 && !["g11", "g12"].includes(s.key)),
+    };
   }
-  console.log(`worst pair: ${worst.a.name} vs ${worst.b.name} = dE ${worst.d.toFixed(1)}`);
+  return { light: themes.LIGHT, dark: themes.DARK, strays };
+}
+
+function report(cssText) {
+  const p = measurePalette(cssText);
+  for (const t of [p.light, p.dark]) {
+    if (t.missing.length || !t.surface) {
+      console.log(`${t.label}: MISSING ${(t.missing.length ? t.missing : ["surface-1"]).join(", ")}`);
+      continue;
+    }
+    console.log(`\n=== ${t.label}  surface ${t.surface} ===`);
+    console.log("slot  name      hex       chroma  hue    contrast");
+    for (const s of t.slots) {
+      console.log(
+        s.key.padEnd(5), s.name.padEnd(9), s.hex.padEnd(9),
+        s.chroma.toFixed(3).padStart(6),
+        s.hue.toFixed(0).padStart(4),
+        s.contrast.toFixed(2).padStart(9),
+      );
+    }
+    const cs = t.slots.slice(0, 10).map((s) => s.chroma);
+    console.log(`hue chroma range: ${Math.min(...cs).toFixed(3)} - ${Math.max(...cs).toFixed(3)}`);
+    console.log(`hues under chroma 0.10: ${t.lowChroma.length ? t.lowChroma.map((s) => s.key + " " + s.name).join(", ") : "none"}`);
+    console.log(`slots under 3:1 on the surface: ${t.under3.length ? t.under3.join(", ") : "none"}`);
+    console.log(`worst pair: ${t.worst.a.name} vs ${t.worst.b.name} = dE ${t.worst.d.toFixed(1)}`);
+  }
+  if (p.strays.length) {
+    console.log(`\nPALETTE DECLARED TWICE: ${p.strays.join(", ")}`);
+    console.log("Every slot hex belongs in the --gN-l / --gN-d pair tokens on .vault-graph;");
+    console.log("a theme block may only map --gN onto one of them. github#77");
+    return 1;
+  }
+  return 0;
+}
+
+if (import.meta.url === pathToFileURL(process.argv[1] || "").href) {
+  process.exit(report(readFileSync(process.argv[2] || "src/page.css", "utf8")));
 }

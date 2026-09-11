@@ -637,6 +637,7 @@ try {
                         " return { theme: v.page.getAttribute('data-theme'), bodyLight: document.body.classList.contains('theme-light'), text: cs.getPropertyValue('--text-1').trim()," +
                         " surface: cs.getPropertyValue('--surface-1').trim(), labelColor: api.renderer.getSetting ? api.renderer.getSetting('labelColor') : null," +
                         " group: g, slot: slot, token: norm(cs.getPropertyValue('--' + slot))," +
+                        " colorOf: g && api.colorOf ? norm(api.colorOf(g)) : null," +
                         " legendSwatch: lsw ? norm(lsw.style.background) : null," +
                         " barred: !!(lg && lg.classList.contains('bar'))," +
                         " bar: lg ? norm(lg.style.getPropertyValue('--vg-bar')) : null," +
@@ -665,16 +666,28 @@ try {
         const legendMoved = before.legendSwatch !== after.legendSwatch;
         const pickerMoved = before.picker !== null && before.picker !== after.picker;
         const barMoved = before.bar !== after.bar;
+        const legendFollows = tokenMoved && legendMoved && after.legendSwatch === after.token;
+        const colorOfFollows = after.colorOf === after.token && restored.colorOf === before.colorOf;
+        const barFollows = !before.barred || (barMoved && after.bar === after.token);
+        const pickerFollows = before.picker === null || (pickerMoved && after.picker === after.token);
         const coherent = !before.barred || (barMoved === legendMoved && after.bar === after.legendSwatch);
+        const restoredBack = restored.legendSwatch === before.legendSwatch &&
+                             (!before.barred || restored.bar === before.bar);
         const parts = ["slot " + after.slot + " on " + JSON.stringify(before.group),
           "token " + before.token + " -> " + after.token + (tokenMoved ? " (moved)" : " (SAME)"),
-          "legend swatch " + before.legendSwatch + " -> " + after.legendSwatch + (legendMoved ? " (moved)" : " (stale)"),
-          before.barred ? "count bar " + before.bar + " -> " + after.bar + (barMoved ? " (moved)" : " (stale)")
-                        : "no count bar on this build",
+          "colorOf " + before.colorOf + " -> " + after.colorOf + (colorOfFollows ? " (follows)" : " (STALE)"),
+          "legend swatch " + before.legendSwatch + " -> " + after.legendSwatch +
+            (legendFollows ? " (follows)" : legendMoved ? " (moved, OFF the token)" : " (STALE)"),
+          before.barred ? "count bar " + before.bar + " -> " + after.bar +
+                            (barFollows ? " (follows)" : barMoved ? " (moved, OFF the token)" : " (STALE)")
+                        : "no count bar on this row",
           before.picker === null ? "picker not rendered (settings tab closed)"
-                                 : "picker " + before.picker + " -> " + after.picker + (pickerMoved ? " (moved)" : " (stale)")];
-        if (tokenMoved && !legendMoved) parts.push("github#84: the legend keeps the old theme");
-        report(coherent, "a theme flip leaves a legend row's bar and its own swatch agreeing", parts.join("; "));
+                                 : "picker " + before.picker + " -> " + after.picker + (pickerFollows ? " (follows)" : " (STALE)"),
+          "bar agrees with its swatch=" + coherent,
+          "restored legend swatch " + restored.legendSwatch + (restoredBack ? " (back)" : " (STUCK)")];
+        if (tokenMoved && !legendMoved) parts.push("<- github#84: the legend keeps the old theme");
+        report(!!before.group && legendFollows && colorOfFollows && barFollows && pickerFollows && coherent && restoredBack,
+          "a theme flip carries the legend's swatch and count bar to the new palette, with the picker", parts.join("; "));
       }
     }
   }
@@ -758,6 +771,131 @@ try {
     report(defs.declarative && defs.items >= 9 && shown.id === PLUGIN_ID && shown.rows >= 9 && pressedAfter !== pressedBefore && String(saved) === String(pressedBefore !== "true") && before,
       "the settings tab renders from getSettingDefinitions and a toggle round-trips to the view and to data.json",
       "definitions: " + defs.top + " top-level, " + defs.items + " items; rendered " + shown.rows + " rows, " + shown.toggles + " toggles, " + shown.headings + " headings; compact axis button " + pressedBefore + " -> " + pressedAfter + ", data.json compactAxis " + saved);
+  }
+
+  // github#77
+  if (selected("colour picker")) {
+    const TAB = "app.setting.pluginTabs.find(function (t) { return t.id === '" + PLUGIN_ID + "'; })";
+    const ALIGN = "var align = function (el) {" +
+      "  var out = [];" +
+      // github#77
+      "  Array.prototype.forEach.call(el.querySelectorAll('.sws'), function (row) {" +
+      "    var kids = row.querySelectorAll('.swatch');" +
+      "    if (!kids.length) return;" +
+      "    var lo = Infinity, hi = -Infinity, tops = [];" +
+      "    Array.prototype.forEach.call(kids, function (k) {" +
+      "      var b = k.getBoundingClientRect();" +
+      "      if (b.left < lo) lo = b.left;" +
+      "      if (b.right > hi) hi = b.right;" +
+      "      var t = Math.round(b.top);" +
+      "      if (tops.indexOf(t) < 0) tops.push(t);" +
+      "    });" +
+      "    tops.sort(function (x, y) { return x - y; });" +
+      "    var firstRun = 0;" +
+      "    Array.prototype.forEach.call(kids, function (k) {" +
+      "      if (Math.round(k.getBoundingClientRect().top) === tops[0]) firstRun++;" +
+      "    });" +
+      "    out.push({ left: Math.round(lo), w: Math.round(hi - lo)," +
+      "               n: kids.length, lines: tops.length, perLine: firstRun });" +
+      "  });" +
+      "  return out;" +
+      "};";
+    const LOOK = "(function(){" + ALIGN +
+      " var t = app.setting.activeTab; var el = t && (t.containerEl || t.contentEl);" +
+      " if (!el) return { open: false };" +
+      " var sws = el.querySelectorAll('.vault-graph .swatch');" +
+      " var prev = el.querySelectorAll('.vault-graph .swatch svg.prev');" +
+      " var empty = 0, flat = 0;" +
+      " Array.prototype.forEach.call(sws, function (s) {" +
+      "   if (s.querySelector('svg.prev')) return;" +
+      "   var bg = getComputedStyle(s).backgroundColor;" +
+      "   if (bg && bg !== 'rgba(0, 0, 0, 0)' && bg !== 'transparent') flat++; else empty++;" +
+      " });" +
+      " var one = sws[0], gnd = one && one.querySelector('.gnd');" +
+      " var scope = el.querySelector('.vault-graph.vg-tokens');" +
+      " var over = 0;" +
+      " if (scope) over = Math.max(0, scope.scrollWidth - scope.clientWidth);" +
+      " return { open: true, sws: sws.length, previews: prev.length, flat: flat, empty: empty," +
+      "          ground: gnd ? getComputedStyle(gnd).fill : null," +
+      "          grounds: one ? one.querySelectorAll('.gnd').length : 0," +
+      "          bodyTheme: document.body.classList.contains('theme-light') ? 'light' : 'dark'," +
+      "          scopeTheme: scope ? scope.getAttribute('data-theme') : null," +
+      "          overflowX: over, keptApi: Object.prototype.hasOwnProperty.call(" + TAB + " || {}, 'api')," +
+      "          rows: align(el) };" +
+      "})()";
+    const openTab = async () => {
+      await E("app.setting.open(); app.setting.openTabById('" + PLUGIN_ID + "'); void 0");
+      await sleep(900);
+    };
+
+    await openGraph(c);
+    await sleep(600);
+    await openTab();
+    const withGraph = await E(LOOK);
+
+    // github#77
+    await E("(function(){ var t = app.setting.activeTab; var b = (t.containerEl || t.contentEl)" +
+            ".querySelector('.vault-graph .swatch[aria-checked=\"false\"]'); if (b) b.click(); return !!b; })()");
+    await sleep(800);
+    const afterPick = await E(LOOK);
+
+    // github#77
+    const wasDark = await E("document.body.classList.contains('theme-dark')");
+    await E("app.changeTheme(" + (wasDark ? "'moonstone'" : "'obsidian'") + "); void 0");
+    await sleep(900);
+    const afterTheme = await E(LOOK);
+    await E("app.changeTheme(" + (wasDark ? "'obsidian'" : "'moonstone'") + "); void 0");
+    await sleep(700);
+
+    // github#77
+    await E("app.setting.close(); void 0");
+    await sleep(300);
+    await E("app.workspace.detachLeavesOfType(" + JSON.stringify(VT) + "); void 0");
+    await sleep(800);
+    await openTab();
+    const noGraph = await E(LOOK);
+    await E("app.setting.close(); void 0");
+    await sleep(300);
+    await openGraph(c);
+    await sleep(600);
+
+    const say = (s) => s.open
+      ? `${s.sws} swatches / ${s.previews} previewed / ${s.flat} flat / ${s.empty} EMPTY, overflow ${s.overflowX}px`
+      : "tab did not open";
+    const good = (s, wantPreviews) => s.open && s.sws > 0 && s.empty === 0 && s.overflowX === 0 &&
+      (wantPreviews ? s.previews === s.sws : true);
+    const lightGround = "rgb(252, 252, 251)", darkGround = "rgb(26, 26, 25)";
+    const oneGround = (s) => s.grounds === 1 && (s.ground === lightGround || s.ground === darkGround);
+    const rows = withGraph.rows || [];
+    const lefts = [...new Set(rows.map((r) => r.left))];
+    const widths = [...new Set(rows.map((r) => r.w))];
+    const counts = [...new Set(rows.map((r) => r.n))];
+    const lines = [...new Set(rows.map((r) => r.lines))];
+    const perLine = [...new Set(rows.map((r) => r.perLine))];
+    const aligned = rows.length > 1 && lefts.length === 1 && widths.length === 1 &&
+                    counts.length === 1 && lines.length === 1 && perLine.length === 1 &&
+                    widths[0] > 0;
+    const ok = aligned && good(withGraph, true) && oneGround(withGraph) &&
+               good(afterPick, true) && good(afterTheme, true) && oneGround(afterTheme) &&
+               afterTheme.ground !== withGraph.ground &&
+               good(noGraph, false) && noGraph.previews === 0 &&
+               !withGraph.keptApi && !noGraph.keptApi;
+    report(ok,
+      "the settings tab's colour picker survives every host state, and keeps no handle on a closed graph",
+      "graph open: " + say(withGraph) + "; after a pick: " + say(afterPick) +
+      "; after a live theme change: " + say(afterTheme) + " (ground " +
+      withGraph.ground + " -> " + afterTheme.ground +
+      (afterTheme.ground !== withGraph.ground ? ", followed" : ", DID NOT FOLLOW") + ")" +
+      "; body/scope after the flip: " + afterTheme.bodyTheme + "/" + afterTheme.scopeTheme +
+      " (was " + withGraph.bodyTheme + "/" + withGraph.scopeTheme + ")" +
+      "; graph torn down and the tab reopened: " + say(noGraph) +
+      "; tab retains an api field: " + (withGraph.keptApi || noGraph.keptApi ? "YES" : "no") +
+      "; " + rows.length + " swatch grids, " +
+      (aligned ? "all at x=" + lefts[0] + ", " + widths[0] + "px, " + counts[0] +
+                 " swatches over " + lines[0] + " lines of " + perLine[0]
+               : "RAGGED -- lefts " + lefts.join('/') + ", widths " + widths.join('/') +
+                 ", counts " + counts.join('/') + ", lines " + lines.join('/') +
+                 ", per line " + perLine.join('/')));
   }
 
   // github#40, design/0012

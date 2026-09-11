@@ -151,6 +151,33 @@ jobs:
           fi
           echo "manifest and version agree on $VERSION, and the CHANGELOG has a section for it"
 
+      # A MINOR or MAJOR ships plugin/whats-new.md for its own version (github#83): the plugin
+      # shows it once after the update, and only when the note's version matches the installed
+      # one, so a forgotten note is a release that announces nothing and fails nowhere.
+      # release.ps1 refuses it too, but a tag pushed by hand never ran release.ps1. A PATCH keeps
+      # the previous note and is not checked. Runs on the dry run as well: the release branch has
+      # already bumped the manifest, so this is where a missing note first shows.
+      - name: A MINOR or MAJOR carries its own update note
+        run: |
+          set -euo pipefail
+          # `|| true`: under set -e an unmatched grep would kill the step with no annotation,
+          # including on a PATCH, which the *) branch below is written to PASS. And the pattern
+          # matches what the two other parsers accept -- update-note.mjs collapses whitespace
+          # before testing /^#\s+/, release.ps1 uses ^#\s+ -- so a note written with a tab or two
+          # spaces builds, passes release.ps1, and no longer fails only here.
+          note=$(grep -m1 -E '^#[[:space:]]+[0-9]+\.[0-9]+\.[0-9]+[[:space:]]*$' plugin/whats-new.md || true)
+          note=$(printf '%s' "$note" | sed -E 's/^#[[:space:]]+//; s/[[:space:]]+$//')
+          case "$VERSION" in
+            *.0)
+              if [ "$note" != "$VERSION" ]; then
+                echo "::error::plugin/whats-new.md is for '$note', not $VERSION. A MINOR or MAJOR ships an update note"
+                echo "::error::the plugin shows once after the update (github#83) -- write it on the release branch first."
+                exit 1
+              fi
+              echo "the update note is for $VERSION" ;;
+            *) echo "$VERSION is a PATCH -- the update note stays at '$note' by design" ;;
+          esac
+
       # main only ever receives develop, and a release is tagged on main (github#47). A tag can
       # be pushed by hand with none of release.ps1's guards, so the rule is enforced here too.
       # Skipped on a dry run, whose whole point is a branch.
@@ -182,6 +209,8 @@ jobs:
         run: node scripts/check-pii.mjs
       - name: Comments are pointers
         run: node scripts/check-comments.mjs
+      - name: The update note's grammar and decision table
+        run: node scripts/update-note-selftest.mjs
       - name: The generated code map and index are current
         run: node scripts/code-map.mjs --check
 

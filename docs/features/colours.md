@@ -34,4 +34,4 @@ commit.
 | | |
 |---|---|
 | **Introduced in** | `1.8.0` — "The Hub" |
-| **Last re-recorded** | `2.5.0 — 2026-09-11` — 18.6 s at 1586x992, encoded at 960 px (0.64 MB) |
+| **Last re-recorded** | `2.6.0 — 2026-09-11` — 18.6 s at 1586x992, encoded at 960 px (0.64 MB) |

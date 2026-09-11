@@ -19,3 +19,9 @@ declare module "b64:*" {
   const base64: string;
   export default base64;
 }
+
+// github#83, design/0016 -- the CHANGELOG's release headings, parsed at build time
+declare module "vg:releases" {
+  const releases: { version: string; name: string }[];
+  export default releases;
+}

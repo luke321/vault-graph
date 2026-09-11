@@ -190,6 +190,17 @@ try {
   # Everything from this version's heading to the next one.
   $section = [regex]::Match($changelog, "(?s)##\s+" + [regex]::Escape($Version) + ".*?(?=\r?\n## |\z)").Value.Trim()
 
+  # THE UPDATE NOTE IS PART OF A MINOR OR MAJOR (github#83). The plugin shows plugin/whats-new.md
+  # once, on the first open after such an update -- but only when the note's version matches the
+  # installed one, so a release that forgot to write it would ship silently: nothing fails, the
+  # strip never appears, and nobody is told. A PATCH shows nothing by design and keeps the
+  # previous note in place, so only x.y.0 is checked here.
+  $noteText = [IO.File]::ReadAllText((Join-Path $repo 'plugin\whats-new.md'), [Text.Encoding]::UTF8)
+  $noteVersion = [regex]::Match($noteText, '(?m)^#\s+(\d+\.\d+\.\d+)\s*$').Groups[1].Value
+  if ($Version -match '\.0$' -and $noteVersion -ne $Version) {
+    throw "plugin/whats-new.md is for '$noteVersion', not $Version. A MINOR or MAJOR ships an update note (github#83) -- write it first."
+  }
+
   Write-Host "`n=== release notes ===" -ForegroundColor Cyan
   Write-Host $section -ForegroundColor DarkGray
 
@@ -289,7 +300,8 @@ try {
   if ($stamped) {
     Write-Host "HEAD's tree already passed the suite -- skipping it (-ForceSuite to run it anyway)" -ForegroundColor Yellow
   } else {
-    $lockOwner = "release.ps1 $Version"
+    # github#104 -- the pid separates two release runs that would otherwise share an owner
+    $lockOwner = "release.ps1 $Version [$PID]"
     try { Invoke-Native node @((Join-Path $here 'lock.mjs'), 'acquire', 'suite', '--owner', $lockOwner) }
     catch { throw "could not take the suite lock -- another suite is running (node scripts/lock.mjs status); not releasing" }
     try {

@@ -173,6 +173,28 @@ async function main() {
     "           overflowX: d.scrollWidth - d.clientWidth," +
     "           sidebar: box('vg-sidebar'), stage: box('vg-stage')," +
     "           heat: box('vg-heat'), canvas: box('vg-canvas'), graph: box('vg-graph')," +
+    // github#79, design/0017 -- forced visible: where it lands, not when
+    "           ov: (function () { var o = document.getElementById('vg-ov'); if (!o) return null;" +
+    "             var was = o.hidden; o.hidden = false; var r = o.getBoundingClientRect();" +
+    "             var m = document.getElementById('vg-mob'), c = document.getElementById('vg-cam');" +
+    "             var hit = function (e) { if (!e) return false; var q = e.getBoundingClientRect();" +
+    "               return !(q.right < r.left || q.left > r.right || q.bottom < r.top || q.top > r.bottom); };" +
+    "             var res = { w: Math.round(r.width), h: Math.round(r.height), x: Math.round(r.left)," +
+    "                         y: Math.round(r.top), hitsMob: hit(m), hitsCam: hit(c) };" +
+    "             var d = document.getElementById('vg-detail');" +
+    "             var root = document.querySelector('.vault-graph');" +
+    // github#79
+    "             if (d && root) {" +
+    "               var capOf = function (v) { var w = root.getAttribute('data-ov');" +
+    "                 if (v === null) root.removeAttribute('data-ov'); else root.setAttribute('data-ov', v);" +
+    "                 var hid = d.hasAttribute('hidden'); d.removeAttribute('hidden');" +
+    "                 var mh = getComputedStyle(d).maxHeight;" +
+    "                 if (hid) d.setAttribute('hidden', '');" +
+    "                 if (w === null) root.removeAttribute('data-ov'); else root.setAttribute('data-ov', w);" +
+    "                 return mh; };" +
+    "               res.cardCapOff = capOf('off'); res.cardCapOn = capOf('on');" +
+    "             } else { res.cardCapOff = null; res.cardCapOn = null; }" +
+    "             o.hidden = was; return res; })()," +
     "           legendHidden: leg ? Math.max(0, leg.scrollHeight - leg.clientHeight) : null," +
     "           sidebarHidden: (function () { var sb = document.getElementById('vg-sidebar');" +
     "             return sb ? Math.max(0, sb.scrollHeight - sb.clientHeight) : null; })()," +
@@ -424,6 +446,32 @@ async function main() {
     }
   }
 
+  // github#77
+  const pickerProbe = await p.eval(`(function () {
+    var root = document.querySelector(".vault-graph");
+    var open = root.getAttribute("data-sheet") !== "on" && window.innerWidth <= 720;
+    if (open) { var s = document.getElementById("vg-sheet"); if (s) s.click(); }
+    var rows = document.querySelectorAll(".lg[data-g]");
+    if (!rows.length) return "no legend row to open it on";
+    var row = rows[rows.length - 1];
+    var rect = row.getBoundingClientRect();
+    row.dispatchEvent(new MouseEvent("contextmenu", {
+      bubbles: true, clientX: rect.left + 5, clientY: rect.bottom - 2 }));
+    var menu = document.querySelector('[id$="ctxmenu"]');
+    if (!menu || menu.hidden) return "menu did not open";
+    var m = menu.getBoundingClientRect(), rr = root.getBoundingClientRect();
+    var sw = menu.querySelector(".swatch");
+    var swr = sw ? sw.getBoundingClientRect() : null;
+    var inside = m.left >= rr.left - 0.5 && m.top >= rr.top - 0.5 &&
+                 m.right <= rr.right + 0.5 && m.bottom <= rr.bottom + 0.5;
+    menu.hidden = true;
+    if (open) { var s2 = document.getElementById("vg-sheet"); if (s2) s2.click(); }
+    return Math.round(m.width) + "x" + Math.round(m.height) + " at " +
+           Math.round(m.left) + "," + Math.round(m.top) + "; swatch " +
+           (swr ? Math.round(swr.width) + "x" + Math.round(swr.height) : "none") +
+           "; " + (inside ? "inside the mount" : "OUTSIDE THE MOUNT");
+  })()`);
+
   const shot = arg("shot", "");
   if (shot) {
     // github#73 -- shoot the resting page, not whatever the last tap selected
@@ -447,6 +495,16 @@ async function main() {
     const b = layout[k];
     console.log("  " + pad("#vg-" + k, 12) +
                 (b ? `${pad(b.w + "x" + b.h, 12)} at ${b.x},${b.y}` : "absent"));
+  }
+  // github#79
+  if (layout.ov) {
+    console.log("  " + pad("#vg-ov", 12) + pad(layout.ov.w + "x" + layout.ov.h, 12) +
+                ` at ${layout.ov.x},${layout.ov.y}` +
+                `   overlaps #vg-mob ${layout.ov.hitsMob}, #vg-cam ${layout.ov.hitsCam}`);
+    console.log(`  ${pad("card cap", 12)}${pad(layout.ov.cardCapOff, 12)} without the tile, ` +
+                `${layout.ov.cardCapOn} with it` +
+                (W > 720 || layout.ov.cardCapOff === layout.ov.cardCapOn
+                  ? "" : "   <- THE TILE MOVED THE CARD, and below the breakpoint it must not"));
   }
   console.log("");
   console.log(`  horizontal overflow      ${layout.overflowX} px`);
@@ -474,6 +532,7 @@ async function main() {
   console.log(`  a 45px swipe             ${swipe}`);
   console.log(`  a two-finger tap         ${twoFinger}`);
   console.log(`  sheet toggle round trip  ${sheetProbe}`);
+  console.log(`  colour picker box        ${pickerProbe}`);
   console.log(`  page errors              ${p.firstError() || "none"}`);
   if (shot) console.log(`  screenshot               ${shot}`);
   console.log("");

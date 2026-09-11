@@ -54,7 +54,7 @@ Four commands, and all four are gates rather than suggestions:
 
 ```bash
 npm run lint                    # tsc --noEmit on the engine, then typescript-eslint on our own code; every finding is held at zero
-node scripts/smoke.mjs          # the invariant suite, over three vault shapes
+node scripts/smoke.mjs          # the invariant suite: four fixtures, each check on the ones its assertion is about
 node scripts/check-scope.mjs    # the page cannot style, or be styled by, its host
 node scripts/check-network.mjs  # nothing shipped can make a network request
 node scripts/check-notice.mjs   # the Sigma notice opens a fresh main.js and a fresh exported page
@@ -93,6 +93,19 @@ the root, mount again) and reads heap, DOM nodes and listener counts after every
 `destroy()` existed each cycle retained a whole mount — +579 DOM nodes, +131 listeners, +7 MB on
 the 10k fixture — through two document listeners nothing removed. `--quick` tears down
 mid-intro, which is the case where a dead mount used to keep animating.
+
+Run the fourth if you touch the update note — `plugin/whats-new.md`, `plugin/update-note.mjs`,
+the strip `VaultGraphView.mountNote()` builds, or the `lastSeenVersion` bookkeeping in `onload()`
+(github#83, `design/0016`). It seeds `data.json` six ways (absent, present without a version,
+a MINOR behind, a PATCH behind, already seen, a note for another version), reloads the plugin
+with the throwaway manifest patched to each installed version, and reads the strip, its links
+and bullets, the written version, the canvas height and the camera back from a real Obsidian:
+
+```bash
+node scripts/build-plugin.mjs
+node scripts/update-note-check.mjs                # the demo fixture; --keep leaves Obsidian open
+node scripts/update-note-selftest.mjs             # the decision table and the note grammar, no Obsidian (the hook runs it too)
+```
 
 One more if you touch the renderer (`src/engine/`): the suite asserts numbers, and none of
 them can see a disc in the wrong colour. `node scripts/render-diff.mjs --against-dir <dir>`
@@ -143,10 +156,22 @@ clone that has not run `npm ci` — run it, then push.
 
 **A tree is gated once.** A green full run of `smoke.mjs` stamps the git *tree* it measured
 and the fixtures it ran against (`scripts/suite-stamp.mjs`, in the shared git common dir).
-The hook and `release.ps1` skip the suite when every commit being pushed carries such a
-stamp, and say which run they trust. A merge that changed the tree, or a fixture regenerated
-since, runs it as before. `node scripts/suite-stamp.mjs check [<rev>]` says what a push would
-do; `release.ps1 -ForceSuite` runs it anyway. `.ai-context/decisions/0013` has the reasoning.
+The hook and `release.ps1` skip the suite when the tip of every ref being pushed carries
+such a stamp — those tips only, never every commit in the range — and say which run they
+trust. A merge that changed the tree, or a fixture regenerated since, runs it as before.
+A push that only *deletes* one of those refs carries no tree, so there is nothing to look
+up: the hook says so and exits. `node scripts/suite-stamp.mjs check [<rev>]` says what a
+push would do; `release.ps1 -ForceSuite` runs it anyway. `.ai-context/decisions/0013` has
+the reasoning.
+
+**A stamp names exactly the run that earned it**, which is why a run can pass and still
+record nothing. The tree is captured *before* the first build, so committing while the
+suite runs — this repo commits as work lands — refuses the stamp rather than naming a tree
+nobody measured; so does a working tree that was dirty at either end. A run whose shape
+differs from the one the gates push with (`--jobs`, `--chrome`, `--headed`, `--no-grid`,
+`--port`) is not the full suite and says which flag; `--jobs 2` is the default and still
+stamps. And the stamp records the Chrome that drove it, so a browser update re-runs the
+suite once.
 
 ## Branches, and how work reaches main
 

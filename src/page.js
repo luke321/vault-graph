@@ -184,10 +184,16 @@
  * @property {() => void} readTheme
  * @property {() => void} placeLogo
  * @property {() => PaletteSlot[]} palette
+ * @property {(key: string) => { light: number, dark: number }} slotContrast
+ * @property {(key: string, name: string) => string} slotTitle
+ * @property {(key: string, suffix: string, group?: string) => string[]} previewLadder
+ * @property {(key: string, group?: string) => string} swatchPreview
+ * @property {() => number[]} previewSizes
  * @property {() => string[]} groupOrder
  * @property {(dim: string) => { name: string, n: number, slot: string, autoSlot: string, pinned: boolean, shown: boolean, subs: { name: string, n: number, pin: string }[] }[]} groupsOf   github#86
  * @property {(group: string) => number} groupCount
  * @property {(group: string) => string} slotOf
+ * @property {(group: string) => string} colorOf   github#84: the hex the dots and the legend draw, after any theme flip
  * @property {(group: string) => string} autoSlotOf
  * @property {(map: SlotMap) => void} setFolderColors
  * @property {(map: SlotMap) => void} setSubfolderColors
@@ -377,7 +383,31 @@ function mountVaultGraph(root, data, deps) {
    * @property {string[]} slots          the twelve group colours, g1..g12
    * @property {string[]} neutrals
    * @property {Record<string, string>} byKey   "g7" -> its hex
+   * @property {{ l: Palette, d: Palette }} pal  both themes at once, github#77
    */
+
+  /**
+   * @typedef {Object} Palette
+   * @property {boolean} dark
+   * @property {string} surface
+   * @property {string[]} slots
+   * @property {Record<string, string>} byKey
+   */
+
+  var SLOT_VARS = ["--g1", "--g2", "--g3", "--g4", "--g5", "--g6",
+                   "--g7", "--g8", "--g9", "--g10", "--g11", "--g12"];
+
+  // github#77
+  /** @param {string} suffix "l" or "d" @returns {Palette} */
+  function readPalette(suffix) {
+    var slots = SLOT_VARS.map(function (v) { return css(v + "-" + suffix); });
+    /** @type {Record<string, string>} */
+    var byKey = dict();
+    slots.forEach(function (hex, i) { byKey["g" + (i + 1)] = hex; });
+    return { dark: suffix === "d", surface: css("--surface-1-" + suffix),
+             slots: slots, byKey: byKey };
+  }
+
   var THEME = /** @type {Theme} */ ({});
   function readTheme() {
     var surf = css("--surface-1");
@@ -391,13 +421,19 @@ function mountVaultGraph(root, data, deps) {
       surface:     surf,
       hoverBg:     css("--surface-2"),
       hoverBorder: css("--border-strong"),
-      slots:    ["--g1", "--g2", "--g3", "--g4", "--g5", "--g6",
-                 "--g7", "--g8", "--g9", "--g10", "--g11", "--g12"].map(css),
-      neutrals: ["--n1", "--n2", "--n3"].map(css)
+      slots:    SLOT_VARS.map(css),
+      neutrals: ["--n1", "--n2", "--n3"].map(css),
+      // github#77
+      pal: { l: readPalette("l"), d: readPalette("d") }
     };
     THEME.byKey = dict();
     THEME.slots.forEach(function (hex, i) { THEME.byKey["g" + (i + 1)] = hex; });
+    clearPreviewCache();
+    // github#79
+    ovSig = "";
     if (renderer) renderer.setSetting("labelColor", THEME.text);
+    // github#84, design/0004
+    if (renderer) { buildColors(); attempt(buildLegend); }
   }
   readTheme();
 
@@ -1095,6 +1131,37 @@ function mountVaultGraph(root, data, deps) {
     });
   }
 
+  // github#77, design/0004
+  var CONTRAST_FLOOR = 3;
+
+  /** @param {string} a @param {string} b @returns {number} */
+  function contrastOf(a, b) {
+    var x = relLum(a), y = relLum(b);
+    var hi = Math.max(x, y), lo = Math.min(x, y);
+    return (hi + 0.05) / (lo + 0.05);
+  }
+
+  // github#77
+  /** @param {string} key @returns {{ light: number, dark: number }} */
+  function slotContrast(key) {
+    return {
+      light: contrastOf(THEME.pal.l.byKey[key], THEME.pal.l.surface),
+      dark:  contrastOf(THEME.pal.d.byKey[key], THEME.pal.d.surface)
+    };
+  }
+
+  // github#77
+  /** @param {string} key @param {string} name @returns {string} */
+  function slotTitle(key, name) {
+    var c = slotContrast(key);
+    /** @param {number} v */
+    var say = function (v) {
+      return v.toFixed(2) + (v < CONTRAST_FLOOR ? " (under 3:1)" : "");
+    };
+    return name + " · solid-area contrast: light " + say(c.light) +
+           ", dark " + say(c.dark) + " · a sub-pixel dot reads lower";
+  }
+
   /** @param {Record<string, unknown>} map @param {string} [dim] */
   function applyFolderShown(map, dim) {
     var d = dim === "tag" ? "tag" : "folder";
@@ -1226,6 +1293,8 @@ function mountVaultGraph(root, data, deps) {
   var INNER_FILL = 0.8;
   var GAP_BAND = { i: 0.5, o: 1 };
   var CLEAR_OF_ROOM = 0.12;
+  // github#107 -- ROOM_PCTL, the pick() quantile
+  var ROOM_PCTL = 0.5;
 
   var MIN_SPAN = 6 * Math.PI / 180;
   var HL_PUSH = 0.9;
@@ -1278,11 +1347,11 @@ function mountVaultGraph(root, data, deps) {
     var l = hex2lab(hex);
     return ((Math.atan2(l[2], l[1]) * 180 / Math.PI) % 360 + 360) % 360;
   }
-  /** @param {string} basecol */
-  function hueBudget(basecol) {
+  // github#77
+  /** @param {string} basecol @param {string[]} others @returns {number} */
+  function hueBudget(basecol, others) {
     var h = hueOf(basecol), gap = 180;
-    Object.keys(groupColor).forEach(function (g) {
-      var c = groupColor[g];
+    others.forEach(function (c) {
       if (c === basecol) return;
       var lab = hex2lab(c);
       if (Math.hypot(lab[1], lab[2]) < 0.02) return;
@@ -1291,6 +1360,46 @@ function mountVaultGraph(root, data, deps) {
       if (d < gap) gap = d;
     });
     return gap * HUE_BUDGET_FRACTION;
+  }
+
+  /** @returns {string[]} */
+  function groupColours() {
+    return Object.keys(groupColor).map(function (g) { return groupColor[g]; });
+  }
+
+  // design/0003, github#77
+  /**
+   * @param {string} basecol @param {number} k @param {boolean} dark @param {number} budget
+   * @returns {string}
+   */
+  function ladderStep(basecol, k, dark, budget) {
+    var lab = hex2lab(basecol);
+    if (Math.hypot(lab[1], lab[2]) < 0.02) return basecol;
+    var Lend = dark ? Math.min(SUB_L_LIMIT, lab[0] + SUB_L_SPAN)
+                    : Math.max(1 - SUB_L_LIMIT, lab[0] - SUB_L_SPAN);
+    var t = k / (SUB_SLOTS - 1);
+    return shade(basecol, (dark ? 1 : -1) * budget * t, (Lend - lab[0]) * t);
+  }
+
+  // github#77
+  /**
+   * @param {string} key @param {string} suffix "l" or "d" @param {string} [group]
+   * @returns {string[]}
+   */
+  function previewLadder(key, suffix, group) {
+    var pal = suffix === "d" ? THEME.pal.d : THEME.pal.l;
+    var basecol = pal && pal.byKey ? pal.byKey[key] : "";
+    if (!basecol) return [];
+    var others = Object.keys(groupSlot).filter(function (g) {
+      return !group || g !== group;
+    }).map(function (g) {
+      return pal.byKey[groupSlot[g]] || "";
+    }).filter(Boolean);
+    var budget = hueBudget(basecol, others.concat([basecol]));
+    /** @type {string[]} */
+    var out = [];
+    for (var k = 1; k < SUB_SLOTS; k++) out.push(ladderStep(basecol, k, pal.dark, budget));
+    return out;
   }
 
   /** @param {string} folder @param {string} sub */
@@ -1310,20 +1419,17 @@ function mountVaultGraph(root, data, deps) {
   }
 
   function buildSubShades() {
+    clearPreviewCache();
     subShade = dict();
     subSlot = dict();
+    var others = groupColours();
     Object.keys(subOrder).forEach(function (f) {
       var subs = subOrder[f];
       var basecol = colorOf(f);
       var lab = hex2lab(basecol);
       var grey = Math.hypot(lab[1], lab[2]) < 0.02;
       var haveLadder = subs.length >= 2 && !grey;
-      var sign = THEME.dark ? 1 : -1;
-      var budget = haveLadder ? hueBudget(basecol) : 0;
-      var Lend = haveLadder
-        ? (THEME.dark ? Math.min(SUB_L_LIMIT, lab[0] + SUB_L_SPAN)
-                      : Math.max(1 - SUB_L_LIMIT, lab[0] - SUB_L_SPAN))
-        : 0;
+      var budget = haveLadder ? hueBudget(basecol, others) : 0;
       subs.forEach(function (sb) {
         var pk = f + "/" + sb;
         var pin = subPin(pk);
@@ -1335,8 +1441,7 @@ function mountVaultGraph(root, data, deps) {
         subSlot[pk] = "";
         if (subs.length < 2) return;
         if (grey) { subShade[pk] = basecol; return; }
-        var t = subTintIndex(f, sb) / (SUB_SLOTS - 1);
-        subShade[pk] = shade(basecol, sign * budget * t, (Lend - lab[0]) * t);
+        subShade[pk] = ladderStep(basecol, subTintIndex(f, sb), THEME.dark, budget);
       });
     });
   }
@@ -2307,6 +2412,8 @@ function mountVaultGraph(root, data, deps) {
       /** @type {Record<string, Point>} */
       var hubOut = {};
       hubPlace(hubOut, geomLock ? geomLock.r0 : 1.5, UNIT);
+      // github#79
+      ovCells = null;
       return hubOut;
     }
 
@@ -2326,7 +2433,8 @@ function mountVaultGraph(root, data, deps) {
       live += c.geom;
     });
     var shown = plan.cells.filter(function (c) { return c.geom > 1e-4; });
-    if (!shown.length || !live) return null;
+    // github#79
+    if (!shown.length || !live) { ovCells = null; return null; }
     lastMaxR = plan.maxR || lastMaxR;
     if (plan.sp > 0) bandOf("o").sp = plan.sp;
     if (plan.spInner > 0) bandOf("i").sp = plan.spInner;
@@ -2568,11 +2676,12 @@ function mountVaultGraph(root, data, deps) {
 
     var pool = roomPool;
     // github#35
+    // github#107 -- ROOM_PCTL 0.1 -> 0.5, inner band's pool is more dispersed
     /** @param {number[]} v */
     var pick = function (v) {
       if (!v.length) return undefined;
       v.sort(function (x, y) { return x - y; });
-      return v[Math.floor(v.length * 0.1)];
+      return v[Math.floor(v.length * ROOM_PCTL)];
     };
     if (!roomNow) {
       bandOf("i").room = pick(pool.i); bandOf("o").room = pick(pool.o);
@@ -2590,6 +2699,8 @@ function mountVaultGraph(root, data, deps) {
     hubRow0 = hubRow0Next;
     dotFit = fit;
     if (dbgCells) DBG.cells = dbgCells;
+    // github#79
+    ovCells = shown;
     hubPlace(out, plan.r0, scale);
     return out;
   }
@@ -3486,6 +3597,10 @@ function mountVaultGraph(root, data, deps) {
     return m && +m[2] > 0 ? +m[2] : 1.25;
   })();
   var TIMELINE_MS = 4500;
+  // github#113
+  function reducedMotion() {
+    return !!(WIN.matchMedia && WIN.matchMedia("(prefers-reduced-motion: reduce)").matches);
+  }
   var CASCADE_MS  = 1600;
   var TWEEN_MS    = 380;
   var NOW = function () { return (window.performance || Date).now(); };
@@ -4159,6 +4274,8 @@ function mountVaultGraph(root, data, deps) {
         var keepFit = dotFit, keepCell = cellRoom, keepEdge = edgeCap, keepHub = hubRow0;
         var keepRampI = bandOf("i").ramp, keepRampO = bandOf("o").ramp, keepScale = sizeScale;
         var keepPin = pinnedPlan, keepKeep = planKeep;
+        // github#79
+        var keepOv = ovCells;
         var saved = roomNow, savedCell = cellNow, savedEdge = edgeNow;
         roomNow = null; cellNow = null; edgeNow = null; edgeNow = null;
         var keepTag = trace ? trace.tag : "";
@@ -4179,6 +4296,7 @@ function mountVaultGraph(root, data, deps) {
         bandOf("i").ramp = keepRampI; bandOf("o").ramp = keepRampO; sizeScale = keepScale;
         dotFit = keepFit; cellRoom = keepCell; edgeCap = keepEdge; hubRow0 = keepHub;
         pinnedPlan = keepPin; planKeep = keepKeep;
+        ovCells = keepOv;
         if (keepAlpha) graph.forEachNode(function (id) { alpha[id] = keepAlpha[id]; });
         return got;
       };
@@ -4251,7 +4369,9 @@ function mountVaultGraph(root, data, deps) {
       settle();
     };
     var msPerFrame = (opts.totalMs > 0 ? opts.totalMs : CASCADE_MS * TIME_SCALE) / Math.max(1, span);
-    var MIN_FRAMES = 20;
+    // github#113
+    var reduced = reducedMotion();
+    var MIN_FRAMES = reduced ? 1 : 20;
     var maxAdv = Math.max(1, span) / MIN_FRAMES;
     var frame = 0, tPrev = NOW(), tailFrames = 0;
     // github#67
@@ -4295,7 +4415,8 @@ function mountVaultGraph(root, data, deps) {
       var tn = NOW();
       var adv = (tn - tPrev) / msPerFrame;
       tPrev = tn;
-      if (adv > maxAdv) adv = maxAdv;
+      if (reduced) adv = Math.max(1, span);
+      else if (adv > maxAdv) adv = maxAdv;
       frame += adv;
       if (cascadeRun) cascadeRun.tick = tn;
       var pr = Math.min(1, frame / Math.max(1, span));
@@ -4437,7 +4558,8 @@ function mountVaultGraph(root, data, deps) {
         targets = plan ? ringsLayout(plan, true) : null;
         traceTag("");
       }
-      var ez = pr < 1 ? RADIAL_EASE
+      var ez = reduced ? 1
+             : pr < 1 ? RADIAL_EASE
                       : Math.min(1, RADIAL_EASE + tailFrames * 0.15);
       var resid = 0;
       if (targets) graph.forEachNode(function (id) {
@@ -4610,13 +4732,16 @@ function mountVaultGraph(root, data, deps) {
     animGuard = WIN.setTimeout(tweenDog, TWEEN_STALL);
 
     var MIN_FRAMES = 20;
+    // github#113
+    var reduced = reducedMotion();
     var p = 0, tPrev = NOW();
     (function step() {
       var tn = NOW();
       lastFrame = tn;
       var adv = (tn - tPrev) / dur;
       tPrev = tn;
-      if (adv > 1 / MIN_FRAMES) adv = 1 / MIN_FRAMES;
+      if (reduced) adv = 1;
+      else if (adv > 1 / MIN_FRAMES) adv = 1 / MIN_FRAMES;
       p = Math.min(1, p + adv);
       var e = p < 0.5 ? 4 * p * p * p : 1 - Math.pow(-2 * p + 2, 3) / 2;
       graph.forEachNode(function (id) {
@@ -5130,6 +5255,25 @@ function mountVaultGraph(root, data, deps) {
   var DOT_ROOM_MAX = DENSITY_MAX;
   var sizeScale = 1;
 
+  // github#77, design/0013
+  var PREVIEW_R_PX = [0.35, 0.65, 1.38, 2.19, 4.06];
+  var PREVIEW_W = 48;
+  var PREVIEW_H = 40;
+  var PREVIEW_ROW_H = PREVIEW_H / SUB_SLOTS;
+  var PREVIEW_CX = (function () {
+    var i, wide = 0;
+    for (i = 0; i < PREVIEW_R_PX.length; i++) wide += 2 * PREVIEW_R_PX[i];
+    var gap = (PREVIEW_W - wide) / (PREVIEW_R_PX.length + 1);
+    /** @type {number[]} */
+    var out = [];
+    var x = gap;
+    for (i = 0; i < PREVIEW_R_PX.length; i++) {
+      out.push(Math.round((x + PREVIEW_R_PX[i]) * 100) / 100);
+      x += 2 * PREVIEW_R_PX[i] + gap;
+    }
+    return out;
+  })();
+
   function measureSizeScale() {
     if (!renderer) return sizeScale;
     var a = renderer.graphToViewport({ x: 0, y: 0 });
@@ -5181,7 +5325,6 @@ function mountVaultGraph(root, data, deps) {
     var isIn = id !== undefined && bandLock && !!bandLock[groupOf(id)];
     var rp = bandOf(isIn ? "i" : "o").ramp;
     var v = rp.m * (size || 4) + rp.b;
-    var scale = 1;
     if (id !== undefined) {
       var room = bandOf(isIn ? "i" : "o").room;
       var mine = cellRoom[id];
@@ -5196,10 +5339,10 @@ function mountVaultGraph(root, data, deps) {
         var f = room / pit;
         if (f > DOT_ROOM_MAX) f = DOT_ROOM_MAX;
         v *= f;
-        scale = f;
       }
     }
-    var lo = (rp.lo || DOT_MIN_PX) * scale;
+    // github#107 -- DOT_MIN_PX now floors below the room scale, not scaled by it
+    var lo = rp.lo || DOT_MIN_PX;
     if (v < lo) v = lo;
     var capU = edgeCap[id];
     if (capU !== undefined && capU > 0) {
@@ -5423,6 +5566,8 @@ function mountVaultGraph(root, data, deps) {
       if (DBG.on) drawWedgeDebug();
       placeLogo(); refreshSizeScale(); heatDraw(); hlSync();
       placeHubDrop();
+      // github#79
+      ovSync();
     });
 
     renderer.on("enterNode", function (e) {
@@ -5686,6 +5831,40 @@ function mountVaultGraph(root, data, deps) {
     var filed = folderCount[g] || 0;
     if (carried === undefined || carried === filed) return base;
     return base + " -- " + filed + " filed here, " + carried + " carry this tag";
+  }
+
+  // github#77
+  /** @type {Record<string, string>} */
+  var previewCache = dict();
+  function clearPreviewCache() { previewCache = dict(); }
+
+  // github#77, design/0004, design/0003
+  /** @param {string} key @param {string} [group] @returns {string} */
+  function swatchPreviewHTML(key, group) {
+    var ck = group ? "g" + group.length + ":" + group + ":" + key : key;
+    var hit = previewCache[ck];
+    if (hit !== undefined) return hit;
+    var L = previewLadder(key, "l", group), D = previewLadder(key, "d", group);
+    var marks = "", vars = "";
+    for (var r = 0; r < SUB_SLOTS; r++) {
+      var cy = PREVIEW_ROW_H * r + PREVIEW_ROW_H / 2;
+      var cls = r === 0 ? "d" : "t" + r;
+      if (r > 0) {
+        vars += "--k" + r + ":" + (L[r - 1] || "currentColor") + ";" +
+                "--k" + r + "d:" + (D[r - 1] || "currentColor") + ";";
+      }
+      for (var c = 0; c < PREVIEW_R_PX.length; c++) {
+        marks += '<circle class="' + cls + '" cx="' + PREVIEW_CX[c] + '" cy="' + cy +
+                 '" r="' + PREVIEW_R_PX[c] + '"/>';
+      }
+    }
+    var html = '<svg class="prev" width="' + PREVIEW_W + '" height="' + PREVIEW_H +
+           '" viewBox="0 0 ' + PREVIEW_W + ' ' + PREVIEW_H +
+           '" style="' + vars + '" aria-hidden="true" focusable="false">' +
+           '<rect class="gnd" x="0" y="0" width="' + PREVIEW_W +
+           '" height="' + PREVIEW_H + '"/>' + marks + '</svg>';
+    previewCache[ck] = html;
+    return html;
   }
 
   // github#50
@@ -6555,6 +6734,8 @@ function mountVaultGraph(root, data, deps) {
     if ($("zin")) $("zin").onclick = function () { zoomBy(1); };
     if ($("zout")) $("zout").onclick = function () { zoomBy(-1); };
     if ($("pan")) $("pan").onclick = function () { setPan(!panEnabled, true); };
+    // github#79
+    if ($("ov")) $("ov").onclick = fit;
     setPan(panEnabled, false);
     // github#23
     if ($("compact")) $("compact").onclick = function () { setCompactAxis(!compactAxis, true); };
@@ -6668,7 +6849,7 @@ function mountVaultGraph(root, data, deps) {
     /**
      * @param {PaletteSlot[]} pal
      * @param {{ role: string, current: string, autoKey?: string, dataAttr?: string,
-     *           dataValue?: string, titleFor?: (on: boolean, isAuto: boolean) => string }} opts
+     *           dataValue?: string, group?: string, titleFor?: (on: boolean, isAuto: boolean) => string }} opts
      */
     function swatchButtonsHTML(pal, opts) {
       return pal.map(function (p) {
@@ -6678,8 +6859,9 @@ function mountVaultGraph(root, data, deps) {
                (opts.dataAttr ? ' data-' + opts.dataAttr + '="' + esc(opts.dataValue) + '"' : '') +
                ' data-key="' + p.key + '" aria-checked="' + on + '"' +
                (isAuto ? ' data-auto="1"' : '') +
-               ' title="' + esc(p.name) + (opts.titleFor ? opts.titleFor(on, isAuto) : "") +
-               '" aria-label="' + esc(p.name) + '"></button>';
+               ' title="' + esc(slotTitle(p.key, p.name)) +
+               (opts.titleFor ? opts.titleFor(on, isAuto) : "") +
+               '" aria-label="' + esc(p.name) + '">' + swatchPreviewHTML(p.key, opts.group) + '</button>';
       }).join("");
     }
 
@@ -6694,13 +6876,14 @@ function mountVaultGraph(root, data, deps) {
      * @param {boolean} visShown @param {() => void} onToggleVisible
      * @param {boolean} [byFolderOn] @param {(() => void) | null} [onToggleByFolder]
      * @param {boolean} [tintOn] @param {(() => void) | null} [onToggleTint]
+     * @param {string} [group]
      */
-    function openCtxMenu(x, y, current, onPick, autoKey, visShown, onToggleVisible, byFolderOn, onToggleByFolder, tintOn, onToggleTint) {
+    function openCtxMenu(x, y, current, onPick, autoKey, visShown, onToggleVisible, byFolderOn, onToggleByFolder, tintOn, onToggleTint, group) {
       var el = $("ctxmenu");
       if (!el) return;
       var pal = paletteInfo();
       var sws = swatchButtonsHTML(pal, {
-        role: "menuitemradio", current: current, autoKey: autoKey,
+        role: "menuitemradio", current: current, autoKey: autoKey, group: group,
         titleFor: function (on, isAuto) { return isAuto ? " (automatic)" : ""; }
       });
       var visTitle = visShown ? "Hide this folder by default" : "Show this folder by default";
@@ -6763,7 +6946,8 @@ function mountVaultGraph(root, data, deps) {
                     isUnlinked ? unlinkedByFolder : undefined,
                     isUnlinked ? function () { setUnlinkedByFolder(!unlinkedByFolder, true); } : undefined,
                     keptSeparate ? unlinkedTintByFolder : undefined,
-                    keptSeparate ? function () { setUnlinkedTintByFolder(!unlinkedTintByFolder, true); } : undefined);
+                    keptSeparate ? function () { setUnlinkedTintByFolder(!unlinkedTintByFolder, true); } : undefined,
+                    g);
         return;
       }
       var subBtn = t.closest(".lgs[data-hsub]");
@@ -6934,7 +7118,7 @@ function mountVaultGraph(root, data, deps) {
         // github#29
         var autoKey = autoSlotFor(d, g) || "";
         var sws = swatchButtonsHTML(pal, {
-          role: "radio", dataAttr: "fc", dataValue: g, current: cur, autoKey: autoKey,
+          role: "radio", dataAttr: "fc", dataValue: g, group: g, current: cur, autoKey: autoKey,
           titleFor: function (on, isAuto) {
             return on ? (pinned ? " (chosen)" : " (automatic)") : (isAuto ? " (automatic default)" : "");
           }
@@ -7003,6 +7187,253 @@ function mountVaultGraph(root, data, deps) {
     if (typeof lo === "number" && r < lo) r = lo;
     if (typeof hi === "number" && r > hi) r = hi;
     cam.animate({ ratio: r }, { duration: renderer.getSetting("zoomDuration") || 120 });
+  }
+
+  /* --------------------------------------------------------------- overview */
+
+  // github#79
+  var OV_DISC_FRAC = 0.62;
+  var OV_CHEV_PX = 6;
+  var OV_SECTOR_A = 0.55;
+  var OV_FILL_A = 0.18;
+  /**
+   * @typedef {Object} OvSector
+   * @property {string} g
+   * @property {string} band     "i" or "o"
+   * @property {number} a0       leading edge, sweep radians
+   * @property {number} a1       trailing edge
+   * @property {string} c        the group's colour
+   */
+  /**
+   * @typedef {Object} OvShape
+   * @property {number} s        tile side, css px
+   * @property {number} k        graph units -> tile px
+   * @property {BandNum} rings   outer edge of each band
+   * @property {number[]} inner  inner edge of each band, [i, o]
+   * @property {OvSector[]} sectors
+   * @property {number[]} rect   the viewport footprint: x0, y0, x1, y1
+   * @property {number | null} chevron   canvas radians, set only when the rect misses the tile
+   */
+  /** @typedef {{ x0: number, x1: number, y0: number, y1: number }} OvExtent */
+  /** @type {Cell[] | null} */
+  var ovCells = null;
+  var ovSig = "";
+  var ovPaints = 0;
+  var ovOn = false;
+  /** @type {OvShape | null} */
+  var ovLast = null;
+
+  function ovSize() {
+    var host = $("ov");
+    var cv = host ? host.querySelector("canvas") : null;
+    var w = cv ? cv.clientWidth : 0;
+    if (w > 0) return w;
+    var v = parseFloat(css("--ov-size"));
+    return v > 0 ? v : 96;
+  }
+
+  // github#79, design/0017 -- after a frame, never off the camera event
+  /** @returns {OvExtent | null} */
+  function ovFootprint() {
+    if (!renderer) return null;
+    var d = renderer.getDimensions();
+    if (!(d.width > 0) || !(d.height > 0)) return null;
+    var a = renderer.viewportToGraph({ x: 0, y: 0 });
+    var b = renderer.viewportToGraph({ x: d.width, y: d.height });
+    if (!isFinite(a.x) || !isFinite(a.y) || !isFinite(b.x) || !isFinite(b.y)) return null;
+    return { x0: Math.min(a.x, b.x), x1: Math.max(a.x, b.x),
+             y0: Math.min(a.y, b.y), y1: Math.max(a.y, b.y) };
+  }
+
+  // github#79, design/0017 -- the LIVE radius, because fit() frames the live disc
+  /** @param {OvExtent} fp */
+  function ovCropped(fp) {
+    var r = (lastMaxR || 0) * UNIT;
+    if (!(r > 0)) return false;
+    return !(fp.x0 <= -r && fp.x1 >= r && fp.y0 <= -r && fp.y1 >= r);
+  }
+
+  /** @returns {OvSector[]} */
+  function ovSectors() {
+    /** @type {Record<string, OvSector>} */
+    var byKey = dict();
+    /** @type {OvSector[]} */
+    var out = [];
+    var list = ovCells || [];
+    for (var i = 0; i < list.length; i++) {
+      var c = list[i];
+      if (c.pLead === undefined || c.pTrail === undefined) continue;
+      if (!(c.pTrail > c.pLead)) continue;
+      var key = c.bandKey + " " + c.g;
+      var s = byKey[key];
+      if (!s) {
+        s = { g: c.g, band: c.bandKey, a0: c.pLead, a1: c.pTrail, c: colorOf(c.g) };
+        byKey[key] = s;
+        out.push(s);
+      } else {
+        if (c.pLead < s.a0) s.a0 = c.pLead;
+        if (c.pTrail > s.a1) s.a1 = c.pTrail;
+      }
+    }
+    return out;
+  }
+
+  /** @param {OvExtent} fp @returns {OvShape | null} */
+  function ovShape(fp) {
+    if (!geomLock) return null;
+    var outer = geomLock.maxR * UNIT;
+    if (!(outer > 0)) return null;
+    var s = ovSize(), half = s / 2;
+    var k = OV_DISC_FRAC * half / outer;
+    var bR = geomLock.bandR;
+    var iLo = geomLock.r0 * INNER_SCALE * UNIT;
+    var iHi = bR && bR.i > iLo ? bR.i : iLo;
+    var oLo = geomLock.rOuter * UNIT;
+    var oHi = bR && bR.o > oLo ? bR.o : outer;
+    var rect = [half + k * fp.x0, half - k * fp.y1, half + k * fp.x1, half - k * fp.y0];
+    var misses = rect[2] < 0 || rect[0] > s || rect[3] < 0 || rect[1] > s;
+    return { s: s, k: k, rings: { i: iHi * k, o: oHi * k }, inner: [iLo * k, oLo * k],
+             sectors: ovSectors(), rect: rect,
+             chevron: misses ? Math.atan2(-(fp.y0 + fp.y1) / 2, (fp.x0 + fp.x1) / 2) : null };
+  }
+
+  // github#79, design/0017, design/0010 -- the drawing's inputs, at what moves a pixel
+  /** @param {OvShape} sh */
+  function ovSigOf(sh) {
+    /** @type {(string | number)[]} */
+    var p = [Math.round(sh.s), Math.round((WIN.devicePixelRatio || 1) * 100),
+             Math.round(sh.rings.i * 2), Math.round(sh.rings.o * 2),
+             Math.round(sh.inner[0] * 2), Math.round(sh.inner[1] * 2),
+             sh.chevron === null ? "-" : Math.round(sh.chevron * 180 / Math.PI)];
+    for (var i = 0; i < 4; i++) p.push(Math.round(sh.rect[i] * 4));
+    for (var j = 0; j < sh.sectors.length; j++) {
+      var sc = sh.sectors[j];
+      p.push(sc.g, sc.band, sc.c, Math.round(sc.a0 * 180 / Math.PI),
+             Math.round(sc.a1 * 180 / Math.PI));
+    }
+    p.push(THEME.text, THEME.dim);
+    return p.join(",");
+  }
+
+  var OV_DIRS = ["right", "lower right", "below", "lower left",
+                 "left", "upper left", "above", "upper right"];
+  /** @param {number} a canvas radians @returns {string} */
+  function ovDirWord(a) {
+    var i = Math.round(a / (Math.PI / 4));
+    while (i < 0) i += 8;
+    return OV_DIRS[i % 8];
+  }
+
+  /** @param {OvShape} sh */
+  function ovLabel(sh) {
+    var host = $("ov");
+    if (!host) return;
+    var t = sh.chevron === null
+      ? "Where the frame sits on the disc. Click to fit."
+      : "Viewport " + ovDirWord(sh.chevron) + " of the disc. Click to fit.";
+    if (host.title !== t) {
+      host.title = t;
+      host.setAttribute("aria-label", t);
+    }
+  }
+
+  /** @param {OvShape} sh */
+  function ovPaint(sh) {
+    var host = $("ov");
+    if (!host) return;
+    var cv = /** @type {HTMLCanvasElement | null} */ (host.querySelector("canvas"));
+    if (!cv || !cv.getContext) return;
+    var s = sh.s, half = s / 2, dpr = WIN.devicePixelRatio || 1;
+    var w = Math.round(s * dpr);
+    if (cv.width !== w || cv.height !== w) { cv.width = w; cv.height = w; }
+    var g2 = /** @type {CanvasRenderingContext2D} */ (cv.getContext("2d"));
+    g2.setTransform(dpr, 0, 0, dpr, 0, 0);
+    g2.clearRect(0, 0, s, s);
+
+    g2.strokeStyle = THEME.dim;
+    g2.lineWidth = 1;
+    [sh.rings.i, sh.rings.o].forEach(function (r) {
+      if (!(r > 0.5)) return;
+      g2.beginPath();
+      g2.arc(half, half, r, 0, 2 * Math.PI);
+      g2.stroke();
+    });
+
+    g2.globalAlpha = OV_SECTOR_A;
+    sh.sectors.forEach(function (sc) {
+      var lo = sc.band === "i" ? sh.inner[0] : sh.inner[1];
+      var hi = sc.band === "i" ? sh.rings.i : sh.rings.o;
+      if (!(hi > lo)) return;
+      var a0 = sc.a0 - Math.PI / 2, a1 = sc.a1 - Math.PI / 2;
+      g2.fillStyle = sc.c;
+      g2.beginPath();
+      g2.arc(half, half, hi, a0, a1, false);
+      g2.arc(half, half, lo, a1, a0, true);
+      g2.closePath();
+      g2.fill();
+    });
+    g2.globalAlpha = 1;
+
+    var r = sh.rect;
+    if (sh.chevron === null) {
+      g2.fillStyle = THEME.text;
+      g2.globalAlpha = OV_FILL_A;
+      g2.fillRect(r[0], r[1], r[2] - r[0], r[3] - r[1]);
+      g2.globalAlpha = 0.85;
+      g2.strokeStyle = THEME.text;
+      g2.strokeRect(r[0] + 0.5, r[1] + 0.5,
+                    Math.max(1, r[2] - r[0] - 1), Math.max(1, r[3] - r[1] - 1));
+    } else {
+      var rr = half - OV_CHEV_PX - 1;
+      g2.save();
+      g2.translate(half + rr * Math.cos(sh.chevron), half + rr * Math.sin(sh.chevron));
+      g2.rotate(sh.chevron);
+      g2.fillStyle = THEME.text;
+      g2.globalAlpha = 0.85;
+      g2.beginPath();
+      g2.moveTo(OV_CHEV_PX, 0);
+      g2.lineTo(-OV_CHEV_PX * 0.6, OV_CHEV_PX * 0.7);
+      g2.lineTo(-OV_CHEV_PX * 0.6, -OV_CHEV_PX * 0.7);
+      g2.closePath();
+      g2.fill();
+      g2.restore();
+    }
+    g2.globalAlpha = 1;
+    ovLabel(sh);
+    ovPaints++;
+    ovLast = sh;
+  }
+
+  /** @param {boolean} on */
+  function ovShow(on) {
+    if (ovOn === on) return;
+    ovOn = on;
+    var host = $("ov");
+    if (host) {
+      // github#79 -- a control that hides itself hands focus on, never drops it
+      if (!on && DOC && DOC.activeElement === host) {
+        var back = $("reset");
+        if (back) back.focus();
+      }
+      host.hidden = !on;
+    }
+    ROOT.setAttribute("data-ov", on ? "on" : "off");
+    if (!on) { ovSig = ""; ovLast = null; }
+  }
+
+  function ovSync() {
+    if (dead || !$("ov")) return;
+    var fp = geomLock ? ovFootprint() : null;
+    var cropped = !!fp && ovCropped(fp);
+    // github#79, design/0017
+    if (cropped && !ovOn && cascadeRun && fitting) cropped = false;
+    var sh = cropped && fp ? ovShape(fp) : null;
+    if (!sh) { ovShow(false); return; }
+    ovShow(true);
+    var sig = ovSigOf(sh);
+    if (sig === ovSig) return;
+    ovSig = sig;
+    ovPaint(sh);
   }
 
   /* github#73, design/0013 */
@@ -9467,6 +9898,12 @@ function mountVaultGraph(root, data, deps) {
                     readTheme: readTheme, get renderer() { return renderer; },
                     placeLogo: placeLogo,
                     palette: paletteInfo,
+                    // github#77
+                    slotContrast: slotContrast,
+                    slotTitle: slotTitle,
+                    previewLadder: previewLadder,
+                    swatchPreview: swatchPreviewHTML,
+                    previewSizes: function () { return PREVIEW_R_PX.slice(); },
                     groupOrder: function () { return (order[state.dim] || []).slice(); },
                     // github#86, design/0015 -- one grouping's rows, whichever disc is on screen:
                     // github#86 -- what a settings surface needs to offer colours for it
@@ -9488,6 +9925,8 @@ function mountVaultGraph(root, data, deps) {
                     },
                     groupCount: /** @param {string} g */ function (g) { return counts[g] || 0; },
                     slotOf: /** @param {string} g */ function (g) { return groupSlot[g] || ""; },
+                    // github#84
+                    colorOf: colorOf,
                     autoSlotOf: /** @param {string} g */ function (g) { return groupAutoSlot[g] || ""; },
                     setFolderColors: applyFolderColors,
                     setSubfolderColors: /** @param {Record<string, unknown>} m */ function (m) { return applySubfolderColors(m, "folder"); },
@@ -10156,6 +10595,16 @@ function mountVaultGraph(root, data, deps) {
                         rOuter: geomLock.rOuter * UNIT,
                         maxR: geomLock.maxR * UNIT
                       };
+                    },
+                    // github#79
+                    overview: function () {
+                      var fp = ovFootprint();
+                      return { shown: ovOn, paints: ovPaints, sig: ovSig,
+                               hidden: !!($("ov") && $("ov").hidden),
+                               cropped: fp ? ovCropped(fp) : null,
+                               footprint: fp,
+                               liveR: (lastMaxR || 0) * UNIT,
+                               shape: ovLast };
                     },
                     // github#41, design/0011
                     traceOn: /** @param {string | number} id */ function (id) {

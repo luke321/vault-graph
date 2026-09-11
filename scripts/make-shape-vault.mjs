@@ -58,6 +58,57 @@ for (const f of FOLDERS) {
 }
 const titles = notes.filter((n) => !n.orphan).map((n) => n.title);
 
+// github#107 -- a long tag tail from a real vault
+// github#107 -- folder layout stays byte-identical
+const TAG_STEMS = ["anchor", "beacon", "cinder", "delta", "ember", "fathom",
+                   "girder", "harbor", "ingot", "jetty", "kiln", "lumen"];
+const TAG_LEAVES = ["brief", "draft", "field", "guide", "index", "log",
+                    "memo", "plan", "query", "sketch", "trace"];
+// github#119 -- two tails: hierarchical (stem-leaf) and unrelated words
+// github#119 -- real vault's tail is 20% clustered at 3+ chars, not 0%
+const TAIL_UNRELATED = [
+  "abacus", "ballast", "cadence", "dovetail", "eaves", "ferrule", "gantry", "halyard",
+  "isthmus", "jigsaw", "keystone", "lintel", "mortise", "nacelle", "obelisk", "plinth",
+  "quarry", "rafter", "spandrel", "tiller", "undertow", "vellum", "wainscot", "xylem",
+  "yardarm", "zephyr", "alcove", "brazier", "cistern", "dowel", "escarp", "flange",
+  "grommet", "hasp", "inglenook", "joist", "kerf", "louver", "mullion", "newel",
+  "oriel", "parapet", "quoin", "rebate", "soffit", "transom", "uprise", "valance",
+  "weir", "yoke", "apse", "buttress", "corbel", "dado", "embrasure", "finial",
+  "gable", "impost", "jamb", "keel", "lancet", "muntin", "nosing", "ogee",
+  "pilaster", "quirk", "reveal", "tracery", "undercroft", "verge", "wicket", "zinc",
+  "cupola", "dormer", "eyelet", "fascia", "gusset", "hinge", "inlay", "knurl",
+  "ledger", "mantel", "niche", "ochre",
+];
+const TAIL_HIERARCHICAL = [];
+for (const s of TAG_STEMS) for (const l of TAG_LEAVES) TAIL_HIERARCHICAL.push(`${s}-${l}`);
+// github#119 -- one in five of the tail is hierarchical
+const TAIL_NAMES = [];
+for (let i = 0; i < 15; i++) TAIL_NAMES.push(TAIL_HIERARCHICAL[i]);
+for (let i = 0, h = 15, u = 0; i < 100; i++) {
+  TAIL_NAMES.push(i % 5 === 0 ? TAIL_HIERARCHICAL[h++] : TAIL_UNRELATED[u++]);
+}
+
+const DOMINANT = "inbox";
+// github#107 -- [name, note count]; mid band named, tail generated
+const TAG_BANDS = [[DOMINANT, 600], ["review", 30], ["archive", 24], ["spec", 18], ["thread", 14]];
+// github#107 -- 15 tags of 4-9, 12 of three, 13 of two, 75 of one
+let tail = 0;
+for (let i = 0; i < 15; i++) TAG_BANDS.push([TAIL_NAMES[tail++], 4 + (i % 6)]);
+for (let i = 0; i < 12; i++) TAG_BANDS.push([TAIL_NAMES[tail++], 3]);
+for (let i = 0; i < 13; i++) TAG_BANDS.push([TAIL_NAMES[tail++], 2]);
+for (let i = 0; i < 75; i++) TAG_BANDS.push([TAIL_NAMES[tail++], 1]);
+
+// github#107 -- a coprime stride scatters tags across folders
+const slots = [];
+for (const [name, n] of TAG_BANDS) for (let i = 0; i < n; i++) slots.push(name);
+const STRIDE = 379;   // github#107 -- prime, shares no factor with 954 = 2*3*3*53
+slots.forEach((name, i) => {
+  const note = notes[(i * STRIDE) % notes.length];
+  (note.tags || (note.tags = [])).push(name);
+  // github#107 -- double-tags with DOMINANT for coverage
+  if (name !== DOMINANT && i % 2 === 0) note.tags.push(DOMINANT);
+});
+
 if (existsSync(OUT)) rmSync(OUT, { recursive: true, force: true });
 mkdirSync(join(OUT, ".obsidian"), { recursive: true });
 writeFileSync(join(OUT, ".obsidian", "app.json"), "{}\n");
@@ -74,8 +125,11 @@ notes.forEach((n, i) => {
     }
     if (rnd() < 0.05) body.push(`[[Nowhere ${int(900, 999)}]]`);
   }
+  // github#107 -- tags after created, byte-identical when untagged
+  const fm = [`created: ${day(i)}`];
+  if (n.tags && n.tags.length) fm.push(`tags: [${n.tags.join(", ")}]`);
   writeFileSync(join(OUT, n.dir, n.title + ".md"),
-                `---\ncreated: ${day(i)}\n---\n\n` + body.join(" ") + "\n", "utf8");
+                `---\n${fm.join("\n")}\n---\n\n` + body.join(" ") + "\n", "utf8");
 });
 
 const orphans = notes.filter((n) => n.orphan).length;
@@ -83,3 +137,33 @@ console.log(`wrote ${notes.length} notes to ${OUT}`);
 console.log(`  ${links} link refs, ${orphans} unlinked, one of them at the vault root`);
 console.log(`  dominant folder: ${FOLDERS[0].dir} ${FOLDERS[0].n}/${notes.length} = ` +
             `${Math.round(FOLDERS[0].n / notes.length * 100)}%`);
+// github#107 -- the tag dimension is degenerate too; this reports the shape
+const per = new Map();
+let pairs = 0, tagged = 0;
+for (const n of notes) {
+  if (!n.tags || !n.tags.length) continue;
+  tagged++;
+  for (const t of n.tags) { per.set(t, (per.get(t) || 0) + 1); pairs++; }
+}
+const counts = [...per.values()].sort((a, b) => a - b);
+const atMost = (k) => counts.filter((v) => v <= k).length;
+console.log(`  ${per.size} tags over ${tagged} tagged notes (${notes.length - tagged} untagged), ` +
+            `${pairs} tag refs = ${(pairs / tagged).toFixed(2)} a note`);
+console.log(`  tail: ${atMost(1)} tags on exactly one note ` +
+            `(${Math.round(atMost(1) / per.size * 100)}%), ${atMost(3)} on three or fewer ` +
+            `(${Math.round(atMost(3) / per.size * 100)}%)`);
+console.log(`  dominant tag: ${DOMINANT} ${per.get(DOMINANT)}/${notes.length} = ` +
+            `${Math.round(per.get(DOMINANT) / notes.length * 100)}%`);
+// github#119 -- how much of the tail a leading-prefix clustering catches
+const lcp = (a, b) => { let n = 0; while (n < a.length && n < b.length && a[n] === b[n]) n++; return n; };
+const smallNames = [...per.entries()].filter(([, v]) => v <= 3).map(([t]) => t).sort();
+for (const min of [3, 4]) {
+  let grouped = 0, runs = 0, run = 1;
+  for (let i = 1; i <= smallNames.length; i++) {
+    if (i < smallNames.length && lcp(smallNames[i - 1], smallNames[i]) >= min) { run++; continue; }
+    if (run > 1) { runs++; grouped += run; }
+    run = 1;
+  }
+  console.log(`  tail names sharing >=${min} leading chars: ${grouped}/${smallNames.length} ` +
+              `(${Math.round(grouped / smallNames.length * 100)}%) in ${runs} clusters`);
+}

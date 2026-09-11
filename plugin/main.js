@@ -8,6 +8,10 @@ import { GraphStore, Renderer } from "../src/engine/index";
 import { localDay, resolveCreated, dateTally } from "../src/dates.mjs";
 import PAGE_HTML from "raw:../src/page.html";
 import LOGO_MASK_B64 from "b64:../assets/logo-mask.png";
+// github#83, design/0016
+import WHATS_NEW from "raw:./whats-new.md";
+import RELEASES from "vg:releases";
+import { CHAIN_MAX, decideNote, minorOf, parseNote, releaseChain } from "./update-note.mjs";
 
 const VIEW_TYPE = "vault-graph-view";
 const ICON_ID = "vault-graph-disc";
@@ -44,6 +48,7 @@ function bareMap() {
 
 /** @typedef {import("obsidian").App} App */
 /** @typedef {import("obsidian").TFile} TFile */
+/** @typedef {import("obsidian").EventRef} EventRef */
 
 /**
  * What data.json holds. Mirrors DEFAULTS below, which is the one place a default is
@@ -70,6 +75,7 @@ function bareMap() {
  * @property {boolean} liveRefresh                      github#72
  * @property {boolean} [sheetOpen]                      github#82 -- absent until folded once
  * @property {boolean} [bandOpen]                       github#82
+ * @property {string} [lastSeenVersion]                 github#83 -- absent until the first load records it
  */
 
 /**
@@ -98,6 +104,7 @@ function bareMap() {
  * `types` section): what mountVaultGraph returns, and the __vg api it builds. Every member
  * `VgApi` names ships in the plugin; the debug surface the standalone adds is not in it.
  * @typedef {import("../src/page.js").MountHandle} MountHandle
+ * @typedef {import("../src/page.js").VgApi} VgApi
  * @typedef {import("../src/page.js").MountDeps} MountDeps
  */
 
@@ -187,6 +194,12 @@ const under = (rel, dir) => !!dir && (rel === dir || rel.startsWith(dir + "/"));
 // github#62
 /** @param {() => void} fn @returns {unknown} */
 const attempt = (fn) => { try { fn(); return null; } catch (e) { return e; } };
+
+// github#83, design/0016 -- built from the version; the note file carries text only
+const RELEASE_URL = "https://github.com/luke321/vault-graph/releases/tag/";
+const RELEASES_URL = "https://github.com/luke321/vault-graph/releases";
+const NEW_CLASS = "vg-new";
+const GALLERY_URL = "https://luke321.github.io/vault-graph/features.html";
 
 // github#32
 /** @param {string} a @param {string} b */
@@ -718,10 +731,67 @@ class VaultGraphView extends ItemView {
     }
   }
 
+  /* ------------------------------------------------------ update note (github#83) */
+
+  // github#83, design/0016 -- above the page root, so the page's own resize path re-fits
+  mountNote() {
+    const note = this.plugin.pendingNote;
+    if (!note) return;
+    const strip = this.contentEl.createDiv({ cls: "vg-whatsnew", attr: { role: "status" } });
+    const head = strip.createDiv({ cls: "vg-whatsnew-head" });
+    head.createEl("strong", { text: "What's new in Vault Graph " + minorOf(note.version) });
+    const links = { target: "_blank", rel: "noopener" };
+    // github#83 -- every release since the one last seen, oldest first
+    const chain = head.createSpan({ cls: "vg-whatsnew-chain" });
+    const all = this.plugin.pendingChain;
+    const shown = all.length > CHAIN_MAX ? all.slice(all.length - CHAIN_MAX) : all;
+    if (shown.length < all.length) {
+      chain.createEl("a", { text: "\u2026", href: RELEASES_URL,
+                            attr: Object.assign({ title: (all.length - shown.length) + " earlier releases" }, links) });
+      chain.appendText(" \u2013 ");
+    }
+    shown.forEach((r, i) => {
+      if (i) chain.appendText(" \u2013 ");
+      chain.createEl("a", { text: r.version, href: RELEASE_URL + r.version,
+                            attr: r.name ? Object.assign({ title: r.name }, links) : links });
+    });
+    head.createEl("a", { text: "Feature gallery", href: GALLERY_URL, attr: links });
+    const list = strip.createEl("ul");
+    for (const line of note.lines) list.createEl("li", { text: line });
+    const ok = strip.createEl("button", { text: "Got it", cls: "vg-whatsnew-ok", attr: { type: "button" } });
+    this.registerDomEvent(ok, "click", () => { void this.dismissNote(strip); });
+  }
+
+  // github#83, design/0016 -- the controls the note points at, pulsing while it is up
+  markNew() {
+    const note = this.plugin.pendingNote;
+    if (!note || !this.page) return;
+    for (const id of note.points) {
+      const el = this.page.querySelector("#" + id);
+      if (el instanceof HTMLElement) el.addClass(NEW_CLASS);
+    }
+  }
+
+  // github#83 -- dismissing is the write that marks the version seen
+  /** @param {HTMLElement} strip */
+  async dismissNote(strip) {
+    strip.remove();
+    this.plugin.pendingNote = null;
+    // github#83 -- a second leaf has its own copy, and its own pulse
+    for (const leaf of this.app.workspace.getLeavesOfType(VIEW_TYPE)) {
+      if (leaf.view instanceof VaultGraphView) {
+        leaf.view.contentEl.querySelectorAll(".vg-whatsnew").forEach((el) => el.remove());
+        leaf.view.contentEl.querySelectorAll("." + NEW_CLASS).forEach((el) => el.removeClass(NEW_CLASS));
+      }
+    }
+    await this.plugin.recordVersion();
+  }
+
   async render() {
     this.teardown();
     const root = this.contentEl;
     root.addClass("vault-graph-view");
+    this.mountNote();
 
     const data = await buildData(this.app, this.plugin.settings, this.plugin.manifest.version);
     this.lastData = data;
@@ -733,6 +803,7 @@ class VaultGraphView extends ItemView {
 
     this.page = page;
     this.syncTheme();
+    this.markNew();
 
     this.registerEvent(this.app.workspace.on("css-change", () => this.syncTheme()));
 
@@ -955,7 +1026,7 @@ const VIEW_SETTINGS = [
     desc: "Take a note you have just written, moved or linked into the disc where it stands, instead of waiting for Refresh to rebuild the whole thing. Only a change that decides where a note SITS moves anything -- writing prose does not, so typing is still. Off, the disc is a snapshot until you press Refresh." },
 ];
 
-const COLOURS_DESC = "Twelve slots, handed out in group order and round again. Folders and tags keep their own colours; the tabs choose which. Setting one group never moves another, and two may share a colour.";
+const COLOURS_DESC = "Twelve slots, handed out in group order and round again. Folders and tags keep their own colours; the tabs choose which. Setting one group never moves another, and two may share a colour. Each swatch shows the slot at the sizes the disc really draws, over both grounds. Its contrast figure is for a solid area of the colour; a dot a pixel across is mostly antialiasing and reads lower than the number.";
 
 const SLOT_NAMES = ["Blue", "Orange", "Aqua", "Yellow", "Green", "Magenta",
                     "Violet", "Red", "Cyan", "Orchid", "Grey", "Slate"];
@@ -1027,6 +1098,9 @@ class VaultGraphSettingTab extends PluginSettingTab {
     this.subOpen = bareMap();
     /** @type {HTMLElement | null} */
     this.scope = null;
+    // github#77
+    /** @type {EventRef | null} */
+    this.cssRef = null;
   }
 
   /* ----------------------------------------------------------- two render paths --
@@ -1162,11 +1236,25 @@ class VaultGraphSettingTab extends PluginSettingTab {
     row.settingEl.addClass("vg-colour-row");
     const scope = row.settingEl.createDiv({ cls: ["vault-graph", "vg-tokens"] });
 
-    scope.setAttribute("data-theme",
-      activeDocument.body.classList.contains("theme-light") ? "light" : "dark");
-
     this.scope = scope;
+    this.syncScopeTheme(false);
+    // github#77
+    if (!this.cssRef) {
+      this.cssRef = this.app.workspace.on("css-change", () => this.syncScopeTheme(true));
+      this.plugin.registerEvent(this.cssRef);
+    }
     this.redrawColours();
+  }
+
+  // github#77
+  syncScopeTheme(defer) {
+    if (defer) {
+      window.requestAnimationFrame(() => this.syncScopeTheme(false));
+      return;
+    }
+    if (!this.scope) return;
+    this.scope.setAttribute("data-theme",
+      activeDocument.body.classList.contains("theme-light") ? "light" : "dark");
   }
 
   redrawColours() {
@@ -1191,7 +1279,6 @@ class VaultGraphSettingTab extends PluginSettingTab {
     const view = await this.plugin.currentView();
     const api = view && view.handle && view.handle.api;
     if (!api || !api.groupOrder || !api.palette || !scope || !scope.isConnected) return;
-
     // github#86 -- the page answers for the tab's grouping, on screen or not
     const groups = api.groupsOf
       ? api.groupsOf(this.colourDim).map((g) => ({ name: g.name, n: g.n, slot: g.slot, autoSlot: g.autoSlot }))
@@ -1201,11 +1288,25 @@ class VaultGraphSettingTab extends PluginSettingTab {
         slot: api.slotOf ? api.slotOf(name) : "",
         autoSlot: api.autoSlotOf ? api.autoSlotOf(name) : "",
       }));
-    if (groups.length) this.renderColours(groups);
+    if (groups.length) this.renderColours(groups, api);
   }
 
-  /** @param {GroupRow[]} groups */
-  renderColours(groups) {
+  // github#77
+  /**
+   * @param {VgApi | null} api @param {HTMLElement} btn
+   * @param {string} key @param {string} name @param {string} tail @param {string} [group]
+   */
+  fillSwatch(api, btn, key, name, tail, group) {
+    if (!api || !api.swatchPreview) return;
+    const doc = new DOMParser().parseFromString(
+      "<body>" + api.swatchPreview(key, group) + "</body>", "text/html");
+    btn.replaceChildren.apply(btn, Array.prototype.slice.call(doc.body.childNodes));
+    if (api.slotTitle) btn.setAttribute("title", api.slotTitle(key, name) + tail);
+  }
+
+  // github#77
+  /** @param {GroupRow[]} groups @param {VgApi | null} [api] */
+  renderColours(groups, api) {
     const scope = this.scope;
     scope.empty();
     // github#86 -- one tab per grouping, above the rows
@@ -1252,7 +1353,7 @@ class VaultGraphSettingTab extends PluginSettingTab {
           .setTooltip(open ? "Hide subfolder colours" : "Subfolder colours")
           .onClick(() => {
             this.subOpen[group.name] = !open;
-            this.renderColours(groups);
+            this.renderColours(groups, api);
           }));
       }
       row.addExtraButton((b) => b
@@ -1260,18 +1361,22 @@ class VaultGraphSettingTab extends PluginSettingTab {
         .setTooltip(shown ? "Shown by default" : "Hidden by default")
         .onClick(() => this.pickVisible(group.name)));
       row.controlEl.addClass("sws");
+      // github#77
+      const grid = row.controlEl.createDiv({ cls: "sw-grid" });
 
       SLOT_NAMES.forEach((name, i) => {
         const key = "g" + (i + 1);
         const on = current === key;
         const isAuto = group.autoSlot === key;
+        const tail = on ? (pinned ? " (chosen)" : " (automatic)")
+                        : (isAuto ? " (automatic default)" : "");
         const attr = {
           role: "radio", "aria-checked": String(on), "aria-label": name,
-          title: name + (on ? (pinned ? " (chosen)" : " (automatic)") :
-                         (isAuto ? " (automatic default)" : "")),
+          title: name + tail,
         };
         if (isAuto) attr["data-auto"] = "1";
-        const b = row.controlEl.createEl("button", { cls: ["swatch", "vg-" + key], attr });
+        const b = grid.createEl("button", { cls: ["swatch", "vg-" + key], attr });
+        this.fillSwatch(api, b, key, name, tail, group.name);
         b.addEventListener("click", () => this.pick(group.name, key));
       });
 
@@ -1282,7 +1387,7 @@ class VaultGraphSettingTab extends PluginSettingTab {
       });
       auto.addEventListener("click", () => this.pick(group.name, null));
 
-      if (open) this.renderSubRows(scope, group.name, subs);
+      if (open) this.renderSubRows(scope, group.name, subs, api);
     }
   }
 
@@ -1290,8 +1395,9 @@ class VaultGraphSettingTab extends PluginSettingTab {
    * @param {HTMLElement} scope
    * @param {string} folder
    * @param {SubRow[]} subs
+   * @param {VgApi | null} [api]
    */
-  renderSubRows(scope, folder, subs) {
+  renderSubRows(scope, folder, subs, api) {
     for (const s of subs) {
       const pk = folder + "/" + s.name;
       const pinned = this.plugin.settings.subfolderColors[pk] || "";
@@ -1300,15 +1406,18 @@ class VaultGraphSettingTab extends PluginSettingTab {
         .setDesc(s.n === 1 ? "1 note" : s.n + " notes");
       row.settingEl.addClass("vg-subrow");
       row.controlEl.addClass("sws");
+      // github#77
+      const grid = row.controlEl.createDiv({ cls: "sw-grid" });
 
       SLOT_NAMES.forEach((name, i) => {
         const key = "g" + (i + 1);
         const on = pinned === key;
-        const b = row.controlEl.createEl("button", {
+        const b = grid.createEl("button", {
           cls: ["swatch", "vg-" + key],
           attr: { role: "radio", "aria-checked": String(on), "aria-label": name,
                   title: name + (on ? " (chosen)" : "") },
         });
+        this.fillSwatch(api, b, key, name, on ? " (chosen)" : "");
         b.addEventListener("click", () => this.pickSub(folder, s.name, key));
       });
 
@@ -1371,12 +1480,31 @@ class VaultGraphSettingTab extends PluginSettingTab {
 class VaultGraphPlugin extends Plugin {
   /** @type {Settings} */
   settings = DEFAULTS;
+  // github#83 -- the note the next view mount shows, until it is dismissed
+  /** @type {import("./update-note.mjs").UpdateNote | null} */
+  pendingNote = null;
+  /** @type {import("./update-note.mjs").Release[]} */
+  pendingChain = [];
 
   async onload() {
     /** @type {unknown} */
     const saved = await this.loadData();
     /** @type {Settings} */
     this.settings = Object.assign({}, DEFAULTS, saved);
+
+    // github#83, design/0016 -- decided once per load; a shown note is recorded on dismiss
+    const verdict = decideNote({
+      installed: this.manifest.version,
+      lastSeen: this.settings.lastSeenVersion,
+      hadData: saved !== null && saved !== undefined,
+      note: parseNote(WHATS_NEW).note,
+    });
+    this.pendingNote = verdict.show;
+    this.pendingChain = verdict.show
+      ? releaseChain({ releases: RELEASES, lastSeen: this.settings.lastSeenVersion,
+                       installed: this.manifest.version, note: verdict.show })
+      : [];
+    if (verdict.record) await this.recordVersion(saved);
     this.addSettingTab(new VaultGraphSettingTab(this.app, this));
 
     this.registerView(VIEW_TYPE, (leaf) => new VaultGraphView(leaf, this));
@@ -1436,6 +1564,16 @@ class VaultGraphPlugin extends Plugin {
 
   async saveSettings() {
     await this.saveData(this.settings);
+  }
+
+  // github#83, design/0016 -- the marker alone, never the defaults onto an empty file
+  /** @param {unknown} [saved] */
+  async recordVersion(saved) {
+    /** @type {unknown} */
+    const disk = saved === undefined ? await this.loadData() : saved;
+    const base = disk && typeof disk === "object" ? /** @type {Record<string, unknown>} */ (disk) : {};
+    this.settings.lastSeenVersion = this.manifest.version;
+    await this.saveData(Object.assign({}, base, { lastSeenVersion: this.manifest.version }));
   }
 
   openSettings() {
