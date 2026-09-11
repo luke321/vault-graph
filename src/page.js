@@ -5776,7 +5776,7 @@ function mountVaultGraph(root, data, deps) {
     hoverHighlight(null, null);
 
     var names = order[state.dim] || [];
-    $("gcount").textContent = "(" + names.length + ")";
+    syncDimCounts();
 
     /** @type {Record<string, Record<string, number>>} */
     var kids = dict();
@@ -6490,6 +6490,22 @@ function mountVaultGraph(root, data, deps) {
   }
 
   // github#86, design/0015 -- the control belongs to the thing it changes
+  // github#86 -- each side carries its own dimension's group count
+  function syncDimCounts() {
+    var seg = $("dim");
+    if (!seg) return;
+    var btns = seg.querySelectorAll("button[data-dim]");
+    for (var i = 0; i < btns.length; i++) {
+      var b = /** @type {HTMLElement} */ (btns[i]);
+      var d = b.getAttribute("data-dim");
+      var ct = b.querySelector(".dimct");
+      if (!ct || !d) continue;
+      ct.textContent = "(" + inDim(d, dimGroupCount(d)) + ")";
+    }
+  }
+  /** @param {string} d @returns {() => number} */
+  function dimGroupCount(d) { return function () { return (order[d] || []).length; }; }
+
   function syncDimUI() {
     var seg = $("dim");
     if (!seg) return;

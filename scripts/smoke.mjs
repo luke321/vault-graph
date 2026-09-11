@@ -606,20 +606,31 @@ async (p) => {
     var sel = document.querySelector("#vg-dim");
     var btns = sel ? Array.prototype.slice.call(sel.querySelectorAll("button[data-dim]")) : [];
     var on = btns.filter(function (b) { return b.getAttribute("aria-pressed") === "true"; });
+    var txt = function (b, sel2) { var e = b.querySelector(sel2); return e ? e.textContent : ""; };
     return { dim: __vg.state.dim, has: !!sel, value: on.length === 1 ? on[0].getAttribute("data-dim") : null,
-             options: btns.map(function (b) { return b.getAttribute("data-dim") + ":" + b.textContent; }),
-             gcount: (document.querySelector("#vg-gcount") || {}).textContent,
+             options: btns.map(function (b) { return b.getAttribute("data-dim") + ":" + txt(b, ".dimnm"); }),
+             // github#86 -- the count lives inside each side, so both are visible before a switch
+             counts: btns.map(function (b) { return b.getAttribute("data-dim") + ":" + txt(b, ".dimct"); }),
+             mine: on.length === 1 ? txt(on[0], ".dimct") : "",
+             full: btns.length === 2 && Math.abs(btns[0].getBoundingClientRect().width -
+                                                 btns[1].getBoundingClientRect().width) < 2 &&
+                   Math.abs(sel.getBoundingClientRect().width -
+                            sel.parentElement.getBoundingClientRect().width) < 26,
              groups: __vg.groupOrder().length };
   })()`);
   if (!r.has) return { ok: false, detail: "no #vg-dim in the group list heading" };
   const wanted = "folder:Folders,tag:Tags";
+  const everyCount = r.counts.every((c) => /:\(\d+\)$/.test(c));
   const ok = r.dim === "folder" && r.value === "folder" &&
-             r.options.join(",") === wanted && r.gcount === "(" + r.groups + ")";
+             r.options.join(",") === wanted && r.mine === "(" + r.groups + ")" &&
+             everyCount && r.full;
   return {
     ok,
     detail: `dim ${r.dim}, pressed ${r.value}, sides [${r.options.join(" | ")}]` +
             (r.options.join(",") === wanted ? "" : ` <- wanted ${wanted}`) +
-            `, heading reads ${r.gcount} for ${r.groups} groups`,
+            `, counts [${r.counts.join(" | ")}]` + (everyCount ? "" : " <- a side carries no count") +
+            `, pressed side reads ${r.mine} for ${r.groups} groups` +
+            (r.full ? ", both sides full width" : " <- the two sides are not equal and full width"),
   };
 });
 
