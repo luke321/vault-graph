@@ -3013,14 +3013,25 @@ for a note shown once. The smallest feature clip in the repo would add a third t
 | `NOTE_MAX_LINES` | 5 bullets |
 | `NOTE_MAX_LINE_CHARS` | 160 per bullet |
 | a `data:` URI, or any tag (`<` followed by a letter, `!` or `/`) in a bullet | refused |
+| `POINTS_MAX` | 4 control ids on the `> ` line, each an `id="…"` in `src/page.html` |
+| `CHAIN_MAX` | 8 releases in the heading's chain; older ones collapse to one `…` |
 
 The constants live in `plugin/update-note.mjs`. **Check:** `scripts/build-plugin.mjs` refuses to
 build on any problem, and `scripts/update-note-selftest.mjs` holds the grammar and the decision
-table — the pre-push hook and `release.yml` both run it. **Measured:** the first note is 650 bytes; the bundle went 472,726 → 477,911 bytes with the
-whole feature in it (+5,185, 1.1%). A note that reaches the plugin is shown only when it is for
+table — the pre-push hook and `release.yml` both run it. **Measured:** the first note is 650 bytes; the bundle went 472,726 → 482,379 bytes with the
+whole feature in it (+9,653, 2.0%), the 25-release chain included. A note that reaches the plugin is shown only when it is for
 the installed MAJOR.MINOR — a forgotten note shows nothing, never a stale one — and
 `scripts/release.ps1` refuses to cut an `x.y.0` whose note is for another version, as does
 `release.yml` at the tag, which a hand-pushed tag cannot skip.
+
+**The chain is the CHANGELOG's own list, and the pulse is checkable.** The heading links every
+`x.y.0` between the stored `lastSeenVersion` and the note's version, oldest first, from
+`parseReleases(CHANGELOG.md)` inlined at build time as `vg:releases` — nothing is fetched and the
+chain cannot name a release that was never published. A `> ` line names controls that pulse while
+the strip is up; the build refuses an id that is not in `src/page.html`, so a renamed control fails
+the build instead of pointing at nothing. **Measured:** 25 releases from the CHANGELOG cost under a
+kilobyte; `2.0.0 → 2.6.0` draws the chain `2.1.0 – 2.2.0 – 2.3.0 – 2.4.0 – 2.5.0 – 2.6.0`, and a
+vault one MINOR behind draws the note's version alone.
 
 The strip sits outside the page root, so the page measures nothing about it: with the strip up the
 canvas is shorter by exactly the strip's height, the camera ratio and `--vg-canvas-top` are the

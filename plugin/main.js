@@ -10,7 +10,8 @@ import PAGE_HTML from "raw:../src/page.html";
 import LOGO_MASK_B64 from "b64:../assets/logo-mask.png";
 // github#83, design/0016
 import WHATS_NEW from "raw:./whats-new.md";
-import { decideNote, minorOf, parseNote } from "./update-note.mjs";
+import RELEASES from "vg:releases";
+import { CHAIN_MAX, decideNote, minorOf, parseNote, releaseChain } from "./update-note.mjs";
 
 const VIEW_TYPE = "vault-graph-view";
 const ICON_ID = "vault-graph-disc";
@@ -194,6 +195,8 @@ const attempt = (fn) => { try { fn(); return null; } catch (e) { return e; } };
 
 // github#83, design/0016 -- built from the version; the note file carries text only
 const RELEASE_URL = "https://github.com/luke321/vault-graph/releases/tag/";
+const RELEASES_URL = "https://github.com/luke321/vault-graph/releases";
+const NEW_CLASS = "vg-new";
 const GALLERY_URL = "https://luke321.github.io/vault-graph/features.html";
 
 // github#32
@@ -736,7 +739,20 @@ class VaultGraphView extends ItemView {
     const head = strip.createDiv({ cls: "vg-whatsnew-head" });
     head.createEl("strong", { text: "What's new in Vault Graph " + minorOf(note.version) });
     const links = { target: "_blank", rel: "noopener" };
-    head.createEl("a", { text: "Release notes", href: RELEASE_URL + note.version, attr: links });
+    // github#83 -- every release since the one last seen, oldest first
+    const chain = head.createSpan({ cls: "vg-whatsnew-chain" });
+    const all = this.plugin.pendingChain;
+    const shown = all.length > CHAIN_MAX ? all.slice(all.length - CHAIN_MAX) : all;
+    if (shown.length < all.length) {
+      chain.createEl("a", { text: "\u2026", href: RELEASES_URL,
+                            attr: Object.assign({ title: (all.length - shown.length) + " earlier releases" }, links) });
+      chain.appendText(" \u2013 ");
+    }
+    shown.forEach((r, i) => {
+      if (i) chain.appendText(" \u2013 ");
+      chain.createEl("a", { text: r.version, href: RELEASE_URL + r.version,
+                            attr: r.name ? Object.assign({ title: r.name }, links) : links });
+    });
     head.createEl("a", { text: "Feature gallery", href: GALLERY_URL, attr: links });
     const list = strip.createEl("ul");
     for (const line of note.lines) list.createEl("li", { text: line });
@@ -744,15 +760,26 @@ class VaultGraphView extends ItemView {
     this.registerDomEvent(ok, "click", () => { void this.dismissNote(strip); });
   }
 
+  // github#83, design/0016 -- the controls the note points at, pulsing while it is up
+  markNew() {
+    const note = this.plugin.pendingNote;
+    if (!note || !this.page) return;
+    for (const id of note.points) {
+      const el = this.page.querySelector("#" + id);
+      if (el instanceof HTMLElement) el.addClass(NEW_CLASS);
+    }
+  }
+
   // github#83 -- dismissing is the write that marks the version seen
   /** @param {HTMLElement} strip */
   async dismissNote(strip) {
     strip.remove();
     this.plugin.pendingNote = null;
-    // github#83 -- a second graph leaf carries its own copy
+    // github#83 -- a second leaf has its own copy, and its own pulse
     for (const leaf of this.app.workspace.getLeavesOfType(VIEW_TYPE)) {
       if (leaf.view instanceof VaultGraphView) {
         leaf.view.contentEl.querySelectorAll(".vg-whatsnew").forEach((el) => el.remove());
+        leaf.view.contentEl.querySelectorAll("." + NEW_CLASS).forEach((el) => el.removeClass(NEW_CLASS));
       }
     }
     await this.plugin.recordVersion();
@@ -774,6 +801,7 @@ class VaultGraphView extends ItemView {
 
     this.page = page;
     this.syncTheme();
+    this.markNew();
 
     this.registerEvent(this.app.workspace.on("css-change", () => this.syncTheme()));
 
@@ -1415,6 +1443,8 @@ class VaultGraphPlugin extends Plugin {
   // github#83 -- the note the next view mount shows, until it is dismissed
   /** @type {import("./update-note.mjs").UpdateNote | null} */
   pendingNote = null;
+  /** @type {import("./update-note.mjs").Release[]} */
+  pendingChain = [];
 
   async onload() {
     /** @type {unknown} */
@@ -1430,6 +1460,10 @@ class VaultGraphPlugin extends Plugin {
       note: parseNote(WHATS_NEW).note,
     });
     this.pendingNote = verdict.show;
+    this.pendingChain = verdict.show
+      ? releaseChain({ releases: RELEASES, lastSeen: this.settings.lastSeenVersion,
+                       installed: this.manifest.version, note: verdict.show })
+      : [];
     if (verdict.record) await this.recordVersion(saved);
     this.addSettingTab(new VaultGraphSettingTab(this.app, this));
 

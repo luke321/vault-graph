@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // github#83, design/0016
 
-import { decideNote, parseNote, NOTE_MAX_LINES } from "../plugin/update-note.mjs";
+import { decideNote, parseNote, parseReleases, releaseChain, NOTE_MAX_LINES } from "../plugin/update-note.mjs";
 
 let failed = 0;
 /** @param {string} name @param {boolean} ok @param {string} [detail] */
@@ -10,7 +10,7 @@ function check(name, ok, detail) {
   if (!ok) failed++;
 }
 
-const NOTE = { version: "2.6.0", lines: ["one", "two"] };
+const NOTE = { version: "2.6.0", lines: ["one", "two"], points: [] };
 /**
  * @param {string} label
  * @param {Parameters<typeof decideNote>[0]} a
@@ -33,7 +33,7 @@ decide("minor bump: shown, recorded on dismiss",
        { installed: "2.6.0", lastSeen: "2.5.0", hadData: true, note: NOTE },
        { show: true, record: false, why: "minor or major bump" });
 decide("major bump: shown",
-       { installed: "3.0.0", lastSeen: "2.6.1", hadData: true, note: { version: "3.0.0", lines: ["x"] } },
+       { installed: "3.0.0", lastSeen: "2.6.1", hadData: true, note: { version: "3.0.0", lines: ["x"], points: [] } },
        { show: true, record: false, why: "minor or major bump" });
 decide("patch bump: nothing shown, version recorded",
        { installed: "2.6.1", lastSeen: "2.6.0", hadData: true, note: NOTE },
@@ -86,6 +86,39 @@ check("five bullets is fine", !!parseNote("# 2.6.0\n" + "- b\n".repeat(NOTE_MAX_
 check("a 161-character bullet is a problem", !parseNote("# 2.6.0\n- " + "x".repeat(161) + "\n").note);
 check("5 KB of bullets is a problem", !parseNote("# 2.6.0\n- " + "x".repeat(5000) + "\n").note);
 check("the empty file is a problem", !parseNote("").note);
+
+const pts = parseNote("# 2.6.0\n> vg-dim\n- one\n");
+check("a \"> \" line names a control, and is not a bullet", !!pts.note && pts.note.points.join("|") === "vg-dim" && pts.note.lines.join("|") === "one", pts.note ? pts.note.points.join("|") : pts.problems.join("; "));
+const pts2 = parseNote("# 2.6.0\n- one\n> vg-dim, vg-countbars vg-dim\n");
+check("several ids on one line, comma or space, de-duplicated", !!pts2.note && pts2.note.points.join("|") === "vg-dim|vg-countbars", pts2.note ? pts2.note.points.join("|") : pts2.problems.join("; "));
+check("a note with no \"> \" line points at nothing", parseNote("# 2.6.0\n- one\n").note.points.length === 0);
+check("an id outside the vg- namespace is a problem", !parseNote("# 2.6.0\n- one\n> body\n").note);
+check("a selector rather than an id is a problem", !parseNote("# 2.6.0\n- one\n> #vg-dim\n").note);
+check("five controls is a problem", !parseNote("# 2.6.0\n- one\n> vg-a vg-b vg-c vg-d vg-e\n").note);
+check("four controls is fine", !!parseNote("# 2.6.0\n- one\n> vg-a vg-b vg-c vg-d\n").note);
+
+console.log("parseReleases");
+const LOG = "# Changelog\n\n## Versioning\n\n## 2.5.0 \u2014 \"Tags\" \u2014 2026-09-11\n\n## 2.4.1 \u2014 2026-09-10\n## 2.4.0 \u2014 \"Auto\" \u2014 2026-09-10\n" +
+            "## 2.3.0 \u2014 \"Gauge\" \u2014 2026-09-09\n## 2.2.0 \u2014 \"Fold\" \u2014 2026-09-08\n## 2.1.0 \u2014 \"Mobile\" \u2014 2026-09-07\n" +
+            "## v1.4.4 \u2014 2026-08-22\n## v1.4.3 \u2014 withdrawn, deleted\n## v1.0 \u2014 2026-08-22\n";
+const rel = parseReleases(LOG);
+check("every semver heading is a release, in file order", rel.map((r) => r.version).join("|") === "2.5.0|2.4.1|2.4.0|2.3.0|2.2.0|2.1.0|1.4.4|1.4.3", rel.map((r) => r.version).join("|"));
+check("a quoted name is read, and a heading without one is empty", rel[0].name === "Tags" && rel[1].name === "" && rel[6].name === "");
+check("v1.0 is not semver and is skipped", !rel.some((r) => r.version.startsWith("1.0")));
+check("the Versioning heading is skipped", !rel.some((r) => !/^\d/.test(r.version)));
+
+console.log("releaseChain");
+const NOTE6 = { version: "2.6.0", lines: ["x"], points: [] };
+const chain = (lastSeen, installed, note = NOTE6) => releaseChain({ releases: rel, lastSeen, installed, note }).map((r) => r.version + (r.name ? ":" + r.name : "")).join("|");
+check("2.1.0 -> 2.6.0 lists every x.y.0 after 2.1.0, oldest first, the note's version last",
+      chain("2.1.0", "2.6.0") === "2.2.0:Fold|2.3.0:Gauge|2.4.0:Auto|2.5.0:Tags|2.6.0", chain("2.1.0", "2.6.0"));
+check("patches are left out of the chain (2.4.1)", !chain("2.1.0", "2.6.0").includes("2.4.1"));
+check("2.5.0 -> 2.6.0 is the note's version alone", chain("2.5.0", "2.6.0") === "2.6.0", chain("2.5.0", "2.6.0"));
+check("2.5.0 -> 2.6.1 still ends at the note's 2.6.0", chain("2.5.0", "2.6.1") === "2.6.0", chain("2.5.0", "2.6.1"));
+check("2.3.0 -> 2.5.0 with the note already in the CHANGELOG carries its name once", chain("2.3.0", "2.5.0", { version: "2.5.0", lines: ["x"], points: [] }) === "2.4.0:Auto|2.5.0:Tags", chain("2.3.0", "2.5.0", { version: "2.5.0", lines: ["x"], points: [] }));
+check("no version last seen: the note's version alone", chain(null, "2.6.0") === "2.6.0", chain(null, "2.6.0"));
+check("an unreadable last-seen version: the note's version alone", chain("latest", "2.6.0") === "2.6.0");
+check("1.4.4 -> 2.6.0 crosses the major: 2.1.0 onward, 1.4.x patches out", chain("1.4.4", "2.6.0") === "2.1.0:Mobile|2.2.0:Fold|2.3.0:Gauge|2.4.0:Auto|2.5.0:Tags|2.6.0", chain("1.4.4", "2.6.0"));
 
 if (failed) { console.log("update-note selftest: " + failed + " FAILED"); process.exit(1); }
 console.log("update-note selftest: all passed");

@@ -9,7 +9,7 @@ import { fileURLToPath } from "node:url";
 import { attach } from "./cdp.mjs";
 import { fixtureStore } from "./suite-stamp.mjs";
 import { leftWindow, placeElectronLeft } from "./screen.mjs";
-import { parseNote, semver } from "../plugin/update-note.mjs";
+import { parseNote, parseReleases, releaseChain, semver } from "../plugin/update-note.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(HERE, "..");
@@ -246,23 +246,24 @@ try {
          "the strip links to the release page and the feature gallery, in a new window", links.join(" | "));
   const bullets = await E("(function(){ var s = " + STRIP + "; return s ? Array.prototype.map.call(s.querySelectorAll('li'), function (l) { return l.textContent; }) : []; })()");
   report(bullets.join("\n") === note.lines.join("\n"), "the bullets are the note file's, verbatim", bullets.length + " bullet" + (bullets.length === 1 ? "" : "s"));
-  const before = await geometry();
   await shoot("01-strip-up");
   await closeGraph();
   await openGraph();
   report(await stripShown(), "reopening the view before dismissing shows it again");
+  // github#83 -- one mount: across two, the cascade decides the ratio
+  const up = await geometry();
   await E("(function(){ var s = " + STRIP + "; s.querySelector('.vg-whatsnew-ok').click(); })(); void 0");
-  await sleep(900);
+  await settle();
   const after = await geometry();
   report(!await stripShown(), "dismissing removes the strip");
   report(lastSeen() === N, "dismissing records the installed version", "lastSeenVersion " + lastSeen());
-  report(before.strip > 0 && Math.abs((after.canvas - before.canvas) - before.strip) <= 1,
+  report(up.strip > 0 && Math.abs((after.canvas - up.canvas) - up.strip) <= 1,
          "the disc's canvas takes the strip's height back, within a pixel",
-         "strip " + before.strip + " px, canvas " + before.canvas + " -> " + after.canvas + " px");
-  report(before.placed, "the strip sits in the view above the page root, not inside it");
-  report(before.x === 0.5 && before.y === 0.5 && after.x === 0.5 && after.y === 0.5 && before.ratio === after.ratio && before.cssTop !== "" && before.cssTop === after.cssTop,
+         "strip " + up.strip + " px, canvas " + up.canvas + " -> " + after.canvas + " px");
+  report(up.placed, "the strip sits in the view above the page root, not inside it");
+  report(up.x === 0.5 && up.y === 0.5 && after.x === 0.5 && after.y === 0.5 && up.ratio === after.ratio && up.cssTop !== "" && up.cssTop === after.cssTop,
          "the camera and --vg-canvas-top are the same with and without the strip",
-         "camera (" + before.x + ", " + before.y + ", " + before.ratio + ") -> (" + after.x + ", " + after.y + ", " + after.ratio + "), --vg-canvas-top " + before.cssTop + " -> " + after.cssTop);
+         "camera (" + up.x + ", " + up.y + ", " + up.ratio + ") -> (" + after.x + ", " + after.y + ", " + after.ratio + "), --vg-canvas-top " + up.cssTop + " -> " + after.cssTop);
   await shoot("02-dismissed");
   await closeGraph();
   await openGraph();
@@ -273,11 +274,53 @@ try {
   await reloadPlugin({ lastSeenVersion: PREV_MINOR }, N);
   await openGraph();
   report(await stripShown(), "a MINOR bump shows the note");
+  const one = await E("(function(){ var s = " + STRIP + "; return s ? Array.prototype.map.call(s.querySelectorAll('.vg-whatsnew-chain a'), function (a) { return a.textContent; }) : []; })()");
+  report(one.length === 1 && one[0] === N, "one MINOR behind: the chain is the note's version alone", one.join(" \u2013 "));
   await closeGraph();
+
   await reloadPlugin(JSON.parse(readData()), N);
   await openGraph();
   report(await stripShown(), "a plugin restart before dismissing shows it again");
   report(lastSeen() === PREV_MINOR, "and still records nothing", "lastSeenVersion " + lastSeen());
+  await closeGraph();
+
+  const releases = parseReleases(readFileSync(join(ROOT, "CHANGELOG.md"), "utf8"));
+  const FAR = releases.filter((r) => semver(r.version)[2] === 0 && semver(r.version)[0] === maj).map((r) => r.version).slice(-1)[0] || PREV_MINOR;
+  const want = releaseChain({ releases, lastSeen: FAR, installed: N, note });
+  console.log("several releases behind ({ lastSeenVersion: " + FAR + " }, " + N + ")");
+  await reloadPlugin({ lastSeenVersion: FAR }, N);
+  await openGraph();
+  const got = await E("(function(){ var s = " + STRIP + "; return s ? Array.prototype.map.call(s.querySelectorAll('.vg-whatsnew-chain a'), function (a) { return { v: a.textContent, href: a.getAttribute('href'), title: a.getAttribute('title') || '' }; }) : []; })()");
+  report(got.length === want.length && got.every((g, i) => g.v === want[i].version && g.href === "https://github.com/luke321/vault-graph/releases/tag/" + want[i].version && g.title === want[i].name),
+         "the chain lists every x.y.0 since " + FAR + ", oldest first, each linking its own release page, the name on hover",
+         got.map((g) => g.v + (g.title ? " (" + g.title + ")" : "")).join(" \u2013 "));
+  report(got.length >= 2 && got[0].v !== FAR && got[got.length - 1].v === N && got.every((g, i) => !i || semver(g.v)[1] > semver(got[i - 1].v)[1] || semver(g.v)[0] > semver(got[i - 1].v)[0]),
+         "the chain starts after the version last seen, ends at the note's, and climbs", got.length + " links");
+  await shoot("03-chain");
+  await closeGraph();
+
+  console.log("the controls a note points at (github#83)");
+  await reloadPlugin({ lastSeenVersion: PREV_MINOR }, N);
+  await openGraph();
+  const POINT = "vg-dim";
+  await E("(function(){ var p = app.plugins.getPlugin(" + JSON.stringify(PLUGIN_ID) + ");" +
+          " var v = " + VIEW + "; p.pendingNote = { version: p.manifest.version, lines: ['x'], points: [" + JSON.stringify(POINT) + "] };" +
+          " v.markNew(); })(); void 0");
+  await sleep(300);
+  const lit = await E("(function(){ var v = " + VIEW + "; var el = v.contentEl.querySelector('#" + POINT + "');" +
+                      " if (!el) return null; var cs = getComputedStyle(el);" +
+                      " return { on: el.classList.contains('vg-new'), anim: cs.animationName, dur: cs.animationDuration }; })()");
+  report(!!lit && lit.on && lit.anim === "vg-new-pulse",
+         "a control the note points at carries the pulse while the strip is up",
+         lit ? lit.anim + " " + lit.dur : "the control was not found");
+  await E("(function(){ var v = " + VIEW + "; v.contentEl.querySelector('.vg-whatsnew-ok').click(); })(); void 0");
+  await sleep(700);
+  const out = await E("(function(){ var v = " + VIEW + "; return v.contentEl.querySelectorAll('.vg-new').length; })()");
+  report(out === 0, "dismissing stops the pulse", out + " still pulsing");
+  await closeGraph();
+  await openGraph();
+  const reopened = await E("(function(){ var v = " + VIEW + "; return v.contentEl.querySelectorAll('.vg-new').length; })()");
+  report(reopened === 0, "and it does not come back when the view is reopened", reopened + " pulsing");
   await closeGraph();
 
   console.log("patch bump ({ lastSeenVersion: " + N + " }, " + NEXT_PATCH + ")");

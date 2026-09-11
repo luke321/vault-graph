@@ -43,6 +43,7 @@
   gap: 2px 14px;
 }
 .vault-graph-view .vg-whatsnew-head a { color: var(--text-accent); }
+.vault-graph-view .vg-whatsnew-chain { color: var(--text-muted); font-variant-numeric: tabular-nums; }
 .vault-graph-view .vg-whatsnew ul {
   flex: 1 1 auto;
   margin: 0;
@@ -50,6 +51,22 @@
 }
 .vault-graph-view .vg-whatsnew li { margin: 0; }
 .vault-graph-view .vg-whatsnew-ok { flex: 0 0 auto; }
+
+/* github#83, design/0016 -- what this release added, while the note is up */
+.vault-graph-view .vg-new {
+  border-radius: 7px;
+  animation: vg-new-pulse 1.9s ease-in-out infinite;
+}
+@keyframes vg-new-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 transparent; }
+  45% { box-shadow: 0 0 0 3px var(--interactive-accent); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .vault-graph-view .vg-new {
+    animation: none;
+    box-shadow: 0 0 0 2px var(--interactive-accent);
+  }
+}
 
 .vg-colour-row { flex-wrap: wrap; }
 .vg-colour-row > .vault-graph.vg-tokens { flex: 1 1 100%; width: 100%; margin-top: 8px; }

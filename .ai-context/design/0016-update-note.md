@@ -9,9 +9,11 @@ announced to anyone running the plugin. This is the once-per-release strip that 
 ## What it is
 
 A dismissible strip **above the disc, inside the view**: a heading (*What's new in Vault Graph 2.6*),
-two links (the release page for the note's version, and the feature gallery on the docs site), the
-note's bullets, and one button, *Got it*. It sits where the change is visible, it carries the link to
-the clips instead of the clips, and dismissing it is the write that marks the version seen.
+the **chain of releases** the user has not seen — `2.1.0 – 2.2.0 – 2.3.0 – 2.4.0 – 2.5.0`, oldest
+first, each linking its own release page and carrying its name on hover — the feature gallery, the
+note's bullets, and one button, *Got it*. While it is up, the **controls this release added pulse**
+in the view behind it. It sits where the change is visible, it carries the links to the clips
+instead of the clips, and dismissing it is the write that marks the version seen.
 
 Not a `Notice` (it expires on a timer and is too small for three lines), not a modal (the wrong first
 impression of a graph plugin), and not fetched (`decisions/0008` — nothing shipped reaches the
@@ -22,14 +24,16 @@ network). The standalone export never shows it: a one-file HTML page has no upda
 `plugin/whats-new.md`, one hand-written file the build inlines through the `raw:` loader:
 
 ```
-# 2.6.0
-- After an update, the graph tells you what changed: this strip, once per release.
+# 2.5.0
+> vg-dim
+- Cut the disc by tag instead of by folder: a Folders / Tags switch above the group list.
 ```
 
-A `# <version>` heading, then up to five `- ` bullets of plain text, blank lines and HTML comments
-allowed between. `parseNote()` in `plugin/update-note.mjs` is the whole grammar, and a file with
-**any** problem is no note at all: `scripts/build-plugin.mjs` refuses to build, and were one to reach
-the plugin anyway it would show nothing rather than something half-parsed.
+A `# <version>` heading, then up to five `- ` bullets of plain text and at most one `> ` line
+naming up to four control ids; blank lines and HTML comments are allowed between.
+`parseNote()` in `plugin/update-note.mjs` is the whole grammar, and a file with **any** problem is
+no note at all: `scripts/build-plugin.mjs` refuses to build, and were one to reach the plugin
+anyway it would show nothing rather than something half-parsed.
 
 **Why one file, overwritten, and not the CHANGELOG section.** The CHANGELOG is written for someone
 reading history: it runs long, it carries commit links, and its voice is the repository's. The strip
@@ -43,7 +47,41 @@ update, forever, for a note shown once — the smallest clip in `assets/features
 to the bundle. So: `NOTE_MAX_BYTES` 4096, `NOTE_MAX_LINES` 5, `NOTE_MAX_LINE_CHARS` 160, no `data:`
 URI, no tag (`<` followed by a letter, `!` or `/`). The links are built by the host from the version (`RELEASE_URL`, `GALLERY_URL` in
 `plugin/main.js`), so the file cannot point anywhere. Measured: the first note is 650 bytes, and the
-bundle grew from 472,726 to 477,911 bytes with the whole feature in it (+5,185, 1.1%).
+bundle grew from 472,726 to 482,379 bytes with the whole feature in it (+9,653, 2.0%), the
+25-release chain included.
+
+## The chain of releases
+
+A user who skipped three releases is not owed one note; they are owed the shape of what they
+missed. So the heading carries every `x.y.0` **after** the stored `lastSeenVersion` and **up to**
+the note's own version, oldest first, each an `<a>` to its own release page with the release's name
+as its `title`: *2.1.0 – 2.2.0 – 2.3.0 – 2.4.0 – 2.5.0*. Patches are left out — they are fixes, and
+`decideNote()` has already decided they are not worth an interruption. Above `CHAIN_MAX` (8) the
+oldest are replaced by one `…` linking the releases list, so a very stale install gets a row, not a
+paragraph. With nothing stored, or a stored version that is not semver, the chain is the note's
+version alone.
+
+**The list is the CHANGELOG's, read at build time.** `scripts/build-plugin.mjs` resolves the import
+`vg:releases` by running `parseReleases()` over `CHANGELOG.md` and inlining the result — every
+`## <version>` heading, with the quoted release name where the heading carries one. So the chain
+cannot disagree with what was published (`release.ps1` and `release.yml` both refuse a version with
+no CHANGELOG section), nothing is fetched, and the whole list of 25 releases costs under a kilobyte.
+The `v`-prefixed tags up to `v1.4.4` parse; `v1.0` is not semver and is skipped, as is *Versioning*.
+
+## The controls a release added
+
+A release that adds a control can name it: `> vg-dim` points at an id in `src/page.html`, and while
+the strip is up that element carries `.vg-new`, a 1.9 s box-shadow pulse in the host's accent
+(`plugin/styles.css`; a static ring under `prefers-reduced-motion`). Dismissing the note removes the
+class in every open graph leaf, and a view opened afterwards never gets it, because `markNew()` reads
+`pendingNote`, which dismissal clears.
+
+**Ids, and only ids, because that is what can be checked.** `POINTS_MAX` is 4, each must match
+`vg-[a-z0-9-]+`, and the build fails when one is not an `id="…"` in `src/page.html` — so a control
+renamed out from under a note is a failed build, not a release that silently points at nothing. The
+unit is therefore a control with an id: for 2.5.0 that is `vg-dim`, the whole Folders/Tags switch,
+which is exactly what that release added. A release that adds no control of its own leaves the line
+out, and nothing pulses.
 
 ## When it shows
 
@@ -110,10 +148,11 @@ and the camera stays centred, on real Obsidian.
 - `scripts/update-note-selftest.mjs` — the decision table above and the grammar, no Obsidian; the
   pre-push hook and `release.yml` run it.
 - `scripts/build-plugin.mjs` — refuses a note the plugin could not show, on every build.
-- `scripts/update-note-check.mjs` — real Obsidian over CDP: seeds `data.json` six ways, reloads the
-  plugin with the manifest patched to each installed version, opens the view, reads the strip, the
-  links, the bullets, the written version, the canvas height and the camera, and screenshots the
-  strip up and dismissed.
+- `scripts/update-note-check.mjs` — real Obsidian over CDP: seeds `data.json` seven ways, reloads
+  the plugin with the manifest patched to each installed version, opens the view, and reads back the
+  strip, the chain against `releaseChain()`'s own answer, the links, the bullets, the written
+  version, the canvas height, the camera, `--vg-canvas-top`, and the pulse on a pointed control
+  before and after dismissal; screenshots the strip up, dismissed, and with a chain.
 - `scripts/check-network.mjs` — the note file and the module are in its source list.
 
 ## Release procedure
