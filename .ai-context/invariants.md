@@ -2934,6 +2934,13 @@ shared git common dir). `.githooks/pre-push` and `scripts/release.ps1` skip the 
 commit in front of them carries a stamp against the fixtures now in the store, and print the
 run they trust. A partial run never stamps; a dirty tree never stamps; a stamp whose fixture
 has been regenerated, or whose unpinned fixture is older than the seven-day refresh, misses.
+A fixture is reused only when its stamp matches **and the vault is still usable**: the demo
+fixture was found on 2026-09-11 with all twenty note folders and a valid stamp but **no
+`.obsidian`**, which `build-graph.mjs` refuses at the vault root, and a freshness test that read
+only the stamp handed that back to every run for ever — six jobs dead, 0 of 107 on that fixture,
+in every worktree, until someone deleted the directory by hand. `gen()` tests for `.obsidian`
+now, so a half-written fixture is rebuilt rather than reused (github#86).
+
 A run in which a fixture could not be generated never stamps, and a stamp naming fewer than
 every fixture in `FIXTURE_NAMES` misses (github#103) — **four names since github#86 added the
 tag-organised fixture**, because a list that lags the suite is the same hole in a new place: the

@@ -5362,7 +5362,10 @@ function resolveVaults() {
       try {
         const st = JSON.parse(readFileSync(stampPath, "utf8"));
         const pinned = args.indexOf("--end") >= 0;
-        fresh = st.digest === digest &&
+        // github#86 -- a stamp is not proof the vault is usable
+        // github#86 -- one was found with its notes but no .obsidian
+        // github#86 -- a stamp-only test reuses that instead of rebuilding
+        fresh = st.digest === digest && existsSync(join(dir, ".obsidian")) &&
                 (pinned || (typeof st.day === "string" && ageDays(st.day) <= FIXTURE_MAX_AGE_DAYS));
       } catch { fresh = false; }
     }
