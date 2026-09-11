@@ -4,7 +4,7 @@
 so an agent that looks for `AGENTS.md` by convention finds its way there instead of guessing, and
 it deliberately does not restate the laws: two copies of a rule become two different rules.
 
-Three things are worth knowing before you touch anything, all expanded in `CLAUDE.md`:
+Four things are worth knowing before you touch anything, all expanded in `CLAUDE.md`:
 
 - **Measure, don't reason.** The recurring failure here is arguing about the code instead of
   driving it: serve the page, drive it, read the numbers. `node scripts/smoke.mjs --only
@@ -21,14 +21,23 @@ Three things are worth knowing before you touch anything, all expanded in `CLAUD
   ```
 
   `record` and `suite` are the two names. Screenshots need no lock — `shoot.mjs` captures over
-  CDP, so overlapping windows are harmless — but pass your own `--port`.
+  CDP, so overlapping windows are harmless — but pass your own `--port`. `.githooks/pre-push`
+  takes the `suite` lock itself around its own run — never also wrap a `git push` in an outer
+  acquire/release, or the hook's own attempt blocks on yours and the push hangs.
 - **A vault that is not Lukas's own opens in restricted mode.** A fixture or generated vault puts
   up "Trust author and enable plugins?" on first open, and until it is confirmed the plugin does
   not load at all -- which reads as a broken plugin rather than as an unconfirmed dialog. Over
   CDP, `app.plugins.setEnable(true)` then `enablePluginAndSave(id)`; never judge the plugin before
   `getPlugin(id)` is truthy.
+- **Never serve Chrome unlabeled.** Any page you open in Chrome from this worktree —
+  `smoke.mjs`, `shoot.mjs`, a manual review build — carries its own top-left title as
+  `<worktree/feature> — <what it's showing>`, e.g. `tag-grouping — demo vault`. Patch
+  `window.VAULT_DATA`'s `vault` field in the built HTML, not the product.
 - **`git push`, merging into `develop`, and a full-suite run are each a separate ask, every
-  time.** None of them is implied by permission to do the work, or by how the last one went.
+  time.** None of them is implied by permission to do the work, or by how the last one went. A
+  dispatched ticket worktree stops at its own branch regardless — only the orchestrator pushes to
+  `develop` or cuts a release. An orchestrator also stops spawning new worktrees once 6 are
+  already working — more than that starved CPU/disk enough to force a hard restart once already.
 
 `.ai-context/README.md` maps the design records; `.ai-context/code-map.md` and `code-index.md` are
 generated and let you jump to a line range instead of reading an 8,700-line file top to bottom.

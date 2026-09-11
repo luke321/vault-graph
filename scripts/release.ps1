@@ -1,16 +1,20 @@
 <#
 .SYNOPSIS
-  The local half of a release: check, gate, tag, push. The publishing half is
+  The local half of a release: check, gate, tag, push the tag. The publishing half is
   .github/workflows/release.yml, which the tag push triggers.
 
 .DESCRIPTION
   Refuses a v-prefixed or non-semver version, a version the manifest does not claim, a
   version with no CHANGELOG section, a branch other than main (github#47), a dirty tree and a
-  main behind origin; prints the hero and feature-clip warnings; runs lint, the Sigma notice
-  check and the invariant suite; builds the plugin once as a pre-flight; then writes the
-  annotated tag and pushes the branch and the tag. Everything after that -- build, provenance
-  attestation, Release, assets -- is the workflow's (github#10). .ai-context/releasing.md is
-  the authority on the two halves.
+  main that is not exactly origin/main (github#94); prints the hero and feature-clip
+  warnings; runs lint and the Sigma notice check; builds the plugin once as a pre-flight; runs
+  the invariant suite unless HEAD's tree already carries a pass stamp from an earlier full run
+  (github#93; -ForceSuite runs it anyway); then writes the annotated tag and pushes it. The
+  branch is never pushed: main only
+  ever receives develop through a pull request merged on the website (github#94), so by the
+  time this runs main is already on origin, or the guard stops it. Everything after the tag
+  push -- build, provenance attestation, Release, assets -- is the workflow's (github#10).
+  .ai-context/releasing.md is the authority on the two halves.
 
 .PARAMETER Version
   Bare semver, e.g. 2.0.0. No v.
@@ -53,7 +57,12 @@ param(
   # hatch for the branch guard below, shaped like -AllowDirty: there is a legitimate case
   # (a hotfix line that never reaches main, say), and the guard exists to stop the ACCIDENT,
   # not to make the deliberate thing impossible.
-  [switch] $AllowAnyBranch
+  [switch] $AllowAnyBranch,
+  # Run the invariant suite even when HEAD's tree already carries a pass stamp (github#93,
+  # decisions/0013). The stamp is the normal case: the dry run on the release branch measured
+  # this exact tree, and the merge into main did not change it. This is the flag for not
+  # trusting that -- a suspected flake, a changed Chrome, a stamp you want re-earned.
+  [switch] $ForceSuite
 )
 
 $ErrorActionPreference = 'Stop'
@@ -116,13 +125,17 @@ try {
            "permanently. Merge into main first, or pass -AllowAnyBranch if you know why.")
   }
 
-  # ...AND ON THE MAIN EVERYONE ELSE CAN SEE. Being AHEAD of origin/main is the normal case
-  # and not checked -- this script pushes HEAD itself a few steps down. Being BEHIND is the
-  # problem: it means tagging a main that is missing commits somebody else has already
-  # published, and the `git push origin HEAD` below would be rejected anyway, after the tag
-  # had been made. Better to say so now than to leave a local tag behind a failed push.
+  # ...AND IT HAS TO BE EXACTLY THE MAIN EVERYONE ELSE CAN SEE (github#94). main only ever
+  # receives develop, through a pull request merged on the website -- the ruleset refuses a
+  # direct push and has no bypass -- so by the time this script runs, main is origin/main or
+  # it is wrong. BEHIND means tagging a main that is missing commits somebody else has already
+  # published. AHEAD means a merge made locally that no push can land: this script used to
+  # call that the normal case and push HEAD itself, which is how 2.4.0's first cut wrote its
+  # tag and then watched the push come back with GH013 -- the tag already sat on a commit
+  # origin would never accept. Both are caught here, the one moment a wrong tag is still free
+  # to not exist.
   #
-  # Fetch first, because "behind" measured against a stale remote ref is not measured at all.
+  # Fetch first, because "equal" measured against a stale remote ref is not measured at all.
   #
   # AN EXPLICIT REFSPEC, not `git fetch origin main`. That form opportunistically
   # fast-forwards the LOCAL main as well, which this observed doing while the guard was
@@ -131,9 +144,16 @@ try {
   if ($branch -eq 'main') {
     & git fetch origin 'refs/heads/main:refs/remotes/origin/main' --quiet
     $behind = (& git rev-list --count 'HEAD..origin/main').Trim()
+    $ahead  = (& git rev-list --count 'origin/main..HEAD').Trim()
     if ($behind -ne '0') {
       throw ("main is $behind commit(s) behind origin/main. Pull first -- tagging here " +
              "would tag a main that is missing what is already published.")
+    }
+    if ($ahead -ne '0') {
+      throw ("main is $ahead commit(s) ahead of origin/main, and the ruleset on main refuses a " +
+             "direct push (GH013: changes must be made through a pull request). Open " +
+             "develop -> main on the website and merge it, then 'git switch main' and " +
+             "'git pull --ff-only', and run this again. Nothing was tagged.")
     }
   }
 
@@ -248,9 +268,39 @@ try {
            "with no release. Fix it first (npm ci, if this is a fresh clone).")
   }
 
+  # A TREE IS GATED ONCE (github#93, decisions/0013). scripts/smoke.mjs stamps the tree it
+  # passed; the dry run on the release branch is normally that run, and the merge into main
+  # carries the same tree (measured byte-identical on 2.3.0, 2.4.0 and 2.4.1). So the suite is
+  # skipped here when HEAD's tree already has a stamp against the fixtures now in the store,
+  # and named when it is. -ForceSuite runs it regardless. When it does run, it runs under the
+  # machine-wide suite lock (scripts/lock.mjs, github#92) and releases it on every way out.
   Write-Host "`n=== invariants ===" -ForegroundColor Cyan
-  try { Invoke-Native node @((Join-Path $here 'smoke.mjs')) }
-  catch { throw "the invariant suite failed -- not releasing" }
+  $stamped = $false
+  if (-not $ForceSuite) {
+    $prev = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    $stampOut = @(); $stampRc = 1
+    try { $stampOut = @(& node (Join-Path $here 'suite-stamp.mjs') check HEAD); $stampRc = $LASTEXITCODE }
+    finally { $ErrorActionPreference = $prev }
+    $stampOut | ForEach-Object { Write-Host $_ }
+    # github#103: exit 0 alone is not a stamp; the pass line itself is required
+    $stamped = ($stampRc -eq 0) -and (($stampOut -join ' ') -match 'passed the invariant suite')
+  }
+  if ($stamped) {
+    Write-Host "HEAD's tree already passed the suite -- skipping it (-ForceSuite to run it anyway)" -ForegroundColor Yellow
+  } else {
+    $lockOwner = "release.ps1 $Version"
+    try { Invoke-Native node @((Join-Path $here 'lock.mjs'), 'acquire', 'suite', '--owner', $lockOwner) }
+    catch { throw "could not take the suite lock -- another suite is running (node scripts/lock.mjs status); not releasing" }
+    try {
+      try { Invoke-Native node @((Join-Path $here 'smoke.mjs')) }
+      catch { throw "the invariant suite failed -- not releasing" }
+    } finally {
+      $prev = $ErrorActionPreference
+      $ErrorActionPreference = 'Continue'
+      try { & node (Join-Path $here 'lock.mjs') release suite --owner $lockOwner } finally { $ErrorActionPreference = $prev }
+    }
+  }
 
   if ($DryRun) { Write-Host "`n-DryRun: stopping before the tag and the push." -ForegroundColor Yellow; return }
 
@@ -267,14 +317,15 @@ try {
   if (-not $tagExists) { Invoke-Native git @('tag', '-a', $Version, '--cleanup=verbatim', '-F', $msgFile) }
   Remove-Item $msgFile -ErrorAction SilentlyContinue
 
-  # THE BRANCH FIRST, THEN THE TAG, and the order is load-bearing in a way it was not when
-  # this script published on its own. The workflow refuses to publish a tag that is not in
+  # THE TAG, AND ONLY THE TAG. The workflow refuses to publish a tag that is not in
   # origin/main's history (github#47, server-side this time), and it starts the moment the
-  # tag lands -- so a tag pushed before its commit is on origin/main can race its own
-  # guard. Pushing HEAD first closes the window. If it fails anyway, main has caught up by
-  # then and re-running the workflow is the whole fix.
+  # tag lands -- so a tag pushed before its commit is on origin/main would race its own
+  # guard. The guard above is what closes that window now: on main, HEAD IS origin/main, and
+  # it got there through the pull request the ruleset requires (github#94). This script used
+  # to push HEAD first for the same reason; under the ruleset that push is a no-op at best
+  # and a GH013 at worst, after the tag had been made. Off main (-AllowAnyBranch) nothing
+  # pushes the branch either -- the workflow will refuse the tag, as that switch says.
   Write-Host "`n=== push ===" -ForegroundColor Cyan
-  Invoke-Native git @('push', 'origin', 'HEAD')
   Invoke-Native git @('push', 'origin', $Version)
 
   # AND STOP. .github/workflows/release.yml takes it from here: it builds main.js and

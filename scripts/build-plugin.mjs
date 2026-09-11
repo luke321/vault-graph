@@ -98,8 +98,34 @@ const stripDemoAndDebugPlugin = {
   },
 };
 
+/* ------------------------------------------------------------------ styles -- */
+// github#98
+const ENTRY = join(ROOT, "plugin", "main.js");
+const STYLE_INPUTS = [join(ROOT, "plugin", "styles.css"), join(ROOT, "src", "page.css")];
+
+function copyStyles() {
+  const host = readFileSync(STYLE_INPUTS[0], "utf8");
+  const page = readFileSync(STYLE_INPUTS[1], "utf8");
+  writeFileSync(join(ROOT, "styles.css"),
+    "/* Built by scripts/build-plugin.mjs from plugin/styles.css + src/page.css. */\n" +
+    host.trimEnd() + "\n\n" +
+    "/* ---- src/page.css ---------------------------------------------------- */\n" +
+    page.trimEnd() + "\n", "utf8");
+}
+
+const stylesPlugin = {
+  name: "styles",
+  setup(b) {
+    b.onLoad({ filter: /[\\/]main\.js$/, namespace: "file" }, (args) =>
+      args.path === ENTRY
+        ? { contents: readFileSync(ENTRY), loader: "js", watchFiles: STYLE_INPUTS }
+        : null);
+    b.onEnd(copyStyles);
+  },
+};
+
 const options = {
-  entryPoints: [join(ROOT, "plugin", "main.js")],
+  entryPoints: [ENTRY],
   outfile: join(ROOT, "main.js"),
   bundle: true,
   format: "cjs",
@@ -109,31 +135,19 @@ const options = {
   sourcemap: false,
   minify: false,
   logLevel: "info",
-  plugins: [rawLoader, stripDemoAndDebugPlugin],
+  plugins: [rawLoader, stripDemoAndDebugPlugin, stylesPlugin],
   banner: {
     js: "/* Vault Graph -- built by scripts/build-plugin.mjs. Source: plugin/ and src/. */\n" +
         engineBanner(),
   },
 };
 
-function copyStyles() {
-  const host = readFileSync(join(ROOT, "plugin", "styles.css"), "utf8");
-  const page = readFileSync(join(ROOT, "src", "page.css"), "utf8");
-  writeFileSync(join(ROOT, "styles.css"),
-    "/* Built by scripts/build-plugin.mjs from plugin/styles.css + src/page.css. */\n" +
-    host.trimEnd() + "\n\n" +
-    "/* ---- src/page.css ---------------------------------------------------- */\n" +
-    page.trimEnd() + "\n", "utf8");
-}
-
 if (WATCH) {
   const ctx = await context(options);
   await ctx.watch();
-  copyStyles();
-  console.log("watching plugin/ -- ctrl-c to stop");
+  console.log("watching plugin/, src/ and both stylesheets -- ctrl-c to stop");
 } else {
   await build(options);
-  copyStyles();
   const kb = (n) => (n / 1024).toFixed(0) + " KB";
   const sizes = ["main.js", "styles.css", "manifest.json"]
     .map((f) => f + " " + kb(readFileSync(join(ROOT, f)).length));

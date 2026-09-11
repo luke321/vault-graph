@@ -73,6 +73,13 @@ is still a jump at the end, and the bar is 0.
   note, a rebuild does — and that reason is now in the code as a pointer to this file.
 - `bandLock` is re-derived with the previous lock as its hint, so a band flips only when the new
   unfiltered plan genuinely says so. Measured: a one-note add flips none, on all three fixtures.
+- **The sub-pixel premise holds only for a lock taken from the plan on screen.** A dimension
+  switch (github#86) leaves the arriving disc inside rings borrowed from the disc it left, and
+  retaking the lock from the arriving disc's own plan is a re-pack, not a step — all 10,002
+  notes of the 10k fixture moved on the first live add after a switch to tags. So the lock
+  records the dimension it was taken from, and the live path retakes it in *that* dimension
+  (`ringsIn`) before building either endpoint; the step is sub-pixel again (r0 0.0009). See
+  `design/0015`, *the two discs share their rings*.
 
 ## Verify
 

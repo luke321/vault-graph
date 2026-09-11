@@ -42,6 +42,18 @@ measuring it: serve the page, drive it, read the numbers.
   `mkdir` is the lock — atomic, and it survives a killed session as a stale entry rather than a
   permanent one. Screenshots need no lock: `shoot.mjs` captures over CDP, so overlapping windows
   are harmless — but pass your own `--port`.
+
+  **`.githooks/pre-push` takes the `suite` lock itself, around its own run, and releases it on
+  every way out (github#92).** Do not also wrap a `git push` in an outer acquire/release — the
+  hook's own attempt blocks on yours and the push hangs until the outer lock's stale window
+  expires. A plain `git push origin develop`/`main` is correctly gated on its own; the wrapping
+  above is only for a `smoke.mjs` run *you* are driving directly, never for a push.
+- **Never serve Chrome unlabeled.** Any vault-graph page opened in Chrome from this worktree
+  — `smoke.mjs`, `shoot.mjs`, a manual review build — sets the page's own top-left title to
+  `<worktree/feature> — <what it's showing>`, e.g. `tag-grouping — demo vault`, instead of the
+  default. Patch `window.VAULT_DATA`'s `vault` field in the built HTML, never the product: the
+  title is a review aid, and several builds from different branches and vaults sit in tabs at
+  once, so an unlabeled one is judged against the wrong build.
 - **A vault that is not Lukas's own opens in restricted mode, and the plugin does not load at
   all.** Any fixture or generated vault is "untrusted" on its first open: Obsidian puts up **"Trust
   author and enable plugins?"** and opens its Settings window behind it. Until that is confirmed
@@ -64,6 +76,17 @@ measuring it: serve the page, drive it, read the numbers.
 
 - `git push` and merging into `develop` are separate asks, every time. `main` only ever
   receives `develop`.
+- **Only the orchestrator session pushes to `develop` or cuts a release.** A dispatched ticket
+  worktree implements, runs its own gates, and stops at its own branch — it never pushes past
+  that branch, never merges into `develop`, and never runs `release.ps1`, no matter how clean the
+  result. Integrating finished branches and shipping them is the orchestrator's job alone, so one
+  place is answerable for what's actually on `develop` and what a release contains.
+- **An orchestrator stops spawning new sessions once 6 Orca worktrees are already working.**
+  Each active worktree can mean its own Claude process plus Chrome over CDP plus node/npm —
+  fanning out further than that starved CPU and disk enough to force a hard restart on
+  2026-09-11, even with RAM nowhere near full. Count `orca worktree list --json` entries with
+  `workspaceStatus: in-progress` before dispatching another; at six, queue the rest and dispatch
+  only as one finishes and is merged.
 - **A release is the range, not the work in hand.** Everything it needs — a `CHANGELOG.md`
   section accounting for *every* merge since the last tag, every clip it embeds, every doc naming
   the version, the release body itself — is finished on `release/<version>` and read there before
@@ -78,7 +101,7 @@ measuring it: serve the page, drive it, read the numbers.
 - `npm run lint` holds every finding at zero. `check-pii`, `check-scope`, `check-network` and
   the two determinism checks gate every push and have no skip flag.
 - Commit messages are sentences; `Closes #n` on its own line closes the issue when the work
-  reaches `main`.
+  reaches `develop` — a workflow does it, since GitHub itself only resolves it on `main`.
 
 ## Where things are
 

@@ -9,7 +9,7 @@ The layout is **deterministic, not force-directed**. There is no simulation to s
 no seed to get lucky with: the same vault always draws the same picture, so the shape
 becomes something you can learn and recognise rather than a fresh tangle each time.
 
-<img src="assets/demo.webp" width="100%" alt="The disc growing from the vault's first note, a note hovered, its card opened and four of its linked notes walked in turn then stepped back along the trail, a note dragged into the hub to pin it and two more pinned by right-click and from their own detail card, the timeline scrubbed, three heatmap days hovered, a folder hidden, the biggest folder right-clicked and hidden by default from its own menu then put back, one folder soloed, a subfolder pushed out, the camera panned and reset, two folders right-clicked for their own colour, the (unlinked) row right-clicked to keep its notes separate, coloured by their own folder anyway, and both put back, and finally the calendar and the folder list folded away so the disc has the window to itself">
+<img src="assets/demo.webp" width="100%" alt="The disc growing from the vault's first note, cut by tag instead of by folder and back, a nested tag's twisty opened to reach its sub-tag then folded away, a note hovered, the heatmap and sidebar folded away and restored as a preview, its card opened and four of its linked notes walked in turn then stepped back along the trail, a note dragged into the hub to pin it and two more pinned by right-click and from their own detail card, the timeline scrubbed, three heatmap days hovered, a folder hidden, the biggest folder right-clicked and hidden by default from its own menu then put back, one folder soloed, a subfolder pushed out, the camera panned and reset, two folders right-clicked for their own colour, the (unlinked) row right-clicked to keep its notes separate, coloured by their own folder anyway, and both put back, and finally the calendar and the folder list folded away so the disc has the window to itself">
 
 Ships as an **Obsidian plugin** and as a **standalone HTML exporter** — one page, two
 mounts, from the same source. The exporter writes a single self-contained offline file with
@@ -24,7 +24,7 @@ ringed by how well-connected they are. Click a folder to hide it and the rest re
 a note to see its links; search narrows to matching notes; scrub a date ribbon to watch the
 vault grow. Follows Obsidian's theme, including a live switch.
 
-**[Try it live](https://luke321.github.io/vault-graph/demo/)** — a real export of an invented
+**[Try it Live](https://luke321.github.io/vault-graph/demo/)** — a real export of an invented
 1,400-note vault, click and hover it exactly like your own. **[The full feature
 list](https://luke321.github.io/vault-graph/features.html)**, one short clip per feature — the
 disc itself, filtering, the heatmap and timeline, reading a note, the camera, and folder

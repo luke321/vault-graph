@@ -247,10 +247,179 @@ defect the check exists for — a shrink fitting *instead of* deferring — move
 the first frames. The opposite-direction check is the control that it is still sensitive: a
 growth must report `moved while notes arrived: true`, and does, on all three fixtures.
 
+## Every note is filed exactly once, in either dimension
+
+github#86, design/0015. The lattice gives every note one cell in one wedge. A folder
+guarantees that by itself; a tag does not, so the tag dimension has to be held to it.
+
+```bash
+node scripts/smoke.mjs --only "tags:"
+```
+
+Four claims, and the counts are the whole check:
+
+- **Plan members equal the note count** less whatever the hub holds, in both dimensions, and
+  no note appears in two cells.
+- **The group counts sum to the vault.** Measured: demo 1,403 members in 41 cells by folder
+  and 11 by tag; 10k 10,002 in 37 and 11; the dominant-folder vault 954 in 10 and **1** —
+  that vault carries no tags at all, so its tag disc is one `(untagged)` wedge, and it lays
+  out clean.
+- **Every note's group is the first tag it lists, or `(untagged)`** (design/0015 D-1).
+  `(unlinked)` is the one legitimate exception, because that setting moves a note out of its
+  group in either dimension.
+- **`folder` is the default and a page nobody switches is the page it was** — the golden
+  snapshots on the three folder-organised fixtures are that check, and the tag fixture's
+  golden, recorded in the tag dimension, is the other half.
+
+**One dot per tag came out on 2026-09-10 as github#91**, and the two paragraphs below are the
+record of what it measured while it was in — the counts a return has to reproduce. The copy
+machinery (`dupOf`, `noteOf`) stays, because a dimension switch's stand-ins are copies for the
+length of the switch, and every walk that counts notes still skips them.
+
+**With "Notes in every tag" on the count changed on purpose and nothing else could.** A note
+with *k* distinct tags becomes *k* dots, so members and counts rise to the dot count — while
+the heatmap's note-days, the search's hits per note, the timeline's `tlMax` and the footer's
+note count all stay exactly what they were. Measured: demo 1,403 notes → **1,721 dots** with
+the heatmap holding **1,091 note-days either way**; 10k 10,002 → **12,208 dots**, heatmap
+**1,275** either way. A walk that forgets its `dupOf` skip shows up here as a doubled count,
+which is why these are counted twice on purpose.
+
+**A copy carries no edges at rest.** Measured: a copy of an 8-link note has degree 0 at rest
+and 8 while hovered, and the graph goes 3,286 → 3,294 → 3,286 edges. The web at rest is the
+notes' web, so the link count keeps meaning what it says.
+
+### A dimension switch lands on the lattice, which takes two passes
+
+Room and position are a fixed point — the same one the settle-size invariant below is about —
+and one layout pass measures its margins against the room the *other* dimension left behind.
+Every wedge changes across a switch, so the residue a folder toggle hides is visible here.
+
+Measured on the demo fixture with a single pass: **1,335 of 1,403 notes settled up to 12.1
+units off** where a fresh relayout puts them, in both directions, with an identical plan. Two
+passes leave **0**, and a third changes nothing. The check compares the landing against a
+fresh relayout in both dimensions and asserts the round trip is exact — 0 of 1,403, 0 of
+10,002, 0 of 954, 0 of 891.
+
+## A plan over the whole circle is the resting disc, and over half of it stays in half
+
+github#86, design/0015. The planner can lay the disc out over an arc `[from, to]` instead of
+the circle (`planArc`, `__vg.arcLayout(from, to)`). Two claims hold it to the disc it already
+draws:
+
+```bash
+node scripts/smoke.mjs --only "arc:"
+```
+
+- **`arcLayout(0, 2π)` is the resting layout** — 0 ring notes off it, worst 0.000 units — on
+  all four fixtures. An arc of the whole circle must change nothing, or the arc maths has an
+  offset in it.
+- **`arcLayout(0, π)` puts every ring note inside the half** — 0 outside, on all four
+  fixtures (815 / 824 / 1,370 / 9,873 ring notes). Compressing the whole disc into a smaller
+  arc shifts a dot in exact proportion to its bearing: 10% → median 18°, max 36°.
+- **Neither question touches the disc on screen** — 0 notes moved after both.
+
+The dimension switch does not use this to draw its new disc — it takes seats from `finalPos`,
+which is exact — but the primitive is what a half-disc comparison or a clockwise wipe would be
+built on, and this is the check that keeps it honest.
+
+## A dot in the disc being left keeps its colour until it has faded
+
+github#86, design/0015. The erase edge fades a dot **where it stands, in the colour it had**.
+`state.dim` flips at the top of `setDim` and `nodeColor` files a note through `fileGroup`,
+which reads that flag — so without a record of the old colour every standing dot repaints in
+its tag colour the moment the switch begins, and the old disc reads as a recolour with a hole
+walking through it instead of one disc being erased. `setDim` snapshots `nodeColor(id)` for
+every mover **before** the flip into `LeftDisc.color`; `cascade` holds it as `leftColor` for
+exactly as long as `moveFrom` holds the note, and `nodeColor` answers from it first.
+
+```bash
+node scripts/smoke.mjs --only "keeps its colour"
+```
+
+The check reads every standing dot's colour before the switch, drives the real `#vg-dim`
+select, and on every sample compares each dot that is still in its old seat under its old
+group. **0 of 801,863 / 688,122 / 833,275 / 338,669 standing dot-frames** in a colour other
+than the one they had, on the four fixtures. Before: 787,308 of 787,308; 709,555 of 728,183;
+821,574 of 845,729; 289,999 of 302,058 — every dot, from the first frame.
+
+## A note one disc hides and the other shows arrives with the fill edge
+
+github#86, design/0015. Each dimension keeps its own hidden state, so a note the folder disc
+hides and the tag disc shows is an **arrival** on the switch, and an arrival is lit by the fill
+edge — never at the switch itself, and while lit its seat is **behind the fill edge**, because
+an arrival sits at its final seat; the inner ring sweeps the other way round, so its bearings
+read mirrored. The switch draws the disc arriving with a **stand-in** per note of the disc
+being left — each carrying its note's links, counting for its note's day in the heat strip,
+and driving the nav bar's rows and bars frame by frame — and the check also holds that every
+stand-in drawn is gone at the end and the graph has the node count it had (the edge count
+follows, since dropping a node drops its edges). Two things break the arrival.
+`setDim` must hand `regroup` `keepAlpha`, or `syncAlpha` lights the note before the cascade
+starts and the cascade has nothing to arrive. And the block after the schedule that re-deals
+a fully-arriving group's delays by radius must be skipped for `hand`: the hand keys every
+delay on angle, and re-dealing hands one seat the delay of another.
+
+```bash
+node scripts/smoke.mjs --only "arrives with the fill edge"
+```
+
+The check hides the smallest non-archive folder with three or more notes in the folder disc
+only, drives the real select, and on every sample compares each such note that is lit against
+the fill edge — the erase edge's angle as the cascade reports it in `lastCascade().handDeg`,
+minus the blade. **0 lit at the switch itself, 0 lit ahead of the fill edge, all lit at the
+end** on the four fixtures. Before, on the maintainer's vault: 16 notes lit at the first sample
+at bearings up to 266°; with `keepAlpha` alone, one lit at 206° while the edge was near 78°.
+
+## Every grouping keeps its own colours, and a tab may be read off-screen
+
+github#86, design/0015 (D-11). Colour pins, sub-wedge tint pins and default visibility are per
+dimension (`dimColors`, `dimSubColors`, `dimShown`), read through `colorsFor`,
+`subColorsFor` and `shownFor`, which default to the dimension on screen. A settings tab shows
+its own dimension whichever disc is drawn, through `inDim(dim, fn)`: the disc's own builders
+run in a swapped world and every global they write is restored, so there is no second
+implementation of grouping, colour assignment or sub-wedge order and no way for the two to
+drift.
+
+```bash
+node scripts/smoke.mjs --only "each grouping keeps its own colours"
+```
+
+The check opens the panel on the **folder** disc, switches to the Tags tab, and holds all of
+it: the two tabs exist, the rows are the tag dimension's own names, a pin lands in the tag map
+and shows on the tag disc, the folder map stays empty, and the folder disc's order and colours
+are unchanged. Rows listed per tab on the four fixtures: 7 against 2, 4 against 15, 18 against
+14, 18 against 14.
+
 ## The rings are independent
 
 Toggling an inner-band group must not move the outer band. Measured, an `05` toggle
 leaves the outer band constant — 0 units of movement.
+
+**A dimension switch keeps the rings** (github#86, design/0015, `keepRings`): the dimension
+arriving takes the hub radius, ring radii and band reference of the disc being left and
+re-solves its rows inside them, on the animated and the instant switch alike — the two discs
+of a switch share a hub and an outer edge. Only a hard relayout re-derives the rings, in
+whatever dimension is on screen, and **an instant relayout runs two layout passes**, because
+one pass lays out with the previous pass's room and is not the fixed point (github#21). The
+round-trip check holds the landing against two passes inside the kept rings and home against
+boot, exact on all four fixtures; the tag fixture's golden, taken after a hard relayout, holds
+without a re-take. The copies toggle keeps the rings too and re-splits the bands inside them;
+the inner ring's share cannot take the copies, which is measured and open in design/0015.
+
+**A live rebuild on a switched-to disc retakes the rings it was switched into** (github#72 ×
+github#86, `ringsIn`, `GeomLock.dim`). `decisions/0011` retakes the geometry lock when the note
+set changes, and its premise — the step is sub-pixel — holds only when the lock came from the
+plan on screen. A switched-to disc sits inside rings borrowed from the dimension it left, so
+re-deriving them from its own plan is not a step but a re-pack: measured on the 10k fixture, one
+note written on the tag disc moved **all 10,002 notes** (worst 19,380 units), resized every dot
+and took the outer band from 24 rows to 23, hub radius 18.63 → 21.29. The lock now records the
+dimension it was taken from, a switch carries that with the rings, and the live path retakes the
+lock **in that dimension** from the new note set and keeps it — the same sub-pixel step the ADR
+measured: r0 step **0.0009**, settle against the fixed point inside the kept rings 0 moved / 0
+resized, the disc restored exactly when the note is removed again, on all four fixtures.
+
+```bash
+node scripts/smoke.mjs --only "keeps the rings it was switched into"
+```
 
 ## Only depth-1 subfolders with their own tint slot are pushed
 
@@ -989,6 +1158,15 @@ Must be **1**, at any depth and whatever is unfolded. Measured 24 rows / 24 coun
 edge at 266px with the tree open, and 9 / 9 / one edge at the folded default. The `only`
 button is laid out at every depth with only its opacity changing on hover, so this holds
 while hovering too.
+
+**Opening the tree is how the check gets more rows, not part of the invariant** (github#86).
+The check clicks every twisty and then requires more counts than it started with — a fair
+demand on the three folder-organised fixtures, and one the tag-organised fixture cannot meet:
+it has three top-level folders and **no subfolder at all**, so there is no twisty to click and
+the count is 4 either way. It read as `the tree never opened` on the first full run after that
+fixture joined the suite. The check now measures the twisties first and, where there are none,
+asserts the shared edge on the folded rows alone and says why. A vault that *has* a subtree is
+unchanged: every fixture that passed before had `open > folded`, which requires a twisty.
 
 ## The legend's count bar is a share of the largest folder currently shown
 
@@ -2199,6 +2377,7 @@ Three properties, one check each, all three fixtures:
 | the same data moves nothing and starts no cascade | 0 notes moved, `applied "words only"`, `cascaded false` |
 | a one-note add settles on the resting layout | **0 moved / 0 resized / 0 band flips** against a fresh `relayout()`, on all three |
 | a removed note re-added restores the disc exactly | 0 notes off their original position |
+| the same, on the tag disc after a switch (github#86) | arrival filed under `(untagged)`, rings stay the folder disc's, r0 step 0.0009, 0 moved / 0 resized, restored exactly |
 
 The second row is `settle()` staying a no-op, measured the way the law states it: the disc it
 landed on IS the resting layout, so rebuilding from scratch moves nothing. `relayout()` is the
@@ -2656,3 +2835,167 @@ Measured 2026-09-07, demo fixture, 1403 notes:
 Every dot on a phone is still under 2 px: the disc is fit to the narrower axis, so the extra
 height buys margin rather than radius. The catchment is what makes a tap work; more radius
 needs a filter or a zoom.
+
+## A note cannot close the data script it is serialised into
+
+The standalone exporter inlines the whole vault as one `<script>window.VAULT_DATA=…;</script>`
+element, and `JSON.stringify` does not know it is inside HTML: it leaves `<` alone, so a
+frontmatter value carrying a literal `</script>` closed that element early. Everything after
+it was parsed as markup, a following `<script>` ran as script, `window.VAULT_DATA` never
+existed, and the page failed on its first read of `nodes`. Any exported string can carry it —
+`type`, a tag, the vault's own folder name on a filesystem that allows `<` — and a note only
+has to *contain* the substring, not mean anything by it (github#96). The plugin passes its
+data as an object and was never exposed.
+
+Measured on a three-note synthetic vault whose `Marked` note declares
+`type: "</script><script>window.__vg_escaped_type=1</script>"` and a tag of the same shape,
+opened from disk in Chrome:
+
+| | before | after |
+|---|---|---|
+| data script closes after | 149 chars in | at its real end, 951 chars in (30 of them the escapes) |
+| marker scripts that ran | both | none |
+| `window.VAULT_DATA` | undefined | 3 notes, both markers intact as text |
+| page exceptions | `SyntaxError`, then `TypeError` reading `nodes` | none |
+| `__vg.graph.order` | no mount | 3 |
+
+Fixed with `jsonForScript()` in `src/build-graph.mjs`: `JSON.stringify` followed by
+`.replace(/</g, "\u003c")`. The result is still JSON — `JSON.parse` decodes the escape —
+and still the JavaScript the browser evaluates, so nothing reading `window.VAULT_DATA`
+changed, including `check-build-order-determinism.mjs`, which regex-extracts the element and
+parses it. Escaping `<` alone is enough: it is the only character that can open a tag or an
+`<!--` in script data, and `>`, `&`, U+2028 and U+2029 are all inert there. Every
+`window.VAULT_*` assignment goes through the helper, the logo mask included, so the rule is
+"no inline data script carries a raw `<`", not "the data script escapes `</script>`".
+
+```bash
+node scripts/check-data-escape.mjs
+node scripts/smoke.mjs --only "closing-script"
+```
+
+Two guards, one shape each:
+
+- **Static, in the pre-push hook, no skip flag**: builds the payload vault, asserts no inline
+  `window.VAULT_*` script contains a raw `<`, parses the data back and asserts both marker
+  strings decode verbatim; and reads the exporter's own source to assert `VAULT_DATA` still
+  goes through `jsonForScript(`. On the unfixed exporter it prints two FAIL lines: the source no longer routes through the helper, and six raw `<` in the data script -- the parse itself still succeeds, since a raw `<` is valid JSON, which is why the count of `<` is the assertion and not the parse.
+- **In the suite**: builds the same vault, opens it in a second tab of the run's own Chrome
+  (`Target.createTarget` from the page session — the first check to do so), and asserts no
+  marker ran, the data decoded, and the graph mounted all three notes. This is the
+  acceptance criterion as written: an actual generated file, opened.
+## A folder can be named after anything on `Object.prototype`
+
+`"a folder named after an Object.prototype member still lays out"` builds seven tiny vaults
+once per run — one-note vaults in folders named `constructor`, `toString`, `hasOwnProperty`
+and `__proto__`, one vault holding all four beside a plain folder, an empty vault, and a plain
+one-note vault — navigates the running page to each, and asserts that the page reached ready
+with no exception, the busy indicator is hidden, every note has a finite position, every
+folder is a group, every note is shown, and `checkPlanParity()` agrees with itself. Then it
+navigates back to the fixture page and waits for rest, so the checks after it start where
+they always did.
+
+The planner's maps are indexed by folder names, and a plain `{}` inherits `Object.prototype`:
+`byCell["constructor"]` is a function before anything was stored, so the `if (!byCell[mKey])`
+initialisation is skipped and `byCell[mKey].push(mId)` throws. Measured on `develop@f5e18f0`
+(github#97, 2026-09-11): the four names and the combined vault all died at boot with
+`TypeError: byCell[mKey].push is not a function`, the page never reached ready and the busy
+indicator stayed up, while the two controls loaded clean — **2/7 pages**. Every map keyed by
+a group name is now `dict()` (`Object.create(null)`): `count`/`counts`, `byCell`, `cellsOf`,
+`groupInner` and the ring balancer's `assign`, `groupNotes`, `pinnedInner` — **7/7 pages on
+all three fixtures**. The maps keyed by node id (`pos`, `out`, `from`, `hubOut`,
+`neighbourCache`) stay plain: ids are integer strings and cannot collide with a prototype
+member.
+
+`__proto__` is the odd one, twice over. It starts with `_`, so it is an archive folder and
+hidden by default — the check shows it explicitly through `setFolderShown` before judging,
+and asserts `shown` equals the note count so a hidden group cannot pass as laid out. And a
+plain object treats that key specially in both directions, measured in node 24: the literal
+`{ "__proto__": true }` sets the prototype and has **no keys**; `Object.assign({}, m)`
+**drops** the key on the way out; `JSON.parse` and `Object.assign(Object.create(null), m)`
+both keep it as an own property. So the four places the page hands the host a copy of a
+settings map (`saveFolderColors`, `saveSubfolderColors` twice, `saveFolderShown`) copy onto
+`dict()`, and the plugin's settings tab copies onto a null-prototype map as well and reads
+`folderColors[name]` through an own-property check. Without that, marking a `__proto__`
+folder as shown by default was dropped on the way to `saveData` and forgotten on the next
+load, and a `constructor` folder's colour row read `Object` as its pinned slot.
+
+```bash
+node scripts/smoke.mjs --only "Object.prototype"      # 7 pages per fixture, ~7s each
+```
+
+The layout equations were not touched: the golden snapshots on all three fixtures are the
+proof, and the check itself asserts plan parity on every page that has a plan.
+## A tree is gated once
+
+A green full run of the suite (no `--only`, `--vault`, `--url` or `--fast`, every fixture, no
+modified tracked files) stamps the git **tree** it measured together with the four fixtures it
+ran against (`scripts/suite-stamp.mjs`, one JSON file per tree under `suite-passed/` in the
+shared git common dir). `.githooks/pre-push` and `scripts/release.ps1` skip the suite when every
+commit in front of them carries a stamp against the fixtures now in the store, and print the
+run they trust. A partial run never stamps; a dirty tree never stamps; a stamp whose fixture
+has been regenerated, or whose unpinned fixture is older than the seven-day refresh, misses.
+A fixture is reused only when its stamp matches **and the vault is still usable**: the demo
+fixture was found on 2026-09-11 with all twenty note folders and a valid stamp but **no
+`.obsidian`**, which `build-graph.mjs` refuses at the vault root, and a freshness test that read
+only the stamp handed that back to every run for ever — six jobs dead, 0 of 107 on that fixture,
+in every worktree, until someone deleted the directory by hand. `gen()` tests for `.obsidian`
+now, so a half-written fixture is rebuilt rather than reused (github#86).
+
+A run in which a fixture could not be generated never stamps, and a stamp naming fewer than
+every fixture in `FIXTURE_NAMES` misses (github#103) — **four names since github#86 added the
+tag-organised fixture**, because a list that lags the suite is the same hole in a new place: the
+three older fixtures would go green, the run would stamp, and the hook would skip the suite for a
+tree the tag disc was never measured on. **A fixture's own stamp is not proof the vault is
+usable** (github#106): before any browser is launched, every fixture is walked — `.obsidian`
+is a directory and the `.md` count outside dot-folders equals the `notes` its stamp recorded
+at generation (stamp format 2; 87 / 456 / 36 ms on the three older fixtures) — and one that
+fails is regenerated with `fixture <name> is corrupt: <why> -- regenerating`; a vault that then
+does not build ends the run before Chrome starts. The same walk makes a stamp naming a
+now-corrupt fixture miss, a run against a corrupt fixture never stamps, and a run pointed at a
+scratch store by `VG_FIXTURE_STORE` (the test seam for that path) never stamps either. Both
+callers require the pass line, not exit 0 alone:
+the CLI realpaths itself against `argv[1]`, because through a junction (every Orca worktree)
+the two paths differed, the body never ran, and an empty exit 0 read as a stamp on every push.
+
+```bash
+node scripts/suite-stamp.mjs --selftest       # hit on the same tree from a different commit, miss otherwise;
+                                              # a missing fixture (either of two cases) refuses to record,
+                                              # a short stamp misses,
+                                              # and the CLI answers through a junction
+node scripts/suite-stamp.mjs check [<rev>]    # what a push of <rev> would do, and why
+node scripts/smoke.mjs --only "intro landed"  # ends with "not stamping this run: --only is not the full suite"
+```
+
+Why (github#93, decisions/0013): every release paid the suite more than once against one tree.
+`main` only ever receives `develop` — the ruleset requires a pull request with no bypass actors
+— and the merge commits for 2.3.0, 2.4.0 and 2.4.1 each have a tree byte-identical to the
+`develop` tip they merged, so a run on either measures the same content. Re-driving Chrome for
+identical content is cost with nothing it could catch that the first run would not.
+
+Measured 2026-09-10, one full run under the `suite` lock, 94/94 on all three fixtures:
+
+| Phase | Wall |
+|---|---|
+| build three pages | 8 s |
+| parallel lane, 4 Chromes, 60 checks per fixture | 133 s |
+| serial lane, 1 Chrome, 34 frame-sensitive checks per fixture | 446 s |
+| **total** | **587 s** |
+
+Re-measured 2026-09-11 with the tag-organised fixture in the suite (github#86): **107/107 on
+each of four fixtures, 428 checks, 790 s**, one of which regenerated the demo vault. A fourth
+fixture is a third more work for a 35% longer wall, because the fixtures run beside one another
+in the parallel lane and only the serial lane pays per fixture.
+
+The static gates ahead of the suite total 10.5 s (lint 6.3 s). The PR into `main` is not a
+suite run: its one required check took 4 s on #95. `release.ps1`'s `git push origin HEAD` —
+gone since github#94, since the ruleset refuses it — ran nothing after a website merge either:
+an up-to-date push hands a pre-push hook zero ref lines (tested against a bare remote), and a
+tag push is never gated. Tonight's two `develop` pushes landed 21 s and 29 s after their merge
+commits, so both were skipped by hand; the stamp is the same skip with a record of what it
+trusted.
+
+Keyed by tree and not by commit because the merge into `main` is a new commit by construction
+while its tree is not; not by time because `develop` moves several times a day and "a recent
+green run" cannot say which tree it saw. While it runs, both gates hold the machine-wide
+`suite` lock (`scripts/lock.mjs`) and release it on every exit path; a lock that cannot be had
+blocks the push and names the holder rather than running on top of it.

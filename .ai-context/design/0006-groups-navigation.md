@@ -5,6 +5,14 @@
 > The sidebar: eye vs label, three selection channels, and the tail block.
 
 
+**The heading is the grouping control** (github#86, design/0015). `Groups (18)` is a
+**segmented control** across the full width of the panel, `Folders (4)` | `Tags (15)`, each
+side carrying its own dimension's group count, and everything below it is the list of
+whichever side is pressed. The control belongs to the thing it changes — not the view
+settings, not the top bar, not a hidden context-menu item. **All** and **None** sit on a
+second row beneath it at their own width, because they are a different kind of thing: one
+switches what the disc is cut by, the others change what is shown within that cut.
+
 Each legend row carries three separate controls, because it does three different
 things and one click could only ever mean one of them:
 

@@ -364,8 +364,12 @@ const nodes = notes.map((n, i) => {
   return { ...rest, deg: degree[i] };
 });
 
+// github#108
+const VERSION = JSON.parse(readFileSync(join(ROOT, "manifest.json"), "utf8")).version;
+
 const data = {
   vault: basename(VAULT),
+  version: VERSION,
   generated: (() => {
     const d = new Date(), p2 = (n) => String(n).padStart(2, "0");
     return `${d.getFullYear()}-${p2(d.getMonth() + 1)}-${p2(d.getDate())} ` +
@@ -414,6 +418,9 @@ const engine = (() => {
 
 const libs = `<script>\n${engine.trimEnd()}\n</script>`;
 
+// github#96
+const jsonForScript = (v) => JSON.stringify(v).replace(/</g, "\\u003c");
+
 const dataUri = (f) => {
   try {
     return "data:image/png;base64," + readFileSync(join(ROOT, "assets", f)).toString("base64");
@@ -423,7 +430,7 @@ const LOGO_MASK = dataUri("logo-mask.png");
 const FAVICON = dataUri("favicon.png");
 const assets =
   (FAVICON ? `<link rel="icon" href="${FAVICON}">` : "") +
-  `\n<script>window.VAULT_LOGO_MASK=${JSON.stringify(LOGO_MASK)};</script>`;
+  `\n<script>window.VAULT_LOGO_MASK=${jsonForScript(LOGO_MASK)};</script>`;
 
 const part = (f) => readFileSync(join(HERE, f), "utf8");
 
@@ -435,7 +442,7 @@ const html = part("shell.html")
   .replace("<!--SCRIPT-->", () => asScript(part("page.js")))
   .replace("<!--LIBS-->", () => libs)
   .replace("<!--ASSETS-->", () => assets)
-  .replace("<!--DATA-->", () => `<script>window.VAULT_DATA=${JSON.stringify(data)};</script>`);
+  .replace("<!--DATA-->", () => `<script>window.VAULT_DATA=${jsonForScript(data)};</script>`);
 
 writeFileSync(OUT, html, "utf8");
 
