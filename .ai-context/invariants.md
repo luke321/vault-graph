@@ -3049,9 +3049,18 @@ only: hover and highlight ramps, the mark's fade, the intro sweep, the hostile-v
 Everything else — the ribbon widget, the camera buttons, the panels, the settings toggles,
 the trail, the escape vault — is the default: demo only, no animation.
 
-**Per fixture: demo 106, 10k 61, shape 44, tag 44 — 255 checks where there were 428**, one
-Chrome per fixture plus one for the intro check (5 launches, not 12), and no fixture runs a
-check whose subject it cannot show.
+**Per fixture: demo 106, 10k 61, shape 44, tag 44 — 255 checks where there were 428**, and
+no fixture runs a check whose subject it cannot show.
+
+**Two lanes, and walk jobs never share the machine with each other.** github#110 hardcoded
+one Chrome at a time after four shards per suite, stacked on several worktrees each running
+one, forced a hard restart; the machine-wide `suite` lock (github#92) now allows one suite at
+a time, so two lanes inside it are bounded. A fixture's `clock: "real"` checks are their own
+job (`… (walk)`), the pool starts a walk job only while no other walk job is running, and the
+fast jobs fill the second lane meanwhile — so the sixteen Laws are never measured under each
+other's contention, which is the one thing the old sharding could not promise. Seven Chromes
+per run: demo walk 116 s then 10k walk 105 s in one lane, the five other jobs (78 + 61 + 17 +
+19 s and the intro) in the other. `--jobs 1` is the quiet run, one Chrome per fixture.
 
 **A check that returns while the page is still walking has failed.** The runner settles the
 page once on arrival (the opening camera tween, or the intro without `?rest`), then after
@@ -3096,13 +3105,14 @@ node scripts/smoke.mjs --vault <path>                  # every check, on that va
 Measured 2026-09-11, one full run under the `suite` lock, all four fixtures green, no check
 left the page busy:
 
-| | before (github#110, serialised) | after |
-|---|---|---|
-| check runs | 428 (107 × 4) | 255 (106 / 61 / 44 / 44) |
-| Chromes launched | 12 | 5 |
-| wall | ~9–10 min | **400 s** (checks: demo 188 s, 10k 163 s, shape 17 s, tag 18 s) |
+| | before (github#110, serialised) | after, one lane | after, two lanes |
+|---|---|---|---|
+| check runs | 428 (107 × 4) | 255 (106 / 61 / 44 / 44) | 255 |
+| Chromes launched | 12 | 5 | 7 |
+| wall | ~9–10 min | 400 s (checks: demo 188 s, 10k 163 s, shape 17 s, tag 18 s) | **226 s** (walk lane 116 + 105 s; other lane 175 s) |
 
-What is left is mostly the sixteen walk Laws on two fixtures (~183 s) and fixed `sleep()`s
+What is left is the walk lane itself — the sixteen Laws on two fixtures, 221 s, which is now
+the critical path — and, on the other lane, fixed `sleep()`s
 inside fast checks that no longer wait for anything — `filtered to the bone` (41.5 s over
 four fixtures) and `the disc's density follows the notes on screen` (17.5 s) alone are 59 s
 of sleeping under reduced motion. Converting those waits to `settle()` plus one frame is the

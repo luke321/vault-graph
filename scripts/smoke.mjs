@@ -115,8 +115,15 @@ const selected = () => (ONLY.length
   ? all.filter((c) => ONLY.some((q) => c.name.toLowerCase().includes(q)))
   : all);
 
-// github#110 -- one Chrome at a time; github#113 -- and one Chrome per fixture
-const JOBS = 1;
+// github#110 hardcoded one Chrome at a time: four shards per suite, stacked on several
+// worktrees each running a suite, forced a hard restart. github#113 reopens it to TWO lanes,
+// bounded now that the machine-wide `suite` lock (github#92) allows one suite at a time --
+// and with one rule the old sharding did not have: a job that reads frames (a fixture's
+// `clock: "real"` checks, its "walk" job) never runs beside another walk job, so the sixteen
+// Laws are never measured under each other's contention. The second lane takes the fast
+// jobs meanwhile. Measured: walk jobs 115 s + 104 s in one lane, everything else 171 s in
+// the other. `--jobs 1` is the quiet run.
+const JOBS = Math.max(1, Number(arg("jobs", "2")) || 2);
 
 const GRID = argv.includes("--no-grid") ? false
           : argv.includes("--grid") ? true
@@ -5532,7 +5539,12 @@ async function main() {
     const atRest = url ? url + (url.indexOf("?") < 0 ? "?rest" : "&rest") : url;
     const rest = mine.filter((c) => !needsIntro(c));
     const intro = mine.filter(needsIntro);
-    if (rest.length) jobs.push({ vault: v, checks: rest, tag: v.label, url: atRest });
+    // with two lanes the frame-reading checks are their own job, so the pool can keep walk
+    // jobs apart; in a quiet run the split would only cost a launch
+    const walk = JOBS > 1 ? rest.filter((c) => c.clock === "real") : [];
+    const fast = JOBS > 1 ? rest.filter((c) => c.clock !== "real") : rest;
+    if (walk.length) jobs.push({ vault: v, checks: walk, tag: v.label + " (walk)", url: atRest, walk: true });
+    if (fast.length) jobs.push({ vault: v, checks: fast, tag: v.label, url: atRest });
     if (intro.length) jobs.push({ vault: v, checks: intro, tag: v.label + " (intro)", url });
   }
   // github#113 -- a check that landed in no job would otherwise vanish with exit 0: a
@@ -5565,20 +5577,27 @@ async function main() {
     console.log("");
   };
 
+  // github#113 -- two queues: a worker takes the next walk job only while no other walk
+  // job is running, and a fast job otherwise; with walk jobs left and none it may start,
+  // it waits rather than doubling up
   const pool = async (list, width) => {
-    let next = 0;
+    const walks = list.filter((j) => j.walk), fasts = list.filter((j) => !j.walk);
+    let walkBusy = false;
     const worker = async (lane) => {
       for (;;) {
-        const i = next++;
-        if (i >= list.length) return;
-        const w = { ...list[i], slot: lane, slots: Math.min(width, list.length),
-                    port: lanePorts[lane] || 0 };
+        let w = null;
+        if (!walkBusy && walks.length) { w = walks.shift(); walkBusy = true; }
+        else if (fasts.length) w = fasts.shift();
+        else if (walks.length) { await sleep(500); continue; }
+        else return;
+        w = { ...w, slot: lane, slots: Math.min(width, list.length), port: lanePorts[lane] || 0 };
         let r;
         try { r = await runOne(w.vault.path, w); }
         catch (e) {
           r = { failed: w.checks.length, ran: w.checks.length,
                 lines: ["  !! this job did not run: " + e.message], timings: [] };
         }
+        if (w.walk) walkBusy = false;
         report(w, r);
         bump(w, r);
       }
@@ -5586,8 +5605,12 @@ async function main() {
     await Promise.all(Array.from({ length: Math.min(width, list.length) }, (_, lane) => worker(lane)));
   };
 
+  if (JOBS > 1) {
+    console.log(`${JOBS} lanes: ${jobs.filter((j) => j.walk).length} walk job(s) one at a time, ` +
+                `${jobs.filter((j) => !j.walk).length} other job(s) beside them`);
+  }
   const started = Date.now();
-  await pool(jobs, 1);
+  await pool(jobs, JOBS);
   const wall = Math.round((Date.now() - started) / 1000);
   if (arg("timings", "")) {
     writeFileSync(arg("timings", ""), JSON.stringify({ at: new Date().toISOString(), wallSec: wall,

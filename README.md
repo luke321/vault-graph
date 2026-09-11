@@ -362,7 +362,7 @@ Builds to a temp file, drives a real Chrome, and checks over a hundred measured 
 the layout — plan parity, the resting lattice, the heatmap's tiling, the hover and highlight
 ramps — printing the number it measured for each.
 
-With no arguments it checks **four generated fixtures**, one Chrome after another: a ~1,400-note
+With no arguments it checks **four generated fixtures**, two Chromes at a time: a ~1,400-note
 mirror of a real vault, a 10,000-note synthetic, a dominant-folder vault and a tag-organised
 one. That is not belt-and-braces — a small vault and a large one take different branches
 through the ring balancer and the gap scaling, and a change that passes at 1,400 notes can
