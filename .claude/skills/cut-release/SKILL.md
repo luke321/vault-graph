@@ -359,7 +359,19 @@ The content:
 - **Title**: `Vault Graph <version> - <Name>` — always the repo/plugin name first, exactly as the
   GitHub Release is titled but with the plugin name prefixed (`gh release view <version> --json
   name` gives the `<version> - <Name>` half).
-- **Image**: a real disc, not a mockup. Build from the actual mirror vault
+- **Image**: a real disc, not a mockup. **Wait for the cascade to land before you capture.**
+  The disc animates into place over ~1.6 s and a frame taken before it settles has half a ring
+  drawn -- it reads as a rendering bug, not as a product. Poll until `__vg.state.until === null`
+  and `__vg.demo.busy()` is false, then give it another couple of seconds, and only then
+  screenshot. 2.6.0's first Ko-fi post went out mid-cascade and had to be deleted and reposted,
+  which is worse than it sounds: Ko-fi's post editor can change the title, the text and the
+  audience but **not the image**, and deleting the feed item leaves the image in the gallery, so
+  the real undo is deleting the gallery item itself.
+
+  Capture it **square** and over CDP, which needs no screen lock:
+  `Emulation.setDeviceMetricsOverride` at 1000x1000 with `deviceScaleFactor: 2`, then
+  `__vg.renderer.getCamera().setState({x:0.5,y:0.5,ratio:0.42,angle:0})` so the disc is cropped
+  and the release's own overview tile is actually in the shot. Build from the actual mirror vault
   (`node src/build-graph.mjs --vault ../vault-graph-mirror --out mirror.html`, or wherever this
   machine's mirror lives — never the real SecondBrain vault, and never a fixture, which would
   publish an invented-looking shape instead of the real one), serve it locally, open it, switch to
