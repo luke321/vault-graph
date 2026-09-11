@@ -164,6 +164,15 @@ up: the hook says so and exits. `node scripts/suite-stamp.mjs check [<rev>]` say
 push would do; `release.ps1 -ForceSuite` runs it anyway. `.ai-context/decisions/0013` has
 the reasoning.
 
+**A stamp names exactly the run that earned it**, which is why a run can pass and still
+record nothing. The tree is captured *before* the first build, so committing while the
+suite runs — this repo commits as work lands — refuses the stamp rather than naming a tree
+nobody measured; so does a working tree that was dirty at either end. A run whose shape
+differs from the one the gates push with (`--jobs`, `--chrome`, `--headed`, `--no-grid`,
+`--port`) is not the full suite and says which flag; `--jobs 2` is the default and still
+stamps. And the stamp records the Chrome that drove it, so a browser update re-runs the
+suite once.
+
 ## Branches, and how work reaches main
 
 **`develop` is where work lands. `main` only ever receives `develop`.**

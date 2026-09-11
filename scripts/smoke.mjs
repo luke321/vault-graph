@@ -1,9 +1,11 @@
 
 import { attach, json } from "./cdp.mjs";
 import { buildPayloadVault, PAYLOAD, NOTE_COUNT } from "./check-data-escape.mjs";
+import { findChrome } from "./chrome.mjs";
 import { leftmostScreen, leftWindowPos } from "./screen.mjs";
 import { FIXTURE_MAX_AGE_DAYS, FIXTURE_NAMES, checkFixture, countNotes, describeFixture,
-         fixtureStore, record as recordPass } from "./suite-stamp.mjs";
+         DEFAULT_JOBS, fixtureStore, record as recordPass, shapeDeltas,
+         startRun } from "./suite-stamp.mjs";
 import { spawn, spawnSync } from "node:child_process";
 import { existsSync, mkdtempSync, rmSync, readFileSync, writeFileSync, readdirSync,
          renameSync, mkdirSync } from "node:fs";
@@ -59,19 +61,10 @@ function freePort() {
 
 /* ------------------------------------------------------------------ chrome */
 
-function findChrome() {
-  const named = arg("chrome", "");
-  if (named) return named;
-  const guesses = [
-    process.env.PROGRAMFILES + "\\Google\\Chrome\\Application\\chrome.exe",
-    process.env["PROGRAMFILES(X86)"] + "\\Google\\Chrome\\Application\\chrome.exe",
-    process.env.LOCALAPPDATA + "\\Google\\Chrome\\Application\\chrome.exe",
-    "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
-    "/usr/bin/google-chrome", "/usr/bin/chromium"
-  ];
-  for (const g of guesses) if (g && existsSync(g)) return g;
-  throw new Error("Chrome not found; pass --chrome <path>");
-}
+const chromeExe = () => findChrome(arg("chrome", ""));
+
+// github#104 -- what actually drove this run, read once
+let BROWSER = null;
 
 /* -------------------------------------------------------------- the checks */
 
@@ -99,7 +92,7 @@ const selected = () => (ONLY.length
   : all);
 
 // github#110, github#113, github#92
-const JOBS = Math.max(1, Number(arg("jobs", "2")) || 2);
+const JOBS = Math.max(1, Number(arg("jobs", String(DEFAULT_JOBS))) || DEFAULT_JOBS);
 
 const GRID = argv.includes("--no-grid") ? false
           : argv.includes("--grid") ? true
@@ -5445,7 +5438,7 @@ async function runOne(vault, work) {
   }
 
   const profile = mkdtempSync(join(tmpdir(), "vg-smoke-"));
-  const chrome = spawn(findChrome(), [
+  const chrome = spawn(chromeExe(), [
     `--remote-debugging-port=${PORT}`, `--user-data-dir=${profile}`,
     "--no-first-run", "--no-default-browser-check",
     "--disable-extensions", "--disable-component-update", "--disable-client-side-phishing-detection",
@@ -5484,6 +5477,8 @@ async function runOne(vault, work) {
       try { page = await attach(PORT, want); break; }
       catch (e) { if (Date.now() > deadline) throw e; await sleep(400); }
     }
+    // github#104
+    if (!BROWSER) { try { BROWSER = (await json(PORT, "/json/version")).Browser; } catch { void 0; } }
     const errors = [];
     await page.send("Runtime.enable").catch(() => {});
     page.on((msg) => {
@@ -5870,6 +5865,8 @@ async function main() {
                 picked.map((c) => c.name).join("; "));
     console.log("");
   }
+  // github#104 -- captured before anything is built from it
+  const builtFrom = startRun(ROOT);
   const vaults = resolveVaults();
   console.log(`checking ${vaults.length} vault(s): ${vaults.map((v) => v.label).join(", ")}`);
 
@@ -5971,21 +5968,29 @@ async function main() {
   }
 
   // github#93, decisions/0013
-  const partial = ONLY.length ? "--only" : argAll("vault").length ? "--vault" : arg("url", "") ? "--url"
-                : vaults.some((v) => !v.fixture) ? "an unstamped fixture"
+  // github#104 -- named first: a changed shape invalidates the measurement
+  const deltas = shapeDeltas({ jobs: JOBS, grid: GRID, headed: HEADED, port: PINNED_PORT,
+                               chrome: arg("chrome", "") });
+  const notFull = (what) => `${what} is not the full suite`;
+  const partial = deltas.length ? `${deltas.join(", ")} is not the run shape the gates push with`
+                : ONLY.length ? notFull("--only")
+                : argAll("vault").length ? notFull("--vault")
+                : arg("url", "") ? notFull("--url")
+                : vaults.some((v) => !v.fixture) ? notFull("an unstamped fixture")
                 // github#106
-                : process.env.VG_FIXTURE_STORE ? "VG_FIXTURE_STORE"
+                : process.env.VG_FIXTURE_STORE ? notFull("VG_FIXTURE_STORE")
                 // github#103
-                : FIXTURE_NAMES.some((n) => !vaults.some((v) => v.fixture.name === n)) ? "a fixture that could not be generated"
+                : FIXTURE_NAMES.some((n) => !vaults.some((v) => v.fixture.name === n))
+                  ? notFull("a fixture that could not be generated")
                 : "";
   if (!worst && !partial) {
     let checks = 0;
     for (const t of ran.values()) checks += t;
-    const r = recordPass({ fixtures: vaults.map((v) => v.fixture), checks });
+    const r = recordPass({ fixtures: vaults.map((v) => v.fixture), checks, started: builtFrom, chrome: BROWSER });
     console.log(r.wrote ? `stamped tree ${r.tree.slice(0, 7)} as passed: ${r.wrote}`
                         : `not stamping this run: ${r.why}`);
   } else if (!worst) {
-    console.log(`not stamping this run: ${partial} is not the full suite`);
+    console.log(`not stamping this run: ${partial}`);
   }
   if (worst) {
     console.log("");

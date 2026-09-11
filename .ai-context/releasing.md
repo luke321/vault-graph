@@ -399,7 +399,10 @@ exactly once.
 2. Rehearse the local half: `.\scripts\release.ps1 <version> -DryRun -AllowAnyBranch`. **This is
    the run that pays the suite.** It ends with `stamped tree <sha> as passed`, which records the
    branch's tree and the three fixtures it ran against in the shared git common dir. A dirty tree
-   is never stamped; commit first.
+   is never stamped; commit first — and **do not commit while it runs**, because the tree is
+   captured before the first build and a moved HEAD refuses the stamp (github#104), which costs
+   the suite again at step 3. Nor with `--jobs`, `--chrome`, `--headed`, `--no-grid` or `--port`:
+   that is not the shape the gates push with, and it stamps nothing.
 3. Push the branch: the workflow's dry run builds, gates and attests the three files on a Linux
    runner (static gates only, no Chrome, under a minute). Read its summary.
 

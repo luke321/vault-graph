@@ -300,7 +300,8 @@ try {
   if ($stamped) {
     Write-Host "HEAD's tree already passed the suite -- skipping it (-ForceSuite to run it anyway)" -ForegroundColor Yellow
   } else {
-    $lockOwner = "release.ps1 $Version"
+    # github#104 -- the pid separates two release runs that would otherwise share an owner
+    $lockOwner = "release.ps1 $Version [$PID]"
     try { Invoke-Native node @((Join-Path $here 'lock.mjs'), 'acquire', 'suite', '--owner', $lockOwner) }
     catch { throw "could not take the suite lock -- another suite is running (node scripts/lock.mjs status); not releasing" }
     try {
