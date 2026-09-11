@@ -1,5 +1,7 @@
 # Vault Graph
 
+[![ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/luke321)
+
 **Your whole vault as one disc.** Every note is a dot; every top-level folder owns a wedge
 of the circle whose angle is its share of the vault. Notes fill concentric rings from the
 middle outwards, best-connected first, so the best-connected notes sit near the centre and
