@@ -49,6 +49,7 @@ prose what's newly done since the last table and what's still blocked or awaitin
 | 10 | Draft the release body, publish as an Artifact, get an explicit go-ahead | |
 | 11 | `release.ps1` on `main` — gates, tag, push | |
 | 12 | GitHub Actions publishes the release — automatic once tagged | |
+| 13 | Post to Ko-fi: title, disc screenshot, community-page link then release link; open the page | |
 ```
 
 ## 1. List the range — before anything else
@@ -238,6 +239,33 @@ creates the Release with the reviewed body. Automatic — watch it if you want:
 gh run watch
 gh release view <version> --json tagName,name,assets,isDraft
 ```
+
+## 15. Post to Ko-fi
+
+Once the Release exists (step 14), post an update at ko-fi.com/luke321:
+
+- **Title**: `Vault Graph <version> - <Name>` — always the repo/plugin name first, exactly as the
+  GitHub Release is titled but with the plugin name prefixed (`gh release view <version> --json
+  name` gives the `<version> - <Name>` half).
+- **Image**: a real disc, not a mockup. Build from the actual mirror vault
+  (`node src/build-graph.mjs --vault ../vault-graph-mirror --out mirror.html`, or wherever this
+  machine's mirror lives — never the real SecondBrain vault, and never a fixture, which would
+  publish an invented-looking shape instead of the real one), serve it locally, open it, switch to
+  whatever grouping/view this release's headline feature actually changed, and screenshot the
+  page. A square crop (pad to square with the page's own `--surface-0` background rather than
+  cropping content away) reads best as a post thumbnail.
+- **Description**: one or two sentences on what shipped, in the release's own voice — not the
+  full changelog. Then two links, **in this order**: the Obsidian community plugin page first
+  (`https://community.obsidian.md/plugins/vault-graph`), the GitHub release second
+  (`https://github.com/luke321/vault-graph/releases/tag/<version>`). The community page is what
+  actually gets someone using it; the release notes are for someone who already knows the tool.
+- Post via **Create → Image** (not "Write a quick update", which has no title field).
+- **Open the page when done** — `Start-Process "https://ko-fi.com/luke321"` in the user's normal
+  browser, not the Claude-in-Chrome automation tab, so what gets reviewed is what a visitor
+  actually sees.
+
+This is separate from the cover image (`Add a cover image`, 1200×400, 3:1) — the cover is
+standing page furniture, refreshed on its own judgment, not part of every release's own post.
 
 ## If something's wrong after the tag
 
