@@ -58,6 +58,58 @@ for (const f of FOLDERS) {
 }
 const titles = notes.filter((n) => !n.orphan).map((n) => n.title);
 
+/* ------------------------------------------------------------------ tags --
+ * github#107 -- this fixture is the DEGENERATE-DISTRIBUTION vault, and until now it was
+ * degenerate in one dimension only: one folder holding 77% of the notes. Its tag dimension
+ * did not exist at all, and no other fixture has a tail below 16 notes a group -- tag-vault's
+ * smallest is 16 -- so "many tags, nearly all of them holding one or two notes" was a shape
+ * the tag disc had never been laid out against. It is the shape a real vault reaches: measured
+ * on the vault that prompted this, 76 top-level tags, 53% of them holding exactly one note,
+ * 72% holding three or fewer, and a dominant tag on 49% of the vault.
+ *
+ * The bands below are deliberately HARDER than that, because a fixture that only just
+ * reproduces today's complaint stops catching it the moment the complaint is answered.
+ *
+ * TWO THINGS KEEP THE FOLDER LAYOUT BYTE-IDENTICAL, and both matter: this generator's rnd()
+ * is one shared stream that the link loop draws from, so anything here that touched it would
+ * reshuffle every link and move every note -- the assignment below is purely index-based and
+ * draws from rnd() not once. And tags ride in frontmatter beside a `created` date that does
+ * not move, so no note changes folder, date or degree. shape-vault's golden is recorded in the
+ * FOLDER dimension and stays green; the check that proves it is "layout matches its golden
+ * snapshot", not this comment. */
+const TAG_STEMS = ["anchor", "beacon", "cinder", "delta", "ember", "fathom",
+                   "girder", "harbor", "ingot", "jetty", "kiln", "lumen"];
+const TAG_LEAVES = ["brief", "draft", "field", "guide", "index", "log",
+                    "memo", "plan", "query", "sketch", "trace"];
+// 12 x 11 = 132 names, taken in a fixed order; the tail needs 115 of them
+const TAIL_NAMES = [];
+for (const s of TAG_STEMS) for (const l of TAG_LEAVES) TAIL_NAMES.push(`${s}-${l}`);
+
+const DOMINANT = "inbox";
+// [name, notes carrying it] -- the mid band is named, the tail is generated
+const TAG_BANDS = [[DOMINANT, 600], ["review", 30], ["archive", 24], ["spec", 18], ["thread", 14]];
+// 15 tags of 4-9 notes, then 12 of three, 13 of two, 75 of exactly one
+let tail = 0;
+for (let i = 0; i < 15; i++) TAG_BANDS.push([TAIL_NAMES[tail++], 4 + (i % 6)]);
+for (let i = 0; i < 12; i++) TAG_BANDS.push([TAIL_NAMES[tail++], 3]);
+for (let i = 0; i < 13; i++) TAG_BANDS.push([TAIL_NAMES[tail++], 2]);
+for (let i = 0; i < 75; i++) TAG_BANDS.push([TAIL_NAMES[tail++], 1]);
+
+// One tag per slot, then a stride that is coprime with the note count so the slots land on
+// distinct notes and a tag's members are scattered ACROSS the folders rather than sitting
+// inside one -- a tag dimension that merely re-drew the folder wedges would test nothing.
+const slots = [];
+for (const [name, n] of TAG_BANDS) for (let i = 0; i < n; i++) slots.push(name);
+const STRIDE = 379;   // prime, and 954 = 2 * 3 * 3 * 53, so the two share no factor
+slots.forEach((name, i) => {
+  const note = notes[(i * STRIDE) % notes.length];
+  (note.tags || (note.tags = [])).push(name);
+  // A note off the dominant tag takes it as a SECOND tag on every other slot, so the
+  // dimension carries copies -- a multi-tagged note is drawn once per tag, and the real
+  // vault runs 1.53 tags a note. Without this the disc would have none to place.
+  if (name !== DOMINANT && i % 2 === 0) note.tags.push(DOMINANT);
+});
+
 if (existsSync(OUT)) rmSync(OUT, { recursive: true, force: true });
 mkdirSync(join(OUT, ".obsidian"), { recursive: true });
 writeFileSync(join(OUT, ".obsidian", "app.json"), "{}\n");
@@ -74,8 +126,11 @@ notes.forEach((n, i) => {
     }
     if (rnd() < 0.05) body.push(`[[Nowhere ${int(900, 999)}]]`);
   }
+  // github#107 -- tags after created, so an untagged note's frontmatter is byte-identical
+  const fm = [`created: ${day(i)}`];
+  if (n.tags && n.tags.length) fm.push(`tags: [${n.tags.join(", ")}]`);
   writeFileSync(join(OUT, n.dir, n.title + ".md"),
-                `---\ncreated: ${day(i)}\n---\n\n` + body.join(" ") + "\n", "utf8");
+                `---\n${fm.join("\n")}\n---\n\n` + body.join(" ") + "\n", "utf8");
 });
 
 const orphans = notes.filter((n) => n.orphan).length;
@@ -83,3 +138,20 @@ console.log(`wrote ${notes.length} notes to ${OUT}`);
 console.log(`  ${links} link refs, ${orphans} unlinked, one of them at the vault root`);
 console.log(`  dominant folder: ${FOLDERS[0].dir} ${FOLDERS[0].n}/${notes.length} = ` +
             `${Math.round(FOLDERS[0].n / notes.length * 100)}%`);
+// github#107 -- the tag dimension is degenerate too, and this is the shape it is degenerate in
+const per = new Map();
+let pairs = 0, tagged = 0;
+for (const n of notes) {
+  if (!n.tags || !n.tags.length) continue;
+  tagged++;
+  for (const t of n.tags) { per.set(t, (per.get(t) || 0) + 1); pairs++; }
+}
+const counts = [...per.values()].sort((a, b) => a - b);
+const atMost = (k) => counts.filter((v) => v <= k).length;
+console.log(`  ${per.size} tags over ${tagged} tagged notes (${notes.length - tagged} untagged), ` +
+            `${pairs} tag refs = ${(pairs / tagged).toFixed(2)} a note`);
+console.log(`  tail: ${atMost(1)} tags on exactly one note ` +
+            `(${Math.round(atMost(1) / per.size * 100)}%), ${atMost(3)} on three or fewer ` +
+            `(${Math.round(atMost(3) / per.size * 100)}%)`);
+console.log(`  dominant tag: ${DOMINANT} ${per.get(DOMINANT)}/${notes.length} = ` +
+            `${Math.round(per.get(DOMINANT) / notes.length * 100)}%`);

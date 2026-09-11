@@ -232,6 +232,43 @@ regression.
 alone took the 10k to **45**. `2·dot/step` per band moved 0.28–0.34 → **0.30–0.37** (demo) and
 0.34–0.57 → **0.35–0.61** (10k), both inside the asserted 0.15–0.80 with spread under 2.2.
 
+### The dominant-folder fixture has a long tag tail now (github#107)
+
+`shape-vault` is the **degenerate-distribution** fixture, and it used to be degenerate in one
+dimension only: one folder holding 77% of 954 notes, and **no tags at all**, so its tag disc was
+a single `(untagged)` wedge that exercised nothing. No other fixture had a group below 16 notes
+either — `tag-vault`'s smallest is 16 — so *many groups, nearly all holding one or two notes* was
+a shape the tag disc had never been laid out against, and it is the shape a real vault reaches.
+
+Measured on the vault that prompted it: **76 top-level tags, 53% holding exactly one note, 72%
+holding three or fewer, a dominant tag on 49% of the vault, 1.53 tag refs a note.** The fixture is
+deliberately harder, because one that merely reproduces today's complaint stops catching it the
+moment the complaint is answered:
+
+| | real vault | `shape-vault` |
+|---|---|---|
+| top-level tags | 76 | **120** |
+| holding exactly one note | 53% | **63%** (75 tags) |
+| holding three or fewer | 72% | **83%** (100 tags) |
+| dominant tag's share | 49% | **79%** |
+| tag refs a note | 1.53 | 1.17 |
+
+Only the copy rate is softer, and it is the one axis the tag fixture already covers.
+
+**The folder layout is byte-identical, and that is not luck.** Two things hold it: the generator's
+`rnd()` is a single stream the link loop draws from, so the tag assignment is purely index-based
+and never calls it — anything that did would reshuffle every link and move every note; and tags
+ride in frontmatter beside a `created` date that does not move, so no note changes folder, date or
+degree. Members are spread with a stride of 379 (prime, and 954 = 2·3²·53, so they share no
+factor), which makes the assignment a bijection over distinct notes and scatters each tag *across*
+the folders — a tag dimension that merely re-drew the folder wedges would test nothing. Verified:
+*layout matches its golden snapshot* reports **positions unchanged** on all four fixtures.
+
+What it now exposes, and what is **not** fixed by github#107: 101 of the 122 groups hold three
+notes or fewer, so the inner ring fills with wedges of one or two dots each. Separately, the
+palette resolves **12 distinct colours across 122 groups**, 22 of which read as grey — measured on
+the real vault too, 12 colours across 76 groups. Both have their own issues.
+
 ### The real cause is the band split, and it is not fixed here
 
 Neither change touches why the inner lattice is tighter in the first place. `balanceBands()`
@@ -333,9 +370,10 @@ Four claims, and the counts are the whole check:
 - **Plan members equal the note count** less whatever the hub holds, in both dimensions, and
   no note appears in two cells.
 - **The group counts sum to the vault.** Measured: demo 1,403 members in 41 cells by folder
-  and 11 by tag; 10k 10,002 in 37 and 11; the dominant-folder vault 954 in 10 and **1** —
-  that vault carries no tags at all, so its tag disc is one `(untagged)` wedge, and it lays
-  out clean.
+  and 11 by tag; 10k 10,002 in 37 and 11; the dominant-folder vault 954 in 10 cells / 7 groups
+  by folder and **121 cells / 122 groups** by tag, 38 of its notes carrying no tag and 158
+  carrying more than one. That vault used to carry no tags at all — its tag disc was a single
+  `(untagged)` wedge, which exercised nothing — see the long-tail entry below (github#107).
 - **Every note's group is the first tag it lists, or `(untagged)`** (design/0015 D-1).
   `(unlinked)` is the one legitimate exception, because that setting moves a note out of its
   group in either dimension.
