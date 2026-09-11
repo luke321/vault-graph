@@ -176,6 +176,78 @@ variable, and conflating them is why size ignored filtering entirely. Its ceilin
 1, since a filtered disc genuinely has more room per note. Median dot 4.238px → 10.854px
 filtering 503 notes to 62.
 
+### A dot is sized off its band's median own-step, not its tightest decile (github#107)
+
+`ringsLayout` collects one own-step per (cell, row) into `roomPool[band]` and `pick()` reduces
+each pool to the one number `dotPx` sizes that whole band against. **`ROOM_PCTL = 0.5`.** It was
+`0.1`, and the tenth percentile is not band-neutral: the inner band packs fewer rows over more
+cells, so its pool is the more dispersed of the two and its tenth percentile sits further below
+its own median. Measured p10/p50 per band — **demo 0.81 inner / 0.90 outer, 10k 0.94 / 0.98,
+dominant-folder 0.95 / 0.98** — so a decile cost the inner band 6–19% that was arithmetic, not
+geometry. The pool is tight either way (the demo inner pool spans 95–170 units over 315 entries),
+so the median is not a long-tail gamble, and `cellRoom` still clamps each cell to its own minimum
+step inside `dotPx`.
+
+**The percentile is not only a sizing number, and that is the cost.** It also feeds
+`clear = CLEAR_OF_ROOM · room · GAP_BAND[bk]` and the `side()` cell-edge margins, so changing it
+moves notes — 1324/1403, 9317/10002, 894/954 and 858/891 of them across the four fixtures. What it
+does **not** move is the part that would make it a relayout: **radius unchanged everywhere, band
+membership unchanged, angle 0.6° at worst.** A tangential nudge. All four goldens were re-recorded
+on that basis, and "radius and band unchanged" is the evidence to re-check if it is ever touched
+again. Decoupling a `sizeRoom` from `room` would keep the goldens still, at the price of threading
+a second number through the cascade's six room-interpolation sites; it was considered and set
+aside.
+
+### `DOT_MIN_PX` is a floor, and the caps below it still win (github#107)
+
+`dotPx` used to scale the floor by the room factor as well as the ceiling — `lo = rp.lo * scale`
+— so **`DOT_MIN_PX = 1.5` was never a floor**: at scale 0.63 the demo vault's inner band bottomed
+out at **0.94px** and the 10k vault's at **0.81px**. The room factor still caps a dot from above;
+only the floor came off it.
+
+It is deliberately applied **before** the edge, fit, hub and `cascadeRun.sizeCap` clamps, all of
+which may still push a dot below it. So this is a floor against *scarcity*, not against
+*clearance*: **sub-pixel dots still exist where a note's room on the frame demands one** — 0.81px
+and 0.75px, still hoverable, which is what *a sub-pixel dot can still be hovered* asserts — and a
+walking dot can still be held under its two resting sizes, which is what the two dot-size cascade
+checks assert.
+
+### What the two together moved
+
+Dots paired by identical link weight across the bands — the question github#107 actually asked:
+
+| fixture | inner/outer before | after |
+|---|---|---|
+| demo-vault | 0.734 | **0.785** |
+| test-vault (10k) | 0.795 | **0.859** |
+| shape-vault | 0.784 | **0.786** |
+
+The dominant-folder fixture barely moves because nothing there was floor-bound and its pool is
+almost undispersed (p10/p50 0.95). The tag fixture has **no inner band at rest** in the folder
+dimension, so it contributes nothing to this measurement — do not read a flat number there as a
+regression.
+
+**Accepted cost.** Overlapping pairs in the inner band go **0 → 1** on the demo vault and
+**21 → 36** on the 10k. The percentile change gives back part of what the floor costs: the floor
+alone took the 10k to **45**. `2·dot/step` per band moved 0.28–0.34 → **0.30–0.37** (demo) and
+0.34–0.57 → **0.35–0.61** (10k), both inside the asserted 0.15–0.80 with spread under 2.2.
+
+### The real cause is the band split, and it is not fixed here
+
+Neither change touches why the inner lattice is tighter in the first place. `balanceBands()`
+optimises ring **thickness** — its cost is `|inner − BAND_RATIO · outer|`, `BAND_RATIO = 0.55` —
+not room per note, so on the demo vault the inner ring gets **20% of the disc's area for 31% of
+its weight**. Relative to its own room an inner dot was already sized like an outer one before
+github#107 (`2·dot/step` 0.31 against 0.34); the dots were small because the room was.
+
+Two facts to carry into any attempt at that. Band membership is seeded by folder **size**
+(`c.wsum < smallAt`), not by how well-linked a folder is — on the demo vault the inner band's
+median link weight is **5.7 against the outer band's 6.40**, so the inner ring is not where the
+best-connected notes land. And membership is per **group**: `c.inner = groupInner[c.g]` and
+`takeGeom()` stores `bandLock[c.g]`, so a folder cannot span both rings and "the best-connected
+*notes* inner" is not reachable without dismantling the wedge. Within a wedge the notes are
+already ordered by link weight along the serpentine.
+
 ## The hub stays the same share of the disc
 
 `r0`'s formula exists to hold the hub at a constant *fraction* — its own comment records
