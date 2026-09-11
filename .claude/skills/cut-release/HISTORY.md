@@ -1,5 +1,28 @@
 # cut-release — change log
 
+## 2026-09-11 - every clip is looked at before it is committed
+
+New step 8, "Look at every clip before committing it", between re-recording and the dry run;
+the status table gained a matching row and everything after it renumbered. Step 7 is now
+"Re-record every clip and the hero" rather than a judgment call (github#121).
+
+Written the same afternoon it was needed. A full re-record captured an Obsidian window that was
+sitting on the target monitor, open on a real vault, and overwrote five clips with footage of a
+personal daily note. `gdigrab` copies a region of the desktop, so the take had the right
+dimensions, the right duration and no error at all. What caught it was a size comparison --
+0.04 MB against a committed 4.37 MB, a near-static capture compressing to nothing -- not anyone
+looking at it.
+
+Two gates, because each catches what the other misses: check the FIRST take before running the
+rest (nineteen blind takes is how one bad clip becomes five), then publish every clip and the
+hero in one Artifact with each byte size beside the previously committed one, and get an
+explicit yes before committing any of them. `git checkout -- assets/` is what makes it
+recoverable, and it only works while nothing has been committed.
+
+github#122 now raises the Chrome window before capture, which removes the common cause. The
+step stays regardless: the failure is silent by construction, and a gate that depends on
+remembering to notice is not a gate.
+
 ## 2026-09-11 — stop step 1 finding the wrong last tag
 
 Step 1 opened with `git describe --tags --abbrev=0` to find the previous tag. That is wrong in

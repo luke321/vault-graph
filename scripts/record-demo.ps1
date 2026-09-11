@@ -135,6 +135,11 @@ Add-Type -Namespace Win -Name U -MemberDefinition @'
   [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr h, out RECT r);
   [DllImport("dwmapi.dll")] public static extern int DwmGetWindowAttribute(
     IntPtr h, int attr, out RECT r, int size);
+  [DllImport("user32.dll")] public static extern bool SetWindowPos(
+    IntPtr h, IntPtr after, int x, int y, int cx, int cy, uint flags);
+  [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr h, int cmd);
+  [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h);
+  [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
 '@ -ErrorAction SilentlyContinue
 $DWMWA_EXTENDED_FRAME_BOUNDS = 9
 
@@ -146,6 +151,24 @@ while ((Get-Date) -lt $deadline) {
   Start-Sleep -Milliseconds 200
 }
 if ($hwnd -eq [IntPtr]::Zero) { throw "Chrome's window never appeared" }
+
+# github#122 -- RAISE IT, don't just find it. gdigrab copies a REGION OF THE DESKTOP, so whatever
+# is drawn over that rectangle is what lands in the take -- and the take still looks plausible.
+# Nothing here used to bring Chrome forward: it was positioned and measured, never raised, so an
+# editor left open on that monitor was recorded instead of the page. HWND_TOPMOST rather than
+# focus alone, because SetForegroundWindow is refused to a background process often enough to be
+# useless on its own; topmost is restored to normal in the finally below.
+$HWND_TOPMOST = [IntPtr](-1)
+$SWP_NOMOVE = 0x0002; $SWP_NOSIZE = 0x0001; $SWP_SHOWWINDOW = 0x0040
+$SW_RESTORE = 9
+[void][Win.U]::ShowWindow($hwnd, $SW_RESTORE)
+[void][Win.U]::SetWindowPos($hwnd, $HWND_TOPMOST, 0, 0, 0, 0, ($SWP_NOMOVE -bor $SWP_NOSIZE -bor $SWP_SHOWWINDOW))
+[void][Win.U]::SetForegroundWindow($hwnd)
+$script:raisedHwnd = $hwnd
+Start-Sleep -Milliseconds 400
+if ([Win.U]::GetForegroundWindow() -ne $hwnd) {
+  Write-Warning "Chrome is topmost but did not take focus; the capture region is covered by nothing, so the take is still clean."
+}
 
 $wr = New-Object Win.U+RECT
 if (-not [Win.U]::GetWindowRect($hwnd, [ref] $wr)) { throw "GetWindowRect failed" }
@@ -225,6 +248,13 @@ if (Test-Path $ffprobe) {
 }
 }
 finally {
+  # github#122 -- put it back, so a failed take does not leave Chrome pinned over everything
+  if ($script:raisedHwnd) {
+    $HWND_NOTOPMOST = [IntPtr](-2)
+    try {
+      [void][Win.U]::SetWindowPos($script:raisedHwnd, $HWND_NOTOPMOST, 0, 0, 0, 0, (0x0002 -bor 0x0001))
+    } catch { }
+  }
   # github#87
   if ($screenLock) {
     & node (Join-Path $here 'lock.mjs') release $screenLock --owner $lockOwner

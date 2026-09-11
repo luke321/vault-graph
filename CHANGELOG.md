@@ -30,6 +30,66 @@ published tag breaks every link to it.
 
 ---
 
+## 2.6.0 — "Minimap" — 2026-09-11
+
+**Three things the disc used to leave you guessing about:** where you are once zoom has cropped
+it, what a colour will actually do before you pick it, and what changed when the plugin updated
+underneath you.
+
+### An overview, for when zoom crops the disc
+
+Zoomed in, the frame held a patch of dots and an arc, and of the four camera controls only Fit
+answered *where am I* — by throwing away the zoom that got you there.
+
+- **A 96px schematic beside Fit, up only while the disc is cropped** — the two band outlines, one
+  coarse sector per folder, and your viewport drawn as a rectangle over them.
+- **No dots and no labels.** It reads the plan, not the notes, so it stays a schematic of where
+  you are rather than a second drawing of the disc.
+- **Click it and the disc fits**, through the same code the Fit button uses.
+- 72px below the 720px breakpoint, and it takes itself off the page the moment the whole disc is
+  back in view — including when an auto-fit is what brought it back.
+
+### The plugin says what changed, once
+
+Obsidian swaps `main.js` under you and says nothing: 2.1.0 shipped the phone layout and the hop
+trail, and nobody running the plugin was told.
+
+- **A dismissible strip above the disc on the first open after a minor or major update**, carrying
+  that release's own bullets and links to the release page and the feature gallery.
+- **Seen on dismiss**, so it survives reopens and restarts until you press *Got it* — not seen
+  because it happened to render once.
+- **It chains the releases you missed**, oldest first, rather than showing only the newest.
+- **The controls that release added pulse** while the strip is up, so a new button is pointed at
+  rather than described.
+- A fresh install sees nothing at all.
+
+### See a colour as the dots it will draw
+
+- **Every swatch in the picker draws the slot's own colour with its sub-wedge tint ladder
+  underneath**, on the ground you are actually using rather than a fixed one.
+- **The preview is the ladder the disc draws.** It is measured against the disc on every group
+  and every slot, not only the slot a folder already holds.
+- The plugin's own settings tab carries the same swatch as the disc's right-click menu.
+
+### Fixes
+
+- **The legend kept the old theme's colours after a live theme flip** while the picker repainted.
+  Both follow the flip now.
+- **Switching between Folders and Tags nudged the sidebar** when one grouping needed a scrollbar
+  and the other did not. The gutter is reserved, so nothing moves.
+- **Opening the plugin's settings tab left a theme listener behind every time.** Ten opens meant
+  ten redraws per theme change.
+- **Inner-ring dots were sized off the whole disc rather than their own band**, which made a dense
+  inner ring draw dots smaller than its own spacing warranted.
+
+### Also in this release
+
+- The cascade and the camera tween honour the system's **reduced-motion** setting.
+- The settings swatches sit in their own grid instead of sharing a row with the chevron, and the
+  chip is large enough to read.
+
+---
+
 ## 2.5.0 — "Tags" — 2026-09-11
 
 **A second way to cut the disc: by tag instead of by folder.** The group list's heading is now
