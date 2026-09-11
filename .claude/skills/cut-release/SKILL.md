@@ -3,8 +3,8 @@ name: cut-release
 description: >
   Cut a vault-graph release end to end, following .ai-context/releasing.md and CLAUDE.md to the
   letter: enumerate the range, build the release/<version> branch, write the CHANGELOG section
-  and release body, re-record whatever clips went stale, rehearse and pay the suite once, merge
-  down, tag, and let the workflow publish. Use when the user says "cut a release", "ship
+  and release body, re-record every clip and the hero by default, rehearse and pay the suite
+  once, merge down, tag, and let the workflow publish. Use when the user says "cut a release", "ship
   <version>", "release <name>", or "/cut-release". Orchestrator-only: refuses to run from a
   dispatched ticket worktree. Invoking this skill IS the standing authorization for the pushes
   and merges it describes -- it does not ask again at each one, but it does show the status
@@ -160,20 +160,27 @@ new entry.
 
 ## 7. Re-record every clip and the hero, then look at them
 
-**The hero (`assets/demo.webp`) goes stale on any visible page change, silently — nothing fails.**
-`release.ps1` warns (`=== hero ===`, `=== features ===`) by comparing commit dates, which is a
-proxy, not proof. Decide by looking at what actually changed:
+**The hero (`assets/demo.webp`) goes stale on any visible page change, silently — nothing fails,**
+and the same is true of every feature clip (github#121): you cannot reliably tell from a diff
+which clips went stale, since a shared constant (a margin, `FIT_RATIO`, a storyboard reorder)
+makes *every* clip stale, not just the ones whose own beats moved. `release.ps1`'s `=== hero ===`
+/ `=== features ===` warnings only compare commit dates, a proxy, not proof — so re-recording
+everything is the default, not a call made by looking at what changed:
 
 ```powershell
 node scripts/lock.mjs acquire record --owner "release <version>"   # ask before taking the mouse
-.\scripts\record-demo.ps1                       # or -Act <name> for one feature clip
-.\scripts\make-hero.ps1                          # or -Out assets\features\<name>.webp
+.\scripts\record-all.ps1                        # every clip and the hero, one command
 node scripts/lock.mjs release record --owner "release <version>"
+node scripts/update-feature-metadata.mjs --version <version>       # rewrites every Last re-recorded line
 ```
 
-If a shared constant changed (a margin, `FIT_RATIO`, a storyboard reorder), **every existing
-clip is stale, not just the ones whose own beats moved** — re-record all of them, not a subset.
-Update each re-recorded feature's `Last re-recorded` line in its `docs/features/<name>.md`.
+For a single feature clip re-recorded on its own, the two commands under it still apply:
+`.\scripts\record-demo.ps1 -Act <name>` then `.\scripts\make-hero.ps1 -Out assets\features\<name>.webp`
+— `update-feature-metadata.mjs --version <version> --only <name>` covers just that one doc.
+
+**Skip re-recording only for a release that touches nothing visual** — a docs-only PATCH. That is
+the one exception, and it has to be named and argued, not defaulted to: say so as its own row in
+the status table (e.g. "Re-record every clip and the hero — skipped, docs-only PATCH").
 
 ## 8. Look at every clip before committing it
 
