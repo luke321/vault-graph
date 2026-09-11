@@ -50,7 +50,7 @@ measuring it: serve the page, drive it, read the numbers.
   the alias, the asker included. Vault Shelf measured it (`vault-shelf#37`) and reached the same
   design independently.
 
-  ```bash
+  ```powershell
   node scripts/lock.mjs acquire screen-right --owner "#77 palette"   # blocks; exit 1 = give up
   node scripts/lock.mjs release screen-right --owner "#77 palette"   # always, even on failure
   node scripts/lock.mjs status                                       # who holds what
@@ -121,9 +121,8 @@ measuring it: serve the page, drive it, read the numbers.
   a plan gate that cannot be argued with is not a gate), and never a raw `git worktree add`, which
   Orca reclaims out from under you because it did not create it.
 
-  ```bash
-  orca worktree create --repo id:<repoId> --name vault-graph-<issue>-<slug> --no-parent \
-    --agent claude --prompt "/implement-ticket <issue>" --json
+  ```powershell
+  orca worktree create --repo id:<repoId> --name vault-graph-<issue>-<slug> --no-parent --agent claude --prompt "/implement-ticket <issue>" --json
   ```
 
   **`--no-parent` is not optional, and it is the half that gets forgotten.** Run from inside a

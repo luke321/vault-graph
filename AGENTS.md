@@ -15,7 +15,7 @@ Five things are worth knowing before you touch anything, all expanded in `CLAUDE
   which a regenerating suite run deletes out from under a concurrent one. One machine-wide mutex,
   shared by every worktree:
 
-  ```bash
+  ```powershell
   node scripts/lock.mjs acquire screen-right --owner "<who you are>"  # exit 1 = give up
   node scripts/lock.mjs release screen-right --owner "<who you are>"  # always, even on failure
   node scripts/lock.mjs status
