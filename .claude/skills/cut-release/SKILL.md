@@ -259,8 +259,9 @@ Structure (see `.ai-context/releasing.md`'s full section):
 2. **No hero at the top** — `assets/demo.webp` is large and unspecific; use the feature clips.
 3. One `###` per genuinely new or visibly-changed feature (from step 1's range, not memory), its
    matching clip embedded.
-4. One line, always the same spot, right after the highlight reel: `☕ If Vault Graph is useful
-   to you, [support it on Ko-fi](https://ko-fi.com/luke321).`
+4. The Ko-fi ask, always the same spot, right after the highlight reel: the line
+   `If Vault Graph is useful to you:`, then the button on its own line —
+   `[![Support me on Ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/luke321)`
 5. A `---`, then the `CHANGELOG.md` section **appended verbatim**, heading included.
 
 **Image URLs in the body are pinned to `<version>` or a commit SHA — never to `develop` and never
