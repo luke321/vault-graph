@@ -478,7 +478,7 @@ range, not the file. Stale when `node scripts/code-map.mjs --check` fails.
 | 10094 | · · · · · · · · · · `byPath` |
 | 10266 | `destroy` |
 
-## `scripts/smoke.mjs` — 5576 lines, 10 sections, 66 functions, 107 checks
+## `scripts/smoke.mjs` — 5578 lines, 10 sections, 66 functions, 107 checks
 
 ### Sections
 
@@ -489,11 +489,11 @@ range, not the file. Stale when `node scripts/code-map.mjs --check` fails.
 | 602–1125 | github#86, design/0015 |
 | 1126–1407 | github#86 D-9, design/0015 |
 | 1408–2201 | camera |
-| 2202–3682 | date range |
-| 3683–4863 | the hub |
-| 4864–5027 | live rebuild (github#72) |
-| 5028–5258 | the run |
-| 5259–5576 | which vaults, and why |
+| 2202–3684 | date range |
+| 3685–4865 | the hub |
+| 4866–5029 | live rebuild (github#72) |
+| 5030–5260 | the run |
+| 5261–5578 | which vaults, and why |
 
 ### Functions
 
@@ -543,28 +543,28 @@ range, not the file. Stale when `node scripts/code-map.mjs --check` fails.
 | 3299 | · `isDay` |
 | 3306 | · `pad` |
 | 3316 | · `wOf` |
-| 3605 | · `snap` |
-| 3616 | · `diff` |
-| 3639 | · `hiddenByDefault` |
-| 3685 | `topByDegree` |
-| 3692 | `pinN` |
-| 4355 | · `norm` |
-| 4512 | · · · `mean` |
-| 4569 | · `norm` |
-| 4650 | · `bars` |
-| 4651 | · `rows` |
-| 4704 | `pressKey` |
-| 4716 | `trailState` |
-| 4717 | `selectBySearch` |
-| 4726 | `hop` |
-| 4735 | `closeCard` |
-| 4736 | `stepBack` |
-| 5013 | `settle` |
-| 5030 | `runOne` |
-| 5217 | `killBrowser` |
-| 5337 | `resolveVaults` |
-| 5431 | `buildFor` |
-| 5450 | `main` |
+| 3607 | · `snap` |
+| 3618 | · `diff` |
+| 3641 | · `hiddenByDefault` |
+| 3687 | `topByDegree` |
+| 3694 | `pinN` |
+| 4357 | · `norm` |
+| 4514 | · · · `mean` |
+| 4571 | · `norm` |
+| 4652 | · `bars` |
+| 4653 | · `rows` |
+| 4706 | `pressKey` |
+| 4718 | `trailState` |
+| 4719 | `selectBySearch` |
+| 4728 | `hop` |
+| 4737 | `closeCard` |
+| 4738 | `stepBack` |
+| 5015 | `settle` |
+| 5032 | `runOne` |
+| 5219 | `killBrowser` |
+| 5339 | `resolveVaults` |
+| 5433 | `buildFor` |
+| 5452 | `main` |
 
 ### Checks
 
@@ -642,38 +642,38 @@ range, not the file. Stale when `node scripts/code-map.mjs --check` fails.
 | 3292 | the ribbon's right edge is a day the vault has actually reached |
 | 3373 | compact axis: the settings-panel toggle actually flips the live state |
 | 3404 | colour unlinked by folder: the settings-panel toggle actually flips the live state |
-| 3434 | colour unlinked notes by folder: the settings-panel toggle actually flips the live state |
-| 3463 | compact axis: the view-level icon actually flips the live state, and persists |
-| 3486 | no non-tail split cell holds fewer notes than its band's row depth |
-| 3511 | the row-depth gate reads LIVE counts, not the whole-vault tally, under a filter |
-| 3548 | undated notes survive every range |
-| 3568 | overriding one folder recolours exactly one group |
-| 3596 | a folder keeps its slot across the membership toggle |
-| 3636 | a folder's legend row toggles \"hidden by default\" from its context menu |
-| 3700 | a pinned note leaves no gap in the ring it came from |
-| 3741 | the hub's dots shrink as it fills |
-| 3757 | a soloed hub-adjacent note stays inside the hub's own radius |
-| 3806 | the mark yields to the hub and comes back |
-| 3828 | a pin hidden by a filter is skipped, not released |
-| 3852 | every unlinked note wears the (unlinked) swatch |
-| 3884 | the (unlinked) row's right-click toggle moves unlinked notes into their folder |
-| 3930 | the (unlinked) row's right-click tint toggle recolours notes without moving them |
-| 3979 | the (unlinked) row opens its menu with no notes in it |
-| 4026 | the (unlinked) row's count is parenthesised while kept separate, plain once joined |
-| 4043 | legend count bars scale to the largest visible folder |
-| 4276 | the thinnest count bar survives a hover in pixels, not just in CSS |
-| 4387 | the count bars walk on the cascade's clock and land on the resting layout |
-| 4446 | a bar that loses its folder shrinks over the cascade instead of blinking out |
-| 4564 | the count bar follows its own swatch across a theme flip |
-| 4642 | count bars are on by default, and the settings toggle removes every bar |
-| 4694 | focus web stays above dim notes |
-| 4742 | only a hop lengthens the trail |
-| 4761 | stepping back never re-collects a hop |
-| 4778 | a crumb click truncates the trail at the crumb |
-| 4793 | the trail is not layout |
-| 4816 | the page claims no keyboard shortcut |
-| 4839 | re-selecting the same note keeps the trail, and a filter does not clear it |
-| 4917 | a live rebuild with the same data moves nothing |
-| 4931 | the invalidation registry names every cache a live rebuild stales |
-| 4940 | a live rebuild lands on the layout a fresh relayout gives |
-| 4972 | word counts land by path, which is the only thing a live rebuild keeps |
+| 3436 | colour unlinked notes by folder: the settings-panel toggle actually flips the live state |
+| 3465 | compact axis: the view-level icon actually flips the live state, and persists |
+| 3488 | no non-tail split cell holds fewer notes than its band's row depth |
+| 3513 | the row-depth gate reads LIVE counts, not the whole-vault tally, under a filter |
+| 3550 | undated notes survive every range |
+| 3570 | overriding one folder recolours exactly one group |
+| 3598 | a folder keeps its slot across the membership toggle |
+| 3638 | a folder's legend row toggles \"hidden by default\" from its context menu |
+| 3702 | a pinned note leaves no gap in the ring it came from |
+| 3743 | the hub's dots shrink as it fills |
+| 3759 | a soloed hub-adjacent note stays inside the hub's own radius |
+| 3808 | the mark yields to the hub and comes back |
+| 3830 | a pin hidden by a filter is skipped, not released |
+| 3854 | every unlinked note wears the (unlinked) swatch |
+| 3886 | the (unlinked) row's right-click toggle moves unlinked notes into their folder |
+| 3932 | the (unlinked) row's right-click tint toggle recolours notes without moving them |
+| 3981 | the (unlinked) row opens its menu with no notes in it |
+| 4028 | the (unlinked) row's count is parenthesised while kept separate, plain once joined |
+| 4045 | legend count bars scale to the largest visible folder |
+| 4278 | the thinnest count bar survives a hover in pixels, not just in CSS |
+| 4389 | the count bars walk on the cascade's clock and land on the resting layout |
+| 4448 | a bar that loses its folder shrinks over the cascade instead of blinking out |
+| 4566 | the count bar follows its own swatch across a theme flip |
+| 4644 | count bars are on by default, and the settings toggle removes every bar |
+| 4696 | focus web stays above dim notes |
+| 4744 | only a hop lengthens the trail |
+| 4763 | stepping back never re-collects a hop |
+| 4780 | a crumb click truncates the trail at the crumb |
+| 4795 | the trail is not layout |
+| 4818 | the page claims no keyboard shortcut |
+| 4841 | re-selecting the same note keeps the trail, and a filter does not clear it |
+| 4919 | a live rebuild with the same data moves nothing |
+| 4933 | the invalidation registry names every cache a live rebuild stales |
+| 4942 | a live rebuild lands on the layout a fresh relayout gives |
+| 4974 | word counts land by path, which is the only thing a live rebuild keeps |
