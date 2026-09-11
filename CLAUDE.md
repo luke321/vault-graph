@@ -138,6 +138,17 @@ measuring it: serve the page, drive it, read the numbers.
   2026-09-11, even with RAM nowhere near full. Count `orca worktree list --json` entries with
   `workspaceStatus: in-progress` before dispatching another; at six, queue the rest and dispatch
   only as one finishes and is merged.
+- **Every issue the orchestrator files carries a label, and "unsure" is a question for Lukas, not
+  a reason to skip it.** `gh issue create` without `--label` silently succeeds, so an unlabelled
+  issue is never caught at filing time — and unlabelled is what most of the backlog already is
+  (9 of 18 open here on 2026-09-11, 31 of 31 in `vault-shelf`), which is how a label stops being
+  worth filtering on at all. The set is the GitHub default: `bug`, `enhancement`,
+  `documentation`, `accessibility`, `question`, plus `duplicate` / `invalid` / `wontfix` for
+  closing. Most work here is `bug` or `enhancement`, and the split is about what the issue
+  *claims*: something the page already promises and does not do is a `bug`; something it does not
+  promise yet is an `enhancement`. **When it is genuinely either — a behaviour that is defensible
+  as designed but reads as broken — ask Lukas which, and file after the answer.** Do not guess and
+  do not file bare.
 - **A release is the range, not the work in hand.** Everything it needs — a `CHANGELOG.md`
   section accounting for *every* merge since the last tag, every clip it embeds, every doc naming
   the version, the release body itself — is finished on `release/<version>` and read there before
