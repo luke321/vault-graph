@@ -65,11 +65,15 @@ function ageOf(meta) {
 }
 
 // github#87
-function aliasHold(n) {
+function aliasHold(n, asker) {
   for (const a of aliasesOf(n)) {
     const legacy = legacyHold(a);
-    if (legacy) return { name: a, root: legacy.root, meta: legacy.meta };
+    if (legacy && legacy.meta.owner !== asker) {
+      return { name: a, root: legacy.root, meta: legacy.meta };
+    }
+    if (legacy) continue;
     const meta = readMeta(a);
+    if (meta && meta.owner === asker) continue;
     if (meta && ageOf(meta) <= staleWindow(a)) return { name: a, root: ROOT, meta: meta };
   }
   return null;
@@ -108,7 +112,7 @@ async function acquire() {
     }
 
     // github#87
-    const alias = aliasHold(name);
+    const alias = aliasHold(name, owner);
     if (alias) {
       if (!announced) {
         console.log("WAITING for " + name + " -- the same screen is held as " + alias.name +
