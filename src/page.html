@@ -12,12 +12,15 @@
       <!-- github#23 -->
       <div id="vg-optbody"></div>
       <div class="row" style="margin-bottom:7px">
-        <div class="lbl" style="margin:0">Folder colours</div>
-        <div class="mini"><button id="vg-fcreset" title="Drop every folder AND subfolder override and go back to the automatic order">Reset</button></div>
+        <div class="lbl" style="margin:0">Group colours</div>
+        <div class="mini"><button id="vg-fcreset" title="Drop every override for the grouping shown, group and sub-wedge, and go back to the automatic order">Reset</button></div>
       </div>
       <div id="vg-setbody"></div>
       <p class="hint">Twelve slots, handed out in folder order and round again. Setting
-        one folder never moves another, and two folders may share a colour.</p>
+        one folder never moves another, and two folders may share a colour.
+        Each swatch shows the slot at the sizes the disc really draws, over both
+        grounds. Its contrast figure is for a <em>solid area</em> of the colour; a
+        dot a pixel across is mostly antialiasing and reads lower than the number.</p>
     </div>
 
     <div class="block">
@@ -30,10 +33,8 @@
     </div>
 
     <div class="block">
-      <div class="row" style="margin-bottom:7px">
-        <div class="lbl" style="margin:0">Groups <span id="vg-gcount" class="val"></span></div>
-        <div class="mini"><button id="vg-allon">All</button><button id="vg-alloff">None</button></div>
-      </div>
+      <span id="vg-dim" class="dimseg dimfull" role="group" aria-label="Group the disc by"><button type="button" data-dim="folder" aria-pressed="true" title="Cut the disc by folder"><span class="dimnm">Folders</span><span class="dimct"></span></button><button type="button" data-dim="tag" aria-pressed="false" title="Cut the disc by tag: the first tag a note lists files it"><span class="dimnm">Tags</span><span class="dimct"></span></button></span>
+      <div class="mini dimall"><button id="vg-allon">All</button><button id="vg-alloff">None</button></div>
       <div id="vg-legend"></div>
     </div>
 
@@ -118,6 +119,14 @@
           </svg>
         </button>
       </div>
+      <!-- github#79 -- a sibling of the cluster, not a fifth button in it: the cluster's own
+           check pins four 31px buttons and their box. Absent entirely while the whole disc is
+           in view; it appears left of the pan button once zoom or a pan crops the disc. -->
+      <button id="vg-ov" type="button" hidden
+              title="Where the frame sits on the disc. Click to fit."
+              aria-label="Where the frame sits on the disc. Click to fit.">
+        <canvas aria-hidden="true"></canvas>
+      </button>
       <div id="vg-tip" hidden></div>
       <!-- github#73 -->
       <div id="vg-mob" role="group" aria-label="Panels">

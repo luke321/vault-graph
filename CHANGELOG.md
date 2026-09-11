@@ -30,6 +30,288 @@ published tag breaks every link to it.
 
 ---
 
+## 2.6.0 — "Minimap" — 2026-09-11
+
+**Three things the disc used to leave you guessing about:** where you are when you zoom in, what a colour will do before you pick it, and what changed when the plugin updated.
+
+### Know where you are when you zoom in
+
+- Zoom in and a small map appears next to Fit, with a box marking the part you are looking at.
+- Click it to jump back to the whole disc.
+- It shows up only while the disc is cut off, and takes itself away when everything fits again.
+
+### See a colour before you pick it
+
+- Every swatch now shows the dots it will actually draw, including the lighter shades the
+  subfolders get.
+- The plugin's settings show the same swatches as the right-click menu.
+
+### The plugin tells you what is new
+
+- After an update, a strip at the top says what changed. Dismiss it and it stays gone.
+- Miss a few releases and it catches you up on all of them, oldest first.
+- Whatever the release added lights up while the strip is there, so you can see where to look.
+
+### Smaller things
+
+- The legend keeps up when you switch light and dark.
+- Switching between Folders and Tags no longer nudges the sidebar sideways.
+- Dots in the inner ring are sized against their own ring, so a busy one looks right.
+- Animations follow your system's reduced-motion setting.
+- The colour swatches in the plugin's settings line up, and are big enough to see.
+
+---
+
+## 2.5.0 — "Tags" — 2026-09-11
+
+**A second way to cut the disc: by tag instead of by folder.** The group list's heading is now
+a segmented control, **Folders** or **Tags** — switch and the whole disc redraws, one hand
+erasing the old wedges while the other brings in the new ones, with the links, the heat strip
+and the group list following the notes. A note's first listed tag files it; a nested tag such
+as `area/health` nests as a sub-wedge of *area*, opened and pushed out exactly the way a
+subfolder is — the same grouping-dimension mechanism underneath, just fed tags instead of
+folder paths. Untagged notes land in their own `(untagged)` bucket, grey like `(unlinked)`.
+
+<img src="https://raw.githubusercontent.com/luke321/vault-graph/2.5.0/assets/features/tags.webp" width="100%" alt="The disc cut by tag instead of by folder, a nested tag's twisty opened to reach its sub-tag, clicked to halo and push the sub-wedge out then let back down, folded away again, and the disc switched back to folders">
+
+### Grouping by tag
+
+- **Folders or Tags**, a segmented control above the legend. The disc keeps its hub and its
+  rings across the switch; nothing about walking a nested tag needed its own code.
+- Where a tag's wedge holds fewer notes than carry the tag, its row says so.
+- The grouping control takes the full panel's width now, split evenly between the two sides,
+  each carrying its own count — instead of one shared count sitting above four buttons that
+  used to read as one group.
+
+### Fixes
+
+- **A frontmatter value containing a literal `</script>` could close the standalone export's own
+  data script and run whatever followed it.** The exported data is escaped now, so this can't
+  happen.
+- **A folder literally named `constructor` or `toString` could crash the plugin**, via an
+  inherited property the planner mistook for its own. Fixed everywhere the layout keys a map by
+  folder or tag name.
+
+### Also in this release
+
+- The stats line now names the version that built the page, so a rebuilt-but-not-reloaded
+  install in Obsidian doesn't read as a stuck bug.
+- The disc-to-window margin is half what it was.
+- The docs site has its own dark theme instead of GitHub Pages' generic default.
+
+---
+
+## 2.4.1 — 2026-09-10
+
+**The README's "Try it live" and feature-list links now go somewhere.** 2.4.0 shipped the docs
+as a real site but the README still carried the placeholder line from before the site resolved —
+"this line gets its links the moment it's live" — and GitHub Pages itself had never been switched
+on for the repository, so there was nothing to link to. Pages is enabled now, serving from
+`main`'s `docs/`, and the README points at it: [the live
+demo](https://luke321.github.io/vault-graph/demo/), [the feature
+gallery](https://luke321.github.io/vault-graph/features.html), and [the site
+itself](https://luke321.github.io/vault-graph/). Nothing in the plugin changed.
+
+---
+
+## 2.4.0 — "Auto" — 2026-09-10
+
+**Write a note, link three people, and the disc beside you notices.** Refresh used to be the
+only way to see a change you just made — a full teardown, a fresh build and the intro cascade
+from the vault's first note, which also threw away your filters, your date range, your pins and
+wherever you'd moved the camera. The graph now watches the vault and walks itself to the new
+state on the ordinary cascade instead.
+
+<img src="https://raw.githubusercontent.com/luke321/vault-graph/2.4.0/assets/features/live.webp" width="100%" alt="Obsidian with the vault graph in one tab: a second tab opened, a meeting note typed into it, the graph tab clicked and the outer ring taking the new note in one cascade, the new dot hovered; then a weekly review written in another tab, the graph tab clicked again and the inner ring taking that one the same way">
+
+### The disc follows the vault
+
+- **A written, renamed or deleted note moves the disc, not a page load.** An added note fades in
+  where its folder puts it, sized zero-to-rest the same way the timeline's own reveal works; a
+  removed note fades out; a note whose link weight or folder changed takes the existing **moves**
+  tween. Filters, date range, pins and camera all survive — which is exactly what Refresh clears.
+- **Nothing animates while you aren't looking.** A rebuild is held while the graph's own tab is
+  hidden, so a burst of edits doesn't play out behind your back — it lands as one cascade the
+  moment you switch back to it, rather than as several you never saw.
+- **Typing prose moves nothing.** Word counts are deliberately left out of what triggers a
+  rebuild, so editing a note's text produces an empty diff and no motion at all — only a
+  structural change (a link, a folder, a rename, a date) starts a cascade.
+- **A big enough batch is a sync, not an edit.** Past 200 changed notes at once the plugin falls
+  back to a full rebuild instead of animating each one in.
+- **A view setting, on by default** — *Follow the vault*, per vault, in the plugin. Turn it off
+  and the graph waits for Refresh as it always did.
+- The standalone page can't watch a vault, so its own clip is honest about that: the storyboard
+  hands it exactly what the plugin would after a save, and the cascade from there is the same
+  code path.
+
+<img src="https://raw.githubusercontent.com/luke321/vault-graph/2.4.0/assets/features/live-page.webp" width="100%" alt="The standalone page handed one note into its biggest folder, the outer ring absorbing it in one cascade and the new dot hovered where it landed, then a second note into a small folder and the inner ring taking it the same way">
+
+### Smaller things
+
+- **The docs are a real site now**, not just files read on GitHub — a home page, the feature
+  gallery, and a live demo of the exported page anyone can click, hover and filter for
+  themselves, published alongside it. The README points at all three.
+- **The feature gallery is grouped by theme now**, seven of them, instead of sixteen sections in
+  recording order — and the count bars, which shipped in 2.3.0 without ever getting an entry,
+  finally have one: a crop of `folders`, where they actually move, rather than a recording of
+  their own.
+- **A vault that isn't yours opens in restricted mode, and no version of the plugin loads until
+  the trust prompt is confirmed and Settings is closed** — a standing trap for any fixture or
+  freshly generated vault, written down in `CLAUDE.md` for the next person who reads a blocked
+  plugin as a code fault.
+
+---
+
+## 2.3.0 — "Gauge" — 2026-09-09
+
+**Every legend row rendered identically, so a 406-note folder and a 1-note folder looked the
+same.** Each row whose count is a plain number now draws a 2px rule along the bottom, in that
+folder's own colour.
+
+<img src="https://raw.githubusercontent.com/luke321/vault-graph/2.3.0/assets/features/countbars.webp" width="286" alt="The folder list zoomed in: each row carrying a coloured bar under its name, the largest folder's bar full width and the rest proportional, then one folder soloed and every other bar shrinking away">
+
+- **The largest folder currently shown fills its row**, and every other bar is read against it.
+  Hide that folder and the next one grows into its place. The count's tooltip names whichever
+  folder the bar is measured against, so the scale is never implied.
+- **A hidden folder draws no bar at all**, so soloing one leaves exactly a single bar, full width.
+- **The bars move with the disc.** They ride the cascade's own clock, so they walk up and shrink
+  down over the same 1600 ms rather than snapping, and a bar whose folder is going away shrinks
+  to nothing instead of blinking out.
+- **A view setting, on by default** — *Count bars in the legend*, remembered per vault. Turn it
+  off and the rows, the counts and their shared right edge are untouched.
+- Parenthesised counts and subfolder rows stay bare, because those notes are tallied somewhere
+  other than that row's own wedge.
+
+**Known:** after a live theme switch a bar and its swatch both keep the old palette while the
+settings picker repaints (github#84). They stay consistent with each other, and the divergence
+predates this release.
+
+---
+
+## 2.2.0 — "Fold" — 2026-09-08
+
+**Either panel folds away, at any width.** The folder list and the notes-added calendar could
+already be put away on a phone; on a PC the two buttons that do it were not drawn, so a small
+monitor or a narrow window had no way to give the disc the screen. Two people asked for it on
+the 2.0 thread within a day of each other, which is what a control nobody can find looks like
+from the outside — the state machine had shipped in 2.1.0 and was reachable only from a console.
+
+### The panels fold on a PC too
+
+Two buttons at the top left of the disc, wearing the camera cluster's look in the opposite
+corner of the same canvas. One folds the folder list, search and view buttons; the other folds
+the calendar and its date strip. Fold both and the disc has the window to itself.
+
+**The toggles sit 12px into the disc's corner in the plugin too.** They had been taking the camera cluster's inset, which the plugin widens to 44px so Obsidian's floating status bar clears the corner that cluster sits in — a problem the opposite corner does not have. The panel buttons have their own spacing now, the same in the exported file and in the plugin.
+
+**The two buttons ride the disc's corner, and follow it rather than jumping.** They sit where the year strip meets the legend counts, which is the corner a fold actually moves — 288px left when the folder list goes, 230px up when the calendar does. The pair now slides over 180ms instead of teleporting. If your system asks for reduced motion it snaps instead, like every other animation here.
+
+**A wide window gets a different fold from a phone's, and that is the only new thing here.** On
+a phone the folder list is a sheet that slides up over the disc. On a PC it is a grid column, and
+a column gets out of the way by collapsing rather than overlaying: it goes to zero and hands its
+width to the graph. It leaves the layout entirely rather than being clipped to zero width, so it
+also leaves the tab order and the accessibility tree — a panel nobody can see must not keep its
+controls focusable while its own button reports that it is closed. The calendar needed no new
+presentation at all: it already had its own row, and hiding the row is what 2.1.0 chose over
+floating the band above the disc.
+
+**Whichever way you leave it is how the graph opens next time**, per vault in the exported file
+and per vault in the plugin. This reverses a decision 2.1.0 made deliberately — panel state was
+session state there, on the grounds that a fold on a phone is a passing act. At a desktop it is
+an arrangement somebody chose. The page itself still stores nothing; it takes the state in and
+hands changes back, the same channel the folder colours have used since 2.0.0. Nothing stored
+yet means the width decides the first open, so a phone still summons its legend and a desktop
+still starts with it beside the disc.
+
+**One consequence, stated rather than left to be discovered:** Obsidian shares one settings file
+between desktop and mobile, so a desktop user who has folded the sidebar and put it back gives
+their phone a sheet that is already up when the view opens. It closes with its own button or a
+tap on the disc.
+
+### Only one of the two folds makes the dots bigger
+
+The disc is fitted to whichever side of the window is shorter, so on a landscape monitor that is
+the height — and the calendar is what is eating it. Measured on a 1600x1000 window over 1403
+notes:
+
+| | canvas | drawn radius min/p50/max | dots under 2 px |
+|---|---|---|---|
+| both panels up | 1312x770 | 0.89 / **2.19** / 4.06 px | 515 of 1403 |
+| calendar folded | 1312x1000 | 1.05 / **2.68** / 5.38 px | **232** of 1403 |
+| calendar + folder list folded | 1600x1000 | 1.05 / **2.68** / 5.38 px | 232 of 1403 |
+| folder list folded alone | 1600x770 | 0.89 / **2.19** / 4.06 px | 515 of 1403 |
+| both back up | 1312x770 | 0.89 / 2.19 / 4.06 px | 515 of 1403 |
+
+The calendar is worth 22% of the median dot radius and halves the population under 2 px. The
+folder list is worth 288 px of framing and not one pixel of radius — worth knowing which one to
+reach for when the dots are too small to aim at. It is the same effect 2.1.0 measured on a phone,
+where showing the band cost no dot size at all.
+
+**The camera is left where it is, and needs no help.** Neither fold re-centres or re-zooms
+anything you had moved; the camera ratio held at 1.08 at 0.5,0.5 through all five states above,
+because the disc simply re-fills the box it has now. Auto-fitting on a fold would have fought a
+rule this suite has asserted since 1.9.0 — that a camera you moved by hand is left alone by a
+visibility toggle.
+
+### The resting desktop layout does not move
+
+Compared against 2.1.0's page — which is the same source exactly, since nothing between that tag
+and this feature touched `src` or `plugin` — the untouched desktop layout is identical: folder
+list 288x1000, stage 1312x1000, calendar 1312x230, disc box 1312x770, drawn radii 0.89/2.19/4.06.
+The two new buttons are the only pixels that differ, and they are the point.
+
+The ≤720 px layout is unchanged too: disc box 390x564 on an iPhone 14 viewport, median dot
+1.38 px, the sheet's 44 px targets, the calendar still on by default, the round trip still
+closing.
+
+### Two defects the phone's code was carrying into the desktop
+
+Clicking bare disc, and opening a note, both put the sheet away — right for a panel that covers
+the disc, and both would have folded the sidebar out from under you on a PC, where it sits beside
+the disc rather than over it. Neither was reachable before this release, because the toggles were
+not drawn; both are fixed with it, and the suite asserts the round trip rather than the reasoning.
+
+### One lock for the two things two agents cannot do at once
+
+Not user-facing, and the reason five parallel worktrees stopped blaming each other's code.
+A screen recording grabs a display region, so a second take started while the first is rolling
+captures the first one's window — both files exist, both look plausible, both are ruined. A full
+invariant-suite run has the same shape through its debugging ports, and there the symptom is
+worse: two runs fight and each reads as a regression in the branch. `scripts/lock.mjs` is one
+mutex for both, living in the OS temp directory so every worktree shares it rather than guarding
+its own, with a stale entry after 20 minutes for a recording and 30 for a suite rather than a
+lock nobody can release. Screenshots deliberately need none: they are captured over the
+debugging port, so overlapping windows are harmless.
+
+### Smaller things
+
+- **The full demo walk ends on the fold.** The `collapse` act is the storyboard's last one, so
+  nothing after it needs the legend it folds away, and the hero closes on the disc with the
+  window to itself. All sixteen clips under `docs/features/` and the README's hero were
+  re-recorded for this release, because the two buttons are now part of the desktop disc and no
+  clip taken before them showed it — the hero is 159.9 s of the 126-beat walk.
+- **An act that flies the camera hands it back fitted, and the hero was broken without it.** The
+  linked-notes walk leaves the camera wherever its last hop flew, and the act that follows drags
+  a specific note into the hub. Re-recording found what that costs: two of the three pins missed,
+  because their notes were off-screen — one target at y **-1205**, another at **-1293** — so the
+  driver reported *the drop missed the hub* and skipped the card beats after it. It has been
+  broken since the walk was recorded, which is why nobody saw it: the hero last came out at
+  2.0.0, and the linked-notes walk landed in 2.1.0, so the two acts had never been filmed in
+  sequence. The walk now fits the disc before it hands over, and the whole 126 beats run with no
+  missed target.
+- **`scripts/mobile-check.mjs` reports its panel round trip at every width**, not only under
+  touch emulation — it always pressed with mouse events, so nothing in it was ever
+  touch-specific. It also re-reads the button's box between the two presses, because folding a
+  grid column slides the whole cluster left and pressing where the button used to be lands on
+  bare disc and reads as a toggle that cannot be put back.
+- **The release procedure says what a release is**, after 2.1.0 was cut twice: everything a
+  release needs is finished on its own branch and read there, the section must account for every
+  merge in the range rather than for the work in hand, and once the tag exists nothing changes —
+  a fix is the next patch version, because editing after the fact leaves the tag disagreeing with
+  the published page.
+
+---
+
 ## 2.1.0 — "Mobile" — 2026-09-07
 
 **The disc works on a phone.** It always claimed to: the plugin ships as not desktop-only and

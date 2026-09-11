@@ -12,6 +12,10 @@ left; the notes-added calendar and its date strip stay on and can be put away; a
 rises as a sheet at the foot, so the disc stays visible above whatever you tapped. A tap on the
 disc, or on the button that opened it, puts a sheet away again.
 
+Those two buttons are drawn at every width now, and above 720 px they *fold* the panels
+rather than summoning them — the folder list is a column there, not a sheet. See
+[`collapse.md`](collapse.md). github#82.
+
 A finger is not a pointer, so picking learned the difference: a tap reaches for the nearest note
 within about half a fingertip, while the mouse keeps the pixel-precise catchment it was measured
 for. `.ai-context/design/0013-touch-input.md` carries that and the rest of the reasoning.
@@ -48,13 +52,15 @@ disc needed a touch captor in the first place.
 ## Regenerating this feature's clip
 
 **Record this one narrow.** The act itself is only choreography; what makes it the phone layout
-is the window it is recorded in, so both commands carry the size:
+is the window it is recorded in, so both commands carry the size — `make-hero.ps1` defaults
+to 960 px, and on a 406 px capture that is an upscale costing 2.5x the bytes for no more
+detail (1.09 MB against 2.67 MB, measured):
 
 ```powershell
 .\scripts\record-demo.ps1 -Act mobile -Width 420 -Height 900 -Monitor right
 # wrote demo-mobile-<timestamp>.mp4
 
-.\scripts\make-hero.ps1 -In demo-mobile-<timestamp>.mp4 -Out assets\features\mobile.webp
+.\scripts\make-hero.ps1 -In demo-mobile-<timestamp>.mp4 -Out assets\features\mobile.webp -Width 406
 ```
 
 Commit `assets/features/mobile.webp` and update `Last re-recorded` below in the same commit —
@@ -71,4 +77,4 @@ selects nothing. See `.ai-context/mobile-harness.md`.
 | | |
 |---|---|
 | **Introduced in** | `2.1.0 (github#73)` |
-| **Last re-recorded** | `2026-09-07` — 17.7 s at 406x892, encoded at native width (1.08 MB) |
+| **Last re-recorded** | `2.6.0 — 2026-09-11` — 17.7 s at 406x892, encoded at native width (1.11 MB) |

@@ -227,6 +227,17 @@ async function main() {
       trace.push(`park: ${beat.why || ""}`);
       continue;
     }
+    // github#72, design/0014 -- the page writes the note itself; nothing to aim at
+    if (beat.live) {
+      const r = JSON.parse(await page.eval(`JSON.stringify(__vg.demo.live(${JSON.stringify(beat.live)}))`));
+      const what = r.applied
+        ? `+1 in ${r.folder} (${r.ring} ring), linked to ${r.linkedTo}`
+        : `REFUSED: ${r.reason}`;
+      console.log(`[${el()}] ${n} live ${beat.live} — ${beat.why || ""} → ${what}`);
+      if (!r.applied) console.warn(`${n} ! the page refused the note: ${r.reason}`);
+      trace.push(`live: ${beat.live} ${r.applied ? r.folder : "REFUSED " + r.reason}`);
+      continue;
+    }
     if (beat.touchmode) {
       touchMode = true;
       await page.send("Emulation.setTouchEmulationEnabled", { enabled: true, maxTouchPoints: 5 })
@@ -243,7 +254,7 @@ async function main() {
         continue;
       }
       if (beat.drag) {
-        let dx, dy, dstLabel = "";
+        let dx, dy, to = null, dstLabel = "";
         if (Array.isArray(beat.drag)) { [dx, dy] = beat.drag; }
         else {
           const w2 = await where(page, beat.to);
@@ -252,6 +263,7 @@ async function main() {
             trace.push(`missing: ${JSON.stringify(beat.to)}`);
             continue;
           }
+          to = w2;
           dx = w2.x - w.x; dy = w2.y - w.y; dstLabel = ` to ${w2.label}`;
         }
         console.log(`[${el()}] ${n} drag ${w.label} from ${w.x},${w.y} by ${dx},${dy}${dstLabel} — ${beat.why || ""}`);
@@ -270,7 +282,12 @@ async function main() {
             console.warn(`  ! aiming to drag ${w.expect} but hovered ${hit} — the press may miss`);
           }
         }
-        await drag(page, press.x, press.y, press.x + dx, press.y + dy);
+        let ex = press.x + dx, ey = press.y + dy;
+        if (to) {
+          const dst = (await where(page, beat.to)) || to;
+          ex = dst.x; ey = dst.y;
+        }
+        await drag(page, press.x, press.y, ex, ey);
         if (w.expect && !Array.isArray(beat.drag)) {
           const pinned = JSON.parse(await page.eval("JSON.stringify(__vg.state.pinned)"));
           if (pinned.indexOf(w.expect) < 0) {

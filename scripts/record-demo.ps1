@@ -8,6 +8,11 @@ param(
   [int]    $Port = 9222,
   [int]    $Width = 1600,
   [int]    $Height = 1000,
+  # github#124 -- the size of the CAPTURED REGION, not of the window. The window is sized to
+  # whatever produces exactly this, because the two are not the same number (see below).
+  [int]    $CaptureWidth = 0,
+  [int]    $CaptureHeight = 0,
+  [switch] $Square,
   [ValidateSet('', 'primary', 'left', 'right')]
   [string] $Monitor = '',
   [int]    $X = [int]::MinValue,
@@ -87,8 +92,35 @@ if ($Monitor) {
     Write-Warning "that screen is left of the primary, so gdigrab sees negative offsets -- check the capture"
   }
 }
+# github#87
+$screenLock = $null
+if ($Monitor) { $screenLock = "screen-$Monitor" }
+elseif ($X -eq [int]::MinValue) { $screenLock = "screen-primary" }
+if ($screenLock) {
+  $lockOwner = if ($env:VG_LOCK_OWNER) { $env:VG_LOCK_OWNER } else { "record-demo pid $PID" }
+  Write-Host "taking $screenLock (owner: $lockOwner)..." -ForegroundColor DarkGray
+  & node (Join-Path $here 'lock.mjs') acquire $screenLock --owner $lockOwner
+  if ($LASTEXITCODE -ne 0) {
+    throw "$screenLock is BUSY -- another session is using that display. Nothing was recorded."
+  }
+}
+
+try {
+
 if ($X -ne [int]::MinValue) { $posX = $X }
 if ($Y -ne [int]::MinValue) { $posY = $Y }
+
+# github#124 -- `-Square` is the house default for a gallery clip: 1000x1000 of actual pixels.
+if ($Square) {
+  if (-not $CaptureWidth)  { $CaptureWidth = 1000 }
+  if (-not $CaptureHeight) { $CaptureHeight = 1000 }
+}
+if ($CaptureWidth -or $CaptureHeight) {
+  if (-not $CaptureWidth)  { $CaptureWidth = $Width }
+  if (-not $CaptureHeight) { $CaptureHeight = $Height }
+  # first guess: ask for the window at the capture size, then correct it once it exists
+  $Width = $CaptureWidth; $Height = $CaptureHeight
+}
 $chromeArgs = @(
   "--remote-debugging-port=$Port",
   "--user-data-dir=$profileDir",
@@ -120,6 +152,11 @@ Add-Type -Namespace Win -Name U -MemberDefinition @'
   [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr h, out RECT r);
   [DllImport("dwmapi.dll")] public static extern int DwmGetWindowAttribute(
     IntPtr h, int attr, out RECT r, int size);
+  [DllImport("user32.dll")] public static extern bool SetWindowPos(
+    IntPtr h, IntPtr after, int x, int y, int cx, int cy, uint flags);
+  [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr h, int cmd);
+  [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h);
+  [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
 '@ -ErrorAction SilentlyContinue
 $DWMWA_EXTENDED_FRAME_BOUNDS = 9
 
@@ -131,6 +168,56 @@ while ((Get-Date) -lt $deadline) {
   Start-Sleep -Milliseconds 200
 }
 if ($hwnd -eq [IntPtr]::Zero) { throw "Chrome's window never appeared" }
+
+# github#122 -- RAISE IT, don't just find it. gdigrab copies a REGION OF THE DESKTOP, so whatever
+# is drawn over that rectangle is what lands in the take -- and the take still looks plausible.
+# Nothing here used to bring Chrome forward: it was positioned and measured, never raised, so an
+# editor left open on that monitor was recorded instead of the page. HWND_TOPMOST rather than
+# focus alone, because SetForegroundWindow is refused to a background process often enough to be
+# useless on its own; topmost is restored to normal in the finally below.
+$HWND_TOPMOST = [IntPtr](-1)
+$SWP_NOMOVE = 0x0002; $SWP_NOSIZE = 0x0001; $SWP_SHOWWINDOW = 0x0040
+$SW_RESTORE = 9
+[void][Win.U]::ShowWindow($hwnd, $SW_RESTORE)
+[void][Win.U]::SetWindowPos($hwnd, $HWND_TOPMOST, 0, 0, 0, 0, ($SWP_NOMOVE -bor $SWP_NOSIZE -bor $SWP_SHOWWINDOW))
+[void][Win.U]::SetForegroundWindow($hwnd)
+$script:raisedHwnd = $hwnd
+Start-Sleep -Milliseconds 400
+if ([Win.U]::GetForegroundWindow() -ne $hwnd) {
+  Write-Warning "Chrome is topmost but did not take focus; the capture region is covered by nothing, so the take is still clean."
+}
+
+# github#124 -- THE REQUESTED SIZE IS NOT THE CAPTURED SIZE. --window-size sizes the window;
+# the capture region is the window's DWM extended frame bounds clipped to the work area, which
+# is smaller by a border the compositor owns -- measured 14x7 on this machine, and not a
+# constant across DPI or Windows version. So asking for 1000x1000 gives 986x992. With a capture
+# size asked for, measure that trim on the real window and resize by it, then verify.
+if ($CaptureWidth -and $CaptureHeight) {
+  for ($attempt = 1; $attempt -le 3; $attempt++) {
+    $probe = New-Object Win.U+RECT
+    $okProbe = ([Win.U]::DwmGetWindowAttribute($hwnd, $DWMWA_EXTENDED_FRAME_BOUNDS, [ref] $probe,
+      [System.Runtime.InteropServices.Marshal]::SizeOf($probe)) -eq 0)
+    if (-not $okProbe) { if (-not [Win.U]::GetWindowRect($hwnd, [ref] $probe)) { break } }
+
+    $screenNow = [System.Windows.Forms.Screen]::FromHandle($hwnd)
+    $waNow = $screenNow.WorkingArea
+    $cw = [Math]::Min($probe.R, $waNow.X + $waNow.Width) - [Math]::Max($probe.L, $waNow.X)
+    $ch = [Math]::Min($probe.B, $waNow.Y + $waNow.Height) - [Math]::Max($probe.T, $waNow.Y)
+    $dw = $CaptureWidth - $cw; $dh = $CaptureHeight - $ch
+    if ($dw -eq 0 -and $dh -eq 0) {
+      Write-Host "capture region is exactly ${CaptureWidth}x${CaptureHeight}" -ForegroundColor DarkGray
+      break
+    }
+    $cur = New-Object Win.U+RECT
+    [void][Win.U]::GetWindowRect($hwnd, [ref] $cur)
+    $newW = ($cur.R - $cur.L) + $dw; $newH = ($cur.B - $cur.T) + $dh
+    Write-Host ("capture {0}x{1}, want {2}x{3} -- resizing the window to {4}x{5} (attempt {6})" -f `
+      $cw, $ch, $CaptureWidth, $CaptureHeight, $newW, $newH, $attempt) -ForegroundColor DarkGray
+    $SWP_NOMOVE2 = 0x0002; $SWP_NOZORDER = 0x0004
+    [void][Win.U]::SetWindowPos($hwnd, [IntPtr]::Zero, 0, 0, $newW, $newH, ($SWP_NOMOVE2 -bor $SWP_NOZORDER))
+    Start-Sleep -Milliseconds 350
+  }
+}
 
 $wr = New-Object Win.U+RECT
 if (-not [Win.U]::GetWindowRect($hwnd, [ref] $wr)) { throw "GetWindowRect failed" }
@@ -207,4 +294,18 @@ if (Test-Path $ffprobe) {
   $dur = (& $ffprobe -v error -show_entries format=duration -of csv=p=0 $Out)
   $vid = (& $ffprobe -v error -select_streams v:0 -show_entries stream=width,height,nb_frames -of csv=p=0 $Out)
   Write-Host ("  {0}s, {1}" -f [math]::Round([double]$dur, 2), $vid) -ForegroundColor DarkGray
+}
+}
+finally {
+  # github#122 -- put it back, so a failed take does not leave Chrome pinned over everything
+  if ($script:raisedHwnd) {
+    $HWND_NOTOPMOST = [IntPtr](-2)
+    try {
+      [void][Win.U]::SetWindowPos($script:raisedHwnd, $HWND_NOTOPMOST, 0, 0, 0, 0, (0x0002 -bor 0x0001))
+    } catch { }
+  }
+  # github#87
+  if ($screenLock) {
+    & node (Join-Path $here 'lock.mjs') release $screenLock --owner $lockOwner
+  }
 }

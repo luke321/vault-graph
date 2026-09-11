@@ -52,5 +52,5 @@
     "strictFunctionTypes": true,
     "types": []
   },
-  "include": ["plugin/**/*.js", "plugin/**/*.d.ts", "src/page.js", "src/engine/**/*.ts"]
+  "include": ["plugin/**/*.js", "plugin/**/*.mjs", "plugin/**/*.d.ts", "src/page.js", "src/engine/**/*.ts"]
 }

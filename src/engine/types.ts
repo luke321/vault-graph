@@ -42,6 +42,8 @@ export interface NodeAttrs {
   touched: string;
   words: number;
   ghost: boolean;
+  /** github#86, design/0015 -- set only on a satellite: the note it copies */
+  dupOf?: string;
 }
 
 export interface EdgeAttrs {
@@ -55,7 +57,10 @@ export interface GraphStore {
   readonly order: number;
   readonly size: number;
   addNode(id: string, attrs: NodeAttrs): string;
+  dropNode(id: string): void;
   addUndirectedEdge(source: string, target: string, attrs: EdgeAttrs): string;
+  // github#72
+  clear(): void;
   hasNode(id: string): boolean;
   hasEdge(source: string, target: string): boolean;
   dropEdge(source: string, target: string): void;

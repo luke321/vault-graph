@@ -8,9 +8,33 @@ import { GraphStore, Renderer } from "../src/engine/index";
 import { localDay, resolveCreated, dateTally } from "../src/dates.mjs";
 import PAGE_HTML from "raw:../src/page.html";
 import LOGO_MASK_B64 from "b64:../assets/logo-mask.png";
+// github#83, design/0016
+import WHATS_NEW from "raw:./whats-new.md";
+import RELEASES from "vg:releases";
+import { CHAIN_MAX, decideNote, minorOf, parseNote, releaseChain } from "./update-note.mjs";
 
 const VIEW_TYPE = "vault-graph-view";
 const ICON_ID = "vault-graph-disc";
+// github#72, design/0014
+const LIVE_DEBOUNCE_MS = 1000;
+// github#72, design/0014
+const LIVE_WAKE_MS = 500;
+
+// github#60
+/** @returns {Record<string, string>} */
+function pathMap() {
+  /** @type {unknown} */
+  const o = Object.create(null);
+  return /** @type {Record<string, string>} */ (o);
+}
+
+// github#97
+/** @template T @returns {Record<string, T>} */
+function bareMap() {
+  /** @type {unknown} */
+  const o = Object.create(null);
+  return /** @type {Record<string, T>} */ (o);
+}
 
 /* ===================================================================== types ==
  * JSDoc, not TypeScript: the file stays plain JavaScript (see the header) and
@@ -24,6 +48,7 @@ const ICON_ID = "vault-graph-disc";
 
 /** @typedef {import("obsidian").App} App */
 /** @typedef {import("obsidian").TFile} TFile */
+/** @typedef {import("obsidian").EventRef} EventRef */
 
 /**
  * What data.json holds. Mirrors DEFAULTS below, which is the one place a default is
@@ -35,13 +60,22 @@ const ICON_ID = "vault-graph-disc";
  * @property {boolean} words
  * @property {Record<string, string>} folderColors      folder name -> slot key ("g7")
  * @property {Record<string, string>} subfolderColors   "folder/sub" -> slot key
+ * @property {Record<string, string>} tagColors         github#86 -- tag -> slot key
+ * @property {Record<string, string>} subtagColors      github#86 -- "tag/sub" -> slot key
+ * @property {Record<string, boolean>} tagShown         github#86 -- tag -> shown by default
  * @property {Record<string, boolean>} folderShown      folder name -> shown by default
  * @property {string[]} pinned                          note ids in the hub, in slot order
  * @property {boolean} panEnabled
  * @property {boolean} compactAxis
  * @property {boolean} unlinkedByFolder
  * @property {boolean} unlinkedTintByFolder
+ * @property {boolean} countBars                        github#78, design/0006
  * @property {boolean} fitCap                           github#41, design/0011
+ * @property {"folder" | "tag"} dim                     github#86 -- grouping dimension
+ * @property {boolean} liveRefresh                      github#72
+ * @property {boolean} [sheetOpen]                      github#82 -- absent until folded once
+ * @property {boolean} [bandOpen]                       github#82
+ * @property {string} [lastSeenVersion]                 github#83 -- absent until the first load records it
  */
 
 /**
@@ -70,6 +104,7 @@ const ICON_ID = "vault-graph-disc";
  * `types` section): what mountVaultGraph returns, and the __vg api it builds. Every member
  * `VgApi` names ships in the plugin; the debug surface the standalone adds is not in it.
  * @typedef {import("../src/page.js").MountHandle} MountHandle
+ * @typedef {import("../src/page.js").VgApi} VgApi
  * @typedef {import("../src/page.js").MountDeps} MountDeps
  */
 
@@ -159,6 +194,12 @@ const under = (rel, dir) => !!dir && (rel === dir || rel.startsWith(dir + "/"));
 // github#62
 /** @param {() => void} fn @returns {unknown} */
 const attempt = (fn) => { try { fn(); return null; } catch (e) { return e; } };
+
+// github#83, design/0016 -- built from the version; the note file carries text only
+const RELEASE_URL = "https://github.com/luke321/vault-graph/releases/tag/";
+const RELEASES_URL = "https://github.com/luke321/vault-graph/releases";
+const NEW_CLASS = "vg-new";
+const GALLERY_URL = "https://luke321.github.io/vault-graph/features.html";
 
 // github#32
 /** @param {string} a @param {string} b */
@@ -280,8 +321,9 @@ async function readFolders(app) {
 /**
  * @param {App} app
  * @param {Settings} opts   only the four build settings are read
+ * @param {string} [version]   github#108 -- this.plugin.manifest.version, shown in the stats line
  */
-async function buildData(app, opts) {
+async function buildData(app, opts, version) {
   const t0 = performance.now();
   const folders = await readFolders(app);
   const templateDirs = folders.templateDirs, dailyDir = folders.dailyDir;
@@ -396,13 +438,15 @@ async function buildData(app, opts) {
   // github#58
   /**
    * @param {(index: number, words: number) => void} apply
+   * @param {Set<string>} [only]   github#72: read just these paths, for a live rebuild
    * @returns {Promise<number>}
    */
-  const readWords = async (apply) => {
+  const readWords = async (apply, only) => {
     const t = performance.now();
     if (!wordFiles) return 0;
     await Promise.all(wordFiles.map(async (file, i) => {
       if (!file) return;
+      if (only && !only.has(file.path)) return;
       let words = 0;
       try {
         const raw = await app.vault.cachedRead(file);
@@ -435,6 +479,7 @@ async function buildData(app, opts) {
 
   return {
     vault: app.vault.getName(),
+    version: version,
     generated: now.getFullYear() + "-" + p2(now.getMonth() + 1) + "-" + p2(now.getDate()) +
                " " + p2(now.getHours()) + ":" + p2(now.getMinutes()),
     nodes: out,
@@ -496,6 +541,19 @@ class VaultGraphView extends ItemView {
     /** @type {BuildResult | null} */
     this.lastData = null;
     this.mountMs = 0;
+    // github#72
+    /** @type {number | null} */
+    this.liveTimer = null;
+    this.pendingRenames = pathMap();
+    /** @type {Set<string>} */
+    this.dirtyPaths = new Set();
+    this.liveBuilding = false;
+    this.liveAgain = false;
+    this.liveDeferred = false;
+    /** @type {number | null} */
+    this.liveWake = null;
+    /** @type {import("../src/page.js").LiveResult | null} */
+    this.lastLive = null;
   }
 
   getViewType() { return VIEW_TYPE; }
@@ -512,11 +570,148 @@ class VaultGraphView extends ItemView {
 
   // github#62
   teardown() {
+    // github#72
+    this.cancelLive();
     if (this.handle) {
       attempt(() => this.handle.destroy());
     }
     this.handle = null;
     this.contentEl.empty();
+  }
+
+  /* ------------------------------------------------------- live rebuild (github#72) */
+
+  liveOn() { return this.plugin.settings.liveRefresh !== false; }
+
+  cancelLive() {
+    if (this.liveTimer !== null) { window.clearTimeout(this.liveTimer); this.liveTimer = null; }
+    this.stopLiveWake();
+    this.dirtyPaths.clear();
+    this.pendingRenames = pathMap();
+    this.liveAgain = false;
+    this.liveDeferred = false;
+  }
+
+  // github#72, design/0014
+  startLiveWake() {
+    if (this.liveWake !== null) return;
+    this.liveWake = window.setInterval(() => {
+      if (!this.liveVisible()) return;
+      this.stopLiveWake();
+      this.scheduleLive();
+    }, LIVE_WAKE_MS);
+  }
+
+  stopLiveWake() {
+    if (this.liveWake !== null) { window.clearInterval(this.liveWake); this.liveWake = null; }
+  }
+
+  // github#72, design/0014
+  liveVisible() {
+    const el = this.containerEl;
+    return !!(el && el.offsetParent !== null);
+  }
+
+  // github#72, design/0014
+  liveSettingChanged() {
+    if (!this.liveOn()) this.cancelLive();
+  }
+
+  // github#72, design/0014
+  subscribeLive() {
+    const cache = this.app.metadataCache, vault = this.app.vault;
+    this.registerEvent(cache.on("resolved", () => this.scheduleLive()));
+    this.registerEvent(cache.on("changed", (file) => this.scheduleLive(file && file.path)));
+    this.registerEvent(vault.on("create", (file) => this.scheduleLive(file && file.path)));
+    this.registerEvent(vault.on("delete", (file) => this.scheduleLive(file && file.path)));
+    this.registerEvent(vault.on("rename", (file, oldPath) => {
+      const to = file && file.path;
+      if (to && oldPath) {
+        // design/0014
+        let from = oldPath;
+        for (const k of Object.keys(this.pendingRenames)) {
+          if (this.pendingRenames[k] === oldPath) { from = k; break; }
+        }
+        this.pendingRenames[from] = to;
+        this.dirtyPaths.add(oldPath);
+      }
+      this.scheduleLive(to);
+    }));
+  }
+
+  /** @param {string} [path] */
+  scheduleLive(path) {
+    if (!this.liveOn() || !this.handle) return;
+    if (path) this.dirtyPaths.add(path);
+    if (this.liveTimer !== null) window.clearTimeout(this.liveTimer);
+    this.liveTimer = window.setTimeout(() => {
+      this.liveTimer = null;
+      void this.liveRebuild();
+    }, LIVE_DEBOUNCE_MS);
+  }
+
+  // github#72, design/0014 -- whether the disc MOVES is applyData's call, not this one's
+  async liveRebuild() {
+    const handle = this.handle;
+    const api = handle && handle.api;
+    if (!api || typeof api.applyData !== "function") return;
+    // github#72, design/0014
+    if (!this.liveVisible()) { this.liveDeferred = true; this.startLiveWake(); return; }
+    this.liveDeferred = false;
+    this.stopLiveWake();
+    if (this.liveBuilding) { this.liveAgain = true; return; }
+    this.liveBuilding = true;
+    const dirty = this.dirtyPaths;
+    this.dirtyPaths = new Set();
+    const renames = this.pendingRenames;
+    this.pendingRenames = pathMap();
+    try {
+      const next = await buildData(this.app, this.plugin.settings, this.plugin.manifest.version);
+      if (this.handle !== handle || handle.api !== api) return;   // github#62
+
+      // github#58, design/0014
+      /** @type {Map<string, number>} */
+      const had = new Map();
+      for (const n of (this.lastData ? this.lastData.nodes : [])) had.set(n.id, n.words || 0);
+      /** @type {Map<string, string>} */
+      const cameFrom = new Map();
+      for (const from of Object.keys(renames)) cameFrom.set(renames[from], from);
+      /** @param {string} path */
+      const wordsBefore = (path) => {
+        const was = cameFrom.get(path);
+        return had.has(path) ? had.get(path) : (was !== undefined ? had.get(was) : undefined);
+      };
+      for (const n of next.nodes) {
+        const before = wordsBefore(n.id);
+        if (!dirty.has(n.id) && before !== undefined) n.words = before;
+      }
+
+      const r = api.applyData(next, { renames: renames });
+      this.lastLive = r;
+      if (r && r.churn !== undefined) {
+        // design/0014 -- a sync, an import or a folder move. Do what Refresh does.
+        this.lastData = null;
+        await this.render();
+        return;
+      }
+      this.lastData = next;
+      if (!this.plugin.settings.words) return;
+      /** @type {Set<string>} */
+      const want = new Set(dirty);
+      for (const n of next.nodes) if (wordsBefore(n.id) === undefined) want.add(n.id);
+      if (!want.size) return;
+      void next.readWords((i, words) => {
+        const node = next.nodes[i];
+        if (!node) return;
+        node.words = words;
+        if (this.handle === handle && handle.api === api) api.setWords(node.id, words);
+      }, want).catch(() => {});
+    } catch (e) {
+      new Notice("Vault Graph: live refresh failed -- " + (e instanceof Error ? e.message : String(e)));
+    } finally {
+      this.liveBuilding = false;
+      if (this.liveAgain) { this.liveAgain = false; this.scheduleLive(); }
+    }
   }
 
   syncTheme() {
@@ -536,12 +731,69 @@ class VaultGraphView extends ItemView {
     }
   }
 
+  /* ------------------------------------------------------ update note (github#83) */
+
+  // github#83, design/0016 -- above the page root, so the page's own resize path re-fits
+  mountNote() {
+    const note = this.plugin.pendingNote;
+    if (!note) return;
+    const strip = this.contentEl.createDiv({ cls: "vg-whatsnew", attr: { role: "status" } });
+    const head = strip.createDiv({ cls: "vg-whatsnew-head" });
+    head.createEl("strong", { text: "What's new in Vault Graph " + minorOf(note.version) });
+    const links = { target: "_blank", rel: "noopener" };
+    // github#83 -- every release since the one last seen, oldest first
+    const chain = head.createSpan({ cls: "vg-whatsnew-chain" });
+    const all = this.plugin.pendingChain;
+    const shown = all.length > CHAIN_MAX ? all.slice(all.length - CHAIN_MAX) : all;
+    if (shown.length < all.length) {
+      chain.createEl("a", { text: "\u2026", href: RELEASES_URL,
+                            attr: Object.assign({ title: (all.length - shown.length) + " earlier releases" }, links) });
+      chain.appendText(" \u2013 ");
+    }
+    shown.forEach((r, i) => {
+      if (i) chain.appendText(" \u2013 ");
+      chain.createEl("a", { text: r.version, href: RELEASE_URL + r.version,
+                            attr: r.name ? Object.assign({ title: r.name }, links) : links });
+    });
+    head.createEl("a", { text: "Feature gallery", href: GALLERY_URL, attr: links });
+    const list = strip.createEl("ul");
+    for (const line of note.lines) list.createEl("li", { text: line });
+    const ok = strip.createEl("button", { text: "Got it", cls: "vg-whatsnew-ok", attr: { type: "button" } });
+    this.registerDomEvent(ok, "click", () => { void this.dismissNote(strip); });
+  }
+
+  // github#83, design/0016 -- the controls the note points at, pulsing while it is up
+  markNew() {
+    const note = this.plugin.pendingNote;
+    if (!note || !this.page) return;
+    for (const id of note.points) {
+      const el = this.page.querySelector("#" + id);
+      if (el instanceof HTMLElement) el.addClass(NEW_CLASS);
+    }
+  }
+
+  // github#83 -- dismissing is the write that marks the version seen
+  /** @param {HTMLElement} strip */
+  async dismissNote(strip) {
+    strip.remove();
+    this.plugin.pendingNote = null;
+    // github#83 -- a second leaf has its own copy, and its own pulse
+    for (const leaf of this.app.workspace.getLeavesOfType(VIEW_TYPE)) {
+      if (leaf.view instanceof VaultGraphView) {
+        leaf.view.contentEl.querySelectorAll(".vg-whatsnew").forEach((el) => el.remove());
+        leaf.view.contentEl.querySelectorAll("." + NEW_CLASS).forEach((el) => el.removeClass(NEW_CLASS));
+      }
+    }
+    await this.plugin.recordVersion();
+  }
+
   async render() {
     this.teardown();
     const root = this.contentEl;
     root.addClass("vault-graph-view");
+    this.mountNote();
 
-    const data = await buildData(this.app, this.plugin.settings);
+    const data = await buildData(this.app, this.plugin.settings, this.plugin.manifest.version);
     this.lastData = data;
 
     const parsed = new DOMParser().parseFromString(PAGE_HTML, "text/html");
@@ -551,6 +803,7 @@ class VaultGraphView extends ItemView {
 
     this.page = page;
     this.syncTheme();
+    this.markNew();
 
     this.registerEvent(this.app.workspace.on("css-change", () => this.syncTheme()));
 
@@ -561,6 +814,25 @@ class VaultGraphView extends ItemView {
       logoMask: "data:image/png;base64," + LOGO_MASK_B64,
       folderColors: this.plugin.settings.folderColors,
       subfolderColors: this.plugin.settings.subfolderColors,
+      // github#86 -- every grouping keeps its own pins
+      tagColors: this.plugin.settings.tagColors,
+      subtagColors: this.plugin.settings.subtagColors,
+      tagShown: this.plugin.settings.tagShown,
+      /** @param {Record<string, string>} map */
+      onTagColors: async (map) => {
+        this.plugin.settings.tagColors = map;
+        await this.plugin.saveSettings();
+      },
+      /** @param {Record<string, string>} map */
+      onSubtagColors: async (map) => {
+        this.plugin.settings.subtagColors = map;
+        await this.plugin.saveSettings();
+      },
+      /** @param {Record<string, boolean>} map */
+      onTagShown: async (map) => {
+        this.plugin.settings.tagShown = map;
+        await this.plugin.saveSettings();
+      },
       /** @param {Record<string, string>} map */
       onFolderColors: async (map) => {
         this.plugin.settings.folderColors = map;
@@ -599,11 +871,38 @@ class VaultGraphView extends ItemView {
         this.plugin.settings.unlinkedByFolder = !!v;
         await this.plugin.saveSettings();
       },
+      // github#78, design/0006
+      countBars: this.plugin.settings.countBars,
+      /** @param {boolean} v */
+      onCountBars: async (v) => {
+        this.plugin.settings.countBars = !!v;
+        await this.plugin.saveSettings();
+      },
       // github#3
       unlinkedTintByFolder: this.plugin.settings.unlinkedTintByFolder,
       /** @param {boolean} v */
       onUnlinkedTintByFolder: async (v) => {
         this.plugin.settings.unlinkedTintByFolder = !!v;
+        await this.plugin.saveSettings();
+      },
+      // github#86, design/0015, decisions/0009 -- the host only remembers it
+      dim: this.plugin.settings.dim,
+      /** @param {"folder" | "tag"} v */
+      onDim: async (v) => {
+        this.plugin.settings.dim = v === "tag" ? "tag" : "folder";
+        await this.plugin.saveSettings();
+      },
+      // github#82, decisions/0009 -- no tab row; absent = width decides
+      sheetOpen: this.plugin.settings.sheetOpen,
+      /** @param {boolean} v */
+      onSheetOpen: async (v) => {
+        this.plugin.settings.sheetOpen = !!v;
+        await this.plugin.saveSettings();
+      },
+      bandOpen: this.plugin.settings.bandOpen,
+      /** @param {boolean} v */
+      onBandOpen: async (v) => {
+        this.plugin.settings.bandOpen = !!v;
         await this.plugin.saveSettings();
       },
       // github#41, design/0011
@@ -628,11 +927,17 @@ class VaultGraphView extends ItemView {
     this.mountMs = Math.round(performance.now() - t0);
 
     const handle = this.handle;
+    // github#58; github#72, design/0014 -- by PATH, never by index
     void data.readWords((i, words) => {
-      data.nodes[i].words = words;
+      const node = data.nodes[i];
+      if (!node) return;
+      node.words = words;
       const api = handle.api;
-      if (api && api.graph && this.handle === handle) api.graph.setNodeAttribute(String(i), "words", words);
+      if (api && api.setWords && this.handle === handle) api.setWords(node.id, words);
     }).then((ms) => { data._spike.msWordsBackground = ms; }, () => {});
+
+    // github#72
+    this.subscribeLive();
 
     this.registerDomEvent(page, "click", (ev) => {
       const a = ev.target instanceof Element ? ev.target.closest('a[href^="obsidian://"]') : null;
@@ -657,6 +962,9 @@ const DEFAULTS = {
   words: true,
   folderColors: {},
   subfolderColors: {},
+  tagColors: {},
+  subtagColors: {},
+  tagShown: {},
   folderShown: {},
   pinned: [],
   panEnabled: true,
@@ -666,8 +974,14 @@ const DEFAULTS = {
   unlinkedByFolder: true,
   // github#3
   unlinkedTintByFolder: false,
+  // github#78, design/0006
+  countBars: true,
   // github#41, design/0011
   fitCap: true,
+  // github#86 -- folder is the default
+  dim: "folder",
+  // github#72
+  liveRefresh: true,
 };
 
 /** @type {{ key: "ghosts" | "templates" | "flatMonths" | "words", name: string, desc: string }[]} */
@@ -684,11 +998,12 @@ const BUILD_SETTINGS = [
 
 /**
  * @typedef {Object} ViewSetting
- * @property {"panEnabled" | "compactAxis" | "unlinkedByFolder" | "unlinkedTintByFolder" | "fitCap"} key
+ * @property {"panEnabled" | "compactAxis" | "unlinkedByFolder" | "unlinkedTintByFolder" | "countBars" | "fitCap" | "liveRefresh"} key
  * @property {string} name
  * @property {string} desc
  * @property {boolean} defaultOn
- * @property {"setPanEnabled" | "setCompactAxis" | "setUnlinkedByFolder" | "setUnlinkedTintByFolder" | "setFitCap"} api
+ * @property {"setPanEnabled" | "setCompactAxis" | "setUnlinkedByFolder" | "setUnlinkedTintByFolder" | "setCountBars" | "setFitCap" | ""} api
+ * @property {boolean} [host]   the HOST owns this one, not the page, so there is no api to call
  */
 /** @type {ViewSetting[]} */
 const VIEW_SETTINGS = [
@@ -700,12 +1015,18 @@ const VIEW_SETTINGS = [
     desc: "A note with no links takes its own folder's wedge and colour, instead of sitting apart in a separate unlinked group. The (unlinked) row's right-click menu flips this too, and lands back here." },
   { key: "unlinkedTintByFolder", name: "Colour unlinked notes by folder", defaultOn: false, api: "setUnlinkedTintByFolder",
     desc: "While unlinked notes are kept as their own group (the toggle just above is off), give each one its own folder's colour instead of the flat unlinked swatch. The (unlinked) row's right-click menu carries this too." },
+  // github#78, design/0006
+  { key: "countBars", name: "Count bars in the legend", defaultOn: true, api: "setCountBars",
+    desc: "Draw a short rule along the bottom of each folder row in the legend, in that folder's own colour, scaled so the largest folder currently shown fills its row and the rest are read against it. The count alone makes a 406-note folder and a 1-note folder look identical. Hovering a count says which folder the bar is measured against." },
   // github#41, design/0011
   { key: "fitCap", name: "Size dots from the frame", defaultOn: true, api: "setFitCap",
     desc: "While the disc animates, cap every dot at just under half its distance to the nearest visible note, measured on the frame being drawn, so dots stay apart while rows slide. The disc at rest is unchanged. Experimental: dots breathe while a cascade walks." },
+  // github#72
+  { key: "liveRefresh", name: "Follow the vault", defaultOn: true, api: "", host: true,
+    desc: "Take a note you have just written, moved or linked into the disc where it stands, instead of waiting for Refresh to rebuild the whole thing. Only a change that decides where a note SITS moves anything -- writing prose does not, so typing is still. Off, the disc is a snapshot until you press Refresh." },
 ];
 
-const COLOURS_DESC = "Twelve slots, handed out in folder order and round again. Setting one folder never moves another, and two folders may share a colour.";
+const COLOURS_DESC = "Twelve slots, handed out in group order and round again. Folders and tags keep their own colours; the tabs choose which. Setting one group never moves another, and two may share a colour. Each swatch shows the slot at the sizes the disc really draws, over both grounds. Its contrast figure is for a solid area of the colour; a dot a pixel across is mostly antialiasing and reads lower than the number.";
 
 const SLOT_NAMES = ["Blue", "Orange", "Aqua", "Yellow", "Green", "Magenta",
                     "Violet", "Red", "Cyan", "Orchid", "Grey", "Slate"];
@@ -772,10 +1093,14 @@ class VaultGraphSettingTab extends PluginSettingTab {
   constructor(app, plugin) {
     super(app, plugin);
     this.plugin = plugin;
+    // github#97
     /** @type {Record<string, boolean>} */
-    this.subOpen = {};
+    this.subOpen = bareMap();
     /** @type {HTMLElement | null} */
     this.scope = null;
+    // github#77
+    /** @type {EventRef | null} */
+    this.cssRef = null;
   }
 
   /* ----------------------------------------------------------- two render paths --
@@ -801,9 +1126,9 @@ class VaultGraphSettingTab extends PluginSettingTab {
       ...BUILD_SETTINGS.map((s) => toggle(s, false)),
       { type: /** @type {"group"} */ ("group"), heading: "View",
         items: VIEW_SETTINGS.map((s) => toggle(s, s.defaultOn)) },
-      { type: /** @type {"group"} */ ("group"), heading: "Folder colours",
+      { type: /** @type {"group"} */ ("group"), heading: "Group colours",
         items: [{
-          name: "Folder and subfolder colours", desc: COLOURS_DESC,
+          name: "Group and sub-wedge colours", desc: COLOURS_DESC,
           aliases: ["colour", "color", "swatch", "palette", "subfolder", "hidden by default", "archive"],
           /** @param {Setting} setting */
           render: (setting) => {
@@ -837,8 +1162,10 @@ class VaultGraphSettingTab extends PluginSettingTab {
   /** @param {ViewSetting} def @param {boolean} v */
   async applyView(def, v) {
     const view = await this.plugin.currentView();
+    // github#72, design/0014 -- a host-owned setting has no page api to call
+    if (def.host) { if (view) view.liveSettingChanged(); return; }
     const api = view && view.handle && view.handle.api;
-    if (api && api[def.api]) api[def.api](v);
+    if (api && def.api && api[def.api]) api[def.api](v);
   }
 
   display() {
@@ -872,9 +1199,13 @@ class VaultGraphSettingTab extends PluginSettingTab {
           }));
     }
 
-    new Setting(containerEl).setName("Folder colours").setHeading();
+    new Setting(containerEl).setName("Group colours").setHeading();
     this.renderColourSection(new Setting(containerEl).setDesc(COLOURS_DESC));
   }
+
+  // github#86 -- the grouping the colour section shows
+  /** @type {"folder" | "tag"} */
+  colourDim = "folder";
 
   /**
    * The folder-colours section: the Reset-all button on `row`, then the swatch rows in a
@@ -890,10 +1221,12 @@ class VaultGraphSettingTab extends PluginSettingTab {
   renderColourSection(row) {
     row.addButton((b) => b
       .setButtonText("Reset all")
-      .setTooltip("Also drops every subfolder override")
+      .setTooltip("Also drops every sub-wedge override, for the grouping shown")
       .onClick(async () => {
-        this.plugin.settings.folderColors = {};
-        this.plugin.settings.subfolderColors = {};
+        // github#86 -- the tab you are on, not the other grouping's pins
+        const tag = this.colourDim === "tag";
+        this.plugin.settings[tag ? "tagColors" : "folderColors"] = {};
+        this.plugin.settings[tag ? "subtagColors" : "subfolderColors"] = {};
         await this.plugin.saveSettings();
         await this.plugin.applyFolderColors();
         await this.plugin.applySubfolderColors();
@@ -903,20 +1236,40 @@ class VaultGraphSettingTab extends PluginSettingTab {
     row.settingEl.addClass("vg-colour-row");
     const scope = row.settingEl.createDiv({ cls: ["vault-graph", "vg-tokens"] });
 
-    scope.setAttribute("data-theme",
-      activeDocument.body.classList.contains("theme-light") ? "light" : "dark");
-
     this.scope = scope;
+    this.syncScopeTheme(false);
+    // github#77
+    if (!this.cssRef) {
+      this.cssRef = this.app.workspace.on("css-change", () => this.syncScopeTheme(true));
+      this.plugin.registerEvent(this.cssRef);
+    }
     this.redrawColours();
+  }
+
+  // github#77
+  syncScopeTheme(defer) {
+    if (defer) {
+      window.requestAnimationFrame(() => this.syncScopeTheme(false));
+      return;
+    }
+    if (!this.scope) return;
+    this.scope.setAttribute("data-theme",
+      activeDocument.body.classList.contains("theme-light") ? "light" : "dark");
   }
 
   redrawColours() {
     if (!this.scope) return;
-    let auto = 0;
-    this.renderColours(topFolders(this.app).map((f) => {
-      const s = isArchiveGroup(f.name) ? ARCHIVE_SLOT : "g" + ((auto++ % SLOT_NAMES.length) + 1);
-      return { name: f.name, n: f.n, slot: s, autoSlot: s };
-    }));
+    // github#86 -- the vault's folders are the first guess, folder tab only;
+    // github#86 -- the open view answers for either grouping a moment later
+    if (this.colourDim === "folder") {
+      let auto = 0;
+      this.renderColours(topFolders(this.app).map((f) => {
+        const s = isArchiveGroup(f.name) ? ARCHIVE_SLOT : "g" + ((auto++ % SLOT_NAMES.length) + 1);
+        return { name: f.name, n: f.n, slot: s, autoSlot: s };
+      }));
+    } else {
+      this.renderColours([]);
+    }
 
     this.refreshFromView();
   }
@@ -926,29 +1279,63 @@ class VaultGraphSettingTab extends PluginSettingTab {
     const view = await this.plugin.currentView();
     const api = view && view.handle && view.handle.api;
     if (!api || !api.groupOrder || !api.palette || !scope || !scope.isConnected) return;
-
-    const groups = api.groupOrder().map((name) => ({
-      name,
-      n: api.groupCount(name),
-      slot: api.slotOf ? api.slotOf(name) : "",
-      autoSlot: api.autoSlotOf ? api.autoSlotOf(name) : "",
-    }));
-    if (groups.length) this.renderColours(groups);
+    // github#86 -- the page answers for the tab's grouping, on screen or not
+    const groups = api.groupsOf
+      ? api.groupsOf(this.colourDim).map((g) => ({ name: g.name, n: g.n, slot: g.slot, autoSlot: g.autoSlot }))
+      : api.groupOrder().map((name) => ({
+        name,
+        n: api.groupCount(name),
+        slot: api.slotOf ? api.slotOf(name) : "",
+        autoSlot: api.autoSlotOf ? api.autoSlotOf(name) : "",
+      }));
+    if (groups.length) this.renderColours(groups, api);
   }
 
-  /** @param {GroupRow[]} groups */
-  renderColours(groups) {
+  // github#77
+  /**
+   * @param {VgApi | null} api @param {HTMLElement} btn
+   * @param {string} key @param {string} name @param {string} tail @param {string} [group]
+   */
+  fillSwatch(api, btn, key, name, tail, group) {
+    if (!api || !api.swatchPreview) return;
+    const doc = new DOMParser().parseFromString(
+      "<body>" + api.swatchPreview(key, group) + "</body>", "text/html");
+    btn.replaceChildren.apply(btn, Array.prototype.slice.call(doc.body.childNodes));
+    if (api.slotTitle) btn.setAttribute("title", api.slotTitle(key, name) + tail);
+  }
+
+  // github#77
+  /** @param {GroupRow[]} groups @param {VgApi | null} [api] */
+  renderColours(groups, api) {
     const scope = this.scope;
     scope.empty();
+    // github#86 -- one tab per grouping, above the rows
+    const tabs = scope.createDiv({ cls: ["dimseg", "setseg"] });
+    tabs.setAttribute("role", "group");
+    tabs.setAttribute("aria-label", "Set colours for");
+    for (const [dim, label] of [["folder", "Folders"], ["tag", "Tags"]]) {
+      const b = tabs.createEl("button", { text: label });
+      b.type = "button";
+      b.setAttribute("aria-pressed", String(dim === this.colourDim));
+      b.onclick = () => {
+        if (this.colourDim === dim) return;
+        this.colourDim = /** @type {"folder" | "tag"} */ (dim);
+        this.redrawColours();
+      };
+    }
     if (!groups.length) {
-      scope.createEl("p", { text: "No folders to colour yet." });
+      scope.createEl("p", { text: this.colourDim === "tag"
+        ? "Open the graph to colour this vault's tags."
+        : "No folders to colour yet." });
       return;
     }
 
     const subsByFolder = allSubfolders(this.app, this.plugin.settings.flatMonths);
 
     for (const group of groups) {
-      const pinned = this.plugin.settings.folderColors[group.name] || "";
+      // github#97
+      const colors = this.plugin.settings.folderColors;
+      const pinned = (Object.prototype.hasOwnProperty.call(colors, group.name) && colors[group.name]) || "";
       const current = pinned || group.slot;
       const shown = this.shownByDefault(group.name);
       const subs = subsByFolder.get(group.name) || [];
@@ -966,7 +1353,7 @@ class VaultGraphSettingTab extends PluginSettingTab {
           .setTooltip(open ? "Hide subfolder colours" : "Subfolder colours")
           .onClick(() => {
             this.subOpen[group.name] = !open;
-            this.renderColours(groups);
+            this.renderColours(groups, api);
           }));
       }
       row.addExtraButton((b) => b
@@ -974,18 +1361,22 @@ class VaultGraphSettingTab extends PluginSettingTab {
         .setTooltip(shown ? "Shown by default" : "Hidden by default")
         .onClick(() => this.pickVisible(group.name)));
       row.controlEl.addClass("sws");
+      // github#77
+      const grid = row.controlEl.createDiv({ cls: "sw-grid" });
 
       SLOT_NAMES.forEach((name, i) => {
         const key = "g" + (i + 1);
         const on = current === key;
         const isAuto = group.autoSlot === key;
+        const tail = on ? (pinned ? " (chosen)" : " (automatic)")
+                        : (isAuto ? " (automatic default)" : "");
         const attr = {
           role: "radio", "aria-checked": String(on), "aria-label": name,
-          title: name + (on ? (pinned ? " (chosen)" : " (automatic)") :
-                         (isAuto ? " (automatic default)" : "")),
+          title: name + tail,
         };
         if (isAuto) attr["data-auto"] = "1";
-        const b = row.controlEl.createEl("button", { cls: ["swatch", "vg-" + key], attr });
+        const b = grid.createEl("button", { cls: ["swatch", "vg-" + key], attr });
+        this.fillSwatch(api, b, key, name, tail, group.name);
         b.addEventListener("click", () => this.pick(group.name, key));
       });
 
@@ -996,7 +1387,7 @@ class VaultGraphSettingTab extends PluginSettingTab {
       });
       auto.addEventListener("click", () => this.pick(group.name, null));
 
-      if (open) this.renderSubRows(scope, group.name, subs);
+      if (open) this.renderSubRows(scope, group.name, subs, api);
     }
   }
 
@@ -1004,8 +1395,9 @@ class VaultGraphSettingTab extends PluginSettingTab {
    * @param {HTMLElement} scope
    * @param {string} folder
    * @param {SubRow[]} subs
+   * @param {VgApi | null} [api]
    */
-  renderSubRows(scope, folder, subs) {
+  renderSubRows(scope, folder, subs, api) {
     for (const s of subs) {
       const pk = folder + "/" + s.name;
       const pinned = this.plugin.settings.subfolderColors[pk] || "";
@@ -1014,15 +1406,18 @@ class VaultGraphSettingTab extends PluginSettingTab {
         .setDesc(s.n === 1 ? "1 note" : s.n + " notes");
       row.settingEl.addClass("vg-subrow");
       row.controlEl.addClass("sws");
+      // github#77
+      const grid = row.controlEl.createDiv({ cls: "sw-grid" });
 
       SLOT_NAMES.forEach((name, i) => {
         const key = "g" + (i + 1);
         const on = pinned === key;
-        const b = row.controlEl.createEl("button", {
+        const b = grid.createEl("button", {
           cls: ["swatch", "vg-" + key],
           attr: { role: "radio", "aria-checked": String(on), "aria-label": name,
                   title: name + (on ? " (chosen)" : "") },
         });
+        this.fillSwatch(api, b, key, name, on ? " (chosen)" : "");
         b.addEventListener("click", () => this.pickSub(folder, s.name, key));
       });
 
@@ -1043,7 +1438,8 @@ class VaultGraphSettingTab extends PluginSettingTab {
 
   /** @param {string} folder */
   async pickVisible(folder) {
-    const map = Object.assign({}, this.plugin.settings.folderShown);
+    // github#97
+    const map = Object.assign(bareMap(), this.plugin.settings.folderShown);
     map[folder] = !this.shownByDefault(folder);
     this.plugin.settings.folderShown = map;
     await this.plugin.saveSettings();
@@ -1052,13 +1448,14 @@ class VaultGraphSettingTab extends PluginSettingTab {
   }
 
   /**
-   * @param {"folderColors" | "subfolderColors"} settingsKey
+   * @param {"folderColors" | "subfolderColors" | "tagColors" | "subtagColors"} settingsKey
    * @param {string} mapKey
    * @param {string | null} key
    * @param {"applyFolderColors" | "applySubfolderColors"} applyMethod
    */
   async setOverride(settingsKey, mapKey, key, applyMethod) {
-    const map = Object.assign({}, this.plugin.settings[settingsKey]);
+    // github#97
+    const map = Object.assign(bareMap(), this.plugin.settings[settingsKey]);
     if (key) map[mapKey] = key; else delete map[mapKey];
     this.plugin.settings[settingsKey] = map;
     await this.plugin.saveSettings();
@@ -1068,24 +1465,46 @@ class VaultGraphSettingTab extends PluginSettingTab {
 
   /** @param {string} folder @param {string | null} key */
   async pick(folder, key) {
-    return this.setOverride("folderColors", folder, key, "applyFolderColors");
+    // github#86 -- into the grouping this tab is on
+    return this.setOverride(this.colourDim === "tag" ? "tagColors" : "folderColors",
+                            folder, key, "applyFolderColors");
   }
 
   /** @param {string} folder @param {string} sub @param {string | null} key */
   async pickSub(folder, sub, key) {
-    return this.setOverride("subfolderColors", folder + "/" + sub, key, "applySubfolderColors");
+    return this.setOverride(this.colourDim === "tag" ? "subtagColors" : "subfolderColors",
+                            folder + "/" + sub, key, "applySubfolderColors");
   }
 }
 
 class VaultGraphPlugin extends Plugin {
   /** @type {Settings} */
   settings = DEFAULTS;
+  // github#83 -- the note the next view mount shows, until it is dismissed
+  /** @type {import("./update-note.mjs").UpdateNote | null} */
+  pendingNote = null;
+  /** @type {import("./update-note.mjs").Release[]} */
+  pendingChain = [];
 
   async onload() {
     /** @type {unknown} */
     const saved = await this.loadData();
     /** @type {Settings} */
     this.settings = Object.assign({}, DEFAULTS, saved);
+
+    // github#83, design/0016 -- decided once per load; a shown note is recorded on dismiss
+    const verdict = decideNote({
+      installed: this.manifest.version,
+      lastSeen: this.settings.lastSeenVersion,
+      hadData: saved !== null && saved !== undefined,
+      note: parseNote(WHATS_NEW).note,
+    });
+    this.pendingNote = verdict.show;
+    this.pendingChain = verdict.show
+      ? releaseChain({ releases: RELEASES, lastSeen: this.settings.lastSeenVersion,
+                       installed: this.manifest.version, note: verdict.show })
+      : [];
+    if (verdict.record) await this.recordVersion(saved);
     this.addSettingTab(new VaultGraphSettingTab(this.app, this));
 
     this.registerView(VIEW_TYPE, (leaf) => new VaultGraphView(leaf, this));
@@ -1147,6 +1566,16 @@ class VaultGraphPlugin extends Plugin {
     await this.saveData(this.settings);
   }
 
+  // github#83, design/0016 -- the marker alone, never the defaults onto an empty file
+  /** @param {unknown} [saved] */
+  async recordVersion(saved) {
+    /** @type {unknown} */
+    const disk = saved === undefined ? await this.loadData() : saved;
+    const base = disk && typeof disk === "object" ? /** @type {Record<string, unknown>} */ (disk) : {};
+    this.settings.lastSeenVersion = this.manifest.version;
+    await this.saveData(Object.assign({}, base, { lastSeenVersion: this.manifest.version }));
+  }
+
   openSettings() {
     const setting = /** @type {AppWithSetting} */ (this.app).setting;
     if (!setting || typeof setting.open !== "function") {
@@ -1178,6 +1607,7 @@ class VaultGraphPlugin extends Plugin {
     if (api.setCompactAxis) api.setCompactAxis(this.settings.compactAxis !== false);
     if (api.setUnlinkedByFolder) api.setUnlinkedByFolder(this.settings.unlinkedByFolder !== false);
     if (api.setUnlinkedTintByFolder) api.setUnlinkedTintByFolder(this.settings.unlinkedTintByFolder === true);
+    if (api.setCountBars) api.setCountBars(this.settings.countBars !== false);
     if (api.setFitCap) api.setFitCap(this.settings.fitCap !== false);
     if (api.applyHiddenDefaults) api.applyHiddenDefaults();
   }

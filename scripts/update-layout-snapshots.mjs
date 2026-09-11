@@ -19,8 +19,12 @@ const OUT_DIR = join(ROOT, "scripts", "layout-snapshots");
 // github#76
 const FIXTURES = [
   { script: "make-demo-vault.mjs", args: [], name: "demo-vault", drill: "03 - Resources" },
-  { script: "make-test-vault.mjs", args: ["--notes", "10000", "--years", "10", "--end", "2026-08-28"], name: "test-vault", drill: "03 - Resources" },
+  { script: "make-test-vault.mjs", args: ["--notes", "10000", "--years", "10", "--end", "2026-08-28"], name: "test-vault", drill: "Projects" },
   { script: "make-shape-vault.mjs", args: [], name: "shape-vault", drill: "projects" },
+  // github#86, design/0015 -- recorded in the TAG dimension; that is its picture. A root is a
+  // FOLDER, so the tag disc has no drilled golden: there is nothing to drill into (github#76).
+  { script: "make-tag-vault.mjs", args: ["--end", "2026-09-09"], name: "tag-vault",
+    gens: ["make-tag-vault.mjs"], dim: "tag" },
 ];
 
 const GENERATORS = ["make-demo-vault.mjs", "make-test-vault.mjs", "make-shape-vault.mjs"];
@@ -36,10 +40,11 @@ function storeRoot() {
   return join(ROOT, ".fixtures");
 }
 
-function digestOf(args) {
+// github#86 -- `gens` must match the list scripts/smoke.mjs hashes
+function digestOf(args, gens) {
   const h = createHash("sha256");
   h.update("format:" + FIXTURE_FORMAT);
-  for (const g of GENERATORS) h.update(readFileSync(join(HERE, g)));
+  for (const g of gens || GENERATORS) h.update(readFileSync(join(HERE, g)));
   h.update(JSON.stringify(args));
   return h.digest("hex").slice(0, 8);
 }
@@ -59,7 +64,7 @@ function findChrome() {
 function sleep(ms) { return new Promise((r) => setTimeout(r, ms)); }
 
 function buildFixture(fx) {
-  const digest = digestOf(fx.args);
+  const digest = digestOf(fx.args, fx.gens);
   const dir = join(storeRoot(), `${fx.name}-${digest}`);
   if (!existsSync(join(dir, ".stamp.json"))) {
     console.log(`  ${fx.name}: not in the shared fixture store yet, generating ...`);
@@ -79,7 +84,7 @@ function buildFixture(fx) {
   return { dir: htmlDir, htmlPath };
 }
 
-async function measure(htmlPath, drill) {
+async function measure(htmlPath, dim, drill) {
   const port = await new Promise((res, rej) => {
     const srv = createServer();
     srv.on("error", rej);
@@ -122,6 +127,10 @@ async function measure(htmlPath, drill) {
       if (Date.now() > settleDeadline) throw new Error("page never settled (demo.busy() stayed true)");
       await sleep(120);
     }
+    // github#86 -- before the relayout, so this is the disc measured
+    if (dim && dim !== "folder") {
+      await page.eval(`__vg.setDim(${JSON.stringify(dim)}); void 0`);
+    }
     // github#21
     // github#76
     const read = `JSON.stringify((function(){
@@ -138,9 +147,12 @@ async function measure(htmlPath, drill) {
     })())`;
     await page.eval(`__vg.relayout(); void 0`).catch(() => {});
     const vault = JSON.parse(await page.eval(read));
-    await page.eval(`__vg.setRoot(${JSON.stringify(drill)}, true); void 0`);
-    const drilled = JSON.parse(await page.eval(read));
-    drilled.root = drill;
+    let drilled = null;
+    if (drill) {
+      await page.eval(`__vg.setRoot(${JSON.stringify(drill)}, true); void 0`);
+      drilled = JSON.parse(await page.eval(read));
+      drilled.root = drill;
+    }
     page.close();
     return { vault, drilled };
   } finally {
@@ -153,8 +165,9 @@ async function main() {
   for (const fx of FIXTURES) {
     const built = buildFixture(fx);
     try {
-      const both = await measure(built.htmlPath, fx.drill);
+      const both = await measure(built.htmlPath, fx.dim, fx.drill);
       for (const [kind, m] of [["", both.vault], [".drill", both.drilled]]) {
+        if (!m) continue;
         const { band, positions, notes } = m;
         const folders = Object.keys(band).sort();
         const sortedBand = {};
@@ -163,14 +176,16 @@ async function main() {
         for (const id of Object.keys(positions).sort((a, b) => Number(a) - Number(b))) {
           sortedPositions[id] = positions[id];
         }
-        const out = { vault: fx.name, notes, folders: folders.length, band: sortedBand, positions: sortedPositions };
+        const out = { vault: fx.name, dim: fx.dim || "folder", notes, folders: folders.length,
+                      band: sortedBand, positions: sortedPositions };
         // github#76
         if (m.root) out.root = m.root;
         const outPath = join(OUT_DIR, `${fx.name}${kind}.json`);
         writeFileSync(outPath, JSON.stringify(out, null, 1) + "\n");
         const inner = folders.filter((f) => band[f] === "inner").length;
-        console.log(`${fx.name}${kind}: wrote ${outPath} (${notes} notes, ${folders.length} folders, ` +
-          `${inner} inner / ${folders.length - inner} outer` + (m.root ? `, root ${JSON.stringify(m.root)}` : "") + `)`);
+        console.log(`${fx.name}${kind}: wrote ${outPath} (${notes} notes, ${folders.length} groups, ` +
+          `${inner} inner / ${folders.length - inner} outer, grouped by ${fx.dim || "folder"}` +
+          (m.root ? `, root ${JSON.stringify(m.root)}` : "") + ")");
       }
     } finally {
       rmSync(built.dir, { recursive: true, force: true });

@@ -1,0 +1,22 @@
+<!--
+  The update note the plugin shows ONCE, on the first open after a MINOR or MAJOR update
+  (github#83, design/0016). Three line kinds, in any order after the heading:
+
+    # 2.6.0          the release this note is for -- one per file, and it must be the one
+                     being cut, or the strip stays silent rather than showing a stale note
+    - <text>         up to five bullets, plain text: what you can now do, not how it was
+                     built. No markup, no images, no links -- the strip builds its own
+    > vg-dim         up to four control ids from src/page.html: what this release ADDED.
+                     They pulse while the note is up and stop when it is dismissed. Leave
+                     the line out when a release adds no control of its own
+
+  The strip links out on its own: one link per release between the version last seen and
+  this one, oldest first, plus the feature gallery. The release branch rewrites this file
+  beside the CHANGELOG entry; a PATCH leaves it as it is, and shows nothing.
+  scripts/build-plugin.mjs refuses a file that breaks any of that.
+-->
+# 2.6.0
+- Zoom in far enough to crop the disc and a small overview appears beside Fit, showing where your view sits. Click it to fit the disc again.
+- Every colour swatch now draws the dots it will actually make, sub-wedge tints and all, so you can see a colour before you choose it.
+- After an update, the graph tells you what changed: this strip, once per release. Dismiss it and it is gone.
+> vg-ov

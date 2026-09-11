@@ -5,6 +5,7 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { engineBanner } from "../src/engine/notice.mjs";
+import { parseNote, parseReleases } from "../plugin/update-note.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(HERE, "..");
@@ -98,8 +99,78 @@ const stripDemoAndDebugPlugin = {
   },
 };
 
+/* ------------------------------------------------------------- update note -- */
+// github#83, design/0016
+const NOTE_FILE = join(ROOT, "plugin", "whats-new.md");
+const PAGE_MARKUP = join(ROOT, "src", "page.html");
+
+function checkWhatsNew() {
+  const text = readFileSync(NOTE_FILE, "utf8");
+  const { note, problems } = parseNote(text);
+  if (note) {
+    const markup = readFileSync(PAGE_MARKUP, "utf8");
+    for (const id of note.points) {
+      if (!markup.includes('id="' + id + '"')) {
+        problems.push("points at " + id + ", which is no id in src/page.html");
+      }
+    }
+  }
+  if (!note || problems.length) {
+    throw new Error("plugin/whats-new.md is not an update note the plugin can show:\n  " +
+                    problems.join("\n  ") + "\nSee the comment at the top of that file.");
+  }
+  return { note, bytes: Buffer.byteLength(text) };
+}
+
+// github#83, design/0016 -- "vg:releases": every release the CHANGELOG has a heading for
+const CHANGELOG = join(ROOT, "CHANGELOG.md");
+
+function readReleases() {
+  return parseReleases(readFileSync(CHANGELOG, "utf8"));
+}
+
+const releasesPlugin = {
+  name: "releases",
+  setup(b) {
+    b.onResolve({ filter: /^vg:releases$/ }, (args) => ({ path: args.path, namespace: "vg:" }));
+    b.onLoad({ filter: /.*/, namespace: "vg:" }, () => ({
+      contents: "export default " + JSON.stringify(readReleases()) + ";",
+      loader: "js",
+      watchFiles: [CHANGELOG],
+    }));
+  },
+};
+
+/* ------------------------------------------------------------------ styles -- */
+// github#98
+const ENTRY = join(ROOT, "plugin", "main.js");
+const STYLE_INPUTS = [join(ROOT, "plugin", "styles.css"), join(ROOT, "src", "page.css")];
+
+function copyStyles() {
+  const host = readFileSync(STYLE_INPUTS[0], "utf8");
+  const page = readFileSync(STYLE_INPUTS[1], "utf8");
+  writeFileSync(join(ROOT, "styles.css"),
+    "/* Built by scripts/build-plugin.mjs from plugin/styles.css + src/page.css. */\n" +
+    host.trimEnd() + "\n\n" +
+    "/* ---- src/page.css ---------------------------------------------------- */\n" +
+    page.trimEnd() + "\n", "utf8");
+}
+
+const stylesPlugin = {
+  name: "styles",
+  setup(b) {
+    b.onLoad({ filter: /[\\/]main\.js$/, namespace: "file" }, (args) =>
+      args.path === ENTRY
+        ? { contents: readFileSync(ENTRY), loader: "js", watchFiles: STYLE_INPUTS }
+        : null);
+    b.onEnd(copyStyles);
+  },
+};
+
+const whatsNew = checkWhatsNew();
+
 const options = {
-  entryPoints: [join(ROOT, "plugin", "main.js")],
+  entryPoints: [ENTRY],
   outfile: join(ROOT, "main.js"),
   bundle: true,
   format: "cjs",
@@ -109,33 +180,26 @@ const options = {
   sourcemap: false,
   minify: false,
   logLevel: "info",
-  plugins: [rawLoader, stripDemoAndDebugPlugin],
+  plugins: [rawLoader, releasesPlugin, stripDemoAndDebugPlugin, stylesPlugin],
   banner: {
     js: "/* Vault Graph -- built by scripts/build-plugin.mjs. Source: plugin/ and src/. */\n" +
         engineBanner(),
   },
 };
 
-function copyStyles() {
-  const host = readFileSync(join(ROOT, "plugin", "styles.css"), "utf8");
-  const page = readFileSync(join(ROOT, "src", "page.css"), "utf8");
-  writeFileSync(join(ROOT, "styles.css"),
-    "/* Built by scripts/build-plugin.mjs from plugin/styles.css + src/page.css. */\n" +
-    host.trimEnd() + "\n\n" +
-    "/* ---- src/page.css ---------------------------------------------------- */\n" +
-    page.trimEnd() + "\n", "utf8");
-}
-
 if (WATCH) {
   const ctx = await context(options);
   await ctx.watch();
-  copyStyles();
-  console.log("watching plugin/ -- ctrl-c to stop");
+  console.log("watching plugin/, src/ and both stylesheets -- ctrl-c to stop");
 } else {
   await build(options);
-  copyStyles();
   const kb = (n) => (n / 1024).toFixed(0) + " KB";
   const sizes = ["main.js", "styles.css", "manifest.json"]
     .map((f) => f + " " + kb(readFileSync(join(ROOT, f)).length));
-  console.log("built: " + sizes.join(", "));
+  const releases = readReleases();
+  console.log("built: " + sizes.join(", ") +
+              "; update note for " + whatsNew.note.version + ": " + whatsNew.note.lines.length +
+              " line" + (whatsNew.note.lines.length === 1 ? "" : "s") + ", " + whatsNew.bytes + " bytes" +
+              (whatsNew.note.points.length ? ", pointing at " + whatsNew.note.points.join(" ") : "") +
+              "; " + releases.length + " releases from the CHANGELOG, newest " + (releases[0] ? releases[0].version : "none"));
 }

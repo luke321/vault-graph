@@ -84,9 +84,65 @@ hex would sit there looking like the other theme's palette. Storing the slot als
 every reachable colour inside the measured set — there is no picker path to a colour that
 never went through the numbers above.
 
-The same reasoning runs one level down into the DOM: swatches are coloured by a
-`.vg-g7` class resolving `var(--g7)`, not by an inline style. A `var()` re-resolves on a
-theme flip; a hex written into a style attribute does not.
+The same reasoning runs one level down into the DOM — but **only the picker follows it
+on its own, and this paragraph used to claim the whole DOM did.** Two surfaces draw a
+slot, by two different mechanisms, and since github#84 both land on the new palette:
+
+| surface | mechanism | on a live theme flip |
+|---|---|---|
+| the picker's swatches, `.swatch.vg-g7` | a class resolving `var(--g7)` | **re-resolves by itself** |
+| the legend row's swatch, and its count bar (github#78) | an inline hex from `colorOf()` | **rebuilt by `readTheme()`** |
+
+A `var()` re-resolves on a theme flip; a hex written into a style attribute does not. So
+`readTheme()` — which the plugin's `syncTheme()` runs on every `css-change` — does more
+than re-snapshot `THEME`: once the page is booted it runs `buildColors()`, so `groupColor`
+(with the sub-shades and the unlinked tint) is re-derived from the new palette, and
+`buildLegend()`, so every row's inline hex is rewritten from it. No `colorWalk`: the host
+flipped in one frame and the disc follows in the same one; the 380 ms walk is for a
+recolour someone asked to watch. The caller's `renderer.refresh()` then repaints the dots
+from the rebuilt colours, which is why the order inside `syncTheme()` — `readTheme()` first,
+`refresh()` after — matters.
+
+**github#84 is the history of this paragraph.** Before it, `readTheme()` only took the
+snapshot, and the picker was right after a flip while the legend was not — measured on the
+demo mirror, running exactly what `syncTheme()` does and flipping dark to light: `--g7`
+moved `#9085e9` → `#4a3aa7` and `.swatch.vg-g7` moved with it, while the legend's swatch and
+the count bar both stayed `#9085e9`, and the settings panel and the legend showed one slot
+in two colours at once. It predated both colour branches (github#77, github#78): the
+picker's `var()` rule was already on `develop`. After the fix, the same probe reads the
+legend swatch and the bar at `#4a3aa7` with the token, and back at `#9085e9` on the flip
+back. `smoke.mjs --only "theme flip"` asserts it on the standalone page by running the
+handler's steps by hand; `obsidian-smoke.mjs --only "theme"` asserts it through the real
+`css-change` path.
+
+There is still no `.vg-g*` class on a legend row, and there does not need to be: a surface
+that stores a hex follows the theme by being rebuilt, not by resolving. If you add one,
+put it inside what `buildLegend()` (or `buildColors()`) writes, or it will be the next
+github#84.
+
+Since github#77 the hexes themselves are declared once as **light/dark pairs** —
+`--g7-l` and `--g7-d`, plus `--surface-1-l` / `--surface-1-d` — and the three theme
+blocks only map `--g7` onto one of them. The picker draws each slot on **both** grounds
+at once whatever theme the page is in, so the other theme's values have to be reachable
+from CSS rather than from the cascade. It also ended a real hazard: the dark palette used
+to be written out twice, in the `prefers-color-scheme` block and again in
+`[data-theme="dark"]`, and `palette-check.mjs` read only the second, so one copy could
+have drifted unnoticed. The harness now refuses any `--gN` or `--surface-1` written as a
+hex anywhere in the file. `invariants.md` carries the rest.
+
+## A swatch shows the dots the slot will draw
+
+A slot that reads well as a filled square can be nearly invisible as the mark it actually
+makes. Measured across the three fixtures a drawn radius spans **0.39 px to 5.93 px**, so
+each swatch is an inline `<svg>` of the slot at four real radii on both grounds, with the
+subfolder tint ladder below, and a title naming the measured contrast per theme. The
+numbers are `palette-check.mjs`'s own, compared against it by a check rather than copied.
+github#77, `invariants.md`.
+
+**The three failing light slots are still failing.** g3 Aqua 2.74, g4 Yellow 2.11 and g9
+Cyan 2.58 are what the preview now makes visible; fixing them is a separate change to
+`src/page.css` with `palette-check.mjs` as its before-and-after, and the table under
+"Slots 6 and 10 were pastels" is the shape that change should take.
 
 ## An override changes exactly one folder
 

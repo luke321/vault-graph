@@ -1,0 +1,159 @@
+---
+---
+
+@import "{{ site.theme }}";
+
+/* github#100 -- the docs site in the product's own dark theme.
+ *
+ * jekyll-theme-midnight is imported above untouched; everything below repaints its selectors
+ * with the page's dark tokens, copied verbatim from the `[data-theme="dark"]` block in
+ * src/page.css. Keep the two in step: a token that changes there changes here.
+ *
+ * Plain CSS after the import on purpose -- it can be appended to the theme's compiled
+ * style.css for a faithful local preview without Jekyll, and there is no SCSS to get wrong.
+ * One static dark theme, not the page's live theme-follow: this is a docs site.
+ */
+
+:root {
+  color-scheme: dark;
+  --surface-0: #121211;
+  --surface-1: #1a1a19;
+  --surface-2: #232322;
+  --border: #33332f;
+  --border-strong: #4a4a45;
+  --text-1: #ffffff;
+  --text-2: #c3c2b7;
+  --text-3: #8d8c84;
+  --accent: #3987e5;
+  --accent-hi: #6aa6f0; /* the one token not in page.css: the accent, lifted for hover */
+  --font: ui-sans-serif, -apple-system, "Segoe UI", system-ui, sans-serif;
+  --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+/* ---- page ---------------------------------------------------------------------------- */
+
+body {
+  background: var(--surface-1);
+  color: var(--text-2);
+  font: 15px/1.6 var(--font);
+  -webkit-font-smoothing: antialiased;
+}
+
+h1, h2, h3, h4, h5, h6 {
+  color: var(--text-1);
+  font-family: var(--font) !important;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+h2 { margin-top: 36px; }
+
+strong, th, dt {
+  font-family: var(--font) !important;
+  font-weight: 600;
+}
+strong { color: var(--text-1); }
+
+a { color: var(--accent); }
+a:hover { color: var(--accent-hi); text-decoration: underline; }
+
+ul { list-style-image: none; list-style-type: disc; }
+
+hr {
+  height: 1px;
+  background: var(--border);
+  margin: 0 0 20px;
+}
+
+blockquote { border-left-color: var(--accent); }
+
+/* ---- code ---------------------------------------------------------------------------- */
+
+code {
+  font-family: var(--mono);
+  font-size: 13px;
+  color: var(--text-1);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  margin: 0;
+  padding: 1px 5px;
+}
+pre {
+  background: var(--surface-0);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: none;
+}
+pre code {
+  color: var(--text-2);
+  background: none;
+  border: 0;
+  text-shadow: none;
+  padding: 0;
+}
+
+/* ---- tables and images --------------------------------------------------------------- */
+
+th {
+  color: var(--text-3);
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  border-bottom-color: var(--border-strong);
+}
+td { border-bottom-color: var(--border); }
+dt { color: var(--text-1); }
+
+section img {
+  background: var(--surface-0);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+/* ---- header bar ---------------------------------------------------------------------- */
+
+#header {
+  background: var(--surface-0);
+  border-bottom: 1px solid var(--border);
+  box-shadow: none;
+}
+#header nav { background: none; }
+#header nav ul li {
+  font-family: var(--font);
+  color: var(--text-2);
+  text-shadow: none;
+}
+#header nav ul li a {
+  color: var(--text-2);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: none;
+  font-family: var(--font);
+  font-size: 13px;
+  padding: 8px 12px;
+}
+#header nav ul li a:hover {
+  color: var(--text-1);
+  background: var(--surface-2);
+  border-color: var(--border-strong);
+  box-shadow: none;
+  text-decoration: none;
+}
+
+/* ---- title block --------------------------------------------------------------------- */
+
+section #title h1 {
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+section #title p {
+  font-family: var(--font);
+  color: var(--text-2);
+}
+section #title .credits {
+  font-family: var(--font);
+  color: var(--text-3);
+}
+section #title .credits a { color: var(--text-3); }
+section #title .credits a:hover { color: var(--text-2); }

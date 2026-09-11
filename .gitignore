@@ -26,3 +26,7 @@ node_modules/
 # main.js is 600KB of bundle and would churn on every template edit.
 /main.js
 /styles.css
+
+# machine-local half of the brief (paths, session identity, screens) -- never tracked, the repo is public
+CLAUDE.local.md
+*.local.md
