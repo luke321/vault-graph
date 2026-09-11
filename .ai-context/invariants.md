@@ -2404,7 +2404,7 @@ notes. The temptation is to check it as its own kind of thing. It is not: it is 
 so it is held to the laws in `CLAUDE.md` rather than to a reduced set of them.
 
 ```
-node scripts/smoke.mjs --only "drill"      # 4 checks x 3 fixtures
+node scripts/smoke.mjs --only "drill"      # 5 checks x 3 fixtures -- 15, and 0/0 on tag
 ```
 
 | | demo | 10k | shape |
@@ -2414,12 +2414,19 @@ node scripts/smoke.mjs --only "drill"      # 4 checks x 3 fixtures
 | cells | 41 → 17 | 41 → 17 | 10 → 5 |
 | `r0` / `maxR` | 6.65/25.25 → 1.50/7.10 | → 1.50/7.10 | 5.48/20.08 → 5.30/17.90 |
 | wedges the vault could not name | 9 children, 3 named + a pool | same | 5 children |
-| row-0 dots, biggest vs cap | 11 · 11.8u / 15.4u | 12 · **15.4u / 15.4u** | 32 · 45.4u / 54.3u |
+| row-0 dots, biggest vs cap | 11 · 11.7u / 15.4u | 12 · **15.4u / 15.4u** | 32 · 45.4u / 54.3u |
 
 The 10k figure in bold is the point of measuring it: the drilled hub is small enough that
 `HUB_ROW0_FRAC` is *binding*, not passing vacuously. A drilled disc is exactly the shape
 that broke this law once already (a band collapsed to one row, the section below), so the
 check asserts it rather than assuming `dotPx` still holds.
+
+**Every fixture that has a drilled golden runs all five checks** (`DRILL_ON` in
+`smoke.mjs`). Each check reads its root out of that fixture's own golden and returns
+`NOT ASSERTED` for a vault that has none, so they are fixture-independent by construction.
+github#113's per-fixture default is `demo-vault` alone and would otherwise capture them,
+leaving two of the three drilled goldens committed and never read -- which is this
+section's heading being quietly false. It was, for the length of one merge.
 
 **The golden is the check that catches a wrong lock.** Plan parity and zero-weight
 invariance both compare two plans against each other, so they pass just as happily when
@@ -2435,14 +2442,41 @@ takes nothing away, so the way back is exact rather than approximately right.
 
 Measured, in and out with no other gesture: **0 of 1403 / 10002 / 954 notes moved past
 0.1 units** (worst 0.000 on every fixture), the whole-basis plan identical cell for cell,
-and the wedge order identical. The three vault goldens also regenerate byte-identical
-after the feature landed, which is the same statement made a second way.
+and the wedge order identical. **All four** vault goldens also regenerate byte-identical
+after the feature landed -- demo, 10k, shape and tag -- which is the same statement made a
+second way, and the one that carried the whole feature across 285 commits of `develop` on
+2026-09-12: the merge was judged by regenerating every golden and finding only the two
+stale *drilled* ones different.
 
 This is what makes the shared-filter decision safe. A filter set inside a drilled disc is
 written to the *absolute* `hiddenSub` key — the same key the vault disc's own subfolder
 eye writes — so there is nothing to translate on the way back and no second filter map to
 fall out of step. Measured: hiding `People` in the drilled demo disc takes it from 60
 notes to 44, and the vault disc then shows 1387 of 1403, the same 16 notes.
+
+## A root and the tag disc are exclusive, and `setRoot` is total
+
+github#76 x github#86, decided on the merge of 2026-09-12 (D-2). A root is a **folder
+path**, and the wedges of a drilled disc are the root's child **folders**. The tag disc
+groups by tag and has no folder tree to descend, so "the tag disc of a folder subtree" is
+not a thing this issue asked for and is not invented here.
+
+Both directions are closed rather than left to chance:
+
+- `setDim` returns to the vault first, instantly, when a root is in force. The switch that
+  follows is then the plain vault-to-vault one github#86 was built and measured for, rather
+  than a new two-axis case with no golden.
+- `setRoot` refuses a root while the disc is not grouped by folder. This is never
+  user-visible: `drillTargetForGroup`/`drillTargetForSub` return `null` off the folder
+  disc, so no gesture offers a drill there in the first place.
+
+`setRoot` is also **total for any string a caller can hand it**. A root no note lives
+under scopes the disc to nothing, `buildWedgePlan` returns `null`, and the page falls
+over on `.cells` -- which is exactly how the snapshot run failed on 2026-09-12, from a
+fixture table that said `Projects` where the folder is `01 - Projects`. The nav only ever
+names a folder that is on screen, but `__vg.setRoot` is public and a harness can typo one,
+so an empty root now refuses and returns the root in force. `anyNoteUnder` asks before the
+root is adopted, so it cannot use `inRootA`, which reads the one already in force.
 
 ## A drilled disc's wedge order is the order the vault disc already gave those children
 
