@@ -196,7 +196,9 @@ Structure (see `.ai-context/releasing.md`'s full section — 1.7.0 is the worked
 2. **No hero at the top** — `assets/demo.webp` is large and unspecific; use the feature clips.
 3. One `###` per genuinely new or visibly-changed feature (from step 1's range, not memory), its
    matching clip embedded.
-4. A `---`, then the `CHANGELOG.md` section **appended verbatim**, heading included.
+4. One line, always the same spot, right after the highlight reel: `☕ If Vault Graph is useful
+   to you, [support it on Ko-fi](https://ko-fi.com/luke321).`
+5. A `---`, then the `CHANGELOG.md` section **appended verbatim**, heading included.
 
 **Image URLs in the body are pinned to `<version>` or a commit SHA — never to `develop` and never
 to `release/<version>`.** The tag doesn't exist yet while drafting, so preview against `develop`,

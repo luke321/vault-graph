@@ -184,7 +184,13 @@ reverse-engineered from it, not invented.
    (`git show <prev-tag>:src/page.js | grep ...`). Bug fixes real enough to matter but not
    visually demonstrable go in prose under the nearest relevant `###`, or their own
    "Smaller things" `###` list, with no clip forced onto them.
-4. **A `---` divider**, then the CHANGELOG.md section **appended verbatim, unedited,
+4. **One line, every release, always the same spot** — right after the highlight reel,
+   right before the divider below: `☕ If Vault Graph is useful to you, [support it on
+   Ko-fi](https://ko-fi.com/luke321).` Added 2026-09-11, alongside the manifest `fundingUrl`,
+   the README badge and the GitHub Sponsor button — this is where it reaches someone who just
+   updated and is reading what's new, which is the natural moment for it. One line, never
+   embellished, never repeated elsewhere on the page.
+5. **A `---` divider**, then the CHANGELOG.md section **appended verbatim, unedited,
    heading included** (`## <version> — "<Name>" — <date>` through to its own trailing
    `---`). This is not a link out — the full technical writeup lives IN the release body,
    underneath the highlight reel, so nothing written for the changelog is lost and nothing
