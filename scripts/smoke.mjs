@@ -4562,8 +4562,9 @@ check("a bar that loses its folder shrinks over the cascade instead of blinking 
   };
 });
 
-// github#84, github#78, design/0004
-check("the count bar follows its own swatch across a theme flip", async (p) => {
+// github#84, github#78, design/0004 -- the legend is an inline hex from colorOf(); it follows
+// the token only because readTheme() rebuilds the colours and the legend on every flip
+check("the legend's swatch and count bar follow the token across a theme flip, with the picker", async (p) => {
   const read = () => p.j(`(function(){
     var root = document.querySelector('.vault-graph'), cs = getComputedStyle(root);
     // github#84 -- resolve INSIDE .vault-graph: --gN is scoped to it, so a var() probed
@@ -4601,8 +4602,8 @@ check("the count bar follows its own swatch across a theme flip", async (p) => {
   })()`);
   await sleep(500);
   const before = await read();
-  if (!before.barred) {
-    return { ok: true, detail: `no barred row on this shape -- nothing to compare` };
+  if (!before.group || !before.swatch) {
+    return { ok: false, detail: `no legend row with notes on this shape -- nothing to flip` };
   }
 
   await p.eval(`(function(){
@@ -4621,23 +4622,33 @@ check("the count bar follows its own swatch across a theme flip", async (p) => {
     if (__vg.renderer) __vg.renderer.refresh();
   })(); void 0`);
   await sleep(400);
+  const restored = await read();
 
   const tokenMoved = before.token !== after.token;
   const swatchMoved = before.swatch !== after.swatch;
   const barMoved = before.bar !== after.bar;
   const pickerMoved = before.picker !== null && before.picker !== after.picker;
-  const coherent = barMoved === swatchMoved && after.bar === after.swatch;
+  // github#84 -- every surface lands on the moved token, and comes back with it
+  const swatchFollows = swatchMoved && after.swatch === after.token;
+  const barFollows = !before.barred || (barMoved && after.bar === after.token);
+  const pickerFollows = before.picker === null || (pickerMoved && after.picker === after.token);
+  const coherent = !before.barred || (barMoved === swatchMoved && after.bar === after.swatch);
+  const restoredBack = restored.swatch === before.swatch &&
+                       (!before.barred || restored.bar === before.bar);
 
   const bits = [`slot ${after.slot} on ${JSON.stringify(before.group)}`,
     `token ${before.token} -> ${after.token}${tokenMoved ? " (moved)" : " (SAME -- flip did nothing)"}`,
-    `swatch ${before.swatch} -> ${after.swatch}${swatchMoved ? " (moved)" : " (stale)"}`,
-    `bar ${before.bar} -> ${after.bar}${barMoved ? " (moved)" : " (stale)"}`,
+    `swatch ${before.swatch} -> ${after.swatch}${swatchFollows ? " (follows)" : swatchMoved ? " (moved, OFF the token)" : " (STALE)"}`,
+    before.barred ? `bar ${before.bar} -> ${after.bar}${barFollows ? " (follows)" : barMoved ? " (moved, OFF the token)" : " (STALE)"}`
+                  : "no count bar on this row",
     before.picker === null ? "no picker swatch rendered"
-                           : `picker ${before.picker} -> ${after.picker}${pickerMoved ? " (moved)" : " (stale)"}`,
-    `bar agrees with its swatch=${coherent}`];
-  if (tokenMoved && !swatchMoved) bits.push("github#84: the legend keeps the old theme while the picker repaints");
+                           : `picker ${before.picker} -> ${after.picker}${pickerFollows ? " (follows)" : " (STALE)"}`,
+    `bar agrees with its swatch=${coherent}`,
+    `restored swatch ${restored.swatch}${restoredBack ? " (back)" : " (STUCK)"}`];
+  if (tokenMoved && !swatchMoved) bits.push("<- github#84: the legend keeps the old theme while the picker repaints");
   if (!coherent) bits.push("<- the bar and its swatch disagree, which no row may do");
-  return { ok: coherent && tokenMoved, detail: bits.join("; ") };
+  return { ok: tokenMoved && swatchFollows && barFollows && pickerFollows && coherent && restoredBack,
+           detail: bits.join("; ") };
 });
 
 // github#78, design/0006

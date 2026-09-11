@@ -276,48 +276,53 @@ unobservable. Because a click rebuilds the legend, the row's class comes from th
 and its width from `barShown`; taking both from one value gives either a snap or a bar that
 outlives its folder.
 
-### The bar's colour is cached, and goes stale with the swatch it sits under
+### The bar's colour is cached, and is rebuilt with the swatch it sits under
 
 The bar takes `colorOf(g)` as an inline hex in `--vg-bar`, which is exactly the treatment the
-swatch beside it already has. Both therefore keep the old palette after a live theme flip.
-**Measured on the demo mirror, running precisely what `syncTheme()` does** — set `data-theme`,
-`readTheme()`, `renderer.refresh()` — for slot `g7` (`05 - Meeting Notes`), dark to light:
+swatch beside it already has. Neither re-resolves on a live theme flip the way the picker's
+`var(--gN)` does; both follow it because `readTheme()` re-derives the group colours and
+rebuilds the legend on every flip (github#84, design/0004). **Measured on the demo mirror,
+running precisely what `syncTheme()` does** — set `data-theme`, `readTheme()`,
+`renderer.refresh()` — for slot `g7` (`05 - Meeting Notes`), dark to light:
 
-| surface | mechanism | dark | after the flip |
-|---|---|---|---|
-| `--g7` token | CSS | `#9085e9` | **`#4a3aa7`** |
-| the picker's `.swatch.vg-g7` | class + `var(--g7)` | `#9085e9` | **`#4a3aa7`** |
-| the legend row's swatch | inline hex | `#9085e9` | `#9085e9` |
-| **the count bar** | inline hex | `#9085e9` | `#9085e9` |
+| surface | mechanism | dark | after the flip, before github#84 | after the flip, since github#84 |
+|---|---|---|---|---|
+| `--g7` token | CSS | `#9085e9` | **`#4a3aa7`** | **`#4a3aa7`** |
+| the picker's `.swatch.vg-g7` | class + `var(--g7)` | `#9085e9` | **`#4a3aa7`** | **`#4a3aa7`** |
+| the legend row's swatch | inline hex | `#9085e9` | `#9085e9` | **`#4a3aa7`** |
+| **the count bar** | inline hex | `#9085e9` | `#9085e9` | **`#4a3aa7`** |
 
-**This is not the bar's doing and the bar does not make it worse.** The picker has always
-repainted and the legend has always gone stale — verified on a `develop` build with neither
-open colour branch applied. What the bar adds is one more surface that is stale *in step with
-its own swatch*, which is the property that keeps a row internally coherent: the two never
-disagree with each other, even while the panel above them does. Tracked as **github#84**, with
-design/0004 corrected to state both mechanisms rather than claiming the whole DOM uses classes.
+**The staleness was never the bar's doing.** The picker had always repainted and the legend had
+always gone stale — verified on a `develop` build with neither colour branch applied. What the
+bar added was one more surface that was stale *in step with its own swatch*, which is the
+property that keeps a row internally coherent, and the one the check went on asserting while
+github#84 was open. Fixing it meant one thing: the hex the bar and the swatch share is rebuilt
+from the new palette, so the row stays coherent *and* agrees with the panel above it.
 
 **Checked in both places, and both have teeth.** `smoke.mjs --only "theme flip"` opens the
-gear on the standalone page, flips, and asserts the bar agrees with its own swatch while
-*reporting* the token divergence and naming github#84 — a known defect stays visible instead
-of failing the gate. `obsidian-smoke.mjs --only "theme"` does the same through the real
-`css-change` path in a real Obsidian. Making the bar resolve `var(--gN)` live while the swatch
-stays cached fails both, which is the regression that a partial fix to github#84 would be.
+gear on the standalone page, flips, and asserts that the legend swatch, the bar and the picker
+all land on the moved token, agree with each other, and come back on the flip back.
+`obsidian-smoke.mjs --only "theme"` asserts the same through the real `css-change` path in a
+real Obsidian. Two mutations fail them: taking the rebuild out of `readTheme()` (the legend
+stays `#9085e9`, `STALE`), and making the bar resolve `var(--gN)` live while the swatch stays
+cached (`bar agrees with its swatch=false`) — the second is the shape a partial fix would have
+taken, which is why the coherence assertion stayed in.
 
 One trap worth keeping: the check normalises colours by probing a throwaway span, and that span
 must be appended **inside `.vault-graph`**. `--gN` is scoped to that root, so a `var()` probed
 from `document.body` comes back `rgb(0, 0, 0)` and reads as a broken colour rather than a live
 one — which is what the first cut of the mutation test reported.
 
-### With github#77 applied, the disagreement widens but does not change in kind
+### With github#77 applied, the disagreement widened but did not change in kind
 
 github#77 declares the palette as `--gN-l` / `--gN-d` pairs and previews a slot as the dots it
-will draw, filled from `var(--sl)` / `var(--sd)`. That adds live surfaces, so the combined
-branch shows the picker and its preview correct after a flip while the legend row and its bar
-are not. **Measured on a real merge of both feature branches into `develop`**: identical to the
-table above — token and picker move, legend swatch and bar stay. Neither branch introduces the
-divergence and neither alone reveals it, which is why it is github#84's rather than either
-one's.
+will draw, filled from `var(--sl)` / `var(--sd)`. That added live surfaces, so the combined
+branch showed the picker and its preview correct after a flip while the legend row and its bar
+were not. **Measured on a real merge of both feature branches into `develop`**: identical to
+the before-github#84 column above — token and picker moved, legend swatch and bar stayed.
+Neither branch introduced the divergence and neither alone revealed it, which is why it was
+github#84's rather than either one's, and why the fix sits in `readTheme()` rather than in
+either branch's surface.
 
 Two integration notes for whoever merges them. `src/page.css` and `src/page.js` merge **cleanly**
 between the two branches — the colour work and the bar do not touch the same rules. `smoke.mjs`

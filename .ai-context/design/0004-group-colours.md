@@ -84,34 +84,41 @@ hex would sit there looking like the other theme's palette. Storing the slot als
 every reachable colour inside the measured set — there is no picker path to a colour that
 never went through the numbers above.
 
-The same reasoning runs one level down into the DOM — but **only the picker actually
-follows it, and this paragraph used to claim the whole DOM did.** Two surfaces draw a
-slot, by two different mechanisms:
+The same reasoning runs one level down into the DOM — but **only the picker follows it
+on its own, and this paragraph used to claim the whole DOM did.** Two surfaces draw a
+slot, by two different mechanisms, and since github#84 both land on the new palette:
 
 | surface | mechanism | on a live theme flip |
 |---|---|---|
-| the picker's swatches, `.swatch.vg-g7` | a class resolving `var(--g7)` | **repaints** |
-| the legend row's swatch, and its count bar (github#78) | an inline hex from `colorOf()` | **stays on the old theme** |
+| the picker's swatches, `.swatch.vg-g7` | a class resolving `var(--g7)` | **re-resolves by itself** |
+| the legend row's swatch, and its count bar (github#78) | an inline hex from `colorOf()` | **rebuilt by `readTheme()`** |
 
 A `var()` re-resolves on a theme flip; a hex written into a style attribute does not. So
-the picker is right after a flip and the legend is not. Measured on the demo mirror,
-running exactly what `syncTheme()` does and flipping dark to light: `--g7` moves
-`#9085e9` → `#4a3aa7` and `.swatch.vg-g7` moves with it, while the legend's swatch and
-the count bar both stay `#9085e9`. `readTheme()` re-snapshots `THEME`, but nothing
-rebuilds `groupColor` — so `colorOf` keeps answering from the old palette — and nothing
-rebuilds the legend, so the hex already written into each row's `style` attribute stays.
+`readTheme()` — which the plugin's `syncTheme()` runs on every `css-change` — does more
+than re-snapshot `THEME`: once the page is booted it runs `buildColors()`, so `groupColor`
+(with the sub-shades and the unlinked tint) is re-derived from the new palette, and
+`buildLegend()`, so every row's inline hex is rewritten from it. No `colorWalk`: the host
+flipped in one frame and the disc follows in the same one; the 380 ms walk is for a
+recolour someone asked to watch. The caller's `renderer.refresh()` then repaints the dots
+from the rebuilt colours, which is why the order inside `syncTheme()` — `readTheme()` first,
+`refresh()` after — matters.
 
-**The limitation is tracked as github#84, not fixed here.** It predates both open colour
-branches: `.swatch.vg-g7 { background: var(--g7); }` is already on `develop`, verified on
-a build with neither feature branch applied. github#78's bar is stale in exactly the same
-way as the swatch it sits under, which is deliberate — the two never disagree with *each
-other*, so a row stays internally coherent even while the panel above it does not.
-`obsidian-smoke.mjs --only "theme"` drives the real `css-change` path and reports every
-surface.
+**github#84 is the history of this paragraph.** Before it, `readTheme()` only took the
+snapshot, and the picker was right after a flip while the legend was not — measured on the
+demo mirror, running exactly what `syncTheme()` does and flipping dark to light: `--g7`
+moved `#9085e9` → `#4a3aa7` and `.swatch.vg-g7` moved with it, while the legend's swatch and
+the count bar both stayed `#9085e9`, and the settings panel and the legend showed one slot
+in two colours at once. It predated both colour branches (github#77, github#78): the
+picker's `var()` rule was already on `develop`. After the fix, the same probe reads the
+legend swatch and the bar at `#4a3aa7` with the token, and back at `#9085e9` on the flip
+back. `smoke.mjs --only "theme flip"` asserts it on the standalone page by running the
+handler's steps by hand; `obsidian-smoke.mjs --only "theme"` asserts it through the real
+`css-change` path.
 
-There is no `.vg-g*` class on a legend row, and until github#84 there was no note saying
-so — which is how this paragraph stayed wrong. If you are about to rely on a slot's
-colour re-resolving, check which of the two surfaces you are on.
+There is still no `.vg-g*` class on a legend row, and there does not need to be: a surface
+that stores a hex follows the theme by being rebuilt, not by resolving. If you add one,
+put it inside what `buildLegend()` (or `buildColors()`) writes, or it will be the next
+github#84.
 
 Since github#77 the hexes themselves are declared once as **light/dark pairs** —
 `--g7-l` and `--g7-d`, plus `--surface-1-l` / `--surface-1-d` — and the three theme

@@ -429,6 +429,12 @@ function mountVaultGraph(root, data, deps) {
     THEME.slots.forEach(function (hex, i) { THEME.byKey["g" + (i + 1)] = hex; });
     clearPreviewCache();
     if (renderer) renderer.setSetting("labelColor", THEME.text);
+    // github#84 -- the palette moved, so everything derived from it is stale: the group
+    // colours (with their sub-shades and the unlinked tint), and the hexes written into the
+    // legend's swatches and count bars. Rebuilt in place, no colorWalk -- the host flipped
+    // in one frame and the disc follows in the same one. Before boot there is no plan to
+    // derive from; the caller refreshes the renderer afterwards.
+    if (renderer) { buildColors(); attempt(buildLegend); }
   }
   readTheme();
 
