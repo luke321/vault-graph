@@ -21,11 +21,20 @@ Call out what's newly done since the last table and what's still blocked or awai
 | 7 | Merge `release/<version>` → `develop` (local) | |
 | 8 | **One** `git push origin develop` (suite lock held, one suite run) | |
 | 9 | PR/merge `develop` → `main` | |
-| 10 | `release.ps1` on `main` — gates, tag, push | |
-| 11 | GitHub Actions publishes the release (attestation, assets) — automatic once tagged | |
+| 10 | **Review the release body before the tag goes out** — `release.yml` publishes live the moment the tag lands, using the `## <version>` CHANGELOG section verbatim as the body and no `--draft` gate; read it as the page a stranger lands on, not as a changelog entry. This is the actual review step, not `release.ps1`'s pre-flight suite. | |
+| 11 | `release.ps1` on `main` — gates, tag, push | |
+| 12 | GitHub Actions publishes the release (attestation, assets) — automatic once tagged | |
 ```
 
 Status values: ✅ done, ⏳ not started / in progress, ⏸️ blocked (name what it's blocked on).
+
+**Why step 10 exists as its own line, added 2026-09-11.** `release.yml`'s own step summary tells
+a human to edit the published body afterward ("the release body is the raw CHANGELOG section, a
+first draft... edit it in place") — which is exactly the *after-the-tag* editing `CLAUDE.md`'s laws
+forbid ("once the tag exists nothing changes"). The workflow creates no GitHub draft to review;
+the CHANGELOG section going out is the actual publish. So the review has to happen before the tag,
+on `release/<version>`, not after — read the `## <version>` section once as the page it's about to
+become, not as a changelog entry, before `release.ps1` runs.
 
 **Every release gets a git tag and a GitHub Release with the plugin's three files attached —
 `main.js`, `manifest.json`, `styles.css` — each carrying a build provenance attestation.** The
