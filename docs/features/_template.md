@@ -19,18 +19,24 @@ text that ends up on the gallery page next to the clip.>
 
 ## Regenerating this feature's clip
 
-Two commands, same pipeline the hero uses -- just scoped to one act instead of the whole
-storyboard:
+Re-recording every clip and the hero is the default for a release (github#121), not a
+per-feature judgment call -- `scripts\record-all.ps1` does the whole gallery in one pass, then
+`scripts\update-feature-metadata.mjs --version <version>` rewrites every `Last re-recorded` row
+below, for every feature at once.
+
+For this one clip on its own (a single feature's beats changed and nothing else did), two
+commands, same pipeline the hero uses -- just scoped to one act instead of the whole storyboard:
 
 ```powershell
 .\scripts\record-demo.ps1 -Act <name>
 # wrote demo-<name>-<timestamp>.mp4
 
 .\scripts\make-hero.ps1 -In demo-<name>-<timestamp>.mp4 -Out assets\features\<name>.webp
+node scripts\update-feature-metadata.mjs --version <version> --only <name>
 ```
 
-Commit `assets/features/<name>.webp` and update `Last re-recorded` below in the same
-commit -- that's what `release.ps1`'s staleness check reads.
+Commit `assets/features/<name>.webp` and the updated `Last re-recorded` row together -- that's
+what `release.ps1`'s staleness check reads.
 
 ## Metadata
 

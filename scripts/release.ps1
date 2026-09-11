@@ -246,11 +246,12 @@ try {
   }
 
   # THE SAME PROXY, PER FEATURE -- see docs/features/_template.md and .ai-context/releasing.md's
-  # "Feature clips are different from the hero" section. Unlike the hero, a feature clip is NOT
-  # expected to be re-recorded every release, so this never blocks and does not claim to know
-  # which act a change actually touched -- it warns against the whole of src/page.js (where every
-  # act lives), same as the hero warns against the whole of src/, and leaves "does this actually
-  # need re-recording" to whoever reads CHANGELOG.md and decides.
+  # "Feature clips are re-recorded every release too" section (github#121). Re-recording every
+  # clip is the default now, same as the hero, so THIS IS A BACKSTOP: it firing means the
+  # default step was skipped for this release -- deliberately (a docs-only PATCH, the one
+  # explicit exception) or not -- not proof any one clip actually needs it. It never blocks and
+  # does not claim to know which act a change actually touched -- it warns against the whole of
+  # src/page.js (where every act lives), same as the hero warns against the whole of src/.
   $pageAt = (& git log -1 --format=%ct -- src/page.js) | Select-Object -First 1
   $pageOn = (& git log -1 --format=%cs -- src/page.js) | Select-Object -First 1
   $featureDocs = Get-ChildItem (Join-Path $repo 'docs/features') -Filter '*.md' -ErrorAction SilentlyContinue |
@@ -270,8 +271,9 @@ try {
     Write-Host "`n=== features ===" -ForegroundColor Cyan
     Write-Host "src/page.js has changed since these feature clips were last recorded:" -ForegroundColor Yellow
     $staleFeatures | ForEach-Object { Write-Host $_ -ForegroundColor Yellow }
-    Write-Host ("Re-record whichever ones this release actually changed visibly -- see " +
-                "`".ai-context/releasing.md`". Not every one; that call is yours.") -ForegroundColor Yellow
+    Write-Host ("Re-recording every clip is the default now (github#121, `".ai-context/releasing.md`"). " +
+                "If this release skipped it, that should be a named docs-only-PATCH exception, not " +
+                "an oversight.") -ForegroundColor Yellow
   }
 
   # THE PLUGIN BUILD IS A PRE-FLIGHT, not an artifact any more. Nothing local consumes
