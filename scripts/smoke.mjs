@@ -5714,6 +5714,13 @@ check("word counts land by path, which is the only thing a live rebuild keeps", 
 /* ------------------------------------------------------------- the drill root */
 // github#76
 
+// github#76 x github#113 -- every fixture that HAS a drilled golden, not just the default
+// one. These checks each read their root from that fixture's own golden and skip any vault
+// without one, so they were written to run on all of them; github#113's per-fixture default
+// arrived after this branch was cut and would otherwise have left two of the three drilled
+// goldens committed but never read.
+const DRILL_ON = ["demo-vault", "test-vault", "shape-vault"];
+
 function drillSnapshot(vaultName) {
   const fixture = ["demo-vault", "test-vault", "shape-vault"].find((f) => vaultName.startsWith(f + "-"));
   if (!fixture) return null;
@@ -5774,7 +5781,7 @@ check("a drilled disc matches its golden snapshot", async (p) => {
   parts.push(moved ? `${moved} moved past ${TOL}u, worst #${worst.id}: radius ${worst.sr.toFixed(1)} -> ${worst.cr.toFixed(1)}`
                    : "positions unchanged");
   return { ok, detail: parts.join("; ") };
-});
+}, { on: DRILL_ON });
 
 check("drilling into a folder and coming straight back is the identity", async (p) => {
   const dd = await p.j("__vg.debugDump()");
@@ -5803,7 +5810,7 @@ check("drilling into a folder and coming straight back is the identity", async (
   return { ok, detail: `in and out of ${JSON.stringify(root)}: ${moved} of ${Object.keys(a.pos).length} ` +
     `notes moved past 0.1u (worst ${worst.toFixed(3)}), plan ${a.plan === b.plan ? "identical" : "CHANGED"}, ` +
     `wedge order ${a.order === b.order ? "identical" : "CHANGED"}` };
-});
+}, { on: DRILL_ON });
 
 check("a drilled disc obeys the same laws as the vault disc", async (p) => {
   const dd = await p.j("__vg.debugDump()");
@@ -5864,7 +5871,7 @@ check("a drilled disc obeys the same laws as the vault disc", async (p) => {
     `${r.offGrid} off the lattice, r0 ${r.r0} / maxR ${r.maxR} (hub ${r.hubFrac} of the disc); ` +
     `${r.row0} row-0 dots, biggest ${r.hubWorst}u against a ${r.hubCap}u cap, ${r.hubBad} over; ` +
     `zero-weight with ${JSON.stringify(zero.g)} hidden: ${zero.ok} (maxR ${zero.lean} vs ${zero.padded})` };
-});
+}, { on: DRILL_ON });
 
 // github#76
 check("a drilled control writes an absolute folder identity, not a display name", async (p) => {
@@ -5919,7 +5926,7 @@ check("a drilled control writes an absolute folder identity, not a display name"
       `colour pick ${r.picked ? "made" : "NOT OFFERED"}, saved keys ${JSON.stringify(r.colKeys)}; ` +
       `after leaving: ${leaked.hl} highlighted, ${leaked.colours} overrides`,
   };
-});
+}, { on: DRILL_ON });
 
 check("a drill animates, and settle() is still a no-op at the end of it", async (p) => {
   const dd = await p.j("__vg.debugDump()");
@@ -6006,7 +6013,7 @@ check("a drill animates, and settle() is still a no-op at the end of it", async 
         `dtan ${r.dt} dot ${r.dd}%, ${r.szOff} of ${r.szN} dots off after a fresh relayout (worst ${r.szWorst}%)`
       : `${r.label}: nothing sampled`).join(" | "),
   };
-});
+}, { on: DRILL_ON });
 
 async function settle(p, ms = 6000) {
   const deadline = Date.now() + ms;
