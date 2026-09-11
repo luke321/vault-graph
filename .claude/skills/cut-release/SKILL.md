@@ -27,12 +27,23 @@ with this skill; after that, this file is enough to drive the mechanics. Where t
 - Ask for the release name only if the user hasn't given one; everything else below should not
   need a question unless a step's own instructions say to stop and ask.
 
+## Keep the chat short
+
+**The table is the report.** Post it after every step, then at most two lines of prose: what is
+newly done, and what is blocked or waiting on him. Nothing else.
+
+Everything that explains or justifies a step goes where it can be read on demand and skipped by
+default — the commit message, the issue, `.ai-context/changelog-detail.md`, or the artifact being
+reviewed. Do not restate it in chat. Specifically, do not narrate gates that passed ("suite
+green" is the whole sentence), do not list the numbers behind a decision, do not summarise an
+artifact you just linked, and do not recap what earlier steps did. He is reading to decide, not
+to audit; a long report buries the one line he needs.
+
 ## The status table
 
 Post this after every step below, updated — not just at the end. Columns: `#`, `Step`, `Status`
 (✅ done, ⏳ not started/in progress, ⏸️ blocked — name what it's blocked on). Drop rows that don't
-apply to this release; add one row per this release's own polish/fix asks at the top. Call out in
-prose what's newly done since the last table and what's still blocked or awaiting a decision.
+apply to this release; add one row per this release's own polish/fix asks at the top.
 
 ```markdown
 | # | Step | Status |

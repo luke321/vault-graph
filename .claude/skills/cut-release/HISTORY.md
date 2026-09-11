@@ -1,5 +1,16 @@
 # cut-release — change log
 
+## 2026-09-11 - the table is the report
+
+New "Keep the chat short" section above the status table, and the table's own instruction to
+"call out in prose what's newly done" is cut back to at most two lines.
+
+Cutting 2.6.0 produced multi-section reports after every step -- findings, measurements,
+justifications -- until Lukas said "to verbose too many details". The skill invited it: it asked
+for prose alongside the table without bounding it. Everything that explains a step already has a
+home that can be skipped (commit message, issue, changelog-detail, the artifact under review),
+so the rule is now explicit about not repeating any of it in chat.
+
 ## 2026-09-11 - every clip is looked at before it is committed
 
 New step 8, "Look at every clip before committing it", between re-recording and the dry run;
