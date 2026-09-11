@@ -43,17 +43,11 @@ measuring it: serve the page, drive it, read the numbers.
   permanent one. Screenshots need no lock: `shoot.mjs` captures over CDP, so overlapping windows
   are harmless — but pass your own `--port`.
 
-  **Every smoke run honors the lock, full stop — including one you didn't type yourself.**
-  `smoke.mjs` and `.githooks/pre-push` do not call `lock.mjs` on their own ([[vault-graph-lock-is-advisory]]-equivalent:
-  it's advisory, so nothing enforces this but you). A `git push` to `develop` or `main` triggers
-  the pre-push hook's full suite exactly as surely as running `smoke.mjs` by hand does — wrap the
-  push itself in an acquire/release, the same as any direct run:
-
-  ```bash
-  node scripts/lock.mjs acquire suite --owner "orchestrator: push develop"
-  git push origin develop
-  node scripts/lock.mjs release suite --owner "orchestrator: push develop"
-  ```
+  **`.githooks/pre-push` takes the `suite` lock itself, around its own run, and releases it on
+  every way out (github#92).** Do not also wrap a `git push` in an outer acquire/release — the
+  hook's own attempt blocks on yours and the push hangs until the outer lock's stale window
+  expires. A plain `git push origin develop`/`main` is correctly gated on its own; the wrapping
+  above is only for a `smoke.mjs` run *you* are driving directly, never for a push.
 - **Never serve Chrome unlabeled.** Any vault-graph page opened in Chrome from this worktree
   — `smoke.mjs`, `shoot.mjs`, a manual review build — sets the page's own top-left title to
   `<worktree/feature> — <what it's showing>`, e.g. `tag-grouping — demo vault`, instead of the

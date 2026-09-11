@@ -19,7 +19,7 @@ Call out what's newly done since the last table and what's still blocked or awai
 | 5 | Release name — propose 2-4 candidates, his pick | |
 | 6 | **Re-record every clip the UI change touches** — if anything visual changed this release (a constant like `FIT_RATIO`, a storyboard reorder, a sizing fix), the hero *and every existing feature-gallery clip* are stale, not just the ones whose own beats moved. Needs the `record` lock; ask before recording. Before merge, not after — the merged tree is what the clips should show. | |
 | 7 | Merge `release/<version>` → `develop` (local) | |
-| 8 | **One** `git push origin develop` (suite lock held, one suite run) | |
+| 8 | **One** plain `git push origin develop` (the hook takes the `suite` lock itself, github#92 — never wrap the push in your own acquire/release, it deadlocks against the hook's) | |
 | 9 | PR/merge `develop` → `main` | |
 | 10 | **Review the release body before the tag goes out** — `release.yml` publishes live the moment the tag lands, using the `## <version>` CHANGELOG section verbatim as the body and no `--draft` gate; read it as the page a stranger lands on, not as a changelog entry. This is the actual review step, not `release.ps1`'s pre-flight suite. | |
 | 11 | `release.ps1` on `main` — gates, tag, push | |
