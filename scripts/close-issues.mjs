@@ -49,9 +49,11 @@ function fail(msg) {
 }
 
 function commitsIn(range) {
-  const m = /^([^.\s]+)\.\.([^.\s]+)$/.exec(range);
-  if (!m) usage(2);
-  const [, before, after] = m;
+  // github#103: split on the first "..": a tag (2.4.1) or any dotted ref is a valid end, and
+  // git cat-file below is the validation, not a regex.
+  const dots = range.indexOf("..");
+  if (dots <= 0 || dots + 2 >= range.length || /\s/.test(range)) usage(2);
+  const before = range.slice(0, dots), after = range.slice(dots + 2);
   if (/^0+$/.test(before)) fail(`before is the zero SHA (${before}): a new branch has no range to scan, nothing closed`);
   for (const sha of [before, after]) {
     try { git("cat-file", "-e", `${sha}^{commit}`); }

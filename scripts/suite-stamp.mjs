@@ -2,8 +2,8 @@
 // github#93, decisions/0013
 
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync,
-         writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync,
+         rmdirSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -84,8 +84,15 @@ export function lookup(rev = "HEAD", cwd = ROOT) {
   try { stamp = JSON.parse(readFileSync(file, "utf8")); }
   catch (e) { return { ok: false, tree, why: `unreadable stamp for tree ${tree.slice(0, 7)}: ${e.message}` }; }
   const have = currentFixtures(cwd);
-  for (const want of stamp.fixtures || []) {
-    const now = have.find((f) => f.name === want.name);
+  const stamped = Array.isArray(stamp.fixtures) ? stamp.fixtures : [];
+  // github#103: every fixture the suite requires must be in the stamp -- a stamp written by a
+  // run that lost a fixture (its generator failed) is not a full pass, whatever it names.
+  for (const name of FIXTURE_NAMES) {
+    const want = stamped.find((f) => f && f.name === name);
+    if (!want) {
+      return { ok: false, tree, stamp, why: `the stamp names no ${name} run, so it is not a full suite pass` };
+    }
+    const now = have.find((f) => f.name === name);
     if (!sameFixture(want, now)) {
       return { ok: false, tree, stamp,
                why: `fixture ${want.name} is not the one that passed (stamped ${want.digest} of ${want.day}, ` +
@@ -109,8 +116,12 @@ export function record({ fixtures, checks, cwd = ROOT }) {
   const tree = treeOf("HEAD", cwd);
   const dir = stampDir(cwd);
   if (!tree || !dir) return { wrote: null, why: "cannot resolve HEAD's tree" };
-  for (const f of fixtures) {
-    if (!f || !f.digest || !f.day) return { wrote: null, why: "a fixture has no digest or day to record" };
+  // github#103: a run that lost a fixture is partial, whatever it measured on the others.
+  const ran = FIXTURE_NAMES.map((name) => (fixtures || []).find((f) => f && f.name === name));
+  for (let i = 0; i < FIXTURE_NAMES.length; i++) {
+    const f = ran[i];
+    if (!f) return { wrote: null, why: `${FIXTURE_NAMES[i]} did not run, so this run is not the full suite` };
+    if (!f.digest || !f.day) return { wrote: null, why: `${f.name} has no digest or day to record` };
   }
   mkdirSync(dir, { recursive: true });
   const file = join(dir, tree + ".json");
@@ -119,7 +130,7 @@ export function record({ fixtures, checks, cwd = ROOT }) {
     commit: git(["rev-parse", "HEAD"], cwd),
     at: new Date().toISOString(),
     checks,
-    fixtures: fixtures.map((f) => ({ name: f.name, digest: f.digest, day: f.day, pinned: !!f.pinned })),
+    fixtures: ran.map((f) => ({ name: f.name, digest: f.digest, day: f.day, pinned: !!f.pinned })),
   };
   writeFileSync(file, JSON.stringify(stamp, null, 2) + "\n");
   return { wrote: file, tree };
@@ -206,6 +217,32 @@ function selftest() {
     seed("shape-vault", "cccccccc", today, false);
     record({ fixtures: currentFixtures(repo), checks: 3, cwd: repo });
     expect("a pinned fixture never ages", lookup("HEAD", repo).ok);
+
+    // github#103
+    const two = record({ fixtures: currentFixtures(repo).filter((f) => f.name !== "test-vault"),
+                         checks: 3, cwd: repo });
+    expect("a run missing a fixture refuses to record", !two.wrote && /test-vault did not run/.test(two.why));
+    const stampFile = lookup("HEAD", repo).file;
+    const full = readFileSync(stampFile, "utf8");
+    const cut = JSON.parse(full);
+    cut.fixtures = cut.fixtures.filter((f) => f.name !== "test-vault");
+    writeFileSync(stampFile, JSON.stringify(cut));
+    const short = lookup("HEAD", repo);
+    expect("a stamp naming two fixtures misses", !short.ok && /names no test-vault/.test(short.why));
+    writeFileSync(stampFile, full);
+    expect("the full stamp hits again", lookup("HEAD", repo).ok);
+
+    const link = join(base, "via-link");
+    symlinkSync(HERE, link, "junction");
+    let via;
+    try {
+      via = spawnSync(process.execPath, [join(link, "suite-stamp.mjs"), "check", "HEAD"],
+                      { encoding: "utf8", cwd: repo });
+    } finally {
+      try { rmdirSync(link); } catch { unlinkSync(link); }
+    }
+    expect("the CLI answers when invoked through a junction", /^suite-stamp: /.test(via.stdout) &&
+           (via.status === 0 || via.status === 1));
   } finally {
     rmSync(base, { recursive: true, force: true });
   }
@@ -213,9 +250,15 @@ function selftest() {
   return fails.length ? 1 : 0;
 }
 
-const invokedDirectly = process.argv[1] &&
-  fileURLToPath(import.meta.url).replace(/\\/g, "/").toLowerCase() ===
-  process.argv[1].replace(/\\/g, "/").toLowerCase();
+// github#103: realpath both sides. Node realpaths the main module, so through a junction
+// argv[1] as typed never equalled import.meta.url, the CLI body was skipped, and the process
+// exited 0 saying nothing -- which both callers read as "this tree is stamped".
+const invokedDirectly = (() => {
+  if (!process.argv[1]) return false;
+  const norm = (p) => realpathSync(p).replace(/\\/g, "/").toLowerCase();
+  try { return norm(process.argv[1]) === norm(fileURLToPath(import.meta.url)); }
+  catch { return false; }
+})();
 
 if (invokedDirectly) {
   const argv = process.argv.slice(2);

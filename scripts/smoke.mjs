@@ -2,7 +2,7 @@
 import { attach, json } from "./cdp.mjs";
 import { buildPayloadVault, PAYLOAD, NOTE_COUNT } from "./check-data-escape.mjs";
 import { leftmostScreen, leftWindowPos } from "./screen.mjs";
-import { FIXTURE_MAX_AGE_DAYS, describeFixture, record as recordPass } from "./suite-stamp.mjs";
+import { FIXTURE_MAX_AGE_DAYS, FIXTURE_NAMES, describeFixture, record as recordPass } from "./suite-stamp.mjs";
 import { spawn, spawnSync } from "node:child_process";
 import { existsSync, mkdtempSync, rmSync, readFileSync, writeFileSync, readdirSync,
          renameSync, mkdirSync } from "node:fs";
@@ -4935,7 +4935,11 @@ async function main() {
 
   // github#93, decisions/0013
   const partial = ONLY.length ? "--only" : argAll("vault").length ? "--vault" : arg("url", "") ? "--url"
-                : FAST ? "--fast" : vaults.some((v) => !v.fixture) ? "an unstamped fixture" : "";
+                : FAST ? "--fast" : vaults.some((v) => !v.fixture) ? "an unstamped fixture"
+                // github#103: a fixture whose generator failed is dropped by gen(); two green
+                // fixtures are not the full suite
+                : FIXTURE_NAMES.some((n) => !vaults.some((v) => v.fixture.name === n)) ? "a fixture that could not be generated"
+                : "";
   if (!worst && !partial) {
     let checks = 0;
     for (const t of ran.values()) checks += t;

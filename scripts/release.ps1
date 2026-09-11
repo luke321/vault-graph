@@ -279,8 +279,12 @@ try {
   if (-not $ForceSuite) {
     $prev = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
-    try { & node (Join-Path $here 'suite-stamp.mjs') check HEAD } finally { $ErrorActionPreference = $prev }
-    $stamped = ($LASTEXITCODE -eq 0)
+    $stampOut = @(); $stampRc = 1
+    try { $stampOut = @(& node (Join-Path $here 'suite-stamp.mjs') check HEAD); $stampRc = $LASTEXITCODE }
+    finally { $ErrorActionPreference = $prev }
+    $stampOut | ForEach-Object { Write-Host $_ }
+    # github#103: exit 0 alone is not a stamp; the pass line itself is required
+    $stamped = ($stampRc -eq 0) -and (($stampOut -join ' ') -match 'passed the invariant suite')
   }
   if ($stamped) {
     Write-Host "HEAD's tree already passed the suite -- skipping it (-ForceSuite to run it anyway)" -ForegroundColor Yellow
