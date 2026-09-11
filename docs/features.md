@@ -13,7 +13,7 @@ pieces small enough to actually watch.
 
 | | |
 |---|---|
-| **The disc** | [The disc, growing](#the-disc-growing) · [The disc follows the vault](#the-disc-follows-the-vault) · [Subfolders](#subfolders) · [Reading each folder's share](#reading-each-folders-share) · [Unlinked notes join their folder](#unlinked-notes-join-their-folder) |
+| **The disc** | [The disc, growing](#the-disc-growing) · [Subfolders](#subfolders) · [Reading each folder's share](#reading-each-folders-share) · [Unlinked notes join their folder](#unlinked-notes-join-their-folder) |
 | **Reading a note** | [Reading one note](#reading-one-note) · [Pin a note to the hub](#pin-a-note-to-the-hub) |
 | **Navigation** | [Walking the links, and back](#walking-the-links-and-back) · [The camera](#the-camera) |
 | **Narrowing what is shown** | [Grouping by tag](#grouping-by-tag) · [Filtering by folder](#filtering-by-folder) · [A folder hidden by default](#a-folder-hidden-by-default) |
@@ -36,14 +36,6 @@ vault always draws the same picture. Refresh replays the vault growing from its 
 to now.
 
 <img src="https://raw.githubusercontent.com/luke321/vault-graph/main/assets/features/intro.webp" width="100%" alt="Refresh clicked, the whole vault regrowing from its first note to now while the date ribbon's range handle sweeps along with it">
-
-### The disc follows the vault
-
-Write a note and the disc takes it in: one two-second cascade, the new dot fading in where its
-folder puts it while everything around it re-packs. Nothing is torn down, so the filters, the
-date range, the pins and the camera all survive — which is what Refresh clears. Deleting or
-renaming a note runs the same cascade the other way. **Follow the vault** is a view setting,
-on by default. New in 2.4.0; the clip is on [its own page](https://github.com/luke321/vault-graph/blob/main/docs/features/live.md).
 
 ### Subfolders
 
