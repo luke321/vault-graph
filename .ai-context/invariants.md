@@ -2943,11 +2943,12 @@ Measured 2026-09-10, one full run under the `suite` lock, 94/94 on all three fix
 | **total** | **587 s** |
 
 The static gates ahead of the suite total 10.5 s (lint 6.3 s). The PR into `main` is not a
-suite run: its one required check took 4 s on #95. `release.ps1`'s `git push origin HEAD` after
-a website merge runs nothing either: an up-to-date push hands a pre-push hook zero ref lines
-(tested against a bare remote), and a tag push is never gated. Tonight's two `develop` pushes
-landed 21 s and 29 s after their merge commits, so both were skipped by hand; the stamp is the
-same skip with a record of what it trusted.
+suite run: its one required check took 4 s on #95. `release.ps1`'s `git push origin HEAD` —
+gone since github#94, since the ruleset refuses it — ran nothing after a website merge either:
+an up-to-date push hands a pre-push hook zero ref lines (tested against a bare remote), and a
+tag push is never gated. Tonight's two `develop` pushes landed 21 s and 29 s after their merge
+commits, so both were skipped by hand; the stamp is the same skip with a record of what it
+trusted.
 
 Keyed by tree and not by commit because the merge into `main` is a new commit by construction
 while its tree is not; not by time because `develop` moves several times a day and "a recent
