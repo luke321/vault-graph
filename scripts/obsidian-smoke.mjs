@@ -637,6 +637,7 @@ try {
                         " return { theme: v.page.getAttribute('data-theme'), bodyLight: document.body.classList.contains('theme-light'), text: cs.getPropertyValue('--text-1').trim()," +
                         " surface: cs.getPropertyValue('--surface-1').trim(), labelColor: api.renderer.getSetting ? api.renderer.getSetting('labelColor') : null," +
                         " group: g, slot: slot, token: norm(cs.getPropertyValue('--' + slot))," +
+                        " colorOf: g && api.colorOf ? norm(api.colorOf(g)) : null," +
                         " legendSwatch: lsw ? norm(lsw.style.background) : null," +
                         " barred: !!(lg && lg.classList.contains('bar'))," +
                         " bar: lg ? norm(lg.style.getPropertyValue('--vg-bar')) : null," +
@@ -667,6 +668,7 @@ try {
         const pickerMoved = before.picker !== null && before.picker !== after.picker;
         const barMoved = before.bar !== after.bar;
         const legendFollows = tokenMoved && legendMoved && after.legendSwatch === after.token;
+        const colorOfFollows = after.colorOf === after.token && restored.colorOf === before.colorOf;
         const barFollows = !before.barred || (barMoved && after.bar === after.token);
         const pickerFollows = before.picker === null || (pickerMoved && after.picker === after.token);
         const coherent = !before.barred || (barMoved === legendMoved && after.bar === after.legendSwatch);
@@ -674,6 +676,7 @@ try {
                              (!before.barred || restored.bar === before.bar);
         const parts = ["slot " + after.slot + " on " + JSON.stringify(before.group),
           "token " + before.token + " -> " + after.token + (tokenMoved ? " (moved)" : " (SAME)"),
+          "colorOf " + before.colorOf + " -> " + after.colorOf + (colorOfFollows ? " (follows)" : " (STALE)"),
           "legend swatch " + before.legendSwatch + " -> " + after.legendSwatch +
             (legendFollows ? " (follows)" : legendMoved ? " (moved, OFF the token)" : " (STALE)"),
           before.barred ? "count bar " + before.bar + " -> " + after.bar +
@@ -684,7 +687,7 @@ try {
           "bar agrees with its swatch=" + coherent,
           "restored legend swatch " + restored.legendSwatch + (restoredBack ? " (back)" : " (STUCK)")];
         if (tokenMoved && !legendMoved) parts.push("<- github#84: the legend keeps the old theme");
-        report(!!before.group && legendFollows && barFollows && pickerFollows && coherent && restoredBack,
+        report(!!before.group && legendFollows && colorOfFollows && barFollows && pickerFollows && coherent && restoredBack,
           "a theme flip carries the legend's swatch and count bar to the new palette, with the picker", parts.join("; "));
       }
     }

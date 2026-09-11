@@ -4586,6 +4586,7 @@ check("the legend's swatch and count bar follow the token across a theme flip, w
     var pick = slot ? document.querySelector('.swatch.vg-' + slot) : null;
     return { group: g, slot: slot,
              token: norm(cs.getPropertyValue('--' + slot)),
+             colorOf: g ? norm(__vg.colorOf(g)) : null,
              swatch: sw ? norm(sw.style.background) : null,
              barred: !!(lg && lg.classList.contains('bar')),
              bar: lg ? norm(lg.style.getPropertyValue('--vg-bar')) : null,
@@ -4629,6 +4630,7 @@ check("the legend's swatch and count bar follow the token across a theme flip, w
   const barMoved = before.bar !== after.bar;
   const pickerMoved = before.picker !== null && before.picker !== after.picker;
   // github#84 -- every surface lands on the moved token, and comes back with it
+  const colorOfFollows = after.colorOf === after.token && restored.colorOf === before.colorOf;
   const swatchFollows = swatchMoved && after.swatch === after.token;
   const barFollows = !before.barred || (barMoved && after.bar === after.token);
   const pickerFollows = before.picker === null || (pickerMoved && after.picker === after.token);
@@ -4638,6 +4640,7 @@ check("the legend's swatch and count bar follow the token across a theme flip, w
 
   const bits = [`slot ${after.slot} on ${JSON.stringify(before.group)}`,
     `token ${before.token} -> ${after.token}${tokenMoved ? " (moved)" : " (SAME -- flip did nothing)"}`,
+    `colorOf ${before.colorOf} -> ${after.colorOf}${colorOfFollows ? " (follows)" : " (STALE)"}`,
     `swatch ${before.swatch} -> ${after.swatch}${swatchFollows ? " (follows)" : swatchMoved ? " (moved, OFF the token)" : " (STALE)"}`,
     before.barred ? `bar ${before.bar} -> ${after.bar}${barFollows ? " (follows)" : barMoved ? " (moved, OFF the token)" : " (STALE)"}`
                   : "no count bar on this row",
@@ -4647,7 +4650,7 @@ check("the legend's swatch and count bar follow the token across a theme flip, w
     `restored swatch ${restored.swatch}${restoredBack ? " (back)" : " (STUCK)"}`];
   if (tokenMoved && !swatchMoved) bits.push("<- github#84: the legend keeps the old theme while the picker repaints");
   if (!coherent) bits.push("<- the bar and its swatch disagree, which no row may do");
-  return { ok: tokenMoved && swatchFollows && barFollows && pickerFollows && coherent && restoredBack,
+  return { ok: tokenMoved && colorOfFollows && swatchFollows && barFollows && pickerFollows && coherent && restoredBack,
            detail: bits.join("; ") };
 });
 
