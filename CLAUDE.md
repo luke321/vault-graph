@@ -69,6 +69,12 @@ measuring it: serve the page, drive it, read the numbers.
   that branch, never merges into `develop`, and never runs `release.ps1`, no matter how clean the
   result. Integrating finished branches and shipping them is the orchestrator's job alone, so one
   place is answerable for what's actually on `develop` and what a release contains.
+- **An orchestrator stops spawning new sessions once 6 Orca worktrees are already working.**
+  Each active worktree can mean its own Claude process plus Chrome over CDP plus node/npm —
+  fanning out further than that starved CPU and disk enough to force a hard restart on
+  2026-09-11, even with RAM nowhere near full. Count `orca worktree list --json` entries with
+  `workspaceStatus: in-progress` before dispatching another; at six, queue the rest and dispatch
+  only as one finishes and is merged.
 - **A release is the range, not the work in hand.** Everything it needs — a `CHANGELOG.md`
   section accounting for *every* merge since the last tag, every clip it embeds, every doc naming
   the version, the release body itself — is finished on `release/<version>` and read there before
