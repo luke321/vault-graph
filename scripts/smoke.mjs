@@ -210,6 +210,14 @@ check("nav counts share one right edge", async (p) => {
     return {n: xs.length, distinct: Array.from(new Set(xs))};
   })()`);
   const folded = await edges();
+  // github#86 -- the shared edge is the invariant, not the opening
+  // github#86 -- a vault with no subfolder has no twisty to click
+  const twisties = await p.j(`document.querySelectorAll('#vg-legend [data-tw]').length`);
+  if (!twisties) {
+    return { ok: folded.distinct.length === 1,
+             detail: `folded ${folded.n} counts / ${folded.distinct.length} edge; ` +
+                     `no subfolder anywhere in this vault, so there is no tree to open` };
+  }
   await p.eval(`(function(){ var b = document.querySelectorAll('#vg-legend [data-tw]');
                 for (var i = 0; i < b.length; i++) b[i].click(); })(); void 0`);
   await sleep(300);

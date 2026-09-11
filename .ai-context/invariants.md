@@ -1159,6 +1159,15 @@ edge at 266px with the tree open, and 9 / 9 / one edge at the folded default. Th
 button is laid out at every depth with only its opacity changing on hover, so this holds
 while hovering too.
 
+**Opening the tree is how the check gets more rows, not part of the invariant** (github#86).
+The check clicks every twisty and then requires more counts than it started with — a fair
+demand on the three folder-organised fixtures, and one the tag-organised fixture cannot meet:
+it has three top-level folders and **no subfolder at all**, so there is no twisty to click and
+the count is 4 either way. It read as `the tree never opened` on the first full run after that
+fixture joined the suite. The check now measures the twisties first and, where there are none,
+asserts the shared edge on the folded rows alone and says why. A vault that *has* a subtree is
+unchanged: every fixture that passed before had `open > folded`, which requires a twisty.
+
 ## The legend's count bar is a share of the largest folder currently shown
 
 Each legend row whose count is a plain number carries a 2px rule along the bottom of `.lg`.
