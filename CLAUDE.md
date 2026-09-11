@@ -88,6 +88,13 @@ measuring it: serve the page, drive it, read the numbers.
 
 - `git push` and merging into `develop` are separate asks, every time. `main` only ever
   receives `develop`.
+- **Which session you are is decided by the checkout you are in, not by what you were asked to
+  do.** The main checkout, `C:\git-personal\vault-graph` on `develop`, is the **orchestrator**:
+  one session, the only one that pushes to `develop`, merges branches down, or cuts a release.
+  Every other checkout — anything under `C:\git-personal\worktrees\`, i.e. any tree whose
+  `git rev-parse --show-toplevel` is not that path — is a **dispatched worker**, whatever its
+  branch says. Settle this before the first write: `git rev-parse --show-toplevel` and
+  `git worktree list` answer it in one call.
 - **Only the orchestrator session pushes to `develop` or cuts a release.** A dispatched ticket
   worktree implements, runs its own gates, and stops at its own branch — it never pushes past
   that branch, never merges into `develop`, and never runs `release.ps1`, no matter how clean the

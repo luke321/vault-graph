@@ -40,8 +40,11 @@ Five things are worth knowing before you touch anything, all expanded in `CLAUDE
 - **`git push`, merging into `develop`, and a full-suite run are each a separate ask, every
   time.** None of them is implied by permission to do the work, or by how the last one went. A
   dispatched ticket worktree stops at its own branch regardless — only the orchestrator pushes to
-  `develop` or cuts a release. An orchestrator also stops spawning new worktrees once 6 are
-  already working — more than that starved CPU/disk enough to force a hard restart once already.
+  `develop` or cuts a release. **The checkout decides which of the two you are, not the task**: the
+  main one, `C:\git-personal\vault-graph`, is the orchestrator; anything under
+  `C:\git-personal\worktrees\` is a worker; `git rev-parse --show-toplevel` settles it.
+  An orchestrator also stops spawning new worktrees once 6 are already working — more than that
+  starved CPU/disk enough to force a hard restart once already.
 
 `.ai-context/README.md` maps the design records; `.ai-context/code-map.md` and `code-index.md` are
 generated and let you jump to a line range instead of reading an 8,700-line file top to bottom.
