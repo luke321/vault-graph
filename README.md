@@ -1,10 +1,6 @@
 # Vault Graph
 
-[![Latest release](https://img.shields.io/github/v/release/luke321/vault-graph?label=release)](https://github.com/luke321/vault-graph/releases/latest)
-[![License: MIT](https://img.shields.io/github/license/luke321/vault-graph)](LICENSE)
-[![GitHub stars](https://img.shields.io/github/stars/luke321/vault-graph)](https://github.com/luke321/vault-graph/stargazers)
-[![Obsidian downloads](https://img.shields.io/badge/dynamic/json?logo=obsidian&color=%23483699&label=downloads&query=%24%5B%27vault-graph%27%5D.downloads&url=https%3A%2F%2Fraw.githubusercontent.com%2Fobsidianmd%2Fobsidian-releases%2Fmaster%2Fcommunity-plugin-stats.json)](https://community.obsidian.md/plugins/vault-graph)
-[![ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/luke321)
+[![Latest release](https://img.shields.io/github/v/release/luke321/vault-graph?label=release)](https://github.com/luke321/vault-graph/releases/latest) [![License: MIT](https://img.shields.io/github/license/luke321/vault-graph)](LICENSE) [![GitHub stars](https://img.shields.io/github/stars/luke321/vault-graph)](https://github.com/luke321/vault-graph/stargazers) [![Obsidian downloads](https://img.shields.io/badge/dynamic/json?logo=obsidian&color=%23483699&label=downloads&query=%24%5B%27vault-graph%27%5D.downloads&url=https%3A%2F%2Fraw.githubusercontent.com%2Fobsidianmd%2Fobsidian-releases%2Fmaster%2Fcommunity-plugin-stats.json)](https://community.obsidian.md/plugins/vault-graph) [![Ko-fi](https://img.shields.io/badge/Ko--fi-support-3987e5?logo=ko-fi&logoColor=white)](https://ko-fi.com/luke321)
 
 **Your whole vault as one disc.** Every note is a dot; every top-level folder owns a wedge
 of the circle whose angle is its share of the vault. Notes fill concentric rings from the
