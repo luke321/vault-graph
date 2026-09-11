@@ -4,26 +4,30 @@
 so an agent that looks for `AGENTS.md` by convention finds its way there instead of guessing, and
 it deliberately does not restate the laws: two copies of a rule become two different rules.
 
-Four things are worth knowing before you touch anything, all expanded in `CLAUDE.md`:
+Five things are worth knowing before you touch anything, all expanded in `CLAUDE.md`:
 
 - **Measure, don't reason.** The recurring failure here is arguing about the code instead of
   driving it: serve the page, drive it, read the numbers. `node scripts/smoke.mjs --only
   "<substring>"` is the iteration loop.
-- **Two things may not run twice at once.** Several agents work this repo in parallel worktrees.
-  A **screen recording** grabs a display region, so a second take captures the first one's window;
-  the **full suite** drives Chrome over CDP, so two runs fight for ports and each blames the code.
-  Both are guarded by one machine-wide mutex that every worktree shares:
+- **Two things may not run twice at once**, and they are different resources. A **screen** —
+  `record-demo.ps1` grabs a region of the desktop, and spike tests and the suite also take over
+  displays — so the lock is named after the monitor, not the job. And the **shared fixture store**,
+  which a regenerating suite run deletes out from under a concurrent one. One machine-wide mutex,
+  shared by every worktree:
 
   ```bash
-  node scripts/lock.mjs acquire record --owner "<who you are>"   # exit 1 = give up, do not record
-  node scripts/lock.mjs release record --owner "<who you are>"   # always, even on failure
+  node scripts/lock.mjs acquire screen-right --owner "<who you are>"  # exit 1 = give up
+  node scripts/lock.mjs release screen-right --owner "<who you are>"  # always, even on failure
   node scripts/lock.mjs status
   ```
 
-  `record` and `suite` are the two names. Screenshots need no lock — `shoot.mjs` captures over
-  CDP, so overlapping windows are harmless — but pass your own `--port`. `.githooks/pre-push`
-  takes the `suite` lock itself around its own run — never also wrap a `git push` in an outer
-  acquire/release, or the hook's own attempt blocks on yours and the push hangs.
+  Names: `screen-left`, `screen-right`, `screen-primary`, `suite`. `record-demo.ps1` takes its own
+  screen lock now, so you only do this by hand for something else that seizes a display. The root
+  is shared with Vault Shelf, so both plugins' jobs contend. `make-hero.ps1` needs no lock — it
+  transcodes a file. Screenshots need none — `shoot.mjs` goes over CDP — but pass your own
+  `--port`. `.githooks/pre-push` takes the `suite` lock itself around its own run — never also
+  wrap a `git push` in an outer acquire/release, or the hook's own attempt blocks on yours and the
+  push hangs.
 - **A vault that is not Lukas's own opens in restricted mode.** A fixture or generated vault puts
   up "Trust author and enable plugins?" on first open, and until it is confirmed the plugin does
   not load at all -- which reads as a broken plugin rather than as an unconfirmed dialog. Over

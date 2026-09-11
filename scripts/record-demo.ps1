@@ -87,6 +87,21 @@ if ($Monitor) {
     Write-Warning "that screen is left of the primary, so gdigrab sees negative offsets -- check the capture"
   }
 }
+# github#87
+$screenLock = $null
+if ($Monitor) { $screenLock = "screen-$Monitor" }
+elseif ($X -eq [int]::MinValue) { $screenLock = "screen-primary" }
+if ($screenLock) {
+  $lockOwner = if ($env:VG_LOCK_OWNER) { $env:VG_LOCK_OWNER } else { "record-demo pid $PID" }
+  Write-Host "taking $screenLock (owner: $lockOwner)..." -ForegroundColor DarkGray
+  & node (Join-Path $here 'lock.mjs') acquire $screenLock --owner $lockOwner
+  if ($LASTEXITCODE -ne 0) {
+    throw "$screenLock is BUSY -- another session is using that display. Nothing was recorded."
+  }
+}
+
+try {
+
 if ($X -ne [int]::MinValue) { $posX = $X }
 if ($Y -ne [int]::MinValue) { $posY = $Y }
 $chromeArgs = @(
@@ -207,4 +222,11 @@ if (Test-Path $ffprobe) {
   $dur = (& $ffprobe -v error -show_entries format=duration -of csv=p=0 $Out)
   $vid = (& $ffprobe -v error -select_streams v:0 -show_entries stream=width,height,nb_frames -of csv=p=0 $Out)
   Write-Host ("  {0}s, {1}" -f [math]::Round([double]$dur, 2), $vid) -ForegroundColor DarkGray
+}
+}
+finally {
+  # github#87
+  if ($screenLock) {
+    & node (Join-Path $here 'lock.mjs') release $screenLock --owner $lockOwner
+  }
 }
