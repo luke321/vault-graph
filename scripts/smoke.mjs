@@ -83,16 +83,23 @@ const all = [];
  * names) or about the walk itself (`clock: "real"` -- a dot's size mid-cascade, a fade, a
  * hover ramp). Measured before the default was chosen: a cascade at timeScale 0.1 lands on a
  * byte-identical resting layout on all four fixtures (0 notes moved past 0.1 units, 0 sizes
- * changed) in ~440 ms instead of ~1720 ms; the floor is the page's MIN_FRAMES.
+ * changed) in ~440 ms instead of ~1720 ms; the floor is the page's MIN_FRAMES. "Real" is
+ * whatever the page booted with (1.25 unless ?slow= says otherwise), read once per page.
+ *
+ * An explicit --vault (or --url) carries no fixture stamp and runs EVERY check on what it
+ * was given -- so a check scoped off a fixture is not scoped off there, and reads as a
+ * regression only if it was scoped off for misbehaving rather than for being uninformative.
  */
 const FAST_CLOCK = 0.1;
 const DEFAULT_ON = ["demo-vault"];
-const check = (name, fn, opts) => all.push({
-  name, fn,
-  on: (opts && opts.on) || DEFAULT_ON,
-  clock: (opts && opts.clock) === "real" ? "real" : "fast",
-});
-// github#113 -- an explicit --vault carries no fixture stamp, and runs everything
+const check = (name, fn, opts) => {
+  const on = (opts && opts.on !== undefined) ? opts.on : DEFAULT_ON;
+  // a typo here would silently run the check nowhere; FIXTURE_NAMES is the vocabulary
+  if (on !== "all" && !(Array.isArray(on) && on.length && on.every((f) => FIXTURE_NAMES.includes(f)))) {
+    throw new Error(`check "${name}": on must be "all" or a non-empty list of ${FIXTURE_NAMES.join(", ")}`);
+  }
+  all.push({ name, fn, on, clock: (opts && opts.clock) === "real" ? "real" : "fast" });
+};
 const runsOn = (c, fixture) => !fixture || c.on === "all" || c.on.indexOf(fixture.name) >= 0;
 
 const ONLY = argAll("only").map((v) => v.toLowerCase());
@@ -3648,7 +3655,7 @@ check("a folder's legend row toggles \"hidden by default\" from its context menu
     // by hand left the legend row's aria-pressed stale, and the next check read that row
     // as hidden while the page counted the group as shown (github#113).
     var restored = false;
-    if (visBtn) {
+    if (visBtn && rowAfter) {
       rowAfter.dispatchEvent(new MouseEvent("contextmenu", {
         bubbles: true, clientX: rect.left + 5, clientY: rect.top + 5 }));
       var again = menu.hidden ? null : menu.querySelector("[data-vis]");
@@ -5154,7 +5161,11 @@ async function runOne(vault, work) {
         "backgrounding the off-screen window; the launch flags above are what prevent it."
       );
     }
-    const ctx = { errors, fixture: (work && work.vault && work.vault.fixture) || null };
+    const ctx = { errors };
+
+    // github#113 -- the page's own clock, restored after every fast check: 1.25 as shipped,
+    // not 1 -- restoring 1 ran every real-clock check after the first 20% fast (review)
+    const nativeClock = await page.j("__vg.timeScale").catch(() => 1.25);
 
     // github#113 -- what the page is still doing, as a list; empty when at rest
     const stillBusy = async () => {
@@ -5215,7 +5226,7 @@ async function runOne(vault, work) {
                       (done ? `settled in ${((Date.now() - tb) / 1000).toFixed(1)}s`
                             : "STILL busy after 20s") };
       }
-      if (fast) await page.eval(`__vg.timeScale = 1; void 0`).catch(() => {});
+      if (fast) await page.eval(`__vg.timeScale = ${nativeClock}; void 0`).catch(() => {});
       const ms = Date.now() - t0;
       timings.push({ name: c.name, ms });
       if (!r.ok) failed++;
@@ -5499,6 +5510,15 @@ async function main() {
     const intro = mine.filter(needsIntro);
     if (rest.length) jobs.push({ vault: v, checks: rest, tag: v.label, url: atRest });
     if (intro.length) jobs.push({ vault: v, checks: intro, tag: v.label + " (intro)", url });
+  }
+  // github#113 -- a check that landed in no job would otherwise vanish with exit 0: a
+  // fixture that could not be generated used to cost that fixture's coverage, and now
+  // costs every check scoped to it (review)
+  const homeless = picked.filter((c) => !jobs.some((jb) => jb.checks.includes(c)));
+  if (homeless.length) {
+    throw new Error(`${homeless.length} selected check(s) run on no available fixture -- ` +
+                    `${homeless.map((c) => `"${c.name}" (${c.on === "all" ? "all" : c.on.join("/")})`).slice(0, 4).join("; ")}` +
+                    (homeless.length > 4 ? "; ..." : ""));
   }
   console.log("");
 
