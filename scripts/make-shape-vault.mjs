@@ -64,9 +64,29 @@ const TAG_STEMS = ["anchor", "beacon", "cinder", "delta", "ember", "fathom",
                    "girder", "harbor", "ingot", "jetty", "kiln", "lumen"];
 const TAG_LEAVES = ["brief", "draft", "field", "guide", "index", "log",
                     "memo", "plan", "query", "sketch", "trace"];
-// github#107 -- 12 x 11 names, fixed order; tail needs 115
+// github#119 -- two tails: hierarchical (stem-leaf) and unrelated words
+// github#119 -- real vault's tail is 20% clustered at 3+ chars, not 0%
+const TAIL_UNRELATED = [
+  "abacus", "ballast", "cadence", "dovetail", "eaves", "ferrule", "gantry", "halyard",
+  "isthmus", "jigsaw", "keystone", "lintel", "mortise", "nacelle", "obelisk", "plinth",
+  "quarry", "rafter", "spandrel", "tiller", "undertow", "vellum", "wainscot", "xylem",
+  "yardarm", "zephyr", "alcove", "brazier", "cistern", "dowel", "escarp", "flange",
+  "grommet", "hasp", "inglenook", "joist", "kerf", "louver", "mullion", "newel",
+  "oriel", "parapet", "quoin", "rebate", "soffit", "transom", "uprise", "valance",
+  "weir", "yoke", "apse", "buttress", "corbel", "dado", "embrasure", "finial",
+  "gable", "impost", "jamb", "keel", "lancet", "muntin", "nosing", "ogee",
+  "pilaster", "quirk", "reveal", "tracery", "undercroft", "verge", "wicket", "zinc",
+  "cupola", "dormer", "eyelet", "fascia", "gusset", "hinge", "inlay", "knurl",
+  "ledger", "mantel", "niche", "ochre",
+];
+const TAIL_HIERARCHICAL = [];
+for (const s of TAG_STEMS) for (const l of TAG_LEAVES) TAIL_HIERARCHICAL.push(`${s}-${l}`);
+// github#119 -- one in five of the tail is hierarchical, aimed at the real 20%
 const TAIL_NAMES = [];
-for (const s of TAG_STEMS) for (const l of TAG_LEAVES) TAIL_NAMES.push(`${s}-${l}`);
+for (let i = 0; i < 15; i++) TAIL_NAMES.push(TAIL_HIERARCHICAL[i]);
+for (let i = 0, h = 15, u = 0; i < 100; i++) {
+  TAIL_NAMES.push(i % 5 === 0 ? TAIL_HIERARCHICAL[h++] : TAIL_UNRELATED[u++]);
+}
 
 const DOMINANT = "inbox";
 // github#107 -- [name, note count]; mid band named, tail generated
@@ -134,3 +154,17 @@ console.log(`  tail: ${atMost(1)} tags on exactly one note ` +
             `(${Math.round(atMost(3) / per.size * 100)}%)`);
 console.log(`  dominant tag: ${DOMINANT} ${per.get(DOMINANT)}/${notes.length} = ` +
             `${Math.round(per.get(DOMINANT) / notes.length * 100)}%`);
+// github#119 -- how much of the tail a leading-prefix clustering would actually catch, so a
+// proposal that only handles hierarchical names cannot look complete here
+const lcp = (a, b) => { let n = 0; while (n < a.length && n < b.length && a[n] === b[n]) n++; return n; };
+const smallNames = [...per.entries()].filter(([, v]) => v <= 3).map(([t]) => t).sort();
+for (const min of [3, 4]) {
+  let grouped = 0, runs = 0, run = 1;
+  for (let i = 1; i <= smallNames.length; i++) {
+    if (i < smallNames.length && lcp(smallNames[i - 1], smallNames[i]) >= min) { run++; continue; }
+    if (run > 1) { runs++; grouped += run; }
+    run = 1;
+  }
+  console.log(`  tail names sharing >=${min} leading chars: ${grouped}/${smallNames.length} ` +
+              `(${Math.round(grouped / smallNames.length * 100)}%) in ${runs} clusters`);
+}
