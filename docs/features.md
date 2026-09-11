@@ -43,8 +43,7 @@ Write a note and the disc takes it in: one two-second cascade, the new dot fadin
 folder puts it while everything around it re-packs. Nothing is torn down, so the filters, the
 date range, the pins and the camera all survive — which is what Refresh clears. Deleting or
 renaming a note runs the same cascade the other way. **Follow the vault** is a view setting,
-on by default. New in 2.4.0; the clips — one filmed in Obsidian itself, one on the standalone
-page — are on [its own page](https://github.com/luke321/vault-graph/blob/main/docs/features/live.md).
+on by default. New in 2.4.0; the clip is on [its own page](https://github.com/luke321/vault-graph/blob/main/docs/features/live.md).
 
 ### Subfolders
 
