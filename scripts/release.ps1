@@ -201,6 +201,21 @@ try {
     throw "plugin/whats-new.md is for '$noteVersion', not $Version. A MINOR or MAJOR ships an update note (github#83) -- write it first."
   }
 
+  # AND IT HAS TO BE LOOKED AT (github#83, github#128). The guard above proves the note EXISTS
+  # and is for this version; it proves nothing about what a user will actually see. The strip is
+  # a user-facing surface that ships in the release and, unlike every other one, has no clip and
+  # no screenshot anywhere in the repo -- 2.6.0 shipped it without anyone having seen it rendered.
+  # scripts/update-note-check.mjs already mounts it in a real Obsidian and writes 01-strip-up.png;
+  # this only names the command, because it drives Obsidian on a display and is not something to
+  # run from inside a release script.
+  if ($Version -match '\.0$') {
+    Write-Host "`n=== update strip ===" -ForegroundColor Cyan
+    Write-Host "  plugin/whats-new.md is for $noteVersion. RENDER IT AND LOOK BEFORE YOU TAG:" -ForegroundColor Yellow
+    Write-Host "    node scripts/lock.mjs acquire screen-left --owner `"release $Version`"" -ForegroundColor DarkGray
+    Write-Host "    node scripts/update-note-check.mjs --out <dir>   # 01-strip-up.png" -ForegroundColor DarkGray
+    Write-Host "    node scripts/lock.mjs release screen-left --owner `"release $Version`"" -ForegroundColor DarkGray
+  }
+
   Write-Host "`n=== release notes ===" -ForegroundColor Cyan
   Write-Host $section -ForegroundColor DarkGray
 

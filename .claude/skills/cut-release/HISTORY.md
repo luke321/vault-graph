@@ -1,5 +1,20 @@
 # cut-release — change log
 
+## 2026-09-11 - the update strip gets rendered and looked at
+
+New step 9, "Render the update strip and show it", between the clip review and the dry run;
+release.ps1 prints the command to run for a MINOR or MAJOR. Everything after renumbered.
+
+2.6.0 shipped the strip -- a user-facing surface, above the disc, on first open after the
+update -- without anyone having seen it rendered. release.ps1 checks that
+`plugin/whats-new.md` exists and names the version, which says nothing about what a user sees;
+the clips get a review page and the strip got nothing. The first real look happened after the
+release, and immediately produced github#126 (the Got it button is in the wrong place).
+
+scripts/update-note-check.mjs already mounts it in a real Obsidian and writes 01-strip-up.png;
+nothing was surfacing that image. The step names it, says to put it in the same Artifact as the
+clips, and says what to look at.
+
 ## 2026-09-11 - ask everything at the front, then run
 
 New "Ask everything first, then run" section: the name, any missing clip/act, this release's own

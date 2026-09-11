@@ -47,8 +47,9 @@ stopping again.
 
 **Then run steps 1-16 without stopping**, except for these, which are not optional:
 
-- **The clip review (step 8).** He looks at what was recorded before it is committed. This
-  catches a capture that grabbed the wrong window, which no gate can see.
+- **The clip review (step 8) and the update strip (step 9).** He looks at what was recorded
+  before it is committed, and at the strip rendered, before either ships. These catch a capture
+  that grabbed the wrong window and a strip nobody has seen — neither of which any gate sees.
 - **The `develop` -> `main` PR (step 12).** Merge it yourself if you can; the ruleset requires a
   PR, not a human.
 - **Anything that fails.** A red gate, a failing check, a workflow that goes red: stop, fix it,
@@ -88,13 +89,14 @@ apply to this release; add one row per this release's own polish/fix asks at the
 | 5 | Release name — propose 2-4 candidates, his pick | |
 | 6 | Re-record every clip and the hero (github#121) | |
 | 7 | **Look at every re-recorded clip in one Artifact, and get a yes, before committing any of them** | |
-| 8 | Merge `release/<version>` → `develop` (local) | |
-| 9 | **One** plain `git push origin develop` | |
-| 10 | PR/merge `develop` → `main` | |
-| 11 | Draft the release body, publish as an Artifact, get an explicit go-ahead | |
-| 12 | `release.ps1` on `main` — gates, tag, push | |
-| 13 | GitHub Actions publishes the release — automatic once tagged | |
-| 14 | Post to Ko-fi: title, disc screenshot, community-page link then release link; open the page | |
+| 8 | **Render the update strip and show it** (MINOR/MAJOR only) — a real screenshot, not the markdown | |
+| 9 | Merge `release/<version>` → `develop` (local) | |
+| 10 | **One** plain `git push origin develop` | |
+| 11 | PR/merge `develop` → `main` | |
+| 12 | Draft the release body, publish as an Artifact, get an explicit go-ahead | |
+| 13 | `release.ps1` on `main` — gates, tag, push | |
+| 14 | GitHub Actions publishes the release — automatic once tagged | |
+| 15 | Post to Ko-fi: title, disc screenshot, community-page link then release link; open the page | |
 ```
 
 ## 1. List the range — before anything else
@@ -199,10 +201,35 @@ fit under 16MB, declare the `assets` capability and `upload_asset` them instead 
 `artifact-capabilities` first). Fixtures only, never a real vault — which is exactly what went
 wrong the day this rule was written.
 
-Commit the new assets only after that yes — a dirty tree is never stamped (step 9) and
+Commit the new assets only after that yes — a dirty tree is never stamped (step 10) and
 `release.ps1` refuses one.
 
-## 9. Rehearse the local half — this is the run that pays the suite
+## 9. Render the update strip and show it — MINOR and MAJOR only
+
+`plugin/whats-new.md` is markdown; **what ships is a strip above the disc in a real Obsidian**,
+and reading the markdown is not seeing it. `release.ps1` only proves the file exists and names
+this version. 2.6.0 shipped the strip without anyone having looked at it rendered once, which is
+how the Got it button's placement (github#126) was first noticed *after* the release.
+
+```bash
+node scripts/lock.mjs acquire screen-left --owner "release <version>"
+node scripts/update-note-check.mjs --out <scratchpad>/strip
+node scripts/lock.mjs release screen-left --owner "release <version>"
+```
+
+It mounts the plugin in a real Obsidian, upgrades a vault from a `data.json` without
+`lastSeenVersion`, and writes `01-strip-up.png` (the strip as a user first sees it),
+`02-dismissed.png` and `03-chain.png` (several missed releases chained). It drives Obsidian on a
+display, so it takes the screen lock; it is also a 29-assertion check, so a failure here is a
+real one.
+
+**Put `01-strip-up.png` in front of him** — in the same Artifact as the clips (step 8) if that
+step ran, otherwise its own. What to look at: the bullets say something a user understands, the
+release links point at the right version, and the control the note names is the one pulsing.
+
+Skip on a PATCH: no strip is shown, by design.
+
+## 10. Rehearse the local half — this is the run that pays the suite
 
 ```powershell
 .\scripts\release.ps1 <version> -DryRun -AllowAnyBranch *> dryrun.log
@@ -216,7 +243,7 @@ re-run **on this branch** — don't chase the failure downstream.
 `node scripts/suite-stamp.mjs check` says what the next push will do; `... list` shows every
 stamped tree on this machine.
 
-## 10. Push the release branch
+## 11. Push the release branch
 
 ```bash
 git push origin release/<version>
@@ -228,7 +255,7 @@ This runs `release.yml` as a **dry run** on GitHub's runner: builds, gates, atte
 files, creates no Release. It rehearses the half `release.ps1` can't run locally. Read the run's
 summary — three SHA-256 lines and an attestation URL, no Release created.
 
-## 11. Merge into `develop`, then the one push
+## 12. Merge into `develop`, then the one push
 
 ```bash
 git switch develop && git merge --no-ff release/<version>
@@ -253,7 +280,7 @@ re-running the whole suite blind), commit, and push again — plain, still no ou
 that fails on a genuinely flaky check is rare after github#110 (the suite is fully serialized);
 don't assume flake without isolating the specific check first.
 
-## 12. Merge `develop` → `main`
+## 13. Merge `develop` → `main`
 
 On the website: open the PR, merge it. The ruleset requires this and has no bypass for a direct
 push (github#94). The only required check is the branch-policy job.
@@ -262,7 +289,7 @@ push (github#94). The only required check is the branch-policy job.
 git switch main && git pull --ff-only
 ```
 
-## 13. Review the release body — before the tag, not after
+## 14. Review the release body — before the tag, not after
 
 **Once the tag exists nothing changes.** `release.yml` publishes live the instant the tag lands —
 no draft gate, and the workflow drops the raw `## <version>` CHANGELOG section straight into the
@@ -315,7 +342,7 @@ then applies the approved version — after `release.ps1` has created the draft-
 release (the Release object doesn't exist before the tag), but the *content* and the *approval*
 both happened before this step, not as a post-hoc edit nobody signed off on.
 
-## 14. Tag and push — `release.ps1` on `main`
+## 15. Tag and push — `release.ps1` on `main`
 
 ```powershell
 .\scripts\release.ps1 <version>
@@ -323,12 +350,12 @@ both happened before this step, not as a post-hoc edit nobody signed off on.
 
 Refuses: a `v`-prefixed tag, a version `manifest.json` doesn't claim, a missing `## <version>`
 CHANGELOG section, a branch other than `main`, a dirty tree, a `main` that isn't exactly
-`origin/main`. Finds the stamp for `HEAD`'s tree (from step 9, carried through the merges) and
+`origin/main`. Finds the stamp for `HEAD`'s tree (from step 10, carried through the merges) and
 skips the suite — it does not re-run it. Writes the annotated tag (`--cleanup=verbatim`, or the
 markdown headings in the tag message get silently stripped) with the CHANGELOG section as its
 message, pushes the tag. **Never pushes `main` itself.**
 
-## 15. Let the workflow publish
+## 16. Let the workflow publish
 
 The tag push triggers `.github/workflows/release.yml`: re-verifies the version, runs the static
 gates again, attests the three files (`main.js`, `manifest.json`, `styles.css`) via Sigstore/OIDC,
@@ -339,9 +366,9 @@ gh run watch
 gh release view <version> --json tagName,name,assets,isDraft
 ```
 
-## 16. Post to Ko-fi
+## 17. Post to Ko-fi
 
-Once the Release exists (step 15), post an update at ko-fi.com/luke321. **Do it yourself with the
+Once the Release exists (step 16), post an update at ko-fi.com/luke321. **Do it yourself with the
 Claude in Chrome tools** -- he is signed in there; do not hand him a link and a block of text to
 paste. The flow, as measured on 2.6.0:
 
