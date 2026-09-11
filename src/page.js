@@ -797,6 +797,19 @@ function mountVaultGraph(root, data, deps) {
   /** @param {NodeAttrs} a @returns {number} folder segments in this note's path */
   function segLen(a) { return 1 + ((a.dirs && a.dirs.length) || 0); }
 
+  // github#76 -- does any note sit under this candidate root? Asked BEFORE the root is
+  // adopted, so it cannot use `inRootA`, which reads the one in force.
+  /** @param {string[]} segs @returns {boolean} */
+  function anyNoteUnder(segs) {
+    var found = false;
+    graph.forEachNode(function (_id, a) {
+      if (found) return;
+      for (var i = 0; i < segs.length; i++) if (segAt(a, i) !== segs[i]) return;
+      found = true;
+    });
+    return found;
+  }
+
   /** @param {NodeAttrs} a @returns {boolean} */
   function inRootA(a) {
     if (!rootDepth) return true;
@@ -8124,6 +8137,11 @@ function mountVaultGraph(root, data, deps) {
     // only ever taken there. Refusing is never user-visible: the nav gestures that offer
     // a drill return null off the folder disc.
     if (next && state.dim !== "folder") return state.root;
+    // github#76 -- a root no note lives under has no disc at all: `buildWedgePlan` comes
+    // back null and the page falls over on `.cells`. Refuse it the same way, so `setRoot`
+    // is total for any string a caller can hand it -- the nav gestures only ever name a
+    // folder that is on screen, but `__vg.setRoot` is public and a harness can typo one.
+    if (next && !anyNoteUnder(next.split("/"))) return state.root;
 
     var live = !!renderer && !instant;
     /** @type {Record<string, string>} */
