@@ -36,4 +36,4 @@ that's what `release.ps1`'s staleness check reads.
 | | |
 |---|---|
 | **Introduced in** | `2.5.0` |
-| **Last re-recorded** | `2.5.0 — 2026-09-11` — 18.6 s at 1586x992, encoded at 960 px (1.5 MB) |
+| **Last re-recorded** | `2.6.0 — 2026-09-11` — 18.6 s at 1586x992, encoded at 960 px (1.5 MB) |
