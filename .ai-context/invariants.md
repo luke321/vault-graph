@@ -2000,7 +2000,7 @@ the same change as the code that moved the layout.
 
 **Why a snapshot taken today stays valid indefinitely — for two of the three.** The fixture
 generators default `--end` to today (so the heatmap's 52-week window stays exercised), which
-means the fixture store's weekly refresh (`FIXTURE_MAX_AGE_DAYS`, `smoke.mjs`) regenerates
+means the fixture store's weekly refresh (`FIXTURE_MAX_AGE_DAYS`, `suite-stamp.mjs`) regenerates
 each vault with a different `--end` periodically. Measured before trusting this at all: built
 the demo and shape vaults twice each, 3.5 years apart in `--end`, and compared band
 assignment plus every note's exact `(x, y)` — identical to the full float64, both vaults,
@@ -2906,6 +2906,14 @@ folder is a group, every note is shown, and `checkPlanParity()` agrees with itse
 navigates back to the fixture page and waits for rest, so the checks after it start where
 they always did.
 
+**The return gets a longer readiness budget than the outbound pages** (github#105). A payload
+vault is one to five notes; the fixture page is the `?rest` URL, so coming home is a full
+re-mount the size of the fixture. The outbound navigations keep **15 s**; the return gets the
+**30 s** `runOne()` gives the identical ready predicate at first load, and the check reports
+what it took (`back in 0.4s` on demo, `0.7s` with `--vault` pointed at the 10k). A return that
+times out throws, and `runOne()` then carries the *next* checks in that shard on a page still
+mid-mount, which is why the asymmetry was worth removing rather than leaving at 37x headroom.
+
 The planner's maps are indexed by folder names, and a plain `{}` inherits `Object.prototype`:
 `byCell["constructor"]` is a function before anything was stored, so the `if (!byCell[mKey])`
 initialisation is skipped and `byCell[mKey].push(mId)` throws. Measured on `develop@f5e18f0`
@@ -2932,7 +2940,7 @@ folder as shown by default was dropped on the way to `saveData` and forgotten on
 load, and a `constructor` folder's colour row read `Object` as its pinned slot.
 
 ```bash
-node scripts/smoke.mjs --only "Object.prototype"      # 7 pages per fixture, ~7s each
+node scripts/smoke.mjs --only "Object.prototype"      # 7 pages, ~8s; demo fixture by default
 ```
 
 The layout equations were not touched: the golden snapshots on all three fixtures are the

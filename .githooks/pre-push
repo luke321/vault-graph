@@ -363,10 +363,21 @@ fi
 # against, in the shared git common dir). main only ever receives develop, so the merge commit
 # that reaches main carries exactly the tree develop's push already gated -- measured on 2.3.0,
 # 2.4.0 and 2.4.1, byte-identical trees -- and re-driving Chrome for ten minutes against
-# identical content is cost, not a second opinion. So: if every commit being pushed has a
-# stamp, the suite is skipped and the stamp is named. A commit whose tree nobody has measured
-# -- a merge that brought new content, a fixture that was regenerated since -- runs it as
-# before. Nothing here trusts a commit hash, a branch name or a clock.
+# identical content is cost, not a second opinion. So: if the tip of every ref being pushed
+# has a stamp, the suite is skipped and the stamp is named. Only those tips are looked up --
+# not every commit in the range. A tip whose tree nobody has measured -- a merge that brought
+# new content, a fixture that was regenerated since -- runs it as before. Nothing here trusts
+# a commit hash, a branch name or a clock.
+#
+# github#105: a DELETION (git push origin :develop) pushes the all-zero sha, which names no
+# tree, so it is left out of gated_shas above and the loop below never runs. stamped=1 as an
+# initial value would then announce a suite pass for a push that carried no tree at all. An
+# empty list here means every develop/main ref in this push is a deletion -- a push that also
+# updates one of them still has that tip to look up, and falls through to the loop.
+if [ -z "$gated_shas" ]; then
+  echo "pre-push: nothing to gate -- the develop/main ref(s) here are deletions, which carry no tree"
+  exit 0
+fi
 stamped=1
 for sha in $gated_shas; do
   # github#103: exit 0 alone is not a stamp -- a CLI whose body never ran also exits 0 -- so
@@ -376,7 +387,7 @@ for sha in $gated_shas; do
   case "$out" in *"passed the invariant suite"*) ;; *) stamped="" ;; esac
 done
 if [ -n "$stamped" ]; then
-  echo "pre-push: every tree being pushed already passed the invariant suite -- skipping it"
+  echo "pre-push: the tip of every ref being pushed already passed the invariant suite -- skipping it"
   exit 0
 fi
 
