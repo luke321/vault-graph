@@ -421,10 +421,11 @@ to do nothing. Tag colours would be a `tagColors` map, and that is its own featu
 ```javascript
 __vg.setDim("tag");             // and "folder" to come back
 __vg.filingOf("<note id>");     // { g, sub, dirs } in the dimension on screen
-__vg.setMultiTag(true);         // the copies
-__vg.noteOf(id); __vg.copiesOf(id);
+__vg.noteOf(id);                // a stand-in's note, mid-switch; the id itself at rest
+__vg.standIns();                // the stand-ins a switch is drawing, none at rest
+__vg.geomLock;                  // the rings as locked, and the dimension they came from
 ```
 
 ```bash
-node scripts/smoke.mjs --only "tags:" --only "multi:" --only golden
+node scripts/smoke.mjs --only "tags:" --only golden
 ```

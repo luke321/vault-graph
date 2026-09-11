@@ -1127,7 +1127,8 @@ class VaultGraphSettingTab extends PluginSettingTab {
     this.renderColourSection(new Setting(containerEl).setDesc(COLOURS_DESC));
   }
 
-  /** github#86 -- which grouping the colour section is showing @type {"folder" | "tag"} */
+  // github#86 -- the grouping the colour section shows
+  /** @type {"folder" | "tag"} */
   colourDim = "folder";
 
   /**
@@ -1168,7 +1169,7 @@ class VaultGraphSettingTab extends PluginSettingTab {
 
   redrawColours() {
     if (!this.scope) return;
-    // github#86 -- the vault's own folders are the first guess, and only for the folder tab;
+    // github#86 -- the vault's folders are the first guess, folder tab only;
     // github#86 -- the open view answers for either grouping a moment later
     if (this.colourDim === "folder") {
       let auto = 0;
@@ -1189,7 +1190,7 @@ class VaultGraphSettingTab extends PluginSettingTab {
     const api = view && view.handle && view.handle.api;
     if (!api || !api.groupOrder || !api.palette || !scope || !scope.isConnected) return;
 
-    // github#86 -- the page answers for the grouping this tab is on, not only the one on screen
+    // github#86 -- the page answers for the tab's grouping, on screen or not
     const groups = api.groupsOf
       ? api.groupsOf(this.colourDim).map((g) => ({ name: g.name, n: g.n, slot: g.slot, autoSlot: g.autoSlot }))
       : api.groupOrder().map((name) => ({

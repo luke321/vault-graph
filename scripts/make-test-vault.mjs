@@ -64,13 +64,11 @@ const ARTICLES = ["Notes on distributed systems", "Why interfaces rot",
 
 const TAGS = ["idea", "reference", "howto", "review", "draft", "question", "decision",
   "seedling", "evergreen", "permanent"];
-// github#86, design/0015 -- two nested families, one two deep, so a demo vault's tag disc has
-// sub-wedges and a twisty to show; a note that carries one also carries a flat tag
+// github#86, design/0015 -- two nested families, one two deep: sub-wedges and a twisty
 const NESTED = ["area/health", "area/health/sleep", "area/finance", "area/career",
   "project/greenhouse", "project/website", "project/thesis"];
-// github#86 -- drawn from a SECOND stream, so the tags change and nothing else in the vault does:
-// one extra draw on the main stream would re-roll every later folder, day and link, and the
-// folder goldens with them
+// github#86 -- a SECOND stream: the tags change and nothing else does
+// github#86 -- (an extra main-stream draw would re-roll the folder goldens)
 let seed2 = Number(arg("seed", 1)) ^ 0x5bd1e995;
 const rnd2 = () => {
   seed2 |= 0; seed2 = (seed2 + 0x6D2B79F5) | 0;
@@ -267,7 +265,7 @@ for (const n of notes) {
   createdDayOf.set(n, day);
   const created = dayStr(day);
   const tags = rnd() < 0.55 ? some(TAGS, int(1, 2)) : [];
-  // github#86 -- one note in five carries a nested tag, first, so its wedge is the nested one
+  // github#86 -- one note in five leads with a nested tag: a nested wedge
   if (rnd2() < 0.2) tags.unshift(NESTED[Math.floor(rnd2() * NESTED.length)]);
   const fm = bare ? "" : ["---", `created: ${created}`,
     tags.length ? `tags: [${tags.join(", ")}]` : null,

@@ -253,7 +253,7 @@ github#86, design/0015. The lattice gives every note one cell in one wedge. A fo
 guarantees that by itself; a tag does not, so the tag dimension has to be held to it.
 
 ```bash
-node scripts/smoke.mjs --only "tags:" --only "multi:"
+node scripts/smoke.mjs --only "tags:"
 ```
 
 Four claims, and the counts are the whole check:
@@ -271,7 +271,12 @@ Four claims, and the counts are the whole check:
   snapshots on the three folder-organised fixtures are that check, and the tag fixture's
   golden, recorded in the tag dimension, is the other half.
 
-**With "Notes in every tag" on the count changes on purpose and nothing else may.** A note
+**One dot per tag came out on 2026-09-10 as github#91**, and the two paragraphs below are the
+record of what it measured while it was in — the counts a return has to reproduce. The copy
+machinery (`dupOf`, `noteOf`) stays, because a dimension switch's stand-ins are copies for the
+length of the switch, and every walk that counts notes still skips them.
+
+**With "Notes in every tag" on the count changed on purpose and nothing else could.** A note
 with *k* distinct tags becomes *k* dots, so members and counts rise to the dot count — while
 the heatmap's note-days, the search's hits per note, the timeline's `tlMax` and the footer's
 note count all stay exactly what they were. Measured: demo 1,403 notes → **1,721 dots** with

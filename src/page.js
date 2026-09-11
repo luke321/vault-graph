@@ -412,8 +412,8 @@ function mountVaultGraph(root, data, deps) {
     return out;
   }
   // github#86, design/0015 -- every grouping keeps its OWN colour pins, sub-tint pins and
-  // github#86 -- default-visibility map, under the same three shapes. A dimension reads its
-  // github#86 -- own; the settings panel reads the tab you are on.
+  // github#86 -- default-visibility map, under the same three shapes
+  // github#86 -- the settings panel reads the tab you are on
   /** @type {Record<string, SlotMap>} */
   var dimColors = { folder: cleanSlotMap(deps.folderColors), tag: cleanSlotMap(deps.tagColors) };
   /** @type {Record<string, SlotMap>} */
@@ -458,9 +458,8 @@ function mountVaultGraph(root, data, deps) {
   // github#86, design/0015
   /** @type {("folder" | "tag")[]} */
   var DIMS = ["folder", "tag"];
-  // github#86, design/0015 -- which dimension the settings panel is showing. It follows the disc
-  // github#86 -- on a switch, so opening the panel after switching lands on the tab you expect,
-  // github#86 -- and stays where you put it while the panel is open.
+  // github#86, design/0015 -- the dimension the settings panel shows
+  // github#86 -- it follows the disc on a switch, and stays put while open
   /** @type {"folder" | "tag"} */
   var settingsDim = "folder";
   var dimStart = DIMS.indexOf(/** @type {"folder" | "tag"} */ (deps.dim)) >= 0
@@ -834,13 +833,12 @@ function mountVaultGraph(root, data, deps) {
 
   /** @type {Record<string, string> | null} */
   var moveFrom = null;
-  // github#86, design/0015 -- a dot still in the disc being left keeps the colour it had there
+  // github#86, design/0015 -- a dot in the disc being left keeps its colour
   /** @type {Record<string, string> | null} */
   var leftColor = null;
-  // github#86, design/0015 -- a dimension switch draws BOTH discs from its first frame: every
-  // github#86 -- note of the disc being left fades where it stands, and a stand-in per note
-  // github#86 -- (a copy, as a tag copy is) waits dark at the note's seat in the disc arriving.
-  // github#86 -- At settle the note takes the stand-in's seat and the stand-in goes.
+  // github#86, design/0015 -- a switch draws BOTH discs from its first frame
+  // github#86 -- the left disc fades in place; stand-ins wait dark, seated
+  // github#86 -- at settle the note takes the stand-in's seat, and it goes
   /** @type {Record<string, boolean>} */
   var leaving = dict();
   /** @type {Record<string, string>} */
@@ -849,8 +847,8 @@ function mountVaultGraph(root, data, deps) {
   var standIns = [];
   // github#86 -- true while planning in the dimension being left
   var oldWorld = false;
-  // github#86, design/0015 -- the nav bar during a switch: the rows of the disc being left,
-  // github#86 -- with their counts and colours as they were, dropping out as their notes fade
+  // github#86, design/0015 -- the nav bar mid-switch: the left disc's rows stay,
+  // github#86 -- counts and colours as they were, dropping out as notes fade
   /** @typedef {{ dim: string, order: string[], counts: Record<string, number>, colors: Record<string, string>, fill: Record<string, string>, swTitle: Record<string, string>, bandLock: Record<string, boolean> | null, subs: Record<string, boolean>, open: Record<string, boolean>, hidden: Record<string, boolean>, basis: number, basisGroup: string }} LegendSwitch */
   /** @type {LegendSwitch | null} */
   var legendSwitch = null;
@@ -858,7 +856,7 @@ function mountVaultGraph(root, data, deps) {
   /** @param {string} id @returns {string} */
   function groupOf(id) {
     if (moveFrom) { var mf = moveFrom[id]; if (mf !== undefined) return mf; }
-    // github#86 -- a note fading out of the disc being left is still filed there
+    // github#86 -- a note fading out of the left disc is still filed there
     if (leftGroup[id] !== undefined) return leftGroup[id];
     // github#3, github#86 -- "join their folder" means "join their group"
     if (!adj[id]) return unlinkedByFolder ? fileGroup(id) : UNLINKED;
@@ -868,8 +866,8 @@ function mountVaultGraph(root, data, deps) {
   // github#86, design/0015 -- D-9: one dot per tag; a copy is not a note
   // github#86 -- a NUL cannot occur in a vault path
   var SAT_SEP = "\u0000";
-  // github#91 -- the persistent copies, one dot per tag a note carries, came out on 2026-09-10;
-  // github#91 -- the switch's stand-ins keep the copy machinery (dupOf, SAT_SEP, noteOf)
+  // github#91 -- the persistent copies came out on 2026-09-10
+  // github#91 -- the switch's stand-ins keep the copy machinery
 
   /**
    * github#86 -- the early return keeps isPinned's per-node cost a branch
@@ -883,7 +881,7 @@ function mountVaultGraph(root, data, deps) {
     return d ? String(d) : id;
   }
 
-  // github#86, design/0015 -- one stand-in per note of the disc being left, dark, at its seat
+  // github#86, design/0015 -- one stand-in per note of the left disc, dark, seated
   function addStandIns() {
     Object.keys(leaving).forEach(function (id) {
       var a = graph.getNodeAttributes(id);
@@ -904,8 +902,8 @@ function mountVaultGraph(root, data, deps) {
       alpha[sid] = 0;
       standIns.push(sid);
     });
-    // github#86 -- and their notes' links, so the disc arriving is drawn with its web from the
-    // github#86 -- first frame; an edge to a note that is not leaving keeps that end
+    // github#86 -- and their notes' links, so the arriving disc has its web
+    // github#86 -- an edge to a note that is not leaving keeps that end
     /** @param {string} id */
     var seat = function (id) { return leaving[id] ? id + SAT_SEP + "s" : id; };
     /** @type {[string, string, EdgeAttrs][]} */
@@ -919,7 +917,7 @@ function mountVaultGraph(root, data, deps) {
     });
   }
 
-  // github#86 -- the note takes its stand-in's seat and presence; the stand-in goes
+  // github#86 -- the note takes its stand-in's seat and presence; it goes
   function dropStandIns() {
     if (!standIns.length && !Object.keys(leaving).length) return;
     standIns.forEach(function (sid) {
@@ -940,13 +938,13 @@ function mountVaultGraph(root, data, deps) {
     lazyAdded = []; lazyShown = null;
     neighbourCache = null;
     focusSetCache = { key: undefined, set: null };
-    // github#86 -- the nav bar and the heat strip are the disc arriving's alone now
+    // github#86 -- the nav bar and heat strip are the arriving disc's alone
     legendSwitch = null;
     if (renderer) { attempt(buildLegend); heatSig = ""; attempt(heatBuild); attempt(heatDraw); }
   }
 
-  // github#86, design/0015 -- what is on the disc right now, per group, in both dimensions:
-  // github#86 -- a leaving note under the group it is fading out of, everything else where
+  // github#86, design/0015 -- what is on the disc now, per group, in both dims:
+  // github#86 -- a leaving note under the group it leaves, the rest where
   // github#86 -- the dimension on screen files it
   function liveByGroup() {
     /** @type {Record<string, number>} */
@@ -962,8 +960,8 @@ function mountVaultGraph(root, data, deps) {
     return { old: old, now: now };
   }
 
-  // github#86 -- one frame of the switch's nav bar: bars follow the notes, a row of the disc
-  // github#86 -- being left drops out when its last note has, a row arriving drops in with its first
+  // github#86 -- one frame of the switch's nav bar: bars follow the notes,
+  // github#86 -- a row drops out with its last note, in with its first
   function legendSwitchTick() {
     var ls = legendSwitch;
     if (!ls) return;
@@ -1024,8 +1022,8 @@ function mountVaultGraph(root, data, deps) {
     /** @type {Record<string, number>} */
     var filed = dict();
     graph.forEachNode(function (id, a) {
-      // github#86 -- a stand-in is its note, already counted; a leaving note counts where this
-      // github#86 -- dimension files it, or the old groups sit in the new order, in the legend
+      // github#86 -- a stand-in is its note, already counted; a leaving note
+      // github#86 -- counts where this dim files it, old groups in the new order
       // github#86 -- and in the colour rotation, for as long as the switch runs
       if (a.standIn) return;
       var g = leaving[id]
@@ -1130,10 +1128,8 @@ function mountVaultGraph(root, data, deps) {
   }
 
   /**
-   * github#86, design/0015 -- read a dimension that is not on screen. The disc's own builders
-   * run in a swapped world and every global they write is restored, so the settings panel can
-   * show the tag tab while the folder disc is drawn (and the other way round) without a
-   * second implementation of grouping, colour assignment or sub-wedge ordering.
+   * github#86, design/0015 -- read a dimension that is not on screen
+   * github#86 -- builders run in a swapped world; every global is restored
    * @template T
    * @param {string} dim
    * @param {() => T} fn
@@ -1769,7 +1765,7 @@ function mountVaultGraph(root, data, deps) {
         liveG[gm] = (liveG[gm] || 0) + (wm > 1 ? 1 : wm < 0 ? 0 : wm);
       }
     } else graph.forEachNode(function (id) {
-      // github#86 -- the disc being left has no stand-ins; the disc arriving has no leavers
+      // github#86 -- the left disc has no stand-ins; the arriving disc no leavers
       if (oldWorld ? !!graph.getNodeAttribute(id, "standIn") : !!leaving[id]) return;
       if (onlyVisible && !(planKeep || willShow)(id)) return;
       // github#18
@@ -3655,8 +3651,8 @@ function mountVaultGraph(root, data, deps) {
   var roomNow = null;
   /** @type {Record<string, { f: number, n: number }> | null} */
   var colWalk = null;
-  // github#86, design/0015 -- while the hand sweeps, a fading dot shrinks to nothing and an
-  // github#86 -- arriving one grows from nothing, as a toggled wedge's dots do through its walk
+  // github#86, design/0015 -- under the hand a fading dot shrinks to nothing
+  // github#86 -- and an arriving one grows from nothing, as a toggled wedge's
   var shrinkFade = false;
   /** @type {Record<string, boolean> | null} */
   var splitHold = null;
@@ -3729,7 +3725,7 @@ function mountVaultGraph(root, data, deps) {
     moveFrom = null; splitHold = null; leftColor = null;
     // github#86 -- only the switch's own cascade draws stand-ins
     if (!opts.hand && standIns.length) dropStandIns();
-    // github#86 -- the disc being left is drawn in its own colours for as long as it stands
+    // github#86 -- the left disc keeps its own colours while it stands
     if (opts.from && opts.from.color) leftColor = opts.from.color;
     shrinkFade = !!opts.hand;
 
@@ -3768,7 +3764,7 @@ function mountVaultGraph(root, data, deps) {
     var moves = [];
     if (opts.movesFrom) {
       moveFrom = opts.movesFrom;
-      // github#86 -- the old disc is drawn in its own colours for as long as it stands
+      // github#86 -- the left disc keeps its own colours while it stands
       leftColor = opts.from && opts.from.color ? opts.from.color : null;
       Object.keys(opts.movesFrom).forEach(function (id) {
         if (!graph.hasNode(id)) return;
@@ -3880,8 +3876,8 @@ function mountVaultGraph(root, data, deps) {
       };
       /** @param {string} id in the inner ring of the disc arriving */
       var innerNew = function (id) { return !!(bandLock && bandLock[groupOf(id)]); };
-      // github#86, design/0015 -- the simplest sweep: the erase edge takes a dot when it passes
-      // github#86 -- the dot's bearing, and the fill edge, a blade behind, lights it at its seat
+      // github#86, design/0015 -- the simplest sweep: the erase edge takes a dot
+      // github#86 -- at its bearing; the fill edge, a blade behind, lights it
       /** @param {string} id @returns {number} */
       var handAt = function (id) { return handW * sweepAt(bearingNow(id), innerOld(id)) / TWO_PI; };
       /** @param {string} id when the fill edge reaches the seat this dot ends in */
@@ -4259,7 +4255,7 @@ function mountVaultGraph(root, data, deps) {
     var frame = 0, tPrev = NOW(), tailFrames = 0;
     // github#67
     // github#86, design/0015 -- the hand keys every delay on angle; re-dealing a group's
-    // github#86 -- arrivals by radius would light a seat the fill edge has not reached
+    // github#86 -- by radius would light a seat the fill edge has not reached
     if (!opts.hand) (function () {
       var stretch = Math.max(1, span - FADE_FRAMES * TIME_SCALE);
       /** @param {string} id @param {boolean} out */
@@ -4291,7 +4287,7 @@ function mountVaultGraph(root, data, deps) {
     cascadeRun = { raf: 0, tick: NOW(), guard: WIN.setTimeout(watchdog, STALL_MS), sizeCap: sizeCap,
                    skel: moveFrom ? null : freshSkel() };
     // github#78, design/0006
-    // github#86 -- the switch's nav bar follows the notes directly (legendSwitchTick)
+    // github#86 -- the switch's nav bar follows the notes (legendSwitchTick)
     var barWalking = opts.hand && legendSwitch ? false : barWalkStart();
 
     (function step() {
@@ -4302,7 +4298,7 @@ function mountVaultGraph(root, data, deps) {
       frame += adv;
       if (cascadeRun) cascadeRun.tick = tn;
       var pr = Math.min(1, frame / Math.max(1, span));
-      // github#86 -- where the erase edge is, in degrees from 12 o'clock; the checks read it
+      // github#86 -- the erase edge, in degrees from 12 o'clock, for the checks
       if (handLap) { lastCascade.handDeg = 360 * frame / handLap; lastCascade.handLap = handLap; }
       var ease = pr * pr * (3 - 2 * pr);
       // github#78
@@ -4408,8 +4404,8 @@ function mountVaultGraph(root, data, deps) {
       var targets = null;
       if (opts.hand && opts.from) {
         // github#86, design/0015 -- both discs sit in the same place, one shown, one hidden: the
-        // github#86 -- old disc fades where it stands, and a dot that has left takes its FINAL
-        // github#86 -- seat outright and waits, dark, for the fill edge. No plan, no re-packing.
+        // github#86 -- old disc fades in place; a dot that has left takes its FINAL
+        // github#86 -- seat outright and waits, dark, for the fill edge. No plan.
         var mf = moveFrom;
         colWalk = null; cellNow = null; edgeNow = null;
         if (roomDstB.i > 1) bandOf("i").room = roomDstB.i;
@@ -4422,7 +4418,7 @@ function mountVaultGraph(root, data, deps) {
           var fq = finalPos[mid];
           if (!fq) continue;
           seats[mid] = fq;
-          // github#86 -- taken outright: easing from where it stood would cross the disc
+          // github#86 -- taken outright: easing from where it stood would cross
           if (!seated[mid]) { graph.mergeNodeAttributes(mid, { x: fq.x, y: fq.y }); seated[mid] = true; }
         }
         targets = seats;
@@ -5742,13 +5738,27 @@ function mountVaultGraph(root, data, deps) {
   var ptr = null;
 
   /**
-   * github#86, design/0015 -- ONE row template for every group row the legend draws, whichever
-   * dimension the group belongs to and whether it is resting, arriving or leaving. A leaving
-   * row is drawn inert: no data-g, no handlers reach it, so nothing acts on a name from the
-   * other dimension.
-   * @param {{ g: string, cls: string, old: boolean, tw: string, eye: string, lgAttrs: string, hl: boolean,
-   *           vis: boolean, title: string, swClass: string, swTitle: string, swFill: string, only: string,
-   *           ctTitle: string, ct: string }} o
+   * @typedef {Object} RowOpts
+   * @property {string} g
+   * @property {string} cls
+   * @property {boolean} old
+   * @property {string} tw
+   * @property {string} eye
+   * @property {string} lgAttrs
+   * @property {boolean} hl
+   * @property {boolean} vis
+   * @property {string} title
+   * @property {string} swClass
+   * @property {string} swTitle
+   * @property {string} swFill
+   * @property {string} only
+   * @property {string} ctTitle
+   * @property {string} ct
+   */
+  /**
+   * github#86, design/0015 -- ONE row template for every group row the legend draws
+   * github#86 -- a leaving row is inert: no data-g, no handler reaches it
+   * @param {RowOpts} o
    */
   function lgrHTML(o) {
     return '<div class="' + o.cls + '" data-row="' + esc(o.g) + '"' + (o.old ? ' data-old="1"' : '') + '>' +
@@ -5816,19 +5826,29 @@ function mountVaultGraph(root, data, deps) {
     var rendered = dict();
 
     // github#86, design/0015 -- while a switch runs, the rows of the disc being left come
-    // github#86 -- first, inert, with the counts and colours they had; they drop out as their
-    // github#86 -- notes fade, and a row of the disc arriving drops in with its first note
+    // github#86 -- first, inert, with the counts and colours they had; they go
+    // github#86 -- as their notes fade; an arriving row comes with its first
     var liveNow = legendSwitch ? liveByGroup() : null;
     /**
+     * @typedef {Object} RowWorld
+     * @property {boolean} inert
+     * @property {Record<string, number>} counts
+     * @property {(g: string) => boolean} hidden
+     * @property {(g: string) => string} color
+     * @property {(g: string) => string} fill
+     * @property {(g: string) => string} swTitle
+     * @property {Record<string, boolean> | null} bandLock
+     * @property {number} basisMax
+     * @property {string} basisGroup
+     * @property {(g: string) => number} share
+     * @property {(g: string) => number | null} live
+     * @property {(g: string) => boolean} subs
+     * @property {(g: string) => boolean} open
+     */
+    /**
      * github#86, design/0015 -- everything a group row reads, from ONE of two worlds: the
-     * dimension on screen, or the dimension being left as it stood when the switch began. A
-     * row of the left disc is the same row it was, drawn inert, with only its gauge following
-     * its notes; nothing else about it may change.
-     * @typedef {{ inert: boolean, counts: Record<string, number>, hidden: (g: string) => boolean,
-     *             color: (g: string) => string, fill: (g: string) => string, swTitle: (g: string) => string,
-     *             bandLock: Record<string, boolean> | null, basisMax: number, basisGroup: string,
-     *             share: (g: string) => number, live: (g: string) => number | null,
-     *             subs: (g: string) => boolean, open: (g: string) => boolean }} RowWorld
+     * github#86 -- on screen, or the one being left as it stood at the switch
+     * github#86 -- a left row is the row it was, inert, only its gauge moving
      */
     /** @type {RowWorld} */
     var here = {
@@ -5879,12 +5899,12 @@ function mountVaultGraph(root, data, deps) {
             : " · " + shareText(share) + " of " + esc(w.basisGroup)) + '"'
         : '';
 
-      // github#86 -- a row of the disc arriving is collapsed until its first note is lit, and a
-      // github#86 -- row of the disc being left once its last note has faded
+      // github#86 -- an arriving row is collapsed until its first note is lit,
+      // github#86 -- a leaving row once its last note has faded
       var lv = w.live(g);
       if (lv !== null && !(lv > 0.004)) lgrClass += " lgr-gone";
       var row = lgrHTML({ g: g, cls: lgrClass, old: w.inert,
-        // github#86 -- a leaving row keeps its twisty, eye and only chip where they were, disabled
+        // github#86 -- a leaving row keeps its twisty, eye and only chip, disabled
         tw: twBtn(hasSubs ? (w.inert ? 'disabled aria-disabled="true"' : 'data-tw="' + esc(g) + '"') : null, open),
         eye: live ? eyeBtn(w.inert ? 'disabled aria-disabled="true"' : 'data-eye="' + esc(g) + '"', vis, g)
                   : '<button class="eye none" disabled aria-hidden="true"></button>',
@@ -6185,8 +6205,8 @@ function mountVaultGraph(root, data, deps) {
    * @param {Record<string, boolean> | null} [bandHint]   group -> inner, to seed the lock with
    * @param {boolean} [keepAlpha]
    */
-  // github#86, decisions/0011 -- the lock derivation on its own, so a live rebuild can take it in
-  // github#86 -- the dimension the rings belong to (ringsIn) as well as in the one on screen
+  // github#86, decisions/0011 -- the lock derivation on its own, so ringsIn
+  // github#86 -- can take it in the dimension the rings belong to
   /** @param {Record<string, boolean>} [bandHint] @returns {Plan | null} */
   function takeGeom(bandHint) {
     var base = buildWedgePlan(false);
@@ -6217,8 +6237,8 @@ function mountVaultGraph(root, data, deps) {
   }
 
   // github#72, github#86, decisions/0011 -- a switched-to disc sits inside rings borrowed from
-  // github#86 -- another dimension; a live rebuild retakes THOSE, from that dimension's own
-  // github#86 -- unfiltered plan of the new note set, so its step stays the sub-pixel one
+  // github#86 -- another dimension; a live rebuild retakes THOSE, from that
+  // github#86 -- dimension's own plan, so the step stays sub-pixel
   /** @param {"folder" | "tag"} dim @returns {GeomLock | null} */
   function ringsIn(dim) {
     var sBand = bandLock, sGeom = geomLock;
@@ -6281,8 +6301,8 @@ function mountVaultGraph(root, data, deps) {
     }
     // github#45
     regroup(true);
-    // github#21, github#86 -- one pass lays out with the previous pass's room; a fresh disc
-    // github#86 -- is the fixed point, so an instant relayout runs two (a cascade converges itself)
+    // github#21, github#86 -- one pass lays out with the previous pass's room
+    // github#86 -- the fixed point takes two, so an instant relayout runs two
     if (!deferLayout && !animate) applyLayout(false);
     if (!deferLayout) applyLayout(!!animate);
     if (renderer) renderer.refresh();
@@ -6569,7 +6589,7 @@ function mountVaultGraph(root, data, deps) {
         $("gear").setAttribute("aria-expanded", String(open));
         if (open) { buildOptions(); buildSettings(); }
       };
-      // github#86 -- the reset drops the tab's own pins, not the other dimension's
+      // github#86 -- the reset drops this tab's pins, not the other dimension's
       $("fcreset").onclick = function () {
         pickColor(null, null, settingsDim);
         var savedSub = applySubfolderColors({}, settingsDim);
@@ -6784,7 +6804,7 @@ function mountVaultGraph(root, data, deps) {
       var next = dict();
       var cur = shownFor(d);
       Object.keys(cur).forEach(function (g) { next[g] = cur[g]; });
-      // github#86 -- flip THIS dimension's default, whether or not it is the one on screen
+      // github#86 -- flip THIS dimension's default, on screen or not
       var wasHidden = typeof cur[folder] === "boolean" ? !cur[folder] : isArchiveGroup(folder);
       next[folder] = wasHidden;
       var saved = applyFolderShown(next, d);
@@ -6875,7 +6895,7 @@ function mountVaultGraph(root, data, deps) {
     function buildSettings() {
       var pal = paletteInfo();
       // github#86, design/0015 -- one tab per grouping, the same control the group list uses.
-      // github#86 -- Each tab writes its own dimension's maps, whichever disc is on screen.
+      // github#86 -- each tab writes its own dimension's maps, on screen or not
       var d = settingsDim;
       var tabs = '<span class="dimseg setseg" role="group" aria-label="Set colours for">' +
         DIMS.map(function (k) {
@@ -6883,7 +6903,7 @@ function mountVaultGraph(root, data, deps) {
                  '" title="Colours and default visibility for ' + (k === "tag" ? "tags" : "folders") + '">' +
                  (k === "tag" ? "Tags" : "Folders") + '</button>';
         }).join("") + '</span>';
-      // github#86 -- a dimension the vault has nothing to show for still gets its tab
+      // github#86 -- a dimension with nothing to show still gets its tab
       var names = orderFor(d);
       if (!names.length) {
         setHTML($("setbody"), tabs +
@@ -7088,7 +7108,7 @@ function mountVaultGraph(root, data, deps) {
   }
 
   // github#86, design/0015 -- the rings belong to the page, not to a dimension: the disc
-  // github#86 -- arriving re-packs inside the rings the disc being left had, as a filter does,
+  // github#86 -- arriving re-packs inside the rings it finds, like a filter,
   // github#86 -- so the two discs of a switch share a hub and an outer edge
   /** @param {GeomLock | null} rings */
   function keepRings(rings) {
@@ -7109,9 +7129,9 @@ function mountVaultGraph(root, data, deps) {
     if (next === state.dim) return state.dim;
     if (next === "tag") buildTagFiling();
 
-    // github#86, design/0015 -- a switch cut short leaves its stand-ins; take them home first
+    // github#86, design/0015 -- a switch cut short leaves stand-ins; take them home
     dropStandIns();
-    // github#86 -- D-8: every visible note leaves this disc, and a stand-in arrives in the next
+    // github#86 -- D-8: every visible note leaves; a stand-in arrives instead
     /** @type {Record<string, string>} */
     var leftColors = dict();
     var n = 0;
@@ -7120,7 +7140,7 @@ function mountVaultGraph(root, data, deps) {
         // github#86 -- a copy does not survive a switch; it leaves
         if (a.dupOf) return;
         if (!visible(id) || (alpha[id] || 0) <= 0.004) return;
-        // github#86 -- the colour and group it stands in, read while this is still its dimension
+        // github#86 -- its colour and group, read while this is still its dimension
         leftColors[id] = nodeColor(id);
         leftGroup[id] = groupOf(id);
         leaving[id] = true;
@@ -7172,8 +7192,8 @@ function mountVaultGraph(root, data, deps) {
       moveFrom = null; splitHold = null; pinnedPlan = null; planKeep = null;
       roomNow = null; cellNow = null; edgeNow = null; colWalk = null; posSrc = null;
       bandLock = null; geomLock = null;
-      // github#86 -- alpha is the cascade's to walk: a note this disc hides and the next one
-      // github#86 -- shows is an ARRIVAL for the fill edge, not a dot lit at the switch
+      // github#86 -- alpha is the cascade's to walk: a note this disc hides and
+      // github#86 -- the next shows ARRIVES with the fill edge, not at the switch
       regroup(true, undefined, true);
       keepRings(rings);
     } else {
@@ -7504,8 +7524,8 @@ function mountVaultGraph(root, data, deps) {
     /** @type {Record<string, number>} */
     var all = dict();
     graph.forEachNode(function (id, a) {
-      // github#86 -- a day counts NOTES written that day, not dots on the disc; a stand-in is
-      // github#86 -- its note's dot in the disc arriving, so its weight and colour cross-fade
+      // github#86 -- a day counts NOTES written, not dots; a stand-in is its
+      // github#86 -- note's arriving dot: its weight and colour cross-fade
       // github#86 -- the note's day from the colour it had to the colour it gets
       if (a.dupOf && !a.standIn) return;
       var k = a.created;
@@ -8806,8 +8826,8 @@ function mountVaultGraph(root, data, deps) {
       { settle: true, act: "intro", why: "start from a disc at rest" },
       { click: true, target: ["id", "refresh"], act: "intro", why: "replay the intro on camera" },
       { settle: true, act: "intro", why: "the vault grows from its first note to now, and the range end sweeps with it" },
-      // github#86, design/0015 -- the second dimension: one hand erases the folder disc where it
-      // github#86 -- stands, the other lights the tag disc at its seats, links, heat strip and
+      // github#86, design/0015 -- the second dimension: one hand erases the folder disc
+      // github#86 -- in place, the other lights the tag disc; links, heat strip,
       // github#86 -- nav bar following the notes
       { click: true, target: ["dim", "tag"], act: "tags", why: "cut the disc by tag instead of by folder" },
       { settle: true, act: "tags", why: "one hand takes the folders, the other brings the tags" },
@@ -9355,7 +9375,7 @@ function mountVaultGraph(root, data, deps) {
     // decisions/0011
     var ringsDim = geomLock ? geomLock.dim : null;
     hardRelayout(false, true, true);
-    // github#86 -- and back inside the rings this disc was switched into, moved by the same step
+    // github#86 -- and back inside the rings it was switched into, same step
     if (ringsDim && ringsDim !== state.dim) keepRings(ringsIn(ringsDim));
 
     /** @type {Record<string, string> | null} */

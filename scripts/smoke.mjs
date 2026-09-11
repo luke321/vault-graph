@@ -335,9 +335,7 @@ check("plan parity and zero-weight invariance with each folder hidden", async (p
     const r = await p.j(`{p: __vg.checkPlanParity().parityOK, z: __vg.checkZeroWeightInvariance().invariantOK}`);
     if (!r.p || !r.z) bad.push(`${g}${r.p ? "" : " parity"}${r.z ? "" : " zero-weight"}`);
   }
-  // github#86 -- leave the page converged: one pass after a membership change lays out with
-  // the previous pass's room and is not the fixed point (github#21), so a check sharing this
-  // page would boot on positions no fresh layout reproduces, by under a unit
+  // github#86, github#21 -- leave the page converged: two passes are the fixed point
   await p.eval(`__vg.state.hidden.folder = {}; __vg.syncAlpha(); __vg.applyLayout(false); __vg.applyLayout(false); void 0`);
   return { ok: bad.length === 0, detail: bad.length ? bad.join("; ") : `${groups.length} folders, all clean` };
 });
@@ -717,7 +715,7 @@ check("tags: a dot in the disc being left keeps its colour until it has faded", 
   await clearRange(p);
   await settle(p);
   await camSettle(p);
-  // github#86, design/0015 -- the erase edge fades a dot where it stands, in the colour it had
+  // github#86, design/0015 -- the erase edge fades a dot where it stands, in its colour
   const n = await p.j(`(function(){
     var b = {};
     __vg.graph.forEachNode(function (id, a) {
@@ -788,9 +786,8 @@ check("tags: a note one disc hides and the other shows arrives with the fill edg
   await clearRange(p);
   await settle(p);
   await camSettle(p);
-  // github#86, design/0015 -- hide one folder in the folder disc only; each dimension keeps its
-  // own hidden state, so in the tag disc those notes are ARRIVALS, and an arrival is lit by the
-  // fill edge at its seat -- never at the switch, never ahead of the edge
+  // github#86, design/0015 -- hide one folder in the folder disc only
+  // github#86 -- in the tag disc those notes ARRIVE with the fill edge
   const pick = await p.j(`(function(){
     var gs = __vg.groupOrder().map(function (g) { return { g: g, n: __vg.groupCount(g) }; })
       .filter(function (x) { return x.n >= 3 && !__vg.isArchiveGroup(x.g); })
@@ -847,7 +844,7 @@ check("tags: a note one disc hides and the other shows arrives with the fill edg
     if (!s.busy && samples > 3) break;
     if (Date.now() - t0 > 20000) break;
   }
-  // github#86 -- the switch draws the arriving disc with stand-ins and takes every one home
+  // github#86 -- stand-ins draw the arriving disc; every one goes home
   const left = await p.j(`__vg.standIns().length`);
   await p.j(`(function(){ delete window.__smokeHid; __vg.setDim("folder"); return true; })()`);
   await settle(p);
@@ -1231,11 +1228,10 @@ check("highlighting ramps per note and is additive", async (p) => {
 check("tags: a live rebuild in the tag disc refiles the arrival and keeps the rings it was switched into", async (p) => {
   await settle(p);
   await p.eval(LIVE_JS);
-  // github#72, github#86, decisions/0011 -- the filing is a cache a live rebuild stales, so an
-  // untagged arrival must land in (untagged); and a switched-to disc sits inside rings borrowed
-  // from the folder disc, which the rebuild must retake from THAT plan, not re-derive from its
-  // own -- or the first live edit after a switch re-packs the whole disc. "Fresh" is the fixed
-  // point inside the kept rings, two layout passes, as the switch round-trip check reads it.
+  // github#72, github#86, decisions/0011 -- the filing is a cache a live rebuild stales
+  // github#86 -- an untagged arrival lands in (untagged)
+  // github#86, decisions/0011 -- a switched-to disc keeps its borrowed rings
+  // github#86 -- "fresh" is two passes inside the kept rings, not relayout()
   await p.j(`(function(){ __vg.setDim("tag"); return true; })()`);
   await settle(p);
   const start = await p.j(`(function(){ window.__live.a = window.__live.snap();
