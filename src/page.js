@@ -6135,7 +6135,11 @@ function mountVaultGraph(root, data, deps) {
     graph.forEachNode(function (id, a) {
       var d = fileDirs(id, a), g0 = fileGroup(id, a);
       for (var i = 0; i < d.length; i++) {
-        var pk = g0 + "/" + d.slice(0, i).join("/");
+        // github#76 -- ABSOLUTE, because the rows below index this table with `keyOf(g, sb)`
+        // and `subtree()` grows its own keys off these. Keyed relatively, `kids[pk]` is
+        // simply never found once a root is in force and the deeper twisties vanish.
+        // `keyOf` is the identity at root depth 0, so the vault legend is unchanged.
+        var pk = keyOf(g0, d.slice(0, i).join("/"));
         if (!kids[pk]) kids[pk] = dict();
         kids[pk][d[i]] = (kids[pk][d[i]] || 0) + 1;
       }
@@ -6583,8 +6587,10 @@ function mountVaultGraph(root, data, deps) {
       }
       if (hitSub) {
         var fSub = hitSub.getAttribute("data-hsub"), subsSub = subOrder[fSub] || [];
+        // github#76 -- `keyOf`, like the pointer path above and `pathKey` on the read side:
+        // a relative key here would simply never match once a root is in force.
         hoverHighlight(null, (hitSub.getAttribute("data-idx") || "").split(",").map(function (i) {
-          return fSub + "/" + subsSub[+i];
+          return keyOf(fSub, subsSub[+i]);
         }));
       } else if (hitPath) {
         hoverHighlight(null, [hitPath.getAttribute("data-hpath")]);
