@@ -42,6 +42,18 @@ measuring it: serve the page, drive it, read the numbers.
   `mkdir` is the lock — atomic, and it survives a killed session as a stale entry rather than a
   permanent one. Screenshots need no lock: `shoot.mjs` captures over CDP, so overlapping windows
   are harmless — but pass your own `--port`.
+
+  **Every smoke run honors the lock, full stop — including one you didn't type yourself.**
+  `smoke.mjs` and `.githooks/pre-push` do not call `lock.mjs` on their own ([[vault-graph-lock-is-advisory]]-equivalent:
+  it's advisory, so nothing enforces this but you). A `git push` to `develop` or `main` triggers
+  the pre-push hook's full suite exactly as surely as running `smoke.mjs` by hand does — wrap the
+  push itself in an acquire/release, the same as any direct run:
+
+  ```bash
+  node scripts/lock.mjs acquire suite --owner "orchestrator: push develop"
+  git push origin develop
+  node scripts/lock.mjs release suite --owner "orchestrator: push develop"
+  ```
 - **A vault that is not Lukas's own opens in restricted mode, and the plugin does not load at
   all.** Any fixture or generated vault is "untrusted" on its first open: Obsidian puts up **"Trust
   author and enable plugins?"** and opens its Settings window behind it. Until that is confirmed

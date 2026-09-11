@@ -21,7 +21,10 @@ Four things are worth knowing before you touch anything, all expanded in `CLAUDE
   ```
 
   `record` and `suite` are the two names. Screenshots need no lock — `shoot.mjs` captures over
-  CDP, so overlapping windows are harmless — but pass your own `--port`.
+  CDP, so overlapping windows are harmless — but pass your own `--port`. Every smoke run honors
+  the lock, including one you didn't type — a `git push` to `develop`/`main` triggers the
+  pre-push hook's full suite just as surely as running it by hand, and the hook does not take
+  the lock itself, so wrap the push too.
 - **A vault that is not Lukas's own opens in restricted mode.** A fixture or generated vault puts
   up "Trust author and enable plugins?" on first open, and until it is confirmed the plugin does
   not load at all -- which reads as a broken plugin rather than as an unconfirmed dialog. Over
