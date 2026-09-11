@@ -455,6 +455,7 @@
        bottom-right corner (github#4). Nothing floats over the top-left, so the toggles
        would have been pushed 44px into the disc for a reason that is not theirs. */
     --panels-inset: 12px;
+    --ov-size: 96px;
   }
   .vault-graph #vg-cam {
     position: absolute; right: var(--controls-inset); bottom: var(--controls-inset);
@@ -468,6 +469,25 @@
   .vault-graph #vg-mob {
     position: absolute; left: var(--panels-inset); top: var(--panels-inset);
     z-index: 6; display: flex; flex-direction: row; gap: 6px;
+  }
+  /* github#79 -- beside the cluster at the pan button's row, bottom-aligned with it. The
+     cluster is 142px tall (--controls-h) and the tile is 96, so it sits entirely inside the
+     band the detail card's max-height already clears: the card does not have to yield. */
+  .vault-graph #vg-ov {
+    position: absolute; bottom: var(--controls-inset);
+    right: calc(var(--controls-inset) + 31px + 8px);
+    z-index: 6; width: var(--ov-size); height: var(--ov-size); padding: 0;
+    cursor: pointer; background: var(--surface-2); color: var(--text-3);
+    border: 0; border-radius: 8px; overflow: hidden;
+    box-shadow: 0 0 0 1px var(--border);
+    opacity: .8; transition: opacity .12s, box-shadow .12s;
+  }
+  .vault-graph #vg-ov:hover { opacity: 1; box-shadow: 0 0 0 1px var(--border-strong); }
+  .vault-graph #vg-ov:focus-visible { opacity: 1; outline: 2px solid var(--accent); outline-offset: 1px; }
+  .vault-graph #vg-ov[hidden] { display: none; }
+  .vault-graph #vg-ov canvas { display: block; width: 100%; height: 100%; }
+  @media (prefers-reduced-motion: reduce) {
+    .vault-graph #vg-ov { transition: none; }
   }
   .vault-graph #vg-cam button, .vault-graph #vg-mob button {
     display: flex; align-items: center; justify-content: center;
@@ -835,6 +855,10 @@
     }
     /* Both control clusters move to the top corners, clear of that sheet. */
     .vault-graph #vg-cam { top: var(--controls-inset); bottom: auto; }
+    /* github#79 -- the cluster is top-right here, so the tile goes left of it, top-aligned,
+       clear of #vg-mob's own corner on the left. */
+    .vault-graph { --ov-size: 72px; }
+    .vault-graph #vg-ov { top: var(--controls-inset); bottom: auto; }
     /* Above the sheet (z-index 8): #vg-mob sits in #vg-canvas, which the band pushes below
        the sheet's top edge, and a panel that covers its own toggle cannot be closed. The rest
        of the cluster -- where it sits and which way it runs -- is the base rule's, github#82. */

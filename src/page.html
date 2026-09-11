@@ -119,6 +119,14 @@
           </svg>
         </button>
       </div>
+      <!-- github#79 -- a sibling of the cluster, not a fifth button in it: the cluster's own
+           check pins four 31px buttons and their box. Absent entirely while the whole disc is
+           in view; it appears left of the pan button once zoom or a pan crops the disc. -->
+      <button id="vg-ov" type="button" hidden
+              title="Where the frame sits on the disc. Click to fit."
+              aria-label="Where the frame sits on the disc. Click to fit.">
+        <canvas aria-hidden="true"></canvas>
+      </button>
       <div id="vg-tip" hidden></div>
       <!-- github#73 -->
       <div id="vg-mob" role="group" aria-label="Panels">
