@@ -4,7 +4,7 @@
 declarations of the files too large to read top to bottom, with line numbers. Open the
 range, not the file. Stale when `node scripts/code-map.mjs --check` fails.
 
-## `src/page.js` — 10467 lines, 33 sections, 440 functions
+## `src/page.js` — 10464 lines, 33 sections, 440 functions
 
 ### Sections
 
@@ -21,28 +21,28 @@ range, not the file. Stale when `node scripts/code-map.mjs --check` fails.
 | 2848–2880 | demo automation + debug API — stripped from the plugin build |
 | 2881–2966 | the pinned hub (continued) |
 | 2967–3530 | timeline |
-| 3531–4583 | reveal cascade |
-| 4584–4766 | animation |
-| 4767–4835 | render |
-| 4836–4882 | hover tween |
-| 4883–5067 | highlight ramp |
-| 5068–5233 | logo |
-| 5234–5385 | node sizes |
-| 5386–5420 | edge width |
-| 5421–5589 | edge curvature |
-| 5590–5591 | group labels |
-| 5592–5610 | tooltip |
-| 5611–5780 | detail panel |
-| 5781–7605 | UI |
-| 7606–8069 | heatmap |
-| 8070–8073 | demo |
-| 8074–8676 | date range |
-| 8677–9415 | demo automation + debug API — stripped from the plugin build |
-| 9416–9417 | date range (continued) |
-| 9418–9620 | live rebuild |
-| 9621–9904 | go |
-| 9905–10398 | demo automation + debug API — stripped from the plugin build |
-| 10399–10467 | go (continued) |
+| 3531–4580 | reveal cascade |
+| 4581–4763 | animation |
+| 4764–4832 | render |
+| 4833–4879 | hover tween |
+| 4880–5064 | highlight ramp |
+| 5065–5230 | logo |
+| 5231–5382 | node sizes |
+| 5383–5417 | edge width |
+| 5418–5586 | edge curvature |
+| 5587–5588 | group labels |
+| 5589–5607 | tooltip |
+| 5608–5777 | detail panel |
+| 5778–7602 | UI |
+| 7603–8066 | heatmap |
+| 8067–8070 | demo |
+| 8071–8673 | date range |
+| 8674–9412 | demo automation + debug API — stripped from the plugin build |
+| 9413–9414 | date range (continued) |
+| 9415–9617 | live rebuild |
+| 9618–9901 | go |
+| 9902–10395 | demo automation + debug API — stripped from the plugin build |
+| 10396–10464 | go (continued) |
 
 ### Functions
 
@@ -213,299 +213,299 @@ range, not the file. Stale when `node scripts/code-map.mjs --check` fails.
 | 3542 | `clearAlpha` |
 | 3547 | `toRgb` |
 | 3561 | `withAlpha` |
-| 3588 | `reducedMotion` |
-| 3593 | `NOW` |
-| 3624 | `freshSkel` |
-| 3630 | `planDiff` |
-| 3684 | `measureFit` |
-| 3747 | `setFitCap` |
-| 3777 | `traceTag` |
-| 3779 | `tracePut` |
-| 3789 | `pinPlan` |
-| 3816 | `cascade` |
-| 3913 | · `clockwise` |
-| 3921 | · `windowFor` |
-| 3967 | · · `bearingNow` |
-| 3974 | · · `sweepAt` |
-| 3976 | · · `innerOld` |
-| 3981 | · · `innerNew` |
-| 3985 | · · `handAt` |
-| 3987 | · · `fillAt` |
-| 4113 | · `settle` |
-| 4141 | · `weightOf` |
-| 4182 | · `staticPlan` |
-| 4192 | · `inWorld` |
-| 4204 | · · `cellsOfG` |
-| 4229 | · · `deepen` |
-| 4234 | · · `record` |
-| 4250 | · · `roomOf` |
-| 4297 | · · · `takeCap` |
-| 4312 | · · `pairUp` |
-| 4323 | · · · `take` |
-| 4348 | · `watchdog` |
-| 4368 | · · `radiusOf` |
-| 4441 | · · `rowsAt` |
-| 4450 | · · `roomWalk` |
-| 4457 | · · `depthWalk` |
-| 4466 | · · `thickAt` |
-| 4475 | · · `spWalk` |
-| 4498 | · · `walkPair` |
-| 4603 | `probeSample` |
-| 4669 | `assignPositions` |
-| 4679 | `animateTo` |
-| 4703 | · `settle` |
-| 4713 | · `tweenDog` |
-| 4754 | `applyLayout` |
-| 4775 | `neighboursOf` |
-| 4787 | `syncLazyEdges` |
-| 4806 | `pathKey` |
-| 4816 | `visible` |
-| 4845 | `mixHex` |
-| 4859 | `hoverAmount` |
-| 4864 | `hoverTo` |
-| 4890 | `hlSignature` |
-| 4898 | `hlWalk` |
-| 4921 | `hlSync` |
-| 4930 | `focusSet` |
-| 4946 | `edgeCurveGeom` |
-| 4956 | `drawFocusWeb` |
-| 5001 | `drawHover` |
-| 5028 | `nodeStyle` |
-| 5083 | `ringColors` |
-| 5094 | `outerPresence` |
-| 5106 | `mixColorArrays` |
-| 5119 | `bandColors` |
-| 5148 | `ringColorsSmooth` |
-| 5166 | `ringGradient` |
-| 5199 | `placeLogo` |
-| 5262 | `measureSizeScale` |
-| 5271 | · `rampFor` |
-| 5290 | `dotWhy` |
-| 5309 | `dotPx` |
-| 5375 | `syncSizeScale` |
-| 5382 | `refreshSizeScale` |
-| 5395 | `measureEdgeMult` |
-| 5402 | `syncEdgeMult` |
-| 5410 | `capEdge` |
-| 5416 | `edgePx` |
-| 5425 | `discR` |
-| 5430 | `curvatureFor` |
-| 5441 | `makeRenderer` |
-| 5535 | · `onResize` |
-| 5581 | · `onDoubleClick` |
-| 5595 | `showTip` |
-| 5609 | `hideTip` |
-| 5626 | `goTo` |
-| 5636 | `trailBackTo` |
-| 5645 | `trailLabel` |
-| 5650 | `trailOff` |
-| 5652 | `trailRefresh` |
-| 5663 | `trailHTML` |
-| 5666 | · `crumb` |
-| 5700 | `select` |
-| 5775 | `centerOn` |
-| 5787 | `swatchFill` |
-| 5798 | `swatchTitle` |
-| 5811 | `rowTitle` |
-| 5823 | `clearPreviewCache` |
-| 5827 | `swatchPreviewHTML` |
-| 5855 | `countText` |
-| 5871 | `barBasis` |
-| 5884 | `barShare` |
-| 5894 | `shareText` |
-| 5926 | `lgrHTML` |
-| 5938 | `buildLegend` |
-| 5957 | · `eyeBtn` |
-| 5963 | · `subtree` |
-| 6041 | · `rowFor` |
-| 6090 | · · · `srow` |
-| 6155 | · `each` |
-| 6160 | · `onlySubs` |
-| 6170 | · `onlyUnder` |
-| 6273 | · · `hoverKeys` |
-| 6350 | `seedHidden` |
-| 6357 | `collapseAll` |
-| 6374 | `takeGeom` |
-| 6406 | `ringsIn` |
-| 6415 | `regroup` |
-| 6444 | `hardRelayout` |
-| 6480 | `buildSearch` |
-| 6519 | · `onDocMove` |
-| 6524 | · `onVisibility` |
-| 6552 | `stopPlay` |
-| 6571 | `timelineFrame` |
-| 6579 | `playTimeline` |
-| 6611 | `sweepTo` |
-| 6626 | `endSweep` |
-| 6633 | `resetView` |
-| 6657 | `syncDimCounts` |
-| 6670 | `dimGroupCount` |
-| 6672 | `syncDimUI` |
-| 6682 | `buildTools` |
-| 6734 | · · `done` |
-| 6740 | · · `save` |
-| 6814 | · `closeCtxMenu` |
-| 6823 | · `ctxOutside` |
-| 6828 | · `ctxKey` |
-| 6835 | · `swatchButtonsHTML` |
-| 6861 | · `openCtxMenu` |
-| 6949 | · `pickColor` |
-| 6964 | · `pickSubColors` |
-| 6981 | · `pickVisible` |
-| 7002 | · `subfolderRows` |
-| 7047 | · `buildOptions` |
-| 7061 | · `orderFor` |
-| 7063 | · `slotFor` |
-| 7065 | · `autoSlotFor` |
-| 7067 | · `subsFor` |
-| 7069 | · `subCountFor` |
-| 7071 | · `subShadeFor` |
-| 7073 | · `slotColor` |
-| 7075 | · `buildSettings` |
-| 7134 | `fitRatio` |
-| 7145 | `fit` |
-| 7148 | · `landed` |
-| 7161 | `zoomBy` |
-| 7172 | `syncCanvasTop` |
-| 7180 | `afterPanel` |
-| 7188 | `glidePanels` |
-| 7204 | `setSheet` |
-| 7219 | `setBand` |
-| 7233 | `setPan` |
-| 7245 | `setCompactAxis` |
-| 7271 | `stashDimNav` |
-| 7280 | `restoreDimNav` |
-| 7294 | `keepRings` |
-| 7306 | `setDim` |
-| 7397 | `setUnlinkedByFolder` |
-| 7421 | `setUnlinkedTintByFolder` |
-| 7434 | `paintBars` |
-| 7456 | `barWalkStart` |
-| 7477 | `barWalkTick` |
-| 7489 | `barWalkEnd` |
-| 7496 | `setCountBars` |
-| 7505 | `savePng` |
-| 7520 | · · · `layer` |
-| 7585 | `buildStats` |
-| 7598 | `esc` |
-| 7653 | `heatParse` |
-| 7658 | `heatKey` |
-| 7661 | · `p` |
-| 7665 | `heatMonday` |
-| 7670 | `heatGeom` |
-| 7681 | `heatBuild` |
-| 7726 | · `q` |
-| 7778 | `heatLevel` |
-| 7789 | `heatTile` |
-| 7809 | `heatCompute` |
-| 7823 | `heatDraw` |
-| 7928 | `heatDrawKey` |
-| 7968 | `heatRect` |
-| 7980 | `heatHit` |
-| 7993 | `heatShowTip` |
-| 8023 | `buildHeatmapUI` |
-| 8026 | · `setHover` |
-| 8049 | · `reflow` |
-| 8124 | `drawDateUI` |
-| 8130 | `buildYears` |
-| 8169 | `fitCanvas` |
-| 8180 | `dateRamp` |
-| 8185 | `scrubColor` |
-| 8188 | `rgbaHex` |
-| 8195 | `measureRibbon` |
-| 8205 | `ribbonW` |
-| 8210 | `ribbonXLinear` |
-| 8216 | `ribbonMsLinear` |
-| 8221 | `monthIndexOfMs` |
-| 8228 | `monthEndMs` |
-| 8233 | `segSpanMs` |
-| 8239 | `ribbonXCompact` |
-| 8247 | `ribbonMsCompact` |
-| 8259 | `ribbonX` |
-| 8263 | `ribbonMs` |
-| 8268 | `brushEnds` |
-| 8275 | `winEndNow` |
-| 8281 | `paintMonthBar` |
-| 8288 | `drawRibbon` |
-| 8366 | `rebuildBand` |
-| 8376 | `winTrack` |
-| 8383 | `inWinTrack` |
-| 8386 | `winSpan` |
-| 8389 | `clampWinEnd` |
-| 8397 | `winEndCentredAtPx` |
-| 8410 | `brushHit` |
-| 8422 | `showRTip` |
-| 8433 | `hideRTip` |
-| 8436 | `isoDay` |
-| 8438 | `winLabel` |
-| 8443 | `buildDateUI` |
-| 8457 | · `fieldMs` |
-| 8472 | · `xOf` |
-| 8474 | · `yOf` |
-| 8557 | · `endDrag` |
-| 8581 | · `hoverYear` |
-| 8589 | · · `yrOf` |
-| 8606 | · `onSlot` |
-| 8625 | `wantWedgeDebug` |
-| 8633 | `restOn` |
-| 8637 | `rowArcOn` |
-| 8673 | `demoOn` |
-| 8679 | `demoBusy` |
-| 8684 | `demoGroup` |
-| 8719 | `demoFind` |
-| 8866 | `demoNoteRect` |
-| 8904 | `demoBigInnerNote` |
-| 8947 | `demoCellRect` |
-| 8959 | `demoPoint` |
-| 8969 | `demoRibbonPoint` |
-| 8986 | `demoWhere` |
-| 9005 | `demoMode` |
-| 9295 | `demoFullStoryboard` |
-| 9310 | `demoLive` |
-| 9366 | `demoArrivalRect` |
-| 9379 | `demoAct` |
-| 9429 | `liveBusy` |
-| 9431 | `liveWhy` |
-| 9437 | `placeKeyOf` |
-| 9448 | `linkWeights` |
-| 9469 | `diffData` |
-| 9488 | · `missing` |
-| 9504 | `applyData` |
-| 9600 | `setWords` |
-| 9607 | `drainLive` |
-| 9615 | `stopDrain` |
-| 9702 | · · · · · · · · · · `rows` |
-| 9739 | · · · · · · · · · · `at` |
-| 9747 | · · · · · · · · · · `dist` |
-| 9818 | · · · · · · · · · · `r3` |
-| 9819 | · · · · · · · · · · `r3n` |
-| 9821 | · · · · · · · · · · `bandStat` |
-| 9846 | · · · · · · · · · · · `q` |
-| 10002 | · · · · · · · · · · `take` |
-| 10011 | · · · · · · · · · · `r2` |
-| 10072 | · · · · · · · · · · `W` |
-| 10080 | · · · · · · · · · · `rows` |
-| 10130 | · · · · · · · · · · `r3` |
-| 10265 | · · · · · · · · · · `byPath` |
-| 10437 | `destroy` |
+| 3586 | `reducedMotion` |
+| 3591 | `NOW` |
+| 3622 | `freshSkel` |
+| 3628 | `planDiff` |
+| 3682 | `measureFit` |
+| 3745 | `setFitCap` |
+| 3775 | `traceTag` |
+| 3777 | `tracePut` |
+| 3787 | `pinPlan` |
+| 3814 | `cascade` |
+| 3911 | · `clockwise` |
+| 3919 | · `windowFor` |
+| 3965 | · · `bearingNow` |
+| 3972 | · · `sweepAt` |
+| 3974 | · · `innerOld` |
+| 3979 | · · `innerNew` |
+| 3983 | · · `handAt` |
+| 3985 | · · `fillAt` |
+| 4111 | · `settle` |
+| 4139 | · `weightOf` |
+| 4180 | · `staticPlan` |
+| 4190 | · `inWorld` |
+| 4202 | · · `cellsOfG` |
+| 4227 | · · `deepen` |
+| 4232 | · · `record` |
+| 4248 | · · `roomOf` |
+| 4295 | · · · `takeCap` |
+| 4310 | · · `pairUp` |
+| 4321 | · · · `take` |
+| 4346 | · `watchdog` |
+| 4365 | · · `radiusOf` |
+| 4438 | · · `rowsAt` |
+| 4447 | · · `roomWalk` |
+| 4454 | · · `depthWalk` |
+| 4463 | · · `thickAt` |
+| 4472 | · · `spWalk` |
+| 4495 | · · `walkPair` |
+| 4600 | `probeSample` |
+| 4666 | `assignPositions` |
+| 4676 | `animateTo` |
+| 4700 | · `settle` |
+| 4710 | · `tweenDog` |
+| 4751 | `applyLayout` |
+| 4772 | `neighboursOf` |
+| 4784 | `syncLazyEdges` |
+| 4803 | `pathKey` |
+| 4813 | `visible` |
+| 4842 | `mixHex` |
+| 4856 | `hoverAmount` |
+| 4861 | `hoverTo` |
+| 4887 | `hlSignature` |
+| 4895 | `hlWalk` |
+| 4918 | `hlSync` |
+| 4927 | `focusSet` |
+| 4943 | `edgeCurveGeom` |
+| 4953 | `drawFocusWeb` |
+| 4998 | `drawHover` |
+| 5025 | `nodeStyle` |
+| 5080 | `ringColors` |
+| 5091 | `outerPresence` |
+| 5103 | `mixColorArrays` |
+| 5116 | `bandColors` |
+| 5145 | `ringColorsSmooth` |
+| 5163 | `ringGradient` |
+| 5196 | `placeLogo` |
+| 5259 | `measureSizeScale` |
+| 5268 | · `rampFor` |
+| 5287 | `dotWhy` |
+| 5306 | `dotPx` |
+| 5372 | `syncSizeScale` |
+| 5379 | `refreshSizeScale` |
+| 5392 | `measureEdgeMult` |
+| 5399 | `syncEdgeMult` |
+| 5407 | `capEdge` |
+| 5413 | `edgePx` |
+| 5422 | `discR` |
+| 5427 | `curvatureFor` |
+| 5438 | `makeRenderer` |
+| 5532 | · `onResize` |
+| 5578 | · `onDoubleClick` |
+| 5592 | `showTip` |
+| 5606 | `hideTip` |
+| 5623 | `goTo` |
+| 5633 | `trailBackTo` |
+| 5642 | `trailLabel` |
+| 5647 | `trailOff` |
+| 5649 | `trailRefresh` |
+| 5660 | `trailHTML` |
+| 5663 | · `crumb` |
+| 5697 | `select` |
+| 5772 | `centerOn` |
+| 5784 | `swatchFill` |
+| 5795 | `swatchTitle` |
+| 5808 | `rowTitle` |
+| 5820 | `clearPreviewCache` |
+| 5824 | `swatchPreviewHTML` |
+| 5852 | `countText` |
+| 5868 | `barBasis` |
+| 5881 | `barShare` |
+| 5891 | `shareText` |
+| 5923 | `lgrHTML` |
+| 5935 | `buildLegend` |
+| 5954 | · `eyeBtn` |
+| 5960 | · `subtree` |
+| 6038 | · `rowFor` |
+| 6087 | · · · `srow` |
+| 6152 | · `each` |
+| 6157 | · `onlySubs` |
+| 6167 | · `onlyUnder` |
+| 6270 | · · `hoverKeys` |
+| 6347 | `seedHidden` |
+| 6354 | `collapseAll` |
+| 6371 | `takeGeom` |
+| 6403 | `ringsIn` |
+| 6412 | `regroup` |
+| 6441 | `hardRelayout` |
+| 6477 | `buildSearch` |
+| 6516 | · `onDocMove` |
+| 6521 | · `onVisibility` |
+| 6549 | `stopPlay` |
+| 6568 | `timelineFrame` |
+| 6576 | `playTimeline` |
+| 6608 | `sweepTo` |
+| 6623 | `endSweep` |
+| 6630 | `resetView` |
+| 6654 | `syncDimCounts` |
+| 6667 | `dimGroupCount` |
+| 6669 | `syncDimUI` |
+| 6679 | `buildTools` |
+| 6731 | · · `done` |
+| 6737 | · · `save` |
+| 6811 | · `closeCtxMenu` |
+| 6820 | · `ctxOutside` |
+| 6825 | · `ctxKey` |
+| 6832 | · `swatchButtonsHTML` |
+| 6858 | · `openCtxMenu` |
+| 6946 | · `pickColor` |
+| 6961 | · `pickSubColors` |
+| 6978 | · `pickVisible` |
+| 6999 | · `subfolderRows` |
+| 7044 | · `buildOptions` |
+| 7058 | · `orderFor` |
+| 7060 | · `slotFor` |
+| 7062 | · `autoSlotFor` |
+| 7064 | · `subsFor` |
+| 7066 | · `subCountFor` |
+| 7068 | · `subShadeFor` |
+| 7070 | · `slotColor` |
+| 7072 | · `buildSettings` |
+| 7131 | `fitRatio` |
+| 7142 | `fit` |
+| 7145 | · `landed` |
+| 7158 | `zoomBy` |
+| 7169 | `syncCanvasTop` |
+| 7177 | `afterPanel` |
+| 7185 | `glidePanels` |
+| 7201 | `setSheet` |
+| 7216 | `setBand` |
+| 7230 | `setPan` |
+| 7242 | `setCompactAxis` |
+| 7268 | `stashDimNav` |
+| 7277 | `restoreDimNav` |
+| 7291 | `keepRings` |
+| 7303 | `setDim` |
+| 7394 | `setUnlinkedByFolder` |
+| 7418 | `setUnlinkedTintByFolder` |
+| 7431 | `paintBars` |
+| 7453 | `barWalkStart` |
+| 7474 | `barWalkTick` |
+| 7486 | `barWalkEnd` |
+| 7493 | `setCountBars` |
+| 7502 | `savePng` |
+| 7517 | · · · `layer` |
+| 7582 | `buildStats` |
+| 7595 | `esc` |
+| 7650 | `heatParse` |
+| 7655 | `heatKey` |
+| 7658 | · `p` |
+| 7662 | `heatMonday` |
+| 7667 | `heatGeom` |
+| 7678 | `heatBuild` |
+| 7723 | · `q` |
+| 7775 | `heatLevel` |
+| 7786 | `heatTile` |
+| 7806 | `heatCompute` |
+| 7820 | `heatDraw` |
+| 7925 | `heatDrawKey` |
+| 7965 | `heatRect` |
+| 7977 | `heatHit` |
+| 7990 | `heatShowTip` |
+| 8020 | `buildHeatmapUI` |
+| 8023 | · `setHover` |
+| 8046 | · `reflow` |
+| 8121 | `drawDateUI` |
+| 8127 | `buildYears` |
+| 8166 | `fitCanvas` |
+| 8177 | `dateRamp` |
+| 8182 | `scrubColor` |
+| 8185 | `rgbaHex` |
+| 8192 | `measureRibbon` |
+| 8202 | `ribbonW` |
+| 8207 | `ribbonXLinear` |
+| 8213 | `ribbonMsLinear` |
+| 8218 | `monthIndexOfMs` |
+| 8225 | `monthEndMs` |
+| 8230 | `segSpanMs` |
+| 8236 | `ribbonXCompact` |
+| 8244 | `ribbonMsCompact` |
+| 8256 | `ribbonX` |
+| 8260 | `ribbonMs` |
+| 8265 | `brushEnds` |
+| 8272 | `winEndNow` |
+| 8278 | `paintMonthBar` |
+| 8285 | `drawRibbon` |
+| 8363 | `rebuildBand` |
+| 8373 | `winTrack` |
+| 8380 | `inWinTrack` |
+| 8383 | `winSpan` |
+| 8386 | `clampWinEnd` |
+| 8394 | `winEndCentredAtPx` |
+| 8407 | `brushHit` |
+| 8419 | `showRTip` |
+| 8430 | `hideRTip` |
+| 8433 | `isoDay` |
+| 8435 | `winLabel` |
+| 8440 | `buildDateUI` |
+| 8454 | · `fieldMs` |
+| 8469 | · `xOf` |
+| 8471 | · `yOf` |
+| 8554 | · `endDrag` |
+| 8578 | · `hoverYear` |
+| 8586 | · · `yrOf` |
+| 8603 | · `onSlot` |
+| 8622 | `wantWedgeDebug` |
+| 8630 | `restOn` |
+| 8634 | `rowArcOn` |
+| 8670 | `demoOn` |
+| 8676 | `demoBusy` |
+| 8681 | `demoGroup` |
+| 8716 | `demoFind` |
+| 8863 | `demoNoteRect` |
+| 8901 | `demoBigInnerNote` |
+| 8944 | `demoCellRect` |
+| 8956 | `demoPoint` |
+| 8966 | `demoRibbonPoint` |
+| 8983 | `demoWhere` |
+| 9002 | `demoMode` |
+| 9292 | `demoFullStoryboard` |
+| 9307 | `demoLive` |
+| 9363 | `demoArrivalRect` |
+| 9376 | `demoAct` |
+| 9426 | `liveBusy` |
+| 9428 | `liveWhy` |
+| 9434 | `placeKeyOf` |
+| 9445 | `linkWeights` |
+| 9466 | `diffData` |
+| 9485 | · `missing` |
+| 9501 | `applyData` |
+| 9597 | `setWords` |
+| 9604 | `drainLive` |
+| 9612 | `stopDrain` |
+| 9699 | · · · · · · · · · · `rows` |
+| 9736 | · · · · · · · · · · `at` |
+| 9744 | · · · · · · · · · · `dist` |
+| 9815 | · · · · · · · · · · `r3` |
+| 9816 | · · · · · · · · · · `r3n` |
+| 9818 | · · · · · · · · · · `bandStat` |
+| 9843 | · · · · · · · · · · · `q` |
+| 9999 | · · · · · · · · · · `take` |
+| 10008 | · · · · · · · · · · `r2` |
+| 10069 | · · · · · · · · · · `W` |
+| 10077 | · · · · · · · · · · `rows` |
+| 10127 | · · · · · · · · · · `r3` |
+| 10262 | · · · · · · · · · · `byPath` |
+| 10434 | `destroy` |
 
-## `scripts/smoke.mjs` — 6050 lines, 11 sections, 71 functions, 113 checks
+## `scripts/smoke.mjs` — 5994 lines, 11 sections, 71 functions, 113 checks
 
 ### Sections
 
 | lines | section |
 |---|---|
 | 60–75 | chrome |
-| 76–593 | the checks |
-| 594–1122 | github#86, design/0015 |
-| 1123–1191 | github#116 |
-| 1192–1475 | github#86 D-9, design/0015 |
-| 1476–2269 | camera |
-| 2270–3767 | date range |
-| 3768–5276 | the hub |
-| 5277–5440 | live rebuild (github#72) |
-| 5441–5713 | the run |
-| 5714–6050 | which vaults, and why |
+| 76–564 | the checks |
+| 565–1089 | github#86, design/0015 |
+| 1090–1158 | github#116 |
+| 1159–1442 | github#86 D-9, design/0015 |
+| 1443–2236 | camera |
+| 2237–3729 | date range |
+| 3730–5235 | the hub |
+| 5236–5399 | live rebuild (github#72) |
+| 5400–5663 | the run |
+| 5664–5994 | which vaults, and why |
 
 ### Functions
 
@@ -514,189 +514,189 @@ range, not the file. Stale when `node scripts/code-map.mjs --check` fails.
 | 32 | `freePorts` |
 | 49 | `freePort` |
 | 62 | `findChrome` |
-| 134 | `gridSlot` |
-| 236 | · `at` |
-| 335 | `hostileVaults` |
-| 445 | · `lattice` |
-| 489 | · `t` |
-| 602 | · `txt` |
-| 632 | · `look` |
-| 688 | · `pos` |
-| 691 | · `drift` |
-| 833 | · · `sweep` |
-| 908 | · `live` |
-| 912 | · `hideFirst` |
-| 1028 | · `sweep` |
-| 1132 | · `q` |
-| 1297 | · `pick` |
-| 1484 | `camState` |
-| 1489 | `stageBox` |
-| 1495 | `camReset` |
-| 1500 | `camSettle` |
-| 1635 | · `box` |
-| 1749 | · `box` |
-| 1753 | · `read` |
-| 1971 | `toRest` |
-| 1980 | `clickEye` |
-| 1989 | `biggestGroup` |
-| 1999 | `watchDuringCascade` |
-| 2250 | · `r3` |
-| 2283 | `ribbonBox` |
-| 2290 | `rangeSnap` |
-| 2306 | `xOfMs` |
-| 2310 | `trackPress` |
-| 2321 | `winTravel` |
-| 2334 | `ribbonDrag` |
-| 2350 | `clearRange` |
-| 2586 | · `snap` |
-| 2600 | · `tick` |
-| 2853 | `walkSolo` |
-| 2917 | `soloDetail` |
-| 3367 | · `isDay` |
-| 3374 | · `pad` |
-| 3384 | · `wOf` |
-| 3675 | · `snap` |
-| 3686 | · `diff` |
-| 3709 | · `hiddenByDefault` |
-| 3770 | `topByDegree` |
-| 3777 | `pinN` |
-| 4449 | · `norm` |
-| 4606 | · · · `mean` |
-| 4663 | · `norm` |
-| 4757 | · `bars` |
-| 4758 | · `rows` |
-| 4862 | · `f` |
-| 4866 | · `read` |
-| 4979 | · `lower` |
-| 4980 | · `read` |
-| 5025 | · `look` |
-| 5117 | `pressKey` |
-| 5129 | `trailState` |
-| 5130 | `selectBySearch` |
-| 5139 | `hop` |
-| 5148 | `closeCard` |
-| 5149 | `stepBack` |
-| 5426 | `settle` |
-| 5443 | `runOne` |
-| 5672 | `killBrowser` |
-| 5792 | `resolveVaults` |
-| 5886 | `buildFor` |
-| 5905 | `main` |
+| 110 | `gridSlot` |
+| 210 | · `at` |
+| 309 | `hostileVaults` |
+| 418 | · `lattice` |
+| 462 | · `t` |
+| 573 | · `txt` |
+| 603 | · `look` |
+| 659 | · `pos` |
+| 662 | · `drift` |
+| 804 | · · `sweep` |
+| 879 | · `live` |
+| 883 | · `hideFirst` |
+| 995 | · `sweep` |
+| 1099 | · `q` |
+| 1264 | · `pick` |
+| 1451 | `camState` |
+| 1456 | `stageBox` |
+| 1462 | `camReset` |
+| 1467 | `camSettle` |
+| 1602 | · `box` |
+| 1716 | · `box` |
+| 1720 | · `read` |
+| 1938 | `toRest` |
+| 1947 | `clickEye` |
+| 1956 | `biggestGroup` |
+| 1966 | `watchDuringCascade` |
+| 2217 | · `r3` |
+| 2250 | `ribbonBox` |
+| 2257 | `rangeSnap` |
+| 2273 | `xOfMs` |
+| 2277 | `trackPress` |
+| 2288 | `winTravel` |
+| 2301 | `ribbonDrag` |
+| 2317 | `clearRange` |
+| 2553 | · `snap` |
+| 2567 | · `tick` |
+| 2820 | `walkSolo` |
+| 2884 | `soloDetail` |
+| 3334 | · `isDay` |
+| 3341 | · `pad` |
+| 3351 | · `wOf` |
+| 3642 | · `snap` |
+| 3653 | · `diff` |
+| 3676 | · `hiddenByDefault` |
+| 3732 | `topByDegree` |
+| 3739 | `pinN` |
+| 4408 | · `norm` |
+| 4565 | · · · `mean` |
+| 4622 | · `norm` |
+| 4716 | · `bars` |
+| 4717 | · `rows` |
+| 4821 | · `f` |
+| 4825 | · `read` |
+| 4938 | · `lower` |
+| 4939 | · `read` |
+| 4984 | · `look` |
+| 5076 | `pressKey` |
+| 5088 | `trailState` |
+| 5089 | `selectBySearch` |
+| 5098 | `hop` |
+| 5107 | `closeCard` |
+| 5108 | `stepBack` |
+| 5385 | `settle` |
+| 5402 | `runOne` |
+| 5622 | `killBrowser` |
+| 5742 | `resolveVaults` |
+| 5836 | `buildFor` |
+| 5855 | `main` |
 
 ### Checks
 
 | line | check |
 |---|---|
-| 147 | page loads with no console errors |
-| 151 | __vg is present and the intro landed |
-| 157 | a closing-script marker in frontmatter cannot escape the data script |
-| 198 | legend opens folded to top-level folders |
-| 207 | nav counts share one right edge |
-| 232 | every heatmap day with notes fills its cell |
-| 251 | the heatmap grid fits its box and is centred in it |
-| 268 | no note is dropped from a heatmap cell's tiling |
-| 282 | the heatmap band is painted for the state it landed in |
-| 312 | plan parity at full vault |
-| 318 | plan parity and zero-weight invariance with each folder hidden |
-| 367 | a folder named after an Object.prototype member still lays out |
-| 428 | the resting disc is on the lattice |
-| 470 | band assignment obeys its two hard rules |
-| 510 | layout matches its golden snapshot |
-| 596 | tags: folders is the default, and the switch is in the group list's own heading |
-| 630 | tags: every note is filed in exactly one wedge, in either dimension |
-| 684 | tags: the switch lands where a fresh relayout would, and comes home exactly |
-| 726 | tags: a dot in the disc being left keeps its colour until it has faded |
-| 797 | tags: a note one disc hides and the other shows arrives with the fill edge |
-| 875 | tags: the two buckets stay out of the hue rotation and sort last |
-| 906 | tags: each dimension keeps its own hidden and collapsed state |
-| 963 | tags: a nested tag earns a sub-wedge, exactly as a subfolder does |
-| 1023 | arc: a plan over the whole circle is the resting disc, and over half of it stays in half |
-| 1059 | tags: each grouping keeps its own colours, and the settings tabs reach both |
-| 1125 | the sidebar chrome stays put when a dimension switch adds or drops its scrollbar |
-| 1194 | a marked heatmap day haloes but never pushes |
-| 1213 | a marked heatmap day recolours its notes |
-| 1239 | hovering a note ramps in and releases at zero |
-| 1294 | highlighting ramps per note and is additive |
-| 1316 | tags: a live rebuild in the tag disc refiles the arrival and keeps the rings it was switched into |
-| 1358 | hover re-arms after the pointer leaves the stage |
-| 1414 | a sub-pixel dot can still be hovered |
-| 1461 | a highlighted note is drawn larger |
-| 1513 | one wheel notch is a step, not a leap |
-| 1527 | dragging the stage pans the camera |
-| 1548 | double-clicking the graph resets the view |
-| 1567 | the camera cluster is bottom-right, in order, and 31px |
-| 1626 | the panel toggles fold each panel away and give the space back |
-| 1805 | the disc's density follows the notes on screen |
-| 1899 | the hub stays the same share of the disc as it is filtered |
-| 1932 | fit frames the disc that is actually there |
-| 2020 | hiding the biggest group auto-fits the camera, but only once it has finished leaving |
-| 2054 | showing a hidden group auto-fits the camera while it is still arriving |
-| 2089 | a manually moved camera is left alone by a visibility toggle |
-| 2123 | the zoom buttons step by one wheel notch |
-| 2140 | the pan toggle locks the camera and flies home |
-| 2185 | a link's stroke holds its width at any zoom |
-| 2236 | the resting web is not floored wider than it asks for |
-| 2356 | a drag on the ribbon caps the date range |
-| 2368 | dragging one brush edge leaves the other alone |
-| 2390 | dragging inside the brush pans it and keeps its width |
-| 2406 | the band's window and the brush move independently |
-| 2441 | a press on the window track centres the window there |
-| 2484 | the disc waits for the release |
-| 2514 | All dates clears the range and the window |
-| 2529 | a range change animates instead of snapping |
-| 2579 | the last frame of a cascade is the resting layout |
-| 2688 | filtered to the bone, the disc stays drawable |
-| 2924 | a dot never outgrows its resting size while a cascade walks |
-| 2932 | with Size dots from the frame on, a walking dot is held under its two resting sizes, never above |
-| 2942 | an arriving note's fade never reverses during a solo switch |
-| 2999 | the gap reservation holds still while groups only thin |
-| 3045 | the date fields set the range and follow it |
-| 3094 | the year buttons select a year and halo it on hover |
-| 3201 | the ribbon rescales with its slot |
-| 3246 | the intro sweeps the range end across the strip |
-| 3292 | compact axis: a year's width tracks its own note count |
-| 3331 | compact axis: sparse years cluster near the same floor width |
-| 3360 | the ribbon's right edge is a day the vault has actually reached |
-| 3441 | compact axis: the settings-panel toggle actually flips the live state |
-| 3472 | colour unlinked by folder: the settings-panel toggle actually flips the live state |
-| 3504 | colour unlinked notes by folder: the settings-panel toggle actually flips the live state |
-| 3533 | compact axis: the view-level icon actually flips the live state, and persists |
-| 3556 | no non-tail split cell holds fewer notes than its band's row depth |
-| 3581 | the row-depth gate reads LIVE counts, not the whole-vault tally, under a filter |
-| 3618 | undated notes survive every range |
-| 3638 | overriding one folder recolours exactly one group |
-| 3666 | a folder keeps its slot across the membership toggle |
-| 3706 | a folder's legend row toggles \"hidden by default\" from its context menu |
-| 3785 | a pinned note leaves no gap in the ring it came from |
-| 3826 | the hub's dots shrink as it fills |
-| 3842 | a soloed hub-adjacent note stays inside the hub's own radius |
-| 3891 | the mark yields to the hub and comes back |
-| 3913 | a pin hidden by a filter is skipped, not released |
-| 3937 | every unlinked note wears the (unlinked) swatch |
-| 3969 | the (unlinked) row's right-click toggle moves unlinked notes into their folder |
-| 4024 | the (unlinked) row's right-click tint toggle recolours notes without moving them |
-| 4073 | the (unlinked) row opens its menu with no notes in it |
-| 4120 | the (unlinked) row's count is parenthesised while kept separate, plain once joined |
-| 4137 | legend count bars scale to the largest visible folder |
-| 4370 | the thinnest count bar survives a hover in pixels, not just in CSS |
-| 4481 | the count bars walk on the cascade's clock and land on the resting layout |
-| 4540 | a bar that loses its folder shrinks over the cascade instead of blinking out |
-| 4658 | the legend's swatch and count bar follow the token across a theme flip, with the picker |
-| 4749 | count bars are on by default, and the settings toggle removes every bar |
-| 4804 | the picker's contrast numbers are the harness's |
-| 4849 | the picker repaints itself on a theme change, with no rebuild |
-| 4910 | the picker draws the disc's own dot sizes |
-| 4963 | the picker's ladder is the ladder the disc draws |
-| 5018 | the picker's settings surface holds every slot without scrolling sideways |
-| 5084 | the picker stays inside the mount |
-| 5107 | focus web stays above dim notes |
-| 5155 | only a hop lengthens the trail |
-| 5174 | stepping back never re-collects a hop |
-| 5191 | a crumb click truncates the trail at the crumb |
-| 5206 | the trail is not layout |
-| 5229 | the page claims no keyboard shortcut |
-| 5252 | re-selecting the same note keeps the trail, and a filter does not clear it |
-| 5330 | a live rebuild with the same data moves nothing |
-| 5344 | the invalidation registry names every cache a live rebuild stales |
-| 5353 | a live rebuild lands on the layout a fresh relayout gives |
-| 5385 | word counts land by path, which is the only thing a live rebuild keeps |
+| 121 | page loads with no console errors |
+| 125 | __vg is present and the intro landed |
+| 131 | a closing-script marker in frontmatter cannot escape the data script |
+| 172 | legend opens folded to top-level folders |
+| 181 | nav counts share one right edge |
+| 206 | every heatmap day with notes fills its cell |
+| 225 | the heatmap grid fits its box and is centred in it |
+| 242 | no note is dropped from a heatmap cell's tiling |
+| 256 | the heatmap band is painted for the state it landed in |
+| 286 | plan parity at full vault |
+| 292 | plan parity and zero-weight invariance with each folder hidden |
+| 341 | a folder named after an Object.prototype member still lays out |
+| 401 | the resting disc is on the lattice |
+| 443 | band assignment obeys its two hard rules |
+| 483 | layout matches its golden snapshot |
+| 567 | tags: folders is the default, and the switch is in the group list's own heading |
+| 601 | tags: every note is filed in exactly one wedge, in either dimension |
+| 655 | tags: the switch lands where a fresh relayout would, and comes home exactly |
+| 697 | tags: a dot in the disc being left keeps its colour until it has faded |
+| 768 | tags: a note one disc hides and the other shows arrives with the fill edge |
+| 846 | tags: the two buckets stay out of the hue rotation and sort last |
+| 877 | tags: each dimension keeps its own hidden and collapsed state |
+| 930 | tags: a nested tag earns a sub-wedge, exactly as a subfolder does |
+| 990 | arc: a plan over the whole circle is the resting disc, and over half of it stays in half |
+| 1026 | tags: each grouping keeps its own colours, and the settings tabs reach both |
+| 1092 | the sidebar chrome stays put when a dimension switch adds or drops its scrollbar |
+| 1161 | a marked heatmap day haloes but never pushes |
+| 1180 | a marked heatmap day recolours its notes |
+| 1206 | hovering a note ramps in and releases at zero |
+| 1261 | highlighting ramps per note and is additive |
+| 1283 | tags: a live rebuild in the tag disc refiles the arrival and keeps the rings it was switched into |
+| 1325 | hover re-arms after the pointer leaves the stage |
+| 1381 | a sub-pixel dot can still be hovered |
+| 1428 | a highlighted note is drawn larger |
+| 1480 | one wheel notch is a step, not a leap |
+| 1494 | dragging the stage pans the camera |
+| 1515 | double-clicking the graph resets the view |
+| 1534 | the camera cluster is bottom-right, in order, and 31px |
+| 1593 | the panel toggles fold each panel away and give the space back |
+| 1772 | the disc's density follows the notes on screen |
+| 1866 | the hub stays the same share of the disc as it is filtered |
+| 1899 | fit frames the disc that is actually there |
+| 1987 | hiding the biggest group auto-fits the camera, but only once it has finished leaving |
+| 2021 | showing a hidden group auto-fits the camera while it is still arriving |
+| 2056 | a manually moved camera is left alone by a visibility toggle |
+| 2090 | the zoom buttons step by one wheel notch |
+| 2107 | the pan toggle locks the camera and flies home |
+| 2152 | a link's stroke holds its width at any zoom |
+| 2203 | the resting web is not floored wider than it asks for |
+| 2323 | a drag on the ribbon caps the date range |
+| 2335 | dragging one brush edge leaves the other alone |
+| 2357 | dragging inside the brush pans it and keeps its width |
+| 2373 | the band's window and the brush move independently |
+| 2408 | a press on the window track centres the window there |
+| 2451 | the disc waits for the release |
+| 2481 | All dates clears the range and the window |
+| 2496 | a range change animates instead of snapping |
+| 2546 | the last frame of a cascade is the resting layout |
+| 2655 | filtered to the bone, the disc stays drawable |
+| 2891 | a dot never outgrows its resting size while a cascade walks |
+| 2899 | with Size dots from the frame on, a walking dot is held under its two resting sizes, never above |
+| 2909 | an arriving note's fade never reverses during a solo switch |
+| 2966 | the gap reservation holds still while groups only thin |
+| 3012 | the date fields set the range and follow it |
+| 3061 | the year buttons select a year and halo it on hover |
+| 3168 | the ribbon rescales with its slot |
+| 3213 | the intro sweeps the range end across the strip |
+| 3259 | compact axis: a year's width tracks its own note count |
+| 3298 | compact axis: sparse years cluster near the same floor width |
+| 3327 | the ribbon's right edge is a day the vault has actually reached |
+| 3408 | compact axis: the settings-panel toggle actually flips the live state |
+| 3439 | colour unlinked by folder: the settings-panel toggle actually flips the live state |
+| 3471 | colour unlinked notes by folder: the settings-panel toggle actually flips the live state |
+| 3500 | compact axis: the view-level icon actually flips the live state, and persists |
+| 3523 | no non-tail split cell holds fewer notes than its band's row depth |
+| 3548 | the row-depth gate reads LIVE counts, not the whole-vault tally, under a filter |
+| 3585 | undated notes survive every range |
+| 3605 | overriding one folder recolours exactly one group |
+| 3633 | a folder keeps its slot across the membership toggle |
+| 3673 | a folder's legend row toggles \"hidden by default\" from its context menu |
+| 3747 | a pinned note leaves no gap in the ring it came from |
+| 3788 | the hub's dots shrink as it fills |
+| 3804 | a soloed hub-adjacent note stays inside the hub's own radius |
+| 3853 | the mark yields to the hub and comes back |
+| 3875 | a pin hidden by a filter is skipped, not released |
+| 3899 | every unlinked note wears the (unlinked) swatch |
+| 3931 | the (unlinked) row's right-click toggle moves unlinked notes into their folder |
+| 3983 | the (unlinked) row's right-click tint toggle recolours notes without moving them |
+| 4032 | the (unlinked) row opens its menu with no notes in it |
+| 4079 | the (unlinked) row's count is parenthesised while kept separate, plain once joined |
+| 4096 | legend count bars scale to the largest visible folder |
+| 4329 | the thinnest count bar survives a hover in pixels, not just in CSS |
+| 4440 | the count bars walk on the cascade's clock and land on the resting layout |
+| 4499 | a bar that loses its folder shrinks over the cascade instead of blinking out |
+| 4617 | the legend's swatch and count bar follow the token across a theme flip, with the picker |
+| 4708 | count bars are on by default, and the settings toggle removes every bar |
+| 4763 | the picker's contrast numbers are the harness's |
+| 4808 | the picker repaints itself on a theme change, with no rebuild |
+| 4869 | the picker draws the disc's own dot sizes |
+| 4922 | the picker's ladder is the ladder the disc draws |
+| 4977 | the picker's settings surface holds every slot without scrolling sideways |
+| 5043 | the picker stays inside the mount |
+| 5066 | focus web stays above dim notes |
+| 5114 | only a hop lengthens the trail |
+| 5133 | stepping back never re-collects a hop |
+| 5150 | a crumb click truncates the trail at the crumb |
+| 5165 | the trail is not layout |
+| 5188 | the page claims no keyboard shortcut |
+| 5211 | re-selecting the same note keeps the trail, and a filter does not clear it |
+| 5289 | a live rebuild with the same data moves nothing |
+| 5303 | the invalidation registry names every cache a live rebuild stales |
+| 5312 | a live rebuild lands on the layout a fresh relayout gives |
+| 5344 | word counts land by path, which is the only thing a live rebuild keeps |
