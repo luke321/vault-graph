@@ -3486,6 +3486,12 @@ function mountVaultGraph(root, data, deps) {
     return m && +m[2] > 0 ? +m[2] : 1.25;
   })();
   var TIMELINE_MS = 4500;
+  // github#113 -- the OS's "reduce motion" setting: a cascade lands in one frame and a camera
+  // tween snaps, on the same resting layout (page.css already stills the chrome under it).
+  // Read per animation rather than once, since the setting can change while the page is up.
+  function reducedMotion() {
+    return !!(WIN.matchMedia && WIN.matchMedia("(prefers-reduced-motion: reduce)").matches);
+  }
   var CASCADE_MS  = 1600;
   var TWEEN_MS    = 380;
   var NOW = function () { return (window.performance || Date).now(); };
@@ -4251,7 +4257,10 @@ function mountVaultGraph(root, data, deps) {
       settle();
     };
     var msPerFrame = (opts.totalMs > 0 ? opts.totalMs : CASCADE_MS * TIME_SCALE) / Math.max(1, span);
-    var MIN_FRAMES = 20;
+    // github#113 -- under "reduce motion" the walk is one frame: the plan is the same, only
+    // the frames between are not drawn
+    var reduced = reducedMotion();
+    var MIN_FRAMES = reduced ? 1 : 20;
     var maxAdv = Math.max(1, span) / MIN_FRAMES;
     var frame = 0, tPrev = NOW(), tailFrames = 0;
     // github#67
@@ -4295,7 +4304,8 @@ function mountVaultGraph(root, data, deps) {
       var tn = NOW();
       var adv = (tn - tPrev) / msPerFrame;
       tPrev = tn;
-      if (adv > maxAdv) adv = maxAdv;
+      if (reduced) adv = Math.max(1, span);
+      else if (adv > maxAdv) adv = maxAdv;
       frame += adv;
       if (cascadeRun) cascadeRun.tick = tn;
       var pr = Math.min(1, frame / Math.max(1, span));
@@ -4437,7 +4447,8 @@ function mountVaultGraph(root, data, deps) {
         targets = plan ? ringsLayout(plan, true) : null;
         traceTag("");
       }
-      var ez = pr < 1 ? RADIAL_EASE
+      var ez = reduced ? 1
+             : pr < 1 ? RADIAL_EASE
                       : Math.min(1, RADIAL_EASE + tailFrames * 0.15);
       var resid = 0;
       if (targets) graph.forEachNode(function (id) {
@@ -4610,13 +4621,16 @@ function mountVaultGraph(root, data, deps) {
     animGuard = WIN.setTimeout(tweenDog, TWEEN_STALL);
 
     var MIN_FRAMES = 20;
+    // github#113 -- under "reduce motion" the camera snaps
+    var reduced = reducedMotion();
     var p = 0, tPrev = NOW();
     (function step() {
       var tn = NOW();
       lastFrame = tn;
       var adv = (tn - tPrev) / dur;
       tPrev = tn;
-      if (adv > 1 / MIN_FRAMES) adv = 1 / MIN_FRAMES;
+      if (reduced) adv = 1;
+      else if (adv > 1 / MIN_FRAMES) adv = 1 / MIN_FRAMES;
       p = Math.min(1, p + adv);
       var e = p < 0.5 ? 4 * p * p * p : 1 - Math.pow(-2 * p + 2, 3) / 2;
       graph.forEachNode(function (id) {

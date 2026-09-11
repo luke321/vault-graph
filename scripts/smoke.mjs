@@ -3906,22 +3906,31 @@ check("the (unlinked) row's right-click toggle moves unlinked notes into their f
     var closedAfter = menu.hidden;
     var turnedOn = __vg.unlinkedByFolder === true;
     var countAfter = __vg.groupCount("(unlinked)");
-
+    window.__smokeOrphans = { ids: ids, startOn: startOn };
+    return { skip: false, ids: ids.length, openedOk: openedOk, pressedBefore: pressedBefore,
+             closedAfter: closedAfter, turnedOn: turnedOn, countAfter: countAfter };
+  })()`);
+  if (r.skip) return { ok: true, detail: "no unlinked notes on this shape, nothing to measure" };
+  // github#113 -- the repaint is read once the click's cascade has landed, not in the click's
+  // own tick: a walking note keeps the colour it left with (github#86), so an in-tick read
+  // compared two stale values and agreed by accident; under reduced motion the first frame
+  // is the last, and the two disagreed
+  await settle(p);
+  const paint = await p.j(`(function(){
+    var o = window.__smokeOrphans, rd = __vg.renderer;
     // nodeColor(), not a mirrored formula: it is the exact function under test, so this
     // asks "did the paint agree with the function" rather than "did the paint agree with
     // this check's own guess at what the function does."
-    var expected = ids.map(function (id) { return String(__vg.nodeColor(id)).toLowerCase(); });
-    var actual = ids.map(function (id) { return String(rd.getNodeDisplayData(id).color).toLowerCase(); });
+    var expected = o.ids.map(function (id) { return String(__vg.nodeColor(id)).toLowerCase(); });
+    var actual = o.ids.map(function (id) { return String(rd.getNodeDisplayData(id).color).toLowerCase(); });
     var matched = actual.filter(function (c, i) { return c === expected[i]; }).length;
-
     // Restore exactly, same discipline as the github#34 check above.
-    __vg.setUnlinkedByFolder(startOn);
-
-    return { skip: false, ids: ids.length, openedOk: openedOk, pressedBefore: pressedBefore,
-             closedAfter: closedAfter, turnedOn: turnedOn, countAfter: countAfter,
-             matched: matched };
+    __vg.setUnlinkedByFolder(o.startOn);
+    delete window.__smokeOrphans;
+    return { matched: matched };
   })()`);
-  if (r.skip) return { ok: true, detail: "no unlinked notes on this shape, nothing to measure" };
+  await settle(p);
+  r.matched = paint.matched;
   const ok = r.openedOk && r.pressedBefore === "false" && r.closedAfter &&
              r.turnedOn && r.countAfter === 0 && r.matched === r.ids;
   return { ok, detail: `${r.ids} unlinked notes; menu opened with the toggle ` +
@@ -5208,9 +5217,16 @@ async function runOne(vault, work) {
       }
       let r;
       const t0 = Date.now();
-      // github#113 -- the fast clock, unless the check reads frames; restored whatever happens
+      // github#113 -- the fast clock, unless the check reads frames; restored whatever happens.
+      // Two knobs: the OS "reduce motion" setting, emulated over CDP, lands every cascade and
+      // camera tween in one frame (the page honours it -- reducedMotion() in page.js); the
+      // clock at FAST_CLOCK shortens what still ramps (hover, highlight).
       const fast = c.clock !== "real";
-      if (fast) await page.eval(`__vg.timeScale = ${FAST_CLOCK}; void 0`).catch(() => {});
+      if (fast) {
+        await page.send("Emulation.setEmulatedMedia",
+                        { features: [{ name: "prefers-reduced-motion", value: "reduce" }] }).catch(() => {});
+        await page.eval(`__vg.timeScale = ${FAST_CLOCK}; void 0`).catch(() => {});
+      }
       try { r = await c.fn(page, ctx); }
       catch (e) { r = { ok: false, detail: "threw: " + e.message }; }
       // github#113, github#112 -- D-3: a check that returns while the page is still walking
@@ -5226,7 +5242,10 @@ async function runOne(vault, work) {
                       (done ? `settled in ${((Date.now() - tb) / 1000).toFixed(1)}s`
                             : "STILL busy after 20s") };
       }
-      if (fast) await page.eval(`__vg.timeScale = ${nativeClock}; void 0`).catch(() => {});
+      if (fast) {
+        await page.eval(`__vg.timeScale = ${nativeClock}; void 0`).catch(() => {});
+        await page.send("Emulation.setEmulatedMedia", { features: [] }).catch(() => {});
+      }
       const ms = Date.now() - t0;
       timings.push({ name: c.name, ms });
       if (!r.ok) failed++;
