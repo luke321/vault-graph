@@ -86,8 +86,7 @@ const selected = () => (ONLY.length
   ? all.filter((c) => ONLY.some((q) => c.name.toLowerCase().includes(q)))
   : all);
 
-// github#110 -- one Chrome at a time, no exceptions; concurrent Chrome across worktrees plus
-// concurrent shards within one run is what forced a hard restart. No flag reinstates this.
+// github#110
 const JOBS = 1;
 
 const GRID = argv.includes("--no-grid") ? false
