@@ -11,8 +11,7 @@ const argv = process.argv.slice(2);
 const arg = (n, d) => { const i = argv.indexOf("--" + n); return i >= 0 && argv[i + 1] ? argv[i + 1] : d; };
 const PORT = Number(arg("port", 9444));
 const KEEP = argv.includes("keep");
-// github#87 -- pass this only when the CALLER already holds the screen; taking it twice
-// makes the inner acquire wait out the outer one's stale window.
+// github#87
 const NO_LOCK = argv.includes("--no-lock");
 const VAULT = arg("vault", join(process.env.TEMP || "/tmp", "vault-graph-spike-vault"));
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -50,11 +49,7 @@ console.log("vault:    " + VAULT);
 console.log("port:     " + PORT);
 console.log("profile:  " + USER_DATA);
 
-// github#87 -- SPIKE-CHECK SEIZES THE LEFT DISPLAY. placeElectronLeft puts Obsidian there, and
-// record-demo.ps1 captures a region of the desktop with gdigrab: a take running beside this one
-// gets Obsidian in it and is ruined silently. Nothing else covered this -- record-demo was the
-// only caller in the tree that took a screen lock. Held around the whole run and released in
-// shutdown(), which is the single exit funnel for both the pass and the throw.
+// github#87
 const LOCK = "screen-left";
 const lockOwner = "spike-check [" + process.pid + "]";
 let holdsLock = false;
@@ -79,9 +74,7 @@ const fail = (msg) => { throw new Error("FAIL " + msg); };
 const shutdown = async (code) => {
   try { if (cdp) await cdp.close(); } catch {}
   if (!KEEP) { try { child.kill(); } catch {} }
-  // github#87 -- released after Obsidian is down, not before: a lock dropped while the window
-  // is still on screen hands the next claimant a display that is not actually free. With
-  // `keep` the window stays up deliberately, so the lock stays with it until the stale window.
+  // github#87
   if (holdsLock && !KEEP) {
     try {
       spawnSync(process.execPath, [join(HERE, "lock.mjs"), "release", LOCK, "--owner", lockOwner],

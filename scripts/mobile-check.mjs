@@ -183,8 +183,7 @@ async function main() {
     "                         y: Math.round(r.top), hitsMob: hit(m), hitsCam: hit(c) };" +
     "             var d = document.getElementById('vg-detail');" +
     "             var root = document.querySelector('.vault-graph');" +
-    // github#79 -- GUARDED LIKE THE smoke.mjs TWIN. Unguarded, an absent card threw out of the
-    // whole layout probe, so every layout line of the report was lost rather than this one line.
+    // github#79
     "             if (d && root) {" +
     "               var capOf = function (v) { var w = root.getAttribute('data-ov');" +
     "                 if (v === null) root.removeAttribute('data-ov'); else root.setAttribute('data-ov', v);" +

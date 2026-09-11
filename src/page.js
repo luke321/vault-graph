@@ -1383,14 +1383,6 @@ function mountVaultGraph(root, data, deps) {
 
   // github#77
   /**
-   * THE BUDGET THE DISC WILL USE, NOT THE ONE IT USES NOW. buildSubShades runs AFTER the pick,
-   * against groupColours() with this group already moved: its old colour is gone from the set
-   * unless another group still holds it, and the new one is skipped as the base. Reading the
-   * slots as they stand counts the old colour too -- and hueBudget takes the MINIMUM hue gap, so
-   * whenever the old colour was the nearest hue the swatch promised a narrower ladder than the
-   * disc then drew. Naming the group drops it here as well, which makes the two agree.
-   * With no group named the slots as they stand are already right: a sub-wedge pin moves no
-   * group, so nothing leaves the set.
    * @param {string} key @param {string} suffix "l" or "d" @param {string} [group]
    * @returns {string[]}
    */
@@ -5847,9 +5839,6 @@ function mountVaultGraph(root, data, deps) {
   function clearPreviewCache() { previewCache = dict(); }
 
   // github#77, design/0004, design/0003
-  // Still built once per swatch grid, not once per swatch -- but a ladder now depends on WHICH
-  // group is picking, so the memo is keyed by both. The settings surface draws a grid per group
-  // either way, so this adds cache entries, not renders.
   /** @param {string} key @param {string} [group] @returns {string} */
   function swatchPreviewHTML(key, group) {
     var ck = group ? "g" + group.length + ":" + group + ":" + key : key;
@@ -6860,8 +6849,7 @@ function mountVaultGraph(root, data, deps) {
     /**
      * @param {PaletteSlot[]} pal
      * @param {{ role: string, current: string, autoKey?: string, dataAttr?: string,
-     *           dataValue?: string, group?: string,
-     *           titleFor?: (on: boolean, isAuto: boolean) => string }} opts
+     *           dataValue?: string, group?: string, titleFor?: (on: boolean, isAuto: boolean) => string }} opts
      */
     function swatchButtonsHTML(pal, opts) {
       return pal.map(function (p) {
@@ -6888,7 +6876,7 @@ function mountVaultGraph(root, data, deps) {
      * @param {boolean} visShown @param {() => void} onToggleVisible
      * @param {boolean} [byFolderOn] @param {(() => void) | null} [onToggleByFolder]
      * @param {boolean} [tintOn] @param {(() => void) | null} [onToggleTint]
-     * @param {string} [group]                        whose colour is being picked, for the preview
+     * @param {string} [group]
      */
     function openCtxMenu(x, y, current, onPick, autoKey, visShown, onToggleVisible, byFolderOn, onToggleByFolder, tintOn, onToggleTint, group) {
       var el = $("ctxmenu");

@@ -1098,7 +1098,7 @@ class VaultGraphSettingTab extends PluginSettingTab {
     this.subOpen = bareMap();
     /** @type {HTMLElement | null} */
     this.scope = null;
-    // github#77 -- see renderColourSection: one listener for the tab's life, not one per open
+    // github#77
     /** @type {EventRef | null} */
     this.cssRef = null;
   }
@@ -1238,13 +1238,7 @@ class VaultGraphSettingTab extends PluginSettingTab {
 
     this.scope = scope;
     this.syncScopeTheme(false);
-    // github#77 -- ONE LISTENER FOR THE TAB'S LIFE, NOT ONE PER OPEN. display() runs again every
-    // time the user opens the tab, while plugin.registerEvent only releases on plugin UNLOAD, so
-    // registering here unguarded left a live handler behind on every open: ten opens meant ten
-    // handlers per theme or snippet change, each scheduling its own rAF, for as long as the
-    // plugin stayed loaded. The tab instance lives as long as the plugin (addSettingTab runs
-    // once), so registering once is both bounded and enough -- syncScopeTheme already returns
-    // early when this.scope is null, which is what the declarative path's teardown leaves it.
+    // github#77
     if (!this.cssRef) {
       this.cssRef = this.app.workspace.on("css-change", () => this.syncScopeTheme(true));
       this.plugin.registerEvent(this.cssRef);
@@ -1299,9 +1293,6 @@ class VaultGraphSettingTab extends PluginSettingTab {
 
   // github#77
   /**
-   * `group` is the group whose colour this grid picks, and the preview needs it: the ladder a
-   * slot draws depends on the hue gap to the OTHER groups, so the group about to move has to
-   * leave the set. A sub-wedge grid moves no group and passes none.
    * @param {VgApi | null} api @param {HTMLElement} btn
    * @param {string} key @param {string} name @param {string} tail @param {string} [group]
    */

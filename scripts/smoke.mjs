@@ -5251,11 +5251,7 @@ check("the picker's ladder is the ladder the disc draws", async (p) => {
     __vg.setFolderColors(was);
     var back = read();
 
-    // github#77 -- AND A SLOT THE GROUP DOES NOT HOLD, which is where the two used to part.
-    // All three reads above preview __vg.slotOf(picked.g), and hueBudget skips the base, so
-    // they cannot see a budget computed against the group's OLD colour. Measured on the demo
-    // vault before the group was named: 4 of 88 (group, unheld slot) pairs disagreed, one of
-    // them by a whole step of hue. Walks the slots and stops at the first that parts.
+    // github#77
     var unheld = null;
     var slots = __vg.palette().map(function (p) { return p.key; });
     for (var si = 0; si < slots.length; si++) {
@@ -5286,7 +5282,7 @@ check("the picker's ladder is the ladder the disc draws", async (p) => {
   const cameBack = r.back.ladder.join() === r.rest.ladder.join() &&
                    r.back.slot === r.rest.slot;
   const n = r.rest.disc.length;
-  // github#77 -- no qualifying slot is not a pass to claim, but it is not a failure either
+  // github#77
   const unheldOk = !r.unheld || r.unheld.ok;
   return { ok: atRest && afterPick && restored && invalidated && cameBack && unheldOk,
            detail: `${r.group} on ${r.rest.slot}: preview ${r.rest.ladder.slice(0, n).join(",")} ` +
