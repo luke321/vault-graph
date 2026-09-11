@@ -8849,6 +8849,12 @@ function mountVaultGraph(root, data, deps) {
       // github#86 -- nav bar following the notes
       { click: true, target: ["dim", "tag"], act: "tags", why: "cut the disc by tag instead of by folder" },
       { settle: true, act: "tags", why: "one hand takes the folders, the other brings the tags" },
+      { click: true, target: ["twisty", "area"], act: "tags", why: "a nested tag unfolds the same way a nested folder does" },
+      { click: true, target: ["sub", "area/health"], act: "tags", why: "click the sub-tag: haloed and pushed out, same as a subfolder" },
+      { settle: true, act: "tags", why: "let the sub-wedge push out" },
+      { click: true, target: ["sub", "area/health"], act: "tags", why: "...and let it back down" },
+      { settle: true, act: "tags", why: "let it settle back" },
+      { click: true, target: ["twisty", "area"], act: "tags", why: "fold it away again" },
       { click: true, target: ["dim", "folder"], act: "tags", why: "and back to folders" },
       { settle: true, act: "tags", why: "the same swap the other way round" },
 
