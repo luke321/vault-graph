@@ -1,13 +1,15 @@
 
 import { attach, json } from "./cdp.mjs";
+import { buildPayloadVault, PAYLOAD, NOTE_COUNT } from "./check-data-escape.mjs";
 import { leftmostScreen, leftWindowPos } from "./screen.mjs";
+import { FIXTURE_MAX_AGE_DAYS, describeFixture, record as recordPass } from "./suite-stamp.mjs";
 import { spawn, spawnSync } from "node:child_process";
 import { existsSync, mkdtempSync, rmSync, readFileSync, writeFileSync, readdirSync,
          renameSync, mkdirSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
 import { createServer } from "node:net";
-import { join, dirname } from "node:path";
+import { join, dirname, basename } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -83,7 +85,7 @@ const selected = () => (ONLY.length
   ? all.filter((c) => ONLY.some((q) => c.name.toLowerCase().includes(q)))
   : all);
 
-// github#7, github#15
+// github#7, github#15, github#78 -- see changelog-detail
 const JOBS = Math.max(1, Number(arg("jobs", "4")) || 4);
 
 const GRID = argv.includes("--no-grid") ? false
@@ -108,6 +110,8 @@ const FRAME_READING = [
   "gap reservation holds still",
   "outgrows",                     // github#66
   "fade never reverses",          // github#67
+  "live rebuild",                 // github#72
+  "land by path",                 // github#72
   "waits for the release",
   "haloes but never pushes",
   "resting layout",
@@ -146,6 +150,48 @@ check("page loads with no console errors", async (p, ctx) => {
 check("__vg is present and the intro landed", async (p) => {
   const r = await p.j(`{hasVg: !!window.__vg, until: __vg.state.until, notes: __vg.graph.order}`);
   return { ok: r.hasVg && r.until === null, detail: `${r.notes} notes, until=${r.until}` };
+});
+
+// github#96
+check("a closing-script marker in frontmatter cannot escape the data script", async (p) => {
+  const dir = mkdtempSync(join(tmpdir(), "vg-smoke-escape-"));
+  const port = Number(new URL(p.target.webSocketDebuggerUrl).port);
+  let tab = null, q = null;
+  try {
+    const url = pathToFileURL(buildPayloadVault(dir)).href;
+    tab = await p.send("Target.createTarget", { url, background: true });
+    for (const deadline = Date.now() + 15000; ;) {
+      try { q = await attach(port, basename(dir)); break; }
+      catch (e) { if (Date.now() > deadline) throw e; await sleep(250); }
+    }
+    for (const deadline = Date.now() + 10000; Date.now() < deadline;) {
+      if (await q.eval("!!(window.__vg && window.__vg.graph)").catch(() => false)) break;
+      await sleep(200);
+    }
+    const r = await q.eval(`(function () {
+      var d = window.VAULT_DATA, marked = null;
+      if (d && d.nodes) d.nodes.forEach(function (n) { if (n.label === "Marked") marked = n; });
+      return { ranType: window.__vg_escaped_type, ranTag: window.__vg_escaped_tag,
+               nodes: d && d.nodes ? d.nodes.length : -1,
+               type: marked ? marked.type : null, tags: marked ? marked.tags : [],
+               order: window.__vg && window.__vg.graph ? window.__vg.graph.order : -1 };
+    })()`);
+    const bad = [];
+    if (r.ranType !== undefined || r.ranTag !== undefined) bad.push("a marker script ran");
+    if (r.nodes !== NOTE_COUNT) bad.push("VAULT_DATA holds " + r.nodes + " notes, not " + NOTE_COUNT);
+    if (r.type !== PAYLOAD.type) bad.push("type decoded as " + JSON.stringify(r.type));
+    if (!r.tags.includes(PAYLOAD.tag)) bad.push("tags decoded as " + JSON.stringify(r.tags));
+    if (r.order !== NOTE_COUNT) bad.push("the graph mounted " + r.order + " notes, not " + NOTE_COUNT);
+    if (q.errors.length) bad.push(q.firstError());
+    return { ok: !bad.length,
+             detail: bad.length ? bad.join(" | ")
+               : "no marker ran, " + r.nodes + " notes decoded with both markers intact as text, " +
+                 r.order + " mounted" };
+  } finally {
+    if (q) q.close();
+    if (tab) await p.send("Target.closeTarget", { targetId: tab.targetId }).catch(() => {});
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 check("legend opens folded to top-level folders", async (p) => {
@@ -294,6 +340,98 @@ check("plan parity and zero-weight invariance with each folder hidden", async (p
   // page would boot on positions no fresh layout reproduces, by under a unit
   await p.eval(`__vg.state.hidden.folder = {}; __vg.syncAlpha(); __vg.applyLayout(false); __vg.applyLayout(false); void 0`);
   return { ok: bad.length === 0, detail: bad.length ? bad.join("; ") : `${groups.length} folders, all clean` };
+});
+
+// github#97
+let hostilePages = null;
+function hostileVaults() {
+  if (hostilePages) return hostilePages;
+  hostilePages = (async () => {
+    const NAMES = ["constructor", "toString", "hasOwnProperty", "__proto__"];
+    const root = mkdtempSync(join(tmpdir(), "vg-smoke-hostile-"));
+    process.on("exit", () => { try { rmSync(root, { recursive: true, force: true }); } catch {} });
+    const vault = (label, folders) => {
+      const dir = join(root, label);
+      mkdirSync(join(dir, ".obsidian"), { recursive: true });
+      for (const f of folders) {
+        mkdirSync(join(dir, f), { recursive: true });
+        writeFileSync(join(dir, f, "Note.md"), "# Note\n\nA note in a folder named " + f + ".\n");
+      }
+      return { label, dir, folders };
+    };
+    const specs = NAMES.map((n) => vault(n, [n])).concat([
+      vault("all-four-and-plain", NAMES.concat(["Plain"])),
+      vault("empty", []),
+      vault("plain", ["Plain"]),
+    ]);
+    return specs.map((s) => {
+      const out = join(root, s.label + ".html");
+      const b = spawnSync(process.execPath,
+                          [join(HERE, "..", "src", "build-graph.mjs"), "--vault", s.dir, "--out", out],
+                          { encoding: "utf8" });
+      if (b.status !== 0) throw new Error("build-graph.mjs failed on " + s.label + ":\n" + (b.stderr || ""));
+      return { ...s, url: pathToFileURL(out).href + "?rest" };
+    });
+  })();
+  return hostilePages;
+}
+
+check("a folder named after an Object.prototype member still lays out", async (p, ctx) => {
+  const home = await p.eval("location.href");
+  const READY = "!!(window.__vg && __vg.heat && __vg.state.until === null)";
+  const goto = async (url) => {
+    await p.send("Page.navigate", { url });
+    for (const until = Date.now() + 15000; ;) {
+      const ok = await p.eval(`location.href === ${JSON.stringify(url)} && ${READY}`).catch(() => false);
+      if (ok) return true;
+      if (Date.now() > until) return false;
+      await sleep(200);
+    }
+  };
+  const firstLine = (e) => String(e).split("\n")[0];
+  const pages = await hostileVaults();
+  const mark = ctx.errors.length;
+  const rows = [];
+  let bad = 0, back = false;
+  try {
+    for (const v of pages) {
+      const before = ctx.errors.length;
+      const ready = await goto(v.url);
+      if (ready && v.folders.indexOf("__proto__") >= 0) {
+        await p.eval(`(function(){ var m = Object.create(null); m["__proto__"] = true;
+                                   __vg.setFolderShown(m); __vg.applyHiddenDefaults(); })(); void 0`);
+        await settle(p);
+      }
+      const r = ready ? await p.j(`(function(){
+        var busy = document.getElementById("vg-busy");
+        var n = 0, nonFinite = 0;
+        __vg.graph.forEachNode(function (id, a) { n++; if (!isFinite(a.x) || !isFinite(a.y)) nonFinite++; });
+        var groups = __vg.groupOrder().filter(function (g) { return __vg.groupCount(g) > 0; });
+        var par = null, parErr = null;
+        if (n) { try { par = __vg.checkPlanParity(); } catch (e) { parErr = e.message; } }
+        return { busyHidden: !!(busy && busy.hidden), n: n, nonFinite: nonFinite, groups: groups,
+                 shown: par ? par.shown : 0,
+                 parity: par ? par.parityOK : (parErr ? "threw: " + parErr : null) };
+      })()`) : null;
+      const errs = ctx.errors.slice(before).map(firstLine);
+      const want = v.folders.length;
+      const ok = ready && !errs.length && r.busyHidden && r.n === want && r.nonFinite === 0 &&
+                 (want === 0 ? r.groups.length === 0
+                             : v.folders.every((f) => r.groups.indexOf(f) >= 0) &&
+                               r.shown === want && r.parity === true);
+      if (!ok) bad++;
+      rows.push(`${ok ? "ok" : "FAIL"} ${v.label}: ` + (ready
+        ? `${r.n}/${want} notes, ${r.shown} shown, groups [${r.groups.join(", ")}], ` +
+          `busy ${r.busyHidden ? "hidden" : "SHOWN"}, parity ${r.parity}` +
+          (errs.length ? `, threw: ${errs[0]}` : "")
+        : "never ready" + (errs.length ? `: ${errs[0]}` : "")));
+    }
+  } finally {
+    ctx.errors.splice(mark);
+    back = await goto(home);
+  }
+  if (!back) throw new Error("could not return to the fixture page at " + home);
+  return { ok: bad === 0, detail: `${pages.length - bad}/${pages.length} pages: ` + rows.join("; ") };
 });
 
 check("the resting disc is on the lattice", async (p) => {
@@ -454,7 +592,7 @@ check("layout matches its golden snapshot", async (p) => {
   return { ok, detail: parts.join("; ") };
 });
 
-/* ---------------------------------------------------- github#86, design/0014 */
+/* ---------------------------------------------------- github#86, design/0015 */
 
 check("tags: folders is the default, and the switch is in the group list's own heading",
 async (p) => {
@@ -564,7 +702,7 @@ async (p) => {
     return { tag: drift(landed, fresh), folder: drift(home, homeFresh),
              trip: drift(boot, home), n: Object.keys(boot).length };
   })()`);
-  // github#86, design/0014 -- room and position are a fixed point
+  // github#86, design/0015 -- room and position are a fixed point
   const ok = !r.tag.moved && !r.folder.moved && !r.trip.moved;
   return {
     ok,
@@ -579,7 +717,7 @@ check("tags: a dot in the disc being left keeps its colour until it has faded", 
   await clearRange(p);
   await settle(p);
   await camSettle(p);
-  // github#86, design/0014 -- the erase edge fades a dot where it stands, in the colour it had
+  // github#86, design/0015 -- the erase edge fades a dot where it stands, in the colour it had
   const n = await p.j(`(function(){
     var b = {};
     __vg.graph.forEachNode(function (id, a) {
@@ -650,7 +788,7 @@ check("tags: a note one disc hides and the other shows arrives with the fill edg
   await clearRange(p);
   await settle(p);
   await camSettle(p);
-  // github#86, design/0014 -- hide one folder in the folder disc only; each dimension keeps its
+  // github#86, design/0015 -- hide one folder in the folder disc only; each dimension keeps its
   // own hidden state, so in the tag disc those notes are ARRIVALS, and an arrival is lit by the
   // fill edge at its seat -- never at the switch, never ahead of the edge
   const pick = await p.j(`(function(){
@@ -893,7 +1031,7 @@ async (p) => {
     return { n: ids.length, off: off, worst: +worst.toFixed(3), inside: inside, outside: outside,
              worstOut: +(worstOut * 180 / Math.PI).toFixed(2), moved: moved };
   })()`);
-  // github#86, design/0014 -- the arc-bounded planner behind the dimension switch
+  // github#86, design/0015 -- the arc-bounded planner behind the dimension switch
   const ok = r.off === 0 && r.outside === 0 && r.moved === 0;
   return {
     ok,
@@ -906,7 +1044,7 @@ async (p) => {
 
 check("tags: each grouping keeps its own colours, and the settings tabs reach both", async (p) => {
   const r = await p.j(`(function(){
-    // github#86, design/0014 -- the panel is opened on the FOLDER disc and switched to the Tags
+    // github#86, design/0015 -- the panel is opened on the FOLDER disc and switched to the Tags
     // tab: its rows are the tag dimension's, a pin lands in the tag map, and the folder map, the
     // folder disc's order and its colours are all untouched.
     var gear = document.querySelector("#vg-gear");
@@ -968,7 +1106,7 @@ check("tags: each grouping keeps its own colours, and the settings tabs reach bo
   };
 });
 
-/* ------------------------------------------------- github#86 D-9, design/0014 */
+/* ------------------------------------------------- github#86 D-9, design/0015 */
 
 check("a marked heatmap day haloes but never pushes", async (p) => {
   const day = await p.j(`(function(){ var h = __vg.heat, b = null;
@@ -1020,7 +1158,9 @@ check("hovering a note ramps in and releases at zero", async (p) => {
   const w = await p.j(`__vg.demo.where("note","04") || __vg.demo.where("note","03")`);
   if (!w) return { ok: false, detail: "no note target resolved at all" };
   await p.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: w.x, y: w.y, buttons: 0 });
-  await sleep(400);
+  // github#78 -- see changelog-detail
+  await sleep(50);
+  await settle(p);
   const on = await p.j(`(function(){
     var f = __vg.state.hovered, nb = f ? __vg.graph.neighbors(f) : [], far = null;
     __vg.graph.forEachNode(function(i){ if (far || i === f || nb.indexOf(i) >= 0) return;
@@ -1033,7 +1173,8 @@ check("hovering a note ramps in and releases at zero", async (p) => {
             dim: getComputedStyle(document.getElementById('vg-app')).getPropertyValue('--dim').trim()};
   })()`);
   await p.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: 5, y: 5, buttons: 0 });
-  await sleep(400);
+  await sleep(50);
+  await settle(p);
   const off = await p.j(`{t: __vg.hoverT, held: !!__vg.state.hovered}`);
   const dimmed = on.farColour && on.dim && on.farColour.toLowerCase() === on.dim.toLowerCase();
   const AIMABLE_PX = 10;
@@ -1085,6 +1226,49 @@ check("highlighting ramps per note and is additive", async (p) => {
   const gone = await p.j(`{a: __vg.hl[${JSON.stringify(r.a)}] || 0, b: __vg.hl[${JSON.stringify(r.b)}] || 0}`);
   const ok = first.a === 1 && mid.a === 1 && mid.b > 0 && mid.b < 1 && gone.a === 0 && gone.b === 0;
   return { ok, detail: `first ${first.a}, then first ${mid.a} / second ${mid.b.toFixed(2)}, released ${gone.a}/${gone.b}` };
+});
+
+check("tags: a live rebuild in the tag disc refiles the arrival and keeps the rings it was switched into", async (p) => {
+  await settle(p);
+  await p.eval(LIVE_JS);
+  // github#72, github#86, decisions/0011 -- the filing is a cache a live rebuild stales, so an
+  // untagged arrival must land in (untagged); and a switched-to disc sits inside rings borrowed
+  // from the folder disc, which the rebuild must retake from THAT plan, not re-derive from its
+  // own -- or the first live edit after a switch re-packs the whole disc. "Fresh" is the fixed
+  // point inside the kept rings, two layout passes, as the switch round-trip check reads it.
+  await p.j(`(function(){ __vg.setDim("tag"); return true; })()`);
+  await settle(p);
+  const start = await p.j(`(function(){ window.__live.a = window.__live.snap();
+    var L = __vg.geomLock; window.__live.rings0 = L ? { r0: L.r0, maxR: L.maxR, dim: L.dim } : null;
+    return { n: window.__live.a.n, dim: __vg.state.dim, rings: window.__live.rings0 }; })()`);
+  const res = await p.j(`__vg.applyData(window.__live.withOneMore("__live/Zz Live Probe.md"))`);
+  await settle(p);
+  const after = await p.j(`(function(){
+    var landed = window.__live.snap(), id = null;
+    __vg.graph.forEachNode(function (i, a) { if (a.path === "__live/Zz Live Probe.md") id = i; });
+    __vg.applyLayout(false); __vg.applyLayout(false);
+    var L = __vg.geomLock;
+    return { d: window.__live.drift(landed, window.__live.snap()), found: id !== null,
+             g: id === null ? "" : __vg.groupOf(id), dim: __vg.state.dim, exit: __vg.lastCascade().exit,
+             rings: L ? { r0: L.r0, maxR: L.maxR, dim: L.dim } : null };
+  })()`);
+  await p.j(`__vg.applyData(window.__live.without(window.__live.clone().nodes.length - 1))`);
+  await settle(p);
+  const back = await p.j(`window.__live.drift(window.__live.a, window.__live.snap())`);
+  await p.j(`(function(){ __vg.setDim("folder"); return true; })()`);
+  await settle(p);
+  const r0Step = start.rings && after.rings ? Math.abs(after.rings.r0 - start.rings.r0) : NaN;
+  const ok = start.dim === "tag" && res.applied && res.added === 1 && res.cascaded &&
+             after.found && after.g === "(untagged)" && after.dim === "tag" &&
+             after.d.moved === 0 && after.d.sized === 0 && after.d.bands === 0 &&
+             !!start.rings && !!after.rings && start.rings.dim === "folder" && after.rings.dim === "folder" &&
+             r0Step < 0.01 && back.moved === 0 && back.sized === 0;
+  return { ok, detail: `on the ${start.dim} disc, ${start.n} -> ${start.n + 1} notes, cascade ${after.exit}; ` +
+                       `arrival filed under ${after.g || "(nowhere)"}; settle vs the fixed point: ` +
+                       `${after.d.moved} moved / ${after.d.sized} resized, ${after.d.bands} band flip(s); ` +
+                       `rings ${start.rings ? start.rings.dim : "none"} -> ${after.rings ? after.rings.dim : "none"}, ` +
+                       `r0 step ${isNaN(r0Step) ? "?" : r0Step.toFixed(4)}; restored to ${back.moved} off original` +
+                       (back.who ? ` (worst ${back.worst}, ${back.who})` : "") };
 });
 
 check("hover re-arms after the pointer leaves the stage", async (p) => {
@@ -3861,21 +4045,8 @@ check("legend count bars scale to the largest visible folder", async (p) => {
     return { order: order, rows: rows };
   })()`);
 
-  // github#78, design/0006
-  const settleBars = async () => {
-    let last = null;
-    for (let i = 0; i < 60; i++) {
-      const now = await p.j(`(function(){
-        return [].map.call(document.querySelectorAll('#vg-legend .lg[data-g]'), function (lg) {
-          return getComputedStyle(lg).getPropertyValue('--vg-share').trim();
-        }).join(",");
-      })()`);
-      if (now === last) return true;
-      last = now;
-      await sleep(150);
-    }
-    return false;
-  };
+  // github#78, design/0006 -- see changelog-detail
+  const settleBars = () => settle(p);
 
   // github#78
   const basisOf = (rows) => rows
@@ -4674,6 +4845,155 @@ check("re-selecting the same note keeps the trail, and a filter does not clear i
                        `${off} marked hidden, card ${s2.open ? "open" : "CLOSED"}; shown again: ${s3.crumbs.length}` };
 });
 
+/* ------------------------------------------------- live rebuild (github#72) */
+
+// github#72, design/0014
+const LIVE_JS = `
+  window.__live = {
+    snap: function () {
+      var pos = {}, band = {}, size = {};
+      __vg.buildWedgePlan(false).cells.forEach(function (c) { band[c.g] = !!c.inner; });
+      __vg.graph.forEachNode(function (id, a) {
+        pos[a.path] = [a.x, a.y];
+        size[a.path] = __vg.renderer.scaleSize(__vg.renderer.getNodeDisplayData(id).size);
+      });
+      return { pos: pos, band: band, size: size, n: __vg.graph.order };
+    },
+    drift: function (a, b) {
+      var moved = 0, worst = 0, who = "", bands = 0, sized = 0, worstSize = 0;
+      Object.keys(a.pos).forEach(function (k) {
+        var p = a.pos[k], q = b.pos[k];
+        if (!q) return;
+        var d = Math.hypot(p[0] - q[0], p[1] - q[1]);
+        if (d > worst) { worst = d; who = k; }
+        if (d > 0.0001) moved++;
+        var s = Math.abs((a.size[k] || 0) - (b.size[k] || 0));
+        if (s > worstSize) worstSize = s;
+        if (s > 0.0001) sized++;
+      });
+      Object.keys(a.band).forEach(function (g) {
+        if (b.band[g] !== undefined && b.band[g] !== a.band[g]) bands++;
+      });
+      return { moved: moved, worst: +worst.toFixed(4), who: who, bands: bands,
+               sized: sized, worstSize: +worstSize.toFixed(4) };
+    },
+    clone: function () { return JSON.parse(JSON.stringify(__vg.data())); },
+    // design/0014
+    withOneMore: function (path) {
+      var d = window.__live.clone();
+      var host = d.nodes[Math.floor(d.nodes.length / 2)];
+      d.nodes.push({ id: path, label: "Zz Live Probe", folder: host.folder,
+                     dirs: (host.dirs || []).slice(), sub: host.sub || "", type: "note",
+                     tags: [], created: host.created, touched: host.touched, words: 0, deg: 0 });
+      return d;
+    },
+    // Drop one note, and renumber the edges the way a real build of that vault would.
+    without: function (at) {
+      var d = window.__live.clone();
+      d.nodes.splice(at, 1);
+      d.edges = d.edges.filter(function (e) { return e.s !== at && e.t !== at; })
+                       .map(function (e) { return { s: e.s > at ? e.s - 1 : e.s,
+                                                    t: e.t > at ? e.t - 1 : e.t, w: e.w }; });
+      return d;
+    }
+  }; void 0`;
+
+check("a live rebuild with the same data moves nothing", async (p) => {
+  await settle(p);
+  await p.eval(LIVE_JS);
+  const r = await p.j(`(function(){
+    var was = window.__live.snap();
+    var res = __vg.applyData(window.__live.clone());
+    return { res: res, d: window.__live.drift(was, window.__live.snap()), busy: !!__vg.demo.busy() };
+  })()`);
+  const ok = r.res.applied && r.res.cascaded === false && r.d.moved === 0 && !r.busy;
+  return { ok, detail: (r.res.applied ? `applied "${r.res.reason}"` : `REFUSED (${r.res.reason})`) +
+                       `, cascaded ${r.res.cascaded}, ${r.d.moved} note(s) moved, ` +
+                       `worst ${r.d.worst}, no cascade started` };
+});
+
+check("the invalidation registry names every cache a live rebuild stales", async (p) => {
+  const names = await p.j("__vg.invalidations()");
+  const want = ["timeline", "heatmap tally", "hop trail", "selection, hover and pins", "search hits",
+                "tag filing and sub order"];
+  const missing = want.filter((w) => !names.includes(w));
+  return { ok: missing.length === 0,
+           detail: missing.length ? `MISSING: ${missing.join(", ")}` : `${names.length}: ${names.join("; ")}` };
+});
+
+check("a live rebuild lands on the layout a fresh relayout gives", async (p) => {
+  await settle(p);
+  await p.eval(LIVE_JS);
+  const start = await p.j(`(function(){ window.__live.a = window.__live.snap();
+                                        return { n: window.__live.a.n }; })()`);
+  const res = await p.j(`__vg.applyData(window.__live.withOneMore("__live/Zz Live Probe.md"))`);
+  await settle(p);
+  // decisions/0011, github#21
+  const after = await p.j(`(function(){
+    var landed = window.__live.snap();
+    __vg.relayout();
+    return { d: window.__live.drift(landed, window.__live.snap()),
+             zero: __vg.checkZeroWeightInvariance(),
+             lattice: __vg.buildWedgePlan(false).cells.length,
+             exit: __vg.lastCascade().exit };
+  })()`);
+  const moved = await p.j(`window.__live.drift(window.__live.a, window.__live.snap())`);
+  // design/0014
+  await p.j(`__vg.applyData(window.__live.clone().nodes.length > ${start.n}
+                            ? window.__live.without(window.__live.clone().nodes.length - 1)
+                            : window.__live.clone())`);
+  await settle(p);
+  const back = await p.j(`window.__live.drift(window.__live.a, window.__live.snap())`);
+  const ok = res.applied && res.added === 1 && res.cascaded &&
+             after.d.moved === 0 && after.d.sized === 0 && after.d.bands === 0 &&
+             after.zero.invariantOK !== false && back.moved === 0;
+  return { ok, detail: `${start.n} -> ${start.n + 1} notes, cascade ${after.exit}; ` +
+                       `settle vs fresh relayout: ${after.d.moved} moved / ${after.d.sized} resized, ` +
+                       `${after.d.bands} band flip(s); the add moved ${moved.moved} of ${start.n} ` +
+                       `notes, worst ${moved.worst}; restored to ${back.moved} off original` };
+});
+
+check("word counts land by path, which is the only thing a live rebuild keeps", async (p) => {
+  await settle(p);
+  await p.eval(LIVE_JS);
+  const start = await p.j(`window.__live.snap().n`);
+  // design/0014
+  const r = await p.j(`(function(){
+    var res = __vg.applyData(window.__live.without(1));
+    var ids = __vg.graph.nodes(), d = __vg.data();
+    var diverged = 0, sample = null;
+    for (var i = 0; i < d.nodes.length; i++) {
+      var byIndex = String(i), byPath = d.nodes[i].id;
+      var here = __vg.graph.hasNode(byIndex)
+        ? __vg.graph.getNodeAttribute(byIndex, "path") : null;
+      if (here !== byPath) diverged++;
+      // design/0014
+      if (!sample && here !== null && here !== byPath) sample = { i: i, path: byPath, atIndex: here };
+    }
+    var landed = null, bystander = null;
+    if (sample) {
+      __vg.setWords(sample.path, 424242);
+      __vg.graph.forEachNode(function (id, a) {
+        if (a.path === sample.path) landed = a.words;
+        if (sample.atIndex && a.path === sample.atIndex) bystander = a.words;
+      });
+    }
+    return { res: res, n: ids.length, diverged: diverged, sample: sample,
+             landed: landed, bystander: bystander,
+             missing: __vg.setWords("__live/not a note.md", 1) };
+  })()`);
+  await settle(p);
+  await p.j(`__vg.applyData(window.__live.clone())`);
+  await settle(p);
+  const ok = r.res.applied && r.diverged > 0 && r.landed === 424242 &&
+             r.bystander !== null && r.bystander !== 424242 && r.missing === false;
+  return { ok, detail: r.sample
+    ? `${start} notes, one removed; index and id disagree for ${r.diverged} note(s) ` +
+      `(index ${r.sample.i} now holds a different note); setWords by path landed on the right ` +
+      `one (${r.landed}), the note at that index kept ${r.bystander}; a deleted path returns false`
+    : `index and id never diverged -- this check cannot see the defect it exists for` };
+});
+
 async function settle(p, ms = 6000) {
   const deadline = Date.now() + ms;
   for (;;) {
@@ -5002,7 +5322,6 @@ function resolveVaults() {
   if (arg("url", "")) return [{ path: "", label: "the page passed with --url" }];
 
   const out = [];
-  const FIXTURE_MAX_AGE_DAYS = 7;
   const GENERATORS = ["make-demo-vault.mjs", "make-test-vault.mjs", "make-shape-vault.mjs"];
   // github#86 -- hashes ONLY its own generator; the other three do not move
   const TAG_GENERATORS = ["make-tag-vault.mjs"];
@@ -5068,14 +5387,15 @@ function resolveVaults() {
       console.log(`  note: ${name}/ exists in this checkout and is IGNORED -- the suite uses ` +
                   `the shared store (${dir}); pass --vault to use a specific vault on purpose`);
     }
-    out.push({ path: dir, label });
+    const desc = describeFixture(dir);
+    out.push({ path: dir, label, fixture: desc ? { name, ...desc } : null });
   };
 
   gen("make-demo-vault.mjs", [], "demo-vault", "the demo vault (sparse tail, 2 dense years)");
   gen("make-test-vault.mjs", ["--notes", "10000", "--years", "10", "--end", "2026-08-28"],
       "test-vault", "the 10k synthetic vault (10 years)");
   gen("make-shape-vault.mjs", [], "shape-vault", "the dominant-folder vault");
-  // github#86, design/0014 -- the only tag-ORGANISED fixture; --end pinned
+  // github#86, design/0015 -- the only tag-ORGANISED fixture; --end pinned
   gen("make-tag-vault.mjs", ["--end", "2026-09-09"], "tag-vault",
       "the tag-organised vault (nested tags, 8% untagged)", TAG_GENERATORS);
 
@@ -5192,6 +5512,19 @@ async function main() {
       const f = failures.get(v.label) || 0, t = ran.get(v.label) || 0;
       console.log(`  ${f ? "FAIL" : " ok "}  ${t - f}/${t}  ${v.label}`);
     }
+  }
+
+  // github#93, decisions/0013
+  const partial = ONLY.length ? "--only" : argAll("vault").length ? "--vault" : arg("url", "") ? "--url"
+                : FAST ? "--fast" : vaults.some((v) => !v.fixture) ? "an unstamped fixture" : "";
+  if (!worst && !partial) {
+    let checks = 0;
+    for (const t of ran.values()) checks += t;
+    const r = recordPass({ fixtures: vaults.map((v) => v.fixture), checks });
+    console.log(r.wrote ? `stamped tree ${r.tree.slice(0, 7)} as passed: ${r.wrote}`
+                        : `not stamping this run: ${r.why}`);
+  } else if (!worst) {
+    console.log(`not stamping this run: ${partial} is not the full suite`);
   }
   if (worst) {
     console.log("");

@@ -6,9 +6,9 @@
 # ruleset on main requires this check to pass. Together they mean a pull request from any
 # other branch cannot be merged, and there is no direct push to main to sidestep it.
 #
-# The point is not ceremony. It is that main is what the Obsidian directory installs from
-# and what `Closes #n` resolves against, so anything reaching it should already have gone
-# through develop -- where the invariant suite runs on every push.
+# The point is not ceremony. It is that main is what the Obsidian directory installs from,
+# so anything reaching it should already have gone through develop -- where the invariant
+# suite runs on every push, and where an issue is closed (close-issues.yml).
 #
 # The mirror of this for the command line is in .githooks/pre-push, which refuses a push to
 # main that develop is not already an ancestor of. Neither is a substitute for the other:

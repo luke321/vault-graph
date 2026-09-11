@@ -59,6 +59,7 @@ node scripts/check-scope.mjs    # the page cannot style, or be styled by, its ho
 node scripts/check-network.mjs  # nothing shipped can make a network request
 node scripts/check-notice.mjs   # the Sigma notice opens a fresh main.js and a fresh exported page
 node scripts/check-comments.mjs # comments are pointers; the count of prose lines only goes down
+node scripts/check-data-escape.mjs # a note's frontmatter cannot close the exported data script
 ```
 
 Three more are manual, because each launches a real browser or a real Obsidian and takes a
@@ -140,6 +141,13 @@ everything else is a static read costing seconds at most, and what most of it pr
 damage to somebody else's software, or to somebody else. The lint gate fails closed on a
 clone that has not run `npm ci` — run it, then push.
 
+**A tree is gated once.** A green full run of `smoke.mjs` stamps the git *tree* it measured
+and the fixtures it ran against (`scripts/suite-stamp.mjs`, in the shared git common dir).
+The hook and `release.ps1` skip the suite when every commit being pushed carries such a
+stamp, and say which run they trust. A merge that changed the tree, or a fixture regenerated
+since, runs it as before. `node scripts/suite-stamp.mjs check [<rev>]` says what a push would
+do; `release.ps1 -ForceSuite` runs it anyway. `.ai-context/decisions/0013` has the reasoning.
+
 ## Branches, and how work reaches main
 
 **`develop` is where work lands. `main` only ever receives `develop`.**
@@ -150,7 +158,7 @@ your branch  ->  develop  ->  main
 
 `main` is what the Obsidian directory installs from and what a release is tagged on, so
 nothing should reach it that has not already been through `develop`, where the invariant
-suite runs on every push. The rule is enforced twice, because there are two ways to move a
+suite runs on every push whose tree it has not measured yet. The rule is enforced twice, because there are two ways to move a
 commit and neither mechanism can see the other:
 
 | | |
@@ -194,13 +202,29 @@ Fix the suite's flake, which was two bugs and neither was the settle
 Closes #7
 ```
 
-GitHub resolves closing keywords when the commit reaches the **default branch**, which is
-`main`. So an issue fixed on a branch stays open through `develop` and closes by itself
-when the release merge lands — which is exactly when it is true to say it is fixed. A bare
-`#7` links without closing, and is right for a commit that only touches an issue in passing.
+The issue closes when that commit reaches **`develop`**. GitHub itself resolves a closing
+keyword only on the default branch, `main`, and has no per-branch switch; at one or two
+releases a day that left issues open for hours after their fix had landed and been gated. So
+`.github/workflows/close-issues.yml` runs on every push to `develop`, scans the pushed commits
+for the keyword forms GitHub recognises (`close`, `fix`, `resolve` and their `-s`/`-d`
+spellings, any case, followed by `#n`, `owner/repo#n` or the issue's URL — anywhere in the
+message except inside a backtick code span, so a commit *about* the convention closes
+nothing), and closes each issue it names with a comment giving the commit and saying the fix
+is not yet released. The release merge into `main` then meets GitHub's own resolution on an
+issue already closed. A closed issue therefore means *landed on `develop`*; whether it has
+shipped is what the CHANGELOG is for. A bare `#7` links without closing, and is right for a
+commit that only touches an issue in passing.
 
-If a merge into `main` needs to close issues its commits did not name, put the keywords in
-the merge commit message; that works the same way.
+If a merge into `develop` needs to close issues its commits did not name, put the keywords in
+the merge commit message; the workflow reads that commit too. The scanning is
+`scripts/close-issues.mjs`, which can be rehearsed on any range without writing anything:
+
+```bash
+node scripts/close-issues.mjs --range <before>..<after> --dry-run
+```
+
+A push whose starting commit the workflow cannot see — `develop` force-pushed, or created from
+nothing — fails the run and closes nothing, rather than guessing at the range.
 
 For a visual change, take before-and-after screenshots of the same vault and compare them:
 

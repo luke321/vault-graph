@@ -79,6 +79,13 @@ export class GraphStore implements GraphStoreApi {
     return key;
   }
 
+  // github#72, design/0014
+  clear(): void {
+    this.nodeAttrs.clear();
+    this.edgeRecords.clear();
+    this.adjacency.clear();
+  }
+
   hasNode(id: string): boolean {
     return this.nodeAttrs.has(id);
   }

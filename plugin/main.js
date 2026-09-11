@@ -11,6 +11,26 @@ import LOGO_MASK_B64 from "b64:../assets/logo-mask.png";
 
 const VIEW_TYPE = "vault-graph-view";
 const ICON_ID = "vault-graph-disc";
+// github#72, design/0014
+const LIVE_DEBOUNCE_MS = 1000;
+// github#72, design/0014
+const LIVE_WAKE_MS = 500;
+
+// github#60
+/** @returns {Record<string, string>} */
+function pathMap() {
+  /** @type {unknown} */
+  const o = Object.create(null);
+  return /** @type {Record<string, string>} */ (o);
+}
+
+// github#97
+/** @template T @returns {Record<string, T>} */
+function bareMap() {
+  /** @type {unknown} */
+  const o = Object.create(null);
+  return /** @type {Record<string, T>} */ (o);
+}
 
 /* ===================================================================== types ==
  * JSDoc, not TypeScript: the file stays plain JavaScript (see the header) and
@@ -47,6 +67,7 @@ const ICON_ID = "vault-graph-disc";
  * @property {boolean} countBars                        github#78, design/0006
  * @property {boolean} fitCap                           github#41, design/0011
  * @property {"folder" | "tag"} dim                     github#86 -- grouping dimension
+ * @property {boolean} liveRefresh                      github#72
  * @property {boolean} [sheetOpen]                      github#82 -- absent until folded once
  * @property {boolean} [bandOpen]                       github#82
  */
@@ -403,13 +424,15 @@ async function buildData(app, opts) {
   // github#58
   /**
    * @param {(index: number, words: number) => void} apply
+   * @param {Set<string>} [only]   github#72: read just these paths, for a live rebuild
    * @returns {Promise<number>}
    */
-  const readWords = async (apply) => {
+  const readWords = async (apply, only) => {
     const t = performance.now();
     if (!wordFiles) return 0;
     await Promise.all(wordFiles.map(async (file, i) => {
       if (!file) return;
+      if (only && !only.has(file.path)) return;
       let words = 0;
       try {
         const raw = await app.vault.cachedRead(file);
@@ -503,6 +526,19 @@ class VaultGraphView extends ItemView {
     /** @type {BuildResult | null} */
     this.lastData = null;
     this.mountMs = 0;
+    // github#72
+    /** @type {number | null} */
+    this.liveTimer = null;
+    this.pendingRenames = pathMap();
+    /** @type {Set<string>} */
+    this.dirtyPaths = new Set();
+    this.liveBuilding = false;
+    this.liveAgain = false;
+    this.liveDeferred = false;
+    /** @type {number | null} */
+    this.liveWake = null;
+    /** @type {import("../src/page.js").LiveResult | null} */
+    this.lastLive = null;
   }
 
   getViewType() { return VIEW_TYPE; }
@@ -519,11 +555,148 @@ class VaultGraphView extends ItemView {
 
   // github#62
   teardown() {
+    // github#72
+    this.cancelLive();
     if (this.handle) {
       attempt(() => this.handle.destroy());
     }
     this.handle = null;
     this.contentEl.empty();
+  }
+
+  /* ------------------------------------------------------- live rebuild (github#72) */
+
+  liveOn() { return this.plugin.settings.liveRefresh !== false; }
+
+  cancelLive() {
+    if (this.liveTimer !== null) { window.clearTimeout(this.liveTimer); this.liveTimer = null; }
+    this.stopLiveWake();
+    this.dirtyPaths.clear();
+    this.pendingRenames = pathMap();
+    this.liveAgain = false;
+    this.liveDeferred = false;
+  }
+
+  // github#72, design/0014
+  startLiveWake() {
+    if (this.liveWake !== null) return;
+    this.liveWake = window.setInterval(() => {
+      if (!this.liveVisible()) return;
+      this.stopLiveWake();
+      this.scheduleLive();
+    }, LIVE_WAKE_MS);
+  }
+
+  stopLiveWake() {
+    if (this.liveWake !== null) { window.clearInterval(this.liveWake); this.liveWake = null; }
+  }
+
+  // github#72, design/0014
+  liveVisible() {
+    const el = this.containerEl;
+    return !!(el && el.offsetParent !== null);
+  }
+
+  // github#72, design/0014
+  liveSettingChanged() {
+    if (!this.liveOn()) this.cancelLive();
+  }
+
+  // github#72, design/0014
+  subscribeLive() {
+    const cache = this.app.metadataCache, vault = this.app.vault;
+    this.registerEvent(cache.on("resolved", () => this.scheduleLive()));
+    this.registerEvent(cache.on("changed", (file) => this.scheduleLive(file && file.path)));
+    this.registerEvent(vault.on("create", (file) => this.scheduleLive(file && file.path)));
+    this.registerEvent(vault.on("delete", (file) => this.scheduleLive(file && file.path)));
+    this.registerEvent(vault.on("rename", (file, oldPath) => {
+      const to = file && file.path;
+      if (to && oldPath) {
+        // design/0014
+        let from = oldPath;
+        for (const k of Object.keys(this.pendingRenames)) {
+          if (this.pendingRenames[k] === oldPath) { from = k; break; }
+        }
+        this.pendingRenames[from] = to;
+        this.dirtyPaths.add(oldPath);
+      }
+      this.scheduleLive(to);
+    }));
+  }
+
+  /** @param {string} [path] */
+  scheduleLive(path) {
+    if (!this.liveOn() || !this.handle) return;
+    if (path) this.dirtyPaths.add(path);
+    if (this.liveTimer !== null) window.clearTimeout(this.liveTimer);
+    this.liveTimer = window.setTimeout(() => {
+      this.liveTimer = null;
+      void this.liveRebuild();
+    }, LIVE_DEBOUNCE_MS);
+  }
+
+  // github#72, design/0014 -- whether the disc MOVES is applyData's call, not this one's
+  async liveRebuild() {
+    const handle = this.handle;
+    const api = handle && handle.api;
+    if (!api || typeof api.applyData !== "function") return;
+    // github#72, design/0014
+    if (!this.liveVisible()) { this.liveDeferred = true; this.startLiveWake(); return; }
+    this.liveDeferred = false;
+    this.stopLiveWake();
+    if (this.liveBuilding) { this.liveAgain = true; return; }
+    this.liveBuilding = true;
+    const dirty = this.dirtyPaths;
+    this.dirtyPaths = new Set();
+    const renames = this.pendingRenames;
+    this.pendingRenames = pathMap();
+    try {
+      const next = await buildData(this.app, this.plugin.settings);
+      if (this.handle !== handle || handle.api !== api) return;   // github#62
+
+      // github#58, design/0014
+      /** @type {Map<string, number>} */
+      const had = new Map();
+      for (const n of (this.lastData ? this.lastData.nodes : [])) had.set(n.id, n.words || 0);
+      /** @type {Map<string, string>} */
+      const cameFrom = new Map();
+      for (const from of Object.keys(renames)) cameFrom.set(renames[from], from);
+      /** @param {string} path */
+      const wordsBefore = (path) => {
+        const was = cameFrom.get(path);
+        return had.has(path) ? had.get(path) : (was !== undefined ? had.get(was) : undefined);
+      };
+      for (const n of next.nodes) {
+        const before = wordsBefore(n.id);
+        if (!dirty.has(n.id) && before !== undefined) n.words = before;
+      }
+
+      const r = api.applyData(next, { renames: renames });
+      this.lastLive = r;
+      if (r && r.churn !== undefined) {
+        // design/0014 -- a sync, an import or a folder move. Do what Refresh does.
+        this.lastData = null;
+        await this.render();
+        return;
+      }
+      this.lastData = next;
+      if (!this.plugin.settings.words) return;
+      /** @type {Set<string>} */
+      const want = new Set(dirty);
+      for (const n of next.nodes) if (wordsBefore(n.id) === undefined) want.add(n.id);
+      if (!want.size) return;
+      void next.readWords((i, words) => {
+        const node = next.nodes[i];
+        if (!node) return;
+        node.words = words;
+        if (this.handle === handle && handle.api === api) api.setWords(node.id, words);
+      }, want).catch(() => {});
+    } catch (e) {
+      new Notice("Vault Graph: live refresh failed -- " + (e instanceof Error ? e.message : String(e)));
+    } finally {
+      this.liveBuilding = false;
+      if (this.liveAgain) { this.liveAgain = false; this.scheduleLive(); }
+    }
   }
 
   syncTheme() {
@@ -639,7 +812,7 @@ class VaultGraphView extends ItemView {
         this.plugin.settings.unlinkedTintByFolder = !!v;
         await this.plugin.saveSettings();
       },
-      // github#86, design/0014, decisions/0009 -- the host only remembers it
+      // github#86, design/0015, decisions/0009 -- the host only remembers it
       dim: this.plugin.settings.dim,
       /** @param {"folder" | "tag"} v */
       onDim: async (v) => {
@@ -681,11 +854,17 @@ class VaultGraphView extends ItemView {
     this.mountMs = Math.round(performance.now() - t0);
 
     const handle = this.handle;
+    // github#58; github#72, design/0014 -- by PATH, never by index
     void data.readWords((i, words) => {
-      data.nodes[i].words = words;
+      const node = data.nodes[i];
+      if (!node) return;
+      node.words = words;
       const api = handle.api;
-      if (api && api.graph && this.handle === handle) api.graph.setNodeAttribute(String(i), "words", words);
+      if (api && api.setWords && this.handle === handle) api.setWords(node.id, words);
     }).then((ms) => { data._spike.msWordsBackground = ms; }, () => {});
+
+    // github#72
+    this.subscribeLive();
 
     this.registerDomEvent(page, "click", (ev) => {
       const a = ev.target instanceof Element ? ev.target.closest('a[href^="obsidian://"]') : null;
@@ -728,6 +907,8 @@ const DEFAULTS = {
   fitCap: true,
   // github#86 -- folder is the default
   dim: "folder",
+  // github#72
+  liveRefresh: true,
 };
 
 /** @type {{ key: "ghosts" | "templates" | "flatMonths" | "words", name: string, desc: string }[]} */
@@ -744,11 +925,12 @@ const BUILD_SETTINGS = [
 
 /**
  * @typedef {Object} ViewSetting
- * @property {"panEnabled" | "compactAxis" | "unlinkedByFolder" | "unlinkedTintByFolder" | "countBars" | "fitCap"} key
+ * @property {"panEnabled" | "compactAxis" | "unlinkedByFolder" | "unlinkedTintByFolder" | "countBars" | "fitCap" | "liveRefresh"} key
  * @property {string} name
  * @property {string} desc
  * @property {boolean} defaultOn
- * @property {"setPanEnabled" | "setCompactAxis" | "setUnlinkedByFolder" | "setUnlinkedTintByFolder" | "setCountBars" | "setFitCap"} api
+ * @property {"setPanEnabled" | "setCompactAxis" | "setUnlinkedByFolder" | "setUnlinkedTintByFolder" | "setCountBars" | "setFitCap" | ""} api
+ * @property {boolean} [host]   the HOST owns this one, not the page, so there is no api to call
  */
 /** @type {ViewSetting[]} */
 const VIEW_SETTINGS = [
@@ -766,6 +948,9 @@ const VIEW_SETTINGS = [
   // github#41, design/0011
   { key: "fitCap", name: "Size dots from the frame", defaultOn: true, api: "setFitCap",
     desc: "While the disc animates, cap every dot at just under half its distance to the nearest visible note, measured on the frame being drawn, so dots stay apart while rows slide. The disc at rest is unchanged. Experimental: dots breathe while a cascade walks." },
+  // github#72
+  { key: "liveRefresh", name: "Follow the vault", defaultOn: true, api: "", host: true,
+    desc: "Take a note you have just written, moved or linked into the disc where it stands, instead of waiting for Refresh to rebuild the whole thing. Only a change that decides where a note SITS moves anything -- writing prose does not, so typing is still. Off, the disc is a snapshot until you press Refresh." },
 ];
 
 const COLOURS_DESC = "Twelve slots, handed out in group order and round again. Folders and tags keep their own colours; the tabs choose which. Setting one group never moves another, and two may share a colour.";
@@ -835,8 +1020,9 @@ class VaultGraphSettingTab extends PluginSettingTab {
   constructor(app, plugin) {
     super(app, plugin);
     this.plugin = plugin;
+    // github#97
     /** @type {Record<string, boolean>} */
-    this.subOpen = {};
+    this.subOpen = bareMap();
     /** @type {HTMLElement | null} */
     this.scope = null;
   }
@@ -900,8 +1086,10 @@ class VaultGraphSettingTab extends PluginSettingTab {
   /** @param {ViewSetting} def @param {boolean} v */
   async applyView(def, v) {
     const view = await this.plugin.currentView();
+    // github#72, design/0014 -- a host-owned setting has no page api to call
+    if (def.host) { if (view) view.liveSettingChanged(); return; }
     const api = view && view.handle && view.handle.api;
-    if (api && api[def.api]) api[def.api](v);
+    if (api && def.api && api[def.api]) api[def.api](v);
   }
 
   display() {
@@ -1041,7 +1229,9 @@ class VaultGraphSettingTab extends PluginSettingTab {
     const subsByFolder = allSubfolders(this.app, this.plugin.settings.flatMonths);
 
     for (const group of groups) {
-      const pinned = this.plugin.settings.folderColors[group.name] || "";
+      // github#97
+      const colors = this.plugin.settings.folderColors;
+      const pinned = (Object.prototype.hasOwnProperty.call(colors, group.name) && colors[group.name]) || "";
       const current = pinned || group.slot;
       const shown = this.shownByDefault(group.name);
       const subs = subsByFolder.get(group.name) || [];
@@ -1136,7 +1326,8 @@ class VaultGraphSettingTab extends PluginSettingTab {
 
   /** @param {string} folder */
   async pickVisible(folder) {
-    const map = Object.assign({}, this.plugin.settings.folderShown);
+    // github#97
+    const map = Object.assign(bareMap(), this.plugin.settings.folderShown);
     map[folder] = !this.shownByDefault(folder);
     this.plugin.settings.folderShown = map;
     await this.plugin.saveSettings();
@@ -1151,7 +1342,8 @@ class VaultGraphSettingTab extends PluginSettingTab {
    * @param {"applyFolderColors" | "applySubfolderColors"} applyMethod
    */
   async setOverride(settingsKey, mapKey, key, applyMethod) {
-    const map = Object.assign({}, this.plugin.settings[settingsKey]);
+    // github#97
+    const map = Object.assign(bareMap(), this.plugin.settings[settingsKey]);
     if (key) map[mapKey] = key; else delete map[mapKey];
     this.plugin.settings[settingsKey] = map;
     await this.plugin.saveSettings();

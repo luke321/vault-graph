@@ -6,9 +6,10 @@
 .DESCRIPTION
   Refuses a v-prefixed or non-semver version, a version the manifest does not claim, a
   version with no CHANGELOG section, a branch other than main (github#47), a dirty tree and a
-  main behind origin; prints the hero and feature-clip warnings; runs lint, the Sigma notice
-  check and the invariant suite; builds the plugin once as a pre-flight; then writes the
-  annotated tag and pushes the branch and the tag. Everything after that -- build, provenance
+  main behind origin; prints the hero and feature-clip warnings; runs lint and the Sigma notice
+  check; builds the plugin once as a pre-flight; runs the invariant suite unless HEAD's tree
+  already carries a pass stamp from an earlier full run (github#93; -ForceSuite runs it
+  anyway); then writes the annotated tag and pushes the branch and the tag. Everything after that -- build, provenance
   attestation, Release, assets -- is the workflow's (github#10). .ai-context/releasing.md is
   the authority on the two halves.
 
@@ -53,7 +54,12 @@ param(
   # hatch for the branch guard below, shaped like -AllowDirty: there is a legitimate case
   # (a hotfix line that never reaches main, say), and the guard exists to stop the ACCIDENT,
   # not to make the deliberate thing impossible.
-  [switch] $AllowAnyBranch
+  [switch] $AllowAnyBranch,
+  # Run the invariant suite even when HEAD's tree already carries a pass stamp (github#93,
+  # decisions/0013). The stamp is the normal case: the dry run on the release branch measured
+  # this exact tree, and the merge into main did not change it. This is the flag for not
+  # trusting that -- a suspected flake, a changed Chrome, a stamp you want re-earned.
+  [switch] $ForceSuite
 )
 
 $ErrorActionPreference = 'Stop'
@@ -248,9 +254,35 @@ try {
            "with no release. Fix it first (npm ci, if this is a fresh clone).")
   }
 
+  # A TREE IS GATED ONCE (github#93, decisions/0013). scripts/smoke.mjs stamps the tree it
+  # passed; the dry run on the release branch is normally that run, and the merge into main
+  # carries the same tree (measured byte-identical on 2.3.0, 2.4.0 and 2.4.1). So the suite is
+  # skipped here when HEAD's tree already has a stamp against the fixtures now in the store,
+  # and named when it is. -ForceSuite runs it regardless. When it does run, it runs under the
+  # machine-wide suite lock (scripts/lock.mjs, github#92) and releases it on every way out.
   Write-Host "`n=== invariants ===" -ForegroundColor Cyan
-  try { Invoke-Native node @((Join-Path $here 'smoke.mjs')) }
-  catch { throw "the invariant suite failed -- not releasing" }
+  $stamped = $false
+  if (-not $ForceSuite) {
+    $prev = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try { & node (Join-Path $here 'suite-stamp.mjs') check HEAD } finally { $ErrorActionPreference = $prev }
+    $stamped = ($LASTEXITCODE -eq 0)
+  }
+  if ($stamped) {
+    Write-Host "HEAD's tree already passed the suite -- skipping it (-ForceSuite to run it anyway)" -ForegroundColor Yellow
+  } else {
+    $lockOwner = "release.ps1 $Version"
+    try { Invoke-Native node @((Join-Path $here 'lock.mjs'), 'acquire', 'suite', '--owner', $lockOwner) }
+    catch { throw "could not take the suite lock -- another suite is running (node scripts/lock.mjs status); not releasing" }
+    try {
+      try { Invoke-Native node @((Join-Path $here 'smoke.mjs')) }
+      catch { throw "the invariant suite failed -- not releasing" }
+    } finally {
+      $prev = $ErrorActionPreference
+      $ErrorActionPreference = 'Continue'
+      try { & node (Join-Path $here 'lock.mjs') release suite --owner $lockOwner } finally { $ErrorActionPreference = $prev }
+    }
+  }
 
   if ($DryRun) { Write-Host "`n-DryRun: stopping before the tag and the push." -ForegroundColor Yellow; return }
 
@@ -261,7 +293,10 @@ try {
   # No BOM -- git and gh both read these as bytes, and a BOM ends up in the tag message.
   $utf8 = New-Object System.Text.UTF8Encoding($false)
   [IO.File]::WriteAllText($msgFile, $section, $utf8)
-  if (-not $tagExists) { Invoke-Native git @('tag', '-a', $Version, '-F', $msgFile) }
+  # --cleanup=verbatim: git's default strips every line starting with '#' from a tag message
+  # as a comment, which silently ate the '## <version>' heading and every '###' section from
+  # 2.0.0, 2.1.0 and 2.2.0's tags. github#47
+  if (-not $tagExists) { Invoke-Native git @('tag', '-a', $Version, '--cleanup=verbatim', '-F', $msgFile) }
   Remove-Item $msgFile -ErrorAction SilentlyContinue
 
   # THE BRANCH FIRST, THEN THE TAG, and the order is load-bearing in a way it was not when

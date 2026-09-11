@@ -48,8 +48,33 @@ measuring it: serve the page, drive it, read the numbers.
   default. Patch `window.VAULT_DATA`'s `vault` field in the built HTML, never the product: the
   title is a review aid, and several builds from different branches and vaults sit in tabs at
   once, so an unlabeled one is judged against the wrong build.
+- **A vault that is not Lukas's own opens in restricted mode, and the plugin does not load at
+  all.** Any fixture or generated vault is "untrusted" on its first open: Obsidian puts up **"Trust
+  author and enable plugins?"** and opens its Settings window behind it. Until that is confirmed
+  *and* Settings is closed, `app.plugins.getPlugin("vault-graph")` is null, the ribbon icon and the
+  `vault-graph:open` command do nothing, and **a perfectly good plugin reads as broken** -- the
+  trap is that it looks like a code fault, so it gets diagnosed as one.
+
+  **Driving over CDP, do not click the dialog -- enable it programmatically**, which is what the
+  harnesses already do (`obsidian-smoke.mjs`, `spike-check.mjs`) and what any new one should copy:
+
+  ```javascript
+  if (!app.plugins.getPlugin(id)) {
+    await app.plugins.setEnable(true);          // leave restricted mode
+    await app.plugins.enablePluginAndSave(id);  // then enable ours
+  }
+  ```
+
+  Judge nothing about the plugin's behaviour until `getPlugin(id)` is truthy. By hand: confirm the
+  prompt, close Settings, then look.
+
 - `git push` and merging into `develop` are separate asks, every time. `main` only ever
   receives `develop`.
+- **Only the orchestrator session pushes to `develop` or cuts a release.** A dispatched ticket
+  worktree implements, runs its own gates, and stops at its own branch — it never pushes past
+  that branch, never merges into `develop`, and never runs `release.ps1`, no matter how clean the
+  result. Integrating finished branches and shipping them is the orchestrator's job alone, so one
+  place is answerable for what's actually on `develop` and what a release contains.
 - **A release is the range, not the work in hand.** Everything it needs — a `CHANGELOG.md`
   section accounting for *every* merge since the last tag, every clip it embeds, every doc naming
   the version, the release body itself — is finished on `release/<version>` and read there before
@@ -59,20 +84,12 @@ measuring it: serve the page, drive it, read the numbers.
   a range.
 - Measure before and after; the numbers go into `.ai-context/changelog-detail.md`, which is
   the regression suite. A changed constant means `invariants.md` changes in the same commit.
-- **Obsidian does not load the plugin in a vault it has not been told to trust.** Open any vault
-  that is not the daily one -- a fixture vault, a generated test vault, anything under a temp dir
-  -- and Obsidian asks *Trust author and enable plugins?* the first time, behind a Settings window.
-  Until that is confirmed the plugin does not load **at all**, so skipping it leaves you staring at
-  a plugin that looks broken for a reason that is nowhere in the code. Confirm the prompt, close
-  Settings, then judge what the plugin is doing. `scripts/obsidian-smoke.mjs` handles this itself
-  -- it writes `community-plugins.json` and calls `enablePluginAndSave` -- a hand-launched Obsidian
-  does not.
 - Fixtures: three generated vaults (`scripts/make-*-vault.mjs`) in the shared store; never a
   real vault, never a built `vault-graph.html`, in anything that reaches the repo.
 - `npm run lint` holds every finding at zero. `check-pii`, `check-scope`, `check-network` and
   the two determinism checks gate every push and have no skip flag.
 - Commit messages are sentences; `Closes #n` on its own line closes the issue when the work
-  reaches `main`.
+  reaches `develop` — a workflow does it, since GitHub itself only resolves it on `main`.
 
 ## Where things are
 

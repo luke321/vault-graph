@@ -58,6 +58,22 @@
  * @property {boolean} [dev]         a --dev build of the standalone; nothing else sets it
  */
 
+// github#72, design/0014
+/**
+ * @typedef {Object} LiveResult
+ * @property {boolean} applied
+ * @property {string} reason
+ * @property {boolean} [queued]
+ * @property {string} [busy]     which of cascade / tween / timeline holds the frame loop
+ * @property {number} [churn]
+ * @property {number} [limit]
+ * @property {number} [added]
+ * @property {number} [removed]
+ * @property {number} [replaced]
+ * @property {number} [moved]
+ * @property {boolean} [cascaded]
+ */
+
 /**
  * The attributes this file puts on every graph node at addNode, and reads back. Declared in
  * src/engine/types.ts since github#58 -- the store and the renderer are checked against the
@@ -110,7 +126,7 @@
  * @property {boolean} [unlinkedByFolder]
  * @property {boolean} [unlinkedTintByFolder]
  * @property {boolean} [countBars]              github#78, design/0006
- * @property {"folder" | "tag"} [dim]         github#86, design/0014 -- absent means "folder"
+ * @property {"folder" | "tag"} [dim]         github#86, design/0015 -- absent means "folder"
  * @property {boolean} [fitCap]               github#41, design/0011
  * @property {boolean} [sheetOpen]            github#82 -- absent means "decide from the width"
  * @property {boolean} [bandOpen]             github#82
@@ -162,6 +178,8 @@
  * @typedef {Object} VgApi
  * @property {GraphLike} graph
  * @property {RendererLike | undefined} renderer   set by makeRenderer() before the api exists; a getter, so a host reads the live one
+ * @property {(next: VaultData, opts?: { renames?: Record<string, string> }) => LiveResult} applyData   github#72
+ * @property {(path: string, words: number) => boolean} setWords   github#72: by PATH, never by index
  * @property {() => void} readTheme
  * @property {() => void} placeLogo
  * @property {() => PaletteSlot[]} palette
@@ -393,7 +411,7 @@ function mountVaultGraph(root, data, deps) {
     });
     return out;
   }
-  // github#86, design/0014 -- every grouping keeps its OWN colour pins, sub-tint pins and
+  // github#86, design/0015 -- every grouping keeps its OWN colour pins, sub-tint pins and
   // github#86 -- default-visibility map, under the same three shapes. A dimension reads its
   // github#86 -- own; the settings panel reads the tab you are on.
   /** @type {Record<string, SlotMap>} */
@@ -437,10 +455,10 @@ function mountVaultGraph(root, data, deps) {
   // github#78, design/0006
   var countBars = deps.countBars === false ? false : true;
   var onCountBars = typeof deps.onCountBars === "function" ? deps.onCountBars : null;
-  // github#86, design/0014
+  // github#86, design/0015
   /** @type {("folder" | "tag")[]} */
   var DIMS = ["folder", "tag"];
-  // github#86, design/0014 -- which dimension the settings panel is showing. It follows the disc
+  // github#86, design/0015 -- which dimension the settings panel is showing. It follows the disc
   // github#86 -- on a switch, so opening the panel after switching lands on the tab you expect,
   // github#86 -- and stays where you put it while the panel is open.
   /** @type {"folder" | "tag"} */
@@ -507,7 +525,7 @@ function mountVaultGraph(root, data, deps) {
 
   /** @param {string} g */
   function hiddenByDefault(g) {
-    // github#86, design/0014 -- each dimension has its own map; D-2 shows (untagged) unless
+    // github#86, design/0015 -- each dimension has its own map; D-2 shows (untagged) unless
     // github#86 -- this dimension's map says otherwise
     var m = shownFor()[g];
     if (typeof m === "boolean") return !m;
@@ -598,19 +616,16 @@ function mountVaultGraph(root, data, deps) {
     pinned: []
   };
 
+  // github#72, design/0014
+  /** @type {{ name: string, fn: () => void }[]} */
+  var onData = [];
+  /** @param {string} name @param {() => void} fn */
+  function invalidatesOnData(name, fn) { onData.push({ name: name, fn: fn }); }
+
   /* ------------------------------------------------- graph + base layout */
 
   var graph = new Graph();
 
-  DATA.nodes.forEach(function (n, i) {
-    graph.addNode(String(i), {
-      label: n.label, x: 0, y: 0, size: 4,
-      folder: n.folder, sub: n.sub || "", dirs: n.dirs || [], ntype: n.type || "note",
-      tags: n.tags || [], path: n.id, deg: n.deg,
-      created: n.created || "", touched: n.touched || "",
-      words: n.words || 0, ghost: !!n.ghost
-    });
-  });
   // github#43
   var EDGE_RAMP_START = 2000, EDGE_RAMP_END = 10000, EDGE_FLOOR = 0.10;
   /** @type {Record<string, { o: string, w: number }[]>} */
@@ -625,58 +640,100 @@ function mountVaultGraph(root, data, deps) {
   var edgeAttrsOf = function (w) { return { weight: w, size: EDGE_SIZE }; };
   var EDGE_SHOWN = 0;
   var lazyEdges = false;
-  (function () {
-    /** @type {Record<string, number>} */
-    var seen = dict();
-    /** @type {{ a: string, b: string, w: number, k: string }[]} */
-    var list = [];
-    DATA.edges.forEach(function (e) {
-      var a = String(e.s), b = String(e.t);
-      var k = a < b ? a + "\u0000" + b : b + "\u0000" + a;
-      if (seen[k]) return;
-      seen[k] = 1;
-      EDGE_TOTAL++;
-      list.push({ a: a, b: b, w: e.w, k: k });
-      (adj[a] || (adj[a] = [])).push({ o: b, w: e.w });
-      if (b !== a) (adj[b] || (adj[b] = [])).push({ o: a, w: e.w });
-    });
-    var share = EDGE_TOTAL <= EDGE_RAMP_START ? 1
-      : EDGE_TOTAL >= EDGE_RAMP_END ? EDGE_FLOOR
-      : 1 - (1 - EDGE_FLOOR) * (EDGE_TOTAL - EDGE_RAMP_START) / (EDGE_RAMP_END - EDGE_RAMP_START);
-    EDGE_SHOWN = Math.round(EDGE_TOTAL * share);
-    lazyEdges = EDGE_SHOWN < EDGE_TOTAL;
-    if (lazyEdges) {
-      list.sort(function (p, q) { return q.w - p.w || (p.k < q.k ? -1 : 1); });
-      list.length = EDGE_SHOWN;
-    }
-    list.forEach(function (e) {
-      if (!graph.hasEdge(e.a, e.b)) graph.addUndirectedEdge(e.a, e.b, edgeAttrsOf(e.w));
-    });
-  })();
 
   var NODE_MIN = 2.6, NODE_MAX = 11, NODE_ORPHAN = 6;
-  graph.forEachNode(function (id, a) {
-    graph.setNodeAttribute(id, "size", a.deg === 0
-      ? NODE_ORPHAN
-      : Math.min(NODE_MAX, NODE_MIN + 1.55 * Math.sqrt(a.deg)));
-  });
 
   // github#58
   /** @type {Record<string, number>} */
   var hubRank = dict();
-  (function () {
+  /** @type {Record<string, string[]>} */
+  var subOrder = dict();
+  /** @type {Record<string, number>} */
+  var subCount = dict();
+  // github#72
+  /** @type {Record<string, string>} */
+  var idOfPath = dict();
+  var nextId = 0;
+
+  // github#72, design/0014
+  /**
+   * @param {VaultData} src
+   * @param {((path: string) => string | undefined) | null} keepId
+   */
+  function ingest(src, keepId) {
+    graph.clear();
+    adj = dict();
+    hubRank = dict();
+    subOrder = dict();
+    subCount = dict();
+    idOfPath = dict();
+    EDGE_TOTAL = 0;
+    EDGE_SHOWN = 0;
+    lazyEdges = false;
+
+    /** @type {string[]} */
+    var idAt = [];
+    src.nodes.forEach(function (n, i) {
+      var held = keepId ? keepId(n.id) : undefined;
+      var id = held === undefined ? String(nextId++) : held;
+      idAt[i] = id;
+      idOfPath[n.id] = id;
+      graph.addNode(id, {
+        label: n.label, x: 0, y: 0, size: 4,
+        folder: n.folder, sub: n.sub || "", dirs: n.dirs || [], ntype: n.type || "note",
+        tags: n.tags || [], path: n.id, deg: n.deg,
+        created: n.created || "", touched: n.touched || "",
+        words: n.words || 0, ghost: !!n.ghost
+      });
+    });
+
+    (function () {
+      /** @type {Record<string, number>} */
+      var seen = dict();
+      /** @type {{ a: string, b: string, w: number, k: string }[]} */
+      var list = [];
+      src.edges.forEach(function (e) {
+        var a = idAt[e.s], b = idAt[e.t];
+        if (a === undefined || b === undefined) return;
+        var k = a < b ? a + "\u0000" + b : b + "\u0000" + a;
+        if (seen[k]) return;
+        seen[k] = 1;
+        EDGE_TOTAL++;
+        list.push({ a: a, b: b, w: e.w, k: k });
+        (adj[a] || (adj[a] = [])).push({ o: b, w: e.w });
+        if (b !== a) (adj[b] || (adj[b] = [])).push({ o: a, w: e.w });
+      });
+      var share = EDGE_TOTAL <= EDGE_RAMP_START ? 1
+        : EDGE_TOTAL >= EDGE_RAMP_END ? EDGE_FLOOR
+        : 1 - (1 - EDGE_FLOOR) * (EDGE_TOTAL - EDGE_RAMP_START) / (EDGE_RAMP_END - EDGE_RAMP_START);
+      EDGE_SHOWN = Math.round(EDGE_TOTAL * share);
+      lazyEdges = EDGE_SHOWN < EDGE_TOTAL;
+      if (lazyEdges) {
+        list.sort(function (p, q) { return q.w - p.w || (p.k < q.k ? -1 : 1); });
+        list.length = EDGE_SHOWN;
+      }
+      list.forEach(function (e) {
+        if (!graph.hasEdge(e.a, e.b)) graph.addUndirectedEdge(e.a, e.b, edgeAttrsOf(e.w));
+      });
+    })();
+
+    graph.forEachNode(function (id, a) {
+      graph.setNodeAttribute(id, "size", a.deg === 0
+        ? NODE_ORPHAN
+        : Math.min(NODE_MAX, NODE_MIN + 1.55 * Math.sqrt(a.deg)));
+    });
+
+    // github#58
     graph.nodes().slice().sort(function (a, b) {
       return graph.getNodeAttribute(b, "deg") - graph.getNodeAttribute(a, "deg") ||
              String(graph.getNodeAttribute(a, "label"))
                .localeCompare(String(graph.getNodeAttribute(b, "label")));
     }).forEach(function (id, i) { hubRank[id] = i; });
-  })();
+  }
 
-  /** @type {Record<string, string[]>} */
-  var subOrder = dict();
-  /** @type {Record<string, number>} */
-  var subCount = dict();
-  // github#86, design/0014 -- per dimension (D-3); called below, after the filing
+  ingest(DATA, null);
+
+  // github#86, design/0015 -- per dimension (D-3); called below, after the filing
   function buildSubOrder() {
     subOrder = dict();
     subCount = dict();
@@ -703,10 +760,10 @@ function mountVaultGraph(root, data, deps) {
 
   // github#3
   var UNLINKED = "(unlinked)";
-  // github#86, design/0014 -- D-2: the bucket, shown, grey, second to last
+  // github#86, design/0015 -- D-2: the bucket, shown, grey, second to last
   var UNTAGGED = "(untagged)";
 
-  // github#86, design/0014 -- the filing: where a note sits in this dimension
+  // github#86, design/0015 -- the filing: where a note sits in this dimension
   /** @type {Record<string, { g: string, sub: string, dirs: string[] }>} */
   var tagFiling = dict();
   // github#86 -- D-4: notes carrying each tag, against those filed under it
@@ -766,7 +823,7 @@ function mountVaultGraph(root, data, deps) {
   }
 
   /**
-   * github#86, design/0014 -- everything a dimension owns that the planner reads
+   * github#86, design/0015 -- everything a dimension owns that the planner reads
    * @typedef {Object} LeftDisc
    * @property {"folder" | "tag"} dim
    * @property {Record<string, string[]>} subOrder
@@ -777,10 +834,10 @@ function mountVaultGraph(root, data, deps) {
 
   /** @type {Record<string, string> | null} */
   var moveFrom = null;
-  // github#86, design/0014 -- a dot still in the disc being left keeps the colour it had there
+  // github#86, design/0015 -- a dot still in the disc being left keeps the colour it had there
   /** @type {Record<string, string> | null} */
   var leftColor = null;
-  // github#86, design/0014 -- a dimension switch draws BOTH discs from its first frame: every
+  // github#86, design/0015 -- a dimension switch draws BOTH discs from its first frame: every
   // github#86 -- note of the disc being left fades where it stands, and a stand-in per note
   // github#86 -- (a copy, as a tag copy is) waits dark at the note's seat in the disc arriving.
   // github#86 -- At settle the note takes the stand-in's seat and the stand-in goes.
@@ -792,7 +849,7 @@ function mountVaultGraph(root, data, deps) {
   var standIns = [];
   // github#86 -- true while planning in the dimension being left
   var oldWorld = false;
-  // github#86, design/0014 -- the nav bar during a switch: the rows of the disc being left,
+  // github#86, design/0015 -- the nav bar during a switch: the rows of the disc being left,
   // github#86 -- with their counts and colours as they were, dropping out as their notes fade
   /** @typedef {{ dim: string, order: string[], counts: Record<string, number>, colors: Record<string, string>, fill: Record<string, string>, swTitle: Record<string, string>, bandLock: Record<string, boolean> | null, subs: Record<string, boolean>, open: Record<string, boolean>, hidden: Record<string, boolean>, basis: number, basisGroup: string }} LegendSwitch */
   /** @type {LegendSwitch | null} */
@@ -808,7 +865,7 @@ function mountVaultGraph(root, data, deps) {
     return fileGroup(id);
   }
 
-  // github#86, design/0014 -- D-9: one dot per tag; a copy is not a note
+  // github#86, design/0015 -- D-9: one dot per tag; a copy is not a note
   // github#86 -- a NUL cannot occur in a vault path
   var SAT_SEP = "\u0000";
   // github#91 -- the persistent copies, one dot per tag a note carries, came out on 2026-09-10;
@@ -826,7 +883,7 @@ function mountVaultGraph(root, data, deps) {
     return d ? String(d) : id;
   }
 
-  // github#86, design/0014 -- one stand-in per note of the disc being left, dark, at its seat
+  // github#86, design/0015 -- one stand-in per note of the disc being left, dark, at its seat
   function addStandIns() {
     Object.keys(leaving).forEach(function (id) {
       var a = graph.getNodeAttributes(id);
@@ -888,7 +945,7 @@ function mountVaultGraph(root, data, deps) {
     if (renderer) { attempt(buildLegend); heatSig = ""; attempt(heatBuild); attempt(heatDraw); }
   }
 
-  // github#86, design/0014 -- what is on the disc right now, per group, in both dimensions:
+  // github#86, design/0015 -- what is on the disc right now, per group, in both dimensions:
   // github#86 -- a leaving note under the group it is fading out of, everything else where
   // github#86 -- the dimension on screen files it
   function liveByGroup() {
@@ -929,6 +986,12 @@ function mountVaultGraph(root, data, deps) {
   // github#86 -- the filing exists from here; subOrder is its first reader
   if (state.dim === "tag") buildTagFiling();
   buildSubOrder();
+  // github#72, github#86 -- a live rebuild refiles every note, so the tally follows it
+  invalidatesOnData("tag filing and sub order", function () {
+    tagFilingBuilt = false;
+    if (state.dim === "tag") buildTagFiling();
+    buildSubOrder();
+  });
 
   var SLOT_COUNT = 12;
   /** @type {Record<string, string>} */
@@ -955,8 +1018,9 @@ function mountVaultGraph(root, data, deps) {
 
   /** @returns {Record<string, number>} group -> note count, for the current dim */
   function computeOrder() {
+    // github#97
     /** @type {Record<string, number>} */
-    var count = {};
+    var count = dict();
     /** @type {Record<string, number>} */
     var filed = dict();
     graph.forEachNode(function (id, a) {
@@ -984,8 +1048,9 @@ function mountVaultGraph(root, data, deps) {
     return count;
   }
 
+  // github#97
   /** @type {Record<string, number>} */
-  var counts = {};
+  var counts = dict();
   // github#50
   /** @type {Record<string, number>} */
   var folderCount = dict();
@@ -1058,14 +1123,14 @@ function mountVaultGraph(root, data, deps) {
     return dimSubColors[d];
   }
 
-  // github#86, design/0014 -- a sub-wedge's pinned tint, from this dimension's own map
+  // github#86, design/0015 -- a sub-wedge's pinned tint, from this dimension's own map
   /** @param {string} pk "group/sub" @returns {string} */
   function subPin(pk) {
     return subColorsFor()[pk] || "";
   }
 
   /**
-   * github#86, design/0014 -- read a dimension that is not on screen. The disc's own builders
+   * github#86, design/0015 -- read a dimension that is not on screen. The disc's own builders
    * run in a swapped world and every global they write is restored, so the settings panel can
    * show the tag tab while the folder disc is drawn (and the other way round) without a
    * second implementation of grouping, colour assignment or sub-wedge ordering.
@@ -1302,7 +1367,7 @@ function mountVaultGraph(root, data, deps) {
   // github#3
   /** @param {string} id @returns {string} */
   function nodeColor(id) {
-    // github#86, design/0014 -- until the erase edge has passed it, a dot is in the old disc
+    // github#86, design/0015 -- until the erase edge has passed it, a dot is in the old disc
     if (leftColor && (leaving[id] || (moveFrom && moveFrom[id] !== undefined))) {
       var lc = leftColor[id];
       if (lc) return lc;
@@ -1388,6 +1453,7 @@ function mountVaultGraph(root, data, deps) {
    * @property {BandNum} bandTotal
    * @property {BandNum} bandR
    * @property {BandNum} rows
+   * @property {"folder" | "tag"} dim   the dimension whose plan the rings were taken from; github#86
    */
   /**
    * buildWedgePlan's fourth argument when it is not a bare density: the previous plan's
@@ -1497,7 +1563,7 @@ function mountVaultGraph(root, data, deps) {
     return which === "lead" ? c.pLead + sm.gap / 2 : c.pTrail - sm.gap / 2;
   }
 
-  // github#86, design/0014 -- a plan over an ARC of the circle; null is the whole disc
+  // github#86, design/0015 -- a plan over an ARC of the circle; null is the whole disc
   /** @type {{ from: number, to: number } | null} */
   var planArc = null;
   function arcSpan() { return planArc ? planArc.to - planArc.from : 2 * Math.PI; }
@@ -1647,10 +1713,11 @@ function mountVaultGraph(root, data, deps) {
     var all = order[state.dim] || [];
     // github#86 -- D-3: both dimensions nest, so the split is not gated
     var SEP = "\u0000";
+    // github#97
     /** @type {Record<string, string[]>} */
-    var byCell = {};
+    var byCell = dict();
     /** @type {Record<string, string[]>} */
-    var cellsOf = {};
+    var cellsOf = dict();
     var planTotal = 0;
     /** @type {Record<string, number>} */
     var presMax = dict();
@@ -1826,8 +1893,9 @@ function mountVaultGraph(root, data, deps) {
     var TOTAL = planTotal;
     var MIN = MIN_SPAN, TWO = arcSpan();
     var smallAt = TOTAL * (MIN / TWO);
+    // github#97
     /** @type {Record<string, boolean>} */
-    var groupInner = {};
+    var groupInner = dict();
     cells.forEach(function (c) {
       var small = c.wsum < smallAt;
       if (groupInner[c.g] === undefined) groupInner[c.g] = small;
@@ -1914,20 +1982,21 @@ function mountVaultGraph(root, data, deps) {
       var names = [];
       cells.forEach(function (c) { if (names.indexOf(c.g) < 0) names.push(c.g); });
       if (names.length < 2) return;
+      // github#97
       /** @type {Record<string, boolean>} */
-      var assign = {};
+      var assign = dict();
       cells.forEach(function (c) { assign[c.g] = !!c.inner; });
 
       var PIN_BELOW = 10;
       /** @type {Record<string, number>} */
-      var groupNotes = {};
+      var groupNotes = dict();
       var totalNotes = 0;
       cells.forEach(function (c) {
         groupNotes[c.g] = (groupNotes[c.g] || 0) + c.list.length;
         totalNotes += c.list.length;
       });
       /** @type {Record<string, boolean>} */
-      var pinnedInner = {};
+      var pinnedInner = dict();
       names.forEach(function (g) {
         if (assign[g] && (groupNotes[g] || 0) < PIN_BELOW) pinnedInner[g] = true;
       });
@@ -2833,6 +2902,8 @@ function mountVaultGraph(root, data, deps) {
   var tlMs = dict();
   /** @type {DateSpan | null} */
   var dateSpan = null;
+  // github#72, design/0014
+  invalidatesOnData("timeline", function () { buildTimeline(); });
   function buildTimeline() {
     /** @type {[string, string][]} */
     var dated = [];
@@ -3401,11 +3472,11 @@ function mountVaultGraph(root, data, deps) {
   }
 
   var FADE_FRAMES = 12;
-  // github#86, design/0014 -- one lap of the erase edge is at least this many fades long
+  // github#86, design/0015 -- one lap of the erase edge is at least this many fades long
   var HAND_SWEEP = 12;
-  // github#86, design/0014 -- the fill edge trails the erase edge by this much
+  // github#86, design/0015 -- the fill edge trails the erase edge by this much
   var HAND_BLADE_DEG = 20;
-  // github#86, design/0014 -- a dot is fully gone, or fully lit, this far behind its edge
+  // github#86, design/0015 -- a dot is fully gone, or fully lit, this far behind its edge
   var HAND_FADE_DEG = 12;
   var RADIAL_EASE = 0.25;
   var SPREAD_MAX  = 78;
@@ -3584,7 +3655,7 @@ function mountVaultGraph(root, data, deps) {
   var roomNow = null;
   /** @type {Record<string, { f: number, n: number }> | null} */
   var colWalk = null;
-  // github#86, design/0014 -- while the hand sweeps, a fading dot shrinks to nothing and an
+  // github#86, design/0015 -- while the hand sweeps, a fading dot shrinks to nothing and an
   // github#86 -- arriving one grows from nothing, as a toggled wedge's dots do through its walk
   var shrinkFade = false;
   /** @type {Record<string, boolean> | null} */
@@ -3780,7 +3851,7 @@ function mountVaultGraph(root, data, deps) {
     var crossAt = dict();
     // github#86 -- frames per lap of the erase edge; 0 when there is no hand
     var handLap = 0;
-    // github#86, design/0014 -- a clock hand: one sweep, keyed on angle not rank
+    // github#86, design/0015 -- a clock hand: one sweep, keyed on angle not rank
     // github#86 -- one fade, in frames; the hand makes it an angle
     var fadeLen = FADE_FRAMES * TIME_SCALE;
     if (opts.hand) {
@@ -3809,7 +3880,7 @@ function mountVaultGraph(root, data, deps) {
       };
       /** @param {string} id in the inner ring of the disc arriving */
       var innerNew = function (id) { return !!(bandLock && bandLock[groupOf(id)]); };
-      // github#86, design/0014 -- the simplest sweep: the erase edge takes a dot when it passes
+      // github#86, design/0015 -- the simplest sweep: the erase edge takes a dot when it passes
       // github#86 -- the dot's bearing, and the fill edge, a blade behind, lights it at its seat
       /** @param {string} id @returns {number} */
       var handAt = function (id) { return handW * sweepAt(bearingNow(id), innerOld(id)) / TWO_PI; };
@@ -3948,6 +4019,8 @@ function mountVaultGraph(root, data, deps) {
         WIN.clearTimeout(cascadeRun.guard);
         cascadeRun = null;
       }
+      // github#78, design/0006 -- see changelog-detail
+      barWalkEnd();
       probeSample("pre-settle");
       moving.forEach(function (id) { alpha[id] = to[id]; });
       heatSig = "";
@@ -4015,7 +4088,7 @@ function mountVaultGraph(root, data, deps) {
       planKeep = save;
       return p;
     };
-    // github#86, design/0014 -- lay out in the dimension the disc is LEAVING
+    // github#86, design/0015 -- lay out in the dimension the disc is LEAVING
     /** @template T @param {() => T} fn @returns {T} */
     var inWorld = function (fn) {
       var w = opts.from;
@@ -4185,7 +4258,7 @@ function mountVaultGraph(root, data, deps) {
     var maxAdv = Math.max(1, span) / MIN_FRAMES;
     var frame = 0, tPrev = NOW(), tailFrames = 0;
     // github#67
-    // github#86, design/0014 -- the hand keys every delay on angle; re-dealing a group's
+    // github#86, design/0015 -- the hand keys every delay on angle; re-dealing a group's
     // github#86 -- arrivals by radius would light a seat the fill edge has not reached
     if (!opts.hand) (function () {
       var stretch = Math.max(1, span - FADE_FRAMES * TIME_SCALE);
@@ -4334,7 +4407,7 @@ function mountVaultGraph(root, data, deps) {
       /** @type {Record<string, Point> | null} */
       var targets = null;
       if (opts.hand && opts.from) {
-        // github#86, design/0014 -- both discs sit in the same place, one shown, one hidden: the
+        // github#86, design/0015 -- both discs sit in the same place, one shown, one hidden: the
         // github#86 -- old disc fades where it stands, and a dot that has left takes its FINAL
         // github#86 -- seat outright and waits, dark, for the fill edge. No plan, no re-packing.
         var mf = moveFrom;
@@ -4400,7 +4473,7 @@ function mountVaultGraph(root, data, deps) {
                            msPerFrame: Math.round(msPerFrame * 1000) / 1000,
                            moving: moving.length, run: !!cascadeRun };
       if (busy || pr < 1 || resid > 0.5) cascadeRun.raf = WIN.requestAnimationFrame(step);
-      else { lastCascade.exit = "converged"; barWalkEnd(); settle(); }
+      else { lastCascade.exit = "converged"; settle(); }
     })();
   }
 
@@ -5416,6 +5489,12 @@ function mountVaultGraph(root, data, deps) {
   var trail = [];
   var TRAIL_CAP = 30;
   var trailHop = false;
+  // github#72, design/0012, design/0014
+  invalidatesOnData("hop trail", function () {
+    var kept = trail.filter(function (id) { return graph.hasNode(id); });
+    trail.length = 0;
+    trail.push.apply(trail, kept);
+  });
 
   /** @param {string} id */
   function goTo(id) {
@@ -5479,6 +5558,17 @@ function mountVaultGraph(root, data, deps) {
            '" title="Back to ' + esc(trailLabel(trail[trail.length - 1])) + '">&#8592;</button>' +
            '<ol>' + parts.join('') + '</ol></nav>';
   }
+
+  // github#72, design/0014
+  invalidatesOnData("selection, hover and pins", function () {
+    if (state.selected && !graph.hasNode(state.selected)) select(null);
+    if (state.hovered && !graph.hasNode(state.hovered)) state.hovered = null;
+    var pins = state.pinned.filter(function (id) { return graph.hasNode(id); });
+    if (pins.length !== state.pinned.length) {
+      state.pinned = pins;
+      if (savePinned) savePinned(pins.slice());
+    }
+  });
 
   /** @param {string | null} id */
   function select(id) {
@@ -5652,7 +5742,7 @@ function mountVaultGraph(root, data, deps) {
   var ptr = null;
 
   /**
-   * github#86, design/0014 -- ONE row template for every group row the legend draws, whichever
+   * github#86, design/0015 -- ONE row template for every group row the legend draws, whichever
    * dimension the group belongs to and whether it is resting, arriving or leaving. A leaving
    * row is drawn inert: no data-g, no handlers reach it, so nothing acts on a name from the
    * other dimension.
@@ -5725,12 +5815,12 @@ function mountVaultGraph(root, data, deps) {
     /** @type {Record<string, number>} */
     var rendered = dict();
 
-    // github#86, design/0014 -- while a switch runs, the rows of the disc being left come
+    // github#86, design/0015 -- while a switch runs, the rows of the disc being left come
     // github#86 -- first, inert, with the counts and colours they had; they drop out as their
     // github#86 -- notes fade, and a row of the disc arriving drops in with its first note
     var liveNow = legendSwitch ? liveByGroup() : null;
     /**
-     * github#86, design/0014 -- everything a group row reads, from ONE of two worlds: the
+     * github#86, design/0015 -- everything a group row reads, from ONE of two worlds: the
      * dimension on screen, or the dimension being left as it stood when the switch began. A
      * row of the left disc is the same row it was, drawn inert, with only its gauge following
      * its notes; nothing else about it may change.
@@ -6095,6 +6185,50 @@ function mountVaultGraph(root, data, deps) {
    * @param {Record<string, boolean> | null} [bandHint]   group -> inner, to seed the lock with
    * @param {boolean} [keepAlpha]
    */
+  // github#86, decisions/0011 -- the lock derivation on its own, so a live rebuild can take it in
+  // github#86 -- the dimension the rings belong to (ringsIn) as well as in the one on screen
+  /** @param {Record<string, boolean>} [bandHint] @returns {Plan | null} */
+  function takeGeom(bandHint) {
+    var base = buildWedgePlan(false);
+    if (!base) return null;
+    bandLock = dict();
+    base.cells.forEach(function (c) { bandLock[c.g] = c.inner; });
+    if (bandHint) Object.keys(bandHint).forEach(function (g) { bandLock[g] = bandHint[g]; });
+    var bandTotal = { i: 0, o: 0 };
+    base.cells.forEach(function (c) { bandTotal[c.inner ? "i" : "o"] += c.wsum; });
+    var bandR = { i: 0, o: 0 }, bandRows = { i: 0, o: 0 };
+    base.cells.forEach(function (c) {
+      var k = c.inner ? "i" : "o";
+      if (c.rows > bandRows[k]) bandRows[k] = c.rows;
+      (c.slots || []).forEach(function (sl) {
+        var rr = sl.r * UNIT;
+        if (rr > bandR[k]) bandR[k] = rr;
+      });
+    });
+    geomLock = { r0: base.r0, rOuter: base.rOuter, maxR: base.maxR,
+                 total: base.total, bandTotal: bandTotal,
+                 bandR: bandR, rows: bandRows, dim: state.dim };
+
+    var again = buildWedgePlan(false);
+    if (again) geomLock = { r0: again.r0, rOuter: again.rOuter, maxR: again.maxR,
+                            total: again.total, bandTotal: bandTotal,
+                            bandR: bandR, rows: bandRows, dim: state.dim };
+    return base;
+  }
+
+  // github#72, github#86, decisions/0011 -- a switched-to disc sits inside rings borrowed from
+  // github#86 -- another dimension; a live rebuild retakes THOSE, from that dimension's own
+  // github#86 -- unfiltered plan of the new note set, so its step stays the sub-pixel one
+  /** @param {"folder" | "tag"} dim @returns {GeomLock | null} */
+  function ringsIn(dim) {
+    var sBand = bandLock, sGeom = geomLock;
+    bandLock = null; geomLock = null;
+    try {
+      return inDim(dim, function () { takeGeom(); return geomLock; });
+    } finally { bandLock = sBand; geomLock = sGeom; }
+  }
+
+  /** @param {boolean} [skipLayout] @param {Record<string, boolean> | null} [bandHint] @param {boolean} [keepAlpha] */
   function regroup(skipLayout, bandHint, keepAlpha) {
     counts = computeOrder();
     /** @type {Record<string, string> | null} */
@@ -6106,35 +6240,10 @@ function mountVaultGraph(root, data, deps) {
     colorWalk(colorsBefore);
     if (!dimSeeded[state.dim]) { dimSeeded[state.dim] = true; collapseAll(); seedHidden(); }
     if (!bandLock) {
-      var base = buildWedgePlan(false);
-      if (base) {
-        bandLock = dict();
-        base.cells.forEach(function (c) { bandLock[c.g] = c.inner; });
-        if (bandHint) Object.keys(bandHint).forEach(function (g) { bandLock[g] = bandHint[g]; });
-        var bandTotal = { i: 0, o: 0 };
-        base.cells.forEach(function (c) { bandTotal[c.inner ? "i" : "o"] += c.wsum; });
-        var bandR = { i: 0, o: 0 }, bandRows = { i: 0, o: 0 };
-        base.cells.forEach(function (c) {
-          var k = c.inner ? "i" : "o";
-          if (c.rows > bandRows[k]) bandRows[k] = c.rows;
-          (c.slots || []).forEach(function (sl) {
-            var rr = sl.r * UNIT;
-            if (rr > bandR[k]) bandR[k] = rr;
-          });
-        });
-        geomLock = { r0: base.r0, rOuter: base.rOuter, maxR: base.maxR,
-                     total: base.total, bandTotal: bandTotal,
-                     bandR: bandR, rows: bandRows };
-
-        var again = buildWedgePlan(false);
-        if (again) geomLock = { r0: again.r0, rOuter: again.rOuter, maxR: again.maxR,
-                                total: again.total, bandTotal: bandTotal,
-                                bandR: bandR, rows: bandRows };
-
-        if (renderer) {
-          var span = base.maxR * UNIT * 1.02;
-          renderer.setCustomBBox({ x: [-span, span], y: [-span, span] });
-        }
+      var base = takeGeom(bandHint);
+      if (base && renderer) {
+        var span = base.maxR * UNIT * 1.02;
+        renderer.setCustomBBox({ x: [-span, span], y: [-span, span] });
       }
     }
     buildLegend();
@@ -6144,7 +6253,12 @@ function mountVaultGraph(root, data, deps) {
   }
 
   // github#3
-  function hardRelayout(animate, deferLayout) {
+  /**
+   * @param {boolean} animate
+   * @param {boolean} [deferLayout]
+   * @param {boolean} [freshGeom]  take a NEW geometry lock instead of holding the old one
+   */
+  function hardRelayout(animate, deferLayout, freshGeom) {
     stopPlay();
     if (cascadeRun) {
       WIN.cancelAnimationFrame(cascadeRun.raf);
@@ -6161,8 +6275,8 @@ function mountVaultGraph(root, data, deps) {
     bandLock = null; geomLock = null;
     if (deferLayout && prevBand) {
       regroup(true, prevBand, true);
-      // github#49
-      if (prevGeom) geomLock = prevGeom;
+      // github#49; github#72, decisions/0011
+      if (prevGeom && !freshGeom) geomLock = prevGeom;
       return;
     }
     // github#45
@@ -6173,6 +6287,12 @@ function mountVaultGraph(root, data, deps) {
     if (!deferLayout) applyLayout(!!animate);
     if (renderer) renderer.refresh();
   }
+
+  // github#72, design/0014
+  invalidatesOnData("search hits", function () {
+    var hits = $("hits");
+    if (hits && hits.firstChild) hits.replaceChildren();
+  });
 
   function buildSearch() {
     var q = /** @type {HTMLInputElement} */ ($("q"));
@@ -6349,7 +6469,7 @@ function mountVaultGraph(root, data, deps) {
     buildLegend();
   }
 
-  // github#86, design/0014 -- the control belongs to the thing it changes
+  // github#86, design/0015 -- the control belongs to the thing it changes
   function syncDimUI() {
     var seg = $("dim");
     if (!seg) return;
@@ -6453,7 +6573,7 @@ function mountVaultGraph(root, data, deps) {
       $("fcreset").onclick = function () {
         pickColor(null, null, settingsDim);
         var savedSub = applySubfolderColors({}, settingsDim);
-        saveSubColorsFor(settingsDim, Object.assign({}, savedSub));
+        saveSubColorsFor(settingsDim, Object.assign(dict(), savedSub));
         buildSettings();
       };
       $("setbody").addEventListener("click", function (ev) {
@@ -6636,7 +6756,7 @@ function mountVaultGraph(root, data, deps) {
         if (key) next[folder] = key; else delete next[folder];
       }
       var saved = applyFolderColors(next, d);
-      saveColorsFor(d, Object.assign({}, saved));
+      saveColorsFor(d, Object.assign(dict(), saved));
       buildSettings();
     }
 
@@ -6652,7 +6772,7 @@ function mountVaultGraph(root, data, deps) {
         if (key) next[pk] = key; else delete next[pk];
       });
       var saved = applySubfolderColors(next, d);
-      saveSubColorsFor(d, Object.assign({}, saved));
+      saveSubColorsFor(d, Object.assign(dict(), saved));
       buildSettings();
     }
 
@@ -6668,7 +6788,7 @@ function mountVaultGraph(root, data, deps) {
       var wasHidden = typeof cur[folder] === "boolean" ? !cur[folder] : isArchiveGroup(folder);
       next[folder] = wasHidden;
       var saved = applyFolderShown(next, d);
-      saveShownFor(d, Object.assign({}, saved));
+      saveShownFor(d, Object.assign(dict(), saved));
       if (d === state.dim) {
         var h = state.hidden[state.dim] || (state.hidden[state.dim] = dict());
         if (hiddenByDefault(folder)) h[folder] = true; else delete h[folder];
@@ -6754,7 +6874,7 @@ function mountVaultGraph(root, data, deps) {
 
     function buildSettings() {
       var pal = paletteInfo();
-      // github#86, design/0014 -- one tab per grouping, the same control the group list uses.
+      // github#86, design/0015 -- one tab per grouping, the same control the group list uses.
       // github#86 -- Each tab writes its own dimension's maps, whichever disc is on screen.
       var d = settingsDim;
       var tabs = '<span class="dimseg setseg" role="group" aria-label="Set colours for">' +
@@ -6935,7 +7055,7 @@ function mountVaultGraph(root, data, deps) {
   }
 
   /**
-   * github#86, design/0014 -- one nav state per dimension: names may collide
+   * github#86, design/0015 -- one nav state per dimension: names may collide
    * @typedef {Object} DimNav
    * @property {Record<string, boolean>} hiddenSub
    * @property {Record<string, boolean>} highlight
@@ -6967,21 +7087,21 @@ function mountVaultGraph(root, data, deps) {
     state.pathOpen = b ? b.pathOpen : dict();
   }
 
-  // github#86, design/0014 -- the rings belong to the page, not to a dimension: the disc
+  // github#86, design/0015 -- the rings belong to the page, not to a dimension: the disc
   // github#86 -- arriving re-packs inside the rings the disc being left had, as a filter does,
   // github#86 -- so the two discs of a switch share a hub and an outer edge
   /** @param {GeomLock | null} rings */
   function keepRings(rings) {
     if (!rings || !geomLock) return;
     geomLock.r0 = rings.r0; geomLock.rOuter = rings.rOuter; geomLock.maxR = rings.maxR;
-    geomLock.bandR = rings.bandR;
+    geomLock.bandR = rings.bandR; geomLock.dim = rings.dim;
     if (renderer) {
       var span = rings.maxR * UNIT * 1.02;
       renderer.setCustomBBox({ x: [-span, span], y: [-span, span] });
     }
   }
 
-  // github#86, design/0014
+  // github#86, design/0015
   /** @param {string} v @param {boolean} [persist] @param {boolean} [instant] */
   function setDim(v, persist, instant) {
     var next = DIMS.indexOf(/** @type {"folder" | "tag"} */ (v)) >= 0
@@ -6989,7 +7109,7 @@ function mountVaultGraph(root, data, deps) {
     if (next === state.dim) return state.dim;
     if (next === "tag") buildTagFiling();
 
-    // github#86, design/0014 -- a switch cut short leaves its stand-ins; take them home first
+    // github#86, design/0015 -- a switch cut short leaves its stand-ins; take them home first
     dropStandIns();
     // github#86 -- D-8: every visible note leaves this disc, and a stand-in arrives in the next
     /** @type {Record<string, string>} */
@@ -7033,7 +7153,7 @@ function mountVaultGraph(root, data, deps) {
       }
     }
 
-    // github#86, design/0014 -- the disc being LEFT, so the cascade can draw both
+    // github#86, design/0015 -- the disc being LEFT, so the cascade can draw both
     /** @type {LeftDisc} */
     var from = { dim: state.dim, subOrder: subOrder, bandLock: bandLock, geomLock: geomLock,
                  color: leftColors };
@@ -7059,7 +7179,7 @@ function mountVaultGraph(root, data, deps) {
     } else {
       hardRelayout(false, false);
       keepRings(rings);
-      // github#86, design/0014 -- room and position are a fixed point: converge
+      // github#86, design/0015 -- room and position are a fixed point: converge
       applyLayout(false);
       applyLayout(false);
     }
@@ -7325,6 +7445,8 @@ function mountVaultGraph(root, data, deps) {
   var heatSig = "";
   /** @type {number | null} */
   var heatRz = null;
+  // github#72, design/0014
+  invalidatesOnData("heatmap tally", function () { heatSig = ""; if (heat) heatBuild(); });
 
   /** @param {string} s @returns {number} ms, or NaN */
   function heatParse(s) {
@@ -8331,6 +8453,7 @@ function mountVaultGraph(root, data, deps) {
    * @property {boolean} [hover]
    * @property {boolean} [drag]
    * @property {boolean} [touchmode]
+   * @property {string} [live]       "outer" or "inner": hand the page one more note on that ring
    * @property {number} [wheel]
    * @property {string[]} [target]
    * @property {string[]} [to]
@@ -8504,6 +8627,8 @@ function mountVaultGraph(root, data, deps) {
       return pickY;
     }
     if (kind === "note") return demoNoteRect(arg);
+    // github#72, design/0014
+    if (kind === "arrival") return demoArrivalRect();
     if (kind === "biginner") return demoBigInnerNote();
     if (kind === "pin") {
       var dcard = $("detail");
@@ -8681,7 +8806,7 @@ function mountVaultGraph(root, data, deps) {
       { settle: true, act: "intro", why: "start from a disc at rest" },
       { click: true, target: ["id", "refresh"], act: "intro", why: "replay the intro on camera" },
       { settle: true, act: "intro", why: "the vault grows from its first note to now, and the range end sweeps with it" },
-      // github#86, design/0014 -- the second dimension: one hand erases the folder disc where it
+      // github#86, design/0015 -- the second dimension: one hand erases the folder disc where it
       // github#86 -- stands, the other lights the tag disc at its seats, links, heat strip and
       // github#86 -- nav bar following the notes
       { click: true, target: ["dim", "tag"], act: "tags", why: "cut the disc by tag instead of by folder" },
@@ -8899,6 +9024,17 @@ function mountVaultGraph(root, data, deps) {
         why: "...and bring the whole vault back" },
       { settle: true, act: "only05", why: "let the disc refill" },
 
+      // github#72, design/0014
+      { live: "outer", act: "live",
+        why: "a note is written into the biggest folder -- the outer ring absorbs it in one cascade" },
+      { settle: true, act: "live", why: "let the disc re-pack around it, nothing torn down" },
+      { hover: true, target: ["arrival"], act: "live", why: "hover the note that just arrived" },
+      { park: true, act: "live", why: "let go of it" },
+      { live: "inner", act: "live",
+        why: "...and one into a small folder, on the inner ring" },
+      { settle: true, act: "live", why: "let the inner ring take it" },
+      { hover: true, target: ["arrival"], act: "live", why: "hover that one too" },
+
       // github#82 -- record wide; band first, it buys the radius
       { click: true, target: ["id", "band"], act: "collapse",
         why: "fold the calendar band away -- the disc grows into the row it had" },
@@ -8938,7 +9074,8 @@ function mountVaultGraph(root, data, deps) {
 
   // github#34, github#73
   // github#82 -- collapse closes the hero: it is the last act and ends folded
-  var FULL_RUN_EXCLUDES = ["subfoldercolor", "hiddenbydefault", "yearchip", "only05", "mobile"];
+  // github#72, design/0014
+  var FULL_RUN_EXCLUDES = ["subfoldercolor", "hiddenbydefault", "yearchip", "only05", "live", "mobile"];
 
   /** @returns {DemoBeat[]} */
   function demoFullStoryboard() {
@@ -8947,6 +9084,81 @@ function mountVaultGraph(root, data, deps) {
       beats = beats.concat([{ park: true, act: beats[beats.length - 1].act, why: "leave the final frame clean" }]);
     }
     return beats;
+  }
+
+  // github#72, design/0014
+  /** @type {string} */
+  var demoArrival = "";
+
+  /**
+   * @param {string} which   "outer" or "inner"
+   */
+  function demoLive(which) {
+    if (!DATA) return { applied: false, reason: "no data" };
+    var wantInner = which === "inner";
+    /** @type {Record<string, number>} */
+    var shown = dict();
+    /** @type {Record<string, boolean>} */
+    var innerOf = dict();
+    buildWedgePlan(false).cells.forEach(function (c) {
+      if (c.g === MERGED || c.g === UNLINKED) return;
+      shown[c.g] = (shown[c.g] || 0) + c.list.length;
+      innerOf[c.g] = !!c.inner;
+    });
+    var folder = "", most = -1;
+    Object.keys(shown).forEach(function (g) {
+      if (innerOf[g] !== wantInner || shown[g] <= most) return;
+      most = shown[g]; folder = g;
+    });
+    if (!folder) return { applied: false, reason: "no folder on the " + which + " ring" };
+
+    /** @type {VaultData} */
+    var next = {
+      vault: DATA.vault, generated: DATA.generated, dev: DATA.dev,
+      nodes: DATA.nodes.map(function (n) {
+        return Object.assign({}, n, { dirs: (n.dirs || []).slice(), tags: (n.tags || []).slice() });
+      }),
+      edges: DATA.edges.map(function (e) { return { s: e.s, t: e.t, w: e.w }; }),
+      stats: Object.assign({}, DATA.stats)
+    };
+    var host = -1, hostScore = -Infinity, taken = 0, newest = "";
+    next.nodes.forEach(function (n, i) {
+      if (/^Untitled( \d+)?$/.test(n.label)) taken++;
+      if (n.ghost) return;
+      if ((n.created || "") > newest) newest = n.created;
+      if (n.folder !== folder) return;
+      var score = n.deg - 1e6 * n.id.split("/").length;
+      if (score > hostScore) { hostScore = score; host = i; }
+    });
+    if (host < 0) return { applied: false, reason: "no note in " + folder };
+    var h = next.nodes[host];
+    var label = taken ? "Untitled " + taken : "Untitled";
+    var path = h.id.slice(0, h.id.lastIndexOf("/") + 1) + label + ".md";
+    // design/0014
+    var day = newest || h.created || "";
+    next.nodes.push({ id: path, label: label, folder: h.folder, dirs: (h.dirs || []).slice(),
+                      sub: h.sub || "", type: "note", tags: [], created: day, touched: day,
+                      words: 0, deg: 1 });
+    next.edges.push({ s: host, t: next.nodes.length - 1, w: 1 });
+    h.deg += 1;
+    if (next.stats) { next.stats.nodes += 1; next.stats.edges += 1; next.stats.files += 1; }
+    demoArrival = path;
+    var res = applyData(next);
+    return { applied: res.applied, reason: res.reason, added: res.added, cascaded: res.cascaded,
+             ring: which, folder: folder, path: path, linkedTo: h.label };
+  }
+
+  // github#72, design/0014
+  function demoArrivalRect() {
+    var id = demoArrival ? idOfPath[demoArrival] : undefined;
+    if (id === undefined || !graph.hasNode(id) || !renderer) return null;
+    var a = graph.getNodeAttributes(id);
+    var org = $("graph").getBoundingClientRect();
+    var v = renderer.graphToViewport({ x: a.x, y: a.y });
+    var r = renderer.scaleSize ? renderer.scaleSize(dotPx(a.size, id)) : dotPx(a.size, id);
+    var box = Math.max(6, r * 1.5);
+    return { left: v.x + org.left - box / 2, top: v.y + org.top - box / 2, width: box, height: box,
+             expect: id, demoLabel: "note " + a.label + ", just arrived" };
   }
 
   /** @param {string} name @returns {DemoBeat[]} */
@@ -8969,6 +9181,7 @@ function mountVaultGraph(root, data, deps) {
     doneTitle: DEMO_DONE_TITLE,
     storyboard: demoFullStoryboard,
     act: demoAct,
+    live: demoLive,
     busy: demoBusy,
     busyWhy: function () {
       return { play: !!play, cascade: !!cascadeRun, anim: !!anim,
@@ -8988,17 +9201,223 @@ function mountVaultGraph(root, data, deps) {
 
   /* ---- END: demo automation + debug API ---- */
 
+  /* ------------------------------------------------------- live rebuild */
+
+  // github#72, design/0014
+  var LIVE_MAX_CHANGED = 200;
+
+  /** @type {{ data: VaultData, renames: Record<string, string> } | null} */
+  var livePending = null;
+  /** @type {number | null} */
+  var liveTimer = null;
+  var LIVE_IDLE_MS = 120;
+
+  function liveBusy() { return !!(cascadeRun || anim || play); }
+  // github#72, design/0014
+  function liveWhy() {
+    return cascadeRun ? "cascade" : anim ? "tween" : play ? "timeline" : "";
+  }
+
+  // github#72, design/0014 -- `words` is deliberately not in the key
+  /** @param {VaultNode} n */
+  function placeKeyOf(n) {
+    return n.label + "\t" + n.folder + "\t" + (n.sub || "") + "\t" + (n.dirs || []).join("/") +
+           "\t" + (n.type || "") + "\t" + (n.tags || []).join(",") + "\t" + (n.created || "") +
+           "\t" + (n.touched || "") + "\t" + n.deg + "\t" + (n.ghost ? "1" : "");
+  }
+
+  // github#72, design/0014
+  /**
+   * @param {VaultData} src
+   * @returns {Record<string, Record<string, number>>}
+   */
+  function linkWeights(src) {
+    /** @type {Record<string, Record<string, number>>} */
+    var m = dict();
+    src.edges.forEach(function (e) {
+      var a = src.nodes[e.s], b = src.nodes[e.t];
+      if (!a || !b) return;
+      var lo = a.id < b.id ? a.id : b.id, hi = a.id < b.id ? b.id : a.id;
+      (m[lo] || (m[lo] = dict()))[hi] = e.w;
+    });
+    return m;
+  }
+
+  /**
+   * @typedef {Object} LiveDiff
+   * @property {string[]} added
+   * @property {string[]} removed
+   * @property {string[]} replaced
+   * @property {boolean} links
+   * @property {string[]} words     changed word count and nothing else
+   */
+  /** @param {VaultData} was @param {VaultData} now @returns {LiveDiff} */
+  function diffData(was, now) {
+    /** @type {Record<string, VaultNode>} */
+    var old = dict();
+    was.nodes.forEach(function (n) { old[n.id] = n; });
+    /** @type {LiveDiff} */
+    var d = { added: [], removed: [], replaced: [], links: false, words: [] };
+    /** @type {Record<string, number>} */
+    var seen = dict();
+    now.nodes.forEach(function (n) {
+      seen[n.id] = 1;
+      var o = old[n.id];
+      if (!o) { d.added.push(n.id); return; }
+      if (placeKeyOf(o) !== placeKeyOf(n)) d.replaced.push(n.id);
+      else if ((o.words || 0) !== (n.words || 0)) d.words.push(n.id);
+    });
+    was.nodes.forEach(function (n) { if (!seen[n.id]) d.removed.push(n.id); });
+
+    var wa = linkWeights(was), wb = linkWeights(now);
+    /** @param {Record<string, Record<string, number>>} x @param {Record<string, Record<string, number>>} y */
+    var missing = function (x, y) {
+      return Object.keys(x).some(function (lo) {
+        var row = x[lo], other = y[lo];
+        return Object.keys(row).some(function (hi) { return !other || other[hi] !== row[hi]; });
+      });
+    };
+    d.links = missing(wa, wb) || missing(wb, wa);
+    return d;
+  }
+
+  // github#72, design/0014, decisions/0006, decisions/0011
+  /**
+   * @param {VaultData} next
+   * @param {{ renames?: Record<string, string> }} [opts]  oldPath -> newPath; github#49
+   * @returns {LiveResult}
+   */
+  function applyData(next, opts) {
+    if (dead) return { applied: false, reason: "torn down" };
+    if (!next || !next.nodes || !next.edges) return { applied: false, reason: "not a build" };
+    /** @type {Record<string, string>} */
+    var renames = (opts && opts.renames) || dict();
+    if (liveBusy()) {
+      livePending = { data: next, renames: renames };
+      if (liveTimer === null) liveTimer = WIN.setInterval(drainLive, LIVE_IDLE_MS);
+      return { applied: false, reason: "busy", busy: liveWhy(), queued: true };
+    }
+
+    /** @type {Record<string, string>} */
+    var held = dict();
+    /** @type {Record<string, Point>} */
+    var posOf = dict();
+    /** @type {Record<string, number>} */
+    var alphaOf = dict();
+    /** @type {Record<string, string>} */
+    var groupWas = dict();
+    graph.forEachNode(function (id, a) {
+      held[a.path] = id;
+      posOf[a.path] = { x: a.x, y: a.y };
+      alphaOf[a.path] = alpha[id] || 0;
+      groupWas[a.path] = groupOf(id);
+    });
+    Object.keys(renames).forEach(function (from) {
+      var to = renames[from];
+      if (!to || held[from] === undefined) return;
+      held[to] = held[from]; posOf[to] = posOf[from];
+      alphaOf[to] = alphaOf[from]; groupWas[to] = groupWas[from];
+      delete held[from];
+    });
+
+    var d = diffData(DATA, next);
+    var churn = d.added.length + d.removed.length + d.replaced.length;
+    if (churn > LIVE_MAX_CHANGED) {
+      return { applied: false, reason: "too much changed", churn: churn, limit: LIVE_MAX_CHANGED };
+    }
+
+    // design/0014 -- the path a person typing spends all their time on
+    if (!churn && !d.links) {
+      /** @type {Record<string, number>} */
+      var wordsOf = dict();
+      next.nodes.forEach(function (n) { wordsOf[n.id] = n.words || 0; });
+      d.words.forEach(function (path) {
+        var id = idOfPath[path];
+        if (id !== undefined) graph.setNodeAttribute(id, "words", wordsOf[path] || 0);
+      });
+      DATA = next;
+      return { applied: true, reason: "words only", added: 0, removed: 0, replaced: 0,
+               moved: 0, cascaded: false };
+    }
+
+    DATA = next;
+    ingest(next, function (path) { return held[path]; });
+
+    // decisions/0006 -- survivors back where they are DRAWN, arrivals seated at zero
+    graph.forEachNode(function (id, a) {
+      var p = posOf[a.path];
+      if (p) graph.mergeNodeAttributes(id, { x: p.x, y: p.y });
+      alpha[id] = p ? (alphaOf[a.path] || 0) : 0;
+    });
+
+    onData.forEach(function (h) { attempt(h.fn); });
+
+    // decisions/0011
+    var ringsDim = geomLock ? geomLock.dim : null;
+    hardRelayout(false, true, true);
+    // github#86 -- and back inside the rings this disc was switched into, moved by the same step
+    if (ringsDim && ringsDim !== state.dim) keepRings(ringsIn(ringsDim));
+
+    /** @type {Record<string, string> | null} */
+    var movesFrom = null;
+    var moved = 0;
+    graph.forEachNode(function (id, a) {
+      var g0 = groupWas[a.path];
+      if (g0 === undefined || (alphaOf[a.path] || 0) <= 0.004) return;
+      if (g0 === groupOf(id)) return;
+      if (!movesFrom) movesFrom = dict();
+      movesFrom[id] = g0;
+      moved++;
+    });
+
+    attempt(placeLogo); attempt(buildLegend); attempt(buildStats);
+    if (dateSpan) attempt(drawDateUI);
+    cascade(null, { colToggle: true, movesFrom: movesFrom });
+    return { applied: true, reason: "", added: d.added.length, removed: d.removed.length,
+             replaced: d.replaced.length, moved: moved, cascaded: true };
+  }
+
+  // github#72, design/0014
+  /**
+   * @param {string} path
+   * @param {number} words
+   * @returns {boolean}
+   */
+  function setWords(path, words) {
+    var id = idOfPath[path];
+    if (id === undefined || !graph.hasNode(id)) return false;
+    graph.setNodeAttribute(id, "words", words);
+    return true;
+  }
+
+  function drainLive() {
+    if (dead || !livePending) { stopDrain(); return; }
+    if (liveBusy()) return;
+    var held = livePending;
+    livePending = null;
+    stopDrain();
+    attempt(function () { applyData(held.data, { renames: held.renames }); });
+  }
+  function stopDrain() {
+    if (liveTimer !== null) { WIN.clearInterval(liveTimer); liveTimer = null; }
+  }
+  // github#62
+  onDestroy.push(function () { livePending = null; stopDrain(); });
+
   /* ------------------------------------------------------------------ go */
 
   var bootTimer = WIN.setTimeout(function () {
     if (dead) return;
     makeRenderer();
     API = window.__vg = { graph: graph,
+                    // github#72
+                    applyData: applyData,
+                    setWords: setWords,
                     readTheme: readTheme, get renderer() { return renderer; },
                     placeLogo: placeLogo,
                     palette: paletteInfo,
                     groupOrder: function () { return (order[state.dim] || []).slice(); },
-                    // github#86, design/0014 -- one grouping's rows, whichever disc is on screen:
+                    // github#86, design/0015 -- one grouping's rows, whichever disc is on screen:
                     // github#86 -- what a settings surface needs to offer colours for it
                     groupsOf: /** @param {string} dim */ function (dim) {
                       return inDim(String(dim), function () {
@@ -9032,7 +9451,7 @@ function mountVaultGraph(root, data, deps) {
                     setCompactAxis: function (v) { return setCompactAxis(v !== false, false); },
                     // github#3
                     setUnlinkedByFolder: function (v) { return setUnlinkedByFolder(v !== false, false, true); },
-                    // github#86, design/0014
+                    // github#86, design/0015
                     setDim: /** @param {string} v */ function (v) { return setDim(String(v), false, true); },
                     noteOf: /** @param {string} id */ function (id) { return noteOf(String(id)); },
                     filingOf: /** @param {string} id */ function (id) {
@@ -9275,6 +9694,8 @@ function mountVaultGraph(root, data, deps) {
                     isOrphan: isOrphan,
                     wedgeDebug: wedgeDebug, wedgeEdges: wedgeEdges,
                     bandRef: function () { return geomLock ? geomLock.bandR : null; },
+                    // github#86 -- the rings as locked, and the dimension they were taken from
+                    get geomLock() { return geomLock; },
                     wedgeTrace: /** @param {number} [rLattice] */ function (rLattice) {
                       DBG.trace = []; DBG.traceR = rLattice;
                       drawWedgeDebug();
@@ -9726,6 +10147,14 @@ function mountVaultGraph(root, data, deps) {
                     // github#31
                     // github#3
                     relayout: function () { hardRelayout(false); },
+                    // github#72
+                    data: function () { return DATA; },
+                    invalidations: function () { return onData.map(function (h) { return h.name; }); },
+                    liveState: function () {
+                      return { pending: !!livePending, draining: liveTimer !== null,
+                               busy: liveBusy(), limit: LIVE_MAX_CHANGED, nextId: nextId,
+                               paths: Object.keys(idOfPath).length };
+                    },
                     // github#86 -- the fill edge's lag behind the erase edge, in degrees
                     get handBlade() { return HAND_BLADE_DEG; },
                     // github#86 -- the fade behind either edge, in degrees

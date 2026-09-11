@@ -4,7 +4,23 @@ import { mkdirSync, writeFileSync, readFileSync, rmSync, existsSync, readdirSync
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
-const ROOT = join(tmpdir(), "vault-graph-locks");
+// github#92
+const ROOT = join(tmpdir(), "obsidian-vault-locks");
+
+// github#92
+const LEGACY_ROOTS = [join(tmpdir(), "vault-graph-locks"), join(tmpdir(), "vault-shelf-locks")];
+
+// github#92
+function legacyHold(n) {
+  for (const root of LEGACY_ROOTS) {
+    const meta = (() => {
+      try { return JSON.parse(readFileSync(join(root, n + ".lock", "owner.json"), "utf8")); }
+      catch { return null; }
+    })();
+    if (meta && meta.at && Date.now() - meta.at <= staleWindow(n)) return { root, meta };
+  }
+  return null;
+}
 const STALE_MS = { record: 20 * 60 * 1000, suite: 30 * 60 * 1000 };
 const DEFAULT_STALE = 20 * 60 * 1000;
 const DEFAULT_TIMEOUT = 45 * 60 * 1000;
@@ -46,6 +62,23 @@ async function acquire() {
   let announced = false;
 
   for (;;) {
+    // github#92 -- checked before the directory is claimed, not after
+    const stale = legacyHold(name);
+    if (stale) {
+      if (!announced) {
+        console.log("WAITING for " + name + " -- held in a legacy root (" + stale.root + ") by " +
+                    (stale.meta.owner || "unknown") + " for " +
+                    Math.round((Date.now() - stale.meta.at) / 1000) + "s");
+        announced = true;
+      }
+      if (Date.now() > deadline) {
+        console.log("BUSY " + name + " -- gave up after " + Math.round(timeoutMs / 1000) + "s");
+        process.exit(1);
+      }
+      await sleep(POLL_MS);
+      continue;
+    }
+
     try {
       mkdirSync(dir);
       writeFileSync(metaFor(name), JSON.stringify({ owner: owner, at: Date.now(), pid: process.pid }, null, 1));
@@ -100,6 +133,14 @@ function release() {
 }
 
 function status() {
+  for (const n of ["record", "suite"]) {
+    const stale = legacyHold(n);
+    if (stale) {
+      console.log(n + "  owner=" + (stale.meta.owner || "unknown") + "  age=" +
+                  Math.round((Date.now() - stale.meta.at) / 1000) + "s  (legacy root " +
+                  stale.root + ")");
+    }
+  }
   if (!existsSync(ROOT)) { console.log("no locks held (" + ROOT + ")"); return; }
   const held = readdirSync(ROOT).filter((f) => f.endsWith(".lock"));
   if (!held.length) { console.log("no locks held (" + ROOT + ")"); return; }

@@ -43,8 +43,13 @@ gh attestation verify main.js --repo luke321/vault-graph
 ```
 
 The invariant suite stays local: it drives a real Chrome against three generated vaults for
-minutes, `release.ps1` runs it before the tag, and `.githooks/pre-push` runs it again on the
-push of `main` that carries the tagged commit. The workflow trusts the tag.
+about ten minutes, and **a tree is gated once** (github#93, `decisions/0013`). A green full run
+stamps the git tree it measured; `release.ps1` and `.githooks/pre-push` skip the suite when the
+tree in front of them already carries that stamp, and name the run they trust. The workflow
+trusts the tag. (This file used to say the hook runs the suite *again* on the push of `main`
+that carries the tagged commit. It never did: `main` is merged on the website, so by the time
+`release.ps1` pushes `HEAD` the branch is already up to date, and git hands a pre-push hook
+zero refs for an up-to-date push — measured against a bare remote, 2026-09-10.)
 
 **Rehearse the local half too.** The workflow's dry run runs on a Linux runner, where
 `release.ps1` never executes; the first cut of 2.0.0 stopped at the script's own pre-flight
@@ -238,6 +243,19 @@ predates a commit touching `src/page.js` — the same non-blocking severity as `
 re-recording. It checks the whole file rather than which `act:` a commit touched, so it can
 over-warn (a `colours`-only change flags every feature) but never under-warns silently.
 
+### A tag message loses every markdown heading unless you say `--cleanup=verbatim`
+
+`git tag -F` defaults to `--cleanup=strip`, which treats a line starting with `#` as a comment
+and deletes it. The tag message is the CHANGELOG section, so that quietly ate the
+`## <version>` heading and every `###` section heading from it — measured on the tags
+themselves: **2.0.0, 2.1.0 and 2.2.0 each carry zero heading lines**, against 8 in 2.3.0's
+source section. `git show <tag>` was supposed to tell the same story as the Release page and
+had been telling a flattened one since the script was written.
+
+`release.ps1` passes `--cleanup=verbatim` now. Caught before 2.3.0's tag was pushed, so that
+one has its headings; the three older tags keep the defect, because a published tag is not
+edited.
+
 ## First, list what is actually in the release
 
 **A release is the RANGE, not the work you happen to have just finished.** Before the bump is
@@ -303,6 +321,51 @@ then the body was edited twice more, because the highlight reel was written in t
 the changelog it sits above and the published page said everything twice. The tag and `develop`
 still differ by the commit that trimmed it. The order below is not bureaucracy; every one of
 those edits was avoidable by doing it on the branch.
+
+## What the release branch owes before `develop`, and what happens after
+
+The suite runs **once per distinct tree**, and the release path is arranged so that the one
+run happens on the release branch, where a failure is still cheap. Measured while cutting
+2.4.0 (github#93): a full run is **587 s** on the reference machine — 8 s of builds, 133 s of
+four parallel Chromes, **446 s of the serial lane** of frame-sensitive checks — and the
+static gates ahead of it total 10.5 s. Everything below is written so that number is paid
+exactly once.
+
+**Before merging into `develop`** — all of it on `release/<version>`:
+
+1. Finish everything the release needs on the branch (the section above).
+2. Rehearse the local half: `.\scripts\release.ps1 <version> -DryRun -AllowAnyBranch`. **This is
+   the run that pays the suite.** It ends with `stamped tree <sha> as passed`, which records the
+   branch's tree and the three fixtures it ran against in the shared git common dir. A dirty tree
+   is never stamped; commit first.
+3. Push the branch: the workflow's dry run builds, gates and attests the three files on a Linux
+   runner (static gates only, no Chrome, under a minute). Read its summary.
+
+**After** — three moves, none of which should pay the suite again:
+
+4. Merge `release/<version>` into `develop` and push. The hook checks the pushed commit's tree:
+   **if `develop` had not moved, the merge commit's tree is the branch's tree and the hook
+   skips**, printing the stamp it trusts. If `develop` *had* moved, the merge is new content and
+   the hook runs the suite for real — and stamps the new tree. Do not reach for `SKIP_SMOKE`
+   here; the stamp is what makes the skip honest, and a skipped run leaves no record of what
+   was trusted.
+5. Open `develop` → `main` on the website and merge it. The only required check is the
+   branch-policy job (4 s). The merge commit carries `develop`'s tree byte for byte — measured
+   on 2.3.0, 2.4.0 and 2.4.1.
+6. `git switch main && git pull --ff-only`, then `.\scripts\release.ps1 <version>`. It finds the
+   stamp for `HEAD`'s tree and skips the suite, tags, and pushes the branch (a no-op: `main` is
+   already up to date, and the hook receives no refs) and then the tag (never gated). The
+   workflow publishes.
+
+`node scripts/suite-stamp.mjs check` says what step 4 or 6 will do before you push, and
+`node scripts/suite-stamp.mjs list` shows every tree this machine has passed.
+`-ForceSuite` on `release.ps1` re-earns a stamp when there is a reason not to trust one.
+
+What used to happen, for the record: 2.4.0 was cut with the suite run on the release branch's
+dry run, skipped by hand (`SKIP_SMOKE`) on both `develop` pushes because it had "just passed",
+and run again in full inside `release.ps1` — while the issue that filed it counted the PR's
+status check as a third run, which it never was. The stamp replaces the by-hand skip with one
+that can say what it trusted.
 
 ## What it does, in case you need to do it by hand
 

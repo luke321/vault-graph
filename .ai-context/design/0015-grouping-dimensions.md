@@ -328,7 +328,14 @@ them:
   outer edge, because a band's last row sits at `(rows − 1) ÷ rows` of its thickness and the
   row count is solved from the band's own note count: on the maintainer's vault 3 rows against
   4, 1,061 against 1,108, on a disc of 2,384. The rings are re-derived only by a hard
-  relayout, in whatever dimension is on screen.
+  relayout, in whatever dimension is on screen — and by a **live rebuild**, which is where the
+  two features met on the merge with github#72: `decisions/0011` retakes the lock when the note
+  set changes, and on a switched-to disc that re-derived the tag disc's own rings, so the first
+  note written after a switch re-packed all 10,002 notes of the 10k fixture (outer band 24 rows
+  → 23). The lock carries the dimension it was taken from (`GeomLock.dim`), `keepRings` carries
+  that too, and the live path retakes the lock in that dimension (`ringsIn`) and keeps it: the
+  step is the ADR's sub-pixel one again, r0 0.0009 on the 10k. The retake also stales the
+  filing — `tagFilingBuilt` and `subOrder` are on the invalidation registry.
 - One lap of the erase edge is at least `HAND_SWEEP` (12) fades of the resting kind long, the
   span is that lap plus one blade plus a fade, and the cascade reports the edge's angle as
   `lastCascade().handDeg` (with `handLap`) for the checks. `__vg.handBlade` and

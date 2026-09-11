@@ -11,14 +11,15 @@
 # have, and the whole point is that it should not depend on anyone remembering.
 #
 # WHY pre-push AND NOT pre-commit: the suite builds the page and drives a real Chrome, and
-# now does that TWICE -- once against a ~450-note mirror of a real vault, once against a
-# 10,000-note synthetic, because a change that passes at 450 notes can still break the band
-# split at 10,000. Call it a minute or two. A fine price per push to develop or main, an
-# intolerable one per commit -- and an unearned one on a feature branch nobody has asked to
-# merge yet, which is why the gate checks below are scoped to gated_push and skip entirely
-# on any other branch. The main-ancestry policy just below stays unconditional regardless
-# -- it only ever fires for a push whose remote ref IS main, so scoping it further would be
-# scoping a no-op.
+# does that against THREE generated vaults -- a ~450-note mirror shape, a 10,000-note
+# synthetic and a dominant-folder one, because a change that passes at 450 notes can still
+# break the band split at 10,000. Measured 2026-09-10: 587 s for 94 checks x 3 fixtures, of
+# which 446 s is the serial lane of frame-sensitive checks (github#93). A fine price per
+# distinct tree pushed to develop or main, an intolerable one per commit -- and an unearned
+# one on a feature branch nobody has asked to merge yet, which is why the gate checks below
+# are scoped to gated_push and skip entirely on any other branch. The main-ancestry policy
+# just below stays unconditional regardless -- it only ever fires for a push whose remote
+# ref IS main, so scoping it further would be scoping a no-op.
 #
 # Skipping the gate checks on a develop/main push is still deliberate and cheap, because
 # there are honest reasons to (a docs-only change, no Chrome on the machine, a hurry):
@@ -61,9 +62,15 @@ root=$(git rev-parse --show-toplevel)
 # else eventually merges into, so that is where a regression has to be caught.
 policy_fail=""
 gated_push=""
+gated_shas=""
 while read -r _local_ref local_sha remote_ref _remote_sha; do
   case "$remote_ref" in
-    refs/heads/develop|refs/heads/main) gated_push=1 ;;
+    refs/heads/develop|refs/heads/main)
+      gated_push=1
+      # The commits the stamp check below asks about (github#93). A deletion pushes the
+      # all-zero sha, which names no tree, so it is left out.
+      case "$local_sha" in *[!0]*) gated_shas="$gated_shas $local_sha" ;; esac
+      ;;
   esac
 
   [ "$remote_ref" = "refs/heads/main" ] || continue
@@ -255,6 +262,27 @@ EOF
   exit 1
 fi
 
+# THE DATA SCRIPT NEXT, same bar -- one subprocess build of three notes, no Chrome, under a
+# second. The exporter inlines the vault as <script>window.VAULT_DATA=...</script>, and a
+# frontmatter value carrying a literal </script> used to close that element early: whatever
+# followed ran as script, and the page never mounted (github#96). jsonForScript() escapes
+# every '<' in the serialised JSON; this is what keeps it that way.
+echo "pre-push: checking a note cannot close the exported data script..."
+if ! node "$root/scripts/check-data-escape.mjs" </dev/null; then
+  cat >&2 <<'EOF'
+
+pre-push: data escape check failed -- push blocked.
+
+A '<' reached an inline data script in the exported page, or the marker payloads did not
+decode back to their text -- read the FAIL lines above. Every window.VAULT_* assignment in
+src/build-graph.mjs must go through jsonForScript(), which is what makes it impossible for
+a note to terminate the element it is serialised into.
+
+There is no skip flag for this check.
+EOF
+  exit 1
+fi
+
 # THE GENERATED NAVIGATION FILES NEXT, same bar -- a read of the tree, well under a second.
 # .ai-context/code-map.md and code-index.md are written from the source by
 # scripts/code-map.mjs (github#61) and are only worth having while they agree with it; a
@@ -313,8 +341,54 @@ if [ -n "$SKIP_SMOKE" ]; then
   exit 0
 fi
 
+# A TREE IS GATED ONCE (github#93, decisions/0013). A green full run of smoke.mjs stamps the
+# tree it measured (scripts/suite-stamp.mjs, keyed by the git TREE hash and the fixtures it ran
+# against, in the shared git common dir). main only ever receives develop, so the merge commit
+# that reaches main carries exactly the tree develop's push already gated -- measured on 2.3.0,
+# 2.4.0 and 2.4.1, byte-identical trees -- and re-driving Chrome for ten minutes against
+# identical content is cost, not a second opinion. So: if every commit being pushed has a
+# stamp, the suite is skipped and the stamp is named. A commit whose tree nobody has measured
+# -- a merge that brought new content, a fixture that was regenerated since -- runs it as
+# before. Nothing here trusts a commit hash, a branch name or a clock.
+stamped=1
+for sha in $gated_shas; do
+  if ! node "$root/scripts/suite-stamp.mjs" check "$sha" </dev/null; then stamped=""; fi
+done
+if [ -n "$stamped" ]; then
+  echo "pre-push: every tree being pushed already passed the invariant suite -- skipping it"
+  exit 0
+fi
+
+# ONE SUITE AT A TIME ON THIS MACHINE. Two runs fight for CDP ports and a screen, and each
+# blames the code (scripts/lock.mjs, github#92). The lock is taken here, around the suite only,
+# and released on every way out -- a lock held by a dead hook makes everyone else wait out its
+# stale window. A lock that cannot be had blocks the push rather than running on top of the
+# holder; the holder is named so the wait is a known one.
+lock_owner="pre-push $(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo '?')"
+release_lock() { node "$root/scripts/lock.mjs" release suite --owner "$lock_owner" </dev/null >/dev/null 2>&1; }
+trap 'release_lock; exit 1' INT TERM HUP
+if ! node "$root/scripts/lock.mjs" acquire suite --owner "$lock_owner" </dev/null; then
+  cat >&2 <<'EOF'
+
+pre-push: could not take the suite lock -- push blocked.
+
+Another invariant suite is running on this machine and the wait ran out. See who holds it
+with:  node scripts/lock.mjs status   and push again when it is free.
+EOF
+  exit 1
+fi
+
 echo "pre-push: running the invariant suite (SKIP_SMOKE=1 to skip)..."
-if node "$root/scripts/smoke.mjs" </dev/null; then
+# The suite is a child so a signal to this hook can take it down too: releasing the lock
+# while the run it guarded keeps driving Chrome would hand the next run a contended screen.
+node "$root/scripts/smoke.mjs" </dev/null &
+suite_pid=$!
+trap 'kill "$suite_pid" 2>/dev/null; release_lock; exit 1' INT TERM HUP
+wait "$suite_pid"
+suite_rc=$?
+release_lock
+trap - INT TERM HUP
+if [ "$suite_rc" -eq 0 ]; then
   exit 0
 fi
 

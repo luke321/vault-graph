@@ -64,7 +64,7 @@ const ARTICLES = ["Notes on distributed systems", "Why interfaces rot",
 
 const TAGS = ["idea", "reference", "howto", "review", "draft", "question", "decision",
   "seedling", "evergreen", "permanent"];
-// github#86, design/0014 -- two nested families, one two deep, so a demo vault's tag disc has
+// github#86, design/0015 -- two nested families, one two deep, so a demo vault's tag disc has
 // sub-wedges and a twisty to show; a note that carries one also carries a flat tag
 const NESTED = ["area/health", "area/health/sleep", "area/finance", "area/career",
   "project/greenhouse", "project/website", "project/thesis"];

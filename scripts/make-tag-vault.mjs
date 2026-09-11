@@ -1,4 +1,4 @@
-// github#86, design/0014
+// github#86, design/0015
 
 import { mkdirSync, writeFileSync, rmSync, existsSync } from "node:fs";
 import { join, dirname } from "node:path";
@@ -19,7 +19,7 @@ const rnd = () => {
 const int = (a, b) => a + Math.floor(rnd() * (b - a + 1));
 const pick = (a) => a[Math.floor(rnd() * a.length)];
 
-// github#86, design/0014 -- 13 top-level tags, two families, one two deep
+// github#86, design/0015 -- 13 top-level tags, two families, one two deep
 const TAGS = [
   { tag: "area/health", n: 78 },
   { tag: "area/health/sleep", n: 21 },

@@ -112,10 +112,10 @@
     color: var(--text-3); margin-bottom: 7px; font-weight: 600;
   }
 
-  /* github#86, design/0014 -- the grouping dimension, in the group list's own heading.
+  /* github#86, design/0015 -- the grouping dimension, in the group list's own heading.
      Semi-obvious: no border or fill at rest, so it reads as the heading it replaced, and a
      chevron that is always there so anyone looking for a control finds one. */
-  /* github#86, design/0014 -- the grouping is a segmented control in the group list's own
+  /* github#86, design/0015 -- the grouping is a segmented control in the group list's own
      heading, in the style the settings segments already use: two named sides, the active one
      filled with the accent, so the one control that changes what the whole disc IS reads as a
      control. It replaced a dropdown drawn as a heading with a chevron, which read as a label:
@@ -229,7 +229,7 @@
     background-size: max(var(--vg-floor, 4px), var(--vg-share)) 2px;
   }
   .vault-graph #vg-legend .lg.bar.bar-out { --vg-floor: 0px; }
-  /* github#86, design/0014 -- during a dimension switch the rows of the disc being left stay,
+  /* github#86, design/0015 -- during a dimension switch the rows of the disc being left stay,
      inert, and drop out as their notes fade; a row of the disc arriving drops in with its
      first note. The height is animated through max-height because a row's height is what
      the font makes it; 48px clears any row the legend draws, and the cap exists only while
@@ -314,7 +314,7 @@
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
   .vault-graph .sws { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
-  /* github#86, design/0014 -- the settings tabs are the group list's own segmented control,
+  /* github#86, design/0015 -- the settings tabs are the group list's own segmented control,
      one rule apart: it spans the panel and sits above the rows. */
   .vault-graph .dimseg.setseg { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; margin: 0 0 9px; }
   .vault-graph .dimseg.setseg button { text-align: center; padding: 5px 8px; }

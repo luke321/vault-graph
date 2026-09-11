@@ -5,7 +5,7 @@
 > The sidebar: eye vs label, three selection channels, and the tail block.
 
 
-**The heading is the grouping control** (github#86, design/0014). `Groups (18)` is a
+**The heading is the grouping control** (github#86, design/0015). `Groups (18)` is a
 dropdown reading `Folders (18)` or `Tags (12)`, in those words, and everything below it
 is the list of whichever it says. The control belongs to the thing it changes — not the
 view settings, not the top bar, not a hidden context-menu item — and it is deliberately

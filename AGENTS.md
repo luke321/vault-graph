@@ -22,15 +22,19 @@ Four things are worth knowing before you touch anything, all expanded in `CLAUDE
 
   `record` and `suite` are the two names. Screenshots need no lock — `shoot.mjs` captures over
   CDP, so overlapping windows are harmless — but pass your own `--port`.
-- **A non-default vault must be trusted before the plugin loads.** Opening a fixture or test
-  vault in Obsidian raises *Trust author and enable plugins?* on first open; confirm it and close
-  the Settings window it opens, or you will misread an untrusted vault as a broken plugin.
+- **A vault that is not Lukas's own opens in restricted mode.** A fixture or generated vault puts
+  up "Trust author and enable plugins?" on first open, and until it is confirmed the plugin does
+  not load at all -- which reads as a broken plugin rather than as an unconfirmed dialog. Over
+  CDP, `app.plugins.setEnable(true)` then `enablePluginAndSave(id)`; never judge the plugin before
+  `getPlugin(id)` is truthy.
 - **Never serve Chrome unlabeled.** Any page you open in Chrome from this worktree —
   `smoke.mjs`, `shoot.mjs`, a manual review build — carries its own top-left title as
   `<worktree/feature> — <what it's showing>`, e.g. `tag-grouping — demo vault`. Patch
   `window.VAULT_DATA`'s `vault` field in the built HTML, not the product.
 - **`git push`, merging into `develop`, and a full-suite run are each a separate ask, every
-  time.** None of them is implied by permission to do the work, or by how the last one went.
+  time.** None of them is implied by permission to do the work, or by how the last one went. A
+  dispatched ticket worktree stops at its own branch regardless — only the orchestrator pushes to
+  `develop` or cuts a release.
 
 `.ai-context/README.md` maps the design records; `.ai-context/code-map.md` and `code-index.md` are
 generated and let you jump to a line range instead of reading an 8,700-line file top to bottom.
