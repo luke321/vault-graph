@@ -21,7 +21,7 @@ Call out what's newly done since the last table and what's still blocked or awai
 | 7 | Merge `release/<version>` → `develop` (local) | |
 | 8 | **One** plain `git push origin develop` (the hook takes the `suite` lock itself, github#92 — never wrap the push in your own acquire/release, it deadlocks against the hook's) | |
 | 9 | PR/merge `develop` → `main` | |
-| 10 | **Review the release body before the tag goes out** — `release.yml` publishes live the moment the tag lands, using the `## <version>` CHANGELOG section verbatim as the body and no `--draft` gate; read it as the page a stranger lands on, not as a changelog entry. This is the actual review step, not `release.ps1`'s pre-flight suite. | |
+| 10 | **Draft the release body, publish it as a Claude Artifact, and get an explicit go-ahead before the tag goes out** — `release.yml` publishes live the moment the tag lands, using the `## <version>` CHANGELOG section verbatim as the body and no `--draft` gate; the artifact is what puts the actual rendered page a stranger will land on in front of a human, not a changelog entry read back by the same session that wrote it. This is the actual review step, not `release.ps1`'s pre-flight suite. | |
 | 11 | `release.ps1` on `main` — gates, tag, push | |
 | 12 | GitHub Actions publishes the release (attestation, assets) — automatic once tagged | |
 ```
@@ -35,6 +35,21 @@ forbid ("once the tag exists nothing changes"). The workflow creates no GitHub d
 the CHANGELOG section going out is the actual publish. So the review has to happen before the tag,
 on `release/<version>`, not after — read the `## <version>` section once as the page it's about to
 become, not as a changelog entry, before `release.ps1` runs.
+
+**Step 10 was skipped by substitution, cutting 2.5.0, the same day it was written.** The highlight
+reel was drafted, read back by the same session that wrote it, judged fine, and pushed live with
+`gh release edit` — no human had seen it. Caught only because Lukas asked directly whether the
+guidelines had actually been followed. **"Review" means a human reviews it — publish the drafted
+body as a Claude Artifact (the rendered highlight reel, its clip, the verbatim CHANGELOG section
+underneath, exactly as it will read on the release page) and wait for an explicit reaction before
+running `release.ps1` or touching the live release with `gh release edit`.** A chat summary of the
+draft is not the artifact and does not satisfy this; neither does the agent's own read-through,
+however careful — the entire reason this step exists is that nobody but Lukas can tell whether the
+highlight reel reads as a page he'd want representing the release, and that judgment cannot be
+delegated to whoever wrote the draft. Mechanically, `gh release edit` can only run after
+`release.ps1` has created the release (the Release object doesn't exist before the tag), but the
+drafting, the artifact, and the go-ahead all happen before that — the edit that follows the tag is
+applying an already-approved body, not asking for approval after the fact.
 
 **Every release gets a git tag and a GitHub Release with the plugin's three files attached —
 `main.js`, `manifest.json`, `styles.css` — each carrying a build provenance attestation.** The
