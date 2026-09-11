@@ -56,6 +56,7 @@
  * @property {VaultEdge[]} edges
  * @property {VaultStats} stats
  * @property {boolean} [dev]         a --dev build of the standalone; nothing else sets it
+ * @property {string} [version]      github#108 -- the plugin/exporter version that built this, shown in the stats line
  */
 
 // github#72, design/0014
@@ -7426,7 +7427,8 @@ function mountVaultGraph(root, data, deps) {
       "<b>" + s.unresolved + "</b> link(s) point at notes that do not exist" +
       (s.ghostsIncluded ? " (shown as ghosts)" : " (hidden)") + "<br>" +
       (s.templatesExcluded ? "Templates excluded. " : "") +
-      "Generated " + esc(DATA.generated));
+      "Generated " + esc(DATA.generated) +
+      (DATA.version ? " &middot; v" + esc(DATA.version) : ""));
   }
 
   /** @param {unknown} s */
@@ -8853,10 +8855,7 @@ function mountVaultGraph(root, data, deps) {
       { hover: true, target: ["note", "04"], act: "note", why: "hover a daily note" },
       { hover: true, target: ["note", "05"], act: "note", why: "hover a meeting note" },
 
-      // github#106 -- a quick preview of the fold toggles early, so the hero shows them
-      // before the acts that need the legend visible; the real close-out fold stays at
-      // the end (act "collapse"), this one restores what it folded
-      { click: true, target: ["id", "band"], act: "collapsepreview", why: "fold the calendar band away -- a preview of the toggle" },
+      { click: true, target: ["id", "band"], act: "collapsepreview", why: "fold the calendar band away -- a preview of the toggle, restored before the acts ahead that need the legend" },
       { settle: true, act: "collapsepreview", why: "let the disc take the band's height" },
       { click: true, target: ["id", "sheet"], act: "collapsepreview", why: "...and the folder list too" },
       { settle: true, act: "collapsepreview", why: "let the disc take the whole window" },
@@ -8875,8 +8874,6 @@ function mountVaultGraph(root, data, deps) {
       { settle: true, act: "pin", why: "let the third pin land" },
       { click: true, target: ["detailclose"], act: "pin", why: "close the card" },
 
-      // github#106 -- moved after pin (was before), and trimmed: one "back" step
-      // instead of two -- still four hops in, so the crumb-trail ellipsis still shows
       // github#40, design/0012
       { click: true, target: ["note", "05"], act: "hoptrail", why: "open a well-linked note's card" },
       { settle: true, act: "hoptrail", why: "let the card land" },
