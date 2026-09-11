@@ -596,6 +596,20 @@ and `readTheme()` clears the signature the way `regroup` clears `heatSig`. Measu
 | 1.2 s of stillness while shown | **0** |
 | three zoom-in notches, the camera genuinely moving | 12-13 |
 
+**"At rest, ever" is a claim about the page's whole life, so the check runs on a page nothing
+else has touched.** `__vg.overview().paints` only counts up, and there is no reset -- rightly, a
+counter the product exposes for a test to zero would not be measuring the product. So any check
+that crops the disc before this one makes "it has never painted" false for a reason that has
+nothing to do with the claim: the suite's camera, zoom and pan checks share a page with it, and
+after the two-lane reorder (github#113) five of them land first. Measured: with one pan check
+ahead of it the count reads **18 at rest** and the check fails, while every one of its five
+DELTA assertions still passes -- forced refreshes add 0, stillness adds 0, the return to rest
+adds 0. The fix is `NEEDS_PRISTINE` in `scripts/smoke.mjs`, which gives it its own job on its
+own `?rest` page the way `NEEDS_INTRO` already did for the intro check; it reads 0 again there.
+Relaxing the assertion to a delta was the other option and is the wrong one -- the deltas are
+already asserted three times over, and what would be lost is the only statement that the
+overview never appears on a disc that fits.
+
 **A programmatic auto-fit does not raise the tile, and the gate is one condition wide.** Re-showing
 a dominant folder used to raise it at 81 ms and drop it at 295 ms -- **214 ms, once, 14 paints** --
 because github#14 fits immediately while the disc is still expanding, so for those frames the disc

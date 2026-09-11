@@ -89,6 +89,9 @@ const ONLY = argAll("only").map((v) => v.toLowerCase());
 
 const NEEDS_INTRO = ["the intro landed"];
 const needsIntro = (c) => NEEDS_INTRO.some((q) => c.name.toLowerCase().includes(q));
+// github#79
+const NEEDS_PRISTINE = ["the overview is absent at rest"];
+const needsPristine = (c) => NEEDS_PRISTINE.some((q) => c.name.toLowerCase().includes(q));
 const selected = () => (ONLY.length
   ? all.filter((c) => ONLY.some((q) => c.name.toLowerCase().includes(q)))
   : all);
@@ -6203,14 +6206,20 @@ async function main() {
     if (!mine.length) { console.log(`  ${v.label}: no selected check runs here`); continue; }
     const url = await buildFor(v);
     const atRest = url ? url + (url.indexOf("?") < 0 ? "?rest" : "&rest") : url;
-    const rest = mine.filter((c) => !needsIntro(c));
+    const rest = mine.filter((c) => !needsIntro(c) && !needsPristine(c));
     const intro = mine.filter(needsIntro);
+    // github#79
+    const pristine = mine.filter(needsPristine);
     // github#113
     const walk = JOBS > 1 ? rest.filter((c) => c.clock === "real") : [];
     const fast = JOBS > 1 ? rest.filter((c) => c.clock !== "real") : rest;
     if (walk.length) jobs.push({ vault: v, checks: walk, tag: v.label + " (walk)", url: atRest, walk: true });
     if (fast.length) jobs.push({ vault: v, checks: fast, tag: v.label, url: atRest });
     if (intro.length) jobs.push({ vault: v, checks: intro, tag: v.label + " (intro)", url });
+    // github#79
+    if (pristine.length) {
+      jobs.push({ vault: v, checks: pristine, tag: v.label + " (pristine)", url: atRest });
+    }
   }
   // github#113
   const homeless = picked.filter((c) => !jobs.some((jb) => jb.checks.includes(c)));
