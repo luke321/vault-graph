@@ -160,7 +160,13 @@ jobs:
       - name: A MINOR or MAJOR carries its own update note
         run: |
           set -euo pipefail
-          note=$(grep -m1 -E '^# [0-9]+\.[0-9]+\.[0-9]+[[:space:]]*$' plugin/whats-new.md | sed -E 's/^# //; s/[[:space:]]+$//')
+          # `|| true`: under set -e an unmatched grep would kill the step with no annotation,
+          # including on a PATCH, which the *) branch below is written to PASS. And the pattern
+          # matches what the two other parsers accept -- update-note.mjs collapses whitespace
+          # before testing /^#\s+/, release.ps1 uses ^#\s+ -- so a note written with a tab or two
+          # spaces builds, passes release.ps1, and no longer fails only here.
+          note=$(grep -m1 -E '^#[[:space:]]+[0-9]+\.[0-9]+\.[0-9]+[[:space:]]*$' plugin/whats-new.md || true)
+          note=$(printf '%s' "$note" | sed -E 's/^#[[:space:]]+//; s/[[:space:]]+$//')
           case "$VERSION" in
             *.0)
               if [ "$note" != "$VERSION" ]; then
