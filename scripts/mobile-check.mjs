@@ -183,14 +183,18 @@ async function main() {
     "                         y: Math.round(r.top), hitsMob: hit(m), hitsCam: hit(c) };" +
     "             var d = document.getElementById('vg-detail');" +
     "             var root = document.querySelector('.vault-graph');" +
-    "             var capOf = function (v) { var w = root.getAttribute('data-ov');" +
-    "               if (v === null) root.removeAttribute('data-ov'); else root.setAttribute('data-ov', v);" +
-    "               var hid = d.hasAttribute('hidden'); d.removeAttribute('hidden');" +
-    "               var mh = getComputedStyle(d).maxHeight;" +
-    "               if (hid) d.setAttribute('hidden', '');" +
-    "               if (w === null) root.removeAttribute('data-ov'); else root.setAttribute('data-ov', w);" +
-    "               return mh; };" +
-    "             res.cardCapOff = capOf('off'); res.cardCapOn = capOf('on');" +
+    // github#79 -- GUARDED LIKE THE smoke.mjs TWIN. Unguarded, an absent card threw out of the
+    // whole layout probe, so every layout line of the report was lost rather than this one line.
+    "             if (d && root) {" +
+    "               var capOf = function (v) { var w = root.getAttribute('data-ov');" +
+    "                 if (v === null) root.removeAttribute('data-ov'); else root.setAttribute('data-ov', v);" +
+    "                 var hid = d.hasAttribute('hidden'); d.removeAttribute('hidden');" +
+    "                 var mh = getComputedStyle(d).maxHeight;" +
+    "                 if (hid) d.setAttribute('hidden', '');" +
+    "                 if (w === null) root.removeAttribute('data-ov'); else root.setAttribute('data-ov', w);" +
+    "                 return mh; };" +
+    "               res.cardCapOff = capOf('off'); res.cardCapOn = capOf('on');" +
+    "             } else { res.cardCapOff = null; res.cardCapOn = null; }" +
     "             o.hidden = was; return res; })()," +
     "           legendHidden: leg ? Math.max(0, leg.scrollHeight - leg.clientHeight) : null," +
     "           sidebarHidden: (function () { var sb = document.getElementById('vg-sidebar');" +
