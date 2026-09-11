@@ -59,7 +59,7 @@ export function describeFixture(dir) {
   }
 }
 
-// github#106 -- the walk build-graph.mjs does
+// github#106 -- every .md outside a dot-folder
 export function countNotes(dir) {
   let n = 0;
   for (const entry of readdirSync(dir)) {
@@ -84,7 +84,9 @@ export function checkFixture(dir) {
     return { ok: false, why: `no .obsidian in ${dir} -- build-graph.mjs would refuse it` };
   }
   if (typeof st.notes !== "number") return { ok: false, why: "the stamp records no note count" };
-  const notes = countNotes(dir);
+  let notes;
+  try { notes = countNotes(dir); }
+  catch (e) { return { ok: false, why: `the walk failed midway (${e.message})` }; }
   if (notes !== st.notes) {
     return { ok: false, why: `${notes} notes on disk, the stamp says ${st.notes}` };
   }
@@ -99,10 +101,10 @@ export function currentFixtures(cwd = ROOT) {
   for (const name of FIXTURE_NAMES) {
     const dir = dirs.filter((d) => d.startsWith(name + "-")).sort()[0];
     const desc = dir ? describeFixture(join(store, dir)) : null;
-    // github#106
+    // github#106 -- a corrupt fixture keeps its identity and says why
     const health = desc ? checkFixture(join(store, dir)) : null;
-    out.push(desc && health.ok ? { name, ...desc }
-           : { name, digest: null, day: null, pinned: false, corrupt: health ? health.why : null });
+    out.push(desc ? { name, ...desc, ...(health.ok ? {} : { corrupt: health.why }) }
+                  : { name, digest: null, day: null, pinned: false });
   }
   return out;
 }
@@ -129,15 +131,15 @@ export function lookup(rev = "HEAD", cwd = ROOT) {
       return { ok: false, tree, stamp, why: `the stamp names no ${name} run, so it is not a full suite pass` };
     }
     const now = have.find((f) => f.name === name);
-    // github#106
-    if (now && now.corrupt) {
-      return { ok: false, tree, stamp,
-               why: `fixture ${want.name} is corrupt (${now.corrupt}) and the next run would regenerate it` };
-    }
     if (!sameFixture(want, now)) {
       return { ok: false, tree, stamp,
                why: `fixture ${want.name} is not the one that passed (stamped ${want.digest} of ${want.day}, ` +
                     `store has ${now && now.digest ? now.digest + " of " + now.day : "none"})` };
+    }
+    // github#106 -- the same fixture, no longer usable
+    if (now.corrupt) {
+      return { ok: false, tree, stamp,
+               why: `fixture ${want.name} is corrupt (${now.corrupt}) and the next run would regenerate it` };
     }
     if (!want.pinned && ageDays(want.day) > FIXTURE_MAX_AGE_DAYS) {
       return { ok: false, tree, stamp,
@@ -154,6 +156,10 @@ export function record({ fixtures, checks, cwd = ROOT }) {
     return { wrote: null, why: `the working tree differs from HEAD in ${dirty.length} tracked file(s), ` +
                                `so this run measured something no commit names` };
   }
+  // github#106 -- a scratch store gates nothing
+  if (process.env.VG_FIXTURE_STORE) {
+    return { wrote: null, why: "VG_FIXTURE_STORE points this run at a scratch store, not the one the gate reads" };
+  }
   const tree = treeOf("HEAD", cwd);
   const dir = stampDir(cwd);
   if (!tree || !dir) return { wrote: null, why: "cannot resolve HEAD's tree" };
@@ -163,6 +169,8 @@ export function record({ fixtures, checks, cwd = ROOT }) {
     const f = ran[i];
     if (!f) return { wrote: null, why: `${FIXTURE_NAMES[i]} did not run, so this run is not the full suite` };
     if (!f.digest || !f.day) return { wrote: null, why: `${f.name} has no digest or day to record` };
+    // github#106
+    if (f.corrupt) return { wrote: null, why: `${f.name} is corrupt (${f.corrupt}), so nothing passed against it` };
   }
   mkdirSync(dir, { recursive: true });
   const file = join(dir, tree + ".json");
@@ -266,9 +274,21 @@ function selftest() {
            !lost.ok && /corrupt \(2 notes on disk, the stamp says 3\)/.test(lost.why));
     writeFileSync(join(shapeDir, "notes", "n2.md"), "# n2\n");
     expect("restoring the note hits again", lookup("HEAD~1", repo).ok);
+    const bad = record({ fixtures: currentFixtures(repo).map((f) => f.name === "shape-vault" ? { ...f, corrupt: "x" } : f),
+                         checks: 3, cwd: repo });
+    expect("a corrupt fixture refuses to record", !bad.wrote && /shape-vault is corrupt/.test(bad.why));
+    const otherDir = seed("shape-vault", "dddddddd", today, false);
+    rmSync(join(otherDir, ".obsidian"), { recursive: true, force: true });
+    const other = lookup("HEAD~1", repo);
+    expect("a corrupt fixture under another digest is 'not the one that passed'",
+           !other.ok && /not the one that passed/.test(other.why));
+    seed("shape-vault", "cccccccc", today, false);
+    expect("the seeded fixture hits again", lookup("HEAD~1", repo).ok);
     process.env.VG_FIXTURE_STORE = join(base, "elsewhere");
     expect("VG_FIXTURE_STORE redirects the store", fixtureStore(repo) === join(base, "elsewhere") &&
            currentFixtures(repo).every((f) => f.digest === null));
+    const scratch = record({ fixtures: currentFixtures(repo), checks: 3, cwd: repo });
+    expect("a scratch-store run refuses to record", !scratch.wrote && /VG_FIXTURE_STORE/.test(scratch.why));
     delete process.env.VG_FIXTURE_STORE;
     expect("and only while it is set", fixtureStore(repo) === store);
 

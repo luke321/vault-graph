@@ -2756,7 +2756,15 @@ commit in front of them carries a stamp against the fixtures now in the store, a
 run they trust. A partial run never stamps; a dirty tree never stamps; a stamp whose fixture
 has been regenerated, or whose unpinned fixture is older than the seven-day refresh, misses.
 A run in which a fixture could not be generated never stamps, and a stamp naming fewer than
-the three fixtures misses (github#103). Both callers require the pass line, not exit 0 alone:
+the three fixtures misses (github#103). **A fixture's own stamp is not proof the vault is
+usable** (github#106): before any browser is launched, every fixture is walked — `.obsidian`
+is a directory and the `.md` count outside dot-folders equals the `notes` its stamp recorded
+at generation (stamp format 2; 87 / 456 / 36 ms on the three) — and one that fails is
+regenerated with `fixture <name> is corrupt: <why> -- regenerating`; a vault that then does
+not build ends the run before Chrome starts. The same walk makes a stamp naming a now-corrupt
+fixture miss, a run against a corrupt fixture never stamps, and a run pointed at a scratch
+store by `VG_FIXTURE_STORE` (the test seam for that path) never stamps either. Both callers
+require the pass line, not exit 0 alone:
 the CLI realpaths itself against `argv[1]`, because through a junction (every Orca worktree)
 the two paths differed, the body never ran, and an empty exit 0 read as a stamp on every push.
 

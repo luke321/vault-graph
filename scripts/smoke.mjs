@@ -4951,6 +4951,8 @@ async function main() {
   // github#93, decisions/0013
   const partial = ONLY.length ? "--only" : argAll("vault").length ? "--vault" : arg("url", "") ? "--url"
                 : FAST ? "--fast" : vaults.some((v) => !v.fixture) ? "an unstamped fixture"
+                // github#106
+                : process.env.VG_FIXTURE_STORE ? "VG_FIXTURE_STORE"
                 // github#103
                 : FIXTURE_NAMES.some((n) => !vaults.some((v) => v.fixture.name === n)) ? "a fixture that could not be generated"
                 : "";
