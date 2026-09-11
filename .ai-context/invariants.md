@@ -2945,7 +2945,15 @@ A run in which a fixture could not be generated never stamps, and a stamp naming
 every fixture in `FIXTURE_NAMES` misses (github#103) — **four names since github#86 added the
 tag-organised fixture**, because a list that lags the suite is the same hole in a new place: the
 three older fixtures would go green, the run would stamp, and the hook would skip the suite for a
-tree the tag disc was never measured on. Both callers require the pass line, not exit 0 alone:
+tree the tag disc was never measured on. **A fixture's own stamp is not proof the vault is
+usable** (github#106): before any browser is launched, every fixture is walked — `.obsidian`
+is a directory and the `.md` count outside dot-folders equals the `notes` its stamp recorded
+at generation (stamp format 2; 87 / 456 / 36 ms on the three older fixtures) — and one that
+fails is regenerated with `fixture <name> is corrupt: <why> -- regenerating`; a vault that then
+does not build ends the run before Chrome starts. The same walk makes a stamp naming a
+now-corrupt fixture miss, a run against a corrupt fixture never stamps, and a run pointed at a
+scratch store by `VG_FIXTURE_STORE` (the test seam for that path) never stamps either. Both
+callers require the pass line, not exit 0 alone:
 the CLI realpaths itself against `argv[1]`, because through a junction (every Orca worktree)
 the two paths differed, the body never ran, and an empty exit 0 read as a stamp on every push.
 

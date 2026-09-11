@@ -2,7 +2,8 @@
 import { attach, json } from "./cdp.mjs";
 import { buildPayloadVault, PAYLOAD, NOTE_COUNT } from "./check-data-escape.mjs";
 import { leftmostScreen, leftWindowPos } from "./screen.mjs";
-import { FIXTURE_MAX_AGE_DAYS, FIXTURE_NAMES, describeFixture, record as recordPass } from "./suite-stamp.mjs";
+import { FIXTURE_MAX_AGE_DAYS, FIXTURE_NAMES, checkFixture, countNotes, describeFixture,
+         fixtureStore, record as recordPass } from "./suite-stamp.mjs";
 import { spawn, spawnSync } from "node:child_process";
 import { existsSync, mkdtempSync, rmSync, readFileSync, writeFileSync, readdirSync,
          renameSync, mkdirSync } from "node:fs";
@@ -5319,6 +5320,8 @@ async function killBrowser(child, PORT) {
  * refresh to change). It costs the 10k vault the live half of the heatmap-window check,
  * which the two ageing vaults still carry.
  *
+ * github#106, decisions/0013 -- a stamp is not proof the vault is usable
+ *
  * All three are gitignored and generated on demand, and NONE NEEDS A VAULT OF YOURS. The
  * demo vault used to be a mirror of the author's real one, which meant it needed
  * OBSIDIAN_VAULT and was skipped with a notice when there was none -- so on a contributor's
@@ -5340,18 +5343,9 @@ function resolveVaults() {
   const GENERATORS = ["make-demo-vault.mjs", "make-test-vault.mjs", "make-shape-vault.mjs"];
   // github#86 -- hashes ONLY its own generator; the other three do not move
   const TAG_GENERATORS = ["make-tag-vault.mjs"];
-  const FIXTURE_FORMAT = 1;
-
-  const storeRoot = (() => {
-    const g = spawnSync("git", ["-C", ROOT, "rev-parse", "--git-common-dir"],
-                        { encoding: "utf8" });
-    if (g.status === 0 && g.stdout.trim()) {
-      const common = g.stdout.trim();
-      const abs = /^[A-Za-z]:[\\/]|^\//.test(common) ? common : join(ROOT, common);
-      return join(dirname(abs), ".fixtures");
-    }
-    return join(ROOT, ".fixtures");
-  })();
+  // github#106 -- format 2 stamps the note count
+  const FIXTURE_FORMAT = 2;
+  const storeRoot = fixtureStore(ROOT);
 
   const digestOf = (args, gens) => {
     const h = createHash("sha256");
@@ -5373,12 +5367,17 @@ function resolveVaults() {
       try {
         const st = JSON.parse(readFileSync(stampPath, "utf8"));
         const pinned = args.indexOf("--end") >= 0;
-        // github#86 -- a stamp is not proof the vault is usable
-        // github#86 -- one was found with its notes but no .obsidian
-        // github#86 -- a stamp-only test reuses that instead of rebuilding
-        fresh = st.digest === digest && existsSync(join(dir, ".obsidian")) &&
+        fresh = st.digest === digest &&
                 (pinned || (typeof st.day === "string" && ageDays(st.day) <= FIXTURE_MAX_AGE_DAYS));
       } catch { fresh = false; }
+    }
+    if (fresh) {
+      // github#106 -- a stamp is not proof the vault is usable
+      const health = checkFixture(dir);
+      if (!health.ok) {
+        console.log(`fixture ${name} is corrupt: ${health.why} -- regenerating`);
+        fresh = false;
+      }
     }
     if (!fresh) {
       console.log(`generating ${label} ...`);
@@ -5392,8 +5391,16 @@ function resolveVaults() {
         rmSync(building, { recursive: true, force: true });
         return;
       }
+      // github#106 -- counted, then checked before it is published
       writeFileSync(join(building, ".stamp.json"),
-                    JSON.stringify({ digest, day: todayDay(), script, args }, null, 2) + "\n");
+                    JSON.stringify({ digest, day: todayDay(), script, args, notes: countNotes(building) },
+                                   null, 2) + "\n");
+      const built = checkFixture(building);
+      if (!built.ok) {
+        console.log(`  cannot generate ${label}: ${built.why}`);
+        rmSync(building, { recursive: true, force: true });
+        return;
+      }
       for (const d of readdirSync(storeRoot)) {
         if (d.startsWith(`${name}-`) || (d.startsWith(`.building-${name}-`) && d !== `.building-${name}-${process.pid}`)) {
           rmSync(join(storeRoot, d), { recursive: true, force: true });
@@ -5428,9 +5435,14 @@ async function buildFor(v) {
                       [join(HERE, "..", "src", "build-graph.mjs"), "--out", scratch]
                         .concat(v.path ? ["--vault", v.path] : []),
                       { encoding: "utf8" });
-  if (b.status !== 0) return "";
+  // github#106 -- fail here, before any browser is launched
+  if (b.status !== 0) {
+    const lines = (b.stderr || "").split("\n").map((s) => s.trim()).filter(Boolean);
+    const why = lines.find((s) => /^Error:/.test(s)) || lines[0] || `exit ${b.status}`;
+    throw new Error(`cannot build ${v.label}: ${why.replace(/^Error:\s*/, "")}`);
+  }
   const m = /^wrote (.+) \(/m.exec(b.stdout || "");
-  if (!m) return "";
+  if (!m) throw new Error(`cannot build ${v.label}: build-graph.mjs did not say where the build landed`);
   console.log((b.stdout || "").trimEnd());
   return pathToFileURL(m[1].trim()).href;
 }
@@ -5535,6 +5547,8 @@ async function main() {
   // github#93, decisions/0013
   const partial = ONLY.length ? "--only" : argAll("vault").length ? "--vault" : arg("url", "") ? "--url"
                 : FAST ? "--fast" : vaults.some((v) => !v.fixture) ? "an unstamped fixture"
+                // github#106
+                : process.env.VG_FIXTURE_STORE ? "VG_FIXTURE_STORE"
                 // github#103
                 : FIXTURE_NAMES.some((n) => !vaults.some((v) => v.fixture.name === n)) ? "a fixture that could not be generated"
                 : "";
