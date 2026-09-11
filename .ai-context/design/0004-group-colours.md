@@ -113,6 +113,30 @@ There is no `.vg-g*` class on a legend row, and until github#84 there was no not
 so — which is how this paragraph stayed wrong. If you are about to rely on a slot's
 colour re-resolving, check which of the two surfaces you are on.
 
+Since github#77 the hexes themselves are declared once as **light/dark pairs** —
+`--g7-l` and `--g7-d`, plus `--surface-1-l` / `--surface-1-d` — and the three theme
+blocks only map `--g7` onto one of them. The picker draws each slot on **both** grounds
+at once whatever theme the page is in, so the other theme's values have to be reachable
+from CSS rather than from the cascade. It also ended a real hazard: the dark palette used
+to be written out twice, in the `prefers-color-scheme` block and again in
+`[data-theme="dark"]`, and `palette-check.mjs` read only the second, so one copy could
+have drifted unnoticed. The harness now refuses any `--gN` or `--surface-1` written as a
+hex anywhere in the file. `invariants.md` carries the rest.
+
+## A swatch shows the dots the slot will draw
+
+A slot that reads well as a filled square can be nearly invisible as the mark it actually
+makes. Measured across the three fixtures a drawn radius spans **0.39 px to 5.93 px**, so
+each swatch is an inline `<svg>` of the slot at four real radii on both grounds, with the
+subfolder tint ladder below, and a title naming the measured contrast per theme. The
+numbers are `palette-check.mjs`'s own, compared against it by a check rather than copied.
+github#77, `invariants.md`.
+
+**The three failing light slots are still failing.** g3 Aqua 2.74, g4 Yellow 2.11 and g9
+Cyan 2.58 are what the preview now makes visible; fixing them is a separate change to
+`src/page.css` with `palette-check.mjs` as its before-and-after, and the table under
+"Slots 6 and 10 were pastels" is the shape that change should take.
+
 ## An override changes exactly one folder
 
 Position decides every other colour. `buildColors` does not look at what anyone else

@@ -760,6 +760,131 @@ try {
       "definitions: " + defs.top + " top-level, " + defs.items + " items; rendered " + shown.rows + " rows, " + shown.toggles + " toggles, " + shown.headings + " headings; compact axis button " + pressedBefore + " -> " + pressedAfter + ", data.json compactAxis " + saved);
   }
 
+  // github#77
+  if (selected("colour picker")) {
+    const TAB = "app.setting.pluginTabs.find(function (t) { return t.id === '" + PLUGIN_ID + "'; })";
+    const ALIGN = "var align = function (el) {" +
+      "  var out = [];" +
+      // github#77
+      "  Array.prototype.forEach.call(el.querySelectorAll('.sws'), function (row) {" +
+      "    var kids = row.querySelectorAll('.swatch');" +
+      "    if (!kids.length) return;" +
+      "    var lo = Infinity, hi = -Infinity, tops = [];" +
+      "    Array.prototype.forEach.call(kids, function (k) {" +
+      "      var b = k.getBoundingClientRect();" +
+      "      if (b.left < lo) lo = b.left;" +
+      "      if (b.right > hi) hi = b.right;" +
+      "      var t = Math.round(b.top);" +
+      "      if (tops.indexOf(t) < 0) tops.push(t);" +
+      "    });" +
+      "    tops.sort(function (x, y) { return x - y; });" +
+      "    var firstRun = 0;" +
+      "    Array.prototype.forEach.call(kids, function (k) {" +
+      "      if (Math.round(k.getBoundingClientRect().top) === tops[0]) firstRun++;" +
+      "    });" +
+      "    out.push({ left: Math.round(lo), w: Math.round(hi - lo)," +
+      "               n: kids.length, lines: tops.length, perLine: firstRun });" +
+      "  });" +
+      "  return out;" +
+      "};";
+    const LOOK = "(function(){" + ALIGN +
+      " var t = app.setting.activeTab; var el = t && (t.containerEl || t.contentEl);" +
+      " if (!el) return { open: false };" +
+      " var sws = el.querySelectorAll('.vault-graph .swatch');" +
+      " var prev = el.querySelectorAll('.vault-graph .swatch svg.prev');" +
+      " var empty = 0, flat = 0;" +
+      " Array.prototype.forEach.call(sws, function (s) {" +
+      "   if (s.querySelector('svg.prev')) return;" +
+      "   var bg = getComputedStyle(s).backgroundColor;" +
+      "   if (bg && bg !== 'rgba(0, 0, 0, 0)' && bg !== 'transparent') flat++; else empty++;" +
+      " });" +
+      " var one = sws[0], gnd = one && one.querySelector('.gnd');" +
+      " var scope = el.querySelector('.vault-graph.vg-tokens');" +
+      " var over = 0;" +
+      " if (scope) over = Math.max(0, scope.scrollWidth - scope.clientWidth);" +
+      " return { open: true, sws: sws.length, previews: prev.length, flat: flat, empty: empty," +
+      "          ground: gnd ? getComputedStyle(gnd).fill : null," +
+      "          grounds: one ? one.querySelectorAll('.gnd').length : 0," +
+      "          bodyTheme: document.body.classList.contains('theme-light') ? 'light' : 'dark'," +
+      "          scopeTheme: scope ? scope.getAttribute('data-theme') : null," +
+      "          overflowX: over, keptApi: Object.prototype.hasOwnProperty.call(" + TAB + " || {}, 'api')," +
+      "          rows: align(el) };" +
+      "})()";
+    const openTab = async () => {
+      await E("app.setting.open(); app.setting.openTabById('" + PLUGIN_ID + "'); void 0");
+      await sleep(900);
+    };
+
+    await openGraph(c);
+    await sleep(600);
+    await openTab();
+    const withGraph = await E(LOOK);
+
+    // github#77
+    await E("(function(){ var t = app.setting.activeTab; var b = (t.containerEl || t.contentEl)" +
+            ".querySelector('.vault-graph .swatch[aria-checked=\"false\"]'); if (b) b.click(); return !!b; })()");
+    await sleep(800);
+    const afterPick = await E(LOOK);
+
+    // github#77
+    const wasDark = await E("document.body.classList.contains('theme-dark')");
+    await E("app.changeTheme(" + (wasDark ? "'moonstone'" : "'obsidian'") + "); void 0");
+    await sleep(900);
+    const afterTheme = await E(LOOK);
+    await E("app.changeTheme(" + (wasDark ? "'obsidian'" : "'moonstone'") + "); void 0");
+    await sleep(700);
+
+    // github#77
+    await E("app.setting.close(); void 0");
+    await sleep(300);
+    await E("app.workspace.detachLeavesOfType(" + JSON.stringify(VT) + "); void 0");
+    await sleep(800);
+    await openTab();
+    const noGraph = await E(LOOK);
+    await E("app.setting.close(); void 0");
+    await sleep(300);
+    await openGraph(c);
+    await sleep(600);
+
+    const say = (s) => s.open
+      ? `${s.sws} swatches / ${s.previews} previewed / ${s.flat} flat / ${s.empty} EMPTY, overflow ${s.overflowX}px`
+      : "tab did not open";
+    const good = (s, wantPreviews) => s.open && s.sws > 0 && s.empty === 0 && s.overflowX === 0 &&
+      (wantPreviews ? s.previews === s.sws : true);
+    const lightGround = "rgb(252, 252, 251)", darkGround = "rgb(26, 26, 25)";
+    const oneGround = (s) => s.grounds === 1 && (s.ground === lightGround || s.ground === darkGround);
+    const rows = withGraph.rows || [];
+    const lefts = [...new Set(rows.map((r) => r.left))];
+    const widths = [...new Set(rows.map((r) => r.w))];
+    const counts = [...new Set(rows.map((r) => r.n))];
+    const lines = [...new Set(rows.map((r) => r.lines))];
+    const perLine = [...new Set(rows.map((r) => r.perLine))];
+    const aligned = rows.length > 1 && lefts.length === 1 && widths.length === 1 &&
+                    counts.length === 1 && lines.length === 1 && perLine.length === 1 &&
+                    widths[0] > 0;
+    const ok = aligned && good(withGraph, true) && oneGround(withGraph) &&
+               good(afterPick, true) && good(afterTheme, true) && oneGround(afterTheme) &&
+               afterTheme.ground !== withGraph.ground &&
+               good(noGraph, false) && noGraph.previews === 0 &&
+               !withGraph.keptApi && !noGraph.keptApi;
+    report(ok,
+      "the settings tab's colour picker survives every host state, and keeps no handle on a closed graph",
+      "graph open: " + say(withGraph) + "; after a pick: " + say(afterPick) +
+      "; after a live theme change: " + say(afterTheme) + " (ground " +
+      withGraph.ground + " -> " + afterTheme.ground +
+      (afterTheme.ground !== withGraph.ground ? ", followed" : ", DID NOT FOLLOW") + ")" +
+      "; body/scope after the flip: " + afterTheme.bodyTheme + "/" + afterTheme.scopeTheme +
+      " (was " + withGraph.bodyTheme + "/" + withGraph.scopeTheme + ")" +
+      "; graph torn down and the tab reopened: " + say(noGraph) +
+      "; tab retains an api field: " + (withGraph.keptApi || noGraph.keptApi ? "YES" : "no") +
+      "; " + rows.length + " swatch grids, " +
+      (aligned ? "all at x=" + lefts[0] + ", " + widths[0] + "px, " + counts[0] +
+                 " swatches over " + lines[0] + " lines of " + perLine[0]
+               : "RAGGED -- lefts " + lefts.join('/') + ", widths " + widths.join('/') +
+                 ", counts " + counts.join('/') + ", lines " + lines.join('/') +
+                 ", per line " + perLine.join('/')));
+  }
+
   // github#40, design/0012
   const TRAIL = "(function(){ var v = " + VIEW + "; if (!v) return null; var d = v.contentEl.querySelector('#vg-detail'); var cr = d && !d.hidden ? d.querySelector('.crumbs') : null;" +
                 " var doc = v.contentEl.ownerDocument, ae = doc.activeElement; return { open: !!d && !d.hidden," +

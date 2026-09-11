@@ -424,6 +424,32 @@ async function main() {
     }
   }
 
+  // github#77
+  const pickerProbe = await p.eval(`(function () {
+    var root = document.querySelector(".vault-graph");
+    var open = root.getAttribute("data-sheet") !== "on" && window.innerWidth <= 720;
+    if (open) { var s = document.getElementById("vg-sheet"); if (s) s.click(); }
+    var rows = document.querySelectorAll(".lg[data-g]");
+    if (!rows.length) return "no legend row to open it on";
+    var row = rows[rows.length - 1];
+    var rect = row.getBoundingClientRect();
+    row.dispatchEvent(new MouseEvent("contextmenu", {
+      bubbles: true, clientX: rect.left + 5, clientY: rect.bottom - 2 }));
+    var menu = document.querySelector('[id$="ctxmenu"]');
+    if (!menu || menu.hidden) return "menu did not open";
+    var m = menu.getBoundingClientRect(), rr = root.getBoundingClientRect();
+    var sw = menu.querySelector(".swatch");
+    var swr = sw ? sw.getBoundingClientRect() : null;
+    var inside = m.left >= rr.left - 0.5 && m.top >= rr.top - 0.5 &&
+                 m.right <= rr.right + 0.5 && m.bottom <= rr.bottom + 0.5;
+    menu.hidden = true;
+    if (open) { var s2 = document.getElementById("vg-sheet"); if (s2) s2.click(); }
+    return Math.round(m.width) + "x" + Math.round(m.height) + " at " +
+           Math.round(m.left) + "," + Math.round(m.top) + "; swatch " +
+           (swr ? Math.round(swr.width) + "x" + Math.round(swr.height) : "none") +
+           "; " + (inside ? "inside the mount" : "OUTSIDE THE MOUNT");
+  })()`);
+
   const shot = arg("shot", "");
   if (shot) {
     // github#73 -- shoot the resting page, not whatever the last tap selected
@@ -474,6 +500,7 @@ async function main() {
   console.log(`  a 45px swipe             ${swipe}`);
   console.log(`  a two-finger tap         ${twoFinger}`);
   console.log(`  sheet toggle round trip  ${sheetProbe}`);
+  console.log(`  colour picker box        ${pickerProbe}`);
   console.log(`  page errors              ${p.firstError() || "none"}`);
   if (shot) console.log(`  screenshot               ${shot}`);
   console.log("");

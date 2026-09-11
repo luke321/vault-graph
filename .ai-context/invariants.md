@@ -2999,3 +2999,191 @@ while its tree is not; not by time because `develop` moves several times a day a
 green run" cannot say which tree it saw. While it runs, both gates hold the machine-wide
 `suite` lock (`scripts/lock.mjs`) and release it on every exit path; a lock that cannot be had
 blocks the push and names the holder rather than running on top of it.
+
+## A colour slot is previewed as the dots it will draw, on both grounds
+
+A swatch used to be a filled square. The disc draws that colour as **dots**, and on the
+fixtures measured those run from **0.39 px of radius** (the 10k vault in a small window) to
+**5.93 px** (the shape vault at 1600 px) — so a square was never the test the choice needed.
+Every swatch is now an inline `<svg>` of the slot at four radii, on the light ground and the
+dark ground side by side, with the slot's subfolder tint ladder on the rows below. github#77,
+design/0004, design/0003.
+
+**One ground: the one the page is on.** Drawing both side by side was tried and dropped -- a
+person picks a theme once and stays there, so half of every swatch showed dots they would never
+see and cost the width to do it. What the asymmetry needs is *naming*, not pixels: three of
+twelve slots fail 3:1 on light and **none** fail on dark, so the title carries the measured
+figure for **both** themes and flags which one fails, and the drawing shows only the ground in
+use.
+
+**Nothing rebuilds the swatch on a theme change, so every colour in it must be a token.** Neither
+host re-renders the picker when the theme flips. The ground is `--surface-1`, the base dots take
+the live `--gN` through a per-slot `--dot`, and the three ladder tints are emitted per swatch as
+`--k1`..`--k3` with `--k1d`..`--k3d` beside them, chosen by the same two theme blocks that choose
+everything else. A flip repaints the identical DOM nodes; the check asserts that by comparing
+`innerHTML` across it. Computing the other theme's tints still needs both palettes in JS, which
+is why `page.css` declares every palette hex once as a **pair** -- `--gN-l` / `--gN-d` and
+`--surface-1-l` / `--surface-1-d` -- and the three theme blocks only map `--gN` onto one of them.
+
+**Two host bugs hid behind the two-ground version, and only a real Obsidian found them.** With
+both grounds always drawn, a stale theme was invisible. With one, it is the whole swatch:
+
+- The settings tab stamped `data-theme` on its scope **once, at creation**, so its swatches kept
+  whatever theme the tab was first opened in. It follows the workspace `css-change` event now.
+- Reading `body.classList` inside that handler is **too early** -- the event fires before
+  Obsidian has flipped `theme-light`, so the first fix still read the old value and the check
+  still failed. The read is deferred a frame. Measured: ground `rgb(26,26,25)` ->
+  `rgb(252,252,251)` after a flip, having been unchanged before the fix.
+
+**No palette hex may be declared anywhere else.** `palette-check.mjs` fails on any `--gN:` or
+`--surface-1:` written as a hex. Before this, the dark palette was written out **twice**, in the
+`prefers-color-scheme` block and again in `[data-theme="dark"]`, and the harness read only the
+second; one copy could have drifted with no gate saying so.
+
+**A CSS rule beats a `fill` presentation attribute, and that is the constraint.** The base dots
+take their fill from a CSS rule (`.swatch .d-l { fill: var(--sl) }`); only the computed ladder
+tints carry a `fill` attribute. **The two must not share a class** -- a class-based `fill` rule
+overrides the attribute, so a shared class silently flattens every tint row to the base colour,
+and the result reads as a design choice rather than a bug.
+
+Measured in Chrome 152, because the first version of this note asserted the wrong reason:
+
+| what was drawn | computed `fill` |
+|---|---|
+| `fill="var(--sl)"`, token on `:root` | `rgb(1, 123, 234)` -- **it works** |
+| `fill="var(--sl)"`, token on a parent element | `rgb(1, 123, 234)` -- it works |
+| a CSS rule using `var()` (what we ship) | `rgb(1, 123, 234)` |
+| `fill="#12ab34"` under a matching CSS `fill` rule | **the rule wins** |
+| `fill="var(--undefined)"`, no fallback | `rgb(0, 0, 0)` -- silently black |
+
+So `var()` in a presentation attribute is **not** the problem; an earlier note here claimed it
+was, from memory rather than from a run. Two things the table does establish: the class collision
+above is real, and an undefined token inside an attribute computes to black rather than failing
+loudly, so a typo there is invisible.
+
+**The svg is one unit to one CSS pixel and must never be scaled.** Scale it and the radii stop
+being the ones the disc draws, which is the only thing the preview is claiming.
+
+### The quartet is a reference scale, not a bound
+
+`PREVIEW_R_PX` is `[0.35, 0.65, 1.38, 2.19, 4.06]`, a **reference scale, not a bound**. A radius
+falls out of the vault's size and the viewport's together, and the three fixtures span 0.39 to
+5.93 px, so no fixed set of numbers can bracket every disc. The first cut of the check asserted
+every live dot fell inside the scale and **failed on the 10k fixture at 0.42 px** -- the
+assertion was wrong, not the code.
+
+**0.35 px is the sub-pixel sample, and it is load-bearing.** The issue asked for the sizes the
+disc really draws *including the smallest*, and a scale starting at 0.65 px did not show that:
+the 10k fixture draws 0.39 px. 0.35 sits below the smallest radius measured on any fixture at
+any viewport, so the preview always carries a mark at least as small as the disc's smallest.
+
+Two criteria, both asserted on every fixture:
+
+1. **Coverage** -- the smallest previewed radius is no larger than the smallest the disc draws.
+2. **Resemblance** -- the previewed range brackets the disc's median dot.
+
+| fixture | dots | drawn radius min / p50 / max | smallest covered | median inside 0.35-4.06 |
+|---|---|---|---|---|
+| demo (1403 notes) | 1403 | 0.67 / **1.47** / 2.10 px | yes | yes |
+| 10k synthetic | 10002 | 0.39 / **0.95** / 0.95 px | yes | yes |
+| dominant-folder | 954 | 1.38 / **2.10** / 3.07 px | yes | yes |
+
+Doubling or halving dot size breaks the second; drawing anything under 0.35 px breaks the first.
+
+**A contrast ratio is for a solid area, and a mark is not one.** The figures in the swatch title
+are solid-colour ratios against the surface, which is the generous measure: a dot near a pixel
+across is mostly antialiasing and its effective contrast is lower, and worst exactly where the
+solid figure is already worst. The title says `solid-area contrast` and `a sub-pixel dot reads
+lower`, and both hosts' help text says the same. These ratios must not be quoted as if they
+described the drawn mark.
+
+### The numbers come from the harness, never from a second table
+
+`scripts/palette-check.mjs` is the authority. It exports `measurePalette(cssText)`, the page
+computes the same figure from the same pair tokens with its own `relLum`, and a check compares
+all **12 slots × 2 themes to two decimals**. The swatch title reads
+`Yellow · light 2.11 (under 3:1) · dark 5.67`, and the check also asserts the `under 3:1` flag
+appears on exactly `g3, g4, g9` for light and on nothing for dark.
+
+### Geometry
+
+| | before | after |
+|---|---|---|
+| swatch | 23x23 px (menu), 15.4 px (settings, desktop) | **50x42 px everywhere** |
+| context menu | 176x122 px | **176x279 px** -- the same width it always was |
+| menu columns | 6 | **3** |
+| settings-body columns | 12 | **4** |
+| settings row height | ~20 px | **159 px** |
+| settings scroll, 18 folders | ~360 px | **2025 px** |
+| circles per swatch | 0 | **20** |
+| settings panel DOM nodes | 396 | **5148** |
+
+Measured inside the mount on the iPhone 14, on a 320 px sidebar and at 1600 px. The mount clamp
+in `openCtxMenu` is what keeps it there and is asserted rather than assumed.
+
+**The settings body auto-fills, and a fixed column count was wrong.** Four fixed 58 px columns overflowed the 288 px panel -- measured, its scrolling box is **244 px wide with 229 px of usable
+width** -- and put the twelfth slot behind a horizontal scrollbar, unreachable. `repeat(auto-fill,
+34px)` gives six columns there and adapts if the panel ever changes; after the fix `scrollWidth`
+equals `clientWidth` at 229 px and all twelve swatches are inside the box.
+
+### Check the host surfaces, not one of them
+
+That overflow escaped every check because they all opened the **menu**, and the menu was always
+going to fit. Fitting there proves nothing about the panel, which is the narrower of the two.
+Coverage now runs at both, and in the plugin as well:
+
+- `smoke.mjs --only "settings surface"` drives the settings panel at rest, **after a colour pick
+  rebuilds it**, and **after a theme flip underneath it**, asserting 12 swatches, 12 previews, no
+  swatch past the right edge and zero horizontal overflow each time. Putting the four-column rule
+  back makes it fail with *3 swatches past the right edge by 32 px, 47 px of overflow*, so it
+  tests what it claims to.
+- `obsidian-smoke.mjs --only "colour picker"` covers five host states in a **real Obsidian**:
+  graph open, a colour pick, a live theme change, the graph torn down with the tab open, and the
+  tab reopened with no graph. Measured 2026-09-08 on the demo fixture: 216 swatches all previewed
+  in the first three, **216 flat squares and zero empty frames** in the last.
+
+**The chip has to be big enough to read, and 34 px was not.** Twenty dots in a 32x40 drawing
+leaves about 2.4 px between them and nothing reads at a glance. The drawing is **48x40** and the
+chip **50x42**, giving roughly 5 px of gap, which is what lets the 0.35 px sample read as a
+smudge beside an 8 px dot rather than as noise. Measured before changing anything, because the
+obvious guess was wrong: Obsidian's `setting-item-control` is a fixed **369 px at both a 1600 px
+and a 900 px window**, and the chip measured exactly 34x42 in both. They were never compressed,
+only small. The cost is height -- four per line instead of six, three lines instead of two, and
+a settings row **113 -> 159 px**.
+
+**The chosen swatch is marked with an outline, not a shadow.** Two stacked box-shadows sat on
+top of Obsidian's own button shadow and read as a blob rather than an edge. An `outline` at
+`outline-offset: 2px` follows the 5 px radius, reads unambiguously as a rectangle, and leaves
+the host's own button shading alone instead of replacing it.
+
+**A folder's chevron must not be able to move its swatches.** In the Obsidian tab the chevron
+and the eye sit in the same flex container as the twelve swatches, so a folder with subfolders
+had less room than one without and its wrap point moved: measured on the real tab, left edges
+of 402 / 440 / 478 px and 11 / 10 / 9 swatches on the first line. At the old 18 px dots all
+twelve fitted on one line and it never showed. The swatches have their own fixed six-column
+grid now, and the check asserts every row agrees: **all at x=536, 224 px, 12 swatches over 2
+lines of 6** across 18 folders.
+
+**Measure the swatches, not their wrapper.** The first version of that check measured the grid
+element, and a wrapper set to `display: contents` has no box of its own -- every row reported
+`left=0 width=0` and the check passed on a layout that was visibly broken. It reads the
+swatches' own rectangles now, and reinstating the old flex layout reproduces the reported
+numbers exactly.
+
+**The settings tab keeps no api of its own.** It is passed one per render and stores nothing, so
+a tab cannot go on drawing previews from a graph the user has closed. The Obsidian check asserts
+the field is *absent*, not merely unused, because an unused field is one edit away from a used
+one.
+
+```bash
+node scripts/smoke.mjs --only picker            # all three fixtures, five checks
+node scripts/palette-check.mjs                  # the authority; output is quoted in design/0004
+node scripts/mobile-check.mjs --device iphone14 # "colour picker box"
+node scripts/mobile-check.mjs --device sidebar  # the 320px case
+```
+
+**The ladder is not a second implementation.** `ladderStep()` is extracted from
+`buildSubShades` and both call it; `hueBudget()` takes the colours to measure against so the
+preview can ask the same question of the other theme's palette. Verified as a no-op the only way
+that means anything: every one of **1403 nodes on the demo fixture draws the same colour as
+`develop`, in both themes**, compared by hash.

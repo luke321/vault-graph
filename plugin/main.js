@@ -98,6 +98,7 @@ function bareMap() {
  * `types` section): what mountVaultGraph returns, and the __vg api it builds. Every member
  * `VgApi` names ships in the plugin; the debug surface the standalone adds is not in it.
  * @typedef {import("../src/page.js").MountHandle} MountHandle
+ * @typedef {import("../src/page.js").VgApi} VgApi
  * @typedef {import("../src/page.js").MountDeps} MountDeps
  */
 
@@ -955,7 +956,7 @@ const VIEW_SETTINGS = [
     desc: "Take a note you have just written, moved or linked into the disc where it stands, instead of waiting for Refresh to rebuild the whole thing. Only a change that decides where a note SITS moves anything -- writing prose does not, so typing is still. Off, the disc is a snapshot until you press Refresh." },
 ];
 
-const COLOURS_DESC = "Twelve slots, handed out in group order and round again. Folders and tags keep their own colours; the tabs choose which. Setting one group never moves another, and two may share a colour.";
+const COLOURS_DESC = "Twelve slots, handed out in group order and round again. Folders and tags keep their own colours; the tabs choose which. Setting one group never moves another, and two may share a colour. Each swatch shows the slot at the sizes the disc really draws, over both grounds. Its contrast figure is for a solid area of the colour; a dot a pixel across is mostly antialiasing and reads lower than the number.";
 
 const SLOT_NAMES = ["Blue", "Orange", "Aqua", "Yellow", "Green", "Magenta",
                     "Violet", "Red", "Cyan", "Orchid", "Grey", "Slate"];
@@ -1162,11 +1163,23 @@ class VaultGraphSettingTab extends PluginSettingTab {
     row.settingEl.addClass("vg-colour-row");
     const scope = row.settingEl.createDiv({ cls: ["vault-graph", "vg-tokens"] });
 
-    scope.setAttribute("data-theme",
-      activeDocument.body.classList.contains("theme-light") ? "light" : "dark");
-
     this.scope = scope;
+    this.syncScopeTheme(false);
+    // github#77
+    this.plugin.registerEvent(
+      this.app.workspace.on("css-change", () => this.syncScopeTheme(true)));
     this.redrawColours();
+  }
+
+  // github#77
+  syncScopeTheme(defer) {
+    if (defer) {
+      window.requestAnimationFrame(() => this.syncScopeTheme(false));
+      return;
+    }
+    if (!this.scope) return;
+    this.scope.setAttribute("data-theme",
+      activeDocument.body.classList.contains("theme-light") ? "light" : "dark");
   }
 
   redrawColours() {
@@ -1191,7 +1204,6 @@ class VaultGraphSettingTab extends PluginSettingTab {
     const view = await this.plugin.currentView();
     const api = view && view.handle && view.handle.api;
     if (!api || !api.groupOrder || !api.palette || !scope || !scope.isConnected) return;
-
     // github#86 -- the page answers for the tab's grouping, on screen or not
     const groups = api.groupsOf
       ? api.groupsOf(this.colourDim).map((g) => ({ name: g.name, n: g.n, slot: g.slot, autoSlot: g.autoSlot }))
@@ -1201,11 +1213,25 @@ class VaultGraphSettingTab extends PluginSettingTab {
         slot: api.slotOf ? api.slotOf(name) : "",
         autoSlot: api.autoSlotOf ? api.autoSlotOf(name) : "",
       }));
-    if (groups.length) this.renderColours(groups);
+    if (groups.length) this.renderColours(groups, api);
   }
 
-  /** @param {GroupRow[]} groups */
-  renderColours(groups) {
+  // github#77
+  /**
+   * @param {VgApi | null} api @param {HTMLElement} btn
+   * @param {string} key @param {string} name @param {string} tail
+   */
+  fillSwatch(api, btn, key, name, tail) {
+    if (!api || !api.swatchPreview) return;
+    const doc = new DOMParser().parseFromString(
+      "<body>" + api.swatchPreview(key) + "</body>", "text/html");
+    btn.replaceChildren.apply(btn, Array.prototype.slice.call(doc.body.childNodes));
+    if (api.slotTitle) btn.setAttribute("title", api.slotTitle(key, name) + tail);
+  }
+
+  // github#77
+  /** @param {GroupRow[]} groups @param {VgApi | null} [api] */
+  renderColours(groups, api) {
     const scope = this.scope;
     scope.empty();
     // github#86 -- one tab per grouping, above the rows
@@ -1252,7 +1278,7 @@ class VaultGraphSettingTab extends PluginSettingTab {
           .setTooltip(open ? "Hide subfolder colours" : "Subfolder colours")
           .onClick(() => {
             this.subOpen[group.name] = !open;
-            this.renderColours(groups);
+            this.renderColours(groups, api);
           }));
       }
       row.addExtraButton((b) => b
@@ -1260,18 +1286,22 @@ class VaultGraphSettingTab extends PluginSettingTab {
         .setTooltip(shown ? "Shown by default" : "Hidden by default")
         .onClick(() => this.pickVisible(group.name)));
       row.controlEl.addClass("sws");
+      // github#77
+      const grid = row.controlEl.createDiv({ cls: "sw-grid" });
 
       SLOT_NAMES.forEach((name, i) => {
         const key = "g" + (i + 1);
         const on = current === key;
         const isAuto = group.autoSlot === key;
+        const tail = on ? (pinned ? " (chosen)" : " (automatic)")
+                        : (isAuto ? " (automatic default)" : "");
         const attr = {
           role: "radio", "aria-checked": String(on), "aria-label": name,
-          title: name + (on ? (pinned ? " (chosen)" : " (automatic)") :
-                         (isAuto ? " (automatic default)" : "")),
+          title: name + tail,
         };
         if (isAuto) attr["data-auto"] = "1";
-        const b = row.controlEl.createEl("button", { cls: ["swatch", "vg-" + key], attr });
+        const b = grid.createEl("button", { cls: ["swatch", "vg-" + key], attr });
+        this.fillSwatch(api, b, key, name, tail);
         b.addEventListener("click", () => this.pick(group.name, key));
       });
 
@@ -1282,7 +1312,7 @@ class VaultGraphSettingTab extends PluginSettingTab {
       });
       auto.addEventListener("click", () => this.pick(group.name, null));
 
-      if (open) this.renderSubRows(scope, group.name, subs);
+      if (open) this.renderSubRows(scope, group.name, subs, api);
     }
   }
 
@@ -1290,8 +1320,9 @@ class VaultGraphSettingTab extends PluginSettingTab {
    * @param {HTMLElement} scope
    * @param {string} folder
    * @param {SubRow[]} subs
+   * @param {VgApi | null} [api]
    */
-  renderSubRows(scope, folder, subs) {
+  renderSubRows(scope, folder, subs, api) {
     for (const s of subs) {
       const pk = folder + "/" + s.name;
       const pinned = this.plugin.settings.subfolderColors[pk] || "";
@@ -1300,15 +1331,18 @@ class VaultGraphSettingTab extends PluginSettingTab {
         .setDesc(s.n === 1 ? "1 note" : s.n + " notes");
       row.settingEl.addClass("vg-subrow");
       row.controlEl.addClass("sws");
+      // github#77
+      const grid = row.controlEl.createDiv({ cls: "sw-grid" });
 
       SLOT_NAMES.forEach((name, i) => {
         const key = "g" + (i + 1);
         const on = pinned === key;
-        const b = row.controlEl.createEl("button", {
+        const b = grid.createEl("button", {
           cls: ["swatch", "vg-" + key],
           attr: { role: "radio", "aria-checked": String(on), "aria-label": name,
                   title: name + (on ? " (chosen)" : "") },
         });
+        this.fillSwatch(api, b, key, name, on ? " (chosen)" : "");
         b.addEventListener("click", () => this.pickSub(folder, s.name, key));
       });
 

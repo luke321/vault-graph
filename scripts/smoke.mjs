@@ -4693,6 +4693,312 @@ check("count bars are on by default, and the settings toggle removes every bar",
   };
 });
 
+// github#77
+const PALETTE = await import("./palette-check.mjs");
+
+check("the picker's contrast numbers are the harness's", async (p) => {
+  const want = PALETTE.measurePalette(readFileSync(join(ROOT, "src", "page.css"), "utf8"));
+  const got = await p.j(`(function(){
+    var out = {};
+    __vg.palette().forEach(function (s) {
+      var c = __vg.slotContrast(s.key);
+      out[s.key] = [Math.round(c.light * 100) / 100, Math.round(c.dark * 100) / 100];
+    });
+    var row = document.querySelector('.lg[data-g]');
+    var rect = row.getBoundingClientRect();
+    row.dispatchEvent(new MouseEvent("contextmenu", {
+      bubbles: true, clientX: rect.left + 5, clientY: rect.top + 5 }));
+    var menu = document.querySelector('[id$="ctxmenu"]');
+    var titles = {};
+    Array.prototype.forEach.call(menu.querySelectorAll(".swatch[data-key]"), function (b) {
+      titles[b.getAttribute("data-key")] = b.getAttribute("title") || "";
+    });
+    menu.hidden = true;
+    return { contrast: out, titles: titles };
+  })()`);
+
+  const bad = [];
+  for (const s of want.light.slots) {
+    const w = [+want.light.slots.find((x) => x.key === s.key).contrast.toFixed(2),
+               +want.dark.slots.find((x) => x.key === s.key).contrast.toFixed(2)];
+    const g = got.contrast[s.key];
+    if (!g || Math.abs(g[0] - w[0]) > 0.005 || Math.abs(g[1] - w[1]) > 0.005) {
+      bad.push(`${s.key} page ${g ? g.join("/") : "?"} vs harness ${w.join("/")}`);
+    }
+    const t = got.titles[s.key] || "";
+    if (!t.includes(w[0].toFixed(2)) || !t.includes(w[1].toFixed(2))) {
+      bad.push(`${s.key} title "${t}" names neither ${w[0].toFixed(2)} nor ${w[1].toFixed(2)}`);
+    }
+    const saysLight = /light [\d.]+ \(under 3:1\)/.test(t);
+    const saysDark = /dark [\d.]+ \(under 3:1\)/.test(t);
+    if (saysLight !== want.light.under3.includes(s.key)) bad.push(`${s.key} light flag wrong`);
+    if (saysDark !== want.dark.under3.includes(s.key)) bad.push(`${s.key} dark flag wrong`);
+  }
+  return { ok: bad.length === 0 && want.strays.length === 0,
+           detail: bad.length
+             ? bad.slice(0, 4).join("; ")
+             : `12 slots x 2 themes agree with palette-check.mjs to 2dp; under 3:1 light ` +
+               `${want.light.under3.join(",") || "none"}, dark ${want.dark.under3.join(",") || "none"}` };
+});
+
+check("the picker repaints itself on a theme change, with no rebuild", async (p) => {
+  const r = await p.j(`(function(){
+    var root = document.getElementById("vg-app");
+    var was = root.getAttribute("data-theme");
+
+    var row = document.querySelector('.lg[data-g]');
+    var rect = row.getBoundingClientRect();
+    row.dispatchEvent(new MouseEvent("contextmenu", {
+      bubbles: true, clientX: rect.left + 5, clientY: rect.top + 5 }));
+    var menu = document.querySelector('[id$="ctxmenu"]');
+    var sw = menu.querySelector('.swatch[data-key="g4"]');
+    var markup = sw.innerHTML;
+
+    var f = function (sel) {
+      var el = sw.querySelector(sel);
+      return el ? getComputedStyle(el).fill : null;
+    };
+    var read = function () {
+      return { gnd: f(".gnd"), base: f(".d"), t1: f(".t1"), t3: f(".t3"),
+               grounds: sw.querySelectorAll(".gnd").length };
+    };
+
+    var seen = {};
+    ["dark", "light"].forEach(function (t) {
+      root.setAttribute("data-theme", t);
+      seen[t] = read();
+    });
+    // the SAME nodes must have repainted -- nothing re-rendered them
+    var sameMarkup = sw.innerHTML === markup;
+    menu.hidden = true;
+    if (was) root.setAttribute("data-theme", was); else root.removeAttribute("data-theme");
+    __vg.readTheme();
+    return { dark: seen.dark, light: seen.light, sameMarkup: sameMarkup };
+  })()`);
+  const rgb = (h) => {
+    const n = h.replace("#", "");
+    return `rgb(${parseInt(n.slice(0, 2), 16)}, ${parseInt(n.slice(2, 4), 16)}, ${parseInt(n.slice(4, 6), 16)})`;
+  };
+  const want = {
+    light: { gnd: rgb("#fcfcfb"), base: rgb("#eda100") },
+    dark: { gnd: rgb("#1a1a19"), base: rgb("#c98500") },
+  };
+  const bad = [];
+  for (const t of ["light", "dark"]) {
+    const s = r[t];
+    if (s.grounds !== 1) bad.push(`${t}: ${s.grounds} grounds drawn, want exactly 1`);
+    if (s.gnd !== want[t].gnd) bad.push(`${t}: ground ${s.gnd} not ${want[t].gnd}`);
+    if (s.base !== want[t].base) bad.push(`${t}: g4 base dot ${s.base} not ${want[t].base}`);
+    if (!s.t1 || s.t1 === s.base) bad.push(`${t}: tint row 1 did not differ from the base`);
+    if (!s.t3 || s.t3 === s.t1) bad.push(`${t}: tint row 3 matched row 1`);
+  }
+  if (r.light.gnd === r.dark.gnd) bad.push("the ground did not change with the theme");
+  if (r.light.t1 === r.dark.t1) bad.push("the tint ladder did not change with the theme");
+  if (!r.sameMarkup) bad.push("the markup changed -- the swatch was rebuilt, not repainted");
+  return { ok: bad.length === 0,
+           detail: bad.length ? bad.slice(0, 3).join("; ")
+             : `one ground, following the theme: ${r.light.gnd} -> ${r.dark.gnd}, g4 ` +
+               `${r.light.base} -> ${r.dark.base}, first tint ${r.light.t1} -> ${r.dark.t1}; ` +
+               `identical markup throughout, so nothing rebuilt it` };
+});
+
+check("the picker draws the disc's own dot sizes", async (p) => {
+  await settle(p);
+  await camSettle(p);
+  const r = await p.j(`(function(){
+    var row = document.querySelector('.lg[data-g]');
+    var rect = row.getBoundingClientRect();
+    row.dispatchEvent(new MouseEvent("contextmenu", {
+      bubbles: true, clientX: rect.left + 5, clientY: rect.top + 5 }));
+    var menu = document.querySelector('[id$="ctxmenu"]');
+    var sw = menu.querySelector('.swatch[data-key="g4"]');
+    var svg = sw.querySelector("svg.prev");
+    var box = svg.getBoundingClientRect();
+    var vb = (svg.getAttribute("viewBox") || "").split(/\\s+/).map(Number);
+    var radii = Array.prototype.map.call(svg.querySelectorAll("circle"), function (c) {
+      return +c.getAttribute("r");
+    });
+    var uniq = radii.filter(function (v, i, a) { return a.indexOf(v) === i; })
+                    .sort(function (a, b) { return a - b; });
+    menu.hidden = true;
+
+    var live = [];
+    __vg.graph.forEachNode(function (id) {
+      if ((__vg.alpha[id] || 0) < 0.999) return;
+      var d = __vg.renderer.getNodeDisplayData(id);
+      if (!d || d.hidden) return;
+      live.push(__vg.renderer.scaleSize(d.size));
+    });
+    live.sort(function (a, b) { return a - b; });
+    return { want: __vg.previewSizes(), uniq: uniq, n: radii.length,
+             boxW: Math.round(box.width * 100) / 100, boxH: Math.round(box.height * 100) / 100,
+             vbW: vb[2], vbH: vb[3],
+             liveMin: live.length ? Math.round(live[0] * 100) / 100 : null,
+             liveMed: live.length ? Math.round(live[Math.floor(live.length / 2)] * 100) / 100 : null,
+             liveMax: live.length ? Math.round(live[live.length - 1] * 100) / 100 : null,
+             liveN: live.length };
+  })()`);
+  const same = r.uniq.length === r.want.length &&
+               r.uniq.every((v, i) => Math.abs(v - r.want[i]) < 1e-9);
+  // github#77
+  const oneToOne = Math.abs(r.boxW - r.vbW) < 0.01 && Math.abs(r.boxH - r.vbH) < 0.01;
+  // github#77 -- two criteria, see invariants.md
+  const lo = r.want[0], hi = r.want[r.want.length - 1];
+  const covers = r.liveMin === null || r.liveMin >= lo - 0.005;
+  const brackets = r.liveMed === null || (r.liveMed >= lo - 0.005 && r.liveMed <= hi + 0.005);
+  return { ok: same && oneToOne && covers && brackets,
+           detail: `preview radii ${r.uniq.join("/")} (want ${r.want.join("/")}), ` +
+                   `${r.n} circles, svg ${r.boxW}x${r.boxH} for viewBox ${r.vbW}x${r.vbH} ` +
+                   `(1 unit = 1px ${oneToOne ? "ok" : "NO"}); disc draws ` +
+                   `${r.liveMin}/${r.liveMed}/${r.liveMax}px over ${r.liveN} dots — smallest ` +
+                   `${covers ? "covered by" : "SMALLER THAN"} the ${lo}px sample, median ` +
+                   `${brackets ? "inside" : "OUTSIDE"} ${lo}-${hi}` };
+});
+
+check("the picker's ladder is the ladder the disc draws", async (p) => {
+  const r = await p.j(`(function(){
+    var cs = getComputedStyle(document.getElementById("vg-app"));
+    var now = cs.getPropertyValue("--surface-1").trim().toLowerCase();
+    var suffix = now === cs.getPropertyValue("--surface-1-d").trim().toLowerCase() ? "d" : "l";
+    var pins = __vg.subfolderColors;
+    var picked = null;
+    __vg.groupOrder().forEach(function (g) {
+      if (picked || g.charAt(0) === "(") return;
+      var subs = __vg.subOrderOf(g);
+      if (!subs || subs.length < 2) return;
+      var pinned = subs.some(function (sb) { return !!pins[g + "/" + sb]; });
+      if (pinned) return;
+      picked = { g: g, subs: subs };
+    });
+    if (!picked) return { skip: true };
+    var lower = function (a) { return a.map(function (h) { return String(h).toLowerCase(); }); };
+    var read = function () {
+      var slot = __vg.slotOf(picked.g);
+      var disc = [];
+      for (var k = 1; k < picked.subs.length && k < 4; k++) {
+        disc.push(String(__vg.subColorOf(picked.g, picked.subs[k])).toLowerCase());
+      }
+      return { slot: slot, ladder: lower(__vg.previewLadder(slot, suffix)), disc: disc };
+    };
+    var rest = read();
+
+    // github#77 -- the preview is memoised per slot, so a pick must invalidate it
+    var was = __vg.folderColors;
+    var other = rest.slot === "g7" ? "g1" : "g7";
+    var next = Object.assign({}, was); next[picked.g] = other;
+    __vg.setFolderColors(next);
+    var moved = read();
+    __vg.setFolderColors(was);
+    var back = read();
+
+    return { skip: false, group: picked.g, suffix: suffix, other: other,
+             rest: rest, moved: moved, back: back };
+  })()`);
+  if (r.skip) return { ok: true, detail: "no unpinned folder with two or more subfolders on this shape" };
+  const agrees = (s) => s.disc.length > 0 && s.disc.every((h, i) => h === s.ladder[i]);
+  const atRest = agrees(r.rest), afterPick = agrees(r.moved), restored = agrees(r.back);
+  const invalidated = r.moved.ladder[0] !== r.rest.ladder[0];
+  const cameBack = r.back.ladder.join() === r.rest.ladder.join() &&
+                   r.back.slot === r.rest.slot;
+  const n = r.rest.disc.length;
+  return { ok: atRest && afterPick && restored && invalidated && cameBack,
+           detail: `${r.group} on ${r.rest.slot}: preview ${r.rest.ladder.slice(0, n).join(",")} ` +
+                   `vs the disc's ${r.rest.disc.join(",")} (${atRest ? "same" : "DIFFERENT"}); ` +
+                   `pinned to ${r.other} the preview ${invalidated ? "followed" : "DID NOT FOLLOW"} ` +
+                   `and still ${afterPick ? "agrees" : "DISAGREES"}; ` +
+                   `restored ${cameBack && restored ? "exactly" : "WRONG"}` };
+});
+
+// github#77
+check("the picker's settings surface holds every slot without scrolling sideways", async (p) => {
+  const r = await p.j(`(function(){
+    var t = document.querySelector('[aria-controls="vg-settings"]');
+    var wasOpen = !document.getElementById("vg-settings").hidden;
+    if (!wasOpen && t) t.click();
+    var body = document.getElementById("vg-setbody");
+
+    var look = function () {
+      var rows = body.querySelectorAll(".scr");
+      var row = rows[0];
+      var sws = row ? row.querySelectorAll(".swatch") : [];
+      var br = body.getBoundingClientRect();
+      var worst = 0, offscreen = 0, previews = 0;
+      Array.prototype.forEach.call(sws, function (s) {
+        var q = s.getBoundingClientRect();
+        if (q.right > br.right + 0.5) { offscreen++; worst = Math.max(worst, q.right - br.right); }
+        if (s.querySelector("svg.prev")) previews++;
+      });
+      return { rows: rows.length, sws: sws.length, previews: previews,
+               offscreen: offscreen, worstPx: Math.round(worst * 10) / 10,
+               overflowX: body.scrollWidth - body.clientWidth,
+               clientW: body.clientWidth,
+               rowH: row ? Math.round(row.getBoundingClientRect().height) : 0 };
+    };
+
+    var atRest = look();
+
+    // a pick rebuilds the whole panel -- the state the overflow actually shipped in
+    var g = __vg.groupOrder().filter(function (x) { return x.charAt(0) !== "("; })[0];
+    var was = __vg.folderColors;
+    var next = Object.assign({}, was);
+    next[g] = __vg.slotOf(g) === "g7" ? "g1" : "g7";
+    __vg.setFolderColors(next);
+    var afterPick = look();
+    __vg.setFolderColors(was);
+
+    // and a theme flip with the panel open
+    var root = document.getElementById("vg-app");
+    var wasTheme = root.getAttribute("data-theme");
+    root.setAttribute("data-theme", wasTheme === "dark" ? "light" : "dark");
+    __vg.readTheme();
+    __vg.setFolderColors(was);
+    var afterTheme = look();
+    if (wasTheme) root.setAttribute("data-theme", wasTheme); else root.removeAttribute("data-theme");
+    __vg.readTheme();
+    __vg.setFolderColors(was);
+
+    if (!wasOpen && t) t.click();
+    return { atRest: atRest, afterPick: afterPick, afterTheme: afterTheme };
+  })()`);
+
+  const bad = [];
+  for (const [when, s] of [["at rest", r.atRest], ["after a pick", r.afterPick],
+                           ["after a theme flip", r.afterTheme]]) {
+    if (s.sws !== 12) bad.push(`${when}: ${s.sws} swatches, want 12`);
+    if (s.previews !== 12) bad.push(`${when}: ${s.previews} of 12 carry a preview`);
+    if (s.offscreen) bad.push(`${when}: ${s.offscreen} swatch(es) past the right edge by ${s.worstPx}px`);
+    if (s.overflowX > 0) bad.push(`${when}: ${s.overflowX}px of horizontal overflow`);
+  }
+  return { ok: bad.length === 0,
+           detail: bad.length ? bad.slice(0, 3).join("; ")
+             : `${r.atRest.rows} folder rows, 12 swatches each all previewed and inside a ` +
+               `${r.atRest.clientW}px box, 0 overflow at rest, after a pick and after a theme ` +
+               `flip; row ${r.atRest.rowH}px` };
+});
+
+check("the picker stays inside the mount", async (p) => {
+  const r = await p.j(`(function(){
+    var root = document.getElementById("vg-app");
+    var rows = document.querySelectorAll('.lg[data-g]');
+    var row = rows[rows.length - 1];
+    var rect = row.getBoundingClientRect();
+    row.dispatchEvent(new MouseEvent("contextmenu", {
+      bubbles: true, clientX: rect.left + 5, clientY: rect.bottom - 2 }));
+    var menu = document.querySelector('[id$="ctxmenu"]');
+    var m = menu.getBoundingClientRect(), rr = root.getBoundingClientRect();
+    var out = { w: Math.round(m.width), h: Math.round(m.height),
+                rootW: Math.round(rr.width), rootH: Math.round(rr.height),
+                inside: m.left >= rr.left - 0.5 && m.top >= rr.top - 0.5 &&
+                        m.right <= rr.right + 0.5 && m.bottom <= rr.bottom + 0.5,
+                sws: menu.querySelectorAll(".swatch").length };
+    menu.hidden = true;
+    return out;
+  })()`);
+  return { ok: r.inside && r.sws === 12,
+           detail: `menu ${r.w}x${r.h} in a ${r.rootW}x${r.rootH} mount, ${r.sws} swatches, ` +
+                   `${r.inside ? "inside" : "OUTSIDE the mount"}` };
+});
+
 check("focus web stays above dim notes", async (p) => {
   const r = await p.j(`__vg.checkFocusWeb()`);
   if (!r.geomGaps) return { ok: true, detail: `${r.node} (degree ${r.degree}): no in-disc samples on this shape, nothing to measure` };

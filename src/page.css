@@ -1,8 +1,25 @@
-  /* ---- tokens: light is the base, dark redefines only what changes -------- */
+  /* ---- tokens: every palette hex once, as a light/dark pair; the theme
+     blocks below only map --gN onto one of them. github#77, design/0004 */
+  .vault-graph {
+    --surface-1-l: #fcfcfb;
+    --surface-1-d: #1a1a19;
+    --g1-l: #2a78d6;  --g1-d: #3987e5;
+    --g2-l: #eb6834;  --g2-d: #d95926;
+    --g3-l: #1baf7a;  --g3-d: #199e70;
+    --g4-l: #eda100;  --g4-d: #c98500;
+    --g5-l: #008300;  --g5-d: #008300;
+    --g6-l: #d3006e;  --g6-d: #eb1580;
+    --g7-l: #4a3aa7;  --g7-d: #9085e9;
+    --g8-l: #e34948;  --g8-d: #e66767;
+    --g9-l: #00aecb;  --g9-d: #009fbb;
+    --g10-l:#9412ad;  --g10-d:#b429d1;
+    --g11-l:#6f6e67;  --g11-d:#8d8c84;
+    --g12-l:#45443f;  --g12-d:#bdbcb2;
+  }
   .vault-graph {
     color-scheme: light;
     --surface-0: #f4f3f0;
-    --surface-1: #fcfcfb;
+    --surface-1: var(--surface-1-l);
     --surface-2: #ffffff;
     --border:    #dedcd5;
     --border-strong: #c4c2b8;
@@ -14,18 +31,18 @@
     --edge-hi:   #2a78d6;
     --dim:       #e6e5df;
     --today:     #0b0b0b;
-    --g1: #2a78d6;
-    --g2: #eb6834;
-    --g3: #1baf7a;
-    --g4: #eda100;
-    --g5: #008300;
-    --g6: #d3006e;
-    --g7: #4a3aa7;
-    --g8: #e34948;
-    --g9: #00aecb;
-    --g10:#9412ad;
-    --g11:#6f6e67;
-    --g12:#45443f;
+    --g1: var(--g1-l);
+    --g2: var(--g2-l);
+    --g3: var(--g3-l);
+    --g4: var(--g4-l);
+    --g5: var(--g5-l);
+    --g6: var(--g6-l);
+    --g7: var(--g7-l);
+    --g8: var(--g8-l);
+    --g9: var(--g9-l);
+    --g10:var(--g10-l);
+    --g11:var(--g11-l);
+    --g12:var(--g12-l);
     --n1: #6f6e67;
     --n2: #45443f;
     --n3: #8a897f;
@@ -35,7 +52,7 @@
     .vault-graph:not([data-theme="light"]) {
       color-scheme: dark;
       --surface-0: #121211;
-      --surface-1: #1a1a19;
+      --surface-1: var(--surface-1-d);
       --surface-2: #232322;
       --border:    #33332f;
       --border-strong: #4a4a45;
@@ -46,10 +63,10 @@
       --edge-hi:   #3987e5;
       --dim:       #2a2a28;
       --today:     #ffffff;
-      --g1: #3987e5; --g2: #d95926; --g3: #199e70; --g4: #c98500;
-      --g5: #008300; --g6: #eb1580; --g7: #9085e9; --g8: #e66767;
-      --g9: #009fbb; --g10:#b429d1;
-      --g11:#8d8c84; --g12:#bdbcb2;
+      --g1: var(--g1-d); --g2: var(--g2-d); --g3: var(--g3-d); --g4: var(--g4-d);
+      --g5: var(--g5-d); --g6: var(--g6-d); --g7: var(--g7-d); --g8: var(--g8-d);
+      --g9: var(--g9-d); --g10:var(--g10-d);
+      --g11:var(--g11-d); --g12:var(--g12-d);
       --n1: #8d8c84; --n2: #bdbcb2; --n3: #77766d;
       --accent: #3987e5;
     }
@@ -57,7 +74,7 @@
   .vault-graph[data-theme="dark"] {
     color-scheme: dark;
     --surface-0: #121211;
-    --surface-1: #1a1a19;
+    --surface-1: var(--surface-1-d);
     --surface-2: #232322;
     --border:    #33332f;
     --border-strong: #4a4a45;
@@ -68,10 +85,10 @@
     --edge-hi:   #3987e5;
     --dim:       #2a2a28;
     --today:     #ffffff;
-    --g1: #3987e5; --g2: #d95926; --g3: #199e70; --g4: #c98500;
-    --g5: #008300; --g6: #eb1580; --g7: #9085e9; --g8: #e66767;
-    --g9: #009fbb; --g10:#b429d1;
-    --g11:#8d8c84; --g12:#bdbcb2;
+    --g1: var(--g1-d); --g2: var(--g2-d); --g3: var(--g3-d); --g4: var(--g4-d);
+    --g5: var(--g5-d); --g6: var(--g6-d); --g7: var(--g7-d); --g8: var(--g8-d);
+    --g9: var(--g9-d); --g10:var(--g10-d);
+    --g11:var(--g11-d); --g12:var(--g12-d);
     --n1: #8d8c84; --n2: #bdbcb2; --n3: #77766d;
     --accent: #3987e5;
   }
@@ -324,26 +341,49 @@
   .vault-graph .dimseg.setseg { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; margin: 0 0 9px; }
   .vault-graph .dimseg.setseg button { text-align: center; padding: 5px 8px; }
   .vault-graph #vg-setbody { max-height: 46vh; overflow-y: auto; }
+  /* github#77 -- auto-fill, never a fixed count: the panel is 288px wide minus its
+     padding and a scrollbar, and four fixed columns overflowed it, putting the
+     twelfth slot behind a horizontal scrollbar. */
   .vault-graph #vg-setbody .sws {
-    display: grid; grid-template-columns: repeat(12, 1fr); gap: 4px;
+    display: grid; grid-template-columns: repeat(auto-fill, 50px); gap: 4px;
+    justify-content: start;
   }
-  .vault-graph #vg-setbody .swatch { width: 100%; height: auto; aspect-ratio: 1; }
+  /* github#77 -- a swatch is the dots the slot will draw, on the ground it will
+     draw them on. The <svg> is 1 unit to 1 CSS pixel and must never be scaled,
+     or the radii stop being the ones the disc draws. Every colour in it comes
+     from a token, so a theme change repaints it with no rebuild. */
   .vault-graph .swatch {
-    width: 18px; height: 18px; padding: 0; cursor: pointer; border-radius: 50%;
-    border: 1px solid var(--border);
+    width: 50px; height: 42px; padding: 0; cursor: pointer; border-radius: 5px;
+    border: 1px solid var(--border); line-height: 0; flex: 0 0 auto;
   }
-  .vault-graph .swatch.vg-g1  { background: var(--g1); }
-  .vault-graph .swatch.vg-g2  { background: var(--g2); }
-  .vault-graph .swatch.vg-g3  { background: var(--g3); }
-  .vault-graph .swatch.vg-g4  { background: var(--g4); }
-  .vault-graph .swatch.vg-g5  { background: var(--g5); }
-  .vault-graph .swatch.vg-g6  { background: var(--g6); }
-  .vault-graph .swatch.vg-g7  { background: var(--g7); }
-  .vault-graph .swatch.vg-g8  { background: var(--g8); }
-  .vault-graph .swatch.vg-g9  { background: var(--g9); }
-  .vault-graph .swatch.vg-g10 { background: var(--g10); }
-  .vault-graph .swatch.vg-g11 { background: var(--g11); }
-  .vault-graph .swatch.vg-g12 { background: var(--g12); }
+  .vault-graph .swatch .prev {
+    width: 48px; height: 40px; display: block; border-radius: 4px;
+  }
+  .vault-graph .swatch .gnd { fill: var(--surface-1); }
+  .vault-graph .swatch .d  { fill: var(--dot); }
+  .vault-graph .swatch .t1 { fill: var(--k1); }
+  .vault-graph .swatch .t2 { fill: var(--k2); }
+  .vault-graph .swatch .t3 { fill: var(--k3); }
+  @media (prefers-color-scheme: dark) {
+    .vault-graph:not([data-theme="light"]) .swatch .t1 { fill: var(--k1d); }
+    .vault-graph:not([data-theme="light"]) .swatch .t2 { fill: var(--k2d); }
+    .vault-graph:not([data-theme="light"]) .swatch .t3 { fill: var(--k3d); }
+  }
+  .vault-graph[data-theme="dark"] .swatch .t1 { fill: var(--k1d); }
+  .vault-graph[data-theme="dark"] .swatch .t2 { fill: var(--k2d); }
+  .vault-graph[data-theme="dark"] .swatch .t3 { fill: var(--k3d); }
+  .vault-graph .swatch.vg-g1  { --dot: var(--g1); background: var(--g1); }
+  .vault-graph .swatch.vg-g2  { --dot: var(--g2); background: var(--g2); }
+  .vault-graph .swatch.vg-g3  { --dot: var(--g3); background: var(--g3); }
+  .vault-graph .swatch.vg-g4  { --dot: var(--g4); background: var(--g4); }
+  .vault-graph .swatch.vg-g5  { --dot: var(--g5); background: var(--g5); }
+  .vault-graph .swatch.vg-g6  { --dot: var(--g6); background: var(--g6); }
+  .vault-graph .swatch.vg-g7  { --dot: var(--g7); background: var(--g7); }
+  .vault-graph .swatch.vg-g8  { --dot: var(--g8); background: var(--g8); }
+  .vault-graph .swatch.vg-g9  { --dot: var(--g9); background: var(--g9); }
+  .vault-graph .swatch.vg-g10 { --dot: var(--g10); background: var(--g10); }
+  .vault-graph .swatch.vg-g11 { --dot: var(--g11); background: var(--g11); }
+  .vault-graph .swatch.vg-g12 { --dot: var(--g12); background: var(--g12); }
 
   .vault-graph.vg-tokens {
     display: block; height: auto; overflow: visible; position: static;
@@ -353,13 +393,20 @@
   .vault-graph.vg-tokens .vg-subrow {
     margin-left: 24px; padding-top: 6px; padding-bottom: 6px; border-top: none;
   }
-  .vault-graph.vg-tokens .sws { flex-wrap: wrap; justify-content: flex-end; }
-  .vault-graph .swatch:hover { transform: scale(1.15); }
+  /* github#77 -- the swatches get their own fixed grid, so the chevron on a
+     folder with subfolders cannot shift them out of line with its neighbours */
+  .vault-graph.vg-tokens .sws { flex-wrap: nowrap; justify-content: flex-end; }
+  .vault-graph.vg-tokens .sw-grid {
+    display: grid; grid-template-columns: repeat(4, 50px); gap: 4px;
+    justify-content: start; flex: none;
+  }
+  .vault-graph .swatch:hover { transform: scale(1.06); }
   .vault-graph .swatch[aria-checked="true"] {
-    box-shadow: 0 0 0 1px var(--surface-0), 0 0 0 2px var(--text-1);
+    outline: 2px solid var(--text-1); outline-offset: 2px;
+    border-color: var(--text-1);
   }
   .vault-graph .swatch[aria-checked="true"][data-auto="1"] {
-    box-shadow: 0 0 0 1px var(--surface-0), 0 0 0 2px var(--text-3);
+    outline-color: var(--text-3); border-color: var(--text-3);
   }
   .vault-graph .swatch[data-auto="1"]:not([aria-checked="true"]) {
     position: relative;
@@ -697,10 +744,11 @@
     background: var(--surface-2); border: 1px solid var(--border-strong);
     border-radius: 8px; padding: 8px; box-shadow: 0 8px 28px rgba(0,0,0,.22);
   }
+  /* github#77 */
   .vault-graph .ctxmenu .sws {
-    display: grid; grid-template-columns: repeat(6, 1fr); gap: 4px; margin-bottom: 6px;
+    display: grid; grid-template-columns: repeat(3, max-content); gap: 4px;
+    margin-bottom: 6px; justify-content: center;
   }
-  .vault-graph .ctxmenu .swatch { width: 100%; height: auto; aspect-ratio: 1; }
   .vault-graph .ctxmenu .auto { width: 100%; }
 
   /* github#34 */
