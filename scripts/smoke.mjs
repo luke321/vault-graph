@@ -3422,6 +3422,8 @@ check("colour unlinked by folder: the settings-panel toggle actually flips the l
     return { ok: false, detail: "gear opened but #vg-opt-unlinkedByFolder was not found -- the " +
       "rendered row id and the $() lookup setUnlinkedByFolder uses have drifted apart" };
   }
+  // github#112
+  await settle(p);
   const flipped = r.afterState !== r.beforeState && r.afterPressed !== r.beforePressed;
   return {
     ok: flipped,
