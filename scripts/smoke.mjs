@@ -1466,7 +1466,7 @@ async function stageBox(p) {
 }
 
 async function camReset(p) {
-  await p.eval(`__vg.renderer.getCamera().setState({x:0.5,y:0.5,ratio:1.04,angle:0}); void 0`);
+  await p.eval(`__vg.renderer.getCamera().setState({x:0.5,y:0.5,ratio:0.954,angle:0}); void 0`);
   await sleep(250);
 }
 
@@ -1531,8 +1531,8 @@ check("double-clicking the graph resets the view", async (p) => {
   const c = await camSettle(p);
   await camReset(p);
   return {
-    ok: Math.abs(c.x - 0.5) < 0.002 && Math.abs(c.y - 0.5) < 0.002 && Math.abs(c.ratio - 1.04) < 0.02,
-    detail: `from (0.28, 0.66) ratio 4.2 -> (${c.x}, ${c.y}) ratio ${c.ratio}; reset is (0.5, 0.5) 1.04`,
+    ok: Math.abs(c.x - 0.5) < 0.002 && Math.abs(c.y - 0.5) < 0.002 && Math.abs(c.ratio - 0.954) < 0.02,
+    detail: `from (0.28, 0.66) ratio 4.2 -> (${c.x}, ${c.y}) ratio ${c.ratio}; reset is (0.5, 0.5) 0.954`,
   };
 });
 
@@ -1958,6 +1958,7 @@ check("fit frames the disc that is actually there", async (p) => {
   await sleep(200);
   await p.eval(`document.querySelector("#vg-reset").click(); void 0`);
   const full = await camSettle(p);
+  const base = 0.954;
 
   const hid = await p.j(`(function(){
     var order = __vg.groupOrder();
@@ -1980,9 +1981,9 @@ check("fit frames the disc that is actually there", async (p) => {
   await p.eval(`__vg.state.hidden.folder = {}; __vg.syncAlpha(); __vg.applyLayout(false); void 0`);
   await sleep(200);
   await camReset(p);
-  const want = 1.04 * Math.max(0.12, Math.min(1.35, dens.reach));
+  const want = base * Math.max(0.12, Math.min(1.35, dens.reach));
   return {
-    ok: Math.abs(full.ratio - 1.04) < 0.02 && Math.abs(small.ratio - want) < 0.03 &&
+    ok: Math.abs(full.ratio - base) < 0.02 && Math.abs(small.ratio - want) < 0.03 &&
         Math.abs(small.x - 0.5) < 0.002 && Math.abs(small.y - 0.5) < 0.002,
     detail: `full vault ratio ${full.ratio}; with ${hid.hidden} of ${hid.hidden + hid.kept} ` +
             `groups hidden the disc reaches ${hid.extent} (${dens.reach} of the lock) and fit ` +
@@ -2053,7 +2054,7 @@ check("hiding the biggest group auto-fits the camera, but only once it has finis
   await clickEye(p, g);
   const { movedWhileBusy, finalRatio } = await watchDuringCascade(p, rest.ratio);
   const dens = await p.j(`__vg.densityReport()`);
-  const want = 1.04 * Math.max(0.12, Math.min(1.35, dens.reach));
+  const want = 0.954 * Math.max(0.12, Math.min(1.35, dens.reach));
   const shrinking = want < rest.ratio - 0.01;
 
   await p.eval(`__vg.state.hidden.folder = {}; __vg.syncAlpha(); __vg.applyLayout(false); void 0`);
@@ -2088,7 +2089,7 @@ check("showing a hidden group auto-fits the camera while it is still arriving", 
   await clickEye(p, g);
   const { movedWhileBusy, finalRatio } = await watchDuringCascade(p, rest.ratio);
   const dens = await p.j(`__vg.densityReport()`);
-  const want = 1.04 * Math.max(0.12, Math.min(1.35, dens.reach));
+  const want = 0.954 * Math.max(0.12, Math.min(1.35, dens.reach));
   const growing = want > rest.ratio + 0.01;
 
   await p.eval(`__vg.state.hidden.folder = {}; __vg.syncAlpha(); __vg.applyLayout(false); void 0`);

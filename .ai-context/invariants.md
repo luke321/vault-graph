@@ -365,6 +365,63 @@ defect the check exists for — a shrink fitting *instead of* deferring — move
 the first frames. The opposite-direction check is the control that it is still sensitive: a
 growth must report `moved while notes arrived: true`, and does, on all three fixtures.
 
+## The fit margin is a flat ratio (github#128)
+
+Filed as a pixel-floor problem — `FIT_RATIO`'s own excess over 1.0 is a fraction of the
+viewport, so the band `fit()` leaves shrinks in lockstep with the window, and a small or square
+one has no aspect-ratio slack to make up the difference the way a wide one does. A
+window-size-dependent floor was built against that framing (tried at 28px and 40px, both in this
+branch's history) before Lukas looked at the actual render at 1000x1000 and asked for something
+simpler and stronger: the disc should just fill more of the viewport, full stop, independent of
+window size. `FIT_RATIO` is cut, flat, with no floor:
+
+```javascript
+FIT_RATIO   // 0.954 -- was 1.04
+```
+
+`fitRatio()` is otherwise unchanged: `FIT_RATIO * clamp(live/locked, 0.12, 1.35)`. A flat cut
+applies identically at every window size, unlike a floor, which only ever touches the small end.
+
+**The naive model — margin scales with `FIT_RATIO`'s excess over 1.0 — does not hold, and cost a
+detour before the right number was found.** A `ratio: R` camera state does not mean "the disc
+plus `(R-1)` of empty space fills the frame": there is a large, roughly *constant* component to
+the rendered margin that barely moves as the ratio approaches 1.0, and only opens up once the
+ratio drops meaningfully below it. Measured on the demo fixture, real windowed Chrome, real node
+positions read through `graphToViewport` (not `getNodeDisplayData`'s `x`/`y`, which is already
+screen-space and double-transforms if fed back through `graphToViewport`), stage 696x675 at
+1000x1000:
+
+| `FIT_RATIO` | margin | | `FIT_RATIO` | margin |
+|---|---|---|---|---|
+| 1.04 (stock) | 52.9px | | 0.97 | 32.9px |
+| 1.02 | 47.4px | | 0.95 | 26.6px |
+| 1.01 | 44.6px | | 0.9 | 9.8px |
+| 1.001 | 42.1px | | 0.844 | **-11.5px (clips)** |
+
+At 1.001 — a ratio whose excess is essentially zero, which the naive model predicts should leave
+almost no margin — the margin is still 42.1px, most of it (≈35px) from node *positions* alone,
+not from the ~5-8px the outermost dot's own rendered size adds. The relationship only becomes
+close to linear once the ratio drops toward and below 1.0 (Δmargin ≈ 300px per unit of
+`FIT_RATIO` in that range), and it has a floor of its own: below **~0.876** on this fixture at
+this window, the disc's own extent exceeds the stage and the outermost dot is clipped by the
+canvas, measured directly at 0.844 (-11.5px). **0.954 was picked by iterating against this real
+relationship, live, at 1000x1000** — not computed from the ratio's excess: a first cut at 0.97
+(a 38% margin cut, 52.9px → 32.9px) still read as too close to stock to see; 0.954 (a further 15%
+off *that* margin, 32.9px → 27.9px, measured) is the one that landed. `0.844` — a "disc 15%
+bigger" reading of an earlier ask, by radius rather than margin — was built and measured too,
+and rejected for the clip.
+
+**Camera framing only, not layout**: `fitRatio()` reads no note position, so the golden snapshot
+is untouched at every ratio in the table above.
+
+The four smoke.mjs checks that assert what `fit()` lands on hold a plain literal, `0.954` in
+place of the old `1.04` — `"double-clicking the graph resets the view"`, `"fit frames the disc
+that is actually there"`, and the two auto-fit checks. `camReset()`, a `setState()` call that
+bypasses `fitRatio()` for test-isolation purposes only, is updated to the same `0.954` for
+consistency. The edge-stroke-width check's `at(1.04)` "rest" reference point is deliberately
+**not** touched — it is an arbitrary zoom-level sample next to `0.216`/`0.108`, unrelated to what
+`fitRatio()` promises.
+
 ## Every note is filed exactly once, in either dimension
 
 github#86, design/0015. The lattice gives every note one cell in one wedge. A folder
