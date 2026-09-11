@@ -100,9 +100,20 @@ name says what it does) there is no gap for any tag, and the disclosure disappea
 ## Where the switch lives
 
 The group list's own heading — `Groups (18)` becomes a **segmented control** reading
-**Folders | Tags**, the active side filled with the accent, the count beside it: `Folders (18)`
-/ `Tags (12)`. **The control belongs to the thing it changes**: not the view settings, not the
-top bar, not a hidden context-menu item.
+**Folders | Tags**, the active side filled with the accent. **The control belongs to the thing
+it changes**: not the view settings, not the top bar, not a hidden context-menu item.
+
+**The control owns a full-width row and the count sits inside each side** (2026-09-11). It
+first shared a row with the All and None chips, with a single count beside it for whichever
+side was pressed. Judged on the built page: "the All and None button are in the same place as
+the Folders and Tags buttons but taller, thematically they do not fit together" — two
+different kinds of control, one switching what the disc is cut by and the others changing what
+is shown within that cut, reading as one group of four chips. So the two sides split the panel
+width evenly on their own row, All and None drop to a second row at their natural width, and
+each side carries **its own dimension's** count: `Folders (4)` | `Tags (15)` on the tag
+fixture. That is strictly more than the old heading said, since the other dimension's size is
+now legible before switching to it — `inDim` already reads a dimension that is not on screen,
+so it costs one order computation per legend build and no second implementation.
 
 It was a dropdown first, drawn as the heading it replaced with a chevron and no border or fill
 — "semi-obvious" was the brief. Asked on 2026-09-10, "is the dropdown obvious enough?", the

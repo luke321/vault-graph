@@ -133,6 +133,11 @@
     background: var(--accent); border-color: var(--accent); color: #fff;
   }
   .vault-graph .dimseg button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  /* github#86 -- the grouping owns a full-width row; All and None sit under it, at their own width */
+  .vault-graph .dimseg.dimfull { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; margin: 0 0 6px; }
+  .vault-graph .dimseg.dimfull button { padding: 5px 8px; border-radius: 6px; text-align: center; }
+  .vault-graph .dimseg .dimct { font-variant-numeric: tabular-nums; opacity: 0.62; margin-left: 5px; font-weight: 500; }
+  .vault-graph .dimall { margin-bottom: 7px; }
 
   .vault-graph .seg { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; }
   .vault-graph .seg button {
