@@ -40,18 +40,17 @@ export function parseNote(text) {
   let version = "";
   let inComment = false;
   src.split(/\r?\n/).forEach((raw, i) => {
-    let line = raw.trim();
+    let line = raw;
     if (inComment) {
       const end = line.indexOf("-->");
       if (end < 0) return;
       inComment = false;
-      line = line.slice(end + 3).trim();
+      line = line.slice(end + 3);
     }
-    if (line.startsWith("<!--")) {
-      const end = line.indexOf("-->", 4);
-      if (end < 0) { inComment = true; return; }
-      line = line.slice(end + 3).trim();
-    }
+    line = line.replace(/<!--[\s\S]*?-->/g, " ");
+    const open = line.indexOf("<!--");
+    if (open >= 0) { inComment = true; line = line.slice(0, open); }
+    line = line.replace(/\s+/g, " ").trim();
     if (!line) return;
     const at = "line " + (i + 1) + ": ";
     if (!version) {
@@ -77,8 +76,9 @@ export function parseNote(text) {
   if (lines.length > NOTE_MAX_LINES) problems.push(lines.length + " bullets, at most " + NOTE_MAX_LINES);
   const bytes = new TextEncoder().encode(src).length;
   if (bytes > NOTE_MAX_BYTES) problems.push(bytes + " bytes, at most " + NOTE_MAX_BYTES);
-  if (/\bdata:/i.test(src)) problems.push("carries a data: URI -- the note is text, link out instead");
-  if (/<(img|video|svg|script|picture|source)\b/i.test(src)) problems.push("carries markup -- the note is text");
+  const body = lines.join("\n");
+  if (/\bdata:[\w.+-]+\/[\w.+-]+[;,]/i.test(body)) problems.push("carries a data: URI -- the note is text, link out instead");
+  if (/<[a-z!/]/i.test(body)) problems.push("carries markup -- the note is text");
   return { note: problems.length ? null : { version, lines }, problems };
 }
 

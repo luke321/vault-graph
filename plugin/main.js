@@ -749,8 +749,13 @@ class VaultGraphView extends ItemView {
   async dismissNote(strip) {
     strip.remove();
     this.plugin.pendingNote = null;
-    this.plugin.settings.lastSeenVersion = this.plugin.manifest.version;
-    await this.plugin.saveSettings();
+    // github#83 -- a second graph leaf carries its own copy
+    for (const leaf of this.app.workspace.getLeavesOfType(VIEW_TYPE)) {
+      if (leaf.view instanceof VaultGraphView) {
+        leaf.view.contentEl.querySelectorAll(".vg-whatsnew").forEach((el) => el.remove());
+      }
+    }
+    await this.plugin.recordVersion();
   }
 
   async render() {
@@ -1425,10 +1430,7 @@ class VaultGraphPlugin extends Plugin {
       note: parseNote(WHATS_NEW).note,
     });
     this.pendingNote = verdict.show;
-    if (verdict.record) {
-      this.settings.lastSeenVersion = this.manifest.version;
-      await this.saveSettings();
-    }
+    if (verdict.record) await this.recordVersion(saved);
     this.addSettingTab(new VaultGraphSettingTab(this.app, this));
 
     this.registerView(VIEW_TYPE, (leaf) => new VaultGraphView(leaf, this));
@@ -1488,6 +1490,16 @@ class VaultGraphPlugin extends Plugin {
 
   async saveSettings() {
     await this.saveData(this.settings);
+  }
+
+  // github#83, design/0016 -- the marker alone, never the defaults onto an empty file
+  /** @param {unknown} [saved] */
+  async recordVersion(saved) {
+    /** @type {unknown} */
+    const disk = saved === undefined ? await this.loadData() : saved;
+    const base = disk && typeof disk === "object" ? /** @type {Record<string, unknown>} */ (disk) : {};
+    this.settings.lastSeenVersion = this.manifest.version;
+    await this.saveData(Object.assign({}, base, { lastSeenVersion: this.manifest.version }));
   }
 
   openSettings() {

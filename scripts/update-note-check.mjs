@@ -189,7 +189,10 @@ async function closeGraph() {
 const stripShown = () => E("!!" + STRIP);
 const geometry = () => E("(function(){ var v = " + VIEW + "; var s = " + STRIP + "; var cv = v.contentEl.querySelector('#vg-canvas');" +
                          " var cam = v.handle.api.renderer.getCamera().getState();" +
+                         " var page = v.contentEl.querySelector('.vault-graph');" +
                          " return { strip: s ? +s.getBoundingClientRect().height.toFixed(2) : 0, canvas: cv ? +cv.getBoundingClientRect().height.toFixed(2) : 0, view: v.contentEl.clientHeight," +
+                         " placed: !!(s && page && s.parentElement === v.contentEl && s.nextElementSibling === page)," +
+                         " cssTop: page ? getComputedStyle(page).getPropertyValue('--vg-canvas-top').trim() : ''," +
                          " x: +cam.x.toFixed(3), y: +cam.y.toFixed(3), ratio: +cam.ratio.toFixed(4) }; })()");
 
 async function dismissModals() {
@@ -256,9 +259,10 @@ try {
   report(before.strip > 0 && Math.abs((after.canvas - before.canvas) - before.strip) <= 1,
          "the disc's canvas takes the strip's height back, within a pixel",
          "strip " + before.strip + " px, canvas " + before.canvas + " -> " + after.canvas + " px");
-  report(before.x === 0.5 && before.y === 0.5 && after.x === 0.5 && after.y === 0.5,
-         "the disc stays centred with and without the strip",
-         "camera (" + before.x + ", " + before.y + ", " + before.ratio + ") -> (" + after.x + ", " + after.y + ", " + after.ratio + ")");
+  report(before.placed, "the strip sits in the view above the page root, not inside it");
+  report(before.x === 0.5 && before.y === 0.5 && after.x === 0.5 && after.y === 0.5 && before.ratio === after.ratio && before.cssTop !== "" && before.cssTop === after.cssTop,
+         "the camera and --vg-canvas-top are the same with and without the strip",
+         "camera (" + before.x + ", " + before.y + ", " + before.ratio + ") -> (" + after.x + ", " + after.y + ", " + after.ratio + "), --vg-canvas-top " + before.cssTop + " -> " + after.cssTop);
   await shoot("02-dismissed");
   await closeGraph();
   await openGraph();

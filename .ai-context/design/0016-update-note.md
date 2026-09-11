@@ -41,9 +41,9 @@ history is in git. A changelog browser is out of scope by the issue.
 machine, so any picture would be a data URI inside `main.js`, downloaded by every user on every
 update, forever, for a note shown once — the smallest clip in `assets/features/` would add a third
 to the bundle. So: `NOTE_MAX_BYTES` 4096, `NOTE_MAX_LINES` 5, `NOTE_MAX_LINE_CHARS` 160, no `data:`
-URI, no markup. The links are built by the host from the version (`RELEASE_URL`, `GALLERY_URL` in
+URI, no tag (`<` followed by a letter, `!` or `/`). The links are built by the host from the version (`RELEASE_URL`, `GALLERY_URL` in
 `plugin/main.js`), so the file cannot point anywhere. Measured: the first note is 650 bytes, and the
-bundle grew from 472,726 to 477,276 bytes with the whole feature in it (+4,550, under 1%).
+bundle grew from 472,726 to 477,911 bytes with the whole feature in it (+5,185, 1.1%).
 
 ## When it shows
 
@@ -84,6 +84,10 @@ Two more that fell out of the grammar:
   `scripts/release.ps1` refuses to cut an `x.y.0` whose note is for another version, beside its
   CHANGELOG guard.
 - **Nothing is written when nothing changed.** An already-seen version does not touch `data.json`.
+- **Recording writes the marker, not the defaults.** `recordVersion()` merges `lastSeenVersion` onto
+  what `data.json` held and writes that — a vault that never changed a setting keeps following the
+  plugin's defaults as they move, instead of having every default of the day frozen onto disk on the
+  first load after this feature.
 
 ## Where it sits, and why the page does not know
 
@@ -103,7 +107,8 @@ and the camera stays centred, on real Obsidian.
 
 ## What checks it
 
-- `scripts/update-note-selftest.mjs` — the decision table above and the grammar, no Obsidian.
+- `scripts/update-note-selftest.mjs` — the decision table above and the grammar, no Obsidian; the
+  pre-push hook and `release.yml` run it.
 - `scripts/build-plugin.mjs` — refuses a note the plugin could not show, on every build.
 - `scripts/update-note-check.mjs` — real Obsidian over CDP: seeds `data.json` six ways, reloads the
   plugin with the manifest patched to each installed version, opens the view, reads the strip, the
@@ -114,4 +119,5 @@ and the camera stays centred, on real Obsidian.
 ## Release procedure
 
 A MINOR or MAJOR rewrites `plugin/whats-new.md` on the release branch beside the CHANGELOG entry
-(`releasing.md`, step 3). A PATCH leaves it. `release.ps1` enforces the first.
+(`releasing.md`, step 3). A PATCH leaves it. `release.ps1` enforces the first, and `release.yml`
+enforces it again at the tag, where a hand-pushed tag would otherwise slip past.
