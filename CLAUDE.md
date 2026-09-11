@@ -115,6 +115,24 @@ measuring it: serve the page, drive it, read the numbers.
   that branch, never merges into `develop`, and never runs `release.ps1`, no matter how clean the
   result. Integrating finished branches and shipping them is the orchestrator's job alone, so one
   place is answerable for what's actually on `develop` and what a release contains.
+- **The orchestrator dispatches a ticket; it never implements one.** Work that comes up here gets
+  its own Orca worktree with its own chatable Claude session running `/implement-ticket <n>` inside
+  it, spawned unasked — not this session, not an Agent-tool subagent (invisible from the phone, and
+  a plan gate that cannot be argued with is not a gate), and never a raw `git worktree add`, which
+  Orca reclaims out from under you because it did not create it.
+
+  ```bash
+  orca worktree create --repo id:<repoId> --name vault-graph-<issue>-<slug> --no-parent \
+    --agent claude --prompt "/implement-ticket <issue>" --json
+  ```
+
+  **`--no-parent` is not optional, and it is the half that gets forgotten.** Run from inside a
+  worktree — which the orchestrator always is — Orca infers the *caller* as the parent, so every
+  dispatched ticket ends up nested under the orchestrator's own tree instead of standing as its own
+  worktree in the project. Both halves were got wrong on 2026-09-11: this session implemented a
+  ticket itself, and the ones it did dispatch came out as child trees. Read `parentWorktreeId` from
+  `orca worktree list --json` to check, and repair one with
+  `orca worktree set --worktree <selector> --no-parent`.
 - **An orchestrator stops spawning new sessions once 6 Orca worktrees are already working.**
   Each active worktree can mean its own Claude process plus Chrome over CDP plus node/npm —
   fanning out further than that starved CPU and disk enough to force a hard restart on
