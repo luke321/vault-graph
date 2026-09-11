@@ -2973,6 +2973,11 @@ Measured 2026-09-10, one full run under the `suite` lock, 94/94 on all three fix
 | serial lane, 1 Chrome, 34 frame-sensitive checks per fixture | 446 s |
 | **total** | **587 s** |
 
+Re-measured 2026-09-11 with the tag-organised fixture in the suite (github#86): **107/107 on
+each of four fixtures, 428 checks, 790 s**, one of which regenerated the demo vault. A fourth
+fixture is a third more work for a 35% longer wall, because the fixtures run beside one another
+in the parallel lane and only the serial lane pays per fixture.
+
 The static gates ahead of the suite total 10.5 s (lint 6.3 s). The PR into `main` is not a
 suite run: its one required check took 4 s on #95. `release.ps1`'s `git push origin HEAD` —
 gone since github#94, since the ruleset refuses it — ran nothing after a website merge either:
