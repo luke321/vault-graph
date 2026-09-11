@@ -28,4 +28,4 @@ commit -- that's what `release.ps1`'s staleness check reads.
 | | |
 |---|---|
 | **Introduced in** | `1.8.0` — "The Hub" |
-| **Last re-recorded** | `2026-09-09` — 14 s at 1586x992, encoded at 960 px (0.55 MB) |
+| **Last re-recorded** | `2.5.0 — 2026-09-11` — 14 s at 1586x992, encoded at 960 px (0.49 MB) |
