@@ -193,6 +193,7 @@
  * @property {(dim: string) => { name: string, n: number, slot: string, autoSlot: string, pinned: boolean, shown: boolean, subs: { name: string, n: number, pin: string }[] }[]} groupsOf   github#86
  * @property {(group: string) => number} groupCount
  * @property {(group: string) => string} slotOf
+ * @property {(group: string) => string} colorOf   github#84: the hex the dots and the legend draw, after any theme flip
  * @property {(group: string) => string} autoSlotOf
  * @property {(map: SlotMap) => void} setFolderColors
  * @property {(map: SlotMap) => void} setSubfolderColors
@@ -429,6 +430,9 @@ function mountVaultGraph(root, data, deps) {
     THEME.slots.forEach(function (hex, i) { THEME.byKey["g" + (i + 1)] = hex; });
     clearPreviewCache();
     if (renderer) renderer.setSetting("labelColor", THEME.text);
+    // github#84, design/0004 -- everything derived from the palette follows it, in the same
+    // frame and with no colorWalk; before boot there is no plan to derive from
+    if (renderer) { buildColors(); attempt(buildLegend); }
   }
   readTheme();
 
@@ -9640,6 +9644,8 @@ function mountVaultGraph(root, data, deps) {
                     },
                     groupCount: /** @param {string} g */ function (g) { return counts[g] || 0; },
                     slotOf: /** @param {string} g */ function (g) { return groupSlot[g] || ""; },
+                    // github#84
+                    colorOf: colorOf,
                     autoSlotOf: /** @param {string} g */ function (g) { return groupAutoSlot[g] || ""; },
                     setFolderColors: applyFolderColors,
                     setSubfolderColors: /** @param {Record<string, unknown>} m */ function (m) { return applySubfolderColors(m, "folder"); },

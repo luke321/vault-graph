@@ -1457,26 +1457,33 @@ that way: **1 on demo, 1 on the 10k, 3 on the shape vault** (`(vault root)`, `ti
 `(unlinked)` — the shape vault is the only fixture carrying github#50's notes-stand-elsewhere
 case). A shape with none reports that it had nothing to bite on rather than passing.
 
-### A row's bar and its own swatch never disagree
+### A legend row follows the theme with the picker, and its bar with its swatch
 
-The bar's colour is an inline hex from `colorOf()`, the same as the swatch it sits under, so
-both keep the old palette after a live theme flip while the picker's `.swatch.vg-g7` — a class
-resolving `var(--g7)` — repaints. **That divergence is github#84 and predates this work**; it is
-reported by the check, not asserted, so a known defect stays visible instead of failing a gate.
+The legend swatch and the count bar are inline hexes from `colorOf()`; the picker's
+`.swatch.vg-g7` is a class resolving `var(--g7)`. A `var()` re-resolves on a theme flip and a
+hex does not, so the legend follows only because `readTheme()` — what the plugin's
+`syncTheme()` runs on `css-change` — rebuilds the group colours (`buildColors()`) and the legend
+(`buildLegend()`) after re-snapshotting the palette, once the page is booted. No tween: the host
+flipped in one frame and the disc follows in the same one (github#84, design/0004).
 
-What IS asserted is the row staying internally coherent: the bar and its swatch move together
-or not at all. Measured, dark to light on the demo fixture, slot `g7`:
+Asserted on every fixture, both on the standalone page (the handler's steps run by hand) and
+through a real Obsidian's `css-change`: after the flip the legend swatch, the bar and the
+picker all equal the moved token; the bar and its swatch agree; the flip back restores both.
+Measured, dark to light on the demo fixture, slot `g7`:
 
-| surface | dark | after |
-|---|---|---|
-| `--g7` token | `rgb(144, 133, 233)` | **`rgb(74, 58, 167)`** |
-| picker `.swatch.vg-g7` | `rgb(144, 133, 233)` | **`rgb(74, 58, 167)`** |
-| legend swatch | `rgb(144, 133, 233)` | `rgb(144, 133, 233)` |
-| count bar | `rgb(144, 133, 233)` | `rgb(144, 133, 233)` |
+| surface | dark | after, before github#84 | after, since github#84 |
+|---|---|---|---|
+| `--g7` token | `rgb(144, 133, 233)` | **`rgb(74, 58, 167)`** | **`rgb(74, 58, 167)`** |
+| picker `.swatch.vg-g7` | `rgb(144, 133, 233)` | **`rgb(74, 58, 167)`** | **`rgb(74, 58, 167)`** |
+| legend swatch | `rgb(144, 133, 233)` | `rgb(144, 133, 233)` | **`rgb(74, 58, 167)`** |
+| count bar | `rgb(144, 133, 233)` | `rgb(144, 133, 233)` | **`rgb(74, 58, 167)`** |
 
-Making the bar resolve `var(--gN)` live while the swatch stays cached fails it — measured, bar
-moves, swatch stale, `bar agrees with its swatch=false`. That is the shape a partial fix to
-github#84 would take, which is the point of asserting it now.
+The shape vault exercises slot `g4` on `projects` (`rgb(201, 133, 0)` → `rgb(237, 161, 0)`)
+and the tag vault slot `g3` on `notes` (`rgb(25, 158, 112)` → `rgb(27, 175, 122)`), so the
+check is not reading one palette entry. Two mutations fail it: taking the rebuild out of
+`readTheme()` — swatch and bar `STALE` on all four fixtures, the picker still following, which
+is github#84 exactly — and making the bar resolve `var(--gN)` live while the swatch stays
+cached — `bar agrees with its swatch=false`, the shape a partial fix would have taken.
 
 **The probe span must be appended inside `.vault-graph`.** `--gN` is scoped to that root, so a
 `var()` normalised from `document.body` returns `rgb(0, 0, 0)` and reads as a broken colour
