@@ -17,11 +17,12 @@ Call out what's newly done since the last table and what's still blocked or awai
 | 3 | `CHANGELOG.md` section for `<version>`, covering every merge since the last tag | |
 | 4 | Version bump: `manifest.json` → `<version>` | |
 | 5 | Release name — propose 2-4 candidates, his pick | |
-| 6 | Merge `release/<version>` → `develop` (local) | |
-| 7 | **One** `git push origin develop` (suite lock held, one suite run) | |
-| 8 | PR/merge `develop` → `main` | |
-| 9 | `release.ps1` on `main` — gates, tag, push | |
-| 10 | GitHub Actions publishes the release (attestation, assets) — automatic once tagged | |
+| 6 | **Re-record every clip the UI change touches** — if anything visual changed this release (a constant like `FIT_RATIO`, a storyboard reorder, a sizing fix), the hero *and every existing feature-gallery clip* are stale, not just the ones whose own beats moved. Needs the `record` lock; ask before recording. Before merge, not after — the merged tree is what the clips should show. | |
+| 7 | Merge `release/<version>` → `develop` (local) | |
+| 8 | **One** `git push origin develop` (suite lock held, one suite run) | |
+| 9 | PR/merge `develop` → `main` | |
+| 10 | `release.ps1` on `main` — gates, tag, push | |
+| 11 | GitHub Actions publishes the release (attestation, assets) — automatic once tagged | |
 ```
 
 Status values: ✅ done, ⏳ not started / in progress, ⏸️ blocked (name what it's blocked on).
