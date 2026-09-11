@@ -25,7 +25,8 @@ merge commits, because the suite "had just passed" — a true statement that not
 **A green full run of `smoke.mjs` stamps the git tree it measured, and the two local gates
 trust the stamp.** `scripts/suite-stamp.mjs` writes one JSON file per tree under
 `suite-passed/` in the shared git common dir: the tree, the commit it was taken from, the
-time, the check count, and the three fixtures (name, digest, generation day, pinned). The
+time, the check count, and every fixture in `FIXTURE_NAMES` (name, digest, generation day,
+pinned) — three when this was written, four since github#86. The
 hook looks up every commit being pushed to `develop` or `main`; `release.ps1` looks up
 `HEAD`. A hit skips the suite and prints what it trusts. A miss runs it, under the `suite`
 lock, and stamps.

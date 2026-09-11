@@ -51,6 +51,7 @@ changing the layout or the animation.
 | `0012-hop-trail` | Concept (github#40): a way back along the linked-notes walk — hops only, crumbs, Backspace and Alt+ArrowLeft; two routes to land the contributor’s patch |
 | `0013-touch-input` | Touch: one finger pans, two pinch, a tap selects and does the hover's job; the phone's two panels, and why picking needed a second floor (github#73) |
 | `0014-live-rebuild` | How the disc follows the vault while the view is open: the diff, one construction not two, and how each law survives an edit (github#72) |
+| `0015-grouping-dimensions` | Folders or tags: the filing that replaced three attribute reads, what a multi-tag note does, what the untagged bucket is, how a switch draws both discs, and the one-dot-per-tag experiment that came out as github#91 (github#86) |
 
 **ADR or DDR?** An ADR is a choice with alternatives that were weighed and one that won —
 it explains *why not the other thing*. A DDR describes how a part actually works and the

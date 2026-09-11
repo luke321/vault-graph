@@ -30,6 +30,10 @@ Four things are worth knowing before you touch anything, all expanded in `CLAUDE
   not load at all -- which reads as a broken plugin rather than as an unconfirmed dialog. Over
   CDP, `app.plugins.setEnable(true)` then `enablePluginAndSave(id)`; never judge the plugin before
   `getPlugin(id)` is truthy.
+- **Never serve Chrome unlabeled.** Any page you open in Chrome from this worktree —
+  `smoke.mjs`, `shoot.mjs`, a manual review build — carries its own top-left title as
+  `<worktree/feature> — <what it's showing>`, e.g. `tag-grouping — demo vault`. Patch
+  `window.VAULT_DATA`'s `vault` field in the built HTML, not the product.
 - **`git push`, merging into `develop`, and a full-suite run are each a separate ask, every
   time.** None of them is implied by permission to do the work, or by how the last one went. A
   dispatched ticket worktree stops at its own branch regardless — only the orchestrator pushes to

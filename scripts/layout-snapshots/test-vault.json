@@ -1,5 +1,6 @@
 {
  "vault": "test-vault",
+ "dim": "folder",
  "notes": 10002,
  "folders": 17,
  "band": {
