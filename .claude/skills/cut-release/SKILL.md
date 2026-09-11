@@ -236,8 +236,24 @@ no draft gate, and the workflow drops the raw `## <version>` CHANGELOG section s
 release body as its literal content. This review is the actual gate; `release.ps1`'s pre-flight
 suite is not a substitute for reading the page a stranger will land on.
 
-Structure (see `.ai-context/releasing.md`'s full section — 1.7.0 is the worked reference,
-`gh release view 1.7.0 --json body`):
+**Read the last published release before writing a word of this one.**
+
+```bash
+gh release view "$PREV_TAG" --json body -q .body
+```
+
+Not optional and not from memory: the voice lives in the artifact, not in this file. Match what
+you see there, and check the draft against it on two axes that go wrong every time:
+
+- **Plain, not technical.** Write what the thing does for someone using the plugin. A reader of
+  the notes does not want breakpoints, band outlines, function names, or what a value is measured
+  against — that is what `.ai-context/` is for. 2.6.0's first draft was written straight out of
+  the design records and came back as "to verbose and technical"; it shipped as "a small map
+  appears next to Fit, with a box marking the part you are looking at".
+- **Short.** 2.5.0's whole reel is under 300 words. Bullets carry the detail and each section is
+  bullets throughout — the only prose is the one bold opening line.
+
+Structure (see `.ai-context/releasing.md`'s full section):
 
 1. One bold line naming the release and what it's actually about, in the release's own voice.
 2. **No hero at the top** — `assets/demo.webp` is large and unspecific; use the feature clips.

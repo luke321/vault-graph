@@ -1,5 +1,15 @@
 # cut-release — change log
 
+## 2026-09-11 - read the last release before writing the next one
+
+Step 13 now opens with `gh release view "$PREV_TAG"` and two checks the draft has to pass: plain
+rather than technical, and short. It pointed at 1.7.0 as a reference before, which is a pointer
+nobody follows; the command is now the first thing in the step.
+
+2.6.0 was drafted from the design records and read like them -- 96px schematics, the 720px
+breakpoint, what the preview is measured against -- and came back "to verbose and technical".
+The same mistake had already been made once that day in preview-release, which got the same fix.
+
 ## 2026-09-11 - the table is the report
 
 New "Keep the chat short" section above the status table, and the table's own instruction to
