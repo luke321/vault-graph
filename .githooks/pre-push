@@ -352,7 +352,11 @@ fi
 # before. Nothing here trusts a commit hash, a branch name or a clock.
 stamped=1
 for sha in $gated_shas; do
-  if ! node "$root/scripts/suite-stamp.mjs" check "$sha" </dev/null; then stamped=""; fi
+  # github#103: exit 0 alone is not a stamp -- a CLI whose body never ran also exits 0 -- so
+  # the pass line itself is required.
+  out=$(node "$root/scripts/suite-stamp.mjs" check "$sha" </dev/null) || stamped=""
+  printf '%s\n' "$out"
+  case "$out" in *"passed the invariant suite"*) ;; *) stamped="" ;; esac
 done
 if [ -n "$stamped" ]; then
   echo "pre-push: every tree being pushed already passed the invariant suite -- skipping it"
