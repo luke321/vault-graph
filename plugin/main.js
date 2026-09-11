@@ -308,8 +308,9 @@ async function readFolders(app) {
 /**
  * @param {App} app
  * @param {Settings} opts   only the four build settings are read
+ * @param {string} [version]   github#108 -- this.plugin.manifest.version, shown in the stats line
  */
-async function buildData(app, opts) {
+async function buildData(app, opts, version) {
   const t0 = performance.now();
   const folders = await readFolders(app);
   const templateDirs = folders.templateDirs, dailyDir = folders.dailyDir;
@@ -465,6 +466,7 @@ async function buildData(app, opts) {
 
   return {
     vault: app.vault.getName(),
+    version: version,
     generated: now.getFullYear() + "-" + p2(now.getMonth() + 1) + "-" + p2(now.getDate()) +
                " " + p2(now.getHours()) + ":" + p2(now.getMinutes()),
     nodes: out,
@@ -651,7 +653,7 @@ class VaultGraphView extends ItemView {
     const renames = this.pendingRenames;
     this.pendingRenames = pathMap();
     try {
-      const next = await buildData(this.app, this.plugin.settings);
+      const next = await buildData(this.app, this.plugin.settings, this.plugin.manifest.version);
       if (this.handle !== handle || handle.api !== api) return;   // github#62
 
       // github#58, design/0014
@@ -721,7 +723,7 @@ class VaultGraphView extends ItemView {
     const root = this.contentEl;
     root.addClass("vault-graph-view");
 
-    const data = await buildData(this.app, this.plugin.settings);
+    const data = await buildData(this.app, this.plugin.settings, this.plugin.manifest.version);
     this.lastData = data;
 
     const parsed = new DOMParser().parseFromString(PAGE_HTML, "text/html");

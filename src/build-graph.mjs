@@ -364,8 +364,12 @@ const nodes = notes.map((n, i) => {
   return { ...rest, deg: degree[i] };
 });
 
+// github#108
+const VERSION = JSON.parse(readFileSync(join(ROOT, "manifest.json"), "utf8")).version;
+
 const data = {
   vault: basename(VAULT),
+  version: VERSION,
   generated: (() => {
     const d = new Date(), p2 = (n) => String(n).padStart(2, "0");
     return `${d.getFullYear()}-${p2(d.getMonth() + 1)}-${p2(d.getDate())} ` +

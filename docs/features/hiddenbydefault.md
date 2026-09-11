@@ -35,4 +35,4 @@ same commit.
 | | |
 |---|---|
 | **Introduced in** | `1.9.0` — "Belonging" (github#34; the setting itself predates it, the legend row does not) |
-| **Last re-recorded** | `2026-09-09` — 14.5 s at 1586x992, encoded at 960 px (1.66 MB) |
+| **Last re-recorded** | `2.5.0 — 2026-09-11` — 15.5 s at 1586x992, encoded at 960 px (1.69 MB) |

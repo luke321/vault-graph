@@ -1,5 +1,41 @@
 # Releasing
 
+**Show the status table after every step.** Whoever is driving a release — orchestrator or
+otherwise — keeps a table of every step the release still needs (the polish asks, the docs and
+clips it must carry, the version bump, the name, the merge-down sequence, the tag) and re-posts
+it, updated, after each step lands. Set 2026-09-11, cutting 2.5.0: Lukas asked for this after
+seeing one mid-release, and it stays standing practice, not a one-off. Columns: step, status.
+Call out what's newly done since the last table and what's still blocked or awaiting a decision
+(a release name, whether an in-flight ticket gates this release or becomes a follow-up). Template
+(drop rows that don't apply to a given release, add rows for its own polish asks):
+
+```markdown
+| # | Step | Status |
+|---|---|---|
+| 1 | <this release's own polish/fix asks, one row each> | |
+| 2 | Any new-feature doc page(s) + clip(s) under `docs/features/` | |
+| 3 | `CHANGELOG.md` section for `<version>`, covering every merge since the last tag | |
+| 4 | Version bump: `manifest.json` → `<version>` | |
+| 5 | Release name — propose 2-4 candidates, his pick | |
+| 6 | **Re-record every clip the UI change touches** — if anything visual changed this release (a constant like `FIT_RATIO`, a storyboard reorder, a sizing fix), the hero *and every existing feature-gallery clip* are stale, not just the ones whose own beats moved. Needs the `record` lock; ask before recording. Before merge, not after — the merged tree is what the clips should show. | |
+| 7 | Merge `release/<version>` → `develop` (local) | |
+| 8 | **One** `git push origin develop` (suite lock held, one suite run) | |
+| 9 | PR/merge `develop` → `main` | |
+| 10 | **Review the release body before the tag goes out** — `release.yml` publishes live the moment the tag lands, using the `## <version>` CHANGELOG section verbatim as the body and no `--draft` gate; read it as the page a stranger lands on, not as a changelog entry. This is the actual review step, not `release.ps1`'s pre-flight suite. | |
+| 11 | `release.ps1` on `main` — gates, tag, push | |
+| 12 | GitHub Actions publishes the release (attestation, assets) — automatic once tagged | |
+```
+
+Status values: ✅ done, ⏳ not started / in progress, ⏸️ blocked (name what it's blocked on).
+
+**Why step 10 exists as its own line, added 2026-09-11.** `release.yml`'s own step summary tells
+a human to edit the published body afterward ("the release body is the raw CHANGELOG section, a
+first draft... edit it in place") — which is exactly the *after-the-tag* editing `CLAUDE.md`'s laws
+forbid ("once the tag exists nothing changes"). The workflow creates no GitHub draft to review;
+the CHANGELOG section going out is the actual publish. So the review has to happen before the tag,
+on `release/<version>`, not after — read the `## <version>` section once as the page it's about to
+become, not as a changelog entry, before `release.ps1` runs.
+
 **Every release gets a git tag and a GitHub Release with the plugin's three files attached —
 `main.js`, `manifest.json`, `styles.css` — each carrying a build provenance attestation.** The
 tag alone is not a release: Obsidian installs from those three assets and nothing else. Until

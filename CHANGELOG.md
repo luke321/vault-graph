@@ -30,6 +30,45 @@ published tag breaks every link to it.
 
 ---
 
+## 2.5.0 — "Tags" — 2026-09-11
+
+**A second way to cut the disc: by tag instead of by folder.** The group list's heading is now
+a segmented control, **Folders** or **Tags** — switch and the whole disc redraws, one hand
+erasing the old wedges while the other brings in the new ones, with the links, the heat strip
+and the group list following the notes. A note's first listed tag files it; a nested tag such
+as `area/health` nests as a sub-wedge of *area*, opened and pushed out exactly the way a
+subfolder is — the same grouping-dimension mechanism underneath, just fed tags instead of
+folder paths. Untagged notes land in their own `(untagged)` bucket, grey like `(unlinked)`.
+
+<img src="https://raw.githubusercontent.com/luke321/vault-graph/2.5.0/assets/features/tags.webp" width="100%" alt="The disc cut by tag instead of by folder, a nested tag's twisty opened to reach its sub-tag, clicked to halo and push the sub-wedge out then let back down, folded away again, and the disc switched back to folders">
+
+### Grouping by tag
+
+- **Folders or Tags**, a segmented control above the legend. The disc keeps its hub and its
+  rings across the switch; nothing about walking a nested tag needed its own code.
+- Where a tag's wedge holds fewer notes than carry the tag, its row says so.
+- The grouping control takes the full panel's width now, split evenly between the two sides,
+  each carrying its own count — instead of one shared count sitting above four buttons that
+  used to read as one group.
+
+### Fixes
+
+- **A frontmatter value containing a literal `</script>` could close the standalone export's own
+  data script and run whatever followed it.** The exported data is escaped now, so this can't
+  happen.
+- **A folder literally named `constructor` or `toString` could crash the plugin**, via an
+  inherited property the planner mistook for its own. Fixed everywhere the layout keys a map by
+  folder or tag name.
+
+### Also in this release
+
+- The stats line now names the version that built the page, so a rebuilt-but-not-reloaded
+  install in Obsidian doesn't read as a stuck bug.
+- The disc-to-window margin is half what it was.
+- The docs site has its own dark theme instead of GitHub Pages' generic default.
+
+---
+
 ## 2.4.1 — 2026-09-10
 
 **The README's "Try it live" and feature-list links now go somewhere.** 2.4.0 shipped the docs

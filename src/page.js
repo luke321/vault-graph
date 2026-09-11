@@ -56,6 +56,7 @@
  * @property {VaultEdge[]} edges
  * @property {VaultStats} stats
  * @property {boolean} [dev]         a --dev build of the standalone; nothing else sets it
+ * @property {string} [version]      github#108 -- the plugin/exporter version that built this, shown in the stats line
  */
 
 // github#72, design/0014
@@ -6962,7 +6963,7 @@ function mountVaultGraph(root, data, deps) {
     }
   }
 
-  var FIT_RATIO = 1.08;
+  var FIT_RATIO = 1.04;
 
   // github#14
   var camAtRest = true, fitting = false;
@@ -7426,7 +7427,8 @@ function mountVaultGraph(root, data, deps) {
       "<b>" + s.unresolved + "</b> link(s) point at notes that do not exist" +
       (s.ghostsIncluded ? " (shown as ghosts)" : " (hidden)") + "<br>" +
       (s.templatesExcluded ? "Templates excluded. " : "") +
-      "Generated " + esc(DATA.generated));
+      "Generated " + esc(DATA.generated) +
+      (DATA.version ? " &middot; v" + esc(DATA.version) : ""));
   }
 
   /** @param {unknown} s */
@@ -8847,11 +8849,36 @@ function mountVaultGraph(root, data, deps) {
       // github#86 -- nav bar following the notes
       { click: true, target: ["dim", "tag"], act: "tags", why: "cut the disc by tag instead of by folder" },
       { settle: true, act: "tags", why: "one hand takes the folders, the other brings the tags" },
+      { click: true, target: ["twisty", "area"], act: "tags", why: "a nested tag unfolds the same way a nested folder does" },
+      { click: true, target: ["sub", "area/health"], act: "tags", why: "click the sub-tag: haloed and pushed out, same as a subfolder" },
+      { settle: true, act: "tags", why: "let the sub-wedge push out" },
+      { click: true, target: ["sub", "area/health"], act: "tags", why: "...and let it back down" },
+      { settle: true, act: "tags", why: "let it settle back" },
+      { click: true, target: ["twisty", "area"], act: "tags", why: "fold it away again" },
       { click: true, target: ["dim", "folder"], act: "tags", why: "and back to folders" },
       { settle: true, act: "tags", why: "the same swap the other way round" },
 
       { hover: true, target: ["note", "04"], act: "note", why: "hover a daily note" },
       { hover: true, target: ["note", "05"], act: "note", why: "hover a meeting note" },
+
+      { click: true, target: ["id", "band"], act: "collapsepreview", why: "fold the calendar band away -- a preview of the toggle, restored before the acts ahead that need the legend" },
+      { settle: true, act: "collapsepreview", why: "let the disc take the band's height" },
+      { click: true, target: ["id", "sheet"], act: "collapsepreview", why: "...and the folder list too" },
+      { settle: true, act: "collapsepreview", why: "let the disc take the whole window" },
+      { click: true, target: ["id", "sheet"], act: "collapsepreview", why: "bring the folder list back -- the acts ahead need it" },
+      { settle: true, act: "collapsepreview", why: "let it return" },
+      { click: true, target: ["id", "band"], act: "collapsepreview", why: "...and the calendar band" },
+      { settle: true, act: "collapsepreview", why: "back to the starting layout" },
+
+      { drag: true, target: ["biginner"], act: "pin", to: ["stage", "centre"],
+        why: "drag a note into the hole to pin it" },
+      { settle: true, act: "pin", why: "the hub opens and the ring closes around where it was" },
+      { rightclick: true, target: ["note", "05"], act: "pin", why: "right-click a note -- pins the same way" },
+      { settle: true, act: "pin", why: "let the second pin land" },
+      { click: true, target: ["note", "03"], act: "pin", why: "click a note to open its card" },
+      { click: true, target: ["pin"], act: "pin", why: "...and pin it from the card itself" },
+      { settle: true, act: "pin", why: "let the third pin land" },
+      { click: true, target: ["detailclose"], act: "pin", why: "close the card" },
 
       // github#40, design/0012
       { click: true, target: ["note", "05"], act: "hoptrail", why: "open a well-linked note's card" },
@@ -8868,8 +8895,6 @@ function mountVaultGraph(root, data, deps) {
       { settle: true, act: "hoptrail", why: "let it land" },
       { click: true, target: ["crumbback"], act: "hoptrail", why: "the back arrow steps back one hop" },
       { settle: true, act: "hoptrail", why: "let the camera fly back" },
-      { click: true, target: ["crumbback"], act: "hoptrail", why: "...and one more" },
-      { settle: true, act: "hoptrail", why: "let it land" },
       { click: true, target: ["crumb", "0"], act: "hoptrail",
         why: "or click a crumb to jump straight back to it -- the trail truncates there" },
       { settle: true, act: "hoptrail", why: "let the walk unwind" },
@@ -8878,16 +8903,6 @@ function mountVaultGraph(root, data, deps) {
       { click: true, target: ["id", "reset"], act: "hoptrail",
         why: "fit the disc again -- a walk moves the camera, and the acts after it aim at notes" },
       { settle: true, act: "hoptrail", why: "let the camera come home" },
-
-      { drag: true, target: ["biginner"], act: "pin", to: ["stage", "centre"],
-        why: "drag a note into the hole to pin it" },
-      { settle: true, act: "pin", why: "the hub opens and the ring closes around where it was" },
-      { rightclick: true, target: ["note", "05"], act: "pin", why: "right-click a note -- pins the same way" },
-      { settle: true, act: "pin", why: "let the second pin land" },
-      { click: true, target: ["note", "03"], act: "pin", why: "click a note to open its card" },
-      { click: true, target: ["pin"], act: "pin", why: "...and pin it from the card itself" },
-      { settle: true, act: "pin", why: "let the third pin land" },
-      { click: true, target: ["detailclose"], act: "pin", why: "close the card" },
 
       // github#23
       { click: true, target: ["id", "compact"], act: "compactaxis", why: "turn off the compact axis -- back to one width per month" },
