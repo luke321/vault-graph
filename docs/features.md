@@ -122,7 +122,10 @@ note sits in one wedge — **the first tag it lists** files it, in the order its
 gives, so a note tagged `[meeting, project]` is in the *meeting* wedge, and a nested tag such as
 `area/health` nests as a sub-wedge of *area* the way a subfolder does. A note with no tag goes
 to *(untagged)*, shown in grey. Where a tag's wedge holds fewer notes than carry the tag, its
-row says so: *74 filed here, 82 carry this tag*.
+row says so: *74 filed here, 82 carry this tag*. Nesting works the same way it does for
+folders — open a nested tag's twisty to reach its sub-tag, click to halo and push it out.
+
+<img src="https://raw.githubusercontent.com/luke321/vault-graph/main/assets/features/tags.webp" width="100%" alt="The disc cut by tag instead of by folder, a nested tag's twisty opened to reach its sub-tag, clicked to halo and push the sub-wedge out then let back down, folded away again, and the disc switched back to folders">
 
 Switching draws both discs at once: one hand erases the folder disc where it stands, the
 other lights the tag disc at its seats, with the links, the heat strip and the group list
