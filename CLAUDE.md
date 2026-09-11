@@ -23,7 +23,8 @@ measuring it: serve the page, drive it, read the numbers.
 ## How to work here
 
 - `node scripts/smoke.mjs --only "<substring>"` is the iteration loop. The full suite runs on
-  the push to `develop` (the pre-push hook); do not run it by hand unless asked.
+  the push to `develop` whose tree it has not measured yet (the pre-push hook; see
+  `scripts/suite-stamp.mjs`); do not run it by hand unless asked.
 - **Two things may not run twice at once, and `scripts/lock.mjs` is how you know.** Several
   agents work this repo in parallel worktrees, and two of them collide invisibly: a **screen
   recording** (`record-demo.ps1`, `make-hero.ps1`) grabs a display region, so a second take

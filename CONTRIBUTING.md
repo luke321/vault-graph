@@ -156,10 +156,13 @@ clone that has not run `npm ci` — run it, then push.
 
 **A tree is gated once.** A green full run of `smoke.mjs` stamps the git *tree* it measured
 and the fixtures it ran against (`scripts/suite-stamp.mjs`, in the shared git common dir).
-The hook and `release.ps1` skip the suite when every commit being pushed carries such a
-stamp, and say which run they trust. A merge that changed the tree, or a fixture regenerated
-since, runs it as before. `node scripts/suite-stamp.mjs check [<rev>]` says what a push would
-do; `release.ps1 -ForceSuite` runs it anyway. `.ai-context/decisions/0013` has the reasoning.
+The hook and `release.ps1` skip the suite when the tip of every ref being pushed carries
+such a stamp — those tips only, never every commit in the range — and say which run they
+trust. A merge that changed the tree, or a fixture regenerated since, runs it as before.
+A push that only *deletes* one of those refs carries no tree, so there is nothing to look
+up: the hook says so and exits. `node scripts/suite-stamp.mjs check [<rev>]` says what a
+push would do; `release.ps1 -ForceSuite` runs it anyway. `.ai-context/decisions/0013` has
+the reasoning.
 
 ## Branches, and how work reaches main
 

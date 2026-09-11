@@ -341,9 +341,9 @@ function hostileVaults() {
 check("a folder named after an Object.prototype member still lays out", async (p, ctx) => {
   const home = await p.eval("location.href");
   const READY = "!!(window.__vg && __vg.heat && __vg.state.until === null)";
-  const goto = async (url) => {
+  const goto = async (url, budget) => {
     await p.send("Page.navigate", { url });
-    for (const until = Date.now() + 15000; ;) {
+    for (const until = Date.now() + budget; ;) {
       const ok = await p.eval(`location.href === ${JSON.stringify(url)} && ${READY}`).catch(() => false);
       if (ok) return true;
       if (Date.now() > until) return false;
@@ -354,11 +354,12 @@ check("a folder named after an Object.prototype member still lays out", async (p
   const pages = await hostileVaults();
   const mark = ctx.errors.length;
   const rows = [];
-  let bad = 0, back = false;
+  let bad = 0, back = false, backMs = 0;
   try {
     for (const v of pages) {
       const before = ctx.errors.length;
-      const ready = await goto(v.url);
+      // github#105 -- a payload vault is 1-5 notes; it mounts in well under this
+      const ready = await goto(v.url, 15000);
       if (ready && v.folders.indexOf("__proto__") >= 0) {
         await p.eval(`(function(){ var m = Object.create(null); m["__proto__"] = true;
                                    __vg.setFolderShown(m); __vg.applyHiddenDefaults(); })(); void 0`);
@@ -390,12 +391,19 @@ check("a folder named after an Object.prototype member still lays out", async (p
     }
   } finally {
     ctx.errors.splice(mark);
-    back = await goto(home);
+    // github#105 -- home is ?rest: a full re-mount, the size of the fixture
+    // github#105 -- so it gets runOne's own first-load budget, not the payloads'
+    const t0 = Date.now();
+    back = await goto(home, 30000);
+    backMs = Date.now() - t0;
     // github#113
     if (back) await settle(p, 20000);
   }
-  if (!back) throw new Error("could not return to the fixture page at " + home);
-  return { ok: bad === 0, detail: `${pages.length - bad}/${pages.length} pages: ` + rows.join("; ") };
+  const backSec = (backMs / 1000).toFixed(1);
+  if (!back) throw new Error(`could not return to the fixture page at ${home} -- gave up after ${backSec}s`);
+  return { ok: bad === 0,
+           detail: `${pages.length - bad}/${pages.length} pages: ` + rows.join("; ") +
+                   `; back in ${backSec}s` };
 }, { clock: "real" });
 
 check("the resting disc is on the lattice", async (p) => {

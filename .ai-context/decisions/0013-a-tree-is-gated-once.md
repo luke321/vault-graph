@@ -27,9 +27,11 @@ trust the stamp.** `scripts/suite-stamp.mjs` writes one JSON file per tree under
 `suite-passed/` in the shared git common dir: the tree, the commit it was taken from, the
 time, the check count, and every fixture in `FIXTURE_NAMES` (name, digest, generation day,
 pinned) — three when this was written, four since github#86. The
-hook looks up every commit being pushed to `develop` or `main`; `release.ps1` looks up
-`HEAD`. A hit skips the suite and prints what it trusts. A miss runs it, under the `suite`
-lock, and stamps.
+hook looks up the tip of every ref being pushed to `develop` or `main` — those tips only,
+never every commit in the range (github#105); `release.ps1` looks up `HEAD`. A hit skips
+the suite and prints what it trusts. A miss runs it, under the `suite` lock, and stamps. A
+push that only *deletes* one of those refs carries no tree at all, so there is nothing to
+look up and nothing to claim: the hook says so and exits (github#105).
 
 A stamp is written only by a **full** default run — no `--only`, `--vault`, `--url` or
 `--fast` — of a tree with **no modified tracked files**, so it never names a measurement no
