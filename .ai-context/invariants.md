@@ -1434,6 +1434,11 @@ block, not a live one today.
 | `nav counts share one right edge` | 1 folded, 1 open | **1 folded, 1 open** |
 | golden snapshot, all three fixtures | — | **band and positions unchanged** |
 
+(github#116 later reserved the sidebar's scrollbar gutter, which takes 15 px off every one of
+these widths at the same window -- row 204, `.nm` 107 / 102 / 126 -- and the demo names
+truncating went from 1 to 5 of 18. That is a chosen cost, recorded in its own section below.
+What this table asserts is that the count bar moved none of them, and that still holds.)
+
 ### The check was proved to have teeth, one regression at a time
 
 A check that cannot fail is worse than none. Each of these was applied to a green tree, run,
@@ -3187,3 +3192,47 @@ node scripts/mobile-check.mjs --device sidebar  # the 320px case
 preview can ask the same question of the other theme's palette. Verified as a no-op the only way
 that means anything: every one of **1403 nodes on the demo fixture draws the same colour as
 `develop`, in both themes**, compared by hash.
+
+## The sidebar's scrollbar gutter is reserved, so a dimension switch moves nothing
+
+The legend never scrolls on its own: `#vg-sidebar` is the scroll container, and a
+Folders/Tags switch that tipped it past the viewport height -- or back under it -- brought a
+scrollbar that took its width out of every block in the sidebar. Measured on the tag fixture
+(4 folders, 15 tags) at an 800 px viewport, before: sidebar content **287 -> 272 px**, the gear
+**250 -> 235**, the Tags side of the segment **145.5 -> 138**, and the search box, the segment
+and the legend each 15 px narrower. The demo and 10k fixtures never show it -- both sides
+scroll, or both fit, at every height from 400 to 1000 px -- so a clean read there means
+nothing, and the check runs on every fixture and *reports* when it found no case rather than
+passing silently. github#116.
+
+`scrollbar-gutter: stable` on `#vg-sidebar` reserves the space whether or not a scrollbar is
+drawn. The property alone, no padding fallback: Chromium 94+ (Chrome, and Obsidian's Electron),
+Firefox 97+ and Safari 18.2+ all honour it, and a fallback would double-reserve wherever it is.
+Overlay scrollbars reserve nothing, which is right -- they take no space to begin with.
+
+**What it costs, and that it was chosen.** The non-scrolling state moved to match the scrolling
+one, so at the suite's 1600x1000 window on Windows the sidebar content is 272 px where it was
+287. Widening the column to 303 px would have kept 260 px of content in both states at the price
+of 15 px of stage and a measured constant; `both-edges` would have cost 30. The gutter was taken
+in place (D-1):
+
+| | before | after |
+|---|---|---|
+| sidebar content width, not scrolling / scrolling | 287 / 272 px | **272 / 272 px** |
+| `.lg` row width | 219 px | **204 px** |
+| `.nm` width (3-digit / 4-digit / no-`only` row) | 122 / 117 / 141 px | **107 / 102 / 126 px** |
+| `.lgr` height | 28.84 px | **28.84 px** |
+| names truncating (demo / 10k / shape) | 1 of 18 / 0 of 14 / 0 of 7 | **5 of 18 / 0 of 14 / 0 of 7** |
+| tag fixture, 800 px tall, folder -> tag: gear left edge | 250 -> 235 | **235 -> 235** |
+| shape fixture, 500 px tall, folder -> tag: gear left edge | 235 -> 250 | **235 -> 235** |
+
+The four extra truncated names on the demo mirror are the visible price of that decision.
+
+```bash
+node scripts/smoke.mjs --only "sidebar chrome stays put"   # bites on the shape and tag fixtures
+```
+
+The check shrinks the viewport through 1000, 800, 650, 500 and 400 px until exactly one
+dimension scrolls, switches, and asserts the gear, search box, segment, its Tags side, All, the
+legend and Refresh are at the same left and right edges. With the property commented out it
+fails on both fixtures that produce the case, naming every box that moved and by how much.
