@@ -48,6 +48,7 @@ function bareMap() {
 
 /** @typedef {import("obsidian").App} App */
 /** @typedef {import("obsidian").TFile} TFile */
+/** @typedef {import("obsidian").EventRef} EventRef */
 
 /**
  * What data.json holds. Mirrors DEFAULTS below, which is the one place a default is
@@ -1097,6 +1098,9 @@ class VaultGraphSettingTab extends PluginSettingTab {
     this.subOpen = bareMap();
     /** @type {HTMLElement | null} */
     this.scope = null;
+    // github#77 -- see renderColourSection: one listener for the tab's life, not one per open
+    /** @type {EventRef | null} */
+    this.cssRef = null;
   }
 
   /* ----------------------------------------------------------- two render paths --
@@ -1234,9 +1238,17 @@ class VaultGraphSettingTab extends PluginSettingTab {
 
     this.scope = scope;
     this.syncScopeTheme(false);
-    // github#77
-    this.plugin.registerEvent(
-      this.app.workspace.on("css-change", () => this.syncScopeTheme(true)));
+    // github#77 -- ONE LISTENER FOR THE TAB'S LIFE, NOT ONE PER OPEN. display() runs again every
+    // time the user opens the tab, while plugin.registerEvent only releases on plugin UNLOAD, so
+    // registering here unguarded left a live handler behind on every open: ten opens meant ten
+    // handlers per theme or snippet change, each scheduling its own rAF, for as long as the
+    // plugin stayed loaded. The tab instance lives as long as the plugin (addSettingTab runs
+    // once), so registering once is both bounded and enough -- syncScopeTheme already returns
+    // early when this.scope is null, which is what the declarative path's teardown leaves it.
+    if (!this.cssRef) {
+      this.cssRef = this.app.workspace.on("css-change", () => this.syncScopeTheme(true));
+      this.plugin.registerEvent(this.cssRef);
+    }
     this.redrawColours();
   }
 
