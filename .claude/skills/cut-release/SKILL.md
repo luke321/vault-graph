@@ -42,14 +42,15 @@ prose what's newly done since the last table and what's still blocked or awaitin
 | 3 | `CHANGELOG.md` section for `<version>`, covering every merge since the last tag | |
 | 4 | Version bump: `manifest.json` → `<version>` | |
 | 5 | Release name — propose 2-4 candidates, his pick | |
-| 6 | Re-record every clip the UI change touches (hero + gallery, not just touched acts) if anything visual changed | |
-| 7 | Merge `release/<version>` → `develop` (local) | |
-| 8 | **One** plain `git push origin develop` | |
-| 9 | PR/merge `develop` → `main` | |
-| 10 | Draft the release body, publish as an Artifact, get an explicit go-ahead | |
-| 11 | `release.ps1` on `main` — gates, tag, push | |
-| 12 | GitHub Actions publishes the release — automatic once tagged | |
-| 13 | Post to Ko-fi: title, disc screenshot, community-page link then release link; open the page | |
+| 6 | Re-record every clip and the hero (github#121) | |
+| 7 | **Look at every re-recorded clip in one Artifact, and get a yes, before committing any of them** | |
+| 8 | Merge `release/<version>` → `develop` (local) | |
+| 9 | **One** plain `git push origin develop` | |
+| 10 | PR/merge `develop` → `main` | |
+| 11 | Draft the release body, publish as an Artifact, get an explicit go-ahead | |
+| 12 | `release.ps1` on `main` — gates, tag, push | |
+| 13 | GitHub Actions publishes the release — automatic once tagged | |
+| 14 | Post to Ko-fi: title, disc screenshot, community-page link then release link; open the page | |
 ```
 
 ## 1. List the range — before anything else
@@ -111,7 +112,7 @@ new entry.
 
 `manifest.json` → `"version": "<version>"`.
 
-## 7. Re-record clips — judgment call, then commit
+## 7. Re-record every clip and the hero, then look at them
 
 **The hero (`assets/demo.webp`) goes stale on any visible page change, silently — nothing fails.**
 `release.ps1` warns (`=== hero ===`, `=== features ===`) by comparing commit dates, which is a
@@ -127,9 +128,37 @@ node scripts/lock.mjs release record --owner "release <version>"
 If a shared constant changed (a margin, `FIT_RATIO`, a storyboard reorder), **every existing
 clip is stale, not just the ones whose own beats moved** — re-record all of them, not a subset.
 Update each re-recorded feature's `Last re-recorded` line in its `docs/features/<name>.md`.
-Commit the new assets — a dirty tree is never stamped (step 8) and `release.ps1` refuses one.
 
-## 8. Rehearse the local half — this is the run that pays the suite
+## 8. Look at every clip before committing it
+
+**`record-demo.ps1` captures a *region of the desktop*, so whatever is drawn over that
+rectangle is what lands in the take — and the take still looks plausible: right dimensions,
+right duration, a real file.** On 2026-09-11 a full re-record silently captured an Obsidian
+window sitting on the target monitor, open on Lukas's own vault, and five clips were
+overwritten with footage of his personal frontmatter before anything caught it. What caught
+it was a size comparison, not an eye: **0.04 MB against a committed 4.37 MB**, because a
+static capture compresses to almost nothing. github#122 raises the window now, which removes
+the common cause but not the need to look.
+
+Two gates, in this order, neither optional:
+
+1. **Check the first take before running the rest.** One act, then look at a frame. Nineteen
+   blind takes is how five bad clips happen instead of one.
+2. **Publish every re-recorded clip and the hero in ONE Artifact and get an explicit yes.** Each
+   clip at its published size, its name and byte size beside it, and the previously committed
+   size next to that so a collapse is obvious at a glance. `git checkout -- assets/` restores
+   everything if the answer is no — the old clips are in git, which is the only reason this is
+   recoverable.
+
+An artifact loads nothing external, so inline each `.webp` as a `data:` URI; if the set will not
+fit under 16MB, declare the `assets` capability and `upload_asset` them instead (load
+`artifact-capabilities` first). Fixtures only, never a real vault — which is exactly what went
+wrong the day this rule was written.
+
+Commit the new assets only after that yes — a dirty tree is never stamped (step 9) and
+`release.ps1` refuses one.
+
+## 9. Rehearse the local half — this is the run that pays the suite
 
 ```powershell
 .\scripts\release.ps1 <version> -DryRun -AllowAnyBranch *> dryrun.log
@@ -143,7 +172,7 @@ re-run **on this branch** — don't chase the failure downstream.
 `node scripts/suite-stamp.mjs check` says what the next push will do; `... list` shows every
 stamped tree on this machine.
 
-## 9. Push the release branch
+## 10. Push the release branch
 
 ```bash
 git push origin release/<version>
@@ -155,7 +184,7 @@ This runs `release.yml` as a **dry run** on GitHub's runner: builds, gates, atte
 files, creates no Release. It rehearses the half `release.ps1` can't run locally. Read the run's
 summary — three SHA-256 lines and an attestation URL, no Release created.
 
-## 10. Merge into `develop`, then the one push
+## 11. Merge into `develop`, then the one push
 
 ```bash
 git switch develop && git merge --no-ff release/<version>
@@ -180,7 +209,7 @@ re-running the whole suite blind), commit, and push again — plain, still no ou
 that fails on a genuinely flaky check is rare after github#110 (the suite is fully serialized);
 don't assume flake without isolating the specific check first.
 
-## 11. Merge `develop` → `main`
+## 12. Merge `develop` → `main`
 
 On the website: open the PR, merge it. The ruleset requires this and has no bypass for a direct
 push (github#94). The only required check is the branch-policy job.
@@ -189,7 +218,7 @@ push (github#94). The only required check is the branch-policy job.
 git switch main && git pull --ff-only
 ```
 
-## 12. Review the release body — before the tag, not after
+## 13. Review the release body — before the tag, not after
 
 **Once the tag exists nothing changes.** `release.yml` publishes live the instant the tag lands —
 no draft gate, and the workflow drops the raw `## <version>` CHANGELOG section straight into the
@@ -225,7 +254,7 @@ then applies the approved version — after `release.ps1` has created the draft-
 release (the Release object doesn't exist before the tag), but the *content* and the *approval*
 both happened before this step, not as a post-hoc edit nobody signed off on.
 
-## 13. Tag and push — `release.ps1` on `main`
+## 14. Tag and push — `release.ps1` on `main`
 
 ```powershell
 .\scripts\release.ps1 <version>
@@ -233,12 +262,12 @@ both happened before this step, not as a post-hoc edit nobody signed off on.
 
 Refuses: a `v`-prefixed tag, a version `manifest.json` doesn't claim, a missing `## <version>`
 CHANGELOG section, a branch other than `main`, a dirty tree, a `main` that isn't exactly
-`origin/main`. Finds the stamp for `HEAD`'s tree (from step 8, carried through the merges) and
+`origin/main`. Finds the stamp for `HEAD`'s tree (from step 9, carried through the merges) and
 skips the suite — it does not re-run it. Writes the annotated tag (`--cleanup=verbatim`, or the
 markdown headings in the tag message get silently stripped) with the CHANGELOG section as its
 message, pushes the tag. **Never pushes `main` itself.**
 
-## 14. Let the workflow publish
+## 15. Let the workflow publish
 
 The tag push triggers `.github/workflows/release.yml`: re-verifies the version, runs the static
 gates again, attests the three files (`main.js`, `manifest.json`, `styles.css`) via Sigstore/OIDC,
@@ -249,7 +278,7 @@ gh run watch
 gh release view <version> --json tagName,name,assets,isDraft
 ```
 
-## 15. Post to Ko-fi
+## 16. Post to Ko-fi
 
 Once the Release exists (step 14), post an update at ko-fi.com/luke321:
 
