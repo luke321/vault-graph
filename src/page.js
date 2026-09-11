@@ -2082,10 +2082,9 @@ function mountVaultGraph(root, data, deps) {
       var mId = members[mIdx], mG = memberG[mIdx];
       if (!useCells) {
         var mA = graph.getNodeAttributes(mId);
+        // github#76 -- `fileSub` rebases on the root, so this is the drilled subfolder
         var mSub = fileSub(mId, mA);
         var mBk = bandLock && bandLock[mG] ? "i" : "o";
-        // github#76
-        var mSub = relSub(mA);
         var mKey = splitFor(mG)
           ? mG + SEP + subCellIndex(mG, mSub, liveSub[mG + "/" + mSub] || 0, bandDepth[mBk])
           : mG;
