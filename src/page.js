@@ -1293,7 +1293,7 @@ function mountVaultGraph(root, data, deps) {
   var INNER_FILL = 0.8;
   var GAP_BAND = { i: 0.5, o: 1 };
   var CLEAR_OF_ROOM = 0.12;
-  // github#107 -- which quantile of a band's own-step pool stands for the whole band, in pick()
+  // github#107 -- ROOM_PCTL, the pick() quantile
   var ROOM_PCTL = 0.5;
 
   var MIN_SPAN = 6 * Math.PI / 180;
@@ -2671,14 +2671,7 @@ function mountVaultGraph(root, data, deps) {
 
     var pool = roomPool;
     // github#35
-    // github#107 -- the quantile was 0.1, and the tenth percentile is harsher on the inner band
-    // than on the outer one: the inner band has fewer rows over more cells, so its own-step pool
-    // is the more dispersed of the two and its tenth percentile sits further below its median.
-    // Measured p10/p50 per band -- demo 0.81 inner / 0.90 outer, 10k 0.94 / 0.98, dominant-folder
-    // 0.95 / 0.98 -- so sizing every dot in a band off its tightest decile cost the inner band
-    // 5-19% that was arithmetic rather than geometry. The pool is tight either way (demo inner
-    // spans 95 to 170 units over 315 entries), so the median is not a long-tail gamble, and
-    // cellRoom still clamps each cell down to its own minimum step in dotPx.
+    // github#107 -- ROOM_PCTL 0.1 -> 0.5, inner band's pool is more dispersed
     /** @param {number[]} v */
     var pick = function (v) {
       if (!v.length) return undefined;
@@ -5343,13 +5336,7 @@ function mountVaultGraph(root, data, deps) {
         v *= f;
       }
     }
-    // github#107 -- the floor used to be scaled by the room factor too, which meant DOT_MIN_PX
-    // was never a floor: at scale 0.63 the demo vault's inner band bottomed out at 0.94px and
-    // the 10k vault's at 0.81px, against a constant that exists to say what a dot needs to read
-    // as one. The room factor still caps the dot from ABOVE, and the edge, fit, hub and cascade
-    // clamps below still win over this floor -- so a walking dot can be held under its two
-    // resting sizes exactly as before. Sizing a band's smallest dots off DOT_MIN_PX rather than
-    // off its scarcity is the whole change.
+    // github#107 -- DOT_MIN_PX now floors below the room scale, not scaled by it
     var lo = rp.lo || DOT_MIN_PX;
     if (v < lo) v = lo;
     var capU = edgeCap[id];
