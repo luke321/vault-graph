@@ -31,6 +31,8 @@ const PORT = Number(arg("port", "9451"));
 const VIEW_MODE = arg("view", "open");
 const PHASE_SEC = Number(arg("phase-sec", "90"));
 const SAMPLE_SEC = Number(arg("sample-sec", "15"));
+const BURSTS = Number(arg("bursts", "3"));
+const BURST_NOTES = Number(arg("burst-notes", "250"));
 const KEEP = flag("keep");
 const NO_LOCK = flag("no-lock");
 const OUT = arg("out", "");
@@ -258,6 +260,21 @@ async function makeArrivalDir(c) {
     " return f ? 'already there' : 'FAILED: ' + String((e && e.message) || e); } })()");
 }
 
+/* -------------------------------------------------------------- hidden burst -- */
+// Steady arrivals never reach LIVE_MAX_CHANGED: at 5/s a rebuild covers about five notes.
+// The path that does is the deferral in design/0014 -- while the leaf is hidden, nothing is
+// built and dirtyPaths accumulates, so the wake can land a churn well over the limit. The
+// host then does what Refresh does: lastData = null, await this.render(). That is the only
+// routine way render() reruns, and render() is where subscribeLive() and the css-change
+// registration sit. This is a sync or an import arriving behind a background tab.
+
+const HIDE_GRAPH = "(function(){ var l = app.workspace.getLeaf('tab');" +
+  " app.workspace.setActiveLeaf(l, { focus: true }); return true; })()";
+const REVEAL_GRAPH = "(function(){ var ls = app.workspace.getLeavesOfType(" + JSON.stringify(VT) + ");" +
+  " if (!ls[0]) return false; app.workspace.revealLeaf(ls[0]); return true; })()";
+const IS_HIDDEN = "(function(){ var v = " + VIEW + ";" +
+  " return !!(v && v.containerEl && v.containerEl.offsetParent === null); })()";
+
 async function pickLinkTargets(c, n) {
   return c.eval("(function(){ var f = app.vault.getMarkdownFiles().slice(0, " + n + ");" +
                 " return f.map(function (x) { return x.basename; }); })()");
@@ -423,6 +440,35 @@ async function main() {
     await sample(cdp, child, phase.name + " AT REST",
                  { arrivals: n, phase: phase.name, rate: phase.rate, rested });
     if (VIEW_MODE === "open" && !rested) console.log("  NOTE: the disc did not reach rest within 90 s");
+  }
+
+  // The phase that can actually cross LIVE_MAX_CHANGED, and so make render() rerun.
+  if (VIEW_MODE === "open" && BURSTS > 0) {
+    for (let b = 1; b <= BURSTS; b++) {
+      console.log("\nhidden burst " + b + " of " + BURSTS + " -- " + BURST_NOTES +
+                  " notes arrive behind a hidden leaf, then it is revealed");
+      await cdp.eval(HIDE_GRAPH);
+      await sleep(1200);
+      const hidden = await cdp.eval(IS_HIDDEN);
+      console.log("  leaf hidden: " + hidden + (hidden ? "" : "   (the burst will NOT defer -- read the rest with that in mind)"));
+      let made = 0;
+      for (let i = 0; i < BURST_NOTES; i++) {
+        const path = ARRIVAL_DIR + "/arrival-" + String(++n).padStart(5, "0") + ".md";
+        const r = await cdp.eval(ARRIVE + "(" + JSON.stringify(path) + "," +
+                                 JSON.stringify(targets[n % targets.length]) + ")").catch(() => ({ ok: 0 }));
+        if (r && r.ok) made++;
+      }
+      const dirty = await cdp.eval("(function(){ var v = " + VIEW + ";" +
+        " return v && v.dirtyPaths ? v.dirtyPaths.size : -1; })()").catch(() => -1);
+      console.log("  " + made + " created while hidden; dirtyPaths holds " + dirty);
+      await cdp.eval(REVEAL_GRAPH);
+      const rested = await atRest(cdp, 120000);
+      const s = await sample(cdp, child, "burst " + b + " AT REST",
+                             { arrivals: n, phase: "burst", burst: b, dirtyAtReveal: dirty, rested });
+      console.log("    churn reported by the last applyData: " + s.lastChurn +
+                  (s.lastChurn !== null && s.lastChurn > 200 ? "  -- OVER LIVE_MAX_CHANGED, so render() reran" : ""));
+      if (!rested) console.log("    NOTE: the disc did not reach rest within 120 s");
+    }
   }
 
   console.log("\nsettling, then a final rest sample ...");
