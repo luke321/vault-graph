@@ -31,6 +31,8 @@ const PORT = Number(arg("port", "9451"));
 const VIEW_MODE = arg("view", "open");
 const PHASE_SEC = Number(arg("phase-sec", "90"));
 const SAMPLE_SEC = Number(arg("sample-sec", "15"));
+const PAN_ONLY = flag("pan-only");
+const PAN = PAN_ONLY || flag("pan");
 const BURSTS = Number(arg("bursts", "3"));
 const BURST_NOTES = Number(arg("burst-notes", "250"));
 const KEEP = flag("keep");
@@ -260,6 +262,86 @@ async function makeArrivalDir(c) {
     " return f ? 'already there' : 'FAILED: ' + String((e && e.message) || e); } })()");
 }
 
+/* ----------------------------------------------------------------- pan cadence -- */
+// Reported from use: the disc starts to lag when panned while notes are arriving.
+// Nothing on the pan path cancels anything -- pan is enableCameraPanning on the renderer's
+// own camera -- and liveBusy() is cascadeRun || anim || play, which does not include a drag.
+// So applyData does NOT defer for a pan: an arrival runs ingest + hardRelayout + cascade
+// synchronously, mid-drag. This measures what that does to the frame cadence.
+
+const FRAMES_ON = "(function(){ window.__vgF = []; window.__vgFOn = true;" +
+  " (function loop(t){ if (!window.__vgFOn) return; window.__vgF.push(t);" +
+  "   requestAnimationFrame(loop); })(performance.now()); return true; })()";
+
+const FRAMES_OFF = "(function(){ window.__vgFOn = false;" +
+  " var a = window.__vgF || [], d = [];" +
+  " for (var i = 1; i < a.length; i++) d.push(a[i] - a[i - 1]);" +
+  " d.sort(function (x, y) { return x - y; });" +
+  " var q = function (p) { return d.length ? +d[Math.min(d.length - 1, Math.floor(d.length * p))].toFixed(1) : -1; };" +
+  " var long = 0, j; for (j = 0; j < d.length; j++) if (d[j] > 50) long++;" +
+  " return { frames: a.length, median: q(0.5), p95: q(0.95)," +
+  "   worst: d.length ? +d[d.length - 1].toFixed(1) : -1, long50: long }; })()";
+
+const STAGE_BOX = "(function(){ var v = " + VIEW + ";" +
+  " var el = v && v.contentEl ? v.contentEl.querySelector('#vg-graph') : null;" +
+  " if (!el) return null; var r = el.getBoundingClientRect();" +
+  " return { left: r.left, top: r.top, w: r.width, h: r.height }; })()";
+
+/** One slow circular drag across the stage, at roughly 60 Hz. */
+async function panDrag(c, box, ms) {
+  const cx = box.left + box.w / 2, cy = box.top + box.h / 2;
+  const rx = box.w * 0.18, ry = box.h * 0.18;
+  const steps = Math.max(8, Math.round(ms / 16));
+  await c.send("Input.dispatchMouseEvent",
+    { type: "mousePressed", x: cx, y: cy, button: "left", clickCount: 1, buttons: 1 });
+  for (let i = 0; i < steps; i++) {
+    const a = (i / steps) * Math.PI * 2;
+    await c.send("Input.dispatchMouseEvent",
+      { type: "mouseMoved", x: cx + Math.sin(a) * rx, y: cy + Math.cos(a) * ry, button: "left", buttons: 1 });
+    await sleep(16);
+  }
+  await c.send("Input.dispatchMouseEvent",
+    { type: "mouseReleased", x: cx, y: cy, button: "left", clickCount: 1, buttons: 0 });
+}
+
+/**
+ * Pan for `ms`, optionally with notes arriving at `rate`/s underneath, and report the
+ * frame cadence. `withArrivals` is what the report is about; the quiet pass is its control.
+ */
+async function panProbe(c, tag, ms, withArrivals, targets, nextName) {
+  const box = await c.eval(STAGE_BOX);
+  if (!box || !box.w) { console.log("  " + tag + ": no stage to pan"); return null; }
+  await c.eval(FRAMES_ON);
+  let arriving = true, made = 0;
+  const feed = (async () => {
+    if (!withArrivals) return;
+    while (arriving) {
+      const r = await c.eval(ARRIVE + "(" + JSON.stringify(nextName()) + "," +
+                             JSON.stringify(targets[made % targets.length]) + ")").catch(() => ({ ok: 0 }));
+      if (r && r.ok) made++;
+      await sleep(1000 / PAN_ARRIVAL_RATE);
+    }
+  })();
+  await panDrag(c, box, ms);
+  arriving = false;
+  await feed;
+  const f = await c.eval(FRAMES_OFF);
+  const row = { tag, withArrivals, arrivalsDuring: made, ...f };
+  panRows.push(row);
+  console.log("  " + tag.padEnd(30) +
+              " frames " + String(f.frames).padStart(4) +
+              "  median " + String(f.median).padStart(6) + " ms" +
+              "  p95 " + String(f.p95).padStart(7) + " ms" +
+              "  worst " + String(f.worst).padStart(8) + " ms" +
+              "  >50ms " + String(f.long50).padStart(4) +
+              (withArrivals ? "   (" + made + " notes arrived during the pan)" : "   (quiet)"));
+  return row;
+}
+
+const PAN_ARRIVAL_RATE = Number(arg("pan-rate", "1"));
+const PAN_MS = Number(arg("pan-ms", "6000"));
+const panRows = [];
+
 /* -------------------------------------------------------------- hidden burst -- */
 // Steady arrivals never reach LIVE_MAX_CHANGED: at 5/s a rebuild covers about five notes.
 // The path that does is the deferral in design/0014 -- while the leaf is hidden, nothing is
@@ -399,7 +481,18 @@ async function main() {
 
   let n = 0;
   let firstRefusal = "";
-  for (const phase of PHASES) {
+  const nextName = () => ARRIVAL_DIR + "/arrival-" + String(++n).padStart(5, "0") + ".md";
+
+  // The pair the pan report rests on: the same drag, quiet and then under arrivals.
+  if (VIEW_MODE === "open" && PAN) {
+    console.log("\npan cadence at mount 1 (before any remount)");
+    await panProbe(cdp, "mount 1 quiet", PAN_MS, false, targets, nextName);
+    await atRest(cdp, 60000);
+    await panProbe(cdp, "mount 1 + arrivals", PAN_MS, true, targets, nextName);
+    await atRest(cdp, 60000);
+  }
+
+  for (const phase of PAN_ONLY ? [] : PHASES) {
     console.log("\n" + phase.name + " -- " + phase.note);
     const gap = 1000 / phase.rate;
     const end = Date.now() + PHASE_SEC * 1000;
@@ -467,6 +560,14 @@ async function main() {
                              { arrivals: n, phase: "burst", burst: b, dirtyAtReveal: dirty, rested });
       console.log("    churn reported by the last applyData: " + s.lastChurn +
                   (s.lastChurn !== null && s.lastChurn > 200 ? "  -- OVER LIVE_MAX_CHANGED, so render() reran" : ""));
+      // The same drag again, now that one more render() has run. If the pan degrades with
+      // mount count rather than with vault size, this is where it shows.
+      if (PAN) {
+        await panProbe(cdp, "mount " + s.mounts + " quiet", PAN_MS, false, targets, nextName);
+        await atRest(cdp, 60000);
+        await panProbe(cdp, "mount " + s.mounts + " + arrivals", PAN_MS, true, targets, nextName);
+        await atRest(cdp, 60000);
+      }
       if (!rested) console.log("    NOTE: the disc did not reach rest within 120 s");
     }
   }
@@ -509,8 +610,30 @@ async function main() {
     console.log("  phases that never reached rest: " + notRested + " of " + PHASES.length);
   }
 
+  if (panRows.length) {
+    console.log("\n=== pan cadence ==========================================");
+    console.log("  a drag is not in liveBusy(), so a rebuild lands mid-drag; these are the frames");
+    for (const r of panRows) {
+      console.log("  " + r.tag.padEnd(24) + (r.withArrivals ? " under arrivals " : " quiet          ") +
+                  " median " + String(r.median).padStart(6) + " ms" +
+                  "  p95 " + String(r.p95).padStart(7) + " ms" +
+                  "  worst " + String(r.worst).padStart(8) + " ms" +
+                  "  frames over 50 ms: " + r.long50 + " of " + Math.max(0, r.frames - 1));
+    }
+    const quiet = panRows.filter((r) => !r.withArrivals);
+    const busy = panRows.filter((r) => r.withArrivals);
+    if (quiet.length > 1) {
+      console.log("  quiet pan, first mount -> last: p95 " + quiet[0].p95 + " -> " + quiet[quiet.length - 1].p95 +
+                  " ms, worst " + quiet[0].worst + " -> " + quiet[quiet.length - 1].worst + " ms");
+    }
+    if (busy.length > 1) {
+      console.log("  pan under arrivals, first -> last: p95 " + busy[0].p95 + " -> " + busy[busy.length - 1].p95 +
+                  " ms, worst " + busy[0].worst + " -> " + busy[busy.length - 1].worst + " ms");
+    }
+  }
+
   const out = OUT || join(WORK, "growth-" + VIEW_MODE + ".json");
-  writeFileSync(out, JSON.stringify({ view: VIEW_MODE, fixture: src, phaseSec: PHASE_SEC,
+  writeFileSync(out, JSON.stringify({ view: VIEW_MODE, fixture: src, phaseSec: PHASE_SEC, pan: panRows,
                                       arrivals: n, samples }, null, 2) + "\n", "utf8");
   console.log("\nwrote " + out);
   await shutdown(0);
