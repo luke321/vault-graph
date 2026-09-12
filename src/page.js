@@ -1369,10 +1369,12 @@ function mountVaultGraph(root, data, deps) {
   // Flip the re-wedge on, run the real colour builders, read `nodeColor` per note, put every
   // global back. Reimplementing the slot rotation here would be a second palette to keep in
   // step with the first; this cannot drift from what step 2 does because it IS step 2 asked.
-  /** @returns {Record<string, string>} id -> colour */
+  /** @returns {{ color: Record<string, string>, child: Record<string, string> }} */
   function wedgeColorsAhead() {
     /** @type {Record<string, string>} */
     var out = dict();
+    /** @type {Record<string, string>} */
+    var child = dict();
     var sWedge = reWedge, sCounts = counts, sFolderCount = folderCount,
         sColor = groupColor, sSlot = groupSlot, sAuto = groupAutoSlot,
         sShade = subShade, sSubSlot = subSlot, sTint = unlinkedTintColors,
@@ -1386,6 +1388,8 @@ function mountVaultGraph(root, data, deps) {
       graph.forEachNode(function (id, a) {
         if (!inRootA(a)) return;
         out[id] = nodeColor(id);
+        // the group of the REBASED basis is the child folder this note will sit in
+        child[id] = relGroup(a);
       });
     } finally {
       reWedge = sWedge;
@@ -1395,7 +1399,35 @@ function mountVaultGraph(root, data, deps) {
       subOrder = sSubOrder; subCount = sSubCount;
       if (sOrder) order[state.dim] = sOrder;
     }
-    return out;
+    return { color: out, child: child };
+  }
+
+  // github#76 -- the recolour, walked across the cascade that is moving the same dots. Driven
+  // by `CascadeOpts.onFrame`, so it cannot run on a clock of its own and finish early.
+  /**
+   * @param {Record<string, string>} from id -> the colour it wore
+   * @param {Record<string, string>} to   id -> the colour it ends in
+   * @returns {((pr: number) => void) | null}
+   */
+  function noteTintWalk(from, to) {
+    if (!renderer) return null;
+    /** @type {string[]} */
+    var ids = [];
+    Object.keys(to).forEach(function (id) {
+      if (from[id] && from[id] !== to[id]) ids.push(id);
+    });
+    if (!ids.length) return null;
+    return function (pr) {
+      var t = pr < 0 ? 0 : pr > 1 ? 1 : pr;
+      var e = t * t * (3 - 2 * t);
+      /** @type {Record<string, string>} */
+      var now = dict();
+      for (var i = 0; i < ids.length; i++) {
+        var id = ids[i];
+        now[id] = mixHex(from[id], to[id], e);
+      }
+      noteColorShown = now;
+    };
   }
 
   /** @param {string} g */
@@ -1415,10 +1447,11 @@ function mountVaultGraph(root, data, deps) {
   var preRootColor = null;
   /** @type {Record<string, string> | null} */
   var preRootShade = null;
-  // github#76 -- the subfolder half of the drill's recolour, read by `nodeColor` ahead of
-  // `subShade` for exactly as long as the walk runs
+  // github#76 -- the drill's recolour, mid-flight: id -> the colour this note is at right now,
+  // mixed from what it wore to what it ends in. Read by `nodeColor` ahead of everything else
+  // for exactly as long as the cascade runs.
   /** @type {Record<string, string> | null} */
-  var shadeShown = null;
+  var noteColorShown = null;
   // github#76 -- step 1: id -> the colour this note will wear once its child folder becomes a
   // wedge. Computed by ASKING, not by reimplementing the palette (see `wedgeColorsAhead`), so
   // the colours the drill paints now are the ones step 2 will hand out.
@@ -1468,47 +1501,6 @@ function mountVaultGraph(root, data, deps) {
     })();
   }
 
-  // github#76 -- drilling in, the folder you opened was ONE colour on the vault disc and its
-  // children are about to take a slot each. Walk every group colour and every subfolder shade
-  // out of that one colour, so the recolour happens across the cascade rather than snapping
-  // when it lands. `colorWalk` cannot do this: it is keyed by group NAME and every name here
-  // is new, so it finds nothing to walk from.
-  /**
-   * It is driven by the CASCADE's own progress rather than a clock of its own, so the
-   * recolour cannot finish a sixth of the way in and be over before the new disc arrives --
-   * which is what a `TWEEN_MS` walk did here, under a disc that was still emptying.
-   * @param {string} fromColor the colour the root folder wore on the disc being left
-   * @returns {((pr: number) => void) | null} a per-frame painter for `CascadeOpts.onFrame`
-   */
-  function rootTintWalk(fromColor) {
-    if (!fromColor || !renderer) return null;
-    /** @type {Record<string, string>} */
-    var gTo = dict();
-    /** @type {Record<string, string>} */
-    var sTo = dict();
-    var any = false;
-    Object.keys(groupColor).forEach(function (g) {
-      if (groupColor[g] && groupColor[g] !== fromColor) { gTo[g] = groupColor[g]; any = true; }
-    });
-    Object.keys(subShade).forEach(function (k) {
-      if (subShade[k] && subShade[k] !== fromColor) { sTo[k] = subShade[k]; any = true; }
-    });
-    if (!any) return null;
-    // `regroup` starts its own name-keyed walk on the way here; it has nothing to say about a
-    // basis whose names are all new, and two writers of `colorShown` would fight.
-    if (colorRaf) { WIN.cancelAnimationFrame(colorRaf); colorRaf = 0; }
-    return function (pr) {
-      var t = pr < 0 ? 0 : pr > 1 ? 1 : pr;
-      var e = t * t * (3 - 2 * t);
-      /** @type {Record<string, string>} */
-      var gN = dict();
-      /** @type {Record<string, string>} */
-      var sN = dict();
-      Object.keys(gTo).forEach(function (g) { gN[g] = mixHex(fromColor, gTo[g], e); });
-      Object.keys(sTo).forEach(function (k) { sN[k] = mixHex(fromColor, sTo[k], e); });
-      colorShown = gN; shadeShown = sN;
-    };
-  }
 
   /** @type {Record<string, string>} */
   var subShade = dict();
@@ -1713,17 +1705,15 @@ function mountVaultGraph(root, data, deps) {
       if (lc) return lc;
     }
     var a = graph.getNodeAttributes(id);
-    // github#76 -- step 1 repaints the soloed folder in its children's wedge colours while
-    // leaving every wedge where it was. `shadeShown` still wins: that is the walk, mid-move.
-    if (rootNoteColor && !shadeShown) { var rc = rootNoteColor[id]; if (rc) return rc; }
+    // github#76 -- mid-drill this note is between two colours; at rest it is simply the one
+    // its child folder gives it. Both come before the tint ladder, which answers to the basis
+    // and knows nothing about the root.
+    if (noteColorShown) { var nw = noteColorShown[id]; if (nw) return nw; }
+    if (rootNoteColor) { var rc = rootNoteColor[id]; if (rc) return rc; }
     if (groupOf(id) === UNLINKED && !unlinkedTintByFolder) return colorOf(UNLINKED);
     // github#86 -- D-3: the tint ladder answers to the filing
     var g = fileGroup(id, a);
     var k = g + "/" + fileSub(id, a);
-    // github#76 -- mid-drill the ladder is walking out of the root folder's own colour;
-    // github#76 -- ahead of `subShade`, or a shaded dot would sit out the recolour and
-    // github#76 -- snap to its new tint when the cascade lands.
-    if (shadeShown) { var sw = shadeShown[k]; if (sw) return sw; }
     var sh = subShade[k];
     if (sh) return sh;
     // github#76 -- a dot on its way out of a drilled disc keeps the shade it wore there,
@@ -8269,19 +8259,52 @@ function mountVaultGraph(root, data, deps) {
     // left over from a previous root would keep hiding rows the new one should show.
     if (wasRoot || next) state.hiddenSub = dict();
 
-    rootNoteColor = next ? wedgeColorsAhead() : null;
+    // github#76 -- what each note wears RIGHT NOW. `rootNoteColor` is still null and the
+    // basis is unchanged, so this is simply the vault's own colour for it.
+    /** @type {Record<string, string> | null} */
+    var beforeColor = null;
+    if (live && next) {
+      beforeColor = dict();
+      graph.forEachNode(function (id, a) {
+        if (inRootA(a)) beforeColor[id] = nodeColor(id);
+      });
+    }
+
+    rootNoteColor = null;
+    if (next) {
+      var ahead = wedgeColorsAhead();
+      // github#76 -- the BIGGEST child keeps the folder's own colour, so a drill reads as
+      // opening the thing you clicked rather than as a new palette: the wedge you were
+      // already looking at stays put and the smaller ones are what take new colours.
+      /** @type {Record<string, number>} */
+      var perChild = dict();
+      var biggest = "", biggestN = 0;
+      Object.keys(ahead.child).forEach(function (id) {
+        var c = ahead.child[id];
+        if (!c || c === DIRECT || c === UNLINKED) return;
+        perChild[c] = (perChild[c] || 0) + 1;
+        if (perChild[c] > biggestN) { biggestN = perChild[c]; biggest = c; }
+      });
+      if (biggest && fromColor) {
+        Object.keys(ahead.child).forEach(function (id) {
+          if (ahead.child[id] === biggest) ahead.color[id] = fromColor;
+        });
+      }
+      rootNoteColor = ahead.color;
+    }
     attempt(placeLogo); attempt(heatBuild); attempt(buildLegend);
 
     var landed = function () {
       preRootColor = null; preRootShade = null;
-      colorShown = null; shadeShown = null;
+      colorShown = null; noteColorShown = null;
     };
     if (live) {
       // github#76 -- an only-click is `cascade(null, { colToggle: true })` and nothing else,
       // so a drill is that, plus the recolour walked across the same cascade by `onFrame`.
       /** @type {CascadeOpts} */
       var how = { colToggle: true };
-      var tint = rootTintWalk(fromColor);
+      var tint = beforeColor && rootNoteColor
+        ? noteTintWalk(beforeColor, rootNoteColor) : null;
       if (tint) how.onFrame = tint;
       cascade(landed, how);
     } else {
