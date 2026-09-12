@@ -75,8 +75,11 @@ actually in play.
 
 ### Reading one note
 
-Hover a note to raise it and dim everything unconnected to it. Click for a panel — folder,
-type, tags, word count, linked notes — each one clickable to jump across the disc.
+Hover a note to raise it and dim everything unconnected to it. Click it and the sidebar
+switches to its reading — folder, type, tags, word count, linked notes, each one clickable
+to jump across the disc. The card sits in the sidebar rather than over the graph, so the
+disc stays whole while you read it; the tab strip says **Groups** or **Selected note**, and
+the card's close button or a click on empty stage goes back to the groupings.
 
 <img src="https://raw.githubusercontent.com/luke321/vault-graph/main/assets/features/note.webp" width="100%" alt="A daily note hovered, then a meeting note hovered, each raising and haloing its own links while the rest of the disc dims">
 

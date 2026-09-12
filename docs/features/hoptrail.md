@@ -1,7 +1,7 @@
 # Walking the links, and back
 
-The linked notes on a card are clickable, and clicking one walks the graph — a hop. Each hop
-is remembered: the card grows a back arrow and a trail of where you came from, oldest first,
+The linked notes in a note's reading are clickable, and clicking one walks the graph — a hop.
+Each hop is remembered: the card grows a back arrow and a trail of where you came from, oldest first,
 folded to the first and the last two once the walk gets long. The arrow steps back one hop;
 any crumb jumps straight to that note and drops everything after it. A crumb whose note a
 filter or the date range is currently hiding greys out and stays clickable. Opening a note
