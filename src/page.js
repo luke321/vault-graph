@@ -5782,11 +5782,19 @@ function mountVaultGraph(root, data, deps) {
   }
 
   /* github#131, design/0019 */
+  // github#135 -- a MediaQueryList lives on the window, so a handler left on one holds this whole
+  // closure for the life of the page: the graph, the renderer, the detached root. Remove it like
+  // the other thirteen, on both registration paths.
   if (WIN.matchMedia) {
     var readMq = WIN.matchMedia("(max-width: 720px)");
     var onReadMq = function () { cardHome(); setReading(reading); afterPanel(); };
-    if (readMq.addEventListener) readMq.addEventListener("change", onReadMq);
-    else if (readMq.addListener) readMq.addListener(onReadMq);
+    if (readMq.addEventListener) {
+      readMq.addEventListener("change", onReadMq);
+      onDestroy.push(function () { readMq.removeEventListener("change", onReadMq); });
+    } else if (readMq.addListener) {
+      readMq.addListener(onReadMq);
+      onDestroy.push(function () { readMq.removeListener(onReadMq); });
+    }
   }
 
   /** @param {string | null} id */
@@ -10857,7 +10865,9 @@ function mountVaultGraph(root, data, deps) {
       attempt(onDestroy[i]);
     }
     onDestroy.length = 0;
-    if (renderer) attempt(function () { renderer.kill(); });
+    // github#135 -- drop the handle too. A killed renderer still answers every call site that
+    // only asks `if (renderer)`, so a handler that outlives a destroy draws into a dead one.
+    if (renderer) { attempt(function () { renderer.kill(); }); renderer = null; }
     if (window.__vg === API) delete window.__vg;
     API = null;
   }
