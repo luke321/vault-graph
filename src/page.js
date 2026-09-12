@@ -180,6 +180,7 @@
  * @property {GraphLike} graph
  * @property {RendererLike | undefined} renderer   set by makeRenderer() before the api exists; a getter, so a host reads the live one
  * @property {(next: VaultData, opts?: { renames?: Record<string, string> }) => LiveResult} applyData   github#72
+ * @property {() => boolean} interacting   github#120: a drag owns the frame loop; do not build either
  * @property {(path: string, words: number) => boolean} setWords   github#72: by PATH, never by index
  * @property {() => void} readTheme
  * @property {() => void} placeLogo
@@ -5528,6 +5529,43 @@ function mountVaultGraph(root, data, deps) {
       }
     });
 
+    // github#120 -- see liveBusy(): the page has to know a drag is in progress, so a
+    // rebuild can wait for the hand to stop rather than freeze a frame under it.
+    (function () {
+      var captor = renderer.getMouseCaptor && renderer.getMouseCaptor();
+      if (!captor) return;
+      // Mirror the captor's OWN condition. It emits "mousedown" unconditionally but sets
+      // isMouseDown only for button 0, and emits "mouseup" only when isMouseDown -- so
+      // binding both unconditionally left `dragging` true after a right-click, with no
+      // matching mouseup, until the DRAG_MAX_MS cap expired. A context menu is not a drag.
+      captor.on("mousedown", function (e) {
+        var o = e && e.original;
+        if (o && o.button !== undefined && o.button !== 0) return;
+        dragging = true; dragStartedAt = NOW();
+      });
+      captor.on("mouseup", function () { dragging = false; dragEndedAt = NOW(); });
+      // What actually catches a lost mouseup, rather than a timeout guessing at one: the
+      // next move with the left button no longer held says the drag is over. bindNodeDrag
+      // reads `buttons` the same way for the same reason.
+      captor.on("mousemovebody", function (e) {
+        if (!dragging) return;
+        var o = e && e.original;
+        if (o && o.buttons !== undefined && !(o.buttons & 1)) { dragging = false; dragEndedAt = NOW(); }
+      });
+      // Belt to that braces: the captor binds its own mouseup on the document, so a release
+      // outside the canvas does reach it -- but only while isMouseDown, which the gate above
+      // now keeps in step. This costs one listener and removes a whole class of stuck flag.
+      var onDocUp = function () {
+        if (!dragging) return;
+        dragging = false; dragEndedAt = NOW();
+      };
+      DOC.addEventListener("mouseup", onDocUp, true);
+      onDestroy.push(function () {
+        DOC.removeEventListener("mouseup", onDocUp, true);
+        dragging = false;
+      });
+    })();
+
     (function () {
       var cam = renderer.getCamera();
       var edgeRaf = 0;
@@ -9746,10 +9784,36 @@ function mountVaultGraph(root, data, deps) {
   var liveTimer = null;
   var LIVE_IDLE_MS = 120;
 
-  function liveBusy() { return !!(cascadeRun || anim || play); }
-  // github#72, design/0014
+  // github#120 -- a DRAG owns the frame loop too, and until now nothing here knew it.
+  // liveBusy() gated applyData on cascadeRun, anim and play, so a rebuild landed in the
+  // middle of a pan and ran ingest, hardRelayout and cascade synchronously under the
+  // pointer. Measured on the demo fixture: a quiet pan is a flat 60 fps at every mount even
+  // as the vault doubles (worst frame 17 ms), while a pan with notes arriving under it keeps
+  // the same median and takes a single frozen frame of 371 to 702 ms -- one per rebuild.
+  // Deferring costs nothing new: livePending and the 120 ms drain already exist for exactly
+  // this, and a drag is bounded by the hand doing it.
+  var dragging = false;
+  var dragEndedAt = -1e9;
+  var dragStartedAt = 0;
+  // Inertia keeps the camera moving briefly after the button comes up.
+  var DRAG_GRACE_MS = 250;
+  // Last resort only. This was 5,000 ms and that was a bug: the cap is meant to catch a lost
+  // mouseup, but a drag can easily run longer than five seconds, and when it did the cap
+  // disarmed the deferral mid-pan and let rebuilds back in -- measured as two long frames
+  // still landing inside a thirteen-second drag with both gates supposedly holding. The
+  // mousemovebody check below is what actually catches a lost mouseup, the same way
+  // bindNodeDrag already does; this only catches a pointer that stops moving entirely.
+  var DRAG_MAX_MS = 60000;
+
+  function dragOwnsFrames() {
+    if (dragging && NOW() - dragStartedAt > DRAG_MAX_MS) dragging = false;
+    return dragging || NOW() - dragEndedAt < DRAG_GRACE_MS;
+  }
+
+  function liveBusy() { return !!(cascadeRun || anim || play || dragOwnsFrames()); }
+  // github#72, design/0014, github#120
   function liveWhy() {
-    return cascadeRun ? "cascade" : anim ? "tween" : play ? "timeline" : "";
+    return cascadeRun ? "cascade" : anim ? "tween" : play ? "timeline" : dragOwnsFrames() ? "drag" : "";
   }
 
   // github#72, design/0014 -- `words` is deliberately not in the key
@@ -9946,6 +10010,12 @@ function mountVaultGraph(root, data, deps) {
     API = window.__vg = { graph: graph,
                     // github#72
                     applyData: applyData,
+                    // github#120 -- NOT part of the debug API, because the host needs it in a
+                    // shipped build. Deferring applyData alone left most of the stall in place:
+                    // the host runs its own buildData over the whole metadata cache before it
+                    // ever calls applyData, and that is the long task that scales with the
+                    // vault. The host asks this before building, not only before applying.
+                    interacting: dragOwnsFrames,
                     setWords: setWords,
                     readTheme: readTheme, get renderer() { return renderer; },
                     placeLogo: placeLogo,
