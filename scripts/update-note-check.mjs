@@ -9,6 +9,7 @@ import { fileURLToPath } from "node:url";
 import { attach } from "./cdp.mjs";
 import { fixtureStore } from "./suite-stamp.mjs";
 import { leftWindow, placeElectronLeft } from "./screen.mjs";
+import { keepFocus } from "./focus.mjs";
 import { parseNote, parseReleases, releaseChain, semver } from "../plugin/update-note.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -74,7 +75,10 @@ async function launchObsidian(vault, profile) {
   mkdirSync(profile, { recursive: true });
   writeFileSync(join(profile, "obsidian.json"),
     JSON.stringify({ vaults: { "0000updatenote": { path: vault, ts: Date.now(), open: true } } }), "utf8");
+  // github#129
+  const focus = await keepFocus();
   const child = spawn(findObsidian(), ["--remote-debugging-port=" + PORT, "--user-data-dir=" + profile], { stdio: "ignore" });
+  void focus.watch(child.pid);
   for (let i = 0; i < 120; i++) {
     await sleep(500);
     let c = null;

@@ -6,6 +6,7 @@ import { existsSync, mkdirSync, writeFileSync, copyFileSync, rmSync, statSync } 
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { attach } from "./cdp.mjs";
+import { keepFocus } from "./focus.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(HERE, "..");
@@ -155,7 +156,10 @@ async function connect() {
 }
 
 async function launch(exe, box) {
+  // github#129
+  const focus = await keepFocus();
   const child = spawn(exe, ["--remote-debugging-port=" + PORT, "--user-data-dir=" + PROFILE, "--lang=en-US"], { stdio: "ignore" });
+  void focus.watch(child.pid);
   let cdp;
   try {
     cdp = await connect();

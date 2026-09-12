@@ -3,6 +3,7 @@ import { attach, json } from "./cdp.mjs";
 import { buildPayloadVault, PAYLOAD, NOTE_COUNT } from "./check-data-escape.mjs";
 import { findChrome } from "./chrome.mjs";
 import { leftmostScreen, leftWindowPos } from "./screen.mjs";
+import { keepFocus } from "./focus.mjs";
 import { FIXTURE_MAX_AGE_DAYS, FIXTURE_NAMES, checkFixture, countNotes, describeFixture,
          DEFAULT_JOBS, fixtureStore, record as recordPass, shapeDeltas,
          startRun } from "./suite-stamp.mjs";
@@ -28,6 +29,7 @@ const argAll = (n) => {
 };
 // github#7
 const PINNED_PORT = arg("port", "") ? Number(arg("port", "")) : 0;
+// github#129
 const HEADED = argv.includes("--headed");
 // github#87
 const NO_LOCK = argv.includes("--no-lock");
@@ -5766,6 +5768,8 @@ async function runOne(vault, work) {
   }
 
   const profile = mkdtempSync(join(tmpdir(), "vg-smoke-"));
+  // github#129
+  const focus = await keepFocus();
   const chrome = spawn(chromeExe(), [
     `--remote-debugging-port=${PORT}`, `--user-data-dir=${profile}`,
     "--no-first-run", "--no-default-browser-check",
@@ -5782,6 +5786,7 @@ async function runOne(vault, work) {
              : HEADED ? [] : [leftWindowPos()]),
     slot ? `--window-size=${slot.w},${slot.h}` : "--window-size=1600,1000", `--app=${url}`
   ], { stdio: ["ignore", "ignore", "pipe"], detached: false });
+  void focus.watch(chrome.pid);
 
   const chromeSaid = [];
   if (chrome.stderr) {

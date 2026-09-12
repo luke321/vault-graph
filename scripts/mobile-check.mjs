@@ -9,6 +9,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { attach } from "./cdp.mjs";
 import { leftmostScreen } from "./screen.mjs";
+import { keepFocus } from "./focus.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(HERE, "..");
@@ -110,6 +111,8 @@ async function main() {
   const PORT = await freePort();
   const profile = mkdtempSync(join(tmpdir(), "vg-mobile-profile-"));
   const scr = leftmostScreen();
+  // github#129
+  const focus = await keepFocus();
   const chrome = spawn(findChrome(), [
     `--remote-debugging-port=${PORT}`, `--user-data-dir=${profile}`,
     "--no-first-run", "--no-default-browser-check", "--disable-extensions",
@@ -122,6 +125,7 @@ async function main() {
     `--window-size=${Math.min(scr.w, W + 20)},${Math.min(scr.h, H + 60)}`,
     `--app=${bootUrl}`,
   ], { stdio: ["ignore", "ignore", "ignore"] });
+  void focus.watch(chrome.pid);
 
   const kill = () => { try { chrome.kill(); } catch { /* github#73 */ } };
   process.on("exit", () => { if (!flag("keep")) kill(); });

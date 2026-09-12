@@ -2,6 +2,7 @@
 
 import { attach } from "./cdp.mjs";
 import { leftWindowPos } from "./screen.mjs";
+import { keepFocus } from "./focus.mjs";
 import { spawn, spawnSync } from "node:child_process";
 import { existsSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -47,6 +48,8 @@ process.stdout.write(b.stdout || "");
 
 const PORT = await freePort();
 const profile = mkdtempSync(join(tmpdir(), "vg-dot-prof-"));
+// github#129
+const focus = await keepFocus();
 const chrome = spawn(findChrome(), [
   `--remote-debugging-port=${PORT}`, `--user-data-dir=${profile}`,
   "--no-first-run", "--no-default-browser-check",
@@ -56,6 +59,7 @@ const chrome = spawn(findChrome(), [
   ...(HEADED ? [] : [leftWindowPos()]),
   "--window-size=1600,1000", `--app=${pathToFileURL(html).href}`,
 ], { stdio: "ignore" });
+void focus.watch(chrome.pid);
 
 // ---------------------------------------------------------------- in-page instrumentation
 
