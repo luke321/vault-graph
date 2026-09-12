@@ -263,6 +263,16 @@ async function sample(c, child, tag, extra) {
     " var w = window; w.__vgGrowthN = w.__vgGrowthN || 0;" +
     " if (w.__vg && !w.__vg.__growthStamp) { w.__vgGrowthN++; try { w.__vg.__growthStamp = w.__vgGrowthN; } catch (e) { void 0; } }" +
     " var v = " + VIEW + ";" +
+    // github#120 -- Obsidian's own emitters, which Memory.getDOMCounters cannot see.
+    // subscribeLive() and the css-change registration both sit inside render(), so a
+    // rebuild that remounts adds handlers here and nowhere a DOM counter looks.
+    " var ev = function (o, n) { try { return (o && o._ && o._[n] ? o._[n].length : -1); } catch (e) { return -1; } };" +
+    " var emit = { resolved: ev(app.metadataCache, 'resolved'), changed: ev(app.metadataCache, 'changed')," +
+    "   create: ev(app.vault, 'create'), del: ev(app.vault, 'delete'), rename: ev(app.vault, 'rename')," +
+    "   cssChange: ev(app.workspace, 'css-change') };" +
+    " emit.total = ['resolved','changed','create','del','rename','cssChange']" +
+    "   .reduce(function (a, k) { return a + Math.max(0, emit[k]); }, 0);" +
+    " var viewEvents = -1; try { viewEvents = v && v._events ? v._events.length : -1; } catch (e) { void 0; }" +
     " var vg = w.__vg || null;" +
     " var pm = w.performance && w.performance.memory ? w.performance.memory : null;" +
     " var ls = vg && vg.liveState ? vg.liveState() : null;" +
@@ -274,6 +284,7 @@ async function sample(c, child, tag, extra) {
     "   pending: ls ? !!ls.pending : false, draining: ls ? !!ls.draining : false, busy: ls ? !!ls.busy : false," +
     "   canvases: v && v.contentEl ? v.contentEl.querySelectorAll('#vg-graph canvas').length : -1," +
     "   lastChurn: v && v.lastLive && v.lastLive.churn !== undefined ? v.lastLive.churn : null," +
+    "   emit: emit, viewEvents: viewEvents," +
     "   jsHeap: pm ? pm.usedJSHeapSize : -1 }; })()").catch(() => ({}));
   const row = {
     tag, at: Date.now(),
@@ -295,7 +306,9 @@ async function sample(c, child, tag, extra) {
               "  notes " + String(row.files).padStart(5) +
               "  order " + String(row.order).padStart(5) +
               "  mounts " + row.mounts +
-              "  inval " + row.invalidations);
+              "  inval " + row.invalidations +
+              "  emit " + String(row.emit ? row.emit.total : -1).padStart(4) +
+              "  vEv " + String(row.viewEvents).padStart(4));
   return row;
 }
 
@@ -396,6 +409,17 @@ async function main() {
               "   (onData handlers; a per-rebuild registration would grow this)");
   console.log("  mounts         " + base.mounts + " -> " + last.mounts +
               "   (a churn above LIVE_MAX_CHANGED remounts the page)");
+  if (base.emit && last.emit) {
+    console.log("  vault/cache listeners " + base.emit.total + " -> " + last.emit.total +
+                "   (resolved " + base.emit.resolved + "->" + last.emit.resolved +
+                ", changed " + base.emit.changed + "->" + last.emit.changed +
+                ", create " + base.emit.create + "->" + last.emit.create +
+                ", delete " + base.emit.del + "->" + last.emit.del +
+                ", rename " + base.emit.rename + "->" + last.emit.rename +
+                ", css-change " + base.emit.cssChange + "->" + last.emit.cssChange + ")");
+  }
+  console.log("  view event refs " + base.viewEvents + " -> " + last.viewEvents +
+              "   (Component registrations, released only when the view unloads)");
   console.log("  notes in vault " + base.files + " -> " + last.files +
               ",  graph order " + base.order + " -> " + last.order);
   const notRested = samples.filter((s) => s.rested === false).length;
