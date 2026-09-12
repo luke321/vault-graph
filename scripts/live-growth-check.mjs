@@ -333,11 +333,16 @@ async function panDrag(c, box, ms) {
 async function panProbe(c, tag, ms, withArrivals, targets, nextName) {
   const box = await c.eval(STAGE_BOX);
   if (!box || !box.w) { console.log("  " + tag + ": no stage to pan"); return null; }
+  const t0 = Date.now();
   await c.eval(FRAMES_ON);
+  // Bounded by count as well as by the flag: a drag that overruns must not keep feeding.
+  // One probe overran by five minutes and dumped 292 notes into a six-second window, which
+  // then read as a 285-second "frame".
+  const cap = withArrivals ? Math.ceil((ms / 1000) * PAN_ARRIVAL_RATE) + 2 : 0;
   let arriving = true, made = 0;
   const feed = (async () => {
     if (!withArrivals) return;
-    while (arriving) {
+    while (arriving && made < cap) {
       const r = await c.eval(ARRIVE + "(" + JSON.stringify(nextName()) + "," +
                              JSON.stringify(targets[made % targets.length]) + ")").catch(() => ({ ok: 0 }));
       if (r && r.ok) made++;
@@ -348,7 +353,18 @@ async function panProbe(c, tag, ms, withArrivals, targets, nextName) {
   arriving = false;
   await feed;
   const f = await c.eval(FRAMES_OFF);
-  const row = { tag, withArrivals, arrivalsDuring: made, ...f };
+  const wallMs = Date.now() - t0;
+  // rAF stops while the window is occluded or minimised, and the gap that leaves is not a
+  // frame -- it is the absence of frames. A probe whose wall clock ran far past what was
+  // asked for did not measure a pan, and its worst frame must not be quoted as one.
+  const suspect = wallMs > ms * 2.5;
+  const row = { tag, withArrivals, arrivalsDuring: made, wallMs, suspect, ...f };
+  if (suspect) {
+    console.log("  " + tag + ": DISCARDED -- the probe asked for " + ms + " ms and took " +
+                wallMs + " ms, so rAF was suspended or the thread was pinned. Not a frame time.");
+    panRows.push(row);
+    return row;
+  }
   panRows.push(row);
   console.log("  " + tag.padEnd(30) +
               " frames " + String(f.frames).padStart(4) +
@@ -646,13 +662,15 @@ async function main() {
     console.log("  a drag is not in liveBusy(), so a rebuild lands mid-drag; these are the frames");
     for (const r of panRows) {
       console.log("  " + r.tag.padEnd(24) + (r.withArrivals ? " under arrivals " : " quiet          ") +
+                  (r.suspect ? " DISCARDED (rAF suspended, " + r.wallMs + " ms wall)" : "") +
                   " median " + String(r.median).padStart(6) + " ms" +
                   "  p95 " + String(r.p95).padStart(7) + " ms" +
                   "  worst " + String(r.worst).padStart(8) + " ms" +
                   "  frames over 50 ms: " + r.long50 + " of " + Math.max(0, r.frames - 1));
     }
-    const quiet = panRows.filter((r) => !r.withArrivals);
-    const busy = panRows.filter((r) => r.withArrivals);
+    const good = panRows.filter((r) => !r.suspect);
+    const quiet = good.filter((r) => !r.withArrivals);
+    const busy = good.filter((r) => r.withArrivals);
     if (quiet.length > 1) {
       console.log("  quiet pan, first mount -> last: p95 " + quiet[0].p95 + " -> " + quiet[quiet.length - 1].p95 +
                   " ms, worst " + quiet[0].worst + " -> " + quiet[quiet.length - 1].worst + " ms");
