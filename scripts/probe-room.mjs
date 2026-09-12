@@ -8,6 +8,7 @@ import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { leftWindowArgs } from "./screen.mjs";
+import { keepFocus } from "./focus.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = dirname(HERE);
@@ -296,6 +297,8 @@ let filmDir = "";
 let page = null;
 let chrome = null;
 try {
+  // github#129, github#135
+  const focus = await keepFocus();
   chrome = spawn(findChrome(), [
     `--remote-debugging-port=${PORT}`, `--user-data-dir=${profile}`,
     "--no-first-run", "--no-default-browser-check", "--disable-extensions",
@@ -304,6 +307,7 @@ try {
     "--disable-background-timer-throttling",
     ...leftWindowArgs(WINDOW[0], WINDOW[1]), `--app=${baseUrl}`,
   ], { stdio: "ignore" });
+  void focus.watch(chrome.pid);
 
   for (let i = 0; i < 60 && !page; i++) {
     await sleep(400);

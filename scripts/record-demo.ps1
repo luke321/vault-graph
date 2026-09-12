@@ -25,6 +25,11 @@ $ErrorActionPreference = 'Stop'
 $here = Split-Path -Parent $MyInvocation.MyCommand.Path
 $repo = Split-Path -Parent $here
 
+# github#135 -- once, unconditionally, before any use. The capture-size correction below reads
+# [Windows.Forms.Screen] whether or not -Monitor was passed, so loading it inside that branch
+# threw "Unable to find type" on -Square -X -Y, after Chrome was up and the screen lock taken.
+Add-Type -AssemblyName System.Windows.Forms
+
 $probe = $Port
 while ($probe -lt $Port + 12) {
   $inUse = $false
@@ -75,7 +80,6 @@ $chrome = (Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\App
 
 $posX = 40; $posY = 40
 if ($Monitor) {
-  Add-Type -AssemblyName System.Windows.Forms
   $screens = @([System.Windows.Forms.Screen]::AllScreens)
   $target = switch ($Monitor) {
     'primary' { $screens | Where-Object { $_.Primary } | Select-Object -First 1 }
@@ -229,7 +233,6 @@ if (-not $dwmOk) {
   $r = $wr
 }
 
-Add-Type -AssemblyName System.Windows.Forms -ErrorAction SilentlyContinue
 $screen = [System.Windows.Forms.Screen]::FromHandle($hwnd)
 $wa = $screen.WorkingArea
 $cl = [Math]::Max($r.L, $wa.X); $ct = [Math]::Max($r.T, $wa.Y)

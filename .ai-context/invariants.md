@@ -2619,9 +2619,12 @@ release cannot go out without it.
 `mountVaultGraph`'s handle has a `destroy()`, and the plugin's `teardown()` calls it. After
 it, nothing this mount registered outside its own element is still registered: the
 `ResizeObserver` on the root and the two on the heatmap band are disconnected, the document's
-`mousemove` and `visibilitychange` listeners and the window `resize` fallbacks are removed,
-every animation frame and timer in flight is cancelled, `cascade()` refuses to start, and the
-renderer is killed last. The host still owns the root and empties it itself.
+`mousemove` and `visibilitychange` listeners, the window `resize` fallbacks and the
+`matchMedia("(max-width: 720px)")` change handler are removed, every animation frame and timer
+in flight is cancelled, `cascade()` refuses to start, and the renderer is killed last **and its
+handle dropped** — `renderer = null`, so the `if (renderer)` guard every call site already
+carries actually stops a handler that outlives the destroy. The host still owns the root and
+empties it itself.
 
 ```bash
 node scripts/teardown-check.mjs --vault ./demo-vault           # six destroy+remount cycles, at rest
@@ -2648,6 +2651,22 @@ with `destroy()` the same cascade stops where it stands (155 frames, `busy` fals
 
 The check is manual and not in `smoke.mjs`: a cycle replaces the page's root and its `__vg`,
 and the suite's checks share one page.
+
+**github#135 — one listener put the whole of this back.** The `matchMedia` handler
+`github#131` added registered with no remover. A `MediaQueryList` lives on the window, so the
+handler on it held the entire `mountVaultGraph` closure — graph, renderer, detached root — and
+the previous mount survived every cycle. Re-measured on the same 10k fixture, same six cycles:
+
+| | heap MB (post-GC) | DOM nodes | JS listeners | document mousemove | document visibilitychange |
+|---|---|---|---|---|---|
+| before, load → cycle 6 | 16.0 → 67.5 | 683 → 4524 | 186 → 1206 | 2 → 2 | 1 → 1 |
+| after, load → cycle 6 | 16.0 → 16.3 | 683 → 684 | 186 → 186 | 2 → 2 | 1 → 1 |
+
+**+640 DOM nodes, +170 listeners and +8.58 MB per cycle**, against the check's 1.5 MB/cycle
+bound. The two document counts stayed correct throughout, which is what made this read as a
+small omission: the leaked listeners were not new registrations but the previous mount's own,
+kept alive by the one closure nobody released. So a claim of this shape is only worth what the
+harness says about it — the document columns alone would have called it clean.
 
 ## The plugin behaves inside a real Obsidian
 

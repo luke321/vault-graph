@@ -1,4 +1,4 @@
-﻿#!/usr/bin/env node
+#!/usr/bin/env node
 
 import { attach } from "./cdp.mjs";
 import { spawn, spawnSync } from "node:child_process";
