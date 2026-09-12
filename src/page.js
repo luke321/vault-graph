@@ -5533,9 +5533,19 @@ function mountVaultGraph(root, data, deps) {
     (function () {
       var captor = renderer.getMouseCaptor && renderer.getMouseCaptor();
       if (!captor) return;
-      captor.on("mousedown", function () { dragging = true; dragStartedAt = NOW(); });
+      // Mirror the captor's OWN condition. It emits "mousedown" unconditionally but sets
+      // isMouseDown only for button 0, and emits "mouseup" only when isMouseDown -- so
+      // binding both unconditionally left `dragging` true after a right-click, with no
+      // matching mouseup, until the DRAG_MAX_MS cap expired. A context menu is not a drag.
+      captor.on("mousedown", function (e) {
+        var o = e && e.original;
+        if (o && o.button !== undefined && o.button !== 0) return;
+        dragging = true; dragStartedAt = NOW();
+      });
       captor.on("mouseup", function () { dragging = false; dragEndedAt = NOW(); });
-      // The button can come up outside the canvas, where the captor never hears it.
+      // Belt to that braces: the captor binds its own mouseup on the document, so a release
+      // outside the canvas does reach it -- but only while isMouseDown, which the gate above
+      // now keeps in step. This costs one listener and removes a whole class of stuck flag.
       var onDocUp = function () {
         if (!dragging) return;
         dragging = false; dragEndedAt = NOW();
