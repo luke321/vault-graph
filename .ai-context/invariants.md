@@ -2771,9 +2771,50 @@ hidden, 20 after** -- twice in a row. The wake is a 500 ms poll that runs only w
 waiting, because `active-leaf-change` / `layout-change` do not carry the case: switching away
 fired five of them and `revealLeaf` fired none.
 
+**A rebuild waits for the HAND as well as for the leaf (github#120).** The block above is not
+merely slow, it lands wherever the reader happens to be -- and until github#120 `liveBusy()` was
+`cascadeRun || anim || play`, which does not include a drag. So a rebuild ran `ingest`,
+`hardRelayout` and `cascade` synchronously in the middle of a pan. Measured in a real Obsidian on
+the demo fixture, driving a six-second drag and reading the rAF interval distribution back:
+
+| | quiet pan | pan with notes arriving |
+|---|---|---|
+| median frame | 16.7 ms | **16.7 ms** |
+| worst frame, mounts 1-4 | 16.9 / 16.9 / 33.4 / 17.0 ms | **371 / 687 / 653 / 702 ms** |
+| frames over 50 ms | 0, every time | 4 per six-second drag |
+
+**The median never moves**, which is why it reads as a stutter rather than a slowdown: one frozen
+frame per rebuild, and nothing else. The quiet row is the control that matters -- it stays flat
+while the vault doubles from 1,403 to 2,218 notes, so panning itself does not degrade with vault
+size and every bit of the damage is the rebuild landing under the pointer.
+
+A drag now counts as owning the frame loop. No new machinery: `livePending` and the 120 ms drain
+already held data for a busy cascade, so the rebuild lands as soon as the hand stops. A 250 ms
+grace covers the camera's inertia after mouseup, and a 5,000 ms cap means a mouseup lost outside
+the canvas cannot starve the rebuild for the life of the view.
+
+**`render()` registers nothing that outlives it (github#120).** `render()` reruns on Refresh and
+on any rebuild whose churn passes `LIVE_MAX_CHANGED`, while `registerEvent` and `registerDomEvent`
+only release when the **view** unloads. Three registrations sat inside it. Measured over three
+hidden bursts of 250 notes each, identical runs on either side of the fix:
+
+| | before | after |
+|---|---|---|
+| vault and cache handlers | 51 -> 63 | **45 -> 45** |
+| view event refs | 16 -> 30 | **8 -> 8** |
+| DOM listeners | +548 | **+41** |
+| DOM nodes | +3,573 | **+1,668** |
+| JS heap | +17.2 MB | **+3.7 MB** |
+
+Six handlers and seven refs per remount, each firing on every metadata event. The DOM row is a
+second leak with the same cause: `registerDomEvent` files the element on the view's list, so every
+discarded page subtree stayed reachable -- about 2,150 nodes per dead page. The remaining +1,668
+is legitimate, being 533 genuinely new notes in the legend and lists.
+
 ```bash
 node scripts/build-plugin.mjs
 node scripts/obsidian-smoke.mjs --only live      # a real Obsidian, throwaway copy of a fixture
+node scripts/live-growth-check.mjs --view open --pan    # github#120, minutes not seconds
 ```
 
 ## Word counts land by path, and an index stopped meaning a node
