@@ -83,7 +83,9 @@ wearing the first one's clothes.
   throughout, the helper keeps the harness alive forever. Both were measured, in that order.
 
 Every failure path degrades to a no-op. A harness must still run on a machine where none of this
-can work, and it must not be the guard's fault when it does not.
+can work, and it must not be the guard's fault when it does not. `VG_NO_FOCUS_GUARD=1` turns it
+off outright — both as an escape hatch if it ever misbehaves, and because it is what makes a real
+before/after possible: the same harness, the same rig, the guard the only difference.
 
 ## Why the check is not in the suite
 
@@ -103,3 +105,8 @@ node scripts/focus-check.mjs --runs 5 -- node scripts/shoot.mjs --vault .fixture
 
 It passes when every run ends holding the keyboard and no single loss reaches a second, which is
 the ticket's own bar.
+
+It takes `screen-left` for harnesses that do not, and **must be given `--no-lock` for the ones that
+do** — `smoke.mjs`, `spike-check.mjs`, `obsidian-smoke.mjs`. Holding the lock outside them makes
+their own acquire wait out this run's stale window, which is the same nesting `github#87` and
+`CLAUDE.md` already warn about for `pre-push`.

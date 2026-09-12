@@ -12,7 +12,9 @@ const ROOT = dirname(HERE);
 const argv = process.argv.slice(2);
 const dashdash = argv.indexOf("--");
 if (dashdash < 0 || dashdash === argv.length - 1) {
-  console.error("usage: node scripts/focus-check.mjs [--runs N] [--no-lock] -- <harness command>");
+  console.error("usage: node scripts/focus-check.mjs [--runs N] [--no-lock] -- <harness command>\n" +
+    "  --no-lock is REQUIRED when the harness takes screen-left itself (smoke.mjs, spike-check.mjs,\n" +
+    "  obsidian-smoke.mjs): holding it out here makes their own acquire wait out this run. github#87");
   process.exit(2);
 }
 const opts = argv.slice(0, dashdash);
@@ -76,7 +78,15 @@ try {
     const res = {
       steals: Number(f.steals), away: Number(f.away_ms), longest: Number(f.longest_ms),
       run: Number(f.run_ms), kept: f.kept === "True", exit: Number(f.exit),
+      lockTimeout: Number(f.locktimeout),
     };
+    // github#129
+    if (res.exit !== 0) {
+      console.log(`run ${i}: harness exited ${res.exit} after ${res.run} ms -- not a measurement. ` +
+                  `Run it on its own and fix that first.`);
+      results.push(null);
+      continue;
+    }
     results.push(res);
     const who = text.match(/^EVENT \d+ (?!.*focus check)(.*)$/m)?.[1];
     console.log(`run ${i}: ${res.steals} steal(s), ${res.away} ms without the keyboard ` +
@@ -97,8 +107,23 @@ const lost = got.filter((r) => !r.kept);
 console.log(`\n${stole.length}/${got.length} run(s) lost the keyboard at all; ` +
             `worst single loss ${worst} ms; ${lost.length} ended without it.`);
 
-// github#129
-const ok = lost.length === 0 && worst < 1000;
-console.log(ok ? "PASS -- every run ended holding the keyboard, and no loss reached a second"
-               : "FAIL -- a run lost the keyboard for a second or more, or never got it back");
-process.exit(ok ? 0 : 1);
+// github#129, design/0018
+const failed = lost.length > 0 || worst >= 1000;
+if (failed) {
+  console.log("FAIL -- a run lost the keyboard for a second or more, or never got it back");
+  process.exit(1);
+}
+if (!stole.length) {
+  const lt = got[0].lockTimeout;
+  console.log(
+    `INCONCLUSIVE -- no run was ever stolen from, so nothing was exercised. A fixed harness and a\n` +
+    `machine that is refusing every activation look identical from here, and Windows is currently\n` +
+    `set to ForegroundLockTimeout = ${lt} ms${lt > 1000 ? " (it refuses them)" : ""}.\n` +
+    `Confirm the environment can still reproduce it before believing a clean run:\n` +
+    `  VG_NO_FOCUS_GUARD=1 on the same command must show steals. If it does not, the machine is\n` +
+    `  masking the defect rather than the guard fixing it.`);
+  process.exit(2);
+}
+console.log(`PASS -- ${stole.length} run(s) were stolen from and every one got the keyboard back ` +
+            `within ${worst} ms`);
+process.exit(0);

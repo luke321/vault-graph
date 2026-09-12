@@ -72,7 +72,8 @@ export function shapeDeltas(shape) {
   if (!!shape.grid !== d.grid) {
     out.push(`the grid is ${shape.grid ? "on" : "off"} (default ${d.grid ? "on" : "off"})`);
   }
-  if (shape.headed) out.push("--headed (default: positioned off-screen)");
+  // github#129
+  if (shape.headed) out.push("--headed (default: the window is placed on the harness display)");
   if (shape.port) out.push(`--port ${shape.port} (default: a free port per lane)`);
   const chrome = shape.chrome || d.chrome;
   if (chrome !== d.chrome) {

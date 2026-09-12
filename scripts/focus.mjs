@@ -15,6 +15,8 @@ let helperFailed = false;
 function startHelper() {
   if (helper || helperFailed) return helper;
   if (process.platform !== "win32") { helperFailed = true; return null; }
+  // design/0018
+  if (process.env.VG_NO_FOCUS_GUARD) { helperFailed = true; return null; }
   let proc;
   try {
     proc = spawn("powershell.exe",

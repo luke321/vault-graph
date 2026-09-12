@@ -23,6 +23,7 @@ Add-Type -Namespace Win -Name Standin -MemberDefinition @'
   [DllImport("user32.dll")] public static extern bool AttachThreadInput(uint from, uint to, bool attach);
   [DllImport("user32.dll")] public static extern int GetWindowText(IntPtr h, System.Text.StringBuilder s, int n);
   [DllImport("kernel32.dll")] public static extern uint GetCurrentThreadId();
+  [DllImport("user32.dll")] public static extern bool SystemParametersInfo(uint a, uint p, ref uint v, uint w);
 '@
 function Describe($h) {
   $q = 0; [void][Win.Standin]::GetWindowThreadProcessId($h, [ref] $q)
@@ -101,6 +102,8 @@ if ($tail.hwnd -ne $me) {
 }
 $lines = New-Object System.Collections.Generic.List[string]
 foreach ($e in $events) { $lines.Add(("EVENT {0} {1}" -f $e.ms, $e.desc)) }
-$lines.Add("RESULT steals=$steals away_ms=$away longest_ms=$longest run_ms=$total kept=$($tail.hwnd -eq $me) exit=$($child.ExitCode)")
+$lockTimeout = 0
+[void][Win.Standin]::SystemParametersInfo(0x2000, 0, [ref] $lockTimeout, 0)
+$lines.Add("RESULT steals=$steals away_ms=$away longest_ms=$longest run_ms=$total kept=$($tail.hwnd -eq $me) exit=$($child.ExitCode) locktimeout=$lockTimeout")
 $lines | Set-Content $Log -Encoding utf8
 $form.Close()
