@@ -599,11 +599,19 @@ class VaultGraphView extends ItemView {
     this.liveDeferred = false;
   }
 
+  // github#120 -- does the page say a hand is on the disc? Absent on an older page build,
+  // in which case nothing is deferred and the behaviour is what it was.
+  interacting() {
+    const api = this.handle && this.handle.api;
+    return !!(api && typeof api.interacting === "function" && api.interacting());
+  }
+
   // github#72, design/0014
   startLiveWake() {
     if (this.liveWake !== null) return;
     this.liveWake = window.setInterval(() => {
-      if (!this.liveVisible()) return;
+      // github#120 -- one retry loop, both reasons to wait: unseen, or being dragged.
+      if (!this.liveVisible() || this.interacting()) return;
       this.stopLiveWake();
       this.scheduleLive();
     }, LIVE_WAKE_MS);
@@ -677,6 +685,13 @@ class VaultGraphView extends ItemView {
     if (!api || typeof api.applyData !== "function") return;
     // github#72, design/0014
     if (!this.liveVisible()) { this.liveDeferred = true; this.startLiveWake(); return; }
+    // github#120 -- and not while a hand is on the disc. Deferring applyData alone was not
+    // enough: buildData below walks the whole metadata cache on the main thread BEFORE
+    // applyData is ever consulted, so the stall stayed and kept scaling with the vault --
+    // measured 417 ms at 1,407 notes rising to 867 ms at 2,181 with the page-side gate
+    // already in. Same shape as the hidden-leaf case above: nothing is built, dirtyPaths
+    // keeps accumulating, and the wake poll retries.
+    if (this.interacting()) { this.liveDeferred = true; this.startLiveWake(); return; }
     this.liveDeferred = false;
     this.stopLiveWake();
     if (this.liveBuilding) { this.liveAgain = true; return; }

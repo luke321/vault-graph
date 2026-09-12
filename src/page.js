@@ -180,6 +180,7 @@
  * @property {GraphLike} graph
  * @property {RendererLike | undefined} renderer   set by makeRenderer() before the api exists; a getter, so a host reads the live one
  * @property {(next: VaultData, opts?: { renames?: Record<string, string> }) => LiveResult} applyData   github#72
+ * @property {() => boolean} interacting   github#120: a drag owns the frame loop; do not build either
  * @property {(path: string, words: number) => boolean} setWords   github#72: by PATH, never by index
  * @property {() => void} readTheme
  * @property {() => void} placeLogo
@@ -9997,6 +9998,12 @@ function mountVaultGraph(root, data, deps) {
     API = window.__vg = { graph: graph,
                     // github#72
                     applyData: applyData,
+                    // github#120 -- NOT part of the debug API, because the host needs it in a
+                    // shipped build. Deferring applyData alone left most of the stall in place:
+                    // the host runs its own buildData over the whole metadata cache before it
+                    // ever calls applyData, and that is the long task that scales with the
+                    // vault. The host asks this before building, not only before applying.
+                    interacting: dragOwnsFrames,
                     setWords: setWords,
                     readTheme: readTheme, get renderer() { return renderer; },
                     placeLogo: placeLogo,
