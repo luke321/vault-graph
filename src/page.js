@@ -5712,6 +5712,45 @@ function mountVaultGraph(root, data, deps) {
     }
   });
 
+  /* ------------------------------------------- github#131, design/0019 -- two readings */
+
+  var reading = "groups";
+  /** @type {Record<string, number>} */
+  var readScroll = { groups: 0, note: 0 };
+
+  /* github#131, design/0019, design/0013 */
+  function cardHome() {
+    var d = $("detail"), note = $("readnote"), canvas = $("canvas");
+    if (!d || !note || !canvas) return;
+    var want = narrow() ? canvas : note;
+    if (d.parentNode !== want) want.appendChild(d);
+  }
+
+  /** @param {string} which */
+  function setReading(which) {
+    var tabs = $("tabs"), tg = $("tabgroups"), tn = $("tabnote");
+    var pg = $("readgroups"), pn = $("readnote"), sb = $("sidebar");
+    if (!tabs || !tg || !tn || !pg || !pn) return;
+    var note = which === "note" && !!state.selected && !narrow();
+    var next = note ? "note" : "groups";
+    if (sb && next !== reading) readScroll[reading] = sb.scrollTop;
+    reading = next;
+    tg.setAttribute("aria-selected", note ? "false" : "true");
+    tn.setAttribute("aria-selected", note ? "true" : "false");
+    tn.disabled = !state.selected || narrow();
+    pg.hidden = note;
+    pn.hidden = !note;
+    if (sb) sb.scrollTop = readScroll[reading] || 0;
+  }
+
+  /* github#131, design/0019 */
+  if (WIN.matchMedia) {
+    var readMq = WIN.matchMedia("(max-width: 720px)");
+    var onReadMq = function () { cardHome(); setReading(reading); afterPanel(); };
+    if (readMq.addEventListener) readMq.addEventListener("change", onReadMq);
+    else if (readMq.addListener) readMq.addListener(onReadMq);
+  }
+
   /** @param {string | null} id */
   function select(id) {
     // github#86 -- clicking any copy selects the NOTE
@@ -5725,7 +5764,8 @@ function mountVaultGraph(root, data, deps) {
     state.selected = id;
     syncLazyEdges();
     var d = $("detail");
-    if (!id) { d.hidden = true; renderer.refresh(); return; }
+    // github#131, design/0019
+    if (!id) { d.hidden = true; setReading("groups"); renderer.refresh(); return; }
 
     var a = graph.getNodeAttributes(id);
     var nb = neighboursOf(id).slice().sort(function (p, q) {
@@ -5754,7 +5794,9 @@ function mountVaultGraph(root, data, deps) {
       '<div class="chip" style="border-style:dashed">' + esc(a.folder) +
         (a.sub ? ' / ' + esc(a.sub) : '') + ' / ' + esc(a.ntype) + '</div>' +
       '<div class="actions">' +
-        (a.ghost ? "" : '<a class="open" href="obsidian://open?vault=' + vault + '&file=' + file + '">Open in Obsidian</a>') +
+        // github#131
+        (a.ghost ? "" : '<a class="open" title="Open in Obsidian" href="obsidian://open?vault=' +
+                        vault + '&file=' + file + '">Open</a>') +
         '<button class="btn pin" data-pin="' + id + '" aria-pressed="' + isPinned(id) + '" title="' +
           (isPinned(id) ? "Unpin from hub" : "Pin to hub") + '">' + pinSvg(isPinned(id)) +
           ' Pin to hub</button>' +
@@ -5784,6 +5826,9 @@ function mountVaultGraph(root, data, deps) {
     Array.prototype.forEach.call(d.querySelectorAll("[data-tr]"), /** @param {HTMLElement} b */ function (b) {
       b.onclick = function () { trailBackTo(+b.getAttribute("data-tr")); };
     });
+    // github#131, design/0019
+    cardHome();
+    setReading("note");
     renderer.refresh();
   }
 
@@ -6706,6 +6751,12 @@ function mountVaultGraph(root, data, deps) {
       if (t) setDim(t.getAttribute("data-dim") || "folder", true);
     });
     syncDimUI();
+
+    // github#131, design/0019 -- the two readings
+    if ($("tabgroups")) $("tabgroups").onclick = function () { setReading("groups"); };
+    if ($("tabnote")) $("tabnote").onclick = function () { setReading("note"); };
+    cardHome();
+    setReading("groups");
 
     $("allon").onclick = function () {
       seedHidden();

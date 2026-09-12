@@ -32,10 +32,23 @@
       <div id="vg-hits"></div>
     </div>
 
+    <!-- github#131, design/0019 -- two readings, one column. The readings are plain
+         wrappers on purpose: `hidden` is unreliable on anything this stylesheet gives a
+         display of its own, and hiding a wrapper sidesteps that for everything inside it. -->
     <div class="block">
-      <span id="vg-dim" class="dimseg dimfull" role="group" aria-label="Group the disc by"><button type="button" data-dim="folder" aria-pressed="true" title="Cut the disc by folder"><span class="dimnm">Folders</span><span class="dimct"></span></button><button type="button" data-dim="tag" aria-pressed="false" title="Cut the disc by tag: the first tag a note lists files it"><span class="dimnm">Tags</span><span class="dimct"></span></button></span>
-      <div class="mini dimall"><button id="vg-allon">All</button><button id="vg-alloff">None</button></div>
-      <div id="vg-legend"></div>
+      <div id="vg-tabs" class="tabs" role="tablist" aria-label="Sidebar reading">
+        <button id="vg-tabgroups" type="button" class="tab" role="tab"
+                aria-selected="true" aria-controls="vg-readgroups">Groups</button>
+        <button id="vg-tabnote" type="button" class="tab" role="tab" disabled
+                aria-selected="false" aria-controls="vg-readnote"
+                title="Click a note on the disc to read it here">Selected note</button>
+      </div>
+      <div id="vg-readgroups" role="tabpanel" aria-labelledby="vg-tabgroups">
+        <span id="vg-dim" class="dimseg dimfull" role="group" aria-label="Group the disc by"><button type="button" data-dim="folder" aria-pressed="true" title="Cut the disc by folder"><span class="dimnm">Folders</span><span class="dimct"></span></button><button type="button" data-dim="tag" aria-pressed="false" title="Cut the disc by tag: the first tag a note lists files it"><span class="dimnm">Tags</span><span class="dimct"></span></button></span>
+        <div class="mini dimall"><button id="vg-allon">All</button><button id="vg-alloff">None</button></div>
+        <div id="vg-legend"></div>
+      </div>
+      <div id="vg-readnote" role="tabpanel" aria-labelledby="vg-tabnote" hidden></div>
     </div>
 
     <div class="block">
