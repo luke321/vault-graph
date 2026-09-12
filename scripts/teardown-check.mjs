@@ -9,6 +9,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { attach } from "./cdp.mjs";
 import { leftWindowArgs } from "./screen.mjs";
+import { keepFocus } from "./focus.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(HERE, "..");
@@ -56,6 +57,8 @@ if (!url) {
 
 const PORT = await freePort();
 const profile = mkdtempSync(join(tmpdir(), "vg-teardown-"));
+// github#129
+const focus = await keepFocus();
 const chrome = spawn(findChrome(), [
   `--remote-debugging-port=${PORT}`, `--user-data-dir=${profile}`,
   "--no-first-run", "--no-default-browser-check", "--disable-extensions",
@@ -67,6 +70,7 @@ const chrome = spawn(findChrome(), [
   "--disable-background-timer-throttling",
   ...leftWindowArgs(1600, 1000), `--app=${url}`,
 ], { stdio: ["ignore", "ignore", "ignore"] });
+void focus.watch(chrome.pid);
 
 let p = null;
 for (let i = 0; i < 100 && !p; i++) {

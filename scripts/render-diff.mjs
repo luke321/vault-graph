@@ -9,6 +9,7 @@ import { fileURLToPath } from "node:url";
 import { inflateSync } from "node:zlib";
 import { attach } from "./cdp.mjs";
 import { leftWindowPos } from "./screen.mjs";
+import { keepFocus } from "./focus.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(HERE, "..");
@@ -620,6 +621,8 @@ async function runVault(vault, reference, current, chrome) {
   let nowHtml = current;
   if (!nowHtml) { nowHtml = join(dir, "now.html"); build(vault, nowHtml); }
   const profile = mkdtempSync(join(tmpdir(), "vg-render-diff-profile-"));
+  // github#129
+  const focus = await keepFocus();
   const proc = spawn(chrome, [
     "--remote-debugging-port=" + PORT, "--user-data-dir=" + profile,
     "--no-first-run", "--no-default-browser-check", "--disable-extensions", "--disable-sync",
@@ -630,6 +633,7 @@ async function runVault(vault, reference, current, chrome) {
     ...(HEADED ? [] : [leftWindowPos(WINDOW[0], WINDOW[1])]), "--window-size=" + WINDOW[0] + "," + WINDOW[1],
     "--app=data:text/html,render-diff",
   ], { stdio: "ignore" });
+  void focus.watch(proc.pid);
   const results = [];
   shotTag.vault = basename(vault).replace(/-[0-9a-f]{8}$/, "");
   try {

@@ -1,14 +1,5 @@
 #!/usr/bin/env node
-// github#129, design/0018 -- does a harness run leave the keyboard where it found it?
-//
-//   node scripts/focus-check.mjs --runs 5 -- node scripts/shoot.mjs --vault .fixtures/x --out shots
-//
-// Everything after `--` is the harness to run. It is run `--runs` times because the theft is
-// intermittent: two identical runs measured 8445 ms stolen and 0 ms stolen, so a single clean run
-// proves nothing. What counts is the rate and the worst case.
-//
-// Not a smoke check, and deliberately so: it needs its own foreground window and it measures
-// something that varies run to run, which is a flaky gate rather than an invariant.
+// github#129, design/0018
 
 import { spawnSync } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
@@ -36,7 +27,7 @@ if (process.platform !== "win32") {
   process.exit(2);
 }
 
-// github#87 -- a stand-in window takes the keyboard and the harness draws on a screen
+// github#87
 const LOCK = "screen-left";
 const owner = "focus-check [" + process.pid + "]";
 let holdsLock = false;
@@ -106,7 +97,7 @@ const lost = got.filter((r) => !r.kept);
 console.log(`\n${stole.length}/${got.length} run(s) lost the keyboard at all; ` +
             `worst single loss ${worst} ms; ${lost.length} ended without it.`);
 
-// github#129's "done when": the keyboard comes back, and any loss is under a second
+// github#129
 const ok = lost.length === 0 && worst < 1000;
 console.log(ok ? "PASS -- every run ended holding the keyboard, and no loss reached a second"
                : "FAIL -- a run lost the keyboard for a second or more, or never got it back");

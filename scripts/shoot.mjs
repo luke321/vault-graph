@@ -53,7 +53,6 @@ const chrome = spawn(findChrome(), [
   "--no-first-run", "--no-default-browser-check",
   ...leftWindowArgs(1600, 1000), `--app=${url}`,
 ], { stdio: "ignore" });
-// github#129 -- the steal lands after the attach, so the watch runs alongside the run
 void focus.watch(chrome.pid);
 
 let page = null;
