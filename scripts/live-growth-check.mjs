@@ -35,6 +35,11 @@ const PAN_ONLY = flag("pan-only");
 const PAN = PAN_ONLY || flag("pan");
 const BURSTS = Number(arg("bursts", "3"));
 const BURST_NOTES = Number(arg("burst-notes", "250"));
+// github#120 -- the control that bounds what this plugin can even fix. With live refresh
+// off, the plugin does no work at all on an arrival: no rebuild, no build, no apply. Any
+// stall that survives is Obsidian parsing the new note and updating resolvedLinks, which is
+// not ours to defer.
+const NO_LIVE = flag("no-live");
 const KEEP = flag("keep");
 const NO_LOCK = flag("no-lock");
 const OUT = arg("out", "");
@@ -503,6 +508,14 @@ async function main() {
   child = ob.child; cdp = ob.cdp;
   await placeElectronLeft((x) => cdp.eval(x)).catch(() => {});
   console.log("  " + (await enablePlugin(cdp)));
+
+  if (NO_LIVE) {
+    const off = await cdp.eval("(function(){ var p = app.plugins.getPlugin(" + JSON.stringify(PLUGIN_ID) + ");" +
+      " if (!p || !p.settings) return 'no settings'; p.settings.liveRefresh = false;" +
+      " return p.settings.liveRefresh === false ? 'off' : 'STILL ON'; })()");
+    console.log("  live refresh: " + off + " -- the plugin will do NO work on an arrival");
+    if (off !== "off") throw new Error("could not turn live refresh off, so the control is meaningless");
+  }
 
   if (VIEW_MODE === "open") {
     const ms = await openGraph(cdp);

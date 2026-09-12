@@ -5544,6 +5544,14 @@ function mountVaultGraph(root, data, deps) {
         dragging = true; dragStartedAt = NOW();
       });
       captor.on("mouseup", function () { dragging = false; dragEndedAt = NOW(); });
+      // What actually catches a lost mouseup, rather than a timeout guessing at one: the
+      // next move with the left button no longer held says the drag is over. bindNodeDrag
+      // reads `buttons` the same way for the same reason.
+      captor.on("mousemovebody", function (e) {
+        if (!dragging) return;
+        var o = e && e.original;
+        if (o && o.buttons !== undefined && !(o.buttons & 1)) { dragging = false; dragEndedAt = NOW(); }
+      });
       // Belt to that braces: the captor binds its own mouseup on the document, so a release
       // outside the canvas does reach it -- but only while isMouseDown, which the gate above
       // now keeps in step. This costs one listener and removes a whole class of stuck flag.
@@ -9789,9 +9797,13 @@ function mountVaultGraph(root, data, deps) {
   var dragStartedAt = 0;
   // Inertia keeps the camera moving briefly after the button comes up.
   var DRAG_GRACE_MS = 250;
-  // A mouseup can be lost when the pointer leaves the window, and a stuck flag would
-  // starve the rebuild for as long as the view is open. Never trust the flag past this.
-  var DRAG_MAX_MS = 5000;
+  // Last resort only. This was 5,000 ms and that was a bug: the cap is meant to catch a lost
+  // mouseup, but a drag can easily run longer than five seconds, and when it did the cap
+  // disarmed the deferral mid-pan and let rebuilds back in -- measured as two long frames
+  // still landing inside a thirteen-second drag with both gates supposedly holding. The
+  // mousemovebody check below is what actually catches a lost mouseup, the same way
+  // bindNodeDrag already does; this only catches a pointer that stops moving entirely.
+  var DRAG_MAX_MS = 60000;
 
   function dragOwnsFrames() {
     if (dragging && NOW() - dragStartedAt > DRAG_MAX_MS) dragging = false;
