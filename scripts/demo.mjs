@@ -270,14 +270,7 @@ async function main() {
         await moveTo(page, w.x, w.y);
         await sleep(DWELL_MS);
         let press = w;
-        // github#124 -- the expectation moves with the target. A computed target like `biginner`
-        // picks the best note for the layout it is asked about, so when the layout has shifted
-        // between the first resolve and the press, `fresh` is a DIFFERENT note at a different
-        // point -- and comparing the hover against the stale `w.expect` reports a miss that is
-        // not one. That is what failed the 2.7.0 hero twice: the pointer sat correctly on the
-        // new best note (410, then 419) while the check still named the old one (430). It only
-        // shows up in the full storyboard, where the pin beat follows `collapsepreview` putting
-        // the panels back and resizing the stage; the `pin` act alone starts from a still layout.
+        // github#124 -- the expectation moves with the target
         let want = w.expect;
         if (w.expect) {
           const fresh = await where(page, beat.target);
