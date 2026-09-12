@@ -1381,10 +1381,6 @@ function mountVaultGraph(root, data, deps) {
   var preRootColor = null;
   /** @type {Record<string, string> | null} */
   var preRootShade = null;
-  // github#76 -- the subfolder half of the drill's recolour, read by `nodeColor` ahead of
-  // `subShade` for exactly as long as the walk runs
-  /** @type {Record<string, string> | null} */
-  var shadeShown = null;
   var colorRaf = 0, colorPrev = 0;
 
   /** @param {string} group @returns {string} */
@@ -1427,48 +1423,6 @@ function mountVaultGraph(root, data, deps) {
       colorShown = null;
       renderer.refresh({ skipIndexation: true });
     })();
-  }
-
-  // github#76 -- drilling in, the folder you opened was ONE colour on the vault disc and its
-  // children are about to take a slot each. Walk every group colour and every subfolder shade
-  // out of that one colour, so the recolour happens across the cascade rather than snapping
-  // when it lands. `colorWalk` cannot do this: it is keyed by group NAME and every name here
-  // is new, so it finds nothing to walk from.
-  /**
-   * It is driven by the CASCADE's own progress rather than a clock of its own, so the
-   * recolour cannot finish a sixth of the way in and be over before the new disc arrives --
-   * which is what a `TWEEN_MS` walk did here, under a disc that was still emptying.
-   * @param {string} fromColor the colour the root folder wore on the disc being left
-   * @returns {((pr: number) => void) | null} a per-frame painter for `CascadeOpts.onFrame`
-   */
-  function rootTintWalk(fromColor) {
-    if (!fromColor || !renderer) return null;
-    /** @type {Record<string, string>} */
-    var gTo = dict();
-    /** @type {Record<string, string>} */
-    var sTo = dict();
-    var any = false;
-    Object.keys(groupColor).forEach(function (g) {
-      if (groupColor[g] && groupColor[g] !== fromColor) { gTo[g] = groupColor[g]; any = true; }
-    });
-    Object.keys(subShade).forEach(function (k) {
-      if (subShade[k] && subShade[k] !== fromColor) { sTo[k] = subShade[k]; any = true; }
-    });
-    if (!any) return null;
-    // `regroup` starts its own name-keyed walk on the way here; it has nothing to say about a
-    // basis whose names are all new, and two writers of `colorShown` would fight.
-    if (colorRaf) { WIN.cancelAnimationFrame(colorRaf); colorRaf = 0; }
-    return function (pr) {
-      var t = pr < 0 ? 0 : pr > 1 ? 1 : pr;
-      var e = t * t * (3 - 2 * t);
-      /** @type {Record<string, string>} */
-      var gN = dict();
-      /** @type {Record<string, string>} */
-      var sN = dict();
-      Object.keys(gTo).forEach(function (g) { gN[g] = mixHex(fromColor, gTo[g], e); });
-      Object.keys(sTo).forEach(function (k) { sN[k] = mixHex(fromColor, sTo[k], e); });
-      colorShown = gN; shadeShown = sN;
-    };
   }
 
   /** @type {Record<string, string>} */
@@ -1678,10 +1632,6 @@ function mountVaultGraph(root, data, deps) {
     // github#86 -- D-3: the tint ladder answers to the filing
     var g = fileGroup(id, a);
     var k = g + "/" + fileSub(id, a);
-    // github#76 -- mid-drill the ladder is walking out of the root folder's own colour;
-    // github#76 -- ahead of `subShade`, or a shaded dot would sit out the recolour and
-    // github#76 -- snap to its new tint when the cascade lands.
-    if (shadeShown) { var sw = shadeShown[k]; if (sw) return sw; }
     var sh = subShade[k];
     if (sh) return sh;
     // github#76 -- a dot on its way out of a drilled disc keeps the shade it wore there,
@@ -8194,10 +8144,6 @@ function mountVaultGraph(root, data, deps) {
     if (next && !anyNoteUnder(next.split("/"))) return state.root;
 
     var live = !!renderer && !instant;
-    // github#76 -- the colour this folder wears on the disc being LEFT, read before the root
-    // moves. Drilling in, its children fan out of it; drilling out there is no single folder
-    // to come from, so there is nothing to walk and the outs keep their shade via preRootShade.
-    var fromColor = live && next ? colorOf(groupOfPath(next)) : "";
     /** @type {Record<string, string>} */
     var was = dict();
     if (live) {
@@ -8236,23 +8182,10 @@ function mountVaultGraph(root, data, deps) {
     hardRelayout(false, live, true);
     attempt(placeLogo); attempt(heatBuild); attempt(buildLegend);
     // github#76
-    var landed = function () {
-      preRootColor = null; preRootShade = null;
-      colorShown = null; shadeShown = null;
-    };
-    // github#76 -- a drill IS a filter, taken to its end: everything but one folder toggles
-    // off, and that folder recolours into its children while it does. So it runs the plain
-    // group-toggle cascade -- the disc empties, then the new one forms in the room that frees
-    // -- with the recolour walking across it. `cross` ran the two sets in one sweep instead,
-    // which put dots in flight between two discs and read as jumping rather than as a filter.
-    if (live) {
-      /** @type {CascadeOpts} */
-      var how = { colToggle: true };
-      if (movesFrom) how.movesFrom = movesFrom;
-      var tint = rootTintWalk(fromColor);
-      if (tint) how.onFrame = tint;
-      cascade(landed, how);
-    } else if (renderer) renderer.refresh();
+    var landed = function () { preRootColor = null; preRootShade = null; };
+    if (live) cascade(landed, movesFrom ? { colToggle: true, cross: true, movesFrom: movesFrom }
+                                        : { colToggle: true, cross: true });
+    else if (renderer) renderer.refresh();
     return state.root;
   }
 

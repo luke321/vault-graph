@@ -2454,50 +2454,6 @@ eye writes — so there is nothing to translate on the way back and no second fi
 fall out of step. Measured: hiding `People` in the drilled demo disc takes it from 60
 notes to 44, and the vault disc then shows 1387 of 1403, the same 16 notes.
 
-## A drill is a filter taken to its end, and the folder recolours while it runs
-
-github#76. A drill reads as **toggling every other folder off** and keeping the one you opened,
-so it runs the plain group-toggle cascade — `{ colToggle: true }` — and nothing else. The disc
-empties in place, and the new one forms in the room that frees.
-
-It was `{ cross: true }` for a while, and briefly github#86's clock hand. Both put dots **in
-flight between two discs**, which on a drill reads as jumping rather than as a filter: unlike a
-dimension switch, the two discs here do not share a radius, so there is no arrangement in which
-one visibly becomes the other. A dimension switch has stand-ins for exactly this reason — one
-node cannot be in two places — and a drill has none, so its dots travel. Emptying first is the
-honest version of the same event.
-
-**The folder recolours across the cascade, not when it lands.** On the vault disc the folder you
-opened is ONE colour; drilled, each of its children takes a slot of its own. `rootTintWalk`
-returns a per-frame painter that mixes every group colour **and every subfolder shade** out of
-that one colour, and it is handed to `CascadeOpts.onFrame`, so it is driven by the cascade's
-own progress and cannot drift out of step with it.
-
-Three things this gets right that the first attempt did not:
-
-- **`colorWalk` cannot do this job.** It is keyed by group NAME, and under a new root every
-  name is new, so it finds nothing to walk from and returns immediately.
-- **The shades have to walk too.** `nodeColor` returns `subShade[k]` before it ever reaches
-  `colorOf`, so a walk that only painted group colours left every shaded dot — most of a
-  drilled disc — sitting out the recolour and snapping to its tint at the end. `shadeShown` is
-  read ahead of `subShade` for exactly as long as the walk runs.
-- **A `TWEEN_MS` clock is the wrong clock.** At 380 ms against a ~2.6 s cascade the recolour
-  finished in the first sixth, while the disc was still emptying and the dots it repainted were
-  barely visible. Measured: the drilled notes still carry the folder's own green a quarter of
-  the way in, and have arrived in their own tints by the time the disc has formed.
-
-Coming back out there is no single folder to come from, so there is nothing to walk; a dot on
-its way off a drilled disc keeps its shade through `preRootShade` instead.
-
-Measured on the demo vault, driven by the real gesture over CDP: **~2.6 s in, ~2.8 s back**, and
-`settle()` is still a no-op at the end of both — 0 of 60 dots off a fresh relayout going in, 0
-of 1403 coming back, worst 0%. The goldens do not move: the resting disc is byte-identical and
-only the path to it changed.
-
-```bash
-node scripts/smoke.mjs --only "a drill animates"
-```
-
 ## A root and the tag disc are exclusive, and `setRoot` is total
 
 github#76 x github#86, decided on the merge of 2026-09-12 (D-2). A root is a **folder
