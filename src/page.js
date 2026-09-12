@@ -5528,6 +5528,25 @@ function mountVaultGraph(root, data, deps) {
       }
     });
 
+    // github#120 -- see liveBusy(): the page has to know a drag is in progress, so a
+    // rebuild can wait for the hand to stop rather than freeze a frame under it.
+    (function () {
+      var captor = renderer.getMouseCaptor && renderer.getMouseCaptor();
+      if (!captor) return;
+      captor.on("mousedown", function () { dragging = true; dragStartedAt = NOW(); });
+      captor.on("mouseup", function () { dragging = false; dragEndedAt = NOW(); });
+      // The button can come up outside the canvas, where the captor never hears it.
+      var onDocUp = function () {
+        if (!dragging) return;
+        dragging = false; dragEndedAt = NOW();
+      };
+      DOC.addEventListener("mouseup", onDocUp, true);
+      onDestroy.push(function () {
+        DOC.removeEventListener("mouseup", onDocUp, true);
+        dragging = false;
+      });
+    })();
+
     (function () {
       var cam = renderer.getCamera();
       var edgeRaf = 0;
@@ -9746,10 +9765,32 @@ function mountVaultGraph(root, data, deps) {
   var liveTimer = null;
   var LIVE_IDLE_MS = 120;
 
-  function liveBusy() { return !!(cascadeRun || anim || play); }
-  // github#72, design/0014
+  // github#120 -- a DRAG owns the frame loop too, and until now nothing here knew it.
+  // liveBusy() gated applyData on cascadeRun, anim and play, so a rebuild landed in the
+  // middle of a pan and ran ingest, hardRelayout and cascade synchronously under the
+  // pointer. Measured on the demo fixture: a quiet pan is a flat 60 fps at every mount even
+  // as the vault doubles (worst frame 17 ms), while a pan with notes arriving under it keeps
+  // the same median and takes a single frozen frame of 371 to 702 ms -- one per rebuild.
+  // Deferring costs nothing new: livePending and the 120 ms drain already exist for exactly
+  // this, and a drag is bounded by the hand doing it.
+  var dragging = false;
+  var dragEndedAt = -1e9;
+  var dragStartedAt = 0;
+  // Inertia keeps the camera moving briefly after the button comes up.
+  var DRAG_GRACE_MS = 250;
+  // A mouseup can be lost when the pointer leaves the window, and a stuck flag would
+  // starve the rebuild for as long as the view is open. Never trust the flag past this.
+  var DRAG_MAX_MS = 5000;
+
+  function dragOwnsFrames() {
+    if (dragging && NOW() - dragStartedAt > DRAG_MAX_MS) dragging = false;
+    return dragging || NOW() - dragEndedAt < DRAG_GRACE_MS;
+  }
+
+  function liveBusy() { return !!(cascadeRun || anim || play || dragOwnsFrames()); }
+  // github#72, design/0014, github#120
   function liveWhy() {
-    return cascadeRun ? "cascade" : anim ? "tween" : play ? "timeline" : "";
+    return cascadeRun ? "cascade" : anim ? "tween" : play ? "timeline" : dragOwnsFrames() ? "drag" : "";
   }
 
   // github#72, design/0014 -- `words` is deliberately not in the key
