@@ -2454,6 +2454,36 @@ eye writes — so there is nothing to translate on the way back and no second fi
 fall out of step. Measured: hiding `People` in the drilled demo disc takes it from 60
 notes to 44, and the vault disc then shows 1387 of 1403, the same 16 notes.
 
+## A drill crosses the two discs in one sweep, and two other animations were rejected
+
+github#76. `setRoot` cascades with `{ colToggle: true, cross: true }` plus `movesFrom`. Two
+alternatives were built, looked at and reverted on 2026-09-12; both are written down here so
+they are not re-tried on the strength of sounding better than they are.
+
+**github#86's clock hand** (`{ hand: true, from }`). Rejected on sight: *"there are jumps, it
+does not look like the discs vanish in place and the new one shows in place at all."* The reason
+is structural rather than a tuning problem, and it is the useful part to remember: a dimension
+switch gives every note a **stand-in** (`addStandIns`), because one node cannot be in two
+places — the old disc fades in place while the real note waits dark at its new seat — **and its
+two discs share a radius**. A drill has neither: no stand-ins, and two discs whose radii differ
+by an order of magnitude. There is no arrangement in which one visibly becomes the other, so the
+hand's dots travel, and travel is what reads as jumping. Carrying the root on a `LeftDisc` (so
+`inWorld` plans the disc being left at the root it was cut at) is the *correct* enabling change
+for that route and would be needed again — it is not what was wrong with it.
+
+**Emptying first, as a filter toggle** (`{ colToggle: true }` alone, with the folder recolouring
+across the cascade). Proposed as the alternative and rejected after looking at it too. The
+recolour machinery it needed is worth knowing about if it ever comes back: `colorWalk` cannot do
+that job because it is keyed by group NAME and every name under a new root is new; `nodeColor`
+returns `subShade[k]` before it reaches `colorOf`, so a group-only walk leaves most of a
+drilled disc snapping to its tint at the end; and a `TWEEN_MS` clock finishes in the first sixth
+of a ~2.6 s cascade, under a disc that is still emptying. Driving it from
+`CascadeOpts.onFrame` is what keeps a walk in step with the cascade it belongs to.
+
+**The goldens did not move across any of the three.** The resting disc is byte-identical whichever
+animation runs, which is what makes an animation change cheap to try and cheap to revert: the
+suite tells you nothing about it, and only looking does.
+
 ## A root and the tag disc are exclusive, and `setRoot` is total
 
 github#76 x github#86, decided on the merge of 2026-09-12 (D-2). A root is a **folder
