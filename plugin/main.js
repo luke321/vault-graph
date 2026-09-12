@@ -554,6 +554,13 @@ class VaultGraphView extends ItemView {
     this.liveWake = null;
     /** @type {import("../src/page.js").LiveResult | null} */
     this.lastLive = null;
+    // github#120 -- see render(): these two register ONCE for the view's life, not once per
+    // render. render() reruns on Refresh and on every rebuild whose churn passes
+    // LIVE_MAX_CHANGED, while registerEvent only releases when the view unloads.
+    /** @type {EventRef | null} */
+    this.cssRef = null;
+    /** @type {EventRef[] | null} */
+    this.liveRefs = null;
   }
 
   getViewType() { return VIEW_TYPE; }
@@ -618,13 +625,26 @@ class VaultGraphView extends ItemView {
   }
 
   // github#72, design/0014
+  // github#120 -- ONCE FOR THE VIEW'S LIFE, NOT ONCE PER RENDER. render() calls this, and
+  // render() reruns on Refresh and on any rebuild whose churn passes LIVE_MAX_CHANGED (a
+  // sync, an import, a folder move -- design/0014). registerEvent only releases on the
+  // view's unload, so calling this unguarded left five live handlers behind every time:
+  // measured 51 -> 69 vault and cache handlers over three remounts, +6 each with the
+  // css-change registration below. Every one of them fires on every metadata event and
+  // calls scheduleLive() again, so the per-arrival cost grows with the number of remounts
+  // -- which is felt as the disc getting progressively slower to pan while notes arrive.
   subscribeLive() {
+    if (this.liveRefs) return;
     const cache = this.app.metadataCache, vault = this.app.vault;
-    this.registerEvent(cache.on("resolved", () => this.scheduleLive()));
-    this.registerEvent(cache.on("changed", (file) => this.scheduleLive(file && file.path)));
-    this.registerEvent(vault.on("create", (file) => this.scheduleLive(file && file.path)));
-    this.registerEvent(vault.on("delete", (file) => this.scheduleLive(file && file.path)));
-    this.registerEvent(vault.on("rename", (file, oldPath) => {
+    /** @type {EventRef[]} */
+    const refs = [];
+    this.liveRefs = refs;
+    const keep = /** @param {EventRef} r */ (r) => { refs.push(r); this.registerEvent(r); };
+    keep(cache.on("resolved", () => this.scheduleLive()));
+    keep(cache.on("changed", (file) => this.scheduleLive(file && file.path)));
+    keep(vault.on("create", (file) => this.scheduleLive(file && file.path)));
+    keep(vault.on("delete", (file) => this.scheduleLive(file && file.path)));
+    keep(vault.on("rename", (file, oldPath) => {
       const to = file && file.path;
       if (to && oldPath) {
         // design/0014
@@ -805,7 +825,12 @@ class VaultGraphView extends ItemView {
     this.syncTheme();
     this.markNew();
 
-    this.registerEvent(this.app.workspace.on("css-change", () => this.syncTheme()));
+    // github#120 -- one listener for the view's life, not one per render. syncTheme() reads
+    // this.page, which every render replaces, so the single registration keeps working.
+    if (!this.cssRef) {
+      this.cssRef = this.app.workspace.on("css-change", () => this.syncTheme());
+      this.registerEvent(this.cssRef);
+    }
 
     const t0 = performance.now();
     this.handle = mountVaultGraph(page, data, {
@@ -939,7 +964,13 @@ class VaultGraphView extends ItemView {
     // github#72
     this.subscribeLive();
 
-    this.registerDomEvent(page, "click", (ev) => {
+    // github#120 -- a PLAIN listener, not registerDomEvent. `page` is built fresh by every
+    // render and thrown away by teardown(), but registerDomEvent files the element away on
+    // the view's own list, which is only released on unload -- so every remount left a whole
+    // detached page subtree reachable and uncollectable. Measured: DOM nodes 8,149 -> 14,597
+    // over three remounts, about 2,150 retained per dead page. This listener dies with the
+    // element it is on, which is exactly the lifetime it should have.
+    page.addEventListener("click", (ev) => {
       const a = ev.target instanceof Element ? ev.target.closest('a[href^="obsidian://"]') : null;
       if (!a) return;
       ev.preventDefault();
