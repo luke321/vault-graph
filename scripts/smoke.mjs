@@ -5641,7 +5641,7 @@ check("a rebuild waits for a drag, and a right-click is not a drag", async (p) =
              `{ bubbles: true, button: 0, clientX: 8, clientY: 8 }));`;
   const EL = `var el = document.querySelector('#vg-graph .vg-layer-mouse'); if (!el) return { noCanvas: true };`;
 
-  // Held left button: the rebuild must be refused, and refused FOR THAT REASON.
+  // github#120 -- refused, and refused FOR THAT REASON
   const held = await p.j(`(function(){ ${EL}
     window.__live.a = window.__live.snap();
     ${DOWN(0)}
@@ -5651,13 +5651,12 @@ check("a rebuild waits for a drag, and a right-click is not a drag", async (p) =
     return { res: res, orderWhileHeld: order, before: window.__live.a.n };
   })()`);
 
-  // Let the 250 ms grace and the 120 ms drain do their work, then the cascade.
+  // github#120 -- the 250 ms grace, the 120 ms drain, then the cascade
   await sleep(600);
   await settle(p);
   const landed = await p.j(`__vg.graph.order`);
 
-  // A context menu is not a drag: the captor emits mousedown for button 2 but never the
-  // matching mouseup, so an ungated flag would defer every right-click to the cap.
+  // github#120 -- a context menu is not a drag
   const rclick = await p.j(`(function(){ ${EL}
     ${DOWN(2)}
     var res = __vg.applyData(window.__live.clone());
@@ -5666,7 +5665,7 @@ check("a rebuild waits for a drag, and a right-click is not a drag", async (p) =
   })()`);
   await settle(p);
 
-  // Put the disc back the way the other live checks expect to find it.
+  // github#120 -- put the disc back for the other live checks
   await p.j(`__vg.applyData(window.__live.clone())`);
   await settle(p);
 

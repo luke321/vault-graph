@@ -15,8 +15,10 @@
   beside the CHANGELOG entry; a PATCH leaves it as it is, and shows nothing.
   scripts/build-plugin.mjs refuses a file that breaks any of that.
 -->
-# 2.6.0
-- Zoom in far enough to crop the disc and a small overview appears beside Fit, showing where your view sits. Click it to fit the disc again.
-- Every colour swatch now draws the dots it will actually make, sub-wedge tints and all, so you can see a colour before you choose it.
-- After an update, the graph tells you what changed: this strip, once per release. Dismiss it and it is gone.
-> vg-ov
+# 2.7.0
+- Click a note and the sidebar reads it. Nothing lands over the disc any more.
+- The sidebar holds two readings, Groups and Selected note. The tabs at its top switch between them, and each one keeps its own scroll position.
+- Close the note, or click empty space, and you are back on the groupings where you left them.
+- The disc fills more of the window, and a square pane gains the most.
+- Panning no longer freezes when notes arrive under it.
+> vg-tabs

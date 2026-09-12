@@ -1,15 +1,5 @@
 #!/usr/bin/env node
-// github#120 -- does anything grow while notes arrive continuously with the view open?
-//
-// Not a gate. This drives a REAL Obsidian for minutes; scripts/smoke.mjs stays Chrome-only
-// and ~100 s. Run it by hand, read the table, and put the numbers in
-// .ai-context/changelog-detail.md.
-//
-//   node scripts/live-growth-check.mjs --view open    --phase-sec 90
-//   node scripts/live-growth-check.mjs --view closed  --phase-sec 90
-//
-// The closed run is the control: the same arrivals with no view, which separates the
-// live-rebuild path (github#72, design/0014) from the mere act of writing files.
+// github#120 -- how to run it: .ai-context/live-growth-harness.md
 
 import { spawn, spawnSync } from "node:child_process";
 import { cpSync, existsSync, mkdirSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
@@ -36,10 +26,7 @@ const PAN_ONLY = flag("pan-only");
 const PAN = PAN_ONLY || flag("pan");
 const BURSTS = Number(arg("bursts", "3"));
 const BURST_NOTES = Number(arg("burst-notes", "250"));
-// github#120 -- the control that bounds what this plugin can even fix. With live refresh
-// off, the plugin does no work at all on an arrival: no rebuild, no build, no apply. Any
-// stall that survives is Obsidian parsing the new note and updating resolvedLinks, which is
-// not ours to defer.
+// github#120 -- the control: with this on, the plugin does no work at all
 const NO_LIVE = flag("no-live");
 const KEEP = flag("keep");
 const NO_LOCK = flag("no-lock");
@@ -53,7 +40,7 @@ if (VIEW_MODE !== "open" && VIEW_MODE !== "closed") {
   process.exit(2);
 }
 
-// The three arrival rates github#120 names: well above the debounce, at it, below it.
+// github#120 -- above the debounce, at it, and below it
 const PHASES = [
   { name: "fast", rate: 5, note: "5/s -- every arrival cancels and re-arms the debounce" },
   { name: "debounce", rate: 1, note: "1/s -- at LIVE_DEBOUNCE_MS" },
@@ -118,8 +105,7 @@ function makeThrowawayVault(src) {
 }
 
 /* -------------------------------------------------------------------- lock -- */
-// github#87 -- this harness places an Electron window on the leftmost screen, so it takes
-// that display's own lock and releases it on every way out.
+// github#87 -- this places a window on the leftmost screen
 
 const LOCK = "screen-left";
 const lockOwner = "live-growth-check #120 [" + process.pid + "]";
@@ -146,7 +132,7 @@ function dropLock() {
 }
 
 /* ----------------------------------------------------------- working set -- */
-// The JS heap cannot see WebGL buffers, textures or the GPU process. This can.
+// github#120 -- the JS heap cannot see GPU memory; this can
 
 const PS_TREE = (rootPid) => [
   "$root = [int]" + rootPid + ";",
@@ -200,7 +186,7 @@ function killObsidian(child) {
   if (process.platform === "win32") spawnSync("taskkill", ["/F", "/T", "/PID", String(child.pid)], { stdio: "ignore" });
 }
 
-// CLAUDE.md -- a generated vault opens untrusted, and until this runs the plugin reads as broken.
+// github#120 -- enable the plugin, never click the trust dialog
 async function enablePlugin(c) {
   if (await c.eval("!!app.plugins.getPlugin(" + JSON.stringify(PLUGIN_ID) + ")")) return "already enabled";
   await c.eval("(async function(){ await app.plugins.setEnable(true); return true; })()");
@@ -230,13 +216,12 @@ async function openGraph(c) {
   return Date.now() - t0;
 }
 
-/** The disc is at rest when nothing is queued, nothing is drawing, and no dot moved. */
+// github#120 -- rest: nothing queued, nothing drawing, nothing moving
 async function atRest(c, ms) {
   const deadline = Date.now() + ms;
   let prev = null, same = 0;
   for (;;) {
-    // NOT __vg.liveState(): build-plugin.mjs strips the demo and debug API from the plugin
-    // build (stripDemoAndDebug), so it does not exist here at all. The view's own fields do.
+    // github#120 -- the plugin build has no __vg debug API
     const k = await c.eval("(function(){ var vg = window.__vg; if (!vg || !vg.graph) return 'no-vg';" +
       " var v = " + VIEW + ";" +
       " if (v && (v.liveBuilding || v.liveTimer !== null || v.liveAgain ||" +
@@ -251,17 +236,14 @@ async function atRest(c, ms) {
 }
 
 /* ----------------------------------------------------------------- arrivals -- */
-// One note per tick, each linking to an existing note so the rebuild takes the structural
-// path (design/0014 -- a words-only diff moves nothing and is not what github#120 reports).
+// design/0014 -- each arrival links a note, for the structural path
 
 const ARRIVE = "(async function(path, link){" +
   " var body = 'Arrival note for github#120.\\n\\n[[' + link + ']]\\n\\nfiller ' + path + '\\n';" +
   " try { await app.vault.create(path, body); return { ok: 1 }; }" +
   " catch (e) { return { ok: 0, why: String((e && e.message) || e) }; } })";
 
-// app.vault.create() does NOT create intermediate folders -- it throws, and a swallowed throw
-// here reads exactly like a working harness measuring nothing. The first run of this file did
-// precisely that: 0 created, 392 refused, every sample flat, and the log said none of it.
+// github#120 -- create() throws on a missing folder, silently
 const ARRIVAL_DIR = "vg120";
 
 async function makeArrivalDir(c) {
@@ -271,15 +253,7 @@ async function makeArrivalDir(c) {
     " return f ? 'already there' : 'FAILED: ' + String((e && e.message) || e); } })()");
 }
 
-/**
- * Wait until the disc has actually TAKEN the notes, not merely gone quiet.
- *
- * atRest() alone cannot tell "settled" from "never started": if no rebuild was ever
- * scheduled, nothing is building, no timer is armed and no dot moves, so it reports rest on
- * a disc that has silently ignored the whole burst. That is exactly what it did -- two
- * bursts, 530 notes, order frozen at 1403 and every live flag false -- and the run still
- * printed a clean table. The disc's own order is the only honest signal here.
- */
+// github#120 -- taken, not merely quiet: the order is the only signal
 async function awaitOrder(c, target, ms) {
   const deadline = Date.now() + ms;
   let last = -1;
@@ -294,11 +268,7 @@ async function awaitOrder(c, target, ms) {
 }
 
 /* ----------------------------------------------------------------- pan cadence -- */
-// Reported from use: the disc starts to lag when panned while notes are arriving.
-// Nothing on the pan path cancels anything -- pan is enableCameraPanning on the renderer's
-// own camera -- and liveBusy() is cascadeRun || anim || play, which does not include a drag.
-// So applyData does NOT defer for a pan: an arrival runs ingest + hardRelayout + cascade
-// synchronously, mid-drag. This measures what that does to the frame cadence.
+// github#120 -- what an arrival mid-drag does to the frame cadence
 
 const FRAMES_ON = "(function(){ window.__vgF = []; window.__vgFOn = true;" +
   " (function loop(t){ if (!window.__vgFOn) return; window.__vgF.push(t);" +
@@ -318,7 +288,7 @@ const STAGE_BOX = "(function(){ var v = " + VIEW + ";" +
   " if (!el) return null; var r = el.getBoundingClientRect();" +
   " return { left: r.left, top: r.top, w: r.width, h: r.height }; })()";
 
-/** One slow circular drag across the stage, at roughly 60 Hz. */
+// github#120 -- one slow circular drag, roughly 60 Hz
 async function panDrag(c, box, ms) {
   const cx = box.left + box.w / 2, cy = box.top + box.h / 2;
   const rx = box.w * 0.18, ry = box.h * 0.18;
@@ -335,18 +305,13 @@ async function panDrag(c, box, ms) {
     { type: "mouseReleased", x: cx, y: cy, button: "left", clickCount: 1, buttons: 0 });
 }
 
-/**
- * Pan for `ms`, optionally with notes arriving at `rate`/s underneath, and report the
- * frame cadence. `withArrivals` is what the report is about; the quiet pass is its control.
- */
+// github#120 -- the pair: the same drag quiet, then under arrivals
 async function panProbe(c, tag, ms, withArrivals, targets, nextName) {
   const box = await c.eval(STAGE_BOX);
   if (!box || !box.w) { console.log("  " + tag + ": no stage to pan"); return null; }
   const t0 = Date.now();
   await c.eval(FRAMES_ON);
-  // Bounded by count as well as by the flag: a drag that overruns must not keep feeding.
-  // One probe overran by five minutes and dumped 292 notes into a six-second window, which
-  // then read as a 285-second "frame".
+  // github#120 -- bounded by count too; an overrun once fed 292
   const cap = withArrivals ? Math.ceil((ms / 1000) * PAN_ARRIVAL_RATE) + 2 : 0;
   let arriving = true, made = 0;
   const feed = (async () => {
@@ -363,13 +328,7 @@ async function panProbe(c, tag, ms, withArrivals, targets, nextName) {
   await feed;
   const f = await c.eval(FRAMES_OFF);
   const wallMs = Date.now() - t0;
-  // rAF stops while the window is occluded or minimised, and the gap that leaves is not a
-  // frame -- it is the absence of frames. The test is NOT that the probe overran: a drag is
-  // 375 sequential CDP round trips, so a six-second drag routinely takes fifteen under load
-  // and every frame in it is real. Suspension is when ONE gap swallows most of the window --
-  // 285,578 ms of a 290 s probe is 98% and is not a frame time; 687 ms of 15,291 ms is 4.5%
-  // and is exactly the stall this is here to measure. An earlier threshold on wall clock
-  // alone discarded three good rows.
+  // github#120 -- suspension is ONE gap, not a probe that ran long
   const suspect = f.worst > wallMs * 0.5;
   const row = { tag, withArrivals, arrivalsDuring: made, wallMs, suspect, ...f };
   if (suspect) {
@@ -394,12 +353,7 @@ const PAN_MS = Number(arg("pan-ms", "6000"));
 const panRows = [];
 
 /* -------------------------------------------------------------- hidden burst -- */
-// Steady arrivals never reach LIVE_MAX_CHANGED: at 5/s a rebuild covers about five notes.
-// The path that does is the deferral in design/0014 -- while the leaf is hidden, nothing is
-// built and dirtyPaths accumulates, so the wake can land a churn well over the limit. The
-// host then does what Refresh does: lastData = null, await this.render(). That is the only
-// routine way render() reruns, and render() is where subscribeLive() and the css-change
-// registration sit. This is a sync or an import arriving behind a background tab.
+// design/0014 -- only the hidden-leaf burst can rerun render()
 
 const HIDE_GRAPH = "(function(){ var l = app.workspace.getLeaf('tab');" +
   " app.workspace.setActiveLeaf(l, { focus: true }); return true; })()";
@@ -418,7 +372,7 @@ async function pickLinkTargets(c, n) {
 const samples = [];
 
 async function sample(c, child, tag, extra) {
-  // Twice: the first pass frees, the second collects what the first made unreachable.
+  // github#120 -- twice: the second collects what the first freed
   await c.send("HeapProfiler.collectGarbage").catch(() => {});
   await sleep(250);
   await c.send("HeapProfiler.collectGarbage").catch(() => {});
@@ -430,9 +384,7 @@ async function sample(c, child, tag, extra) {
     " var w = window; w.__vgGrowthN = w.__vgGrowthN || 0;" +
     " if (w.__vg && !w.__vg.__growthStamp) { w.__vgGrowthN++; try { w.__vg.__growthStamp = w.__vgGrowthN; } catch (e) { void 0; } }" +
     " var v = " + VIEW + ";" +
-    // github#120 -- Obsidian's own emitters, which Memory.getDOMCounters cannot see.
-    // subscribeLive() and the css-change registration both sit inside render(), so a
-    // rebuild that remounts adds handlers here and nowhere a DOM counter looks.
+    // github#120 -- Obsidian's emitters, invisible to DOM counters
     " var ev = function (o, n) { try { return (o && o._ && o._[n] ? o._[n].length : -1); } catch (e) { return -1; } };" +
     " var emit = { resolved: ev(app.metadataCache, 'resolved'), changed: ev(app.metadataCache, 'changed')," +
     "   create: ev(app.vault, 'create'), del: ev(app.vault, 'delete'), rename: ev(app.vault, 'rename')," +
@@ -442,8 +394,7 @@ async function sample(c, child, tag, extra) {
     " var viewEvents = -1; try { viewEvents = v && v._events ? v._events.length : -1; } catch (e) { void 0; }" +
     " var vg = w.__vg || null;" +
     " var pm = w.performance && w.performance.memory ? w.performance.memory : null;" +
-    // The plugin build has no liveState() or invalidations(): stripDemoAndDebug removes the
-    // whole demo and debug region. Everything below is read off the view instead.
+    // github#120 -- the plugin build has no liveState()
     " var live = v ? { building: !!v.liveBuilding, timer: v.liveTimer !== null," +
     "   again: !!v.liveAgain, deferred: !!v.liveDeferred, wake: v.liveWake !== null," +
     "   dirty: v.dirtyPaths ? v.dirtyPaths.size : -1 } : null;" +
@@ -542,7 +493,7 @@ async function main() {
   let firstRefusal = "";
   const nextName = () => ARRIVAL_DIR + "/arrival-" + String(++n).padStart(5, "0") + ".md";
 
-  // The pair the pan report rests on: the same drag, quiet and then under arrivals.
+  // github#120 -- the pair the pan report rests on
   if (VIEW_MODE === "open" && PAN) {
     console.log("\npan cadence at mount 1 (before any remount)");
     await panProbe(cdp, "mount 1 quiet", PAN_MS, false, targets, nextName);
@@ -581,20 +532,19 @@ async function main() {
       if (wait > 0) await sleep(wait);
     }
     console.log("  arrivals: " + made + " created, " + failed + " refused");
-    // A run where nothing arrived still prints a full, flat, entirely plausible table.
-    // Refuse to be that run.
+    // github#120 -- refuse to be the run that measured nothing
     if (!made) {
       throw new Error("phase " + phase.name + " created no notes (" + failed + " refused: " +
                       (firstRefusal || "no reason given") + ") -- there is nothing to measure");
     }
-    // Let the debounce, the wake and any cascade finish before the rest sample.
+    // github#120 -- let the debounce, the wake and the cascade finish
     const rested = VIEW_MODE === "open" ? await atRest(cdp, 90000) : (await sleep(4000), true);
     await sample(cdp, child, phase.name + " AT REST",
                  { arrivals: n, phase: phase.name, rate: phase.rate, rested });
     if (VIEW_MODE === "open" && !rested) console.log("  NOTE: the disc did not reach rest within 90 s");
   }
 
-  // The phase that can actually cross LIVE_MAX_CHANGED, and so make render() rerun.
+  // design/0014 -- the phase that can cross LIVE_MAX_CHANGED
   if (VIEW_MODE === "open" && BURSTS > 0) {
     for (let b = 1; b <= BURSTS; b++) {
       console.log("\nhidden burst " + b + " of " + BURSTS + " -- " + BURST_NOTES +
@@ -614,8 +564,7 @@ async function main() {
         " return v && v.dirtyPaths ? v.dirtyPaths.size : -1; })()").catch(() => -1);
       console.log("  " + made + " created while hidden; dirtyPaths holds " + dirty);
       await cdp.eval(REVEAL_GRAPH);
-      // What the disc SHOULD end up holding. The fixture carries a few non-note files, so
-      // the baseline gap between notes and order is the allowance, not a guess.
+      // github#120 -- the non-note files are the allowance, not a guess
       const notesNow = await cdp.eval("app.vault.getMarkdownFiles().length").catch(() => -1);
       const want = notesNow - (base.files - base.order);
       const took = await awaitOrder(cdp, want, 180000);
@@ -628,8 +577,7 @@ async function main() {
                              { arrivals: n, phase: "burst", burst: b, dirtyAtReveal: dirty, rested, tookBurst: took.reached, orderWanted: want });
       console.log("    churn reported by the last applyData: " + s.lastChurn +
                   (s.lastChurn !== null && s.lastChurn > 200 ? "  -- OVER LIVE_MAX_CHANGED, so render() reran" : ""));
-      // The same drag again, now that one more render() has run. If the pan degrades with
-      // mount count rather than with vault size, this is where it shows.
+      // github#120 -- does the pan degrade with mount count?
       if (PAN) {
         await panProbe(cdp, "mount " + s.mounts + " quiet", PAN_MS, false, targets, nextName);
         await atRest(cdp, 60000);

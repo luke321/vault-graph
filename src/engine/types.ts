@@ -202,9 +202,7 @@ export interface RendererEvents {
 }
 
 export interface MouseCaptor {
-  // github#120 -- "mousedown" was emitted by the implementation and subscribed to by the
-  // renderer itself, but never declared here, so a caller depending on it was depending on
-  // something the contract did not promise. The page needs it to know a drag has started.
+  // github#120 -- emitted and subscribed to, but never declared
   on(event: "mousedown" | "mousemovebody" | "mouseup" | "mouseleave", fn: (e: MouseCoords) => void): void;
 }
 

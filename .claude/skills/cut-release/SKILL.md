@@ -169,10 +169,16 @@ makes *every* clip stale, not just the ones whose own beats moved. `release.ps1`
 / `=== features ===` warnings only compare commit dates, a proxy, not proof — so re-recording
 everything is the default, not a call made by looking at what changed:
 
+**Ask before taking the mouse — but do NOT take a lock by hand.** `record-demo.ps1` acquires
+`screen-<monitor>` itself and releases it on every way out, and `record` is **aliased to the screen
+locks**, so an outer `acquire record` blocks the recorder's own acquire and the run hangs at
+`taking screen-right ...` with `lock.mjs status` showing only your own hold. Measured cutting 2.7.0:
+the first take sat there for seven minutes until the outer lock was released, after which it
+recorded immediately. `CLAUDE.md` states the rule this line used to break — never wrap one of the
+three window-placing harnesses.
+
 ```powershell
-node scripts/lock.mjs acquire record --owner "release <version>"   # ask before taking the mouse
-.\scripts\record-all.ps1                        # every clip and the hero, one command
-node scripts/lock.mjs release record --owner "release <version>"
+.\scripts\record-all.ps1                        # every clip and the hero, one command; takes its own locks
 node scripts/update-feature-metadata.mjs --version <version>       # rewrites every Last re-recorded line
 ```
 
