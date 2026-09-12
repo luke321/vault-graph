@@ -554,9 +554,7 @@ class VaultGraphView extends ItemView {
     this.liveWake = null;
     /** @type {import("../src/page.js").LiveResult | null} */
     this.lastLive = null;
-    // github#120 -- see render(): these two register ONCE for the view's life, not once per
-    // render. render() reruns on Refresh and on every rebuild whose churn passes
-    // LIVE_MAX_CHANGED, while registerEvent only releases when the view unloads.
+    // github#120 -- these two register once for the view's life
     /** @type {EventRef | null} */
     this.cssRef = null;
     /** @type {EventRef[] | null} */
@@ -599,8 +597,7 @@ class VaultGraphView extends ItemView {
     this.liveDeferred = false;
   }
 
-  // github#120 -- does the page say a hand is on the disc? Absent on an older page build,
-  // in which case nothing is deferred and the behaviour is what it was.
+  // github#120 -- is a hand on the disc? absent on an older page
   interacting() {
     const api = this.handle && this.handle.api;
     return !!(api && typeof api.interacting === "function" && api.interacting());
@@ -610,7 +607,7 @@ class VaultGraphView extends ItemView {
   startLiveWake() {
     if (this.liveWake !== null) return;
     this.liveWake = window.setInterval(() => {
-      // github#120 -- one retry loop, both reasons to wait: unseen, or being dragged.
+      // github#120 -- both reasons to wait: unseen, or being dragged
       if (!this.liveVisible() || this.interacting()) return;
       this.stopLiveWake();
       this.scheduleLive();
@@ -633,14 +630,7 @@ class VaultGraphView extends ItemView {
   }
 
   // github#72, design/0014
-  // github#120 -- ONCE FOR THE VIEW'S LIFE, NOT ONCE PER RENDER. render() calls this, and
-  // render() reruns on Refresh and on any rebuild whose churn passes LIVE_MAX_CHANGED (a
-  // sync, an import, a folder move -- design/0014). registerEvent only releases on the
-  // view's unload, so calling this unguarded left five live handlers behind every time:
-  // measured 51 -> 69 vault and cache handlers over three remounts, +6 each with the
-  // css-change registration below. Every one of them fires on every metadata event and
-  // calls scheduleLive() again, so the per-arrival cost grows with the number of remounts
-  // -- which is felt as the disc getting progressively slower to pan while notes arrive.
+  // github#120 -- ONCE FOR THE VIEW'S LIFE, NOT ONCE PER RENDER
   subscribeLive() {
     if (this.liveRefs) return;
     const cache = this.app.metadataCache, vault = this.app.vault;
@@ -685,12 +675,7 @@ class VaultGraphView extends ItemView {
     if (!api || typeof api.applyData !== "function") return;
     // github#72, design/0014
     if (!this.liveVisible()) { this.liveDeferred = true; this.startLiveWake(); return; }
-    // github#120 -- and not while a hand is on the disc. Deferring applyData alone was not
-    // enough: buildData below walks the whole metadata cache on the main thread BEFORE
-    // applyData is ever consulted, so the stall stayed and kept scaling with the vault --
-    // measured 417 ms at 1,407 notes rising to 867 ms at 2,181 with the page-side gate
-    // already in. Same shape as the hidden-leaf case above: nothing is built, dirtyPaths
-    // keeps accumulating, and the wake poll retries.
+    // github#120 -- and not while a hand is on the disc
     if (this.interacting()) { this.liveDeferred = true; this.startLiveWake(); return; }
     this.liveDeferred = false;
     this.stopLiveWake();
@@ -840,8 +825,7 @@ class VaultGraphView extends ItemView {
     this.syncTheme();
     this.markNew();
 
-    // github#120 -- one listener for the view's life, not one per render. syncTheme() reads
-    // this.page, which every render replaces, so the single registration keeps working.
+    // github#120 -- one listener for the view's life, not per render
     if (!this.cssRef) {
       this.cssRef = this.app.workspace.on("css-change", () => this.syncTheme());
       this.registerEvent(this.cssRef);
@@ -979,12 +963,7 @@ class VaultGraphView extends ItemView {
     // github#72
     this.subscribeLive();
 
-    // github#120 -- a PLAIN listener, not registerDomEvent. `page` is built fresh by every
-    // render and thrown away by teardown(), but registerDomEvent files the element away on
-    // the view's own list, which is only released on unload -- so every remount left a whole
-    // detached page subtree reachable and uncollectable. Measured: DOM nodes 8,149 -> 14,597
-    // over three remounts, about 2,150 retained per dead page. This listener dies with the
-    // element it is on, which is exactly the lifetime it should have.
+    // github#120 -- a PLAIN listener: registerDomEvent retains the page
     page.addEventListener("click", (ev) => {
       const a = ev.target instanceof Element ? ev.target.closest('a[href^="obsidian://"]') : null;
       if (!a) return;
