@@ -355,13 +355,17 @@ async function panProbe(c, tag, ms, withArrivals, targets, nextName) {
   const f = await c.eval(FRAMES_OFF);
   const wallMs = Date.now() - t0;
   // rAF stops while the window is occluded or minimised, and the gap that leaves is not a
-  // frame -- it is the absence of frames. A probe whose wall clock ran far past what was
-  // asked for did not measure a pan, and its worst frame must not be quoted as one.
-  const suspect = wallMs > ms * 2.5;
+  // frame -- it is the absence of frames. The test is NOT that the probe overran: a drag is
+  // 375 sequential CDP round trips, so a six-second drag routinely takes fifteen under load
+  // and every frame in it is real. Suspension is when ONE gap swallows most of the window --
+  // 285,578 ms of a 290 s probe is 98% and is not a frame time; 687 ms of 15,291 ms is 4.5%
+  // and is exactly the stall this is here to measure. An earlier threshold on wall clock
+  // alone discarded three good rows.
+  const suspect = f.worst > wallMs * 0.5;
   const row = { tag, withArrivals, arrivalsDuring: made, wallMs, suspect, ...f };
   if (suspect) {
-    console.log("  " + tag + ": DISCARDED -- the probe asked for " + ms + " ms and took " +
-                wallMs + " ms, so rAF was suspended or the thread was pinned. Not a frame time.");
+    console.log("  " + tag + ": DISCARDED -- one gap of " + f.worst + " ms in a " + wallMs +
+                " ms probe, so rAF was suspended rather than slow. Not a frame time.");
     panRows.push(row);
     return row;
   }
@@ -662,7 +666,7 @@ async function main() {
     console.log("  a drag is not in liveBusy(), so a rebuild lands mid-drag; these are the frames");
     for (const r of panRows) {
       console.log("  " + r.tag.padEnd(24) + (r.withArrivals ? " under arrivals " : " quiet          ") +
-                  (r.suspect ? " DISCARDED (rAF suspended, " + r.wallMs + " ms wall)" : "") +
+                  (r.suspect ? " DISCARDED (one " + r.worst + " ms gap in " + r.wallMs + " ms)" : "") +
                   " median " + String(r.median).padStart(6) + " ms" +
                   "  p95 " + String(r.p95).padStart(7) + " ms" +
                   "  worst " + String(r.worst).padStart(8) + " ms" +
