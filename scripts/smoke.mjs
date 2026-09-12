@@ -5631,6 +5631,55 @@ check("a live rebuild with the same data moves nothing", async (p) => {
                        `worst ${r.d.worst}, no cascade started` };
 }, { on: "all" });
 
+// github#120
+check("a rebuild waits for a drag, and a right-click is not a drag", async (p) => {
+  await settle(p);
+  await p.eval(LIVE_JS);
+  const DOWN = (b) => `el.dispatchEvent(new MouseEvent('mousedown', ` +
+                      `{ bubbles: true, button: ${b}, clientX: 8, clientY: 8 }));`;
+  const UP = `el.dispatchEvent(new MouseEvent('mouseup', ` +
+             `{ bubbles: true, button: 0, clientX: 8, clientY: 8 }));`;
+  const EL = `var el = document.querySelector('#vg-graph .vg-layer-mouse'); if (!el) return { noCanvas: true };`;
+
+  // Held left button: the rebuild must be refused, and refused FOR THAT REASON.
+  const held = await p.j(`(function(){ ${EL}
+    window.__live.a = window.__live.snap();
+    ${DOWN(0)}
+    var res = __vg.applyData(window.__live.withOneMore('__live/Zz Drag Probe.md'));
+    var order = __vg.graph.order;
+    ${UP}
+    return { res: res, orderWhileHeld: order, before: window.__live.a.n };
+  })()`);
+
+  // Let the 250 ms grace and the 120 ms drain do their work, then the cascade.
+  await sleep(600);
+  await settle(p);
+  const landed = await p.j(`__vg.graph.order`);
+
+  // A context menu is not a drag: the captor emits mousedown for button 2 but never the
+  // matching mouseup, so an ungated flag would defer every right-click to the cap.
+  const rclick = await p.j(`(function(){ ${EL}
+    ${DOWN(2)}
+    var res = __vg.applyData(window.__live.clone());
+    ${UP}
+    return res;
+  })()`);
+  await settle(p);
+
+  // Put the disc back the way the other live checks expect to find it.
+  await p.j(`__vg.applyData(window.__live.clone())`);
+  await settle(p);
+
+  const ok = held.res && held.res.applied === false && held.res.busy === "drag" &&
+             held.res.queued === true && held.orderWhileHeld === held.before &&
+             landed === held.before + 1 &&
+             rclick && rclick.applied === true;
+  return { ok, detail: held.noCanvas ? "no mouse layer to dispatch on" :
+    `held: ${held.res.applied ? "APPLIED (should have waited)" : `refused "${held.res.reason}" busy "${held.res.busy}"`}` +
+    `, order while held ${held.orderWhileHeld} (was ${held.before}), after release ${landed}` +
+    `; right-click: ${rclick.applied ? `applied "${rclick.reason}"` : `REFUSED "${rclick.busy}" -- a context menu deferred the rebuild`}` };
+}, { on: "all" });
+
 check("the invalidation registry names every cache a live rebuild stales", async (p) => {
   const names = await p.j("__vg.invalidations()");
   const want = ["timeline", "heatmap tally", "hop trail", "selection, hover and pins", "search hits",
