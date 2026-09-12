@@ -327,7 +327,9 @@ Structure (see `.ai-context/releasing.md`'s full section):
 1. One bold line naming the release and what it's actually about, in the release's own voice.
 2. **No hero at the top** — `assets/demo.webp` is large and unspecific; use the feature clips.
 3. One `###` per genuinely new or visibly-changed feature (from step 1's range, not memory), its
-   matching clip embedded.
+   matching clip embedded **directly under the heading and above the bullets** — every published
+   release is in that order, and a clip placed after the bullets is the tell of a draft written
+   from the design records rather than from a release.
 4. The Ko-fi ask, always the same spot, right after the highlight reel: the line
    `If Vault Graph is useful to you:`, then the button on its own line —
    `[![Support me on Ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/luke321)`

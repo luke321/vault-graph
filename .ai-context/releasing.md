@@ -178,7 +178,11 @@ reverse-engineered from it, not invented.
 3. **One `###` (h3, not h2) section per genuinely new or visibly-changed feature** — and the
    set of them comes from the merge list in *First, list what is actually in the release*, not
    from memory, so nothing in the range goes unmentioned. Each
-   with its matching clip from `assets/features/*.webp` embedded the same way. Only
+   with its matching clip from `assets/features/*.webp` embedded the same way. **The clip goes
+   directly under the heading, above the bullets, every time** — the picture is what the section
+   is for, and a reader who has already read three bullets does not need it. Every published
+   release does it in that order; a draft that puts the clip under the bullets reads as written
+   from a doc rather than from a release. Only
    feature clips that exist and are current belong here; don't call something "new" that
    already shipped in an earlier release — check the source at the previous tag first
    (`git show <prev-tag>:src/page.js | grep ...`). Bug fixes real enough to matter but not
