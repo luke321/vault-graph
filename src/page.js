@@ -810,6 +810,13 @@ function mountVaultGraph(root, data, deps) {
     return found;
   }
 
+  // github#76 -- STEP 2 flips this on. Step 1 is the folder SOLOED and recoloured: a root
+  // filters the disc and repaints it, and leaves the wedges exactly as they were. Everything
+  // that rebases the basis on the root asks `rebasing()` rather than `rootDepth` directly,
+  // so the two steps differ by this one flag and nothing else.
+  var reWedge = false;
+  function rebasing() { return rootDepth > 0 && reWedge; }
+
   /** @param {NodeAttrs} a @returns {boolean} */
   function inRootA(a) {
     if (!rootDepth) return true;
@@ -821,30 +828,30 @@ function mountVaultGraph(root, data, deps) {
 
   /** @param {NodeAttrs} a @returns {string} the group this note sits in, rebased on the root */
   function relGroup(a) {
-    if (!rootDepth || !inRootA(a)) return a.folder;
+    if (!rebasing() || !inRootA(a)) return a.folder;
     return segLen(a) > rootDepth ? segAt(a, rootDepth) : DIRECT;
   }
   /** @param {NodeAttrs} a @returns {string} the subfolder it sits in, rebased on the root */
   function relSub(a) {
-    if (!rootDepth || !inRootA(a)) return a.sub || "";
+    if (!rebasing() || !inRootA(a)) return a.sub || "";
     return segLen(a) > rootDepth + 1 ? segAt(a, rootDepth + 1) : "";
   }
   /** @param {string} g a rebased group @returns {string} the folder path it stands for */
   function absOf(g) {
-    if (!rootDepth) return g;
+    if (!rebasing()) return g;
     var r = state.root || "";
     return g === DIRECT ? r + "/" : r + "/" + g;
   }
   // github#76
   /** @param {string} g @param {string} sb @returns {string} its `hiddenSub` key */
   function keyOf(g, sb) {
-    if (!rootDepth) return g + "/" + (sb || "");
+    if (!rebasing()) return g + "/" + (sb || "");
     var base = absOf(g);
     return sb ? base + "/" + sb : base;
   }
   /** @param {string} p an absolute folder path @returns {string} the group it falls in */
   function groupOfPath(p) {
-    return p.split("/")[rootDepth] || DIRECT;
+    return p.split("/")[rebasing() ? rootDepth : 0] || DIRECT;
   }
 
   /* ---------------------------------------------------- identity vs display name */
@@ -852,13 +859,13 @@ function mountVaultGraph(root, data, deps) {
 
   /** @param {string} g a group of the CURRENT basis @returns {string} the folder path it is */
   function identOf(g) {
-    if (!rootDepth || g === UNLINKED) return g;
+    if (!rebasing() || g === UNLINKED) return g;
     return absOf(g);
   }
   /** @param {string} id @returns {string} the folder path of the wedge this note sits in */
   function identOfNode(id) {
     var g = groupOf(id);
-    if (!rootDepth || g === UNLINKED) return g;
+    if (!rebasing() || g === UNLINKED) return g;
     return inRootA(graph.getNodeAttributes(id)) ? absOf(g) : g;
   }
 
@@ -886,8 +893,6 @@ function mountVaultGraph(root, data, deps) {
     /** @type {Record<string, Record<string, number>>} */
     var tally = dict();
     graph.forEachNode(function (id, a) {
-      // github#76 -- a note outside the root is not a member of this disc at all
-      if (!inRootA(a)) return;
       var f = fileGroup(id, a), sb = fileSub(id, a);
       if (!tally[f]) tally[f] = dict();
       tally[f][sb] = (tally[f][sb] || 0) + 1;
@@ -974,7 +979,7 @@ function mountVaultGraph(root, data, deps) {
       // named the root itself, and `dirs` is offset one from `segAt`, so slicing by rootDepth
       // drops exactly the segments the drilled group and its sub now stand for.
       var d = (a || graph.getNodeAttributes(id)).dirs || [];
-      return rootDepth ? d.slice(rootDepth) : d;
+      return rebasing() ? d.slice(rootDepth) : d;
     }
     var f = tagFiling[id];
     return f ? f.dirs : [];
@@ -1182,10 +1187,6 @@ function mountVaultGraph(root, data, deps) {
     /** @type {Record<string, number>} */
     var filed = dict();
     graph.forEachNode(function (id, a) {
-      // github#76 -- a note outside the root is not a member of this disc at all, so it
-      // github#76 -- neither counts nor files: `fileGroup` falls back to the note's own
-      // github#76 -- top-level folder off-root, which would pollute `folderCount`.
-      if (!inRootA(a)) return;
       // github#86 -- a stand-in is its note, already counted; a leaving note
       // github#86 -- counts where this dim files it, old groups in the new order
       // github#86 -- and in the colour rotation, for as long as the switch runs
@@ -1210,7 +1211,7 @@ function mountVaultGraph(root, data, deps) {
     // cannot silently re-sort. The `_`/`(` archive ranking is a TOP-LEVEL naming convention
     // and does not carry one level down, which is why every group ranks alike here; only
     // `(unlinked)` still sinks to the end. At root depth 0 this is develop's sort, untouched.
-    var names = rootDepth
+    var names = rebasing()
       ? Object.keys(count).sort(function (a, b) {
           return (a === UNLINKED ? 1 : 0) - (b === UNLINKED ? 1 : 0) ||
                  count[b] - count[a] ||
@@ -1364,6 +1365,39 @@ function mountVaultGraph(root, data, deps) {
     }
   }
 
+  // github#76 -- what would each note in the root be coloured if the children WERE the wedges?
+  // Flip the re-wedge on, run the real colour builders, read `nodeColor` per note, put every
+  // global back. Reimplementing the slot rotation here would be a second palette to keep in
+  // step with the first; this cannot drift from what step 2 does because it IS step 2 asked.
+  /** @returns {Record<string, string>} id -> colour */
+  function wedgeColorsAhead() {
+    /** @type {Record<string, string>} */
+    var out = dict();
+    var sWedge = reWedge, sCounts = counts, sFolderCount = folderCount,
+        sColor = groupColor, sSlot = groupSlot, sAuto = groupAutoSlot,
+        sShade = subShade, sSubSlot = subSlot, sTint = unlinkedTintColors,
+        sSubOrder = subOrder, sSubCount = subCount, sOrder = order[state.dim];
+    reWedge = true;
+    try {
+      buildSubOrder();
+      counts = computeOrder();
+      buildColors();
+      buildSubShades();
+      graph.forEachNode(function (id, a) {
+        if (!inRootA(a)) return;
+        out[id] = nodeColor(id);
+      });
+    } finally {
+      reWedge = sWedge;
+      counts = sCounts; folderCount = sFolderCount;
+      groupColor = sColor; groupSlot = sSlot; groupAutoSlot = sAuto;
+      subShade = sShade; subSlot = sSubSlot; unlinkedTintColors = sTint;
+      subOrder = sSubOrder; subCount = sSubCount;
+      if (sOrder) order[state.dim] = sOrder;
+    }
+    return out;
+  }
+
   /** @param {string} g */
   function groupHasPinnedSub(g) {
     // github#76
@@ -1385,6 +1419,11 @@ function mountVaultGraph(root, data, deps) {
   // `subShade` for exactly as long as the walk runs
   /** @type {Record<string, string> | null} */
   var shadeShown = null;
+  // github#76 -- step 1: id -> the colour this note will wear once its child folder becomes a
+  // wedge. Computed by ASKING, not by reimplementing the palette (see `wedgeColorsAhead`), so
+  // the colours the drill paints now are the ones step 2 will hand out.
+  /** @type {Record<string, string> | null} */
+  var rootNoteColor = null;
   var colorRaf = 0, colorPrev = 0;
 
   /** @param {string} group @returns {string} */
@@ -1674,6 +1713,9 @@ function mountVaultGraph(root, data, deps) {
       if (lc) return lc;
     }
     var a = graph.getNodeAttributes(id);
+    // github#76 -- step 1 repaints the soloed folder in its children's wedge colours while
+    // leaving every wedge where it was. `shadeShown` still wins: that is the walk, mid-move.
+    if (rootNoteColor && !shadeShown) { var rc = rootNoteColor[id]; if (rc) return rc; }
     if (groupOf(id) === UNLINKED && !unlinkedTintByFolder) return colorOf(UNLINKED);
     // github#86 -- D-3: the tint ladder answers to the filing
     var g = fileGroup(id, a);
@@ -1693,7 +1735,10 @@ function mountVaultGraph(root, data, deps) {
   /** @param {string} group */
   function isHidden(group) {
     // github#76
-    if (rootDepth && group !== UNLINKED) return !!state.hiddenSub[keyOf(group, "")];
+    // github#76 -- only while the re-wedge is on is a "group" really a SUBFOLDER of the
+    // vault, keyed in `hiddenSub`. With it off the disc is the vault's own basis and hides
+    // through `state.hidden`, the same map the eye and "only" write to -- and a drill with it.
+    if (rebasing() && group !== UNLINKED) return !!state.hiddenSub[keyOf(group, "")];
     var h = state.hidden[state.dim];
     return !!(h && h[group]);
   }
@@ -2087,11 +2132,7 @@ function mountVaultGraph(root, data, deps) {
     } else graph.forEachNode(function (id) {
       // github#86 -- the left disc has no stand-ins; the arriving disc no leavers
       if (oldWorld ? !!graph.getNodeAttribute(id, "standIn") : !!leaving[id]) return;
-      // github#76 -- membership of the disc is asked first. When the plan is the VISIBLE
-      // set, `visible()` already answers it (it opens with the root test), so the filter
-      // below covers it; when the plan is EVERY note, nothing else would.
-      if (onlyVisible) { if (!(planKeep || willShow)(id)) return; }
-      else if (!inRoot(id)) return;
+      if (onlyVisible && !(planKeep || willShow)(id)) return;
       // github#18
       if (isPinned(id)) return;
       members.push(id);
@@ -5065,8 +5106,9 @@ function mountVaultGraph(root, data, deps) {
     // github#86 -- a leaving note is in the disc being left only
     if (leaving[id] && !oldWorld) return false;
     var a = graph.getNodeAttributes(id);
-    // github#76
-    if (!inRootA(a)) return false;
+    // github#76 -- a root does NOT filter here. It hides the other groups through
+    // `state.hidden`, the same door the legend's eye and its "only" use, so the disc sees a
+    // plain solo and animates as one. What the root filters is the NAV, in `buildLegend`.
     if (isHidden(groupOf(id))) return false;
     var d = fileDirs(id, a);
     if (!d.length) {
@@ -6190,6 +6232,14 @@ function mountVaultGraph(root, data, deps) {
     hoverHighlight(null, null);
 
     var names = order[state.dim] || [];
+    // github#76 -- the nav is the half a root DOES change: drilled, it lists the folder's own
+    // world and not the vault's. With the re-wedge on, `order` already holds the children and
+    // there is nothing to drop; with it off, the disc is still the vault's basis, so the rows
+    // for the folders the drill hid are filtered out here rather than left switched off.
+    if (rootDepth && !rebasing()) {
+      var rootG = groupOfPath(state.root || "");
+      names = names.filter(function (g) { return g === rootG; });
+    }
     syncDimCounts();
 
     /** @type {Record<string, Record<string, number>>} */
@@ -6442,7 +6492,7 @@ function mountVaultGraph(root, data, deps) {
     var soloGroup = function (g) {
       state.hiddenSub = dict();
       var gs = order[state.dim] || [];
-      if (rootDepth) {
+      if (rebasing()) {
         gs.forEach(function (n) {
           if (n !== g && n !== UNLINKED) state.hiddenSub[keyOf(n, "")] = true;
         });
@@ -6469,7 +6519,7 @@ function mountVaultGraph(root, data, deps) {
       // github#76 -- `path` is ABSOLUTE and `g` is this basis's group NAME, so neither
       // `path.slice(g.length + 1)` (right only at depth 0) nor `.slice(1)` (right only at
       // depth 1) finds the segments below the group. Their index is rootDepth + 1, always.
-      var want = path.split("/").slice(rootDepth + 1);
+      var want = path.split("/").slice((rebasing() ? rootDepth : 0) + 1);
       graph.forEachNode(function (id, a) {
         if (fileGroup(id, a) !== g) return;
         var d = fileDirs(id, a), i = 0;
@@ -6555,7 +6605,7 @@ function mountVaultGraph(root, data, deps) {
       var g = b.getAttribute("data-eye");
       b.onclick = function () {
         // github#76
-        if (rootDepth && g !== UNLINKED) {
+        if (rebasing() && g !== UNLINKED) {
           var pk = keyOf(g, "");
           if (state.hiddenSub[pk]) delete state.hiddenSub[pk]; else state.hiddenSub[pk] = true;
           buildLegend();
@@ -6666,7 +6716,7 @@ function mountVaultGraph(root, data, deps) {
   function seedHidden() {
     var h = state.hidden[state.dim] = dict();
     // github#76
-    if (rootDepth) {
+    if (rebasing()) {
       (order[state.dim] || []).forEach(function (g) {
         if (!hiddenByDefault(g)) return;
         if (g === UNLINKED) h[g] = true; else state.hiddenSub[identOf(g)] = true;
@@ -6764,8 +6814,7 @@ function mountVaultGraph(root, data, deps) {
    * @param {boolean} animate
    * @param {boolean} [deferLayout]
    * @param {boolean} [freshGeom]  take a NEW geometry lock instead of holding the old one
-   *                               (github#72/decisions/0011 live rebuild; github#76 a drill,
-   *                               whose disc is a different disc and gets its own rings)
+   *                               (github#72/decisions/0011, the live rebuild)
    */
   function hardRelayout(animate, deferLayout, freshGeom) {
     stopPlay();
@@ -7401,7 +7450,7 @@ function mountVaultGraph(root, data, deps) {
         // github#76 -- hides it is `hiddenSub` under its absolute key, not `state.hidden`,
         // github#76 -- which is keyed by top-level group and would hide the wrong folder.
         var nowHidden = hiddenByDefault(folder);
-        if (rootDepth && folder !== UNLINKED) {
+        if (rebasing() && folder !== UNLINKED) {
           if (nowHidden) state.hiddenSub[vk] = true; else delete state.hiddenSub[vk];
         } else {
           var h = state.hidden[state.dim] || (state.hidden[state.dim] = dict());
@@ -8194,65 +8243,51 @@ function mountVaultGraph(root, data, deps) {
     if (next && !anyNoteUnder(next.split("/"))) return state.root;
 
     var live = !!renderer && !instant;
-    // github#76 -- the colour this folder wears on the disc being LEFT, read before the root
-    // moves. Drilling in, its children fan out of it; drilling out there is no single folder
-    // to come from, so there is nothing to walk and the outs keep their shade via preRootShade.
+    // github#76 -- the colour this folder wears right now; its children walk out of it.
     var fromColor = live && next ? colorOf(groupOfPath(next)) : "";
-    /** @type {Record<string, string>} */
-    var was = dict();
-    if (live) {
-      graph.forEachNode(function (id) {
-        if (visible(id) && (alpha[id] || 0) > 0.004) was[id] = groupOf(id);
-      });
-    }
-
-    // github#76
-    if (live) {
-      /** @type {Record<string, string>} */
-      var pc = dict();
-      /** @type {Record<string, string>} */
-      var ps = dict();
-      Object.keys(groupColor).forEach(function (g) { pc[g] = groupColor[g]; });
-      Object.keys(subShade).forEach(function (k) { ps[k] = subShade[k]; });
-      preRootColor = pc; preRootShade = ps;
-    }
+    var wasRoot = state.root || "";
 
     state.root = next || null;
     rootSegs = next ? next.split("/") : [];
     rootDepth = rootSegs.length;
-    buildSubOrder();
 
-    /** @type {Record<string, string> | null} */
-    var movesFrom = null;
-    if (live) {
-      Object.keys(was).forEach(function (id) {
-        if (!inRoot(id)) return;
-        if (groupOf(id) === was[id]) return;
-        if (!movesFrom) movesFrom = dict();
-        movesFrom[id] = was[id];
-      });
+    // github#76 -- STEP 1. A drill hides every other folder through `state.hidden` -- the same
+    // door the legend's eye and its "only" write to -- so the DISC sees a plain solo and
+    // animates as one. The root's own work is the other half: it filters the NAV (buildLegend)
+    // and repaints the folder in the colours its children will wear as wedges. Nothing is
+    // re-wedged and nothing re-ordered while `reWedge` is off.
+    var h = state.hidden[state.dim] || (state.hidden[state.dim] = dict());
+    if (next) {
+      var g0 = groupOfPath(next);
+      (order[state.dim] || []).forEach(function (n) { h[n] = (n !== g0); });
+    } else {
+      // coming home: give every group back, the way "All" does
+      Object.keys(h).forEach(function (n) { delete h[n]; });
+      seedHidden();
     }
+    // github#76 -- a drill filters by GROUP, so it owns no subfolder filter of its own; one
+    // left over from a previous root would keep hiding rows the new one should show.
+    if (wasRoot || next) state.hiddenSub = dict();
 
-    hardRelayout(false, live, true);
+    rootNoteColor = next ? wedgeColorsAhead() : null;
     attempt(placeLogo); attempt(heatBuild); attempt(buildLegend);
-    // github#76
+
     var landed = function () {
       preRootColor = null; preRootShade = null;
       colorShown = null; shadeShown = null;
     };
-    // github#76 -- a drill IS a filter, taken to its end: everything but one folder toggles
-    // off, and that folder recolours into its children while it does. So it runs the plain
-    // group-toggle cascade -- the disc empties, then the new one forms in the room that frees
-    // -- with the recolour walking across it. `cross` ran the two sets in one sweep instead,
-    // which put dots in flight between two discs and read as jumping rather than as a filter.
     if (live) {
+      // github#76 -- an only-click is `cascade(null, { colToggle: true })` and nothing else,
+      // so a drill is that, plus the recolour walked across the same cascade by `onFrame`.
       /** @type {CascadeOpts} */
       var how = { colToggle: true };
-      if (movesFrom) how.movesFrom = movesFrom;
       var tint = rootTintWalk(fromColor);
       if (tint) how.onFrame = tint;
       cascade(landed, how);
-    } else if (renderer) renderer.refresh();
+    } else {
+      applyLayout(false);
+      if (renderer) renderer.refresh();
+    }
     return state.root;
   }
 
