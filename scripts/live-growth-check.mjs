@@ -222,8 +222,12 @@ async function atRest(c, ms) {
   const deadline = Date.now() + ms;
   let prev = null, same = 0;
   for (;;) {
-    const k = await c.eval("(function(){ var vg = window.__vg; if (!vg) return 'no-vg';" +
-      " var s = vg.liveState(); if (s.pending || s.draining || s.busy) return 'busy';" +
+    // NOT __vg.liveState(): build-plugin.mjs strips the demo and debug API from the plugin
+    // build (stripDemoAndDebug), so it does not exist here at all. The view's own fields do.
+    const k = await c.eval("(function(){ var vg = window.__vg; if (!vg || !vg.graph) return 'no-vg';" +
+      " var v = " + VIEW + ";" +
+      " if (v && (v.liveBuilding || v.liveTimer !== null || v.liveAgain ||" +
+      "           (v.dirtyPaths && v.dirtyPaths.size))) return 'busy';" +
       " var sum = 0; vg.graph.forEachNode(function (id, a) { sum += a.x + a.y + a.size; });" +
       " return vg.graph.order + '|' + sum.toFixed(3); })()").catch(() => "err");
     if (k !== "busy" && k !== "err" && k === prev) { if (++same >= 3) return true; } else { same = 0; }
@@ -239,7 +243,20 @@ async function atRest(c, ms) {
 
 const ARRIVE = "(async function(path, link){" +
   " var body = 'Arrival note for github#120.\\n\\n[[' + link + ']]\\n\\nfiller ' + path + '\\n';" +
-  " try { await app.vault.create(path, body); return 1; } catch (e) { return 0; } })";
+  " try { await app.vault.create(path, body); return { ok: 1 }; }" +
+  " catch (e) { return { ok: 0, why: String((e && e.message) || e) }; } })";
+
+// app.vault.create() does NOT create intermediate folders -- it throws, and a swallowed throw
+// here reads exactly like a working harness measuring nothing. The first run of this file did
+// precisely that: 0 created, 392 refused, every sample flat, and the log said none of it.
+const ARRIVAL_DIR = "vg120";
+
+async function makeArrivalDir(c) {
+  return c.eval("(async function(){" +
+    " try { await app.vault.createFolder(" + JSON.stringify(ARRIVAL_DIR) + "); return 'created'; }" +
+    " catch (e) { var f = app.vault.getAbstractFileByPath(" + JSON.stringify(ARRIVAL_DIR) + ");" +
+    " return f ? 'already there' : 'FAILED: ' + String((e && e.message) || e); } })()");
+}
 
 async function pickLinkTargets(c, n) {
   return c.eval("(function(){ var f = app.vault.getMarkdownFiles().slice(0, " + n + ");" +
@@ -275,13 +292,15 @@ async function sample(c, child, tag, extra) {
     " var viewEvents = -1; try { viewEvents = v && v._events ? v._events.length : -1; } catch (e) { void 0; }" +
     " var vg = w.__vg || null;" +
     " var pm = w.performance && w.performance.memory ? w.performance.memory : null;" +
-    " var ls = vg && vg.liveState ? vg.liveState() : null;" +
+    // The plugin build has no liveState() or invalidations(): stripDemoAndDebug removes the
+    // whole demo and debug region. Everything below is read off the view instead.
+    " var live = v ? { building: !!v.liveBuilding, timer: v.liveTimer !== null," +
+    "   again: !!v.liveAgain, deferred: !!v.liveDeferred, wake: v.liveWake !== null," +
+    "   dirty: v.dirtyPaths ? v.dirtyPaths.size : -1 } : null;" +
     " return { mounts: w.__vgGrowthN," +
     "   hasView: !!v, files: app.vault.getMarkdownFiles().length," +
     "   order: vg && vg.graph ? vg.graph.order : -1, size: vg && vg.graph ? vg.graph.size : -1," +
-    "   invalidations: vg && vg.invalidations ? vg.invalidations().length : -1," +
-    "   paths: ls ? ls.paths : -1, nextId: ls ? ls.nextId : -1," +
-    "   pending: ls ? !!ls.pending : false, draining: ls ? !!ls.draining : false, busy: ls ? !!ls.busy : false," +
+    "   live: live," +
     "   canvases: v && v.contentEl ? v.contentEl.querySelectorAll('#vg-graph canvas').length : -1," +
     "   lastChurn: v && v.lastLive && v.lastLive.churn !== undefined ? v.lastLive.churn : null," +
     "   emit: emit, viewEvents: viewEvents," +
@@ -306,7 +325,7 @@ async function sample(c, child, tag, extra) {
               "  notes " + String(row.files).padStart(5) +
               "  order " + String(row.order).padStart(5) +
               "  mounts " + row.mounts +
-              "  inval " + row.invalidations +
+              "  dirty " + String(row.live ? row.live.dirty : -1).padStart(4) +
               "  emit " + String(row.emit ? row.emit.total : -1).padStart(4) +
               "  vEv " + String(row.viewEvents).padStart(4));
   return row;
@@ -352,12 +371,17 @@ async function main() {
     await sleep(4000);
   }
 
+  const dir = await makeArrivalDir(cdp);
+  console.log("  arrival folder " + ARRIVAL_DIR + "/: " + dir);
+  if (String(dir).startsWith("FAILED")) throw new Error("cannot create " + ARRIVAL_DIR + "/ -- " + dir);
+
   console.log("\nsamples");
   const base = await sample(cdp, child, "baseline");
   const targets = await pickLinkTargets(cdp, 200);
   if (!targets.length) throw new Error("the fixture vault has no markdown files to link to");
 
   let n = 0;
+  let firstRefusal = "";
   for (const phase of PHASES) {
     console.log("\n" + phase.name + " -- " + phase.note);
     const gap = 1000 / phase.rate;
@@ -366,11 +390,19 @@ async function main() {
     let made = 0, failed = 0;
     while (Date.now() < end) {
       const t = Date.now();
-      const path = "vg120/arrival-" + String(++n).padStart(5, "0") + ".md";
+      const path = ARRIVAL_DIR + "/arrival-" + String(++n).padStart(5, "0") + ".md";
       const link = targets[n % targets.length];
-      const ok = await cdp.eval(ARRIVE + "(" + JSON.stringify(path) + "," + JSON.stringify(link) + ")")
-        .catch(() => 0);
-      if (ok) made++; else failed++;
+      const r = await cdp.eval(ARRIVE + "(" + JSON.stringify(path) + "," + JSON.stringify(link) + ")")
+        .catch((e) => ({ ok: 0, why: "CDP: " + String(e && e.message ? e.message : e) }));
+      if (r && r.ok) {
+        made++;
+      } else {
+        failed++;
+        if (!firstRefusal) {
+          firstRefusal = (r && r.why) || "unknown";
+          console.log("  REFUSED: " + firstRefusal + "   (first of what may be many)");
+        }
+      }
       if (Date.now() >= nextSample) {
         await sample(cdp, child, phase.name + " +" + Math.round((Date.now() - (end - PHASE_SEC * 1000)) / 1000) + "s",
                      { arrivals: n, phase: phase.name, rate: phase.rate });
@@ -380,6 +412,12 @@ async function main() {
       if (wait > 0) await sleep(wait);
     }
     console.log("  arrivals: " + made + " created, " + failed + " refused");
+    // A run where nothing arrived still prints a full, flat, entirely plausible table.
+    // Refuse to be that run.
+    if (!made) {
+      throw new Error("phase " + phase.name + " created no notes (" + failed + " refused: " +
+                      (firstRefusal || "no reason given") + ") -- there is nothing to measure");
+    }
     // Let the debounce, the wake and any cascade finish before the rest sample.
     const rested = VIEW_MODE === "open" ? await atRest(cdp, 90000) : (await sleep(4000), true);
     await sample(cdp, child, phase.name + " AT REST",
@@ -405,8 +443,6 @@ async function main() {
               (last.domNodes - base.domNodes >= 0 ? "+" : "") + (last.domNodes - base.domNodes) + ")");
   console.log("  listeners      " + base.listeners + " -> " + last.listeners + "   (" +
               (last.listeners - base.listeners >= 0 ? "+" : "") + (last.listeners - base.listeners) + ")");
-  console.log("  invalidations  " + base.invalidations + " -> " + last.invalidations +
-              "   (onData handlers; a per-rebuild registration would grow this)");
   console.log("  mounts         " + base.mounts + " -> " + last.mounts +
               "   (a churn above LIVE_MAX_CHANGED remounts the page)");
   if (base.emit && last.emit) {
