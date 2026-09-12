@@ -262,6 +262,28 @@ async function makeArrivalDir(c) {
     " return f ? 'already there' : 'FAILED: ' + String((e && e.message) || e); } })()");
 }
 
+/**
+ * Wait until the disc has actually TAKEN the notes, not merely gone quiet.
+ *
+ * atRest() alone cannot tell "settled" from "never started": if no rebuild was ever
+ * scheduled, nothing is building, no timer is armed and no dot moves, so it reports rest on
+ * a disc that has silently ignored the whole burst. That is exactly what it did -- two
+ * bursts, 530 notes, order frozen at 1403 and every live flag false -- and the run still
+ * printed a clean table. The disc's own order is the only honest signal here.
+ */
+async function awaitOrder(c, target, ms) {
+  const deadline = Date.now() + ms;
+  let last = -1;
+  for (;;) {
+    const o = await c.eval("(function(){ var vg = window.__vg;" +
+      " return vg && vg.graph ? vg.graph.order : -1; })()").catch(() => -1);
+    if (o >= target) return { reached: true, order: o };
+    if (Date.now() > deadline) return { reached: false, order: o, wanted: target };
+    if (o !== last) { last = o; }
+    await sleep(500);
+  }
+}
+
 /* ----------------------------------------------------------------- pan cadence -- */
 // Reported from use: the disc starts to lag when panned while notes are arriving.
 // Nothing on the pan path cancels anything -- pan is enableCameraPanning on the renderer's
@@ -555,9 +577,18 @@ async function main() {
         " return v && v.dirtyPaths ? v.dirtyPaths.size : -1; })()").catch(() => -1);
       console.log("  " + made + " created while hidden; dirtyPaths holds " + dirty);
       await cdp.eval(REVEAL_GRAPH);
+      // What the disc SHOULD end up holding. The fixture carries a few non-note files, so
+      // the baseline gap between notes and order is the allowance, not a guess.
+      const notesNow = await cdp.eval("app.vault.getMarkdownFiles().length").catch(() => -1);
+      const want = notesNow - (base.files - base.order);
+      const took = await awaitOrder(cdp, want, 180000);
+      if (!took.reached) {
+        console.log("  DISC NEVER TOOK THE BURST: order " + took.order + ", wanted " + want +
+                    " -- the live rebuild did not land");
+      }
       const rested = await atRest(cdp, 120000);
       const s = await sample(cdp, child, "burst " + b + " AT REST",
-                             { arrivals: n, phase: "burst", burst: b, dirtyAtReveal: dirty, rested });
+                             { arrivals: n, phase: "burst", burst: b, dirtyAtReveal: dirty, rested, tookBurst: took.reached, orderWanted: want });
       console.log("    churn reported by the last applyData: " + s.lastChurn +
                   (s.lastChurn !== null && s.lastChurn > 200 ? "  -- OVER LIVE_MAX_CHANGED, so render() reran" : ""));
       // The same drag again, now that one more render() has run. If the pan degrades with
