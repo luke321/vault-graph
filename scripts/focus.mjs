@@ -11,6 +11,8 @@ const sleep = (ms) => new Promise((r) => { setTimeout(r, ms).unref(); });
 /** @type {{ proc: import("node:child_process").ChildProcess, ask: (cmd: string) => Promise<string> } | null} */
 let helper = null;
 let helperFailed = false;
+/** @type {string | null} */
+let home = null;
 
 function startHelper() {
   if (helper || helperFailed) return helper;
@@ -87,8 +89,12 @@ const NOOP = /** @type {FocusGuard} */ ({ watch: async () => "off" });
 export async function keepFocus() {
   const h = startHelper();
   if (!h) return NOOP;
-  const before = await h.ask("fg");
-  const hwnd = /^(\d+) (\d+)$/.exec(before)?.[1];
+  // design/0018 -- home is captured once per run, before the FIRST spawn
+  if (!home) {
+    const before = await h.ask("fg");
+    home = /^(\d+) (\d+)$/.exec(before)?.[1] || null;
+  }
+  const hwnd = home;
   if (!hwnd) return NOOP;
 
   return {
@@ -105,7 +111,7 @@ export async function keepFocus() {
       for (;;) {
         if (!helper) return last;
         const r = await helper.ask(`handback ${hwnd} ${childPid}`);
-        if (r === "foreign" || r === "failed") return r;
+        if (r === "foreign" || r === "failed" || r.startsWith("ERR")) return r;
         if (r === "plain" || r === "attach") last = r;
         if (Date.now() >= until) return last;
         await sleep(200);

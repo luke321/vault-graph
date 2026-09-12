@@ -77,6 +77,10 @@ wearing the first one's clothes.
 - **The watch runs alongside the harness and is never awaited.** The steal lands 1.9–2.2 s after
   the spawn, which is *after* the CDP attach has already succeeded, so a hand-back attempted once
   at the attach misses it every time. That was the first version, and it measured as no fix at all.
+- **Home is captured once per run, before the first spawn, not once per launch.** A harness that
+  launches several windows — `smoke.mjs` runs two lanes, `obsidian-smoke.mjs` launches three times
+  — would otherwise capture lane 1's browser as the window to protect while opening lane 2, and
+  the keyboard would bounce between harness windows and never find its way back to the terminal.
 - **The helper's pipe is ref'd only while a reply is outstanding.** Unref'd throughout, an `await`
   on the helper is the only pending work in the loop and node exits 13 on an unsettled top-level
   await one second into the run — a harness that dies immediately while reporting success. Ref'd
