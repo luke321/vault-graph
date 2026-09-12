@@ -988,6 +988,7 @@ function mountVaultGraph(root, data, deps) {
    * @property {Record<string, boolean> | null} bandLock
    * @property {GeomLock | null} geomLock
    * @property {Record<string, string>} color        id -> the colour it was drawn in there
+   * @property {string | null} [root]                github#76: the root it was cut at
    */
 
   /** @type {Record<string, string> | null} */
@@ -4382,10 +4383,22 @@ function mountVaultGraph(root, data, deps) {
       var w = opts.from;
       if (!w) return fn();
       var sDim = state.dim, sSub = subOrder, sBand = bandLock, sGeom = geomLock, sMove = moveFrom;
+      // github#76 -- the ROOT is part of which disc this is, exactly as the dimension is:
+      // plan the disc being left at the root it was cut at, or a drill would lay the old
+      // disc out with the new root and the erase edge would sweep the wrong seats.
+      var sRoot = state.root, sSegs = rootSegs, sDepth = rootDepth;
       state.dim = w.dim; subOrder = w.subOrder; bandLock = w.bandLock; geomLock = w.geomLock;
+      if (w.root !== undefined) {
+        state.root = w.root;
+        rootSegs = w.root ? w.root.split("/") : [];
+        rootDepth = rootSegs.length;
+      }
       moveFrom = null; oldWorld = true;
       try { return fn(); }
-      finally { state.dim = sDim; subOrder = sSub; bandLock = sBand; geomLock = sGeom; moveFrom = sMove; oldWorld = false; }
+      finally {
+        state.dim = sDim; subOrder = sSub; bandLock = sBand; geomLock = sGeom; moveFrom = sMove;
+        state.root = sRoot; rootSegs = sSegs; rootDepth = sDepth; oldWorld = false;
+      }
     };
     (function () {
       var a = inWorld(function () { return staticPlan(function (id) { return wasPresent[id]; }); });
@@ -8146,10 +8159,21 @@ function mountVaultGraph(root, data, deps) {
     var live = !!renderer && !instant;
     /** @type {Record<string, string>} */
     var was = dict();
+    /** @type {LeftDisc | null} */
+    var from = null;
     if (live) {
+      /** @type {Record<string, string>} */
+      var leftColors = dict();
       graph.forEachNode(function (id) {
-        if (visible(id) && (alpha[id] || 0) > 0.004) was[id] = groupOf(id);
+        if (!visible(id) || (alpha[id] || 0) <= 0.004) return;
+        was[id] = groupOf(id);
+        // github#86, github#76 -- its colour, read while this is still its disc
+        leftColors[id] = nodeColor(id);
       });
+      // github#76 x github#86, design/0015 -- the disc being LEFT, so the cascade can draw
+      // both. A drill replaces every wedge, which is what the clock hand was built for.
+      from = { dim: state.dim, subOrder: subOrder, bandLock: bandLock, geomLock: geomLock,
+               color: leftColors, root: state.root || null };
     }
 
     // github#76
@@ -8183,8 +8207,16 @@ function mountVaultGraph(root, data, deps) {
     attempt(placeLogo); attempt(heatBuild); attempt(buildLegend);
     // github#76
     var landed = function () { preRootColor = null; preRootShade = null; };
-    if (live) cascade(landed, movesFrom ? { colToggle: true, cross: true, movesFrom: movesFrom }
-                                        : { colToggle: true, cross: true });
+    // github#76 x github#86 -- the same clock hand a dimension switch uses. A drill replaces
+    // every wedge, which is the case the hand was built for: one sweep keyed on ANGLE, the
+    // erase edge taking each dot at its bearing on the disc being left and the fill edge, a
+    // blade behind, lighting it at the seat it ends in. `cross` keyed the same two sets on
+    // rank instead, so departures and arrivals ran in index order rather than round the disc.
+    /** @type {CascadeOpts} */
+    var how = { colToggle: true, hand: true };
+    if (from) how.from = from;
+    if (movesFrom) how.movesFrom = movesFrom;
+    if (live) cascade(landed, how);
     else if (renderer) renderer.refresh();
     return state.root;
   }

@@ -2454,6 +2454,38 @@ eye writes — so there is nothing to translate on the way back and no second fi
 fall out of step. Measured: hiding `People` in the drilled demo disc takes it from 60
 notes to 44, and the vault disc then shows 1387 of 1403, the same 16 notes.
 
+## A drill sweeps on the same clock hand a dimension switch does
+
+github#76 x github#86, design/0015. A drill replaces **every wedge**, which is the case the
+hand was built for, so it uses the hand rather than a second animation of its own. One sweep
+keyed on **angle, not rank**: the erase edge takes each dot at its bearing on the disc being
+left, and the fill edge, a blade behind it, lights each dot at the seat it ends in.
+
+It replaced `cross`, which keyed the same two sets on *index order* — departures and arrivals
+ran in the order the planner happened to list them rather than round the disc, so a drill and a
+dimension switch, which are the same event on different axes, did not read as the same gesture.
+
+**The root is part of which disc a `LeftDisc` is**, exactly as the dimension is. `inWorld`
+already swapped `state.dim`, `subOrder`, `bandLock` and `geomLock` to the disc being left;
+it now carries `state.root` / `rootSegs` / `rootDepth` too, restoring all three in its
+`finally`. Without that the old disc is planned **at the new root**, and the erase edge sweeps
+seats the dots it is erasing never occupied. `LeftDisc.root` is optional and `inWorld` only
+applies it when present, so `setDim`'s own `from` — which carries no root — is untouched:
+measured, the four dimension-switch checks and the switched-to live rebuild are unchanged on all
+four fixtures, landing 0 moved against a fresh relayout and 0 on the round trip.
+
+Measured on the demo vault, driven by the real gesture over CDP: the cascade runs **~2.3 s**
+in, **~2.6 s** back, and `settle()` stays a no-op at the end of both — **0 of 60** dots off
+after a fresh relayout going in, **0 of 1403** coming back, worst 0% on each. The suite's own
+frame count reads `1f animated` rather than `2f` only because the checks run on the fast
+clock (`FAST_CLOCK`); it is not a shorter animation, and the wall-clock figures above are
+what says so.
+
+```bash
+node scripts/smoke.mjs --only "a drill animates"
+node scripts/smoke.mjs --only "switch" --only "rings"   # the dimension switch, unchanged
+```
+
 ## A root and the tag disc are exclusive, and `setRoot` is total
 
 github#76 x github#86, decided on the merge of 2026-09-12 (D-2). A root is a **folder
