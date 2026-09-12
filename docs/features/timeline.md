@@ -32,4 +32,4 @@ commit.
 | | |
 |---|---|
 | **Introduced in** | `1.7.0` — "The Timeline Update" |
-| **Last re-recorded** | `2.6.0 — 2026-09-11` — 27.4 s at 1586x992, encoded at 960 px (2.69 MB) |
+| **Last re-recorded** | `2.7.0 — 2026-09-12` — 27.9 s at 1000x1000, encoded at 1000 px (5.11 MB) |

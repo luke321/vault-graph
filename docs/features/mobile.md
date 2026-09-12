@@ -77,4 +77,4 @@ selects nothing. See `.ai-context/mobile-harness.md`.
 | | |
 |---|---|
 | **Introduced in** | `2.1.0 (github#73)` |
-| **Last re-recorded** | `2.6.0 — 2026-09-11` — 17.7 s at 406x892, encoded at native width (1.11 MB) |
+| **Last re-recorded** | `2.7.0 — 2026-09-12` — 17.1 s at 420x900, encoded at native width (1.13 MB) |
