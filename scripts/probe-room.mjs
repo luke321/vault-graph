@@ -388,7 +388,22 @@ try {
 
     const chrome_ = await page.j(READING);
 
-    rows.push({ note: picked, rest, walk, fit, closed, chrome: chrome_,
+    /* github#131, github#82 */
+    const spot = await page.j(`(function () {
+      var g = document.getElementById("vg-graph").getBoundingClientRect();
+      return { x: Math.round(g.right - 24), y: Math.round(g.top + 24) }; })()`);
+    for (const type of ["mousePressed", "mouseReleased"]) {
+      await page.send("Input.dispatchMouseEvent", {
+        type, x: spot.x, y: spot.y, button: "left", clickCount: 1,
+        buttons: type === "mousePressed" ? 1 : 0,
+      });
+    }
+    await sleep(500);
+    await settle();
+    const stage = await page.j(READING);
+    await shoot("5-stage");
+
+    rows.push({ note: picked, rest, walk, fit, closed, stage, chrome: chrome_,
                 consoleError: page.firstError() });
     console.log(`\n${LABEL ? LABEL + " " : ""}note ${picked.label} (deg ${picked.deg})`);
     for (const [k, m] of [["rest", rest], ["walk", walk], ["fit", fit]]) {
@@ -406,9 +421,11 @@ try {
     console.log(`  selected: card in #${chrome_.cardParent}, reading "${chrome_.reading}", ` +
       `note tab ${chrome_.noteTab}, open button "${chrome_.openLabel}", ` +
       `sidebar scrollable by ${chrome_.sidebarHidden}px`);
-    console.log(`  after the card's x: reading "${closed.reading}", note tab ${closed.noteTab}, ` +
-      `card ${closed.cardHidden ? "hidden" : "SHOWN"}, groups ${closed.groupsShown ? "shown" : "HIDDEN"}` +
-      (chrome_.consoleError ? `  CONSOLE ERROR: ${chrome_.consoleError}` : ""));
+    for (const [how, m] of [["the card's x", closed], ["a click on the stage", stage]]) {
+      console.log(`  after ${how}: reading "${m.reading}", note tab ${m.noteTab}, ` +
+        `card ${m.cardHidden ? "hidden" : "SHOWN"}, groups ${m.groupsShown ? "shown" : "HIDDEN"}`);
+    }
+    if (chrome_.consoleError) console.log(`  CONSOLE ERROR: ${chrome_.consoleError}`);
   }
 
   if (FILM) {
