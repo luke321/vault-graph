@@ -2780,18 +2780,44 @@ the demo fixture, driving a six-second drag and reading the rAF interval distrib
 | | quiet pan | pan with notes arriving |
 |---|---|---|
 | median frame | 16.7 ms | **16.7 ms** |
-| worst frame, mounts 1-4 | 16.9 / 16.9 / 33.4 / 17.0 ms | **371 / 687 / 653 / 702 ms** |
-| frames over 50 ms | 0, every time | 4 per six-second drag |
+| worst frame, mounts 1-4 | 16.9 / 16.9 / 33.4 / 17.0 ms | **517 / 734 / 851 / 817 ms** |
+| frames over 50 ms | 0, every time | 5 / 6 / 6 / 7 per six-second drag |
 
 **The median never moves**, which is why it reads as a stutter rather than a slowdown: one frozen
 frame per rebuild, and nothing else. The quiet row is the control that matters -- it stays flat
 while the vault doubles from 1,403 to 2,218 notes, so panning itself does not degrade with vault
 size and every bit of the damage is the rebuild landing under the pointer.
 
-A drag now counts as owning the frame loop. No new machinery: `livePending` and the 120 ms drain
-already held data for a busy cascade, so the rebuild lands as soon as the hand stops. A 250 ms
-grace covers the camera's inertia after mouseup, and a 5,000 ms cap means a mouseup lost outside
-the canvas cannot starve the rebuild for the life of the view.
+**It took four passes, and each of the first three looked like progress while leaving the stall
+in place.** Worth recording in full, because the shape of the mistake repeats:
+
+| | worst frame under arrivals | over 50 ms |
+|---|---|---|
+| nothing done | 517 / 734 / 851 / 817 ms | 5 / 6 / 6 / 7 |
+| the listener fix below | 371 / 687 / 653 / 702 ms | 4 |
+| + `applyData` deferred on a drag | 417 / 767 / 868 / 867 ms | 3 |
+| + the host's `buildData` deferred too | 367 / 634 / 653 / 687 ms | 2 |
+| + the cap fixed | **23.9 / 18.8 / 22.9 / 21.5 ms** | **0** |
+
+Deferring `applyData` alone barely moved it, because `liveRebuild()` runs `await buildData(app,
+...)` over the whole metadata cache **before** `applyData` is ever consulted -- the apply was
+gated and the build was not. And with both gated it *still* stalled, because `DRAG_MAX_MS` was
+5,000 ms: a drag longer than five seconds tripped the very cap meant to protect the gates and let
+rebuilds back in mid-pan. The final row is a pan under arrivals that is indistinguishable from a
+quiet one.
+
+**The floor is not Obsidian.** Measured with `--no-live`, where the plugin does no work at all on
+an arrival: a pan under the same arrivals gives worst frames of **27.9 and 19.0 ms, zero over
+50 ms**, and `graph.order` never moves. So Obsidian's own parsing and `resolvedLinks` update cost
+essentially nothing, and every millisecond of the stall was this plugin's.
+
+A drag now counts as owning the frame loop, on both sides: the page refuses to apply, and the host
+refuses to build (`api.interacting()`, which lives outside the demo-and-debug region precisely
+because a shipped build needs it). No new machinery -- `livePending`, the 120 ms drain and the
+500 ms wake poll all already existed. A 250 ms grace covers the camera's inertia after mouseup; a
+lost mouseup is caught by the next `mousemovebody` whose `buttons` no longer carry bit 1, the way
+`bindNodeDrag` already does it, with `DRAG_MAX_MS` demoted to a 60,000 ms backstop for a pointer
+that stops moving entirely.
 
 **`render()` registers nothing that outlives it (github#120).** `render()` reruns on Refresh and
 on any rebuild whose churn passes `LIVE_MAX_CHANGED`, while `registerEvent` and `registerDomEvent`
