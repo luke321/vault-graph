@@ -270,16 +270,26 @@ async function main() {
         await moveTo(page, w.x, w.y);
         await sleep(DWELL_MS);
         let press = w;
+        // github#124 -- the expectation moves with the target. A computed target like `biginner`
+        // picks the best note for the layout it is asked about, so when the layout has shifted
+        // between the first resolve and the press, `fresh` is a DIFFERENT note at a different
+        // point -- and comparing the hover against the stale `w.expect` reports a miss that is
+        // not one. That is what failed the 2.7.0 hero twice: the pointer sat correctly on the
+        // new best note (410, then 419) while the check still named the old one (430). It only
+        // shows up in the full storyboard, where the pin beat follows `collapsepreview` putting
+        // the panels back and resizing the stage; the `pin` act alone starts from a still layout.
+        let want = w.expect;
         if (w.expect) {
           const fresh = await where(page, beat.target);
           if (fresh && (fresh.x !== w.x || fresh.y !== w.y)) {
             await moveTo(page, fresh.x, fresh.y);
             press = fresh;
+            if (fresh.expect) want = fresh.expect;
           }
           const gotHover = await page.eval("JSON.stringify(__vg.demo.hovered())");
           const hit = gotHover && JSON.parse(gotHover);
-          if (hit !== w.expect) {
-            console.warn(`  ! aiming to drag ${w.expect} but hovered ${hit} — the press may miss`);
+          if (hit !== want) {
+            console.warn(`  ! aiming to drag ${want} but hovered ${hit} — the press may miss`);
           }
         }
         let ex = press.x + dx, ey = press.y + dy;
@@ -288,10 +298,10 @@ async function main() {
           ex = dst.x; ey = dst.y;
         }
         await drag(page, press.x, press.y, ex, ey);
-        if (w.expect && !Array.isArray(beat.drag)) {
+        if (want && !Array.isArray(beat.drag)) {
           const pinned = JSON.parse(await page.eval("JSON.stringify(__vg.state.pinned)"));
-          if (pinned.indexOf(w.expect) < 0) {
-            console.warn(`  ! dragged ${w.expect} but it is not pinned afterward — the drop missed the hub`);
+          if (pinned.indexOf(want) < 0) {
+            console.warn(`  ! dragged ${want} but it is not pinned afterward — the drop missed the hub`);
             trace.push(`MISSED: ${JSON.stringify(beat.target)}`);
           }
         }
