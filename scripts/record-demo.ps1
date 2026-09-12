@@ -8,6 +8,11 @@ param(
   [int]    $Port = 9222,
   [int]    $Width = 1600,
   [int]    $Height = 1000,
+  # github#124 -- the size of the CAPTURED REGION, not of the window. The window is sized to
+  # whatever produces exactly this, because the two are not the same number (see below).
+  [int]    $CaptureWidth = 0,
+  [int]    $CaptureHeight = 0,
+  [switch] $Square,
   [ValidateSet('', 'primary', 'left', 'right')]
   [string] $Monitor = '',
   [int]    $X = [int]::MinValue,
@@ -19,6 +24,11 @@ param(
 $ErrorActionPreference = 'Stop'
 $here = Split-Path -Parent $MyInvocation.MyCommand.Path
 $repo = Split-Path -Parent $here
+
+# github#135 -- once, unconditionally, before any use. The capture-size correction below reads
+# [Windows.Forms.Screen] whether or not -Monitor was passed, so loading it inside that branch
+# threw "Unable to find type" on -Square -X -Y, after Chrome was up and the screen lock taken.
+Add-Type -AssemblyName System.Windows.Forms
 
 $probe = $Port
 while ($probe -lt $Port + 12) {
@@ -70,7 +80,6 @@ $chrome = (Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\App
 
 $posX = 40; $posY = 40
 if ($Monitor) {
-  Add-Type -AssemblyName System.Windows.Forms
   $screens = @([System.Windows.Forms.Screen]::AllScreens)
   $target = switch ($Monitor) {
     'primary' { $screens | Where-Object { $_.Primary } | Select-Object -First 1 }
@@ -104,6 +113,18 @@ try {
 
 if ($X -ne [int]::MinValue) { $posX = $X }
 if ($Y -ne [int]::MinValue) { $posY = $Y }
+
+# github#124 -- `-Square` is the house default for a gallery clip: 1000x1000 of actual pixels.
+if ($Square) {
+  if (-not $CaptureWidth)  { $CaptureWidth = 1000 }
+  if (-not $CaptureHeight) { $CaptureHeight = 1000 }
+}
+if ($CaptureWidth -or $CaptureHeight) {
+  if (-not $CaptureWidth)  { $CaptureWidth = $Width }
+  if (-not $CaptureHeight) { $CaptureHeight = $Height }
+  # first guess: ask for the window at the capture size, then correct it once it exists
+  $Width = $CaptureWidth; $Height = $CaptureHeight
+}
 $chromeArgs = @(
   "--remote-debugging-port=$Port",
   "--user-data-dir=$profileDir",
@@ -170,6 +191,38 @@ if ([Win.U]::GetForegroundWindow() -ne $hwnd) {
   Write-Warning "Chrome is topmost but did not take focus; the capture region is covered by nothing, so the take is still clean."
 }
 
+# github#124 -- THE REQUESTED SIZE IS NOT THE CAPTURED SIZE. --window-size sizes the window;
+# the capture region is the window's DWM extended frame bounds clipped to the work area, which
+# is smaller by a border the compositor owns -- measured 14x7 on this machine, and not a
+# constant across DPI or Windows version. So asking for 1000x1000 gives 986x992. With a capture
+# size asked for, measure that trim on the real window and resize by it, then verify.
+if ($CaptureWidth -and $CaptureHeight) {
+  for ($attempt = 1; $attempt -le 3; $attempt++) {
+    $probe = New-Object Win.U+RECT
+    $okProbe = ([Win.U]::DwmGetWindowAttribute($hwnd, $DWMWA_EXTENDED_FRAME_BOUNDS, [ref] $probe,
+      [System.Runtime.InteropServices.Marshal]::SizeOf($probe)) -eq 0)
+    if (-not $okProbe) { if (-not [Win.U]::GetWindowRect($hwnd, [ref] $probe)) { break } }
+
+    $screenNow = [System.Windows.Forms.Screen]::FromHandle($hwnd)
+    $waNow = $screenNow.WorkingArea
+    $cw = [Math]::Min($probe.R, $waNow.X + $waNow.Width) - [Math]::Max($probe.L, $waNow.X)
+    $ch = [Math]::Min($probe.B, $waNow.Y + $waNow.Height) - [Math]::Max($probe.T, $waNow.Y)
+    $dw = $CaptureWidth - $cw; $dh = $CaptureHeight - $ch
+    if ($dw -eq 0 -and $dh -eq 0) {
+      Write-Host "capture region is exactly ${CaptureWidth}x${CaptureHeight}" -ForegroundColor DarkGray
+      break
+    }
+    $cur = New-Object Win.U+RECT
+    [void][Win.U]::GetWindowRect($hwnd, [ref] $cur)
+    $newW = ($cur.R - $cur.L) + $dw; $newH = ($cur.B - $cur.T) + $dh
+    Write-Host ("capture {0}x{1}, want {2}x{3} -- resizing the window to {4}x{5} (attempt {6})" -f `
+      $cw, $ch, $CaptureWidth, $CaptureHeight, $newW, $newH, $attempt) -ForegroundColor DarkGray
+    $SWP_NOMOVE2 = 0x0002; $SWP_NOZORDER = 0x0004
+    [void][Win.U]::SetWindowPos($hwnd, [IntPtr]::Zero, 0, 0, $newW, $newH, ($SWP_NOMOVE2 -bor $SWP_NOZORDER))
+    Start-Sleep -Milliseconds 350
+  }
+}
+
 $wr = New-Object Win.U+RECT
 if (-not [Win.U]::GetWindowRect($hwnd, [ref] $wr)) { throw "GetWindowRect failed" }
 
@@ -180,7 +233,6 @@ if (-not $dwmOk) {
   $r = $wr
 }
 
-Add-Type -AssemblyName System.Windows.Forms -ErrorAction SilentlyContinue
 $screen = [System.Windows.Forms.Screen]::FromHandle($hwnd)
 $wa = $screen.WorkingArea
 $cl = [Math]::Max($r.L, $wa.X); $ct = [Math]::Max($r.T, $wa.Y)

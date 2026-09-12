@@ -9,6 +9,7 @@ import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { attach } from "./cdp.mjs";
 import { leftmostScreen, leftWindow, leftWindowArgs, placeElectronLeft } from "./screen.mjs";
+import { keepFocus } from "./focus.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(HERE, "..");
@@ -115,6 +116,8 @@ async function exporterPositions(vault) {
   if (b.status !== 0) throw new Error("build-graph failed: " + (b.stderr || b.stdout));
   const port = await freePort();
   const profile = mkdtempSync(join(tmpdir(), "vg-obsidian-smoke-chrome-"));
+  // github#129
+  const focus = await keepFocus();
   const chrome = spawn(findChrome(), [
     "--remote-debugging-port=" + port, "--user-data-dir=" + profile,
     "--no-first-run", "--no-default-browser-check", "--disable-extensions", "--disable-sync",
@@ -124,6 +127,7 @@ async function exporterPositions(vault) {
     "--force-device-scale-factor=1", ...leftWindowArgs(1600, 1000),
     "--app=" + pathToFileURL(out).href + "?rest",
   ], { stdio: "ignore" });
+  void focus.watch(chrome.pid);
   let p = null;
   try {
     for (let i = 0; i < 100 && !p; i++) {
@@ -163,7 +167,10 @@ async function launchObsidian(vault, profile, fresh = true) {
       JSON.stringify({ vaults: { "0000obsidiansmoke": { path: vault, ts: Date.now(), open: true } } }), "utf8");
   }
   const t0 = Date.now();
+  // github#129
+  const focus = await keepFocus();
   const child = spawn(findObsidian(), ["--remote-debugging-port=" + PORT, "--user-data-dir=" + profile], { stdio: "ignore" });
+  void focus.watch(child.pid);
   for (let i = 0; i < 120; i++) {
     await sleep(500);
     let c = null;

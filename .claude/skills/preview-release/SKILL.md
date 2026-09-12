@@ -55,8 +55,12 @@ What it looks like, and what a draft keeps getting wrong if it skips this step:
   about what the release "is about".
 - **Bullets carry the detail, each opening with a bold clause.** Prose paragraphs under a feature
   heading are the tell of a draft written from the design records instead of from a release.
-- **The clip is embedded inside its section**, not described. `<img src="..." width="100%"
-  alt="...">` with a real alt that narrates the clip beat by beat.
+- **The clip is embedded inside its section**, not described, and it goes **directly under the
+  `###` heading, above the bullets** — every published release is in that order. `<img src="..."
+  width="100%" alt="...">` with a real alt that narrates the clip beat by beat. A clip placed
+  after the bullets is the tell of a draft written from the design records rather than from a
+  release; in a preview, where the clip does not exist yet, its **status line sits in that same
+  slot** so the drafted shape is the shape a real note would have.
 - **`### Smaller things` is a flat bullet list** at the end.
 - **It is short.** 2.5.0's whole reel is under 300 words. If a section runs past a short
   paragraph plus four or five bullets, it is too long.

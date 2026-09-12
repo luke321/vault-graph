@@ -11,6 +11,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { attach } from "./cdp.mjs";
 import { leftWindowArgs } from "./screen.mjs";
+import { keepFocus } from "./focus.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(HERE, "..");
@@ -90,6 +91,8 @@ async function measure(htmlPath, dim) {
   });
   const profile = mkdtempSync(join(tmpdir(), "vg-snap-profile-"));
   const url = pathToFileURL(htmlPath).href + "?rest";
+  // github#129
+  const focus = await keepFocus();
   const chrome = spawn(findChrome(), [
     `--remote-debugging-port=${port}`, `--user-data-dir=${profile}`,
     "--no-first-run", "--no-default-browser-check",
@@ -103,6 +106,7 @@ async function measure(htmlPath, dim) {
     "--disable-background-timer-throttling",
     ...leftWindowArgs(1600, 1000), `--app=${url}`,
   ], { stdio: "ignore", detached: false });
+  void focus.watch(chrome.pid);
 
   try {
     let page;

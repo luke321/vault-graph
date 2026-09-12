@@ -180,6 +180,7 @@
  * @property {GraphLike} graph
  * @property {RendererLike | undefined} renderer   set by makeRenderer() before the api exists; a getter, so a host reads the live one
  * @property {(next: VaultData, opts?: { renames?: Record<string, string> }) => LiveResult} applyData   github#72
+ * @property {() => boolean} interacting   github#120: a drag owns the frame loop; do not build either
  * @property {(path: string, words: number) => boolean} setWords   github#72: by PATH, never by index
  * @property {() => void} readTheme
  * @property {() => void} placeLogo
@@ -5528,6 +5529,35 @@ function mountVaultGraph(root, data, deps) {
       }
     });
 
+    // github#120 -- see liveBusy(): the page has to know a drag is on
+    (function () {
+      var captor = renderer.getMouseCaptor && renderer.getMouseCaptor();
+      if (!captor) return;
+      // github#120 -- mirror the captor's own condition, not its events
+      captor.on("mousedown", function (e) {
+        var o = e && e.original;
+        if (o && o.button !== undefined && o.button !== 0) return;
+        dragging = true; dragStartedAt = NOW();
+      });
+      captor.on("mouseup", function () { dragging = false; dragEndedAt = NOW(); });
+      // github#120 -- what actually catches a lost mouseup
+      captor.on("mousemovebody", function (e) {
+        if (!dragging) return;
+        var o = e && e.original;
+        if (o && o.buttons !== undefined && !(o.buttons & 1)) { dragging = false; dragEndedAt = NOW(); }
+      });
+      // github#120 -- belt to that braces, for a release off-canvas
+      var onDocUp = function () {
+        if (!dragging) return;
+        dragging = false; dragEndedAt = NOW();
+      };
+      DOC.addEventListener("mouseup", onDocUp, true);
+      onDestroy.push(function () {
+        DOC.removeEventListener("mouseup", onDocUp, true);
+        dragging = false;
+      });
+    })();
+
     (function () {
       var cam = renderer.getCamera();
       var edgeRaf = 0;
@@ -5712,6 +5742,51 @@ function mountVaultGraph(root, data, deps) {
     }
   });
 
+  /* ------------------------------------------- github#131, design/0019 -- two readings */
+
+  var reading = "groups";
+  /** @type {Record<string, number>} */
+  var readScroll = { groups: 0, note: 0 };
+
+  /* github#131, design/0019, design/0013 */
+  function cardHome() {
+    var d = $("detail"), note = $("readnote"), canvas = $("canvas");
+    if (!d || !note || !canvas) return;
+    var want = narrow() ? canvas : note;
+    if (d.parentNode !== want) want.appendChild(d);
+  }
+
+  /** @param {string} which */
+  function setReading(which) {
+    var tabs = $("tabs"), tg = $("tabgroups"), tn = $("tabnote");
+    var pg = $("readgroups"), pn = $("readnote"), sb = $("sidebar");
+    if (!tabs || !tg || !tn || !pg || !pn) return;
+    var note = which === "note" && !!state.selected && !narrow();
+    var next = note ? "note" : "groups";
+    if (sb && next !== reading) readScroll[reading] = sb.scrollTop;
+    reading = next;
+    tg.setAttribute("aria-selected", note ? "false" : "true");
+    tn.setAttribute("aria-selected", note ? "true" : "false");
+    tn.disabled = !state.selected || narrow();
+    pg.hidden = note;
+    pn.hidden = !note;
+    if (sb) sb.scrollTop = readScroll[reading] || 0;
+  }
+
+  /* github#131, design/0019 */
+  // github#135 -- a MediaQueryList lives on the window; remove it
+  if (WIN.matchMedia) {
+    var readMq = WIN.matchMedia("(max-width: 720px)");
+    var onReadMq = function () { cardHome(); setReading(reading); afterPanel(); };
+    if (readMq.addEventListener) {
+      readMq.addEventListener("change", onReadMq);
+      onDestroy.push(function () { readMq.removeEventListener("change", onReadMq); });
+    } else if (readMq.addListener) {
+      readMq.addListener(onReadMq);
+      onDestroy.push(function () { readMq.removeListener(onReadMq); });
+    }
+  }
+
   /** @param {string | null} id */
   function select(id) {
     // github#86 -- clicking any copy selects the NOTE
@@ -5725,7 +5800,8 @@ function mountVaultGraph(root, data, deps) {
     state.selected = id;
     syncLazyEdges();
     var d = $("detail");
-    if (!id) { d.hidden = true; renderer.refresh(); return; }
+    // github#131, design/0019
+    if (!id) { d.hidden = true; setReading("groups"); renderer.refresh(); return; }
 
     var a = graph.getNodeAttributes(id);
     var nb = neighboursOf(id).slice().sort(function (p, q) {
@@ -5754,7 +5830,9 @@ function mountVaultGraph(root, data, deps) {
       '<div class="chip" style="border-style:dashed">' + esc(a.folder) +
         (a.sub ? ' / ' + esc(a.sub) : '') + ' / ' + esc(a.ntype) + '</div>' +
       '<div class="actions">' +
-        (a.ghost ? "" : '<a class="open" href="obsidian://open?vault=' + vault + '&file=' + file + '">Open in Obsidian</a>') +
+        // github#131
+        (a.ghost ? "" : '<a class="open" title="Open in Obsidian" href="obsidian://open?vault=' +
+                        vault + '&file=' + file + '">Open</a>') +
         '<button class="btn pin" data-pin="' + id + '" aria-pressed="' + isPinned(id) + '" title="' +
           (isPinned(id) ? "Unpin from hub" : "Pin to hub") + '">' + pinSvg(isPinned(id)) +
           ' Pin to hub</button>' +
@@ -5784,6 +5862,9 @@ function mountVaultGraph(root, data, deps) {
     Array.prototype.forEach.call(d.querySelectorAll("[data-tr]"), /** @param {HTMLElement} b */ function (b) {
       b.onclick = function () { trailBackTo(+b.getAttribute("data-tr")); };
     });
+    // github#131, design/0019
+    cardHome();
+    setReading("note");
     renderer.refresh();
   }
 
@@ -6707,6 +6788,12 @@ function mountVaultGraph(root, data, deps) {
     });
     syncDimUI();
 
+    // github#131, design/0019 -- the two readings
+    if ($("tabgroups")) $("tabgroups").onclick = function () { setReading("groups"); };
+    if ($("tabnote")) $("tabnote").onclick = function () { setReading("note"); };
+    cardHome();
+    setReading("groups");
+
     $("allon").onclick = function () {
       seedHidden();
       state.hiddenSub = dict();
@@ -7147,7 +7234,8 @@ function mountVaultGraph(root, data, deps) {
     }
   }
 
-  var FIT_RATIO = 1.04;
+  // github#128
+  var FIT_RATIO = 0.954;
 
   // github#14
   var camAtRest = true, fitting = false;
@@ -9694,10 +9782,24 @@ function mountVaultGraph(root, data, deps) {
   var liveTimer = null;
   var LIVE_IDLE_MS = 120;
 
-  function liveBusy() { return !!(cascadeRun || anim || play); }
-  // github#72, design/0014
+  // github#120 -- a drag owns the frame loop, and nothing knew it
+  var dragging = false;
+  var dragEndedAt = -1e9;
+  var dragStartedAt = 0;
+  // github#120 -- inertia outlives the button coming up
+  var DRAG_GRACE_MS = 250;
+  // github#120 -- last resort only; 5,000 ms was a bug
+  var DRAG_MAX_MS = 60000;
+
+  function dragOwnsFrames() {
+    if (dragging && NOW() - dragStartedAt > DRAG_MAX_MS) dragging = false;
+    return dragging || NOW() - dragEndedAt < DRAG_GRACE_MS;
+  }
+
+  function liveBusy() { return !!(cascadeRun || anim || play || dragOwnsFrames()); }
+  // github#72, design/0014, github#120
   function liveWhy() {
-    return cascadeRun ? "cascade" : anim ? "tween" : play ? "timeline" : "";
+    return cascadeRun ? "cascade" : anim ? "tween" : play ? "timeline" : dragOwnsFrames() ? "drag" : "";
   }
 
   // github#72, design/0014 -- `words` is deliberately not in the key
@@ -9894,6 +9996,9 @@ function mountVaultGraph(root, data, deps) {
     API = window.__vg = { graph: graph,
                     // github#72
                     applyData: applyData,
+                    // github#120 -- NOT part of the debug API, because the host needs it in a
+                    // github#120 -- the host asks before building, not only applying
+                    interacting: dragOwnsFrames,
                     setWords: setWords,
                     readTheme: readTheme, get renderer() { return renderer; },
                     placeLogo: placeLogo,
@@ -10735,7 +10840,8 @@ function mountVaultGraph(root, data, deps) {
       attempt(onDestroy[i]);
     }
     onDestroy.length = 0;
-    if (renderer) attempt(function () { renderer.kill(); });
+    // github#135 -- drop the handle: `if (renderer)` is every call site
+    if (renderer) { attempt(function () { renderer.kill(); }); renderer = null; }
     if (window.__vg === API) delete window.__vg;
     API = null;
   }

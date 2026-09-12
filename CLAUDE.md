@@ -5,6 +5,14 @@ disc: notes packed into folder wedges on a fixed lattice, animated by a cascade.
 is **public**. The recurring failure mode here is reasoning about the code instead of
 measuring it: serve the page, drive it, read the numbers.
 
+**Because the repo is public, this file carries only what is true for anyone who clones it.**
+Absolute paths, session identity and naming, the session manager's commands, which physical
+display a harness seizes, and anything about the maintainer's own setup live in an untracked
+`CLAUDE.local.md` next to this one. If you are working on the machine that has one, it is
+imported below; if you are a contributor, its absence is normal and nothing here depends on it.
+
+@CLAUDE.local.md
+
 ## Laws — every one has a check in `scripts/smoke.mjs` and a section in `.ai-context/invariants.md`
 
 - **The serpentine survives.** Nothing between a note's link weight and its position may step.
@@ -31,7 +39,7 @@ measuring it: serve the page, drive it, read the numbers.
   **A screen.** `record-demo.ps1` captures with `gdigrab -i desktop` — it copies a *region of the
   display*, so anything else drawn there lands in the take and ruins it silently: the file exists
   and looks plausible. A recording is not the only claimant — `smoke.mjs` parks every Chrome
-  window it opens on the leftmost monitor, and `spike-check.mjs` puts Obsidian there — so the
+  window it opens on one fixed display, and `spike-check.mjs` puts Obsidian there — so the
   lock is named after the **screen**, not the job: `screen-left`, `screen-right`,
   `screen-primary`. **Every harness that places a window takes its own screen lock and releases
   it on every way out** — `smoke.mjs`, `spike-check.mjs`, `record-demo.ps1` — so you do not have
@@ -47,10 +55,10 @@ measuring it: serve the page, drive it, read the numbers.
   Keeping them separate is what lets `pre-push` hold `suite` while the `smoke.mjs` it spawns
   holds `screen-left`: two names, two resources, no nesting. Aliasing the two instead — which
   this repo tried first — deadlocks that exact pair, because `aliasHold` blocks on whoever holds
-  the alias, the asker included. Vault Shelf measured it (`vault-shelf#37`) and reached the same
-  design independently.
+  the alias, the asker included. A sister plugin hit the same deadlock and reached the same design
+  independently.
 
-  ```bash
+  ```powershell
   node scripts/lock.mjs acquire screen-right --owner "#77 palette"   # blocks; exit 1 = give up
   node scripts/lock.mjs release screen-right --owner "#77 palette"   # always, even on failure
   node scripts/lock.mjs status                                       # who holds what
@@ -62,8 +70,8 @@ measuring it: serve the page, drive it, read the numbers.
   stale window. `--no-lock` exists for the one caller that legitimately already holds it.
 
   The lock lives in the OS temp dir, not the worktree, so **every worktree shares one** — and the
-  root is shared with Vault Shelf (`obsidian-vault-locks`), so the two plugins' jobs contend with
-  each other, not just their own (github#92). A `mkdir` is the lock — atomic, and it survives a
+  root (`obsidian-vault-locks`) is shared with a sister Obsidian plugin, so if you work on both,
+  their jobs contend with each other, not just their own (github#92). A `mkdir` is the lock — atomic, and it survives a
   killed session as a stale entry (20 min) rather than a permanent one. **`make-hero.ps1` needs no
   lock**: it is an ffmpeg file-to-file transcode, not a capture. Screenshots need none either:
   `shoot.mjs` captures over CDP, so overlapping windows are harmless — but pass your own `--port`.
@@ -81,8 +89,8 @@ measuring it: serve the page, drive it, read the numbers.
   default. Patch `window.VAULT_DATA`'s `vault` field in the built HTML, never the product: the
   title is a review aid, and several builds from different branches and vaults sit in tabs at
   once, so an unlabeled one is judged against the wrong build.
-- **A vault that is not Lukas's own opens in restricted mode, and the plugin does not load at
-  all.** Any fixture or generated vault is "untrusted" on its first open: Obsidian puts up **"Trust
+- **A vault Obsidian has not been told to trust opens in restricted mode, and the plugin does not
+  load at all.** Any fixture or generated vault is "untrusted" on its first open: Obsidian puts up **"Trust
   author and enable plugins?"** and opens its Settings window behind it. Until that is confirmed
   *and* Settings is closed, `app.plugins.getPlugin("vault-graph")` is null, the ribbon icon and the
   `vault-graph:open` command do nothing, and **a perfectly good plugin reads as broken** -- the
@@ -104,23 +112,34 @@ measuring it: serve the page, drive it, read the numbers.
 - `git push` and merging into `develop` are separate asks, every time. `main` only ever
   receives `develop`.
 - **Which session you are is decided by the checkout you are in, not by what you were asked to
-  do.** The main checkout, `C:\git-personal\vault-graph` on `develop`, is the **orchestrator**:
+  do.** The primary checkout — the one `git worktree list` names first — is the **orchestrator**:
   one session, the only one that pushes to `develop`, merges branches down, or cuts a release.
-  Every other checkout — anything under `C:\git-personal\worktrees\`, i.e. any tree whose
-  `git rev-parse --show-toplevel` is not that path — is a **dispatched worker**, whatever its
-  branch says. Settle this before the first write: `git rev-parse --show-toplevel` and
-  `git worktree list` answer it in one call.
+  Every other checkout, i.e. any tree whose `git rev-parse --show-toplevel` is not that path, is a
+  **dispatched worker**, whatever its branch says. Settle this before the first write:
+  `git rev-parse --show-toplevel` and `git worktree list` answer it in one call. Which paths those
+  are on this machine, and what the orchestrator session calls itself, are in `CLAUDE.local.md`.
 - **Only the orchestrator session pushes to `develop` or cuts a release.** A dispatched ticket
   worktree implements, runs its own gates, and stops at its own branch — it never pushes past
   that branch, never merges into `develop`, and never runs `release.ps1`, no matter how clean the
   result. Integrating finished branches and shipping them is the orchestrator's job alone, so one
   place is answerable for what's actually on `develop` and what a release contains.
-- **An orchestrator stops spawning new sessions once 6 Orca worktrees are already working.**
-  Each active worktree can mean its own Claude process plus Chrome over CDP plus node/npm —
-  fanning out further than that starved CPU and disk enough to force a hard restart on
-  2026-09-11, even with RAM nowhere near full. Count `orca worktree list --json` entries with
-  `workspaceStatus: in-progress` before dispatching another; at six, queue the rest and dispatch
-  only as one finishes and is merged.
+- **The orchestrator dispatches a ticket; it never implements one.** Work that comes up gets its
+  own worktree with its own chatable session, one ticket per checkout, so a ticket's branch, plan,
+  review and gates all belong to one place instead of being tangled into whatever the coordinating
+  session was doing. The session manager used here, the exact spawn command, and the ceiling on how
+  many may run at once are in `CLAUDE.local.md` — the ceiling is real: fanning out past it starved
+  CPU and disk enough to force a hard restart once.
+- **Every issue filed here carries a label, and "unsure" is a question for the maintainer, not
+  a reason to skip it.** `gh issue create` without `--label` silently succeeds, so an unlabelled
+  issue is never caught at filing time — and unlabelled is what half this backlog was until it was
+  backfilled on 2026-09-11, which is how a label stops being worth filtering on at all. The set is
+  the GitHub default: `bug`, `enhancement`,
+  `documentation`, `accessibility`, `question`, plus `duplicate` / `invalid` / `wontfix` for
+  closing. Most work here is `bug` or `enhancement`, and the split is about what the issue
+  *claims*: something the page already promises and does not do is a `bug`; something it does not
+  promise yet is an `enhancement`. **When it is genuinely either — a behaviour that is defensible
+  as designed but reads as broken — ask the maintainer which, and file after the answer.** Do not
+  guess and do not file bare.
 - **A release is the range, not the work in hand.** Everything it needs — a `CHANGELOG.md`
   section accounting for *every* merge since the last tag, every clip it embeds, every doc naming
   the version, the release body itself — is finished on `release/<version>` and read there before

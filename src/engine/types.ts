@@ -202,7 +202,8 @@ export interface RendererEvents {
 }
 
 export interface MouseCaptor {
-  on(event: "mousemovebody" | "mouseup" | "mouseleave", fn: (e: MouseCoords) => void): void;
+  // github#120 -- emitted and subscribed to, but never declared
+  on(event: "mousedown" | "mousemovebody" | "mouseup" | "mouseleave", fn: (e: MouseCoords) => void): void;
 }
 
 /* ------------------------------------------------------------- renderer */

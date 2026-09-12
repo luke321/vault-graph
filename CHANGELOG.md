@@ -30,6 +30,35 @@ published tag breaks every link to it.
 
 ---
 
+## 2.7.0 — "Reader" — 2026-09-12
+
+**The note card stops covering the disc** — and three things that got in the way of reading it are fixed.
+
+### Read a note without losing the disc
+
+- The sidebar now holds two readings, **Groups** and **Selected note**, and shows one at a time.
+- Click a note and the sidebar switches to its reading, instead of a card landing over the graph.
+- The card's close button, or a click on empty stage, takes you back to the groupings.
+- Each reading keeps its own scroll position, so coming back lands where you left the folder list.
+- On a phone nothing changes: the card still slides up over the canvas, where there is no room
+  for a second column.
+
+### Fixed
+
+- The disc fills more of the window. Fit leaves a smaller margin at every window size, and a
+  square window — which an Obsidian pane usually is — gains the most.
+- Panning no longer freezes when notes arrive under it.
+- Leaving the view open and coming back no longer costs memory.
+- A right-click on the disc is no longer mistaken for a drag.
+- The update strip's **Got it** button sits under the text, on the left.
+
+### Smaller things
+
+- Every gallery clip and the hero are re-recorded square, which is what the thumbnails and the
+  community page actually want.
+- Harness runs hand the keyboard back instead of keeping it — invisible in the plugin, but it is
+  why the machine stays usable while the test suite runs.
+
 ## 2.6.0 — "Minimap" — 2026-09-11
 
 **Three things the disc used to leave you guessing about:** where you are when you zoom in, what a colour will do before you pick it, and what changed when the plugin updated.

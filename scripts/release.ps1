@@ -201,6 +201,21 @@ try {
     throw "plugin/whats-new.md is for '$noteVersion', not $Version. A MINOR or MAJOR ships an update note (github#83) -- write it first."
   }
 
+  # AND IT HAS TO BE LOOKED AT (github#83, github#128). The guard above proves the note EXISTS
+  # and is for this version; it proves nothing about what a user will actually see. The strip is
+  # a user-facing surface that ships in the release and, unlike every other one, has no clip and
+  # no screenshot anywhere in the repo -- 2.6.0 shipped it without anyone having seen it rendered.
+  # scripts/update-note-check.mjs already mounts it in a real Obsidian and writes 01-strip-up.png;
+  # this only names the command, because it drives Obsidian on a display and is not something to
+  # run from inside a release script.
+  if ($Version -match '\.0$') {
+    Write-Host "`n=== update strip ===" -ForegroundColor Cyan
+    Write-Host "  plugin/whats-new.md is for $noteVersion. RENDER IT AND LOOK BEFORE YOU TAG:" -ForegroundColor Yellow
+    Write-Host "    node scripts/lock.mjs acquire screen-left --owner `"release $Version`"" -ForegroundColor DarkGray
+    Write-Host "    node scripts/update-note-check.mjs --out <dir>   # 01-strip-up.png" -ForegroundColor DarkGray
+    Write-Host "    node scripts/lock.mjs release screen-left --owner `"release $Version`"" -ForegroundColor DarkGray
+  }
+
   Write-Host "`n=== release notes ===" -ForegroundColor Cyan
   Write-Host $section -ForegroundColor DarkGray
 
@@ -231,11 +246,12 @@ try {
   }
 
   # THE SAME PROXY, PER FEATURE -- see docs/features/_template.md and .ai-context/releasing.md's
-  # "Feature clips are different from the hero" section. Unlike the hero, a feature clip is NOT
-  # expected to be re-recorded every release, so this never blocks and does not claim to know
-  # which act a change actually touched -- it warns against the whole of src/page.js (where every
-  # act lives), same as the hero warns against the whole of src/, and leaves "does this actually
-  # need re-recording" to whoever reads CHANGELOG.md and decides.
+  # "Feature clips are re-recorded every release too" section (github#121). Re-recording every
+  # clip is the default now, same as the hero, so THIS IS A BACKSTOP: it firing means the
+  # default step was skipped for this release -- deliberately (a docs-only PATCH, the one
+  # explicit exception) or not -- not proof any one clip actually needs it. It never blocks and
+  # does not claim to know which act a change actually touched -- it warns against the whole of
+  # src/page.js (where every act lives), same as the hero warns against the whole of src/.
   $pageAt = (& git log -1 --format=%ct -- src/page.js) | Select-Object -First 1
   $pageOn = (& git log -1 --format=%cs -- src/page.js) | Select-Object -First 1
   $featureDocs = Get-ChildItem (Join-Path $repo 'docs/features') -Filter '*.md' -ErrorAction SilentlyContinue |
@@ -255,8 +271,9 @@ try {
     Write-Host "`n=== features ===" -ForegroundColor Cyan
     Write-Host "src/page.js has changed since these feature clips were last recorded:" -ForegroundColor Yellow
     $staleFeatures | ForEach-Object { Write-Host $_ -ForegroundColor Yellow }
-    Write-Host ("Re-record whichever ones this release actually changed visibly -- see " +
-                "`".ai-context/releasing.md`". Not every one; that call is yours.") -ForegroundColor Yellow
+    Write-Host ("Re-recording every clip is the default now (github#121, `".ai-context/releasing.md`"). " +
+                "If this release skipped it, that should be a named docs-only-PATCH exception, not " +
+                "an oversight.") -ForegroundColor Yellow
   }
 
   # THE PLUGIN BUILD IS A PRE-FLIGHT, not an artifact any more. Nothing local consumes

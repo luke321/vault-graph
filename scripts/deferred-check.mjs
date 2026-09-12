@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { attach } from "./cdp.mjs";
 import { placeElectronLeft } from "./screen.mjs";
+import { keepFocus } from "./focus.mjs";
 
 const argv = process.argv.slice(2);
 const arg = (n, d) => { const i = argv.indexOf("--" + n); return i >= 0 && argv[i + 1] ? argv[i + 1] : d; };
@@ -31,8 +32,11 @@ writeFileSync(join(USER_DATA, "obsidian.json"),
   JSON.stringify({ vaults: { "0000deferredvault": { path: VAULT, ts: Date.now(), open: true } } }), "utf8");
 
 async function launch() {
+  // github#129
+  const focus = await keepFocus();
   const child = spawn(exe, ["--remote-debugging-port=" + PORT, "--user-data-dir=" + USER_DATA],
     { stdio: "ignore", detached: false });
+  void focus.watch(child.pid);
   for (let i = 0; i < 60; i++) {
     await sleep(1000);
     let c = null;

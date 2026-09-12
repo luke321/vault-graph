@@ -54,6 +54,8 @@ changing the layout or the animation.
 | `0015-grouping-dimensions` | Folders or tags: the filing that replaced three attribute reads, what a multi-tag note does, what the untagged bucket is, how a switch draws both discs, and the one-dot-per-tag experiment that came out as github#91 (github#86) |
 | `0016-update-note` | The strip that says what changed, once, after a MINOR or MAJOR update: one hand-written text file the build inlines, the decision table (fresh, patch, minor, seen on dismiss), why it is text and capped, and why the page never knows it is there (github#83) |
 | `0017-the-overview` | The schematic beside Fit: shown only while the disc is cropped, why containment rather than the camera ratio decides that, and why the footprint is never clamped (github#79) |
+| `0018-gallery-new-in` | The generated "New in <version>" line above the gallery's nav table: which features count as new, and why the strip is built rather than written (github#127) |
+| `0019-two-readings` | The sidebar's two readings, Groups and the selected note: what the floating card covered, the four prototypes measured against it, why tabs won, and why the panel is a plain wrapper (github#80, github#131) |
 
 **ADR or DDR?** An ADR is a choice with alternatives that were weighed and one that won —
 it explains *why not the other thing*. A DDR describes how a part actually works and the

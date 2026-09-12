@@ -365,6 +365,63 @@ defect the check exists for — a shrink fitting *instead of* deferring — move
 the first frames. The opposite-direction check is the control that it is still sensitive: a
 growth must report `moved while notes arrived: true`, and does, on all three fixtures.
 
+## The fit margin is a flat ratio (github#128)
+
+Filed as a pixel-floor problem — `FIT_RATIO`'s own excess over 1.0 is a fraction of the
+viewport, so the band `fit()` leaves shrinks in lockstep with the window, and a small or square
+one has no aspect-ratio slack to make up the difference the way a wide one does. A
+window-size-dependent floor was built against that framing (tried at 28px and 40px, both in this
+branch's history) before Lukas looked at the actual render at 1000x1000 and asked for something
+simpler and stronger: the disc should just fill more of the viewport, full stop, independent of
+window size. `FIT_RATIO` is cut, flat, with no floor:
+
+```javascript
+FIT_RATIO   // 0.954 -- was 1.04
+```
+
+`fitRatio()` is otherwise unchanged: `FIT_RATIO * clamp(live/locked, 0.12, 1.35)`. A flat cut
+applies identically at every window size, unlike a floor, which only ever touches the small end.
+
+**The naive model — margin scales with `FIT_RATIO`'s excess over 1.0 — does not hold, and cost a
+detour before the right number was found.** A `ratio: R` camera state does not mean "the disc
+plus `(R-1)` of empty space fills the frame": there is a large, roughly *constant* component to
+the rendered margin that barely moves as the ratio approaches 1.0, and only opens up once the
+ratio drops meaningfully below it. Measured on the demo fixture, real windowed Chrome, real node
+positions read through `graphToViewport` (not `getNodeDisplayData`'s `x`/`y`, which is already
+screen-space and double-transforms if fed back through `graphToViewport`), stage 696x675 at
+1000x1000:
+
+| `FIT_RATIO` | margin | | `FIT_RATIO` | margin |
+|---|---|---|---|---|
+| 1.04 (stock) | 52.9px | | 0.97 | 32.9px |
+| 1.02 | 47.4px | | 0.95 | 26.6px |
+| 1.01 | 44.6px | | 0.9 | 9.8px |
+| 1.001 | 42.1px | | 0.844 | **-11.5px (clips)** |
+
+At 1.001 — a ratio whose excess is essentially zero, which the naive model predicts should leave
+almost no margin — the margin is still 42.1px, most of it (≈35px) from node *positions* alone,
+not from the ~5-8px the outermost dot's own rendered size adds. The relationship only becomes
+close to linear once the ratio drops toward and below 1.0 (Δmargin ≈ 300px per unit of
+`FIT_RATIO` in that range), and it has a floor of its own: below **~0.876** on this fixture at
+this window, the disc's own extent exceeds the stage and the outermost dot is clipped by the
+canvas, measured directly at 0.844 (-11.5px). **0.954 was picked by iterating against this real
+relationship, live, at 1000x1000** — not computed from the ratio's excess: a first cut at 0.97
+(a 38% margin cut, 52.9px → 32.9px) still read as too close to stock to see; 0.954 (a further 15%
+off *that* margin, 32.9px → 27.9px, measured) is the one that landed. `0.844` — a "disc 15%
+bigger" reading of an earlier ask, by radius rather than margin — was built and measured too,
+and rejected for the clip.
+
+**Camera framing only, not layout**: `fitRatio()` reads no note position, so the golden snapshot
+is untouched at every ratio in the table above.
+
+The four smoke.mjs checks that assert what `fit()` lands on hold a plain literal, `0.954` in
+place of the old `1.04` — `"double-clicking the graph resets the view"`, `"fit frames the disc
+that is actually there"`, and the two auto-fit checks. `camReset()`, a `setState()` call that
+bypasses `fitRatio()` for test-isolation purposes only, is updated to the same `0.954` for
+consistency. The edge-stroke-width check's `at(1.04)` "rest" reference point is deliberately
+**not** touched — it is an arbitrary zoom-level sample next to `0.216`/`0.108`, unrelated to what
+`fitRatio()` promises.
+
 ## Every note is filed exactly once, in either dimension
 
 github#86, design/0015. The lattice gives every note one cell in one wedge. A folder
@@ -2562,9 +2619,12 @@ release cannot go out without it.
 `mountVaultGraph`'s handle has a `destroy()`, and the plugin's `teardown()` calls it. After
 it, nothing this mount registered outside its own element is still registered: the
 `ResizeObserver` on the root and the two on the heatmap band are disconnected, the document's
-`mousemove` and `visibilitychange` listeners and the window `resize` fallbacks are removed,
-every animation frame and timer in flight is cancelled, `cascade()` refuses to start, and the
-renderer is killed last. The host still owns the root and empties it itself.
+`mousemove` and `visibilitychange` listeners, the window `resize` fallbacks and the
+`matchMedia("(max-width: 720px)")` change handler are removed, every animation frame and timer
+in flight is cancelled, `cascade()` refuses to start, and the renderer is killed last **and its
+handle dropped** — `renderer = null`, so the `if (renderer)` guard every call site already
+carries actually stops a handler that outlives the destroy. The host still owns the root and
+empties it itself.
 
 ```bash
 node scripts/teardown-check.mjs --vault ./demo-vault           # six destroy+remount cycles, at rest
@@ -2591,6 +2651,22 @@ with `destroy()` the same cascade stops where it stands (155 frames, `busy` fals
 
 The check is manual and not in `smoke.mjs`: a cycle replaces the page's root and its `__vg`,
 and the suite's checks share one page.
+
+**github#135 — one listener put the whole of this back.** The `matchMedia` handler
+`github#131` added registered with no remover. A `MediaQueryList` lives on the window, so the
+handler on it held the entire `mountVaultGraph` closure — graph, renderer, detached root — and
+the previous mount survived every cycle. Re-measured on the same 10k fixture, same six cycles:
+
+| | heap MB (post-GC) | DOM nodes | JS listeners | document mousemove | document visibilitychange |
+|---|---|---|---|---|---|
+| before, load → cycle 6 | 16.0 → 67.5 | 683 → 4524 | 186 → 1206 | 2 → 2 | 1 → 1 |
+| after, load → cycle 6 | 16.0 → 16.3 | 683 → 684 | 186 → 186 | 2 → 2 | 1 → 1 |
+
+**+640 DOM nodes, +170 listeners and +8.58 MB per cycle**, against the check's 1.5 MB/cycle
+bound. The two document counts stayed correct throughout, which is what made this read as a
+small omission: the leaked listeners were not new registrations but the previous mount's own,
+kept alive by the one closure nobody released. So a claim of this shape is only worth what the
+harness says about it — the document columns alone would have called it clean.
 
 ## The plugin behaves inside a real Obsidian
 
@@ -2714,9 +2790,76 @@ hidden, 20 after** -- twice in a row. The wake is a 500 ms poll that runs only w
 waiting, because `active-leaf-change` / `layout-change` do not carry the case: switching away
 fired five of them and `revealLeaf` fired none.
 
+**A rebuild waits for the HAND as well as for the leaf (github#120).** The block above is not
+merely slow, it lands wherever the reader happens to be -- and until github#120 `liveBusy()` was
+`cascadeRun || anim || play`, which does not include a drag. So a rebuild ran `ingest`,
+`hardRelayout` and `cascade` synchronously in the middle of a pan. Measured in a real Obsidian on
+the demo fixture, driving a six-second drag and reading the rAF interval distribution back:
+
+| | quiet pan | pan with notes arriving |
+|---|---|---|
+| median frame | 16.7 ms | **16.7 ms** |
+| worst frame, mounts 1-4 | 16.9 / 16.9 / 33.4 / 17.0 ms | **517 / 734 / 851 / 817 ms** |
+| frames over 50 ms | 0, every time | 5 / 6 / 6 / 7 per six-second drag |
+
+**The median never moves**, which is why it reads as a stutter rather than a slowdown: one frozen
+frame per rebuild, and nothing else. The quiet row is the control that matters -- it stays flat
+while the vault doubles from 1,403 to 2,218 notes, so panning itself does not degrade with vault
+size and every bit of the damage is the rebuild landing under the pointer.
+
+**It took four passes, and each of the first three looked like progress while leaving the stall
+in place.** Worth recording in full, because the shape of the mistake repeats:
+
+| | worst frame under arrivals | over 50 ms |
+|---|---|---|
+| nothing done | 517 / 734 / 851 / 817 ms | 5 / 6 / 6 / 7 |
+| the listener fix below | 371 / 687 / 653 / 702 ms | 4 |
+| + `applyData` deferred on a drag | 417 / 767 / 868 / 867 ms | 3 |
+| + the host's `buildData` deferred too | 367 / 634 / 653 / 687 ms | 2 |
+| + the cap fixed | **23.9 / 18.8 / 22.9 / 21.5 ms** | **0** |
+
+Deferring `applyData` alone barely moved it, because `liveRebuild()` runs `await buildData(app,
+...)` over the whole metadata cache **before** `applyData` is ever consulted -- the apply was
+gated and the build was not. And with both gated it *still* stalled, because `DRAG_MAX_MS` was
+5,000 ms: a drag longer than five seconds tripped the very cap meant to protect the gates and let
+rebuilds back in mid-pan. The final row is a pan under arrivals that is indistinguishable from a
+quiet one.
+
+**The floor is not Obsidian.** Measured with `--no-live`, where the plugin does no work at all on
+an arrival: a pan under the same arrivals gives worst frames of **27.9 and 19.0 ms, zero over
+50 ms**, and `graph.order` never moves. So Obsidian's own parsing and `resolvedLinks` update cost
+essentially nothing, and every millisecond of the stall was this plugin's.
+
+A drag now counts as owning the frame loop, on both sides: the page refuses to apply, and the host
+refuses to build (`api.interacting()`, which lives outside the demo-and-debug region precisely
+because a shipped build needs it). No new machinery -- `livePending`, the 120 ms drain and the
+500 ms wake poll all already existed. A 250 ms grace covers the camera's inertia after mouseup; a
+lost mouseup is caught by the next `mousemovebody` whose `buttons` no longer carry bit 1, the way
+`bindNodeDrag` already does it, with `DRAG_MAX_MS` demoted to a 60,000 ms backstop for a pointer
+that stops moving entirely.
+
+**`render()` registers nothing that outlives it (github#120).** `render()` reruns on Refresh and
+on any rebuild whose churn passes `LIVE_MAX_CHANGED`, while `registerEvent` and `registerDomEvent`
+only release when the **view** unloads. Three registrations sat inside it. Measured over three
+hidden bursts of 250 notes each, identical runs on either side of the fix:
+
+| | before | after |
+|---|---|---|
+| vault and cache handlers | 51 -> 63 | **45 -> 45** |
+| view event refs | 16 -> 30 | **8 -> 8** |
+| DOM listeners | +548 | **+41** |
+| DOM nodes | +3,573 | **+1,668** |
+| JS heap | +17.2 MB | **+3.7 MB** |
+
+Six handlers and seven refs per remount, each firing on every metadata event. The DOM row is a
+second leak with the same cause: `registerDomEvent` files the element on the view's list, so every
+discarded page subtree stayed reachable -- about 2,150 nodes per dead page. The remaining +1,668
+is legitimate, being 533 genuinely new notes in the legend and lists.
+
 ```bash
 node scripts/build-plugin.mjs
 node scripts/obsidian-smoke.mjs --only live      # a real Obsidian, throwaway copy of a fixture
+node scripts/live-growth-check.mjs --view open --pan    # github#120, minutes not seconds
 ```
 
 ## Word counts land by path, and an index stopped meaning a node

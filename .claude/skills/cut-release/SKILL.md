@@ -3,8 +3,8 @@ name: cut-release
 description: >
   Cut a vault-graph release end to end, following .ai-context/releasing.md and CLAUDE.md to the
   letter: enumerate the range, build the release/<version> branch, write the CHANGELOG section
-  and release body, re-record whatever clips went stale, rehearse and pay the suite once, merge
-  down, tag, and let the workflow publish. Use when the user says "cut a release", "ship
+  and release body, re-record every clip and the hero by default, rehearse and pay the suite
+  once, merge down, tag, and let the workflow publish. Use when the user says "cut a release", "ship
   <version>", "release <name>", or "/cut-release". Orchestrator-only: refuses to run from a
   dispatched ticket worktree. Invoking this skill IS the standing authorization for the pushes
   and merges it describes -- it does not ask again at each one, but it does show the status
@@ -24,8 +24,42 @@ with this skill; after that, this file is enough to drive the mechanics. Where t
   a release." If this session is a dispatched ticket worktree, stop and say so instead of running
   any of this.
 - **Confirm no other release or suite run is in flight**: `node scripts/lock.mjs status`.
-- Ask for the release name only if the user hasn't given one; everything else below should not
-  need a question unless a step's own instructions say to stop and ask.
+
+## Ask everything first, then run
+
+**One gate at the front, then go.** A release is an hour of mechanical work with four or five
+decisions buried in it, and stopping at each one turns an hour into an afternoon. Gather the
+decisions up front, get them answered in one exchange, then run every step to the end without
+stopping again.
+
+**Front-load these, before step 1:**
+
+1. **The release name** (step 5) -- propose 2-4 candidates unless he has already said one.
+2. **Anything visual to re-record beyond the default.** Everything is re-recorded every release
+   (github#121); what needs asking is whether a feature shipped with *no* clip and no storyboard
+   act, because writing one is product work and changes what this cut is.
+3. **This release's own polish/fix asks**, if he has any.
+4. **The drafts, both of them, together:** the `CHANGELOG.md` section and the release body.
+   Write them from the range at step 1, publish the body as an Artifact, and get them approved in
+   the same exchange as the questions above. Do not draft the body at step 13 and ask then -- by
+   then he has been waiting through the suite, the clips and three pushes for a question you
+   could have asked at the start.
+
+**Then run steps 1-16 without stopping**, except for these, which are not optional:
+
+- **The clip review (step 8) and the update strip (step 9).** He looks at what was recorded
+  before it is committed, and at the strip rendered, before either ships. These catch a capture
+  that grabbed the wrong window and a strip nobody has seen — neither of which any gate sees.
+- **The `develop` -> `main` PR (step 12).** Merge it yourself if you can; the ruleset requires a
+  PR, not a human.
+- **Anything that fails.** A red gate, a failing check, a workflow that goes red: stop, fix it,
+  say what it was. Never route around a gate to keep the run moving.
+- **Anything genuinely new.** A decision the questions above did not cover, or a finding that
+  changes what the release contains.
+
+Everything else -- the branch, the bump, the dry run, the pushes, the tag, the Ko-fi post -- runs
+without asking. Invoking this skill is the authorization for all of it.
+
 
 ## Keep the chat short
 
@@ -55,13 +89,14 @@ apply to this release; add one row per this release's own polish/fix asks at the
 | 5 | Release name — propose 2-4 candidates, his pick | |
 | 6 | Re-record every clip and the hero (github#121) | |
 | 7 | **Look at every re-recorded clip in one Artifact, and get a yes, before committing any of them** | |
-| 8 | Merge `release/<version>` → `develop` (local) | |
-| 9 | **One** plain `git push origin develop` | |
-| 10 | PR/merge `develop` → `main` | |
-| 11 | Draft the release body, publish as an Artifact, get an explicit go-ahead | |
-| 12 | `release.ps1` on `main` — gates, tag, push | |
-| 13 | GitHub Actions publishes the release — automatic once tagged | |
-| 14 | Post to Ko-fi: title, disc screenshot, community-page link then release link; open the page | |
+| 8 | **Render the update strip and show it** (MINOR/MAJOR only) — a real screenshot, not the markdown | |
+| 9 | Merge `release/<version>` → `develop` (local) | |
+| 10 | **One** plain `git push origin develop` | |
+| 11 | PR/merge `develop` → `main` | |
+| 12 | Draft the release body, publish as an Artifact, get an explicit go-ahead | |
+| 13 | `release.ps1` on `main` — gates, tag, push | |
+| 14 | GitHub Actions publishes the release — automatic once tagged | |
+| 15 | Post to Ko-fi: title, disc screenshot, community-page link then release link; open the page | |
 ```
 
 ## 1. List the range — before anything else
@@ -107,7 +142,9 @@ only step whose content isn't dictated by the release process itself.
 
 New or visibly-changed features get a `docs/features/<name>.md` page (copy
 `docs/features/_template.md`) and a clip. `docs/features.md`'s nav and inline sections get the
-new entry.
+new entry. Then `node scripts/gallery-nav.mjs` (github#127) so the gallery's "New in" strip picks
+up whatever this release's `Introduced in` lines make newest — pre-push checks this the same way
+it checks the code map, so a forgotten run is caught there if not here.
 
 ## 5. Write the `CHANGELOG.md` section
 
@@ -125,20 +162,33 @@ new entry.
 
 ## 7. Re-record every clip and the hero, then look at them
 
-**The hero (`assets/demo.webp`) goes stale on any visible page change, silently — nothing fails.**
-`release.ps1` warns (`=== hero ===`, `=== features ===`) by comparing commit dates, which is a
-proxy, not proof. Decide by looking at what actually changed:
+**The hero (`assets/demo.webp`) goes stale on any visible page change, silently — nothing fails,**
+and the same is true of every feature clip (github#121): you cannot reliably tell from a diff
+which clips went stale, since a shared constant (a margin, `FIT_RATIO`, a storyboard reorder)
+makes *every* clip stale, not just the ones whose own beats moved. `release.ps1`'s `=== hero ===`
+/ `=== features ===` warnings only compare commit dates, a proxy, not proof — so re-recording
+everything is the default, not a call made by looking at what changed:
+
+**Ask before taking the mouse — but do NOT take a lock by hand.** `record-demo.ps1` acquires
+`screen-<monitor>` itself and releases it on every way out, and `record` is **aliased to the screen
+locks**, so an outer `acquire record` blocks the recorder's own acquire and the run hangs at
+`taking screen-right ...` with `lock.mjs status` showing only your own hold. Measured cutting 2.7.0:
+the first take sat there for seven minutes until the outer lock was released, after which it
+recorded immediately. `CLAUDE.md` states the rule this line used to break — never wrap one of the
+three window-placing harnesses.
 
 ```powershell
-node scripts/lock.mjs acquire record --owner "release <version>"   # ask before taking the mouse
-.\scripts\record-demo.ps1                       # or -Act <name> for one feature clip
-.\scripts\make-hero.ps1                          # or -Out assets\features\<name>.webp
-node scripts/lock.mjs release record --owner "release <version>"
+.\scripts\record-all.ps1                        # every clip and the hero, one command; takes its own locks
+node scripts/update-feature-metadata.mjs --version <version>       # rewrites every Last re-recorded line
 ```
 
-If a shared constant changed (a margin, `FIT_RATIO`, a storyboard reorder), **every existing
-clip is stale, not just the ones whose own beats moved** — re-record all of them, not a subset.
-Update each re-recorded feature's `Last re-recorded` line in its `docs/features/<name>.md`.
+For a single feature clip re-recorded on its own, the two commands under it still apply:
+`.\scripts\record-demo.ps1 -Act <name>` then `.\scripts\make-hero.ps1 -Out assets\features\<name>.webp`
+— `update-feature-metadata.mjs --version <version> --only <name>` covers just that one doc.
+
+**Skip re-recording only for a release that touches nothing visual** — a docs-only PATCH. That is
+the one exception, and it has to be named and argued, not defaulted to: say so as its own row in
+the status table (e.g. "Re-record every clip and the hero — skipped, docs-only PATCH").
 
 ## 8. Look at every clip before committing it
 
@@ -166,10 +216,35 @@ fit under 16MB, declare the `assets` capability and `upload_asset` them instead 
 `artifact-capabilities` first). Fixtures only, never a real vault — which is exactly what went
 wrong the day this rule was written.
 
-Commit the new assets only after that yes — a dirty tree is never stamped (step 9) and
+Commit the new assets only after that yes — a dirty tree is never stamped (step 10) and
 `release.ps1` refuses one.
 
-## 9. Rehearse the local half — this is the run that pays the suite
+## 9. Render the update strip and show it — MINOR and MAJOR only
+
+`plugin/whats-new.md` is markdown; **what ships is a strip above the disc in a real Obsidian**,
+and reading the markdown is not seeing it. `release.ps1` only proves the file exists and names
+this version. 2.6.0 shipped the strip without anyone having looked at it rendered once, which is
+how the Got it button's placement (github#126) was first noticed *after* the release.
+
+```bash
+node scripts/lock.mjs acquire screen-left --owner "release <version>"
+node scripts/update-note-check.mjs --out <scratchpad>/strip
+node scripts/lock.mjs release screen-left --owner "release <version>"
+```
+
+It mounts the plugin in a real Obsidian, upgrades a vault from a `data.json` without
+`lastSeenVersion`, and writes `01-strip-up.png` (the strip as a user first sees it),
+`02-dismissed.png` and `03-chain.png` (several missed releases chained). It drives Obsidian on a
+display, so it takes the screen lock; it is also a 29-assertion check, so a failure here is a
+real one.
+
+**Put `01-strip-up.png` in front of him** — in the same Artifact as the clips (step 8) if that
+step ran, otherwise its own. What to look at: the bullets say something a user understands, the
+release links point at the right version, and the control the note names is the one pulsing.
+
+Skip on a PATCH: no strip is shown, by design.
+
+## 10. Rehearse the local half — this is the run that pays the suite
 
 ```powershell
 .\scripts\release.ps1 <version> -DryRun -AllowAnyBranch *> dryrun.log
@@ -183,7 +258,7 @@ re-run **on this branch** — don't chase the failure downstream.
 `node scripts/suite-stamp.mjs check` says what the next push will do; `... list` shows every
 stamped tree on this machine.
 
-## 10. Push the release branch
+## 11. Push the release branch
 
 ```bash
 git push origin release/<version>
@@ -195,7 +270,7 @@ This runs `release.yml` as a **dry run** on GitHub's runner: builds, gates, atte
 files, creates no Release. It rehearses the half `release.ps1` can't run locally. Read the run's
 summary — three SHA-256 lines and an attestation URL, no Release created.
 
-## 11. Merge into `develop`, then the one push
+## 12. Merge into `develop`, then the one push
 
 ```bash
 git switch develop && git merge --no-ff release/<version>
@@ -220,7 +295,7 @@ re-running the whole suite blind), commit, and push again — plain, still no ou
 that fails on a genuinely flaky check is rare after github#110 (the suite is fully serialized);
 don't assume flake without isolating the specific check first.
 
-## 12. Merge `develop` → `main`
+## 13. Merge `develop` → `main`
 
 On the website: open the PR, merge it. The ruleset requires this and has no bypass for a direct
 push (github#94). The only required check is the branch-policy job.
@@ -229,7 +304,7 @@ push (github#94). The only required check is the branch-policy job.
 git switch main && git pull --ff-only
 ```
 
-## 13. Review the release body — before the tag, not after
+## 14. Review the release body — before the tag, not after
 
 **Once the tag exists nothing changes.** `release.yml` publishes live the instant the tag lands —
 no draft gate, and the workflow drops the raw `## <version>` CHANGELOG section straight into the
@@ -258,9 +333,12 @@ Structure (see `.ai-context/releasing.md`'s full section):
 1. One bold line naming the release and what it's actually about, in the release's own voice.
 2. **No hero at the top** — `assets/demo.webp` is large and unspecific; use the feature clips.
 3. One `###` per genuinely new or visibly-changed feature (from step 1's range, not memory), its
-   matching clip embedded.
-4. One line, always the same spot, right after the highlight reel: `☕ If Vault Graph is useful
-   to you, [support it on Ko-fi](https://ko-fi.com/luke321).`
+   matching clip embedded **directly under the heading and above the bullets** — every published
+   release is in that order, and a clip placed after the bullets is the tell of a draft written
+   from the design records rather than from a release.
+4. The Ko-fi ask, always the same spot, right after the highlight reel: the line
+   `If Vault Graph is useful to you:`, then the button on its own line —
+   `[![Support me on Ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/luke321)`
 5. A `---`, then the `CHANGELOG.md` section **appended verbatim**, heading included.
 
 **Image URLs in the body are pinned to `<version>` or a commit SHA — never to `develop` and never
@@ -281,7 +359,7 @@ then applies the approved version — after `release.ps1` has created the draft-
 release (the Release object doesn't exist before the tag), but the *content* and the *approval*
 both happened before this step, not as a post-hoc edit nobody signed off on.
 
-## 14. Tag and push — `release.ps1` on `main`
+## 15. Tag and push — `release.ps1` on `main`
 
 ```powershell
 .\scripts\release.ps1 <version>
@@ -289,12 +367,12 @@ both happened before this step, not as a post-hoc edit nobody signed off on.
 
 Refuses: a `v`-prefixed tag, a version `manifest.json` doesn't claim, a missing `## <version>`
 CHANGELOG section, a branch other than `main`, a dirty tree, a `main` that isn't exactly
-`origin/main`. Finds the stamp for `HEAD`'s tree (from step 9, carried through the merges) and
+`origin/main`. Finds the stamp for `HEAD`'s tree (from step 10, carried through the merges) and
 skips the suite — it does not re-run it. Writes the annotated tag (`--cleanup=verbatim`, or the
 markdown headings in the tag message get silently stripped) with the CHANGELOG section as its
 message, pushes the tag. **Never pushes `main` itself.**
 
-## 15. Let the workflow publish
+## 16. Let the workflow publish
 
 The tag push triggers `.github/workflows/release.yml`: re-verifies the version, runs the static
 gates again, attests the three files (`main.js`, `manifest.json`, `styles.css`) via Sigstore/OIDC,
@@ -305,14 +383,39 @@ gh run watch
 gh release view <version> --json tagName,name,assets,isDraft
 ```
 
-## 16. Post to Ko-fi
+## 17. Post to Ko-fi
 
-Once the Release exists (step 14), post an update at ko-fi.com/luke321:
+Once the Release exists (step 16), post an update at ko-fi.com/luke321. **Do it yourself with the
+Claude in Chrome tools** -- he is signed in there; do not hand him a link and a block of text to
+paste. The flow, as measured on 2.6.0:
+
+- `ko-fi.com/Manage` -> the **Add something** button, then **Image** in the modal (not "Write a
+  quick update", which has no title field).
+- `read_page` gives the Title and Description fields; `form_input` fills them.
+- **The image needs `find`, not `read_page`.** The dropzone's `<input type=file>` is not in the
+  accessibility tree, and clicking **Add +** opens nothing useful. `find` for "hidden file input
+  for uploading post images (dropzone)" returns it, then `file_upload` attaches the PNG.
+- Screenshot the filled dialog, confirm the exact wording with him, then click **Post image** --
+  that publishes publicly and is the one click in this step that needs a yes.
+
+The content:
 
 - **Title**: `Vault Graph <version> - <Name>` — always the repo/plugin name first, exactly as the
   GitHub Release is titled but with the plugin name prefixed (`gh release view <version> --json
   name` gives the `<version> - <Name>` half).
-- **Image**: a real disc, not a mockup. Build from the actual mirror vault
+- **Image**: a real disc, not a mockup. **Wait for the cascade to land before you capture.**
+  The disc animates into place over ~1.6 s and a frame taken before it settles has half a ring
+  drawn -- it reads as a rendering bug, not as a product. Poll until `__vg.state.until === null`
+  and `__vg.demo.busy()` is false, then give it another couple of seconds, and only then
+  screenshot. 2.6.0's first Ko-fi post went out mid-cascade and had to be deleted and reposted,
+  which is worse than it sounds: Ko-fi's post editor can change the title, the text and the
+  audience but **not the image**, and deleting the feed item leaves the image in the gallery, so
+  the real undo is deleting the gallery item itself.
+
+  Capture it **square** and over CDP, which needs no screen lock:
+  `Emulation.setDeviceMetricsOverride` at 1000x1000 with `deviceScaleFactor: 2`, then
+  `__vg.renderer.getCamera().setState({x:0.5,y:0.5,ratio:0.42,angle:0})` so the disc is cropped
+  and the release's own overview tile is actually in the shot. Build from the actual mirror vault
   (`node src/build-graph.mjs --vault ../vault-graph-mirror --out mirror.html`, or wherever this
   machine's mirror lives — never the real SecondBrain vault, and never a fixture, which would
   publish an invented-looking shape instead of the real one), serve it locally, open it, switch to

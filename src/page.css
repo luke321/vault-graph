@@ -141,6 +141,32 @@
      control. It replaced a dropdown drawn as a heading with a chevron, which read as a label:
      "is the dropdown obvious enough?" -- it was not. Inline, so the count sits beside it, and
      the heading's uppercase does not reach the names. */
+  /* github#131, design/0019 -- the two readings of the sidebar. A tab, not a segment: the
+     dimseg below it changes what the disc IS, and these two change only what this column
+     shows, so they must not read as the same kind of control. */
+  .vault-graph #vg-tabs { display: flex; gap: 4px; margin-bottom: 9px; }
+  .vault-graph #vg-tabs .tab {
+    flex: 1 1 0; min-width: 0; font: inherit; font-size: 11px; padding: 5px 9px; cursor: pointer;
+    background: none; color: var(--text-3); border: 0; border-bottom: 2px solid transparent;
+    border-radius: 0; text-align: center; overflow: hidden; text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .vault-graph #vg-tabs .tab:hover:not(:disabled) { color: var(--text-1); }
+  .vault-graph #vg-tabs .tab:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+  .vault-graph #vg-tabs .tab[aria-selected="true"] {
+    color: var(--text-1); font-weight: 600; border-bottom-color: var(--accent);
+  }
+  .vault-graph #vg-tabs .tab:disabled { opacity: 0.4; cursor: default; }
+  /* The card in the column: one scroll container, not two. The reading carries the
+     positioning context, or the card's absolute close button escapes to the page corner. */
+  .vault-graph #vg-readnote { position: relative; }
+  .vault-graph #vg-readnote > #vg-detail {
+    position: static; width: auto; max-height: none; overflow: visible;
+    box-shadow: none; border: 0; border-radius: 0; padding: 0; background: none; z-index: auto;
+  }
+  .vault-graph #vg-readnote > #vg-detail .x { top: -2px; right: 0; }
+  .vault-graph #vg-readnote > #vg-detail h2 { margin-top: 0; }
+
   .vault-graph .dimseg { display: inline-grid; grid-auto-flow: column; gap: 2px; vertical-align: middle; margin: -3px 0; }
   .vault-graph .dimseg button {
     font: inherit; font-size: 11px; font-weight: 600; text-transform: none; letter-spacing: 0;
@@ -823,6 +849,10 @@
 
   /* github#73 -- the disc gets the screen; the legend and the band are summoned */
   @media (max-width: 720px) {
+    /* github#131, design/0019 -- the phone keeps design/0013's answer: the card is a sheet
+       over the stage, not a reading of a column that is itself summoned, so there is no
+       second reading here and no tab strip to choose one. */
+    .vault-graph #vg-tabs { display: none; }
     .vault-graph { grid-template-columns: 1fr; grid-template-rows: 1fr; }
     .vault-graph #vg-sidebar {
       position: absolute; left: 0; right: 0; bottom: 0; z-index: 8;

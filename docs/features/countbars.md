@@ -17,10 +17,10 @@ list. It is a view setting, **Count bars in the legend**, on by default and reme
 
 ## Where it lives in the storyboard
 
-**No act of its own.** The bars are part of the legend, so they are on screen in all sixteen
-acts; `act: "folders"` is where they actually move, because its solo beat sends every other bar
-down to nothing. This clip is a crop of that act rather than a separate recording — filming the
-legend twice would mean two takes that have to agree.
+**No act of its own.** The bars are part of the legend, so they are on screen in every act;
+`act: "folders"` is where they actually move, because its solo beat sends every other bar down to
+nothing. This clip is a crop of that act rather than a separate recording — filming the legend
+twice would mean two takes that have to agree.
 
 ## Regenerating this feature's clip
 
@@ -32,7 +32,7 @@ legible on a release page:
 # wrote demo-folders-<timestamp>.mp4
 
 ffmpeg -y -ss 18.5 -t 9 -i demo-folders-<timestamp>.mp4 `
-  -vf "crop=286:545:8:215,scale=572:-1:flags=lanczos,fps=15" `
+  -vf "crop=270:585:8:250,scale=540:-1:flags=lanczos,fps=15" `
   -c:v libwebp_anim -lossless 0 -quality 72 -compression_level 4 -loop 0 -an `
   assets\features\countbars.webp
 ```
@@ -41,11 +41,14 @@ The `-ss` lands just before the solo, which is the part worth watching. `make-he
 used here because it scales to a fixed width from the top left of the whole window; this needs a
 crop first.
 
-**The `y` offset is 215, not 200 — check it again after any change above the legend.** The
-Folders/Tags segmented control (github#86) added a row above the legend that the old offset
-didn't know about, so a 200 crop caught its bottom edge. 215 lands just below it, at the
-All/None row; re-measure with a frame grab (`ffmpeg -ss 18.5 -i <take>.mp4 -frames:v 1 check.png`)
-if the legend's top ever moves again rather than guessing a new number.
+**The rectangle is measured, never carried over — every number in it has moved at least once.**
+The offset was 200, then 215 when the Folders/Tags segmented control (github#86) added a row above
+the legend and a 200 crop caught its bottom edge. It is **250** from 2.7.0: github#131 added
+another row above the legend, so 215 no longer lands on the All/None row — and the take is now a
+square 1000x1000 window rather than 1586x992, which moves the legend column's width as well as its
+top. Grab a frame and read it off (`ffmpeg -ss 18.5 -i <take>.mp4 -frames:v 1 check.png`) after any
+change above the legend or to the recording frame; never guess a new number, and never assume the
+old one survived a reframe.
 
 Commit `assets/features/countbars.webp` and update `Last re-recorded` below in the same commit —
 that pair is what `release.ps1`'s `=== features ===` warning reads.
@@ -55,4 +58,4 @@ that pair is what `release.ps1`'s `=== features ===` warning reads.
 | | |
 |---|---|
 | **Introduced in** | `2.3.0 (github#78)` |
-| **Last re-recorded** | `2.6.0 — 2026-09-11` — 9.0 s cropped from a 29.4 s `folders` take at 1586x992, encoded at 572 px (0.38 MB) — crop offset adjusted to clear the new Folders/Tags control |
+| **Last re-recorded** | `2.7.0 — 2026-09-12` — 9.0 s cropped from a 30.0 s `folders` take at 1000x1000, encoded at 540 px (0.40 MB) — rectangle re-measured for the square frame and for github#131's extra row above the legend |

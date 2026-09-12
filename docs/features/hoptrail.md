@@ -1,7 +1,7 @@
 # Walking the links, and back
 
-The linked notes on a card are clickable, and clicking one walks the graph — a hop. Each hop
-is remembered: the card grows a back arrow and a trail of where you came from, oldest first,
+The linked notes in a note's reading are clickable, and clicking one walks the graph — a hop.
+Each hop is remembered: the card grows a back arrow and a trail of where you came from, oldest first,
 folded to the first and the last two once the walk gets long. The arrow steps back one hop;
 any crumb jumps straight to that note and drops everything after it. A crumb whose note a
 filter or the date range is currently hiding greys out and stays clickable. Opening a note
@@ -38,4 +38,4 @@ commit — that's what `release.ps1`'s staleness check reads.
 | | |
 |---|---|
 | **Introduced in** | `2.1.0 (github#40)` |
-| **Last re-recorded** | `2.6.0 — 2026-09-11` — 18.6 s at 1586x992, encoded at 960 px (1.07 MB) — trimmed by one back-step (github#109) |
+| **Last re-recorded** | `2.7.0 — 2026-09-12` — 18.6 s at 1000x1000, encoded at 1000 px (2.61 MB) |

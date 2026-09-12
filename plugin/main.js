@@ -554,6 +554,11 @@ class VaultGraphView extends ItemView {
     this.liveWake = null;
     /** @type {import("../src/page.js").LiveResult | null} */
     this.lastLive = null;
+    // github#120 -- these two register once for the view's life
+    /** @type {EventRef | null} */
+    this.cssRef = null;
+    /** @type {EventRef[] | null} */
+    this.liveRefs = null;
   }
 
   getViewType() { return VIEW_TYPE; }
@@ -592,11 +597,18 @@ class VaultGraphView extends ItemView {
     this.liveDeferred = false;
   }
 
+  // github#120 -- is a hand on the disc? absent on an older page
+  interacting() {
+    const api = this.handle && this.handle.api;
+    return !!(api && typeof api.interacting === "function" && api.interacting());
+  }
+
   // github#72, design/0014
   startLiveWake() {
     if (this.liveWake !== null) return;
     this.liveWake = window.setInterval(() => {
-      if (!this.liveVisible()) return;
+      // github#120 -- both reasons to wait: unseen, or being dragged
+      if (!this.liveVisible() || this.interacting()) return;
       this.stopLiveWake();
       this.scheduleLive();
     }, LIVE_WAKE_MS);
@@ -618,13 +630,19 @@ class VaultGraphView extends ItemView {
   }
 
   // github#72, design/0014
+  // github#120 -- ONCE FOR THE VIEW'S LIFE, NOT ONCE PER RENDER
   subscribeLive() {
+    if (this.liveRefs) return;
     const cache = this.app.metadataCache, vault = this.app.vault;
-    this.registerEvent(cache.on("resolved", () => this.scheduleLive()));
-    this.registerEvent(cache.on("changed", (file) => this.scheduleLive(file && file.path)));
-    this.registerEvent(vault.on("create", (file) => this.scheduleLive(file && file.path)));
-    this.registerEvent(vault.on("delete", (file) => this.scheduleLive(file && file.path)));
-    this.registerEvent(vault.on("rename", (file, oldPath) => {
+    /** @type {EventRef[]} */
+    const refs = [];
+    this.liveRefs = refs;
+    const keep = /** @param {EventRef} r */ (r) => { refs.push(r); this.registerEvent(r); };
+    keep(cache.on("resolved", () => this.scheduleLive()));
+    keep(cache.on("changed", (file) => this.scheduleLive(file && file.path)));
+    keep(vault.on("create", (file) => this.scheduleLive(file && file.path)));
+    keep(vault.on("delete", (file) => this.scheduleLive(file && file.path)));
+    keep(vault.on("rename", (file, oldPath) => {
       const to = file && file.path;
       if (to && oldPath) {
         // design/0014
@@ -657,6 +675,8 @@ class VaultGraphView extends ItemView {
     if (!api || typeof api.applyData !== "function") return;
     // github#72, design/0014
     if (!this.liveVisible()) { this.liveDeferred = true; this.startLiveWake(); return; }
+    // github#120 -- and not while a hand is on the disc
+    if (this.interacting()) { this.liveDeferred = true; this.startLiveWake(); return; }
     this.liveDeferred = false;
     this.stopLiveWake();
     if (this.liveBuilding) { this.liveAgain = true; return; }
@@ -805,7 +825,11 @@ class VaultGraphView extends ItemView {
     this.syncTheme();
     this.markNew();
 
-    this.registerEvent(this.app.workspace.on("css-change", () => this.syncTheme()));
+    // github#120 -- one listener for the view's life, not per render
+    if (!this.cssRef) {
+      this.cssRef = this.app.workspace.on("css-change", () => this.syncTheme());
+      this.registerEvent(this.cssRef);
+    }
 
     const t0 = performance.now();
     this.handle = mountVaultGraph(page, data, {
@@ -939,7 +963,8 @@ class VaultGraphView extends ItemView {
     // github#72
     this.subscribeLive();
 
-    this.registerDomEvent(page, "click", (ev) => {
+    // github#120 -- a PLAIN listener: registerDomEvent retains the page
+    page.addEventListener("click", (ev) => {
       const a = ev.target instanceof Element ? ev.target.closest('a[href^="obsidian://"]') : null;
       if (!a) return;
       ev.preventDefault();

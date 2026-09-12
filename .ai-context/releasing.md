@@ -17,7 +17,7 @@ Call out what's newly done since the last table and what's still blocked or awai
 | 3 | `CHANGELOG.md` section for `<version>`, covering every merge since the last tag — and, for a MINOR or MAJOR, `plugin/whats-new.md` rewritten for it: the three-to-five-line note the plugin shows once after the update (github#83, `design/0016`). A PATCH leaves the file alone. `release.ps1` refuses an `x.y.0` whose note is for another version | |
 | 4 | Version bump: `manifest.json` → `<version>` | |
 | 5 | Release name — propose 2-4 candidates, his pick | |
-| 6 | **Re-record every clip the UI change touches** — if anything visual changed this release (a constant like `FIT_RATIO`, a storyboard reorder, a sizing fix), the hero *and every existing feature-gallery clip* are stale, not just the ones whose own beats moved. Needs the `record` lock; ask before recording. Before merge, not after — the merged tree is what the clips should show. | |
+| 6 | **Re-record every clip and the hero — the default, not a judgment call (github#121)** — a diff cannot reliably say which clips went stale (a constant like `FIT_RATIO`, a storyboard reorder, a sizing fix makes *every* clip stale, not just the ones whose own beats moved), so `scripts/record-all.ps1` re-records all of them in one pass. Needs the `record` lock; ask before recording. Before merge, not after — the merged tree is what the clips should show. Skip only for a release that touches nothing visual (a docs-only PATCH), and name that exception here rather than defaulting to it. | | **Then run the `review-clips` skill and look at the page** (`& "$env:USERPROFILE\.claude\skills\review-clips\build-clip-review.ps1" -Repo . -Open`) — it reads the storyboard itself and prints `clips present N/N` with the missing act names, so the recording step is confirmed rather than assumed. Do not eyeball a diff to decide what was re-recorded.
 | 7 | Merge `release/<version>` → `develop` (local) | |
 | 8 | **One** plain `git push origin develop` (the hook takes the `suite` lock itself, github#92 — never wrap the push in your own acquire/release, it deadlocks against the hook's) | |
 | 9 | PR/merge `develop` → `main` | |
@@ -178,18 +178,36 @@ reverse-engineered from it, not invented.
 3. **One `###` (h3, not h2) section per genuinely new or visibly-changed feature** — and the
    set of them comes from the merge list in *First, list what is actually in the release*, not
    from memory, so nothing in the range goes unmentioned. Each
-   with its matching clip from `assets/features/*.webp` embedded the same way. Only
+   with its matching clip from `assets/features/*.webp` embedded the same way. **The clip goes
+   directly under the heading, above the bullets, every time** — the picture is what the section
+   is for, and a reader who has already read three bullets does not need it. Every published
+   release does it in that order; a draft that puts the clip under the bullets reads as written
+   from a doc rather than from a release. Only
    feature clips that exist and are current belong here; don't call something "new" that
    already shipped in an earlier release — check the source at the previous tag first
-   (`git show <prev-tag>:src/page.js | grep ...`). Bug fixes real enough to matter but not
-   visually demonstrable go in prose under the nearest relevant `###`, or their own
-   "Smaller things" `###` list, with no clip forced onto them.
-4. **One line, every release, always the same spot** — right after the highlight reel,
-   right before the divider below: `☕ If Vault Graph is useful to you, [support it on
-   Ko-fi](https://ko-fi.com/luke321).` Added 2026-09-11, alongside the manifest `fundingUrl`,
-   the README badge and the GitHub Sponsor button — this is where it reaches someone who just
-   updated and is reading what's new, which is the natural moment for it. One line, never
-   embellished, never repeated elsewhere on the page.
+   (`git show <prev-tag>:src/page.js | grep ...`). **A fix does not get a `###` section or a clip, however visible it is.** The test is *new
+   capability versus corrected behaviour*, never *can it be filmed* — a disc that now fills more
+   of the window, or a pan that no longer freezes, is plainly visible and is still a fix. Fixes
+   real enough to matter go in prose under the nearest relevant `###`, or their own
+   "Smaller things" `###` list, with no clip forced onto them. This sentence used to read "real
+   enough to matter but not visually demonstrable", which invited exactly the wrong reading: a
+   preview drafted github#128 and github#120 as feature sections owing clips, acts and feature
+   pages, and Lukas corrected it — *"the disc being able to pan is a bug fix not new feature and
+   so is the rescale of the disc, no need for features md or clips or demo takes."*
+4. **The Ko-fi ask, every release, always the same spot** — right after the highlight reel,
+   right before the divider below. One line of text, then the button on its own line:
+
+   ```markdown
+   If Vault Graph is useful to you:
+
+   [![Support me on Ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/luke321)
+   ```
+
+   Added 2026-09-11 alongside the manifest `fundingUrl`, the README badge and the GitHub
+   Sponsor button — this is where it reaches someone who just updated and is reading what's
+   new, which is the natural moment for it. It was a plain inline link until 2.6.0 and is
+   Ko-fi's own button now, which reads as something to press rather than as a sentence to
+   skim. Never embellished, never repeated elsewhere on the page.
 5. **A `---` divider**, then the CHANGELOG.md section **appended verbatim, unedited,
    heading included** (`## <version> — "<Name>" — <date>` through to its own trailing
    `---`). This is not a link out — the full technical writeup lives IN the release body,
@@ -282,28 +300,68 @@ screen. And **a correction applied to one half of a computed pair is a bug waiti
 deadline**: correcting the press without recomputing the destination was strictly worse than
 correcting neither, because it looked careful.
 
-## Feature clips are different from the hero — regenerate on judgment, not every release
+## Feature clips are re-recorded every release too, same as the hero (github#121)
 
 `docs/features.md` and `assets/features/*.webp` are the per-feature gallery (see
-`docs/features/_template.md`). Unlike the hero, **these are not regenerated every
-release.** Re-record a feature's clip only when it's new or when this release visibly
-changed it — that's a call for whoever is cutting the release to make, looking at what the
-`CHANGELOG.md` entry actually says, not something to automate:
+`docs/features/_template.md`). This used to be regenerated on judgment — only when a
+feature was new or this release visibly changed it — but that call cannot reliably be made
+from a diff: a shared constant changing (a margin, `FIT_RATIO`, a storyboard reorder) makes
+every existing clip stale, not just the ones whose own beats moved, and a wrong call is only
+visible to a reader of the published release, after the tag exists, when nothing can change.
+So re-recording everything is the default:
+
+```powershell
+.\scripts\record-all.ps1                     # every feature clip and the hero, one pass
+node scripts\update-feature-metadata.mjs --version <version>   # rewrites every Last re-recorded line
+```
+
+For one clip on its own (a single feature's beats changed and nothing else did):
 
 ```powershell
 .\scripts\record-demo.ps1 -Act <name>        # e.g. -Act timeline
 .\scripts\make-hero.ps1 -In demo-<name>-<timestamp>.mp4 -Out assets\features\<name>.webp
+node scripts\update-feature-metadata.mjs --version <version> --only <name>
 ```
 
-Commit the new clip and update that feature's `Last re-recorded` line in
-`docs/features/<name>.md` together — that pair is what the `=== features ===` warning
-below reads.
+Commit the new clip(s) and the updated `Last re-recorded` line(s) in `docs/features/<name>.md`
+together — that pair is what the `=== features ===` warning below reads.
+
+**The one exception is a release that touches nothing visual** — a docs-only PATCH. Skipping
+re-recording there is fine, but it has to be named and argued explicitly (a line in the
+release's status table saying so), never taken by default.
+
+### `update-feature-metadata.mjs` — what it measures, and what it can't
+
+Twenty `Last re-recorded` lines were hand-edited every release before this existed — the exact
+kind of bookkeeping the issue that added it (github#121) called out as wanting a script. It
+reads each `docs/features/<name>.md`, replaces only its `Last re-recorded` row, and leaves the
+rest of the file untouched.
+
+**Capture resolution and true duration need the source take**, not the published `.webp` —
+`record-all.ps1`'s own scratch directory (`%TEMP%\vault-graph-takes\demo-<name>.mp4` by
+default, `--scratch` to override) is read for both when the take is still there. Without it,
+the script falls back to measuring the `.webp` itself: that gives a real duration and the
+*encoded* width, but not the original capture size, so the line says so explicitly
+("capture size not recorded…") rather than asserting a guessed number — measuring, not
+guessing, is the whole point of the script existing.
+
+**`ffprobe` reports `N/A` for an animated WebP's own container duration** (measured against
+`assets/features/timeline.webp`, 2026-09-11) — `-show_entries format=duration` works for the
+source `.mp4` but not for the encoded `.webp`. The fallback counts decoded frames
+(`-count_frames`) and divides by the stream's own frame rate instead; slower, but fine for a
+release-time metadata pass rather than something run in a loop.
+
+`mobile` keeps the doc's existing "encoded at native width" wording instead of a numeric
+width, and `countbars` is skipped outright — same reason `record-all.ps1` skips recording it
+(its crop offsets are measured by hand against one specific `folders` take).
 
 `release.ps1` prints `=== features ===`, one line per feature whose `Last re-recorded`
 predates a commit touching `src/page.js` — the same non-blocking severity as `=== hero
-===`, for the same reason: it's evidence worth a look, not proof anything actually needs
-re-recording. It checks the whole file rather than which `act:` a commit touched, so it can
-over-warn (a `colours`-only change flags every feature) but never under-warns silently.
+===`. Now that re-recording is the default, this is a backstop: it means the default step was
+skipped for this release, deliberately (the PATCH exception above) or not, and it's worth a
+look either way, not proof anything is actually stale. It checks the whole file rather than
+which `act:` a commit touched, so it can over-warn (a `colours`-only change flags every
+feature) but never under-warns silently.
 
 ### A tag message loses every markdown heading unless you say `--cleanup=verbatim`
 
@@ -442,10 +500,12 @@ that can say what it trusted.
    MINOR is a new capability or an intentional visual change, PATCH is fixes and docs.
 3. **Write the release section in `CHANGELOG.md`** — human-readable, what shipped, no
    before/after numbers. Those go in `changelog-detail.md`, which is the regression suite.
-4. **Re-record the hero** if the page changed visually, then commit `assets/demo.webp` —
-   `record-demo.ps1` to take the recording, `make-hero.ps1` to encode it. **Re-record any
-   feature clip** this release changed, same two commands with `-Act <name>` — see above;
-   this one's a judgment call, not "always."
+4. **Re-record every clip and the hero** — the default (github#121), not a per-clip judgment
+   call: `.\scripts\record-all.ps1` does the whole gallery and the hero in one pass, then
+   `node scripts\update-feature-metadata.mjs --version <version>` rewrites every feature's
+   `Last re-recorded` line. Commit `assets/demo.webp`, `assets/features/*.webp` and the
+   updated docs together. Skip only for a release that touches nothing visual (a docs-only
+   PATCH), and say so explicitly rather than skipping by default — see above.
 5. **Run the gates.** `npm run lint`, `node scripts/check-notice.mjs`, `node scripts/smoke.mjs`
    — and they run again on push via `.githooks/pre-push`, so a red suite cannot be released.
 6. **Get the commit onto `origin/main` first**: merge `develop → main` through a pull request
