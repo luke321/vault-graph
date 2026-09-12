@@ -1,4 +1,4 @@
-#!/usr/bin/env node
+﻿#!/usr/bin/env node
 
 import { attach } from "./cdp.mjs";
 import { spawn, spawnSync } from "node:child_process";
@@ -7,6 +7,7 @@ import { tmpdir } from "node:os";
 import { join, dirname, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { leftWindowArgs } from "./screen.mjs";
+import { keepFocus } from "./focus.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = dirname(HERE);
@@ -45,11 +46,15 @@ if (!url) {
 
 mkdirSync(OUT, { recursive: true });
 const profile = mkdtempSync(join(tmpdir(), "vg-shoot-profile-"));
+// github#129
+const focus = await keepFocus();
 const chrome = spawn(findChrome(), [
   `--remote-debugging-port=${PORT}`, `--user-data-dir=${profile}`,
   "--no-first-run", "--no-default-browser-check",
   ...leftWindowArgs(1600, 1000), `--app=${url}`,
 ], { stdio: "ignore" });
+// github#129 -- the steal lands after the attach, so the watch runs alongside the run
+void focus.watch(chrome.pid);
 
 let page = null;
 try {
