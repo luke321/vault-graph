@@ -185,9 +185,15 @@ reverse-engineered from it, not invented.
    from a doc rather than from a release. Only
    feature clips that exist and are current belong here; don't call something "new" that
    already shipped in an earlier release — check the source at the previous tag first
-   (`git show <prev-tag>:src/page.js | grep ...`). Bug fixes real enough to matter but not
-   visually demonstrable go in prose under the nearest relevant `###`, or their own
-   "Smaller things" `###` list, with no clip forced onto them.
+   (`git show <prev-tag>:src/page.js | grep ...`). **A fix does not get a `###` section or a clip, however visible it is.** The test is *new
+   capability versus corrected behaviour*, never *can it be filmed* — a disc that now fills more
+   of the window, or a pan that no longer freezes, is plainly visible and is still a fix. Fixes
+   real enough to matter go in prose under the nearest relevant `###`, or their own
+   "Smaller things" `###` list, with no clip forced onto them. This sentence used to read "real
+   enough to matter but not visually demonstrable", which invited exactly the wrong reading: a
+   preview drafted github#128 and github#120 as feature sections owing clips, acts and feature
+   pages, and Lukas corrected it — *"the disc being able to pan is a bug fix not new feature and
+   so is the rescale of the disc, no need for features md or clips or demo takes."*
 4. **The Ko-fi ask, every release, always the same spot** — right after the highlight reel,
    right before the divider below. One line of text, then the button on its own line:
 
