@@ -3326,10 +3326,7 @@ check("the rings hold their radii while a cascade walks", async (p) => {
   await settle(p);
   await sleep(200);
 
-  // The hull of what is DRAWN, exactly as the wedge overlay measures it (r +/- the dot's
-  // own radius, alpha >= 0.5, orphans out), against __vg.lockedRings() -- the same
-  // function the overlay draws. A band re-packs INSIDE its annulus; it may not carry the
-  // annulus with it, and the locked radii may not move at all.
+  // github#161
   const sampler = `(function (trigger) {
     window.__RH = { rows: [], done: false };
     var snap = function () {
@@ -3376,7 +3373,7 @@ check("the rings hold their radii while a cascade walks", async (p) => {
       var R = window.__RH.rows;
       if (!R.length) return { frames: 0 };
       var r3 = function (v) { return Math.round(v * 1000) / 1000; };
-      // the locked radii themselves: four numbers that may not move at all
+      // github#161
       var a = R[0].lk, lockStep = 0;
       for (var i = 1; i < R.length; i++) {
         ["i", "o"].forEach(function (k) {
@@ -3386,7 +3383,7 @@ check("the rings hold their radii while a cascade walks", async (p) => {
           }
         });
       }
-      // and how far the drawn band leaves its annulus, worst over every frame
+      // github#161
       var outHi = 0, inHi = 0, atHi = 0, who = null, outLo = 0;
       for (var n = 0; n < R.length; n++) {
         var lk = R[n].lk, s = R[n].seen;
@@ -3395,14 +3392,10 @@ check("the rings hold their radii while a cascade walks", async (p) => {
             outHi = s.o.hi - lk.o[1]; atHi = n;
             who = { g: __vg.groupOf(s.o.hiId), r: r3(s.o.hi - s.o.hiDot), dot: r3(s.o.hiDot) };
           }
-          // github#160's shift is estimated from the pitch, not measured off the drawn
-          // dot, so row 0's edge does not land exactly on rOuter. REPORTED, NOT ASSERTED
-          // -- it is a different defect from this one and it points inward, into the gap
-          // between the rings, never at the inner band.
+          // github#160 -- reported, not asserted
           if (lk.o[0] - s.o.lo > outLo) outLo = lk.o[0] - s.o.lo;
         }
-        // the inner band's LOWER edge is deliberately inside r0 -- github#35 keeps
-        // HUB_ROW0_FRAC of the hub -- so only its outer edge is a containment question
+        // github#35 -- the inner band's lower edge is inside r0 on purpose
         if (s.i && s.i.hi - lk.i[1] > inHi) inHi = s.i.hi - lk.i[1];
       }
       return { frames: R.length, lockStep: r3(lockStep),
@@ -3435,9 +3428,7 @@ check("the rings hold their radii while a cascade walks", async (p) => {
   }
   await clearRange(p);
 
-  // One row is 1.0, so 0.05 is a twentieth of a row -- the float slop in reading a radius
-  // back out of a rendered dot, and nothing like the 2.5 units (399 graph units, 12% of
-  // the disc) the dominant-folder vault carried its outer band before github#161.
+  // github#161 -- one row is 1.0
   const TOL = 0.05;
   const bad = out.filter((r) => !r.frames || r.lockStep > 0 || r.outHi > TOL || r.inHi > TOL);
   return {

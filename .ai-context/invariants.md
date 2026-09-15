@@ -439,6 +439,61 @@ the band has a full pitch of it at rest and the github#157 ceiling leaves some.
 **Outer band only.** The inner band's row 0 is allowed `HUB_ROW0_FRAC` of the hub on purpose
 (github#35) and is untouched: edges 715 … 1345 against a 772 hub, before and after.
 
+### The band stays inside its ring for every frame of a cascade — github#161
+
+The strongest reading of *the rings are independent, and their thickness is locked*: not only
+that `r0`, `rOuter` and `maxR` hold — they always did, measured **0 step and 0 deviation** on
+every frame of four transitions across all four fixtures — but that what is **drawn** stays
+inside them while the band re-packs.
+
+```javascript
+node scripts/smoke.mjs --only "rings hold their radii"
+```
+
+The check samples every frame of a cascade, takes the hull of the drawn dots exactly as the
+wedge overlay does (`r ± dot`, `alpha ≥ 0.5`, orphans out), and asserts it against
+`__vg.lockedRings()` — **the same function the overlay draws**, so what is asserted is what is
+seen. One row is `1.0`; the tolerance is `0.05`.
+
+Mid-walk the pitch reaches `ringsLayout()` as `thickAt / depthWalk`, a band span over a **float**
+row count, while `placeCell()` seats notes on **integer** rows — so the band is `ceil(rows)` deep
+and its last row sits a whole pitch beyond what the float count claims. Since github#157 a
+resting plan's `rows · sp` is no longer the band's thickness either (it carries margin), so the
+span interpolated between two such plans is unbounded by the lock. Against a locked thickness of
+**8.0**, measured mid-walk: span **9.4** on the dominant-folder vault, **17.6** on the tag vault.
+
+github#160's shift could not correct it, because its slack was measured against
+`(rows.o − 1) · sp` — the same float count — and against `plan.maxR`, which mid-walk reports
+`rOuter + round(rows) · sp` and so lands a whole pitch short of the ring half the time. The shift
+clamped to zero and the band still sat outside.
+
+**The walking pitch is capped to the locked thickness**, leaving `DOT_OF_PITCH` at each end for
+row 0's edge and the last row's; the shift is clamped against the outermost slot **actually
+placed**; and its ceiling is the locked ring rather than the plan's shorter reach. **Walking
+plans only** — every resting layout measured **0.4 to 1.0 units inside** its ring on all four
+fixtures, so the resting path has nothing to fix. All four goldens unmoved is the evidence.
+
+| fixture | outer band past `maxR`, worst frame | after |
+|---|---|---|
+| demo | 0.042 | **0** |
+| 10k | 0 | **0** |
+| dominant-folder | **2.492** (399 graph units, 12% of the disc) | **0** |
+| tag | **9.585** | **0** |
+
+**Reported by the check, not asserted.** github#160 *estimates* row 0's dot radius from the pitch
+rather than measuring the drawn dot, and the two disagree — **1.338 estimated against 0.487
+drawn** at rest on the dominant-folder vault. Row 0's edge therefore does not land on `rOuter` as
+github#160 intends, missing by up to **1.8 units inward** mid-walk. It points into the gap
+between the rings, never at the inner band, and it is a different defect from this one.
+
+**The wedge overlay was never drawing the rings.** It seeded its four dashed circles from
+`geomLock` and then overwrote them with the hull of the drawn dots, re-measured every frame — so
+it drew where the notes happened to reach, which re-packs and therefore moves even when nothing
+is wrong. That is what github#161 was reported from. The hull still draws, dashed; the locked
+rings now draw over it, solid. Its `geomLock` fallback was also in nominal units while the hull
+was in post-`INNER_SCALE` drawn units, so the inner pair would have drawn 25% too large whenever
+no dot was there to override it.
+
 Measured on the dominant-folder vault, dot edges in graph px, `rOuter 2021`, `maxR 3301`:
 
 | state | row centres | dot edges before | dot edges after | max dot |

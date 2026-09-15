@@ -2290,26 +2290,8 @@ function mountVaultGraph(root, data, deps) {
       return { sp: pit, rows: rw };
     };
 
-    /**
-     * github#161 -- a walking band must fit the ring it is locked into.
-     *
-     * `given` hands ringsLayout a pitch the cascade walked as `thickAt / depthWalk` --
-     * a band span over a FLOAT row count. Two things then go wrong at once, and the
-     * dominant-folder vault shows both. `placeCell` seats notes on INTEGER rows, so the
-     * band is `ceil(rows)` deep and its last row sits a whole pitch further out than the
-     * float count says; and since github#157 a resting plan's `rows * sp` is no longer the
-     * band's thickness -- it carries margin -- so the span the walk interpolates between
-     * two such plans is not bounded by the locked thickness either. Measured mid-walk
-     * against a locked thickness of 8.0: span 9.4 on the dominant-folder vault, 17.6 on
-     * the tag vault, putting notes 399 units past `maxR` while `geomLock` itself never
-     * moved. `DOT_OF_PITCH` at each end is what github#160's shift needs to seat row 0's
-     * edge on the ring and the last row's edge inside it.
-     *
-     * Walking plans only. Every resting layout measured 0.4 to 1.0 units INSIDE its ring
-     * on all four fixtures, so the resting path has nothing to fix and no golden moves.
-     *
-     * @param {number} sp @param {number} rows @param {number} thick @returns {number}
-     */
+    // github#161, github#157, github#160 -- a walking band fits the ring it is locked into
+    /** @param {number} sp @param {number} rows @param {number} thick @returns {number} */
     var fitWalk = function (sp, rows, thick) {
       if (!given || !(thick > 0) || !(sp > 0)) return sp;
       var used = Math.ceil(rows - 1e-9);
@@ -2544,7 +2526,7 @@ function mountVaultGraph(root, data, deps) {
     var firstAt = null;
     /** @type {Record<string, number[]>} */
     var roomPool = { i: [], o: [] };
-    // github#161 -- the outermost lattice radius the outer band actually placed a note on
+    // github#161
     var maxPlacedO = 0;
     /** @type {Record<string, number>} */
     var cellRoomNext = dict();
@@ -2693,8 +2675,7 @@ function mountVaultGraph(root, data, deps) {
           var arc = a1 - a0;
           var rGraph = Math.max(1e-6, sl.r * UNIT);
           if (isInner && sl.row === 0) hubRow0Next[sl.id] = true;
-          // github#161 -- where the outer band's rows ACTUALLY reach, off sl.r rather
-          // github#161 -- than the highlight-pushed rr below, so a hover moves no lattice
+          // github#161 -- off sl.r, not the highlight-pushed rr below
           if (!isInner && sl.r > maxPlacedO) maxPlacedO = sl.r;
           var bk = isInner ? "i" : "o";
           var room = bandOf(bk).room > 1 ? bandOf(bk).room : pitchUnits(bk);
@@ -2794,21 +2775,10 @@ function mountVaultGraph(root, data, deps) {
       var hiO = DOT_OF_PITCH * Math.min(pitO, UNIT * DOT_MAX_SPREAD);
       var fO = Math.min(roomO * 0.92 / pitO, DOT_ROOM_MAX);
       insetO = hiO * fO / UNIT;
-      // github#161 -- mid-cascade plan.rows.o is a FLOAT walking between two row counts,
-      // github#161 -- so (rows.o - 1) * sp says the band ends short of where its INTEGER
-      // github#161 -- rows really sit: the clamp read slack it did not have and the band
-      // github#161 -- shifted 399 units past maxR on the dominant-folder vault. Take the
-      // github#161 -- further of the two. At rest the placed rows never reach past the
-      // github#161 -- formula, so this is the formula and every resting layout is unmoved.
+      // github#161
       var spanO = (plan.rows.o - 1) * plan.sp;
       if (maxPlacedO > plan.rOuter && maxPlacedO - plan.rOuter > spanO) spanO = maxPlacedO - plan.rOuter;
-      // github#161 -- WALKING, the ceiling is the locked ring rather than plan.maxR. The
-      // github#161 -- plan reports rOuter + round(rows) * sp, and round() of a float row
-      // github#161 -- count lands a whole pitch short of the ring half the time -- slack
-      // github#161 -- that reads as zero, so the shift is clamped away and row 0's dot
-      // github#161 -- crosses rOuter inward by its own radius instead (1.8 units measured
-      // github#161 -- on the dominant-folder vault). At rest plan.maxR is the honest reach
-      // github#161 -- and every fixture measured inside its ring, so leave that alone.
+      // github#161
       var ceilO = roomNow && geomLock && geomLock.maxR > 0 ? geomLock.maxR : plan.maxR;
       var slackO = (ceilO - plan.rOuter) - spanO - 2 * insetO;
       if (slackO < 0) insetO = Math.max(0, insetO + slackO);
@@ -3563,12 +3533,7 @@ function mountVaultGraph(root, data, deps) {
     return out;
   }
 
-  // github#161 -- the locked annuli, in the space each band is DRAWN in: an inner slot
-  // github#161 -- lands at (base + row * SP) * INNER_SCALE, so the inner ring on screen is
-  // github#161 -- the locked one scaled, while the outer band is drawn at scale 1. Both the
-  // github#161 -- wedge overlay and the suite's per-frame ring check read this one function,
-  // github#161 -- so what is asserted is what is drawn. Nothing here may move while a
-  // github#161 -- cascade walks -- the bands re-pack inside these, they do not carry them.
+  // github#161
   /** @returns {Record<string, number[]> | null} */
   function lockedRings() {
     if (!geomLock) return null;
@@ -3612,9 +3577,7 @@ function mountVaultGraph(root, data, deps) {
     });
     var lockR = lockedRings();
     if (!lockR) { cv.hidden = true; return; }
-    // github#161 -- the hull of what is DRAWN, which re-packs inside the lock and so
-    // github#161 -- legitimately moves while a cascade walks. Drawing only this one and
-    // github#161 -- calling it the ring is what read as the rings themselves moving.
+    // github#161 -- the hull of what is DRAWN; it re-packs, so it moves
     /** @type {Record<string, number[]>} */
     var bandR = { i: lockR.i.slice(), o: lockR.o.slice() };
     ["i", "o"].forEach(function (k) {
@@ -3643,8 +3606,7 @@ function mountVaultGraph(root, data, deps) {
     g2.setLineDash([4, 4]);
     ringPath([bandR.i[0], bandR.i[1], bandR.o[0], bandR.o[1]]);
     g2.setLineDash([]);
-    // github#161 -- the locked rings, solid, over the dashed hull: what holds versus what
-    // github#161 -- re-packs, told apart on sight instead of one pair standing for both
+    // github#161 -- the locked rings, solid, over the dashed hull
     g2.strokeStyle = SEAM_YELLOW;
     g2.lineWidth = 1;
     ringPath([lockR.i[0], lockR.i[1], lockR.o[0], lockR.o[1]]);
@@ -4002,7 +3964,7 @@ function mountVaultGraph(root, data, deps) {
   /** @type {Record<string, string> | null} */
   var lastBand = null;
   var lastMaxR = 0;
-  // github#161 -- the terms the outer band's shift was decided on, for the ring check
+  // github#161
   /** @type {Record<string, number> | null} */
   var lastShift = null;
   /** @type {Record<string, number>} */
