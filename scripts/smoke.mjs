@@ -3402,8 +3402,7 @@ check("the rings hold their radii while a cascade walks", async (p) => {
         // github#35 -- the inner band's lower edge is inside r0 on purpose
         if (s.i && s.i.hi - lk.i[1] > inHi) inHi = s.i.hi - lk.i[1];
       }
-      // github#161 -- the two RESTING frames on their own: a resting layout that already
-      // sits outside its band is not something the cascade did, and not this issue's.
+      // github#161
       var restLo = 0;
       [0, R.length - 1].forEach(function (n) {
         var lk = R[n].lk, q = R[n].seen;
@@ -3442,9 +3441,7 @@ check("the rings hold their radii while a cascade walks", async (p) => {
 
   // github#161 -- one row is 1.0
   const TOL = 0.05;
-  // github#161 -- what the CASCADE does, which is what this issue is about: a resting
-  // layout that already sits outside its band is github#160's estimate being low, it is
-  // on develop too, and it is reported below rather than blamed on the walk.
+  // github#161
   const bad = out.filter((r) => !r.frames || r.lockStep > 0 ||
                                 r.outHi > TOL || r.inHi > TOL ||
                                 r.outLo - r.restLo > TOL);

@@ -2463,9 +2463,7 @@ function mountVaultGraph(root, data, deps) {
                      o: depthOf(outer, outerRows || REF_ROWS, "o") } };
   }
 
-  // github#160, github#161 -- the largest dot row 0 can draw, in UNIT-relative units.
-  // Shrinking the pitch does NOT shrink it: the room term cancels the pitch term over most
-  // of the range, so a band that will not fit has to lose rows, never the dot's clearance.
+  // github#160, github#161 -- the largest dot row 0 can draw; not a function of the pitch
   /** @param {number} sp @param {number} room @returns {number} */
   function rowDotUnits(sp, room) {
     if (!(sp > 0) || !(room > 1)) return 0;
@@ -2793,9 +2791,7 @@ function mountVaultGraph(root, data, deps) {
       if (maxPlacedO > plan.rOuter && maxPlacedO - plan.rOuter > spanO) spanO = maxPlacedO - plan.rOuter;
       // github#161
       var ceilO = roomNow && geomLock && geomLock.maxR > 0 ? geomLock.maxR : plan.maxR;
-      // github#161 -- when the band cannot hold two clearances, HALVE what is left rather
-      // github#161 -- than dropping the shift: insetO = 0 puts row 0's CENTRE on rOuter and
-      // github#161 -- its dot 1.8 units into the gap, which is the github#160 defect again.
+      // github#161 -- halve what is left rather than dropping the shift
       var slackO = (ceilO - plan.rOuter) - spanO - 2 * insetO;
       if (slackO < 0) insetO = Math.max(0, ((ceilO - plan.rOuter) - spanO) / 2);
       // github#161
