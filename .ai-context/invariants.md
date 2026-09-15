@@ -488,6 +488,19 @@ The worst frame is consistently **75–92% through the walk**, not at either end
 are resting plans and those are inside the ring, so the bulge is entirely a thing the
 interpolation does between them.
 
+**It takes motion out, it does not add any.** The cap tightens the walking pitch, so the obvious
+worry is that the band now squeezes and releases where it used to drift. Measured on the
+dominant-folder vault with `__vg.probe` — `outerMaxStep`, the biggest single-frame step of the
+outer band's edge over a fixed set of notes — **659 → 23** on the dominant-folder hide and
+**356 → 27** on a range change, with `innerMaxStep` 0 → 0 and 54 → 35. The worst single drawn
+dot's radial step goes 228.5 → 186.7 units.
+
+What does **not** change is the count of frames over `animation.md`'s 40-unit budget: 107/130 →
+112/129. That budget is one `RADIAL_EASE` quarter of a **160-unit** row, and hiding 738 of 765
+outer notes dilates the row to five times that, so a proportionate quarter-step is ~200. The
+smoothing is working; the row is simply taller. That dilation is the re-pack the law permits and
+is deliberately not touched here.
+
 **Reported by the check, not asserted.** github#160 *estimates* row 0's dot radius from the pitch
 rather than measuring the drawn dot, and the two disagree — **1.338 estimated against 0.487
 drawn** at rest on the dominant-folder vault. Row 0's edge therefore does not land on `rOuter` as
