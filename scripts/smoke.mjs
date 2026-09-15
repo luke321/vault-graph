@@ -3320,6 +3320,139 @@ check("the last frame of a cascade is the resting layout", async (p) => {
   };
 }, { on: WALK, clock: "real" });
 
+// github#161
+check("the rings hold their radii while a cascade walks", async (p) => {
+  await clearRange(p);
+  await settle(p);
+  await sleep(200);
+
+  // The hull of what is DRAWN, exactly as the wedge overlay measures it (r +/- the dot's
+  // own radius, alpha >= 0.5, orphans out), against __vg.lockedRings() -- the same
+  // function the overlay draws. A band re-packs INSIDE its annulus; it may not carry the
+  // annulus with it, and the locked radii may not move at all.
+  const sampler = `(function (trigger) {
+    window.__RH = { rows: [], done: false };
+    var snap = function () {
+      var lk = __vg.lockedRings();
+      if (!lk) return null;
+      var a0 = __vg.renderer.graphToViewport({ x: 0, y: 0 });
+      var b0 = __vg.renderer.graphToViewport({ x: 160, y: 0 });
+      var d0 = Math.hypot(b0.x - a0.x, b0.y - a0.y);
+      var perPx = d0 > 1e-3 ? 160 / d0 : 0;
+      var seen = { i: null, o: null };
+      __vg.graph.forEachNode(function (id, at) {
+        if ((__vg.alpha[id] || 0) < 0.5 || __vg.isOrphan(id)) return;
+        var d = __vg.renderer.getNodeDisplayData(id);
+        if (!d || d.hidden) return;
+        var rl = Math.hypot(at.x, at.y) / 160;
+        var dot = __vg.renderer.scaleSize(d.size) * perPx / 160;
+        var k = __vg.groupBand(__vg.groupOf(id));
+        var bb = seen[k] || (seen[k] = { lo: Infinity, hi: -Infinity, hiId: null, hiDot: 0 });
+        if (rl - dot < bb.lo) bb.lo = rl - dot;
+        if (rl + dot > bb.hi) { bb.hi = rl + dot; bb.hiId = id; bb.hiDot = dot; }
+      });
+      return { lk: lk, seen: seen, sh: __vg.lastShift };
+    };
+    var tick = function () {
+      var s = snap();
+      if (s) window.__RH.rows.push(s);
+      if (__vg.demo.busy()) requestAnimationFrame(tick);
+      else setTimeout(function () {
+        var e = snap(); if (e) window.__RH.rows.push(e);
+        window.__RH.done = true;
+      }, 320);
+    };
+    trigger();
+    requestAnimationFrame(tick);
+  })`;
+
+  const run = async (label, triggerJs) => {
+    await p.eval(`${sampler}(function () { ${triggerJs} }); void 0`);
+    for (let i = 0; i < 400; i++) {
+      if (await p.j(`!!window.__RH.done`).catch(() => false)) break;
+      await sleep(100);
+    }
+    return await p.j(`(function () {
+      var R = window.__RH.rows;
+      if (!R.length) return { frames: 0 };
+      var r3 = function (v) { return Math.round(v * 1000) / 1000; };
+      // the locked radii themselves: four numbers that may not move at all
+      var a = R[0].lk, lockStep = 0;
+      for (var i = 1; i < R.length; i++) {
+        ["i", "o"].forEach(function (k) {
+          for (var j = 0; j < 2; j++) {
+            var d = Math.abs(R[i].lk[k][j] - R[i - 1].lk[k][j]);
+            if (d > lockStep) lockStep = d;
+          }
+        });
+      }
+      // and how far the drawn band leaves its annulus, worst over every frame
+      var outHi = 0, inHi = 0, atHi = 0, who = null, outLo = 0;
+      for (var n = 0; n < R.length; n++) {
+        var lk = R[n].lk, s = R[n].seen;
+        if (s.o) {
+          if (s.o.hi - lk.o[1] > outHi) {
+            outHi = s.o.hi - lk.o[1]; atHi = n;
+            who = { g: __vg.groupOf(s.o.hiId), r: r3(s.o.hi - s.o.hiDot), dot: r3(s.o.hiDot) };
+          }
+          // github#160's shift is estimated from the pitch, not measured off the drawn
+          // dot, so row 0's edge does not land exactly on rOuter. REPORTED, NOT ASSERTED
+          // -- it is a different defect from this one and it points inward, into the gap
+          // between the rings, never at the inner band.
+          if (lk.o[0] - s.o.lo > outLo) outLo = lk.o[0] - s.o.lo;
+        }
+        // the inner band's LOWER edge is deliberately inside r0 -- github#35 keeps
+        // HUB_ROW0_FRAC of the hub -- so only its outer edge is a containment question
+        if (s.i && s.i.hi - lk.i[1] > inHi) inHi = s.i.hi - lk.i[1];
+      }
+      return { frames: R.length, lockStep: r3(lockStep),
+               outHi: r3(outHi), inHi: r3(inHi), outLo: r3(outLo),
+               atHi: Math.round(100 * atHi / Math.max(1, R.length - 1)), who: who,
+               lock: [r3(a.i[0]), r3(a.i[1]), r3(a.o[0]), r3(a.o[1])] };
+    })()`).then((r) => ({ label, ...r }));
+  };
+
+  const out = [];
+  const groups = await p.j(`__vg.groupOrder().filter(function (x) { return __vg.groupCount(x) > 0; })
+                             .map(function (x) { return [x, __vg.groupCount(x)]; })`);
+  const gBig = groups.reduce((a, b) => (b[1] > a[1] ? b : a), groups[0])[0];
+  const eye = (name) => `document.querySelector('[data-eye="' +
+    ${JSON.stringify("NAME")}.replace(/"/g, String.fromCharCode(92) + '"') + '"]').click();`
+    .replace(JSON.stringify("NAME"), JSON.stringify(name));
+
+  out.push(await run("largest folder toggle", eye(gBig)));
+  await p.eval(eye(gBig) + " void 0");
+  await settle(p);
+  await sleep(200);
+
+  const span = await p.j(`(function () { var f = document.querySelector("#vg-from");
+    return f ? { min: f.min, max: f.max } : null; })()`);
+  if (span && span.min && span.max) {
+    const lo = Date.parse(span.min), hi = Date.parse(span.max);
+    const from = new Date(hi - (hi - lo) * 0.15).toISOString().slice(0, 10);
+    out.push(await run("range change", `__vg.setRange(${JSON.stringify("PLACEHOLDER")}, null);`
+      .replace("PLACEHOLDER", from)));
+  }
+  await clearRange(p);
+
+  // One row is 1.0, so 0.05 is a twentieth of a row -- the float slop in reading a radius
+  // back out of a rendered dot, and nothing like the 2.5 units (399 graph units, 12% of
+  // the disc) the dominant-folder vault carried its outer band before github#161.
+  const TOL = 0.05;
+  const bad = out.filter((r) => !r.frames || r.lockStep > 0 || r.outHi > TOL || r.inHi > TOL);
+  return {
+    ok: !bad.length,
+    detail: out.map((r) => r.frames
+      ? `${r.label}: ${r.frames}f, locked [${r.lock.join(" ")}] step ${r.lockStep}, ` +
+        `outer past maxR ${r.outHi}` +
+        (r.who && r.outHi > TOL ? ` (at ${r.atHi}%, ${r.who.g} r ${r.who.r} + dot ${r.who.dot})` : "") +
+        `, inner past its edge ${r.inHi}; one row = 1.0. ` +
+        `Reported, not asserted: row 0 inside rOuter by ${r.outLo} (github#160's shift is ` +
+        `estimated, not measured off the drawn dot)`
+      : `${r.label}: nothing sampled`).join(" | "),
+  };
+}, { on: "all", clock: "real" });
+
 check("filtered to the bone, the disc stays drawable", async (p) => {
   await clearRange(p);
   await settle(p);
