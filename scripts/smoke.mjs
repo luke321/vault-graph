@@ -3344,11 +3344,12 @@ check("the rings hold their radii while a cascade walks", async (p) => {
         var rl = Math.hypot(at.x, at.y) / 160;
         var dot = __vg.renderer.scaleSize(d.size) * perPx / 160;
         var k = __vg.groupBand(__vg.groupOf(id));
-        var bb = seen[k] || (seen[k] = { lo: Infinity, hi: -Infinity, hiId: null, hiDot: 0 });
-        if (rl - dot < bb.lo) bb.lo = rl - dot;
+        var bb = seen[k] || (seen[k] = { lo: Infinity, hi: -Infinity, hiId: null, hiDot: 0,
+                                         loId: null, loDot: 0 });
+        if (rl - dot < bb.lo) { bb.lo = rl - dot; bb.loId = id; bb.loDot = dot; }
         if (rl + dot > bb.hi) { bb.hi = rl + dot; bb.hiId = id; bb.hiDot = dot; }
       });
-      return { lk: lk, seen: seen };
+      return { lk: lk, seen: seen, sh: __vg.lastShift || null };
     };
     var tick = function () {
       var s = snap();
@@ -3384,7 +3385,7 @@ check("the rings hold their radii while a cascade walks", async (p) => {
         });
       }
       // github#161
-      var outHi = 0, inHi = 0, atHi = 0, who = null, outLo = 0;
+      var outHi = 0, inHi = 0, atHi = 0, who = null, outLo = 0, atLo = 0, whoLo = null;
       for (var n = 0; n < R.length; n++) {
         var lk = R[n].lk, s = R[n].seen;
         if (s.o) {
@@ -3392,15 +3393,26 @@ check("the rings hold their radii while a cascade walks", async (p) => {
             outHi = s.o.hi - lk.o[1]; atHi = n;
             who = { g: __vg.groupOf(s.o.hiId), r: r3(s.o.hi - s.o.hiDot), dot: r3(s.o.hiDot) };
           }
-          // github#160 -- reported, not asserted
-          if (lk.o[0] - s.o.lo > outLo) outLo = lk.o[0] - s.o.lo;
+          if (lk.o[0] - s.o.lo > outLo) {
+            outLo = lk.o[0] - s.o.lo; atLo = n;
+            whoLo = { g: __vg.groupOf(s.o.loId), r: r3(s.o.lo + s.o.loDot), dot: r3(s.o.loDot),
+                      sh: R[n].sh };
+          }
         }
         // github#35 -- the inner band's lower edge is inside r0 on purpose
         if (s.i && s.i.hi - lk.i[1] > inHi) inHi = s.i.hi - lk.i[1];
       }
-      return { frames: R.length, lockStep: r3(lockStep),
+      // github#161 -- the two RESTING frames on their own: a resting layout that already
+      // sits outside its band is not something the cascade did, and not this issue's.
+      var restLo = 0;
+      [0, R.length - 1].forEach(function (n) {
+        var lk = R[n].lk, q = R[n].seen;
+        if (q.o && lk.o[0] - q.o.lo > restLo) restLo = lk.o[0] - q.o.lo;
+      });
+      return { frames: R.length, lockStep: r3(lockStep), restLo: r3(restLo),
                outHi: r3(outHi), inHi: r3(inHi), outLo: r3(outLo),
                atHi: Math.round(100 * atHi / Math.max(1, R.length - 1)), who: who,
+               atLo: Math.round(100 * atLo / Math.max(1, R.length - 1)), whoLo: whoLo,
                lock: [r3(a.i[0]), r3(a.i[1]), r3(a.o[0]), r3(a.o[1])] };
     })()`).then((r) => ({ label, ...r }));
   };
@@ -3430,16 +3442,25 @@ check("the rings hold their radii while a cascade walks", async (p) => {
 
   // github#161 -- one row is 1.0
   const TOL = 0.05;
-  const bad = out.filter((r) => !r.frames || r.lockStep > 0 || r.outHi > TOL || r.inHi > TOL);
+  // github#161 -- what the CASCADE does, which is what this issue is about: a resting
+  // layout that already sits outside its band is github#160's estimate being low, it is
+  // on develop too, and it is reported below rather than blamed on the walk.
+  const bad = out.filter((r) => !r.frames || r.lockStep > 0 ||
+                                r.outHi > TOL || r.inHi > TOL ||
+                                r.outLo - r.restLo > TOL);
   return {
     ok: !bad.length,
     detail: out.map((r) => r.frames
       ? `${r.label}: ${r.frames}f, locked [${r.lock.join(" ")}] step ${r.lockStep}, ` +
         `outer past maxR ${r.outHi}` +
         (r.who && r.outHi > TOL ? ` (at ${r.atHi}%, ${r.who.g} r ${r.who.r} + dot ${r.who.dot})` : "") +
-        `, inner past its edge ${r.inHi}; one row = 1.0. ` +
-        `Reported, not asserted: row 0 inside rOuter by ${r.outLo} (github#160's shift is ` +
-        `estimated, not measured off the drawn dot)`
+        `, outer inside rOuter ${r.outLo}` +
+        (r.whoLo && r.outLo > TOL
+          ? ` (at ${r.atLo}%, ${r.whoLo.g} r ${r.whoLo.r} - dot ${r.whoLo.dot}` +
+            ` shift ${JSON.stringify(r.whoLo.sh)})` : "") +
+        `, inner past its edge ${r.inHi}; one row = 1.0` +
+        `. Walk adds ${Math.round((r.outLo - r.restLo) * 1000) / 1000}; ` +
+        `the resting layout is already ${r.restLo} inside (github#160's estimate, on develop too)`
       : `${r.label}: nothing sampled`).join(" | "),
   };
 }, { on: "all", clock: "real" });

@@ -2291,12 +2291,16 @@ function mountVaultGraph(root, data, deps) {
     };
 
     // github#161, github#157, github#160 -- a walking band fits the ring it is locked into
-    /** @param {number} sp @param {number} rows @param {number} thick @returns {number} */
-    var fitWalk = function (sp, rows, thick) {
+    /** @param {number} sp @param {number} rows @param {number} thick @param {string} bk @returns {number} */
+    var fitWalk = function (sp, rows, thick, bk) {
       if (!given || !(thick > 0) || !(sp > 0)) return sp;
       var used = Math.ceil(rows - 1e-9);
       if (!(used > 0)) used = 1;
-      var cap = thick / (used - 1 + 2 * DOT_OF_PITCH);
+      if (used < 2) return sp;
+      var dot = rowDotUnits(sp, roomNow ? roomNow[bk] : 0);
+      var avail = thick - 2 * dot;
+      if (!(avail > 0)) return sp;
+      var cap = avail / (used - 1);
       return sp > cap ? cap : sp;
     };
     var thickI = geomLock ? (geomLock.rOuter - geomLock.r0) * INNER_FILL : 0;
@@ -2304,7 +2308,7 @@ function mountVaultGraph(root, data, deps) {
     if (geomLock && thickI > 0) {
       var si = solveBand(inner, r0, thickI, INNER_SCALE, SP_I);
       SP_I = si.sp; innerRows = si.rows;
-      SP_I = fitWalk(SP_I, given && given.depth ? given.depth.i : innerRows, thickI);
+      SP_I = fitWalk(SP_I, given && given.depth ? given.depth.i : innerRows, thickI, "i");
       // github#5
       inner.forEach(function (c) { c.rows = c.wsum > 0.0001 ? innerRows : 0; });
     } else {
@@ -2321,7 +2325,7 @@ function mountVaultGraph(root, data, deps) {
     if (geomLock && thickO > 0) {
       var so = solveBand(outer, rOuter, thickO, 1, SP_O);
       SP_O = so.sp; outerRows = so.rows;
-      SP_O = fitWalk(SP_O, given && given.depth ? given.depth.o : outerRows, thickO);
+      SP_O = fitWalk(SP_O, given && given.depth ? given.depth.o : outerRows, thickO, "o");
       outer.forEach(function (c) { c.rows = c.wsum > 0.0001 ? outerRows : 0; });
       maxR = rOuter + outerRows * SP_O;
       // github#157 -- take back only the overshoot; fitRatio frames by maxR
@@ -2457,6 +2461,18 @@ function mountVaultGraph(root, data, deps) {
              dbgLive: liveG, dbgSplit: splitOf, presMax: presMax,
              rows: { i: depthOf(inner, innerRows, "i"),
                      o: depthOf(outer, outerRows || REF_ROWS, "o") } };
+  }
+
+  // github#160, github#161 -- the largest dot row 0 can draw, in UNIT-relative units.
+  // Shrinking the pitch does NOT shrink it: the room term cancels the pitch term over most
+  // of the range, so a band that will not fit has to lose rows, never the dot's clearance.
+  /** @param {number} sp @param {number} room @returns {number} */
+  function rowDotUnits(sp, room) {
+    if (!(sp > 0) || !(room > 1)) return 0;
+    var pit = UNIT * sp;
+    var hi = DOT_OF_PITCH * Math.min(pit, UNIT * DOT_MAX_SPREAD);
+    var f = Math.min(room * 0.92 / pit, DOT_ROOM_MAX);
+    return hi * f / UNIT;
   }
 
   var REPACK_BELOW = 0.55;
@@ -2771,17 +2787,20 @@ function mountVaultGraph(root, data, deps) {
     var insetO = 0;
     var roomO = roomNow ? roomNow.o : bandOf("o").room;
     if (plan.sp > 0 && plan.rows && plan.rows.o > 0 && roomO > 1) {
-      var pitO = UNIT * plan.sp;
-      var hiO = DOT_OF_PITCH * Math.min(pitO, UNIT * DOT_MAX_SPREAD);
-      var fO = Math.min(roomO * 0.92 / pitO, DOT_ROOM_MAX);
-      insetO = hiO * fO / UNIT;
+      insetO = rowDotUnits(plan.sp, roomO);
       // github#161
       var spanO = (plan.rows.o - 1) * plan.sp;
       if (maxPlacedO > plan.rOuter && maxPlacedO - plan.rOuter > spanO) spanO = maxPlacedO - plan.rOuter;
       // github#161
       var ceilO = roomNow && geomLock && geomLock.maxR > 0 ? geomLock.maxR : plan.maxR;
+      // github#161 -- when the band cannot hold two clearances, HALVE what is left rather
+      // github#161 -- than dropping the shift: insetO = 0 puts row 0's CENTRE on rOuter and
+      // github#161 -- its dot 1.8 units into the gap, which is the github#160 defect again.
       var slackO = (ceilO - plan.rOuter) - spanO - 2 * insetO;
-      if (slackO < 0) insetO = Math.max(0, insetO + slackO);
+      if (slackO < 0) insetO = Math.max(0, ((ceilO - plan.rOuter) - spanO) / 2);
+      // github#161
+      lastShift = { rOuter: plan.rOuter, maxR: plan.maxR, ceil: ceilO, sp: plan.sp,
+                    rows: plan.rows.o, placed: maxPlacedO, span: spanO, inset: insetO };
       if (insetO > 0) {
         plan.cells.forEach(function (c) {
           if (c.inner) return;
@@ -3962,6 +3981,9 @@ function mountVaultGraph(root, data, deps) {
   /** @type {Record<string, string> | null} */
   var lastBand = null;
   var lastMaxR = 0;
+  // github#161
+  /** @type {Record<string, number> | null} */
+  var lastShift = null;
   /** @type {Record<string, number>} */
   var dotFit = dict();
 
@@ -10868,6 +10890,7 @@ function mountVaultGraph(root, data, deps) {
                     bandRef: function () { return geomLock ? geomLock.bandR : null; },
                     // github#161 -- the locked annuli as drawn; the suite asserts on these
                     lockedRings: lockedRings,
+                    get lastShift() { return lastShift; },
                     // github#161 -- which ring a group is locked into, for a per-band measure
                     groupBand: /** @param {string} g */ function (g) {
                       return bandLock && bandLock[String(g)] ? "i" : "o";
