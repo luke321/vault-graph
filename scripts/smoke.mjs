@@ -3348,7 +3348,7 @@ check("the rings hold their radii while a cascade walks", async (p) => {
         if (rl - dot < bb.lo) bb.lo = rl - dot;
         if (rl + dot > bb.hi) { bb.hi = rl + dot; bb.hiId = id; bb.hiDot = dot; }
       });
-      return { lk: lk, seen: seen, sh: __vg.lastShift };
+      return { lk: lk, seen: seen };
     };
     var tick = function () {
       var s = snap();

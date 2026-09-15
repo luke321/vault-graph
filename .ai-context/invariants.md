@@ -473,12 +473,20 @@ placed**; and its ceiling is the locked ring rather than the plan's shorter reac
 plans only** — every resting layout measured **0.4 to 1.0 units inside** its ring on all four
 fixtures, so the resting path has nothing to fix. All four goldens unmoved is the evidence.
 
-| fixture | outer band past `maxR`, worst frame | after |
+Measured by the check itself, with only the layout fix reverted — the overlay and
+`lockedRings()` left in place, or the check has nothing to call and fails vacuously. Worst
+frame of a cascade, lattice units, largest-folder toggle / range change:
+
+| fixture | outer band past `maxR`, before | after |
 |---|---|---|
-| demo | 0.042 | **0** |
-| 10k | 0 | **0** |
-| dominant-folder | **2.492** (399 graph units, 12% of the disc) | **0** |
-| tag | **9.585** | **0** |
+| demo | 0.471 / 0.440 | **0 / 0** |
+| 10k | 0.299 / 0.703 | **0 / 0** |
+| dominant-folder | **2.273 / 1.938** (364 graph units, 11% of the disc) | **0 / 0** |
+| tag | **4.752 / 9.593** | **0 / 0** |
+
+The worst frame is consistently **75–92% through the walk**, not at either end: both endpoints
+are resting plans and those are inside the ring, so the bulge is entirely a thing the
+interpolation does between them.
 
 **Reported by the check, not asserted.** github#160 *estimates* row 0's dot radius from the pitch
 rather than measuring the drawn dot, and the two disagree — **1.338 estimated against 0.487

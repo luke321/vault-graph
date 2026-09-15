@@ -2782,8 +2782,6 @@ function mountVaultGraph(root, data, deps) {
       var ceilO = roomNow && geomLock && geomLock.maxR > 0 ? geomLock.maxR : plan.maxR;
       var slackO = (ceilO - plan.rOuter) - spanO - 2 * insetO;
       if (slackO < 0) insetO = Math.max(0, insetO + slackO);
-      lastShift = { rOuter: plan.rOuter, maxR: plan.maxR, ceil: ceilO, sp: plan.sp,
-                    rows: plan.rows.o, placed: maxPlacedO, span: spanO, inset: insetO };
       if (insetO > 0) {
         plan.cells.forEach(function (c) {
           if (c.inner) return;
@@ -3964,9 +3962,6 @@ function mountVaultGraph(root, data, deps) {
   /** @type {Record<string, string> | null} */
   var lastBand = null;
   var lastMaxR = 0;
-  // github#161
-  /** @type {Record<string, number> | null} */
-  var lastShift = null;
   /** @type {Record<string, number>} */
   var dotFit = dict();
 
@@ -10873,7 +10868,6 @@ function mountVaultGraph(root, data, deps) {
                     bandRef: function () { return geomLock ? geomLock.bandR : null; },
                     // github#161 -- the locked annuli as drawn; the suite asserts on these
                     lockedRings: lockedRings,
-                    get lastShift() { return lastShift; },
                     // github#161 -- which ring a group is locked into, for a per-band measure
                     groupBand: /** @param {string} g */ function (g) {
                       return bandLock && bandLock[String(g)] ? "i" : "o";
