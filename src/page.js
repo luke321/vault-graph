@@ -5520,26 +5520,10 @@ function mountVaultGraph(root, data, deps) {
     })();
   }
 
-  // github#166 -- did the room the fill used survive the layout it made?
-  function roomSettled() {
-    if (!lastFill) return true;
-    var ok = true;
-    ["i", "o"].forEach(function (k) {
-      var q = lastFill[k];
-      if (!q || !(q.room > 1)) return;
-      var now = bandOf(k).room;
-      if (!(now > 1)) return;
-      if (Math.abs(now - q.room) > 1e-9 * now) ok = false;
-    });
-    return ok;
-  }
-
   /** @param {boolean} [animate] @param {() => void} [done] */
   function applyLayout(animate, done) {
     traceTag("rest");
     var targets = ringsLayout();
-    // github#166 -- a cold first pass lands beside its own fixed point
-    if (targets && !roomNow && !roomSettled()) targets = ringsLayout() || targets;
     traceTag("");
     if (!targets) { if (done) done(); return; }
     if (animate) animateTo(targets, done);
