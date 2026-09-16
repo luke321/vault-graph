@@ -10,6 +10,7 @@ import { createServer } from "node:net";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { attach } from "./cdp.mjs";
+import { countNotes } from "./suite-stamp.mjs";
 import { leftWindowArgs } from "./screen.mjs";
 import { keepFocus } from "./focus.mjs";
 
@@ -31,7 +32,8 @@ const FIXTURES = [
 ];
 
 const GENERATORS = ["make-demo-vault.mjs", "make-test-vault.mjs", "make-shape-vault.mjs"];
-const FIXTURE_FORMAT = 1;
+// github#106, github#166 -- the number smoke.mjs hashes, or these are not its vaults
+const FIXTURE_FORMAT = 2;
 
 function storeRoot() {
   const g = spawnSync("git", ["-C", ROOT, "rev-parse", "--git-common-dir"], { encoding: "utf8" });
@@ -75,8 +77,10 @@ function buildFixture(fx) {
     const gen = spawnSync(process.execPath, [join(HERE, fx.script), ...fx.args, "--out", dir],
       { encoding: "utf8" });
     if (gen.status !== 0) throw new Error(`${fx.script} failed:\n${gen.stderr || ""}`);
+    // github#106, github#166 -- the five fields smoke.mjs writes, not two
     writeFileSync(join(dir, ".stamp.json"),
-      JSON.stringify({ digest, day: new Date().toISOString().slice(0, 10) }, null, 2) + "\n");
+      JSON.stringify({ digest, day: new Date().toISOString().slice(0, 10),
+                       script: fx.script, args: fx.args, notes: countNotes(dir) }, null, 2) + "\n");
   }
   const htmlDir = mkdtempSync(join(tmpdir(), `vg-snap-${fx.name}-`));
   const htmlPath = join(htmlDir, "vault-graph.html");
