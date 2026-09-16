@@ -2615,11 +2615,15 @@ function mountVaultGraph(root, data, deps) {
     };
     /** @type {Record<string, FillDbg>} */
     var fillDbg = dict();
+    // github#166 -- one walk per band, not one per fit pass
+    /** @type {Record<string, number>} */
+    var sizeMax = dict();
     // github#166 -- one call site; the passes below redo exactly this
     /** @param {Cell[]} list @param {string} bk @param {number} thick @param {number} scale
      *  @param {number} rows @returns {boolean} */
     var fitBand = function (list, bk, thick, scale, rows) {
-      var q = fillBand(thick, rows, roomAt(bk), scale, sizeMaxOf(list),
+      if (sizeMax[bk] === undefined) sizeMax[bk] = sizeMaxOf(list);
+      var q = fillBand(thick, rows, roomAt(bk), scale, sizeMax[bk],
                        (bk === "i" ? SP_I : SP_O) * scale,
                        given && given.dotCap ? given.dotCap[bk] : 0);
       if (q && q.sp > 0) { if (bk === "i") SP_I = q.sp; else SP_O = q.sp; }
@@ -2652,8 +2656,8 @@ function mountVaultGraph(root, data, deps) {
       SP_O = so.sp; outerRows = so.rows;
       var fitO = fitBand(outer, "o", thickO, 1, rowsUsedOf(outer, outerRows));
       outer.forEach(function (c) { c.rows = c.wsum > 0.0001 ? outerRows : 0; });
-      // github#157, github#166 -- the fill reaches maxR by construction, so that is the extent
-      maxR = fitO ? geomLock.maxR : rOuter + outerRows * SP_O;
+      maxR = rOuter + outerRows * SP_O;
+      // github#157 -- take back only the overshoot; fitRatio frames by maxR
       if (maxR > geomLock.maxR) maxR = geomLock.maxR;
     } else {
       outer.forEach(function (c) {
@@ -2784,6 +2788,9 @@ function mountVaultGraph(root, data, deps) {
         if (!again) break;
         placeAll();
       }
+      // github#157, github#166 -- only a band with two rows reaches maxR; an
+      // github#157 -- emptied one keeps the smaller radius the camera zooms to
+      if (fitO && rowsFilledOf(outer) > 1) maxR = geomLock.maxR;
     }
 
     /** @param {Cell[]} list */
@@ -4870,7 +4877,6 @@ function mountVaultGraph(root, data, deps) {
     var spSrcB = { i: 1, o: 1 };
     /** @type {BandNum} */
     var spDstB = { i: 1, o: 1 };
-    /** @type {BandNum} */
     // github#66, github#166
     /** @type {BandNum} */
     var dotCapB = { i: 0, o: 0 };
