@@ -632,6 +632,59 @@ first and last frame, and to **one pitch** on every frame in between. Across all
 both triggers: at rest 0.000 on every one, worst mid-walk exactly 1.000 of a pitch, crossings
 0.023 outer, 0 inner, 0 hub.
 
+#### OPEN, AND THE REASON THIS BRANCH IS NOT MERGEABLE AS IT STANDS
+
+**Making the pitch a function of the measured room makes the LAYOUT a function of its own
+history, and this repo's laws forbid that.** It is the same rule the `pxPerUnit` term broke, one
+level deeper: not the window this time, but which layouts ran before.
+
+`bandOf(k).room` is written from **two different places that mean two different things**:
+
+| written at | by | what it is |
+|---|---|---|
+| `ringsLayout`, end of a resting pass | `pick(roomPool)` | the `ROOM_PCTL` percentile of the arc each dot actually got, measured off the render |
+| the cascade's landing frame | `roomDstB[k]` | the destination plan's `roomOf()`, a 10th percentile off the plan's own slots |
+
+Before github#166 that field fed only `dotPx`, so the two definitions disagreed by a little and it
+showed up as nothing: *a live rebuild lands on the layout a fresh relayout gives* passes on
+develop, and reports **0 resized**. github#166 makes the same field set the **pitch**, so the
+disagreement becomes a different disc:
+
+| check | fixtures | measured |
+|---|---|---|
+| *a live rebuild lands on the layout a fresh relayout gives* | demo, 10k | 314 and 5735 notes moved, 0 resized, 0 band flips |
+| *tags: a live rebuild in the tag disc refiles the arrival…* | demo, shape, tag, spec | up to 1389 moved |
+| *tags: the switch lands where a fresh relayout would, and comes home exactly* | tag | fails |
+| *layout matches its golden snapshot* | tag, and spec in a shared session | 803 notes, worst 0.7 graph units |
+
+Every one is the same sentence: **two paths to the same data, two discs.** The golden failures are
+the same thing and must NOT be answered by re-recording — a golden recorded from one path would
+simply fail from the other next session.
+
+**Three fixes were tried and measured, and none of them is the answer:**
+
+- **Converge the resting layout** (re-run `ringsLayout` when the room it used is not the room it
+  produced). Fixes nothing here — the rebuild checks fail by the *same* 314 and 5735 — and it was
+  removed, because the golden reproducibility it was added for turned out to be the `pxPerUnit`
+  term.
+- **Drop the placement-driven row count.** Also fails by the same 314 and 5735, so the row-count
+  iteration is not the cause.
+- **Feed the fill the plan's own `roomOf()` instead**, which IS history-free. It is a different
+  quantity — a 10th percentile off the plan, against `pick`'s `ROOM_PCTL` off the render — so it
+  under-reserves, and *a band fills the ring it is locked into* fails instead.
+
+**What it probably wants** is for the two writers above to agree: either the cascade's landing
+stops writing `roomDstB` and lets the final `ringsLayout` measure the room like any other resting
+pass, or the fill reads a room defined once and measured the same way on both paths. Both change
+what `dotPx` sees as well, so both need github#66's dot laws re-measured with them — which is a
+decision about the cascade, not about this ticket, and it is the maintainer's.
+
+**Also open, from the same root:** *the disc's density follows the notes on screen* read
+**square 2.05 against a 1.75 bound** at 27 of 765 shown on the dominant-folder vault in one full
+run (and passed in others). github#157 measured that bound with walls at each end. Filling a
+locked annulus with a fixed row count and holding a cell-shape bound are in direct tension, which
+is what the issue meant by "it rewrites github#157's resting margin rule".
+
 #### Measured — dominant-folder fixture, toggling `projects` (738 of 954)
 
 Every animation frame sampled. Signed gap from the drawn hull to the locked ring, **+ past it,
