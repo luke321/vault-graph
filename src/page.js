@@ -2615,18 +2615,24 @@ function mountVaultGraph(root, data, deps) {
     };
     /** @type {Record<string, FillDbg>} */
     var fillDbg = dict();
+    // github#166 -- one call site; the passes below redo exactly this
+    /** @param {Cell[]} list @param {string} bk @param {number} thick @param {number} scale
+     *  @param {number} rows @returns {boolean} */
+    var fitBand = function (list, bk, thick, scale, rows) {
+      var q = fillBand(thick, rows, roomAt(bk), scale, sizeMaxOf(list),
+                       given && given.dotCap ? given.dotCap[bk] : 0);
+      if (q && q.sp > 0) { if (bk === "i") SP_I = q.sp; else SP_O = q.sp; }
+      insetAt[bk] = q ? q.inset : 0;
+      fillDbg[bk] = { rows: rows, sp: bk === "i" ? SP_I : SP_O, dot: q ? q.dot : 0,
+                      inset: insetAt[bk], room: roomAt(bk), thick: thick, scale: scale,
+                      placed: 0 };
+      return !!q;
+    };
     if (geomLock && thickI > 0) {
       var si = solveBand(inner, r0, thickI, INNER_SCALE, SP_I);
       SP_I = si.sp; innerRows = si.rows;
       // github#166
-      var fitI = fillBand(thickI, rowsUsedOf(inner, innerRows),
-                          roomAt("i"), INNER_SCALE, sizeMaxOf(inner),
-                          given && given.dotCap ? given.dotCap.i : 0);
-      if (fitI && fitI.sp > 0) SP_I = fitI.sp;
-      if (fitI) insetAt.i = fitI.inset;
-      fillDbg.i = { rows: rowsUsedOf(inner, innerRows), sp: SP_I,
-                    dot: fitI ? fitI.dot : 0, inset: insetAt.i, room: roomAt("i"),
-                    thick: thickI, scale: INNER_SCALE, placed: 0 };
+      var fitI = fitBand(inner, "i", thickI, INNER_SCALE, rowsUsedOf(inner, innerRows));
       // github#5
       inner.forEach(function (c) { c.rows = c.wsum > 0.0001 ? innerRows : 0; });
     } else {
@@ -2643,14 +2649,7 @@ function mountVaultGraph(root, data, deps) {
     if (geomLock && thickO > 0) {
       var so = solveBand(outer, rOuter, thickO, 1, SP_O);
       SP_O = so.sp; outerRows = so.rows;
-      var fitO = fillBand(thickO, rowsUsedOf(outer, outerRows),
-                          roomAt("o"), 1, sizeMaxOf(outer),
-                          given && given.dotCap ? given.dotCap.o : 0);
-      if (fitO && fitO.sp > 0) SP_O = fitO.sp;
-      if (fitO) insetAt.o = fitO.inset;
-      fillDbg.o = { rows: rowsUsedOf(outer, outerRows), sp: SP_O,
-                    dot: fitO ? fitO.dot : 0, inset: insetAt.o, room: roomAt("o"),
-                    thick: thickO, scale: 1, placed: 0 };
+      var fitO = fitBand(outer, "o", thickO, 1, rowsUsedOf(outer, outerRows));
       outer.forEach(function (c) { c.rows = c.wsum > 0.0001 ? outerRows : 0; });
       // github#157, github#166 -- the fill reaches maxR by construction, so that is the extent
       maxR = fitO ? geomLock.maxR : rOuter + outerRows * SP_O;
@@ -2746,12 +2745,45 @@ function mountVaultGraph(root, data, deps) {
       return out;
     }
 
-    cells.forEach(function (c) {
-      var base = c.inner ? r0 : rOuter;
-      var rf = rowsOf ? rowsOf(c) : c.rows;
-      if (!rf) rf = c.rows;
-      c.slots = placeCell(c, rf, base, c.inner ? innerRows : outerRows);
-    });
+    var placeAll = function () {
+      cells.forEach(function (c) {
+        var base = c.inner ? r0 : rOuter;
+        var rf = rowsOf ? rowsOf(c) : c.rows;
+        if (!rf) rf = c.rows;
+        c.slots = placeCell(c, rf, base, c.inner ? innerRows : outerRows);
+      });
+    };
+    placeAll();
+    // github#166 -- placement and pitch feed back; iterate to a fit
+    /** @param {Cell[]} list */
+    var rowsFilledOf = function (list) {
+      var m = -1;
+      list.forEach(function (c) {
+        (c.slots || []).forEach(function (sl) { if (sl.row > m) m = sl.row; });
+      });
+      return m + 1;
+    };
+    if (fitI || fitO) {
+      var bestI = 0, bestO = 0;
+      for (var pass = 0; pass < FILL_PASSES; pass++) {
+        var reI = fitI ? rowsFilledOf(inner) : 0;
+        var reO = fitO ? rowsFilledOf(outer) : 0;
+        if (reI > bestI) bestI = reI;
+        if (reO > bestO) bestO = reO;
+        // github#166 -- a finer pitch only pulls rows in, so the deepest is safe
+        var last = pass === FILL_PASSES - 1;
+        var wantI = last ? bestI : reI, wantO = last ? bestO : reO;
+        var again = false;
+        if (fitI && wantI > 0 && wantI !== Math.ceil(fillDbg.i.rows - 1e-9)) {
+          fitBand(inner, "i", thickI, INNER_SCALE, wantI); again = true;
+        }
+        if (fitO && wantO > 0 && wantO !== Math.ceil(fillDbg.o.rows - 1e-9)) {
+          fitBand(outer, "o", thickO, 1, wantO); again = true;
+        }
+        if (!again) break;
+        placeAll();
+      }
+    }
 
     /** @param {Cell[]} list */
     var roomOf = function (list) {
@@ -2849,6 +2881,9 @@ function mountVaultGraph(root, data, deps) {
     var P = (lo + hi) / 2;
     return { sp: P / scale, dot: dotAt(P), inset: dotAt(P) };
   }
+
+  // github#166 -- three is not enough on the 10k inner band; six is
+  var FILL_PASSES = 6;
 
   var REPACK_BELOW = 0.55;
 
