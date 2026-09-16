@@ -508,17 +508,27 @@ Two degenerate cases, both answered by the shape of `g` rather than by a special
 - **A one-row band** spans nothing, so no pitch stretches it to both rings. `fillBand` centres it
   (`offset = T / 2`) and claims no fit; the check skips it rather than asserting one.
 
-**`rowDotUnits` is the whole ramp now, and two terms in it were wrong.** Both measured on the
-dominant-folder fixture:
+**`rowDotUnits` reads the whole ramp now**, and what it must not read is the point.
 
-| term | was | is | why it mattered |
+**NEVER a renderer or a window term. This is github#160's rule and github#166 broke it and put it
+back.** `DOT_MAX_SPREAD` and `DOT_MIN_PX` cap the ramp in **pixels**, and develop compared
+`DOT_MAX_SPREAD` against a **lattice** pitch — genuinely a unit error, and it did under-reserve:
+with `projects` hidden the offset reserved **1.180** against a drawn **1.451**, putting row 0's
+dot 0.27 through `rOuter`. The obvious repair is to convert, via a `pxPerUnit()` off
+`graphToViewport`. Do not: the arithmetic is right and the idea is wrong, because it makes the
+resting pitch a function of how big the window is. It was caught by the golden snapshots refusing
+to reproduce — `update-layout-snapshots.mjs` drives 1600×1000 and `smoke.mjs` drives a grid slot,
+so spec-vault laid out two ways, **42 of 287 notes, 0.2 graph units, reproducible to the digit**.
+
+Both px terms are therefore **dropped rather than converted**:
+
+| term | was | is | why |
 |---|---|---|---|
-| spread cap | `min(P, DOT_MAX_SPREAD)` | `min(P, DOT_MAX_SPREAD · UNIT / ppu)` | `DOT_MAX_SPREAD` caps the ramp in **pixels**, and the page draws **16.8px per lattice unit** there, so the two thresholds sat a factor of ten apart |
-| ramp position | read at `NODE_MAX` | read at the band's own largest size | filtered to its 25 biggest notes that band tops out at size **8.99**, not 11 |
+| spread cap | `min(P, DOT_MAX_SPREAD)` | gone | it can only make the DRAWN dot smaller than `DOT_OF_PITCH · P`, so omitting it over-reserves — the side that cannot put a dot through a ring |
+| `DOT_MIN_PX` floor | never in it | stays out | a 1.5px visibility floor on the smallest dots the page draws; reserving band for it reserves for something no reader can see, and it is the one term that would need the window |
+| ramp position | read at `NODE_MAX` | read at the band's own largest node size | filtered to its 25 biggest notes that band tops out at size **8.99**, not 11 — half a lattice unit of band nothing ever drew into |
 
-The first made the reservation too small wherever the pitch widened — with `projects` hidden it
-reserved **1.180** against a drawn **1.451**, so row 0's dot crossed `rOuter` by 0.27. The second
-made it too large: half a lattice unit of band nothing ever drew into.
+What is left is `DOT_OF_PITCH · P · u · f`, and every term in it comes from the data.
 
 **github#66 is a premise of the fill, not a cap applied after it.** A walking dot never outgrows
 the larger of its two resting sizes, so the space reserved for it may not either. The room
@@ -527,10 +537,30 @@ reserving against that room asked for a dot **three times** what the cascade per
 edges a unit and a half off rings the drawn dots could never have reached. Both endpoint plans
 already solved their own dot, so the walk takes `max` of the two rather than re-deriving one.
 
+**The resting layout is a fixed point, not one pass short of one.** The fill solves against the
+room the *last* layout measured, so the first pass on a cold page lands beside its own answer —
+measured on spec-vault at `?rest`, pitch **1.3011** settling to **1.3013** on the next pass and
+never moving again. `applyLayout` re-runs once when the room it used is not the room it produced.
+It fires on a cold start and not afterwards, and never during a cascade, where `roomNow` is given.
+This is what makes the ticket's "apply at rest as well as while walking" true rather than nearly
+true.
+
 **Reserve for the depth PLACEMENT uses, which is the deepest CELL and not the band.** The band's
 interpolated depth and the deepest cell's own depth part company whenever a different cell is
 deepest at each end of a walk. The band then reserved a row nothing was ever placed into — a whole
-pitch of empty band, measured at **2.55 units** on the sortspec fixture before `rowsUsedOf()`.
+pitch of empty band, measured at **2.55 units** on the sortspec fixture.
+
+The deepest cell's depth is not enough either: `placeCell` **centres** a cell thinner than its
+band, so a shrinking cell pulls its rows inward and the depth it was handed is not the depth it
+fills — 1.157 units at 87% of a folder toggle on the demo vault. So the fill places, reads the
+deepest row actually filled, solves again on that, and re-places. That does not settle in one go
+either: a deeper reserve is a finer pitch, a finer pitch changes which row a note's cumulative
+weight lands it in, and the count moves again. Three passes leave the 10k vault's inner band a
+pitch short during a range change; **six settle all five fixtures**, and the loop exits the moment
+nothing changes, so the common frame costs one placement exactly as before. `FILL_PASSES` is a
+quality knob and not a correctness one — the last pass reserves the **deepest count seen** rather
+than the latest, and since a finer pitch only pulls rows in, over-reserving is the side that
+cannot cross a ring.
 
 **`maxR` is `geomLock.maxR` whenever the fill applies.** github#157 took back "only the overshoot"
 because `CELL_FILL_MAX` could leave margin *or* overshoot; the fill leaves neither, so the band
@@ -544,6 +574,7 @@ This distinction is the one to keep, because conflating them is what github#160 
 - The **reserved extent** is the fill's own arithmetic and is exact. *a band fills the ring it is
   locked into, and never leaves it* asserts `|offset − d| ≤ 0.02` and
   `|placed + offset + d − farRing| ≤ 0.02` on **every animation frame**, on all five fixtures.
+  It measures **0.000** on both, on every one.
 - The **drawn hull** sits inside it. The largest dot a band *may* draw is bounded per note by its
   cell's room, its edge clearance, `hubRow0` and github#66's cap — none of which a band-level
   solve can see. So the hull is asserted for **containment only**: nothing crosses a ring in
@@ -569,9 +600,9 @@ Every animation frame sampled. Signed gap from the drawn hull to the locked ring
 | rest, inner hi | −0.665 | **−0.205** |
 | rest, outer lo | +0.005 | +0.007 |
 | rest, outer hi | −0.432 | **−0.191** |
-| walk, worst outer lo | −0.844 | +1.293 |
-| walk, worst outer hi | **+2.447** | −2.954 |
-| biggest frame-to-frame step | 0.997 | 0.785 |
+| walk, worst outer lo | −0.844 | +1.290 |
+| walk, worst outer hi | **+2.447** | −2.953 |
+| biggest frame-to-frame step | 0.997 | **0.605** |
 
 The inner band was a flat −0.357 / −0.665 on **every** frame including rest, because no offset was
 ever applied to it (github#160 was outer-band only). The walk's **+2.447** was 2.4 units of dot
@@ -580,7 +611,7 @@ fixture, in either direction.
 
 **The "jump" is real, and it is not `settle()`.** The issue left open whether the end of the walk
 is a discontinuity or a fast ramp, and asked for per-frame sampling. Sampled every frame: the
-biggest single-frame step in the outer hull is **0.785 units at 86% of the walk** — not at the
+biggest single-frame step in the outer hull is **0.605 units at 85% of the walk** — not at the
 landing frame. It is the band's row count dropping (3 → 2), which doubles the pitch and
 redistributes the middle row. It is present on develop too, at **0.997**, so the fill reduces it
 rather than causing it. *the last frame of a cascade is the resting layout* still reads
@@ -588,7 +619,32 @@ rather than causing it. *the last frame of a cascade is the resting layout* stil
 inside the walk, not at its end.
 
 **All five goldens move**, because every resting layout changes pitch. They were re-recorded as a
-separate, deliberate commit with the numbers above — not to make a check pass.
+separate, deliberate commit — not to make a check pass — with the shift measured first:
+
+| fixture | notes | moved > 0.1 | worst note, radius | angle |
+|---|---|---|---|---|
+| demo-vault | 1403 | 1402 | 3776.7 → 3979.9 | 88.9 → 88.9 |
+| test-vault | 10002 | 10002 | 8182.7 → 8204.9 | 159.4 → 161.7 |
+| shape-vault | 954 | 954 | 2880.9 → 3074.1 | 140.4 → 140.5 |
+| tag-vault | 891 | 891 | 1286.8 → 1494.6 | −6.6 → −6.4 |
+| spec-vault | 287 | 287 | 442.5 → 678.0 | 100.8 → 97.8 |
+
+**Band unchanged on every fixture** and the angles hold to a tenth of a degree, which is the
+signature this change should have: a radial re-lattice and nothing else. The serpentine is
+untouched — the wedge order and the row a note sits in are decided before the pitch is.
+
+#### One thing found on the way, and fixed with it — github#106
+
+`update-layout-snapshots.mjs` hashes `FIXTURE_FORMAT` into the fixture digest exactly as
+`smoke.mjs` does, and was still on **1** while `smoke.mjs` went to **2** in github#106. The two
+therefore resolve **different directories in the shared store for the same fixture**, so every
+golden had been recorded against a vault the suite never opens. The store carries both copies of
+all five. It went unnoticed because the generators are deterministic and the pinned ones take
+`--end`, so the two copies hold the same notes and a golden recorded against either matched — and
+it stops being harmless the moment a digest is new, because `currentFixtures()` takes the
+lexicographically first directory and hands it to every worktree. The stamp it wrote was
+`{digest, day}`, which `checkFixture` reads as corrupt for want of `notes` and `describeFixture`
+reads as unpinned for want of `args`; it writes all five fields now.
 
 ### A dot held under a stale endpoint cap, released on the landing frame — github#159
 
