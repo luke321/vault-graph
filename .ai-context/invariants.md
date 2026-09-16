@@ -505,8 +505,10 @@ Two degenerate cases, both answered by the shape of `g` rather than by a special
 - **A band that cannot host its rows.** It never arises. The issue asked whether to drop a row or
   cap the dot when `T − 2d ≤ 0`; the root simply shrinks the dot *along with* the pitch, because
   below the room clamp `d` is proportional to `P`.
-- **A one-row band** spans nothing, so no pitch stretches it to both rings. `fillBand` centres it
-  (`offset = T / 2`) and claims no fit; the check skips it rather than asserting one.
+- **A one-row band** spans nothing, so no pitch stretches it to both rings, and it is therefore
+  **left exactly where it is** — no pitch, no offset. The check skips it rather than asserting one.
+  Two other answers were tried and both cost more than they bought, which is why this one is
+  written down: see *a one-row band is not moved* below.
 
 **`rowDotUnits` reads the whole ramp now**, and what it must not read is the point.
 
@@ -588,6 +590,47 @@ Reserving the same `d` at both ends therefore leaves more slack at the top than 
 `dotPx`'s full per-note cap stack reproduced inside the planner, or the drawn radius measured and
 fed back — and the feedback loop oscillates at the 2.04 gain above. That is a design decision with
 a cost, and it is the maintainer's.
+
+#### A one-row band is not moved — github#65
+
+The first answer was to **centre** it: no pitch reaches both rings, so the midpoint is as good as
+anywhere. It is not. **The tangential step grows with the radius and the dot does not**, so walking
+a row half a band outward starves it. Measured on the dominant-folder vault filtered to its six
+orphans: radius **4.823 → 6.935**, and *filtered to the bone, the disc stays drawable* read dots
+collapsed to **0.10** of the step against the **0.15** floor github#65 measured. The second answer
+— offset it by its own dot radius, like any other row 0 — still reached only 0.13.
+
+**Both states that broke are one row of six notes, and both sat at exactly 0.15 on develop**: the
+dominant-folder vault hidden through `refs` (0.147) and the tag vault at the last 0.5% (0.150).
+The dot is byte-identical before and after; only the radius moves. There is no margin there to
+spend, so a one-row band takes no offset at all.
+
+**What that keeps is github#160's defect**, in the one place this ticket does not fix it: a
+one-row band's row 0 has its *centre* on the ring, so its dot hangs a radius inside — and past
+github#35's `HUB_ROW0_FRAC` allowance, measured 0.708 against a permitted 0.386. It is
+pre-existing, unchanged here, and **reported rather than traded for a measured legibility floor**.
+Closing it means either accepting `ds` at 0.13 for a one-row band, or exempting a one-row band
+from the floor (it has no neighbouring row to be legible against), and that is a maintainer's
+call, not a worker's.
+
+#### What the fill holds WHILE WALKING, and what it does not
+
+The reserve is solved from the row count placement reaches, and placement's count moves when the
+pitch does. At rest that settles — the reserved extent lands on both rings at **0.000**, on all
+five fixtures. Mid-walk it sometimes does not: **reserving three rows fills two and reserving two
+fills three**, so no integer reserve is a fixed point. Measured at six passes and at ten; more
+passes do not help, because there is nothing to converge to.
+
+The fill then reserves the **deeper** of the two. That is short by exactly one pitch and never
+over, so it is never a crossing — which is the whole reason the tie-break is the deepest count
+seen rather than the latest. `FILL_PASSES = 6` is therefore a quality knob: three leaves the 10k
+inner band a pitch short during a range change, six settles everything that has a fixed point, and
+anything without one degrades to a short band.
+
+**The check says this rather than averaging it away.** The reserved extent is held to 0.02 at the
+first and last frame, and to **one pitch** on every frame in between. Across all five fixtures and
+both triggers: at rest 0.000 on every one, worst mid-walk exactly 1.000 of a pitch, crossings
+0.023 outer, 0 inner, 0 hub.
 
 #### Measured — dominant-folder fixture, toggling `projects` (738 of 954)
 
