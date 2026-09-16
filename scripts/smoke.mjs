@@ -3570,6 +3570,167 @@ check("the last frame of a cascade is the resting layout", async (p) => {
   };
 }, { on: WALK, clock: "real" });
 
+// github#166
+check("a band fills the ring it is locked into, and never leaves it", async (p) => {
+  await clearRange(p);
+  await settle(p);
+  await sleep(200);
+
+  // github#166 -- per frame: the four edges, and what was reserved
+  const sampler = `(function (trigger) {
+    window.__BF = { rows: [], done: false };
+    var snap = function () {
+      var lk = __vg.lockedRings();
+      if (!lk) return null;
+      var a0 = __vg.renderer.graphToViewport({ x: 0, y: 0 });
+      var b0 = __vg.renderer.graphToViewport({ x: 160, y: 0 });
+      var d0 = Math.hypot(b0.x - a0.x, b0.y - a0.y);
+      var perPx = d0 > 1e-3 ? 160 / d0 : 0;
+      var seen = { i: null, o: null };
+      __vg.graph.forEachNode(function (id, at) {
+        if ((__vg.alpha[id] || 0) < 0.5 || __vg.isOrphan(id)) return;
+        var d = __vg.renderer.getNodeDisplayData(id);
+        if (!d || d.hidden) return;
+        var rl = Math.hypot(at.x, at.y) / 160;
+        var dot = __vg.renderer.scaleSize(d.size) * perPx / 160;
+        var k = __vg.groupBand(__vg.groupOf(id));
+        var bb = seen[k] || (seen[k] = { lo: Infinity, hi: -Infinity });
+        if (rl - dot < bb.lo) bb.lo = rl - dot;
+        if (rl + dot > bb.hi) bb.hi = rl + dot;
+      });
+      var f = __vg.lastFill || {};
+      var res = {};
+      ["i", "o"].forEach(function (k) {
+        var q = f[k];
+        res[k] = q && q.placed > 0
+          ? { inset: q.inset, dot: q.dot, placed: q.placed, sp: q.sp, rows: q.rows }
+          : null;
+      });
+      return { lk: lk, seen: seen, res: res, hf: __vg.hubRow0Frac };
+    };
+    var tick = function () {
+      var s = snap();
+      if (s) window.__BF.rows.push(s);
+      if (__vg.demo.busy()) requestAnimationFrame(tick);
+      else setTimeout(function () {
+        var e = snap(); if (e) window.__BF.rows.push(e);
+        window.__BF.done = true;
+      }, 320);
+    };
+    trigger();
+    requestAnimationFrame(tick);
+  })`;
+
+  const run = async (label, triggerJs) => {
+    await p.eval(`${sampler}(function () { ${triggerJs} }); void 0`);
+    for (let i = 0; i < 400; i++) {
+      if (await p.j(`!!window.__BF.done`).catch(() => false)) break;
+      await sleep(100);
+    }
+    return await p.j(`(function () {
+      var R = window.__BF.rows;
+      if (!R.length) return { frames: 0 };
+      var r3 = function (v) { return Math.round(v * 1000) / 1000; };
+      // github#166 -- reserved extent is exact; the drawn hull is asserted for containment
+      var resLo = 0, resHi = 0, atRes = 0, who = null;
+      var worst = 0;
+      var outCross = 0, inCross = 0, hubCross = 0;
+      var shortLo = 0, shortHi = 0;
+      for (var n = 0; n < R.length; n++) {
+        var lk = R[n].lk, s = R[n].seen, rs = R[n].res;
+        if (s.o) {
+          if (s.o.hi - lk.o[1] > outCross) outCross = s.o.hi - lk.o[1];
+          if (lk.o[0] - s.o.lo > outCross) outCross = lk.o[0] - s.o.lo;
+          if (s.o.lo - lk.o[0] > shortLo) shortLo = s.o.lo - lk.o[0];
+          if (lk.o[1] - s.o.hi > shortHi) shortHi = lk.o[1] - s.o.hi;
+        }
+        if (s.i) {
+          if (s.i.hi - lk.i[1] > inCross) inCross = s.i.hi - lk.i[1];
+          // github#35 -- row 0 may reach HUB_ROW0_FRAC into the hub, no further
+          var floorI = lk.i[0] * (1 - (R[n].hf || 0));
+          if (floorI - s.i.lo > hubCross) hubCross = floorI - s.i.lo;
+        }
+        for (var bi = 0; bi < 2; bi++) {
+          var k = bi ? "o" : "i", q = rs[k];
+          // github#166 -- a one-row band is centred and claims no fit
+          if (!q || !lk[k] || Math.ceil(q.rows - 1e-9) < 2) continue;
+          var eLo = Math.abs(q.inset - q.dot);
+          var eHi = Math.abs(q.placed + q.inset + q.dot - lk[k][1]);
+          if (eLo > resLo) resLo = eLo;
+          if (eHi > resHi) resHi = eHi;
+          var e = eLo > eHi ? eLo : eHi;
+          if (e > worst) {
+            worst = e; atRes = n;
+            who = { band: k, lo: r3(eLo), hi: r3(eHi), sp: r3(q.sp), dot: r3(q.dot),
+                    rows: r3(q.rows), placed: r3(q.placed), ring: r3(lk[k][1]) };
+          }
+        }
+      }
+      var step = 0, atStep = 0;
+      for (var m = 1; m < R.length; m++) {
+        for (var bj = 0; bj < 2; bj++) {
+          var kk = bj ? "o" : "i";
+          if (!R[m].seen[kk] || !R[m - 1].seen[kk]) continue;
+          var dl = Math.abs(R[m].seen[kk].lo - R[m - 1].seen[kk].lo);
+          var dh = Math.abs(R[m].seen[kk].hi - R[m - 1].seen[kk].hi);
+          var dd = dl > dh ? dl : dh;
+          if (dd > step) { step = dd; atStep = m; }
+        }
+      }
+      return { frames: R.length, resLo: r3(resLo), resHi: r3(resHi), who: who,
+               atRes: Math.round(100 * atRes / Math.max(1, R.length - 1)),
+               outCross: r3(outCross), inCross: r3(inCross), hubCross: r3(hubCross),
+               shortLo: r3(shortLo), shortHi: r3(shortHi),
+               step: r3(step), atStep: Math.round(100 * atStep / Math.max(1, R.length - 1)),
+               lock: [r3(R[0].lk.i[0]), r3(R[0].lk.i[1]), r3(R[0].lk.o[0]), r3(R[0].lk.o[1])] };
+    })()`).then((r) => ({ label, ...r }));
+  };
+
+  const out = [];
+  const groups = await p.j(`__vg.groupOrder().filter(function (x) { return __vg.groupCount(x) > 0; })
+                             .map(function (x) { return [x, __vg.groupCount(x)]; })`);
+  const gBig = groups.reduce((a, b) => (b[1] > a[1] ? b : a), groups[0])[0];
+  const eye = (name) => `document.querySelector('[data-eye="' +
+    ${JSON.stringify("NAME")}.replace(/"/g, String.fromCharCode(92) + '"') + '"]').click();`
+    .replace(JSON.stringify("NAME"), JSON.stringify(name));
+
+  out.push(await run("largest folder toggle", eye(gBig)));
+  await p.eval(eye(gBig) + " void 0");
+  await settle(p);
+  await sleep(200);
+
+  const span = await p.j(`(function () { var f = document.querySelector("#vg-from");
+    return f ? { min: f.min, max: f.max } : null; })()`);
+  if (span && span.min && span.max) {
+    const lo = Date.parse(span.min), hi = Date.parse(span.max);
+    const from = new Date(hi - (hi - lo) * 0.15).toISOString().slice(0, 10);
+    out.push(await run("range change", `__vg.setRange(${JSON.stringify("PLACEHOLDER")}, null);`
+      .replace("PLACEHOLDER", from)));
+  }
+  await clearRange(p);
+
+  // github#166 -- one row is 1.0; the reserve is arithmetic
+  const RES_TOL = 0.02;
+  const CROSS_TOL = 0.05;
+  const bad = out.filter((r) => !r.frames || r.resLo > RES_TOL || r.resHi > RES_TOL ||
+                                r.outCross > CROSS_TOL || r.inCross > CROSS_TOL ||
+                                r.hubCross > CROSS_TOL);
+  return {
+    ok: !bad.length,
+    detail: out.map((r) => r.frames
+      ? `${r.label}: ${r.frames}f, locked [${r.lock.join(" ")}]; reserved extent off its rings ` +
+        `by lo ${r.resLo} hi ${r.resHi}` +
+        (r.who && (r.resLo > RES_TOL || r.resHi > RES_TOL)
+          ? ` (at ${r.atRes}%, band ${r.who.band}: lo ${r.who.lo} hi ${r.who.hi}, ` +
+            `sp ${r.who.sp} dot ${r.who.dot} rows ${r.who.rows} placed ${r.who.placed} ` +
+            `ring ${r.who.ring})` : "") +
+        `; crossings outer ${r.outCross} inner ${r.inCross} hub ${r.hubCross}` +
+        `; drawn hull inside the reserve by lo ${r.shortLo} hi ${r.shortHi} -- per-note caps, ` +
+        `not the fill; biggest frame step ${r.step} at ${r.atStep}%. One row = 1.0`
+      : `${r.label}: nothing sampled`).join(" | "),
+  };
+}, { on: "all", clock: "real" });
+
 check("filtered to the bone, the disc stays drawable", async (p) => {
   await clearRange(p);
   await settle(p);

@@ -1829,7 +1829,7 @@ function mountVaultGraph(root, data, deps) {
    */
   /**
    * What buildWedgePlan returns.
-   * github#166 -- what the fill solved for one band, for the suite and the wedge overlay
+   * github#166 -- what the fill solved for one band
    * @typedef {Object} FillDbg
    * @property {number} rows
    * @property {number} sp
@@ -2358,8 +2358,7 @@ function mountVaultGraph(root, data, deps) {
     var SP = density;
 
     var givenRoom = given && given.room ? given.room : null;
-    // github#166 -- the room the fill solves against. While a cascade walks, ringsLayout has
-    // github#166 -- already pushed roomNow into bandOf(), so plan and draw read the same number.
+    // github#166 -- the room the fill solves against; the walk reads roomNow
     /** @param {string} bk */
     var roomAt = function (bk) {
       var r = givenRoom ? givenRoom[bk] : roomNow ? roomNow[bk] : bandOf(bk).room;
@@ -2591,7 +2590,18 @@ function mountVaultGraph(root, data, deps) {
     var innerRows = 0;
     /** @type {BandNum} */
     var insetAt = { i: 0, o: 0 };
-    // github#166 -- the ramp is read here, so it has to be read at the size the band holds
+    // github#166 -- the depth PLACEMENT uses: the deepest cell
+    /** @param {Cell[]} list @param {number} fallback */
+    var rowsUsedOf = function (list, fallback) {
+      var m = 0;
+      list.forEach(function (c) {
+        var rf = rowsOf ? rowsOf(c) : 0;
+        if (!rf) rf = fallback;
+        if (rf > m) m = rf;
+      });
+      return m > 0 ? m : fallback;
+    };
+    // github#166 -- the largest node size the band holds, for the ramp above
     /** @param {Cell[]} list */
     var sizeMaxOf = function (list) {
       var m = 0;
@@ -2608,13 +2618,13 @@ function mountVaultGraph(root, data, deps) {
     if (geomLock && thickI > 0) {
       var si = solveBand(inner, r0, thickI, INNER_SCALE, SP_I);
       SP_I = si.sp; innerRows = si.rows;
-      // github#166 -- the walk uses the interpolated depth, not the endpoint plan's row count
-      var fitI = fillBand(thickI, given && given.depth ? given.depth.i : innerRows,
+      // github#166
+      var fitI = fillBand(thickI, rowsUsedOf(inner, innerRows),
                           roomAt("i"), INNER_SCALE, sizeMaxOf(inner),
                           given && given.dotCap ? given.dotCap.i : 0);
       if (fitI && fitI.sp > 0) SP_I = fitI.sp;
       if (fitI) insetAt.i = fitI.inset;
-      fillDbg.i = { rows: given && given.depth ? given.depth.i : innerRows, sp: SP_I,
+      fillDbg.i = { rows: rowsUsedOf(inner, innerRows), sp: SP_I,
                     dot: fitI ? fitI.dot : 0, inset: insetAt.i, room: roomAt("i"),
                     thick: thickI, scale: INNER_SCALE, placed: 0 };
       // github#5
@@ -2633,17 +2643,16 @@ function mountVaultGraph(root, data, deps) {
     if (geomLock && thickO > 0) {
       var so = solveBand(outer, rOuter, thickO, 1, SP_O);
       SP_O = so.sp; outerRows = so.rows;
-      var fitO = fillBand(thickO, given && given.depth ? given.depth.o : outerRows,
+      var fitO = fillBand(thickO, rowsUsedOf(outer, outerRows),
                           roomAt("o"), 1, sizeMaxOf(outer),
                           given && given.dotCap ? given.dotCap.o : 0);
       if (fitO && fitO.sp > 0) SP_O = fitO.sp;
       if (fitO) insetAt.o = fitO.inset;
-      fillDbg.o = { rows: given && given.depth ? given.depth.o : outerRows, sp: SP_O,
+      fillDbg.o = { rows: rowsUsedOf(outer, outerRows), sp: SP_O,
                     dot: fitO ? fitO.dot : 0, inset: insetAt.o, room: roomAt("o"),
                     thick: thickO, scale: 1, placed: 0 };
       outer.forEach(function (c) { c.rows = c.wsum > 0.0001 ? outerRows : 0; });
-      // github#166 -- the band now reaches maxR by construction, so that IS its extent;
-      // github#166 -- github#157's "take back only the overshoot" had nothing left to take back
+      // github#157, github#166 -- the fill reaches maxR by construction, so that is the extent
       maxR = fitO ? geomLock.maxR : rOuter + outerRows * SP_O;
       if (maxR > geomLock.maxR) maxR = geomLock.maxR;
     } else {
@@ -2781,10 +2790,7 @@ function mountVaultGraph(root, data, deps) {
                      o: depthOf(outer, outerRows || REF_ROWS, "o") } };
   }
 
-  // github#160, github#166 -- the radius row 0 draws at a given pitch, in lattice units.
-  // github#166 -- Two channels pull opposite ways: the ramp grows with the pitch, the room
-  // github#166 -- factor shrinks with it. Where the room factor is not clamped the two cancel
-  // github#166 -- and the dot does not follow the pitch at all; where it is clamped, it does.
+  // github#160, github#166 -- rampFor() and dotPx(), read in lattice units
   /** @param {number} pitU   the DRAWN pitch, lattice units (the band's scale already in it)
    *  @param {number} room
    *  @param {number} [size]   the band's largest node size; NODE_MAX when not given
@@ -2792,26 +2798,17 @@ function mountVaultGraph(root, data, deps) {
   function rowDotUnits(pitU, room, size) {
     if (!(pitU > 0) || !(room > 1)) return 0;
     var ppu = pxPerUnit();
-    // github#166 -- this is rampFor() and dotPx() read in lattice units. Both are written in
-    // github#166 -- pixels and both fold the camera in twice, through graphToViewport and again
-    // github#166 -- through scaleSize, so the ratio cancels: what survives the change of units
-    // github#166 -- is the px-side pair DOT_MAX_SPREAD and DOT_MIN_PX, converted here.
+    // github#166 -- both dot constants are px-side; convert them
     var hi = DOT_OF_PITCH * Math.min(pitU, DOT_MAX_SPREAD * UNIT / ppu);
     var lo = Math.min(hi, DOT_MIN_PX / ppu);
-    // github#166 -- the ramp runs NODE_MIN..NODE_MAX, so reading it at NODE_MAX reserves for a
-    // github#166 -- dot the band may not hold. Filtered to its 25 biggest notes the dominant-
-    // github#166 -- folder fixture tops out at size 8.99, not 11, and that gap was half a
-    // github#166 -- lattice unit of band nothing ever drew into.
+    // github#166 -- read the ramp at the size the band HOLDS, not at NODE_MAX
     var u = size === undefined ? 1 : (size - NODE_MIN) / Math.max(1e-6, NODE_MAX - NODE_MIN);
     u = u < 0 ? 0 : u > 1 ? 1 : u;
     var f = Math.min(room * 0.92 / (UNIT * pitU), DOT_ROOM_MAX);
     return (lo + (hi - lo) * u) * f;
   }
 
-  // github#166 -- pixels per lattice unit. DOT_MAX_SPREAD and DOT_MIN_PX are px-side constants,
-  // github#166 -- and github#160's offset compared DOT_MAX_SPREAD against a LATTICE pitch: on
-  // github#166 -- the dominant-folder fixture that is 16.8px per unit, so the two thresholds sat
-  // github#166 -- a factor of ten apart and the offset under-reserved wherever the pitch widened.
+  // github#166 -- pixels per lattice unit, for the two px-side dot constants
   function pxPerUnit() {
     if (!renderer) return UNIT;
     var a = renderer.graphToViewport({ x: 0, y: 0 });
@@ -2820,20 +2817,7 @@ function mountVaultGraph(root, data, deps) {
     return d > 1e-9 ? d : UNIT;
   }
 
-  // github#166 -- pitch, dot radius and the band's offset are ONE fixed point, not three
-  // github#166 -- numbers settled in turn. For `used` rows of radius d in a locked thickness T,
-  // github#166 -- both edges land on their rings exactly when
-  // github#166 --     2d + (used - 1) * P = T,   d = rowDotUnits(P, room),   offset = d
-  // github#166 -- and d moves when P does, so P cannot be solved first. Setting the pitch alone
-  // github#166 -- let the dot grow and left the offset behind, which deepened the ring crossing
-  // github#166 -- rather than closing it (github#166 has the before/after).
-  //
-  // github#166 -- g(P) = 2 * rowDotUnits(P, room) + (used - 1) * P is continuous and strictly
-  // github#166 -- increasing, g(0) = 0 and g(T / (used - 1)) >= T, so the root is unique and
-  // github#166 -- bisection finds it. Iteration would not: in the clamped regime d = cP with
-  // github#166 -- 2c = 2 * DOT_OF_PITCH * DOT_ROOM_MAX = 2.04, so P <- (T - 2d) / (used - 1)
-  // github#166 -- diverges for a two-row band. This also answers "what if the band cannot host
-  // github#166 -- its rows" -- it never reaches that: the root shrinks the dot with the pitch.
+  // github#166 -- one fixed point: 2d + (used-1)P = T
   /** @param {number} thick  the band's thickness, BEFORE its scale
    *  @param {number} rows   the row depth this frame actually uses; may be fractional
    *  @param {number} room @param {number} scale
@@ -2845,23 +2829,15 @@ function mountVaultGraph(root, data, deps) {
     if (!(T > 0) || !(room > 1)) return null;
     var used = Math.ceil(rows - 1e-9);
     if (!(used > 0)) used = 1;
-    // github#66 -- a walking dot never outgrows its two resting sizes, so the space the fill
-    // github#66 -- reserves for it must not either. The room balloons as a big folder leaves --
-    // github#66 -- 169 to 1133 on the dominant-folder fixture -- and reserving against that room
-    // github#66 -- pushed both edges a unit and a half off rings the drawn dots never reached.
+    // github#66, github#166 -- reserve no more than the walk is allowed to draw
     /** @param {number} P */
     var dotAt = function (P) {
       var d = rowDotUnits(P, room, size);
       return ceil > 0 && d > ceil ? ceil : d;
     };
-    // github#166 -- one row spans nothing, so no pitch can stretch it to both rings; centre it
-    // github#166 -- and say so, rather than pretending the fit holds
+    // github#166 -- one row spans nothing; centre it and claim no fit
     if (used < 2) return { sp: 0, dot: dotAt(0), inset: T / 2 };
-    // github#166 -- g(P) = 2 * dotAt(P) + (used - 1) * P rises from g(0) = 0. It increases
-    // github#166 -- across the bracket: the dot's two pitch channels cancel above the room
-    // github#166 -- clamp and add below it, so the (used - 1) * P term is always in charge. A
-    // github#166 -- bracket that never reaches T is a band too thin to fill at any pitch -- take
-    // github#166 -- the widest it has and let the check report the shortfall, rather than loop.
+    // github#166 -- g increases here, so bisect; iteration diverges
     var lo = 0, hi = T / (used - 1);
     if (2 * dotAt(hi) + (used - 1) * hi <= T) {
       return { sp: hi / scale, dot: dotAt(hi), inset: dotAt(hi) };
@@ -3177,13 +3153,9 @@ function mountVaultGraph(root, data, deps) {
     if (!roomNow) {
       bandOf("i").room = pick(pool.i); bandOf("o").room = pick(pool.o);
     }
-    // github#160, github#166 -- shift each band out by row 0's dot radius, so row 0's INNER
-    // github#166 -- edge lands on the ring rather than its centre. This is not computed here:
-    // github#166 -- it is the third leg of the fixed point buildWedgePlan already solved, and
-    // github#166 -- recomputing it against a pitch settled elsewhere is exactly the bug.
-    // github#35 -- row 0 may reach HUB_ROW0_FRAC of r0 into the hub; that is a bound, not a
-    // github#35 -- target, and landing on the ring spends none of it.
-    // github#166 -- what the placement actually reached, against what the fill reserved
+    // github#160, github#166 -- row 0's EDGE on the ring, not its centre; solved in the plan
+    // github#35 -- the hub allowance is a bound, not a target
+    // github#166 -- what placement reached, against what the fill reserved
     /** @type {Record<string, number>} */
     var placed = dict();
     plan.cells.forEach(function (c) {
@@ -3947,8 +3919,7 @@ function mountVaultGraph(root, data, deps) {
     return out;
   }
 
-  // github#166 -- the two annuli a band is locked into, as they are DRAWN: the inner band's
-  // github#166 -- radii carry INNER_SCALE, so its ring does too
+  // github#166 -- the annuli AS DRAWN; the inner carries INNER_SCALE
   /** @returns {Record<string, number[]> | null} */
   function lockedRings() {
     if (!geomLock) return null;
@@ -3992,7 +3963,7 @@ function mountVaultGraph(root, data, deps) {
     });
     var lockR = lockedRings();
     if (!lockR) { cv.hidden = true; return; }
-    // github#166 -- the hull of what is DRAWN; it re-packs, so it moves off the locked ring
+    // github#166 -- the hull of what is drawn; it re-packs, so it moves
     /** @type {Record<string, number[]>} */
     var bandR = { i: lockR.i.slice(), o: lockR.o.slice() };
     ["i", "o"].forEach(function (k) {
@@ -4974,11 +4945,7 @@ function mountVaultGraph(root, data, deps) {
       });
       if (a) { spSrcB = { i: a.spInner || a.sp || 1, o: a.sp || 1 }; }
       if (b) { spDstB = { i: b.spInner || b.sp || 1, o: b.sp || 1 }; }
-      // github#66, github#166 -- a walking dot never outgrows its two resting sizes, so the
-      // github#66 -- space reserved for it may not either. Both endpoints already solved their
-      // github#66 -- own, so take those rather than re-deriving one from a walked room: the
-      // github#66 -- room balloons as a big folder leaves, and reserving against that room
-      // github#66 -- pushed both edges a unit and a half off rings the dots never reached.
+      // github#66, github#166 -- the two resting dots this walk sits between
       ["i", "o"].forEach(function (k) {
         var da = a && a.fill && a.fill[k] ? a.fill[k].dot : 0;
         var db = b && b.fill && b.fill[k] ? b.fill[k].dot : 0;

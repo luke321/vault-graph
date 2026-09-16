@@ -388,6 +388,14 @@ screen* asserts. The same law reads the other three sampled states exactly — `
 1.364 / 1.633 against a rendered 1.05 / 1.24 / 1.51 — the constant 0.91–0.96 discount being
 the arc the wedge gaps take and the step therefore never gets.
 
+**Superseded by github#166 wherever `geomLock` exists, which is every state but the seeding
+layout.** The pitch is no longer a decision that follows the row count: it is solved, together
+with the dot radius and the band's offset, so that the band exactly spans its locked annulus.
+`solveBand()` still decides `rw` and still computes the pitch below, and that pitch is still what
+a band without a lock gets -- but on every locked band `fillBand()` overwrites it. What follows is
+why the margin was right when the pitch stood alone; read the github#166 section for why it no
+longer is.
+
 So past `CELL_FILL_MAX = 1.5` the pitch is raised back toward the square side `s`, never past
 it, and the band carries the remainder as margin. **It costs the dot nothing the ceil bought**:
 `dotPx` scales by `room / pitch`, and `room` is a function of `rw`, not of the pitch — the
@@ -420,7 +428,16 @@ what is left. Measured live 21 / locked 21 / unclamped 23, with the tag vault's 
 branch of *the hub stays the same share of the disc as it is filtered* unchanged in both
 directions.
 
-### Row 0's edge sits on the ring, not its centre — github#160
+### Row 0's edge sits on the ring, not its centre — github#160 (absorbed by github#166)
+
+**This offset is no longer computed in `ringsLayout()`.** github#166 found that computing it
+*after* the pitch was the defect, not the fix: the shift is one of three numbers that move
+together, and settling it last meant it never followed the pitch it was supposed to match. It is
+now the third leg of `fillBand()`'s solve and arrives on the plan as `plan.inset`. Two terms in
+the estimate below were also wrong; the github#166 section has both, measured. The reasoning here
+is kept because the *idea* -- row 0's edge, not its centre, belongs on the ring -- is unchanged
+and is now applied to both bands rather than only the outer one.
+
 
 Rows are laid from `base`, so the outer band's first row had its **centre** on `rOuter` and its
 dot crossed the ring by a whole radius. At rest that is 60px on a 2021px ring and reads as
@@ -436,8 +453,12 @@ can only make a dot *smaller* than that, so the edge lands on the ring or inside
 row's dot must still clear `maxR`, so the shift is clamped to the slack the pitch left there;
 the band has a full pitch of it at rest and the github#157 ceiling leaves some.
 
-**Outer band only.** The inner band's row 0 is allowed `HUB_ROW0_FRAC` of the hub on purpose
-(github#35) and is untouched: edges 715 … 1345 against a 772 hub, before and after.
+**Outer band only** — and github#166 found that this was the reason the inner band never touched
+either of its rings, at rest or on any frame of any cascade. `HUB_ROW0_FRAC` is a **bound** on how
+far row 0 may reach into the hub, not an instruction to spend it; with no offset at all the inner
+band's row 0 sat with its *centre* on `r0 · INNER_SCALE`, so its dot hung a full radius inside the
+ring and the band's far edge fell short by as much again. github#166 gives the inner band the same
+offset and spends none of the allowance.
 
 Measured on the dominant-folder vault, dot edges in graph px, `rOuter 2021`, `maxR 3301`:
 
@@ -450,6 +471,124 @@ The estimate matched the drawn radius to the pixel in both states. **Every resti
 by the resting row-0 dot radius**, so all four golden snapshots were re-recorded deliberately —
 the change is the point, not a side effect. *the resting disc is on the lattice* is unaffected: a
 uniform radial shift keeps every row gap.
+
+### A band's pitch, its dot radius and its offset are one fixed point — github#166
+
+**The law.** For a band of `used` rows, dot radius `d` and locked thickness `T`, the band spans
+its annulus exactly when
+
+```
+2d + (used − 1) · P = T,      d = rowDotUnits(P, room),      offset = d
+```
+
+`P` is the drawn pitch (the band's scale already in it). Row 0 then sits at `ring + d`, so its
+**inner edge** is on the inner ring; the top row sits at `farRing − d`, so its **outer edge** is
+on the outer ring. `fillBand()` solves all three at once, per band, per frame, at rest and while
+walking. Nothing downstream re-derives any of them.
+
+**Why it cannot be solved one term at a time**, which is what develop did and what makes this a
+redesign rather than a constant change. The pitch is set in `buildWedgePlan`; the dot radius is a
+function of `room / pitch`, so it *moves when the pitch moves*; github#160's offset was computed
+later still, in `ringsLayout`, against a pitch it had no influence on. github#166 measured the
+consequence directly: setting the pitch alone to the equality above let the dot grow **1.807 →
+1.965** and deepened the very ring crossing it was meant to close, **0.469 → 0.619**.
+
+**Bisection, not iteration.** `g(P) = 2 · dotAt(P) + (used − 1) · P` rises from `g(0) = 0` and
+increases across `[0, T / (used − 1)]`, so the root is unique. Fixed-point iteration
+`P ← (T − 2d) / (used − 1)` **diverges**: in the room-clamped regime `d = cP` with
+`2c = 2 · DOT_OF_PITCH · DOT_ROOM_MAX = 2.04`, which is a gain above 1 for a two-row band. That
+number is also why the drawn radius is not measured and fed back: the loop that would close the
+last gap (below) is the same loop, at the same gain.
+
+Two degenerate cases, both answered by the shape of `g` rather than by a special rule:
+
+- **A band that cannot host its rows.** It never arises. The issue asked whether to drop a row or
+  cap the dot when `T − 2d ≤ 0`; the root simply shrinks the dot *along with* the pitch, because
+  below the room clamp `d` is proportional to `P`.
+- **A one-row band** spans nothing, so no pitch stretches it to both rings. `fillBand` centres it
+  (`offset = T / 2`) and claims no fit; the check skips it rather than asserting one.
+
+**`rowDotUnits` is the whole ramp now, and two terms in it were wrong.** Both measured on the
+dominant-folder fixture:
+
+| term | was | is | why it mattered |
+|---|---|---|---|
+| spread cap | `min(P, DOT_MAX_SPREAD)` | `min(P, DOT_MAX_SPREAD · UNIT / ppu)` | `DOT_MAX_SPREAD` caps the ramp in **pixels**, and the page draws **16.8px per lattice unit** there, so the two thresholds sat a factor of ten apart |
+| ramp position | read at `NODE_MAX` | read at the band's own largest size | filtered to its 25 biggest notes that band tops out at size **8.99**, not 11 |
+
+The first made the reservation too small wherever the pitch widened — with `projects` hidden it
+reserved **1.180** against a drawn **1.451**, so row 0's dot crossed `rOuter` by 0.27. The second
+made it too large: half a lattice unit of band nothing ever drew into.
+
+**github#66 is a premise of the fill, not a cap applied after it.** A walking dot never outgrows
+the larger of its two resting sizes, so the space reserved for it may not either. The room
+balloons as a big folder leaves — **169 → 1133** units on the dominant-folder fixture — and
+reserving against that room asked for a dot **three times** what the cascade permits, pushing both
+edges a unit and a half off rings the drawn dots could never have reached. Both endpoint plans
+already solved their own dot, so the walk takes `max` of the two rather than re-deriving one.
+
+**Reserve for the depth PLACEMENT uses, which is the deepest CELL and not the band.** The band's
+interpolated depth and the deepest cell's own depth part company whenever a different cell is
+deepest at each end of a walk. The band then reserved a row nothing was ever placed into — a whole
+pitch of empty band, measured at **2.55 units** on the sortspec fixture before `rowsUsedOf()`.
+
+**`maxR` is `geomLock.maxR` whenever the fill applies.** github#157 took back "only the overshoot"
+because `CELL_FILL_MAX` could leave margin *or* overshoot; the fill leaves neither, so the band
+reaches `maxR` by construction and that is its extent. `fitRatio()` frames by it and the hub's
+share is measured against it, both unchanged.
+
+#### The reserved extent and the drawn hull are two different things
+
+This distinction is the one to keep, because conflating them is what github#160 did.
+
+- The **reserved extent** is the fill's own arithmetic and is exact. *a band fills the ring it is
+  locked into, and never leaves it* asserts `|offset − d| ≤ 0.02` and
+  `|placed + offset + d − farRing| ≤ 0.02` on **every animation frame**, on all five fixtures.
+- The **drawn hull** sits inside it. The largest dot a band *may* draw is bounded per note by its
+  cell's room, its edge clearance, `hubRow0` and github#66's cap — none of which a band-level
+  solve can see. So the hull is asserted for **containment only**: nothing crosses a ring in
+  either direction, which is the half the rings law actually governs.
+
+**The outer edge is the worse of the two, and that is structural.** `placeCell` fills outward in
+`hubRank` order, so the big notes are in row 0 and the top row systematically holds smaller ones.
+Reserving the same `d` at both ends therefore leaves more slack at the top than at the bottom.
+
+**Open, and deliberately not closed here.** Making the *drawn* hull touch as well needs either
+`dotPx`'s full per-note cap stack reproduced inside the planner, or the drawn radius measured and
+fed back — and the feedback loop oscillates at the 2.04 gain above. That is a design decision with
+a cost, and it is the maintainer's.
+
+#### Measured — dominant-folder fixture, toggling `projects` (738 of 954)
+
+Every animation frame sampled. Signed gap from the drawn hull to the locked ring, **+ past it,
+− short of it**. Locked inner `[4.823 … 9.047]`, outer `[12.628 … 20.628]`.
+
+| | before | after |
+|---|---|---|
+| rest, inner lo | −0.357 | **+0.025** |
+| rest, inner hi | −0.665 | **−0.205** |
+| rest, outer lo | +0.005 | +0.007 |
+| rest, outer hi | −0.432 | **−0.191** |
+| walk, worst outer lo | −0.844 | +1.293 |
+| walk, worst outer hi | **+2.447** | −2.954 |
+| biggest frame-to-frame step | 0.997 | 0.785 |
+
+The inner band was a flat −0.357 / −0.665 on **every** frame including rest, because no offset was
+ever applied to it (github#160 was outer-band only). The walk's **+2.447** was 2.4 units of dot
+drawn *outside* the locked annulus; after the fill nothing crosses a ring on any frame of any
+fixture, in either direction.
+
+**The "jump" is real, and it is not `settle()`.** The issue left open whether the end of the walk
+is a discontinuity or a fast ramp, and asked for per-frame sampling. Sampled every frame: the
+biggest single-frame step in the outer hull is **0.785 units at 86% of the walk** — not at the
+landing frame. It is the band's row count dropping (3 → 2), which doubles the pitch and
+redistributes the middle row. It is present on develop too, at **0.997**, so the fill reduces it
+rather than causing it. *the last frame of a cascade is the resting layout* still reads
+`dr 0 dtan 0 dot 0%` on all three walked shapes, so `settle()` remains a no-op and the step is
+inside the walk, not at its end.
+
+**All five goldens move**, because every resting layout changes pitch. They were re-recorded as a
+separate, deliberate commit with the numbers above — not to make a check pass.
 
 ### A dot held under a stale endpoint cap, released on the landing frame — github#159
 
