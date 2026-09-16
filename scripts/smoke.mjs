@@ -3349,7 +3349,7 @@ check("the rings hold their radii while a cascade walks", async (p) => {
         if (rl - dot < bb.lo) { bb.lo = rl - dot; bb.loId = id; bb.loDot = dot; }
         if (rl + dot > bb.hi) { bb.hi = rl + dot; bb.hiId = id; bb.hiDot = dot; }
       });
-      return { lk: lk, seen: seen, sh: __vg.lastShift || null };
+      return { lk: lk, seen: seen, sh: __vg.lastShift || null, hf: __vg.hubRow0Frac };
     };
     var tick = function () {
       var s = snap();
@@ -3386,6 +3386,7 @@ check("the rings hold their radii while a cascade walks", async (p) => {
       }
       // github#161
       var outHi = 0, inHi = 0, atHi = 0, who = null, outLo = 0, atLo = 0, whoLo = null;
+      var inLo = 0, atIn = 0, whoIn = null;
       for (var n = 0; n < R.length; n++) {
         var lk = R[n].lk, s = R[n].seen;
         if (s.o) {
@@ -3399,16 +3400,33 @@ check("the rings hold their radii while a cascade walks", async (p) => {
                       sh: R[n].sh };
           }
         }
-        // github#35 -- the inner band's lower edge is inside r0 on purpose
         if (s.i && s.i.hi - lk.i[1] > inHi) inHi = s.i.hi - lk.i[1];
+        // github#35 -- row 0 may reach HUB_ROW0_FRAC of r0 into the hub and no further,
+        // github#35 -- because that fraction caps the dot's RADIUS. Past it is a note out
+        // github#161 -- of the band on the inner side, which is the other half of #161.
+        if (s.i) {
+          var floorI = lk.i[0] * (1 - (R[n].hf || 0));
+          if (floorI - s.i.lo > inLo) {
+            inLo = floorI - s.i.lo; atIn = n;
+            whoIn = { g: __vg.groupOf(s.i.loId), r: r3(s.i.lo + s.i.loDot), dot: r3(s.i.loDot),
+                      floor: r3(floorI) };
+          }
+        }
       }
       // github#161
-      var restLo = 0;
+      var restLo = 0, restIn = 0, restHi = 0;
       [0, R.length - 1].forEach(function (n) {
         var lk = R[n].lk, q = R[n].seen;
+        if (q.o && q.o.hi - lk.o[1] > restHi) restHi = q.o.hi - lk.o[1];
         if (q.o && lk.o[0] - q.o.lo > restLo) restLo = lk.o[0] - q.o.lo;
+        if (q.i) {
+          var fl = lk.i[0] * (1 - (R[n].hf || 0));
+          if (fl - q.i.lo > restIn) restIn = fl - q.i.lo;
+        }
       });
-      return { frames: R.length, lockStep: r3(lockStep), restLo: r3(restLo),
+      return { frames: R.length, lockStep: r3(lockStep), restLo: r3(restLo), restHi: r3(restHi),
+               inLo: r3(inLo), restIn: r3(restIn), whoIn: whoIn,
+               atIn: Math.round(100 * atIn / Math.max(1, R.length - 1)),
                outHi: r3(outHi), inHi: r3(inHi), outLo: r3(outLo),
                atHi: Math.round(100 * atHi / Math.max(1, R.length - 1)), who: who,
                atLo: Math.round(100 * atLo / Math.max(1, R.length - 1)), whoLo: whoLo,
@@ -3442,22 +3460,27 @@ check("the rings hold their radii while a cascade walks", async (p) => {
   // github#161 -- one row is 1.0
   const TOL = 0.05;
   // github#161
-  const bad = out.filter((r) => !r.frames || r.lockStep > 0 ||
-                                r.outHi > TOL || r.inHi > TOL ||
-                                r.outLo - r.restLo > TOL);
+  const bad = out.filter((r) => !r.frames || r.lockStep > 0 || r.inHi > TOL ||
+                                r.outHi - r.restHi > TOL ||
+                                r.outLo - r.restLo > TOL ||
+                                r.inLo - r.restIn > TOL);
   return {
     ok: !bad.length,
     detail: out.map((r) => r.frames
       ? `${r.label}: ${r.frames}f, locked [${r.lock.join(" ")}] step ${r.lockStep}, ` +
-        `outer past maxR ${r.outHi}` +
+        `outer past maxR ${r.outHi} [walk adds ${Math.round((r.outHi - r.restHi) * 1000) / 1000}]` +
         (r.who && r.outHi > TOL ? ` (at ${r.atHi}%, ${r.who.g} r ${r.who.r} + dot ${r.who.dot})` : "") +
         `, outer inside rOuter ${r.outLo}` +
         (r.whoLo && r.outLo > TOL
           ? ` (at ${r.atLo}%, ${r.whoLo.g} r ${r.whoLo.r} - dot ${r.whoLo.dot}` +
             ` shift ${JSON.stringify(r.whoLo.sh)})` : "") +
-        `, inner past its edge ${r.inHi}; one row = 1.0` +
-        `. Walk adds ${Math.round((r.outLo - r.restLo) * 1000) / 1000}; ` +
-        `the resting layout is already ${r.restLo} inside (github#160's estimate, on develop too)`
+        `, inner past its edge ${r.inHi}, inner into the hub ${r.inLo}` +
+        (r.whoIn && r.inLo > TOL
+          ? ` (at ${r.atIn}%, ${r.whoIn.g} r ${r.whoIn.r} - dot ${r.whoIn.dot}` +
+            ` vs floor ${r.whoIn.floor})` : "") +
+        ` [walk adds ${Math.round((r.inLo - r.restIn) * 1000) / 1000}]; one row = 1.0` +
+        `. At rest, already ${r.restHi} past maxR and ${r.restLo} inside rOuter ` +
+        `-- not the walk; see github#161 in invariants.md`
       : `${r.label}: nothing sampled`).join(" | "),
   };
 }, { on: "all", clock: "real" });

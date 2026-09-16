@@ -10886,6 +10886,8 @@ function mountVaultGraph(root, data, deps) {
                     bandRef: function () { return geomLock ? geomLock.bandR : null; },
                     // github#161 -- the locked annuli as drawn; the suite asserts on these
                     lockedRings: lockedRings,
+                    // github#35, github#161 -- row 0's permitted reach into the hub
+                    get hubRow0Frac() { return HUB_ROW0_FRAC; },
                     get lastShift() { return lastShift; },
                     // github#161 -- which ring a group is locked into, for a per-band measure
                     groupBand: /** @param {string} g */ function (g) {
