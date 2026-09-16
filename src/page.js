@@ -3788,6 +3788,16 @@ function mountVaultGraph(root, data, deps) {
     return out;
   }
 
+  // github#166 -- the two annuli a band is locked into, as they are DRAWN: the inner band's
+  // github#166 -- radii carry INNER_SCALE, so its ring does too
+  /** @returns {Record<string, number[]> | null} */
+  function lockedRings() {
+    if (!geomLock) return null;
+    var thickI = (geomLock.rOuter - geomLock.r0) * INNER_FILL;
+    return { i: [geomLock.r0 * INNER_SCALE, (geomLock.r0 + thickI) * INNER_SCALE],
+             o: [geomLock.rOuter, geomLock.maxR] };
+  }
+
   function drawWedgeDebug() {
     var cv = DBG.canvas;
     if (!cv) return;
@@ -3821,9 +3831,11 @@ function mountVaultGraph(root, data, deps) {
       if (rl - dot < bb.lo) bb.lo = rl - dot;
       if (rl + dot > bb.hi) bb.hi = rl + dot;
     });
-    var thickI = (geomLock.rOuter - geomLock.r0) * INNER_FILL;
+    var lockR = lockedRings();
+    if (!lockR) { cv.hidden = true; return; }
+    // github#166 -- the hull of what is DRAWN; it re-packs, so it moves off the locked ring
     /** @type {Record<string, number[]>} */
-    var bandR = { i: [geomLock.r0, geomLock.r0 + thickI], o: [geomLock.rOuter, geomLock.maxR] };
+    var bandR = { i: lockR.i.slice(), o: lockR.o.slice() };
     ["i", "o"].forEach(function (k) {
       if (seen[k] && seen[k].lo < seen[k].hi) bandR[k] = [seen[k].lo, seen[k].hi];
     });
@@ -11306,6 +11318,14 @@ function mountVaultGraph(root, data, deps) {
                     // github#165 -- where the key landed, in host coordinates
                     wedgeLegendBox: function () { return DBG.legendBox || null; },
                     bandRef: function () { return geomLock ? geomLock.bandR : null; },
+                    // github#166 -- the locked annuli as drawn; the suite asserts on these
+                    lockedRings: lockedRings,
+                    // github#35, github#166 -- row 0's permitted reach into the hub
+                    get hubRow0Frac() { return HUB_ROW0_FRAC; },
+                    // github#166 -- which ring a group is locked into, for a per-band measure
+                    groupBand: /** @param {string} g */ function (g) {
+                      return bandLock && bandLock[String(g)] ? "i" : "o";
+                    },
                     // github#86 -- the rings as locked, and the dimension they were taken from
                     get geomLock() { return geomLock; },
                     wedgeTrace: /** @param {number} [rLattice] */ function (rLattice) {
