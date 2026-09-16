@@ -501,11 +501,43 @@ outer notes dilates the row to five times that, so a proportionate quarter-step 
 smoothing is working; the row is simply taller. That dilation is the re-pack the law permits and
 is deliberately not touched here.
 
-**Reported by the check, not asserted.** github#160 *estimates* row 0's dot radius from the pitch
-rather than measuring the drawn dot, and the two disagree — **1.338 estimated against 0.487
-drawn** at rest on the dominant-folder vault. Row 0's edge therefore does not land on `rOuter` as
-github#160 intends, missing by up to **1.8 units inward** mid-walk. It points into the gap
-between the rings, never at the inner band, and it is a different defect from this one.
+**All four edges, and the check asserts what the CASCADE adds.** The band is an annulus, so both
+its edges are containment questions, for both bands:
+
+| edge | bound | walk adds |
+|---|---|---|
+| outer band, outer | `maxR` | **0** on all four fixtures |
+| outer band, inner | `rOuter` | **0**, except 0.005 / 0.026 on the 10k |
+| inner band, outer | `r0 + thickI`, scaled | **0** |
+| inner band, inner | `r0 · INNER_SCALE · (1 − HUB_ROW0_FRAC)` | **0** |
+
+The inner band's lower edge is *not* exempt, which is how it was first read here. github#35 allows
+row 0 `HUB_ROW0_FRAC = 0.08` of `r0` into the hub, and that is a **bound**: the fraction caps the
+dot's *radius*, so the permitted edge is `r0 · INNER_SCALE · 0.92`. The check reads the constant
+through `__vg.hubRow0Frac` and measures against it rather than waiving the edge.
+
+**The resting outer band is over-subscribed on the dominant-folder vault, and that is not the
+cascade's doing.** With `projects` hidden:
+
+```
+thickness (maxR − rOuter)     8.000
+row pitch (2 rows, sp)        5.159
+two dot radii (1.801 × 2)     3.602
+                              ─────
+needed                        8.761      over by 0.761
+```
+
+Row 0 clearing `rOuter` needs `inset ≥ 1.801`; row 1 clearing `maxR` needs `inset ≤ 1.04`. No
+value satisfies both. The range-change state is worse — `2 × 3.317 + 1.666 + 0.737 = 9.04` against
+the same 8.0. **Holding those edges at rest means reducing the resting pitch or the dot size, and
+either moves every golden**, so the check measures each edge against its own resting baseline and
+asserts the delta. The resting crossings are printed on every run so they stay visible.
+
+**github#160's estimate is separately wrong in that state, though fixing it would not help.** It
+computes `DOT_OF_PITCH · min(pit, UNIT · DOT_MAX_SPREAD)`, clamping the **pitch** at 416 graph
+units; the real pitch there is **825.5**, so it reads **1.338** where the unclamped model gives
+**2.656** and the renderer draws **1.801**. The clamp mirrors `rampFor`'s `hiCap`, which applies
+it in px·cam space, not graph space — the two are not the same bound.
 
 **The wedge overlay was never drawing the rings.** It seeded its four dashed circles from
 `geomLock` and then overwrote them with the hull of the drawn dots, re-measured every frame — so
