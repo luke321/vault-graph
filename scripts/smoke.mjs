@@ -3603,7 +3603,8 @@ check("a band fills the ring it is locked into, and never leaves it", async (p) 
       ["i", "o"].forEach(function (k) {
         var q = f[k];
         res[k] = q && q.placed > 0
-          ? { inset: q.inset, dot: q.dot, placed: q.placed, sp: q.sp, rows: q.rows }
+          ? { inset: q.inset, dot: q.dot, placed: q.placed, sp: q.sp, rows: q.rows,
+              pitch: q.sp * q.scale }
           : null;
       });
       return { lk: lk, seen: seen, res: res, hf: __vg.hubRow0Frac };
@@ -3633,7 +3634,7 @@ check("a band fills the ring it is locked into, and never leaves it", async (p) 
       var r3 = function (v) { return Math.round(v * 1000) / 1000; };
       // github#166 -- reserved extent is exact; the drawn hull is asserted for containment
       var resLo = 0, resHi = 0, atRes = 0, who = null;
-      var worst = 0;
+      var worst = 0, restHi = 0, pitchHi = 0;
       var outCross = 0, inCross = 0, hubCross = 0;
       var shortLo = 0, shortHi = 0;
       for (var n = 0; n < R.length; n++) {
@@ -3658,6 +3659,10 @@ check("a band fills the ring it is locked into, and never leaves it", async (p) 
           var eHi = Math.abs(q.placed + q.inset + q.dot - lk[k][1]);
           if (eLo > resLo) resLo = eLo;
           if (eHi > resHi) resHi = eHi;
+          // github#166 -- exact at rest; mid-walk one pitch, never a crossing
+          if (n === 0 || n === R.length - 1) { if (eHi > restHi) restHi = eHi; }
+          var rel = q.pitch > 1e-9 ? eHi / q.pitch : eHi;
+          if (rel > pitchHi) pitchHi = rel;
           var e = eLo > eHi ? eLo : eHi;
           if (e > worst) {
             worst = e; atRes = n;
@@ -3678,6 +3683,7 @@ check("a band fills the ring it is locked into, and never leaves it", async (p) 
         }
       }
       return { frames: R.length, resLo: r3(resLo), resHi: r3(resHi), who: who,
+               restHi: r3(restHi), pitchHi: r3(pitchHi),
                atRes: Math.round(100 * atRes / Math.max(1, R.length - 1)),
                outCross: r3(outCross), inCross: r3(inCross), hubCross: r3(hubCross),
                shortLo: r3(shortLo), shortHi: r3(shortHi),
@@ -3709,18 +3715,20 @@ check("a band fills the ring it is locked into, and never leaves it", async (p) 
   }
   await clearRange(p);
 
-  // github#166 -- one row is 1.0; the reserve is arithmetic
+  // github#166 -- one row is 1.0; exact at rest, one pitch while walking
   const RES_TOL = 0.02;
+  const PITCH_TOL = 1.02;
   const CROSS_TOL = 0.05;
-  const bad = out.filter((r) => !r.frames || r.resLo > RES_TOL || r.resHi > RES_TOL ||
+  const bad = out.filter((r) => !r.frames || r.resLo > RES_TOL || r.restHi > RES_TOL ||
+                                r.pitchHi > PITCH_TOL ||
                                 r.outCross > CROSS_TOL || r.inCross > CROSS_TOL ||
                                 r.hubCross > CROSS_TOL);
   return {
     ok: !bad.length,
     detail: out.map((r) => r.frames
       ? `${r.label}: ${r.frames}f, locked [${r.lock.join(" ")}]; reserved extent off its rings ` +
-        `by lo ${r.resLo} hi ${r.resHi}` +
-        (r.who && (r.resLo > RES_TOL || r.resHi > RES_TOL)
+        `by lo ${r.resLo} hi ${r.resHi} (at rest ${r.restHi}, worst ${r.pitchHi} of a pitch)` +
+        (r.who && (r.resLo > RES_TOL || r.restHi > RES_TOL || r.pitchHi > PITCH_TOL)
           ? ` (at ${r.atRes}%, band ${r.who.band}: lo ${r.who.lo} hi ${r.who.hi}, ` +
             `sp ${r.who.sp} dot ${r.who.dot} rows ${r.who.rows} placed ${r.who.placed} ` +
             `ring ${r.who.ring})` : "") +

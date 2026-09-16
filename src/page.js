@@ -1,4 +1,4 @@
-// github#58
+﻿// github#58
 
 /* ===================================================================== types ==
  * The three boundaries of this file, as JSDoc (github#60, batch 2): what comes IN as data
@@ -759,8 +759,8 @@ function mountVaultGraph(root, data, deps) {
   function twBtn(attrs, open) {
     return attrs
       ? '<button class="tw" ' + attrs + ' aria-expanded="' + open + '">' +
-        (open ? "▾" : "▸") + '</button>'
-      : '<span class="tw none">▸</span>';
+        (open ? "â–¾" : "â–¸") + '</button>'
+      : '<span class="tw none">â–¸</span>';
   }
 
   /** @param {Record<string, unknown> | undefined} raw @returns {Record<string, boolean>} */
@@ -1453,8 +1453,8 @@ function mountVaultGraph(root, data, deps) {
     var say = function (v) {
       return v.toFixed(2) + (v < CONTRAST_FLOOR ? " (under 3:1)" : "");
     };
-    return name + " · solid-area contrast: light " + say(c.light) +
-           ", dark " + say(c.dark) + " · a sub-pixel dot reads lower";
+    return name + " Â· solid-area contrast: light " + say(c.light) +
+           ", dark " + say(c.dark) + " Â· a sub-pixel dot reads lower";
   }
 
   /** @param {Record<string, unknown>} map @param {string} [dim] */
@@ -2620,6 +2620,7 @@ function mountVaultGraph(root, data, deps) {
      *  @param {number} rows @returns {boolean} */
     var fitBand = function (list, bk, thick, scale, rows) {
       var q = fillBand(thick, rows, roomAt(bk), scale, sizeMaxOf(list),
+                       (bk === "i" ? SP_I : SP_O) * scale,
                        given && given.dotCap ? given.dotCap[bk] : 0);
       if (q && q.sp > 0) { if (bk === "i") SP_I = q.sp; else SP_O = q.sp; }
       insetAt[bk] = q ? q.inset : 0;
@@ -2842,9 +2843,10 @@ function mountVaultGraph(root, data, deps) {
    *  @param {number} rows   the row depth this frame actually uses; may be fractional
    *  @param {number} room @param {number} scale
    *  @param {number} size    the band's largest node size
+   *  @param {number} spNow   the pitch the band has now, DRAWN; kept when there is one row
    *  @param {number} [ceil]   github#66's cap: the larger of the two resting dots, while walking
    *  @returns {{ sp: number, dot: number, inset: number } | null} */
-  function fillBand(thick, rows, room, scale, size, ceil) {
+  function fillBand(thick, rows, room, scale, size, spNow, ceil) {
     var T = thick * scale;
     if (!(T > 0) || !(room > 1)) return null;
     var used = Math.ceil(rows - 1e-9);
@@ -2855,8 +2857,8 @@ function mountVaultGraph(root, data, deps) {
       var d = rowDotUnits(P, room, size);
       return ceil > 0 && d > ceil ? ceil : d;
     };
-    // github#166 -- one row spans nothing; centre it and claim no fit
-    if (used < 2) return { sp: 0, dot: dotAt(0), inset: T / 2 };
+    // github#166, github#65 -- a one-row band spans no annulus, so it is left where it is
+    if (used < 2) return { sp: 0, dot: dotAt(spNow), inset: 0 };
     // github#166 -- g increases here, so bisect; iteration diverges
     var lo = 0, hi = T / (used - 1);
     if (2 * dotAt(hi) + (used - 1) * hi <= T) {
@@ -6259,7 +6261,7 @@ function mountVaultGraph(root, data, deps) {
     el.textContent = stalled
       ? what + " and " + (one ? "has" : "have") +
         " not come back. Reload or reopen the graph to rebuild it."
-      : what + " — restoring...";
+      : what + " â€” restoring...";
     el.hidden = false;
   }
 
@@ -6759,7 +6761,7 @@ function mountVaultGraph(root, data, deps) {
   /** @param {string} g @param {Record<string, boolean> | null} bandLock */
   function swatchTitle(g, bandLock) {
     if (g === UNLINKED && unlinkedTintByFolder && unlinkedTintColors.length > 1) {
-      return "Mixed — coloured by folder";
+      return "Mixed â€” coloured by folder";
     }
     // github#3, github#50
     if (!counts[g]) return "No notes on the disc";
@@ -7021,8 +7023,8 @@ function mountVaultGraph(root, data, deps) {
       var ctTitle = share
         ? ' title="' + w.counts[g] + (w.counts[g] === 1 ? " note" : " notes") +
           (g === w.basisGroup
-            ? " · the largest folder shown"
-            : " · " + shareText(share) + " of " + esc(w.basisGroup)) + '"'
+            ? " Â· the largest folder shown"
+            : " Â· " + shareText(share) + " of " + esc(w.basisGroup)) + '"'
         : '';
 
       // github#86 -- an arriving row is collapsed until its first note is lit,
@@ -9173,13 +9175,13 @@ function mountVaultGraph(root, data, deps) {
     for (var i = 0; i < keys.length; i++) inWin += days[keys[i]].ids.length;
     // github#86 -- graph.order counts DOTS, and this sentence says notes
     $("heatnote").textContent =
-      "last " + cols + " weeks · " + inWin + " of " +
+      "last " + cols + " weeks Â· " + inWin + " of " +
       (graph.order - standIns.length) + " notes" +
-      (before ? " · " + before + " earlier" : "") +
-      (after ? " · " + after + " later" : "") +
-      (undated ? " · " + undated + " undated" : "") +
+      (before ? " Â· " + before + " earlier" : "") +
+      (after ? " Â· " + after + " later" : "") +
+      (undated ? " Â· " + undated + " undated" : "") +
       // github#70
-      (bulkDays ? " · " + bulkDays + " bulk day" + (bulkDays === 1 ? "" : "s") : "");
+      (bulkDays ? " Â· " + bulkDays + " bulk day" + (bulkDays === 1 ? "" : "s") : "");
 
     heatSig = "";
     heatDraw();
@@ -9378,12 +9380,12 @@ function mountVaultGraph(root, data, deps) {
     var wd = HEAT_WD[(new Date(d.ms).getUTCDay() + 6) % 7];
     // github#70
     var verb = state.heatSource === "touched" ? "touched" : "added";
-    setHTML(t, '<div class="t">' + esc(d.key) + " · " + wd +
-      (d.key === TODAY ? " · today" : "") + "</div>" +
+    setHTML(t, '<div class="t">' + esc(d.key) + " Â· " + wd +
+      (d.key === TODAY ? " Â· today" : "") + "</div>" +
       '<div class="m">' +
       (n ? n + " note" + (n === 1 ? "" : "s") + " " + verb : "nothing " + verb) +
       (top.length ? "<br>" + top.map(function (g2) {
-        return '<b style="color:' + colorOf(g2) + '">■ </b> ' + esc(g2) + " " + by[g2];
+        return '<b style="color:' + colorOf(g2) + '">â–  </b> ' + esc(g2) + " " + by[g2];
       }).join("<br>") : "") +
       (d.bulk ? "<br><i>" + (d.bulkX > 1 ? d.bulkX + "&times; the typical day here. " : "") +
                 "A sync, an import or a rename does this &mdash; it is not " +
@@ -9468,8 +9470,8 @@ function mountVaultGraph(root, data, deps) {
       if (cnt && cnt.textContent !== String(c.n)) cnt.textContent = String(c.n);
       btn.title = c.win
         ? c.n + " note" + (c.n === 1 ? "" : "s") + " " + c.win.label +
-          (c.bulk ? " · " + c.bulk + " of them on a bulk day, so probably a sync or a rename" : "") +
-          (c.n ? "" : " · nothing here yet")
+          (c.bulk ? " Â· " + c.bulk + " of them on a bulk day, so probably a sync or a rename" : "") +
+          (c.n ? "" : " Â· nothing here yet")
         : "";
     }
   }
