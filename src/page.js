@@ -2829,24 +2829,12 @@ function mountVaultGraph(root, data, deps) {
    *  @returns {number} */
   function rowDotUnits(pitU, room, size) {
     if (!(pitU > 0) || !(room > 1)) return 0;
-    var ppu = pxPerUnit();
-    // github#166 -- both dot constants are px-side; convert them
-    var hi = DOT_OF_PITCH * Math.min(pitU, DOT_MAX_SPREAD * UNIT / ppu);
-    var lo = Math.min(hi, DOT_MIN_PX / ppu);
+    // github#160, github#166 -- NEVER a renderer or window term here; see invariants.md
     // github#166 -- read the ramp at the size the band HOLDS, not at NODE_MAX
     var u = size === undefined ? 1 : (size - NODE_MIN) / Math.max(1e-6, NODE_MAX - NODE_MIN);
     u = u < 0 ? 0 : u > 1 ? 1 : u;
     var f = Math.min(room * 0.92 / (UNIT * pitU), DOT_ROOM_MAX);
-    return (lo + (hi - lo) * u) * f;
-  }
-
-  // github#166 -- pixels per lattice unit, for the two px-side dot constants
-  function pxPerUnit() {
-    if (!renderer) return UNIT;
-    var a = renderer.graphToViewport({ x: 0, y: 0 });
-    var b = renderer.graphToViewport({ x: UNIT, y: 0 });
-    var d = Math.hypot(b.x - a.x, b.y - a.y);
-    return d > 1e-9 ? d : UNIT;
+    return DOT_OF_PITCH * pitU * u * f;
   }
 
   // github#166 -- one fixed point: 2d + (used-1)P = T
@@ -5524,10 +5512,26 @@ function mountVaultGraph(root, data, deps) {
     })();
   }
 
+  // github#166 -- did the room the fill used survive the layout it made?
+  function roomSettled() {
+    if (!lastFill) return true;
+    var ok = true;
+    ["i", "o"].forEach(function (k) {
+      var q = lastFill[k];
+      if (!q || !(q.room > 1)) return;
+      var now = bandOf(k).room;
+      if (!(now > 1)) return;
+      if (Math.abs(now - q.room) > 1e-9 * now) ok = false;
+    });
+    return ok;
+  }
+
   /** @param {boolean} [animate] @param {() => void} [done] */
   function applyLayout(animate, done) {
     traceTag("rest");
     var targets = ringsLayout();
+    // github#166 -- a cold first pass lands beside its own fixed point
+    if (targets && !roomNow && !roomSettled()) targets = ringsLayout() || targets;
     traceTag("");
     if (!targets) { if (done) done(); return; }
     if (animate) animateTo(targets, done);
