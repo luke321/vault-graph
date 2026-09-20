@@ -477,7 +477,7 @@ fi
 lock_owner="pre-push $(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo '?') [$$]"
 release_lock() { node "$root/scripts/lock.mjs" release suite --owner "$lock_owner" </dev/null >/dev/null 2>&1; }
 trap 'release_lock; exit 1' INT TERM HUP
-if ! node "$root/scripts/lock.mjs" acquire suite --owner "$lock_owner" </dev/null; then
+if ! node "$root/scripts/lock.mjs" acquire suite --owner "$lock_owner" --holder process </dev/null; then
   cat >&2 <<'EOF'
 
 pre-push: could not take the suite lock -- push blocked.

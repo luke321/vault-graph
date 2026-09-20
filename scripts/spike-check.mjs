@@ -55,7 +55,7 @@ const LOCK = "screen-left";
 const lockOwner = "spike-check [" + process.pid + "]";
 let holdsLock = false;
 if (!NO_LOCK) {
-  const r = spawnSync(process.execPath, [join(HERE, "lock.mjs"), "acquire", LOCK, "--owner", lockOwner],
+  const r = spawnSync(process.execPath, [join(HERE, "lock.mjs"), "acquire", LOCK, "--owner", lockOwner, "--holder", "process"],
     { stdio: "inherit" });
   if (r.status !== 0) {
     console.error("could not take the " + LOCK + " lock -- something else is driving that display.");

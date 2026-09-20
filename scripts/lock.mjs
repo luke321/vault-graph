@@ -43,6 +43,7 @@ const flag = (n, d) => {
   return i >= 0 && argv[i + 1] ? argv[i + 1] : d;
 };
 const owner = flag("owner", "");
+const holder = flag("holder", "");
 const timeoutMs = Number(flag("timeout-ms", DEFAULT_TIMEOUT));
 
 const dirFor = (n) => join(ROOT, n + ".lock");
@@ -56,6 +57,21 @@ function readMeta(n) {
 
 function ageOf(meta) {
   return meta && meta.at ? Date.now() - meta.at : Infinity;
+}
+
+// github#130 -- a record only opts into fast reaping when its writer promised to keep the pid
+// live and current (holder: "process"); anything else, including a human's manual acquire, is
+// never fast-reaped just because a pid it happens to carry looks dead.
+const LIVENESS_FLOOR_MS = 60 * 1000;
+
+function isAlive(pid) {
+  if (!pid) return null;
+  try { process.kill(pid, 0); return true; }
+  catch (e) { return e.code !== "ESRCH"; }
+}
+
+function deadProcess(meta) {
+  return !!(meta && meta.holder === "process" && meta.pid && isAlive(meta.pid) === false);
 }
 
 // github#87
@@ -74,9 +90,12 @@ function aliasHold(n, asker) {
 }
 
 function usage(code) {
-  console.error("usage: node scripts/lock.mjs <acquire|release|status> <name> --owner <id>");
+  console.error("usage: node scripts/lock.mjs <acquire|release|status> <name> --owner <id> [--holder process]");
   console.error("  names: suite | screen-left | screen-right | screen-primary | record (legacy)");
   console.error("  suite is the fixture store; a display is claimed by its own name");
+  console.error("  --holder process: this caller stays running and owns release -- opts the");
+  console.error("  record into fast reaping (github#130) once its pid is provably dead. Never");
+  console.error("  pass it for a one-shot acquire held open by hand from a terminal.");
   process.exit(code);
 }
 
@@ -125,7 +144,14 @@ async function acquire() {
 
     try {
       mkdirSync(dir);
-      writeFileSync(metaFor(name), JSON.stringify({ owner: owner, at: Date.now(), pid: process.pid }, null, 1));
+      // github#130 -- under --holder process, process.pid here is this short-lived acquiring
+      // CLI's own pid, already gone by the time anyone reads it back; process.ppid is the real,
+      // long-running caller (smoke.mjs, spike-check.mjs, record-demo.ps1, pre-push), which is
+      // what a liveness check actually needs to test.
+      const pid = holder === "process" ? process.ppid : process.pid;
+      const record = { owner: owner, at: Date.now(), pid: pid };
+      if (holder) record.holder = holder;
+      writeFileSync(metaFor(name), JSON.stringify(record, null, 1));
       console.log("ACQUIRED " + name + " by " + owner);
       process.exit(0);
     } catch (e) {
@@ -138,6 +164,14 @@ async function acquire() {
     if (meta && meta.owner === owner) {
       console.log("ALREADY HELD by " + owner + " -- not re-entrant, treat as held");
       process.exit(0);
+    }
+
+    // github#130
+    if (age > LIVENESS_FLOOR_MS && deadProcess(meta)) {
+      console.log("BREAKING dead-process " + name + " lock (pid " + meta.pid + " gone, age " +
+                  Math.round(age / 1000) + "s, owner " + ((meta && meta.owner) || "unknown") + ")");
+      try { rmSync(dir, { recursive: true, force: true }); } catch { void 0; }
+      continue;
     }
 
     if (age > staleWindow(name)) {
@@ -191,9 +225,13 @@ function status() {
   for (const h of held) {
     const n = h.replace(/\.lock$/, "");
     const meta = readMeta(n);
+    const age = ageOf(meta);
+    // github#130
+    const dead = deadProcess(meta);
     console.log(n + "  owner=" + ((meta && meta.owner) || "unknown") +
-                "  age=" + Math.round(ageOf(meta) / 1000) + "s" +
-                (ageOf(meta) > staleWindow(n) ? "  STALE" : ""));
+                "  age=" + Math.round(age / 1000) + "s" +
+                (dead ? "  DEAD" : "") +
+                (age > staleWindow(n) ? "  STALE" : ""));
   }
 }
 

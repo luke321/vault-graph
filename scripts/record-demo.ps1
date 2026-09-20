@@ -112,7 +112,7 @@ elseif ($X -eq [int]::MinValue) { $screenLock = "screen-primary" }
 if ($screenLock) {
   $lockOwner = if ($env:VG_LOCK_OWNER) { $env:VG_LOCK_OWNER } else { "record-demo pid $PID" }
   Write-Host "taking $screenLock (owner: $lockOwner)..." -ForegroundColor DarkGray
-  & node (Join-Path $here 'lock.mjs') acquire $screenLock --owner $lockOwner
+  & node (Join-Path $here 'lock.mjs') acquire $screenLock --owner $lockOwner --holder process
   if ($LASTEXITCODE -ne 0) {
     throw "$screenLock is BUSY -- another session is using that display. Nothing was recorded."
   }
