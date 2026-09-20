@@ -48,20 +48,59 @@ export const STATE_PROBE = `(function () {
   }
 
   var scope = root || document;
+
+  // github#151 -- a control with an id of its own is its own key. One without is a row the page
+  // github#151 -- BUILT -- a legend folder, a colour swatch, a detail-card button -- and there
+  // github#151 -- are hundreds of them, so each folds into one digest key named after the
+  // github#151 -- container it sits in. Measured first: hiding one folder took state.hidden
+  // github#151 -- off baseline and, with a key per row, reported 90 more that were only its
+  // github#151 -- consequence. A digest still moves when any row does; it just says so once.
+  var folds = {};
+  var fold = function (el, kind, value) {
+    var box = el.closest ? el.closest("[id^=vg-]") : null;
+    var k = kind + "." + ((box && box.id) || "loose");
+    (folds[k] || (folds[k] = [])).push(label(el) + "=" + value);
+  };
+  var label = function (el) {
+    return el.getAttribute("data-dim") || el.getAttribute("data-src") ||
+           el.getAttribute("data-eye") || el.getAttribute("data-k") || el.name ||
+           (el.textContent || "").trim().slice(0, 24) || el.tagName;
+  };
+  // github#151 -- order-independent and short: the digest must not move because the page
+  // github#151 -- rebuilt the same rows in another order
+  var digest = function (list) {
+    list.sort();
+    var h = 5381;
+    var s = list.join("|");
+    for (var i = 0; i < s.length; i++) h = ((h * 33) ^ s.charCodeAt(i)) >>> 0;
+    return list.length + " rows #" + h.toString(16);
+  };
+
+  // github#151 -- only a control that is actually rendered. The settings body, the detail card
+  // github#151 -- and the context menu are BUILT on first use and then hidden, so without this
+  // github#151 -- the first check to open one reports every control inside it as newly present
+  // github#151 -- -- six of the twenty-two the boundary first caught, none of them state a later
+  // github#151 -- check could act on. A panel genuinely left open still shows, as open.<id> and
+  // github#151 -- as its controls together.
+  var rendered = function (el) { return el.getClientRects().length > 0; };
+
   var ins = scope.querySelectorAll("input, select, textarea");
   for (var j = 0; j < ins.length; j++) {
     var el = ins[j];
-    var id = el.id || el.name || (el.getAttribute("data-k") || "") || ("anon" + j);
+    if (!rendered(el)) continue;
     var t = (el.type || "").toLowerCase();
-    put("ui." + id, t === "checkbox" || t === "radio" ? String(el.checked) : String(el.value));
+    var v = t === "checkbox" || t === "radio" ? String(el.checked) : String(el.value);
+    var id = el.id || el.name;
+    if (id) put("ui." + id, v); else fold(el, "ui", v);
   }
   var prs = scope.querySelectorAll("[aria-pressed]");
   for (var m = 0; m < prs.length; m++) {
     var b = prs[m];
-    var who = b.id || b.getAttribute("data-dim") || b.getAttribute("data-src") ||
-              b.getAttribute("data-eye") || (b.textContent || "").trim().slice(0, 16) || ("anon" + m);
-    put("press." + who, b.getAttribute("aria-pressed"));
+    if (!rendered(b)) continue;
+    if (b.id) put("press." + b.id, b.getAttribute("aria-pressed"));
+    else fold(b, "press", b.getAttribute("aria-pressed"));
   }
+  Object.keys(folds).forEach(function (k) { put(k, digest(folds[k])); });
 
   // github#151 -- a panel is state: a check that leaves one open changes what the next one clicks
   var PANELS = ["vg-settings", "vg-legend", "vg-detail", "vg-ctxmenu", "vg-band", "vg-heatwrap",
@@ -117,6 +156,10 @@ export function tokensFor(key) {
   // github#151 -- the mount flag is not inheritable state, and its only honest token would be
   // github#151 -- `__vg`, which every expression here names. No token, so it is never a read.
   if (head === "page") return [];
+  // github#151 -- the page exposes these as __vg.state.<name>, so the literal dotted form is the
+  // token. The bare tail was useless: `hidden` matched getNodeDisplayData(id).hidden in a third
+  // of the suite, and reported 15 reads of state.hidden that were nothing of the kind.
+  if (head === "state") return ["state." + tail];
   // github#151 -- ui./open./press./attr. are keyed by a DOM id or attribute value, which is the
   // github#151 -- literal an expression has to name to reach the element
   return [tail];

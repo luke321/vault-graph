@@ -332,9 +332,16 @@ console.log("github#151 -- the state audit");
         keysRead(keys, ["__vg.graph.order"]).length === 0);
   // github#151 -- the whole-word rule, which is what keeps the report worth reading
   check("a bare identifier is not read out of a longer word",
-        keysRead({ "state.dim": "" }, ["res.dimAtGaps + dimmed"]).length === 0,
-        keysRead({ "state.dim": "" }, ["res.dimAtGaps + dimmed"]).join());
-  check("...but is found as a word", keysRead({ "state.dim": "" }, ["__vg.state.dim"]).length === 1);
+        keysRead({ "vg.timeScale": "" }, ["res.timeScaleish + timeScaled"]).length === 0,
+        keysRead({ "vg.timeScale": "" }, ["res.timeScaleish + timeScaled"]).join());
+  check("...but is found as a word",
+        keysRead({ "vg.timeScale": "" }, ["__vg.timeScale"]).length === 1);
+  // github#151 -- and a state key needs its full accessor, not its bare tail: `hidden` alone
+  // matched getNodeDisplayData(id).hidden in a third of the suite
+  check("a state key is not read out of an unrelated .hidden",
+        keysRead({ "state.hidden": "" }, ["renderer.getNodeDisplayData(id).hidden"]).length === 0);
+  check("...but is read through __vg.state",
+        keysRead({ "state.hidden": "" }, ["__vg.state.hidden"]).length === 1);
   check("a DOM id with a dash still matches literally, where a word boundary means nothing",
         keysRead({ "ui.vg-q": "" }, ['$("vg-q")']).length === 1);
   check("a camera key carries its accessors as tokens, never the bare word",

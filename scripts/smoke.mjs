@@ -276,7 +276,9 @@ check("nav counts share one right edge", async (p) => {
   return { ok, detail: `folded ${folded.n} counts / ${folded.distinct.length} edge, ` +
                        `open ${open.n} counts / ${open.distinct.length} edge` +
                        (open.n > folded.n ? "" : "  <- the tree never opened") };
-});
+  // github#151 -- as "legend count bars scale to the largest visible folder": measuring
+  // github#151 -- every row means expanding every folder, and it stays expanded.
+}, { leaves: ["state.collapsed", "press.vg-legend"] });
 
 check("every heatmap day with notes fills its cell", async (p) => {
   const r = await p.j(`(function(){
@@ -734,7 +736,8 @@ check("tags: every note is filed in exactly one wedge, in either dimension", asy
             (r.folder.twice + r.tag.twice ? `; ${r.folder.twice + r.tag.twice} note(s) in TWO cells` : "") +
             (r.misfiled.length ? `; MISFILED ${r.misfiled.join(", ")}` : ""),
   };
-}, { on: "all" });
+  // github#151 -- as above: visiting the tag disc seeds its own hidden defaults, by design
+}, { on: "all", leaves: ["state.hidden"] });
 
 check("tags: the switch lands where a fresh relayout would, and comes home exactly",
 async (p) => {
@@ -779,6 +782,9 @@ async (p) => {
 }, { on: "all" });
 
 check("tags: a dot in the disc being left keeps its colour until it has faded", async (p) => {
+  // github#151 -- the Tags button persists the dimension; __vg.setDim() does not, so switching
+  // back through the API leaves {"dim":"tag"} stored and a reload would open on the tag disc
+  const storedWas = await storeSnap(p);
   await clearRange(p);
   await settle(p);
   await camSettle(p);
@@ -839,6 +845,8 @@ check("tags: a dot in the disc being left keeps its colour until it has faded", 
   await p.j(`(function(){ delete window.__smokeLeft; delete window.__smokeRows; __vg.setDim("folder"); return true; })()`);
   await settle(p);
   await camSettle(p);
+  // github#151
+  await storeBack(p, storedWas);
   return {
     ok: dotFrames === 0 && rowFrames === 0 && samples > 3,
     detail: `${n} dots standing in the folder disc, ${samples} samples over the switch: ` +
@@ -847,7 +855,11 @@ check("tags: a dot in the disc being left keeps its colour until it has faded", 
             `; ${rowFrames} leaving-row-frames with a swatch or count other than the row's` +
             (rowExample ? ` (e.g. ${rowExample})` : ""),
   };
-}, { on: WALK, clock: "real" });
+  // github#151 -- the first check in this job to visit the tag disc seeds that disc's own
+  // hidden defaults, and the page keeps them per dimension on purpose (design/0015, and
+  // "tags: each dimension keeps its own hidden and collapsed state" asserts it). Declared, so
+  // the coupling is in the source rather than in the order the checks happen to run in.
+}, { on: WALK, clock: "real", leaves: ["state.hidden"] });
 
 check("tags: a note one disc hides and the other shows arrives with the fill edge", async (p) => {
   await clearRange(p);
@@ -2466,6 +2478,9 @@ check("the camera cluster is bottom-right, in order, and 31px", async (p) => {
 // github#82
 check("the panel toggles fold each panel away and give the space back", async (p) => {
   // github#82 -- pinned: this suite's own window is a grid slot
+  // github#151 -- pressing each toggle twice restores the LIVE state; the stored blob keeps
+  // sheetOpen/bandOpen either way, and that outlives a reload
+  const storedWas = await storeSnap(p);
   const dpr = await p.j(`window.devicePixelRatio || 1`);
   await p.send("Emulation.setDeviceMetricsOverride",
                { width: 1280, height: 900, deviceScaleFactor: dpr, mobile: false });
@@ -2558,6 +2573,8 @@ check("the panel toggles fold each panel away and give the space back", async (p
   const d = await shot();
   await p.send("Emulation.clearDeviceMetricsOverride");
   await sleep(360);
+  // github#151
+  await storeBack(p, storedWas);
 
   const badBtn = btns.buttons.filter((x) => x.missing || x.w !== 31 || x.h !== 31 ||
                                             !x.svg || !x.label || !x.inside);
@@ -3830,6 +3847,29 @@ check("a resize re-centres a fitted disc on the new stage", async (p) => {
 }, { on: ["demo-vault"], clock: "real" });
 
 // github#14
+// github#151 -- the stored settings, around a check that drives a control the page persists
+async function storeSnap(p) {
+  return p.j(`(function(){
+    try { return window.SETTINGS_KEY
+                 ? (window.localStorage.getItem(window.SETTINGS_KEY) === null
+                      ? null : window.localStorage.getItem(window.SETTINGS_KEY))
+                 : null; }
+    catch (e) { return null; }
+  })()`).catch(() => null);
+}
+/** @param {string | null} was */
+async function storeBack(p, was) {
+  await p.eval(`(function(){
+    try {
+      var k = window.SETTINGS_KEY;
+      if (!k) return;
+      var was = ${JSON.stringify(was)};
+      if (was === null) window.localStorage.removeItem(k);
+      else window.localStorage.setItem(k, was);
+    } catch (e) { /* a page with no store has nothing to put back */ }
+  })(); void 0`).catch(() => {});
+}
+
 async function toRest(p) {
   await p.eval(`document.querySelector("#vg-reset").click(); void 0`);
   await camSettle(p);
@@ -3931,8 +3971,11 @@ check("showing a hidden group auto-fits the camera while it is still arriving", 
   const want = fr * Math.max(0.12, Math.min(1.35, dens.reach));
   const growing = want > rest.ratio + 0.01;
 
-  await p.eval(`__vg.state.hidden.folder = {}; __vg.syncAlpha(); __vg.applyLayout(false); void 0`);
-  await sleep(200);
+  // github#151 -- the eye, not the dict: assigning state.hidden leaves the legend row's
+  // aria-pressed claiming the group is still hidden, which is what github#113 found in the
+  // context-menu check and what the state boundary now catches here.
+  await clickEye(p, g);
+  await settle(p);
   await toRest(p);
 
   const atRest = await p.j(`__vg.camAtRest`);
@@ -3972,9 +4015,10 @@ check("a manually moved camera is left alone by a visibility toggle", async (p) 
   await sleep(3000);
   const after = await camState(p);
 
-  await p.eval(`__vg.renderer.setSetting("enableCameraPanning", ${JSON.stringify(!!panWas)});
-    __vg.state.hidden.folder = {}; __vg.syncAlpha(); __vg.applyLayout(false); void 0`);
-  await sleep(200);
+  await p.eval(`__vg.renderer.setSetting("enableCameraPanning", ${JSON.stringify(!!panWas)}); void 0`);
+  // github#151 -- the eye, not the dict: see the check above
+  await clickEye(p, g);
+  await settle(p);
   await toRest(p);
 
   return {
@@ -6189,7 +6233,8 @@ check("a pin is stored by the note's path, not by its position", async (p, ctx) 
     // github#105 -- home is ?rest: a full re-mount, the size of the fixture
     back = await goto(home, 30000);
     // github#143 -- leave the fixture's own store as this check found it
-    if (back) { await p.eval(`__vg.clearPins(); void 0`); await settle(p); }
+    // github#151 -- and its camera: clearing the pins re-fits a disc whose extent just changed
+    if (back) { await p.eval(`__vg.clearPins(); void 0`); await settle(p); await camReset(p); }
   }
   if (why) return { ok: false, detail: why };
   const want = ["B.md", "ghost:Missing"];
@@ -6646,7 +6691,9 @@ check("legend count bars scale to the largest visible folder", async (p) => {
             `title ${JSON.stringify(titled && titled.title)}` +
             (wrong.length ? `  <- ${wrong.join(" | ")}` : "")
   };
-}, { on: "all" });
+  // github#151 -- leaves the legend tree expanded and state.collapsed with it: the
+  // github#151 -- check measures every folder's row, which means opening every folder.
+}, { on: "all", leaves: ["state.collapsed", "press.vg-legend"] });
 
 // github#78, design/0006
 check("the thinnest count bar survives a hover in pixels, not just in CSS", async (p) => {
@@ -6997,6 +7044,12 @@ check("the legend's swatch and count bar follow the token across a theme flip, w
   })(); void 0`);
   await sleep(400);
   const restored = await read();
+  // github#151 -- the gear was un-hidden and the panel opened to reach the picker; close it
+  await p.eval(`(function(){
+    var g = document.getElementById('vg-gear');
+    if (g && g.getAttribute('aria-expanded') === 'true') g.click();
+  })(); void 0`).catch(() => {});
+  await sleep(200);
 
   const tokenMoved = before.token !== after.token;
   const swatchMoved = before.swatch !== after.swatch;
@@ -7724,6 +7777,9 @@ check("only a hop lengthens the trail", async (p) => {
   await p.eval(`__vg.renderer.emit("clickStage", {}); void 0`).catch(() => {});
   await closeCard(p);
   const s4 = await trailState(p);
+  // github#151 -- a hop flies the camera to its note; the trail is put back here, the camera
+  // was not, and it carried the overview badge with it into every check that followed
+  await camReset(p);
   const ok = s0.crumbs.length === 0 && n === 3 && s1.crumbs.length === 3 && s2.crumbs.length === 0 && s3.crumbs.length === 1 && !s4.open;
   return { ok, detail: `search hit: ${s0.crumbs.length} crumbs; after ${n} hops: ${s1.crumbs.length}; ` +
                        `a fresh search hit: ${s2.crumbs.length}; one more hop: ${s3.crumbs.length}; closed: card ${s4.open ? "STILL OPEN" : "hidden"}` };
@@ -7900,6 +7956,7 @@ check("a live rebuild with the same data moves nothing", async (p) => {
 }, { on: "all" });
 
 // github#120
+// github#151 -- leaves vg.shown: see the note on "word counts land by path"
 check("a rebuild waits for a drag, and a right-click is not a drag", async (p) => {
   await settle(p);
   await p.eval(LIVE_JS);
@@ -7945,7 +8002,7 @@ check("a rebuild waits for a drag, and a right-click is not a drag", async (p) =
     `held: ${held.res.applied ? "APPLIED (should have waited)" : `refused "${held.res.reason}" busy "${held.res.busy}"`}` +
     `, order while held ${held.orderWhileHeld} (was ${held.before}), after release ${landed}` +
     `; right-click: ${rclick.applied ? `applied "${rclick.reason}"` : `REFUSED "${rclick.busy}" -- a context menu deferred the rebuild`}` };
-}, { on: "all" });
+}, { on: "all", leaves: ["vg.shown"] });
 
 check("the invalidation registry names every cache a live rebuild stales", async (p) => {
   const names = await p.j("__vg.invalidations()");
@@ -8031,6 +8088,8 @@ check("a live rebuild re-arms the chip, so a note that arrives inside its window
     : `rebuild refused: ${r.reason}` };
 }, { on: "all" });
 
+// github#151 -- leaves vg.shown: a live rebuild adds or drops a note, and the new count is
+// github#151 -- the thing under test, not a leak to be put back
 check("word counts land by path, which is the only thing a live rebuild keeps", async (p) => {
   await settle(p);
   await p.eval(LIVE_JS);
@@ -8070,7 +8129,7 @@ check("word counts land by path, which is the only thing a live rebuild keeps", 
       `(index ${r.sample.i} now holds a different note); setWords by path landed on the right ` +
       `one (${r.landed}), the note at that index kept ${r.bystander}; a deleted path returns false`
     : `index and id never diverged -- this check cannot see the defect it exists for` };
-}, { on: WALK, clock: "real" });
+}, { on: WALK, clock: "real", leaves: ["vg.shown"] });
 
 // github#142
 check("an idle PNG export carries the graph, not just the background and the logo", async (p) => {
