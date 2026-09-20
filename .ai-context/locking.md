@@ -37,6 +37,39 @@ asker included — so the hook's own child process waits on a lock the hook itse
 separate names is what lets that nesting work at all. A sister plugin (`vault-shelf`) hit the same
 deadlock independently and reached the same design (`vault-shelf#37`).
 
+## Liveness: reaping a lock whose holder is already dead (github#130)
+
+Age alone used to decide staleness — a killed holder's lock blocked everyone else for the full
+window (20–30 min) exactly as if the process were still working. `acquire()` now also breaks a
+lock early when its record carries `holder: "process"`, its `pid` is provably dead
+(`process.kill(pid, 0)` throwing `ESRCH`), and the record is older than a 60s floor (so a record
+just written, before its writer has done anything else, is never reaped).
+
+`holder: "process"` is an **explicit opt-in**, passed only by the four callers that stay running
+for as long as they hold the lock and release it themselves: `smoke.mjs`'s `takeScreen()`,
+`spike-check.mjs`, `record-demo.ps1`, and `.githooks/pre-push`'s `suite` acquire. A bare manual
+`node scripts/lock.mjs acquire screen-right --owner me`, typed by hand at a terminal, never passes
+it and keeps the old age-only behavior — because that invocation looks identical, in process-tree
+shape, to the same script's own child call, and a human can legitimately outlive the shell that
+wrote the record. Breaking a human's held lock because their shell exited would be worse than the
+20-minute wait; this is the same gate the sister repo's (`vault-shelf`) own liveness fix uses.
+
+**The `pid` recorded under `--holder process` is `process.ppid`, not `process.pid`.** Every one of
+the four callers acquires the lock by spawning `node scripts/lock.mjs acquire ...` as a *child*
+process and blocking on it — that child's own pid is gone within milliseconds of writing the
+record, long before anyone reads it back. Its parent — the long-running `smoke.mjs`/
+`spike-check.mjs` node process, the `record-demo.ps1` PowerShell process, or the `pre-push` bash
+process — is the real holder, and `process.ppid` inside `lock.mjs` already equals it, with no
+extra plumbing needed at the call sites.
+
+`status()` tags a `holder: "process"` record whose pid is dead as `DEAD`, ahead of the existing
+`STALE` (age-only) tag — visible before the 20-minute window would otherwise have surfaced it.
+
+**Not done here:** reaping the sister repo's own lock records (`legacyHold()` / `aliasHold()`) by
+liveness. This repo now writes the `holder` field the sister repo's reaper needs to reap *our*
+dead locks; reaping *its* locks the same way would mean trusting a record shape it hasn't
+committed to — left for a follow-up once/if it writes `holder` the same way.
+
 ## The pre-push nesting
 
 `.githooks/pre-push` takes the `suite` lock itself, around its own run, and releases it on every

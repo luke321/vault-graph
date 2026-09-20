@@ -8652,7 +8652,7 @@ const SCREEN_OWNER = (() => {
 function takeScreen() {
   if (NO_LOCK) return false;
   const r = spawnSync(process.execPath,
-    [join(HERE, "lock.mjs"), "acquire", SCREEN_LOCK, "--owner", SCREEN_OWNER],
+    [join(HERE, "lock.mjs"), "acquire", SCREEN_LOCK, "--owner", SCREEN_OWNER, "--holder", "process"],
     { stdio: "inherit" });
   if (r.status !== 0) {
     console.error("");
