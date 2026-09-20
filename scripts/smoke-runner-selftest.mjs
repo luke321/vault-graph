@@ -2,6 +2,9 @@
 // github#146 -- the smoke runner's own scoring, with no Chrome
 
 import { makeErrorLog, runChecks, summarise } from "./smoke-runner.mjs";
+// github#151
+import { allowedToLeave, couplingReport, diffState, keysRead, leakReport, newLeaks,
+         tokensFor } from "./smoke-state.mjs";
 
 let failed = 0;
 /** @param {string} name @param {boolean} ok @param {string} [detail] */
@@ -20,11 +23,15 @@ function fakePage(opts = {}) {
     captured: (opts.captured || []).slice(),
     get errors() { return p.captured.slice(); },
     async send(method, params) { p.sent.push(method); void params; },
+    // github#151 -- the page state the probe reads back, for the audit's own regressions
+    state: Object.assign({}, opts.state || {}),
     async eval(expr) {
       if (p.dead) throw new Error("Inspector.detached");
       // github#146 -- honour the grace, so a window can close too early
       const grace = /setTimeout\(r, (\d+)\)/.exec(String(expr));
       if (grace) { await new Promise((r) => setTimeout(r, Number(grace[1]))); return undefined; }
+      // github#151 -- the state probe is the only expression that names this key
+      if (String(expr).includes("page.mounted")) return JSON.stringify(p.state);
       return expr === "1" ? 1 : undefined;
     },
     async j(expr) {
@@ -48,12 +55,17 @@ async function run(checks, opts = {}) {
   const ctx = { get errors() { return errorLog.errors; } };
   for (const e of opts.errors || []) ctx.errors.push(e);
   const log = quietLog();
+  // github#151 -- so a test can assert the wrapper was handed back
+  const beforeEval = page.eval;
   const r = await runChecks({
     checks, page, ctx, log, settle,
     chromeState: () => ({ gone: opts.gone || null, said: opts.said || [] }),
     fastClock: 0.1, nativeClock: 1.25,
-    finalGraceMs: opts.finalGraceMs === undefined ? 0 : opts.finalGraceMs
+    finalGraceMs: opts.finalGraceMs === undefined ? 0 : opts.finalGraceMs,
+    // github#151
+    stateAudit: !!opts.stateAudit, stateBoundary: !!opts.stateBoundary
   });
+  r.evalRestored = page.eval === beforeEval;
   return { ...r, lines: log.lines, text: log.lines.join("\n"), errors: ctx.errors, page };
 }
 
@@ -243,6 +255,227 @@ console.log("the error log");
   check("a long list is summarised, with a count of the rest",
         summarise(["a", "b", "c", "d"]) === "a | b | c (+1 more)",
         summarise(["a", "b", "c", "d"]));
+}
+
+console.log("");
+console.log("github#151 -- the state audit");
+
+// github#151 -- off unless asked for, and it leaves page.eval exactly as it found it
+{
+  const r = await run([pass("one"), pass("two")]);
+  check("the audit is off by default", r.audit === null, String(r.audit));
+  check("...and page.eval is never wrapped when it is off", r.evalRestored);
+}
+
+// github#151 -- what a check changed, and what it left off the job's baseline
+{
+  const r = await run([
+    { name: "leaves the camera moved",
+      fn: async (p) => { p.state["cam.ratio"] = "0.5"; return { ok: true, detail: "" }; } },
+    pass("changes nothing"),
+    { name: "moves it and puts it back",
+      fn: async (p) => { p.state["cam.ratio"] = "9"; p.state["cam.ratio"] = "0.5";
+                         return { ok: true, detail: "" }; } }
+  ], { stateAudit: true,
+       state: { "page.mounted": "true", "cam.ratio": "1", "state.selected": "null" } });
+
+  const rows = r.audit.rows;
+  check("the audit records one row per check", rows.length === 3, rows.length + " row(s)");
+  check("a check that moved a key reports it as changed",
+        rows[0].changed.length === 1 && rows[0].changed[0].key === "cam.ratio",
+        JSON.stringify(rows[0].changed));
+  check("...with the value on both sides",
+        rows[0].changed[0].from === "1" && rows[0].changed[0].to === "0.5");
+  check("...and as still off baseline", rows[0].dirty.some((d) => d.key === "cam.ratio"));
+  check("a check that changed nothing reports nothing changed", rows[1].changed.length === 0);
+  check("...but still reports what its predecessor left dirty",
+        rows[1].dirty.some((d) => d.key === "cam.ratio"));
+  check("the baseline is the state before the first check, not the first check's own",
+        r.audit.base["cam.ratio"] === "1", r.audit.base["cam.ratio"]);
+  check("a key moved and put back inside one check is not reported as changed by it",
+        rows[2].changed.length === 0 && rows[2].dirty.length === 1,
+        JSON.stringify(rows[2].changed) + " / " + JSON.stringify(rows[2].dirty));
+}
+
+// github#151 -- what a check read, and what the probe's own read must not be counted as
+{
+  const r = await run([
+    { name: "reads the selection",
+      fn: async (p) => { await p.eval("__vg.state.selected"); return { ok: true, detail: "" }; } }
+  ], { stateAudit: true,
+       state: { "page.mounted": "true", "state.selected": "null", "cam.ratio": "1",
+                "store.settings": "{}" } });
+  const reads = r.audit.rows[0].reads;
+  check("an expression naming a key counts as a read of it",
+        reads.includes("state.selected"), reads.join(", "));
+  check("...and a key it never names does not", !reads.includes("cam.ratio"), reads.join(", "));
+  // github#151 -- the probe itself names SETTINGS_KEY and localStorage, so store.settings
+  // github#151 -- appearing here would mean the probe's own eval landed in the check's list
+  check("the probe's own read is not counted as the check's",
+        !reads.includes("store.settings"), reads.join(", "));
+  check("the mount flag is never a read -- every expression names __vg",
+        !reads.includes("page.mounted") && tokensFor("page.mounted").length === 0,
+        reads.join(", "));
+  check("page.eval is handed back after the run", r.evalRestored);
+}
+
+// github#151 -- keysRead is an upper bound by construction: it matches tokens, not semantics
+{
+  const keys = { "state.selected": "", "cam.ratio": "", "ui.vg-q": "", "store.settings": "" };
+  check("a DOM id is the token for its own key",
+        keysRead(keys, ['document.getElementById("vg-q").value']).join() === "ui.vg-q");
+  check("the camera is reached through any of its accessors",
+        keysRead(keys, ["__vg.renderer.getCamera().getState()"]).join() === "cam.ratio");
+  check("the stored settings are reached through localStorage",
+        keysRead(keys, ["window.localStorage.getItem(k)"]).join() === "store.settings");
+  check("an expression naming none of them reads none",
+        keysRead(keys, ["__vg.graph.order"]).length === 0);
+  check("a camera key carries its accessors as tokens, never the bare word",
+        tokensFor("cam.ratio").includes("getCamera") && !tokensFor("cam.ratio").includes("ratio"),
+        tokensFor("cam.ratio").join(", "));
+}
+
+// github#151 -- the coupling: a read of a key an earlier check left off baseline
+{
+  const job = {
+    base: { "cam.ratio": "1", "state.selected": "null" },
+    rows: [
+      { name: "A moves the camera", changed: [{ key: "cam.ratio" }],
+        dirty: [{ key: "cam.ratio", from: "1", to: "0.5" }], reads: [] },
+      { name: "B reads the camera", changed: [],
+        dirty: [{ key: "cam.ratio", from: "1", to: "0.5" }], reads: ["cam.ratio"] },
+      { name: "C reads the selection", changed: [],
+        dirty: [{ key: "cam.ratio", from: "1", to: "0.5" }], reads: ["state.selected"] }
+    ]
+  };
+  const c = couplingReport(job);
+  check("a check reading a key left dirty before it is reported as coupled",
+        c.length === 1 && c[0].check === "B reads the camera", JSON.stringify(c));
+  check("...and the report names who left it", c[0].leftBy === "A moves the camera", c[0].leftBy);
+  check("...with the value it inherited", c[0].was === "0.5", c[0].was);
+  check("a read of a key still at baseline is not a coupling",
+        !c.some((x) => x.key === "state.selected"));
+  check("the check that left the key is not reported as coupled to itself",
+        !c.some((x) => x.check === "A moves the camera"));
+
+  const leaks = leakReport(job);
+  check("a leak is reported once, at the check that first took the key off baseline",
+        leaks.length === 1 && leaks[0].check === "A moves the camera" &&
+        leaks[0].keys.join() === "cam.ratio", JSON.stringify(leaks));
+}
+
+// github#151 -- diffing, both directions
+{
+  const d = diffState({ a: "1", gone: "x" }, { a: "2", fresh: "y" });
+  const by = Object.fromEntries(d.map((x) => [x.key, x]));
+  check("a changed key reports both sides", by.a && by.a.from === "1" && by.a.to === "2");
+  check("a key that disappeared is reported as absent", by.gone && by.gone.to === "(absent)");
+  check("a key that appeared is reported as absent before",
+        by.fresh && by.fresh.from === "(absent)");
+  check("an unchanged map diffs to nothing", diffState({ a: "1" }, { a: "1" }).length === 0);
+}
+
+console.log("");
+console.log("github#151 -- the reset boundary");
+
+// github#151 -- a check that leaves a key changed fails, and the one after it does not
+{
+  const r = await run([
+    pass("leaves nothing behind"),
+    { name: "leaves the camera moved",
+      fn: async (p) => { p.state["cam.ratio"] = "0.5"; return { ok: true, detail: "42 notes" }; } },
+    pass("inherits it and touches nothing")
+  ], { stateBoundary: true,
+       state: { "page.mounted": "true", "cam.ratio": "1", "state.selected": "null" } });
+
+  check("a check that left a key off baseline fails", r.failed === 1, "failed " + r.failed);
+  check("...naming the key and both values",
+        /left the page off its baseline: cam\.ratio 1 -> 0\.5/.test(r.text),
+        r.text.split("\n").join(" / "));
+  check("...while its own detail is kept",
+        /42 notes \| left the page off its baseline/.test(r.text));
+  check("the check before it is untouched", /  ok   leaves nothing behind/.test(r.text));
+  check("the check AFTER it passes -- one leak must not fail every check that follows",
+        /  ok   inherits it and touches nothing/.test(r.text), r.text.split("\n").join(" / "));
+}
+
+// github#151 -- a key moved and put back inside one check is not a leak
+{
+  const r = await run([
+    { name: "moves the camera and puts it back",
+      fn: async (p) => { p.state["cam.ratio"] = "9"; p.state["cam.ratio"] = "1";
+                         return { ok: true, detail: "" }; } }
+  ], { stateBoundary: true, state: { "page.mounted": "true", "cam.ratio": "1" } });
+  check("a check that restores what it changed is clean", r.failed === 0, "failed " + r.failed);
+}
+
+// github#151 -- and a check may DECLARE what it leaves, which is the point: the coupling
+// github#151 -- becomes visible in the source instead of implicit in the order
+{
+  const r = await run([
+    { name: "switches the disc and says so", leaves: ["state.dim"],
+      fn: async (p) => { p.state["state.dim"] = "tag"; return { ok: true, detail: "" }; } },
+    { name: "switches the disc back, cleaning up after it",
+      fn: async (p) => { p.state["state.dim"] = "folder"; return { ok: true, detail: "" }; } },
+    { name: "switches the disc and declares nothing",
+      fn: async (p) => { p.state["state.dim"] = "tag"; return { ok: true, detail: "" }; } }
+  ], { stateBoundary: true, state: { "page.mounted": "true", "state.dim": "folder" } });
+  check("a declared key may be left off baseline",
+        /  ok   switches the disc and says so/.test(r.text), r.text.split("\n").join(" / "));
+  check("a check that puts an inherited key BACK is not scored for touching it",
+        /  ok   switches the disc back, cleaning up after it/.test(r.text),
+        r.text.split("\n").join(" / "));
+  check("...and an undeclared leak still fails", r.failed === 1, "failed " + r.failed);
+}
+
+// github#151 -- the rule itself: newly off baseline, never merely changed
+{
+  const base = { a: "1", b: "1" };
+  check("a key taken off baseline is a new leak",
+        newLeaks(base, { a: "1", b: "1" }, { a: "2", b: "1" }).map((d) => d.key).join() === "a");
+  check("a key already off baseline is not the next check's leak",
+        newLeaks(base, { a: "2", b: "1" }, { a: "2", b: "1" }).length === 0);
+  check("a key moved from one off-baseline value to another is not a new leak either",
+        newLeaks(base, { a: "2", b: "1" }, { a: "3", b: "1" }).length === 0);
+  check("restoring an inherited key is never a leak",
+        newLeaks(base, { a: "2", b: "1" }, { a: "1", b: "1" }).length === 0);
+}
+
+// github#151 -- the declaration covers a family by prefix, and nothing wider
+{
+  check("an exact key is allowed", allowedToLeave("state.dim", ["state.dim"]));
+  check("a trailing dot covers the family", allowedToLeave("state.hidden", ["state."]));
+  check("...and nothing outside it", !allowedToLeave("cam.ratio", ["state."]));
+  check("a bare prefix with no dot is not a wildcard",
+        !allowedToLeave("state.dim", ["state"]));
+  check("declaring nothing allows nothing", !allowedToLeave("state.dim", []) &&
+        !allowedToLeave("state.dim", undefined));
+}
+
+// github#151 -- the boundary is off unless asked for, and costs nothing when it is
+{
+  const r = await run([
+    { name: "leaves the camera moved",
+      fn: async (p) => { p.state["cam.ratio"] = "0.5"; return { ok: true, detail: "" }; } }
+  ], { state: { "page.mounted": "true", "cam.ratio": "1" } });
+  check("with the boundary off, a leak does not fail anything", r.failed === 0,
+        "failed " + r.failed);
+  check("...and nothing is audited either", r.audit === null);
+}
+
+// github#151 -- the boundary alone needs no audit rows, and the audit alone scores nothing
+{
+  const leak = [{ name: "leaves the camera moved",
+                  fn: async (p) => { p.state["cam.ratio"] = "0.5"; return { ok: true, detail: "" }; } }];
+  const b = await run(leak, { stateBoundary: true,
+                              state: { "page.mounted": "true", "cam.ratio": "1" } });
+  check("the boundary without the audit still fails the leak and reports no rows",
+        b.failed === 1 && b.audit === null, "failed " + b.failed + ", audit " + b.audit);
+  const a = await run(leak, { stateAudit: true,
+                              state: { "page.mounted": "true", "cam.ratio": "1" } });
+  check("the audit without the boundary records the leak and fails nothing",
+        a.failed === 0 && a.audit.rows[0].changed.length === 1,
+        "failed " + a.failed);
 }
 
 console.log("");

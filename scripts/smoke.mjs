@@ -2,6 +2,8 @@
 import { attach, json } from "./cdp.mjs";
 // github#146
 import { makeErrorLog, runChecks } from "./smoke-runner.mjs";
+// github#151
+import { couplingReport, leakReport } from "./smoke-state.mjs";
 // github#142
 import { pngCaptureJs, pngCarriesGraph, pngCaptureDetail } from "./png-capture.mjs";
 import { buildPayloadVault, PAYLOAD, NOTE_COUNT } from "./check-data-escape.mjs";
@@ -34,6 +36,10 @@ const argAll = (n) => {
 // github#7
 const PINNED_PORT = arg("port", "") ? Number(arg("port", "")) : 0;
 // github#129
+// github#151 -- the state audit, off unless a file is named for it
+const AUDIT = arg("audit-state", "");
+// github#151 -- the boundary: a check that leaves the page off its baseline fails
+const BOUNDARY = !argv.includes("--no-state-boundary");
 const HEADED = argv.includes("--headed");
 // github#87
 const NO_LOCK = argv.includes("--no-lock");
@@ -87,7 +93,15 @@ const check = (name, fn, opts) => {
   if (on !== "all" && !(Array.isArray(on) && on.length && on.every((f) => FIXTURE_NAMES.includes(f)))) {
     throw new Error(`check "${name}": on must be "all" or a non-empty list of ${FIXTURE_NAMES.join(", ")}`);
   }
-  all.push({ name, fn, on, clock: (opts && opts.clock) === "real" ? "real" : "fast" });
+  // github#151 -- what this check is allowed to leave off the page's baseline, if anything.
+  // github#151 -- A declaration here is the coupling made visible; the absence of one is the
+  // github#151 -- claim that the check puts the page back exactly as it found it.
+  const leaves = (opts && opts.leaves) || undefined;
+  if (leaves !== undefined &&
+      !(Array.isArray(leaves) && leaves.length && leaves.every((k) => typeof k === "string" && k))) {
+    throw new Error(`check "${name}": leaves must be a non-empty list of state keys`);
+  }
+  all.push({ name, fn, on, clock: (opts && opts.clock) === "real" ? "real" : "fast", leaves });
 };
 const runsOn = (c, fixture) => !fixture || c.on === "all" || c.on.indexOf(fixture.name) >= 0;
 
@@ -8228,17 +8242,18 @@ async function runOne(vault, work) {
     await settle(page, 20000);
 
     // github#146
-    const { failed, ran, timings } = await runChecks({
+    const { failed, ran, timings, audit } = await runChecks({
       checks: mine, page, ctx, log, settle,
       chromeState: () => ({ gone: chromeGone, said: chromeSaid }),
-      fastClock: FAST_CLOCK, nativeClock
+      // github#151
+      fastClock: FAST_CLOCK, nativeClock, stateAudit: !!AUDIT, stateBoundary: BOUNDARY
     });
 
     const total = timings.reduce((a, t) => a + t.ms, 0);
     const slow = timings.slice().sort((a, b) => b.ms - a.ms).slice(0, 5);
     log(`\n${ran - failed}/${ran} passed in ${(total / 1000).toFixed(0)}s`);
     log("slowest: " + slow.map((t) => `${t.name} ${(t.ms / 1000).toFixed(1)}s`).join(", "));
-    return { failed, ran, lines, timings };
+    return { failed, ran, lines, timings, audit };
   } finally {
     try { if (page) await page.send("Browser.close"); } catch { }
     if (page) page.close();
@@ -8542,12 +8557,16 @@ async function main() {
   const ran = new Map();
   // github#113
   const timingsOut = [];
+  // github#151
+  const auditsOut = [];
   const bump = (work, r) => {
     const label = work.vault.label;
     failures.set(label, (failures.get(label) || 0) + r.failed);
     ran.set(label, (ran.get(label) || 0) + r.ran);
     const fixture = work.vault.fixture ? work.vault.fixture.name : label;
     for (const t of r.timings || []) timingsOut.push({ fixture, check: t.name, ms: t.ms });
+    // github#151
+    if (r.audit) auditsOut.push({ job: work.tag, fixture, ...r.audit });
   };
   const report = (work, r) => {
     console.log("=".repeat(72));
@@ -8596,6 +8615,44 @@ async function main() {
     console.log(`wrote ${timingsOut.length} timings to ${arg("timings", "")}`);
   }
 
+  // github#151 -- the audit: the file is the record, the summary is what a run prints
+  if (AUDIT && auditsOut.length) {
+    writeFileSync(AUDIT, JSON.stringify({ at: new Date().toISOString(), jobs: auditsOut }, null, 1) + "\n");
+    const bar = "=".repeat(72);
+    console.log(bar);
+    console.log("== state audit -- what each check left behind, and what the next one could read");
+    console.log(bar);
+    let leakN = 0, coupN = 0, probeMs = 0, probeN = 0;
+    for (const jb of auditsOut) {
+      const leaks = leakReport(jb), coupled = couplingReport(jb);
+      leakN += leaks.length; coupN += coupled.length;
+      for (const r of jb.rows) { probeMs += r.ms; probeN++; }
+      console.log("");
+      console.log(`-- ${jb.job}: ${jb.rows.length} checks, ` +
+                  `${Object.keys(jb.base).length} state keys, ` +
+                  `${leaks.length} check(s) left the page off baseline, ` +
+                  `${coupled.length} inherited-state read(s)`);
+      for (const l of leaks) {
+        console.log(`   left:  ${l.check}`);
+        console.log(`            ${l.keys.join(", ")}`);
+      }
+      /** @type {Map<string, string[]>} */
+      const byCheck = new Map();
+      for (const c of coupled) {
+        if (!byCheck.has(c.check)) byCheck.set(c.check, []);
+        (byCheck.get(c.check) || []).push(`${c.key} (left by ${c.leftBy})`);
+      }
+      for (const [name, list] of byCheck) {
+        console.log(`   reads: ${name}`);
+        for (const one of list) console.log(`            ${one}`);
+      }
+    }
+    console.log("");
+    console.log(`wrote ${auditsOut.length} job audit(s) to ${AUDIT}`);
+    console.log(`${leakN} leak(s), ${coupN} inherited read(s); ` +
+                `the probe cost ${(probeMs / 1000).toFixed(1)}s over ${probeN} check(s)`);
+  }
+
   let worst = 0;
   for (const v of vaults) worst = Math.max(worst, failures.get(v.label) || 0);
 
@@ -8619,6 +8676,9 @@ async function main() {
                 : arg("url", "") ? notFull("--url")
                 : vaults.some((v) => !v.fixture) ? notFull("an unstamped fixture")
                 // github#106
+                // github#151
+                : AUDIT ? notFull("--audit-state")
+                : !BOUNDARY ? notFull("--no-state-boundary")
                 : process.env.VG_FIXTURE_STORE ? notFull("VG_FIXTURE_STORE")
                 // github#103
                 : FIXTURE_NAMES.some((n) => !vaults.some((v) => v.fixture.name === n))
