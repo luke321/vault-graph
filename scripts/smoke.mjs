@@ -2265,9 +2265,12 @@ async function stageBox(p) {
              cx: r.left + r.width/2, cy: r.top + r.height/2 }; })()`);
 }
 
+// github#111 -- reads the page's own FIT_RATIO instead of a copy someone has to keep in sync
 async function camReset(p) {
-  await p.eval(`__vg.renderer.getCamera().setState({x:0.5,y:0.5,ratio:0.954,angle:0}); void 0`);
+  const fr = await p.j(`__vg.FIT_RATIO`);
+  await p.eval(`__vg.renderer.getCamera().setState({x:0.5,y:0.5,ratio:${fr},angle:0}); void 0`);
   await sleep(250);
+  return fr;
 }
 
 async function camSettle(p, ms = 4000) {
@@ -2329,10 +2332,10 @@ check("double-clicking the graph resets the view", async (p) => {
     await sleep(40);
   }
   const c = await camSettle(p);
-  await camReset(p);
+  const fr = await camReset(p);
   return {
-    ok: Math.abs(c.x - 0.5) < 0.002 && Math.abs(c.y - 0.5) < 0.002 && Math.abs(c.ratio - 0.954) < 0.02,
-    detail: `from (0.28, 0.66) ratio 4.2 -> (${c.x}, ${c.y}) ratio ${c.ratio}; reset is (0.5, 0.5) 0.954`,
+    ok: Math.abs(c.x - 0.5) < 0.002 && Math.abs(c.y - 0.5) < 0.002 && Math.abs(c.ratio - fr) < 0.02,
+    detail: `from (0.28, 0.66) ratio 4.2 -> (${c.x}, ${c.y}) ratio ${c.ratio}; reset is (0.5, 0.5) ${fr}`,
   };
 });
 
@@ -3715,7 +3718,7 @@ check("fit frames the disc that is actually there", async (p) => {
   await sleep(200);
   await p.eval(`document.querySelector("#vg-reset").click(); void 0`);
   const full = await camSettle(p);
-  const base = 0.954;
+  const base = await p.j(`__vg.FIT_RATIO`); // github#111
 
   const hid = await p.j(`(function(){
     var order = __vg.groupOrder();
@@ -3874,7 +3877,8 @@ check("hiding the biggest group auto-fits the camera, but only once it has finis
   await clickEye(p, g);
   const { movedWhileBusy, finalRatio } = await watchDuringCascade(p, rest.ratio);
   const dens = await p.j(`__vg.densityReport()`);
-  const want = 0.954 * Math.max(0.12, Math.min(1.35, dens.reach));
+  const fr = await p.j(`__vg.FIT_RATIO`); // github#111
+  const want = fr * Math.max(0.12, Math.min(1.35, dens.reach));
   const shrinking = want < rest.ratio - 0.01;
 
   await p.eval(`__vg.state.hidden.folder = {}; __vg.syncAlpha(); __vg.applyLayout(false); void 0`);
@@ -3909,7 +3913,8 @@ check("showing a hidden group auto-fits the camera while it is still arriving", 
   await clickEye(p, g);
   const { movedWhileBusy, finalRatio } = await watchDuringCascade(p, rest.ratio);
   const dens = await p.j(`__vg.densityReport()`);
-  const want = 0.954 * Math.max(0.12, Math.min(1.35, dens.reach));
+  const fr = await p.j(`__vg.FIT_RATIO`); // github#111
+  const want = fr * Math.max(0.12, Math.min(1.35, dens.reach));
   const growing = want > rest.ratio + 0.01;
 
   await p.eval(`__vg.state.hidden.folder = {}; __vg.syncAlpha(); __vg.applyLayout(false); void 0`);
