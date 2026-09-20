@@ -60,8 +60,9 @@ function makeAudit(page) {
 }
 
 /**
- * github#146, github#112, github#113
- * @returns {Promise<{ failed: number, ran: number, timings: {name: string, ms: number}[] }>}
+ * github#146, github#112, github#113, github#151
+ * @returns {Promise<{ failed: number, ran: number, timings: {name: string, ms: number}[],
+ *                     audit: { base: Record<string, string>, rows: object[] } | null }>}
  */
 export async function runChecks(opts) {
   const { checks, page, ctx, log, settle, chromeState, fastClock, nativeClock } = opts;
@@ -149,16 +150,15 @@ export async function runChecks(opts) {
       const exprs = audit.close();
       const t1 = Date.now();
       const now = await readState(page);
-      const changed = diffState(prevState, now);
       if (auditing) {
-        auditRows.push({ name: c.name, changed,
+        auditRows.push({ name: c.name, changed: diffState(prevState, now),
                          dirty: diffState(baseState, now), reads: keysRead(baseState, exprs),
                          ms: Date.now() - t1 });
       }
       // github#151 -- what this check took off the job's baseline, minus what it declared.
       // github#151 -- Not "changed since the last boundary": that would fail a check for putting
       // github#151 -- an inherited key back, and would fail every check after one unfixed leak.
-      // github#151 -- an unreadable sample scores nothing: see readable() for why
+      // github#151 -- An unreadable sample scores nothing at all: see readable() for why.
       if (bounding && readable(baseState) && readable(prevState) && readable(now)) {
         const leaked = newLeaks(baseState, prevState, now)
                          .filter((d) => !allowedToLeave(d.key, c.leaves));

@@ -401,9 +401,9 @@ console.log("github#151 -- the reset boundary");
         r.text.split("\n").join(" / "));
   check("...while its own detail is kept",
         /42 notes \| left the page off its baseline/.test(r.text));
-  check("the check before it is untouched", /  ok   leaves nothing behind/.test(r.text));
+  check("the check before it is untouched", / {2}ok {3}leaves nothing behind/.test(r.text));
   check("the check AFTER it passes -- one leak must not fail every check that follows",
-        /  ok   inherits it and touches nothing/.test(r.text), r.text.split("\n").join(" / "));
+        / {2}ok {3}inherits it and touches nothing/.test(r.text), r.text.split("\n").join(" / "));
 }
 
 // github#151 -- a key moved and put back inside one check is not a leak
@@ -428,9 +428,9 @@ console.log("github#151 -- the reset boundary");
       fn: async (p) => { p.state["state.dim"] = "tag"; return { ok: true, detail: "" }; } }
   ], { stateBoundary: true, state: { "page.mounted": "true", "state.dim": "folder" } });
   check("a declared key may be left off baseline",
-        /  ok   switches the disc and says so/.test(r.text), r.text.split("\n").join(" / "));
+        / {2}ok {3}switches the disc and says so/.test(r.text), r.text.split("\n").join(" / "));
   check("a check that puts an inherited key BACK is not scored for touching it",
-        /  ok   switches the disc back, cleaning up after it/.test(r.text),
+        / {2}ok {3}switches the disc back, cleaning up after it/.test(r.text),
         r.text.split("\n").join(" / "));
   check("...and an undeclared leak still fails", r.failed === 1, "failed " + r.failed);
 }
