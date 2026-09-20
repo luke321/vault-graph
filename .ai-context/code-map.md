@@ -557,279 +557,279 @@ range, not the file. Stale when `node scripts/code-map.mjs --check` fails.
 | 11849 | · · · · · · · · · · `byPath` |
 | 12038 | `destroy` |
 
-## `scripts/smoke.mjs` — 8692 lines, 13 sections, 89 functions, 158 checks
+## `scripts/smoke.mjs` — 8677 lines, 13 sections, 89 functions, 158 checks
 
 ### Sections
 
 | lines | section |
 |---|---|
-| 70–76 | chrome |
-| 77–634 | the checks |
-| 635–1159 | github#86, design/0015 |
-| 1160–1228 | github#116 |
-| 1229–1618 | github#71 |
-| 1619–2248 | github#86 D-9, design/0015 |
-| 2249–4364 | camera |
-| 4365–5900 | date range |
-| 5901–7401 | the hub |
-| 7402–7820 | github#165 |
-| 7821–8090 | live rebuild (github#72) |
-| 8091–8294 | the run |
-| 8295–8692 | which vaults, and why |
+| 69–75 | chrome |
+| 76–633 | the checks |
+| 634–1158 | github#86, design/0015 |
+| 1159–1227 | github#116 |
+| 1228–1617 | github#71 |
+| 1618–2247 | github#86 D-9, design/0015 |
+| 2248–4363 | camera |
+| 4364–5899 | date range |
+| 5900–7400 | the hub |
+| 7401–7819 | github#165 |
+| 7820–8089 | live rebuild (github#72) |
+| 8090–8293 | the run |
+| 8294–8677 | which vaults, and why |
 
 ### Functions
 
 | line | function |
 |---|---|
-| 42 | `freePorts` |
-| 59 | `freePort` |
-| 114 | `gridSlot` |
-| 271 | · `at` |
-| 370 | `hostileVaults` |
-| 487 | · `lattice` |
-| 531 | · `t` |
-| 643 | · `txt` |
-| 673 | · `look` |
-| 729 | · `pos` |
-| 732 | · `drift` |
-| 874 | · · `sweep` |
-| 949 | · `live` |
-| 953 | · `hideFirst` |
-| 1065 | · `sweep` |
-| 1169 | · `q` |
-| 1448 | · `spec` |
-| 1488 | · `shape` |
-| 1544 | · `read` |
-| 1577 | · `read` |
-| 1828 | · `shown` |
-| 1935 | · `snap` |
-| 2070 | · `pick` |
-| 2257 | `camState` |
-| 2262 | `stageBox` |
-| 2269 | `camReset` |
-| 2276 | `camSettle` |
-| 2395 | · · · `capOf` |
-| 2462 | · `box` |
-| 2576 | · `box` |
-| 2580 | · `read` |
-| 2636 | `box` |
-| 2882 | · · · · `h` |
-| 3033 | · `h` |
-| 3421 | · · `stop` |
-| 3819 | `toRest` |
-| 3828 | `clickEye` |
-| 3837 | `biggestGroup` |
-| 3847 | `watchDuringCascade` |
-| 4036 | `ovState` |
-| 4054 | `camTo` |
-| 4249 | · `tick` |
-| 4345 | · `r3` |
-| 4378 | `ribbonBox` |
-| 4385 | `rangeSnap` |
-| 4401 | `xOfMs` |
-| 4405 | `trackPress` |
-| 4416 | `winTravel` |
-| 4429 | `ribbonDrag` |
-| 4445 | `clearRange` |
-| 4681 | · `snap` |
-| 4695 | · `tick` |
-| 4966 | `walkSolo` |
-| 5030 | `soloDetail` |
-| 5480 | · `isDay` |
-| 5487 | · `pad` |
-| 5497 | · `wOf` |
-| 5813 | · `snap` |
-| 5824 | · `diff` |
-| 5847 | · `hiddenByDefault` |
-| 5903 | `topByDegree` |
-| 5910 | `pinN` |
-| 6073 | `pinIdentityBuilds` |
-| 6146 | · · · `name` |
-| 6717 | · `norm` |
-| 6874 | · · · `mean` |
-| 6931 | · `norm` |
-| 7025 | · `bars` |
-| 7026 | · `rows` |
-| 7130 | · `f` |
-| 7134 | · `read` |
-| 7247 | · `lower` |
-| 7248 | · `read` |
-| 7320 | · `look` |
-| 7620 | · `pick` |
-| 7661 | `pressKey` |
-| 7673 | `trailState` |
-| 7674 | `selectBySearch` |
-| 7683 | `hop` |
-| 7692 | `closeCard` |
-| 7693 | `stepBack` |
-| 8076 | `settle` |
-| 8093 | `runOne` |
-| 8253 | `killBrowser` |
-| 8373 | `resolveVaults` |
-| 8473 | `buildFor` |
-| 8493 | `main` |
-| 8657 | `takeScreen` |
-| 8674 | `dropScreen` |
+| 41 | `freePorts` |
+| 58 | `freePort` |
+| 113 | `gridSlot` |
+| 270 | · `at` |
+| 369 | `hostileVaults` |
+| 486 | · `lattice` |
+| 530 | · `t` |
+| 642 | · `txt` |
+| 672 | · `look` |
+| 728 | · `pos` |
+| 731 | · `drift` |
+| 873 | · · `sweep` |
+| 948 | · `live` |
+| 952 | · `hideFirst` |
+| 1064 | · `sweep` |
+| 1168 | · `q` |
+| 1447 | · `spec` |
+| 1487 | · `shape` |
+| 1543 | · `read` |
+| 1576 | · `read` |
+| 1827 | · `shown` |
+| 1934 | · `snap` |
+| 2069 | · `pick` |
+| 2256 | `camState` |
+| 2261 | `stageBox` |
+| 2268 | `camReset` |
+| 2275 | `camSettle` |
+| 2394 | · · · `capOf` |
+| 2461 | · `box` |
+| 2575 | · `box` |
+| 2579 | · `read` |
+| 2635 | `box` |
+| 2881 | · · · · `h` |
+| 3032 | · `h` |
+| 3420 | · · `stop` |
+| 3818 | `toRest` |
+| 3827 | `clickEye` |
+| 3836 | `biggestGroup` |
+| 3846 | `watchDuringCascade` |
+| 4035 | `ovState` |
+| 4053 | `camTo` |
+| 4248 | · `tick` |
+| 4344 | · `r3` |
+| 4377 | `ribbonBox` |
+| 4384 | `rangeSnap` |
+| 4400 | `xOfMs` |
+| 4404 | `trackPress` |
+| 4415 | `winTravel` |
+| 4428 | `ribbonDrag` |
+| 4444 | `clearRange` |
+| 4680 | · `snap` |
+| 4694 | · `tick` |
+| 4965 | `walkSolo` |
+| 5029 | `soloDetail` |
+| 5479 | · `isDay` |
+| 5486 | · `pad` |
+| 5496 | · `wOf` |
+| 5812 | · `snap` |
+| 5823 | · `diff` |
+| 5846 | · `hiddenByDefault` |
+| 5902 | `topByDegree` |
+| 5909 | `pinN` |
+| 6072 | `pinIdentityBuilds` |
+| 6145 | · · · `name` |
+| 6716 | · `norm` |
+| 6873 | · · · `mean` |
+| 6930 | · `norm` |
+| 7024 | · `bars` |
+| 7025 | · `rows` |
+| 7129 | · `f` |
+| 7133 | · `read` |
+| 7246 | · `lower` |
+| 7247 | · `read` |
+| 7319 | · `look` |
+| 7619 | · `pick` |
+| 7660 | `pressKey` |
+| 7672 | `trailState` |
+| 7673 | `selectBySearch` |
+| 7682 | `hop` |
+| 7691 | `closeCard` |
+| 7692 | `stepBack` |
+| 8075 | `settle` |
+| 8092 | `runOne` |
+| 8252 | `killBrowser` |
+| 8372 | `resolveVaults` |
+| 8458 | `buildFor` |
+| 8478 | `main` |
+| 8642 | `takeScreen` |
+| 8659 | `dropScreen` |
 
 ### Checks
 
 | line | check |
 |---|---|
-| 125 | page loads with no console errors |
-| 129 | __vg is present and the intro landed |
-| 135 | a closing-script marker in frontmatter cannot escape the data script |
-| 177 | a node id carrying quotes round-trips through data-pin, data-go and data-hit |
-| 233 | legend opens folded to top-level folders |
-| 242 | nav counts share one right edge |
-| 267 | every heatmap day with notes fills its cell |
-| 286 | the heatmap grid fits its box and is centred in it |
-| 303 | no note is dropped from a heatmap cell's tiling |
-| 317 | the heatmap band is painted for the state it landed in |
-| 347 | plan parity at full vault |
-| 353 | plan parity and zero-weight invariance with each folder hidden |
-| 402 | a folder named after an Object.prototype member still lays out |
-| 470 | the resting disc is on the lattice |
-| 512 | band assignment obeys its two hard rules |
-| 552 | layout matches its golden snapshot |
-| 637 | tags: folders is the default, and the switch is in the group list's own heading |
-| 671 | tags: every note is filed in exactly one wedge, in either dimension |
-| 725 | tags: the switch lands where a fresh relayout would, and comes home exactly |
-| 767 | tags: a dot in the disc being left keeps its colour until it has faded |
-| 838 | tags: a note one disc hides and the other shows arrives with the fill edge |
-| 916 | tags: the two buckets stay out of the hue rotation and sort last |
-| 947 | tags: each dimension keeps its own hidden and collapsed state |
-| 1000 | tags: a nested tag earns a sub-wedge, exactly as a subfolder does |
-| 1060 | arc: a plan over the whole circle is the resting disc, and over half of it stays in half |
-| 1096 | tags: each grouping keeps its own colours, and the settings tabs reach both |
-| 1162 | the sidebar chrome stays put when a dimension switch adds or drops its scrollbar |
-| 1231 | the wedge order follows the file explorer spec |
-| 1321 | a vault with no sortspec is laid out in name order |
-| 1341 | an unreadable sortspec falls back to name order and names the line |
-| 1372 | a sortspec naming a folder that is gone is ignored, not fatal |
-| 1404 | a broken target-folder takes its pins with it, never the spec's own folder |
-| 1445 | order-asc: a-z reads numbers as numbers, and true a-z as text |
-| 1476 | a leading slash anchors a sortspec target at the vault root |
-| 1541 | a folder keeps its colour when the wedge order changes |
-| 1574 | the vault root sorts with the folders, and keeps its colour there |
-| 1621 | a marked heatmap day haloes but never pushes |
-| 1640 | a marked heatmap day recolours its notes |
-| 1680 | the 7-day chip spans seven days on every weekday, Today included |
-| 1723 | a recent chip haloes but never pushes |
-| 1743 | a recent chip dims what it did not match, and gives it back |
-| 1773 | a lit note stays lit while a dimension switch draws it as a stand-in |
-| 1824 | the band counts the date it names |
-| 1865 | a picked day marks exactly the notes that tile counted |
-| 1893 | a bulk day is named rather than hidden |
-| 1926 | the band's control row does not move when its state changes |
-| 1972 | every control in the band's row is the same height |
-| 2000 | the exported page offers no since-last-open chip |
-| 2012 | hovering a note ramps in and releases at zero |
-| 2067 | highlighting ramps per note and is additive |
-| 2089 | tags: a live rebuild in the tag disc refiles the arrival and keeps the rings it was switched into |
-| 2131 | hover re-arms after the pointer leaves the stage |
-| 2187 | a sub-pixel dot can still be hovered |
-| 2234 | a highlighted note is drawn larger |
-| 2289 | one wheel notch is a step, not a leap |
-| 2303 | dragging the stage pans the camera |
-| 2324 | double-clicking the graph resets the view |
-| 2343 | the camera cluster is bottom-right, in order, and 31px |
-| 2453 | the panel toggles fold each panel away and give the space back |
-| 2783 | a phone gets the disc whole and clear, on a page that scrolls |
-| 2997 | a narrow window with a pointer keeps the desktop's answer |
-| 3085 | a settings push keeps a phone's zoom |
-| 3143 | the calendar follows a phone that rotates |
-| 3231 | a swipe after Fit still scrolls, and a late finger still pinches |
-| 3328 | a swipe in the tail of a fit flight still scrolls |
-| 3408 | a settings push during a fit flight changes nothing |
-| 3497 | a rotation to landscape writes the host nothing |
-| 3570 | narrow() costs no MediaQueryList |
-| 3589 | the disc's density follows the notes on screen |
-| 3683 | the hub stays the same share of the disc as it is filtered |
-| 3716 | fit frames the disc that is actually there |
-| 3768 | a resize re-centres a fitted disc on the new stage |
-| 3868 | hiding the biggest group auto-fits the camera, but only once it has finished leaving |
-| 3903 | showing a hidden group auto-fits the camera while it is still arriving |
-| 3939 | a manually moved camera is left alone by a visibility toggle |
-| 3973 | the zoom buttons step by one wheel notch |
-| 3990 | the pan toggle locks the camera and flies home |
-| 4060 | the overview is absent at rest and appears only while the disc is cropped |
-| 4105 | the overview footprint is drawn to the disc's scale and is never clamped |
-| 4174 | clicking the overview fits the disc through fit(), with panning on or off |
-| 4239 | the overview stays away while a programmatic auto-fit crops the disc |
-| 4280 | a link's stroke holds its width at any zoom |
-| 4331 | the resting web is not floored wider than it asks for |
-| 4451 | a drag on the ribbon caps the date range |
-| 4463 | dragging one brush edge leaves the other alone |
-| 4485 | dragging inside the brush pans it and keeps its width |
-| 4501 | the band's window and the brush move independently |
-| 4536 | a press on the window track centres the window there |
-| 4579 | the disc waits for the release |
-| 4609 | All dates clears the range and the window |
-| 4624 | a range change animates instead of snapping |
-| 4674 | the last frame of a cascade is the resting layout |
-| 4801 | filtered to the bone, the disc stays drawable |
-| 5037 | a dot never outgrows its resting size while a cascade walks |
-| 5045 | with Size dots from the frame on, a walking dot is held under its two resting sizes, never above |
-| 5055 | an arriving note's fade never reverses during a solo switch |
-| 5112 | the gap reservation holds still while groups only thin |
-| 5158 | the date fields set the range and follow it |
-| 5207 | the year buttons select a year and halo it on hover |
-| 5314 | the ribbon rescales with its slot |
-| 5359 | the intro sweeps the range end across the strip |
-| 5405 | compact axis: a year's width tracks its own note count |
-| 5444 | compact axis: sparse years cluster near the same floor width |
-| 5473 | the ribbon's right edge is a day the vault has actually reached |
-| 5554 | compact axis: the settings-panel toggle actually flips the live state |
-| 5585 | colour unlinked by folder: the settings-panel toggle actually flips the live state |
-| 5617 | colour unlinked notes by folder: the settings-panel toggle actually flips the live state |
-| 5646 | compact axis: the view-level icon actually flips the live state, and persists |
-| 5669 | no non-tail split cell holds fewer notes than its band's row depth |
-| 5694 | the row-depth gate reads LIVE counts, not the whole-vault tally, under a filter |
-| 5731 | undated notes survive every range |
-| 5751 | overriding one folder recolours exactly one group |
-| 5778 | no working group is handed a grey by where it sorts |
-| 5804 | a folder keeps its slot across the membership toggle |
-| 5844 | a folder's legend row toggles \"hidden by default\" from its context menu |
-| 5918 | a pinned note leaves no gap in the ring it came from |
-| 5959 | the hub's dots shrink as it fills |
-| 5975 | a soloed hub-adjacent note stays inside the hub's own radius |
-| 6024 | the mark yields to the hub and comes back |
-| 6046 | a pin hidden by a filter is skipped, not released |
-| 6105 | a pin is stored by the note's path, not by its position |
-| 6208 | every unlinked note wears the (unlinked) swatch |
-| 6240 | the (unlinked) row's right-click toggle moves unlinked notes into their folder |
-| 6292 | the (unlinked) row's right-click tint toggle recolours notes without moving them |
-| 6341 | the (unlinked) row opens its menu with no notes in it |
-| 6388 | the (unlinked) row's count is parenthesised while kept separate, plain once joined |
-| 6405 | legend count bars scale to the largest visible folder |
-| 6638 | the thinnest count bar survives a hover in pixels, not just in CSS |
-| 6749 | the count bars walk on the cascade's clock and land on the resting layout |
-| 6808 | a bar that loses its folder shrinks over the cascade instead of blinking out |
-| 6926 | the legend's swatch and count bar follow the token across a theme flip, with the picker |
-| 7017 | count bars are on by default, and the settings toggle removes every bar |
-| 7072 | the picker's contrast numbers are the harness's |
-| 7117 | the picker repaints itself on a theme change, with no rebuild |
-| 7178 | the picker draws the disc's own dot sizes |
-| 7231 | the picker's ladder is the ladder the disc draws |
-| 7313 | the picker's settings surface holds every slot without scrolling sideways |
-| 7379 | the picker stays inside the mount |
-| 7421 | the disc's right-click does nothing until Developer debug is on |
-| 7453 | a right-click on a note still pins it, and opens no developer menu |
-| 7490 | the developer menu's grid item draws the wedge overlay |
-| 7530 | the grid drawn from the menu is the whole grid, and no dot moves to get it |
-| 7568 | the grid's key sits bottom left, clear of every button over the graph |
-| 7617 | the developer menu's slow motion reaches the animation clock |
-| 7651 | focus web stays above dim notes |
-| 7699 | only a hop lengthens the trail |
-| 7718 | stepping back never re-collects a hop |
-| 7735 | a crumb click truncates the trail at the crumb |
-| 7750 | the trail is not layout |
-| 7773 | the page claims no keyboard shortcut |
-| 7796 | re-selecting the same note keeps the trail, and a filter does not clear it |
-| 7874 | a live rebuild with the same data moves nothing |
-| 7889 | a rebuild waits for a drag, and a right-click is not a drag |
-| 7936 | the invalidation registry names every cache a live rebuild stales |
-| 7945 | a live rebuild lands on the layout a fresh relayout gives |
-| 7977 | a live rebuild re-arms the chip, so a note that arrives inside its window is lit |
-| 8020 | word counts land by path, which is the only thing a live rebuild keeps |
-| 8062 | an idle PNG export carries the graph, not just the background and the logo |
+| 124 | page loads with no console errors |
+| 128 | __vg is present and the intro landed |
+| 134 | a closing-script marker in frontmatter cannot escape the data script |
+| 176 | a node id carrying quotes round-trips through data-pin, data-go and data-hit |
+| 232 | legend opens folded to top-level folders |
+| 241 | nav counts share one right edge |
+| 266 | every heatmap day with notes fills its cell |
+| 285 | the heatmap grid fits its box and is centred in it |
+| 302 | no note is dropped from a heatmap cell's tiling |
+| 316 | the heatmap band is painted for the state it landed in |
+| 346 | plan parity at full vault |
+| 352 | plan parity and zero-weight invariance with each folder hidden |
+| 401 | a folder named after an Object.prototype member still lays out |
+| 469 | the resting disc is on the lattice |
+| 511 | band assignment obeys its two hard rules |
+| 551 | layout matches its golden snapshot |
+| 636 | tags: folders is the default, and the switch is in the group list's own heading |
+| 670 | tags: every note is filed in exactly one wedge, in either dimension |
+| 724 | tags: the switch lands where a fresh relayout would, and comes home exactly |
+| 766 | tags: a dot in the disc being left keeps its colour until it has faded |
+| 837 | tags: a note one disc hides and the other shows arrives with the fill edge |
+| 915 | tags: the two buckets stay out of the hue rotation and sort last |
+| 946 | tags: each dimension keeps its own hidden and collapsed state |
+| 999 | tags: a nested tag earns a sub-wedge, exactly as a subfolder does |
+| 1059 | arc: a plan over the whole circle is the resting disc, and over half of it stays in half |
+| 1095 | tags: each grouping keeps its own colours, and the settings tabs reach both |
+| 1161 | the sidebar chrome stays put when a dimension switch adds or drops its scrollbar |
+| 1230 | the wedge order follows the file explorer spec |
+| 1320 | a vault with no sortspec is laid out in name order |
+| 1340 | an unreadable sortspec falls back to name order and names the line |
+| 1371 | a sortspec naming a folder that is gone is ignored, not fatal |
+| 1403 | a broken target-folder takes its pins with it, never the spec's own folder |
+| 1444 | order-asc: a-z reads numbers as numbers, and true a-z as text |
+| 1475 | a leading slash anchors a sortspec target at the vault root |
+| 1540 | a folder keeps its colour when the wedge order changes |
+| 1573 | the vault root sorts with the folders, and keeps its colour there |
+| 1620 | a marked heatmap day haloes but never pushes |
+| 1639 | a marked heatmap day recolours its notes |
+| 1679 | the 7-day chip spans seven days on every weekday, Today included |
+| 1722 | a recent chip haloes but never pushes |
+| 1742 | a recent chip dims what it did not match, and gives it back |
+| 1772 | a lit note stays lit while a dimension switch draws it as a stand-in |
+| 1823 | the band counts the date it names |
+| 1864 | a picked day marks exactly the notes that tile counted |
+| 1892 | a bulk day is named rather than hidden |
+| 1925 | the band's control row does not move when its state changes |
+| 1971 | every control in the band's row is the same height |
+| 1999 | the exported page offers no since-last-open chip |
+| 2011 | hovering a note ramps in and releases at zero |
+| 2066 | highlighting ramps per note and is additive |
+| 2088 | tags: a live rebuild in the tag disc refiles the arrival and keeps the rings it was switched into |
+| 2130 | hover re-arms after the pointer leaves the stage |
+| 2186 | a sub-pixel dot can still be hovered |
+| 2233 | a highlighted note is drawn larger |
+| 2288 | one wheel notch is a step, not a leap |
+| 2302 | dragging the stage pans the camera |
+| 2323 | double-clicking the graph resets the view |
+| 2342 | the camera cluster is bottom-right, in order, and 31px |
+| 2452 | the panel toggles fold each panel away and give the space back |
+| 2782 | a phone gets the disc whole and clear, on a page that scrolls |
+| 2996 | a narrow window with a pointer keeps the desktop's answer |
+| 3084 | a settings push keeps a phone's zoom |
+| 3142 | the calendar follows a phone that rotates |
+| 3230 | a swipe after Fit still scrolls, and a late finger still pinches |
+| 3327 | a swipe in the tail of a fit flight still scrolls |
+| 3407 | a settings push during a fit flight changes nothing |
+| 3496 | a rotation to landscape writes the host nothing |
+| 3569 | narrow() costs no MediaQueryList |
+| 3588 | the disc's density follows the notes on screen |
+| 3682 | the hub stays the same share of the disc as it is filtered |
+| 3715 | fit frames the disc that is actually there |
+| 3767 | a resize re-centres a fitted disc on the new stage |
+| 3867 | hiding the biggest group auto-fits the camera, but only once it has finished leaving |
+| 3902 | showing a hidden group auto-fits the camera while it is still arriving |
+| 3938 | a manually moved camera is left alone by a visibility toggle |
+| 3972 | the zoom buttons step by one wheel notch |
+| 3989 | the pan toggle locks the camera and flies home |
+| 4059 | the overview is absent at rest and appears only while the disc is cropped |
+| 4104 | the overview footprint is drawn to the disc's scale and is never clamped |
+| 4173 | clicking the overview fits the disc through fit(), with panning on or off |
+| 4238 | the overview stays away while a programmatic auto-fit crops the disc |
+| 4279 | a link's stroke holds its width at any zoom |
+| 4330 | the resting web is not floored wider than it asks for |
+| 4450 | a drag on the ribbon caps the date range |
+| 4462 | dragging one brush edge leaves the other alone |
+| 4484 | dragging inside the brush pans it and keeps its width |
+| 4500 | the band's window and the brush move independently |
+| 4535 | a press on the window track centres the window there |
+| 4578 | the disc waits for the release |
+| 4608 | All dates clears the range and the window |
+| 4623 | a range change animates instead of snapping |
+| 4673 | the last frame of a cascade is the resting layout |
+| 4800 | filtered to the bone, the disc stays drawable |
+| 5036 | a dot never outgrows its resting size while a cascade walks |
+| 5044 | with Size dots from the frame on, a walking dot is held under its two resting sizes, never above |
+| 5054 | an arriving note's fade never reverses during a solo switch |
+| 5111 | the gap reservation holds still while groups only thin |
+| 5157 | the date fields set the range and follow it |
+| 5206 | the year buttons select a year and halo it on hover |
+| 5313 | the ribbon rescales with its slot |
+| 5358 | the intro sweeps the range end across the strip |
+| 5404 | compact axis: a year's width tracks its own note count |
+| 5443 | compact axis: sparse years cluster near the same floor width |
+| 5472 | the ribbon's right edge is a day the vault has actually reached |
+| 5553 | compact axis: the settings-panel toggle actually flips the live state |
+| 5584 | colour unlinked by folder: the settings-panel toggle actually flips the live state |
+| 5616 | colour unlinked notes by folder: the settings-panel toggle actually flips the live state |
+| 5645 | compact axis: the view-level icon actually flips the live state, and persists |
+| 5668 | no non-tail split cell holds fewer notes than its band's row depth |
+| 5693 | the row-depth gate reads LIVE counts, not the whole-vault tally, under a filter |
+| 5730 | undated notes survive every range |
+| 5750 | overriding one folder recolours exactly one group |
+| 5777 | no working group is handed a grey by where it sorts |
+| 5803 | a folder keeps its slot across the membership toggle |
+| 5843 | a folder's legend row toggles \"hidden by default\" from its context menu |
+| 5917 | a pinned note leaves no gap in the ring it came from |
+| 5958 | the hub's dots shrink as it fills |
+| 5974 | a soloed hub-adjacent note stays inside the hub's own radius |
+| 6023 | the mark yields to the hub and comes back |
+| 6045 | a pin hidden by a filter is skipped, not released |
+| 6104 | a pin is stored by the note's path, not by its position |
+| 6207 | every unlinked note wears the (unlinked) swatch |
+| 6239 | the (unlinked) row's right-click toggle moves unlinked notes into their folder |
+| 6291 | the (unlinked) row's right-click tint toggle recolours notes without moving them |
+| 6340 | the (unlinked) row opens its menu with no notes in it |
+| 6387 | the (unlinked) row's count is parenthesised while kept separate, plain once joined |
+| 6404 | legend count bars scale to the largest visible folder |
+| 6637 | the thinnest count bar survives a hover in pixels, not just in CSS |
+| 6748 | the count bars walk on the cascade's clock and land on the resting layout |
+| 6807 | a bar that loses its folder shrinks over the cascade instead of blinking out |
+| 6925 | the legend's swatch and count bar follow the token across a theme flip, with the picker |
+| 7016 | count bars are on by default, and the settings toggle removes every bar |
+| 7071 | the picker's contrast numbers are the harness's |
+| 7116 | the picker repaints itself on a theme change, with no rebuild |
+| 7177 | the picker draws the disc's own dot sizes |
+| 7230 | the picker's ladder is the ladder the disc draws |
+| 7312 | the picker's settings surface holds every slot without scrolling sideways |
+| 7378 | the picker stays inside the mount |
+| 7420 | the disc's right-click does nothing until Developer debug is on |
+| 7452 | a right-click on a note still pins it, and opens no developer menu |
+| 7489 | the developer menu's grid item draws the wedge overlay |
+| 7529 | the grid drawn from the menu is the whole grid, and no dot moves to get it |
+| 7567 | the grid's key sits bottom left, clear of every button over the graph |
+| 7616 | the developer menu's slow motion reaches the animation clock |
+| 7650 | focus web stays above dim notes |
+| 7698 | only a hop lengthens the trail |
+| 7717 | stepping back never re-collects a hop |
+| 7734 | a crumb click truncates the trail at the crumb |
+| 7749 | the trail is not layout |
+| 7772 | the page claims no keyboard shortcut |
+| 7795 | re-selecting the same note keeps the trail, and a filter does not clear it |
+| 7873 | a live rebuild with the same data moves nothing |
+| 7888 | a rebuild waits for a drag, and a right-click is not a drag |
+| 7935 | the invalidation registry names every cache a live rebuild stales |
+| 7944 | a live rebuild lands on the layout a fresh relayout gives |
+| 7976 | a live rebuild re-arms the chip, so a note that arrives inside its window is lit |
+| 8019 | word counts land by path, which is the only thing a live rebuild keeps |
+| 8061 | an idle PNG export carries the graph, not just the background and the logo |

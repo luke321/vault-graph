@@ -9,12 +9,11 @@ import { findChrome } from "./chrome.mjs";
 import { leftmostScreen, leftWindowPos } from "./screen.mjs";
 import { keepFocus } from "./focus.mjs";
 import { FIXTURE_MAX_AGE_DAYS, FIXTURE_NAMES, checkFixture, countNotes, describeFixture,
-         DEFAULT_JOBS, fixtureStore, record as recordPass, shapeDeltas,
-         startRun } from "./suite-stamp.mjs";
+         DEFAULT_JOBS, fixtureDigest, fixtureStore, record as recordPass, shapeDeltas,
+         stampFixture, startRun } from "./suite-stamp.mjs";
 import { spawn, spawnSync } from "node:child_process";
 import { existsSync, mkdtempSync, rmSync, readFileSync, writeFileSync, readdirSync,
          renameSync, mkdirSync } from "node:fs";
-import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
 import { createServer } from "node:net";
 import { join, dirname, basename } from "node:path";
@@ -8376,29 +8375,17 @@ function resolveVaults() {
   if (arg("url", "")) return [{ path: "", label: "the page passed with --url" }];
 
   const out = [];
-  // github#71 -- the trio share one list, by delegation
-  const GENERATORS = ["make-demo-vault.mjs", "make-test-vault.mjs", "make-shape-vault.mjs"];
   // github#86 -- hashes ONLY its own generator; the other three do not move
   const TAG_GENERATORS = ["make-tag-vault.mjs"];
   // github#71 -- delegates to nothing, so it gets its OWN list
   const SPEC_GENERATORS = ["make-spec-vault.mjs"];
-  // github#106 -- format 2 stamps the note count
-  const FIXTURE_FORMAT = 2;
   const storeRoot = fixtureStore(ROOT);
-
-  const digestOf = (args, gens) => {
-    const h = createHash("sha256");
-    h.update("format:" + FIXTURE_FORMAT);
-    for (const g of gens || GENERATORS) h.update(readFileSync(join(HERE, g)));
-    h.update(JSON.stringify(args));
-    return h.digest("hex").slice(0, 8);
-  };
 
   const todayDay = () => new Date().toISOString().slice(0, 10);
   const ageDays = (day) => Math.floor((Date.parse(todayDay()) - Date.parse(day)) / 86400000);
 
   const gen = (script, args, name, label, gens) => {
-    const digest = digestOf(args, gens);
+    const digest = fixtureDigest(args, gens);
     const dir = join(storeRoot, `${name}-${digest}`);
     const stampPath = join(dir, ".stamp.json");
     let fresh = false;
@@ -8431,9 +8418,7 @@ function resolveVaults() {
         return;
       }
       // github#106 -- counted, then checked before it is published
-      writeFileSync(join(building, ".stamp.json"),
-                    JSON.stringify({ digest, day: todayDay(), script, args, notes: countNotes(building) },
-                                   null, 2) + "\n");
+      stampFixture(building, { digest, script, args, notes: countNotes(building) });
       const built = checkFixture(building);
       if (!built.ok) {
         console.log(`  cannot generate ${label}: ${built.why}`);
