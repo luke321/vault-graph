@@ -51,7 +51,7 @@ export const STATE_PROBE = `(function () {
   var ins = scope.querySelectorAll("input, select, textarea");
   for (var j = 0; j < ins.length; j++) {
     var el = ins[j];
-    var id = el.id || el.name || (el.getAttribute("data-k") || "") || ("#" + j);
+    var id = el.id || el.name || (el.getAttribute("data-k") || "") || ("anon" + j);
     var t = (el.type || "").toLowerCase();
     put("ui." + id, t === "checkbox" || t === "radio" ? String(el.checked) : String(el.value));
   }
@@ -59,7 +59,7 @@ export const STATE_PROBE = `(function () {
   for (var m = 0; m < prs.length; m++) {
     var b = prs[m];
     var who = b.id || b.getAttribute("data-dim") || b.getAttribute("data-src") ||
-              b.getAttribute("data-eye") || (b.textContent || "").trim().slice(0, 16) || ("#" + m);
+              b.getAttribute("data-eye") || (b.textContent || "").trim().slice(0, 16) || ("anon" + m);
     put("press." + who, b.getAttribute("aria-pressed"));
   }
 
@@ -131,9 +131,19 @@ export function keysRead(keys, exprs) {
   const hay = exprs.join("\n");
   const hit = [];
   for (const k of Object.keys(keys)) {
-    if (tokensFor(k).some((t) => t && hay.includes(t))) hit.push(k);
+    if (tokensFor(k).some((t) => t && reaches(hay, t))) hit.push(k);
   }
   return hit;
+}
+
+// github#151 -- a bare identifier has to appear as a whole word, so `dim` is not read out of
+// `dimmed` or `dimAtGaps`. A DOM id or an attribute value carries dashes and spaces, where a
+// word boundary means nothing, so those match literally.
+const IDENT = /^[A-Za-z_$][\w$]*$/;
+/** @param {string} hay @param {string} token */
+function reaches(hay, token) {
+  if (!IDENT.test(token)) return hay.includes(token);
+  return new RegExp("\\b" + token + "\\b").test(hay);
 }
 
 /**
@@ -160,6 +170,16 @@ export async function readState(page) {
   } catch (e) {
     return { "probe.error": String((e && e.message) || e) };
   }
+}
+
+/**
+ * github#151 -- whether a sample can be scored at all. A probe that could not run answers with
+ * one key, and diffing that against a 125-key baseline reads as the whole page vanishing: every
+ * check after it would fail naming 125 keys, which is a harness fault wearing a defect's clothes.
+ * @param {Record<string, string>} snap
+ */
+export function readable(snap) {
+  return !!snap && !snap["probe.error"] && snap["page.mounted"] === "true";
 }
 
 /**

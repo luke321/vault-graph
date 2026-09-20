@@ -1,7 +1,8 @@
 // github#146 -- the smoke loop, and the error audit around every check
 
 import { errorText } from "./cdp.mjs";
-import { readState, diffState, keysRead, allowedToLeave, newLeaks } from "./smoke-state.mjs";
+import { readState, diffState, keysRead, allowedToLeave, newLeaks,
+         readable } from "./smoke-state.mjs";
 
 /**
  * @param {string[]} errs
@@ -157,7 +158,8 @@ export async function runChecks(opts) {
       // github#151 -- what this check took off the job's baseline, minus what it declared.
       // github#151 -- Not "changed since the last boundary": that would fail a check for putting
       // github#151 -- an inherited key back, and would fail every check after one unfixed leak.
-      if (bounding) {
+      // github#151 -- an unreadable sample scores nothing: see readable() for why
+      if (bounding && readable(baseState) && readable(prevState) && readable(now)) {
         const leaked = newLeaks(baseState, prevState, now)
                          .filter((d) => !allowedToLeave(d.key, c.leaves));
         if (leaked.length) {

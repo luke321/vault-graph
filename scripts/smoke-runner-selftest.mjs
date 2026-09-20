@@ -4,7 +4,7 @@
 import { makeErrorLog, runChecks, summarise } from "./smoke-runner.mjs";
 // github#151
 import { allowedToLeave, couplingReport, diffState, keysRead, leakReport, newLeaks,
-         tokensFor } from "./smoke-state.mjs";
+         readable, tokensFor } from "./smoke-state.mjs";
 
 let failed = 0;
 /** @param {string} name @param {boolean} ok @param {string} [detail] */
@@ -330,6 +330,13 @@ console.log("github#151 -- the state audit");
         keysRead(keys, ["window.localStorage.getItem(k)"]).join() === "store.settings");
   check("an expression naming none of them reads none",
         keysRead(keys, ["__vg.graph.order"]).length === 0);
+  // github#151 -- the whole-word rule, which is what keeps the report worth reading
+  check("a bare identifier is not read out of a longer word",
+        keysRead({ "state.dim": "" }, ["res.dimAtGaps + dimmed"]).length === 0,
+        keysRead({ "state.dim": "" }, ["res.dimAtGaps + dimmed"]).join());
+  check("...but is found as a word", keysRead({ "state.dim": "" }, ["__vg.state.dim"]).length === 1);
+  check("a DOM id with a dash still matches literally, where a word boundary means nothing",
+        keysRead({ "ui.vg-q": "" }, ['$("vg-q")']).length === 1);
   check("a camera key carries its accessors as tokens, never the bare word",
         tokensFor("cam.ratio").includes("getCamera") && !tokensFor("cam.ratio").includes("ratio"),
         tokensFor("cam.ratio").join(", "));
@@ -476,6 +483,22 @@ console.log("github#151 -- the reset boundary");
   check("the audit without the boundary records the leak and fails nothing",
         a.failed === 0 && a.audit.rows[0].changed.length === 1,
         "failed " + a.failed);
+}
+
+// github#151 -- a probe that could not run scores nothing, rather than reading as the whole
+// github#151 -- page vanishing and failing every check after it with 125 keys
+{
+  check("a good sample is readable", readable({ "page.mounted": "true", "cam.ratio": "1" }));
+  check("a probe that threw is not", !readable({ "probe.error": "page threw" }));
+  check("a page that is not mounted is not", !readable({ "page.mounted": "false" }));
+  check("nothing at all is not", !readable(null) && !readable({}));
+
+  const r = await run([
+    { name: "kills the probe",
+      fn: async (p) => { p.state = { "probe.error": "page threw" }; return { ok: true, detail: "" }; } },
+    pass("runs after it")
+  ], { stateBoundary: true, state: { "page.mounted": "true", "cam.ratio": "1" } });
+  check("an unreadable sample fails nothing on its own", r.failed === 0, "failed " + r.failed);
 }
 
 console.log("");
