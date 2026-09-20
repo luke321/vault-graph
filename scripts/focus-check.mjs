@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// github#129, design/0018
+// github#129, design/0018-not-stealing-the-keyboard
 
 import { spawnSync } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
@@ -107,7 +107,7 @@ const lost = got.filter((r) => !r.kept);
 console.log(`\n${stole.length}/${got.length} run(s) lost the keyboard at all; ` +
             `worst single loss ${worst} ms; ${lost.length} ended without it.`);
 
-// github#129, design/0018
+// github#129, design/0018-not-stealing-the-keyboard
 const failed = lost.length > 0 || worst >= 1000;
 if (failed) {
   console.log("FAIL -- a run lost the keyboard for a second or more, or never got it back");

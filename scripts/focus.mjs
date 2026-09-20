@@ -1,11 +1,11 @@
-// github#129, design/0018
+// github#129, design/0018-not-stealing-the-keyboard
 
 import { spawn } from "node:child_process";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-// design/0018
+// design/0018-not-stealing-the-keyboard
 const sleep = (ms) => new Promise((r) => { setTimeout(r, ms).unref(); });
 
 /** @type {{ proc: import("node:child_process").ChildProcess, ask: (cmd: string) => Promise<string> } | null} */
@@ -17,7 +17,7 @@ let home = null;
 function startHelper() {
   if (helper || helperFailed) return helper;
   if (process.platform !== "win32") { helperFailed = true; return null; }
-  // design/0018
+  // design/0018-not-stealing-the-keyboard
   if (process.env.VG_NO_FOCUS_GUARD) { helperFailed = true; return null; }
   let proc;
   try {
@@ -28,7 +28,7 @@ function startHelper() {
 
   /** @type {((line: string) => void)[]} */
   const waiting = [];
-  // design/0018
+  // design/0018-not-stealing-the-keyboard
   const refWhileBusy = () => { if (waiting.length) proc.stdout.ref(); else proc.stdout.unref(); };
   let buf = "";
   proc.stdout.setEncoding("utf8");
@@ -68,7 +68,7 @@ function startHelper() {
   return helper;
 }
 
-/** design/0018 */
+/** design/0018-not-stealing-the-keyboard */
 export function releaseFocusGuard() {
   if (!helper) return;
   const h = helper;
@@ -83,13 +83,13 @@ process.once("exit", releaseFocusGuard);
 const NOOP = /** @type {FocusGuard} */ ({ watch: async () => "off" });
 
 /**
- * github#129, design/0018
+ * github#129, design/0018-not-stealing-the-keyboard
  * @returns {Promise<FocusGuard>}
  */
 export async function keepFocus() {
   const h = startHelper();
   if (!h) return NOOP;
-  // design/0018 -- home is captured once per run, before the FIRST spawn
+  // design/0018-not-stealing-the-keyboard -- home is captured once per run, before the FIRST spawn
   if (!home) {
     const before = await h.ask("fg");
     home = /^(\d+) (\d+)$/.exec(before)?.[1] || null;
@@ -99,7 +99,7 @@ export async function keepFocus() {
 
   return {
     /**
-     * design/0018 -- never await this on the critical path.
+     * design/0018-not-stealing-the-keyboard -- never await this on the critical path.
      * @param {number} [childPid]
      * @param {{ forMs?: number }} [opts]
      * @returns {Promise<string>} already | foreign | plain | attach | failed | off

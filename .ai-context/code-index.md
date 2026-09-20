@@ -5,7 +5,7 @@ markers already in the source: which code cites an issue, an ADR or a DDR; which
 enforces each invariant; who calls each `__vg` entry point. Stale when
 `node scripts/code-map.mjs --check` fails.
 
-## Issues — 134 cited (125 in code, 127 in `.ai-context/`)
+## Issues — 135 cited (126 in code, 127 in `.ai-context/`)
 
 | issue | code sites | prose sites |
 |---|---|---|
@@ -125,6 +125,7 @@ enforces each invariant; who calls each `__vg` entry point. Stale when
 | #146 | scripts/cdp.mjs:117, scripts/smoke-runner-selftest.mjs:2, scripts/smoke-runner-selftest.mjs:13, scripts/smoke-runner-selftest.mjs:25, scripts/smoke-runner-selftest.mjs:41, scripts/smoke-runner-selftest.mjs:64, scripts/smoke-runner-selftest.mjs:81, scripts/smoke-runner-selftest.mjs:99, scripts/smoke-runner-selftest.mjs:113, scripts/smoke-runner-selftest.mjs:121, scripts/smoke-runner-selftest.mjs:141, scripts/smoke-runner-selftest.mjs:158, scripts/smoke-runner-selftest.mjs:221, scripts/smoke-runner.mjs:1, scripts/smoke-runner.mjs:15, scripts/smoke-runner.mjs:20, scripts/smoke-runner.mjs:30, scripts/smoke-runner.mjs:38, scripts/smoke-runner.mjs:44, scripts/smoke-runner.mjs:49, scripts/smoke-runner.mjs:115, scripts/smoke-runner.mjs:117, scripts/smoke-runner.mjs:132, scripts/smoke.mjs:3, scripts/smoke.mjs:8175, scripts/smoke.mjs:8230 | .ai-context/changelog-detail.md:44, .ai-context/changelog-detail.md:51, .ai-context/invariants.md:4659, .ai-context/invariants.md:5059 |
 | #147 | scripts/check-ci-parity.mjs:2, scripts/check-ci-parity.mjs:17, scripts/check-ci-parity.mjs:21, scripts/check-ci-parity.mjs:26, scripts/check-ci-parity.mjs:41, scripts/check-ci-parity.mjs:54, scripts/check-ci-parity.mjs:70, scripts/check-ci-parity.mjs:93, scripts/check-ci-parity.mjs:99, scripts/check-ci-parity.mjs:144 | .ai-context/changelog-detail.md:38, .ai-context/changelog-detail.md:44, .ai-context/invariants.md:4661 |
 | #152 | src/build-graph.mjs:422, scripts/check-link-resolution.mjs:196, scripts/check-link-resolution.mjs:197 | .ai-context/changelog-detail.md:37, .ai-context/invariants.md:4512 |
+| #153 | scripts/code-map.mjs:94 | — |
 | #154 | scripts/check-ci-parity.mjs:2, scripts/check-ci-parity.mjs:11, scripts/check-ci-parity.mjs:125 | .ai-context/changelog-detail.md:38, .ai-context/invariants.md:4674, .ai-context/invariants.md:4686, .ai-context/releasing.md:93 |
 | #157 | src/page.js:1637, src/page.js:2595, src/page.js:2629 | .ai-context/changelog-detail.md:40, .ai-context/changelog-detail.md:41, .ai-context/changelog-detail.md:42, .ai-context/invariants.md:374, .ai-context/invariants.md:429, .ai-context/invariants.md:437 |
 | #159 | src/page.js:4261, src/page.js:4279, src/page.js:4860, scripts/smoke.mjs:4714, scripts/smoke.mjs:4734, scripts/smoke.mjs:4767 | .ai-context/changelog-detail.md:41, .ai-context/invariants.md:429, .ai-context/invariants.md:454 |
@@ -144,7 +145,7 @@ enforces each invariant; who calls each `__vg` entry point. Stale when
 | #183 | scripts/smoke.mjs:176, scripts/smoke.mjs:186, scripts/smoke.mjs:205 | .ai-context/changelog-detail.md:18 |
 | #184 | plugin/main.js:618, plugin/main.js:620, plugin/main.js:648, plugin/main.js:799, plugin/main.js:801, plugin/main.js:812, plugin/main.js:1098, plugin/main.js:1105, scripts/words-race-check.mjs:2, scripts/words-race-check.mjs:3, scripts/words-race-check.mjs:4, scripts/words-race-check.mjs:5, scripts/words-race-check.mjs:27, scripts/words-race-check.mjs:70, scripts/words-race-check.mjs:97, scripts/words-race-check.mjs:186, scripts/words-race-check.mjs:324 | .ai-context/changelog-detail.md:16, .ai-context/invariants.md:3895 |
 
-## Decision and design records cited in code — 27
+## Decision and design records cited in code — 28
 
 | record | code sites |
 |---|---|
@@ -152,9 +153,9 @@ enforces each invariant; who calls each `__vg` entry point. Stale when
 | `decisions/0005` | src/build-graph.mjs:98 |
 | `decisions/0006` | src/page.js:11023, src/page.js:11085 |
 | `decisions/0007` | scripts/mobile-check.mjs:2 |
-| `decisions/0008` | scripts/check-network.mjs:103 |
+| `decisions/0008-zero-network-calls` | scripts/check-network.mjs:103 |
 | `decisions/0009` | src/build-graph.mjs:103, src/page.js:714, src/page.js:722, src/page.js:3143, src/page.js:7502, src/page.js:9417, src/shell.html:79, plugin/main.js:635, plugin/main.js:1057, plugin/main.js:1064, plugin/main.js:1163, scripts/obsidian-smoke.mjs:625 |
-| `decisions/0011` | src/page.js:7229, src/page.js:7260, src/page.js:7319, src/page.js:11023, src/page.js:11094, scripts/smoke.mjs:580, scripts/smoke.mjs:2092, scripts/smoke.mjs:2094, scripts/smoke.mjs:7952 |
+| `decisions/0011-a-live-rebuild-retakes-the-geometry-lock-at-rest` | src/page.js:7229, src/page.js:7260, src/page.js:7319, src/page.js:11023, src/page.js:11094, scripts/smoke.mjs:580, scripts/smoke.mjs:2092, scripts/smoke.mjs:2094, scripts/smoke.mjs:7952 |
 | `decisions/0012` | src/build-graph.mjs:8 |
 | `decisions/0013` | scripts/release.ps1:62, scripts/release.ps1:311, scripts/smoke.mjs:8359, scripts/smoke.mjs:8611, scripts/suite-stamp.mjs:2 |
 | `decisions/0014` | src/page.js:3225, src/page.js:3229, src/page.js:3241, src/page.js:3266, src/page.js:3270 |
@@ -173,7 +174,8 @@ enforces each invariant; who calls each `__vg` entry point. Stale when
 | `design/0015` | src/engine/types.ts:45, src/engine/types.ts:47, src/page.css:134, src/page.css:250, src/page.css:335, src/page.js:136, src/page.js:650, src/page.js:750, src/page.js:753, src/page.js:821, src/page.js:1065, src/page.js:1070, src/page.js:1130, src/page.js:1141, src/page.js:1144, src/page.js:1155, src/page.js:1171, src/page.js:1189, src/page.js:1251, src/page.js:1523, src/page.js:1530, src/page.js:1807, src/page.js:2005, src/page.js:4147, src/page.js:4149, src/page.js:4151, src/page.js:4341, src/page.js:4538, src/page.js:4567, src/page.js:4776, src/page.js:4954, src/page.js:5104, src/page.js:6779, src/page.js:6848, src/page.js:6869, src/page.js:7520, src/page.js:8045, src/page.js:8538, src/page.js:8570, src/page.js:8584, src/page.js:8592, src/page.js:8636, src/page.js:8662, src/page.js:10496, src/page.js:11180, src/page.js:11222, plugin/main.js:1057, scripts/make-tag-vault.mjs:1, scripts/make-tag-vault.mjs:22, scripts/make-test-vault.mjs:67, scripts/smoke.mjs:635, scripts/smoke.mjs:756, scripts/smoke.mjs:771, scripts/smoke.mjs:842, scripts/smoke.mjs:1085, scripts/smoke.mjs:1098, scripts/smoke.mjs:1619, scripts/smoke.mjs:8462, scripts/update-layout-snapshots.mjs:25 |
 | `design/0016` | plugin/bundler-modules.d.ts:23, plugin/main.js:13, plugin/main.js:209, plugin/main.js:845, plugin/main.js:874, plugin/main.js:1746, plugin/main.js:1820, plugin/main.js:1830, plugin/styles.css:24, plugin/styles.css:56, plugin/update-note.mjs:1, plugin/update-note.mjs:35, plugin/update-note.mjs:101, plugin/update-note.mjs:116, plugin/update-note.mjs:144, scripts/build-plugin.mjs:103, scripts/build-plugin.mjs:125, scripts/update-note-check.mjs:2, scripts/update-note-selftest.mjs:2 |
 | `design/0017` | src/page.css:452, src/page.css:879, src/page.css:956, src/page.js:8198, src/page.js:8211, src/page.js:8263, src/page.js:8391, scripts/mobile-check.mjs:222, scripts/smoke.mjs:4070, scripts/smoke.mjs:4075, scripts/smoke.mjs:4084, scripts/smoke.mjs:4109, scripts/smoke.mjs:4114, scripts/smoke.mjs:4121, scripts/smoke.mjs:4146, scripts/smoke.mjs:4151, scripts/smoke.mjs:4175, scripts/smoke.mjs:4185, scripts/smoke.mjs:4198, scripts/smoke.mjs:4246, scripts/smoke.mjs:4265 |
-| `design/0018` | scripts/focus-check.mjs:2, scripts/focus-check.mjs:110, scripts/focus.mjs:1, scripts/focus.mjs:8, scripts/focus.mjs:20, scripts/focus.mjs:31, scripts/focus.mjs:71, scripts/focus.mjs:86, scripts/focus.mjs:92, scripts/focus.mjs:102, scripts/gallery-nav.mjs:2, scripts/gallery-nav.mjs:18, scripts/gallery-nav.mjs:27, scripts/gallery-nav.mjs:51 |
+| `design/0018-gallery-new-in` | scripts/gallery-nav.mjs:2, scripts/gallery-nav.mjs:18, scripts/gallery-nav.mjs:27, scripts/gallery-nav.mjs:51 |
+| `design/0018-not-stealing-the-keyboard` | scripts/focus-check.mjs:2, scripts/focus-check.mjs:110, scripts/focus.mjs:1, scripts/focus.mjs:8, scripts/focus.mjs:20, scripts/focus.mjs:31, scripts/focus.mjs:71, scripts/focus.mjs:86, scripts/focus.mjs:92, scripts/focus.mjs:102 |
 | `design/0019` | src/page.css:135, src/page.css:149, src/page.css:849, src/page.html:35, src/page.js:6452, src/page.js:6458, src/page.js:6484, src/page.js:6559, src/page.js:6624, src/page.js:7558, scripts/probe-room.mjs:2, scripts/probe-room.mjs:20, scripts/probe-room.mjs:116 |
 
 ## Invariants → checks — 98 sections in `.ai-context/invariants.md`

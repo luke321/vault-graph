@@ -90,6 +90,18 @@ function walk(dir, acc) {
   return acc;
 }
 
+// A pointer names a record as `decisions/NNNN` (ambiguous when NNNN is shared) or, to
+// disambiguate, `decisions/NNNN-full-stem` (github#153). recordFilesOf resolves either form
+// against what is actually on disk.
+function recordFilesOf(dir) {
+  const byNumber = {};
+  for (const f of readdirSync(join(ROOT, ".ai-context", dir)).sort()) {
+    const m = /^(\d{4})-(.+)\.md$/.exec(f);
+    if (m) (byNumber[m[1]] || (byNumber[m[1]] = [])).push(`${m[1]}-${m[2]}`);
+  }
+  return byNumber;
+}
+
 function buildIndex() {
   const codeFiles = CODE_DIRS.flatMap((d) => walk(join(ROOT, d), []));
   const proseFiles = walk(join(ROOT, ".ai-context"), []).concat(
@@ -97,6 +109,8 @@ function buildIndex() {
     ["decisions", "design"].flatMap((d) => readdirSync(join(ROOT, ".ai-context", d)).sort().map((f) => `.ai-context/${d}/${f}`)));
   const prose = [...new Set(proseFiles)].filter((f) => f.endsWith(".md") && !/code-(map|index)\.md$/.test(f));
 
+  const recordFiles = { decisions: recordFilesOf("decisions"), design: recordFilesOf("design") };
+  const recordErrors = [];
   const issues = {};
   const records = {};
   const vgCalls = {};
@@ -105,7 +119,22 @@ function buildIndex() {
   for (const file of codeFiles) {
     read(file).split("\n").forEach((line, i) => {
       for (const m of line.matchAll(/github#(\d+)/g)) add(issues, +m[1], file, i + 1);
-      for (const m of line.matchAll(/\b(decisions|design)\/(\d{4})/g)) add(records, `${m[1]}/${m[2]}`, file, i + 1);
+      for (const m of line.matchAll(/\b(decisions|design)\/(\d{4})(-[a-z][a-z0-9-]*)?/g)) {
+        const [, dir, num, stemPart] = m;
+        const candidates = recordFiles[dir][num] || [];
+        let key = num;
+        if (stemPart) {
+          key = `${num}${stemPart}`;
+          if (!candidates.includes(key)) {
+            recordErrors.push(`${file}:${i + 1}: ${dir}/${key} -- no matching file in .ai-context/${dir}`);
+          }
+        } else if (candidates.length > 1) {
+          recordErrors.push(`${file}:${i + 1}: ${dir}/${num} is ambiguous -- ${candidates.length} records share this number (${candidates.join(", ")}); write the stem`);
+        } else if (candidates.length === 0) {
+          recordErrors.push(`${file}:${i + 1}: ${dir}/${num} -- no record file found`);
+        }
+        add(records, `${dir}/${key}`, file, i + 1);
+      }
       if (file !== "src/page.js") {
         for (const m of line.matchAll(/__vg\.([A-Za-z_$][\w$]*)/g)) add(vgCalls, m[1], file, i + 1);
       }
@@ -133,7 +162,7 @@ function buildIndex() {
     }
   });
 
-  return { issues, proseIssues, records, vgCalls, invariants, checkLines, codeFiles: codeFiles.length, prose: prose.length };
+  return { issues, proseIssues, records, vgCalls, invariants, checkLines, recordErrors, codeFiles: codeFiles.length, prose: prose.length };
 }
 
 function renderIndex(ix) {
@@ -174,9 +203,10 @@ function renderIndex(ix) {
 
 /* ---------------------------------------------------------------------- run -- */
 
+const ix = buildIndex();
 const outputs = [
   [".ai-context/code-map.md", renderMap(MAP_FILES.map(mapFile))],
-  [".ai-context/code-index.md", renderIndex(buildIndex())],
+  [".ai-context/code-index.md", renderIndex(ix)],
 ];
 let stale = 0;
 for (const [file, text] of outputs) {
@@ -189,7 +219,8 @@ for (const [file, text] of outputs) {
     console.log(`code-map: wrote ${file} (${text.split("\n").length} lines)`);
   }
 }
+for (const e of ix.recordErrors) console.error(`code-map: ${e}`);
 if (CHECK) {
-  if (stale) process.exit(1);
+  if (stale || ix.recordErrors.length) process.exit(1);
   console.log("code-map: both generated files are current");
 }
