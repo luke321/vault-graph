@@ -19,5 +19,8 @@
   },
   "dependencies": {
     "esbuild": "^0.21.5"
+  },
+  "allowScripts": {
+    "esbuild@0.21.5": true
   }
 }
