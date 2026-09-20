@@ -653,13 +653,17 @@ and rejected for the clip.
 **Camera framing only, not layout**: `fitRatio()` reads no note position, so the golden snapshot
 is untouched at every ratio in the table above.
 
-The four smoke.mjs checks that assert what `fit()` lands on hold a plain literal, `0.954` in
-place of the old `1.04` — `"double-clicking the graph resets the view"`, `"fit frames the disc
-that is actually there"`, and the two auto-fit checks. `camReset()`, a `setState()` call that
-bypasses `fitRatio()` for test-isolation purposes only, is updated to the same `0.954` for
-consistency. The edge-stroke-width check's `at(1.04)` "rest" reference point is deliberately
-**not** touched — it is an arbitrary zoom-level sample next to `0.216`/`0.108`, unrelated to what
-`fitRatio()` promises.
+The constant used to be a plain literal, `0.954`, hand-copied into six places in `smoke.mjs` —
+`camReset()` (a `setState()` call that bypasses `fitRatio()` for test-isolation purposes only) and
+four checks that assert what `fit()` lands on: `"double-clicking the graph resets the view"`,
+`"fit frames the disc that is actually there"`, and the two auto-fit checks. That broke
+deterministically, across every fixture, the last time `FIT_RATIO` moved (1.08 → 1.04) — the exact
+failure mode github#111 removed: `__vg.FIT_RATIO` now exposes the raw constant, and all six sites
+read it live via CDP instead of holding a copy. The three checks that verify `fit()`'s clamp
+formula still recompute it against an independently-measured `reach`, so the live read does not
+make them tautological — only the hand-sync is gone. The edge-stroke-width check's `at(1.04)`
+"rest" reference point is deliberately **not** touched — it is an arbitrary zoom-level sample next
+to `0.216`/`0.108`, unrelated to what `fitRatio()` promises.
 
 ## A resize re-centres a fitted disc on the new stage (github#182)
 

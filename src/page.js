@@ -11871,6 +11871,8 @@ function mountVaultGraph(root, data, deps) {
                     get hoverBusy() { return !!hoverRaf; },
                     // github#14
                     get camAtRest() { return camAtRest; },
+                    // github#111 -- so a test reads the page's own value instead of a copy
+                    get FIT_RATIO() { return FIT_RATIO; },
                     // github#82
                     get sheetOpen() { return sheetOpen; },
                     get bandOpen() { return bandOpen; },
