@@ -3054,8 +3054,10 @@ check("a narrow window with a pointer keeps the desktop's answer", async (p) => 
     r = await p.j(PHONE_PROBE);
   } finally {
     await p.send("Emulation.clearDeviceMetricsOverride").catch(() => {});
-    // github#151 -- after the resize the metrics change fires, which saves again
-    await sleep(500);
+    // github#151 -- the resize that clearing the metrics fires saves again, on a frame of its
+    // own well after the call returns, so the store goes back once the page is done moving
+    await settle(p);
+    await sleep(1200);
     await storeBack(p, storedWas);
     await sleep(500);
     await reboot(p);
@@ -3073,7 +3075,12 @@ check("a narrow window with a pointer keeps the desktop's answer", async (p) => 
             `${r && r.bandOpen ? "open" : "FOLDED"} (data-band ${r && r.dataBand})` +
             (ok ? "" : "  <- A NARROW DESKTOP WINDOW TOOK THE PHONE LAYOUT"),
   };
-});
+  // github#151 -- leaves store.settings: clearing the device metrics fires a resize, and the
+  // github#151 -- page saves from a frame of its own AFTER this check has returned, so the
+  // github#151 -- restore below cannot win from inside the check. It writes {} into a store
+  // github#151 -- that had no entry at all, which is worth its own look rather than a longer
+  // github#151 -- sleep here -- tuning one would be the flakiness this repo warns about.
+}, { leaves: ["store.settings"] });
 
 // github#173, design/0013 -- the three items that reproduced, one check each
 const PHONE_TRACE_ON = `(function () { window.__sev = [];
@@ -8754,17 +8761,25 @@ async function main() {
     console.log(bar);
     let leakN = 0, coupN = 0, probeMs = 0, probeN = 0;
     for (const jb of auditsOut) {
-      const leaks = leakReport(jb), coupled = couplingReport(jb);
+      const all = leakReport(jb);
+      const leaks = all.filter((l) => l.keys.length);
+      const declared = all.filter((l) => l.declared.length);
+      const coupled = couplingReport(jb);
       leakN += leaks.length; coupN += coupled.length;
       for (const r of jb.rows) { probeMs += r.ms; probeN++; }
       console.log("");
       console.log(`-- ${jb.job}: ${jb.rows.length} checks, ` +
                   `${Object.keys(jb.base).length} state keys, ` +
                   `${leaks.length} check(s) left the page off baseline, ` +
+                  `${declared.length} declared, ` +
                   `${coupled.length} inherited-state read(s)`);
       for (const l of leaks) {
         console.log(`   left:  ${l.check}`);
         console.log(`            ${l.keys.join(", ")}`);
+      }
+      for (const l of declared) {
+        console.log(`   says:  ${l.check}`);
+        console.log(`            ${l.declared.join(", ")}`);
       }
       /** @type {Map<string, string[]>} */
       const byCheck = new Map();

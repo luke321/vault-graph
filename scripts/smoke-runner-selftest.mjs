@@ -376,6 +376,21 @@ console.log("github#151 -- the state audit");
   check("a leak is reported once, at the check that first took the key off baseline",
         leaks.length === 1 && leaks[0].check === "A moves the camera" &&
         leaks[0].keys.join() === "cam.ratio", JSON.stringify(leaks));
+
+  // github#151 -- a key the check declared is not a leak, and a report that calls it one sends
+  // the reader to fix something the source already accounts for
+  const declaredJob = {
+    base: { "cam.ratio": "1" },
+    rows: [{ name: "A moves the camera and says so", leaves: ["cam.ratio"],
+             changed: [{ key: "cam.ratio" }],
+             dirty: [{ key: "cam.ratio", from: "1", to: "0.5" }], reads: [] }]
+  };
+  const d = leakReport(declaredJob);
+  check("a declared key is reported as declared, never as a leak",
+        d.length === 1 && d[0].keys.length === 0 && d[0].declared.join() === "cam.ratio",
+        JSON.stringify(d));
+  check("...and an undeclared one is still a leak",
+        leakReport(job)[0].declared.length === 0);
 }
 
 // github#151 -- diffing, both directions

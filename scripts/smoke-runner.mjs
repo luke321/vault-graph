@@ -153,7 +153,8 @@ export async function runChecks(opts) {
       if (auditing) {
         auditRows.push({ name: c.name, changed: diffState(prevState, now),
                          dirty: diffState(baseState, now), reads: keysRead(baseState, exprs),
-                         ms: Date.now() - t1 });
+                         // github#151 -- so the report can tell a leak from a declaration
+                         leaves: c.leaves || null, ms: Date.now() - t1 });
       }
       // github#151 -- what this check took off the job's baseline, minus what it declared.
       // github#151 -- Not "changed since the last boundary": that would fail a check for putting

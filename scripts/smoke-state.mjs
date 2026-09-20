@@ -284,13 +284,17 @@ export function couplingReport(job) {
  */
 export function leakReport(job) {
   const rows = job.rows || [];
-  /** @type {{ check: string, keys: string[] }[]} */
+  /** @type {{ check: string, keys: string[], declared: string[] }[]} */
   const out = [];
   let before = new Set();
   for (const r of rows) {
     const after = new Set((r.dirty || []).map((d) => d.key));
     const added = Array.from(after).filter((k) => !before.has(k)).sort();
-    if (added.length) out.push({ check: r.name, keys: added });
+    // github#151 -- a key the check DECLARED is not a leak, and a report that calls it one
+    // sends the reader to fix something the source already accounts for
+    const keys = added.filter((k) => !allowedToLeave(k, r.leaves));
+    const declared = added.filter((k) => allowedToLeave(k, r.leaves));
+    if (keys.length || declared.length) out.push({ check: r.name, keys, declared });
     before = after;
   }
   return out;
