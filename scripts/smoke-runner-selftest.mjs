@@ -402,6 +402,22 @@ console.log("github#151 -- the state audit");
   check("a key that appeared is reported as absent before",
         by.fresh && by.fresh.from === "(absent)");
   check("an unchanged map diffs to nothing", diffState({ a: "1" }, { a: "1" }).length === 0);
+
+  // github#151 -- a camera that settles a ten-thousandth away has not changed state, and a full
+  // run failed on exactly that (cam.ratio 0.954 -> 0.9539, the 4-dp rounding straddling a
+  // boundary). Integers stay exact, so no count is ever absorbed by the tolerance.
+  check("float drift under the tolerance is not a change",
+        diffState({ "cam.ratio": "0.954" }, { "cam.ratio": "0.9539" }).length === 0);
+  check("...and a real camera move still is",
+        diffState({ "cam.ratio": "0.954" }, { "cam.ratio": "0.4071" }).length === 1);
+  check("an integer count is exact, never tolerant",
+        diffState({ "vg.shown": "1403" }, { "vg.shown": "1402" }).length === 1);
+  check("...including one that differs by less than the epsilon would allow",
+        diffState({ "vg.pinned": "3" }, { "vg.pinned": "4" }).length === 1);
+  check("a non-numeric value is still compared exactly",
+        diffState({ "state.dim": "folder" }, { "state.dim": "tag" }).length === 1);
+  check("absent on one side is still a difference",
+        diffState({ "a": "0.5" }, {}).length === 1);
 }
 
 console.log("");

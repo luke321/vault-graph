@@ -5407,6 +5407,15 @@ isolation, which is what a load-sensitive check looks like from the inside. Fixe
 harness inferring it from stillness. `camSettle()` is left alone: checks that deliberately park the
 camera off-rest need exactly its weaker guarantee.
 
+**A false positive of the instrument's own, and the fix for it.** A full run failed `legend count
+bars scale to the largest visible folder` on `cam.ratio 0.954 -> 0.9539` — a difference of one
+ten-thousandth, which is the fingerprint's own 4-dp rounding straddling a boundary, not a camera
+anybody moved. `diffState()` now gives a **fractional** value a tolerance of `1e-3`, which sits far
+under the tightest camera assertion in the suite (0.002). **Integers stay exact**, so a count never
+gets absorbed by it: `vg.shown 1403 -> 1402`, a row tally, a node id and a pin count all still
+differ. An instrument that cries leak over float noise costs the next reader the same hour it just
+cost this one.
+
 **One limitation the five-fixture run exposed, and it is the price of the rule rather than a
 defect in it.** Scoring "newly off baseline" means **a declared leak of a key masks a later
 undeclared leak of the same key**: the context-menu check leaked `store.settings` on four fixtures

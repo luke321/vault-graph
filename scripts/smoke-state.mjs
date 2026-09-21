@@ -189,6 +189,24 @@ function reaches(hay, token) {
   return new RegExp("\\b" + token + "\\b").test(hay);
 }
 
+// github#151 -- a camera that settles one ten-thousandth away from where it started has not
+// changed state, and reporting it as a leak sends the reader after nothing. Measured: a full run
+// failed "legend count bars scale to the largest visible folder" on cam.ratio 0.954 -> 0.9539,
+// which is the fingerprint's own 4-dp rounding straddling a boundary.
+// INTEGERS STAY EXACT, so a count -- vg.shown 1403 -> 1402, a row tally, a node id -- is never
+// absorbed by this; only a value that was already fractional gets the tolerance, and 1e-3 sits far
+// under every camera assertion in the suite (the tightest is 0.002).
+const NUM_EPS = 1e-3;
+/** @param {string} a @param {string} b */
+function samePrimitive(a, b) {
+  if (a === b) return true;
+  if (a === undefined || b === undefined || a === "" || b === "") return false;
+  const x = Number(a), y = Number(b);
+  if (!Number.isFinite(x) || !Number.isFinite(y)) return false;
+  if (Number.isInteger(x) && Number.isInteger(y)) return false;
+  return Math.abs(x - y) <= NUM_EPS;
+}
+
 /**
  * @param {Record<string, string>} a
  * @param {Record<string, string>} b
@@ -199,8 +217,10 @@ export function diffState(a, b) {
   const keys = new Set(Object.keys(a || {}).concat(Object.keys(b || {})));
   for (const k of Array.from(keys).sort()) {
     const from = a ? a[k] : undefined, to = b ? b[k] : undefined;
-    if (from !== to) out.push({ key: k, from: from === undefined ? "(absent)" : from,
-                                          to:   to   === undefined ? "(absent)" : to });
+    if (!samePrimitive(from, to)) {
+      out.push({ key: k, from: from === undefined ? "(absent)" : from,
+                          to:   to   === undefined ? "(absent)" : to });
+    }
   }
   return out;
 }
