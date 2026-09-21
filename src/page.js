@@ -58,6 +58,7 @@
  * @property {boolean} [dev]         a --dev build of the standalone; nothing else sets it
  * @property {string} [version]      github#108 -- the plugin/exporter version that built this, shown in the stats line
  * @property {{ folder: string, text: string, origin: string }[]} [sortSpecs]  github#71
+ * @property {"name" | "explorer" | "size"} [folderOrder]  github#156 -- the standalone alone sets it, from --folder-order; shell.html reads it back off VAULT_DATA as a MountDeps
  */
 
 // github#72, design/0014

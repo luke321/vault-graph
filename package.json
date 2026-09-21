@@ -10,6 +10,7 @@
     "typecheck": "tsc --noEmit -p tsconfig.engine.json"
   },
   "devDependencies": {
+    "@types/node": "^20.12.12",
     "eslint": "^9.9.0",
     "eslint-plugin-obsidianmd": "^0.4.1",
     "globals": "^14.0.0",

@@ -4510,9 +4510,13 @@ alias index, so the plugin grows a `ghost:Nickname` the exporter does not. Adopt
 answer would delete real edges, so the exporter keeps its aliases.
 
 **One node-shape divergence found by inspection, not by a check (github#152).** `VaultNode`
-(`src/page.js`) is the one written contract both producers are supposed to satisfy, and
-`tsconfig.contracts.json`'s `checkJs` program only names `plugin/main.js` and `src/page.js` —
-`src/build-graph.mjs` is never type-checked against it. The exporter's ghost object literal
+(`src/page.js`) is the one written contract both producers are supposed to satisfy, and at the
+time `tsconfig.contracts.json`'s `checkJs` program named only `plugin/main.js` and `src/page.js` —
+`src/build-graph.mjs` was never type-checked against it. **That gap is closed (github#156):** the
+exporter is in `tsconfig.contracts-node.json` and its ghost literal is annotated `RawNote`, so
+dropping either field is a `TS2322` at the keystroke. The check below stays, because it reads the
+`@property` list out of the JSDoc and so also catches a field added to `VaultNode` that the
+exporter never learns about. The exporter's ghost object literal
 omitted `dirs` and `touched`, both declared required, while the plugin's already carried both;
 `page.js`'s own fallbacks (`n.dirs || []`, a missing `touched` reading as `""`) absorbed the gap,
 so nothing broke and no screenshot showed it. `check-link-resolution.mjs` now reads `VaultNode`'s
@@ -5210,19 +5214,38 @@ drops -- so a live rebuild that deleted one pinned note silently cost every pin.
 check, which reads what the **host** ended up holding rather than what the page believes it stored:
 `["2"]` before, `["\u0000vault-graph:pins:2","C.md"]` after. Both writes go through `persistPins()`,
 and `savePinned` has exactly one call site so a third one cannot quietly appear.
-## The JavaScript's own contracts are compiler-checked, and the gate proves it (github#145)
+## The JavaScript's own contracts are compiler-checked, and the gate proves it (github#145, github#156)
 
-**`npm run lint` holds `src/page.js` and `plugin/main.js` at ZERO compiler diagnostics with
-`checkJs` on, and rejects a probe that assigns `42` to a `VaultData`-annotated binding.**
+**`npm run lint` holds `src/page.js`, `plugin/main.js` and `src/build-graph.mjs` at ZERO compiler
+diagnostics with `checkJs` on, and rejects a probe against each of the two programs.**
 
 ```bash
 node scripts/check-js-contracts.mjs      # or npm run lint, which calls it
 ```
 
-Two `tsc` runs against `tsconfig.contracts.json`, about 1.3s together. The first is the real
-check. The second is the reason this is a check and not a setting: it writes a copy of
-`src/page.js` with `var DATA = data` replaced by `/** @type {VaultData} */ var DATA = 42` and
-**fails if that copy comes back clean**.
+Four `tsc` runs, about 2.5s together: two real checks, and one probe each. The real checks are the
+browser program (`tsconfig.contracts.json` -- `src/page.js`, `plugin/main.js`) and the node program
+(`tsconfig.contracts-node.json` -- `src/build-graph.mjs`, github#156). The probes are the reason
+this is a check and not a setting: each writes a mutated copy of its program's entry point and
+**fails if that copy comes back clean** -- `src/page.js` with `var DATA = data` replaced by
+`/** @type {VaultData} */ var DATA = 42`, and `src/build-graph.mjs` with the `nodes,` in its
+`VaultData`-annotated `data` literal replaced by `nodes: 42,`.
+
+### Why there are two programs and not one widened one (github#156)
+
+`src/build-graph.mjs` is node code: without `"types": ["node"]` it reports **16 diagnostics that
+are all one cause** (`node:fs`/`node:path`/`node:url`, `process`, `Buffer`). The obvious move was
+to add those types to the shared program. **Measured 2026-09-21, that is a hole:** with node types
+on `tsconfig.contracts.json`, `if (process.env.X) { var B = Buffer.from("x"); }` inserted into
+`src/page.js` reported **zero** diagnostics. `src/page.js` is browser code and both of those are
+runtime failures there. Without node types the same insert is **two `TS2591`s**. So the browser
+program keeps `types: []` inherited, and the node-side entry point gets its own config.
+
+`src/page.js` is in **both** programs -- the exporter's annotations import its typedefs, which also
+pulls in `src/globals.d.ts` (without it, four `TS2339`s about `window.__vg`). So the gate reports
+the union of the two runs, **deduped by identity**, and the browser program is what still catches a
+node global in the page. The node program also reaches `src/sortspec-file.mjs` and
+`src/engine/notice.mjs`, which were in no program before; both are clean.
 
 **Why the second run exists.** Before github#145, `tsconfig.json` set `checkJs: false` -- it is
 typescript-eslint's program, and the compiler's own check ran over `src/engine/**/*.ts` alone.
@@ -5235,6 +5258,29 @@ probe runs every time.
 taken on `deca048` and do not match this code): the same program with `checkJs: true` and **no
 added strictness** reported **138 diagnostics -- 136 page, two plugin -- over 105 lines**. All
 138 are fixed at their source. The bar is zero.
+
+**What github#156 was worth, measured 2026-09-21.** `src/build-graph.mjs` was in no type program
+at all, so its annotations were comments nothing read -- and it had **none**: the file carried zero
+type annotations, so a naive include reported zero for the dullest possible reason. Annotating the
+producer boundary against `VaultNode` / `VaultEdge` / `VaultStats` / `VaultData` found **four**
+things nothing was checking, all fixed at their source:
+
+| | What was unchecked | Now |
+|---|---|---|
+| `sortSpecs` | `SORT_SPECS`'s accumulator is an evolving `[]`, so it reached `VaultData.sortSpecs` as `any[]`. Dropping `origin` from a pushed spec: not caught. `origin: 7`: not caught | `@type` on the accumulator, from `VaultData` itself; both are `TS2345`/`TS2322` |
+| `folderOrder` | The exporter spreads it onto `data` and `src/shell.html` reads it back off `VAULT_DATA` as a `MountDeps` -- and `VaultData` declared it nowhere, so **neither end of that round trip** was checked | declared on `VaultData`, and `FOLDER_ORDER` typed as the page's own union |
+| the `--folder-order` guard | `.includes(v)` over the three valid values returns a boolean and narrows nothing, so a vetted value left the IIFE as plain `string` -- the guard read as more than it typed | an `===` chain that narrows; relaxing it to `if (v) return v` is now `TS2322` |
+| `src/dates.mjs` | unannotated, and it is the direct producer of `VaultNode.created`, `VaultNode.touched` and `VaultStats.dates` -- so those three arrived as `any` and the boundary annotation would have checked nothing about them | a `DateSource` union and `@param`/`@returns` on all seven exports |
+
+**And github#152's own defect is a compile error now**, which was the ticket's argument for doing
+this: dropping `dirs` or `touched` from the exporter's ghost literal is `TS2322` at the keystroke,
+where it was previously found by a person reading prose for an unrelated documentation ticket.
+
+**No behaviour changed, and that was measured too.** The same 400-note fixture built before and
+after, three ways (plain, `--folder-order explorer`, and `--folder-order nonsense` to exercise the
+rejection path the narrowing guard replaced): `window.VAULT_DATA` **byte-identical** in all three,
+and the only difference anywhere in the emitted page is the four comment lines added to
+`src/page.js`'s `VaultData` typedef, which the exporter inlines verbatim.
 
 **Zero, not a baseline.** github#145 allows a baseline *if the work is phased*, tracked **by
 identity and never by total** -- a count lets one new error silently replace one old one. It was
@@ -5263,6 +5309,11 @@ Tried against the finished check, each one made it fail:
 | `checkJs` back to `false` in `tsconfig.contracts.json` | the probe is no longer rejected |
 | `plugin/main.js` dropped from the `include` | `--listFiles` says it is not in the program |
 | the probe's anchor renamed away in `src/page.js` | a hard failure, never a skip -- a probe testing nothing is the failure this prevents |
+| `checkJs` back to `false` in `tsconfig.contracts-node.json` (github#156) | the exporter probe is no longer rejected |
+| `src/build-graph.mjs` dropped from that `include` (github#156) | `--listFiles` says it is not in the program |
+| the exporter probe's anchor renamed away (github#156) | a hard failure, never a skip |
+| the `@type {VaultData}` deleted from the exporter's `data` (github#156) | the exporter probe is no longer rejected |
+| node types added to `tsconfig.contracts.json` (github#156) | nothing does, which is why they are not there -- the browser program is what catches `process` in `src/page.js`, and it can only do that while its `types` stays `[]` |
 
 The fourth, dropping `src/page.js` from the `include`, does **not** fail, and correctly: it
 stays in the program as `plugin/main.js`'s import and stays checked. That was measured too, by
@@ -5272,8 +5323,17 @@ reintroducing a real defect with the file out of the include and watching 22 dia
 ### Not covered
 
 `strictNullChecks` over the JavaScript -- github#145 calls it a separate, later, measured step,
-and github#55's ratchet owns it. `src/build-graph.mjs` and `scripts/**` are in no type program
-today; widening the program is its own measurement.
+github#55's ratchet owns it, and github#156 did not touch it.
+
+`scripts/**` is in no type program. github#156 deliberately stopped at `src/build-graph.mjs`: it is
+the one that produces data the page's declared types describe, so it is where a disagreement is
+most expensive and most checkable, and much of `scripts/**` is harnesses whose annotations matter
+less than a producer's. Widening to it is its own measurement.
+
+**Annotating the rest of `src/build-graph.mjs`** beyond the producer boundary, likewise. github#156
+annotated what crosses into `VaultData` and the accumulators feeding it; the file's internal helpers
+are still unannotated, which means they are `any` and check nothing. That is not a hole in this
+invariant -- the boundary is what the page depends on -- but it is not coverage either.
 
 ## The disc's right-click is the host's until a reader asks for it (github#165)
 
