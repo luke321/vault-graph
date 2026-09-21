@@ -7226,7 +7226,7 @@ function mountVaultGraph(root, data, deps) {
    * @param {Record<string, boolean> | null} [bandHint]   group -> inner, to seed the lock with
    * @param {boolean} [keepAlpha]
    */
-  // github#86, decisions/0011 -- the lock derivation on its own, so ringsIn
+  // github#86, decisions/0011-a-live-rebuild-retakes-the-geometry-lock-at-rest -- the lock derivation on its own, so ringsIn
   // github#86 -- can take it in the dimension the rings belong to
   /** @param {Record<string, boolean>} [bandHint] @returns {Plan | null} */
   function takeGeom(bandHint) {
@@ -7257,7 +7257,7 @@ function mountVaultGraph(root, data, deps) {
     return base;
   }
 
-  // github#72, github#86, decisions/0011 -- a switched-to disc sits inside rings borrowed from
+  // github#72, github#86, decisions/0011-a-live-rebuild-retakes-the-geometry-lock-at-rest -- a switched-to disc sits inside rings borrowed from
   // github#86 -- another dimension; a live rebuild retakes THOSE, from that
   // github#86 -- dimension's own plan, so the step stays sub-pixel
   /** @param {"folder" | "tag"} dim @returns {GeomLock | null} */
@@ -7316,7 +7316,7 @@ function mountVaultGraph(root, data, deps) {
     bandLock = null; geomLock = null;
     if (deferLayout && prevBand) {
       regroup(true, prevBand, true);
-      // github#49; github#72, decisions/0011
+      // github#49; github#72, decisions/0011-a-live-rebuild-retakes-the-geometry-lock-at-rest
       if (prevGeom && !freshGeom) geomLock = prevGeom;
       return;
     }
@@ -11020,7 +11020,7 @@ function mountVaultGraph(root, data, deps) {
     return d;
   }
 
-  // github#72, design/0014, decisions/0006, decisions/0011
+  // github#72, design/0014, decisions/0006, decisions/0011-a-live-rebuild-retakes-the-geometry-lock-at-rest
   /**
    * @param {VaultData} next
    * @param {{ renames?: Record<string, string> }} [opts]  oldPath -> newPath; github#49
@@ -11091,7 +11091,7 @@ function mountVaultGraph(root, data, deps) {
 
     onData.forEach(function (h) { attempt(h.fn); });
 
-    // decisions/0011
+    // decisions/0011-a-live-rebuild-retakes-the-geometry-lock-at-rest
     var ringsDim = geomLock ? geomLock.dim : null;
     hardRelayout(false, true, true);
     // github#86 -- and back inside the rings it was switched into, same step

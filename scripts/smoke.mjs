@@ -576,7 +576,7 @@ check("layout matches its golden snapshot", async (p) => {
     __vg.graph.forEachNode(function(id, a){ pos[id] = [a.x, a.y]; });
     return { band: band, positions: pos };
   })()`);
-  // github#113, decisions/0011
+  // github#113, decisions/0011-a-live-rebuild-retakes-the-geometry-lock-at-rest
   if (dim !== "folder") {
     await p.eval(`__vg.setDim("folder"); void 0`);
     await settle(p);
@@ -2088,9 +2088,9 @@ check("highlighting ramps per note and is additive", async (p) => {
 check("tags: a live rebuild in the tag disc refiles the arrival and keeps the rings it was switched into", async (p) => {
   await settle(p);
   await p.eval(LIVE_JS);
-  // github#72, github#86, decisions/0011 -- the filing is a cache a live rebuild stales
+  // github#72, github#86, decisions/0011-a-live-rebuild-retakes-the-geometry-lock-at-rest -- the filing is a cache a live rebuild stales
   // github#86 -- an untagged arrival lands in (untagged)
-  // github#86, decisions/0011 -- a switched-to disc keeps its borrowed rings
+  // github#86, decisions/0011-a-live-rebuild-retakes-the-geometry-lock-at-rest -- a switched-to disc keeps its borrowed rings
   // github#86 -- "fresh" is two passes inside the kept rings, not relayout()
   await p.j(`(function(){ __vg.setDim("tag"); return true; })()`);
   await settle(p);
@@ -7948,7 +7948,7 @@ check("a live rebuild lands on the layout a fresh relayout gives", async (p) => 
                                         return { n: window.__live.a.n }; })()`);
   const res = await p.j(`__vg.applyData(window.__live.withOneMore("__live/Zz Live Probe.md"))`);
   await settle(p);
-  // decisions/0011, github#21
+  // decisions/0011-a-live-rebuild-retakes-the-geometry-lock-at-rest, github#21
   const after = await p.j(`(function(){
     var landed = window.__live.snap();
     __vg.relayout();
