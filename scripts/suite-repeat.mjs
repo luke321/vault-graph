@@ -49,6 +49,15 @@ function parseLog(text) {
   return perCheck;
 }
 
+// github#101 -- a check name has spaces; split(/\s+/) alone breaks --only
+function tokenize(s) {
+  const out = [];
+  const re = /"([^"]*)"|'([^']*)'|(\S+)/g;
+  let m;
+  while ((m = re.exec(s))) out.push(m[1] !== undefined ? m[1] : m[2] !== undefined ? m[2] : m[3]);
+  return out;
+}
+
 function parseModes() {
   const specs = argAll("mode");
   if (!specs.length) return [];
@@ -58,7 +67,7 @@ function parseModes() {
     const name = s.slice(0, eq).trim();
     const args = s.slice(eq + 1).trim();
     if (!name) throw new Error(`--mode "${s}" has an empty name`);
-    return { name, args: args ? args.split(/\s+/) : [] };
+    return { name, args: args ? tokenize(args) : [] };
   });
 }
 

@@ -4,7 +4,7 @@
 declarations of the files too large to read top to bottom, with line numbers. Open the
 range, not the file. Stale when `node scripts/code-map.mjs --check` fails.
 
-## `src/page.js` — 12069 lines, 38 sections, 503 functions
+## `src/page.js` — 12079 lines, 38 sections, 504 functions
 
 ### Sections
 
@@ -45,9 +45,9 @@ range, not the file. Stale when `node scripts/code-map.mjs --check` fails.
 | 10159–10926 | demo automation + debug API — stripped from the plugin build |
 | 10927–10928 | date range (continued) |
 | 10929–11145 | live rebuild |
-| 11146–11466 | go |
-| 11467–11999 | demo automation + debug API — stripped from the plugin build |
-| 12000–12069 | go (continued) |
+| 11146–11476 | go |
+| 11477–12009 | demo automation + debug API — stripped from the plugin build |
+| 12010–12079 | go (continued) |
 
 ### Functions
 
@@ -543,19 +543,20 @@ range, not the file. Stale when `node scripts/code-map.mjs --check` fails.
 | 11132 | `drainLive` |
 | 11140 | `stopDrain` |
 | 11263 | · · · · · · · · · · `rows` |
-| 11300 | · · · · · · · · · · `at` |
-| 11308 | · · · · · · · · · · `dist` |
-| 11379 | · · · · · · · · · · `r3` |
-| 11380 | · · · · · · · · · · `r3n` |
-| 11382 | · · · · · · · · · · `bandStat` |
-| 11407 | · · · · · · · · · · · `q` |
-| 11581 | · · · · · · · · · · `take` |
-| 11590 | · · · · · · · · · · `r2` |
-| 11656 | · · · · · · · · · · `W` |
-| 11664 | · · · · · · · · · · `rows` |
-| 11714 | · · · · · · · · · · `r3` |
-| 11849 | · · · · · · · · · · `byPath` |
-| 12038 | `destroy` |
+| 11291 | · · · · · · · · · · `sample` |
+| 11304 | · · · · · · · · · · `at` |
+| 11312 | · · · · · · · · · · `dist` |
+| 11389 | · · · · · · · · · · `r3` |
+| 11390 | · · · · · · · · · · `r3n` |
+| 11392 | · · · · · · · · · · `bandStat` |
+| 11417 | · · · · · · · · · · · `q` |
+| 11591 | · · · · · · · · · · `take` |
+| 11600 | · · · · · · · · · · `r2` |
+| 11666 | · · · · · · · · · · `W` |
+| 11674 | · · · · · · · · · · `rows` |
+| 11724 | · · · · · · · · · · `r3` |
+| 11859 | · · · · · · · · · · `byPath` |
+| 12048 | `destroy` |
 
 ## `scripts/smoke.mjs` — 8684 lines, 13 sections, 89 functions, 158 checks
 
