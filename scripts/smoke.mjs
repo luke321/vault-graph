@@ -3786,8 +3786,13 @@ check("the hub stays the same share of the disc as it is filtered", async (p) =>
 check("fit frames the disc that is actually there", async (p) => {
   await p.eval(`__vg.state.hidden.folder = {}; __vg.syncAlpha(); __vg.applyLayout(false); void 0`);
   await sleep(200);
-  await p.eval(`document.querySelector("#vg-reset").click(); void 0`);
-  const full = await camSettle(p);
+  // github#151 -- toRest(), not a click plus camSettle(). camSettle() returns when two polls
+  // 60ms apart read the same numbers, and under frame starvation that means NO FRAME WAS DRAWN
+  // rather than the camera having landed -- so it read a mid-flight ratio (0.9282 against the
+  // 0.6134 the fit promised) on a machine at 100% RAM. toRest() waits on __vg.camAtRest, which
+  // is the page saying it, not the harness inferring it from stillness.
+  await toRest(p);
+  const full = await camState(p);
   const base = await p.j(`__vg.FIT_RATIO`); // github#111
 
   const hid = await p.j(`(function(){
@@ -3804,13 +3809,18 @@ check("fit frames the disc that is actually there", async (p) => {
     return { kept: keep.length, hidden: Object.keys(h).length, extent: Math.round(max) };
   })()`);
   await sleep(250);
-  await p.eval(`document.querySelector("#vg-reset").click(); void 0`);
-  const small = await camSettle(p);
+  // github#151 -- as above: the landed ratio is the whole assertion here
+  await toRest(p);
+  const small = await camState(p);
 
   const dens = await p.j(`__vg.densityReport()`);
   await p.eval(`__vg.state.hidden.folder = {}; __vg.syncAlpha(); __vg.applyLayout(false); void 0`);
   await sleep(200);
-  await camReset(p);
+  // github#151 -- showing the groups again re-fits, and a camReset() issued while that flight is
+  // in the air is simply overwritten -- which is how this check left cam.ratio at 0.6138 and the
+  // overview badge lit. Wait it out, then come home the page's own way.
+  await settle(p);
+  await toRest(p);
   const want = base * Math.max(0.12, Math.min(1.35, dens.reach));
   return {
     ok: Math.abs(full.ratio - base) < 0.02 && Math.abs(small.ratio - want) < 0.03 &&

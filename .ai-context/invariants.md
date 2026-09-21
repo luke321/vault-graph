@@ -5396,6 +5396,17 @@ call sites), and the check refuses a report that never arrived instead of readin
 nothing on it. **A check that cannot tell "nothing to measure" from "nothing came back" is a check
 that will pass through its own removal.**
 
+**And one more of the same family, caught only because the verification run happened on a machine
+at 100% RAM.** `fit frames the disc that is actually there` read its landed ratio through
+`camSettle()`, which returns once two polls 60 ms apart read the same numbers — and under frame
+starvation that means **no frame was drawn**, not that the camera has landed. It measured 0.9282
+against the 0.6134 its own fit promised, and the `camReset()` at the end was then overwritten by the
+flight still in the air, leaving `cam.ratio` at 0.6138 with the overview badge lit. It passed 6/6 in
+isolation, which is what a load-sensitive check looks like from the inside. Fixed by using
+`toRest()`, which waits on **`__vg.camAtRest`** — the page saying it has landed, rather than the
+harness inferring it from stillness. `camSettle()` is left alone: checks that deliberately park the
+camera off-rest need exactly its weaker guarantee.
+
 **One limitation the five-fixture run exposed, and it is the price of the rule rather than a
 defect in it.** Scoring "newly off baseline" means **a declared leak of a key masks a later
 undeclared leak of the same key**: the context-menu check leaked `store.settings` on four fixtures
