@@ -10,11 +10,11 @@ import { buildSync } from "esbuild";
 // github#6
 import { localDay, resolveCreated, dateTally } from "./dates.mjs";
 // github#141
-import { canonicalDest, cleanTarget, ghostId, ghostKey, ghostLabel, isExternalTarget, isRelativeDest, resolveAgainst } from "./links.mjs";
+import { canonicalDest, cleanTarget, ghostKey, isExternalTarget, isRelativeDest, resolveAgainst } from "./links.mjs";
 // github#149 -- the policy this producer shares with plugin/build-data.mjs
 import {
   countWords, degrees, edgeBook, generatedStamp, ghostNode, inferType, isSkippedFile,
-  normalizeTags, normSlashes, paraDirs, paraFolder, under,
+  noteBody, normalizeTags, normSlashes, paraDirs, paraFolder, under,
 } from "./taxonomy.mjs";
 import { engineBanner } from "./engine/notice.mjs";
 // github#71
@@ -195,7 +195,8 @@ function parseFrontmatter(raw) {
       fm[key] = unquote(v);
     }
   }
-  return { fm, body: text.slice(m[0].length) };
+  // github#149
+  return { fm, body: noteBody(raw) };
 }
 const unquote = (s) => String(s).trim().replace(/^["']|["']$/g, "").trim();
 
@@ -396,7 +397,7 @@ if (INCLUDE_GHOSTS) {
   for (const { dest, sources } of ghosts.values()) {
     // github#149, github#152 -- one factory, so a ghost cannot lose a field in one host only
     /** @type {RawNote} */
-    const g = ghostNode(dest, ghostId, ghostLabel);
+    const g = ghostNode(dest);
     const j = notes.push(g) - 1;
     for (const i of sources) addEdge(i, j);
   }

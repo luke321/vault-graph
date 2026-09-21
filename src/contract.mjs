@@ -63,7 +63,7 @@ export const DATE_SOURCES = ["frontmatter", "filename", "stamp", "none"];
 
 // github#149, design/0020 -- where the two hosts genuinely cannot agree
 // github#149 -- the gate asserts each of these STILL happens, or it rots
-/** @type {{ key: string, host: "exporter" | "plugin", kind: "extra-key" | "absent-key" | "field-value", why: string }[]} */
+/** @type {{ key: string, host: "exporter" | "plugin", kind: "extra-key" | "absent-key" | "field-value" | "deferred-value", why: string }[]} */
 export const DIVERGENCES = [
   {
     key: "dev", host: "exporter", kind: "absent-key",
@@ -90,9 +90,12 @@ export const DIVERGENCES = [
          "kept so the view can report them. The page never reads it.",
   },
   {
-    key: "words", host: "plugin", kind: "field-value",
+    key: "words", host: "plugin", kind: "deferred-value",
     why: "The deferred read above: every node is words: 0 until readWords() has been awaited, " +
-         "and 0 for every node when the `words` setting is off.",
+         "and 0 for every node when the `words` setting is off. DEFERRED, not different -- the " +
+         "TIMING is what diverges, so the gate asserts the zero state and then compares the " +
+         "value like any other. Exempting it from the comparison is how github#149's own first " +
+         "run missed a real word-count divergence on a note carrying a byte-order mark.",
   },
 ];
 

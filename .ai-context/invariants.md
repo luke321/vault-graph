@@ -4590,6 +4590,27 @@ than keeping it as a sub. A first draft of those assertions **passed under that 
 each only checked a case where both readings agree; the note buried under a month folder is in the
 fixture because of it.
 
+**Sharing the policy found two live defects on the first read, and both are pinned in the
+fixture.** Neither was introduced by the merge; both had been sitting in the duplicated halves.
+
+- **`type: constructor` in frontmatter returned a *function* as `node.type`.** `TYPE_ALIAS` is a
+  plain object literal indexed by a user-written value, so `TYPE_ALIAS["constructor"]` is
+  `Object.prototype.constructor` before anything is stored — github#97's class exactly, one level
+  up from the planner maps that invariant covers. It is the **only** reachable name: `fm.type` is
+  lowercased first, so `toString` and `hasOwnProperty` miss, and `constructor` is already
+  lowercase. The map has a null prototype now, in the one place both hosts read it.
+- **The plugin counted one word too many on a note carrying a byte-order mark.** It matched
+  `^---` against the BOM-stripped text and then sliced the **original**, so the body kept one
+  character of its own frontmatter: measured **7 words against the exporter's 6** on the same
+  note. The exporter was right — `parseFrontmatter` sliced the string it had matched. `noteBody()`
+  is that rule in one place now, and both producers call it.
+
+**And the check had a hole that let the second one through.** `words` was declared a
+`field-value` divergence, which exempted it from the node-for-node comparison altogether — so the
+one field where the two hosts provably disagreed was the one field never compared. It is a
+`deferred-value` now: the gate asserts the zero state before `readWords()` (which is what actually
+diverges — the *timing*) and then compares the value like every other field.
+
 **Behaviour unchanged, measured both ways:** the exporter's output on a fixture vault is
 byte-identical to `98c91e7` with `generated` excluded, and `check-link-resolution.mjs` — which
 builds real vaults and asserts exact edges, ghost identities and degrees — passes untouched.

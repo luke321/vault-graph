@@ -5,11 +5,11 @@
 // github#6
 import { dateTally, localDay, resolveCreated } from "../src/dates.mjs";
 // github#141
-import { canonicalDest, ghostId, ghostKey, ghostLabel } from "../src/links.mjs";
+import { canonicalDest, ghostKey } from "../src/links.mjs";
 // github#149 -- the policy this producer shares with src/build-graph.mjs
 import {
-  countWords, degrees, edgeBook, frontmatterBlock, generatedStamp, ghostNode, inferType,
-  isSkippedFile, normalizeTags, normSlashes, paraDirs, paraFolder, under,
+  countWords, degrees, edgeBook, generatedStamp, ghostNode, inferType, isSkippedFile,
+  noteBody, normalizeTags, normSlashes, paraDirs, paraFolder, under,
 } from "../src/taxonomy.mjs";
 
 /** @typedef {import("obsidian").App} App */
@@ -262,7 +262,7 @@ export async function buildData(host, opts, version) {
     for (const slot of ghosts.values()) {
       const j = nodes.length;
       // github#149, github#152 -- one factory, so a ghost cannot lose a field in one host only
-      nodes.push(ghostNode(slot.dest, ghostId, ghostLabel));
+      nodes.push(ghostNode(slot.dest));
       for (const pair of slot.sources) addEdge(pair[0], j, pair[1]);
     }
   }
@@ -286,7 +286,7 @@ export async function buildData(host, opts, version) {
       try {
         // github#149
         const raw = await app.vault.cachedRead(file);
-        words = countWords(raw.slice(frontmatterBlock(raw).length));
+        words = countWords(noteBody(raw));
       } catch { words = 0; }
       apply(i, words);
     }));

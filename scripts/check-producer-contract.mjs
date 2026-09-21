@@ -19,6 +19,8 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(HERE, "..");
 
 let failures = 0;
+// github#149 -- what the "deferred-value" divergence claims, observed rather than asserted here
+let sawDeferredZero = true;
 /** @param {boolean} ok @param {string} name @param {string} [detail] */
 function report(ok, name, detail) {
   if (!ok) failures++;
@@ -41,6 +43,10 @@ const NOTES = {
   "01 - Projects/Deep/Inner/Leaf.md": "# leaf\n",
   "01 - Projects/2026-09/Deeper/Buried.md": "# buried under a month folder\n",
   "README.md": "# never a note\n",
+  // github#149 -- a BOM: the strip and the slice have to be the same string in BOTH hosts
+  "04 - Notes/Bom.md": "\uFEFF---\ntags: [x]\n---\nthe body here has six real words\n",
+  // github#97, github#149 -- `constructor` is already lowercase, so it reaches the alias map
+  "04 - Notes/Proto.md": "---\ntype: constructor\n---\n# a type named after a prototype member\n",
   "02 - Areas/Beta.md": "---\ntype: people\ntag: green\n---\n# beta\n",
   "03 - Dailies/2026-09-20.md": "# a day\n",
   "Templates/Tpl.md": "# a template\n",
@@ -106,9 +112,7 @@ async function runPlugin(vault, flatMonths) {
     await buildData(fakeHost(vault), { ghosts: true, templates: false, flatMonths, words: true },
                     FIXTURE_VERSION)));
   const nodes = /** @type {Record<string, unknown>[]} */ (out.nodes);
-  if (!nodes.every((n) => n.words === 0)) {
-    report(false, "every plugin node starts at words: 0, before readWords() has run");
-  }
+  if (!nodes.every((n) => n.words === 0)) sawDeferredZero = false;
   await /** @type {(apply: (i: number, w: number) => void) => Promise<number>} */ (out.readWords)(
     (i, w) => { nodes[i].words = w; });
   return out;
@@ -136,7 +140,9 @@ function fakeHost(vault) {
   });
   /** @param {string} raw @returns {Record<string, unknown>} */
   const frontmatter = (raw) => {
-    const m = /^---\r?\n([\s\S]*?)\r?\n---/.exec(raw);
+    // github#149 -- Obsidian strips the BOM before parsing its own frontmatter; a fake host
+    // that does not reports a tag difference the two real hosts do not have
+    const m = /^---\r?\n([\s\S]*?)\r?\n---/.exec(String(raw).replace(/^\uFEFF/, ""));
     if (!m) return {};
     /** @type {Record<string, unknown>} */
     const fm = {};
@@ -263,6 +269,7 @@ try {
    * @param {string} note
    */
   function compareValues(exporter, plugin, note) {
+    // github#149 -- only a PERMANENTLY different field is exempt; a deferred one is compared
     const skip = new Set(DIVERGENCES.filter((x) => x.kind === "field-value").map((x) => x.key));
     /** @param {Record<string, unknown>} d */
     const byId = (d) => Object.fromEntries(
@@ -316,6 +323,14 @@ try {
     eq(ex["Templates/Tpl.md"], undefined, "a template is excluded when templates are off");
     eq(ex["README.md"], undefined, "a README is never a note, in either host");
     eq(ex["ghost:Nowhere"].deg, 2, "two sources reaching one destination make one ghost of degree 2");
+
+    // github#149 -- both found by review, both a difference the two hosts could carry silently
+    eq(ex["04 - Notes/Bom.md"].words, 7,
+       "a byte-order mark is stripped before the frontmatter is sliced, not after");
+    eq(typeof ex["04 - Notes/Proto.md"].type, "string",
+       "github#97 -- a `type:` naming an Object.prototype member stays a string");
+    eq(ex["04 - Notes/Proto.md"].type, "constructor",
+       "and it is the name that was written, not what the prototype holds under it");
   }
 
   console.log("check-producer-contract: every declared divergence still happens (github#149)");
@@ -330,8 +345,12 @@ try {
       report(d.key in from && !(d.key in other),
              `${d.key} is still the ${d.host}'s alone`,
              d.key in from ? "both producers emit it now" : "the " + d.host + " stopped emitting it");
+    } else if (d.kind === "deferred-value") {
+      report(sawDeferredZero, `${d.key} is still 0 on every plugin node before readWords()`,
+             "it is no longer deferred -- the declaration is stale");
     } else {
-      report(true, `${d.key} is a declared value divergence`, d.why.slice(0, 48) + "...");
+      report(JSON.stringify(from[d.key]) !== JSON.stringify(other[d.key]),
+             `${d.key} still differs between the two hosts`, "the two agree now");
     }
   }
 

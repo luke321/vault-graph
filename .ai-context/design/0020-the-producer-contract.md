@@ -137,6 +137,45 @@ the fixture because of it.
 once in each state. A policy that agrees in its default and diverges under a flag is the failure
 that second pass exists for.
 
+## What sharing the policy found immediately
+
+Neither of these was introduced by the merge. Both had been sitting in the duplicated halves,
+which is the argument for the merge.
+
+**`type: constructor` returned a function.** `TYPE_ALIAS` was a plain object literal indexed by
+whatever a note's frontmatter `type:` says, so `TYPE_ALIAS["constructor"]` is
+`Object.prototype.constructor` before anything is stored. This is github#97's class — the same
+defect that killed four one-note vaults at boot when the planner's maps were plain `{}` — one
+level up, in a map the *user* keys. `constructor` is the only reachable name, because `fm.type`
+is lowercased first and the other prototype members are camel-cased. Null prototype now, once,
+where both hosts read it.
+
+**The plugin counted a word that was not there.** It matched `^---` against the BOM-stripped text
+and sliced the **original**, so a note with a byte-order mark kept one character of its own
+frontmatter: 7 words where the exporter said 6. The exporter was right — `parseFrontmatter` sliced
+the same string it matched. `noteBody()` is that rule in one place, and both call it.
+
+**The check had a hole that let the second one through**, which is worth recording because the
+hole is a design mistake and not a typo. `words` was filed as a `field-value` divergence, and that
+exempted it from the node-for-node comparison — so the one field where the two hosts provably
+disagreed was the one field never compared. What actually diverges about `words` is its **timing**:
+it is `0` until `readWords()` has been awaited, and correct after. That is a `deferred-value`, and
+the gate now asserts the zero state *and* compares the value.
+
+The general lesson, for the next entry added to `DIVERGENCES`: a divergence exempts something from
+a check, so the narrowest true description of it is the only safe one.
+
+## One divergence reported and deliberately not fixed
+
+`tags: false` in frontmatter becomes the tag `"false"` in the exporter and no tag at all in the
+plugin. The exporter's own parser yields the string `"false"`; Obsidian yields the boolean. This is
+pre-existing — it predates the shared module — and `||` was kept over `??` in `normalizeTags()`
+because `||` preserves **both** hosts byte for byte, where `??` would have changed the plugin.
+
+Closing it means teaching the exporter YAML scalar types, which is a real change to a parser this
+ticket has no business touching. It is not in `DIVERGENCES` because that list is keyed by field,
+and declaring `tags` would exempt all tag comparison rather than this one value.
+
 ## Cost
 
 Four files, and the gate runs in about a second: no Chrome, no Obsidian, a fixture of nine notes

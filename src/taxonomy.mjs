@@ -2,6 +2,9 @@
 // github#149 -- no imports: this is bundled into the plugin
 // github#149 -- every path argument arrives "/" separated
 
+// github#141 -- src/links.mjs is importless and pure, so it keeps the rule above
+import { ghostId, ghostLabel } from "./links.mjs";
+
 // github#149, design/0020 -- a folder naming a period, not a subject
 const MONTHISH = /^\d{4}(?:[-_ ]?(?:\d{2}|Q[1-4]|W\d{1,2}))?$/i;
 
@@ -11,11 +14,12 @@ export function isMonthFolder(seg) {
 }
 
 // github#149 -- frontmatter `type:` values naming one kind
+// github#97, github#149 -- NULL PROTOTYPE: `type: constructor` read Object itself
 /** @type {Record<string, string>} */
-const TYPE_ALIAS = {
+const TYPE_ALIAS = Object.assign(Object.create(null), {
   people: "person", person: "person",
   "zettel/permanent": "zettel", "zettel/fleeting": "zettel", "zettel/literature": "zettel",
-};
+});
 
 // github#149 -- never a note, in either host
 const SKIP_FILES = new Set(["claude.md", "readme.md", "license.md"]);
@@ -127,20 +131,23 @@ export function normalizeTags(fm) {
   /** @type {unknown[]} */
   const raw = [];
   return raw
-    .concat(fm.tags ?? [], fm.tag ?? [])
+    .concat(fm.tags || [], fm.tag || [])
     .flatMap((t) => String(t).split(/[,\s]+/))
     .map((t) => t.replace(/^#/, "").trim())
     .filter(Boolean);
 }
 
-// github#149 -- a leading frontmatter block, or "" when absent
+// github#149 -- the note's body: the BOM and any frontmatter block removed
+// github#149 -- the strip and the slice MUST be the same string, or a BOM note
+// github#149 -- keeps one character of its own frontmatter (measured: +1 word)
 /**
  * @param {string} raw
  * @returns {string}
  */
-export function frontmatterBlock(raw) {
-  const m = /^---\r?\n[\s\S]*?\r?\n---/.exec(String(raw).replace(/^\uFEFF/, ""));
-  return m ? m[0] : "";
+export function noteBody(raw) {
+  const text = String(raw).replace(/^\uFEFF/, "");
+  const m = /^---\r?\n[\s\S]*?\r?\n---/.exec(text);
+  return m ? text.slice(m[0].length) : text;
 }
 
 // github#149 -- the body's word count, frontmatter already removed
@@ -155,13 +162,11 @@ export function countWords(body) {
 // github#149, github#152, design/0020 -- one unresolved-link placeholder
 /**
  * @param {string} dest  a canonical destination from src/links.mjs
- * @param {(dest: string) => string} id
- * @param {(dest: string) => string} label
  * @returns {{ id: string, label: string, folder: string, sub: string, dirs: string[], type: string, tags: string[], created: string, touched: string, words: number, ghost: true }}
  */
-export function ghostNode(dest, id, label) {
+export function ghostNode(dest) {
   return {
-    id: id(dest), label: label(dest), folder: "(unresolved)", sub: "", dirs: [],
+    id: ghostId(dest), label: ghostLabel(dest), folder: "(unresolved)", sub: "", dirs: [],
     type: "ghost", tags: [], created: "", touched: "", words: 0, ghost: true,
   };
 }
