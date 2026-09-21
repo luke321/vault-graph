@@ -533,6 +533,122 @@ folder dimension) — under the cost's own `HOLE_MAX` ceiling of 0.36, which is 
 fixture that asserts it**, before and after, because `balanceBands()` runs only when
 `bandLock` is null: a filter re-packs inside rings it does not re-choose.
 
+## "Packed", and the four ways a cascade broke it (github#186)
+
+The definition, given on 2026-09-21 and implemented as given:
+
+> **Packed means that at all times every wedge has enough notes to touch both seam sides and
+> the inner and outer rings, and the static inner and outer radii are always honoured. A wedge
+> is never wider than its notes can fill. The last frame of a cascade is the rest, with nothing
+> to snap.**
+
+At rest the packer already kept it. The github#186 investigation measured every cascade frame of
+four acts on two fixtures and found **four separate ways it was broken in flight**, each with its
+own mechanism. What follows is what each one was, and what it reads now.
+
+**The resting halves are asserted by the suite**, on every fixture:
+
+| check | what it reads |
+|---|---|
+| *no lit note is outside its band's static rails* | the CENTRE of every note at full alpha against `geomLock`'s own rails. Row 0 of the inner band may spend `HUB_ROW0_FRAC` of the hub on purpose (github#35) and the outer band is already shifted out by its row-0 dot (github#160), so these are centre rails, with half a graph unit of float noise allowed — the same window the lattice check uses |
+| *a resting wedge fills the arc its notes can* | each wedge's seam coverage — the angular span of its dots over the arc it actually draws — against `(n-1)/n + 2·dot/arc` for its rim row. A one- or two-note wedge is allowed the little its notes can reach, which is the github#119 tail and is why this is not a flat threshold |
+
+**The per-frame halves stay manual**, in `scripts/pack-check.mjs`, because automation's frame
+pacing is not a person's and a threshold tuned under it measures the harness rather than the page
+(`animation.md`, *Checking*). It reads a `probe-186.mjs` run and asserts five things: RAILS (no
+lit note's centre outside its band's rails on any frame), REST (a band's outermost lit note never
+past `max(rest before, rest after, rail)`), AREA (area per lit note stays between the two resting
+values), SEAM (a lit wedge's coverage never below its resting value, scaled by the share of itself
+the alpha ≥ 0.5 measure can see) and FILL (a wedge is never wider, per its own notes at the band's
+pitch, than it rests).
+
+### 1. A band empty at one end walked to the density fallback
+
+`solveBand([])` returns `{ sp: sp, rows: 0 }`, and `sp` there is the *density fallback*
+`min(DENSITY_MAX, sqrt(full/now))` = **2.6** — a pitch nothing rests at. The cascade took it as
+`spDstB`, so the thickness walk ran from the source lattice to 2.6 × the source depth.
+
+Soloing `03 - Resources` on the demo vault: the departing outer band's pitch walked **160 → 416
+px** and its outermost lit note reached **5845 px, 1.447× its locked rail of 4038**, with 1058
+notes still fading. That is the spray the solo clip shows.
+
+**A band empty at one end now holds the other end's pitch and depth.** Measured after: the same
+band's outermost lit note tops out at **3937 px, its own resting value, 0.975× the rail**, and
+**0 of 389 frames** are past a rail.
+
+### 2. The top row rode out to the rail
+
+A cell's row is `Math.floor(pp)` while its row *count* is a real number being walked, and the
+pitch was `T / rows_walked`. So while the count ran 6 → 5.01 the outermost row sat at
+`5 × T/5.01` — against the rail — and dropped a whole pitch when the count crossed 5.
+
+Hiding `03 - Resources`: inner band edge **1754 → 1875 px at pr 0.86** (rail 1884) → 1728 at
+rest, and area per lit note **1.00× → 1.30× → 1.17×** with the destination having been 1.17×
+all along. Hiding `inbox` on the tag disc: outer edge **3721 → 3952 at pr 0.94**, **141 px
+outside the locked `maxR` of 3811**.
+
+**Rows and pitch are now solved from the live weighted count, against the band's own STATIC
+thickness, by the same `solveBand` call the resting layout makes.** A walking band is therefore a
+valid resting lattice for what it is carrying: its top row is `(rw − 1) × T/rw`, never the rail,
+and the last frame is the resting one by construction rather than by convergence. Only a band
+that is leaving entirely is handed a lattice, and that one is its source lattice (1 above).
+
+Measured after, over all four acts: **0 frames past a rail, 0 frames past `max(rest, rest,
+rail)`, and area per lit note inside its two resting values on every frame of three of the four
+acts** (the tag act's remaining excursion is below).
+
+**The other candidate was built and measured, and lost.** Walking the top row's radius between
+its two resting values and deriving the pitch as `top / (rows_int − 1)` also holds every rail —
+but it lands **1.12× off the resting density at the end** of both demo acts (16694 against a rest
+of 18678..21826, at pr 0.998), which is a snap at settle, the one thing `animation.md` exists to
+prevent. `design/0002`'s three earlier failures say what else not to repeat.
+
+### 3. A single-cell whole-group toggle drove its arc on the clock, not on its notes
+
+`colWalk` (github#19) replaces a toggling single-cell group's allocation basis with a ramp, so
+its wedge closes monotonically whatever the stagger does. The ramp was `1 − pr` — the cascade's
+clock — so the arc lagged the notes: `00 - Inbox` kept **90% of its arc with half its notes
+gone**, and the worst arc-versus-notes gap on the solo act was **58%**.
+
+**`f` now comes from the group's own weight sum over its rest weight.** A *move* (a note changing
+group during a dimension switch) keeps the edge ramp — that path is github#49's and its notes
+belong to two groups at once.
+
+### 4. The last leavers inherited the ring
+
+A wedge's share is its geom over the band's, so when a whole band is leaving and its notes fade
+on a stagger, whoever is left holds a growing share of a ring that stays full: `10 - Literature
+Notes` ended up **at 1% opacity over 287°**, and its wedge was **18.7× wider than its own notes
+could fill**.
+
+**A band leaving entirely now holds its seats and its source arc shares for the whole fade.**
+`planKeep` keeps every source member of such a band in the plan, so its cells' geoms are constant;
+each wedge draws `share × (live weight / source weight)` and the arc it does not spend is left
+**empty at its own trailing edge** rather than handed to the next group. So the wedges shrink
+where they stand, in place, and the ring simply opens up behind them.
+
+Measured on the solo act, worst wedge against its own resting fill: **18.7× → 1.0×**. On the tag
+act: **1.75× → 1.08×**.
+
+### What is left, and is not this ticket
+
+- **github#132 closes as documented behaviour.** Its 1001 units decompose with no bug in them:
+  the inner band's row 0 is `r0 × INNER_SCALE` and its top rail is
+  `(r0 + (rOuter − r0) × INNER_FILL) × INNER_SCALE`, so 708 of the 1001 is those two constants
+  and the remaining 293 is exactly one pitch — the same relationship the unfiltered vault has.
+  What remains of the issue is that **a filtered band rests at ~6× the area per note**, with its
+  dots on both rings: with the radii static and fewer notes, that is what "still touching both
+  rings" has to mean. It wants this line in `invariants.md`, not a change.
+- **github#119's tail bucketing is a requirement of the definition, and is NOT in this ticket.**
+  A one-note wedge cannot touch two seams; 31 of the tag disc's 121 wedges rest at 0.52 coverage
+  before anything is toggled. That is the one **rest-state** change the umbrella still owes, and
+  *a resting wedge fills the arc its notes can* is written to allow it rather than to fail on it.
+- **The tag act still overshoots its destination density by 1.23×** around pr 0.85 (203877
+  against a rest of 32423..165725). The band survives and re-densifies 5× across that act, and
+  the excursion is in `lit`-note terms — the notes between alpha 0 and 0.5 are in the solve and
+  not in the count. It is reported by `pack-check.mjs` rather than hidden, and it is the smallest
+  of the five numbers this ticket moved.
+
 ## The hub stays the same share of the disc
 
 `r0`'s formula exists to hold the hub at a constant *fraction* — its own comment records

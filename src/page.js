@@ -946,6 +946,7 @@ function mountVaultGraph(root, data, deps) {
   var LINK_WEIGHT = 0.4;
   var LINK_CAP = 2.5;
   var sizeMean = 1;
+  var linkMean = 1;
   /** @param {string} id */
   function linkWeight(id) {
     if (!(LINK_WEIGHT > 0) || !(sizeMean > 1e-9)) return 1;
@@ -1037,6 +1038,9 @@ function mountVaultGraph(root, data, deps) {
       var sum = 0, n = 0;
       graph.forEachNode(function (id, a) { sum += a.size || NODE_MIN; n++; });
       sizeMean = n > 0 ? sum / n : 1;
+      var lw = 0;
+      graph.forEachNode(function (id) { lw += linkWeight(id); });
+      linkMean = n > 0 ? lw / n : 1;
     })();
 
     // github#58
@@ -5859,7 +5863,8 @@ function mountVaultGraph(root, data, deps) {
   // github#13
   var DOT_OF_PITCH = 11 / 28;
   var DOT_MIN_PX = 1.5;
-  var DOT_MAX_SPREAD = DENSITY_MAX;
+  // github#186, decisions/0017
+  var DOT_MAX_SPREAD = DENSITY_MAX * DENSITY_MAX;
   var sizeScale = 1;
   // github#186
   var pxPerUnit = 1;
@@ -11600,6 +11605,7 @@ function mountVaultGraph(root, data, deps) {
                     // github#186
                     linkWeightOf: linkWeight,
                     get linkWeight() { return LINK_WEIGHT; },
+                    get linkWeightMean() { return linkMean; },
                     get radialEase() { return RADIAL_EASE; },
                     set radialEase(v) { RADIAL_EASE = +v > 0 ? Math.min(1, +v) : 1; },
                     get subGap() { return SUB_GAP; },

@@ -3817,13 +3817,15 @@ check("the disc's density follows the notes on screen", async (p) => {
   const roots = free.map((r) => r.pitchRoot);
   const spread = roots.length > 1 ? Math.max(...roots) / Math.min(...roots) : 1;
 
+  // github#186, decisions/0017
+  const linkMean = await p.j("__vg.linkWeightMean").catch(() => 1);
   const sq = [];
   for (const L of lat) {
     for (const [band, v] of [["outer", L.o], ["inner", L.i]]) {
       if (!v || v.n < 9 || v.rows < 2 || !(v.pitch > 1) || !(v.step > 1)) continue;
       sq.push({ keep: L.keep, band: band, n: v.n, rows: v.rows,
                 step: Math.round(v.step), pitch: Math.round(v.pitch),
-                ratio: Math.round((v.step / v.pitch) * 100) / 100,
+                ratio: Math.round((v.step / (v.pitch * (linkMean > 0 ? linkMean : 1))) * 100) / 100,
                 ds: Math.round((2 * (v.dot || 0) / v.step) * 100) / 100 });
     }
   }
@@ -3841,7 +3843,7 @@ check("the disc's density follows the notes on screen", async (p) => {
 
   return {
     ok: square_ok && size_ok,
-    detail: `step/pitch per band over ${sq.length} sampled states: ` +
+    detail: `step/(pitch x link mean ${linkMean.toFixed(3)}) per band over ${sq.length} sampled states: ` +
             sq.map((q) => `${q.band[0]}${q.n}:${q.ratio}/d${q.ds}`).join(" ") +
             ` -- worst square ${worstSq.ratio} (needs ${SQ_LO.toFixed(2)}-${SQ_HI.toFixed(2)}),` +
             ` diameter/step ${dsLo}-${dsHi} (needs 0.15-0.80, spread <2.2)` +
@@ -5169,7 +5171,8 @@ check("filtered to the bone, the disc stays drawable", async (p) => {
   await toRest(p);
   return {
     ok: !bad.length,
-    detail: bad.length ? bad.slice(0, 4).join("; ")
+    // github#186
+    detail: bad.length ? bad.slice(0, 4).join("; ") + "  ||  " + seen.slice(-4).join(" | ")
                        : seen.slice(-4).join(" | "),
   };
 }, { on: "all" });
