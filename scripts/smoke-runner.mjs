@@ -42,17 +42,16 @@ async function drain(page) {
   try { await page.eval("1"); return ""; } catch (e) { return e.message || "no reply"; }
 }
 
-// github#151 -- the audit: what a check changed, and what the next one could read.
-// github#151 -- Off unless asked for, and when off nothing below runs and nothing is wrapped.
+// github#151 -- the audit, off unless asked for
 function makeAudit(page) {
   /** @type {string[]} */
   let exprs = [];
   let on = false;
-  // github#151 -- the original reference, so release() hands back the very same function
+  // github#151 -- the original reference, so release() restores it
   const real = page.eval;
   page.eval = (expr) => { if (on) exprs.push(String(expr)); return real.call(page, expr); };
   return {
-    // github#151 -- the probe's own read must not land in the check's expression list
+    // github#151 -- the probe's own read is not the check's
     open() { exprs = []; on = true; },
     close() { on = false; return exprs.slice(); },
     release() { page.eval = real; }
@@ -61,13 +60,11 @@ function makeAudit(page) {
 
 /**
  * github#146, github#112, github#113, github#151
- * @returns {Promise<{ failed: number, ran: number, timings: {name: string, ms: number}[],
- *                     audit: { base: Record<string, string>, rows: object[] } | null }>}
+ * @returns {Promise<{ failed: number, ran: number, timings: {name: string, ms: number}[], audit: { base: Record<string, string>, rows: object[] } | null }>}
  */
 export async function runChecks(opts) {
   const { checks, page, ctx, log, settle, chromeState, fastClock, nativeClock } = opts;
-  // github#151 -- the audit reports the coupling; the boundary refuses to let it accumulate.
-  // github#151 -- Either one needs the probe, so they share it.
+  // github#151 -- audit reports, boundary refuses; both need the probe
   const auditing = !!opts.stateAudit;
   const bounding = !!opts.stateBoundary;
   const watching = auditing || bounding;
@@ -145,7 +142,7 @@ export async function runChecks(opts) {
     }
     // github#146 -- the window closes after the interaction's tail
     await quiet(page);
-    // github#151 -- sampled here, on the same boundary the error window closes on
+    // github#151 -- sampled on the error window's own boundary
     if (audit) {
       const exprs = audit.close();
       const t1 = Date.now();
@@ -156,10 +153,7 @@ export async function runChecks(opts) {
                          // github#151 -- so the report can tell a leak from a declaration
                          leaves: c.leaves || null, ms: Date.now() - t1 });
       }
-      // github#151 -- what this check took off the job's baseline, minus what it declared.
-      // github#151 -- Not "changed since the last boundary": that would fail a check for putting
-      // github#151 -- an inherited key back, and would fail every check after one unfixed leak.
-      // github#151 -- An unreadable sample scores nothing at all: see readable() for why.
+      // github#151 -- off the job's baseline, minus what it declared
       if (bounding && readable(baseState) && readable(prevState) && readable(now)) {
         const leaked = newLeaks(baseState, prevState, now)
                          .filter((d) => !allowedToLeave(d.key, c.leaves));

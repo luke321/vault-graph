@@ -37,7 +37,7 @@ const PINNED_PORT = arg("port", "") ? Number(arg("port", "")) : 0;
 // github#129
 // github#151 -- the state audit, off unless a file is named for it
 const AUDIT = arg("audit-state", "");
-// github#151 -- the boundary: a check that leaves the page off its baseline fails
+// github#151 -- the state boundary
 const BOUNDARY = !argv.includes("--no-state-boundary");
 const HEADED = argv.includes("--headed");
 // github#87
@@ -92,9 +92,7 @@ const check = (name, fn, opts) => {
   if (on !== "all" && !(Array.isArray(on) && on.length && on.every((f) => FIXTURE_NAMES.includes(f)))) {
     throw new Error(`check "${name}": on must be "all" or a non-empty list of ${FIXTURE_NAMES.join(", ")}`);
   }
-  // github#151 -- what this check is allowed to leave off the page's baseline, if anything.
-  // github#151 -- A declaration here is the coupling made visible; the absence of one is the
-  // github#151 -- claim that the check puts the page back exactly as it found it.
+  // github#151 -- what this check may leave off baseline, if anything
   const leaves = (opts && opts.leaves) || undefined;
   if (leaves !== undefined &&
       !(Array.isArray(leaves) && leaves.length && leaves.every((k) => typeof k === "string" && k))) {
@@ -279,8 +277,7 @@ check("nav counts share one right edge", async (p) => {
   return { ok, detail: `folded ${folded.n} counts / ${folded.distinct.length} edge, ` +
                        `open ${open.n} counts / ${open.distinct.length} edge` +
                        (open.n > folded.n ? "" : "  <- the tree never opened") };
-  // github#151 -- as "legend count bars scale to the largest visible folder": measuring
-  // github#151 -- every row means expanding every folder, and it stays expanded.
+  // github#151 -- measuring every row expands every folder
 }, { leaves: ["state.collapsed", "press.vg-legend"] });
 
 check("every heatmap day with notes fills its cell", async (p) => {
@@ -358,8 +355,7 @@ check("the heatmap band is painted for the state it landed in", async (p) => {
   await clickEye(p, g);
   await settle(p);
   const BAR = 2;
-  // github#151 -- hiding and filtering its way around the disc crops it, which lights the
-  // github#151 -- overview and leaves the camera where the last fit put it
+  // github#151 -- hiding and filtering crops the disc; the overview lights
   await settle(p);
   await toRest(p);
   return { ok: r.max <= BAR,
@@ -653,9 +649,7 @@ check("layout matches its golden snapshot", async (p) => {
     parts.push("positions unchanged");
   }
   return { ok, detail: parts.join("; ") };
-  // github#151 -- leaves state.hidden: it relayouts the tag disc, and visiting that disc
-  // github#151 -- seeds its own hidden defaults, which the page keeps per dimension by
-  // github#151 -- design (design/0015). No golden is touched by this; see github#113.
+  // github#151 -- leaves state.hidden: the tag disc seeds its defaults
 }, { on: "all", leaves: ["state.hidden"] });
 
 /* ---------------------------------------------------- github#86, design/0015 */
@@ -746,7 +740,7 @@ check("tags: every note is filed in exactly one wedge, in either dimension", asy
             (r.folder.twice + r.tag.twice ? `; ${r.folder.twice + r.tag.twice} note(s) in TWO cells` : "") +
             (r.misfiled.length ? `; MISFILED ${r.misfiled.join(", ")}` : ""),
   };
-  // github#151 -- as above: visiting the tag disc seeds its own hidden defaults, by design
+  // github#151 -- leaves state.hidden: the tag disc seeds its defaults
 }, { on: "all", leaves: ["state.hidden"] });
 
 check("tags: the switch lands where a fresh relayout would, and comes home exactly",
@@ -789,14 +783,11 @@ async (p) => {
             `round trip ${r.trip.moved} moved (worst ${r.trip.worst}` +
             (r.trip.who ? `, #${r.trip.who}` : "") + ")",
   };
-  // github#151 -- leaves state.hidden: visiting the tag disc seeds that disc's own hidden
-  // github#151 -- defaults, which the page keeps per dimension by design (design/0015).
-  // github#151 -- Declared so it does not depend on another tag check running first.
+  // github#151 -- leaves state.hidden: the tag disc seeds its defaults
 }, { on: "all", leaves: ["state.hidden"] });
 
 check("tags: a dot in the disc being left keeps its colour until it has faded", async (p) => {
-  // github#151 -- the Tags button persists the dimension; __vg.setDim() does not, so switching
-  // back through the API leaves {"dim":"tag"} stored and a reload would open on the tag disc
+  // github#151 -- the Tags button persists the dimension, setDim() does not
   const storedWas = await storeSnap(p);
   await clearRange(p);
   await settle(p);
@@ -868,14 +859,11 @@ check("tags: a dot in the disc being left keeps its colour until it has faded", 
             `; ${rowFrames} leaving-row-frames with a swatch or count other than the row's` +
             (rowExample ? ` (e.g. ${rowExample})` : ""),
   };
-  // github#151 -- the first check in this job to visit the tag disc seeds that disc's own
-  // hidden defaults, and the page keeps them per dimension on purpose (design/0015, and
-  // "tags: each dimension keeps its own hidden and collapsed state" asserts it). Declared, so
-  // the coupling is in the source rather than in the order the checks happen to run in.
+  // github#151 -- leaves state.hidden: the tag disc seeds its defaults
 }, { on: WALK, clock: "real", leaves: ["state.hidden"] });
 
 check("tags: a note one disc hides and the other shows arrives with the fill edge", async (p) => {
-  // github#151 -- the Tags button persists the dimension; __vg.setDim() does not
+  // github#151 -- the Tags button persists the dimension, setDim() does not
   const storedWas = await storeSnap(p);
   await clearRange(p);
   await settle(p);
@@ -954,9 +942,7 @@ check("tags: a note one disc hides and the other shows arrives with the fill edg
             (first ? ` (first: ${first})` : "") + `, ${litEnd} of ${n.hid} lit at the end; ` +
             `${standInsPeak} stand-ins drawn, ${left} left behind, ${nodesEnd} of ${n.nodes} nodes after`,
   };
-  // github#151 -- leaves state.hidden: visiting the tag disc seeds that disc's own hidden
-  // github#151 -- defaults, which the page keeps per dimension by design (design/0015).
-  // github#151 -- Declared so it does not depend on another tag check running first.
+  // github#151 -- leaves state.hidden: the tag disc seeds its defaults
 }, { on: WALK, clock: "real", leaves: ["state.hidden"] });
 
 check("tags: the two buckets stay out of the hue rotation and sort last", async (p) => {
@@ -988,9 +974,7 @@ check("tags: the two buckets stay out of the hue rotation and sort last", async 
             `${r.untagged}, (unlinked) ${r.unlinked} (both want the archive grey g11); ` +
             `${r.hues.length} real tags take ${r.hues.length - r.repeats} distinct slots`,
   };
-  // github#151 -- leaves state.hidden: visiting the tag disc seeds that disc's own hidden
-  // github#151 -- defaults, which the page keeps per dimension by design (design/0015).
-  // github#151 -- Declared so it does not depend on another tag check running first.
+  // github#151 -- leaves state.hidden: the tag disc seeds its defaults
 }, { on: "all", leaves: ["state.hidden"] });
 
 check("tags: each dimension keeps its own hidden and collapsed state", async (p) => {
@@ -1044,9 +1028,7 @@ check("tags: each dimension keeps its own hidden and collapsed state", async (p)
             `subs ${r.folderSubBefore.length} -> ${r.folderSubAgain.length}; ` +
             `tag came back [${r.tagAfter.join(" ")}] -> [${r.tagAgain.join(" ")}]`,
   };
-  // github#151 -- leaves state.hidden: visiting the tag disc seeds that disc's own hidden
-  // github#151 -- defaults, which the page keeps per dimension by design (design/0015).
-  // github#151 -- Declared so it does not depend on another tag check running first.
+  // github#151 -- leaves state.hidden: the tag disc seeds its defaults
 }, { on: "all", leaves: ["state.hidden"] });
 
 check("tags: a nested tag earns a sub-wedge, exactly as a subfolder does", async (p) => {
@@ -1107,9 +1089,7 @@ check("tags: a nested tag earns a sub-wedge, exactly as a subfolder does", async
             (r.deeper.length ? `, and a depth-2 tag nests below it: ${r.deeper.join(", ")}`
                              : "; no depth-2 tag was reachable"),
   };
-  // github#151 -- leaves state.hidden: visiting the tag disc seeds that disc's own hidden
-  // github#151 -- defaults, which the page keeps per dimension by design (design/0015).
-  // github#151 -- Declared so it does not depend on another tag check running first.
+  // github#151 -- leaves state.hidden: the tag disc seeds its defaults
 }, { on: "all", leaves: ["state.hidden"] });
 
 check("arc: a plan over the whole circle is the resting disc, and over half of it stays in half",
@@ -1210,11 +1190,7 @@ check("tags: each grouping keeps its own colours, and the settings tabs reach bo
               : "; no tag row to pin") +
             `; folder map ${r.folderMapSize} entries, folder order kept ${r.foldersSame}, folder colours kept ${r.colourSame}`,
   };
-  // github#151 -- leaves state.hidden: it switches to the tag disc, and visiting that disc
-  // github#151 -- seeds its own hidden defaults, which the page keeps per dimension by design
-  // github#151 -- (design/0015). Declared here rather than relying on an earlier declared
-  // github#151 -- writer of the same key running first -- which is what made it pass in a
-  // github#151 -- full run and fail on its own.
+  // github#151 -- leaves state.hidden: the tag disc seeds its defaults
 }, { on: "all", leaves: ["state.hidden"] });
 
 /* -------------------------------------------------------------- github#116 */
@@ -1284,9 +1260,7 @@ async (p) => {
               ? `gear, search, segment, its Tags side, All, legend and Refresh all at the same edges`
               : `MOVED ${moved.map((k) => `${k} [${r.folder.at[k]}] -> [${r.tag.at[k]}]`).join(", ")}`),
   };
-  // github#151 -- leaves state.hidden: visiting the tag disc seeds that disc's own hidden
-  // github#151 -- defaults, which the page keeps per dimension by design (design/0015).
-  // github#151 -- Declared so it does not depend on another tag check running first.
+  // github#151 -- leaves state.hidden: the tag disc seeds its defaults
 }, { leaves: ["state.hidden"] });
 
 /* ---------------------------------------------------------------- github#71 -- */
@@ -1834,7 +1808,7 @@ check("a recent chip dims what it did not match, and gives it back", async (p) =
 }, { on: "all" });
 
 check("a lit note stays lit while a dimension switch draws it as a stand-in", async (p) => {
-  // github#151 -- the Tags button persists the dimension; __vg.setDim() does not
+  // github#151 -- the Tags button persists the dimension, setDim() does not
   const storedWas = await storeSnap(p);
   // github#70, github#86
   await clearRange(p);
@@ -1886,9 +1860,7 @@ check("a lit note stays lit while a dimension switch draws it as a stand-in", as
                    `${disagreed} disagreeing with their own note` +
                    (example ? ` (e.g. ${example})` : "") +
                    (litStandIns ? "" : "  <- NOTHING ASSERTED: no stand-in was ever lit") };
-  // github#151 -- leaves state.hidden: on the tag fixture this is the first check in the job
-  // github#151 -- to visit the tag disc, and that seeds the disc's own hidden defaults --
-  // github#151 -- kept per dimension on purpose (design/0015).
+  // github#151 -- leaves state.hidden: the tag disc seeds its defaults
 }, { on: ["demo-vault", "tag-vault"], clock: "real", leaves: ["state.hidden"] });
 
 check("the band counts the date it names", async (p) => {
@@ -2159,9 +2131,9 @@ check("highlighting ramps per note and is additive", async (p) => {
 check("tags: a live rebuild in the tag disc refiles the arrival and keeps the rings it was switched into", async (p) => {
   await settle(p);
   await p.eval(LIVE_JS);
-  // github#72, github#86, decisions/0011-a-live-rebuild-retakes-the-geometry-lock-at-rest -- the filing is a cache a live rebuild stales
+  // github#72, github#86, decisions/0011-a-live-rebuild-retakes-the-geometry-lock-at-rest
   // github#86 -- an untagged arrival lands in (untagged)
-  // github#86, decisions/0011-a-live-rebuild-retakes-the-geometry-lock-at-rest -- a switched-to disc keeps its borrowed rings
+  // github#86, decisions/0011-a-live-rebuild-retakes-the-geometry-lock-at-rest
   // github#86 -- "fresh" is two passes inside the kept rings, not relayout()
   await p.j(`(function(){ __vg.setDim("tag"); return true; })()`);
   await settle(p);
@@ -2196,9 +2168,7 @@ check("tags: a live rebuild in the tag disc refiles the arrival and keeps the ri
                        `rings ${start.rings ? start.rings.dim : "none"} -> ${after.rings ? after.rings.dim : "none"}, ` +
                        `r0 step ${isNaN(r0Step) ? "?" : r0Step.toFixed(4)}; restored to ${back.moved} off original` +
                        (back.who ? ` (worst ${back.worst}, ${back.who})` : "") };
-  // github#151 -- leaves state.hidden: visiting the tag disc seeds that disc's own hidden
-  // github#151 -- defaults, which the page keeps per dimension by design (design/0015).
-  // github#151 -- Declared so it does not depend on another tag check running first.
+  // github#151 -- leaves state.hidden: the tag disc seeds its defaults
 }, { on: "all", leaves: ["state.hidden"] });
 
 check("hover re-arms after the pointer leaves the stage", async (p) => {
@@ -2338,7 +2308,7 @@ async function stageBox(p) {
              cx: r.left + r.width/2, cy: r.top + r.height/2 }; })()`);
 }
 
-// github#111 -- reads the page's own FIT_RATIO instead of a copy someone has to keep in sync
+// github#111 -- reads the page's own FIT_RATIO, not a copy
 async function camReset(p) {
   const fr = await p.j(`__vg.FIT_RATIO`);
   await p.eval(`__vg.renderer.getCamera().setState({x:0.5,y:0.5,ratio:${fr},angle:0}); void 0`);
@@ -2525,8 +2495,7 @@ check("the camera cluster is bottom-right, in order, and 31px", async (p) => {
 // github#82
 check("the panel toggles fold each panel away and give the space back", async (p) => {
   // github#82 -- pinned: this suite's own window is a grid slot
-  // github#151 -- pressing each toggle twice restores the LIVE state; the stored blob keeps
-  // sheetOpen/bandOpen either way, and that outlives a reload
+  // github#151 -- restores a control the page persists
   const storedWas = await storeSnap(p);
   const dpr = await p.j(`window.devicePixelRatio || 1`);
   await p.send("Emulation.setDeviceMetricsOverride",
@@ -2859,8 +2828,7 @@ const settlePan = async (p) => {
 
 // github#170
 check("a phone gets the disc whole and clear, on a page that scrolls", async (p) => {
-  // github#151 -- a phone's settings pushes write the store, and the page writes {} where there
-  // had been no entry at all; put back whatever was there, including nothing
+  // github#151 -- the phone path writes the store; put back what was there
   const storedWas = await storeSnap(p);
   const dpr = await p.j(`window.devicePixelRatio || 1`);
   // github#170 -- these emulate touch, so they own putting the page back
@@ -3078,8 +3046,7 @@ check("a phone gets the disc whole and clear, on a page that scrolls", async (p)
 
 // github#170 -- the other half of the predicate: narrow alone is not a phone
 check("a narrow window with a pointer keeps the desktop's answer", async (p) => {
-  // github#151 -- as "a phone gets the disc whole and clear": the phone path writes the store,
-  // and writes {} where there had been no entry at all
+  // github#151 -- the phone path writes the store; put back what was there
   const storedWas = await storeSnap(p);
   const dpr = await p.j(`window.devicePixelRatio || 1`);
   let r = null;
@@ -3093,8 +3060,7 @@ check("a narrow window with a pointer keeps the desktop's answer", async (p) => 
     r = await p.j(PHONE_PROBE);
   } finally {
     await p.send("Emulation.clearDeviceMetricsOverride").catch(() => {});
-    // github#151 -- the resize that clearing the metrics fires saves again, on a frame of its
-    // own well after the call returns, so the store goes back once the page is done moving
+    // github#151 -- the resize saves again a frame later, so restore after it
     await settle(p);
     await sleep(1200);
     await storeBack(p, storedWas);
@@ -3114,11 +3080,7 @@ check("a narrow window with a pointer keeps the desktop's answer", async (p) => 
             `${r && r.bandOpen ? "open" : "FOLDED"} (data-band ${r && r.dataBand})` +
             (ok ? "" : "  <- A NARROW DESKTOP WINDOW TOOK THE PHONE LAYOUT"),
   };
-  // github#151 -- leaves store.settings: clearing the device metrics fires a resize, and the
-  // github#151 -- page saves from a frame of its own AFTER this check has returned, so the
-  // github#151 -- restore below cannot win from inside the check. It writes {} into a store
-  // github#151 -- that had no entry at all, which is worth its own look rather than a longer
-  // github#151 -- sleep here -- tuning one would be the flakiness this repo warns about.
+  // github#151 -- leaves store.settings: the resize saves after the check
 }, { leaves: ["store.settings"] });
 
 // github#173, design/0013 -- the three items that reproduced, one check each
@@ -3422,8 +3384,7 @@ check("a swipe after Fit still scrolls, and a late finger still pinches", async 
 // github#175, design/0013 -- the four items raised after github#173 merged
 // github#175 -- items 1 and 2: setPan(false) flew a disc home
 check("a swipe in the tail of a fit flight still scrolls", async (p) => {
-  // github#151, github#180 -- as "a phone gets the disc whole and clear": the phone path
-  // writes the store, and writes {} where there had been no entry at all
+  // github#151, github#180 -- the phone path writes the store
   const storedWas = await storeSnap(p);
   const dpr = await p.j(`window.devicePixelRatio || 1`);
   const said = [], bad = [];
@@ -3826,11 +3787,7 @@ check("the hub stays the same share of the disc as it is filtered", async (p) =>
 check("fit frames the disc that is actually there", async (p) => {
   await p.eval(`__vg.state.hidden.folder = {}; __vg.syncAlpha(); __vg.applyLayout(false); void 0`);
   await sleep(200);
-  // github#151 -- toRest(), not a click plus camSettle(). camSettle() returns when two polls
-  // 60ms apart read the same numbers, and under frame starvation that means NO FRAME WAS DRAWN
-  // rather than the camera having landed -- so it read a mid-flight ratio (0.9282 against the
-  // 0.6134 the fit promised) on a machine at 100% RAM. toRest() waits on __vg.camAtRest, which
-  // is the page saying it, not the harness inferring it from stillness.
+  // github#151 -- toRest(), not camSettle(): the page says it is at rest
   await toRest(p);
   const full = await camState(p);
   const base = await p.j(`__vg.FIT_RATIO`); // github#111
@@ -3856,9 +3813,7 @@ check("fit frames the disc that is actually there", async (p) => {
   const dens = await p.j(`__vg.densityReport()`);
   await p.eval(`__vg.state.hidden.folder = {}; __vg.syncAlpha(); __vg.applyLayout(false); void 0`);
   await sleep(200);
-  // github#151 -- showing the groups again re-fits, and a camReset() issued while that flight is
-  // in the air is simply overwritten -- which is how this check left cam.ratio at 0.6138 and the
-  // overview badge lit. Wait it out, then come home the page's own way.
+  // github#151 -- wait the re-fit out, then come home the page's own way
   await settle(p);
   await toRest(p);
   const want = base * Math.max(0.12, Math.min(1.35, dens.reach));
@@ -3936,7 +3891,7 @@ check("a resize re-centres a fitted disc on the new stage", async (p) => {
 }, { on: ["demo-vault"], clock: "real" });
 
 // github#14
-// github#151 -- the stored settings, around a check that drives a control the page persists
+// github#151 -- snapshot the stored settings around a persisted control
 async function storeSnap(p) {
   return p.j(`(function(){
     try { return window.SETTINGS_KEY
@@ -4024,9 +3979,7 @@ check("hiding the biggest group auto-fits the camera, but only once it has finis
   const want = fr * Math.max(0.12, Math.min(1.35, dens.reach));
   const shrinking = want < rest.ratio - 0.01;
 
-  // github#151 -- the eye, not the dict: assigning state.hidden and calling syncAlpha never
-  // rebuilds the legend, so the row goes on claiming the group is hidden while the page counts
-  // it as shown -- the defect github#113 found in the context-menu check.
+  // github#151 -- the eye, not the dict: the legend must rebuild
   await clickEye(p, g);
   await settle(p);
   await toRest(p);
@@ -4063,8 +4016,7 @@ check("showing a hidden group auto-fits the camera while it is still arriving", 
   const want = fr * Math.max(0.12, Math.min(1.35, dens.reach));
   const growing = want > rest.ratio + 0.01;
 
-  // github#151 -- nothing to put back: the second eye click above already showed the group
-  // again, through the page's own path, so the legend row and the model agree.
+  // github#151 -- nothing to put back: the second eye click already did
   await settle(p);
   await toRest(p);
 
@@ -4136,9 +4088,7 @@ check("the zoom buttons step by one wheel notch", async (p) => {
 });
 
 check("the pan toggle locks the camera and flies home", async (p) => {
-  // github#151 -- this drives a control the page PERSISTS. It passed only because something
-  // github#151 -- upstream had already taken store.settings off baseline; on its own, or once
-  // github#151 -- that writer is fixed, it is the first writer and fails.
+  // github#151 -- first writer of store.settings; snapshot and restore
   const storedWas = await storeSnap(p);
   await camReset(p);
   const box = await stageBox(p);
@@ -4326,10 +4276,7 @@ check("the overview footprint is drawn to the disc's scale and is never clamped"
 
 // github#79
 check("clicking the overview fits the disc through fit(), with panning on or off", async (p) => {
-  // github#151, github#180 -- this drives a control the page PERSISTS (#vg-pan). Toggling it
-  // github#151, github#180 -- twice returns the same value but not the same baseline: the first
-  // github#151, github#180 -- toggle creates the store.settings key even when it lands back on
-  // github#151, github#180 -- the default, so a snapshot/restore is needed, not just the value.
+  // github#151, github#180 -- #vg-pan: snapshot and restore, not the value
   const storedWas = await storeSnap(p);
   // github#79, design/0017 -- ask Fit where it lands; FIT_RATIO is develop's to move
   const fitLanding = async () => {
@@ -5114,7 +5061,7 @@ check("filtered to the bone, the disc stays drawable", async (p) => {
     }
   }
   await clearRange(p);
-  // github#151 -- filtering to a handful of notes crops the disc and lights the overview
+  // github#151 -- filtering crops the disc and lights the overview
   await settle(p);
   await toRest(p);
   return {
@@ -5127,11 +5074,7 @@ check("filtered to the bone, the disc stays drawable", async (p) => {
 // github#66
 // github#14
 // design/0011
-// github#151 -- the legend's eyes, snapshotted and put back. Two solo checks each had their own
-// "click every row that reads false" restore, which is wrong twice over: it restores to
-// EVERYTHING SHOWN where seedHidden() hides some groups by default, and it cannot reach a group
-// soloed down to zero visible notes at all -- a row is only given a data-eye while it is LIVE, so
-// "(unlinked)" loses its own eye and can never be clicked back. One implementation, used by both.
+// github#151 -- the legend's eyes, snapshotted and put back
 async function eyesSnapshot(p) {
   const eyes = await p.j(`(function(){
     var out = {}, els = document.querySelectorAll("[data-eye]");
@@ -5145,8 +5088,7 @@ async function eyesSnapshot(p) {
 
 /** @param {{ eyes: Record<string, string>, hidden: string }} snap */
 async function restoreEyes(p, snap) {
-  // github#151 -- RE-QUERY AFTER EVERY CLICK: each one rebuilds the legend, so a single loop over
-  // one querySelectorAll clicks detached nodes after the first and silently does nothing.
+  // github#151 -- re-query after every click: the legend rebuilds
   await p.j(`(function(){
     var map = JSON.parse(${JSON.stringify(JSON.stringify(snap.eyes))});
     for (var n = 0; n < 60; n++) {
@@ -5161,8 +5103,7 @@ async function restoreEyes(p, snap) {
     }
     return true; })()`).catch(() => 0);
   await settle(p);
-  // github#151 -- and the trap door the eyes cannot open: applyHiddenDefaults() is the page's own
-  // way back -- seedHidden() + buildLegend() + a cascade.
+  // github#151 -- applyHiddenDefaults() is the page's own way back
   const stillOff = await p.j(
     `JSON.stringify(__vg.state.hidden.folder || {}) !== ${JSON.stringify(snap.hidden)}`
   ).catch(() => false);
@@ -5245,9 +5186,7 @@ check("a dot never outgrows its resting size while a cascade walks", async (p) =
   if (r.skip) return { ok: true, detail: r.skip };
   if (r.fail) return { ok: false, detail: r.fail };
   return { ok: r.ok, detail: soloDetail(r) };
-  // github#151 -- nothing declared: the residue this used to carry was "(unlinked)" soloed down
-  // github#151 -- to zero visible notes, which loses its own data-eye and cannot be clicked back.
-  // github#151 -- walkSolo() re-queries between clicks and falls back to applyHiddenDefaults().
+  // github#151 -- nothing declared: walkSolo() restores through the page
 }, { on: WALK, clock: "real" });
 
 // design/0011
@@ -5303,8 +5242,7 @@ check("an arriving note's fade never reverses during a solo switch", async (p) =
     if (Date.now() - t0 > 12000) break;
   }
   await settle(p);
-  // github#151 -- the same restore as walkSolo(), and for the same reason: clicking every row
-  // that reads false ends wider than baseline, and cannot reach a group soloed to zero notes
+  // github#151 -- the same restore as walkSolo(), for the same reason
   await restoreEyes(p, eyesWere);
   await camSettle(p);
   const flickering = arriving.filter((id) => drops[id]);
@@ -5758,9 +5696,7 @@ check("the ribbon's right edge is a day the vault has actually reached", async (
 }, { on: "all" });
 
 check("compact axis: the settings-panel toggle actually flips the live state", async (p) => {
-  // github#151 -- this drives a control the page PERSISTS, so flipping it back restores
-  // github#151 -- the page and leaves the key in the store; a check that re-mounts later
-  // github#151 -- would read it (which is why reboot() already deletes bandOpen by hand)
+  // github#151 -- restores a control the page persists
   const storedWas = await storeSnap(p);
   const r = await p.j(`(function(){
     var gear = document.querySelector("#vg-gear");
@@ -5795,9 +5731,7 @@ check("compact axis: the settings-panel toggle actually flips the live state", a
 
 // github#3
 check("colour unlinked by folder: the settings-panel toggle actually flips the live state", async (p) => {
-  // github#151 -- this drives a control the page PERSISTS, so flipping it back restores
-  // github#151 -- the page and leaves the key in the store; a check that re-mounts later
-  // github#151 -- would read it (which is why reboot() already deletes bandOpen by hand)
+  // github#151 -- restores a control the page persists
   const storedWas = await storeSnap(p);
   const r = await p.j(`(function(){
     var gear = document.querySelector("#vg-gear");
@@ -5833,9 +5767,7 @@ check("colour unlinked by folder: the settings-panel toggle actually flips the l
 
 // github#3
 check("colour unlinked notes by folder: the settings-panel toggle actually flips the live state", async (p) => {
-  // github#151 -- this drives a control the page PERSISTS, so flipping it back restores
-  // github#151 -- the page and leaves the key in the store; a check that re-mounts later
-  // github#151 -- would read it (which is why reboot() already deletes bandOpen by hand)
+  // github#151 -- restores a control the page persists
   const storedWas = await storeSnap(p);
   const r = await p.j(`(function(){
     var gear = document.querySelector("#vg-gear");
@@ -5868,9 +5800,7 @@ check("colour unlinked notes by folder: the settings-panel toggle actually flips
 });
 
 check("compact axis: the view-level icon actually flips the live state, and persists", async (p) => {
-  // github#151 -- this drives a control the page PERSISTS. It passed only because something
-  // github#151 -- upstream had already taken store.settings off baseline; on its own, or once
-  // github#151 -- that writer is fixed, it is the first writer and fails.
+  // github#151 -- first writer of store.settings; snapshot and restore
   const storedWas = await storeSnap(p);
   // github#23
   const r = await p.j(`(function(){
@@ -6072,10 +6002,7 @@ check("a folder keeps its slot across the membership toggle", async (p) => {
 
 // github#34
 check("a folder's legend row toggles \"hidden by default\" from its context menu", async (p) => {
-  // github#151 -- the menu item persists folderShown, and clicking it back restores the
-  // github#151 -- page without taking the key out of the store again. It leaked on four
-  // github#151 -- fixtures and was masked on the fifth, where an earlier DECLARED leak of
-  // github#151 -- store.settings had already taken the key off baseline.
+  // github#151 -- the menu item persists folderShown; click it back
   const storedWas = await storeSnap(p);
   const r = await p.j(`(function(){
     var g = __vg.groupOrder().filter(function (x) { return x.charAt(0) !== "("; })[0];
@@ -6153,8 +6080,7 @@ async function pinN(p, n) {
 }
 
 check("a pinned note leaves no gap in the ring it came from", async (p) => {
-  // github#151 -- pinning writes the host store, and that outlives a reload; the live
-  // github#151 -- clearPins() below restores the page but leaves the key behind.
+  // github#151 -- pinning writes the store; clearPins() leaves the key
   const storedWas = await storeSnap(p);
   const gapOf = () => p.j(`(function(){
     // The busiest group, since a wedge with more notes in it has a tighter spacing and so
@@ -6199,8 +6125,7 @@ check("a pinned note leaves no gap in the ring it came from", async (p) => {
 }, { on: "all" });
 
 check("the hub's dots shrink as it fills", async (p) => {
-  // github#151 -- pinning writes the host store, and that outlives a reload; the live
-  // github#151 -- clearPins() below restores the page but leaves the key behind.
+  // github#151 -- pinning writes the store; clearPins() leaves the key
   const storedWas = await storeSnap(p);
   const sizeAt = async (n) => {
     const ids = await pinN(p, n);
@@ -6269,8 +6194,7 @@ check("a soloed hub-adjacent note stays inside the hub's own radius", async (p) 
 }, { on: "all" });
 
 check("the mark yields to the hub and comes back", async (p) => {
-  // github#151 -- pinning writes the host store, and that outlives a reload; the live
-  // github#151 -- clearPins() below restores the page but leaves the key behind.
+  // github#151 -- pinning writes the store; clearPins() leaves the key
   const storedWas = await storeSnap(p);
   const markOn = () => p.j(`(function(){
     var el = document.querySelector("#vg-logo");
@@ -6296,8 +6220,7 @@ check("the mark yields to the hub and comes back", async (p) => {
 }, { clock: "real" });
 
 check("a pin hidden by a filter is skipped, not released", async (p) => {
-  // github#151 -- pinning writes the host store, and that outlives a reload; the live
-  // github#151 -- clearPins() below restores the page but leaves the key behind.
+  // github#151 -- pinning writes the store; clearPins() leaves the key
   const storedWas = await storeSnap(p);
   await pinN(p, 3);
   const before = await p.j(`__vg.pinned().length`);
@@ -6359,14 +6282,9 @@ function pinIdentityBuilds() {
 }
 
 // github#143
-// github#151 -- leaves cam.ratio: this check navigates to a second vault and back, which is a
-// github#151 -- full re-mount, and the re-mounted page derives its own FIT_RATIO -- 0.9589
-// github#151 -- against the 0.954 the job started on. camReset() puts the camera at the page's
-// github#151 -- fit, which is the right place; it is simply not the same number.
+// github#151 -- leaves cam.ratio: a re-mount derives its own FIT_RATIO
 check("a pin is stored by the note's path, not by its position", async (p, ctx) => {
-  // github#151 -- this drives a control the page PERSISTS. It passed only because something
-  // github#151 -- upstream had already taken store.settings off baseline; on its own, or once
-  // github#151 -- that writer is fixed, it is the first writer and fails.
+  // github#151 -- first writer of store.settings; snapshot and restore
   const storedWas = await storeSnap(p);
   const home = await p.eval("location.href");
   const READY = "!!(window.__vg && __vg.heat && __vg.state.until === null)";
@@ -6440,10 +6358,9 @@ check("a pin is stored by the note's path, not by its position", async (p, ctx) 
     // github#105 -- home is ?rest: a full re-mount, the size of the fixture
     back = await goto(home, 30000);
     // github#143 -- leave the fixture's own store as this check found it
-    // github#151 -- and its camera: clearing the pins re-fits a disc whose extent just changed
+    // github#151 -- and its camera: clearing the pins re-fits the disc
     if (back) { await p.eval(`__vg.clearPins(); void 0`); await settle(p); await camReset(p); }
-    // github#151 -- after the navigation home, so it is the FIXTURE page's store that gets put
-    // back rather than the pin vault's. clearPins() restores the page and leaves the key behind.
+    // github#151 -- restores the FIXTURE page's store, after coming home
     await storeBack(p, storedWas);
   }
   if (why) return { ok: false, detail: why };
@@ -6507,8 +6424,7 @@ check("every unlinked note wears the (unlinked) swatch", async (p) => {
 // github#3
 // github#34
 check("the (unlinked) row's right-click toggle moves unlinked notes into their folder", async (p) => {
-  // github#151 -- the menu item persists unlinkedByFolder, and toggling it back restores the
-  // github#151 -- page without taking the key out of the store again
+  // github#151 -- the menu item persists unlinkedByFolder; toggle it back
   const storedWas = await storeSnap(p);
   const r = await p.j(`(function(){
     var g = __vg.graph, rd = __vg.renderer;
@@ -6564,9 +6480,7 @@ check("the (unlinked) row's right-click toggle moves unlinked notes into their f
 
 // github#3
 check("the (unlinked) row's right-click tint toggle recolours notes without moving them", async (p) => {
-  // github#151 -- this drives a control the page PERSISTS, so flipping it back restores
-  // github#151 -- the page and leaves the key in the store; a check that re-mounts later
-  // github#151 -- would read it (which is why reboot() already deletes bandOpen by hand)
+  // github#151 -- restores a control the page persists
   const storedWas = await storeSnap(p);
   const r = await p.j(`(function(){
     var g = __vg.graph, rd = __vg.renderer;
@@ -6619,9 +6533,7 @@ check("the (unlinked) row's right-click tint toggle recolours notes without movi
 // github#50
 // github#50
 check("the (unlinked) row opens its menu with no notes in it", async (p) => {
-  // github#151 -- this drives a control the page PERSISTS, so flipping it back restores
-  // github#151 -- the page and leaves the key in the store; a check that re-mounts later
-  // github#151 -- would read it (which is why reboot() already deletes bandOpen by hand)
+  // github#151 -- restores a control the page persists
   const storedWas = await storeSnap(p);
   const r = await p.j(`(function(){
     if (!__vg.graph.nodes().some(function (id) { return __vg.isOrphan(id); })) return { skip: true };
@@ -6918,8 +6830,7 @@ check("legend count bars scale to the largest visible folder", async (p) => {
             `title ${JSON.stringify(titled && titled.title)}` +
             (wrong.length ? `  <- ${wrong.join(" | ")}` : "")
   };
-  // github#151 -- leaves the legend tree expanded and state.collapsed with it: the
-  // github#151 -- check measures every folder's row, which means opening every folder.
+  // github#151 -- leaves state.collapsed: every row means every folder
 }, { on: "all", leaves: ["state.collapsed", "press.vg-legend"] });
 
 // github#78, design/0006
@@ -7271,7 +7182,7 @@ check("the legend's swatch and count bar follow the token across a theme flip, w
   })(); void 0`);
   await sleep(400);
   const restored = await read();
-  // github#151 -- the gear was un-hidden and the panel opened to reach the picker; close it
+  // github#151 -- the gear was un-hidden and the panel opened; close it
   await p.eval(`(function(){
     var g = document.getElementById('vg-gear');
     if (g && g.getAttribute('aria-expanded') === 'true') g.click();
@@ -7309,9 +7220,7 @@ check("the legend's swatch and count bar follow the token across a theme flip, w
 
 // github#78, design/0006
 check("count bars are on by default, and the settings toggle removes every bar", async (p) => {
-  // github#151 -- this drives a control the page PERSISTS, so flipping it back restores
-  // github#151 -- the page and leaves the key in the store; a check that re-mounts later
-  // github#151 -- would read it (which is why reboot() already deletes bandOpen by hand)
+  // github#151 -- restores a control the page persists
   const storedWas = await storeSnap(p);
   const r = await p.j(`(function(){
     var gear = document.querySelector("#vg-gear");
@@ -7677,9 +7586,7 @@ check("the picker's settings surface holds every slot without scrolling sideways
 });
 
 check("the picker stays inside the mount", async (p) => {
-  // github#151 -- this drives a control the page PERSISTS, so flipping it back restores
-  // github#151 -- the page and leaves the key in the store; a check that re-mounts later
-  // github#151 -- would read it (which is why reboot() already deletes bandOpen by hand)
+  // github#151 -- restores a control the page persists
   const storedWas = await storeSnap(p);
   const r = await p.j(`(function(){
     var root = document.getElementById("vg-app");
@@ -7725,9 +7632,7 @@ const DEV_RIGHT_CLICK = `(function(){
 })()`;
 
 check("the disc's right-click does nothing until Developer debug is on", async (p) => {
-  // github#151 -- this drives a control the page PERSISTS, so flipping it back restores
-  // github#151 -- the page and leaves the key in the store; a check that re-mounts later
-  // github#151 -- would read it (which is why reboot() already deletes bandOpen by hand)
+  // github#151 -- restores a control the page persists
   const storedWas = await storeSnap(p);
   const r = await p.j(`(function(){
     var menu = document.querySelector('[id$="ctxmenu"]');
@@ -7763,8 +7668,7 @@ check("the disc's right-click does nothing until Developer debug is on", async (
 
 // github#165
 check("a right-click on a note still pins it, and opens no developer menu", async (p) => {
-  // github#151 -- pinning writes the host store, and that outlives a reload; the live
-  // github#151 -- clearPins() below restores the page but leaves the key behind.
+  // github#151 -- pinning writes the store; clearPins() leaves the key
   const storedWas = await storeSnap(p);
   const r = await p.j(`(function(){
     var menu = document.querySelector('[id$="ctxmenu"]');
@@ -7805,9 +7709,7 @@ check("a right-click on a note still pins it, and opens no developer menu", asyn
 
 // github#165
 check("the developer menu's grid item draws the wedge overlay", async (p) => {
-  // github#151 -- this drives a control the page PERSISTS, so flipping it back restores
-  // github#151 -- the page and leaves the key in the store; a check that re-mounts later
-  // github#151 -- would read it (which is why reboot() already deletes bandOpen by hand)
+  // github#151 -- restores a control the page persists
   const storedWas = await storeSnap(p);
   // github#165 -- settles between halves; the draw hook paints, not the click
   const before = await p.j(`(function(){
@@ -7938,9 +7840,7 @@ check("the grid's key sits bottom left, clear of every button over the graph", a
 
 // github#165
 check("the developer menu's slow motion reaches the animation clock", async (p) => {
-  // github#151 -- this drives a control the page PERSISTS, so flipping it back restores
-  // github#151 -- the page and leaves the key in the store; a check that re-mounts later
-  // github#151 -- would read it (which is why reboot() already deletes bandOpen by hand)
+  // github#151 -- restores a control the page persists
   const storedWas = await storeSnap(p);
   const r = await p.j(`(function(){
     var menu = document.querySelector('[id$="ctxmenu"]');
@@ -7979,9 +7879,7 @@ check("the developer menu's slow motion reaches the animation clock", async (p) 
 
 check("focus web stays above dim notes", async (p) => {
   const r = await p.j(`__vg.checkFocusWeb()`);
-  // github#151 -- a report that never arrived is not a shape with nothing on it. Without this,
-  // checkFocusWeb() returning something unreadable reads as "no in-disc samples" and PASSES:
-  // that is how github#101's async conversion disabled this check on every fixture at once.
+  // github#151 -- a report that never arrived is not an empty shape
   if (typeof r.node === "undefined" || typeof r.geomGaps === "undefined") {
     return { ok: false,
              detail: `checkFocusWeb() returned no report (${JSON.stringify(r).slice(0, 80)}) -- ` +
@@ -8026,11 +7924,7 @@ async function hop(p, n) {
   }
   return n;
 }
-// github#151 -- closing the card is where a trail check puts the interaction away, so it is
-// where the camera comes home too. A hop FLIES to its note, and every check here closed the
-// card and left the camera out there with the overview badge lit -- four of them, found one
-// per run as each was fixed, which is what made it worth fixing in the one helper they share.
-// Wait the flight out first: a setState() issued while one is still in the air is overwritten.
+// github#151 -- close the card, wait the flight out, then come home
 async function closeCard(p) {
   await p.eval(`(function(){ var x = document.querySelector("#vg-detail .x"); if (x) x.click(); })(); void 0`);
   await settle(p);
@@ -8278,8 +8172,7 @@ check("a rebuild waits for a drag, and a right-click is not a drag", async (p) =
     `held: ${held.res.applied ? "APPLIED (should have waited)" : `refused "${held.res.reason}" busy "${held.res.busy}"`}` +
     `, order while held ${held.orderWhileHeld} (was ${held.before}), after release ${landed}` +
     `; right-click: ${rclick.applied ? `applied "${rclick.reason}"` : `REFUSED "${rclick.busy}" -- a context menu deferred the rebuild`}` };
-  // github#151 -- and press.vg-legend with it: a rebuild that adds or drops a note builds a
-  // github#151 -- different legend, which is the same fact as vg.shown one layer out
+  // github#151 -- leaves press.vg-legend too: a rebuild builds a new legend
 }, { on: "all", leaves: ["vg.shown", "press.vg-legend"] });
 
 check("the invalidation registry names every cache a live rebuild stales", async (p) => {
@@ -8366,8 +8259,7 @@ check("a live rebuild re-arms the chip, so a note that arrives inside its window
     : `rebuild refused: ${r.reason}` };
 }, { on: "all" });
 
-// github#151 -- leaves vg.shown: a live rebuild adds or drops a note, and the new count is
-// github#151 -- the thing under test, not a leak to be put back
+// github#151 -- leaves vg.shown: the new count is the thing under test
 check("word counts land by path, which is the only thing a live rebuild keeps", async (p) => {
   await settle(p);
   await p.eval(LIVE_JS);
@@ -8407,8 +8299,7 @@ check("word counts land by path, which is the only thing a live rebuild keeps", 
       `(index ${r.sample.i} now holds a different note); setWords by path landed on the right ` +
       `one (${r.landed}), the note at that index kept ${r.bystander}; a deleted path returns false`
     : `index and id never diverged -- this check cannot see the defect it exists for` };
-  // github#151 -- and press.vg-legend with it: a rebuild that adds or drops a note builds a
-  // github#151 -- different legend, which is the same fact as vg.shown one layer out
+  // github#151 -- leaves press.vg-legend too: a rebuild builds a new legend
 }, { on: WALK, clock: "real", leaves: ["vg.shown", "press.vg-legend"] });
 
 // github#142
@@ -8549,15 +8440,7 @@ async function runOne(vault, work) {
       await sleep(300);
     }
 
-    // github#151 -- await the expression before stringifying it. cdp.mjs evaluates with
-    // awaitPromise, but that awaits what the EXPRESSION returns -- and the expression here was
-    // JSON.stringify(...), which returns a string immediately. So a debug API that returns a
-    // Promise was serialised as the Promise object, "{}", and every field read off it came back
-    // undefined. github#101 made __vg.checkFocusWeb() async on exactly that assurance ("cdp.mjs
-    // already evaluates with awaitPromise: true, so a debug function returning a Promise needed
-    // no change on the calling side") -- true of p.eval, false of p.j, and it silently turned
-    // "focus web stays above dim notes" into a check that asserted nothing on all five fixtures.
-    // `await x` is x for a non-promise, so this is a no-op for every other call site.
+    // github#151 -- await the expression before stringifying it
     page.j = async (expr) =>
       JSON.parse(await page.eval(`(async function () { return JSON.stringify(await (${expr})); })()`));
 
@@ -8953,7 +8836,7 @@ async function main() {
     console.log(`wrote ${timingsOut.length} timings to ${arg("timings", "")}`);
   }
 
-  // github#151 -- the audit: the file is the record, the summary is what a run prints
+  // github#151 -- the audit file is the record; the summary is printed
   if (AUDIT && auditsOut.length) {
     writeFileSync(AUDIT, JSON.stringify({ at: new Date().toISOString(), jobs: auditsOut }, null, 1) + "\n");
     const bar = "=".repeat(72);

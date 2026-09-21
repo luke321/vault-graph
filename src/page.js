@@ -7227,7 +7227,7 @@ function mountVaultGraph(root, data, deps) {
    * @param {Record<string, boolean> | null} [bandHint]   group -> inner, to seed the lock with
    * @param {boolean} [keepAlpha]
    */
-  // github#86, decisions/0011-a-live-rebuild-retakes-the-geometry-lock-at-rest -- the lock derivation on its own, so ringsIn
+  // github#86, decisions/0011-a-live-rebuild-retakes-the-geometry-lock-at-rest
   // github#86 -- can take it in the dimension the rings belong to
   /** @param {Record<string, boolean>} [bandHint] @returns {Plan | null} */
   function takeGeom(bandHint) {
@@ -7258,7 +7258,7 @@ function mountVaultGraph(root, data, deps) {
     return base;
   }
 
-  // github#72, github#86, decisions/0011-a-live-rebuild-retakes-the-geometry-lock-at-rest -- a switched-to disc sits inside rings borrowed from
+  // github#72, github#86, decisions/0011-a-live-rebuild-retakes-the-geometry-lock-at-rest
   // github#86 -- another dimension; a live rebuild retakes THOSE, from that
   // github#86 -- dimension's own plan, so the step stays sub-pixel
   /** @param {"folder" | "tag"} dim @returns {GeomLock | null} */
@@ -7602,10 +7602,7 @@ function mountVaultGraph(root, data, deps) {
     if ($("band")) $("band").onclick = function () { setBand(!bandOpen); };
     setSheet(sheetOpen, true);
     setBand(bandOpen, true);
-    // github#151 -- the third root flag, written at mount like the two above it. ovShow()
-    // github#151 -- only writes it when the overview CHANGES, so before the disc was first
-    // github#151 -- cropped the attribute did not exist at all: a rule or a host reading
-    // github#151 -- [data-ov="off"] matched nothing at rest, and matched it afterwards.
+    // github#151 -- the third root flag, written at mount like the two above
     ROOT.setAttribute("data-ov", ovOn ? "on" : "off");
     $("png").onclick = savePng;
     if ($("dbg")) $("dbg").onclick = function () {

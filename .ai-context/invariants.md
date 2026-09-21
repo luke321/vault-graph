@@ -3987,6 +3987,20 @@ still there on 2026-09-06 (392 on `develop@fc7d157`): JSDoc blocks whose lines c
 the ribbon icon's design notes in `plugin/main.js`, the `.d.ts` file's explanation of itself,
 `build-plugin.mjs`'s strip-marker essay.
 
+**And the ratchet is not self-enforcing across a batch of merges — github#188.** Nine tickets
+merged into `develop` in one session took it from **exactly 0 over to 272 over** (299 by the time
+it was worked), most of it in the suite's own infrastructure. No single branch was far enough over
+its own diff to notice, several correctly read the already-red gate as pre-existing debt outside
+their ticket, and the merge verification never ran this check at all. **The dominant failure was
+not a missing pointer but a pointer with an essay after it** — the label cap is 60 characters, and
+a `// github#151 -- ` prefix repeated down four wrapped lines fails on every one of them.
+
+github#188 converted the **327** lines that were not present at the pre-drift commit, leaving the
+**350** the baseline had already sanctioned, and lowered `BASELINE` 378 → **350**. Two rules it
+leaves behind: a comment whose reasoning does not fit in 60 characters belongs in `.ai-context/`
+with a pointer at the call site, and a merge into `develop` is the boundary where this check has
+to run, since the count is an aggregate no single branch can see.
+
 ```bash
 node scripts/check-comments.mjs          # counts per file, the total, the baseline
 node scripts/check-comments.mjs --list   # every counted line
@@ -5545,6 +5559,24 @@ them fixed rather than the first one declared.
   deletes `bandOpen` by hand. `storeSnap`/`storeBack` put the blob back. The second is an asymmetry
   worth its own look: the Tags button persists the dimension and `__vg.setDim()` does not, so
   switching back through the API leaves `{"dim":"tag"}` stored.
+
+**Three mechanics the restores above rely on, written down here because the code now only points
+at them (github#188).** Each was found by a check that had one of them wrong.
+
+- **The legend is rebuilt on every eye click, so a restore has to re-query between clicks.** A
+  single `querySelectorAll` walked once clicks the first row and then clicks nodes the rebuild has
+  already detached, which silently does nothing.
+- **A row is given a `data-eye` only while its group is LIVE.** A group soloed down to zero visible
+  notes loses its own eye and can never be clicked back — `"(unlinked)"` is the one that bit. So a
+  "click every row that reads false" restore is wrong twice over: it cannot reach that group, and
+  it restores to *everything shown*, where `seedHidden()` hides some groups by default.
+  `walkSolo()` re-queries between clicks and falls back to `applyHiddenDefaults()` — the page's own
+  way back, `seedHidden()` + `buildLegend()` + a cascade — and both solo checks share the one
+  implementation rather than carrying a restore each.
+- **Clearing the emulated device metrics fires a resize that saves the settings from a frame of its
+  own, well after the call has returned.** A `storeBack()` issued from inside the check cannot win
+  that race, so `store.settings` is *declared* there rather than restored. Tuning a sleep to beat
+  it would be the flakiness this suite warns about; it is worth its own look instead.
 
 **Declared rather than fixed**, each with its reason at the check: the first check in a job to visit
 the tag disc seeds that disc's own hidden defaults and the page keeps them per dimension on purpose

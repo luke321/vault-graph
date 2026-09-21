@@ -1,10 +1,6 @@
-// github#151 -- the page state a check inherits: how to read it, diff it, and tell
-// github#151 -- which later check could see it. Read-only: nothing here touches the page.
+// github#151 -- the page state a check inherits: read, diff, attribute
 
-// github#151 -- one flat map, key -> string, so a diff is a key list rather than a tree walk.
-// github#151 -- Mostly generic on purpose (D-2): every input and every aria-pressed button under
-// github#151 -- the root is fingerprinted, so a toggle added later is covered without anyone
-// github#151 -- remembering to add it here. The enumerated reads are the remainder.
+// github#151 -- one flat map, key -> string; mostly generic (D-2)
 export const STATE_PROBE = `(function () {
   var out = {};
   var put = function (k, v) { out[k] = v === undefined ? "undefined" : String(v); };
@@ -141,9 +137,7 @@ export const STATE_PROBE = `(function () {
 })()`;
 
 /**
- * github#151 -- what a check could see, not what it read (D-4): the token for each key is the
- * substring an expression must contain to reach it, so this is an upper bound and is reported
- * as one.
+ * github#151 -- what a check could see, not what it read (D-4)
  * @param {string} key
  * @returns {string[]}
  */
@@ -153,15 +147,11 @@ export function tokensFor(key) {
   const tail = i < 0 ? key : key.slice(i + 1);
   if (head === "cam") return ["getCamera", "camera", "camRatio", "camState", "graphToViewport"];
   if (head === "store") return ["localStorage", "SETTINGS_KEY"];
-  // github#151 -- the mount flag is not inheritable state, and its only honest token would be
-  // github#151 -- `__vg`, which every expression here names. No token, so it is never a read.
+  // github#151 -- the mount flag is not inheritable state; no token
   if (head === "page") return [];
-  // github#151 -- the page exposes these as __vg.state.<name>, so the literal dotted form is the
-  // token. The bare tail was useless: `hidden` matched getNodeDisplayData(id).hidden in a third
-  // of the suite, and reported 15 reads of state.hidden that were nothing of the kind.
+  // github#151 -- the literal dotted form is the token, not the bare tail
   if (head === "state") return ["state." + tail];
-  // github#151 -- ui./open./press./attr. are keyed by a DOM id or attribute value, which is the
-  // github#151 -- literal an expression has to name to reach the element
+  // github#151 -- ui./open./press./attr. are keyed by a DOM literal
   return [tail];
 }
 
@@ -179,9 +169,7 @@ export function keysRead(keys, exprs) {
   return hit;
 }
 
-// github#151 -- a bare identifier has to appear as a whole word, so `dim` is not read out of
-// `dimmed` or `dimAtGaps`. A DOM id or an attribute value carries dashes and spaces, where a
-// word boundary means nothing, so those match literally.
+// github#151 -- an identifier needs a word boundary, a literal does not
 const IDENT = /^[A-Za-z_$][\w$]*$/;
 /** @param {string} hay @param {string} token */
 function reaches(hay, token) {
@@ -189,13 +177,7 @@ function reaches(hay, token) {
   return new RegExp("\\b" + token + "\\b").test(hay);
 }
 
-// github#151 -- a camera that settles one ten-thousandth away from where it started has not
-// changed state, and reporting it as a leak sends the reader after nothing. Measured: a full run
-// failed "legend count bars scale to the largest visible folder" on cam.ratio 0.954 -> 0.9539,
-// which is the fingerprint's own 4-dp rounding straddling a boundary.
-// INTEGERS STAY EXACT, so a count -- vg.shown 1403 -> 1402, a row tally, a node id -- is never
-// absorbed by this; only a value that was already fractional gets the tolerance, and 1e-3 sits far
-// under every camera assertion in the suite (the tightest is 0.002).
+// github#151 -- fractions get a tolerance; integers stay exact
 const NUM_EPS = 1e-3;
 /** @param {string} a @param {string} b */
 function samePrimitive(a, b) {
@@ -236,9 +218,7 @@ export async function readState(page) {
 }
 
 /**
- * github#151 -- whether a sample can be scored at all. A probe that could not run answers with
- * one key, and diffing that against a 125-key baseline reads as the whole page vanishing: every
- * check after it would fail naming 125 keys, which is a harness fault wearing a defect's clothes.
+ * github#151 -- whether a sample can be scored at all
  * @param {Record<string, string>} snap
  */
 export function readable(snap) {
@@ -246,9 +226,7 @@ export function readable(snap) {
 }
 
 /**
- * github#151 -- a check declares what it is allowed to leave off baseline, as exact keys or as a
- * `prefix.` that covers a family. Anything else it took off baseline is a leak and fails it,
- * which is the shape github#113 already uses for "left the page busy".
+ * github#151 -- what a check may leave off baseline: keys, or a prefix.
  * @param {string} key
  * @param {string[] | undefined} allowed
  */
@@ -258,10 +236,7 @@ export function allowedToLeave(key, allowed) {
 }
 
 /**
- * github#151 -- the keys a check took OFF the job's baseline: off baseline now, at baseline when
- * it started. Deliberately not "changed since the last boundary", which would score a check for
- * putting an inherited key BACK -- exactly the cleanup the boundary wants. It is also what makes
- * one unfixed leak fail one check rather than every check after it.
+ * github#151 -- the keys a check took OFF the job's baseline
  * @param {Record<string, string>} base
  * @param {Record<string, string>} before
  * @param {Record<string, string>} after
@@ -273,9 +248,7 @@ export function newLeaks(base, before, after) {
 }
 
 /**
- * github#151 -- the coupling, read off one job's audit rows. A check is coupled when a key was
- * already off the job's baseline when it started, and one of its expressions could reach that
- * key. "Could" is the honest word (D-4): this narrows the list, the solo re-run confirms it.
+ * github#151 -- the coupling, read off one job's audit rows
  * @param {{ base: Record<string, string>, rows: { name: string, changed: {key: string}[], dirty: {key: string, from: string, to: string}[], reads: string[] }[] }} job
  */
 export function couplingReport(job) {
@@ -299,7 +272,7 @@ export function couplingReport(job) {
 }
 
 /**
- * github#151 -- which checks leave the page off its baseline at all, and with what.
+ * github#151 -- which checks leave the page off baseline, and with what
  * @param {{ rows: { name: string, changed: {key: string}[], dirty: {key: string}[] }[] }} job
  */
 export function leakReport(job) {
@@ -310,8 +283,7 @@ export function leakReport(job) {
   for (const r of rows) {
     const after = new Set((r.dirty || []).map((d) => d.key));
     const added = Array.from(after).filter((k) => !before.has(k)).sort();
-    // github#151 -- a key the check DECLARED is not a leak, and a report that calls it one
-    // sends the reader to fix something the source already accounts for
+    // github#151 -- a declared key is not a leak
     const keys = added.filter((k) => !allowedToLeave(k, r.leaves));
     const declared = added.filter((k) => allowedToLeave(k, r.leaves));
     if (keys.length || declared.length) out.push({ check: r.name, keys, declared });

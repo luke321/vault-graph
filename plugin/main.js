@@ -4,7 +4,7 @@ import { Plugin, ItemView, Notice, PluginSettingTab, Setting, normalizePath, add
 import { mountVaultGraph } from "../src/page.js";
 // github#58
 import { GraphStore, Renderer } from "../src/engine/index";
-// github#149 -- the producer lives in its own module now, so a gate can run it without Obsidian
+// github#149 -- the producer is its own module, so a gate can run it
 import { buildData } from "./build-data.mjs";
 // github#149 -- what the settings tab still needs of the shared policy
 import { isSkippedFile, paraDirs, paraFolder } from "../src/taxonomy.mjs";
@@ -85,8 +85,7 @@ function bareMap() {
  */
 
 /**
- * github#149 -- the producer and its shapes live in plugin/build-data.mjs now; the view holds
- * one of these as `lastData`.
+ * github#149 -- the producer's shapes live in plugin/build-data.mjs
  * @typedef {import("./build-data.mjs").BuildResult} BuildResult
  */
 
@@ -158,13 +157,7 @@ function discIcon() {
 }
 
 /* ================================================================= taxonomy ==
- * MOVED (github#149). The policy this file used to carry -- the month-folder rule, the type
- * aliases, the slug trio, paraFolder / paraDirs / inferType -- was a line-for-line port of
- * src/build-graph.mjs, and a port is a copy that drifts. It is one module now,
- * src/taxonomy.mjs, imported by both producers.
- *
- * The adapter itself moved too, to plugin/build-data.mjs, so that a gate can run it without
- * Obsidian. That is what scripts/check-producer-contract.mjs does with it.
+ * github#149 -- policy moved to src/taxonomy.mjs, the adapter to build-data
  */
 
 // github#62
