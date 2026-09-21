@@ -102,10 +102,19 @@ the tail of a fit flight still scrolls* — a check that registers with no `cloc
 defaults to `fast`, while its body samples a fit flight at +345ms. See decisions/0016; the soak
 is what settles whether the rest of that family belongs in the walk lane too.
 
-Nothing about the suite is a required status yet, and nothing here makes one.
-`.github/workflows/suite-soak.yml` runs a lane N times on a runner and
-`scripts/soak-report.mjs` prints the **spread** — every run, min/median/max wall, and every check
-that failed in any run with how many. Read that before requiring anything.
+**The suite has no CI gate, and that is settled rather than pending.** Measured 2026-09-21
+(`ubuntu-latest`, run 35627190525): the fast lane takes a **median 30.9 minutes** there against
+**295 s** here — 6.3× — and came back **0 of 3 green**, with **22 of 29 failures** being
+`Runtime.evaluate … got no reply in 10s`, i.e. `cdp.mjs`'s own reply timeout rather than a check
+disagreeing. The rest are the same cause one level up. Every fix available for them — a longer
+CDP timeout, wider sampling windows, moved thresholds — is measuring the machine. A
+GitHub-hosted runner has no GPU and software-renders, which a Chrome-over-CDP suite cannot
+afford.
+
+`.github/workflows/suite-soak.yml` and `scripts/soak-report.mjs` stay as the instrument that
+produced that answer, and the one that would re-take it on faster infrastructure. The report is
+also useful locally: it prints the **spread** — every run, min/median/max wall, and every check
+that failed in any run with how many.
 
 `npm run lint` runs `scripts/check-js-contracts.mjs` as part of that first line, and it is
 worth knowing what it does before you meet it failing. The JavaScript's JSDoc annotations are

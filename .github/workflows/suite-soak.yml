@@ -34,9 +34,12 @@ on:
   workflow_dispatch:
     inputs:
       runs:
-        description: 'How many consecutive runs (the ask is 20)'
+        # DEFAULT LOWERED FROM 20 TO 5 once the pace was known: at ~31 min a run, twenty is a
+        # 10-hour job that dies at the timeout every time. Five is ~2.6 h, inside the timeout,
+        # and three was already enough to settle the question.
+        description: 'How many consecutive runs (~31 min each on a GitHub-hosted runner)'
         required: false
-        default: '20'
+        default: '5'
       lane:
         description: 'fast (the non-frame lane), walk (the frame-sensitive one), or all'
         required: false
@@ -98,7 +101,7 @@ jobs:
 
       - name: Run the lane, over and over
         env:
-          RUNS: ${{ github.event.inputs.runs || '20' }}
+          RUNS: ${{ github.event.inputs.runs || '5' }}
           LANE: ${{ github.event.inputs.lane || 'fast' }}
         run: |
           mkdir -p soak-out

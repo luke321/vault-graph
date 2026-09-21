@@ -43,20 +43,58 @@ splits jobs on it. `--lane fast|walk|all` filters on that same field: **131 fast
 158 checks as of 2026-09-21. A second classification of one property would drift from the first,
 and the one the scheduler acts on is the one that is true.
 
-### 3. Measure before requiring — and this is the open half
+### 3. Measure before requiring — measured, and the answer was no
 
 `.github/workflows/suite-soak.yml` runs a lane N times on `ubuntu-latest` and
 `scripts/soak-report.mjs` prints **the spread, not the mean**: every run, min/median/max wall,
 and every check that failed in any run with how many. A mean hides the one run in twenty that
 went red, and that run is the whole decision.
 
+Both stay in the tree after the verdict below. The workflow is the instrument that produced the
+answer and the one that would re-take it if the infrastructure ever changes; `soak-report.mjs`
+earns its keep locally as well, and did — it is what found the mis-declared `clock` below.
+
 **Nothing is added to `quality.yml` and nothing becomes required.** A job in `quality.yml`
 would already be a required status in practice — it shows red on every `develop` push —
 whatever the ruleset says. github#147's reasoning is unchanged: *a required status that flakes
 is a required status that gets bypassed, which is worse than not having one.*
 
-**As of 2026-09-21 the twenty-run runner measurement has not been taken**, so no decision about
-requiring the lane has been made or can be.
+**The measurement was taken on 2026-09-21 (run 35627190525, `ubuntu-latest`) and it settled the
+question in the negative.** Three completed runs before it was stopped:
+
+| | |
+|---|---|
+| wall per run | **1854 / 1883 / 1848 s** — median **30.9 minutes**, spread 1.02x |
+| the same lane here | 294 / 295 / 299 s — the runner is **6.3x slower** |
+| green | **0 of 3** |
+| failures | 7 / 13 / 9 — **29 across the three runs** |
+| of those, `Runtime.evaluate … got no reply in 10s` | **22 of 29** |
+
+**Every failure traces to the pace, not to a disagreement.** Three quarters of them are
+`cdp.mjs`'s own ten-second reply timeout firing; the rest are the same cause one level up — *"the
+plain ride sampled 1 time(s) over 1500ms — too coarse to place an edge"*, and the fit-flight
+tail missed by a frame. Not one of them is a check asserting something different about the page.
+
+And every available fix for them is the one this ticket forbids by name: raise the CDP timeout,
+widen the sampling windows, move the thresholds. **A threshold that has to move for the machine
+is measuring the machine.**
+
+**So the decision is not "not yet" — it is no.** Lukas, 2026-09-21: the invariant suite gets no
+CI gate. A GitHub-hosted runner has no GPU, falls back to software rendering, and is an order of
+magnitude too slow for a suite that drives Chrome over CDP. Three samples at that pace settle it;
+the remaining seventeen would have confirmed the same number.
+
+**The spread was worth taking anyway, and it is why the answer is trustworthy.** A mean would have
+said "31 minutes, mostly green-ish". The per-check breakdown said *0 of 3, and here is the one
+cause*, which is what turns "too slow to be pleasant" into "too slow to be correct".
+
+### What the run proved that survives the verdict
+
+**The headless path works on Linux, which nothing had tested.** No run printed the
+`headless viewport is …` warning, so `nextBounds()` read what Chrome gave it and resized the
+window onto 1584×961 on a platform it had never seen. The self-calibrating design was the right
+call rather than a hardcoded per-platform size — that is the part that would have failed silently,
+and it did not.
 
 ## What this bought, measured on this machine (2026-09-21)
 
