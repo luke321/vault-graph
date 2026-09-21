@@ -46,7 +46,8 @@ on:
   push:
     # A dedicated namespace, so no ordinary branch push ever spends an hour of runner time by
     # accident. workflow_dispatch only exists once a file is on the default branch, and this
-    # measurement is wanted before that.
+    # measurement is wanted before that -- the same reason release.yml takes a push to
+    # `release/*` as its dry run, and this follows that convention rather than inventing one.
     branches: ['ci/soak/**']
 
 permissions:
@@ -110,8 +111,17 @@ jobs:
             echo "::endgroup::"
           done
 
+      # ALWAYS, and this is not defensive boilerplate. Twenty runs of a lane nobody has timed
+      # on a runner can hit the job timeout, and the runs that DID finish are the measurement --
+      # a spread over fourteen runs answers the question, where a killed job with no report
+      # answers nothing and costs the same hours.
       - name: The spread
+        if: always()
         run: |
+          if ! ls soak-out/run-*.txt >/dev/null 2>&1; then
+            echo "no runs completed -- nothing to report" | tee soak-out/spread.txt
+            exit 0
+          fi
           node scripts/soak-report.mjs soak-out/run-*.txt | tee soak-out/spread.txt
           {
             echo '## Suite soak -- lane `'"${{ github.event.inputs.lane || 'fast' }}"'`'
