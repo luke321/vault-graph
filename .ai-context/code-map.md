@@ -558,7 +558,7 @@ range, not the file. Stale when `node scripts/code-map.mjs --check` fails.
 | 11865 | · · · · · · · · · · `byPath` |
 | 12054 | `destroy` |
 
-## `scripts/smoke.mjs` — 8976 lines, 13 sections, 91 functions, 158 checks
+## `scripts/smoke.mjs` — 8994 lines, 13 sections, 91 functions, 158 checks
 
 ### Sections
 
@@ -573,10 +573,10 @@ range, not the file. Stale when `node scripts/code-map.mjs --check` fails.
 | 2296–4462 | camera |
 | 4463–6040 | date range |
 | 6041–7603 | the hub |
-| 7604–8054 | github#165 |
-| 8055–8331 | live rebuild (github#72) |
-| 8332–8536 | the run |
-| 8537–8976 | which vaults, and why |
+| 7604–8062 | github#165 |
+| 8063–8339 | live rebuild (github#72) |
+| 8340–8554 | the run |
+| 8555–8994 | which vaults, and why |
 
 ### Functions
 
@@ -659,20 +659,20 @@ range, not the file. Stale when `node scripts/code-map.mjs --check` fails.
 | 7444 | · `read` |
 | 7516 | · `look` |
 | 7843 | · `pick` |
-| 7886 | `pressKey` |
-| 7898 | `trailState` |
-| 7899 | `selectBySearch` |
-| 7908 | `hop` |
-| 7922 | `closeCard` |
-| 7927 | `stepBack` |
-| 8317 | `settle` |
-| 8334 | `runOne` |
-| 8495 | `killBrowser` |
-| 8615 | `resolveVaults` |
-| 8701 | `buildFor` |
-| 8721 | `main` |
-| 8941 | `takeScreen` |
-| 8958 | `dropScreen` |
+| 7894 | `pressKey` |
+| 7906 | `trailState` |
+| 7907 | `selectBySearch` |
+| 7916 | `hop` |
+| 7930 | `closeCard` |
+| 7935 | `stepBack` |
+| 8325 | `settle` |
+| 8342 | `runOne` |
+| 8513 | `killBrowser` |
+| 8633 | `resolveVaults` |
+| 8719 | `buildFor` |
+| 8739 | `main` |
+| 8959 | `takeScreen` |
+| 8976 | `dropScreen` |
 
 ### Checks
 
@@ -823,16 +823,16 @@ range, not the file. Stale when `node scripts/code-map.mjs --check` fails.
 | 7787 | the grid's key sits bottom left, clear of every button over the graph |
 | 7836 | the developer menu's slow motion reaches the animation clock |
 | 7876 | focus web stays above dim notes |
-| 7933 | only a hop lengthens the trail |
-| 7952 | stepping back never re-collects a hop |
-| 7969 | a crumb click truncates the trail at the crumb |
-| 7984 | the trail is not layout |
-| 8007 | the page claims no keyboard shortcut |
-| 8030 | re-selecting the same note keeps the trail, and a filter does not clear it |
-| 8108 | a live rebuild with the same data moves nothing |
-| 8124 | a rebuild waits for a drag, and a right-click is not a drag |
-| 8173 | the invalidation registry names every cache a live rebuild stales |
-| 8182 | a live rebuild lands on the layout a fresh relayout gives |
-| 8214 | a live rebuild re-arms the chip, so a note that arrives inside its window is lit |
-| 8259 | word counts land by path, which is the only thing a live rebuild keeps |
-| 8303 | an idle PNG export carries the graph, not just the background and the logo |
+| 7941 | only a hop lengthens the trail |
+| 7960 | stepping back never re-collects a hop |
+| 7977 | a crumb click truncates the trail at the crumb |
+| 7992 | the trail is not layout |
+| 8015 | the page claims no keyboard shortcut |
+| 8038 | re-selecting the same note keeps the trail, and a filter does not clear it |
+| 8116 | a live rebuild with the same data moves nothing |
+| 8132 | a rebuild waits for a drag, and a right-click is not a drag |
+| 8181 | the invalidation registry names every cache a live rebuild stales |
+| 8190 | a live rebuild lands on the layout a fresh relayout gives |
+| 8222 | a live rebuild re-arms the chip, so a note that arrives inside its window is lit |
+| 8267 | word counts land by path, which is the only thing a live rebuild keeps |
+| 8311 | an idle PNG export carries the graph, not just the background and the logo |

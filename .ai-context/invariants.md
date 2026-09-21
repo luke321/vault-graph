@@ -5379,6 +5379,23 @@ boundary, and the checks that drive a control the page **persists** snapshot and
 distinction that matters is the control, not the value: `__vg.setX()` passes the host callback
 `false` and writes nothing, while a real click on a settings toggle or a context-menu item writes.
 
+**The first thing the boundary caught on someone else's work, and the reason it is worth having.**
+github#101 made `__vg.checkFocusWeb()` return a `Promise`, on the reasoning that *"cdp.mjs already
+evaluates with `awaitPromise: true`, so a debug function returning a Promise needed no change on the
+calling side"*. That is true of `p.eval` and **false of `p.j`**, which wraps its argument as
+`JSON.stringify(<expr>)` — a string, returned immediately, so `awaitPromise` has nothing to wait
+for and the Promise object itself was serialised as `{}`. Every field read off it came back
+`undefined`, `r.geomGaps` was falsy, and the check took its *"no in-disc samples on this shape,
+nothing to measure"* branch and returned **`ok: true`**. Measured on this tree: the check asserted
+**nothing on all five fixtures** while reporting green, and the restore of `state.selected` — which
+github#101 moved inside the deferred sampling function — landed a frame after the check returned, so
+three of the five also left a note selected. **Nothing in the suite could see this except the state
+boundary**, because a check that measures nothing and passes looks exactly like a check that passes.
+Two fixes, both here: `p.j` now awaits (`JSON.stringify(await (<expr>))`, a no-op for the other 346
+call sites), and the check refuses a report that never arrived instead of reading it as a shape with
+nothing on it. **A check that cannot tell "nothing to measure" from "nothing came back" is a check
+that will pass through its own removal.**
+
 **One limitation the five-fixture run exposed, and it is the price of the rule rather than a
 defect in it.** Scoring "newly off baseline" means **a declared leak of a key masks a later
 undeclared leak of the same key**: the context-menu check leaked `store.settings` on four fixtures

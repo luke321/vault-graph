@@ -7875,6 +7875,14 @@ check("the developer menu's slow motion reaches the animation clock", async (p) 
 
 check("focus web stays above dim notes", async (p) => {
   const r = await p.j(`__vg.checkFocusWeb()`);
+  // github#151 -- a report that never arrived is not a shape with nothing on it. Without this,
+  // checkFocusWeb() returning something unreadable reads as "no in-disc samples" and PASSES:
+  // that is how github#101's async conversion disabled this check on every fixture at once.
+  if (typeof r.node === "undefined" || typeof r.geomGaps === "undefined") {
+    return { ok: false,
+             detail: `checkFocusWeb() returned no report (${JSON.stringify(r).slice(0, 80)}) -- ` +
+                     `nothing was measured, and this is not a shape with nothing to measure` };
+  }
   if (!r.geomGaps) return { ok: true, detail: `${r.node} (degree ${r.degree}): no in-disc samples on this shape, nothing to measure` };
   return { ok: r.webOK,
            detail: `${r.node} (degree ${r.degree}, ${r.edges} edges): ${r.blueAtGaps} blue, ` +
@@ -8437,7 +8445,17 @@ async function runOne(vault, work) {
       await sleep(300);
     }
 
-    page.j = async (expr) => JSON.parse(await page.eval(`JSON.stringify(${expr})`));
+    // github#151 -- await the expression before stringifying it. cdp.mjs evaluates with
+    // awaitPromise, but that awaits what the EXPRESSION returns -- and the expression here was
+    // JSON.stringify(...), which returns a string immediately. So a debug API that returns a
+    // Promise was serialised as the Promise object, "{}", and every field read off it came back
+    // undefined. github#101 made __vg.checkFocusWeb() async on exactly that assurance ("cdp.mjs
+    // already evaluates with awaitPromise: true, so a debug function returning a Promise needed
+    // no change on the calling side") -- true of p.eval, false of p.j, and it silently turned
+    // "focus web stays above dim notes" into a check that asserted nothing on all five fixtures.
+    // `await x` is x for a non-promise, so this is a no-op for every other call site.
+    page.j = async (expr) =>
+      JSON.parse(await page.eval(`(async function () { return JSON.stringify(await (${expr})); })()`));
 
     // github#7
     // github#63
