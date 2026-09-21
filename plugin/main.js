@@ -4,10 +4,10 @@ import { Plugin, ItemView, Notice, PluginSettingTab, Setting, normalizePath, add
 import { mountVaultGraph } from "../src/page.js";
 // github#58
 import { GraphStore, Renderer } from "../src/engine/index";
-// github#6
-import { localDay, resolveCreated, dateTally } from "../src/dates.mjs";
-// github#141
-import { canonicalDest, ghostId, ghostKey, ghostLabel } from "../src/links.mjs";
+// github#149 -- the producer lives in its own module now, so a gate can run it without Obsidian
+import { buildData } from "./build-data.mjs";
+// github#149 -- what the settings tab still needs of the shared policy
+import { isSkippedFile, paraDirs, paraFolder } from "../src/taxonomy.mjs";
 import PAGE_HTML from "raw:../src/page.html";
 import LOGO_MASK_B64 from "b64:../assets/logo-mask.png";
 // github#83, design/0016
@@ -85,25 +85,10 @@ function bareMap() {
  */
 
 /**
- * One note as buildData emits it -- the same shape src/build-graph.mjs writes into the
- * standalone file, which is the whole point of the adapter (see SPIKE.md). `_file` is the
- * plugin-side handle used for the one read left, and is stripped before the data leaves.
- * @typedef {Object} GraphNode
- * @property {string} id
- * @property {string} label
- * @property {string} folder
- * @property {string[]} dirs
- * @property {string} sub
- * @property {string} type
- * @property {string[]} tags
- * @property {string} created
- * @property {string} touched
- * @property {number} words
- * @property {boolean} [ghost]
- * @property {TFile} [_file]
+ * github#149 -- the producer and its shapes live in plugin/build-data.mjs now; the view holds
+ * one of these as `lastData`.
+ * @typedef {import("./build-data.mjs").BuildResult} BuildResult
  */
-
-/** @typedef {Awaited<ReturnType<typeof buildData>>} BuildResult */
 
 /**
  * github#140 -- the only four settings buildData reads, per render
@@ -173,34 +158,14 @@ function discIcon() {
 }
 
 /* ================================================================= taxonomy ==
- * Ported from src/build-graph.mjs, line-for-line wherever it is a pure function of the
- * path. Divergence here would make every measurement in SPIKE.md meaningless: the point
- * is to compare the SAME derivation fed by two different sources, so any difference in
- * the output is a difference in the SOURCE.
+ * MOVED (github#149). The policy this file used to carry -- the month-folder rule, the type
+ * aliases, the slug trio, paraFolder / paraDirs / inferType -- was a line-for-line port of
+ * src/build-graph.mjs, and a port is a copy that drifts. It is one module now,
+ * src/taxonomy.mjs, imported by both producers.
  *
- * One thing genuinely gets simpler: Obsidian hands out "a/b/c.md" with forward slashes
- * on every platform, so all the node:path `sep` juggling disappears.
+ * The adapter itself moved too, to plugin/build-data.mjs, so that a gate can run it without
+ * Obsidian. That is what scripts/check-producer-contract.mjs does with it.
  */
-
-const MONTHISH = /^\d{4}(?:[-_ ]?(?:\d{2}|Q[1-4]|W\d{1,2}))?$/i;
-/** @type {Record<string, string>} */
-const TYPE_ALIAS = {
-  people: "person", person: "person",
-  "zettel/permanent": "zettel", "zettel/fleeting": "zettel", "zettel/literature": "zettel",
-};
-
-const SKIP_FILES = new Set(["claude.md", "readme.md", "license.md"]);
-
-/** @param {unknown} s */
-const deNumber = (s) => String(s).replace(/^[\s\d._)-]+/, "").trim();
-/** @param {unknown} s */
-const slug = (s) => deNumber(s).toLowerCase().replace(/[\s_]+/g, "-");
-/** @param {string} s */
-const singular = (s) => s.replace(/ies$/, "y").replace(/([^aeious])s$/, "$1");
-/** @param {unknown} s */
-const norm = (s) => String(s).split(/[\\/]/).filter(Boolean).join("/");
-/** @param {string} rel @param {string} dir */
-const under = (rel, dir) => !!dir && (rel === dir || rel.startsWith(dir + "/"));
 
 // github#62
 /** @param {() => void} fn @returns {unknown} */
@@ -212,354 +177,6 @@ const RELEASES_URL = "https://github.com/luke321/vault-graph/releases";
 const NEW_CLASS = "vg-new";
 const GALLERY_URL = "https://luke321.github.io/vault-graph/features.html";
 
-// github#32
-/** @param {string} a @param {string} b */
-const walkOrder = (a, b) => {
-  const sa = a.split("/"), sb = b.split("/");
-  const n = Math.min(sa.length, sb.length);
-  for (let i = 0; i < n; i++) {
-    if (sa[i] !== sb[i]) return sa[i] < sb[i] ? -1 : 1;
-  }
-  return sa.length - sb.length;
-};
-
-/** @param {string} path */
-const paraFolder = (path) => {
-  const seg = path.split("/");
-  return seg.length > 1 ? seg[0] : "(vault root)";
-};
-
-/** @param {string} path @param {boolean} flatMonths */
-const paraDirs = (path, flatMonths) => {
-  const seg = path.split("/").slice(1, -1);
-  /** @type {string[]} */
-  const out = [];
-  for (let i = 0; i < seg.length; i++) {
-    if (MONTHISH.test(seg[i])) {
-      if (i === 0 && !flatMonths) out.push(seg[i]);
-      break;
-    }
-    out.push(seg[i]);
-  }
-  return out;
-};
-
-/**
- * @param {Record<string, unknown>} fm      the note's frontmatter, or {}
- * @param {string} path
- * @param {string[]} tags
- * @param {string} dailyDir                 "" when the vault has no daily-notes folder
- * @param {(path: string) => boolean} isTemplate
- */
-function inferType(fm, path, tags, dailyDir, isTemplate) {
-  const raw = typeof fm.type === "string" ? fm.type.toLowerCase() : "";
-  if (raw) return TYPE_ALIAS[raw] || raw;
-  if (tags.indexOf("daily-note") >= 0) return "daily";
-  if (under(path, dailyDir)) return "daily";
-  if (isTemplate(path)) return "template";
-
-  const dirs = path.split("/").slice(0, -1).filter(Boolean);
-  const named = dirs.filter((d) => !MONTHISH.test(d));
-  const pick = named.length ? named[named.length - 1] : dirs[0];
-  const type = pick ? singular(slug(pick)) : "";
-  return type || "note";
-}
-
-/* ==================================================================== config ==
- * Same principle as the Node builder: ask the vault which folders are templates and
- * daily notes rather than assuming a layout. The path must go through Vault#configDir --
- * a literal ".obsidian" is an ERROR under obsidianmd/eslint-plugin
- * (hardcoded-config-path), and it is wrong anyway in a vault whose config folder was
- * renamed.
- */
-/**
- * @param {App} app
- * @param {string} name   path under the config dir
- * @returns {Promise<unknown>}   the parsed file, or null when absent or unreadable. `unknown`
- *   on purpose: none of these files has a schema this plugin owns, so a caller has to check
- *   what it reads -- which is what strField below does, and what every caller already did.
- */
-async function readConfigJson(app, name) {
-  try {
-    const p = normalizePath(app.vault.configDir + "/" + name);
-    if (!(await app.vault.adapter.exists(p))) return null;
-    /** @type {unknown} */
-    const parsed = JSON.parse(await app.vault.adapter.read(p));
-    return parsed;
-  } catch {
-    return null;
-  }
-}
-
-/**
- * One string field of a parsed config object, or "" when the object or the field is not
- * what it should be. Untrimmed: the caller decides what blank means.
- * @param {unknown} obj @param {string} key
- */
-const strField = (obj, key) => {
-  if (!obj || typeof obj !== "object" || !(key in obj)) return "";
-  const v = /** @type {Record<string, unknown>} */ (obj)[key];
-  return typeof v === "string" ? v : "";
-};
-
-/** @param {App} app */
-async function readFolders(app) {
-  /** @type {Set<string>} */
-  const dirs = new Set();
-  const core = strField(await readConfigJson(app, "templates.json"), "folder");
-  if (core.trim()) dirs.add(norm(core));
-  const templater = strField(await readConfigJson(app, "plugins/templater-obsidian/data.json"), "templates_folder");
-  if (templater.trim()) dirs.add(norm(templater));
-  const dn = strField(await readConfigJson(app, "daily-notes.json"), "folder");
-  const dailyDir = dn.trim() ? norm(dn) : "";
-  return { templateDirs: Array.from(dirs), dailyDir: dailyDir };
-}
-
-/** github#71, decisions/0015 -- the three places a spec is read; cache-parsed here
- * @param {import("obsidian").App} app
- */
-async function readSortSpecs(app) {
-  /** @type {{ folder: string, text: string, origin: string }[]} */
-  const out = [];
-  const seen = new Set();
-  /** @param {import("obsidian").TFile} file */
-  const add = (file) => {
-    if (!file || seen.has(file.path)) return;
-    seen.add(file.path);
-    const fm = (app.metadataCache.getFileCache(file) || {}).frontmatter || {};
-    const text = typeof fm["sorting-spec"] === "string" ? fm["sorting-spec"] : "";
-    if (!text.trim()) return;
-    const dir = file.parent && file.parent.path && file.parent.path !== "/" ? file.parent.path : "";
-    out.push({ folder: dir, text: text, origin: file.path });
-  };
-
-  for (const file of app.vault.getMarkdownFiles()) {
-    const dir = file.parent && file.parent.path && file.parent.path !== "/" ? file.parent.path : "";
-    const parent = dir.indexOf("/") < 0 ? dir : dir.slice(dir.lastIndexOf("/") + 1);
-    // github#71 -- a sortspec.md, or a folder note carrying the key
-    if (file.basename.toLowerCase() === "sortspec" || (parent && file.basename === parent)) add(file);
-  }
-
-  const extra = strField(await readConfigJson(app, "plugins/custom-sort/data.json"), "additionalSortspecFile");
-  if (extra.trim()) {
-    const f = app.vault.getFileByPath(normalizePath(norm(extra)));
-    if (f) add(/** @type {import("obsidian").TFile} */ (f));
-  }
-  return out;
-}
-
-/* ================================================================ the adapter ==
- * The crawl in build-graph.mjs, replaced by asking Obsidian. What used to be a walk, a
- * YAML parser, a wikilink miner, a resolver and an alias table is now four reads of an
- * index that is already in memory:
- *
- *   vault.getMarkdownFiles()        the file list       (was walk())
- *   metadataCache.getFileCache()    frontmatter + tags  (was parseFrontmatter())
- *   metadataCache.resolvedLinks     the edges           (was mineLinks() + resolve())
- *   metadataCache.unresolvedLinks   the ghosts          (was the resolve() failures)
- *   file.stat.mtime                 `touched`           (was statSync())
- *
- * Only `words` still needs a file body, and that is the only I/O left in the whole
- * build.
- */
-/**
- * @param {App} app
- * @param {BuildOptions} opts   only the four build settings are read
- * @param {string} [version]   github#108 -- this.plugin.manifest.version, shown in the stats line
- */
-async function buildData(app, opts, version) {
-  const t0 = performance.now();
-  const folders = await readFolders(app);
-  // github#71
-  const sortSpecs = await readSortSpecs(app);
-  const templateDirs = folders.templateDirs, dailyDir = folders.dailyDir;
-  /** @param {string} path */
-  const isTemplate = (path) => templateDirs.some((d) => under(path, d));
-
-  const files = app.vault.getMarkdownFiles().filter((f) => {
-    if (SKIP_FILES.has(f.name.toLowerCase())) return false;
-    return opts.templates ? true : !isTemplate(f.path);
-  });
-  // github#32
-  files.sort((a, b) => walkOrder(a.path, b.path));
-
-  /** @type {Map<string, number>} */
-  const index = new Map();
-  /** @type {GraphNode[]} */
-  const nodes = [];
-  const dates = dateTally();
-
-  for (const file of files) {
-    const cache = app.metadataCache.getFileCache(file) || {};
-    /** @type {Record<string, unknown>} */
-    const fm = cache.frontmatter || {};
-
-    /** @type {unknown[]} */
-    const rawTags = [];
-    const tags = rawTags
-      .concat(fm.tags || [], fm.tag || [])
-      .flatMap((t) => String(t).split(/[,\s]+/))
-      .map((t) => t.replace(/^#/, "").trim())
-      .filter(Boolean);
-
-    const dirs = paraDirs(file.path, opts.flatMonths);
-    // github#6
-    const dated = resolveCreated(fm, file.basename, file.stat.ctime, file.stat.mtime);
-    dates[dated.source]++;
-    index.set(file.path, nodes.length);
-    nodes.push({
-      id: file.path,
-      label: file.basename,
-      folder: paraFolder(file.path),
-      dirs: dirs,
-      sub: dirs[0] || "",
-      type: inferType(fm, file.path, tags, dailyDir, isTemplate),
-      tags: tags,
-      created: dated.day,
-      touched: localDay(file.stat.mtime),
-      words: 0,
-      _file: file,
-    });
-  }
-  const tIndex = performance.now();
-
-  /* ---- edges: Obsidian's resolution, not ours ----------------------------- */
-  /** @type {Map<string, number>} */
-  const weight = new Map();
-  /** @param {number} i @param {number} j @param {number} w */
-  const addEdge = (i, j, w) => {
-    if (i === j) return;
-    const key = i < j ? i + " " + j : j + " " + i;
-    weight.set(key, (weight.get(key) || 0) + w);
-  };
-
-  let attachmentLinks = 0, filteredLinks = 0;
-  const resolved = app.metadataCache.resolvedLinks || {};
-  for (const src of Object.keys(resolved)) {
-    const i = index.get(src);
-    if (i === undefined) continue;
-    for (const dest of Object.keys(resolved[src])) {
-      const j = index.get(dest);
-      if (j === undefined) {
-        if (dest.toLowerCase().endsWith(".md")) filteredLinks++;
-        else attachmentLinks++;
-        continue;
-      }
-      addEdge(i, j, resolved[src][dest]);
-    }
-  }
-
-  /* ---- ghosts: unresolvedLinks, for free --------------------------------- */
-  const unresolvedMap = app.metadataCache.unresolvedLinks || {};
-  let unresolved = 0;
-  // github#141
-  /** @type {Map<string, { dest: string, sources: [number, number][] }>} */
-  const ghosts = new Map();
-  for (const src of Object.keys(unresolvedMap)) {
-    const i = index.get(src);
-    if (i === undefined) continue;
-    for (const target of Object.keys(unresolvedMap[src])) {
-      const n = unresolvedMap[src][target];
-      unresolved += n;
-      if (!opts.ghosts) continue;
-      const dest = canonicalDest(src, target);
-      const key = ghostKey(dest);
-      let slot = ghosts.get(key);
-      if (!slot) { slot = { dest: dest, sources: [] }; ghosts.set(key, slot); }
-      else if (dest < slot.dest) slot.dest = dest;
-      slot.sources.push([i, n]);
-    }
-  }
-  if (opts.ghosts) {
-    for (const slot of ghosts.values()) {
-      const j = nodes.length;
-      nodes.push({
-        id: ghostId(slot.dest), label: ghostLabel(slot.dest), folder: "(unresolved)", sub: "", dirs: [],
-        type: "ghost", tags: [], created: "", touched: "", words: 0, ghost: true,
-      });
-      for (const pair of slot.sources) addEdge(pair[0], j, pair[1]);
-    }
-  }
-
-  /* ---- words: the only remaining I/O, read after the mount ---------------- */
-  const tEdges = performance.now();
-  const wordFiles = opts.words ? nodes.map((n) => n._file || null) : null;
-  // github#58
-  /**
-   * @param {(index: number, words: number) => void} apply
-   * @param {Set<string>} [only]   github#72: read just these paths, for a live rebuild
-   * @returns {Promise<number>}
-   */
-  const readWords = async (apply, only) => {
-    const t = performance.now();
-    if (!wordFiles) return 0;
-    await Promise.all(wordFiles.map(async (file, i) => {
-      if (!file) return;
-      if (only && !only.has(file.path)) return;
-      let words = 0;
-      try {
-        const raw = await app.vault.cachedRead(file);
-        const m = /^---\r?\n[\s\S]*?\r?\n---/.exec(raw.replace(/^\uFEFF/, ""));
-        const body = m ? raw.slice(m[0].length) : raw;
-        words = body.split(/\s+/).filter(Boolean).length;
-      } catch { words = 0; }
-      apply(i, words);
-    }));
-    return Math.round(performance.now() - t);
-  };
-  const tWords = performance.now();
-
-  const edges = Array.from(weight).map((entry) => {
-    const ab = entry[0].split(" ");
-    return { s: Number(ab[0]), t: Number(ab[1]), w: entry[1] };
-  });
-
-  const degree = /** @type {number[]} */ (new Array(nodes.length).fill(0));
-  for (const e of edges) { degree[e.s]++; degree[e.t]++; }
-
-  const out = nodes.map((n, i) => {
-    const clean = Object.assign({}, n, { deg: degree[i] });
-    delete clean._file;
-    return clean;
-  });
-
-  const p2 = (n) => String(n).padStart(2, "0");
-  const now = new Date();
-
-  return {
-    vault: app.vault.getName(),
-    version: version,
-    generated: now.getFullYear() + "-" + p2(now.getMonth() + 1) + "-" + p2(now.getDate()) +
-               " " + p2(now.getHours()) + ":" + p2(now.getMinutes()),
-    nodes: out,
-    edges: edges,
-    stats: {
-      files: files.length,
-      nodes: out.length,
-      edges: edges.length,
-      unresolved: unresolved,
-      orphans: degree.filter((d) => d === 0).length,
-      // github#6
-      dates: dates,
-      templatesExcluded: !opts.templates,
-      ghostsIncluded: !!opts.ghosts,
-    },
-    readWords: readWords,
-    // github#71
-    sortSpecs: sortSpecs,
-    _spike: {
-      msIndex: Math.round(tIndex - t0),
-      msEdges: Math.round(tEdges - tIndex),
-      msWords: Math.round(tWords - tEdges),
-      msWordsBackground: /** @type {number | null} */ (null),
-      msTotal: Math.round(tWords - t0),
-      templateDirs: templateDirs,
-      dailyDir: dailyDir,
-      attachmentLinks: attachmentLinks,
-      filteredLinks: filteredLinks,
-    },
-  };
-}
 
 /* ====================================================================== view ==
  * IN THE DOM, not in an iframe.
@@ -762,7 +379,7 @@ class VaultGraphView extends ItemView {
     const renames = this.pendingRenames;
     this.pendingRenames = pathMap();
     try {
-      const next = await buildData(this.app, this.plugin.settings, this.plugin.manifest.version);
+      const next = await buildData({ app: this.app, normalizePath }, this.plugin.settings, this.plugin.manifest.version);
       if (this.handle !== handle || handle.api !== api) return;   // github#62
 
       // github#58, design/0014
@@ -931,7 +548,7 @@ class VaultGraphView extends ItemView {
     root.addClass("vault-graph-view");
     this.mountNote();
 
-    const data = await buildData(this.app, opts, this.plugin.manifest.version);
+    const data = await buildData({ app: this.app, normalizePath }, opts, this.plugin.manifest.version);
     // github#140 -- THE CHECK: everything below writes view state
     if (this.renderGen !== gen) return;
     this.lastData = data;
@@ -1242,7 +859,7 @@ function topFolders(app) {
   /** @type {Map<string, number>} */
   const count = new Map();
   for (const file of app.vault.getMarkdownFiles()) {
-    if (SKIP_FILES.has(file.name.toLowerCase())) continue;
+    if (isSkippedFile(file.name)) continue;
     const g = paraFolder(file.path);
     count.set(g, (count.get(g) || 0) + 1);
   }
@@ -1263,7 +880,7 @@ function allSubfolders(app, flatMonths) {
   /** @type {Map<string, Map<string, number>>} */
   const byFolder = new Map();
   for (const file of app.vault.getMarkdownFiles()) {
-    if (SKIP_FILES.has(file.name.toLowerCase())) continue;
+    if (isSkippedFile(file.name)) continue;
     const g = paraFolder(file.path);
     let count = byFolder.get(g);
     if (!count) {
