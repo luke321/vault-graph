@@ -789,7 +789,10 @@ async (p) => {
             `round trip ${r.trip.moved} moved (worst ${r.trip.worst}` +
             (r.trip.who ? `, #${r.trip.who}` : "") + ")",
   };
-}, { on: "all" });
+  // github#151 -- leaves state.hidden: visiting the tag disc seeds that disc's own hidden
+  // github#151 -- defaults, which the page keeps per dimension by design (design/0015).
+  // github#151 -- Declared so it does not depend on another tag check running first.
+}, { on: "all", leaves: ["state.hidden"] });
 
 check("tags: a dot in the disc being left keeps its colour until it has faded", async (p) => {
   // github#151 -- the Tags button persists the dimension; __vg.setDim() does not, so switching
@@ -951,7 +954,10 @@ check("tags: a note one disc hides and the other shows arrives with the fill edg
             (first ? ` (first: ${first})` : "") + `, ${litEnd} of ${n.hid} lit at the end; ` +
             `${standInsPeak} stand-ins drawn, ${left} left behind, ${nodesEnd} of ${n.nodes} nodes after`,
   };
-}, { on: WALK, clock: "real" });
+  // github#151 -- leaves state.hidden: visiting the tag disc seeds that disc's own hidden
+  // github#151 -- defaults, which the page keeps per dimension by design (design/0015).
+  // github#151 -- Declared so it does not depend on another tag check running first.
+}, { on: WALK, clock: "real", leaves: ["state.hidden"] });
 
 check("tags: the two buckets stay out of the hue rotation and sort last", async (p) => {
   const r = await p.j(`(function(){
@@ -982,7 +988,10 @@ check("tags: the two buckets stay out of the hue rotation and sort last", async 
             `${r.untagged}, (unlinked) ${r.unlinked} (both want the archive grey g11); ` +
             `${r.hues.length} real tags take ${r.hues.length - r.repeats} distinct slots`,
   };
-}, { on: "all" });
+  // github#151 -- leaves state.hidden: visiting the tag disc seeds that disc's own hidden
+  // github#151 -- defaults, which the page keeps per dimension by design (design/0015).
+  // github#151 -- Declared so it does not depend on another tag check running first.
+}, { on: "all", leaves: ["state.hidden"] });
 
 check("tags: each dimension keeps its own hidden and collapsed state", async (p) => {
   const r = await p.j(`(function(){
@@ -1035,7 +1044,10 @@ check("tags: each dimension keeps its own hidden and collapsed state", async (p)
             `subs ${r.folderSubBefore.length} -> ${r.folderSubAgain.length}; ` +
             `tag came back [${r.tagAfter.join(" ")}] -> [${r.tagAgain.join(" ")}]`,
   };
-}, { on: "all" });
+  // github#151 -- leaves state.hidden: visiting the tag disc seeds that disc's own hidden
+  // github#151 -- defaults, which the page keeps per dimension by design (design/0015).
+  // github#151 -- Declared so it does not depend on another tag check running first.
+}, { on: "all", leaves: ["state.hidden"] });
 
 check("tags: a nested tag earns a sub-wedge, exactly as a subfolder does", async (p) => {
   const r = await p.j(`(function(){
@@ -1095,7 +1107,10 @@ check("tags: a nested tag earns a sub-wedge, exactly as a subfolder does", async
             (r.deeper.length ? `, and a depth-2 tag nests below it: ${r.deeper.join(", ")}`
                              : "; no depth-2 tag was reachable"),
   };
-}, { on: "all" });
+  // github#151 -- leaves state.hidden: visiting the tag disc seeds that disc's own hidden
+  // github#151 -- defaults, which the page keeps per dimension by design (design/0015).
+  // github#151 -- Declared so it does not depend on another tag check running first.
+}, { on: "all", leaves: ["state.hidden"] });
 
 check("arc: a plan over the whole circle is the resting disc, and over half of it stays in half",
 async (p) => {
@@ -1269,7 +1284,10 @@ async (p) => {
               ? `gear, search, segment, its Tags side, All, legend and Refresh all at the same edges`
               : `MOVED ${moved.map((k) => `${k} [${r.folder.at[k]}] -> [${r.tag.at[k]}]`).join(", ")}`),
   };
-});
+  // github#151 -- leaves state.hidden: visiting the tag disc seeds that disc's own hidden
+  // github#151 -- defaults, which the page keeps per dimension by design (design/0015).
+  // github#151 -- Declared so it does not depend on another tag check running first.
+}, { leaves: ["state.hidden"] });
 
 /* ---------------------------------------------------------------- github#71 -- */
 
@@ -2178,7 +2196,10 @@ check("tags: a live rebuild in the tag disc refiles the arrival and keeps the ri
                        `rings ${start.rings ? start.rings.dim : "none"} -> ${after.rings ? after.rings.dim : "none"}, ` +
                        `r0 step ${isNaN(r0Step) ? "?" : r0Step.toFixed(4)}; restored to ${back.moved} off original` +
                        (back.who ? ` (worst ${back.worst}, ${back.who})` : "") };
-}, { on: "all" });
+  // github#151 -- leaves state.hidden: visiting the tag disc seeds that disc's own hidden
+  // github#151 -- defaults, which the page keeps per dimension by design (design/0015).
+  // github#151 -- Declared so it does not depend on another tag check running first.
+}, { on: "all", leaves: ["state.hidden"] });
 
 check("hover re-arms after the pointer leaves the stage", async (p) => {
   // github#7
