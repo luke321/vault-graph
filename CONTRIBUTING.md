@@ -80,6 +80,33 @@ is damage to somebody else's software, somebody else's licence, or somebody else
 While iterating, `node scripts/smoke.mjs --only <substring>` is the loop. The full suite
 belongs to the push that merges.
 
+**The suite can also run where there is no screen (github#155).** `--headless` opens
+`--headless=new`, places no window, and takes **no screen lock** — the lock is named after a
+display (`.ai-context/locking.md`) and a headless run puts nothing on one. `CI` being set turns
+it on by itself, so a runner that forgets the flag does not hang; `--headed` beats both.
+`--lane fast` runs the 131 checks that assert counts, geometry and plan parity, and `--lane walk`
+the 27 that assert frame cadence — github#113's `clock` classification, reused rather than
+invented a second time. Both flags are part of the run *shape*, so neither can stamp a tree as
+having passed the suite.
+
+A headless run corrects its own viewport to **1584×961**, the inner size a placed `--app` window
+of 1600×1000 gives the page on the machine the thresholds were tuned against. That is not
+cosmetic: measured 2026-09-21, uncorrected headless gives the page 905px of height instead of
+961, and that 56px alone failed *the disc's density follows the notes on screen* on the 10k vault
+three runs out of three while it passed headed every time. **The frame moved, not the threshold**
+— a threshold that has to move for the machine is measuring the machine.
+
+**A lane is only as good as the `clock` each check declares, and one has not declared it.**
+Three local headless fast-lane runs came back 2 of 3 green, the odd one out being *a swipe in
+the tail of a fit flight still scrolls* — a check that registers with no `clock` opt, so it
+defaults to `fast`, while its body samples a fit flight at +345ms. See decisions/0016; the soak
+is what settles whether the rest of that family belongs in the walk lane too.
+
+Nothing about the suite is a required status yet, and nothing here makes one.
+`.github/workflows/suite-soak.yml` runs a lane N times on a runner and
+`scripts/soak-report.mjs` prints the **spread** — every run, min/median/max wall, and every check
+that failed in any run with how many. Read that before requiring anything.
+
 `npm run lint` runs `scripts/check-js-contracts.mjs` as part of that first line, and it is
 worth knowing what it does before you meet it failing. The JavaScript's JSDoc annotations are
 compiler-checked with `checkJs` on and held at **zero** diagnostics, across **two** programs --

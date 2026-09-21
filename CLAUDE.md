@@ -30,6 +30,11 @@ imported below; if you are a contributor, its absence is normal and nothing here
 
 ## How to work here
 
+- **`--headless` runs the suite with no window and no screen lock, and `--lane fast|walk|all`
+  runs one half of it** (github#155). `CI` implies `--headless`; `--headed` beats both. A
+  headless run corrects its viewport to the tuned 1584×961 rather than inheriting Chrome's, and
+  both flags are run-shape deltas, so neither stamps a tree. Nothing in CI requires the suite
+  yet — `.github/workflows/suite-soak.yml` measures the spread first.
 - `node scripts/smoke.mjs --only "<substring>"` is the iteration loop. The full suite runs on
   the push to `develop` whose tree it has not measured yet (the pre-push hook; see
   `scripts/suite-stamp.mjs`); do not run it by hand unless asked.

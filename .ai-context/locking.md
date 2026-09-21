@@ -15,6 +15,13 @@ one fixed display, and `spike-check.mjs` puts Obsidian there. The lock is named 
 other. All three take their own screen lock now and release it on every way out (github#87), so a
 caller never has to remember to.
 
+**A headless run claims nothing (github#155).** `smoke.mjs --headless` places no window, so
+`takeScreen()` is a no-op and the run neither waits for the lock nor holds one. That is the lock
+name being honest rather than an exemption: the claim is on a *screen*, and a run with no window
+is not on any screen. It is also what lets the suite run on a CI runner at all, where there is no
+display to name. A run that skipped the lock says so in its first line, so a contended display is
+never diagnosed from a log that looks like the other kind.
+
 The lock lives in the OS temp dir, not the worktree, so every worktree shares one — and the root
 (`obsidian-vault-locks`) is shared with a sister Obsidian plugin, so working on both means their
 jobs contend with each other, not just their own (github#92). A `mkdir` is the lock: atomic, and it

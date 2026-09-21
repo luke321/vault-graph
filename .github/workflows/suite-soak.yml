@@ -1,0 +1,130 @@
+# github#155 -- MEASURE the invariant suite on a runner. Deliberately not a gate.
+#
+# WHY THIS IS A SEPARATE FILE AND NOT A JOB IN quality.yml. github#147 put the static gates in
+# CI and stopped there, on the reasoning that "a required status that flakes is a required
+# status that gets bypassed, which is worse than not having one". github#155 does not overturn
+# that -- it supplies the evidence the decision needs. The suite's frame-sensitive thresholds
+# were tuned against one machine's Chrome, and nobody knows what a shared runner does to them,
+# so the honest order is: run the non-frame lane many times, read the spread, and only then
+# decide whether it earns a status. A job added to quality.yml would already be that status in
+# practice, whatever the ruleset says -- it shows up red on every develop push.
+#
+# WHAT IT RUNS. `smoke.mjs --headless --lane fast` (github#155): no window is placed and no
+# screen lock is taken, and the lane is github#113's clock split -- the checks that assert
+# counts, geometry and plan parity, without the 27 that assert frame cadence. The frame lane is
+# selectable here too, on purpose: measuring how badly it flakes on a runner is worth knowing
+# even though nobody expects it to be required.
+#
+# AND THE REPORT IS THE SPREAD, NOT THE MEAN. scripts/soak-report.mjs prints every run, the
+# min/median/max wall, and every check that failed in any run with how many -- because the
+# number that decides this is "how often does it lie", which a mean erases.
+#
+# HOW TO RUN IT. Once this file is on main, from the Actions tab (workflow_dispatch). Before
+# then, or from any branch: push that branch under ci/soak/, e.g.
+#
+#   git push origin HEAD:ci/soak/155
+#
+# NOTHING HERE IS ALLOWED TO BECOME REQUIRED on the strength of a green run alone. Read the
+# spread first. And if a threshold has to move to make a runner pass, the runner is the thing
+# being measured -- see github#155's own wording.
+
+name: suite soak
+
+on:
+  workflow_dispatch:
+    inputs:
+      runs:
+        description: 'How many consecutive runs (the ask is 20)'
+        required: false
+        default: '20'
+      lane:
+        description: 'fast (the non-frame lane), walk (the frame-sensitive one), or all'
+        required: false
+        default: 'fast'
+        type: choice
+        options: [fast, walk, all]
+  push:
+    # A dedicated namespace, so no ordinary branch push ever spends an hour of runner time by
+    # accident. workflow_dispatch only exists once a file is on the default branch, and this
+    # measurement is wanted before that.
+    branches: ['ci/soak/**']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: suite-soak-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  soak:
+    name: soak the suite on a runner
+    runs-on: ubuntu-latest
+    # 20 runs of a lane nobody has timed on a runner. Generous on purpose: a run that is killed
+    # halfway reports as a failure and would read as instability that is really a timeout.
+    timeout-minutes: 300
+
+    steps:
+      - name: Check out the commit under measurement
+        uses: actions/checkout@v7
+
+      - name: Set up Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          cache: npm
+
+      - name: Install the toolchain
+        run: npm ci
+
+      # THIS STEP IS ALLOWED TO FAIL THE JOB, and that is the point. smoke.mjs resolves Chrome
+      # through scripts/chrome.mjs; with no browser every run reports "smoke failed to run" and
+      # the spread would read as instability when the real answer is a missing browser. Fail
+      # loudly here instead of measuring nothing twenty times.
+      - name: Which Chrome this measured
+        run: |
+          node -e "import('./scripts/chrome.mjs').then(m => { const e = m.findChrome(); console.log(e, m.chromeVersion(e) || ''); })"
+
+      # THE FIXTURES ARE THE SLOW PART AND THEY ARE DETERMINISTIC -- check-generator-determinism
+      # in quality.yml is the proof, and it is why caching them here is safe rather than a way
+      # to measure a stale vault. The store is keyed on the generators, so a generator change
+      # misses the cache and regenerates.
+      - name: Cache the generated fixtures
+        uses: actions/cache@v4
+        with:
+          path: .fixtures
+          key: fixtures-${{ runner.os }}-${{ hashFiles('scripts/make-*-vault.mjs', 'scripts/suite-stamp.mjs') }}
+
+      - name: Run the lane, over and over
+        env:
+          RUNS: ${{ github.event.inputs.runs || '20' }}
+          LANE: ${{ github.event.inputs.lane || 'fast' }}
+        run: |
+          mkdir -p soak-out
+          for i in $(seq 1 "$RUNS"); do
+            echo "::group::run $i of $RUNS (lane $LANE)"
+            # || true -- a red run is DATA here, not a failure of the measurement. The whole
+            # point is to count how many of twenty went red.
+            node scripts/smoke.mjs --headless --lane "$LANE" > "soak-out/run-$i.txt" 2>&1 || true
+            tail -n 12 "soak-out/run-$i.txt"
+            echo "::endgroup::"
+          done
+
+      - name: The spread
+        run: |
+          node scripts/soak-report.mjs soak-out/run-*.txt | tee soak-out/spread.txt
+          {
+            echo '## Suite soak -- lane `'"${{ github.event.inputs.lane || 'fast' }}"'`'
+            echo
+            echo '```'
+            cat soak-out/spread.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Keep every run, so a spread can be re-read
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: suite-soak-${{ github.run_id }}
+          path: soak-out/
+          retention-days: 14

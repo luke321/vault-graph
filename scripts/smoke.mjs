@@ -10,6 +10,9 @@ import { buildPayloadVault, PAYLOAD, NOTE_COUNT } from "./check-data-escape.mjs"
 import { findChrome } from "./chrome.mjs";
 import { leftmostScreen, leftWindowPos } from "./screen.mjs";
 import { keepFocus } from "./focus.mjs";
+// github#155
+import { chromeArgs, nextBounds, parseLane, pickLane, TUNED_VIEWPORT,
+         wantsHeadless } from "./smoke-shape.mjs";
 import { FIXTURE_MAX_AGE_DAYS, FIXTURE_NAMES, checkFixture, countNotes, describeFixture,
          DEFAULT_JOBS, fixtureDigest, fixtureStore, record as recordPass, shapeDeltas,
          stampFixture, startRun } from "./suite-stamp.mjs";
@@ -40,6 +43,14 @@ const AUDIT = arg("audit-state", "");
 // github#151 -- the boundary: a check that leaves the page off its baseline fails
 const BOUNDARY = !argv.includes("--no-state-boundary");
 const HEADED = argv.includes("--headed");
+// github#155, decisions/0016 -- no window, no screen lock; --headed beats it
+const HEADLESS = wantsHeadless({ argv, env: process.env });
+// github#113, github#155 -- all (the default), fast, or walk
+// github#155 -- the file's own voice for a bad argument, not a stack trace
+const LANE = (() => {
+  try { return parseLane(arg("lane", "all")); }
+  catch (e) { console.error("smoke failed to run: " + e.message); process.exit(1); }
+})();
 // github#87
 const NO_LOCK = argv.includes("--no-lock");
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -111,9 +122,10 @@ const needsIntro = (c) => NEEDS_INTRO.some((q) => c.name.toLowerCase().includes(
 // github#79
 const NEEDS_PRISTINE = ["the overview is absent at rest"];
 const needsPristine = (c) => NEEDS_PRISTINE.some((q) => c.name.toLowerCase().includes(q));
-const selected = () => (ONLY.length
+// github#113, github#155 -- --only picks by name, --lane by the clock
+const selected = () => pickLane(ONLY.length
   ? all.filter((c) => ONLY.some((q) => c.name.toLowerCase().includes(q)))
-  : all);
+  : all, LANE);
 
 // github#110, github#113, github#92
 const JOBS = Math.max(1, Number(arg("jobs", String(DEFAULT_JOBS))) || DEFAULT_JOBS);
@@ -122,7 +134,9 @@ const SERIAL_JOBS = Math.max(1, Number(arg("serial-jobs", "1")) || 1);
 // github#101
 const WIDTH = Math.max(JOBS, SERIAL_JOBS);
 
-const GRID = argv.includes("--no-grid") ? false
+// github#155 -- no screen to divide, and a constant viewport beats the grid
+const GRID = HEADLESS ? false
+          : argv.includes("--no-grid") ? false
           : argv.includes("--grid") ? true
           : WIDTH > 1;
 
@@ -8405,6 +8419,31 @@ check("an idle PNG export carries the graph, not just the background and the log
 });
 
 
+// github#155, decisions/0016 -- a real window resize, never a metrics override
+async function fitViewport(p, want = TUNED_VIEWPORT) {
+  // github#155 -- p.eval, not p.j: p.j is installed after the intro wait
+  const read = async () => JSON.parse(
+    await p.eval("JSON.stringify({ w: innerWidth, h: innerHeight })"));
+  let got = await read().catch(() => null);
+  if (!got) return null;
+  let id = null;
+  try { id = (await p.send("Browser.getWindowForTarget", {})).windowId; }
+  catch { return got; }
+  // github#155 -- a second pass, for a window manager that clamped the first
+  for (let i = 0; i < 2 && got; i++) {
+    let bounds;
+    try { bounds = (await p.send("Browser.getWindowBounds", { windowId: id })).bounds; }
+    catch { return got; }
+    const next = nextBounds(bounds, got, want);
+    if (!next) return got;
+    try { await p.send("Browser.setWindowBounds", { windowId: id, bounds: next }); }
+    catch { return got; }
+    await sleep(250);
+    got = await read().catch(() => got);
+  }
+  return got;
+}
+
 async function settle(p, ms = 6000) {
   const deadline = Date.now() + ms;
   for (;;) {
@@ -8461,24 +8500,16 @@ async function runOne(vault, work) {
 
   const profile = mkdtempSync(join(tmpdir(), "vg-smoke-"));
   // github#129
-  const focus = await keepFocus();
-  const chrome = spawn(chromeExe(), [
-    `--remote-debugging-port=${PORT}`, `--user-data-dir=${profile}`,
-    "--no-first-run", "--no-default-browser-check",
-    "--disable-extensions", "--disable-component-update", "--disable-client-side-phishing-detection",
-    "--disable-sync", "--no-service-autorun", "--disable-domain-reliability",
-    "--metrics-recording-only", "--no-pings", "--mute-audio",
-    "--disable-breakpad", "--disable-crash-reporter",
-    // github#7
-    "--disable-features=Translate,TranslateUI,CalculateNativeWinOcclusion",
-    "--disable-backgrounding-occluded-windows",
-    "--disable-renderer-backgrounding",
-    "--disable-background-timer-throttling",
-    ...(slot ? [`--window-position=${slot.x},${slot.y}`]
-             : HEADED ? [] : [leftWindowPos()]),
-    slot ? `--window-size=${slot.w},${slot.h}` : "--window-size=1600,1000", `--app=${url}`
-  ], { stdio: ["ignore", "ignore", "pipe"], detached: false });
-  void focus.watch(chrome.pid);
+  // github#155 -- no window ever takes the keyboard, so nothing to hand back
+  const focus = HEADLESS ? null : await keepFocus();
+  // github#155 -- the flag list lives in smoke-shape.mjs, where it is asserted
+  const chrome = spawn(chromeExe(), chromeArgs({
+    url, port: PORT, profile, headless: HEADLESS,
+    windowPos: slot ? `--window-position=${slot.x},${slot.y}`
+             : (HEADED || HEADLESS) ? null : leftWindowPos(),
+    windowSize: slot ? `${slot.w},${slot.h}` : "1600,1000",
+  }), { stdio: ["ignore", "ignore", "pipe"], detached: false });
+  if (focus) void focus.watch(chrome.pid);
 
   const chromeSaid = [];
   if (chrome.stderr) {
@@ -8518,6 +8549,17 @@ async function runOne(vault, work) {
         `attached to the wrong page.\n  wanted ${url}\n  got    ${at}\n` +
         "That is a leaked browser from an earlier run, not a defect in the page."
       );
+    }
+
+    // github#155 -- the frame, before the intro lands in it
+    if (HEADLESS) {
+      const saw = await fitViewport(page).catch(() => null);
+      if (!saw || saw.w !== TUNED_VIEWPORT.w || saw.h !== TUNED_VIEWPORT.h) {
+        // github#155 -- said, never silently tolerated
+        log(`  ! headless viewport is ${saw ? saw.w + "x" + saw.h : "unreadable"}, not ` +
+            `${TUNED_VIEWPORT.w}x${TUNED_VIEWPORT.h} -- frame-relative checks measure a ` +
+            `different stage than the thresholds were tuned in`);
+      }
     }
 
     const ready = Date.now() + 30000;
@@ -8821,18 +8863,29 @@ async function buildFor(v) {
 
 async function main() {
   const picked = selected();
-  if (ONLY.length && !picked.length) {
-    throw new Error(`--only ${ONLY.join(", ")} matched none of the ${all.length} checks`);
+  // github#155 -- say which filter emptied the set, not just --only
+  if ((ONLY.length || LANE !== "all") && !picked.length) {
+    const how = [ONLY.length ? `--only ${ONLY.join(", ")}` : "", LANE !== "all" ? `--lane ${LANE}` : ""]
+      .filter(Boolean).join(" with ");
+    throw new Error(`${how} matched none of the ${all.length} checks`);
+  }
+  // github#155 -- the lane is part of what this run is
+  if (LANE !== "all") {
+    const fast = all.filter((c) => c.clock !== "real").length;
+    console.log(`--lane ${LANE}: ${LANE === "fast" ? fast : all.length - fast} of ${all.length} ` +
+                `checks run on the ${LANE === "fast" ? "fast" : "real"} clock`);
   }
   if (ONLY.length) {
     console.log(`--only: ${picked.length} of ${all.length} checks -- ` +
                 picked.map((c) => c.name).join("; "));
-    console.log("");
   }
+  if (ONLY.length || LANE !== "all") console.log("");
   // github#104 -- captured before anything is built from it
   const builtFrom = startRun(ROOT);
   const vaults = resolveVaults();
-  console.log(`checking ${vaults.length} vault(s): ${vaults.map((v) => v.label).join(", ")}`);
+  console.log(`checking ${vaults.length} vault(s): ${vaults.map((v) => v.label).join(", ")}` +
+              // github#155 -- a run that took no screen lock says so
+              (HEADLESS ? " -- headless, no window placed and no screen lock taken" : ""));
 
   const lanePorts = PINNED_PORT ? [] : await freePorts(Math.max(WIDTH, 1));
 
@@ -8993,6 +9046,8 @@ async function main() {
   // github#93, decisions/0013
   // github#104 -- named first: a changed shape invalidates the measurement
   const deltas = shapeDeltas({ jobs: JOBS, serialJobs: SERIAL_JOBS, grid: GRID, headed: HEADED,
+                               // github#155
+                               headless: HEADLESS, lane: LANE,
                                port: PINNED_PORT, chrome: arg("chrome", "") });
   const notFull = (what) => `${what} is not the full suite`;
   const partial = deltas.length ? `${deltas.join(", ")} is not the run shape the gates push with`
@@ -9040,7 +9095,8 @@ const SCREEN_OWNER = (() => {
 
 // github#87
 function takeScreen() {
-  if (NO_LOCK) return false;
+  // github#155 -- the lock names a SCREEN; a headless run is on none
+  if (NO_LOCK || HEADLESS) return false;
   const r = spawnSync(process.execPath,
     [join(HERE, "lock.mjs"), "acquire", SCREEN_LOCK, "--owner", SCREEN_OWNER, "--holder", "process"],
     { stdio: "inherit" });

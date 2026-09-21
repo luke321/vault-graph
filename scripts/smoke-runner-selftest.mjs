@@ -5,6 +5,11 @@ import { makeErrorLog, runChecks, summarise } from "./smoke-runner.mjs";
 // github#151
 import { allowedToLeave, couplingReport, diffState, keysRead, leakReport, newLeaks,
          readable, tokensFor } from "./smoke-state.mjs";
+// github#155
+import { chromeArgs, laneOf, nextBounds, parseLane, pickLane, TUNED_VIEWPORT,
+         wantsHeadless } from "./smoke-shape.mjs";
+// github#155
+import { readRun } from "./soak-report.mjs";
 
 let failed = 0;
 /** @param {string} name @param {boolean} ok @param {string} [detail] */
@@ -537,6 +542,123 @@ console.log("github#151 -- the reset boundary");
     pass("runs after it")
   ], { stateBoundary: true, state: { "page.mounted": "true", "cam.ratio": "1" } });
   check("an unreadable sample fails nothing on its own", r.failed === 0, "failed " + r.failed);
+}
+
+// github#155, decisions/0016 -- the lane seam
+{
+  const checks = [{ name: "a", clock: "fast" }, { name: "b", clock: "real" },
+                  { name: "c" }, { name: "d", clock: "real" }];
+  check("a real clock is the walk lane", laneOf({ clock: "real" }) === "walk");
+  check("anything else is the fast lane",
+        laneOf({ clock: "fast" }) === "fast" && laneOf({}) === "fast" && laneOf(null) === "fast");
+  check("--lane all keeps every check", pickLane(checks, "all").length === 4);
+  check("--lane fast drops the frame-timed ones",
+        pickLane(checks, "fast").map((c) => c.name).join("") === "ac");
+  check("--lane walk keeps only them",
+        pickLane(checks, "walk").map((c) => c.name).join("") === "bd");
+  check("--lane all is the default", parseLane("") === "all" && parseLane(undefined) === "all");
+  check("an unknown lane is refused, not silently treated as all",
+        (() => { try { parseLane("frame"); return false; } catch { return true; } })());
+  // github#155 -- never hand back the caller's own array
+  check("the filter never returns the caller's own array", pickLane(checks, "all") !== checks);
+}
+
+// github#155 -- who decides headless, and in which order
+{
+  const w = (argv, env) => wantsHeadless({ argv, env: env || {} });
+  check("nothing asked for it, and no CI", !w([], {}));
+  check("--headless asks for it", w(["--headless"], {}));
+  check("VG_HEADLESS asks for it", w([], { VG_HEADLESS: "1" }));
+  check("CI implies it, so a runner that forgot the flag still runs", w([], { CI: "true" }));
+  check("--headed beats CI", !w(["--headed"], { CI: "true" }));
+  check("--headed beats --headless", !w(["--headed", "--headless"], {}));
+  check("--headed beats VG_HEADLESS", !w(["--headed"], { VG_HEADLESS: "1" }));
+  // github#155 -- CI=false is set by real tools, and it is not a yes
+  check("CI=false is not a yes", !w([], { CI: "false" }) && !w([], { CI: "0" }));
+  check("an empty CI is not a yes", !w([], { CI: "" }));
+}
+
+// github#155 -- what a headless launch drops, asserted rather than described
+{
+  const base = { url: "file:///tmp/x/vault-graph.html", port: 9222, profile: "/tmp/p" };
+  const headed = chromeArgs({ ...base, windowPos: "--window-position=-2400,0" });
+  const bare = chromeArgs({ ...base, headless: true, windowPos: "--window-position=-2400,0" });
+  const has = (a, re) => a.some((x) => re.test(x));
+
+  check("a placed run still places its window and opens as an app",
+        has(headed, /^--window-position=/) && has(headed, /^--app=/) &&
+        !has(headed, /^--headless/));
+  check("a headless run places nothing, even when handed a position",
+        !has(bare, /^--window-position=/) && has(bare, /^--headless=new$/));
+  check("a headless run does not use --app, which is a windowing mode",
+        !has(bare, /^--app=/) && bare[bare.length - 1] === base.url);
+  check("a headless run keeps the headed viewport",
+        bare.indexOf("--window-size=1600,1000") >= 0 &&
+        headed.indexOf("--window-size=1600,1000") >= 0);
+  // github#155, decisions/0016 -- the two modes must differ ONLY in windowing
+  const windowing = (a) => a.filter((x) => !/^(--headless|--window-|--app=)/.test(x) && x !== base.url);
+  check("headed and headless differ only in how the page is windowed",
+        windowing(headed).join("|") === windowing(bare).join("|"));
+  check("the port and profile are the caller's either way",
+        has(bare, /^--remote-debugging-port=9222$/) && has(bare, /^--user-data-dir=\/tmp\/p$/) &&
+        has(headed, /^--remote-debugging-port=9222$/));
+  check("a grid slot's own size survives",
+        chromeArgs({ ...base, windowSize: "800,500" }).indexOf("--window-size=800,500") >= 0);
+  // github#7 -- the flags that stop Chrome throttling the page
+  const shared = ["--disable-renderer-backgrounding", "--disable-background-timer-throttling",
+                  "--disable-backgrounding-occluded-windows"];
+  check("both keep every flag that stops Chrome throttling the page",
+        shared.every((f) => headed.indexOf(f) >= 0 && bare.indexOf(f) >= 0));
+}
+
+// github#155, decisions/0016 -- the frame correction
+{
+  const want = TUNED_VIEWPORT;
+  check("the tuned viewport is the placed window's inner size", want.w === 1584 && want.h === 961);
+  check("a window already the right size is left alone",
+        nextBounds({ width: 1600, height: 1000 }, { w: 1584, h: 961 }, want) === null);
+  const n = nextBounds({ width: 1600, height: 1000 }, { w: 1584, h: 905 }, want);
+  check("56px short of the tuned height grows the window by 56px",
+        n.height === 1056 && n.width === 1600, n ? n.width + "x" + n.height : "null");
+  const wide = nextBounds({ width: 1600, height: 1000 }, { w: 1620, h: 961 }, want);
+  check("a page wider than the frame shrinks it", wide.width === 1564 && wide.height === 1000);
+  check("the correction never drives the window to nothing",
+        nextBounds({ width: 300, height: 300 }, { w: 9000, h: 9000 }, want).width === 200);
+}
+
+// github#155, decisions/0016 -- the soak's parser, which can silently stop matching
+{
+  const NL = String.fromCharCode(10);
+  const green = [
+    "checking 5 vault(s): a, b -- headless, no window placed and no screen lock taken",
+    "  ok   some check 1.2s",
+    "========================================================================",
+    "   ok   131/131  the demo vault (sparse tail, 2 dense years)",
+    "   ok   63/63  the 10k synthetic vault (10 years)",
+    "  299s wall over 7 Chrome(s)",
+  ].join(NL);
+  const red = [
+    " FAIL  the disc's density follows the notes on screen 5.0s",
+    "         step/pitch per band over 8 sampled states: worst square 1.13",
+    "   ok   131/131  the demo vault (sparse tail, 2 dense years)",
+    "  FAIL  62/63  the 10k synthetic vault (10 years)",
+    "  295s wall over 7 Chrome(s)",
+  ].join(NL);
+
+  const g = readRun(green);
+  check("a green run reads as green", g.wall === 299 && g.passed === 194 && g.ran === 194 &&
+        g.failures.length === 0, `${g.passed}/${g.ran} in ${g.wall}s`);
+  const r = readRun(red);
+  check("a red run reads as red", r.wall === 295 && r.passed === 193 && r.ran === 194,
+        `${r.passed}/${r.ran} in ${r.wall}s`);
+  check("and names the check that failed",
+        r.failures.length === 1 &&
+        r.failures[0] === "the disc's density follows the notes on screen", r.failures.join("; "));
+  // github#155 -- the per-vault FAIL line is indented deeper than a check's
+  check("the per-vault summary is not mistaken for a check",
+        !r.failures.some((f) => /[0-9]+[/][0-9]+/.test(f)));
+  const dead = readRun("smoke failed to run: Chrome not found; pass --chrome <path>");
+  check("a run that never started is not green", dead.ran === 0 && dead.wall === null);
 }
 
 console.log("");
