@@ -105,7 +105,9 @@ imported below; if you are a contributor, its absence is normal and nothing here
 | `src/page.js` | the page: plan, layout, cascade, render, UI — one `mountVaultGraph()`, ~300 inner functions. **Do not read it top to bottom**; open `.ai-context/code-map.md` and go to the line range |
 | `src/engine/` | the graph store and WebGL renderer (TypeScript) |
 | `src/build-graph.mjs` | the exporter: vault → data → one HTML file |
-| `plugin/main.js` | the Obsidian plugin: metadata cache → data → mounts the page in a view |
+| `src/taxonomy.mjs`, `src/contract.mjs` | what both producers share: the policy, and the output shape as data (github#149, `design/0020`) |
+| `plugin/build-data.mjs` | the plugin's producer: metadata cache → data. No `obsidian` import at runtime, so a gate can run it (github#149) |
+| `plugin/main.js` | the Obsidian plugin: the view, its lifecycle, the settings tab, the live rebuild |
 | `scripts/smoke.mjs` | the invariant suite (Chrome over CDP); `scripts/*-check.mjs` are the manual harnesses |
 | `.ai-context/code-map.md` | **generated**: sections and functions of the two big files, with line numbers |
 | `.ai-context/code-index.md` | **generated**: issue → code sites, ADR/DDR → code sites, invariant → check, `__vg.*` → callers |

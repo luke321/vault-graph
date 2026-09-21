@@ -12,7 +12,9 @@ import { dirname, join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
-import { DATA, DIVERGENCES, NODE, STATS, shapeOf, validate } from "../src/contract.mjs";
+import { ALIAS_DIVERGENCE, DATA, DATE_SOURCES, DIVERGENCES, NODE, STATS, shapeOf, validate }
+  from "../src/contract.mjs";
+import { dateTally } from "../src/dates.mjs";
 import { buildData } from "../plugin/build-data.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -223,6 +225,10 @@ console.log("check-producer-contract: src/contract.mjs against src/page.js typed
     eq(declared(/** @type {Record<string, { required: boolean }>} */ (table)), typedefFields(String(name)),
        name + " in src/contract.mjs matches its typedef in src/page.js");
   }
+  // github#149 -- src/dates.mjs is where those four buckets are actually produced, so the
+  // contract's copy of them is checked against it rather than against a second hand-written list
+  eq(DATE_SOURCES.slice().sort(), Object.keys(dateTally()).sort(),
+     "DATE_SOURCES matches the tally src/dates.mjs builds");
 }
 
 /* --------------------------------------------------------------- the two runs -- */
@@ -334,6 +340,7 @@ try {
   }
 
   console.log("check-producer-contract: every declared divergence still happens (github#149)");
+  console.log("  note  not measured here: " + ALIAS_DIVERGENCE);
   for (const d of DIVERGENCES) {
     const from = d.host === "exporter" ? exporter : plugin;
     const other = d.host === "exporter" ? plugin : exporter;

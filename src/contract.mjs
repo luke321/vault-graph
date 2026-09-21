@@ -118,7 +118,7 @@ function isType(v, type) {
     case "sortSpecs":
       return Array.isArray(v) && v.every((x) => !!x && typeof x === "object" &&
         typeof x.folder === "string" && typeof x.text === "string" && typeof x.origin === "string");
-    case "node[]":  return Array.isArray(v);
+    case "node[]":
     case "edge[]":  return Array.isArray(v);
     case "stats":   return !!v && typeof v === "object";
     default:        return false;

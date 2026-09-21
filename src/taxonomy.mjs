@@ -9,7 +9,7 @@ import { ghostId, ghostLabel } from "./links.mjs";
 const MONTHISH = /^\d{4}(?:[-_ ]?(?:\d{2}|Q[1-4]|W\d{1,2}))?$/i;
 
 /** @param {string} seg @returns {boolean} */
-export function isMonthFolder(seg) {
+function isMonthFolder(seg) {
   return MONTHISH.test(seg);
 }
 
@@ -46,7 +46,7 @@ const singular = (s) => s.replace(/ies$/, "y").replace(/([^aeious])s$/, "$1");
  * @param {string} s
  * @returns {string}
  */
-export function folderType(s) {
+function folderType(s) {
   return singular(slug(s));
 }
 
