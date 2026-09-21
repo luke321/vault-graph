@@ -93,8 +93,14 @@ imported below; if you are a contributor, its absence is normal and nothing here
   the regression suite. A changed constant means `invariants.md` changes in the same commit.
 - Fixtures: five generated vaults (`scripts/make-*-vault.mjs`) in the shared store; never a
   real vault, never a built `vault-graph.html`, in anything that reaches the repo.
-- `npm run lint` holds every finding at zero. `check-pii`, `check-scope`, `check-network` and
-  the two determinism checks gate every push and have no skip flag.
+- `npm run lint` holds every finding at zero. `check-pii`, `check-scope`, `check-network`,
+  `check-comments` and the two determinism checks gate every push and have no skip flag.
+  **`check-comments` is a ratchet, not a snapshot**: it fails the push once the repo holds more
+  non-pointer comment lines than `BASELINE`, wherever they landed. A branch that finds the ratchet
+  already over baseline still owes it not going higher — treating existing debt as licence to add
+  more is how nine tickets in one session pushed `develop` from exactly 0 over to 272 over, none
+  of them individually far enough over their own diff to notice (github#188). Run
+  `node scripts/check-comments.mjs` before calling anything done, same as `npm run lint`.
 - Commit messages are sentences; `Closes #n` on its own line closes the issue when the work
   reaches `develop` — a workflow does it, since GitHub itself only resolves it on `main`.
 
