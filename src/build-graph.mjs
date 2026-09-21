@@ -11,6 +11,11 @@ import { buildSync } from "esbuild";
 import { localDay, resolveCreated, dateTally } from "./dates.mjs";
 // github#141
 import { canonicalDest, cleanTarget, ghostId, ghostKey, ghostLabel, isExternalTarget, isRelativeDest, resolveAgainst } from "./links.mjs";
+// github#149 -- the policy this producer shares with plugin/build-data.mjs
+import {
+  countWords, degrees, edgeBook, generatedStamp, ghostNode, inferType, isSkippedFile,
+  normalizeTags, normSlashes, paraDirs, paraFolder, under,
+} from "./taxonomy.mjs";
 import { engineBanner } from "./engine/notice.mjs";
 // github#71
 import { readSortingSpec } from "./sortspec-file.mjs";
@@ -128,29 +133,25 @@ const FOLDER_ORDER = (() => {
 const readJson = (rel) => {
   try { return JSON.parse(readFileSync(join(VAULT, rel), "utf8")); } catch { return null; }
 };
-const norm = (s) => String(s).split(/[\\/]/).filter(Boolean).join("/");
 
 const TEMPLATE_DIRS = (() => {
   const out = new Set();
   const core = readJson(".obsidian/templates.json");
-  if (core && typeof core.folder === "string" && core.folder.trim()) out.add(norm(core.folder));
+  if (core && typeof core.folder === "string" && core.folder.trim()) out.add(normSlashes(core.folder));
   const templater = readJson(".obsidian/plugins/templater-obsidian/data.json");
   if (templater && typeof templater.templates_folder === "string" && templater.templates_folder.trim()) {
-    out.add(norm(templater.templates_folder));
+    out.add(normSlashes(templater.templates_folder));
   }
   return [...out];
 })();
 
 const DAILY_DIR = (() => {
   const dn = readJson(".obsidian/daily-notes.json");
-  return dn && typeof dn.folder === "string" && dn.folder.trim() ? norm(dn.folder) : "";
+  return dn && typeof dn.folder === "string" && dn.folder.trim() ? normSlashes(dn.folder) : "";
 })();
 
 const SKIP_DIRS = new Set(["node_modules"]);
 
-const SKIP_FILES = new Set(["claude.md", "readme.md", "license.md"]);
-
-const under = (rel, dir) => dir && (rel === dir || rel.startsWith(dir + "/"));
 const isTemplate = (rel) => TEMPLATE_DIRS.some((d) => under(rel, d));
 
 function walk(dir, acc = []) {
@@ -161,7 +162,7 @@ function walk(dir, acc = []) {
     if (st.isDirectory()) {
       if (SKIP_DIRS.has(entry) || entry.startsWith(".")) continue;
       walk(p, acc);
-    } else if (entry.toLowerCase().endsWith(".md") && !SKIP_FILES.has(entry.toLowerCase())) {
+    } else if (entry.toLowerCase().endsWith(".md") && !isSkippedFile(entry)) {
       acc.push(p);
     }
   }
@@ -243,50 +244,10 @@ function mineLinks(body, fm) {
 
 /* ------------------------------------------------------------ note taxonomy */
 
-const MONTHISH = /^\d{4}(?:[-_ ]?(?:\d{2}|Q[1-4]|W\d{1,2}))?$/i;
-
-const TYPE_ALIAS = {
-  people: "person", person: "person",
-  "zettel/permanent": "zettel", "zettel/fleeting": "zettel", "zettel/literature": "zettel",
-};
-
-const deNumber = (s) => String(s).replace(/^[\s\d._)-]+/, "").trim();
-const slug = (s) => deNumber(s).toLowerCase().replace(/[\s_]+/g, "-");
-const singular = (s) => s.replace(/ies$/, "y").replace(/([^aeious])s$/, "$1");
-
-function inferType(fm, relPath, tags) {
-  const raw = typeof fm.type === "string" ? fm.type.toLowerCase() : "";
-  if (raw) return TYPE_ALIAS[raw] ?? raw;
-  if (tags.includes("daily-note")) return "daily";
-
-  const rel = relPath.split(sep).join("/");
-  if (under(rel, DAILY_DIR)) return "daily";
-  if (isTemplate(rel)) return "template";
-
-  const dirs = relPath.split(sep).slice(0, -1).filter(Boolean);
-  const named = dirs.filter((d) => !MONTHISH.test(d));
-  const pick = named.length ? named[named.length - 1] : dirs[0];
-  const type = pick ? singular(slug(pick)) : "";
-  return type || "note";
-}
-
-const paraFolder = (relPath) => {
-  const seg = relPath.split(sep);
-  return seg.length > 1 ? seg[0] : "(vault root)";
-};
-
-const paraDirs = (relPath) => {
-  const seg = relPath.split(sep).slice(1, -1);
-  const out = [];
-  for (let i = 0; i < seg.length; i++) {
-    if (MONTHISH.test(seg[i])) {
-      if (i === 0 && !FLAT_MONTHS) out.push(seg[i]);
-      break;
-    }
-    out.push(seg[i]);
-  }
-  return out;
-};
+// github#149 -- the exporter is the only host that sees a platform separator; everything below
+// this line, and everything in src/taxonomy.mjs, is "/" separated.
+/** @param {string} relPath @returns {string} */
+const slashed = (relPath) => relPath.split(sep).join("/");
 
 const dates = dateTally();
 
@@ -294,7 +255,7 @@ const dates = dateTally();
 
 const files = walk(VAULT).filter((abs) => {
   if (INCLUDE_TEMPLATES) return true;
-  return !isTemplate(relative(VAULT, abs).split(sep).join("/"));
+  return !isTemplate(slashed(relative(VAULT, abs)));
 });
 /* github#71, decisions/0015 -- the three places a spec is read, plus --sortspec */
 const SORT_SPECS = (() => {
@@ -309,13 +270,13 @@ const SORT_SPECS = (() => {
     let raw; try { raw = readFileSync(abs, "utf8"); } catch { return; }
     const text = readSortingSpec(raw);
     if (!text.trim()) return;
-    const rel = relative(VAULT, abs).split(sep).join("/");
+    const rel = slashed(relative(VAULT, abs));
     const home = rel.indexOf("/") < 0 ? "" : rel.slice(0, rel.lastIndexOf("/"));
     out.push({ folder: home, text, origin: origin || rel });
   };
 
   for (const abs of files) {
-    const rel = relative(VAULT, abs).split(sep).join("/");
+    const rel = slashed(relative(VAULT, abs));
     const name = basename(abs, ".md");
     const dir = rel.indexOf("/") < 0 ? "" : rel.slice(0, rel.lastIndexOf("/"));
     const parent = dir.indexOf("/") < 0 ? dir : dir.slice(dir.lastIndexOf("/") + 1);
@@ -325,10 +286,10 @@ const SORT_SPECS = (() => {
 
   const cfg = readJson(".obsidian/plugins/custom-sort/data.json");
   if (cfg && typeof cfg.additionalSortspecFile === "string" && cfg.additionalSortspecFile.trim()) {
-    add(join(VAULT, norm(cfg.additionalSortspecFile)), norm(cfg.additionalSortspecFile));
+    add(join(VAULT, normSlashes(cfg.additionalSortspecFile)), normSlashes(cfg.additionalSortspecFile));
   }
   if (SORTSPEC_ARG) {
-    const abs = isAbsolute(SORTSPEC_ARG) ? SORTSPEC_ARG : join(VAULT, norm(SORTSPEC_ARG));
+    const abs = isAbsolute(SORTSPEC_ARG) ? SORTSPEC_ARG : join(VAULT, normSlashes(SORTSPEC_ARG));
     if (!existsSync(abs)) console.error(`build-graph: --sortspec ${SORTSPEC_ARG} does not exist -- ignored`);
     else add(abs, "--sortspec");
   }
@@ -344,7 +305,7 @@ const byKey = new Map();
 const byPath = new Map();
 
 for (const abs of files) {
-  const relPath = relative(VAULT, abs);
+  const path = slashed(relative(VAULT, abs));
   const raw = readFileSync(abs, "utf8");
   const { fm, body } = parseFrontmatter(raw);
   const name = basename(abs, ".md");
@@ -352,32 +313,30 @@ for (const abs of files) {
   const dated = resolveCreated(fm, name, st && st.ctimeMs, st && st.mtimeMs);
   dates[dated.source]++;
 
-  const tags = []
-    .concat(fm.tags ?? [], fm.tag ?? [])
-    .flatMap((t) => String(t).split(/[,\s]+/))
-    .map((t) => t.replace(/^#/, "").trim())
-    .filter(Boolean);
+  // github#149
+  const tags = normalizeTags(fm);
+  const dirs = paraDirs(path, FLAT_MONTHS);
 
   /** @type {RawNote} */
   const note = {
-    id: relPath.split(sep).join("/"),
+    id: path,
     label: name,
-    folder: paraFolder(relPath),
-    dirs: paraDirs(relPath),
-    sub: paraDirs(relPath)[0] || "",
-    type: inferType(fm, relPath, tags),
+    folder: paraFolder(path),
+    dirs,
+    sub: dirs[0] || "",
+    type: inferType(fm, path, tags, DAILY_DIR, isTemplate),
     tags,
     // github#6
     created: dated.day,
     touched: st ? localDay(st.mtimeMs) : "",
-    words: body.split(/\s+/).filter(Boolean).length,
+    words: countWords(body),
     _links: mineLinks(body, fm),
   };
   const idx = notes.push(note) - 1;
 
   // github#141
-  const path = note.id.replace(/\.md$/, "").toLowerCase();
-  if (!byPath.has(path)) byPath.set(path, idx);
+  const key = note.id.replace(/\.md$/, "").toLowerCase();
+  if (!byPath.has(key)) byPath.set(key, idx);
 
   const keys = [name].concat(fm.aliases ?? [], fm.alias ?? []);
   for (const k of keys) {
@@ -386,8 +345,6 @@ for (const abs of files) {
   }
 }
 
-/** @type {Map<string, number>} */
-const edgeWeight = new Map();
 /** @type {Map<string, { dest: string, sources: number[] }>} */
 const ghosts = new Map();
 let unresolved = 0;
@@ -410,11 +367,9 @@ const resolve = (dest, sourceId) => {
   return byKey.has(k) ? byKey.get(k) : -1;
 };
 
-const addEdge = (i, j) => {
-  if (i === j) return;
-  const key = i < j ? `${i} ${j}` : `${j} ${i}`;
-  edgeWeight.set(key, (edgeWeight.get(key) ?? 0) + 1);
-};
+// github#149
+const book = edgeBook();
+const addEdge = (i, j) => book.add(i, j, 1);
 
 for (let i = 0; i < notes.length; i++) {
   for (const target of notes[i]._links) {
@@ -439,25 +394,17 @@ for (let i = 0; i < notes.length; i++) {
 if (INCLUDE_GHOSTS) {
   // github#141
   for (const { dest, sources } of ghosts.values()) {
+    // github#149, github#152 -- one factory, so a ghost cannot lose a field in one host only
     /** @type {RawNote} */
-    const g = {
-      // github#152, github#156 -- dirs and touched are required; dropping one is a TS2322
-      id: ghostId(dest), label: ghostLabel(dest), folder: "(unresolved)", sub: "", dirs: [],
-      type: "ghost", tags: [], created: "", touched: "", words: 0, ghost: true,
-    };
+    const g = ghostNode(dest, ghostId, ghostLabel);
     const j = notes.push(g) - 1;
     for (const i of sources) addEdge(i, j);
   }
 }
 
 /** @type {VaultEdge[]} */
-const edges = [...edgeWeight].map(([k, w]) => {
-  const [a, b] = k.split(" ").map(Number);
-  return { s: a, t: b, w };
-});
-
-const degree = new Array(notes.length).fill(0);
-for (const e of edges) { degree[e.s]++; degree[e.t]++; }
+const edges = book.edges();
+const degree = degrees(edges, notes.length);
 
 /** @type {VaultNode[]} */
 const nodes = notes.map((n, i) => {
@@ -472,11 +419,8 @@ const VERSION = JSON.parse(readFileSync(join(ROOT, "manifest.json"), "utf8")).ve
 const data = {
   vault: basename(VAULT),
   version: VERSION,
-  generated: (() => {
-    const d = new Date(), p2 = (n) => String(n).padStart(2, "0");
-    return `${d.getFullYear()}-${p2(d.getMonth() + 1)}-${p2(d.getDate())} ` +
-           `${p2(d.getHours())}:${p2(d.getMinutes())}`;
-  })(),
+  // github#149
+  generated: generatedStamp(),
   nodes,
   edges,
   stats: {
