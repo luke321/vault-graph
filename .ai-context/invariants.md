@@ -5228,15 +5228,21 @@ Measured 2026-09-20, every check on the demo fixture (`--vault`, 158 checks, 4 C
 |---|---|---|
 | check runs | 158 | **428** |
 | state keys in the fingerprint | 125, then 80 once it was sharpened | **80** |
-| the probe | **0.6 s over 158** (~4 ms each) | **4.7 s over 428** (~11 ms each) |
-| wall | **291 s** with it on, 296 s off | **416 s** over 10 Chromes, of which the probe is 4.7 s |
+| the probe | **0.6 s over 158** (~4 ms each) | **1.1 – 5.1 s over 428** across three runs |
+| wall | **291 s** with it on, 296 s off | **372 – 451 s** over 10 Chromes, the probe ≤ 1.4 % of it |
 | leaking check runs, before | **24** (158/158 still passing) | **9 more**, none of them on the demo |
+| after | 0 | **428/428, 0 leaks** — 158 / 80 / 63 / 64 / 63 |
 | distinct state keys | **10** — `attr.data-ov` ×5, `cam.ratio` ×2, `cam.x`, `cam.y`, `open.vg-ov`, `open.vg-settings`, `state.collapsed` ×2, `state.hidden` ×2, `store.settings` ×2, `vg.shown` ×2 | the same families, no new one |
 
-**The per-check probe costs roughly three times as much across five fixtures as on the demo alone,
-and the 10k fixture is the whole of the difference**: `vg.shown` and `vg.pinned` each walk every
-node, so a 10,000-note vault pays about seven times the 1,403-note one for those two keys. 4.7 s of
-a 416 s wall is worth paying for; a fingerprint that grew another per-node key would not be.
+**The probe's cost is a range, not a number, and the spread is the honest figure**: 4.7 s, 5.1 s
+and 1.1 s over the same 428 checks on three consecutive full runs, against walls of 416 s, 451 s
+and 372 s. Two things push it up and neither is the fingerprint's size — the 10k fixture, where
+`vg.shown` and `vg.pinned` each walk every node (a 10,000-note vault pays about seven times the
+1,403-note one for those two keys), and a page that is *off* its baseline, since `rendered()` skips
+a hidden control and a check that left a panel open hands the next probe dozens more. The cheapest
+of the three runs is the one where nothing leaked, which fits that reading — **offered as the likely
+cause rather than a measured one**, since separating it would cost a run of its own. At worst 1.4 %
+of the wall, which is worth paying; a fingerprint that grew another per-node key would not be.
 
 **The other four fixtures found nine more leaks and no new kind.** Six checks, all in the families
 the demo had already named: the context-menu toggle persisting `folderShown` (on four fixtures), two
