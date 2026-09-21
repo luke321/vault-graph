@@ -5216,10 +5216,10 @@ the mark drops to zero and the whole list is audited rather than the remainder t
 
 **What this does not do.** Nothing catches an error the page has not thrown yet: a timer left
 running further out than the final grace throws into nobody's window, and no finite wait would
-change that. And successive checks still share one page — the **error list's** boundary is
-deterministic now, the **page state's** is not, which stays open. The year-hover discrepancy
-(32 highlighted against 30 notes, passing when rerun alone) remains a hypothesis about that
-shared state; nothing here diagnoses or fixes it.
+change that. And successive checks still share one page — the **error list's** boundary was
+deterministic from here, the **page state's** was not. That half was closed by github#151, two
+sections down; the year-hover discrepancy (32 highlighted against 30 notes, passing when rerun
+alone) remains a hypothesis about that shared state, and neither ticket diagnoses or fixes it.
 
 Measured 2026-09-14. `scripts/smoke-runner-selftest.mjs` holds **34 regressions: 9 fail with the
 audit removed and nothing else changed, 0 with it** — among them the two the ticket names, a
@@ -5286,6 +5286,202 @@ inside fast checks that no longer wait for anything — `filtered to the bone` (
 four fixtures) and `the disc's density follows the notes on screen` (17.5 s) alone are 59 s
 of sleeping under reduced motion. Converting those waits to `settle()` plus one frame is the
 next cut, taken separately so each check's own numbers are re-read when it changes.
+
+## A check leaves the page as it found it, or says what it leaves (github#151)
+
+github#146 made the **error** boundary around each check deterministic and left the **state**
+boundary open — its own D-6, and the last paragraph of the section above. One page serves every
+check in a job, so a check inherits whatever camera, selection, filter, panel and cascade state its
+predecessors left. github#112 was one instance found by a person rather than by a gate. The ticket
+that asked for both also said *"preserve all existing thresholds and snapshots"*, and resolving that
+blind would have been guessing — so this was measured first.
+
+**The fingerprint.** `scripts/smoke-state.mjs` carries one page-side expression that answers with a
+flat map of the observable state: `__vg.state`; the camera; every rendered `input`/`select` and
+every rendered `[aria-pressed]` under the root; each named panel's open flag; the root's `data-*`
+attributes; the stored settings blob; and the handful of `__vg` getters that are not in `state`.
+It is generic on purpose — a toggle added later is fingerprinted without anyone remembering to add
+it here — and three of its rules were each earned by a measurement rather than chosen:
+
+- **Only what is rendered.** The settings body, the detail card and the context menu are built on
+  first use and then hidden, so the first check to open one reported every control inside it as
+  newly present — **six of the twenty-two** leaks the boundary first caught, none of them anything
+  a later check could act on. A panel genuinely left open still shows, as `open.<id>` and as its
+  controls together. The cost is that a value changed while its control is hidden is not seen; the
+  next check has to open the panel to reach it, and opening syncs it.
+- **A control with no id of its own folds into its container.** A legend folder, a colour swatch,
+  a detail-card button — there are hundreds. Hiding one folder took `state.hidden` off baseline
+  and, with a key per row, reported **90 more that were only its consequence**. Each container now
+  answers with one order-independent digest (`press.vg-legend  35 rows #9b9bb64e`), so a rebuild of
+  the same rows does not move it and a real change still does.
+- **A state key's token is its full accessor.** The read set matches `state.hidden`, never a bare
+  `hidden`, which matched `renderer.getNodeDisplayData(id).hidden` across a third of the suite and
+  reported **15 reads of `state.hidden` that were nothing of the kind**.
+
+**The audit.** `--audit-state <file>` samples the fingerprint at each check boundary and wraps
+`page.eval` for the duration of the check, so a run says what each check changed, what it left off
+the job's baseline, and which keys a later check's expressions could reach. **The read set is an
+upper bound and is reported as one**: an expression naming `__vg.state.selected` may never branch
+on it. It narrows 158 checks to a shortlist; it does not prove a dependence.
+
+**The boundary.** A check that took a key **off the job's baseline** fails, naming the key and both
+values: `left the page off its baseline: cam.ratio 0.954 -> 0.4071`. Off baseline **now**, at
+baseline **when it started** — deliberately not "changed since the last boundary", which would fail
+a check for putting an inherited key *back*, and would make one unfixed leak fail every check after
+it. Same shape as github#113's `left the page busy`. A check that legitimately ends elsewhere
+declares it — `leaves: ["state.hidden"]`, or a `"state."` family prefix — which puts the coupling in
+the source instead of in the order the checks happen to run in. `--no-state-boundary` turns it off
+and, like `--audit-state`, marks the run as not the full suite.
+
+**A remount per check is not on the table at any price, and that is a fact about the page, not a
+budget.** `mountVaultGraph()` is called inline from `src/shell.html`; `destroy()` exists and nothing
+re-mounts. Offering one would mean shipping a test hook in the product, which is the thing the
+harness does not do. So the choice was between a reset and a declared boundary, and the measurement
+said the boundary: **24 leaking check runs, 16 distinct checks, 10 distinct state keys** — not the
+sixty that would have made per-check restoration hopeless.
+
+Measured 2026-09-20, every check on the demo fixture (`--vault`, 158 checks, 4 Chromes), then
+2026-09-21 across all five (the full suite's own shape, 428 check runs, 10 Chromes):
+
+| | demo only | all five fixtures |
+|---|---|---|
+| check runs | 158 | **428** |
+| state keys in the fingerprint | 125, then 80 once it was sharpened | **80** |
+| the probe | **0.6 s over 158** (~4 ms each) | **1.1 – 5.1 s over 428** across three runs |
+| wall | **291 s** with it on, 296 s off | **372 – 451 s** over 10 Chromes, the probe ≤ 1.4 % of it |
+| leaking check runs, before | **24** (158/158 still passing) | **9 more**, none of them on the demo |
+| after | 0 | **428/428, 0 leaks** — 158 / 80 / 63 / 64 / 63 |
+| distinct state keys | **10** — `attr.data-ov` ×5, `cam.ratio` ×2, `cam.x`, `cam.y`, `open.vg-ov`, `open.vg-settings`, `state.collapsed` ×2, `state.hidden` ×2, `store.settings` ×2, `vg.shown` ×2 | the same families, no new one |
+
+**The probe's cost is a range, not a number, and the spread is the honest figure**: 4.7 s, 5.1 s
+and 1.1 s over the same 428 checks on three consecutive full runs, against walls of 416 s, 451 s
+and 372 s. Two things push it up and neither is the fingerprint's size — the 10k fixture, where
+`vg.shown` and `vg.pinned` each walk every node (a 10,000-note vault pays about seven times the
+1,403-note one for those two keys), and a page that is *off* its baseline, since `rendered()` skips
+a hidden control and a check that left a panel open hands the next probe dozens more. The cheapest
+of the three runs is the one where nothing leaked, which fits that reading — **offered as the likely
+cause rather than a measured one**, since separating it would cost a run of its own. At worst 1.4 %
+of the wall, which is worth paying; a fingerprint that grew another per-node key would not be.
+
+**The other four fixtures found nine more leaks and no new kind.** Six checks, all in the families
+the demo had already named: the context-menu toggle persisting `folderShown` (on four fixtures), two
+checks ending on a camera their own filtering had moved, the golden check and the stand-in check
+each seeding the tag disc's hidden defaults, and a live-rebuild check whose legend is a different
+legend afterwards. The demo fixture came back **clean in all four of its jobs**.
+
+**Why the host store is scored at all, since within one job it cannot couple two checks.** The
+page reads `localStorage` at **mount**, so a key written by check N changes nothing for check N+1 —
+that page has already booted. It matters for the checks that re-mount: `goto()` in the pin check,
+and `reboot()` behind the phone teardown. That is not hypothetical, it is already in the source —
+`reboot()` deletes `bandOpen` by hand before reloading (github#170), which is this exact coupling
+found once, patched at the one site that bit, and left everywhere else. So the store stays in the
+boundary, and the checks that drive a control the page **persists** snapshot and restore it. The
+distinction that matters is the control, not the value: `__vg.setX()` passes the host callback
+`false` and writes nothing, while a real click on a settings toggle or a context-menu item writes.
+
+**The first thing the boundary caught on someone else's work, and the reason it is worth having.**
+github#101 made `__vg.checkFocusWeb()` return a `Promise`, on the reasoning that *"cdp.mjs already
+evaluates with `awaitPromise: true`, so a debug function returning a Promise needed no change on the
+calling side"*. That is true of `p.eval` and **false of `p.j`**, which wraps its argument as
+`JSON.stringify(<expr>)` — a string, returned immediately, so `awaitPromise` has nothing to wait
+for and the Promise object itself was serialised as `{}`. Every field read off it came back
+`undefined`, `r.geomGaps` was falsy, and the check took its *"no in-disc samples on this shape,
+nothing to measure"* branch and returned **`ok: true`**. Measured on this tree: the check asserted
+**nothing on all five fixtures** while reporting green, and the restore of `state.selected` — which
+github#101 moved inside the deferred sampling function — landed a frame after the check returned, so
+three of the five also left a note selected. **Nothing in the suite could see this except the state
+boundary**, because a check that measures nothing and passes looks exactly like a check that passes.
+Two fixes, both here: `p.j` now awaits (`JSON.stringify(await (<expr>))`, a no-op for the other 346
+call sites), and the check refuses a report that never arrived instead of reading it as a shape with
+nothing on it. **A check that cannot tell "nothing to measure" from "nothing came back" is a check
+that will pass through its own removal.**
+
+**And one more of the same family, caught only because the verification run happened on a machine
+at 100% RAM.** `fit frames the disc that is actually there` read its landed ratio through
+`camSettle()`, which returns once two polls 60 ms apart read the same numbers — and under frame
+starvation that means **no frame was drawn**, not that the camera has landed. It measured 0.9282
+against the 0.6134 its own fit promised, and the `camReset()` at the end was then overwritten by the
+flight still in the air, leaving `cam.ratio` at 0.6138 with the overview badge lit. It passed 6/6 in
+isolation, which is what a load-sensitive check looks like from the inside. Fixed by using
+`toRest()`, which waits on **`__vg.camAtRest`** — the page saying it has landed, rather than the
+harness inferring it from stillness. `camSettle()` is left alone: checks that deliberately park the
+camera off-rest need exactly its weaker guarantee.
+
+**A false positive of the instrument's own, and the fix for it.** A full run failed `legend count
+bars scale to the largest visible folder` on `cam.ratio 0.954 -> 0.9539` — a difference of one
+ten-thousandth, which is the fingerprint's own 4-dp rounding straddling a boundary, not a camera
+anybody moved. `diffState()` now gives a **fractional** value a tolerance of `1e-3`, which sits far
+under the tightest camera assertion in the suite (0.002). **Integers stay exact**, so a count never
+gets absorbed by it: `vg.shown 1403 -> 1402`, a row tally, a node id and a pin count all still
+differ. An instrument that cries leak over float noise costs the next reader the same hour it just
+cost this one.
+
+**Verified, finally, in the shape that counts.** Two consecutive `node scripts/smoke.mjs` runs
+with **no flags at all** — 428/428 across all five fixtures, 367 s and 364 s, and the suite
+**stamped the tree** both times, which it only does on a complete, unflagged, all-green run with
+every fixture present and no shape delta. Every earlier verification on this branch carried
+`--audit-state`, which `shapeDeltas()` classifies as *not the full suite*, and ran against a base
+ten commits stale. **That is how this branch claimed all-clear twice and was wrong twice**, and it
+is a lesson about the verification rather than about the boundary: a flag that changes how a run is
+classified changes what the run is evidence of. It also matters that the green runs happened on a
+machine at **54% memory** — the five before them ran at 99–100% with the wall drifting 396 s → 604 s,
+and at that end of the range the frame-reading Laws and cdp.mjs's fixed 10 s evaluate timeout start
+failing on their own.
+
+**One limitation the five-fixture run exposed, and it is the price of the rule rather than a
+defect in it.** Scoring "newly off baseline" means **a declared leak of a key masks a later
+undeclared leak of the same key**: the context-menu check leaked `store.settings` on four fixtures
+and was invisible on the fifth, where `a narrow window with a pointer keeps the desktop's answer`
+had already taken that key off baseline under its own declaration. The alternative — scoring against
+the previous boundary — fails a check for putting an inherited key back and turns one unfixed leak
+into a failure in every check after it, which is worse. So a `leaves:` declaration is not free: it
+buys silence for that key for the rest of the job, and a key that several checks write wants each of
+them fixed rather than the first one declared.
+
+**What the instrument found, and what each one was.**
+
+- **`data-ov` did not exist until the overview first appeared.** `ovShow()` writes the attribute
+  only when the overview *changes*, so at rest on a fresh page the root carried no `data-ov` at all
+  — a CSS rule or a host reading `[data-ov="off"]` matched nothing before the disc was first
+  cropped and matched it afterwards. Four checks reported it as their leak; **the attribute was the
+  defect**. It is written at mount now, beside `data-sheet` and `data-band`, which were already.
+- **Three checks restored `state.hidden` by assigning the dict.** `__vg.state.hidden.folder = {}`
+  plus `syncAlpha()` never rebuilds the legend, so the row's `aria-pressed` went on claiming the
+  group was hidden while the page counted it as shown. That is exactly the defect github#113 found
+  in the context-menu check, in three more places; they restore by clicking the eye back, which is
+  the page's own path and moves the model, the legend and the layout together.
+- **Two checks left the camera where their interaction put it** — a hop flies to its note, and
+  clearing the pins re-fits a disc whose extent just changed. `only a hop lengthens the trail`
+  carried `attr.data-ov`, `open.vg-ov` and three camera keys into everything after it.
+- **Two left the settings store written.** Pressing a toggle twice restores the live state and
+  leaves the key behind, and that key **outlives a reload** — which is why `reboot()` already
+  deletes `bandOpen` by hand. `storeSnap`/`storeBack` put the blob back. The second is an asymmetry
+  worth its own look: the Tags button persists the dimension and `__vg.setDim()` does not, so
+  switching back through the API leaves `{"dim":"tag"}` stored.
+
+**Declared rather than fixed**, each with its reason at the check: the first check in a job to visit
+the tag disc seeds that disc's own hidden defaults and the page keeps them per dimension on purpose
+(design/0015, and `tags: each dimension keeps its own hidden and collapsed state` asserts it); the
+two legend-measuring checks expand every folder, which is what they measure; and the two
+live-rebuild checks change how many notes there are, which is the assertion.
+
+**No golden snapshot was regenerated and no threshold moved.** The four checks whose bodies changed
+did so to restore state they had been leaving, not to accommodate a reset.
+
+**What this does not do.** It does not diagnose the year-hover discrepancy (32 highlighted against
+30 notes, passing when rerun alone). github#146 named it a hypothesis about shared state and this
+does not upgrade it to a finding: the boundary makes that state deterministic from here, which
+removes the hypothesis's easiest hiding place without proving it was ever the cause. It also
+fingerprints one page per job, so it says nothing about coupling *between* jobs, which have none —
+each lane is its own Chrome and its own baseline. And a check that runs on several fixtures is
+audited separately in each, which is how four of the nine second-round leaks were found: the same
+check, clean on the fixture whose job happened to put a declared writer ahead of it.
+
+```bash
+node scripts/smoke.mjs --only "wheel notch" --audit-state /tmp/a.json   # what it changed, and read
+node scripts/smoke.mjs --no-state-boundary                             # score the leaks, do not fail them
+node scripts/smoke-runner-selftest.mjs                                 # the runner's own rules, no Chrome
+```
 
 ## A pin names its note, and the stored format says which format it is
 

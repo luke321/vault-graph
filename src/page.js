@@ -7602,6 +7602,11 @@ function mountVaultGraph(root, data, deps) {
     if ($("band")) $("band").onclick = function () { setBand(!bandOpen); };
     setSheet(sheetOpen, true);
     setBand(bandOpen, true);
+    // github#151 -- the third root flag, written at mount like the two above it. ovShow()
+    // github#151 -- only writes it when the overview CHANGES, so before the disc was first
+    // github#151 -- cropped the attribute did not exist at all: a rule or a host reading
+    // github#151 -- [data-ov="off"] matched nothing at rest, and matched it afterwards.
+    ROOT.setAttribute("data-ov", ovOn ? "on" : "off");
     $("png").onclick = savePng;
     if ($("dbg")) $("dbg").onclick = function () {
       var txt = JSON.stringify(API.debugDump(), null, 2);
