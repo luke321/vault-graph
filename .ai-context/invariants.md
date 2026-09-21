@@ -5416,6 +5416,18 @@ gets absorbed by it: `vg.shown 1403 -> 1402`, a row tally, a node id and a pin c
 differ. An instrument that cries leak over float noise costs the next reader the same hour it just
 cost this one.
 
+**Verified, finally, in the shape that counts.** Two consecutive `node scripts/smoke.mjs` runs
+with **no flags at all** — 428/428 across all five fixtures, 367 s and 364 s, and the suite
+**stamped the tree** both times, which it only does on a complete, unflagged, all-green run with
+every fixture present and no shape delta. Every earlier verification on this branch carried
+`--audit-state`, which `shapeDeltas()` classifies as *not the full suite*, and ran against a base
+ten commits stale. **That is how this branch claimed all-clear twice and was wrong twice**, and it
+is a lesson about the verification rather than about the boundary: a flag that changes how a run is
+classified changes what the run is evidence of. It also matters that the green runs happened on a
+machine at **54% memory** — the five before them ran at 99–100% with the wall drifting 396 s → 604 s,
+and at that end of the range the frame-reading Laws and cdp.mjs's fixed 10 s evaluate timeout start
+failing on their own.
+
 **One limitation the five-fixture run exposed, and it is the price of the rule rather than a
 defect in it.** Scoring "newly off baseline" means **a declared leak of a key masks a later
 undeclared leak of the same key**: the context-menu check leaked `store.settings` on four fixtures
