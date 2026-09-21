@@ -558,7 +558,7 @@ range, not the file. Stale when `node scripts/code-map.mjs --check` fails.
 | 11865 | · · · · · · · · · · `byPath` |
 | 12054 | `destroy` |
 
-## `scripts/smoke.mjs` — 9047 lines, 13 sections, 91 functions, 158 checks
+## `scripts/smoke.mjs` — 9056 lines, 13 sections, 93 functions, 158 checks
 
 ### Sections
 
@@ -571,12 +571,12 @@ range, not the file. Stale when `node scripts/code-map.mjs --check` fails.
 | 1274–1663 | github#71 |
 | 1664–2300 | github#86 D-9, design/0015 |
 | 2301–4483 | camera |
-| 4484–6086 | date range |
-| 6087–7656 | the hub |
-| 7657–8115 | github#165 |
-| 8116–8392 | live rebuild (github#72) |
-| 8393–8607 | the run |
-| 8608–9047 | which vaults, and why |
+| 4484–6095 | date range |
+| 6096–7665 | the hub |
+| 7666–8124 | github#165 |
+| 8125–8401 | live rebuild (github#72) |
+| 8402–8616 | the run |
+| 8617–9056 | which vaults, and why |
 
 ### Functions
 
@@ -636,43 +636,45 @@ range, not the file. Stale when `node scripts/code-map.mjs --check` fails.
 | 4564 | `clearRange` |
 | 4800 | · `snap` |
 | 4814 | · `tick` |
-| 5088 | `walkSolo` |
-| 5182 | `soloDetail` |
-| 5635 | · `isDay` |
-| 5642 | · `pad` |
-| 5652 | · `wOf` |
-| 5992 | · `snap` |
-| 6003 | · `diff` |
-| 6031 | · `hiddenByDefault` |
-| 6089 | `topByDegree` |
-| 6096 | `pinN` |
-| 6279 | `pinIdentityBuilds` |
-| 6360 | · · · `name` |
-| 6954 | · `norm` |
-| 7111 | · · · `mean` |
-| 7168 | · `norm` |
-| 7272 | · `bars` |
-| 7273 | · `rows` |
-| 7379 | · `f` |
-| 7383 | · `read` |
-| 7496 | · `lower` |
-| 7497 | · `read` |
-| 7569 | · `look` |
-| 7896 | · `pick` |
-| 7947 | `pressKey` |
-| 7959 | `trailState` |
-| 7960 | `selectBySearch` |
-| 7969 | `hop` |
-| 7983 | `closeCard` |
-| 7988 | `stepBack` |
-| 8378 | `settle` |
-| 8395 | `runOne` |
-| 8566 | `killBrowser` |
-| 8686 | `resolveVaults` |
-| 8772 | `buildFor` |
-| 8792 | `main` |
-| 9012 | `takeScreen` |
-| 9029 | `dropScreen` |
+| 5093 | `eyesSnapshot` |
+| 5105 | `restoreEyes` |
+| 5133 | `walkSolo` |
+| 5194 | `soloDetail` |
+| 5644 | · `isDay` |
+| 5651 | · `pad` |
+| 5661 | · `wOf` |
+| 6001 | · `snap` |
+| 6012 | · `diff` |
+| 6040 | · `hiddenByDefault` |
+| 6098 | `topByDegree` |
+| 6105 | `pinN` |
+| 6288 | `pinIdentityBuilds` |
+| 6369 | · · · `name` |
+| 6963 | · `norm` |
+| 7120 | · · · `mean` |
+| 7177 | · `norm` |
+| 7281 | · `bars` |
+| 7282 | · `rows` |
+| 7388 | · `f` |
+| 7392 | · `read` |
+| 7505 | · `lower` |
+| 7506 | · `read` |
+| 7578 | · `look` |
+| 7905 | · `pick` |
+| 7956 | `pressKey` |
+| 7968 | `trailState` |
+| 7969 | `selectBySearch` |
+| 7978 | `hop` |
+| 7992 | `closeCard` |
+| 7997 | `stepBack` |
+| 8387 | `settle` |
+| 8404 | `runOne` |
+| 8575 | `killBrowser` |
+| 8695 | `resolveVaults` |
+| 8781 | `buildFor` |
+| 8801 | `main` |
+| 9021 | `takeScreen` |
+| 9038 | `dropScreen` |
 
 ### Checks
 
@@ -771,68 +773,68 @@ range, not the file. Stale when `node scripts/code-map.mjs --check` fails.
 | 4743 | a range change animates instead of snapping |
 | 4793 | the last frame of a cascade is the resting layout |
 | 4920 | filtered to the bone, the disc stays drawable |
-| 5189 | a dot never outgrows its resting size while a cascade walks |
-| 5200 | with Size dots from the frame on, a walking dot is held under its two resting sizes, never above |
-| 5210 | an arriving note's fade never reverses during a solo switch |
-| 5267 | the gap reservation holds still while groups only thin |
-| 5313 | the date fields set the range and follow it |
-| 5362 | the year buttons select a year and halo it on hover |
-| 5469 | the ribbon rescales with its slot |
-| 5514 | the intro sweeps the range end across the strip |
-| 5560 | compact axis: a year's width tracks its own note count |
-| 5599 | compact axis: sparse years cluster near the same floor width |
-| 5628 | the ribbon's right edge is a day the vault has actually reached |
-| 5709 | compact axis: the settings-panel toggle actually flips the live state |
-| 5746 | colour unlinked by folder: the settings-panel toggle actually flips the live state |
-| 5784 | colour unlinked notes by folder: the settings-panel toggle actually flips the live state |
-| 5819 | compact axis: the view-level icon actually flips the live state, and persists |
-| 5848 | no non-tail split cell holds fewer notes than its band's row depth |
-| 5873 | the row-depth gate reads LIVE counts, not the whole-vault tally, under a filter |
-| 5910 | undated notes survive every range |
-| 5930 | overriding one folder recolours exactly one group |
-| 5957 | no working group is handed a grey by where it sorts |
-| 5983 | a folder keeps its slot across the membership toggle |
-| 6023 | a folder's legend row toggles \"hidden by default\" from its context menu |
-| 6104 | a pinned note leaves no gap in the ring it came from |
-| 6150 | the hub's dots shrink as it fills |
-| 6171 | a soloed hub-adjacent note stays inside the hub's own radius |
-| 6220 | the mark yields to the hub and comes back |
-| 6247 | a pin hidden by a filter is skipped, not released |
-| 6315 | a pin is stored by the note's path, not by its position |
-| 6426 | every unlinked note wears the (unlinked) swatch |
-| 6458 | the (unlinked) row's right-click toggle moves unlinked notes into their folder |
-| 6515 | the (unlinked) row's right-click tint toggle recolours notes without moving them |
-| 6570 | the (unlinked) row opens its menu with no notes in it |
-| 6623 | the (unlinked) row's count is parenthesised while kept separate, plain once joined |
-| 6640 | legend count bars scale to the largest visible folder |
-| 6875 | the thinnest count bar survives a hover in pixels, not just in CSS |
-| 6986 | the count bars walk on the cascade's clock and land on the resting layout |
-| 7045 | a bar that loses its folder shrinks over the cascade instead of blinking out |
-| 7163 | the legend's swatch and count bar follow the token across a theme flip, with the picker |
-| 7260 | count bars are on by default, and the settings toggle removes every bar |
-| 7321 | the picker's contrast numbers are the harness's |
-| 7366 | the picker repaints itself on a theme change, with no rebuild |
-| 7427 | the picker draws the disc's own dot sizes |
-| 7480 | the picker's ladder is the ladder the disc draws |
-| 7562 | the picker's settings surface holds every slot without scrolling sideways |
-| 7628 | the picker stays inside the mount |
-| 7676 | the disc's right-click does nothing until Developer debug is on |
-| 7714 | a right-click on a note still pins it, and opens no developer menu |
-| 7756 | the developer menu's grid item draws the wedge overlay |
-| 7802 | the grid drawn from the menu is the whole grid, and no dot moves to get it |
-| 7840 | the grid's key sits bottom left, clear of every button over the graph |
-| 7889 | the developer menu's slow motion reaches the animation clock |
-| 7929 | focus web stays above dim notes |
-| 7994 | only a hop lengthens the trail |
-| 8013 | stepping back never re-collects a hop |
-| 8030 | a crumb click truncates the trail at the crumb |
-| 8045 | the trail is not layout |
-| 8068 | the page claims no keyboard shortcut |
-| 8091 | re-selecting the same note keeps the trail, and a filter does not clear it |
-| 8169 | a live rebuild with the same data moves nothing |
-| 8185 | a rebuild waits for a drag, and a right-click is not a drag |
-| 8234 | the invalidation registry names every cache a live rebuild stales |
-| 8243 | a live rebuild lands on the layout a fresh relayout gives |
-| 8275 | a live rebuild re-arms the chip, so a note that arrives inside its window is lit |
-| 8320 | word counts land by path, which is the only thing a live rebuild keeps |
-| 8364 | an idle PNG export carries the graph, not just the background and the logo |
+| 5201 | a dot never outgrows its resting size while a cascade walks |
+| 5212 | with Size dots from the frame on, a walking dot is held under its two resting sizes, never above |
+| 5222 | an arriving note's fade never reverses during a solo switch |
+| 5276 | the gap reservation holds still while groups only thin |
+| 5322 | the date fields set the range and follow it |
+| 5371 | the year buttons select a year and halo it on hover |
+| 5478 | the ribbon rescales with its slot |
+| 5523 | the intro sweeps the range end across the strip |
+| 5569 | compact axis: a year's width tracks its own note count |
+| 5608 | compact axis: sparse years cluster near the same floor width |
+| 5637 | the ribbon's right edge is a day the vault has actually reached |
+| 5718 | compact axis: the settings-panel toggle actually flips the live state |
+| 5755 | colour unlinked by folder: the settings-panel toggle actually flips the live state |
+| 5793 | colour unlinked notes by folder: the settings-panel toggle actually flips the live state |
+| 5828 | compact axis: the view-level icon actually flips the live state, and persists |
+| 5857 | no non-tail split cell holds fewer notes than its band's row depth |
+| 5882 | the row-depth gate reads LIVE counts, not the whole-vault tally, under a filter |
+| 5919 | undated notes survive every range |
+| 5939 | overriding one folder recolours exactly one group |
+| 5966 | no working group is handed a grey by where it sorts |
+| 5992 | a folder keeps its slot across the membership toggle |
+| 6032 | a folder's legend row toggles \"hidden by default\" from its context menu |
+| 6113 | a pinned note leaves no gap in the ring it came from |
+| 6159 | the hub's dots shrink as it fills |
+| 6180 | a soloed hub-adjacent note stays inside the hub's own radius |
+| 6229 | the mark yields to the hub and comes back |
+| 6256 | a pin hidden by a filter is skipped, not released |
+| 6324 | a pin is stored by the note's path, not by its position |
+| 6435 | every unlinked note wears the (unlinked) swatch |
+| 6467 | the (unlinked) row's right-click toggle moves unlinked notes into their folder |
+| 6524 | the (unlinked) row's right-click tint toggle recolours notes without moving them |
+| 6579 | the (unlinked) row opens its menu with no notes in it |
+| 6632 | the (unlinked) row's count is parenthesised while kept separate, plain once joined |
+| 6649 | legend count bars scale to the largest visible folder |
+| 6884 | the thinnest count bar survives a hover in pixels, not just in CSS |
+| 6995 | the count bars walk on the cascade's clock and land on the resting layout |
+| 7054 | a bar that loses its folder shrinks over the cascade instead of blinking out |
+| 7172 | the legend's swatch and count bar follow the token across a theme flip, with the picker |
+| 7269 | count bars are on by default, and the settings toggle removes every bar |
+| 7330 | the picker's contrast numbers are the harness's |
+| 7375 | the picker repaints itself on a theme change, with no rebuild |
+| 7436 | the picker draws the disc's own dot sizes |
+| 7489 | the picker's ladder is the ladder the disc draws |
+| 7571 | the picker's settings surface holds every slot without scrolling sideways |
+| 7637 | the picker stays inside the mount |
+| 7685 | the disc's right-click does nothing until Developer debug is on |
+| 7723 | a right-click on a note still pins it, and opens no developer menu |
+| 7765 | the developer menu's grid item draws the wedge overlay |
+| 7811 | the grid drawn from the menu is the whole grid, and no dot moves to get it |
+| 7849 | the grid's key sits bottom left, clear of every button over the graph |
+| 7898 | the developer menu's slow motion reaches the animation clock |
+| 7938 | focus web stays above dim notes |
+| 8003 | only a hop lengthens the trail |
+| 8022 | stepping back never re-collects a hop |
+| 8039 | a crumb click truncates the trail at the crumb |
+| 8054 | the trail is not layout |
+| 8077 | the page claims no keyboard shortcut |
+| 8100 | re-selecting the same note keeps the trail, and a filter does not clear it |
+| 8178 | a live rebuild with the same data moves nothing |
+| 8194 | a rebuild waits for a drag, and a right-click is not a drag |
+| 8243 | the invalidation registry names every cache a live rebuild stales |
+| 8252 | a live rebuild lands on the layout a fresh relayout gives |
+| 8284 | a live rebuild re-arms the chip, so a note that arrives inside its window is lit |
+| 8329 | word counts land by path, which is the only thing a live rebuild keeps |
+| 8373 | an idle PNG export carries the graph, not just the background and the logo |

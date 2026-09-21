@@ -5085,6 +5085,51 @@ check("filtered to the bone, the disc stays drawable", async (p) => {
 // github#66
 // github#14
 // design/0011
+// github#151 -- the legend's eyes, snapshotted and put back. Two solo checks each had their own
+// "click every row that reads false" restore, which is wrong twice over: it restores to
+// EVERYTHING SHOWN where seedHidden() hides some groups by default, and it cannot reach a group
+// soloed down to zero visible notes at all -- a row is only given a data-eye while it is LIVE, so
+// "(unlinked)" loses its own eye and can never be clicked back. One implementation, used by both.
+async function eyesSnapshot(p) {
+  const eyes = await p.j(`(function(){
+    var out = {}, els = document.querySelectorAll("[data-eye]");
+    for (var i = 0; i < els.length; i++) {
+      out[els[i].getAttribute("data-eye")] = els[i].getAttribute("aria-pressed");
+    }
+    return out; })()`).catch(() => ({}));
+  const hidden = await p.j(`JSON.stringify(__vg.state.hidden.folder || {})`).catch(() => "{}");
+  return { eyes, hidden };
+}
+
+/** @param {{ eyes: Record<string, string>, hidden: string }} snap */
+async function restoreEyes(p, snap) {
+  // github#151 -- RE-QUERY AFTER EVERY CLICK: each one rebuilds the legend, so a single loop over
+  // one querySelectorAll clicks detached nodes after the first and silently does nothing.
+  await p.j(`(function(){
+    var map = JSON.parse(${JSON.stringify(JSON.stringify(snap.eyes))});
+    for (var n = 0; n < 60; n++) {
+      var els = document.querySelectorAll("[data-eye]"), did = false;
+      for (var i = 0; i < els.length; i++) {
+        var k = els[i].getAttribute("data-eye");
+        if (map[k] !== undefined && els[i].getAttribute("aria-pressed") !== map[k]) {
+          els[i].click(); did = true; break;
+        }
+      }
+      if (!did) break;
+    }
+    return true; })()`).catch(() => 0);
+  await settle(p);
+  // github#151 -- and the trap door the eyes cannot open: applyHiddenDefaults() is the page's own
+  // way back -- seedHidden() + buildLegend() + a cascade.
+  const stillOff = await p.j(
+    `JSON.stringify(__vg.state.hidden.folder || {}) !== ${JSON.stringify(snap.hidden)}`
+  ).catch(() => false);
+  if (stillOff) {
+    await p.eval(`__vg.applyHiddenDefaults(); void 0`).catch(() => {});
+    await settle(p);
+  }
+}
+
 async function walkSolo(p, fitOn) {
   await clearRange(p);
   await settle(p);
@@ -5092,14 +5137,8 @@ async function walkSolo(p, fitOn) {
   const hasFit = await p.j(`typeof __vg.fitCap === "boolean"`);
   if (fitOn && !hasFit) return { skip: "this build has no per-frame dot-size cap to switch on" };
   await p.eval(`__vg.fitCap = ${fitOn ? "true" : "false"}; void 0`);
-  // github#151 -- what the eyes read before this walk touches them, and the model behind them
-  const eyesWere = await p.j(`(function(){
-    var out = {}, els = document.querySelectorAll("[data-eye]");
-    for (var i = 0; i < els.length; i++) {
-      out[els[i].getAttribute("data-eye")] = els[i].getAttribute("aria-pressed");
-    }
-    return out; })()`).catch(() => ({}));
-  const hiddenWere = await p.j(`JSON.stringify(__vg.state.hidden.folder || {})`).catch(() => "{}");
+  // github#151 -- what the eyes read before this walk touches them
+  const eyesWere = await eyesSnapshot(p);
   const pick = await p.j(`(function(){
     var best = null;
     __vg.groupOrder().forEach(function (g) {
@@ -5142,35 +5181,8 @@ async function walkSolo(p, fitOn) {
   await camSettle(p);
   await sleep(300);
   const after = await p.j(SAMPLE);
-  // github#151 -- back to what the eyes read, not to everything shown: seedHidden() hides some
-  // groups by default, and clicking every "false" row on left the legend wider than baseline.
-  // RE-QUERY AFTER EVERY CLICK: each one rebuilds the legend, so a single loop over one
-  // querySelectorAll clicks detached nodes after the first and silently does nothing.
-  await p.j(`(function(){
-    var map = JSON.parse(${JSON.stringify(JSON.stringify(eyesWere))});
-    for (var n = 0; n < 60; n++) {
-      var els = document.querySelectorAll("[data-eye]"), did = false;
-      for (var i = 0; i < els.length; i++) {
-        var k = els[i].getAttribute("data-eye");
-        if (map[k] !== undefined && els[i].getAttribute("aria-pressed") !== map[k]) {
-          els[i].click(); did = true; break;
-        }
-      }
-      if (!did) break;
-    }
-    return true; })()`).catch(() => 0);
-  await settle(p);
-  // github#151 -- and the trap door the eyes cannot open. A row is only given a data-eye while it
-  // is LIVE, and a group hidden down to zero visible notes is not live -- so "(unlinked)" soloed
-  // away loses its own eye and can never be clicked back, which is what left state.hidden off
-  // baseline for the rest of the job and what the press.vg-legend declaration was papering over.
-  // applyHiddenDefaults() is the page's own path back: seedHidden() + buildLegend() + a cascade.
-  const stillOff = await p.j(`JSON.stringify(__vg.state.hidden.folder || {}) !== ${JSON.stringify(hiddenWere)}`)
-                     .catch(() => false);
-  if (stillOff) {
-    await p.eval(`__vg.applyHiddenDefaults(); void 0`).catch(() => {});
-    await settle(p);
-  }
+  // github#151
+  await restoreEyes(p, eyesWere);
   await settle(p);
   await camSettle(p);
   if (hasFit) await p.eval(`__vg.fitCap = false; void 0`);
@@ -5211,6 +5223,8 @@ check("an arriving note's fade never reverses during a solo switch", async (p) =
   await clearRange(p);
   await settle(p);
   await camSettle(p);
+  // github#151
+  const eyesWere = await eyesSnapshot(p);
   const pair = await p.j(`(function(){
     var gs = __vg.groupOrder().map(function (g) { return { g: g, n: __vg.groupCount(g) }; })
       .filter(function (x) { return x.n >= 2; }).sort(function (x, y) { return x.n - y.n; });
@@ -5247,14 +5261,9 @@ check("an arriving note's fade never reverses during a solo switch", async (p) =
     if (Date.now() - t0 > 12000) break;
   }
   await settle(p);
-  const groups = await p.j(`__vg.groupOrder()`);
-  for (const g of groups) {
-    await p.j(`(function(){
-      var b = document.querySelector('[data-eye="' + ${JSON.stringify(g)}.replace(/"/g, '\\"') + '"]');
-      if (b && b.getAttribute("aria-pressed") === "false") b.click();
-      return true; })()`).catch(() => 0);
-  }
-  await settle(p);
+  // github#151 -- the same restore as walkSolo(), and for the same reason: clicking every row
+  // that reads false ends wider than baseline, and cannot reach a group soloed to zero notes
+  await restoreEyes(p, eyesWere);
   await camSettle(p);
   const flickering = arriving.filter((id) => drops[id]);
   const worst = flickering.sort((x, y) => (drops[y] || 0) - (drops[x] || 0))[0];
