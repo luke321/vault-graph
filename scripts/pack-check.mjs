@@ -129,7 +129,9 @@ for (const dir of runDirs(ROOT)) {
     if (!(arc > 1e-6)) return null;
     const rows = Math.max(1, Math.round((gs.rMax - gs.rMin) / pitch) + 1);
     const sumR = (rows * (gs.rMin + gs.rMax)) / 2;
-    return (arc * sumR) / pitch / gs.alphaSum;
+    // github#186
+    const w = gs.wsum > 1e-6 ? gs.wsum : gs.alphaSum;
+    return (arc * sumR) / pitch / w;
   };
   const first = frames[0], last = frames[frames.length - 1];
   const keys = new Set();
