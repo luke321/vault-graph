@@ -15,6 +15,17 @@ import { engineBanner } from "./engine/notice.mjs";
 // github#71
 import { readSortingSpec } from "./sortspec-file.mjs";
 
+// github#156 -- tsconfig.contracts-node.json is what reads these
+/**
+ * @typedef {import("./page.js").VaultNode} VaultNode
+ * @typedef {import("./page.js").VaultEdge} VaultEdge
+ * @typedef {import("./page.js").VaultData} VaultData
+ */
+/**
+ * github#156 -- a note before its degree is counted, so not a VaultNode yet
+ * @typedef {Omit<VaultNode, "deg"> & { _links?: string[] }} RawNote
+ */
+
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolvePath(HERE, "..");
 
@@ -102,10 +113,12 @@ const FLAT_MONTHS = flag("flat-months");
 const STRIP_NAV = flag("no-nav");
 // github#71, decisions/0009 -- --folder-order overrides; absent, the page decides
 const SORTSPEC_ARG = opt("sortspec", "");
+// github#156 -- the page's own union; .includes() narrows nothing
+/** @type {"" | NonNullable<import("./page.js").MountDeps["folderOrder"]>} */
 const FOLDER_ORDER = (() => {
   const v = String(opt("folder-order", ""));
   if (!v) return "";   // github#71 -- absent: the page decides from the vault
-  if (["name", "explorer", "size"].includes(v)) return v;
+  if (v === "name" || v === "explorer" || v === "size") return v;
   console.error(`build-graph: --folder-order ${v} is not name|explorer|size -- letting the page decide`);
   return "";
 })();
@@ -285,6 +298,8 @@ const files = walk(VAULT).filter((abs) => {
 });
 /* github#71, decisions/0015 -- the three places a spec is read, plus --sortspec */
 const SORT_SPECS = (() => {
+  // github#156 -- typed, or it reaches VaultData.sortSpecs as any[]
+  /** @type {NonNullable<VaultData["sortSpecs"]>} */
   const out = [];
   const seen = new Set();
   const add = (abs, origin) => {
@@ -320,9 +335,12 @@ const SORT_SPECS = (() => {
   return out;
 })();
 
+/** @type {RawNote[]} */
 const notes = [];
+/** @type {Map<string, number>} */
 const byKey = new Map();
 // github#141
+/** @type {Map<string, number>} */
 const byPath = new Map();
 
 for (const abs of files) {
@@ -340,6 +358,7 @@ for (const abs of files) {
     .map((t) => t.replace(/^#/, "").trim())
     .filter(Boolean);
 
+  /** @type {RawNote} */
   const note = {
     id: relPath.split(sep).join("/"),
     label: name,
@@ -367,7 +386,9 @@ for (const abs of files) {
   }
 }
 
+/** @type {Map<string, number>} */
 const edgeWeight = new Map();
+/** @type {Map<string, { dest: string, sources: number[] }>} */
 const ghosts = new Map();
 let unresolved = 0;
 
@@ -418,8 +439,9 @@ for (let i = 0; i < notes.length; i++) {
 if (INCLUDE_GHOSTS) {
   // github#141
   for (const { dest, sources } of ghosts.values()) {
+    /** @type {RawNote} */
     const g = {
-      // github#152 -- dirs and touched are required on VaultNode
+      // github#152, github#156 -- dirs and touched are required; dropping one is a TS2322
       id: ghostId(dest), label: ghostLabel(dest), folder: "(unresolved)", sub: "", dirs: [],
       type: "ghost", tags: [], created: "", touched: "", words: 0, ghost: true,
     };
@@ -428,6 +450,7 @@ if (INCLUDE_GHOSTS) {
   }
 }
 
+/** @type {VaultEdge[]} */
 const edges = [...edgeWeight].map(([k, w]) => {
   const [a, b] = k.split(" ").map(Number);
   return { s: a, t: b, w };
@@ -436,6 +459,7 @@ const edges = [...edgeWeight].map(([k, w]) => {
 const degree = new Array(notes.length).fill(0);
 for (const e of edges) { degree[e.s]++; degree[e.t]++; }
 
+/** @type {VaultNode[]} */
 const nodes = notes.map((n, i) => {
   const { _links, ...rest } = n;
   return { ...rest, deg: degree[i] };
@@ -444,6 +468,7 @@ const nodes = notes.map((n, i) => {
 // github#108
 const VERSION = JSON.parse(readFileSync(join(ROOT, "manifest.json"), "utf8")).version;
 
+/** @type {VaultData} */
 const data = {
   vault: basename(VAULT),
   version: VERSION,

@@ -3,8 +3,7 @@
 // github#37
 
 import { spawnSync, spawn } from "node:child_process";
-import { existsSync, mkdtempSync, mkdirSync, writeFileSync, rmSync, readFileSync } from "node:fs";
-import { createHash } from "node:crypto";
+import { existsSync, mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { createServer } from "node:net";
 import { dirname, join, resolve } from "node:path";
@@ -12,6 +11,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { attach } from "./cdp.mjs";
 import { leftWindowArgs } from "./screen.mjs";
 import { keepFocus } from "./focus.mjs";
+import { checkFixture, countNotes, fixtureDigest, stampFixture } from "./suite-stamp.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(HERE, "..");
@@ -30,9 +30,6 @@ const FIXTURES = [
     gens: ["make-spec-vault.mjs"] },
 ];
 
-const GENERATORS = ["make-demo-vault.mjs", "make-test-vault.mjs", "make-shape-vault.mjs"];
-const FIXTURE_FORMAT = 1;
-
 function storeRoot() {
   const g = spawnSync("git", ["-C", ROOT, "rev-parse", "--git-common-dir"], { encoding: "utf8" });
   if (g.status === 0 && g.stdout.trim()) {
@@ -41,15 +38,6 @@ function storeRoot() {
     return join(dirname(abs), ".fixtures");
   }
   return join(ROOT, ".fixtures");
-}
-
-// github#86, github#71 -- `gens` must match the list scripts/smoke.mjs hashes
-function digestOf(args, gens) {
-  const h = createHash("sha256");
-  h.update("format:" + FIXTURE_FORMAT);
-  for (const g of gens || GENERATORS) h.update(readFileSync(join(HERE, g)));
-  h.update(JSON.stringify(args));
-  return h.digest("hex").slice(0, 8);
 }
 
 function findChrome() {
@@ -67,16 +55,25 @@ function findChrome() {
 function sleep(ms) { return new Promise((r) => setTimeout(r, ms)); }
 
 function buildFixture(fx) {
-  const digest = digestOf(fx.args, fx.gens);
+  const digest = fixtureDigest(fx.args, fx.gens);
   const dir = join(storeRoot(), `${fx.name}-${digest}`);
-  if (!existsSync(join(dir, ".stamp.json"))) {
+  let valid = existsSync(join(dir, ".stamp.json"));
+  if (valid) {
+    // github#169 -- a stamp is not proof the vault is usable
+    const health = checkFixture(dir);
+    if (!health.ok) {
+      console.log(`  ${fx.name}: fixture at ${dir} is corrupt: ${health.why} -- regenerating`);
+      valid = false;
+    }
+  }
+  if (!valid) {
     console.log(`  ${fx.name}: not in the shared fixture store yet, generating ...`);
+    rmSync(dir, { recursive: true, force: true });
     mkdirSync(storeRoot(), { recursive: true });
     const gen = spawnSync(process.execPath, [join(HERE, fx.script), ...fx.args, "--out", dir],
       { encoding: "utf8" });
     if (gen.status !== 0) throw new Error(`${fx.script} failed:\n${gen.stderr || ""}`);
-    writeFileSync(join(dir, ".stamp.json"),
-      JSON.stringify({ digest, day: new Date().toISOString().slice(0, 10) }, null, 2) + "\n");
+    stampFixture(dir, { digest, script: fx.script, args: fx.args, notes: countNotes(dir) });
   }
   const htmlDir = mkdtempSync(join(tmpdir(), `vg-snap-${fx.name}-`));
   const htmlPath = join(htmlDir, "vault-graph.html");

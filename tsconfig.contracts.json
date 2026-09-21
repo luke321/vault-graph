@@ -25,6 +25,13 @@
   // include IS tsconfig.json's, VERBATIM. The point is to check what that program already
   // names, with checkJs on; a different include would make the two disagree about what the
   // file set is, and the first thing to fall through the difference would be a new file.
+  //
+  // ITS SIBLING BREAKS THAT RULE ON PURPOSE (github#156). tsconfig.contracts-node.json checks
+  // src/build-graph.mjs, which is node code and needs `types: ["node"]` -- and that is exactly
+  // why it cannot be one program with this one: measured, node types on THIS include accept
+  // `process.env` and `Buffer` in src/page.js, which is browser code, and report zero. So this
+  // config stays the browser and plugin one with `types: []` inherited, and the node-side entry
+  // point is named there rather than here. That file's comment carries the number.
   "extends": "./tsconfig.json",
   "compilerOptions": {
     "checkJs": true

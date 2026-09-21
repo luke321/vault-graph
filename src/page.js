@@ -58,6 +58,7 @@
  * @property {boolean} [dev]         a --dev build of the standalone; nothing else sets it
  * @property {string} [version]      github#108 -- the plugin/exporter version that built this, shown in the stats line
  * @property {{ folder: string, text: string, origin: string }[]} [sortSpecs]  github#71
+ * @property {"name" | "explorer" | "size"} [folderOrder]  github#156 -- the standalone alone sets it, from --folder-order; shell.html reads it back off VAULT_DATA as a MountDeps
  */
 
 // github#72, design/0014
@@ -237,7 +238,7 @@
  * @property {(kind: string | null, refMs?: number) => void} setRecent
  * @property {(src: string) => void} setHeatSource
  * @property {() => PlanParityReport} checkPlanParity
- * @property {() => unknown} checkFocusWeb
+ * @property {() => Promise<unknown>} checkFocusWeb
  * @property {() => unknown} debugDump
  */
 
@@ -7226,7 +7227,7 @@ function mountVaultGraph(root, data, deps) {
    * @param {Record<string, boolean> | null} [bandHint]   group -> inner, to seed the lock with
    * @param {boolean} [keepAlpha]
    */
-  // github#86, decisions/0011 -- the lock derivation on its own, so ringsIn
+  // github#86, decisions/0011-a-live-rebuild-retakes-the-geometry-lock-at-rest -- the lock derivation on its own, so ringsIn
   // github#86 -- can take it in the dimension the rings belong to
   /** @param {Record<string, boolean>} [bandHint] @returns {Plan | null} */
   function takeGeom(bandHint) {
@@ -7257,7 +7258,7 @@ function mountVaultGraph(root, data, deps) {
     return base;
   }
 
-  // github#72, github#86, decisions/0011 -- a switched-to disc sits inside rings borrowed from
+  // github#72, github#86, decisions/0011-a-live-rebuild-retakes-the-geometry-lock-at-rest -- a switched-to disc sits inside rings borrowed from
   // github#86 -- another dimension; a live rebuild retakes THOSE, from that
   // github#86 -- dimension's own plan, so the step stays sub-pixel
   /** @param {"folder" | "tag"} dim @returns {GeomLock | null} */
@@ -7316,7 +7317,7 @@ function mountVaultGraph(root, data, deps) {
     bandLock = null; geomLock = null;
     if (deferLayout && prevBand) {
       regroup(true, prevBand, true);
-      // github#49; github#72, decisions/0011
+      // github#49; github#72, decisions/0011-a-live-rebuild-retakes-the-geometry-lock-at-rest
       if (prevGeom && !freshGeom) geomLock = prevGeom;
       return;
     }
@@ -11025,7 +11026,7 @@ function mountVaultGraph(root, data, deps) {
     return d;
   }
 
-  // github#72, design/0014, decisions/0006, decisions/0011
+  // github#72, design/0014, decisions/0006, decisions/0011-a-live-rebuild-retakes-the-geometry-lock-at-rest
   /**
    * @param {VaultData} next
    * @param {{ renames?: Record<string, string> }} [opts]  oldPath -> newPath; github#49
@@ -11096,7 +11097,7 @@ function mountVaultGraph(root, data, deps) {
 
     onData.forEach(function (h) { attempt(h.fn); });
 
-    // decisions/0011
+    // decisions/0011-a-live-rebuild-retakes-the-geometry-lock-at-rest
     var ringsDim = geomLock ? geomLock.dim : null;
     hardRelayout(false, true, true);
     // github#86 -- and back inside the rings it was switched into, same step
@@ -11281,7 +11282,9 @@ function mountVaultGraph(root, data, deps) {
                       return out;
                     },
                     checkFocusWeb: function () {
-                      var best = null, bd = -1;
+                      /** @type {string | null} */
+                      var best = null;
+                      var bd = -1;
                       graph.forEachNode(function (id) {
                         var d = renderer.getNodeDisplayData(id);
                         if (!d || d.hidden) return;
@@ -11290,6 +11293,8 @@ function mountVaultGraph(root, data, deps) {
                       var keepSel = state.selected, keepHov = state.hovered;
                       state.selected = best; state.hovered = null;
                       renderer.refresh({ skipIndexation: true }); renderer.render();
+                      // github#101 -- sample after a real composite, not just render()'s return
+                      function sample() {
                       var cv = renderer.getCanvases();
                       var order = ["edges", "nodes", "edgeLabels", "labels", "hovers", "hoverNodes"];
                       var W = cv.nodes.width, H = cv.nodes.height, dpr = W / renderer.getDimensions().width;
@@ -11360,6 +11365,12 @@ function mountVaultGraph(root, data, deps) {
                       state.selected = keepSel; state.hovered = keepHov; renderer.refresh();
                       res.webOK = res.dimAtGaps === 0;
                       return res;
+                      }
+                      return new Promise(function (resolve) {
+                        WIN.requestAnimationFrame(function () {
+                          WIN.requestAnimationFrame(function () { resolve(sample()); });
+                        });
+                      });
                     },
                     debugDump: function () {
                       var a0 = renderer ? renderer.graphToViewport({ x: 0, y: 0 }) : null;

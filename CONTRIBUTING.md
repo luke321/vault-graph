@@ -82,10 +82,19 @@ belongs to the push that merges.
 
 `npm run lint` runs `scripts/check-js-contracts.mjs` as part of that first line, and it is
 worth knowing what it does before you meet it failing. The JavaScript's JSDoc annotations are
-compiler-checked (`tsconfig.contracts.json`, `checkJs` on) and held at **zero** diagnostics --
-and the same run re-injects the defect github#145 was filed over, a copy of `src/page.js` with
-`/** @type {VaultData} */ var DATA = 42`, and fails if that copy comes back **clean**. Before
-github#145 that mutation drew zero errors and zero warnings from this whole list.
+compiler-checked with `checkJs` on and held at **zero** diagnostics, across **two** programs --
+`tsconfig.contracts.json` for the browser and plugin (`src/page.js`, `plugin/main.js`) and
+`tsconfig.contracts-node.json` for the exporter (`src/build-graph.mjs`, github#156). They are two
+and not one because `src/build-graph.mjs` needs `"types": ["node"]`, and node types over
+`src/page.js` make `process` and `Buffer` in browser code type-check clean -- measured, and
+`.ai-context/invariants.md` has the number.
+
+**Each program re-injects a defect of its own and fails if the mutated copy comes back clean:**
+a copy of `src/page.js` with `/** @type {VaultData} */ var DATA = 42`, which is the defect
+github#145 was filed over, and a copy of `src/build-graph.mjs` with `nodes: 42` in the
+`VaultData`-annotated object it emits. Before github#145 the first mutation drew zero errors and
+zero warnings from this whole list; before github#156 the exporter was in no type program at all,
+so the second could not have been written.
 
 **Fix a diagnostic where it is caused.** A cast that widens, an `any`, a `@ts-ignore` or an
 exclusion makes the gate green again and worth exactly what it was worth before the ticket --

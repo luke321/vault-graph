@@ -2459,14 +2459,17 @@ click) edge running under a dim note used to lose a bite of itself to every disc
 crossed — a well-connected hub read as dashed instead of solid (issue #2).
 
 ```javascript
-__vg.checkFocusWeb()      // -> dimAtGaps: 0, webOK: true
+await __vg.checkFocusWeb()      // -> dimAtGaps: 0, webOK: true
 ```
 
 Selects the best-connected note, composites the canvases in stacking order, and samples
 every lit curve at 1% steps, keeping the samples that fall geometrically inside a
 non-focus disc. `dimAtGaps` must be **0** — any sample landing on a dim disc means the web
 is still running under it. Not frame-sensitive: the check selects rather than hovers, so
-`hoverAmount()` is `1` immediately with no ramp to catch mid-flight.
+`hoverAmount()` is `1` immediately with no ramp to catch mid-flight. **Returns a `Promise`**
+(github#101) — it waits a real composited frame (double `requestAnimationFrame`) between its
+own `render()` and its own pixel read, so a caller must `await` it; reading synchronously
+samples whatever was on screen before this call, not after.
 
 Measured across the three vault shapes `scripts/smoke.mjs` builds: the demo vault (node
 452, degree 71, 364 in-disc samples) **107 dim before the fix, 0 after**; the 10k
@@ -4510,9 +4513,13 @@ alias index, so the plugin grows a `ghost:Nickname` the exporter does not. Adopt
 answer would delete real edges, so the exporter keeps its aliases.
 
 **One node-shape divergence found by inspection, not by a check (github#152).** `VaultNode`
-(`src/page.js`) is the one written contract both producers are supposed to satisfy, and
-`tsconfig.contracts.json`'s `checkJs` program only names `plugin/main.js` and `src/page.js` —
-`src/build-graph.mjs` is never type-checked against it. The exporter's ghost object literal
+(`src/page.js`) is the one written contract both producers are supposed to satisfy, and at the
+time `tsconfig.contracts.json`'s `checkJs` program named only `plugin/main.js` and `src/page.js` —
+`src/build-graph.mjs` was never type-checked against it. **That gap is closed (github#156):** the
+exporter is in `tsconfig.contracts-node.json` and its ghost literal is annotated `RawNote`, so
+dropping either field is a `TS2322` at the keystroke. The check below stays, because it reads the
+`@property` list out of the JSDoc and so also catches a field added to `VaultNode` that the
+exporter never learns about. The exporter's ghost object literal
 omitted `dirs` and `touched`, both declared required, while the plugin's already carried both;
 `page.js`'s own fallbacks (`n.dirs || []`, a missing `touched` reading as `""`) absorbed the gap,
 so nothing broke and no screenshot showed it. `check-link-resolution.mjs` now reads `VaultNode`'s
@@ -4647,6 +4654,118 @@ while its tree is not; not by time because `develop` moves several times a day a
 green run" cannot say which tree it saw. While it runs, both gates hold the machine-wide
 `suite` lock (`scripts/lock.mjs`) and release it on every exit path; a lock that cannot be had
 blocks the push and names the holder rather than running on top of it.
+
+## Widening the suite's concurrency surfaced one real race and one window-size artifact
+
+github#101 asked whether the serial (frame-reading) lane's 76% share of a run (github#93,
+above) could be shrunk by widening it, and whether doing so would flake more under
+contention. `smoke.mjs` gained two levers: `--jobs <n>` (already existed) is the width of the
+whole pool; `--serial-jobs <n>` (new, default 1) is the width of just the walk sub-pool inside
+it -- `--serial-jobs 3` lets the three fixtures that carry a frame-sensitive check (demo-vault,
+test-vault, tag-vault) read their frames at once instead of one at a time. Either flag above
+its default is a delta from the shape the gates push with (`suite-stamp.mjs`'s `shapeDeltas`),
+so a run using them never stamps the tree, the same as `--only` or `--vault`.
+
+**The experiment measured three shapes, five runs each, interleaved (not five-in-a-row) so
+machine drift would not land on one shape, every run under the `suite` lock:**
+
+| Mode | Flags | Wall (avg / min / max) | FAILs across 5 runs |
+|---|---|---|---|
+| default | *(none)* | 428s / 366s / 674s | 1/5 -- "a swipe in the tail of a fit flight still scrolls" (demo-vault) |
+| fast | `--jobs 5` | 301s / 299s / 307s | **5/5** -- "focus web stays above dim notes" (dominant-folder vault); **5/5** -- "the disc's density follows the notes on screen" (10k vault) |
+| serial3 | `--jobs 3 --serial-jobs 3` | 307s / 305s / 308s | **5/5** -- "the disc's density follows the notes on screen" (10k vault) |
+
+428 checks across the suite's five current fixtures (158 + 80 + 63 + 64 + 63). The default
+mode's own wall time is a wide range (366-674s) because one of its five runs queued behind
+unrelated work also holding the `suite`/`screen-left` locks at the time -- 366s is the more
+representative number; the other two modes' runs happened not to collide and read tight
+(within 8s of each other).
+
+**The one default-mode failure is the flake already on record** (github#93's own note: a
+1-in-6-to-8 rate on two checks, reproduced isolated) -- 1/5 here is consistent with that rate
+and is not new. **The other two are not that** -- both reproduced on every single run of the
+shape that triggers them and on zero of the five default runs. Investigated, and the two turned
+out to be two different things, not one:
+
+**"focus web stays above dim notes" was a genuine test race, and is fixed.**
+`checkFocusWeb()` (`src/page.js`) calls `renderer.render()` then immediately reads the canvas
+with `getImageData` -- synchronous in the JS thread, but the actual GPU composite is not
+guaranteed to have landed by the time the read happens, and under GPU contention from several
+concurrent Chromes it measurably had not: the check reads a not-yet-painted frame and finds the
+highlighted edge still under a dim note that has not yet been drawn over.
+
+**First attempt was wrong, and worth recording why.** A double-`requestAnimationFrame` wait --
+the fix this codebase already uses for exactly this class of bug, in the PNG-export and
+camera-zoom checks -- placed in `scripts/smoke.mjs` *ahead of* the call to `checkFocusWeb()`
+looked fixed (5x `--jobs 5` + 5x `--jobs 3 --serial-jobs 3`, previously 5/5 failing both, 0/10)
+but only because that verification ran the density check first in the same `--only` selection,
+and its several `sleep(400)`s incidentally gave the GPU enough slack regardless of where the
+wait sat. Re-run with *only* the focus-web check selected -- the true test, since
+`checkFocusWeb()` does its own `render()` and its own read internally, after anything a
+preceding wait in `smoke.mjs` could reach -- and it failed 5/5 under `--jobs 5` again, byte
+identical to the original failure. The wait had to be *inside* `checkFocusWeb()`, between its
+own `render()` and its own pixel read, not before the function is even called.
+
+**The real fix**: `checkFocusWeb()`'s pixel-sampling body is now a named inner function
+(`sample()`), called only after a double-`requestAnimationFrame` `Promise` resolves;
+`cdp.mjs` already evaluates with `awaitPromise: true`, so returning a `Promise` from a debug
+API function needed no change on the calling side. `checkFocusWeb`'s JSDoc return type updated
+to `Promise<unknown>`; one `no-unsafe-assignment` lint finding surfaced from `best`'s type no
+longer narrowing across the new function boundary, fixed with an explicit `@type`. **Verified
+in true isolation this time** -- `--only "focus web stays above dim notes"` alone, nothing else
+in the selection -- 5x `--jobs 5` and 5x default, **0/10 failures**, plus `npm run lint` and
+`npm run typecheck` both clean.
+
+**"the disc's density follows the notes on screen" is not a bug -- it is a window-size
+dependency in a pixel-based check, at a width nobody plans to ship.** The check measures a
+dot's on-screen diameter against its on-screen step (`__vg.debugDump()`'s `dotRadius` and
+`step35`, both screen-pixel quantities derived through `renderer.graphToViewport`), and the
+product **intentionally** sizes dots relative to the frame they are drawn in ("Size dots from
+the frame", `CLAUDE.md`'s own laws) -- a smaller browser window legitimately produces a smaller
+dot-to-step ratio. `smoke.mjs`'s pool tiles each lane's window into a `gridSlot` sized by the
+lane count, so a wider pool means a smaller window *for every job in it, not just the walk
+ones*: confirmed by disentangling the two variables directly -- `--jobs 5 --no-grid` (same
+width, full-size window) passes with `diameter/step` topping out at 0.76, against 0.81 with
+the grid on; an isolated run at the default `--jobs 2` grid width passes at 0.57. The check's
+own threshold (0.15-0.80) was calibrated against the one window size the suite has ever run
+at -- the default 2-lane grid -- and this ticket is the first time anything ran the suite at
+`--jobs 5` or `--jobs 3 --serial-jobs 3` at all. **No code changed for this one.** It is left
+exactly as it was: the check is correct, the product is behaving as designed, and the
+"failure" only exists at pool widths this ticket already decided (D-4) will never be the
+shipped default -- fixing it would mean loosening a real threshold to accommodate a shape
+nobody runs, which is the wrong direction to move a regression check.
+
+**The recommendation is unchanged: the default lane shape does not stamp differently, and does
+not change.** Per D-4 this ticket never changed the default regardless of outcome. The wall-time
+win (~120-370s) from widening either pool no longer comes bundled with a real defect -- the one
+genuine bug is fixed -- but it still surfaces a check whose assertion window assumes the
+default's window size, which is reason enough on its own not to make either wider shape the
+default without first deciding whether pixel-based checks should be exempted from the grid,
+sized on their own window, or something else. That is a design question, not a bug report, and
+is out of scope here.
+
+**A full default-shape suite run was attempted as a broader regression check on the
+`checkFocusWeb()` change and did not complete** -- the harness killed it for machine-wide low
+memory while other worktrees were also driving Chrome, not a failure of the change itself. What
+did run clean: `npm run lint`, `npm run typecheck`, every static gate, and the targeted
+isolation runs above (10/10 at default and `--jobs 5` for the fixed check). The wider run is
+safe to retry later; it was not repeated here per the standing instruction not to re-launch
+something the memory reaper stopped.
+
+`scripts/suite-repeat.mjs` runs the suite `k` times per named mode (`--mode name=args`,
+repeatable), taking and releasing the `suite` lock around every run so it never collides with
+a fixture-regenerating run elsewhere, logging each run's full output, and tallying wall time
+and FAIL counts per (fixture, check) per mode; `--tally <dir>` re-reads a directory of logs
+without running anything. Its parser has one trap worth naming: `smoke.mjs` prints "FAIL" on
+two different lines -- a per-check line (`" FAIL  <name>"`, one leading space) and the
+end-of-run per-vault summary (`"  FAIL  <ran>/<total>  <label>"`, two) -- and the first cut of
+the parser matched both, counting a whole vault's fail tally as a single fabricated "check"
+named after its ratio. The fix is the leading-space count, not the word. A second trap in the
+same file: `--mode name=args` first tokenised `args` on bare whitespace, which breaks the
+moment a `--only` value is a check name with spaces in it -- exactly the case needed to isolate
+either finding above. Fixed with a small quote-aware tokenizer (`"..."` and `'...'` both
+group), so `--mode 'fast=--only "focus web stays above dim notes" --jobs 5'` now reaches
+`smoke.mjs` as one argument, not several broken ones.
 
 ## The merge boundary runs the gates the hook runs
 
@@ -5357,19 +5476,38 @@ drops -- so a live rebuild that deleted one pinned note silently cost every pin.
 check, which reads what the **host** ended up holding rather than what the page believes it stored:
 `["2"]` before, `["\u0000vault-graph:pins:2","C.md"]` after. Both writes go through `persistPins()`,
 and `savePinned` has exactly one call site so a third one cannot quietly appear.
-## The JavaScript's own contracts are compiler-checked, and the gate proves it (github#145)
+## The JavaScript's own contracts are compiler-checked, and the gate proves it (github#145, github#156)
 
-**`npm run lint` holds `src/page.js` and `plugin/main.js` at ZERO compiler diagnostics with
-`checkJs` on, and rejects a probe that assigns `42` to a `VaultData`-annotated binding.**
+**`npm run lint` holds `src/page.js`, `plugin/main.js` and `src/build-graph.mjs` at ZERO compiler
+diagnostics with `checkJs` on, and rejects a probe against each of the two programs.**
 
 ```bash
 node scripts/check-js-contracts.mjs      # or npm run lint, which calls it
 ```
 
-Two `tsc` runs against `tsconfig.contracts.json`, about 1.3s together. The first is the real
-check. The second is the reason this is a check and not a setting: it writes a copy of
-`src/page.js` with `var DATA = data` replaced by `/** @type {VaultData} */ var DATA = 42` and
-**fails if that copy comes back clean**.
+Four `tsc` runs, about 2.5s together: two real checks, and one probe each. The real checks are the
+browser program (`tsconfig.contracts.json` -- `src/page.js`, `plugin/main.js`) and the node program
+(`tsconfig.contracts-node.json` -- `src/build-graph.mjs`, github#156). The probes are the reason
+this is a check and not a setting: each writes a mutated copy of its program's entry point and
+**fails if that copy comes back clean** -- `src/page.js` with `var DATA = data` replaced by
+`/** @type {VaultData} */ var DATA = 42`, and `src/build-graph.mjs` with the `nodes,` in its
+`VaultData`-annotated `data` literal replaced by `nodes: 42,`.
+
+### Why there are two programs and not one widened one (github#156)
+
+`src/build-graph.mjs` is node code: without `"types": ["node"]` it reports **16 diagnostics that
+are all one cause** (`node:fs`/`node:path`/`node:url`, `process`, `Buffer`). The obvious move was
+to add those types to the shared program. **Measured 2026-09-21, that is a hole:** with node types
+on `tsconfig.contracts.json`, `if (process.env.X) { var B = Buffer.from("x"); }` inserted into
+`src/page.js` reported **zero** diagnostics. `src/page.js` is browser code and both of those are
+runtime failures there. Without node types the same insert is **two `TS2591`s**. So the browser
+program keeps `types: []` inherited, and the node-side entry point gets its own config.
+
+`src/page.js` is in **both** programs -- the exporter's annotations import its typedefs, which also
+pulls in `src/globals.d.ts` (without it, four `TS2339`s about `window.__vg`). So the gate reports
+the union of the two runs, **deduped by identity**, and the browser program is what still catches a
+node global in the page. The node program also reaches `src/sortspec-file.mjs` and
+`src/engine/notice.mjs`, which were in no program before; both are clean.
 
 **Why the second run exists.** Before github#145, `tsconfig.json` set `checkJs: false` -- it is
 typescript-eslint's program, and the compiler's own check ran over `src/engine/**/*.ts` alone.
@@ -5382,6 +5520,29 @@ probe runs every time.
 taken on `deca048` and do not match this code): the same program with `checkJs: true` and **no
 added strictness** reported **138 diagnostics -- 136 page, two plugin -- over 105 lines**. All
 138 are fixed at their source. The bar is zero.
+
+**What github#156 was worth, measured 2026-09-21.** `src/build-graph.mjs` was in no type program
+at all, so its annotations were comments nothing read -- and it had **none**: the file carried zero
+type annotations, so a naive include reported zero for the dullest possible reason. Annotating the
+producer boundary against `VaultNode` / `VaultEdge` / `VaultStats` / `VaultData` found **four**
+things nothing was checking, all fixed at their source:
+
+| | What was unchecked | Now |
+|---|---|---|
+| `sortSpecs` | `SORT_SPECS`'s accumulator is an evolving `[]`, so it reached `VaultData.sortSpecs` as `any[]`. Dropping `origin` from a pushed spec: not caught. `origin: 7`: not caught | `@type` on the accumulator, from `VaultData` itself; both are `TS2345`/`TS2322` |
+| `folderOrder` | The exporter spreads it onto `data` and `src/shell.html` reads it back off `VAULT_DATA` as a `MountDeps` -- and `VaultData` declared it nowhere, so **neither end of that round trip** was checked | declared on `VaultData`, and `FOLDER_ORDER` typed as the page's own union |
+| the `--folder-order` guard | `.includes(v)` over the three valid values returns a boolean and narrows nothing, so a vetted value left the IIFE as plain `string` -- the guard read as more than it typed | an `===` chain that narrows; relaxing it to `if (v) return v` is now `TS2322` |
+| `src/dates.mjs` | unannotated, and it is the direct producer of `VaultNode.created`, `VaultNode.touched` and `VaultStats.dates` -- so those three arrived as `any` and the boundary annotation would have checked nothing about them | a `DateSource` union and `@param`/`@returns` on all seven exports |
+
+**And github#152's own defect is a compile error now**, which was the ticket's argument for doing
+this: dropping `dirs` or `touched` from the exporter's ghost literal is `TS2322` at the keystroke,
+where it was previously found by a person reading prose for an unrelated documentation ticket.
+
+**No behaviour changed, and that was measured too.** The same 400-note fixture built before and
+after, three ways (plain, `--folder-order explorer`, and `--folder-order nonsense` to exercise the
+rejection path the narrowing guard replaced): `window.VAULT_DATA` **byte-identical** in all three,
+and the only difference anywhere in the emitted page is the four comment lines added to
+`src/page.js`'s `VaultData` typedef, which the exporter inlines verbatim.
 
 **Zero, not a baseline.** github#145 allows a baseline *if the work is phased*, tracked **by
 identity and never by total** -- a count lets one new error silently replace one old one. It was
@@ -5410,6 +5571,11 @@ Tried against the finished check, each one made it fail:
 | `checkJs` back to `false` in `tsconfig.contracts.json` | the probe is no longer rejected |
 | `plugin/main.js` dropped from the `include` | `--listFiles` says it is not in the program |
 | the probe's anchor renamed away in `src/page.js` | a hard failure, never a skip -- a probe testing nothing is the failure this prevents |
+| `checkJs` back to `false` in `tsconfig.contracts-node.json` (github#156) | the exporter probe is no longer rejected |
+| `src/build-graph.mjs` dropped from that `include` (github#156) | `--listFiles` says it is not in the program |
+| the exporter probe's anchor renamed away (github#156) | a hard failure, never a skip |
+| the `@type {VaultData}` deleted from the exporter's `data` (github#156) | the exporter probe is no longer rejected |
+| node types added to `tsconfig.contracts.json` (github#156) | nothing does, which is why they are not there -- the browser program is what catches `process` in `src/page.js`, and it can only do that while its `types` stays `[]` |
 
 The fourth, dropping `src/page.js` from the `include`, does **not** fail, and correctly: it
 stays in the program as `plugin/main.js`'s import and stays checked. That was measured too, by
@@ -5419,8 +5585,17 @@ reintroducing a real defect with the file out of the include and watching 22 dia
 ### Not covered
 
 `strictNullChecks` over the JavaScript -- github#145 calls it a separate, later, measured step,
-and github#55's ratchet owns it. `src/build-graph.mjs` and `scripts/**` are in no type program
-today; widening the program is its own measurement.
+github#55's ratchet owns it, and github#156 did not touch it.
+
+`scripts/**` is in no type program. github#156 deliberately stopped at `src/build-graph.mjs`: it is
+the one that produces data the page's declared types describe, so it is where a disagreement is
+most expensive and most checkable, and much of `scripts/**` is harnesses whose annotations matter
+less than a producer's. Widening to it is its own measurement.
+
+**Annotating the rest of `src/build-graph.mjs`** beyond the producer boundary, likewise. github#156
+annotated what crosses into `VaultData` and the accumulators feeding it; the file's internal helpers
+are still unannotated, which means they are `any` and check nothing. That is not a hole in this
+invariant -- the boundary is what the page depends on -- but it is not coverage either.
 
 ## The disc's right-click is the host's until a reader asks for it (github#165)
 

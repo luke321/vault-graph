@@ -36,3 +36,6 @@ CLAUDE.local.md
 # the probe is a mutated copy of src/page.js and would read as a duplicate of the whole page.
 src/vg-contract-probe.js
 tsconfig.probe.json
+# github#156 -- the same two, for the exporter's probe against tsconfig.contracts-node.json.
+src/vg-exporter-probe.mjs
+tsconfig.exporter-probe.json

@@ -11,12 +11,11 @@ import { findChrome } from "./chrome.mjs";
 import { leftmostScreen, leftWindowPos } from "./screen.mjs";
 import { keepFocus } from "./focus.mjs";
 import { FIXTURE_MAX_AGE_DAYS, FIXTURE_NAMES, checkFixture, countNotes, describeFixture,
-         DEFAULT_JOBS, fixtureStore, record as recordPass, shapeDeltas,
-         startRun } from "./suite-stamp.mjs";
+         DEFAULT_JOBS, fixtureDigest, fixtureStore, record as recordPass, shapeDeltas,
+         stampFixture, startRun } from "./suite-stamp.mjs";
 import { spawn, spawnSync } from "node:child_process";
 import { existsSync, mkdtempSync, rmSync, readFileSync, writeFileSync, readdirSync,
          renameSync, mkdirSync } from "node:fs";
-import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
 import { createServer } from "node:net";
 import { join, dirname, basename } from "node:path";
@@ -118,10 +117,14 @@ const selected = () => (ONLY.length
 
 // github#110, github#113, github#92
 const JOBS = Math.max(1, Number(arg("jobs", String(DEFAULT_JOBS))) || DEFAULT_JOBS);
+// github#101
+const SERIAL_JOBS = Math.max(1, Number(arg("serial-jobs", "1")) || 1);
+// github#101
+const WIDTH = Math.max(JOBS, SERIAL_JOBS);
 
 const GRID = argv.includes("--no-grid") ? false
           : argv.includes("--grid") ? true
-          : JOBS > 1;
+          : WIDTH > 1;
 
 let SCREEN = null;
 
@@ -597,7 +600,7 @@ check("layout matches its golden snapshot", async (p) => {
     __vg.graph.forEachNode(function(id, a){ pos[id] = [a.x, a.y]; });
     return { band: band, positions: pos };
   })()`);
-  // github#113, decisions/0011
+  // github#113, decisions/0011-a-live-rebuild-retakes-the-geometry-lock-at-rest
   if (dim !== "folder") {
     await p.eval(`__vg.setDim("folder"); void 0`);
     await settle(p);
@@ -2133,9 +2136,9 @@ check("highlighting ramps per note and is additive", async (p) => {
 check("tags: a live rebuild in the tag disc refiles the arrival and keeps the rings it was switched into", async (p) => {
   await settle(p);
   await p.eval(LIVE_JS);
-  // github#72, github#86, decisions/0011 -- the filing is a cache a live rebuild stales
+  // github#72, github#86, decisions/0011-a-live-rebuild-retakes-the-geometry-lock-at-rest -- the filing is a cache a live rebuild stales
   // github#86 -- an untagged arrival lands in (untagged)
-  // github#86, decisions/0011 -- a switched-to disc keeps its borrowed rings
+  // github#86, decisions/0011-a-live-rebuild-retakes-the-geometry-lock-at-rest -- a switched-to disc keeps its borrowed rings
   // github#86 -- "fresh" is two passes inside the kept rings, not relayout()
   await p.j(`(function(){ __vg.setDim("tag"); return true; })()`);
   await settle(p);
@@ -8183,7 +8186,7 @@ check("a live rebuild lands on the layout a fresh relayout gives", async (p) => 
                                         return { n: window.__live.a.n }; })()`);
   const res = await p.j(`__vg.applyData(window.__live.withOneMore("__live/Zz Live Probe.md"))`);
   await settle(p);
-  // decisions/0011, github#21
+  // decisions/0011-a-live-rebuild-retakes-the-geometry-lock-at-rest, github#21
   const after = await p.j(`(function(){
     var landed = window.__live.snap();
     __vg.relayout();
@@ -8615,29 +8618,17 @@ function resolveVaults() {
   if (arg("url", "")) return [{ path: "", label: "the page passed with --url" }];
 
   const out = [];
-  // github#71 -- the trio share one list, by delegation
-  const GENERATORS = ["make-demo-vault.mjs", "make-test-vault.mjs", "make-shape-vault.mjs"];
   // github#86 -- hashes ONLY its own generator; the other three do not move
   const TAG_GENERATORS = ["make-tag-vault.mjs"];
   // github#71 -- delegates to nothing, so it gets its OWN list
   const SPEC_GENERATORS = ["make-spec-vault.mjs"];
-  // github#106 -- format 2 stamps the note count
-  const FIXTURE_FORMAT = 2;
   const storeRoot = fixtureStore(ROOT);
-
-  const digestOf = (args, gens) => {
-    const h = createHash("sha256");
-    h.update("format:" + FIXTURE_FORMAT);
-    for (const g of gens || GENERATORS) h.update(readFileSync(join(HERE, g)));
-    h.update(JSON.stringify(args));
-    return h.digest("hex").slice(0, 8);
-  };
 
   const todayDay = () => new Date().toISOString().slice(0, 10);
   const ageDays = (day) => Math.floor((Date.parse(todayDay()) - Date.parse(day)) / 86400000);
 
   const gen = (script, args, name, label, gens) => {
-    const digest = digestOf(args, gens);
+    const digest = fixtureDigest(args, gens);
     const dir = join(storeRoot, `${name}-${digest}`);
     const stampPath = join(dir, ".stamp.json");
     let fresh = false;
@@ -8670,9 +8661,7 @@ function resolveVaults() {
         return;
       }
       // github#106 -- counted, then checked before it is published
-      writeFileSync(join(building, ".stamp.json"),
-                    JSON.stringify({ digest, day: todayDay(), script, args, notes: countNotes(building) },
-                                   null, 2) + "\n");
+      stampFixture(building, { digest, script, args, notes: countNotes(building) });
       const built = checkFixture(building);
       if (!built.ok) {
         console.log(`  cannot generate ${label}: ${built.why}`);
@@ -8744,7 +8733,7 @@ async function main() {
   const vaults = resolveVaults();
   console.log(`checking ${vaults.length} vault(s): ${vaults.map((v) => v.label).join(", ")}`);
 
-  const lanePorts = PINNED_PORT ? [] : await freePorts(Math.max(JOBS, 1));
+  const lanePorts = PINNED_PORT ? [] : await freePorts(Math.max(WIDTH, 1));
 
   // github#113
   const jobs = [];
@@ -8757,9 +8746,9 @@ async function main() {
     const intro = mine.filter(needsIntro);
     // github#79
     const pristine = mine.filter(needsPristine);
-    // github#113
-    const walk = JOBS > 1 ? rest.filter((c) => c.clock === "real") : [];
-    const fast = JOBS > 1 ? rest.filter((c) => c.clock !== "real") : rest;
+    // github#113, github#101
+    const walk = WIDTH > 1 ? rest.filter((c) => c.clock === "real") : [];
+    const fast = WIDTH > 1 ? rest.filter((c) => c.clock !== "real") : rest;
     if (walk.length) jobs.push({ vault: v, checks: walk, tag: v.label + " (walk)", url: atRest, walk: true });
     if (fast.length) jobs.push({ vault: v, checks: fast, tag: v.label, url: atRest });
     if (intro.length) jobs.push({ vault: v, checks: intro, tag: v.label + " (intro)", url });
@@ -8800,14 +8789,15 @@ async function main() {
     console.log("");
   };
 
-  // github#113
+  // github#113, github#101
   const pool = async (list, width) => {
     const walks = list.filter((j) => j.walk), fasts = list.filter((j) => !j.walk);
-    let walkBusy = false;
+    const walkWidth = Math.max(1, Math.min(SERIAL_JOBS, width));
+    let walkRunning = 0;
     const worker = async (lane) => {
       for (;;) {
         let w = null;
-        if (!walkBusy && walks.length) { w = walks.shift(); walkBusy = true; }
+        if (walkRunning < walkWidth && walks.length) { w = walks.shift(); walkRunning++; }
         else if (fasts.length) w = fasts.shift();
         else if (walks.length) { await sleep(500); continue; }
         else return;
@@ -8818,7 +8808,7 @@ async function main() {
           r = { failed: w.checks.length, ran: w.checks.length,
                 lines: ["  !! this job did not run: " + e.message], timings: [] };
         }
-        if (w.walk) walkBusy = false;
+        if (w.walk) walkRunning--;
         report(w, r);
         bump(w, r);
       }
@@ -8826,12 +8816,14 @@ async function main() {
     await Promise.all(Array.from({ length: Math.min(width, list.length) }, (_, lane) => worker(lane)));
   };
 
-  if (JOBS > 1) {
-    console.log(`${JOBS} lanes: ${jobs.filter((j) => j.walk).length} walk job(s) one at a time, ` +
+  if (WIDTH > 1) {
+    const walkWidth = Math.max(1, Math.min(SERIAL_JOBS, WIDTH));
+    console.log(`${WIDTH} lane(s), serial pool width ${SERIAL_JOBS}: ` +
+                `${jobs.filter((j) => j.walk).length} walk job(s) up to ${walkWidth} at once, ` +
                 `${jobs.filter((j) => !j.walk).length} other job(s) beside them`);
   }
   const started = Date.now();
-  await pool(jobs, JOBS);
+  await pool(jobs, WIDTH);
   const wall = Math.round((Date.now() - started) / 1000);
   if (arg("timings", "")) {
     writeFileSync(arg("timings", ""), JSON.stringify({ at: new Date().toISOString(), wallSec: wall,
@@ -8888,7 +8880,7 @@ async function main() {
   let worst = 0;
   for (const v of vaults) worst = Math.max(worst, failures.get(v.label) || 0);
 
-  if (vaults.length > 1 || JOBS > 1) {
+  if (vaults.length > 1 || WIDTH > 1) {
     console.log(`${"=".repeat(72)}`);
     for (const v of vaults) {
       const f = failures.get(v.label) || 0, t = ran.get(v.label) || 0;
@@ -8899,8 +8891,8 @@ async function main() {
 
   // github#93, decisions/0013
   // github#104 -- named first: a changed shape invalidates the measurement
-  const deltas = shapeDeltas({ jobs: JOBS, grid: GRID, headed: HEADED, port: PINNED_PORT,
-                               chrome: arg("chrome", "") });
+  const deltas = shapeDeltas({ jobs: JOBS, serialJobs: SERIAL_JOBS, grid: GRID, headed: HEADED,
+                               port: PINNED_PORT, chrome: arg("chrome", "") });
   const notFull = (what) => `${what} is not the full suite`;
   const partial = deltas.length ? `${deltas.join(", ")} is not the run shape the gates push with`
                 : ONLY.length ? notFull("--only")
