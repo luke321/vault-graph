@@ -10,6 +10,7 @@ issue; this folder holds what re-produces its numbers.
 | `analyse-186.mjs` | prints the rest states, the per-frame table, the arc-vs-opacity coupling per group, the radial walk per band and the watched notes, from a run's `probe.json`; writes `frames.csv` |
 | `encode-186.mjs` | square, CROPPED clip and stills at chosen `pr` from a filmed run |
 | `chart-data-186.mjs` | condenses the runs into the JSON the review page charts |
+| `packed-186.mjs` | measures the runs against the definition of packed given on 2026-09-21 — every wedge touches both seams and both rings at all times, the static radii honoured — as seam coverage per lit wedge and ring reach per band, per frame; writes `runs/packed-data.json` |
 | `runs/*.csv` | the per-frame series of the four acts measured on 2026-09-21 |
 | `runs/chart-data.json` | the condensed data behind the review page's charts |
 
