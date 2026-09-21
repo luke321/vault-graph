@@ -1195,7 +1195,12 @@ check("tags: each grouping keeps its own colours, and the settings tabs reach bo
               : "; no tag row to pin") +
             `; folder map ${r.folderMapSize} entries, folder order kept ${r.foldersSame}, folder colours kept ${r.colourSame}`,
   };
-}, { on: "all" });
+  // github#151 -- leaves state.hidden: it switches to the tag disc, and visiting that disc
+  // github#151 -- seeds its own hidden defaults, which the page keeps per dimension by design
+  // github#151 -- (design/0015). Declared here rather than relying on an earlier declared
+  // github#151 -- writer of the same key running first -- which is what made it pass in a
+  // github#151 -- full run and fail on its own.
+}, { on: "all", leaves: ["state.hidden"] });
 
 /* -------------------------------------------------------------- github#116 */
 
@@ -4096,6 +4101,10 @@ check("the zoom buttons step by one wheel notch", async (p) => {
 });
 
 check("the pan toggle locks the camera and flies home", async (p) => {
+  // github#151 -- this drives a control the page PERSISTS. It passed only because something
+  // github#151 -- upstream had already taken store.settings off baseline; on its own, or once
+  // github#151 -- that writer is fixed, it is the first writer and fails.
+  const storedWas = await storeSnap(p);
   await camReset(p);
   const box = await stageBox(p);
   const on = await p.j(`document.querySelector("#vg-pan").getAttribute("aria-pressed")`);
@@ -4129,6 +4138,8 @@ check("the pan toggle locks the camera and flies home", async (p) => {
   await camSettle(p);
   const back = await p.j(`document.querySelector("#vg-pan").getAttribute("aria-pressed")`);
   await camReset(p);
+  // github#151
+  await storeBack(p, storedWas);
   return {
     ok: on === "true" && off.pressed === "false" && !off.setting && !off.api &&
         Math.abs(moved.x - 0.5) > 0.01 &&
@@ -5081,13 +5092,14 @@ async function walkSolo(p, fitOn) {
   const hasFit = await p.j(`typeof __vg.fitCap === "boolean"`);
   if (fitOn && !hasFit) return { skip: "this build has no per-frame dot-size cap to switch on" };
   await p.eval(`__vg.fitCap = ${fitOn ? "true" : "false"}; void 0`);
-  // github#151 -- what the eyes read before this walk touches them
+  // github#151 -- what the eyes read before this walk touches them, and the model behind them
   const eyesWere = await p.j(`(function(){
     var out = {}, els = document.querySelectorAll("[data-eye]");
     for (var i = 0; i < els.length; i++) {
       out[els[i].getAttribute("data-eye")] = els[i].getAttribute("aria-pressed");
     }
     return out; })()`).catch(() => ({}));
+  const hiddenWere = await p.j(`JSON.stringify(__vg.state.hidden.folder || {})`).catch(() => "{}");
   const pick = await p.j(`(function(){
     var best = null;
     __vg.groupOrder().forEach(function (g) {
@@ -5131,15 +5143,34 @@ async function walkSolo(p, fitOn) {
   await sleep(300);
   const after = await p.j(SAMPLE);
   // github#151 -- back to what the eyes read, not to everything shown: seedHidden() hides some
-  // groups by default, and clicking every "false" row on left the legend wider than baseline
+  // groups by default, and clicking every "false" row on left the legend wider than baseline.
+  // RE-QUERY AFTER EVERY CLICK: each one rebuilds the legend, so a single loop over one
+  // querySelectorAll clicks detached nodes after the first and silently does nothing.
   await p.j(`(function(){
-    var want = ${JSON.stringify(JSON.stringify(eyesWere))};
-    var map = JSON.parse(want), els = document.querySelectorAll("[data-eye]");
-    for (var i = 0; i < els.length; i++) {
-      var k = els[i].getAttribute("data-eye");
-      if (map[k] !== undefined && els[i].getAttribute("aria-pressed") !== map[k]) els[i].click();
+    var map = JSON.parse(${JSON.stringify(JSON.stringify(eyesWere))});
+    for (var n = 0; n < 60; n++) {
+      var els = document.querySelectorAll("[data-eye]"), did = false;
+      for (var i = 0; i < els.length; i++) {
+        var k = els[i].getAttribute("data-eye");
+        if (map[k] !== undefined && els[i].getAttribute("aria-pressed") !== map[k]) {
+          els[i].click(); did = true; break;
+        }
+      }
+      if (!did) break;
     }
     return true; })()`).catch(() => 0);
+  await settle(p);
+  // github#151 -- and the trap door the eyes cannot open. A row is only given a data-eye while it
+  // is LIVE, and a group hidden down to zero visible notes is not live -- so "(unlinked)" soloed
+  // away loses its own eye and can never be clicked back, which is what left state.hidden off
+  // baseline for the rest of the job and what the press.vg-legend declaration was papering over.
+  // applyHiddenDefaults() is the page's own path back: seedHidden() + buildLegend() + a cascade.
+  const stillOff = await p.j(`JSON.stringify(__vg.state.hidden.folder || {}) !== ${JSON.stringify(hiddenWere)}`)
+                     .catch(() => false);
+  if (stillOff) {
+    await p.eval(`__vg.applyHiddenDefaults(); void 0`).catch(() => {});
+    await settle(p);
+  }
   await settle(p);
   await camSettle(p);
   if (hasFit) await p.eval(`__vg.fitCap = false; void 0`);
@@ -5160,11 +5191,10 @@ check("a dot never outgrows its resting size while a cascade walks", async (p) =
   if (r.skip) return { ok: true, detail: r.skip };
   if (r.fail) return { ok: false, detail: r.fail };
   return { ok: r.ok, detail: soloDetail(r) };
-  // github#151 -- walkSolo() now puts every eye back to what it READ rather than showing
-  // github#151 -- everything, and one legend row still ends off baseline. Declared rather than
-  // github#151 -- guessed at: the solo path is the legend's own "only" affordance and what it
-  // github#151 -- leaves has not been explained yet. It is the whole residue on this fixture.
-}, { on: WALK, clock: "real", leaves: ["press.vg-legend"] });
+  // github#151 -- nothing declared: the residue this used to carry was "(unlinked)" soloed down
+  // github#151 -- to zero visible notes, which loses its own data-eye and cannot be clicked back.
+  // github#151 -- walkSolo() re-queries between clicks and falls back to applyHiddenDefaults().
+}, { on: WALK, clock: "real" });
 
 // design/0011
 check("with Size dots from the frame on, a walking dot is held under its two resting sizes, never above", async (p) => {
@@ -5787,6 +5817,10 @@ check("colour unlinked notes by folder: the settings-panel toggle actually flips
 });
 
 check("compact axis: the view-level icon actually flips the live state, and persists", async (p) => {
+  // github#151 -- this drives a control the page PERSISTS. It passed only because something
+  // github#151 -- upstream had already taken store.settings off baseline; on its own, or once
+  // github#151 -- that writer is fixed, it is the first writer and fails.
+  const storedWas = await storeSnap(p);
   // github#23
   const r = await p.j(`(function(){
     var btn = document.querySelector("#vg-compact");
@@ -5802,6 +5836,8 @@ check("compact axis: the view-level icon actually flips the live state, and pers
   })()`);
   if (r.noButton) return { ok: false, detail: "no #vg-compact on this build" };
   const flipped = r.afterState !== r.beforeState && r.afterPressed !== r.beforePressed;
+  // github#151
+  await storeBack(p, storedWas);
   return {
     ok: flipped,
     detail: `clicking the icon: state ${r.beforeState}->${r.afterState}, aria-pressed ` +
@@ -6277,6 +6313,10 @@ function pinIdentityBuilds() {
 // github#151 -- against the 0.954 the job started on. camReset() puts the camera at the page's
 // github#151 -- fit, which is the right place; it is simply not the same number.
 check("a pin is stored by the note's path, not by its position", async (p, ctx) => {
+  // github#151 -- this drives a control the page PERSISTS. It passed only because something
+  // github#151 -- upstream had already taken store.settings off baseline; on its own, or once
+  // github#151 -- that writer is fixed, it is the first writer and fails.
+  const storedWas = await storeSnap(p);
   const home = await p.eval("location.href");
   const READY = "!!(window.__vg && __vg.heat && __vg.state.until === null)";
   const goto = async (url, budget) => {
@@ -6351,6 +6391,9 @@ check("a pin is stored by the note's path, not by its position", async (p, ctx) 
     // github#143 -- leave the fixture's own store as this check found it
     // github#151 -- and its camera: clearing the pins re-fits a disc whose extent just changed
     if (back) { await p.eval(`__vg.clearPins(); void 0`); await settle(p); await camReset(p); }
+    // github#151 -- after the navigation home, so it is the FIXTURE page's store that gets put
+    // back rather than the pin vault's. clearPins() restores the page and leaves the key behind.
+    await storeBack(p, storedWas);
   }
   if (why) return { ok: false, detail: why };
   const want = ["B.md", "ghost:Missing"];
