@@ -156,16 +156,23 @@ const SAMPLER = `(function () {
     G.forEachNode(function (id, a) {
       var al = __vg.alpha[id] || 0;
       var g = __vg.groupOf(id);
-      var gg = groups[g] || (groups[g] = { n: 0, alphaSum: 0, lit: 0, rMin: Infinity, rMax: 0, cells: 0 });
+      var gg = groups[g] || (groups[g] = { n: 0, alphaSum: 0, lit: 0, rMin: Infinity, rMax: 0, cells: 0, byBand: {} });
       gg.n++; gg.alphaSum += al; if (al > 0.004) gg.lit++;
       if (__vg.isOrphan(id) || __vg.isPinned(id)) return;
-      var b = bands[__vg.isInner(id) ? "i" : "o"];
+      var bk = __vg.isInner(id) ? "i" : "o";
+      // github#186 -- per BAND, so a group with cells in both is judged wedge by wedge
+      var gb = gg.byBand[bk] || (gg.byBand[bk] = { n: 0, alphaSum: 0, lit: 0, rMin: Infinity, rMax: 0 });
+      gb.n++; gb.alphaSum += al;
+      if (al > 0.5) { var rb = Math.hypot(a.x, a.y); gb.lit++;
+                      if (rb < gb.rMin) gb.rMin = rb; if (rb > gb.rMax) gb.rMax = rb; }
+      var b = bands[bk];
       b.alphaSum += al;
       if (al > 0.5) { var r = Math.hypot(a.x, a.y); b.lit++; if (r < b.rMin) b.rMin = r; if (r > b.rMax) b.rMax = r;
                       if (r < gg.rMin) gg.rMin = r; if (r > gg.rMax) gg.rMax = r; }
     });
     ["i", "o"].forEach(function (k) { if (bands[k].rMin === Infinity) bands[k].rMin = 0; });
-    Object.keys(groups).forEach(function (g) { if (groups[g].rMin === Infinity) groups[g].rMin = 0; });
+    Object.keys(groups).forEach(function (g) { if (groups[g].rMin === Infinity) groups[g].rMin = 0;
+      Object.keys(groups[g].byBand).forEach(function (k) { if (groups[g].byBand[k].rMin === Infinity) groups[g].byBand[k].rMin = 0; }); });
     __vg.wedgeCells().forEach(function (c) { if (groups[c.g]) groups[c.g].cells++; });
     var d = __vg.densityReport();
     var pitch = { o: d.pitchPx && d.unitPx ? 160 * d.pitchPx / d.unitPx : 0, i: d.pitchPxInner && d.unitPx ? 160 * d.pitchPxInner / d.unitPx : 0 };
