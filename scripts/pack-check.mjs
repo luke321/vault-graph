@@ -54,8 +54,7 @@ for (const dir of runDirs(ROOT)) {
   const frames = P.samples.filter((s) => s.cascade && s.pr != null);
   if (!frames.length) throw new Error(`${dir}: no cascade frames sampled`);
   const restCov = { A: covers(P.restA.wedges), B: covers(P.restB.wedges) };
-  // a run taken before the sampler recorded per-band group stats would silently skip every
-  // wedge, and a check with no data is not a check -- github#186
+  // github#186
   if (!frames.some((s) => Object.values(s.groups || {}).some((g) => g && g.byBand))) {
     throw new Error(`${dir}: the run has no per-band group stats -- re-take it with the current probe-186.mjs`);
   }
@@ -101,11 +100,9 @@ for (const dir of runDirs(ROOT)) {
     for (const [key, c] of covers(s.wedges)) {
       const a = restCov.A.get(key), b = restCov.B.get(key);
       if (!a && !b) continue;
-      // a one- or two-note wedge cannot reach two seams: the definition exempts it
+      // github#186
       const gs = s.groups[c.g] && s.groups[c.g].byBand ? s.groups[c.g].byBand[c.band] : null;
       if (!(gs && gs.lit >= SEAM_MIN_LIT)) continue;
-      // coverage counts a dot only at alpha >= 0.5, while the arc is held by every note's
-      // opacity, so a wedge mid-fade owes only the share of itself the measure can see
       const seen = gs.alphaSum > 1e-6 ? Math.min(1, gs.lit / gs.alphaSum) : 1;
       const owed = (a && b ? Math.min(a.cover, b.cover) : (a || b).cover) * seen;
       const slack = c.cover - owed;
@@ -119,9 +116,7 @@ for (const dir of runDirs(ROOT)) {
   }
   const seamWorstList = [...seamWorst.values()].sort((x, y) => x.slack - y.slack).slice(0, 6);
 
-  // how many notes a group's arc could hold at the band's own pitch, over its own rows,
-  // against how many it actually has -- the definition's "never wider than its notes can fill".
-  // Read RELATIVE to the same ratio at rest, so solveBand's ceil overshoot cancels.
+  // github#186
   const fillOf = (s, key) => {
     const [g, band] = key.split("|");
     const gs = s.groups[g] && s.groups[g].byBand ? s.groups[g].byBand[band] : null;

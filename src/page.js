@@ -943,7 +943,7 @@ function mountVaultGraph(root, data, deps) {
   var NODE_MIN = 2.6, NODE_MAX = 11, NODE_ORPHAN = 6;
 
   // github#186, decisions/0017
-  var LINK_WEIGHT = 0;
+  var LINK_WEIGHT = 0.4;
   var LINK_CAP = 2.5;
   var sizeMean = 1;
   /** @param {string} id */
@@ -1643,8 +1643,6 @@ function mountVaultGraph(root, data, deps) {
   var INNER_FILL = 0.8;
   var GAP_BAND = { i: 0.5, o: 1 };
   var CLEAR_OF_ROOM = 0.12;
-  // github#107 -- ROOM_PCTL, the pick() quantile
-  var ROOM_PCTL = 0.5;
 
   var MIN_SPAN = 6 * Math.PI / 180;
   var HL_PUSH = 0.9;
@@ -1661,8 +1659,6 @@ function mountVaultGraph(root, data, deps) {
    * @property {"i" | "o"} key
    * @property {number} sp        row pitch, in units
    * @property {number} rows
-   * @property {number} room
-   * @property {{ m: number, b: number, lo: number }} ramp
    * @property {number} gapDeg
    * @property {number} nG
    * @property {number} [nSub]   subfolder boundaries in this band, set by the allocator
@@ -1673,8 +1669,8 @@ function mountVaultGraph(root, data, deps) {
   function bandOf(k) {
     if (!BAND) {
       BAND = {
-        i: { key: "i", sp: 1, rows: 0, room: 0, ramp: { m: 1, b: 0, lo: 0 }, gapDeg: 0, nG: 0 },
-        o: { key: "o", sp: 1, rows: 0, room: 0, ramp: { m: 1, b: 0, lo: 0 }, gapDeg: 0, nG: 0 },
+        i: { key: "i", sp: 1, rows: 0, gapDeg: 0, nG: 0 },
+        o: { key: "o", sp: 1, rows: 0, gapDeg: 0, nG: 0 },
       };
     }
     return k === "i" ? BAND.i : BAND.o;
@@ -1855,8 +1851,8 @@ function mountVaultGraph(root, data, deps) {
    * @property {number} r        row radius in units (times UNIT for graph units)
    * @property {number} u        position along the cell's arc, 0..1
    * @property {number} row
-   * @property {number} eA       dot size at this row's leading edge
-   * @property {number} eB       and at its trailing edge
+   * @property {number} eA         github#186
+   * @property {number} eB         github#186
    */
   /**
    * A wedge cell: one group, one subfolder slice of a group, or the shared wedge of the
@@ -1875,7 +1871,7 @@ function mountVaultGraph(root, data, deps) {
    * @property {Slot[]} slots
    * @property {number} geom       ringsLayout: geometric presence this frame
    * @property {number} live       ringsLayout: alpha-weighted presence this frame
-   * @property {boolean} holdArc    ringsLayout: github#186, the arc is held at its source share
+   * @property {boolean} holdArc   github#186
    * @property {number} span
    * @property {number} pLead
    * @property {number} pTrail
@@ -1893,7 +1889,6 @@ function mountVaultGraph(root, data, deps) {
    * @property {number} sp
    * @property {number} spInner
    * @property {number} density
-   * @property {BandNum} room
    * @property {Record<string, number>} dbgLive
    * @property {Record<string, boolean>} dbgSplit
    * @property {Record<string, number>} presMax
@@ -1913,9 +1908,8 @@ function mountVaultGraph(root, data, deps) {
    */
   /**
    * buildWedgePlan's fourth argument when it is not a bare density: the previous plan's
-   * spacings, room and depth, held so a re-plan does not move what it should not. github#186
-   * @typedef {{ i?: number, o?: number, room?: BandNum, depth?: BandNum,
-   *             hold?: Record<string, boolean> }} SpHold
+   * spacings and depth, held so a re-plan does not move what it should not. github#186
+   * @typedef {{ i?: number, o?: number, depth?: BandNum, hold?: Record<string, boolean> }} SpHold
    */
   /**
    * @typedef {Object} AllocOpts
@@ -2177,7 +2171,7 @@ function mountVaultGraph(root, data, deps) {
     var byCell = dict();
     /** @type {Record<string, string[]>} */
     var cellsOf = dict();
-    var planTotal = 0;
+    var planTotal = 0, planCount = 0;
     /** @type {Record<string, number>} */
     var presMax = dict();
 
@@ -2224,7 +2218,7 @@ function mountVaultGraph(root, data, deps) {
         }
       }
       for (var mi = 0, mn = members.length; mi < mn; mi++) {
-        // github#186 -- a presence count, so it divides the link weight back out
+        // github#186
         var gm = memberG[mi], wm = W(members[mi]) / linkWeight(members[mi]);
         liveG[gm] = (liveG[gm] || 0) + (wm > 1 ? 1 : wm < 0 ? 0 : wm);
       }
@@ -2298,7 +2292,7 @@ function mountVaultGraph(root, data, deps) {
         byCell[mKey].push(mId);
       }
       var pw = W(mId);
-      planTotal += pw;
+      planTotal += pw; planCount++;
       // github#186, decisions/0006
       var pv = pw / linkWeight(mId);
       if (colWalk && colWalk[mG] !== undefined) pv = colWalk[mG].f;
@@ -2353,14 +2347,15 @@ function mountVaultGraph(root, data, deps) {
       skel.filled = true;
     }
 
-    var TOTAL = planTotal;
+    // github#186, decisions/0017 -- the hub and the ring seed are COUNTS, not weights
+    var TOTAL = planCount;
     var MIN = MIN_SPAN, TWO = arcSpan();
     var smallAt = TOTAL * (MIN / TWO);
     // github#97
     /** @type {Record<string, boolean>} */
     var groupInner = dict();
     cells.forEach(function (c) {
-      var small = c.wsum < smallAt;
+      var small = c.list.length < smallAt;
       if (groupInner[c.g] === undefined) groupInner[c.g] = small;
       else groupInner[c.g] = groupInner[c.g] || small;
     });
@@ -2376,10 +2371,11 @@ function mountVaultGraph(root, data, deps) {
       outer = cells; inner = [];
     }
 
-    /** @param {Cell[]} list @param {string} band */
-    var share = function (list, band) {
+    // github#186
+    /** @param {Cell[]} list @param {string} band @param {(c: Cell) => number} [wOf] */
+    var share = function (list, band, wOf) {
       var a = allocateBand(list,
-                           function (c) { return c.wsum; },
+                           wOf || function (c) { return c.wsum; },
                            { subGaps: false, clamp: null, totFloor: 0.0001, band: band });
       lastGapN[band] = Math.round(a.nG * 1000) / 1000;
       list.forEach(function (c) { c.band = a.shareOf(c); });
@@ -2404,7 +2400,6 @@ function mountVaultGraph(root, data, deps) {
           ? Math.min(DENSITY_MAX, Math.sqrt(fullTotal / planTotal)) : 1);
     var SP = density;
 
-    var givenRoom = given && given.room ? given.room : null;
     var SP_I = given && given.i > 0 ? given.i : SP;
     var SP_O = given && given.o > 0 ? given.o : SP;
     /** @param {Cell[]} cells @param {string} key */
@@ -2469,6 +2464,9 @@ function mountVaultGraph(root, data, deps) {
         if ((groupNotes[g] || 0) < PIN_BELOW) { pinnedInner[g] = true; assign[g] = true; }
       });
       var movable = names.filter(function (g) { return !pinnedInner[g]; });
+      // github#186, decisions/0017
+      /** @param {Cell} c */
+      var countOf = function (c) { return c.list.length; };
       // github#117 -- the pin above can MOVE a group, so land it on both paths out
       var applyAssign = function () {
         cells.forEach(function (c) { c.inner = !!assign[c.g]; });
@@ -2489,19 +2487,19 @@ function mountVaultGraph(root, data, deps) {
       var spanFor = function (ins, outs, rv) {
         var iR = 0;
         ins.forEach(function (c) {
-          var r = rowsNeeded(usableRef(c, rv), c.wsum, rv);
+          var r = rowsNeeded(usableRef(c, rv), countOf(c), rv);
           if (r > iR) iR = r;
         });
         var rOut = ins.length ? rv + iR * SP + GUTTER : rv;
         var oR = 0;
         outs.forEach(function (c) {
-          var r = rowsNeeded(usableRef(c, rOut), c.wsum, rOut);
+          var r = rowsNeeded(usableRef(c, rOut), countOf(c), rOut);
           if (r > oR) oR = r;
         });
         // github#117
         var nI = 0, nO = 0;
-        ins.forEach(function (c) { nI += c.wsum; });
-        outs.forEach(function (c) { nO += c.wsum; });
+        ins.forEach(function (c) { nI += countOf(c); });
+        outs.forEach(function (c) { nO += countOf(c); });
         var iHi = (rv + iR * SP) * INNER_SCALE, iLo = rv * INNER_SCALE;
         var oHi = rOut + oR * SP, oLo = rOut;
         var rpI = nI > 0.0001 ? Math.max(0, iHi * iHi - iLo * iLo) / nI : 0;
@@ -2525,7 +2523,7 @@ function mountVaultGraph(root, data, deps) {
         var outs = [];
         cells.forEach(function (c) { (a[c.g] ? ins : outs).push(c); });
         if (!ins.length || !outs.length) return { cost: Infinity, r0: R0_BASE };
-        share(ins, "i"); share(outs, "o");
+        share(ins, "i", countOf); share(outs, "o", countOf);
         cells.forEach(function (c) { c.bandRef = c.band; });
 
         var biggestInner = 0, smallestOuter = Infinity;
@@ -2589,9 +2587,9 @@ function mountVaultGraph(root, data, deps) {
         }
       }
 
-      applyAssign();
-
+      // github#186
       r0 = evaluate(assign).r0;
+      applyAssign();
     })();
 
     // github#186
@@ -2706,17 +2704,10 @@ function mountVaultGraph(root, data, deps) {
       var rowFirst = dict();
       /** @type {Record<string, number>} */
       var rowLast = dict();
-      /** @type {Record<string, number>} */
-      var edgeA = dict();
-      /** @type {Record<string, number>} */
-      var edgeB = dict();
       recs.forEach(function (r) {
         rowW[r.row] = (rowW[r.row] || 0) + r.w;
         if (rowFirst[r.row] === undefined) rowFirst[r.row] = r.w;
         rowLast[r.row] = r.w;
-        var dz = graph.getNodeAttribute(r.id, "size") || 4;
-        if (edgeA[r.row] === undefined) edgeA[r.row] = dz;
-        edgeB[r.row] = dz;
       });
       /** @type {Record<string, number>} */
       var rowAcc = dict();
@@ -2739,7 +2730,8 @@ function mountVaultGraph(root, data, deps) {
                      rr: rr, inner: !!c.inner });
         }
         var u0 = (r.row % 2 === 1) ? 1 - t : t;
-        var eA = edgeA[r.row] || 0, eB = edgeB[r.row] || 0;
+        // github#186
+        var eA = 2 * hA, eB = 2 * hB;
         out.push({ id: r.id, r: rr, u: pad + u0 * span, row: r.row,
                    eA: (r.row % 2 === 1) ? eB : eA,
                    eB: (r.row % 2 === 1) ? eA : eB });
@@ -2754,27 +2746,6 @@ function mountVaultGraph(root, data, deps) {
       c.slots = placeCell(c, rf, base, c.inner ? innerRows : outerRows);
     });
 
-    /** @param {Cell[]} list */
-    var roomOf = function (list) {
-      /** @type {number[]} */
-      var v = [];
-      list.forEach(function (c) {
-        if (!c.slots || !c.slots.length) return;
-        /** @type {Record<string, number>} */
-        var rn = dict();
-        c.slots.forEach(function (sl) { rn[sl.r] = (rn[sl.r] || 0) + 1; });
-        c.slots.forEach(function (sl) {
-          var n = rn[sl.r] || 1;
-          var step = (c.band || 0) * sl.r * UNIT / n;
-          if (step > 1) v.push(step);
-        });
-      });
-      if (!v.length) return 0;
-      v.sort(function (x, y) { return x - y; });
-      return v[Math.floor(v.length * 0.1)];
-    };
-    var roomPlan = givenRoom || { i: roomOf(inner), o: roomOf(outer) };
-
     /** @param {Cell[]} list @param {number} fallback @param {string} band */
     var depthOf = function (list, fallback, band) {
       var given = spIn && typeof spIn === "object" && spIn.depth ? spIn.depth[band] : 0;
@@ -2783,7 +2754,7 @@ function mountVaultGraph(root, data, deps) {
     };
 
     return { cells: cells, maxR: maxR, total: planTotal, r0: r0, rOuter: rOuter,
-             sp: SP_O, spInner: SP_I, density: density, room: roomPlan,
+             sp: SP_O, spInner: SP_I, density: density,
              dbgLive: liveG, dbgSplit: splitOf, presMax: presMax,
              rows: { i: depthOf(inner, innerRows, "i"),
                      o: depthOf(outer, outerRows || REF_ROWS, "o") } };
@@ -2799,13 +2770,9 @@ function mountVaultGraph(root, data, deps) {
   function ringsLayout(planIn, strict) {
     // github#41, design/0011
     if (trace) {
-      tracePut({ what: "pass", roomIn_i: bandOf("i").room, roomIn_o: bandOf("o").room,
-                 hasRoomNow: !!roomNow, hasCellNow: !!cellNow, hasEdgeNow: !!edgeNow,
+      tracePut({ what: "pass", roomIn_i: pitchUnits("i"), roomIn_o: pitchUnits("o"),
+                 hasRoomNow: false, hasCellNow: !!cellNow, hasEdgeNow: !!edgeNow,
                  strict: !!strict, givenPlan: !!planIn });
-    }
-    if (roomNow) {
-      if (roomNow.i > 1) bandOf("i").room = roomNow.i;
-      if (roomNow.o > 1) bandOf("o").room = roomNow.o;
     }
     // github#19
     // decisions/0001
@@ -2865,14 +2832,8 @@ function mountVaultGraph(root, data, deps) {
     var lastAt = null;
     /** @type {Record<string, { t: number, id: string }> | null} */
     var firstAt = null;
-    /** @type {Record<string, number[]>} */
-    var roomPool = { i: [], o: [] };
     /** @type {Record<string, number>} */
     var cellRoomNext = dict();
-    /** @type {Record<string, number>} */
-    var cellMin = dict();
-    /** @type {Record<string, string>} */
-    var cellOf = dict();
     /** @type {Record<string, number>} */
     var edgeCapNext = dict();
     /** @type {Record<string, boolean>} */
@@ -2975,19 +2936,13 @@ function mountVaultGraph(root, data, deps) {
                           ids: c.slots.map(function (sl) { return sl.id; }) });
         }
 
+        // github#186
         /** @type {Record<string, number>} */
         var rowN = dict();
         c.slots.forEach(function (sl) {
-          var w = alpha[sl.id] || 0;
+          var w = (alpha[sl.id] || 0) * linkWeight(sl.id);
           if (w > 0) rowN[sl.r] = (rowN[sl.r] || 0) + w;
         });
-        var rowsUsed = 0;
-        Object.keys(rowN).forEach(function (rk) {
-          rowsUsed += rowN[rk] > 1 ? 1 : rowN[rk];
-        });
-        if (!(rowsUsed > 0)) rowsUsed = 1;
-        var maxRowR = -1;
-        Object.keys(rowN).forEach(function (rk) { if (+rk > maxRowR) maxRowR = +rk; });
         c.slots.forEach(function (sl) {
           if (!present(sl.id)) return;
           var rs = rowShare ? rowShare[Math.round(sl.r * 1000)] : null;
@@ -3017,19 +2972,20 @@ function mountVaultGraph(root, data, deps) {
           var rGraph = Math.max(1e-6, sl.r * UNIT);
           if (isInner && sl.row === 0) hubRow0Next[sl.id] = true;
           var bk = isInner ? "i" : "o";
-          var room = bandOf(bk).room > 1 ? bandOf(bk).room : pitchUnits(bk);
-          var clear = CLEAR_OF_ROOM * room * (GAP_BAND[bk] || 1);
-          var nRow = rowN[sl.r] > 0.001 ? rowN[sl.r] : 1;
-          if (nRow > 1.5) {
-            var ownStep = arc * rGraph / nRow;
-            roomPool[isInner ? "i" : "o"].push(ownStep);
-            if (cellMin[c.k] === undefined || ownStep < cellMin[c.k]) cellMin[c.k] = ownStep;
-          }
-          cellOf[sl.id] = c.k;
-          var side = function (z) {
-            var f = (z || NODE_MAX) / NODE_MAX;
-            if (f > 1) f = 1; else if (f < 0.15) f = 0.15;
-            return (clear + DOT_OF_PITCH * room * f) / rGraph;
+          // github#186, decisions/0017
+          var pitU = pitchUnits(bk);
+          var rowWs = rowN[sl.r] > 1e-9 ? rowN[sl.r] : 0;
+          var wSelf = (alpha[sl.id] || 0) * linkWeight(sl.id);
+          /** @param {number} shr */
+          var slotOf = function (shr) {
+            var u = arc * rGraph * (shr > 0 ? shr : 1);
+            return u > pitU ? pitU : u;
+          };
+          cellRoomNext[sl.id] = slotOf(rowWs > 1e-9 && wSelf > 0 ? wSelf / rowWs : 1);
+          /** @param {number} shr */
+          var side = function (shr) {
+            var u = slotOf(shr);
+            return (CLEAR_OF_ROOM * u * (GAP_BAND[bk] || 1) + DOT_OF_PITCH * u) / rGraph;
           };
           var mgA = side(sl.eA), mgB = side(sl.eB);
           var arcCap = arc * 0.66;
@@ -3045,8 +3001,9 @@ function mountVaultGraph(root, data, deps) {
           if (trace && trace.id === sl.id) {
             tracePut({ what: "edge", cell: c.k, g: c.g, u: sl.u, arc: arc, mgA: mgA, mgB: mgB,
                        spanArc: spanArc, rGraph: rGraph, slotR: sl.r, dEdge: dEdge,
-                       a0: a0, nRow: nRow, geom: c.geom, live: c.live, span: c.span,
-                       sideClear: clear, sideRoom: room, sideEA: sl.eA, sideEB: sl.eB });
+                       a0: a0, nRow: rowWs, geom: c.geom, live: c.live, span: c.span,
+                       sideClear: CLEAR_OF_ROOM * slotOf(1), sideRoom: slotOf(1),
+                       sideEA: sl.eA, sideEB: sl.eB });
           }
           var dLo = (mgA + spanArc * sl.u) * rGraph;
           var dHi = (mgB + spanArc * (1 - sl.u)) * rGraph;
@@ -3095,27 +3052,12 @@ function mountVaultGraph(root, data, deps) {
                                     y: graph.getNodeAttribute(id, "y") };
     });
 
-    var pool = roomPool;
-    // github#35
-    // github#107 -- ROOM_PCTL 0.1 -> 0.5, inner band's pool is more dispersed
-    /** @param {number[]} v */
-    var pick = function (v) {
-      if (!v.length) return undefined;
-      v.sort(function (x, y) { return x - y; });
-      return v[Math.floor(v.length * ROOM_PCTL)];
-    };
-    if (!roomNow) {
-      bandOf("i").room = pick(pool.i); bandOf("o").room = pick(pool.o);
-    }
     // github#160 -- shift the outer band out by row 0's largest dot radius
     // github#35 -- the inner band keeps HUB_ROW0_FRAC of the hub on purpose
     var insetO = 0;
-    var roomO = roomNow ? roomNow.o : bandOf("o").room;
-    if (plan.sp > 0 && plan.rows && plan.rows.o > 0 && roomO > 1) {
+    if (plan.sp > 0 && plan.rows && plan.rows.o > 0) {
       var pitO = UNIT * plan.sp;
-      var hiO = DOT_OF_PITCH * Math.min(pitO, UNIT * DOT_MAX_SPREAD);
-      var fO = Math.min(roomO * 0.92 / pitO, DOT_ROOM_MAX);
-      insetO = hiO * fO / UNIT;
+      insetO = DOT_OF_PITCH * Math.min(pitO, UNIT * DOT_MAX_SPREAD) / UNIT;
       var slackO = (plan.maxR - plan.rOuter) - (plan.rows.o - 1) * plan.sp - 2 * insetO;
       if (slackO < 0) insetO = Math.max(0, insetO + slackO);
       if (insetO > 0) {
@@ -3133,13 +3075,9 @@ function mountVaultGraph(root, data, deps) {
       }
     }
     if (trace) {
-      tracePut({ what: "passEnd", roomOut_i: bandOf("i").room, roomOut_o: bandOf("o").room,
-                 measured: !roomNow });
+      tracePut({ what: "passEnd", roomOut_i: pitchUnits("i"), roomOut_o: pitchUnits("o"),
+                 measured: true });
     }
-    Object.keys(cellOf).forEach(function (id) {
-      var m = cellMin[cellOf[id]];
-      if (m > 1) cellRoomNext[id] = m;
-    });
     cellRoom = cellNow || cellRoomNext;
     edgeCap = edgeNow || edgeCapNext;
     hubRow0 = hubRow0Next;
@@ -3831,6 +3769,15 @@ function mountVaultGraph(root, data, deps) {
         if (last && last.g === c.g) { last.b = c; return; }
         runs.push({ g: c.g, band: bk, a: c, b: c });
       });
+      // github#186
+      /** @param {{ g: string, a: DbgCell, b: DbgCell }} run */
+      var drawnFrac = function (run) {
+        var d = 0;
+        band.forEach(function (c) {
+          if (c.g === run.g && c.f0 >= run.a.f0 - 1e-12 && c.f1 <= run.b.f1 + 1e-12) d += c.f1 - c.f0;
+        });
+        return d;
+      };
       /** @param {{ g: string, a: DbgCell, b: DbgCell }} run */
       var noteFrac = function (run) {
         var lo = Infinity, hi = -Infinity;
@@ -3861,6 +3808,7 @@ function mountVaultGraph(root, data, deps) {
                    gap: sm.gap * 180 / Math.PI, avail: sm.avail * 180 / Math.PI,
                    start: deg(sw(run.a, "f0")), end: deg(sw(run.b, "f1")),
                    arc: (sw(run.b, "f1") - sw(run.a, "f0")) * 180 / Math.PI,
+                   drawn: drawnFrac(run) * sm.avail * 180 / Math.PI,
                    centre: deg((lo + hi) / 2) });
       });
     });
@@ -4377,8 +4325,6 @@ function mountVaultGraph(root, data, deps) {
     return fitCap;
   }
   var lastMinArc = 0;
-  /** @type {BandNum | null} */
-  var roomNow = null;
   /** @type {Record<string, { f: number, n: number }> | null} */
   var colWalk = null;
   // github#186
@@ -4478,8 +4424,8 @@ function mountVaultGraph(root, data, deps) {
     /** @type {Record<string, number>} */
     var keep = dict();
     graph.forEachNode(function (id) { keep[id] = alpha[id] || 0; alpha[id] = visible(id) ? timeFactor(id) : 0; });
-    var pinWas = pinnedPlan, keepWas = planKeep, roomWas = roomNow;
-    pinnedPlan = null; planKeep = null; roomNow = null; cellNow = null; edgeNow = null;
+    var pinWas = pinnedPlan, keepWas = planKeep;
+    pinnedPlan = null; planKeep = null; cellNow = null; edgeNow = null;
     colWalk = null; geomHold = null;
     ringsLayout();
     /** @type {Record<string, Point>} */
@@ -4490,7 +4436,7 @@ function mountVaultGraph(root, data, deps) {
       if (fitRatio() < renderer.getCamera().getState().ratio) deferredAutoFit = true;
       else fit();
     }
-    pinnedPlan = pinWas; planKeep = keepWas; roomNow = roomWas;
+    pinnedPlan = pinWas; planKeep = keepWas;
     graph.forEachNode(function (id) { alpha[id] = keep[id]; });
     /** @type {Record<string, number>} */
     var sweepOf = dict();
@@ -4542,7 +4488,7 @@ function mountVaultGraph(root, data, deps) {
     if (!ins.length && !outs.length && !moves.length) {
       lastCascade = { ins: 0, outs: 0, span: 0, path: "instant: nothing to move", frames: 0, ms: 0,
                       skelFrames: 0, skelMismatch: 0, skelFirst: "" };
-      pinnedPlan = null; roomNow = null; cellNow = null; edgeNow = null; posSrc = null; applyLayout(true); return;
+      pinnedPlan = null; cellNow = null; edgeNow = null; posSrc = null; applyLayout(true); return;
     }
 
     /** @param {string} a @param {string} b */
@@ -4774,7 +4720,7 @@ function mountVaultGraph(root, data, deps) {
       heatSig = "";
       pinnedPlan = null;
       planKeep = null;
-      roomNow = null; cellNow = null; edgeNow = null; posSrc = null;
+      cellNow = null; edgeNow = null; posSrc = null;
       colWalk = null; geomHold = null;
       assignPositions(finalPos);
       // github#21
@@ -4801,10 +4747,6 @@ function mountVaultGraph(root, data, deps) {
     var spDstB = { i: 1, o: 1 };
     // github#186
     var bandGone = { i: false, o: false };
-    /** @type {BandNum} */
-    var roomSrcB = { i: 0, o: 0 };
-    /** @type {BandNum} */
-    var roomDstB = { i: 0, o: 0 };
     /** @type {Record<string, number> | null} */
     var cellSrc = null;
     /** @type {Record<string, number> | null} */
@@ -4912,14 +4854,13 @@ function mountVaultGraph(root, data, deps) {
           keepAlpha = dict();
           graph.forEachNode(function (id) { keepAlpha[id] = alpha[id]; alpha[id] = alphaFn(id); });
         }
-        var keepI = bandOf("i").room, keepO = bandOf("o").room;
         var keepFit = dotFit, keepCell = cellRoom, keepEdge = edgeCap, keepHub = hubRow0;
-        var keepRampI = bandOf("i").ramp, keepRampO = bandOf("o").ramp, keepScale = sizeScale;
+        var keepScale = sizeScale;
         var keepPin = pinnedPlan, keepKeep = planKeep;
         // github#79
         var keepOv = ovCells;
-        var saved = roomNow, savedCell = cellNow, savedEdge = edgeNow;
-        roomNow = null; cellNow = null; edgeNow = null; edgeNow = null;
+        var savedCell = cellNow, savedEdge = edgeNow;
+        cellNow = null; edgeNow = null;
         var keepTag = trace ? trace.tag : "";
         traceTag(alphaFn ? "endpoint-B" : "endpoint-A");
         outPos = ringsLayout(pl, true);
@@ -4934,11 +4875,9 @@ function mountVaultGraph(root, data, deps) {
           if ((alpha[id] || 0) > 0.004) sizes[id] = dotPx(at.size, id);
         });
         fitPos = null; fitVer = -1;
-        var got = { i: bandOf("i").room, o: bandOf("o").room, pos: outPos,
-                    cells: cellRoom, edges: edgeCap, sizes: sizes };
-        roomNow = saved; cellNow = savedCell; edgeNow = savedEdge;
-        bandOf("i").room = keepI; bandOf("o").room = keepO;
-        bandOf("i").ramp = keepRampI; bandOf("o").ramp = keepRampO; sizeScale = keepScale;
+        var got = { pos: outPos, cells: cellRoom, edges: edgeCap, sizes: sizes };
+        cellNow = savedCell; edgeNow = savedEdge;
+        sizeScale = keepScale;
         dotFit = keepFit; cellRoom = keepCell; edgeCap = keepEdge; hubRow0 = keepHub;
         pinnedPlan = keepPin; planKeep = keepKeep;
         ovCells = keepOv;
@@ -4947,8 +4886,6 @@ function mountVaultGraph(root, data, deps) {
       };
       var rA = inWorld(function () { return roomOf(a, null); });
       var rB = roomOf(b, function (id) { return willShow(id) ? timeFactor(id) : 0; });
-      if (rA) roomSrcB = { i: rA.i || 0, o: rA.o || 0 };
-      if (rB) roomDstB = { i: rB.i || 0, o: rB.o || 0 };
       cellSrc = (rA && rA.cells) || null; cellDst = (rB && rB.cells) || null;
       edgeSrc = (rA && rA.edges) || null; edgeDst = (rB && rB.edges) || null;
       // github#66
@@ -5106,20 +5043,12 @@ function mountVaultGraph(root, data, deps) {
         if (d === undefined) d = bandDst[bk] !== undefined ? bandDst[bk] : s;
         return s + (d - s) * ease;
       };
-      /** @param {string} k */
-      var roomWalk = function (k) {
-        var sv = roomSrcB[k], dv = roomDstB[k];
-        if (!(sv > 1)) return dv;
-        if (!(dv > 1)) return sv;
-        return sv + (dv - sv) * ease;
-      };
       // github#44, github#186
       var spNow = { i: bandGone.i ? spSrcB.i : 0, o: bandGone.o ? spSrcB.o : 0,
                     depth: { i: bandGone.i ? bandSrc.i : 0, o: bandGone.o ? bandSrc.o : 0 },
                     hold: { i: bandGone.i, o: bandGone.o } };
       /** @param {Cell} c */
       var rowsNow = function (c) { return bandGone[c.inner ? "i" : "o"] ? rowsAt(c) : 0; };
-      roomNow = { i: roomWalk("i"), o: roomWalk("o") };
       geomHold = (bandGone.i || bandGone.o) ? bandGone : null;
       colWalk = dict();
       Object.keys(tglDir).forEach(function (g0) {
@@ -5159,8 +5088,6 @@ function mountVaultGraph(root, data, deps) {
         // github#86 -- seat outright and waits, dark, for the fill edge. No plan.
         var mf = moveFrom;
         colWalk = null; geomHold = null; cellNow = null; edgeNow = null;
-        if (roomDstB.i > 1) bandOf("i").room = roomDstB.i;
-        if (roomDstB.o > 1) bandOf("o").room = roomDstB.o;
         /** @type {Record<string, Point>} */
         var seats = dict();
         for (var mi = 0; mi < moving.length; mi++) {
@@ -5933,8 +5860,9 @@ function mountVaultGraph(root, data, deps) {
   var DOT_OF_PITCH = 11 / 28;
   var DOT_MIN_PX = 1.5;
   var DOT_MAX_SPREAD = DENSITY_MAX;
-  var DOT_ROOM_MAX = DENSITY_MAX;
   var sizeScale = 1;
+  // github#186
+  var pxPerUnit = 1;
 
   // github#77, design/0013
   var PREVIEW_R_PX = [0.35, 0.65, 1.38, 2.19, 4.06];
@@ -5955,30 +5883,16 @@ function mountVaultGraph(root, data, deps) {
     return out;
   })();
 
+  // github#186, decisions/0017
   function measureSizeScale() {
     if (!renderer) return sizeScale;
     var a = renderer.graphToViewport({ x: 0, y: 0 });
-    var b = renderer.graphToViewport({ x: UNIT * (bandOf("o").sp || 1), y: 0 });
-    var pitch = Math.hypot(b.x - a.x, b.y - a.y);
-    if (!(pitch > 0)) return sizeScale;
+    var b = renderer.graphToViewport({ x: 1000, y: 0 });
     var cam = renderer.getCamera().getState().ratio || 1;
-    pitch *= cam;
-    /** @param {number} units */
-    var rampFor = function (units) {
-      var bb = renderer.graphToViewport({ x: units, y: 0 });
-      var pit = Math.hypot(bb.x - a.x, bb.y - a.y) * cam;
-      var hi = DOT_OF_PITCH * pit;
-      var hiCap = DOT_OF_PITCH * UNIT * DOT_MAX_SPREAD * cam;
-      if (hi > hiCap) hi = hiCap;
-      var lo = Math.min(hi, DOT_MIN_PX * cam);
-      return { m: (hi - lo) / Math.max(1e-6, NODE_MAX - NODE_MIN),
-               b: lo - (hi - lo) / Math.max(1e-6, NODE_MAX - NODE_MIN) * NODE_MIN,
-               lo: lo, hi: hi };
-    };
-    var ro = rampFor(UNIT * (bandOf("o").sp || 1) * bandScale("o"));
-    var ri = rampFor(UNIT * (bandOf("i").sp || 1) * bandScale("i"));
-    bandOf("o").ramp = ro; bandOf("i").ramp = ri;
-    return ro.hi / NODE_MAX;
+    var per = Math.hypot(b.x - a.x, b.y - a.y) * cam / 1000;
+    if (!(per > 0)) return sizeScale;
+    pxPerUnit = per;
+    return DOT_OF_PITCH * Math.min(pitchUnits("o"), UNIT * DOT_MAX_SPREAD) * per / NODE_MAX;
   }
 
   // github#41, design/0011
@@ -5986,16 +5900,16 @@ function mountVaultGraph(root, data, deps) {
   function dotWhy(size, id) {
     var isIn = !!bandLock && !!bandLock[groupOf(id)];
     var bk = isIn ? "i" : "o";
-    var rp = bandOf(bk).ramp;
     var cwd = colWalk ? colWalk[groupOf(id)] : undefined;
     return {
       id: id, band: bk, size: size,
-      ramp: { m: rp.m, b: rp.b, lo: rp.lo }, rampV: rp.m * (size || 4) + rp.b,
-      bandRoom: bandOf(bk).room,
+      // github#186
+      ramp: { m: 0, b: 0, lo: DOT_MIN_PX }, rampV: DOT_OF_PITCH * pitchUnits(bk) * pxPerUnit,
+      bandRoom: pitchUnits(bk),
       cellRoom: cellRoom[id], colWalk: cwd ? cwd.f : null,
       pitch: pitchUnits(bk),
       edgeCap: edgeCap[id], hubRow0: !!hubRow0[id],
-      walking: { room: !!roomNow, cell: !!cellNow, edge: !!edgeNow },
+      walking: { room: false, cell: !!cellNow, edge: !!edgeNow },
       out: dotPx(size, id),
       fit: fitNow ? fitNow[id] : undefined
     };
@@ -6004,60 +5918,36 @@ function mountVaultGraph(root, data, deps) {
   /** @param {number} size @param {string} [id] */
   function dotPx(size, id) {
     var isIn = id !== undefined && bandLock && !!bandLock[groupOf(id)];
-    var rp = bandOf(isIn ? "i" : "o").ramp;
-    var v = rp.m * (size || 4) + rp.b;
+    var pit = pitchUnits(isIn ? "i" : "o");
+    // github#186, decisions/0017
+    var u = pit;
     if (id !== undefined) {
-      var room = bandOf(isIn ? "i" : "o").room;
       var mine = cellRoom[id];
       if (colWalk) {
         var cwd = colWalk[groupOf(id)];
-        if (cwd !== undefined) mine = (mine === undefined ? room : mine) * cwd.f;
+        if (cwd !== undefined) mine = (mine === undefined ? pit : mine) * cwd.f;
       }
-      if (mine !== undefined && mine > 1 && (!(room > 1) || mine < room)) room = mine;
-      if (room !== undefined) room *= 0.92;
-      var pit = pitchUnits(isIn ? "i" : "o");
-      if (room !== undefined && pit > 1e-9) {
-        var f = room / pit;
-        if (f > DOT_ROOM_MAX) f = DOT_ROOM_MAX;
-        v *= f;
-      }
+      if (mine !== undefined && mine > 0 && mine < u) u = mine;
     }
-    // github#107 -- DOT_MIN_PX now floors below the room scale, not scaled by it
-    var lo = rp.lo || DOT_MIN_PX;
-    if (v < lo) v = lo;
+    var spread = UNIT * DOT_MAX_SPREAD;
+    if (u > spread) u = spread;
+    var v = DOT_OF_PITCH * u * pxPerUnit;
+    // github#107
+    if (v < DOT_MIN_PX) v = DOT_MIN_PX;
     var capU = edgeCap[id];
-    if (capU !== undefined && capU > 0) {
-      var pitU = pitchUnits(isIn ? "i" : "o");
-      var hiU = DOT_OF_PITCH * pitU;
-      if (hiU > 1e-6) {
-        var capV = rp.m * NODE_MAX + rp.b;
-        var vMax = capV * (capU / hiU);
-        if (v > vMax) v = vMax;
-      }
-    }
+    if (capU !== undefined && capU > 0 && v > capU * pxPerUnit) v = capU * pxPerUnit;
     // github#41, design/0011
     if (fitCap && id !== undefined) {
       if (fitVer !== posVer) measureFit();
       var nnU = fitNow ? fitNow[id] : undefined;
-      if (nnU !== undefined && nnU > 0) {
-        var pitF = pitchUnits(isIn ? "i" : "o");
-        var hiF = DOT_OF_PITCH * pitF;
-        if (hiF > 1e-6) {
-          var fitV = (rp.m * NODE_MAX + rp.b) * (FIT_SHARE * nnU / hiF);
-          if (v > fitV) v = fitV;
-        }
+      if (nnU !== undefined && nnU > 0 && v > FIT_SHARE * nnU * pxPerUnit) {
+        v = FIT_SHARE * nnU * pxPerUnit;
       }
     }
     // github#35
     if (isIn && geomLock && hubRow0[id]) {
       var hubU = HUB_ROW0_FRAC * geomLock.r0 * INNER_SCALE * UNIT;
-      var pitH = pitchUnits("i");
-      var hiH = DOT_OF_PITCH * pitH;
-      if (hiH > 1e-6) {
-        var hubCapV = rp.m * NODE_MAX + rp.b;
-        var hubVMax = hubCapV * (hubU / hiH);
-        if (v > hubVMax) v = hubVMax;
-      }
+      if (v > hubU * pxPerUnit) v = hubU * pxPerUnit;
     }
     // github#66
     if (id !== undefined && cascadeRun && cascadeRun.sizeCap) {
@@ -7363,7 +7253,7 @@ function mountVaultGraph(root, data, deps) {
     if (animGuard) { WIN.clearTimeout(animGuard); animGuard = null; }
     moveFrom = null; splitHold = null;
     pinnedPlan = null; planKeep = null;
-    roomNow = null; cellNow = null; edgeNow = null; colWalk = null;
+    cellNow = null; edgeNow = null; colWalk = null;
     posSrc = null;
     var prevBand = bandLock, prevGeom = geomLock;
     bandLock = null; geomLock = null;
@@ -7449,7 +7339,7 @@ function mountVaultGraph(root, data, deps) {
       }
       if (anim) { WIN.cancelAnimationFrame(anim); anim = null; }
       if (animGuard) { WIN.clearTimeout(animGuard); animGuard = null; }
-      pinnedPlan = null; planKeep = null; roomNow = null; cellNow = null; edgeNow = null;
+      pinnedPlan = null; planKeep = null; cellNow = null; edgeNow = null;
     colWalk = null;
       posSrc = null;
       state.until = null;
@@ -7473,7 +7363,7 @@ function mountVaultGraph(root, data, deps) {
       WIN.clearTimeout(cascadeRun.guard);
       cascadeRun = null;
     }
-    pinnedPlan = null; planKeep = null; roomNow = null; cellNow = null; edgeNow = null; posSrc = null;
+    pinnedPlan = null; planKeep = null; cellNow = null; edgeNow = null; posSrc = null;
     colWalk = null;
     state.until = null;
     timelineFrame(true);
@@ -7496,7 +7386,7 @@ function mountVaultGraph(root, data, deps) {
     }
     if (anim) { WIN.cancelAnimationFrame(anim); anim = null; }
     if (animGuard) { WIN.clearTimeout(animGuard); animGuard = null; }
-    pinnedPlan = null; planKeep = null; roomNow = null; cellNow = null; edgeNow = null;
+    pinnedPlan = null; planKeep = null; cellNow = null; edgeNow = null;
     colWalk = null;
     posSrc = null;
 
@@ -8705,7 +8595,7 @@ function mountVaultGraph(root, data, deps) {
     if (n) {
       // github#86 -- fresh locks for the new dimension, positions untouched
       moveFrom = null; splitHold = null; pinnedPlan = null; planKeep = null;
-      roomNow = null; cellNow = null; edgeNow = null; colWalk = null; posSrc = null;
+      cellNow = null; edgeNow = null; colWalk = null; posSrc = null;
       bandLock = null; geomLock = null;
       // github#86 -- alpha is the cascade's to walk: a note this disc hides and
       // github#86 -- the next shows ARRIVES with the fill edge, not at the switch
@@ -11507,7 +11397,7 @@ function mountVaultGraph(root, data, deps) {
                                    timelineUntil: state.until,
                                    markDay: state.markDay, shown: pts.length,
                                    heatSource: state.heatSource, recent: state.recent },
-                        room: { i: r3n(bandOf("i").room), o: r3n(bandOf("o").room) },
+                        room: { i: r3n(pitchUnits("i")), o: r3n(pitchUnits("o")) },
                         minArcDeg: r3(lastMinArc * 180 / Math.PI),
                         spacing: { spOuter: r3(bandOf("o").sp),
                                    spInner: r3(bandOf("i").sp),
@@ -11524,8 +11414,7 @@ function mountVaultGraph(root, data, deps) {
                                              bandTotal: geomLock.bandTotal } : null,
                         bands: { inner: bandStat(pts.slice(0, gi)), outer: bandStat(pts.slice(gi)) },
                         dots: { ofPitch: r3(DOT_OF_PITCH), minPx: DOT_MIN_PX,
-                                maxSpread: DOT_MAX_SPREAD, m: r3(bandOf("o").ramp.m),
-                                b: r3(bandOf("o").ramp.b), lo: r3(bandOf("o").ramp.lo) },
+                                maxSpread: DOT_MAX_SPREAD, m: 0, b: 0, lo: DOT_MIN_PX },
                       };
                     },
     };

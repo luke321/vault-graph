@@ -528,6 +528,109 @@ check("the resting disc is on the lattice", async (p) => {
   return { ok, detail };
 }, { on: "all" });
 
+// github#186
+check("no lit note is outside its band's static rails", async (p) => {
+  await settle(p);
+  const r = await p.j(`(function () {
+    var gl = __vg.geomLock;
+    if (!gl) return null;
+    var UNIT = 160, INNER_SCALE = 0.8, INNER_FILL = 0.8;
+    var rails = { i: { row0: gl.r0 * INNER_SCALE * UNIT,
+                       top: (gl.r0 + (gl.rOuter - gl.r0) * INNER_FILL) * INNER_SCALE * UNIT },
+                  o: { row0: gl.rOuter * UNIT, top: gl.maxR * UNIT } };
+    var out = { i: { n: 0, lo: Infinity, hi: 0, worst: null }, o: { n: 0, lo: Infinity, hi: 0, worst: null } };
+    __vg.graph.forEachNode(function (id, a) {
+      if ((__vg.alpha[id] || 0) < 0.999) return;
+      if (__vg.isOrphan(id) || __vg.isPinned(id)) return;
+      var k = __vg.isInner(id) ? "i" : "o";
+      var b = out[k], rr = Math.hypot(a.x, a.y);
+      b.n++;
+      if (rr < b.lo) b.lo = rr;
+      if (rr > b.hi) b.hi = rr;
+      var over = Math.max(rails[k].row0 - rr, rr - rails[k].top);
+      if (!b.worst || over > b.worst.over) b.worst = { id: id, r: rr, over: over };
+    });
+    ["i", "o"].forEach(function (k) { if (out[k].lo === Infinity) out[k].lo = 0; });
+    return { rails: rails, bands: out };
+  })()`);
+  if (!r) return { ok: true, detail: "NOT ASSERTED: no geometry lock on this page" };
+  // github#186
+  const TOL = 0.5;
+  const parts = [], bad = [];
+  for (const k of ["i", "o"]) {
+    const b = r.bands[k], rail = r.rails[k];
+    if (!b.n) { parts.push(`${k} empty`); continue; }
+    const under = rail.row0 - b.lo, over = b.hi - rail.top;
+    if (under > TOL) bad.push(`${k} reaches ${b.lo.toFixed(1)}, inside its row-0 rail ${rail.row0.toFixed(1)} by ${under.toFixed(1)}`);
+    if (over > TOL) bad.push(`${k} reaches ${b.hi.toFixed(1)}, past its top rail ${rail.top.toFixed(1)} by ${over.toFixed(1)}`);
+    parts.push(`${k} ${b.n} notes over ${b.lo.toFixed(0)}..${b.hi.toFixed(0)} in ${rail.row0.toFixed(0)}..${rail.top.toFixed(0)}`);
+  }
+  return { ok: !bad.length, detail: bad.length ? bad.join("; ") : parts.join("; ") };
+}, { on: "all" });
+
+// github#186
+check("a resting wedge fills the arc its notes can", async (p) => {
+  await settle(p);
+  await p.eval("__vg.wedgeDebug(true); void 0").catch(() => {});
+  await p.eval("__vg.relayout(); void 0").catch(() => {});
+  await settle(p);
+  const r = await p.j(`(function () {
+    var UNIT = 160;
+    var edges = __vg.wedgeEdges() || [];
+    if (!edges.length) return null;
+    var pos = {};
+    __vg.graph.forEachNode(function (id, a) { pos[id] = { r: Math.hypot(a.x, a.y), th: Math.atan2(a.y, a.x) }; });
+    var dotOf = function (id) {
+      var d = __vg.renderer.getNodeDisplayData(id);
+      return d && !d.hidden ? __vg.renderer.scaleSize(d.size) : 0;
+    };
+    var q0 = __vg.renderer.graphToViewport({ x: 0, y: 0 });
+    var q1 = __vg.renderer.graphToViewport({ x: UNIT, y: 0 });
+    var perPx = Math.hypot(q1.x - q0.x, q1.y - q0.y);
+    perPx = perPx > 1e-3 ? UNIT / perPx : 0;
+    var ang = function (a, b) { var d = b - a; while (d < 0) d += 360; while (d >= 360) d -= 360; return d; };
+    var out = [];
+    edges.forEach(function (w) {
+      if (w.nStart == null || !(w.drawn > 0.2)) return;
+      var mine = [];
+      __vg.graph.forEachNode(function (id) {
+        if (__vg.groupOf(id) !== w.g) return;
+        if ((__vg.alpha[id] || 0) < 0.999) return;
+        if (__vg.isOrphan(id) || __vg.isPinned(id)) return;
+        if ((__vg.isInner(id) ? "i" : "o") !== w.band) return;
+        mine.push(id);
+      });
+      if (!mine.length) return;
+      // the RIM row is what draws the wedge's angular extent
+      var rim = 0;
+      mine.forEach(function (id) { if (pos[id].r > rim) rim = pos[id].r; });
+      var row = mine.filter(function (id) { return Math.abs(pos[id].r - rim) < 1; });
+      var n = row.length, dot = 0;
+      row.forEach(function (id) { var d = dotOf(id) * perPx; if (d > dot) dot = d; });
+      var arcLen = (w.drawn * Math.PI / 180) * rim;
+      if (!(arcLen > 1e-6)) return;
+      // n notes spread across the arc reach (n-1)/n of it, plus their own two half-dots
+      var allow = Math.min(1, (n > 1 ? (n - 1) / n : 0) + 2 * dot / arcLen);
+      out.push({ g: w.g, band: w.band, n: n, drawn: w.drawn,
+                 cover: Math.min(1, ang(w.nEnd, w.nStart) / w.drawn), allow: allow, dot: dot, rim: rim });
+    });
+    return { wedges: out };
+  })()`);
+  await p.eval("__vg.wedgeDebug(false); void 0").catch(() => {});
+  if (!r || !r.wedges.length) {
+    return { ok: true, detail: "NOT ASSERTED: the wedge overlay recorded no cells on this page" };
+  }
+  const SLACK = 0.9;
+  const short = r.wedges.filter((w) => w.cover < w.allow * SLACK)
+                        .sort((a, b) => a.cover / a.allow - b.cover / b.allow);
+  const worst = r.wedges.slice().sort((a, b) => a.cover / a.allow - b.cover / b.allow)[0];
+  const detail = `${r.wedges.length} resting wedges; tightest ${worst.g} (${worst.band}, ${worst.n} in its rim row, ` +
+    `${worst.drawn.toFixed(1)} deg): covers ${worst.cover.toFixed(2)} of the ${worst.allow.toFixed(2)} its notes allow` +
+    (short.length ? `; ${short.length} under ${SLACK}x: ` +
+      short.slice(0, 3).map((w) => `${w.g} ${w.cover.toFixed(2)}/${w.allow.toFixed(2)}`).join(", ") : "");
+  return { ok: !short.length, detail };
+}, { on: "all" });
+
 check("band assignment obeys its two hard rules", async (p) => {
   const r = await p.j(`(function(){
     var plan = __vg.buildWedgePlan(false), band = {}, rows = {i: 0, o: 0};
