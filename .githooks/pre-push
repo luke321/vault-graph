@@ -336,6 +336,30 @@ EOF
   exit 1
 fi
 
+# THE PRODUCER CONTRACT NEXT, same bar as the link check above and for the same reason -- one
+# subprocess build of a nine-note fixture and one in-process run of the plugin's adapter, about a
+# second, no Chrome and no Obsidian. github#149: src/build-graph.mjs and plugin/build-data.mjs
+# build the same VaultData for the same page from two different hosts, and nothing compared them.
+# github#152 is what that costs -- the exporter shipped ghosts with `dirs` and `touched` missing
+# while the plugin's carried both, the page papered over it, and nothing caught it. This runs both
+# producers over one vault and fails on any difference that is not declared in src/contract.mjs.
+echo "pre-push: checking both producers still emit the same shape..."
+if ! node "$root/scripts/check-producer-contract.mjs" </dev/null; then
+  cat >&2 <<'EOF'
+
+pre-push: the producer contract check failed -- push blocked.
+
+Read the FAIL lines above. src/taxonomy.mjs and src/contract.mjs are shared by
+src/build-graph.mjs and plugin/build-data.mjs, so a change to either moves BOTH producers.
+A difference between the two hosts is allowed only when it is declared in DIVERGENCES in
+src/contract.mjs, with the reason -- and a declared difference that stopped happening fails
+here too, so the list cannot rot into an allowlist. design/0020 has the reasoning.
+
+There is no skip flag for this check.
+EOF
+  exit 1
+fi
+
 # THE GENERATED NAVIGATION FILES NEXT, same bar -- a read of the tree, well under a second.
 # .ai-context/code-map.md and code-index.md are written from the source by
 # scripts/code-map.mjs (github#61) and are only worth having while they agree with it; a
