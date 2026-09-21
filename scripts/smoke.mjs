@@ -355,6 +355,10 @@ check("the heatmap band is painted for the state it landed in", async (p) => {
   await clickEye(p, g);
   await settle(p);
   const BAR = 2;
+  // github#151 -- hiding and filtering its way around the disc crops it, which lights the
+  // github#151 -- overview and leaves the camera where the last fit put it
+  await settle(p);
+  await toRest(p);
   return { ok: r.max <= BAR,
            detail: `hid ${g}: ${r.lit} of ${r.days} days lit; the band as painted vs repainted from its own state differs ` +
                    `in ${r.px} px (max ${r.max}/255, bar ${BAR}) of ${r.w}x${r.h}` };
@@ -646,7 +650,10 @@ check("layout matches its golden snapshot", async (p) => {
     parts.push("positions unchanged");
   }
   return { ok, detail: parts.join("; ") };
-}, { on: "all" });
+  // github#151 -- leaves state.hidden: it relayouts the tag disc, and visiting that disc
+  // github#151 -- seeds its own hidden defaults, which the page keeps per dimension by
+  // github#151 -- design (design/0015). No golden is touched by this; see github#113.
+}, { on: "all", leaves: ["state.hidden"] });
 
 /* ---------------------------------------------------- github#86, design/0015 */
 
@@ -1853,7 +1860,10 @@ check("a lit note stays lit while a dimension switch draws it as a stand-in", as
                    `${disagreed} disagreeing with their own note` +
                    (example ? ` (e.g. ${example})` : "") +
                    (litStandIns ? "" : "  <- NOTHING ASSERTED: no stand-in was ever lit") };
-}, { on: ["demo-vault", "tag-vault"], clock: "real" });
+  // github#151 -- leaves state.hidden: on the tag fixture this is the first check in the job
+  // github#151 -- to visit the tag disc, and that seeds the disc's own hidden defaults --
+  // github#151 -- kept per dimension on purpose (design/0015).
+}, { on: ["demo-vault", "tag-vault"], clock: "real", leaves: ["state.hidden"] });
 
 check("the band counts the date it names", async (p) => {
   const r = await p.j(`(function(){
@@ -5038,6 +5048,9 @@ check("filtered to the bone, the disc stays drawable", async (p) => {
     }
   }
   await clearRange(p);
+  // github#151 -- filtering to a handful of notes crops the disc and lights the overview
+  await settle(p);
+  await toRest(p);
   return {
     ok: !bad.length,
     detail: bad.length ? bad.slice(0, 4).join("; ")
@@ -5651,6 +5664,10 @@ check("the ribbon's right edge is a day the vault has actually reached", async (
 }, { on: "all" });
 
 check("compact axis: the settings-panel toggle actually flips the live state", async (p) => {
+  // github#151 -- this drives a control the page PERSISTS, so flipping it back restores
+  // github#151 -- the page and leaves the key in the store; a check that re-mounts later
+  // github#151 -- would read it (which is why reboot() already deletes bandOpen by hand)
+  const storedWas = await storeSnap(p);
   const r = await p.j(`(function(){
     var gear = document.querySelector("#vg-gear");
     if (!gear || gear.hidden) return { noGear: true };
@@ -5673,6 +5690,8 @@ check("compact axis: the settings-panel toggle actually flips the live state", a
       "rendered row id and the $() lookup setCompactAxis uses have drifted apart again" };
   }
   const flipped = r.afterState !== r.beforeState && r.afterPressed !== r.beforePressed;
+  // github#151
+  await storeBack(p, storedWas);
   return {
     ok: flipped,
     detail: `clicking the row: state ${r.beforeState}->${r.afterState}, aria-pressed ` +
@@ -5682,6 +5701,10 @@ check("compact axis: the settings-panel toggle actually flips the live state", a
 
 // github#3
 check("colour unlinked by folder: the settings-panel toggle actually flips the live state", async (p) => {
+  // github#151 -- this drives a control the page PERSISTS, so flipping it back restores
+  // github#151 -- the page and leaves the key in the store; a check that re-mounts later
+  // github#151 -- would read it (which is why reboot() already deletes bandOpen by hand)
+  const storedWas = await storeSnap(p);
   const r = await p.j(`(function(){
     var gear = document.querySelector("#vg-gear");
     if (!gear || gear.hidden) return { noGear: true };
@@ -5705,6 +5728,8 @@ check("colour unlinked by folder: the settings-panel toggle actually flips the l
   // github#112
   await settle(p);
   const flipped = r.afterState !== r.beforeState && r.afterPressed !== r.beforePressed;
+  // github#151
+  await storeBack(p, storedWas);
   return {
     ok: flipped,
     detail: `clicking the row: state ${r.beforeState}->${r.afterState}, aria-pressed ` +
@@ -5714,6 +5739,10 @@ check("colour unlinked by folder: the settings-panel toggle actually flips the l
 
 // github#3
 check("colour unlinked notes by folder: the settings-panel toggle actually flips the live state", async (p) => {
+  // github#151 -- this drives a control the page PERSISTS, so flipping it back restores
+  // github#151 -- the page and leaves the key in the store; a check that re-mounts later
+  // github#151 -- would read it (which is why reboot() already deletes bandOpen by hand)
+  const storedWas = await storeSnap(p);
   const r = await p.j(`(function(){
     var gear = document.querySelector("#vg-gear");
     if (!gear || gear.hidden) return { noGear: true };
@@ -5735,6 +5764,8 @@ check("colour unlinked notes by folder: the settings-panel toggle actually flips
       "rendered row id and the $() lookup setUnlinkedTintByFolder uses have drifted apart" };
   }
   const flipped = r.afterState !== r.beforeState && r.afterPressed !== r.beforePressed;
+  // github#151
+  await storeBack(p, storedWas);
   return {
     ok: flipped,
     detail: `clicking the row: state ${r.beforeState}->${r.afterState}, aria-pressed ` +
@@ -5941,6 +5972,11 @@ check("a folder keeps its slot across the membership toggle", async (p) => {
 
 // github#34
 check("a folder's legend row toggles \"hidden by default\" from its context menu", async (p) => {
+  // github#151 -- the menu item persists folderShown, and clicking it back restores the
+  // github#151 -- page without taking the key out of the store again. It leaked on four
+  // github#151 -- fixtures and was masked on the fifth, where an earlier DECLARED leak of
+  // github#151 -- store.settings had already taken the key off baseline.
+  const storedWas = await storeSnap(p);
   const r = await p.j(`(function(){
     var g = __vg.groupOrder().filter(function (x) { return x.charAt(0) !== "("; })[0];
     var hiddenByDefault = function (x) {
@@ -5990,6 +6026,8 @@ check("a folder's legend row toggles \"hidden by default\" from its context menu
   }
   const ok = r.openedOk && r.pressedBefore === String(r.startShown) && r.closedAfter &&
              r.defaultFlipped && r.legendFollowed && r.settingsAgrees !== false;
+  // github#151
+  await storeBack(p, storedWas);
   return { ok, detail: `"${r.g}" started ${r.startShown ? "shown" : "hidden"} by default; ` +
     `menu opened with the toggle ${r.openedOk ? "present" : "MISSING"} ` +
     `(pressed=${r.pressedBefore}); after click: menu closed=${r.closedAfter}, ` +
@@ -6362,6 +6400,9 @@ check("every unlinked note wears the (unlinked) swatch", async (p) => {
 // github#3
 // github#34
 check("the (unlinked) row's right-click toggle moves unlinked notes into their folder", async (p) => {
+  // github#151 -- the menu item persists unlinkedByFolder, and toggling it back restores the
+  // github#151 -- page without taking the key out of the store again
+  const storedWas = await storeSnap(p);
   const r = await p.j(`(function(){
     var g = __vg.graph, rd = __vg.renderer;
     var ids = g.nodes().filter(function (id) { return __vg.isOrphan(id); });
@@ -6406,6 +6447,8 @@ check("the (unlinked) row's right-click toggle moves unlinked notes into their f
   r.matched = paint.matched;
   const ok = r.openedOk && r.pressedBefore === "false" && r.closedAfter &&
              r.turnedOn && r.countAfter === 0 && r.matched === r.ids;
+  // github#151
+  await storeBack(p, storedWas);
   return { ok, detail: `${r.ids} unlinked notes; menu opened with the toggle ` +
     `${r.openedOk ? "present" : "MISSING"} (pressed=${r.pressedBefore}); after click: ` +
     `menu closed=${r.closedAfter}, toggle turned on=${r.turnedOn}, (unlinked) count after=` +
@@ -6414,6 +6457,10 @@ check("the (unlinked) row's right-click toggle moves unlinked notes into their f
 
 // github#3
 check("the (unlinked) row's right-click tint toggle recolours notes without moving them", async (p) => {
+  // github#151 -- this drives a control the page PERSISTS, so flipping it back restores
+  // github#151 -- the page and leaves the key in the store; a check that re-mounts later
+  // github#151 -- would read it (which is why reboot() already deletes bandOpen by hand)
+  const storedWas = await storeSnap(p);
   const r = await p.j(`(function(){
     var g = __vg.graph, rd = __vg.renderer;
     var ids = g.nodes().filter(function (id) { return __vg.isOrphan(id); });
@@ -6453,6 +6500,8 @@ check("the (unlinked) row's right-click tint toggle recolours notes without movi
   if (r.skip) return { ok: true, detail: "no unlinked notes on this shape, nothing to measure" };
   const ok = r.openedOk && r.pressedBefore === "false" && r.closedAfter && r.turnedOn &&
              r.countAfter === r.ids && r.matched === r.ids;
+  // github#151
+  await storeBack(p, storedWas);
   return { ok, detail: `${r.ids} unlinked notes kept separate; menu opened with the toggle ` +
     `${r.openedOk ? "present" : "MISSING"} (pressed=${r.pressedBefore}); after click: ` +
     `menu closed=${r.closedAfter}, toggle turned on=${r.turnedOn}, (unlinked) count still=` +
@@ -6463,6 +6512,10 @@ check("the (unlinked) row's right-click tint toggle recolours notes without movi
 // github#50
 // github#50
 check("the (unlinked) row opens its menu with no notes in it", async (p) => {
+  // github#151 -- this drives a control the page PERSISTS, so flipping it back restores
+  // github#151 -- the page and leaves the key in the store; a check that re-mounts later
+  // github#151 -- would read it (which is why reboot() already deletes bandOpen by hand)
+  const storedWas = await storeSnap(p);
   const r = await p.j(`(function(){
     if (!__vg.graph.nodes().some(function (id) { return __vg.isOrphan(id); })) return { skip: true };
     var startOn = __vg.unlinkedByFolder;
@@ -6501,6 +6554,8 @@ check("the (unlinked) row opens its menu with no notes in it", async (p) => {
   if (r.skip) return { ok: true, detail: "no unlinked notes on this shape, nothing to empty" };
   const ok = r.rowFound && r.empty === 0 && r.noEye && r.noOnly && r.dimmed &&
              r.openedOk && r.closedAfter === true && r.turnedOff === true;
+  // github#151
+  await storeBack(p, storedWas);
   return { ok, detail: `row ${r.rowFound ? "present" : "MISSING"} at count ${r.empty}, ` +
     `dimmed=${r.dimmed}, eye dropped for a placeholder=${r.noEye}, only dropped for a ` +
     `placeholder=${r.noOnly}; menu ${r.openedOk ? "opened" : "DID NOT OPEN"} ` +
@@ -7147,6 +7202,10 @@ check("the legend's swatch and count bar follow the token across a theme flip, w
 
 // github#78, design/0006
 check("count bars are on by default, and the settings toggle removes every bar", async (p) => {
+  // github#151 -- this drives a control the page PERSISTS, so flipping it back restores
+  // github#151 -- the page and leaves the key in the store; a check that re-mounts later
+  // github#151 -- would read it (which is why reboot() already deletes bandOpen by hand)
+  const storedWas = await storeSnap(p);
   const r = await p.j(`(function(){
     var gear = document.querySelector("#vg-gear");
     if (!gear || gear.hidden) return { noGear: true };
@@ -7189,6 +7248,8 @@ check("count bars are on by default, and the settings toggle removes every bar",
              r.offPressed === "false" && r.offState === false && r.barsOff === 0 &&
              r.sizeOff === "auto" && r.rowsOff === r.rows &&
              r.backPressed === "true" && r.backState === true && r.barsBack === r.barsOn;
+  // github#151
+  await storeBack(p, storedWas);
   return {
     ok,
     detail: `default pressed=${r.defaultPressed} state=${r.defaultState} with ` +
@@ -7509,6 +7570,10 @@ check("the picker's settings surface holds every slot without scrolling sideways
 });
 
 check("the picker stays inside the mount", async (p) => {
+  // github#151 -- this drives a control the page PERSISTS, so flipping it back restores
+  // github#151 -- the page and leaves the key in the store; a check that re-mounts later
+  // github#151 -- would read it (which is why reboot() already deletes bandOpen by hand)
+  const storedWas = await storeSnap(p);
   const r = await p.j(`(function(){
     var root = document.getElementById("vg-app");
     var rows = document.querySelectorAll('.lg[data-g]');
@@ -7526,6 +7591,8 @@ check("the picker stays inside the mount", async (p) => {
     menu.hidden = true;
     return out;
   })()`);
+  // github#151
+  await storeBack(p, storedWas);
   return { ok: r.inside && r.sws === 12,
            detail: `menu ${r.w}x${r.h} in a ${r.rootW}x${r.rootH} mount, ${r.sws} swatches, ` +
                    `${r.inside ? "inside" : "OUTSIDE the mount"}` };
@@ -7551,6 +7618,10 @@ const DEV_RIGHT_CLICK = `(function(){
 })()`;
 
 check("the disc's right-click does nothing until Developer debug is on", async (p) => {
+  // github#151 -- this drives a control the page PERSISTS, so flipping it back restores
+  // github#151 -- the page and leaves the key in the store; a check that re-mounts later
+  // github#151 -- would read it (which is why reboot() already deletes bandOpen by hand)
+  const storedWas = await storeSnap(p);
   const r = await p.j(`(function(){
     var menu = document.querySelector('[id$="ctxmenu"]');
     // Whatever the host handed this page, assert from a known state.
@@ -7574,6 +7645,8 @@ check("the disc's right-click does nothing until Developer debug is on", async (
   })()`);
   const ok = !r.preventedOff && r.hiddenOff && r.preventedOn && r.openOn && r.hasGrid &&
              r.speeds.join(",") === "1,2,4,8" && r.swatches === 0 && r.shutByToggle;
+  // github#151
+  await storeBack(p, storedWas);
   return { ok, detail: `off: preventDefault=${r.preventedOff} (must be false so the host keeps ` +
     `its own menu), stayed hidden=${r.hiddenOff}; on: preventDefault=${r.preventedOn}, ` +
     `opened=${r.openOn}, grid item=${r.hasGrid}, speed multipliers=[${r.speeds.join(", ")}], ` +
@@ -7625,6 +7698,10 @@ check("a right-click on a note still pins it, and opens no developer menu", asyn
 
 // github#165
 check("the developer menu's grid item draws the wedge overlay", async (p) => {
+  // github#151 -- this drives a control the page PERSISTS, so flipping it back restores
+  // github#151 -- the page and leaves the key in the store; a check that re-mounts later
+  // github#151 -- would read it (which is why reboot() already deletes bandOpen by hand)
+  const storedWas = await storeSnap(p);
   // github#165 -- settles between halves; the draw hook paints, not the click
   const before = await p.j(`(function(){
     var cv = document.querySelector(".vg-wedge-debug");
@@ -7656,6 +7733,8 @@ check("the developer menu's grid item draws the wedge overlay", async (p) => {
   })()`);
   const ok = !before.started && before.pressed === "false" && before.closed &&
              on.drawn && on.inHost && on.painted && on.pressed === "true" && off.gone;
+  // github#151
+  await storeBack(p, storedWas);
   return { ok, detail: `overlay at rest=${before.started} (must be false); the item reads ` +
     `pressed=${before.pressed} and closes the menu=${before.closed}; a frame later the ` +
     `lattice is drawn=${on.drawn} on a ${on.painted ? "sized" : "ZERO-SIZED"} canvas, ` +
@@ -7752,6 +7831,10 @@ check("the grid's key sits bottom left, clear of every button over the graph", a
 
 // github#165
 check("the developer menu's slow motion reaches the animation clock", async (p) => {
+  // github#151 -- this drives a control the page PERSISTS, so flipping it back restores
+  // github#151 -- the page and leaves the key in the store; a check that re-mounts later
+  // github#151 -- would read it (which is why reboot() already deletes bandOpen by hand)
+  const storedWas = await storeSnap(p);
   const r = await p.j(`(function(){
     var menu = document.querySelector('[id$="ctxmenu"]');
     var pick = function (mul) {
@@ -7780,6 +7863,8 @@ check("the developer menu's slow motion reaches the animation clock", async (p) 
   const ok = r.checked2Before === "false" && r.at2 === 2.5 && r.at8 === 10 &&
              r.marks.join(" ") === "1:false 2:false 4:false 8:true" &&
              r.back === 1.25 && r.restored === r.before;
+  // github#151
+  await storeBack(p, storedWas);
   return { ok, detail: `timeScale ${r.before} -> 2x=${r.at2} -> 8x=${r.at8} -> Normal=${r.back} ` +
     `(x1, x2, x4, x8 of the 1.25 default); reopened at 8x the marks read ` +
     `[${r.marks.join(", ")}]; restored to ${r.restored}` };
@@ -8078,7 +8163,9 @@ check("a rebuild waits for a drag, and a right-click is not a drag", async (p) =
     `held: ${held.res.applied ? "APPLIED (should have waited)" : `refused "${held.res.reason}" busy "${held.res.busy}"`}` +
     `, order while held ${held.orderWhileHeld} (was ${held.before}), after release ${landed}` +
     `; right-click: ${rclick.applied ? `applied "${rclick.reason}"` : `REFUSED "${rclick.busy}" -- a context menu deferred the rebuild`}` };
-}, { on: "all", leaves: ["vg.shown"] });
+  // github#151 -- and press.vg-legend with it: a rebuild that adds or drops a note builds a
+  // github#151 -- different legend, which is the same fact as vg.shown one layer out
+}, { on: "all", leaves: ["vg.shown", "press.vg-legend"] });
 
 check("the invalidation registry names every cache a live rebuild stales", async (p) => {
   const names = await p.j("__vg.invalidations()");

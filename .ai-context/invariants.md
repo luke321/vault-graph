@@ -5221,15 +5221,48 @@ harness does not do. So the choice was between a reset and a declared boundary, 
 said the boundary: **24 leaking check runs, 16 distinct checks, 10 distinct state keys** — not the
 sixty that would have made per-check restoration hopeless.
 
-Measured 2026-09-20, every check on the demo fixture (`--vault`, 158 checks, 4 Chromes):
+Measured 2026-09-20, every check on the demo fixture (`--vault`, 158 checks, 4 Chromes), then
+2026-09-21 across all five (the full suite's own shape, 428 check runs, 10 Chromes):
 
-| | |
-|---|---|
-| state keys in the fingerprint | 125 |
-| the probe | **0.6 s over 158 checks** (~4 ms each) |
-| wall, audit off / audit + boundary on | **296 s / 291 s** — the boundary is inside the noise |
-| leaking check runs, before | **24** (158/158 still passing) |
-| distinct state keys leaked | **10** — `attr.data-ov` ×5, `cam.ratio` ×2, `cam.x`, `cam.y`, `open.vg-ov`, `open.vg-settings`, `state.collapsed` ×2, `state.hidden` ×2, `store.settings` ×2, `vg.shown` ×2 |
+| | demo only | all five fixtures |
+|---|---|---|
+| check runs | 158 | **428** |
+| state keys in the fingerprint | 125, then 80 once it was sharpened | **80** |
+| the probe | **0.6 s over 158** (~4 ms each) | **4.7 s over 428** (~11 ms each) |
+| wall | **291 s** with it on, 296 s off | **416 s** over 10 Chromes, of which the probe is 4.7 s |
+| leaking check runs, before | **24** (158/158 still passing) | **9 more**, none of them on the demo |
+| distinct state keys | **10** — `attr.data-ov` ×5, `cam.ratio` ×2, `cam.x`, `cam.y`, `open.vg-ov`, `open.vg-settings`, `state.collapsed` ×2, `state.hidden` ×2, `store.settings` ×2, `vg.shown` ×2 | the same families, no new one |
+
+**The per-check probe costs roughly three times as much across five fixtures as on the demo alone,
+and the 10k fixture is the whole of the difference**: `vg.shown` and `vg.pinned` each walk every
+node, so a 10,000-note vault pays about seven times the 1,403-note one for those two keys. 4.7 s of
+a 416 s wall is worth paying for; a fingerprint that grew another per-node key would not be.
+
+**The other four fixtures found nine more leaks and no new kind.** Six checks, all in the families
+the demo had already named: the context-menu toggle persisting `folderShown` (on four fixtures), two
+checks ending on a camera their own filtering had moved, the golden check and the stand-in check
+each seeding the tag disc's hidden defaults, and a live-rebuild check whose legend is a different
+legend afterwards. The demo fixture came back **clean in all four of its jobs**.
+
+**Why the host store is scored at all, since within one job it cannot couple two checks.** The
+page reads `localStorage` at **mount**, so a key written by check N changes nothing for check N+1 —
+that page has already booted. It matters for the checks that re-mount: `goto()` in the pin check,
+and `reboot()` behind the phone teardown. That is not hypothetical, it is already in the source —
+`reboot()` deletes `bandOpen` by hand before reloading (github#170), which is this exact coupling
+found once, patched at the one site that bit, and left everywhere else. So the store stays in the
+boundary, and the checks that drive a control the page **persists** snapshot and restore it. The
+distinction that matters is the control, not the value: `__vg.setX()` passes the host callback
+`false` and writes nothing, while a real click on a settings toggle or a context-menu item writes.
+
+**One limitation the five-fixture run exposed, and it is the price of the rule rather than a
+defect in it.** Scoring "newly off baseline" means **a declared leak of a key masks a later
+undeclared leak of the same key**: the context-menu check leaked `store.settings` on four fixtures
+and was invisible on the fifth, where `a narrow window with a pointer keeps the desktop's answer`
+had already taken that key off baseline under its own declaration. The alternative — scoring against
+the previous boundary — fails a check for putting an inherited key back and turns one unfixed leak
+into a failure in every check after it, which is worse. So a `leaves:` declaration is not free: it
+buys silence for that key for the rest of the job, and a key that several checks write wants each of
+them fixed rather than the first one declared.
 
 **What the instrument found, and what each one was.**
 
@@ -5266,7 +5299,9 @@ did so to restore state they had been leaving, not to accommodate a reset.
 does not upgrade it to a finding: the boundary makes that state deterministic from here, which
 removes the hypothesis's easiest hiding place without proving it was ever the cause. It also
 fingerprints one page per job, so it says nothing about coupling *between* jobs, which have none —
-each lane is its own Chrome and its own baseline.
+each lane is its own Chrome and its own baseline. And a check that runs on several fixtures is
+audited separately in each, which is how four of the nine second-round leaks were found: the same
+check, clean on the fixture whose job happened to put a declared writer ahead of it.
 
 ```bash
 node scripts/smoke.mjs --only "wheel notch" --audit-state /tmp/a.json   # what it changed, and read
