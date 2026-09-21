@@ -82,7 +82,8 @@ function defaultChrome() {
 
 // github#104 -- the shape the two gates always push with
 export function defaultShape() {
-  return { jobs: DEFAULT_JOBS, grid: DEFAULT_JOBS > 1, headed: false, port: 0, chrome: defaultChrome() };
+  return { jobs: DEFAULT_JOBS, serialJobs: 1, grid: DEFAULT_JOBS > 1, headed: false, port: 0,
+           chrome: defaultChrome() };
 }
 
 // github#104 -- takes the values the run USED, never a second parse of argv
@@ -90,6 +91,10 @@ export function shapeDeltas(shape) {
   const d = defaultShape();
   const out = [];
   if (shape.jobs !== d.jobs) out.push(`--jobs ${shape.jobs} (default ${d.jobs})`);
+  // github#101
+  if ((shape.serialJobs || 1) !== d.serialJobs) {
+    out.push(`--serial-jobs ${shape.serialJobs} (default ${d.serialJobs})`);
+  }
   if (!!shape.grid !== d.grid) {
     out.push(`the grid is ${shape.grid ? "on" : "off"} (default ${d.grid ? "on" : "off"})`);
   }

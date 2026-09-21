@@ -2459,14 +2459,17 @@ click) edge running under a dim note used to lose a bite of itself to every disc
 crossed — a well-connected hub read as dashed instead of solid (issue #2).
 
 ```javascript
-__vg.checkFocusWeb()      // -> dimAtGaps: 0, webOK: true
+await __vg.checkFocusWeb()      // -> dimAtGaps: 0, webOK: true
 ```
 
 Selects the best-connected note, composites the canvases in stacking order, and samples
 every lit curve at 1% steps, keeping the samples that fall geometrically inside a
 non-focus disc. `dimAtGaps` must be **0** — any sample landing on a dim disc means the web
 is still running under it. Not frame-sensitive: the check selects rather than hovers, so
-`hoverAmount()` is `1` immediately with no ramp to catch mid-flight.
+`hoverAmount()` is `1` immediately with no ramp to catch mid-flight. **Returns a `Promise`**
+(github#101) — it waits a real composited frame (double `requestAnimationFrame`) between its
+own `render()` and its own pixel read, so a caller must `await` it; reading synchronously
+samples whatever was on screen before this call, not after.
 
 Measured across the three vault shapes `scripts/smoke.mjs` builds: the demo vault (node
 452, degree 71, 364 in-disc samples) **107 dim before the fix, 0 after**; the 10k
@@ -4651,6 +4654,118 @@ while its tree is not; not by time because `develop` moves several times a day a
 green run" cannot say which tree it saw. While it runs, both gates hold the machine-wide
 `suite` lock (`scripts/lock.mjs`) and release it on every exit path; a lock that cannot be had
 blocks the push and names the holder rather than running on top of it.
+
+## Widening the suite's concurrency surfaced one real race and one window-size artifact
+
+github#101 asked whether the serial (frame-reading) lane's 76% share of a run (github#93,
+above) could be shrunk by widening it, and whether doing so would flake more under
+contention. `smoke.mjs` gained two levers: `--jobs <n>` (already existed) is the width of the
+whole pool; `--serial-jobs <n>` (new, default 1) is the width of just the walk sub-pool inside
+it -- `--serial-jobs 3` lets the three fixtures that carry a frame-sensitive check (demo-vault,
+test-vault, tag-vault) read their frames at once instead of one at a time. Either flag above
+its default is a delta from the shape the gates push with (`suite-stamp.mjs`'s `shapeDeltas`),
+so a run using them never stamps the tree, the same as `--only` or `--vault`.
+
+**The experiment measured three shapes, five runs each, interleaved (not five-in-a-row) so
+machine drift would not land on one shape, every run under the `suite` lock:**
+
+| Mode | Flags | Wall (avg / min / max) | FAILs across 5 runs |
+|---|---|---|---|
+| default | *(none)* | 428s / 366s / 674s | 1/5 -- "a swipe in the tail of a fit flight still scrolls" (demo-vault) |
+| fast | `--jobs 5` | 301s / 299s / 307s | **5/5** -- "focus web stays above dim notes" (dominant-folder vault); **5/5** -- "the disc's density follows the notes on screen" (10k vault) |
+| serial3 | `--jobs 3 --serial-jobs 3` | 307s / 305s / 308s | **5/5** -- "the disc's density follows the notes on screen" (10k vault) |
+
+428 checks across the suite's five current fixtures (158 + 80 + 63 + 64 + 63). The default
+mode's own wall time is a wide range (366-674s) because one of its five runs queued behind
+unrelated work also holding the `suite`/`screen-left` locks at the time -- 366s is the more
+representative number; the other two modes' runs happened not to collide and read tight
+(within 8s of each other).
+
+**The one default-mode failure is the flake already on record** (github#93's own note: a
+1-in-6-to-8 rate on two checks, reproduced isolated) -- 1/5 here is consistent with that rate
+and is not new. **The other two are not that** -- both reproduced on every single run of the
+shape that triggers them and on zero of the five default runs. Investigated, and the two turned
+out to be two different things, not one:
+
+**"focus web stays above dim notes" was a genuine test race, and is fixed.**
+`checkFocusWeb()` (`src/page.js`) calls `renderer.render()` then immediately reads the canvas
+with `getImageData` -- synchronous in the JS thread, but the actual GPU composite is not
+guaranteed to have landed by the time the read happens, and under GPU contention from several
+concurrent Chromes it measurably had not: the check reads a not-yet-painted frame and finds the
+highlighted edge still under a dim note that has not yet been drawn over.
+
+**First attempt was wrong, and worth recording why.** A double-`requestAnimationFrame` wait --
+the fix this codebase already uses for exactly this class of bug, in the PNG-export and
+camera-zoom checks -- placed in `scripts/smoke.mjs` *ahead of* the call to `checkFocusWeb()`
+looked fixed (5x `--jobs 5` + 5x `--jobs 3 --serial-jobs 3`, previously 5/5 failing both, 0/10)
+but only because that verification ran the density check first in the same `--only` selection,
+and its several `sleep(400)`s incidentally gave the GPU enough slack regardless of where the
+wait sat. Re-run with *only* the focus-web check selected -- the true test, since
+`checkFocusWeb()` does its own `render()` and its own read internally, after anything a
+preceding wait in `smoke.mjs` could reach -- and it failed 5/5 under `--jobs 5` again, byte
+identical to the original failure. The wait had to be *inside* `checkFocusWeb()`, between its
+own `render()` and its own pixel read, not before the function is even called.
+
+**The real fix**: `checkFocusWeb()`'s pixel-sampling body is now a named inner function
+(`sample()`), called only after a double-`requestAnimationFrame` `Promise` resolves;
+`cdp.mjs` already evaluates with `awaitPromise: true`, so returning a `Promise` from a debug
+API function needed no change on the calling side. `checkFocusWeb`'s JSDoc return type updated
+to `Promise<unknown>`; one `no-unsafe-assignment` lint finding surfaced from `best`'s type no
+longer narrowing across the new function boundary, fixed with an explicit `@type`. **Verified
+in true isolation this time** -- `--only "focus web stays above dim notes"` alone, nothing else
+in the selection -- 5x `--jobs 5` and 5x default, **0/10 failures**, plus `npm run lint` and
+`npm run typecheck` both clean.
+
+**"the disc's density follows the notes on screen" is not a bug -- it is a window-size
+dependency in a pixel-based check, at a width nobody plans to ship.** The check measures a
+dot's on-screen diameter against its on-screen step (`__vg.debugDump()`'s `dotRadius` and
+`step35`, both screen-pixel quantities derived through `renderer.graphToViewport`), and the
+product **intentionally** sizes dots relative to the frame they are drawn in ("Size dots from
+the frame", `CLAUDE.md`'s own laws) -- a smaller browser window legitimately produces a smaller
+dot-to-step ratio. `smoke.mjs`'s pool tiles each lane's window into a `gridSlot` sized by the
+lane count, so a wider pool means a smaller window *for every job in it, not just the walk
+ones*: confirmed by disentangling the two variables directly -- `--jobs 5 --no-grid` (same
+width, full-size window) passes with `diameter/step` topping out at 0.76, against 0.81 with
+the grid on; an isolated run at the default `--jobs 2` grid width passes at 0.57. The check's
+own threshold (0.15-0.80) was calibrated against the one window size the suite has ever run
+at -- the default 2-lane grid -- and this ticket is the first time anything ran the suite at
+`--jobs 5` or `--jobs 3 --serial-jobs 3` at all. **No code changed for this one.** It is left
+exactly as it was: the check is correct, the product is behaving as designed, and the
+"failure" only exists at pool widths this ticket already decided (D-4) will never be the
+shipped default -- fixing it would mean loosening a real threshold to accommodate a shape
+nobody runs, which is the wrong direction to move a regression check.
+
+**The recommendation is unchanged: the default lane shape does not stamp differently, and does
+not change.** Per D-4 this ticket never changed the default regardless of outcome. The wall-time
+win (~120-370s) from widening either pool no longer comes bundled with a real defect -- the one
+genuine bug is fixed -- but it still surfaces a check whose assertion window assumes the
+default's window size, which is reason enough on its own not to make either wider shape the
+default without first deciding whether pixel-based checks should be exempted from the grid,
+sized on their own window, or something else. That is a design question, not a bug report, and
+is out of scope here.
+
+**A full default-shape suite run was attempted as a broader regression check on the
+`checkFocusWeb()` change and did not complete** -- the harness killed it for machine-wide low
+memory while other worktrees were also driving Chrome, not a failure of the change itself. What
+did run clean: `npm run lint`, `npm run typecheck`, every static gate, and the targeted
+isolation runs above (10/10 at default and `--jobs 5` for the fixed check). The wider run is
+safe to retry later; it was not repeated here per the standing instruction not to re-launch
+something the memory reaper stopped.
+
+`scripts/suite-repeat.mjs` runs the suite `k` times per named mode (`--mode name=args`,
+repeatable), taking and releasing the `suite` lock around every run so it never collides with
+a fixture-regenerating run elsewhere, logging each run's full output, and tallying wall time
+and FAIL counts per (fixture, check) per mode; `--tally <dir>` re-reads a directory of logs
+without running anything. Its parser has one trap worth naming: `smoke.mjs` prints "FAIL" on
+two different lines -- a per-check line (`" FAIL  <name>"`, one leading space) and the
+end-of-run per-vault summary (`"  FAIL  <ran>/<total>  <label>"`, two) -- and the first cut of
+the parser matched both, counting a whole vault's fail tally as a single fabricated "check"
+named after its ratio. The fix is the leading-space count, not the word. A second trap in the
+same file: `--mode name=args` first tokenised `args` on bare whitespace, which breaks the
+moment a `--only` value is a check name with spaces in it -- exactly the case needed to isolate
+either finding above. Fixed with a small quote-aware tokenizer (`"..."` and `'...'` both
+group), so `--mode 'fast=--only "focus web stays above dim notes" --jobs 5'` now reaches
+`smoke.mjs` as one argument, not several broken ones.
 
 ## The merge boundary runs the gates the hook runs
 

@@ -238,7 +238,7 @@
  * @property {(kind: string | null, refMs?: number) => void} setRecent
  * @property {(src: string) => void} setHeatSource
  * @property {() => PlanParityReport} checkPlanParity
- * @property {() => unknown} checkFocusWeb
+ * @property {() => Promise<unknown>} checkFocusWeb
  * @property {() => unknown} debugDump
  */
 
@@ -11277,7 +11277,9 @@ function mountVaultGraph(root, data, deps) {
                       return out;
                     },
                     checkFocusWeb: function () {
-                      var best = null, bd = -1;
+                      /** @type {string | null} */
+                      var best = null;
+                      var bd = -1;
                       graph.forEachNode(function (id) {
                         var d = renderer.getNodeDisplayData(id);
                         if (!d || d.hidden) return;
@@ -11286,6 +11288,8 @@ function mountVaultGraph(root, data, deps) {
                       var keepSel = state.selected, keepHov = state.hovered;
                       state.selected = best; state.hovered = null;
                       renderer.refresh({ skipIndexation: true }); renderer.render();
+                      // github#101 -- sample after a real composite, not just render()'s return
+                      function sample() {
                       var cv = renderer.getCanvases();
                       var order = ["edges", "nodes", "edgeLabels", "labels", "hovers", "hoverNodes"];
                       var W = cv.nodes.width, H = cv.nodes.height, dpr = W / renderer.getDimensions().width;
@@ -11356,6 +11360,12 @@ function mountVaultGraph(root, data, deps) {
                       state.selected = keepSel; state.hovered = keepHov; renderer.refresh();
                       res.webOK = res.dimAtGaps === 0;
                       return res;
+                      }
+                      return new Promise(function (resolve) {
+                        WIN.requestAnimationFrame(function () {
+                          WIN.requestAnimationFrame(function () { resolve(sample()); });
+                        });
+                      });
                     },
                     debugDump: function () {
                       var a0 = renderer ? renderer.graphToViewport({ x: 0, y: 0 }) : null;
