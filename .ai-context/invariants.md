@@ -4648,6 +4648,62 @@ green run" cannot say which tree it saw. While it runs, both gates hold the mach
 `suite` lock (`scripts/lock.mjs`) and release it on every exit path; a lock that cannot be had
 blocks the push and names the holder rather than running on top of it.
 
+## Widening the suite's concurrency does not just flake more -- it breaks two checks outright
+
+github#101 asked whether the serial (frame-reading) lane's 76% share of a run (github#93,
+above) could be shrunk by widening it, and whether doing so would flake more under
+contention. `smoke.mjs` gained two levers: `--jobs <n>` (already existed) is the width of the
+whole pool; `--serial-jobs <n>` (new, default 1) is the width of just the walk sub-pool inside
+it -- `--serial-jobs 3` lets the three fixtures that carry a frame-sensitive check (demo-vault,
+test-vault, tag-vault) read their frames at once instead of one at a time. Either flag above
+its default is a delta from the shape the gates push with (`suite-stamp.mjs`'s `shapeDeltas`),
+so a run using them never stamps the tree, the same as `--only` or `--vault`.
+
+**The experiment measured three shapes, five runs each, interleaved (not five-in-a-row) so
+machine drift would not land on one shape, every run under the `suite` lock:**
+
+| Mode | Flags | Wall (avg / min / max) | FAILs across 5 runs |
+|---|---|---|---|
+| default | *(none)* | 428s / 366s / 674s | 1/5 -- "a swipe in the tail of a fit flight still scrolls" (demo-vault) |
+| fast | `--jobs 5` | 301s / 299s / 307s | **5/5** -- "focus web stays above dim notes" (dominant-folder vault); **5/5** -- "the disc's density follows the notes on screen" (10k vault) |
+| serial3 | `--jobs 3 --serial-jobs 3` | 307s / 305s / 308s | **5/5** -- "the disc's density follows the notes on screen" (10k vault) |
+
+428 checks across the suite's five current fixtures (158 + 80 + 63 + 64 + 63). The default
+mode's own wall time is a wide range (366-674s) because one of its five runs queued behind
+unrelated work also holding the `suite`/`screen-left` locks at the time -- 366s is the more
+representative number; the other two modes' runs happened not to collide and read tight
+(within 8s of each other).
+
+**The one default-mode failure is the flake already on record** (github#93's own note: a
+1-in-6-to-8 rate on two checks, reproduced isolated) -- 1/5 here is consistent with that rate
+and is not new. **The other two are not that.** Both reproduced on every single run of the
+shape that triggers them and on zero of the five default runs -- a wider pool does not make
+these checks flakier, it makes them fail, deterministically, whenever the machine is asked to
+drive more Chrome instances at once than the default shape does. Both are `on: "all"`,
+fast-clock (pointer-driven) checks, not the frame-reading ones this ticket set out to shard --
+so the confound D-8 named as a risk (window size shrinking as the grid gets more crowded) is
+one candidate explanation, contention for CPU/GPU between five simultaneous Chromes is
+another, and this experiment does not distinguish them.
+
+**The recommendation: the default lane shape does not change.** Per D-4 this ticket never
+changed it regardless of outcome, but the result also does not make a case to revisit that
+later -- the wall-time win (~120-370s) from widening either pool comes bundled with two
+checks that break every time, not some of the time, and neither is the check this ticket
+was measuring. Shrinking the suite this way trades a slow, reliable serial lane for a fast,
+unreliable one. **Left for a human to file, not filed here**, because whether the two breaks
+are a check too fragile under contention or a real product timing bug under CPU pressure is
+exactly the kind of call `CONTRIBUTING.md` says to ask about rather than guess at.
+
+`scripts/suite-repeat.mjs` runs the suite `k` times per named mode (`--mode name=args`,
+repeatable), taking and releasing the `suite` lock around every run so it never collides with
+a fixture-regenerating run elsewhere, logging each run's full output, and tallying wall time
+and FAIL counts per (fixture, check) per mode; `--tally <dir>` re-reads a directory of logs
+without running anything. Its parser has one trap worth naming: `smoke.mjs` prints "FAIL" on
+two different lines -- a per-check line (`" FAIL  <name>"`, one leading space) and the
+end-of-run per-vault summary (`"  FAIL  <ran>/<total>  <label>"`, two) -- and the first cut of
+the parser matched both, counting a whole vault's fail tally as a single fabricated "check"
+named after its ratio. The fix is the leading-space count, not the word.
+
 ## The merge boundary runs the gates the hook runs
 
 `.githooks/pre-push` is a file in an installed checkout. It runs where somebody ran `git
