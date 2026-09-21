@@ -2,7 +2,7 @@
 // github#149 -- no imports: this is bundled into the plugin
 // github#149 -- every path argument arrives "/" separated
 
-// github#141 -- src/links.mjs is importless and pure, so it keeps the rule above
+// github#141 -- src/links.mjs is importless and pure, so the rule holds
 import { ghostId, ghostLabel } from "./links.mjs";
 
 // github#149, design/0020 -- a folder naming a period, not a subject
@@ -138,8 +138,7 @@ export function normalizeTags(fm) {
 }
 
 // github#149 -- the note's body: the BOM and any frontmatter block removed
-// github#149 -- the strip and the slice MUST be the same string, or a BOM note
-// github#149 -- keeps one character of its own frontmatter (measured: +1 word)
+// github#149 -- the strip and the slice must be the same string
 /**
  * @param {string} raw
  * @returns {string}

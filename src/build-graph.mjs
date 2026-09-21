@@ -245,8 +245,7 @@ function mineLinks(body, fm) {
 
 /* ------------------------------------------------------------ note taxonomy */
 
-// github#149 -- the exporter is the only host that sees a platform separator; everything below
-// this line, and everything in src/taxonomy.mjs, is "/" separated.
+// github#149 -- below this line everything is "/" separated
 /** @param {string} relPath @returns {string} */
 const slashed = (relPath) => relPath.split(sep).join("/");
 

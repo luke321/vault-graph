@@ -88,6 +88,21 @@ The alternative considered and rejected: leave `buildData` where it is and bundl
 with an `obsidian` stub to reach it. It works, but its failure mode is an opaque bundling error
 rather than a named missing field, and it leaves the boundary implicit.
 
+### Two host rules the adapter keeps, and the code only points at (github#188)
+
+**Read the config folder through `Vault#configDir`, never through a literal `.obsidian`.** A
+hardcoded path is an **error** under `obsidianmd/eslint-plugin` (`hardcoded-config-path`), and it
+is wrong on its own terms in a vault whose config folder has been renamed. `readConfigJson()`
+takes the host's `normalizePath` over `app.vault.configDir + "/" + name` for exactly that reason,
+and `strField()` exists because none of the files it reads has a schema this plugin owns — the
+parsed value is `unknown` on purpose, so a caller has to check what it reads.
+
+**Only the exporter ever sees a platform separator.** `src/build-graph.mjs` is the one host with a
+filesystem under it, so `slashed()` converts at the boundary and everything below that line — and
+everything in `src/taxonomy.mjs` — is `"/"` separated. Obsidian hands out `"a/b/c.md"` on every
+platform already, so the plugin adapter has no conversion to do and must not add one: a second
+convention is how the ported copy drifted in the first place.
+
 ### Why a divergence must still happen
 
 `DIVERGENCES` in `src/contract.mjs` names five host differences that are real and permanent:

@@ -21,7 +21,7 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(HERE, "..");
 
 let failures = 0;
-// github#149 -- what the "deferred-value" divergence claims, observed rather than asserted here
+// github#149 -- the "deferred-value" divergence, observed not asserted
 let sawDeferredZero = true;
 /** @param {boolean} ok @param {string} name @param {string} [detail] */
 function report(ok, name, detail) {
@@ -45,9 +45,9 @@ const NOTES = {
   "01 - Projects/Deep/Inner/Leaf.md": "# leaf\n",
   "01 - Projects/2026-09/Deeper/Buried.md": "# buried under a month folder\n",
   "README.md": "# never a note\n",
-  // github#149 -- a BOM: the strip and the slice have to be the same string in BOTH hosts
+  // github#149 -- a BOM: strip and slice must be the same string
   "04 - Notes/Bom.md": "\uFEFF---\ntags: [x]\n---\nthe body here has six real words\n",
-  // github#97, github#149 -- `constructor` is already lowercase, so it reaches the alias map
+  // github#97, github#149 -- `constructor` is lowercase already
   "04 - Notes/Proto.md": "---\ntype: constructor\n---\n# a type named after a prototype member\n",
   "02 - Areas/Beta.md": "---\ntype: people\ntag: green\n---\n# beta\n",
   "03 - Dailies/2026-09-20.md": "# a day\n",
@@ -142,8 +142,7 @@ function fakeHost(vault) {
   });
   /** @param {string} raw @returns {Record<string, unknown>} */
   const frontmatter = (raw) => {
-    // github#149 -- Obsidian strips the BOM before parsing its own frontmatter; a fake host
-    // that does not reports a tag difference the two real hosts do not have
+    // github#149 -- Obsidian strips the BOM before parsing frontmatter
     const m = /^---\r?\n([\s\S]*?)\r?\n---/.exec(String(raw).replace(/^\uFEFF/, ""));
     if (!m) return {};
     /** @type {Record<string, unknown>} */
@@ -191,7 +190,7 @@ console.log("check-producer-contract: src/contract.mjs against src/page.js typed
 {
   const pageSrc = readFileSync(join(ROOT, "src", "page.js"), "utf8");
   // github#149, design/0020 -- braces are MATCHED, not skipped to the first }
-  // github#149 -- dates and sortSpecs carry object types; a lazy regex eats them
+  // github#149 -- dates and sortSpecs carry object types
   /**
    * @param {string} name
    * @returns {{ required: string[], optional: string[] }}
@@ -225,8 +224,7 @@ console.log("check-producer-contract: src/contract.mjs against src/page.js typed
     eq(declared(/** @type {Record<string, { required: boolean }>} */ (table)), typedefFields(String(name)),
        name + " in src/contract.mjs matches its typedef in src/page.js");
   }
-  // github#149 -- src/dates.mjs is where those four buckets are actually produced, so the
-  // contract's copy of them is checked against it rather than against a second hand-written list
+  // github#149 -- checked against src/dates.mjs, not a second hand list
   eq(DATE_SOURCES.slice().sort(), Object.keys(dateTally()).sort(),
      "DATE_SOURCES matches the tally src/dates.mjs builds");
 }
@@ -251,8 +249,7 @@ try {
   eq(validate(plugin, "plugin"), [], "the plugin adapter satisfies the contract");
 
   console.log("check-producer-contract: the fixture exercises what is about to be compared");
-  // github#149 -- without these four, a fixture that stopped producing ghosts or edges would
-  // make the shape comparison below agree about nothing and still report a pass
+  // github#149 -- without these four, agreeing about nothing would pass
   for (const [label, d] of [["exporter", exporter], ["plugin", plugin]]) {
     const nodes = /** @type {Record<string, unknown>[]} */ (d.nodes);
     report(nodes.filter((n) => n.ghost !== true).length >= 5, label + " built real notes to compare");
@@ -287,7 +284,7 @@ try {
    * @param {string} note
    */
   function compareValues(exporter, plugin, note) {
-    // github#149 -- only a PERMANENTLY different field is exempt; a deferred one is compared
+    // github#149 -- only a permanently different field is exempt
     const skip = new Set(DIVERGENCES.filter((x) => x.kind === "field-value").map((x) => x.key));
     /** @param {Record<string, unknown>} d */
     const byId = (d) => Object.fromEntries(
@@ -306,9 +303,7 @@ try {
     }
     eq(diffs, [], "every contract field agrees, node for node" + note);
 
-    // github#149 review follow-up -- s/t are indices into each producer's OWN nodes array,
-    // which can order the same notes differently, so the raw pair is not comparable; resolve
-    // to node ids first, then canonicalize the undirected pair (EDGE's own comment) by sorting it.
+    // github#149 -- compare edges by node id, then canonicalize the pair
     /** @param {Record<string, unknown>} d */
     const canonEdges = (d) => {
       const ids = /** @type {Record<string, unknown>[]} */ (d.nodes).map((n) => String(n.id));
@@ -329,9 +324,7 @@ try {
       eq(a, b, "stats." + key + " agrees" + note);
     }
     eq(exporter.version, plugin.version, "both producers report the same version" + note);
-    // github#149 review follow-up -- a shared, non-divergent top-level field the value pass
-    // skipped; NOT vault/generated, which are legitimately build-identity/wall-clock metadata,
-    // not policy the two hosts owe agreement on.
+    // github#149 -- a shared, non-divergent top-level field, not build identity
     eq(exporter.sortSpecs, plugin.sortSpecs, "sortSpecs agrees" + note);
   }
 
@@ -364,7 +357,7 @@ try {
     eq(ex["README.md"], undefined, "a README is never a note, in either host");
     eq(ex["ghost:Nowhere"].deg, 2, "two sources reaching one destination make one ghost of degree 2");
 
-    // github#149 -- both found by review, both a difference the two hosts could carry silently
+    // github#149 -- both found by review, both carried silently
     eq(ex["04 - Notes/Bom.md"].words, 7,
        "a byte-order mark is stripped before the frontmatter is sliced, not after");
     eq(typeof ex["04 - Notes/Proto.md"].type, "string",

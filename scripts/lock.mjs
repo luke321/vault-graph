@@ -59,9 +59,7 @@ function ageOf(meta) {
   return meta && meta.at ? Date.now() - meta.at : Infinity;
 }
 
-// github#130 -- a record only opts into fast reaping when its writer promised to keep the pid
-// live and current (holder: "process"); anything else, including a human's manual acquire, is
-// never fast-reaped just because a pid it happens to carry looks dead.
+// github#130 -- only holder: "process" opts into fast reaping
 const LIVENESS_FLOOR_MS = 60 * 1000;
 
 function isAlive(pid) {
@@ -144,10 +142,7 @@ async function acquire() {
 
     try {
       mkdirSync(dir);
-      // github#130 -- under --holder process, process.pid here is this short-lived acquiring
-      // CLI's own pid, already gone by the time anyone reads it back; process.ppid is the real,
-      // long-running caller (smoke.mjs, spike-check.mjs, record-demo.ps1, pre-push), which is
-      // what a liveness check actually needs to test.
+      // github#130 -- process.ppid is the long-running caller, not this CLI
       const pid = holder === "process" ? process.ppid : process.pid;
       const record = { owner: owner, at: Date.now(), pid: pid };
       if (holder) record.holder = holder;

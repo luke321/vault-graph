@@ -89,7 +89,7 @@ const NOOP = /** @type {FocusGuard} */ ({ watch: async () => "off" });
 export async function keepFocus() {
   const h = startHelper();
   if (!h) return NOOP;
-  // design/0018-not-stealing-the-keyboard -- home is captured once per run, before the FIRST spawn
+  // design/0018-not-stealing-the-keyboard
   if (!home) {
     const before = await h.ask("fg");
     home = /^(\d+) (\d+)$/.exec(before)?.[1] || null;
@@ -99,7 +99,7 @@ export async function keepFocus() {
 
   return {
     /**
-     * design/0018-not-stealing-the-keyboard -- never await this on the critical path.
+     * design/0018-not-stealing-the-keyboard
      * @param {number} [childPid]
      * @param {{ forMs?: number }} [opts]
      * @returns {Promise<string>} already | foreign | plain | attach | failed | off

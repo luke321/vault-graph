@@ -23,7 +23,7 @@ function fakePage(opts = {}) {
     captured: (opts.captured || []).slice(),
     get errors() { return p.captured.slice(); },
     async send(method, params) { p.sent.push(method); void params; },
-    // github#151 -- the page state the probe reads back, for the audit's own regressions
+    // github#151 -- the page state the probe reads back
     state: Object.assign({}, opts.state || {}),
     async eval(expr) {
       if (p.dead) throw new Error("Inspector.detached");
@@ -260,14 +260,14 @@ console.log("the error log");
 console.log("");
 console.log("github#151 -- the state audit");
 
-// github#151 -- off unless asked for, and it leaves page.eval exactly as it found it
+// github#151 -- off unless asked for; page.eval left as found
 {
   const r = await run([pass("one"), pass("two")]);
   check("the audit is off by default", r.audit === null, String(r.audit));
   check("...and page.eval is never wrapped when it is off", r.evalRestored);
 }
 
-// github#151 -- what a check changed, and what it left off the job's baseline
+// github#151 -- what a check changed, and what it left off baseline
 {
   const r = await run([
     { name: "leaves the camera moved",
@@ -297,7 +297,7 @@ console.log("github#151 -- the state audit");
         JSON.stringify(rows[2].changed) + " / " + JSON.stringify(rows[2].dirty));
 }
 
-// github#151 -- what a check read, and what the probe's own read must not be counted as
+// github#151 -- what a check read; the probe's own read is not it
 {
   const r = await run([
     { name: "reads the selection",
@@ -309,8 +309,7 @@ console.log("github#151 -- the state audit");
   check("an expression naming a key counts as a read of it",
         reads.includes("state.selected"), reads.join(", "));
   check("...and a key it never names does not", !reads.includes("cam.ratio"), reads.join(", "));
-  // github#151 -- the probe itself names SETTINGS_KEY and localStorage, so store.settings
-  // github#151 -- appearing here would mean the probe's own eval landed in the check's list
+  // github#151 -- the probe's own eval must not land in the check's list
   check("the probe's own read is not counted as the check's",
         !reads.includes("store.settings"), reads.join(", "));
   check("the mount flag is never a read -- every expression names __vg",
@@ -319,7 +318,7 @@ console.log("github#151 -- the state audit");
   check("page.eval is handed back after the run", r.evalRestored);
 }
 
-// github#151 -- keysRead is an upper bound by construction: it matches tokens, not semantics
+// github#151 -- keysRead matches tokens, not semantics
 {
   const keys = { "state.selected": "", "cam.ratio": "", "ui.vg-q": "", "store.settings": "" };
   check("a DOM id is the token for its own key",
@@ -330,14 +329,13 @@ console.log("github#151 -- the state audit");
         keysRead(keys, ["window.localStorage.getItem(k)"]).join() === "store.settings");
   check("an expression naming none of them reads none",
         keysRead(keys, ["__vg.graph.order"]).length === 0);
-  // github#151 -- the whole-word rule, which is what keeps the report worth reading
+  // github#151 -- the whole-word rule keeps the report readable
   check("a bare identifier is not read out of a longer word",
         keysRead({ "vg.timeScale": "" }, ["res.timeScaleish + timeScaled"]).length === 0,
         keysRead({ "vg.timeScale": "" }, ["res.timeScaleish + timeScaled"]).join());
   check("...but is found as a word",
         keysRead({ "vg.timeScale": "" }, ["__vg.timeScale"]).length === 1);
-  // github#151 -- and a state key needs its full accessor, not its bare tail: `hidden` alone
-  // matched getNodeDisplayData(id).hidden in a third of the suite
+  // github#151 -- a state key needs its full accessor, not its bare tail
   check("a state key is not read out of an unrelated .hidden",
         keysRead({ "state.hidden": "" }, ["renderer.getNodeDisplayData(id).hidden"]).length === 0);
   check("...but is read through __vg.state",
@@ -349,7 +347,7 @@ console.log("github#151 -- the state audit");
         tokensFor("cam.ratio").join(", "));
 }
 
-// github#151 -- the coupling: a read of a key an earlier check left off baseline
+// github#151 -- the coupling: reading a key left off baseline
 {
   const job = {
     base: { "cam.ratio": "1", "state.selected": "null" },
@@ -377,8 +375,7 @@ console.log("github#151 -- the state audit");
         leaks.length === 1 && leaks[0].check === "A moves the camera" &&
         leaks[0].keys.join() === "cam.ratio", JSON.stringify(leaks));
 
-  // github#151 -- a key the check declared is not a leak, and a report that calls it one sends
-  // the reader to fix something the source already accounts for
+  // github#151 -- a declared key is not a leak
   const declaredJob = {
     base: { "cam.ratio": "1" },
     rows: [{ name: "A moves the camera and says so", leaves: ["cam.ratio"],
@@ -403,9 +400,7 @@ console.log("github#151 -- the state audit");
         by.fresh && by.fresh.from === "(absent)");
   check("an unchanged map diffs to nothing", diffState({ a: "1" }, { a: "1" }).length === 0);
 
-  // github#151 -- a camera that settles a ten-thousandth away has not changed state, and a full
-  // run failed on exactly that (cam.ratio 0.954 -> 0.9539, the 4-dp rounding straddling a
-  // boundary). Integers stay exact, so no count is ever absorbed by the tolerance.
+  // github#151 -- fractions get a tolerance; integers stay exact
   check("float drift under the tolerance is not a change",
         diffState({ "cam.ratio": "0.954" }, { "cam.ratio": "0.9539" }).length === 0);
   check("...and a real camera move still is",
@@ -423,7 +418,7 @@ console.log("github#151 -- the state audit");
 console.log("");
 console.log("github#151 -- the reset boundary");
 
-// github#151 -- a check that leaves a key changed fails, and the one after it does not
+// github#151 -- one leak fails one check, not every check after
 {
   const r = await run([
     pass("leaves nothing behind"),
@@ -454,8 +449,7 @@ console.log("github#151 -- the reset boundary");
   check("a check that restores what it changed is clean", r.failed === 0, "failed " + r.failed);
 }
 
-// github#151 -- and a check may DECLARE what it leaves, which is the point: the coupling
-// github#151 -- becomes visible in the source instead of implicit in the order
+// github#151 -- a check may DECLARE what it leaves
 {
   const r = await run([
     { name: "switches the disc and says so", leaves: ["state.dim"],
@@ -497,7 +491,7 @@ console.log("github#151 -- the reset boundary");
         !allowedToLeave("state.dim", undefined));
 }
 
-// github#151 -- the boundary is off unless asked for, and costs nothing when it is
+// github#151 -- the boundary is off unless asked for
 {
   const r = await run([
     { name: "leaves the camera moved",
@@ -508,7 +502,7 @@ console.log("github#151 -- the reset boundary");
   check("...and nothing is audited either", r.audit === null);
 }
 
-// github#151 -- the boundary alone needs no audit rows, and the audit alone scores nothing
+// github#151 -- boundary without rows, audit without scoring
 {
   const leak = [{ name: "leaves the camera moved",
                   fn: async (p) => { p.state["cam.ratio"] = "0.5"; return { ok: true, detail: "" }; } }];
@@ -523,8 +517,7 @@ console.log("github#151 -- the reset boundary");
         "failed " + a.failed);
 }
 
-// github#151 -- a probe that could not run scores nothing, rather than reading as the whole
-// github#151 -- page vanishing and failing every check after it with 125 keys
+// github#151 -- a probe that could not run scores nothing
 {
   check("a good sample is readable", readable({ "page.mounted": "true", "cam.ratio": "1" }));
   check("a probe that threw is not", !readable({ "probe.error": "page threw" }));

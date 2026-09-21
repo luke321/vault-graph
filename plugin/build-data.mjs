@@ -1,5 +1,5 @@
 // github#149, design/0020 -- the plugin's producer, out of main.js for the gate
-// github#149 -- nothing from "obsidian" at runtime; the host carries normalizePath
+// github#149 -- nothing from "obsidian" at runtime; normalizePath comes in
 // github#149 -- JSDoc obsidian types are erased, and are checked by tsc
 
 // github#6
@@ -23,9 +23,7 @@ import {
  */
 
 /**
- * One note as buildData emits it -- the same shape src/build-graph.mjs writes into the
- * standalone file, which is the whole point of the adapter (see SPIKE.md). `_file` is the
- * plugin-side handle used for the one read left, and is stripped before the data leaves.
+ * github#149, design/0020 -- one note as buildData emits it
  * @typedef {Object} GraphNode
  * @property {string} id
  * @property {string} label
@@ -60,18 +58,13 @@ const walkOrder = (a, b) => {
 };
 
 /* ==================================================================== config ==
- * Same principle as the Node builder: ask the vault which folders are templates and
- * daily notes rather than assuming a layout. The path must go through Vault#configDir --
- * a literal ".obsidian" is an ERROR under obsidianmd/eslint-plugin
- * (hardcoded-config-path), and it is wrong anyway in a vault whose config folder was
- * renamed.
+ * github#149, design/0020 -- ask the vault, through Vault#configDir
  */
 /**
  * @param {Host} host
  * @param {string} name   path under the config dir
  * @returns {Promise<unknown>}   the parsed file, or null when absent or unreadable. `unknown`
- *   on purpose: none of these files has a schema this plugin owns, so a caller has to check
- *   what it reads -- which is what strField below does, and what every caller already did.
+ *   github#149 -- unknown on purpose: no schema this plugin owns
  */
 async function readConfigJson(host, name) {
   try {
@@ -87,8 +80,7 @@ async function readConfigJson(host, name) {
 }
 
 /**
- * One string field of a parsed config object, or "" when the object or the field is not
- * what it should be. Untrimmed: the caller decides what blank means.
+ * github#149 -- one string field, or "" -- untrimmed
  * @param {unknown} obj @param {string} key
  */
 const strField = (obj, key) => {
@@ -145,18 +137,7 @@ async function readSortSpecs(host) {
 }
 
 /* ================================================================ the adapter ==
- * The crawl in build-graph.mjs, replaced by asking Obsidian. What used to be a walk, a
- * YAML parser, a wikilink miner, a resolver and an alias table is now four reads of an
- * index that is already in memory:
- *
- *   vault.getMarkdownFiles()        the file list       (was walk())
- *   metadataCache.getFileCache()    frontmatter + tags  (was parseFrontmatter())
- *   metadataCache.resolvedLinks     the edges           (was mineLinks() + resolve())
- *   metadataCache.unresolvedLinks   the ghosts          (was the resolve() failures)
- *   file.stat.mtime                 `touched`           (was statSync())
- *
- * Only `words` still needs a file body, and that is the only I/O left in the whole
- * build.
+ * github#149, design/0020 -- four reads of an in-memory index, not a crawl
  */
 /**
  * @param {Host} host

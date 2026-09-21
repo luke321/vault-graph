@@ -90,9 +90,7 @@ function walk(dir, acc) {
   return acc;
 }
 
-// A pointer names a record as `decisions/NNNN` (ambiguous when NNNN is shared) or, to
-// disambiguate, `decisions/NNNN-full-stem` (github#153). recordFilesOf resolves either form
-// against what is actually on disk.
+// github#153 -- a pointer names a record by NNNN or by its full stem
 function recordFilesOf(dir) {
   const byNumber = {};
   for (const f of readdirSync(join(ROOT, ".ai-context", dir)).sort()) {
