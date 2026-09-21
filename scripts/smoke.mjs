@@ -3422,6 +3422,9 @@ check("a swipe after Fit still scrolls, and a late finger still pinches", async 
 // github#175, design/0013 -- the four items raised after github#173 merged
 // github#175 -- items 1 and 2: setPan(false) flew a disc home
 check("a swipe in the tail of a fit flight still scrolls", async (p) => {
+  // github#151, github#180 -- as "a phone gets the disc whole and clear": the phone path
+  // writes the store, and writes {} where there had been no entry at all
+  const storedWas = await storeSnap(p);
   const dpr = await p.j(`window.devicePixelRatio || 1`);
   const said = [], bad = [];
   const swipe = async (c) => {
@@ -3457,16 +3460,25 @@ check("a swipe in the tail of a fit flight still scrolls", async (p) => {
       const c = await discAt(p);
       await p.eval(`(function () { var b = document.getElementById("vg-reset");
                      if (b) b.click(); })(); void 0`);
-      // github#175 -- 345ms into a 380ms flight: its tail, where the ratio has
-      // github#175 -- climbed back over phonePanWanted()'s own threshold
-      await sleep(345);
-      const tail = await camRatio(p);
+      // github#175, github#180 -- the tail of a 380ms flight, where the ratio climbs back
+      // github#175, github#180 -- over phonePanWanted()'s own threshold. A fixed sleep(345)
+      // github#175, github#180 -- took one sample and left the swipe to whatever CDP
+      // github#175, github#180 -- round-trip jitter landed around that instant -- flaky by
+      // github#175, github#180 -- as little as 0.00009 of the ratio. Poll into the band
+      // github#175, github#180 -- itself instead, and swipe the moment it is entered, so
+      // github#175, github#180 -- the sample cannot miss by a fraction of a percent the way
+      // github#175, github#180 -- a single fixed-delay read can.
+      const threshold = FIT * 0.995, ceiling = FIT - 1e-5;
+      let tail = await camRatio(p);
+      for (const dl = Date.now() + 379; Date.now() < dl && !(tail > threshold && tail < ceiling);) {
+        tail = await camRatio(p);
+      }
       const { trace, held } = await swipe(c);
       // github#175 -- both halves, or a pass is meaningless: the finger has to
       // github#175 -- land with the flight still up AND past the pan threshold
-      if (!(tail > FIT * 0.995 && tail < FIT - 1e-5)) {
+      if (!(tail > threshold && tail < ceiling)) {
         bad.push(`${d.name}: the finger missed the tail (ratio ${tail}, fit ${FIT}, ` +
-                 `threshold ${+(FIT * 0.995).toFixed(5)}) -- retimed, not fixed`);
+                 `threshold ${+threshold.toFixed(5)}) -- retimed, not fixed`);
       }
       if (held) {
         bad.push(`${d.name}: panning was armed as the swipe began -- setPan(false) ` +
@@ -3475,13 +3487,15 @@ check("a swipe in the tail of a fit flight still scrolls", async (p) => {
       if (!free(trace)) {
         bad.push(`${d.name}: the flight's tail claimed the swipe [${trace}]`);
       }
-      said.push(`${d.name}: fit ${FIT}, zoomed ${zoomed}, at +345ms ${tail}, ` +
+      said.push(`${d.name}: fit ${FIT}, zoomed ${zoomed}, at the tail ${tail}, ` +
                 `panning ${held ? "ARMED" : "off"}, [${trace}]`);
       await sleep(700);
       await settlePan(p);
     }
   } finally {
     await phoneOff(p);
+    // github#151, github#180
+    await storeBack(p, storedWas);
   }
   return { ok: bad.length === 0,
            detail: said.join(" | ") + (bad.length ? "  <- " + bad.join("; ") : "") };
@@ -4312,6 +4326,11 @@ check("the overview footprint is drawn to the disc's scale and is never clamped"
 
 // github#79
 check("clicking the overview fits the disc through fit(), with panning on or off", async (p) => {
+  // github#151, github#180 -- this drives a control the page PERSISTS (#vg-pan). Toggling it
+  // github#151, github#180 -- twice returns the same value but not the same baseline: the first
+  // github#151, github#180 -- toggle creates the store.settings key even when it lands back on
+  // github#151, github#180 -- the default, so a snapshot/restore is needed, not just the value.
+  const storedWas = await storeSnap(p);
   // github#79, design/0017 -- ask Fit where it lands; FIT_RATIO is develop's to move
   const fitLanding = async () => {
     await camTo(p, { x: 0.5, y: 0.5, ratio: 0.35, angle: 0 });
@@ -4357,6 +4376,8 @@ check("clicking the overview fits the disc through fit(), with panning on or off
   await p.eval(`document.querySelector("#vg-pan").click(); void 0`);
   await camSettle(p);
   await camReset(p);
+  // github#151, github#180
+  await storeBack(p, storedWas);
   return {
     ok: shown === true && flew1 &&
         Math.abs(landed.x - 0.5) < 0.002 && Math.abs(landed.y - 0.5) < 0.002 &&
