@@ -305,12 +305,34 @@ try {
       }
     }
     eq(diffs, [], "every contract field agrees, node for node" + note);
+
+    // github#149 review follow-up -- s/t are indices into each producer's OWN nodes array,
+    // which can order the same notes differently, so the raw pair is not comparable; resolve
+    // to node ids first, then canonicalize the undirected pair (EDGE's own comment) by sorting it.
+    /** @param {Record<string, unknown>} d */
+    const canonEdges = (d) => {
+      const ids = /** @type {Record<string, unknown>[]} */ (d.nodes).map((n) => String(n.id));
+      return /** @type {Record<string, unknown>[]} */ (d.edges)
+        .map((e) => {
+          const a = ids[/** @type {number} */ (e.s)], b = ids[/** @type {number} */ (e.t)];
+          const [lo, hi] = a < b ? [a, b] : [b, a];
+          return `${lo}|${hi}|${e.w}`;
+        })
+        .sort();
+    };
+    eq(canonEdges(exporter), canonEdges(plugin),
+       "every edge agrees on its two notes and its weight, canonicalized by id" + note);
+
     for (const key of Object.keys(STATS)) {
       const a = /** @type {Record<string, unknown>} */ (exporter.stats)[key];
       const b = /** @type {Record<string, unknown>} */ (plugin.stats)[key];
       eq(a, b, "stats." + key + " agrees" + note);
     }
     eq(exporter.version, plugin.version, "both producers report the same version" + note);
+    // github#149 review follow-up -- a shared, non-divergent top-level field the value pass
+    // skipped; NOT vault/generated, which are legitimately build-identity/wall-clock metadata,
+    // not policy the two hosts owe agreement on.
+    eq(exporter.sortSpecs, plugin.sortSpecs, "sortSpecs agrees" + note);
   }
 
   console.log("check-producer-contract: the policy both producers now share, on this fixture");
