@@ -139,6 +139,9 @@ jobs:
       - name: Link destinations resolve against their source
         run: node scripts/check-link-resolution.mjs
 
+      - name: Both producers emit the same shape
+        run: node scripts/check-producer-contract.mjs
+
       - name: The generated code map and index are current
         run: node scripts/code-map.mjs --check
 

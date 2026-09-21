@@ -7,11 +7,13 @@ because the contract between them is declared in one place and both are read aga
 Nothing runs at serve time. There is no serve time.
 
 ```
-  src/build-graph.mjs                 plugin/main.js
+  src/build-graph.mjs                 plugin/build-data.mjs
   (Node: crawl the vault)             (Obsidian: read metadataCache)
           │                                   │
           ├──────── src/links.mjs ────────────┤   shared pure rules:
-          ├──────── src/dates.mjs ────────────┤   link destinations, ghost ids, dates
+          ├──────── src/dates.mjs ────────────┤   link destinations, ghost ids, dates,
+          ├──────── src/taxonomy.mjs ─────────┤   folders, types, tags, words, ghosts
+          ├──────── src/contract.mjs ─────────┤   the shape itself, as data
           │                                   │
           ▼                                   ▼
       VaultData  ────────────────────────  VaultData        contract: src/page.js "types"
@@ -42,20 +44,31 @@ The engine's own surfaces — the store and the renderer — are typed in `src/e
 as **exactly the members `page.js` calls** and nothing more (github#58, `decisions/0012`), so
 anything a future caller reaches for shows up rather than being absorbed.
 
-## Shared pure modules — `src/links.mjs`, `src/dates.mjs`
+## Shared pure modules — `links`, `dates`, `taxonomy`, `contract`
 
-Host-independent rules that both producers import rather than port. `dates.mjs` (github#6)
-decides a note's day: frontmatter, then filename, then file stamp. `links.mjs` (github#141)
-cleans a link target, resolves it against the note it was written in, and derives a ghost's
-id, key and label.
+Host-independent rules that both producers import rather than port. **None of the four imports
+anything**, because all four are bundled into the plugin: a `node:` import in any of them would
+reach `main.js`.
 
-They matter structurally, not just as tidiness: a change to `links.mjs` moves edges and ghost
-identities in **both** hosts at once, which is why `scripts/check-link-resolution.mjs` gates
-it with no skip flag.
+- `dates.mjs` (github#6) decides a note's day: frontmatter, then filename, then file stamp.
+- `links.mjs` (github#141) cleans a link target, resolves it against the note it was written in,
+  and derives a ghost's id, key and label.
+- `taxonomy.mjs` (github#149) is everything else a producer decides about a note: its wedge and
+  subfolders, the month-folder rule, its type, its tags, its word count, the ghost factory, the
+  edge book.
+- `contract.mjs` (github#149) is not a rule but the **shape** — every field of `VaultNode`,
+  `VaultEdge`, `VaultStats` and `VaultData` with its type and whether it is required, plus the
+  host differences that are declared rather than accidental.
+
+They matter structurally, not just as tidiness: a change to any of them moves **both** hosts at
+once, which is why `scripts/check-link-resolution.mjs` and `scripts/check-producer-contract.mjs`
+gate them with no skip flag. Until github#149 the last two did not exist and the policy in them
+was written out twice — 7 byte-identical duplications and 5 near-duplicates, measured.
 
 Everything else stays in its adapter, because Obsidian owns its own metadata resolution while
 the exporter parses files — and where the two therefore cannot agree, the difference is
-measured and written down rather than assumed away (see *Link resolution*, below).
+**declared in `contract.mjs` with its reason and asserted to still happen**, rather than assumed
+away (`design/0020`, and see *Link resolution*, below).
 
 ## Producer 1 — `src/build-graph.mjs` (the exporter)
 
@@ -74,10 +87,15 @@ measured and written down rather than assumed away (see *Link resolution*, below
   `window.VAULT_*` assignment goes through `jsonForScript()`, so a note cannot close the
   element it is serialised into (github#96, `scripts/check-data-escape.mjs`).
 
-## Producer 2 — `plugin/main.js` (the Obsidian plugin)
+## Producer 2 — `plugin/build-data.mjs` and `plugin/main.js` (the Obsidian plugin)
 
 Reads Obsidian's `metadataCache` rather than the filesystem, and emits the same `VaultData`.
-Beyond the data it owns three things the exporter has no equivalent of:
+
+**The data half is `plugin/build-data.mjs`, and it imports nothing from `obsidian` at runtime**
+(github#149): the host's `normalizePath` is handed in on an explicit `host` argument, so the
+adapter can be run in plain Node and compared against the exporter by
+`scripts/check-producer-contract.mjs`. `plugin/main.js` is the rest, and it owns three things the
+exporter has no equivalent of:
 
 - **The view lifecycle.** `VaultGraphView extends ItemView`: `onOpen()` renders, `onClose()`
   tears down.
@@ -195,9 +213,10 @@ a feature-branch push runs none of them and proves nothing. In order:
 `check-pii` · `check-scope` · `check-network` · `check-notice` · `check-comments` ·
 `check-generator-determinism` · `check-build-order-determinism` · `check-data-escape` ·
 `update-note-selftest` · `smoke-runner-selftest` · `check-link-resolution` ·
-`code-map.mjs --check` · `gallery-nav.mjs --check` · `npm run lint`
+`check-producer-contract` · `code-map.mjs --check` · `gallery-nav.mjs --check` ·
+`check-ci-parity` · `npm run lint`
 
-**None of those fourteen has a skip flag.** `SKIP_SMOKE=1` reaches only the last step, the
+**None of those sixteen has a skip flag.** `SKIP_SMOKE=1` reaches only the last step, the
 invariant suite (`scripts/smoke.mjs`), which runs each check on the fixtures its assertion is
 about and skips entirely on a tree already stamped green (`decisions/0013`).
 

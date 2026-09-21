@@ -4528,6 +4528,93 @@ emits carries all of them, `dirs` as `[]` and `touched` as `""` — so a produce
 required field fails the check that already builds the ghost fixture, instead of surviving on
 the page's fallback until the next doc pass notices by eye.
 
+## Both producers emit one shape, and a difference has to be declared (github#149)
+
+`src/build-graph.mjs` reads a filesystem; `plugin/build-data.mjs` reads Obsidian's
+`metadataCache`. They build the same `VaultData` for the same page, and until github#149 nothing
+put their outputs next to each other — so what held them together was that someone had copied the
+policy across correctly and would keep doing so. The plugin's own header said as much: *"ported
+from `src/build-graph.mjs`, line-for-line"*.
+
+**What the port had already cost, twice.** github#141: both adapters keyed a ghost by basename,
+so one defect had to be found and fixed in two places. github#152: the exporter shipped ghosts
+with `dirs` and `touched` missing outright while the plugin's carried both, and `page.js`'s own
+fallbacks absorbed the gap — working software, and a shape nothing could rely on.
+
+**Measured on `98c91e7` before the change**, matching the two sources for the policy they share:
+
+| | |
+|---|---|
+| byte-identical duplications | **7** — `MONTHISH`, `TYPE_ALIAS`, `SKIP_FILES`, `deNumber`, `slug`, `singular`, `norm` |
+| near-duplicates | **5** — `under`, `inferType`'s body, `paraDirs`'s body, the ghost literal, the tag normaliser |
+
+The five are the number that matters: they differ only in path separator, in a module constant
+versus a parameter, and in `??` versus `||`. None changed behaviour that day. Each was one
+careless edit from doing so, and nothing would have caught it.
+
+**The invariant.** The policy lives once, in `src/taxonomy.mjs`; the shape is declared once, in
+`src/contract.mjs`, cross-checked against `src/page.js`'s own typedefs; and a difference between
+the two hosts is legal only when `DIVERGENCES` names it and says why. **A declared divergence that
+stops happening fails too** — without that half the list becomes an allowlist, and the first
+genuinely new difference to land on one of those keys is waved through. Five are declared today:
+`dev` and `folderOrder` are the exporter's alone, `readWords` and `_spike` are the plugin's, and
+`words` is `0` on every plugin node until the deferred read has run.
+
+**The alias divergence is declared and deliberately not checked here.** The exporter resolves
+frontmatter aliases; Obsidian's cache does not, so `[[Nickname]]` reaches an aliased note in the
+standalone and becomes `ghost:Nickname` in the plugin (github#141). It moves which **nodes** exist,
+not which **fields** they carry, so it belongs to resolution — and `check-link-resolution.mjs`
+owns resolution, pinned against Obsidian's own cache.
+
+**Check:** `scripts/check-producer-contract.mjs`, in the hook and at the merge boundary — 59
+assertions, about a second, no Chrome and no Obsidian. It runs the exporter as a subprocess and
+the plugin's adapter in-process against a fake host, over one nine-note fixture, twice: once
+plain and once with `--flat-months`, which is the one shared rule that takes a parameter.
+The fake host is handed `resolvedLinks` / `unresolvedLinks` as **fixture data**, so the
+comparison is of everything downstream of resolution and is not circular.
+
+Each of these was applied to the tree, the check run, and the change reverted:
+
+| mutation | caught by |
+|---|---|
+| the exporter drops `sub` | `validate()`, and the shape diff |
+| either producer grows an undeclared field | `validate()`, and the shape diff |
+| the plugin changes one field's value policy | the value diff, node for node, in both flat-month states |
+| the **shared** month rule changes | the fixture's own policy assertions |
+
+The last row is the one to read twice. A change to `src/taxonomy.mjs` reaches both producers at
+once, so by construction it is **not** a divergence and the cross-producer diff stays silent —
+which is what sharing the policy is for. The fixture assertions are what hold the rule itself: a
+month folder never names a type, a month folder ends the walk, and `--flat-months` drops it rather
+than keeping it as a sub. A first draft of those assertions **passed under that mutation**, because
+each only checked a case where both readings agree; the note buried under a month folder is in the
+fixture because of it.
+
+**Sharing the policy found two live defects on the first read, and both are pinned in the
+fixture.** Neither was introduced by the merge; both had been sitting in the duplicated halves.
+
+- **`type: constructor` in frontmatter returned a *function* as `node.type`.** `TYPE_ALIAS` is a
+  plain object literal indexed by a user-written value, so `TYPE_ALIAS["constructor"]` is
+  `Object.prototype.constructor` before anything is stored — github#97's class exactly, one level
+  up from the planner maps that invariant covers. It is the **only** reachable name: `fm.type` is
+  lowercased first, so `toString` and `hasOwnProperty` miss, and `constructor` is already
+  lowercase. The map has a null prototype now, in the one place both hosts read it.
+- **The plugin counted one word too many on a note carrying a byte-order mark.** It matched
+  `^---` against the BOM-stripped text and then sliced the **original**, so the body kept one
+  character of its own frontmatter: measured **7 words against the exporter's 6** on the same
+  note. The exporter was right — `parseFrontmatter` sliced the string it had matched. `noteBody()`
+  is that rule in one place now, and both producers call it.
+
+**And the check had a hole that let the second one through.** `words` was declared a
+`field-value` divergence, which exempted it from the node-for-node comparison altogether — so the
+one field where the two hosts provably disagreed was the one field never compared. It is a
+`deferred-value` now: the gate asserts the zero state before `readWords()` (which is what actually
+diverges — the *timing*) and then compares the value like every other field.
+
+**Behaviour unchanged, measured both ways:** the exporter's output on a fixture vault is
+byte-identical to `98c91e7` with `generated` excluded, and `check-link-resolution.mjs` — which
+builds real vaults and asserts exact edges, ghost identities and degrees — passes untouched.
+
 ## A folder can be named after anything on `Object.prototype`
 
 `"a folder named after an Object.prototype member still lays out"` builds seven tiny vaults

@@ -50,7 +50,7 @@ slots, the six-degree minimum wedge, the fifty-two-week heatmap window. Each has
 measurement behind it, and the recurring failure mode in this repo is reasoning about the
 code instead of measuring it.
 
-Sixteen commands, and every one of them is a gate rather than a suggestion. They all run
+Seventeen commands, and every one of them is a gate rather than a suggestion. They all run
 from `.githooks/pre-push`, in this order, on a push to `develop` or `main` — a feature-branch
 push runs none of them, so a green branch push is not evidence of anything:
 
@@ -66,6 +66,7 @@ node scripts/check-data-escape.mjs      # a note's frontmatter cannot close the 
 node scripts/update-note-selftest.mjs   # the update note's grammar and decision table (design/0016)
 node scripts/smoke-runner-selftest.mjs  # a check that threw is scored as a failure (github#146)
 node scripts/check-link-resolution.mjs  # both producers agree where a link points (github#141)
+node scripts/check-producer-contract.mjs # both producers emit the same shape, and a difference is declared (github#149)
 node scripts/code-map.mjs --check       # the generated map and index still match the source
 node scripts/gallery-nav.mjs --check    # the gallery's "New in" strip still matches the feature pages
 node scripts/check-ci-parity.mjs        # every gate above also runs in CI, where a merge boundary can see it (github#147)
@@ -73,7 +74,7 @@ npm run lint                            # tsc --noEmit on the engine, then on th
 node scripts/smoke.mjs                  # the invariant suite: five fixtures, each check on the ones its assertion is about
 ```
 
-**Only the last one has a skip flag.** `SKIP_SMOKE=1 git push` skips the suite; the fifteen
+**Only the last one has a skip flag.** `SKIP_SMOKE=1 git push` skips the suite; the sixteen
 above it do not have one and are not meant to — most of them are cheap, and what they prevent
 is damage to somebody else's software, somebody else's licence, or somebody else's name.
 
