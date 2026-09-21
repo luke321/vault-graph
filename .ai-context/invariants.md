@@ -4510,9 +4510,13 @@ alias index, so the plugin grows a `ghost:Nickname` the exporter does not. Adopt
 answer would delete real edges, so the exporter keeps its aliases.
 
 **One node-shape divergence found by inspection, not by a check (github#152).** `VaultNode`
-(`src/page.js`) is the one written contract both producers are supposed to satisfy, and
-`tsconfig.contracts.json`'s `checkJs` program only names `plugin/main.js` and `src/page.js` —
-`src/build-graph.mjs` is never type-checked against it. The exporter's ghost object literal
+(`src/page.js`) is the one written contract both producers are supposed to satisfy, and at the
+time `tsconfig.contracts.json`'s `checkJs` program named only `plugin/main.js` and `src/page.js` —
+`src/build-graph.mjs` was never type-checked against it. **That gap is closed (github#156):** the
+exporter is in `tsconfig.contracts-node.json` and its ghost literal is annotated `RawNote`, so
+dropping either field is a `TS2322` at the keystroke. The check below stays, because it reads the
+`@property` list out of the JSDoc and so also catches a field added to `VaultNode` that the
+exporter never learns about. The exporter's ghost object literal
 omitted `dirs` and `touched`, both declared required, while the plugin's already carried both;
 `page.js`'s own fallbacks (`n.dirs || []`, a missing `touched` reading as `""`) absorbed the gap,
 so nothing broke and no screenshot showed it. `check-link-resolution.mjs` now reads `VaultNode`'s

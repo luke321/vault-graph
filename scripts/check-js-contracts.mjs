@@ -21,8 +21,8 @@ const TSC = join(ROOT, "node_modules", "typescript", "bin", "tsc");
 
 // github#145, github#156 -- the two real programs; covers is what --listFiles proves
 const PROGRAMS = [
-  { config: "tsconfig.contracts.json", label: "browser", covers: ["src/page.js", "plugin/main.js"] },
-  { config: "tsconfig.contracts-node.json", label: "node", covers: ["src/build-graph.mjs"] },
+  { config: "tsconfig.contracts.json", covers: ["src/page.js", "plugin/main.js"] },
+  { config: "tsconfig.contracts-node.json", covers: ["src/build-graph.mjs"] },
 ];
 
 // github#145, github#156 -- one probe per program: each config has its own checkJs
