@@ -250,6 +250,18 @@ try {
   eq(validate(exporter, "exporter"), [], "the exporter satisfies the contract");
   eq(validate(plugin, "plugin"), [], "the plugin adapter satisfies the contract");
 
+  console.log("check-producer-contract: the fixture exercises what is about to be compared");
+  // github#149 -- without these four, a fixture that stopped producing ghosts or edges would
+  // make the shape comparison below agree about nothing and still report a pass
+  for (const [label, d] of [["exporter", exporter], ["plugin", plugin]]) {
+    const nodes = /** @type {Record<string, unknown>[]} */ (d.nodes);
+    report(nodes.filter((n) => n.ghost !== true).length >= 5, label + " built real notes to compare");
+    report(nodes.some((n) => n.ghost === true), label + " built at least one ghost to compare");
+    report(/** @type {unknown[]} */ (d.edges).length > 0, label + " built at least one edge to compare");
+    report(nodes.some((n) => /** @type {string[]} */ (n.dirs).length > 0),
+           label + " built a note with subfolders, so dirs is not vacuously empty");
+  }
+
   console.log("check-producer-contract: the two shapes against each other");
   {
     const a = shapeOf(exporter), b = shapeOf(plugin);

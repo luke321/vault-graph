@@ -165,6 +165,26 @@ the gate now asserts the zero state *and* compares the value.
 The general lesson, for the next entry added to `DIVERGENCES`: a divergence exempts something from
 a check, so the narrowest true description of it is the only safe one.
 
+## The limit of this gate, stated
+
+**The plugin adapter is run against a fake host, never against Obsidian.** The fake supplies only
+*inputs* — the file list, the frontmatter, `resolvedLinks`, `unresolvedLinks`, `file.stat` — and
+every decision about what a node carries is still made by the real `buildData`. That is what makes
+it worth running. It is also the assumption the whole gate rests on, so it is worth being plain
+about what it cannot catch: **if the fake drifts from what Obsidian actually hands over, the gate
+keeps passing while the plugin is wrong in Obsidian.**
+
+That is not hypothetical. It happened during this ticket: the fake's frontmatter parser did not
+strip a byte-order mark before matching `^---`, where Obsidian does, and the gate reported a tag
+difference the two real hosts do not have. It was the fixture that was wrong, and the fixture was
+fixed — but a drift in the other direction would be silent.
+
+Two things bound it. The fake reads the **same files on disk** the exporter reads, and takes its
+timestamps from the same `statSync`, so nothing about the file layer is invented. And the plugin's
+behaviour in real Obsidian is covered where it always was: `scripts/obsidian-smoke.mjs`,
+`scripts/refresh-check.mjs` and `scripts/deferred-check.mjs`, which launch the real application.
+This gate is about the two producers agreeing; those are about the plugin working.
+
 ## One divergence reported and deliberately not fixed
 
 `tags: false` in frontmatter becomes the tag `"false"` in the exporter and no tag at all in the
