@@ -594,15 +594,9 @@ it lands at 1.64–2.09× across the five fixtures against develop's 1.15–1.93
 corr(degree, ramp) with the ceiling divided out, the hub/leaf ratio, the distinct-size count and
 the column offset — and is the acceptance test for any future change to this.
 
-**How a dot is sized, since this rework, is in `decisions/0017`:** a wedge-local ceiling
-(`DOT_OF_PITCH × min(the note's own tangential step, the band's pitch, UNIT × DOT_MAX_SPREAD)`)
-times a ramp on the note's `size`, normalised per vault so the 90th-percentile dot is
-`DOT_LINK_RATIO = 1.85` times the 10th. The first rule this rework tried —
-`DOT_OF_PITCH × min(own slot, pitch)` and nothing else — removed link weight from the dot
-entirely, because `solveBand` makes the cell square so the `min` always takes the pitch; that is
-measured in `decisions/0017` and in `.ai-context/investigations/186/dotsize-186.mjs`.
-**Weighted arcs and slots did not land** (`LINK_WEIGHT = 0`), so everything below is measured
-with the arc still following opacity alone.
+**Weighted arcs and slots did not land** (`LINK_WEIGHT = 0`), so everything below is measured with
+the arc still following opacity alone. `decisions/0017` carries why, and why the ring split must
+count notes rather than weight if they ever do.
 
 **The resting halves are asserted by the suite**, on every fixture:
 

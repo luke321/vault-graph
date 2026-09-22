@@ -133,9 +133,15 @@ its ring is the weight's job. That split is already in the code and costs nothin
 
 ## Consequences
 
-- **The goldens do not move.** Stage A changes only drawn radii, and a golden records position and
-  band. All five are develop's, unchanged, which is also the check that the cascade fixes in
-  `30d6ff9` leak nothing into the resting layout.
+- **The goldens move, and the size of the move is the proof there is no re-pack.** A dot's radius
+  feeds two places that are geometry: `github#160`'s outer-row inset and the seam clearance in
+  `side()`. So all five were re-recorded, and measured against develop's they move by **at most
+  2.611 units radially** (shape; demo 0.551, tag 0.982, spec 0.932, the 10k 0.097) against a
+  **tightest row pitch of 120.1 units** — 2.2% of one pitch, so no note changed row. Angularly the
+  median note moves 0.017–0.049° and the worst 2.35°, inside its own wedge. **Band membership and
+  note counts are identical on all five.** That is also the check that the cascade fixes in
+  `30d6ff9` leak nothing into the resting layout: a leak would move notes by pitches, not by
+  hundredths of one.
 - The measured hub-to-leaf ratio comes out **above** the named 1.85 — roughly 1.9–2.3 per band —
   because the ramp is normalised on the vault's `size` deciles while the acceptance reads *degree*
   deciles *per band*, and a band's extremes sit outside the vault's. The constant is the one that
@@ -147,7 +153,7 @@ its ring is the weight's job. That split is already in the code and costs nothin
 ## Verify
 
 ```javascript
-__vg.dotWhy(size, id)     // ramp is the link ramp again; cellRoom is the note's own step
+__vg.dotWhy(id)           // ramp is the link ramp again; cellRoom is the note's own step
 __vg.debugDump().dots     // linkRatio, and the solved ramp
 ```
 
