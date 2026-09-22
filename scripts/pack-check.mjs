@@ -11,6 +11,8 @@ const RAIL_TOL = Number(arg("rail-tol", "0.005"));
 const AREA_TOL = Number(arg("area-tol", "0.02"));
 const SEAM_TOL = Number(arg("seam-tol", "0.05"));
 const FILL_TOL = Number(arg("fill-tol", "0.10"));
+// github#186 -- an integer row count makes the pitch STEP, and the whole band moves with it
+const STEP_TOL = Number(arg("step-tol", "0.03"));
 const SEAM_MIN_LIT = 3;
 const FILL_MIN_LIT = 8;
 const DOT_OF_PITCH = 11 / 28;
@@ -70,7 +72,7 @@ for (const dir of runDirs(ROOT)) {
     rest[k].areaHi = as.length ? Math.max(...as) : null;
   }
 
-  const fail = { rails: [], rest: [], area: [], seam: [], fill: [] };
+  const fail = { rails: [], rest: [], area: [], seam: [], fill: [], step: [] };
   let worst = { over: 0, under: 0, restX: 0, areaX: 0 };
   const seamWorst = new Map();
 
@@ -158,13 +160,30 @@ for (const dir of runDirs(ROOT)) {
   arcGap.sort((x, y) => y.worst - x.worst);
   for (const a of arcGap) if (a.worst > FILL_TOL) fail.fill.push(a);
 
+  // github#186 -- a band's pitch is the row spacing, so a step in it moves every note it holds
+  for (let k = 1; k < frames.length; k++) {
+    for (const b of ["i", "o"]) {
+      const a = frames[k - 1].pitch && frames[k - 1].pitch[b];
+      const c = frames[k].pitch && frames[k].pitch[b];
+      if (!(a > 1e-6) || !(c > 1e-6)) continue;
+      const rel = Math.abs(c - a) / a;
+      // the last frame of an EMPTIED band shows the density fallback, and moves no note
+      const lit = frames[k].bands && frames[k].bands[b] ? frames[k].bands[b].lit : 0;
+      if (rel > STEP_TOL && lit > 0) {
+        fail.step.push({ band: b, pr: r3(frames[k].pr), from: r2(a), to: r2(c), rel: r3(rel), lit: lit });
+      }
+    }
+  }
+  fail.step.sort((x, y) => y.rel - x.rel);
+
   const ok = { rails: !fail.rails.length, rest: !fail.rest.length, area: !fail.area.length,
-               seam: !fail.seam.length, fill: !fail.fill.length };
-  if (!ok.rails || !ok.rest || !ok.area || !ok.seam || !ok.fill) failures++;
+               seam: !fail.seam.length, fill: !fail.fill.length, step: !fail.step.length };
+  if (!ok.rails || !ok.rest || !ok.area || !ok.seam || !ok.fill || !ok.step) failures++;
   report[basename(dir)] = { label: P.label, frames: frames.length, ok, worst, rest,
                             counts: { rails: fail.rails.length, rest: fail.rest.length, area: fail.area.length,
-                                      seam: fail.seam.length, fill: fail.fill.length },
-                            railRows: fail.rails.slice(0, 6), seamWorstList, arcGap: arcGap.slice(0, 6) };
+                                      seam: fail.seam.length, fill: fail.fill.length, step: fail.step.length },
+                            railRows: fail.rails.slice(0, 6), seamWorstList, arcGap: arcGap.slice(0, 6),
+                            stepList: fail.step.slice(0, 8) };
 
   const mark = (b) => (b ? "ok  " : "FAIL");
   console.log(`\n== ${P.label}  (${frames.length} cascade frames)`);
@@ -191,6 +210,10 @@ for (const dir of runDirs(ROOT)) {
   console.log(`   FILL  ${mark(ok.fill)} ${fail.fill.length} wedges wider than their notes fill`);
   for (const a of arcGap.slice(0, 4)) {
     console.log(`         ${a.g.slice(0, 24).padEnd(26)} ${(1 + a.worst).toFixed(2)}x its resting fill -- arc ${a.arcFrac} deg over ${a.noteFrac} notes, at pr ${a.pr}`);
+  }
+  console.log(`   STEP  ${mark(ok.step)} ${fail.step.length} frames where a lit band's pitch jumps over ${(STEP_TOL * 100).toFixed(0)}%`);
+  for (const x of fail.step.slice(0, 4)) {
+    console.log(`         band ${x.band} pitch ${x.from} -> ${x.to} (${(x.rel * 100).toFixed(0)}%) at pr ${x.pr}, ${x.lit} notes lit`);
   }
 }
 
