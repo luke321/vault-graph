@@ -37,7 +37,7 @@ export function pickLane(checks, lane) {
 
 /* ---------------------------------------------------------------- headless */
 
-// github#155, decisions/0016 -- asked for, never sniffed; --headed beats everything
+// github#155, decisions/0016 -- asked for, never inferred. CI does NOT imply it.
 /**
  * @param {{ argv?: string[], env?: Record<string, string | undefined> }} [opts]
  * @returns {boolean}
@@ -45,11 +45,9 @@ export function pickLane(checks, lane) {
 export function wantsHeadless({ argv = [], env = {} } = {}) {
   if (argv.indexOf("--headed") >= 0) return false;
   if (argv.indexOf("--headless") >= 0) return true;
-  // github#155 -- CI=false is set by real tools, and it is not a yes
+  // github#155 -- VG_HEADLESS=false is a no, the way a person would read it
   const on = (v) => !!v && v !== "0" && String(v).toLowerCase() !== "false";
-  if (on(env.VG_HEADLESS)) return true;
-  // github#155 -- a runner that forgot the flag must not hang placing a window
-  return on(env.CI);
+  return on(env.VG_HEADLESS);
 }
 
 /* ------------------------------------------------------------ the launch */

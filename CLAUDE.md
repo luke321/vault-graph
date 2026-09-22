@@ -31,7 +31,8 @@ imported below; if you are a contributor, its absence is normal and nothing here
 ## How to work here
 
 - **`--headless` runs the suite with no window and no screen lock, and `--lane fast|walk|all`
-  runs one half of it** (github#155). `CI` implies `--headless`; `--headed` beats both. A
+  runs one half of it** (github#155). Both are opt-in: the default is still a real window on
+  the harness screen, holding the `screen-left` lock, and **`CI` does not imply `--headless`**. A
   headless run corrects its viewport to the tuned 1584×961 rather than inheriting Chrome's, and
   both flags are run-shape deltas, so neither stamps a tree. **The suite has no CI gate and is
   not getting one**: measured 2026-09-21, a GitHub-hosted runner takes 30.9 min against 5 min

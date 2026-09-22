@@ -566,16 +566,19 @@ console.log("github#151 -- the reset boundary");
 // github#155 -- who decides headless, and in which order
 {
   const w = (argv, env) => wantsHeadless({ argv, env: env || {} });
-  check("nothing asked for it, and no CI", !w([], {}));
+  check("nothing asked for it", !w([], {}));
   check("--headless asks for it", w(["--headless"], {}));
   check("VG_HEADLESS asks for it", w([], { VG_HEADLESS: "1" }));
-  check("CI implies it, so a runner that forgot the flag still runs", w([], { CI: "true" }));
-  check("--headed beats CI", !w(["--headed"], { CI: "true" }));
   check("--headed beats --headless", !w(["--headed", "--headless"], {}));
   check("--headed beats VG_HEADLESS", !w(["--headed"], { VG_HEADLESS: "1" }));
-  // github#155 -- CI=false is set by real tools, and it is not a yes
-  check("CI=false is not a yes", !w([], { CI: "false" }) && !w([], { CI: "0" }));
-  check("an empty CI is not a yes", !w([], { CI: "" }));
+  check("VG_HEADLESS=false is not a yes",
+        !w([], { VG_HEADLESS: "false" }) && !w([], { VG_HEADLESS: "0" }) &&
+        !w([], { VG_HEADLESS: "" }));
+  // github#155 -- the default is a window, and CI must not take it away
+  check("CI does NOT imply headless, on a runner or in a shell that happens to set it",
+        !w([], { CI: "true" }) && !w([], { CI: "1" }));
+  check("CI with the flag is still headless, because the flag said so",
+        w(["--headless"], { CI: "true" }));
 }
 
 // github#155 -- what a headless launch drops, asserted rather than described

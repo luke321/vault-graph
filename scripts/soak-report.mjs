@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// github#155, decisions/0016 -- N runs of one lane, reported as a spread
+// github#155, decisions/0016 -- N runs of one lane, reported as a spread (local)
 
 import { readFileSync } from "node:fs";
 import { argv } from "node:process";

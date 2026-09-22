@@ -21,16 +21,22 @@ thresholds were tuned against one machine's Chrome.
 
 **Three things, in the order github#155 sets, and the third one is not finished.**
 
-### 1. Headless is asked for, never sniffed
+### 1. Headless is asked for, never inferred
 
-`--headless` (or `VG_HEADLESS`, or `CI` being set) passes `--headless=new`, drops every
-window-placement flag, passes the URL positionally instead of through `--app=`, skips the focus
-guard, forces the grid off, and **takes no screen lock**.
+`--headless` (or `VG_HEADLESS`) passes `--headless=new`, drops every window-placement flag,
+passes the URL positionally instead of through `--app=`, skips the focus guard, forces the grid
+off, and **takes no screen lock**. `--headed` beats both.
 
 *Rejected: inferring it from an unset `DISPLAY`.* That is right until somebody runs under
 xvfb, and then it is silently wrong — about the one thing this change is not allowed to be
-silent about. `--headed` beats every other signal, including `CI`, so debugging a runner
-failure under xvfb stays possible.
+silent about.
+
+**`CI` implied it at first, and that was removed** once the verdict below landed. The
+implication existed so a runner that forgot the flag would not hang trying to place a window —
+but with no CI running this suite, the only thing it could still do is take the window away from
+someone whose shell happens to export `CI`. Lukas, 2026-09-21: *"I like the tests to be not
+headless and move on my second screen."* **The default is a real window on the harness screen,
+holding the `screen-left` lock, and nothing infers otherwise.**
 
 *Skipping the screen lock is the lock name being honest, not an exemption.* `locking.md`: the
 claim is on a **screen**, and a run with no window is on no screen. A run that skipped it says
@@ -45,14 +51,28 @@ and the one the scheduler acts on is the one that is true.
 
 ### 3. Measure before requiring — measured, and the answer was no
 
-`.github/workflows/suite-soak.yml` runs a lane N times on `ubuntu-latest` and
-`scripts/soak-report.mjs` prints **the spread, not the mean**: every run, min/median/max wall,
-and every check that failed in any run with how many. A mean hides the one run in twenty that
-went red, and that run is the whole decision.
+The instrument was a workflow that ran a lane N times on `ubuntu-latest`, plus
+`scripts/soak-report.mjs`, which prints **the spread, not the mean**: every run, min/median/max
+wall, and every check that failed in any run with how many. A mean hides the one run in twenty
+that went red, and that run is the whole decision.
 
-Both stay in the tree after the verdict below. The workflow is the instrument that produced the
-answer and the one that would re-take it if the infrastructure ever changes; `soak-report.mjs`
-earns its keep locally as well, and did — it is what found the mis-declared `clock` below.
+**The workflow has since been deleted; `soak-report.mjs` stays.** Once the answer below was
+"no", the workflow had nothing left to gate, and a dormant workflow whose `push` trigger costs
+hours is a trap rather than an asset — the same reasoning github#147 applies to a list nobody
+checks. The finding lives here and in `changelog-detail.md`, which is where this repo keeps
+evidence; it does not need a `.yml` to survive. The report earns its keep locally on its own,
+and did — it is what found the mis-declared `clock` below.
+
+**To re-take the measurement** on faster infrastructure, no workflow is required:
+
+```bash
+for i in $(seq 1 5); do
+  node scripts/smoke.mjs --headless --lane fast > "run-$i.txt" 2>&1 || true
+done
+node scripts/soak-report.mjs run-*.txt
+```
+
+A red run is data, not a failed measurement, which is why the `|| true` is there.
 
 **Nothing is added to `quality.yml` and nothing becomes required.** A job in `quality.yml`
 would already be a required status in practice — it shows red on every `develop` push —

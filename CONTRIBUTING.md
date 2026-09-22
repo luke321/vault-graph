@@ -111,10 +111,18 @@ CDP timeout, wider sampling windows, moved thresholds — is measuring the machi
 GitHub-hosted runner has no GPU and software-renders, which a Chrome-over-CDP suite cannot
 afford.
 
-`.github/workflows/suite-soak.yml` and `scripts/soak-report.mjs` stay as the instrument that
-produced that answer, and the one that would re-take it on faster infrastructure. The report is
-also useful locally: it prints the **spread** — every run, min/median/max wall, and every check
-that failed in any run with how many.
+The workflow that measured it has been removed — there is nothing left for it to gate, and a
+dormant workflow with a `push` trigger that costs hours is a trap rather than an asset. To
+re-take the measurement on faster infrastructure, run `node scripts/smoke.mjs --headless --lane
+fast` N times, keeping each run's stdout, and hand the files to `node scripts/soak-report.mjs
+run-*.txt`. That report stays, and is useful locally too: it prints the **spread** — every run,
+min/median/max wall, and every check that failed in any run with how many. It is what found the
+mis-declared `clock` above.
+
+**`--headless` is opt-in and stays that way.** A plain `node scripts/smoke.mjs` still places its
+windows on the harness screen and takes the `screen-left` lock. `CI` deliberately does **not**
+imply it: there is no CI running this suite, so the only thing that implication could still do is
+silently take the window away from someone whose shell happens to set `CI`.
 
 `npm run lint` runs `scripts/check-js-contracts.mjs` as part of that first line, and it is
 worth knowing what it does before you meet it failing. The JavaScript's JSDoc annotations are
