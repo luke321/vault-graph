@@ -11,7 +11,7 @@ const RAIL_TOL = Number(arg("rail-tol", "0.005"));
 const AREA_TOL = Number(arg("area-tol", "0.02"));
 const SEAM_TOL = Number(arg("seam-tol", "0.05"));
 const FILL_TOL = Number(arg("fill-tol", "0.10"));
-// github#186 -- an integer row count makes the pitch STEP, and the whole band moves with it
+// github#186 -- an integer row count steps the pitch
 const STEP_TOL = Number(arg("step-tol", "0.03"));
 const SEAM_MIN_LIT = 3;
 const FILL_MIN_LIT = 8;
@@ -160,14 +160,14 @@ for (const dir of runDirs(ROOT)) {
   arcGap.sort((x, y) => y.worst - x.worst);
   for (const a of arcGap) if (a.worst > FILL_TOL) fail.fill.push(a);
 
-  // github#186 -- a band's pitch is the row spacing, so a step in it moves every note it holds
+  // github#186 -- pitch is row spacing: a step moves the band
   for (let k = 1; k < frames.length; k++) {
     for (const b of ["i", "o"]) {
       const a = frames[k - 1].pitch && frames[k - 1].pitch[b];
       const c = frames[k].pitch && frames[k].pitch[b];
       if (!(a > 1e-6) || !(c > 1e-6)) continue;
       const rel = Math.abs(c - a) / a;
-      // the last frame of an EMPTIED band shows the density fallback, and moves no note
+      // github#186 -- an emptied band's fallback moves no note
       const lit = frames[k].bands && frames[k].bands[b] ? frames[k].bands[b].lit : 0;
       if (rel > STEP_TOL && lit > 0) {
         fail.step.push({ band: b, pr: r3(frames[k].pr), from: r2(a), to: r2(c), rel: r3(rel), lit: lit });
