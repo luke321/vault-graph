@@ -2954,6 +2954,8 @@ function mountVaultGraph(root, data, deps) {
           var w = (alpha[sl.id] || 0) * linkWeight(sl.id);
           if (w > 0) rowN[sl.r] = (rowN[sl.r] || 0) + w;
         });
+        // github#186, decisions/0017 -- one ceiling per cell, never per note
+        var cellMin = Infinity;
         c.slots.forEach(function (sl) {
           if (!present(sl.id)) return;
           var rs = rowShare ? rowShare[Math.round(sl.r * 1000)] : null;
@@ -2989,7 +2991,8 @@ function mountVaultGraph(root, data, deps) {
           var wSelf = (alpha[sl.id] || 0) * linkWeight(sl.id);
           /** @param {number} shr */
           var slotOf = function (shr) { return arc * rGraph * (shr > 0 ? shr : 1); };
-          cellRoomNext[sl.id] = slotOf(rowWs > 1e-9 && wSelf > 0 ? wSelf / rowWs : 1);
+          var own = slotOf(rowWs > 1e-9 && wSelf > 0 ? wSelf / rowWs : 1);
+          if (own > 0 && own < cellMin) cellMin = own;
           /** @param {number} shr */
           var side = function (shr) {
             var u = slotOf(shr);
@@ -3032,6 +3035,10 @@ function mountVaultGraph(root, data, deps) {
           if (firstAt[sl.r] === undefined) firstAt[sl.r] = { t: t, id: sl.id };
           var rr = sl.r + (pushOn && isPushed(sl.id) ? HL_PUSH : 0);
           pos[sl.id] = { x: rr * Math.cos(t), y: rr * Math.sin(t) };
+        });
+        // github#186, decisions/0017
+        if (cellMin < Infinity) c.slots.forEach(function (sl) {
+          if (present(sl.id)) cellRoomNext[sl.id] = cellMin;
         });
         // github#186
         fracBefore += frac * open;

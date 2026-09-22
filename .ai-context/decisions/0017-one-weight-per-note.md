@@ -56,17 +56,26 @@ harness that produced the table and is the acceptance test for any replacement.
 wedges.** develop sized a dot as a ramp on `size` running from the pixel floor up to a ceiling,
 and the ceiling was the *band's median own-step*. Only that last term was wrong:
 
-    ceiling = DOT_OF_PITCH x min( the note's OWN tangential step x DOT_CLEAR,
+    ceiling = DOT_OF_PITCH x min( the CELL's tightest tangential step x DOT_CLEAR,
                                   DOT_OVER_PITCH x min(the band's radial pitch,
                                                        UNIT x DOT_MAX_SPREAD) )
     dot     = DOT_MIN_PX + (ceiling - DOT_MIN_PX) x ramp(size)
     ramp    = (size - NODE_MIN) / (NODE_MAX - NODE_MIN),  clamped to [0, 1]
 
-Three things that each had to be got right, and each of which was measured wrong first:
+The cell's tightest step is the minimum, over every row of the cell, of each note's own slot at
+its radius. It is the same number for every note of the cell, so inside a wedge the ramp is the
+only thing that varies.
 
-- **The ceiling is wedge-local.** The note's own tangential step decides it, so nothing about one
-  wedge reaches another — the whole point of retiring the band median. `DOT_CLEAR = 0.92` is the
-  clearance allowance develop spent on `room`, kept.
+Four things that each had to be got right, and each of which was measured wrong first:
+
+- **The ceiling is one number per CELL, and the cell's own tightest step is that number.** It is
+  wedge-local, so nothing about one wedge reaches another — the whole point of retiring the band
+  median — but it must not be note-local either. **A note's own row step is POSITION**, and a rule
+  that reads it makes a note's size say where it sits as well as what it links to. That breaks the
+  serpentine, which is visible only as its size gradient; the measurements are in *The serpentine,
+  and the fourth wrong reading* below. `DOT_CLEAR = 0.92` is the clearance allowance develop spent
+  on `room`, kept. A row holding a lone note contributes `slotOf(1)` — the whole arc — so it is
+  never the minimum, and the case needs no special handling.
 - **The absolute ceiling caps the PITCH, never the product.** `DOT_OVER_PITCH = DENSITY_MAX` is
   how far a dot may outgrow the *radial* pitch once its own tangential step allows — develop's
   `room/pitch` factor under its own name, and the only part of that factor that was not the band
@@ -85,25 +94,67 @@ Three things that each had to be got right, and each of which was measured wrong
 stay. Size is **monotone in link weight**, as `animation.md` requires, because the ramp is
 monotone in `size` and `size` is monotone in degree.
 
+### The serpentine, and the fourth wrong reading
+
+A cell's notes are laid in link order along a snake: row 0 runs one way, row 1 back, and so on.
+**The snake has no visible geometry of its own** — the placement is a lattice either way. What
+makes it legible is that the dot shrinks along the path, so the eye follows a gradient that
+reverses each row. `animation.md` states the law it rests on: size must stay monotone in link
+weight, because a rule that modulates size by position will hand a worse-linked note a bigger dot
+than a better-linked one.
+
+The first landed rule sized a note by **its own row's** step, and a row's step differs by row — the
+rim row and the end margins most of all. So size began carrying position, and the gradient
+scrambled while the placement stayed perfect. Measured at rest with
+`.ai-context/investigations/186/serp-186.mjs`, per cell, as Kendall tau of drawn radius against
+rank in `c.list`:
+
+| fixture | row pairs alternating | tau median (per cell) | tau median (note-weighted) | notes in cells at tau ≥ 0.9 |
+|---|---|---|---|---|
+| demo | 222/222 on all three | 0.99 → 0.51 → **0.99** | 0.99 → 0.67 → **0.99** | 76% → 24% → **76%** |
+| shape | 47/47 on all three | 0.96 → 0.84 → **0.96** | 0.96 → 0.94 → **0.96** | 85% → 71% → **85%** |
+| tag | 13/13 on all three | 0.87 → 0.81 → **0.87** | 0.94 → 0.91 → **0.94** | 82% → 82% → **82%** |
+| spec | 27/27 on all three | 1.00 → 0.82 → **1.00** | 1.00 → 0.87 → **1.00** | 100% → 49% → **100%** |
+| 10k | 588/588 on all three | 0.34 → 0.00 → 0.00 | 0.99 → 0.68 → **0.98** | 71% → 27% → **71%** |
+
+(develop → the per-note ceiling → the per-cell ceiling.) **The placement snake never moved** —
+alternation is 100% on every build, which is why this was invisible to every check that reads
+positions, the goldens included.
+
+**Read the 10k's per-cell median with its cause.** 22 of its 34 cells draw one size, because on a
+10,002-note disc the ceiling sits at the 1.5 px floor, and a cell whose dots are all equal scores
+tau 0 rather than 1. Note-weighted it is 0.98 against develop's 0.99, and the six largest cells
+(2715, 936, 552, 522, 497 and 459 notes) read 0.97–1.00 against develop's 0.97–1.00. develop's own
+per-cell median there is 0.34 with 17 of 34 cells under 0.3, and its inner-band cells read tau
+−0.03 while drawing **1.05–1.49 px** — below the floor, off the position-driven edge cap. That is
+noise, not a gradient, so it was not taken as a bar to match.
+
 ### What it measures, against develop
+
+develop → the per-note ceiling → **the per-cell ceiling that landed**:
 
 | fixture / band | corr(deg, px) | hub / leaf dot | median drawn radius |
 |---|---|---|---|
-| demo / inner | 0.737 → 0.683 | 1.93× → 1.73× | |
-| demo / outer | 0.827 → **0.829** | 1.85× → 1.64× | 2.44 → 2.80 px |
-| shape / outer | 0.861 → **0.868** | 1.92× → 1.81× | |
-| shape / inner | 0.954 → 0.938 | 1.77× → 1.76× | 3.35 → 3.51 px |
-| 10k / outer | 0.818 → 0.689 | 1.15× → 1.09× | 1.51 → 1.67 px |
-| 10k / inner | 0.025 → −0.154 | 1.04× → 0.99× | |
+| demo / inner | 0.737 → 0.683 → **0.761** | 1.93× → 1.73× → 1.71× | |
+| demo / outer | 0.827 → 0.829 → **0.850** | 1.85× → 1.64× → 1.65× | 2.44 → 2.80 → 2.60 px |
+| shape / outer | 0.861 → 0.868 → **0.865** | 1.92× → 1.81× → 1.84× | |
+| shape / inner | 0.954 → 0.938 → **0.959** | 1.77× → 1.76× → 1.76× | 3.35 → 3.51 → 3.43 px |
+| 10k / outer | 0.818 → 0.689 → 0.667 | 1.15× → 1.09× → 1.09× | 1.51 → 1.67 → 1.65 px |
+| 10k / inner | 0.025 → −0.154 → −0.207 | 1.04× → 0.99× → 0.99× | |
 
-Distinct drawn sizes: demo 13 → 14, shape 16 → 15, 10k 5 → 7. Column offset (a note's angular
-distance to the nearest note one row inward, over that row's own step) demo 0.047 → 0.043,
-shape 0.228 → 0.219, 10k 0.130 → 0.127 — the lattice is untouched.
+Four of the six bands read **above develop**. The 10k's two are the pixel floor: its median drawn
+radius is 1.65 px against a 1.5 px floor, so most of that vault has no range to correlate over,
+and develop's own inner band reads 0.025.
+
+Distinct drawn sizes: demo 13 → 14 → 12, shape 16 → 15 → 15, 10k 5 → 7 → 4. Column offset (a
+note's angular distance to the nearest note one row inward, over that row's own step) demo
+0.047 → 0.043, shape 0.228 → 0.219, 10k 0.130 → 0.127 — **the lattice is untouched**, and was
+untouched by the rejected rule too, which is why *the columns are gone* was about dots and not
+about geometry.
 
 `corr(deg, ramp)`, which isolates the ramp from the ceiling, reads **0.87–0.96** on the bands
-where no cap binds and 0.59–0.69 on the two inner bands where one does: the 10k's, pinned at the
-pixel floor, and the sortspec vault's, pinned by the hub cap on row 0. develop's 10k inner reads
-0.025, so that band is not a regression.
+where no cap binds. On the 10k's inner band it is undefined, because every ceiling there is at or
+under the floor.
 
 ### Weighted arcs and slots are NOT part of this
 

@@ -554,12 +554,12 @@ At rest the packer already kept it. The github#186 investigation measured every 
 four acts on two fixtures and found **four separate ways it was broken in flight**, each with its
 own mechanism. What follows is what each one was, and what it reads now.
 
-### How a dot is sized, and the three ways it was got wrong first (github#186)
+### How a dot is sized, and the four ways it was got wrong first (github#186)
 
 A dot is `DOT_MIN_PX + (ceiling − DOT_MIN_PX) × ramp(size)`, the ramp linear in `size` over
 `NODE_MIN..NODE_MAX`, and the ceiling
 
-    DOT_OF_PITCH × min( the note's OWN tangential step × DOT_CLEAR,
+    DOT_OF_PITCH × min( the CELL's tightest tangential step × DOT_CLEAR,
                         DOT_OVER_PITCH × min(the band's radial pitch, UNIT × DOT_MAX_SPREAD) )
 
 **Each of the three terms in that `min()` guards a different thing, and collapsing them back into
@@ -567,7 +567,7 @@ one number is how this was broken three times:**
 
 | term | what it guards |
 |---|---|
-| the note's own step × `DOT_CLEAR` | seam and neighbour clearance, decided inside the note's own wedge — nothing about another wedge reaches it |
+| the cell's tightest step × `DOT_CLEAR` | seam and neighbour clearance, decided inside the note's own wedge — nothing about another wedge reaches it, and nothing about the note's own ROW reaches it either (the fourth failure below) |
 | `DOT_OVER_PITCH × pitch` | how far a dot may outgrow the **radial** pitch once its own tangential step allows, which is where a filtered disc's dot growth comes from |
 | `UNIT × DOT_MAX_SPREAD` | the absolute ceiling, applied **to the pitch**, never to the product |
 
@@ -585,6 +585,20 @@ The three failures, each measured before it was found:
    floor, which on a dense vault is the whole disc — the demo's ceiling is ~2.0 px against a
    1.5 px floor, and the measured result was **one drawn size for 1370 notes**. The ramp runs
    from the floor to the ceiling instead, which makes pinning impossible.
+
+4. **Sizing a note by its OWN row's step breaks the serpentine**, silently and with the placement
+   still perfect. A row's step differs by row — the rim row and the end margins most of all — so
+   the dot began carrying *where a note sits* as well as what it links to. The snake has no
+   visible geometry of its own; it is legible only as the size gradient that falls along the path
+   and reverses each row, which is the law `animation.md` states as *size stays monotone in link
+   weight*. Measured per cell as Kendall tau of drawn radius against rank in `c.list`
+   (develop → per-note ceiling → per-cell ceiling): demo **0.99 → 0.51 → 0.99**, spec
+   **1.00 → 0.82 → 1.00**, shape 0.96 → 0.84 → 0.96, and note-weighted on the 10k
+   **0.99 → 0.68 → 0.98**. Row-direction alternation is **100% on all three builds and all five
+   fixtures**, which is exactly why no position check — the goldens included — could see it. The
+   ceiling is one number per **cell** now: the minimum, over the cell's rows, of each note's own
+   slot at its radius, so inside a wedge the ramp is the only thing that varies. A row holding a
+   lone note contributes the whole arc and never binds that minimum.
 
 The hub-to-leaf dot ratio is therefore a **consequence** of ceiling over floor, not a constant:
 it lands at 1.64–2.09× across the five fixtures against develop's 1.15–1.93×, and a named
@@ -604,6 +618,7 @@ count notes rather than weight if they ever do.
 |---|---|
 | *no lit note is outside its band's static rails* | the CENTRE of every note at full alpha against `geomLock`'s own rails. Row 0 of the inner band may spend `HUB_ROW0_FRAC` of the hub on purpose (github#35) and the outer band is already shifted out by its row-0 dot (github#160), so these are centre rails, with half a graph unit of float noise allowed — the same window the lattice check uses |
 | *a resting wedge fills the arc its notes can* | each wedge's seam coverage — the angular span of its dots over the arc it actually draws — against `(n-1)/n + 2·dot/arc` for its rim row. A one- or two-note wedge is allowed the little its notes can reach, which is the github#119 tail and is why this is not a flat threshold |
+| *the serpentine survives, in direction and in size* | per cell of six or more notes: every adjacent row pair runs against its neighbour, the **note-weighted** median cell reads Kendall tau ≥ 0.90 of drawn radius against rank, and ≥ 65% of notes sit in a cell at 0.90+. Note-weighted because a cell whose dots are all at the pixel floor scores tau 0, and on the 10k that is 22 of 34 cells on develop's build as well as this one — an unweighted median is unusable there. **Its teeth were proven**, not assumed: reverting the per-cell ceiling turns it red on demo (0.72, 24%), the 10k (0.88, 37%) and spec (0.87, 49%). It stays green on shape and tag, where the same defect cost only 0.96 → 0.94 and 0.94 → 0.91, so it is a regression gate and not a proof |
 
 **The per-frame halves stay manual**, in `scripts/pack-check.mjs`, because automation's frame
 pacing is not a person's and a threshold tuned under it measures the harness rather than the page

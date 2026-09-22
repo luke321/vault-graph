@@ -631,6 +631,88 @@ check("a resting wedge fills the arc its notes can", async (p) => {
   return { ok: !short.length, detail };
 }, { on: "all" });
 
+// github#186, decisions/0017 -- the snake is only visible as its size gradient
+check("the serpentine survives, in direction and in size", async (p) => {
+  await settle(p);
+  await p.eval("__vg.relayout(); void 0").catch(() => {});
+  await settle(p);
+  const r = await p.j(`(function () {
+    var G = __vg.graph, R = __vg.renderer;
+    var plan = __vg.buildWedgePlan(true, function (id) { return __vg.alpha[id] || 0; });
+    var cells = [];
+    plan.cells.forEach(function (c) {
+      if (c.list.length < 6) return;
+      var rows = {}, seq = [];
+      c.list.forEach(function (id, rank) {
+        var a = G.getNodeAttributes(id), d = R.getNodeDisplayData(id);
+        if (!a || !d || d.hidden) return;
+        var sw = Math.PI / 2 - Math.atan2(a.y, a.x);
+        while (sw < 0) sw += 2 * Math.PI;
+        var sl = c.slots.find(function (s) { return s.id === id; });
+        var rec = { rank: rank, row: sl ? sl.row : -1, sw: sw, px: R.scaleSize(d.size) };
+        seq.push(rec);
+        (rows[rec.row] || (rows[rec.row] = [])).push(rec);
+      });
+      if (seq.length < 6) return;
+      var dirs = [];
+      Object.keys(rows).map(Number).sort(function (x, y) { return x - y; }).forEach(function (rw) {
+        var L = rows[rw];
+        if (L.length < 2) { dirs.push(0); return; }
+        var up = 0, down = 0;
+        for (var i = 1; i < L.length; i++) {
+          var d0 = L[i].sw - L[i - 1].sw;
+          if (d0 > Math.PI) d0 -= 2 * Math.PI;
+          if (d0 < -Math.PI) d0 += 2 * Math.PI;
+          if (d0 > 1e-6) up++; else if (d0 < -1e-6) down++;
+        }
+        dirs.push(up > down ? 1 : down > up ? -1 : 0);
+      });
+      var alt = 0, pairs = 0;
+      for (var k = 1; k < dirs.length; k++) {
+        if (dirs[k] && dirs[k - 1]) { pairs++; if (dirs[k] !== dirs[k - 1]) alt++; }
+      }
+      var conc = 0, disc = 0;
+      for (var i2 = 0; i2 < seq.length; i2++) {
+        for (var j = i2 + 1; j < seq.length; j++) {
+          var dp = seq[j].px - seq[i2].px;
+          if (dp < -1e-6) conc++; else if (dp > 1e-6) disc++;
+        }
+      }
+      cells.push({ g: c.g, k: c.k, band: c.inner ? "i" : "o", n: seq.length,
+                   alt: alt, pairs: pairs,
+                   tau: (conc + disc) ? (conc - disc) / (conc + disc) : 0,
+                   flat: !(conc + disc) });
+    });
+    return { cells: cells };
+  })()`);
+  if (!r || !r.cells.length) {
+    return { ok: true, detail: "NOT ASSERTED: no cell on this page holds six notes" };
+  }
+  const cs = r.cells;
+  const notes = cs.reduce((a, c) => a + c.n, 0);
+  const pairs = cs.reduce((a, c) => a + c.pairs, 0);
+  const alt = cs.reduce((a, c) => a + c.alt, 0);
+  const spread = [];
+  for (const c of cs) for (let i = 0; i < c.n; i++) spread.push(c.tau);
+  spread.sort((a, b) => a - b);
+  const wmed = spread[Math.floor(spread.length / 2)];
+  const good = cs.filter((c) => c.tau >= 0.9).reduce((a, c) => a + c.n, 0);
+  const share = good / notes;
+  const bad = [];
+  if (alt < pairs) {
+    const off = cs.filter((c) => c.alt < c.pairs).slice(0, 3)
+                  .map((c) => `${c.g} ${c.band} ${c.alt}/${c.pairs}`).join(", ");
+    bad.push(`${pairs - alt} of ${pairs} adjacent row pairs run the same way: ${off}`);
+  }
+  if (wmed < 0.9) bad.push(`the note-weighted median cell reads tau ${wmed.toFixed(2)}, under 0.90`);
+  if (share < 0.65) bad.push(`only ${(share * 100).toFixed(0)}% of notes sit in a cell with tau >= 0.9, under 65%`);
+  const flat = cs.filter((c) => c.flat).reduce((a, c) => a + c.n, 0);
+  const detail = `${cs.length} cells of 6+ notes (${notes} notes); direction alternates ${alt}/${pairs}; ` +
+    `size falls along rank at tau ${wmed.toFixed(2)} note-weighted, ${(share * 100).toFixed(0)}% of notes in a cell at 0.90+` +
+    (flat ? `; ${flat} notes draw one size (the pixel floor)` : "");
+  return { ok: !bad.length, detail: bad.length ? bad.join("; ") + "  ||  " + detail : detail };
+}, { on: "all" });
+
 check("band assignment obeys its two hard rules", async (p) => {
   const r = await p.j(`(function(){
     var plan = __vg.buildWedgePlan(false), band = {}, rows = {i: 0, o: 0};
