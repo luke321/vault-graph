@@ -2686,6 +2686,8 @@ function mountVaultGraph(root, data, deps) {
       var span = 1 - 2 * pad;
       var centred = bandRows > 0 && nEff > 0.0001 && nEff < bandRows - 0.0001;
       var cStart = centred ? Math.round((bandRows - nEff) / 2) : 0;
+      // github#186, decisions/0002 -- the top slot's OUTER EDGE may not pass the rail
+      var rowCap = Math.max(0, Math.floor(rows - 0.5 + 1e-9));
       /** @type {{ id: string, w: number, row: number }[]} */
       var recs = [];
       var acc = 0;
@@ -2700,11 +2702,12 @@ function mountVaultGraph(root, data, deps) {
           ? (-base + Math.sqrt(Math.max(0, base * base + 2 * SP * target))) / SP
           : target / Math.max(1e-9, base);
         if (pp < 0) pp = 0;
-        if (pp > rows - 1e-9) pp = Math.max(0, rows - 1e-9);
+        if (pp > rowCap) pp = rowCap;
         var cRow = 0;
         if (centred) {
           var top = Math.max(0, Math.ceil(nEff - 0.0001) - 1);
           cRow = cStart + Math.min(Math.floor(s * nEff), top);
+          if (cRow > rowCap) cRow = rowCap;
         }
         recs.push({ id: id, w: w, row: centred ? cRow : Math.floor(pp) });
       });
@@ -5059,12 +5062,48 @@ function mountVaultGraph(root, data, deps) {
         if (d === undefined) d = bandDst[bk] !== undefined ? bandDst[bk] : s;
         return s + (d - s) * ease;
       };
+      // github#186, decisions/0002 -- a band emptying at one end holds the other end's lattice
+      /** @param {string} k */
+      var depthWalk = function (k) {
+        if (bandGone[k]) return bandSrc[k];
+        var a2 = bandSrc[k], b2 = bandDst[k];
+        if (a2 === undefined && b2 === undefined) return 0;
+        if (a2 === undefined) a2 = b2;
+        if (b2 === undefined) b2 = a2;
+        return a2 + (b2 - a2) * ease;
+      };
+      // github#186 -- the walked thickness may never exceed the band's STATIC one
+      /** @param {string} k */
+      var thickLock = function (k) {
+        if (!geomLock) return Infinity;
+        return k === "i" ? (geomLock.rOuter - geomLock.r0) * INNER_FILL
+                         : geomLock.maxR - geomLock.rOuter;
+      };
       // github#44, github#186
-      var spNow = { i: bandGone.i ? spSrcB.i : 0, o: bandGone.o ? spSrcB.o : 0,
-                    depth: { i: bandGone.i ? bandSrc.i : 0, o: bandGone.o ? bandSrc.o : 0 },
-                    hold: { i: bandGone.i, o: bandGone.o } };
+      /** @param {string} k */
+      var thickAt = function (k) {
+        var cap = thickLock(k);
+        if (bandGone[k]) return Math.min(cap, bandSrc[k] * spSrcB[k]);
+        var ds = bandSrc[k], dd = bandDst[k];
+        if (ds === undefined && dd === undefined) return 0;
+        if (ds === undefined) ds = dd;
+        if (dd === undefined) dd = ds;
+        var ts = ds * spSrcB[k], td = dd * spDstB[k];
+        var t = ts + (td - ts) * ease;
+        return t > cap ? cap : t;
+      };
+      // github#186 -- continuous; placeCell caps the row index
+      /** @param {string} k */
+      var spWalk = function (k) {
+        if (bandGone[k]) return spSrcB[k];
+        var rows = depthWalk(k), T = thickAt(k);
+        if (!(rows > 0) || !(T > 0)) return spSrcB[k] + (spDstB[k] - spSrcB[k]) * ease;
+        return T / rows;
+      };
+      var spNow = { i: spWalk("i"), o: spWalk("o"),
+                    depth: { i: depthWalk("i"), o: depthWalk("o") } };
       /** @param {Cell} c */
-      var rowsNow = function (c) { return bandGone[c.inner ? "i" : "o"] ? rowsAt(c) : 0; };
+      var rowsNow = rowsAt;
       geomHold = (bandGone.i || bandGone.o) ? bandGone : null;
       colWalk = dict();
       Object.keys(tglDir).forEach(function (g0) {

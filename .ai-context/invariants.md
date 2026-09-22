@@ -626,8 +626,22 @@ pacing is not a person's and a threshold tuned under it measures the harness rat
 lit note's centre outside its band's rails on any frame), REST (a band's outermost lit note never
 past `max(rest before, rest after, rail)`), AREA (area per lit note stays between the two resting
 values), SEAM (a lit wedge's coverage never below its resting value, scaled by the share of itself
-the alpha ≥ 0.5 measure can see) and FILL (a wedge is never wider, per its own notes at the band's
-pitch, than it rests).
+the alpha ≥ 0.5 measure can see), FILL (a wedge is never wider, per its own notes at the band's
+pitch, than it rests), **STEP** (a lit band's pitch never jumps more than 3% between frames),
+**TOUCH** (the top slot's outer edge stays within 10% of the rail) and **TICK** (the band edge's
+worst single-frame move stays under 0.3 of that frame's pitch, `decisions/0002`'s eased tick). The
+last three came out of defect 2's second attempt, below. TOUCH and TICK assert only while a band
+holds **at least one lit note per live row** — the least that can touch a rail — because a band
+down to its last few notes reads 0.82 of the rail on *every* build, develop included, and a band
+whose final note vanishes moves its edge without moving a note. Both are reported when thinner,
+never asserted. TICK is relative because `RADIAL_EASE` closes a quarter of a *pitch* per frame, so
+38 units on a 160 pitch and 63 on a 250 are the same tick and an absolute bar mis-reads the second.
+
+**AREA is deliberately looser below the resting floor than above it** — 7% under against 2% over.
+The row cap in defect 2 trades a bulge outside the rail for bunching inside it, and the definition
+prefers under to outside. Measured: hiding and showing `03 - Resources` sit 1.05–1.06× *under* the
+floor for 41 and 36 frames, where develop sat **1.30× and 1.29× over** it. A reading under the
+floor is that trade, not a regression.
 
 ### 1. A band empty at one end walked to the density fallback
 
@@ -654,21 +668,42 @@ rest, and area per lit note **1.00× → 1.30× → 1.17×** with the destinatio
 all along. Hiding `inbox` on the tag disc: outer edge **3721 → 3952 at pr 0.94**, **141 px
 outside the locked `maxR` of 3811**.
 
-**Rows and pitch are now solved from the live weighted count, against the band's own STATIC
-thickness, by the same `solveBand` call the resting layout makes.** A walking band is therefore a
-valid resting lattice for what it is carrying: its top row is `(rw − 1) × T/rw`, never the rail,
-and the last frame is the resting one by construction rather than by convergence. Only a band
-that is leaving entirely is handed a lattice, and that one is its source lattice (1 above).
+#### The first fix was exact at both ends and DISCRETE in between, which is its own defect
 
-Measured after, over all four acts: **0 frames past a rail, 0 frames past `max(rest, rest,
-rail)`, and area per lit note inside its two resting values on every frame of three of the four
-acts** (the tag act's remaining excursion is below).
+Solving rows and pitch from the live weighted count each frame, through the same `solveBand` the
+resting layout calls, does hold every rail: **0 frames past a rail on all four acts**, against
+develop's 369 and 43. But `rows = ceil(T/s)` is an **integer**, so `pitch = thick/rows` *steps*
+as the live weight falls — and pitch is the row spacing, so **every note in the band moves at
+once**. Found by eye on the act nothing had measured: soloing `misc` on the dominant-folder vault
+(27 of 954 notes, outer band) walks six row counts down and reads **15 pitch jumps of 13–21%**
+(160 → 183 → 213 → 256 → 320 → 427, then ten more at the tail). The four measured acts read 1, 3,
+1 and 4. develop reads **0 on all five**, because it walked the pitch continuously — which is
+exactly what let its top row ride past the rail.
 
-**The other candidate was built and measured, and lost.** Walking the top row's radius between
-its two resting values and deriving the pitch as `top / (rows_int − 1)` also holds every rail —
-but it lands **1.12× off the resting density at the end** of both demo acts (16694 against a rest
-of 18678..21826, at pr 0.998), which is a snap at settle, the one thing `animation.md` exists to
-prevent. `design/0002`'s three earlier failures say what else not to repeat.
+**With integer rows you cannot have a continuous pitch AND exact fill of the rail on every frame.**
+That is the whole of it, and the three candidates are the three ways to lose:
+
+| | pitch | rail | cost |
+|---|---|---|---|
+| develop | continuous | **crossed**, 1.45× on the solo act | 369 frames outside the disc |
+| walk the top row's radius, pitch `top/(rows_int − 1)` | continuous | held | **1.12× off the resting density at pr 0.998** — a snap at settle |
+| live `solveBand` each frame | **steps 13–21%** | held | the whole band moves, 1–15 times an act |
+
+**What ships is develop's continuous walk with the row INDEX capped.** `placeCell` takes
+`rowCap = floor(rows_walked − 0.5)` instead of `floor(rows_walked)`, so the top slot's outer edge
+(`rowCap × pitch + pitch/2`) is `≤ T` at every frame by construction, and **`thickAt` is clamped to
+the band's static thickness** so that `T` is the real rail and not one that walked off the disc.
+At rest `rows_walked` is an integer and `floor(rows − 0.5) = rows − 1`, so **nothing at rest
+changes and no golden moves** — which is the check that this is a cascade-only change. The notes of
+a dissolving row drop one pitch at the half count instead of riding to the rail and dropping at the
+end, and `RADIAL_EASE = 0.25` spreads that tick over about four frames exactly as `decisions/0002`
+intends.
+
+The transient cost is real and is priced above: a top gap of up to half a pitch mid-walk (TOUCH),
+and a band packing 1.05–1.06× *tighter* than its resting floor while the top row's notes bunch at
+the cap (AREA), against develop's 1.30× looser in the other direction. Blending the `n`-row and
+`n+1`-row lattices was **not** built: `design/0002` rejected exactly that twice, and
+`decisions/0002` a third time as a smeared disc.
 
 ### 3. A single-cell whole-group toggle drove its arc on the clock, not on its notes
 
