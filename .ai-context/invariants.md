@@ -620,6 +620,17 @@ count notes rather than weight if they ever do.
 | *a resting wedge fills the arc its notes can* | each wedge's seam coverage — the angular span of its dots over the arc it actually draws — against `(n-1)/n + 2·dot/arc` for its rim row. A one- or two-note wedge is allowed the little its notes can reach, which is the github#119 tail and is why this is not a flat threshold |
 | *the serpentine survives, in direction and in size* | per cell of six or more notes: every adjacent row pair runs against its neighbour, the **note-weighted** median cell reads Kendall tau ≥ 0.90 of drawn radius against rank, and ≥ 65% of notes sit in a cell at 0.90+. Note-weighted because a cell whose dots are all at the pixel floor scores tau 0, and on the 10k that is 22 of 34 cells on develop's build as well as this one — an unweighted median is unusable there. **Its teeth were proven**, not assumed: reverting the per-cell ceiling turns it red on demo (0.72, 24%), the 10k (0.88, 37%) and spec (0.87, 49%). It stays green on shape and tag, where the same defect cost only 0.96 → 0.94 and 0.94 → 0.91, so it is a regression gate and not a proof |
 
+**Chrome 153 headless reports `prefers-reduced-motion: reduce`, and the page honours it**, so every
+cascade completes in two frames. Found the hard way: commands that produced 388-frame cascades an
+hour earlier produced **2**, with `restA` and `restB` byte-identical — the layout change was right,
+the animation simply did not run. `smoke-runner.mjs` was affected worse than the probe. It set
+`reduce` for fast-clock checks and restored with `features: []`, which means *Chrome's own default*
+— and since 153 that default **is** `reduce`; a `clock: "real"` check never entered that branch at
+all and inherited it from the browser. Either way an animation check would assert against a snap and
+pass. Both `smoke-runner.mjs` and `probe-186.mjs` now set `no-preference` **explicitly** and
+**throw** if the browser still reports `reduce`, rather than measuring nothing. Never restore
+emulated media with an empty feature list.
+
 **The per-frame halves stay manual**, in `scripts/pack-check.mjs`, because automation's frame
 pacing is not a person's and a threshold tuned under it measures the harness rather than the page
 (`animation.md`, *Checking*). It reads a `probe-186.mjs` run and asserts five things: RAILS (no
