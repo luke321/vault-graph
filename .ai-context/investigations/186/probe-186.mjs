@@ -229,6 +229,12 @@ try {
   for (let i = 0; i < 80 && !page; i++) { await sleep(400); try { page = await attach(PORT, "page.html"); } catch { } }
   if (!page) throw new Error("could not attach");
   page.j = async (e) => JSON.parse(await page.eval("JSON.stringify(" + e + ")"));
+  // github#186 -- Chrome 153 headless reports reduce, and the page rightly snaps every cascade
+  await page.send("Emulation.setEmulatedMedia",
+    { features: [{ name: "prefers-reduced-motion", value: "no-preference" }] }).catch(() => {});
+  if (await page.eval(`matchMedia("(prefers-reduced-motion: reduce)").matches`).catch(() => false)) {
+    throw new Error("this Chrome still reports prefers-reduced-motion: reduce -- every cascade would snap");
+  }
   const ready = async () => {
     for (let i = 0; i < 120; i++) {
       if (await page.eval("!!(window.__vg && __vg.renderer && __vg.state.until === null)").catch(() => false)) return true;

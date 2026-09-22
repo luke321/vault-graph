@@ -75,6 +75,13 @@ export async function runChecks(opts) {
   if (watching) { baseState = await readState(page); prevState = baseState; }
   // github#146 -- only the last window pays for a grace
   const finalGraceMs = opts.finalGraceMs === undefined ? 500 : opts.finalGraceMs;
+  // github#186 -- Chrome 153 headless defaults to reduce
+  await page.send("Emulation.setEmulatedMedia",
+                  { features: [{ name: "prefers-reduced-motion", value: "no-preference" }] }).catch(() => {});
+  if (await page.eval(`matchMedia("(prefers-reduced-motion: reduce)").matches`).catch(() => false)) {
+    throw new Error("this Chrome reports prefers-reduced-motion: reduce and would not let it be emulated away -- " +
+                    "every animation check would pass against a snap");
+  }
 
   const chromeTail = () => {
     const said = chromeState ? chromeState() : null;
@@ -138,7 +145,9 @@ export async function runChecks(opts) {
     }
     if (fast) {
       await page.eval(`__vg.timeScale = ${nativeClock}; void 0`).catch(() => {});
-      await page.send("Emulation.setEmulatedMedia", { features: [] }).catch(() => {});
+      // github#186 -- an empty list restores Chrome's own default
+      await page.send("Emulation.setEmulatedMedia",
+                      { features: [{ name: "prefers-reduced-motion", value: "no-preference" }] }).catch(() => {});
     }
     // github#146 -- the window closes after the interaction's tail
     await quiet(page);
