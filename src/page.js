@@ -943,10 +943,17 @@ function mountVaultGraph(root, data, deps) {
   var NODE_MIN = 2.6, NODE_MAX = 11, NODE_ORPHAN = 6;
 
   // github#186, decisions/0017
-  var LINK_WEIGHT = 0.4;
+  var LINK_WEIGHT = 0;
   var LINK_CAP = 2.5;
   var sizeMean = 1;
   var linkMean = 1;
+  // github#186, decisions/0017
+  var DOT_CLEAR = 0.92;
+  /** @param {string} id */
+  function dotRamp(id) {
+    var t = ((graph.getNodeAttribute(id, "size") || NODE_MIN) - NODE_MIN) / (NODE_MAX - NODE_MIN);
+    return t > 1 ? 1 : t < 0 ? 0 : t;
+  }
   /** @param {string} id */
   function linkWeight(id) {
     if (!(LINK_WEIGHT > 0) || !(sizeMean > 1e-9)) return 1;
@@ -2981,14 +2988,12 @@ function mountVaultGraph(root, data, deps) {
           var rowWs = rowN[sl.r] > 1e-9 ? rowN[sl.r] : 0;
           var wSelf = (alpha[sl.id] || 0) * linkWeight(sl.id);
           /** @param {number} shr */
-          var slotOf = function (shr) {
-            var u = arc * rGraph * (shr > 0 ? shr : 1);
-            return u > pitU ? pitU : u;
-          };
+          var slotOf = function (shr) { return arc * rGraph * (shr > 0 ? shr : 1); };
           cellRoomNext[sl.id] = slotOf(rowWs > 1e-9 && wSelf > 0 ? wSelf / rowWs : 1);
           /** @param {number} shr */
           var side = function (shr) {
             var u = slotOf(shr);
+            if (u > pitU) u = pitU;
             return (CLEAR_OF_ROOM * u * (GAP_BAND[bk] || 1) + DOT_OF_PITCH * u) / rGraph;
           };
           var mgA = side(sl.eA), mgB = side(sl.eB);
@@ -3061,7 +3066,7 @@ function mountVaultGraph(root, data, deps) {
     var insetO = 0;
     if (plan.sp > 0 && plan.rows && plan.rows.o > 0) {
       var pitO = UNIT * plan.sp;
-      insetO = DOT_OF_PITCH * Math.min(pitO, UNIT * DOT_MAX_SPREAD) / UNIT;
+      insetO = DOT_OF_PITCH * DOT_CLEAR * Math.min(pitO, UNIT * DOT_MAX_SPREAD) / UNIT;
       var slackO = (plan.maxR - plan.rOuter) - (plan.rows.o - 1) * plan.sp - 2 * insetO;
       if (slackO < 0) insetO = Math.max(0, insetO + slackO);
       if (insetO > 0) {
@@ -5864,7 +5869,8 @@ function mountVaultGraph(root, data, deps) {
   var DOT_OF_PITCH = 11 / 28;
   var DOT_MIN_PX = 1.5;
   // github#186, decisions/0017
-  var DOT_MAX_SPREAD = DENSITY_MAX * DENSITY_MAX;
+  var DOT_MAX_SPREAD = DENSITY_MAX;
+  var DOT_OVER_PITCH = DENSITY_MAX;
   var sizeScale = 1;
   // github#186
   var pxPerUnit = 1;
@@ -5909,35 +5915,36 @@ function mountVaultGraph(root, data, deps) {
     return {
       id: id, band: bk, size: size,
       // github#186
-      ramp: { m: 0, b: 0, lo: DOT_MIN_PX }, rampV: DOT_OF_PITCH * pitchUnits(bk) * pxPerUnit,
+      ramp: { m: 1 / (NODE_MAX - NODE_MIN), b: 0, lo: 0 }, rampV: dotRamp(id),
       bandRoom: pitchUnits(bk),
       cellRoom: cellRoom[id], colWalk: cwd ? cwd.f : null,
       pitch: pitchUnits(bk),
       edgeCap: edgeCap[id], hubRow0: !!hubRow0[id],
       walking: { room: false, cell: !!cellNow, edge: !!edgeNow },
-      out: dotPx(size, id),
+      out: dotPx(size, id), ceil: lastDotHi, floorPx: DOT_MIN_PX,
       fit: fitNow ? fitNow[id] : undefined
     };
   }
 
+  var lastDotHi = 0;
   /** @param {number} size @param {string} [id] */
   function dotPx(size, id) {
     var isIn = id !== undefined && bandLock && !!bandLock[groupOf(id)];
     var pit = pitchUnits(isIn ? "i" : "o");
     // github#186, decisions/0017
-    var u = pit;
-    if (id !== undefined) {
-      var mine = cellRoom[id];
-      if (colWalk) {
-        var cwd = colWalk[groupOf(id)];
-        if (cwd !== undefined) mine = (mine === undefined ? pit : mine) * cwd.f;
-      }
-      if (mine !== undefined && mine > 0 && mine < u) u = mine;
+    var mine = id !== undefined ? cellRoom[id] : undefined;
+    if (colWalk && id !== undefined) {
+      var cwd = colWalk[groupOf(id)];
+      if (cwd !== undefined) mine = (mine === undefined ? pit : mine) * cwd.f;
     }
-    var spread = UNIT * DOT_MAX_SPREAD;
-    if (u > spread) u = spread;
-    var v = DOT_OF_PITCH * u * pxPerUnit;
-    // github#107
+    // github#186, decisions/0017
+    var u = DOT_OVER_PITCH * Math.min(pit, UNIT * DOT_MAX_SPREAD);
+    if (mine !== undefined && mine > 0 && mine * DOT_CLEAR < u) u = mine * DOT_CLEAR;
+    var hi = DOT_OF_PITCH * u * pxPerUnit;
+    lastDotHi = hi;
+    // github#107, github#186 -- the floor IS the ramp's bottom, so no dot is pinned to it
+    var v = hi <= DOT_MIN_PX ? hi
+          : DOT_MIN_PX + (hi - DOT_MIN_PX) * (id !== undefined ? dotRamp(id) : 1);
     if (v < DOT_MIN_PX) v = DOT_MIN_PX;
     var capU = edgeCap[id];
     if (capU !== undefined && capU > 0 && v > capU * pxPerUnit) v = capU * pxPerUnit;
@@ -11419,7 +11426,9 @@ function mountVaultGraph(root, data, deps) {
                                              bandTotal: geomLock.bandTotal } : null,
                         bands: { inner: bandStat(pts.slice(0, gi)), outer: bandStat(pts.slice(gi)) },
                         dots: { ofPitch: r3(DOT_OF_PITCH), minPx: DOT_MIN_PX,
-                                maxSpread: DOT_MAX_SPREAD, m: 0, b: 0, lo: DOT_MIN_PX },
+                                maxSpread: DOT_MAX_SPREAD,
+                                clear: DOT_CLEAR, overPitch: DOT_OVER_PITCH,
+                                m: r3(1 / (NODE_MAX - NODE_MIN)), b: 0, lo: 0 },
                       };
                     },
     };

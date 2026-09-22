@@ -37,9 +37,14 @@ const MEASURE = `(function () {
     var d = R.getNodeDisplayData(id);
     if (!d || d.hidden || (__vg.alpha[id] || 0) < 0.999) return;
     if (__vg.isOrphan(id) || __vg.isPinned(id)) return;
+    // github#186 -- the CEILING the note's own wedge sets, so the ramp can be read alone
+    var w = __vg.dotWhy ? __vg.dotWhy(id) : null;
+    var ceil = w && w.ceil > w.floorPx ? w.ceil : null;
     ns.push({ id: id, g: __vg.groupOf(id), band: __vg.isInner(id) ? "i" : "o",
               deg: at.deg, size: at.size, r: Math.hypot(at.x, at.y),
-              th: Math.atan2(at.y, at.x), px: R.scaleSize(d.size) });
+              th: Math.atan2(at.y, at.x), px: R.scaleSize(d.size),
+              ceil: ceil,
+              rel: ceil ? (w.out - w.floorPx) / (ceil - w.floorPx) : null });
   });
   if (!ns.length) return null;
   /* ---- 1. does the DOT still say anything about the note's links? ---- */
@@ -64,7 +69,12 @@ const MEASURE = `(function () {
       degHi: Math.round(mean(hi.map(function (z) { return z.deg; })) * 10) / 10,
       pxLo: Math.round(mean(lo.map(function (z) { return z.px; })) * 100) / 100,
       pxHi: Math.round(mean(hi.map(function (z) { return z.px; })) * 100) / 100,
-      corr: Math.round(corr(v.map(function (z) { return z.deg; }), v.map(function (z) { return z.px; })) * 1000) / 1000 };
+      corr: Math.round(corr(v.map(function (z) { return z.deg; }), v.map(function (z) { return z.px; })) * 1000) / 1000,
+      corrRel: (function () {
+        var w2 = v.filter(function (z) { return z.rel != null && isFinite(z.rel); });
+        return w2.length > 8 ? Math.round(corr(w2.map(function (z) { return z.deg; }),
+                                               w2.map(function (z) { return z.rel; })) * 1000) / 1000 : null;
+      })() };
     bandDot[k].ratio = bandDot[k].pxLo > 0 ? Math.round(bandDot[k].pxHi / bandDot[k].pxLo * 100) / 100 : 0;
   });
   /* ---- 2. are the COLUMNS still there? ---- */
@@ -139,7 +149,7 @@ try {
   console.log(`   DOT   ${r.dot.min} .. ${r.dot.max} px, median ${r.dot.p50}, spread ${r.dot.spread}x, ${r.dot.distinct} distinct sizes (quarter-px buckets)`);
   for (const k of Object.keys(b)) {
     console.log(`         band ${k}: bottom-decile deg ${b[k].degLo} -> ${b[k].pxLo} px, top-decile deg ${b[k].degHi} -> ${b[k].pxHi} px` +
-                `  (${b[k].ratio}x), corr(deg, px) ${b[k].corr}`);
+                `  (${b[k].ratio}x), corr(deg, px) ${b[k].corr}, corr(deg, ramp) ${b[k].corrRel}`);
   }
   const c = r.columns;
   console.log(`   COLS  ${c.samples} notes over ${c.rowPairs} adjacent row pairs: median offset ${c.median} of a step` +

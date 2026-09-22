@@ -178,6 +178,11 @@ filtering 503 notes to 62.
 
 ### A dot is sized off its band's median own-step, not its tightest decile (github#107)
 
+> **SUPERSEDED by github#186 / `decisions/0017`.** There is no band-median room any more, and no
+> `ROOM_PCTL`: a dot is sized off **its own** tangential step, capped at the band's radial pitch,
+> times a ramp on its `size`. Kept here because the reasoning below is why a band-wide figure was
+> the wrong instrument, which is the argument that retired it.
+
 `ringsLayout` collects one own-step per (cell, row) into `roomPool[band]` and `pick()` reduces
 each pool to the one number `dotPx` sizes that whole band against. **`ROOM_PCTL = 0.5`.** It was
 `0.1`, and the tenth percentile is not band-neutral: the inner band packs fewer rows over more
@@ -199,6 +204,9 @@ a second number through the cascade's six room-interpolation sites; it was consi
 aside.
 
 ### `DOT_MIN_PX` is a floor, and the caps below it still win (github#107)
+
+> Still true under github#186: the floor is applied before the edge, fit, hub and cascade clamps,
+> and those may still push a dot under it.
 
 `dotPx` used to scale the floor by the room factor as well as the ceiling — `lo = rp.lo * scale`
 — so **`DOT_MIN_PX = 1.5` was never a floor**: at scale 0.63 the demo vault's inner band bottomed
@@ -545,6 +553,16 @@ The definition, given on 2026-09-21 and implemented as given:
 At rest the packer already kept it. The github#186 investigation measured every cascade frame of
 four acts on two fixtures and found **four separate ways it was broken in flight**, each with its
 own mechanism. What follows is what each one was, and what it reads now.
+
+**How a dot is sized, since this rework, is in `decisions/0017`:** a wedge-local ceiling
+(`DOT_OF_PITCH × min(the note's own tangential step, the band's pitch, UNIT × DOT_MAX_SPREAD)`)
+times a ramp on the note's `size`, normalised per vault so the 90th-percentile dot is
+`DOT_LINK_RATIO = 1.85` times the 10th. The first rule this rework tried —
+`DOT_OF_PITCH × min(own slot, pitch)` and nothing else — removed link weight from the dot
+entirely, because `solveBand` makes the cell square so the `min` always takes the pitch; that is
+measured in `decisions/0017` and in `.ai-context/investigations/186/dotsize-186.mjs`.
+**Weighted arcs and slots did not land** (`LINK_WEIGHT = 0`), so everything below is measured
+with the arc still following opacity alone.
 
 **The resting halves are asserted by the suite**, on every fixture:
 
