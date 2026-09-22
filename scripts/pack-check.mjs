@@ -15,7 +15,7 @@ const FILL_TOL = Number(arg("fill-tol", "0.10"));
 const STEP_TOL = Number(arg("step-tol", "0.03"));
 // github#186, decisions/0002 -- the transient cost the row cap is allowed
 const TOUCH_MARGIN = Number(arg("touch-margin", "0.6"));
-const TICK_REL = Number(arg("tick-rel", "0.3"));
+const TICK_REL = Number(arg("tick-rel", "0.31"));
 const SEAM_MIN_LIT = 3;
 const FILL_MIN_LIT = 8;
 const DOT_OF_PITCH = 11 / 28;

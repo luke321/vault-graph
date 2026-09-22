@@ -637,7 +637,7 @@ does not "tighten" it back and rediscover why it is where it is.**
 |---|---|---|
 | STEP | 3% | frame-to-frame pitch noise is under 1%; the smallest real step measured was 13%. A wide gap to sit in, not a tuned threshold |
 | TOUCH | `1 − 0.6 / rows_live`, per frame | **the row cap's own guarantee.** The cap holds the top slot's outer edge at most half a pitch under the rail, so the worst honest reading on a band of `rows_live` rows is `1 − 0.5/rows_live`; 0.6 leaves a tenth of a pitch of margin. On 5 rows that is 0.88, on 4 rows 0.85, on 3 rows 0.80 |
-| TICK | 0.3 of the band's pitch | `RADIAL_EASE = 0.25` closes a quarter of a *pitch* per frame (`decisions/0002`), plus margin. Absolute is wrong: 38 units on a 160 pitch and 63 on a 250 are the same tick |
+| TICK | 0.31 of the band's pitch | `RADIAL_EASE = 0.25` closes a quarter of a *pitch* per frame (`decisions/0002`), and the pitch itself grows up to a quarter across a walk, so `0.25 × 1.25 = 0.3125`. Absolute is wrong: 38 units on a 160 pitch and 63 on a 250 are the same tick |
 | AREA | ±7% | **symmetric, and loose because the endpoints are two samples.** A 2% ceiling cannot be supported by two resting measurements of a quantity that is being walked between them. Do not tighten it back to 2% |
 
 **TOUCH and TICK assert only while a band is actually populated** — at least one lit note per live
@@ -718,6 +718,35 @@ and a band packing 1.05–1.06× *tighter* than its resting floor while the top 
 the cap (AREA), against develop's 1.30× looser in the other direction. Blending the `n`-row and
 `n+1`-row lattices was **not** built: `design/0002` rejected exactly that twice, and
 `decisions/0002` a third time as a smeared disc.
+
+#### A centred cell steps TWO rows at a cap crossing — recorded, not fixed
+
+A cell with fewer notes than its band is deep takes `placeCell`'s **centred** path: one note per
+row from `cStart = round((bandRows − nEff) / 2)`. Both terms move during a walk — `bandRows` falls
+with the cap, `nEff` falls as the cell's own notes fade — so at a crossing `cStart` can move by one
+in the same frame that the note's index inside the cell moves by one. Two rows, on one note, in one
+frame.
+
+Measured soloing `03 - Resources`, inner band, note `2` of `00 - Inbox` — **3 notes in a 6-row
+band**, so centred throughout:
+
+```
+pr     pitch  lit  rows  rMax   step
+0.499  172.7  167   5    1792    42     <- RADIAL_EASE, 0.25 of a pitch
+0.501  173.2  164   5    1750    85     <- 0.49 of a pitch, the crossing
+0.504  173.6  163   5    1719    64
+0.507  174.1  163   4    1696    48
+0.509  174.6  160   4    1680    43     <- back to 0.25
+```
+
+`85 → 64 → 48 → 43` is a clean 0.75 geometric decay, so **the easing is working and the target
+moved twice as far as a row tick should**. It is one frame, one note, 85 units on a 4000-unit disc,
+and about half the 160-unit tick `decisions/0002` accepted before easing existed.
+
+**The fix is to walk `cStart` rather than round it, and it is deferred** — out of github#186's
+scope, which was the four in-flight defects and the packing rule. TICK asserts at 0.31 and this one
+frame reads 0.49, so the assertion names this crossing rather than being relaxed: a blanket
+exclusion would hide the next one.
 
 ### 3. A single-cell whole-group toggle drove its arc on the clock, not on its notes
 
