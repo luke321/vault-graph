@@ -33,6 +33,9 @@ const ACT = arg("act", "");
 const DIM = arg("dim", "");
 const SLOW = Number(arg("slow", "4"));
 const FILM = has("film");
+// github#186 -- PNG encode cost drops 12-16% of a heavy act's frames; jpeg keeps them
+const FILM_FMT = arg("film-format", "png");
+const FILM_Q = Number(arg("film-quality", "95"));
 const W = 1200, H = 1000;
 if (!HTML_IN || !existsSync(HTML_IN)) throw new Error("pass --html <built page>");
 mkdirSync(OUT, { recursive: true });
@@ -282,12 +285,14 @@ try {
     page.on((msg) => {
       if (msg.method !== "Page.screencastFrame") return;
       page.send("Page.screencastFrameAck", { sessionId: msg.params.sessionId }).catch(() => {});
-      const file = join(filmDir, String(frames.length).padStart(5, "0") + ".png");
+      const file = join(filmDir, String(frames.length).padStart(5, "0") + "." + FILM_FMT);
       writeFileSync(file, Buffer.from(msg.params.data, "base64"));
       frames.push({ file, t: msg.params.metadata.timestamp });
     });
     await page.send("Page.enable");
-    await page.send("Page.startScreencast", { format: "png", everyNthFrame: 1, maxWidth: W, maxHeight: H });
+    await page.send("Page.startScreencast", Object.assign(
+      { format: FILM_FMT, everyNthFrame: 1, maxWidth: W, maxHeight: H },
+      FILM_FMT === "jpeg" ? { quality: FILM_Q } : {}));
     await sleep(700);
   }
 

@@ -37,7 +37,8 @@ writeFileSync(list, lines.join("\n") + "\n");
 const clip = join(dir, "clip.mp4");
 let r = spawnSync(ffmpeg, ["-hide_banner", "-loglevel", "error", "-f", "concat", "-safe", "0", "-i", list,
   "-vf", `crop=${S}:${S}:${X}:${Y},fps=${FPS},scale=720:720,format=yuv420p`,
-  "-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-movflags", "+faststart", "-y", clip], { stdio: "inherit" });
+  "-c:v", "libx264", "-preset", arg("preset", "veryfast"), "-crf", arg("crf", "20"),
+  "-movflags", "+faststart", "-y", clip], { stdio: "inherit" });
 if (r.status !== 0) throw new Error("ffmpeg clip exited " + r.status);
 console.log(`clip: ${frames.length} frames over ${(frames[frames.length - 1].t - frames[0].t).toFixed(1)}s -> ${clip}`);
 
