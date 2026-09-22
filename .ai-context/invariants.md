@@ -554,6 +554,46 @@ At rest the packer already kept it. The github#186 investigation measured every 
 four acts on two fixtures and found **four separate ways it was broken in flight**, each with its
 own mechanism. What follows is what each one was, and what it reads now.
 
+### How a dot is sized, and the three ways it was got wrong first (github#186)
+
+A dot is `DOT_MIN_PX + (ceiling − DOT_MIN_PX) × ramp(size)`, the ramp linear in `size` over
+`NODE_MIN..NODE_MAX`, and the ceiling
+
+    DOT_OF_PITCH × min( the note's OWN tangential step × DOT_CLEAR,
+                        DOT_OVER_PITCH × min(the band's radial pitch, UNIT × DOT_MAX_SPREAD) )
+
+**Each of the three terms in that `min()` guards a different thing, and collapsing them back into
+one number is how this was broken three times:**
+
+| term | what it guards |
+|---|---|
+| the note's own step × `DOT_CLEAR` | seam and neighbour clearance, decided inside the note's own wedge — nothing about another wedge reaches it |
+| `DOT_OVER_PITCH × pitch` | how far a dot may outgrow the **radial** pitch once its own tangential step allows, which is where a filtered disc's dot growth comes from |
+| `UNIT × DOT_MAX_SPREAD` | the absolute ceiling, applied **to the pitch**, never to the product |
+
+The three failures, each measured before it was found:
+
+1. **`DOT_OF_PITCH × min(own slot, pitch)` and nothing else** removes link weight from the dot
+   entirely — `solveBand` makes the cell square, so at rest the slot *is* the pitch and the
+   `min` always takes the pitch. Measured: corr(degree, drawn radius) **0.827 → 0.007** on the
+   demo's outer band, and **815 notes on the dominant-folder vault drew at two distinct sizes**,
+   one per band.
+2. **Capping the product rather than the pitch** collapses the sparse case: the dominant-folder
+   vault filtered to eight notes read a dot of **8.8 px against develop's 52.96**, and
+   *filtered to the bone, the disc stays drawable* failed at **d/s 0.03** against its 0.15 floor.
+3. **A multiplicative ramp** (`ceiling × ramp`) pins every dot whose ceiling is near the pixel
+   floor, which on a dense vault is the whole disc — the demo's ceiling is ~2.0 px against a
+   1.5 px floor, and the measured result was **one drawn size for 1370 notes**. The ramp runs
+   from the floor to the ceiling instead, which makes pinning impossible.
+
+The hub-to-leaf dot ratio is therefore a **consequence** of ceiling over floor, not a constant:
+it lands at 1.64–2.09× across the five fixtures against develop's 1.15–1.93×, and a named
+`DOT_LINK_RATIO` was tried and retired because a ramp anchored at the floor cannot honour one.
+
+`.ai-context/investigations/186/dotsize-186.mjs` measures all of it — corr(degree, drawn radius),
+corr(degree, ramp) with the ceiling divided out, the hub/leaf ratio, the distinct-size count and
+the column offset — and is the acceptance test for any future change to this.
+
 **How a dot is sized, since this rework, is in `decisions/0017`:** a wedge-local ceiling
 (`DOT_OF_PITCH × min(the note's own tangential step, the band's pitch, UNIT × DOT_MAX_SPREAD)`)
 times a ramp on the note's `size`, normalised per vault so the 90th-percentile dot is
