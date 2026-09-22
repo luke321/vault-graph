@@ -185,7 +185,23 @@ const SAMPLER = `(function () {
     watch.forEach(function (id) { var a = G.getNodeAttributes(id); watched[id] = { al: Math.round((__vg.alpha[id] || 0) * 1e4) / 1e4, r: Math.round(Math.hypot(a.x, a.y) * 10) / 10, th: Math.round(Math.atan2(a.y, a.x) * 1e4) / 1e4 }; });
     var lc = __vg.lastCascade();
     var w = __vg.demo.busyWhy();
+    // github#186, decisions/0002 -- the eased tick, read on notes that are LIT: a fade is not a move
+    var litStep = { i: 0, o: 0 }, litWho = { i: null, o: null };
+    var seenR = {};
+    G.forEachNode(function (id, a) {
+      if ((__vg.alpha[id] || 0) < 0.5) return;
+      if (__vg.isOrphan(id) || __vg.isPinned(id)) return;
+      var r = Math.hypot(a.x, a.y);
+      seenR[id] = r;
+      var was = window.__p186 && __p186.prevR ? __p186.prevR[id] : undefined;
+      if (was === undefined) return;
+      var bk = __vg.isInner(id) ? "i" : "o";
+      var dr = Math.abs(r - was);
+      if (dr > litStep[bk]) { litStep[bk] = dr; litWho[bk] = id; }
+    });
+    if (window.__p186) __p186.prevR = seenR;
     return { t: performance.now(), epoch: Date.now() / 1000,
+             litStep: litStep, litStepId: litWho,
              pr: lc && lc.last ? lc.last.pr : null, frame: lc && lc.last ? lc.last.frame : null,
              cascade: !!w.cascade, anim: !!w.anim, exit: lc ? lc.exit || null : null,
              seams: { i: { deg: __vg.seamDeg("i"), nB: __vg.seamNB("i") }, o: { deg: __vg.seamDeg("o"), nB: __vg.seamNB("o") } },

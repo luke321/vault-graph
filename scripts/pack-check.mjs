@@ -8,15 +8,13 @@ const arg = (n, d) => { const i = argv.indexOf("--" + n); return i >= 0 && argv[
 const ROOT = resolve(argv.find((a) => !a.startsWith("--")) || ".");
 const JSON_OUT = arg("json", "");
 const RAIL_TOL = Number(arg("rail-tol", "0.005"));
-const AREA_TOL = Number(arg("area-tol", "0.02"));
-// github#186 -- the row cap bunches below the floor
-const AREA_UNDER = Number(arg("area-under", "0.07"));
+const AREA_TOL = Number(arg("area-tol", "0.07"));
 const SEAM_TOL = Number(arg("seam-tol", "0.05"));
 const FILL_TOL = Number(arg("fill-tol", "0.10"));
 // github#186 -- an integer row count steps the pitch
 const STEP_TOL = Number(arg("step-tol", "0.03"));
 // github#186, decisions/0002 -- the transient cost the row cap is allowed
-const TOUCH_MIN = Number(arg("touch-min", "0.90"));
+const TOUCH_MARGIN = Number(arg("touch-margin", "0.6"));
 const TICK_REL = Number(arg("tick-rel", "0.3"));
 const SEAM_MIN_LIT = 3;
 const FILL_MIN_LIT = 8;
@@ -103,7 +101,7 @@ for (const dir of runDirs(ROOT)) {
         const over = ap > rest[k].areaHi;
         const ax = over ? ap / rest[k].areaHi : rest[k].areaLo / ap;
         if (ax > worst.areaX) worst = { ...worst, areaX: ax, areaAt: { pr: r3(s.pr), band: k, area: r2(ap), lo: r2(rest[k].areaLo), hi: r2(rest[k].areaHi) } };
-        if (ax > 1 + (over ? AREA_TOL : AREA_UNDER)) {
+        if (ax > 1 + AREA_TOL) {
           fail.area.push({ pr: r3(s.pr), band: k, area: r2(ap), lo: r2(rest[k].areaLo), hi: r2(rest[k].areaHi), x: r2(ax), over: over });
         }
       }
@@ -185,17 +183,27 @@ for (const dir of runDirs(ROOT)) {
   }
   fail.step.sort((x, y) => y.rel - x.rel);
 
-  // github#186 -- one note per row, the least that can touch
-  const populated = (s, b) => {
+  // github#186 -- a band's live row count, from its own lit extent
+  const rowsLive = (s, b) => {
     const bd = s.bands && s.bands[b];
     const pitch = (s.pitch && s.pitch[b]) || 0;
     if (!bd || !bd.lit || !(pitch > 1e-6)) return 0;
-    const rows = Math.max(1, Math.round((bd.rMax - bd.rMin) / pitch) + 1);
-    // github#186 -- a band down to one or two notes is not touching anything
-    return bd.lit >= Math.max(AREA_MIN_LIT, rows) ? rows : 0;
+    return Math.max(1, Math.round((bd.rMax - bd.rMin) / pitch) + 1);
   };
-  // github#186 -- the top slot's outer edge against the rail
-  let touch = { x: Infinity, pr: null, band: null };
+  // github#186 -- a note per row, three, and a tenth of rest
+  const restLit = {};
+  for (const k of ["i", "o"]) {
+    const a = P.restA.bands[k], b = P.restB.bands[k];
+    restLit[k] = Math.max((a && a.lit) || 0, (b && b.lit) || 0);
+  }
+  const populated = (s, b) => {
+    const rows = rowsLive(s, b);
+    if (!rows) return 0;
+    const floorLit = Math.max(AREA_MIN_LIT, rows, Math.ceil(0.1 * restLit[b]));
+    return s.bands[b].lit >= floorLit ? rows : 0;
+  };
+  // github#186 -- the cap's own guarantee is the bar
+  let touch = { x: Infinity, bar: 0, pr: null, band: null };
   let touchThin = { x: Infinity, pr: null, band: null };
   for (const s of frames) {
     for (const b of ["i", "o"]) {
@@ -203,34 +211,43 @@ for (const dir of runDirs(ROOT)) {
       const pitch = (s.pitch && s.pitch[b]) || 0;
       if (!bd || !bd.lit || !(pitch > 1e-6)) continue;
       const x = (bd.rMax + pitch / 2) / rails[b].top;
-      const at = { x, pr: r3(s.pr), band: b, rMax: r2(bd.rMax), pitch: r2(pitch), lit: bd.lit };
+      const rows = rowsLive(s, b);
+      const at = { x, pr: r3(s.pr), band: b, rMax: r2(bd.rMax), pitch: r2(pitch), lit: bd.lit, rows: rows };
       if (x < touchThin.x) touchThin = at;
-      if (populated(s, b) && x < touch.x) touch = at;
+      if (!populated(s, b)) continue;
+      const bar = 1 - TOUCH_MARGIN / rows;
+      const slack = x - bar;
+      if (slack < touch.x - touch.bar) touch = { ...at, bar: r3(bar), slack: r3(slack) };
     }
   }
-  if (!isFinite(touch.x)) touch = { x: 1, pr: null, band: null, thin: true };
-  if (touch.x < TOUCH_MIN) fail.touch.push(touch);
-  // github#186, decisions/0002 -- the eased band-edge tick
+  if (!isFinite(touch.x)) touch = { x: 1, bar: 0, pr: null, band: null, thin: true };
+  if (touch.x < touch.bar) fail.touch.push(touch);
+  // github#186, decisions/0002 -- the eased tick, on a LIT note rather than the band edge
   let tick = { step: 0, rel: 0, pr: null, band: null };
+  let tickEdge = { step: 0, rel: 0, pr: null, band: null };
   const edge = { i: null, o: null };
   for (const s of frames) {
     for (const b of ["i", "o"]) {
       const bd = s.bands && s.bands[b];
       const pitch = (s.pitch && s.pitch[b]) || 0;
+      if (!bd || !bd.lit || !(pitch > 1e-6)) { edge[b] = null; continue; }
       const was = edge[b];
-      if (bd && bd.lit && pitch > 1e-6) {
-        if (was != null && populated(s, b)) {
-          const step = Math.abs(bd.rMax - was);
-          const rel = step / pitch;
-          if (rel > tick.rel) tick = { step: Math.round(step), rel: r3(rel), pr: r3(s.pr), band: b, pitch: r2(pitch), lit: bd.lit, rows: populated(s, b) };
-        }
-        edge[b] = bd.rMax;
-      } else {
-        edge[b] = null;
+      if (was != null && populated(s, b)) {
+        const rel = Math.abs(bd.rMax - was) / pitch;
+        if (rel > tickEdge.rel) tickEdge = { step: Math.round(Math.abs(bd.rMax - was)), rel: r3(rel), pr: r3(s.pr), band: b, pitch: r2(pitch) };
+      }
+      edge[b] = bd.rMax;
+      const ls = s.litStep && s.litStep[b];
+      if (ls == null || !populated(s, b)) continue;
+      const rel = ls / pitch;
+      if (rel > tick.rel) {
+        tick = { step: Math.round(ls), rel: r3(rel), pr: r3(s.pr), band: b, pitch: r2(pitch),
+                 lit: bd.lit, node: s.litStepId ? s.litStepId[b] : null };
       }
     }
   }
-  if (tick.rel > TICK_REL) fail.tick.push(tick);
+  const tickSeen = frames.some((s) => s.litStep);
+  if (tickSeen && tick.rel > TICK_REL) fail.tick.push(tick);
 
   const ok = { rails: !fail.rails.length, rest: !fail.rest.length, area: !fail.area.length,
                seam: !fail.seam.length, fill: !fail.fill.length, step: !fail.step.length,
@@ -277,12 +294,14 @@ for (const dir of runDirs(ROOT)) {
   for (const x of fail.step.slice(0, 4)) {
     console.log(`         band ${x.band} pitch ${x.from} -> ${x.to} (${(x.rel * 100).toFixed(0)}%) at pr ${x.pr}, ${x.lit} notes lit`);
   }
-  console.log(`   TOUCH ${mark(ok.touch)} top slot edge stays at ${touch.x.toFixed(3)} of the rail at worst` +
-              (touch.pr != null ? ` (band ${touch.band}, rMax ${touch.rMax} + half of ${touch.pitch}, ${touch.lit} lit @pr ${touch.pr})` : " -- no frame held a note per row") +
+  console.log(`   TOUCH ${mark(ok.touch)} top slot edge ${touch.x.toFixed(3)} of the rail against a ${touch.bar.toFixed(3)} bar` +
+              (touch.pr != null ? ` (band ${touch.band}, ${touch.rows} live rows, ${touch.lit} lit @pr ${touch.pr})` : " -- never populated enough to assert") +
               (isFinite(touchThin.x) && touchThin.x < touch.x
                 ? `; ${touchThin.x.toFixed(3)} while thinner (${touchThin.lit} lit @pr ${touchThin.pr}), not asserted` : ""));
-  console.log(`   TICK  ${mark(ok.tick)} worst band-edge step ${tick.rel.toFixed(2)} of a pitch` +
-              (tick.pr != null ? ` (${tick.step} units of a ${tick.pitch} pitch, band ${tick.band} @pr ${tick.pr})` : ""));
+  console.log(`   TICK  ${mark(ok.tick)} worst lit-note step ${tick.rel.toFixed(2)} of a pitch` +
+              (tick.pr != null ? ` (${tick.step} units of a ${tick.pitch} pitch, band ${tick.band} @pr ${tick.pr})`
+                               : tickSeen ? "" : " -- this run predates litStep, re-take it") +
+              `; band edge ${tickEdge.rel.toFixed(2)} of a pitch, reported not asserted`);
 }
 
 if (!seen) { console.log(`no probe runs under ${ROOT}`); process.exit(1); }

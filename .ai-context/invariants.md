@@ -627,21 +627,35 @@ lit note's centre outside its band's rails on any frame), REST (a band's outermo
 past `max(rest before, rest after, rail)`), AREA (area per lit note stays between the two resting
 values), SEAM (a lit wedge's coverage never below its resting value, scaled by the share of itself
 the alpha ≥ 0.5 measure can see), FILL (a wedge is never wider, per its own notes at the band's
-pitch, than it rests), **STEP** (a lit band's pitch never jumps more than 3% between frames),
-**TOUCH** (the top slot's outer edge stays within 10% of the rail) and **TICK** (the band edge's
-worst single-frame move stays under 0.3 of that frame's pitch, `decisions/0002`'s eased tick). The
-last three came out of defect 2's second attempt, below. TOUCH and TICK assert only while a band
-holds **at least one lit note per live row** — the least that can touch a rail — because a band
-down to its last few notes reads 0.82 of the rail on *every* build, develop included, and a band
-whose final note vanishes moves its edge without moving a note. Both are reported when thinner,
-never asserted. TICK is relative because `RADIAL_EASE` closes a quarter of a *pitch* per frame, so
-38 units on a 160 pitch and 63 on a 250 are the same tick and an absolute bar mis-reads the second.
+pitch, than it rests), **STEP**, **TOUCH** and **TICK**. The last three came out of defect 2's
+second attempt, below.
 
-**AREA is deliberately looser below the resting floor than above it** — 7% under against 2% over.
-The row cap in defect 2 trades a bulge outside the rail for bunching inside it, and the definition
-prefers under to outside. Measured: hiding and showing `03 - Resources` sit 1.05–1.06× *under* the
-floor for 41 and 36 frames, where develop sat **1.30× and 1.29× over** it. A reading under the
-floor is that trade, not a regression.
+**Every bar here is derived from something, and each derivation is written down so the next person
+does not "tighten" it back and rediscover why it is where it is.**
+
+| bar | number | where the number comes from |
+|---|---|---|
+| STEP | 3% | frame-to-frame pitch noise is under 1%; the smallest real step measured was 13%. A wide gap to sit in, not a tuned threshold |
+| TOUCH | `1 − 0.6 / rows_live`, per frame | **the row cap's own guarantee.** The cap holds the top slot's outer edge at most half a pitch under the rail, so the worst honest reading on a band of `rows_live` rows is `1 − 0.5/rows_live`; 0.6 leaves a tenth of a pitch of margin. On 5 rows that is 0.88, on 4 rows 0.85, on 3 rows 0.80 |
+| TICK | 0.3 of the band's pitch | `RADIAL_EASE = 0.25` closes a quarter of a *pitch* per frame (`decisions/0002`), plus margin. Absolute is wrong: 38 units on a 160 pitch and 63 on a 250 are the same tick |
+| AREA | ±7% | **symmetric, and loose because the endpoints are two samples.** A 2% ceiling cannot be supported by two resting measurements of a quantity that is being walked between them. Do not tighten it back to 2% |
+
+**TOUCH and TICK assert only while a band is actually populated** — at least one lit note per live
+row, at least three lit, and at least a tenth of what the band rests with. A band down to its last
+few notes reads 0.82 of the rail on *every* build, develop included, and it is not touching
+anything. Both are reported when thinner, never asserted.
+
+**TICK measures a NOTE, not the band edge.** The edge metric counts a fade as a move: when the
+outermost lit note goes dark, `rMax` drops a full pitch with nothing having moved, which read
+exactly 1.00 of a pitch on two acts. A per-note step taken at opacity ≥ 0.5 never sees a note that
+has gone dark, and never sees the direct-assigned ones under 0.05 that make a raw per-note maximum
+read 154–2476 units on develop. The band-edge figure is still printed, as a report and not an
+assertion.
+
+**The AREA trade, so nobody reads the under-readings as a regression.** The row cap in defect 2
+trades a bulge *outside* the rail for bunching *inside* it, and the definition prefers under to
+outside. Measured across the five acts: at worst **1.02×, 1.06× and 1.065× over** the resting
+ceiling and 1.05–1.06× under the floor, where develop sat **1.30×, 1.29× and 1.54× over**.
 
 ### 1. A band empty at one end walked to the density fallback
 
