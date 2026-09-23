@@ -58,7 +58,7 @@ and the ceiling was the *band's median own-step*. Only that last term was wrong:
 
     ceiling = DOT_OF_PITCH x min( the CELL's tightest tangential step x DOT_CLEAR,
                                   DOT_OVER_PITCH x min(the band's radial pitch,
-                                                       UNIT x DOT_MAX_SPREAD) )
+                                                       UNIT x DOT_MAX_SPREAD x DOT_OVER_PITCH) )
     dot     = DOT_MIN_PX + (ceiling - DOT_MIN_PX) x ramp(size)
     ramp    = (size - NODE_MIN) / (NODE_MAX - NODE_MIN),  clamped to [0, 1]
 
@@ -82,6 +82,14 @@ Four things that each had to be got right, and each of which was measured wrong 
   median. Capping the product instead collapses the sparse case: measured on the dominant-folder
   vault filtered to eight notes, the dot read **8.8 px against develop's 52.96 px** and
   *filtered to the bone, the disc stays drawable* failed at **d/s 0.03** against its 0.15 floor.
+  **And the cap on the pitch is `DOT_OVER_PITCH × DOT_MAX_SPREAD × UNIT`, not `DOT_MAX_SPREAD ×
+  UNIT`** (2026-09-23, from the merge gate): at `2.6 × UNIT` the ceiling topped out at 425 units
+  while the eight-note ring's tangential step ran to 3,400, and the same check read **d/s 0.07
+  against develop's 0.19**. develop's `hiCap` was scaled by the camera ratio against a pitch that
+  was not, so in practice it never bound and its dots reached ~1,100 units; the pitch term now
+  caps where develop's dots actually stopped, `2.6 × 2.6 × UNIT`, and the bone reads **0.18**.
+  Nothing at rest moves on any fixture: no resting pitch exceeds 416 units, so the cap only ever
+  bound a filtered disc.
 - **The ramp runs from the PIXEL FLOOR to the ceiling, not from a fraction of it.** A
   multiplicative ramp pins every dot whose ceiling is near the floor, which on a dense vault is
   most of the disc — the demo's ceiling is ~2.0 px against a 1.5 px floor, and the measured result

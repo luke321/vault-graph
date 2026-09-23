@@ -6023,7 +6023,8 @@ function mountVaultGraph(root, data, deps) {
       if (cwd !== undefined) mine = (mine === undefined ? pit : mine) * cwd.f;
     }
     // github#186, decisions/0017
-    var u = DOT_OVER_PITCH * Math.min(pit, UNIT * DOT_MAX_SPREAD);
+    // github#186 -- the pitch cap is DOT_OVER_PITCH x the spread
+    var u = DOT_OVER_PITCH * Math.min(pit, UNIT * DOT_MAX_SPREAD * DOT_OVER_PITCH);
     if (mine !== undefined && mine > 0 && mine * DOT_CLEAR < u) u = mine * DOT_CLEAR;
     var hi = DOT_OF_PITCH * u * pxPerUnit;
     lastDotHi = hi;

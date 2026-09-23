@@ -560,7 +560,8 @@ A dot is `DOT_MIN_PX + (ceiling − DOT_MIN_PX) × ramp(size)`, the ramp linear 
 `NODE_MIN..NODE_MAX`, and the ceiling
 
     DOT_OF_PITCH × min( the CELL's tightest tangential step × DOT_CLEAR,
-                        DOT_OVER_PITCH × min(the band's radial pitch, UNIT × DOT_MAX_SPREAD) )
+                        DOT_OVER_PITCH × min(the band's radial pitch,
+                                             UNIT × DOT_MAX_SPREAD × DOT_OVER_PITCH) )
 
 **Each of the three terms in that `min()` guards a different thing, and collapsing them back into
 one number is how this was broken three times:**
@@ -569,7 +570,7 @@ one number is how this was broken three times:**
 |---|---|
 | the cell's tightest step × `DOT_CLEAR` | seam and neighbour clearance, decided inside the note's own wedge — nothing about another wedge reaches it, and nothing about the note's own ROW reaches it either (the fourth failure below) |
 | `DOT_OVER_PITCH × pitch` | how far a dot may outgrow the **radial** pitch once its own tangential step allows, which is where a filtered disc's dot growth comes from |
-| `UNIT × DOT_MAX_SPREAD` | the absolute ceiling, applied **to the pitch**, never to the product |
+| `UNIT × DOT_MAX_SPREAD × DOT_OVER_PITCH` | the absolute ceiling, applied **to the pitch**, never to the product — at `2.6 × UNIT` it held a filtered disc's dot at 425 units against a 3,400-unit step (d/s 0.07); where develop's dots actually stopped is `2.6 × 2.6 × UNIT`, and no resting pitch reaches either |
 
 The three failures, each measured before it was found:
 
@@ -849,6 +850,34 @@ develop. Both were confirmed with a scratch harness before anything was changed.
   (`lo = min(hi, DOT_MIN_PX × cam)`), and does again. At ratio 1 every dot is byte-identical
   (smallest 1.943 on the maintainer's vault before and after), so the goldens do not move; at
   ratio 4 the smallest dot is its own ceiling, as on develop, rather than a floor it cannot fill.
+
+#### Two suite failures at the merge gate, one cause
+
+The orchestrator's own full-suite run after merging (2026-09-23, reverted) failed *a dot never
+outgrows its resting size while a cascade walks* on the 10k vault and *filtered to the bone* on
+the dominant-folder and tag vaults. Both were replayed headless (`scratchpad/186/dotwalk.mjs`
+takes the check's own biggest-lit-dot measure per frame; `bone.mjs` runs the check's probe
+verbatim from `probe-bone.js`) before anything changed.
+
+- **The bone**: at the last 0.5% the dominant-folder vault's outer dots read exactly develop's
+  ÷ 2.6 (18.4 / 13.4 / 23.3 against 47.8 / 34.7 / 60.8 renderer px, same notes): the ceiling's
+  pitch cap at `2.6 × UNIT` bound where develop's never had. Raised to `2.6 × 2.6 × UNIT`
+  (decisions/0017): **0.07 → 0.18** (develop 0.19). Rest layouts byte-identical on all five.
+- **The overshoot**: soloing the 10k's two-note vault root, the biggest dot walked to 157.7
+  units and rested at 149.3. Traced: the rest was ramp-limited below the hub cap, and the ramp's
+  floor is 1.5 *screen* px, so it is `DOT_MIN_PX × camera ratio` in renderer size — and the
+  auto-fit after the landing takes the ratio from 0.95 to 0.60, shrinking a floor-dominated dot by
+  8% *after* the cascade. The endpoint size the walk is capped at was taken at the old ratio.
+  With the ceiling above, that dot rests on the hub cap (6.84 renderer px, the same figure as
+  develop's), the walk is capped at exactly that, and the check's own measure reads **1.000× on
+  all five fixtures** (smallest group with two notes on each, as the check picks). The floor's
+  camera coupling is develop's too and still latent for a dot that rests ramp-limited and
+  floor-dominated while the fit changes the ratio; it is recorded here, not fixed.
+- **The tag vault's bone is a knife-edge, not a size**: six hub-capped notes in one row, 7.16 px
+  on both builds; the branch's median gap is 64° against develop's 63° (a 42° seam against 45°),
+  and the check rounds diameter/step to two decimals — **0.14 against 0.15**. Nothing was tuned
+  to cross it; whether the check's floor or the seam reservation is the thing to move is the
+  maintainer's call.
 
 **A sparse cell's half rounds inward** (asked on 2026-09-23, *"home and career note not in the
 innermost row"*, on the 10k vault under a date range). What he saw was a pooled tail of three
