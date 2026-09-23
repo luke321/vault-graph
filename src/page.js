@@ -2811,7 +2811,7 @@ function mountVaultGraph(root, data, deps) {
         c.slots.forEach(function (sl) {
           var lw = linkWeight(sl.id);
           c.geom += lw;
-          c.live += (alpha[sl.id] || 0) * lw;
+          c.live += (handHeld && handHeld[sl.id] ? 1 : (alpha[sl.id] || 0)) * lw;
         });
         c.holdArc = true;
         live += c.geom;
@@ -4352,6 +4352,9 @@ function mountVaultGraph(root, data, deps) {
   // github#86, design/0015 -- under the hand a fading dot shrinks to nothing
   // github#86 -- and an arriving one grows from nothing, as a toggled wedge's
   var shrinkFade = false;
+  // github#186, design/0015 -- the dots of a ring going or coming WHOLE, under the hand
+  /** @type {Record<string, boolean> | null} */
+  var handHeld = null;
   /** @type {Record<string, boolean> | null} */
   var splitHold = null;
   /** @type {Record<string, Point> | null} */
@@ -4427,6 +4430,7 @@ function mountVaultGraph(root, data, deps) {
     // github#86 -- the left disc keeps its own colours while it stands
     if (opts.from && opts.from.color) leftColor = opts.from.color;
     shrinkFade = !!opts.hand;
+    handHeld = null;
 
     fullRing = false;
     graph.forEachNode(function (id) { if (present(id)) fullRing = true; });
@@ -4726,7 +4730,7 @@ function mountVaultGraph(root, data, deps) {
 
     var settle = function () {
       if (!lastCascade.exit) lastCascade.exit = "settle() called from outside the loop";
-      moveFrom = null; splitHold = null; leftColor = null; shrinkFade = false;
+      moveFrom = null; splitHold = null; leftColor = null; shrinkFade = false; handHeld = null;
       if (cascadeRun) {
         WIN.cancelAnimationFrame(cascadeRun.raf);
         WIN.clearTimeout(cascadeRun.guard);
@@ -4752,7 +4756,10 @@ function mountVaultGraph(root, data, deps) {
     };
 
     /** @param {string} id */
-    var weightOf = function (id) { return (alpha[id] || 0) * linkWeight(id); };
+    // github#186 -- under the hand a dot keeps its seat
+    var weightOf = function (id) {
+      return (handHeld && handHeld[id] ? 1 : (alpha[id] || 0)) * linkWeight(id);
+    };
 
     /** @type {Record<string, boolean>} */
     var wasPresent = dict();
@@ -4766,6 +4773,7 @@ function mountVaultGraph(root, data, deps) {
     var spDstB = { i: 1, o: 1 };
     // github#186
     var bandGone = { i: false, o: false };
+    var bandBorn = { i: false, o: false };
     /** @type {Record<string, number> | null} */
     var cellSrc = null;
     /** @type {Record<string, number> | null} */
@@ -4858,10 +4866,41 @@ function mountVaultGraph(root, data, deps) {
       // github#186
       bandGone = { i: bandSrc.i !== undefined && bandDst.i === undefined,
                    o: bandSrc.o !== undefined && bandDst.o === undefined };
+      // github#186, design/0015
+      bandBorn = { i: !opts.hand && bandSrc.i === undefined && bandDst.i !== undefined,
+                       o: !opts.hand && bandSrc.o === undefined && bandDst.o !== undefined };
       ["i", "o"].forEach(function (k) {
+        // github#186 -- a ring arriving whole starts at its rest
+        if (bandBorn[k]) { bandSrc[k] = bandDst[k]; spSrcB[k] = spDstB[k]; return; }
         if (bandSrc[k] === undefined && bandDst[k] !== undefined) { bandSrc[k] = 1; spSrcB[k] = spDstB[k]; return; }
         if (bandGone[k]) { bandDst[k] = bandSrc[k]; spDstB[k] = spSrcB[k]; }
       });
+      // github#186, design/0015 -- the clock hand: outer clockwise, inner counter-clockwise
+      if (!opts.hand && (bandGone.i || bandGone.o || bandBorn.i || bandBorn.o)) {
+        var lapW = windowFor(Math.max(outs.length, ins.length));
+        var TWO = 2 * Math.PI;
+        handHeld = dict();
+        /** @param {string} id */
+        var ringOf = function (id) { return bandLock && bandLock[groupOf(id)] ? "i" : "o"; };
+        /** @param {string} id */
+        var standsAt = function (id) {
+          var at = graph.getNodeAttributes(id);
+          return (at.x || at.y) ? angleSweep(Math.atan2(at.y, at.x)) : sweepOf[id];
+        };
+        /** @param {string[]} set @param {{ i: boolean, o: boolean }} which @param {boolean} leaving */
+        var sweep = function (set, which, leaving) {
+          set.forEach(function (id) {
+            if (isMove[id]) return;
+            var k = ringOf(id);
+            if (!which[k]) return;
+            var b = leaving ? standsAt(id) : sweepOf[id];
+            delay[id] = lapW * (k === "i" ? (TWO - b) % TWO : b) / TWO;
+            handHeld[id] = true;
+          });
+        };
+        sweep(outs, bandGone, true);
+        sweep(ins, bandBorn, false);
+      }
       /** @param {Plan | null} pl @param {((id: string) => number) | null} alphaFn */
       var roomOf = function (pl, alphaFn) {
         if (!pl) return null;
@@ -5082,14 +5121,17 @@ function mountVaultGraph(root, data, deps) {
       // github#44, github#186
       /** @param {string} k */
       var thickAt = function (k) {
-        var cap = thickLock(k);
-        if (bandGone[k]) return Math.min(cap, bandSrc[k] * spSrcB[k]);
+        if (bandGone[k]) return bandSrc[k] * spSrcB[k];
         var ds = bandSrc[k], dd = bandDst[k];
         if (ds === undefined && dd === undefined) return 0;
         if (ds === undefined) ds = dd;
         if (dd === undefined) dd = ds;
         var ts = ds * spSrcB[k], td = dd * spDstB[k];
         var t = ts + (td - ts) * ease;
+        // github#186 -- the cap converges onto a legal rest, late
+        var lock = thickLock(k);
+        var e8 = Math.pow(ease, 8), f8 = Math.pow(1 - ease, 8);
+        var cap = lock + Math.max(0, ts - lock) * f8 + Math.max(0, td - lock) * e8;
         return t > cap ? cap : t;
       };
       // github#186 -- continuous; placeCell caps the row index
@@ -5104,9 +5146,13 @@ function mountVaultGraph(root, data, deps) {
                     depth: { i: depthWalk("i"), o: depthWalk("o") } };
       /** @param {Cell} c */
       var rowsNow = rowsAt;
-      geomHold = (bandGone.i || bandGone.o) ? bandGone : null;
+      geomHold = (bandGone.i || bandGone.o || bandBorn.i || bandBorn.o)
+        ? { i: bandGone.i || bandBorn.i, o: bandGone.o || bandBorn.o } : null;
       colWalk = dict();
       Object.keys(tglDir).forEach(function (g0) {
+        // github#186 -- a ring under the hand keeps its wedges' size
+        var rg = bandLock && bandLock[g0] ? "i" : "o";
+        if (bandGone[rg] || bandBorn[rg]) return;
         var fRamp = tglDir[g0] === "out" ? 1 - pr : pr;
         if (tglMv[g0]) {
           var mvEdge = Math.min(0.45, (FADE_FRAMES * TIME_SCALE * 2) / Math.max(1, span));
@@ -6168,7 +6214,7 @@ function mountVaultGraph(root, data, deps) {
         var r = nodeStyle(id, a);
         if (al < 0.999) {
           r.color = withAlpha(r.color, al);
-          r.size = (r.size || a.size) * (shrinkFade ? al : 0.45 + 0.55 * al);
+          r.size = (r.size || a.size) * (shrinkFade || (handHeld && handHeld[id]) ? al : 0.45 + 0.55 * al);
           if (al < 0.62) { r.label = ""; r.forceLabel = false; r.highlighted = false; }
         }
         if (colWalk) {

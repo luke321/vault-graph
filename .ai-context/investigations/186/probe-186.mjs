@@ -37,6 +37,8 @@ const FILM = has("film");
 const FILM_FMT = arg("film-format", "png");
 const FILM_Q = Number(arg("film-quality", "95"));
 const W = 1200, H = 1000;
+// github#186 -- a denser capture, so a clip can fill 1200px without being scaled up
+const DSF = Number(arg("dsf", "1"));
 if (!HTML_IN || !existsSync(HTML_IN)) throw new Error("pass --html <built page>");
 mkdirSync(OUT, { recursive: true });
 
@@ -87,7 +89,7 @@ const chrome = spawn(findChrome(), [
   "--no-first-run", "--no-default-browser-check", "--disable-extensions",
   "--disable-features=Translate,TranslateUI,CalculateNativeWinOcclusion",
   "--disable-background-timer-throttling", "--disable-renderer-backgrounding",
-  "--disable-backgrounding-occluded-windows", "--hide-scrollbars", "--force-device-scale-factor=1",
+  "--disable-backgrounding-occluded-windows", "--hide-scrollbars", `--force-device-scale-factor=${DSF}`,
   ...(HEADED ? [...leftWindowArgs(W, H), `--app=${url}`] : [`--window-size=${W},${H}`, url]),
 ], { stdio: "ignore" });
 if (focus) void focus.watch(chrome.pid);
@@ -313,7 +315,7 @@ try {
     });
     await page.send("Page.enable");
     await page.send("Page.startScreencast", Object.assign(
-      { format: FILM_FMT, everyNthFrame: 1, maxWidth: W, maxHeight: H },
+      { format: FILM_FMT, everyNthFrame: 1, maxWidth: W * DSF, maxHeight: H * DSF },
       FILM_FMT === "jpeg" ? { quality: FILM_Q } : {}));
     await sleep(700);
   }
@@ -346,7 +348,7 @@ try {
   const restFresh = await page.j(MEASURE);
   const errors = page.errors;
 
-  const out = { label: LABEL, act: ACT, dim: DIM, slow: SLOW, actMs, geom, lastCascade, probeReport,
+  const out = { label: LABEL, act: ACT, dim: DIM, slow: SLOW, dsf: DSF, actMs, geom, lastCascade, probeReport,
                 restA, restB, restFresh, samples, frames: frames.map((f) => ({ file: f.file, t: f.t })), errors };
   writeFileSync(join(OUT, "probe.json"), JSON.stringify(out));
   console.log(`\n${samples.length} frames sampled over ${actMs} ms; cascade said ${lastCascade.frames} frames / ${lastCascade.ms} ms, exit ${lastCascade.exit}`);

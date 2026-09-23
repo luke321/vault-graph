@@ -18,9 +18,12 @@ const ffmpeg = existsSync(join(process.env.LOCALAPPDATA || "", "Microsoft", "Win
   ? join(process.env.LOCALAPPDATA, "Microsoft", "WinGet", "Links", "ffmpeg.exe") : "ffmpeg";
 
 // the crop: a square the height of the stage, centred on the disc
+// github#186 -- geom is in CSS px; a --dsf capture's frames are that many times larger
+const D = P.dsf || 1;
+const OUT = Number(arg("size", "720"));
 const g = P.geom;
-const S = 2 * Math.floor(Math.min(g.stage.h, g.stage.w, 2 * g.cx, 2 * g.cy) / 2);
-const X = Math.max(0, Math.round(g.cx - S / 2)), Y = Math.max(0, Math.round(g.cy - S / 2));
+const S = 2 * Math.floor(D * Math.min(g.stage.h, g.stage.w, 2 * g.cx, 2 * g.cy) / 2);
+const X = Math.max(0, Math.round(D * g.cx - S / 2)), Y = Math.max(0, Math.round(D * g.cy - S / 2));
 console.log(`crop ${S}x${S} at ${X},${Y} (disc centre ${Math.round(g.cx)},${Math.round(g.cy)}, radius ${Math.round(g.rpx)}px at rest)`);
 
 // the clip, at the recorded pace (the page ran at slow x${P.slow}, so the clip shows that)
@@ -36,7 +39,7 @@ const list = join(dir, "frames.txt");
 writeFileSync(list, lines.join("\n") + "\n");
 const clip = join(dir, "clip.mp4");
 let r = spawnSync(ffmpeg, ["-hide_banner", "-loglevel", "error", "-f", "concat", "-safe", "0", "-i", list,
-  "-vf", `crop=${S}:${S}:${X}:${Y},fps=${FPS},scale=720:720,format=yuv420p`,
+  "-vf", `crop=${S}:${S}:${X}:${Y},fps=${FPS},scale=${OUT}:${OUT},format=yuv420p`,
   "-c:v", "libx264", "-preset", arg("preset", "veryfast"), "-crf", arg("crf", "20"),
   "-movflags", "+faststart", "-y", clip], { stdio: "inherit" });
 if (r.status !== 0) throw new Error("ffmpeg clip exited " + r.status);
@@ -54,11 +57,11 @@ for (const pr of PRS) {
   const out = join(dir, `still-pr${String(pr).replace(".", "_")}.png`);
   const label = `pr ${best.pr.toFixed(2)}`;
   r = spawnSync(ffmpeg, ["-hide_banner", "-loglevel", "error", "-i", f.file,
-    "-vf", `crop=${S}:${S}:${X}:${Y},scale=720:720,drawbox=x=0:y=0:w=110:h=30:color=black@0.6:t=fill,drawtext=text='${label}':x=8:y=7:fontsize=18:fontcolor=white`,
+    "-vf", `crop=${S}:${S}:${X}:${Y},scale=${OUT}:${OUT},drawbox=x=0:y=0:w=110:h=30:color=black@0.6:t=fill,drawtext=text='${label}':x=8:y=7:fontsize=18:fontcolor=white`,
     "-frames:v", "1", "-y", out], { stdio: "inherit" });
   if (r.status !== 0) {
     // drawtext needs a font on some builds; fall back to the bare crop
-    r = spawnSync(ffmpeg, ["-hide_banner", "-loglevel", "error", "-i", f.file, "-vf", `crop=${S}:${S}:${X}:${Y},scale=720:720`, "-frames:v", "1", "-y", out], { stdio: "inherit" });
+    r = spawnSync(ffmpeg, ["-hide_banner", "-loglevel", "error", "-i", f.file, "-vf", `crop=${S}:${S}:${X}:${Y},scale=${OUT}:${OUT}`, "-frames:v", "1", "-y", out], { stdio: "inherit" });
   }
   stills.push({ pr, sampledPr: best.pr, file: out, frameT: f.t, sampleT: best.epoch });
   console.log(`still pr ${pr}: sample pr ${best.pr.toFixed(3)} (${((f.t - best.epoch) * 1000).toFixed(0)} ms off) -> ${out}`);

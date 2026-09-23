@@ -786,6 +786,52 @@ where they stand, in place, and the ring simply opens up behind them.
 Measured on the solo act, worst wedge against its own resting fill: **18.7× → 1.0×**. On the tag
 act: **1.75× → 1.08×**.
 
+#### Then the maintainer asked for the ring to go by the clock hand instead
+
+Shrinking in place fixed the inheritance but opened gaps all round the ring, every wedge closing
+on its own. Asked for, on 2026-09-23: *"when we toggle a whole disc off it would be nice if the
+wedges would move together … fan back to 12, one clockwise one anti-clockwise like we do for
+switching from folder to tag."*
+
+**A ring leaving or arriving WHOLE now goes by the same clock hand as the dimension switch**
+(`design/0015`). The ring holds its lattice, its seats and its **full** arcs for the whole cascade
+(`handHeld`: its notes' weights do not fade, so no seat slides; `geomHold` counts them at full, so
+no arc shrinks; `colWalk` leaves its groups alone, so no dot shrinks early). Each note's fade is
+delayed by its **bearing** — `angleSweep` of where it stands, the switch's own conversion — over
+the same window the stagger used, so **the outer ring is swept away clockwise from 12 and the inner
+ring counter-clockwise**, each dot shrinking to nothing where it stands as the hand passes. A ring
+arriving whole is laid at its **destination** lattice from the first frame and drawn in by the
+same hand at its final seats. Measured on the maintainer's vault: solo `04 - Daily Notes` and
+*show all* again, **0 frames outside a rail, 0 pitch steps, 0 movement after landing, worst lit
+note 0.25–0.26 of a pitch** — the easing constant exactly, because nothing in that ring moves at
+all. develop reads 267 frames outside the rail on the same solo, 1.39× at worst.
+
+**SEAM and FILL are not asserted on a ring under the hand.** A half-swept wedge held at full arc is
+wider than its remaining notes, by design: that is what "fades where it stands" means, and the
+dimension switch has the same property (*the old disc is never re-laid-out*). `pack-check.mjs`
+names the ring (`HAND`) rather than counting it.
+
+#### The jump at the END of an animation, and the cap that caused it
+
+Clamping the walked thickness to the static one (to stop a band riding past its rail mid-walk)
+held a band **below its own destination** whenever that rest has few enough notes that its pitch
+widens toward square (github#157), so `rows × pitch` exceeds the static thickness. The walk then
+snapped the difference at landing: soloing `04 - Daily Notes` on the maintainer's vault walked the
+inner ring at pitch **169** to the last frame and landed at **190** — **232 units, ten notes moving
+more than a row**, in the frame after the cascade. Nothing caught it because every criterion read
+only frames *during* the cascade.
+
+**A resting endpoint is legal by definition, so the cap converges onto it:**
+`cap = lock + (ts − lock)⁺ × (1 − ease)⁸ + (td − lock)⁺ × ease⁸`. Mid-walk it is the static
+thickness; at each end it is that end's own. The exponent is measured, not picked: at 4 the cap
+opened early enough to cross the rail on 2 frames soloing `misc` (1.013×), and at 8 it does not.
+A cap derived exactly from the rail — `T ≤ lock × rows / rowCap` — was tried and is **worse**: it
+steps whenever the row index changes (2 pitch steps, 9 rail frames on `misc`) and it ignores the
+outer ring's github#160 inset.
+
+**`SETTLE` in `pack-check.mjs` reads the frame after the landing**: no lit note may move more than
+one unit, radially or tangentially. It is the check `settle() is a no-op` always needed.
+
 ### What is left, and is not this ticket
 
 - **github#132 closes as documented behaviour.** Its 1001 units decompose with no bug in them:

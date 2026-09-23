@@ -16,6 +16,7 @@ const STEP_TOL = Number(arg("step-tol", "0.03"));
 // github#186, decisions/0002 -- the transient cost the row cap is allowed
 const TOUCH_MARGIN = Number(arg("touch-margin", "0.6"));
 const TICK_REL = Number(arg("tick-rel", "0.31"));
+const SETTLE_TOL = Number(arg("settle-tol", "1"));
 const SEAM_MIN_LIT = 3;
 const FILL_MIN_LIT = 8;
 const DOT_OF_PITCH = 11 / 28;
@@ -75,7 +76,13 @@ for (const dir of runDirs(ROOT)) {
     rest[k].areaHi = as.length ? Math.max(...as) : null;
   }
 
-  const fail = { rails: [], rest: [], area: [], seam: [], fill: [], step: [], touch: [], tick: [] };
+  const fail = { rails: [], rest: [], area: [], seam: [], fill: [], step: [], touch: [], tick: [], settle: [] };
+  // github#186, design/0015 -- a ring going or coming WHOLE is held at full under the hand
+  const handRing = {};
+  for (const k of ["i", "o"]) {
+    const la = (P.restA.bands[k] && P.restA.bands[k].lit) || 0, lb = (P.restB.bands[k] && P.restB.bands[k].lit) || 0;
+    handRing[k] = (la > 0) !== (lb > 0);
+  }
   let worst = { over: 0, under: 0, restX: 0, areaX: 0 };
   const seamWorst = new Map();
 
@@ -109,6 +116,7 @@ for (const dir of runDirs(ROOT)) {
     for (const [key, c] of covers(s.wedges)) {
       const a = restCov.A.get(key), b = restCov.B.get(key);
       if (!a && !b) continue;
+      if (handRing[c.band]) continue;
       // github#186
       const gs = s.groups[c.g] && s.groups[c.g].byBand ? s.groups[c.g].byBand[c.band] : null;
       if (!(gs && gs.lit >= SEAM_MIN_LIT)) continue;
@@ -147,6 +155,7 @@ for (const dir of runDirs(ROOT)) {
   for (const s of [first, last]) for (const w of s.wedges || []) keys.add(w.g + "|" + w.band);
   const arcGap = [];
   for (const key of keys) {
+    if (handRing[key.split("|")[1]]) continue;
     const bf = fillOf(first, key), bl = fillOf(last, key);
     const base = Math.max(bf || 0, bl || 0);
     if (!(base > 1e-6)) continue;
@@ -248,15 +257,23 @@ for (const dir of runDirs(ROOT)) {
   }
   const tickSeen = frames.some((s) => s.litStep);
   if (tickSeen && tick.rel > TICK_REL) fail.tick.push(tick);
+  // github#186 -- settle() is a no-op
+  const lastC = P.samples.map((s) => !!s.cascade).lastIndexOf(true);
+  const landed = P.samples[lastC + 1];
+  const ss = (P.probeReport && P.probeReport.settleStep) || {};
+  const settle = { radial: landed && landed.litStep ? Math.round(Math.max(landed.litStep.i || 0, landed.litStep.o || 0)) : null,
+                   tan: Math.round(ss.tan || 0), over: ss.over || 0 };
+  if ((settle.radial || 0) > SETTLE_TOL || settle.tan > SETTLE_TOL) fail.settle.push(settle);
 
   const ok = { rails: !fail.rails.length, rest: !fail.rest.length, area: !fail.area.length,
                seam: !fail.seam.length, fill: !fail.fill.length, step: !fail.step.length,
-               touch: !fail.touch.length, tick: !fail.tick.length };
-  if (!ok.rails || !ok.rest || !ok.area || !ok.seam || !ok.fill || !ok.step || !ok.touch || !ok.tick) failures++;
+               touch: !fail.touch.length, tick: !fail.tick.length, settle: !fail.settle.length };
+  if (!ok.rails || !ok.rest || !ok.area || !ok.seam || !ok.fill || !ok.step || !ok.touch || !ok.tick || !ok.settle) failures++;
   report[basename(dir)] = { label: P.label, frames: frames.length, ok, worst, rest,
                             counts: { rails: fail.rails.length, rest: fail.rest.length, area: fail.area.length,
                                       seam: fail.seam.length, fill: fail.fill.length, step: fail.step.length,
-                                      touch: fail.touch.length, tick: fail.tick.length },
+                                      touch: fail.touch.length, tick: fail.tick.length, settle: fail.settle.length },
+                            settle: settle,
                             touch: touch, tick: tick,
                             railRows: fail.rails.slice(0, 6), seamWorstList, arcGap: arcGap.slice(0, 6),
                             stepList: fail.step.slice(0, 8) };
@@ -302,6 +319,9 @@ for (const dir of runDirs(ROOT)) {
               (tick.pr != null ? ` (${tick.step} units of a ${tick.pitch} pitch, band ${tick.band} @pr ${tick.pr})`
                                : tickSeen ? "" : " -- this run predates litStep, re-take it") +
               `; band edge ${tickEdge.rel.toFixed(2)} of a pitch, reported not asserted`);
+  const handed = ["i", "o"].filter((k) => handRing[k]);
+  if (handed.length) console.log(`   HAND  band ${handed.join(", ")} left or arrived whole under the hand: held at full, SEAM and FILL not asserted there`);
+  console.log(`   SETTLE ${mark(ok.settle)} after the landing: lit notes moved ${settle.radial == null ? "-" : settle.radial} units radially, ${settle.tan} tangentially (${settle.over} over a row)`);
 }
 
 if (!seen) { console.log(`no probe runs under ${ROOT}`); process.exit(1); }
