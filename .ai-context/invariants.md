@@ -821,14 +821,13 @@ step is the surviving ring's ordinary 0.25 of a pitch.
 `pack-check.mjs` names the ring (`HAND`) rather than counting it.
 #### Both rings land together, and no wedge splits or merges mid-walk
 
-**Each ring sweeps its own lap.** The stagger used to sort every changing note on the disc into one
-clockwise sweep, so a ring whose changing wedges sat late in that sweep did its work in the back
-half: soloing `04 - Daily Notes`, the inner ring was half done at pr **0.69** while the outer ring's
-fan was half closed at **0.50**. Asked for: *"can we make inner and outer ring animations
-synchronized so they finish at the same time?"* When both rings change, each ring's notes are now
-re-spread, in their own clockwise order, over the full window, so both start at 12 together and
-land on the same frame — 0.43 against 0.50 at the half, and within 0.04 at 99%. A cascade that
-touches one ring is unchanged.
+**Every wedge takes the whole window, so both rings land together.** The stagger used to sort
+every changing note on the disc into one clockwise sweep, so a ring whose changing wedges sat late
+in that sweep did its work in the back half: soloing `04 - Daily Notes`, the inner ring was half
+done at pr **0.69** while the outer ring's fan was half closed at **0.50**. Asked for: *"can we make
+inner and outer ring animations synchronized so they finish at the same time?"* A first fix gave
+each ring its own clockwise lap; the rings landed together, but a wedge still closed only when the
+lap reached it — see the next section for what that looked like and what replaced it.
 
 **A wedge splits or merges once, at the click** (`cellHold`). Whether a group earns sub-wedges, and
 which sub-piece each note lands in, is decided per frame from the ring's *walked* depth
@@ -869,6 +868,38 @@ constant; what the checks did not count was **how many notes step in the same fr
 Measured on the maintainer's vault after all three: the worst frame on solo `03` went from **431
 notes starting a move to 7**, and no frame on any act starts more than 8 except the click itself
 (hide `03`'s split, held there by design). Worst single step 0.12 of a pitch everywhere.
+#### A wedge closes at one rate, and the intro is not a ring arriving
+
+Two more, from the same review page. *"Solo 04: the inner ring wedges are not closing with
+constant speed, looks like it stutters."* `scratchpad/186/wedgespeed.mjs` records each group's
+`Σ alpha` per frame — the wedge's arc is proportional to it — and reports how much of the walk a
+wedge spends closing and its peak-to-mean rate. On solo `04` the inner ring's wedges closed **one
+after another**: `01 - Projects` in 28% of the walk, `05 - Weekly Reviews` in 38%, and the
+one-note `07 - Yearly Reviews` sat still until the last 13% (the github#67 deal gives a lone note
+the *end* of the stretch). Develop was burstier still (17% and 20%). A wedge that is still, then
+closes, then is still again is the stutter.
+
+- **Every changing wedge now spreads its notes over the whole window**, whatever the cascade: the
+  golden-ratio interleave the fan already used, for every cell of the source plan (leaving notes)
+  and the destination plan (arriving ones). The per-ring re-spread is gone — rings land together
+  because every wedge does.
+- **A small wedge fades slowly.** A 12-frame fade spaced 30 frames apart alternates between one
+  and two notes fading, so a 10-note wedge's rate swung 2:1. Each cell's fade is
+  `clamp(window × 3 / n, FADE_FRAMES, window)` (`fadeOf`), and its delays are spread over what is
+  left, so the last note lands on the last frame and a lone note fades over the whole walk. A wedge
+  of 24 notes or more keeps the standard fade. The github#67 radius deal (a single-cell wedge leaves
+  outside-in, arrives inside-out) keeps its order and takes the same fade and room.
+
+Measured after, solo `04`: every inner wedge closes over **58–73% of the walk at peak/mean
+1.06–1.19** (the outer ring's fan: 83%, 1.02–1.05); the same on solo `03` and on show-all;
+hide `03` unchanged at 74%, 1.00. Rows: no frame starts more than 6 hops except the click.
+
+*"Hmm, the old intro looks better, it also makes more sense since the intro goes over time."* The
+intro is a timeline walk — `cascade({ order: tlRank, totalMs })` — and it starts from an empty
+disc, so both rings read as *arriving whole* and opened as fans from 12, discarding the date order
+the sweep was drawn for. `bandBorn`, the interleave and the frozen plan now all require
+`!opts.order`: a timeline walk fills the disc note by note at each note's rest, as develop does,
+each ring growing from one row.
 #### The jump at the END of an animation, and the cap that caused it
 
 Clamping the walked thickness to the static one (to stop a band riding past its rail mid-walk)

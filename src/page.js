@@ -4574,6 +4574,9 @@ function mountVaultGraph(root, data, deps) {
     };
     /** @type {Record<string, number>} */
     var delay = dict();
+    // github#186
+    /** @type {Record<string, number>} */
+    var fadeOf = dict();
     [ins, outs].forEach(function (set) {
       var w = windowFor(set.length);
       set.forEach(function (id, i) { delay[id] = set.length < 2 ? 0 : w * i / (set.length - 1); });
@@ -4916,56 +4919,38 @@ function mountVaultGraph(root, data, deps) {
       // github#186
       bandGone = { i: bandSrc.i !== undefined && bandDst.i === undefined,
                    o: bandSrc.o !== undefined && bandDst.o === undefined };
-      // github#186, design/0015
-      bandBorn = { i: !opts.hand && bandSrc.i === undefined && bandDst.i !== undefined,
-                       o: !opts.hand && bandSrc.o === undefined && bandDst.o !== undefined };
+      // github#186, design/0015 -- a timeline walk fills the disc in date order, not as a ring
+      var whole = !opts.hand && !rank;
+      bandBorn = { i: whole && bandSrc.i === undefined && bandDst.i !== undefined,
+                   o: whole && bandSrc.o === undefined && bandDst.o !== undefined };
       ["i", "o"].forEach(function (k) {
         // github#186 -- a ring arriving whole starts at its rest
         if (bandBorn[k]) { bandSrc[k] = bandDst[k]; spSrcB[k] = spDstB[k]; return; }
         if (bandSrc[k] === undefined && bandDst[k] !== undefined) { bandSrc[k] = 1; spSrcB[k] = spDstB[k]; return; }
         if (bandGone[k]) { bandDst[k] = bandSrc[k]; spDstB[k] = spSrcB[k]; }
       });
-      // github#186 -- a whole ring: every wedge empties at one rate
-      if (!opts.hand && (bandGone.i || bandGone.o || bandBorn.i || bandBorn.o)) {
-        var lapW = windowFor(Math.max(outs.length, ins.length));
-        ringHeld = dict();
+      // github#186 -- every wedge empties or fills at one rate, over the window
+      if (whole && !opts.cross) {
+        var lapW = windowFor(Math.max(outs.length, ins.length)) + fadeLen;
+        if (bandGone.i || bandGone.o || bandBorn.i || bandBorn.o) ringHeld = dict();
         /** @param {Plan | null} pl @param {{ i: boolean, o: boolean }} which */
         var byCell = function (pl, which) {
           if (!pl) return;
           pl.cells.forEach(function (c) {
-            if (!which[c.inner ? "i" : "o"]) return;
+            if (ringHeld && which[c.inner ? "i" : "o"]) c.list.forEach(function (id) { ringHeld[id] = true; });
             var ids = c.list.filter(function (id) { return !isMove[id] && to[id] !== undefined; });
             var n = ids.length;
-            c.list.forEach(function (id) { ringHeld[id] = true; });
+            // github#186 -- a small wedge fades slowly, so its rate stays even
+            var fadeC = Math.min(lapW, Math.max(fadeLen, lapW * 3 / Math.max(1, n)));
             ids.forEach(function (id, i) {
               // github#186 -- evenly through the wedge, so it thins as it narrows
-              delay[id] = n < 2 ? 0 : lapW * ((i * 0.6180339887) % 1);
+              delay[id] = n < 2 ? 0 : (lapW - fadeC) * ((i * 0.6180339887) % 1);
+              fadeOf[id] = fadeC;
             });
           });
         };
         byCell(a, bandGone);
         byCell(b, bandBorn);
-      }
-      // github#186 -- each ring its own lap, so both land together
-      if (!opts.hand && !opts.cross) {
-        var syncW = windowFor(Math.max(outs.length, ins.length));
-        /** @param {string} id */
-        var ringOfId = function (id) { return bandLock && bandLock[groupOf(id)] ? "i" : "o"; };
-        var busyRing = { i: false, o: false };
-        outs.concat(ins).forEach(function (id) { if (!isMove[id]) busyRing[ringOfId(id)] = true; });
-        if (busyRing.i && busyRing.o) [outs, ins].forEach(function (set) {
-          /** @type {Record<string, string[]>} */
-          var per = { i: [], o: [] };
-          set.forEach(function (id) {
-            if (isMove[id] || (ringHeld && ringHeld[id])) return;
-            per[ringOfId(id)].push(id);
-          });
-          ["i", "o"].forEach(function (k) {
-            var ids = per[k];
-            ids.sort(function (x, y) { return delay[x] - delay[y]; });
-            ids.forEach(function (id, i) { delay[id] = ids.length < 2 ? 0 : syncW * i / (ids.length - 1); });
-          });
-        });
       }
       /** @param {Plan | null} pl @param {((id: string) => number) | null} alphaFn */
       var roomOf = function (pl, alphaFn) {
@@ -5084,7 +5069,6 @@ function mountVaultGraph(root, data, deps) {
     // github#86, design/0015 -- the hand keys every delay on angle; re-dealing a group's
     // github#86 -- by radius would light a seat the fill edge has not reached
     if (!opts.hand) (function () {
-      var stretch = Math.max(1, span - FADE_FRAMES * TIME_SCALE);
       /** @param {string} id @param {boolean} out */
       var radiusOf = function (id, out) {
         var pt = out ? posSrc[id] : finalPos[id];
@@ -5102,8 +5086,12 @@ function mountVaultGraph(root, data, deps) {
           return out ? d : -d;
         });
         if (out) {
+          // github#186 -- a small wedge fades slowly, so its rate stays even
+          var fadeC = Math.min(span, Math.max(fadeLen, span * 3 / Math.max(1, set.length)));
+          var room = Math.max(1, span - fadeC);
           set.forEach(function (id, i) {
-            delay[id] = set.length < 2 ? stretch : stretch * i / (set.length - 1);
+            delay[id] = set.length < 2 ? 0 : room * i / (set.length - 1);
+            fadeOf[id] = fadeC;
           });
         } else {
           var base0 = set.map(function (id) { return delay[id] || 0; }).sort(function (x, y) { return x - y; });
@@ -5148,7 +5136,7 @@ function mountVaultGraph(root, data, deps) {
           if (frame < arriveAt[id] + fadeLen) busy = true;
           continue;
         }
-        var q = (frame - delay[id]) / fadeLen;
+        var q = (frame - delay[id]) / (fadeOf[id] || fadeLen);
         q = q < 0 ? 0 : q > 1 ? 1 : q;
         alpha[id] = from[id] + (to[id] - from[id]) * (q * q * (3 - 2 * q));
         if (q < 1) busy = true;
