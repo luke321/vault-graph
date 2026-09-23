@@ -850,6 +850,17 @@ develop. Both were confirmed with a scratch harness before anything was changed.
   (smallest 1.943 on the maintainer's vault before and after), so the goldens do not move; at
   ratio 4 the smallest dot is its own ceiling, as on develop, rather than a floor it cannot fill.
 
+**A sparse cell's half rounds inward** (asked on 2026-09-23, *"home and career note not in the
+innermost row"*, on the 10k vault under a date range). What he saw was a pooled tail of three
+sparse subfolders laid down the radius as one four-note column, which is the 2026-08-23 rule and
+was kept on being asked; what changed is the centring's tie: `cStart = round((rows − n) / 2)`
+sent a lone note in two rows, or three notes in four, to the *outer* row, because `round(0.5)`
+is 1. It is `floor` now, so an odd gap goes to the hub side. Measured at rest across the five
+fixtures (`scratchpad/186/restdiff.mjs`): shape, spec and tag byte-identical; demo moves 4 notes
+(`00 - Inbox` ×3, `14 - Reading List` ×1) and the 10k 4 (`13 - Someday Maybe` ×2, the vault root
+×2), each one row inward (worst 129.7 units, one inner pitch). Those two goldens are re-recorded
+for it, with the go-ahead, not to make the check pass.
+
 The same review retired the disabled link-weight experiment: `LINK_WEIGHT = 0`, its means and
 cap, `linkWeight()` (which returned 1 everywhere), the `__vg.linkWeight*` getters and the
 suite's division by the mean are gone; a note's plan weight is `alpha`, as decisions/0017 says.

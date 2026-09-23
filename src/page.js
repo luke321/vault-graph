@@ -2667,7 +2667,8 @@ function mountVaultGraph(root, data, deps) {
       var pad = typeof c.pad === "number" ? c.pad : padFor(base, c.bandRef);
       var span = 1 - 2 * pad;
       var centred = bandRows > 0 && nEff > 0.0001 && nEff < bandRows - 0.0001;
-      var cStart = centred ? Math.round((bandRows - nEff) / 2) : 0;
+      // github#186 -- a half rounds INWARD: a lone note sits nearest the hub
+      var cStart = centred ? Math.floor((bandRows - nEff) / 2) : 0;
       // github#186, decisions/0002 -- the top slot's OUTER EDGE may not pass the rail
       // github#186 -- a note's cap up to half a row early: rows dissolve
       /** @param {string} id */
