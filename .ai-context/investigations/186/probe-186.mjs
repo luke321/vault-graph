@@ -69,7 +69,8 @@ function freePort() {
 
 const PORT = await freePort();
 const profile = mkdtempSync(join(tmpdir(), "vg-186-prof-"));
-const url = pathToFileURL(html).href + "?rest&wedges&slow=" + SLOW;
+// github#186 -- --clean films the page as a person sees it, without the wedge overlay
+const url = pathToFileURL(html).href + (has("clean") ? "?rest&slow=" : "?rest&wedges&slow=") + SLOW;
 const HEADED = has("headed");
 // headed: a real window on the free monitor, under the repo's own screen lock and focus guard,
 // exactly as smoke.mjs / probe-room.mjs do -- headless Chrome starves rAF on this page and the
@@ -266,7 +267,7 @@ try {
   await settle();
   await sleep(800);
   console.log("page ready; timeScale " + await page.j("__vg.timeScale") + ", fitCap " + await page.j("__vg.fitCap") +
-              ", wedge overlay " + await page.j("__vg.wedgeDebug(true)"));
+              ", wedge overlay " + await page.j(has("clean") ? "__vg.wedgeDebug(false)" : "__vg.wedgeDebug(true)"));
   await sleep(300);
   await settle();
 

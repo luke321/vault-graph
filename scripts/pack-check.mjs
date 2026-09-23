@@ -77,7 +77,7 @@ for (const dir of runDirs(ROOT)) {
   }
 
   const fail = { rails: [], rest: [], area: [], seam: [], fill: [], step: [], touch: [], tick: [], settle: [] };
-  // github#186, design/0015 -- a ring going or coming WHOLE is held at full under the hand
+  // github#186 -- a ring going or coming WHOLE closes as a fan
   const handRing = {};
   for (const k of ["i", "o"]) {
     const la = (P.restA.bands[k] && P.restA.bands[k].lit) || 0, lb = (P.restB.bands[k] && P.restB.bands[k].lit) || 0;
@@ -320,7 +320,7 @@ for (const dir of runDirs(ROOT)) {
                                : tickSeen ? "" : " -- this run predates litStep, re-take it") +
               `; band edge ${tickEdge.rel.toFixed(2)} of a pitch, reported not asserted`);
   const handed = ["i", "o"].filter((k) => handRing[k]);
-  if (handed.length) console.log(`   HAND  band ${handed.join(", ")} left or arrived whole under the hand: held at full, SEAM and FILL not asserted there`);
+  if (handed.length) console.log(`   HAND  band ${handed.join(", ")} left or arrived whole, closing as a fan: SEAM and FILL not asserted there`);
   console.log(`   SETTLE ${mark(ok.settle)} after the landing: lit notes moved ${settle.radial == null ? "-" : settle.radial} units radially, ${settle.tan} tangentially (${settle.over} over a row)`);
 }
 

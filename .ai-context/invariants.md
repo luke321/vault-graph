@@ -786,31 +786,39 @@ where they stand, in place, and the ring simply opens up behind them.
 Measured on the solo act, worst wedge against its own resting fill: **18.7× → 1.0×**. On the tag
 act: **1.75× → 1.08×**.
 
-#### Then the maintainer asked for the ring to go by the clock hand instead
+#### Then the maintainer asked for the ring to close like a fan
 
 Shrinking in place fixed the inheritance but opened gaps all round the ring, every wedge closing
 on its own. Asked for, on 2026-09-23: *"when we toggle a whole disc off it would be nice if the
-wedges would move together … fan back to 12, one clockwise one anti-clockwise like we do for
-switching from folder to tag."*
+wedges would move together … fan back to 12, one clockwise one anti-clockwise"* — and, when a
+first attempt reused the dimension switch's clock hand (dots erased in place by a sweeping edge):
+*"I wanted wedges that get smaller … not notes just hovering out."*
 
-**A ring leaving or arriving WHOLE now goes by the same clock hand as the dimension switch**
-(`design/0015`). The ring holds its lattice, its seats and its **full** arcs for the whole cascade
-(`handHeld`: its notes' weights do not fade, so no seat slides; `geomHold` counts them at full, so
-no arc shrinks; `colWalk` leaves its groups alone, so no dot shrinks early). Each note's fade is
-delayed by its **bearing** — `angleSweep` of where it stands, the switch's own conversion — over
-the same window the stagger used, so **the outer ring is swept away clockwise from 12 and the inner
-ring counter-clockwise**, each dot shrinking to nothing where it stands as the hand passes. A ring
-arriving whole is laid at its **destination** lattice from the first frame and drawn in by the
-same hand at its final seats. Measured on the maintainer's vault: solo `04 - Daily Notes` and
-*show all* again, **0 frames outside a rail, 0 pitch steps, 0 movement after landing, worst lit
-note 0.25–0.26 of a pitch** — the easing constant exactly, because nothing in that ring moves at
-all. develop reads 267 frames outside the rail on the same solo, 1.39× at worst.
+**A ring leaving or arriving WHOLE now closes, or opens, as a fan.** Three things together:
 
-**SEAM and FILL are not asserted on a ring under the hand.** A half-swept wedge held at full arc is
-wider than its remaining notes, by design: that is what "fades where it stands" means, and the
-dimension switch has the same property (*the old disc is never re-laid-out*). `pack-check.mjs`
-names the ring (`HAND`) rather than counting it.
+- **Its plan is frozen at full weight** (`ringHeld`): `weightOf` gives its notes their full link
+  weight for the whole cascade, so no cell splits or merges and no note changes row. Without this,
+  a sub-wedge that can no longer fill a slot merged into its parent mid-walk and re-seated its
+  notes two rows away — measured 0.51 of a pitch in one frame on the maintainer's vault.
+- **Only the spacing inside a row follows what is lit.** `placeCell` takes a held cell's rows from
+  the frozen weights and its in-row spacing from `alpha × linkWeight`, and the ring is allocated
+  by its lit weight (`c.geom = c.live`), so the wedges stay packed edge to edge and each one closes
+  up as its notes fade.
+- **The whole ring is squeezed toward 12 by its lit fraction** `F = Σ live / Σ full`: every angle
+  `a` in it maps to `from + (a − from) × F` for the outer ring and, offset by `span × (1 − F)`, for
+  the inner — so wedges and the seams between them shrink together, **the outer ring from the
+  clockwise side and the inner from the counter-clockwise side**, both to 12. A ring arriving whole
+  is laid at its destination lattice and opens the same way.
 
+Each wedge empties at the same rate, notes chosen by a golden-ratio interleave over the stagger
+window, so every wedge thins evenly while it narrows and none empties a whole row first. Measured
+on the maintainer's vault, soloing `04 - Daily Notes`: **0 frames outside a rail, 0 pitch steps, 0
+movement after landing, and the leaving ring moves no note radially at all** — the worst lit-note
+step is the surviving ring's ordinary 0.25 of a pitch.
+
+**SEAM and FILL are not asserted on a ring closing as a fan**, and neither is the wedge overlay
+(`?wedges`) truthful during one: both read the wedge boundaries from before the squeeze.
+`pack-check.mjs` names the ring (`HAND`) rather than counting it.
 #### The jump at the END of an animation, and the cap that caused it
 
 Clamping the walked thickness to the static one (to stop a band riding past its rail mid-walk)
