@@ -754,7 +754,7 @@ pr     pitch  lit  rows  rMax   step
 moved twice as far as a row tick should**. It is one frame, one note, 85 units on a 4000-unit disc,
 and about half the 160-unit tick `decisions/0002` accepted before easing existed.
 
-**The fix is to walk `cStart` rather than round it, and it is deferred** — out of github#186's
+**Since the glide cap (RADIAL_STEP_MAX, below) that frame reads 0.12 of a pitch, inside the bar; walking cStart rather than rounding it remains the real fix and is still deferred** — out of github#186's
 scope, which was the four in-flight defects and the packing rule. TICK asserts at 0.31 and this one
 frame reads 0.49, so the assertion names this crossing rather than being relaxed: a blanket
 exclusion would hide the next one.
