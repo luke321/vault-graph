@@ -1408,6 +1408,42 @@ one afternoon, both plausible, both fitting the evidence:
    environment;
 2. `skipIndexation` — probably right, unprovable from that run.
 
+## The suite measures in a 1584x961 frame, and a headless run has to be put in it (github#155)
+
+`--window-size` is an **outer** size, and how much of it reaches the page depends on how much
+the browser keeps for itself. Every fit, clearance and density threshold in `smoke.mjs` was
+tuned in whatever that left over, and until github#155 nobody had written the number down.
+
+Measured 2026-09-21, same Chrome, same machine, same `--window-size=1600,1000`:
+
+| how it opens | `innerWidth` x `innerHeight` | `devicePixelRatio` |
+|---|---|---|
+| placed, `--app=<url>` (the tuned shape) | **1584 x 961** | 1 |
+| `--headless=new`, URL positional | 1584 x **905** | 1 |
+
+56px, 5.8% of the stage height, and it is not cosmetic. *The disc's density follows the notes
+on screen* on the 10k vault measured `diameter/step 0.81` against a `0.80` ceiling and **failed
+three runs out of three** headless, while passing headed every time — a shorter stage means a
+smaller disc, fewer pixels per lattice step, and dots that are relatively fatter.
+
+**The threshold did not move.** github#155's own wording is the rule: *a threshold that has to
+move for the machine is measuring the machine*. So the frame moves instead. `TUNED_VIEWPORT` in
+`scripts/smoke-shape.mjs` names `1584 x 961`, and a headless run reads what it actually got and
+resizes the **window** by the difference (`nextBounds()`, up to two passes).
+
+Two things about that, both deliberate:
+
+- **A real window resize, not `Emulation.setDeviceMetricsOverride`.** Several checks here set
+  their own metrics override and then clear it, and a clear drops back to the *window* — so a
+  baseline installed as an override would silently vanish after the first mobile check and leave
+  everything behind it measuring a different stage.
+- **Self-calibrating, not a hardcoded window size per platform.** Every OS and every Chrome mode
+  keeps a different slice of the window, so the only portable way to land on an inner size is to
+  measure what you got and correct. A Linux runner's chrome height is not this one's.
+
+A headless run that cannot reach `1584 x 961` **says so in its own output** rather than
+quietly reporting numbers that are not comparable to the tuned ones.
+
 ## A leaked Chrome on the debug port makes the suite measure a stale page
 
 `attach(PORT, "")` takes **whatever is listening**, and a killed run can leave its browser

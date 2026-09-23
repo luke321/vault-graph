@@ -50,6 +50,7 @@ numbers stay and the index spells them out.
 | `0013-a-tree-is-gated-once` | A green full suite run stamps the git tree it measured; the hook and `release.ps1` skip a stamped tree, and why not by commit, by time or by `SKIP_SMOKE` (github#93) |
 | `0014-a-pin-names-its-note-not-its-position` | Why a pin is stored by the note's path: an id is a position, and a position only holds while the input order does (github#143) |
 | `0015-mirror-the-explorer-not-its-api` | Why the file-explorer order is parsed from the sortspec text, which subset, and why it falls back loudly (github#71) |
+| `0016-the-suite-runs-headless-but-nothing-requires-it` | Why headless is a flag and never sniffed, why the lane seam is github#113's `clock`, why the screen lock is skipped rather than excepted, and why the soak measures the spread before anything becomes a required status (github#155) |
 
 ### DDRs — `design/`
 
