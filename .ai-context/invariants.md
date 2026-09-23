@@ -819,6 +819,28 @@ step is the surviving ring's ordinary 0.25 of a pitch.
 **SEAM and FILL are not asserted on a ring closing as a fan**, and neither is the wedge overlay
 (`?wedges`) truthful during one: both read the wedge boundaries from before the squeeze.
 `pack-check.mjs` names the ring (`HAND`) rather than counting it.
+#### Both rings land together, and no wedge splits or merges mid-walk
+
+**Each ring sweeps its own lap.** The stagger used to sort every changing note on the disc into one
+clockwise sweep, so a ring whose changing wedges sat late in that sweep did its work in the back
+half: soloing `04 - Daily Notes`, the inner ring was half done at pr **0.69** while the outer ring's
+fan was half closed at **0.50**. Asked for: *"can we make inner and outer ring animations
+synchronized so they finish at the same time?"* When both rings change, each ring's notes are now
+re-spread, in their own clockwise order, over the full window, so both start at 12 together and
+land on the same frame — 0.43 against 0.50 at the half, and within 0.04 at 99%. A cascade that
+touches one ring is unchanged.
+
+**A wedge splits or merges once, at the click** (`cellHold`). Whether a group earns sub-wedges, and
+which sub-piece each note lands in, is decided per frame from the ring's *walked* depth
+(`liveN ≥ pieces × depth`), so it flipped at whatever frame the walk crossed the threshold and every
+note in the wedge re-seated at once. Hiding `03 - Resources` on the maintainer's vault grows
+`02 - Areas` from one 19-note wedge to three (7, 7, 5) as the outer ring goes from six rows to five;
+the flip landed at pr 0.786 and threw a note two rows (93 units, 0.50 of a pitch) — **identically
+on develop**, so it predates this ticket. Each note's cell is now taken from the destination plan
+(the source plan's for a note that is leaving) for the whole cascade. Holding only the yes/no of
+the split was tried first and mis-landed 19 notes at settle, because the sub-piece assignment also
+reads the walked depth. Measured after: worst lit-note step **0.30 of a pitch**, nothing moving
+after the landing.
 #### The jump at the END of an animation, and the cap that caused it
 
 Clamping the walked thickness to the static one (to stop a band riding past its rail mid-walk)

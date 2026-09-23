@@ -2294,7 +2294,9 @@ function mountVaultGraph(root, data, deps) {
         var mA = graph.getNodeAttributes(mId);
         var mSub = fileSub(mId, mA);
         var mBk = bandLock && bandLock[mG] ? "i" : "o";
-        var mKey = splitFor(mG)
+        var held = cellHold ? cellHold[mId] : undefined;
+        var mKey = held !== undefined && held.split(SEP)[0] === mG ? held
+          : splitFor(mG)
           ? mG + SEP + subCellIndex(mG, mSub, liveSub[mG + "/" + mSub] || 0, bandDepth[mBk])
           : mG;
         if (!byCell[mKey]) {
@@ -4385,6 +4387,9 @@ function mountVaultGraph(root, data, deps) {
   var ringHeld = null;
   /** @type {Record<string, boolean> | null} */
   var splitHold = null;
+  // github#186 -- each note's cell, fixed for a cascade
+  /** @type {Record<string, string> | null} */
+  var cellHold = null;
   /** @type {Record<string, Point> | null} */
   var posSrc = null;
   /** @type {Record<string, number>} */
@@ -4452,7 +4457,7 @@ function mountVaultGraph(root, data, deps) {
       WIN.clearTimeout(cascadeRun.guard);
       cascadeRun = null;
     }
-    moveFrom = null; splitHold = null; leftColor = null;
+    moveFrom = null; splitHold = null; cellHold = null; leftColor = null;
     // github#86 -- only the switch's own cascade draws stand-ins
     if (!opts.hand && standIns.length) dropStandIns();
     // github#86 -- the left disc keeps its own colours while it stands
@@ -4758,7 +4763,7 @@ function mountVaultGraph(root, data, deps) {
 
     var settle = function () {
       if (!lastCascade.exit) lastCascade.exit = "settle() called from outside the loop";
-      moveFrom = null; splitHold = null; leftColor = null; shrinkFade = false; ringHeld = null;
+      moveFrom = null; splitHold = null; cellHold = null; leftColor = null; shrinkFade = false; ringHeld = null;
       if (cascadeRun) {
         WIN.cancelAnimationFrame(cascadeRun.raf);
         WIN.clearTimeout(cascadeRun.guard);
@@ -4868,6 +4873,12 @@ function mountVaultGraph(root, data, deps) {
           if (splitHold[g0] === undefined) splitHold[g0] = aCells[g0] > 1;
         });
       }
+      // github#186 -- a wedge splits or merges once, at the click
+      if (!opts.hand) {
+        cellHold = dict();
+        if (a) a.cells.forEach(function (c) { c.list.forEach(function (id) { if (!isMove[id]) cellHold[id] = c.k; }); });
+        if (b) b.cells.forEach(function (c) { c.list.forEach(function (id) { if (!isMove[id]) cellHold[id] = c.k; }); });
+      }
       Object.keys(tglDir).forEach(function (g0) {
         var n0 = tglDir[g0] === "out" ? aCells[g0] : bCells[g0];
         if (n0 !== 1) delete tglDir[g0];
@@ -4922,6 +4933,27 @@ function mountVaultGraph(root, data, deps) {
         };
         byCell(a, bandGone);
         byCell(b, bandBorn);
+      }
+      // github#186 -- each ring its own lap, so both land together
+      if (!opts.hand && !opts.cross) {
+        var syncW = windowFor(Math.max(outs.length, ins.length));
+        /** @param {string} id */
+        var ringOfId = function (id) { return bandLock && bandLock[groupOf(id)] ? "i" : "o"; };
+        var busyRing = { i: false, o: false };
+        outs.concat(ins).forEach(function (id) { if (!isMove[id]) busyRing[ringOfId(id)] = true; });
+        if (busyRing.i && busyRing.o) [outs, ins].forEach(function (set) {
+          /** @type {Record<string, string[]>} */
+          var per = { i: [], o: [] };
+          set.forEach(function (id) {
+            if (isMove[id] || (ringHeld && ringHeld[id])) return;
+            per[ringOfId(id)].push(id);
+          });
+          ["i", "o"].forEach(function (k) {
+            var ids = per[k];
+            ids.sort(function (x, y) { return delay[x] - delay[y]; });
+            ids.forEach(function (id, i) { delay[id] = ids.length < 2 ? 0 : syncW * i / (ids.length - 1); });
+          });
+        });
       }
       /** @param {Plan | null} pl @param {((id: string) => number) | null} alphaFn */
       var roomOf = function (pl, alphaFn) {
@@ -7374,7 +7406,7 @@ function mountVaultGraph(root, data, deps) {
     }
     if (anim) { WIN.cancelAnimationFrame(anim); anim = null; }
     if (animGuard) { WIN.clearTimeout(animGuard); animGuard = null; }
-    moveFrom = null; splitHold = null;
+    moveFrom = null; splitHold = null; cellHold = null;
     pinnedPlan = null; planKeep = null;
     cellNow = null; edgeNow = null; colWalk = null;
     posSrc = null;
@@ -8717,7 +8749,7 @@ function mountVaultGraph(root, data, deps) {
     syncDimUI();
     if (n) {
       // github#86 -- fresh locks for the new dimension, positions untouched
-      moveFrom = null; splitHold = null; pinnedPlan = null; planKeep = null;
+      moveFrom = null; splitHold = null; cellHold = null; pinnedPlan = null; planKeep = null;
       cellNow = null; edgeNow = null; colWalk = null; posSrc = null;
       bandLock = null; geomLock = null;
       // github#86 -- alpha is the cascade's to walk: a note this disc hides and
