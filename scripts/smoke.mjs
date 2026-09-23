@@ -2659,7 +2659,7 @@ const PHONE_PROBE = `(function () {
   }
   var SEL = "#vg-cam button, #vg-mob button, #vg-ov, #vg-heatsrc button, #vg-recent button," +
             " #vg-compact, #vg-rangebox .dt, #vg-rangeall, #vg-years button," +
-            " #vg-dim button, .dimall button, .tools button, .lgr .eye, .lgr .tw, .lg .only";
+            " #vg-dim button, .dimall button, .tools button, select.pick, .lgr .eye, .lgr .tw, .lg .only";
   var small = [], over = [], n = 0;
   Array.prototype.forEach.call(document.querySelectorAll(SEL), function (el) {
     var r = el.getBoundingClientRect();
@@ -6059,6 +6059,69 @@ check("a pin hidden by a filter is skipped, not released", async (p) => {
                        `filtered out (still ${whileHidden} held) -> ${drawnBack} back, ` +
                        `${after} held` };
 }, { on: "all" });
+
+check("the pin links menu shows the pins with the notes linked to any, or to every, pin", async (p) => {
+  const drawn = () => p.j(`(function(){ var out = [];
+    __vg.graph.forEachNode(function(id){ if ((__vg.alpha[id]||0) > 0.5) out.push(id); });
+    return out.sort(); })()`);
+  // the pins, and the notes linked to at least `need` of them, among those drawn with it off
+  const want = (shown, every) => p.j(`(function(){ var shown = ${JSON.stringify(shown)}, set = {}, hits = {};
+    var on = {}; shown.forEach(function(id){ on[id] = 1; });
+    var pins = __vg.pinned();
+    pins.forEach(function(id){
+      if (on[id]) set[id] = 1;
+      // every link, not the drawn share the store keeps once a vault is dense (lazyEdges)
+      (__vg.adj[id] || []).forEach(function(e){ hits[e.o] = (hits[e.o] || 0) + 1; });
+    });
+    var need = ${every ? "pins.length" : "1"};
+    Object.keys(hits).forEach(function(n){ if (on[n] && hits[n] >= need) set[n] = 1; });
+    return Object.keys(set).sort(); })()`);
+  const pick = (v) => p.eval(`(function(){ var s = document.getElementById("vg-pinlinks");
+    s.value = ${JSON.stringify(v)}; s.dispatchEvent(new Event("change")); })(); void 0`);
+  const menu = () => p.j(`(function(){ var s = document.getElementById("vg-pinlinks");
+    return s ? { disabled: s.disabled, value: s.value, on: s.getAttribute("data-on"),
+                 options: Array.prototype.map.call(s.options, function(o){ return o.value; }).join("|") } : null; })()`);
+  await p.eval(`__vg.clearPins(); void 0`);
+  await settle(p);
+  const idle = await menu();
+  const all = await drawn();
+  const ids = await pinN(p, 2);
+  const armed = await menu();
+  await pick("any");
+  await settle(p);
+  const anyOn = await menu();
+  const any2 = await drawn(), any2Want = await want(all, false);
+  // a sparse disc's pitch grows a pin's base; two pins in the hub must still not touch
+  const hubClear = await p.j(`(function(){ var R = __vg.renderer, ids = __vg.pinned(), d = [];
+    ids.forEach(function(id){ var dd = R.getNodeDisplayData(id);
+      if (dd) d.push({ v: R.graphToViewport(__vg.graph.getNodeAttributes(id)), r: R.scaleSize(dd.size) }); });
+    if (d.length < 2) return null;
+    return Math.round(Math.hypot(d[0].v.x - d[1].v.x, d[0].v.y - d[1].v.y) - d[0].r - d[1].r); })()`);
+  await pick("every");
+  await settle(p);
+  const every2 = await drawn(), every2Want = await want(all, true);
+  await p.eval(`__vg.pin(${JSON.stringify(ids[1])}); void 0`);
+  await settle(p);
+  const every1 = await drawn(), every1Want = await want(all, true);
+  await pick("");
+  await settle(p);
+  const back = await drawn();
+  const offMenu = await menu();
+  await p.eval(`__vg.clearPins(); void 0`);
+  await settle(p);
+  const same = (x, y) => x.length === y.length && x.every((v, i) => v === y[i]);
+  const ok = !!idle && idle.disabled && idle.options === "|any|every" &&
+             !!armed && !armed.disabled && armed.on === "0" && !!anyOn && anyOn.on === "1" &&
+             same(any2, any2Want) && any2.length < all.length && hubClear !== null && hubClear > 0 &&
+             same(every2, every2Want) && every2.length <= any2.length && every2.length >= 2 &&
+             same(every1, every1Want) &&
+             back.length === all.length && !!offMenu && offMenu.on === "0";
+  return { ok, detail: `menu idle ${JSON.stringify(idle)}; ${all.length} drawn -> ` +
+                       `any of 2 pins ${any2.length} (want ${any2Want.length}) -> ` +
+                       `every one of 2 ${every2.length} (want ${every2Want.length}) -> ` +
+                       `every one of 1 ${every1.length} (want ${every1Want.length}) -> ` +
+                       `${back.length} off; the two pins clear each other by ${hubClear}px` };
+});
 
 // github#12 -- PIN_MAX in src/page.js; a change there changes this
 const PIN_MAX = 13;

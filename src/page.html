@@ -53,6 +53,15 @@
 
     <div class="block">
       <div class="lbl">View</div>
+      <div class="row" style="margin-bottom:7px">
+        <label class="lbl" style="margin:0" for="vg-pinlinks">Show</label>
+        <select id="vg-pinlinks" class="pick" disabled
+                title="Narrow the disc to the notes pinned to the hub and their links. Pin a note first.">
+          <option value="">Every note</option>
+          <option value="any">Linked to any pin</option>
+          <option value="every">Linked to every pin</option>
+        </select>
+      </div>
       <div class="tools">
         <button id="vg-refresh" title="Back to the defaults, and replay the intro. Clears highlights and the date range, and returns each folder to the visibility set in the gear -- so archives go back to hidden. This page is a snapshot -- its data was baked in when it was built -- so to pick up notes written since, rebuild it with refresh-graph.ps1 (or build-graph.mjs). The Obsidian plugin rebuilds in place instead.">Refresh</button>
         <button id="vg-png">Save PNG</button>

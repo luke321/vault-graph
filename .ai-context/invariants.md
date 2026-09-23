@@ -1932,6 +1932,13 @@ Three numbers hang off the same decision:
   real note of the disc, not against `r0` — both the dot and the note carry a radius the
   hole knows nothing about. At 0.62 the outer edge reached **0.865** of that distance,
   8.8px of clearance, which reads as contact; at 0.50 it reaches **0.714**, ~19px.
+- **Two pins never touch.** `hubSizeMult()` scales a base that grows with the ring pitch,
+  so on a sparse disc -- a narrow filter, or the *Show* menu's pin links -- adjacent pins outgrew the
+  gap between their slots. `HUB_GAP_FILL` = 0.45 caps a pin's radius at that share of the
+  nearest two slots' distance, on screen. On the 10k vault with two busy notes pinned and the
+  toggle on: **38.9 -> 25.1**, clearing each other by ~20px. It leaves the shrink check's
+  numbers unchanged on four fixtures and engages only on the sortspec vault at thirteen
+  (5.89 -> 5.33px). `node scripts/smoke.mjs --only "the pin links menu"`
 - **A pin hidden by a filter is skipped, not released.** Filters are deliberately not
   persisted, so they must not quietly edit something that is. Releasing was the first
   version: hiding a folder dropped every pin in it and unhiding did not bring them back.

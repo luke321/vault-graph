@@ -298,6 +298,17 @@
   .vault-graph .tools button:hover, .vault-graph .mini button:hover, .vault-graph button.btn:hover {
     color: var(--text-1); border-color: var(--border-strong);
   }
+  .vault-graph .mini button:disabled { opacity: .45; cursor: default; }
+  .vault-graph select.pick {
+    font: inherit; font-size: 11px; padding: 4px 6px; cursor: pointer;
+    background: var(--surface-2); color: var(--text-2);
+    border: 1px solid var(--border); border-radius: 6px;
+  }
+  .vault-graph select.pick:hover { color: var(--text-1); border-color: var(--border-strong); }
+  .vault-graph select.pick:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .vault-graph select.pick:disabled { opacity: .45; cursor: default; }
+  /* a narrowed disc is a state to see at a glance, not only in the menu */
+  .vault-graph select.pick[data-on="1"] { color: var(--accent); border-color: var(--accent); }
   /* github#71 -- the segmented Folder order radio borrows the pressed look */
   .vault-graph .mini button[aria-pressed="true"], .vault-graph button.btn[aria-pressed="true"],
   .vault-graph .mini button[role="radio"][aria-checked="true"],
@@ -991,7 +1002,8 @@
     /* github#170, design/0013 */
     .vault-graph .dimseg.dimfull button { min-height: 44px; }
     .vault-graph .dimall button,
-    .vault-graph .tools button { min-height: 44px; min-width: 44px; }
+    .vault-graph .tools button,
+    .vault-graph select.pick { min-height: 44px; min-width: 44px; }
     .vault-graph #vg-q { height: 44px; font-size: 14px; }
     /* github#170, design/0013 */
     .vault-graph .tw, .vault-graph .eye { width: 44px; height: 44px; padding: 0; }

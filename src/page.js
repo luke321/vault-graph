@@ -882,6 +882,7 @@ function mountVaultGraph(root, data, deps) {
    * @property {boolean} curveEdges
    * @property {boolean} logoTwoRing
    * @property {string[]} pinned
+   * @property {string} pinLinks                             "" | "any" | "every"; the pins and their links
    */
   /** @type {State} */
   var state = {
@@ -911,7 +912,8 @@ function mountVaultGraph(root, data, deps) {
     heatEnd: null,
     curveEdges: true,
     logoTwoRing: true,
-    pinned: []
+    pinned: [],
+    pinLinks: ""
   };
 
   // github#72, design/0014
@@ -3148,11 +3150,14 @@ function mountVaultGraph(root, data, deps) {
   }
 
   var hubSep = 0;
+  // the nearest two pins' distance in graph units, or 0 with fewer than two
+  var hubGap = 0;
 
   /** @param {Record<string, Point>} out @param {number} r0 @param {number} scale */
   function hubPlace(out, r0, scale) {
     var ids = pinnedIds();
     hubSep = 0;
+    hubGap = 0;
     if (!ids.length) return;
     var slots = hubSlots(ids.length, r0);
     if (slots.length < 2) {
@@ -3166,6 +3171,7 @@ function mountVaultGraph(root, data, deps) {
         }
       }
       hubSep = best / r0;
+      hubGap = best * scale;
     }
     ids.forEach(function (id, k) {
       if (nodeDrag && nodeDrag.id === id) return;
@@ -3178,6 +3184,18 @@ function mountVaultGraph(root, data, deps) {
     return Math.max(HUB_SIZE_MIN, Math.min(HUB_SIZE_MAX, HUB_SIZE_K * hubSep));
   }
 
+  // a sparse disc's pitch grows the base a pin is scaled from; two pins never touch
+  var HUB_GAP_FILL = 0.45;
+  /** @param {number} size @returns {number} */
+  function hubSizeCap(size) {
+    if (!(hubGap > 0) || !renderer) return size;
+    var a = renderer.graphToViewport({ x: 0, y: 0 });
+    var b = renderer.graphToViewport({ x: hubGap, y: 0 });
+    var cap = HUB_GAP_FILL * Math.hypot(b.x - a.x, b.y - a.y) *
+              (renderer.getCamera().getState().ratio || 1);
+    return cap > 0 && size > cap ? cap : size;
+  }
+
   /** @param {string} id */
   function isPinned(id) { return state.pinned.indexOf(noteOf(id)) >= 0; }
 
@@ -3187,6 +3205,7 @@ function mountVaultGraph(root, data, deps) {
     var i = state.pinned.indexOf(id);
     if (i >= 0) state.pinned.splice(i, 1);
     if (at === undefined || at > state.pinned.length) at = state.pinned.length;
+    linkedSet = null;
     state.pinned.splice(at, 0, id);
     while (state.pinned.length > PIN_MAX) {
       state.pinned.splice(state.pinned[0] === id ? 1 : 0, 1);
@@ -3199,6 +3218,7 @@ function mountVaultGraph(root, data, deps) {
     var i = state.pinned.indexOf(noteOf(id));
     if (i < 0) return false;
     state.pinned.splice(i, 1);
+    linkedSet = null;
     return true;
   }
 
@@ -3206,6 +3226,58 @@ function mountVaultGraph(root, data, deps) {
   function togglePin(id) {
     if (!unpin(id)) pin(id);
     hubChanged(true);
+  }
+
+  // pin links -- the pins, and the notes one link from any of them or from every one
+  var PIN_LINKS = ["", "any", "every"];
+  function linkedOn() { return !!state.pinLinks && state.pinned.length > 0; }
+
+  /** @type {Record<string, boolean> | null} */
+  var linkedSet = null;
+  /** @type {string[] | null} the pin list the set was built from; pin() and unpin() drop it */
+  var linkedKey = null;
+  var linkedMode = "";
+
+  /** @param {string} id */
+  function inLinked(id) {
+    if (!linkedSet || linkedKey !== state.pinned || linkedMode !== state.pinLinks) {
+      /** @type {Record<string, boolean>} */
+      var set = dict();
+      /** @type {Record<string, number>} */
+      var hits = dict();
+      var pins = state.pinned.filter(function (p) { return graph.hasNode(p); });
+      pins.forEach(function (p) {
+        set[p] = true;
+        neighboursOf(p).forEach(function (n) { hits[n] = (hits[n] || 0) + 1; });
+      });
+      var need = state.pinLinks === "every" ? pins.length : 1;
+      Object.keys(hits).forEach(function (n) { if (hits[n] >= need) set[n] = true; });
+      linkedSet = set;
+      linkedKey = state.pinned;
+      linkedMode = state.pinLinks;
+    }
+    return !!linkedSet[noteOf(id)];
+  }
+
+  invalidatesOnData("pin links set", function () { linkedSet = null; });
+
+  function syncLinkedUI() {
+    var sel = /** @type {HTMLSelectElement | null} */ ($("pinlinks"));
+    if (!sel) return;
+    sel.value = state.pinLinks;
+    sel.disabled = !state.pinned.length && !state.pinLinks;
+    sel.setAttribute("data-on", linkedOn() ? "1" : "0");
+  }
+
+  /** @param {string} mode "" | "any" | "every" */
+  function setPinLinks(mode) {
+    if (PIN_LINKS.indexOf(mode) < 0) mode = "";
+    if (state.pinLinks === mode) return;
+    var was = linkedOn(), wasMode = state.pinLinks;
+    state.pinLinks = mode;
+    syncLinkedUI();
+    // "any" and "every" agree on a single pin, but the cascade is cheap to skip only when off
+    if (linkedOn() !== was || (was && wasMode !== mode)) cascade(null, { colToggle: true });
   }
 
   function releaseHover() {
@@ -3217,9 +3289,12 @@ function mountVaultGraph(root, data, deps) {
   function hubChanged(animate) {
     releaseHover();
     pinnedPlan = null;
-    applyLayout(!!animate, releaseHover);
+    // pin links -- a pin changes what is shown, so the disc re-packs as for any filter
+    if (state.pinLinks) cascade(releaseHover, { colToggle: true });
+    else applyLayout(!!animate, releaseHover);
     placeLogo();
     persistPins();
+    syncLinkedUI();
   }
 
   // github#143, decisions/0014 -- version 1 was the runtime ids, which move
@@ -5437,6 +5512,7 @@ function mountVaultGraph(root, data, deps) {
     if (leaving[id] && !oldWorld) return false;
     var a = graph.getNodeAttributes(id);
     if (isHidden(groupOf(id))) return false;
+    if (linkedOn() && !inLinked(id)) return false;
     var d = fileDirs(id, a);
     if (!d.length) {
       if (state.hiddenSub[fileGroup(id, a) + "/"]) return false;
@@ -6179,7 +6255,7 @@ function mountVaultGraph(root, data, deps) {
         var base = a.size || 4;
         r.size = dotPx(base, id) * ((r.size === undefined ? base : r.size) / base);
         if (isPinned(id)) {
-          r.size = (r.size || a.size) * hubSizeMult();
+          r.size = hubSizeCap((r.size || a.size) * hubSizeMult());
           r.zIndex = 3;
         }
         return r;
@@ -7501,6 +7577,8 @@ function mountVaultGraph(root, data, deps) {
     state.hoverDay = null;
     // github#70, decisions/0009
     setRecent(null);
+    state.pinLinks = "";
+    syncLinkedUI();
     recentT = 0;
     recentDim = recentSet;
     state.until = null;
@@ -7591,6 +7669,9 @@ function mountVaultGraph(root, data, deps) {
     if ($("pan")) $("pan").onclick = function () { storedPan = !panEnabled; setPan(storedPan, true); };
     // github#79
     if ($("ov")) $("ov").onclick = fit;
+    var pinLinksSel = /** @type {HTMLSelectElement | null} */ ($("pinlinks"));
+    if (pinLinksSel) pinLinksSel.onchange = function () { setPinLinks(pinLinksSel.value); };
+    syncLinkedUI();
     setPan(panEnabled, false);
     // github#23
     if ($("compact")) $("compact").onclick = function () { setCompactAxis(!compactAxis, true); };
@@ -11894,6 +11975,7 @@ function mountVaultGraph(root, data, deps) {
                     pin: /** @param {string} id */ function (id) { togglePin(id); },
                     pinned: function () { return state.pinned.slice(); },
                     clearPins: function () { state.pinned = []; hubChanged(false); },
+                    pinLinks: /** @param {string} mode */ function (mode) { setPinLinks(mode); },
                     // github#143 -- what the host is handed, and what it reads back
                     pinsStored: function () { return pinsStored(); },
                     pinsFrom: /** @param {unknown} want */ function (want) { return pinsFrom(want); },
