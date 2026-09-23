@@ -876,8 +876,9 @@ verbatim from `probe-bone.js`) before anything changed.
 - **The tag vault's bone is a knife-edge, not a size**: six hub-capped notes in one row, 7.16 px
   on both builds; the branch's median gap is 64° against develop's 63° (a 42° seam against 45°),
   and the check rounds diameter/step to two decimals — **0.14 against 0.15**. Nothing was tuned
-  to cross it; whether the check's floor or the seam reservation is the thing to move is the
-  maintainer's call.
+  to cross it; asked, the maintainer left it (2026-09-23): no product change for a 0.4% margin,
+  and the check's floor is the thing to revisit. **The full suite therefore shows the tag vault
+  at 66/67 on this branch, by decision**, until that floor is.
 
 **A sparse cell's half rounds inward** (asked on 2026-09-23, *"home and career note not in the
 innermost row"*, on the 10k vault under a date range). What he saw was a pooled tail of three
