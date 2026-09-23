@@ -830,6 +830,30 @@ And **`STEP` is now per frame**: the samples carry the cascade's frame counter, 
 of seven frames had read as a 7% "step" on the demo's solo `03`, where the inner ring's pitch
 climbs 215 → 238 at 0.4% a frame as the github#186 thickness cap lets go late in the walk.
 
+#### Two regressions a static review found, both measured before they were believed
+
+A second reviewer read the branch cold on 2026-09-23 and named two regressions against
+develop. Both were confirmed with a scratch harness before anything was changed.
+
+- **A toggled wedge's progress was measured against every note in the folder, lit or not.**
+  `tglFull` summed all of a group's notes, while the live weight above it only ever counts the
+  lit ones, so with half a folder outside the date range the ramp started at 0.5. Measured on the
+  maintainer's vault with 9 of `02 - Areas`' 19 notes in range (`scratchpad/186/denom.mjs`):
+  hiding it snapped the wedge **from 6.21° to 2.90° at the click**, and showing it again walked
+  to 2.90° and **jumped to 6.21° on landing**. The full is now the notes taking part, at their lit
+  endpoint (`alpha` for a departure, `to` for an arrival): 6.21° → 0 and 0 → 6.21°, no step at
+  either end. The nine measured acts toggle whole folders, so none of them could see it.
+- **The pixel floor scaled with the zoom.** `dotPx` returns a renderer size, which the renderer
+  divides by the camera ratio; `DOT_MIN_PX` was applied to that size unscaled, so the 1.5 px floor
+  was 6 px zoomed in four times and 0.375 px zoomed out. Develop scaled the floor by the ratio
+  (`lo = min(hi, DOT_MIN_PX × cam)`), and does again. At ratio 1 every dot is byte-identical
+  (smallest 1.943 on the maintainer's vault before and after), so the goldens do not move; at
+  ratio 4 the smallest dot is its own ceiling, as on develop, rather than a floor it cannot fill.
+
+The same review retired the disabled link-weight experiment: `LINK_WEIGHT = 0`, its means and
+cap, `linkWeight()` (which returned 1 everywhere), the `__vg.linkWeight*` getters and the
+suite's division by the mean are gone; a note's plan weight is `alpha`, as decisions/0017 says.
+
 **`SEAM` and `FILL` fail on develop and on every build of this branch, and never reached a
 report until 2026-09-23 evening**: the run scripts printed only the six criteria under review.
 They assert that no wedge is ever under its resting coverage while a cascade walks — develop's

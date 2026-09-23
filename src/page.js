@@ -943,22 +943,11 @@ function mountVaultGraph(root, data, deps) {
   var NODE_MIN = 2.6, NODE_MAX = 11, NODE_ORPHAN = 6;
 
   // github#186, decisions/0017
-  var LINK_WEIGHT = 0;
-  var LINK_CAP = 2.5;
-  var sizeMean = 1;
-  var linkMean = 1;
-  // github#186, decisions/0017
   var DOT_CLEAR = 0.92;
   /** @param {string} id */
   function dotRamp(id) {
     var t = ((graph.getNodeAttribute(id, "size") || NODE_MIN) - NODE_MIN) / (NODE_MAX - NODE_MIN);
     return t > 1 ? 1 : t < 0 ? 0 : t;
-  }
-  /** @param {string} id */
-  function linkWeight(id) {
-    if (!(LINK_WEIGHT > 0) || !(sizeMean > 1e-9)) return 1;
-    var w = 1 + LINK_WEIGHT * (graph.getNodeAttribute(id, "size") || NODE_MIN) / sizeMean;
-    return w > LINK_CAP ? LINK_CAP : w;
   }
 
   // github#58
@@ -1040,16 +1029,6 @@ function mountVaultGraph(root, data, deps) {
         ? NODE_ORPHAN
         : Math.min(NODE_MAX, NODE_MIN + 1.55 * Math.sqrt(a.deg)));
     });
-    // github#186 -- decisions/0017
-    (function () {
-      var sum = 0, n = 0;
-      graph.forEachNode(function (id, a) { sum += a.size || NODE_MIN; n++; });
-      sizeMean = n > 0 ? sum / n : 1;
-      var lw = 0;
-      graph.forEachNode(function (id) { lw += linkWeight(id); });
-      linkMean = n > 0 ? lw / n : 1;
-    })();
-
     // github#58
     graph.nodes().slice().sort(function (a, b) {
       return graph.getNodeAttribute(b, "deg") - graph.getNodeAttribute(a, "deg") ||
@@ -2172,7 +2151,7 @@ function mountVaultGraph(root, data, deps) {
    * @returns {Plan | null}
    */
   function buildWedgePlan(onlyVisible, weightOf, rowsOf, spIn) {
-    var W = weightOf || linkWeight;
+    var W = weightOf || function () { return 1; };
     var all = order[state.dim] || [];
     // github#86 -- D-3: both dimensions nest, so the split is not gated
     var SEP = "\u0000";
@@ -2229,7 +2208,7 @@ function mountVaultGraph(root, data, deps) {
       }
       for (var mi = 0, mn = members.length; mi < mn; mi++) {
         // github#186
-        var gm = memberG[mi], wm = W(members[mi]) / linkWeight(members[mi]);
+        var gm = memberG[mi], wm = W(members[mi]);
         liveG[gm] = (liveG[gm] || 0) + (wm > 1 ? 1 : wm < 0 ? 0 : wm);
       }
     } else graph.forEachNode(function (id) {
@@ -2243,7 +2222,7 @@ function mountVaultGraph(root, data, deps) {
       memberG.push(g0);
       if (skel && onlyVisible && !willShow(id)) leaving.push(id);
       // github#186
-      var wv = W(id) / linkWeight(id);
+      var wv = W(id);
       liveG[g0] = (liveG[g0] || 0) + (wv > 1 ? 1 : wv < 0 ? 0 : wv);
       liveN[g0] = (liveN[g0] || 0) + 1;
       var sk = g0 + "/" + fileSub(id);
@@ -2306,7 +2285,7 @@ function mountVaultGraph(root, data, deps) {
       var pw = W(mId);
       planTotal += pw; planCount++;
       // github#186, decisions/0006
-      var pv = pw / linkWeight(mId);
+      var pv = pw;
       if (colWalk && colWalk[mG] !== undefined) pv = colWalk[mG].f;
       if (!(presMax[mG] >= pv)) presMax[mG] = pv;
     }
@@ -2702,10 +2681,9 @@ function mountVaultGraph(root, data, deps) {
       var recs = [];
       var acc = 0;
       seq.forEach(function (id, idx) {
-        var wr = W(id), wt = wTot;
-        var w = wr;
-        var s = wt > 0.0001 ? (acc + wr / 2) / wt : 0.5;
-        acc += wr;
+        var w = W(id);
+        var s = wTot > 0.0001 ? (acc + w / 2) / wTot : 0.5;
+        acc += w;
         s = s < 0 ? 0 : s > 1 ? 1 : s;
 
         var target = s * total;
@@ -2804,7 +2782,7 @@ function mountVaultGraph(root, data, deps) {
     // decisions/0001
     var plan = planIn || pinnedPlan ||
       buildWedgePlan(true,
-                     function (id) { return (alpha[id] || 0) * linkWeight(id); });
+                     function (id) { return alpha[id] || 0; });
     if (!plan) {
       if (!pinnedIds().length) return null;
       /** @type {Record<string, Point>} */
@@ -2953,7 +2931,7 @@ function mountVaultGraph(root, data, deps) {
         /** @type {Record<string, number>} */
         var rowN = dict();
         c.slots.forEach(function (sl) {
-          var w = (alpha[sl.id] || 0) * linkWeight(sl.id);
+          var w = alpha[sl.id] || 0;
           if (w > 0) rowN[sl.r] = (rowN[sl.r] || 0) + w;
         });
         // github#186, decisions/0017 -- one ceiling per cell, never per note
@@ -2990,7 +2968,7 @@ function mountVaultGraph(root, data, deps) {
           // github#186, decisions/0017
           var pitU = pitchUnits(bk);
           var rowWs = rowN[sl.r] > 1e-9 ? rowN[sl.r] : 0;
-          var wSelf = (alpha[sl.id] || 0) * linkWeight(sl.id);
+          var wSelf = alpha[sl.id] || 0;
           /** @param {number} shr */
           var slotOf = function (shr) { return arc * rGraph * (shr > 0 ? shr : 1); };
           var own = slotOf(rowWs > 1e-9 && wSelf > 0 ? wSelf / rowWs : 1);
@@ -4669,12 +4647,12 @@ function mountVaultGraph(root, data, deps) {
       Object.keys(inN).forEach(function (g0) {
         if (!outN[g0] && !(startN[g0] || 0)) { tglDir[g0] = "in"; tglN[g0] = inN[g0]; if (mvInN[g0]) tglMv[g0] = true; }
       });
-      // github#186
+      // github#186 -- the full is the notes taking part, at their lit endpoint
       graph.forEachNode(function (id) {
         var g0 = groupOf(id);
         if (tglDir[g0] === undefined || tglMv[g0]) return;
         (tglIds[g0] || (tglIds[g0] = [])).push(id);
-        tglFull[g0] = (tglFull[g0] || 0) + linkWeight(id);
+        tglFull[g0] = (tglFull[g0] || 0) + (tglDir[g0] === "out" ? (alpha[id] || 0) : (to[id] || 0));
       });
     })();
 
@@ -4757,7 +4735,7 @@ function mountVaultGraph(root, data, deps) {
     };
 
     /** @param {string} id */
-    var weightOf = function (id) { return (alpha[id] || 0) * linkWeight(id); };
+    var weightOf = function (id) { return alpha[id] || 0; };
 
     /** @type {Record<string, boolean>} */
     var wasPresent = dict();
@@ -4801,7 +4779,7 @@ function mountVaultGraph(root, data, deps) {
       var save = planKeep;
       planKeep = presentFn;
       var p = buildWedgePlan(true,
-                             function (id) { return presentFn(id) ? linkWeight(id) : 0; });
+                             function (id) { return presentFn(id) ? 1 : 0; });
       planKeep = save;
       return p;
     };
@@ -5158,8 +5136,6 @@ function mountVaultGraph(root, data, deps) {
       };
       var spNow = { i: spWalk("i"), o: spWalk("o"),
                     depth: { i: depthWalk("i"), o: depthWalk("o") } };
-      /** @param {Cell} c */
-      var rowsNow = rowsAt;
       colWalk = dict();
       Object.keys(tglDir).forEach(function (g0) {
         var fRamp = tglDir[g0] === "out" ? 1 - pr : pr;
@@ -5213,10 +5189,10 @@ function mountVaultGraph(root, data, deps) {
       } else {
         // github#19
         planSkel = cascadeRun ? cascadeRun.skel : null;
-        try { plan = buildWedgePlan(ovAfter, weightOf, rowsNow, spNow); }
+        try { plan = buildWedgePlan(ovAfter, weightOf, rowsAt, spNow); }
         finally { planSkel = null; }
         if (planSkelCheck && cascadeRun && cascadeRun.skel) {
-          var why = planDiff(plan, buildWedgePlan(ovAfter, weightOf, rowsNow, spNow));
+          var why = planDiff(plan, buildWedgePlan(ovAfter, weightOf, rowsAt, spNow));
           lastCascade.skelFrames++;
           if (why) { lastCascade.skelMismatch++; if (!lastCascade.skelFirst) lastCascade.skelFirst = why; }
         }
@@ -6028,12 +6004,13 @@ function mountVaultGraph(root, data, deps) {
       pitch: pitchUnits(bk),
       edgeCap: edgeCap[id], hubRow0: !!hubRow0[id],
       walking: { room: false, cell: !!cellNow, edge: !!edgeNow },
-      out: dotPx(size, id), ceil: lastDotHi, floorPx: DOT_MIN_PX,
+      out: dotPx(size, id), ceil: lastDotHi, floorPx: lastDotLo,
       fit: fitNow ? fitNow[id] : undefined
     };
   }
 
   var lastDotHi = 0;
+  var lastDotLo = 0;
   /** @param {number} size @param {string} [id] */
   function dotPx(size, id) {
     var isIn = id !== undefined && bandLock && !!bandLock[groupOf(id)];
@@ -6049,10 +6026,12 @@ function mountVaultGraph(root, data, deps) {
     if (mine !== undefined && mine > 0 && mine * DOT_CLEAR < u) u = mine * DOT_CLEAR;
     var hi = DOT_OF_PITCH * u * pxPerUnit;
     lastDotHi = hi;
+    // github#107 -- a floor in SCREEN px; the renderer divides by the ratio
+    var lo = Math.min(hi, DOT_MIN_PX * (renderer ? renderer.getCamera().getState().ratio || 1 : 1));
+    lastDotLo = lo;
     // github#107, github#186 -- the floor IS the ramp's bottom, so no dot is pinned to it
-    var v = hi <= DOT_MIN_PX ? hi
-          : DOT_MIN_PX + (hi - DOT_MIN_PX) * (id !== undefined ? dotRamp(id) : 1);
-    if (v < DOT_MIN_PX) v = DOT_MIN_PX;
+    var v = lo + (hi - lo) * (id !== undefined ? dotRamp(id) : 1);
+    if (v < lo) v = lo;
     var capU = edgeCap[id];
     if (capU !== undefined && capU > 0 && v > capU * pxPerUnit) v = capU * pxPerUnit;
     // github#41, design/0011
@@ -11718,10 +11697,6 @@ function mountVaultGraph(root, data, deps) {
                     set fitShare(v) { FIT_SHARE = +v > 0 ? +v : 0.46; fitVer = -1; renderer.refresh({ skipIndexation: true }); },
                     get timeScale() { return TIME_SCALE; },
                     set timeScale(v) { TIME_SCALE = +v > 0 ? +v : 1; },
-                    // github#186
-                    linkWeightOf: linkWeight,
-                    get linkWeight() { return LINK_WEIGHT; },
-                    get linkWeightMean() { return linkMean; },
                     get radialEase() { return RADIAL_EASE; },
                     set radialEase(v) { RADIAL_EASE = +v > 0 ? Math.min(1, +v) : 1; },
                     get subGap() { return SUB_GAP; },

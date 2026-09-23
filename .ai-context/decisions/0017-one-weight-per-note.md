@@ -204,8 +204,8 @@ its ring is the weight's job. That split is already in the code and costs nothin
 ## Verify
 
 ```javascript
-__vg.dotWhy(id)           // ramp is the link ramp again; cellRoom is the note's own step
-__vg.debugDump().dots     // linkRatio, and the solved ramp
+__vg.dotWhy(id)           // out, ceil, floorPx; cellRoom is the note's own step
+__vg.debugDump().dots     // ofPitch, minPx, clear, overPitch
 ```
 
 ```bash

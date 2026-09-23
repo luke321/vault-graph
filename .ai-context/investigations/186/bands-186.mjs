@@ -68,7 +68,7 @@ const TABLE = `(function () {
     wTot[bk] += c.wsum;
   });
   var sizes = [], wl = [];
-  __vg.graph.forEachNode(function (id, a) { sizes.push(a.size); wl.push(__vg.linkWeightOf(id)); });
+  __vg.graph.forEachNode(function (id, a) { sizes.push(a.size); wl.push(1); });
   var mean = function (v) { return v.length ? v.reduce(function (x, y) { return x + y; }, 0) / v.length : 0; };
   return { dim: __vg.state.dim,
            plan: plan ? { r0: plan.r0, rOuter: plan.rOuter, maxR: plan.maxR, sp: plan.sp,

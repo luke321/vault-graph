@@ -171,7 +171,7 @@ const SAMPLER = `(function () {
       var gb = gg.byBand[bk] || (gg.byBand[bk] = { n: 0, alphaSum: 0, wsum: 0, lit: 0, rMin: Infinity, rMax: 0 });
       gb.n++; gb.alphaSum += al;
       // github#186 -- the arc follows WEIGHT, so the fill measure has to as well
-      gb.wsum += al * (__vg.linkWeightOf ? __vg.linkWeightOf(id) : 1);
+      gb.wsum += al;
       if (al > 0.5) { var rb = Math.hypot(a.x, a.y); gb.lit++;
                       if (rb < gb.rMin) gb.rMin = rb; if (rb > gb.rMax) gb.rMax = rb; }
       var b = bands[bk];
