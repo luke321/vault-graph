@@ -77,11 +77,11 @@ for (const dir of runDirs(ROOT)) {
   }
 
   const fail = { rails: [], rest: [], area: [], seam: [], fill: [], step: [], touch: [], tick: [], settle: [] };
-  // github#186 -- a ring going or coming WHOLE closes as a fan
-  const handRing = {};
+  // github#186 -- a ring going or coming WHOLE thins to one row
+  const wholeRing = {};
   for (const k of ["i", "o"]) {
     const la = (P.restA.bands[k] && P.restA.bands[k].lit) || 0, lb = (P.restB.bands[k] && P.restB.bands[k].lit) || 0;
-    handRing[k] = (la > 0) !== (lb > 0);
+    wholeRing[k] = (la > 0) !== (lb > 0);
   }
   let worst = { over: 0, under: 0, restX: 0, areaX: 0 };
   const seamWorst = new Map();
@@ -116,7 +116,6 @@ for (const dir of runDirs(ROOT)) {
     for (const [key, c] of covers(s.wedges)) {
       const a = restCov.A.get(key), b = restCov.B.get(key);
       if (!a && !b) continue;
-      if (handRing[c.band]) continue;
       // github#186
       const gs = s.groups[c.g] && s.groups[c.g].byBand ? s.groups[c.g].byBand[c.band] : null;
       if (!(gs && gs.lit >= SEAM_MIN_LIT)) continue;
@@ -155,7 +154,6 @@ for (const dir of runDirs(ROOT)) {
   for (const s of [first, last]) for (const w of s.wedges || []) keys.add(w.g + "|" + w.band);
   const arcGap = [];
   for (const key of keys) {
-    if (handRing[key.split("|")[1]]) continue;
     const bf = fillOf(first, key), bl = fillOf(last, key);
     const base = Math.max(bf || 0, bl || 0);
     if (!(base > 1e-6)) continue;
@@ -182,7 +180,9 @@ for (const dir of runDirs(ROOT)) {
       const a = frames[k - 1].pitch && frames[k - 1].pitch[b];
       const c = frames[k].pitch && frames[k].pitch[b];
       if (!(a > 1e-6) || !(c > 1e-6)) continue;
-      const rel = Math.abs(c - a) / a;
+      // github#186 -- per frame: a capture gap is not a step
+      const gap = Math.max(1, (frames[k].frame - frames[k - 1].frame) || 1);
+      const rel = Math.abs(c - a) / a / gap;
       // github#186 -- an emptied band's fallback moves no note
       const lit = frames[k].bands && frames[k].bands[b] ? frames[k].bands[b].lit : 0;
       if (rel > STEP_TOL && lit > 0) {
@@ -223,7 +223,7 @@ for (const dir of runDirs(ROOT)) {
       const rows = rowsLive(s, b);
       const at = { x, pr: r3(s.pr), band: b, rMax: r2(bd.rMax), pitch: r2(pitch), lit: bd.lit, rows: rows };
       if (x < touchThin.x) touchThin = at;
-      if (!populated(s, b)) continue;
+      if (!populated(s, b) || wholeRing[b]) continue;
       const bar = 1 - TOUCH_MARGIN / rows;
       const slack = x - bar;
       if (slack < touch.x - touch.bar) touch = { ...at, bar: r3(bar), slack: r3(slack) };
@@ -314,13 +314,13 @@ for (const dir of runDirs(ROOT)) {
   console.log(`   TOUCH ${mark(ok.touch)} top slot edge ${touch.x.toFixed(3)} of the rail against a ${touch.bar.toFixed(3)} bar` +
               (touch.pr != null ? ` (band ${touch.band}, ${touch.rows} live rows, ${touch.lit} lit @pr ${touch.pr})` : " -- never populated enough to assert") +
               (isFinite(touchThin.x) && touchThin.x < touch.x
-                ? `; ${touchThin.x.toFixed(3)} while thinner (${touchThin.lit} lit @pr ${touchThin.pr}), not asserted` : ""));
+                ? `; ${touchThin.x.toFixed(3)} while thinner (${touchThin.lit} lit @pr ${touchThin.pr}), not asserted` : "") +
+              (["i", "o"].some((k) => wholeRing[k])
+                ? `; band ${["i", "o"].filter((k) => wholeRing[k]).join(", ")} goes or comes whole, thinning to one row: not asserted` : ""));
   console.log(`   TICK  ${mark(ok.tick)} worst lit-note step ${tick.rel.toFixed(2)} of a pitch` +
               (tick.pr != null ? ` (${tick.step} units of a ${tick.pitch} pitch, band ${tick.band} @pr ${tick.pr})`
                                : tickSeen ? "" : " -- this run predates litStep, re-take it") +
               `; band edge ${tickEdge.rel.toFixed(2)} of a pitch, reported not asserted`);
-  const handed = ["i", "o"].filter((k) => handRing[k]);
-  if (handed.length) console.log(`   HAND  band ${handed.join(", ")} left or arrived whole, closing as a fan: SEAM and FILL not asserted there`);
   console.log(`   SETTLE ${mark(ok.settle)} after the landing: lit notes moved ${settle.radial == null ? "-" : settle.radial} units radially, ${settle.tan} tangentially (${settle.over} over a row)`);
 }
 

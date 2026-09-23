@@ -794,31 +794,47 @@ wedges would move together … fan back to 12, one clockwise one anti-clockwise"
 first attempt reused the dimension switch's clock hand (dots erased in place by a sweeping edge):
 *"I wanted wedges that get smaller … not notes just hovering out."*
 
-**A ring leaving or arriving WHOLE now closes, or opens, as a fan.** Three things together:
+A fan was built and measured first: the ring's plan frozen at full weight (`ringHeld`), its wedges
+packed by what was lit and the whole ring squeezed toward 12 by its lit fraction, the outer ring
+from the clockwise side and the inner from the counter-clockwise side, with `SEAM` and `FILL`
+exempted for it (`HAND`). It moved no note radially and passed every criterion. Shown beside a
+third variant the same afternoon, it lost: *"that looks fantastic, dynamic, aligns with the intro, I
+think we solved it"* — and the fan, its freeze, its squeeze and its exemption were removed the
+same day rather than kept behind a flag. The history is in git at `7e70bff` and before.
 
-- **Its plan is frozen at full weight** (`ringHeld`): `weightOf` gives its notes their full link
-  weight for the whole cascade, so no cell splits or merges and no note changes row. Without this,
-  a sub-wedge that can no longer fill a slot merged into its parent mid-walk and re-seated its
-  notes two rows away — measured 0.51 of a pitch in one frame on the maintainer's vault.
-- **Only the spacing inside a row follows what is lit.** `placeCell` takes a held cell's rows from
-  the frozen weights and its in-row spacing from `alpha × linkWeight`, and the ring is allocated
-  by its lit weight (`c.geom = c.live`), so the wedges stay packed edge to edge and each one closes
-  up as its notes fade.
-- **The whole ring is squeezed toward 12 by its lit fraction** `F = Σ live / Σ full`: every angle
-  `a` in it maps to `from + (a − from) × F` for the outer ring and, offset by `span × (1 − F)`, for
-  the inner — so wedges and the seams between them shrink together, **the outer ring from the
-  clockwise side and the inner from the counter-clockwise side**, both to 12. A ring arriving whole
-  is laid at its destination lattice and opens the same way.
+**A ring leaving or arriving WHOLE now goes the way the intro does, or its reverse.** The intro
+is a timeline walk: each ring grows from **one row**, notes arriving at their rest in date order,
+wedges growing in place as the ring thickens. So:
 
-Each wedge empties at the same rate, notes chosen by a golden-ratio interleave over the stagger
-window, so every wedge thins evenly while it narrows and none empties a whole row first. Measured
-on the maintainer's vault, soloing `04 - Daily Notes`: **0 frames outside a rail, 0 pitch steps, 0
-movement after landing, and the leaving ring moves no note radially at all** — the worst lit-note
-step is the surviving ring's ordinary 0.25 of a pitch.
+- **A ring leaving whole thins to one row** — `bandDst[k] = 1`, its pitch held at the source's —
+  and its notes leave **newest first**, spread evenly over the window; each wedge closes in place
+  as the ring re-packs, until the ring is one row and gone. The github#67 radius deal (a
+  single-cell wedge leaves outside-in) is skipped for a ring going by date, as is the per-cell
+  interleave; the ring's own order is the order.
+- **A ring arriving whole grows from one row** — the pre-existing `bandSrc[k] = 1` path the intro
+  already took — and its notes arrive **oldest first**. Nothing is held: `weightOf` is plain
+  `alpha × linkWeight` for every cascade again.
+- **Under the hand** (the dimension switch) a ring going whole keeps its rows, as before: the hand
+  erases dots in place and does not thin a ring.
 
-**SEAM and FILL are not asserted on a ring closing as a fan**, and neither is the wedge overlay
-(`?wedges`) truthful during one: both read the wedge boundaries from before the squeeze.
-`pack-check.mjs` names the ring (`HAND`) rather than counting it.
+Measured on the maintainer's vault, soloing `04 - Daily Notes`: **0 frames outside a rail, 0 pitch
+steps, 0 movement after landing, worst lit-note step 0.12 of a pitch**. The one cost against the
+fan, and accepted: the emptying ring re-packs while it thins, so up to **11 notes start a hop in
+one frame** (10 such frames) where the fan started none; no hop exceeds 0.125 of a pitch. Showing
+the ring again reads the same way in reverse: `03 - Resources` first, `02 - Areas` last.
+
+Two consequences for `pack-check.mjs`. **`TOUCH` is not asserted on a ring going or coming
+whole** — a ring thinning to one row leaves its rail by design, so *the rings' thickness is
+locked* holds for a ring being filtered inside, not for one leaving; the report names the band.
+And **`STEP` is now per frame**: the samples carry the cascade's frame counter, and a capture gap
+of seven frames had read as a 7% "step" on the demo's solo `03`, where the inner ring's pitch
+climbs 215 → 238 at 0.4% a frame as the github#186 thickness cap lets go late in the walk.
+
+**`SEAM` and `FILL` fail on develop and on every build of this branch, and never reached a
+report until 2026-09-23 evening**: the run scripts printed only the six criteria under review.
+They assert that no wedge is ever under its resting coverage while a cascade walks — develop's
+own solo `03` on the demo vault fails that on 816 wedge-frames. They are not gates; whether they
+describe a real target or a wrong measure is an open question, and nothing was tuned to pass them.
 #### Both rings land together, and no wedge splits or merges mid-walk
 
 **Every wedge takes the whole window, so both rings land together.** The stagger used to sort
@@ -879,10 +895,10 @@ one-note `07 - Yearly Reviews` sat still until the last 13% (the github#67 deal 
 the *end* of the stretch). Develop was burstier still (17% and 20%). A wedge that is still, then
 closes, then is still again is the stutter.
 
-- **Every changing wedge now spreads its notes over the whole window**, whatever the cascade: the
-  golden-ratio interleave the fan already used, for every cell of the source plan (leaving notes)
-  and the destination plan (arriving ones). The per-ring re-spread is gone — rings land together
-  because every wedge does.
+- **Every changing wedge now spreads its notes over the whole window**, whatever the cascade: a
+  golden-ratio interleave through every cell of the source plan (leaving notes) and the
+  destination plan (arriving ones). The per-ring re-spread is gone — rings land together because
+  every wedge does. A ring going or coming whole is the exception: it goes by date (above).
 - **A small wedge fades slowly.** A 12-frame fade spaced 30 frames apart alternates between one
   and two notes fading, so a 10-note wedge's rate swung 2:1. Each cell's fade is
   `clamp(window × 3 / n, FADE_FRAMES, window)` (`fadeOf`), and its delays are spread over what is

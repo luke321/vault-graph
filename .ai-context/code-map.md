@@ -4,7 +4,7 @@
 declarations of the files too large to read top to bottom, with line numbers. Open the
 range, not the file. Stale when `node scripts/code-map.mjs --check` fails.
 
-## `src/page.js` — 12210 lines, 38 sections, 509 functions
+## `src/page.js` — 12148 lines, 38 sections, 509 functions
 
 ### Sections
 
@@ -16,38 +16,38 @@ range, not the file. Stale when `node scripts/code-map.mjs --check` fails.
 | 924–1089 | graph + base layout |
 | 1090–1849 | grouping |
 | 1850–1853 | positions per group |
-| 1854–2089 | rings layout |
-| 2090–3150 | minimum arc |
-| 3151–3337 | the pinned hub |
-| 3338–3370 | demo automation + debug API — stripped from the plugin build |
-| 3371–3458 | the pinned hub (continued) |
-| 3459–3667 | timeline |
-| 3668–4159 | the recent lens |
-| 4160–5332 | reveal cascade |
-| 5333–5543 | animation |
-| 5544–5612 | render |
-| 5613–5659 | hover tween |
-| 5660–5868 | highlight ramp |
-| 5869–6034 | logo |
-| 6035–6151 | node sizes |
-| 6152–6186 | edge width |
-| 6187–6206 | edge curvature |
-| 6207–6465 | github#144, a lost context |
-| 6466–6467 | group labels |
-| 6468–6486 | tooltip |
-| 6487–6575 | detail panel |
-| 6576–6760 | github#131, design/0019 -- two readings |
-| 6761–8280 | UI |
-| 8281–9047 | overview |
-| 9048–9631 | heatmap |
-| 9632–9635 | demo |
-| 9636–10284 | date range |
-| 10285–11052 | demo automation + debug API — stripped from the plugin build |
-| 11053–11054 | date range (continued) |
-| 11055–11271 | live rebuild |
-| 11272–11603 | go |
-| 11604–12140 | demo automation + debug API — stripped from the plugin build |
-| 12141–12210 | go (continued) |
+| 1854–2087 | rings layout |
+| 2088–3108 | minimum arc |
+| 3109–3295 | the pinned hub |
+| 3296–3328 | demo automation + debug API — stripped from the plugin build |
+| 3329–3416 | the pinned hub (continued) |
+| 3417–3625 | timeline |
+| 3626–4117 | the recent lens |
+| 4118–5270 | reveal cascade |
+| 5271–5481 | animation |
+| 5482–5550 | render |
+| 5551–5597 | hover tween |
+| 5598–5806 | highlight ramp |
+| 5807–5972 | logo |
+| 5973–6089 | node sizes |
+| 6090–6124 | edge width |
+| 6125–6144 | edge curvature |
+| 6145–6403 | github#144, a lost context |
+| 6404–6405 | group labels |
+| 6406–6424 | tooltip |
+| 6425–6513 | detail panel |
+| 6514–6698 | github#131, design/0019 -- two readings |
+| 6699–8218 | UI |
+| 8219–8985 | overview |
+| 8986–9569 | heatmap |
+| 9570–9573 | demo |
+| 9574–10222 | date range |
+| 10223–10990 | demo automation + debug API — stripped from the plugin build |
+| 10991–10992 | date range (continued) |
+| 10993–11209 | live rebuild |
+| 11210–11541 | go |
+| 11542–12078 | demo automation + debug API — stripped from the plugin build |
+| 12079–12148 | go (continued) |
 
 ### Functions
 
@@ -145,423 +145,423 @@ range, not the file. Stale when `node scripts/code-map.mjs --check` fails.
 | 1811 | `buildUnlinkedTint` |
 | 1831 | `nodeColor` |
 | 1845 | `isHidden` |
-| 1975 | `sweepAngle` |
-| 1977 | `angleSweep` |
-| 1983 | `isOrphan` |
-| 1992 | `gapScale` |
-| 2000 | `seamFall` |
-| 2007 | `seamAngle` |
-| 2018 | `gapFor` |
-| 2026 | `edgeSweep` |
-| 2034 | `arcSpan` |
-| 2035 | `arcFrom` |
-| 2038 | `seamAt` |
-| 2051 | `allocateBand` |
-| 2062 | · `presOf` |
-| 2121 | · · `floorFor` |
-| 2176 | `buildWedgePlan` |
-| 2258 | · `depthOfBand` |
-| 2277 | · `splitFor` |
-| 2390 | · `share` |
-| 2420 | · `bandDensity` |
-| 2432 | · `rowsNeeded` |
-| 2442 | · `padFor` |
-| 2447 | · `usableRef` |
-| 2483 | · · `countOf` |
-| 2485 | · · `applyAssign` |
-| 2501 | · · `spanFor` |
-| 2533 | · · `evaluate` |
-| 2575 | · · `cost` |
-| 2611 | · `heldBand` |
-| 2619 | · `solveBand` |
-| 2682 | · `placeCell` |
-| 2701 | · · `rowCapOf` |
-| 2783 | · `depthOf` |
-| 2803 | `ringsLayout` |
-| 3036 | · · · · `slotOf` |
-| 3040 | · · · · `side` |
-| 3158 | `hubRing` |
-| 3166 | `hubSlots` |
-| 3184 | `pinnedIds` |
-| 3193 | `hubPlace` |
-| 3217 | `hubSizeMult` |
-| 3222 | `isPinned` |
-| 3225 | `pin` |
-| 3238 | `unpin` |
-| 3246 | `togglePin` |
-| 3251 | `releaseHover` |
-| 3257 | `hubChanged` |
-| 3271 | `pinsStored` |
-| 3283 | `pinsFrom` |
-| 3302 | `persistPins` |
-| 3307 | `seedPins` |
-| 3333 | `inHubHole` |
-| 3339 | `demoCursorAt` |
-| 3347 | `demoCursorHide` |
-| 3352 | `demoTapAt` |
-| 3373 | `placeHubDrop` |
-| 3388 | `makeFrameCoalescer` |
-| 3392 | · `flush` |
-| 3404 | `bindNodeDrag` |
-| 3445 | · `drop` |
-| 3492 | `buildTimeline` |
-| 3513 | `buildDateSpan` |
-| 3592 | `rangeLabel` |
-| 3597 | · `iso` |
-| 3602 | `setRangeMs` |
-| 3610 | `rangeChrome` |
-| 3625 | `applyRange` |
-| 3631 | `localKey` |
-| 3656 | `heatDateOf` |
-| 3661 | `isMarkedDay` |
-| 3691 | `recentWindow` |
-| 3716 | `setRecent` |
-| 3738 | `inRecent` |
-| 3744 | `setHeatSource` |
-| 3760 | `isHighlighted` |
-| 3777 | `cellNoteFrac` |
-| 3802 | `wedgeEdges` |
-| 3819 | · · `sw` |
-| 3833 | · · `drawnFrac` |
-| 3841 | · · `noteFrac` |
-| 3860 | · · · `deg` |
-| 3877 | `drawWedgeDebug` |
-| 3917 | · `vp` |
-| 3921 | · `tint` |
-| 3956 | · · · · `mid` |
-| 3983 | · · · `angOf` |
-| 3999 | · · · `chord` |
-| 4016 | · · · `sweepA` |
-| 4018 | · · · `sweepB` |
-| 4027 | · · · · `mid` |
-| 4052 | `drawWedgeLegend` |
-| 4092 | `wedgeDebug` |
-| 4111 | `hoverHighlight` |
-| 4125 | `ownsWedge` |
-| 4133 | `isPushed` |
-| 4141 | `willShow` |
-| 4145 | `timeFactor` |
-| 4165 | `present` |
-| 4166 | `syncAlpha` |
-| 4171 | `clearAlpha` |
-| 4176 | `toRgb` |
-| 4190 | `withAlpha` |
-| 4219 | `reducedMotion` |
-| 4224 | `NOW` |
-| 4255 | `freshSkel` |
-| 4261 | `planDiff` |
-| 4320 | `measureFit` |
-| 4385 | `setFitCap` |
-| 4422 | `traceTag` |
-| 4424 | `tracePut` |
-| 4434 | `pinPlan` |
-| 4462 | `cascade` |
-| 4565 | · `clockwise` |
-| 4573 | · `windowFor` |
-| 4624 | · · `bearingNow` |
-| 4631 | · · `sweepAt` |
-| 4633 | · · `innerOld` |
-| 4638 | · · `innerNew` |
-| 4642 | · · `handAt` |
-| 4644 | · · `fillAt` |
-| 4783 | · `settle` |
-| 4811 | · `weightOf` |
-| 4856 | · `staticPlan` |
-| 4866 | · `inWorld` |
-| 4878 | · · `cellsOfG` |
-| 4909 | · · `deepen` |
-| 4914 | · · `record` |
-| 4946 | · · · `byCell` |
-| 4976 | · · `roomOf` |
-| 5024 | · · · `takeCap` |
-| 5039 | · · `pairUp` |
-| 5050 | · · · `take` |
-| 5075 | · `watchdog` |
-| 5093 | · · `radiusOf` |
-| 5170 | · · `rowsAt` |
-| 5180 | · · `depthWalk` |
-| 5190 | · · `thickLock` |
-| 5197 | · · `thickAt` |
-| 5213 | · · `spWalk` |
-| 5243 | · · `walkPair` |
-| 5380 | `probeSample` |
-| 5446 | `assignPositions` |
-| 5456 | `animateTo` |
-| 5480 | · `settle` |
-| 5490 | · `tweenDog` |
-| 5531 | `applyLayout` |
-| 5552 | `neighboursOf` |
-| 5564 | `syncLazyEdges` |
-| 5583 | `pathKey` |
-| 5593 | `visible` |
-| 5622 | `mixHex` |
-| 5636 | `hoverAmount` |
-| 5641 | `hoverTo` |
-| 5667 | `hlSignature` |
-| 5677 | `hlWalk` |
-| 5709 | `hlSync` |
-| 5718 | `focusSet` |
-| 5734 | `edgeCurveGeom` |
-| 5744 | `drawFocusWeb` |
-| 5789 | `drawHover` |
-| 5820 | `nodeStyle` |
-| 5884 | `ringColors` |
-| 5895 | `outerPresence` |
-| 5907 | `mixColorArrays` |
-| 5920 | `bandColors` |
-| 5949 | `ringColorsSmooth` |
-| 5967 | `ringGradient` |
-| 6000 | `placeLogo` |
-| 6067 | `measureSizeScale` |
-| 6080 | `dotWhy` |
-| 6100 | `dotPx` |
-| 6141 | `syncSizeScale` |
-| 6148 | `refreshSizeScale` |
-| 6161 | `measureEdgeMult` |
-| 6168 | `syncEdgeMult` |
-| 6176 | `capEdge` |
-| 6182 | `edgePx` |
-| 6191 | `discR` |
-| 6196 | `curvatureFor` |
-| 6216 | `glostCount` |
-| 6219 | `glostPaint` |
-| 6231 | `glostStopTimer` |
-| 6236 | `glostLost` |
-| 6252 | `glostRestored` |
-| 6265 | `makeRenderer` |
-| 6361 | · · `onDocUp` |
-| 6394 | · `onResize` |
-| 6445 | · `onRightClickStage` |
-| 6457 | · `onDoubleClick` |
-| 6471 | `showTip` |
-| 6485 | `hideTip` |
-| 6502 | `goTo` |
-| 6512 | `trailBackTo` |
-| 6521 | `trailLabel` |
-| 6526 | `trailOff` |
-| 6528 | `trailRefresh` |
-| 6539 | `trailHTML` |
-| 6542 | · `crumb` |
-| 6583 | `cardHome` |
-| 6591 | `setReading` |
-| 6613 | · `onReadMq` |
-| 6635 | `phonePanWanted` |
-| 6642 | `syncPhonePan` |
-| 6655 | `syncPhoneBand` |
-| 6664 | `syncPhoneLayout` |
-| 6670 | `select` |
-| 6755 | `centerOn` |
-| 6767 | `swatchFill` |
-| 6778 | `swatchTitle` |
-| 6791 | `rowTitle` |
-| 6803 | `clearPreviewCache` |
-| 6807 | `swatchPreviewHTML` |
-| 6836 | `countText` |
-| 6852 | `barBasis` |
-| 6865 | `barShare` |
-| 6875 | `shareText` |
-| 6907 | `lgrHTML` |
-| 6919 | `buildLegend` |
-| 6938 | · `eyeBtn` |
-| 6944 | · `subtree` |
-| 7022 | · `rowFor` |
-| 7071 | · · · `srow` |
-| 7137 | · `each` |
-| 7142 | · `onlySubs` |
-| 7152 | · `onlyUnder` |
-| 7255 | · · `hoverKeys` |
-| 7332 | `seedHidden` |
-| 7339 | `collapseAll` |
-| 7356 | `takeGeom` |
-| 7388 | `ringsIn` |
-| 7397 | `regroup` |
-| 7426 | `hardRelayout` |
-| 7462 | `buildSearch` |
-| 7501 | · `onDocMove` |
-| 7506 | · `onVisibility` |
-| 7534 | `stopPlay` |
-| 7553 | `timelineFrame` |
-| 7561 | `playTimeline` |
-| 7593 | `sweepTo` |
-| 7608 | `endSweep` |
-| 7615 | `resetView` |
-| 7646 | `syncDimCounts` |
-| 7659 | `dimGroupCount` |
-| 7661 | `syncDimUI` |
-| 7671 | `buildTools` |
-| 7734 | · · `done` |
-| 7740 | · · `save` |
-| 7821 | · `closeCtxMenu` |
-| 7833 | · `ctxOutside` |
-| 7838 | · `ctxKey` |
-| 7845 | · `swatchButtonsHTML` |
-| 7873 | · `openCtxMenu` |
-| 7922 | · `showCtxMenu` |
-| 7942 | · `slowOf` |
-| 7948 | · `openDevMenu` |
-| 8010 | · `pickColor` |
-| 8025 | · `pickSubColors` |
-| 8042 | · `pickVisible` |
-| 8063 | · `subfolderRows` |
-| 8127 | · `folderOrderHTML` |
-| 8132 | · `buildOptions` |
-| 8155 | · `orderFor` |
-| 8157 | · `slotFor` |
-| 8159 | · `autoSlotFor` |
-| 8161 | · `subsFor` |
-| 8163 | · `subCountFor` |
-| 8165 | · `subShadeFor` |
-| 8167 | · `slotColor` |
-| 8169 | · `buildSettings` |
-| 8229 | `fitRatio` |
-| 8241 | `fitTarget` |
-| 8247 | `atFit` |
-| 8257 | `fit` |
-| 8261 | · `landed` |
-| 8271 | `zoomBy` |
-| 8315 | `ovSize` |
-| 8326 | `ovFootprint` |
-| 8339 | `ovCropped` |
-| 8346 | `ovSectors` |
-| 8371 | `ovShape` |
-| 8391 | `ovSigOf` |
-| 8410 | `ovDirWord` |
-| 8417 | `ovLabel` |
-| 8430 | `ovPaint` |
-| 8497 | `ovShow` |
-| 8513 | `ovSync` |
-| 8529 | `syncCanvasTop` |
-| 8537 | `afterPanel` |
-| 8545 | `glidePanels` |
-| 8561 | `setSheet` |
-| 8576 | `setBand` |
-| 8597 | `setPan` |
-| 8615 | `setCompactAxis` |
-| 8628 | `folderOrderNote` |
-| 8639 | `setFolderOrder` |
-| 8677 | `stashDimNav` |
-| 8686 | `restoreDimNav` |
-| 8700 | `keepRings` |
-| 8712 | `setDim` |
-| 8803 | `setUnlinkedByFolder` |
-| 8827 | `setUnlinkedTintByFolder` |
-| 8840 | `paintBars` |
-| 8862 | `barWalkStart` |
-| 8883 | `barWalkTick` |
-| 8895 | `barWalkEnd` |
-| 8903 | `setRootInOrder` |
-| 8917 | `setCountBars` |
-| 8930 | `setDevTools` |
-| 8943 | `setTimeScale` |
-| 8945 | `savePng` |
-| 8962 | · · · `layer` |
-| 9027 | `buildStats` |
-| 9040 | `esc` |
-| 9101 | `heatParse` |
-| 9106 | `heatKey` |
-| 9109 | · `p` |
-| 9113 | `heatMonday` |
-| 9118 | `heatGeom` |
-| 9129 | `heatBuild` |
-| 9176 | · `q` |
-| 9250 | `heatLevel` |
-| 9261 | `heatTile` |
-| 9281 | `heatCompute` |
-| 9295 | `heatDraw` |
-| 9404 | `heatRect` |
-| 9416 | `heatHit` |
-| 9429 | `heatShowTip` |
-| 9470 | `recentCount` |
-| 9498 | `syncRecentUI` |
-| 9538 | `buildRecentUI` |
-| 9575 | `buildHeatmapUI` |
-| 9588 | · `setHover` |
-| 9611 | · `reflow` |
-| 9687 | `drawDateUI` |
-| 9693 | `buildYears` |
-| 9741 | `fitYears` |
-| 9774 | `fitCanvas` |
-| 9785 | `dateRamp` |
-| 9790 | `scrubColor` |
-| 9793 | `rgbaHex` |
-| 9800 | `measureRibbon` |
-| 9810 | `ribbonW` |
-| 9815 | `ribbonXLinear` |
-| 9821 | `ribbonMsLinear` |
-| 9826 | `monthIndexOfMs` |
-| 9833 | `monthEndMs` |
-| 9838 | `segSpanMs` |
-| 9844 | `ribbonXCompact` |
-| 9852 | `ribbonMsCompact` |
-| 9864 | `ribbonX` |
-| 9868 | `ribbonMs` |
-| 9873 | `brushEnds` |
-| 9880 | `winEndNow` |
-| 9886 | `paintMonthBar` |
-| 9893 | `drawRibbon` |
-| 9971 | `rebuildBand` |
-| 9981 | `winTrack` |
-| 9988 | `inWinTrack` |
-| 9991 | `winSpan` |
-| 9994 | `clampWinEnd` |
-| 10002 | `winEndCentredAtPx` |
-| 10015 | `brushHit` |
-| 10027 | `showRTip` |
-| 10038 | `hideRTip` |
-| 10041 | `isoDay` |
-| 10043 | `winLabel` |
-| 10048 | `buildDateUI` |
-| 10062 | · `fieldMs` |
-| 10078 | · `xOf` |
-| 10080 | · `yOf` |
-| 10163 | · `endDrag` |
-| 10187 | · `hoverYear` |
-| 10195 | · · `yrOf` |
-| 10214 | · `onSlot` |
-| 10233 | `wantWedgeDebug` |
-| 10241 | `restOn` |
-| 10245 | `rowArcOn` |
-| 10281 | `demoOn` |
-| 10287 | `demoBusy` |
-| 10292 | `demoGroup` |
-| 10328 | `demoFind` |
-| 10478 | `demoNoteRect` |
-| 10516 | `demoBigInnerNote` |
-| 10559 | `demoCellRect` |
-| 10571 | `demoPoint` |
-| 10581 | `demoRibbonPoint` |
-| 10598 | `demoWhere` |
-| 10617 | `demoMode` |
-| 10928 | `demoFullStoryboard` |
-| 10943 | `demoLive` |
-| 10999 | `demoArrivalRect` |
-| 11012 | `demoAct` |
-| 11075 | `dragOwnsFrames` |
-| 11080 | `liveBusy` |
-| 11082 | `liveWhy` |
-| 11088 | `placeKeyOf` |
-| 11099 | `linkWeights` |
-| 11120 | `diffData` |
-| 11139 | · `missing` |
-| 11155 | `applyData` |
-| 11251 | `setWords` |
-| 11258 | `drainLive` |
-| 11266 | `stopDrain` |
-| 11389 | · · · · · · · · · · `rows` |
-| 11417 | · · · · · · · · · · `sample` |
-| 11430 | · · · · · · · · · · `at` |
-| 11438 | · · · · · · · · · · `dist` |
-| 11515 | · · · · · · · · · · `r3` |
-| 11516 | · · · · · · · · · · `r3n` |
-| 11518 | · · · · · · · · · · `bandStat` |
-| 11543 | · · · · · · · · · · · `q` |
-| 11718 | · · · · · · · · · · `take` |
-| 11727 | · · · · · · · · · · `r2` |
-| 11797 | · · · · · · · · · · `W` |
-| 11805 | · · · · · · · · · · `rows` |
-| 11855 | · · · · · · · · · · `r3` |
-| 11990 | · · · · · · · · · · `byPath` |
-| 12179 | `destroy` |
+| 1973 | `sweepAngle` |
+| 1975 | `angleSweep` |
+| 1981 | `isOrphan` |
+| 1990 | `gapScale` |
+| 1998 | `seamFall` |
+| 2005 | `seamAngle` |
+| 2016 | `gapFor` |
+| 2024 | `edgeSweep` |
+| 2032 | `arcSpan` |
+| 2033 | `arcFrom` |
+| 2036 | `seamAt` |
+| 2049 | `allocateBand` |
+| 2060 | · `presOf` |
+| 2119 | · · `floorFor` |
+| 2174 | `buildWedgePlan` |
+| 2256 | · `depthOfBand` |
+| 2275 | · `splitFor` |
+| 2388 | · `share` |
+| 2418 | · `bandDensity` |
+| 2430 | · `rowsNeeded` |
+| 2440 | · `padFor` |
+| 2445 | · `usableRef` |
+| 2481 | · · `countOf` |
+| 2483 | · · `applyAssign` |
+| 2499 | · · `spanFor` |
+| 2531 | · · `evaluate` |
+| 2573 | · · `cost` |
+| 2609 | · `heldBand` |
+| 2617 | · `solveBand` |
+| 2680 | · `placeCell` |
+| 2695 | · · `rowCapOf` |
+| 2776 | · `depthOf` |
+| 2796 | `ringsLayout` |
+| 2995 | · · · · `slotOf` |
+| 2999 | · · · · `side` |
+| 3116 | `hubRing` |
+| 3124 | `hubSlots` |
+| 3142 | `pinnedIds` |
+| 3151 | `hubPlace` |
+| 3175 | `hubSizeMult` |
+| 3180 | `isPinned` |
+| 3183 | `pin` |
+| 3196 | `unpin` |
+| 3204 | `togglePin` |
+| 3209 | `releaseHover` |
+| 3215 | `hubChanged` |
+| 3229 | `pinsStored` |
+| 3241 | `pinsFrom` |
+| 3260 | `persistPins` |
+| 3265 | `seedPins` |
+| 3291 | `inHubHole` |
+| 3297 | `demoCursorAt` |
+| 3305 | `demoCursorHide` |
+| 3310 | `demoTapAt` |
+| 3331 | `placeHubDrop` |
+| 3346 | `makeFrameCoalescer` |
+| 3350 | · `flush` |
+| 3362 | `bindNodeDrag` |
+| 3403 | · `drop` |
+| 3450 | `buildTimeline` |
+| 3471 | `buildDateSpan` |
+| 3550 | `rangeLabel` |
+| 3555 | · `iso` |
+| 3560 | `setRangeMs` |
+| 3568 | `rangeChrome` |
+| 3583 | `applyRange` |
+| 3589 | `localKey` |
+| 3614 | `heatDateOf` |
+| 3619 | `isMarkedDay` |
+| 3649 | `recentWindow` |
+| 3674 | `setRecent` |
+| 3696 | `inRecent` |
+| 3702 | `setHeatSource` |
+| 3718 | `isHighlighted` |
+| 3735 | `cellNoteFrac` |
+| 3760 | `wedgeEdges` |
+| 3777 | · · `sw` |
+| 3791 | · · `drawnFrac` |
+| 3799 | · · `noteFrac` |
+| 3818 | · · · `deg` |
+| 3835 | `drawWedgeDebug` |
+| 3875 | · `vp` |
+| 3879 | · `tint` |
+| 3914 | · · · · `mid` |
+| 3941 | · · · `angOf` |
+| 3957 | · · · `chord` |
+| 3974 | · · · `sweepA` |
+| 3976 | · · · `sweepB` |
+| 3985 | · · · · `mid` |
+| 4010 | `drawWedgeLegend` |
+| 4050 | `wedgeDebug` |
+| 4069 | `hoverHighlight` |
+| 4083 | `ownsWedge` |
+| 4091 | `isPushed` |
+| 4099 | `willShow` |
+| 4103 | `timeFactor` |
+| 4123 | `present` |
+| 4124 | `syncAlpha` |
+| 4129 | `clearAlpha` |
+| 4134 | `toRgb` |
+| 4148 | `withAlpha` |
+| 4177 | `reducedMotion` |
+| 4182 | `NOW` |
+| 4213 | `freshSkel` |
+| 4219 | `planDiff` |
+| 4276 | `measureFit` |
+| 4341 | `setFitCap` |
+| 4372 | `traceTag` |
+| 4374 | `tracePut` |
+| 4384 | `pinPlan` |
+| 4412 | `cascade` |
+| 4514 | · `clockwise` |
+| 4522 | · `windowFor` |
+| 4573 | · · `bearingNow` |
+| 4580 | · · `sweepAt` |
+| 4582 | · · `innerOld` |
+| 4587 | · · `innerNew` |
+| 4591 | · · `handAt` |
+| 4593 | · · `fillAt` |
+| 4732 | · `settle` |
+| 4760 | · `weightOf` |
+| 4800 | · `staticPlan` |
+| 4810 | · `inWorld` |
+| 4822 | · · `cellsOfG` |
+| 4853 | · · `deepen` |
+| 4858 | · · `record` |
+| 4886 | · · · `byCell` |
+| 4919 | · · `roomOf` |
+| 4967 | · · · `takeCap` |
+| 4982 | · · `pairUp` |
+| 4993 | · · · `take` |
+| 5018 | · `watchdog` |
+| 5036 | · · `radiusOf` |
+| 5113 | · · `rowsAt` |
+| 5123 | · · `depthWalk` |
+| 5132 | · · `thickLock` |
+| 5139 | · · `thickAt` |
+| 5154 | · · `spWalk` |
+| 5181 | · · `walkPair` |
+| 5318 | `probeSample` |
+| 5384 | `assignPositions` |
+| 5394 | `animateTo` |
+| 5418 | · `settle` |
+| 5428 | · `tweenDog` |
+| 5469 | `applyLayout` |
+| 5490 | `neighboursOf` |
+| 5502 | `syncLazyEdges` |
+| 5521 | `pathKey` |
+| 5531 | `visible` |
+| 5560 | `mixHex` |
+| 5574 | `hoverAmount` |
+| 5579 | `hoverTo` |
+| 5605 | `hlSignature` |
+| 5615 | `hlWalk` |
+| 5647 | `hlSync` |
+| 5656 | `focusSet` |
+| 5672 | `edgeCurveGeom` |
+| 5682 | `drawFocusWeb` |
+| 5727 | `drawHover` |
+| 5758 | `nodeStyle` |
+| 5822 | `ringColors` |
+| 5833 | `outerPresence` |
+| 5845 | `mixColorArrays` |
+| 5858 | `bandColors` |
+| 5887 | `ringColorsSmooth` |
+| 5905 | `ringGradient` |
+| 5938 | `placeLogo` |
+| 6005 | `measureSizeScale` |
+| 6018 | `dotWhy` |
+| 6038 | `dotPx` |
+| 6079 | `syncSizeScale` |
+| 6086 | `refreshSizeScale` |
+| 6099 | `measureEdgeMult` |
+| 6106 | `syncEdgeMult` |
+| 6114 | `capEdge` |
+| 6120 | `edgePx` |
+| 6129 | `discR` |
+| 6134 | `curvatureFor` |
+| 6154 | `glostCount` |
+| 6157 | `glostPaint` |
+| 6169 | `glostStopTimer` |
+| 6174 | `glostLost` |
+| 6190 | `glostRestored` |
+| 6203 | `makeRenderer` |
+| 6299 | · · `onDocUp` |
+| 6332 | · `onResize` |
+| 6383 | · `onRightClickStage` |
+| 6395 | · `onDoubleClick` |
+| 6409 | `showTip` |
+| 6423 | `hideTip` |
+| 6440 | `goTo` |
+| 6450 | `trailBackTo` |
+| 6459 | `trailLabel` |
+| 6464 | `trailOff` |
+| 6466 | `trailRefresh` |
+| 6477 | `trailHTML` |
+| 6480 | · `crumb` |
+| 6521 | `cardHome` |
+| 6529 | `setReading` |
+| 6551 | · `onReadMq` |
+| 6573 | `phonePanWanted` |
+| 6580 | `syncPhonePan` |
+| 6593 | `syncPhoneBand` |
+| 6602 | `syncPhoneLayout` |
+| 6608 | `select` |
+| 6693 | `centerOn` |
+| 6705 | `swatchFill` |
+| 6716 | `swatchTitle` |
+| 6729 | `rowTitle` |
+| 6741 | `clearPreviewCache` |
+| 6745 | `swatchPreviewHTML` |
+| 6774 | `countText` |
+| 6790 | `barBasis` |
+| 6803 | `barShare` |
+| 6813 | `shareText` |
+| 6845 | `lgrHTML` |
+| 6857 | `buildLegend` |
+| 6876 | · `eyeBtn` |
+| 6882 | · `subtree` |
+| 6960 | · `rowFor` |
+| 7009 | · · · `srow` |
+| 7075 | · `each` |
+| 7080 | · `onlySubs` |
+| 7090 | · `onlyUnder` |
+| 7193 | · · `hoverKeys` |
+| 7270 | `seedHidden` |
+| 7277 | `collapseAll` |
+| 7294 | `takeGeom` |
+| 7326 | `ringsIn` |
+| 7335 | `regroup` |
+| 7364 | `hardRelayout` |
+| 7400 | `buildSearch` |
+| 7439 | · `onDocMove` |
+| 7444 | · `onVisibility` |
+| 7472 | `stopPlay` |
+| 7491 | `timelineFrame` |
+| 7499 | `playTimeline` |
+| 7531 | `sweepTo` |
+| 7546 | `endSweep` |
+| 7553 | `resetView` |
+| 7584 | `syncDimCounts` |
+| 7597 | `dimGroupCount` |
+| 7599 | `syncDimUI` |
+| 7609 | `buildTools` |
+| 7672 | · · `done` |
+| 7678 | · · `save` |
+| 7759 | · `closeCtxMenu` |
+| 7771 | · `ctxOutside` |
+| 7776 | · `ctxKey` |
+| 7783 | · `swatchButtonsHTML` |
+| 7811 | · `openCtxMenu` |
+| 7860 | · `showCtxMenu` |
+| 7880 | · `slowOf` |
+| 7886 | · `openDevMenu` |
+| 7948 | · `pickColor` |
+| 7963 | · `pickSubColors` |
+| 7980 | · `pickVisible` |
+| 8001 | · `subfolderRows` |
+| 8065 | · `folderOrderHTML` |
+| 8070 | · `buildOptions` |
+| 8093 | · `orderFor` |
+| 8095 | · `slotFor` |
+| 8097 | · `autoSlotFor` |
+| 8099 | · `subsFor` |
+| 8101 | · `subCountFor` |
+| 8103 | · `subShadeFor` |
+| 8105 | · `slotColor` |
+| 8107 | · `buildSettings` |
+| 8167 | `fitRatio` |
+| 8179 | `fitTarget` |
+| 8185 | `atFit` |
+| 8195 | `fit` |
+| 8199 | · `landed` |
+| 8209 | `zoomBy` |
+| 8253 | `ovSize` |
+| 8264 | `ovFootprint` |
+| 8277 | `ovCropped` |
+| 8284 | `ovSectors` |
+| 8309 | `ovShape` |
+| 8329 | `ovSigOf` |
+| 8348 | `ovDirWord` |
+| 8355 | `ovLabel` |
+| 8368 | `ovPaint` |
+| 8435 | `ovShow` |
+| 8451 | `ovSync` |
+| 8467 | `syncCanvasTop` |
+| 8475 | `afterPanel` |
+| 8483 | `glidePanels` |
+| 8499 | `setSheet` |
+| 8514 | `setBand` |
+| 8535 | `setPan` |
+| 8553 | `setCompactAxis` |
+| 8566 | `folderOrderNote` |
+| 8577 | `setFolderOrder` |
+| 8615 | `stashDimNav` |
+| 8624 | `restoreDimNav` |
+| 8638 | `keepRings` |
+| 8650 | `setDim` |
+| 8741 | `setUnlinkedByFolder` |
+| 8765 | `setUnlinkedTintByFolder` |
+| 8778 | `paintBars` |
+| 8800 | `barWalkStart` |
+| 8821 | `barWalkTick` |
+| 8833 | `barWalkEnd` |
+| 8841 | `setRootInOrder` |
+| 8855 | `setCountBars` |
+| 8868 | `setDevTools` |
+| 8881 | `setTimeScale` |
+| 8883 | `savePng` |
+| 8900 | · · · `layer` |
+| 8965 | `buildStats` |
+| 8978 | `esc` |
+| 9039 | `heatParse` |
+| 9044 | `heatKey` |
+| 9047 | · `p` |
+| 9051 | `heatMonday` |
+| 9056 | `heatGeom` |
+| 9067 | `heatBuild` |
+| 9114 | · `q` |
+| 9188 | `heatLevel` |
+| 9199 | `heatTile` |
+| 9219 | `heatCompute` |
+| 9233 | `heatDraw` |
+| 9342 | `heatRect` |
+| 9354 | `heatHit` |
+| 9367 | `heatShowTip` |
+| 9408 | `recentCount` |
+| 9436 | `syncRecentUI` |
+| 9476 | `buildRecentUI` |
+| 9513 | `buildHeatmapUI` |
+| 9526 | · `setHover` |
+| 9549 | · `reflow` |
+| 9625 | `drawDateUI` |
+| 9631 | `buildYears` |
+| 9679 | `fitYears` |
+| 9712 | `fitCanvas` |
+| 9723 | `dateRamp` |
+| 9728 | `scrubColor` |
+| 9731 | `rgbaHex` |
+| 9738 | `measureRibbon` |
+| 9748 | `ribbonW` |
+| 9753 | `ribbonXLinear` |
+| 9759 | `ribbonMsLinear` |
+| 9764 | `monthIndexOfMs` |
+| 9771 | `monthEndMs` |
+| 9776 | `segSpanMs` |
+| 9782 | `ribbonXCompact` |
+| 9790 | `ribbonMsCompact` |
+| 9802 | `ribbonX` |
+| 9806 | `ribbonMs` |
+| 9811 | `brushEnds` |
+| 9818 | `winEndNow` |
+| 9824 | `paintMonthBar` |
+| 9831 | `drawRibbon` |
+| 9909 | `rebuildBand` |
+| 9919 | `winTrack` |
+| 9926 | `inWinTrack` |
+| 9929 | `winSpan` |
+| 9932 | `clampWinEnd` |
+| 9940 | `winEndCentredAtPx` |
+| 9953 | `brushHit` |
+| 9965 | `showRTip` |
+| 9976 | `hideRTip` |
+| 9979 | `isoDay` |
+| 9981 | `winLabel` |
+| 9986 | `buildDateUI` |
+| 10000 | · `fieldMs` |
+| 10016 | · `xOf` |
+| 10018 | · `yOf` |
+| 10101 | · `endDrag` |
+| 10125 | · `hoverYear` |
+| 10133 | · · `yrOf` |
+| 10152 | · `onSlot` |
+| 10171 | `wantWedgeDebug` |
+| 10179 | `restOn` |
+| 10183 | `rowArcOn` |
+| 10219 | `demoOn` |
+| 10225 | `demoBusy` |
+| 10230 | `demoGroup` |
+| 10266 | `demoFind` |
+| 10416 | `demoNoteRect` |
+| 10454 | `demoBigInnerNote` |
+| 10497 | `demoCellRect` |
+| 10509 | `demoPoint` |
+| 10519 | `demoRibbonPoint` |
+| 10536 | `demoWhere` |
+| 10555 | `demoMode` |
+| 10866 | `demoFullStoryboard` |
+| 10881 | `demoLive` |
+| 10937 | `demoArrivalRect` |
+| 10950 | `demoAct` |
+| 11013 | `dragOwnsFrames` |
+| 11018 | `liveBusy` |
+| 11020 | `liveWhy` |
+| 11026 | `placeKeyOf` |
+| 11037 | `linkWeights` |
+| 11058 | `diffData` |
+| 11077 | · `missing` |
+| 11093 | `applyData` |
+| 11189 | `setWords` |
+| 11196 | `drainLive` |
+| 11204 | `stopDrain` |
+| 11327 | · · · · · · · · · · `rows` |
+| 11355 | · · · · · · · · · · `sample` |
+| 11368 | · · · · · · · · · · `at` |
+| 11376 | · · · · · · · · · · `dist` |
+| 11453 | · · · · · · · · · · `r3` |
+| 11454 | · · · · · · · · · · `r3n` |
+| 11456 | · · · · · · · · · · `bandStat` |
+| 11481 | · · · · · · · · · · · `q` |
+| 11656 | · · · · · · · · · · `take` |
+| 11665 | · · · · · · · · · · `r2` |
+| 11735 | · · · · · · · · · · `W` |
+| 11743 | · · · · · · · · · · `rows` |
+| 11793 | · · · · · · · · · · `r3` |
+| 11928 | · · · · · · · · · · `byPath` |
+| 12117 | `destroy` |
 
 ## `scripts/smoke.mjs` — 9169 lines, 13 sections, 95 functions, 161 checks
 
