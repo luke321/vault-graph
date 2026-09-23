@@ -284,10 +284,20 @@ try {
 
   // --pre "kind:arg;kind:arg": acts to run and settle BEFORE the measured one, e.g. hide a group
   // so the measured act can show it again
+  // github#186 -- "range:<fraction>" narrows the date range to the last <fraction> of the span
+  const doAct = async (kind, target) => {
+    if (kind !== "range") return click(kind, target);
+    const frac = Number(target);
+    const from = await page.j(`(function () { var lo = null, hi = null;
+      __vg.graph.forEachNode(function (id, a) { var d = a.created ? String(a.created).slice(0, 10) : ""; if (Number.isNaN(Date.parse(d))) return; if (lo === null || d < lo) lo = d; if (hi === null || d > hi) hi = d; });
+      var L = Date.parse(lo), H = Date.parse(hi); return new Date(H - (H - L) * ${frac}).toISOString().slice(0, 10); })()`);
+    await page.eval(`__vg.setRange(${JSON.stringify(from)}, null); void 0`);
+    return { x: 0, y: 0, label: "range from " + from };
+  };
   for (const a of (arg("pre", "") ? arg("pre", "").split(";") : [])) {
     const [kind, ...rest] = a.split(":");
-    const w = await click(kind, rest.join(":"));
-    console.log(`pre: clicked ${kind} ${JSON.stringify(rest.join(":"))} (${w.label})`);
+    const w = await doAct(kind, rest.join(":"));
+    console.log(`pre: ${kind} ${JSON.stringify(rest.join(":"))} (${w.label})`);
     await sleep(300);
     await settle();
     await sleep(500);
@@ -329,8 +339,8 @@ try {
     const [kind, ...rest] = a.split(":");
     const target = rest.join(":");
     await page.eval("window.__p186.armed = true; void 0");
-    actWhere = await click(kind, target);
-    console.log(`clicked ${kind} ${JSON.stringify(target)} at ${actWhere.x},${actWhere.y} (${actWhere.label})`);
+    actWhere = await doAct(kind, target);
+    console.log(`act ${kind} ${JSON.stringify(target)} at ${actWhere.x},${actWhere.y} (${actWhere.label})`);
     await sleep(300);
     await settle();
     for (let k = 0; k < 100; k++) { if (await page.j("!!(window.__p186 && window.__p186.done)")) break; await sleep(60); }
