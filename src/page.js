@@ -2665,7 +2665,9 @@ function mountVaultGraph(root, data, deps) {
       var so = solveBand(outer, rOuter, thickO, 1, SP_O, heldBand("o"));
       SP_O = so.sp; outerRows = so.rows;
       outer.forEach(function (c) { c.rows = c.wsum > 0.0001 ? outerRows : 0; });
-      maxR = rOuter + outerRows * SP_O;
+      // github#186 -- the walked depth: round() shifts the ring at .5
+      var depthO = spIn && typeof spIn === "object" && spIn.depth ? spIn.depth.o : 0;
+      maxR = rOuter + (depthO > 0 ? depthO : outerRows) * SP_O;
       // github#157 -- take back only the overshoot; fitRatio frames by maxR
       if (maxR > geomLock.maxR) maxR = geomLock.maxR;
     } else {
@@ -2694,7 +2696,14 @@ function mountVaultGraph(root, data, deps) {
       var centred = bandRows > 0 && nEff > 0.0001 && nEff < bandRows - 0.0001;
       var cStart = centred ? Math.round((bandRows - nEff) / 2) : 0;
       // github#186, decisions/0002 -- the top slot's OUTER EDGE may not pass the rail
-      var rowCap = Math.max(0, Math.floor(rows - 0.5 + 1e-9));
+      // github#186 -- a note's cap up to half a row early: rows dissolve
+      /** @param {string} id */
+      var rowCapOf = function (id) {
+        var h = 2166136261;
+        for (var ci = 0; ci < id.length; ci++) { h ^= id.charCodeAt(ci); h = Math.imul(h, 16777619); }
+        var j = ((h >>> 0) % 1000) / 2000;
+        return Math.max(0, Math.floor(rows - 0.5 - j + 1e-9));
+      };
       /** @type {{ id: string, w: number, row: number }[]} */
       var recs = [];
       var acc = 0;
@@ -2711,6 +2720,7 @@ function mountVaultGraph(root, data, deps) {
           ? (-base + Math.sqrt(Math.max(0, base * base + 2 * SP * target))) / SP
           : target / Math.max(1e-9, base);
         if (pp < 0) pp = 0;
+        var rowCap = rowCapOf(id);
         if (pp > rowCap) pp = rowCap;
         var cRow = 0;
         if (centred) {
@@ -4191,6 +4201,8 @@ function mountVaultGraph(root, data, deps) {
   // github#86, design/0015 -- a dot is fully gone, or fully lit, this far behind its edge
   var HAND_FADE_DEG = 12;
   var RADIAL_EASE = 0.25;
+  // github#186 -- a hop's top speed, as a share of the pitch
+  var RADIAL_STEP_MAX = 0.12;
   var SPREAD_MAX  = 78;
   var SPREAD_PER  = 0.17;
   var SPREAD_MIN  = 24;
@@ -5285,7 +5297,13 @@ function mountVaultGraph(root, data, deps) {
         var rNow = Math.hypot(x, y), rWant = Math.hypot(q.x, q.y);
         var gap = rWant - rNow;
         if (gap < 0 ? -gap > resid : gap > resid) resid = gap < 0 ? -gap : gap;
-        var r = rNow + gap * ez;
+        var move = gap * ez;
+        // github#186, decisions/0002 -- a row hop glides, capped per frame
+        if (pr < 1) {
+          var lim = RADIAL_STEP_MAX * UNIT * (bandLock && bandLock[groupOf(id)] ? bandOf("i").sp * INNER_SCALE : bandOf("o").sp);
+          if (lim > 0 && move > lim) move = lim; else if (lim > 0 && move < -lim) move = -lim;
+        }
+        var r = rNow + move;
         graph.mergeNodeAttributes(id, { x: r * Math.cos(h), y: r * Math.sin(h) });
       });
       posVer++;

@@ -841,6 +841,34 @@ on develop**, so it predates this ticket. Each note's cell is now taken from the
 the split was tried first and mis-landed 19 notes at settle, because the sub-piece assignment also
 reads the walked depth. Measured after: worst lit-note step **0.30 of a pitch**, nothing moving
 after the landing.
+#### A row dissolves, a hop glides, and the ring does not shift at 5.5
+
+Three more things the maintainer saw on his own vault, after the fan and the sync: *"the outer ring
+cleans smoothly, the inner does not, it stutters … in solo 03 there are jumps in the outer ring rows
+several times, same in hide 03, massive jumps in rows."* Every per-note step was inside the easing
+constant; what the checks did not count was **how many notes step in the same frame**.
+`scratchpad/186/rowdrops.mjs` counts hop *starts* per frame.
+
+- **The top row dropped as one block.** The row cap `floor(rows − 0.5)` changes for every note at
+  once when the walked count passes the half, so the whole top row fell a pitch together: soloing
+  `03 - Resources`, **53 notes in one frame** at pr 0.33 and again at 0.68. Each note's cap now
+  carries a deterministic offset of up to half a row (`rowCapOf`, an FNV hash of the id), so the
+  top row dissolves one note at a time across half the walk. At rest the offset is inert:
+  `floor(n − 0.5 − j) = n − 1` for every `j < 0.5`.
+- **A hop was a jump.** `RADIAL_EASE = 0.25` closes a one-pitch hop in about four frames — 67 ms —
+  which reads as a jump next to a ring that does not move at all. A hop is now capped at
+  `RADIAL_STEP_MAX = 0.12` of the ring's pitch per frame (inner pitch scaled by `INNER_SCALE`), so
+  it glides over about nine. The cap applies only while `pr < 1`; the tail after the landing keeps
+  `decisions/0003`'s convergence.
+- **The whole ring shifted at exactly 5.5 rows — on develop too.** `buildWedgePlan` takes the
+  band's outer extent from `round(thick / pitch) × pitch`, and `round` flips at the half, so
+  `maxR` stepped by a pitch, the github#160 inset with it, and **every outer note moved 0.05 of a
+  pitch in one frame** (431 of 445 on solo `03`, 384 of 395 on hide `03`), identically on develop.
+  The extent now takes the walked depth the frame already carries.
+
+Measured on the maintainer's vault after all three: the worst frame on solo `03` went from **431
+notes starting a move to 7**, and no frame on any act starts more than 8 except the click itself
+(hide `03`'s split, held there by design). Worst single step 0.12 of a pitch everywhere.
 #### The jump at the END of an animation, and the cap that caused it
 
 Clamping the walked thickness to the static one (to stop a band riding past its rail mid-walk)
