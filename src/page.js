@@ -4306,6 +4306,8 @@ function mountVaultGraph(root, data, deps) {
   var fitCap = /(^|[?&#])nofit\b/.test(fitQuery) ? false
              : /(^|[?&#])fit\b/.test(fitQuery) ? true
              : deps.fitCap !== false;
+  // github#186 -- review variant: a ring leaves in reverse of the intro
+  var leaveRev = /(^|[?&#])leave=reverse\b/.test(fitQuery);
   var posVer = 0;
   var fitVer = -1;
   /** @type {Record<string, number> | null} */
@@ -4577,6 +4579,8 @@ function mountVaultGraph(root, data, deps) {
     // github#186
     /** @type {Record<string, number>} */
     var fadeOf = dict();
+    /** @type {Record<string, boolean>} */
+    var revIds = dict();
     [ins, outs].forEach(function (set) {
       var w = windowFor(set.length);
       set.forEach(function (id, i) { delay[id] = set.length < 2 ? 0 : w * i / (set.length - 1); });
@@ -4821,6 +4825,9 @@ function mountVaultGraph(root, data, deps) {
     // github#186
     var bandGone = { i: false, o: false };
     var bandBorn = { i: false, o: false };
+    // github#186 -- gone as a fan, or gone in reverse (?leave=reverse)
+    var fanGone = { i: false, o: false };
+    var revGone = { i: false, o: false };
     /** @type {Record<string, number> | null} */
     var cellSrc = null;
     /** @type {Record<string, number> | null} */
@@ -4923,16 +4930,18 @@ function mountVaultGraph(root, data, deps) {
       var whole = !opts.hand && !rank;
       bandBorn = { i: whole && bandSrc.i === undefined && bandDst.i !== undefined,
                    o: whole && bandSrc.o === undefined && bandDst.o !== undefined };
+      revGone = { i: leaveRev && bandGone.i, o: leaveRev && bandGone.o };
+      fanGone = { i: bandGone.i && !revGone.i, o: bandGone.o && !revGone.o };
       ["i", "o"].forEach(function (k) {
         // github#186 -- a ring arriving whole starts at its rest
         if (bandBorn[k]) { bandSrc[k] = bandDst[k]; spSrcB[k] = spDstB[k]; return; }
         if (bandSrc[k] === undefined && bandDst[k] !== undefined) { bandSrc[k] = 1; spSrcB[k] = spDstB[k]; return; }
-        if (bandGone[k]) { bandDst[k] = bandSrc[k]; spDstB[k] = spSrcB[k]; }
+        if (bandGone[k]) { bandDst[k] = revGone[k] ? 1 : bandSrc[k]; spDstB[k] = spSrcB[k]; }
       });
       // github#186 -- every wedge empties or fills at one rate, over the window
       if (whole && !opts.cross) {
         var lapW = windowFor(Math.max(outs.length, ins.length)) + fadeLen;
-        if (bandGone.i || bandGone.o || bandBorn.i || bandBorn.o) ringHeld = dict();
+        if (fanGone.i || fanGone.o || bandBorn.i || bandBorn.o) ringHeld = dict();
         /** @param {Plan | null} pl @param {{ i: boolean, o: boolean }} which */
         var byCell = function (pl, which) {
           if (!pl) return;
@@ -4949,8 +4958,19 @@ function mountVaultGraph(root, data, deps) {
             });
           });
         };
-        byCell(a, bandGone);
+        byCell(a, fanGone);
         byCell(b, bandBorn);
+        ["i", "o"].forEach(function (k) {
+          if (!revGone[k]) return;
+          var ids = outs.filter(function (id) {
+            return !isMove[id] && (bandLock && bandLock[groupOf(id)] ? "i" : "o") === k;
+          });
+          ids.sort(function (x, y) { return (tlRank[y] || 0) - (tlRank[x] || 0); });
+          ids.forEach(function (id, i) {
+            delay[id] = ids.length < 2 ? 0 : (lapW - fadeLen) * i / (ids.length - 1);
+            fadeOf[id] = fadeLen; revIds[id] = true;
+          });
+        });
       }
       /** @param {Plan | null} pl @param {((id: string) => number) | null} alphaFn */
       var roomOf = function (pl, alphaFn) {
@@ -5080,7 +5100,7 @@ function mountVaultGraph(root, data, deps) {
         var set = (out ? outs : ins).filter(function (id) {
           return groupOf(id) === g0;
         });
-        if (!set.length) return;
+        if (!set.length || revIds[set[0]]) return;
         set.sort(function (p, q) {
           var d = radiusOf(p, out) - radiusOf(q, out);
           return out ? d : -d;
@@ -5158,7 +5178,7 @@ function mountVaultGraph(root, data, deps) {
       // github#186, decisions/0002 -- a band emptying at one end holds the other end's lattice
       /** @param {string} k */
       var depthWalk = function (k) {
-        if (bandGone[k]) return bandSrc[k];
+        if (fanGone[k]) return bandSrc[k];
         var a2 = bandSrc[k], b2 = bandDst[k];
         if (a2 === undefined && b2 === undefined) return 0;
         if (a2 === undefined) a2 = b2;
@@ -5175,7 +5195,7 @@ function mountVaultGraph(root, data, deps) {
       // github#44, github#186
       /** @param {string} k */
       var thickAt = function (k) {
-        if (bandGone[k]) return bandSrc[k] * spSrcB[k];
+        if (fanGone[k]) return bandSrc[k] * spSrcB[k];
         var ds = bandSrc[k], dd = bandDst[k];
         if (ds === undefined && dd === undefined) return 0;
         if (ds === undefined) ds = dd;
@@ -5191,7 +5211,7 @@ function mountVaultGraph(root, data, deps) {
       // github#186 -- continuous; placeCell caps the row index
       /** @param {string} k */
       var spWalk = function (k) {
-        if (bandGone[k]) return spSrcB[k];
+        if (fanGone[k]) return spSrcB[k];
         var rows = depthWalk(k), T = thickAt(k);
         if (!(rows > 0) || !(T > 0)) return spSrcB[k] + (spDstB[k] - spSrcB[k]) * ease;
         return T / rows;
@@ -5200,8 +5220,8 @@ function mountVaultGraph(root, data, deps) {
                     depth: { i: depthWalk("i"), o: depthWalk("o") } };
       /** @param {Cell} c */
       var rowsNow = rowsAt;
-      geomHold = (bandGone.i || bandGone.o || bandBorn.i || bandBorn.o)
-        ? { i: bandGone.i || bandBorn.i, o: bandGone.o || bandBorn.o } : null;
+      geomHold = (fanGone.i || fanGone.o || bandBorn.i || bandBorn.o)
+        ? { i: fanGone.i || bandBorn.i, o: fanGone.o || bandBorn.o } : null;
       colWalk = dict();
       Object.keys(tglDir).forEach(function (g0) {
         var fRamp = tglDir[g0] === "out" ? 1 - pr : pr;
