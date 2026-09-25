@@ -4172,9 +4172,19 @@ function mountVaultGraph(root, data, deps) {
   var RADIAL_EASE = 0.25;
   // github#186 -- a hop's top speed, as a share of the pitch
   var RADIAL_STEP_MAX = 0.12;
-  // github#186, design/0015
+  // github#186 -- a deferred fit starts here in the walk and lands with it
+  var FIT_RIDE_AT = 0.66;
+  // github#186 -- a departing note's links are gone by this share of the walk
+  var LEAVE_EDGE_BY = 0.35;
+  /** @type {Record<string, boolean> | null} */
+  var departing = null;
+  var leaveEdgeK = 1;
+  // github#186, design/0015 -- the worlds overlap for 0.3 of the clock
   var foldSwitch = true;
-  var FOLD_ENTER = 0.4, FOLD_PHASE = 0.6, FOLD_FADE = 0.18;
+  // github#186 -- the arrival ends at 0.95; the glide cap catches up after
+  var FOLD_ENTER = 0.30, FOLD_PHASE = 0.65, FOLD_FADE = 0.18;
+  // github#186 -- the arriving world eases onto its rest from here
+  var FOLD_LAND = 0.85;
   var SPREAD_MAX  = 78;
   var SPREAD_PER  = 0.17;
   var SPREAD_MIN  = 24;
@@ -4373,7 +4383,7 @@ function mountVaultGraph(root, data, deps) {
   // github#186 -- one place drops what a walk held, wherever it is cut short
   function clearHolds() {
     moveFrom = null; splitHold = null; cellHold = null; leftColor = null; shrinkFade = false;
-    colWalk = null;
+    colWalk = null; departing = null; leaveEdgeK = 1;
     foldSizes = null;
   }
   /** @type {Record<string, Point> | null} */
@@ -4494,8 +4504,12 @@ function mountVaultGraph(root, data, deps) {
     var finalPos = ringsLayout() || {};
     // github#14
     var deferredAutoFit = false;
+    // github#186 -- the destination's fit, taken now for the ride
+    /** @type {{ x: number, y: number, ratio: number, angle: number } | null} */
+    var deferredFitTo = null;
+    var fitRode = false;
     if (opts.colToggle && camAtRest) {
-      if (fitRatio() < renderer.getCamera().getState().ratio) deferredAutoFit = true;
+      if (fitRatio() < renderer.getCamera().getState().ratio) { deferredAutoFit = true; deferredFitTo = fitTarget(); }
       else fit();
     }
     pinnedPlan = pinWas; planKeep = keepWas;
@@ -4768,6 +4782,10 @@ function mountVaultGraph(root, data, deps) {
     })();
 
     var moving = ins.concat(outs).concat(moves);
+    // github#186
+    departing = dict();
+    outs.forEach(function (id) { if (!isMove[id]) departing[id] = true; });
+    leaveEdgeK = 1;
     lastCascade = { ins: ins.length, outs: outs.length, span: Math.round(span * 100) / 100,
                     path: "animated", frames: 0, ms: 0, t0: NOW(),
                     skelFrames: 0, skelMismatch: 0, skelFirst: "" };
@@ -4798,7 +4816,7 @@ function mountVaultGraph(root, data, deps) {
       takeRestDots();
       renderer.refresh({ skipIndexation: false });
       probeSample("settled");
-      if (deferredAutoFit && camAtRest) fit();
+      if (deferredAutoFit && !fitRode && camAtRest) fit();
       if (done) done();
     };
 
@@ -5202,6 +5220,14 @@ function mountVaultGraph(root, data, deps) {
       if (handLap) { lastCascade.handDeg = 360 * frame / handLap; lastCascade.handLap = handLap; }
       var ease = pr * pr * (3 - 2 * pr);
       visEase = ease;
+      // github#186 -- links of departing notes go first, before their fans bundle
+      var qe = Math.min(1, pr / LEAVE_EDGE_BY);
+      leaveEdgeK = 1 - qe * qe * (3 - 2 * qe);
+      // github#186 -- the deferred fit lands with the notes, not after them
+      if (deferredAutoFit && !fitRode && pr >= FIT_RIDE_AT && camAtRest) {
+        fitRode = true;
+        fit(Math.max(120, (span - frame) * msPerFrame), deferredFitTo);
+      }
       // github#78
       if (barWalking) barWalkTick(ease);
       var busy = false;
@@ -5317,6 +5343,14 @@ function mountVaultGraph(root, data, deps) {
         var enterPr = foldEase((pr - FOLD_ENTER) / FOLD_PHASE);
         var oldSeats = leavePr < 1 ? inWorld(function () { return packFold(foldA, 1 - leavePr); }) : {};
         var newSeats = enterPr >= 1 ? finalPos : packFold(foldB, enterPr);
+        // github#186 -- no snap at the landing: the tail eases onto finalPos
+        if (enterPr < 1 && enterPr > FOLD_LAND) {
+          var kLand = foldEase((enterPr - FOLD_LAND) / (1 - FOLD_LAND));
+          Object.keys(newSeats).forEach(function (id) {
+            var f = finalPos[id], n = newSeats[id];
+            if (f && n) newSeats[id] = { x: n.x + (f.x - n.x) * kLand, y: n.y + (f.y - n.y) * kLand };
+          });
+        }
         targets = Object.assign({}, oldSeats, newSeats);
         cellNow = null; edgeNow = null; colWalk = null;
       } else if (opts.hand && opts.from) {
@@ -6452,6 +6486,9 @@ function mountVaultGraph(root, data, deps) {
             r.zIndex = 0;
           }
         }
+        // github#186 -- a departing note's links go in the first third of the walk
+        if (departing && leaveEdgeK < 1 && (departing[x[0]] || departing[x[1]])) al *= leaveEdgeK;
+        if (al <= 0.004) { r.hidden = true; return r; }
         if (al < 0.999) r.color = withAlpha(r.color, al * al);
         return capEdge(r, a);
       }
@@ -7829,13 +7866,13 @@ function mountVaultGraph(root, data, deps) {
       playTimeline();
     };
     // github#4
-    if ($("reset")) $("reset").onclick = fit;
+    if ($("reset")) $("reset").onclick = function () { fit(); };
     if ($("zin")) $("zin").onclick = function () { zoomBy(1); };
     if ($("zout")) $("zout").onclick = function () { zoomBy(-1); };
     // github#170 -- storedPan follows every deliberate choice
     if ($("pan")) $("pan").onclick = function () { storedPan = !panEnabled; setPan(storedPan, true); };
     // github#79
-    if ($("ov")) $("ov").onclick = fit;
+    if ($("ov")) $("ov").onclick = function () { fit(); };
     setPan(panEnabled, false);
     // github#23
     if ($("compact")) $("compact").onclick = function () { setCompactAxis(!compactAxis, true); };
@@ -8375,8 +8412,9 @@ function mountVaultGraph(root, data, deps) {
         && Math.abs((st.angle || 0) - to.angle) <= 1e-3;
   }
 
-  function fit() {
-    var to = fitTarget();
+  /** @param {number} [ms] @param {{ x: number, y: number, ratio: number, angle: number } | null} [at] */
+  function fit(ms, at) {
+    var to = at || fitTarget();
     fitting = true;
     // github#170, design/0013 -- restore what pan is NOW, and re-ask once landed
     var landed = function () {
@@ -8386,7 +8424,7 @@ function mountVaultGraph(root, data, deps) {
     };
     // github#4 -- the flight needs panning on whatever the toggle says
     if (!panEnabled) renderer.setSetting("enableCameraPanning", true);
-    renderer.getCamera().animate(to, { duration: 380 }, landed);
+    renderer.getCamera().animate(to, { duration: ms > 0 ? ms : 380 }, landed);
   }
 
   function zoomBy(dir) {

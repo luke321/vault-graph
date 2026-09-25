@@ -4259,27 +4259,38 @@ async function biggestGroup(p) {
 }
 // github#55
 async function watchDuringCascade(p, startRatio, capMs = 8000) {
-  var movedWhileBusy = false;
+  var movedWhileBusy = false, movedEarly = false, movedByLanding = false, firstMovePr = null, landingRatio = null;
   var deadline = Date.now() + capMs;
   for (;;) {
     // THE CASCADE, not busy(): the question is whether the camera moved while notes were still
     // leaving, and busy() also counts the hover-highlight ramp the eye click starts, which can
     // outlast the cascade under load -- measured once as "moved early: true" in a gate run and
     // 0 of 3 alone, the fit having begun after the last note left but with that ramp still up.
-    var s = await p.j(`(function(){ var w = __vg.demo.busyWhy(); return { busy: !!(w.cascade || w.play || w.anim),
+    var s = await p.j(`(function(){ var w = __vg.demo.busyWhy(); var c = __vg.lastCascade(); return { busy: !!(w.cascade || w.play || w.anim),
+      cascade: !!w.cascade, pr: c && c.last ? c.last.pr : null,
       ratio: +__vg.renderer.getCamera().getState().ratio.toFixed(4) }; })()`);
     // github#19
     if (!s.busy) break;
-    if (Math.abs(s.ratio - startRatio) > 0.01) movedWhileBusy = true;
+    const moved = Math.abs(s.ratio - startRatio) > 0.01;
+    if (moved) movedWhileBusy = true;
+    // github#186 -- a deferred fit rides the last third: nothing before pr 0.6,
+    // github#186 -- and by the landing the camera is on its way or there
+    if (s.cascade) {
+      if (moved && firstMovePr === null) firstMovePr = s.pr;
+      if (moved && s.pr !== null && s.pr < 0.6) movedEarly = true;
+      landingRatio = s.ratio;
+    }
     if (Date.now() > deadline) break;
     await sleep(60);
   }
+  if (landingRatio !== null && Math.abs(landingRatio - startRatio) > 0.01) movedByLanding = true;
   await sleep(500);
   const settled = await camState(p);
-  return { movedWhileBusy, finalRatio: settled.ratio };
+  return { movedWhileBusy, movedEarly, movedByLanding, firstMovePr, finalRatio: settled.ratio };
 }
 
-check("hiding the biggest group auto-fits the camera, but only once it has finished leaving", async (p) => {
+// github#14, github#186 -- the flight rides the last third and lands with the notes
+check("hiding the biggest group auto-fits the camera, riding the last third of the walk", async (p) => {
   await p.eval(`__vg.state.hidden.folder = {}; __vg.syncAlpha(); __vg.applyLayout(false); void 0`);
   await sleep(200);
   await toRest(p);
@@ -4289,7 +4300,7 @@ check("hiding the biggest group auto-fits the camera, but only once it has finis
   if (!g) return { ok: false, detail: "no group to hide" };
 
   await clickEye(p, g);
-  const { movedWhileBusy, finalRatio } = await watchDuringCascade(p, rest.ratio);
+  const { movedEarly, movedByLanding, firstMovePr, finalRatio } = await watchDuringCascade(p, rest.ratio);
   const dens = await p.j(`__vg.densityReport()`);
   const fr = await p.j(`__vg.FIT_RATIO`); // github#111
   const want = fr * Math.max(0.12, Math.min(1.35, dens.reach));
@@ -4302,14 +4313,14 @@ check("hiding the biggest group auto-fits the camera, but only once it has finis
 
   const atRest = await p.j(`__vg.camAtRest`);
   const ok = shrinking
-    ? (!movedWhileBusy && Math.abs(finalRatio - want) < 0.03 && atRest)
+    ? (!movedEarly && movedByLanding && Math.abs(finalRatio - want) < 0.03 && atRest)
     : true;
   return {
     ok,
     detail: shrinking
-      ? `hid "${g}" (reach ${dens.reach}): ratio held at ${rest.ratio} while notes left ` +
-        `(moved early: ${movedWhileBusy}), landed at ${finalRatio.toFixed(4)} against ` +
-        `${want.toFixed(4)} promised, camAtRest ${atRest}`
+      ? `hid "${g}" (reach ${dens.reach}): ratio ${rest.ratio} held until pr 0.6 (moved early: ${movedEarly}), ` +
+        `first camera move at pr ${firstMovePr === null ? "never" : firstMovePr.toFixed(2)}, on its way by the landing: ${movedByLanding}, ` +
+        `landed at ${finalRatio.toFixed(4)} against ${want.toFixed(4)} promised, camAtRest ${atRest}`
       : `hid "${g}": reach ${dens.reach} did not shrink the disc below its resting ratio on ` +
         `this fixture -- nothing to assert`,
   };
@@ -8519,10 +8530,17 @@ check("the invalidation registry names every cache a live rebuild stales", async
 check("a live rebuild lands on the layout a fresh relayout gives", async (p) => {
   await settle(p);
   await p.eval(LIVE_JS);
+  const STATE = `(function () { var d = __vg.debugDump(); var h = __vg.state.hidden[__vg.state.dim] || {};
+    return { dim: __vg.state.dim, hidden: Object.keys(h).filter(function (k) { return h[k]; }).length, sub: Object.keys(__vg.state.hiddenSub).length,
+      range: [__vg.state.from, __vg.state.to, __vg.state.until], cam: d.camera, lock: d.locked, fold: __vg.foldSwitch, active: __vg.foldActive,
+      timeScale: __vg.timeScale, fitCap: __vg.fitCap, pins: __vg.pinned ? __vg.pinned().length : null, busy: __vg.demo.busyWhy(),
+      last: (function () { var c = __vg.lastCascade(); return c ? { path: c.path, exit: c.exit, frames: c.frames } : null; })() }; })()`;
+  console.log("         [diag before] " + JSON.stringify(await p.j(STATE)));
   const start = await p.j(`(function(){ window.__live.a = window.__live.snap();
                                         return { n: window.__live.a.n }; })()`);
   const res = await p.j(`__vg.applyData(window.__live.withOneMore("__live/Zz Live Probe.md"))`);
   await settle(p);
+  console.log("         [diag landed] " + JSON.stringify(await p.j(STATE)));
   // decisions/0011-a-live-rebuild-retakes-the-geometry-lock-at-rest, github#21
   const after = await p.j(`(function(){
     var landed = window.__live.snap();

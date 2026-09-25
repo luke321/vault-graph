@@ -8,8 +8,10 @@ remains available for comparison through `__vg.foldSwitch = false` in the standa
 `true` restores the fold. This is a prototype awaiting browser measurement and visual review.
 
 Both worlds share the cascade's clock and the locked ring boundaries. Departure occupies
-progress 0..0.6; arrival occupies 0.4..1. The 20% overlap leaves some notes visible while the
-grouping changes. Each cell distributes its fades using the same deterministic interleave as
+progress 0..0.65; arrival occupies 0.30..0.95, its last 15% easing onto the resting layout
+(`FOLD_LAND`), and the 5% left lets the glide cap catch up so the landing does not snap
+(measured 2026-09-25: step at the landing 0.23 → 0.12 of a pitch). The 0.35 overlap keeps the
+lit-dot sum at 26% of its start at the trough, where the first cut (0..0.6 and 0.4..1) fell to 11%. Each cell distributes its fades using the same deterministic interleave as
 the packing rework. A fade takes at least 0.18 of the whole transition and stretches up to the
 whole 0.6 phase for small cells. Both bands use the same phase progress.
 

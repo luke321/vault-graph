@@ -933,6 +933,37 @@ fixtures; at full vault every share is 1, so nothing at rest changes. The check 
 bounds note by note against the resting probe, in place of the step floor and the legibility
 floor.
 
+#### Five things a clip review saw, 2026-09-25
+
+A reviewer went through all 35 clip pairs and named five. Each was measured before and after
+(`scratchpad/186/camride.mjs` for the camera and the lit-dot sum per frame; `pack-check.mjs` for
+the landing; mean grey of a 48-px downscale over the clip's own window for the link fans).
+
+- **Late zoom after a hide** — the disc settles, pauses, then enlarges; develop's too. github#14's
+  rule had the deferred fit wait for the landing. The maintainer chose to let it ride: the
+  destination's fit target is taken at the click (`fitTarget()` reads the destination's `lastMaxR`
+  there, and would read the mid-walk extent later), and at `FIT_RIDE_AT = 0.66` the camera flies
+  for exactly the time the walk has left. Measured: first camera move at pr 0.68, landing ratio
+  0.630 with the notes, nothing after (mirror solo `04`; spec solo `beta` 0.638). The check
+  *hiding the biggest group auto-fits the camera* now asserts no move before pr 0.6, on its way by
+  the landing, landed at the promise, `camAtRest`.
+- **A small snap at the end of the fold.** The glide cap holds every hop to 0.12 of a pitch a frame
+  while the clock runs and lets go at pr 1, so an arrival still moving on the last frame snaps
+  what it owes: 0.23 of a pitch on the demo, 0.16 on the tag vault; easing the tail onto
+  `finalPos` alone made it 0.38. The arrival now ends at pr 0.95 (`FOLD_ENTER = 0.30`,
+  `FOLD_PHASE = 0.65`, `FOLD_LAND = 0.85`), leaving the cap 5% of the clock to catch up: worst
+  step **0.12, at pr 0.96**, nothing after the landing.
+- **The fold goes nearly dark mid-clock.** With departure 0..0.6 and arrival 0.4..1 the lit-dot
+  sum fell to **11%** of its start; with 0..0.65 and 0.30..0.95 it stays at **26%**.
+- **Bright link fans overpower the fading dots** on a solo. The links of notes still at 80–90%
+  opacity converge as their ring thins to a row, and a steeper per-note edge fade (α⁴) changed
+  nothing visible. A departing note's links now fade on their own clock, gone by
+  `LEAVE_EDGE_BY = 0.35` of the walk (`departing`, `leaveEdgeK`): mean grey in the review's window
+  **34.9 → 28.1**, the fans absent in the frames, the surviving ring's own web untouched.
+- **Freeze then catch-up in a recording** — capture, not rendering: the intro's screencast has
+  gaps of 229 and 251 ms in its frame timestamps at 8.4 and 9.6 s (filmed under load, 35 clips in
+  a row), and the encoder lays frames at a fixed rate. Re-film alone to be rid of it.
+
 **What a walk holds is dropped in one place, wherever the walk is cut short** (`clearHolds`, from
 a second static review on 2026-09-25). `cellHold`, `splitHold`, `moveFrom`, `leftColor`,
 `shrinkFade` and `colWalk` were cleared by the cascade's own start and settle and by
