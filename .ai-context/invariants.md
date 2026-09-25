@@ -880,6 +880,18 @@ verbatim from `probe-bone.js`) before anything changed.
   and the check's floor is the thing to revisit. **The full suite therefore shows the tag vault
   at 66/67 on this branch, by decision**, until that floor is.
 
+**What a walk holds is dropped in one place, wherever the walk is cut short** (`clearHolds`, from
+a second static review on 2026-09-25). `cellHold`, `splitHold`, `moveFrom`, `leftColor`,
+`shrinkFade` and `colWalk` were cleared by the cascade's own start and settle and by
+`hardRelayout`, but not by the four paths that cancel a `cascadeRun` from outside — the tab going
+hidden, `stopPlay`, `playTimeline` and `destroy` — so a hold could outlive its walk. Measured
+before anything changed (`scratchpad/186/tabhide.mjs`: hide the tab at pr 0.5 of a hide or a solo,
+then diff what the page laid out against a fresh relayout): **0 notes off on this branch** on both
+acts, because the held cells are the destination plan's and the hidden-tab path lays out that
+same destination — and **252 of 406 notes off by up to 21.7 units on develop**, whose hidden-tab
+path also leaves `colWalk` standing. The nine sites now call one function; the measurement reads
+0 before and after, so this is hygiene with a witness, not a fix with one.
+
 **A sparse cell's half rounds inward** (asked on 2026-09-23, *"home and career note not in the
 innermost row"*, on the 10k vault under a date range). What he saw was a pooled tail of three
 sparse subfolders laid down the radius as one four-note column, which is the 2026-08-23 rule and

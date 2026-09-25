@@ -4333,6 +4333,11 @@ function mountVaultGraph(root, data, deps) {
   // github#186 -- each note's cell, fixed for a cascade
   /** @type {Record<string, string> | null} */
   var cellHold = null;
+  // github#186 -- one place drops what a walk held, wherever it is cut short
+  function clearHolds() {
+    moveFrom = null; splitHold = null; cellHold = null; leftColor = null; shrinkFade = false;
+    colWalk = null;
+  }
   /** @type {Record<string, Point> | null} */
   var posSrc = null;
   /** @type {Record<string, number>} */
@@ -4400,7 +4405,7 @@ function mountVaultGraph(root, data, deps) {
       WIN.clearTimeout(cascadeRun.guard);
       cascadeRun = null;
     }
-    moveFrom = null; splitHold = null; cellHold = null; leftColor = null;
+    clearHolds();
     // github#86 -- only the switch's own cascade draws stand-ins
     if (!opts.hand && standIns.length) dropStandIns();
     // github#86 -- the left disc keeps its own colours while it stands
@@ -4710,7 +4715,7 @@ function mountVaultGraph(root, data, deps) {
 
     var settle = function () {
       if (!lastCascade.exit) lastCascade.exit = "settle() called from outside the loop";
-      moveFrom = null; splitHold = null; cellHold = null; leftColor = null; shrinkFade = false;
+      clearHolds();
       if (cascadeRun) {
         WIN.cancelAnimationFrame(cascadeRun.raf);
         WIN.clearTimeout(cascadeRun.guard);
@@ -7351,9 +7356,9 @@ function mountVaultGraph(root, data, deps) {
     }
     if (anim) { WIN.cancelAnimationFrame(anim); anim = null; }
     if (animGuard) { WIN.clearTimeout(animGuard); animGuard = null; }
-    moveFrom = null; splitHold = null; cellHold = null;
+    clearHolds();
     pinnedPlan = null; planKeep = null;
-    cellNow = null; edgeNow = null; colWalk = null;
+    cellNow = null; edgeNow = null;
     posSrc = null;
     var prevBand = bandLock, prevGeom = geomLock;
     bandLock = null; geomLock = null;
@@ -7439,6 +7444,7 @@ function mountVaultGraph(root, data, deps) {
       }
       if (anim) { WIN.cancelAnimationFrame(anim); anim = null; }
       if (animGuard) { WIN.clearTimeout(animGuard); animGuard = null; }
+      clearHolds();
       pinnedPlan = null; planKeep = null; cellNow = null; edgeNow = null;
     colWalk = null;
       posSrc = null;
@@ -7463,8 +7469,8 @@ function mountVaultGraph(root, data, deps) {
       WIN.clearTimeout(cascadeRun.guard);
       cascadeRun = null;
     }
+    clearHolds();
     pinnedPlan = null; planKeep = null; cellNow = null; edgeNow = null; posSrc = null;
-    colWalk = null;
     state.until = null;
     timelineFrame(true);
   }
@@ -7486,6 +7492,7 @@ function mountVaultGraph(root, data, deps) {
     }
     if (anim) { WIN.cancelAnimationFrame(anim); anim = null; }
     if (animGuard) { WIN.clearTimeout(animGuard); animGuard = null; }
+    clearHolds();
     pinnedPlan = null; planKeep = null; cellNow = null; edgeNow = null;
     colWalk = null;
     posSrc = null;
@@ -8694,8 +8701,9 @@ function mountVaultGraph(root, data, deps) {
     syncDimUI();
     if (n) {
       // github#86 -- fresh locks for the new dimension, positions untouched
-      moveFrom = null; splitHold = null; cellHold = null; pinnedPlan = null; planKeep = null;
-      cellNow = null; edgeNow = null; colWalk = null; posSrc = null;
+      clearHolds();
+      pinnedPlan = null; planKeep = null;
+      cellNow = null; edgeNow = null; posSrc = null;
       bandLock = null; geomLock = null;
       // github#86 -- alpha is the cascade's to walk: a note this disc hides and
       // github#86 -- the next shows ARRIVES with the fill edge, not at the switch
@@ -12105,6 +12113,7 @@ function mountVaultGraph(root, data, deps) {
       WIN.clearTimeout(cascadeRun.guard);
       cascadeRun = null;
     }
+    clearHolds();
     if (anim) { WIN.cancelAnimationFrame(anim); anim = null; }
     if (animGuard) { WIN.clearTimeout(animGuard); animGuard = null; }
     if (hoverRaf) { WIN.cancelAnimationFrame(hoverRaf); hoverRaf = 0; }
