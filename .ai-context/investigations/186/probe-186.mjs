@@ -286,6 +286,15 @@ try {
   // so the measured act can show it again
   // github#186 -- "range:<fraction>" narrows the date range to the last <fraction> of the span
   const doAct = async (kind, target) => {
+    // github#186 -- "sel:<css>" clicks the centre of the first element the selector finds
+    if (kind === "sel") {
+      const w = await page.j(`(function () { var el = document.querySelector(${JSON.stringify(target)}); if (!el) return null; var r = el.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2, label: (el.textContent || "").trim().slice(0, 40) }; })()`);
+      if (!w) throw new Error(`no element for ${target}`);
+      await page.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: w.x, y: w.y, buttons: 0 });
+      await page.send("Input.dispatchMouseEvent", { type: "mousePressed", x: w.x, y: w.y, button: "left", clickCount: 1, buttons: 1 });
+      await page.send("Input.dispatchMouseEvent", { type: "mouseReleased", x: w.x, y: w.y, button: "left", clickCount: 1, buttons: 0 });
+      return w;
+    }
     if (kind !== "range") return click(kind, target);
     const frac = Number(target);
     const from = await page.j(`(function () { var lo = null, hi = null;
