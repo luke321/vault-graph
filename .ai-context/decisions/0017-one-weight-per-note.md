@@ -96,6 +96,32 @@ Four things that each had to be got right, and each of which was measured wrong 
   was one drawn size for the whole vault. Anchoring the ramp at the floor makes pinning
   impossible, and it is what develop did.
 
+**Under a filter, two more terms (2026-09-25).** Watching the date range narrow on the review
+page: *"why are the notes growing so much when filtering to the last few percent by date? links
+are vanishing as well so note weight should not explode."* Measured, develop and the branch
+alike: at the last 0.5% of the dominant-folder vault the pitch had ballooned 160 → 1,280 and the
+median dot with it, 3.24 → 34.9 px (10.8×), the four `projects` notes drawn at 62 / 49 / 49 / 35 px
+by whole-vault degrees of 10 / 6 / 6 / 3 while every one of them had **zero** visible links. Two
+things were wrong in his eyes, and he chose both fixes over keeping the law as written:
+
+- **The ramp reads the links a note has to notes on screen.** `rankVisible()` counts, per note,
+  the edges whose other end is visible under the target filter, over all its edges; `dotRamp`
+  multiplies the whole-vault ramp by that share. At full vault the share is 1 and every resting
+  dot is what it was; the goldens do not move. Across a cascade the share walks from the source's
+  to the destination's on the cascade's own ease, so a note whose links are vanishing shrinks
+  through the walk rather than at the click. A note with no links at all keeps share 1.
+- **A filtered dot stays within 1× and `DOT_GROW_MAX = 3` of its unfiltered rest.** `takeRestDots`
+  records every dot's size at each unfiltered rest; under a filter `dotPx` lifts a dot to that
+  size (the visible-link ramp would otherwise send a note with no visible links to the 1.5 px
+  floor) and caps it at three times it, however far the rows collapse. The suite's *filtered to
+  the bone* asserts exactly that, note by note, in place of github#65's diameter/step floor and
+  github#53's legibility floor, both of which required the growth this retires.
+
+Measured after, the last 0.5%: dominant-folder median **3.41 px (1.1× rest)**, max 5.93 (an
+orphan at its rest); demo **1.0×**; tag vault 7.16 px (2.0×, six orphans on the hub cap). The
+ceiling still follows the pitch and still caps it at `2.6 × 2.6 × UNIT`; it simply no longer
+reaches a dot that has lost its links.
+
 `ROOM_PCTL`, `roomPool`, `plan.room`, `bandOf().room`, the cascade's `roomNow` / `roomSrcB` /
 `roomDstB` walk and `DOT_ROOM_MAX` are gone. The `DOT_MIN_PX` floor, the edge cap, the frame fit
 (`github#41`), the hub cap (`github#35`) and the cascade's two-resting-sizes bound (`github#66`)

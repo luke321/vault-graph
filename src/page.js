@@ -944,10 +944,38 @@ function mountVaultGraph(root, data, deps) {
 
   // github#186, decisions/0017
   var DOT_CLEAR = 0.92;
+  // github#186 -- a note's links to notes on screen, over all its links
+  /** @type {Record<string, number>} */
+  var visSrc = dict();
+  /** @type {Record<string, number>} */
+  var visDst = dict();
+  var visEase = 1;
+  /** @param {(id: string) => boolean} on @returns {Record<string, number>} */
+  function rankVisible(on) {
+    /** @type {Record<string, number>} */
+    var all = dict();
+    /** @type {Record<string, number>} */
+    var vis = dict();
+    /** @type {Record<string, boolean>} */
+    var seen = dict();
+    graph.forEachNode(function (id) { seen[id] = !!on(id); });
+    graph.forEachEdge(function (e, at, s, t) {
+      all[s] = (all[s] || 0) + 1; all[t] = (all[t] || 0) + 1;
+      if (seen[s] && seen[t]) { vis[s] = (vis[s] || 0) + 1; vis[t] = (vis[t] || 0) + 1; }
+    });
+    /** @type {Record<string, number>} */
+    var out = dict();
+    graph.forEachNode(function (id) { var n = all[id] || 0; out[id] = n > 0 ? (vis[id] || 0) / n : 1; });
+    return out;
+  }
   /** @param {string} id */
   function dotRamp(id) {
     var t = ((graph.getNodeAttribute(id, "size") || NODE_MIN) - NODE_MIN) / (NODE_MAX - NODE_MIN);
-    return t > 1 ? 1 : t < 0 ? 0 : t;
+    t = t > 1 ? 1 : t < 0 ? 0 : t;
+    var a = visSrc[id], b = visDst[id];
+    if (a === undefined) a = b === undefined ? 1 : b;
+    if (b === undefined) b = a;
+    return t * (a + (b - a) * visEase);
   }
 
   // github#58
@@ -4104,6 +4132,8 @@ function mountVaultGraph(root, data, deps) {
   function present(id) { return (alpha[id] || 0) > 0.004; }
   function syncAlpha() {
     graph.forEachNode(function (id) { alpha[id] = visible(id) ? timeFactor(id) : 0; });
+    // github#186 -- the rank follows what is on screen
+    visSrc = visDst = rankVisible(willShow); visEase = 1;
     // github#40, design/0012
     trailRefresh();
   }
@@ -4423,6 +4453,18 @@ function mountVaultGraph(root, data, deps) {
       cascadeRun = null;
     }
     clearHolds();
+    // github#186 -- the rank walks from where it is to the destination's
+    (function () {
+      /** @type {Record<string, number>} */
+      var cur = dict();
+      graph.forEachNode(function (id) {
+        var a = visSrc[id], b = visDst[id];
+        if (a === undefined) a = b === undefined ? 1 : b;
+        if (b === undefined) b = a;
+        cur[id] = a + (b - a) * visEase;
+      });
+      visSrc = cur; visDst = rankVisible(willShow); visEase = 0;
+    })();
     // github#86 -- only the switch's own cascade draws stand-ins
     if (!opts.hand && standIns.length) dropStandIns();
     // github#86 -- the left disc keeps its own colours while it stands
@@ -4733,6 +4775,7 @@ function mountVaultGraph(root, data, deps) {
     var settle = function () {
       if (!lastCascade.exit) lastCascade.exit = "settle() called from outside the loop";
       clearHolds();
+      visSrc = visDst; visEase = 1;
       if (cascadeRun) {
         WIN.cancelAnimationFrame(cascadeRun.raf);
         WIN.clearTimeout(cascadeRun.guard);
@@ -4965,9 +5008,13 @@ function mountVaultGraph(root, data, deps) {
         fitPos = outPos; fitVer = -1;
         /** @type {Record<string, number>} */
         var sizes = dict();
+        // github#186 -- the endpoint's own rank: the source's for A, the destination's for B
+        var keepEase = visEase;
+        visEase = alphaFn ? 1 : 0;
         graph.forEachNode(function (id, at) {
           if ((alpha[id] || 0) > 0.004) sizes[id] = dotPx(at.size, id);
         });
+        visEase = keepEase;
         fitPos = null; fitVer = -1;
         var got = { pos: outPos, cells: cellRoom, edges: edgeCap, sizes: sizes };
         cellNow = savedCell; edgeNow = savedEdge;
@@ -5152,6 +5199,7 @@ function mountVaultGraph(root, data, deps) {
       // github#86 -- the erase edge, in degrees from 12 o'clock, for the checks
       if (handLap) { lastCascade.handDeg = 360 * frame / handLap; lastCascade.handLap = handLap; }
       var ease = pr * pr * (3 - 2 * pr);
+      visEase = ease;
       // github#78
       if (barWalking) barWalkTick(ease);
       var busy = false;
@@ -5549,12 +5597,33 @@ function mountVaultGraph(root, data, deps) {
     var targets = ringsLayout();
     traceTag("");
     if (!targets) { if (done) done(); return; }
-    if (animate) animateTo(targets, done);
+    if (animate) animateTo(targets, function () { takeRestDots(); if (done) done(); });
     else {
       assignPositions(targets);
+      takeRestDots();
       renderer.refresh({ skipIndexation: false });
       if (done) done();
     }
+  }
+
+  // github#186 -- a date range, the timeline or a hidden group filters
+  function filterOn() {
+    if (state.from !== null || state.to !== null || state.until !== null) return true;
+    var h = state.hidden[state.dim];
+    if (h) for (var g in h) if (h[g]) return true;
+    for (var k in state.hiddenSub) if (state.hiddenSub[k]) return true;
+    return false;
+  }
+  // github#186 -- every dot's size at the unfiltered rest: a filter's bound
+  /** @type {Record<string, number>} */
+  var restDot = dict();
+  var restTaking = false;
+  function takeRestDots() {
+    if (!renderer || cascadeRun || filterOn()) return;
+    restTaking = true;
+    try {
+      graph.forEachNode(function (id, a) { restDot[id] = dotPx(a.size || NODE_MIN, id); });
+    } finally { restTaking = false; }
   }
 
   /* ---------------------------------------------------------------- render */
@@ -6053,6 +6122,8 @@ function mountVaultGraph(root, data, deps) {
   // github#13
   var DOT_OF_PITCH = 11 / 28;
   var DOT_MIN_PX = 1.5;
+  // github#186 -- a filtered dot grows at most this far past its rest
+  var DOT_GROW_MAX = 3;
   // github#186, decisions/0017
   var DOT_MAX_SPREAD = DENSITY_MAX;
   var DOT_OVER_PITCH = DENSITY_MAX;
@@ -6146,6 +6217,9 @@ function mountVaultGraph(root, data, deps) {
     // github#107, github#186 -- the floor IS the ramp's bottom, so no dot is pinned to it
     var v = lo + (hi - lo) * (id !== undefined ? dotRamp(id) : 1);
     if (v < lo) v = lo;
+    // github#186 -- under a filter a dot keeps at least its resting size
+    var rest = id !== undefined && !restTaking ? restDot[id] : undefined;
+    if (rest !== undefined && v < rest && filterOn()) v = rest;
     var capU = edgeCap[id];
     if (capU !== undefined && capU > 0 && v > capU * pxPerUnit) v = capU * pxPerUnit;
     // github#41, design/0011
@@ -6161,6 +6235,8 @@ function mountVaultGraph(root, data, deps) {
       var hubU = HUB_ROW0_FRAC * geomLock.r0 * INNER_SCALE * UNIT;
       if (v > hubU * pxPerUnit) v = hubU * pxPerUnit;
     }
+    // github#186 -- and never more than DOT_GROW_MAX times it
+    if (rest !== undefined && v > DOT_GROW_MAX * rest) v = DOT_GROW_MAX * rest;
     // github#66
     if (id !== undefined && cascadeRun && cascadeRun.sizeCap) {
       var scap = cascadeRun.sizeCap[id];
@@ -11629,7 +11705,7 @@ function mountVaultGraph(root, data, deps) {
                                              maxR: r3(geomLock.maxR), rows: geomLock.rows,
                                              bandTotal: geomLock.bandTotal } : null,
                         bands: { inner: bandStat(pts.slice(0, gi)), outer: bandStat(pts.slice(gi)) },
-                        dots: { ofPitch: r3(DOT_OF_PITCH), minPx: DOT_MIN_PX,
+                        dots: { ofPitch: r3(DOT_OF_PITCH), minPx: DOT_MIN_PX, growMax: DOT_GROW_MAX,
                                 maxSpread: DOT_MAX_SPREAD,
                                 clear: DOT_CLEAR, overPitch: DOT_OVER_PITCH,
                                 m: r3(1 / (NODE_MAX - NODE_MIN)), b: 0, lo: 0 },

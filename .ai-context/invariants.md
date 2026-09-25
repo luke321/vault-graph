@@ -907,6 +907,32 @@ verbatim from `probe-bone.js`) before anything changed.
   and the check's floor is the thing to revisit. **The full suite therefore shows the tag vault
   at 66/67 on this branch, by decision**, until that floor is.
 
+#### A filtered dot is ranked by its visible links and stays within 1×–3× of its rest
+
+Asked on 2026-09-25, watching the range clips: *"why are the notes growing so much when filtering
+to the last few percent by date? links are vanishing as well so note weight should not
+explode."* Measured on the dominant-folder vault, develop and the branch alike
+(`scratchpad/186/degrees.mjs`):
+
+| range | notes | median degree | median **visible** degree | median dot | pitch |
+|---|---|---|---|---|---|
+| rest | 954 | 6 | 5 | 3.24 px | 160 |
+| last 10% | 86 | 3 | 0 | 7.3 px (2.2×) | 640 |
+| last 2.5% | 24 | 4 | 0 | 15.5 px (4.8×) | 1,280 |
+| last 0.5% | 8 | 6 | 0 | 34.9 px (10.8×) | 1,280 |
+
+The growth was the pitch — the 2026-08 law that the disc's density follows the notes on screen,
+which the suite's *filtered to the bone* enforced with a diameter/step floor — and the ramp read
+whole-vault degree, never the visible one. He chose to change both (decisions/0017 has the
+mechanism): the ramp is scaled by the share of a note's links whose other end is on screen,
+walked on the cascade's ease; and under a filter a dot keeps at least its unfiltered resting
+size and never exceeds `DOT_GROW_MAX = 3` times it. After: the same column reads **3.70 / 3.88 /
+3.41 px (1.1× rest)**; demo 1.0× throughout; tag vault 7.16 px at the bone (2.0×, six orphans
+on the hub cap, which binds before the growth cap). Rest layouts byte-identical on all five
+fixtures; at full vault every share is 1, so nothing at rest changes. The check asserts the two
+bounds note by note against the resting probe, in place of the step floor and the legibility
+floor.
+
 **What a walk holds is dropped in one place, wherever the walk is cut short** (`clearHolds`, from
 a second static review on 2026-09-25). `cellHold`, `splitHold`, `moveFrom`, `leftColor`,
 `shrinkFade` and `colWalk` were cleared by the cascade's own start and settle and by

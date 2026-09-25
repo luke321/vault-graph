@@ -3963,7 +3963,13 @@ check("the disc's density follows the notes on screen", async (p) => {
       __vg.renderer.refresh();
     })()`);
     await sleep(400);
-    return p.j("__vg.densityReport()");
+    const r = await p.j("__vg.densityReport()");
+    // github#186 -- every shown dot's radius, bounded against its own rest
+    r.sizes = await p.j(`(function () { var o = {}; __vg.graph.forEachNode(function (id) {
+      var d = __vg.renderer.getNodeDisplayData(id);
+      if (!d || d.hidden || (__vg.alpha[id] || 0) < 0.999) return;
+      o[id] = __vg.renderer.scaleSize(d.size); }); return o; })()`);
+    return r;
   };
 
   const rows = [await at(1), await at(0.8), await at(0.6), await at(0.4)];
@@ -4025,14 +4031,30 @@ check("the disc's density follows the notes on screen", async (p) => {
   const grew = widest.sp > 1.05 ? widest.sizeMedian / base.sizeMedian : 1;
   const dss = sq.map((q) => q.ds).filter((v) => v > 0);
   const dsLo = dss.length ? Math.min(...dss) : 1, dsHi = dss.length ? Math.max(...dss) : 1;
-  const size_ok = !dss.length || (dsLo >= 0.15 && dsHi <= 0.8 && dsHi / dsLo < 2.2);
+  // github#186 -- the lattice follows the notes; a dot stays within
+  // github#186 -- 1x..DOT_GROW_MAX of its own rest, note by note
+  const GROW = (await p.j("__vg.debugDump().dots.growMax").catch(() => null)) || 3;
+  let under = 0, over = 0, compared = 0, worstLo = 1, worstHi = 1;
+  for (const r of rows.slice(1)) {
+    for (const id of Object.keys(r.sizes || {})) {
+      const a = base.sizes ? base.sizes[id] : undefined;
+      if (!(a > 0)) continue;
+      compared++;
+      const q = r.sizes[id] / a;
+      if (q < 0.97) { under++; if (q < worstLo) worstLo = q; }
+      if (q > GROW * 1.03) { over++; if (q > worstHi) worstHi = q; }
+    }
+  }
+  const size_ok = under === 0 && over === 0;
 
   return {
     ok: square_ok && size_ok,
     detail: `step/pitch per band over ${sq.length} sampled states: ` +
             sq.map((q) => `${q.band[0]}${q.n}:${q.ratio}/d${q.ds}`).join(" ") +
             ` -- worst square ${worstSq.ratio} (needs ${SQ_LO.toFixed(2)}-${SQ_HI.toFixed(2)}),` +
-            ` diameter/step ${dsLo}-${dsHi} (needs 0.15-0.80, spread <2.2)` +
+            ` ${compared} dot-states against their unfiltered size: ${under} under (worst ${worstLo.toFixed(2)}x), ` +
+            `${over} past ${GROW}x (worst ${worstHi.toFixed(2)}x); median dot grew ${grew.toFixed(2)}x, ` +
+            `diameter/step ${dsLo}-${dsHi} (context, not asserted)` +
             `; context, not asserted: pitch*sqrt(shown) ` +
             roots.map((v) => Math.round(v)).join("/") + ` spread ${spread.toFixed(3)}x` +
             `; spacing reached ${widest.sp} at ${widest.shown} of ` +
@@ -5204,11 +5226,13 @@ check("filtered to the bone, the disc stays drawable", async (p) => {
     var a0 = __vg.renderer.graphToViewport({ x: 0, y: 0 });
     var b0 = __vg.renderer.graphToViewport({ x: 160, y: 0 });
     var perPx = 160 / Math.hypot(b0.x - a0.x, b0.y - a0.y);
-    var rows = {}, n = 0;
+    var rows = {}, n = 0, sizes = {};
     __vg.graph.forEachNode(function (id, at) {
       var d = __vg.renderer.getNodeDisplayData(id);
       if (!d || d.hidden || (__vg.alpha[id] || 0) < 0.999) return;
       n++;
+      // github#186 -- every lit dot's radius in units, bounded against its rest
+      sizes[id] = __vg.renderer.scaleSize(d.size) * perPx;
       var r = Math.hypot(at.x, at.y);
       var k = Math.round(r / 8) * 8;
       (rows[k] || (rows[k] = [])).push({ th: Math.atan2(at.y, at.x),
@@ -5286,9 +5310,11 @@ check("filtered to the bone, the disc stays drawable", async (p) => {
              // these when there is no step to size a dot against.
              minDotPx: dots.length ? Math.round(dots[0] / perPx * 100) / 100 : 0,
              medDotPx: Math.round(medDot / perPx * 100) / 100,
-             rows: Object.keys(rows).length };
+             rows: Object.keys(rows).length, sizes: sizes };
   })()`;
   const rest = await p.j(probe);
+  // github#186 -- a filtered dot stays within 1x..DOT_GROW_MAX of its rest
+  const GROW = (await p.j("__vg.debugDump().dots.growMax").catch(() => null)) || 3;
   const bad = [];
   const seen = [];
   const judge = (label, r) => {
@@ -5301,14 +5327,19 @@ check("filtered to the bone, the disc stays drawable", async (p) => {
       bad.push(`${label}: ${r.overlaps} overlapping pair(s), worst ${r.worstClear} = ` +
                `${r.worstRel}% of the row median`);
     }
-    // github#65
-    if (r.stepped) {
-      if (r.ds < 0.15) bad.push(`${label}: dots collapsed, diameter/step ${r.ds}`);
-    } else if (r.minDotPx < rest.medDotPx) {
-      // github#53
-      bad.push(`${label}: no row holds four notes, and the smallest dot (${r.minDotPx}px) is ` +
-               `under the resting median (${rest.medDotPx}px)`);
+    // github#186 -- in place of github#65's step floor and github#53's
+    // github#186 -- each dot within 1x..DOT_GROW_MAX of its own rest
+    let under = 0, over = 0, worstLo = 1, worstHi = 1, compared = 0;
+    for (const id of Object.keys(r.sizes || {})) {
+      const a = rest.sizes ? rest.sizes[id] : undefined;
+      if (!(a > 0)) continue;
+      compared++;
+      const q = r.sizes[id] / a;
+      if (q < 0.97) { under++; if (q < worstLo) worstLo = q; }
+      if (q > GROW * 1.03) { over++; if (q > worstHi) worstHi = q; }
     }
+    if (under) bad.push(`${label}: ${under} of ${compared} dots under their resting size (worst ${worstLo.toFixed(2)}x)`);
+    if (over) bad.push(`${label}: ${over} of ${compared} dots past ${GROW}x their resting size (worst ${worstHi.toFixed(2)}x)`);
     if (r.holeRatio > 3.2) bad.push(`${label}: a gap ${r.holeRatio}x the row median INSIDE one wedge`);
   };
 
