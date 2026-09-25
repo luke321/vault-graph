@@ -5619,12 +5619,18 @@ function mountVaultGraph(root, data, deps) {
   // github#186 -- every dot's size at the unfiltered rest: a filter's bound
   /** @type {Record<string, number>} */
   var restDot = dict();
+  /** @type {Record<string, number>} */
+  var restT = dict();
   var restTaking = false;
   function takeRestDots() {
     if (!renderer || cascadeRun || filterOn()) return;
     restTaking = true;
     try {
-      graph.forEachNode(function (id, a) { restDot[id] = dotPx(a.size || NODE_MIN, id); });
+      graph.forEachNode(function (id, a) {
+        var t = ((a.size || NODE_MIN) - NODE_MIN) / (NODE_MAX - NODE_MIN);
+        restT[id] = t > 1 ? 1 : t < 0 ? 0 : t;
+        restDot[id] = dotPx(a.size || NODE_MIN, id);
+      });
     } finally { restTaking = false; }
   }
 
@@ -6214,13 +6220,16 @@ function mountVaultGraph(root, data, deps) {
     var hi = DOT_OF_PITCH * u * pxPerUnit;
     lastDotHi = hi;
     // github#107 -- a floor in SCREEN px; the renderer divides by the ratio
-    var lo = Math.min(hi, DOT_MIN_PX * (renderer ? renderer.getCamera().getState().ratio || 1 : 1));
+    var camLo = restTaking ? DOT_MIN_PX : DOT_MIN_PX * (renderer ? renderer.getCamera().getState().ratio || 1 : 1);
+    var lo = Math.min(hi, camLo);
     lastDotLo = lo;
     // github#107, github#186 -- the floor IS the ramp's bottom, so no dot is pinned to it
     var v = lo + (hi - lo) * (id !== undefined ? dotRamp(id) : 1);
     if (v < lo) v = lo;
+    // github#186 -- the rest was taken at ratio 1; its floor share follows
+    var rest = id !== undefined && !restTaking && restDot[id] !== undefined
+      ? restDot[id] + (camLo - DOT_MIN_PX) * (1 - (restT[id] || 0)) : undefined;
     // github#186 -- under a filter a dot keeps at least its resting size
-    var rest = id !== undefined && !restTaking ? restDot[id] : undefined;
     if (rest !== undefined && v < rest && filterOn()) v = rest;
     var capU = edgeCap[id];
     if (capU !== undefined && capU > 0 && v > capU * pxPerUnit) v = capU * pxPerUnit;

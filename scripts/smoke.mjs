@@ -3963,6 +3963,9 @@ check("the disc's density follows the notes on screen", async (p) => {
       __vg.renderer.refresh();
     })()`);
     await sleep(400);
+    // github#186 -- at ratio 1, so the screen floor reads alike in every state
+    await p.eval("__vg.renderer.getCamera().setState({ ratio: 1 }); void 0");
+    await sleep(150);
     const r = await p.j("__vg.densityReport()");
     // github#186 -- every shown dot's radius, bounded against its own rest
     r.sizes = await p.j(`(function () { var o = {}; __vg.graph.forEachNode(function (id) {
@@ -5312,6 +5315,10 @@ check("filtered to the bone, the disc stays drawable", async (p) => {
              medDotPx: Math.round(medDot / perPx * 100) / 100,
              rows: Object.keys(rows).length, sizes: sizes };
   })()`;
+  // github#186 -- every probe at ratio 1: the floor is a screen size
+  // github#186 -- and the auto-fit would move it under the measure
+  const atOne = async () => { await p.eval("__vg.renderer.getCamera().setState({ ratio: 1 }); void 0"); await sleep(150); };
+  await atOne();
   const rest = await p.j(probe);
   // github#186 -- a filtered dot stays within 1x..DOT_GROW_MAX of its rest
   const GROW = (await p.j("__vg.debugDump().dots.growMax").catch(() => null)) || 3;
@@ -5351,6 +5358,7 @@ check("filtered to the bone, the disc stays drawable", async (p) => {
     if (!hid) continue;
     await settle(p);
     await sleep(600);
+    await atOne();
     judge(`hidden through ${g}`, await p.j(probe));
   }
   for (const g of groups) {
@@ -5379,6 +5387,7 @@ check("filtered to the bone, the disc stays drawable", async (p) => {
       await p.eval(`__vg.setRange(${JSON.stringify(from)}, null); void 0`);
       await settle(p);
       await sleep(600);
+      await atOne();
       judge(`range last ${Math.round(frac * 1000) / 10}%`, await p.j(probe));
     }
   }
