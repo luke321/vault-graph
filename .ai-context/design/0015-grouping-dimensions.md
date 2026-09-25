@@ -1,5 +1,39 @@
 # Grouping dimensions: folders, tags, and the filing
 
+## Fold-and-regrow prototype (github#186, 2026-09-25)
+
+The branch now defaults to folding the old dimension toward one row per ring and growing the
+new dimension outward. This replaces the clock sweep as the default; the sweep described below
+remains available for comparison through `__vg.foldSwitch = false` in the standalone debug API.
+`true` restores the fold. This is a prototype awaiting browser measurement and visual review.
+
+Both worlds share the cascade's clock and the locked ring boundaries. Departure occupies
+progress 0..0.6; arrival occupies 0.4..1. The 20% overlap leaves some notes visible while the
+grouping changes. Each cell distributes its fades using the same deterministic interleave as
+the packing rework. A fade takes at least 0.18 of the whole transition and stretches up to the
+whole 0.6 phase for small cells. Both bands use the same phase progress.
+
+Source and destination cell membership are captured once. Each frame plans each participating
+world separately with its endpoint pitch and a depth walking between one row and its resting
+depth. The source also retains its own group counts, colours and band assignment. This costs
+up to two layout passes per frame, versus no frame planning for the clock sweep; performance
+on large vaults has not yet been measured. The existing row caps and radial movement limit
+apply, using each note's own world's pitch. The arriving plan converges to `finalPos` before
+the cascade settles.
+
+Dot sizes retain their measured resting ceiling during the fold and still obey the drawn-frame
+clearance cap when enabled. `clearHolds()` clears this temporary sizing state on cancellation
+as well as completion. Removing stand-ins also clears it, and hiding the tab during a fold
+takes the stand-ins home before rebuilding the resting view.
+
+The smoke checks exercise both directions, inward and outward motion, monotone fades, the
+resting fixed point, and tab-hidden interruption. The existing fill-edge check explicitly
+selects the retained clock sweep and restores the mode afterward. These checks have been
+added but **have not run successfully yet**: the sandboxed launch failed with `spawn EPERM`.
+TypeScript and ESLint checks were run directly; those are not evidence of visual correctness.
+
+---
+
 **Status** as-built · github#86, 2026-09-09 · asked for on Reddit: group the disc by **tag**
 instead of by folder, so a vault organised by tag gets a picture of itself too.
 

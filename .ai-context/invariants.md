@@ -1,5 +1,32 @@
 # Invariants
 
+## Fold-and-regrow prototype timing (github#186)
+
+`design/0015` records the branch's new default dimension transition. `FOLD_ENTER = 0.4`,
+`FOLD_PHASE = 0.6`, and `FOLD_FADE = 0.18` are fractions of the existing cascade duration.
+Departure and arrival overlap for 0.2 of that duration. Small cells lengthen their fades to
+`min(FOLD_PHASE, max(FOLD_FADE, FOLD_PHASE * 3 / n))`. These are prototype choices, not
+measured acceptance thresholds. The clock sweep remains available through `__vg.foldSwitch`.
+
+The intended guarantees are monotone opacity on both worlds, independent locked ring boundaries,
+endpoint cell membership, the existing `RADIAL_STEP_MAX` movement limit during the walk, frame
+clearance when enabled, and no retained fold sizing or stand-ins after completion or tab hiding.
+The targeted checks are `--only "tags: fold and regrow"` and `--only "tags: hiding the tab"`.
+
+**Run and measured on 2026-09-25, on the left screen, before the commit** (the prototype's author
+could not launch a browser): *fold and regrow* passes on the demo (tag: 119 frames, fold 952
+units, grow 105, 0 reversals, relayout drift 0.000, converged; folder the same) and the 10k
+(33 frames, converged); *hiding the tab midway* releases everything (1,403 stand-ins → 0, drift
+0.000); the three switch checks it adapted stay green on all five fixtures. Filmed against
+develop on the tag and demo vaults (`scratchpad/186/cap-fold`, on the review page): the old rings
+fold to one row and the new grow from one; **around the middle of the clock the disc goes nearly
+dark** — old faded, new not in — the 20% overlap being thin; and **the last frame snaps 0.23 of
+a pitch (demo) / 0.16 (tag) onto the rest**, which the hand does not. `pack-check.mjs` cannot
+judge a switch otherwise: it classifies by the ring a note is in *now*, so its rail and area
+readings are noise for this act. **Its cost on the 10k, headless at real speed: 70.7 ms a frame
+(14 fps) against the hand's 57.7 (17 fps)** — the two layout passes per frame add 22%. All three
+are open items, not acceptance; the maintainer kept the prototype on sight, default on.
+
 Measured properties that must not regress. Each one has a way to check it — use it,
 don't reason about it.
 

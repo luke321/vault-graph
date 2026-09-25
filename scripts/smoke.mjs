@@ -1006,7 +1006,7 @@ check("tags: a dot in the disc being left keeps its colour until it has faded", 
       Object.keys(b).forEach(function (id) {
         // a dot that has left stands in its final seat, under its new group
         var a = __vg.graph.getNodeAttributes(id);
-        if (Math.abs(a.x - b[id].x) > 0.5 || Math.abs(a.y - b[id].y) > 0.5 || __vg.groupOf(id) !== b[id].g) return;
+        if (__vg.groupOf(id) !== b[id].g || a.standIn) return;
         if ((__vg.alpha[id] || 0) <= 0.004) return;
         standing++;
         var c = __vg.nodeColor(id);
@@ -1037,7 +1037,7 @@ check("tags: a dot in the disc being left keeps its colour until it has faded", 
   // github#151
   await storeBack(p, storedWas);
   return {
-    ok: dotFrames === 0 && rowFrames === 0 && samples > 3,
+    ok: dotFrames === 0 && rowFrames === 0 && samples > 3 && standingFrames > 0,
     detail: `${n} dots standing in the folder disc, ${samples} samples over the switch: ` +
             `${dotFrames} of ${standingFrames} standing dot-frames in a colour other than the one they had` +
             (worstFrame ? ` (worst frame ${worstFrame}, e.g. ${example})` : "") +
@@ -1048,6 +1048,9 @@ check("tags: a dot in the disc being left keeps its colour until it has faded", 
 }, { on: WALK, clock: "real", leaves: ["state.hidden"] });
 
 check("tags: a note one disc hides and the other shows arrives with the fill edge", async (p) => {
+  const foldWas = await p.j("__vg.foldSwitch");
+  try {
+  await p.eval("__vg.foldSwitch = false; void 0");
   // github#151 -- the Tags button persists the dimension, setDim() does not
   const storedWas = await storeSnap(p);
   await clearRange(p);
@@ -1127,8 +1130,111 @@ check("tags: a note one disc hides and the other shows arrives with the fill edg
             (first ? ` (first: ${first})` : "") + `, ${litEnd} of ${n.hid} lit at the end; ` +
             `${standInsPeak} stand-ins drawn, ${left} left behind, ${nodesEnd} of ${n.nodes} nodes after`,
   };
+  } finally { await p.eval(`__vg.foldSwitch = ${JSON.stringify(foldWas)}; void 0`); }
   // github#151 -- leaves state.hidden: the tag disc seeds its defaults
 }, { on: WALK, clock: "real", leaves: ["state.hidden"] });
+
+// github#186, design/0015
+check("tags: fold and regrow moves both discs and converges on the resting layout", async (p) => {
+  const storedWas = await storeSnap(p);
+  const foldWas = await p.j("__vg.foldSwitch");
+  await clearRange(p);
+  await settle(p);
+  const rides = [];
+  try {
+    await p.eval('__vg.setDim("folder"); __vg.foldSwitch = true; void 0');
+    for (const dim of ["tag", "folder"]) {
+      const ride = await p.eval(`new Promise(function (resolve, reject) {
+        var G = __vg.graph, start = {}, previous = {}, frames = 0, inward = 0, outward = 0, reversals = 0;
+        var raf = 0, timer = setTimeout(function () { cancelAnimationFrame(raf); reject(new Error("fold timed out")); }, 8000);
+        G.forEachNode(function (id, a) {
+          if ((__vg.alpha[id] || 0) > 0.999) start[id] = Math.hypot(a.x, a.y);
+        });
+        function tick() {
+          try {
+            if (__vg.demo.busy()) {
+              frames++;
+              G.forEachNode(function (id, a) {
+                var al = __vg.alpha[id] || 0, r = Math.hypot(a.x, a.y), prev = previous[id];
+                if (start[id] !== undefined && !a.standIn) {
+                  if (al > 0.5) inward = Math.max(inward, start[id] - r);
+                  if (prev && al > prev.al + 1e-6) reversals++;
+                } else {
+                  if (prev && al > 0.5 && prev.al > 0.5) outward = Math.max(outward, r - prev.r);
+                  if (prev && al < prev.al - 1e-6) reversals++;
+                }
+                previous[id] = { al: al, r: r };
+              });
+              raf = requestAnimationFrame(tick); return;
+            }
+            var landed = {}, drift = 0;
+            G.forEachNode(function (id, a) { if ((__vg.alpha[id] || 0) > 0.999) landed[id] = { x: a.x, y: a.y }; });
+            __vg.applyLayout(false); __vg.applyLayout(false);
+            Object.keys(landed).forEach(function (id) {
+              var a = G.getNodeAttributes(id), b = landed[id];
+              drift = Math.max(drift, Math.hypot(a.x - b.x, a.y - b.y));
+            });
+            clearTimeout(timer);
+            resolve({ dim: __vg.state.dim, frames: frames, inward: inward, outward: outward, reversals: reversals,
+              drift: drift, active: __vg.foldActive, standIns: __vg.standIns().length,
+              path: __vg.lastCascade().path, exit: __vg.lastCascade().exit });
+          } catch (e) { clearTimeout(timer); reject(e); }
+        }
+        document.querySelector('#vg-dim button[data-dim="${dim}"]').click();
+        raf = requestAnimationFrame(tick);
+      })`);
+      rides.push(ride);
+    }
+    return {
+      ok: rides.every((r) => r.frames >= 10 && r.inward > 1 && r.outward > 1 && r.reversals === 0 &&
+        r.drift < 0.5 && !r.active && r.standIns === 0 && r.path === "fold and regrow" && r.exit === "converged"),
+      detail: rides.map((r) => `${r.dim}: ${r.frames}f, fold ${r.inward.toFixed(1)}, grow ${r.outward.toFixed(1)}, ` +
+        `reversals ${r.reversals}, relayout ${r.drift.toFixed(3)}, stand-ins ${r.standIns}, ${r.exit}`).join(" | ")
+    };
+  } finally {
+    await p.eval(`__vg.setDim("folder"); __vg.foldSwitch = ${JSON.stringify(foldWas)}; void 0`);
+    await settle(p);
+    await storeBack(p, storedWas);
+  }
+}, { on: WALK, clock: "real", leaves: ["state.hidden"] });
+
+// github#186, design/0015
+check("tags: hiding the tab midway through a fold releases its temporary state", async (p) => {
+  const storedWas = await storeSnap(p);
+  const foldWas = await p.j("__vg.foldSwitch");
+  await settle(p);
+  try {
+    await p.eval('__vg.setDim("folder"); __vg.foldSwitch = true; void 0');
+    await p.eval('document.querySelector(\'#vg-dim button[data-dim="tag"]\').click(); void 0');
+    await sleep(500);
+    const r = await p.j(`(function () {
+      var running = __vg.foldActive && __vg.demo.busy(), before = __vg.standIns().length;
+      var descriptor = Object.getOwnPropertyDescriptor(document, "visibilityState");
+      try {
+        Object.defineProperty(document, "visibilityState", { configurable: true, value: "hidden" });
+        document.dispatchEvent(new Event("visibilitychange"));
+      } finally {
+        if (descriptor) Object.defineProperty(document, "visibilityState", descriptor);
+        else delete document.visibilityState;
+      }
+      var settled = {}, drift = 0;
+      __vg.graph.forEachNode(function (id, a) { settled[id] = { x: a.x, y: a.y }; });
+      __vg.applyLayout(false); __vg.applyLayout(false);
+      __vg.graph.forEachNode(function (id, a) {
+        var b = settled[id]; drift = Math.max(drift, Math.hypot(a.x - b.x, a.y - b.y));
+      });
+      return { running: running, before: before, after: __vg.standIns().length,
+        active: __vg.foldActive, busy: __vg.demo.busy(), drift: drift };
+    })()`);
+    return { ok: r.running && r.before > 0 && r.after === 0 && !r.active && !r.busy && r.drift < 0.5,
+      detail: `running ${r.running}; stand-ins ${r.before} -> ${r.after}; active ${r.active}; ` +
+        `busy ${r.busy}; relayout ${r.drift.toFixed(3)}` };
+  } finally {
+    await p.eval(`__vg.setDim("folder"); __vg.foldSwitch = ${JSON.stringify(foldWas)}; void 0`);
+    await settle(p);
+    await storeBack(p, storedWas);
+  }
+}, { clock: "real", leaves: ["state.hidden"] });
 
 check("tags: the two buckets stay out of the hue rotation and sort last", async (p) => {
   const r = await p.j(`(function(){

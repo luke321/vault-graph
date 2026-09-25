@@ -1142,6 +1142,7 @@ function mountVaultGraph(root, data, deps) {
    * @property {Record<string, boolean> | null} bandLock
    * @property {GeomLock | null} geomLock
    * @property {Record<string, string>} color        id -> the colour it was drawn in there
+   * @property {Record<string, number>} counts
    */
 
   /** @type {Record<string, string> | null} */
@@ -1233,6 +1234,7 @@ function mountVaultGraph(root, data, deps) {
   // github#86 -- the note takes its stand-in's seat and presence; it goes
   function dropStandIns() {
     if (!standIns.length && !Object.keys(leaving).length) return;
+    foldSizes = null;
     standIns.forEach(function (sid) {
       var id = graph.getNodeAttribute(sid, "standIn");
       if (graph.hasNode(id)) {
@@ -4140,6 +4142,9 @@ function mountVaultGraph(root, data, deps) {
   var RADIAL_EASE = 0.25;
   // github#186 -- a hop's top speed, as a share of the pitch
   var RADIAL_STEP_MAX = 0.12;
+  // github#186, design/0015
+  var foldSwitch = true;
+  var FOLD_ENTER = 0.4, FOLD_PHASE = 0.6, FOLD_FADE = 0.18;
   var SPREAD_MAX  = 78;
   var SPREAD_PER  = 0.17;
   var SPREAD_MIN  = 24;
@@ -4333,10 +4338,13 @@ function mountVaultGraph(root, data, deps) {
   // github#186 -- each note's cell, fixed for a cascade
   /** @type {Record<string, string> | null} */
   var cellHold = null;
+  /** @type {Record<string, number> | null} */
+  var foldSizes = null;
   // github#186 -- one place drops what a walk held, wherever it is cut short
   function clearHolds() {
     moveFrom = null; splitHold = null; cellHold = null; leftColor = null; shrinkFade = false;
     colWalk = null;
+    foldSizes = null;
   }
   /** @type {Record<string, Point> | null} */
   var posSrc = null;
@@ -4383,6 +4391,7 @@ function mountVaultGraph(root, data, deps) {
    * @property {number} [spread]                      stagger window, frames
    * @property {boolean} [cross]                       github#76: swap two discs in one sweep
    * @property {boolean} [hand]                        github#86: one clock sweep, by angle
+   * @property {boolean} [fold]                        github#186, design/0015
    * @property {LeftDisc} [from]                       github#86: the disc being left
    * @property {number} [totalMs]
    * @property {(pr: number) => void} [onFrame]
@@ -4396,6 +4405,14 @@ function mountVaultGraph(root, data, deps) {
   function cascade(done, opts) {
     if (dead) return;                      // github#62
     opts = opts || {};
+    var folding = !!(opts.fold && opts.hand && opts.from);
+    /** @typedef {{ plan: Plan, members: Record<string, boolean>, cells: Record<string, string> }} FoldPlan */
+    /** @type {FoldPlan | null} */
+    var foldA = null;
+    /** @type {FoldPlan | null} */
+    var foldB = null;
+    /** @type {Record<string, number>} */
+    var foldPitch = dict();
     stopPlay();
     trailRefresh();                        // github#40, design/0012
     if (anim) { WIN.cancelAnimationFrame(anim); anim = null; }
@@ -4795,10 +4812,30 @@ function mountVaultGraph(root, data, deps) {
       var w = opts.from;
       if (!w) return fn();
       var sDim = state.dim, sSub = subOrder, sBand = bandLock, sGeom = geomLock, sMove = moveFrom;
+      var sCounts = counts;
       state.dim = w.dim; subOrder = w.subOrder; bandLock = w.bandLock; geomLock = w.geomLock;
+      if (folding) counts = w.counts;
       moveFrom = null; oldWorld = true;
       try { return fn(); }
-      finally { state.dim = sDim; subOrder = sSub; bandLock = sBand; geomLock = sGeom; moveFrom = sMove; oldWorld = false; }
+      finally {
+        state.dim = sDim; subOrder = sSub; bandLock = sBand; geomLock = sGeom;
+        moveFrom = sMove; counts = sCounts; oldWorld = false;
+      }
+    };
+    /** @param {Plan | null} plan @returns {FoldPlan | null} */
+    var holdFold = function (plan) {
+      if (!plan) return null;
+      /** @type {Record<string, boolean>} */
+      var members = dict();
+      /** @type {Record<string, string>} */
+      var cells = dict();
+      plan.cells.forEach(function (c) {
+        c.list.forEach(function (id) {
+          members[id] = true; cells[id] = c.k;
+          foldPitch[id] = UNIT * (c.inner ? plan.spInner * INNER_SCALE : plan.sp);
+        });
+      });
+      return { plan: plan, members: members, cells: cells };
     };
     (function () {
       var a = inWorld(function () { return staticPlan(function (id) { return wasPresent[id]; }); });
@@ -4816,6 +4853,7 @@ function mountVaultGraph(root, data, deps) {
         finally { moveFrom = save; }
       })();
       var aCells = cellsOfG(a), bCells = cellsOfG(b);
+      if (folding) { foldA = holdFold(a); foldB = holdFold(b); }
       if (moves.length) {
         splitHold = dict();
         Object.keys(bCells).forEach(function (g0) { splitHold[g0] = bCells[g0] > 1; });
@@ -5046,6 +5084,56 @@ function mountVaultGraph(root, data, deps) {
         }
       });
     })();
+    // github#186, design/0015
+    if (folding) {
+      [outs, ins].forEach(function (ids, direction) {
+        var held = direction ? foldB : foldA;
+        /** @type {Record<string, boolean>} */
+        var scheduled = dict();
+        if (held) held.plan.cells.forEach(function (c) {
+          var list = c.list.filter(function (id) { return to[id] !== undefined; });
+          var fade = Math.min(FOLD_PHASE, Math.max(FOLD_FADE, FOLD_PHASE * 3 / Math.max(1, list.length)));
+          list.forEach(function (id, index) {
+            var f = list.length < 2 ? 0 : (index * 0.6180339887) % 1;
+            delay[id] = span * ((direction ? FOLD_ENTER : 0) + (FOLD_PHASE - fade) * f);
+            fadeOf[id] = span * fade;
+            scheduled[id] = true;
+          });
+        });
+        ids.forEach(function (id) {
+          if (scheduled[id]) return;
+          delay[id] = span * (direction ? FOLD_ENTER : 0);
+          fadeOf[id] = span * FOLD_PHASE;
+        });
+      });
+      handLap = 0;
+      foldSizes = sizeCap;
+      lastCascade.path = "fold and regrow";
+    }
+    /** @param {number} v */
+    var foldEase = function (v) {
+      v = Math.max(0, Math.min(1, v));
+      return v * v * (3 - 2 * v);
+    };
+    /** @param {FoldPlan | null} held @param {number} amount @returns {Record<string, Point>} */
+    var packFold = function (held, amount) {
+      if (!held) return {};
+      var endpoint = held.plan;
+      var savedKeep = planKeep, savedCell = cellHold, savedPin = pinnedPlan;
+      planKeep = function (id) { return !!held.members[id]; };
+      cellHold = held.cells; pinnedPlan = null;
+      cellNow = null; edgeNow = null; colWalk = null;
+      var depths = { i: 1 + ((endpoint.rows.i || 1) - 1) * amount,
+                     o: 1 + ((endpoint.rows.o || 1) - 1) * amount };
+      try {
+        var foldPlan = buildWedgePlan(true, weightOf,
+          function (c) { return depths[c.inner ? "i" : "o"]; },
+          { i: endpoint.spInner, o: endpoint.sp, depth: depths });
+        return foldPlan ? ringsLayout(foldPlan, true) || {} : {};
+      } finally {
+        planKeep = savedKeep; cellHold = savedCell; pinnedPlan = savedPin;
+      }
+    };
     cascadeRun = { raf: 0, tick: NOW(), guard: WIN.setTimeout(watchdog, STALL_MS), sizeCap: sizeCap,
                    skel: moveFrom ? null : freshSkel() };
     // github#78, design/0006
@@ -5174,7 +5262,14 @@ function mountVaultGraph(root, data, deps) {
       var plan = null;
       /** @type {Record<string, Point> | null} */
       var targets = null;
-      if (opts.hand && opts.from) {
+      if (folding) {
+        var leavePr = foldEase(pr / FOLD_PHASE);
+        var enterPr = foldEase((pr - FOLD_ENTER) / FOLD_PHASE);
+        var oldSeats = leavePr < 1 ? inWorld(function () { return packFold(foldA, 1 - leavePr); }) : {};
+        var newSeats = enterPr >= 1 ? finalPos : packFold(foldB, enterPr);
+        targets = Object.assign({}, oldSeats, newSeats);
+        cellNow = null; edgeNow = null; colWalk = null;
+      } else if (opts.hand && opts.from) {
         // github#86, design/0015 -- both discs sit in the same place, one shown, one hidden: the
         // github#86 -- old disc fades in place; a dot that has left takes its FINAL
         // github#86 -- seat outright and waits, dark, for the fill edge. No plan.
@@ -5229,6 +5324,7 @@ function mountVaultGraph(root, data, deps) {
         // github#186, decisions/0002 -- a row hop glides, capped per frame
         if (pr < 1) {
           var lim = RADIAL_STEP_MAX * UNIT * (bandLock && bandLock[groupOf(id)] ? bandOf("i").sp * INNER_SCALE : bandOf("o").sp);
+          if (folding && foldPitch[id] > 0) lim = RADIAL_STEP_MAX * foldPitch[id];
           if (lim > 0 && move > lim) move = lim; else if (lim > 0 && move < -lim) move = -lim;
         }
         var r = rNow + move;
@@ -6019,6 +6115,17 @@ function mountVaultGraph(root, data, deps) {
   var lastDotLo = 0;
   /** @param {number} size @param {string} [id] */
   function dotPx(size, id) {
+    // github#186, design/0015
+    if (foldSizes && id !== undefined && foldSizes[id] !== undefined) {
+      var folded = foldSizes[id];
+      lastDotHi = folded; lastDotLo = 0;
+      if (fitCap) {
+        if (fitVer !== posVer) measureFit();
+        var foldFit = fitNow ? fitNow[id] : undefined;
+        if (foldFit !== undefined && foldFit > 0) folded = Math.min(folded, FIT_SHARE * foldFit * pxPerUnit);
+      }
+      return folded;
+    }
     var isIn = id !== undefined && bandLock && !!bandLock[groupOf(id)];
     var pit = pitchUnits(isIn ? "i" : "o");
     // github#186, decisions/0017
@@ -7444,6 +7551,7 @@ function mountVaultGraph(root, data, deps) {
       }
       if (anim) { WIN.cancelAnimationFrame(anim); anim = null; }
       if (animGuard) { WIN.clearTimeout(animGuard); animGuard = null; }
+      if (foldSizes) dropStandIns();
       clearHolds();
       pinnedPlan = null; planKeep = null; cellNow = null; edgeNow = null;
     colWalk = null;
@@ -8688,7 +8796,7 @@ function mountVaultGraph(root, data, deps) {
     // github#86, design/0015 -- the disc being LEFT, so the cascade can draw both
     /** @type {LeftDisc} */
     var from = { dim: state.dim, subOrder: subOrder, bandLock: bandLock, geomLock: geomLock,
-                 color: leftColors };
+                 color: leftColors, counts: Object.assign(dict(), counts) };
     var rings = geomLock;
     stashDimNav(state.dim);
     state.dim = next;
@@ -8721,7 +8829,7 @@ function mountVaultGraph(root, data, deps) {
     if (refreshSettingsPanel) refreshSettingsPanel();
     if (persist && onDim) onDim(state.dim);
     // github#76, github#86 -- every wedge changes, so cross the two discs in one sweep
-    if (n) cascade(dropStandIns, { colToggle: true, hand: true, from: from });
+    if (n) cascade(dropStandIns, { colToggle: true, hand: true, fold: foldSwitch, from: from });
     return state.dim;
   }
 
@@ -12044,6 +12152,9 @@ function mountVaultGraph(root, data, deps) {
                     },
                     // github#86 -- the fill edge's lag behind the erase edge, in degrees
                     get handBlade() { return HAND_BLADE_DEG; },
+                    get foldSwitch() { return foldSwitch; },
+                    set foldSwitch(v) { foldSwitch = !!v; },
+                    get foldActive() { return !!foldSizes; },
                     // github#86 -- the fade behind either edge, in degrees
                     get handFade() { return HAND_FADE_DEG; },
                     set handFade(v) { HAND_FADE_DEG = Math.max(1, Math.min(180, +v || 1)); },
