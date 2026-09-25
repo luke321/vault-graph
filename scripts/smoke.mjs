@@ -8468,14 +8468,25 @@ check("a drilled disc obeys the same laws as the vault disc", async (p) => {
     var parity = __vg.checkPlanParity();
     var plan = __vg.buildWedgePlan(false);
     var band = {}; plan.cells.forEach(function(c){ band[c.g] = c.inner; });
-    var offGrid = 0, n = 0;
+    // github#160, github#76
+    var offGrid = 0, n = 0, rad = { inner: [], outer: [] };
     plan.cells.forEach(function(c){
       c.slots.forEach(function(sl){
         n++;
-        var want = sl.r * 160;
+        if ((__vg.alpha[sl.id] || 0) < 0.999 || __vg.isOrphan(sl.id)) return;
         var a = __vg.graph.getNodeAttributes(sl.id);
-        if (Math.abs(Math.hypot(a.x, a.y) - want) > 0.5) offGrid++;
+        rad[c.inner ? "inner" : "outer"].push(Math.hypot(a.x, a.y));
       });
+    });
+    ["inner", "outer"].forEach(function(k){
+      var seen = {}, d = [];
+      rad[k].forEach(function(v){ var s = v.toFixed(3); if (!seen[s]) { seen[s] = 1; d.push(+s); } });
+      d.sort(function(x, y){ return x - y; });
+      if (d.length < 3) return;
+      var gaps = [];
+      for (var i = 1; i < d.length; i++) gaps.push(d[i] - d[i - 1]);
+      var lo = Math.min.apply(null, gaps);
+      gaps.forEach(function(g){ if (g - lo >= 0.5) offGrid++; });
     });
     // github#35
     var a0 = __vg.renderer.graphToViewport({ x: 0, y: 0 });
