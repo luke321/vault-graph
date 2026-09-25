@@ -4794,6 +4794,8 @@ function mountVaultGraph(root, data, deps) {
       // github#21
       ringsLayout();
       ringsLayout();
+      // github#186 -- a landing at an unfiltered rest is a rest to size against
+      takeRestDots();
       renderer.refresh({ skipIndexation: false });
       probeSample("settled");
       if (deferredAutoFit && camAtRest) fit();
