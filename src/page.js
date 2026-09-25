@@ -5008,7 +5008,7 @@ function mountVaultGraph(root, data, deps) {
         fitPos = outPos; fitVer = -1;
         /** @type {Record<string, number>} */
         var sizes = dict();
-        // github#186 -- the endpoint's own rank: the source's for A, the destination's for B
+        // github#186 -- the endpoint's own rank: A the source's, B the destination's
         var keepEase = visEase;
         visEase = alphaFn ? 1 : 0;
         graph.forEachNode(function (id, at) {
