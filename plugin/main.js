@@ -4,8 +4,10 @@ import { Plugin, ItemView, Notice, PluginSettingTab, Setting, normalizePath, add
 import { mountVaultGraph } from "../src/page.js";
 // github#58
 import { GraphStore, Renderer } from "../src/engine/index";
-// github#6
-import { localDay, resolveCreated, dateTally } from "../src/dates.mjs";
+// github#149 -- the producer is its own module, so a gate can run it
+import { buildData } from "./build-data.mjs";
+// github#149 -- what the settings tab still needs of the shared policy
+import { isSkippedFile, paraDirs, paraFolder } from "../src/taxonomy.mjs";
 import PAGE_HTML from "raw:../src/page.html";
 import LOGO_MASK_B64 from "b64:../assets/logo-mask.png";
 // github#83, design/0016
@@ -64,40 +66,33 @@ function bareMap() {
  * @property {Record<string, string>} subtagColors      github#86 -- "tag/sub" -> slot key
  * @property {Record<string, boolean>} tagShown         github#86 -- tag -> shown by default
  * @property {Record<string, boolean>} folderShown      folder name -> shown by default
- * @property {string[]} pinned                          note ids in the hub, in slot order
+ * @property {string[]} pinned                          github#143 -- opaque; the page owns it
  * @property {boolean} panEnabled
  * @property {boolean} compactAxis
  * @property {boolean} unlinkedByFolder
+ * @property {"name" | "explorer" | "size" | undefined} folderOrder
  * @property {boolean} unlinkedTintByFolder
  * @property {boolean} countBars                        github#78, design/0006
+ * @property {boolean} rootInOrder                      github#164
+ * @property {boolean} devTools                        github#165
  * @property {boolean} fitCap                           github#41, design/0011
  * @property {"folder" | "tag"} dim                     github#86 -- grouping dimension
  * @property {boolean} liveRefresh                      github#72
+ * @property {number} [lastSeen]                       github#70 -- ms, when the view was last
  * @property {boolean} [sheetOpen]                      github#82 -- absent until folded once
  * @property {boolean} [bandOpen]                       github#82
  * @property {string} [lastSeenVersion]                 github#83 -- absent until the first load records it
  */
 
 /**
- * One note as buildData emits it -- the same shape src/build-graph.mjs writes into the
- * standalone file, which is the whole point of the adapter (see SPIKE.md). `_file` is the
- * plugin-side handle used for the one read left, and is stripped before the data leaves.
- * @typedef {Object} GraphNode
- * @property {string} id
- * @property {string} label
- * @property {string} folder
- * @property {string[]} dirs
- * @property {string} sub
- * @property {string} type
- * @property {string[]} tags
- * @property {string} created
- * @property {string} touched
- * @property {number} words
- * @property {boolean} [ghost]
- * @property {TFile} [_file]
+ * github#149 -- the producer's shapes live in plugin/build-data.mjs
+ * @typedef {import("./build-data.mjs").BuildResult} BuildResult
  */
 
-/** @typedef {Awaited<ReturnType<typeof buildData>>} BuildResult */
+/**
+ * github#140 -- the only four settings buildData reads, per render
+ * @typedef {Pick<Settings, "ghosts" | "templates" | "flatMonths" | "words">} BuildOptions
+ */
 
 /**
  * The page's own boundary types, declared where the object is built (src/page.js, the
@@ -162,34 +157,8 @@ function discIcon() {
 }
 
 /* ================================================================= taxonomy ==
- * Ported from src/build-graph.mjs, line-for-line wherever it is a pure function of the
- * path. Divergence here would make every measurement in SPIKE.md meaningless: the point
- * is to compare the SAME derivation fed by two different sources, so any difference in
- * the output is a difference in the SOURCE.
- *
- * One thing genuinely gets simpler: Obsidian hands out "a/b/c.md" with forward slashes
- * on every platform, so all the node:path `sep` juggling disappears.
+ * github#149 -- policy moved to src/taxonomy.mjs, the adapter to build-data
  */
-
-const MONTHISH = /^\d{4}(?:[-_ ]?(?:\d{2}|Q[1-4]|W\d{1,2}))?$/i;
-/** @type {Record<string, string>} */
-const TYPE_ALIAS = {
-  people: "person", person: "person",
-  "zettel/permanent": "zettel", "zettel/fleeting": "zettel", "zettel/literature": "zettel",
-};
-
-const SKIP_FILES = new Set(["claude.md", "readme.md", "license.md"]);
-
-/** @param {unknown} s */
-const deNumber = (s) => String(s).replace(/^[\s\d._)-]+/, "").trim();
-/** @param {unknown} s */
-const slug = (s) => deNumber(s).toLowerCase().replace(/[\s_]+/g, "-");
-/** @param {string} s */
-const singular = (s) => s.replace(/ies$/, "y").replace(/([^aeious])s$/, "$1");
-/** @param {unknown} s */
-const norm = (s) => String(s).split(/[\\/]/).filter(Boolean).join("/");
-/** @param {string} rel @param {string} dir */
-const under = (rel, dir) => !!dir && (rel === dir || rel.startsWith(dir + "/"));
 
 // github#62
 /** @param {() => void} fn @returns {unknown} */
@@ -201,314 +170,6 @@ const RELEASES_URL = "https://github.com/luke321/vault-graph/releases";
 const NEW_CLASS = "vg-new";
 const GALLERY_URL = "https://luke321.github.io/vault-graph/features.html";
 
-// github#32
-/** @param {string} a @param {string} b */
-const walkOrder = (a, b) => {
-  const sa = a.split("/"), sb = b.split("/");
-  const n = Math.min(sa.length, sb.length);
-  for (let i = 0; i < n; i++) {
-    if (sa[i] !== sb[i]) return sa[i] < sb[i] ? -1 : 1;
-  }
-  return sa.length - sb.length;
-};
-
-/** @param {string} path */
-const paraFolder = (path) => {
-  const seg = path.split("/");
-  return seg.length > 1 ? seg[0] : "(vault root)";
-};
-
-/** @param {string} path @param {boolean} flatMonths */
-const paraDirs = (path, flatMonths) => {
-  const seg = path.split("/").slice(1, -1);
-  /** @type {string[]} */
-  const out = [];
-  for (let i = 0; i < seg.length; i++) {
-    if (MONTHISH.test(seg[i])) {
-      if (i === 0 && !flatMonths) out.push(seg[i]);
-      break;
-    }
-    out.push(seg[i]);
-  }
-  return out;
-};
-
-/**
- * @param {Record<string, unknown>} fm      the note's frontmatter, or {}
- * @param {string} path
- * @param {string[]} tags
- * @param {string} dailyDir                 "" when the vault has no daily-notes folder
- * @param {(path: string) => boolean} isTemplate
- */
-function inferType(fm, path, tags, dailyDir, isTemplate) {
-  const raw = typeof fm.type === "string" ? fm.type.toLowerCase() : "";
-  if (raw) return TYPE_ALIAS[raw] || raw;
-  if (tags.indexOf("daily-note") >= 0) return "daily";
-  if (under(path, dailyDir)) return "daily";
-  if (isTemplate(path)) return "template";
-
-  const dirs = path.split("/").slice(0, -1).filter(Boolean);
-  const named = dirs.filter((d) => !MONTHISH.test(d));
-  const pick = named.length ? named[named.length - 1] : dirs[0];
-  const type = pick ? singular(slug(pick)) : "";
-  return type || "note";
-}
-
-/* ==================================================================== config ==
- * Same principle as the Node builder: ask the vault which folders are templates and
- * daily notes rather than assuming a layout. The path must go through Vault#configDir --
- * a literal ".obsidian" is an ERROR under obsidianmd/eslint-plugin
- * (hardcoded-config-path), and it is wrong anyway in a vault whose config folder was
- * renamed.
- */
-/**
- * @param {App} app
- * @param {string} name   path under the config dir
- * @returns {Promise<unknown>}   the parsed file, or null when absent or unreadable. `unknown`
- *   on purpose: none of these files has a schema this plugin owns, so a caller has to check
- *   what it reads -- which is what strField below does, and what every caller already did.
- */
-async function readConfigJson(app, name) {
-  try {
-    const p = normalizePath(app.vault.configDir + "/" + name);
-    if (!(await app.vault.adapter.exists(p))) return null;
-    /** @type {unknown} */
-    const parsed = JSON.parse(await app.vault.adapter.read(p));
-    return parsed;
-  } catch {
-    return null;
-  }
-}
-
-/**
- * One string field of a parsed config object, or "" when the object or the field is not
- * what it should be. Untrimmed: the caller decides what blank means.
- * @param {unknown} obj @param {string} key
- */
-const strField = (obj, key) => {
-  if (!obj || typeof obj !== "object" || !(key in obj)) return "";
-  const v = /** @type {Record<string, unknown>} */ (obj)[key];
-  return typeof v === "string" ? v : "";
-};
-
-/** @param {App} app */
-async function readFolders(app) {
-  /** @type {Set<string>} */
-  const dirs = new Set();
-  const core = strField(await readConfigJson(app, "templates.json"), "folder");
-  if (core.trim()) dirs.add(norm(core));
-  const templater = strField(await readConfigJson(app, "plugins/templater-obsidian/data.json"), "templates_folder");
-  if (templater.trim()) dirs.add(norm(templater));
-  const dn = strField(await readConfigJson(app, "daily-notes.json"), "folder");
-  const dailyDir = dn.trim() ? norm(dn) : "";
-  return { templateDirs: Array.from(dirs), dailyDir: dailyDir };
-}
-
-/* ================================================================ the adapter ==
- * The crawl in build-graph.mjs, replaced by asking Obsidian. What used to be a walk, a
- * YAML parser, a wikilink miner, a resolver and an alias table is now four reads of an
- * index that is already in memory:
- *
- *   vault.getMarkdownFiles()        the file list       (was walk())
- *   metadataCache.getFileCache()    frontmatter + tags  (was parseFrontmatter())
- *   metadataCache.resolvedLinks     the edges           (was mineLinks() + resolve())
- *   metadataCache.unresolvedLinks   the ghosts          (was the resolve() failures)
- *   file.stat.mtime                 `touched`           (was statSync())
- *
- * Only `words` still needs a file body, and that is the only I/O left in the whole
- * build.
- */
-/**
- * @param {App} app
- * @param {Settings} opts   only the four build settings are read
- * @param {string} [version]   github#108 -- this.plugin.manifest.version, shown in the stats line
- */
-async function buildData(app, opts, version) {
-  const t0 = performance.now();
-  const folders = await readFolders(app);
-  const templateDirs = folders.templateDirs, dailyDir = folders.dailyDir;
-  /** @param {string} path */
-  const isTemplate = (path) => templateDirs.some((d) => under(path, d));
-
-  const files = app.vault.getMarkdownFiles().filter((f) => {
-    if (SKIP_FILES.has(f.name.toLowerCase())) return false;
-    return opts.templates ? true : !isTemplate(f.path);
-  });
-  // github#32
-  files.sort((a, b) => walkOrder(a.path, b.path));
-
-  /** @type {Map<string, number>} */
-  const index = new Map();
-  /** @type {GraphNode[]} */
-  const nodes = [];
-  const dates = dateTally();
-
-  for (const file of files) {
-    const cache = app.metadataCache.getFileCache(file) || {};
-    /** @type {Record<string, unknown>} */
-    const fm = cache.frontmatter || {};
-
-    /** @type {unknown[]} */
-    const rawTags = [];
-    const tags = rawTags
-      .concat(fm.tags || [], fm.tag || [])
-      .flatMap((t) => String(t).split(/[,\s]+/))
-      .map((t) => t.replace(/^#/, "").trim())
-      .filter(Boolean);
-
-    const dirs = paraDirs(file.path, opts.flatMonths);
-    // github#6
-    const dated = resolveCreated(fm, file.basename, file.stat.ctime, file.stat.mtime);
-    dates[dated.source]++;
-    index.set(file.path, nodes.length);
-    nodes.push({
-      id: file.path,
-      label: file.basename,
-      folder: paraFolder(file.path),
-      dirs: dirs,
-      sub: dirs[0] || "",
-      type: inferType(fm, file.path, tags, dailyDir, isTemplate),
-      tags: tags,
-      created: dated.day,
-      touched: localDay(file.stat.mtime),
-      words: 0,
-      _file: file,
-    });
-  }
-  const tIndex = performance.now();
-
-  /* ---- edges: Obsidian's resolution, not ours ----------------------------- */
-  /** @type {Map<string, number>} */
-  const weight = new Map();
-  /** @param {number} i @param {number} j @param {number} w */
-  const addEdge = (i, j, w) => {
-    if (i === j) return;
-    const key = i < j ? i + " " + j : j + " " + i;
-    weight.set(key, (weight.get(key) || 0) + w);
-  };
-
-  let attachmentLinks = 0, filteredLinks = 0;
-  const resolved = app.metadataCache.resolvedLinks || {};
-  for (const src of Object.keys(resolved)) {
-    const i = index.get(src);
-    if (i === undefined) continue;
-    for (const dest of Object.keys(resolved[src])) {
-      const j = index.get(dest);
-      if (j === undefined) {
-        if (dest.toLowerCase().endsWith(".md")) filteredLinks++;
-        else attachmentLinks++;
-        continue;
-      }
-      addEdge(i, j, resolved[src][dest]);
-    }
-  }
-
-  /* ---- ghosts: unresolvedLinks, for free --------------------------------- */
-  const unresolvedMap = app.metadataCache.unresolvedLinks || {};
-  let unresolved = 0;
-  /** @type {Map<string, [number, number][]>} */
-  const ghosts = new Map();
-  for (const src of Object.keys(unresolvedMap)) {
-    const i = index.get(src);
-    if (i === undefined) continue;
-    for (const target of Object.keys(unresolvedMap[src])) {
-      const n = unresolvedMap[src][target];
-      unresolved += n;
-      if (!opts.ghosts) continue;
-      const key = target.split("/").pop();
-      if (!ghosts.has(key)) ghosts.set(key, []);
-      ghosts.get(key).push([i, n]);
-    }
-  }
-  if (opts.ghosts) {
-    for (const entry of ghosts) {
-      const name = entry[0], sources = entry[1];
-      const j = nodes.length;
-      nodes.push({
-        id: "ghost:" + name, label: name, folder: "(unresolved)", sub: "", dirs: [],
-        type: "ghost", tags: [], created: "", touched: "", words: 0, ghost: true,
-      });
-      for (const pair of sources) addEdge(pair[0], j, pair[1]);
-    }
-  }
-
-  /* ---- words: the only remaining I/O, read after the mount ---------------- */
-  const tEdges = performance.now();
-  const wordFiles = opts.words ? nodes.map((n) => n._file || null) : null;
-  // github#58
-  /**
-   * @param {(index: number, words: number) => void} apply
-   * @param {Set<string>} [only]   github#72: read just these paths, for a live rebuild
-   * @returns {Promise<number>}
-   */
-  const readWords = async (apply, only) => {
-    const t = performance.now();
-    if (!wordFiles) return 0;
-    await Promise.all(wordFiles.map(async (file, i) => {
-      if (!file) return;
-      if (only && !only.has(file.path)) return;
-      let words = 0;
-      try {
-        const raw = await app.vault.cachedRead(file);
-        const m = /^---\r?\n[\s\S]*?\r?\n---/.exec(raw.replace(/^\uFEFF/, ""));
-        const body = m ? raw.slice(m[0].length) : raw;
-        words = body.split(/\s+/).filter(Boolean).length;
-      } catch { words = 0; }
-      apply(i, words);
-    }));
-    return Math.round(performance.now() - t);
-  };
-  const tWords = performance.now();
-
-  const edges = Array.from(weight).map((entry) => {
-    const ab = entry[0].split(" ");
-    return { s: Number(ab[0]), t: Number(ab[1]), w: entry[1] };
-  });
-
-  const degree = /** @type {number[]} */ (new Array(nodes.length).fill(0));
-  for (const e of edges) { degree[e.s]++; degree[e.t]++; }
-
-  const out = nodes.map((n, i) => {
-    const clean = Object.assign({}, n, { deg: degree[i] });
-    delete clean._file;
-    return clean;
-  });
-
-  const p2 = (n) => String(n).padStart(2, "0");
-  const now = new Date();
-
-  return {
-    vault: app.vault.getName(),
-    version: version,
-    generated: now.getFullYear() + "-" + p2(now.getMonth() + 1) + "-" + p2(now.getDate()) +
-               " " + p2(now.getHours()) + ":" + p2(now.getMinutes()),
-    nodes: out,
-    edges: edges,
-    stats: {
-      files: files.length,
-      nodes: out.length,
-      edges: edges.length,
-      unresolved: unresolved,
-      orphans: degree.filter((d) => d === 0).length,
-      // github#6
-      dates: dates,
-      templatesExcluded: !opts.templates,
-      ghostsIncluded: !!opts.ghosts,
-    },
-    readWords: readWords,
-    _spike: {
-      msIndex: Math.round(tIndex - t0),
-      msEdges: Math.round(tEdges - tIndex),
-      msWords: Math.round(tWords - tEdges),
-      msWordsBackground: /** @type {number | null} */ (null),
-      msTotal: Math.round(tWords - t0),
-      templateDirs: templateDirs,
-      dailyDir: dailyDir,
-      attachmentLinks: attachmentLinks,
-      filteredLinks: filteredLinks,
-    },
-  };
-}
 
 /* ====================================================================== view ==
  * IN THE DOM, not in an iframe.
@@ -538,6 +199,9 @@ class VaultGraphView extends ItemView {
     this.plugin = plugin;
     /** @type {MountHandle | null} */
     this.handle = null;
+    // github#140 -- teardown() drops it, so it is declared here
+    /** @type {HTMLElement | null} */
+    this.page = null;
     /** @type {BuildResult | null} */
     this.lastData = null;
     this.mountMs = 0;
@@ -554,6 +218,23 @@ class VaultGraphView extends ItemView {
     this.liveWake = null;
     /** @type {import("../src/page.js").LiveResult | null} */
     this.lastLive = null;
+    // github#120 -- these two register once for the view's life
+    /** @type {EventRef | null} */
+    this.cssRef = null;
+    /** @type {EventRef[] | null} */
+    this.liveRefs = null;
+    // github#140 -- the current render; only teardown() moves it
+    this.renderGen = 0;
+    // github#184 -- one per word read started, so a late read can be told apart
+    this.buildGen = 0;
+    // github#184 -- path -> the build that owns that path's count
+    /** @type {Map<string, number>} */
+    this.wordsGen = new Map();
+    // github#140 -- render() owns this now, not the Refresh button
+    this.rebuilding = false;
+     // github#70
+    /** @type {number | undefined} */
+    this.lastSeenPrev = undefined;
   }
 
   getViewType() { return VIEW_TYPE; }
@@ -561,21 +242,31 @@ class VaultGraphView extends ItemView {
   getIcon() { return ICON_ID; }
 
   async onOpen() {
-    await this.render();
+    // github#70, decisions/0009 -- the HOST owns this clock; the page only receives it.
+    this.lastSeenPrev = this.plugin.settings.lastSeen;
+    // github#70 -- a failed stamp must not skip the render or the teardown
+    try { await this.plugin.stampOpen(); } finally { await this.render(); }
   }
 
   async onClose() {
-    this.teardown();
+    try { await this.plugin.stampOpen(); } finally { this.teardown(); }
   }
 
-  // github#62
+  // github#62; github#140 -- the one place a render is invalidated
   teardown() {
+    this.renderGen++;
+    // github#184 -- a pending word read outlives the mount it was started for
+    this.wordsGen.clear();
+    // github#140 -- nothing is current after this, so nothing is busy
+    this.rebuilding = false;
     // github#72
     this.cancelLive();
     if (this.handle) {
       attempt(() => this.handle.destroy());
     }
     this.handle = null;
+    // github#140 -- never hold a reference to a removed element
+    this.page = null;
     this.contentEl.empty();
   }
 
@@ -592,11 +283,18 @@ class VaultGraphView extends ItemView {
     this.liveDeferred = false;
   }
 
+  // github#120 -- is a hand on the disc? absent on an older page
+  interacting() {
+    const api = this.handle && this.handle.api;
+    return !!(api && typeof api.interacting === "function" && api.interacting());
+  }
+
   // github#72, design/0014
   startLiveWake() {
     if (this.liveWake !== null) return;
     this.liveWake = window.setInterval(() => {
-      if (!this.liveVisible()) return;
+      // github#120 -- both reasons to wait: unseen, or being dragged
+      if (!this.liveVisible() || this.interacting()) return;
       this.stopLiveWake();
       this.scheduleLive();
     }, LIVE_WAKE_MS);
@@ -618,13 +316,19 @@ class VaultGraphView extends ItemView {
   }
 
   // github#72, design/0014
+  // github#120 -- ONCE FOR THE VIEW'S LIFE, NOT ONCE PER RENDER
   subscribeLive() {
+    if (this.liveRefs) return;
     const cache = this.app.metadataCache, vault = this.app.vault;
-    this.registerEvent(cache.on("resolved", () => this.scheduleLive()));
-    this.registerEvent(cache.on("changed", (file) => this.scheduleLive(file && file.path)));
-    this.registerEvent(vault.on("create", (file) => this.scheduleLive(file && file.path)));
-    this.registerEvent(vault.on("delete", (file) => this.scheduleLive(file && file.path)));
-    this.registerEvent(vault.on("rename", (file, oldPath) => {
+    /** @type {EventRef[]} */
+    const refs = [];
+    this.liveRefs = refs;
+    const keep = /** @param {EventRef} r */ (r) => { refs.push(r); this.registerEvent(r); };
+    keep(cache.on("resolved", () => this.scheduleLive()));
+    keep(cache.on("changed", (file) => this.scheduleLive(file && file.path)));
+    keep(vault.on("create", (file) => this.scheduleLive(file && file.path)));
+    keep(vault.on("delete", (file) => this.scheduleLive(file && file.path)));
+    keep(vault.on("rename", (file, oldPath) => {
       const to = file && file.path;
       if (to && oldPath) {
         // design/0014
@@ -657,6 +361,8 @@ class VaultGraphView extends ItemView {
     if (!api || typeof api.applyData !== "function") return;
     // github#72, design/0014
     if (!this.liveVisible()) { this.liveDeferred = true; this.startLiveWake(); return; }
+    // github#120 -- and not while a hand is on the disc
+    if (this.interacting()) { this.liveDeferred = true; this.startLiveWake(); return; }
     this.liveDeferred = false;
     this.stopLiveWake();
     if (this.liveBuilding) { this.liveAgain = true; return; }
@@ -666,7 +372,7 @@ class VaultGraphView extends ItemView {
     const renames = this.pendingRenames;
     this.pendingRenames = pathMap();
     try {
-      const next = await buildData(this.app, this.plugin.settings, this.plugin.manifest.version);
+      const next = await buildData({ app: this.app, normalizePath }, this.plugin.settings, this.plugin.manifest.version);
       if (this.handle !== handle || handle.api !== api) return;   // github#62
 
       // github#58, design/0014
@@ -700,11 +406,23 @@ class VaultGraphView extends ItemView {
       const want = new Set(dirty);
       for (const n of next.nodes) if (wordsBefore(n.id) === undefined) want.add(n.id);
       if (!want.size) return;
+      // github#184 -- claim these paths, so a read still out for them is dropped
+      const claim = ++this.buildGen;
+      // github#184 -- rebuilt from next.nodes: a path that is gone cannot pile up
+      const held = this.wordsGen;
+      this.wordsGen = new Map();
+      for (const n of next.nodes) {
+        if (want.has(n.id)) { this.wordsGen.set(n.id, claim); continue; }
+        const was = held.get(n.id);
+        if (was !== undefined) this.wordsGen.set(n.id, was);
+      }
       void next.readWords((i, words) => {
         const node = next.nodes[i];
         if (!node) return;
+        // github#184 -- identity cannot separate two builds of the same mount
+        if (this.wordsGen.get(node.id) !== claim) return;
         node.words = words;
-        if (this.handle === handle && handle.api === api) api.setWords(node.id, words);
+        api.setWords(node.id, words);
       }, want).catch(() => {});
     } catch (e) {
       new Notice("Vault Graph: live refresh failed -- " + (e instanceof Error ? e.message : String(e)));
@@ -716,7 +434,8 @@ class VaultGraphView extends ItemView {
 
   syncTheme() {
     if (!this.page) return;
-    const want = activeDocument.body.classList.contains("theme-light") ? "light" : "dark";
+    // github#140 -- THIS view's document, not whichever one has focus
+    const want = this.contentEl.doc.body.classList.contains("theme-light") ? "light" : "dark";
     if (this.page.getAttribute("data-theme") === want) return;
     this.page.setAttribute("data-theme", want);
 
@@ -787,17 +506,49 @@ class VaultGraphView extends ItemView {
     await this.plugin.recordVersion();
   }
 
+  // github#140 -- a superseded render writes nothing, on every path
+  // github#140 -- and render() owns `rebuilding`, not just Refresh
   async render() {
     this.teardown();
+    const gen = this.renderGen;
+    // github#140 -- a snapshot, taken before the await
+    /** @type {BuildOptions} */
+    const opts = {
+      ghosts: this.plugin.settings.ghosts,
+      templates: this.plugin.settings.templates,
+      flatMonths: this.plugin.settings.flatMonths,
+      words: this.plugin.settings.words,
+    };
+    this.rebuilding = true;
+    try {
+      await this.renderPass(gen, opts);
+    } catch (e) {
+      // github#140 -- clean up, but only while still the current one
+      if (this.renderGen === gen) this.teardown();
+      throw e;
+    } finally {
+      if (this.renderGen === gen) this.rebuilding = false;
+    }
+  }
+
+  /**
+   * github#140 -- one render's body; the bookkeeping above stays short
+   * @param {number} gen
+   * @param {BuildOptions} opts
+   */
+  async renderPass(gen, opts) {
     const root = this.contentEl;
     root.addClass("vault-graph-view");
     this.mountNote();
 
-    const data = await buildData(this.app, this.plugin.settings, this.plugin.manifest.version);
+    const data = await buildData({ app: this.app, normalizePath }, opts, this.plugin.manifest.version);
+    // github#140 -- THE CHECK: everything below writes view state
+    if (this.renderGen !== gen) return;
     this.lastData = data;
 
     const parsed = new DOMParser().parseFromString(PAGE_HTML, "text/html");
-    const page = parsed.body.firstElementChild;
+    // github#145 -- PAGE_HTML's root is a div; the narrow claim is made here
+    const page = /** @type {HTMLElement | null} */ (parsed.body.firstElementChild);
     if (!page) throw new Error("page markup did not parse to an element");
     root.appendChild(page);
 
@@ -805,7 +556,11 @@ class VaultGraphView extends ItemView {
     this.syncTheme();
     this.markNew();
 
-    this.registerEvent(this.app.workspace.on("css-change", () => this.syncTheme()));
+    // github#120 -- one listener for the view's life, not per render
+    if (!this.cssRef) {
+      this.cssRef = this.app.workspace.on("css-change", () => this.syncTheme());
+      this.registerEvent(this.cssRef);
+    }
 
     const t0 = performance.now();
     this.handle = mountVaultGraph(page, data, {
@@ -851,6 +606,8 @@ class VaultGraphView extends ItemView {
         await this.plugin.saveSettings();
       },
       folderShown: this.plugin.settings.folderShown,
+      // github#70
+      lastOpen: this.lastSeenPrev,
       panEnabled: this.plugin.settings.panEnabled,
       /** @param {boolean} v */
       onPanEnabled: async (v) => {
@@ -862,6 +619,14 @@ class VaultGraphView extends ItemView {
       /** @param {boolean} v */
       onCompactAxis: async (v) => {
         this.plugin.settings.compactAxis = !!v;
+        await this.plugin.saveSettings();
+      },
+      // github#71
+      // github#71 -- undefined until the reader picks
+      folderOrder: this.plugin.settings.folderOrder,
+      /** @param {"name" | "explorer" | "size"} v */
+      onFolderOrder: async (v) => {
+        this.plugin.settings.folderOrder = v;
         await this.plugin.saveSettings();
       },
       // github#3
@@ -876,6 +641,20 @@ class VaultGraphView extends ItemView {
       /** @param {boolean} v */
       onCountBars: async (v) => {
         this.plugin.settings.countBars = !!v;
+        await this.plugin.saveSettings();
+      },
+      // github#164
+      rootInOrder: this.plugin.settings.rootInOrder === true,
+      /** @param {boolean} v */
+      onRootInOrder: async (v) => {
+        this.plugin.settings.rootInOrder = !!v;
+        await this.plugin.saveSettings();
+      },
+      // github#165
+      devTools: this.plugin.settings.devTools === true,
+      /** @param {boolean} v */
+      onDevTools: async (v) => {
+        this.plugin.settings.devTools = !!v;
         await this.plugin.saveSettings();
       },
       // github#3
@@ -914,32 +693,37 @@ class VaultGraphView extends ItemView {
         await this.plugin.saveSettings();
       },
       openSettings: () => this.plugin.openSettings(),
-      win: activeWindow,
-      // github#6
+      // github#140 -- this view's window, not whichever one has focus now
+      win: this.contentEl.win,
+      // github#6; github#140 -- render() owns the busy flag, this only declines to re-enter
       onRefresh: () => {
         if (this.rebuilding) return;
-        this.rebuilding = true;
         this.render()
-          .catch(/** @param {Error} e */ (e) => new Notice("Vault Graph: rebuild failed -- " + e.message))
-          .finally(() => { this.rebuilding = false; });
+          .catch(/** @param {Error} e */ (e) => new Notice("Vault Graph: rebuild failed -- " + e.message));
       },
     });
     this.mountMs = Math.round(performance.now() - t0);
 
     const handle = this.handle;
+    // github#184 -- this sweep owns every path until a newer build claims one
+    const claim = ++this.buildGen;
+    for (const node of data.nodes) this.wordsGen.set(node.id, claim);
     // github#58; github#72, design/0014 -- by PATH, never by index
     void data.readWords((i, words) => {
       const node = data.nodes[i];
       if (!node) return;
+      // github#184 -- per path, never per build: an unclaimed path still lands
+      if (this.wordsGen.get(node.id) !== claim) return;
       node.words = words;
       const api = handle.api;
-      if (api && api.setWords && this.handle === handle) api.setWords(node.id, words);
+      if (api && api.setWords) api.setWords(node.id, words);
     }).then((ms) => { data._spike.msWordsBackground = ms; }, () => {});
 
     // github#72
     this.subscribeLive();
 
-    this.registerDomEvent(page, "click", (ev) => {
+    // github#120 -- a PLAIN listener: registerDomEvent retains the page
+    page.addEventListener("click", (ev) => {
       const a = ev.target instanceof Element ? ev.target.closest('a[href^="obsidian://"]') : null;
       if (!a) return;
       ev.preventDefault();
@@ -976,12 +760,31 @@ const DEFAULTS = {
   unlinkedTintByFolder: false,
   // github#78, design/0006
   countBars: true,
+  // github#164 -- off is the order the disc has always drawn
+  rootInOrder: false,
+  // github#165 -- off; the disc's right-click stays the host's
+  devTools: false,
   // github#41, design/0011
   fitCap: true,
   // github#86 -- folder is the default
   dim: "folder",
   // github#72
   liveRefresh: true,
+  // github#71, decisions/0009 -- absent means nobody has chosen yet
+  folderOrder: undefined,
+};
+
+/* github#71 -- the one view setting that is not a boolean */
+const FOLDER_ORDER_SETTING = {
+  key: /** @type {const} */ ("folderOrder"),
+  name: "Folder order",
+  desc: "Which way the wedges run round the disc. Name is the vault's own folder order, " +
+        "numbers reading as numbers. File explorer follows a Custom File Explorer sorting " +
+        "sortspec -- pinned names first, then order-asc/order-desc a-z, by that plugin's own " +
+        "precedence; only the sections aimed at the vault root and at a top-level folder can " +
+        "reach the disc, and a spec that cannot be read falls back to Name. Size puts the " +
+        "biggest folder first. A folder keeps its colour whichever you pick.",
+  options: { name: "Name", explorer: "File explorer", size: "Size" },
 };
 
 /** @type {{ key: "ghosts" | "templates" | "flatMonths" | "words", name: string, desc: string }[]} */
@@ -998,11 +801,11 @@ const BUILD_SETTINGS = [
 
 /**
  * @typedef {Object} ViewSetting
- * @property {"panEnabled" | "compactAxis" | "unlinkedByFolder" | "unlinkedTintByFolder" | "countBars" | "fitCap" | "liveRefresh"} key
+ * @property {"panEnabled" | "compactAxis" | "unlinkedByFolder" | "unlinkedTintByFolder" | "countBars" | "rootInOrder" | "fitCap" | "liveRefresh" | "devTools"} key
  * @property {string} name
  * @property {string} desc
  * @property {boolean} defaultOn
- * @property {"setPanEnabled" | "setCompactAxis" | "setUnlinkedByFolder" | "setUnlinkedTintByFolder" | "setCountBars" | "setFitCap" | ""} api
+ * @property {"setPanEnabled" | "setCompactAxis" | "setUnlinkedByFolder" | "setUnlinkedTintByFolder" | "setCountBars" | "setRootInOrder" | "setFitCap" | "setDevTools" | ""} api
  * @property {boolean} [host]   the HOST owns this one, not the page, so there is no api to call
  */
 /** @type {ViewSetting[]} */
@@ -1018,12 +821,18 @@ const VIEW_SETTINGS = [
   // github#78, design/0006
   { key: "countBars", name: "Count bars in the legend", defaultOn: true, api: "setCountBars",
     desc: "Draw a short rule along the bottom of each folder row in the legend, in that folder's own colour, scaled so the largest folder currently shown fills its row and the rest are read against it. The count alone makes a 406-note folder and a 1-note folder look identical. Hovering a count says which folder the bar is measured against." },
+  // github#164
+  { key: "rootInOrder", name: "Vault root sorts with the folders", defaultOn: false, api: "setRootInOrder",
+    desc: "Let (vault root) take the place its own notes sort to, in among the folders, instead of sitting at the front of the disc. It sorts as its alphabetically first note does, which is where the file explorer starts showing them -- so the disc and the tree agree. The archives keep the front, and (untagged) and (unlinked) stay at the end. Off by default, so no disc moves until you ask." },
   // github#41, design/0011
   { key: "fitCap", name: "Size dots from the frame", defaultOn: true, api: "setFitCap",
     desc: "While the disc animates, cap every dot at just under half its distance to the nearest visible note, measured on the frame being drawn, so dots stay apart while rows slide. The disc at rest is unchanged. Experimental: dots breathe while a cascade walks." },
   // github#72
   { key: "liveRefresh", name: "Follow the vault", defaultOn: true, api: "", host: true,
     desc: "Take a note you have just written, moved or linked into the disc where it stands, instead of waiting for Refresh to rebuild the whole thing. Only a change that decides where a note SITS moves anything -- writing prose does not, so typing is still. Off, the disc is a snapshot until you press Refresh." },
+  // github#165 -- last on purpose
+  { key: "devTools", name: "Developer debug", defaultOn: false, api: "setDevTools",
+    desc: "Right-click the disc for a developer menu: draw the wedge lattice the notes are packed onto over the top of them, and slow every animation down 2x, 4x or 8x so a cascade can be read a dot at a time. Off, the disc's right-click does nothing and Obsidian's own menu is untouched." },
 ];
 
 const COLOURS_DESC = "Twelve slots, handed out in group order and round again. Folders and tags keep their own colours; the tabs choose which. Setting one group never moves another, and two may share a colour. Each swatch shows the slot at the sizes the disc really draws, over both grounds. Its contrast figure is for a solid area of the colour; a dot a pixel across is mostly antialiasing and reads lower than the number.";
@@ -1043,7 +852,7 @@ function topFolders(app) {
   /** @type {Map<string, number>} */
   const count = new Map();
   for (const file of app.vault.getMarkdownFiles()) {
-    if (SKIP_FILES.has(file.name.toLowerCase())) continue;
+    if (isSkippedFile(file.name)) continue;
     const g = paraFolder(file.path);
     count.set(g, (count.get(g) || 0) + 1);
   }
@@ -1064,7 +873,7 @@ function allSubfolders(app, flatMonths) {
   /** @type {Map<string, Map<string, number>>} */
   const byFolder = new Map();
   for (const file of app.vault.getMarkdownFiles()) {
-    if (SKIP_FILES.has(file.name.toLowerCase())) continue;
+    if (isSkippedFile(file.name)) continue;
     const g = paraFolder(file.path);
     let count = byFolder.get(g);
     if (!count) {
@@ -1125,7 +934,14 @@ class VaultGraphSettingTab extends PluginSettingTab {
     return [
       ...BUILD_SETTINGS.map((s) => toggle(s, false)),
       { type: /** @type {"group"} */ ("group"), heading: "View",
-        items: VIEW_SETTINGS.map((s) => toggle(s, s.defaultOn)) },
+        items: [
+          // github#71
+          { name: FOLDER_ORDER_SETTING.name, desc: FOLDER_ORDER_SETTING.desc,
+            aliases: ["sortspec", "sort", "order", "explorer", "custom sort"],
+            control: { type: /** @type {"dropdown"} */ ("dropdown"), key: FOLDER_ORDER_SETTING.key,
+                       defaultValue: "name", options: FOLDER_ORDER_SETTING.options } },
+          ...VIEW_SETTINGS.map((s) => toggle(s, s.defaultOn)),
+        ] },
       { type: /** @type {"group"} */ ("group"), heading: "Group colours",
         items: [{
           name: "Group and sub-wedge colours", desc: COLOURS_DESC,
@@ -1141,10 +957,19 @@ class VaultGraphSettingTab extends PluginSettingTab {
 
   /** @param {string} key */
   getControlValue(key) {
+    // github#71 -- report what the page chose, not the declarative default
+    if (key === FOLDER_ORDER_SETTING.key) {
+      return this.plugin.settings.folderOrder || this.liveFolderOrder() || "name";
+    }
     return this.plugin.settings[/** @type {keyof Settings} */ (key)];
   }
   /** @param {string} key @param {unknown} value */
   async setControlValue(key, value) {
+    // github#71 -- the only non-boolean, settled before the !!value below
+    if (key === FOLDER_ORDER_SETTING.key) {
+      await this.setFolderOrder(String(value));
+      return;
+    }
     const build = BUILD_SETTINGS.find((s) => s.key === key);
     const view = VIEW_SETTINGS.find((s) => s.key === key);
     if (!build && !view) return;
@@ -1168,6 +993,34 @@ class VaultGraphSettingTab extends PluginSettingTab {
     if (api && def.api && api[def.api]) api[def.api](v);
   }
 
+  // github#71
+  /** @param {string} v */
+  async setFolderOrder(v) {
+    const next = ["name", "explorer", "size"].includes(v)
+      ? /** @type {"name" | "explorer" | "size"} */ (v) : "name";
+    this.plugin.settings.folderOrder = next;
+    await this.plugin.saveSettings();
+    const view = await this.plugin.currentView();
+    const api = view && view.handle && view.handle.api;
+    if (api && api.setFolderOrder) api.setFolderOrder(next);
+  }
+
+  /**
+   * github#71, decisions/0015 -- what the disc is ACTUALLY ordered by
+   * @returns {"" | "name" | "explorer" | "size"}
+   */
+  liveFolderOrder() {
+    for (const leaf of this.app.workspace.getLeavesOfType(VIEW_TYPE)) {
+      const view = leaf.view;
+      if (!(view instanceof VaultGraphView)) continue;
+      const api = view.handle && view.handle.api;
+      if (!api || !api.folderOrder) continue;
+      const v = api.folderOrder();
+      if (v === "name" || v === "explorer" || v === "size") return v;
+    }
+    return "";
+  }
+
   display() {
     const { containerEl } = this;
     containerEl.empty();
@@ -1186,6 +1039,14 @@ class VaultGraphSettingTab extends PluginSettingTab {
     }
 
     new Setting(containerEl).setName("View").setHeading();
+    // github#71
+    new Setting(containerEl)
+      .setName(FOLDER_ORDER_SETTING.name)
+      .setDesc(FOLDER_ORDER_SETTING.desc)
+      .addDropdown((d) => d
+        .addOptions(FOLDER_ORDER_SETTING.options)
+        .setValue(this.plugin.settings.folderOrder || this.liveFolderOrder() || "name")
+        .onChange(async (v) => { await this.setFolderOrder(v); }));
     for (const s of VIEW_SETTINGS) {
       new Setting(containerEl)
         .setName(s.name)
@@ -1576,6 +1437,15 @@ class VaultGraphPlugin extends Plugin {
     await this.saveData(Object.assign({}, base, { lastSeenVersion: this.manifest.version }));
   }
 
+  // github#70, design/0016 -- the stamp alone onto what is on disk, like recordVersion
+  async stampOpen() {
+    /** @type {unknown} */
+    const disk = await this.loadData();
+    const base = disk && typeof disk === "object" ? /** @type {Record<string, unknown>} */ (disk) : {};
+    this.settings.lastSeen = Date.now();
+    await this.saveData(Object.assign({}, base, { lastSeen: this.settings.lastSeen }));
+  }
+
   openSettings() {
     const setting = /** @type {AppWithSetting} */ (this.app).setting;
     if (!setting || typeof setting.open !== "function") {
@@ -1608,7 +1478,14 @@ class VaultGraphPlugin extends Plugin {
     if (api.setUnlinkedByFolder) api.setUnlinkedByFolder(this.settings.unlinkedByFolder !== false);
     if (api.setUnlinkedTintByFolder) api.setUnlinkedTintByFolder(this.settings.unlinkedTintByFolder === true);
     if (api.setCountBars) api.setCountBars(this.settings.countBars !== false);
+    // github#164
+    if (api.setRootInOrder) api.setRootInOrder(this.settings.rootInOrder === true);
+    // github#165
+    if (api.setDevTools) api.setDevTools(this.settings.devTools === true);
     if (api.setFitCap) api.setFitCap(this.settings.fitCap !== false);
+    // github#71
+    // github#71 -- only push a STORED choice, never a default
+    if (api.setFolderOrder && this.settings.folderOrder) api.setFolderOrder(this.settings.folderOrder);
     if (api.applyHiddenDefaults) api.applyHiddenDefaults();
   }
 

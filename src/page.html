@@ -32,10 +32,23 @@
       <div id="vg-hits"></div>
     </div>
 
+    <!-- github#131, design/0019 -- two readings, one column. The readings are plain
+         wrappers on purpose: `hidden` is unreliable on anything this stylesheet gives a
+         display of its own, and hiding a wrapper sidesteps that for everything inside it. -->
     <div class="block">
-      <span id="vg-dim" class="dimseg dimfull" role="group" aria-label="Group the disc by"><button type="button" data-dim="folder" aria-pressed="true" title="Cut the disc by folder"><span class="dimnm">Folders</span><span class="dimct"></span></button><button type="button" data-dim="tag" aria-pressed="false" title="Cut the disc by tag: the first tag a note lists files it"><span class="dimnm">Tags</span><span class="dimct"></span></button></span>
-      <div class="mini dimall"><button id="vg-allon">All</button><button id="vg-alloff">None</button></div>
-      <div id="vg-legend"></div>
+      <div id="vg-tabs" class="tabs" role="tablist" aria-label="Sidebar reading">
+        <button id="vg-tabgroups" type="button" class="tab" role="tab"
+                aria-selected="true" aria-controls="vg-readgroups">Groups</button>
+        <button id="vg-tabnote" type="button" class="tab" role="tab" disabled
+                aria-selected="false" aria-controls="vg-readnote"
+                title="Click a note on the disc to read it here">Selected note</button>
+      </div>
+      <div id="vg-readgroups" role="tabpanel" aria-labelledby="vg-tabgroups">
+        <span id="vg-dim" class="dimseg dimfull" role="group" aria-label="Group the disc by"><button type="button" data-dim="folder" aria-pressed="true" title="Cut the disc by folder"><span class="dimnm">Folders</span><span class="dimct"></span></button><button type="button" data-dim="tag" aria-pressed="false" title="Cut the disc by tag: the first tag a note lists files it"><span class="dimnm">Tags</span><span class="dimct"></span></button></span>
+        <div class="mini dimall"><button id="vg-allon">All</button><button id="vg-alloff">None</button></div>
+        <div id="vg-legend"></div>
+      </div>
+      <div id="vg-readnote" role="tabpanel" aria-labelledby="vg-tabnote" hidden></div>
     </div>
 
     <div class="block">
@@ -53,11 +66,28 @@
   <main id="vg-stage">
     <div id="vg-heat">
       <div class="hrow">
-        <div class="lbl">Notes added</div>
-        <span id="vg-heatnote"></span>
-        <div id="vg-heatscale" aria-hidden="true">
-          <span>fewer</span><canvas id="vg-heatkey"></canvas><span>more</span>
+        <!-- github#70: what the band counts must always be nameable (design/0010). This
+             started as the label itself toggling its own word, which named the state but not
+             the choice -- nothing said it could be clicked, or that a second state existed.
+             Both options are on screen now, and the pressed one is the answer. Two buttons
+             that are always both rendered also cannot change the row's width. -->
+        <span class="lbl">Notes</span>
+        <div id="vg-heatsrc" role="group" aria-label="Which date the calendar counts">
+          <button type="button" data-src="created" aria-pressed="true">Added</button>
+          <button type="button" data-src="touched" aria-pressed="false">Touched</button>
         </div>
+        <!-- github#70: no heading. The chips read the date the segment names, so the row
+             states it once and both controls obey it. A "touched:" label lived here while
+             the chips were pinned to that date, and sat next to a button already saying
+             Touched. Filled from script. -->
+        <div id="vg-recent" role="group" aria-label="Halo the notes from a recent window"></div>
+        <!-- github#70: the `fewer [][][] more` key stood here and is gone. It explained a
+             thing the band already demonstrates -- a denser square is more notes -- and it
+             was the one item in this row that could never hold the row's height, being a
+             canvas sized from the cell. Removed on review: "I think people will get the
+             idea." The readout beside it names the tally in words, which is the part a
+             reader cannot infer from looking. -->
+        <span id="vg-heatnote"></span>
         <button id="vg-compact" type="button" aria-pressed="true"
                 title="Compact the date axis by note count. Off gives every year and month equal width."
                 aria-label="Compact date axis">
@@ -128,6 +158,10 @@
         <canvas aria-hidden="true"></canvas>
       </button>
       <div id="vg-tip" hidden></div>
+      <!-- github#144 -- a lost WebGL context must not read as an empty vault. A pill rather
+           than #vg-busy's full-stage cover: loss is per layer, so the disc is often still
+           half there and worth seeing while the browser hands the context back. -->
+      <div id="vg-glost" role="status" aria-live="polite" hidden></div>
       <!-- github#73 -->
       <div id="vg-mob" role="group" aria-label="Panels">
         <button id="vg-sheet" type="button" aria-expanded="false"
@@ -138,7 +172,7 @@
           </svg>
         </button>
         <button id="vg-band" type="button" aria-pressed="false"
-                title="The notes-added calendar and the date strip" aria-label="Show the calendar">
+                title="The calendar of notes added or touched, and the date strip" aria-label="Show the calendar">
           <svg viewBox="0 0 16 16" width="17" height="17" aria-hidden="true" focusable="false">
             <rect x="2.2" y="3.2" width="11.6" height="9.6" rx="1.4" fill="none"
                   stroke="currentColor" stroke-width="1.4"/>

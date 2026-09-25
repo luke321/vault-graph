@@ -2,14 +2,34 @@
 // github#58
 
 import { readFileSync, writeFileSync, readdirSync, statSync, existsSync } from "node:fs";
-import { join, relative, sep, basename, dirname, resolve as resolvePath } from "node:path";
+import { join, relative, sep, basename, dirname, isAbsolute, resolve as resolvePath } from "node:path";
 import { fileURLToPath } from "node:url";
 // github#58
 // decisions/0012
 import { buildSync } from "esbuild";
 // github#6
 import { localDay, resolveCreated, dateTally } from "./dates.mjs";
+// github#141
+import { canonicalDest, cleanTarget, ghostKey, isExternalTarget, isRelativeDest, resolveAgainst } from "./links.mjs";
+// github#149 -- the policy this producer shares with plugin/build-data.mjs
+import {
+  countWords, degrees, edgeBook, generatedStamp, ghostNode, inferType, isSkippedFile,
+  noteBody, normalizeTags, normSlashes, paraDirs, paraFolder, under,
+} from "./taxonomy.mjs";
 import { engineBanner } from "./engine/notice.mjs";
+// github#71
+import { readSortingSpec } from "./sortspec-file.mjs";
+
+// github#156 -- tsconfig.contracts-node.json is what reads these
+/**
+ * @typedef {import("./page.js").VaultNode} VaultNode
+ * @typedef {import("./page.js").VaultEdge} VaultEdge
+ * @typedef {import("./page.js").VaultData} VaultData
+ */
+/**
+ * github#156 -- a note before its degree is counted, so not a VaultNode yet
+ * @typedef {Omit<VaultNode, "deg"> & { _links?: string[] }} RawNote
+ */
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolvePath(HERE, "..");
@@ -96,35 +116,42 @@ const INCLUDE_TEMPLATES = flag("templates");
 const OUT = opt("out", join(VAULT, "vault-graph.html"));
 const FLAT_MONTHS = flag("flat-months");
 const STRIP_NAV = flag("no-nav");
+// github#71, decisions/0009 -- --folder-order overrides; absent, the page decides
+const SORTSPEC_ARG = opt("sortspec", "");
+// github#156 -- the page's own union; .includes() narrows nothing
+/** @type {"" | NonNullable<import("./page.js").MountDeps["folderOrder"]>} */
+const FOLDER_ORDER = (() => {
+  const v = String(opt("folder-order", ""));
+  if (!v) return "";   // github#71 -- absent: the page decides from the vault
+  if (v === "name" || v === "explorer" || v === "size") return v;
+  console.error(`build-graph: --folder-order ${v} is not name|explorer|size -- letting the page decide`);
+  return "";
+})();
 
 /* ---------------------------------------------------------------- discovery */
 
 const readJson = (rel) => {
   try { return JSON.parse(readFileSync(join(VAULT, rel), "utf8")); } catch { return null; }
 };
-const norm = (s) => String(s).split(/[\\/]/).filter(Boolean).join("/");
 
 const TEMPLATE_DIRS = (() => {
   const out = new Set();
   const core = readJson(".obsidian/templates.json");
-  if (core && typeof core.folder === "string" && core.folder.trim()) out.add(norm(core.folder));
+  if (core && typeof core.folder === "string" && core.folder.trim()) out.add(normSlashes(core.folder));
   const templater = readJson(".obsidian/plugins/templater-obsidian/data.json");
   if (templater && typeof templater.templates_folder === "string" && templater.templates_folder.trim()) {
-    out.add(norm(templater.templates_folder));
+    out.add(normSlashes(templater.templates_folder));
   }
   return [...out];
 })();
 
 const DAILY_DIR = (() => {
   const dn = readJson(".obsidian/daily-notes.json");
-  return dn && typeof dn.folder === "string" && dn.folder.trim() ? norm(dn.folder) : "";
+  return dn && typeof dn.folder === "string" && dn.folder.trim() ? normSlashes(dn.folder) : "";
 })();
 
 const SKIP_DIRS = new Set(["node_modules"]);
 
-const SKIP_FILES = new Set(["claude.md", "readme.md", "license.md"]);
-
-const under = (rel, dir) => dir && (rel === dir || rel.startsWith(dir + "/"));
 const isTemplate = (rel) => TEMPLATE_DIRS.some((d) => under(rel, d));
 
 function walk(dir, acc = []) {
@@ -135,7 +162,7 @@ function walk(dir, acc = []) {
     if (st.isDirectory()) {
       if (SKIP_DIRS.has(entry) || entry.startsWith(".")) continue;
       walk(p, acc);
-    } else if (entry.toLowerCase().endsWith(".md") && !SKIP_FILES.has(entry.toLowerCase())) {
+    } else if (entry.toLowerCase().endsWith(".md") && !isSkippedFile(entry)) {
       acc.push(p);
     }
   }
@@ -168,7 +195,8 @@ function parseFrontmatter(raw) {
       fm[key] = unquote(v);
     }
   }
-  return { fm, body: text.slice(m[0].length) };
+  // github#149
+  return { fm, body: noteBody(raw) };
 }
 const unquote = (s) => String(s).trim().replace(/^["']|["']$/g, "").trim();
 
@@ -185,26 +213,31 @@ const NAV_LINE = new RegExp(
 );
 const stripDailyNav = (s) => (STRIP_NAV ? s.replace(NAV_LINE, "") : s);
 
-const WIKILINK = /!?\[\[([^[\]|#^]+)(?:[#^][^[\]|]*)?(?:\|[^[\]]*)?\]\]/g;
-const MDLINK = /\[[^\]]*\]\(([^)\s]+\.md)(?:\s[^)]*)?\)/g;
+// github#141
+const WIKILINK = /!?\[\[([^[\]|#]+)(?:#[^[\]|]*)?(?:\|[^[\]]*)?\]\]/g;
+// github#141
+const MDLINK = /\[[^\]]*\]\(([^)\s#]+\.md)(?:#[^)\s]*)?(?:\s[^)]*)?\)/g;
 
 function mineLinks(body, fm) {
   const out = [];
-  const push = (t) => { t = t.trim(); if (t) out.push(t); };
-  const scan = (text, re) => {
+  // github#141
+  const push = (raw, url) => {
+    if (url && isExternalTarget(raw)) return;
+    const dest = cleanTarget(raw);
+    if (dest) out.push(dest);
+  };
+  const scan = (text, re, url) => {
     let m; re.lastIndex = 0;
-    while ((m = re.exec(text))) {
-      try { push(decodeURIComponent(m[1])); } catch { push(m[1]); }
-    }
+    while ((m = re.exec(text))) push(m[1], url);
   };
 
   const clean = stripDailyNav(stripCode(body));
-  scan(clean, WIKILINK);
-  scan(clean, MDLINK);
+  scan(clean, WIKILINK, false);
+  scan(clean, MDLINK, true);
 
   for (const v of Object.values(fm)) {
     for (const s of (Array.isArray(v) ? v : [v])) {
-      if (typeof s === "string" && s.includes("[[")) scan(s, WIKILINK);
+      if (typeof s === "string" && s.includes("[[")) scan(s, WIKILINK, false);
     }
   }
   return out;
@@ -212,50 +245,9 @@ function mineLinks(body, fm) {
 
 /* ------------------------------------------------------------ note taxonomy */
 
-const MONTHISH = /^\d{4}(?:[-_ ]?(?:\d{2}|Q[1-4]|W\d{1,2}))?$/i;
-
-const TYPE_ALIAS = {
-  people: "person", person: "person",
-  "zettel/permanent": "zettel", "zettel/fleeting": "zettel", "zettel/literature": "zettel",
-};
-
-const deNumber = (s) => String(s).replace(/^[\s\d._)-]+/, "").trim();
-const slug = (s) => deNumber(s).toLowerCase().replace(/[\s_]+/g, "-");
-const singular = (s) => s.replace(/ies$/, "y").replace(/([^aeious])s$/, "$1");
-
-function inferType(fm, relPath, tags) {
-  const raw = typeof fm.type === "string" ? fm.type.toLowerCase() : "";
-  if (raw) return TYPE_ALIAS[raw] ?? raw;
-  if (tags.includes("daily-note")) return "daily";
-
-  const rel = relPath.split(sep).join("/");
-  if (under(rel, DAILY_DIR)) return "daily";
-  if (isTemplate(rel)) return "template";
-
-  const dirs = relPath.split(sep).slice(0, -1).filter(Boolean);
-  const named = dirs.filter((d) => !MONTHISH.test(d));
-  const pick = named.length ? named[named.length - 1] : dirs[0];
-  const type = pick ? singular(slug(pick)) : "";
-  return type || "note";
-}
-
-const paraFolder = (relPath) => {
-  const seg = relPath.split(sep);
-  return seg.length > 1 ? seg[0] : "(vault root)";
-};
-
-const paraDirs = (relPath) => {
-  const seg = relPath.split(sep).slice(1, -1);
-  const out = [];
-  for (let i = 0; i < seg.length; i++) {
-    if (MONTHISH.test(seg[i])) {
-      if (i === 0 && !FLAT_MONTHS) out.push(seg[i]);
-      break;
-    }
-    out.push(seg[i]);
-  }
-  return out;
-};
+// github#149 -- below this line everything is "/" separated
+/** @param {string} relPath @returns {string} */
+const slashed = (relPath) => relPath.split(sep).join("/");
 
 const dates = dateTally();
 
@@ -263,13 +255,57 @@ const dates = dateTally();
 
 const files = walk(VAULT).filter((abs) => {
   if (INCLUDE_TEMPLATES) return true;
-  return !isTemplate(relative(VAULT, abs).split(sep).join("/"));
+  return !isTemplate(slashed(relative(VAULT, abs)));
 });
+/* github#71, decisions/0015 -- the three places a spec is read, plus --sortspec */
+const SORT_SPECS = (() => {
+  // github#156 -- typed, or it reaches VaultData.sortSpecs as any[]
+  /** @type {NonNullable<VaultData["sortSpecs"]>} */
+  const out = [];
+  const seen = new Set();
+  const add = (abs, origin) => {
+    const key = resolvePath(abs);
+    if (seen.has(key)) return;
+    seen.add(key);
+    let raw; try { raw = readFileSync(abs, "utf8"); } catch { return; }
+    const text = readSortingSpec(raw);
+    if (!text.trim()) return;
+    const rel = slashed(relative(VAULT, abs));
+    const home = rel.indexOf("/") < 0 ? "" : rel.slice(0, rel.lastIndexOf("/"));
+    out.push({ folder: home, text, origin: origin || rel });
+  };
+
+  for (const abs of files) {
+    const rel = slashed(relative(VAULT, abs));
+    const name = basename(abs, ".md");
+    const dir = rel.indexOf("/") < 0 ? "" : rel.slice(0, rel.lastIndexOf("/"));
+    const parent = dir.indexOf("/") < 0 ? dir : dir.slice(dir.lastIndexOf("/") + 1);
+    // github#71 -- a sortspec.md, or a folder note carrying the key
+    if (name.toLowerCase() === "sortspec" || (parent && name === parent)) add(abs, rel);
+  }
+
+  const cfg = readJson(".obsidian/plugins/custom-sort/data.json");
+  if (cfg && typeof cfg.additionalSortspecFile === "string" && cfg.additionalSortspecFile.trim()) {
+    add(join(VAULT, normSlashes(cfg.additionalSortspecFile)), normSlashes(cfg.additionalSortspecFile));
+  }
+  if (SORTSPEC_ARG) {
+    const abs = isAbsolute(SORTSPEC_ARG) ? SORTSPEC_ARG : join(VAULT, normSlashes(SORTSPEC_ARG));
+    if (!existsSync(abs)) console.error(`build-graph: --sortspec ${SORTSPEC_ARG} does not exist -- ignored`);
+    else add(abs, "--sortspec");
+  }
+  return out;
+})();
+
+/** @type {RawNote[]} */
 const notes = [];
+/** @type {Map<string, number>} */
 const byKey = new Map();
+// github#141
+/** @type {Map<string, number>} */
+const byPath = new Map();
 
 for (const abs of files) {
-  const relPath = relative(VAULT, abs);
+  const path = slashed(relative(VAULT, abs));
   const raw = readFileSync(abs, "utf8");
   const { fm, body } = parseFrontmatter(raw);
   const name = basename(abs, ".md");
@@ -277,62 +313,77 @@ for (const abs of files) {
   const dated = resolveCreated(fm, name, st && st.ctimeMs, st && st.mtimeMs);
   dates[dated.source]++;
 
-  const tags = []
-    .concat(fm.tags ?? [], fm.tag ?? [])
-    .flatMap((t) => String(t).split(/[,\s]+/))
-    .map((t) => t.replace(/^#/, "").trim())
-    .filter(Boolean);
+  // github#149
+  const tags = normalizeTags(fm);
+  const dirs = paraDirs(path, FLAT_MONTHS);
 
+  /** @type {RawNote} */
   const note = {
-    id: relPath.split(sep).join("/"),
+    id: path,
     label: name,
-    folder: paraFolder(relPath),
-    dirs: paraDirs(relPath),
-    sub: paraDirs(relPath)[0] || "",
-    type: inferType(fm, relPath, tags),
+    folder: paraFolder(path),
+    dirs,
+    sub: dirs[0] || "",
+    type: inferType(fm, path, tags, DAILY_DIR, isTemplate),
     tags,
     // github#6
     created: dated.day,
     touched: st ? localDay(st.mtimeMs) : "",
-    words: body.split(/\s+/).filter(Boolean).length,
+    words: countWords(body),
     _links: mineLinks(body, fm),
   };
   const idx = notes.push(note) - 1;
 
-  const keys = [name, note.id, note.id.replace(/\.md$/, "")]
-    .concat(fm.aliases ?? [], fm.alias ?? []);
+  // github#141
+  const key = note.id.replace(/\.md$/, "").toLowerCase();
+  if (!byPath.has(key)) byPath.set(key, idx);
+
+  const keys = [name].concat(fm.aliases ?? [], fm.alias ?? []);
   for (const k of keys) {
     const kk = String(k).toLowerCase().trim();
     if (kk && !byKey.has(kk)) byKey.set(kk, idx);
   }
 }
 
-const edgeWeight = new Map();
+/** @type {Map<string, { dest: string, sources: number[] }>} */
 const ghosts = new Map();
 let unresolved = 0;
 
-const resolve = (target) => {
-  const t = target.toLowerCase().trim().replace(/\.md$/, "");
-  if (byKey.has(t)) return byKey.get(t);
-  const base = t.split("/").pop();
-  return byKey.has(base) ? byKey.get(base) : -1;
+// github#141
+const exact = (p) => {
+  const k = p.toLowerCase();
+  return k && byPath.has(k) ? byPath.get(k) : -1;
 };
 
-const addEdge = (i, j) => {
-  if (i === j) return;
-  const key = i < j ? `${i} ${j}` : `${j} ${i}`;
-  edgeWeight.set(key, (edgeWeight.get(key) ?? 0) + 1);
+// github#141
+const resolve = (dest, sourceId) => {
+  const here = exact(resolveAgainst(sourceId, dest));
+  if (here >= 0) return here;
+  if (isRelativeDest(dest)) return -1;
+  const there = exact(canonicalDest(sourceId, dest));
+  if (there >= 0) return there;
+  // github#141 -- byKey holds no paths now, so an alias may carry a slash
+  const k = dest.toLowerCase().trim();
+  return byKey.has(k) ? byKey.get(k) : -1;
 };
+
+// github#149
+const book = edgeBook();
+const addEdge = (i, j) => book.add(i, j, 1);
 
 for (let i = 0; i < notes.length; i++) {
   for (const target of notes[i]._links) {
-    const j = resolve(target);
+    const j = resolve(target, notes[i].id);
     if (j < 0) {
       unresolved++;
       if (INCLUDE_GHOSTS) {
-        const key = target.split("/").pop();
-        if (!ghosts.has(key)) ghosts.set(key, []);
-        ghosts.get(key).push(i);
+        // github#141
+        const dest = canonicalDest(notes[i].id, target);
+        const key = ghostKey(dest);
+        let slot = ghosts.get(key);
+        if (!slot) { slot = { dest, sources: [] }; ghosts.set(key, slot); }
+        else if (dest < slot.dest) slot.dest = dest;
+        slot.sources.push(i);
       }
       continue;
     }
@@ -341,24 +392,21 @@ for (let i = 0; i < notes.length; i++) {
 }
 
 if (INCLUDE_GHOSTS) {
-  for (const [name, sources] of ghosts) {
-    const g = {
-      id: `ghost:${name}`, label: name, folder: "(unresolved)", sub: "", type: "ghost",
-      tags: [], created: "", words: 0, ghost: true,
-    };
+  // github#141
+  for (const { dest, sources } of ghosts.values()) {
+    // github#149, github#152 -- one factory, so a ghost cannot lose a field in one host only
+    /** @type {RawNote} */
+    const g = ghostNode(dest);
     const j = notes.push(g) - 1;
     for (const i of sources) addEdge(i, j);
   }
 }
 
-const edges = [...edgeWeight].map(([k, w]) => {
-  const [a, b] = k.split(" ").map(Number);
-  return { s: a, t: b, w };
-});
+/** @type {VaultEdge[]} */
+const edges = book.edges();
+const degree = degrees(edges, notes.length);
 
-const degree = new Array(notes.length).fill(0);
-for (const e of edges) { degree[e.s]++; degree[e.t]++; }
-
+/** @type {VaultNode[]} */
 const nodes = notes.map((n, i) => {
   const { _links, ...rest } = n;
   return { ...rest, deg: degree[i] };
@@ -367,14 +415,12 @@ const nodes = notes.map((n, i) => {
 // github#108
 const VERSION = JSON.parse(readFileSync(join(ROOT, "manifest.json"), "utf8")).version;
 
+/** @type {VaultData} */
 const data = {
   vault: basename(VAULT),
   version: VERSION,
-  generated: (() => {
-    const d = new Date(), p2 = (n) => String(n).padStart(2, "0");
-    return `${d.getFullYear()}-${p2(d.getMonth() + 1)}-${p2(d.getDate())} ` +
-           `${p2(d.getHours())}:${p2(d.getMinutes())}`;
-  })(),
+  // github#149
+  generated: generatedStamp(),
   nodes,
   edges,
   stats: {
@@ -389,6 +435,9 @@ const data = {
     ghostsIncluded: INCLUDE_GHOSTS,
   },
   dev: DEV_BUILD,
+  // github#71 -- omitted unless told, so absence means nobody has chosen
+  ...(FOLDER_ORDER ? { folderOrder: FOLDER_ORDER } : {}),
+  sortSpecs: SORT_SPECS,
 };
 
 /* ------------------------------------------------------------------ emit */
@@ -449,6 +498,13 @@ writeFileSync(OUT, html, "utf8");
 const kb = (Buffer.byteLength(html) / 1024).toFixed(0);
 console.log(`vault-graph: ${data.stats.nodes} notes, ${data.stats.edges} links, ` +
             `${data.stats.orphans} orphans, ${unresolved} unresolved link(s)`);
+if (SORT_SPECS.length) {
+  console.log(`sortspec: ${SORT_SPECS.length} source(s) -- ` +
+              SORT_SPECS.map((x) => x.origin).join(", ") + `; folder order: ${FOLDER_ORDER || "from the vault (explorer)"}`);
+} else if (FOLDER_ORDER === "explorer") {
+  console.log("sortspec: --folder-order explorer, but no sortspec was found -- the page will " +
+              "fall back to name order");
+}
 console.log(`dated: ${dates.frontmatter} from frontmatter, ${dates.filename} from the ` +
             `filename, ${dates.stamp} from the file stamp` +
             (dates.none ? `, ${dates.none} UNDATED` : ", none undated"));

@@ -17,10 +17,10 @@ Call out what's newly done since the last table and what's still blocked or awai
 | 3 | `CHANGELOG.md` section for `<version>`, covering every merge since the last tag — and, for a MINOR or MAJOR, `plugin/whats-new.md` rewritten for it: the three-to-five-line note the plugin shows once after the update (github#83, `design/0016`). A PATCH leaves the file alone. `release.ps1` refuses an `x.y.0` whose note is for another version | |
 | 4 | Version bump: `manifest.json` → `<version>` | |
 | 5 | Release name — propose 2-4 candidates, his pick | |
-| 6 | **Re-record every clip and the hero — the default, not a judgment call (github#121)** — a diff cannot reliably say which clips went stale (a constant like `FIT_RATIO`, a storyboard reorder, a sizing fix makes *every* clip stale, not just the ones whose own beats moved), so `scripts/record-all.ps1` re-records all of them in one pass. Needs the `record` lock; ask before recording. Before merge, not after — the merged tree is what the clips should show. Skip only for a release that touches nothing visual (a docs-only PATCH), and name that exception here rather than defaulting to it. | |
+| 6 | **Re-record every clip and the hero — the default, not a judgment call (github#121)** — a diff cannot reliably say which clips went stale (a constant like `FIT_RATIO`, a storyboard reorder, a sizing fix makes *every* clip stale, not just the ones whose own beats moved), so `scripts/record-all.ps1` re-records all of them in one pass. Needs the `record` lock; ask before recording. Before merge, not after — the merged tree is what the clips should show. Skip only for a release that touches nothing visual (a docs-only PATCH), and name that exception here rather than defaulting to it. | | **Then run the `review-clips` skill and look at the page** (`& "$env:USERPROFILE\.claude\skills\review-clips\build-clip-review.ps1" -Repo . -Open`) — it reads the storyboard itself and prints `clips present N/N` with the missing act names, so the recording step is confirmed rather than assumed. Do not eyeball a diff to decide what was re-recorded.
 | 7 | Merge `release/<version>` → `develop` (local) | |
 | 8 | **One** plain `git push origin develop` (the hook takes the `suite` lock itself, github#92 — never wrap the push in your own acquire/release, it deadlocks against the hook's) | |
-| 9 | PR/merge `develop` → `main` | |
+| 9 | Merge/push `develop` → `main` (no PR required since 2026-09-13) | |
 | 10 | **Draft the release body, publish it as a Claude Artifact, and get an explicit go-ahead before the tag goes out** — `release.yml` publishes live the moment the tag lands, using the `## <version>` CHANGELOG section verbatim as the body and no `--draft` gate; the artifact is what puts the actual rendered page a stranger will land on in front of a human, not a changelog entry read back by the same session that wrote it. This is the actual review step, not `release.ps1`'s pre-flight suite. | |
 | 11 | `release.ps1` on `main` — gates, tag, push | |
 | 12 | GitHub Actions publishes the release (attestation, assets) — automatic once tagged | |
@@ -70,24 +70,31 @@ prefix, so a `v`-tagged release is one nobody can install), a version the manife
 claim, a version with no `## <version>` section in `CHANGELOG.md`, a branch other than `main`
 (github#47), a dirty tree and a `main` that is not exactly `origin/main` (github#94: behind
 means missing what is already published, ahead means a local merge the ruleset will never let
-through); prints the hero and feature-clip warnings; runs lint, `check-notice.mjs` and the
-invariant suite; builds the plugin once as a pre-flight (the one failure the split introduces
+through); prints the hero and feature-clip warnings; runs lint, `check-notice.mjs`,
+`check-comments.mjs` (github#137) and the invariant suite; builds the plugin once as a pre-flight
+(the one failure the split introduces
 is a build that only fails in CI, leaving a tag with no release, and a tag cannot be re-cut);
 then writes the annotated tag with the CHANGELOG section as its message and pushes the tag.
-**It never pushes `main`.** The ruleset on `main` requires a pull request and has no bypass,
-so the `develop → main` merge happens on the website before the script runs; the first cut of
-2.4.0 made its tag and then had `git push origin HEAD` come back with GH013, which is the
-dangling-tag case this file warns about. `-DryRun` stops after the suite.
+**It never pushes `main`.** The `develop → main` merge happens before the script runs —
+either on the website, or as a local merge pushed directly now that the ruleset no longer
+requires a pull request (dropped 2026-09-13; it still requires `branch-policy.yml`'s
+source-branch check to pass, whichever way the commit arrives). The first cut of 2.4.0 made
+its tag and then had `git push origin HEAD` come back with GH013 — back when the ruleset
+still refused a direct push outright — which is the dangling-tag case this file warns about.
+`-DryRun` stops after the suite.
 
 **`.github/workflows/release.yml` is the publisher (github#10).** The tag push triggers it. It
 checks out the tagged commit, resolves and re-checks the version against the manifest and the
-CHANGELOG, refuses a commit that is not in `origin/main`'s history, runs the static gates
-(lint, scope, PII, comments, code map, and `check-notice.mjs`, which builds `main.js` and reads
-the Sigma copyright line back out of it and of a fresh exported page), refuses to publish
-without all three files, **attests** them with `actions/attest-build-provenance`, drafts the
-release body from the `## <version>` section, names the release from that heading, and creates
-the Release (or re-uploads over one that exists). Its step summary prints the SHA-256 of each
-file and the attestation URL.
+CHANGELOG, refuses a commit that is not in `origin/main`'s history, runs the hook's whole
+unskippable static block (lint, scope, PII, comments, the generator/build-order/data-escape
+determinism checks, the update-note and smoke-runner selftests, link resolution, the code map
+and gallery-nav checks, and `check-notice.mjs`, which builds `main.js` and reads the Sigma
+copyright line back out of it and of a fresh exported page — `scripts/check-ci-parity.mjs`
+guards this file the same way it guards `quality.yml`, github#154), refuses to publish without
+all three files, **attests** them with `actions/attest-build-provenance`, drafts the release
+body from the `## <version>` section, names the release from that heading, and creates the
+Release (or re-uploads over one that exists). Its step summary prints the SHA-256 of each file
+and the attestation URL.
 
 **Why publication had to move.** An attestation is signed through Sigstore with the run's OIDC
 token, and `id-token: write` is a permission only an Actions run can hold — no script on a
@@ -178,12 +185,22 @@ reverse-engineered from it, not invented.
 3. **One `###` (h3, not h2) section per genuinely new or visibly-changed feature** — and the
    set of them comes from the merge list in *First, list what is actually in the release*, not
    from memory, so nothing in the range goes unmentioned. Each
-   with its matching clip from `assets/features/*.webp` embedded the same way. Only
+   with its matching clip from `assets/features/*.webp` embedded the same way. **The clip goes
+   directly under the heading, above the bullets, every time** — the picture is what the section
+   is for, and a reader who has already read three bullets does not need it. Every published
+   release does it in that order; a draft that puts the clip under the bullets reads as written
+   from a doc rather than from a release. Only
    feature clips that exist and are current belong here; don't call something "new" that
    already shipped in an earlier release — check the source at the previous tag first
-   (`git show <prev-tag>:src/page.js | grep ...`). Bug fixes real enough to matter but not
-   visually demonstrable go in prose under the nearest relevant `###`, or their own
-   "Smaller things" `###` list, with no clip forced onto them.
+   (`git show <prev-tag>:src/page.js | grep ...`). **A fix does not get a `###` section or a clip, however visible it is.** The test is *new
+   capability versus corrected behaviour*, never *can it be filmed* — a disc that now fills more
+   of the window, or a pan that no longer freezes, is plainly visible and is still a fix. Fixes
+   real enough to matter go in prose under the nearest relevant `###`, or their own
+   "Smaller things" `###` list, with no clip forced onto them. This sentence used to read "real
+   enough to matter but not visually demonstrable", which invited exactly the wrong reading: a
+   preview drafted github#128 and github#120 as feature sections owing clips, acts and feature
+   pages, and Lukas corrected it — *"the disc being able to pan is a bug fix not new feature and
+   so is the rescale of the disc, no need for features md or clips or demo takes."*
 4. **The Ko-fi ask, every release, always the same spot** — right after the highlight reel,
    right before the divider below. One line of text, then the button on its own line:
 
@@ -462,12 +479,15 @@ exactly once.
    the hook runs the suite for real — and stamps the new tree. Do not reach for `SKIP_SMOKE`
    here; the stamp is what makes the skip honest, and a skipped run leaves no record of what
    was trusted.
-5. Open `develop` → `main` on the website and merge it. The only required check is the
-   branch-policy job (4 s). The merge commit carries `develop`'s tree byte for byte — measured
-   on 2.3.0, 2.4.0 and 2.4.1.
+5. Merge `develop` → `main`, either way — open it on the website (the only required check is
+   the branch-policy job, 4 s), or merge locally and `git push origin main` (branch-policy.yml's
+   push job runs the same check: `develop` must already be an ancestor). No pull request is
+   required either way, since the ruleset dropped that rule 2026-09-13 — only the source-branch
+   check remains. The merge commit carries `develop`'s tree byte for byte — measured on 2.3.0,
+   2.4.0 and 2.4.1.
 6. `git switch main && git pull --ff-only`, then `.\scripts\release.ps1 <version>`. It checks
-   that `main` is exactly `origin/main` (github#94: a `main` that is ahead is a local merge the
-   ruleset will never accept, and the script stops before any tag exists), finds the stamp for
+   that `main` is exactly `origin/main` (github#94: a `main` that is ahead is a local merge
+   nobody has pushed yet, and the script stops before any tag exists), finds the stamp for
    `HEAD`'s tree and skips the suite, tags, and pushes the tag (never gated). The workflow
    publishes.
 
@@ -496,11 +516,13 @@ that can say what it trusted.
    `Last re-recorded` line. Commit `assets/demo.webp`, `assets/features/*.webp` and the
    updated docs together. Skip only for a release that touches nothing visual (a docs-only
    PATCH), and say so explicitly rather than skipping by default — see above.
-5. **Run the gates.** `npm run lint`, `node scripts/check-notice.mjs`, `node scripts/smoke.mjs`
+5. **Run the gates.** `npm run lint`, `node scripts/check-notice.mjs`,
+   `node scripts/check-comments.mjs` (github#137), `node scripts/smoke.mjs`
    — and they run again on push via `.githooks/pre-push`, so a red suite cannot be released.
-6. **Get the commit onto `origin/main` first**: merge `develop → main` through a pull request
-   on the website — the ruleset refuses a direct push (github#94) — then `git switch main &&
-   git pull --ff-only`.
+6. **Get the commit onto `origin/main` first**: merge `develop → main`, either on the website
+   or locally followed by `git push origin main` — no pull request required since 2026-09-13,
+   just `branch-policy.yml`'s source-branch check (`develop` must already be an ancestor) —
+   then `git switch main && git pull --ff-only`.
 7. **Tag, annotated**, with the release summary as the message, on that `main`, and **push the
    tag.** The commit is already on `origin/main`, so the workflow's main-ancestry guard has no
    race to lose. Everything below is what the workflow then does for you.

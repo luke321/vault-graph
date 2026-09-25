@@ -8,7 +8,10 @@ import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { attach } from "./cdp.mjs";
+// github#142
+import { pngCaptureJs, pngCarriesGraph, pngCaptureDetail } from "./png-capture.mjs";
 import { leftmostScreen, leftWindow, leftWindowArgs, placeElectronLeft } from "./screen.mjs";
+import { keepFocus } from "./focus.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(HERE, "..");
@@ -115,6 +118,8 @@ async function exporterPositions(vault) {
   if (b.status !== 0) throw new Error("build-graph failed: " + (b.stderr || b.stdout));
   const port = await freePort();
   const profile = mkdtempSync(join(tmpdir(), "vg-obsidian-smoke-chrome-"));
+  // github#129
+  const focus = await keepFocus();
   const chrome = spawn(findChrome(), [
     "--remote-debugging-port=" + port, "--user-data-dir=" + profile,
     "--no-first-run", "--no-default-browser-check", "--disable-extensions", "--disable-sync",
@@ -124,6 +129,7 @@ async function exporterPositions(vault) {
     "--force-device-scale-factor=1", ...leftWindowArgs(1600, 1000),
     "--app=" + pathToFileURL(out).href + "?rest",
   ], { stdio: "ignore" });
+  void focus.watch(chrome.pid);
   let p = null;
   try {
     for (let i = 0; i < 100 && !p; i++) {
@@ -163,7 +169,10 @@ async function launchObsidian(vault, profile, fresh = true) {
       JSON.stringify({ vaults: { "0000obsidiansmoke": { path: vault, ts: Date.now(), open: true } } }), "utf8");
   }
   const t0 = Date.now();
+  // github#129
+  const focus = await keepFocus();
   const child = spawn(findObsidian(), ["--remote-debugging-port=" + PORT, "--user-data-dir=" + profile], { stdio: "ignore" });
+  void focus.watch(child.pid);
   for (let i = 0; i < 120; i++) {
     await sleep(500);
     let c = null;
@@ -437,7 +446,7 @@ try {
   }
 
   if (selected("right-click")) {
-    const before = await E("(" + VIEW + ").plugin.settings.pinned.length");
+    const before = await E("(" + VIEW + ").plugin.settings.pinned.slice()");
     await E("(function(){ var v = " + VIEW + "; window.__vgSmokeRc = { menu: 0, node: 0 };" +
             " v.contentEl.querySelector('#vg-graph').addEventListener('contextmenu', function () { window.__vgSmokeRc.menu++; }, true);" +
             " v.handle.api.renderer.on('rightClickNode', function () { window.__vgSmokeRc.node++; }); })(); void 0");
@@ -453,14 +462,17 @@ try {
     };
     const at = await rightClick();
     const pinned = await E("(" + VIEW + ").plugin.settings.pinned.slice()");
+    // github#143 -- the setting holds the note's PATH now, never its runtime id
+    const path = await E(VIEW + ".handle.api.graph.getNodeAttribute(" + JSON.stringify(id) + ", 'path')");
     const at2 = await noteAt(c, id);
     await rightClick();
-    const after = await E("(" + VIEW + ").plugin.settings.pinned.length");
+    const after = await E("(" + VIEW + ").plugin.settings.pinned.slice()");
     const rc = await E("window.__vgSmokeRc");
     const instances = await E("(function(){ var v = " + VIEW + "; return v.plugin === app.plugins.getPlugin('" + PLUGIN_ID + "') ? 'one plugin instance' : 'TWO plugin instances (the view belongs to an earlier load)'; })()");
     const moved = Math.hypot(at2.x - at.x, at2.y - at.y);
-    report(pinned.includes(id) && pinned.length === before + 1 && after === before, "right-click pins the note into the hub and persists it, a second right-click releases it",
-      "pinned " + before + " -> " + pinned.length + " (" + (pinned.includes(id) ? "holds " + id : "does not hold " + id) + ") -> " + after + "; the note moved " + Math.round(moved) + " px into the hub; " +
+    report(pinned.includes(path) && !pinned.includes(id) && after.indexOf(path) < 0 && pinned.length === after.length + 1,
+      "right-click pins the note into the hub and persists it by path, a second right-click releases it",
+      "stored " + JSON.stringify(before) + " -> " + JSON.stringify(pinned) + " (" + (pinned.includes(path) ? "holds " + path : "does NOT hold " + path) + ", runtime id " + id + (pinned.includes(id) ? " ALSO STORED" : " not stored") + ") -> " + JSON.stringify(after) + "; the note moved " + Math.round(moved) + " px into the hub; " +
       rc.menu + " contextmenu events, " + rc.node + " rightClickNode events over two right-clicks; " + instances);
   }
 
@@ -607,6 +619,38 @@ try {
     report(problems.length === 0, "closing and reopening the view " + CYCLES + " times grows no listeners, DOM or heap",
       problems.length ? problems.join("; ") : "cycle 1 -> " + CYCLES + ": heap " + first.heapMB + " -> " + last.heapMB + " MB (" + heapPer.toFixed(2) + " MB/cycle), nodes " + first.nodes + " -> " + last.nodes +
       ", listeners " + first.listeners + " -> " + last.listeners + ", document mousemove " + first.move + "/" + last.move + ", reopen " + Math.min(...msOpen) + "-" + Math.max(...msOpen) + " ms");
+  }
+
+  if (selected("since last open")) {
+    // github#70, decisions/0009
+    const read = "(async function(){ var raw = await app.vault.adapter.read(app.vault.configDir +" +
+                 " '/plugins/" + PLUGIN_ID + "/data.json'); return JSON.parse(raw).lastSeen || null; })()";
+    const chips = "(function(){ var box = " + VIEW + ".contentEl.querySelector('#vg-recent');" +
+                  " return box ? Array.prototype.map.call(box.querySelectorAll('button[data-kind]')," +
+                  " function(b){ return b.getAttribute('data-kind'); }).join(',') : 'NO ROW'; })()";
+    const before = await E(read);
+    const dep0 = await E(VIEW + ".lastSeenPrev || null");
+    const kinds0 = await E(chips);
+    await closeGraph(c);
+    const atClose = await E(read);
+    await openGraph(c);
+    const dep1 = await E(VIEW + ".lastSeenPrev || null");
+    const kinds1 = await E(chips);
+    const atOpen = await E(read);
+    // github#70
+    await E("(function(){ var b = " + VIEW + ".contentEl.querySelector('#vg-refresh'); if (b) b.click(); })(); void 0");
+    await sleep(1500);
+    const dep2 = await E(VIEW + ".lastSeenPrev || null");
+    const ok = typeof atClose === "number" && typeof atOpen === "number" &&
+               atOpen >= atClose && dep1 === atClose && dep2 === dep1 &&
+               kinds1.split(",").indexOf("open") >= 0;
+    report(ok, "the view stamps lastSeen at open and at close, and hands the page the previous stamp",
+      "data.json lastSeen " + before + " -> " + atClose + " (close) -> " + atOpen + " (reopen); " +
+      "the page was handed " + dep0 + ", then " + dep1 +
+      (dep1 === atClose ? " = the stamp from the close" : "  <- NOT the previous stamp") +
+      ", and " + dep2 + " after a Refresh" + (dep2 === dep1 ? " (unchanged)" : "  <- a rebuild moved it") +
+      "; chips " + kinds0 + " -> " + kinds1 +
+      (kinds1.split(",").indexOf("open") >= 0 ? "" : "  <- no since-last-open chip"));
   }
 
   if (selected("refresh")) {
@@ -927,6 +971,25 @@ try {
     await mouse(c, "mouseMoved", 3, 3, { buttons: 0 });
     return at;
   };
+  // github#142
+  if (selected("png export")) {
+    const n0 = errorsBefore();
+    await E("(function(){ var v = " + VIEW + "; var b = v.contentEl.querySelector('#vg-reset'); if (b) b.click(); })(); void 0");
+    await camSettle(c);
+    // github#142
+    await sleep(1500);
+    await E("new Promise(function (r) { requestAnimationFrame(function () { requestAnimationFrame(r); }); })");
+    const cap = await E(pngCaptureJs({
+      api: VIEW + ".handle.api",
+      button: VIEW + ".contentEl.querySelector('#vg-png')",
+      logo: VIEW + ".contentEl.querySelector('#vg-logo')",
+      stage: VIEW + ".contentEl.querySelector('#vg-graph')",
+    })).catch((e) => ({ clicked: false, why: e.message }));
+    const errs = errorsSince(n0);
+    report(pngCarriesGraph(cap) && errs.length === 0,
+      "the plugin's Save PNG carries the graph after the disc has been idle",
+      pngCaptureDetail(cap) + (cap.why ? " -- " + cap.why : "") + "; " + errs.length + " errors");
+  }
   if (selected("trail")) {
     const n0 = errorsBefore();
     await clickNote();

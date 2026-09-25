@@ -31,7 +31,7 @@ them adjacent dE of roughly 7-9 on its own.
 
 ## It goes round
 
-Folder *n* takes slot *n*, and folder 13 comes back to slot 1.
+Folder *n* takes hue *n*, and folder 11 comes back to hue 1.
 
 It used to stop at ten and drop everything past that into the neutrals, on the reasoning
 that a repeated hue is a lie about identity. That trade is the wrong way round. A repeat
@@ -49,6 +49,74 @@ and the palette should answer it as a choice.
 
 The neutrals still exist and are still used — as the dim colour and as `colorOf`'s
 fallback — but they are no longer the overflow palette.
+
+### The rotation is ten hues, not twelve slots (github#118)
+
+**The paragraph above stopped being true at the eleventh group, and that went unnoticed for
+as long as only folder dimensions were looked at.** "A punishment for being thirteenth" was
+removed from the *overflow* and left in the *rotation*: cycling all twelve slots hands slot 11
+and slot 12 — the two greys — to whichever groups happen to sort eleventh and twelfth, then
+twenty-first and twenty-second, and so on. A group made grey that way did not choose to
+recede; it sorted there. That is the same trade this section says is the wrong way round,
+one position earlier.
+
+It stayed invisible because a folder dimension rarely reaches eleven groups. A **tag**
+dimension reaches it immediately, which is what github#118 reported. Measured with
+`__vg.colorOf` over `__vg.groupOrder()` on `shape-vault`'s tag dimension — 122 groups, and
+the rotation laps twelve times:
+
+| slot | groups on it | |
+|---|---|---|
+| g1 … g10 | 10 each | ten hues |
+| **g11** | **12** | **grey** |
+| **g12** | **10** | **grey** |
+
+So **20 of its 122 groups were grey on nothing but their place in the sort**, and with
+`(untagged)` and `(unlinked)` — which are *meant* to be grey — that is the 22 the issue
+reported as "a fifth of them read as grey".
+
+`buildColors` rotates over `HUE_SLOTS = 10`. Both greys stay fully pickable, `g11` stays
+`ARCHIVE_SLOT`, and `groupSlot` / `groupAutoSlot` / pins / persistence are untouched — an
+archive still never advances the counter. `SLOT_COUNT` had exactly one use, the rotation, and
+went with it; the picker's twelve come from `SLOT_NAMES` and are unchanged.
+
+| fixture · dimension | groups | distinct colours | greyish |
+|---|---|---|---|
+| `shape-vault` · tag | 122 | 12 → **11** | 22 → **2** |
+| `shape-vault` · folder | 7 | 7 → 7 | 1 → 1 |
+| demo mirror · folder | 18 | 12 → **11** | 3 → **1** |
+| demo mirror · tag | 14 | 12 → **11** | 4 → **2** |
+
+"Greyish" is max(r,g,b) − min(r,g,b) < 26 on the resolved hex. The two that remain everywhere
+are the two buckets that should be grey. Distinct colours falling by one is the point, not a
+regression: the twelfth colour was a grey nobody asked for.
+
+`smoke.mjs --only "handed a grey by where it sorts"` asserts it on all four fixtures, reading
+both dimensions through `groupsOf()` — which runs `inDim()`, so it reaches the dimension that
+is not on screen without switching to it and without a cascade to settle.
+
+**What this does NOT answer, and is still open.** github#118 also reports 122 groups sharing
+twelve colours, now ten. That is the rotation doing what this section says it should, and the
+three options the issue lists were weighed against measurements rather than picked:
+
+- **Merging tiny groups (the issue's third option) is not an answer to it at all**, and that is
+  measured, not argued. `ringsMerged` / `MERGED` / `smallIds` live entirely inside the plan and
+  layout code; nothing in `computeOrder`, `buildColors`, `colorOf` or `buildLegend` reads them.
+  A merged group leaves the wedge structure and stays in `order[state.dim]`, still holding a
+  rotation slot. Spiked: `SMALL_GROUP` 0 → 4 on `shape-vault`, pooling the 101 groups holding
+  three notes or fewer, moved **neither** number — still 122 groups, 12 distinct, 22 greyish.
+  It is github#119's mechanism, and github#119's own open question ("whether a bucket is a
+  group or a presentation") is the one that would decide it.
+- **A deliberate "other" colour for the tail (the second option) reverses this very section**,
+  so it is a decision for the maintainer rather than an implementation detail.
+- **Widening the ladder (the first option) redefines a slot** from one colour per theme into a
+  family of colours — which is the proposition ["A saved colour is a slot, not a
+  hex"](#a-saved-colour-is-a-slot-not-a-hex) rests on. `src/page.css`'s `.swatch.vg-gN` rules
+  give the picker its background *and* its dot from `var(--gN)` by class, so every group past
+  the tenth would show the base hue in the picker while drawing a lap variant on the disc —
+  the github#84 divergence this record already warns about. Honest costs an inline per-lap
+  `--dot`/`background` in both themes, `slotTitle`'s measured contrast recomputed per lap, and
+  `palette-check.mjs` growing a lap dimension. Worth doing on purpose, not as a side effect.
 
 ## Slots 6 and 10 were pastels
 

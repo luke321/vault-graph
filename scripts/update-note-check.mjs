@@ -9,7 +9,8 @@ import { fileURLToPath } from "node:url";
 import { attach } from "./cdp.mjs";
 import { fixtureStore } from "./suite-stamp.mjs";
 import { leftWindow, placeElectronLeft } from "./screen.mjs";
-import { parseNote, parseReleases, releaseChain, semver } from "../plugin/update-note.mjs";
+import { keepFocus } from "./focus.mjs";
+import { CHAIN_MAX, parseNote, parseReleases, releaseChain, semver } from "../plugin/update-note.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(HERE, "..");
@@ -74,7 +75,10 @@ async function launchObsidian(vault, profile) {
   mkdirSync(profile, { recursive: true });
   writeFileSync(join(profile, "obsidian.json"),
     JSON.stringify({ vaults: { "0000updatenote": { path: vault, ts: Date.now(), open: true } } }), "utf8");
+  // github#129
+  const focus = await keepFocus();
   const child = spawn(findObsidian(), ["--remote-debugging-port=" + PORT, "--user-data-dir=" + profile], { stdio: "ignore" });
+  void focus.watch(child.pid);
   for (let i = 0; i < 120; i++) {
     await sleep(500);
     let c = null;
@@ -286,14 +290,25 @@ try {
 
   const releases = parseReleases(readFileSync(join(ROOT, "CHANGELOG.md"), "utf8"));
   const FAR = releases.filter((r) => semver(r.version)[2] === 0 && semver(r.version)[0] === maj).map((r) => r.version).slice(-1)[0] || PREV_MINOR;
-  const want = releaseChain({ releases, lastSeen: FAR, installed: N, note });
+  const wantAll = releaseChain({ releases, lastSeen: FAR, installed: N, note });
+  // github#83 -- models CHAIN_MAX's collapse; see the fix commit
+  const want = wantAll.length > CHAIN_MAX ? wantAll.slice(wantAll.length - CHAIN_MAX) : wantAll;
+  const collapsedCount = wantAll.length - want.length;
   console.log("several releases behind ({ lastSeenVersion: " + FAR + " }, " + N + ")");
   await reloadPlugin({ lastSeenVersion: FAR }, N);
   await openGraph();
-  const got = await E("(function(){ var s = " + STRIP + "; return s ? Array.prototype.map.call(s.querySelectorAll('.vg-whatsnew-chain a'), function (a) { return { v: a.textContent, href: a.getAttribute('href'), title: a.getAttribute('title') || '' }; }) : []; })()");
+  const gotAll = await E("(function(){ var s = " + STRIP + "; return s ? Array.prototype.map.call(s.querySelectorAll('.vg-whatsnew-chain a'), function (a) { return { v: a.textContent, href: a.getAttribute('href'), title: a.getAttribute('title') || '' }; }) : []; })()");
+  const collapseLink = collapsedCount > 0 ? gotAll[0] : null;
+  const got = collapsedCount > 0 ? gotAll.slice(1) : gotAll;
+  if (collapsedCount > 0) {
+    report(!!collapseLink && collapseLink.v === "\u2026" && collapseLink.href === "https://github.com/luke321/vault-graph/releases" &&
+           collapseLink.title === collapsedCount + " earlier releases",
+           "releases before the shown window collapse behind one link naming how many",
+           collapseLink ? collapseLink.v + " (" + collapseLink.title + ")" : "(no collapse link)");
+  }
   report(got.length === want.length && got.every((g, i) => g.v === want[i].version && g.href === "https://github.com/luke321/vault-graph/releases/tag/" + want[i].version && g.title === want[i].name),
          "the chain lists every x.y.0 since " + FAR + ", oldest first, each linking its own release page, the name on hover",
-         got.map((g) => g.v + (g.title ? " (" + g.title + ")" : "")).join(" \u2013 "));
+         (collapseLink ? collapseLink.v + " (" + collapseLink.title + ") \u2013 " : "") + got.map((g) => g.v + (g.title ? " (" + g.title + ")" : "")).join(" \u2013 "));
   report(got.length >= 2 && got[0].v !== FAR && got[got.length - 1].v === N && got.every((g, i) => !i || semver(g.v)[1] > semver(got[i - 1].v)[1] || semver(g.v)[0] > semver(got[i - 1].v)[0]),
          "the chain starts after the version last seen, ends at the note's, and climbs", got.length + " links");
   await shoot("03-chain");
@@ -335,7 +350,12 @@ try {
   const bytesBefore = readData();
   await openGraph();
   report(!await stripShown(), "an already-seen version shows nothing");
-  report(readData() === bytesBefore, "and writes nothing", "data.json unchanged");
+  // github#70 -- the lens stamps lastSeen on every open; nothing else moves
+  const sansStamp = (s) => { const o = JSON.parse(s); delete o.lastSeen; return JSON.stringify(o); };
+  const afterSans = sansStamp(readData()), beforeSans = sansStamp(bytesBefore);
+  report(afterSans === beforeSans, "and writes nothing but the open stamp",
+         afterSans === beforeSans ? "data.json unchanged apart from lastSeen"
+                                  : "before " + beforeSans + " -> after " + afterSans);
   await closeGraph();
 
   console.log("note for another minor ({ lastSeenVersion: " + N + " }, " + NEXT_MINOR + ")");

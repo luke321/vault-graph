@@ -1,5 +1,13 @@
 # cut-release — change log
 
+## 2026-09-13 - develop -> main no longer stops for a PR
+
+The ruleset on `main` dropped its required-pull-request rule; only the source-branch check
+(`branch-policy.yml`, now gating a direct push too) remains. Step 13 (merge `develop` -> `main`)
+drops off the "still stops" list from "ask everything first, then run" below and off the
+per-clip-review exceptions -- it merges and pushes directly like every other step, same as
+`develop`'s own push. The website route still works if you'd rather use it.
+
 ## 2026-09-11 - the update strip gets rendered and looked at
 
 New step 9, "Render the update strip and show it", between the clip review and the dry run;

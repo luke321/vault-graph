@@ -7,6 +7,7 @@ import { tmpdir } from "node:os";
 import { join, dirname, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { leftWindowArgs } from "./screen.mjs";
+import { keepFocus } from "./focus.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = dirname(HERE);
@@ -48,6 +49,8 @@ process.stdout.write(b.stdout || "");
 
 const PORT = await freePort();
 const profile = mkdtempSync(join(tmpdir(), "vg-tr-prof-"));
+// github#129
+const focus = await keepFocus();
 const chrome = spawn(findChrome(), [
   `--remote-debugging-port=${PORT}`, `--user-data-dir=${profile}`,
   "--no-first-run", "--no-default-browser-check",
@@ -56,6 +59,7 @@ const chrome = spawn(findChrome(), [
   "--disable-background-timer-throttling",
   ...leftWindowArgs(1600, 1000), `--app=${pathToFileURL(html).href}`,
 ], { stdio: "ignore" });
+void focus.watch(chrome.pid);
 
 const num = (v) => (v === null || v === undefined ? "-" :
   (typeof v === "number" ? String(Math.round(v * 1000) / 1000) : String(v)));

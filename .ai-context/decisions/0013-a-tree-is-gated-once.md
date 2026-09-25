@@ -20,6 +20,12 @@ A run on either measures the same content. What was actually happening on the ni
 was cut: both `develop` pushes went out with `SKIP_SMOKE=1`, 21 and 29 seconds after their
 merge commits, because the suite "had just passed" — a true statement that nothing recorded.
 
+**2026-09-13: the ruleset dropped the required-pull-request rule** — `develop` can merge into
+`main` by a direct push now, gated by `branch-policy.yml`'s source-branch check instead of the
+website's merge button. The premise above still holds either way: a direct push of a plain
+merge produces the same byte-identical tree a PR merge would have, so the decision below is
+unaffected.
+
 ## Decision
 
 **A green full run of `smoke.mjs` stamps the git tree it measured, and the two local gates

@@ -10,10 +10,10 @@
   warnings; runs lint and the Sigma notice check; builds the plugin once as a pre-flight; runs
   the invariant suite unless HEAD's tree already carries a pass stamp from an earlier full run
   (github#93; -ForceSuite runs it anyway); then writes the annotated tag and pushes it. The
-  branch is never pushed: main only
-  ever receives develop through a pull request merged on the website (github#94), so by the
-  time this runs main is already on origin, or the guard stops it. Everything after the tag
-  push -- build, provenance attestation, Release, assets -- is the workflow's (github#10).
+  branch is never pushed: main only ever receives develop, either merged on the website or
+  pushed directly (branch-policy.yml gates both the same way), so by the time this runs main
+  is already on origin, or the guard stops it. Everything after the tag push -- build,
+  provenance attestation, Release, assets -- is the workflow's (github#10).
   .ai-context/releasing.md is the authority on the two halves.
 
 .PARAMETER Version
@@ -126,14 +126,17 @@ try {
   }
 
   # ...AND IT HAS TO BE EXACTLY THE MAIN EVERYONE ELSE CAN SEE (github#94). main only ever
-  # receives develop, through a pull request merged on the website -- the ruleset refuses a
-  # direct push and has no bypass -- so by the time this script runs, main is origin/main or
-  # it is wrong. BEHIND means tagging a main that is missing commits somebody else has already
-  # published. AHEAD means a merge made locally that no push can land: this script used to
-  # call that the normal case and push HEAD itself, which is how 2.4.0's first cut wrote its
-  # tag and then watched the push come back with GH013 -- the tag already sat on a commit
-  # origin would never accept. Both are caught here, the one moment a wrong tag is still free
-  # to not exist.
+  # receives develop -- merged on the website, or pushed directly and gated by
+  # branch-policy.yml's push check instead (the ruleset dropped its required-pull-request rule
+  # 2026-09-13, keeping only that check) -- so by the time this script runs, main is
+  # origin/main or it is wrong. BEHIND means tagging a main that is missing commits somebody
+  # else has already published. AHEAD means a merge made locally that has not been pushed:
+  # this script used to call that the normal case and push HEAD itself, which is how 2.4.0's
+  # first cut wrote its tag and then watched the push come back with GH013 (back when the
+  # ruleset still refused a direct push outright) -- the tag already sat on a commit origin
+  # would never accept. Both are caught here, the one moment a wrong tag is still free to not
+  # exist. Pushing main is still not this script's job even now that it is allowed: push it
+  # yourself first, same as develop.
   #
   # Fetch first, because "equal" measured against a stale remote ref is not measured at all.
   #
@@ -150,9 +153,9 @@ try {
              "would tag a main that is missing what is already published.")
     }
     if ($ahead -ne '0') {
-      throw ("main is $ahead commit(s) ahead of origin/main, and the ruleset on main refuses a " +
-             "direct push (GH013: changes must be made through a pull request). Open " +
-             "develop -> main on the website and merge it, then 'git switch main' and " +
+      throw ("main is $ahead commit(s) ahead of origin/main. Push it -- 'git push origin main' " +
+             "if branch-policy.yml's push check will pass (develop must already be an ancestor), " +
+             "or open develop -> main on the website and merge it -- then 'git switch main' and " +
              "'git pull --ff-only', and run this again. Nothing was tagged.")
     }
   }
@@ -289,6 +292,15 @@ try {
   try { Invoke-Native node @((Join-Path $here 'check-notice.mjs')) }
   catch { throw "the Sigma notice is missing from a build -- not releasing" }
 
+  # COMMENTS ARE POINTERS HERE TOO (github#61, github#137). .githooks/pre-push and
+  # release.yml both run check-comments.mjs already; this script did not, so a green -DryRun
+  # meant nothing about the one gate that actually broke cutting 2.7.0 -- the branch was
+  # pushed, the dry run was green, and the workflow went red on this exact check. Same bar as
+  # the notice check just above: fast, pure Node, no skip flag.
+  Write-Host "`n=== comments ===" -ForegroundColor Cyan
+  try { Invoke-Native node @((Join-Path $here 'check-comments.mjs')) }
+  catch { throw "comment check failed -- not releasing (read the counts above; CONTRIBUTING.md explains the pointer rule, github#61)" }
+
   Write-Host "`n=== build (pre-flight) ===" -ForegroundColor Cyan
   try { Invoke-Native node @((Join-Path $here 'build-plugin.mjs')) }
   catch {
@@ -349,11 +361,13 @@ try {
   # THE TAG, AND ONLY THE TAG. The workflow refuses to publish a tag that is not in
   # origin/main's history (github#47, server-side this time), and it starts the moment the
   # tag lands -- so a tag pushed before its commit is on origin/main would race its own
-  # guard. The guard above is what closes that window now: on main, HEAD IS origin/main, and
-  # it got there through the pull request the ruleset requires (github#94). This script used
-  # to push HEAD first for the same reason; under the ruleset that push is a no-op at best
-  # and a GH013 at worst, after the tag had been made. Off main (-AllowAnyBranch) nothing
-  # pushes the branch either -- the workflow will refuse the tag, as that switch says.
+  # guard. The guard above is what closes that window now: on main, HEAD IS origin/main,
+  # pushed there already (merged on the website or pushed directly -- github#94; the ruleset
+  # dropped its required-pull-request rule 2026-09-13, keeping only branch-policy.yml's
+  # check). This script used to push HEAD first for the same reason; that push is a no-op at
+  # best and, back when the ruleset refused a direct push outright, a GH013 at worst, after
+  # the tag had been made. Off main (-AllowAnyBranch) nothing pushes the branch either -- the
+  # workflow will refuse the tag, as that switch says.
   Write-Host "`n=== push ===" -ForegroundColor Cyan
   Invoke-Native git @('push', 'origin', $Version)
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// github#127 -- design/0018
+// github#127 -- design/0018-gallery-new-in
 
 import { readFileSync, writeFileSync, readdirSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
@@ -15,7 +15,7 @@ const END = "<!-- gallery-nav:end -->";
 
 /* ---------------------------------------------------------- the gallery's own anchor map -- */
 
-// design/0018
+// design/0018-gallery-new-in
 function anchorsByTitle(galleryText) {
   const map = new Map();
   for (const m of galleryText.matchAll(/\[([^\]]+)\]\(#([a-z0-9-]+)\)/g)) map.set(m[1], m[2]);
@@ -24,7 +24,7 @@ function anchorsByTitle(galleryText) {
 
 /* -------------------------------------------------------------------- per-feature metadata -- */
 
-// design/0018
+// design/0018-gallery-new-in
 const TITLE = /^#\s+(.+?)\s*$/m;
 const INTRODUCED = /\*\*Introduced in\*\*\s*\|\s*`([^`]+)`/;
 const VERSION = /^(v)?(\d+(?:\.\d+){1,2})/;
@@ -48,7 +48,7 @@ function compareTuples(a, b) {
 
 /* ------------------------------------------------------------------------------- generate -- */
 
-// design/0018
+// design/0018-gallery-new-in
 function buildNavLine(galleryText) {
   const anchors = anchorsByTitle(galleryText);
   const files = readdirSync(join(ROOT, "docs/features")).filter(

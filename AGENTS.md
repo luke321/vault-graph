@@ -40,13 +40,7 @@ Five things are worth knowing before you touch anything, all expanded in `CLAUDE
   `<worktree/feature> — <what it's showing>`, e.g. `tag-grouping — demo vault`. Patch
   `window.VAULT_DATA`'s `vault` field in the built HTML, not the product.
 - **`git push`, merging into `develop`, and a full-suite run are each a separate ask, every
-  time.** None of them is implied by permission to do the work, or by how the last one went. A
-  dispatched ticket worktree stops at its own branch regardless — only the orchestrator pushes to
-  `develop` or cuts a release. **The checkout decides which of the two you are, not the task**: the
-  primary checkout is the orchestrator, any other worktree is a worker, and
-  `git rev-parse --show-toplevel` settles it. An orchestrator dispatches a ticket into its own
-  worktree rather than implementing it, and stops spawning new ones at the ceiling — past it,
-  parallel sessions starved CPU and disk enough to force a hard restart once already.
+  time.** See `CLAUDE.md`'s branch-policy bullet for who may do which.
 
 **This repo is public, so both this file and `CLAUDE.md` stay machine-agnostic.** Absolute paths,
 session identity and naming, the session manager's own commands, which display a harness seizes,

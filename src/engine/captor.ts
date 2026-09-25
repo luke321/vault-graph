@@ -234,12 +234,18 @@ export class MouseCaptor extends Emitter<CaptorEvents> implements MouseCaptorApi
    * github#73, design/0013
    */
 
+  // github#170, design/0013 -- a move the camera cannot use is the page's
+  private claimsTouch(e: TouchEvent): boolean {
+    return e.cancelable && (e.touches.length > 1 || this.host.getCamera().enabledPanning);
+  }
+
   private readonly handleTouchStart = (e: TouchEvent): void => {
-    e.preventDefault();
+    // design/0013
+    // github#173 -- a flight's transient panning is not the reader's
+    this.host.getCamera().stopAnimation();
+    if (this.claimsTouch(e)) e.preventDefault();
     const pts = touchPoints(e, this.container);
     if (!pts.length) return;
-    // design/0013
-    this.host.getCamera().stopAnimation();
     // design/0013
     if (this.lastTouch === null) {
       this.touchMoved = false;
@@ -257,7 +263,8 @@ export class MouseCaptor extends Emitter<CaptorEvents> implements MouseCaptorApi
   };
 
   private readonly handleTouchMove = (e: TouchEvent): void => {
-    e.preventDefault();
+    // github#170
+    if (this.claimsTouch(e)) e.preventDefault();
     const pts = touchPoints(e, this.container);
     if (!pts.length) return;
 
@@ -292,7 +299,8 @@ export class MouseCaptor extends Emitter<CaptorEvents> implements MouseCaptorApi
   };
 
   private readonly handleTouchEnd = (e: TouchEvent): void => {
-    e.preventDefault();
+    // github#170, design/0013 -- the mouse-compat suppression, wanted at every width
+    if (e.cancelable) e.preventDefault();
     if (e.touches.length) {
       const pts = touchPoints(e, this.container);
       this.lastTouch = pts.length > 1 ? midpoint(pts[0], pts[1]) : (pts[0] ?? this.lastTouch);

@@ -3,6 +3,10 @@
 import { readFileSync, writeFileSync, readdirSync, statSync, existsSync, mkdirSync, rmSync } from "node:fs";
 import { join, relative, sep, basename, dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+// github#71
+import { readSortingSpec } from "../src/sortspec-file.mjs";
+// github#176
+import { translateSortSpec } from "./mirror-sortspec.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(HERE, "..");
@@ -139,6 +143,8 @@ for (const abs of files) {
     tagCount: (fmRaw.match(/^tags?:/m) ? between(1, 3) : 0),
     aliases,
     links,
+    // github#71 -- a sortspec IS a note; captured here, translated later
+    specRaw: readSortingSpec(raw),
   });
 }
 
@@ -184,7 +190,10 @@ const register = (k, v) => { const kk = key(k); if (kk && !nameMap.has(kk)) name
 for (const n of notes) {
   const demoDir = mapDir(n.dir);
   let demoBase;
-  if (ISO_DAY.test(n.base) || DATEISH.test(n.base)) {
+  if (n.specRaw) {
+    // github#71, decisions/0015 -- a spec is found by its name, so the name holds
+    demoBase = n.base.toLowerCase() === "sortspec" ? n.base : (demoDir.split("/").pop() || n.base);
+  } else if (ISO_DAY.test(n.base) || DATEISH.test(n.base)) {
     demoBase = n.base;
   } else if (looksLikePerson(n.base, n.dir)) {
     demoBase = newPerson();
@@ -201,6 +210,26 @@ for (const n of notes) {
 
   n.demoAliases = n.aliases.map(() => newTitle());
   n.aliases.forEach((a, i) => register(a, n.demoAliases[i]));
+}
+
+/* github#71, decisions/0015 -- the spec is TRANSLATED, never copied */
+
+const specNotes = notes.filter((n) => n.specRaw);
+let specDropped = 0;
+
+if (specNotes.length) {
+  /** @type {Map<string, string | null>} github#71 -- real folder path -> the mirror's */
+  const mapPath = (p) => {
+    const clean = String(p).split(/[\\/]/).filter(Boolean).join("/");
+    if (!clean) return "";
+    return dirMap.has(clean) ? dirMap.get(clean) : null;
+  };
+
+  for (const n of specNotes) {
+    const { text, dropped } = translateSortSpec(n.specRaw, n.dir, mapPath, nameMap);
+    n.specText = text;
+    specDropped += dropped;
+  }
 }
 
 /* ------------------------------------------------------------------- write */
@@ -237,6 +266,11 @@ for (const n of notes) {
   });
 
   const fm = ["---"];
+  // github#71 -- the spec is this note's front matter
+  if (n.specText) {
+    fm.push("sorting-spec: |-");
+    for (const line of n.specText.split("\n")) fm.push(line ? "  " + line : "");
+  }
   if (n.created) fm.push("created: " + n.created);
   if (n.demoAliases && n.demoAliases.length) fm.push("aliases: [" + n.demoAliases.join(", ") + "]");
   if (n.tagCount) {
@@ -276,9 +310,32 @@ const copyCfg = (name, fallback) => {
 copyCfg("daily-notes.json", "{}");
 copyCfg("templates.json", "{}");
 copyCfg("app.json", "{}");
+// github#71, decisions/0015 -- rewritten to point at the MIRRORED note
+const cfgSpec = (() => {
+  try {
+    const cs = JSON.parse(readFileSync(join(VAULT, ".obsidian", "plugins", "custom-sort", "data.json"), "utf8"));
+    const want = String(cs.additionalSortspecFile || "").split(/[\\/]/).filter(Boolean).join("/");
+    if (!want) return null;
+    const hit = specNotes.find((n) => n.rel === want);
+    return hit ? hit.demoRel : null;
+  } catch { return null; }   // github#71 -- the plugin is not installed in the source vault
+})();
+if (cfgSpec) {
+  mkdirSync(join(cfg, "plugins", "custom-sort"), { recursive: true });
+  writeFileSync(join(cfg, "plugins", "custom-sort", "data.json"),
+    JSON.stringify({ additionalSortspecFile: cfgSpec, suspended: false }, null, 2) + "\n", "utf8");
+}
 
 console.log(`demo vault: ${OUT}`);
 console.log(`  ${written} notes, ${dirMap.size} folders mapped, ` +
             `${usedPeople.size} person names invented, seed ${SEED}`);
 console.log(`  ${edges} links rewritten, ${dangling} left dangling`);
+if (specNotes.length) {
+  console.log(`  sortspec: ${specNotes.length} note(s) translated in place -> ` +
+              specNotes.map((n) => n.demoRel).join(", ") +
+              `, ${specDropped} line(s) dropped as unmappable or prose` +
+              (cfgSpec ? `; registered via .obsidian/plugins/custom-sort` : ""));
+} else {
+  console.log("  sortspec: none in the source vault -- the mirror carries none either");
+}
 console.log(`\nRecord against it with:  --vault "${OUT}"`);

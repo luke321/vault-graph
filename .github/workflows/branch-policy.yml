@@ -1,18 +1,22 @@
 # main only ever receives develop.
 #
-# WHY A WORKFLOW AND NOT A BRANCH PROTECTION SETTING: GitHub can require a pull request,
-# require a review, require a status check and forbid a force push -- but it has no rule
-# for "the pull request must come FROM this branch". So the rule is a check, and the
-# ruleset on main requires this check to pass. Together they mean a pull request from any
-# other branch cannot be merged, and there is no direct push to main to sidestep it.
+# WHY A WORKFLOW AND NOT ONLY A BRANCH PROTECTION SETTING: GitHub can require a status check
+# and forbid a force push, but it has no rule for "the pull request must come FROM this
+# branch" -- and no rule at all for "the commit being pushed directly must already contain
+# this branch". So the rule is a check, in both shapes: the ruleset on main requires it to
+# pass whichever way a commit arrives.
+#
+# main's ruleset no longer requires a pull request (dropped 2026-09-13) -- a direct push to
+# main is allowed again, provided this check passes. The pull_request job below still runs
+# for anyone who opens one; the push job is the direct-push equivalent, checking the same
+# thing the command-line half already checks (.githooks/pre-push): that develop is already
+# an ancestor of what is being pushed. Neither job substitutes for the other -- one governs
+# the button on the website, the other governs `git push`, and .githooks/pre-push is the
+# third copy of this same rule for someone who has not fetched this workflow's result yet.
 #
 # The point is not ceremony. It is that main is what the Obsidian directory installs from,
 # so anything reaching it should already have gone through develop -- where the invariant
 # suite runs on every push, and where an issue is closed (close-issues.yml).
-#
-# The mirror of this for the command line is in .githooks/pre-push, which refuses a push to
-# main that develop is not already an ancestor of. Neither is a substitute for the other:
-# this one governs the button on the website, that one governs `git push`.
 
 name: branch policy
 
@@ -22,6 +26,8 @@ on:
     # Re-run when the PR is retargeted or its head moves, so an edited PR cannot keep a
     # green check it earned under a different base.
     types: [opened, reopened, synchronize, edited]
+  push:
+    branches: [main]
 
 permissions:
   contents: read
@@ -31,7 +37,8 @@ jobs:
     name: main only accepts develop
     runs-on: ubuntu-latest
     steps:
-      - name: The head branch must be develop
+      - name: The head branch must be develop (pull request)
+        if: github.event_name == 'pull_request'
         env:
           HEAD_REF: ${{ github.event.pull_request.head.ref }}
           HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
@@ -49,4 +56,32 @@ jobs:
           echo "Merge your branch into develop first, then open develop -> main."
           echo "develop is where the invariant suite runs on every push; main is what the"
           echo "plugin directory installs from."
+          exit 1
+
+      - name: Check out with full history (direct push)
+        if: github.event_name == 'push'
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: develop must already be an ancestor (direct push)
+        if: github.event_name == 'push'
+        run: |
+          # Same test as .githooks/pre-push: not "which branch was this committed on" -- a
+          # merge made locally and pushed is fine -- but IS DEVELOP ALREADY AN ANCESTOR OF
+          # THE COMMIT BEING PUSHED. A merge of develop into main passes (develop's tip is a
+          # parent); a commit made straight on main does not, which is the case worth
+          # catching -- work that never went through develop is work the invariant suite
+          # never gated.
+          git fetch origin develop --depth=1
+          if git merge-base --is-ancestor origin/develop "$GITHUB_SHA"; then
+            echo "develop is an ancestor of $GITHUB_SHA -- allowed"
+            exit 0
+          fi
+          echo "::error::main only accepts a push whose commit already has develop as an ancestor."
+          echo "This push's commit does not contain develop."
+          echo ""
+          echo "Merge develop into main (or push a commit that already does) rather than"
+          echo "committing straight to main -- develop is where the invariant suite runs on"
+          echo "every push, and main is what the plugin directory installs from."
           exit 1

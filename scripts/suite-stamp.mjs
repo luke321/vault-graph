@@ -5,6 +5,7 @@ import { chromeVersion, findChrome, normaliseVersion } from "./chrome.mjs";
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync,
          rmdirSync, statSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -13,7 +14,27 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = dirname(HERE);
 
 export const FIXTURE_MAX_AGE_DAYS = 7;
-export const FIXTURE_NAMES = ["demo-vault", "test-vault", "shape-vault", "tag-vault"];
+// github#71, github#103 -- a name missing here is a fixture the stamp does not require
+export const FIXTURE_NAMES = ["demo-vault", "test-vault", "shape-vault", "tag-vault", "spec-vault"];
+
+// github#169 -- single source for the suite and the recorder
+export const FIXTURE_FORMAT = 2;
+export const FIXTURE_GENERATORS = ["make-demo-vault.mjs", "make-test-vault.mjs", "make-shape-vault.mjs"];
+
+// github#169 -- one digest function, so one fixture directory
+export function fixtureDigest(args, gens = FIXTURE_GENERATORS) {
+  const h = createHash("sha256");
+  h.update("format:" + FIXTURE_FORMAT);
+  for (const g of gens) h.update(readFileSync(join(HERE, g)));
+  h.update(JSON.stringify(args));
+  return h.digest("hex").slice(0, 8);
+}
+
+// github#169 -- one stamp shape for both checkFixture() callers
+export function stampFixture(dir, { digest, script, args, notes }) {
+  writeFileSync(join(dir, ".stamp.json"),
+                JSON.stringify({ digest, day: todayDay(), script, args, notes }, null, 2) + "\n");
+}
 
 function git(args, cwd) {
   const r = spawnSync("git", ["-C", cwd, ...args], { encoding: "utf8" });
@@ -61,7 +82,9 @@ function defaultChrome() {
 
 // github#104 -- the shape the two gates always push with
 export function defaultShape() {
-  return { jobs: DEFAULT_JOBS, grid: DEFAULT_JOBS > 1, headed: false, port: 0, chrome: defaultChrome() };
+  // github#155, decisions/0013, decisions/0016 -- in the shape, so neither stamps
+  return { jobs: DEFAULT_JOBS, serialJobs: 1, grid: DEFAULT_JOBS > 1, headed: false,
+           headless: false, lane: "all", port: 0, chrome: defaultChrome() };
 }
 
 // github#104 -- takes the values the run USED, never a second parse of argv
@@ -69,10 +92,24 @@ export function shapeDeltas(shape) {
   const d = defaultShape();
   const out = [];
   if (shape.jobs !== d.jobs) out.push(`--jobs ${shape.jobs} (default ${d.jobs})`);
+  // github#101
+  if ((shape.serialJobs || 1) !== d.serialJobs) {
+    out.push(`--serial-jobs ${shape.serialJobs} (default ${d.serialJobs})`);
+  }
   if (!!shape.grid !== d.grid) {
     out.push(`the grid is ${shape.grid ? "on" : "off"} (default ${d.grid ? "on" : "off"})`);
   }
-  if (shape.headed) out.push("--headed (default: positioned off-screen)");
+  // github#129
+  if (shape.headed) out.push("--headed (default: the window is placed on the harness display)");
+  // github#155
+  if (shape.headless) {
+    out.push("--headless (default: a real window on this machine's GPU, which is what the " +
+             "frame-sensitive thresholds were tuned against)");
+  }
+  // github#155
+  if ((shape.lane || "all") !== d.lane) {
+    out.push(`--lane ${shape.lane} (default ${d.lane} -- a lane is half the suite by definition)`);
+  }
   if (shape.port) out.push(`--port ${shape.port} (default: a free port per lane)`);
   const chrome = shape.chrome || d.chrome;
   if (chrome !== d.chrome) {
@@ -305,6 +342,8 @@ function selftest() {
     seed("shape-vault", "cccccccc", today, false);
     // github#86
     seed("tag-vault", "dddddddd", "2026-09-09", true);
+    // github#71 -- pinned: its dated subfolders would otherwise age out weekly
+    seed("spec-vault", "eeeeeeee", "2026-09-08", true);
 
     expect("no stamp yet -> miss", !lookup("HEAD", repo).ok);
     const wrote = pass({ fixtures: currentFixtures(repo), checks: 3, cwd: repo });
@@ -425,6 +464,11 @@ function selftest() {
                            checks: 3, cwd: repo });
     expect("a run missing the tag vault refuses to record",
            !three.wrote && /tag-vault did not run/.test(three.why));
+    // github#71 -- and the fifth like the fourth
+    const four = pass({ fixtures: currentFixtures(repo).filter((f) => f.name !== "spec-vault"),
+                          checks: 3, cwd: repo });
+    expect("a run missing the sortspec vault refuses to record",
+           !four.wrote && /spec-vault did not run/.test(four.why));
     const stampFile = lookup("HEAD", repo).file;
     const full = readFileSync(stampFile, "utf8");
     const cut = JSON.parse(full);

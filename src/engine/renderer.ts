@@ -12,7 +12,6 @@ import { createNormalization, getMatrixImpact, graphExtent, identity, matrixFrom
          multiplyVec2, type Extent, type Mat3, type Normalization } from "./viewport";
 
 interface EventMap extends RendererEvents {
-  rightClickStage: StageEvent;
   downStage: StageEvent;
   upNode: NodeEvent;
   upStage: StageEvent;
@@ -75,9 +74,10 @@ export class Renderer extends Emitter<EventMap> implements RendererApi {
   private readonly elements = new Map<string, HTMLCanvasElement>();
   private readonly gl: Record<WebGLLayer, WebGL2RenderingContext>;
   private readonly ctx: Record<CanvasLayer, CanvasRenderingContext2D>;
-  private readonly nodePrograms: { circle: NodeProgram; halo: NodeProgram };
-  private readonly hoverPrograms: { circle: NodeProgram; halo: NodeProgram };
-  private readonly edgePrograms: { line: EdgeProgram; curve: EdgeProgram };
+  // github#144 -- rebuilt on webglcontextrestored, so not readonly
+  private nodePrograms: { circle: NodeProgram; halo: NodeProgram };
+  private hoverPrograms: { circle: NodeProgram; halo: NodeProgram };
+  private edgePrograms: { line: EdgeProgram; curve: EdgeProgram };
 
   private readonly camera: Camera;
   private readonly captor: MouseCaptor;
@@ -105,9 +105,14 @@ export class Renderer extends Emitter<EventMap> implements RendererApi {
   private killed = false;
   private renderFrame: number | null = null;
   private hoverFrame: number | null = null;
+  // github#144 -- the layers whose context is gone right now
+  private readonly lost = new Set<WebGLLayer>();
+  private readonly contextListeners: Array<() => void> = [];
   private readonly onWindowResize = (): void => {
     this.scheduleRefresh();
   };
+  // github#182 -- the container is the stage, not just the window
+  private containerRO: ResizeObserver | null = null;
 
   constructor(
     private readonly graph: GraphStore,
@@ -133,9 +138,9 @@ export class Renderer extends Emitter<EventMap> implements RendererApi {
     this.ctx = { labels, hovers, mouse };
     this.resize(true);
 
-    this.nodePrograms = { circle: new NodeCircleProgram(this.gl.nodes, this.doc), halo: new NodeHaloProgram(this.gl.nodes, this.doc) };
-    this.hoverPrograms = { circle: new NodeCircleProgram(this.gl.hoverNodes, this.doc), halo: new NodeHaloProgram(this.gl.hoverNodes, this.doc) };
-    this.edgePrograms = { line: new EdgeLineProgram(this.gl.edges, this.doc), curve: new EdgeCurveProgram(this.gl.edges, this.doc) };
+    this.nodePrograms = this.makeNodePrograms("nodes");
+    this.hoverPrograms = this.makeNodePrograms("hoverNodes");
+    this.edgePrograms = this.makeEdgePrograms();
 
     this.camera = new Camera(win);
     this.applyCameraSettings();
@@ -152,6 +157,13 @@ export class Renderer extends Emitter<EventMap> implements RendererApi {
     this.captor = new MouseCaptor(mouse.canvas, host, win);
     this.bindCaptor();
     win.addEventListener("resize", this.onWindowResize);
+    // github#182 -- a popout is a different window from the global
+    const RO = (win as Window & { ResizeObserver?: typeof ResizeObserver }).ResizeObserver;
+    if (RO) {
+      const ro = new RO(() => this.scheduleRender());
+      ro.observe(this.container);
+      this.containerRO = ro;
+    }
 
     this.refresh();
   }
@@ -197,10 +209,15 @@ export class Renderer extends Emitter<EventMap> implements RendererApi {
     this.correctionRatio = getMatrixImpact(this.matrix, state, dims);
 
     const params = this.renderParams();
-    this.nodePrograms.circle.render(params);
-    this.nodePrograms.halo.render(params);
-    this.edgePrograms.line.render(params);
-    this.edgePrograms.curve.render(params);
+    // github#144 -- a lost layer draws nothing, the others carry on
+    if (!this.lost.has("nodes")) {
+      this.nodePrograms.circle.render(params);
+      this.nodePrograms.halo.render(params);
+    }
+    if (!this.lost.has("edges")) {
+      this.edgePrograms.line.render(params);
+      this.edgePrograms.curve.render(params);
+    }
     this.renderLabels();
     this.renderHighlightedNodes();
     this.emit("afterRender", undefined);
@@ -211,6 +228,9 @@ export class Renderer extends Emitter<EventMap> implements RendererApi {
     this.removeAllListeners();
     this.camera.kill();
     this.win.removeEventListener("resize", this.onWindowResize);
+    // github#182
+    this.containerRO?.disconnect();
+    this.containerRO = null;
     this.captor.kill();
     if (this.renderFrame !== null) this.win.cancelAnimationFrame(this.renderFrame);
     if (this.hoverFrame !== null) this.win.cancelAnimationFrame(this.hoverFrame);
@@ -220,6 +240,9 @@ export class Renderer extends Emitter<EventMap> implements RendererApi {
     this.hoveredNode = null;
     for (const p of [this.nodePrograms.circle, this.nodePrograms.halo, this.hoverPrograms.circle,
                      this.hoverPrograms.halo, this.edgePrograms.line, this.edgePrograms.curve]) p.kill();
+    // github#144 -- off before the deliberate loss below
+    for (const off of this.contextListeners) off();
+    this.contextListeners.length = 0;
     for (const gl of [this.gl.edges, this.gl.nodes, this.gl.hoverNodes]) {
       gl.getExtension("WEBGL_lose_context")?.loseContext();
     }
@@ -299,7 +322,16 @@ export class Renderer extends Emitter<EventMap> implements RendererApi {
     const canvas = this.createCanvas(id);
     const gl = canvas.getContext("webgl2", { preserveDrawingBuffer: false, antialias: false });
     if (!gl) throw new Error("vault-graph: WebGL2 is not available in this window");
-    gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
+    this.applyContextState(gl);
+    // github#144 -- a loss must be prevented to be restorable
+    const lost = (event: Event): void => this.onContextLost(id, event);
+    const restored = (): void => this.onContextRestored(id);
+    canvas.addEventListener("webglcontextlost", lost);
+    canvas.addEventListener("webglcontextrestored", restored);
+    this.contextListeners.push(() => {
+      canvas.removeEventListener("webglcontextlost", lost);
+      canvas.removeEventListener("webglcontextrestored", restored);
+    });
     return gl;
   }
 
@@ -328,12 +360,57 @@ export class Renderer extends Emitter<EventMap> implements RendererApi {
   }
 
   private clear(): void {
-    for (const gl of [this.gl.nodes, this.gl.edges, this.gl.hoverNodes]) {
+    for (const layer of ["nodes", "edges", "hoverNodes"] as const) {
+      // github#144 -- a call on a lost context is a silent no-op
+      if (this.lost.has(layer)) continue;
+      const gl = this.gl[layer];
       gl.bindFramebuffer(gl.FRAMEBUFFER, null);
       gl.clear(gl.COLOR_BUFFER_BIT);
     }
     this.ctx.labels.clearRect(0, 0, this.width, this.height);
     this.ctx.hovers.clearRect(0, 0, this.width, this.height);
+  }
+
+  /* --------------------------------------------------- github#144, context loss */
+
+  // github#144 -- the state a restored context does not carry over
+  private applyContextState(gl: WebGL2RenderingContext): void {
+    gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
+    gl.viewport(0, 0, this.width * this.pixelRatio, this.height * this.pixelRatio);
+  }
+
+  private makeNodePrograms(layer: "nodes" | "hoverNodes"): { circle: NodeProgram; halo: NodeProgram } {
+    const gl = this.gl[layer];
+    return { circle: new NodeCircleProgram(gl, this.doc), halo: new NodeHaloProgram(gl, this.doc) };
+  }
+
+  private makeEdgePrograms(): { line: EdgeProgram; curve: EdgeProgram } {
+    const gl = this.gl.edges;
+    return { line: new EdgeLineProgram(gl, this.doc), curve: new EdgeCurveProgram(gl, this.doc) };
+  }
+
+  private onContextLost(layer: WebGLLayer, event: Event): void {
+    // github#144 -- kill() loses all three on purpose
+    if (this.killed) return;
+    event.preventDefault();
+    if (this.lost.has(layer)) return;
+    this.lost.add(layer);
+    this.emit("contextLost", { layer });
+  }
+
+  private onContextRestored(layer: WebGLLayer): void {
+    if (this.killed) return;
+    this.lost.delete(layer);
+    const gl = this.gl[layer];
+    this.applyContextState(gl);
+    // github#144 -- nothing to delete: the old resources died with the context
+    if (layer === "nodes") this.nodePrograms = this.makeNodePrograms("nodes");
+    else if (layer === "hoverNodes") this.hoverPrograms = this.makeNodePrograms("hoverNodes");
+    else this.edgePrograms = this.makeEdgePrograms();
+    // github#144 -- a fresh program is at capacity 0, so process() again
+    this.needToProcess = true;
+    this.render();
+    this.emit("contextRestored", { layer });
   }
 
   /* ------------------------------------------------------------- indexing */
@@ -494,6 +571,9 @@ export class Renderer extends Emitter<EventMap> implements RendererApi {
       const { x, y } = this.framedGraphToViewport(data);
       this.drawHover(ctx, { key: id, ...data, size: this.scaleSize(data.size), x, y }, this.settings);
     }
+
+    // github#144 -- the 2D hovers above still draw; the program work does not
+    if (this.lost.has("hoverNodes")) return;
 
     let circles = 0, halos = 0;
     for (const id of toRender) {

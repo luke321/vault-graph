@@ -19,7 +19,7 @@
  * plugin/main.js's buildData from Obsidian's metadata cache. Nothing checked the two agreed
  * before this typedef; now the plugin's buildData is read against it.
  * @typedef {Object} VaultNode
- * @property {string} id           vault-relative path with "/" separators, or "ghost:<name>"
+ * @property {string} id           vault-relative path with "/" separators, or "ghost:<destination>"
  * @property {string} label        the note's basename
  * @property {string} folder       first path segment; "(vault root)" or "(unresolved)"
  * @property {string[]} dirs       the named folders below it, month folders handled
@@ -57,6 +57,8 @@
  * @property {VaultStats} stats
  * @property {boolean} [dev]         a --dev build of the standalone; nothing else sets it
  * @property {string} [version]      github#108 -- the plugin/exporter version that built this, shown in the stats line
+ * @property {{ folder: string, text: string, origin: string }[]} [sortSpecs]  github#71
+ * @property {"name" | "explorer" | "size"} [folderOrder]  github#156 -- the standalone alone sets it, from --folder-order; shell.html reads it back off VAULT_DATA as a MountDeps
  */
 
 // github#72, design/0014
@@ -124,14 +126,20 @@
  * @property {Record<string, boolean>} [folderShown]
  * @property {boolean} [panEnabled]
  * @property {boolean} [compactAxis]
+ * @property {"name" | "explorer" | "size"} [folderOrder]   github#71, decisions/0015
  * @property {boolean} [unlinkedByFolder]
  * @property {boolean} [unlinkedTintByFolder]
  * @property {boolean} [countBars]              github#78, design/0006
+ * @property {boolean} [rootInOrder]            github#164 -- off is today's order
+ * @property {(v: boolean) => void} [onRootInOrder]  github#164
+ * @property {boolean} [devTools]               github#165 -- absent means "follow DATA.dev"
+ * @property {(v: boolean) => void} [onDevTools]     github#165
  * @property {"folder" | "tag"} [dim]         github#86, design/0015 -- absent means "folder"
  * @property {boolean} [fitCap]               github#41, design/0011
  * @property {boolean} [sheetOpen]            github#82 -- absent means "decide from the width"
  * @property {boolean} [bandOpen]             github#82
- * @property {string[]} [pinned]
+ * @property {number} [lastOpen]              github#70 -- ms, when the host last had the graph
+ * @property {string[]} [pinned]            github#143 -- the marker, then one note path per slot
  * @property {boolean} [settingsUI]
  * @property {() => void} [openSettings]
  * @property {(map: SlotMap) => void | Promise<void>} [onFolderColors]
@@ -142,13 +150,14 @@
  * @property {(map: Record<string, boolean>) => void | Promise<void>} [onFolderShown]
  * @property {(v: boolean) => void | Promise<void>} [onPanEnabled]
  * @property {(v: boolean) => void | Promise<void>} [onCompactAxis]
+ * @property {(v: "name" | "explorer" | "size") => void | Promise<void>} [onFolderOrder]
  * @property {(v: boolean) => void | Promise<void>} [onUnlinkedByFolder]
  * @property {(v: boolean) => void | Promise<void>} [onUnlinkedTintByFolder]
  * @property {(v: "folder" | "tag") => void | Promise<void>} [onDim]   github#86
  * @property {(v: boolean) => void | Promise<void>} [onSheetOpen]
  * @property {(v: boolean) => void | Promise<void>} [onBandOpen]
  * @property {(v: boolean) => void | Promise<void>} [onCountBars]
- * @property {(ids: string[]) => void | Promise<void>} [onPinned]
+ * @property {(v: string[]) => void | Promise<void>} [onPinned]   github#143 -- store it verbatim
  * @property {() => void} [onRefresh]
  */
 
@@ -170,7 +179,7 @@
 
 /**
  * The __vg api: what mountVaultGraph builds once its deferred init has run, and what
- * plugin/main.js and the settings UIs call. THESE 23 MEMBERS SHIP IN THE PLUGIN. The
+ * github#61
  * standalone build adds ~70 more -- state, alpha, demo, probe and the rest of the debug
  * surface the invariant suite drives -- through Object.defineProperties inside the region
  * scripts/build-plugin.mjs strips, so they are deliberately not part of this type: nothing
@@ -180,6 +189,7 @@
  * @property {GraphLike} graph
  * @property {RendererLike | undefined} renderer   set by makeRenderer() before the api exists; a getter, so a host reads the live one
  * @property {(next: VaultData, opts?: { renames?: Record<string, string> }) => LiveResult} applyData   github#72
+ * @property {() => boolean} interacting   github#120: a drag owns the frame loop; do not build either
  * @property {(path: string, words: number) => boolean} setWords   github#72: by PATH, never by index
  * @property {() => void} readTheme
  * @property {() => void} placeLogo
@@ -200,19 +210,35 @@
  * @property {(map: SlotMap) => void} setTagColors
  * @property {(map: SlotMap) => void} setSubtagColors
  * @property {(map: Record<string, boolean>) => void} setFolderShown
+ * github#145 -- three getters that shipped undeclared
+ * @property {SlotMap} tagColors                  github#86 -- the tag colour pins
+ * @property {SlotMap} subtagColors               github#86 -- the sub-tint pins
+ * @property {Record<string, boolean>} tagShown   github#86 -- shown by default
  * @property {(v: boolean) => void} setPanEnabled
  * @property {(v: boolean) => void} setCompactAxis
  * @property {(v: boolean) => void} setUnlinkedByFolder
  * @property {(v: boolean) => void} setUnlinkedTintByFolder
  * @property {(v: boolean) => void} setCountBars
+ * @property {(v: boolean) => void} setRootInOrder                github#164
+ * @property {(v: boolean) => void} setDevTools                   github#165
+ * @property {(v: boolean) => boolean} setWedgeGrid               github#165
+ * @property {(v: number) => number} setTimeScale                 github#165
  * @property {(v: string) => string} setDim                        github#86
  * @property {(id: string) => { g: string, sub: string, dirs: string[] }} filingOf
  * @property {(id: string) => string} noteOf
  * @property {(v: boolean) => void} setFitCap
+ * @property {(v: "name" | "explorer" | "size") => void} setFolderOrder   github#71
+ * @property {() => string[]} nameOrder    github#71 -- the slot order, which never leaves name order
+ * @property {() => string} folderOrder    github#71 -- the mode in force
+ * @property {() => SortSpecView} sortSpec   github#71 -- the parsed spec, sections and skipped lines
  * @property {() => void} applyHiddenDefaults
  * @property {() => void} heatBuild
+ * @property {(a: NodeAttrs) => string} heatDateOf
+ * @property {(kind: string | null, refMs?: number) => { lo: string, hi: string, label: string } | null} recentWindow
+ * @property {(kind: string | null, refMs?: number) => void} setRecent
+ * @property {(src: string) => void} setHeatSource
  * @property {() => PlanParityReport} checkPlanParity
- * @property {() => unknown} checkFocusWeb
+ * @property {() => Promise<unknown>} checkFocusWeb
  * @property {() => unknown} debugDump
  * @property {(path: string | null, instant?: boolean) => string | null} setRoot   github#76
  * @property {string | null} root                                                 github#76
@@ -225,6 +251,183 @@
  * @typedef {{ readonly api: VgApi | null, readonly ready: boolean, destroy: () => void }} MountHandle
  */
 
+/* ------------------------------------------------------ file-explorer order --
+ * github#71, decisions/0015 */
+
+/**
+ * github#71 -- one resolved section of a spec
+ * @typedef {Object} SortSection
+ * @property {string} target   normalised folder path the section aims at; "" is the vault root
+ * @property {number} rank     the plugin's precedence: 3 exact path, 2 exact name, 1 regexp, 0 wildcard
+ * @property {RegExp | null} re   compiled pattern, rank 1 only
+ * @property {string[]} pins   item names to float to the top, in the order they were listed
+ * @property {"asc" | "desc" | null} dir
+ * @property {boolean} numeric   github#172 -- `a-z` reads numbers as numbers, `true a-z` as text
+ * @property {boolean} dead   github#172 -- its target-folder did not resolve; never pushed
+ * @property {string} origin   which spec file this came from, for notices
+ */
+
+/**
+ * @typedef {{ origin: string, line: number, text: string, why: string }} SortSkip
+ * @typedef {{ sections: SortSection[], skipped: SortSkip[], ok: boolean }} SortSpec
+ */
+
+/**
+ * github#71 -- the parsed spec with `re` dropped
+ * @typedef {{ target: string, rank: number, pins: string[], dir: "asc" | "desc" | null, numeric: boolean, origin: string }} SortSectionView
+ * @typedef {{ sections: SortSectionView[], skipped: SortSkip[], ok: boolean }} SortSpecView
+ */
+
+// github#71 -- a line naming a directive rather than an item to pin
+var SORT_DIRECTIVE = /^([a-z][a-z-]*)\s*:\s*(.*)$/;
+// github#71 -- punctuation-led syntax: none of it decides order
+var SORT_MARKER = /^[/<>%!\\.]/;
+
+/** @param {string} s */
+function sortTrimPath(s) {
+  return String(s).split(/[\\/]/).filter(Boolean).join("/");
+}
+
+/**
+ * github#71 -- a `target-folder:` value into a target + precedence rank
+ * @param {string} raw @param {string} home the folder the spec file itself lives in
+ * @returns {{ target: string, rank: number, re: RegExp | null } | null}
+ */
+function sortTarget(raw, home) {
+  var v = String(raw).trim();
+  if (!v) return null;
+  // github#172 -- the plugin spells a pattern `regexp:`, not `/re/`
+  var rx = /^regexp\s*:\s*(?:for-name\s*:\s*)?(.*)$/.exec(v);
+  if (rx) {
+    if (!rx[1].trim()) return null;
+    try { return { target: v, rank: 1, re: new RegExp(rx[1].trim()) }; } catch { return null; }
+  }
+  // github#172 -- a leading / or . anchors: the result is a PATH
+  var anchored = v.charAt(0) === "/" || v.charAt(0) === ".";
+  var wild = /\/\*$/.test(v);
+  if (wild) v = v.slice(0, -2);
+  if (v.charAt(0) === ".") v = home + "/" + v.replace(/^\.\/?/, "");
+  var target = sortTrimPath(v);
+  if (!target && !anchored) return null;
+  if (wild) return { target: target, rank: 0, re: null };
+  // github#71, github#172 -- a bare name matches at any depth, rank 2
+  return { target: target, rank: (!anchored && target.indexOf("/") < 0) ? 2 : 3, re: null };
+}
+
+/**
+ * github#71 -- never throws; a bad source takes the spec to ok:false
+ * @param {{ folder: string, text: string, origin: string }[]} sources
+ * @returns {SortSpec}
+ */
+function parseSortSpec(sources) {
+  /** @type {SortSection[]} */
+  var sections = [];
+  /** @type {SortSkip[]} */
+  var skipped = [];
+  try {
+    (sources || []).forEach(function (src) {
+      var home = sortTrimPath(src.folder || "");
+      var origin = src.origin || "sortspec";
+      /**
+       * @param {boolean} dead
+       * @param {{ target: string, rank: number, re: RegExp | null } | null} [t]
+       * @returns {SortSection}
+       */
+      var section = function (dead, t) {
+        return { target: t ? t.target : home, rank: t ? t.rank : 3, re: t ? t.re : null,
+                 pins: [], dir: null, numeric: true, dead: dead, origin: origin };
+      };
+      var cur = section(false);
+      var used = false;
+      // github#172 -- a broken target-folder drops its section, pins and all
+      var keep = function () { return !cur.dead && (used || cur.pins.length || cur.dir); };
+      String(src.text || "").split(/\r?\n/).forEach(function (raw, i) {
+        var line = raw.trim(), n = i + 1;
+        if (!line || line.indexOf("//") === 0) return;
+        var m = SORT_DIRECTIVE.exec(line);
+        var key = m ? m[1] : "";
+        if (key === "target-folder") {
+          if (keep()) sections.push(cur);
+          var t = sortTarget(m[2], home);
+          if (!t) {
+            skipped.push({ origin: origin, line: n, text: line, why: "target-folder is not a path this page can resolve" });
+            cur = section(true);
+            used = false;
+            return;
+          }
+          cur = section(false, t);
+          used = true;
+          return;
+        }
+        if (key === "order-asc" || key === "order-desc") {
+          var by = m[2].trim().toLowerCase();
+          // github#172 -- the plugin's a-z is numeric, its true a-z is plain
+          if (by !== "a-z" && by !== "true a-z") {
+            // github#71 -- D-9: created/modified need folder timestamps we lack
+            skipped.push({ origin: origin, line: n, text: line,
+                           why: "only `a-z` and `true a-z` are applied; `" + by + "` needs folder timestamps the page does not have" });
+            return;
+          }
+          cur.dir = key === "order-desc" ? "desc" : "asc";
+          cur.numeric = by === "a-z";
+          return;
+        }
+        if (m || SORT_MARKER.test(line)) {
+          skipped.push({ origin: origin, line: n, text: line, why: "not part of the ordering subset this page reads" });
+          return;
+        }
+        cur.pins.push(line);
+      });
+      if (keep()) sections.push(cur);
+    });
+  } catch (e) {
+    return { sections: [], skipped: [{ origin: "sortspec", line: 0, text: "",
+             why: "the spec could not be parsed (" + String(e) + ") -- falling back to name order" }], ok: false };
+  }
+  return { sections: sections, skipped: skipped, ok: true };
+}
+
+/**
+ * github#71 -- the section governing `path`, by the plugin's own precedence
+ * @param {SortSpec | null} spec @param {string} path "" is the vault root
+ * @returns {SortSection | null}
+ */
+function sortSectionFor(spec, path) {
+  if (!spec || !spec.ok) return null;
+  var name = path.indexOf("/") < 0 ? path : path.slice(path.lastIndexOf("/") + 1);
+  /** @type {SortSection | null} */
+  var best = null;
+  spec.sections.forEach(function (s) {
+    var hit = s.rank === 3 ? s.target === path
+      : s.rank === 2 ? (!!path && s.target === name)
+      : s.rank === 1 ? (!!path && !!s.re && s.re.test(name))
+      : s.target === "" || s.target === path || path.indexOf(s.target + "/") === 0;
+    if (hit && (!best || s.rank > best.rank)) best = s;
+  });
+  return best;
+}
+
+/**
+ * github#71 -- D-11: pins first, then the section's direction
+ * @param {string[]} names @param {SortSection} section
+ * @returns {string[]}
+ */
+function orderBySortSection(names, section) {
+  /** @type {string[]} */
+  var pinned = [];
+  section.pins.forEach(function (p) {
+    if (names.indexOf(p) >= 0 && pinned.indexOf(p) < 0) pinned.push(p);
+  });
+  var rest = names.filter(function (n) { return pinned.indexOf(n) < 0; });
+  if (section.dir) {
+    // github#172 -- a-z is numeric-aware, like byGroupName
+    var opts = section.numeric ? { numeric: true } : undefined;
+    rest.sort(function (a, b) { return a.localeCompare(b, undefined, opts); });
+    if (section.dir === "desc") rest.reverse();
+  }
+  return pinned.concat(rest);
+}
+
 /**
  * @param {HTMLElement} root
  * @param {VaultData} data
@@ -234,17 +437,6 @@
 function mountVaultGraph(root, data, deps) {
   "use strict";
 
-  /**
-   * A prototype-less dictionary, typed. Object.create(null) is `any` to the type program
-   * and a cast at the call site is read as the expression inside it, so this is the ONE
-   * place that any is laundered -- through unknown, once -- and every dictionary in this
-   * file declares its own shape where it is made: `@type {Record<string, number>}` on the
-   * var, `= dict()` after it. Same object as Object.create(null) gave (no prototype, so a
-   * folder named "constructor" or "toString" is just a key); nothing about behaviour
-   * changed. github#60.
-   * @template T
-   * @returns {Record<string, T>}
-   */
   // github#62
   /** @param {() => void} fn @returns {unknown} */
   function attempt(fn) {
@@ -256,6 +448,13 @@ function mountVaultGraph(root, data, deps) {
     for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) return true;
     return false;
   }
+  /**
+   * file declares its own shape where it is made: `@type {Record<string, number>}` on the
+   *
+   * github#145 -- this block sat above attempt(), so T resolved nowhere
+   * @template T
+   * @returns {Record<string, T>}
+   */
   function dict() {
     /** @type {unknown} */
     var o = Object.create(null);
@@ -426,9 +625,10 @@ function mountVaultGraph(root, data, deps) {
       slots:    SLOT_VARS.map(css),
       neutrals: ["--n1", "--n2", "--n3"].map(css),
       // github#77
-      pal: { l: readPalette("l"), d: readPalette("d") }
+      pal: { l: readPalette("l"), d: readPalette("d") },
+      // github#145 -- in the literal, not one statement after it
+      byKey: dict()
     };
-    THEME.byKey = dict();
     THEME.slots.forEach(function (hex, i) { THEME.byKey["g" + (i + 1)] = hex; });
     clearPreviewCache();
     // github#79
@@ -462,26 +662,69 @@ function mountVaultGraph(root, data, deps) {
   /** @param {string} [dim] @returns {SlotMap} */
   function subColorsFor(dim) { return dimSubColors[dim || state.dim] || dimSubColors.folder; }
 
+  // github#73, design/0013
+  // github#82 -- NARROW_PX must match the breakpoint in page.css
+  var NARROW_PX = 720;
+  // github#175, design/0013 -- held from mount, as phoneMq is
+  var narrowMq = WIN.matchMedia
+    ? WIN.matchMedia("(max-width: " + NARROW_PX + "px)")
+    : null;
+  function narrow() {
+    return !!(narrowMq && narrowMq.matches);
+  }
+
+  // github#170, design/0013 -- must match page.css's phone block
+  // github#173 -- held from mount: phone() is on the camera's per-frame path
+  var phoneMq = WIN.matchMedia
+    ? WIN.matchMedia("(max-width: " + NARROW_PX + "px) and (pointer: coarse)")
+    : null;
+  function phone() {
+    return !!(phoneMq && phoneMq.matches);
+  }
+
   // github#4
-  var panEnabled = deps.panEnabled === false ? false : true;
+  // github#170 -- what the host stored; on a phone the zoom decides instead
+  var storedPan = deps.panEnabled === false ? false : true;
+  var panEnabled = phone() ? false : storedPan;
   var onPanEnabled = typeof deps.onPanEnabled === "function" ? deps.onPanEnabled : null;
 
   // github#23
   var compactAxis = deps.compactAxis === false ? false : true;
   var onCompactAxis = typeof deps.onCompactAxis === "function" ? deps.onCompactAxis : null;
 
-  // github#73, design/0013
-  // github#82 -- NARROW_PX must match the breakpoint in page.css
-  var NARROW_PX = 720;
-  function narrow() {
-    return !!(WIN.matchMedia && WIN.matchMedia("(max-width: " + NARROW_PX + "px)").matches);
+  // github#71
+  var FOLDER_ORDERS = ["name", "explorer", "size"];
+  var sortSpec = parseSortSpec(DATA.sortSpecs || []);
+  var onFolderOrder = typeof deps.onFolderOrder === "function" ? deps.onFolderOrder : null;
+  /**
+   * github#71, decisions/0015 -- absent means nobody has chosen; the vault decides
+   */
+  var folderOrder = FOLDER_ORDERS.indexOf(String(deps.folderOrder)) >= 0
+    ? /** @type {"name" | "explorer" | "size"} */ (deps.folderOrder)
+    : (sortSpec.ok && sortSpec.sections.length
+        ? /** @type {"explorer"} */ ("explorer")
+        : /** @type {"name"} */ ("name"));
+  // github#71 -- the section count matters as much as ok
+  function usingSpec() {
+    return folderOrder === "explorer" && sortSpec.ok && sortSpec.sections.length > 0;
+  }
+
+  // github#71, github#86 -- D-12: a sortspec names FOLDERS only
+  function specOrders() {
+    return state.dim === "folder" && usingSpec();
   }
 
   // github#82, decisions/0009 -- absent means nobody chose; width decides
   var sheetOpen = typeof deps.sheetOpen === "boolean" ? deps.sheetOpen : !narrow();
   var onSheetOpen = typeof deps.onSheetOpen === "function" ? deps.onSheetOpen : null;
-  var bandOpen = typeof deps.bandOpen === "boolean" ? deps.bandOpen : true;
+  // github#170, design/0013 -- what the host stored; on a phone the layout decides
+  var storedBand = typeof deps.bandOpen === "boolean" ? deps.bandOpen : true;
+  var bandOpen = phone() ? false : storedBand;
   var onBandOpen = typeof deps.onBandOpen === "function" ? deps.onBandOpen : null;
+
+  // github#70, decisions/0009 -- the host owns the clock. The page never writes this back:
+  var lastOpen = typeof deps.lastOpen === "number" && isFinite(deps.lastOpen)
+    ? deps.lastOpen : null;
 
   // github#3
   var unlinkedByFolder = deps.unlinkedByFolder === false ? false : true;
@@ -493,7 +736,20 @@ function mountVaultGraph(root, data, deps) {
 
   // github#78, design/0006
   var countBars = deps.countBars === false ? false : true;
+  // github#164 -- OFF is today's disc, so nothing moves until a reader asks
+  var rootInOrder = deps.rootInOrder === true;
+  var onRootInOrder = typeof deps.onRootInOrder === "function" ? deps.onRootInOrder : null;
+  // github#164 -- the name the root group SORTS as: its first note
+  var rootKey = "";
   var onCountBars = typeof deps.onCountBars === "function" ? deps.onCountBars : null;
+  // github#165 -- `--dev` opens with it armed; off everywhere else
+  var devTools = typeof deps.devTools === "boolean" ? deps.devTools : !!(DATA && DATA.dev);
+  var onDevTools = typeof deps.onDevTools === "function" ? deps.onDevTools : null;
+  // github#165 -- two handles across the buildTools() scope line
+  /** @type {(() => void) | null} */
+  var closeMenus = null;
+  /** @type {((x: number, y: number) => void) | null} */
+  var openDev = null;
   // github#86, design/0015
   /** @type {("folder" | "tag")[]} */
   var DIMS = ["folder", "tag"];
@@ -560,7 +816,9 @@ function mountVaultGraph(root, data, deps) {
     var out = dict();
     if (!raw || typeof raw !== "object") return out;
     Object.keys(raw).forEach(function (g) {
-      if (typeof raw[g] === "boolean") out[g] = raw[g];
+      // github#145 -- a local, so the typeof narrows it; as cleanSlotMap()
+      var v = raw[g];
+      if (typeof v === "boolean") out[g] = v;
     });
     return out;
   }
@@ -625,7 +883,9 @@ function mountVaultGraph(root, data, deps) {
    * @property {string | null} hovered                         node id
    * @property {string | null} markDay                         heatmap cell key
    * @property {string | null} hoverDay
-   * @property {number | null} hoverYear
+   * @property {string | null} hoverYear   github#145 -- as data-yr spells it
+   * @property {string} heatSource                             "created" | "touched"; github#70
+   * @property {string | null} recent                          "today" | "week" | "open"; github#70
    * @property {string} query
    * @property {string | null} root                            github#76
    * @property {number | null} until                           timeline rank, or null for all
@@ -654,6 +914,9 @@ function mountVaultGraph(root, data, deps) {
     markDay: null,
     hoverDay: null,
     hoverYear: null,
+    // github#70
+    heatSource: "created",
+    recent: null,
     query: "",
     root: null,
     until: null,
@@ -885,8 +1148,7 @@ function mountVaultGraph(root, data, deps) {
 
   ingest(DATA, null);
 
-  // github#86, design/0015 -- per dimension (D-3); called below, after the filing
-  // github#76 -- and per root: a drilled disc counts only its own members
+  // github#86, github#71, github#76 -- per dimension and per root; D-12 gates the spec to folders
   function buildSubOrder() {
     subOrder = dict();
     subCount = dict();
@@ -897,11 +1159,15 @@ function mountVaultGraph(root, data, deps) {
       if (!tally[f]) tally[f] = dict();
       tally[f][sb] = (tally[f][sb] || 0) + 1;
     });
+    var spec = specOrders();
     Object.keys(tally).forEach(function (f) {
-      subOrder[f] = Object.keys(tally[f]).sort(function (x, y) {
+      var subs = Object.keys(tally[f]).sort(function (x, y) {
         return tally[f][y] - tally[f][x] || x.localeCompare(y);
       });
-      subOrder[f].forEach(function (sb) { subCount[f + "/" + sb] = tally[f][sb]; });
+      var sec = spec ? sortSectionFor(sortSpec, f) : null;
+      if (sec) subs = orderBySortSection(subs, sec);
+      subOrder[f] = subs;
+      subs.forEach(function (sb) { subCount[f + "/" + sb] = tally[f][sb]; });
     });
   }
 
@@ -915,6 +1181,8 @@ function mountVaultGraph(root, data, deps) {
   var UNLINKED = "(unlinked)";
   // github#86, design/0015 -- D-2: the bucket, shown, grey, second to last
   var UNTAGGED = "(untagged)";
+  // github#164 -- the hosts' paraFolder() emits this
+  var ROOT_GROUP = "(vault root)";
 
   // github#86, design/0015 -- the filing: where a note sits in this dimension
   /** @type {Record<string, { g: string, sub: string, dirs: string[] }>} */
@@ -1156,7 +1424,8 @@ function mountVaultGraph(root, data, deps) {
     buildSubOrder();
   });
 
-  var SLOT_COUNT = 12;
+  // github#118, design/0004 -- the rotation is the ten hues; the greys stay pickable
+  var HUE_SLOTS = 10;
   /** @type {Record<string, string>} */
   var groupColor = dict();
   /** @type {Record<string, string>} */
@@ -1165,6 +1434,35 @@ function mountVaultGraph(root, data, deps) {
   var groupAutoSlot = dict();
   /** @type {Record<string, string[]>} */
   var order = {};
+  // github#71, design/0004 -- the draw order may move; the slot order never does
+  /** @type {Record<string, string[]>} */
+  var slotOrder = {};
+
+  /**
+   * github#71 -- D-7: groupRank stays the outer key
+   * @param {string[]} names already in name order @param {Record<string, number>} count
+   * @returns {string[]}
+   */
+  function drawOrder(names, count) {
+    // github#164 -- the partition runs in EVERY mode, name included
+    var body = names.filter(function (n) { return drawRank(n) === 2; });
+    // github#164 -- re-seats the root group; a no-op without it
+    if (rootInOrder && body.indexOf(ROOT_GROUP) >= 0) {
+      body.sort(function (a, b) {
+        return drawKey(a).localeCompare(drawKey(b), undefined, { numeric: true });
+      });
+    }
+    if (folderOrder === "size") {
+      body.sort(function (a, b) { return (count[b] || 0) - (count[a] || 0) || byGroupName(a, b); });
+    } else if (folderOrder === "explorer") {
+      // github#71, github#86 -- D-12: a sortspec names FOLDERS, so gate on the dim
+      var sec = specOrders() ? sortSectionFor(sortSpec, "") : null;
+      if (sec) body = orderBySortSection(body, sec);
+    }
+    // github#164 -- rank-partitioning a rank-sorted array is the identity
+    return names.filter(function (n) { return drawRank(n) < 2; })
+      .concat(body, names.filter(function (n) { return drawRank(n) > 2; }));
+  }
 
   // github#3, github#86 -- archives, brackets, groups, (untagged), (unlinked)
   /** @param {string} s */
@@ -1174,6 +1472,22 @@ function mountVaultGraph(root, data, deps) {
     var c = s.charAt(0);
     return c === "_" ? 0 : c === "(" ? 1 : 2;
   }
+  /**
+   * github#164, github#71 -- the DRAW rank; groupRank stays stable for the slot order
+   * @param {string} s
+   */
+  function drawRank(s) {
+    return rootInOrder && s === ROOT_GROUP ? 2 : groupRank(s);
+  }
+
+  /**
+   * github#164 -- what a group sorts AS in the draw order
+   * @param {string} s
+   */
+  function drawKey(s) {
+    return rootInOrder && s === ROOT_GROUP && rootKey ? rootKey : s;
+  }
+
   /** @param {string} a @param {string} b */
   function byGroupName(a, b) {
     return groupRank(a) - groupRank(b) || a.localeCompare(b, undefined, { numeric: true });
@@ -1199,6 +1513,18 @@ function mountVaultGraph(root, data, deps) {
       var f = fileGroup(id, a);
       filed[f] = (filed[f] || 0) + 1;
     });
+    // github#164 -- folder dim ONLY: inDim() runs this for the tag disc too
+    if (state.dim === "folder") {
+      rootKey = "";
+      if (rootInOrder) {
+        graph.forEachNode(function (id, a) {
+          if (a.standIn || fileGroup(id, a) !== ROOT_GROUP) return;
+          var t = String(a.label || "");
+          if (!t) return;
+          if (!rootKey || t.localeCompare(rootKey, undefined, { numeric: true }) < 0) rootKey = t;
+        });
+      }
+    }
     folderCount = filed;
     // github#50
     // github#48
@@ -1218,7 +1544,10 @@ function mountVaultGraph(root, data, deps) {
                  a.localeCompare(b, undefined, { numeric: true });
         })
       : Object.keys(count).sort(byGroupName);
-    order[state.dim] = names;
+    // github#71 -- a separate copy: the draw order is re-sorted in place below
+    slotOrder[state.dim] = names.slice();
+    // github#76 -- under a root the size order above IS the draw order
+    order[state.dim] = rebasing() ? names : drawOrder(names, count);
     return count;
   }
 
@@ -1231,7 +1560,9 @@ function mountVaultGraph(root, data, deps) {
   function buildColors() {
     groupColor = dict();
 
-    var names = order[state.dim] || [];
+    // github#71, design/0004 -- SLOTS COME FROM THE NAME ORDER, NEVER THE DRAW ORDER. The
+    // github#71 -- under "name" the two arrays are equal and this is a no-op
+    var names = slotOrder[state.dim] || order[state.dim] || [];
 
     /** @type {SlotMap} */
     // github#86 -- the pins of the dimension on screen
@@ -1254,7 +1585,8 @@ function mountVaultGraph(root, data, deps) {
         return;
       }
 
-      var key = "g" + ((auto++ % SLOT_COUNT) + 1);
+      // github#118
+      var key = "g" + ((auto++ % HUE_SLOTS) + 1);
       var use = picked || key;
       groupColor[g] = THEME.byKey[use];
       groupSlot[g] = use;
@@ -1344,7 +1676,8 @@ function mountVaultGraph(root, data, deps) {
    * @returns {T}
    */
   function inDim(dim, fn) {
-    if (dim === state.dim || DIMS.indexOf(dim) < 0) return fn();
+    // github#145 -- membership without a cast; DIMS narrows indexOf()
+    if (dim === state.dim || !DIMS.some(function (d) { return d === dim; })) return fn();
     var sDim = state.dim, sCounts = counts, sFolderCount = folderCount,
         sColor = groupColor, sSlot = groupSlot, sAuto = groupAutoSlot,
         sShade = subShade, sSubSlot = subSlot, sTint = unlinkedTintColors,
@@ -1378,7 +1711,8 @@ function mountVaultGraph(root, data, deps) {
     var sWedge = reWedge, sCounts = counts, sFolderCount = folderCount,
         sColor = groupColor, sSlot = groupSlot, sAuto = groupAutoSlot,
         sShade = subShade, sSubSlot = subSlot, sTint = unlinkedTintColors,
-        sSubOrder = subOrder, sSubCount = subCount, sOrder = order[state.dim];
+        sSubOrder = subOrder, sSubCount = subCount, sOrder = order[state.dim],
+        sSlotOrder = slotOrder[state.dim], sRootKey = rootKey;
     reWedge = true;
     try {
       buildSubOrder();
@@ -1398,6 +1732,8 @@ function mountVaultGraph(root, data, deps) {
       subShade = sShade; subSlot = sSubSlot; unlinkedTintColors = sTint;
       subOrder = sSubOrder; subCount = sSubCount;
       if (sOrder) order[state.dim] = sOrder;
+      if (sSlotOrder) slotOrder[state.dim] = sSlotOrder;
+      rootKey = sRootKey;
     }
     return { color: out, child: child };
   }
@@ -1528,6 +1864,9 @@ function mountVaultGraph(root, data, deps) {
 
   // github#13
   var DENSITY_MAX = 2.6;
+
+  // github#157 -- the stretch ceiling; the 1.5 window is in changelog-detail
+  var CELL_FILL_MAX = 1.5;
 
   /**
    * One of the two bands the disc is laid out in.
@@ -1845,9 +2184,11 @@ function mountVaultGraph(root, data, deps) {
    * @property {HTMLCanvasElement | null} canvas
    * @property {unknown[] | null} [trace]
    * @property {number} [traceR]
+   * github#165
+   * @property {{ x: number, y: number, w: number, h: number } | null} legendBox
    */
   /** @type {DebugState} */
-  var DBG = { on: false, cells: null, canvas: null };
+  var DBG = { on: false, cells: null, canvas: null, legendBox: null };
   var SEAM_YELLOW = "rgb(255,196,0)";
   var SEAM_YELLOW_45 = "rgba(255,196,0,0.45)";
   /** @type {Record<string, boolean>} */
@@ -2283,14 +2624,18 @@ function mountVaultGraph(root, data, deps) {
     // github#13
     var HOLE = 0.3;
     var fullTotal = geomLock && geomLock.total > 0 ? geomLock.total : planTotal;
-    var density = (spIn && typeof spIn === "object") ? (spIn.o || 1)
-      : spIn > 0 ? spIn
+    // github#13
+    // github#145 -- split the density from the held spacings, once
+    // github#145 -- typeof "number" is what `spIn > 0` meant: null,
+    // github#145 -- undefined and a negative all take the measured branch
+    var given = (spIn && typeof spIn === "object") ? spIn : null;
+    var spDensity = typeof spIn === "number" ? spIn : 0;
+    var density = given ? (given.o || 1)
+      : spDensity > 0 ? spDensity
       : (planTotal > 0.0001
           ? Math.min(DENSITY_MAX, Math.sqrt(fullTotal / planTotal)) : 1);
     var SP = density;
 
-    // github#13
-    var given = (spIn && typeof spIn === "object") ? spIn : null;
     var givenRoom = given && given.room ? given.room : null;
     var SP_I = given && given.i > 0 ? given.i : SP;
     var SP_O = given && given.o > 0 ? given.o : SP;
@@ -2351,11 +2696,26 @@ function mountVaultGraph(root, data, deps) {
       });
       /** @type {Record<string, boolean>} */
       var pinnedInner = dict();
+      // github#117
       names.forEach(function (g) {
-        if (assign[g] && (groupNotes[g] || 0) < PIN_BELOW) pinnedInner[g] = true;
+        if ((groupNotes[g] || 0) < PIN_BELOW) { pinnedInner[g] = true; assign[g] = true; }
       });
       var movable = names.filter(function (g) { return !pinnedInner[g]; });
-      if (!movable.length) return;
+      // github#117 -- the pin above can MOVE a group, so land it on both paths out
+      var applyAssign = function () {
+        cells.forEach(function (c) { c.inner = !!assign[c.g]; });
+        inner = cells.filter(function (c) { return c.inner; });
+        outer = cells.filter(function (c) { return !c.inner; });
+        share(inner, "i"); share(outer, "o");
+        cells.forEach(function (c) { c.bandRef = c.band; });
+      };
+      if (!movable.length) {
+        // github#117 -- no outer band: flip to all outer, as the seed guard does
+        if (names.every(function (g) { return assign[g]; })) {
+          names.forEach(function (g) { assign[g] = false; });
+        }
+        applyAssign(); return;
+      }
 
       /** @param {Cell[]} ins @param {Cell[]} outs @param {number} rv */
       var spanFor = function (ins, outs, rv) {
@@ -2370,10 +2730,19 @@ function mountVaultGraph(root, data, deps) {
           var r = rowsNeeded(usableRef(c, rOut), c.wsum, rOut);
           if (r > oR) oR = r;
         });
+        // github#117
+        var nI = 0, nO = 0;
+        ins.forEach(function (c) { nI += c.wsum; });
+        outs.forEach(function (c) { nO += c.wsum; });
+        var iHi = (rv + iR * SP) * INNER_SCALE, iLo = rv * INNER_SCALE;
+        var oHi = rOut + oR * SP, oLo = rOut;
+        var rpI = nI > 0.0001 ? Math.max(0, iHi * iHi - iLo * iLo) / nI : 0;
+        var rpO = nO > 0.0001 ? Math.max(0, oHi * oHi - oLo * oLo) / nO : 0;
         return {
           inner: Math.max(0, iR - 1) * SP * INNER_SCALE,
           outer: Math.max(0, oR - 1) * SP,
           iR: iR, oR: oR,
+          room: (rpI > 1e-9 && rpO > 1e-9) ? Math.abs(Math.log(rpI / rpO)) : 0,
           holeShare: (rOut + oR * SP) > 0 ? rv / (rOut + oR * SP) : 1
         };
       };
@@ -2406,6 +2775,8 @@ function mountVaultGraph(root, data, deps) {
         for (var m = 100; m <= 300; m += 5) {
           var rv = R0_BASE * (m / 100), t = spanFor(ins, outs, rv);
           var c2 = Math.abs(t.inner - BAND_RATIO * t.outer) +
+                   // github#117 -- at THIS rv, never a fixed base
+                   ROOM_WEIGHT * t.room +
                    (t.iR > t.oR ? INVERT_WEIGHT * (t.iR - t.oR) : 0) +
                    SIZE_WEIGHT * SP * innerPeak +
                    (t.inner >= t.outer ? 1000 : 0) +
@@ -2415,6 +2786,9 @@ function mountVaultGraph(root, data, deps) {
         return { cost: bc, r0: br };
       };
       var INVERT_WEIGHT = 0.5;
+
+      // github#117
+      var ROOM_WEIGHT = 5;
 
       var SIZE_WEIGHT = 5.0;
       /** @param {Record<string, boolean>} a */
@@ -2447,11 +2821,7 @@ function mountVaultGraph(root, data, deps) {
         }
       }
 
-      cells.forEach(function (c) { c.inner = !!assign[c.g]; });
-      inner = cells.filter(function (c) { return c.inner; });
-      outer = cells.filter(function (c) { return !c.inner; });
-      share(inner, "i"); share(outer, "o");
-      cells.forEach(function (c) { c.bandRef = c.band; });
+      applyAssign();
 
       r0 = evaluate(assign).r0;
     })();
@@ -2474,10 +2844,19 @@ function mountVaultGraph(root, data, deps) {
       }
       var T = thick * scale, R = (base + thick / 2) * scale;
       var s = Math.sqrt(arcSpan() * R * T / n);
-      var rw = Math.round(T / s);
+      // github#117
+      var rw = Math.ceil(T / s - 0.001);
       if (rw < 1) rw = 1;
       if (rw > 200) rw = 200;
-      return { sp: thick / rw, rows: rw };
+      // github#157 -- rows at the square pitch; the rest is margin, not stretch
+      var pit = thick / rw;
+      var q = rw * s / T;
+      if (rw > 1 && q * q > CELL_FILL_MAX) {
+        var square = s / scale;
+        pit *= q * q / CELL_FILL_MAX;
+        if (pit > square) pit = square;
+      }
+      return { sp: pit, rows: rw };
     };
 
     var thickI = geomLock ? (geomLock.rOuter - geomLock.r0) * INNER_FILL : 0;
@@ -2503,6 +2882,8 @@ function mountVaultGraph(root, data, deps) {
       SP_O = so.sp; outerRows = so.rows;
       outer.forEach(function (c) { c.rows = c.wsum > 0.0001 ? outerRows : 0; });
       maxR = rOuter + outerRows * SP_O;
+      // github#157 -- take back only the overshoot; fitRatio frames by maxR
+      if (maxR > geomLock.maxR) maxR = geomLock.maxR;
     } else {
       outer.forEach(function (c) {
         c.rows = rowsNeeded(usableRef(c, rOuter), c.wsum, rOuter, SP_O);
@@ -2918,6 +3299,7 @@ function mountVaultGraph(root, data, deps) {
     });
 
     var scale = UNIT;
+    /** @type {Record<string, Point>} */
     var out = {};
     graph.forEachNode(function (id) {
       var q = pos[id];
@@ -2937,6 +3319,31 @@ function mountVaultGraph(root, data, deps) {
     };
     if (!roomNow) {
       bandOf("i").room = pick(pool.i); bandOf("o").room = pick(pool.o);
+    }
+    // github#160 -- shift the outer band out by row 0's largest dot radius
+    // github#35 -- the inner band keeps HUB_ROW0_FRAC of the hub on purpose
+    var insetO = 0;
+    var roomO = roomNow ? roomNow.o : bandOf("o").room;
+    if (plan.sp > 0 && plan.rows && plan.rows.o > 0 && roomO > 1) {
+      var pitO = UNIT * plan.sp;
+      var hiO = DOT_OF_PITCH * Math.min(pitO, UNIT * DOT_MAX_SPREAD);
+      var fO = Math.min(roomO * 0.92 / pitO, DOT_ROOM_MAX);
+      insetO = hiO * fO / UNIT;
+      var slackO = (plan.maxR - plan.rOuter) - (plan.rows.o - 1) * plan.sp - 2 * insetO;
+      if (slackO < 0) insetO = Math.max(0, insetO + slackO);
+      if (insetO > 0) {
+        plan.cells.forEach(function (c) {
+          if (c.inner) return;
+          c.list.forEach(function (id) {
+            var q = out[id];
+            if (!q) return;
+            var rq = Math.hypot(q.x, q.y);
+            if (!(rq > 1e-9)) return;
+            var kq = (rq + insetO * UNIT) / rq;
+            q.x *= kq; q.y *= kq;
+          });
+        });
+      }
     }
     if (trace) {
       tracePut({ what: "passEnd", roomOut_i: bandOf("i").room, roomOut_o: bandOf("o").room,
@@ -3068,24 +3475,56 @@ function mountVaultGraph(root, data, deps) {
     pinnedPlan = null;
     applyLayout(!!animate, releaseHover);
     placeLogo();
-    if (savePinned) savePinned(state.pinned.slice());
+    persistPins();
   }
 
-  // github#12
-  function seedPins() {
-    var want = deps.pinned;
-    if (!want || !want.length || typeof want.length !== "number") return;
-    /** @type {Record<string, number>} */
-    var seen = dict();
+  // github#143, decisions/0014 -- version 1 was the runtime ids, which move
+  // github#86, github#143 -- a NUL cannot occur in a vault path, so no note forges this
+  var PIN_FORMAT = "\u0000vault-graph:pins:2";
+
+  // github#143, decisions/0014
+  /** @returns {string[]} the marker, then one note path per slot, in slot order */
+  function pinsStored() {
+    /** @type {string[]} */
+    var out = [PIN_FORMAT];
+    state.pinned.forEach(function (id) {
+      // github#141 -- a ghost's path is its canonical full destination
+      if (graph.hasNode(id)) out.push(String(graph.getNodeAttribute(id, "path")));
+    });
+    return out;
+  }
+
+  // github#143, decisions/0014
+  /** @param {unknown} want @returns {string[]} the runtime ids it names, in slot order */
+  function pinsFrom(want) {
     /** @type {string[]} */
     var out = [];
-    for (var i = 0; i < want.length && out.length < PIN_MAX; i++) {
-      var id = want[i];
-      if (typeof id !== "string" || seen[id] || !graph.hasNode(id)) continue;
+    var list = /** @type {unknown[]} */ (want || []);
+    if (typeof list.length !== "number" || list[0] !== PIN_FORMAT) return out;
+    /** @type {Record<string, number>} */
+    var seen = dict();
+    for (var i = 1; i < list.length && out.length < PIN_MAX; i++) {
+      var path = list[i];
+      if (typeof path !== "string") continue;
+      var id = idOfPath[path];
+      if (id === undefined || seen[id] || !graph.hasNode(id)) continue;
       seen[id] = 1;
       out.push(id);
     }
-    state.pinned = out;
+    return out;
+  }
+
+  // github#143
+  function persistPins() {
+    if (savePinned) savePinned(pinsStored());
+  }
+
+  // github#12; github#143, decisions/0014 -- an unmarked store is version 1's ordinals
+  function seedPins() {
+    var want = deps.pinned;
+    state.pinned = pinsFrom(want);
+    // github#143, decisions/0014 -- drop it once, not once per mount
+    if (want && want.length && want[0] !== PIN_FORMAT) persistPins();
   }
 
   /**
@@ -3185,14 +3624,16 @@ function mountVaultGraph(root, data, deps) {
 
     renderer.on("downNode", function (e) {
       var o = e.event && e.event.original;
-      if (o && o.button !== 0) return;
+      // github#145 -- `in` narrows MouseEvent | TouchEvent; a touch still bails
+      if (o && (!("button" in o) || o.button !== 0)) return;
       nodeDrag = { id: e.node, moved: false, over: false, wasPinned: isPinned(e.node) };
       dragJustMoved = null;
     });
 
     captor.on("mousemovebody", function (e) {
       if (!nodeDrag) return;
-      if (e.original && e.original.buttons !== undefined && !(e.original.buttons & 1)) {
+      // github#145 -- `in` is the `!== undefined` test it replaces
+      if (e.original && "buttons" in e.original && !(e.original.buttons & 1)) {
         drop();
         return;
       }
@@ -3387,11 +3828,12 @@ function mountVaultGraph(root, data, deps) {
     if (el) el.textContent = rangeLabel();
     if (dateSpan) {
       var lo = isoDay(dateSpan.lo), hi = isoDay(dateSpan.hi);
-      var f = $("from"), t = $("to");
+      var f = /** @type {HTMLInputElement} */ ($("from"));
+      var t = /** @type {HTMLInputElement} */ ($("to"));
       if (f) { f.min = lo; f.max = hi; f.value = isoDay(state.from === null ? dateSpan.lo : state.from); }
       if (t) { t.min = lo; t.max = hi; t.value = isoDay(state.to === null ? dateSpan.hi : state.to); }
     }
-    var btn = $("rangeall");
+    var btn = /** @type {HTMLButtonElement} */ ($("rangeall"));
     if (btn) btn.disabled = (state.from === null && state.to === null);
     drawDateUI();
   }
@@ -3401,21 +3843,139 @@ function mountVaultGraph(root, data, deps) {
     cascade();
   }
 
-  var TODAY = (function () {
-    var d = new Date(), p = function (n) { return (n < 10 ? "0" : "") + n; };
+  /** @param {number} ms */
+  function localKey(ms) {
+    var d = new Date(ms), p = function (n) { return (n < 10 ? "0" : "") + n; };
     return d.getFullYear() + "-" + p(d.getMonth() + 1) + "-" + p(d.getDate());
+  }
+  // github#70 -- ?today=YYYY-MM-DD or ?today=vault pins the clock for a demo
+  var TODAY = (function () {
+    var q = String(WIN.location ? WIN.location.search : "") + " " +
+            String(WIN.location ? WIN.location.hash : "");
+    var m = /(^|[?&#])today=([^&#\s]+)/.exec(q);
+    var v = m ? decodeURIComponent(m[2]) : "";
+    if (/^\d{4}-\d{2}-\d{2}$/.test(v)) return v;
+    if (v === "vault") {
+      var newest = "";
+      (data.nodes || []).forEach(function (n) {
+        if (!n.ghost && (n.created || "") > newest) newest = n.created;
+      });
+      if (newest) return newest;
+    }
+    return localKey(Date.now());
   })();
+
+  /**
+   * github#70
+   * @param {NodeAttrs} a
+   */
+  function heatDateOf(a) {
+    return (state.heatSource === "touched" ? a.touched : a.created) || "";
+  }
 
   /** @param {string} id */
   function isMarkedDay(id) {
     if (!state.markDay && !state.hoverDay && state.hoverYear === null) return false;
-    var c = graph.getNodeAttribute(id, "created");
+    var c = heatDateOf(graph.getNodeAttributes(id));
     if (c === state.markDay || c === state.hoverDay) return true;
     return state.hoverYear !== null && !!c && c.slice(0, 4) === state.hoverYear;
   }
 
+  /* --------------------------------------------------------- the recent lens */
+
+  /**
+   * github#70
+   * @type {Record<string, boolean>}
+   */
+  var recentSet = dict();
+  // github#70 -- what the dim reads; on a disarm it outlives recentSet
+  /** @type {Record<string, boolean>} */
+  var recentDim = recentSet;
+  /** github#70 */
+  var recentT = 0;
+  /**
+   * github#70
+   * @type {number | null}
+   */
+  var recentRef = null;
+
+  /**
+   * github#70
+   * @param {string | null} kind @param {number} [refMs]
+   * @returns {{ lo: string, hi: string, label: string } | null}
+   */
+  function recentWindow(kind, refMs) {
+    var ref = typeof refMs === "number" && isFinite(refMs) ? refMs : heatParse(TODAY);
+    if (!isFinite(ref)) return null;
+    var hi = heatKey(ref);
+    // github#70
+    var v = state.heatSource === "touched" ? "touched" : "added";
+    if (kind === "today") return { lo: hi, hi: hi, label: v + " today" };
+    if (kind === "week") {
+      // github#70
+      var lo = heatKey(ref - 6 * DAY_MS);
+      return { lo: lo, hi: hi, label: v + " in the last 7 days, since " + lo };
+    }
+    if (kind === "open" && lastOpen !== null) {
+      // github#70 -- the host's clock is local time, like TODAY; heatKey is UTC
+      var lk = localKey(lastOpen);
+      // github#70
+      return { lo: lk, hi: hi > lk ? hi : lk, label: v + " on or after " + lk };
+    }
+    return null;
+  }
+
+  /**
+   * github#70
+   * @param {string | null} kind @param {number} [refMs]
+   */
+  function setRecent(kind, refMs) {
+    var win = kind ? recentWindow(kind, refMs) : null;
+    state.recent = win ? kind : null;
+    recentRef = win && typeof refMs === "number" && isFinite(refMs) ? refMs : null;
+    recentSet = dict();
+    if (win) {
+      graph.forEachNode(function (id, a) { if (inRecent(win, a)) recentSet[id] = true; });
+      recentDim = recentSet;
+    }
+  }
+
+  /*
+   // github#70
+   */
+  invalidatesOnData("recent lens", function () {
+    if (state.recent) setRecent(state.recent, recentRef === null ? undefined : recentRef);
+  });
+
+  /**
+   * github#70
+   * @param {{ lo: string, hi: string }} win @param {NodeAttrs} a
+   */
+  function inRecent(win, a) {
+    var t = heatDateOf(a);
+    return !!t && t >= win.lo && t <= win.hi;
+  }
+
+  /** @param {string} src "created" or "touched" */
+  function setHeatSource(src) {
+    var want = src === "touched" ? "touched" : "created";
+    if (state.heatSource === want) return;
+    state.heatSource = want;
+    // github#70, design/0010
+    state.markDay = null;
+    state.hoverDay = null;
+    // github#70
+    if (state.recent) setRecent(state.recent, recentRef === null ? undefined : recentRef);
+    heatBuild();
+    syncRecentUI();
+    hlSync();
+    renderer.refresh();
+  }
+
   /** @param {string} id */
   function isHighlighted(id) {
+    // github#70, github#86
+    if (recentSet[noteOf(id)]) return true;
     if (isMarkedDay(id)) return true;
     // github#76
     var g = identOfNode(id);
@@ -3704,27 +4264,33 @@ function mountVaultGraph(root, data, deps) {
       ["dotted yellow", "seam centre"],
       ["dashed yellow", "band radius"]
     ];
-    var pad = 8, lh = 16, sw = 34, x = 12, y = 12;
+    var pad = 8, lh = 16, sw = 34, inset = 12;
     g2.font = "11px ui-monospace, monospace";
     g2.textBaseline = "middle";
     var wide = 0;
     rows.forEach(function (r) { wide = Math.max(wide, g2.measureText(r[1]).width); });
+    // github#165 -- no plate, so the box is the text's own extent
     var w = sw + 8 + wide + pad * 2, h = lh * (rows.length + 1) + pad * 2;
-    g2.globalAlpha = 0.72; g2.fillStyle = "#000";
-    g2.fillRect(x, y, w, h);
-    g2.globalAlpha = 1;
+    // github#165 -- bottom left: the one corner with nothing over it
+    var host = $("graph");
+    var hostH = host ? host.clientHeight : 0;
+    var x = inset;
+    var y = Math.max(inset, hostH - h - inset);
+    DBG.legendBox = { x: x, y: y, w: w, h: h };
+    // github#165 -- no plate, so the ink follows the theme
+    var ink = THEME.text || "#fff";
     rows.forEach(function (r, i) {
       var yy = y + pad + lh * i + lh / 2;
-      g2.strokeStyle = i === 0 ? "#e66767" : i === 1 ? "#fff" : SEAM_YELLOW;
+      g2.strokeStyle = i === 0 ? "#e66767" : i === 1 ? ink : SEAM_YELLOW;
       g2.globalAlpha = i === 0 ? 0.9 : i === 1 ? 0.5 : i === 2 ? 0.75 : 0.45;
       g2.lineWidth = i === 0 ? 1.5 : 1;
       g2.setLineDash(i === 0 ? [] : i === 1 ? [5, 5] : i === 2 ? [3, 4] : [4, 4]);
       g2.beginPath(); g2.moveTo(x + pad, yy); g2.lineTo(x + pad + sw, yy); g2.stroke();
       g2.setLineDash([]);
-      g2.globalAlpha = 0.85; g2.fillStyle = "#fff";
+      g2.globalAlpha = 0.85; g2.fillStyle = ink;
       g2.fillText(r[1], x + pad + sw + 8, yy);
     });
-    g2.globalAlpha = 0.55; g2.fillStyle = "#fff";
+    g2.globalAlpha = 0.55; g2.fillStyle = ink;
     g2.fillText("built " + (DATA && DATA.generated ? DATA.generated : "?"),
                 x + pad, y + pad + lh * rows.length + lh / 2);
     g2.globalAlpha = 1;
@@ -3742,7 +4308,9 @@ function mountVaultGraph(root, data, deps) {
       }
     }
     if (!DBG.on) { DBG.cells = null; if (DBG.canvas) DBG.canvas.hidden = true; }
-    if (renderer) renderer.refresh({ skipIndexation: true });
+    // github#165 -- the packer collects the cells, so ask for a pass
+    if (DBG.on && !DBG.cells && renderer) applyLayout(false);
+    else if (renderer) renderer.refresh({ skipIndexation: true });
     return DBG.on;
   }
 
@@ -3847,10 +4415,12 @@ function mountVaultGraph(root, data, deps) {
   var SPREAD_PER  = 0.17;
   var SPREAD_MIN  = 24;
   // github#41, design/0011
+  // github#165 -- named so the menu's Normal cannot drift from it
+  var TIME_SCALE_DEFAULT = 1.25;
   var TIME_SCALE  = (function () {
     var m = /(^|[?&#])slow=([0-9.]+)/.exec(String(WIN.location ? WIN.location.search : "") + " " +
                                            String(WIN.location ? WIN.location.hash : ""));
-    return m && +m[2] > 0 ? +m[2] : 1.25;
+    return m && +m[2] > 0 ? +m[2] : TIME_SCALE_DEFAULT;
   })();
   var TIMELINE_MS = 4500;
   // github#113
@@ -3949,6 +4519,9 @@ function mountVaultGraph(root, data, deps) {
   var fitVer = -1;
   /** @type {Record<string, number> | null} */
   var fitNow = null;
+  // github#159 -- an endpoint's clearance from its OWN positions
+  /** @type {Record<string, Point> | null} */
+  var fitPos = null;
 
   var FIT_GRID_MAX = 1 << 20;
   function measureFit() {
@@ -3964,8 +4537,10 @@ function mountVaultGraph(root, data, deps) {
       var al = alpha[id];
       if (al === undefined) al = 1;
       if (al < 0.35) return;
-      if (!(isFinite(a.x) && isFinite(a.y))) return;
-      ids.push(id); xs.push(a.x); ys.push(a.y);
+      // github#159
+      var q = fitPos && fitPos[id] ? fitPos[id] : a;
+      if (!(isFinite(q.x) && isFinite(q.y))) return;
+      ids.push(id); xs.push(q.x); ys.push(q.y);
     });
     /** @type {Record<string, number>} */
     var map = dict();
@@ -4080,7 +4655,8 @@ function mountVaultGraph(root, data, deps) {
    */
   /** @typedef {{ ids: string[], a: number[], b: number[], out: Record<string, number> }} WalkPair */
   /**
-   * @param {(() => void) | null} done
+   * github#145 -- done is optional; most callers pass nothing
+   * @param {(() => void) | null} [done]
    * @param {CascadeOpts} [opts]
    */
   function cascade(done, opts) {
@@ -4291,7 +4867,8 @@ function mountVaultGraph(root, data, deps) {
     var tglDir = dict();
     /** @type {Record<string, number>} */
     var tglN = dict();
-    /** @type {Record<string, number>} */
+    // github#145 -- a flag, not a count
+    /** @type {Record<string, boolean>} */
     var tglMv = dict();
     if (opts.colToggle) (function () {
       /** @type {Record<string, number>} */
@@ -4541,11 +5118,14 @@ function mountVaultGraph(root, data, deps) {
         traceTag(keepTag);
         // github#66
         measureSizeScale();
+        // github#159, github#66, github#41 -- the endpoint's own frame for the fit
+        fitPos = outPos; fitVer = -1;
         /** @type {Record<string, number>} */
         var sizes = dict();
         graph.forEachNode(function (id, at) {
           if ((alpha[id] || 0) > 0.004) sizes[id] = dotPx(at.size, id);
         });
+        fitPos = null; fitVer = -1;
         var got = { i: bandOf("i").room, o: bandOf("o").room, pos: outPos,
                     cells: cellRoom, edges: edgeCap, sizes: sizes };
         roomNow = saved; cellNow = savedCell; edgeNow = savedEdge;
@@ -4861,12 +5441,40 @@ function mountVaultGraph(root, data, deps) {
   /**
    * The per-frame layout probe behind __vg.probe(), standalone only: one flat record per
    * sampled frame, plus the fixed set of notes it measures (see where it is captured).
-   * @typedef {Record<string, number | string | null>} ProbeSample
+   *
+   * github#145 -- was Record<string, number | string | null>, a bag
+   * @typedef {Object} ProbeSample
+   * @property {string} tag
+   * @property {number} ms
+   * @property {number} gapI
+   * @property {number} gapO
+   * @property {number} ngI
+   * @property {number} ngO
+   * @property {number} gapDegI
+   * @property {number} gapDegO
+   * @property {number} radStep
+   * @property {string | null} radId
+   * @property {number} radMean
+   * @property {number} tanStep
+   * @property {string | null} tanId
+   * @property {number} tanOver
+   * @property {number} tanMean
+   * @property {Record<string, number> | null} starts    the wedge start angles
+   * @property {Record<string, number> | null} arcs
+   * @property {Record<string, string> | null} bands
+   * @property {number} innerN
+   * @property {number} innerMin
+   * @property {number} innerMax
+   * @property {number} outerN
+   * @property {number} outerMin
+   * @property {number} outerMax
+   */
+  /**
    * @typedef {Object} Probe
    * @property {number} t0
    * @property {ProbeSample[]} samples
-   * @property {number | null} prevAng
-   * @property {number | null} prevR
+   * @property {Record<string, number> | null} prevAng   github#145 -- per note
+   * @property {Record<string, number> | null} prevR     github#145 -- per note
    * @property {Record<string, number>} set
    * @property {string} [watch]
    * @property {unknown} [watched]
@@ -5173,7 +5781,9 @@ function mountVaultGraph(root, data, deps) {
            Object.keys(state.highlightSub).join(",") + "|" +
            (state.markDay || "") + "|" + (state.hoverDay || "") + "|" +
            (state.hoverGroup || "") + "|" + Object.keys(state.hoverSub).join(",") + "|" +
-           (state.hoverYear || "");
+           (state.hoverYear || "") + "|" +
+           // github#70
+           (state.recent || "") + "|" + state.heatSource;
   }
 
   function hlWalk() {
@@ -5184,6 +5794,15 @@ function mountVaultGraph(root, data, deps) {
       hlPrev = now;
       var adv = Math.min(dt, TWEEN_MS) / (TWEEN_MS * TIME_SCALE);
       var moving = false;
+      // github#70
+      var rAim = state.recent ? 1 : 0;
+      if (recentT !== rAim) {
+        recentT += rAim > recentT ? adv : -adv;
+        if (recentT > 1) recentT = 1;
+        if (recentT < 0) recentT = 0;
+        if (recentT !== rAim) moving = true;
+        else if (rAim === 0) recentDim = recentSet;
+      }
       graph.forEachNode(function (id) {
         var aim = isHighlighted(id) ? 1 : 0, v = hl[id] || 0;
         if (v === aim) return;
@@ -5305,12 +5924,18 @@ function mountVaultGraph(root, data, deps) {
     ctx.fillText(data.label, data.x + data.size + 5, data.y + n / 3);
   }
 
-  /** @param {string} id @param {NodeAttrs} a @returns {NodeDisplayData & { haloColor?: string }} */
+  /**
+   * github#145 -- applyNodeDefaults() fills the rest
+   * @param {string} id @param {NodeAttrs} a
+   * @returns {NodeAttrs & Partial<NodeDisplayData> & { haloColor?: string }}
+   */
   function nodeStyle(id, a) {
-        var r = /** @type {NodeDisplayData & { haloColor?: string }} */ (Object.assign({}, a));
+        // github#145 -- the attrs; the display fields arrive below
+        var r = /** @type {NodeAttrs & Partial<NodeDisplayData> & { haloColor?: string }} */ (
+                  Object.assign({}, a));
         r.color = nodeColor(id);
         var hv = hl[id] || 0;
-        if (state.markDay && graph.getNodeAttribute(id, "created") === state.markDay) {
+        if (state.markDay && heatDateOf(a) === state.markDay) {
           r.color = mixHex(r.color, THEME.today, hv);
           r.zIndex = 3;
         }
@@ -5319,6 +5944,13 @@ function mountVaultGraph(root, data, deps) {
           r.haloColor = mixHex(nodeColor(id), THEME.today, hv);
           r.size = (r.size || a.size) * (1 + (0.3 + HL_GROW) * hv);
           r.zIndex = 4;
+        }
+        // github#70
+        if (recentT > 0.004 && !recentDim[noteOf(id)] &&
+            id !== state.hovered && id !== state.selected) {
+          r.color = mixHex(r.color || nodeColor(id), THEME.dim, recentT);
+          r.label = "";
+          r.zIndex = 0;
         }
 
         if (state.query) {
@@ -5718,6 +6350,64 @@ function mountVaultGraph(root, data, deps) {
     return out >= 0 ? mag : -mag;
   }
 
+  /* ------------------------------------------------ github#144, a lost context */
+
+  // github#144 -- a driver reset restores in a frame or two
+  var GLOST_STALL_MS = 4000;
+  var glostGone = dict();
+  var glostStalled = false;
+  /** @type {number | null} */
+  var glostTimer = null;
+
+  function glostCount() { return Object.keys(glostGone).length; }
+
+  // github#144 -- host-neutral wording: the tab and the view alike
+  function glostPaint() {
+    var el = $("glost"), n = glostCount(), stalled = glostStalled;
+    if (!n) { el.hidden = true; el.textContent = ""; return; }
+    var one = n === 1;
+    var what = (one ? "A graphics layer was" : n + " graphics layers were") + " lost";
+    el.textContent = stalled
+      ? what + " and " + (one ? "has" : "have") +
+        " not come back. Reload or reopen the graph to rebuild it."
+      : what + " — restoring...";
+    el.hidden = false;
+  }
+
+  function glostStopTimer() {
+    if (glostTimer !== null) { WIN.clearTimeout(glostTimer); glostTimer = null; }
+  }
+
+  /** @param {string} layer */
+  function glostLost(layer) {
+    glostGone[layer] = true;
+    // github#144 -- a layer going now is news; the wait starts again
+    glostStalled = false;
+    glostPaint();
+    glostStopTimer();
+    // github#144 -- escalates the wording only; the restore is what clears it
+    glostTimer = WIN.setTimeout(function () {
+      glostTimer = null;
+      if (!glostCount()) return;
+      glostStalled = true;
+      glostPaint();
+    }, GLOST_STALL_MS);
+  }
+
+  /** @param {string} layer */
+  function glostRestored(layer) {
+    delete glostGone[layer];
+    // github#144 -- one back is no promise about the rest; the wording holds
+    if (!glostCount()) { glostStopTimer(); glostStalled = false; }
+    glostPaint();
+  }
+
+  onDestroy.push(function () {
+    glostStopTimer();
+    glostGone = dict();
+    glostStalled = false;
+  });
+
   function makeRenderer() {
     renderer = new RendererCls(graph, $("graph"), {
       win: WIN,
@@ -5739,7 +6429,8 @@ function mountVaultGraph(root, data, deps) {
       nodeReducer: function (id, a) {
         var al = alpha[id] || 0;
         if (al <= 0.004) {
-          var h = /** @type {NodeDisplayData} */ (Object.assign({}, a));
+          // github#145 -- as nodeStyle()
+          var h = /** @type {NodeAttrs & Partial<NodeDisplayData>} */ (Object.assign({}, a));
           h.hidden = true;
           return h;
         }
@@ -5794,6 +6485,36 @@ function mountVaultGraph(root, data, deps) {
       }
     });
 
+    // github#120 -- see liveBusy(): the page has to know a drag is on
+    (function () {
+      var captor = renderer.getMouseCaptor && renderer.getMouseCaptor();
+      if (!captor) return;
+      // github#120 -- mirror the captor's own condition, not its events
+      captor.on("mousedown", function (e) {
+        var o = e && e.original;
+        // github#145 -- see bindNodeDrag()
+        if (o && "button" in o && o.button !== 0) return;
+        dragging = true; dragStartedAt = NOW();
+      });
+      captor.on("mouseup", function () { dragging = false; dragEndedAt = NOW(); });
+      // github#120 -- what actually catches a lost mouseup
+      captor.on("mousemovebody", function (e) {
+        if (!dragging) return;
+        var o = e && e.original;
+        if (o && "buttons" in o && !(o.buttons & 1)) { dragging = false; dragEndedAt = NOW(); }
+      });
+      // github#120 -- belt to that braces, for a release off-canvas
+      var onDocUp = function () {
+        if (!dragging) return;
+        dragging = false; dragEndedAt = NOW();
+      };
+      DOC.addEventListener("mouseup", onDocUp, true);
+      onDestroy.push(function () {
+        DOC.removeEventListener("mouseup", onDocUp, true);
+        dragging = false;
+      });
+    })();
+
     (function () {
       var cam = renderer.getCamera();
       var edgeRaf = 0;
@@ -5810,13 +6531,17 @@ function mountVaultGraph(root, data, deps) {
       });
     })();
 
+    // github#170, design/0013 -- the zoom is what arms pan here, so watch the camera
+    // github#173 -- the per-frame caller; off a phone there is nothing to ask
+    renderer.getCamera().on("updated", function () { if (!dead && phone()) syncPhonePan(); });
+
     /** @type {number | null} */
     var rzTimer = null;
     var onResize = function () {
       if (dead) return;
       if (rzTimer) WIN.clearTimeout(rzTimer);
       rzTimer = WIN.setTimeout(function () { rzTimer = null; refreshSizeScale(); placeLogo();
-                                             syncCanvasTop(); }, 120);
+                                             syncCanvasTop(); syncPhoneLayout(); }, 120);
     };
     if (window.ResizeObserver) {
       var rootRO = new ResizeObserver(onResize);
@@ -5836,6 +6561,10 @@ function mountVaultGraph(root, data, deps) {
       ovSync();
     });
 
+    // github#144 -- the engine says which layer went; the page says it out loud
+    renderer.on("contextLost", function (e) { glostLost(e.layer); });
+    renderer.on("contextRestored", function (e) { glostRestored(e.layer); });
+
     renderer.on("enterNode", function (e) {
       state.hovered = e.node;
       syncLazyEdges();
@@ -5848,14 +6577,25 @@ function mountVaultGraph(root, data, deps) {
     });
     // github#73, design/0013
     // github#82 -- only a sheet closes itself; a column does not
+    // github#170 -- and on a phone the panel is in the scroll flow
     renderer.on("clickStage", function () {
-      if (sheetOpen && narrow()) setSheet(false);
+      if (sheetOpen && narrow() && !phone()) setSheet(false);
       select(null);
     });
     renderer.on("rightClickNode", function (e) {
       if (e.event && e.event.original) e.event.original.preventDefault();
       togglePin(e.node);
     });
+    // github#165 -- the STAGE's right-click, never a node's
+    /** @param {RendererEvent} e */
+    var onRightClickStage = function (e) {
+      if (!devTools || !openDev) return;
+      var orig = e.event && e.event.original;
+      if (!orig || !("clientX" in orig)) return;
+      orig.preventDefault();
+      openDev(orig.clientX, orig.clientY);
+    };
+    renderer.on("rightClickStage", onRightClickStage);
     bindNodeDrag();
 
     // github#58
@@ -5974,9 +6714,103 @@ function mountVaultGraph(root, data, deps) {
     var pins = state.pinned.filter(function (id) { return graph.hasNode(id); });
     if (pins.length !== state.pinned.length) {
       state.pinned = pins;
-      if (savePinned) savePinned(pins.slice());
+      // github#143 -- the store is versioned; never hand the host raw ids
+      persistPins();
     }
   });
+
+  /* ------------------------------------------- github#131, design/0019 -- two readings */
+
+  var reading = "groups";
+  /** @type {Record<string, number>} */
+  var readScroll = { groups: 0, note: 0 };
+
+  /* github#131, design/0019, design/0013 */
+  function cardHome() {
+    var d = $("detail"), note = $("readnote"), canvas = $("canvas");
+    if (!d || !note || !canvas) return;
+    var want = narrow() ? canvas : note;
+    if (d.parentNode !== want) want.appendChild(d);
+  }
+
+  /** @param {string} which */
+  function setReading(which) {
+    var tabs = $("tabs"), tg = $("tabgroups"), tn = $("tabnote");
+    var pg = $("readgroups"), pn = $("readnote"), sb = $("sidebar");
+    // github#145 -- .disabled is a button's
+    if (!tabs || !tg || !tn || !pg || !pn) return;
+    var note = which === "note" && !!state.selected && !narrow();
+    var next = note ? "note" : "groups";
+    if (sb && next !== reading) readScroll[reading] = sb.scrollTop;
+    reading = next;
+    tg.setAttribute("aria-selected", note ? "false" : "true");
+    tn.setAttribute("aria-selected", note ? "true" : "false");
+    /** @type {HTMLButtonElement} */ (tn).disabled = !state.selected || narrow();
+    pg.hidden = note;
+    pn.hidden = !note;
+    if (sb) sb.scrollTop = readScroll[reading] || 0;
+  }
+
+  /* github#131, design/0019 */
+  // github#135 -- a MediaQueryList lives on the window; remove it
+  if (WIN.matchMedia) {
+    // github#175 -- the same query; one object, not two
+    var readMq = narrowMq;
+    var onReadMq = function () { cardHome(); setReading(reading); afterPanel(); };
+    if (readMq.addEventListener) {
+      readMq.addEventListener("change", onReadMq);
+      onDestroy.push(function () { readMq.removeEventListener("change", onReadMq); });
+    } else if (readMq.addListener) {
+      readMq.addListener(onReadMq);
+      onDestroy.push(function () { readMq.removeListener(onReadMq); });
+    }
+    // github#170, design/0013 -- the layout is live; a mount-time read of pan was not
+    // github#173, design/0013 -- nor of the band; and phoneMq is the one held at mount
+    if (phoneMq) {
+      if (phoneMq.addEventListener) {
+        phoneMq.addEventListener("change", syncPhoneLayout);
+        onDestroy.push(function () { phoneMq.removeEventListener("change", syncPhoneLayout); });
+      } else if (phoneMq.addListener) {
+        phoneMq.addListener(syncPhoneLayout);
+        onDestroy.push(function () { phoneMq.removeListener(syncPhoneLayout); });
+      }
+    }
+  }
+
+  // github#170, design/0013 -- a fitted disc has nowhere to pan to; a zoomed one does
+  function phonePanWanted() {
+    if (!phone()) return storedPan;
+    if (!renderer) return false;
+    return renderer.getCamera().getState().ratio < fitRatio() * 0.995;
+  }
+
+  // github#170, design/0013 -- setPan(false) flies home; only on a real change
+  function syncPhonePan() {
+    if (fitting) return;
+    var want = phonePanWanted();
+    if (want !== panEnabled) { setPan(want, false); return; }
+    // github#170 -- an interrupted flight can leave the setting off its flag
+    if (renderer && !!renderer.getSetting("enableCameraPanning") !== panEnabled) {
+      renderer.setSetting("enableCameraPanning", panEnabled);
+    }
+  }
+
+  // github#173, design/0013 -- bandOpen is the layout's call, and the layout is live
+  // github#173 -- only on a flip: setBand's own reflow is a resize
+  var bandPhone = phone();
+  function syncPhoneBand() {
+    var isPhone = phone();
+    if (isPhone === bandPhone) return;
+    bandPhone = isPhone;
+    var want = isPhone ? false : storedBand;
+    if (want !== bandOpen) setBand(want);
+  }
+
+  // github#173 -- the two the phone media query decides, on every path
+  function syncPhoneLayout() {
+    syncPhonePan();
+    syncPhoneBand();
+  }
 
   /** @param {string | null} id */
   function select(id) {
@@ -5984,14 +6818,16 @@ function mountVaultGraph(root, data, deps) {
     if (id) id = noteOf(id);
     // github#73, design/0013
     // github#82 -- same: only the phone's sheet gets out of the way
-    if (id && sheetOpen && narrow()) setSheet(false);
+    // github#170 -- a panel in the scroll flow is not in the way
+    if (id && sheetOpen && narrow() && !phone()) setSheet(false);
     // github#40, design/0012
     if (!trailHop && (!id || id !== state.selected)) trail.length = 0;
     trailHop = false;
     state.selected = id;
     syncLazyEdges();
     var d = $("detail");
-    if (!id) { d.hidden = true; renderer.refresh(); return; }
+    // github#131, design/0019
+    if (!id) { d.hidden = true; setReading("groups"); renderer.refresh(); return; }
 
     var a = graph.getNodeAttributes(id);
     var nb = neighboursOf(id).slice().sort(function (p, q) {
@@ -6007,7 +6843,10 @@ function mountVaultGraph(root, data, deps) {
         '<span><b style="color:' + colorOf(groupOf(id)) + '">&#9632;</b> ' + esc(groupOf(id)) + '</span>' +
         '<span>' + a.deg + ' link' + (a.deg === 1 ? "" : "s") + '</span>' +
         (a.words ? '<span>' + a.words + ' words</span>' : "") +
-        (a.created ? '<span>' + esc(a.created) + '</span>' : "") +
+        (a.created ? '<span title="added">' + esc(a.created) + '</span>' : "") +
+        // github#70
+        (a.touched && a.touched !== a.created
+          ? '<span title="last touched">&#8635; ' + esc(a.touched) + '</span>' : "") +
       '</div>' +
       // github#86 -- D-1: say which tag put the note where it is
       '<div>' + (a.tags || []).slice(0, 8).map(function (t, ti) {
@@ -6020,8 +6859,10 @@ function mountVaultGraph(root, data, deps) {
       '<div class="chip" style="border-style:dashed">' + esc(a.folder) +
         (a.sub ? ' / ' + esc(a.sub) : '') + ' / ' + esc(a.ntype) + '</div>' +
       '<div class="actions">' +
-        (a.ghost ? "" : '<a class="open" href="obsidian://open?vault=' + vault + '&file=' + file + '">Open in Obsidian</a>') +
-        '<button class="btn pin" data-pin="' + id + '" aria-pressed="' + isPinned(id) + '" title="' +
+        // github#131
+        (a.ghost ? "" : '<a class="open" title="Open in Obsidian" href="obsidian://open?vault=' +
+                        vault + '&file=' + file + '">Open</a>') +
+        '<button class="btn pin" data-pin="' + esc(id) + '" aria-pressed="' + isPinned(id) + '" title="' +
           (isPinned(id) ? "Unpin from hub" : "Pin to hub") + '">' + pinSvg(isPinned(id)) +
           ' Pin to hub</button>' +
       '</div>';
@@ -6029,7 +6870,7 @@ function mountVaultGraph(root, data, deps) {
     if (nb.length) {
       h += '<div class="nb">Linked notes (' + nb.length + ')</div><ul>' +
         nb.slice(0, 40).map(function (n) {
-          return '<li><button data-go="' + n + '">' +
+          return '<li><button data-go="' + esc(n) + '">' +
                  esc(graph.getNodeAttribute(n, "label")) +
                  ' <span style="color:var(--text-3)">' + graph.getNodeAttribute(n, "deg") + '</span></button></li>';
         }).join("") + '</ul>';
@@ -6042,14 +6883,17 @@ function mountVaultGraph(root, data, deps) {
     // github#40, design/0012
     d.setAttribute("role", "region");
     d.setAttribute("aria-label", a.label);
-    d.querySelector(".x").onclick = function () { select(null); };
-    d.querySelector(".pin").onclick = function () { togglePin(id); select(id); };
+    /** @type {HTMLElement} */ (d.querySelector(".x")).onclick = function () { select(null); };
+    /** @type {HTMLElement} */ (d.querySelector(".pin")).onclick = function () { togglePin(id); select(id); };
     Array.prototype.forEach.call(d.querySelectorAll("[data-go]"), /** @param {HTMLElement} b */ function (b) {
       b.onclick = function () { goTo(b.getAttribute("data-go")); };
     });
     Array.prototype.forEach.call(d.querySelectorAll("[data-tr]"), /** @param {HTMLElement} b */ function (b) {
       b.onclick = function () { trailBackTo(+b.getAttribute("data-tr")); };
     });
+    // github#131, design/0019
+    cardHome();
+    setReading("note");
     renderer.refresh();
   }
 
@@ -6402,7 +7246,7 @@ function mountVaultGraph(root, data, deps) {
         var subs = subOrder[g];
         /**
          * @param {string} col @param {string} nm @param {number} ct
-         * @param {string[]} idx  subfolder indexes this row stands for
+         * @param {number[]} idx  github#145 -- numbers at all three call sites
          * @param {number} depth @param {string | null} twAttrs @param {boolean} twOpen
          */
         var srow = function (col, nm, ct, idx, depth, twAttrs, twOpen) {
@@ -6436,8 +7280,9 @@ function mountVaultGraph(root, data, deps) {
           var n = 0;
           tail.forEach(function (sb) { n += subCount[g + "/" + sb] || 0; });
           var tOpen = !!state.tailOpen[identOf(g)];
+          // github#71, decisions/0015 -- "smaller" holds only while the order is size
           row += srow(subShade[g + "/" + tail[0]] || colorOf(g),
-                      tail.length + " smaller subfolders", n,
+                      tail.length + (specOrders() ? " other subfolders" : " smaller subfolders"), n,
                       tail.map(function (_, j) { return SUB_NAMED + j; }), 1,
                       'data-twtail="' + esc(g) + '"', tOpen);
           if (tOpen) {
@@ -6732,7 +7577,7 @@ function mountVaultGraph(root, data, deps) {
    * @param {Record<string, boolean> | null} [bandHint]   group -> inner, to seed the lock with
    * @param {boolean} [keepAlpha]
    */
-  // github#86, decisions/0011 -- the lock derivation on its own, so ringsIn
+  // github#86, decisions/0011-a-live-rebuild-retakes-the-geometry-lock-at-rest
   // github#86 -- can take it in the dimension the rings belong to
   /** @param {Record<string, boolean>} [bandHint] @returns {Plan | null} */
   function takeGeom(bandHint) {
@@ -6763,7 +7608,7 @@ function mountVaultGraph(root, data, deps) {
     return base;
   }
 
-  // github#72, github#86, decisions/0011 -- a switched-to disc sits inside rings borrowed from
+  // github#72, github#86, decisions/0011-a-live-rebuild-retakes-the-geometry-lock-at-rest
   // github#86 -- another dimension; a live rebuild retakes THOSE, from that
   // github#86 -- dimension's own plan, so the step stays sub-pixel
   /** @param {"folder" | "tag"} dim @returns {GeomLock | null} */
@@ -6804,7 +7649,7 @@ function mountVaultGraph(root, data, deps) {
    * @param {boolean} animate
    * @param {boolean} [deferLayout]
    * @param {boolean} [freshGeom]  take a NEW geometry lock instead of holding the old one
-   *                               (github#72/decisions/0011, the live rebuild)
+   *                               (github#72, decisions/0011-a-live-rebuild-retakes-the-geometry-lock-at-rest)
    */
   function hardRelayout(animate, deferLayout, freshGeom) {
     stopPlay();
@@ -6823,7 +7668,7 @@ function mountVaultGraph(root, data, deps) {
     bandLock = null; geomLock = null;
     if (deferLayout && prevBand) {
       regroup(true, prevBand, true);
-      // github#49; github#72, decisions/0011; github#76
+      // github#49; github#72, decisions/0011-a-live-rebuild-retakes-the-geometry-lock-at-rest; github#76
       if (prevGeom && !freshGeom) geomLock = prevGeom;
       return;
     }
@@ -6857,7 +7702,7 @@ function mountVaultGraph(root, data, deps) {
       });
       found.sort(function (p, o) { return graph.getNodeAttribute(o, "deg") - graph.getNodeAttribute(p, "deg"); });
       setHTML(hits, found.slice(0, 40).map(function (id) {
-        return '<button data-hit="' + id + '">' + esc(graph.getNodeAttribute(id, "label")) +
+        return '<button data-hit="' + esc(id) + '">' + esc(graph.getNodeAttribute(id, "label")) +
                ' <span style="color:var(--text-3)">' + graph.getNodeAttribute(id, "deg") + '</span></button>';
       }).join("") || '<div style="color:var(--text-3);font-size:11px;padding:4px">No match</div>');
       Array.prototype.forEach.call(hits.querySelectorAll("[data-hit]"), /** @param {HTMLElement} b */ function (b) {
@@ -7014,13 +7859,20 @@ function mountVaultGraph(root, data, deps) {
     state.pathOpen = dict();
     state.markDay = null;
     state.hoverDay = null;
+    // github#70, decisions/0009
+    setRecent(null);
+    recentT = 0;
+    recentDim = recentSet;
     state.until = null;
     state.query = "";
     state.hovered = null;
     select(null);
     hideTip();
-    $("q").value = "";    $("hits").replaceChildren();
+    /** @type {HTMLInputElement} */ ($("q")).value = "";    $("hits").replaceChildren();
     state.from = null; state.to = null; state.heatEnd = null;
+    // github#70 -- through setHeatSource, so the tally is rebuilt with it
+    setHeatSource("created");
+    syncRecentUI();
     rangeChrome();
     buildLegend();
   }
@@ -7063,6 +7915,12 @@ function mountVaultGraph(root, data, deps) {
     });
     syncDimUI();
 
+    // github#131, design/0019 -- the two readings
+    if ($("tabgroups")) $("tabgroups").onclick = function () { setReading("groups"); };
+    if ($("tabnote")) $("tabnote").onclick = function () { setReading("note"); };
+    cardHome();
+    setReading("groups");
+
     $("allon").onclick = function () {
       seedHidden();
       state.hiddenSub = dict();
@@ -7089,7 +7947,8 @@ function mountVaultGraph(root, data, deps) {
     if ($("reset")) $("reset").onclick = fit;
     if ($("zin")) $("zin").onclick = function () { zoomBy(1); };
     if ($("zout")) $("zout").onclick = function () { zoomBy(-1); };
-    if ($("pan")) $("pan").onclick = function () { setPan(!panEnabled, true); };
+    // github#170 -- storedPan follows every deliberate choice
+    if ($("pan")) $("pan").onclick = function () { storedPan = !panEnabled; setPan(storedPan, true); };
     // github#79
     if ($("ov")) $("ov").onclick = fit;
     setPan(panEnabled, false);
@@ -7102,6 +7961,8 @@ function mountVaultGraph(root, data, deps) {
     if ($("band")) $("band").onclick = function () { setBand(!bandOpen); };
     setSheet(sheetOpen, true);
     setBand(bandOpen, true);
+    // github#151 -- the third root flag, written at mount like the two above
+    ROOT.setAttribute("data-ov", ovOn ? "on" : "off");
     $("png").onclick = savePng;
     if ($("dbg")) $("dbg").onclick = function () {
       var txt = JSON.stringify(API.debugDump(), null, 2);
@@ -7185,6 +8046,13 @@ function mountVaultGraph(root, data, deps) {
         var row = OPTION_ROWS.filter(function (o) { return o.key === key; })[0];
         if (row) { row.set(!row.get()); buildOptions(); }
       });
+      // github#71
+      $("optbody").addEventListener("click", function (ev) {
+        var t = ev.target instanceof Element ? ev.target : null;
+        var b = t && t.closest("[data-fo]");
+        if (!b) return;
+        setFolderOrder(b.getAttribute("data-fo") || "name", true);
+      });
     }
 
     function closeCtxMenu() {
@@ -7195,6 +8063,9 @@ function mountVaultGraph(root, data, deps) {
       WIN.removeEventListener("resize", closeCtxMenu);
     }
     onDestroy.push(closeCtxMenu);
+    // github#165
+    closeMenus = closeCtxMenu;
+    openDev = openDevMenu;
     /** @param {MouseEvent} ev */
     function ctxOutside(ev) {
       var el = $("ctxmenu");
@@ -7286,18 +8157,26 @@ function mountVaultGraph(root, data, deps) {
         b.onclick = function () { onPick(b.getAttribute("data-key") || null); closeCtxMenu(); };
       });
       if (onToggleVisible) {
-        el.querySelector("[data-vis]").onclick = function () { onToggleVisible(); closeCtxMenu(); };
+        /** @type {HTMLElement} */ (el.querySelector("[data-vis]")).onclick = function () { onToggleVisible(); closeCtxMenu(); };
       }
       if (onToggleByFolder) {
-        el.querySelector("[data-byfolder]").onclick = function () { onToggleByFolder(); closeCtxMenu(); };
+        /** @type {HTMLElement} */ (el.querySelector("[data-byfolder]")).onclick = function () { onToggleByFolder(); closeCtxMenu(); };
       }
       if (onToggleTint) {
-        el.querySelector("[data-tint]").onclick = function () { onToggleTint(); closeCtxMenu(); };
+        /** @type {HTMLElement} */ (el.querySelector("[data-tint]")).onclick = function () { onToggleTint(); closeCtxMenu(); };
       }
       // github#76
       if (onDrill) {
-        el.querySelector("[data-drill]").onclick = function () { onDrill(); closeCtxMenu(); };
+        /** @type {HTMLElement} */ (el.querySelector("[data-drill]")).onclick = function () { onDrill(); closeCtxMenu(); };
       }
+      showCtxMenu(el, x, y);
+    }
+
+    /**
+     * github#165 -- shared by both menus; all they have in common
+     * @param {HTMLElement} el @param {number} x @param {number} y
+     */
+    function showCtxMenu(el, x, y) {
       el.hidden = false;
       var root0 = ROOT.getBoundingClientRect();
       var rx = x - root0.left, ry = y - root0.top;
@@ -7307,6 +8186,46 @@ function mountVaultGraph(root, data, deps) {
       DOC.addEventListener("mousedown", ctxOutside, true);
       DOC.addEventListener("keydown", ctxKey, true);
       WIN.addEventListener("resize", closeCtxMenu);
+    }
+
+    // github#165 -- multiples of the default, never durations of their own
+    var SPEED_ROW = [
+      { by: 1, label: "Normal", title: "The speed the disc animates at unless ?slow= says otherwise" },
+      { by: 2, label: "2x",     title: "Half speed -- every cascade, tween and timeline sweep takes twice as long" },
+      { by: 4, label: "4x",     title: "Quarter speed" },
+      { by: 8, label: "8x",     title: "An eighth of speed -- slow enough to read a single dot's arrival" }
+    ];
+    /** @param {number} by */
+    function slowOf(by) { return TIME_SCALE_DEFAULT * by; }
+
+    /**
+     * github#165 -- deliberately not openCtxMenu
+     * @param {number} x @param {number} y
+     */
+    function openDevMenu(x, y) {
+      var el = $("ctxmenu");
+      if (!el) return;
+      var gridOn = !!DBG.on;
+      setHTML(el,
+        '<button class="vis" data-grid aria-pressed="' + gridOn + '" title="' +
+        esc("Draw the wedge lattice and the locked rings over the disc") + '">' +
+        dotSvg(gridOn) + '<span>Wedge grid</span></button>' +
+        '<div class="row devrow"><div class="lbl">Slow motion</div>' +
+        // github#165 -- menuitemradio: a menu may not hold a radiogroup
+        '<div class="mini" role="group" aria-label="Slow motion">' +
+        SPEED_ROW.map(function (o) {
+          return '<button data-speed="' + o.by + '" role="menuitemradio" aria-checked="' +
+                 (TIME_SCALE === slowOf(o.by)) + '" title="' + esc(o.title) + '">' +
+                 esc(o.label) + '</button>';
+        }).join("") + '</div></div>');
+      /** @type {HTMLElement} */ (el.querySelector("[data-grid]")).onclick = function () {
+        wedgeDebug(!DBG.on); closeCtxMenu();
+      };
+      Array.prototype.forEach.call(el.querySelectorAll("[data-speed]"),
+        /** @param {HTMLElement} b */ function (b) {
+          b.onclick = function () { setTimeScale(slowOf(+b.getAttribute("data-speed"))); closeCtxMenu(); };
+        });
+      showCtxMenu(el, x, y);
     }
 
     $("legend").addEventListener("contextmenu", function (ev) {
@@ -7498,12 +8417,45 @@ function mountVaultGraph(root, data, deps) {
       { key: "countBars", label: "Count bars in the legend",
         title: "Draw a short rule along the bottom of each folder row, in that folder's own colour, scaled so the largest folder currently shown fills its row -- the count alone makes 406 notes and 1 note look the same",
         get: function () { return countBars; },
-        set: function (v) { setCountBars(v, true); } }
+        set: function (v) { setCountBars(v, true); } },
+      // github#164
+      { key: "rootInOrder", label: "Vault root sorts with the folders",
+        title: "Let (vault root) take the place its own notes sort to, in among the folders, instead of sitting at the front. It sorts as its first note does, which is where the file explorer starts showing them. The archives keep the front, and (untagged) and (unlinked) stay at the end",
+        get: function () { return rootInOrder; },
+        set: function (v) { setRootInOrder(v === true, true); } },
+      // github#165
+      { key: "devTools", label: "Developer debug",
+        title: "Right-click the disc for a developer menu: draw the wedge lattice over it, and slow every animation down so a cascade can be read a dot at a time. Off by default, and while it is off the disc's right-click does nothing",
+        get: function () { return devTools; },
+        set: function (v) { setDevTools(v === true, true); } }
     ];
+    // github#71 -- the first non-boolean setting; keys must match FOLDER_ORDERS
+    var FOLDER_ORDER_ROW = [
+      { key: "name", label: "Name",
+        title: "Folders run in their own name order, numbers read as numbers -- the disc's original order" },
+      { key: "explorer", label: "File explorer",
+        title: "Follow a Custom File Explorer sorting sortspec: pinned names first, then order-asc/order-desc a-z, by the plugin's own precedence. Only the sections aimed at the vault root and at a top-level folder can reach the disc, which has two levels" },
+      { key: "size", label: "Size",
+        title: "Biggest folder first. Sub-wedges are already size-ordered, so this changes the wedges only" }
+    ];
+    function folderOrderHTML() {
+      var note = folderOrderNote();
+      return '<div id="vg-fonote" class="lbl" style="margin:2px 0 0;opacity:.7"' +
+             (note ? "" : " hidden") + '>' + esc(note) + '</div>';
+    }
     function buildOptions() {
       var host = $("optbody");
       if (!host) return;
-      setHTML(host, OPTION_ROWS.map(function (o) {
+      var seg = '<div class="row" style="margin-bottom:7px">' +
+                '<div class="lbl" style="margin:0">Folder order</div>' +
+                '<div class="mini" role="radiogroup" aria-label="Folder order">' +
+                FOLDER_ORDER_ROW.map(function (o) {
+                  return '<button id="vg-fo-' + o.key + '" data-fo="' + o.key + '" role="radio"' +
+                         ' aria-checked="' + (folderOrder === o.key) + '"' +
+                         ' title="' + esc(o.title) + '">' + esc(o.label) + '</button>';
+                }).join("") +
+                '</div></div>' + folderOrderHTML();
+      setHTML(host, seg + OPTION_ROWS.map(function (o) {
         var on = !!o.get();
         return '<div class="row" style="margin-bottom:7px">' +
                '<div class="lbl" style="margin:0">' + esc(o.label) + '</div>' +
@@ -7601,19 +8553,34 @@ function mountVaultGraph(root, data, deps) {
     return FIT_RATIO * k;
   }
 
+  // github#175, design/0013 -- the state fit() would fly to
+  function fitTarget() {
+    return { x: 0.5, y: 0.5, ratio: fitRatio(), angle: 0 };
+  }
+
+  // github#175, design/0013 -- and whether the camera is in it
+  // github#175 -- a redundant flight re-armed panning for claimsTouch
+  function atFit() {
+    if (!renderer) return false;
+    var to = fitTarget(), st = renderer.getCamera().getState();
+    // github#175 -- the same 0.5% band phonePanWanted() reads
+    return Math.abs(st.ratio - to.ratio) <= to.ratio * 0.005
+        && Math.abs(st.x - to.x) <= 1e-3
+        && Math.abs(st.y - to.y) <= 1e-3
+        && Math.abs((st.angle || 0) - to.angle) <= 1e-3;
+  }
+
   function fit() {
-    var to = { x: 0.5, y: 0.5, ratio: fitRatio(), angle: 0 };
+    var to = fitTarget();
     fitting = true;
-    var landed = function () { fitting = false; camAtRest = true; };
-    // github#4
-    if (!panEnabled) {
-      renderer.setSetting("enableCameraPanning", true);
-      renderer.getCamera().animate(to, { duration: 380 }, function () {
-        renderer.setSetting("enableCameraPanning", false);
-        landed();
-      });
-      return;
-    }
+    // github#170, design/0013 -- restore what pan is NOW, and re-ask once landed
+    var landed = function () {
+      fitting = false; camAtRest = true;
+      renderer.setSetting("enableCameraPanning", panEnabled);
+      syncPhonePan();
+    };
+    // github#4 -- the flight needs panning on whatever the toggle says
+    if (!panEnabled) renderer.setSetting("enableCameraPanning", true);
     renderer.getCamera().animate(to, { duration: 380 }, landed);
   }
 
@@ -7933,7 +8900,14 @@ function mountVaultGraph(root, data, deps) {
     syncCanvasTop();
     if (quiet) return;
     afterPanel();
-    if (onBandOpen) onBandOpen(bandOpen);
+    // github#170, design/0013 -- a phone never writes over a desk's stored choice
+    // github#173 -- storedBand follows every deliberate one, as storedPan does
+    if (!phone()) {
+      // github#175, design/0013 -- a flip re-assigned it to itself
+      var moved = storedBand !== bandOpen;
+      storedBand = bandOpen;
+      if (moved && onBandOpen) onBandOpen(bandOpen);
+    }
   }
 
   function setPan(on, persist) {
@@ -7942,7 +8916,13 @@ function mountVaultGraph(root, data, deps) {
     if (btn) btn.setAttribute("aria-pressed", panEnabled ? "true" : "false");
     if (renderer) {
       if (panEnabled) renderer.setSetting("enableCameraPanning", true);
-      else fit();
+      // github#175, design/0013 -- a disc home needs no flight
+      // github#175 -- the flight is what claimsTouch read as armed
+      else if (atFit()) {
+        renderer.setSetting("enableCameraPanning", false);
+        // github#175 -- what a landed flight sets, and what atFit() just read
+        camAtRest = true;
+      } else fit();
     }
     if (persist && onPanEnabled) onPanEnabled(panEnabled);
     return panEnabled;
@@ -7958,6 +8938,42 @@ function mountVaultGraph(root, data, deps) {
     if (dateSpan) drawDateUI();
     if (persist && onCompactAxis) onCompactAxis(compactAxis);
     return compactAxis;
+  }
+
+  // github#172 -- the spec's own notice, and nothing while it is not read
+  function folderOrderNote() {
+    if (folderOrder !== "explorer") return "";
+    var note = sortSpec.ok
+      ? (sortSpec.sections.length ? "" : "no sortspec found in this vault")
+      : "the sortspec could not be read -- showing name order";
+    var skips = sortSpec.skipped.length;
+    return [note, skips ? skips + " line(s) skipped" : ""].filter(Boolean).join("; ");
+  }
+
+  // github#71
+  /** @param {string} v @param {boolean} [persist] @param {boolean} [instant] */
+  function setFolderOrder(v, persist, instant) {
+    var next = FOLDER_ORDERS.indexOf(v) >= 0 ? /** @type {"name" | "explorer" | "size"} */ (v) : "name";
+    if (next === folderOrder) return folderOrder;
+    folderOrder = next;
+    // github#71 -- D-2: rebuild the sub order before anything reads subOrder
+    buildSubOrder();
+    FOLDER_ORDERS.forEach(function (k) {
+      var btn = $("fo-" + k);
+      if (btn) btn.setAttribute("aria-checked", k === folderOrder ? "true" : "false");
+    });
+    // github#172 -- the note follows the mode, not the panel
+    var fonote = $("fonote");
+    if (fonote) {
+      var noteText = folderOrderNote();
+      fonote.textContent = noteText;
+      fonote.hidden = !noteText;
+    }
+    // github#71, design/0001 -- a real relayout; `instant` is for the suite
+    hardRelayout(!instant);
+    attempt(placeLogo); attempt(heatBuild); attempt(buildLegend);
+    if (persist && onFolderOrder) onFolderOrder(folderOrder);
+    return folderOrder;
   }
 
   /**
@@ -8203,6 +9219,21 @@ function mountVaultGraph(root, data, deps) {
     if (barNow) paintBars(barNow);
   }
 
+  // github#164
+  /** @param {boolean} on @param {boolean} [persist] @param {boolean} [instant] */
+  function setRootInOrder(on, persist, instant) {
+    var next = !!on;
+    if (next === rootInOrder) return rootInOrder;
+    rootInOrder = next;
+    var btn = $("opt-rootInOrder");
+    if (btn) btn.setAttribute("aria-pressed", rootInOrder ? "true" : "false");
+    // github#164 -- a relayout, not a repaint; `instant` is for the suite
+    hardRelayout(!instant);
+    attempt(placeLogo); attempt(heatBuild); attempt(buildLegend);
+    if (persist && onRootInOrder) onRootInOrder(rootInOrder);
+    return rootInOrder;
+  }
+
   // github#78, design/0006
   function setCountBars(on, persist) {
     countBars = !!on;
@@ -8314,7 +9345,28 @@ function mountVaultGraph(root, data, deps) {
     return state.root;
   }
 
+  /**
+   * github#165 -- off closes the menu, not just hides the feature
+   * @param {boolean} on @param {boolean} [persist]
+   */
+  function setDevTools(on, persist) {
+    devTools = !!on;
+    var btn = $("opt-devTools");
+    if (btn) btn.setAttribute("aria-pressed", devTools ? "true" : "false");
+    if (!devTools && closeMenus) closeMenus();
+    if (persist && onDevTools) onDevTools(devTools);
+    return devTools;
+  }
+
+  /**
+   * github#165 -- the clock needs a name; wedgeDebug is already one
+   * @param {number} v
+   */
+  function setTimeScale(v) { TIME_SCALE = +v > 0 ? +v : 1; return TIME_SCALE; }
+
   function savePng() {
+    // github#142
+    renderer.render();
     var canvases = renderer.getCanvases();
     var src = canvases.nodes;
     var out = DOC.createElement("canvas");
@@ -8424,6 +9476,8 @@ function mountVaultGraph(root, data, deps) {
   var HEAT_MONTH_H = 12;
   var HEAT_ARROW_W = 9;
   var HEAT_EMPTY_A = 0.5;
+  // github#70 -- all three measured on the three fixtures, see invariants.md.
+  var BULK_MIN = 25, BULK_X = 20, BULK_SHARE = 0.15;
   var DAY_MS = 86400000, WEEK_MS = 7 * DAY_MS;
   var MONTH_ABBR = ["Jan", "Feb", "Mar", "Apr", "May", "Jun",
                     "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
@@ -8437,6 +9491,8 @@ function mountVaultGraph(root, data, deps) {
    * @property {string[]} ids
    * @property {{ c: string, w: number }[]} parts   colour and weight per note drawn in the tile
    * @property {number} n        weighted count currently on screen
+   * @property {boolean} [bulk]  github#70 -- too big to be a day's work; see heatBuild
+   * @property {number} [bulkX]  how many times the median day this one is
    * @typedef {Object} Heat
    * @property {number} cols
    * @property {number} cell
@@ -8449,6 +9505,8 @@ function mountVaultGraph(root, data, deps) {
    * @property {number} before
    * @property {number} after
    * @property {number} undated
+   * @property {number} median    the median non-zero day, the bulk rule's yardstick
+   * @property {number} bulkDays
    * @property {number} dated
    * @property {number} w
    * @property {number} h
@@ -8491,7 +9549,9 @@ function mountVaultGraph(root, data, deps) {
   }
 
   function heatBuild() {
-    var wrap = $("heatwrap"), cv = $("heatc");
+    // github#70 -- a rebuilt tally is a new set of matches for the chips too
+    recentCache = dict();
+    var wrap = $("heatwrap"), cv = /** @type {HTMLCanvasElement} */ ($("heatc"));
     if (!wrap || !cv) return;
 
     var g = heatGeom();
@@ -8521,7 +9581,7 @@ function mountVaultGraph(root, data, deps) {
       // github#86 -- note's arriving dot: its weight and colour cross-fade
       // github#86 -- the note's day from the colour it had to the colour it gets
       if (a.dupOf && !a.standIn) return;
-      var k = a.created;
+      var k = heatDateOf(a);
       if (!heatParse(k)) { undated++; return; }
       all[k] = (all[k] || 0) + 1;
       var d = days[k];
@@ -8546,9 +9606,29 @@ function mountVaultGraph(root, data, deps) {
       if (wn > nMax) nMax = wn;
     }
 
+    /**
+     * github#70
+     *
+     *
+     *
+     */
+    var median = counts.length ? counts[Math.floor(counts.length / 2)] : 0;
+    var datedTotal = 0;
+    for (var t2 = 0; t2 < counts.length; t2++) datedTotal += counts[t2];
+    var bulkDays = 0;
+    for (var b = 0; b < keys.length; b++) {
+      var bd = days[keys[b]], bn = bd.ids.length;
+      bd.bulk = bn >= BULK_MIN &&
+        ((median > 0 && bn >= BULK_X * median) ||
+         (datedTotal > 0 && bn >= BULK_SHARE * datedTotal));
+      bd.bulkX = median > 0 ? Math.round(bn / median) : 0;
+      if (bd.bulk) bulkDays++;
+    }
+
     heat = {
       cols: cols, cell: cell, pitch: pitch, start: start, days: days, keys: keys,
       cuts: cuts, nMax: nMax, before: before, after: after, undated: undated,
+      median: median, bulkDays: bulkDays,
       dated: counts.length,
       w: HEAT_GUTTER + cols * pitch - HEAT_GAP + HEAT_ARROW_W,
       h: HEAT_MONTH_H + 7 * pitch - HEAT_GAP
@@ -8580,7 +9660,9 @@ function mountVaultGraph(root, data, deps) {
       (graph.order - standIns.length) + " notes" +
       (before ? " · " + before + " earlier" : "") +
       (after ? " · " + after + " later" : "") +
-      (undated ? " · " + undated + " undated" : "");
+      (undated ? " · " + undated + " undated" : "") +
+      // github#70
+      (bulkDays ? " · " + bulkDays + " bulk day" + (bulkDays === 1 ? "" : "s") : "");
 
     heatSig = "";
     heatDraw();
@@ -8642,12 +9724,14 @@ function mountVaultGraph(root, data, deps) {
     for (var i = 0; i < heat.keys.length; i++) {
       sig.push(Math.ceil(heat.days[heat.keys[i]].n * 4));
     }
-    sig.push(state.markDay || "", state.hoverDay || "", heat.cell);
+    sig.push(state.markDay || "", state.hoverDay || "", heat.cell, state.heatSource);
     // github#86 -- while a switch runs the colours move under a steady count
     if (standIns.length) sig.push("s" + lastCascade.frames);
-    sig = sig.join(",");
-    if (sig === heatSig) return;
-    heatSig = sig;
+    // github#145 -- the joined signature is its own binding
+    var sigKey = sig.join(",");
+    if (sigKey === heatSig) return;
+    heatSig = sigKey;
+    syncRecentUI();
 
     var dpr = window.devicePixelRatio || 1;
     var ctx = /** @type {CanvasRenderingContext2D} */ (cv.getContext("2d"));
@@ -8733,44 +9817,6 @@ function mountVaultGraph(root, data, deps) {
       }
     }
 
-    heatDrawKey(cell, R);
-  }
-
-  /** @param {number} cell @param {number} R corner radius */
-  function heatDrawKey(cell, R) {
-    var cv = /** @type {HTMLCanvasElement} */ ($("heatkey"));
-    if (!cv || !cv.getContext) return;
-    /** @type {number[]} */
-    var anchors = [];
-    heat.cuts.concat([heat.nMax]).forEach(function (a) {
-      if (anchors.indexOf(a) < 0) anchors.push(a);
-    });
-    var pitch = cell + 4;
-    var dpr = window.devicePixelRatio || 1;
-    var w = anchors.length * pitch - 4;
-    if (cv.width !== Math.round(w * dpr) || cv.height !== Math.round(cell * dpr)) {
-      cv.width = Math.round(w * dpr);
-      cv.height = Math.round(cell * dpr);
-      cv.style.width = w + "px";
-      cv.style.height = cell + "px";
-    }
-    var ctx = /** @type {CanvasRenderingContext2D} */ (cv.getContext("2d"));
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    ctx.clearRect(0, 0, w, cell);
-    var greys = [THEME.neutrals[0], THEME.neutrals[2]];
-    for (var i = 0; i < anchors.length; i++) {
-      /** @type {{ c: string, w: number }[]} */
-      var parts = [];
-      for (var j = 0; j < anchors[i]; j++) parts.push({ c: greys[j % 2], w: 1 });
-      ctx.save();
-      heatRect(ctx, i * pitch, 0, cell, cell, R);
-      ctx.clip();
-      heatTile(ctx, i * pitch, 0, cell, parts);
-      ctx.restore();
-    }
-    cv.title = anchors.map(function (a) {
-      return a + (a === 1 ? " note" : " notes");
-    }).join("  ·  ");
   }
 
   /**
@@ -8813,13 +9859,18 @@ function mountVaultGraph(root, data, deps) {
     }
     var top = Object.keys(by).sort(function (a, b) { return by[b] - by[a]; }).slice(0, 3);
     var wd = HEAT_WD[(new Date(d.ms).getUTCDay() + 6) % 7];
+    // github#70
+    var verb = state.heatSource === "touched" ? "touched" : "added";
     setHTML(t, '<div class="t">' + esc(d.key) + " · " + wd +
       (d.key === TODAY ? " · today" : "") + "</div>" +
       '<div class="m">' +
-      (n ? n + " note" + (n === 1 ? "" : "s") + " added" : "nothing added") +
+      (n ? n + " note" + (n === 1 ? "" : "s") + " " + verb : "nothing " + verb) +
       (top.length ? "<br>" + top.map(function (g2) {
         return '<b style="color:' + colorOf(g2) + '">■ </b> ' + esc(g2) + " " + by[g2];
       }).join("<br>") : "") +
+      (d.bulk ? "<br><i>" + (d.bulkX > 1 ? d.bulkX + "&times; the typical day here. " : "") +
+                "A sync, an import or a rename does this &mdash; it is not " +
+                "necessarily work.</i>" : "") +
       (n ? "<br><i>click to mark them on the disc</i>" : "") +
       "</div>");
     t.hidden = false;
@@ -8832,8 +9883,129 @@ function mountVaultGraph(root, data, deps) {
     t.style.top = (above >= 2 ? above : cy + heat.cell + 8) + "px";
   }
 
+  /** @type {Record<string, { key: string, ids: string[], days: string[] }>} */
+  var recentCache = dict();
+  /**
+   * github#70
+   * @param {string} kind
+   */
+  function recentCount(kind) {
+    var win = recentWindow(kind, state.recent === kind && recentRef !== null
+      ? recentRef : undefined);
+    if (!win) return { n: 0, bulk: 0, win: null };
+    // github#70 -- the walk once per window, the alpha pass per call
+    var key = state.heatSource + "|" + win.lo + "|" + win.hi;
+    var c = recentCache[kind];
+    if (!c || c.key !== key) {
+      c = recentCache[kind] = { key: key, ids: [], days: [] };
+      graph.forEachNode(function (id, a) {
+        if (!inRecent(win, a)) return;
+        c.ids.push(id); c.days.push(heatDateOf(a));
+      });
+    }
+    var n = 0, bulk = 0;
+    for (var i = 0; i < c.ids.length; i++) {
+      if ((alpha[c.ids[i]] || 0) <= 0.004) continue;
+      n++;
+      // github#70
+      var d = heat ? heat.days[c.days[i]] : null;
+      if (d && d.bulk) bulk++;
+    }
+    return { n: n, bulk: bulk, win: win };
+  }
+
+  /**
+   * github#70
+   */
+  function syncRecentUI() {
+    var box = $("recent");
+    if (!box) return;
+    var src = $("heatsrc");
+    if (src) {
+      /** @type {Record<string, string>} */
+      var TITLES = {
+        created: "Count each note on the day it was ADDED. The band's default, and the date " +
+                 "the timeline and the date range use.",
+        touched: "Count each note on the day it was last TOUCHED -- the file's own timestamp. " +
+                 "A sync, an import or a rename rewrites that in bulk, so a big day here is " +
+                 "not always work; the band says so when it sees one."
+      };
+      var btns = src.querySelectorAll("button[data-src]");
+      for (var b = 0; b < btns.length; b++) {
+        var sb = /** @type {HTMLButtonElement} */ (btns[b]);
+        var key = sb.getAttribute("data-src") || "";
+        sb.setAttribute("aria-pressed", key === state.heatSource ? "true" : "false");
+        sb.title = TITLES[key] || "";
+      }
+    }
+    var chips = box.querySelectorAll("button[data-kind]");
+    for (var i = 0; i < chips.length; i++) {
+      var btn = /** @type {HTMLButtonElement} */ (chips[i]);
+      var kind = btn.getAttribute("data-kind") || "";
+      var c = recentCount(kind);
+      var on = state.recent === kind;
+      btn.setAttribute("aria-pressed", on ? "true" : "false");
+      // github#70
+      btn.disabled = c.n === 0 && !on;
+      var cnt = btn.querySelector(".n");
+      if (cnt && cnt.textContent !== String(c.n)) cnt.textContent = String(c.n);
+      btn.title = c.win
+        ? c.n + " note" + (c.n === 1 ? "" : "s") + " " + c.win.label +
+          (c.bulk ? " · " + c.bulk + " of them on a bulk day, so probably a sync or a rename" : "") +
+          (c.n ? "" : " · nothing here yet")
+        : "";
+    }
+  }
+
+  function buildRecentUI() {
+    var box = $("recent");
+    if (!box) return;
+    // github#70
+    box.style.setProperty("--vg-count-ch", String(graph.order).length + "ch");
+    // github#70, decisions/0009 -- the third chip exists only where a host can answer it.
+    var kinds = [
+      { kind: "today", label: "Today" },
+      // github#70
+      { kind: "week", label: "Last 7" }
+    ];
+    if (lastOpen !== null) kinds.push({ kind: "open", label: "Since last open" });
+
+    kinds.forEach(function (k) {
+      var b = DOC.createElement("button");
+      b.type = "button";
+      b.className = "btn chip";
+      b.setAttribute("data-kind", k.kind);
+      b.setAttribute("aria-pressed", "false");
+      var t = DOC.createElement("span");
+      t.textContent = k.label;
+      var n = DOC.createElement("span");
+      n.className = "n";
+      b.appendChild(t);
+      b.appendChild(n);
+      b.addEventListener("click", function () {
+        // github#70
+        setRecent(state.recent === k.kind ? null : k.kind);
+        syncRecentUI();
+        hlSync();
+        renderer.refresh();
+      });
+      box.appendChild(b);
+    });
+    syncRecentUI();
+  }
+
   function buildHeatmapUI() {
     var cv = /** @type {HTMLCanvasElement} */ ($("heatc"));
+    var srcBox = $("heatsrc");
+    if (srcBox) {
+      // github#70
+      srcBox.addEventListener("click", function (ev) {
+        var t = /** @type {HTMLElement} */ (ev.target);
+        var btn = t && t.closest ? t.closest("button[data-src]") : null;
+        if (btn) setHeatSource(btn.getAttribute("data-src") || "created");
+      });
+    }
+    buildRecentUI();
     /** @param {string | null} key */
     var setHover = function (key) {
       if (state.hoverDay === key) return;
@@ -8927,6 +10099,7 @@ function mountVaultGraph(root, data, deps) {
    * @property {number} [to0]
    * @property {number} [pFrom]
    * @property {number} [pTo]
+   * @property {number} [winEnd0]  github#145 -- the window end at drag start
    */
   /** @type {BrushDrag | null} */
   var brushDrag = null;
@@ -8961,20 +10134,62 @@ function mountVaultGraph(root, data, deps) {
         ca.getUTCMonth() === 0 && ca.getUTCDate() === 1 &&
         (cb.getUTCMonth() === 11 && cb.getUTCDate() === 31 ||
          ct >= dateSpan.hi)) cur = ca.getUTCFullYear();
+    /** @type {HTMLButtonElement[]} */
     var made = [];
+    /** @type {number[]} */
+    var at = [];
     dateSpan.years.forEach(function (yy, yi) {
       if ((yy.y % every) !== 0) return;
-      var at = positions[yi];
       var b = DOC.createElement("button");
       b.type = "button";
       b.setAttribute("data-yr", String(yy.y));
       b.setAttribute("aria-pressed", cur === yy.y ? "true" : "false");
       b.title = yy.y + " -- " + yy.n + " note" + (yy.n === 1 ? "" : "s");
-      b.style.setProperty("left", Math.round(at) + "px");
+      b.style.setProperty("left", Math.round(positions[yi]) + "px");
       b.textContent = "'" + String(yy.y).slice(2);
       made.push(b);
+      at.push(positions[yi]);
     });
     host.replaceChildren.apply(host, made);
+    fitYears(host, made, at, w);
+  }
+
+  // github#178, design/0013
+  var yearFit = { w: -1, cw: 0, padL: 0, padR: 0 };
+
+  // github#178, design/0013
+  /** @param {HTMLElement} host @param {HTMLButtonElement[]} made
+   *  @param {number[]} at @param {number} w */
+  function fitYears(host, made, at, w) {
+    if (!made.length) return;
+    if (yearFit.w !== w || !yearFit.cw) {
+      var band = host.parentElement;
+      var bs = band ? WIN.getComputedStyle(band) : null;
+      yearFit = {
+        w: w,
+        cw: made[0].getBoundingClientRect().width,
+        padL: bs ? parseFloat(bs.paddingLeft) || 0 : 0,
+        padR: bs ? parseFloat(bs.paddingRight) || 0 : 0
+      };
+    }
+    var cw = yearFit.cw, padL = yearFit.padL, padR = yearFit.padR;
+    if (!cw) return;
+    var half = cw / 2;
+    var lo = half - padL, hi = w - half + padR;
+
+    /** @type {number[]} */
+    var left = [];
+    for (var k = 0; k < made.length; k++) {
+      var x = Math.max(lo, Math.min(hi, Math.round(at[k])));
+      left.push(x);
+      made[k].style.setProperty("left", x + "px");
+    }
+    // github#178 -- the newest year is worth keeping, so sweep back
+    var last = Infinity;
+    for (var j = made.length - 1; j >= 0; j--) {
+      if (left[j] + half > last) made[j].remove();
+      else last = left[j] - half;
+    }
   }
 
   /** @param {HTMLCanvasElement} cv @param {number} w @param {number} h @returns {CanvasRenderingContext2D} */
@@ -9276,7 +10491,8 @@ function mountVaultGraph(root, data, deps) {
       var el = $(which);
       if (!el) return;
       el.onchange = function () {
-        setRangeMs(fieldMs($("from")), fieldMs($("to")));
+        setRangeMs(fieldMs(/** @type {HTMLInputElement} */ ($("from"))),
+                   fieldMs(/** @type {HTMLInputElement} */ ($("to"))));
       };
     });
 
@@ -9411,7 +10627,9 @@ function mountVaultGraph(root, data, deps) {
       });
       yrHost.addEventListener("pointerover", function (ev) { hoverYear(yrOf(ev)); });
       yrHost.addEventListener("pointerout", function (ev) {
-        if (!ev.relatedTarget || !yrHost.contains(ev.relatedTarget)) hoverYear(null);
+        // github#145 -- EventTarget; contains() takes a Node
+        var to = /** @type {Node | null} */ (ev.relatedTarget);
+        if (!to || !yrHost.contains(to)) hoverYear(null);
       });
     }
 
@@ -9464,7 +10682,7 @@ function mountVaultGraph(root, data, deps) {
    * @property {boolean} [dblclick]
    * @property {boolean} [rightclick]
    * @property {boolean} [hover]
-   * @property {boolean} [drag]
+   * @property {boolean | number[]} [drag]   github#145 -- true, or the [dx, dy]
    * @property {boolean} [touchmode]
    * @property {string} [live]       "outer" or "inner": hand the page one more note on that ring
    * @property {number} [wheel]
@@ -9511,6 +10729,7 @@ function mountVaultGraph(root, data, deps) {
    * shapes answer the three questions demoWhere asks of them, which is why they are
    * interchangeable here; DemoTarget states that duck-typed contract rather than pretending
    * one is the other.
+   * @typedef {{ left: number, top: number, width: number, height: number }} DemoRect
    * @typedef {Object} DemoTarget
    * @property {number} [left]
    * @property {number} [top]
@@ -9520,7 +10739,7 @@ function mountVaultGraph(root, data, deps) {
    * @property {number} [gap]
    * @property {string} [demoLabel]
    * @property {string} [id]
-   * @property {() => DOMRect} [getBoundingClientRect]
+   * @property {() => DemoRect} [getBoundingClientRect]   github#145 -- not a DOMRect
    * @property {(opts?: unknown) => void} [scrollIntoView]
    * @property {(name: string) => string | null} [getAttribute]
    * @property {(sel: string) => Element | null} [querySelector]
@@ -9532,6 +10751,9 @@ function mountVaultGraph(root, data, deps) {
     if (kind === "id") return $(arg);
     // github#86 -- a side of the grouping control
     if (kind === "dim") return $("dim") ? $("dim").querySelector('button[data-dim="' + arg + '"]') : null;
+    // github#70 -- a recent chip, or a side of the Added / Touched control
+    if (kind === "chip") return $("recent") ? $("recent").querySelector('button[data-kind="' + arg + '"]') : null;
+    if (kind === "heatsrc") return $("heatsrc") ? $("heatsrc").querySelector('button[data-src="' + arg + '"]') : null;
     if (kind === "stage") {
       var stageEl = $("graph");
       if (!stageEl) return null;
@@ -9620,7 +10842,7 @@ function mountVaultGraph(root, data, deps) {
     if (kind === "year") {
       var yh = $("years");
       if (!yh || !dateSpan) return null;
-      var chips = Array.from(yh.querySelectorAll("button[data-yr]"));
+      var chips = /** @type {HTMLElement[]} */ (Array.from(yh.querySelectorAll("button[data-yr]")));
       if (!chips.length) return null;
       /** @type {Record<string, number>} */
       var have = dict();
@@ -9911,6 +11133,18 @@ function mountVaultGraph(root, data, deps) {
       { click: true, target: ["busiest", "1"], act: "heatmap", why: "...and click again to let it go" },
       { settle: true, act: "heatmap", why: "let it ramp back" },
 
+      // github#70 -- recorded with ?today=vault; see docs/features/recent.md
+      { click: true, target: ["chip", "today"], act: "recent", why: "halo what was added today -- nothing moves, everything else steps back" },
+      { settle: true, act: "recent", why: "let the halo and the dim ramp in" },
+      { click: true, target: ["chip", "week"], act: "recent", why: "widen to the last seven days" },
+      { settle: true, act: "recent", why: "the window grows, and the halo with it" },
+      { click: true, target: ["heatsrc", "touched"], act: "recent", why: "count by the day a note was last touched instead" },
+      { settle: true, act: "recent", why: "same window, the other date" },
+      { click: true, target: ["heatsrc", "created"], act: "recent", why: "...and back to the day it was added" },
+      { settle: true, act: "recent", why: "let it swap back" },
+      { click: true, target: ["chip", "week"], act: "recent", why: "click the chip again to let the lens go" },
+      { settle: true, act: "recent", why: "everything eases back" },
+
       { click: true, target: ["eye", "06"], act: "folders", why: "hide a folder -- the wedges reallocate" },
       { settle: true, act: "folders", why: "let the wedges reallocate" },
 
@@ -9992,6 +11226,16 @@ function mountVaultGraph(root, data, deps) {
       { settle: true, act: "colours", why: "let the menu open" },
       { click: true, target: ["ctxswatch", ""], act: "colours", why: "put it back to automatic too" },
       { settle: true, act: "colours", why: "let the palette snap back" },
+
+      // github#71 -- needs spec-vault, not demo-vault; see FULL_RUN_EXCLUDES
+      { click: true, target: ["id", "gear"], act: "sort", why: "open settings -- Folder order lives here" },
+      { settle: true, act: "sort", why: "let the panel open" },
+      { click: true, target: ["id", "fo-explorer"], act: "sort",
+        why: "switch Folder order to File explorer -- the vault's own custom-sort spec" },
+      { settle: true, act: "sort", why: "the wedges and the legend reorder to match it" },
+      { click: true, target: ["id", "fo-name"], act: "sort", why: "...and back to Name" },
+      { settle: true, act: "sort", why: "let it settle back into name order" },
+      { click: true, target: ["id", "gear"], act: "sort", why: "close settings -- leave a clean frame" },
 
       // github#3
       { rightclick: true, target: ["group", "(unlinked)"], act: "unlinked",
@@ -10083,17 +11327,16 @@ function mountVaultGraph(root, data, deps) {
         why: "tap a note -- the card rises as a sheet at the foot, the disc still above it" },
       { settle: true, act: "mobile", why: "let the card land and the links light" },
       { click: true, target: ["detailclose"], act: "mobile", why: "close the card" },
-      { click: true, target: ["id", "sheet"], act: "mobile",
-        why: "the folder list, search and view buttons slide up as a sheet" },
-      { settle: true, act: "mobile", why: "let the sheet arrive" },
+      // github#170 -- no #vg-sheet on a phone; solo scrolls there itself
       { click: true, target: ["only", "01"], act: "mobile",
-        why: "solo a folder -- the pill is always there on a phone, since there is no hover to " +
-             "reveal it with" },
-      { click: true, target: ["id", "sheet"], act: "mobile",
-        why: "put the sheet away -- everything else has gone behind it" },
-      { settle: true, act: "mobile", why: "let the rest recede" },
+        why: "solo a folder from the panel below the disc -- the page scrolls to it, nothing " +
+             "slides over the circle" },
+      { settle: true, act: "mobile", why: "let everything else recede" },
+      { click: true, target: ["id", "allon"], act: "mobile", why: "show everything again" },
+      { settle: true, act: "mobile", why: "let the disc fill back in" },
+      { hover: true, target: ["id", "graph"], act: "mobile", why: "scroll back up to the disc" },
       { dblclick: true, target: ["stage", "centre"], act: "mobile",
-        why: "double-tap fits what is left back into view, the way a double-click does" },
+        why: "double-tap fits the disc back into view, the way a double-click does" },
       { settle: true, act: "mobile", why: "let it fly home" }
     ];
   }
@@ -10101,7 +11344,7 @@ function mountVaultGraph(root, data, deps) {
   // github#34, github#73
   // github#82 -- collapse closes the hero: it is the last act and ends folded
   // github#72, design/0014
-  var FULL_RUN_EXCLUDES = ["subfoldercolor", "hiddenbydefault", "yearchip", "only05", "live", "mobile"];
+  var FULL_RUN_EXCLUDES = ["subfoldercolor", "hiddenbydefault", "yearchip", "only05", "live", "mobile", "sort"];
 
   /** @returns {DemoBeat[]} */
   function demoFullStoryboard() {
@@ -10195,9 +11438,13 @@ function mountVaultGraph(root, data, deps) {
       return [];
     }
     if (name === "intro") return beats;
-    var out = [{ settle: true, act: name, why: "start from a disc at rest" }].concat(beats);
+    /** @type {DemoBeat[]} */
+    var lead = [{ settle: true, act: name, why: "start from a disc at rest" }];
+    var out = lead.concat(beats);
     if (!beats[beats.length - 1].park) {
-      out = out.concat([{ park: true, act: name, why: "leave the final frame clean" }]);
+      /** @type {DemoBeat[]} */
+      var tailBeat = [{ park: true, act: name, why: "leave the final frame clean" }];
+      out = out.concat(tailBeat);
     }
     return out;
   }
@@ -10238,10 +11485,24 @@ function mountVaultGraph(root, data, deps) {
   var liveTimer = null;
   var LIVE_IDLE_MS = 120;
 
-  function liveBusy() { return !!(cascadeRun || anim || play); }
-  // github#72, design/0014
+  // github#120 -- a drag owns the frame loop, and nothing knew it
+  var dragging = false;
+  var dragEndedAt = -1e9;
+  var dragStartedAt = 0;
+  // github#120 -- inertia outlives the button coming up
+  var DRAG_GRACE_MS = 250;
+  // github#120 -- last resort only; 5,000 ms was a bug
+  var DRAG_MAX_MS = 60000;
+
+  function dragOwnsFrames() {
+    if (dragging && NOW() - dragStartedAt > DRAG_MAX_MS) dragging = false;
+    return dragging || NOW() - dragEndedAt < DRAG_GRACE_MS;
+  }
+
+  function liveBusy() { return !!(cascadeRun || anim || play || dragOwnsFrames()); }
+  // github#72, design/0014, github#120
   function liveWhy() {
-    return cascadeRun ? "cascade" : anim ? "tween" : play ? "timeline" : "";
+    return cascadeRun ? "cascade" : anim ? "tween" : play ? "timeline" : dragOwnsFrames() ? "drag" : "";
   }
 
   // github#72, design/0014 -- `words` is deliberately not in the key
@@ -10307,7 +11568,7 @@ function mountVaultGraph(root, data, deps) {
     return d;
   }
 
-  // github#72, design/0014, decisions/0006, decisions/0011
+  // github#72, design/0014, decisions/0006, decisions/0011-a-live-rebuild-retakes-the-geometry-lock-at-rest
   /**
    * @param {VaultData} next
    * @param {{ renames?: Record<string, string> }} [opts]  oldPath -> newPath; github#49
@@ -10378,7 +11639,7 @@ function mountVaultGraph(root, data, deps) {
 
     onData.forEach(function (h) { attempt(h.fn); });
 
-    // decisions/0011
+    // decisions/0011-a-live-rebuild-retakes-the-geometry-lock-at-rest
     var ringsDim = geomLock ? geomLock.dim : null;
     hardRelayout(false, true, true);
     // github#86 -- and back inside the rings it was switched into, same step
@@ -10438,6 +11699,9 @@ function mountVaultGraph(root, data, deps) {
     API = window.__vg = { graph: graph,
                     // github#72
                     applyData: applyData,
+                    // github#120 -- NOT part of the debug API, because the host needs it in a
+                    // github#120 -- the host asks before building, not only applying
+                    interacting: dragOwnsFrames,
                     setWords: setWords,
                     readTheme: readTheme, get renderer() { return renderer; },
                     // github#76
@@ -10453,6 +11717,18 @@ function mountVaultGraph(root, data, deps) {
                     swatchPreview: swatchPreviewHTML,
                     previewSizes: function () { return PREVIEW_R_PX.slice(); },
                     groupOrder: function () { return (order[state.dim] || []).slice(); },
+                    // github#71
+                    nameOrder: function () { return (slotOrder[state.dim] || []).slice(); },
+                    folderOrder: function () { return folderOrder; },
+                    // github#71 -- instant: only the page's own radio animates
+                    setFolderOrder: /** @param {string} v */ function (v) { return setFolderOrder(v, false, true); },
+                    sortSpec: function () {
+                      return { ok: sortSpec.ok, skipped: sortSpec.skipped.slice(),
+                               sections: sortSpec.sections.map(function (x) {
+                                 return { target: x.target, rank: x.rank, pins: x.pins.slice(),
+                                          dir: x.dir, numeric: x.numeric, origin: x.origin };
+                               }) };
+                    },
                     // github#86, design/0015 -- one grouping's rows, whichever disc is on screen:
                     // github#86 -- what a settings surface needs to offer colours for it
                     groupsOf: /** @param {string} dim */ function (dim) {
@@ -10484,7 +11760,13 @@ function mountVaultGraph(root, data, deps) {
                     get subtagColors() { return Object.assign(dict(), dimSubColors.tag); },
                     get tagShown() { return Object.assign(dict(), dimShown.tag); },
                     setFolderShown: applyFolderShown,
-                    setPanEnabled: function (v) { return setPan(v !== false, false); },
+                    // github#170
+                    // github#170 -- the phone's layout outranks the settings row, as at mount
+                    // github#173, design/0013 -- and on a phone the live zoom is that layout
+                    setPanEnabled: function (v) {
+                      storedPan = v !== false;
+                      return setPan(phonePanWanted(), false);
+                    },
                     // github#23
                     setCompactAxis: function (v) { return setCompactAxis(v !== false, false); },
                     // github#3
@@ -10500,12 +11782,27 @@ function mountVaultGraph(root, data, deps) {
                     setFitCap: function (v) { return setFitCap(v === true); },
                     setUnlinkedTintByFolder: function (v) { return setUnlinkedTintByFolder(v === true, false); },
                     setCountBars: function (v) { return setCountBars(v !== false, false); },
+                    // github#164 -- instant, like setFolderOrder: the host is not watching
+                    setRootInOrder: /** @param {boolean} v */ function (v) { return setRootInOrder(v, false, true); },
+                    // github#165
+                    setDevTools: /** @param {boolean} v */ function (v) { return setDevTools(v === true, false); },
+                    setWedgeGrid: /** @param {boolean} v */ function (v) { return wedgeDebug(v === true); },
+                    setTimeScale: /** @param {number} v */ function (v) { return setTimeScale(v); },
                     applyHiddenDefaults: function () {
                       seedHidden();
                       buildLegend();
                       cascade(null, { colToggle: true });
                     },
                     heatBuild: heatBuild,
+                    // github#70 -- heatDateOf is the seam a day-contents list reads,
+                    heatDateOf: heatDateOf,
+                    recentWindow: recentWindow,
+                    setHeatSource: setHeatSource,
+                    /** @param {string | null} kind @param {number} [refMs] */
+                    setRecent: function (kind, refMs) {
+                      setRecent(kind || null, refMs);
+                      syncRecentUI(); hlSync(); renderer.refresh();
+                    },
                     checkPlanParity: function () {
                       var shown = 0;
                       graph.forEachNode(function (id) { if (visible(id)) shown++; });
@@ -10515,7 +11812,7 @@ function mountVaultGraph(root, data, deps) {
                       /** @type {Record<string, object>} */
                       var diffs = {};
                       /** @param {Plan} p @returns {Record<string, number>} */
-                      var rows = function (p) { /** @type {Record<string, number>} */ var m = {}; p.cells.forEach(function (c) { m[c.k] = c.rows; }); return m; };
+                      var rows = function (p) { /** @type {Record<string, number>} */ var m = dict(); p.cells.forEach(function (c) { m[c.k] = c.rows; }); return m; };
                       var rs = rows(stat), rl = rows(live);
                       Object.keys(rs).concat(Object.keys(rl)).forEach(function (k) {
                         if (rs[k] !== rl[k]) diffs[k] = { staticPlan: rs[k], livePlan: rl[k] };
@@ -10531,7 +11828,9 @@ function mountVaultGraph(root, data, deps) {
                       return out;
                     },
                     checkFocusWeb: function () {
-                      var best = null, bd = -1;
+                      /** @type {string | null} */
+                      var best = null;
+                      var bd = -1;
                       graph.forEachNode(function (id) {
                         var d = renderer.getNodeDisplayData(id);
                         if (!d || d.hidden) return;
@@ -10540,6 +11839,8 @@ function mountVaultGraph(root, data, deps) {
                       var keepSel = state.selected, keepHov = state.hovered;
                       state.selected = best; state.hovered = null;
                       renderer.refresh({ skipIndexation: true }); renderer.render();
+                      // github#101 -- sample after a real composite, not just render()'s return
+                      function sample() {
                       var cv = renderer.getCanvases();
                       var order = ["edges", "nodes", "edgeLabels", "labels", "hovers", "hoverNodes"];
                       var W = cv.nodes.width, H = cv.nodes.height, dpr = W / renderer.getDimensions().width;
@@ -10610,6 +11911,12 @@ function mountVaultGraph(root, data, deps) {
                       state.selected = keepSel; state.hovered = keepHov; renderer.refresh();
                       res.webOK = res.dimAtGaps === 0;
                       return res;
+                      }
+                      return new Promise(function (resolve) {
+                        WIN.requestAnimationFrame(function () {
+                          WIN.requestAnimationFrame(function () { resolve(sample()); });
+                        });
+                      });
                     },
                     debugDump: function () {
                       var a0 = renderer ? renderer.graphToViewport({ x: 0, y: 0 }) : null;
@@ -10695,7 +12002,8 @@ function mountVaultGraph(root, data, deps) {
                                    range: rangeLabel(),
                                    from: state.from, to: state.to, heatEnd: state.heatEnd,
                                    timelineUntil: state.until,
-                                   markDay: state.markDay, shown: pts.length },
+                                   markDay: state.markDay, shown: pts.length,
+                                   heatSource: state.heatSource, recent: state.recent },
                         room: { i: r3n(bandOf("i").room), o: r3n(bandOf("o").room) },
                         minArcDeg: r3(lastMinArc * 180 / Math.PI),
                         spacing: { spOuter: r3(bandOf("o").sp),
@@ -10721,6 +12029,19 @@ function mountVaultGraph(root, data, deps) {
     /* ---- BEGIN: demo automation + debug API -- stripped from the plugin build, see scripts/build-plugin.mjs (stripDemoAndDebug) ---- */
     var debugAPI = {
                     state: state,
+                    // github#71 -- the spec GRAMMAR as a pure function, so the suite can
+                    // github#71 -- the failure paths, without a fixture for each
+                    parseSortSpec: parseSortSpec,
+                    /**
+                     * @param {{ folder: string, text: string, origin: string }[]} src
+                     * @param {string} path @param {string[]} names
+                     */
+                    sortOrderFor: function (src, path, names) {
+                      var spec = parseSortSpec(src);
+                      var sec = sortSectionFor(spec, path);
+                      return { ok: spec.ok, matched: !!sec, skipped: spec.skipped.slice(),
+                               names: sec ? orderBySortSection(names, sec) : names.slice() };
+                    },
                     ringsLayout: ringsLayout, visible: visible, groupOf: groupOf,
                     alpha: alpha, cascade: cascade, syncAlpha: syncAlpha,
                     syncLazyEdges: syncLazyEdges,
@@ -10731,6 +12052,8 @@ function mountVaultGraph(root, data, deps) {
                     get lazyEdges() { return lazyEdges; },
                     isOrphan: isOrphan,
                     wedgeDebug: wedgeDebug, wedgeEdges: wedgeEdges,
+                    // github#165 -- where the key landed, in host coordinates
+                    wedgeLegendBox: function () { return DBG.legendBox || null; },
                     bandRef: function () { return geomLock ? geomLock.bandR : null; },
                     // github#86 -- the rings as locked, and the dimension they were taken from
                     get geomLock() { return geomLock; },
@@ -10779,6 +12102,8 @@ function mountVaultGraph(root, data, deps) {
                     get unlinkedByFolder() { return unlinkedByFolder; },
                     get unlinkedTintByFolder() { return unlinkedTintByFolder; },
                     get countBars() { return countBars; },
+                    get rootInOrder() { return rootInOrder; },
+                    get rootKey() { return rootKey; },
                     get unlinkedTintColors() { return unlinkedTintColors.slice(); },
                     get subTailRank() { return SUB_SLOTS - 1; },
                     hiddenByDefault: hiddenByDefault,
@@ -10865,7 +12190,12 @@ function mountVaultGraph(root, data, deps) {
                         busiest: top, inWindow: heat.keys.reduce(function (a, k) {
                           return a + heat.days[k].ids.length; }, 0),
                         earlier: heat.before, later: heat.after, undated: heat.undated,
-                        markDay: state.markDay, hoverDay: state.hoverDay
+                        markDay: state.markDay, hoverDay: state.hoverDay,
+                        // github#70
+                        heatSource: state.heatSource, recent: state.recent,
+                        median: heat.median, bulkDays: heat.bulkDays,
+                        bulk: heat.keys.filter(function (k) { return heat.days[k].bulk; }),
+                        recentLit: Object.keys(recentSet).length, recentT: recentT
                       };
                       return out;
                     },
@@ -10898,7 +12228,7 @@ function mountVaultGraph(root, data, deps) {
                       var padded = buildWedgePlan(true, W);
                       planKeep = save;
                       /** @param {Plan} p @returns {Record<string, number>} */
-                      var rows = function (p) { /** @type {Record<string, number>} */ var m = {}; p.cells.forEach(function (c) { m[c.k] = c.rows; }); return m; };
+                      var rows = function (p) { /** @type {Record<string, number>} */ var m = dict(); p.cells.forEach(function (c) { m[c.k] = c.rows; }); return m; };
                       var a = rows(lean), b = rows(padded), diffs = {};
                       // github#5
                       Object.keys(a).concat(Object.keys(b)).forEach(function (k) {
@@ -11108,10 +12438,14 @@ function mountVaultGraph(root, data, deps) {
                     get hoverBusy() { return !!hoverRaf; },
                     // github#14
                     get camAtRest() { return camAtRest; },
+                    // github#111 -- so a test reads the page's own value instead of a copy
+                    get FIT_RATIO() { return FIT_RATIO; },
                     // github#82
                     get sheetOpen() { return sheetOpen; },
                     get bandOpen() { return bandOpen; },
                     get narrow() { return narrow(); },
+                    // github#170
+                    get phone() { return phone(); },
                     hl: hl,
                     get hlBusy() { return !!hlRaf; },
                     get dateSpan() { return dateSpan; },
@@ -11129,6 +12463,9 @@ function mountVaultGraph(root, data, deps) {
                     pin: /** @param {string} id */ function (id) { togglePin(id); },
                     pinned: function () { return state.pinned.slice(); },
                     clearPins: function () { state.pinned = []; hubChanged(false); },
+                    // github#143 -- what the host is handed, and what it reads back
+                    pinsStored: function () { return pinsStored(); },
+                    pinsFrom: /** @param {unknown} want */ function (want) { return pinsFrom(want); },
                     lastCascade: function () { return lastCascade; },
                     get planSkelCheck() { return planSkelCheck; },
                     set planSkelCheck(v) { planSkelCheck = !!v; },
@@ -11288,7 +12625,8 @@ function mountVaultGraph(root, data, deps) {
       attempt(onDestroy[i]);
     }
     onDestroy.length = 0;
-    if (renderer) attempt(function () { renderer.kill(); });
+    // github#135 -- drop the handle: `if (renderer)` is every call site
+    if (renderer) { attempt(function () { renderer.kill(); }); renderer = null; }
     if (window.__vg === API) delete window.__vg;
     API = null;
   }

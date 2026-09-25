@@ -1,20 +1,35 @@
 # The disc on a phone
 
-A finger drives the disc. One finger pans, two pinch about their midpoint, a tap raises a note
+A finger drives the disc: two fingers pinch to zoom about their midpoint, a tap raises a note
 and opens its card, and a double-tap fits the disc back into view — the same meaning the desktop
 double-click has. Until 2.1.0 none of that worked: the renderer listened for a mouse and nothing
 else, and the page's own `touch-action: none` suppressed even the click a tap would otherwise
 have fallen back to.
 
-Below 720 px the layout changes to match. The disc takes the screen instead of sitting under the
-folder list; the folders, search and view buttons slide up as a sheet from two buttons at the top
-left; the notes-added calendar and its date strip stay on and can be put away; and a note's card
-rises as a sheet at the foot, so the disc stays visible above whatever you tapped. A tap on the
-disc, or on the button that opened it, puts a sheet away again.
+**Panning is off on a phone.** A finger dragging the disc used to pan it the way a mouse drag
+does; github#170 turned that off — the disc doesn't move under your thumb — and the page scrolls
+instead. The pan button in the camera cluster isn't drawn at all, since there's nothing for it to
+toggle. Pinch-to-zoom is unaffected: it's the disc's own scale, not the camera's pan.
 
-Those two buttons are drawn at every width now, and above 720 px they *fold* the panels
-rather than summoning them — the folder list is a column there, not a sheet. See
-[`collapse.md`](collapse.md). github#82.
+**The panel lives below the disc, not over it.** Below 720 px on a real touchscreen (github#170;
+a mouse-driven window that width keeps the older behaviour below), the disc sits whole at the top
+of a page that scrolls, the folder list and the rest of the panel follow underneath it in the
+normal flow, and a note's card opens inline in that same scroll rather than as a sheet. Nothing
+is drawn over the circle — that's the point: a reader on Reddit found the old layout's own
+buttons and panel covering the animation the page exists to show.
+
+Buttons throughout are sized for a finger — the camera cluster becomes a row of 44px buttons
+under the disc — and the heatmap band's own controls, which used to overflow their row at this
+width, now fit it: the recent-window chips scroll inside their own row instead of wrapping, and
+the widest one (**Since last open**) drops rather than crowding the rest out.
+
+At a *narrow desktop window* rather than a real phone — no touch, just a resize — the older
+sheet-over-the-disc panel from 2.1.0 still applies unchanged: the folders, search and view
+buttons slide up as a sheet from two buttons at the top left, and a tap on the disc or the
+button that opened it puts the sheet away again. See [`collapse.md`](collapse.md) for that case
+and for the same two buttons' desktop behaviour, where they fold panels rather than summon them.
+Which of the two a given window gets is decided by width **and** a coarse pointer together, not
+by width alone (github#170) — precisely so a mouse-driven narrow window keeps the sheet.
 
 A finger is not a pointer, so picking learned the difference: a tap reaches for the nearest note
 within about half a fingertip, while the mouse keeps the pixel-precise catchment it was measured
@@ -49,6 +64,18 @@ DOM targets take a mouse press at the point, with no move before it: Chrome's to
 does not turn a synthesized tap into a click on an ordinary button, which is the same reason the
 disc needed a touch captor in the first place.
 
+**The old sheet beats are gone — confirmed, not just reasoned about.** A full re-record of this
+act crashed partway on exactly the risk above: the two `["id", "sheet"]` clicks target
+`#vg-sheet`, which `(max-width: 720px) and (pointer: coarse)` hides outright, so its bounding box
+is zero-size and the driver's own `demoWhere()` returns `null` for it rather than a soft
+"not found" — the act aborted mid-run rather than skipping the beat. The act now clicks
+`["only", "01"]` directly instead: on a phone the folder list is already in the page's own scroll
+flow with nothing to open, so soloing a folder from it scrolls straight there on its own
+(`Element.scrollIntoView`, the same mechanism every other act's on-disc targets already use). The
+folder is then shown again (`["id", "allon"]`), and a hover on `#vg-graph` scrolls the page back
+up before the closing double-tap — otherwise that beat's coordinates would land on whatever the
+scroll had left under them, not the disc.
+
 ## Regenerating this feature's clip
 
 **Record this one narrow.** The act itself is only choreography; what makes it the phone layout
@@ -77,4 +104,4 @@ selects nothing. See `.ai-context/mobile-harness.md`.
 | | |
 |---|---|
 | **Introduced in** | `2.1.0 (github#73)` |
-| **Last re-recorded** | `2.6.0 — 2026-09-11` — 17.7 s at 406x892, encoded at native width (1.11 MB) |
+| **Last re-recorded** | `2.9.0 — 2026-09-19` — 21.3 s at 420x900, encoded at native width (1.64 MB) |

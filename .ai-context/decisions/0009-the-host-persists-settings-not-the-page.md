@@ -75,3 +75,26 @@ disc and replay the reveal animation.
 - Deliberately **not** persisted: filters, highlights, the timeline, the theme. The
   standalone's `Refresh` button documents itself as resetting every filter, and a restored
   filter state would quietly contradict it.
+
+## Superseded in part, 2026-09-14 — the size of the deps object, not the decision
+
+The decision holds unchanged, and has held under considerable growth: `page.js` still stores
+nothing, the host still owns the store, and only the standalone gets the gear.
+
+What the record describes as **three optional entries** is now **37 deps**, of which 14 are
+`on*` callbacks, because every setting added since 2026-08-23 took the same route rather than
+reaching for a store. A partial list of what joined `folderColors` / `onFolderColors` /
+`settingsUI`: `subfolderColors`, `tagColors`, `subtagColors`, `tagShown` (github#86 — every
+grouping keeps its own pins), `folderShown`, `panEnabled`, `compactAxis`, `unlinkedByFolder`,
+`unlinkedTintByFolder`, `countBars`, `bandOpen`, `sheetOpen`, `dim`, `fitCap`, `pinned` /
+`onPinned` (`decisions/0014`), plus `openSettings` and `win` — the last being the plugin
+handing the page `this.contentEl.win`, this view's own window rather than whichever one has
+focus now (github#140).
+
+"The plugin passes only the first" is the sentence to read as of its date, not as of now: the
+plugin passes almost all of them and withholds `settingsUI`, which is the one that matters and
+the reason the rule still reads the way it does.
+
+The pattern is the point, and the growth is evidence for it rather than against it: 37 entries
+on a deps object cost nothing, where 37 settings reaching for a store would each have had to
+pick the wrong one of two.

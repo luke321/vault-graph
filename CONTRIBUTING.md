@@ -50,17 +50,103 @@ slots, the six-degree minimum wedge, the fifty-two-week heatmap window. Each has
 measurement behind it, and the recurring failure mode in this repo is reasoning about the
 code instead of measuring it.
 
-Four commands, and all four are gates rather than suggestions:
+Seventeen commands, and every one of them is a gate rather than a suggestion. They all run
+from `.githooks/pre-push`, in this order, on a push to `develop` or `main` — a feature-branch
+push runs none of them, so a green branch push is not evidence of anything:
 
 ```bash
-npm run lint                    # tsc --noEmit on the engine, then typescript-eslint on our own code; every finding is held at zero
-node scripts/smoke.mjs          # the invariant suite: four fixtures, each check on the ones its assertion is about
-node scripts/check-scope.mjs    # the page cannot style, or be styled by, its host
-node scripts/check-network.mjs  # nothing shipped can make a network request
-node scripts/check-notice.mjs   # the Sigma notice opens a fresh main.js and a fresh exported page
-node scripts/check-comments.mjs # comments are pointers; the count of prose lines only goes down
-node scripts/check-data-escape.mjs # a note's frontmatter cannot close the exported data script
+node scripts/check-pii.mjs              # this repo is public; no skip flag, ever
+node scripts/check-scope.mjs            # the page cannot style, or be styled by, its host
+node scripts/check-network.mjs          # nothing shipped can make a network request
+node scripts/check-notice.mjs           # the Sigma notice opens a fresh main.js and a fresh exported page
+node scripts/check-comments.mjs         # comments are pointers; the count of prose lines only goes down
+node scripts/check-generator-determinism.mjs   # a fixture vault does not depend on the day it was generated
+node scripts/check-build-order-determinism.mjs # nor on the order the filesystem enumerated it
+node scripts/check-data-escape.mjs      # a note's frontmatter cannot close the exported data script
+node scripts/update-note-selftest.mjs   # the update note's grammar and decision table (design/0016)
+node scripts/smoke-runner-selftest.mjs  # a check that threw is scored as a failure (github#146)
+node scripts/check-link-resolution.mjs  # both producers agree where a link points (github#141)
+node scripts/check-producer-contract.mjs # both producers emit the same shape, and a difference is declared (github#149)
+node scripts/code-map.mjs --check       # the generated map and index still match the source
+node scripts/gallery-nav.mjs --check    # the gallery's "New in" strip still matches the feature pages
+node scripts/check-ci-parity.mjs        # every gate above also runs in CI, where a merge boundary can see it (github#147)
+npm run lint                            # tsc --noEmit on the engine, then on the JavaScript's own annotations, then typescript-eslint; every finding is held at zero
+node scripts/smoke.mjs                  # the invariant suite: five fixtures, each check on the ones its assertion is about
 ```
+
+**Only the last one has a skip flag.** `SKIP_SMOKE=1 git push` skips the suite; the sixteen
+above it do not have one and are not meant to — most of them are cheap, and what they prevent
+is damage to somebody else's software, somebody else's licence, or somebody else's name.
+
+While iterating, `node scripts/smoke.mjs --only <substring>` is the loop. The full suite
+belongs to the push that merges.
+
+**The suite can also run where there is no screen (github#155).** `--headless` opens
+`--headless=new`, places no window, and takes **no screen lock** — the lock is named after a
+display (`.ai-context/locking.md`) and a headless run puts nothing on one. `CI` being set turns
+it on by itself, so a runner that forgets the flag does not hang; `--headed` beats both.
+`--lane fast` runs the 131 checks that assert counts, geometry and plan parity, and `--lane walk`
+the 27 that assert frame cadence — github#113's `clock` classification, reused rather than
+invented a second time. Both flags are part of the run *shape*, so neither can stamp a tree as
+having passed the suite.
+
+A headless run corrects its own viewport to **1584×961**, the inner size a placed `--app` window
+of 1600×1000 gives the page on the machine the thresholds were tuned against. That is not
+cosmetic: measured 2026-09-21, uncorrected headless gives the page 905px of height instead of
+961, and that 56px alone failed *the disc's density follows the notes on screen* on the 10k vault
+three runs out of three while it passed headed every time. **The frame moved, not the threshold**
+— a threshold that has to move for the machine is measuring the machine.
+
+**A lane is only as good as the `clock` each check declares, and one has not declared it.**
+Three local headless fast-lane runs came back 2 of 3 green, the odd one out being *a swipe in
+the tail of a fit flight still scrolls* — a check that registers with no `clock` opt, so it
+defaults to `fast`, while its body samples a fit flight at +345ms. See decisions/0016; the soak
+is what settles whether the rest of that family belongs in the walk lane too.
+
+**The suite has no CI gate, and that is settled rather than pending.** Measured 2026-09-21
+(`ubuntu-latest`, run 35627190525): the fast lane takes a **median 30.9 minutes** there against
+**295 s** here — 6.3× — and came back **0 of 3 green**, with **22 of 29 failures** being
+`Runtime.evaluate … got no reply in 10s`, i.e. `cdp.mjs`'s own reply timeout rather than a check
+disagreeing. The rest are the same cause one level up. Every fix available for them — a longer
+CDP timeout, wider sampling windows, moved thresholds — is measuring the machine. A
+GitHub-hosted runner has no GPU and software-renders, which a Chrome-over-CDP suite cannot
+afford.
+
+The workflow that measured it has been removed — there is nothing left for it to gate, and a
+dormant workflow with a `push` trigger that costs hours is a trap rather than an asset. To
+re-take the measurement on faster infrastructure, run `node scripts/smoke.mjs --headless --lane
+fast` N times, keeping each run's stdout, and hand the files to `node scripts/soak-report.mjs
+run-*.txt`. That report stays, and is useful locally too: it prints the **spread** — every run,
+min/median/max wall, and every check that failed in any run with how many. It is what found the
+mis-declared `clock` above.
+
+**`--headless` is opt-in and stays that way.** A plain `node scripts/smoke.mjs` still places its
+windows on the harness screen and takes the `screen-left` lock. `CI` deliberately does **not**
+imply it: there is no CI running this suite, so the only thing that implication could still do is
+silently take the window away from someone whose shell happens to set `CI`.
+
+`npm run lint` runs `scripts/check-js-contracts.mjs` as part of that first line, and it is
+worth knowing what it does before you meet it failing. The JavaScript's JSDoc annotations are
+compiler-checked with `checkJs` on and held at **zero** diagnostics, across **two** programs --
+`tsconfig.contracts.json` for the browser and plugin (`src/page.js`, `plugin/main.js`) and
+`tsconfig.contracts-node.json` for the exporter (`src/build-graph.mjs`, github#156). They are two
+and not one because `src/build-graph.mjs` needs `"types": ["node"]`, and node types over
+`src/page.js` make `process` and `Buffer` in browser code type-check clean -- measured, and
+`.ai-context/invariants.md` has the number.
+
+**Each program re-injects a defect of its own and fails if the mutated copy comes back clean:**
+a copy of `src/page.js` with `/** @type {VaultData} */ var DATA = 42`, which is the defect
+github#145 was filed over, and a copy of `src/build-graph.mjs` with `nodes: 42` in the
+`VaultData`-annotated object it emits. Before github#145 the first mutation drew zero errors and
+zero warnings from this whole list; before github#156 the exporter was in no type program at all,
+so the second could not have been written.
+
+**Fix a diagnostic where it is caused.** A cast that widens, an `any`, a `@ts-ignore` or an
+exclusion makes the gate green again and worth exactly what it was worth before the ticket --
+and the probe cannot tell the difference, since it only proves the compiler is reading
+something. A *narrowing* cast at a site that knows more than the accessor does is the file's own
+convention and is fine: `$()` returns `HTMLElement` and tells a caller wanting an input's
+`.value` to say so at its own site. `.ai-context/invariants.md` has the rest.
 
 Three more are manual, because each launches a real browser or a real Obsidian and takes a
 minute or two. Run the first if you touch the view's lifecycle — `onOpen`, `currentView`,
@@ -105,6 +191,7 @@ and bullets, the written version, the canvas height and the camera back from a r
 node scripts/build-plugin.mjs
 node scripts/update-note-check.mjs                # the demo fixture; --keep leaves Obsidian open
 node scripts/update-note-selftest.mjs             # the decision table and the note grammar, no Obsidian (the hook runs it too)
+node scripts/smoke-runner-selftest.mjs           # the smoke runner's own scoring and error audit, no Chrome (the hook runs it too)
 ```
 
 One more if you touch the renderer (`src/engine/`): the suite asserts numbers, and none of
@@ -143,6 +230,30 @@ other harnesses open the graph in the foreground, which is the one state where t
 happens — so this one quits and relaunches to get the leaf into the state a person's first
 restart of the day puts it in.
 
+And one more for anything about the band's controls at a phone's width, because the suite
+cannot see the one thing that decides them — the host's own CSS:
+
+```bash
+node scripts/build-plugin.mjs
+node scripts/host-phone-check.mjs                       # the demo fixture at 390x844
+node scripts/host-phone-check.mjs --w 320 --fixture 10k
+node scripts/host-phone-check.mjs --json before.json --shot shots/
+node scripts/host-phone-check.mjs --plugin-from <dir>   # a build made somewhere else
+```
+
+Every other phone check in this repo runs against the **exported page in Chrome**, which
+carries none of Obsidian's `app.css`. The plugin mounts `page.css` into Obsidian's own
+document, where `app.css` styles bare `button` and `input` elements and `.is-mobile` retunes
+those tokens to touch sizes — so a control that styles its colour and its font but not its
+`height` gets the host's 44 px, and no Chrome check can see it. This one installs the built
+plugin into a throwaway copy of a store fixture, launches a separate Obsidian on its own
+profile and port, turns on touch emulation, overrides the device metrics, calls
+`app.emulateMobile(true)` and only then opens the view — the ordering matters and each step
+carries its pointer in the file. It reports the band's six readings from github#178 with the
+number behind each. Like `obsidian-smoke.mjs` it needs Obsidian installed, takes a minute or
+two, and is not in the hook; it takes the `screen-left` lock, because it puts a window on that
+display.
+
 `git config core.hooksPath .githooks` once per clone runs those on every push to `develop` or
 `main`, along with a check that refuses to publish other people's names, two that keep the
 generated fixtures deterministic, one that keeps the generated navigation files
@@ -153,6 +264,19 @@ push that raises the count. Only the invariant suite has a skip flag, on purpose
 everything else is a static read costing seconds at most, and what most of it prevents is
 damage to somebody else's software, or to somebody else. The lint gate fails closed on a
 clone that has not run `npm ci` — run it, then push.
+
+**A hook is not a server-side proof.** It runs where somebody ran that `git config`, on
+whichever machine happened to push, so for as long as it was the only place these gates ran,
+nothing a merge boundary could read had evaluated them.
+`.github/workflows/quality.yml` runs the same block — every check between the hook's
+`gated_push` early exit and its `SKIP_SMOKE` line, plus `npm run lint` — against the
+checked-out commit, on a pull request into `develop` or `main` and on a push to either. The
+two lists are kept in step by `node scripts/check-ci-parity.mjs`, which the hook and the
+workflow both run: a gate added to one and not the other fails the push. The suite stays out
+of CI (no headless path, and a frame-sensitive lane tuned against one machine's Chrome), and
+`check-pii.mjs` is patterns-only there, since `.pii-names` is gitignored — read that step's
+output, not its exit code. `.ai-context/invariants.md` ("The merge boundary runs the gates the
+hook runs") has the measurements and github#147 the reasoning.
 
 **A tree is gated once.** A green full run of `smoke.mjs` stamps the git *tree* it measured
 and the fixtures it ran against (`scripts/suite-stamp.mjs`, in the shared git common dir).
@@ -188,12 +312,20 @@ commit and neither mechanism can see the other:
 
 | | |
 |---|---|
-| `.github/workflows/branch-policy.yml` | a pull request into `main` fails unless its head is `develop` in this repository — GitHub has no branch-protection setting for "the PR must come from X", so it is a required check |
+| `.github/workflows/branch-policy.yml` | a pull request into `main` fails unless its head is `develop` in this repository — GitHub has no branch-protection setting for "the PR must come from X", so it is a required check; the same workflow also gates a direct push to `main`, checking `develop` is already an ancestor of the pushed commit, since a pull request is no longer required (below) |
 | `.githooks/pre-push` | a `git push` to `main` is refused unless `develop` is already an ancestor of it — a merge of `develop` passes, a commit made straight on `main` does not |
 | `.github/workflows/release.yml` | a release tag whose commit is not in `origin/main`'s history is refused before anything is built, signed or published — the same rule again, at the one moment it still matters, since a published tag cannot be moved |
+| `.github/workflows/quality.yml` | the quality gates themselves, run against the checked-out commit on a pull request into `develop` or `main` and on a push to either — the branch-source rule above says where a commit came from, and this says whether it is any good |
 
-`main` also carries a ruleset: pull request required, that check required, no force pushes,
-no deletion.
+`main` also carries a ruleset: that check required, no force pushes, no deletion. A pull
+request was also required until 2026-09-13; `develop` can now merge into `main` by a direct
+push, gated by the same check rather than by the website's merge button.
+
+**`quality gates` is not required yet**, and a workflow file cannot make it so — a required
+status is a repository setting. Until `quality gates` is added to that ruleset's required
+contexts alongside `main only accepts develop`, the workflow reports on every pull request and
+every `develop`/`main` push and blocks nothing. That is the open half of github#147; this file
+says what is required today rather than what ought to be.
 
 ## Comments are pointers
 

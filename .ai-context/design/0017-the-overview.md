@@ -20,7 +20,7 @@ arc whose dots are readable and whose place in the disc is not.
 
 The two band outlines, one coarse sector per folder per band, and the camera's footprint.
 **No dots, no labels, no second renderer, no WebGL context** — one 2D canvas, the same kind of
-drawing `#vg-heatkey` already is. The rule that keeps it honest: *if it needs a node position,
+drawing the band's own `#vg-heatc` already is. The rule that keeps it honest: *if it needs a node position,
 it has become a minimap and is the wrong thing*. Nothing in `ovSectors`, `ovShape` or `ovPaint`
 reads `graph.getNodeAttributes` or `getNodeDisplayData`.
 

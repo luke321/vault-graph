@@ -75,12 +75,27 @@ mountVaultGraph(
     // github#23
     compactAxis: loadSettings().compactAxis,
     onCompactAxis: function (v) { saveSettings({ compactAxis: v }); },
+    // github#71 -- the build picks the order the page OPENS in (--folder-order); once the
+    // reader changes it, localStorage is the host that remembers (decisions/0009).
+    // github#71 -- left UNDEFINED when nobody has chosen and the build did not pick one, so
+    // the page decides from the vault: a vault shipping a sortspec opens in explorer order.
+    folderOrder: loadSettings().folderOrder ||
+                 (window.VAULT_DATA && window.VAULT_DATA.folderOrder) || undefined,
+    onFolderOrder: function (v) { saveSettings({ folderOrder: v }); },
     // github#3
     unlinkedByFolder: loadSettings().unlinkedByFolder,
     onUnlinkedByFolder: function (v) { saveSettings({ unlinkedByFolder: v }); },
     // github#3
     unlinkedTintByFolder: loadSettings().unlinkedTintByFolder,
     onUnlinkedTintByFolder: function (v) { saveSettings({ unlinkedTintByFolder: v }); },
+    // github#164 -- absent means off, which is the order the disc has always drawn
+    rootInOrder: loadSettings().rootInOrder === true,
+    onRootInOrder: function (v) { saveSettings({ rootInOrder: v }); },
+    // github#165 -- left UNDEFINED when nobody has chosen, so the page falls back to
+    // VAULT_DATA.dev: a build made with --dev opens with the developer menu already armed,
+    // and once the reader has flipped it here localStorage is what remembers.
+    devTools: typeof loadSettings().devTools === "boolean" ? loadSettings().devTools : undefined,
+    onDevTools: function (v) { saveSettings({ devTools: v }); },
     // github#86 -- absent means "folder", so a page nobody has switched is today's page
     dim: loadSettings().dim,
     onDim: function (v) { saveSettings({ dim: v }); },
@@ -92,6 +107,10 @@ mountVaultGraph(
     onSheetOpen: function (v) { saveSettings({ sheetOpen: v }); },
     bandOpen: loadSettings().bandOpen,
     onBandOpen: function (v) { saveSettings({ bandOpen: v }); },
+    // github#70 -- deliberately NOT passed. This page is a snapshot: its data was baked in
+    // when it was built, so "since the graph was last open" would measure a window whose
+    // notes cannot be in the file. The page leaves the third chip out rather than showing
+    // one that can only ever say zero. The plugin, which rebuilds live, passes it.
     pinned: loadSettings().pinned,
     onPinned: function (ids) { saveSettings({ pinned: ids }); }
   }

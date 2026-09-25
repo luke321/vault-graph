@@ -74,4 +74,4 @@ node scripts/mobile-check.mjs --device iphone14  # the sheet below the breakpoin
 | | |
 |---|---|
 | **Introduced in** | `2.2.0 (github#82)` |
-| **Last re-recorded** | `2.6.0 — 2026-09-11` — 6.7 s at 1586x992, encoded at 960 px (0.13 MB) |
+| **Last re-recorded** | `2.9.0 — 2026-09-19` — 6.7 s at 1000x1000, encoded at 1000 px (0.56 MB) |

@@ -3,19 +3,21 @@
 // github#37
 
 import { spawnSync, spawn } from "node:child_process";
-import { existsSync, mkdtempSync, mkdirSync, writeFileSync, rmSync, readFileSync } from "node:fs";
-import { createHash } from "node:crypto";
+import { existsSync, mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { createServer } from "node:net";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { attach } from "./cdp.mjs";
 import { leftWindowArgs } from "./screen.mjs";
+import { keepFocus } from "./focus.mjs";
+import { checkFixture, countNotes, fixtureDigest, stampFixture } from "./suite-stamp.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(HERE, "..");
 const OUT_DIR = join(ROOT, "scripts", "layout-snapshots");
 
+/* github#71 -- MUST AGREE WITH resolveVaults() in smoke.mjs, args included */
 // github#76
 const FIXTURES = [
   { script: "make-demo-vault.mjs", args: [], name: "demo-vault", drill: "03 - Resources" },
@@ -25,10 +27,10 @@ const FIXTURES = [
   // FOLDER, so the tag disc has no drilled golden: there is nothing to drill into (github#76).
   { script: "make-tag-vault.mjs", args: ["--end", "2026-09-09"], name: "tag-vault",
     gens: ["make-tag-vault.mjs"], dim: "tag" },
+  // github#71 -- --end pinned: its dated subfolders are date-derived
+  { script: "make-spec-vault.mjs", args: ["--end", "2026-09-08"], name: "spec-vault",
+    gens: ["make-spec-vault.mjs"] },
 ];
-
-const GENERATORS = ["make-demo-vault.mjs", "make-test-vault.mjs", "make-shape-vault.mjs"];
-const FIXTURE_FORMAT = 1;
 
 function storeRoot() {
   const g = spawnSync("git", ["-C", ROOT, "rev-parse", "--git-common-dir"], { encoding: "utf8" });
@@ -38,15 +40,6 @@ function storeRoot() {
     return join(dirname(abs), ".fixtures");
   }
   return join(ROOT, ".fixtures");
-}
-
-// github#86 -- `gens` must match the list scripts/smoke.mjs hashes
-function digestOf(args, gens) {
-  const h = createHash("sha256");
-  h.update("format:" + FIXTURE_FORMAT);
-  for (const g of gens || GENERATORS) h.update(readFileSync(join(HERE, g)));
-  h.update(JSON.stringify(args));
-  return h.digest("hex").slice(0, 8);
 }
 
 function findChrome() {
@@ -64,21 +57,30 @@ function findChrome() {
 function sleep(ms) { return new Promise((r) => setTimeout(r, ms)); }
 
 function buildFixture(fx) {
-  const digest = digestOf(fx.args, fx.gens);
+  const digest = fixtureDigest(fx.args, fx.gens);
   const dir = join(storeRoot(), `${fx.name}-${digest}`);
-  if (!existsSync(join(dir, ".stamp.json"))) {
+  let valid = existsSync(join(dir, ".stamp.json"));
+  if (valid) {
+    // github#169 -- a stamp is not proof the vault is usable
+    const health = checkFixture(dir);
+    if (!health.ok) {
+      console.log(`  ${fx.name}: fixture at ${dir} is corrupt: ${health.why} -- regenerating`);
+      valid = false;
+    }
+  }
+  if (!valid) {
     console.log(`  ${fx.name}: not in the shared fixture store yet, generating ...`);
+    rmSync(dir, { recursive: true, force: true });
     mkdirSync(storeRoot(), { recursive: true });
     const gen = spawnSync(process.execPath, [join(HERE, fx.script), ...fx.args, "--out", dir],
       { encoding: "utf8" });
     if (gen.status !== 0) throw new Error(`${fx.script} failed:\n${gen.stderr || ""}`);
-    writeFileSync(join(dir, ".stamp.json"),
-      JSON.stringify({ digest, day: new Date().toISOString().slice(0, 10) }, null, 2) + "\n");
+    stampFixture(dir, { digest, script: fx.script, args: fx.args, notes: countNotes(dir) });
   }
   const htmlDir = mkdtempSync(join(tmpdir(), `vg-snap-${fx.name}-`));
   const htmlPath = join(htmlDir, "vault-graph.html");
   const build = spawnSync(process.execPath,
-    [join(ROOT, "src", "build-graph.mjs"), "--vault", dir, "--out", htmlPath],
+    [join(ROOT, "src", "build-graph.mjs"), "--vault", dir, "--out", htmlPath, ...(fx.build || [])],
     { encoding: "utf8" });
   if (build.status !== 0) throw new Error(`build-graph.mjs failed:\n${build.stderr || ""}`);
   return { dir: htmlDir, htmlPath };
@@ -92,6 +94,8 @@ async function measure(htmlPath, dim, drill) {
   });
   const profile = mkdtempSync(join(tmpdir(), "vg-snap-profile-"));
   const url = pathToFileURL(htmlPath).href + "?rest";
+  // github#129
+  const focus = await keepFocus();
   const chrome = spawn(findChrome(), [
     `--remote-debugging-port=${port}`, `--user-data-dir=${profile}`,
     "--no-first-run", "--no-default-browser-check",
@@ -105,6 +109,7 @@ async function measure(htmlPath, dim, drill) {
     "--disable-background-timer-throttling",
     ...leftWindowArgs(1600, 1000), `--app=${url}`,
   ], { stdio: "ignore", detached: false });
+  void focus.watch(chrome.pid);
 
   try {
     let page;

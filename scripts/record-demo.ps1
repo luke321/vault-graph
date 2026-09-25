@@ -25,6 +25,11 @@ $ErrorActionPreference = 'Stop'
 $here = Split-Path -Parent $MyInvocation.MyCommand.Path
 $repo = Split-Path -Parent $here
 
+# github#135 -- once, unconditionally, before any use. The capture-size correction below reads
+# [Windows.Forms.Screen] whether or not -Monitor was passed, so loading it inside that branch
+# threw "Unable to find type" on -Square -X -Y, after Chrome was up and the screen lock taken.
+Add-Type -AssemblyName System.Windows.Forms
+
 $probe = $Port
 while ($probe -lt $Port + 12) {
   $inUse = $false
@@ -44,15 +49,24 @@ if (-not (Test-Path $ffmpeg)) {
 }
 
 if (-not $Url) {
-  $demoOut = Join-Path $env:TEMP 'vg-demo-vault'
-  $demoHtml = Join-Path $env:TEMP 'vg-demo-vault.html'
-  Write-Host "building the demo vault..." -ForegroundColor DarkGray
-  & node (Join-Path $here 'make-demo-vault.mjs') --out $demoOut
-  if ($LASTEXITCODE -ne 0) { throw "make-demo-vault.mjs failed (exit $LASTEXITCODE)" }
+  # github#71 -- the "sort" act needs a vault that actually ships a sortspec, or toggling
+  # Folder order to "File explorer" shows the "no sortspec found" note and proves nothing on
+  # camera. demo-vault has none by design (see make-demo-vault.mjs); spec-vault is the fixture
+  # built for exactly this (scripts/make-spec-vault.mjs, already wired into smoke.mjs).
+  $vaultGen = if ($Act -eq 'sort') { 'make-spec-vault.mjs' } else { 'make-demo-vault.mjs' }
+  $vaultTag = if ($Act -eq 'sort') { 'spec-vault' } else { 'demo-vault' }
+  $demoOut = Join-Path $env:TEMP "vg-$vaultTag"
+  $demoHtml = Join-Path $env:TEMP "vg-$vaultTag.html"
+  Write-Host "building the $vaultTag..." -ForegroundColor DarkGray
+  & node (Join-Path $here $vaultGen) --out $demoOut
+  if ($LASTEXITCODE -ne 0) { throw "$vaultGen failed (exit $LASTEXITCODE)" }
   Write-Host "building a fresh snapshot to record..." -ForegroundColor DarkGray
   & node (Join-Path $here '../src/build-graph.mjs') --vault $demoOut --out $demoHtml
   if ($LASTEXITCODE -ne 0) { throw "build-graph.mjs failed (exit $LASTEXITCODE)" }
   $Url = ([uri]("file:///" + ($demoHtml -replace '\\','/'))).AbsoluteUri + "?demo"
+  # github#70 -- the recent chips count from the wall clock, and the fixture's newest note is
+  # weeks old, so this one act pins the page's clock to the vault's own last day
+  if ($Act -eq 'recent') { $Url += "&today=vault" }
 }
 if (-not $Out) {
   $stamp = Get-Date -Format 'yyyy-MM-dd-HHmmss'
@@ -75,7 +89,6 @@ $chrome = (Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\App
 
 $posX = 40; $posY = 40
 if ($Monitor) {
-  Add-Type -AssemblyName System.Windows.Forms
   $screens = @([System.Windows.Forms.Screen]::AllScreens)
   $target = switch ($Monitor) {
     'primary' { $screens | Where-Object { $_.Primary } | Select-Object -First 1 }
@@ -99,7 +112,7 @@ elseif ($X -eq [int]::MinValue) { $screenLock = "screen-primary" }
 if ($screenLock) {
   $lockOwner = if ($env:VG_LOCK_OWNER) { $env:VG_LOCK_OWNER } else { "record-demo pid $PID" }
   Write-Host "taking $screenLock (owner: $lockOwner)..." -ForegroundColor DarkGray
-  & node (Join-Path $here 'lock.mjs') acquire $screenLock --owner $lockOwner
+  & node (Join-Path $here 'lock.mjs') acquire $screenLock --owner $lockOwner --holder process
   if ($LASTEXITCODE -ne 0) {
     throw "$screenLock is BUSY -- another session is using that display. Nothing was recorded."
   }
@@ -229,7 +242,6 @@ if (-not $dwmOk) {
   $r = $wr
 }
 
-Add-Type -AssemblyName System.Windows.Forms -ErrorAction SilentlyContinue
 $screen = [System.Windows.Forms.Screen]::FromHandle($hwnd)
 $wa = $screen.WorkingArea
 $cl = [Math]::Max($r.L, $wa.X); $ct = [Math]::Max($r.T, $wa.Y)

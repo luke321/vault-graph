@@ -20,9 +20,10 @@
 # tree it measured, and release.ps1 and .githooks/pre-push skip the suite for a tree that
 # already carries that stamp. The release branch's dry run is normally the one run; the
 # merge into main carries the same tree. This workflow TRUSTS THE TAG and runs the static
-# gates instead -- lint, scope, network, PII, the Sigma notice, the comment rule, the code
-# map -- which need no vault and no browser and are about what the release ships. The flow
-# the two halves make up is written down in .ai-context/releasing.md, which is the
+# gates instead -- the hook's whole unskippable static block (github#154), which need no
+# vault and no browser and are about what the release ships, not a hand-picked subset of it.
+# check-ci-parity.mjs (github#147) fails this run if a gate the hook added is missing here.
+# The flow the two halves make up is written down in .ai-context/releasing.md, which is the
 # authority; change it in the same commit as this file.
 
 name: release
@@ -201,6 +202,15 @@ jobs:
       # The static gates, the same ones .githooks/pre-push runs on a push to develop or main.
       # The invariant suite is not among them: it needs a real Chrome and minutes, and
       # release.ps1 has already run it against this commit.
+      #
+      # THIS CHECK GOES FIRST (github#154), same reason quality.yml puts it first: it is the one
+      # that says whether the rest of this section is still the truth. release.yml used to keep
+      # its own hand-written copy of the hook's static gate list, unchecked, and it drifted --
+      # five gates absent (github#154). check-ci-parity.mjs now checks this file the same way it
+      # already checked quality.yml, and since the hook's own static block calls check-ci-parity
+      # itself, this file has to run it too or the guard would fail on itself.
+      - name: The hook's static gates all run here
+        run: node scripts/check-ci-parity.mjs
       - name: Lint, and typecheck the engine
         run: npm run lint --silent
       - name: The page cannot style, or be styled by, its host
@@ -209,10 +219,24 @@ jobs:
         run: node scripts/check-pii.mjs
       - name: Comments are pointers
         run: node scripts/check-comments.mjs
+      - name: The vault generators are day-independent
+        run: node scripts/check-generator-determinism.mjs
+      - name: The build order is filesystem-independent
+        run: node scripts/check-build-order-determinism.mjs
+      - name: A note cannot close the data script it is serialised into
+        run: node scripts/check-data-escape.mjs
       - name: The update note's grammar and decision table
         run: node scripts/update-note-selftest.mjs
+      - name: The smoke runner scores a check that threw
+        run: node scripts/smoke-runner-selftest.mjs
+      - name: Link destinations resolve against their source
+        run: node scripts/check-link-resolution.mjs
+      - name: Both producers emit the same shape
+        run: node scripts/check-producer-contract.mjs
       - name: The generated code map and index are current
         run: node scripts/code-map.mjs --check
+      - name: The gallery's 'New in' strip is current
+        run: node scripts/gallery-nav.mjs --check
 
       # The bundle is built HERE, from the checked-out commit, so the attestation below is a
       # claim about bytes this runner produced from this source. check-notice builds it and

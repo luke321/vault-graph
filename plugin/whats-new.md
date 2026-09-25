@@ -15,8 +15,10 @@
   beside the CHANGELOG entry; a PATCH leaves it as it is, and shows nothing.
   scripts/build-plugin.mjs refuses a file that breaks any of that.
 -->
-# 2.6.0
-- Zoom in far enough to crop the disc and a small overview appears beside Fit, showing where your view sits. Click it to fit the disc again.
-- Every colour swatch now draws the dots it will actually make, sub-wedge tints and all, so you can see a colour before you choose it.
-- After an update, the graph tells you what changed: this strip, once per release. Dismiss it and it is gone.
-> vg-ov
+# 2.9.0
+- On a phone the panel now sits below the disc in the page's own scroll, instead of covering the circle.
+- Panning is off on a phone -- the disc doesn't drift under your thumb -- and buttons throughout are sized for a finger.
+- A new Folder order setting lays wedges and the legend out the way your vault's own file explorer already sorts them.
+- Root notes take their place among the folders instead of always sitting first or last.
+- The heatmap band's own controls fit their row on a phone instead of spilling out of it.
+> vg-gear

@@ -8,6 +8,7 @@ import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { leftWindowArgs } from "./screen.mjs";
+import { keepFocus } from "./focus.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = dirname(HERE);
@@ -73,6 +74,8 @@ async function measureOne(notes, steps) {
   const url = buildVault(notes);
   const PORT = await freePort();
   const profile = mkdtempSync(join(tmpdir(), "vg-dens-prof-"));
+  // github#129
+  const focus = await keepFocus();
   const chrome = spawn(findChrome(), [
     `--remote-debugging-port=${PORT}`, `--user-data-dir=${profile}`,
     "--no-first-run", "--no-default-browser-check",
@@ -81,6 +84,7 @@ async function measureOne(notes, steps) {
     "--disable-background-timer-throttling",
     ...leftWindowArgs(1600, 1000), `--app=${url}`,
   ], { stdio: "ignore" });
+  void focus.watch(chrome.pid);
 
   const rows = [];
   let page = null;

@@ -36,10 +36,16 @@
   // reading one file cannot disagree on that, or every fix for one fails the other. It reports
   // nothing on the JavaScript (checkJs is off) and esbuild does not read it.
   //
-  // plugin/**/*.d.ts is the one thing here that is not linted: declarations for the
-  // bundler's own `raw:` and `b64:` modules (plugin/bundler-modules.d.ts), which the program
-  // needs or every import from them is an error type (github#60). eslint.config.mjs ignores
-  // them for the same reason -- nothing in one for a rule to read.
+  // plugin/**/*.d.ts and src/globals.d.ts are the things here that are not linted:
+  // declarations for the bundler's own `raw:` and `b64:` modules (plugin/bundler-modules.d.ts),
+  // which the program needs or every import from them is an error type (github#60), and the
+  // two debug globals the page and the plugin set on `window` (src/globals.d.ts, github#145).
+  // eslint.config.mjs ignores both for the same reason -- nothing in one for a rule to read.
+  //
+  // github#145 added tsconfig.contracts.json, which extends this file with checkJs ON and is
+  // where the JavaScript's annotations are actually checked. This include is the file set both
+  // programs read, so a file added here is checked there in the same edit rather than a year
+  // later.
   "compilerOptions": {
     "target": "ES2022",
     "module": "ESNext",
@@ -52,5 +58,5 @@
     "strictFunctionTypes": true,
     "types": []
   },
-  "include": ["plugin/**/*.js", "plugin/**/*.mjs", "plugin/**/*.d.ts", "src/page.js", "src/engine/**/*.ts"]
+  "include": ["plugin/**/*.js", "plugin/**/*.mjs", "plugin/**/*.d.ts", "src/page.js", "src/globals.d.ts", "src/engine/**/*.ts"]
 }

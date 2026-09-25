@@ -164,3 +164,18 @@ Node 18 has no `WebSocket` global (it landed in 22) and this repo installs nothi
 `scripts/cdp.mjs` implements the ~80 lines needed: HTTP Upgrade, then RFC 6455 frames
 with client masking. Continuation frames are reassembled on receive because a large
 `Runtime.evaluate` result does arrive split.
+
+## Superseded in part, 2026-09-14 — where `demoMode()` lives
+
+The decision holds unchanged: the storyboard is data the page returns, the input is performed
+from outside it over CDP, and the page answers two questions about itself and performs
+nothing.
+
+One file name in it has moved. `demoMode()` was in `template.html`; it is in **`src/page.js`**
+now, inside the demo-and-debug region that `scripts/build-plugin.mjs` strips from the plugin
+build — so the storyboard ships in the standalone and not in the plugin, which is the same
+boundary this record describes, drawn by the bundler instead of by two separate files.
+
+An act must exist in `demoMode()` for `scripts/record-demo.ps1 -Act <name>` to reach it at
+all. A feature whose clip is wanted therefore needs its act written as part of that feature's
+own work, not discovered at release time (github#121).

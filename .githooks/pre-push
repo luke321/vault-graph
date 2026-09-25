@@ -300,6 +300,66 @@ EOF
   exit 1
 fi
 
+# THE SMOKE RUNNER'S OWN SCORING NEXT, same bar -- a fake page, no Chrome, ~100 ms.
+# github#146: the runner used to count a check by the ok it returned and nothing else, so an
+# interaction could satisfy a numeric invariant, throw asynchronously, and still be scored a
+# pass -- which made every check after the first worth less than its green suggested. These
+# regressions hold the audit around each check and the final one before the browser closes.
+echo "pre-push: checking the smoke runner scores a check that threw..."
+if ! node "$root/scripts/smoke-runner-selftest.mjs" </dev/null; then
+  cat >&2 <<'EOF'
+
+pre-push: the smoke-runner selftest failed -- push blocked.
+
+Read the FAIL lines above. scripts/smoke-runner.mjs and scripts/smoke-runner-selftest.mjs must
+agree; .ai-context/invariants.md has the rule. There is no skip flag for this check.
+EOF
+  exit 1
+fi
+
+# LINK RESOLUTION NEXT, same bar -- a handful of subprocess builds of a few notes, no Chrome,
+# about a second. github#141: the exporter's resolver lost the source note a link was written in,
+# so a relative link landed on whichever same-named note was indexed first, a heading link was
+# never mined at all, and two different ghost destinations collapsed onto one basename. Every case
+# here was pinned against Obsidian's own metadataCache on a disposable vault, so this is what keeps
+# the exporter and the plugin agreeing about where a link points.
+echo "pre-push: checking link destinations resolve against their source..."
+if ! node "$root/scripts/check-link-resolution.mjs" </dev/null; then
+  cat >&2 <<'EOF'
+
+pre-push: the link resolution check failed -- push blocked.
+
+Read the FAIL lines above. src/links.mjs is shared by src/build-graph.mjs and plugin/main.js, so a
+change to it moves edges and ghost identities in BOTH. The expectations were measured against
+Obsidian's own metadataCache -- .ai-context/invariants.md says which. There is no skip flag.
+EOF
+  exit 1
+fi
+
+# THE PRODUCER CONTRACT NEXT, same bar as the link check above and for the same reason -- one
+# subprocess build of a nine-note fixture and one in-process run of the plugin's adapter, about a
+# second, no Chrome and no Obsidian. github#149: src/build-graph.mjs and plugin/build-data.mjs
+# build the same VaultData for the same page from two different hosts, and nothing compared them.
+# github#152 is what that costs -- the exporter shipped ghosts with `dirs` and `touched` missing
+# while the plugin's carried both, the page papered over it, and nothing caught it. This runs both
+# producers over one vault and fails on any difference that is not declared in src/contract.mjs.
+echo "pre-push: checking both producers still emit the same shape..."
+if ! node "$root/scripts/check-producer-contract.mjs" </dev/null; then
+  cat >&2 <<'EOF'
+
+pre-push: the producer contract check failed -- push blocked.
+
+Read the FAIL lines above. src/taxonomy.mjs and src/contract.mjs are shared by
+src/build-graph.mjs and plugin/build-data.mjs, so a change to either moves BOTH producers.
+A difference between the two hosts is allowed only when it is declared in DIVERGENCES in
+src/contract.mjs, with the reason -- and a declared difference that stopped happening fails
+here too, so the list cannot rot into an allowlist. design/0020 has the reasoning.
+
+There is no skip flag for this check.
+EOF
+  exit 1
+fi
+
 # THE GENERATED NAVIGATION FILES NEXT, same bar -- a read of the tree, well under a second.
 # .ai-context/code-map.md and code-index.md are written from the source by
 # scripts/code-map.mjs (github#61) and are only worth having while they agree with it; a
@@ -327,6 +387,26 @@ if ! node "$root/scripts/gallery-nav.mjs" --check </dev/null; then
 pre-push: the generated gallery nav strip is stale -- push blocked.
 
 Run: node scripts/gallery-nav.mjs   and commit docs/features.md. There is no skip flag.
+EOF
+  exit 1
+fi
+
+# AND THE LAST OF THE "TWO FILES MUST AGREE" CHECKS: everything above this line also has to run
+# where a merge boundary can see it (github#147). Every check between the gated_push exit and
+# SKIP_SMOKE is a file in an installed checkout -- it runs where someone ran `git config
+# core.hooksPath .githooks`, on the machine that pushed, and it is never a server-side proof
+# about a commit. .github/workflows/quality.yml runs the same block against the checked-out
+# commit, and scripts/check-ci-parity.mjs is what stops the two lists drifting: release.yml
+# keeps a hand-written copy of the same list and five of these gates are already missing from
+# it, which is how a green status stops meaning what it says.
+echo "pre-push: checking the merge boundary runs these same gates..."
+if ! node "$root/scripts/check-ci-parity.mjs" </dev/null; then
+  cat >&2 <<'EOF'
+
+pre-push: the CI parity check failed -- push blocked.
+
+A gate this hook runs is not run by .github/workflows/quality.yml, so nothing on the server
+would catch it. Add the step there, then push again. There is no skip flag for this check.
 EOF
   exit 1
 fi
@@ -421,7 +501,7 @@ fi
 lock_owner="pre-push $(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo '?') [$$]"
 release_lock() { node "$root/scripts/lock.mjs" release suite --owner "$lock_owner" </dev/null >/dev/null 2>&1; }
 trap 'release_lock; exit 1' INT TERM HUP
-if ! node "$root/scripts/lock.mjs" acquire suite --owner "$lock_owner" </dev/null; then
+if ! node "$root/scripts/lock.mjs" acquire suite --owner "$lock_owner" --holder process </dev/null; then
   cat >&2 <<'EOF'
 
 pre-push: could not take the suite lock -- push blocked.

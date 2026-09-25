@@ -4,13 +4,10 @@
   in so a live vault is never the test subject.
 
 .DESCRIPTION
-  The plugin folder needs five things that live in four places in this repo, so copying
-  them by hand is exactly the sort of step that gets done wrong once and then debugged
-  for an hour:
-
-      plugin/main.js  manifest.json  styles.css
-      src/template.html                     -> the page, verbatim
-      assets/logo-mask.png                  -> optional
+  Installs the three files Obsidian actually loads -- main.js, manifest.json, styles.css,
+  built at the repo root by `node scripts/build-plugin.mjs`. The page markup and the logo
+  are bundled into main.js at build time (raw:/b64: imports in plugin/main.js), so there is
+  nothing else to copy; run the build first if those three aren't there yet.
 
   Vault resolution matches src/build-graph.mjs on purpose: -Vault, then
   VAULT_GRAPH_VAULT, then OBSIDIAN_VAULT. No path is written down anywhere -- the vault
@@ -44,7 +41,10 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $repo = Split-Path -Parent $PSScriptRoot
-$pluginId = 'vault-graph-spike'
+$manifestPath = Join-Path $repo 'manifest.json'
+if (-not (Test-Path $manifestPath)) { throw "no manifest.json at the repo root" }
+$manifest = Get-Content -Raw -Encoding UTF8 $manifestPath | ConvertFrom-Json
+$pluginId = $manifest.id
 
 function Write-Utf8NoBom([string] $Path, [string] $Text) {
   $enc = New-Object System.Text.UTF8Encoding($false)
@@ -106,24 +106,21 @@ if ($TestVault) {
 
 $dest = Join-Path $vaultRoot ".obsidian/plugins/$pluginId"
 New-Item -ItemType Directory -Force -Path $dest | Out-Null
-New-Item -ItemType Directory -Force -Path (Join-Path $dest 'assets') | Out-Null
 
-$copies = @(
-  @{ From = 'plugin/main.js';       To = 'main.js' }
-  @{ From = 'plugin/manifest.json'; To = 'manifest.json' }
-  @{ From = 'plugin/styles.css';    To = 'styles.css' }
-  @{ From = 'src/template.html';    To = 'template.html' }
-  @{ From = 'assets/logo-mask.png';         To = 'assets/logo-mask.png' }
-)
+$assets = @('main.js', 'manifest.json', 'styles.css')
+foreach ($a in $assets) {
+  if (-not (Test-Path (Join-Path $repo $a))) {
+    throw "$a is missing -- run: node scripts/build-plugin.mjs"
+  }
+}
 
 $total = 0
-foreach ($c in $copies) {
-  $src = Join-Path $repo $c.From
-  if (-not (Test-Path $src)) { Write-Warning "missing, skipped: $($c.From)"; continue }
-  Copy-Item -Force -Path $src -Destination (Join-Path $dest $c.To)
+foreach ($a in $assets) {
+  $src = Join-Path $repo $a
+  Copy-Item -Force -Path $src -Destination (Join-Path $dest $a)
   $bytes = (Get-Item $src).Length
   $total += $bytes
-  Write-Host ("  {0,-34} {1,7:N0} bytes" -f $c.To, $bytes)
+  Write-Host ("  {0,-16} {1,7:N0} bytes" -f $a, $bytes)
 }
 Write-Host ("installed {0:N0} KB into {1}" -f ($total / 1KB), $dest) -ForegroundColor Green
 
@@ -142,7 +139,7 @@ if ($Enable -and -not $TestVault) {
 
 if (-not $TestVault) {
   Write-Host ''
-  Write-Host 'Next: Settings -> Community plugins -> enable "Vault Graph (spike)",'
+  Write-Host "Next: Settings -> Community plugins -> enable `"$($manifest.name)`","
   Write-Host '      then run the "Open the graph" command.'
 } else {
   Write-Host ''

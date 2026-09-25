@@ -1,6 +1,7 @@
 
 import { attach, json } from "./cdp.mjs";
 import { placeElectronLeft } from "./screen.mjs";
+import { keepFocus } from "./focus.mjs";
 import { spawn, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, writeFileSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -54,7 +55,7 @@ const LOCK = "screen-left";
 const lockOwner = "spike-check [" + process.pid + "]";
 let holdsLock = false;
 if (!NO_LOCK) {
-  const r = spawnSync(process.execPath, [join(HERE, "lock.mjs"), "acquire", LOCK, "--owner", lockOwner],
+  const r = spawnSync(process.execPath, [join(HERE, "lock.mjs"), "acquire", LOCK, "--owner", lockOwner, "--holder", "process"],
     { stdio: "inherit" });
   if (r.status !== 0) {
     console.error("could not take the " + LOCK + " lock -- something else is driving that display.");
@@ -64,10 +65,13 @@ if (!NO_LOCK) {
   holdsLock = true;
 }
 
+// github#129
+const focus = await keepFocus();
 const child = spawn(exe, [
   "--remote-debugging-port=" + PORT,
   "--user-data-dir=" + USER_DATA,
 ], { stdio: "ignore", detached: false });
+void focus.watch(child.pid);
 
 let cdp = null;
 const fail = (msg) => { throw new Error("FAIL " + msg); };

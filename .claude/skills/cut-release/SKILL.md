@@ -50,8 +50,6 @@ stopping again.
 - **The clip review (step 8) and the update strip (step 9).** He looks at what was recorded
   before it is committed, and at the strip rendered, before either ships. These catch a capture
   that grabbed the wrong window and a strip nobody has seen — neither of which any gate sees.
-- **The `develop` -> `main` PR (step 12).** Merge it yourself if you can; the ruleset requires a
-  PR, not a human.
 - **Anything that fails.** A red gate, a failing check, a workflow that goes red: stop, fix it,
   say what it was. Never route around a gate to keep the run moving.
 - **Anything genuinely new.** A decision the questions above did not cover, or a finding that
@@ -92,7 +90,7 @@ apply to this release; add one row per this release's own polish/fix asks at the
 | 8 | **Render the update strip and show it** (MINOR/MAJOR only) — a real screenshot, not the markdown | |
 | 9 | Merge `release/<version>` → `develop` (local) | |
 | 10 | **One** plain `git push origin develop` | |
-| 11 | PR/merge `develop` → `main` | |
+| 11 | Merge `develop` → `main` and push (no PR required since 2026-09-13) | |
 | 12 | Draft the release body, publish as an Artifact, get an explicit go-ahead | |
 | 13 | `release.ps1` on `main` — gates, tag, push | |
 | 14 | GitHub Actions publishes the release — automatic once tagged | |
@@ -169,10 +167,16 @@ makes *every* clip stale, not just the ones whose own beats moved. `release.ps1`
 / `=== features ===` warnings only compare commit dates, a proxy, not proof — so re-recording
 everything is the default, not a call made by looking at what changed:
 
+**Ask before taking the mouse — but do NOT take a lock by hand.** `record-demo.ps1` acquires
+`screen-<monitor>` itself and releases it on every way out, and `record` is **aliased to the screen
+locks**, so an outer `acquire record` blocks the recorder's own acquire and the run hangs at
+`taking screen-right ...` with `lock.mjs status` showing only your own hold. Measured cutting 2.7.0:
+the first take sat there for seven minutes until the outer lock was released, after which it
+recorded immediately. `CLAUDE.md` states the rule this line used to break — never wrap one of the
+three window-placing harnesses.
+
 ```powershell
-node scripts/lock.mjs acquire record --owner "release <version>"   # ask before taking the mouse
-.\scripts\record-all.ps1                        # every clip and the hero, one command
-node scripts/lock.mjs release record --owner "release <version>"
+.\scripts\record-all.ps1                        # every clip and the hero, one command; takes its own locks
 node scripts/update-feature-metadata.mjs --version <version>       # rewrites every Last re-recorded line
 ```
 
@@ -221,10 +225,15 @@ this version. 2.6.0 shipped the strip without anyone having looked at it rendere
 how the Got it button's placement (github#126) was first noticed *after* the release.
 
 ```bash
+node scripts/build-plugin.mjs                       # the check copies the ROOT main.js; it does not build
 node scripts/lock.mjs acquire screen-left --owner "release <version>"
 node scripts/update-note-check.mjs --out <scratchpad>/strip
 node scripts/lock.mjs release screen-left --owner "release <version>"
 ```
+
+**Build first, every time.** `update-note-check.mjs` installs whatever `main.js` sits at the repo
+root into its Obsidian; it never builds. Cutting 2.8.0, two runs measured a build from before the
+fix they were meant to prove, and read as the fix not working.
 
 It mounts the plugin in a real Obsidian, upgrades a vault from a `data.json` without
 `lastSeenVersion`, and writes `01-strip-up.png` (the strip as a user first sees it),
@@ -291,12 +300,17 @@ don't assume flake without isolating the specific check first.
 
 ## 13. Merge `develop` → `main`
 
-On the website: open the PR, merge it. The ruleset requires this and has no bypass for a direct
-push (github#94). The only required check is the branch-policy job.
+No PR required since 2026-09-13 — merge locally and push directly, gated by
+`branch-policy.yml`'s push job (`develop` must already be an ancestor of the pushed commit):
 
 ```bash
 git switch main && git pull --ff-only
+git merge --no-ff develop
+git push origin main
 ```
+
+(The website route — open `develop` → `main` as a PR and merge it — still works too; the only
+required check either way is the branch-policy job.)
 
 ## 14. Review the release body — before the tag, not after
 
@@ -327,7 +341,9 @@ Structure (see `.ai-context/releasing.md`'s full section):
 1. One bold line naming the release and what it's actually about, in the release's own voice.
 2. **No hero at the top** — `assets/demo.webp` is large and unspecific; use the feature clips.
 3. One `###` per genuinely new or visibly-changed feature (from step 1's range, not memory), its
-   matching clip embedded.
+   matching clip embedded **directly under the heading and above the bullets** — every published
+   release is in that order, and a clip placed after the bullets is the tell of a draft written
+   from the design records rather than from a release.
 4. The Ko-fi ask, always the same spot, right after the highlight reel: the line
    `If Vault Graph is useful to you:`, then the button on its own line —
    `[![Support me on Ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/luke321)`
@@ -379,14 +395,20 @@ gh release view <version> --json tagName,name,assets,isDraft
 
 Once the Release exists (step 16), post an update at ko-fi.com/luke321. **Do it yourself with the
 Claude in Chrome tools** -- he is signed in there; do not hand him a link and a block of text to
-paste. The flow, as measured on 2.6.0:
+paste.
 
-- `ko-fi.com/Manage` -> the **Add something** button, then **Image** in the modal (not "Write a
-  quick update", which has no title field).
-- `read_page` gives the Title and Description fields; `form_input` fills them.
-- **The image needs `find`, not `read_page`.** The dropzone's `<input type=file>` is not in the
-  accessibility tree, and clicking **Add +** opens nothing useful. `find` for "hidden file input
-  for uploading post images (dropzone)" returns it, then `file_upload` attaches the PNG.
+**The mechanics live in the user-level `post-to-kofi` skill -- read it before touching the page.**
+It is shared with vault-shelf and the second machine because the traps belong to Ko-fi rather than
+to this plugin, and one of them is destructive:
+
+- **A page-wide `find` for the post's file input also returns the COVER image input.** Uploading to
+  it replaces the page's cover with no confirm step and no undo -- Ko-fi's cover dialog offers only
+  upload and remove, and keeps no history. That destroyed the cover cutting 2.7.0. Open the **Add
+  image** dialog first, scope the search to it, and screenshot straight after uploading: the
+  dropzone must read **`1 of 8 images`**. A dialog that closed, or a counter still at `0 of 8`,
+  means you hit the cover -- stop and say so.
+- Entry point is the **Feed card's `Add` button** -> **Image** (not "Write a quick update", which
+  has no title field).
 - Screenshot the filled dialog, confirm the exact wording with him, then click **Post image** --
   that publishes publicly and is the one click in this step that needs a yes.
 

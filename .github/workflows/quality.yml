@@ -1,0 +1,157 @@
+# Run the quality gates against the commit a merge boundary is actually looking at.
+#
+# WHY THIS FILE EXISTS (github#147, A3 of the github#81 architecture follow-up). Everything
+# that asserts quality in this repo lived in .githooks/pre-push, and a hook is a file in an
+# installed checkout: it runs where someone ran `git config core.hooksPath .githooks`, on the
+# machine that pushed, and it is never a server-side proof about a commit. The one status
+# `main`'s ruleset required -- `main only accepts develop` -- asserts where a commit came
+# FROM and nothing about whether it is any good. A commit could satisfy that branch-source
+# condition with no quality check having evaluated it anywhere a merge boundary can see.
+#
+# The gap had been widening rather than closing: github#141 put `check-link-resolution` in the
+# hook and github#146 put `smoke-runner-selftest` there, so each fix moved more of what
+# protects this repo somewhere a pull request cannot read.
+#
+# WHAT THIS RUNS, AND WHY THE LIST IS NOT A JUDGEMENT CALL. Exactly the hook's UNSKIPPABLE
+# STATIC BLOCK: every check between the hook's `gated_push` early exit and its `SKIP_SMOKE`
+# line, plus `npm run lint`. That slice is already the set the hook itself treats as having no
+# honest reason to skip -- cheap, no browser, no vault, and mostly about damage to somebody
+# else's software or to somebody else. Picking a list by hand would have produced a fourth
+# opinion; deriving it from the hook produces the same one.
+#
+# AND THE LIST IS GUARDED, NOT TRUSTED. scripts/check-ci-parity.mjs reads the hook's static
+# block and this file and fails if a gate in the hook is missing here. It runs in the hook and
+# below. The guard is not hypothetical: release.yml keeps a hand-written copy of the same list
+# and it has already drifted -- five of these gates are absent from it. A list nobody checks
+# becomes a list that lies, which is exactly how a green status stops meaning anything.
+#
+# WHAT THIS DELIBERATELY DOES NOT RUN: scripts/smoke.mjs. The invariant suite has no headless
+# path -- it spawns Chrome with `--app=`, `--window-position` and `--window-size`, and takes a
+# lock named after a monitor -- and the hook's own note measures 587 s for 94 checks x 3
+# fixtures, of which 446 s is a serial lane of frame-sensitive checks whose thresholds were
+# tuned against one machine's Chrome. A required status that flakes is a required status that
+# gets bypassed, which is worse than not having it. Browser validation on a runner is real
+# work, tracked separately; the suite stays on the hook and on release.ps1 until then. Real
+# Obsidian integration (scripts/obsidian-smoke.mjs) stays separate for the same reason, at one
+# further remove.
+#
+# THE FILE IS ONLY HALF THE FIX. A workflow produces a status; it does not require one. The
+# `quality gates` context has to be added to `main`'s ruleset alongside `main only accepts
+# develop`, which is a repository settings change and not something any commit can make.
+# CONTRIBUTING.md ("Branches, and how work reaches main") says what is required today.
+
+name: quality
+
+on:
+  pull_request:
+    branches: [develop, main]
+    # Same types as branch-policy.yml: re-run when the pull request is retargeted or its head
+    # moves, so an edited pull request cannot keep a green check it earned under a different
+    # base or a different commit.
+    types: [opened, reopened, synchronize, edited]
+  push:
+    # THE PUSH TRIGGER IS THE ONE THAT MATTERS MOST HERE, not the pull_request one: work lands
+    # on develop in this repository by a direct `git push`, not through a pull request, so
+    # without this the common path would produce no status at all. Feature branches are
+    # deliberately absent -- gating a branch nobody has asked to merge yet is the unearned
+    # minute the hook also refuses to spend.
+    branches: [develop, main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  # CANCEL A SUPERSEDED PULL-REQUEST RUN, NEVER A PUSH RUN. A cancelled run reports a status
+  # that is not "passing", and on develop or main that status is the thing a merge boundary
+  # reads -- so cancelling one would leave a landed commit looking gated when nothing gated it.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  quality-gates:
+    # THIS NAME IS THE REQUIRED-STATUS CONTEXT. GitHub names a status after the job, so
+    # renaming it silently drops whatever the ruleset requires -- the same way `main only
+    # accepts develop` is a string in the ruleset and a job name here. One job on purpose:
+    # a matrix would produce one context per leg and multiply what has to be required.
+    name: quality gates
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Check out the commit under review
+        uses: actions/checkout@v7
+
+      - name: Set up Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          cache: npm
+
+      # `npm ci` installs exactly package-lock.json. The lint gate needs eslint and typescript,
+      # and check-notice.mjs needs esbuild to build the two artifacts it reads the notice out of.
+      - name: Install the toolchain
+        run: npm ci
+
+      # THIS CHECK GOES FIRST because it is the one that says whether the rest of this file is
+      # still the truth. If a gate has been added to the hook and not here, every step below
+      # can pass while the status means less than it did yesterday.
+      - name: The hook's static gates all run here
+        run: node scripts/check-ci-parity.mjs
+
+      # PATTERNS ONLY ON A RUNNER, AND THAT IS NOT A BUG TO BE FIXED HERE. .pii-names is
+      # gitignored on purpose -- the whole point is that those names are in no commit -- so a
+      # fresh checkout has no name list, check-pii.mjs says `NO NAME LIST`, checks its five
+      # patterns and exits 0. A green status here proves the patterns; the twelve names are
+      # proved by the hook, on a checkout that has the file. Read the step's output, not its
+      # exit code: `12 names` is the name check having run, `NO NAME LIST` is it having not.
+      - name: No other people's names or identifiers
+        run: node scripts/check-pii.mjs
+
+      - name: The page cannot style, or be styled by, its host
+        run: node scripts/check-scope.mjs
+
+      - name: Nothing shipped can make a network request
+        run: node scripts/check-network.mjs
+
+      # Builds main.js and an exported page, and reads the Sigma copyright line back out of
+      # both -- so this is also the step that proves both artifacts still build.
+      - name: The Sigma notice opens both builds
+        run: node scripts/check-notice.mjs
+
+      - name: Comments are pointers
+        run: node scripts/check-comments.mjs
+
+      - name: The vault generators are day-independent
+        run: node scripts/check-generator-determinism.mjs
+
+      - name: The build order is filesystem-independent
+        run: node scripts/check-build-order-determinism.mjs
+
+      - name: A note cannot close the data script it is serialised into
+        run: node scripts/check-data-escape.mjs
+
+      - name: The update note's grammar and decision table
+        run: node scripts/update-note-selftest.mjs
+
+      - name: The smoke runner scores a check that threw
+        run: node scripts/smoke-runner-selftest.mjs
+
+      - name: Link destinations resolve against their source
+        run: node scripts/check-link-resolution.mjs
+
+      - name: Both producers emit the same shape
+        run: node scripts/check-producer-contract.mjs
+
+      - name: The generated code map and index are current
+        run: node scripts/code-map.mjs --check
+
+      - name: The gallery's 'New in' strip is current
+        run: node scripts/gallery-nav.mjs --check
+
+      # LAST, because it is the slowest of them (about 20 s locally) and the others each fail
+      # in under three -- a broken tree should say so before the toolchain has finished. It is
+      # tsc --noEmit on the engine and then typescript-eslint on our own code, every finding
+      # held at zero, including the five type-aware no-unsafe-* rules the Obsidian directory's
+      # review applies to every published version.
+      - name: Lint, and typecheck the engine
+        run: npm run lint --silent

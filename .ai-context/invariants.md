@@ -274,25 +274,264 @@ that does cluster. Realised: **24% of the tail clusters at three leading charact
 clusters**, against the real vault's 20% in 6. The generator prints both figures.
 
 What it now exposes, and what is **not** fixed by github#107: 101 of the 122 groups hold three
-notes or fewer, so the inner ring fills with wedges of one or two dots each. Separately, the
-palette resolves **12 distinct colours across 122 groups**, 22 of which read as grey — measured on
-the real vault too, 12 colours across 76 groups. Both have their own issues.
+notes or fewer, so the inner ring fills with wedges of one or two dots each (github#119).
+Separately, the palette resolved **12 distinct colours across 122 groups**, 22 of which read as
+grey — measured on the real vault too, 12 colours across 76 groups (github#118). Both have their
+own issues; the grey half of the second is fixed below.
 
-### The real cause is the band split, and it is not fixed here
+### A working group is never handed a grey by where it sorts (github#118)
 
-Neither change touches why the inner lattice is tighter in the first place. `balanceBands()`
-optimises ring **thickness** — its cost is `|inner − BAND_RATIO · outer|`, `BAND_RATIO = 0.55` —
-not room per note, so on the demo vault the inner ring gets **20% of the disc's area for 31% of
-its weight**. Relative to its own room an inner dot was already sized like an outer one before
-github#107 (`2·dot/step` 0.31 against 0.34); the dots were small because the room was.
+`buildColors` cycled all twelve slots, and the last two are the greys. So slot 11 and slot 12 went
+to whichever groups sorted eleventh and twelfth, then twenty-first and twenty-second, and so on —
+a group made grey by its position in the sort rather than by anyone choosing it. design/0004 puts
+the greys in the palette to be *picked* ("this folder should recede" is a real thing to want), and
+says in the same breath that grey "stopped being a punishment for being thirteenth"; it had not
+stopped being one for the eleventh.
 
-Two facts to carry into any attempt at that. Band membership is seeded by folder **size**
-(`c.wsum < smallAt`), not by how well-linked a folder is — on the demo vault the inner band's
-median link weight is **5.7 against the outer band's 6.40**, so the inner ring is not where the
-best-connected notes land. And membership is per **group**: `c.inner = groupInner[c.g]` and
-`takeGeom()` stores `bandLock[c.g]`, so a folder cannot span both rings and "the best-connected
-*notes* inner" is not reachable without dismantling the wedge. Within a wedge the notes are
-already ordered by link weight along the serpentine.
+Invisible while only folder dimensions were looked at, because a folder dimension rarely reaches
+eleven groups. A tag dimension reaches it at once. On `shape-vault`'s tag dimension the rotation
+laps twelve times, so **g11 carried 12 groups and g12 carried 10 — 20 working groups grey by sort
+position**, which with `(untagged)` and `(unlinked)` is the 22 the issue reported.
+
+The rotation is now `HUE_SLOTS = 10`. Both greys stay pickable, `g11` stays `ARCHIVE_SLOT`, an
+archive still never advances the counter, and `groupSlot` / `groupAutoSlot` / pins / persistence
+are untouched. `SLOT_COUNT` had exactly one use and went with it.
+
+| fixture · dimension | groups | distinct colours | greyish |
+|---|---|---|---|
+| `shape-vault` · tag | 122 | 12 → **11** | 22 → **2** |
+| `shape-vault` · folder | 7 | 7 → 7 | 1 → 1 |
+| demo mirror · folder | 18 | 12 → **11** | 3 → **1** |
+| demo mirror · tag | 14 | 12 → **11** | 4 → **2** |
+
+"Greyish" is max(r,g,b) − min(r,g,b) < 26 on the resolved hex, the issue's own measure. The two
+that remain are `(untagged)` and `(unlinked)`, which are meant to be grey. **Distinct colours
+falling by one is the intent, not a regression** — the twelfth colour was a grey nobody picked.
+
+```bash
+node scripts/smoke.mjs --only "handed a grey by where it sorts"      # all four fixtures
+```
+
+It reads both dimensions through `__vg.groupsOf(dim)`, which runs `inDim()` — so it reaches the
+dimension that is not on screen without switching to it, and has no cascade to settle. Verified to
+have teeth: with the rotation put back to twelve it fails on **all four** fixtures — the demo
+mirror at 2 folders and 2 tags, `tag-vault` at 2 tags, and `shape-vault` at **20 tags**.
+
+**The other half of github#118 is deliberately still open**: 122 groups now share ten colours
+rather than twelve. Merging tiny groups does not answer it — spiked, `SMALL_GROUP` 0 → 4 pooling
+the 101 groups of three notes or fewer moved neither number (still 122 groups, 12 distinct, 22
+greyish), because `ringsMerged` / `MERGED` / `smallIds` are layout-only and a merged group keeps
+its place in `order[state.dim]`. design/0004 carries the reasoning and the price of the two
+options that remain.
+
+### The real cause is the band split — fixed in github#117, in two halves
+
+Neither github#107 change touched why the inner lattice was tighter in the first place.
+`balanceBands()` optimised ring **thickness** — its cost was `|inner − BAND_RATIO · outer|`,
+`BAND_RATIO = 0.55` — with nothing in it aware of how much each ring was carrying. Room per
+note, inner over outer, measured over the annulus each band's own rows sweep:
+
+| fixture | before | after github#117 | median inner dot | median outer dot |
+|---|---|---|---|---|
+| demo | 0.708 | **0.817** | +36% | +3% |
+| 10k synthetic | 0.569 | **0.588** | 0% | −0% |
+| dominant-folder | 0.729 | **0.891** | +22% | −3% |
+| tag-organised | 0.810 | **0.906** | +15% | −1% |
+
+## Room parity between the rings, and why one term was not enough
+
+github#117. Two changes, and **neither delivers anything without the other** — this is the
+part to carry forward, because the first one alone looks like a win on the metric and is a
+regression on the screen.
+
+**`ROOM_WEIGHT = 5`, the room-parity term.** `spanFor()` returns `room`, the `|ln|` of one
+band's area per note over the other's, and `evaluate()`'s cost gains `ROOM_WEIGHT * t.room`.
+Three things about it were measured rather than chosen:
+
+- **Scored at the candidate `r0`, never a fixed one.** Hoisting it to `R0_BASE` so it cannot
+  buy parity by inflating the hub was tried and reverted: it scores geometry the search does
+  not choose, and takes the tag vault to **0.786, below the 0.810 it starts at**.
+- **5 is the bottom of a plateau**, not a knife edge. 5 and 10 give the identical layout on
+  all four fixtures; 2 is inert on the 10k; 20 and up let the term beat the thickness term
+  outright and the inner ring collapses to 3 rows with parity overshooting past 1.
+- **`BAND_RATIO` survives it.** The measured thickness ratio moves 0.52 → 0.51 (demo),
+  0.49 → 0.48 (10k), and not at all on the other two. The term trades against the thickness
+  term by construction and in practice barely bends it.
+
+**`Math.ceil` in `solveBand()`, which is the half that reaches the dot.** `s` is the square
+cell side, so `T / s` is the row count that makes a cell square, and the old `Math.round`
+rounded *down* whenever the fraction fell under a half. That leaves the cell radially taller
+than wide, and **the dot cannot grow into radial slack** — `dotPx` scales by `room / pitch`,
+so a coarser pitch makes the dot a smaller fraction of its own row. Measured with the room
+term in and `Math.round` left alone: parity improves on all four fixtures and the median
+**inner dot falls 8% on the dominant-folder vault and 12% on the tag vault**, because the
+inner band drops 5 rows to 4 and spends the whole gain on pitch. The trip is not the hub —
+holding `r0` fixed and letting only membership move reproduces it exactly. It is a
+quantisation: one row out of five is a 20–25% step, which is why the 10k vault's 16-row
+inner band never shows it and the small-ring fixtures always do. Rounding up leaves the
+slack *angular* instead, which the dot does use.
+
+**But do not then STRETCH the lattice to fill the band with those rows — github#157.** The
+row count is one decision and the pitch is another, and `solveBand()` used to make the second
+one follow from the first: `sp = T / rw`, rows spread to fill the band exactly. How many notes
+land in a row is decided by `rw` alone, so **the tangential step does not move when the pitch
+does** — which means the whole of the stretch lands on the cell's shape:
+
+```
+ratio = (avail / arcSpan) · q²        q = rw · s / T,  the row-count overshoot
+```
+
+The **square** of the rounding error, not the error. Measured on the dominant-folder vault,
+outer band at 27 of 765 shown: `T 8, s 5.564, T/s 1.438, rw 2, q 1.391, q² 1.935`, rendered
+`step 1127 / pitch 640 = 1.76` against the 1.75 that *the disc's density follows the notes on
+screen* asserts. The same law reads the other three sampled states exactly — `q²` 1.092 /
+1.364 / 1.633 against a rendered 1.05 / 1.24 / 1.51 — the constant 0.91–0.96 discount being
+the arc the wedge gaps take and the step therefore never gets.
+
+So past `CELL_FILL_MAX = 1.5` the pitch is raised back toward the square side `s`, never past
+it, and the band carries the remainder as margin. **It costs the dot nothing the ceil bought**:
+`dotPx` scales by `room / pitch`, and `room` is a function of `rw`, not of the pitch — the
+median outer dot in that state goes 168 → 164. The rows always fit, with no clamp needed:
+`rw = ceil(T / s)` puts `(rw − 1) · s ≤ T`, and rows are laid from `base`, not centred.
+
+| band, state (dominant-folder) | q² | before | after |
+|---|---|---|---|
+| outer, 27 of 765 shown | 1.935 | **1.76** | **1.36** |
+| inner, 101 of 189 shown | 1.633 | 1.51 | 1.39 |
+| inner, 189 at rest | 1.364 | 1.24 | 1.24 |
+| outer, 765 at rest | 1.092 | 1.05 | 1.05 |
+
+**1.5 has a wall at each end, which is why it is not a round number picked for looking like
+one.** The largest stretch any of the four fixtures reaches **at rest** is q² 1.364 — the
+dominant-folder vault's inner ring, 5 rows against 4.28 — then 1.355 (tag) and 1.350 (demo),
+so a ceiling under 1.364 relayouts the resting disc on three of the four and every golden with
+it. At the other end, 1.75 would sit exactly on the bound the check asserts, and a construction
+that cannot violate a check is a check with no teeth. At 1.5 no resting layout moves — all four
+goldens pass unchanged — and the worst cell over the sampled states is 1.40.
+
+**One radius has to be taken back with it.** `maxR` was `rOuter + outerRows * SP_O`, which is
+the ring's locked outer edge exactly while the band is filled exactly — and overshoots it the
+moment `CELL_FILL_MAX` leaves margin inside the ring (measured: 23 against a locked 21, in the
+state above). That radius is not bookkeeping: `fitRatio()` frames the disc by it, and the hub's
+share is measured against it, so an inflated one zooms the camera out and drifts the share. Only
+the **overshoot** is taken back — `if (maxR > geomLock.maxR)` — because a band that has *emptied*
+legitimately reports a smaller radius than the lock, and that is what lets the camera zoom into
+what is left. Measured live 21 / locked 21 / unclamped 23, with the tag vault's `NOT ASSERTED`
+branch of *the hub stays the same share of the disc as it is filtered* unchanged in both
+directions.
+
+### Row 0's edge sits on the ring, not its centre — github#160
+
+Rows are laid from `base`, so the outer band's first row had its **centre** on `rOuter` and its
+dot crossed the ring by a whole radius. At rest that is 60px on a 2021px ring and reads as
+honoured; with `projects` hidden on the dominant-folder vault the row-0 dot is 215px, and the
+wedge-debug ring — drawn at the measured dot-edge extreme — visibly walked 155px inward. Neither
+github#157 nor github#159 caused it; the sparse-state dot growth made it visible.
+
+**The outer band is shifted out by the largest dot row 0 can draw**, worked out in UNIT space
+from the same terms `dotPx()` uses — the pitch ramp `DOT_OF_PITCH · min(pitch, UNIT ·
+DOT_MAX_SPREAD)` times the band's `room · 0.92 / pitch` capped at `DOT_ROOM_MAX` — so the layout
+stays a function of the data and never of the renderer or the window. Cell room and the edge cap
+can only make a dot *smaller* than that, so the edge lands on the ring or inside it. The last
+row's dot must still clear `maxR`, so the shift is clamped to the slack the pitch left there;
+the band has a full pitch of it at rest and the github#157 ceiling leaves some.
+
+**Outer band only.** The inner band's row 0 is allowed `HUB_ROW0_FRAC` of the hub on purpose
+(github#35) and is untouched: edges 715 … 1345 against a 772 hub, before and after.
+
+Measured on the dominant-folder vault, dot edges in graph px, `rOuter 2021`, `maxR 3301`:
+
+| state | row centres | dot edges before | dot edges after | max dot |
+|---|---|---|---|---|
+| at rest, 765 | 2021…3141 → 2081…3201 | 1961 … 3173 | **2021** … 3233 | 60 |
+| `projects` off, 27 | 2021…2847 → 2235…3060 | 1806 … 3010 | **2020** … 3225 | 215 |
+
+The estimate matched the drawn radius to the pixel in both states. **Every resting layout moves
+by the resting row-0 dot radius**, so all four golden snapshots were re-recorded deliberately —
+the change is the point, not a side effect. *the resting disc is on the lattice* is unaffected: a
+uniform radial shift keeps every row gap.
+
+### A dot held under a stale endpoint cap, released on the landing frame — github#159
+
+Hiding `projects` on the dominant-folder vault, the dots changed size **on the single frame the
+cascade ended**, with nothing moving on that frame or after it. Positions converged the way a
+settle should — `114 → 84 → 101 → 84 → 48 → 17.5 → 3.1 → 0` — and the size channel sat flat at
+zero the whole walk, then moved 23 px on the first frame `busy()` was false. One note, `17`, went
+**7.0 px → 30.2 px** on that frame.
+
+**The cause was in the endpoint sizes, not the walk.** github#66 caps every walking dot at the
+larger of its two resting sizes, and those are computed in `roomOf()` by laying each endpoint
+out (`ringsLayout(pl, true)`) and calling `dotPx()` per note. The frame fit (github#41,
+design/0011) is part of `dotPx()` — and `measureFit()` reads **graph positions** and re-runs
+only when `posVer` moves. Nothing moves it between endpoint A and endpoint B, so **B's sizes
+were measured against A's frame**, with A's neighbours still in it. A dot whose neighbour was
+leaving was capped at the size that neighbour allowed, all the way to the landing, and released
+in one frame once the settle re-measured the real frame. `?nofit` made the snap vanish, which
+is what pointed at the fit; `dotPx(17)` read 28.8 uncapped on every frame while the renderer
+drew 7.0, which is what pointed at the cap.
+
+**Fix: an endpoint's clearance is measured on the endpoint's own positions.** `fitPos` hands
+`measureFit()` the endpoint's `outPos` for the duration of the size pass, with `fitVer` reset
+on both sides so neither endpoint inherits the other's map and the first real frame re-measures.
+Measured after: worst size step over the whole cascade **30.206 → 30.211** (0.005 px), landing
+frame `dsize 0`.
+
+**The check that should have caught it snapshots the wrong side of the transition.** *the last
+frame of a cascade is the resting layout* asserts a dot delta, but takes `last` on the first
+frame `busy()` is false — the frame the release has *already happened on* — and `rest` 320 ms
+later, so `last → rest` read 0. That placement was deliberate, and right for positions (leaving
+`last` a frame back cost up to 27 units on the 10k fixture); it is exactly wrong for anything that
+changes *on* the transition. It now also keeps `prev`, the last busy frame, and asserts **size**
+across `prev → last` (positions are not asserted across that pair — it is a real frame of
+motion). And it toggles the **largest** group as well as `groupOrder()[0]`, which on the
+dominant-folder vault is `(vault root)`, one note.
+
+Verified to have teeth, against the base with the fix reverted: 10k fixture `largest folder
+toggle` landing-frame dot **95.8%**, `range change` **232%**; demo `largest folder toggle`
+**5%**. With the fix: 0% on every toggle on every fixture that runs the check.
+
+**Not reached by that check at all**: the dominant-folder and tag vaults report `0/0` for it —
+the check does not run there. The 10k catches this defect at 232%, so the gate holds, but the
+fixture the report came from is not the one that asserts it.
+
+**A blind spot this fix walks into, and does not cause.** `debugDump().bands` splits the two
+rings at the **biggest radial gap**. That is right whenever a band's own pitch is smaller than
+the gap between the rings, and wrong when it is not — and raising the outer pitch in that one
+heavily-filtered state takes it to 826px against a 741px inter-ring gap, so the split falls
+*inside* the outer band and the check reads a mixed band (`i113:0.82`) rather than the band
+itself. The numbers in the table above are measured against the solver's own lattice radii
+instead. **The check keeps its teeth for this defect**: revert the fix and the pitch drops back
+under the gap, the split is right again, and it reads 1.76 and fails.
+
+**Two facts that survive, for anyone going further.** Membership is per **group**:
+`c.inner = groupInner[c.g]` and `takeGeom()` stores `bandLock[c.g]`, so a folder cannot span
+both rings and "the best-connected *notes* inner" is not reachable without dismantling the
+wedge. Within a wedge the notes are already ordered by link weight along the serpentine.
+
+**Seeding `groupInner` by link weight instead of size is inert — measured, not argued.**
+This was github#117's other candidate and it cannot work. `balanceBands()` searches
+**exhaustively** on all four fixtures (`movable` 13, 13, 4, 14, all within
+`EXHAUSTIVE_UP_TO` 14), so it re-decides every movable group from cost alone and the seed
+reaches the outcome through one channel only: `pinnedInner`. With the pin made
+seed-independent, a link-weight seed gives a layout **identical to the size seed on all four
+fixtures** — same parity, same areas, same inner set, same hole share. Left as it is, the
+link-weight seed only *empties* the pin set, which pushes demo and the 10k past
+`EXHAUSTIVE_UP_TO` into hill-climbing: demo parity goes **0.708 → 0.539**, the inner set
+collapses to one folder, and four small folders land outer — a straight failure of *band
+assignment obeys its two hard rules*.
+
+**`pinnedInner` no longer asks what the seed decided**, and that is a safety rail for the
+room term rather than a tidy-up. `smallAt` is `TOTAL / 60`, so on a vault under ~600 notes a
+folder of 7–9 notes is seeded *outer*, never pinned, and the room term is happy to leave it
+there — a stray. On all four fixtures `smallAt` is already past `PIN_BELOW` (23.4, 166.7,
+15.9, 14.9), so every such group was seeded inner anyway and nothing moves.
+
+**The hub grows, and the drift invariant does not notice.** `holeShare` goes 0.263 → 0.342
+(demo), 0.304 → 0.353 (10k), 0.273 → 0.292 (dominant-folder), 0.290 → 0.353 (tag, in the
+folder dimension) — under the cost's own `HOLE_MAX` ceiling of 0.36, which is what holds it.
+*The hub stays the same share of the disc as it is filtered* reads **drift 0.000 on every
+fixture that asserts it**, before and after, because `balanceBands()` runs only when
+`bandLock` is null: a filter re-packs inside rings it does not re-choose.
 
 ## The hub stays the same share of the disc
 
@@ -414,13 +653,58 @@ and rejected for the clip.
 **Camera framing only, not layout**: `fitRatio()` reads no note position, so the golden snapshot
 is untouched at every ratio in the table above.
 
-The four smoke.mjs checks that assert what `fit()` lands on hold a plain literal, `0.954` in
-place of the old `1.04` — `"double-clicking the graph resets the view"`, `"fit frames the disc
-that is actually there"`, and the two auto-fit checks. `camReset()`, a `setState()` call that
-bypasses `fitRatio()` for test-isolation purposes only, is updated to the same `0.954` for
-consistency. The edge-stroke-width check's `at(1.04)` "rest" reference point is deliberately
-**not** touched — it is an arbitrary zoom-level sample next to `0.216`/`0.108`, unrelated to what
-`fitRatio()` promises.
+The constant used to be a plain literal, `0.954`, hand-copied into six places in `smoke.mjs` —
+`camReset()` (a `setState()` call that bypasses `fitRatio()` for test-isolation purposes only) and
+four checks that assert what `fit()` lands on: `"double-clicking the graph resets the view"`,
+`"fit frames the disc that is actually there"`, and the two auto-fit checks. That broke
+deterministically, across every fixture, the last time `FIT_RATIO` moved (1.08 → 1.04) — the exact
+failure mode github#111 removed: `__vg.FIT_RATIO` now exposes the raw constant, and all six sites
+read it live via CDP instead of holding a copy. The three checks that verify `fit()`'s clamp
+formula still recompute it against an independently-measured `reach`, so the live read does not
+make them tautological — only the hand-sync is gone. The edge-stroke-width check's `at(1.04)`
+"rest" reference point is deliberately **not** touched — it is an arbitrary zoom-level sample next
+to `0.216`/`0.108`, unrelated to what `fitRatio()` promises.
+
+## A resize re-centres a fitted disc on the new stage (github#182)
+
+The stage is whatever the host gives the page: a browser window, an Obsidian pane, a pane with a
+side panel opening beside it. **Whichever of those changes, the disc stays centred in it.**
+
+```bash
+node scripts/smoke.mjs --only "re-centres a fitted disc"
+```
+
+The check fits the disc, then changes the stage seven times — three viewport sizes through
+`Emulation.setDeviceMetricsOverride` (portrait and landscape) and three container-only sizes on
+the host element — and asserts after each that the drawn disc centre is **within 1px** of the
+stage centre, and that the ratio is still `fit()`'s within its 0.5% band.
+
+**Measure the two real rectangles, never `renderer.getDimensions()`.** Those are the renderer's
+own cached `width`/`height`, and a stale cache *is* the defect — asking it only makes it agree
+with itself. The check reads the canvas's `getBoundingClientRect()` and the container's, and
+places the disc centre with `graphToViewport({x: 0, y: 0})` inside the canvas's rect.
+
+**A container resize is the case that fails; a window resize is not.** `resize()` runs only
+inside `render()`, and the renderer's own listener was on `win`'s `resize` event. A window resize
+therefore repainted and re-measured; an Obsidian pane being dragged, a split closing or a panel
+opening fired neither, so the canvases kept the size they had and the disc stayed drawn around
+the **old** centre. Measured on develop at `62e235d`, demo fixture, camera at `(0.5, 0.5)` and
+ratio `0.954` throughout — the camera was never the problem:
+
+| stage change | drawn centre, off by |
+|---|---|
+| `672x772` → `672x322` (container) | **0, 225px** |
+| `672x772` → `1312x772` (container) | **320px, 0** |
+| `640x760` container | **480px, 120px** |
+| `900x1200` viewport | 0, 5px |
+
+The fix is a `ResizeObserver` on the renderer's own container, taken off the **host's** window
+(`win.ResizeObserver`, not the global — an Obsidian popout is a different window), calling
+`scheduleRender()`. Not `scheduleRefresh()`: `process()` is graph-space only, so a size change
+owes a re-measure and a repaint, never a re-index of every node.
+
+**Camera and canvas only, not layout**: no note position is read or written, so the golden
+snapshots are untouched.
 
 ## Every note is filed exactly once, in either dimension
 
@@ -949,6 +1233,169 @@ button owned moved onto `state.markDay`, and `smoke.mjs` follows it: *a marked h
 recolours its notes* asserts the fill changes on pick and comes back on clear, which the two
 deleted `mark today` checks were the only cover for.
 
+## A recent chip haloes and dims, but never pushes (github#70)
+
+The chips above the band — Today, Last 7, Since last open — light the notes whose date
+falls in their window and mix everything else toward `--dim`. **Which date is the segment's**,
+through `heatDateOf`, so a chip lights exactly the notes the band's own tiles counted over the
+same span. Both halves ride the existing highlight ramp; neither moves anything, for the
+reason a marked day does not: a day's notes are scattered across every wedge, so pushing a
+subset slides it out *through* its cell-mates.
+
+```bash
+node scripts/smoke.mjs --only "recent chip"
+```
+
+Measured on the three fixtures, each against **its own newest counted day** rather than the
+clock (see the next paragraph), on the default `created`: demo **109 haloed, 0 pushed, 0
+moved**; dominant-folder **12 / 0 / 0**; 10k **2 / 0 / 0**. On `touched` the same windows give
+115, 954 and 2 — the dominant-folder jump from 12 to 954 is that fixture's single mtime day,
+and it is the clearest demonstration that the chips really do follow the segment. The dim is colour
+only — no size and no alpha multiplier — so a dot the cascade is still walking is untouched
+by it, and the resting-size law is not in play. Round trip on the demo: a non-matching note
+goes `#d95926 → #2a2a28 → #d95926`.
+
+Re-measured 2026-09-14 against the four fixtures the suite now carries — the tag-organised
+vault arrived with `github#86` after this work was written — each again on its own newest
+counted day, default `created`, with the middle chip rolling seven days: demo **113 haloed / 0
+pushed / 0 moved**, 10k **2 / 0 / 0**, dominant-folder **14 / 0 / 0**, tag **7 / 0 / 0**. The
+counts move with every weekly fixture regeneration and the shape of the claim does not:
+whatever a window lights, it pushes nothing. Every lens check declares `on: "all"`, so all
+four shapes carry all of them.
+
+### The 7-day chip spans seven days on every weekday (github#70)
+
+```bash
+node scripts/smoke.mjs --only "7-day chip"
+```
+
+The middle chip was **week-to-date** first, and week-to-date collapses on a Monday: its window
+is that single day, so it counted exactly what *Today* counted and the two chips were one
+control rendered twice. One day in seven, and the first thing a reviewer of a built page hit.
+It rolls back six days now, which is a claim about **all seven weekdays**, so the check walks
+seven consecutive injected reference days ending at the vault's own newest counted day rather
+than whichever weekday the suite happens to run on: each window must measure **7 days** and
+must **contain Today's**. Measured 2026-09-14, all four fixtures **7 on every weekday**, with
+Today a strict subset: demo **37 of 113**, 10k **2 of 2**, dominant-folder **2 of 14**, tag
+**1 of 7**. The 10k's 2-of-2 is that fixture having nothing in the six days before its newest
+— the subset still holds, which is the assertion.
+
+**No check here may key on the real clock, and this is not a style preference.** Measured
+2026-09-08: the newest `touched` day is 2026-09-05 on the demo and dominant-folder fixtures
+and 2026-08-28 on the 10k, so *Today* and the 7-day chip light **0 notes on all three** — a
+check written against `new Date()` passes by asserting nothing, and does so more thoroughly
+every day as the two ageing fixtures regenerate forward and the pinned 10k does not. This is
+the same trap the 10k's pinned `--end` exists to avoid. `__vg.setRecent(kind, refMs)` and
+`__vg.recentWindow(kind, refMs)` both take a reference day for exactly this reason.
+
+## The band's control row does not move when its state changes (github#70)
+
+A control that walks away from the pointer between clicks is a defect no numeric check was
+looking for, and this row grew two of them in one change. Every element in it now holds its
+left edge **and its width** across every state the row can be in.
+
+```bash
+node scripts/smoke.mjs --only "control row does not move"
+```
+
+Measured at 1440x900 on the demo fixture across five states (rest, week armed, released,
+source flipped, armed again): **worst shift 19px before, 0px after**. Four separate causes,
+each found by measuring rather than by looking:
+
+| Cause | Before | Fix |
+|---|---|---|
+| the label swapped its text | `Notes added` 76px → `Notes touched` 90px, shoving everything right of it by **14px** | the label is a static word and the choice is a two-position segment; both positions are always rendered, so the control has one width |
+| the pressed position was bolder | **1px**, as the bold moved between `Added` and `Touched` | both positions carry the same weight; the accent fill is what says which is on |
+| a chip's count grew a digit | `This week 0` 75px → `This week 115` 85px, **10px** (measured while that chip was still labelled *This week*; it is *Last 7* since the window went rolling, and the check re-measures rather than trusting this number) | the count slot is reserved at `--vg-count-ch`, set from the note count at mount, with tabular figures: 3ch / 4ch / 5ch on the three fixtures |
+| the heat key lost swatches | **17px**, on the dominant-folder fixture only | `heatDrawKey` sized the canvas for `HEAT_KEY_ANCHORS` (5 — four cuts plus nMax) and centred however many survived the dedup. **The key itself was removed on 2026-09-14** (see below), so this cause no longer exists and neither does the code for it; the row keeps the property by having one element fewer |
+
+The third was not introduced here and is the interesting one: the key has always shrunk when
+a vault's quantiles collapsed, but nothing could change a vault's tally at runtime until the
+band's date became a control. **A pre-existing wobble that only a new control could expose.**
+It shows only where the anchors actually collapse — the dominant-folder fixture, whose 954
+notes share one `touched` day, so all four cuts and `nMax` dedup to a single swatch.
+
+The check compares both `left` and `width`, because an element that keeps its position while
+changing width still pushes whatever the flex row gives the slack to.
+
+## Every control in the band's row is the same height (github#70)
+
+```bash
+node scripts/smoke.mjs --only "same height"
+```
+
+The fidget check above pins `left` and `width`, and would pass with every height in the row
+different — which is what it was. Measured at 1440x900: the Added/Touched segment **22.5px**,
+the chips **27.9**, the compact toggle **22.0**, the date inputs **22.3**, All dates **27.9**.
+Six controls, four heights. The row now declares **one** height, `--vg-hrow-h: 26px` on `.hrow`,
+and every control takes it through `height` rather than through its own padding; the check reads
+the declared value from the custom property rather than hard-coding 26, so changing the row's
+height in one place does not falsify it. Measured after: **7 controls, all at 26px**, and the
+fidget check still **0px worst shift across six states**.
+
+The tolerance is **0.5px**, not zero: a border or a rounded line box can land a tenth either
+side of a declared height, and a tenth is not the defect this exists to catch — four distinct
+heights is.
+
+`#vg-heatscale`, the `fewer [][][] more` key, is **absent**, and the check asserts that too
+rather than exempting it. It was the one element in the row that could never hold a row height,
+being a canvas sized from the heat cell, and it is the one that cost 17px of the original
+fidget. Removed on review; see `design/0010-heatmap.md`.
+
+## The band counts the date it names (github#70)
+
+`design/0010` already required that clicking a square mark exactly the notes that square
+counted. With two possible sources the rule needs enforcing rather than observing, so every
+band reader goes through one accessor, `heatDateOf`, and a check drives both sources and
+asserts that every note in a tile carries that tile's own date.
+
+```bash
+node scripts/smoke.mjs --only "band counts" --only "picked day marks"
+```
+
+Measured, added → touched: demo **1,091 → 1,165** notes in window (busiest day 37 → 40),
+dominant-folder **762 → 954** (busiest 3 on 2025-09-15 → 954 on 2026-09-05), 10k
+**1,275 → 1,295** (busiest 50 → 54). Wrong-dated notes in a tile: **0 of 1,165 / 954 /
+1,295**. Picked-day mismatches at each busiest day, both sources: **0**. Positions moved by
+the switch: **0** on all three — `touched` is read by nothing upstream of the plan, so the
+golden snapshots cannot move and do not.
+
+The label itself is the control (`Notes added` / `Notes touched`), because the count must be
+nameable and the name was already in that slot.
+
+## A bulk day is named, not hidden (github#70)
+
+`mtime` is not a record of work: a sync, an import or a rename rewrites it in bulk, and
+`design/0010` measured this vault's own worst case at 240 files "touched" on the day the
+folders were renumbered. A day too big to be a day's work is therefore **flagged and said
+aloud** — in the tooltip, in the readout, and in every chip's count — while its tile stays
+painted in full and its notes stay counted. Hiding data to make a lens look tidy is the
+failure this project keeps re-learning.
+
+```bash
+node scripts/smoke.mjs --only "bulk day is named"
+```
+
+`BULK_MIN = 25`, `BULK_X = 20`, `BULK_SHARE = 0.15`: a day is bulk when it holds at least 25
+notes **and** is either 20× the median day **or** 15% of every dated note.
+
+| Fixture | Notes | Days | Median | Busiest | Flagged |
+|---|---:|---:|---:|---:|---|
+| demo | 1,403 | 553 | 1 | 40 | 2026-09-05 |
+| 10k | 10,002 | 3,397 | 3 | 54 | none |
+| dominant-folder | 954 | **1** | **954** | **954** | 2026-09-05 |
+
+**Both clauses are load-bearing, and the multiple alone was measured failing.** The
+dominant-folder generator never stamps mtime, so all 954 notes share one day — and with a
+single day in the distribution the median *is* the outlier, making it 1× its own median.
+Built with the multiple test alone, the rule left the only genuine bulk day in the whole
+suite unflagged while flagging two ordinary busy days on the 10k (25 and 54 notes out of
+10,002). The share clause catches the degenerate case and needs no spread to work; the real
+vault's import day (180 of 934, 19%) and renumbering day (240 of 934, 26%) clear both.
+
+The check recomputes the rule from the day counts on its own rather than asking the page —
+a check that reads back the page's own answer agrees with any rule, including a broken one.
+
 ## `skipIndexation` is a promise, and only hlWalk can keep it
 
 `renderer.refresh({ skipIndexation: true })` told Sigma "nothing moved, do not rebuild the
@@ -979,6 +1426,42 @@ one afternoon, both plausible, both fitting the evidence:
    environment;
 2. `skipIndexation` — probably right, unprovable from that run.
 
+## The suite measures in a 1584x961 frame, and a headless run has to be put in it (github#155)
+
+`--window-size` is an **outer** size, and how much of it reaches the page depends on how much
+the browser keeps for itself. Every fit, clearance and density threshold in `smoke.mjs` was
+tuned in whatever that left over, and until github#155 nobody had written the number down.
+
+Measured 2026-09-21, same Chrome, same machine, same `--window-size=1600,1000`:
+
+| how it opens | `innerWidth` x `innerHeight` | `devicePixelRatio` |
+|---|---|---|
+| placed, `--app=<url>` (the tuned shape) | **1584 x 961** | 1 |
+| `--headless=new`, URL positional | 1584 x **905** | 1 |
+
+56px, 5.8% of the stage height, and it is not cosmetic. *The disc's density follows the notes
+on screen* on the 10k vault measured `diameter/step 0.81` against a `0.80` ceiling and **failed
+three runs out of three** headless, while passing headed every time — a shorter stage means a
+smaller disc, fewer pixels per lattice step, and dots that are relatively fatter.
+
+**The threshold did not move.** github#155's own wording is the rule: *a threshold that has to
+move for the machine is measuring the machine*. So the frame moves instead. `TUNED_VIEWPORT` in
+`scripts/smoke-shape.mjs` names `1584 x 961`, and a headless run reads what it actually got and
+resizes the **window** by the difference (`nextBounds()`, up to two passes).
+
+Two things about that, both deliberate:
+
+- **A real window resize, not `Emulation.setDeviceMetricsOverride`.** Several checks here set
+  their own metrics override and then clear it, and a clear drops back to the *window* — so a
+  baseline installed as an override would silently vanish after the first mobile check and leave
+  everything behind it measuring a different stage.
+- **Self-calibrating, not a hardcoded window size per platform.** Every OS and every Chrome mode
+  keeps a different slice of the window, so the only portable way to land on an inner size is to
+  measure what you got and correct. A Linux runner's chrome height is not this one's.
+
+A headless run that cannot reach `1584 x 961` **says so in its own output** rather than
+quietly reporting numbers that are not comparable to the tuned ones.
+
 ## A leaked Chrome on the debug port makes the suite measure a stale page
 
 `attach(PORT, "")` takes **whatever is listening**, and a killed run can leave its browser
@@ -1002,12 +1485,68 @@ Get-CimInstance Win32_Process -Filter "Name='chrome.exe'" |
   ForEach-Object { Stop-Process -Id $_.ProcessId -Force }
 ```
 
+## The host owns the "since last open" clock, and hands over the PREVIOUS stamp (github#70)
+
+`decisions/0009` — the page stores nothing, so the third chip's window is a timestamp the host
+keeps and passes in `deps.lastOpen`. Three rules, and none of them is reachable from a page
+check, which is why this one lives in the Obsidian harness rather than the suite:
+
+```bash
+node scripts/obsidian-smoke.mjs --only "since last open"
+```
+
+- **The page is handed the stamp from the previous open, never `Date.now()`** — a chip whose
+  window starts at this instant names a window that closed as it opened.
+- **The stamp is written at open as well as at close.** An Obsidian quit never fires `onClose`,
+  and a chip that silently stops moving is worse than one measuring from slightly too early.
+- **A rebuild re-passes the same value.** `render()`'s own teardown does not stamp, or Refresh
+  would quietly turn *since last open* into *since the last rebuild*.
+
+Measured in a real Obsidian, one open/close/reopen cycle: `data.json` `lastSeen`
+`…139099 → …147288` (close) `→ …147600` (reopen); the page was handed **null** on the first
+open — absent means never seen, and the chip is not built — then **…147288, the stamp from the
+close**, and the same value again after a Refresh. Chips went `today,week` → `today,week,open`.
+The standalone passes no `lastOpen` at all (`src/shell.html`), so the exported page shows two
+chips rather than a third that could only ever read zero.
+
+## An armed chip survives a live rebuild, and a stand-in is lit by its own note (github#70)
+
+An armed chip is a **set of ids**, and two things this repo grew after the lens was written
+hand it ids it has never seen. Both were found by merging `develop` back in rather than by a
+failure, and both now have a check that fails without the fix.
+
+```bash
+node scripts/smoke.mjs --only "live rebuild re-arms" --only "stays lit while a dimension switch"
+```
+
+**A live rebuild re-mints ids** (`github#72`, `design/0014`). A note edited or created with the
+view open is *the* case this lens exists for, and it arrives as a node that did not exist when
+the set was built — so a set left alone goes stale on the one event it most has to answer. The
+lens is registered in the invalidation registry (`invalidatesOnData("recent lens", …)`) and
+re-runs its window **against the reference it was armed with, never the clock**, or a check
+arming a chip at a fixture's own newest day would find itself measuring today after a rebuild.
+Measured, one arrival stamped on the armed day: demo **37 lit → 38**, 10k **2 → 3**,
+dominant-folder **2 → 3**, tag **1 → 2**, probe lit on all four. With the registration disabled
+the probe reads `DARK -- the set went stale` on all four.
+
+**A dimension switch draws copies** (`github#86`, `design/0015`). A stand-in is a second dot for
+a note the lens has an opinion about, under an id the lens has never seen; read by its own id it
+is a non-match, so the note would be haloed on the arriving disc and dimmed on the leaving one
+for as long as the cross lasts. Both reads — `isHighlighted` and the `nodeStyle` dim — go
+through `noteOf`, the same accessor `isPinned` uses, which costs one branch while no copies
+exist. Measured over a switch with a week armed: demo **883,890 stand-in frames, 60,480 of them
+lit, 0 disagreeing with their own note**; tag vault **1,353,429 / 1,519 / 0**. Without `noteOf`,
+the demo run reports **83,040 disagreeing frames and not one lit stand-in**.
+
 ## Every highlight source belongs in the signature
 
 `isHighlighted` answers yes for a clicked group, a clicked subfolder path, a marked heatmap
-day, a hovered day or year, and — since 2026-08-23 — a hovered legend row
-(`state.hoverGroup` / `state.hoverPath`). ("Mark today" was a sixth until 1.7.0 removed the
-button; the band's picked day absorbed it.) Every one of them feeds the same per-note ramp,
+day, a hovered day or year, since 2026-08-23 a hovered legend row (`state.hoverGroup` /
+`state.hoverPath`), and since github#70 **an armed recent chip** (`state.recent`) — plus
+`state.heatSource`, which is not itself a highlight but decides *which date* `isMarkedDay`
+compares, so it changes who is lit without `state.markDay` moving at all. ("Mark today" was
+a sixth until 1.7.0 removed the button; the band's picked day absorbed it.)
+Every one of them feeds the same per-note ramp,
 and every one must appear in `hlSignature`: that signature decides whether the per-note
 sweep runs at all, so a source missing from it is a source whose highlight silently never
 ramps.
@@ -1974,14 +2513,17 @@ click) edge running under a dim note used to lose a bite of itself to every disc
 crossed — a well-connected hub read as dashed instead of solid (issue #2).
 
 ```javascript
-__vg.checkFocusWeb()      // -> dimAtGaps: 0, webOK: true
+await __vg.checkFocusWeb()      // -> dimAtGaps: 0, webOK: true
 ```
 
 Selects the best-connected note, composites the canvases in stacking order, and samples
 every lit curve at 1% steps, keeping the samples that fall geometrically inside a
 non-focus disc. `dimAtGaps` must be **0** — any sample landing on a dim disc means the web
 is still running under it. Not frame-sensitive: the check selects rather than hovers, so
-`hoverAmount()` is `1` immediately with no ramp to catch mid-flight.
+`hoverAmount()` is `1` immediately with no ramp to catch mid-flight. **Returns a `Promise`**
+(github#101) — it waits a real composited frame (double `requestAnimationFrame`) between its
+own `render()` and its own pixel read, so a caller must `await` it; reading synchronously
+samples whatever was on screen before this call, not after.
 
 Measured across the three vault shapes `scripts/smoke.mjs` builds: the demo vault (node
 452, degree 71, 364 in-disc samples) **107 dim before the fix, 0 after**; the 10k
@@ -2563,6 +3105,216 @@ the colour half of the assertion silently never runs. And an assertion over "key
 wrong" passes vacuously when there are no keys at all: both this check and the harness
 require the pick to have actually been offered and made.
 
+**A VAULT THAT SHIPS A SORTSPEC OPENS IN ITS OWN ORDER.** Since github#71 the default is not
+`Name` — it is *whatever the vault says*. `folderOrder` absent from the deps means **nobody has
+chosen yet**, and the page then resolves it at mount: a parsed spec with at least one section gives
+`explorer`, anything else gives `name`. That is the `sheetOpen`/`bandOpen` idiom from github#82,
+where absence means "decide from the width".
+
+An explicit value always wins and always sticks, which is what makes this safe: the host persists
+on every change (`decisions/0009`), so a reader who picks `Name` on a spec-carrying vault keeps
+`Name`. All three hosts had to stop coercing absence into `"name"` for this to work — `shell.html`
+passes `undefined`, the plugin's `DEFAULTS.folderOrder` is deliberately absent and
+`applyHiddenDefaults` only pushes a *stored* choice, and the exporter omits `folderOrder` from the
+data entirely unless `--folder-order` was passed. **Any one of those regressing to `"name"` silently
+disables the feature for every vault**, and nothing would fail: the disc would simply be in name
+order.
+
+**THE RANK IS THE OUTER SORT KEY, AND THERE ARE NOW TWO OF THEM (github#164).** `groupRank()`
+is the **stable** one -- archives 0, bracketed pseudo-groups 1, real folders 2, `(untagged)` 3,
+`(unlinked)` 4 -- and it is what `byGroupName()` sorts on, which makes it the **name order**,
+which makes it what hands out colour slots (github#71 D-5). `drawRank()` is what the **draw**
+order partitions on, and with **Vault root sorts with the folders** on it ranks `(vault root)`
+as **2**, a real folder, so it seats itself among them.
+
+**Where it seats is its first note, not the end of the list.** The setting was built as "below
+all folders" and that was wrong, caught by the maintainer against his own explorer: the notes in
+`(vault root)` are interleaved with the folders alphabetically, so the group belongs where its
+**alphabetically first note** sorts. On his vault that is between `09 - Work Notes` and `Inbox`,
+because the first root note is `CLAUDE` and the `_`-prefixed folders are pulled out to rank 0.
+`drawKey()` returns that note's name for the root group and the group's own name for everything
+else; `rootKey` is recomputed by `computeOrder()`.
+
+**Three defects, each found by the check rather than by reading:**
+
+1. Moving the rank inside `groupRank()` itself **repainted 17 of 18 groups on the demo vault** --
+   github#71's D-5 reintroduced from the other end, since D-5 had only decoupled the slot order
+   from a *spec-driven* reorder and both orders come off the same comparator. Hence two ranks.
+2. `drawOrder()` returned `names` untouched when the mode was `name`, so the setting worked on
+   `spec-vault` and did **nothing** on the other four. Where the root group sits is not the
+   sortspec's business. The partition runs in every mode now, and under `name` with the setting
+   off it is the **identity**: `names` arrives rank-sorted, so splitting it by rank rebuilds it.
+3. `rootKey` came back **empty on every fixture**. `inDim()` runs `computeOrder()` for the *tag*
+   disc as well, where no group is `(vault root)`, and the unconditional reset at the top of the
+   block wiped the key the folder disc had just derived. It is computed in the folder dimension
+   only.
+
+**The buckets stay at the very end, and that is what the check asserts** -- not that the last
+entries are non-folders, which was true only while the root group always went last. A real
+folder may now follow it: on `shape-vault` it seats between `refs` and `tiny`.
+
+**ONLY `spec-vault` CARRIES A SORTSPEC, and that is deliberate (github#71 D-13).** The other
+four fixtures are spec-free, so **every one of their goldens is byte-identical to the one
+`develop` already held** -- this feature adds a snapshot and moves none. `spec-vault` writes its
+spec to `beta/sortspec.md` and registers it through `.obsidian/plugins/custom-sort/data.json`,
+which is the arrangement a real vault ends up with and the reason its first section must say
+`target-folder: /` rather than `.`; that is the suite's coverage of the `additionalSortspecFile`
+path.
+
+**Why the shared fixtures were left alone.** An earlier pass on this branch wrote a spec into
+`make-test-vault.mjs` -- which reaches both the demo and the 10k vault -- and re-recorded their
+two goldens for it. The argument was that the 10k vault is the only fixture big enough to show
+the colour defect: **17 top-level folders against 12 colour slots**, so the slot walk cycles, and
+a slot that followed the draw order would swap hues between folders sharing one. The premise is
+true and the conclusion does not follow -- the colour check flips **`size`**, which reorders with
+no spec at all, so the 10k vault shows the defect whether or not it carries one. Measured: under
+`size` the order really moves there and every automatic slot is unchanged. The regeneration was
+legitimate -- the fixture genuinely gained a note -- but the repo's first law is that a golden is
+never regenerated to make a check pass, and a legitimate regeneration still spends that norm for
+coverage that was already present. So it was reverted.
+
+**Four spec-free fixtures also keep a check honest that one spec-free fixture only just kept
+alive**: *a vault with no sortspec is laid out in name order* now asserts on the demo, the 10k,
+`shape-vault` and `tag-vault`, rather than on `shape-vault` alone.
+
+**`spec-vault`'s shape is built to provoke, and each part of it provokes something named.** It is
+the only fixture whose wedges are not in name order, so it is where the explorer order is actually
+laid out:
+
+| what | why it is there |
+|---|---|
+| the root section pins **out of name order** | `zeta` and `alpha` are pinned first, so the wedge sequence cannot accidentally agree with the name order it is supposed to be leaving |
+| one **pinned subfolder is tiny** | `alpha/00 pinned tiny` holds 4 notes and is pinned first inside its parent. `ownsWedge()` grants a sub-wedge by **position** while `subCellIndex()` pools the tint by **rows**, so a small folder at position 0 is exactly where the two disagree (github#71 D-10, `decisions/0004`). Measured, not assumed |
+| a dated tree on **`order-desc`** | `gamma/YYYY-MM` reads newest-first, which is the point of `order-desc` on an ISO-prefixed tree and the thing that reads backwards without a spec |
+| a section aimed at a **folder that is gone**, and a line **outside the subset** | the two failure paths, so the fallback and the notice are exercised by a real spec rather than only by the parser's unit checks |
+| registered **globally, from inside a folder** | `.obsidian/plugins/custom-sort/data.json` names `beta/sortspec.md`. That is the arrangement a real vault ends up with, and the reason its root section must say `target-folder: /` rather than `.`. It is the suite's only coverage of the `additionalSortspecFile` path |
+
+Name order would be `alpha, beta, gamma, zeta`; under `explorer` it is `zeta, alpha, beta, gamma`.
+
+**Its `--end` is pinned by every caller and must stay that way.** The `YYYY-MM` subfolders are
+derived from note dates, so moving `--end` moves notes between subfolders and the subfolder cells
+move with them -- the exact failure the 10k vault hit on 2026-09-04, when 893 notes moved on the
+first weekly refresh. A fixture whose golden fails weekly teaches everyone to regenerate goldens to
+make a check pass, which is the one thing this repo forbids. Pinned in `smoke.mjs`,
+`update-layout-snapshots.mjs` and the `suite-stamp.mjs` self-test alike.
+
+**A FOURTH FIXTURE since github#71: `spec-vault`.** 287 notes, and the only one laid out in
+anything but name order — it ships a sortspec and is built with `--folder-order explorer`, so
+the whole suite runs against a disc whose wedges are where a spec put them. Its `--end` is
+**pinned at 2026-09-08**, like the 10k vault's and for the same reason: `gamma/` files its notes
+into `YYYY-MM` subfolders derived from their dates, so a moving `--end` would move notes
+between subfolders and fail its own golden on the first weekly refresh. It carries its own
+digest input list (`make-spec-vault.mjs` alone), because the original trio share one only
+because `make-demo-vault` delegates to `make-test-vault`; adding a fourth to that list would
+regenerate all three for a file they never read.
+
+## A folder keeps its colour when the wedge order changes
+
+github#71. **The goldens cannot catch this**, which is the whole reason it has a check: they
+hold node positions and band assignment, not colour. A change that reordered the wedges *and*
+repainted every one of them would pass "layout matches its golden snapshot" on all four
+fixtures.
+
+The automatic palette slot is handed out as `auto++ % SLOT_COUNT` in `buildColors()` — a
+group's **index in the array being walked**. So the moment the draw order could be something
+other than name order, walking it would have made a folder's hue a function of where the spec
+happened to put it. `design/0001` says name order exists precisely so a group keeps its colour
+as the vault grows, and github#71 lists it as a thing the change must not break.
+
+`computeOrder()` therefore emits **two** arrays: `order[dim]`, the draw order, and
+`slotOrder[dim]`, an always-name-ordered copy that is the only thing the slot walk reads. Under
+`Name` the two are equal and the walk is byte-identical to what it replaced.
+
+```bash
+node scripts/smoke.mjs --only "keeps its colour"
+```
+
+Measured 2026-09-08 on the spec fixture, flipping all three modes: the order really moves under
+both `size` and `explorer` (`alpha, beta, gamma, zeta` → `alpha, gamma, beta, zeta` and →
+`zeta, alpha, beta, gamma`) and **every automatic slot is unchanged** — `alpha=g2` and `zeta=g5`
+in all three. `(vault root)` keeps `g1` and `(unlinked)` keeps the archive slot `g11` throughout,
+which is the rank rule below holding at the same time.
+
+**The rank is the outer key in every mode.** `(vault root)`, the `_`-archives and `(unlinked)`
+keep the positions `design/0001` gave them; only the real-folder bucket is re-sorted. Measured
+in the same run.
+
+## The two group comparators are deliberately not the same
+
+github#71. `computeOrder()` compares names with `localeCompare(..., { numeric: true })`; the
+`subOrder` build compares with a plain `localeCompare`. Unifying them is the obvious tidy-up and
+it is **wrong**: it reorders numbered subfolders on the 10k fixture and fails that vault's
+golden, while reading in the diff like a refactor.
+
+**The spec path is a THIRD comparator, and github#172 corrected which one it is.** This section
+used to end "The spec path's own `a-z` is plain `localeCompare` too, matching what the mirrored
+plugin's `a-z` means." The second half of that sentence is false, and it is what the first half
+was resting on: the plugin's `a-z` is the numeric-aware order — its own README, "numbers are
+treated specifically and 2 goes before 11" — and its `true a-z` is the plain one, "numbers are
+treated as texts and 11 goes before 2". So `orderBySortSection` now picks its comparator from the
+directive: `a-z` numeric, `true a-z` plain. Measured on `2 drafts` against `10 archive`:
+`1 inbox | 10 archive | 2 drafts` before, `1 inbox | 2 drafts | 10 archive` after, which is what
+`byGroupName` and the explorer beside it both say.
+
+**That does not reopen the unification above.** This changed the spec path only, which is gated
+behind a non-default setting and reached by one fixture; the `subOrder` build's plain comparator
+is untouched and the 10k golden is unmoved. All five goldens were verified byte-identical after
+the change — band unchanged and positions unchanged on demo (1403), 10k (10002), shape (954),
+tag (891) and spec (287) — and `spec-vault` is the one that could have moved, since a
+spec-carrying vault with nothing stored opens in explorer mode, so its golden *is* the
+spec-ordered layout. It did not, because its only `order-desc: a-z` runs over zero-padded
+`YYYY-MM` folders, where numeric and plain collation agree.
+
+## A vault's layout matches its golden snapshot — the sortspec paths
+
+github#71, and all of these are `node scripts/smoke.mjs --only "sortspec"` plus
+`--only "wedge order follows"`. Measured 2026-09-08, 20/20 across all four fixtures:
+
+- **the order follows the spec.** On `spec-vault`, pins land first and in spec order: wedges
+  `zeta, alpha, ...` against name order `alpha, beta, gamma, zeta`; `alpha`'s subs
+  `00 pinned tiny, 04 smaller, 01 big, ...` against the size order `01 big, 02 middling, ...`.
+  Both pin lists are deliberately against *both* name and size order, so neither can pass by
+  accident.
+- **a vault with no spec is untouched.** Asking for `File explorer` in the other three fixtures
+  leaves every group in name order — a no-op, not an empty or half-applied order.
+- **an unreadable spec falls back and names the line.** A `target-folder:` with no value drops
+  its section rather than silently meaning the vault root; a `> a-z` and an
+  `order-asc: modified` are skipped, each carrying its line number and a reason.
+- **a spec naming a folder that is gone is ignored, not fatal, and skips nothing.** Three pins,
+  two naming folders that do not exist → the one that exists still leads and **0 lines are
+  skipped**. A stale pin is wear on a spec, not a syntax error — and a real root section usually
+  pins *files*, which are not folders and can never match.
+
+github#172 adds three more, `on: "all"`, and each was verified to **fail on develop at fd08e12**
+by building a page from that revision and running the check body against it. A check nobody has
+watched fail is a check nobody has tested.
+
+- **a broken target-folder takes its pins with it, never the spec's own folder.** A valueless
+  `target-folder:` followed by two pins, in a spec living in `Home`. Develop: `Home`'s own order
+  came out `[gamma, alpha, beta]`, the section matched, and **two** sections survived —
+  `Home@3[gamma alpha]` and `(root)@3[beta]`. After: `[alpha, beta, gamma]`, nothing matched, one
+  section. It asserts the other half too, which is the easy over-correction: the section **after**
+  a dead one still has to be read.
+- **order-asc: a-z reads numbers as numbers, and true a-z as text.** Asserted as the relative
+  order of `2 drafts` against `10 archive` rather than a whole sequence, so no locale's
+  tie-breaking decides the check.
+- **a leading slash anchors a sortspec target at the vault root.** Develop:
+  `[Projects@2, Archive/Projects@3]`, `/Projects/` compiled to a rank-1 pattern, `./` resolved to
+  `Notes@2`, and all three of `Old/Projects`, `Old Projects` and `Other/Notes` were reached by a
+  section that never named them. After: every one a rank-3 exact path, and none of the three
+  reached.
+
+And the unreadable-spec check above was **tightened, not extended**: its `keptOrder` accepted
+`gamma|alpha|beta` as well as the untouched order, which is precisely the section *not* being
+dropped, so the check could never have caught the thing its own prose promised. It now requires
+the order unchanged **and** `matched` false, and it fails on develop.
+
+**The default is what keeps the other three goldens still.** `Name` is the default, no existing
+fixture carries a spec, and the spec path is gated behind a non-default setting. Verified the
+strong way rather than argued: `update-layout-snapshots.mjs` rewrites **all four** snapshots, and
+after github#71 `git status` reported only `spec-vault.json` as new — `demo-vault.json`,
+`test-vault.json` and `shape-vault.json` came back byte-identical.
+
 ## A row-0 dot may not eat past a fixed share of the hub's own radius
 
 github#35, the dot-sizing half (the hub-boundary-*position* half shipped separately in
@@ -2648,8 +3400,9 @@ large outer-ring dots in a two-note ring (42–74 px) are `DOT_ROOM_MAX` doing w
 
 ## A folder that holds notes keeps its row, its slot and its colour
 
-The twelve automatic colour slots are handed out by POSITION in `order[state.dim]`
-(`buildColors`), so while that list was built only from groups currently holding a member,
+The automatic colour slots are handed out by POSITION in `order[state.dim]`
+(`buildColors`) — **ten of them, the hues, since github#118; the two greys are pickable but
+out of the rotation** — so while that list was built only from groups currently holding a member,
 anything that emptied a group renumbered every group behind it — each one inheriting the
 colour of the one in front. `computeOrder` now seeds the list from where notes are **filed**
 (each node's own `folder`), so every folder that holds a note keeps its row and its slot
@@ -2799,14 +3552,187 @@ build's own header comment) and byte 101,719 of the page, each inside its banner
 the pre-push hook next to the network check, with no skip flag, and `releasing.md` says why a
 release cannot go out without it.
 
+## A saved PNG contains the graph, in both hosts
+
+The two WebGL layers are created with `preserveDrawingBuffer: false`
+(`src/engine/renderer.ts`), which means the browser is free to empty their drawing buffers at
+the compositing pass that follows a draw. `savePng()` used to composite those canvases without
+drawing them first, so on a settled disc — the only state anyone is in when they reach for the
+button — it copied two empty buffers and saved the background fill plus the logo, with no error
+anywhere (github#142).
+
+**The law: the draw and the copy happen in the same task.** `renderer.render()` is synchronous
+and so is `savePng()` from its first line to `a.click()`, so one call at the top of it is
+enough; scheduling a frame is not, because the scheduled frame lands after the copy and the
+copy is the thing that needed the pixels. It goes at the top rather than next to the composite
+loop because `render()` resizes, and the composite canvas is sized from the layers.
+
+Not the fix: `preserveDrawingBuffer: true`. It charges every frame of every session for a
+button pressed occasionally, and the issue ruled it out before the work started.
+
+```bash
+node scripts/smoke.mjs --only "idle PNG export"      # the exported page
+node scripts/obsidian-smoke.mjs --only "png export"  # the plugin, in a real Obsidian
+```
+
+`scripts/png-capture.mjs` holds the one measurement both harnesses drive, because the button is
+one function serving both hosts. It settles the disc, waits out a compositing pass, swaps
+`HTMLAnchorElement.prototype.click` for the length of one click — the anchor `savePng()` builds
+is never appended, so nothing propagates off it and no listener can see it — and clicks the real
+`#vg-png`. Two numbers come back, and **file size is neither of them**: an empty export is a
+real PNG of a real background and weighs a plausible 29–76 kB. The layers are counted inside
+`savePng()`'s own task, the only place their buffers are still true; the saved file is judged by
+how many of its pixels differ from its own background fill *outside the logo's square*, because
+the composite is filled opaque before anything lands on it and so is 100% non-transparent either
+way.
+
+| | page, 2256x1123 | plugin, 1268x690 |
+|---|---|---|
+| edge layer painted px, before → after | 0 → **512,858** | 0 → **210,125** |
+| node layer painted px, before → after | 0 → **57,846** | 0 → **24,511** |
+| saved px off background, outside the logo | 0 → **469,542** | 0 → **199,278** |
+| logo px, before → after | 917 → 959 | 339 → 363 |
+| data URL | 76 kB → 2,042 kB | 29 kB → 813 kB |
+
+The logo column is the control: it is the part that was always there, and it barely moves.
+`PNG_GRAPH_PX_MIN` is 2,000 — three orders of magnitude under what a real export clears and
+well over what a blank one can reach, so the floor is not a number anything is tuned to.
+
+The extra render costs one frame on a button pressed occasionally, which is the same frame
+the page draws continuously while the camera moves; a click mid-cascade cancels the pending
+frame and draws it immediately rather than dropping it. `render()` also emits `afterRender`,
+so `placeLogo()` has run before `savePng()` reads the logo's position — the export now
+composites the logo where this frame put it rather than where the last one did.
+
+## A lost WebGL layer comes back, and a blank one is never silent
+
+The three WebGL layers (`edges`, `nodes`, `hoverNodes`) are contexts the browser owns and may
+take back at any time — a driver reset, a GPU switch, a machine waking up, too many contexts on
+one page. Until github#144 `src/engine/renderer.ts` created them and installed no
+`webglcontextlost` or `webglcontextrestored` handler anywhere, so a loss was permanent for the
+life of the mount and the page said nothing about it.
+
+**The law has two halves, and the second is not decoration.** *Prevent the default on the loss,
+rebuild the layer's GPU state on the restore* — a loss event left un-prevented is never followed
+by a restore, so preventing it is what makes recovery possible at all rather than an
+optimisation. And *a layer that is gone is said out loud*: a disc that stops drawing with no
+error and no message is indistinguishable from an empty vault, which is exactly how this defect
+survived being looked at.
+
+What a restored context does and does not carry is the whole of the fix. Per the spec it is the
+**same `WebGL2RenderingContext` object** — measured, `sameContexts` in the harness below, so no
+canvas is replaced and nothing above the engine has a stale handle — with **default state and no
+resources**. So three things are said again on restoration and nothing else is: `blendFunc`, the
+viewport, and that layer's programs, rebuilt through the same `makeNodePrograms` /
+`makeEdgePrograms` the constructor uses. The fresh programs come back at capacity 0 with empty
+arrays, which is why the restore ends in `needToProcess = true` and one `render()` — `process()`
+is what puts the vertex data back, and `render()` is what calls it.
+
+**Loss is per layer, not one flag.** `WEBGL_lose_context` works on one context, and a browser may
+lose one of three; `render()`, `renderHighlightedNodes()` and `clear()` each skip a lost layer, so
+the other two and the three 2D layers carry on drawing. The measured table below is what that
+claim rests on: with `edges` gone, `nodes` and `hoverNodes` draw *exactly* what they drew before,
+to the pixel.
+
+**Nothing the graph holds lives in the GL**, so the camera, the selection, the pins, the query and
+the cascade's clock survive by construction rather than by being copied across a remount. That is
+the reason this is an in-place rebuild and not the "controlled remount path" the issue offered as
+the alternative — a remount would have to preserve all of it deliberately, and would have to be
+threaded through `src/page.js` and `plugin/main.js` as well.
+
+`kill()` loses all three contexts on purpose to hand the GPU memory back, so it drops the two
+listeners first and the loss handler returns early while `killed`: teardown must not ask the
+browser to restore something being thrown away, and must not raise a notice on the way out.
+
+```bash
+node scripts/webgl-recovery-check.mjs                  # generates its own 300-note vault
+node scripts/webgl-recovery-check.mjs --vault ./demo-vault
+node scripts/webgl-recovery-check.mjs --url <a built page>   # e.g. one built from develop
+```
+
+Headless, so it places no window and takes **no screen lock**. It builds a real page, seeds a
+search and a selection so all three layers have work of their own, then loses and restores each
+context in turn. Layers are counted **inside the same task that drew them** — `preserveDrawingBuffer`
+is false, so a later read is empty by design (github#142) — using `png-capture.mjs`'s own
+`drawImage`-and-count-alpha idiom.
+
+**The assertion is against the baseline, not a tuned floor.** A lost layer reads exactly 0 and a
+recovered one reads exactly what it read before, so "draws again" is an equality at rest and a
+90% bound mid-cascade, where the disc has moved a pixel or two under it. Measured on a 527-note
+generated vault at 1400x900, painted px per layer:
+
+| scenario | edges | nodes | hoverNodes |
+|---|---|---|---|
+| baseline | 128,461 | 14,383 | 10,801 |
+| `edges` lost | **0** | 14,383 | 10,801 |
+| `edges` restored | **128,461** | 14,383 | 10,801 |
+| `nodes` lost | 128,461 | **0** | 10,801 |
+| `nodes` restored | 128,461 | **14,383** | 10,801 |
+| `hoverNodes` lost | 128,461 | 14,383 | **0** |
+| `hoverNodes` restored | 128,461 | 14,383 | **10,801** |
+| all three lost | 0 | 0 | 0 |
+| all three restored | 128,461 | 14,383 | 10,801 |
+| all three lost mid-cascade | 0 | 0 | 0 |
+| the cascade then lands | 128,464 | 14,384 | 10,802 |
+| three gone, `edges` back after the wait | 128,464 | 0 | 0 |
+
+**On `develop` the same harness reports 23 of 45 failed**, and the table is the diagnosis rather
+than the verdict: every layer, once lost, stays at 0 for the rest of the page's life, and the
+losses accumulate — by scenario 2.3 all three read 0 because the two lost in 2.1 and 2.2 never
+came back. `defaultPrevented` is `false` on every loss event there, no `webglcontextrestored`
+ever arrives, and `#vg-glost` does not exist. The three checks that pass on both sides are the
+ones that were never at risk: the context object is the same either way (a browser fact, not a
+fix), and the camera and pins were never in the GL.
+
+**The notice is the page's, not the engine's.** The engine's boundary (`src/engine/types.ts`) is a
+measured one and draws no chrome; it emits `contextLost` / `contextRestored` carrying the layer,
+and `src/page.js` renders `#vg-glost` from them — which gives the Obsidian view the same notice
+for free, since it mounts the same page. A pill rather than `#vg-busy`'s full-stage cover,
+because loss is per layer and the disc is often still half drawn and worth seeing.
+`pointer-events: none`, so it never eats a click meant for the graph underneath.
+
+The wording escalates once, after `GLOST_STALL_MS` (4,000 ms): a real driver reset restores within
+a frame or two, so four seconds never flashes the second wording during a normal recovery, and a
+loss with no restore coming should not sit on "restoring..." much longer than that. It names no
+host — this page is the exported tab and the Obsidian view alike, and "reload the tab" is right in
+only one of them.
+
+**A partial restore does not un-say what already stands.** Found in review rather than by the
+harness, and then covered by it: with all three gone and the wait already elapsed, bringing one
+layer back left the other two described as "restoring..." with no timer running, so the page would
+have promised a recovery indefinitely. The escalation is a flag now, cleared only when the last
+layer is back or when a *new* layer goes (which is news, and restarts the wait). Measured, last
+row of the table above: three lost reads `3 graphics layers were lost and have not come back`, and
+after `edges` comes back it reads **`2 graphics layers were lost and have not come back`** while
+`edges` alone draws.
+
+**At phone width the notice takes the whole top row, on purpose.** Below 720px `#vg-cam` and
+`#vg-ov` move to the top right and `#vg-mob` is at the top left, leaving about 170px between them
+— not a sentence. So the pill spans the row and sits above them. It keeps `pointer-events: none`,
+so every button under it is still reachable by touch; a lost context is a broken state, and for as
+long as it lasts the reason outranks the camera buttons.
+
+**Not a check inside `smoke.mjs`, deliberately.** The suite shares one page across 66 checks on
+three fixtures; a *failed* restore would poison every check after it and turn one defect into
+twenty confusing failures. `teardown-check.mjs` and `render-race-check.mjs` sit outside for the
+same kind of reason.
+
+**What this does not establish.** The harness drives `WEBGL_lose_context`, which is a controlled
+simulation: it proves the handlers work and that a lost layer comes back, and says nothing about
+how often monitor power-saving, a driver reset or a GPU switch actually causes this in the field.
+The issue was explicit about that, and no field frequency was measured.
+
 ## A torn-down mount holds nothing outside its root
 
 `mountVaultGraph`'s handle has a `destroy()`, and the plugin's `teardown()` calls it. After
 it, nothing this mount registered outside its own element is still registered: the
 `ResizeObserver` on the root and the two on the heatmap band are disconnected, the document's
-`mousemove` and `visibilitychange` listeners and the window `resize` fallbacks are removed,
-every animation frame and timer in flight is cancelled, `cascade()` refuses to start, and the
-renderer is killed last. The host still owns the root and empties it itself.
+`mousemove` and `visibilitychange` listeners, the window `resize` fallbacks and the
+`matchMedia("(max-width: 720px)")` change handler are removed, every animation frame and timer
+in flight is cancelled, `cascade()` refuses to start, and the renderer is killed last **and its
+handle dropped** — `renderer = null`, so the `if (renderer)` guard every call site already
+carries actually stops a handler that outlives the destroy. The host still owns the root and
+empties it itself.
 
 ```bash
 node scripts/teardown-check.mjs --vault ./demo-vault           # six destroy+remount cycles, at rest
@@ -2833,6 +3759,22 @@ with `destroy()` the same cascade stops where it stands (155 frames, `busy` fals
 
 The check is manual and not in `smoke.mjs`: a cycle replaces the page's root and its `__vg`,
 and the suite's checks share one page.
+
+**github#135 — one listener put the whole of this back.** The `matchMedia` handler
+`github#131` added registered with no remover. A `MediaQueryList` lives on the window, so the
+handler on it held the entire `mountVaultGraph` closure — graph, renderer, detached root — and
+the previous mount survived every cycle. Re-measured on the same 10k fixture, same six cycles:
+
+| | heap MB (post-GC) | DOM nodes | JS listeners | document mousemove | document visibilitychange |
+|---|---|---|---|---|---|
+| before, load → cycle 6 | 16.0 → 67.5 | 683 → 4524 | 186 → 1206 | 2 → 2 | 1 → 1 |
+| after, load → cycle 6 | 16.0 → 16.3 | 683 → 684 | 186 → 186 | 2 → 2 | 1 → 1 |
+
+**+640 DOM nodes, +170 listeners and +8.58 MB per cycle**, against the check's 1.5 MB/cycle
+bound. The two document counts stayed correct throughout, which is what made this read as a
+small omission: the leaked listeners were not new registrations but the previous mount's own,
+kept alive by the one closure nobody released. So a claim of this shape is only worth what the
+harness says about it — the document columns alone would have called it clean.
 
 ## The plugin behaves inside a real Obsidian
 
@@ -2956,10 +3898,200 @@ hidden, 20 after** -- twice in a row. The wake is a 500 ms poll that runs only w
 waiting, because `active-leaf-change` / `layout-change` do not carry the case: switching away
 fired five of them and `revealLeaf` fired none.
 
+**A rebuild waits for the HAND as well as for the leaf (github#120).** The block above is not
+merely slow, it lands wherever the reader happens to be -- and until github#120 `liveBusy()` was
+`cascadeRun || anim || play`, which does not include a drag. So a rebuild ran `ingest`,
+`hardRelayout` and `cascade` synchronously in the middle of a pan. Measured in a real Obsidian on
+the demo fixture, driving a six-second drag and reading the rAF interval distribution back:
+
+| | quiet pan | pan with notes arriving |
+|---|---|---|
+| median frame | 16.7 ms | **16.7 ms** |
+| worst frame, mounts 1-4 | 16.9 / 16.9 / 33.4 / 17.0 ms | **517 / 734 / 851 / 817 ms** |
+| frames over 50 ms | 0, every time | 5 / 6 / 6 / 7 per six-second drag |
+
+**The median never moves**, which is why it reads as a stutter rather than a slowdown: one frozen
+frame per rebuild, and nothing else. The quiet row is the control that matters -- it stays flat
+while the vault doubles from 1,403 to 2,218 notes, so panning itself does not degrade with vault
+size and every bit of the damage is the rebuild landing under the pointer.
+
+**It took four passes, and each of the first three looked like progress while leaving the stall
+in place.** Worth recording in full, because the shape of the mistake repeats:
+
+| | worst frame under arrivals | over 50 ms |
+|---|---|---|
+| nothing done | 517 / 734 / 851 / 817 ms | 5 / 6 / 6 / 7 |
+| the listener fix below | 371 / 687 / 653 / 702 ms | 4 |
+| + `applyData` deferred on a drag | 417 / 767 / 868 / 867 ms | 3 |
+| + the host's `buildData` deferred too | 367 / 634 / 653 / 687 ms | 2 |
+| + the cap fixed | **23.9 / 18.8 / 22.9 / 21.5 ms** | **0** |
+
+Deferring `applyData` alone barely moved it, because `liveRebuild()` runs `await buildData(app,
+...)` over the whole metadata cache **before** `applyData` is ever consulted -- the apply was
+gated and the build was not. And with both gated it *still* stalled, because `DRAG_MAX_MS` was
+5,000 ms: a drag longer than five seconds tripped the very cap meant to protect the gates and let
+rebuilds back in mid-pan. The final row is a pan under arrivals that is indistinguishable from a
+quiet one.
+
+**The floor is not Obsidian.** Measured with `--no-live`, where the plugin does no work at all on
+an arrival: a pan under the same arrivals gives worst frames of **27.9 and 19.0 ms, zero over
+50 ms**, and `graph.order` never moves. So Obsidian's own parsing and `resolvedLinks` update cost
+essentially nothing, and every millisecond of the stall was this plugin's.
+
+A drag now counts as owning the frame loop, on both sides: the page refuses to apply, and the host
+refuses to build (`api.interacting()`, which lives outside the demo-and-debug region precisely
+because a shipped build needs it). No new machinery -- `livePending`, the 120 ms drain and the
+500 ms wake poll all already existed. A 250 ms grace covers the camera's inertia after mouseup; a
+lost mouseup is caught by the next `mousemovebody` whose `buttons` no longer carry bit 1, the way
+`bindNodeDrag` already does it, with `DRAG_MAX_MS` demoted to a 60,000 ms backstop for a pointer
+that stops moving entirely.
+
+**`render()` registers nothing that outlives it (github#120).** `render()` reruns on Refresh and
+on any rebuild whose churn passes `LIVE_MAX_CHANGED`, while `registerEvent` and `registerDomEvent`
+only release when the **view** unloads. Three registrations sat inside it. Measured over three
+hidden bursts of 250 notes each, identical runs on either side of the fix:
+
+| | before | after |
+|---|---|---|
+| vault and cache handlers | 51 -> 63 | **45 -> 45** |
+| view event refs | 16 -> 30 | **8 -> 8** |
+| DOM listeners | +548 | **+41** |
+| DOM nodes | +3,573 | **+1,668** |
+| JS heap | +17.2 MB | **+3.7 MB** |
+
+Six handlers and seven refs per remount, each firing on every metadata event. The DOM row is a
+second leak with the same cause: `registerDomEvent` files the element on the view's list, so every
+discarded page subtree stayed reachable -- about 2,150 nodes per dead page. The remaining +1,668
+is legitimate, being 533 genuinely new notes in the legend and lists.
+
 ```bash
 node scripts/build-plugin.mjs
 node scripts/obsidian-smoke.mjs --only live      # a real Obsidian, throwaway copy of a fixture
+node scripts/live-growth-check.mjs --view open --pan    # github#120, minutes not seconds
 ```
+
+## A render that is no longer the current one mounts nothing
+
+github#140. `render()` tears down synchronously and then awaits `buildData()`, and until this
+there was nothing in that gap a later teardown or a newer render could reach into. Everything
+after the await -- `lastData`, the appended page, `mountVaultGraph()`, `subscribeLive()` -- ran
+unconditionally, on whatever view state existed by the time the build came back.
+
+**`teardown()` bumps a monotonic `renderGen`, and that is the only place it moves.** Every way a
+mount ends routes through it -- a newer render, `onClose()`, an explicit teardown -- so there is no
+fourth call site to forget, and `teardown()` stays idempotent. `render()` captures the generation
+immediately after its own teardown call, snapshots the four settings `buildData` reads
+(`BuildOptions`, a type now rather than a sentence in a comment), and re-reads the
+generation on the far side of the await. A superseded render
+returns having written **nothing**: no `lastData`, no markup, no mount, no registration -- and its
+error and `finally` paths are guarded identically, because the current render's handle and busy
+state are not an old request's to clear.
+
+`this.rebuilding` moved into `render()` with it. It had guarded the Refresh button alone, which
+left settings rebuilds, the rebuild command and the initial open unguarded; `teardown()` clears it,
+without which a view closed mid-build keeps a busy flag no later render would ever clear.
+
+```bash
+node scripts/render-race-check.mjs      # headless, ~10s, no display and no screen lock
+```
+
+The harness bundles the **real** `VaultGraphView` against stubbed `obsidian`, `src/page.js` and
+`src/engine/index`, runs it in headless Chrome over `cdp.mjs`, and holds the first `vault.adapter`
+read of each build on a latch it releases by name -- which is the one thing the Obsidian harnesses
+cannot offer, since the only way to delay `buildData()` there is to monkeypatch it over CDP and
+measure the patch. Real browser rather than a DOM shim, because `render()` parses `src/page.html`
+with `DOMParser` and a shim that is subtly wrong hides the defect instead of showing it. Twenty-three
+checks, four scenarios, measured on either side of the fix:
+
+| | before | after |
+|---|---|---|
+| A and B overlap, **B resolves first** — pages in the root | 2 | **1** |
+| — live mounts | 2 (`B`, `A`) | **1 (`B`)** |
+| — `this.handle` / `lastData` | `A` / `A` | **`B` / `B`** |
+| the view is closed mid-build — mounts created | 1 | **0** |
+| — pages in the root / `this.handle` | 1 / `C` | **0 / `null`** |
+| — `rebuilding` left behind | true | **false** |
+| three rapid rebuilds resolving **3, 1, 2** — pages in the root | 3 | **1** |
+| — live mounts | 3 (`r3`, `r1`, `r2`) | **1 (`r3`)** |
+| — `this.handle` | `r2`, the last to *resolve* | **`r3`, the newest *started*** |
+| two Refresh clicks already dispatched — new mounts | 1 | 1 (**regression guard**) |
+| the mount's `win`, with `activeWindow` naming another window | the **other** window | **the view's own** |
+| the page's `data-theme`, that other document being light | `light` | **`dark`, its own document's** |
+
+**13 of 23 checks failed before, 23 of 23 pass after.** The first row is the leak the issue names:
+the second assignment to `this.handle` orphaned the first mount rather than replacing it, so it
+stayed alive and unreachable and the later teardown destroyed only one of the two. github#120 holds
+through all of it -- **six view event refs across three renders, not eighteen**, which the harness
+asserts so the two fixes cannot quietly undo each other.
+
+**The last two rows are the popout, modelled.** A single-window harness cannot tell `activeWindow` from the view's own window, so it would have asserted the fix while proving nothing. The harness builds an iframe, points `activeWindow` / `activeDocument` at it, and gives it the *opposite* theme -- at which point reading the active one instead of the view's own is a wrong `win` on the mount and a page painted `light` inside a dark document, which is exactly what the pre-fix run reports.
+
+**The four Obsidian and Chrome harnesses the issue names, as regression cover**, all against a
+throwaway copy of the demo fixture with this build installed:
+
+```bash
+node scripts/obsidian-smoke.mjs                       # 21/21
+node scripts/teardown-check.mjs --vault <copy>        # clean, 4 cycles
+node scripts/deferred-check.mjs --vault <copy>        # 10/10
+node scripts/refresh-check.mjs  --vault <copy>        # 8/9, and the 9th fails on develop too
+```
+
+The rows that speak to this change: **closing and reopening the view six times grew nothing** (heap
+34.5 -> 35.3 MB at 0.16 MB/cycle, DOM nodes 9,379 -> 9,379, listeners 1,930 -> 1,930), **Refresh
+remounted and destroyed the old mount** (6,169 ms, build 15 ms, mount 8 ms, old api gone, 0 errors),
+and `teardown-check` held flat over four destroy+remount cycles (nodes 683 -> 684, listeners 186 ->
+186). `deferred-check` covers the other end of the lifecycle -- a leaf restored **deferred**, where
+`leaf.view.render` does not exist -- and stays 10/10.
+
+**The popout pair is the part that matters for `contentEl.win`**, and it is measured rather than
+argued: **the view mounts in a popout and tears down with it** (popout document true, window true,
+1200x860 at -2498,70, 6 canvases, stage 912x550, ready in 509 ms, 0 errors, popout windows left open
+0), and **the hop trail survives a view moved out to a popout** with its back arrow still stepping
+there. So popout behaviour is preserved by the switch away from `activeWindow`. What is still *not*
+measured is the benefit: both windows here sit at 1x on one display, so the wrong-`devicePixelRatio`
+and throttled-frame-clock cases need two displays at different scaling and this branch has no number
+for them.
+
+**One check fails, and it fails on `origin/develop` too.** `refresh-check`'s "the graph has NOT
+noticed it on its own" asserts the *absence* of live refresh -- it is github#6's complaint, written
+before github#72 made live refresh the default -- so the graph now picks the note up on its own
+before Refresh is ever clicked and the check reports 1404 where it wants 1403. Confirmed by running
+the same harness against `origin/develop`'s `plugin/main.js`: same 8/9, same check. Stale harness,
+not a regression, and out of scope here.
+
+**The fourth scenario passes on both sides, deliberately.** It drives the real `onRefresh` callback
+the view handed its own page, capturing it *before* the render tears the button out -- the only way
+a second click can arrive at all -- and checks that the second is declined. That guard worked before
+and still works, which is the point: `this.rebuilding` moved owner, and the one thing it did do had
+to keep doing it.
+
+**Two things read across the await that were reading the wrong window.** `win:` on the mount deps
+and `syncTheme()`'s theme probe both used `activeWindow` / `activeDocument`, which name whichever
+window has **focus**, not the one the view lives in. Both go through Obsidian's own `contentEl.win`
+/ `contentEl.doc` now (documented as "the window this node belongs to, or the global window"), read
+at the point of use rather than captured, because a leaf can be moved between windows and the
+element always knows where it is.
+
+**The two are not equally consequential, and saying so matters more than the fix reading well.**
+`activeDocument === document` was measured **false** with a popout focused, so the wrong-window read
+is real and routine -- but Obsidian **mirrors** the theme classes onto every window, measured in a
+real Obsidian with a leaf popped out: **main `theme-dark` / popout `theme-dark`, and on Moonstone
+main `theme-light` / popout `theme-light`**. The two documents therefore always agree about the
+theme, so `syncTheme()` reading the wrong one was wrong in principle and produced no visible defect.
+It is corrected because the next person to add a per-document read should find the right idiom next
+to it, not because a user could see it.
+
+`win` is the one that bites. The page drives `requestAnimationFrame`, `setTimeout`,
+`devicePixelRatio` and `matchMedia` off `deps.win` across **81 call sites**, and all four are
+genuinely per-window: a popout on a display with different scaling takes the main window's
+`devicePixelRatio` into its canvas sizing, and its cascade runs on the main window's frame clock --
+which is throttled when that window is occluded. That measurement was **not** taken here: it needs
+two displays at different scale factors, and this branch has no number for it.
+
+`liveRebuild()`'s own `github#62` handle-identity guard is **untouched and still required**: it
+stops an old *live* result reaching a replacement graph, which is a different race in a different
+method. Finding 4 of github#81 (host registrations accumulating per render) is not this -- github#120
+fixed it in `73c62ca`, and the two stay apart.
 
 ## Word counts land by path, and an index stopped meaning a node
 
@@ -2982,6 +4114,90 @@ asked for.
 node scripts/smoke.mjs --only "land by path"
 ```
 
+## A word count lands only while its build still owns that note
+
+github#184. Both `readWords()` callbacks in `plugin/main.js` guarded on **object identity** --
+`this.handle === handle` in the opening sweep, `this.handle === handle && handle.api === api` in the
+live path. A live refresh calls `api.applyData()` on the mount it already has: it creates no new
+handle and no new api by design, so identity is the same object across every build of one mounted
+page, and it cannot separate them. Two races followed from that.
+
+**Live versus live.** `readWords` is fired with `void` and `liveBuilding` is cleared in the `finally`
+without awaiting it, so refresh B runs to completion while A's reads are still out. A then resolves
+with the content it snapshotted *before* the edit and calls `setWords()` over B's fresh count.
+
+**The opening sweep versus a live refresh -- the wider window.** The background read after the mount
+walks **every file in the vault**. Any note edited during that sweep gets its live-refreshed count
+overwritten when the sweep's read for that note resolves. That window is the whole vault read, not
+one note's: seconds to minutes on a large vault rather than milliseconds. Either way the wrong count
+sticks on screen until that note happens to be edited again.
+
+**The counter is per PATH, not per build, and that distinction is the whole design.** The view
+carries `buildGen`, bumped once per `readWords()` call started, and `wordsGen`, a `path -> claim`
+map that `teardown()` clears. Each call claims the paths it is about to read -- every node for the
+opening sweep, `want` for a live refresh -- and a callback writes only while `wordsGen.get(id)` is
+still its own claim.
+
+A plain per-build counter, which is what the issue proposed, is **worse than the defect**. A live
+refresh re-reads only the notes that changed (`want` is the dirty set plus whatever the build has no
+previous count for), and it carries every other count forward from `lastData` -- which during the
+opening sweep is still `0`, because the sweep has not landed yet. So a per-build guard drops the
+entire sweep on the first edit and leaves every uncontested note holding nothing. Measured on the
+harness below, with the per-build variant in place: **one edit during the sweep left `setWords`
+called once instead of three times, and two of the three notes with no count at all.** Claiming per
+path drops exactly the contested read and lets the rest of the sweep land.
+
+```bash
+node scripts/words-race-check.mjs       # headless, ~10s, no display and no screen lock
+```
+
+The harness bundles the **real** `VaultGraphView` against stubbed `obsidian`, `src/page.js` and
+`src/engine/index` and runs it in headless Chrome over `cdp.mjs`, the same shape as
+`render-race-check.mjs`. It latches somewhere different, because these races are elsewhere: every
+`vault.cachedRead` **snapshots the note's content at the moment the read is made** and then parks
+its resolve on a gate the driver releases by id. That is what "A resolves with pre-edit content"
+means, made literal, and it is what lets two builds' reads be interleaved by hand rather than raced.
+`setWords` is the measurement -- what the **page** was left holding, not what the view thinks.
+Thirteen checks over five scenarios:
+
+| | before | after |
+|---|---|---|
+| a plain open, nothing racing — counts on the page | 3, 2, 1 | 3, 2, 1 (**regression guard**) |
+| refreshes A then B on one note, **A's read resolving last** — the page's count | `3`, A's stale read | **`5`, B's** |
+| — `setWords` calls | 5 | **4**, A's callback wrote nothing |
+| a note edited mid-sweep — the edited note's count | `1`, the pre-edit read | **`4`, the refresh's** |
+| — the two notes the refresh never claimed | 2, 3 | 2, 3 (**regression guard**) |
+| — with a per-BUILD guard instead | — | 2 of 3 notes hold **no count**, `setWords` 1 not 3 |
+| two refreshes claiming **different** notes — the first refresh's count | 3 | 3 (**regression guard**) |
+| — entries in the claim map, on a three-note vault | — | **3**, one per node, rebuilt each refresh |
+| the view closed with three reads still out — `setWords` calls after release | 0 | 0 |
+
+**4 of 13 checks fail before, 13 of 13 pass after.** The regression-guard rows pass on both sides on
+purpose: the fix has to drop the contested read *without* dropping the sweep, and a harness that only
+asserted the first half would have signed off the per-build variant.
+
+**The claim map is rebuilt from `next.nodes` on every live refresh**, carrying each unclaimed path's
+existing claim across and dropping any path the new build no longer has. Two reasons, and the first
+is the smaller one: without it the map accumulates an entry for every distinct path ever dirtied
+during the life of one mount, which for a view left open all day with renames in it is the growth
+shape github#120 exists for. The second is correctness -- a claim held on a path that has been
+renamed away would let a read land `setWords()` on an id the page no longer has. Scenario 3c
+measures the bound directly: **three entries on a three-note vault after two refreshes**, carrying
+three distinct claims (`three.md` still the opening sweep's, `one.md` the first refresh's,
+`two.md` the second's) -- which is the per-path design made visible.
+
+**`liveRebuild()`'s own `github#62` handle-identity guard is untouched** -- the
+`if (this.handle !== handle || handle.api !== api) return;` on the far side of `buildData`. That one
+stops an old *live result* reaching a replacement graph, which is a different race in a different
+place. What went is the identity test inside the two `readWords` callbacks, which the claim strictly
+subsumes: every way the handle or the api changes routes through `teardown()`, and `teardown()`
+clears the claim map, so a read that outlived its mount finds no claim and drops (scenario 4).
+
+**What this does not establish.** The window was reproduced on a three-note stub, not measured on a
+real vault: no figure was taken for how long the opening sweep actually runs on the 10k fixture, or
+how often a note is edited inside it in practice. The issue reported the defect from reading the
+code, and nothing here changes that provenance.
+
 ## Comments are pointers, and the count only goes down
 
 github#61 cut every comment in `plugin/`, `src/` and `scripts/` to a pointer — a bare
@@ -2991,6 +4207,20 @@ banners kept. What it did not do was stop the prose coming back, and 386 lines o
 still there on 2026-09-06 (392 on `develop@fc7d157`): JSDoc blocks whose lines carry no tag,
 the ribbon icon's design notes in `plugin/main.js`, the `.d.ts` file's explanation of itself,
 `build-plugin.mjs`'s strip-marker essay.
+
+**And the ratchet is not self-enforcing across a batch of merges — github#188.** Nine tickets
+merged into `develop` in one session took it from **exactly 0 over to 272 over** (299 by the time
+it was worked), most of it in the suite's own infrastructure. No single branch was far enough over
+its own diff to notice, several correctly read the already-red gate as pre-existing debt outside
+their ticket, and the merge verification never ran this check at all. **The dominant failure was
+not a missing pointer but a pointer with an essay after it** — the label cap is 60 characters, and
+a `// github#151 -- ` prefix repeated down four wrapped lines fails on every one of them.
+
+github#188 converted the **327** lines that were not present at the pre-drift commit, leaving the
+**350** the baseline had already sanctioned, and lowered `BASELINE` 378 → **350**. Two rules it
+leaves behind: a comment whose reasoning does not fit in 60 characters belongs in `.ai-context/`
+with a pointer at the call site, and a merge into `develop` is the boundary where this check has
+to run, since the count is an aggregate no single branch can see.
 
 ```bash
 node scripts/check-comments.mjs          # counts per file, the total, the baseline
@@ -3003,7 +4233,9 @@ to 60 characters after `--`, `-` or `:`), a JSDoc tag line, a directive, a banne
 `/*!` block line. `BASELINE` in the script is held at **exactly** the count: a push that adds
 prose fails, and a commit that removes some fails too until the baseline is lowered to match,
 so the number can only go down — the ratchet github#60 used for the no-unsafe meter. In the
-pre-push hook next to the network check, with no skip flag.
+pre-push hook next to the network check, with no skip flag, and in `release.yml`. `release.ps1`
+ran neither until github#137 — cutting 2.7.0 the branch was pushed with a green `-DryRun` and
+the workflow went red on this exact check, so it now runs here too, same no-skip-flag rule.
 
 ## Our own code lints clean
 
@@ -3413,6 +4645,211 @@ Two guards, one shape each:
   (`Target.createTarget` from the page session — the first check to do so), and asserts no
   marker ran, the data decoded, and the graph mounted all three notes. This is the
   acceptance criterion as written: an actual generated file, opened.
+## A link resolves against the note it was written in
+
+`mineLinks()` in `src/build-graph.mjs` returned bare destination strings, and `resolve()` took
+only the destination — so the source note a link was written in never reached the lookup. Three
+defects fell out of that one omission (github#141, split from github#81 as findings 5, 7 and 6):
+
+- a `[rel](./Target.md)` written in `B/Source.md` lowercased, stripped `.md` and fell back to
+  the basename, landing on whichever `Target.md` was **indexed first** — `A/Target.md`;
+- `MDLINK` required `.md` to be followed immediately by `)` or whitespace, so
+  `[anchor](B/Target.md#Heading)` matched nothing at all: no edge, and not even a count in
+  `unresolved`;
+- both adapters keyed a ghost by `target.split("/").pop()`, so `[[FutureA/New]]` and
+  `[[FutureB/New]]` became **one** `ghost:New` with a single edge of weight 2, and the two
+  intended destinations were unreachable.
+
+The expectations are not invented. A disposable vault of 21 destination syntaxes was opened in a
+real Obsidian and `app.metadataCache.resolvedLinks` / `unresolvedLinks` read back over CDP, and
+that dump is what the check asserts against. Two things it settled that were worth not assuming:
+wikilinks and Markdown links **share one rule** here, and a *bare* name resolves
+**source-folder-first**, not by first-indexed basename — so finding 5 was the explicit-`./` case
+of a wider defect, and the bare-name behaviour the issue said to preserve absent a measurement is
+exactly what the measurement overturned.
+
+Measured on the issue's own probe vault — `A/Target.md`, `B/Target.md`, and a `B/Source.md`
+carrying `[rel](./Target.md)`, `[anchor](Target.md#Heading)`, `[[A/Target]]`, `[[FutureA/New]]`
+and `[[FutureB/New]]`:
+
+| | before | after |
+|---|---|---|
+| links mined | 2 | 4 |
+| `./Target.md` lands on | `A/Target.md` | `B/Target.md` |
+| `Target.md#Heading` | not mined | `B/Target.md` |
+| ghost nodes | 1 (`ghost:New`, w2) | 2 (`ghost:FutureA/New`, `ghost:FutureB/New`, w1 each) |
+| orphans | 1 | 0 |
+
+One more divergence the comparison turned up and this change closes: `WIKILINK` treated a **bare**
+`^` as a fragment separator, so `[[A/Target^abc]]` was mined as `A/Target` and resolved. Obsidian
+does not — a block ref is `#^blk`, and a lone caret is part of the filename, which the cache
+confirms by leaving `A/Target^abc` unresolved. Only `#` separates a fragment now, in both regexes;
+zero occurrences in any fixture.
+
+The lookup order is now `<source folder>/<dest>` exact, then vault-relative exact, then the
+ambiguous basename/alias index — and the first two read a **separate** `byPath` map, so a
+destination that names a path can never silently resolve to an unrelated basename. An explicit
+`./` or `../` destination stops after the first step: Obsidian leaves `./Missing` unresolved even
+with nothing else by that name, and so does the exporter. External URLs are dropped at the miner,
+which is required rather than tidy — widening `MDLINK` to accept a fragment would otherwise start
+mining `[x](https://example.com/thing.md)`, which Obsidian's cache does not treat as a link at all.
+**Only a Markdown link is tested for that, and the test requires `://` or a known scheme.** The
+first version of it was `^[a-z][a-z0-9+.-]*:` applied to both syntaxes, which reads `[[Debt: The
+First 5000 Years]]` as a URI and drops it: 20 links on the demo vault and 155 on the 10k
+disappeared before the before/after comparison below caught it. A wikilink is never an external
+URL in Obsidian, so it is not tested at all.
+
+`src/links.mjs` is the shared pure helper both adapters key a ghost by (the precedent is
+`src/dates.mjs`), so a ghost id is `ghost:<canonical full destination>` with the basename kept as
+the display *label* only, in the exporter and in `plugin/main.js` alike. A **bare** unresolved name
+stays one destination rather than being pinned to its source folder, because that is how Obsidian
+keys it: create `New.md` anywhere and every `[[New]]` in the vault resolves to it.
+
+**Blast radius: none, and it is measured rather than argued.** The exporter at the previous commit
+and the exporter here were both run over all four fixtures, with `--ghosts` off and on, and their
+node ids, labels, degrees, edge lists, `unresolved` and orphan counts compared:
+
+| | nodes | links | unresolved | orphans |
+|---|---|---|---|---|
+| `demo-vault` (1403) | identical | 4787 | 491 | 33 |
+| `test-vault` (10002) | identical | 38154 | 3841 | 129 |
+| `shape-vault` (954) | identical | 3158 | 53 | 139 |
+| `tag-vault` (891) | identical | 3142 | 0 | 67 |
+
+Identical on every one, `--ghosts` included. That is expected from what the fixtures contain — 0
+duplicate basenames, 0 Markdown links, 0 qualified wikilinks, 0 relative wikilinks, 0 bare carets —
+and it is exactly why they cannot serve as this change's regression evidence, so it has a check of
+its own. Run that comparison again before changing `src/links.mjs`: it is what turned the colon
+bug above from a shipped regression into a caught one.
+
+```bash
+node scripts/check-link-resolution.mjs
+```
+
+Static, in the pre-push hook, no skip flag, ~1 s. It asserts the pure rules of `src/links.mjs`
+directly, then builds three synthetic vaults and reads exact endpoint IDs, weights, degrees,
+ghost IDs and labels, and `unresolved` counts back out of `window.VAULT_DATA`: duplicate
+basenames, `./` and `../../`, a qualified path, an alias, an encoded space, `.md#Heading`, a plain
+Markdown link, an external URL, a fenced and an inline-code link, the two-ghost case with
+`--ghosts` both off and on, the same canonical ghost referenced from two different folders, and a
+qualified miss that a same-named file elsewhere must **not** rescue.
+
+Verified across both adapters on one miniature vault, with `--ghosts` on and the plugin setting
+on: the exporter and a real Obsidian mount agree on **every node id and every edge weight**, ghost
+ids included (`ghost:B/Missing`, `ghost:FutureA/New`, `ghost:FutureB/New`, `ghost:New`,
+`ghost:A/Target^abc`), `A/Target -- B/Source` at 6 and `B/Source -- B/Target` at 5 in both. The
+plugin's `vault-graph:rebuild` reproduces the identical node set, and `__vg.select`,
+`__vg.togglePin` and `__vg.isPinned` all work against the new ids — a ghost's card opens under its
+basename and, as before, carries no "Open in Obsidian" anchor.
+
+Exactly one divergence remains, and it is deliberate rather than unexamined: the probe left
+`[[Nickname]]` unresolved in Obsidian's `resolvedLinks` while the exporter resolves it through its
+alias index, so the plugin grows a `ghost:Nickname` the exporter does not. Adopting the cache's
+answer would delete real edges, so the exporter keeps its aliases.
+
+**One node-shape divergence found by inspection, not by a check (github#152).** `VaultNode`
+(`src/page.js`) is the one written contract both producers are supposed to satisfy, and at the
+time `tsconfig.contracts.json`'s `checkJs` program named only `plugin/main.js` and `src/page.js` —
+`src/build-graph.mjs` was never type-checked against it. **That gap is closed (github#156):** the
+exporter is in `tsconfig.contracts-node.json` and its ghost literal is annotated `RawNote`, so
+dropping either field is a `TS2322` at the keystroke. The check below stays, because it reads the
+`@property` list out of the JSDoc and so also catches a field added to `VaultNode` that the
+exporter never learns about. The exporter's ghost object literal
+omitted `dirs` and `touched`, both declared required, while the plugin's already carried both;
+`page.js`'s own fallbacks (`n.dirs || []`, a missing `touched` reading as `""`) absorbed the gap,
+so nothing broke and no screenshot showed it. `check-link-resolution.mjs` now reads `VaultNode`'s
+`@property` list directly out of `src/page.js`'s JSDoc and asserts every ghost node the exporter
+emits carries all of them, `dirs` as `[]` and `touched` as `""` — so a producer that drops a
+required field fails the check that already builds the ghost fixture, instead of surviving on
+the page's fallback until the next doc pass notices by eye.
+
+## Both producers emit one shape, and a difference has to be declared (github#149)
+
+`src/build-graph.mjs` reads a filesystem; `plugin/build-data.mjs` reads Obsidian's
+`metadataCache`. They build the same `VaultData` for the same page, and until github#149 nothing
+put their outputs next to each other — so what held them together was that someone had copied the
+policy across correctly and would keep doing so. The plugin's own header said as much: *"ported
+from `src/build-graph.mjs`, line-for-line"*.
+
+**What the port had already cost, twice.** github#141: both adapters keyed a ghost by basename,
+so one defect had to be found and fixed in two places. github#152: the exporter shipped ghosts
+with `dirs` and `touched` missing outright while the plugin's carried both, and `page.js`'s own
+fallbacks absorbed the gap — working software, and a shape nothing could rely on.
+
+**Measured on `98c91e7` before the change**, matching the two sources for the policy they share:
+
+| | |
+|---|---|
+| byte-identical duplications | **7** — `MONTHISH`, `TYPE_ALIAS`, `SKIP_FILES`, `deNumber`, `slug`, `singular`, `norm` |
+| near-duplicates | **5** — `under`, `inferType`'s body, `paraDirs`'s body, the ghost literal, the tag normaliser |
+
+The five are the number that matters: they differ only in path separator, in a module constant
+versus a parameter, and in `??` versus `||`. None changed behaviour that day. Each was one
+careless edit from doing so, and nothing would have caught it.
+
+**The invariant.** The policy lives once, in `src/taxonomy.mjs`; the shape is declared once, in
+`src/contract.mjs`, cross-checked against `src/page.js`'s own typedefs; and a difference between
+the two hosts is legal only when `DIVERGENCES` names it and says why. **A declared divergence that
+stops happening fails too** — without that half the list becomes an allowlist, and the first
+genuinely new difference to land on one of those keys is waved through. Five are declared today:
+`dev` and `folderOrder` are the exporter's alone, `readWords` and `_spike` are the plugin's, and
+`words` is `0` on every plugin node until the deferred read has run.
+
+**The alias divergence is declared and deliberately not checked here.** The exporter resolves
+frontmatter aliases; Obsidian's cache does not, so `[[Nickname]]` reaches an aliased note in the
+standalone and becomes `ghost:Nickname` in the plugin (github#141). It moves which **nodes** exist,
+not which **fields** they carry, so it belongs to resolution — and `check-link-resolution.mjs`
+owns resolution, pinned against Obsidian's own cache.
+
+**Check:** `scripts/check-producer-contract.mjs`, in the hook and at the merge boundary — 59
+assertions, about a second, no Chrome and no Obsidian. It runs the exporter as a subprocess and
+the plugin's adapter in-process against a fake host, over one nine-note fixture, twice: once
+plain and once with `--flat-months`, which is the one shared rule that takes a parameter.
+The fake host is handed `resolvedLinks` / `unresolvedLinks` as **fixture data**, so the
+comparison is of everything downstream of resolution and is not circular.
+
+Each of these was applied to the tree, the check run, and the change reverted:
+
+| mutation | caught by |
+|---|---|
+| the exporter drops `sub` | `validate()`, and the shape diff |
+| either producer grows an undeclared field | `validate()`, and the shape diff |
+| the plugin changes one field's value policy | the value diff, node for node, in both flat-month states |
+| the **shared** month rule changes | the fixture's own policy assertions |
+
+The last row is the one to read twice. A change to `src/taxonomy.mjs` reaches both producers at
+once, so by construction it is **not** a divergence and the cross-producer diff stays silent —
+which is what sharing the policy is for. The fixture assertions are what hold the rule itself: a
+month folder never names a type, a month folder ends the walk, and `--flat-months` drops it rather
+than keeping it as a sub. A first draft of those assertions **passed under that mutation**, because
+each only checked a case where both readings agree; the note buried under a month folder is in the
+fixture because of it.
+
+**Sharing the policy found two live defects on the first read, and both are pinned in the
+fixture.** Neither was introduced by the merge; both had been sitting in the duplicated halves.
+
+- **`type: constructor` in frontmatter returned a *function* as `node.type`.** `TYPE_ALIAS` is a
+  plain object literal indexed by a user-written value, so `TYPE_ALIAS["constructor"]` is
+  `Object.prototype.constructor` before anything is stored — github#97's class exactly, one level
+  up from the planner maps that invariant covers. It is the **only** reachable name: `fm.type` is
+  lowercased first, so `toString` and `hasOwnProperty` miss, and `constructor` is already
+  lowercase. The map has a null prototype now, in the one place both hosts read it.
+- **The plugin counted one word too many on a note carrying a byte-order mark.** It matched
+  `^---` against the BOM-stripped text and then sliced the **original**, so the body kept one
+  character of its own frontmatter: measured **7 words against the exporter's 6** on the same
+  note. The exporter was right — `parseFrontmatter` sliced the string it had matched. `noteBody()`
+  is that rule in one place now, and both producers call it.
+
+**And the check had a hole that let the second one through.** `words` was declared a
+`field-value` divergence, which exempted it from the node-for-node comparison altogether — so the
+one field where the two hosts provably disagreed was the one field never compared. It is a
+`deferred-value` now: the gate asserts the zero state before `readWords()` (which is what actually
+diverges — the *timing*) and then compares the value like every other field.
+
+**Behaviour unchanged, measured both ways:** the exporter's output on a fixture vault is
+byte-identical to `98c91e7` with `generated` excluded, and `check-link-resolution.mjs` — which
+builds real vaults and asserts exact edges, ghost identities and degrees — passes untouched.
+
 ## A folder can be named after anything on `Object.prototype`
 
 `"a folder named after an Object.prototype member still lays out"` builds seven tiny vaults
@@ -3505,10 +4942,12 @@ node scripts/smoke.mjs --only "intro landed"  # ends with "not stamping this run
 ```
 
 Why (github#93, decisions/0013): every release paid the suite more than once against one tree.
-`main` only ever receives `develop` — the ruleset requires a pull request with no bypass actors
-— and the merge commits for 2.3.0, 2.4.0 and 2.4.1 each have a tree byte-identical to the
-`develop` tip they merged, so a run on either measures the same content. Re-driving Chrome for
-identical content is cost with nothing it could catch that the first run would not.
+`main` only ever receives `develop` — until 2026-09-13 the ruleset enforced that through a
+required pull request with no bypass actors; it now allows a direct push instead, gated by the
+same source-branch check in `branch-policy.yml` — and the merge commits for 2.3.0, 2.4.0 and
+2.4.1 each have a tree byte-identical to the `develop` tip they merged, so a run on either
+measures the same content. Re-driving Chrome for identical content is cost with nothing it
+could catch that the first run would not.
 
 Measured 2026-09-10, one full run under the `suite` lock, 94/94 on all three fixtures:
 
@@ -3537,6 +4976,176 @@ while its tree is not; not by time because `develop` moves several times a day a
 green run" cannot say which tree it saw. While it runs, both gates hold the machine-wide
 `suite` lock (`scripts/lock.mjs`) and release it on every exit path; a lock that cannot be had
 blocks the push and names the holder rather than running on top of it.
+
+## Widening the suite's concurrency surfaced one real race and one window-size artifact
+
+github#101 asked whether the serial (frame-reading) lane's 76% share of a run (github#93,
+above) could be shrunk by widening it, and whether doing so would flake more under
+contention. `smoke.mjs` gained two levers: `--jobs <n>` (already existed) is the width of the
+whole pool; `--serial-jobs <n>` (new, default 1) is the width of just the walk sub-pool inside
+it -- `--serial-jobs 3` lets the three fixtures that carry a frame-sensitive check (demo-vault,
+test-vault, tag-vault) read their frames at once instead of one at a time. Either flag above
+its default is a delta from the shape the gates push with (`suite-stamp.mjs`'s `shapeDeltas`),
+so a run using them never stamps the tree, the same as `--only` or `--vault`.
+
+**The experiment measured three shapes, five runs each, interleaved (not five-in-a-row) so
+machine drift would not land on one shape, every run under the `suite` lock:**
+
+| Mode | Flags | Wall (avg / min / max) | FAILs across 5 runs |
+|---|---|---|---|
+| default | *(none)* | 428s / 366s / 674s | 1/5 -- "a swipe in the tail of a fit flight still scrolls" (demo-vault) |
+| fast | `--jobs 5` | 301s / 299s / 307s | **5/5** -- "focus web stays above dim notes" (dominant-folder vault); **5/5** -- "the disc's density follows the notes on screen" (10k vault) |
+| serial3 | `--jobs 3 --serial-jobs 3` | 307s / 305s / 308s | **5/5** -- "the disc's density follows the notes on screen" (10k vault) |
+
+428 checks across the suite's five current fixtures (158 + 80 + 63 + 64 + 63). The default
+mode's own wall time is a wide range (366-674s) because one of its five runs queued behind
+unrelated work also holding the `suite`/`screen-left` locks at the time -- 366s is the more
+representative number; the other two modes' runs happened not to collide and read tight
+(within 8s of each other).
+
+**The one default-mode failure is the flake already on record** (github#93's own note: a
+1-in-6-to-8 rate on two checks, reproduced isolated) -- 1/5 here is consistent with that rate
+and is not new. **The other two are not that** -- both reproduced on every single run of the
+shape that triggers them and on zero of the five default runs. Investigated, and the two turned
+out to be two different things, not one:
+
+**"focus web stays above dim notes" was a genuine test race, and is fixed.**
+`checkFocusWeb()` (`src/page.js`) calls `renderer.render()` then immediately reads the canvas
+with `getImageData` -- synchronous in the JS thread, but the actual GPU composite is not
+guaranteed to have landed by the time the read happens, and under GPU contention from several
+concurrent Chromes it measurably had not: the check reads a not-yet-painted frame and finds the
+highlighted edge still under a dim note that has not yet been drawn over.
+
+**First attempt was wrong, and worth recording why.** A double-`requestAnimationFrame` wait --
+the fix this codebase already uses for exactly this class of bug, in the PNG-export and
+camera-zoom checks -- placed in `scripts/smoke.mjs` *ahead of* the call to `checkFocusWeb()`
+looked fixed (5x `--jobs 5` + 5x `--jobs 3 --serial-jobs 3`, previously 5/5 failing both, 0/10)
+but only because that verification ran the density check first in the same `--only` selection,
+and its several `sleep(400)`s incidentally gave the GPU enough slack regardless of where the
+wait sat. Re-run with *only* the focus-web check selected -- the true test, since
+`checkFocusWeb()` does its own `render()` and its own read internally, after anything a
+preceding wait in `smoke.mjs` could reach -- and it failed 5/5 under `--jobs 5` again, byte
+identical to the original failure. The wait had to be *inside* `checkFocusWeb()`, between its
+own `render()` and its own pixel read, not before the function is even called.
+
+**The real fix**: `checkFocusWeb()`'s pixel-sampling body is now a named inner function
+(`sample()`), called only after a double-`requestAnimationFrame` `Promise` resolves;
+`cdp.mjs` already evaluates with `awaitPromise: true`, so returning a `Promise` from a debug
+API function needed no change on the calling side. `checkFocusWeb`'s JSDoc return type updated
+to `Promise<unknown>`; one `no-unsafe-assignment` lint finding surfaced from `best`'s type no
+longer narrowing across the new function boundary, fixed with an explicit `@type`. **Verified
+in true isolation this time** -- `--only "focus web stays above dim notes"` alone, nothing else
+in the selection -- 5x `--jobs 5` and 5x default, **0/10 failures**, plus `npm run lint` and
+`npm run typecheck` both clean.
+
+**"the disc's density follows the notes on screen" is not a bug -- it is a window-size
+dependency in a pixel-based check, at a width nobody plans to ship.** The check measures a
+dot's on-screen diameter against its on-screen step (`__vg.debugDump()`'s `dotRadius` and
+`step35`, both screen-pixel quantities derived through `renderer.graphToViewport`), and the
+product **intentionally** sizes dots relative to the frame they are drawn in ("Size dots from
+the frame", `CLAUDE.md`'s own laws) -- a smaller browser window legitimately produces a smaller
+dot-to-step ratio. `smoke.mjs`'s pool tiles each lane's window into a `gridSlot` sized by the
+lane count, so a wider pool means a smaller window *for every job in it, not just the walk
+ones*: confirmed by disentangling the two variables directly -- `--jobs 5 --no-grid` (same
+width, full-size window) passes with `diameter/step` topping out at 0.76, against 0.81 with
+the grid on; an isolated run at the default `--jobs 2` grid width passes at 0.57. The check's
+own threshold (0.15-0.80) was calibrated against the one window size the suite has ever run
+at -- the default 2-lane grid -- and this ticket is the first time anything ran the suite at
+`--jobs 5` or `--jobs 3 --serial-jobs 3` at all. **No code changed for this one.** It is left
+exactly as it was: the check is correct, the product is behaving as designed, and the
+"failure" only exists at pool widths this ticket already decided (D-4) will never be the
+shipped default -- fixing it would mean loosening a real threshold to accommodate a shape
+nobody runs, which is the wrong direction to move a regression check.
+
+**The recommendation is unchanged: the default lane shape does not stamp differently, and does
+not change.** Per D-4 this ticket never changed the default regardless of outcome. The wall-time
+win (~120-370s) from widening either pool no longer comes bundled with a real defect -- the one
+genuine bug is fixed -- but it still surfaces a check whose assertion window assumes the
+default's window size, which is reason enough on its own not to make either wider shape the
+default without first deciding whether pixel-based checks should be exempted from the grid,
+sized on their own window, or something else. That is a design question, not a bug report, and
+is out of scope here.
+
+**A full default-shape suite run was attempted as a broader regression check on the
+`checkFocusWeb()` change and did not complete** -- the harness killed it for machine-wide low
+memory while other worktrees were also driving Chrome, not a failure of the change itself. What
+did run clean: `npm run lint`, `npm run typecheck`, every static gate, and the targeted
+isolation runs above (10/10 at default and `--jobs 5` for the fixed check). The wider run is
+safe to retry later; it was not repeated here per the standing instruction not to re-launch
+something the memory reaper stopped.
+
+`scripts/suite-repeat.mjs` runs the suite `k` times per named mode (`--mode name=args`,
+repeatable), taking and releasing the `suite` lock around every run so it never collides with
+a fixture-regenerating run elsewhere, logging each run's full output, and tallying wall time
+and FAIL counts per (fixture, check) per mode; `--tally <dir>` re-reads a directory of logs
+without running anything. Its parser has one trap worth naming: `smoke.mjs` prints "FAIL" on
+two different lines -- a per-check line (`" FAIL  <name>"`, one leading space) and the
+end-of-run per-vault summary (`"  FAIL  <ran>/<total>  <label>"`, two) -- and the first cut of
+the parser matched both, counting a whole vault's fail tally as a single fabricated "check"
+named after its ratio. The fix is the leading-space count, not the word. A second trap in the
+same file: `--mode name=args` first tokenised `args` on bare whitespace, which breaks the
+moment a `--only` value is a check name with spaces in it -- exactly the case needed to isolate
+either finding above. Fixed with a small quote-aware tokenizer (`"..."` and `'...'` both
+group), so `--mode 'fast=--only "focus web stays above dim notes" --jobs 5'` now reaches
+`smoke.mjs` as one argument, not several broken ones.
+
+## The merge boundary runs the gates the hook runs
+
+`.githooks/pre-push` is a file in an installed checkout. It runs where somebody ran `git
+config core.hooksPath .githooks`, on whichever machine happened to push, and it is **never a
+server-side proof about a commit** — so for as long as it was the only place the quality gates
+ran, merge eligibility on `main` turned on one status, `main only accepts develop`, which
+asserts where a commit came from and nothing about whether it is any good. Read-only ruleset
+inspection on 2026-09-08 confirmed that was the only required context. The gap was widening
+rather than closing: github#141 put `check-link-resolution` in the hook and github#146 put
+`smoke-runner-selftest` there, so each fix moved more of what protects this repo somewhere a
+pull request cannot read (github#147, A3 of the github#81 architecture follow-up).
+
+`.github/workflows/quality.yml` runs the hook's **unskippable static block** — every check
+between the hook's `gated_push` early exit and its `SKIP_SMOKE` line, plus `npm run lint` —
+against the checked-out commit, on a pull request into `develop` or `main` and on a push to
+either. **The push trigger is the one that matters most**: work lands on `develop` here by a
+direct `git push`, not through a pull request, so without it the common path would produce no
+status at all. Feature branches are absent for the reason the hook also skips them.
+
+**The list is derived, not curated, and then guarded.** `scripts/check-ci-parity.mjs` parses
+the hook's static block and fails on any gate a checked workflow does not run. That was not a
+hypothetical: `release.yml` kept its own hand-written copy of the same set, unchecked, and it
+drifted — `check-generator-determinism`, `check-build-order-determinism`, `check-data-escape`,
+`check-link-resolution` and `gallery-nav --check` were all absent from it (github#154). A list
+nobody checks becomes a list that lies. Fifteen gates on the tree that added the check, about
+30 s of check time locally, of which `npm run lint` is 21 s — so lint runs last, and a broken
+tree says so before the toolchain has finished. The check holds three things per workflow it
+checks, each measured failing before it was committed: a gate present in the hook and absent
+from the workflow, the job's `name:` where one is asserted (`quality gates` for `quality.yml` —
+a job name **is** the required-status context, so renaming it silently drops whatever the
+ruleset requires; `release.yml`'s job name is templated and asserts nothing, since it is not a
+PR merge-boundary status), and the two markers it anchors on still being in the hook. It parses
+the hook's heredoc refusal messages as prose, not as invocations; three of them name a script
+in a sentence.
+
+**github#154 closed the drift by extending the guard, not by hand-adding five steps.** The
+checker now takes a list of target workflows (`quality.yml` and `release.yml`) and checks each
+against the same derived gate set, so `release.yml` cannot silently fall behind the hook again
+the way it did. One consequence that was not obvious from the drift table: the hook's own
+static block calls `check-ci-parity.mjs` itself, so extending the guard to a second target made
+that target require the same self-check `quality.yml` already carried — six steps landed in
+`release.yml`, not five.
+
+**Two things the workflow states rather than implies, because a green status must not be read
+as more than it is.** `scripts/smoke.mjs` is not in CI: it has no headless path — it spawns
+Chrome with `--app=`, `--window-position` and `--window-size` and takes a lock named after a
+monitor — and its frame-sensitive lane (446 s of the hook's measured 587 s) was tuned against
+one machine's Chrome, so a required status built on it would flake, and a required status that
+flakes is one that gets bypassed. And `check-pii.mjs` is **patterns-only on a runner**:
+`.pii-names` is gitignored on purpose, so a fresh checkout has no name list, the check prints
+`NO NAME LIST`, tests its five patterns and exits 0. CI proves the patterns; the twelve names
+are proved by the hook on a configured checkout. Read the step's output, not its exit code.
+
+**Creating the workflow does not require the status.** The `quality gates` context has to be
+added to `main`'s ruleset alongside `main only accepts develop`, which is a repository
+settings change no commit can make. `CONTRIBUTING.md` ("Branches, and how work reaches main")
+says what is required today rather than what ought to be.
 
 ## A colour slot is previewed as the dots it will draw, on both grounds
 
@@ -3888,6 +5497,62 @@ other's contention, which is the one thing the old sharding could not promise. S
 per run: demo walk 116 s then 10k walk 105 s in one lane, the five other jobs (78 + 61 + 17 +
 19 s and the intro) in the other. `--jobs 1` is the quiet run, one Chrome per fixture.
 
+**A check that returns after the page threw has failed too.** github#146: the console-error
+assertion was an *initial* test, and every later check was scored only by the `ok` it returned —
+so an interaction could satisfy a numeric invariant, throw asynchronously, and still be counted a
+pass, and nothing read the accumulated list before the profile directory was deleted. Verified by
+running the loop with controlled callbacks: the second appended an error and returned a passing
+numeric result, and the runner printed **2/2 passed** while holding it. That is a runner defect,
+and it says nothing about whether a production interaction throws today.
+
+The runner (`scripts/smoke-runner.mjs`) now keeps a **high-water mark** into the error list.
+A check's window opens at the mark and closes after its settle, **one animation frame and one
+round-trip** — so it holds what the interaction threw on its way out, not just what the callback
+saw — and anything in it fails that check, whatever its own assertion said:
+`42 notes | threw during this check: exception: TypeError: … (line 42)`. Errors captured before
+the first check (page load) fall into the **first** check's window rather than a line of their
+own: one mechanism, no double count against `page loads with no console errors`, and still
+audited in the three jobs where that check does not run. A **final audit**, once per job with a
+500 ms grace, catches what arrives after the last check.
+
+**The list a check reads is live.** `ctx.errors` is a getter: reading it catches it up with what
+the connection has captured, so a check that samples it *while it runs* — which the hostile-vault
+check does, to tell an expected payload failure from a real one — sees what arrived since it
+started. A first attempt refreshed the list only at the window boundaries, and that check went on
+passing while its own per-page error read was permanently empty; caught in review, and held now by
+a regression of its own.
+
+**Two sources, and only two.** `cdp.mjs` was already capturing both for `firstError()` —
+`Runtime.exceptionThrown`, which covers thrown exceptions and unhandled promise rejections alike,
+and `Runtime.consoleAPICalled` with type `"error"` — so the runner reads that list instead of
+listening a second time, and the suite sees console errors for free. `Log.entryAdded` is captured
+by neither, deliberately: 404s, CSP reports and deprecation notices are Chrome's business and not
+this page's invariants, and auditing them would be the broad filter the ticket warns against,
+pointing the other way.
+
+**One allowlist, and it is the one that was already there.** `a folder named after an
+Object.prototype member still lays out` splices back the window it provoked across its
+hostile-vault navigations. A check that leaves the list *shorter* than the mark has removed
+something the runner never audited, and which entries survived is unknowable from outside — so
+the mark drops to zero and the whole list is audited rather than the remainder trusted.
+
+**What this does not do.** Nothing catches an error the page has not thrown yet: a timer left
+running further out than the final grace throws into nobody's window, and no finite wait would
+change that. And successive checks still share one page — the **error list's** boundary was
+deterministic from here, the **page state's** was not. That half was closed by github#151, two
+sections down; the year-hover discrepancy (32 highlighted against 30 notes, passing when rerun
+alone) remains a hypothesis about that shared state, and neither ticket diagnoses or fixes it.
+
+Measured 2026-09-14. `scripts/smoke-runner-selftest.mjs` holds **34 regressions: 9 fail with the
+audit removed and nothing else changed, 0 with it** — among them the two the ticket names, a
+later callback that records an error while its numeric assertion passes, and a late error at test
+completion. Against a real page on the demo fixture: a timer throwing at **+5 ms**, an unhandled
+rejection and a `console.error` each fail their own check by name, and a throw at **+300 ms**
+lands in the final audit instead of vanishing. The frame costs **13 ms per check** (104 ms over
+8 check runs, 9,455 against 9,351), so about **7 s on a full suite** — ~3.3 s across 255 check
+runs plus 3.5 s of final grace over seven jobs. No threshold, golden snapshot or check name
+moved.
+
 **A check that returns while the page is still walking has failed.** The runner settles the
 page once on arrival (the opening camera tween, or the intro without `?rest`), then after
 every check asks `__vg.demo.busyWhy()`; anything still busy is waited out — so one leak never
@@ -3943,3 +5608,889 @@ inside fast checks that no longer wait for anything — `filtered to the bone` (
 four fixtures) and `the disc's density follows the notes on screen` (17.5 s) alone are 59 s
 of sleeping under reduced motion. Converting those waits to `settle()` plus one frame is the
 next cut, taken separately so each check's own numbers are re-read when it changes.
+
+## A check leaves the page as it found it, or says what it leaves (github#151)
+
+github#146 made the **error** boundary around each check deterministic and left the **state**
+boundary open — its own D-6, and the last paragraph of the section above. One page serves every
+check in a job, so a check inherits whatever camera, selection, filter, panel and cascade state its
+predecessors left. github#112 was one instance found by a person rather than by a gate. The ticket
+that asked for both also said *"preserve all existing thresholds and snapshots"*, and resolving that
+blind would have been guessing — so this was measured first.
+
+**The fingerprint.** `scripts/smoke-state.mjs` carries one page-side expression that answers with a
+flat map of the observable state: `__vg.state`; the camera; every rendered `input`/`select` and
+every rendered `[aria-pressed]` under the root; each named panel's open flag; the root's `data-*`
+attributes; the stored settings blob; and the handful of `__vg` getters that are not in `state`.
+It is generic on purpose — a toggle added later is fingerprinted without anyone remembering to add
+it here — and three of its rules were each earned by a measurement rather than chosen:
+
+- **Only what is rendered.** The settings body, the detail card and the context menu are built on
+  first use and then hidden, so the first check to open one reported every control inside it as
+  newly present — **six of the twenty-two** leaks the boundary first caught, none of them anything
+  a later check could act on. A panel genuinely left open still shows, as `open.<id>` and as its
+  controls together. The cost is that a value changed while its control is hidden is not seen; the
+  next check has to open the panel to reach it, and opening syncs it.
+- **A control with no id of its own folds into its container.** A legend folder, a colour swatch,
+  a detail-card button — there are hundreds. Hiding one folder took `state.hidden` off baseline
+  and, with a key per row, reported **90 more that were only its consequence**. Each container now
+  answers with one order-independent digest (`press.vg-legend  35 rows #9b9bb64e`), so a rebuild of
+  the same rows does not move it and a real change still does.
+- **A state key's token is its full accessor.** The read set matches `state.hidden`, never a bare
+  `hidden`, which matched `renderer.getNodeDisplayData(id).hidden` across a third of the suite and
+  reported **15 reads of `state.hidden` that were nothing of the kind**.
+
+**The audit.** `--audit-state <file>` samples the fingerprint at each check boundary and wraps
+`page.eval` for the duration of the check, so a run says what each check changed, what it left off
+the job's baseline, and which keys a later check's expressions could reach. **The read set is an
+upper bound and is reported as one**: an expression naming `__vg.state.selected` may never branch
+on it. It narrows 158 checks to a shortlist; it does not prove a dependence.
+
+**The boundary.** A check that took a key **off the job's baseline** fails, naming the key and both
+values: `left the page off its baseline: cam.ratio 0.954 -> 0.4071`. Off baseline **now**, at
+baseline **when it started** — deliberately not "changed since the last boundary", which would fail
+a check for putting an inherited key *back*, and would make one unfixed leak fail every check after
+it. Same shape as github#113's `left the page busy`. A check that legitimately ends elsewhere
+declares it — `leaves: ["state.hidden"]`, or a `"state."` family prefix — which puts the coupling in
+the source instead of in the order the checks happen to run in. `--no-state-boundary` turns it off
+and, like `--audit-state`, marks the run as not the full suite.
+
+**A remount per check is not on the table at any price, and that is a fact about the page, not a
+budget.** `mountVaultGraph()` is called inline from `src/shell.html`; `destroy()` exists and nothing
+re-mounts. Offering one would mean shipping a test hook in the product, which is the thing the
+harness does not do. So the choice was between a reset and a declared boundary, and the measurement
+said the boundary: **24 leaking check runs, 16 distinct checks, 10 distinct state keys** — not the
+sixty that would have made per-check restoration hopeless.
+
+Measured 2026-09-20, every check on the demo fixture (`--vault`, 158 checks, 4 Chromes), then
+2026-09-21 across all five (the full suite's own shape, 428 check runs, 10 Chromes):
+
+| | demo only | all five fixtures |
+|---|---|---|
+| check runs | 158 | **428** |
+| state keys in the fingerprint | 125, then 80 once it was sharpened | **80** |
+| the probe | **0.6 s over 158** (~4 ms each) | **1.1 – 5.1 s over 428** across three runs |
+| wall | **291 s** with it on, 296 s off | **372 – 451 s** over 10 Chromes, the probe ≤ 1.4 % of it |
+| leaking check runs, before | **24** (158/158 still passing) | **9 more**, none of them on the demo |
+| after | 0 | **428/428, 0 leaks** — 158 / 80 / 63 / 64 / 63 |
+| distinct state keys | **10** — `attr.data-ov` ×5, `cam.ratio` ×2, `cam.x`, `cam.y`, `open.vg-ov`, `open.vg-settings`, `state.collapsed` ×2, `state.hidden` ×2, `store.settings` ×2, `vg.shown` ×2 | the same families, no new one |
+
+**The probe's cost is a range, not a number, and the spread is the honest figure**: 4.7 s, 5.1 s
+and 1.1 s over the same 428 checks on three consecutive full runs, against walls of 416 s, 451 s
+and 372 s. Two things push it up and neither is the fingerprint's size — the 10k fixture, where
+`vg.shown` and `vg.pinned` each walk every node (a 10,000-note vault pays about seven times the
+1,403-note one for those two keys), and a page that is *off* its baseline, since `rendered()` skips
+a hidden control and a check that left a panel open hands the next probe dozens more. The cheapest
+of the three runs is the one where nothing leaked, which fits that reading — **offered as the likely
+cause rather than a measured one**, since separating it would cost a run of its own. At worst 1.4 %
+of the wall, which is worth paying; a fingerprint that grew another per-node key would not be.
+
+**The other four fixtures found nine more leaks and no new kind.** Six checks, all in the families
+the demo had already named: the context-menu toggle persisting `folderShown` (on four fixtures), two
+checks ending on a camera their own filtering had moved, the golden check and the stand-in check
+each seeding the tag disc's hidden defaults, and a live-rebuild check whose legend is a different
+legend afterwards. The demo fixture came back **clean in all four of its jobs**.
+
+**Why the host store is scored at all, since within one job it cannot couple two checks.** The
+page reads `localStorage` at **mount**, so a key written by check N changes nothing for check N+1 —
+that page has already booted. It matters for the checks that re-mount: `goto()` in the pin check,
+and `reboot()` behind the phone teardown. That is not hypothetical, it is already in the source —
+`reboot()` deletes `bandOpen` by hand before reloading (github#170), which is this exact coupling
+found once, patched at the one site that bit, and left everywhere else. So the store stays in the
+boundary, and the checks that drive a control the page **persists** snapshot and restore it. The
+distinction that matters is the control, not the value: `__vg.setX()` passes the host callback
+`false` and writes nothing, while a real click on a settings toggle or a context-menu item writes.
+
+**The first thing the boundary caught on someone else's work, and the reason it is worth having.**
+github#101 made `__vg.checkFocusWeb()` return a `Promise`, on the reasoning that *"cdp.mjs already
+evaluates with `awaitPromise: true`, so a debug function returning a Promise needed no change on the
+calling side"*. That is true of `p.eval` and **false of `p.j`**, which wraps its argument as
+`JSON.stringify(<expr>)` — a string, returned immediately, so `awaitPromise` has nothing to wait
+for and the Promise object itself was serialised as `{}`. Every field read off it came back
+`undefined`, `r.geomGaps` was falsy, and the check took its *"no in-disc samples on this shape,
+nothing to measure"* branch and returned **`ok: true`**. Measured on this tree: the check asserted
+**nothing on all five fixtures** while reporting green, and the restore of `state.selected` — which
+github#101 moved inside the deferred sampling function — landed a frame after the check returned, so
+three of the five also left a note selected. **Nothing in the suite could see this except the state
+boundary**, because a check that measures nothing and passes looks exactly like a check that passes.
+Two fixes, both here: `p.j` now awaits (`JSON.stringify(await (<expr>))`, a no-op for the other 346
+call sites), and the check refuses a report that never arrived instead of reading it as a shape with
+nothing on it. **A check that cannot tell "nothing to measure" from "nothing came back" is a check
+that will pass through its own removal.**
+
+**And one more of the same family, caught only because the verification run happened on a machine
+at 100% RAM.** `fit frames the disc that is actually there` read its landed ratio through
+`camSettle()`, which returns once two polls 60 ms apart read the same numbers — and under frame
+starvation that means **no frame was drawn**, not that the camera has landed. It measured 0.9282
+against the 0.6134 its own fit promised, and the `camReset()` at the end was then overwritten by the
+flight still in the air, leaving `cam.ratio` at 0.6138 with the overview badge lit. It passed 6/6 in
+isolation, which is what a load-sensitive check looks like from the inside. Fixed by using
+`toRest()`, which waits on **`__vg.camAtRest`** — the page saying it has landed, rather than the
+harness inferring it from stillness. `camSettle()` is left alone: checks that deliberately park the
+camera off-rest need exactly its weaker guarantee.
+
+**A false positive of the instrument's own, and the fix for it.** A full run failed `legend count
+bars scale to the largest visible folder` on `cam.ratio 0.954 -> 0.9539` — a difference of one
+ten-thousandth, which is the fingerprint's own 4-dp rounding straddling a boundary, not a camera
+anybody moved. `diffState()` now gives a **fractional** value a tolerance of `1e-3`, which sits far
+under the tightest camera assertion in the suite (0.002). **Integers stay exact**, so a count never
+gets absorbed by it: `vg.shown 1403 -> 1402`, a row tally, a node id and a pin count all still
+differ. An instrument that cries leak over float noise costs the next reader the same hour it just
+cost this one.
+
+**Verified, finally, in the shape that counts.** Two consecutive `node scripts/smoke.mjs` runs
+with **no flags at all** — 428/428 across all five fixtures, 367 s and 364 s, and the suite
+**stamped the tree** both times, which it only does on a complete, unflagged, all-green run with
+every fixture present and no shape delta. Every earlier verification on this branch carried
+`--audit-state`, which `shapeDeltas()` classifies as *not the full suite*, and ran against a base
+ten commits stale. **That is how this branch claimed all-clear twice and was wrong twice**, and it
+is a lesson about the verification rather than about the boundary: a flag that changes how a run is
+classified changes what the run is evidence of. It also matters that the green runs happened on a
+machine at **54% memory** — the five before them ran at 99–100% with the wall drifting 396 s → 604 s,
+and at that end of the range the frame-reading Laws and cdp.mjs's fixed 10 s evaluate timeout start
+failing on their own.
+
+**One limitation the five-fixture run exposed, and it is the price of the rule rather than a
+defect in it.** Scoring "newly off baseline" means **a declared leak of a key masks a later
+undeclared leak of the same key**: the context-menu check leaked `store.settings` on four fixtures
+and was invisible on the fifth, where `a narrow window with a pointer keeps the desktop's answer`
+had already taken that key off baseline under its own declaration. The alternative — scoring against
+the previous boundary — fails a check for putting an inherited key back and turns one unfixed leak
+into a failure in every check after it, which is worse. So a `leaves:` declaration is not free: it
+buys silence for that key for the rest of the job, and a key that several checks write wants each of
+them fixed rather than the first one declared.
+
+**What the instrument found, and what each one was.**
+
+- **`data-ov` did not exist until the overview first appeared.** `ovShow()` writes the attribute
+  only when the overview *changes*, so at rest on a fresh page the root carried no `data-ov` at all
+  — a CSS rule or a host reading `[data-ov="off"]` matched nothing before the disc was first
+  cropped and matched it afterwards. Four checks reported it as their leak; **the attribute was the
+  defect**. It is written at mount now, beside `data-sheet` and `data-band`, which were already.
+- **Three checks restored `state.hidden` by assigning the dict.** `__vg.state.hidden.folder = {}`
+  plus `syncAlpha()` never rebuilds the legend, so the row's `aria-pressed` went on claiming the
+  group was hidden while the page counted it as shown. That is exactly the defect github#113 found
+  in the context-menu check, in three more places; they restore by clicking the eye back, which is
+  the page's own path and moves the model, the legend and the layout together.
+- **Two checks left the camera where their interaction put it** — a hop flies to its note, and
+  clearing the pins re-fits a disc whose extent just changed. `only a hop lengthens the trail`
+  carried `attr.data-ov`, `open.vg-ov` and three camera keys into everything after it.
+- **Two left the settings store written.** Pressing a toggle twice restores the live state and
+  leaves the key behind, and that key **outlives a reload** — which is why `reboot()` already
+  deletes `bandOpen` by hand. `storeSnap`/`storeBack` put the blob back. The second is an asymmetry
+  worth its own look: the Tags button persists the dimension and `__vg.setDim()` does not, so
+  switching back through the API leaves `{"dim":"tag"}` stored.
+
+**Three mechanics the restores above rely on, written down here because the code now only points
+at them (github#188).** Each was found by a check that had one of them wrong.
+
+- **The legend is rebuilt on every eye click, so a restore has to re-query between clicks.** A
+  single `querySelectorAll` walked once clicks the first row and then clicks nodes the rebuild has
+  already detached, which silently does nothing.
+- **A row is given a `data-eye` only while its group is LIVE.** A group soloed down to zero visible
+  notes loses its own eye and can never be clicked back — `"(unlinked)"` is the one that bit. So a
+  "click every row that reads false" restore is wrong twice over: it cannot reach that group, and
+  it restores to *everything shown*, where `seedHidden()` hides some groups by default.
+  `walkSolo()` re-queries between clicks and falls back to `applyHiddenDefaults()` — the page's own
+  way back, `seedHidden()` + `buildLegend()` + a cascade — and both solo checks share the one
+  implementation rather than carrying a restore each.
+- **Clearing the emulated device metrics fires a resize that saves the settings from a frame of its
+  own, well after the call has returned.** A `storeBack()` issued from inside the check cannot win
+  that race, so `store.settings` is *declared* there rather than restored. Tuning a sleep to beat
+  it would be the flakiness this suite warns about; it is worth its own look instead.
+
+**Declared rather than fixed**, each with its reason at the check: the first check in a job to visit
+the tag disc seeds that disc's own hidden defaults and the page keeps them per dimension on purpose
+(design/0015, and `tags: each dimension keeps its own hidden and collapsed state` asserts it); the
+two legend-measuring checks expand every folder, which is what they measure; and the two
+live-rebuild checks change how many notes there are, which is the assertion.
+
+**No golden snapshot was regenerated and no threshold moved.** The four checks whose bodies changed
+did so to restore state they had been leaving, not to accommodate a reset.
+
+**What this does not do.** It does not diagnose the year-hover discrepancy (32 highlighted against
+30 notes, passing when rerun alone). github#146 named it a hypothesis about shared state and this
+does not upgrade it to a finding: the boundary makes that state deterministic from here, which
+removes the hypothesis's easiest hiding place without proving it was ever the cause. It also
+fingerprints one page per job, so it says nothing about coupling *between* jobs, which have none —
+each lane is its own Chrome and its own baseline. And a check that runs on several fixtures is
+audited separately in each, which is how four of the nine second-round leaks were found: the same
+check, clean on the fixture whose job happened to put a declared writer ahead of it.
+
+```bash
+node scripts/smoke.mjs --only "wheel notch" --audit-state /tmp/a.json   # what it changed, and read
+node scripts/smoke.mjs --no-state-boundary                             # score the leaks, do not fail them
+node scripts/smoke-runner-selftest.mjs                                 # the runner's own rules, no Chrome
+```
+
+## A pin names its note, and the stored format says which format it is
+
+github#143, decisions/0014 (finding 9 of github#81). A graph id comes from input order --
+`String(nextId++)` in `ingest()` -- so persisting `state.pinned` persisted a *position*. The
+stored value is now versioned and keyed by the note's own path; a ghost's is the canonical full
+destination github#141 landed.
+
+```bash
+node scripts/smoke.mjs --only "a pin is stored by the note"
+```
+
+The check builds two vaults with the same vault NAME -- so both read one `localStorage` key -- and
+drives the ticket's own reproduction. Measured before and after on the same scenario, ghosts on:
+
+| | version 1 (develop) | version 2 |
+|---|---|---|
+| pinned in a vault of `B.md`, `C.md` | `B.md`, `ghost:Missing` | same |
+| stored | `["0","2"]` | `["\u0000vault-graph:pins:2","B.md","ghost:Missing"]` |
+| reopened after `A.md` was inserted ahead | **`A.md`, `C.md`** | `B.md`, `ghost:Missing` |
+
+`B.md` moves from id `0` to `1` across that rebuild, and id `0` now names `A.md` -- which is the
+whole defect in one line, and what the check asserts rather than describes. The restore is read
+**through the host**: the two-note build's `localStorage` write is what the rebuild mounts from,
+so the exported page's whole persistence path is exercised, not just the mapping. (The mapping is
+asserted separately via `__vg.pinsFrom`, so the check still means something where `localStorage`
+throws on `file://` -- see decisions/0009.)
+
+The same run covers the rest of what github#143 required: a version-1 store restores **0** pins, an
+unknown path **0**, `[B, B, C]` dedupes to `[B.md, C.md]`, and 20 valid paths cap at **13**
+(`PIN_MAX`). The plugin host's half is in `scripts/obsidian-smoke.mjs`'s right-click check, which
+asserts `settings.pinned` holds the note's **path** and not its runtime id.
+
+**A version-1 store is dropped in full, and the empty version-2 store written back over it** -- once,
+not at every mount. decisions/0014 has why there is no recovery and why the marker leads with a NUL.
+
+**There are two writes, not one, and the second one is easy to miss.** `hubChanged()` is the obvious
+one; `invalidatesOnData("selection, hover and pins", ...)` is the other, pruning a pin whose note a
+live rebuild removed. Left writing raw ids it produced a store the next mount reads as version 1 and
+drops -- so a live rebuild that deleted one pinned note silently cost every pin. Caught by the same
+check, which reads what the **host** ended up holding rather than what the page believes it stored:
+`["2"]` before, `["\u0000vault-graph:pins:2","C.md"]` after. Both writes go through `persistPins()`,
+and `savePinned` has exactly one call site so a third one cannot quietly appear.
+## The JavaScript's own contracts are compiler-checked, and the gate proves it (github#145, github#156)
+
+**`npm run lint` holds `src/page.js`, `plugin/main.js` and `src/build-graph.mjs` at ZERO compiler
+diagnostics with `checkJs` on, and rejects a probe against each of the two programs.**
+
+```bash
+node scripts/check-js-contracts.mjs      # or npm run lint, which calls it
+```
+
+Four `tsc` runs, about 2.5s together: two real checks, and one probe each. The real checks are the
+browser program (`tsconfig.contracts.json` -- `src/page.js`, `plugin/main.js`) and the node program
+(`tsconfig.contracts-node.json` -- `src/build-graph.mjs`, github#156). The probes are the reason
+this is a check and not a setting: each writes a mutated copy of its program's entry point and
+**fails if that copy comes back clean** -- `src/page.js` with `var DATA = data` replaced by
+`/** @type {VaultData} */ var DATA = 42`, and `src/build-graph.mjs` with the `nodes,` in its
+`VaultData`-annotated `data` literal replaced by `nodes: 42,`.
+
+### Why there are two programs and not one widened one (github#156)
+
+`src/build-graph.mjs` is node code: without `"types": ["node"]` it reports **16 diagnostics that
+are all one cause** (`node:fs`/`node:path`/`node:url`, `process`, `Buffer`). The obvious move was
+to add those types to the shared program. **Measured 2026-09-21, that is a hole:** with node types
+on `tsconfig.contracts.json`, `if (process.env.X) { var B = Buffer.from("x"); }` inserted into
+`src/page.js` reported **zero** diagnostics. `src/page.js` is browser code and both of those are
+runtime failures there. Without node types the same insert is **two `TS2591`s**. So the browser
+program keeps `types: []` inherited, and the node-side entry point gets its own config.
+
+`src/page.js` is in **both** programs -- the exporter's annotations import its typedefs, which also
+pulls in `src/globals.d.ts` (without it, four `TS2339`s about `window.__vg`). So the gate reports
+the union of the two runs, **deduped by identity**, and the browser program is what still catches a
+node global in the page. The node program also reaches `src/sortspec-file.mjs` and
+`src/engine/notice.mjs`, which were in no program before; both are clean.
+
+**Why the second run exists.** Before github#145, `tsconfig.json` set `checkJs: false` -- it is
+typescript-eslint's program, and the compiler's own check ran over `src/engine/**/*.ts` alone.
+Every annotation in 13k lines of JavaScript was a comment nothing read, and the exact mutation
+above drew **zero errors and zero warnings** from the whole gate. That is a green gate worth
+nothing, and it stays green forever unless something asserts a known defect *is* caught. So the
+probe runs every time.
+
+**Numbers, measured 2026-09-14 on the tree at `45d28f5`** (the github#81 review's figures were
+taken on `deca048` and do not match this code): the same program with `checkJs: true` and **no
+added strictness** reported **138 diagnostics -- 136 page, two plugin -- over 105 lines**. All
+138 are fixed at their source. The bar is zero.
+
+**What github#156 was worth, measured 2026-09-21.** `src/build-graph.mjs` was in no type program
+at all, so its annotations were comments nothing read -- and it had **none**: the file carried zero
+type annotations, so a naive include reported zero for the dullest possible reason. Annotating the
+producer boundary against `VaultNode` / `VaultEdge` / `VaultStats` / `VaultData` found **four**
+things nothing was checking, all fixed at their source:
+
+| | What was unchecked | Now |
+|---|---|---|
+| `sortSpecs` | `SORT_SPECS`'s accumulator is an evolving `[]`, so it reached `VaultData.sortSpecs` as `any[]`. Dropping `origin` from a pushed spec: not caught. `origin: 7`: not caught | `@type` on the accumulator, from `VaultData` itself; both are `TS2345`/`TS2322` |
+| `folderOrder` | The exporter spreads it onto `data` and `src/shell.html` reads it back off `VAULT_DATA` as a `MountDeps` -- and `VaultData` declared it nowhere, so **neither end of that round trip** was checked | declared on `VaultData`, and `FOLDER_ORDER` typed as the page's own union |
+| the `--folder-order` guard | `.includes(v)` over the three valid values returns a boolean and narrows nothing, so a vetted value left the IIFE as plain `string` -- the guard read as more than it typed | an `===` chain that narrows; relaxing it to `if (v) return v` is now `TS2322` |
+| `src/dates.mjs` | unannotated, and it is the direct producer of `VaultNode.created`, `VaultNode.touched` and `VaultStats.dates` -- so those three arrived as `any` and the boundary annotation would have checked nothing about them | a `DateSource` union and `@param`/`@returns` on all seven exports |
+
+**And github#152's own defect is a compile error now**, which was the ticket's argument for doing
+this: dropping `dirs` or `touched` from the exporter's ghost literal is `TS2322` at the keystroke,
+where it was previously found by a person reading prose for an unrelated documentation ticket.
+
+**No behaviour changed, and that was measured too.** The same 400-note fixture built before and
+after, three ways (plain, `--folder-order explorer`, and `--folder-order nonsense` to exercise the
+rejection path the narrowing guard replaced): `window.VAULT_DATA` **byte-identical** in all three,
+and the only difference anywhere in the emitted page is the four comment lines added to
+`src/page.js`'s `VaultData` typedef, which the exporter inlines verbatim.
+
+**Zero, not a baseline.** github#145 allows a baseline *if the work is phased*, tracked **by
+identity and never by total** -- a count lets one new error silently replace one old one. It was
+not phased, so there is no ledger: zero cannot drift. The check still prints every diagnostic
+with its file, position, code and message, so a failure names itself.
+
+### What may not be done to make this pass
+
+**A diagnostic is fixed where it is caused.** A cast that widens, an `any`, a `@ts-ignore`, or
+an exclusion over a file leaves the gate exactly as untrustworthy as github#145 found it, and
+the probe cannot tell the difference -- it only proves the compiler is reading *something*.
+A narrow cast at a site that genuinely knows more than the accessor does is fine and is the
+file's own documented convention (`$()` returns `HTMLElement` and tells a caller wanting an
+input's `.value` to say so at its own site); widening a return type so a wrong call type-checks
+is not.
+
+**A measured constant still changes `invariants.md` in the same commit.** This section does not
+exempt anything.
+
+### The three ways it was verified to have teeth
+
+Tried against the finished check, each one made it fail:
+
+| Weakening | What catches it |
+|---|---|
+| `checkJs` back to `false` in `tsconfig.contracts.json` | the probe is no longer rejected |
+| `plugin/main.js` dropped from the `include` | `--listFiles` says it is not in the program |
+| the probe's anchor renamed away in `src/page.js` | a hard failure, never a skip -- a probe testing nothing is the failure this prevents |
+| `checkJs` back to `false` in `tsconfig.contracts-node.json` (github#156) | the exporter probe is no longer rejected |
+| `src/build-graph.mjs` dropped from that `include` (github#156) | `--listFiles` says it is not in the program |
+| the exporter probe's anchor renamed away (github#156) | a hard failure, never a skip |
+| the `@type {VaultData}` deleted from the exporter's `data` (github#156) | the exporter probe is no longer rejected |
+| node types added to `tsconfig.contracts.json` (github#156) | nothing does, which is why they are not there -- the browser program is what catches `process` in `src/page.js`, and it can only do that while its `types` stays `[]` |
+
+The fourth, dropping `src/page.js` from the `include`, does **not** fail, and correctly: it
+stays in the program as `plugin/main.js`'s import and stays checked. That was measured too, by
+reintroducing a real defect with the file out of the include and watching 22 diagnostics arrive.
+`tsconfig.json` names it explicitly anyway, so the program is stated rather than inherited.
+
+### Not covered
+
+`strictNullChecks` over the JavaScript -- github#145 calls it a separate, later, measured step,
+github#55's ratchet owns it, and github#156 did not touch it.
+
+`scripts/**` is in no type program. github#156 deliberately stopped at `src/build-graph.mjs`: it is
+the one that produces data the page's declared types describe, so it is where a disagreement is
+most expensive and most checkable, and much of `scripts/**` is harnesses whose annotations matter
+less than a producer's. Widening to it is its own measurement.
+
+**Annotating the rest of `src/build-graph.mjs`** beyond the producer boundary, likewise. github#156
+annotated what crosses into `VaultData` and the accumulators feeding it; the file's internal helpers
+are still unannotated, which means they are `any` and check nothing. That is not a hole in this
+invariant -- the boundary is what the page depends on -- but it is not coverage either.
+
+## The disc's right-click is the host's until a reader asks for it (github#165)
+
+Right-clicking the **empty stage** opens a developer menu — the wedge grid, and a slow-motion
+scale — and it does so **only** while the **Developer debug** setting is on. The setting is
+`defaultOn: false` in `VIEW_SETTINGS` and `false` in `DEFAULTS`, and the handler returns
+*before* `preventDefault()` when it is off. That ordering is the invariant, not a detail: a
+handler that prevented the default and then decided would suppress Obsidian's own context
+menu on the disc for every reader who never asked for this.
+
+### It hangs off `rightClickStage`, and that is the whole of why a note still pins
+
+The first cut bound a plain `contextmenu` listener to `#vg-graph`. That is wrong, and the
+check that caught it is the one worth keeping: **`rightClickNode` already owns a right-click
+on a note and toggles its pin** (`src/page.js`, beside this handler). A DOM listener over the
+host sits above both cases, so with the setting on, right-clicking a note pinned it **and**
+opened the developer menu. `rightClickStage` fires only when the renderer's own hit test
+finds nothing under the pointer, so the two cannot collide by construction.
+
+That cost one line of contract. `rightClickStage` has been emitted since the captor was
+written but was declared only in `renderer.ts`'s private `EventMap`, so `on()` — typed
+`<K extends keyof RendererEvents>` — could not admit it and **no consumer could subscribe at
+all**. It is now in the public `RendererEvents` in `src/engine/types.ts`. `downStage`,
+`upNode` and `upStage` are in the same position and deliberately stay private until something
+consumes them.
+
+```bash
+node scripts/smoke.mjs --only "right-click does nothing"     # the gate
+node scripts/smoke.mjs --only "still pins it"                # the collision, as a check
+node scripts/smoke.mjs --only "the whole grid"               # the half-grid, as a check
+node scripts/smoke.mjs --only "the grid's key"               # the key's placement
+```
+
+**Six checks, on `demo-vault` only** — none of them asserts anything about a fixture's shape,
+so per *Each check runs where its assertion lives* they take the cheap default rather than
+`"all"`.
+
+The first fires a cancelable `contextmenu` with the setting off and asserts
+`defaultPrevented === false` and the menu still hidden; then with it on, asserts
+`defaultPrevented === true`, the menu open, the grid item present, the four speed entries at
+`1.25, 2.5, 5, 10`, and **zero `.swatch` elements** — the last of those is what separates this
+menu from the legend's, which shares the same `#vg-ctxmenu` element. Finally it turns the
+setting off again and asserts the open menu shut: `setDevTools(false)` calls `closeMenus()`,
+so a menu cannot outlive the switch that opened it. The second aims at the largest visible
+note with the setting **on** and asserts the pin flipped and the menu stayed shut — measured
+`false -> true` on a 7.7px note, against `false -> false` and a menu that opened on the
+`#vg-graph` version.
+
+**A synthetic event must be dispatched at the MOUSE CANVAS, not at `#vg-graph`.** The captor
+listens on `renderer.getCanvases().mouse`, a descendant of the host, so an event dispatched at
+the host bubbles *upward* past it and reaches nothing. All four checks aim at a corner inset
+18px into the host rather than the centre: the hub hole in the middle of the disc holds the
+unlinked notes on the fixtures that have any, so the centre is not reliably empty stage.
+
+### The implementation was already in the plugin; only the accessors were not
+
+`scripts/build-plugin.mjs` (`stripDemoAndDebug`) removes the text between three marker pairs
+in `src/page.js`. Measured at 9e84932:
+
+| region | lines |
+|---|---|
+| the `demoCursorAt` cluster | 3247–3280 |
+| the `demoMode` / `demoAct` / `demoApi` cluster | 9877–10636 |
+| the `debugAPI` slice of `window.__vg` | 11166–11693 |
+
+`wedgeDebug()` is defined at **3985**, `TIME_SCALE` at **4099**, `wantWedgeDebug()` at
+**9825** and its caller at **6263** — every one of them outside every region, and therefore
+already shipped in the plugin. What the strip removes is `wedgeDebug:` (11191) and the
+`timeScale` getter/setter (11341–11342), i.e. the *names on `__vg`*, not the code behind them.
+
+So the product API carries `setWedgeGrid` and `setTimeScale` as two delegating one-liners
+beside `setFitCap`, and **`debugAPI` is not touched** — `__vg.wedgeDebug` and `__vg.timeScale`
+still exist for `smoke.mjs` and the storyboard, and are still stripped from the plugin.
+**Do not "fix" this by moving `wedgeDebug` or `TIME_SCALE` across a marker**: the markers are
+count-checked, and the move would buy nothing that is not already there.
+
+The cost of the whole feature, measured by building `main.js` at 9e84932 and again on this
+branch: **538,085 → 542,746 bytes, +4,661 (+0.9%)**. The three stripped regions stay stripped —
+`demoAct`, `checkZeroWeightInvariance` and `timeScale` each occur **0** times in the built
+bundle, while `openDevMenu`, `setWedgeGrid`, `setTimeScale` and `rightClickStage` are present.
+
+### One menu element, two openers, one shared tail
+
+`#vg-ctxmenu` is a singleton and both menus use it. What they share is `showCtxMenu(el, x, y)`
+— unhide, clamp inside the mount, arm the outside-mousedown / Escape / resize listeners — and
+nothing else. `openCtxMenu`'s thirteen positional parameters are all palette-shaped (a swatch
+grid plus three bespoke trailing toggles) and six checks drive that path; `openDevMenu` has no
+swatches at all. Generalising one function to serve both would mean an item-list abstraction
+*plus* a swatch special case, so the second opener is deliberate (D-2, github#165).
+
+### Turning the overlay on has to re-pack, or it draws the band radii alone
+
+The wedge cells are collected **by** the packer, and only on a pass that ran while `DBG.on`
+was already true — `var dbgCells = DBG.on ? [] : null` in `ringsLayout()`. `wedgeDebug()`
+only called `renderer.refresh()`, which repaints and re-runs no layout. So turning the
+overlay on at rest had nothing to draw the wedges from: it drew the band-radius circles and
+**nothing else**, until some filter or resize happened to re-pack.
+
+That has always been true and never mattered, because the only way in was
+`__vg.wedgeDebug()` from a console with a relayout a keystroke away. A menu item makes it
+the **first** thing anyone does with the feature, so `wedgeDebug()` now asks for the pass it
+needs: `applyLayout(false)` when `DBG.on && !DBG.cells`. That re-runs the packer without
+touching `bandLock` or `geomLock`; `hardRelayout()` would reset both and is the wrong tool.
+
+**The fix buys the grid by re-packing, so the no-op had to be proven rather than assumed.**
+Measured on the demo mirror: wedge cells **0 → 43** on one click, **86** seam-trace rows, and
+of **1403 notes, 0 moved, worst 0 units**. Without the fix the check reads `0 -> 0` cells and
+`0` seam-trace rows.
+
+### The grid's key sits bottom left, and nothing drawn over the graph is under it
+
+`drawWedgeLegend()` put the key at `12, 12`. The host's two view buttons (`#vg-sheet`,
+`#vg-band`) are exactly there, so the overlay covered them — found by the maintainer looking
+at the review build, not by any check. It is now **bottom left**, which is the one corner of
+the host with nothing drawn over it: the zoom/fit column (`#vg-cam`) is bottom right, and the
+sidebar is outside the host entirely.
+
+**There is no plate behind it.** The key used to sit on a 72%-black rectangle, and the
+`built <date>` line fell outside that rectangle's bottom edge. The plate is gone rather than
+resized: it was also the only reason white type was safe there. Without it the type and the
+`wedge centre` sample rule take **`THEME.text`** — the same token the renderer gives its own
+node labels — so both read on the light ground as well as the dark one. The `wedge centre`
+rule was `#fff`, which is the colour the disc actually draws, and would have vanished on
+light the moment the plate went.
+
+The key is drawn on canvas, so there is no element for a check to measure. `DBG.legendBox`
+records where it landed in host coordinates and `__vg.wedgeLegendBox()` hands it over.
+
+```bash
+node scripts/smoke.mjs --only "the grid's key"
+```
+
+It asserts the box is inside the host, left of the midpoint and below it, and overlaps
+**neither** the named control groups **nor any `button` drawn over the graph**. That second
+test is the one with teeth: reverting the placement to `12, 12` fails it naming `vg-sheet,
+vg-band` — two ids the named list does not contain, which is exactly why the check does not
+rely on a list. Measured at the placement that ships: key **131×96 at 12, 1017** in a
+2256×1125 host, **0 overlaps**.
+
+### Slow motion is a scale, and it only ever slows
+
+`TIME_SCALE` multiplies every duration, so a larger number is slower. The entries are
+**1.25 (Normal, the built-in default), 2.5, 5, 10** — that is 1×, 2×, 4× and 8× against the
+default, and every one of them is at or above it. The menu can make a cascade readable; it
+cannot make one race. `?slow=<n>` still sets any value at load, unchanged.
+
+### What each `github#165` pointer in the code stands for
+
+Comments in `plugin/`, `src/` and `scripts/` are pointers (github#61), so the reasoning that
+would otherwise sit beside these lines is here. In source order:
+
+**`src/page.js`**
+
+- **`devTools`, and its fallback to `DATA.dev`.** A build made with `--dev` opens with the menu
+  already armed, so a fixture needs no trip through settings. Everywhere else it is off and the
+  disc's right-click does nothing at all.
+- **`closeMenus` and `openDev`, the two cross-scope handles.** `buildTools()` owns the context
+  menu and everything that closes it, while the renderer's events are wired in a different
+  function entirely. Two things have to cross that line: one so the setting can shut a menu it
+  opened, one so a right-click on the stage can open it. Same reason
+  `onDestroy.push(closeCtxMenu)` already reaches out of that scope.
+- **`DBG.legendBox`.** Where `drawWedgeLegend()` last put the key, in host coordinates. The key
+  is canvas, so without this a check has nothing to assert against the controls it must clear.
+- **The key's box is the text's own extent.** With the plate gone there is no drawn edge for the
+  `built <date>` line to fall outside of; `rows.length + 1` counts that line.
+- **`TIME_SCALE_DEFAULT`.** Named because the menu's *Normal* entry is this value, and a second
+  copy of the number would be free to drift from the one the page actually opens at.
+- **`SPEED_ROW` carries a multiplier, not a duration.** Two reasons. "At or above the speed the
+  page opens at" becomes structural — no entry can be written below the default without writing
+  a multiplier below one. And the multiplier is what goes into `data-speed` and what comes back
+  out of it: an integer round-trips through a string attribute exactly, where a computed
+  duration would not survive a `TIME_SCALE_DEFAULT` that is not a binary fraction. 1.25 is 5/4,
+  so ×2/×4/×8 are exact today; 1.3 would not be, and the checked mark would silently stop
+  matching with nothing failing. `slowOf()` is the one place that turns one into the other.
+- **`role="menuitemradio"`, not `role="radio"`.** `#vg-ctxmenu` is `role="menu"`, and ARIA lets
+  a menu hold a group of `menuitemradio` but not a `radiogroup`. The legend's swatches in the
+  same element are `menuitemradio` for the same reason.
+- **`setDevTools` closes the menu as well as hiding the feature**, so the setting cannot leave
+  one open behind its own back.
+- **`setWedgeGrid` on the api is `wedgeDebug` itself.** It is already a setter and needs no
+  second name. The clock does need one — assigning `TIME_SCALE` has two callers — so
+  `setTimeScale` exists as a function where `setWedgeGrid` does not.
+- **`showCtxMenu()`** is the half of opening a menu that has nothing to do with what is in it:
+  unhide, clamp inside the root, arm the three ways it closes.
+- **The colour menu's `.vis` row stacks rather than sitting beside its label** (github#174). The
+  menu is a fixed 176px wide, and a label with four choices under it does not fit on one line at
+  that width the way `.row` manages everywhere else in the sidebar, so this one row is the
+  exception and is written as a block rather than a flex pair.
+
+**`plugin/main.js`**
+
+- **`devTools: false` in `DEFAULTS`.** A reader's right-click on the disc belongs to the host
+  until they ask otherwise.
+- **The row is last in `VIEW_SETTINGS`, on purpose** — the only row there about working *on* the
+  graph rather than about reading a vault with it. It sits under **View** rather than in a
+  Developer group of its own because both settings renderers are built from the same tables
+  (github#59), so a row costs nothing while a new group means touching both paths. That is a
+  presentation call, not a structural one.
+
+**`scripts/smoke.mjs`**
+
+- **Every github#165 check aims at a point the renderer's own hit test agrees is empty**, and
+  the last one aims at a note on purpose — see the `rightClickStage` section above for why the
+  two cases must not collide.
+- **The grid check settles between its halves.** The overlay is painted by the renderer's draw
+  hook, not by the click. Reading the canvas straight after the click would be asserting that a
+  freshly *created* canvas defaults to visible, which is true of the first run only.
+- **The whole-grid check asserts two things, not one**: that the cells came back, and that
+  buying them moved no note.
+
+**`src/engine/types.ts`**
+
+- **`rightClickStage` on the public `RendererEvents`** — see the `rightClickStage` section
+  above. `downStage`, `upNode` and `upStage` are in the same position and stay private until
+  something consumes them.
+
+### `--dev` arms the menu, and the suite does not pass it
+
+`build-graph.mjs --dev` sets `DATA.dev`, and `devTools` falls back to it when no host has
+chosen, so a page built with `--dev` opens with the menu already available. `DATA.dev` also
+arms `wantWedgeDebug()`, which draws the lattice at boot — so **`--dev` is deliberately not
+added to `smoke.mjs`'s `buildFor`**: it would draw the wedge overlay over all 66 checks and
+every `shoot.mjs` still. Turning that on is a change to what the whole suite renders and wants
+a decision, not a default (D-7, github#165).
+
+## A phone is a narrow screen AND a coarse pointer, and it gets a page that scrolls (github#170)
+
+`design/0013`. **The predicate is `(max-width: 720px) and (pointer: coarse)`, both halves**, in
+`page.css`'s phone block and in `page.js`'s `phone()` beside `narrow()`. `NARROW_PX` carries the
+number for both queries and keeps the must-match comment it already had. A narrow desktop window,
+a 320px Obsidian side leaf on a PC and a touchscreen laptop at 1440px all keep the desktop layout,
+and the plugin needs no `Platform.isMobile` -- Obsidian mobile reports coarse at 390px.
+
+| | |
+|---|---|
+| reading order | **disc, folder list**, all in the scroll flow -- the calendar starts **folded** and opens above the disc (github#170 second pass) |
+| minimum hit box | **44 x 44 px** outside the calendar; the calendar is read rather than driven, so it keeps its own floors **by height**: 26 px for its control row, 20 px for the year strip (D-8) |
+| the year strip | **data-driven width, never widened** -- the chips sit 36-41px apart on a date axis and 44px-wide neighbours would overlap by ~8px (D-6). A chip stays **inside the band**, not inside the strip: it is centred on its year's x with `translateX(-50%)`, so the end chips bleed into the band's 14px padding, which is what keeps a chip's x equal to its data -- and what they may not do is leave the band. Measured before github#178, the leftmost chip sat at **x = -0.19** at every width from 320 to 430 (github#178) |
+| two year chips | **never overlap.** github#23's `minGap < 28` thins by whole years against a constant that approximates a chip and never re-checks the gap after thinning, so the tightest kept gap on the demo fixture is **7.6px at 390 and 0.6px at 320** -- one denser vault from a collision. `fitYears` clamps the ends and then sweeps **right to left**, dropping any chip still overlapping its neighbour; backwards, because the newest year is the one worth keeping. The thinning rule itself is untouched, so which years are round is unchanged (github#178) |
+| the recent lens | **one line, never two**, beside the source segment rather than below it (D-8). It gets there with **`flex: 1 1 0`**, not `1 1 auto`: an `auto` basis is the item's content size and that is what a flex line is broken on, so with the plugin's **three** chips the lens did not fit line 1 and took one of its own -- never reaching the `overflow-x` scroller github#170 gave it. A zero basis cannot force a wrap and costs nothing, since the lens is the only grower on that line, so its box is unchanged. Measured inside Obsidian: lens top **502 -> 462**, the row **5 -> 4 lines**, the lens **181 in 181 -> 268 in 181** (github#178) |
+| the since-last-open chip | **not drawn on a phone** -- `#vg-recent [data-kind="open"] { display: none }` inside the phone block. It is the widest of the three and the lens's scroller left it reading `Sinc…`, clipped mid-word. Lukas, 2026-09-17, looking at the fix: *"you need to drop the since last open button it goes out of the page, just don't show it on mobile as ui decisions rest looks good."* The chip is **hidden, not absent**: `#vg-recent` still builds all three, so the desktop, the exported page and `recentCount` are untouched and a rotate back to a desk width restores it. With two chips the lens fits the line exactly, **181 in 181**, and does not scroll (github#178) |
+| measuring the lens at all | needs **three** chips, and no fixture had them. The exported page offers no since-last-open chip (github#70) and a throwaway vault has no `lastSeen` for the plugin to build one from, so every run until github#178 measured a two-chip lens -- and two fit. `host-phone-check.mjs --seen-days <n>` seeds it. The shape that could not exhibit the defect was the plugin's stored state, not the vault's notes (github#178) |
+| pan | **off at fit, on once the ratio is inside `fitRatio() * 0.995`** -- a fitted disc has nowhere to pan to (D-9) |
+| the disc box | **square**: `min(w, h)` already fit it to the width, so 390x390 draws the same disc as 390x530 -- p50 radius **1.64 px** either way |
+| over the **drawn disc** | **nothing**, at rest, mid-cascade and with the calendar open. Measured against the disc the renderer draws -- `graphToViewport` over the drawn nodes plus each dot's `scaleSize` -- and **not** against `#vg-graph`'s bounding box, because the disc is a circle in a square and the square's corners are empty by construction |
+| the calendar's toggle | in the disc square's **top-left corner**, which the circle leaves empty: 44x44 at 12,12, its nearest corner **197 px** from a centre whose drawn radius is **167** -- ~30 px of clearance |
+| the toggles drawn | the calendar's, so a folded band has a way back; **not** the folder list's, which is in the flow |
+| the pan toggle | **not drawn** -- pan is automatic here, not a choice |
+| zoom | **survives** -- at 1.64px a pinch is the only route to a tappable dot |
+| the disc's mouse layer | `touch-action: pan-y`, and the captor claims a touch only when it can use it |
+
+**Two grid traps guard that square, and both are silent.** `#vg-graph` takes `align-self: start`
+with `justify-self: stretch`, because a grid item stretches on both axes by default and the
+*height* would otherwise be the definite one -- measured **319x319 in a 375 px column**, all 1403
+dots under 2 px. And every flow child of `#vg-canvas` names `grid-column: 1`: two items naming
+only `grid-row: 2` auto-place side by side and create an implicit second column, whose 56 px come
+out of the disc's `1fr` (**334 px of square in a 390 px canvas**). Neither failed anything; both
+produced a smaller disc that still looked like a disc.
+
+**Pan is re-applied, not read once.** `syncPhonePan()` runs on the media query's change, on the
+root's resize beat, and on the camera's own `updated`, guarded on the value actually differing
+because `setPan(false)` flies the camera home. `storedPan` holds what the host chose, so a phone
+never writes over a desk's choice and a breakpoint crossing restores it.
+
+**`fit()` asks again when it lands, and that line is load-bearing.** `syncPhonePan` returns early
+while `fitting`, or a fit in flight would re-arm pan on every frame as the ratio climbs back
+through the threshold -- and the camera's last `updated` is emitted by `setState` *before* the
+animation's callback clears `fitting`, so every update during a fit is skipped including the one
+that lands on the answer. Without the call in `landed()`, returning to fit leaves pan armed.
+
+**The calendar is FOLDED on a phone, and the store is neither read nor written there
+(github#170).** `bandOpen` takes `panEnabled`'s form -- `phone() ? false : storedBand` -- and
+`setBand` skips `onBandOpen` on a phone, exactly as `syncPhonePan` passes `setPan(want, false)`.
+It first shipped with `sheetOpen`'s *absent means nobody chose* form and **installing it on a real
+vault disproved that the same afternoon**: a `"bandOpen": true` written by a desktop click made
+"off by default" unreachable on the phone, and the only route to it would have written `false` back
+and folded the desktop too. One shared value cannot express two form factors. Off a phone
+`storedBand` is the expression the literal `true` always was, so the desktop path is unchanged --
+measured identical at 1600x1000, every box. The cost, taken knowingly: a phone reader who wants the
+calendar open taps once per launch. **It IS re-derived when the media query flips, since github#173
+-- that sentence used to say the opposite**, and the section below has the measurement that changed
+it.
+
+**Every control in the band declares its own `border-radius`, and the segment declares `0`
+(github#170).** `page.css` is scoped so the page cannot style its host; **nothing stops the host
+styling the page**, and a bare `<button>` inside Obsidian wears Obsidian's radius, min-height and
+shadow. `#vg-heatsrc button` was the only control in the band declaring none -- every other one
+does (`.tools`/`.mini`/`button.btn` 6px, `#vg-years` 4px, `#vg-compact` 6px, `#vg-rangeall` 5px,
+`#vg-cam`/`#vg-mob` 8px, and `#vg-tabs .tab` declares `0` for this exact reason). The segment is a
+fixed `height: var(--vg-hrow-h)` box with `overflow: hidden`, so a host radius domes the pressed
+half and a host min-height or shadow spills past the bottom and is sheared off.
+
+**The structural gap that hid it, stated because no gate closes it:** `check-scope.mjs` proves the
+page cannot reach its host, and `smoke.mjs` drives the **exported** page, where there is no host CSS
+at all -- so a host-CSS collision is invisible to every gate that runs on a push. Only
+`obsidian-smoke.mjs`, which launches a real Obsidian, or a device can see one. This was reported
+from a phone (github#170 want #4), diagnosed from that screenshot plus a static audit of which
+controls declare a radius, and is **confirmed only on the device**.
+
+**The audit above was of `border-radius`, and the property that was actually breaking the segment
+was `height` (github#178).** Obsidian's `app.css` sets `button { height: var(--input-height) }`, and
+`.is-mobile` retunes that token to `--touch-size-m`, **44px**; on the desktop it is 30px. An explicit
+`height` overrides a flex stretch, and `#vg-heatsrc button` specified none -- so the segment's two
+halves were 44px inside a 32px container on a phone and 30px inside a 26px row on the desktop,
+clipped by the container's `overflow: hidden` with their labels centred in the taller box, which is
+what "Added is taller than Touched, the outline broken between them" was. **github#70's "every
+control in the band's row is the same height" could not catch it**: it measures `#vg-heatsrc`, the
+container, which was always right, and never the two buttons inside it.
+The reset is `.vault-graph #vg-heat :where(button)` / `:where(input)` -- **(1,1,0)**, which beats
+every `app.css` rule reaching these elements (`button` (0,0,1), `button:not(.clickable-icon)` and
+`input[type='date']` both (0,1,1)) while tying with or losing to the band's own rules, so it sits
+above them in the file. It sets exactly `height: auto` and `box-shadow: none`, because every other
+property the host touches is already set by a band rule -- and a wider reset would have *taken*
+things away: `.vault-graph button.btn` is (0,2,1), which loses to anything carrying an id, so the
+chips and `#vg-rangeall` would have lost the `padding: 5px 8px` and 6px radius they get from `.btn`.
+
+**And the gap is closed now:** `scripts/host-phone-check.mjs` renders the plugin inside a real
+desktop Obsidian with `app.emulateMobile(true)` and the device metrics at a phone's width, and puts
+the band's controls under checks that can fail. It is manual, like `obsidian-smoke.mjs` -- it needs
+Obsidian installed and takes a minute or two -- so the invisibility to a *push* is unchanged; what
+changed is that it no longer takes a device and a person noticing.
+
+**Two things make a "default" unmeasurable, and both once made this check unable to fail.**
+`bandOpen` is read **once, at mount**, so a harness that resizes a page into a phone measures the
+default for the size the page *booted* at -- both checks reboot under the emulation instead. And
+the exported page **persists `bandOpen` to `localStorage`** (`shell.html`), so the tap that proves
+the fold has a way back stores `false`, and the next boot would start folded because of the tap
+rather than because of the default. `reboot()` forgets that one key first; storing `open` on
+purpose and booting a phone with it is the other half, asserted -- and since the phone now ignores
+the store, that assertion reads the other way round: the stored `open` must **not** reach the
+phone, and the phone's own tap must leave it exactly as it found it.
+
+**Check:** `smoke.mjs`'s "a phone gets the disc whole at the top of a page that scrolls", on the
+demo fixture at 390x844 and 412x915 with touch emulated and the page **booted at that size** --
+the calendar folded with the disc's top at y=0, a desk's stored `open` ignored and a tap here
+leaving that stored value untouched, its toggle inside the disc square's top-left quadrant, nothing over the drawn disc at rest or mid-cascade, the root scrolling, the panel below
+the disc, pan off with no toggle, and a raw touch trace showing the disc releasing a one-finger
+move to the browser. A tap then opens the band, and everything *inside* the band is measured
+there because a folded band has no boxes to measure: every hit box at 44 (height only for
+`#vg-years button`), the band above the disc, nothing over the drawn disc, the lens on one line,
+every `.hrow` child inside its row, `#vg-compact` on the range's line. A second tap folds it
+again. Its twin, "a narrow window with a pointer keeps the desktop's answer", holds the other
+half of the predicate at 390x844 with a fine pointer **and asserts the calendar is still open
+there, from the store** -- the fold keys off `phone()`, never off `narrow()`. Both put touch emulation and the
+metrics override back on every exit. `scripts/mobile-check.mjs` reports the same readings at any
+device and takes the `screen-left` lock.
+
+**The scrollbar costs the disc 15px in a desktop-Chrome harness and nothing on a phone** --
+`overflow-y: auto` reserves a classic scrollbar there, so the square measures 375 and the radius
+reads 1.59px. Coarse-pointer devices use overlay scrollbars. It is why the two readings of the
+same disc differ between `mobile-check.mjs` and the record.
+
+## A disc already home needs no flight (github#175)
+
+`design/0013`. A second code review, of `fd08e12..develop`, raised five more claims about the
+github#170 and github#173 work, all unverified. **Four reproduced and one did not**, on the demo
+fixture at 390x844 and 412x915 with touch emulated and the page booted at size. The measurements
+are in `changelog-detail.md`; what each one now guarantees is here.
+
+**`setPan(false)` may not fly a disc that is already at fit.** It called `fit()` unconditionally,
+and `fit()` forces `enableCameraPanning` on for its 380 ms -- so github#173's repair was complete
+only until the flight's own tail. `stopAnimation()` runs `fit()`'s `landed` callback
+**synchronously**, `landed` calls `syncPhonePan()`, and by the tail the ratio has climbed back over
+`phonePanWanted()`'s threshold, so that call reaches `setPan(false)` -> `fit()` again and arms
+panning before `claimsTouch` reads the flag. `setPan(false)` now asks `atFit()` first and sets
+`enableCameraPanning` false directly when the camera is already in the state `fit()` would fly to.
+The 380 ms window is gone at its source; nothing was added at the input layer, and `captor.ts` is
+untouched.
+
+**`atFit()`'s band is `phonePanWanted()`'s band, and that is the point.** The ratio must be within
+**0.5 % of `fitRatio()`** -- the same 0.995 the pan predicate reads -- so the two are exactly
+complementary: whenever pan is not wanted, no flight is owed. x, y and angle must be at the
+target within **1e-3**. That positional epsilon is not decoration: the reported path leaves them
+at **exactly 0.5**, because the zoom buttons and a bare `setState({ratio})` never touch them, so
+the epsilon costs the fix nothing while keeping a genuinely **panned** disc flying home. Guarding
+on `camAtRest` instead was rejected for that reason -- `landed` sets it true even for an
+**arrested** flight, so it would skip the flight for a disc still far from home and strand it
+off-centre.
+
+**A disc flies home once.** `enableCameraPanning` going off at roughly twice the flight's duration
+was the second, redundant `fit()`, and it is what the item-3 check pins.
+
+**A rotation tells the host nothing it already stored.** `syncPhoneBand`'s phone->desk flip calls
+`setBand(storedBand)`, which off a phone re-assigned `storedBand` to itself and still fired
+`onBandOpen`, so every rotation to landscape wrote the plugin's settings for nothing. The callback
+is gated on the stored value actually moving. The **quiet** form was rejected: it also skips
+`afterPanel()`, which that flip needs to lay the band out, and github#173's own check asserts
+`laidOut` on exactly that rotation. A deliberate desk tap still writes through -- the gate is
+"the stored value moved", not "say nothing".
+
+**`narrow()` costs no `MediaQueryList`.** It built a fresh one per call, the allocation github#173
+took out of `phone()`, and it is read from `select()`, the sheet and the note-card toggles.
+`narrowMq` is held from mount, and the read-panel listener binds to **that** object rather than a
+second one for the identical `(max-width: 720px)` query -- one object, as `phoneMq` already is.
+
+**The fifth claim does not reproduce, and is recorded rather than fixed.** "A host settings push
+mid-flight arms pan on a transient ratio" is structurally impossible on a phone, not merely
+unobserved: `syncPhonePan()` arms pan on the camera's own `updated`, so a flight *toward* fit only
+ever starts from an **already-armed** zoom, and at or above fit `phonePanWanted()` already answers
+`false`. There is no window in which `api.setPanEnabled` sees a sub-fit ratio with pan off, so no
+`fitting` guard was added -- a guard for a defect that cannot occur is a constant nobody can
+justify from a measurement. The same flight with and without the push agrees to within **1 ms**,
+and a push on the boot flight flips pan **0** times. Asserted in the check so the claim cannot be
+reopened on a reading.
+
+**Check:** four in `smoke.mjs`, each verified to fail on `develop` at `e4b962f` — though the
+item-3 one only at github#179, which is the correction this paragraph carries. It was written,
+merged and recorded here as verified while it had **never been run**: the screen guard was busy
+for its author's whole run, and the first time it was driven it threw on its own JSON, because
+its ride returns a Promise through `p.j` and `p.j` stringifies inside the page, before anything
+awaits. Driven through `p.eval` it passes on `develop` and fails on `e4b962f` as claimed —
+`panning off` at **392 ms** against **781 ms** — so the guarantee below stands; what did not
+stand was the evidence for it. See `awaiting-a-page-promise.md`, and treat "a check asserts it"
+as a claim about a check that has actually run. "A swipe in the
+tail of a fit flight still scrolls" zooms twice to arm pan, taps Fit, and puts a finger down at
+345 ms of the 380 ms flight, reading the captor's own trace plus `enabledPanning` sampled after
+`stopAnimation()` has run -- the flag `claimsTouch` reads. **Two preconditions are asserted before
+the verdict**, because without them a pass means only that the timing drifted: the ratio at that
+instant must be past the pan threshold and still short of fit, and the zoom must actually have
+armed pan. "A settings push during a fit flight changes nothing" runs the same flight twice, with
+and without the push, and requires the two rides to agree on the flip count and on when panning
+goes off within two sample periods; it also asserts the disc flies home exactly once, which is the
+half that fails on `develop`. Its wait is bounded at both ends (github#179) — a sampler tick that
+throws stops the ride and reports its message, and `rideCap()` fails it at **5 s** if the page
+stops ticking at all — so a future hang here fails with a reason instead of holding `screen-left`
+until the transport gives up with only the expression to show for it. "A rotation to landscape writes the host nothing" counts `onBandOpen`
+by wrapping the shell's `saveSettings` across the flip, and keeps github#173's own assertions on
+that rotation, so the zero cannot be bought by dropping the restore. "`narrow()` costs no
+MediaQueryList" measures `phone()` too, so a regression in github#173's hoist surfaces here as well.
+
+**Desktop unchanged, measured both ways:** all five goldens match, band and positions; and at
+1600x1000 the three `setPan` paths are identical to `e4b962f` -- pan off at fit moves the camera
+**0.000000** either way, a zoomed disc still returns to fit, and a panned one still flies back to
+centre.
+
+## Three things the phone layout read once, and one that read too often (github#173)
+
+`design/0013`. A code review of `2.8.0..develop` raised four claims about the github#170 work, all
+unverified. **Three reproduced and one did not**, on the demo fixture at 390x844 and 412x915 with
+touch emulated and the page booted at size. The measurements are in `changelog-detail.md`; what
+each one now guarantees is here.
+
+**A host settings push may not discard a phone's zoom.** `api.setPanEnabled` asks
+`phonePanWanted()`, the same live read the mount path and `syncPhonePan` already use, rather than
+`phone() ? false : storedPan`. The old form was an unconditional `setPan(false)` on a phone, which
+flies the camera home -- and `applyHiddenDefaults()` pushes `setPanEnabled` on **every** settings-tab
+change, so hiding one folder threw away the reader's zoom. Measured: zoomed **0.795** with pan
+armed came back **0.954** with pan off. Off a phone `phonePanWanted()` **is** `storedPan`, so the
+settings row still decides there; that half is asserted too, because a fix that simply left pan on
+would pass everything else.
+
+**The calendar's fold follows the layout, and only the desk's own tap reaches the store.**
+`bandOpen` was derived once at mount while `setBand` gated persistence on a *live* `phone()`, so a
+coarse device booted at 700px stayed folded after rotating to 900px although the host had stored
+`true` -- and two taps at that width then wrote that stored `true` to **`false`**. A phone
+rewriting the desk's setting by way of a resize is exactly what the github#170 second pass existed
+to prevent; the resize was the hole left in it. `syncPhoneBand()` re-derives on the media query's
+change and on the root's resize beat, and `storedBand` follows every deliberate desk choice, as
+`storedPan` already did for pan.
+
+**It fires only when the predicate itself flips, and that guard is load-bearing.** `setBand`
+changes `data-band`, which reflows the root, which fires the root's own `ResizeObserver` -- so a
+`syncPhoneBand` guarded merely on `want !== bandOpen` folds the band back the instant a phone
+reader opens it, and the toggle stops working. `bandPhone` holds the last answer and the function
+returns early when it is unchanged. Caught by the new check's own last assertion on the first run;
+nothing else would have seen it, because the github#170 checks tap the band at one width.
+
+**`fit()`'s flight may not claim a swipe.** `fit()` turns `enableCameraPanning` on for its 380 ms
+flight -- it has to, since `camera.validateState` drops `x` and `y` while it is false -- and
+`claimsTouch` reads `camera.enabledPanning`. So tapping Fit and swiping at once had the swipe
+claimed and the page could not scroll. `handleTouchStart` already called `stopAnimation()`, which
+runs `fit()`'s own `landed` callback synchronously and restores the flag; it simply did it **after**
+`claimsTouch` had answered. That call moves above the claim, and the engine still knows nothing
+about `fit()`. The desktop gets the same correction for free, exactly as the original
+`claimsTouch` did.
+
+**`phone()` is not free, and it was on the camera's per-frame path.** It built a fresh
+`MediaQueryList` per call, and `syncPhonePan` ran on every camera `updated` -- **1.00 `matchMedia`
+call per update, on a desktop too**, to conclude nothing had changed. `phone()` reads the `phoneMq`
+held from mount (the bind block's own object, hoisted rather than duplicated), and the per-frame
+caller returns early off a phone. **0.00 per update** at both widths. The media-query and
+resize-beat callers keep the full body, so the interrupted-flight repair above stays reachable on
+a desktop.
+
+**The fourth claim does not reproduce, and is recorded rather than fixed.** "A late second finger
+loses the pinch" has a correct premise -- the thumb crosses the slop, the browser commits to the
+`pan-y` scroll, and later `touchmove`s arrive non-cancelable -- and a wrong conclusion.
+`handleTouchMove` runs the pinch arithmetic **after** the `claimsTouch` guard, not inside it, so a
+non-cancelable move still zooms: **x4.534** with both fingers down first, **x2.2-2.9** with the
+second finger late, both tracking `pinchRatio * (pinchSpread / now)`. And `claimsTouch`
+short-circuits on `e.cancelable`, so `preventDefault` is never called on an event that has none.
+The measurement is asserted in the check below, so the claim cannot be reopened on a reading.
+
+**Check:** three in `smoke.mjs`, on the demo fixture at both phone viewports, each verified to fail
+on `develop` at `fd08e12`. "A settings push keeps a phone's zoom" asserts the zoom armed pan
+*before* pushing -- a push that discards nothing must not read as a pass -- and uses a stability
+poll rather than `settlePan`, which clicks Fit and would undo the very zoom being measured. "The
+calendar follows a phone that rotates" walks 700x900 → 900x700 → back → out again with a stored
+`open`, asserting the fold, the restore, that a desk tap reaches the store, that `storedBand` did
+not go stale, and that a phone's own tap opens it for the session only. "A swipe after Fit still
+scrolls, and a late finger still pinches" reads the raw touch trace against an at-rest control --
+the control must show `TAKEN` or the row below it means nothing -- and asserts
+`enableCameraPanning` is still true when the swipe starts, so a flight that has already landed
+cannot make it pass vacuously; aiming is recomputed after the swipes, because those really do
+scroll the page.
+
+**Desktop unchanged, measured both ways:** all five goldens match, positions and band; and every
+box and reading at 1600x1000 is identical to `fd08e12` -- 64 of them, including the camera and both
+pan flags.
