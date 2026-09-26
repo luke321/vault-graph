@@ -50,3 +50,5 @@ failure was measured over 48 frames; a toggle now runs 62–123, ample to conver
 - Exposed as `__vg.radialEase` so it can be re-swept without a rebuild.
 - The `Math.floor(pp)` step is still there. It is *smoothed*, not removed — anyone
   tempted to remove it should read the rejected option above first.
+
+**2026-09-26, github#186.** The easing and the per-frame cap were radial only; the angle was taken from the target outright, so a serpentine flip on a row hop crossed the wedge in one frame. The angle now eases and is capped the same way, as an arc at the target radius, and its residual counts toward convergence. Numbers in `invariants.md`, *The angle was still a jump*.

@@ -1074,6 +1074,8 @@ function mountVaultGraph(root, data, deps) {
     /** @type {Record<string, Record<string, number>>} */
     var tally = dict();
     graph.forEachNode(function (id, a) {
+      // github#86 -- a stand-in is its note, already tallied
+      if (a.standIn) return;
       var f = fileGroup(id, a), sb = fileSub(id, a);
       if (!tally[f]) tally[f] = dict();
       tally[f][sb] = (tally[f][sb] || 0) + 1;
@@ -5406,13 +5408,22 @@ function mountVaultGraph(root, data, deps) {
         if (gap < 0 ? -gap > resid : gap > resid) resid = gap < 0 ? -gap : gap;
         var move = gap * ez;
         // github#186, decisions/0002 -- a row hop glides, capped per frame
+        // github#186 -- the angle glides too: a serpentine flip is an arc
+        var hNow = rNow > 1e-6 ? Math.atan2(y, x) : h;
+        var dh = h - hNow;
+        if (dh > Math.PI) dh -= 2 * Math.PI; else if (dh < -Math.PI) dh += 2 * Math.PI;
+        var arc = dh * rWant;
+        if (arc < 0 ? -arc > resid : arc > resid) resid = arc < 0 ? -arc : arc;
+        var turn = arc * ez;
         if (pr < 1) {
           var lim = RADIAL_STEP_MAX * UNIT * (bandLock && bandLock[groupOf(id)] ? bandOf("i").sp * INNER_SCALE : bandOf("o").sp);
           if (folding && foldPitch[id] > 0) lim = RADIAL_STEP_MAX * foldPitch[id];
           if (lim > 0 && move > lim) move = lim; else if (lim > 0 && move < -lim) move = -lim;
         }
+          if (lim > 0 && turn > lim) turn = lim; else if (lim > 0 && turn < -lim) turn = -lim;
         var r = rNow + move;
-        graph.mergeNodeAttributes(id, { x: r * Math.cos(h), y: r * Math.sin(h) });
+        var hh = rWant > 1e-6 ? hNow + turn / rWant : h;
+        graph.mergeNodeAttributes(id, { x: r * Math.cos(hh), y: r * Math.sin(hh) });
       });
       posVer++;
       if (pr >= 1) tailFrames++;
