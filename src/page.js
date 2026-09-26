@@ -4223,7 +4223,7 @@ function mountVaultGraph(root, data, deps) {
    * @property {number} depthO
    * @property {string[]} members
    * @property {string[]} memberG
-   * @property {string[]} leaving   members kept only while present: they drop out as they fade
+   * @property {string[]} leavers   members kept only while present: they drop out as they fade
    * @property {Record<string, number>} liveN
    * @property {Record<string, number>} liveSub
    * @property {Record<string, boolean>} splitOf
@@ -4239,7 +4239,7 @@ function mountVaultGraph(root, data, deps) {
   /** @returns {PlanSkel} */
   function freshSkel() {
     return { filled: false, keep: null, dim: "", order: [], pinned: "", onlyVisible: false,
-             depthI: 0, depthO: 0, members: [], memberG: [], leaving: [], liveN: dict(), liveSub: dict(),
+             depthI: 0, depthO: 0, members: [], memberG: [], leavers: [], liveN: dict(), liveSub: dict(),
              splitOf: dict(), byCell: dict(), cellsOf: dict(), big: [], smallIds: [], merged: dict() };
   }
   /** @param {Plan | null} a @param {Plan | null} b @returns {string} empty when the plans agree */
