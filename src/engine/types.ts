@@ -119,6 +119,7 @@ export interface NodeDisplayData {
   hidden: boolean;
   highlighted?: boolean;
   forceLabel?: boolean;
+  autoLabel?: boolean;
   zIndex?: number;
   type?: string;
   haloColor?: string;

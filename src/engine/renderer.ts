@@ -26,6 +26,9 @@ type CanvasLayer = "labels" | "hovers" | "mouse";
 
 const X_LABEL_MARGIN = 150;
 const Y_LABEL_MARGIN = 50;
+// github#186
+const SPARSE_LABEL_LIMIT = 12;
+const SPARSE_LABEL_WIDTH = 180;
 const ANTI_ALIASING_FEATHER = 1;
 const STAGE_PADDING = 30;
 const DEFAULT_NODE_COLOR = "#999";
@@ -542,15 +545,56 @@ export class Renderer extends Emitter<EventMap> implements RendererApi {
   private renderLabels(): void {
     const ctx = this.ctx.labels;
     const { labelSize, labelFont, labelWeight, labelColor } = this.settings;
+    const occupied: { x: number; y: number; w: number; h: number }[] = [];
+    ctx.fillStyle = labelColor;
+    ctx.font = `${labelWeight} ${labelSize}px ${labelFont}`;
     for (const id of this.forcedLabels) {
       const data = this.nodeData.get(id);
       if (!data || data.hidden || !data.label) continue;
       const { x, y } = this.framedGraphToViewport(data);
       const size = this.scaleSize(data.size);
       if (x < -X_LABEL_MARGIN || x > this.width + X_LABEL_MARGIN || y < -Y_LABEL_MARGIN || y > this.height + Y_LABEL_MARGIN) continue;
-      ctx.fillStyle = labelColor;
-      ctx.font = `${labelWeight} ${labelSize}px ${labelFont}`;
       ctx.fillText(data.label, x + size + 3, y + labelSize / 3);
+      occupied.push({ x: x + size + 1, y: y - labelSize, w: ctx.measureText(data.label).width + 4, h: labelSize + 5 });
+    }
+    // github#186
+    const visible: NodeDisplayData[] = [];
+    for (const data of this.nodeData.values()) {
+      if (data.hidden) continue;
+      visible.push(data);
+      if (visible.length > SPARSE_LABEL_LIMIT) return;
+    }
+    for (const data of visible) {
+      const { x, y } = this.framedGraphToViewport(data);
+      const r = this.scaleSize(data.size) + 2;
+      occupied.push({ x: x - r, y: y - r, w: r * 2, h: r * 2 });
+    }
+    for (const data of visible) {
+      if (!data.autoLabel || data.forceLabel || !data.label) continue;
+      const { x, y } = this.framedGraphToViewport(data);
+      if (x < 0 || x > this.width || y < 0 || y > this.height) continue;
+      const r = this.scaleSize(data.size) + 5;
+      const maxWidth = Math.min(SPARSE_LABEL_WIDTH, this.width * 0.4);
+      const chars = Array.from(data.label);
+      let text = data.label;
+      while (chars.length && ctx.measureText(text).width > maxWidth) {
+        chars.pop(); text = chars.join("") + "…";
+      }
+      const w = ctx.measureText(text).width;
+      const candidates = [
+        { x: x + r, y: y + labelSize / 3 },
+        { x: x - r - w, y: y + labelSize / 3 },
+        { x: x - w / 2, y: y - r },
+        { x: x - w / 2, y: y + r + labelSize }
+      ];
+      for (const at of candidates) {
+        const box = { x: at.x - 2, y: at.y - labelSize, w: w + 4, h: labelSize + 4 };
+        if (box.x < 2 || box.y < 2 || box.x + box.w > this.width - 2 || box.y + box.h > this.height - 2) continue;
+        if (occupied.some((b) => box.x < b.x + b.w && box.x + box.w > b.x && box.y < b.y + b.h && box.y + box.h > b.y)) continue;
+        ctx.fillText(text, at.x, at.y);
+        occupied.push(box);
+        break;
+      }
     }
   }
 

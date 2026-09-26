@@ -1,6 +1,52 @@
 # Invariants
 
-## Fold-and-regrow prototype timing (github#186)
+## Fold continuity and sparse-result labels (github#186)
+
+The fold now interpolates each endpoint row's radius toward that band's first row while
+keeping its endpoint angle. It does not rebuild a fractional top row and redistribute its
+notes across a wedge. The departure folds from the positions captured at the switch (`foldSrc`; `posSrc` is not taken
+on a switch, which is why the first cut folded nothing on the demo and 10k), the arrival from
+`finalPos`, and each fold covers only its own disc's notes, since one seat map overriding the
+other left the leaving disc standing still. At amount 1 the target is exactly the endpoint;
+the existing per-frame radial cap and convergence loop still govern the drawn positions.
+
+`FOLD_ENTER = 0.05`, `FOLD_PHASE = 0.65`, and `FOLD_FADE = 0.18` are fractions of the existing
+cascade duration. Departure and arrival overlap for 0.60 of the clock; arrival finishes at
+0.70, leaving time to converge. `FOLD_LAND` is removed: there is no second layout to blend onto.
+Fold opacity no longer additionally shrinks the radius. Endpoint size ceilings and actual
+frame-clearance sizing remain active; the clock-hand fallback retains its shrink behavior.
+
+At a settled filtered view, up to `SPARSE_LABEL_LIMIT = 12` visible display nodes may receive
+automatic labels. They do not change note sizes, search labels, or focus behavior. Labels are
+limited to `SPARSE_LABEL_WIDTH = 180` CSS pixels (or 40% of a narrow canvas), shortened with an
+ellipsis, and placed to avoid other labels, dots, and the canvas edges. They disappear during
+animation, focus, a recent lens, or when the filter clears. Hidden nodes do not consume the cap.
+
+Verification added to `tags: fold and regrow` measures angular drift between lit frames as well
+as movement, opacity reversals, cleanup, and resting-layout parity. `sparse filtered results`
+measures actual label-canvas ink on a sparse day and its removal after clearing the filter.
+The existing `filtered to the bone` check continues to enforce the 1×–3× dot-size bounds.
+
+Measured locally on 2026-09-26, executing the actual fold and label methods in isolation:
+401 fold positions, maximum angular drift **1.11e-16 radians**, endpoint drift **0**, monotone
+radii and unchanged pinned positions; label truncation, canvas bounds, pairwise overlap,
+density cutoff, hidden-node exclusion, filter clearing, and forced-label priority pass.
+Filmed on the same day, at slow ×4, both discs folding, the reviewer's chroma proxy (300 px
+frames, annulus 30–145 px, against the smaller resting endpoint) and the arrival-window frame step:
+
+| | trough, demo | trough, tag | ripple mean / max, demo | 10k, ms a frame |
+|---|---|---|---|---|
+| the re-planned fold (FOLD_ENTER 0.30, landing blend) | 24.2% | 17.7% | 1.34 / 3.41 | 70.7 |
+| this fold, both discs | **53.8%** | **48.4%** | **0.62 / 3.94** | **64.5** |
+| this fold with the leaving disc not folding (the first cut) | 73.3% | 66.1% | 0.59 / 3.96 | -- |
+| develop's clock hand | 95.7% | 94.7% | -- | 57.7 |
+
+The fold check reads fold 893 / grow 19.2 on the demo and 285 / 893 on the 10k (grow is a per-frame
+maximum, the glide cap), angular step 0, relayout drift 0, and `render-diff` at rest shows 0
+canvas pixels differing on every fixture and ratio. A leaving disc that only fades where it stands
+keeps more colour in the middle than one that folds; the design folds both.
+
+## Fold-and-regrow prototype timing (github#186, historical)
 
 `design/0015` records the branch's new default dimension transition. `FOLD_ENTER = 0.4`,
 `FOLD_PHASE = 0.6`, and `FOLD_FADE = 0.18` are fractions of the existing cascade duration.

@@ -796,8 +796,8 @@ function mountVaultGraph(root, data, deps) {
   function twBtn(attrs, open) {
     return attrs
       ? '<button class="tw" ' + attrs + ' aria-expanded="' + open + '">' +
-        (open ? "▾" : "▸") + '</button>'
-      : '<span class="tw none">▸</span>';
+        (open ? "â–¾" : "â–¸") + '</button>'
+      : '<span class="tw none">â–¸</span>';
   }
 
   /** @param {Record<string, unknown> | undefined} raw @returns {Record<string, boolean>} */
@@ -1529,8 +1529,8 @@ function mountVaultGraph(root, data, deps) {
     var say = function (v) {
       return v.toFixed(2) + (v < CONTRAST_FLOOR ? " (under 3:1)" : "");
     };
-    return name + " · solid-area contrast: light " + say(c.light) +
-           ", dark " + say(c.dark) + " · a sub-pixel dot reads lower";
+    return name + " Â· solid-area contrast: light " + say(c.light) +
+           ", dark " + say(c.dark) + " Â· a sub-pixel dot reads lower";
   }
 
   /** @param {Record<string, unknown>} map @param {string} [dim] */
@@ -4182,12 +4182,10 @@ function mountVaultGraph(root, data, deps) {
   /** @type {Record<string, boolean> | null} */
   var departing = null;
   var leaveEdgeK = 1;
-  // github#186, design/0015 -- the worlds overlap for 0.3 of the clock
+  // github#186, design/0015 -- the worlds overlap while the rows fold
   var foldSwitch = true;
-  // github#186 -- the arrival ends at 0.95; the glide cap catches up after
-  var FOLD_ENTER = 0.30, FOLD_PHASE = 0.65, FOLD_FADE = 0.18;
-  // github#186 -- the arriving world eases onto its rest from here
-  var FOLD_LAND = 0.85;
+  // github#186 -- the arrival ends at 0.70; the glide cap catches up after
+  var FOLD_ENTER = 0.05, FOLD_PHASE = 0.65, FOLD_FADE = 0.18;
   var SPREAD_MAX  = 78;
   var SPREAD_PER  = 0.17;
   var SPREAD_MIN  = 24;
@@ -4449,11 +4447,13 @@ function mountVaultGraph(root, data, deps) {
     if (dead) return;                      // github#62
     opts = opts || {};
     var folding = !!(opts.fold && opts.hand && opts.from);
-    /** @typedef {{ plan: Plan, members: Record<string, boolean>, cells: Record<string, string> }} FoldPlan */
+    /** @typedef {{ plan: Plan }} FoldPlan */
     /** @type {FoldPlan | null} */
     var foldA = null;
     /** @type {FoldPlan | null} */
     var foldB = null;
+    /** @type {Record<string, Point> | null} */
+    var foldSrc = null;
     /** @type {Record<string, number>} */
     var foldPitch = dict();
     stopPlay();
@@ -4482,7 +4482,7 @@ function mountVaultGraph(root, data, deps) {
     if (!opts.hand && standIns.length) dropStandIns();
     // github#86 -- the left disc keeps its own colours while it stands
     if (opts.from && opts.from.color) leftColor = opts.from.color;
-    shrinkFade = !!opts.hand;
+    shrinkFade = !!opts.hand && !folding;
 
     fullRing = false;
     graph.forEachNode(function (id) { if (present(id)) fullRing = true; });
@@ -4891,17 +4891,12 @@ function mountVaultGraph(root, data, deps) {
     /** @param {Plan | null} plan @returns {FoldPlan | null} */
     var holdFold = function (plan) {
       if (!plan) return null;
-      /** @type {Record<string, boolean>} */
-      var members = dict();
-      /** @type {Record<string, string>} */
-      var cells = dict();
       plan.cells.forEach(function (c) {
         c.list.forEach(function (id) {
-          members[id] = true; cells[id] = c.k;
           foldPitch[id] = UNIT * (c.inner ? plan.spInner * INNER_SCALE : plan.sp);
         });
       });
-      return { plan: plan, members: members, cells: cells };
+      return { plan: plan };
     };
     (function () {
       var a = inWorld(function () { return staticPlan(function (id) { return wasPresent[id]; }); });
@@ -4919,7 +4914,12 @@ function mountVaultGraph(root, data, deps) {
         finally { moveFrom = save; }
       })();
       var aCells = cellsOfG(a), bCells = cellsOfG(b);
-      if (folding) { foldA = holdFold(a); foldB = holdFold(b); }
+      if (folding) {
+        foldA = holdFold(a); foldB = holdFold(b);
+        // github#186 -- the leaving disc folds from where it stands
+        foldSrc = dict();
+        graph.forEachNode(function (id) { foldSrc[id] = { x: graph.getNodeAttribute(id, "x"), y: graph.getNodeAttribute(id, "y") }; });
+      }
       if (moves.length) {
         splitHold = dict();
         Object.keys(bCells).forEach(function (g0) { splitHold[g0] = bCells[g0] > 1; });
@@ -5185,24 +5185,22 @@ function mountVaultGraph(root, data, deps) {
       v = Math.max(0, Math.min(1, v));
       return v * v * (3 - 2 * v);
     };
-    /** @param {FoldPlan | null} held @param {number} amount @returns {Record<string, Point>} */
-    var packFold = function (held, amount) {
+    /** @param {FoldPlan | null} held @param {number} amount @param {Record<string, Point> | null} seats @returns {Record<string, Point>} */
+    var packFold = function (held, amount, seats) {
       if (!held) return {};
-      var endpoint = held.plan;
-      var savedKeep = planKeep, savedCell = cellHold, savedPin = pinnedPlan;
-      planKeep = function (id) { return !!held.members[id]; };
-      cellHold = held.cells; pinnedPlan = null;
-      cellNow = null; edgeNow = null; colWalk = null;
-      var depths = { i: 1 + ((endpoint.rows.i || 1) - 1) * amount,
-                     o: 1 + ((endpoint.rows.o || 1) - 1) * amount };
-      try {
-        var foldPlan = buildWedgePlan(true, weightOf,
-          function (c) { return depths[c.inner ? "i" : "o"]; },
-          { i: endpoint.spInner, o: endpoint.sp, depth: depths });
-        return foldPlan ? ringsLayout(foldPlan, true) || {} : {};
-      } finally {
-        planKeep = savedKeep; cellHold = savedCell; pinnedPlan = savedPin;
-      }
+      // github#186 -- only this disc's notes, or the other disc overrides the fold
+      var out = dict();
+      held.plan.cells.forEach(function (c) {
+        var base = UNIT * (c.inner ? held.plan.r0 * INNER_SCALE : held.plan.rOuter);
+        c.list.forEach(function (id) {
+          var p = seats && seats[id];
+          if (!p) return;
+          var r = Math.hypot(p.x, p.y);
+          var k = r > 1e-9 ? (Math.min(base, r) + Math.max(0, r - base) * amount) / r : 1;
+          out[id] = { x: p.x * k, y: p.y * k };
+        });
+      });
+      return out;
     };
     cascadeRun = { raf: 0, tick: NOW(), guard: WIN.setTimeout(watchdog, STALL_MS), sizeCap: sizeCap,
                    skel: moveFrom ? null : freshSkel() };
@@ -5344,16 +5342,8 @@ function mountVaultGraph(root, data, deps) {
       if (folding) {
         var leavePr = foldEase(pr / FOLD_PHASE);
         var enterPr = foldEase((pr - FOLD_ENTER) / FOLD_PHASE);
-        var oldSeats = leavePr < 1 ? inWorld(function () { return packFold(foldA, 1 - leavePr); }) : {};
-        var newSeats = enterPr >= 1 ? finalPos : packFold(foldB, enterPr);
-        // github#186 -- no snap at the landing: the tail eases onto finalPos
-        if (enterPr < 1 && enterPr > FOLD_LAND) {
-          var kLand = foldEase((enterPr - FOLD_LAND) / (1 - FOLD_LAND));
-          Object.keys(newSeats).forEach(function (id) {
-            var f = finalPos[id], n = newSeats[id];
-            if (f && n) newSeats[id] = { x: n.x + (f.x - n.x) * kLand, y: n.y + (f.y - n.y) * kLand };
-          });
-        }
+        var oldSeats = leavePr < 1 ? packFold(foldA, 1 - leavePr, foldSrc) : {};
+        var newSeats = enterPr >= 1 ? finalPos : packFold(foldB, enterPr, finalPos);
         targets = Object.assign({}, oldSeats, newSeats);
         cellNow = null; edgeNow = null; colWalk = null;
       } else if (opts.hand && opts.from) {
@@ -6001,7 +5991,8 @@ function mountVaultGraph(root, data, deps) {
           if (ht > 0.5) { r.highlighted = true; r.forceLabel = true; }
           return r;
         }
-        r.label = "";
+        r.autoLabel = !cascadeRun && !anim && !focus && recentT <= 0.004 && filterOn();
+        if (!r.autoLabel) r.label = "";
         return r;
   }
 
@@ -6388,7 +6379,7 @@ function mountVaultGraph(root, data, deps) {
     el.textContent = stalled
       ? what + " and " + (one ? "has" : "have") +
         " not come back. Reload or reopen the graph to rebuild it."
-      : what + " — restoring...";
+      : what + " â€” restoring...";
     el.hidden = false;
   }
 
@@ -6455,7 +6446,7 @@ function mountVaultGraph(root, data, deps) {
         var r = nodeStyle(id, a);
         if (al < 0.999) {
           r.color = withAlpha(r.color, al);
-          r.size = (r.size || a.size) * (shrinkFade ? al : 0.45 + 0.55 * al);
+          r.size = (r.size || a.size) * (foldSizes ? 1 : shrinkFade ? al : 0.45 + 0.55 * al);
           if (al < 0.62) { r.label = ""; r.forceLabel = false; r.highlighted = false; }
         }
         if (colWalk) {
@@ -6944,7 +6935,7 @@ function mountVaultGraph(root, data, deps) {
   /** @param {string} g @param {Record<string, boolean> | null} bandLock */
   function swatchTitle(g, bandLock) {
     if (g === UNLINKED && unlinkedTintByFolder && unlinkedTintColors.length > 1) {
-      return "Mixed — coloured by folder";
+      return "Mixed â€” coloured by folder";
     }
     // github#3, github#50
     if (!counts[g]) return "No notes on the disc";
@@ -7206,8 +7197,8 @@ function mountVaultGraph(root, data, deps) {
       var ctTitle = share
         ? ' title="' + w.counts[g] + (w.counts[g] === 1 ? " note" : " notes") +
           (g === w.basisGroup
-            ? " · the largest folder shown"
-            : " · " + shareText(share) + " of " + esc(w.basisGroup)) + '"'
+            ? " Â· the largest folder shown"
+            : " Â· " + shareText(share) + " of " + esc(w.basisGroup)) + '"'
         : '';
 
       // github#86 -- an arriving row is collapsed until its first note is lit,
@@ -9406,13 +9397,13 @@ function mountVaultGraph(root, data, deps) {
     for (var i = 0; i < keys.length; i++) inWin += days[keys[i]].ids.length;
     // github#86 -- graph.order counts DOTS, and this sentence says notes
     $("heatnote").textContent =
-      "last " + cols + " weeks · " + inWin + " of " +
+      "last " + cols + " weeks Â· " + inWin + " of " +
       (graph.order - standIns.length) + " notes" +
-      (before ? " · " + before + " earlier" : "") +
-      (after ? " · " + after + " later" : "") +
-      (undated ? " · " + undated + " undated" : "") +
+      (before ? " Â· " + before + " earlier" : "") +
+      (after ? " Â· " + after + " later" : "") +
+      (undated ? " Â· " + undated + " undated" : "") +
       // github#70
-      (bulkDays ? " · " + bulkDays + " bulk day" + (bulkDays === 1 ? "" : "s") : "");
+      (bulkDays ? " Â· " + bulkDays + " bulk day" + (bulkDays === 1 ? "" : "s") : "");
 
     heatSig = "";
     heatDraw();
@@ -9611,12 +9602,12 @@ function mountVaultGraph(root, data, deps) {
     var wd = HEAT_WD[(new Date(d.ms).getUTCDay() + 6) % 7];
     // github#70
     var verb = state.heatSource === "touched" ? "touched" : "added";
-    setHTML(t, '<div class="t">' + esc(d.key) + " · " + wd +
-      (d.key === TODAY ? " · today" : "") + "</div>" +
+    setHTML(t, '<div class="t">' + esc(d.key) + " Â· " + wd +
+      (d.key === TODAY ? " Â· today" : "") + "</div>" +
       '<div class="m">' +
       (n ? n + " note" + (n === 1 ? "" : "s") + " " + verb : "nothing " + verb) +
       (top.length ? "<br>" + top.map(function (g2) {
-        return '<b style="color:' + colorOf(g2) + '">■ </b> ' + esc(g2) + " " + by[g2];
+        return '<b style="color:' + colorOf(g2) + '">â–  </b> ' + esc(g2) + " " + by[g2];
       }).join("<br>") : "") +
       (d.bulk ? "<br><i>" + (d.bulkX > 1 ? d.bulkX + "&times; the typical day here. " : "") +
                 "A sync, an import or a rename does this &mdash; it is not " +
@@ -9701,8 +9692,8 @@ function mountVaultGraph(root, data, deps) {
       if (cnt && cnt.textContent !== String(c.n)) cnt.textContent = String(c.n);
       btn.title = c.win
         ? c.n + " note" + (c.n === 1 ? "" : "s") + " " + c.win.label +
-          (c.bulk ? " · " + c.bulk + " of them on a bulk day, so probably a sync or a rename" : "") +
-          (c.n ? "" : " · nothing here yet")
+          (c.bulk ? " Â· " + c.bulk + " of them on a bulk day, so probably a sync or a rename" : "") +
+          (c.n ? "" : " Â· nothing here yet")
         : "";
     }
   }

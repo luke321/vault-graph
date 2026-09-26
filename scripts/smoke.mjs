@@ -1145,7 +1145,7 @@ check("tags: fold and regrow moves both discs and converges on the resting layou
     await p.eval('__vg.setDim("folder"); __vg.foldSwitch = true; void 0');
     for (const dim of ["tag", "folder"]) {
       const ride = await p.eval(`new Promise(function (resolve, reject) {
-        var G = __vg.graph, start = {}, previous = {}, frames = 0, inward = 0, outward = 0, reversals = 0;
+        var G = __vg.graph, start = {}, previous = {}, frames = 0, inward = 0, outward = 0, reversals = 0, angularStep = 0;
         var raf = 0, timer = setTimeout(function () { cancelAnimationFrame(raf); reject(new Error("fold timed out")); }, 8000);
         G.forEachNode(function (id, a) {
           if ((__vg.alpha[id] || 0) > 0.999) start[id] = Math.hypot(a.x, a.y);
@@ -1163,7 +1163,12 @@ check("tags: fold and regrow moves both discs and converges on the resting layou
                   if (prev && al > 0.5 && prev.al > 0.5) outward = Math.max(outward, r - prev.r);
                   if (prev && al < prev.al - 1e-6) reversals++;
                 }
-                previous[id] = { al: al, r: r };
+                var angle = Math.atan2(a.y, a.x);
+                if (prev && al > 0.05 && prev.al > 0.05) {
+                  var da = Math.abs(angle - prev.angle);
+                  angularStep = Math.max(angularStep, Math.min(da, 2 * Math.PI - da));
+                }
+                previous[id] = { al: al, r: r, angle: angle };
               });
               raf = requestAnimationFrame(tick); return;
             }
@@ -1176,7 +1181,7 @@ check("tags: fold and regrow moves both discs and converges on the resting layou
             });
             clearTimeout(timer);
             resolve({ dim: __vg.state.dim, frames: frames, inward: inward, outward: outward, reversals: reversals,
-              drift: drift, active: __vg.foldActive, standIns: __vg.standIns().length,
+              drift: drift, angularStep: angularStep, active: __vg.foldActive, standIns: __vg.standIns().length,
               path: __vg.lastCascade().path, exit: __vg.lastCascade().exit });
           } catch (e) { clearTimeout(timer); reject(e); }
         }
@@ -1187,9 +1192,9 @@ check("tags: fold and regrow moves both discs and converges on the resting layou
     }
     return {
       ok: rides.every((r) => r.frames >= 10 && r.inward > 1 && r.outward > 1 && r.reversals === 0 &&
-        r.drift < 0.5 && !r.active && r.standIns === 0 && r.path === "fold and regrow" && r.exit === "converged"),
+        r.angularStep < 1e-5 && r.drift < 0.5 && !r.active && r.standIns === 0 && r.path === "fold and regrow" && r.exit === "converged"),
       detail: rides.map((r) => `${r.dim}: ${r.frames}f, fold ${r.inward.toFixed(1)}, grow ${r.outward.toFixed(1)}, ` +
-        `reversals ${r.reversals}, relayout ${r.drift.toFixed(3)}, stand-ins ${r.standIns}, ${r.exit}`).join(" | ")
+        `reversals ${r.reversals}, angular step ${r.angularStep.toFixed(6)}, relayout ${r.drift.toFixed(3)}, stand-ins ${r.standIns}, ${r.exit}`).join(" | ")
     };
   } finally {
     await p.eval(`__vg.setDim("folder"); __vg.foldSwitch = ${JSON.stringify(foldWas)}; void 0`);
@@ -5232,6 +5237,42 @@ check("the last frame of a cascade is the resting layout", async (p) => {
       : `${r.label}: nothing sampled`).join(" | "),
   };
 }, { on: WALK, clock: "real" });
+
+// github#186
+check("sparse filtered results draw labels and clear them with the filter", async (p) => {
+  await clearRange(p);
+  await settle(p);
+  const day = await p.j(`(function () {
+    var days = {};
+    __vg.graph.forEachNode(function (id, a) {
+      if ((__vg.alpha[id] || 0) > 0.999 && a.created) {
+        var d = String(a.created).slice(0, 10);
+        days[d] = (days[d] || 0) + 1;
+      }
+    });
+    return Object.keys(days).sort().reverse().find(function (d) { return days[d] > 0 && days[d] <= 12; }) || null;
+  })()`);
+  if (!day) return { ok: false, detail: "fixture has no day with 1–12 notes" };
+  const labelInk = async () => p.j(`(function () {
+    var c = __vg.renderer.getCanvases().labels;
+    var bytes = c.getContext('2d').getImageData(0, 0, c.width, c.height).data, ink = 0;
+    for (var i = 3; i < bytes.length; i += 4) if (bytes[i] > 32) ink++;
+    return ink;
+  })()`);
+  let sparseInk = 0;
+  try {
+    await p.eval(`__vg.setRange(${JSON.stringify(day)}, ${JSON.stringify(day)}); void 0`);
+    await settle(p);
+    await sleep(200);
+    sparseInk = await labelInk();
+  } finally {
+    await clearRange(p);
+    await settle(p);
+    await toRest(p);
+  }
+  const restInk = await labelInk();
+  return { ok: sparseInk > 20 && restInk === 0, detail: `${day}: ${sparseInk} label pixels; cleared: ${restInk}` };
+});
 
 check("filtered to the bone, the disc stays drawable", async (p) => {
   await clearRange(p);

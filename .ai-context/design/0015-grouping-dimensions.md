@@ -463,6 +463,21 @@ pin reaches the tag dimension and every tag takes its automatic slot. The colour
 folder panel and says which dimension owns it, rather than offering swatches that would appear
 to do nothing. Tag colours would be a `tagColors` map, and that is its own feature.
 
+## Fold continuity after the visual reviews (2026-09-26, github#186)
+
+The folder/tag fold uses each world's captured endpoint seats. A note's radius moves toward
+its band's first row on departure and from that row on arrival; its endpoint angle stays
+fixed. Repacking a fractional top row had repeatedly spread a small number of notes across
+the whole wedge, producing the scalloped silhouette seen in the recordings. Fixed angles
+remove that cause and reach the exact final seats without a separate landing blend.
+
+Arrival starts at 5% of the shared clock and runs for 65%; departure runs over the first 65%.
+The remaining 30% lets the movement cap converge. Fading changes opacity without another
+radius multiplier on the fold; actual frame clearance and endpoint size limits remain in
+force. The departure folds from the positions captured at the switch, and each fold covers only its
+own disc's notes. The clock-hand fallback is unchanged. Filmed: the demo's middle keeps 54% of
+the resting colour (was 24%), the tag vault's 48% (was 18%); the numbers are in `invariants.md`.
+
 ## Verify
 
 ```javascript
