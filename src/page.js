@@ -1999,7 +1999,8 @@ function mountVaultGraph(root, data, deps) {
   var GAP_FULL_TO = 1000;
   var GAP_ZERO_AT = 10000;
   function gapScale() {
-    var n = graph.order;
+    // github#86 -- a stand-in is its note: the switch must not narrow the gaps
+    var n = graph.order - standIns.length;
     if (n <= GAP_FULL_TO) return 1;
     if (n >= GAP_ZERO_AT) return 0;
     return 1 - (n - GAP_FULL_TO) / (GAP_ZERO_AT - GAP_FULL_TO);
@@ -2213,14 +2214,14 @@ function mountVaultGraph(root, data, deps) {
     /** @type {string[]} */
     var memberG = [];
     /** @type {string[]} */
-    var leaving = [];
+    var leavers = [];
     var dropped = false;
     if (useSkel && skel) {
       /** @type {Record<string, boolean>} */
       var gone = dict();
-      for (var li = 0, ln = skel.leaving.length; li < ln; li++) {
-        var lid = skel.leaving[li];
-        if ((planKeep || willShow)(lid)) leaving.push(lid);
+      for (var li = 0, ln = skel.leavers.length; li < ln; li++) {
+        var lid = skel.leavers[li];
+        if ((planKeep || willShow)(lid)) leavers.push(lid);
         else { gone[lid] = true; dropped = true; }
       }
       if (!dropped) {
@@ -2252,7 +2253,7 @@ function mountVaultGraph(root, data, deps) {
       members.push(id);
       var g0 = groupOf(id);
       memberG.push(g0);
-      if (skel && onlyVisible && !willShow(id)) leaving.push(id);
+      if (skel && onlyVisible && !willShow(id)) leavers.push(id);
       // github#186
       var wv = W(id);
       liveG[g0] = (liveG[g0] || 0) + (wv > 1 ? 1 : wv < 0 ? 0 : wv);
@@ -2357,7 +2358,7 @@ function mountVaultGraph(root, data, deps) {
     });
     if (skel) {
       if (!useSkel || dropped) {
-        skel.members = members; skel.memberG = memberG; skel.leaving = leaving;
+        skel.members = members; skel.memberG = memberG; skel.leavers = leavers;
         skel.liveN = liveN; skel.liveSub = liveSub;
         skel.keep = planKeep; skel.dim = state.dim; skel.order = all;
         skel.pinned = state.pinned.join(SEP); skel.onlyVisible = !!onlyVisible;
@@ -5407,7 +5408,6 @@ function mountVaultGraph(root, data, deps) {
         var gap = rWant - rNow;
         if (gap < 0 ? -gap > resid : gap > resid) resid = gap < 0 ? -gap : gap;
         var move = gap * ez;
-        // github#186, decisions/0002 -- a row hop glides, capped per frame
         // github#186 -- the angle glides too: a serpentine flip is an arc
         var hNow = rNow > 1e-6 ? Math.atan2(y, x) : h;
         var dh = h - hNow;
@@ -5415,12 +5415,13 @@ function mountVaultGraph(root, data, deps) {
         var arc = dh * rWant;
         if (arc < 0 ? -arc > resid : arc > resid) resid = arc < 0 ? -arc : arc;
         var turn = arc * ez;
+        // github#186, decisions/0002 -- a row hop glides, capped per frame
         if (pr < 1) {
           var lim = RADIAL_STEP_MAX * UNIT * (bandLock && bandLock[groupOf(id)] ? bandOf("i").sp * INNER_SCALE : bandOf("o").sp);
           if (folding && foldPitch[id] > 0) lim = RADIAL_STEP_MAX * foldPitch[id];
           if (lim > 0 && move > lim) move = lim; else if (lim > 0 && move < -lim) move = -lim;
-        }
           if (lim > 0 && turn > lim) turn = lim; else if (lim > 0 && turn < -lim) turn = -lim;
+        }
         var r = rNow + move;
         var hh = rWant > 1e-6 ? hNow + turn / rWant : h;
         graph.mergeNodeAttributes(id, { x: r * Math.cos(hh), y: r * Math.sin(hh) });

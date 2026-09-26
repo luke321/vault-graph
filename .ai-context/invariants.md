@@ -1045,6 +1045,35 @@ constant; what the checks did not count was **how many notes step in the same fr
 Measured on the maintainer's vault after all three: the worst frame on solo `03` went from **431
 notes starting a move to 7**, and no frame on any act starts more than 8 except the click itself
 (hide `03`'s split, held there by design). Worst single step 0.12 of a pitch everywhere.
+
+- **The angle was still a jump (2026-09-26).** *"The animation for the last 0.5% is too jumpy."* The
+  cap above eased the radius and took the angle from the target outright, so a serpentine flip on a
+  row hop, and the re-spacing of every note in both rows when one note hops, landed in a single
+  frame: on the tag vault's last-0.5% walk, single-frame tangential moves of **3,887 units** (a wedge
+  width) with **20 of 24 notes** moving in that frame, the median frame at 9 units. The angle now
+  glides under the same easing and the same per-frame cap, measured as an arc at the target
+  radius, and its residual counts toward convergence, so the tail still lands exactly. After: the
+  largest capped frame is **67 units**, 6 frames over three times the median instead of 15, and the
+  only jumps left are notes under alpha 0.05, which snap by design. `scratchpad/186/walkjump.mjs`
+  is the harness.
+#### A switch took its lock over twice the vault
+
+The github#186 state tracking (`vg.bandTotal`, `vg.lockRows` at every check boundary) caught the
+fold check leaving the demo vault's ring split at 344/1059 where a fresh page has 322/1081, and the
+10k at 3031/6971 against 2753/7249 with one row fewer outside, which is the state the 10k
+live-rebuild check then failed on in suite order and passed alone. Traced with a hook in
+`takeGeom`: every lock taken *during* a switch saw a plan total of **2806 notes on a 1403-note
+vault**. `buildWedgePlan` declares a local `leaving` array for the skeleton's leavers, which shadows
+the page's `leaving` dict inside the function (since f5ab063), so its *"the arriving disc has no
+leavers"* skip never fired and the plan counted every stand-in beside its original. The doubled total
+moved the hub and the small-group threshold, and the ring balance chose differently. The local is
+`leavers` now; a switch's lock counts 1403, and the 10k comes home to **2753/7249** exactly. The demo
+still landed one swap off (308/1095) after that, and the trace named the second counter: `gapScale`
+took `graph.order`, which the stand-ins double for the length of a switch, so the seam gaps the
+balance is costed with were narrower than a fresh page's. It counts notes now, and the demo comes
+home to **322/1081**. `buildSubOrder` tallied stand-ins too, doubling the legend's subfolder counts
+during a switch; it skips them. Three counters, one rule: **a stand-in is its note, already counted.**
+
 #### A wedge closes at one rate, and the intro is not a ring arriving
 
 Two more, from the same review page. *"Solo 04: the inner ring wedges are not closing with
