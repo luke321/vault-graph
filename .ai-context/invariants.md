@@ -4085,6 +4085,40 @@ simulation: it proves the handlers work and that a lost layer comes back, and sa
 how often monitor power-saving, a driver reset or a GPU switch actually causes this in the field.
 The issue was explicit about that, and no field frequency was measured.
 
+## A translucent colour never renders brighter than its opaque self
+
+The engine blends with `gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA)` and the canvas composites
+as premultiplied, so what a shader writes **must already be multiplied by its alpha**. Written
+straight, a colour at alpha `a` keeps its whole RGB and only takes `(1 - a)` of what is under it:
+it comes out brighter than the same colour opaque, and two translucent edges crossing saturate to
+white. Every program premultiplies right after the `bias` multiply (github#190) — the two edge
+programs, the circle's two border colours, and the halo — and nothing else in the pipeline may
+touch RGB after that.
+
+Nothing at rest shows it, because every dot and edge at rest is opaque. It shows the moment an
+alpha ramps: a departing note's links went *up* in brightness as they faded, bundled into a white
+web where they crossed, and vanished together at the hide threshold, which is what the github#186
+clip reviews called an edge flash and a hard cut.
+
+Measured on a synthetic quad under that exact blend, grey 0.8 at alpha 0.3 over a `#202020`
+page, and on the demo vault's hide clip at slow ×4:
+
+| | straight (before) | premultiplied (after) | expected |
+|---|---|---|---|
+| one quad, alpha 0.3 | 226 | 83 | 84 |
+| two quads crossing, alpha 0.3 each | 255 | -- | 120 |
+| demo hide, largest frame step (mean abs grey /255, 180² frames at 40 fps) | 15.49 at the cut | 6.47 | -- |
+| demo hide, mean luminance: rest → peak while the links fade | 42.8 → 55.6 | 42.8 → 42.9 | no rise |
+| shape solo, largest frame step / luminance peak | 21.79 / 64.0 | 9.0 / 42.5 | -- |
+
+### Verify
+
+```bash
+node scripts/render-diff.mjs --against-dir <refs>   # a rest frame has no alpha: 0 pixels differing
+node .ai-context/investigations/186/probe-186.mjs --html <page> --out <dir> --act "eye:<group>" --film --slow 4
+# then the mean luminance of the clip's frames must not rise above its first frame while the links fade
+```
+
 ## A torn-down mount holds nothing outside its root
 
 `mountVaultGraph`'s handle has a `destroy()`, and the plugin's `teardown()` calls it. After

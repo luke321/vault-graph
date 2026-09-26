@@ -180,3 +180,5 @@ node scripts/render-diff.mjs --against-dir <refs> --query note   # the same in a
 
 Measured at step 1 (interface + toolchain, no runtime change): plugin bundle byte-identical to
 `develop@79d829a`'s build, `tsc --noEmit` clean, lint 0/0 with `strict: true`.
+
+**2026-09-26, github#190.** The programs were ported writing straight colour under the `ONE / ONE_MINUS_SRC_ALPHA` blend the original used too, so a translucent edge or dot rendered *brighter* than its opaque self and crossing fades saturated to white; 0 pixels differed from the Sigma build because the Sigma build had the same defect and a rest frame has no alpha. Every program now premultiplies after the bias; the numbers are in `invariants.md`, *A translucent colour never renders brighter than its opaque self*.

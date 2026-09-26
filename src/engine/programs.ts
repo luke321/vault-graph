@@ -238,6 +238,8 @@ void main() {
 
   v_color = a_color;
   v_color.a *= bias;
+  // github#190 -- premultiplied for the ONE / ONE_MINUS_SRC_ALPHA blend
+  v_color.rgb *= v_color.a;
 }
 `;
 
@@ -371,9 +373,13 @@ void main(void) {
   vec4 borderColor_0 = transparent;
   vec4 borderColor_1 = v_borderColor_1;
   borderColor_1.a *= bias;
+  // github#190 -- premultiplied for the ONE / ONE_MINUS_SRC_ALPHA blend
+  borderColor_1.rgb *= borderColor_1.a;
   if (borderSize_1 <= 1.0 * u_correctionRatio) { borderColor_1 = borderColor_0; }
   vec4 borderColor_2 = v_borderColor_2;
   borderColor_2.a *= bias;
+  // github#190 -- premultiplied for the ONE / ONE_MINUS_SRC_ALPHA blend
+  borderColor_2.rgb *= borderColor_2.a;
   if (borderSize_2 <= 1.0 * u_correctionRatio) { borderColor_2 = borderColor_1; }
 
   if (dist > adjustedBorderSize_0) {
@@ -497,6 +503,8 @@ void main() {
 
   v_color = a_color;
   v_color.a *= bias;
+  // github#190 -- premultiplied for the ONE / ONE_MINUS_SRC_ALPHA blend
+  v_color.rgb *= v_color.a;
 }
 `;
 
@@ -657,6 +665,8 @@ void main() {
 
   v_color = a_color;
   v_color.a *= bias;
+  // github#190 -- premultiplied for the ONE / ONE_MINUS_SRC_ALPHA blend
+  v_color.rgb *= v_color.a;
 }
 `;
 
