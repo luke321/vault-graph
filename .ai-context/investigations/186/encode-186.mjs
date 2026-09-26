@@ -31,7 +31,7 @@ const frames = P.frames;
 const lines = [];
 for (let i = 0; i < frames.length; i++) {
   const next = frames[i + 1];
-  const dur = next ? Math.max(1 / FPS, next.t - frames[i].t) : 1.0;
+  const dur = next ? Math.max(0.001, next.t - frames[i].t) : 1.0;
   lines.push(`file '${frames[i].file.replace(/\\/g, "/")}'`, `duration ${dur.toFixed(4)}`);
 }
 lines.push(`file '${frames[frames.length - 1].file.replace(/\\/g, "/")}'`);
