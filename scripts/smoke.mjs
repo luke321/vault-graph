@@ -156,8 +156,19 @@ check("page loads with no console errors", async (p, ctx) => {
 }, { on: "all" });
 
 check("__vg is present and the intro landed", async (p) => {
-  const r = await p.j(`{hasVg: !!window.__vg, until: __vg.state.until, notes: __vg.graph.order}`);
-  return { ok: r.hasVg && r.until === null, detail: `${r.notes} notes, until=${r.until}` };
+  // github#139
+  const r = await p.j(`(function () {
+    var lc = window.__vg ? __vg.lastCascade() : null;
+    return { hasVg: !!window.__vg, until: window.__vg ? __vg.state.until : undefined,
+             notes: window.__vg ? __vg.graph.order : -1,
+             path: lc ? lc.path : "", frames: lc ? lc.frames : -1, exit: lc ? lc.exit : "" };
+  })()`);
+  const animated = r.path === "animated" && r.exit === "converged";
+  return {
+    ok: r.hasVg && r.until === null && animated,
+    detail: `${r.notes} notes, until=${r.until}; intro cascade ${r.path || "?"}, ${r.frames} frames, ` +
+            `exit ${r.exit || "?"}` + (animated ? "" : "  <- THE LOAD INTRO DID NOT ANIMATE"),
+  };
 });
 
 // github#96
@@ -5519,10 +5530,7 @@ check("the intro sweeps the range end across the strip", async (p) => {
   await settle(p);
   const scale = await p.j(`__vg.timeScale`);
   await p.eval(`__vg.timeScale = 0.25; void 0`);
-  await p.eval(`document.querySelector("#vg-refresh").click(); void 0`);
-  const seen = [];
-  for (let i = 0; i < 90; i++) {
-    const r = await p.j(`(function(){
+  const SAMPLE = `(function(){
       var b = __vg.brushNow();
       if (!b) return null;
       var lit = 0; __vg.graph.forEachNode(function (id) { if ((__vg.alpha[id] || 0) > 0.004) lit++; });
@@ -5531,7 +5539,13 @@ check("the intro sweeps the range end across the strip", async (p) => {
                sweeping: b.sweeping, lit: lit,
                tip: tip && !tip.hidden ? tip.textContent : null,
                from: __vg.state.from, to: __vg.state.to, busy: !!__vg.demo.busy() };
-    })()`);
+    })()`;
+  // github#139
+  const seen = [];
+  const first = await p.j(`(function(){ document.querySelector("#vg-refresh").click(); return ${SAMPLE}; })()`);
+  if (first) seen.push(first);
+  for (let i = 0; i < 90; i++) {
+    const r = await p.j(SAMPLE);
     if (r) seen.push(r);
     if (seen.length > 2 && r && !r.busy && !r.sweeping) break;
     await sleep(40);
@@ -5557,6 +5571,63 @@ check("the intro sweeps the range end across the strip", async (p) => {
             `state stayed null: ${stayedPreview}; handle labelled: ${labelled}` +
             (startedLeft ? "" : "  <- DID NOT START AT THE LEFT END") +
             (landedRight ? "" : "  <- DID NOT LAND ON THE RIGHT END"),
+  };
+}, { clock: "real" });
+
+// github#139
+check("the intro lights the disc note by note, and the heat cells follow", async (p) => {
+  await clearRange(p);
+  await settle(p);
+  const scale = await p.j(`__vg.timeScale`);
+  await p.eval(`__vg.timeScale = 0.25; void 0`);
+  const SAMPLE = `(function(){
+    var lit = 0, total = 0;
+    __vg.graph.forEachNode(function (id) { total++; if ((__vg.alpha[id] || 0) > 0.004) lit++; });
+    var h = __vg.heat, heatLit = 0;
+    if (h) for (var i = 0; i < h.keys.length; i++) { if ((h.days[h.keys[i]].n || 0) > 0.004) heatLit++; }
+    var b = __vg.brushNow(), lc = __vg.lastCascade();
+    return { lit: lit, total: total, heatLit: heatLit, sweeping: !!(b && b.sweeping),
+             path: lc ? lc.path : "", frames: lc ? lc.frames : -1, exit: lc ? lc.exit : "",
+             busy: !!__vg.demo.busy() };
+  })()`;
+  // github#139
+  const seen = [await p.j(`(function(){ document.querySelector("#vg-refresh").click(); return ${SAMPLE}; })()`)];
+  for (let i = 0; i < 120; i++) {
+    const r = await p.j(SAMPLE);
+    if (r) seen.push(r);
+    if (seen.length > 2 && r && !r.busy && !r.sweeping) break;
+    await sleep(40);
+  }
+  await p.eval(`__vg.timeScale = ${JSON.stringify(scale)}; void 0`);
+  await settle(p);
+  const rest = await p.j(SAMPLE);
+
+  const mid = seen.filter((r) => r.sweeping);
+  const end = seen[seen.length - 1];
+  const first = mid[0];
+  let litBack = 0, heatBack = 0, restarted = 0;
+  for (let i = 1; i < seen.length; i++) {
+    if (seen[i].lit < seen[i - 1].lit) litBack++;
+    if (seen[i].heatLit < seen[i - 1].heatLit) heatBack++;
+    if (seen[i].frames < seen[i - 1].frames) restarted++;
+  }
+  const startedEmpty = !!first && first.lit <= 0.05 * first.total;
+  const grew = mid.length >= 3 && mid[mid.length - 1].lit > first.lit;
+  const landedFull = !!end && rest.lit > 0 && end.lit === rest.lit;
+  const heatLanded = !!end && end.heatLit === rest.heatLit;
+  const oneCascade = !!end && end.path === "animated" && end.exit === "converged" && restarted === 0;
+  return {
+    ok: mid.length >= 3 && startedEmpty && grew && litBack === 0 && landedFull &&
+        heatBack === 0 && heatLanded && oneCascade,
+    detail: `${mid.length} sweeping frames; lit ${first ? first.lit : "-"} -> ` +
+            `${mid.length ? mid[mid.length - 1].lit : "-"} of ${rest.total}, ${litBack} backwards, ` +
+            `at rest ${rest.lit}; heat cells ${first ? first.heatLit : "-"} -> ` +
+            `${mid.length ? mid[mid.length - 1].heatLit : "-"}, ${heatBack} backwards, at rest ${rest.heatLit}; ` +
+            `cascade ${end ? end.path : "?"}, ${end ? end.frames : "?"} frames, ${restarted} restarts, ` +
+            `exit ${end ? end.exit : "?"}` +
+            (startedEmpty ? "" : "  <- THE DISC DID NOT START EMPTY") +
+            (landedFull ? "" : "  <- THE DISC DID NOT LAND FULL") +
+            (heatLanded ? "" : "  <- THE HEAT CELLS DID NOT FOLLOW"),
   };
 }, { clock: "real" });
 
