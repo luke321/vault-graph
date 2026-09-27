@@ -1706,6 +1706,48 @@ real vault — 0.70 of the strip crossed in the first ~5% of the run, then a cra
 vault's own distribution and not a regression; both evenly-dated fixtures sweep at 0.05–0.06
 at the same point. See `design/0007-timeline.md`.
 
+**A sample taken after a CDP round trip is not the first frame.** The cascade's first `step()`
+runs synchronously inside the click, and on a loaded machine the first `p.j` after a separate
+click eval landed at **0.248–0.336** of the strip (8–10 sweeping samples) and failed the check
+twice in three runs, with nothing wrong on the page. Both intro checks now take their first
+sample in the same eval as the click (github#139): first sample **0.002**, 22 sweeping samples,
+in every run since.
+
+## The intro lights the disc note by note, and the heat cells follow it
+
+The sweep above is the value side; this is the render side, and the two are asserted
+separately because a page can move the handle while nothing that draws follows it — the
+report behind github#139 described exactly that. What the renderer draws is `alpha[id]`
+(`nodeReducer` hides a dot at `alpha ≤ 0.004`), and the heat band tallies the same `alpha`
+in `heatCompute()` from `afterRender`, so counting both per frame is measuring the drawn
+state rather than the sweep value.
+
+```javascript
+__vg.alpha            // id -> 0..1, what the reducer and the heat band read
+__vg.heat.days[k].n   // a day's tally after the last afterRender
+__vg.lastCascade()    // { path, frames, exit } -- "animated"/"converged" for one uninterrupted run
+```
+
+Measured, at `timeScale 0.25` on the demo fixture (1403 notes): the first sample is **0 of
+1403** lit (the check allows 5% for the frame the click itself advances), lit never goes
+backwards and lands on the resting count (**1403**), the heat cells go **0 → 329** with no
+step back and land on the resting tally, and `lastCascade` is one `animated` run of 47–73
+frames ending `converged` — a second cascade started underneath the intro would reset that
+frame count, and `cascade()` → `stopPlay()` → `timelineFrame(true)` → `syncAlpha()` is the one
+path that lights every dot in a single frame. The load intro is asserted the same way in
+"__vg is present and the intro landed": `animated`, 229–330 frames at full speed, `converged`.
+
+`node scripts/smoke.mjs --only "intro"` runs all three.
+
+**Why the report read as "full from frame one" (github#139).** `record-demo.ps1` starts
+ffmpeg, sleeps 800 ms, then boots `demo.mjs`, whose clock starts after node start-up and the
+CDP attach — measured here, a driver-logged click at 0.71 s landed 2.36 s after the driver was
+spawned. Frames pulled at video times before that offset show the demo page at rest (fully
+lit, by design), and a frame after the sweep has passed ~0.97 shows it full again. The take's
+frame times are on the video clock; the beat times are on the driver clock. Every drive of the
+intro measured for the ticket — headless click, fresh load, the tree from the issue's date, a
+real 1368×1350 window under the real driver — grew from 0.
+
 ## The window's travel is what the history exceeds the window by
 
 The band shows `heat.cols` weeks ending no later than the current week, so the pill can
