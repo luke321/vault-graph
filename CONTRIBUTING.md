@@ -65,6 +65,7 @@ node scripts/check-build-order-determinism.mjs # nor on the order the filesystem
 node scripts/check-data-escape.mjs      # a note's frontmatter cannot close the exported data script
 node scripts/update-note-selftest.mjs   # the update note's grammar and decision table (design/0016)
 node scripts/smoke-runner-selftest.mjs  # a check that threw is scored as a failure (github#146)
+node scripts/make-mirror-vault-selftest.mjs # no real folder segment survives into a mirror (github#191)
 node scripts/check-link-resolution.mjs  # both producers agree where a link points (github#141)
 node scripts/check-producer-contract.mjs # both producers emit the same shape, and a difference is declared (github#149)
 node scripts/code-map.mjs --check       # the generated map and index still match the source
@@ -192,6 +193,7 @@ node scripts/build-plugin.mjs
 node scripts/update-note-check.mjs                # the demo fixture; --keep leaves Obsidian open
 node scripts/update-note-selftest.mjs             # the decision table and the note grammar, no Obsidian (the hook runs it too)
 node scripts/smoke-runner-selftest.mjs           # the smoke runner's own scoring and error audit, no Chrome (the hook runs it too)
+node scripts/make-mirror-vault-selftest.mjs      # the mirror's sort-spec translation and its no-real-folder-name rule, on a fixture (the hook runs it too)
 ```
 
 One more if you touch the renderer (`src/engine/`): the suite asserts numbers, and none of

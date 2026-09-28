@@ -3122,6 +3122,58 @@ spec-carrying vault with nothing stored opens in explorer mode, so its golden *i
 spec-ordered layout. It did not, because its only `order-desc: a-z` runs over zero-padded
 `YYYY-MM` folders, where numeric and plain collation agree.
 
+## No real folder segment survives into the mirror
+
+github#191. `scripts/make-mirror-vault.mjs` promises a mirror that can be recorded and shared in
+place of the real vault, and until this it only invented **note** names and **person** folders:
+`mapDir()` kept a folder's name unless `looksLikePerson()` said otherwise, so a numbered
+top-level folder and every project and employer name beneath it were copied verbatim. Three
+`.obsidian` files (`daily-notes.json`, `templates.json`, `app.json`) were copied byte for byte,
+and each can name real folders. Measured by the maintainer on a real 715-note, 79-folder vault:
+the mirror carried the real top-level structure through.
+
+```bash
+node scripts/make-mirror-vault-selftest.mjs     # the hook and both workflows run it too
+```
+
+The rule, and what the check asserts on a 16-note, 9-folder fixture with distinctive names:
+
+- **Every folder segment is invented**, seeded like the notes (`newFolder()`, drawn from `NOUN`
+  and `TOPIC`, `Adj noun` once those run out), unique across the mirror and **never equal,
+  case-insensitively, to any real segment of the source** — so an invented word cannot reproduce
+  a real one by coincidence. A person folder under a people parent still gets a person name.
+- **Only shape survives.** A name that is wholly `DATEISH` (`2024`, `2024-Q3`, `2025-W07`) is
+  kept. Otherwise `FOLDER_PREFIX` — `/^[_\d][\d_.\s-]*(?:[QW]\d{1,2}[\s_.-]*)?/i` — keeps the
+  leading number/underscore run and any quarter or week token, and the remainder is invented:
+  `01 - Projects` → `01 - Meadow`, `_ Archive` → `_ Printing`, `2024-Q3 Planning` → `2024-Q3
+  Beacon`. A name like `3D models` keeps its `3`, which is harmless.
+- **The three `.obsidian` files are rewritten from a key whitelist, never copied.**
+  `daily-notes.json`: `folder` (through `mapPath`), `format` (not a path), `template` (a note,
+  resolved to the mirrored note's path). `templates.json`: `folder`. `app.json`:
+  `attachmentFolderPath`, `newFileFolderPath`, `userIgnoreFilters` (each entry mapped, a trailing
+  `/` kept). A path that does not resolve is **dropped**, and so is every other key — the two
+  producers read only `folder` from the first two files (`src/build-graph.mjs`,
+  `plugin/build-data.mjs`), and nothing reads `app.json` at all. The summary line counts the
+  drops (`2 path(s) dropped as unmappable` on the fixture: an attachments folder holding no
+  notes, and an ignore filter naming a folder that does not exist).
+- **The sort spec follows the new names for free**: `mapPath` already routes through `dirMap`.
+  The check reads the translated spec back and asserts its pins and `target-folder:` lines name
+  the invented folders.
+
+The check's hunter takes every non-date real segment, strips its kept prefix, and greps the
+remainder (≥ 3 chars, case-insensitive) against every mirror **path** and every mirror **file's
+contents** — tree, `.obsidian/*.json` and the spec's front matter alike. A negative control runs
+the same hunter over the source fixture and requires 10 of 10 hits, so a hunter that went blind
+would fail before the real assertion could pass vacuously. Two runs at seed 1 must be
+byte-identical and a run at seed 2 must differ. Driven against the pre-fix generator
+(`5c223d3`) it fails **7 of 24**, the leak line naming both folder segments in `app.json` and the
+`01 - …` folder in the tree; against the fix, 24 of 24.
+
+One consequence to know: `newFolder()` consumes the seeded generator, so a mirror at seed 1 has
+**different person and note names than the same seed produced before github#191**. Nothing in the
+repo depends on a mirror's names — the golden snapshots and the fixture store exclude it on
+purpose (see "The vault generators are day-independent").
+
 ## A vault's layout matches its golden snapshot — the sortspec paths
 
 github#71, and all of these are `node scripts/smoke.mjs --only "sortspec"` plus

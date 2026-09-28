@@ -230,9 +230,9 @@ makes a screenshot comparable and a recording reproducible. Every screenshot and
 in this README were made from it.
 
 The **mirror** is for bug reports. It reproduces one real vault's shape and none of its
-content — same folder tree, same note count per folder, same `created` dates, same word
-counts, and the whole link graph rewritten between renamed notes, so it builds to the same
-numbers yours does. If the layout misbehaves on your vault, the shape *is* the report, and a
+content — same folder tree under invented folder names (only a leading number, underscore or
+date survives), same note count per folder, same `created` dates, same word counts, and the
+whole link graph rewritten between renamed notes, so it builds to the same numbers yours does. If the layout misbehaves on your vault, the shape *is* the report, and a
 generic fixture cannot reproduce a shape it does not have.
 
 ## Which vault
