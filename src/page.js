@@ -5665,9 +5665,10 @@ function mountVaultGraph(root, data, deps) {
     var sig = state.dim + "#" + restVer;
     var filtered = filterOn();
     if (filtered && sig === restSig) return;
+    if (sig !== restSig) { restDot = dict(); restT = dict(); }
     restTaking = true;
     try {
-      if (filtered) { restDot = dict(); restT = dict(); unfilteredRest(); }
+      if (filtered) unfilteredRest();
       else graph.forEachNode(takeRest);
       restSig = sig;
     } finally { restTaking = false; }
