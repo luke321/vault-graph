@@ -4071,6 +4071,47 @@ check("the disc's density follows the notes on screen", async (p) => {
   };
 }, { on: "all" });
 
+// github#186
+check("a page that lays out filtered still takes its dots' rest from the unfiltered disc", async (p) => {
+  const clear = `__vg.state.hidden[__vg.state.dim] = {}; __vg.state.hiddenSub = {};
+    __vg.state.from = null; __vg.state.to = null; __vg.state.until = null;
+    __vg.syncAlpha(); __vg.applyLayout(false); void 0`;
+  await p.eval(clear);
+  await sleep(200);
+  const direct = await p.j(`__vg.restDots()`);
+  const hid = await p.j(`(function () {
+    var order = __vg.groupOrder();
+    var g = order.filter(function (x) { return __vg.isArchiveGroup(x); })[0] || order[order.length - 1];
+    var h = {}; h[g] = true;
+    __vg.forgetRest();
+    __vg.state.hidden[__vg.state.dim] = h; __vg.syncAlpha(); __vg.applyLayout(false);
+    return g; })()`);
+  await sleep(200);
+  const retaken = await p.j(`__vg.restDots()`);
+  await p.eval(`__vg.state.until = Math.max(2, Math.round(__vg.graph.order * 0.1));
+    __vg.syncAlpha(); __vg.applyLayout(false); void 0`);
+  await sleep(200);
+  const ranged = await p.j(`__vg.restDots()`);
+  await p.eval(clear);
+  await sleep(200);
+  await camReset(p);
+
+  const ids = Object.keys(direct);
+  let missing = 0, worst = 0, drift = 0;
+  for (const id of ids) {
+    if (!(retaken[id] > 0)) { missing++; continue; }
+    const d = Math.abs(retaken[id] / direct[id] - 1);
+    if (d > worst) worst = d;
+    if (ranged[id] !== retaken[id]) drift++;
+  }
+  return {
+    ok: ids.length > 0 && missing === 0 && worst < 0.01 && drift === 0,
+    detail: `${ids.length} dots at the unfiltered rest; with "${hid}" hidden and the rest forgotten, ` +
+            `${ids.length - missing} retaken (${missing} missing), worst ${(worst * 100).toFixed(2)}% off ` +
+            `(needs <1%); a sparse timeline then moved ${drift} of them (needs 0)`,
+  };
+}, { on: "all" });
+
 // github#13
 check("the hub stays the same share of the disc as it is filtered", async (p) => {
   await p.eval(`__vg.state.hidden.folder = {}; __vg.syncAlpha(); __vg.applyLayout(false); void 0`);

@@ -22,7 +22,11 @@ function fakePage(opts = {}) {
     dead: opts.dead || false,
     captured: (opts.captured || []).slice(),
     get errors() { return p.captured.slice(); },
-    async send(method, params) { p.sent.push(method); void params; },
+    media: [],
+    async send(method, params) {
+      p.sent.push(method);
+      if (method === "Emulation.setEmulatedMedia") p.media.push(params.features[0].value);
+    },
     // github#151 -- the page state the probe reads back
     state: Object.assign({}, opts.state || {}),
     async eval(expr) {
@@ -32,6 +36,7 @@ function fakePage(opts = {}) {
       if (grace) { await new Promise((r) => setTimeout(r, Number(grace[1]))); return undefined; }
       // github#151 -- the state probe is the only expression that names this key
       if (String(expr).includes("page.mounted")) return JSON.stringify(p.state);
+      if (String(expr).includes("prefers-reduced-motion: reduce")) return !!opts.stuckReduced;
       return expr === "1" ? 1 : undefined;
     },
     async j(expr) {
@@ -186,15 +191,22 @@ console.log("what the runner already did, unchanged");
   check("...counts every check", r.ran === 3 && r.timings.length === 3);
   check("...names each one in order",
         r.timings.map((t) => t.name).join(",") === "one,two,three");
-  check("...and emulates reduced motion around a fast check",
-        r.page.sent.filter((m) => m === "Emulation.setEmulatedMedia").length === 6,
-        r.page.sent.filter((m) => m === "Emulation.setEmulatedMedia").length + " calls");
+  check("...and emulates reduced motion around a fast check, after clearing the headless default",
+        r.page.media.join(",") ===
+          "no-preference,reduce,no-preference,reduce,no-preference,reduce,no-preference",
+        r.page.media.join(","));
 }
 
 {
   const r = await run([{ name: "real", clock: "real", fn: async () => ({ ok: true, detail: "d" }) }]);
   check("a real-clock check is not put under reduced motion",
-        !r.page.sent.includes("Emulation.setEmulatedMedia"));
+        r.page.media.join(",") === "no-preference", r.page.media.join(","));
+}
+
+{
+  const threw = await run([pass("one")], { stuckReduced: true }).then(() => null, (e) => e.message);
+  check("a Chrome that keeps reporting reduced motion refuses to run",
+        /would not let it be emulated away/.test(threw || ""), threw || "ran");
 }
 
 {

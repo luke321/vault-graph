@@ -796,8 +796,8 @@ function mountVaultGraph(root, data, deps) {
   function twBtn(attrs, open) {
     return attrs
       ? '<button class="tw" ' + attrs + ' aria-expanded="' + open + '">' +
-        (open ? "â–¾" : "â–¸") + '</button>'
-      : '<span class="tw none">â–¸</span>';
+        (open ? "▾" : "▸") + '</button>'
+      : '<span class="tw none">▸</span>';
   }
 
   /** @param {Record<string, unknown> | undefined} raw @returns {Record<string, boolean>} */
@@ -996,6 +996,7 @@ function mountVaultGraph(root, data, deps) {
    * @param {((path: string) => string | undefined) | null} keepId
    */
   function ingest(src, keepId) {
+    restVer++;
     graph.clear();
     adj = dict();
     hubRank = dict();
@@ -1529,8 +1530,8 @@ function mountVaultGraph(root, data, deps) {
     var say = function (v) {
       return v.toFixed(2) + (v < CONTRAST_FLOOR ? " (under 3:1)" : "");
     };
-    return name + " Â· solid-area contrast: light " + say(c.light) +
-           ", dark " + say(c.dark) + " Â· a sub-pixel dot reads lower";
+    return name + " · solid-area contrast: light " + say(c.light) +
+           ", dark " + say(c.dark) + " · a sub-pixel dot reads lower";
   }
 
   /** @param {Record<string, unknown>} map @param {string} [dim] */
@@ -5658,16 +5659,59 @@ function mountVaultGraph(root, data, deps) {
   /** @type {Record<string, number>} */
   var restT = dict();
   var restTaking = false;
+  var restVer = 0, restSig = "";
   function takeRestDots() {
-    if (!renderer || cascadeRun || filterOn()) return;
+    if (!renderer || cascadeRun) return;
+    var sig = state.dim + "#" + restVer;
+    var filtered = filterOn();
+    if (filtered && sig === restSig) return;
     restTaking = true;
     try {
-      graph.forEachNode(function (id, a) {
-        var t = ((a.size || NODE_MIN) - NODE_MIN) / (NODE_MAX - NODE_MIN);
-        restT[id] = t > 1 ? 1 : t < 0 ? 0 : t;
-        restDot[id] = dotPx(a.size || NODE_MIN, id);
-      });
+      if (filtered) { restDot = dict(); restT = dict(); unfilteredRest(); }
+      else graph.forEachNode(takeRest);
+      restSig = sig;
     } finally { restTaking = false; }
+  }
+  /** @param {string} id @param {{ size?: number }} a */
+  function takeRest(id, a) {
+    var t = ((a.size || NODE_MIN) - NODE_MIN) / (NODE_MAX - NODE_MIN);
+    restT[id] = t > 1 ? 1 : t < 0 ? 0 : t;
+    restDot[id] = dotPx(a.size || NODE_MIN, id);
+  }
+  // github#186
+  function unfilteredRest() {
+    var sFrom = state.from, sTo = state.to, sUntil = state.until;
+    var sHid = state.hidden[state.dim], sSub = state.hiddenSub;
+    var sAlpha = alpha, sSrc = visSrc, sDst = visDst, sEase = visEase;
+    var sBand = BAND ? { i: Object.assign({}, BAND.i), o: Object.assign({}, BAND.o) } : null;
+    var sFit = dotFit, sCell = cellRoom, sEdge = edgeCap, sHub = hubRow0, sOv = ovCells;
+    var sMaxR = lastMaxR, sScale = sizeScale, sPin = pinnedPlan, sKeep = planKeep;
+    var sCellNow = cellNow, sEdgeNow = edgeNow, sFitPos = fitPos;
+    var sTrace = trace, sProbe = probe, sDbg = DBG.cells;
+    try {
+      state.from = state.to = state.until = null;
+      state.hidden[state.dim] = dict(); state.hiddenSub = dict();
+      alpha = dict();
+      graph.forEachNode(function (id) { alpha[id] = visible(id) ? 1 : 0; });
+      visSrc = visDst = dict(); visEase = 1;
+      cellNow = edgeNow = null; pinnedPlan = planKeep = null;
+      trace = null; probe = null;
+      var pos = ringsLayout(null, true);
+      if (!pos) return;
+      measureSizeScale();
+      fitPos = pos; fitVer = -1;
+      graph.forEachNode(function (id, a) { if (alpha[id] > 0) takeRest(id, a); });
+    } finally {
+      state.from = sFrom; state.to = sTo; state.until = sUntil;
+      if (sHid) state.hidden[state.dim] = sHid; else delete state.hidden[state.dim];
+      state.hiddenSub = sSub;
+      alpha = sAlpha; visSrc = sSrc; visDst = sDst; visEase = sEase;
+      if (sBand && BAND) { Object.assign(BAND.i, sBand.i); Object.assign(BAND.o, sBand.o); }
+      dotFit = sFit; cellRoom = sCell; edgeCap = sEdge; hubRow0 = sHub; ovCells = sOv;
+      lastMaxR = sMaxR; sizeScale = sScale; pinnedPlan = sPin; planKeep = sKeep;
+      cellNow = sCellNow; edgeNow = sEdgeNow; fitPos = sFitPos; fitVer = -1;
+      trace = sTrace; probe = sProbe; DBG.cells = sDbg;
+    }
   }
 
   /* ---------------------------------------------------------------- render */
@@ -6379,7 +6423,7 @@ function mountVaultGraph(root, data, deps) {
     el.textContent = stalled
       ? what + " and " + (one ? "has" : "have") +
         " not come back. Reload or reopen the graph to rebuild it."
-      : what + " â€” restoring...";
+      : what + " — restoring...";
     el.hidden = false;
   }
 
@@ -6935,7 +6979,7 @@ function mountVaultGraph(root, data, deps) {
   /** @param {string} g @param {Record<string, boolean> | null} bandLock */
   function swatchTitle(g, bandLock) {
     if (g === UNLINKED && unlinkedTintByFolder && unlinkedTintColors.length > 1) {
-      return "Mixed â€” coloured by folder";
+      return "Mixed — coloured by folder";
     }
     // github#3, github#50
     if (!counts[g]) return "No notes on the disc";
@@ -7197,8 +7241,8 @@ function mountVaultGraph(root, data, deps) {
       var ctTitle = share
         ? ' title="' + w.counts[g] + (w.counts[g] === 1 ? " note" : " notes") +
           (g === w.basisGroup
-            ? " Â· the largest folder shown"
-            : " Â· " + shareText(share) + " of " + esc(w.basisGroup)) + '"'
+            ? " · the largest folder shown"
+            : " · " + shareText(share) + " of " + esc(w.basisGroup)) + '"'
         : '';
 
       // github#86 -- an arriving row is collapsed until its first note is lit,
@@ -9397,13 +9441,13 @@ function mountVaultGraph(root, data, deps) {
     for (var i = 0; i < keys.length; i++) inWin += days[keys[i]].ids.length;
     // github#86 -- graph.order counts DOTS, and this sentence says notes
     $("heatnote").textContent =
-      "last " + cols + " weeks Â· " + inWin + " of " +
+      "last " + cols + " weeks · " + inWin + " of " +
       (graph.order - standIns.length) + " notes" +
-      (before ? " Â· " + before + " earlier" : "") +
-      (after ? " Â· " + after + " later" : "") +
-      (undated ? " Â· " + undated + " undated" : "") +
+      (before ? " · " + before + " earlier" : "") +
+      (after ? " · " + after + " later" : "") +
+      (undated ? " · " + undated + " undated" : "") +
       // github#70
-      (bulkDays ? " Â· " + bulkDays + " bulk day" + (bulkDays === 1 ? "" : "s") : "");
+      (bulkDays ? " · " + bulkDays + " bulk day" + (bulkDays === 1 ? "" : "s") : "");
 
     heatSig = "";
     heatDraw();
@@ -9602,12 +9646,12 @@ function mountVaultGraph(root, data, deps) {
     var wd = HEAT_WD[(new Date(d.ms).getUTCDay() + 6) % 7];
     // github#70
     var verb = state.heatSource === "touched" ? "touched" : "added";
-    setHTML(t, '<div class="t">' + esc(d.key) + " Â· " + wd +
-      (d.key === TODAY ? " Â· today" : "") + "</div>" +
+    setHTML(t, '<div class="t">' + esc(d.key) + " · " + wd +
+      (d.key === TODAY ? " · today" : "") + "</div>" +
       '<div class="m">' +
       (n ? n + " note" + (n === 1 ? "" : "s") + " " + verb : "nothing " + verb) +
       (top.length ? "<br>" + top.map(function (g2) {
-        return '<b style="color:' + colorOf(g2) + '">â–  </b> ' + esc(g2) + " " + by[g2];
+        return '<b style="color:' + colorOf(g2) + '">■ </b> ' + esc(g2) + " " + by[g2];
       }).join("<br>") : "") +
       (d.bulk ? "<br><i>" + (d.bulkX > 1 ? d.bulkX + "&times; the typical day here. " : "") +
                 "A sync, an import or a rename does this &mdash; it is not " +
@@ -9692,8 +9736,8 @@ function mountVaultGraph(root, data, deps) {
       if (cnt && cnt.textContent !== String(c.n)) cnt.textContent = String(c.n);
       btn.title = c.win
         ? c.n + " note" + (c.n === 1 ? "" : "s") + " " + c.win.label +
-          (c.bulk ? " Â· " + c.bulk + " of them on a bulk day, so probably a sync or a rename" : "") +
-          (c.n ? "" : " Â· nothing here yet")
+          (c.bulk ? " · " + c.bulk + " of them on a bulk day, so probably a sync or a rename" : "") +
+          (c.n ? "" : " · nothing here yet")
         : "";
     }
   }
@@ -11809,6 +11853,8 @@ function mountVaultGraph(root, data, deps) {
                     seamNB: /** @param {string} bk */ function (bk) { return (bandOf(bk).nG || 0) + (bandOf(bk).nSub || 0); },
                     clearAlpha: clearAlpha, buildWedgePlan: buildWedgePlan,
                     applyLayout: applyLayout, isHighlighted: isHighlighted,
+                    restDots: function () { return Object.assign(dict(), restDot); },
+                    forgetRest: function () { restVer++; restDot = dict(); restT = dict(); },
                     ringColors: ringColors,
                     colorOf: colorOf,
                     nodeColor: nodeColor,

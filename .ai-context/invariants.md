@@ -979,6 +979,18 @@ fixtures; at full vault every share is 1, so nothing at rest changes. The check 
 bounds note by note against the resting probe, in place of the step floor and the legibility
 floor.
 
+The bounds need a rest to bound against, and the first cut only took one while no filter was on
+(`takeRestDots()`). A group hidden by default (an archive) is a filter, so a page that mounted
+with one hidden held no rest at all and nothing bounded its dots: an isolated probe of the three
+functions measured 8× growth against 3× with the rest in hand. The rest is now taken from an
+unfiltered layout pass (`unfilteredRest()`: filters cleared, full alpha, every visible share 1,
+`ringsLayout(null, true)`, then every piece of layout state restored), cached per dimension and
+per ingest so a live rebuild or a dimension switch retakes it. The check *a page that lays out
+filtered still takes its dots' rest from the unfiltered disc* takes the rest unfiltered, forgets
+it, hides a group, and requires the retaken rest to match: 0.00 % off on all five fixtures, and
+a sparse timeline after it moves none. With `unfilteredRest()` disabled it retakes 0 of 1,403 /
+10,002 / 891 dots. No fixture mounts with a group hidden, so this is the only place the path runs.
+
 #### Five things a clip review saw, 2026-09-25
 
 A reviewer went through all 35 clip pairs and named five. Each was measured before and after
