@@ -317,6 +317,22 @@ EOF
   exit 1
 fi
 
+# THE MIRROR'S OWN CHECK NEXT, same bar -- a 16-note fixture, three subprocess runs, no Chrome,
+# about a second. github#191: the mirror kept every real folder name that was not a person and
+# copied three .obsidian files verbatim, so a "shareable" mirror carried the real vault's tree.
+echo "pre-push: checking no real folder segment survives into a mirror..."
+if ! node "$root/scripts/make-mirror-vault-selftest.mjs" </dev/null; then
+  cat >&2 <<'EOF'
+
+pre-push: the make-mirror-vault selftest failed -- push blocked.
+
+Read the FAIL lines above. scripts/make-mirror-vault.mjs, scripts/mirror-sortspec.mjs and
+scripts/make-mirror-vault-selftest.mjs must agree; .ai-context/invariants.md has the rule.
+There is no skip flag for this check.
+EOF
+  exit 1
+fi
+
 # LINK RESOLUTION NEXT, same bar -- a handful of subprocess builds of a few notes, no Chrome,
 # about a second. github#141: the exporter's resolver lost the source note a link was written in,
 # so a relative link landed on whichever same-named note was indexed first, a heading link was

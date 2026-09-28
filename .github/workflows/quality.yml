@@ -136,6 +136,9 @@ jobs:
       - name: The smoke runner scores a check that threw
         run: node scripts/smoke-runner-selftest.mjs
 
+      - name: No real folder segment survives into a mirror
+        run: node scripts/make-mirror-vault-selftest.mjs
+
       - name: Link destinations resolve against their source
         run: node scripts/check-link-resolution.mjs
 

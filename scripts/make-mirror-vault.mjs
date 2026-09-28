@@ -160,15 +160,37 @@ const newPerson = () => {
   return pick(FIRST) + " " + pick(LAST) + " " + usedPeople.size;
 };
 
+// github#191 -- an invented folder name never coincides with a real one
+const realSegments = new Set();
+for (const n of notes) for (const seg of n.dir.split("/")) if (seg) realSegments.add(seg.toLowerCase());
+
+// github#191 -- only a leading number/underscore run survives
+const FOLDER_PREFIX = /^[_\d][\d_.\s-]*(?:[QW]\d{1,2}[\s_.-]*)?/i;
+const FOLDER_WORDS = [...NOUN, ...TOPIC];
+const usedFolders = new Set();
+const newFolder = () => {
+  const fresh = (n) => !usedFolders.has(n.toLowerCase()) && !realSegments.has(n.toLowerCase());
+  for (let i = 0; i < 500; i++) {
+    const w = i < 200 ? pick(FOLDER_WORDS) : pick(ADJ) + " " + pick(NOUN);
+    const n = w.charAt(0).toUpperCase() + w.slice(1);
+    if (fresh(n)) { usedFolders.add(n.toLowerCase()); return n; }
+  }
+  const n = "Folder " + usedFolders.size;
+  usedFolders.add(n.toLowerCase());
+  return n;
+};
+
 const mapDir = (dir) => {
   if (!dir) return "";
   if (dirMap.has(dir)) return dirMap.get(dir);
   const parent = dirname(dir) === "." ? "" : dirname(dir);
   const name = basename(dir);
   const mappedParent = mapDir(parent);
-  const keep = DATEISH.test(name) || /^[_\d]/.test(name) || !looksLikePerson(name, parent);
-  const mappedName = keep ? name : newPerson();
-  const full = mappedParent ? mappedParent + "/" + name.replace(name, mappedName) : mappedName;
+  let mappedName;
+  if (DATEISH.test(name)) mappedName = name;
+  else if (looksLikePerson(name, parent)) mappedName = newPerson();
+  else mappedName = (FOLDER_PREFIX.exec(name) || [""])[0] + newFolder(); // github#191
+  const full = mappedParent ? mappedParent + "/" + mappedName : mappedName;
   dirMap.set(dir, full);
   return full;
 };
@@ -217,14 +239,15 @@ for (const n of notes) {
 const specNotes = notes.filter((n) => n.specRaw);
 let specDropped = 0;
 
-if (specNotes.length) {
-  /** @type {Map<string, string | null>} github#71 -- real folder path -> the mirror's */
-  const mapPath = (p) => {
-    const clean = String(p).split(/[\\/]/).filter(Boolean).join("/");
-    if (!clean) return "";
-    return dirMap.has(clean) ? dirMap.get(clean) : null;
-  };
+/** github#71, github#191 -- real folder path -> the mirror's, null if unmapped
+ * @param {string} p @returns {string | null} */
+const mapPath = (p) => {
+  const clean = String(p).split(/[\\/]/).filter(Boolean).join("/");
+  if (!clean) return "";
+  return dirMap.has(clean) ? dirMap.get(clean) : null;
+};
 
+if (specNotes.length) {
   for (const n of specNotes) {
     const { text, dropped } = translateSortSpec(n.specRaw, n.dir, mapPath, nameMap);
     n.specText = text;
@@ -300,16 +323,48 @@ for (const n of notes) {
 
 const cfg = join(OUT, ".obsidian");
 mkdirSync(cfg, { recursive: true });
-const copyCfg = (name, fallback) => {
-  const src = join(VAULT, ".obsidian", name);
-  if (existsSync(src)) {
-    try { writeFileSync(join(cfg, name), readFileSync(src, "utf8"), "utf8"); return; } catch { }
-  }
-  if (fallback) writeFileSync(join(cfg, name), fallback, "utf8");
+
+// github#191 -- the config files are rewritten through the map, never copied
+let cfgDropped = 0;
+const readCfg = (name) => {
+  try { return JSON.parse(readFileSync(join(VAULT, ".obsidian", name), "utf8")) || {}; } catch { return {}; }
 };
-copyCfg("daily-notes.json", "{}");
-copyCfg("templates.json", "{}");
-copyCfg("app.json", "{}");
+const cfgFolder = (v) => {
+  if (typeof v !== "string" || !v.trim()) return undefined;
+  const slash = /\/$/.test(v) ? "/" : "";
+  const mapped = mapPath(v.replace(/^\.\//, ""));
+  if (mapped === "") return "/";
+  if (mapped === null) { cfgDropped++; return undefined; }
+  return mapped + slash;
+};
+const cfgNote = (v) => {
+  if (typeof v !== "string" || !v.trim()) return undefined;
+  const clean = v.split(/[\\/]/).filter(Boolean).join("/").replace(/\.md$/i, "");
+  const hit = notes.find((n) => n.rel.replace(/\.md$/i, "") === clean);
+  if (!hit) { cfgDropped++; return undefined; }
+  return hit.demoRel.replace(/\.md$/i, "");
+};
+const cfgString = (v) => (typeof v === "string" && v.trim() ? v : undefined);
+const writeCfg = (name, shape) => {
+  const src = readCfg(name);
+  const out = {};
+  for (const [k, via] of Object.entries(shape)) {
+    const v = via(src[k]);
+    if (v !== undefined) out[k] = v;
+  }
+  writeFileSync(join(cfg, name), JSON.stringify(out, null, 2) + "\n", "utf8");
+};
+writeCfg("daily-notes.json", { folder: cfgFolder, format: cfgString, template: cfgNote });
+writeCfg("templates.json", { folder: cfgFolder });
+writeCfg("app.json", {
+  attachmentFolderPath: cfgFolder,
+  newFileFolderPath: cfgFolder,
+  userIgnoreFilters: (v) => {
+    if (!Array.isArray(v)) return undefined;
+    const kept = v.map(cfgFolder).filter((x) => x !== undefined);
+    return kept.length ? kept : undefined;
+  },
+});
 // github#71, decisions/0015 -- rewritten to point at the MIRRORED note
 const cfgSpec = (() => {
   try {
@@ -327,9 +382,11 @@ if (cfgSpec) {
 }
 
 console.log(`demo vault: ${OUT}`);
-console.log(`  ${written} notes, ${dirMap.size} folders mapped, ` +
-            `${usedPeople.size} person names invented, seed ${SEED}`);
+console.log(`  ${written} notes, ${dirMap.size} folders mapped (${usedFolders.size} folder names and ` +
+            `${usedPeople.size} person names invented), seed ${SEED}`);
 console.log(`  ${edges} links rewritten, ${dangling} left dangling`);
+console.log(`  .obsidian: daily-notes.json, templates.json, app.json rewritten through the map, ` +
+            `${cfgDropped} path(s) dropped as unmappable`);
 if (specNotes.length) {
   console.log(`  sortspec: ${specNotes.length} note(s) translated in place -> ` +
               specNotes.map((n) => n.demoRel).join(", ") +
