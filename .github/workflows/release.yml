@@ -216,6 +216,8 @@ jobs:
       - name: The page cannot style, or be styled by, its host
         run: node scripts/check-scope.mjs
       - name: No other people's names or identifiers
+        env:
+          PII_NAMES: ${{ secrets.PII_NAMES }}
         run: node scripts/check-pii.mjs
       - name: Comments are pointers
         run: node scripts/check-comments.mjs

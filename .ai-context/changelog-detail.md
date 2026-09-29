@@ -1,3 +1,30 @@
+## 2026-09-29 — check-pii's private rules move out of the tracked file (`github#196`)
+
+Two rules in `scripts/check-pii.mjs` spelled out internal Jira project keys and the name of a real
+vault. They had been public since the first commit, and `ALLOW_FILES` meant the guard never
+flagged itself. (The email rule was already generic after github#193.) This is a forward fix only:
+history was not rewritten. The strings now load from the untracked `.pii-names` as typed entries
+(`email:`, `jira:`, `vault:`), or from `PII_NAMES` in CI, which the two workflows now pass to the
+step.
+
+| | before | after |
+|---|---|---|
+| tracked patterns | 5, two naming the maintainer's setup | 4 generic, plus up to 3 built at runtime from the list |
+| `git grep` for the Jira-key shape and the vault path | present in the script | **0** |
+| clean line on the maintainer's list | `250 files, 12 names, 5 patterns` | `250 files, 12 names, rules 1 email, 2 jira, 1 vault, 7 patterns, 20 negative controls caught` |
+| negative controls | none | **20** on every run (4 generic, plus one for each name and rule entry) |
+| CI's view of the list | `NO NAME LIST` | the `PII_NAMES` secret |
+
+A throwaway-repo matrix with invented values passed **18/18**:
+
+- A planted email, two Jira keys and a vault path each hit, from the file and from the env, plus a planted name each way (10 cases, exit 1).
+- A clean tree passes from both.
+- `PII_NAMES` with no `jira:` entry exits 1; the file with none warns and exits 0.
+- No list at all prints the `NO NAME LIST` warning; a drive-root `Obsidian` folder and a generic email are still caught with no list.
+- An unknown `kind:` exits 1.
+
+Nothing in `src/` moved, so the suite was not re-run, and the tree earns no stamp from this.
+
 # Detailed change history
 
 Every change, newest first, with the numbers that decided it. **This is the regression
