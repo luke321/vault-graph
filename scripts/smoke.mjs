@@ -9023,17 +9023,17 @@ async function killBrowser(child, PORT) {
  * reuses. A leftover fixture directory in a checkout root is ignored with a one-line notice;
  * --vault remains the explicit override for pointing the suite at any vault on purpose.
  *
- * EXCEPT THE 10k VAULT, WHOSE --end IS PINNED. Its golden layout snapshot is not
- * day-invariant: the daily notes there are filed into year-month subfolders derived from
- * their dates, so moving --end moves notes between subfolders, and the subfolder cells move
- * with them. Measured 2026-09-04, the first weekly refresh after the goldens were recorded:
- * the regenerated 10k vault failed "layout matches its golden snapshot" with 893 notes moved
- * (worst #5296, radius 9317 -> 9637, angle -80 -> 169 degrees) on develop itself, while the
- * demo and shape vaults -- which have no date-derived folders -- stayed byte-identical, as
- * invariants.md had measured for those two. So the 10k is generated with --end fixed at the
- * day its golden was taken, and a pinned fixture does not age (there is nothing for a weekly
- * refresh to change). It costs the 10k vault the live half of the heatmap-window check,
- * which the two ageing vaults still carry.
+ * EXCEPT THE 10k AND DEMO VAULTS, WHOSE --end IS PINNED. Their goldens are not day-invariant:
+ * daily notes are named by date and filed into year-month subfolders, so moving --end renames
+ * and refiles them, and the subfolder cells move with them. Measured 2026-09-04: the 10k
+ * failed "layout matches its golden snapshot" with 893 notes moved on develop itself. The
+ * demo vault delegates to the same generator and was assumed safe; measured 2026-09-29 (github
+ * #186), its golden holds for --end 09-20 to 09-22, moves 3 notes at 09-23 and 31 at 09-27.
+ * The shape vault has no date-derived folders and still ages, so it carries the live window.
+ * So both are generated with --end fixed at a day their goldens hold, and a pinned fixture
+ * does not age (there is nothing for a weekly refresh to change). It costs both the live
+ * half of the heatmap-window check,
+ * which the shape vault still carries.
  *
  * github#106, decisions/0013 -- a stamp is not proof the vault is usable
  *
@@ -9120,7 +9120,7 @@ function resolveVaults() {
     out.push({ path: dir, label, fixture: desc ? { name, ...desc } : null });
   };
 
-  gen("make-demo-vault.mjs", [], "demo-vault", "the demo vault (sparse tail, 2 dense years)");
+  gen("make-demo-vault.mjs", ["--end", "2026-09-22"], "demo-vault", "the demo vault (sparse tail, 2 dense years)");
   gen("make-test-vault.mjs", ["--notes", "10000", "--years", "10", "--end", "2026-08-28"],
       "test-vault", "the 10k synthetic vault (10 years)");
   gen("make-shape-vault.mjs", [], "shape-vault", "the dominant-folder vault");
