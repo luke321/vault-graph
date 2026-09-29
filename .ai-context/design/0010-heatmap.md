@@ -21,7 +21,7 @@ on the live vault and both answer a different question:
 
 | Field | Measured | Answers |
 |---|---|---|
-| NTFS `birthtime` | **472 of 934 files "born" today** | when *this machine* first saw the file — OneDrive re-creates on sync |
+| NTFS `birthtime` | **472 of 934 files "born" today** | when *this machine* first saw the file — a cloud sync client re-creates on sync |
 | `mtime` | 2026-08-19 shows **240 files** | what did I *touch* — that day was the folder renumbering |
 | `created` | 894 valid of 916 | when the note was **added**; its big day, 2026-06-27 with 180 notes, is the initial import |
 
@@ -285,7 +285,7 @@ is the one constant to change if the axis should be shorter.
 
 These counts move around more than they look like they should, and the reason is worth
 knowing: the vault moved from `<vault>\<vault>` to `<vault>` on the
-same day, and mid-move a build saw both copies (916 notes, a phantom `SecondBrain`
+same day, and mid-move a build saw both copies (916 notes, a phantom folder
 group). Numbers measured that morning and that afternoon are from different vaults. The
 *shapes* hold; the exact figures should be re-measured rather than trusted.
 

@@ -4838,7 +4838,7 @@ does not build ends the run before Chrome starts. The same walk makes a stamp na
 now-corrupt fixture miss, a run against a corrupt fixture never stamps, and a run pointed at a
 scratch store by `VG_FIXTURE_STORE` (the test seam for that path) never stamps either. Both
 callers require the pass line, not exit 0 alone:
-the CLI realpaths itself against `argv[1]`, because through a junction (every Orca worktree)
+the CLI realpaths itself against `argv[1]`, because through a junction (a worktree reached that way)
 the two paths differed, the body never ran, and an empty exit 0 read as a stamp on every push.
 
 ```bash
