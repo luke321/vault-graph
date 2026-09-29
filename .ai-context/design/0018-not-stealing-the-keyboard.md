@@ -3,8 +3,8 @@
 github#129. A harness run used to take the keyboard: a window came to the foreground mid-run and
 keystrokes landed in it instead of in the terminal that started the run, for the rest of the run.
 
-`scripts/lock.mjs` does not help and was never meant to. It serialises *who owns the display*; it
-says nothing about a window *activating*. Two harnesses that correctly take `screen-left` one
+The screen hold (now the optional harness hook, `.ai-context/harness-hook.md`) does not help and
+was never meant to. It serialises *who owns the display*; it says nothing about a window *activating*. Two harnesses that correctly take `screen-left` one
 after the other still steal focus one after the other.
 
 ## What was actually measured
