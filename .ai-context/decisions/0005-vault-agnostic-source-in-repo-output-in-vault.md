@@ -31,7 +31,7 @@ does not sync.
 
 The tool started in `.vault-graph/`, moved to `03 - Resources/Vault Graph/` because
 **dot-folders do not sync** so the graph never reached the other devices, and on
-2026-08-22 the source moved out to `C:\git-personal\vault-graph` — while the *output*
+2026-08-22 the source moved out to a separate source checkout — while the *output*
 stayed in the vault.
 
 **Why split them.** They want opposite things:

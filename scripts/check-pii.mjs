@@ -26,7 +26,7 @@ const NAMES = (() => {
 })();
 
 const PATTERNS = [
-  { name: "work email",        re: /[a-zA-Z0-9._%+-]+@humaneticsgroup\.com/gi },
+  { name: "email address",     re: /[a-zA-Z0-9._%+-]+@(?!(?:example\.|users\.noreply\.github\.com|noreply\.))[a-zA-Z0-9-]+(?:\.[a-zA-Z0-9-]+)*\.[a-zA-Z]{2,}/gi },
   { name: "jira key",          re: /\b(?:TC|ASTBSPD)-\d+\b/g },
   { name: "atlassian host",    re: /[a-z0-9-]+\.atlassian\.net/gi },
   { name: "windows user path", re: /[A-Z]:\\Users\\[a-zA-Z0-9._-]+/g },

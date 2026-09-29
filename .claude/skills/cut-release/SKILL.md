@@ -398,7 +398,7 @@ Claude in Chrome tools** -- he is signed in there; do not hand him a link and a 
 paste.
 
 **The mechanics live in the user-level `post-to-kofi` skill -- read it before touching the page.**
-It is shared with vault-shelf and the second machine because the traps belong to Ko-fi rather than
+It is shared with a sister plugin and other machines because the traps belong to Ko-fi rather than
 to this plugin, and one of them is destructive:
 
 - **A page-wide `find` for the post's file input also returns the COVER image input.** Uploading to
@@ -431,7 +431,7 @@ The content:
   `__vg.renderer.getCamera().setState({x:0.5,y:0.5,ratio:0.42,angle:0})` so the disc is cropped
   and the release's own overview tile is actually in the shot. Build from the actual mirror vault
   (`node src/build-graph.mjs --vault ../vault-graph-mirror --out mirror.html`, or wherever this
-  machine's mirror lives — never the real SecondBrain vault, and never a fixture, which would
+  machine's mirror lives — never the maintainer's real vault, and never a fixture, which would
   publish an invented-looking shape instead of the real one), serve it locally, open it, switch to
   whatever grouping/view this release's headline feature actually changed, and screenshot the
   page. A square crop (pad to square with the page's own `--surface-0` background rather than
