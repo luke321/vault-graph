@@ -30,9 +30,9 @@ imported below; if you are a contributor, its absence is normal and nothing here
 
 ## How to work here
 
-- **`--headless` runs the suite with no window and no screen lock, and `--lane fast|walk|all`
+- **`--headless` runs the suite with no window, and `--lane fast|walk|all`
   runs one half of it** (github#155). Both are opt-in: the default is still a real window on
-  the harness screen, holding the `screen-left` lock, and **`CI` does not imply `--headless`**. A
+  the harness screen, and **`CI` does not imply `--headless`**. A
   headless run corrects its viewport to the tuned 1584×961 rather than inheriting Chrome's, and
   both flags are run-shape deltas, so neither stamps a tree. **The suite has no CI gate and is
   not getting one**: measured 2026-09-21, a GitHub-hosted runner takes 30.9 min against 5 min
@@ -41,29 +41,13 @@ imported below; if you are a contributor, its absence is normal and nothing here
 - `node scripts/smoke.mjs --only "<substring>"` is the iteration loop. The full suite runs on
   the push to `develop` whose tree it has not measured yet (the pre-push hook; see
   `scripts/suite-stamp.mjs`); do not run it by hand unless asked.
-- **Two things may not run twice at once, and `scripts/lock.mjs` is how you know.** Several
-  agents work this repo in parallel worktrees, and they collide over two different resources: a
-  **screen** (`smoke.mjs`, `spike-check.mjs`, `record-demo.ps1` each place a window, so the lock
-  is named after the monitor — `screen-left`, `screen-right`, `screen-primary` — not the job), and
-  the **shared fixture store** (`.fixtures/`, under the name `suite`) that a regenerating run
-  deletes out from under a concurrent one. The two names are deliberately not aliased — the
-  deadlock that taught us that, and the github issues behind each one, are in
-  `.ai-context/locking.md`.
-
-  ```powershell
-  node scripts/lock.mjs acquire screen-right --owner "#77 palette"   # blocks; exit 1 = give up
-  node scripts/lock.mjs release screen-right --owner "#77 palette"   # always, even on failure
-  node scripts/lock.mjs status                                       # who holds what
-  ```
-
-  You need those two by hand only for something that seizes a display and is **not** one of the
-  three harnesses (`smoke.mjs`, `spike-check.mjs`, `record-demo.ps1`) — **never wrap one of
-  them**, since its own acquire would wait out your stale hold; `--no-lock` exists for the one
-  caller that already holds it. **Never wrap a `git push` either**: `.githooks/pre-push` takes
-  `suite` itself around its own run, so an outer hold blocks the hook's own attempt and the push
-  hangs until your stale window expires. A plain `git push origin develop`/`main`, or a
-  `smoke.mjs` run you drive directly, is correctly gated on its own. `make-hero.ps1` and
-  `shoot.mjs` need no lock (a transcode and a CDP capture — pass `shoot.mjs` its own `--port`).
+- **The harnesses take no lock of their own** (github#192). `smoke.mjs`, `spike-check.mjs`,
+  `record-demo.ps1`, the other window-placing checks and the pre-push hook call an optional
+  harness hook when one is configured outside the repo (`VAULT_GRAPH_HARNESS_HOOK`, or
+  `git config vaultgraph.harnessHook`): it can hold a screen or the fixture store, and name the
+  monitor a window goes on. With none configured they run as a fresh clone should — no lock, no
+  waiting, windows on the leftmost screen. The contract is `.ai-context/harness-hook.md`.
+  `shoot.mjs` is a CDP capture: pass it its own `--port`.
 - **Never serve Chrome unlabeled.** Any vault-graph page opened in Chrome from this worktree
   — `smoke.mjs`, `shoot.mjs`, a manual review build — sets the page's own top-left title to
   `<worktree/feature> — <what it's showing>`, e.g. `tag-grouping — demo vault`, instead of the

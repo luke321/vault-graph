@@ -502,28 +502,20 @@ if [ -n "$stamped" ]; then
   exit 0
 fi
 
-# ONE SUITE AT A TIME ON THIS MACHINE. Two runs fight for CDP ports and a screen, and each
-# blames the code (scripts/lock.mjs, github#92). The lock is taken here, around the suite only,
-# and released on every way out -- a lock held by a dead hook makes everyone else wait out its
-# stale window. A lock that cannot be had blocks the push rather than running on top of the
-# holder; the holder is named so the wait is a known one.
-#
-# THE PID IS PART OF THE OWNER, and the whole point (github#104). lock.mjs treats a same-owner
-# acquire as already held and exits 0, and lets that owner release -- so without $$ a second
-# push from this worktree while the first is still driving Chrome would start a second suite
-# immediately, which is the exact collision the lock exists to prevent, and whichever finished
-# first would delete the lock out from under the other. The branch name alone does not separate
-# them: two worktrees on detached HEAD both read "pre-push HEAD".
+# github#192, github#104 -- a configured harness hook holds "suite" around the run; with none,
+# nothing is held. The pid keeps two pushes from one worktree from sharing an owner; under Git
+# Bash a child's parent is a short-lived fork, so the hook names its own Windows pid as holder.
+lock_pid=$(cat /proc/$$/winpid 2>/dev/null || echo $$)
 lock_owner="pre-push $(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo '?') [$$]"
-release_lock() { node "$root/scripts/lock.mjs" release suite --owner "$lock_owner" </dev/null >/dev/null 2>&1; }
+release_lock() { node "$root/scripts/harness-hook.mjs" release suite --owner "$lock_owner" </dev/null >/dev/null 2>&1; }
 trap 'release_lock; exit 1' INT TERM HUP
-if ! node "$root/scripts/lock.mjs" acquire suite --owner "$lock_owner" --holder process </dev/null; then
+if ! node "$root/scripts/harness-hook.mjs" acquire suite --owner "$lock_owner" --pid "$lock_pid" </dev/null; then
   cat >&2 <<'EOF'
 
-pre-push: could not take the suite lock -- push blocked.
+pre-push: the harness hook could not hold the suite -- push blocked.
 
-Another invariant suite is running on this machine and the wait ran out. See who holds it
-with:  node scripts/lock.mjs status   and push again when it is free.
+Another invariant suite is running on this machine. See who holds it with:
+  node scripts/harness-hook.mjs status   and push again when it is free.
 EOF
   exit 1
 fi

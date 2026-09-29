@@ -12,44 +12,18 @@ const ROOT = dirname(HERE);
 const argv = process.argv.slice(2);
 const dashdash = argv.indexOf("--");
 if (dashdash < 0 || dashdash === argv.length - 1) {
-  console.error("usage: node scripts/focus-check.mjs [--runs N] [--no-lock] -- <harness command>\n" +
-    "  --no-lock is REQUIRED when the harness takes screen-left itself (smoke.mjs, spike-check.mjs,\n" +
-    "  obsidian-smoke.mjs): holding it out here makes their own acquire wait out this run. github#87");
+  console.error("usage: node scripts/focus-check.mjs [--runs N] -- <harness command>");
   process.exit(2);
 }
 const opts = argv.slice(0, dashdash);
 const command = argv.slice(dashdash + 1).join(" ");
 const arg = (n, d) => { const i = opts.indexOf("--" + n); return i >= 0 && opts[i + 1] ? opts[i + 1] : d; };
 const RUNS = Math.max(1, Number(arg("runs", 3)));
-// github#87
-const NO_LOCK = opts.includes("--no-lock");
 
 if (process.platform !== "win32") {
   console.error("focus-check only means anything on Windows -- the defect is Win32 foreground activation");
   process.exit(2);
 }
-
-// github#87
-const LOCK = "screen-left";
-const owner = "focus-check [" + process.pid + "]";
-let holdsLock = false;
-if (!NO_LOCK) {
-  const r = spawnSync(process.execPath, [join(HERE, "lock.mjs"), "acquire", LOCK, "--owner", owner],
-    { stdio: "inherit" });
-  if (r.status !== 0) {
-    console.error("could not take the " + LOCK + " lock -- something else is driving that display.");
-    process.exit(1);
-  }
-  holdsLock = true;
-}
-const releaseLock = () => {
-  if (!holdsLock) return;
-  holdsLock = false;
-  try {
-    spawnSync(process.execPath, [join(HERE, "lock.mjs"), "release", LOCK, "--owner", owner], { stdio: "ignore" });
-  } catch { void 0; }
-};
-process.once("exit", releaseLock);
 
 const scratch = mkdtempSync(join(tmpdir(), "vg-focus-check-"));
 console.log(`${RUNS} run(s) of: ${command}\n`);
@@ -96,7 +70,6 @@ try {
   }
 } finally {
   try { rmSync(scratch, { recursive: true, force: true }); } catch { void 0; }
-  releaseLock();
 }
 
 const got = results.filter(Boolean);

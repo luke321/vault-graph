@@ -110,7 +110,5 @@ node scripts/focus-check.mjs --runs 5 -- node scripts/shoot.mjs --vault .fixture
 It passes when every run ends holding the keyboard and no single loss reaches a second, which is
 the ticket's own bar.
 
-It takes `screen-left` for harnesses that do not, and **must be given `--no-lock` for the ones that
-do** — `smoke.mjs`, `spike-check.mjs`, `obsidian-smoke.mjs`. Holding the lock outside them makes
-their own acquire wait out this run's stale window, which is the same nesting `github#87` and
-`CLAUDE.md` already warn about for `pre-push`.
+It takes no screen of its own (github#192): a harness it wraps claims one through the harness
+hook itself, when one is configured (`.ai-context/harness-hook.md`).

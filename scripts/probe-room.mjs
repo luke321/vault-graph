@@ -8,6 +8,7 @@ import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { leftWindowArgs } from "./screen.mjs";
+import { claimScreen, noFreeScreen, release } from "./harness-hook.mjs";
 import { keepFocus } from "./focus.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -40,38 +41,18 @@ const RANK = Number(arg("rank", 1));
 const HOLD = Number(arg("hold", 0));
 const FILM = arg("film", "");
 const FPS = Number(arg("fps", 30));
-const NO_LOCK = argv.includes("--no-lock");
 
-// github#87
-const SCREEN_LOCK = "screen-left";
+// github#87, github#192
 const SCREEN_OWNER = "probe-room.mjs " + branchName() + " [" + process.pid + "]";
 
-// github#87
 function takeScreen() {
-  if (NO_LOCK) return false;
-  const r = spawnSync(process.execPath,
-    [join(HERE, "lock.mjs"), "acquire", SCREEN_LOCK, "--owner", SCREEN_OWNER],
-    { stdio: "inherit" });
-  if (r.status !== 0) {
-    console.error("");
-    console.error("could not take the " + SCREEN_LOCK + " lock -- something else is driving that");
-    console.error("display, and this harness parks a Chrome window on it.");
-    console.error("Who holds it:  node scripts/lock.mjs status");
-    console.error("Pass --no-lock ONLY when the caller already holds it.");
-    process.exit(1);
-  }
-  return true;
+  const s = claimScreen(SCREEN_OWNER);
+  if (!s.ok) { noFreeScreen(); process.exit(1); }
+  return s.lock;
 }
 
-// github#87
-function dropScreen(held) {
-  if (!held) return;
-  try {
-    spawnSync(process.execPath,
-      [join(HERE, "lock.mjs"), "release", SCREEN_LOCK, "--owner", SCREEN_OWNER],
-      { stdio: "ignore" });
-  } catch { /* github#87 */ }
-}
+/** @param {string | null} held */
+function dropScreen(held) { release(held, SCREEN_OWNER); }
 
 function findChrome() {
   const named = arg("chrome", "");
