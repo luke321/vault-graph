@@ -3439,6 +3439,7 @@ const phoneOff = async (p) => {
 check("a settings push keeps a phone's zoom", async (p) => {
   const dpr = await p.j(`window.devicePixelRatio || 1`);
   const said = [], bad = [];
+  const putBack = await keepSettings(p);
   try {
     for (const d of PHONE_DEVICES) {
       await phoneOn(p, d, dpr);
@@ -3488,6 +3489,7 @@ check("a settings push keeps a phone's zoom", async (p) => {
     said.push(`a desk still follows the row: off ${deskOff}, on ${deskOn}`);
   } finally {
     await phoneOff(p);
+    await putBack();
   }
   return { ok: bad.length === 0,
            detail: said.join(" | ") + (bad.length ? "  <- " + bad.join("; ") : "") };
@@ -3497,6 +3499,7 @@ check("a settings push keeps a phone's zoom", async (p) => {
 check("the calendar follows a phone that rotates", async (p) => {
   const dpr = await p.j(`window.devicePixelRatio || 1`);
   const said = [], bad = [];
+  const putBack = await keepSettings(p);
   const store = (v) => p.j(`(function () { try {
       var k = window.SETTINGS_KEY; if (!k) return "no key";
       var s = JSON.parse(window.localStorage.getItem(k) || "{}");
@@ -3576,6 +3579,7 @@ check("the calendar follows a phone that rotates", async (p) => {
               `a phone's tap opened it and left the store ${kept}`);
   } finally {
     await phoneOff(p);
+    await putBack();
   }
   return { ok: bad.length === 0,
            detail: said.join(" | ") + (bad.length ? "  <- " + bad.join("; ") : "") };
@@ -4276,12 +4280,19 @@ async function storeBack(p, was) {
   })(); void 0`).catch(() => {});
 }
 
+// github#151
+async function keepSettings(p) {
+  const was = await p.j(`window.SETTINGS_KEY ? window.localStorage.getItem(window.SETTINGS_KEY) : null`);
+  return () => p.eval(`(function (v) { var k = window.SETTINGS_KEY; if (!k) return;
+    if (v === null) window.localStorage.removeItem(k); else window.localStorage.setItem(k, v);
+  })(${JSON.stringify(was)}); void 0`);
+}
 async function toRest(p) {
   await p.eval(`document.querySelector("#vg-reset").click(); void 0`);
   await camSettle(p);
   const dl = Date.now() + 4000;
   while (Date.now() < dl) {
-    if (await p.j(`!!__vg.camAtRest`)) return;
+    if (await p.j(`!!__vg.camAtRest && !__vg.demo.busy()`)) return;
     await sleep(60);
   }
 }
@@ -8564,6 +8575,7 @@ check("a rebuild waits for a drag, and a right-click is not a drag", async (p) =
   // github#120 -- refused, and refused FOR THAT REASON
   const held = await p.j(`(function(){ ${EL}
     window.__live.a = window.__live.snap();
+    window.__live.orig = window.__live.clone();
     ${DOWN(0)}
     var res = __vg.applyData(window.__live.withOneMore('__live/Zz Drag Probe.md'));
     var order = __vg.graph.order;
@@ -8579,14 +8591,14 @@ check("a rebuild waits for a drag, and a right-click is not a drag", async (p) =
   // github#120 -- a context menu is not a drag
   const rclick = await p.j(`(function(){ ${EL}
     ${DOWN(2)}
-    var res = __vg.applyData(window.__live.clone());
+    var res = __vg.applyData(window.__live.orig);
     ${UP}
     return res;
   })()`);
   await settle(p);
 
   // github#120 -- put the disc back for the other live checks
-  await p.j(`__vg.applyData(window.__live.clone())`);
+  await p.j(`__vg.applyData(window.__live.orig)`);
   await settle(p);
 
   const ok = held.res && held.res.applied === false && held.res.busy === "drag" &&
@@ -8698,6 +8710,7 @@ check("word counts land by path, which is the only thing a live rebuild keeps", 
   const start = await p.j(`window.__live.snap().n`);
   // design/0014
   const r = await p.j(`(function(){
+    window.__live.orig = window.__live.clone();
     var res = __vg.applyData(window.__live.without(1));
     var ids = __vg.graph.nodes(), d = __vg.data();
     var diverged = 0, sample = null;
@@ -8722,7 +8735,7 @@ check("word counts land by path, which is the only thing a live rebuild keeps", 
              missing: __vg.setWords("__live/not a note.md", 1) };
   })()`);
   await settle(p);
-  await p.j(`__vg.applyData(window.__live.clone())`);
+  await p.j(`__vg.applyData(window.__live.orig)`);
   await settle(p);
   const ok = r.res.applied && r.diverged > 0 && r.landed === 424242 &&
              r.bystander !== null && r.bystander !== 424242 && r.missing === false;

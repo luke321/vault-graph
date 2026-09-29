@@ -1940,6 +1940,10 @@ check written against `new Date()` passes by asserting nothing, and does so more
 every day as the two ageing fixtures regenerate forward and the pinned 10k does not. This is
 the same trap the 10k's pinned `--end` exists to avoid. `__vg.setRecent(kind, refMs)` and
 `__vg.recentWindow(kind, refMs)` both take a reference day for exactly this reason.
+Since 2026-09-29 the demo vault's `--end` is pinned too (2026-09-22): its daily notes are named
+by date and filed into month subfolders, so it was never day-invariant, and its golden moved 31
+notes on the weekly regeneration of 09-27 (changelog-detail). The dominant-folder vault is now
+the only fixture that ages.
 
 ## The band's control row does not move when its state changes (github#70)
 

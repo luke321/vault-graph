@@ -8430,7 +8430,7 @@ function mountVaultGraph(root, data, deps) {
   var FIT_RATIO = 0.954;
 
   // github#14
-  var camAtRest = true, fitting = false;
+  var camAtRest = true, fitting = false, fitSeq = 0;
 
   function fitRatio() {
     var locked = geomLock && geomLock.maxR ? geomLock.maxR : 0;
@@ -8464,8 +8464,11 @@ function mountVaultGraph(root, data, deps) {
   function fit(ms, at) {
     var to = at || fitTarget();
     fitting = true;
+    var seq = ++fitSeq;
     // github#170, design/0013 -- restore what pan is NOW, and re-ask once landed
     var landed = function () {
+      // github#186
+      if (seq !== fitSeq) return;
       fitting = false; camAtRest = true;
       renderer.setSetting("enableCameraPanning", panEnabled);
       syncPhonePan();
@@ -10493,7 +10496,7 @@ function mountVaultGraph(root, data, deps) {
   /* ---- BEGIN: demo automation + debug API -- stripped from the plugin build, see scripts/build-plugin.mjs (stripDemoAndDebug) ---- */
 
   function demoBusy() {
-    return !!(play || cascadeRun || anim || hoverRaf || hlRaf);
+    return !!(play || cascadeRun || anim || hoverRaf || hlRaf || fitting);
   }
 
   /** @param {string} spec a name prefix, or "#N" for the Nth biggest */
@@ -11244,7 +11247,7 @@ function mountVaultGraph(root, data, deps) {
     busy: demoBusy,
     busyWhy: function () {
       return { play: !!play, cascade: !!cascadeRun, anim: !!anim,
-               hover: !!hoverRaf, highlight: !!hlRaf };
+               hover: !!hoverRaf, highlight: !!hlRaf, fit: fitting };
     },
     where: demoWhere,
     cursorAt: demoCursorAt,
