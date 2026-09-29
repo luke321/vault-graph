@@ -8,6 +8,7 @@ import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { attach } from "./cdp.mjs";
 import { placeElectronLeft } from "./screen.mjs";
+import { busy, claimScreen, release } from "./harness-hook.mjs";
 import { keepFocus } from "./focus.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -22,8 +23,6 @@ const PORT = Number(arg("port", "9449"));
 const W = Number(arg("w", "390"));
 const H = Number(arg("h", "844"));
 const KEEP = flag("keep");
-// github#87
-const NO_LOCK = flag("no-lock");
 const JSON_OUT = arg("json", "");
 const SHOT = arg("shot", "");
 const SEEN_DAYS = Number(arg("seen-days", "0")) || 0;
@@ -246,26 +245,11 @@ console.log("port:     " + PORT);
 const vault = makeThrowawayVault(src, plugin);
 console.log("throwaway vault: " + vault);
 
-// github#87
-const LOCK = "screen-left";
+// github#87, github#192
 const lockOwner = "host-phone-check [" + process.pid + "]";
-let holdsLock = false;
-if (!NO_LOCK) {
-  const r = spawnSync(process.execPath, [join(HERE, "lock.mjs"), "acquire", LOCK, "--owner", lockOwner], { stdio: "inherit" });
-  if (r.status !== 0) {
-    console.error("could not take the " + LOCK + " lock -- something else is driving that display.");
-    console.error("  who: node scripts/lock.mjs status");
-    process.exit(1);
-  }
-  holdsLock = true;
-}
-const releaseLock = () => {
-  if (!holdsLock || KEEP) return;
-  holdsLock = false;
-  try {
-    spawnSync(process.execPath, [join(HERE, "lock.mjs"), "release", LOCK, "--owner", lockOwner], { stdio: "ignore" });
-  } catch { void 0; }
-};
+const screen = claimScreen(lockOwner);
+if (!screen.ok) { busy("every screen"); process.exit(1); }
+const releaseLock = () => { if (!KEEP) release(screen.lock, lockOwner); };
 process.on("exit", releaseLock);
 
 rmSync(PROFILE, { recursive: true, force: true });

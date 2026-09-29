@@ -8,7 +8,8 @@ import { couplingReport, leakReport } from "./smoke-state.mjs";
 import { pngCaptureJs, pngCarriesGraph, pngCaptureDetail } from "./png-capture.mjs";
 import { buildPayloadVault, PAYLOAD, NOTE_COUNT } from "./check-data-escape.mjs";
 import { findChrome } from "./chrome.mjs";
-import { leftmostScreen, leftWindowPos } from "./screen.mjs";
+import { harnessScreen, leftWindowPos } from "./screen.mjs";
+import { busy, claimScreen, release } from "./harness-hook.mjs";
 import { keepFocus } from "./focus.mjs";
 // github#155
 import { chromeArgs, nextBounds, parseLane, pickLane, TUNED_VIEWPORT,
@@ -51,8 +52,6 @@ const LANE = (() => {
   try { return parseLane(arg("lane", "all")); }
   catch (e) { console.error("smoke failed to run: " + e.message); process.exit(1); }
 })();
-// github#87
-const NO_LOCK = argv.includes("--no-lock");
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 async function freePorts(k) {
@@ -141,7 +140,7 @@ const GRID = HEADLESS ? false
 let SCREEN = null;
 
 function gridSlot(i, k) {
-  if (!SCREEN) SCREEN = leftmostScreen();
+  if (!SCREEN) SCREEN = harnessScreen();
   const cols = Math.ceil(Math.sqrt(Math.max(1, k)));
   const rows = Math.ceil(Math.max(1, k) / cols);
   const w = Math.floor(SCREEN.w / cols), h = Math.floor(SCREEN.h / rows);
@@ -9056,8 +9055,7 @@ async function main() {
   return worst ? 1 : 0;
 }
 
-// github#87
-const SCREEN_LOCK = "screen-left";
+// github#87, github#192
 const SCREEN_OWNER = (() => {
   let branch = "?";
   try {
@@ -9068,33 +9066,16 @@ const SCREEN_OWNER = (() => {
   return "smoke.mjs " + branch + " [" + process.pid + "]";
 })();
 
-// github#87
 function takeScreen() {
-  // github#155 -- the lock names a SCREEN; a headless run is on none
-  if (NO_LOCK || HEADLESS) return false;
-  const r = spawnSync(process.execPath,
-    [join(HERE, "lock.mjs"), "acquire", SCREEN_LOCK, "--owner", SCREEN_OWNER, "--holder", "process"],
-    { stdio: "inherit" });
-  if (r.status !== 0) {
-    console.error("");
-    console.error("could not take the " + SCREEN_LOCK + " lock -- something else is driving that");
-    console.error("display, and two runs on one screen spoil each other's captures and timings.");
-    console.error("Who holds it:  node scripts/lock.mjs status");
-    console.error("Pass --no-lock ONLY when the caller already holds it.");
-    process.exit(1);
-  }
-  return true;
+  // github#155 -- a headless run is on no screen
+  if (HEADLESS) return null;
+  const s = claimScreen(SCREEN_OWNER);
+  if (!s.ok) { busy("every screen"); process.exit(1); }
+  return s.lock;
 }
 
-// github#87
-function dropScreen(held) {
-  if (!held) return;
-  try {
-    spawnSync(process.execPath,
-      [join(HERE, "lock.mjs"), "release", SCREEN_LOCK, "--owner", SCREEN_OWNER],
-      { stdio: "ignore" });
-  } catch { void 0; }
-}
+/** @param {string | null} held */
+function dropScreen(held) { release(held, SCREEN_OWNER); }
 
 const heldScreen = takeScreen();
 for (const sig of ["SIGINT", "SIGTERM", "SIGHUP"]) {

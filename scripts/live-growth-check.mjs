@@ -8,6 +8,7 @@ import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { attach } from "./cdp.mjs";
 import { placeElectronLeft } from "./screen.mjs";
+import { busy, claimScreen, release } from "./harness-hook.mjs";
 import { keepFocus } from "./focus.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -29,7 +30,6 @@ const BURST_NOTES = Number(arg("burst-notes", "250"));
 // github#120 -- the control: with this on, the plugin does no work at all
 const NO_LIVE = flag("no-live");
 const KEEP = flag("keep");
-const NO_LOCK = flag("no-lock");
 const OUT = arg("out", "");
 const TEMP = process.env.TEMP || tmpdir();
 const WORK = join(TEMP, "vault-graph-live-growth");
@@ -105,30 +105,21 @@ function makeThrowawayVault(src) {
 }
 
 /* -------------------------------------------------------------------- lock -- */
-// github#87 -- this places a window on the leftmost screen
+// github#87, github#192
 
-const LOCK = "screen-left";
 const lockOwner = "live-growth-check #120 [" + process.pid + "]";
-let holdsLock = false;
+/** @type {string | null} */
+let heldScreen = null;
 
 function takeLock() {
-  if (NO_LOCK) return;
-  const r = spawnSync(process.execPath, [join(HERE, "lock.mjs"), "acquire", LOCK, "--owner", lockOwner],
-                      { stdio: "inherit" });
-  if (r.status !== 0) {
-    console.error("could not take the " + LOCK + " lock -- something else is driving that display.");
-    console.error("  who: node scripts/lock.mjs status");
-    process.exit(1);
-  }
-  holdsLock = true;
+  const s = claimScreen(lockOwner);
+  if (!s.ok) { busy("every screen"); process.exit(1); }
+  heldScreen = s.lock;
 }
 
 function dropLock() {
-  if (!holdsLock) return;
-  holdsLock = false;
-  try {
-    spawnSync(process.execPath, [join(HERE, "lock.mjs"), "release", LOCK, "--owner", lockOwner], { stdio: "ignore" });
-  } catch { void 0; }
+  release(heldScreen, lockOwner);
+  heldScreen = null;
 }
 
 /* ----------------------------------------------------------- working set -- */
