@@ -6404,3 +6404,27 @@ scroll the page.
 **Desktop unchanged, measured both ways:** all five goldens match, positions and band; and every
 box and reading at 1600x1000 is identical to `fd08e12` -- 64 of them, including the camera and both
 pan flags.
+
+## check-pii names nobody in its own source (`github#196`)
+
+The tracked `scripts/check-pii.mjs` holds only generic shapes: an email address outside the
+reserved and noreply domains, an `*.atlassian.net` host, a Windows user path, and the generic
+drive-root `Obsidian` vault path. Every rule that would name somebody is loaded from the same
+place as the names, never from a commit: the untracked `.pii-names`, or the `PII_NAMES` secret
+in CI (`quality.yml` and `release.yml` both pass it to the step). A bare entry is a name.
+`email: <domain>`, `jira: <KEY>` and `vault: <name>` are typed entries, and each adds a work
+email, Jira key or vault path rule. Any other `kind:` prefix exits 1. `.pii-names.example`
+documents the format with placeholder values.
+
+**A list that is loaded but lacks a kind fails in CI and warns locally.** `PII_NAMES` without an
+`email:`, `jira:` or `vault:` entry exits 1, so a secret that was never updated cannot run half
+the rules and pass. A local `.pii-names` without one prints a warning naming the missing kind and
+exits 0. With no list at all nothing has changed: the generic patterns run and the `NO NAME LIST`
+warning prints.
+
+**Negative controls run on every invocation.** Each generic pattern gets one. Each loaded name,
+domain, key and vault gets a synthetic line, and that line has to be flagged **by the rule it was
+built for**. The clean line prints the count (`12 names, rules 1 email, 2 jira, 1 vault, 7 patterns,
+20 negative controls caught` on the maintainer's list). A control that does not bite exits 1. The
+message names only its kind and index (`jira #1`) and never the value, because the CI log of a
+public repository is public too.
