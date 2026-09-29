@@ -9,7 +9,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { attach } from "./cdp.mjs";
 import { harnessScreen } from "./screen.mjs";
-import { busy, claimScreen, release } from "./harness-hook.mjs";
+import { claimScreen, noFreeScreen, release } from "./harness-hook.mjs";
 import { keepFocus } from "./focus.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -61,7 +61,7 @@ const LOCK_OWNER = "mobile-check [" + process.pid + "]";
 let heldScreen = null;
 function takeLock() {
   const s = claimScreen(LOCK_OWNER);
-  if (!s.ok) { busy("every screen"); process.exit(1); }
+  if (!s.ok) { noFreeScreen(); process.exit(1); }
   heldScreen = s.lock;
 }
 function dropLock() {

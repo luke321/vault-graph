@@ -1,7 +1,7 @@
 
 import { attach, json } from "./cdp.mjs";
 import { placeElectronLeft } from "./screen.mjs";
-import { busy, claimScreen, release } from "./harness-hook.mjs";
+import { claimScreen, noFreeScreen, release } from "./harness-hook.mjs";
 import { keepFocus } from "./focus.mjs";
 import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, writeFileSync, readFileSync } from "node:fs";
@@ -52,7 +52,7 @@ console.log("profile:  " + USER_DATA);
 // github#87, github#192
 const lockOwner = "spike-check [" + process.pid + "]";
 const screen = claimScreen(lockOwner);
-if (!screen.ok) { busy("every screen"); process.exit(1); }
+if (!screen.ok) { noFreeScreen(); process.exit(1); }
 
 // github#129
 const focus = await keepFocus();

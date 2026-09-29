@@ -8,7 +8,7 @@ import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { leftWindowArgs } from "./screen.mjs";
-import { busy, claimScreen, release } from "./harness-hook.mjs";
+import { claimScreen, noFreeScreen, release } from "./harness-hook.mjs";
 import { keepFocus } from "./focus.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -47,7 +47,7 @@ const SCREEN_OWNER = "probe-room.mjs " + branchName() + " [" + process.pid + "]"
 
 function takeScreen() {
   const s = claimScreen(SCREEN_OWNER);
-  if (!s.ok) { busy("every screen"); process.exit(1); }
+  if (!s.ok) { noFreeScreen(); process.exit(1); }
   return s.lock;
 }
 

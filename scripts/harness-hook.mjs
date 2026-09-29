@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // github#192
 import { spawnSync } from "node:child_process";
+import { existsSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { useScreen } from "./screen.mjs";
@@ -20,11 +21,16 @@ export function hookPath() {
     p = r.status === 0 ? (r.stdout || "").trim() : "";
   }
   resolved = p && p !== "off" ? resolve(HERE, "..", p) : null;
+  if (resolved && !existsSync(resolved)) {
+    console.error("the harness hook " + resolved + " does not exist -- fix VAULT_GRAPH_HARNESS_HOOK or");
+    console.error("  vaultgraph.harnessHook, or set the variable to off");
+  }
   return resolved;
 }
 
 /** @param {string[]} args @param {"inherit" | "pipe" | "ignore"} out */
 function run(args, out) {
+  if (!existsSync(/** @type {string} */ (hookPath()))) return { status: 1, stdout: "" };
   return spawnSync(process.execPath, [/** @type {string} */ (hookPath()), ...args],
     { stdio: ["ignore", out, out === "ignore" ? "ignore" : "inherit"], encoding: "utf8" });
 }
@@ -51,9 +57,8 @@ export function claimScreen(owner, pid = process.pid) {
   return { ok: true, lock: "screen-" + which, which: which };
 }
 
-/** @param {string} what */
-export function busy(what) {
-  console.error("the harness hook says " + what + " is busy -- something else is using it.");
+export function noFreeScreen() {
+  console.error("the harness hook found no free screen -- something else is using them.");
   console.error("  who: node scripts/harness-hook.mjs status");
 }
 

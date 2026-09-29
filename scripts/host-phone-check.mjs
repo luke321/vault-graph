@@ -8,7 +8,7 @@ import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { attach } from "./cdp.mjs";
 import { placeElectronLeft } from "./screen.mjs";
-import { busy, claimScreen, release } from "./harness-hook.mjs";
+import { claimScreen, noFreeScreen, release } from "./harness-hook.mjs";
 import { keepFocus } from "./focus.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -248,7 +248,7 @@ console.log("throwaway vault: " + vault);
 // github#87, github#192
 const lockOwner = "host-phone-check [" + process.pid + "]";
 const screen = claimScreen(lockOwner);
-if (!screen.ok) { busy("every screen"); process.exit(1); }
+if (!screen.ok) { noFreeScreen(); process.exit(1); }
 const releaseLock = () => { if (!KEEP) release(screen.lock, lockOwner); };
 process.on("exit", releaseLock);
 

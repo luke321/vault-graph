@@ -8,7 +8,7 @@ import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { attach } from "./cdp.mjs";
 import { placeElectronLeft } from "./screen.mjs";
-import { busy, claimScreen, release } from "./harness-hook.mjs";
+import { claimScreen, noFreeScreen, release } from "./harness-hook.mjs";
 import { keepFocus } from "./focus.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -113,7 +113,7 @@ let heldScreen = null;
 
 function takeLock() {
   const s = claimScreen(lockOwner);
-  if (!s.ok) { busy("every screen"); process.exit(1); }
+  if (!s.ok) { noFreeScreen(); process.exit(1); }
   heldScreen = s.lock;
 }
 

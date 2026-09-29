@@ -9,7 +9,7 @@ import { pngCaptureJs, pngCarriesGraph, pngCaptureDetail } from "./png-capture.m
 import { buildPayloadVault, PAYLOAD, NOTE_COUNT } from "./check-data-escape.mjs";
 import { findChrome } from "./chrome.mjs";
 import { harnessScreen, leftWindowPos } from "./screen.mjs";
-import { busy, claimScreen, release } from "./harness-hook.mjs";
+import { claimScreen, noFreeScreen, release } from "./harness-hook.mjs";
 import { keepFocus } from "./focus.mjs";
 // github#155
 import { chromeArgs, nextBounds, parseLane, pickLane, TUNED_VIEWPORT,
@@ -9070,7 +9070,7 @@ function takeScreen() {
   // github#155 -- a headless run is on no screen
   if (HEADLESS) return null;
   const s = claimScreen(SCREEN_OWNER);
-  if (!s.ok) { busy("every screen"); process.exit(1); }
+  if (!s.ok) { noFreeScreen(); process.exit(1); }
   return s.lock;
 }
 
