@@ -4882,9 +4882,10 @@ trusted.
 
 Keyed by tree and not by commit because the merge into `main` is a new commit by construction
 while its tree is not; not by time because `develop` moves several times a day and "a recent
-green run" cannot say which tree it saw. While it runs, both gates hold the machine-wide
-`suite` lock (`scripts/lock.mjs`) and release it on every exit path; a lock that cannot be had
-blocks the push and names the holder rather than running on top of it.
+green run" cannot say which tree it saw. While it runs, both gates ask the optional harness hook
+(`.ai-context/harness-hook.md`) for the `suite` hold and release it on every exit path; a hold that
+cannot be had blocks the push rather than running on top of it. With no hook configured neither
+gate takes anything.
 
 ## Widening the suite's concurrency surfaced one real race and one window-size artifact
 

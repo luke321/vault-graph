@@ -23,7 +23,9 @@ with this skill; after that, this file is enough to drive the mechanics. Where t
 - **Primary checkout only.** `CLAUDE.md`: only the primary checkout pushes to `develop` or cuts a
   release. If this is a ticket worktree (`git rev-parse --git-common-dir` names a path under
   `.git`), stop and say so instead of running any of this.
-- **Confirm no other release or suite run is in flight**: `node scripts/lock.mjs status`.
+- **Confirm no other release or suite run is in flight**: `node scripts/harness-hook.mjs status`
+  forwards to the configured harness hook; with none set it says `no harness hook configured --
+  nothing is locked`, which means there is nothing to check (`.ai-context/harness-hook.md`).
 
 ## Ask everything first, then run
 
@@ -167,12 +169,12 @@ makes *every* clip stale, not just the ones whose own beats moved. `release.ps1`
 / `=== features ===` warnings only compare commit dates, a proxy, not proof — so re-recording
 everything is the default, not a call made by looking at what changed:
 
-**Ask before taking the mouse — but do NOT take a lock by hand.** `record-demo.ps1` acquires
-`screen-<monitor>` itself and releases it on every way out, and `record` is **aliased to the screen
-locks**, so an outer `acquire record` blocks the recorder's own acquire and the run hangs at
-`taking screen-right ...` with `lock.mjs status` showing only your own hold. Measured cutting 2.7.0:
-the first take sat there for seven minutes until the outer lock was released, after which it
-recorded immediately. `CLAUDE.md` states the rule this line used to break — never wrap one of the
+**Ask before taking the mouse — but do NOT take a screen hold by hand.** With a harness hook
+configured, `record-demo.ps1` asks it for its screen and releases it on every way out; with none it
+takes nothing. An outer hold of the same screen blocks the recorder's own claim and the run hangs at
+`taking screen-right ...` with `node scripts/harness-hook.mjs status` showing only your own hold.
+Measured cutting 2.7.0: the first take sat there for seven minutes until the outer hold was
+released, after which it recorded immediately. `CLAUDE.md` states the rule this line used to break — never wrap one of the
 three window-placing harnesses.
 
 ```powershell
@@ -226,9 +228,9 @@ how the Got it button's placement (github#126) was first noticed *after* the rel
 
 ```bash
 node scripts/build-plugin.mjs                       # the check copies the ROOT main.js; it does not build
-node scripts/lock.mjs acquire screen-left --owner "release <version>"
+node scripts/harness-hook.mjs acquire screen-left --owner "release <version>"   # no-op without a hook
 node scripts/update-note-check.mjs --out <scratchpad>/strip
-node scripts/lock.mjs release screen-left --owner "release <version>"
+node scripts/harness-hook.mjs release screen-left --owner "release <version>"
 ```
 
 **Build first, every time.** `update-note-check.mjs` installs whatever `main.js` sits at the repo
@@ -285,9 +287,9 @@ Then **exactly one** plain push:
 git push origin develop
 ```
 
-**Never wrap this in `scripts/lock.mjs acquire/release suite`** — `.githooks/pre-push` takes that
-lock itself around its own run and releases it on every exit (github#92); an outer lock deadlocks
-against it. If `develop` hadn't moved since the branch was cut, the merge commit's tree equals
+**Never wrap this in a hold on `suite`** (`harness-hook.mjs acquire/release suite`) —
+`.githooks/pre-push` takes that hold itself around its own run and releases it on every exit
+(github#92, github#192); an outer hold deadlocks against it. If `develop` hadn't moved since the branch was cut, the merge commit's tree equals
 the stamped one and the hook skips the suite, printing the stamp it trusts — this is correct
 behavior, not a shortcut; don't reach for `SKIP_SMOKE` to force the same outcome by hand, because
 the stamp is what makes the skip honest and a manual skip leaves no record of what was trusted.
