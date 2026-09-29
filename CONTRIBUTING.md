@@ -83,8 +83,8 @@ While iterating, `node scripts/smoke.mjs --only <substring>` is the loop. The fu
 belongs to the push that merges.
 
 **The suite can also run where there is no screen (github#155).** `--headless` opens
-`--headless=new`, places no window, and takes **no screen lock** — the lock is named after a
-display (`.ai-context/locking.md`) and a headless run puts nothing on one. `CI` being set turns
+`--headless=new`, places no window, and asks a configured harness hook for **no screen**
+(`.ai-context/harness-hook.md`) — a headless run puts nothing on one. `CI` being set turns
 it on by itself, so a runner that forgets the flag does not hang; `--headed` beats both.
 `--lane fast` runs the 131 checks that assert counts, geometry and plan parity, and `--lane walk`
 the 27 that assert frame cadence — github#113's `clock` classification, reused rather than
@@ -122,7 +122,7 @@ min/median/max wall, and every check that failed in any run with how many. It is
 mis-declared `clock` above.
 
 **`--headless` is opt-in and stays that way.** A plain `node scripts/smoke.mjs` still places its
-windows on the harness screen and takes the `screen-left` lock. `CI` deliberately does **not**
+windows on the harness screen. `CI` deliberately does **not**
 imply it: there is no CI running this suite, so the only thing that implication could still do is
 silently take the window away from someone whose shell happens to set `CI`.
 
@@ -253,8 +253,8 @@ profile and port, turns on touch emulation, overrides the device metrics, calls
 `app.emulateMobile(true)` and only then opens the view — the ordering matters and each step
 carries its pointer in the file. It reports the band's six readings from github#178 with the
 number behind each. Like `obsidian-smoke.mjs` it needs Obsidian installed, takes a minute or
-two, and is not in the hook; it takes the `screen-left` lock, because it puts a window on that
-display.
+two, and is not in the hook; it asks a configured harness hook for a screen, because it puts a
+window on one.
 
 `git config core.hooksPath .githooks` once per clone runs those on every push to `develop` or
 `main`, along with a check that refuses to publish other people's names, two that keep the

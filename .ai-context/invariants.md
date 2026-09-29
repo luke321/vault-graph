@@ -6239,7 +6239,7 @@ again. Its twin, "a narrow window with a pointer keeps the desktop's answer", ho
 half of the predicate at 390x844 with a fine pointer **and asserts the calendar is still open
 there, from the store** -- the fold keys off `phone()`, never off `narrow()`. Both put touch emulation and the
 metrics override back on every exit. `scripts/mobile-check.mjs` reports the same readings at any
-device and takes the `screen-left` lock.
+device and claims its screen through the harness hook when one is configured.
 
 **The scrollbar costs the disc 15px in a desktop-Chrome harness and nothing on a phone** --
 `overflow-y: auto` reserves a classic scrollbar there, so the square measures 375 and the radius
@@ -6318,7 +6318,7 @@ and without the push, and requires the two rides to agree on the flip count and 
 goes off within two sample periods; it also asserts the disc flies home exactly once, which is the
 half that fails on `develop`. Its wait is bounded at both ends (github#179) — a sampler tick that
 throws stops the ride and reports its message, and `rideCap()` fails it at **5 s** if the page
-stops ticking at all — so a future hang here fails with a reason instead of holding `screen-left`
+stops ticking at all — so a future hang here fails with a reason instead of holding its screen
 until the transport gives up with only the expression to show for it. "A rotation to landscape writes the host nothing" counts `onBandOpen`
 by wrapping the shell's `saveSettings` across the flip, and keeps github#173's own assertions on
 that rotation, so the zero cannot be bought by dropping the restore. "`narrow()` costs no
