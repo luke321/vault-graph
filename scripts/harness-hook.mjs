@@ -63,22 +63,24 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   const flag = (/** @type {string} */ n) => { const i = argv.indexOf("--" + n); return i >= 0 ? argv[i + 1] || "" : ""; };
   const [verb, name] = argv;
   const owner = flag("owner");
+  const pid = Number(flag("pid")) || process.ppid;
   let code = 0;
   if (verb === "status") {
     if (!hookPath()) console.log("no harness hook configured -- nothing is locked");
     else code = run(["status"], "inherit").status ?? 1;
   } else if (verb === "acquire" && name && owner) {
-    code = acquire(name, owner, process.ppid) ? 0 : 1;
+    code = acquire(name, owner, pid) ? 0 : 1;
   } else if (verb === "release" && name && owner) {
     release(name, owner);
   } else if (verb === "screen" && owner) {
-    const s = claimScreen(owner, process.ppid);
+    const s = claimScreen(owner, pid);
     if (s.which) console.log(s.which);
     code = s.ok ? 0 : 1;
   } else {
-    console.error("usage: node scripts/harness-hook.mjs <acquire|release> <name> --owner <id>");
-    console.error("       node scripts/harness-hook.mjs screen --owner <id>   (prints left|right|primary)");
+    console.error("usage: node scripts/harness-hook.mjs <acquire|release> <name> --owner <id> [--pid N]");
+    console.error("       node scripts/harness-hook.mjs screen --owner <id> [--pid N]   (prints left|right|primary)");
     console.error("       node scripts/harness-hook.mjs status");
+    console.error("  --pid: the process that holds it until release; default this command's parent");
     code = 2;
   }
   process.exit(code);
