@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // github#197
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, readdirSync, rmSync, statSync } from "node:fs";
+import { existsSync, mkdtempSync, readdirSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -23,12 +23,16 @@ export function onInterrupt(fn, { code = 130, budgetMs = 4000 } = {}) {
   cleanups.push(fn);
   if (installed) return;
   installed = true;
-  for (const sig of SIGNALS) {
-    process.on(sig, () => {
-      if (stopping) process.exit(code);
-      stopping = true;
-      void drain(budgetMs).finally(() => process.exit(code));
-    });
+  const stop = () => {
+    if (stopping) process.exit(code);
+    stopping = true;
+    void drain(budgetMs).finally(() => process.exit(code));
+  };
+  for (const sig of SIGNALS) process.on(sig, stop);
+  const file = process.env.VG_STOP_FILE;
+  if (file) {
+    const poll = setInterval(() => { if (existsSync(file)) { clearInterval(poll); stop(); } }, 250);
+    poll.unref();
   }
 }
 
