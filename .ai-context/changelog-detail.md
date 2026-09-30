@@ -1,3 +1,31 @@
+## 2026-09-30 — the harness hook can admit, narrow or pause heavy work (`github#198`)
+
+Every heavy harness ran at a fixed width whatever the machine was doing. The github#192 hook
+gains `admit` and `threads` (`.ai-context/harness-hook.md`); the repo still measures no load.
+Measured on `--only "page loads with no console errors"` (5 jobs, one per fixture, 2 lanes,
+headed) against a stub hook in a scratch directory that forwarded its lock and screen verbs to
+the machine's real hook:
+
+| stub answers | green | wall (jobs) | most at once | stamps? |
+|---|---|---|---|---|
+| `go` | 5/5 | 8 s | 2 | would (only `--only` stops it) |
+| `width 1` | 5/5 | 15 s | **1** | **no**: `the harness hook's width 1 (planned 2)` |
+| `wait 3000` once, then `go` | 5/5 | 10 s | 2 | would |
+| the machine's own pre-github#198 hook (exits 2) | 5/5 | 9 s | 2 | would; the summary claims no governor |
+
+- Under `width 1` both lanes asked at once with 0 running; one started and one parked, and each
+  later ask came between jobs. Under `wait` one lane paused 3.0 s while the other ran.
+- The CLI forms: `go`, `width 1`, `width 0` (clamped to 1), `wait 0` (read as `go`), unparseable,
+  exit 3, and a hook that never answers (given up at **10 s**, its process reaped) all end in `go`
+  or `width n`, exit 0. `wait 5` is served as **1.0 s**, the floor.
+- The hook on this machine today predates the verbs: it exits 2, is asked once per run, and
+  its usage text is not printed.
+- `make-hero.ps1` through a logging ffmpeg wrapper: no `-threads` on any of its three encodes with
+  no count, `-threads 2` on all three when the stub answered 2. `record-demo.ps1`'s argument list
+  was checked the same way (29 arguments, 31 with `-threads 3`); no take was recorded.
+
+Nothing in `src/` moved, and the full suite was not run, so the tree earns no stamp from this.
+
 ## 2026-09-29 — check-pii's private rules move out of the tracked file (`github#196`)
 
 Two rules in `scripts/check-pii.mjs` spelled out internal Jira project keys and the name of a real

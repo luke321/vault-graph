@@ -91,6 +91,9 @@ $chrome = (Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\App
 # none, nothing is held and the placement is the default below
 $hook = Join-Path $here 'harness-hook.mjs'
 $lockOwner = if ($env:VG_LOCK_OWNER) { $env:VG_LOCK_OWNER } else { "record-demo pid $PID" }
+# github#198
+$null = & node $hook admit record --owner $lockOwner --pid $PID
+$threads = "$(@(& node $hook threads encode --owner $lockOwner) | Select-Object -Last 1)".Trim()
 $screenLock = $null
 if ($Monitor) {
   & node $hook acquire "screen-$Monitor" --owner $lockOwner
@@ -265,7 +268,8 @@ $ffArgs = @(
   '-offset_x', "$rx", '-offset_y', "$ry", '-video_size', "${rw}x${rh}",
   '-i', 'desktop',
   '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '20',
-  '-pix_fmt', 'yuv420p', '-movflags', '+faststart',
+  '-pix_fmt', 'yuv420p', '-movflags', '+faststart'
+) + @(if ($threads) { '-threads'; $threads }) + @(
   '-y', $Out
 )
 $psi = New-Object System.Diagnostics.ProcessStartInfo

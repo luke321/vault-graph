@@ -8,7 +8,7 @@ import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { leftWindowArgs } from "./screen.mjs";
-import { claimScreen, noFreeScreen, release } from "./harness-hook.mjs";
+import { admit, claimScreen, noFreeScreen, release, threads } from "./harness-hook.mjs";
 import { keepFocus } from "./focus.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -95,7 +95,7 @@ function findFfmpeg() {
 }
 
 /* github#80, design/0019 */
-function encodeFilm() {
+async function encodeFilm() {
   if (!frames.length) throw new Error("no screencast frames arrived; nothing to encode");
   const lines = [];
   for (let i = 0; i < frames.length; i++) {
@@ -108,12 +108,15 @@ function encodeFilm() {
   writeFileSync(list, lines.join("\n") + "\n");
 
   const span = frames[frames.length - 1].t - frames[0].t;
+  // github#198
+  await admit("encode", SCREEN_OWNER);
+  const n = await threads("encode", SCREEN_OWNER);
   const r = spawnSync(findFfmpeg(), [
     "-hide_banner", "-loglevel", "warning",
     "-f", "concat", "-safe", "0", "-i", list,
     "-vf", `fps=${FPS},scale=trunc(iw/2)*2:trunc(ih/2)*2,format=yuv420p`,
     "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
-    "-movflags", "+faststart", "-y", resolve(FILM),
+    "-movflags", "+faststart", ...(n ? ["-threads", String(n)] : []), "-y", resolve(FILM),
   ], { stdio: "inherit" });
   if (r.status !== 0) throw new Error("ffmpeg exited " + r.status);
   console.log(`\nfilmed ${frames.length} frames over ${span.toFixed(1)}s -> ${resolve(FILM)}`);
@@ -269,6 +272,8 @@ const SELECT = `(function () {
 /* ------------------------------------------------------------------------------- the run */
 
 const profile = mkdtempSync(join(tmpdir(), "vg-room-profile-"));
+// github#198
+if (FILM) await admit("record", SCREEN_OWNER);
 const held = takeScreen();
 
 const rows = [];
@@ -416,7 +421,7 @@ try {
   if (FILM) {
     await page.send("Page.stopScreencast").catch(() => { /* github#80 */ });
     await sleep(400);
-    encodeFilm();
+    await encodeFilm();
   }
 
   if (OUT_JSON) {

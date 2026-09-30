@@ -25,20 +25,27 @@ if (-not (Test-Path $ffmpeg)) { throw "ffmpeg not found. winget install Gyan.FFm
 
 $filters = "fps=$Fps,scale=$($Width):-1:flags=lanczos"
 
+# github#198
+$hook = Join-Path $here 'harness-hook.mjs'
+$owner = "make-hero pid $PID"
+$null = & node $hook admit encode --owner $owner --pid $PID
+$n = "$(@(& node $hook threads encode --owner $owner) | Select-Object -Last 1)".Trim()
+$threads = @(if ($n) { '-threads'; $n })
+
 $prev = $ErrorActionPreference
 $ErrorActionPreference = 'Continue'
 try {
   if ($Format -eq 'webp') {
     & $ffmpeg -y -loglevel error -i $In -vf $filters `
-      -c:v libwebp_anim -lossless 0 -quality $Quality -compression_level 4 -loop 0 -an $Out
+      -c:v libwebp_anim -lossless 0 -quality $Quality -compression_level 4 -loop 0 -an @threads $Out
     if ($LASTEXITCODE -ne 0) { throw "webp encode failed ($LASTEXITCODE)" }
   }
   else {
     $palette = Join-Path $env:TEMP 'vg-palette.png'
-    & $ffmpeg -y -loglevel error -i $In -vf "$filters,palettegen=stats_mode=diff" $palette
+    & $ffmpeg -y -loglevel error -i $In -vf "$filters,palettegen=stats_mode=diff" @threads $palette
     if ($LASTEXITCODE -ne 0) { throw "palettegen failed ($LASTEXITCODE)" }
     & $ffmpeg -y -loglevel error -i $In -i $palette -lavfi `
-      "$filters[x];[x][1:v]paletteuse=dither=bayer:bayer_scale=3:diff_mode=rectangle" $Out
+      "$filters[x];[x][1:v]paletteuse=dither=bayer:bayer_scale=3:diff_mode=rectangle" @threads $Out
     if ($LASTEXITCODE -ne 0) { throw "paletteuse failed ($LASTEXITCODE)" }
     Remove-Item $palette -ErrorAction SilentlyContinue
   }

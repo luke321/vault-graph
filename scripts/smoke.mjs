@@ -9,7 +9,7 @@ import { pngCaptureJs, pngCarriesGraph, pngCaptureDetail } from "./png-capture.m
 import { buildPayloadVault, PAYLOAD, NOTE_COUNT } from "./check-data-escape.mjs";
 import { findChrome } from "./chrome.mjs";
 import { harnessScreen, leftWindowPos } from "./screen.mjs";
-import { claimScreen, noFreeScreen, release } from "./harness-hook.mjs";
+import { admission, claimScreen, noFreeScreen, release } from "./harness-hook.mjs";
 import { keepFocus } from "./focus.mjs";
 // github#155
 import { chromeArgs, nextBounds, parseLane, pickLane, TUNED_VIEWPORT,
@@ -8917,6 +8917,9 @@ async function main() {
     console.log("");
   };
 
+  // github#198
+  const gate = admission("smoke", SCREEN_OWNER, Math.min(WIDTH, jobs.length));
+
   // github#113, github#101
   const pool = async (list, width) => {
     const walks = list.filter((j) => j.walk), fasts = list.filter((j) => !j.walk);
@@ -8924,11 +8927,17 @@ async function main() {
     let walkRunning = 0;
     const worker = async (lane) => {
       for (;;) {
+        const walkNext = walkRunning < walkWidth && walks.length > 0;
+        if (!walkNext && !fasts.length) {
+          if (!walks.length) return;
+          await sleep(500); continue;
+        }
+        // github#198 -- asked between jobs only, never inside one
+        if (!(await gate.enter(walkNext ? "walk" : "fast"))) continue;
         let w = null;
         if (walkRunning < walkWidth && walks.length) { w = walks.shift(); walkRunning++; }
         else if (fasts.length) w = fasts.shift();
-        else if (walks.length) { await sleep(500); continue; }
-        else return;
+        else { gate.leave(); continue; }
         w = { ...w, slot: lane, slots: Math.min(width, list.length), port: lanePorts[lane] || 0 };
         let r;
         try { r = await runOne(w.vault.path, w); }
@@ -8937,6 +8946,7 @@ async function main() {
                 lines: ["  !! this job did not run: " + e.message], timings: [] };
         }
         if (w.walk) walkRunning--;
+        gate.leave();
         report(w, r);
         bump(w, r);
       }
@@ -9014,7 +9024,8 @@ async function main() {
       const f = failures.get(v.label) || 0, t = ran.get(v.label) || 0;
       console.log(`  ${f ? "FAIL" : " ok "}  ${t - f}/${t}  ${v.label}`);
     }
-    console.log(`  ${wall}s wall over ${jobs.length} Chrome(s)`);
+    console.log(`  ${wall}s wall over ${jobs.length} Chrome(s)` +
+                (gate.heard() ? `, at most ${gate.peak} at once under the harness hook` : ""));
   }
 
   // github#93, decisions/0013
@@ -9024,6 +9035,10 @@ async function main() {
                                headless: HEADLESS, lane: LANE,
                                port: PINNED_PORT, chrome: arg("chrome", "") });
   const notFull = (what) => `${what} is not the full suite`;
+  // github#198
+  if (gate.narrowest < Math.min(WIDTH, jobs.length)) {
+    deltas.push(`the harness hook's width ${gate.narrowest} (planned ${Math.min(WIDTH, jobs.length)})`);
+  }
   const partial = deltas.length ? `${deltas.join(", ")} is not the run shape the gates push with`
                 : ONLY.length ? notFull("--only")
                 : argAll("vault").length ? notFull("--vault")
