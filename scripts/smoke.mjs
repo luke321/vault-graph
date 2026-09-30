@@ -8958,8 +8958,7 @@ async function main() {
     const walkWidth = Math.max(1, Math.min(SERIAL_JOBS, WIDTH));
     console.log(`${WIDTH} lane(s), serial pool width ${SERIAL_JOBS}: ` +
                 `${jobs.filter((j) => j.walk).length} walk job(s) up to ${walkWidth} at once, ` +
-                `${jobs.filter((j) => !j.walk).length} other job(s) beside them` +
-                (gate.hooked ? "; the harness hook admits each job start" : ""));
+                `${jobs.filter((j) => !j.walk).length} other job(s) beside them`);
   }
   const started = Date.now();
   await pool(jobs, WIDTH);
@@ -9026,7 +9025,7 @@ async function main() {
       console.log(`  ${f ? "FAIL" : " ok "}  ${t - f}/${t}  ${v.label}`);
     }
     console.log(`  ${wall}s wall over ${jobs.length} Chrome(s)` +
-                (gate.hooked ? `, at most ${gate.peak} at once under the harness hook` : ""));
+                (gate.heard() ? `, at most ${gate.peak} at once under the harness hook` : ""));
   }
 
   // github#93, decisions/0013

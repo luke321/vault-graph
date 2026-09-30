@@ -64,15 +64,16 @@ encode is the hook's to judge; the harnesses only ask, at these points:
 What each answer does:
 
 - **`go`** — start.
-- **`wait <ms>`** — sleep, then ask again. Each wait is clamped to 60 s, and one process waits at
-  most 10 min in all; past that it goes ahead without asking again and says so. A pause is
+- **`wait <ms>`** — sleep, then ask again. Each wait is clamped to between 1 s and 60 s (`wait 0`
+  is `go`, so a hook cannot spin the harness), and one process waits at most 10 min in all; past that it goes ahead without asking again and says so. A pause is
   between jobs, so a frame-timed walk check is only ever delayed at its start, never slowed.
 - **`width <n>`** — in `smoke.mjs`, at most `n` jobs run at once (clamped to at least 1): a lane
   that would exceed it parks until a running job finishes, then asks again. Two lanes answered at
   the same moment still start one job, because the count is checked after the answer arrives.
   For a recording or an encode, which is one unit, `width` means `go`. **A run the hook narrowed
   below its planned lanes does not stamp the tree** (decisions/0013): like `--jobs 1`, it is not
-  the shape the gates push with, and the closing summary names the most lanes it used. A run the
+  the shape the gates push with. Whenever the hook gave `smoke.mjs` a usable answer, the closing
+  summary names the most jobs that ran at once. A run the
   hook only paused stamps as normal.
 - **Anything else** — a non-zero exit, no answer within 10 s, an unparseable line — reads as `go`
   (and no thread count), said once per run. **Exit 2** means the hook does not know the verb (a

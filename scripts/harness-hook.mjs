@@ -64,6 +64,7 @@ export function noFreeScreen() {
 
 // github#198
 export const CALL_MS = 10_000;
+export const WAIT_MIN_MS = 1_000;
 export const WAIT_STEP_MS = 60_000;
 export const WAIT_CAP_MS = 10 * 60_000;
 
@@ -71,6 +72,8 @@ let waitedMs = 0;
 let warned = false;
 /** @type {Set<string>} */
 const deaf = new Set();
+/** @type {Set<string>} */
+const heard = new Set();
 const say = (/** @type {string} */ line) => console.error("harness hook: " + line);
 const pause = (/** @type {number} */ ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -88,7 +91,10 @@ function ask(args) {
     child.stderr.on("data", (d) => { err += String(d); });
     child.on("error", () => finish(null));
     child.on("close", (code) => {
-      if (code === 2) { deaf.add(args[0]); say(`does not answer ${args[0]} -- not asking it again this run`); }
+      if (code === 2) {
+        if (!deaf.has(args[0])) say(`does not answer ${args[0]} -- not asking it again this run`);
+        deaf.add(args[0]);
+      }
       else if (err) process.stderr.write(err);
       finish(code === 0 ? out.trim().split(/\r?\n/).pop() || "" : null);
     });
@@ -99,7 +105,7 @@ function ask(args) {
 function parseAdmit(raw) {
   const m = /^(go|wait|width)(?:\s+(\d+))?$/.exec(raw.trim());
   if (!m) return null;
-  if (m[1] === "go") return { go: true };
+  if (m[1] === "go" || (m[1] === "wait" && m[2] === "0")) return { go: true };
   if (m[2] === undefined) return null;
   return m[1] === "wait" ? { wait: Number(m[2]) } : { width: Math.max(1, Number(m[2])) };
 }
@@ -122,8 +128,9 @@ export async function admit(job, owner, extra = {}, pid = process.pid) {
       warned = true;
       return { go: true };
     }
+    heard.add("admit");
     if (!("wait" in a)) return a;
-    const ms = Math.min(a.wait, WAIT_STEP_MS, WAIT_CAP_MS - waitedMs);
+    const ms = Math.min(Math.max(a.wait, WAIT_MIN_MS), WAIT_STEP_MS, WAIT_CAP_MS - waitedMs);
     say(`wait ${(ms / 1000).toFixed(1)}s before ${job}`);
     await pause(ms);
     waitedMs += ms;
@@ -135,7 +142,9 @@ export async function admit(job, owner, extra = {}, pid = process.pid) {
 export async function threads(job, owner) {
   if (!hookPath()) return null;
   const raw = await ask(["threads", job, "--owner", owner]);
-  return raw && /^\d+$/.test(raw.trim()) && Number(raw) > 0 ? Number(raw) : null;
+  if (raw === null || !/^\d+$/.test(raw.trim()) || !(Number(raw) > 0)) return null;
+  heard.add("threads");
+  return Number(raw);
 }
 
 /**
@@ -143,7 +152,8 @@ export async function threads(job, owner) {
  * @param {string} job @param {string} owner @param {number} lanes
  */
 export function admission(job, owner, lanes) {
-  const s = { running: 0, peak: 0, finished: 0, narrowest: lanes, hooked: !!hookPath() };
+  const s = { running: 0, peak: 0, finished: 0, narrowest: lanes, hooked: !!hookPath(),
+             heard: () => heard.has("admit") };
   const take = () => { s.running++; s.peak = Math.max(s.peak, s.running); return true; };
   return Object.assign(s, {
     /** @param {string} kind @returns {Promise<boolean>} */

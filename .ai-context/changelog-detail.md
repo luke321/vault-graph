@@ -11,11 +11,13 @@ the machine's real hook:
 | `go` | 5/5 | 8 s | 2 | would (only `--only` stops it) |
 | `width 1` | 5/5 | 15 s | **1** | **no**: `the harness hook's width 1 (planned 2)` |
 | `wait 3000` once, then `go` | 5/5 | 10 s | 2 | would |
+| the machine's own pre-github#198 hook (exits 2) | 5/5 | 9 s | 2 | would; the summary claims no governor |
 
 - Under `width 1` both lanes asked at once with 0 running; one started and one parked, and each
   later ask came between jobs. Under `wait` one lane paused 3.0 s while the other ran.
-- The CLI forms: `go`, `width 1`, `width 0` (clamped to 1), unparseable, exit 3, and a hook that
-  never answers (given up at **10 s**, its process reaped) all end in `go` or `width n`, exit 0.
+- The CLI forms: `go`, `width 1`, `width 0` (clamped to 1), `wait 0` (read as `go`), unparseable,
+  exit 3, and a hook that never answers (given up at **10 s**, its process reaped) all end in `go`
+  or `width n`, exit 0. `wait 5` is served as **1.0 s**, the floor.
 - The hook on this machine today predates the verbs: it exits 2, is asked once per run, and
   its usage text is not printed.
 - `make-hero.ps1` through a logging ffmpeg wrapper: no `-threads` on any of its three encodes with
