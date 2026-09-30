@@ -675,16 +675,17 @@ console.log("github#151 -- the reset boundary");
     dead: `vg-smoke-p${gone}-aaaaaa`, deadBuild: `vg-smoke-build-p${gone}-bbbbbb`,
     mine: `vg-smoke-p${process.pid}-cccccc`, parent: `vg-smoke-p${process.ppid}-dddddd`,
     old: "vg-smoke-eeeeee", young: "vg-smoke-build-ffffff", other: "not-ours-gggggg",
+    reused: `vg-smoke-p${process.ppid}-hhhhhh`,
   };
   for (const d of Object.values(dirs)) mkdirSync(join(root, d));
   const then = new Date(Date.now() - 2 * DAY);
-  utimesSync(join(root, dirs.old), then, then);
-  utimesSync(join(root, dirs.other), then, then);
+  for (const d of [dirs.old, dirs.other, dirs.reused]) utimesSync(join(root, d), then, then);
   const r = reapStale({ root, budgetMs: 5000 });
   const left = new Set(readdirSync(root));
   check("a reap removes the dirs of a run that is gone", !left.has(dirs.dead) && !left.has(dirs.deadBuild));
   check("and never a live run's, its own or another's", left.has(dirs.mine) && left.has(dirs.parent));
   check("an untagged dir goes only once it is a day old", !left.has(dirs.old) && left.has(dirs.young));
+  check("and so does a live pid's, which a day on is a reused one", !left.has(dirs.reused));
   check("and nothing without the prefix", left.has(dirs.other), `removed ${r.removed}`);
 
   const stop = join(root, "stop");

@@ -6441,8 +6441,9 @@ browser yet refuses to start one.
 
 **A run starts by reaping what a finished run left.** `reapStale` removes any `vg-smoke-*` dir whose
 owning pid is no longer running, and first kills any browser still using it as its profile. It
-removes an untagged dir only once it is a day old, and it never touches a dir whose owner is alive,
-in this worktree or another. It works within a time budget (1 s at the start of a run), dead-owner
+removes an untagged dir only once it is a day old. It never touches a dir whose owner is alive, in
+this worktree or another, until the dir is a day old too: no run lasts a day, so by then the pid has
+been reused. It works within a time budget (1 s at the start of a run), dead-owner
 dirs first, so an old backlog clears over several runs instead of stalling one.
 
 **The pre-push hook stops the suite through the stop file, never with a bare `kill`.** Under Git
@@ -6458,6 +6459,6 @@ and skips both `finally` and `exit` handlers.
 `smoke-runner-selftest.mjs` holds the rule with no Chrome:
 - a reap removes a gone run's profile and build;
 - it keeps a live run's, both its own and its parent's;
-- it removes an untagged dir only once it is a day old;
+- it removes an untagged dir, or a live pid's, only once it is a day old;
 - it leaves anything without the prefix;
 - a stop file runs a registered teardown and exits with its code.

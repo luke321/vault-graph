@@ -103,7 +103,7 @@ export function reapStale({ budgetMs = 3000, now = Date.now(), root = tmpdir() }
   const dead = [], old = [];
   for (const n of names) {
     const m = STALE.exec(n);
-    if (m) { if (Number(m[1]) !== process.pid && !alive(Number(m[1]))) dead.push(n); continue; }
+    if (m && !alive(Number(m[1]))) { dead.push(n); continue; }
     try { if (now - statSync(join(root, n)).mtimeMs > DAY_MS) old.push(n); } catch { void 0; }
   }
   const stale = dead.concat(old);

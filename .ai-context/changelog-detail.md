@@ -29,7 +29,7 @@ Two intermediate readings decided the design:
   never ran its release. So the hook now asks through a stop file first and tree-kills only
   after 5 s.
 
-`smoke-runner-selftest.mjs` gains 5 checks, all green, in 66 ms for the stop-file child. Lint 0/0.
+`smoke-runner-selftest.mjs` gains 6 checks, all green; the stop-file child exits in 68 ms. Lint 0/0.
 The comment ratchet is held at 350 of 350. No check in `smoke.mjs` changed and nothing in `src/`
 moved, so the suite was not run in full; `--only hub` runs are the only suite runs above.
 ## 2026-09-29 — check-pii's private rules move out of the tracked file (`github#196`)
