@@ -6,6 +6,7 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { acquire, release } from "./harness-hook.mjs";
+import { interrupted, onInterrupt } from "./interrupt.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = dirname(HERE);
@@ -135,7 +136,7 @@ function tally(dir) {
   }
 }
 
-function main() {
+async function main() {
   if (argv.includes("--help") || argv.includes("-h")) usage(0);
 
   const tallyDir = arg("tally", "");
@@ -152,12 +153,18 @@ function main() {
   console.log(`${runs} run(s) x ${modes.length} mode(s) = ${runs * modes.length} smoke.mjs run(s), ` +
               `interleaved, into ${outDir}`);
   // github#101 -- modes interleaved, not five-in-a-row
+  // github#197
+  onInterrupt(() => {});
   for (let run = 1; run <= runs; run++) {
-    for (const mode of modes) runOnce(mode, run, outDir);
+    for (const mode of modes) {
+      runOnce(mode, run, outDir);
+      await new Promise((r) => setImmediate(r));
+      if (interrupted()) return;
+    }
   }
 
   console.log("\ndone. tally:");
   tally(outDir);
 }
 
-main();
+await main();

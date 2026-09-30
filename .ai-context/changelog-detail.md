@@ -1,3 +1,37 @@
+## 2026-09-30 — an interrupted suite takes its lanes down, and no run leaks its temp dirs (`github#197`)
+
+The issue assumed an interrupt orphans the Chrome lanes. Measured, that is true of only one path.
+Node puts a non-detached child in a kill-on-close job object, so Chrome goes whenever `node` goes,
+even when `process.exit` skips `runOne`'s `finally`. The path that leaked was the pre-push trap: its
+`kill` never reaches the native `node` under Git Bash. The same measurement turned up a leak that
+fires on **every** run: each profile's `rmSync` lost the race with Chrome still holding its files,
+and `buildFor` never removed its builds at all.
+
+A headed two-lane `--only hub` run (6 jobs over 5 fixtures), interrupted once both lanes' Chrome was
+up. Counted from the process list at +1..+5 s: `chrome.exe` whose `--user-data-dir` is this run's
+profile, and the lane ports still listening. The hook case runs `stop_suite` and the trap lifted
+verbatim from `.githooks/pre-push`, with `--only` so it is not a full run.
+
+| | before | after |
+|---|---|---|
+| console Ctrl+C: chrome.exe at +1 s / ports | 20 → **0** / 0 of 2 (already clean) | 20 → **0** / 0 of 2 |
+| console Ctrl+C: this run's temp dirs left | not counted | **0** |
+| hard kill of `node`, console left open | 18 → **0** by +1 s (the job object) | not re-measured, same mechanism |
+| `kill -INT` of the pre-push suite block | **14 at +5 s, 2 of 2 ports listening, `node` still running**; the suite finished on its own after the hook released its lock | 19 → **0** by +1 s, `node` exits by +2 s through the stop file; **0** dirs; lock and screen released |
+| a clean, uninterrupted run adds to the temp dir | **+11** (6 profiles, 5 builds) | **0** |
+| `vg-smoke-*` dirs in the temp dir on this machine | **6,763** (2,769 profiles, 3,971 builds, 23 others) | reaped from the oldest runs, dead owners first, within 1 s per run |
+
+Two intermediate readings decided the design:
+- Removing a profile straight after `killBrowser` still left **5 of 6**, because the CDP port
+  closes before Chrome lets go of the directory. Waiting for the browser process to exit took it
+  to 0.
+- A tree kill from the hook took Chrome down but left the run's **screen lock held**, since `node`
+  never ran its release. So the hook now asks through a stop file first and tree-kills only
+  after 5 s.
+
+`smoke-runner-selftest.mjs` gains 6 checks, all green; the stop-file child exits in 68 ms. Lint 0/0.
+The comment ratchet is held at 350 of 350. No check in `smoke.mjs` changed and nothing in `src/`
+moved, so the suite was not run in full; `--only hub` runs are the only suite runs above.
 ## 2026-09-30 — the harness hook can admit, narrow or pause heavy work (`github#198`)
 
 Every heavy harness ran at a fixed width whatever the machine was doing. The github#192 hook

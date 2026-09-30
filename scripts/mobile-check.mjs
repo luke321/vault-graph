@@ -11,6 +11,7 @@ import { attach } from "./cdp.mjs";
 import { harnessScreen } from "./screen.mjs";
 import { claimScreen, noFreeScreen, release } from "./harness-hook.mjs";
 import { keepFocus } from "./focus.mjs";
+import { onInterrupt } from "./interrupt.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(HERE, "..");
@@ -71,6 +72,8 @@ function dropLock() {
 }
 // github#170 -- a throw before Chrome spawns must still free the lock
 process.on("exit", dropLock);
+// github#197
+onInterrupt(() => {});
 
 function fixtureStore() {
   const g = spawnSync("git", ["-C", ROOT, "rev-parse", "--git-common-dir"], { encoding: "utf8" });

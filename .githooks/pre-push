@@ -523,9 +523,28 @@ fi
 echo "pre-push: running the invariant suite (SKIP_SMOKE=1 to skip)..."
 # The suite is a child so a signal to this hook can take it down too: releasing the lock
 # while the run it guarded keeps driving Chrome would hand the next run a contended screen.
-node "$root/scripts/smoke.mjs" </dev/null &
+# github#197
+stop_file="$(git rev-parse --absolute-git-dir)/vg-suite-stop-$$"
+rm -f "$stop_file"
+VG_STOP_FILE="$(cygpath -m "$stop_file" 2>/dev/null || echo "$stop_file")" \
+  node "$root/scripts/smoke.mjs" </dev/null &
 suite_pid=$!
-trap 'kill "$suite_pid" 2>/dev/null; release_lock; exit 1' INT TERM HUP
+stop_suite() {
+  suite_winpid=$(cat "/proc/$suite_pid/winpid" 2>/dev/null)
+  : > "$stop_file"
+  [ -n "$suite_winpid" ] || kill "$suite_pid" 2>/dev/null
+  for _ in 1 2 3 4 5 6 7 8 9 10; do
+    kill -0 "$suite_pid" 2>/dev/null || break
+    sleep 0.5
+  done
+  if kill -0 "$suite_pid" 2>/dev/null; then
+    if [ -n "$suite_winpid" ]; then taskkill //PID "$suite_winpid" //T //F >/dev/null 2>&1
+    else kill -9 "$suite_pid" 2>/dev/null; fi
+  fi
+  rm -f "$stop_file"
+  node "$root/scripts/interrupt.mjs" reap </dev/null
+}
+trap 'stop_suite; release_lock; exit 1' INT TERM HUP
 wait "$suite_pid"
 suite_rc=$?
 release_lock

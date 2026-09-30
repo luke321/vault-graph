@@ -6428,3 +6428,37 @@ built for**. The clean line prints the count (`12 names, rules 1 email, 2 jira, 
 20 negative controls caught` on the maintainer's list). A control that does not bite exits 1. The
 message names only its kind and index (`jira #1`) and never the value, because the CI log of a
 public repository is public too.
+
+## A stopped run takes its browsers and temp dirs with it (`github#197`)
+
+`smoke.mjs` names every temp dir it makes after its own pid (`vg-smoke-p<pid>-`,
+`vg-smoke-build-p<pid>-`, via `runDir` in `scripts/interrupt.mjs`). It removes a lane's profile only
+after that lane's browser process has exited, because the CDP port closes first and Chrome is still
+holding the files. It removes its builds when the run ends. A signal (INT, TERM, HUP, BREAK), or the
+stop file named by `VG_STOP_FILE`, runs the same teardown within a 4 s budget and exits: each lane's
+`killBrowser`, then its profile, then the builds and the screen. A job that has not started its
+browser yet refuses to start one.
+
+**A run starts by reaping what a finished run left.** `reapStale` removes any `vg-smoke-*` dir whose
+owning pid is no longer running, and first kills any browser still using it as its profile. It
+removes an untagged dir only once it is a day old. It never touches a dir whose owner is alive, in
+this worktree or another, until the dir is a day old too: no run lasts a day, so by then the pid has
+been reused. It works within a time budget (1 s at the start of a run), dead-owner
+dirs first, so an old backlog clears over several runs instead of stalling one.
+
+**The pre-push hook stops the suite through the stop file, never with a bare `kill`.** Under Git
+Bash a `kill` never reaches the native `node`: the suite ran on after the hook had released its
+lock. The trap writes the stop file and waits up to 5 s. Only if the suite is still there does it
+take the tree down by its Windows pid (or `kill -9` elsewhere). It then reaps and releases the lock.
+
+**The other harnesses that hold a lock or write into a vault register their cleanup with
+`onInterrupt`:** `spike-check`, `host-phone-check`, `mobile-check`, `probe-room`, `suite-repeat`,
+`refresh-check` (its probe note) and `deferred-check`. Without a listener, node exits on the spot
+and skips both `finally` and `exit` handlers.
+
+`smoke-runner-selftest.mjs` holds the rule with no Chrome:
+- a reap removes a gone run's profile and build;
+- it keeps a live run's, both its own and its parent's;
+- it removes an untagged dir, or a live pid's, only once it is a day old;
+- it leaves anything without the prefix;
+- a stop file runs a registered teardown and exits with its code.
