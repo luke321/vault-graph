@@ -11,6 +11,7 @@ import { findChrome } from "./chrome.mjs";
 import { harnessScreen, leftWindowPos } from "./screen.mjs";
 import { claimScreen, noFreeScreen, release } from "./harness-hook.mjs";
 import { keepFocus } from "./focus.mjs";
+import { exited, interrupted, onInterrupt, reapStale, removeDir, runDir } from "./interrupt.mjs";
 // github#155
 import { chromeArgs, nextBounds, parseLane, pickLane, TUNED_VIEWPORT,
          wantsHeadless } from "./smoke-shape.mjs";
@@ -8451,7 +8452,7 @@ async function runOne(vault, work) {
   let url = (work && work.url) || arg("url", "");
   let scratch = null;
   if (!url) {
-    scratch = join(mkdtempSync(join(tmpdir(), "vg-smoke-build-")), "vault-graph.html");
+    scratch = join(runDir("vg-smoke-build-"), "vault-graph.html");
     const b = spawnSync(process.execPath,
                         [join(HERE, "..", "src", "build-graph.mjs"), "--out", scratch]
                           .concat(vault ? ["--vault", vault] : []),
@@ -8480,7 +8481,9 @@ async function runOne(vault, work) {
     if (/already serving CDP/.test(e.message)) throw e;
   }
 
-  const profile = mkdtempSync(join(tmpdir(), "vg-smoke-"));
+  // github#197
+  if (interrupted()) throw new Error("interrupted before this job's browser started");
+  const profile = runDir("vg-smoke-");
   // github#129
   // github#155 -- no window ever takes the keyboard, so nothing to hand back
   const focus = HEADLESS ? null : await keepFocus();
@@ -8492,6 +8495,9 @@ async function runOne(vault, work) {
     windowSize: slot ? `${slot.w},${slot.h}` : "1600,1000",
   }), { stdio: ["ignore", "ignore", "pipe"], detached: false });
   if (focus) void focus.watch(chrome.pid);
+  // github#197
+  const lane = { chrome, port: PORT, profile };
+  LANES.add(lane);
 
   const chromeSaid = [];
   if (chrome.stderr) {
@@ -8603,10 +8609,19 @@ async function runOne(vault, work) {
     if (page) page.close();
 
     await killBrowser(chrome, PORT);
-    try { rmSync(profile, { recursive: true, force: true }); } catch {}
-    if (scratch) { try { rmSync(dirname(scratch), { recursive: true, force: true }); } catch {} }
+    // github#197
+    await exited(chrome, 5000);
+    removeDir(profile);
+    LANES.delete(lane);
+    if (scratch) removeDir(dirname(scratch));
   }
 }
+
+// github#197
+/** @type {Set<{ chrome: import("node:child_process").ChildProcess, port: number, profile: string }>} */
+const LANES = new Set();
+/** @type {string[]} */
+const BUILDS = [];
 
 // github#7
 async function killBrowser(child, PORT) {
@@ -8817,7 +8832,8 @@ function resolveVaults() {
 
 async function buildFor(v) {
   if (arg("url", "")) return "";
-  const scratch = join(mkdtempSync(join(tmpdir(), "vg-smoke-build-")), "vault-graph.html");
+  const scratch = join(runDir("vg-smoke-build-"), "vault-graph.html");
+  BUILDS.push(dirname(scratch));
   const b = spawnSync(process.execPath,
                       [join(HERE, "..", "src", "build-graph.mjs"), "--out", scratch]
                         .concat(v.path ? ["--vault", v.path] : [])
@@ -9078,11 +9094,27 @@ function takeScreen() {
 function dropScreen(held) { release(held, SCREEN_OWNER); }
 
 const heldScreen = takeScreen();
-for (const sig of ["SIGINT", "SIGTERM", "SIGHUP"]) {
-  process.on(sig, () => { dropScreen(heldScreen); process.exit(1); });
+// github#197
+const tidy = () => { for (const b of BUILDS.splice(0)) removeDir(b); };
+onInterrupt(() => { dropScreen(heldScreen); tidy(); }, { code: 1 });
+onInterrupt(async () => {
+  const lanes = [...LANES];
+  await Promise.all(lanes.map(async (l) => {
+    await killBrowser(l.chrome, l.port);
+    await exited(l.chrome, 1500);
+    removeDir(l.profile);
+  }));
+});
+{
+  const r = reapStale({ budgetMs: 1000 });
+  if (r.killed || r.removed) {
+    console.log(`reaped ${r.killed} browser(s) and ${r.removed} temp dir(s) left by runs that are gone` +
+                (r.left ? `, ${r.left} more next run` : ""));
+  }
 }
-main().then((code) => { dropScreen(heldScreen); process.exit(code); }).catch((e) => {
+main().then((code) => { dropScreen(heldScreen); tidy(); process.exit(code); }).catch((e) => {
   dropScreen(heldScreen);
+  tidy();
   console.error("smoke failed to run:", e.message);
   process.exit(1);
 });
