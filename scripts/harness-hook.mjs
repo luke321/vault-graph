@@ -69,21 +69,29 @@ export const WAIT_CAP_MS = 10 * 60_000;
 
 let waitedMs = 0;
 let warned = false;
+/** @type {Set<string>} */
+const deaf = new Set();
 const say = (/** @type {string} */ line) => console.error("harness hook: " + line);
 const pause = (/** @type {number} */ ms) => new Promise((r) => setTimeout(r, ms));
 
+// github#198 -- exit 2 means the hook lacks this verb
 /** @param {string[]} args @returns {Promise<string | null>} */
 function ask(args) {
   const hook = hookPath();
-  if (!hook || !existsSync(hook)) return Promise.resolve(null);
+  if (!hook || !existsSync(hook) || deaf.has(args[0])) return Promise.resolve(null);
   return new Promise((done) => {
-    let out = "", settled = false;
+    let out = "", err = "", settled = false;
     const finish = (/** @type {string | null} */ v) => { if (!settled) { settled = true; clearTimeout(timer); done(v); } };
-    const child = spawn(process.execPath, [hook, ...args], { stdio: ["ignore", "pipe", "inherit"] });
+    const child = spawn(process.execPath, [hook, ...args], { stdio: ["ignore", "pipe", "pipe"] });
     const timer = setTimeout(() => { try { child.kill(); } catch { void 0; } finish(null); }, CALL_MS);
     child.stdout.on("data", (d) => { out += String(d); });
+    child.stderr.on("data", (d) => { err += String(d); });
     child.on("error", () => finish(null));
-    child.on("close", (code) => finish(code === 0 ? out.trim().split(/\r?\n/).pop() || "" : null));
+    child.on("close", (code) => {
+      if (code === 2) { deaf.add(args[0]); say(`does not answer ${args[0]} -- not asking it again this run`); }
+      else if (err) process.stderr.write(err);
+      finish(code === 0 ? out.trim().split(/\r?\n/).pop() || "" : null);
+    });
   });
 }
 
@@ -110,7 +118,7 @@ export async function admit(job, owner, extra = {}, pid = process.pid) {
     const raw = await ask(args);
     const a = raw === null ? null : parseAdmit(raw);
     if (!a) {
-      if (!warned) say(`no usable answer to admit ${job} (${raw === null ? "failed or took over " + CALL_MS / 1000 + "s" : JSON.stringify(raw)}) -- going ahead`);
+      if (!warned && !deaf.has("admit")) say(`no usable answer to admit ${job} (${raw === null ? "failed or took over " + CALL_MS / 1000 + "s" : JSON.stringify(raw)}) -- going ahead`);
       warned = true;
       return { go: true };
     }
