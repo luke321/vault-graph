@@ -10,6 +10,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { leftWindowArgs } from "./screen.mjs";
 import { claimScreen, noFreeScreen, release } from "./harness-hook.mjs";
 import { keepFocus } from "./focus.mjs";
+import { onInterrupt } from "./interrupt.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = dirname(HERE);
@@ -277,6 +278,11 @@ const frames = [];
 let filmDir = "";
 let page = null;
 let chrome = null;
+// github#197
+onInterrupt(() => {
+  try { if (chrome) chrome.kill(); } catch { /* github#80 */ }
+  dropScreen(held);
+});
 try {
   // github#129, github#135
   const focus = await keepFocus();

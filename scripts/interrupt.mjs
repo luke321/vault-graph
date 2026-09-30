@@ -96,9 +96,8 @@ function browsersUsing(names) {
   return pids;
 }
 
-/** @param {{ budgetMs?: number, now?: number }} [opts] */
-export function reapStale({ budgetMs = 3000, now = Date.now() } = {}) {
-  const root = tmpdir();
+/** @param {{ budgetMs?: number, now?: number, root?: string }} [opts] */
+export function reapStale({ budgetMs = 3000, now = Date.now(), root = tmpdir() } = {}) {
   let names;
   try { names = readdirSync(root).filter((n) => n.startsWith("vg-smoke-")); } catch { return { killed: 0, removed: 0, left: 0 }; }
   const dead = [], old = [];

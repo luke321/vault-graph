@@ -9,6 +9,7 @@ import { fileURLToPath } from "node:url";
 import { attach } from "./cdp.mjs";
 import { placeElectronLeft } from "./screen.mjs";
 import { claimScreen, noFreeScreen, release } from "./harness-hook.mjs";
+import { onInterrupt } from "./interrupt.mjs";
 import { keepFocus } from "./focus.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -274,6 +275,8 @@ const shutdown = async (code) => {
   releaseLock();
   process.exit(code);
 };
+// github#197
+onInterrupt(() => shutdown(130));
 
 async function waitForApp(label) {
   for (let i = 0; i < 90; i++) {

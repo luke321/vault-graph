@@ -2,6 +2,7 @@
 import { attach, json } from "./cdp.mjs";
 import { placeElectronLeft } from "./screen.mjs";
 import { claimScreen, noFreeScreen, release } from "./harness-hook.mjs";
+import { onInterrupt } from "./interrupt.mjs";
 import { keepFocus } from "./focus.mjs";
 import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, writeFileSync, readFileSync } from "node:fs";
@@ -70,6 +71,8 @@ const shutdown = async (code) => {
   if (!KEEP) release(screen.lock, lockOwner);
   process.exit(code);
 };
+// github#197
+onInterrupt(() => shutdown(130));
 
 try {
   let attached = null;
