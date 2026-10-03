@@ -21,6 +21,24 @@ radii, on every sampled frame. Demo, shape, tag and sortspec pass both direction
 zero shared-space violations, zero opacity reversals, zero final-layout drift and no
 remaining stand-ins. Both worlds remain visible together for 259-320 sampled frames
 per direction; departure remains reverse chronological and arrival chronological.
+The previous build, 8f93d33, fails the same rendered-circle check on the demo: 307 sampled
+frames violate the shared space on the way to tags, and 324 on the way back to folders.
+Demo and tag also pass both directions with nearest-neighbour fitting disabled: the
+wedge boundary itself preserves separation, rather than relying on shrinking colliding dots.
+All four fixtures also retain zero incoming-rank mismatches and zero settled-size changes
+in both directions. The two focused lifecycle checks pass, including hiding the tab
+mid-transition and releasing every temporary stand-in. Lint is zero; comments remain 350/350.
+
+The two affected current clips were recorded again. Demo retains 284/284 distinct source
+states, source 7.234 s to MP4 7.233333 s; tag retains 336/336, 7.267 s to 7.266667 s.
+Both have source gaps at most 34 ms, no active three-frame hold and two completed MP4
+playbacks with zero drops or corruption. Demo's measured app rAF reaches 33.5 ms, tag's
+16.8 ms; a 60 FPS delivery label does not claim 60 unique app states per second.
+One demo rehearsal exited through settlement and its next take failed cadence; both
+remain in the evidence. The accepted demo retry held the shared heavy-work lock as
+well as the recorder's own record/screen locks. Only the two replacement media hashes
+invalidate manual review marks; the other 58 media hashes remain unchanged. Visual
+acceptance of the new motion remains pending user playback.
 
 Dimension-switch dot sizing (2026-10-03, github#186): arriving stand-ins shared adjacency
 lists that pointed to the departing originals. Those originals are hidden in the arriving
