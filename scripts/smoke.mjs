@@ -4118,13 +4118,11 @@ check("a page that lays out filtered still takes its dots' rest from the unfilte
 
 // github#186
 check("a rest taken at one stage size still bounds the dots at another", async (p) => {
-  const clear = `__vg.state.hidden[__vg.state.dim] = {}; __vg.state.hiddenSub = {};
-    __vg.state.from = null; __vg.state.to = null; __vg.state.until = null;
-    __vg.syncAlpha(); __vg.applyLayout(false); void 0`;
   const SIZES = `(function () { var R = __vg.renderer, o = {};
     __vg.graph.forEachNode(function (id) { if ((__vg.alpha[id] || 0) > 0.5) o[id] = R.scaleSize(R.getNodeDisplayData(id).size); });
     return o; })()`;
   const dpr = await p.j(`window.devicePixelRatio || 1`);
+  const was = await p.j(`JSON.stringify(__vg.state.hidden[__vg.state.dim] || {})`);
   const hid = await p.j(`(function () {
     var order = __vg.groupOrder(), g = order[order.length - 1], h = {}; h[g] = true;
     __vg.forgetRest();
@@ -4136,6 +4134,8 @@ check("a rest taken at one stage size still bounds the dots at another", async (
     await p.send("Emulation.setDeviceMetricsOverride", { width: 760, height: 640, deviceScaleFactor: dpr, mobile: false });
     await sleep(900);
     await settle(p);
+    await p.eval(`__vg.applyLayout(false); void 0`);
+    await sleep(200);
     carried = await p.j(SIZES);
     await p.eval(`__vg.forgetRest(); __vg.applyLayout(false); void 0`);
     await sleep(200);
@@ -4143,7 +4143,7 @@ check("a rest taken at one stage size still bounds the dots at another", async (
   } finally {
     await p.send("Emulation.clearDeviceMetricsOverride").catch(() => {});
     await sleep(600);
-    await p.eval(clear);
+    await p.eval(`__vg.state.hidden[__vg.state.dim] = ${was}; __vg.syncAlpha(); __vg.applyLayout(false); void 0`);
     await sleep(200);
     await camReset(p);
   }
