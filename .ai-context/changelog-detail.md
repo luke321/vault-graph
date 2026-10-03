@@ -27,6 +27,31 @@ samples with zero clipping**, including locked-centre checks. Existing focus-web
 fit, pan toggle and hop/backtracking checks passed. This was a scoped headed run, not a full
 suite or a suite stamp.
 
+## 2026-10-03 — audit the tag-tail reports against a pinned packing rework (`github#119`)
+
+Audit only, no product change. Local develop `e8995f1` versus #186 at `1a5cee1`, read
+from immutable Git blobs. The [audit and proposed plan](investigations/119/README.md)
+separate source-executed probes, archived browser evidence and deferred rendered checks.
+
+Both isolated rest planners give 116 inner groups / 244 notes / five rows and five
+outer groups / 710 notes / seven rows. Allocator inner gaps total 93.476 degrees;
+the separate radius-dependent seam function reaches its 162-degree cap at the sampled
+reference radius. Neither is a fresh measurement of painted empty area. The original
+115-boundary / 31% report is stale. The mixed-name fixture already exists (24/100 tail
+names cluster at three characters). `SMALL_GROUP` remains zero; setting it to four
+only in the probe pools 100 tags but changes the rings, so it is not a free fix.
+
+#118's grey-by-sort half is already fixed: both base-slot probes yield 11 colours and
+two grey assignments across 122 groups; ten hues still repeat. #132's rounded inputs
+give scaled inner rails 850.40–1731.04, leaving a 293.04-unit centre margin, not 1001.
+#171's formula-level viewport dependence persists on both pins: the controlled
+midpoint dot falls from 0.520192 to 0.446970 lattice-unit diameter as the pixel scale
+rises from 11.78 to 27.72. These are extracted-function inputs, not rendered fixtures.
+#186 removes the old band-room sizing mechanism and already contains #190's shader fix.
+
+No browser/full-suite run, no closure recommendation based on a merge title, and no
+product implementation approval. Bucket identity and filter stability remain decisions.
+
 ## 2026-09-30 — an interrupted suite takes its lanes down, and no run leaks its temp dirs (`github#197`)
 
 The issue assumed an interrupt orphans the Chrome lanes. Measured, that is true of only one path.
