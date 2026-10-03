@@ -235,6 +235,18 @@ counts, and the whole link graph rewritten between renamed notes, so it builds t
 numbers yours does. If the layout misbehaves on your vault, the shape *is* the report, and a
 generic fixture cannot reproduce a shape it does not have.
 
+The mirror includes folders hidden in the graph, including `_` folders, and carries the
+saved folder/tag visibility, colour slots, pinned notes and view preferences. Tags get
+neutral names while retaining their hierarchy. Markdown links, aliases, repeated links,
+note types, resolved creation dates, modification dates and body word counts survive the
+rewrite. `.vault-graph-mirror.json` seeds these settings in an exported HTML page too;
+settings previously saved in that browser take precedence. This preserves the source
+graph's behaviour without changing its animation or dot-sizing rules.
+
+Regenerate an existing mirror to pick up these settings. The output must be separate from
+the source vault: generation replaces the output directory. Verify the generator with
+`node scripts/make-mirror-vault-selftest.mjs`, which uses only invented notes.
+
 ## Which vault
 
 You can skip `--vault` entirely. Resolution order, first match wins:

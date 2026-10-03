@@ -1,12 +1,17 @@
 #!/usr/bin/env node
 
-import { readFileSync, writeFileSync, readdirSync, statSync, existsSync, mkdirSync, rmSync } from "node:fs";
+import { readFileSync, writeFileSync, readdirSync, statSync, existsSync, mkdirSync, rmSync, utimesSync, realpathSync } from "node:fs";
 import { join, relative, sep, basename, dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 // github#71
 import { readSortingSpec } from "../src/sortspec-file.mjs";
 // github#176
 import { translateSortSpec } from "./mirror-sortspec.mjs";
+import { parseFrontmatter, mineLinks } from "../src/note-source.mjs";
+import { resolveCreated } from "../src/dates.mjs";
+import { canonicalDest, isRelativeDest, resolveAgainst, ghostKey } from "../src/links.mjs";
+import { countWords, inferType, normalizeTags, under } from "../src/taxonomy.mjs";
+import { mirrorSettings } from "./mirror-settings.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(HERE, "..");
@@ -21,7 +26,12 @@ if (!VAULT || !existsSync(join(VAULT, ".obsidian"))) {
   console.error("no vault: pass --vault <path> or set OBSIDIAN_VAULT");
   process.exit(1);
 }
-if (OUT === VAULT) { console.error("refusing to write into the source vault"); process.exit(1); }
+// github#186
+const realTarget = (p) => existsSync(p) ? realpathSync(p) : join(realTarget(dirname(p)), basename(p));
+const sourceRoot = realTarget(VAULT).toLowerCase(), outputRoot = realTarget(OUT).toLowerCase();
+if (outputRoot === sourceRoot || sourceRoot.startsWith(outputRoot + sep) || outputRoot.startsWith(sourceRoot + sep) || dirname(OUT) === OUT) {
+  console.error("source and output must be separate, non-nested directories"); process.exit(1);
+}
 
 /* ------------------------------------------------------------------ random --
  * mulberry32. Seeded on purpose: an unseeded generator makes every regeneration a fresh
@@ -65,7 +75,7 @@ const SKIP_DIRS = new Set(["node_modules"]);
 const SKIP_FILES = new Set(["claude.md", "readme.md", "license.md"]);
 
 function walk(dir, acc = []) {
-  for (const entry of readdirSync(dir)) {
+  for (const entry of readdirSync(dir).sort()) {
     const p = join(dir, entry);
     let st; try { st = statSync(p); } catch { continue; }
     if (st.isDirectory()) {
@@ -80,7 +90,6 @@ function walk(dir, acc = []) {
 
 const ISO_DAY = /^\d{4}-\d{2}-\d{2}$/;
 const DATEISH = /^\d{4}(?:[-_ ]?(?:\d{2}|Q[1-4]|W\d{1,2}))?$/i;
-const WIKILINK = /!?\[\[([^[\]|#^]+)(?:[#^][^[\]|]*)?(?:\|[^[\]]*)?\]\]/g;
 
 const PEOPLE_PARENT = /1\s*on\s*1|one.on.one|(^|\/)people(\/|$)|(^|\/)partners(\/|$)/i;
 
@@ -91,58 +100,28 @@ const looksLikePerson = (name, parentPath) =>
   isPeopleContainer(parentPath) && !STRUCTURAL.has(String(name).toLowerCase());
 
 const files = walk(VAULT);
+const readConfig = (rel) => { try { return JSON.parse(readFileSync(join(VAULT, ".obsidian", rel), "utf8")); } catch { return {}; } };
+const daily = readConfig("daily-notes.json"), templates = readConfig("templates.json"), templater = readConfig("plugins/templater-obsidian/data.json");
+const templateDirs = [templates.folder, templater.templates_folder].filter((p) => typeof p === "string" && p);
 const notes = [];
 for (const abs of files) {
   const rel = relative(VAULT, abs).split(sep).join("/");
-  let raw = "";
-  try { raw = readFileSync(abs, "utf8"); } catch { continue; }
-  const text = raw.replace(/^\uFEFF/, "");
-  const fmMatch = /^---\r?\n([\s\S]*?)\r?\n---/.exec(text);
-  const fmRaw = fmMatch ? fmMatch[1] : "";
-  const body = fmMatch ? text.slice(fmMatch[0].length) : text;
-
-  const dateOf = (key) => {
-    const m = new RegExp("^" + key + ":\\s*(.+)$", "m").exec(fmRaw);
-    if (!m) return "";
-    const v = m[1].trim().replace(/^["']|["']$/g, "").slice(0, 10);
-    return ISO_DAY.test(v) ? v : "";
-  };
-
-  const links = [];
-  let m; WIKILINK.lastIndex = 0;
-  const stripCode = (t) => t
-    .replace(/^```[\s\S]*?^```/gm, "\n")
-    .replace(/^~~~[\s\S]*?^~~~/gm, "\n")
-    .replace(/`[^`\n]*`/g, " ");
-  const scanText = fmRaw + "\n" + stripCode(body);
-  while ((m = WIKILINK.exec(scanText))) links.push(m[1].trim());
-
-  const aliases = [];
-  const flow = /^alias(?:es)?:\s*\[(.*)\]\s*$/m.exec(fmRaw);
-  if (flow) {
-    for (const a of flow[1].split(",")) {
-      const t = a.trim().replace(/^["']|["']$/g, "");
-      if (t) aliases.push(t);
-    }
-  } else {
-    const block = /^alias(?:es)?:\s*$\n((?:\s*-\s*.+\n?)+)/m.exec(fmRaw);
-    if (block) {
-      for (const line of block[1].split("\n")) {
-        const t = (/^\s*-\s*(.+)$/.exec(line) || [])[1];
-        if (t) aliases.push(t.trim().replace(/^["']|["']$/g, ""));
-      }
-    }
-  }
+  const raw = readFileSync(abs, "utf8");
+  const { fm, body } = parseFrontmatter(raw), st = statSync(abs);
+  const tags = normalizeTags(fm);
+  const aliases = [].concat(fm.aliases || [], fm.alias || []).map(String);
 
   notes.push({
     rel,
     dir: dirname(rel) === "." ? "" : dirname(rel),
     base: basename(rel, ".md"),
-    created: dateOf("created") || dateOf("date"),
-    words: body.split(/\s+/).filter(Boolean).length,
-    tagCount: (fmRaw.match(/^tags?:/m) ? between(1, 3) : 0),
+    created: resolveCreated(fm, basename(rel, ".md"), st.ctimeMs, st.mtimeMs).day,
+    mtime: st.mtime,
+    words: countWords(body),
+    tags,
+    type: inferType(fm, rel, tags, daily.folder || "", (p) => templateDirs.some((d) => under(p, d))),
     aliases,
-    links,
+    links: mineLinks(body, fm),
     // github#71 -- a sortspec IS a note; captured here, translated later
     specRaw: readSortingSpec(raw),
   });
@@ -186,6 +165,25 @@ const newTitle = () => {
 const nameMap = new Map();
 const key = (s) => s.toLowerCase().trim().replace(/\.md$/, "");
 const register = (k, v) => { const kk = key(k); if (kk && !nameMap.has(kk)) nameMap.set(kk, v); };
+const byPath = new Map(), byName = new Map();
+for (const n of notes) {
+  byPath.set(key(n.rel), n);
+  for (const k of [n.base, ...n.aliases]) if (!byName.has(key(k))) byName.set(key(k), n);
+}
+const labelOrder = new Map([...new Set(notes.map((n) => n.base))]
+  .sort((a, b) => a.localeCompare(b)).map((name, i) => [name, i + 1]));
+// github#186
+const tagMap = new Map();
+const tagPaths = new Set();
+for (const n of notes) for (const tag of n.tags) {
+  const parts = tag.split("/");
+  for (let i = 1; i <= parts.length; i++) tagPaths.add(parts.slice(0, i).join("/"));
+}
+for (const tag of [...tagPaths].sort()) {
+  const at = tag.lastIndexOf("/"), parent = at < 0 ? "" : tag.slice(0, at);
+  const prefix = tag.slice(at + 1).startsWith("_") ? "_tag" : "tag";
+  tagMap.set(tag, (parent ? tagMap.get(parent) + "/" : "") + prefix + String(tagMap.size + 1).padStart(6, "0"));
+}
 
 for (const n of notes) {
   const demoDir = mapDir(n.dir);
@@ -195,10 +193,8 @@ for (const n of notes) {
     demoBase = n.base.toLowerCase() === "sortspec" ? n.base : (demoDir.split("/").pop() || n.base);
   } else if (ISO_DAY.test(n.base) || DATEISH.test(n.base)) {
     demoBase = n.base;
-  } else if (looksLikePerson(n.base, n.dir)) {
-    demoBase = newPerson();
   } else {
-    demoBase = newTitle();
+    demoBase = "Note-" + String(labelOrder.get(n.base)).padStart(8, "0");
   }
   n.demoDir = demoDir;
   n.demoBase = demoBase;
@@ -256,13 +252,13 @@ for (const n of notes) {
   mkdirSync(dirname(abs), { recursive: true });
 
   const demoLinks = n.links.map((t) => {
-    const full = nameMap.get(key(t));
-    if (full) { edges++; return full; }
-    const base = nameMap.get(key(basename(t.split("/").pop(), ".md")));
-    if (base) { edges++; return base; }
+    const hit = byPath.get(key(resolveAgainst(n.rel, t))) || (!isRelativeDest(t) &&
+      (byPath.get(key(canonicalDest(n.rel, t))) || byName.get(key(t))));
+    if (hit) { edges++; return hit.demoRel.slice(0, -3); }
     dangling++;
-    if (!ghostMap.has(key(t))) ghostMap.set(key(t), newTitle());
-    return ghostMap.get(key(t));
+    const k = ghostKey(canonicalDest(n.rel, t));
+    if (!ghostMap.has(k)) ghostMap.set(k, "Missing-" + String(ghostMap.size + 1).padStart(6, "0"));
+    return ghostMap.get(k);
   });
 
   const fm = ["---"];
@@ -272,27 +268,16 @@ for (const n of notes) {
     for (const line of n.specText.split("\n")) fm.push(line ? "  " + line : "");
   }
   if (n.created) fm.push("created: " + n.created);
-  if (n.demoAliases && n.demoAliases.length) fm.push("aliases: [" + n.demoAliases.join(", ") + "]");
-  if (n.tagCount) {
-    const tags = [];
-    for (let i = 0; i < n.tagCount; i++) tags.push(pick(TOPIC));
-    fm.push("tags: [" + [...new Set(tags)].join(", ") + "]");
+  if (inferType({ type: n.type }, n.rel, [], "", () => false) === n.type) {
+    fm.push("type: " + JSON.stringify(n.type));
+  }
+  for (const [key, values] of [["aliases", n.demoAliases], ["tags", n.tags.map((t) => tagMap.get(t))],
+    ["links", demoLinks.map((l) => "[[" + encodeURI(l).replace(/#/g, "%23") + "]]")]]) {
+    if (values.length) fm.push(key + ":", ...values.map((v) => "  - " + JSON.stringify(v)));
   }
   fm.push("---", "");
-
-  const body = [
-    "# " + n.demoBase,
-    "",
-    filler(Math.max(12, Math.min(n.words, 400))),
-    "",
-  ];
-  if (demoLinks.length) {
-    body.push("## Links", "");
-    for (const l of demoLinks) body.push("- [[" + l + "]]");
-    body.push("");
-  }
-
-  writeFileSync(abs, fm.join("\n") + body.join("\n"), "utf8");
+  writeFileSync(abs, fm.join("\n") + filler(n.words) + "\n", "utf8");
+  utimesSync(abs, n.mtime, n.mtime);
   written++;
 }
 
@@ -300,16 +285,24 @@ for (const n of notes) {
 
 const cfg = join(OUT, ".obsidian");
 mkdirSync(cfg, { recursive: true });
-const copyCfg = (name, fallback) => {
-  const src = join(VAULT, ".obsidian", name);
-  if (existsSync(src)) {
-    try { writeFileSync(join(cfg, name), readFileSync(src, "utf8"), "utf8"); return; } catch { }
-  }
-  if (fallback) writeFileSync(join(cfg, name), fallback, "utf8");
+const writeCfg = (name, data) => {
+  const dest = join(cfg, name);
+  mkdirSync(dirname(dest), { recursive: true });
+  writeFileSync(dest, JSON.stringify(data, null, 2) + "\n");
 };
-copyCfg("daily-notes.json", "{}");
-copyCfg("templates.json", "{}");
-copyCfg("app.json", "{}");
+for (const [file, data, key] of [["daily-notes.json", daily, "folder"], ["templates.json", templates, "folder"],
+  ["plugins/templater-obsidian/data.json", templater, "templates_folder"]]) {
+  writeCfg(file, typeof data[key] === "string" && data[key] ? { [key]: mapDir(data[key]) } : {});
+}
+writeCfg("app.json", {});
+// github#186
+const specialGroups = new Set(["(vault root)", "(unlinked)", "(unresolved)", "(untagged)"]);
+const settings = mirrorSettings(readConfig("plugins/vault-graph/data.json"),
+  (p) => specialGroups.has(p) ? p : dirMap.get(p),
+  (p) => specialGroups.has(p) ? p : tagMap.get(p),
+  (p) => typeof p === "string" ? byPath.get(key(p))?.demoRel : null);
+writeCfg("plugins/vault-graph/data.json", settings);
+writeFileSync(join(OUT, ".vault-graph-mirror.json"), JSON.stringify({ version: 1, settings }, null, 2) + "\n");
 // github#71, decisions/0015 -- rewritten to point at the MIRRORED note
 const cfgSpec = (() => {
   try {
@@ -326,7 +319,7 @@ if (cfgSpec) {
     JSON.stringify({ additionalSortspecFile: cfgSpec, suspended: false }, null, 2) + "\n", "utf8");
 }
 
-console.log(`demo vault: ${OUT}`);
+console.log(`mirror vault: ${OUT}`);
 console.log(`  ${written} notes, ${dirMap.size} folders mapped, ` +
             `${usedPeople.size} person names invented, seed ${SEED}`);
 console.log(`  ${edges} links rewritten, ${dangling} left dangling`);
