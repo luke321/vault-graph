@@ -8,6 +8,20 @@ how you tell whether a later change has quietly undone an earlier one.
 Read this when you are about to change something and want to know what it cost to get
 right. For *what shipped when*, see [`../CHANGELOG.md`](../CHANGELOG.md).
 
+Recording matrix follow-up (2026-10-03, github#186): the native recorder now accepts
+settled setup actions, checks that animated reports started after the trigger, and
+supports explicitly expected static membership actions. Static acceptance also requires
+the app to replace its pre-trigger report object; the identity comparison runs in the
+page before serialization, so a no-op cannot reuse a setup's instant report. Focused
+coverage rejects that stale static report and missing identity evidence, while accepting
+a new object with identical contents. Nine recorder tests pass, lint reports zero
+errors/warnings, and the comment gate remains 350/350. The earlier four-fixture matrix
+contains 60 fresh native clips: 58 technical passes and two explicitly unresolved cadence
+findings (current demo folder-to-tag and baseline sortspec solo-out). The matrix and its
+original/recheck playback evidence are unchanged by this freshness guard; no new capture
+or full suite was run for it. Posters are extracted after capture, and exact 50 ms gaps
+are rounded at microsecond precision before comparison to avoid floating-point failures.
+
 Recording follow-up (2026-10-03, github#186): the reusable
 [`record-native.mjs`](../scripts/native-recording.md) uses a queued native desktop clock
 and retains a timestamped FFV1 master before bounded H264 encoding. Separate headed

@@ -4,6 +4,10 @@ import { setPriority, constants } from "node:os";
 
 export const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
 
+export function isStaticAction(allowed, last, reportReplaced = false) {
+  return !!allowed && reportReplaced === true && last.frames === 0 && last.path === "instant: nothing to move";
+}
+
 export async function cleanupAll(tasks) {
   const errors = [];
   for (const task of tasks) {
@@ -72,7 +76,7 @@ export function measuredRegion(d, monitor, size) {
 }
 
 export function stats(values) {
-  const sorted = [...values].sort((a, b) => a - b);
+  const sorted = values.map(v => Math.round(v * 1e6) / 1e6).sort((a, b) => a - b);
   return { count: sorted.length, median: sorted[Math.floor(sorted.length / 2)] ?? null,
     p95: sorted[Math.floor(sorted.length * 0.95)] ?? null, max: sorted.at(-1) ?? null,
     over35: sorted.filter(x => x > 35).length, over50: sorted.filter(x => x > 50).length };

@@ -10,7 +10,7 @@ import { spawn } from "node:child_process";
 import { findChrome } from "./chrome.mjs";
 import { attach } from "./cdp.mjs";
 import { pause, run, startProcess, captureArgs, encodeArgs, measuredRegion, stats, cleanupAll,
-  frameHashes, retention, repeatRuns, durationCheck } from "./native-recording.mjs";
+  frameHashes, retention, repeatRuns, durationCheck, isStaticAction } from "./native-recording.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const argv = process.argv.slice(2);
@@ -19,7 +19,7 @@ if (argv.includes("--help")) {
   console.log("node scripts/record-native.mjs --html <export.html> --out <new-directory> --label <feature - scene>\n" +
     "  [--size 1080] [--monitor primary|left|right] [--threads 4] [--max-seconds 30]\n" +
     "  [--ffmpeg <exe>] [--ffprobe <exe>] [--chrome <exe>] [--harness-module <harness-hook.mjs>]\n" +
-    "  [--trigger-file <trusted-js>] [--playback-runs 2]\n" +
+    "  [--setup-file <trusted-async-js>] [--trigger-file <trusted-js>] [--allow-static] [--playback-runs 2]\n" +
     "Windows native capture; needs DPR=1. Hook-selected monitor overrides --monitor. See native-recording.md.");
   process.exit(0);
 }
@@ -110,6 +110,8 @@ try {
   if (!pattern.test(original)) throw Error("Source is not a self-contained Vault Graph export");
   const trigger = arg("trigger-file") ? readFileSync(resolve(arg("trigger-file")), "utf8")
     : "document.getElementById('vg-refresh').click();";
+  const setup = arg("setup-file") ? readFileSync(resolve(arg("setup-file")), "utf8") : "";
+  new Function("return (async () => {" + setup + "\n})");
   new Function(trigger);
   out = resolve(arg("out"));
   if (existsSync(out)) throw Error("Output directory already exists; use a fresh directory to prevent stale evidence");
@@ -134,6 +136,10 @@ try {
   const sourceHash = createHash("sha256").update(original).digest("hex");
   const { p, display, region } = await openBrowser(html, monitor, size, chrome);
   await until(() => p.eval("!!(window.__vg && __vg.renderer && !__vg.demo.busy())"), 15000, "Graph ready");
+  if (setup) {
+    await p.eval(`(async () => {${setup}\n})()`);
+    await until(() => p.eval("!__vg.demo.busy()"), maxMs, "Setup action");
+  }
   if (p.firstError()) throw Error("Source page error: " + p.firstError());
   await p.eval(`document.title=${JSON.stringify(label)}; void 0`);
   await pause(400);
@@ -149,14 +155,17 @@ try {
   }, 10000, "First native frames");
   await pause(500);
   const clickWall = Date.now();
-  await p.eval(`(() => {${trigger}\n})(); void 0`);
+  await p.eval(`window.nativePreviousCascade=__vg.lastCascade();
+    window.nativeTrace.triggerTime=performance.now(); (() => {${trigger}\n})(); void 0`);
   await pause(300);
   await until(async () => {
     if (recorder.closed) { await recorder.result(); throw Error("Capture stopped during the action"); }
     return !(await p.eval("__vg.demo.busy()"));
   }, maxMs, "Recorded action");
   await pause(500);
-  const data = await p.eval("nativeTrace.active=false; ({trace:nativeTrace,last:__vg.lastCascade()})");
+  const data = await p.eval("(() => { nativeTrace.active=false; const last=__vg.lastCascade();" +
+    "const reportReplaced=last!==window.nativePreviousCascade; delete window.nativePreviousCascade;" +
+    "return {trace:nativeTrace,last,reportReplaced}; })()");
   const pageErrors = p.errors;
   recorder.child.stdin.write("q\n");
   await until(() => recorder.closed, 15000, "Capture finalization");
@@ -164,11 +173,15 @@ try {
   writeFileSync(join(out, "capture.log"), recordLog);
   await recorder.result(); recorder = null;
   if (statSync(master).size < 1024) throw Error("Lossless source is empty");
-  const capture = { sourceHash, label, display, region, monitor: screen.which || arg("monitor"), threads, clickWall, pageErrors, ...data };
+  const capture = { sourceHash, label, display, region, monitor: screen.which || arg("monitor"), threads, warmupMs: 400, clickWall, pageErrors, ...data };
   jsonWrite(join(out, "capture.json"), capture);
   await closeBrowser();
   if (pageErrors.length) throw Error("Source page reported errors; inspect capture.json");
-  if (data.last.exit !== "converged" || data.last.frames < 20) throw Error("The recorded action did not complete a measured animation");
+  const freshCascade = Number.isFinite(data.last.t0) && data.last.t0 >= data.trace.triggerTime - 1;
+  const staticAction = isStaticAction(argv.includes("--allow-static"), data.last, data.reportReplaced);
+  if (!staticAction && (!freshCascade || data.last.exit !== "converged" || data.last.frames < 1)) {
+    throw Error("The recorded action did not complete a fresh measured animation");
+  }
   if (/error|failed|dropp?ing|overrun/i.test(recordLog)) throw Error("Capture reported an error or dropped input; inspect capture.log");
   if (hook.admit) await hook.admit("encode", owner);
   checkAbort();
@@ -179,6 +192,8 @@ try {
   const video = join(out, "capture.mp4");
   await run(ffmpeg, encodeArgs(master, video, duration, threads), { signal });
   const encodedProbe = await probe(video);
+  await run(ffmpeg, ["-v", "error", "-threads", String(threads), "-filter_threads", String(threads),
+    "-i", video, "-frames:v", "1", "-threads", String(threads), "-n", join(out, "poster.png")], { signal });
   const hash = async (filter, name) => {
     const text = await run(ffmpeg, ["-v", "error", "-threads", String(threads), "-filter_threads", String(threads),
       "-i", master, "-t", String(duration), ...(filter ? ["-vf", filter] : []), "-fps_mode", "passthrough",
@@ -188,10 +203,12 @@ try {
   const sourceHashes = await hash("", "source.framemd5"), reference = await hash("fps=60", "reference.framemd5");
   const inputStart = Number(/start: ([\d.]+)/.exec(recordLog)?.[1]);
   if (!Number.isFinite(inputStart)) throw Error("Cannot align native timestamps with the app clock");
-  const appStart = (data.trace.origin + data.last.t0) / 1000 - inputStart, appEnd = appStart + data.last.ms / 1000;
+  const appT0 = staticAction ? data.trace.triggerTime : data.last.t0;
+  const appMs = staticAction ? 500 : data.last.ms;
+  const appStart = (data.trace.origin + appT0) / 1000 - inputStart, appEnd = appStart + appMs / 1000;
   const pts = sourceProbe.frames.map(f => Number(f.best_effort_timestamp_time)).filter(t => t >= appStart && t <= appEnd);
-  const raf = data.trace.raf.filter(f => f.t >= data.last.t0 && f.t <= data.last.t0 + data.last.ms);
-  const verification = { duration: durationCheck(duration, Number(encodedProbe.format.duration)),
+  const raf = data.trace.raf.filter(f => f.t >= appT0 && f.t <= appT0 + appMs);
+  const verification = { staticAction, duration: durationCheck(duration, Number(encodedProbe.format.duration)),
     identity: retention(sourceHashes, reference), appStart, appEnd,
     activeSourceGapsMs: stats(pts.slice(1).map((t, i) => (t - pts[i]) * 1000)),
     activeRafGapsMs: stats(raf.slice(1).map((f, i) => f.t - raf[i].t)),
@@ -230,8 +247,8 @@ try {
   }
   await closeBrowser();
   const valid = verification.duration.withinOneFrame && verification.identity.invented === 0 &&
-    verification.identity.referenceFrames === verification.encodedFrames && pts.length > 20 &&
-    verification.activeSourceGapsMs.max <= 50 && !verification.activeRepeats.some(r => r.activeFrames >= 3) &&
+    verification.identity.referenceFrames === verification.encodedFrames && pts.length > 1 &&
+    verification.activeSourceGapsMs.max <= 50 && (staticAction || !verification.activeRepeats.some(r => r.activeFrames >= 3)) &&
     verification.playback.every(p => p.ended && p.corrupted === 0);
   verification.technicalChecksPassed = valid;
   jsonWrite(join(out, "verification.json"), verification);

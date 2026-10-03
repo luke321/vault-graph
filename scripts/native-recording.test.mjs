@@ -4,7 +4,28 @@ import assert from "node:assert/strict";
 import { mkdtempSync, writeFileSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { run, startProcess, measuredRegion, retention, repeatRuns, durationCheck, cleanupAll } from "./native-recording.mjs";
+import { run, startProcess, measuredRegion, retention, repeatRuns, durationCheck, cleanupAll, stats, isStaticAction } from "./native-recording.mjs";
+
+test("expected static membership needs an explicit instant report, never a stale animated cascade", () => {
+  assert.equal(isStaticAction(true, { frames: 0, path: "instant: nothing to move" }, true), true);
+  assert.equal(isStaticAction(false, { frames: 0, path: "instant: nothing to move" }, true), false);
+  assert.equal(isStaticAction(true, { frames: 120, path: "animated", exit: "converged" }, true), false);
+  assert.equal(isStaticAction(true, { frames: 0, path: "none" }, true), false);
+});
+
+test("a no-op trigger cannot reuse the setup's static report; identical fresh contents are accepted", () => {
+  const before = { frames: 0, path: "instant: nothing to move" };
+  const unchanged = before;
+  assert.equal(isStaticAction(true, unchanged, unchanged !== before), false);
+  assert.equal(isStaticAction(true, unchanged), false);
+  const replaced = { ...before };
+  assert.equal(isStaticAction(true, replaced, replaced !== before), true);
+});
+
+test("binary floating point does not turn an exact 50 ms interval into a failed gap", () => {
+  assert.equal(stats([(2.1 - 2.05) * 1000]).max, 50);
+  assert.equal(stats([50.001]).over50, 1);
+});
 
 test("failed evidence and browser cleanup cannot bypass either resource release", async () => {
   const calls = [];
