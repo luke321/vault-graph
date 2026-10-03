@@ -6,6 +6,7 @@ import { makeErrorLog, runChecks } from "./smoke-runner.mjs";
 import { couplingReport, leakReport } from "./smoke-state.mjs";
 // github#142
 import { pngCaptureJs, pngCarriesGraph, pngCaptureDetail } from "./png-capture.mjs";
+import { hiddenBaselineCheck } from "./check-hidden-baseline.mjs";
 import { buildPayloadVault, PAYLOAD, NOTE_COUNT } from "./check-data-escape.mjs";
 import { findChrome } from "./chrome.mjs";
 import { leftmostScreen, leftWindowPos } from "./screen.mjs";
@@ -4076,8 +4077,14 @@ check("the disc's density follows the notes on screen", async (p) => {
 }, { on: "all" });
 
 // github#186
+check("hidden defaults do not change visible geometry or dots on mount and Refresh", hiddenBaselineCheck);
+check("hidden defaults do not change visible geometry or dots after animated Refresh", hiddenBaselineCheck,
+  { clock: "real" });
+check("hidden defaults do not change the separate unlinked group", p => hiddenBaselineCheck(p, false));
+
 check("a page that lays out filtered still takes its dots' rest from the unfiltered disc", async (p) => {
-  const clear = `__vg.state.hidden[__vg.state.dim] = {}; __vg.state.hiddenSub = {};
+  const clear = `__vg.state.hidden[__vg.state.dim] = Object.fromEntries(
+    __vg.groupOrder().filter(g => __vg.hiddenByDefault(g)).map(g => [g, true])); __vg.state.hiddenSub = {};
     __vg.state.from = null; __vg.state.to = null; __vg.state.until = null;
     __vg.syncAlpha(); __vg.applyLayout(false); void 0`;
   await p.eval(clear);
@@ -4085,8 +4092,8 @@ check("a page that lays out filtered still takes its dots' rest from the unfilte
   const direct = await p.j(`__vg.restDots()`);
   const hid = await p.j(`(function () {
     var order = __vg.groupOrder();
-    var g = order.filter(function (x) { return __vg.isArchiveGroup(x); })[0] || order[order.length - 1];
-    var h = {}; h[g] = true;
+    var g = order.filter(function (x) { return !__vg.hiddenByDefault(x); })[0];
+    var h = Object.assign({}, __vg.state.hidden[__vg.state.dim]); h[g] = true;
     __vg.forgetRest();
     __vg.state.hidden[__vg.state.dim] = h; __vg.syncAlpha(); __vg.applyLayout(false);
     return g; })()`);

@@ -950,6 +950,59 @@ function mountVaultGraph(root, data, deps) {
   /** @type {Record<string, number>} */
   var visDst = dict();
   var visEase = 1;
+  // github#186
+  /** @type {Record<string, Record<string, number>>} */
+  var basisDegrees = dict();
+  /** @type {Record<string, Record<string, number>>} */
+  var basisRanks = dict();
+  /** @type {Record<string, number>} */
+  var basisCounts = dict();
+  /** @param {string} id */
+  function basisFiled(id) { return !hiddenByDefault(fileGroup(id)); }
+  /** @param {string} id */
+  function basisDegree(id) {
+    var cache = basisDegrees[state.dim] || (basisDegrees[state.dim] = dict());
+    var key = noteOf(id);
+    if (cache[key] === undefined) {
+      var n = 0, own = basisFiled(key);
+      (adj[key] || []).forEach(function (e) {
+        if (!own || basisFiled(e.o)) n += e.o === key ? 2 : 1;
+      });
+      cache[key] = n;
+    }
+    return cache[key];
+  }
+  /** @param {string} id */
+  function basisShown(id) {
+    return basisFiled(id) && !hiddenByDefault(!basisDegree(id) && !unlinkedByFolder ? UNLINKED : fileGroup(id));
+  }
+  function basisCount() {
+    var key = state.dim + "#" + unlinkedByFolder;
+    if (basisCounts[key] === undefined) {
+      var n = 0;
+      graph.forEachNode(function (id, a) { if (!a.dupOf && basisShown(id)) n++; });
+      basisCounts[key] = n;
+    }
+    return basisCounts[key];
+  }
+  /** @param {string} id */
+  function basisSize(id) {
+    var n = basisDegree(id);
+    return n === 0 ? NODE_ORPHAN : Math.min(NODE_MAX, NODE_MIN + 1.55 * Math.sqrt(n));
+  }
+  /** @param {string} id */
+  function basisRank(id) {
+    var ranks = basisRanks[state.dim];
+    if (!ranks) {
+      ranks = basisRanks[state.dim] = dict();
+      graph.nodes().filter(function (key) { return !graph.getNodeAttribute(key, "dupOf"); })
+        .sort(function (a, b) {
+          return basisDegree(b) - basisDegree(a) ||
+            String(graph.getNodeAttribute(a, "label")).localeCompare(String(graph.getNodeAttribute(b, "label")));
+        }).forEach(function (key, i) { ranks[key] = i; });
+    }
+    return ranks[noteOf(id)];
+  }
   /** @param {(id: string) => boolean} on @returns {Record<string, number>} */
   function rankVisible(on) {
     /** @type {Record<string, number>} */
@@ -959,9 +1012,14 @@ function mountVaultGraph(root, data, deps) {
     /** @type {Record<string, boolean>} */
     var seen = dict();
     graph.forEachNode(function (id) { seen[id] = !!on(id); });
-    graph.forEachEdge(function (e, at, s, t) {
-      all[s] = (all[s] || 0) + 1; all[t] = (all[t] || 0) + 1;
-      if (seen[s] && seen[t]) { vis[s] = (vis[s] || 0) + 1; vis[t] = (vis[t] || 0) + 1; }
+    graph.forEachNode(function (id) {
+      var own = basisFiled(id);
+      (adj[id] || []).forEach(function (e) {
+        if (own && !basisFiled(e.o)) return;
+        var w = e.o === id ? 2 : 1;
+        all[id] = (all[id] || 0) + w;
+        if (seen[id] && seen[e.o]) vis[id] = (vis[id] || 0) + w;
+      });
     });
     /** @type {Record<string, number>} */
     var out = dict();
@@ -970,7 +1028,7 @@ function mountVaultGraph(root, data, deps) {
   }
   /** @param {string} id */
   function dotRamp(id) {
-    var t = ((graph.getNodeAttribute(id, "size") || NODE_MIN) - NODE_MIN) / (NODE_MAX - NODE_MIN);
+    var t = (basisSize(id) - NODE_MIN) / (NODE_MAX - NODE_MIN);
     t = t > 1 ? 1 : t < 0 ? 0 : t;
     var a = visSrc[id], b = visDst[id];
     if (a === undefined) a = b === undefined ? 1 : b;
@@ -978,9 +1036,6 @@ function mountVaultGraph(root, data, deps) {
     return t * (a + (b - a) * visEase);
   }
 
-  // github#58
-  /** @type {Record<string, number>} */
-  var hubRank = dict();
   /** @type {Record<string, string[]>} */
   var subOrder = dict();
   /** @type {Record<string, number>} */
@@ -998,8 +1053,10 @@ function mountVaultGraph(root, data, deps) {
   function ingest(src, keepId) {
     restVer++;
     graph.clear();
+    basisDegrees = dict();
+    basisRanks = dict();
+    basisCounts = dict();
     adj = dict();
-    hubRank = dict();
     subOrder = dict();
     subCount = dict();
     idOfPath = dict();
@@ -1058,12 +1115,6 @@ function mountVaultGraph(root, data, deps) {
         ? NODE_ORPHAN
         : Math.min(NODE_MAX, NODE_MIN + 1.55 * Math.sqrt(a.deg)));
     });
-    // github#58
-    graph.nodes().slice().sort(function (a, b) {
-      return graph.getNodeAttribute(b, "deg") - graph.getNodeAttribute(a, "deg") ||
-             String(graph.getNodeAttribute(a, "label"))
-               .localeCompare(String(graph.getNodeAttribute(b, "label")));
-    }).forEach(function (id, i) { hubRank[id] = i; });
   }
 
   ingest(DATA, null);
@@ -1204,7 +1255,7 @@ function mountVaultGraph(root, data, deps) {
     // github#86 -- a note fading out of the left disc is still filed there
     if (leftGroup[id] !== undefined) return leftGroup[id];
     // github#3, github#86 -- "join their folder" means "join their group"
-    if (!adj[id]) return unlinkedByFolder ? fileGroup(id) : UNLINKED;
+    if (!basisDegree(id) && basisFiled(id)) return unlinkedByFolder ? fileGroup(id) : UNLINKED;
     return fileGroup(id);
   }
 
@@ -1241,7 +1292,6 @@ function mountVaultGraph(root, data, deps) {
       });
       if (tagFiling[id]) tagFiling[sid] = tagFiling[id];
       if (adj[id]) adj[sid] = adj[id];
-      hubRank[sid] = hubRank[id];
       if (tlRank[id] !== undefined) tlRank[sid] = tlRank[id];
       if (tlMs[id] !== undefined) tlMs[sid] = tlMs[id];
       alpha[sid] = 0;
@@ -1275,7 +1325,7 @@ function mountVaultGraph(root, data, deps) {
       if (state.hovered === sid) state.hovered = id;
       if (state.selected === sid) state.selected = id;
       graph.dropNode(sid);
-      delete tagFiling[sid]; delete adj[sid]; delete hubRank[sid];
+      delete tagFiling[sid]; delete adj[sid];
       delete tlRank[sid]; delete tlMs[sid]; delete alpha[sid];
     });
     standIns = [];
@@ -1419,7 +1469,7 @@ function mountVaultGraph(root, data, deps) {
       // github#86 -- and in the colour rotation, for as long as the switch runs
       if (a.standIn) return;
       var g = leaving[id]
-        ? (!adj[id] && !unlinkedByFolder ? UNLINKED : fileGroup(id, a))
+        ? (!basisDegree(id) && basisFiled(id) && !unlinkedByFolder ? UNLINKED : fileGroup(id, a))
         : groupOf(id);
       count[g] = (count[g] || 0) + 1;
       // github#86, github#50 -- what this dimension FILES, on the disc or not
@@ -1538,6 +1588,10 @@ function mountVaultGraph(root, data, deps) {
   function applyFolderShown(map, dim) {
     var d = dim === "tag" ? "tag" : "folder";
     dimShown[d] = cleanFolderShown(map);
+    basisDegrees = dict();
+    basisRanks = dict();
+    basisCounts = dict();
+    restVer++;
     return dimShown[d];
   }
 
@@ -1990,7 +2044,7 @@ function mountVaultGraph(root, data, deps) {
   }
 
   /** @param {string} id */
-  function isOrphan(id) { return !adj[id]; }
+  function isOrphan(id) { return basisDegree(id) === 0; }
 
   var SEAM_ROWS = 0.3;
 
@@ -2001,7 +2055,7 @@ function mountVaultGraph(root, data, deps) {
   var GAP_ZERO_AT = 10000;
   function gapScale() {
     // github#86 -- a stand-in is its note: the switch must not narrow the gaps
-    var n = graph.order - standIns.length;
+    var n = basisCount();
     if (n <= GAP_FULL_TO) return 1;
     if (n >= GAP_ZERO_AT) return 0;
     return 1 - (n - GAP_FULL_TO) / (GAP_ZERO_AT - GAP_FULL_TO);
@@ -2248,7 +2302,7 @@ function mountVaultGraph(root, data, deps) {
     } else graph.forEachNode(function (id) {
       // github#86 -- the left disc has no stand-ins; the arriving disc no leavers
       if (oldWorld ? !!graph.getNodeAttribute(id, "standIn") : !!leaving[id]) return;
-      if (onlyVisible && !(planKeep || willShow)(id)) return;
+      if (onlyVisible ? !(planKeep || willShow)(id) : !basisShown(id)) return;
       // github#18
       if (isPinned(id)) return;
       members.push(id);
@@ -2353,7 +2407,7 @@ function mountVaultGraph(root, data, deps) {
     if (!cells.length) return null;
 
     cells.forEach(function (c) {
-      if (!useCells) c.list.sort(function (a, b) { return hubRank[a] - hubRank[b]; });
+      if (!useCells) c.list.sort(function (a, b) { return basisRank(a) - basisRank(b); });
       c.wsum = 0;
       c.list.forEach(function (id) { c.wsum += W(id); });
     });
@@ -5636,7 +5690,11 @@ function mountVaultGraph(root, data, deps) {
     var targets = ringsLayout();
     traceTag("");
     if (!targets) { if (done) done(); return; }
-    if (animate) animateTo(targets, function () { takeRestDots(); if (done) done(); });
+    if (animate) animateTo(targets, function () {
+      takeRestDots();
+      renderer.refresh({ skipIndexation: false });
+      if (done) done();
+    });
     else {
       assignPositions(targets);
       takeRestDots();
@@ -5677,7 +5735,7 @@ function mountVaultGraph(root, data, deps) {
   }
   /** @param {string} id @param {{ size?: number }} a */
   function takeRest(id, a) {
-    var t = ((a.size || NODE_MIN) - NODE_MIN) / (NODE_MAX - NODE_MIN);
+    var t = (basisSize(id) - NODE_MIN) / (NODE_MAX - NODE_MIN);
     t = t > 1 ? 1 : t < 0 ? 0 : t;
     restT[id] = t;
     var v = dotPx(a.size || NODE_MIN, id), hi = lastDotHi, lo = Math.min(hi, DOT_MIN_PX);
@@ -5703,7 +5761,7 @@ function mountVaultGraph(root, data, deps) {
     var sTrace = trace, sProbe = probe, sDbg = DBG.cells;
     try {
       state.from = state.to = state.until = null;
-      state.hidden[state.dim] = dict(); state.hiddenSub = dict();
+      seedHidden(); state.hiddenSub = dict();
       alpha = dict();
       graph.forEachNode(function (id) { alpha[id] = visible(id) ? 1 : 0; });
       visSrc = visDst = dict(); visEase = 1;
@@ -5780,6 +5838,7 @@ function mountVaultGraph(root, data, deps) {
     // github#86 -- a leaving note is in the disc being left only
     if (leaving[id] && !oldWorld) return false;
     var a = graph.getNodeAttributes(id);
+    if (isHidden(fileGroup(id, a))) return false;
     if (isHidden(groupOf(id))) return false;
     var d = fileDirs(id, a);
     if (!d.length) {
@@ -7804,7 +7863,7 @@ function mountVaultGraph(root, data, deps) {
       totalMs: dur,
       onFrame: function (pr) { sweepTo(pr); }
     });
-    play = { raf: 0, guard: 0, viaCascade: true };
+    play = cascadeRun ? { raf: 0, guard: 0, viaCascade: true } : null;
   }
 
   /** @param {number} pr 0..1 through the timeline */
@@ -7922,6 +7981,7 @@ function mountVaultGraph(root, data, deps) {
     $("refresh").onclick = function () {
       if (onRefresh) { onRefresh(); return; }
       resetView();
+      hardRelayout(false);
       fit();
       playTimeline();
     };
@@ -8271,8 +8331,7 @@ function mountVaultGraph(root, data, deps) {
       if (d === state.dim) {
         var h = state.hidden[state.dim] || (state.hidden[state.dim] = dict());
         if (hiddenByDefault(folder)) h[folder] = true; else delete h[folder];
-        buildLegend();
-        cascade(null, { colToggle: true });
+        hardRelayout(true);
       }
       buildSettings();
     }
@@ -11587,8 +11646,7 @@ function mountVaultGraph(root, data, deps) {
                     setTimeScale: /** @param {number} v */ function (v) { return setTimeScale(v); },
                     applyHiddenDefaults: function () {
                       seedHidden();
-                      buildLegend();
-                      cascade(null, { colToggle: true });
+                      hardRelayout(true);
                     },
                     heatBuild: heatBuild,
                     // github#70 -- heatDateOf is the seam a day-contents list reads,

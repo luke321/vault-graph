@@ -1,5 +1,25 @@
 # Invariants
 
+## Hidden defaults are outside the layout baseline (github#186)
+
+Folders or tag groups hidden in settings, including the underscore default, contribute no
+members or links to the starting disc's geometry, seam-count scaling, degree ramp, or serpentine ordering.
+Their data remains available to the legend and can be shown again. A note connected only to
+those groups is unlinked in the visible baseline. Hiding a filing also hides its unlinked notes.
+
+The geometry lock and resting-size reference describe this baseline, rather than every note
+the producer returned. Temporary legend and date filters still repack inside the locked rings
+and retain the existing resting-size bounds. The baseline calculation clears those temporary
+filters while retaining saved hidden defaults. Changing a saved default invalidates degree,
+rank and resting-size caches and retakes the geometry; standalone Refresh retakes it too.
+Link ranking uses the full adjacency list, not the subset of edges submitted to the renderer.
+
+The focused checks `hidden defaults do not change` add 320 synthetic hidden notes and 640
+incident edges, then compare visible positions, band membership and dot radii with the original
+graph. They cover mounting, Refresh, revealing the added groups and hiding them again, with
+ordinary and reduced motion. Reduced-motion Refresh must leave no playing state behind.
+The reference remains stored in graph units so a viewport resize cannot alter its meaning.
+
 ## Fold continuity and sparse-result labels (github#186)
 
 The fold now interpolates each endpoint row's radius toward that band's first row while

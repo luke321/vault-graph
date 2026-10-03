@@ -237,6 +237,14 @@ its ring is the weight's job. That split is already in the code and costs nothin
 
 ## Verify
 
+### Hidden defaults (2026-10-03)
+
+The degree and resting-size reference exclude groups hidden in settings. This includes
+underscore-prefixed groups without an explicit show override. Geometry locks exclude them as
+well. Temporary filters retain the established lock and size bounds, but a changed saved
+default establishes a new baseline. Full producer adjacency supplies link ranks even when the
+renderer samples its edges. See the hidden-default invariant and its focused regression checks.
+
 ```javascript
 __vg.dotWhy(id)           // out, ceil, floorPx; cellRoom is the note's own step
 __vg.debugDump().dots     // ofPitch, minPx, clear, overPitch
