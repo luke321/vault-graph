@@ -25,6 +25,14 @@ and is saved as `reportReplaced` in `capture.json`. A no-op trigger cannot reuse
 static report. The calendar or camera may still adjust. Stale cascade measurements never
 stand in for the recorded action.
 Timeout defaults to 30 seconds, maximum 120.
+Pass `--rehearse` to measure a warmed browser: the recorder first performs the same action,
+restores the original local storage, reloads the page in that browser and repeats setup.
+Recording starts only if the controls, complete node attributes, camera and viewport match
+their original state exactly. `rehearsal.json` retains the action report and both states;
+`capture.json` labels the take `warm-rehearsed` or the default `cold-profile`.
+This avoids paying first-use GPU costs in every comparison take while keeping the recorded
+action at normal speed. It does not fix cold-start rendering or repair an existing clip.
+Keep cold-profile tests separately, and use the same mode for both sides of a comparison.
 The tool rejects an existing output directory without changing it. Preserve both the
 original HTML and generated evidence when comparing app versions; use the same fixture,
 viewport, action, display and machine conditions serially.

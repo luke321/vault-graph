@@ -8,6 +8,21 @@ how you tell whether a later change has quietly undone an earlier one.
 Read this when you are about to change something and want to know what it cost to get
 right. For *what shipped when*, see [`../CHANGELOG.md`](../CHANGELOG.md).
 
+Cold-browser investigation (2026-10-03, github#186): an opt-in `--rehearse` mode runs
+the action before capture, restores local storage, reloads in the same owned browser,
+and rejects any difference in initial controls, node attributes, camera or viewport.
+It retains both snapshots and labels the take `warm-rehearsed`; default takes remain
+`cold-profile`. Thirteen focused tests pass, lint is zero, comments remain 350/350.
+This implements the measured diagnostic: the baseline solo-out cold trace had three
+33.3 ms presentation gaps and new shader-cache activity; its same-state warm reload
+had no new cache activity and a maximum presentation interval of 16.737 ms. Both
+warm MP4 plays reached ended, with 4/0 dropped frames and no corruption. These are
+diagnostic results, not acceptance of the new reusable mode. Its final headed checks
+and a restored-workspace Obsidian startup probe remain queued behind the shared lane.
+Fresh-install and initially hidden-pane Obsidian probes rendered all 1,407 synthetic
+notes with no errors; the reported persistent missing dots has not been reproduced.
+The installed plugin bundle matches the tested bundle. No app animation changed.
+
 Recording matrix follow-up (2026-10-03, github#186): the native recorder now accepts
 settled setup actions, checks that animated reports started after the trigger, and
 supports explicitly expected static membership actions. Static acceptance also requires

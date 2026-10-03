@@ -2,6 +2,24 @@
 
 ## Native recording cadence investigation, 2026-10-03
 
+Follow-up: the strict baseline warm-reload control now completed. Initial graph
+positions, controls and camera were identical. Its largest presentation interval
+was 16.737 ms, with no shader-cache load/store during the action, versus three
+33.3 ms presentation gaps in the cold trace. A separate constant-gradient-stop
+experiment removed the original 20 ms raster spike but still had a 50 ms
+presentation gap elsewhere; that experiment is not an app fix and is not shipped.
+
+The recorder now has an explicit `--rehearse` mode, documented in
+[`native-recording.md`](../../../scripts/native-recording.md), with state-reset
+evidence and a cold/warm label. Its focused tests pass; final headed verification
+remains queued. Cold-start behavior must continue to be tested separately.
+
+The intermittent Obsidian missing-dot report is separate. Fresh-install and
+initially hidden-pane probes using the installed bundle rendered 1,407 synthetic
+notes without errors. Reopening restores the user's affected view, but the actual
+persistent blank state has not yet been reproduced. Do not equate this report with
+the measured short Chrome presentation pauses.
+
 The remaining demo folder-to-tag hold occurs before encoding, in Chrome's frame
 presentation path. A headed diagnostic kept the accepted app `aa987d6` unchanged,
 delayed the trigger by another second, and logged render submissions, graph position

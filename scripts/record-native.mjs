@@ -9,6 +9,7 @@ import { createHash } from "node:crypto";
 import { spawn } from "node:child_process";
 import { findChrome } from "./chrome.mjs";
 import { attach } from "./cdp.mjs";
+import { rehearse } from "./recording-rehearsal.mjs";
 import { pause, run, startProcess, captureArgs, encodeArgs, measuredRegion, stats, cleanupAll,
   frameHashes, retention, repeatRuns, durationCheck, isStaticAction } from "./native-recording.mjs";
 
@@ -19,7 +20,7 @@ if (argv.includes("--help")) {
   console.log("node scripts/record-native.mjs --html <export.html> --out <new-directory> --label <feature - scene>\n" +
     "  [--size 1080] [--monitor primary|left|right] [--threads 4] [--max-seconds 30]\n" +
     "  [--ffmpeg <exe>] [--ffprobe <exe>] [--chrome <exe>] [--harness-module <harness-hook.mjs>]\n" +
-    "  [--setup-file <trusted-async-js>] [--trigger-file <trusted-js>] [--allow-static] [--playback-runs 2]\n" +
+    "  [--setup-file <trusted-async-js>] [--trigger-file <trusted-js>] [--allow-static] [--playback-runs 2] [--rehearse]\n" +
     "Windows native capture; needs DPR=1. Hook-selected monitor overrides --monitor. See native-recording.md.");
   process.exit(0);
 }
@@ -140,6 +141,9 @@ try {
     await p.eval(`(async () => {${setup}\n})()`);
     await until(() => p.eval("!__vg.demo.busy()"), maxMs, "Setup action");
   }
+  const rehearsed = argv.includes("--rehearse");
+  if (rehearsed) await rehearse({ page: p, setup, trigger, until, pause, maxMs,
+    save: evidence => jsonWrite(join(out, "rehearsal.json"), evidence) });
   if (p.firstError()) throw Error("Source page error: " + p.firstError());
   await p.eval(`document.title=${JSON.stringify(label)}; void 0`);
   await pause(400);
@@ -173,7 +177,8 @@ try {
   writeFileSync(join(out, "capture.log"), recordLog);
   await recorder.result(); recorder = null;
   if (statSync(master).size < 1024) throw Error("Lossless source is empty");
-  const capture = { sourceHash, label, display, region, monitor: screen.which || arg("monitor"), threads, warmupMs: 400, clickWall, pageErrors, ...data };
+  const capture = { sourceHash, label, display, region, monitor: screen.which || arg("monitor"), threads,
+    captureMode: rehearsed ? "warm-rehearsed" : "cold-profile", warmupMs: 400, clickWall, pageErrors, ...data };
   jsonWrite(join(out, "capture.json"), capture);
   await closeBrowser();
   if (pageErrors.length) throw Error("Source page reported errors; inspect capture.json");
