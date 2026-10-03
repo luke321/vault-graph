@@ -37,13 +37,20 @@ date order; arrival follows it. Each disc owns its endpoint membership, cell ass
 geometry lock and running serpentine coordinates. Both use the same cell-local path walker
 as ordinary Refresh; independent polar easing must not cut across the serpentine.
 
+The two worlds share one angular budget, divided by their live weights. The departing
+wedges occupy the leading arc and the arriving wedges grow into the released trailing arc.
+Each uses the ordinary allocator's pitch and seam rules inside its allocation. Partial-arc
+seams cannot cross either end, and drawn dot radii remain capped at their wedge edges;
+a zero-width seat stays hidden rather than becoming the renderer's default-size dot.
+
 Opacity stays monotone per display node. Both discs remain visible during the transition,
 then the stand-ins are removed and the result equals a fresh resting layout. The radial
 fixed-angle fold and its `FOLD_ENTER`, `FOLD_PHASE`, `FOLD_FADE` constants are superseded.
 The clock-hand fallback remains available through `foldSwitch = false`.
 
 `tags: parallel Refresh` checks both directions, reverse/forward date order, visible angular
-motion in both discs, overlap, opacity monotonicity, convergence and temporary-node cleanup.
+motion in both discs, simultaneous visibility, disjoint drawn angular extents, opacity
+monotonicity, convergence and temporary-node cleanup.
 The old fixed-angle animation is a negative control: visible angular motion is effectively
 zero and departure does not reverse date order. The existing Refresh/date-filter wedge
 checks remain unchanged.

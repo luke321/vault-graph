@@ -474,6 +474,14 @@ in aa987d6 is shared with ordinary Refresh, rather than independently easing pol
 Stand-ins keep the worlds independent until the destination converges; its notes then take
 their stand-ins' final positions. The clock-hand fallback is unchanged.
 
+The subsequent overlap review requires both worlds to share the disc, like toggling
+groups off and on. Their live weights divide one angular budget: source wedges shrink in
+the leading arc while destination wedges grow in the released trailing arc. This is still
+the chronological serpentine walk, with the ordinary pitch, seam and packing rules. Each
+partial arc clamps its open ends, and edge clearance caps the drawn dot radii even when
+nearest-neighbour fitting is disabled. Zero-width seats must stay hidden: the renderer
+otherwise gives a zero-sized node its default size. Both endpoint layouts remain unchanged.
+
 ## Fold continuity after the visual reviews (2026-09-26, github#186, superseded)
 
 The folder/tag fold uses each world's captured endpoint seats. A note's radius moves toward

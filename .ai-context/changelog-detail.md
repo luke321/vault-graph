@@ -8,6 +8,20 @@ how you tell whether a later change has quietly undone an earlier one.
 Read this when you are about to change something and want to know what it cost to get
 right. For *what shipped when*, see [`../CHANGELOG.md`](../CHANGELOG.md).
 
+Shared wedge space during dimension changes (2026-10-03, github#186): the simultaneous
+reverse/forward Refresh had allocated a complete disc independently to each world.
+Source and destination now divide one angular budget by live weight, so folder wedges
+shrink while tag wedges grow into the released space. The normal pitch, seam allocation
+and serpentine walker still apply. Partial-arc ends are bounded, and dot radii use the
+perpendicular clearance to their wedge edges. A zero-width seat stays hidden instead
+of being replaced by the renderer's default-size dot.
+
+The headed regression measures the angular extents of rendered circles, including their
+radii, on every sampled frame. Demo, shape, tag and sortspec pass both directions with
+zero shared-space violations, zero opacity reversals, zero final-layout drift and no
+remaining stand-ins. Both worlds remain visible together for 259-320 sampled frames
+per direction; departure remains reverse chronological and arrival chronological.
+
 Dimension-switch dot sizing (2026-10-03, github#186): arriving stand-ins shared adjacency
 lists that pointed to the departing originals. Those originals are hidden in the arriving
 world, so every linked arrival acquired a zero visible-link score: 1,370 demo notes and

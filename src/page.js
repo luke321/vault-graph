@@ -3041,6 +3041,10 @@ function mountVaultGraph(root, data, deps) {
             a0 = arcFrom() + sm.gap * seamsBefore + sm.avail * fracBefore - sm.gap / 2;
             a1 = a0 + sm.avail * frac * open;
           }
+          if (planArc) {
+            a0 = Math.max(planArc.from, Math.min(planArc.to, a0));
+            a1 = Math.max(planArc.from, Math.min(planArc.to, a1));
+          }
           if (walk && a1 < a0) a0 = a1 = (a0 + a1) / 2;
           if (probe && probe.watch === sl.id) {
             probe.watched = { k: c.k, g: c.g, u: Math.round(sl.u * 1e5) / 1e5,
@@ -3079,7 +3083,8 @@ function mountVaultGraph(root, data, deps) {
           var t = sweepAngle(a0 + mgA + (arc - mgA - mgB) * sl.u);
           var spanArc = arc - mgA - mgB;
           var dEdge = Math.min(mgA + spanArc * sl.u, mgB + spanArc * (1 - sl.u)) * rGraph;
-          if (dEdge > 0) edgeCapNext[sl.id] = dEdge;
+          if (planArc) dEdge = rGraph * Math.sin(Math.min(Math.PI / 2, Math.max(0, dEdge / rGraph)));
+          if (dEdge >= 0) edgeCapNext[sl.id] = dEdge;
           // github#41, design/0011
           if (trace && trace.id === sl.id) {
             tracePut({ what: "edge", cell: c.k, g: c.g, u: sl.u, arc: arc, mgA: mgA, mgB: mgB,
@@ -5230,10 +5235,12 @@ function mountVaultGraph(root, data, deps) {
       v = Math.max(0, Math.min(1, v));
       return v * v * (3 - 2 * v);
     };
-    /** @param {FoldPlan | null} held @param {number} amount @param {(plan: Plan, seats: Record<string, { cell: string, at: number }>) => Record<string, Point> | null} walk @returns {Record<string, Point>} */
-    var packFold = function (held, amount, walk) {
-      if (!held) return {};
+    /** @param {FoldPlan | null} held @param {number} amount @param {number} start @param {number} end @param {(plan: Plan, seats: Record<string, { cell: string, at: number }>) => Record<string, Point> | null} walk @returns {Record<string, Point>} */
+    var packFold = function (held, amount, start, end, walk) {
+      if (!held || end - start < 1e-9) return {};
       var savedKeep = planKeep, savedCell = cellHold, savedPin = pinnedPlan;
+      var savedArc = planArc;
+      planArc = end - start >= 2 * Math.PI - 1e-9 ? null : { from: start, to: end };
       planKeep = function (id) { return !!held.members[id]; };
       cellHold = held.cells; pinnedPlan = null;
       var endpoint = held.plan;
@@ -5251,7 +5258,7 @@ function mountVaultGraph(root, data, deps) {
           if (held.members[id]) out[id] = positions[id];
         });
         return out;
-      } finally { planKeep = savedKeep; cellHold = savedCell; pinnedPlan = savedPin; }
+      } finally { planKeep = savedKeep; cellHold = savedCell; pinnedPlan = savedPin; planArc = savedArc; }
     };
     cascadeRun = { raf: 0, tick: NOW(), guard: WIN.setTimeout(watchdog, STALL_MS), sizeCap: sizeCap,
                    skel: moveFrom ? null : freshSkel() };
@@ -5428,10 +5435,15 @@ function mountVaultGraph(root, data, deps) {
       };
       if (folding) {
         cellNow = null; edgeNow = null; colWalk = null;
-        var oldSeats = pr < 1 ? inWorld(function () { return packFold(foldA, foldEase(1 - pr), walkPlan); }) : {};
-        var oldFit = dotFit;
-        var newSeats = packFold(foldB, foldEase(pr), walkPlan);
+        var outWeight = 0, inWeight = 0;
+        outs.forEach(function (id) { outWeight += weightOf(id); });
+        ins.forEach(function (id) { inWeight += weightOf(id); });
+        var split = 2 * Math.PI * outWeight / Math.max(1e-9, outWeight + inWeight);
+        var oldSeats = pr < 1 ? inWorld(function () { return packFold(foldA, foldEase(1 - pr), 0, split, walkPlan); }) : {};
+        var oldFit = dotFit, oldEdges = edgeCap;
+        var newSeats = packFold(foldB, foldEase(pr), split, 2 * Math.PI, walkPlan);
         dotFit = Object.assign({}, oldFit, dotFit);
+        edgeCap = Object.assign({}, oldEdges, edgeCap);
         targets = Object.assign({}, oldSeats, newSeats);
       } else if (opts.hand && opts.from) {
         // github#86, design/0015 -- both discs sit in the same place, one shown, one hidden: the
@@ -6388,6 +6400,7 @@ function mountVaultGraph(root, data, deps) {
     // github#186, design/0015
     if (foldSizes && id !== undefined && foldSizes[id] !== undefined) {
       var folded = foldSizes[id];
+      if (edgeCap[id] !== undefined) folded = Math.min(folded, edgeCap[id] * pxPerUnit);
       lastDotHi = folded; lastDotLo = 0;
       if (fitCap) {
         if (fitVer !== posVer) measureFit();
@@ -6611,6 +6624,8 @@ function mountVaultGraph(root, data, deps) {
         }
         var base = a.size || 4;
         r.size = dotPx(base, id) * ((r.size === undefined ? base : r.size) / base);
+        if (foldSizes && edgeCap[id] !== undefined) r.size = Math.min(r.size, edgeCap[id] * pxPerUnit);
+        if (foldSizes && r.size === 0) r.hidden = true;
         if (isPinned(id)) {
           r.size = (r.size || a.size) * hubSizeMult();
           r.zIndex = 3;

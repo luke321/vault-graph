@@ -10,17 +10,28 @@ export async function dimensionRefreshCheck(p) {
       for(const dim of ['tag','folder']) {
         const old=new Set(api.graph.nodes().filter(id=>(api.alpha[id]||0)>.5));
         const prev=new Map(), crossed=[[],[]], angles=[0,0];
-        let frames=0, overlap=0, reversals=0;
+        let frames=0, overlap=0, reversals=0, sharedSpaceViolations=0;
+        const violations=[];
         document.querySelector('#vg-dim button[data-dim="'+dim+'"]').click();
         const limit=performance.now()+15000;
         while(api.demo.busy()) {
           if(performance.now()>limit) throw Error('Dimension Refresh timed out');
           await wait(); if(!api.demo.busy())break; frames++;
           const visible=[0,0];
+          const extents=[{lo:Infinity,hi:-Infinity},{lo:Infinity,hi:-Infinity}];
+          const center=api.renderer.graphToViewport({x:0,y:0});
           api.graph.forEachNode((id,a)=>{
             const side=old.has(id)&&!a.standIn?0:1, al=api.alpha[id]||0, before=prev.get(id);
             if(al>.1)visible[side]++;
             const angle=Math.atan2(a.y,a.x);
+            if(al>.01&&!api.isPinned(id)) {
+              const theta=((Math.PI/2-angle)%(2*Math.PI)+2*Math.PI)%(2*Math.PI);
+              const screen=api.renderer.graphToViewport(a),display=api.renderer.getNodeDisplayData(id);
+              const radius=display&&!display.hidden?api.renderer.scaleSize(display.size):0;
+              const half=Math.asin(Math.min(1,radius/Math.hypot(screen.x-center.x,screen.y-center.y)));
+              extents[side].lo=Math.min(extents[side].lo,theta-half);
+              extents[side].hi=Math.max(extents[side].hi,theta+half);
+            }
             if(before) {
               if((side===0&&al>before.al+1e-6)||(side===1&&al<before.al-1e-6))reversals++;
               if(al>.1&&before.al>.1) {
@@ -33,6 +44,7 @@ export async function dimensionRefreshCheck(p) {
             prev.set(id,{al,angle});
           });
           if(visible.every(n=>n>0))overlap++;
+          if(extents[0].hi>extents[1].lo+1e-6||extents[0].lo< -1e-6||extents[1].hi>2*Math.PI+1e-6){sharedSpaceViolations++;if(violations.length<3)violations.push({frames,extents});}
         }
         const order=crossed.map((rows,side)=>{
           rows.sort((a,b)=>a.date.localeCompare(b.date));
@@ -44,9 +56,9 @@ export async function dimensionRefreshCheck(p) {
         const landed=new Map(api.graph.nodes().map(id=>[id,{...api.graph.getNodeAttributes(id)}]));
         api.applyLayout(false);api.applyLayout(false);
         let drift=0;api.graph.forEachNode((id,a)=>{const b=landed.get(id);drift=Math.max(drift,Math.hypot(a.x-b.x,a.y-b.y));});
-        rides.push({dim,frames,overlap,angles,order,reversals,drift,standIns:api.standIns().length,exit:api.lastCascade().exit});
+        rides.push({dim,frames,overlap,angles,order,reversals,sharedSpaceViolations,violations,drift,standIns:api.standIns().length,exit:api.lastCascade().exit});
       }
-      return {ok:rides.every(r=>r.frames>20&&r.overlap>10&&r.angles.every(a=>a>.005)&&r.order.every(o=>o.count>10&&o.ok)&&r.reversals===0&&r.drift<.5&&r.standIns===0&&r.exit==='converged'),detail:JSON.stringify(rides)};
+      return {ok:rides.every(r=>r.frames>20&&r.overlap>10&&r.angles.every(a=>a>.005)&&r.order.every(o=>o.count>10&&o.ok)&&r.reversals===0&&r.sharedSpaceViolations===0&&r.drift<.5&&r.standIns===0&&r.exit==='converged'),detail:JSON.stringify(rides)};
     } finally {api.timeScale=original;api.setDim('folder');}
   })().then(result=>window.__dimensionRefreshResult=result,error=>window.__dimensionRefreshResult={ok:false,detail:String(error)}); void 0`);
   for (let i=0;i<160;i++) {
