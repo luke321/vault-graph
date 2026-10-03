@@ -1,3 +1,32 @@
+## 2026-10-03 — walking frames the visible neighbourhood (`github#134`)
+
+The fixed 0.22 walk camera cropped most of the selected note's focus web. `centerOn()` now
+frames visible neighbours, whole dot radii and the control-point hull of curves among them,
+with a 24 px inset. It keeps one 420 ms flight and a closest ratio of 0.22. Locked panning keeps
+the existing centre; search, linked-note hops and backtracking share the new landing. No layout
+or cascade geometry changes. Reasoning and scope: `design/0019`, `animation.md`.
+
+Headed Chrome, same demo fixture and 960x960 window (656x693 graph), degree-125 note:
+
+| Measurement | Before | After |
+|---|---:|---:|
+| Lit endpoints off canvas | 118 / 126 | 0 / 126 |
+| Lit curve samples off canvas | 10,801 / 16,830 (64.2%) | 0 / 16,830 |
+| Curve samples covered by the detail card | 0 | 0 |
+
+`probe-room.mjs` measured both versions. The current fixture reproduces the issue at 64.2%,
+versus the historical 67.7%; the paired numbers above are from one fixture and window.
+The added smoke check covers square, wide and narrow panes, several degrees including isolated
+notes, a hidden group and locked panning. Its initial 30 camera landings all fit; that first
+test failed the state audit because the narrow-pane selection left the sidebar folded.
+The check now restores the panel and persisted settings as well as the camera.
+
+Final targeted run: exit 0, **6/6 demo, 3/3 10k, 1/1 dominant-folder, 1/1 tags,
+1/1 sortspec**. The new framing check covered **34 landings, 2,986 dots and 136,161 curve
+samples with zero clipping**, including locked-centre checks. Existing focus-web rendering,
+fit, pan toggle and hop/backtracking checks passed. This was a scoped headed run, not a full
+suite or a suite stamp.
+
 ## 2026-09-30 — an interrupted suite takes its lanes down, and no run leaks its temp dirs (`github#197`)
 
 The issue assumed an interrupt orphans the Chrome lanes. Measured, that is true of only one path.

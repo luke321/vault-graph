@@ -8021,6 +8021,110 @@ async function stepBack(p) {
   return ok;
 }
 
+// github#134, design/0019
+check("walk framing keeps the visible focus web on canvas", async (p) => {
+  const rows = [];
+  const storedWas = await storeSnap(p);
+  const sheetWas = await p.j(`__vg.sheetOpen`);
+  const panWas = await p.j(`__vg.panEnabled`);
+  let hiddenGroup = null;
+  try {
+    for (const [width, height] of [[960, 960], [1600, 1000], [420, 900]]) {
+      await p.send("Emulation.setDeviceMetricsOverride", { width, height, deviceScaleFactor: 1, mobile: false });
+      await sleep(400);
+      await settle(p);
+      for (const rank of (width === 960 ? [0, 9, 99, 499, -1, -2, -3] : [0, 9, 99, 499, -1])) {
+        if (rank === -2) {
+          await p.eval(`__vg.setPanEnabled(false); void 0`);
+          await sleep(500);
+        }
+        if (rank === -3) {
+          hiddenGroup = await biggestGroup(p);
+          await clickEye(p, hiddenGroup);
+          await settle(p);
+          await sleep(500);
+        }
+        const before = await p.j(`__vg.renderer.getCamera().getState()`);
+        const picked = await p.j(`(function () {
+          var G = __vg.graph, R = __vg.renderer, ids = [];
+          G.forEachNode(function (id, a) {
+            var d = R.getNodeDisplayData(id);
+            if (!a.dupOf && d && !d.hidden) ids.push(id);
+          });
+          ids.sort(function (a, b) { return G.getNodeAttribute(b, "deg") - G.getNodeAttribute(a, "deg"); });
+          var id = ids[${rank} === -1 ? ids.length - 1 : Math.min(Math.max(0, ${rank}), ids.length - 1)];
+          if (!id) return null;
+          var q = document.querySelector("#vg-q"); q.value = G.getNodeAttribute(id, "label");
+          q.dispatchEvent(new Event("input"));
+          var hit = Array.from(document.querySelectorAll("#vg-hits [data-hit]")).find(function (el) {
+            return el.getAttribute("data-hit") === id;
+          });
+          if (!hit) return null;
+          hit.click(); return id;
+        })()`);
+        await sleep(650);
+        const r = await p.j(`(function () {
+          var G = __vg.graph, R = __vg.renderer, id = __vg.state.selected;
+          var dim = R.getDimensions(), set = {}, seen = {}, nodes = 0, offDots = 0, samples = 0, offCurve = 0;
+          set[id] = true;
+          G.forEachEdge(id, function (e, a, s, t) { set[s] = true; set[t] = true; });
+          Object.keys(set).forEach(function (n) {
+            var d = R.getNodeDisplayData(n);
+            if (!d || d.hidden || (__vg.alpha[n] || 0) <= 0.004) { delete set[n]; return; }
+            var v = R.graphToViewport(G.getNodeAttributes(n)), radius = R.scaleSize(d.size);
+            nodes++;
+            if (v.x - radius < -1 || v.x + radius > dim.width + 1 ||
+                v.y - radius < -1 || v.y + radius > dim.height + 1) offDots++;
+          });
+          Object.keys(set).forEach(function (n) {
+            G.forEachEdge(n, function (e, a, s, t) {
+              if (seen[e] || !set[s] || !set[t]) return;
+              seen[e] = true;
+              var ed = R.getEdgeDisplayData(e); if (!ed || ed.hidden) return;
+              var ps = R.graphToViewport(G.getNodeAttributes(s)), pt = R.graphToViewport(G.getNodeAttributes(t));
+              var k = ed.type === "curve" ? ed.curvature || 0 : 0;
+              var cx = (ps.x + pt.x) / 2 + (pt.y - ps.y) * k;
+              var cy = (ps.y + pt.y) / 2 - (pt.x - ps.x) * k;
+              for (var i = 0; i <= 40; i++) {
+                var u = i / 40, v = 1 - u;
+                var x = v * v * ps.x + 2 * v * u * cx + u * u * pt.x;
+                var y = v * v * ps.y + 2 * v * u * cy + u * u * pt.y;
+                samples++;
+                if (x < 0 || x > dim.width || y < 0 || y > dim.height) offCurve++;
+              }
+            });
+          });
+          return { id: id, nodes: nodes, offDots: offDots, samples: samples, offCurve: offCurve,
+                   ratio: R.getCamera().getState().ratio, camera: R.getCamera().getState() };
+        })()`);
+        const lockMoved = rank === -2 && (Math.abs(r.camera.x - before.x) > 1e-6 || Math.abs(r.camera.y - before.y) > 1e-6);
+        rows.push({ width, height, rank, picked, lockMoved, ...r });
+        if (rank === -2) await p.eval(`__vg.setPanEnabled(${panWas}); void 0`);
+        if (hiddenGroup) {
+          await clickEye(p, hiddenGroup);
+          hiddenGroup = null;
+          await settle(p);
+        }
+      }
+    }
+  } finally {
+    await p.send("Emulation.clearDeviceMetricsOverride");
+    await sleep(400);
+    await closeCard(p);
+    if (hiddenGroup) { await clickEye(p, hiddenGroup); await settle(p); }
+    await p.eval(`(function () {
+      __vg.setPanEnabled(${panWas});
+      if (__vg.sheetOpen !== ${sheetWas}) document.querySelector("#vg-sheet").click();
+    })(); void 0`);
+    await sleep(500);
+    await storeBack(p, storedWas);
+  }
+  const failed = rows.filter((r) => !r.picked || r.id !== r.picked || !r.nodes || r.offDots || r.offCurve || r.lockMoved || !Number.isFinite(r.ratio));
+  return { ok: rows.length === 17 && !failed.length && rows.some((r) => r.samples > 0),
+           detail: `${rows.length} landings, ${rows.reduce((n, r) => n + r.nodes, 0)} dots, ` +
+             `${rows.reduce((n, r) => n + r.samples, 0)} curve samples; failures ${JSON.stringify(failed)}` };
+}, { on: ["demo-vault", "test-vault"] });
+
 check("only a hop lengthens the trail", async (p) => {
   await settle(p);
   const start = await selectBySearch(p);
