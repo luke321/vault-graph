@@ -8,6 +8,18 @@ how you tell whether a later change has quietly undone an earlier one.
 Read this when you are about to change something and want to know what it cost to get
 right. For *what shipped when*, see [`../CHANGELOG.md`](../CHANGELOG.md).
 
+Recording follow-up (2026-10-03, github#186): the reusable
+[`record-native.mjs`](../scripts/native-recording.md) uses a queued native desktop clock
+and retains a timestamped FFV1 master before bounded H264 encoding. Separate headed
+1080-square shape Refresh takes at `653d46d` and `aa987d6` retained **339/344** and
+**341/342** distinct native states in their lossless 60 FPS references. Both sources were
+**7.134 s**, both MP4s **7.133333 s**; maximum active source gap **34 ms**, app rAF
+**16.9 ms**, and no active three-frame repeat. Each MP4 reached ended twice, with **1
+then 0** player drops and zero corruption; callback gaps reached **33.5 ms**. These are
+technical candidate results, **not user approval of smoothness**. Rejected CDP recordings
+remain rejected: their roughly 250 ms capture gaps persisted despite fast handlers and
+app rAF near 17 ms. Focused recorder tests, lint and the comment gate pass; no full suite.
+
 Entries predate the release-note split of 2026-08-22 and are not grouped by version: many
 landed on the same day, and the useful axis here is the measurement, not the tag.
 
