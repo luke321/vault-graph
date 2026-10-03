@@ -8,6 +8,7 @@ import { couplingReport, leakReport } from "./smoke-state.mjs";
 import { pngCaptureJs, pngCarriesGraph, pngCaptureDetail } from "./png-capture.mjs";
 import { hiddenBaselineCheck } from "./check-hidden-baseline.mjs";
 import { cascadeWedgesCheck } from "./check-cascade-wedges.mjs";
+import { dimensionRefreshCheck } from "./check-dimension-refresh.mjs";
 import { buildPayloadVault, PAYLOAD, NOTE_COUNT } from "./check-data-escape.mjs";
 import { findChrome } from "./chrome.mjs";
 import { leftmostScreen, leftWindowPos } from "./screen.mjs";
@@ -1137,73 +1138,17 @@ check("tags: a note one disc hides and the other shows arrives with the fill edg
 }, { on: WALK, clock: "real", leaves: ["state.hidden"] });
 
 // github#186, design/0015
-check("tags: fold and regrow moves both discs and converges on the resting layout", async (p) => {
-  const storedWas = await storeSnap(p);
-  const foldWas = await p.j("__vg.foldSwitch");
-  await clearRange(p);
-  await settle(p);
-  const rides = [];
+check("tags: parallel Refresh reverses the old disc and builds the new disc", async (p) => {
+  const storedWas = await storeSnap(p), foldWas = await p.j("__vg.foldSwitch");
+  await clearRange(p); await settle(p);
   try {
-    await p.eval('__vg.setDim("folder"); __vg.foldSwitch = true; void 0');
-    for (const dim of ["tag", "folder"]) {
-      const ride = await p.eval(`new Promise(function (resolve, reject) {
-        var G = __vg.graph, start = {}, previous = {}, frames = 0, inward = 0, outward = 0, reversals = 0, angularStep = 0;
-        var raf = 0, timer = setTimeout(function () { cancelAnimationFrame(raf); reject(new Error("fold timed out")); }, 8000);
-        G.forEachNode(function (id, a) {
-          if ((__vg.alpha[id] || 0) > 0.999) start[id] = Math.hypot(a.x, a.y);
-        });
-        function tick() {
-          try {
-            if (__vg.demo.busy()) {
-              frames++;
-              G.forEachNode(function (id, a) {
-                var al = __vg.alpha[id] || 0, r = Math.hypot(a.x, a.y), prev = previous[id];
-                if (start[id] !== undefined && !a.standIn) {
-                  if (al > 0.5) inward = Math.max(inward, start[id] - r);
-                  if (prev && al > prev.al + 1e-6) reversals++;
-                } else {
-                  if (prev && al > 0.5 && prev.al > 0.5) outward = Math.max(outward, r - prev.r);
-                  if (prev && al < prev.al - 1e-6) reversals++;
-                }
-                var angle = Math.atan2(a.y, a.x);
-                if (prev && al > 0.05 && prev.al > 0.05) {
-                  var da = Math.abs(angle - prev.angle);
-                  angularStep = Math.max(angularStep, Math.min(da, 2 * Math.PI - da));
-                }
-                previous[id] = { al: al, r: r, angle: angle };
-              });
-              raf = requestAnimationFrame(tick); return;
-            }
-            var landed = {}, drift = 0;
-            G.forEachNode(function (id, a) { if ((__vg.alpha[id] || 0) > 0.999) landed[id] = { x: a.x, y: a.y }; });
-            __vg.applyLayout(false); __vg.applyLayout(false);
-            Object.keys(landed).forEach(function (id) {
-              var a = G.getNodeAttributes(id), b = landed[id];
-              drift = Math.max(drift, Math.hypot(a.x - b.x, a.y - b.y));
-            });
-            clearTimeout(timer);
-            resolve({ dim: __vg.state.dim, frames: frames, inward: inward, outward: outward, reversals: reversals,
-              drift: drift, angularStep: angularStep, active: __vg.foldActive, standIns: __vg.standIns().length,
-              path: __vg.lastCascade().path, exit: __vg.lastCascade().exit });
-          } catch (e) { clearTimeout(timer); reject(e); }
-        }
-        document.querySelector('#vg-dim button[data-dim="${dim}"]').click();
-        raf = requestAnimationFrame(tick);
-      })`);
-      rides.push(ride);
-    }
-    return {
-      ok: rides.every((r) => r.frames >= 10 && r.inward > 1 && r.outward > 1 && r.reversals === 0 &&
-        r.angularStep < 1e-5 && r.drift < 0.5 && !r.active && r.standIns === 0 && r.path === "fold and regrow" && r.exit === "converged"),
-      detail: rides.map((r) => `${r.dim}: ${r.frames}f, fold ${r.inward.toFixed(1)}, grow ${r.outward.toFixed(1)}, ` +
-        `reversals ${r.reversals}, angular step ${r.angularStep.toFixed(6)}, relayout ${r.drift.toFixed(3)}, stand-ins ${r.standIns}, ${r.exit}`).join(" | ")
-    };
+    await p.eval("__vg.foldSwitch = true; void 0");
+    return await dimensionRefreshCheck(p);
   } finally {
     await p.eval(`__vg.setDim("folder"); __vg.foldSwitch = ${JSON.stringify(foldWas)}; void 0`);
-    await settle(p);
-    await storeBack(p, storedWas);
+    await settle(p); await storeBack(p, storedWas);
   }
-}, { on: WALK, clock: "real", leaves: ["state.hidden"] });
+}, { on: ["demo-vault", "shape-vault", "tag-vault", "spec-vault"], clock: "real", leaves: ["state.hidden"] });
 
 // github#186, design/0015
 check("tags: hiding the tab midway through a fold releases its temporary state", async (p) => {

@@ -4238,8 +4238,6 @@ function mountVaultGraph(root, data, deps) {
   var leaveEdgeK = 1;
   // github#186, design/0015 -- the worlds overlap while the rows fold
   var foldSwitch = true;
-  // github#186 -- the arrival ends at 0.70; the glide cap catches up after
-  var FOLD_ENTER = 0.05, FOLD_PHASE = 0.65, FOLD_FADE = 0.18;
   var SPREAD_MAX  = 78;
   var SPREAD_PER  = 0.17;
   var SPREAD_MIN  = 24;
@@ -4503,15 +4501,11 @@ function mountVaultGraph(root, data, deps) {
     /** @type {Record<string, { cell: string, at: number }>} */
     var seatsFrom = Object.assign(dict(), pathSeats);
     var folding = !!(opts.fold && opts.hand && opts.from);
-    /** @typedef {{ plan: Plan }} FoldPlan */
+    /** @typedef {{ plan: Plan, members: Record<string, boolean>, cells: Record<string, string>, seats: Record<string, { cell: string, at: number }> }} FoldPlan */
     /** @type {FoldPlan | null} */
     var foldA = null;
     /** @type {FoldPlan | null} */
     var foldB = null;
-    /** @type {Record<string, Point> | null} */
-    var foldSrc = null;
-    /** @type {Record<string, number>} */
-    var foldPitch = dict();
     stopPlay();
     trailRefresh();                        // github#40, design/0012
     if (anim) { WIN.cancelAnimationFrame(anim); anim = null; }
@@ -4950,12 +4944,15 @@ function mountVaultGraph(root, data, deps) {
     /** @param {Plan | null} plan @returns {FoldPlan | null} */
     var holdFold = function (plan) {
       if (!plan) return null;
+      /** @type {FoldPlan} */
+      var held = { plan: plan, members: dict(), cells: dict(), seats: dict() };
       plan.cells.forEach(function (c) {
         c.list.forEach(function (id) {
-          foldPitch[id] = UNIT * (c.inner ? plan.spInner * INNER_SCALE : plan.sp);
+          held.members[id] = true; held.cells[id] = c.k;
+          if (seatsFrom[id]) held.seats[id] = seatsFrom[id];
         });
       });
-      return { plan: plan };
+      return held;
     };
     (function () {
       var a = inWorld(function () { return staticPlan(function (id) { return wasPresent[id]; }); });
@@ -4975,9 +4972,6 @@ function mountVaultGraph(root, data, deps) {
       var aCells = cellsOfG(a), bCells = cellsOfG(b);
       if (folding) {
         foldA = holdFold(a); foldB = holdFold(b);
-        // github#186 -- the leaving disc folds from where it stands
-        foldSrc = dict();
-        graph.forEachNode(function (id) { foldSrc[id] = { x: graph.getNodeAttribute(id, "x"), y: graph.getNodeAttribute(id, "y") }; });
       }
       if (moves.length) {
         splitHold = dict();
@@ -5216,50 +5210,44 @@ function mountVaultGraph(root, data, deps) {
     // github#186, design/0015
     if (folding) {
       [outs, ins].forEach(function (ids, direction) {
-        var held = direction ? foldB : foldA;
-        /** @type {Record<string, boolean>} */
-        var scheduled = dict();
-        if (held) held.plan.cells.forEach(function (c) {
-          var list = c.list.filter(function (id) { return to[id] !== undefined; });
-          var fade = Math.min(FOLD_PHASE, Math.max(FOLD_FADE, FOLD_PHASE * 3 / Math.max(1, list.length)));
-          list.forEach(function (id, index) {
-            var f = list.length < 2 ? 0 : (index * 0.6180339887) % 1;
-            delay[id] = span * ((direction ? FOLD_ENTER : 0) + (FOLD_PHASE - fade) * f);
-            fadeOf[id] = span * fade;
-            scheduled[id] = true;
-          });
-        });
-        ids.forEach(function (id) {
-          if (scheduled[id]) return;
-          delay[id] = span * (direction ? FOLD_ENTER : 0);
-          fadeOf[id] = span * FOLD_PHASE;
+        ids.sort(function (x, y) { var d = (tlRank[x] || 0) - (tlRank[y] || 0); return direction ? d : -d; });
+        var fade = span * FADE_FRAMES * TIME_SCALE / (windowFor(ids.length) + FADE_FRAMES * TIME_SCALE);
+        ids.forEach(function (id, index) {
+          delay[id] = ids.length < 2 ? 0 : (span - fade) * index / (ids.length - 1);
+          fadeOf[id] = fade;
         });
       });
       handLap = 0;
       foldSizes = sizeCap;
-      lastCascade.path = "fold and regrow";
+      lastCascade.path = "parallel refresh";
     }
     /** @param {number} v */
     var foldEase = function (v) {
       v = Math.max(0, Math.min(1, v));
       return v * v * (3 - 2 * v);
     };
-    /** @param {FoldPlan | null} held @param {number} amount @param {Record<string, Point> | null} seats @returns {Record<string, Point>} */
-    var packFold = function (held, amount, seats) {
+    /** @param {FoldPlan | null} held @param {number} amount @param {(plan: Plan, seats: Record<string, { cell: string, at: number }>) => Record<string, Point> | null} walk @returns {Record<string, Point>} */
+    var packFold = function (held, amount, walk) {
       if (!held) return {};
-      // github#186 -- only this disc's notes, or the other disc overrides the fold
-      var out = dict();
-      held.plan.cells.forEach(function (c) {
-        var base = UNIT * (c.inner ? held.plan.r0 * INNER_SCALE : held.plan.rOuter);
-        c.list.forEach(function (id) {
-          var p = seats && seats[id];
-          if (!p) return;
-          var r = Math.hypot(p.x, p.y);
-          var k = r > 1e-9 ? (Math.min(base, r) + Math.max(0, r - base) * amount) / r : 1;
-          out[id] = { x: p.x * k, y: p.y * k };
+      var savedKeep = planKeep, savedCell = cellHold, savedPin = pinnedPlan;
+      planKeep = function (id) { return !!held.members[id]; };
+      cellHold = held.cells; pinnedPlan = null;
+      var endpoint = held.plan;
+      /** @type {Record<string, number>} */
+      var rows = dict();
+      endpoint.cells.forEach(function (c) { rows[c.k] = 1 + (c.rows - 1) * amount; });
+      var depths = { i: 1 + ((endpoint.rows.i || 1) - 1) * amount,
+                     o: 1 + ((endpoint.rows.o || 1) - 1) * amount };
+      try {
+        var planned = buildWedgePlan(true, weightOf, function (c) { return rows[c.k] || 1; },
+          { i: endpoint.spInner, o: endpoint.sp, depth: depths });
+        var positions = planned ? walk(planned, held.seats) : null;
+        var out = dict();
+        if (positions) Object.keys(positions).forEach(function (id) {
+          if (held.members[id]) out[id] = positions[id];
         });
-      });
-      return out;
+        return out;
+      } finally { planKeep = savedKeep; cellHold = savedCell; pinnedPlan = savedPin; }
     };
     cascadeRun = { raf: 0, tick: NOW(), guard: WIN.setTimeout(watchdog, STALL_MS), sizeCap: sizeCap,
                    skel: moveFrom ? null : freshSkel() };
@@ -5399,13 +5387,48 @@ function mountVaultGraph(root, data, deps) {
       /** @type {Record<string, Point> | null} */
       var targets = null;
       var pathResid = 0;
+      /** @param {Plan} plan @param {Record<string, { cell: string, at: number }>} walkSeats */
+      var walkPlan = function (plan, walkSeats) {
+        plan.cells.forEach(function (c) {
+          var slots = c.slots, lo = null;
+          for (var first = 0; first < slots.length;) {
+            var old = walkSeats[slots[first].id];
+            if (old && old.cell === c.k) { lo = old.at; first++; continue; }
+            var end = first + 1;
+            while (end < slots.length && (!walkSeats[slots[end].id] || walkSeats[slots[end].id].cell !== c.k)) end++;
+            var hi = end < slots.length ? walkSeats[slots[end].id].at : null;
+            for (var j = first; j < end; j++) {
+              var seat = slots[j], target = 2 * seat.row + (seat.row % 2 ? 1 - seat.u : seat.u);
+              var start = lo !== null && hi !== null ? lo + (hi - lo) * (j - first + 1) / (end - first + 1)
+                : lo !== null ? Math.max(lo, target) : hi !== null ? Math.min(hi, target) : target;
+              walkSeats[seat.id] = { cell: c.k, at: start };
+            }
+            first = end;
+          }
+        });
+        return ringsLayout(plan, true, function (c, sl) {
+          var at = 2 * sl.row + (sl.row % 2 ? 1 - sl.u : sl.u);
+          var before = walkSeats[sl.id];
+          var ezPath = reduced ? 1 : pr < 1 ? RADIAL_EASE : Math.min(1, RADIAL_EASE + tailFrames * 0.15);
+          var now = !before || before.cell !== c.k
+            ? at : before.at + (at - before.at) * ezPath;
+          walkSeats[sl.id] = pathSeats[sl.id] = { cell: c.k, at: now };
+          var pitch = (c.inner ? plan.spInner * INNER_SCALE : plan.sp);
+          pathResid = Math.max(pathResid, Math.abs(at - now) * UNIT * Math.max(pitch, sl.r * 2 * Math.PI));
+          var row = Math.floor(now / 2), along = now - 2 * row;
+          var tPath = Math.min(1, along), radial = Math.max(0, along - 1);
+          return Object.assign({}, sl, { row: row,
+            r: sl.r + (row + radial - sl.row) * pitch,
+            u: row % 2 ? 1 - tPath : tPath });
+        });
+      };
       if (folding) {
-        var leavePr = foldEase(pr / FOLD_PHASE);
-        var enterPr = foldEase((pr - FOLD_ENTER) / FOLD_PHASE);
-        var oldSeats = leavePr < 1 ? packFold(foldA, 1 - leavePr, foldSrc) : {};
-        var newSeats = enterPr >= 1 ? finalPos : packFold(foldB, enterPr, finalPos);
-        targets = Object.assign({}, oldSeats, newSeats);
         cellNow = null; edgeNow = null; colWalk = null;
+        var oldSeats = pr < 1 ? inWorld(function () { return packFold(foldA, foldEase(1 - pr), walkPlan); }) : {};
+        var oldFit = dotFit;
+        var newSeats = packFold(foldB, foldEase(pr), walkPlan);
+        dotFit = Object.assign({}, oldFit, dotFit);
+        targets = Object.assign({}, oldSeats, newSeats);
       } else if (opts.hand && opts.from) {
         // github#86, design/0015 -- both discs sit in the same place, one shown, one hidden: the
         // github#86 -- old disc fades in place; a dot that has left takes its FINAL
@@ -5435,38 +5458,7 @@ function mountVaultGraph(root, data, deps) {
           if (why) { lastCascade.skelMismatch++; if (!lastCascade.skelFirst) lastCascade.skelFirst = why; }
         }
         traceTag("frame");
-        if (plan) plan.cells.forEach(function (c) {
-          var slots = c.slots, lo = null;
-          for (var first = 0; first < slots.length;) {
-            var old = seatsFrom[slots[first].id];
-            if (old && old.cell === c.k) { lo = old.at; first++; continue; }
-            var end = first + 1;
-            while (end < slots.length && (!seatsFrom[slots[end].id] || seatsFrom[slots[end].id].cell !== c.k)) end++;
-            var hi = end < slots.length ? seatsFrom[slots[end].id].at : null;
-            for (var j = first; j < end; j++) {
-              var seat = slots[j], target = 2 * seat.row + (seat.row % 2 ? 1 - seat.u : seat.u);
-              var start = lo !== null && hi !== null ? lo + (hi - lo) * (j - first + 1) / (end - first + 1)
-                : lo !== null ? Math.max(lo, target) : hi !== null ? Math.min(hi, target) : target;
-              seatsFrom[seat.id] = { cell: c.k, at: start };
-            }
-            first = end;
-          }
-        });
-        targets = plan ? ringsLayout(plan, true, function (c, sl) {
-          var at = 2 * sl.row + (sl.row % 2 ? 1 - sl.u : sl.u);
-          var before = seatsFrom[sl.id];
-          var ezPath = reduced ? 1 : pr < 1 ? RADIAL_EASE : Math.min(1, RADIAL_EASE + tailFrames * 0.15);
-          var now = !before || before.cell !== c.k
-            ? at : before.at + (at - before.at) * ezPath;
-          seatsFrom[sl.id] = pathSeats[sl.id] = { cell: c.k, at: now };
-          var pitch = (c.inner ? plan.spInner * INNER_SCALE : plan.sp);
-          pathResid = Math.max(pathResid, Math.abs(at - now) * UNIT * Math.max(pitch, sl.r * 2 * Math.PI));
-          var row = Math.floor(now / 2), along = now - 2 * row;
-          var tPath = Math.min(1, along), radial = Math.max(0, along - 1);
-          return Object.assign({}, sl, { row: row,
-            r: sl.r + (row + radial - sl.row) * pitch,
-            u: row % 2 ? 1 - tPath : tPath });
-        }) : null;
+        targets = plan ? walkPlan(plan, seatsFrom) : null;
         traceTag("");
       }
       var ez = reduced ? 1
@@ -5476,7 +5468,7 @@ function mountVaultGraph(root, data, deps) {
       if (targets) graph.forEachNode(function (id) {
         var q = targets[id];
         if (!q) return;
-        if (plan) {
+        if (plan || folding) {
           graph.mergeNodeAttributes(id, { x: q.x, y: q.y });
           return;
         }
@@ -5503,7 +5495,6 @@ function mountVaultGraph(root, data, deps) {
         // github#186, decisions/0002 -- a row hop glides, capped per frame
         if (pr < 1) {
           var lim = RADIAL_STEP_MAX * UNIT * (bandLock && bandLock[groupOf(id)] ? bandOf("i").sp * INNER_SCALE : bandOf("o").sp);
-          if (folding && foldPitch[id] > 0) lim = RADIAL_STEP_MAX * foldPitch[id];
           if (lim > 0 && move > lim) move = lim; else if (lim > 0 && move < -lim) move = -lim;
           if (lim > 0 && turn > lim) turn = lim; else if (lim > 0 && turn < -lim) turn = -lim;
         }
@@ -9119,7 +9110,8 @@ function mountVaultGraph(root, data, deps) {
     if (refreshSettingsPanel) refreshSettingsPanel();
     if (persist && onDim) onDim(state.dim);
     // github#76, github#86 -- every wedge changes, so cross the two discs in one sweep
-    if (n) cascade(dropStandIns, { colToggle: true, hand: true, fold: foldSwitch, from: from });
+    if (n) cascade(dropStandIns, { colToggle: true, hand: true, fold: foldSwitch, from: from,
+      totalMs: foldSwitch ? TIMELINE_MS * TIME_SCALE : undefined });
     return state.dim;
   }
 

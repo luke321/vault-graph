@@ -463,7 +463,18 @@ pin reaches the tag dimension and every tag takes its automatic slot. The colour
 folder panel and says which dimension owns it, rather than offering swatches that would appear
 to do nothing. Tag colours would be a `tagColors` map, and that is its own feature.
 
-## Fold continuity after the visual reviews (2026-09-26, github#186)
+## Parallel Refresh after the comparison review (2026-10-03, github#186)
+
+The requested transition is the leaving disc running Refresh backwards while the destination
+runs Refresh forwards in parallel. The fixed-angle radial fold below was rejected in the
+comparison review. Departure now follows reverse date order and arrival follows date order,
+with both running for the normal Refresh duration. Each world replans from its own live
+weights, membership, cells and locked geometry. The cell-local serpentine walker introduced
+in aa987d6 is shared with ordinary Refresh, rather than independently easing polar positions.
+Stand-ins keep the worlds independent until the destination converges; its notes then take
+their stand-ins' final positions. The clock-hand fallback is unchanged.
+
+## Fold continuity after the visual reviews (2026-09-26, github#186, superseded)
 
 The folder/tag fold uses each world's captured endpoint seats. A note's radius moves toward
 its band's first row on departure and from that row on arrival; its endpoint angle stays

@@ -20,7 +20,26 @@ graph. They cover mounting, Refresh, revealing the added groups and hiding them 
 ordinary and reduced motion. Reduced-motion Refresh must leave no playing state behind.
 The reference remains stored in graph units so a viewport resize cannot alter its meaning.
 
-## Fold continuity and sparse-result labels (github#186)
+## Parallel Refresh on a dimension switch (github#186)
+
+The folder/tag switch runs the leaving disc's Refresh backwards and the destination's
+Refresh forwards over the same `TIMELINE_MS * TIME_SCALE` clock. Departure reverses the
+date order; arrival follows it. Each disc owns its endpoint membership, cell assignments,
+geometry lock and running serpentine coordinates. Both use the same cell-local path walker
+as ordinary Refresh; independent polar easing must not cut across the serpentine.
+
+Opacity stays monotone per display node. Both discs remain visible during the transition,
+then the stand-ins are removed and the result equals a fresh resting layout. The radial
+fixed-angle fold and its `FOLD_ENTER`, `FOLD_PHASE`, `FOLD_FADE` constants are superseded.
+The clock-hand fallback remains available through `foldSwitch = false`.
+
+`tags: parallel Refresh` checks both directions, reverse/forward date order, visible angular
+motion in both discs, overlap, opacity monotonicity, convergence and temporary-node cleanup.
+The old fixed-angle animation is a negative control: visible angular motion is effectively
+zero and departure does not reverse date order. The existing Refresh/date-filter wedge
+checks remain unchanged.
+
+## Fold continuity and sparse-result labels (github#186, historical fold)
 
 The fold now interpolates each endpoint row's radius toward that band's first row while
 keeping its endpoint angle. It does not rebuild a fractional top row and redistribute its

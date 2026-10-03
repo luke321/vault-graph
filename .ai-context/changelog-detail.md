@@ -8,6 +8,24 @@ how you tell whether a later change has quietly undone an earlier one.
 Read this when you are about to change something and want to know what it cost to get
 right. For *what shipped when*, see [`../CHANGELOG.md`](../CHANGELOG.md).
 
+Parallel Refresh dimension switch (2026-10-03, github#186): the comparison review rejected
+the fixed-angle radial fold. The leaving disc now runs reverse date-order Refresh while
+the destination runs forward date-order Refresh, on the same normal Refresh clock and
+through the existing cell-local serpentine walker. The old animation fails the new motion
+check (angular movement approximately zero, no reverse date order). Headed checks on demo,
+shape, tag and sortspec cover both directions: no opacity reversals, zero resting-layout
+drift and no stand-ins left. Existing Refresh/date-filter checks retain zero wedge escapes
+and zero path inversions on all four fixtures. A first shape run hit the watchdog; its
+fresh repeat converged in both directions. No watchdog threshold was changed.
+
+The two affected comparison clips were re-recorded serially with labelled rehearsals.
+Demo retained 328/328 distinct source states, source 7.284 s to MP4 7.283333 s, maximum
+active source gap 17 ms, two completed playbacks with 0/1 dropped frames. Tag retained
+327/344 states after 60 Hz resampling, 7.384 s to 7.383333 s, maximum source gap 34 ms,
+playback drops 1/0. Both have no active three-frame hold; rejected first takes remain in
+the evidence. Visual acceptance remains the reviewer's. Review controls now mark pairs,
+persist existing per-clip hash keys and hide reviewed pairs by default with a show toggle.
+
 Cold-browser investigation (2026-10-03, github#186): an opt-in `--rehearse` mode runs
 the action before capture, restores local storage, reloads in the same owned browser,
 and rejects any difference in initial controls, node attributes, camera or viewport.
