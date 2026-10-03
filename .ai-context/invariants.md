@@ -14,6 +14,21 @@ check, pass or fail — exiting non-zero so it can gate a push. The one property
 **not** cover is the per-frame animation steps; that section says so and stays manual. Numbers below are from a 450-note vault (1458 links) on
 2026-08-22; the shape matters more than the exact figure.
 
+## A walk frames its visible focus web (github#134)
+
+Search, linked-note navigation and backtracking share `centerOn()`. The landing includes visible
+neighbour dots and the quadratic hull of edges among them, with a 24 px inset. The closest ratio
+remains 0.22 and the flight remains 420 ms. A locked camera keeps its centre and widens enough
+to contain that same geometry. Filtering out a neighbour removes its framing cost.
+
+Check: `node scripts/smoke.mjs --only "walk framing"`. It drives search at 960x960, 1600x1000 and
+420x900, samples whole dot radii and curves, and covers high/low-degree notes, an isolated note,
+a hidden group and locked panning on the demo and 10k fixtures. The layout is not moved by a
+camera flight; the existing hop/backtracking check protects that separately.
+
+Measured on the demo at a 960x960 window: 118 of 126 lit endpoints outside the canvas became 0;
+10,801 of 16,830 curve samples outside became 0. See `design/0019` for scope and geometry.
+
 ## Plan parity
 
 The static plan and the live (opacity-weighted) plan must agree cell for cell.
