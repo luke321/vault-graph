@@ -22,6 +22,15 @@ The reference remains stored in graph units so a viewport resize cannot alter it
 
 ## Parallel Refresh on a dimension switch (github#186)
 
+Sizing resolves each adjacent note to its display node in the arriving disc. A temporary
+stand-in keeps its note's link count, including self-link weighting, and sees the arriving
+stand-ins of its neighbours. The departing originals being hidden in this world must not
+zero that score. Before taking the settled size baseline, transfer and remove stand-ins,
+recompute visible-link ranks for the real nodes, and lay out the destination. A fresh alpha
+sync and relayout after the switch must change neither the size rank nor the dot size.
+`tags: parallel Refresh preserves link-based sizes` checks incoming ranks against an instant
+destination and settled sizes against a fresh recalculation, in both directions on four fixtures.
+
 The folder/tag switch runs the leaving disc's Refresh backwards and the destination's
 Refresh forwards over the same `TIMELINE_MS * TIME_SCALE` clock. Departure reverses the
 date order; arrival follows it. Each disc owns its endpoint membership, cell assignments,

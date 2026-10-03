@@ -8,6 +8,27 @@ how you tell whether a later change has quietly undone an earlier one.
 Read this when you are about to change something and want to know what it cost to get
 right. For *what shipped when*, see [`../CHANGELOG.md`](../CHANGELOG.md).
 
+Dimension-switch dot sizing (2026-10-03, github#186): arriving stand-ins shared adjacency
+lists that pointed to the departing originals. Those originals are hidden in the arriving
+world, so every linked arrival acquired a zero visible-link score: 1,370 demo notes and
+824 tag-fixture notes in the isolated reproduction. The stale ranks also survived settlement.
+The fix resolves adjacent notes to their arriving display nodes and retains self-link weights.
+Stand-ins are now removed and real-node ranks restored before measuring the settled baseline.
+
+The old headed demo fails the regression: over 103,000 incoming samples have the wrong rank
+in each direction; all 1,403 settled sizes change after a fresh alpha sync and relayout,
+by up to 4.61/5.10 renderer size units. The corrected demo, shape, tag and sortspec each pass
+both directions with zero incoming-rank mismatches, zero settled-size changes and no surviving
+stand-ins. Each direction samples 49,000–243,000 incoming nodes. Two lifecycle checks also
+pass, including tab hiding halfway through the transition. Lint is zero; comments remain 350/350.
+
+Both comparison clips were re-recorded with the accepted native recorder, serially and with
+labelled rehearsals. Demo retains 308/308 distinct source states, 7.250 s to 7.250 s, playback
+drops 0/1; tag retains 339/342 after resampling, 7.367 s to 7.366667 s, playback drops 1/1.
+Both have active source gaps at most 34 ms, no active three-frame hold, and two completed
+playbacks without corruption. Two rejected demo takes remain in the evidence. Only these
+two media hashes and their review marks change; playback acceptance remains manual.
+
 Parallel Refresh dimension switch (2026-10-03, github#186): the comparison review rejected
 the fixed-angle radial fold. The leaving disc now runs reverse date-order Refresh while
 the destination runs forward date-order Refresh, on the same normal Refresh clock and

@@ -1016,9 +1016,10 @@ function mountVaultGraph(root, data, deps) {
       var own = basisFiled(id);
       (adj[id] || []).forEach(function (e) {
         if (own && !basisFiled(e.o)) return;
-        var w = e.o === id ? 2 : 1;
+        var peer = !oldWorld && leaving[e.o] ? e.o + SAT_SEP + "s" : e.o;
+        var w = e.o === noteOf(id) ? 2 : 1;
         all[id] = (all[id] || 0) + w;
-        if (seen[id] && seen[e.o]) vis[id] = (vis[id] || 0) + w;
+        if (seen[id] && seen[peer]) vis[id] = (vis[id] || 0) + w;
       });
     });
     /** @type {Record<string, number>} */
@@ -1327,10 +1328,12 @@ function mountVaultGraph(root, data, deps) {
       graph.dropNode(sid);
       delete tagFiling[sid]; delete adj[sid];
       delete tlRank[sid]; delete tlMs[sid]; delete alpha[sid];
+      delete visSrc[sid]; delete visDst[sid];
     });
     standIns = [];
     leaving = dict();
     leftGroup = dict();
+    visSrc = visDst = rankVisible(willShow); visEase = 1;
     lazyAdded = []; lazyShown = null;
     neighbourCache = null;
     focusSetCache = { key: undefined, set: null };
@@ -4862,6 +4865,7 @@ function mountVaultGraph(root, data, deps) {
       cellNow = null; edgeNow = null; posSrc = null;
       colWalk = null;
       assignPositions(finalPos);
+      if (opts.hand && standIns.length) dropStandIns();
       // github#21
       ringsLayout();
       ringsLayout();

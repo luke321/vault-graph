@@ -9,6 +9,7 @@ import { pngCaptureJs, pngCarriesGraph, pngCaptureDetail } from "./png-capture.m
 import { hiddenBaselineCheck } from "./check-hidden-baseline.mjs";
 import { cascadeWedgesCheck } from "./check-cascade-wedges.mjs";
 import { dimensionRefreshCheck } from "./check-dimension-refresh.mjs";
+import { dimensionSizingCheck } from "./check-dimension-sizing.mjs";
 import { buildPayloadVault, PAYLOAD, NOTE_COUNT } from "./check-data-escape.mjs";
 import { findChrome } from "./chrome.mjs";
 import { leftmostScreen, leftWindowPos } from "./screen.mjs";
@@ -1138,6 +1139,18 @@ check("tags: a note one disc hides and the other shows arrives with the fill edg
 }, { on: WALK, clock: "real", leaves: ["state.hidden"] });
 
 // github#186, design/0015
+check("tags: parallel Refresh preserves link-based sizes during and after the switch", async (p) => {
+  const storedWas = await storeSnap(p), foldWas = await p.j("__vg.foldSwitch");
+  await clearRange(p); await settle(p);
+  try {
+    await p.eval("__vg.foldSwitch = true; void 0");
+    return await dimensionSizingCheck(p);
+  } finally {
+    await p.eval(`__vg.setDim("folder"); __vg.foldSwitch = ${JSON.stringify(foldWas)}; void 0`);
+    await settle(p); await storeBack(p, storedWas);
+  }
+}, { on: ["demo-vault", "shape-vault", "tag-vault", "spec-vault"], clock: "real", leaves: ["state.hidden"] });
+
 check("tags: parallel Refresh reverses the old disc and builds the new disc", async (p) => {
   const storedWas = await storeSnap(p), foldWas = await p.j("__vg.foldSwitch");
   await clearRange(p); await settle(p);
