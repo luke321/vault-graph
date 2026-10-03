@@ -5655,7 +5655,9 @@ function mountVaultGraph(root, data, deps) {
   }
   // github#186 -- every dot's size at the unfiltered rest: a filter's bound
   /** @type {Record<string, number>} */
-  var restDot = dict();
+  var restHiU = dict();
+  /** @type {Record<string, number>} */
+  var restCapU = dict();
   /** @type {Record<string, number>} */
   var restT = dict();
   var restTaking = false;
@@ -5665,7 +5667,7 @@ function mountVaultGraph(root, data, deps) {
     var sig = state.dim + "#" + restVer;
     var filtered = filterOn();
     if (filtered && sig === restSig) return;
-    if (sig !== restSig) { restDot = dict(); restT = dict(); }
+    if (sig !== restSig) { restHiU = dict(); restCapU = dict(); restT = dict(); }
     restTaking = true;
     try {
       if (filtered) unfilteredRest();
@@ -5676,8 +5678,18 @@ function mountVaultGraph(root, data, deps) {
   /** @param {string} id @param {{ size?: number }} a */
   function takeRest(id, a) {
     var t = ((a.size || NODE_MIN) - NODE_MIN) / (NODE_MAX - NODE_MIN);
-    restT[id] = t > 1 ? 1 : t < 0 ? 0 : t;
-    restDot[id] = dotPx(a.size || NODE_MIN, id);
+    t = t > 1 ? 1 : t < 0 ? 0 : t;
+    restT[id] = t;
+    var v = dotPx(a.size || NODE_MIN, id), hi = lastDotHi, lo = Math.min(hi, DOT_MIN_PX);
+    restHiU[id] = hi / pxPerUnit;
+    if (v < lo + (hi - lo) * t - 1e-9) restCapU[id] = v / pxPerUnit; else delete restCapU[id];
+  }
+  // github#186
+  /** @param {string} id */
+  function restAt(id) {
+    var hi = restHiU[id] * pxPerUnit, lo = Math.min(hi, DOT_MIN_PX);
+    var v = lo + (hi - lo) * (restT[id] || 0), cap = restCapU[id];
+    return cap !== undefined && cap * pxPerUnit < v ? cap * pxPerUnit : v;
   }
   // github#186
   function unfilteredRest() {
@@ -6309,8 +6321,8 @@ function mountVaultGraph(root, data, deps) {
     var v = lo + (hi - lo) * (id !== undefined ? dotRamp(id) : 1);
     if (v < lo) v = lo;
     // github#186 -- the rest was taken at ratio 1; its floor share follows
-    var rest = id !== undefined && !restTaking && restDot[id] !== undefined
-      ? restDot[id] + (camLo - DOT_MIN_PX) * (1 - (restT[id] || 0)) : undefined;
+    var rest = id !== undefined && !restTaking && restHiU[id] !== undefined
+      ? restAt(id) + (camLo - DOT_MIN_PX) * (1 - (restT[id] || 0)) : undefined;
     // github#186 -- under a filter a dot keeps at least its resting size
     if (rest !== undefined && v < rest && filterOn()) v = rest;
     var capU = edgeCap[id];
@@ -11857,8 +11869,8 @@ function mountVaultGraph(root, data, deps) {
                     seamNB: /** @param {string} bk */ function (bk) { return (bandOf(bk).nG || 0) + (bandOf(bk).nSub || 0); },
                     clearAlpha: clearAlpha, buildWedgePlan: buildWedgePlan,
                     applyLayout: applyLayout, isHighlighted: isHighlighted,
-                    restDots: function () { return Object.assign(dict(), restDot); },
-                    forgetRest: function () { restVer++; restDot = dict(); restT = dict(); },
+                    restDots: function () { var o = dict(); for (var k in restHiU) o[k] = restAt(k); return o; },
+                    forgetRest: function () { restVer++; restHiU = dict(); restCapU = dict(); restT = dict(); },
                     ringColors: ringColors,
                     colorOf: colorOf,
                     nodeColor: nodeColor,

@@ -4116,6 +4116,51 @@ check("a page that lays out filtered still takes its dots' rest from the unfilte
   };
 }, { on: "all" });
 
+// github#186
+check("a rest taken at one stage size still bounds the dots at another", async (p) => {
+  const clear = `__vg.state.hidden[__vg.state.dim] = {}; __vg.state.hiddenSub = {};
+    __vg.state.from = null; __vg.state.to = null; __vg.state.until = null;
+    __vg.syncAlpha(); __vg.applyLayout(false); void 0`;
+  const SIZES = `(function () { var R = __vg.renderer, o = {};
+    __vg.graph.forEachNode(function (id) { if ((__vg.alpha[id] || 0) > 0.5) o[id] = R.scaleSize(R.getNodeDisplayData(id).size); });
+    return o; })()`;
+  const dpr = await p.j(`window.devicePixelRatio || 1`);
+  const hid = await p.j(`(function () {
+    var order = __vg.groupOrder(), g = order[order.length - 1], h = {}; h[g] = true;
+    __vg.forgetRest();
+    __vg.state.hidden[__vg.state.dim] = h; __vg.syncAlpha(); __vg.applyLayout(false);
+    return g; })()`);
+  await sleep(200);
+  let carried, retaken;
+  try {
+    await p.send("Emulation.setDeviceMetricsOverride", { width: 760, height: 640, deviceScaleFactor: dpr, mobile: false });
+    await sleep(900);
+    await settle(p);
+    carried = await p.j(SIZES);
+    await p.eval(`__vg.forgetRest(); __vg.applyLayout(false); void 0`);
+    await sleep(200);
+    retaken = await p.j(SIZES);
+  } finally {
+    await p.send("Emulation.clearDeviceMetricsOverride").catch(() => {});
+    await sleep(600);
+    await p.eval(clear);
+    await sleep(200);
+    await camReset(p);
+  }
+  const ids = Object.keys(retaken);
+  let worst = 0, off = 0;
+  for (const id of ids) {
+    const d = Math.abs((carried[id] || 0) / retaken[id] - 1);
+    if (d > 0.01) off++;
+    if (d > worst) worst = d;
+  }
+  return {
+    ok: ids.length > 0 && off === 0,
+    detail: `"${hid}" hidden, rest taken, stage resized to 760x640: ${off} of ${ids.length} dots ` +
+            `differ from a rest retaken at the new size by more than 1% (worst ${(worst * 100).toFixed(1)}%)`,
+  };
+}, { on: "all" });
+
 // github#13
 check("the hub stays the same share of the disc as it is filtered", async (p) => {
   await p.eval(`__vg.state.hidden.folder = {}; __vg.syncAlpha(); __vg.applyLayout(false); void 0`);
