@@ -52,3 +52,11 @@ failure was measured over 48 frames; a toggle now runs 62–123, ample to conver
   tempted to remove it should read the rejected option above first.
 
 **2026-09-26, github#186.** The easing and the per-frame cap were radial only; the angle was taken from the target outright, so a serpentine flip on a row hop crossed the wedge in one frame. The angle now eases and is capped the same way, as an arc at the target radius, and its residual counts toward convergence. Numbers in `invariants.md`, *The angle was still a jump*.
+
+**2026-10-03, github#186: supersedes independent angular easing.** The September change let
+notes lag behind their wedge boundaries and take shortcuts through neighbours. Normal cascades
+now ease a scalar position along the cell's serpentine and project it through the shared live
+wedge boundaries. Row changes travel around the row ends. A shared row cap preserves rank;
+invisible notes follow the same path and arrivals start between their surviving neighbours.
+Resting integer rows remain unchanged. The fixed-angle fold retains its radial easing and cap.
+See `animation.md`, *Cascade movement within a wedge*, and the normal-motion wedge regression.

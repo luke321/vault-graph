@@ -56,6 +56,29 @@ packing re-derives continuously instead of switching from one arrangement to ano
 
 ## What decides a note's position
 
+### Cascade movement within a wedge (github#186, 2026-10-03)
+
+The live plan allocates wedge boundaries once for the whole frame. Normal cascades ease a
+note's position along its cell's serpentine, then project that position through those current
+boundaries. They do not ease each note's world angle independently: that allowed notes to lag
+behind a moving boundary and enter the neighbouring wedge.
+
+The path coordinate is `2 * row + along`, with `along` increasing in rank order. The first half
+of each two-unit interval runs along a row; the second connects its end to the next row at the
+same wedge edge. `RADIAL_EASE` applies to this scalar coordinate. Integer resting slots are
+unchanged. Row caps are shared within a cell, since per-note hashed caps invert the rank order
+as a row dissolves. Invisible members follow the path too; arrivals are inserted between their
+existing neighbours before easing, instead of reusing stale seats from before a filter.
+
+The residual includes path length and is drained before settling. Fold-and-regrow still uses
+its fixed-angle endpoint paths and `RADIAL_STEP_MAX`. `unfilteredRest()` saves and restores the
+path cache along with the other simulated layout state.
+
+`scripts/check-cascade-wedges.mjs` samples normal-motion Refresh, a date filter, and its removal.
+It checks actual note angles against allocated wedge boundaries, rank order along the path,
+and a converged exit. A smallest-covering-arc estimate is unsuitable here: an almost-full-circle
+wedge can have an internal gap larger than the gap occupied by its neighbour.
+
 Every term below is either handed in from the endpoints or derived per frame. **Derived per frame
 is where the bugs are.** When something jumps, find the term whose source is the current frame.
 

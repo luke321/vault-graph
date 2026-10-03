@@ -2758,14 +2758,7 @@ function mountVaultGraph(root, data, deps) {
       // github#186 -- a half rounds INWARD: a lone note sits nearest the hub
       var cStart = centred ? Math.floor((bandRows - nEff) / 2) : 0;
       // github#186, decisions/0002 -- the top slot's OUTER EDGE may not pass the rail
-      // github#186 -- a note's cap up to half a row early: rows dissolve
-      /** @param {string} id */
-      var rowCapOf = function (id) {
-        var h = 2166136261;
-        for (var ci = 0; ci < id.length; ci++) { h ^= id.charCodeAt(ci); h = Math.imul(h, 16777619); }
-        var j = ((h >>> 0) % 1000) / 2000;
-        return Math.max(0, Math.floor(rows - 0.5 - j + 1e-9));
-      };
+      var rowCap = Math.max(0, Math.floor(rows - 0.5 + 1e-9));
       /** @type {{ id: string, w: number, row: number }[]} */
       var recs = [];
       var acc = 0;
@@ -2780,7 +2773,6 @@ function mountVaultGraph(root, data, deps) {
           ? (-base + Math.sqrt(Math.max(0, base * base + 2 * SP * target))) / SP
           : target / Math.max(1e-9, base);
         if (pp < 0) pp = 0;
-        var rowCap = rowCapOf(id);
         if (pp > rowCap) pp = rowCap;
         var cRow = 0;
         if (centred) {
@@ -2854,13 +2846,16 @@ function mountVaultGraph(root, data, deps) {
   }
 
   var REPACK_BELOW = 0.55;
+  /** @type {Record<string, { cell: string, at: number }>} */
+  var pathSeats = dict();
 
   /**
    * @param {Plan | null} [planIn]   a plan to lay out; built from the live alphas when absent
    * @param {boolean} [strict]
+   * @param {(c: Cell, sl: Slot) => Slot} [walk]
    * @returns {Record<string, Point> | null}   node id -> position, or null with nothing to show
    */
-  function ringsLayout(planIn, strict) {
+  function ringsLayout(planIn, strict, walk) {
     // github#41, design/0011
     if (trace) {
       tracePut({ what: "pass", roomIn_i: pitchUnits("i"), roomIn_o: pitchUnits("o"),
@@ -3026,6 +3021,9 @@ function mountVaultGraph(root, data, deps) {
         // github#186, decisions/0017 -- one ceiling per cell, never per note
         var cellMin = Infinity;
         c.slots.forEach(function (sl) {
+          var slotR = sl.r;
+          if (walk) sl = walk(c, sl);
+          else pathSeats[sl.id] = { cell: c.k, at: 2 * sl.row + (sl.row % 2 ? 1 - sl.u : sl.u) };
           if (!present(sl.id)) return;
           var rs = rowShare ? rowShare[Math.round(sl.r * 1000)] : null;
           var sm = seamAt(sl.r * UNIT, rs ? rs.nB : nB, isInner ? "i" : "o");
@@ -3040,6 +3038,7 @@ function mountVaultGraph(root, data, deps) {
             a0 = arcFrom() + sm.gap * seamsBefore + sm.avail * fracBefore - sm.gap / 2;
             a1 = a0 + sm.avail * frac * open;
           }
+          if (walk && a1 < a0) a0 = a1 = (a0 + a1) / 2;
           if (probe && probe.watch === sl.id) {
             probe.watched = { k: c.k, g: c.g, u: Math.round(sl.u * 1e5) / 1e5,
                               slotR: Math.round(sl.r), slots: c.slots.length,
@@ -3056,7 +3055,7 @@ function mountVaultGraph(root, data, deps) {
           var bk = isInner ? "i" : "o";
           // github#186, decisions/0017
           var pitU = pitchUnits(bk);
-          var rowWs = rowN[sl.r] > 1e-9 ? rowN[sl.r] : 0;
+          var rowWs = rowN[slotR] > 1e-9 ? rowN[slotR] : 0;
           var wSelf = alpha[sl.id] || 0;
           /** @param {number} shr */
           var slotOf = function (shr) { return arc * rGraph * (shr > 0 ? shr : 1); };
@@ -4501,6 +4500,8 @@ function mountVaultGraph(root, data, deps) {
   function cascade(done, opts) {
     if (dead) return;                      // github#62
     opts = opts || {};
+    /** @type {Record<string, { cell: string, at: number }>} */
+    var seatsFrom = Object.assign(dict(), pathSeats);
     var folding = !!(opts.fold && opts.hand && opts.from);
     /** @typedef {{ plan: Plan }} FoldPlan */
     /** @type {FoldPlan | null} */
@@ -4883,7 +4884,10 @@ function mountVaultGraph(root, data, deps) {
 
     /** @type {Record<string, boolean>} */
     var wasPresent = dict();
-    graph.forEachNode(function (id) { wasPresent[id] = present(id); });
+    graph.forEachNode(function (id) {
+      wasPresent[id] = present(id);
+      if (!wasPresent[id]) delete seatsFrom[id];
+    });
 
     var ovAfter = true;
 
@@ -5394,6 +5398,7 @@ function mountVaultGraph(root, data, deps) {
       var plan = null;
       /** @type {Record<string, Point> | null} */
       var targets = null;
+      var pathResid = 0;
       if (folding) {
         var leavePr = foldEase(pr / FOLD_PHASE);
         var enterPr = foldEase((pr - FOLD_ENTER) / FOLD_PHASE);
@@ -5430,16 +5435,51 @@ function mountVaultGraph(root, data, deps) {
           if (why) { lastCascade.skelMismatch++; if (!lastCascade.skelFirst) lastCascade.skelFirst = why; }
         }
         traceTag("frame");
-        targets = plan ? ringsLayout(plan, true) : null;
+        if (plan) plan.cells.forEach(function (c) {
+          var slots = c.slots, lo = null;
+          for (var first = 0; first < slots.length;) {
+            var old = seatsFrom[slots[first].id];
+            if (old && old.cell === c.k) { lo = old.at; first++; continue; }
+            var end = first + 1;
+            while (end < slots.length && (!seatsFrom[slots[end].id] || seatsFrom[slots[end].id].cell !== c.k)) end++;
+            var hi = end < slots.length ? seatsFrom[slots[end].id].at : null;
+            for (var j = first; j < end; j++) {
+              var seat = slots[j], target = 2 * seat.row + (seat.row % 2 ? 1 - seat.u : seat.u);
+              var start = lo !== null && hi !== null ? lo + (hi - lo) * (j - first + 1) / (end - first + 1)
+                : lo !== null ? Math.max(lo, target) : hi !== null ? Math.min(hi, target) : target;
+              seatsFrom[seat.id] = { cell: c.k, at: start };
+            }
+            first = end;
+          }
+        });
+        targets = plan ? ringsLayout(plan, true, function (c, sl) {
+          var at = 2 * sl.row + (sl.row % 2 ? 1 - sl.u : sl.u);
+          var before = seatsFrom[sl.id];
+          var ezPath = reduced ? 1 : pr < 1 ? RADIAL_EASE : Math.min(1, RADIAL_EASE + tailFrames * 0.15);
+          var now = !before || before.cell !== c.k
+            ? at : before.at + (at - before.at) * ezPath;
+          seatsFrom[sl.id] = pathSeats[sl.id] = { cell: c.k, at: now };
+          var pitch = (c.inner ? plan.spInner * INNER_SCALE : plan.sp);
+          pathResid = Math.max(pathResid, Math.abs(at - now) * UNIT * Math.max(pitch, sl.r * 2 * Math.PI));
+          var row = Math.floor(now / 2), along = now - 2 * row;
+          var tPath = Math.min(1, along), radial = Math.max(0, along - 1);
+          return Object.assign({}, sl, { row: row,
+            r: sl.r + (row + radial - sl.row) * pitch,
+            u: row % 2 ? 1 - tPath : tPath });
+        }) : null;
         traceTag("");
       }
       var ez = reduced ? 1
              : pr < 1 ? RADIAL_EASE
                       : Math.min(1, RADIAL_EASE + tailFrames * 0.15);
-      var resid = 0;
+      var resid = pathResid;
       if (targets) graph.forEachNode(function (id) {
         var q = targets[id];
         if (!q) return;
+        if (plan) {
+          graph.mergeNodeAttributes(id, { x: q.x, y: q.y });
+          return;
+        }
         // github#41
         var h = Math.atan2(q.y, q.x);
         if ((alpha[id] || 0) < 0.05) {
@@ -5759,7 +5799,9 @@ function mountVaultGraph(root, data, deps) {
     var sMaxR = lastMaxR, sScale = sizeScale, sPin = pinnedPlan, sKeep = planKeep;
     var sCellNow = cellNow, sEdgeNow = edgeNow, sFitPos = fitPos;
     var sTrace = trace, sProbe = probe, sDbg = DBG.cells;
+    var sSeats = pathSeats;
     try {
+      pathSeats = dict();
       state.from = state.to = state.until = null;
       seedHidden(); state.hiddenSub = dict();
       alpha = dict();
@@ -5782,6 +5824,7 @@ function mountVaultGraph(root, data, deps) {
       lastMaxR = sMaxR; sizeScale = sScale; pinnedPlan = sPin; planKeep = sKeep;
       cellNow = sCellNow; edgeNow = sEdgeNow; fitPos = sFitPos; fitVer = -1;
       trace = sTrace; probe = sProbe; DBG.cells = sDbg;
+      pathSeats = sSeats;
     }
   }
 
@@ -11908,6 +11951,10 @@ function mountVaultGraph(root, data, deps) {
                     get lazyEdges() { return lazyEdges; },
                     isOrphan: isOrphan,
                     wedgeDebug: wedgeDebug, wedgeEdges: wedgeEdges,
+                    walkSeats: function () { return Object.keys(pathSeats).map(function (id) {
+                      var seat = pathSeats[id];
+                      return { id: id, rank: basisRank(id), cell: seat.cell, at: seat.at };
+                    }); },
                     // github#165 -- where the key landed, in host coordinates
                     wedgeLegendBox: function () { return DBG.legendBox || null; },
                     bandRef: function () { return geomLock ? geomLock.bandR : null; },

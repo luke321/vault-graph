@@ -7,6 +7,7 @@ import { couplingReport, leakReport } from "./smoke-state.mjs";
 // github#142
 import { pngCaptureJs, pngCarriesGraph, pngCaptureDetail } from "./png-capture.mjs";
 import { hiddenBaselineCheck } from "./check-hidden-baseline.mjs";
+import { cascadeWedgesCheck } from "./check-cascade-wedges.mjs";
 import { buildPayloadVault, PAYLOAD, NOTE_COUNT } from "./check-data-escape.mjs";
 import { findChrome } from "./chrome.mjs";
 import { leftmostScreen, leftWindowPos } from "./screen.mjs";
@@ -4081,6 +4082,8 @@ check("hidden defaults do not change visible geometry or dots on mount and Refre
 check("hidden defaults do not change visible geometry or dots after animated Refresh", hiddenBaselineCheck,
   { clock: "real" });
 check("hidden defaults do not change the separate unlinked group", p => hiddenBaselineCheck(p, false));
+check("a cascade keeps moving notes inside separate wedges", cascadeWedgesCheck,
+  { on: ["demo-vault", "shape-vault", "tag-vault"], clock: "real" });
 
 check("a page that lays out filtered still takes its dots' rest from the unfiltered disc", async (p) => {
   const clear = `__vg.state.hidden[__vg.state.dim] = Object.fromEntries(

@@ -1134,6 +1134,16 @@ notes starting a move to 7**, and no frame on any act starts more than 8 except 
   largest capped frame is **67 units**, 6 frames over three times the median instead of 15, and the
   only jumps left are notes under alpha 0.05, which snap by design. `scratchpad/186/walkjump.mjs`
   is the harness.
+**2026-10-03 correction (github#186):** independent angular easing above is superseded. It
+bounded individual frame steps but allowed notes to escape moving wedges. Normal cascades now
+ease along each cell's serpentine and use the frame's shared boundaries; the fixed-angle fold
+retains its radial cap. A cell uses one row cap, and arriving notes start between surviving
+neighbours. `--only "a cascade keeps"` measures normal-motion Refresh and both directions of a
+date filter: no lit note outside its allocated wedge (0.01-degree numerical tolerance), no rank
+inversions along the path, at least 20 frames, and a converged exit. Golden layouts remain the
+resting-layout authority. The earlier smallest-covering-arc diagnostic can falsely include a
+neighbour when one wedge covers almost the whole circle, so it is not this regression's oracle.
+
 #### A switch took its lock over twice the vault
 
 The github#186 state tracking (`vg.bandTotal`, `vg.lockRows` at every check boundary) caught the
