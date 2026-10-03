@@ -1,5 +1,60 @@
 # github#186 — wedge-packing investigation tooling
 
+## Native recording cadence investigation, 2026-10-03
+
+The remaining demo folder-to-tag hold occurs before encoding, in Chrome's frame
+presentation path. A headed diagnostic kept the accepted app `aa987d6` unchanged,
+delayed the trigger by another second, and logged render submissions, graph position
+checksums and Chrome GPU/compositor tracing alongside the native lossless recording.
+The hold moved with the animation: three repeated frames at 142–192 ms after cascade
+start, rather than staying at the original recording's one-second mark.
+
+During that hold, native capture gaps were at most 17 ms and rAF gaps 16.8 ms.
+Cascade frames 9, 10 and 11 submitted renders with different graph positions. Chrome's
+`AnimationFrame::Presentation` events instead had a 50.025 ms gap at 153–203 ms.
+A GPU raster flush took 22.076 ms; shader-cache load/store events bracketed 21.480 ms
+of work inside it, followed by swap throttling. This distinguishes an actual browser
+presentation stall from intentional stationary easing, MP4 duplication introduced
+by resampling, or a playback-only dropped frame.
+
+The baseline sortspec solo-out diagnostic showed the same mechanism at the phases
+seen in the archived rejected takes: GPU raster flushes of 20.061 ms around 1.208 s
+and 16.035 ms around 1.890 s, with new shader-cache entries and presentation gaps of
+33.328 and 33.366 ms respectively. That diagnostic retained 122/122 source states and
+had only two-frame repeats, so it does not reproduce the exact three-frame historical
+hold. Capture/display phase and workload can change how many repeated samples a
+missed display deadline produces. The app rAF maximum remained 17.1 ms.
+
+**Confirmed:** the reproduced demo hold is a browser presentation stall, and the
+baseline exhibits matching GPU/presentation stalls at the relevant phases.
+**Leading explanation:** first-use Skia GPU shader creation. Cache events alone do
+not identify the exact compiler operation. Chromium's
+[shader cache](https://chromium.googlesource.com/chromium/src/+/refs/heads/main/gpu/command_buffer/service/gr_shader_cache.cc)
+and Skia's
+[program builder](https://skia.googlesource.com/skia.git/+/de7f6e2fe567f4d1f1699cde72f7cffb8c19faa2/src/gpu/ganesh/gl/builders/GrGLProgramBuilder.cpp)
+explain the cache and shader-creation path; the attribution remains an inference
+until the stricter control below runs.
+
+A preliminary same-browser rehearsal of demo tags then folders removed the
+three-frame hold and all new shader-cache entries during the measured action. Its
+largest presentation gap was 33.409 ms. It is supporting evidence only: a shared
+suite overlapped this run, and playback was stopped after the first completed pass.
+It is not a replacement review clip or a complete controlled acceptance run.
+
+The stricter controls are prepared: rehearse the exact action, reload the same page
+in the same browser, prove identical initial graph/view state, then record with
+Skia shader tracing enabled. They were deferred behind the shared manual-playtest
+suite; the waiting helper was stopped with no child process, so no unattended
+capture remains queued. All owned capture browsers and record/screen locks were
+released. No full suite or app change was made.
+
+Raw traces, diagnostic masters, derived summaries and reproduction scripts remain
+in the local `vg186-cadence-cause` scratch directory. Small evidence copies are
+preserved beside the existing review under `evidence/cadence-cause`. The original
+60 clips, their checkmarks and both failed cadence flags remain unchanged. Warming
+a recording would measure warm behavior; it must not be presented as fixing the
+app's first-use behavior or as repairing frames in an existing recording.
+
 Investigation only. Nothing here is a fix, and nothing in `src/` or `plugin/` changed. The
 write-up, with the clips, the stills and the charts, is the review Artifact linked from the
 issue; this folder holds what re-produces its numbers.
