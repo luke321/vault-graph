@@ -361,6 +361,10 @@ async function audit(page, url, prof, k, fixture) {
       __vg.readTheme(); __vg.renderer.refresh(); })(); void 0`);
     await sleep(400);
     const probe = await page.eval(`(${pageProbe.toString()})(${JSON.stringify({ titles: !geo })})`);
+    if (!geo && arg("shots")) {
+      const shot = await page.send("Page.captureScreenshot", { format: "jpeg", quality: 82 });
+      writeFileSync(join(resolve(arg("shots")), `${fixture}-${prof.name}-${theme}.jpg`), Buffer.from(shot.data, "base64"));
+    }
     if (!geo) geo = probe;
     const surf = (parseColour(probe.surface) || [0, 0, 0, 1]).slice(0, 3);
     themed[theme] = { probe, surf };
