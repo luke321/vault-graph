@@ -10,6 +10,7 @@ import { hiddenBaselineCheck } from "./check-hidden-baseline.mjs";
 import { cascadeWedgesCheck } from "./check-cascade-wedges.mjs";
 import { dimensionRefreshCheck } from "./check-dimension-refresh.mjs";
 import { dimensionSizingCheck } from "./check-dimension-sizing.mjs";
+import { countSizingCheck } from "./check-count-sizing.mjs";
 import { buildPayloadVault, PAYLOAD, NOTE_COUNT } from "./check-data-escape.mjs";
 import { findChrome } from "./chrome.mjs";
 import { leftmostScreen, leftWindowPos } from "./screen.mjs";
@@ -4004,17 +4005,18 @@ check("the disc's density follows the notes on screen", async (p) => {
   const dss = sq.map((q) => q.ds).filter((v) => v > 0);
   const dsLo = dss.length ? Math.min(...dss) : 1, dsHi = dss.length ? Math.max(...dss) : 1;
   // github#186 -- the lattice follows the notes; a dot stays within
-  // github#186 -- 1x..DOT_GROW_MAX of its own rest, note by note
+  // github#186 -- the accepted count floor may exceed DOT_GROW_MAX
   const GROW = (await p.j("__vg.debugDump().dots.growMax").catch(() => null)) || 3;
   let under = 0, over = 0, compared = 0, worstLo = 1, worstHi = 1;
   for (const r of rows.slice(1)) {
+    const countFloor = Math.min(7.5, 1.5 + 0.7 * Math.log2(Math.max(1, Object.keys(base.sizes).length / Math.max(1, Object.keys(r.sizes).length))));
     for (const id of Object.keys(r.sizes || {})) {
       const a = base.sizes ? base.sizes[id] : undefined;
       if (!(a > 0)) continue;
       compared++;
       const q = r.sizes[id] / a;
       if (q < 0.97) { under++; if (q < worstLo) worstLo = q; }
-      if (q > GROW * 1.03) { over++; if (q > worstHi) worstHi = q; }
+      if (r.sizes[id] > Math.max(GROW * a, countFloor) * 1.03) { over++; if (q > worstHi) worstHi = q; }
     }
   }
   const size_ok = under === 0 && over === 0;
@@ -4025,7 +4027,7 @@ check("the disc's density follows the notes on screen", async (p) => {
             sq.map((q) => `${q.band[0]}${q.n}:${q.ratio}/d${q.ds}`).join(" ") +
             ` -- worst square ${worstSq.ratio} (needs ${SQ_LO.toFixed(2)}-${SQ_HI.toFixed(2)}),` +
             ` ${compared} dot-states against their unfiltered size: ${under} under (worst ${worstLo.toFixed(2)}x), ` +
-            `${over} past ${GROW}x (worst ${worstHi.toFixed(2)}x); median dot grew ${grew.toFixed(2)}x, ` +
+            `${over} past the rest/count bound (worst ${worstHi.toFixed(2)}x); median dot grew ${grew.toFixed(2)}x, ` +
             `diameter/step ${dsLo}-${dsHi} (context, not asserted)` +
             `; context, not asserted: pitch*sqrt(shown) ` +
             roots.map((v) => Math.round(v)).join("/") + ` spread ${spread.toFixed(3)}x` +
@@ -5339,6 +5341,8 @@ check("sparse filtered results stay unlabelled without explicit interaction", as
   return { ok: sparseInk === 0 && restInk === 0, detail: `${day}: ${sparseInk} automatic label pixels; cleared: ${restInk}` };
 });
 
+check("count-based note sizes ease through filtering and interruption", countSizingCheck, { on: "all", clock: "real" });
+
 check("filtered to the bone, the disc stays drawable", async (p) => {
   await clearRange(p);
   await settle(p);
@@ -5430,14 +5434,14 @@ check("filtered to the bone, the disc stays drawable", async (p) => {
              // these when there is no step to size a dot against.
              minDotPx: dots.length ? Math.round(dots[0] / perPx * 100) / 100 : 0,
              medDotPx: Math.round(medDot / perPx * 100) / 100,
-             rows: Object.keys(rows).length, sizes: sizes };
+             rows: Object.keys(rows).length, sizes: sizes, perPx: perPx };
   })()`;
   // github#186 -- every probe at ratio 1: the floor is a screen size
   // github#186 -- and the auto-fit would move it under the measure
   const atOne = async () => { await p.eval("__vg.renderer.getCamera().setState({ ratio: 1 }); void 0"); await sleep(150); };
   await atOne();
   const rest = await p.j(probe);
-  // github#186 -- a filtered dot stays within 1x..DOT_GROW_MAX of its rest
+  // github#186 -- growth is bounded by its rest or the accepted count floor
   const GROW = (await p.j("__vg.debugDump().dots.growMax").catch(() => null)) || 3;
   const bad = [];
   const seen = [];
@@ -5452,18 +5456,19 @@ check("filtered to the bone, the disc stays drawable", async (p) => {
                `${r.worstRel}% of the row median`);
     }
     // github#186 -- in place of github#65's step floor and github#53's
-    // github#186 -- each dot within 1x..DOT_GROW_MAX of its own rest
+    // github#186
     let under = 0, over = 0, worstLo = 1, worstHi = 1, compared = 0;
+    const countFloor = Math.min(7.5, 1.5 + 0.7 * Math.log2(Math.max(1, rest.shown / Math.max(1, r.shown)))) * r.perPx;
     for (const id of Object.keys(r.sizes || {})) {
       const a = rest.sizes ? rest.sizes[id] : undefined;
       if (!(a > 0)) continue;
       compared++;
       const q = r.sizes[id] / a;
       if (q < 0.97) { under++; if (q < worstLo) worstLo = q; }
-      if (q > GROW * 1.03) { over++; if (q > worstHi) worstHi = q; }
+      if (r.sizes[id] > Math.max(GROW * a, countFloor) * 1.03) { over++; if (q > worstHi) worstHi = q; }
     }
     if (under) bad.push(`${label}: ${under} of ${compared} dots under their resting size (worst ${worstLo.toFixed(2)}x)`);
-    if (over) bad.push(`${label}: ${over} of ${compared} dots past ${GROW}x their resting size (worst ${worstHi.toFixed(2)}x)`);
+    if (over) bad.push(`${label}: ${over} of ${compared} dots past the rest/count bound (worst ${worstHi.toFixed(2)}x)`);
     if (r.holeRatio > 3.2) bad.push(`${label}: a gap ${r.holeRatio}x the row median INSIDE one wedge`);
   };
 
@@ -8844,8 +8849,7 @@ async function runOne(vault, work) {
     "--disable-backgrounding-occluded-windows",
     "--disable-renderer-backgrounding",
     "--disable-background-timer-throttling",
-    ...(slot ? [`--window-position=${slot.x},${slot.y}`]
-             : HEADED ? [] : [leftWindowPos()]),
+    ...(slot ? [`--window-position=${slot.x},${slot.y}`] : [leftWindowPos()]),
     slot ? `--window-size=${slot.w},${slot.h}` : "--window-size=1600,1000", `--app=${url}`
   ], { stdio: ["ignore", "ignore", "pipe"], detached: false });
   void focus.watch(chrome.pid);
@@ -8871,6 +8875,16 @@ async function runOne(vault, work) {
     for (;;) {
       try { page = await attach(PORT, want); break; }
       catch (e) { if (Date.now() > deadline) throw e; await sleep(400); }
+    }
+    // github#186
+    if (process.platform === "win32") {
+      const { bounds } = await page.send("Browser.getWindowForTarget");
+      const screen = leftmostScreen();
+      if (bounds.left < screen.x || bounds.top < screen.y ||
+          bounds.left + bounds.width > screen.x + screen.w || bounds.top + bounds.height > screen.y + screen.h) {
+        throw new Error("Chrome is outside the claimed left screen: " + JSON.stringify(bounds));
+      }
+      log("Chrome bounds verified on left screen: " + JSON.stringify(bounds));
     }
     // github#104
     if (!BROWSER) { try { BROWSER = (await json(PORT, "/json/version")).Browser; } catch { void 0; } }

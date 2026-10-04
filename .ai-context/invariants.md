@@ -78,7 +78,7 @@ available through explicit interaction, including hover and focus.
 Verification added to `tags: fold and regrow` measures angular drift between lit frames as well
 as movement, opacity reversals, cleanup, and resting-layout parity. `sparse filtered results`
 measures zero automatic label-canvas ink on a sparse day and after clearing the filter.
-The existing `filtered to the bone` check continues to enforce the 1×–3× dot-size bounds.
+The existing `filtered to the bone` check enforces the rest/count size bound described below.
 
 Historical measurement on 2026-09-26, before removing automatic labels, executing the actual
 fold and label methods in isolation:
@@ -1007,7 +1007,28 @@ verbatim from `probe-bone.js`) before anything changed.
   and the check's floor is the thing to revisit. **The full suite therefore shows the tag vault
   at 66/67 on this branch, by decision**, until that floor is.
 
-#### A filtered dot is ranked by its visible links and stays within 1×–3× of its rest
+#### A filtered dot keeps its link rank and a count-based readability floor
+
+Balanced was accepted on 2026-10-04 after comparing headed stills on all five fixtures.
+The floor is `min(7.5, 1.5 + 0.7 * log2(baseline / max(1, visible)))` CSS pixels of radius,
+active only below the baseline count. `DOT_COUNT_GAIN = 0.7` and `DOT_COUNT_MAX_PX = 7.5`
+are independent of link rank. Visible timeline weights are summed by unique note; transient
+dimension-switch copies never count as additional notes. Settings-hidden notes are excluded
+from the baseline. The full-vault layout and original sizes remain unchanged.
+
+The floor follows the same eased source/destination clock as visible-link rank. Interrupting
+a cascade starts from its current floor. Each endpoint is measured with its own floor, and
+temporary unfiltered rest measurements bypass it. The final size is bounded by the larger
+of `3 * rest` and the new floor, then by wedge, neighbour, hub and animation endpoint clearance.
+Spatial constraints may therefore keep a dot smaller than the requested floor.
+
+`count-based note sizes ease through filtering and interruption` checks narrowing, widening,
+interruption continuity, empty ranges, exact restoration and settled relayout parity on every
+fixture. The density and bone checks retain their spacing/overlap assertions and now bound
+growth against the independently calculated count floor as well as the original rest.
+
+The following measurements document the previous 2026-09-25 decision, superseded only where
+the accepted readability floor exceeds the old three-times-rest ceiling.
 
 Asked on 2026-09-25, watching the range clips: *"why are the notes growing so much when filtering
 to the last few percent by date? links are vanishing as well so note weight should not

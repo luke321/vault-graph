@@ -950,6 +950,7 @@ function mountVaultGraph(root, data, deps) {
   /** @type {Record<string, number>} */
   var visDst = dict();
   var visEase = 1;
+  var countFloorFrom = 0, countFloorTo = 0;
   // github#186
   /** @type {Record<string, Record<string, number>>} */
   var basisDegrees = dict();
@@ -1334,6 +1335,7 @@ function mountVaultGraph(root, data, deps) {
     leaving = dict();
     leftGroup = dict();
     visSrc = visDst = rankVisible(willShow); visEase = 1;
+    countFloorFrom = countFloorTo = measureCountFloor();
     lazyAdded = []; lazyShown = null;
     neighbourCache = null;
     focusSetCache = { key: undefined, set: null };
@@ -4199,6 +4201,7 @@ function mountVaultGraph(root, data, deps) {
     graph.forEachNode(function (id) { alpha[id] = visible(id) ? timeFactor(id) : 0; });
     // github#186 -- the rank follows what is on screen
     visSrc = visDst = rankVisible(willShow); visEase = 1;
+    countFloorFrom = countFloorTo = measureCountFloor();
     // github#40, design/0012
     trailRefresh();
   }
@@ -4534,6 +4537,7 @@ function mountVaultGraph(root, data, deps) {
         if (b === undefined) b = a;
         cur[id] = a + (b - a) * visEase;
       });
+      countFloorFrom = countFloorPx(); countFloorTo = measureCountFloor();
       visSrc = cur; visDst = rankVisible(willShow); visEase = 0;
     })();
     // github#86 -- only the switch's own cascade draws stand-ins
@@ -4569,6 +4573,8 @@ function mountVaultGraph(root, data, deps) {
     /** @type {{ x: number, y: number, ratio: number, angle: number } | null} */
     var deferredFitTo = null;
     var fitRode = false;
+    var sourceSizeRatio = renderer.getCamera().getState().ratio || 1;
+    var targetSizeRatio = opts.colToggle && camAtRest ? fitRatio() : sourceSizeRatio;
     if (opts.colToggle && camAtRest) {
       if (fitRatio() < renderer.getCamera().getState().ratio) { deferredAutoFit = true; deferredFitTo = fitTarget(); }
       else fit();
@@ -5095,11 +5101,14 @@ function mountVaultGraph(root, data, deps) {
         var sizes = dict();
         // github#186 -- the endpoint's own rank: A the source's, B the destination's
         var keepEase = visEase;
+        var keepRatio = dotMeasureRatio;
+        dotMeasureRatio = alphaFn ? targetSizeRatio : sourceSizeRatio;
         visEase = alphaFn ? 1 : 0;
         graph.forEachNode(function (id, at) {
           if ((alpha[id] || 0) > 0.004) sizes[id] = dotPx(at.size, id);
         });
         visEase = keepEase;
+        dotMeasureRatio = keepRatio;
         fitPos = null; fitVer = -1;
         var got = { pos: outPos, cells: cellRoom, edges: edgeCap, sizes: sizes };
         cellNow = savedCell; edgeNow = savedEdge;
@@ -6332,14 +6341,37 @@ function mountVaultGraph(root, data, deps) {
   // github#13
   var DOT_OF_PITCH = 11 / 28;
   var DOT_MIN_PX = 1.5;
-  // github#186 -- a filtered dot grows at most this far past its rest
+  // github#186
   var DOT_GROW_MAX = 3;
+  var DOT_COUNT_GAIN = 0.7, DOT_COUNT_MAX_PX = 7.5;
+  /** @type {number | null} */
+  var dotMeasureRatio = null;
   // github#186, decisions/0017
   var DOT_MAX_SPREAD = DENSITY_MAX;
   var DOT_OVER_PITCH = DENSITY_MAX;
   var sizeScale = 1;
   // github#186
   var pxPerUnit = 1;
+
+  // github#186
+  function measureCountFloor() {
+    if (!filterOn()) return 0;
+    /** @type {Record<string, number>} */
+    var weights = dict();
+    graph.forEachNode(function (id) {
+      if (!visible(id)) return;
+      var key = noteOf(id);
+      weights[key] = Math.max(weights[key] || 0, timeFactor(id));
+    });
+    var n = 0;
+    for (var key in weights) n += weights[key];
+    var baseline = basisCount();
+    if (n >= baseline) return 0;
+    return Math.min(DOT_COUNT_MAX_PX, DOT_MIN_PX + DOT_COUNT_GAIN * Math.log2(baseline / Math.max(1, n)));
+  }
+  function countFloorPx() {
+    return countFloorFrom + (countFloorTo - countFloorFrom) * visEase;
+  }
 
   // github#77, design/0013
   var PREVIEW_R_PX = [0.35, 0.65, 1.38, 2.19, 4.06];
@@ -6388,6 +6420,7 @@ function mountVaultGraph(root, data, deps) {
       edgeCap: edgeCap[id], hubRow0: !!hubRow0[id],
       walking: { room: false, cell: !!cellNow, edge: !!edgeNow },
       out: dotPx(size, id), ceil: lastDotHi, floorPx: lastDotLo,
+      countFloorPx: countFloorPx(),
       fit: fitNow ? fitNow[id] : undefined
     };
   }
@@ -6423,7 +6456,8 @@ function mountVaultGraph(root, data, deps) {
     var hi = DOT_OF_PITCH * u * pxPerUnit;
     lastDotHi = hi;
     // github#107 -- a floor in SCREEN px; the renderer divides by the ratio
-    var camLo = restTaking ? DOT_MIN_PX : DOT_MIN_PX * (renderer ? renderer.getCamera().getState().ratio || 1 : 1);
+    var cameraRatio = dotMeasureRatio !== null ? dotMeasureRatio : renderer ? renderer.getCamera().getState().ratio || 1 : 1;
+    var camLo = restTaking ? DOT_MIN_PX : DOT_MIN_PX * cameraRatio;
     var lo = Math.min(hi, camLo);
     lastDotLo = lo;
     // github#107, github#186 -- the floor IS the ramp's bottom, so no dot is pinned to it
@@ -6434,6 +6468,8 @@ function mountVaultGraph(root, data, deps) {
       ? restAt(id) + (camLo - DOT_MIN_PX) * (1 - (restT[id] || 0)) : undefined;
     // github#186 -- under a filter a dot keeps at least its resting size
     if (rest !== undefined && v < rest && filterOn()) v = rest;
+    var countFloor = restTaking ? 0 : countFloorPx() * cameraRatio;
+    if (v < countFloor) v = countFloor;
     var capU = edgeCap[id];
     if (capU !== undefined && capU > 0 && v > capU * pxPerUnit) v = capU * pxPerUnit;
     // github#41, design/0011
@@ -6449,8 +6485,8 @@ function mountVaultGraph(root, data, deps) {
       var hubU = HUB_ROW0_FRAC * geomLock.r0 * INNER_SCALE * UNIT;
       if (v > hubU * pxPerUnit) v = hubU * pxPerUnit;
     }
-    // github#186 -- and never more than DOT_GROW_MAX times it
-    if (rest !== undefined && v > DOT_GROW_MAX * rest) v = DOT_GROW_MAX * rest;
+    // github#186
+    if (rest !== undefined && v > Math.max(DOT_GROW_MAX * rest, countFloor)) v = Math.max(DOT_GROW_MAX * rest, countFloor);
     // github#66
     if (id !== undefined && cascadeRun && cascadeRun.sizeCap) {
       var scap = cascadeRun.sizeCap[id];
@@ -11929,6 +11965,7 @@ function mountVaultGraph(root, data, deps) {
                                              bandTotal: geomLock.bandTotal } : null,
                         bands: { inner: bandStat(pts.slice(0, gi)), outer: bandStat(pts.slice(gi)) },
                         dots: { ofPitch: r3(DOT_OF_PITCH), minPx: DOT_MIN_PX, growMax: DOT_GROW_MAX,
+                                countGain: DOT_COUNT_GAIN, countMaxPx: DOT_COUNT_MAX_PX, countFloorPx: countFloorPx(),
                                 maxSpread: DOT_MAX_SPREAD,
                                 clear: DOT_CLEAR, overPitch: DOT_OVER_PITCH,
                                 m: r3(1 / (NODE_MAX - NODE_MIN)), b: 0, lo: 0 },

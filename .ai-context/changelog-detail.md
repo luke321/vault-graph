@@ -8,6 +8,36 @@ how you tell whether a later change has quietly undone an earlier one.
 Read this when you are about to change something and want to know what it cost to get
 right. For *what shipped when*, see [`../CHANGELOG.md`](../CHANGELOG.md).
 
+Balanced count-based dot floor (2026-10-04, github#186, decisions/0017): the maintainer
+selected Balanced from the 27-still comparison. Below the baseline count a filtered dot's
+radius is at least `min(7.5, 1.5 + 0.7 * log2(baseline / visible))` CSS pixels. Visible
+notes are counted once, fractionally for timeline fades; groups hidden in settings stay out
+of the baseline. The floor eases with the cascade (`countFloorFrom` to `countFloorTo` along
+`visEase`) and restarts from its drawn value on interruption. It may exceed
+`DOT_GROW_MAX` times rest. Wedge, neighbour, hub and endpoint caps still bind. Measured on
+the built pages at 1080 x 1080: the 10k fixture's last three generated days (97 of 10,002)
+went from median radius 1.74 to 6.18 px; the last seven (136) to 5.84 px; the two newest
+root notes, and the demo vault's single-note folder, to 7.5 px. Hiding the demo's largest
+folder (997 of 1,403) leaves the median at 2.83 px, since the floor there is about 2 px.
+The new `count-based note sizes` check passed on all five fixtures: no floor reversals,
+no interruption jump, no landing or restoration drift. That run predates the endpoint fix
+below and must be repeated.
+
+Soloing a folder auto-fits the camera, and the endpoint sizes the walk is capped at were
+taken at the source ratio, so the floor briefly overshot its landing by 25%. Endpoint
+sizes now use the destination ratio (`targetSizeRatio`). The headed smoke harness also
+omitted `--window-position` under `--headed`, which put a test window on the centre
+monitor. It now always places the window and refuses to run unless Chrome's reported
+bounds sit inside the left screen (measured: x -2080, y 196, 1600 x 1000).
+
+Focused smoke checks after both fixes: demo 7/7, shape 5/5, tag 7/7, spec 5/5. The 10k
+fixture is 3/5, and neither failure comes from this change; the same checks on
+`d4a2c15`, `6530c84`, `653d46d`, `aa987d6`, `9f29dc4` and HEAD `2ada18d` also fail. *The
+disc's density follows* finds dots under 0.97 times their unfiltered size, worst 0.95,
+in all of them (HEAD 2452 dot-states, Balanced 1943), with the camera at ratio 1 and the
+page idle. *Filtered to the bone* finds 2 of 2566 dots at 3.10 times rest with Weekly
+Reviews hidden, identical at HEAD. Both are open on the branch.
+
 Sparse automatic labels removed (2026-10-04, github#186): the user requested removing
 the rule that labelled settled filtered views with at most 12 visible notes. The renderer
 now draws only explicitly requested labels; hover, focus and search paths remain intact.

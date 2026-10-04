@@ -24,10 +24,11 @@ imported below; if you are a contributor, its absence is normal and nothing here
 - **A dot never outgrows its two resting sizes** while a cascade walks; a fade never reverses. With
   **Size dots from the frame** on (a view setting, on by default; `?nofit` turns it off on the page) a
   walking dot may also be held *below* them by its clearance on the frame being drawn, never above.
-- **A filtered dot is ranked by its visible links and stays within 1×–3× of its rest.** Links that
-  vanish under a date range or a hidden group shrink the note through the walk; the rows collapsing
-  never grow it past `DOT_GROW_MAX` times its baseline size. Groups hidden in settings contribute
-  no members or links to that baseline; temporary legend and date filters retain its locked rings.
+- **A filtered dot keeps its link rank and gains a count-based readability floor.** Balanced adds
+  0.7 CSS pixels of radius per halving of the visible count, from 1.5 up to 7.5 pixels. Growth is
+  bounded by the larger of that floor and `DOT_GROW_MAX` times its baseline size; spatial and
+  animation endpoint caps still apply. Groups hidden in settings contribute no members or links
+  to that baseline; temporary legend and date filters retain its locked rings.
 - **Only depth-1 subfolders with their own tint slot are pushed**; a sub-wedge earns a slot only if it can fill one.
 - **The page is scoped**: every CSS rule under `.vault-graph`, every id through `$()`; nothing shipped reaches the network.
 - **The layout matches its golden snapshot** on all five fixtures — never regenerate a golden to make a check pass.

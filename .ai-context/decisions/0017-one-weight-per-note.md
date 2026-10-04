@@ -5,6 +5,20 @@
 
 ## Context
 
+**Accepted extension, 2026-10-04 (github#186): Balanced readability.** After reviewing
+still comparisons on all five fixtures, the maintainer chose a count-based minimum radius:
+`min(7.5, 1.5 + 0.7 * log2(baseline / max(1, visible)))` CSS pixels while filtering below
+the baseline count. It supplements the link-weight ramp and may exceed the old three-times-rest
+ceiling. The new upper bound is the larger of that ceiling and this floor. Wedge, neighbour,
+hub and cascade endpoint caps remain authoritative. Full-vault sizes are unchanged.
+
+The floor interpolates on the cascade's eased clock, retaining its current value on interruption.
+Destination size caps use the destination camera ratio when folder filtering also auto-fits;
+measuring both endpoints with the starting zoom overstates the final screen-pixel floor in
+graph units and causes a temporary overshoot. The count uses timeline weights and unique notes,
+so a dimension-switch stand-in cannot double it. The following sections retain the earlier
+decisions and measurements that led to the link-weight and three-times-rest rules.
+
 Three quantities decided how much of the disc a note got, and only one of them knew about links.
 
 - **Arc** came from a note's *opacity* alone. Every note counted the same, however connected.
