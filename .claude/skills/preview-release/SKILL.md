@@ -7,7 +7,7 @@ description: >
   publish it as a Claude Artifact to look at. Read-only: touches no file, bumps no version,
   never runs release.ps1 or git push/tag, never fetches or pushes. Use when the user asks
   "preview the release note", "show me what the release would say", "what's the top of the next
-  release look like", or "/preview-release". Safe to run from any session, unlike cut-release.
+  release look like", or "/preview-release". Read-only, so safe to run from any checkout, unlike cut-release.
 ---
 
 # Previewing the top of the next release note
@@ -100,7 +100,7 @@ Structure, matching `releasing.md` items 1–4 exactly (nothing from item 5 — 
 appendix, no divider, this is only the reel):
 
 1. One bold line naming what this batch is actually about, in the release's own voice — not a
-   commit-log summary. There is no name yet (that's step 5 of a real cut, his pick), so head the
+   commit-log summary. There is no name yet (that's step 5 of a real cut, the maintainer's pick), so head the
    draft `**[working title]**` or similar rather than inventing one that would look chosen.
 2. No hero image.
 3. One `###` per feature sorted into that bucket in step 3, in the shape step 2 read off the

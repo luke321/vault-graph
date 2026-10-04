@@ -6897,11 +6897,56 @@ function mountVaultGraph(root, data, deps) {
     renderer.refresh();
   }
 
+  // github#134, design/0019
   /** @param {string} id */
   function centerOn(id) {
     var d = renderer.getNodeDisplayData(id);
     if (!d) return;
-    renderer.getCamera().animate({ x: d.x, y: d.y, ratio: 0.22 }, { duration: 420 });
+    var camera = renderer.getCamera(), cam = camera.getState();
+    var dim = renderer.getDimensions(), pad = 24, radius = 0;
+    var left = Infinity, right = -Infinity, top = Infinity, bottom = -Infinity;
+    var nx0 = Infinity, nx1 = -Infinity, ny0 = Infinity, ny1 = -Infinity;
+    /** @type {Record<string, boolean>} */
+    var set = dict(), seen = dict();
+    /** @param {{x: number, y: number}} n @param {{x: number, y: number}} p */
+    function include(n, p) {
+      nx0 = Math.min(nx0, n.x); nx1 = Math.max(nx1, n.x);
+      ny0 = Math.min(ny0, n.y); ny1 = Math.max(ny1, n.y);
+      left = Math.min(left, p.x); right = Math.max(right, p.x);
+      top = Math.min(top, p.y); bottom = Math.max(bottom, p.y);
+    }
+    [id].concat(neighboursOf(id)).forEach(function (n) {
+      var nd = renderer.getNodeDisplayData(n);
+      if (!nd || nd.hidden || (alpha[n] || 0) <= 0.004) return;
+      set[n] = true;
+      include(nd, renderer.graphToViewport(graph.getNodeAttributes(n)));
+      radius = Math.max(radius, renderer.scaleSize(nd.size));
+    });
+    Object.keys(set).forEach(function (n) {
+      graph.forEachEdge(n, function (e, attrs, s, t) {
+        if (seen[e] || !set[s] || !set[t]) return;
+        seen[e] = true;
+        var geo = edgeCurveGeom(e, s, t);
+        if (!geo || !geo.k) return;
+        var ns = renderer.getNodeDisplayData(s), nt = renderer.getNodeDisplayData(t);
+        include({ x: (ns.x + nt.x) / 2 - (nt.y - ns.y) * geo.k,
+                  y: (ns.y + nt.y) / 2 + (nt.x - ns.x) * geo.k }, geo.cp);
+      });
+    });
+    var x = d.x, y = d.y, ratio = 0.22;
+    if (Number.isFinite(left)) {
+      var width = right - left, height = bottom - top;
+      x = (nx0 + nx1) / 2; y = (ny0 + ny1) / 2;
+      if (!renderer.getSetting("enableCameraPanning")) {
+        x = cam.x; y = cam.y;
+        width = 2 * Math.max(Math.abs(left - dim.width / 2), Math.abs(right - dim.width / 2));
+        height = 2 * Math.max(Math.abs(top - dim.height / 2), Math.abs(bottom - dim.height / 2));
+      }
+      ratio = Math.max(ratio, cam.ratio * Math.max(
+        (width + 2 * radius) / Math.max(1, dim.width - 2 * pad),
+        (height + 2 * radius) / Math.max(1, dim.height - 2 * pad)));
+    }
+    camera.animate({ x: x, y: y, ratio: ratio }, { duration: 420 });
   }
 
   /* ---------------------------------------------------------------- UI */

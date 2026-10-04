@@ -1,5 +1,9 @@
 # preview-release — change log
 
+## 2026-09-29 - no longer names a session role (github#194)
+
+"Safe to run from any session" became "from any checkout"; "his pick" became "the maintainer's pick".
+
 ## 2026-09-11 — read the last published release before drafting
 
 Added step 2, "Read the last published release before drafting anything", and renumbered the

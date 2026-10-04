@@ -5,8 +5,8 @@ description: >
   letter: enumerate the range, build the release/<version> branch, write the CHANGELOG section
   and release body, re-record every clip and the hero by default, rehearse and pay the suite
   once, merge down, tag, and let the workflow publish. Use when the user says "cut a release", "ship
-  <version>", "release <name>", or "/cut-release". Orchestrator-only: refuses to run from a
-  dispatched ticket worktree. Invoking this skill IS the standing authorization for the pushes
+  <version>", "release <name>", or "/cut-release". Primary checkout only: refuses to run from a
+  ticket worktree. Invoking this skill IS the standing authorization for the pushes
   and merges it describes -- it does not ask again at each one, but it does show the status
   table after every step and stops at any named decision point.
 ---
@@ -20,10 +20,12 @@ with this skill; after that, this file is enough to drive the mechanics. Where t
 
 ## Before starting
 
-- **Orchestrator only.** `CLAUDE.md`: "Only the orchestrator session pushes to `develop` or cuts
-  a release." If this session is a dispatched ticket worktree, stop and say so instead of running
-  any of this.
-- **Confirm no other release or suite run is in flight**: `node scripts/lock.mjs status`.
+- **Primary checkout only.** `CLAUDE.md`: only the primary checkout pushes to `develop` or cuts a
+  release. If this is a ticket worktree (`git rev-parse --git-common-dir` names a path under
+  `.git`), stop and say so instead of running any of this.
+- **Confirm no other release or suite run is in flight**: `node scripts/harness-hook.mjs status`
+  forwards to the configured harness hook; with none set it says `no harness hook configured --
+  nothing is locked`, which means there is nothing to check (`.ai-context/harness-hook.md`).
 
 ## Ask everything first, then run
 
@@ -34,20 +36,20 @@ stopping again.
 
 **Front-load these, before step 1:**
 
-1. **The release name** (step 5) -- propose 2-4 candidates unless he has already said one.
+1. **The release name** (step 5) -- propose 2-4 candidates unless the maintainer has already said one.
 2. **Anything visual to re-record beyond the default.** Everything is re-recorded every release
    (github#121); what needs asking is whether a feature shipped with *no* clip and no storyboard
    act, because writing one is product work and changes what this cut is.
-3. **This release's own polish/fix asks**, if he has any.
+3. **This release's own polish/fix asks**, if there are any.
 4. **The drafts, both of them, together:** the `CHANGELOG.md` section and the release body.
    Write them from the range at step 1, publish the body as an Artifact, and get them approved in
    the same exchange as the questions above. Do not draft the body at step 13 and ask then -- by
-   then he has been waiting through the suite, the clips and three pushes for a question you
+   then the maintainer has been waiting through the suite, the clips and three pushes for a question you
    could have asked at the start.
 
 **Then run steps 1-16 without stopping**, except for these, which are not optional:
 
-- **The clip review (step 8) and the update strip (step 9).** He looks at what was recorded
+- **The clip review (step 8) and the update strip (step 9).** The maintainer looks at what was recorded
   before it is committed, and at the strip rendered, before either ships. These catch a capture
   that grabbed the wrong window and a strip nobody has seen — neither of which any gate sees.
 - **Anything that fails.** A red gate, a failing check, a workflow that goes red: stop, fix it,
@@ -62,14 +64,14 @@ without asking. Invoking this skill is the authorization for all of it.
 ## Keep the chat short
 
 **The table is the report.** Post it after every step, then at most two lines of prose: what is
-newly done, and what is blocked or waiting on him. Nothing else.
+newly done, and what is blocked or waiting on the maintainer. Nothing else.
 
 Everything that explains or justifies a step goes where it can be read on demand and skipped by
 default — the commit message, the issue, `.ai-context/changelog-detail.md`, or the artifact being
 reviewed. Do not restate it in chat. Specifically, do not narrate gates that passed ("suite
 green" is the whole sentence), do not list the numbers behind a decision, do not summarise an
-artifact you just linked, and do not recap what earlier steps did. He is reading to decide, not
-to audit; a long report buries the one line he needs.
+artifact you just linked, and do not recap what earlier steps did. The reader is there to decide, not
+to audit; a long report buries the one line that matters.
 
 ## The status table
 
@@ -84,7 +86,7 @@ apply to this release; add one row per this release's own polish/fix asks at the
 | 2 | Any new-feature doc page(s) + clip(s) under `docs/features/` | |
 | 3 | `CHANGELOG.md` section for `<version>`, covering every merge since the last tag | |
 | 4 | Version bump: `manifest.json` → `<version>` | |
-| 5 | Release name — propose 2-4 candidates, his pick | |
+| 5 | Release name — propose 2-4 candidates, the maintainer's pick | |
 | 6 | Re-record every clip and the hero (github#121) | |
 | 7 | **Look at every re-recorded clip in one Artifact, and get a yes, before committing any of them** | |
 | 8 | **Render the update strip and show it** (MINOR/MAJOR only) — a real screenshot, not the markdown | |
@@ -94,7 +96,7 @@ apply to this release; add one row per this release's own polish/fix asks at the
 | 12 | Draft the release body, publish as an Artifact, get an explicit go-ahead | |
 | 13 | `release.ps1` on `main` — gates, tag, push | |
 | 14 | GitHub Actions publishes the release — automatic once tagged | |
-| 15 | Post to Ko-fi: title, disc screenshot, community-page link then release link; open the page | |
+| 15 | Post to Ko-fi: title, disc screenshot, community-page link then release link; hand over the page URL | |
 ```
 
 ## 1. List the range — before anything else
@@ -167,12 +169,12 @@ makes *every* clip stale, not just the ones whose own beats moved. `release.ps1`
 / `=== features ===` warnings only compare commit dates, a proxy, not proof — so re-recording
 everything is the default, not a call made by looking at what changed:
 
-**Ask before taking the mouse — but do NOT take a lock by hand.** `record-demo.ps1` acquires
-`screen-<monitor>` itself and releases it on every way out, and `record` is **aliased to the screen
-locks**, so an outer `acquire record` blocks the recorder's own acquire and the run hangs at
-`taking screen-right ...` with `lock.mjs status` showing only your own hold. Measured cutting 2.7.0:
-the first take sat there for seven minutes until the outer lock was released, after which it
-recorded immediately. `CLAUDE.md` states the rule this line used to break — never wrap one of the
+**Ask before taking the mouse — but do NOT take a screen hold by hand.** With a harness hook
+configured, `record-demo.ps1` asks it for its screen and releases it on every way out; with none it
+takes nothing. An outer hold of the same screen blocks the recorder's own claim and the run hangs at
+`taking screen-right ...` with `node scripts/harness-hook.mjs status` showing only your own hold.
+Measured cutting 2.7.0: the first take sat there for seven minutes until the outer hold was
+released, after which it recorded immediately. `CLAUDE.md` states the rule this line used to break — never wrap one of the
 three window-placing harnesses.
 
 ```powershell
@@ -193,8 +195,8 @@ the status table (e.g. "Re-record every clip and the hero — skipped, docs-only
 **`record-demo.ps1` captures a *region of the desktop*, so whatever is drawn over that
 rectangle is what lands in the take — and the take still looks plausible: right dimensions,
 right duration, a real file.** On 2026-09-11 a full re-record silently captured an Obsidian
-window sitting on the target monitor, open on Lukas's own vault, and five clips were
-overwritten with footage of his personal frontmatter before anything caught it. What caught
+window sitting on the target monitor, open on the maintainer's own vault, and five clips were
+overwritten with footage of a personal vault's frontmatter before anything caught it. What caught
 it was a size comparison, not an eye: **0.04 MB against a committed 4.37 MB**, because a
 static capture compresses to almost nothing. github#122 raises the window now, which removes
 the common cause but not the need to look.
@@ -226,9 +228,9 @@ how the Got it button's placement (github#126) was first noticed *after* the rel
 
 ```bash
 node scripts/build-plugin.mjs                       # the check copies the ROOT main.js; it does not build
-node scripts/lock.mjs acquire screen-left --owner "release <version>"
+node scripts/harness-hook.mjs acquire screen-left --owner "release <version>"   # no-op without a hook
 node scripts/update-note-check.mjs --out <scratchpad>/strip
-node scripts/lock.mjs release screen-left --owner "release <version>"
+node scripts/harness-hook.mjs release screen-left --owner "release <version>"
 ```
 
 **Build first, every time.** `update-note-check.mjs` installs whatever `main.js` sits at the repo
@@ -241,7 +243,7 @@ It mounts the plugin in a real Obsidian, upgrades a vault from a `data.json` wit
 display, so it takes the screen lock; it is also a 29-assertion check, so a failure here is a
 real one.
 
-**Put `01-strip-up.png` in front of him** — in the same Artifact as the clips (step 8) if that
+**Put `01-strip-up.png` in front of the maintainer** — in the same Artifact as the clips (step 8) if that
 step ran, otherwise its own. What to look at: the bullets say something a user understands, the
 release links point at the right version, and the control the note names is the one pulsing.
 
@@ -285,9 +287,9 @@ Then **exactly one** plain push:
 git push origin develop
 ```
 
-**Never wrap this in `scripts/lock.mjs acquire/release suite`** — `.githooks/pre-push` takes that
-lock itself around its own run and releases it on every exit (github#92); an outer lock deadlocks
-against it. If `develop` hadn't moved since the branch was cut, the merge commit's tree equals
+**Never wrap this in a hold on `suite`** (`harness-hook.mjs acquire/release suite`) —
+`.githooks/pre-push` takes that hold itself around its own run and releases it on every exit
+(github#92, github#192); an outer hold deadlocks against it. If `develop` hadn't moved since the branch was cut, the merge commit's tree equals
 the stamped one and the hook skips the suite, printing the stamp it trusts — this is correct
 behavior, not a shortcut; don't reach for `SKIP_SMOKE` to force the same outcome by hand, because
 the stamp is what makes the skip honest and a manual skip leaves no record of what was trusted.
@@ -394,11 +396,11 @@ gh release view <version> --json tagName,name,assets,isDraft
 ## 17. Post to Ko-fi
 
 Once the Release exists (step 16), post an update at ko-fi.com/luke321. **Do it yourself with the
-Claude in Chrome tools** -- he is signed in there; do not hand him a link and a block of text to
+Claude in Chrome tools** -- the maintainer is signed in there; do not hand over a link and a block of text to
 paste.
 
 **The mechanics live in the user-level `post-to-kofi` skill -- read it before touching the page.**
-It is shared with vault-shelf and the second machine because the traps belong to Ko-fi rather than
+It is shared with a sister plugin and other machines because the traps belong to Ko-fi rather than
 to this plugin, and one of them is destructive:
 
 - **A page-wide `find` for the post's file input also returns the COVER image input.** Uploading to
@@ -409,7 +411,7 @@ to this plugin, and one of them is destructive:
   means you hit the cover -- stop and say so.
 - Entry point is the **Feed card's `Add` button** -> **Image** (not "Write a quick update", which
   has no title field).
-- Screenshot the filled dialog, confirm the exact wording with him, then click **Post image** --
+- Screenshot the filled dialog, confirm the exact wording with the maintainer, then click **Post image** --
   that publishes publicly and is the one click in this step that needs a yes.
 
 The content:
@@ -431,7 +433,7 @@ The content:
   `__vg.renderer.getCamera().setState({x:0.5,y:0.5,ratio:0.42,angle:0})` so the disc is cropped
   and the release's own overview tile is actually in the shot. Build from the actual mirror vault
   (`node src/build-graph.mjs --vault ../vault-graph-mirror --out mirror.html`, or wherever this
-  machine's mirror lives — never the real SecondBrain vault, and never a fixture, which would
+  machine's mirror lives — never the maintainer's real vault, and never a fixture, which would
   publish an invented-looking shape instead of the real one), serve it locally, open it, switch to
   whatever grouping/view this release's headline feature actually changed, and screenshot the
   page. A square crop (pad to square with the page's own `--surface-0` background rather than
@@ -442,9 +444,8 @@ The content:
   (`https://github.com/luke321/vault-graph/releases/tag/<version>`). The community page is what
   actually gets someone using it; the release notes are for someone who already knows the tool.
 - Post via **Create → Image** (not "Write a quick update", which has no title field).
-- **Open the page when done** — `Start-Process "https://ko-fi.com/luke321"` in the user's normal
-  browser, not the Claude-in-Chrome automation tab, so what gets reviewed is what a visitor
-  actually sees.
+- **Finish by handing over the page's URL** (`https://ko-fi.com/luke321`), and open it only if the
+  maintainer asks. Do not launch a browser window on your own.
 
 This is separate from the cover image (`Add a cover image`, 1200×400, 3:1) — the cover is
 standing page furniture, refreshed on its own judgment, not part of every release's own post.

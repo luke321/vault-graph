@@ -1,5 +1,12 @@
 # cut-release — change log
 
+## 2026-09-29 - session and desk wiring out of the tracked skill (github#194)
+
+The skill is tracked in a public repo, so it now reads as a procedure. "Orchestrator-only" became
+"primary checkout only" (the rule CLAUDE.md states, with the git test that tells a worktree apart),
+the maintainer stands in for a named person, and the Ko-fi step hands over the page URL instead of
+opening a browser. Lock names and the two Ko-fi lines github#193 owns are untouched.
+
 ## 2026-09-13 - develop -> main no longer stops for a PR
 
 The ruleset on `main` dropped its required-pull-request rule; only the source-branch check

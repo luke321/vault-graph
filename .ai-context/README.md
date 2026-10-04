@@ -11,7 +11,7 @@ changing the layout or the animation.
 | `changelog-detail.md` | The measurement behind every change, dated, with the numbers on both sides of it. **This file is the regression suite** — a change to how the disc looks or moves adds a row here |
 | `perf-cascade-frame-cost.md` | What an animated frame costs on a 10k vault, term by term; what was taken out of it and what is left (github#19). Read before optimising the cascade, and before believing anything about `renderer.refresh`'s options |
 | `releasing.md` | How a release is cut: enumerating the range, what must be finished on `release/<version>` before anything merges down, and why a tag is never edited after the fact |
-| `locking.md` | Why `scripts/lock.mjs`'s two lock names (`screen-*`, `suite`) stay separate rather than aliased, the deadlock that proved it, and the github issues behind each (github#87, github#92) |
+| `harness-hook.md` | The optional hook the harnesses call to hold a screen or the fixture store and to be told which monitor to use; with none configured they take no lock at all (github#192) |
 | `obsidian-trust-mode.md` | Why a vault Obsidian hasn't trusted opens in restricted mode and reads as a broken plugin, and the CDP workaround every harness uses |
 | `decisions/` | **ADRs** — structural choices, what they cost, and what was rejected |
 | `design/` | **DDRs** — the as-built design of each part of the disc |

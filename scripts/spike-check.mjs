@@ -1,8 +1,10 @@
 
 import { attach, json } from "./cdp.mjs";
 import { placeElectronLeft } from "./screen.mjs";
+import { claimScreen, noFreeScreen, release } from "./harness-hook.mjs";
+import { onInterrupt } from "./interrupt.mjs";
 import { keepFocus } from "./focus.mjs";
-import { spawn, spawnSync } from "node:child_process";
+import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, writeFileSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -12,8 +14,6 @@ const argv = process.argv.slice(2);
 const arg = (n, d) => { const i = argv.indexOf("--" + n); return i >= 0 && argv[i + 1] ? argv[i + 1] : d; };
 const PORT = Number(arg("port", 9444));
 const KEEP = argv.includes("keep");
-// github#87
-const NO_LOCK = argv.includes("--no-lock");
 const VAULT = arg("vault", join(process.env.TEMP || "/tmp", "vault-graph-spike-vault"));
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -50,20 +50,10 @@ console.log("vault:    " + VAULT);
 console.log("port:     " + PORT);
 console.log("profile:  " + USER_DATA);
 
-// github#87
-const LOCK = "screen-left";
+// github#87, github#192
 const lockOwner = "spike-check [" + process.pid + "]";
-let holdsLock = false;
-if (!NO_LOCK) {
-  const r = spawnSync(process.execPath, [join(HERE, "lock.mjs"), "acquire", LOCK, "--owner", lockOwner, "--holder", "process"],
-    { stdio: "inherit" });
-  if (r.status !== 0) {
-    console.error("could not take the " + LOCK + " lock -- something else is driving that display.");
-    console.error("  who: node scripts/lock.mjs status");
-    process.exit(1);
-  }
-  holdsLock = true;
-}
+const screen = claimScreen(lockOwner);
+if (!screen.ok) { noFreeScreen(); process.exit(1); }
 
 // github#129
 const focus = await keepFocus();
@@ -78,15 +68,11 @@ const fail = (msg) => { throw new Error("FAIL " + msg); };
 const shutdown = async (code) => {
   try { if (cdp) await cdp.close(); } catch {}
   if (!KEEP) { try { child.kill(); } catch {} }
-  // github#87
-  if (holdsLock && !KEEP) {
-    try {
-      spawnSync(process.execPath, [join(HERE, "lock.mjs"), "release", LOCK, "--owner", lockOwner],
-        { stdio: "ignore" });
-    } catch { void 0; }
-  }
+  if (!KEEP) release(screen.lock, lockOwner);
   process.exit(code);
 };
+// github#197
+onInterrupt(() => shutdown(130));
 
 try {
   let attached = null;
