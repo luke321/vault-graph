@@ -10,12 +10,13 @@ import { buildSync } from "esbuild";
 // github#6
 import { localDay, resolveCreated, dateTally } from "./dates.mjs";
 // github#141
-import { canonicalDest, cleanTarget, ghostKey, isExternalTarget, isRelativeDest, resolveAgainst } from "./links.mjs";
+import { canonicalDest, ghostKey, isRelativeDest, resolveAgainst } from "./links.mjs";
 // github#149 -- the policy this producer shares with plugin/build-data.mjs
 import {
   countWords, degrees, edgeBook, generatedStamp, ghostNode, inferType, isSkippedFile,
-  noteBody, normalizeTags, normSlashes, paraDirs, paraFolder, under,
+  normalizeTags, normSlashes, paraDirs, paraFolder, under,
 } from "./taxonomy.mjs";
+import { parseFrontmatter, mineLinks } from "./note-source.mjs";
 import { engineBanner } from "./engine/notice.mjs";
 // github#71
 import { readSortingSpec } from "./sortspec-file.mjs";
@@ -108,13 +109,20 @@ const VAULT = (() => {
   );
 })();
 
-const INCLUDE_GHOSTS = flag("ghosts");
+// github#186
+const MIRROR_SETTINGS = (() => {
+  try {
+    const mirror = JSON.parse(readFileSync(join(VAULT, ".vault-graph-mirror.json"), "utf8"));
+    return mirror.version === 1 && mirror.settings && typeof mirror.settings === "object" ? mirror.settings : {};
+  } catch { return {}; }
+})();
+const INCLUDE_GHOSTS = flag("ghosts") || MIRROR_SETTINGS.ghosts === true;
 const DEV_BUILD = flag("dev");
-const INCLUDE_TEMPLATES = flag("templates");
+const INCLUDE_TEMPLATES = flag("templates") || MIRROR_SETTINGS.templates === true;
 // decisions/0005
 // github#64
 const OUT = opt("out", join(VAULT, "vault-graph.html"));
-const FLAT_MONTHS = flag("flat-months");
+const FLAT_MONTHS = flag("flat-months") || MIRROR_SETTINGS.flatMonths === true;
 const STRIP_NAV = flag("no-nav");
 // github#71, decisions/0009 -- --folder-order overrides; absent, the page decides
 const SORTSPEC_ARG = opt("sortspec", "");
@@ -167,80 +175,6 @@ function walk(dir, acc = []) {
     }
   }
   return acc;
-}
-
-/* ------------------------------------------------------------- frontmatter */
-
-function parseFrontmatter(raw) {
-  const text = raw.replace(/^\uFEFF/, "");
-  const m = /^---\r?\n([\s\S]*?)\r?\n---/.exec(text);
-  if (!m) return { fm: {}, body: text };
-  const fm = {};
-  const lines = m[1].split(/\r?\n/);
-  let key = null;
-  for (const line of lines) {
-    const li = /^\s*-\s+(.*)$/.exec(line);
-    if (li && key) {
-      (Array.isArray(fm[key]) ? fm[key] : (fm[key] = [])).push(unquote(li[1]));
-      continue;
-    }
-    const kv = /^([A-Za-z0-9_-]+)\s*:\s*(.*)$/.exec(line);
-    if (!kv) continue;
-    key = kv[1];
-    const v = kv[2].trim();
-    if (v === "") { fm[key] = []; continue; }
-    if (v.startsWith("[") && v.endsWith("]")) {
-      fm[key] = v.slice(1, -1).split(",").map(unquote).filter(Boolean);
-    } else {
-      fm[key] = unquote(v);
-    }
-  }
-  // github#149
-  return { fm, body: noteBody(raw) };
-}
-const unquote = (s) => String(s).trim().replace(/^["']|["']$/g, "").trim();
-
-/* -------------------------------------------------------------- link mining */
-
-const stripCode = (s) =>
-  s.replace(/^```[\s\S]*?^```/gm, "\n")
-   .replace(/^~~~[\s\S]*?^~~~/gm, "\n")
-   .replace(/`[^`\n]*`/g, " ");
-
-const NAV_LINE = new RegExp(
-  "^\\s*!?\\[\\[[^\\]]+\\]\\]\\s*(?:\\u2190|<-|<)\\s*\\|\\s*(?:\\u2192|->|>)\\s*!?\\[\\[[^\\]]+\\]\\]\\s*$",
-  "gm"
-);
-const stripDailyNav = (s) => (STRIP_NAV ? s.replace(NAV_LINE, "") : s);
-
-// github#141
-const WIKILINK = /!?\[\[([^[\]|#]+)(?:#[^[\]|]*)?(?:\|[^[\]]*)?\]\]/g;
-// github#141
-const MDLINK = /\[[^\]]*\]\(([^)\s#]+\.md)(?:#[^)\s]*)?(?:\s[^)]*)?\)/g;
-
-function mineLinks(body, fm) {
-  const out = [];
-  // github#141
-  const push = (raw, url) => {
-    if (url && isExternalTarget(raw)) return;
-    const dest = cleanTarget(raw);
-    if (dest) out.push(dest);
-  };
-  const scan = (text, re, url) => {
-    let m; re.lastIndex = 0;
-    while ((m = re.exec(text))) push(m[1], url);
-  };
-
-  const clean = stripDailyNav(stripCode(body));
-  scan(clean, WIKILINK, false);
-  scan(clean, MDLINK, true);
-
-  for (const v of Object.values(fm)) {
-    for (const s of (Array.isArray(v) ? v : [v])) {
-      if (typeof s === "string" && s.includes("[[")) scan(s, WIKILINK, false);
-    }
-  }
-  return out;
 }
 
 /* ------------------------------------------------------------ note taxonomy */
@@ -330,7 +264,7 @@ for (const abs of files) {
     created: dated.day,
     touched: st ? localDay(st.mtimeMs) : "",
     words: countWords(body),
-    _links: mineLinks(body, fm),
+    _links: mineLinks(body, fm, STRIP_NAV),
   };
   const idx = notes.push(note) - 1;
 
@@ -491,7 +425,8 @@ const html = part("shell.html")
   .replace("<!--SCRIPT-->", () => asScript(part("page.js")))
   .replace("<!--LIBS-->", () => libs)
   .replace("<!--ASSETS-->", () => assets)
-  .replace("<!--DATA-->", () => `<script>window.VAULT_DATA=${jsonForScript(data)};</script>`);
+  .replace("<!--DATA-->", () => `<script>window.VAULT_DATA=${jsonForScript(data)};</script>` +
+    `\n<script>window.VAULT_SETTINGS=${jsonForScript(MIRROR_SETTINGS)};</script>`);
 
 writeFileSync(OUT, html, "utf8");
 

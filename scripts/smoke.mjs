@@ -6,6 +6,11 @@ import { makeErrorLog, runChecks } from "./smoke-runner.mjs";
 import { couplingReport, leakReport } from "./smoke-state.mjs";
 // github#142
 import { pngCaptureJs, pngCarriesGraph, pngCaptureDetail } from "./png-capture.mjs";
+import { hiddenBaselineCheck } from "./check-hidden-baseline.mjs";
+import { cascadeWedgesCheck } from "./check-cascade-wedges.mjs";
+import { dimensionRefreshCheck } from "./check-dimension-refresh.mjs";
+import { dimensionSizingCheck } from "./check-dimension-sizing.mjs";
+import { countSizingCheck } from "./check-count-sizing.mjs";
 import { buildPayloadVault, PAYLOAD, NOTE_COUNT } from "./check-data-escape.mjs";
 import { findChrome } from "./chrome.mjs";
 import { harnessScreen, leftWindowPos } from "./screen.mjs";
@@ -553,6 +558,191 @@ check("the resting disc is on the lattice", async (p) => {
   return { ok, detail };
 }, { on: "all" });
 
+// github#186
+check("no lit note is outside its band's static rails", async (p) => {
+  await settle(p);
+  const r = await p.j(`(function () {
+    var gl = __vg.geomLock;
+    if (!gl) return null;
+    var UNIT = 160, INNER_SCALE = 0.8, INNER_FILL = 0.8;
+    var rails = { i: { row0: gl.r0 * INNER_SCALE * UNIT,
+                       top: (gl.r0 + (gl.rOuter - gl.r0) * INNER_FILL) * INNER_SCALE * UNIT },
+                  o: { row0: gl.rOuter * UNIT, top: gl.maxR * UNIT } };
+    var out = { i: { n: 0, lo: Infinity, hi: 0, worst: null }, o: { n: 0, lo: Infinity, hi: 0, worst: null } };
+    __vg.graph.forEachNode(function (id, a) {
+      if ((__vg.alpha[id] || 0) < 0.999) return;
+      if (__vg.isOrphan(id) || __vg.isPinned(id)) return;
+      var k = __vg.isInner(id) ? "i" : "o";
+      var b = out[k], rr = Math.hypot(a.x, a.y);
+      b.n++;
+      if (rr < b.lo) b.lo = rr;
+      if (rr > b.hi) b.hi = rr;
+      var over = Math.max(rails[k].row0 - rr, rr - rails[k].top);
+      if (!b.worst || over > b.worst.over) b.worst = { id: id, r: rr, over: over };
+    });
+    ["i", "o"].forEach(function (k) { if (out[k].lo === Infinity) out[k].lo = 0; });
+    return { rails: rails, bands: out };
+  })()`);
+  if (!r) return { ok: true, detail: "NOT ASSERTED: no geometry lock on this page" };
+  // github#186
+  const TOL = 0.5;
+  const parts = [], bad = [];
+  for (const k of ["i", "o"]) {
+    const b = r.bands[k], rail = r.rails[k];
+    if (!b.n) { parts.push(`${k} empty`); continue; }
+    const under = rail.row0 - b.lo, over = b.hi - rail.top;
+    if (under > TOL) bad.push(`${k} reaches ${b.lo.toFixed(1)}, inside its row-0 rail ${rail.row0.toFixed(1)} by ${under.toFixed(1)}`);
+    if (over > TOL) bad.push(`${k} reaches ${b.hi.toFixed(1)}, past its top rail ${rail.top.toFixed(1)} by ${over.toFixed(1)}`);
+    parts.push(`${k} ${b.n} notes over ${b.lo.toFixed(0)}..${b.hi.toFixed(0)} in ${rail.row0.toFixed(0)}..${rail.top.toFixed(0)}`);
+  }
+  return { ok: !bad.length, detail: bad.length ? bad.join("; ") : parts.join("; ") };
+}, { on: "all" });
+
+// github#186
+check("a resting wedge fills the arc its notes can", async (p) => {
+  await settle(p);
+  await p.eval("__vg.wedgeDebug(true); void 0").catch(() => {});
+  await p.eval("__vg.relayout(); void 0").catch(() => {});
+  await settle(p);
+  const r = await p.j(`(function () {
+    var UNIT = 160;
+    var edges = __vg.wedgeEdges() || [];
+    if (!edges.length) return null;
+    var pos = {};
+    __vg.graph.forEachNode(function (id, a) { pos[id] = { r: Math.hypot(a.x, a.y), th: Math.atan2(a.y, a.x) }; });
+    var dotOf = function (id) {
+      var d = __vg.renderer.getNodeDisplayData(id);
+      return d && !d.hidden ? __vg.renderer.scaleSize(d.size) : 0;
+    };
+    var q0 = __vg.renderer.graphToViewport({ x: 0, y: 0 });
+    var q1 = __vg.renderer.graphToViewport({ x: UNIT, y: 0 });
+    var perPx = Math.hypot(q1.x - q0.x, q1.y - q0.y);
+    perPx = perPx > 1e-3 ? UNIT / perPx : 0;
+    var ang = function (a, b) { var d = b - a; while (d < 0) d += 360; while (d >= 360) d -= 360; return d; };
+    var out = [];
+    edges.forEach(function (w) {
+      if (w.nStart == null || !(w.drawn > 0.2)) return;
+      var mine = [];
+      __vg.graph.forEachNode(function (id) {
+        if (__vg.groupOf(id) !== w.g) return;
+        if ((__vg.alpha[id] || 0) < 0.999) return;
+        if (__vg.isOrphan(id) || __vg.isPinned(id)) return;
+        if ((__vg.isInner(id) ? "i" : "o") !== w.band) return;
+        mine.push(id);
+      });
+      if (!mine.length) return;
+      // the RIM row is what draws the wedge's angular extent
+      var rim = 0;
+      mine.forEach(function (id) { if (pos[id].r > rim) rim = pos[id].r; });
+      var row = mine.filter(function (id) { return Math.abs(pos[id].r - rim) < 1; });
+      var n = row.length, dot = 0;
+      row.forEach(function (id) { var d = dotOf(id) * perPx; if (d > dot) dot = d; });
+      var arcLen = (w.drawn * Math.PI / 180) * rim;
+      if (!(arcLen > 1e-6)) return;
+      // n notes spread across the arc reach (n-1)/n of it, plus their own two half-dots
+      var allow = Math.min(1, (n > 1 ? (n - 1) / n : 0) + 2 * dot / arcLen);
+      out.push({ g: w.g, band: w.band, n: n, drawn: w.drawn,
+                 cover: Math.min(1, ang(w.nEnd, w.nStart) / w.drawn), allow: allow, dot: dot, rim: rim });
+    });
+    return { wedges: out };
+  })()`);
+  await p.eval("__vg.wedgeDebug(false); void 0").catch(() => {});
+  if (!r || !r.wedges.length) {
+    return { ok: true, detail: "NOT ASSERTED: the wedge overlay recorded no cells on this page" };
+  }
+  const SLACK = 0.9;
+  const short = r.wedges.filter((w) => w.cover < w.allow * SLACK)
+                        .sort((a, b) => a.cover / a.allow - b.cover / b.allow);
+  const worst = r.wedges.slice().sort((a, b) => a.cover / a.allow - b.cover / b.allow)[0];
+  const detail = `${r.wedges.length} resting wedges; tightest ${worst.g} (${worst.band}, ${worst.n} in its rim row, ` +
+    `${worst.drawn.toFixed(1)} deg): covers ${worst.cover.toFixed(2)} of the ${worst.allow.toFixed(2)} its notes allow` +
+    (short.length ? `; ${short.length} under ${SLACK}x: ` +
+      short.slice(0, 3).map((w) => `${w.g} ${w.cover.toFixed(2)}/${w.allow.toFixed(2)}`).join(", ") : "");
+  return { ok: !short.length, detail };
+}, { on: "all" });
+
+// github#186, decisions/0017 -- the snake is only visible as its size gradient
+check("the serpentine survives, in direction and in size", async (p) => {
+  await settle(p);
+  await p.eval("__vg.relayout(); void 0").catch(() => {});
+  await settle(p);
+  const r = await p.j(`(function () {
+    var G = __vg.graph, R = __vg.renderer;
+    var plan = __vg.buildWedgePlan(true, function (id) { return __vg.alpha[id] || 0; });
+    var cells = [];
+    plan.cells.forEach(function (c) {
+      if (c.list.length < 6) return;
+      var rows = {}, seq = [];
+      c.list.forEach(function (id, rank) {
+        var a = G.getNodeAttributes(id), d = R.getNodeDisplayData(id);
+        if (!a || !d || d.hidden) return;
+        var sw = Math.PI / 2 - Math.atan2(a.y, a.x);
+        while (sw < 0) sw += 2 * Math.PI;
+        var sl = c.slots.find(function (s) { return s.id === id; });
+        var rec = { rank: rank, row: sl ? sl.row : -1, sw: sw, px: R.scaleSize(d.size) };
+        seq.push(rec);
+        (rows[rec.row] || (rows[rec.row] = [])).push(rec);
+      });
+      if (seq.length < 6) return;
+      var dirs = [];
+      Object.keys(rows).map(Number).sort(function (x, y) { return x - y; }).forEach(function (rw) {
+        var L = rows[rw];
+        if (L.length < 2) { dirs.push(0); return; }
+        var up = 0, down = 0;
+        for (var i = 1; i < L.length; i++) {
+          var d0 = L[i].sw - L[i - 1].sw;
+          if (d0 > Math.PI) d0 -= 2 * Math.PI;
+          if (d0 < -Math.PI) d0 += 2 * Math.PI;
+          if (d0 > 1e-6) up++; else if (d0 < -1e-6) down++;
+        }
+        dirs.push(up > down ? 1 : down > up ? -1 : 0);
+      });
+      var alt = 0, pairs = 0;
+      for (var k = 1; k < dirs.length; k++) {
+        if (dirs[k] && dirs[k - 1]) { pairs++; if (dirs[k] !== dirs[k - 1]) alt++; }
+      }
+      var conc = 0, disc = 0;
+      for (var i2 = 0; i2 < seq.length; i2++) {
+        for (var j = i2 + 1; j < seq.length; j++) {
+          var dp = seq[j].px - seq[i2].px;
+          if (dp < -1e-6) conc++; else if (dp > 1e-6) disc++;
+        }
+      }
+      cells.push({ g: c.g, k: c.k, band: c.inner ? "i" : "o", n: seq.length,
+                   alt: alt, pairs: pairs,
+                   tau: (conc + disc) ? (conc - disc) / (conc + disc) : 0,
+                   flat: !(conc + disc) });
+    });
+    return { cells: cells };
+  })()`);
+  if (!r || !r.cells.length) {
+    return { ok: true, detail: "NOT ASSERTED: no cell on this page holds six notes" };
+  }
+  const cs = r.cells;
+  const notes = cs.reduce((a, c) => a + c.n, 0);
+  const pairs = cs.reduce((a, c) => a + c.pairs, 0);
+  const alt = cs.reduce((a, c) => a + c.alt, 0);
+  const spread = [];
+  for (const c of cs) for (let i = 0; i < c.n; i++) spread.push(c.tau);
+  spread.sort((a, b) => a - b);
+  const wmed = spread[Math.floor(spread.length / 2)];
+  const good = cs.filter((c) => c.tau >= 0.9).reduce((a, c) => a + c.n, 0);
+  const share = good / notes;
+  const bad = [];
+  if (alt < pairs) {
+    const off = cs.filter((c) => c.alt < c.pairs).slice(0, 3)
+                  .map((c) => `${c.g} ${c.band} ${c.alt}/${c.pairs}`).join(", ");
+    bad.push(`${pairs - alt} of ${pairs} adjacent row pairs run the same way: ${off}`);
+  }
+  if (wmed < 0.9) bad.push(`the note-weighted median cell reads tau ${wmed.toFixed(2)}, under 0.90`);
+  if (share < 0.65) bad.push(`only ${(share * 100).toFixed(0)}% of notes sit in a cell with tau >= 0.9, under 65%`);
+  const flat = cs.filter((c) => c.flat).reduce((a, c) => a + c.n, 0);
+  const detail = `${cs.length} cells of 6+ notes (${notes} notes); direction alternates ${alt}/${pairs}; ` +
+    `size falls along rank at tau ${wmed.toFixed(2)} note-weighted, ${(share * 100).toFixed(0)}% of notes in a cell at 0.90+` +
+    (flat ? `; ${flat} notes draw one size (the pixel floor)` : "");
+  return { ok: !bad.length, detail: bad.length ? bad.join("; ") + "  ||  " + detail : detail };
+}, { on: "all" });
+
 check("band assignment obeys its two hard rules", async (p) => {
   const r = await p.j(`(function(){
     var plan = __vg.buildWedgePlan(false), band = {}, rows = {i: 0, o: 0};
@@ -846,7 +1036,7 @@ check("tags: a dot in the disc being left keeps its colour until it has faded", 
       Object.keys(b).forEach(function (id) {
         // a dot that has left stands in its final seat, under its new group
         var a = __vg.graph.getNodeAttributes(id);
-        if (Math.abs(a.x - b[id].x) > 0.5 || Math.abs(a.y - b[id].y) > 0.5 || __vg.groupOf(id) !== b[id].g) return;
+        if (__vg.groupOf(id) !== b[id].g || a.standIn) return;
         if ((__vg.alpha[id] || 0) <= 0.004) return;
         standing++;
         var c = __vg.nodeColor(id);
@@ -877,7 +1067,7 @@ check("tags: a dot in the disc being left keeps its colour until it has faded", 
   // github#151
   await storeBack(p, storedWas);
   return {
-    ok: dotFrames === 0 && rowFrames === 0 && samples > 3,
+    ok: dotFrames === 0 && rowFrames === 0 && samples > 3 && standingFrames > 0,
     detail: `${n} dots standing in the folder disc, ${samples} samples over the switch: ` +
             `${dotFrames} of ${standingFrames} standing dot-frames in a colour other than the one they had` +
             (worstFrame ? ` (worst frame ${worstFrame}, e.g. ${example})` : "") +
@@ -888,6 +1078,9 @@ check("tags: a dot in the disc being left keeps its colour until it has faded", 
 }, { on: WALK, clock: "real", leaves: ["state.hidden"] });
 
 check("tags: a note one disc hides and the other shows arrives with the fill edge", async (p) => {
+  const foldWas = await p.j("__vg.foldSwitch");
+  try {
+  await p.eval("__vg.foldSwitch = false; void 0");
   // github#151 -- the Tags button persists the dimension, setDim() does not
   const storedWas = await storeSnap(p);
   await clearRange(p);
@@ -967,8 +1160,72 @@ check("tags: a note one disc hides and the other shows arrives with the fill edg
             (first ? ` (first: ${first})` : "") + `, ${litEnd} of ${n.hid} lit at the end; ` +
             `${standInsPeak} stand-ins drawn, ${left} left behind, ${nodesEnd} of ${n.nodes} nodes after`,
   };
+  } finally { await p.eval(`__vg.foldSwitch = ${JSON.stringify(foldWas)}; void 0`); }
   // github#151 -- leaves state.hidden: the tag disc seeds its defaults
 }, { on: WALK, clock: "real", leaves: ["state.hidden"] });
+
+// github#186, design/0015
+check("tags: parallel Refresh preserves link-based sizes during and after the switch", async (p) => {
+  const storedWas = await storeSnap(p), foldWas = await p.j("__vg.foldSwitch");
+  await clearRange(p); await settle(p);
+  try {
+    await p.eval("__vg.foldSwitch = true; void 0");
+    return await dimensionSizingCheck(p);
+  } finally {
+    await p.eval(`__vg.setDim("folder"); __vg.foldSwitch = ${JSON.stringify(foldWas)}; void 0`);
+    await settle(p); await storeBack(p, storedWas);
+  }
+}, { on: ["demo-vault", "shape-vault", "tag-vault", "spec-vault"], clock: "real", leaves: ["state.hidden"] });
+
+check("tags: parallel Refresh reverses the old disc and builds the new disc", async (p) => {
+  const storedWas = await storeSnap(p), foldWas = await p.j("__vg.foldSwitch");
+  await clearRange(p); await settle(p);
+  try {
+    await p.eval("__vg.foldSwitch = true; void 0");
+    return await dimensionRefreshCheck(p);
+  } finally {
+    await p.eval(`__vg.setDim("folder"); __vg.foldSwitch = ${JSON.stringify(foldWas)}; void 0`);
+    await settle(p); await storeBack(p, storedWas);
+  }
+}, { on: ["demo-vault", "shape-vault", "tag-vault", "spec-vault"], clock: "real", leaves: ["state.hidden"] });
+
+// github#186, design/0015
+check("tags: hiding the tab midway through a fold releases its temporary state", async (p) => {
+  const storedWas = await storeSnap(p);
+  const foldWas = await p.j("__vg.foldSwitch");
+  await settle(p);
+  try {
+    await p.eval('__vg.setDim("folder"); __vg.foldSwitch = true; void 0');
+    await p.eval('document.querySelector(\'#vg-dim button[data-dim="tag"]\').click(); void 0');
+    await sleep(500);
+    const r = await p.j(`(function () {
+      var running = __vg.foldActive && __vg.demo.busy(), before = __vg.standIns().length;
+      var descriptor = Object.getOwnPropertyDescriptor(document, "visibilityState");
+      try {
+        Object.defineProperty(document, "visibilityState", { configurable: true, value: "hidden" });
+        document.dispatchEvent(new Event("visibilitychange"));
+      } finally {
+        if (descriptor) Object.defineProperty(document, "visibilityState", descriptor);
+        else delete document.visibilityState;
+      }
+      var settled = {}, drift = 0;
+      __vg.graph.forEachNode(function (id, a) { settled[id] = { x: a.x, y: a.y }; });
+      __vg.applyLayout(false); __vg.applyLayout(false);
+      __vg.graph.forEachNode(function (id, a) {
+        var b = settled[id]; drift = Math.max(drift, Math.hypot(a.x - b.x, a.y - b.y));
+      });
+      return { running: running, before: before, after: __vg.standIns().length,
+        active: __vg.foldActive, busy: __vg.demo.busy(), drift: drift };
+    })()`);
+    return { ok: r.running && r.before > 0 && r.after === 0 && !r.active && !r.busy && r.drift < 0.5,
+      detail: `running ${r.running}; stand-ins ${r.before} -> ${r.after}; active ${r.active}; ` +
+        `busy ${r.busy}; relayout ${r.drift.toFixed(3)}` };
+  } finally {
+    await p.eval(`__vg.setDim("folder"); __vg.foldSwitch = ${JSON.stringify(foldWas)}; void 0`);
+    await settle(p);
+    await storeBack(p, storedWas);
+  }
+}, { clock: "real", leaves: ["state.hidden"] });
 
 check("tags: the two buckets stay out of the hue rotation and sort last", async (p) => {
   const r = await p.j(`(function(){
@@ -1154,6 +1411,8 @@ async (p) => {
 }, { on: "all" });
 
 check("tags: each grouping keeps its own colours, and the settings tabs reach both", async (p) => {
+  // github#151, github#186
+  const storedWas = await storeSnap(p);
   const r = await p.j(`(function(){
     // github#86, design/0015 -- the panel is opened on the FOLDER disc and switched to the Tags
     // tab: its rows are the tag dimension's, a pin lands in the tag map, and the folder map, the
@@ -1203,6 +1462,7 @@ check("tags: each grouping keeps its own colours, and the settings tabs reach bo
     gear.click();
     return out;
   })()`);
+  await storeBack(p, storedWas);
   if (r.none) return { ok: true, detail: "no settings panel on this host -- the plugin owns it" };
   const ok = r.tabs.join(",") === "folder,tag" && r.dim === "folder" && r.tagRows > 0 &&
              r.namesMatch && r.folderMapSize === 0 && r.foldersSame && r.colourSame &&
@@ -3168,6 +3428,7 @@ const phoneOff = async (p) => {
 check("a settings push keeps a phone's zoom", async (p) => {
   const dpr = await p.j(`window.devicePixelRatio || 1`);
   const said = [], bad = [];
+  const putBack = await keepSettings(p);
   try {
     for (const d of PHONE_DEVICES) {
       await phoneOn(p, d, dpr);
@@ -3217,6 +3478,7 @@ check("a settings push keeps a phone's zoom", async (p) => {
     said.push(`a desk still follows the row: off ${deskOff}, on ${deskOn}`);
   } finally {
     await phoneOff(p);
+    await putBack();
   }
   return { ok: bad.length === 0,
            detail: said.join(" | ") + (bad.length ? "  <- " + bad.join("; ") : "") };
@@ -3226,6 +3488,7 @@ check("a settings push keeps a phone's zoom", async (p) => {
 check("the calendar follows a phone that rotates", async (p) => {
   const dpr = await p.j(`window.devicePixelRatio || 1`);
   const said = [], bad = [];
+  const putBack = await keepSettings(p);
   const store = (v) => p.j(`(function () { try {
       var k = window.SETTINGS_KEY; if (!k) return "no key";
       var s = JSON.parse(window.localStorage.getItem(k) || "{}");
@@ -3305,6 +3568,7 @@ check("the calendar follows a phone that rotates", async (p) => {
               `a phone's tap opened it and left the store ${kept}`);
   } finally {
     await phoneOff(p);
+    await putBack();
   }
   return { ok: bad.length === 0,
            detail: said.join(" | ") + (bad.length ? "  <- " + bad.join("; ") : "") };
@@ -3697,7 +3961,16 @@ check("the disc's density follows the notes on screen", async (p) => {
       __vg.renderer.refresh();
     })()`);
     await sleep(400);
-    return p.j("__vg.densityReport()");
+    // github#186 -- at ratio 1, so the screen floor reads alike in every state
+    await p.eval("__vg.renderer.getCamera().setState({ ratio: 1 }); void 0");
+    await sleep(150);
+    const r = await p.j("__vg.densityReport()");
+    // github#186 -- every shown dot's radius, bounded against its own rest
+    r.sizes = await p.j(`(function () { var o = {}; __vg.graph.forEachNode(function (id) {
+      var d = __vg.renderer.getNodeDisplayData(id);
+      if (!d || d.hidden || (__vg.alpha[id] || 0) < 0.999) return;
+      o[id] = __vg.renderer.scaleSize(d.size); }); return o; })()`);
+    return r;
   };
 
   const rows = [await at(1), await at(0.8), await at(0.6), await at(0.4)];
@@ -3759,19 +4032,130 @@ check("the disc's density follows the notes on screen", async (p) => {
   const grew = widest.sp > 1.05 ? widest.sizeMedian / base.sizeMedian : 1;
   const dss = sq.map((q) => q.ds).filter((v) => v > 0);
   const dsLo = dss.length ? Math.min(...dss) : 1, dsHi = dss.length ? Math.max(...dss) : 1;
-  const size_ok = !dss.length || (dsLo >= 0.15 && dsHi <= 0.8 && dsHi / dsLo < 2.2);
+  // github#186 -- the lattice follows the notes; a dot stays within
+  // github#186 -- the accepted count floor may exceed DOT_GROW_MAX
+  const GROW = (await p.j("__vg.debugDump().dots.growMax").catch(() => null)) || 3;
+  let under = 0, over = 0, compared = 0, worstLo = 1, worstHi = 1;
+  for (const r of rows.slice(1)) {
+    const countFloor = Math.min(7.5, 1.5 + 0.7 * Math.log2(Math.max(1, Object.keys(base.sizes).length / Math.max(1, Object.keys(r.sizes).length))));
+    for (const id of Object.keys(r.sizes || {})) {
+      const a = base.sizes ? base.sizes[id] : undefined;
+      if (!(a > 0)) continue;
+      compared++;
+      const q = r.sizes[id] / a;
+      if (q < 0.97) { under++; if (q < worstLo) worstLo = q; }
+      if (r.sizes[id] > Math.max(GROW * a, countFloor) * 1.03) { over++; if (q > worstHi) worstHi = q; }
+    }
+  }
+  const size_ok = under === 0 && over === 0;
 
   return {
     ok: square_ok && size_ok,
     detail: `step/pitch per band over ${sq.length} sampled states: ` +
             sq.map((q) => `${q.band[0]}${q.n}:${q.ratio}/d${q.ds}`).join(" ") +
             ` -- worst square ${worstSq.ratio} (needs ${SQ_LO.toFixed(2)}-${SQ_HI.toFixed(2)}),` +
-            ` diameter/step ${dsLo}-${dsHi} (needs 0.15-0.80, spread <2.2)` +
+            ` ${compared} dot-states against their unfiltered size: ${under} under (worst ${worstLo.toFixed(2)}x), ` +
+            `${over} past the rest/count bound (worst ${worstHi.toFixed(2)}x); median dot grew ${grew.toFixed(2)}x, ` +
+            `diameter/step ${dsLo}-${dsHi} (context, not asserted)` +
             `; context, not asserted: pitch*sqrt(shown) ` +
             roots.map((v) => Math.round(v)).join("/") + ` spread ${spread.toFixed(3)}x` +
             `; spacing reached ${widest.sp} at ${widest.shown} of ` +
             `${base.shown} shown, median dot ${base.sizeMedian} -> ${widest.sizeMedian}` +
             ` (${grew.toFixed(2)}x)`,
+  };
+}, { on: "all" });
+
+// github#186
+check("hidden defaults do not change visible geometry or dots on mount and Refresh", hiddenBaselineCheck);
+check("hidden defaults do not change visible geometry or dots after animated Refresh", hiddenBaselineCheck,
+  { clock: "real" });
+check("hidden defaults do not change the separate unlinked group", p => hiddenBaselineCheck(p, false));
+check("a cascade keeps moving notes inside separate wedges", cascadeWedgesCheck,
+  { on: ["demo-vault", "shape-vault", "tag-vault"], clock: "real" });
+
+check("a page that lays out filtered still takes its dots' rest from the unfiltered disc", async (p) => {
+  const clear = `__vg.state.hidden[__vg.state.dim] = Object.fromEntries(
+    __vg.groupOrder().filter(g => __vg.hiddenByDefault(g)).map(g => [g, true])); __vg.state.hiddenSub = {};
+    __vg.state.from = null; __vg.state.to = null; __vg.state.until = null;
+    __vg.syncAlpha(); __vg.applyLayout(false); void 0`;
+  await p.eval(clear);
+  await sleep(200);
+  const direct = await p.j(`__vg.restDots()`);
+  const hid = await p.j(`(function () {
+    var order = __vg.groupOrder();
+    var g = order.filter(function (x) { return !__vg.hiddenByDefault(x); })[0];
+    var h = Object.assign({}, __vg.state.hidden[__vg.state.dim]); h[g] = true;
+    __vg.forgetRest();
+    __vg.state.hidden[__vg.state.dim] = h; __vg.syncAlpha(); __vg.applyLayout(false);
+    return g; })()`);
+  await sleep(200);
+  const retaken = await p.j(`__vg.restDots()`);
+  await p.eval(`__vg.state.until = Math.max(2, Math.round(__vg.graph.order * 0.1));
+    __vg.syncAlpha(); __vg.applyLayout(false); void 0`);
+  await sleep(200);
+  const ranged = await p.j(`__vg.restDots()`);
+  await p.eval(clear);
+  await sleep(200);
+  await camReset(p);
+
+  const ids = Object.keys(direct);
+  let missing = 0, worst = 0, drift = 0;
+  for (const id of ids) {
+    if (!(retaken[id] > 0)) { missing++; continue; }
+    const d = Math.abs(retaken[id] / direct[id] - 1);
+    if (d > worst) worst = d;
+    if (ranged[id] !== retaken[id]) drift++;
+  }
+  return {
+    ok: ids.length > 0 && missing === 0 && worst < 0.01 && drift === 0,
+    detail: `${ids.length} dots at the unfiltered rest; with "${hid}" hidden and the rest forgotten, ` +
+            `${ids.length - missing} retaken (${missing} missing), worst ${(worst * 100).toFixed(2)}% off ` +
+            `(needs <1%); a sparse timeline then moved ${drift} of them (needs 0)`,
+  };
+}, { on: "all" });
+
+// github#186
+check("a rest taken at one stage size still bounds the dots at another", async (p) => {
+  const SIZES = `(function () { var R = __vg.renderer, o = {};
+    __vg.graph.forEachNode(function (id) { if ((__vg.alpha[id] || 0) > 0.5) o[id] = R.scaleSize(R.getNodeDisplayData(id).size); });
+    return o; })()`;
+  const dpr = await p.j(`window.devicePixelRatio || 1`);
+  const was = await p.j(`JSON.stringify(__vg.state.hidden[__vg.state.dim] || {})`);
+  const hid = await p.j(`(function () {
+    var order = __vg.groupOrder(), g = order[order.length - 1], h = {}; h[g] = true;
+    __vg.forgetRest();
+    __vg.state.hidden[__vg.state.dim] = h; __vg.syncAlpha(); __vg.applyLayout(false);
+    return g; })()`);
+  await sleep(200);
+  let carried, retaken;
+  try {
+    await p.send("Emulation.setDeviceMetricsOverride", { width: 760, height: 640, deviceScaleFactor: dpr, mobile: false });
+    await sleep(900);
+    await settle(p);
+    await p.eval(`__vg.applyLayout(false); void 0`);
+    await sleep(200);
+    carried = await p.j(SIZES);
+    await p.eval(`__vg.forgetRest(); __vg.applyLayout(false); void 0`);
+    await sleep(200);
+    retaken = await p.j(SIZES);
+  } finally {
+    await p.send("Emulation.clearDeviceMetricsOverride").catch(() => {});
+    await sleep(600);
+    await p.eval(`__vg.state.hidden[__vg.state.dim] = ${was}; __vg.syncAlpha(); __vg.applyLayout(false); void 0`);
+    await sleep(200);
+    await camReset(p);
+  }
+  const ids = Object.keys(retaken);
+  let worst = 0, off = 0;
+  for (const id of ids) {
+    const d = Math.abs((carried[id] || 0) / retaken[id] - 1);
+    if (d > 0.01) off++;
+    if (d > worst) worst = d;
+  }
+  return {
+    ok: ids.length > 0 && off === 0,
+    detail: `"${hid}" hidden, rest taken, stage resized to 760x640: ${off} of ${ids.length} dots ` +
+            `differ from a rest retaken at the new size by more than 1% (worst ${(worst * 100).toFixed(1)}%)`,
   };
 }, { on: "all" });
 
@@ -3939,12 +4323,19 @@ async function storeBack(p, was) {
   })(); void 0`).catch(() => {});
 }
 
+// github#151
+async function keepSettings(p) {
+  const was = await p.j(`window.SETTINGS_KEY ? window.localStorage.getItem(window.SETTINGS_KEY) : null`);
+  return () => p.eval(`(function (v) { var k = window.SETTINGS_KEY; if (!k) return;
+    if (v === null) window.localStorage.removeItem(k); else window.localStorage.setItem(k, v);
+  })(${JSON.stringify(was)}); void 0`);
+}
 async function toRest(p) {
   await p.eval(`document.querySelector("#vg-reset").click(); void 0`);
   await camSettle(p);
   const dl = Date.now() + 4000;
   while (Date.now() < dl) {
-    if (await p.j(`!!__vg.camAtRest`)) return;
+    if (await p.j(`!!__vg.camAtRest && !__vg.demo.busy()`)) return;
     await sleep(60);
   }
 }
@@ -3968,27 +4359,38 @@ async function biggestGroup(p) {
 }
 // github#55
 async function watchDuringCascade(p, startRatio, capMs = 8000) {
-  var movedWhileBusy = false;
+  var movedWhileBusy = false, movedEarly = false, movedByLanding = false, firstMovePr = null, landingRatio = null;
   var deadline = Date.now() + capMs;
   for (;;) {
     // THE CASCADE, not busy(): the question is whether the camera moved while notes were still
     // leaving, and busy() also counts the hover-highlight ramp the eye click starts, which can
     // outlast the cascade under load -- measured once as "moved early: true" in a gate run and
     // 0 of 3 alone, the fit having begun after the last note left but with that ramp still up.
-    var s = await p.j(`(function(){ var w = __vg.demo.busyWhy(); return { busy: !!(w.cascade || w.play || w.anim),
+    var s = await p.j(`(function(){ var w = __vg.demo.busyWhy(); var c = __vg.lastCascade(); return { busy: !!(w.cascade || w.play || w.anim),
+      cascade: !!w.cascade, pr: c && c.last ? c.last.pr : null,
       ratio: +__vg.renderer.getCamera().getState().ratio.toFixed(4) }; })()`);
     // github#19
     if (!s.busy) break;
-    if (Math.abs(s.ratio - startRatio) > 0.01) movedWhileBusy = true;
+    const moved = Math.abs(s.ratio - startRatio) > 0.01;
+    if (moved) movedWhileBusy = true;
+    // github#186 -- a deferred fit rides the last third: nothing before pr 0.6,
+    // github#186 -- and by the landing the camera is on its way or there
+    if (s.cascade) {
+      if (moved && firstMovePr === null) firstMovePr = s.pr;
+      if (moved && s.pr !== null && s.pr < 0.6) movedEarly = true;
+      landingRatio = s.ratio;
+    }
     if (Date.now() > deadline) break;
     await sleep(60);
   }
+  if (landingRatio !== null && Math.abs(landingRatio - startRatio) > 0.01) movedByLanding = true;
   await sleep(500);
   const settled = await camState(p);
-  return { movedWhileBusy, finalRatio: settled.ratio };
+  return { movedWhileBusy, movedEarly, movedByLanding, firstMovePr, finalRatio: settled.ratio };
 }
 
-check("hiding the biggest group auto-fits the camera, but only once it has finished leaving", async (p) => {
+// github#14, github#186 -- the flight rides the last third and lands with the notes
+check("hiding the biggest group auto-fits the camera, riding the last third of the walk", async (p) => {
   await p.eval(`__vg.state.hidden.folder = {}; __vg.syncAlpha(); __vg.applyLayout(false); void 0`);
   await sleep(200);
   await toRest(p);
@@ -3998,7 +4400,7 @@ check("hiding the biggest group auto-fits the camera, but only once it has finis
   if (!g) return { ok: false, detail: "no group to hide" };
 
   await clickEye(p, g);
-  const { movedWhileBusy, finalRatio } = await watchDuringCascade(p, rest.ratio);
+  const { movedEarly, movedByLanding, firstMovePr, finalRatio } = await watchDuringCascade(p, rest.ratio);
   const dens = await p.j(`__vg.densityReport()`);
   const fr = await p.j(`__vg.FIT_RATIO`); // github#111
   const want = fr * Math.max(0.12, Math.min(1.35, dens.reach));
@@ -4011,14 +4413,14 @@ check("hiding the biggest group auto-fits the camera, but only once it has finis
 
   const atRest = await p.j(`__vg.camAtRest`);
   const ok = shrinking
-    ? (!movedWhileBusy && Math.abs(finalRatio - want) < 0.03 && atRest)
+    ? (!movedEarly && movedByLanding && Math.abs(finalRatio - want) < 0.03 && atRest)
     : true;
   return {
     ok,
     detail: shrinking
-      ? `hid "${g}" (reach ${dens.reach}): ratio held at ${rest.ratio} while notes left ` +
-        `(moved early: ${movedWhileBusy}), landed at ${finalRatio.toFixed(4)} against ` +
-        `${want.toFixed(4)} promised, camAtRest ${atRest}`
+      ? `hid "${g}" (reach ${dens.reach}): ratio ${rest.ratio} held until pr 0.6 (moved early: ${movedEarly}), ` +
+        `first camera move at pr ${firstMovePr === null ? "never" : firstMovePr.toFixed(2)}, on its way by the landing: ${movedByLanding}, ` +
+        `landed at ${finalRatio.toFixed(4)} against ${want.toFixed(4)} promised, camAtRest ${atRest}`
       : `hid "${g}": reach ${dens.reach} did not shrink the disc below its resting ratio on ` +
         `this fixture -- nothing to assert`,
   };
@@ -4931,6 +5333,44 @@ check("the last frame of a cascade is the resting layout", async (p) => {
   };
 }, { on: WALK, clock: "real" });
 
+// github#186
+check("sparse filtered results stay unlabelled without explicit interaction", async (p) => {
+  await clearRange(p);
+  await settle(p);
+  const day = await p.j(`(function () {
+    var days = {};
+    __vg.graph.forEachNode(function (id, a) {
+      if ((__vg.alpha[id] || 0) > 0.999 && a.created) {
+        var d = String(a.created).slice(0, 10);
+        days[d] = (days[d] || 0) + 1;
+      }
+    });
+    return Object.keys(days).sort().reverse().find(function (d) { return days[d] > 0 && days[d] <= 12; }) || null;
+  })()`);
+  if (!day) return { ok: false, detail: "fixture has no day with 1–12 notes" };
+  const labelInk = async () => p.j(`(function () {
+    var c = __vg.renderer.getCanvases().labels;
+    var bytes = c.getContext('2d').getImageData(0, 0, c.width, c.height).data, ink = 0;
+    for (var i = 3; i < bytes.length; i += 4) if (bytes[i] > 32) ink++;
+    return ink;
+  })()`);
+  let sparseInk = 0;
+  try {
+    await p.eval(`__vg.setRange(${JSON.stringify(day)}, ${JSON.stringify(day)}); void 0`);
+    await settle(p);
+    await sleep(200);
+    sparseInk = await labelInk();
+  } finally {
+    await clearRange(p);
+    await settle(p);
+    await toRest(p);
+  }
+  const restInk = await labelInk();
+  return { ok: sparseInk === 0 && restInk === 0, detail: `${day}: ${sparseInk} automatic label pixels; cleared: ${restInk}` };
+});
+
+check("count-based note sizes ease through filtering and interruption", countSizingCheck, { on: "all", clock: "real" });
+
 check("filtered to the bone, the disc stays drawable", async (p) => {
   await clearRange(p);
   await settle(p);
@@ -4938,11 +5378,13 @@ check("filtered to the bone, the disc stays drawable", async (p) => {
     var a0 = __vg.renderer.graphToViewport({ x: 0, y: 0 });
     var b0 = __vg.renderer.graphToViewport({ x: 160, y: 0 });
     var perPx = 160 / Math.hypot(b0.x - a0.x, b0.y - a0.y);
-    var rows = {}, n = 0;
+    var rows = {}, n = 0, sizes = {};
     __vg.graph.forEachNode(function (id, at) {
       var d = __vg.renderer.getNodeDisplayData(id);
       if (!d || d.hidden || (__vg.alpha[id] || 0) < 0.999) return;
       n++;
+      // github#186 -- every lit dot's radius in units, bounded against its rest
+      sizes[id] = __vg.renderer.scaleSize(d.size) * perPx;
       var r = Math.hypot(at.x, at.y);
       var k = Math.round(r / 8) * 8;
       (rows[k] || (rows[k] = [])).push({ th: Math.atan2(at.y, at.x),
@@ -5020,9 +5462,15 @@ check("filtered to the bone, the disc stays drawable", async (p) => {
              // these when there is no step to size a dot against.
              minDotPx: dots.length ? Math.round(dots[0] / perPx * 100) / 100 : 0,
              medDotPx: Math.round(medDot / perPx * 100) / 100,
-             rows: Object.keys(rows).length };
+             rows: Object.keys(rows).length, sizes: sizes, perPx: perPx };
   })()`;
+  // github#186 -- every probe at ratio 1: the floor is a screen size
+  // github#186 -- and the auto-fit would move it under the measure
+  const atOne = async () => { await p.eval("__vg.renderer.getCamera().setState({ ratio: 1 }); void 0"); await sleep(150); };
+  await atOne();
   const rest = await p.j(probe);
+  // github#186 -- growth is bounded by its rest or the accepted count floor
+  const GROW = (await p.j("__vg.debugDump().dots.growMax").catch(() => null)) || 3;
   const bad = [];
   const seen = [];
   const judge = (label, r) => {
@@ -5035,14 +5483,20 @@ check("filtered to the bone, the disc stays drawable", async (p) => {
       bad.push(`${label}: ${r.overlaps} overlapping pair(s), worst ${r.worstClear} = ` +
                `${r.worstRel}% of the row median`);
     }
-    // github#65
-    if (r.stepped) {
-      if (r.ds < 0.15) bad.push(`${label}: dots collapsed, diameter/step ${r.ds}`);
-    } else if (r.minDotPx < rest.medDotPx) {
-      // github#53
-      bad.push(`${label}: no row holds four notes, and the smallest dot (${r.minDotPx}px) is ` +
-               `under the resting median (${rest.medDotPx}px)`);
+    // github#186 -- in place of github#65's step floor and github#53's
+    // github#186
+    let under = 0, over = 0, worstLo = 1, worstHi = 1, compared = 0;
+    const countFloor = Math.min(7.5, 1.5 + 0.7 * Math.log2(Math.max(1, rest.shown / Math.max(1, r.shown)))) * r.perPx;
+    for (const id of Object.keys(r.sizes || {})) {
+      const a = rest.sizes ? rest.sizes[id] : undefined;
+      if (!(a > 0)) continue;
+      compared++;
+      const q = r.sizes[id] / a;
+      if (q < 0.97) { under++; if (q < worstLo) worstLo = q; }
+      if (r.sizes[id] > Math.max(GROW * a, countFloor) * 1.03) { over++; if (q > worstHi) worstHi = q; }
     }
+    if (under) bad.push(`${label}: ${under} of ${compared} dots under their resting size (worst ${worstLo.toFixed(2)}x)`);
+    if (over) bad.push(`${label}: ${over} of ${compared} dots past the rest/count bound (worst ${worstHi.toFixed(2)}x)`);
     if (r.holeRatio > 3.2) bad.push(`${label}: a gap ${r.holeRatio}x the row median INSIDE one wedge`);
   };
 
@@ -5054,6 +5508,7 @@ check("filtered to the bone, the disc stays drawable", async (p) => {
     if (!hid) continue;
     await settle(p);
     await sleep(600);
+    await atOne();
     judge(`hidden through ${g}`, await p.j(probe));
   }
   for (const g of groups) {
@@ -5082,6 +5537,7 @@ check("filtered to the bone, the disc stays drawable", async (p) => {
       await p.eval(`__vg.setRange(${JSON.stringify(from)}, null); void 0`);
       await settle(p);
       await sleep(600);
+      await atOne();
       judge(`range last ${Math.round(frac * 1000) / 10}%`, await p.j(probe));
     }
   }
@@ -5091,7 +5547,8 @@ check("filtered to the bone, the disc stays drawable", async (p) => {
   await toRest(p);
   return {
     ok: !bad.length,
-    detail: bad.length ? bad.slice(0, 4).join("; ")
+    // github#186
+    detail: bad.length ? bad.slice(0, 4).join("; ") + "  ||  " + seen.slice(-4).join(" | ")
                        : seen.slice(-4).join(" | "),
   };
 }, { on: "all" });
@@ -5491,7 +5948,7 @@ check("the ribbon rescales with its slot", async (p) => {
     var slot = years.getBoundingClientRect().width;
     var last = bs.length ? bs[bs.length - 1] : null;
     var lastX = last ? last.getBoundingClientRect().left + last.getBoundingClientRect().width / 2 - rb.left : null;
-    return { rib: Math.round(rb.width), slot: Math.round(slot),
+    return { rib: Math.round(rb.width), slot: Math.round(slot), ribExact: rb.width,
              inline: rib.style.width, bitmap: rib.width,
              lastX: lastX === null ? null : Math.round(lastX) };
   })()`);
@@ -5511,12 +5968,13 @@ check("the ribbon rescales with its slot", async (p) => {
   const settled = await at();
 
   const tracks = rows.every((r) => Math.abs(r.rib - r.slot) <= 1);
-  const pinned = rows.every((r) => r.inline === r.rib + "px");
+  // github#186
+  const pinned = rows.every((r) => /px$/.test(r.inline) && Math.abs(parseFloat(r.inline) - r.ribExact) <= 0.5);
   const moved = new Set(rows.map((r) => r.lastX)).size === rows.length || rows.length < 2;
   const restored = Math.abs(settled.rib - settled.slot) <= 1;
   return {
     ok: tracks && pinned && moved && restored,
-    detail: rows.map((r) => `${r.w}px -> strip ${r.rib}/slot ${r.slot}` +
+    detail: rows.map((r) => `${r.w}px -> strip ${r.rib}/slot ${r.slot} (inline ${r.inline})` +
                             (r.lastX === null ? "" : `, last year at ${r.lastX}`)).join("; ") +
             `; cleared -> ${settled.rib}/${settled.slot}` +
             (tracks ? "" : "  <- STRIP DID NOT FOLLOW ITS SLOT") +
@@ -6660,6 +7118,8 @@ check("the (unlinked) row opens its menu with no notes in it", async (p) => {
              r.openedOk && r.closedAfter === true && r.turnedOff === true;
   // github#151
   await storeBack(p, storedWas);
+  // github#186
+  await settle(p);
   return { ok, detail: `row ${r.rowFound ? "present" : "MISSING"} at count ${r.empty}, ` +
     `dimmed=${r.dimmed}, eye dropped for a placeholder=${r.noEye}, only dropped for a ` +
     `placeholder=${r.noOnly}; menu ${r.openedOk ? "opened" : "DID NOT OPEN"} ` +
@@ -6970,7 +7430,11 @@ check("the thinnest count bar survives a hover in pixels, not just in CSS", asyn
         if (rb > best) best = rb;
       }
       var el = document.querySelector(${JSON.stringify(`[data-g=${JSON.stringify(row.g)}]`)});
-      return { px: best, hovered: !!el && el.matches(':hover') };
+      var at = document.elementFromPoint(${row.cx}, ${row.cy});
+      var all = document.querySelectorAll(${JSON.stringify(`[data-g=${JSON.stringify(row.g)}]`)});
+      return { px: best, hovered: !!el && el.matches(':hover'),
+               at: at ? at.tagName.toLowerCase() + (at.id ? "#" + at.id : "") + "." + String(at.className).split(" ").join(".") : "none",
+               twins: all.length, first: el ? el.tagName.toLowerCase() + "." + String(el.className).split(" ").join(".") : "none" };
     })()`);
   };
 
@@ -7024,7 +7488,8 @@ check("the thinnest count bar survives a hover in pixels, not just in CSS", asyn
             `${lit.px}px highlighted (data-hl=${wasLit}); weakest asserted ${weakest}px of ` +
             states.map((s) => s[0]).join("/") +
             (nearAccent ? "  (highlighted NOT asserted: this bar's hue is the accent's)" : "") +
-            (over.hovered ? "" : "  <- NO :hover from the harness") +
+            (over.hovered ? "" : `  <- NO :hover from the harness (under the pointer: ${over.at}; ` +
+              `${over.twins} element(s) carry this data-g, the first is ${over.first})`) +
             (weakest < FLOOR_MIN ? `  <- a state paints under ${FLOOR_MIN}px` : "")
   };
 });
@@ -8328,6 +8793,7 @@ check("a rebuild waits for a drag, and a right-click is not a drag", async (p) =
   // github#120 -- refused, and refused FOR THAT REASON
   const held = await p.j(`(function(){ ${EL}
     window.__live.a = window.__live.snap();
+    window.__live.orig = window.__live.clone();
     ${DOWN(0)}
     var res = __vg.applyData(window.__live.withOneMore('__live/Zz Drag Probe.md'));
     var order = __vg.graph.order;
@@ -8343,14 +8809,14 @@ check("a rebuild waits for a drag, and a right-click is not a drag", async (p) =
   // github#120 -- a context menu is not a drag
   const rclick = await p.j(`(function(){ ${EL}
     ${DOWN(2)}
-    var res = __vg.applyData(window.__live.clone());
+    var res = __vg.applyData(window.__live.orig);
     ${UP}
     return res;
   })()`);
   await settle(p);
 
   // github#120 -- put the disc back for the other live checks
-  await p.j(`__vg.applyData(window.__live.clone())`);
+  await p.j(`__vg.applyData(window.__live.orig)`);
   await settle(p);
 
   const ok = held.res && held.res.applied === false && held.res.busy === "drag" &&
@@ -8455,6 +8921,7 @@ check("word counts land by path, which is the only thing a live rebuild keeps", 
   const start = await p.j(`window.__live.snap().n`);
   // design/0014
   const r = await p.j(`(function(){
+    window.__live.orig = window.__live.clone();
     var res = __vg.applyData(window.__live.without(1));
     var ids = __vg.graph.nodes(), d = __vg.data();
     var diverged = 0, sample = null;
@@ -8479,7 +8946,7 @@ check("word counts land by path, which is the only thing a live rebuild keeps", 
              missing: __vg.setWords("__live/not a note.md", 1) };
   })()`);
   await settle(p);
-  await p.j(`__vg.applyData(window.__live.clone())`);
+  await p.j(`__vg.applyData(window.__live.orig)`);
   await settle(p);
   const ok = r.res.applied && r.diverged > 0 && r.landed === 424242 &&
              r.bystander !== null && r.bystander !== 424242 && r.missing === false;
@@ -8944,6 +9411,16 @@ async function runOne(vault, work) {
       try { page = await attach(PORT, want); break; }
       catch (e) { if (Date.now() > deadline) throw e; await sleep(400); }
     }
+    // github#186, github#192 -- only a window this run placed on the hook's screen
+    if (process.platform === "win32" && !slot && !HEADED && !HEADLESS) {
+      const { bounds } = await page.send("Browser.getWindowForTarget");
+      const screen = harnessScreen();
+      if (bounds.left < screen.x || bounds.top < screen.y ||
+          bounds.left + bounds.width > screen.x + screen.w || bounds.top + bounds.height > screen.y + screen.h) {
+        throw new Error("Chrome is outside the claimed screen: " + JSON.stringify(bounds));
+      }
+      log("Chrome bounds verified on the claimed screen: " + JSON.stringify(bounds));
+    }
     // github#104
     if (!BROWSER) { try { BROWSER = (await json(PORT, "/json/version")).Browser; } catch { void 0; } }
     // github#146 -- the list the checks see, and may edit
@@ -9141,17 +9618,17 @@ async function killBrowser(child, PORT) {
  * reuses. A leftover fixture directory in a checkout root is ignored with a one-line notice;
  * --vault remains the explicit override for pointing the suite at any vault on purpose.
  *
- * EXCEPT THE 10k VAULT, WHOSE --end IS PINNED. Its golden layout snapshot is not
- * day-invariant: the daily notes there are filed into year-month subfolders derived from
- * their dates, so moving --end moves notes between subfolders, and the subfolder cells move
- * with them. Measured 2026-09-04, the first weekly refresh after the goldens were recorded:
- * the regenerated 10k vault failed "layout matches its golden snapshot" with 893 notes moved
- * (worst #5296, radius 9317 -> 9637, angle -80 -> 169 degrees) on develop itself, while the
- * demo and shape vaults -- which have no date-derived folders -- stayed byte-identical, as
- * invariants.md had measured for those two. So the 10k is generated with --end fixed at the
- * day its golden was taken, and a pinned fixture does not age (there is nothing for a weekly
- * refresh to change). It costs the 10k vault the live half of the heatmap-window check,
- * which the two ageing vaults still carry.
+ * EXCEPT THE 10k AND DEMO VAULTS, WHOSE --end IS PINNED. Their goldens are not day-invariant:
+ * daily notes are named by date and filed into year-month subfolders, so moving --end renames
+ * and refiles them, and the subfolder cells move with them. Measured 2026-09-04: the 10k
+ * failed "layout matches its golden snapshot" with 893 notes moved on develop itself. The
+ * demo vault delegates to the same generator and was assumed safe; measured 2026-09-29 (github
+ * #186), its golden holds for --end 09-20 to 09-22, moves 3 notes at 09-23 and 31 at 09-27.
+ * The shape vault has no date-derived folders and still ages, so it carries the live window.
+ * So both are generated with --end fixed at a day their goldens hold, and a pinned fixture
+ * does not age (there is nothing for a weekly refresh to change). It costs both the live
+ * half of the heatmap-window check,
+ * which the shape vault still carries.
  *
  * github#106, decisions/0013 -- a stamp is not proof the vault is usable
  *
@@ -9238,8 +9715,8 @@ function resolveVaults() {
     out.push({ path: dir, label, fixture: desc ? { name, ...desc } : null });
   };
 
-  // github#199
-  gen("make-demo-vault.mjs", ["--end", "2026-09-14"], "demo-vault", "the demo vault (sparse tail, 2 dense years)");
+  // github#199, github#186
+  gen("make-demo-vault.mjs", ["--end", "2026-09-22"], "demo-vault", "the demo vault (sparse tail, 2 dense years)");
   gen("make-test-vault.mjs", ["--notes", "10000", "--years", "10", "--end", "2026-08-28"],
       "test-vault", "the 10k synthetic vault (10 years)");
   gen("make-shape-vault.mjs", [], "shape-vault", "the dominant-folder vault");

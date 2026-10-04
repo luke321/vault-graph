@@ -257,4 +257,5 @@ try {
 }
 
 if (failed) { console.log("make-mirror-vault selftest: " + failed + " FAILED"); process.exit(1); }
+await import("./check-mirror-fidelity.mjs");
 console.log("make-mirror-vault selftest: all passed");

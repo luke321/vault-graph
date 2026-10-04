@@ -42,8 +42,8 @@ function loadSettings() {
   try {
     var raw = window.localStorage.getItem(SETTINGS_KEY);
     var v = raw ? JSON.parse(raw) : null;
-    return v && typeof v === "object" ? v : {};
-  } catch (e) { return {}; }
+    return Object.assign({}, window.VAULT_SETTINGS || {}, v && typeof v === "object" ? v : {});
+  } catch (e) { return Object.assign({}, window.VAULT_SETTINGS || {}); }
 }
 
 function saveSettings(patch) {
@@ -68,6 +68,12 @@ mountVaultGraph(
     onFolderColors: function (map) { saveSettings({ folderColors: map }); },
     subfolderColors: loadSettings().subfolderColors,
     onSubfolderColors: function (map) { saveSettings({ subfolderColors: map }); },
+    tagColors: loadSettings().tagColors,
+    onTagColors: function (map) { saveSettings({ tagColors: map }); },
+    subtagColors: loadSettings().subtagColors,
+    onSubtagColors: function (map) { saveSettings({ subtagColors: map }); },
+    tagShown: loadSettings().tagShown,
+    onTagShown: function (map) { saveSettings({ tagShown: map }); },
     folderShown: loadSettings().folderShown,
     onFolderShown: function (map) { saveSettings({ folderShown: map }); },
     panEnabled: loadSettings().panEnabled,
@@ -88,6 +94,9 @@ mountVaultGraph(
     // github#3
     unlinkedTintByFolder: loadSettings().unlinkedTintByFolder,
     onUnlinkedTintByFolder: function (v) { saveSettings({ unlinkedTintByFolder: v }); },
+    countBars: loadSettings().countBars,
+    onCountBars: function (v) { saveSettings({ countBars: v }); },
+    fitCap: loadSettings().fitCap,
     // github#164 -- absent means off, which is the order the disc has always drawn
     rootInOrder: loadSettings().rootInOrder === true,
     onRootInOrder: function (v) { saveSettings({ rootInOrder: v }); },

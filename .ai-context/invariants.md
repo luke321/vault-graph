@@ -1,5 +1,132 @@
 # Invariants
 
+## Hidden defaults are outside the layout baseline (github#186)
+
+Folders or tag groups hidden in settings, including the underscore default, contribute no
+members or links to the starting disc's geometry, seam-count scaling, degree ramp, or serpentine ordering.
+Their data remains available to the legend and can be shown again. A note connected only to
+those groups is unlinked in the visible baseline. Hiding a filing also hides its unlinked notes.
+
+The geometry lock and resting-size reference describe this baseline, rather than every note
+the producer returned. Temporary legend and date filters still repack inside the locked rings
+and retain the existing resting-size bounds. The baseline calculation clears those temporary
+filters while retaining saved hidden defaults. Changing a saved default invalidates degree,
+rank and resting-size caches and retakes the geometry; standalone Refresh retakes it too.
+Link ranking uses the full adjacency list, not the subset of edges submitted to the renderer.
+
+The focused checks `hidden defaults do not change` add 320 synthetic hidden notes and 640
+incident edges, then compare visible positions, band membership and dot radii with the original
+graph. They cover mounting, Refresh, revealing the added groups and hiding them again, with
+ordinary and reduced motion. Reduced-motion Refresh must leave no playing state behind.
+The reference remains stored in graph units so a viewport resize cannot alter its meaning.
+
+## Parallel Refresh on a dimension switch (github#186)
+
+Sizing resolves each adjacent note to its display node in the arriving disc. A temporary
+stand-in keeps its note's link count, including self-link weighting, and sees the arriving
+stand-ins of its neighbours. The departing originals being hidden in this world must not
+zero that score. Before taking the settled size baseline, transfer and remove stand-ins,
+recompute visible-link ranks for the real nodes, and lay out the destination. A fresh alpha
+sync and relayout after the switch must change neither the size rank nor the dot size.
+`tags: parallel Refresh preserves link-based sizes` checks incoming ranks against an instant
+destination and settled sizes against a fresh recalculation, in both directions on four fixtures.
+
+The folder/tag switch runs the leaving disc's Refresh backwards and the destination's
+Refresh forwards over the same `TIMELINE_MS * TIME_SCALE` clock. Departure reverses the
+date order; arrival follows it. Each disc owns its endpoint membership, cell assignments,
+geometry lock and running serpentine coordinates. Both use the same cell-local path walker
+as ordinary Refresh; independent polar easing must not cut across the serpentine.
+
+The two worlds share one angular budget, divided by their live weights. The departing
+wedges occupy the leading arc and the arriving wedges grow into the released trailing arc.
+Each uses the ordinary allocator's pitch and seam rules inside its allocation. Partial-arc
+seams cannot cross either end, and drawn dot radii remain capped at their wedge edges;
+a zero-width seat stays hidden rather than becoming the renderer's default-size dot.
+
+Opacity stays monotone per display node. Both discs remain visible during the transition,
+then the stand-ins are removed and the result equals a fresh resting layout. The radial
+fixed-angle fold and its `FOLD_ENTER`, `FOLD_PHASE`, `FOLD_FADE` constants are superseded.
+The clock-hand fallback remains available through `foldSwitch = false`.
+
+`tags: parallel Refresh` checks both directions, reverse/forward date order, visible angular
+motion in both discs, simultaneous visibility, disjoint drawn angular extents, opacity
+monotonicity, convergence and temporary-node cleanup.
+The old fixed-angle animation is a negative control: visible angular motion is effectively
+zero and departure does not reverse date order. The existing Refresh/date-filter wedge
+checks remain unchanged.
+
+## Fold continuity and sparse-result labels (github#186, historical fold)
+
+The fold now interpolates each endpoint row's radius toward that band's first row while
+keeping its endpoint angle. It does not rebuild a fractional top row and redistribute its
+notes across a wedge. The departure folds from the positions captured at the switch (`foldSrc`; `posSrc` is not taken
+on a switch, which is why the first cut folded nothing on the demo and 10k), the arrival from
+`finalPos`, and each fold covers only its own disc's notes, since one seat map overriding the
+other left the leaving disc standing still. At amount 1 the target is exactly the endpoint;
+the existing per-frame radial cap and convergence loop still govern the drawn positions.
+
+`FOLD_ENTER = 0.05`, `FOLD_PHASE = 0.65`, and `FOLD_FADE = 0.18` are fractions of the existing
+cascade duration. Departure and arrival overlap for 0.60 of the clock; arrival finishes at
+0.70, leaving time to converge. `FOLD_LAND` is removed: there is no second layout to blend onto.
+Fold opacity no longer additionally shrinks the radius. Endpoint size ceilings and actual
+frame-clearance sizing remain active; the clock-hand fallback retains its shrink behavior.
+
+Sparse filtered views do not automatically label notes. The former 12-note threshold and
+180-pixel truncation rule were removed at the user's request on 2026-10-04. Labels remain
+available through explicit interaction, including hover and focus.
+
+Verification added to `tags: fold and regrow` measures angular drift between lit frames as well
+as movement, opacity reversals, cleanup, and resting-layout parity. `sparse filtered results`
+measures zero automatic label-canvas ink on a sparse day and after clearing the filter.
+The existing `filtered to the bone` check enforces the rest/count size bound described below.
+
+Historical measurement on 2026-09-26, before removing automatic labels, executing the actual
+fold and label methods in isolation:
+401 fold positions, maximum angular drift **1.11e-16 radians**, endpoint drift **0**, monotone
+radii and unchanged pinned positions; label truncation, canvas bounds, pairwise overlap,
+density cutoff, hidden-node exclusion, filter clearing, and forced-label priority pass.
+Filmed on the same day, at slow ×4, both discs folding, the reviewer's chroma proxy (300 px
+frames, annulus 30–145 px, against the smaller resting endpoint) and the arrival-window frame step:
+
+| | trough, demo | trough, tag | ripple mean / max, demo | 10k, ms a frame |
+|---|---|---|---|---|
+| the re-planned fold (FOLD_ENTER 0.30, landing blend) | 24.2% | 17.7% | 1.34 / 3.41 | 70.7 |
+| this fold, both discs | **53.8%** | **48.4%** | **0.62 / 3.94** | **64.5** |
+| this fold with the leaving disc not folding (the first cut) | 73.3% | 66.1% | 0.59 / 3.96 | -- |
+| develop's clock hand | 95.7% | 94.7% | -- | 57.7 |
+
+The fold check reads fold 893 / grow 19.2 on the demo and 285 / 893 on the 10k (grow is a per-frame
+maximum, the glide cap), angular step 0, relayout drift 0, and `render-diff` at rest shows 0
+canvas pixels differing on every fixture and ratio. A leaving disc that only fades where it stands
+keeps more colour in the middle than one that folds; the design folds both.
+
+## Fold-and-regrow prototype timing (github#186, historical)
+
+`design/0015` records the branch's new default dimension transition. `FOLD_ENTER = 0.4`,
+`FOLD_PHASE = 0.6`, and `FOLD_FADE = 0.18` are fractions of the existing cascade duration.
+Departure and arrival overlap for 0.2 of that duration. Small cells lengthen their fades to
+`min(FOLD_PHASE, max(FOLD_FADE, FOLD_PHASE * 3 / n))`. These are prototype choices, not
+measured acceptance thresholds. The clock sweep remains available through `__vg.foldSwitch`.
+
+The intended guarantees are monotone opacity on both worlds, independent locked ring boundaries,
+endpoint cell membership, the existing `RADIAL_STEP_MAX` movement limit during the walk, frame
+clearance when enabled, and no retained fold sizing or stand-ins after completion or tab hiding.
+The targeted checks are `--only "tags: fold and regrow"` and `--only "tags: hiding the tab"`.
+
+**Run and measured on 2026-09-25, on the left screen, before the commit** (the prototype's author
+could not launch a browser): *fold and regrow* passes on the demo (tag: 119 frames, fold 952
+units, grow 105, 0 reversals, relayout drift 0.000, converged; folder the same) and the 10k
+(33 frames, converged); *hiding the tab midway* releases everything (1,403 stand-ins → 0, drift
+0.000); the three switch checks it adapted stay green on all five fixtures. Filmed against
+develop on the tag and demo vaults (`scratchpad/186/cap-fold`, on the review page): the old rings
+fold to one row and the new grow from one; **around the middle of the clock the disc goes nearly
+dark** — old faded, new not in — the 20% overlap being thin; and **the last frame snaps 0.23 of
+a pitch (demo) / 0.16 (tag) onto the rest**, which the hand does not. `pack-check.mjs` cannot
+judge a switch otherwise: it classifies by the ring a note is in *now*, so its rail and area
+readings are noise for this act. **Its cost on the 10k, headless at real speed: 70.7 ms a frame
+(14 fps) against the hand's 57.7 (17 fps)** — the two layout passes per frame add 22%. All three
+are open items, not acceptance; the maintainer kept the prototype on sight, default on.
+
 Measured properties that must not regress. Each one has a way to check it — use it,
 don't reason about it.
 
@@ -193,6 +320,11 @@ filtering 503 notes to 62.
 
 ### A dot is sized off its band's median own-step, not its tightest decile (github#107)
 
+> **SUPERSEDED by github#186 / `decisions/0017`.** There is no band-median room any more, and no
+> `ROOM_PCTL`: a dot is sized off **its own** tangential step, capped at the band's radial pitch,
+> times a ramp on its `size`. Kept here because the reasoning below is why a band-wide figure was
+> the wrong instrument, which is the argument that retired it.
+
 `ringsLayout` collects one own-step per (cell, row) into `roomPool[band]` and `pick()` reduces
 each pool to the one number `dotPx` sizes that whole band against. **`ROOM_PCTL = 0.5`.** It was
 `0.1`, and the tenth percentile is not band-neutral: the inner band packs fewer rows over more
@@ -214,6 +346,9 @@ a second number through the cascade's six room-interpolation sites; it was consi
 aside.
 
 ### `DOT_MIN_PX` is a floor, and the caps below it still win (github#107)
+
+> Still true under github#186: the floor is applied before the edge, fit, hub and cascade clamps,
+> and those may still push a dot under it.
 
 `dotPx` used to scale the floor by the room factor as well as the ceiling — `lo = rp.lo * scale`
 — so **`DOT_MIN_PX = 1.5` was never a floor**: at scale 0.63 the demo vault's inner band bottomed
@@ -547,6 +682,627 @@ folder dimension) — under the cost's own `HOLE_MAX` ceiling of 0.36, which is 
 *The hub stays the same share of the disc as it is filtered* reads **drift 0.000 on every
 fixture that asserts it**, before and after, because `balanceBands()` runs only when
 `bandLock` is null: a filter re-packs inside rings it does not re-choose.
+
+## "Packed", and the four ways a cascade broke it (github#186)
+
+The definition, given on 2026-09-21 and implemented as given:
+
+> **Packed means that at all times every wedge has enough notes to touch both seam sides and
+> the inner and outer rings, and the static inner and outer radii are always honoured. A wedge
+> is never wider than its notes can fill. The last frame of a cascade is the rest, with nothing
+> to snap.**
+
+At rest the packer already kept it. The github#186 investigation measured every cascade frame of
+four acts on two fixtures and found **four separate ways it was broken in flight**, each with its
+own mechanism. What follows is what each one was, and what it reads now.
+
+### How a dot is sized, and the four ways it was got wrong first (github#186)
+
+A dot is `DOT_MIN_PX + (ceiling − DOT_MIN_PX) × ramp(size)`, the ramp linear in `size` over
+`NODE_MIN..NODE_MAX`, and the ceiling
+
+    DOT_OF_PITCH × min( the CELL's tightest tangential step × DOT_CLEAR,
+                        DOT_OVER_PITCH × min(the band's radial pitch,
+                                             UNIT × DOT_MAX_SPREAD × DOT_OVER_PITCH) )
+
+**Each of the three terms in that `min()` guards a different thing, and collapsing them back into
+one number is how this was broken three times:**
+
+| term | what it guards |
+|---|---|
+| the cell's tightest step × `DOT_CLEAR` | seam and neighbour clearance, decided inside the note's own wedge — nothing about another wedge reaches it, and nothing about the note's own ROW reaches it either (the fourth failure below) |
+| `DOT_OVER_PITCH × pitch` | how far a dot may outgrow the **radial** pitch once its own tangential step allows, which is where a filtered disc's dot growth comes from |
+| `UNIT × DOT_MAX_SPREAD × DOT_OVER_PITCH` | the absolute ceiling, applied **to the pitch**, never to the product — at `2.6 × UNIT` it held a filtered disc's dot at 425 units against a 3,400-unit step (d/s 0.07); where develop's dots actually stopped is `2.6 × 2.6 × UNIT`, and no resting pitch reaches either |
+
+The three failures, each measured before it was found:
+
+1. **`DOT_OF_PITCH × min(own slot, pitch)` and nothing else** removes link weight from the dot
+   entirely — `solveBand` makes the cell square, so at rest the slot *is* the pitch and the
+   `min` always takes the pitch. Measured: corr(degree, drawn radius) **0.827 → 0.007** on the
+   demo's outer band, and **815 notes on the dominant-folder vault drew at two distinct sizes**,
+   one per band.
+2. **Capping the product rather than the pitch** collapses the sparse case: the dominant-folder
+   vault filtered to eight notes read a dot of **8.8 px against develop's 52.96**, and
+   *filtered to the bone, the disc stays drawable* failed at **d/s 0.03** against its 0.15 floor.
+3. **A multiplicative ramp** (`ceiling × ramp`) pins every dot whose ceiling is near the pixel
+   floor, which on a dense vault is the whole disc — the demo's ceiling is ~2.0 px against a
+   1.5 px floor, and the measured result was **one drawn size for 1370 notes**. The ramp runs
+   from the floor to the ceiling instead, which makes pinning impossible.
+
+4. **Sizing a note by its OWN row's step breaks the serpentine**, silently and with the placement
+   still perfect. A row's step differs by row — the rim row and the end margins most of all — so
+   the dot began carrying *where a note sits* as well as what it links to. The snake has no
+   visible geometry of its own; it is legible only as the size gradient that falls along the path
+   and reverses each row, which is the law `animation.md` states as *size stays monotone in link
+   weight*. Measured per cell as Kendall tau of drawn radius against rank in `c.list`
+   (develop → per-note ceiling → per-cell ceiling): demo **0.99 → 0.51 → 0.99**, spec
+   **1.00 → 0.82 → 1.00**, shape 0.96 → 0.84 → 0.96, and note-weighted on the 10k
+   **0.99 → 0.68 → 0.98**. Row-direction alternation is **100% on all three builds and all five
+   fixtures**, which is exactly why no position check — the goldens included — could see it. The
+   ceiling is one number per **cell** now: the minimum, over the cell's rows, of each note's own
+   slot at its radius, so inside a wedge the ramp is the only thing that varies. A row holding a
+   lone note contributes the whole arc and never binds that minimum.
+
+The hub-to-leaf dot ratio is therefore a **consequence** of ceiling over floor, not a constant:
+it lands at 1.64–2.09× across the five fixtures against develop's 1.15–1.93×, and a named
+`DOT_LINK_RATIO` was tried and retired because a ramp anchored at the floor cannot honour one.
+
+`.ai-context/investigations/186/dotsize-186.mjs` measures all of it — corr(degree, drawn radius),
+corr(degree, ramp) with the ceiling divided out, the hub/leaf ratio, the distinct-size count and
+the column offset — and is the acceptance test for any future change to this.
+
+**Weighted arcs and slots did not land** (`LINK_WEIGHT = 0`), so everything below is measured with
+the arc still following opacity alone. `decisions/0017` carries why, and why the ring split must
+count notes rather than weight if they ever do.
+
+**The resting halves are asserted by the suite**, on every fixture:
+
+| check | what it reads |
+|---|---|
+| *no lit note is outside its band's static rails* | the CENTRE of every note at full alpha against `geomLock`'s own rails. Row 0 of the inner band may spend `HUB_ROW0_FRAC` of the hub on purpose (github#35) and the outer band is already shifted out by its row-0 dot (github#160), so these are centre rails, with half a graph unit of float noise allowed — the same window the lattice check uses |
+| *a resting wedge fills the arc its notes can* | each wedge's seam coverage — the angular span of its dots over the arc it actually draws — against `(n-1)/n + 2·dot/arc` for its rim row. A one- or two-note wedge is allowed the little its notes can reach, which is the github#119 tail and is why this is not a flat threshold |
+| *the serpentine survives, in direction and in size* | per cell of six or more notes: every adjacent row pair runs against its neighbour, the **note-weighted** median cell reads Kendall tau ≥ 0.90 of drawn radius against rank, and ≥ 65% of notes sit in a cell at 0.90+. Note-weighted because a cell whose dots are all at the pixel floor scores tau 0, and on the 10k that is 22 of 34 cells on develop's build as well as this one — an unweighted median is unusable there. **Its teeth were proven**, not assumed: reverting the per-cell ceiling turns it red on demo (0.72, 24%), the 10k (0.88, 37%) and spec (0.87, 49%). It stays green on shape and tag, where the same defect cost only 0.96 → 0.94 and 0.94 → 0.91, so it is a regression gate and not a proof |
+
+**Chrome 153 headless reports `prefers-reduced-motion: reduce`, and the page honours it**, so every
+cascade completes in two frames. Found the hard way: commands that produced 388-frame cascades an
+hour earlier produced **2**, with `restA` and `restB` byte-identical — the layout change was right,
+the animation simply did not run. `smoke-runner.mjs` was affected worse than the probe. It set
+`reduce` for fast-clock checks and restored with `features: []`, which means *Chrome's own default*
+— and since 153 that default **is** `reduce`; a `clock: "real"` check never entered that branch at
+all and inherited it from the browser. Either way an animation check would assert against a snap and
+pass. Both `smoke-runner.mjs` and `probe-186.mjs` now set `no-preference` **explicitly** and
+**throw** if the browser still reports `reduce`, rather than measuring nothing. Never restore
+emulated media with an empty feature list.
+
+**The per-frame halves stay manual**, in `scripts/pack-check.mjs`, because automation's frame
+pacing is not a person's and a threshold tuned under it measures the harness rather than the page
+(`animation.md`, *Checking*). It reads a `probe-186.mjs` run and asserts five things: RAILS (no
+lit note's centre outside its band's rails on any frame), REST (a band's outermost lit note never
+past `max(rest before, rest after, rail)`), AREA (area per lit note stays between the two resting
+values), SEAM (a lit wedge's coverage never below its resting value, scaled by the share of itself
+the alpha ≥ 0.5 measure can see), FILL (a wedge is never wider, per its own notes at the band's
+pitch, than it rests), **STEP**, **TOUCH** and **TICK**. The last three came out of defect 2's
+second attempt, below.
+
+**Every bar here is derived from something, and each derivation is written down so the next person
+does not "tighten" it back and rediscover why it is where it is.**
+
+| bar | number | where the number comes from |
+|---|---|---|
+| STEP | 3% | frame-to-frame pitch noise is under 1%; the smallest real step measured was 13%. A wide gap to sit in, not a tuned threshold |
+| TOUCH | `1 − 0.6 / rows_live`, per frame | **the row cap's own guarantee.** The cap holds the top slot's outer edge at most half a pitch under the rail, so the worst honest reading on a band of `rows_live` rows is `1 − 0.5/rows_live`; 0.6 leaves a tenth of a pitch of margin. On 5 rows that is 0.88, on 4 rows 0.85, on 3 rows 0.80 |
+| TICK | 0.31 of the band's pitch | `RADIAL_EASE = 0.25` closes a quarter of a *pitch* per frame (`decisions/0002`), and the pitch itself grows up to a quarter across a walk, so `0.25 × 1.25 = 0.3125`. Absolute is wrong: 38 units on a 160 pitch and 63 on a 250 are the same tick |
+| AREA | ±7% | **symmetric, and loose because the endpoints are two samples.** A 2% ceiling cannot be supported by two resting measurements of a quantity that is being walked between them. Do not tighten it back to 2% |
+
+**TOUCH and TICK assert only while a band is actually populated** — at least one lit note per live
+row, at least three lit, and at least a tenth of what the band rests with. A band down to its last
+few notes reads 0.82 of the rail on *every* build, develop included, and it is not touching
+anything. Both are reported when thinner, never asserted.
+
+**TICK measures a NOTE, not the band edge.** The edge metric counts a fade as a move: when the
+outermost lit note goes dark, `rMax` drops a full pitch with nothing having moved, which read
+exactly 1.00 of a pitch on two acts. A per-note step taken at opacity ≥ 0.5 never sees a note that
+has gone dark, and never sees the direct-assigned ones under 0.05 that make a raw per-note maximum
+read 154–2476 units on develop. The band-edge figure is still printed, as a report and not an
+assertion.
+
+**The AREA trade, so nobody reads the under-readings as a regression.** The row cap in defect 2
+trades a bulge *outside* the rail for bunching *inside* it, and the definition prefers under to
+outside. Measured across the five acts: at worst **1.02×, 1.06× and 1.065× over** the resting
+ceiling and 1.05–1.06× under the floor, where develop sat **1.30×, 1.29× and 1.54× over**.
+
+### 1. A band empty at one end walked to the density fallback
+
+`solveBand([])` returns `{ sp: sp, rows: 0 }`, and `sp` there is the *density fallback*
+`min(DENSITY_MAX, sqrt(full/now))` = **2.6** — a pitch nothing rests at. The cascade took it as
+`spDstB`, so the thickness walk ran from the source lattice to 2.6 × the source depth.
+
+Soloing `03 - Resources` on the demo vault: the departing outer band's pitch walked **160 → 416
+px** and its outermost lit note reached **5845 px, 1.447× its locked rail of 4038**, with 1058
+notes still fading. That is the spray the solo clip shows.
+
+**A band empty at one end now holds the other end's pitch and depth.** Measured after: the same
+band's outermost lit note tops out at **3937 px, its own resting value, 0.975× the rail**, and
+**0 of 389 frames** are past a rail.
+
+### 2. The top row rode out to the rail
+
+A cell's row is `Math.floor(pp)` while its row *count* is a real number being walked, and the
+pitch was `T / rows_walked`. So while the count ran 6 → 5.01 the outermost row sat at
+`5 × T/5.01` — against the rail — and dropped a whole pitch when the count crossed 5.
+
+Hiding `03 - Resources`: inner band edge **1754 → 1875 px at pr 0.86** (rail 1884) → 1728 at
+rest, and area per lit note **1.00× → 1.30× → 1.17×** with the destination having been 1.17×
+all along. Hiding `inbox` on the tag disc: outer edge **3721 → 3952 at pr 0.94**, **141 px
+outside the locked `maxR` of 3811**.
+
+#### The first fix was exact at both ends and DISCRETE in between, which is its own defect
+
+Solving rows and pitch from the live weighted count each frame, through the same `solveBand` the
+resting layout calls, does hold every rail: **0 frames past a rail on all four acts**, against
+develop's 369 and 43. But `rows = ceil(T/s)` is an **integer**, so `pitch = thick/rows` *steps*
+as the live weight falls — and pitch is the row spacing, so **every note in the band moves at
+once**. Found by eye on the act nothing had measured: soloing `misc` on the dominant-folder vault
+(27 of 954 notes, outer band) walks six row counts down and reads **15 pitch jumps of 13–21%**
+(160 → 183 → 213 → 256 → 320 → 427, then ten more at the tail). The four measured acts read 1, 3,
+1 and 4. develop reads **0 on all five**, because it walked the pitch continuously — which is
+exactly what let its top row ride past the rail.
+
+**With integer rows you cannot have a continuous pitch AND exact fill of the rail on every frame.**
+That is the whole of it, and the three candidates are the three ways to lose:
+
+| | pitch | rail | cost |
+|---|---|---|---|
+| develop | continuous | **crossed**, 1.45× on the solo act | 369 frames outside the disc |
+| walk the top row's radius, pitch `top/(rows_int − 1)` | continuous | held | **1.12× off the resting density at pr 0.998** — a snap at settle |
+| live `solveBand` each frame | **steps 13–21%** | held | the whole band moves, 1–15 times an act |
+
+**What ships is develop's continuous walk with the row INDEX capped.** `placeCell` takes
+`rowCap = floor(rows_walked − 0.5)` instead of `floor(rows_walked)`, so the top slot's outer edge
+(`rowCap × pitch + pitch/2`) is `≤ T` at every frame by construction, and **`thickAt` is clamped to
+the band's static thickness** so that `T` is the real rail and not one that walked off the disc.
+At rest `rows_walked` is an integer and `floor(rows − 0.5) = rows − 1`, so **nothing at rest
+changes and no golden moves** — which is the check that this is a cascade-only change. The notes of
+a dissolving row drop one pitch at the half count instead of riding to the rail and dropping at the
+end, and `RADIAL_EASE = 0.25` spreads that tick over about four frames exactly as `decisions/0002`
+intends.
+
+The transient cost is real and is priced above: a top gap of up to half a pitch mid-walk (TOUCH),
+and a band packing 1.05–1.06× *tighter* than its resting floor while the top row's notes bunch at
+the cap (AREA), against develop's 1.30× looser in the other direction. Blending the `n`-row and
+`n+1`-row lattices was **not** built: `design/0002` rejected exactly that twice, and
+`decisions/0002` a third time as a smeared disc.
+
+#### A centred cell steps TWO rows at a cap crossing — recorded, not fixed
+
+A cell with fewer notes than its band is deep takes `placeCell`'s **centred** path: one note per
+row from `cStart = round((bandRows − nEff) / 2)`. Both terms move during a walk — `bandRows` falls
+with the cap, `nEff` falls as the cell's own notes fade — so at a crossing `cStart` can move by one
+in the same frame that the note's index inside the cell moves by one. Two rows, on one note, in one
+frame.
+
+Measured soloing `03 - Resources`, inner band, note `2` of `00 - Inbox` — **3 notes in a 6-row
+band**, so centred throughout:
+
+```
+pr     pitch  lit  rows  rMax   step
+0.499  172.7  167   5    1792    42     <- RADIAL_EASE, 0.25 of a pitch
+0.501  173.2  164   5    1750    85     <- 0.49 of a pitch, the crossing
+0.504  173.6  163   5    1719    64
+0.507  174.1  163   4    1696    48
+0.509  174.6  160   4    1680    43     <- back to 0.25
+```
+
+`85 → 64 → 48 → 43` is a clean 0.75 geometric decay, so **the easing is working and the target
+moved twice as far as a row tick should**. It is one frame, one note, 85 units on a 4000-unit disc,
+and about half the 160-unit tick `decisions/0002` accepted before easing existed.
+
+**Since the glide cap (RADIAL_STEP_MAX, below) that frame reads 0.12 of a pitch, inside the bar; walking cStart rather than rounding it remains the real fix and is still deferred** — out of github#186's
+scope, which was the four in-flight defects and the packing rule. TICK asserts at 0.31 and this one
+frame reads 0.49, so the assertion names this crossing rather than being relaxed: a blanket
+exclusion would hide the next one.
+
+### 3. A single-cell whole-group toggle drove its arc on the clock, not on its notes
+
+`colWalk` (github#19) replaces a toggling single-cell group's allocation basis with a ramp, so
+its wedge closes monotonically whatever the stagger does. The ramp was `1 − pr` — the cascade's
+clock — so the arc lagged the notes: `00 - Inbox` kept **90% of its arc with half its notes
+gone**, and the worst arc-versus-notes gap on the solo act was **58%**.
+
+**`f` now comes from the group's own weight sum over its rest weight.** A *move* (a note changing
+group during a dimension switch) keeps the edge ramp — that path is github#49's and its notes
+belong to two groups at once.
+
+### 4. The last leavers inherited the ring
+
+A wedge's share is its geom over the band's, so when a whole band is leaving and its notes fade
+on a stagger, whoever is left holds a growing share of a ring that stays full: `10 - Literature
+Notes` ended up **at 1% opacity over 287°**, and its wedge was **18.7× wider than its own notes
+could fill**.
+
+**A band leaving entirely now holds its seats and its source arc shares for the whole fade.**
+`planKeep` keeps every source member of such a band in the plan, so its cells' geoms are constant;
+each wedge draws `share × (live weight / source weight)` and the arc it does not spend is left
+**empty at its own trailing edge** rather than handed to the next group. So the wedges shrink
+where they stand, in place, and the ring simply opens up behind them.
+
+Measured on the solo act, worst wedge against its own resting fill: **18.7× → 1.0×**. On the tag
+act: **1.75× → 1.08×**.
+
+#### Then the maintainer asked for the ring to close like a fan
+
+Shrinking in place fixed the inheritance but opened gaps all round the ring, every wedge closing
+on its own. Asked for, on 2026-09-23: *"when we toggle a whole disc off it would be nice if the
+wedges would move together … fan back to 12, one clockwise one anti-clockwise"* — and, when a
+first attempt reused the dimension switch's clock hand (dots erased in place by a sweeping edge):
+*"I wanted wedges that get smaller … not notes just hovering out."*
+
+A fan was built and measured first: the ring's plan frozen at full weight (`ringHeld`), its wedges
+packed by what was lit and the whole ring squeezed toward 12 by its lit fraction, the outer ring
+from the clockwise side and the inner from the counter-clockwise side, with `SEAM` and `FILL`
+exempted for it (`HAND`). It moved no note radially and passed every criterion. Shown beside a
+third variant the same afternoon, it lost: *"that looks fantastic, dynamic, aligns with the intro, I
+think we solved it"* — and the fan, its freeze, its squeeze and its exemption were removed the
+same day rather than kept behind a flag. The history is in git at `7e70bff` and before.
+
+**A ring leaving or arriving WHOLE now goes the way the intro does, or its reverse.** The intro
+is a timeline walk: each ring grows from **one row**, notes arriving at their rest in date order,
+wedges growing in place as the ring thickens. So:
+
+- **A ring leaving whole thins to one row** — `bandDst[k] = 1`, its pitch held at the source's —
+  and its notes leave **newest first**, spread evenly over the window; each wedge closes in place
+  as the ring re-packs, until the ring is one row and gone. The github#67 radius deal (a
+  single-cell wedge leaves outside-in) is skipped for a ring going by date, as is the per-cell
+  interleave; the ring's own order is the order.
+- **A ring arriving whole grows from one row** — the pre-existing `bandSrc[k] = 1` path the intro
+  already took — and its notes arrive **oldest first**. Nothing is held: `weightOf` is plain
+  `alpha × linkWeight` for every cascade again.
+- **Under the hand** (the dimension switch) a ring going whole keeps its rows, as before: the hand
+  erases dots in place and does not thin a ring.
+
+Measured on the maintainer's vault, soloing `04 - Daily Notes`: **0 frames outside a rail, 0 pitch
+steps, 0 movement after landing, worst lit-note step 0.12 of a pitch**. The one cost against the
+fan, and accepted: the emptying ring re-packs while it thins, so up to **11 notes start a hop in
+one frame** (10 such frames) where the fan started none; no hop exceeds 0.125 of a pitch. Showing
+the ring again reads the same way in reverse: `03 - Resources` first, `02 - Areas` last.
+
+Two consequences for `pack-check.mjs`. **`TOUCH` is not asserted on a ring going or coming
+whole** — a ring thinning to one row leaves its rail by design, so *the rings' thickness is
+locked* holds for a ring being filtered inside, not for one leaving; the report names the band.
+And **`STEP` is now per frame**: the samples carry the cascade's frame counter, and a capture gap
+of seven frames had read as a 7% "step" on the demo's solo `03`, where the inner ring's pitch
+climbs 215 → 238 at 0.4% a frame as the github#186 thickness cap lets go late in the walk.
+
+#### Two regressions a static review found, both measured before they were believed
+
+A second reviewer read the branch cold on 2026-09-23 and named two regressions against
+develop. Both were confirmed with a scratch harness before anything was changed.
+
+- **A toggled wedge's progress was measured against every note in the folder, lit or not.**
+  `tglFull` summed all of a group's notes, while the live weight above it only ever counts the
+  lit ones, so with half a folder outside the date range the ramp started at 0.5. Measured on the
+  maintainer's vault with 9 of `02 - Areas`' 19 notes in range (`scratchpad/186/denom.mjs`):
+  hiding it snapped the wedge **from 6.21° to 2.90° at the click**, and showing it again walked
+  to 2.90° and **jumped to 6.21° on landing**. The full is now the notes taking part, at their lit
+  endpoint (`alpha` for a departure, `to` for an arrival): 6.21° → 0 and 0 → 6.21°, no step at
+  either end. The nine measured acts toggle whole folders, so none of them could see it.
+- **The pixel floor scaled with the zoom.** `dotPx` returns a renderer size, which the renderer
+  divides by the camera ratio; `DOT_MIN_PX` was applied to that size unscaled, so the 1.5 px floor
+  was 6 px zoomed in four times and 0.375 px zoomed out. Develop scaled the floor by the ratio
+  (`lo = min(hi, DOT_MIN_PX × cam)`), and does again. At ratio 1 every dot is byte-identical
+  (smallest 1.943 on the maintainer's vault before and after), so the goldens do not move; at
+  ratio 4 the smallest dot is its own ceiling, as on develop, rather than a floor it cannot fill.
+
+#### Two suite failures at the merge gate, one cause
+
+The orchestrator's own full-suite run after merging (2026-09-23, reverted) failed *a dot never
+outgrows its resting size while a cascade walks* on the 10k vault and *filtered to the bone* on
+the dominant-folder and tag vaults. Both were replayed headless (`scratchpad/186/dotwalk.mjs`
+takes the check's own biggest-lit-dot measure per frame; `bone.mjs` runs the check's probe
+verbatim from `probe-bone.js`) before anything changed.
+
+- **The bone**: at the last 0.5% the dominant-folder vault's outer dots read exactly develop's
+  ÷ 2.6 (18.4 / 13.4 / 23.3 against 47.8 / 34.7 / 60.8 renderer px, same notes): the ceiling's
+  pitch cap at `2.6 × UNIT` bound where develop's never had. Raised to `2.6 × 2.6 × UNIT`
+  (decisions/0017): **0.07 → 0.18** (develop 0.19). Rest layouts byte-identical on all five.
+- **The overshoot**: soloing the 10k's two-note vault root, the biggest dot walked to 157.7
+  units and rested at 149.3. Traced: the rest was ramp-limited below the hub cap, and the ramp's
+  floor is 1.5 *screen* px, so it is `DOT_MIN_PX × camera ratio` in renderer size — and the
+  auto-fit after the landing takes the ratio from 0.95 to 0.60, shrinking a floor-dominated dot by
+  8% *after* the cascade. The endpoint size the walk is capped at was taken at the old ratio.
+  With the ceiling above, that dot rests on the hub cap (6.84 renderer px, the same figure as
+  develop's), the walk is capped at exactly that, and the check's own measure reads **1.000× on
+  all five fixtures** (smallest group with two notes on each, as the check picks). The floor's
+  camera coupling is develop's too and still latent for a dot that rests ramp-limited and
+  floor-dominated while the fit changes the ratio; it is recorded here, not fixed.
+- **The tag vault's bone is a knife-edge, not a size**: six hub-capped notes in one row, 7.16 px
+  on both builds; the branch's median gap is 64° against develop's 63° (a 42° seam against 45°),
+  and the check rounds diameter/step to two decimals — **0.14 against 0.15**. Nothing was tuned
+  to cross it; asked, the maintainer left it (2026-09-23): no product change for a 0.4% margin,
+  and the check's floor is the thing to revisit. **The full suite therefore shows the tag vault
+  at 66/67 on this branch, by decision**, until that floor is.
+
+#### A filtered dot keeps its link rank and a count-based readability floor
+
+Balanced was accepted on 2026-10-04 after comparing headed stills on all five fixtures.
+The floor is `min(7.5, 1.5 + 0.7 * log2(baseline / max(1, visible)))` CSS pixels of radius,
+active only below the baseline count. `DOT_COUNT_GAIN = 0.7` and `DOT_COUNT_MAX_PX = 7.5`
+are independent of link rank. Visible timeline weights are summed by unique note; transient
+dimension-switch copies never count as additional notes. Settings-hidden notes are excluded
+from the baseline. The full-vault layout and original sizes remain unchanged.
+
+The floor follows the same eased source/destination clock as visible-link rank. Interrupting
+a cascade starts from its current floor. Each endpoint is measured with its own floor, and
+temporary unfiltered rest measurements bypass it. The final size is bounded by the larger
+of `3 * rest` and the new floor, then by wedge, neighbour, hub and animation endpoint clearance.
+Spatial constraints may therefore keep a dot smaller than the requested floor.
+
+`count-based note sizes ease through filtering and interruption` checks narrowing, widening,
+interruption continuity, empty ranges, exact restoration and settled relayout parity on every
+fixture. The density and bone checks retain their spacing/overlap assertions and now bound
+growth against the independently calculated count floor as well as the original rest.
+
+The following measurements document the previous 2026-09-25 decision, superseded only where
+the accepted readability floor exceeds the old three-times-rest ceiling.
+
+Asked on 2026-09-25, watching the range clips: *"why are the notes growing so much when filtering
+to the last few percent by date? links are vanishing as well so note weight should not
+explode."* Measured on the dominant-folder vault, develop and the branch alike
+(`scratchpad/186/degrees.mjs`):
+
+| range | notes | median degree | median **visible** degree | median dot | pitch |
+|---|---|---|---|---|---|
+| rest | 954 | 6 | 5 | 3.24 px | 160 |
+| last 10% | 86 | 3 | 0 | 7.3 px (2.2×) | 640 |
+| last 2.5% | 24 | 4 | 0 | 15.5 px (4.8×) | 1,280 |
+| last 0.5% | 8 | 6 | 0 | 34.9 px (10.8×) | 1,280 |
+
+The growth was the pitch — the 2026-08 law that the disc's density follows the notes on screen,
+which the suite's *filtered to the bone* enforced with a diameter/step floor — and the ramp read
+whole-vault degree, never the visible one. He chose to change both (decisions/0017 has the
+mechanism): the ramp is scaled by the share of a note's links whose other end is on screen,
+walked on the cascade's ease; and under a filter a dot keeps at least its unfiltered resting
+size and never exceeds `DOT_GROW_MAX = 3` times it. After: the same column reads **3.70 / 3.88 /
+3.41 px (1.1× rest)**; demo 1.0× throughout; tag vault 7.16 px at the bone (2.0×, six orphans
+on the hub cap, which binds before the growth cap). Rest layouts byte-identical on all five
+fixtures; at full vault every share is 1, so nothing at rest changes. The check asserts the two
+bounds note by note against the resting probe, in place of the step floor and the legibility
+floor.
+
+The bounds need a rest to bound against, and the first cut only took one while no filter was on
+(`takeRestDots()`). A group hidden by default (an archive) is a filter, so a page that mounted
+with one hidden held no rest at all and nothing bounded its dots: an isolated probe of the three
+functions measured 8× growth against 3× with the rest in hand. The rest is now taken from an
+unfiltered layout pass (`unfilteredRest()`: filters cleared, full alpha, every visible share 1,
+`ringsLayout(null, true)`, then every piece of layout state restored), cached per dimension and
+per ingest so a live rebuild or a dimension switch retakes it. The check *a page that lays out
+filtered still takes its dots' rest from the unfiltered disc* takes the rest unfiltered, forgets
+it, hides a group, and requires the retaken rest to match: 0.00 % off on all five fixtures, and
+a sparse timeline after it moves none. With `unfilteredRest()` disabled it retakes 0 of 1,403 /
+10,002 / 891 dots. No fixture mounts with a group hidden, so this is the only place the path runs.
+
+#### Five things a clip review saw, 2026-09-25
+
+A reviewer went through all 35 clip pairs and named five. Each was measured before and after
+(`scratchpad/186/camride.mjs` for the camera and the lit-dot sum per frame; `pack-check.mjs` for
+the landing; mean grey of a 48-px downscale over the clip's own window for the link fans).
+
+- **Late zoom after a hide** — the disc settles, pauses, then enlarges; develop's too. github#14's
+  rule had the deferred fit wait for the landing. The maintainer chose to let it ride: the
+  destination's fit target is taken at the click (`fitTarget()` reads the destination's `lastMaxR`
+  there, and would read the mid-walk extent later), and at `FIT_RIDE_AT = 0.66` the camera flies
+  for exactly the time the walk has left. Measured: first camera move at pr 0.68, landing ratio
+  0.630 with the notes, nothing after (mirror solo `04`; spec solo `beta` 0.638). The check
+  *hiding the biggest group auto-fits the camera* now asserts no move before pr 0.6, on its way by
+  the landing, landed at the promise, `camAtRest`.
+- **A small snap at the end of the fold.** The glide cap holds every hop to 0.12 of a pitch a frame
+  while the clock runs and lets go at pr 1, so an arrival still moving on the last frame snaps
+  what it owes: 0.23 of a pitch on the demo, 0.16 on the tag vault; easing the tail onto
+  `finalPos` alone made it 0.38. The arrival now ends at pr 0.95 (`FOLD_ENTER = 0.30`,
+  `FOLD_PHASE = 0.65`, `FOLD_LAND = 0.85`), leaving the cap 5% of the clock to catch up: worst
+  step **0.12, at pr 0.96**, nothing after the landing.
+- **The fold goes nearly dark mid-clock.** With departure 0..0.6 and arrival 0.4..1 the lit-dot
+  sum fell to **11%** of its start; with 0..0.65 and 0.30..0.95 it stays at **26%**.
+- **Bright link fans overpower the fading dots** on a solo. The links of notes still at 80–90%
+  opacity converge as their ring thins to a row, and a steeper per-note edge fade (α⁴) changed
+  nothing visible. A departing note's links now fade on their own clock, gone by
+  `LEAVE_EDGE_BY = 0.35` of the walk (`departing`, `leaveEdgeK`): mean grey in the review's window
+  **34.9 → 28.1**, the fans absent in the frames, the surviving ring's own web untouched.
+- **Freeze then catch-up in a recording** — capture, not rendering: the intro's screencast has
+  gaps of 229 and 251 ms in its frame timestamps at 8.4 and 9.6 s (filmed under load, 35 clips in
+  a row), and the encoder lays frames at a fixed rate. Re-film alone to be rid of it.
+
+**What a walk holds is dropped in one place, wherever the walk is cut short** (`clearHolds`, from
+a second static review on 2026-09-25). `cellHold`, `splitHold`, `moveFrom`, `leftColor`,
+`shrinkFade` and `colWalk` were cleared by the cascade's own start and settle and by
+`hardRelayout`, but not by the four paths that cancel a `cascadeRun` from outside — the tab going
+hidden, `stopPlay`, `playTimeline` and `destroy` — so a hold could outlive its walk. Measured
+before anything changed (`scratchpad/186/tabhide.mjs`: hide the tab at pr 0.5 of a hide or a solo,
+then diff what the page laid out against a fresh relayout): **0 notes off on this branch** on both
+acts, because the held cells are the destination plan's and the hidden-tab path lays out that
+same destination — and **252 of 406 notes off by up to 21.7 units on develop**, whose hidden-tab
+path also leaves `colWalk` standing. The nine sites now call one function; the measurement reads
+0 before and after, so this is hygiene with a witness, not a fix with one.
+
+**A sparse cell's half rounds inward** (asked on 2026-09-23, *"home and career note not in the
+innermost row"*, on the 10k vault under a date range). What he saw was a pooled tail of three
+sparse subfolders laid down the radius as one four-note column, which is the 2026-08-23 rule and
+was kept on being asked; what changed is the centring's tie: `cStart = round((rows − n) / 2)`
+sent a lone note in two rows, or three notes in four, to the *outer* row, because `round(0.5)`
+is 1. It is `floor` now, so an odd gap goes to the hub side. Measured at rest across the five
+fixtures (`scratchpad/186/restdiff.mjs`): shape, spec and tag byte-identical; demo moves 4 notes
+(`00 - Inbox` ×3, `14 - Reading List` ×1) and the 10k 4 (`13 - Someday Maybe` ×2, the vault root
+×2), each one row inward (worst 129.7 units, one inner pitch). Those two goldens are re-recorded
+for it, with the go-ahead, not to make the check pass.
+
+The same review retired the disabled link-weight experiment: `LINK_WEIGHT = 0`, its means and
+cap, `linkWeight()` (which returned 1 everywhere), the `__vg.linkWeight*` getters and the
+suite's division by the mean are gone; a note's plan weight is `alpha`, as decisions/0017 says.
+
+**`SEAM` and `FILL` fail on develop and on every build of this branch, and never reached a
+report until 2026-09-23 evening**: the run scripts printed only the six criteria under review.
+They assert that no wedge is ever under its resting coverage while a cascade walks — develop's
+own solo `03` on the demo vault fails that on 816 wedge-frames. They are not gates; whether they
+describe a real target or a wrong measure is an open question, and nothing was tuned to pass them.
+#### Both rings land together, and no wedge splits or merges mid-walk
+
+**Every wedge takes the whole window, so both rings land together.** The stagger used to sort
+every changing note on the disc into one clockwise sweep, so a ring whose changing wedges sat late
+in that sweep did its work in the back half: soloing `04 - Daily Notes`, the inner ring was half
+done at pr **0.69** while the outer ring's fan was half closed at **0.50**. Asked for: *"can we make
+inner and outer ring animations synchronized so they finish at the same time?"* A first fix gave
+each ring its own clockwise lap; the rings landed together, but a wedge still closed only when the
+lap reached it — see the next section for what that looked like and what replaced it.
+
+**A wedge splits or merges once, at the click** (`cellHold`). Whether a group earns sub-wedges, and
+which sub-piece each note lands in, is decided per frame from the ring's *walked* depth
+(`liveN ≥ pieces × depth`), so it flipped at whatever frame the walk crossed the threshold and every
+note in the wedge re-seated at once. Hiding `03 - Resources` on the maintainer's vault grows
+`02 - Areas` from one 19-note wedge to three (7, 7, 5) as the outer ring goes from six rows to five;
+the flip landed at pr 0.786 and threw a note two rows (93 units, 0.50 of a pitch) — **identically
+on develop**, so it predates this ticket. Each note's cell is now taken from the destination plan
+(the source plan's for a note that is leaving) for the whole cascade. Holding only the yes/no of
+the split was tried first and mis-landed 19 notes at settle, because the sub-piece assignment also
+reads the walked depth. Measured after: worst lit-note step **0.30 of a pitch**, nothing moving
+after the landing.
+#### A row dissolves, a hop glides, and the ring does not shift at 5.5
+
+Three more things the maintainer saw on his own vault, after the fan and the sync: *"the outer ring
+cleans smoothly, the inner does not, it stutters … in solo 03 there are jumps in the outer ring rows
+several times, same in hide 03, massive jumps in rows."* Every per-note step was inside the easing
+constant; what the checks did not count was **how many notes step in the same frame**.
+`scratchpad/186/rowdrops.mjs` counts hop *starts* per frame.
+
+- **The top row dropped as one block.** The row cap `floor(rows − 0.5)` changes for every note at
+  once when the walked count passes the half, so the whole top row fell a pitch together: soloing
+  `03 - Resources`, **53 notes in one frame** at pr 0.33 and again at 0.68. Each note's cap now
+  carries a deterministic offset of up to half a row (`rowCapOf`, an FNV hash of the id), so the
+  top row dissolves one note at a time across half the walk. At rest the offset is inert:
+  `floor(n − 0.5 − j) = n − 1` for every `j < 0.5`.
+- **A hop was a jump.** `RADIAL_EASE = 0.25` closes a one-pitch hop in about four frames — 67 ms —
+  which reads as a jump next to a ring that does not move at all. A hop is now capped at
+  `RADIAL_STEP_MAX = 0.12` of the ring's pitch per frame (inner pitch scaled by `INNER_SCALE`), so
+  it glides over about nine. The cap applies only while `pr < 1`; the tail after the landing keeps
+  `decisions/0003`'s convergence.
+- **The whole ring shifted at exactly 5.5 rows — on develop too.** `buildWedgePlan` takes the
+  band's outer extent from `round(thick / pitch) × pitch`, and `round` flips at the half, so
+  `maxR` stepped by a pitch, the github#160 inset with it, and **every outer note moved 0.05 of a
+  pitch in one frame** (431 of 445 on solo `03`, 384 of 395 on hide `03`), identically on develop.
+  The extent now takes the walked depth the frame already carries.
+
+Measured on the maintainer's vault after all three: the worst frame on solo `03` went from **431
+notes starting a move to 7**, and no frame on any act starts more than 8 except the click itself
+(hide `03`'s split, held there by design). Worst single step 0.12 of a pitch everywhere.
+
+- **The angle was still a jump (2026-09-26).** *"The animation for the last 0.5% is too jumpy."* The
+  cap above eased the radius and took the angle from the target outright, so a serpentine flip on a
+  row hop, and the re-spacing of every note in both rows when one note hops, landed in a single
+  frame: on the tag vault's last-0.5% walk, single-frame tangential moves of **3,887 units** (a wedge
+  width) with **20 of 24 notes** moving in that frame, the median frame at 9 units. The angle now
+  glides under the same easing and the same per-frame cap, measured as an arc at the target
+  radius, and its residual counts toward convergence, so the tail still lands exactly. After: the
+  largest capped frame is **67 units**, 6 frames over three times the median instead of 15, and the
+  only jumps left are notes under alpha 0.05, which snap by design. `scratchpad/186/walkjump.mjs`
+  is the harness.
+**2026-10-03 correction (github#186):** independent angular easing above is superseded. It
+bounded individual frame steps but allowed notes to escape moving wedges. Normal cascades now
+ease along each cell's serpentine and use the frame's shared boundaries; the fixed-angle fold
+retains its radial cap. A cell uses one row cap, and arriving notes start between surviving
+neighbours. `--only "a cascade keeps"` measures normal-motion Refresh and both directions of a
+date filter: no lit note outside its allocated wedge (0.01-degree numerical tolerance), no rank
+inversions along the path, at least 20 frames, and a converged exit. Golden layouts remain the
+resting-layout authority. The earlier smallest-covering-arc diagnostic can falsely include a
+neighbour when one wedge covers almost the whole circle, so it is not this regression's oracle.
+
+#### A switch took its lock over twice the vault
+
+The github#186 state tracking (`vg.bandTotal`, `vg.lockRows` at every check boundary) caught the
+fold check leaving the demo vault's ring split at 344/1059 where a fresh page has 322/1081, and the
+10k at 3031/6971 against 2753/7249 with one row fewer outside, which is the state the 10k
+live-rebuild check then failed on in suite order and passed alone. Traced with a hook in
+`takeGeom`: every lock taken *during* a switch saw a plan total of **2806 notes on a 1403-note
+vault**. `buildWedgePlan` declares a local `leaving` array for the skeleton's leavers, which shadows
+the page's `leaving` dict inside the function (since f5ab063), so its *"the arriving disc has no
+leavers"* skip never fired and the plan counted every stand-in beside its original. The doubled total
+moved the hub and the small-group threshold, and the ring balance chose differently. The local is
+`leavers` now; a switch's lock counts 1403, and the 10k comes home to **2753/7249** exactly. The demo
+still landed one swap off (308/1095) after that, and the trace named the second counter: `gapScale`
+took `graph.order`, which the stand-ins double for the length of a switch, so the seam gaps the
+balance is costed with were narrower than a fresh page's. It counts notes now, and the demo comes
+home to **322/1081**. `buildSubOrder` tallied stand-ins too, doubling the legend's subfolder counts
+during a switch; it skips them. Three counters, one rule: **a stand-in is its note, already counted.**
+
+#### A wedge closes at one rate, and the intro is not a ring arriving
+
+Two more, from the same review page. *"Solo 04: the inner ring wedges are not closing with
+constant speed, looks like it stutters."* `scratchpad/186/wedgespeed.mjs` records each group's
+`Σ alpha` per frame — the wedge's arc is proportional to it — and reports how much of the walk a
+wedge spends closing and its peak-to-mean rate. On solo `04` the inner ring's wedges closed **one
+after another**: `01 - Projects` in 28% of the walk, `05 - Weekly Reviews` in 38%, and the
+one-note `07 - Yearly Reviews` sat still until the last 13% (the github#67 deal gives a lone note
+the *end* of the stretch). Develop was burstier still (17% and 20%). A wedge that is still, then
+closes, then is still again is the stutter.
+
+- **Every changing wedge now spreads its notes over the whole window**, whatever the cascade: a
+  golden-ratio interleave through every cell of the source plan (leaving notes) and the
+  destination plan (arriving ones). The per-ring re-spread is gone — rings land together because
+  every wedge does. A ring going or coming whole is the exception: it goes by date (above).
+- **A small wedge fades slowly.** A 12-frame fade spaced 30 frames apart alternates between one
+  and two notes fading, so a 10-note wedge's rate swung 2:1. Each cell's fade is
+  `clamp(window × 3 / n, FADE_FRAMES, window)` (`fadeOf`), and its delays are spread over what is
+  left, so the last note lands on the last frame and a lone note fades over the whole walk. A wedge
+  of 24 notes or more keeps the standard fade. The github#67 radius deal (a single-cell wedge leaves
+  outside-in, arrives inside-out) keeps its order and takes the same fade and room.
+
+Measured after, solo `04`: every inner wedge closes over **58–73% of the walk at peak/mean
+1.06–1.19** (the outer ring's fan: 83%, 1.02–1.05); the same on solo `03` and on show-all;
+hide `03` unchanged at 74%, 1.00. Rows: no frame starts more than 6 hops except the click.
+
+*"Hmm, the old intro looks better, it also makes more sense since the intro goes over time."* The
+intro is a timeline walk — `cascade({ order: tlRank, totalMs })` — and it starts from an empty
+disc, so both rings read as *arriving whole* and opened as fans from 12, discarding the date order
+the sweep was drawn for. `bandBorn`, the interleave and the frozen plan now all require
+`!opts.order`: a timeline walk fills the disc note by note at each note's rest, as develop does,
+each ring growing from one row.
+#### The jump at the END of an animation, and the cap that caused it
+
+Clamping the walked thickness to the static one (to stop a band riding past its rail mid-walk)
+held a band **below its own destination** whenever that rest has few enough notes that its pitch
+widens toward square (github#157), so `rows × pitch` exceeds the static thickness. The walk then
+snapped the difference at landing: soloing `04 - Daily Notes` on the maintainer's vault walked the
+inner ring at pitch **169** to the last frame and landed at **190** — **232 units, ten notes moving
+more than a row**, in the frame after the cascade. Nothing caught it because every criterion read
+only frames *during* the cascade.
+
+**A resting endpoint is legal by definition, so the cap converges onto it:**
+`cap = lock + (ts − lock)⁺ × (1 − ease)⁸ + (td − lock)⁺ × ease⁸`. Mid-walk it is the static
+thickness; at each end it is that end's own. The exponent is measured, not picked: at 4 the cap
+opened early enough to cross the rail on 2 frames soloing `misc` (1.013×), and at 8 it does not.
+A cap derived exactly from the rail — `T ≤ lock × rows / rowCap` — was tried and is **worse**: it
+steps whenever the row index changes (2 pitch steps, 9 rail frames on `misc`) and it ignores the
+outer ring's github#160 inset.
+
+**`SETTLE` in `pack-check.mjs` reads the frame after the landing**: no lit note may move more than
+one unit, radially or tangentially. It is the check `settle() is a no-op` always needed.
+
+### What is left, and is not this ticket
+
+- **github#132 closes as documented behaviour.** Its 1001 units decompose with no bug in them:
+  the inner band's row 0 is `r0 × INNER_SCALE` and its top rail is
+  `(r0 + (rOuter − r0) × INNER_FILL) × INNER_SCALE`, so 708 of the 1001 is those two constants
+  and the remaining 293 is exactly one pitch — the same relationship the unfiltered vault has.
+  What remains of the issue is that **a filtered band rests at ~6× the area per note**, with its
+  dots on both rings: with the radii static and fewer notes, that is what "still touching both
+  rings" has to mean. It wants this line in `invariants.md`, not a change.
+- **github#119's tail bucketing is a requirement of the definition, and is NOT in this ticket.**
+  A one-note wedge cannot touch two seams; 31 of the tag disc's 121 wedges rest at 0.52 coverage
+  before anything is toggled. That is the one **rest-state** change the umbrella still owes, and
+  *a resting wedge fills the arc its notes can* is written to allow it rather than to fail on it.
+- **The tag act still overshoots its destination density by 1.23×** around pr 0.85 (203877
+  against a rest of 32423..165725). The band survives and re-densifies 5× across that act, and
+  the excursion is in `lit`-note terms — the notes between alpha 0 and 0.5 are in the solve and
+  not in the count. It is reported by `pack-check.mjs` rather than hidden, and it is the smallest
+  of the five numbers this ticket moved.
 
 ## The hub stays the same share of the disc
 
@@ -1302,6 +2058,10 @@ check written against `new Date()` passes by asserting nothing, and does so more
 every day as the ageing fixtures regenerate forward and the pinned ones do not (github#199). This is
 the same trap the 10k's pinned `--end` exists to avoid. `__vg.setRecent(kind, refMs)` and
 `__vg.recentWindow(kind, refMs)` both take a reference day for exactly this reason.
+Since 2026-09-29 the demo vault's `--end` is pinned too (2026-09-22): its daily notes are named
+by date and filed into month subfolders, so it was never day-invariant, and its golden moved 31
+notes on the weekly regeneration of 09-27 (changelog-detail). The dominant-folder vault is now
+the only fixture that ages.
 
 ## The band's control row does not move when its state changes (github#70)
 
@@ -2979,8 +3739,9 @@ as `--end` moves a note's name crosses `2025-06` in that order: same notes, diff
 order, and the layout breaks ties on node order. Measured on `develop@67c285b` with
 `--only golden`: **`--end` 2026-09-14…09-22 ok; 09-23…09-26 3 notes moved (worst #424, radius
 1754.4 → 1105.9); 09-27…10-04 31 moved (worst #855, angle −83.0° → −143.8°)**. It surfaced on
-2026-10-04 as the first refresh after the last stamped pass. The demo fixture is now generated
-with `--end 2026-09-14`, the day its golden was taken, in both scripts. The shape vault is the
+2026-10-04 as the first refresh after the last stamped pass. That window is develop's golden; the
+github#186 merge brought the golden re-recorded at `7cbdf7a`, which holds for `--end` 2026-09-20…09-22
+only, so the demo fixture is generated with `--end 2026-09-22` in both scripts. The shape vault is the
 one fixture left ageing, and it carries the live half of the heatmap-window check alone.
 
 **Reading raw positions off `demo.busy() === false` is NOT enough, on its own.** This is the
@@ -3841,6 +4602,40 @@ same kind of reason.
 simulation: it proves the handlers work and that a lost layer comes back, and says nothing about
 how often monitor power-saving, a driver reset or a GPU switch actually causes this in the field.
 The issue was explicit about that, and no field frequency was measured.
+
+## A translucent colour never renders brighter than its opaque self
+
+The engine blends with `gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA)` and the canvas composites
+as premultiplied, so what a shader writes **must already be multiplied by its alpha**. Written
+straight, a colour at alpha `a` keeps its whole RGB and only takes `(1 - a)` of what is under it:
+it comes out brighter than the same colour opaque, and two translucent edges crossing saturate to
+white. Every program premultiplies right after the `bias` multiply (github#190) — the two edge
+programs, the circle's two border colours, and the halo — and nothing else in the pipeline may
+touch RGB after that.
+
+Nothing at rest shows it, because every dot and edge at rest is opaque. It shows the moment an
+alpha ramps: a departing note's links went *up* in brightness as they faded, bundled into a white
+web where they crossed, and vanished together at the hide threshold, which is what the github#186
+clip reviews called an edge flash and a hard cut.
+
+Measured on a synthetic quad under that exact blend, grey 0.8 at alpha 0.3 over a `#202020`
+page, and on the demo vault's hide clip at slow ×4:
+
+| | straight (before) | premultiplied (after) | expected |
+|---|---|---|---|
+| one quad, alpha 0.3 | 226 | 83 | 84 |
+| two quads crossing, alpha 0.3 each | 255 | -- | 120 |
+| demo hide, largest frame step (mean abs grey /255, 180² frames at 40 fps) | 15.49 at the cut | 6.47 | -- |
+| demo hide, mean luminance: rest → peak while the links fade | 42.8 → 55.6 | 42.8 → 42.9 | no rise |
+| shape solo, largest frame step / luminance peak | 21.79 / 64.0 | 9.0 / 42.5 | -- |
+
+### Verify
+
+```bash
+node scripts/render-diff.mjs --against-dir <refs>   # a rest frame has no alpha: 0 pixels differing
+node .ai-context/investigations/186/probe-186.mjs --html <page> --out <dir> --act "eye:<group>" --film --slow 4
+# then the mean luminance of the clip's frames must not rise above its first frame while the links fade
+```
 
 ## A torn-down mount holds nothing outside its root
 
