@@ -8,6 +8,21 @@ how you tell whether a later change has quietly undone an earlier one.
 Read this when you are about to change something and want to know what it cost to get
 right. For *what shipped when*, see [`../CHANGELOG.md`](../CHANGELOG.md).
 
+Sparse automatic labels removed (2026-10-04, github#186): the user requested removing
+the rule that labelled settled filtered views with at most 12 visible notes. The renderer
+now draws only explicitly requested labels; hover, focus and search paths remain intact.
+The same sparse demo day, 2026-09-29, measured 459 automatic label-canvas pixels before
+the removal and zero afterward. Explicit search still drew 300 label pixels; clearing
+search and the range returned to zero. The headed focused smoke check passes (1/1),
+with zero page errors, lint diagnostics or TypeScript errors; comments remain 350/350.
+
+A separate local sizing study captured 27 comparison stills across all five fixtures,
+without changing product sizes or recording 10k video. The 10k fixture's last three
+generated days retained 97 of 10,002 notes: current median diameter 3.48 CSS pixels,
+versus 12.36 and 17.72 for two count-based minimum-size proposals. Each comparison kept
+identical node positions and camera state. The newest two root notes were measured
+separately. The proposals remain unshipped pending visual selection and animation work.
+
 Shared wedge space during dimension changes (2026-10-03, github#186): the simultaneous
 reverse/forward Refresh had allocated a complete disc independently to each world.
 Source and destination now divide one angular budget by live weight, so folder wedges

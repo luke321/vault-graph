@@ -71,18 +71,17 @@ cascade duration. Departure and arrival overlap for 0.60 of the clock; arrival f
 Fold opacity no longer additionally shrinks the radius. Endpoint size ceilings and actual
 frame-clearance sizing remain active; the clock-hand fallback retains its shrink behavior.
 
-At a settled filtered view, up to `SPARSE_LABEL_LIMIT = 12` visible display nodes may receive
-automatic labels. They do not change note sizes, search labels, or focus behavior. Labels are
-limited to `SPARSE_LABEL_WIDTH = 180` CSS pixels (or 40% of a narrow canvas), shortened with an
-ellipsis, and placed to avoid other labels, dots, and the canvas edges. They disappear during
-animation, focus, a recent lens, or when the filter clears. Hidden nodes do not consume the cap.
+Sparse filtered views do not automatically label notes. The former 12-note threshold and
+180-pixel truncation rule were removed at the user's request on 2026-10-04. Labels remain
+available through explicit interaction, including hover and focus.
 
 Verification added to `tags: fold and regrow` measures angular drift between lit frames as well
 as movement, opacity reversals, cleanup, and resting-layout parity. `sparse filtered results`
-measures actual label-canvas ink on a sparse day and its removal after clearing the filter.
+measures zero automatic label-canvas ink on a sparse day and after clearing the filter.
 The existing `filtered to the bone` check continues to enforce the 1×–3× dot-size bounds.
 
-Measured locally on 2026-09-26, executing the actual fold and label methods in isolation:
+Historical measurement on 2026-09-26, before removing automatic labels, executing the actual
+fold and label methods in isolation:
 401 fold positions, maximum angular drift **1.11e-16 radians**, endpoint drift **0**, monotone
 radii and unchanged pinned positions; label truncation, canvas bounds, pairwise overlap,
 density cutoff, hidden-node exclusion, filter clearing, and forced-label priority pass.

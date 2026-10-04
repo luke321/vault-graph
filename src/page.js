@@ -6157,8 +6157,7 @@ function mountVaultGraph(root, data, deps) {
           if (ht > 0.5) { r.highlighted = true; r.forceLabel = true; }
           return r;
         }
-        r.autoLabel = !cascadeRun && !anim && !focus && recentT <= 0.004 && filterOn();
-        if (!r.autoLabel) r.label = "";
+        r.label = "";
         return r;
   }
 

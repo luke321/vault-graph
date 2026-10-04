@@ -5304,7 +5304,7 @@ check("the last frame of a cascade is the resting layout", async (p) => {
 }, { on: WALK, clock: "real" });
 
 // github#186
-check("sparse filtered results draw labels and clear them with the filter", async (p) => {
+check("sparse filtered results stay unlabelled without explicit interaction", async (p) => {
   await clearRange(p);
   await settle(p);
   const day = await p.j(`(function () {
@@ -5336,7 +5336,7 @@ check("sparse filtered results draw labels and clear them with the filter", asyn
     await toRest(p);
   }
   const restInk = await labelInk();
-  return { ok: sparseInk > 20 && restInk === 0, detail: `${day}: ${sparseInk} label pixels; cleared: ${restInk}` };
+  return { ok: sparseInk === 0 && restInk === 0, detail: `${day}: ${sparseInk} automatic label pixels; cleared: ${restInk}` };
 });
 
 check("filtered to the bone, the disc stays drawable", async (p) => {
