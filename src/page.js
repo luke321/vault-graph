@@ -1155,6 +1155,8 @@ function mountVaultGraph(root, data, deps) {
     /** @type {Record<string, Record<string, number>>} */
     var tally = dict();
     graph.forEachNode(function (id, a) {
+      // github#76
+      if (rebasing() && !inRootA(a)) return;
       var f = fileGroup(id, a), sb = fileSub(id, a);
       if (!tally[f]) tally[f] = dict();
       tally[f][sb] = (tally[f][sb] || 0) + 1;
@@ -1505,6 +1507,8 @@ function mountVaultGraph(root, data, deps) {
       // github#86 -- counts where this dim files it, old groups in the new order
       // github#86 -- and in the colour rotation, for as long as the switch runs
       if (a.standIn) return;
+      // github#76
+      if (rebasing() && !inRootA(a)) return;
       var g = leaving[id]
         ? (!adj[id] && !unlinkedByFolder ? UNLINKED : fileGroup(id, a))
         : groupOf(id);
@@ -1592,8 +1596,31 @@ function mountVaultGraph(root, data, deps) {
       groupSlot[g] = use;
       groupAutoSlot[g] = key;
     });
+    // github#76
+    if (rebasing() && rootSlot) giveRootSlot(names);
     buildSubShades();
     buildUnlinkedTint();
+  }
+
+  // github#76 -- the slot the drilled folder wore on the disc it was drilled from
+  var rootSlot = "";
+  // github#76
+  /** @param {string[]} names */
+  function giveRootSlot(names) {
+    var big = "", bigN = 0;
+    names.forEach(function (g) {
+      if (g === UNLINKED || g === DIRECT || isArchiveGroup(g)) return;
+      var n = folderCount[g] || 0;
+      if (n > bigN) { bigN = n; big = g; }
+    });
+    if (!big || groupSlot[big] !== groupAutoSlot[big] || !THEME.byKey[rootSlot]) return;
+    var mine = groupSlot[big];
+    var holders = names.filter(function (o) { return o !== big && groupSlot[o] === rootSlot; });
+    if (holders.some(function (o) { return groupAutoSlot[o] !== rootSlot; })) return;
+    holders.forEach(function (o) {
+      groupSlot[o] = mine; groupAutoSlot[o] = mine; groupColor[o] = THEME.byKey[mine];
+    });
+    groupSlot[big] = rootSlot; groupAutoSlot[big] = rootSlot; groupColor[big] = THEME.byKey[rootSlot];
   }
 
   /** @returns {PaletteSlot[]} */
@@ -2463,7 +2490,9 @@ function mountVaultGraph(root, data, deps) {
     } else graph.forEachNode(function (id) {
       // github#86 -- the left disc has no stand-ins; the arriving disc no leavers
       if (oldWorld ? !!graph.getNodeAttribute(id, "standIn") : !!leaving[id]) return;
-      if (onlyVisible && !(planKeep || willShow)(id)) return;
+      if (onlyVisible) { if (!(planKeep || willShow)(id)) return; }
+      // github#76
+      else if (rebasing() && !inRoot(id)) return;
       // github#18
       if (isPinned(id)) return;
       members.push(id);
@@ -5704,9 +5733,8 @@ function mountVaultGraph(root, data, deps) {
     // github#86 -- a leaving note is in the disc being left only
     if (leaving[id] && !oldWorld) return false;
     var a = graph.getNodeAttributes(id);
-    // github#76 -- a root does NOT filter here. It hides the other groups through
-    // `state.hidden`, the same door the legend's eye and its "only" use, so the disc sees a
-    // plain solo and animates as one. What the root filters is the NAV, in `buildLegend`.
+    // github#76
+    if (rebasing() && !inRootA(a)) return false;
     if (isHidden(groupOf(id))) return false;
     var d = fileDirs(id, a);
     if (!d.length) {
@@ -9309,34 +9337,44 @@ function mountVaultGraph(root, data, deps) {
     if (next && !anyNoteUnder(next.split("/"))) return state.root;
 
     var live = !!renderer && !instant;
-    // github#76 -- the colour this folder wears right now; its children walk out of it.
-    var fromColor = live && next ? colorOf(groupOfPath(next)) : "";
-    var wasRoot = state.root || "";
+    var slot = next ? slotOfPath(next) : "";
+    // github#76 -- out of a re-wedged disc the way it came: back to the solo first
+    if (rebasing()) {
+      if (live) {
+        reWedgeTo(false, true, function () { soloRoot(next, slot, true); });
+        return next || null;
+      }
+      reWedgeTo(false, false, null);
+    }
+    soloRoot(next, slot, live);
+    return state.root;
+  }
 
+  // github#76 -- the slot a folder path wears on the disc on screen, or "" if it has none
+  /** @param {string} p @returns {string} */
+  function slotOfPath(p) {
+    if (rebasing() && p.indexOf((state.root || "") + "/") !== 0) return "";
+    return groupSlot[groupOfPath(p)] || "";
+  }
+
+  // github#76 -- STEP 1: solo the folder, filter the nav, repaint in the children's colours
+  /** @param {string} next @param {string} slot @param {boolean} live */
+  function soloRoot(next, slot, live) {
+    var wasRoot = state.root || "";
     state.root = next || null;
     rootSegs = next ? next.split("/") : [];
     rootDepth = rootSegs.length;
+    rootSlot = slot;
 
-    // github#76 -- STEP 1. A drill hides every other folder through `state.hidden` -- the same
-    // door the legend's eye and its "only" write to -- so the DISC sees a plain solo and
-    // animates as one. The root's own work is the other half: it filters the NAV (buildLegend)
-    // and repaints the folder in the colours its children will wear as wedges. Nothing is
-    // re-wedged and nothing re-ordered while `reWedge` is off.
     var h = state.hidden[state.dim] || (state.hidden[state.dim] = dict());
-    if (next) {
-      var g0 = groupOfPath(next);
-      (order[state.dim] || []).forEach(function (n) { h[n] = (n !== g0); });
-    } else {
-      // coming home: give every group back, the way "All" does
+    if (next) soloHide(h);
+    else {
       Object.keys(h).forEach(function (n) { delete h[n]; });
       seedHidden();
     }
-    // github#76 -- a drill filters by GROUP, so it owns no subfolder filter of its own; one
-    // left over from a previous root would keep hiding rows the new one should show.
+    // github#76
     if (wasRoot || next) state.hiddenSub = dict();
 
-    // github#76 -- what each note wears RIGHT NOW. `rootNoteColor` is still null and the
-    // basis is unchanged, so this is simply the vault's own colour for it.
     /** @type {Record<string, string> | null} */
     var beforeColor = null;
     if (live && next) {
@@ -9345,49 +9383,71 @@ function mountVaultGraph(root, data, deps) {
         if (inRootA(a)) beforeColor[id] = nodeColor(id);
       });
     }
-
-    rootNoteColor = null;
-    if (next) {
-      var ahead = wedgeColorsAhead();
-      // github#76 -- the BIGGEST child keeps the folder's own colour, so a drill reads as
-      // opening the thing you clicked rather than as a new palette: the wedge you were
-      // already looking at stays put and the smaller ones are what take new colours.
-      /** @type {Record<string, number>} */
-      var perChild = dict();
-      var biggest = "", biggestN = 0;
-      Object.keys(ahead.child).forEach(function (id) {
-        var c = ahead.child[id];
-        if (!c || c === DIRECT || c === UNLINKED) return;
-        perChild[c] = (perChild[c] || 0) + 1;
-        if (perChild[c] > biggestN) { biggestN = perChild[c]; biggest = c; }
-      });
-      if (biggest && fromColor) {
-        Object.keys(ahead.child).forEach(function (id) {
-          if (ahead.child[id] === biggest) ahead.color[id] = fromColor;
-        });
-      }
-      rootNoteColor = ahead.color;
-    }
+    rootNoteColor = next ? wedgeColorsAhead().color : null;
     attempt(placeLogo); attempt(heatBuild); attempt(buildLegend);
 
-    var landed = function () {
-      preRootColor = null; preRootShade = null;
-      colorShown = null; noteColorShown = null;
-    };
     if (live) {
-      // github#76 -- an only-click is `cascade(null, { colToggle: true })` and nothing else,
-      // so a drill is that, plus the recolour walked across the same cascade by `onFrame`.
       /** @type {CascadeOpts} */
       var how = { colToggle: true };
       var tint = beforeColor && rootNoteColor
         ? noteTintWalk(beforeColor, rootNoteColor) : null;
       if (tint) how.onFrame = tint;
-      cascade(landed, how);
-    } else {
+      cascade(function () {
+        preRootColor = null; preRootShade = null;
+        colorShown = null; noteColorShown = null;
+        if (next && state.root === next) reWedgeTo(true, true, null);
+      }, how);
+    } else if (next) reWedgeTo(true, false, null);
+    else {
       applyLayout(false);
       if (renderer) renderer.refresh();
     }
-    return state.root;
+  }
+
+  // github#76 -- every group but the root's own, hidden through the vault basis
+  /** @param {Record<string, boolean>} h */
+  function soloHide(h) {
+    var g0 = groupOfPath(state.root || "");
+    graph.forEachNode(function (id) { var g = groupOf(id); h[g] = g !== g0; });
+    (order[state.dim] || []).forEach(function (n) { h[n] = n !== g0; });
+  }
+
+  // github#76 -- STEP 2: the root's children become the wedges, or stop being them
+  /** @param {boolean} on @param {boolean} live @param {(() => void) | null} done */
+  function reWedgeTo(on, live, done) {
+    /** @type {Record<string, string>} */
+    var was = dict();
+    if (live) {
+      graph.forEachNode(function (id, a) {
+        if (inRootA(a) && visible(id) && (alpha[id] || 0) > 0.004) was[id] = groupOf(id);
+      });
+    }
+    reWedge = on;
+    state.hiddenSub = dict();
+    var h = state.hidden[state.dim] || (state.hidden[state.dim] = dict());
+    buildSubOrder();
+    if (on) {
+      rootNoteColor = null;
+      counts = computeOrder();
+      seedHidden();
+    } else {
+      Object.keys(h).forEach(function (n) { delete h[n]; });
+      soloHide(h);
+      rootNoteColor = rootDepth ? wedgeColorsAhead().color : null;
+    }
+    hardRelayout(false, live, true);
+    attempt(placeLogo); attempt(heatBuild); attempt(buildLegend);
+    if (!live) { if (done) done(); return; }
+    /** @type {Record<string, string> | null} */
+    var movesFrom = null;
+    Object.keys(was).forEach(function (id) {
+      if (groupOf(id) === was[id]) return;
+      (movesFrom || (movesFrom = dict()))[id] = was[id];
+    });
+    /** @type {CascadeOpts} */
+    var how = { colToggle: true };
+    if (movesFrom) how.movesFrom = movesFrom;
+    cascade(done, how);
   }
 
   /**

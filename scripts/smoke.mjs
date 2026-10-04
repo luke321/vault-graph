@@ -8710,6 +8710,8 @@ check("a drilled control writes an absolute folder identity, not a display name"
   const found = drillSnapshot(dd.vault.name);
   if (!found) return { ok: true, detail: `NOT ASSERTED: "${dd.vault.name}" has no drilled golden` };
   const root = found.snap.root;
+  // github#151
+  const storedWas = await storeSnap(p);
   await withRoot(p, root);
 
   const r = await p.j(`(function(){
@@ -8738,6 +8740,7 @@ check("a drilled control writes an absolute folder identity, not a display name"
   })()`);
 
   const want = root + "/" + r.g;
+  r.hlKeys = r.hlKeys || []; r.colKeys = r.colKeys || [];
   const hlOk = r.hlKeys.length === 1 && (r.hlKeys[0] === want || r.hlKeys[0] === root + "/");
   // github#76
   const colOk = r.picked && r.colKeys.length > 0 &&
@@ -8748,6 +8751,7 @@ check("a drilled control writes an absolute folder identity, not a display name"
   const leaked = await p.j(`(function(){ var n = 0;
     __vg.graph.forEachNode(function (id) { if (__vg.isHighlighted(id)) n++; });
     return { hl: n, colours: Object.keys(__vg.folderColors).length }; })()`);
+  await storeBack(p, storedWas);
 
   const ok = r.row && hlOk && colOk && r.outside === 0 && leaked.hl === 0 && leaked.colours === 0;
   return {
