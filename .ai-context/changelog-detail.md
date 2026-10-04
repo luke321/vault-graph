@@ -1,3 +1,29 @@
+## 2026-10-04 — a usability audit against researched thresholds (`github#200`)
+
+Tooling and a baseline only, no product change. `scripts/usability-audit.mjs` measures the page
+headless at seven device profiles (phone to 27-inch, plus an Obsidian side leaf), both themes,
+against the thresholds in `usability-thresholds.md`: WCAG 2.5.8 / 2.5.5 / 1.4.3 / 1.4.11 / 2.5.1 /
+2.5.7, Apple, Material, Microsoft, Parhi 2006, Hoober 2013, 20/20 acuity, HFES 100, and Stone
+et al. 2014's size-dependent colour difference under Machado 2009 dichromacy simulation.
+`usability-thresholds.mjs --selftest` pins the maths (CSS reference pixel 0.0213°, 21:1, grey
+through every CVD matrix, ND50 against the paper's table).
+
+Baseline on develop `022fd40`, five fixtures × seven profiles, 85 s, 468 findings:
+
+| Measurement | demo phone | demo desktop | 10k phone | 10k desktop |
+|---|---:|---:|---:|---:|
+| dot diameter p50 | 3.28 px / 5.2′ | 5.8 px / 8.5′ | 2.12 px / 3.4′ | 3.39 px / 4.9′ |
+| dots under 5′ | 35.9% | 0.4% | 100% | 52.7% |
+| dots failing 2.5.8 (dot and spacing < 24 px) | 100% | 100% | 100% | 100% |
+| effective tap width p50 (touch) | 1.12 mm | — | 0.45 mm | — |
+| controls failing 2.5.8 | 0 of 74 | 18 of 80 | 0 of 74 | 18 of 80 |
+
+Also measured: tablet (820 px, touch) gets the desktop controls, 100% under 44 px; light-theme
+dim text 3.34:1 and two tint slots at 2.11:1 and 2.74:1; the legend's `only` control appears
+only on `:hover`; pan is drag-only (2.5.7); tap slop 10 px vs Android's 8 dp, double-tap radius
+24 px vs 100 dp. Five pairs (protan, demo dark) stay under one noticeable difference even at
+1/3°.
+
 ## 2026-10-03 — walking frames the visible neighbourhood (`github#134`)
 
 The fixed 0.22 walk camera cropped most of the selected note's focus web. `centerOn()` now

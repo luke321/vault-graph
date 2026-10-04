@@ -5,7 +5,7 @@ markers already in the source: which code cites an issue, an ADR or a DDR; which
 enforces each invariant; who calls each `__vg` entry point. Stale when
 `node scripts/code-map.mjs --check` fails.
 
-## Issues — 154 cited (142 in code, 147 in `.ai-context/`)
+## Issues — 155 cited (143 in code, 147 in `.ai-context/`)
 
 | issue | code sites | prose sites |
 |---|---|---|
@@ -163,6 +163,7 @@ enforces each invariant; who calls each `__vg` entry point. Stale when
 | #197 | scripts/deferred-check.mjs:59, scripts/host-phone-check.mjs:278, scripts/interrupt.mjs:2, scripts/mobile-check.mjs:75, scripts/probe-room.mjs:286, scripts/refresh-check.mjs:81, scripts/smoke-runner-selftest.mjs:13, scripts/smoke-runner-selftest.mjs:669, scripts/smoke.mjs:8588, scripts/smoke.mjs:8602, scripts/smoke.mjs:8716, scripts/smoke.mjs:8724, scripts/smoke.mjs:9217, scripts/spike-check.mjs:74, scripts/suite-repeat.mjs:156 | .ai-context/changelog-detail.md:55, .ai-context/invariants.md:6458 |
 | #198 | scripts/harness-hook.mjs:65, scripts/harness-hook.mjs:80, scripts/harness-hook.mjs:151, scripts/make-hero.ps1:28, scripts/probe-room.mjs:112, scripts/probe-room.mjs:276, scripts/record-demo.ps1:94, scripts/record-live.mjs:32, scripts/record-live.mjs:226, scripts/smoke.mjs:9041, scripts/smoke.mjs:9056, scripts/smoke.mjs:9159 | .ai-context/changelog-detail.md:89, .ai-context/changelog-detail.md:102, .ai-context/harness-hook.md:34, .ai-context/harness-hook.md:35, .ai-context/harness-hook.md:50, .ai-context/harness-hook.md:83 |
 | #199 | scripts/smoke.mjs:8922, scripts/update-layout-snapshots.mjs:22 | .ai-context/invariants.md:1284, .ai-context/invariants.md:2957 |
+| #200 | scripts/usability-audit.mjs:2, scripts/usability-audit.mjs:72, scripts/usability-audit.mjs:86, scripts/usability-audit.mjs:452, scripts/usability-thresholds.mjs:2, scripts/usability-thresholds.mjs:55, scripts/usability-thresholds.mjs:109, scripts/usability-thresholds.mjs:132, scripts/usability-thresholds.mjs:147, scripts/usability-thresholds.mjs:182 | — |
 
 ## Decision and design records cited in code — 30
 
@@ -341,7 +342,7 @@ enforces each invariant; who calls each `__vg` entry point. Stale when
 | `__vg.data` | scripts/smoke.mjs ×3 |
 | `__vg.dateSpan` | scripts/shoot-daterange.mjs ×1, scripts/smoke.mjs ×6 |
 | `__vg.debugDump` | scripts/obsidian-smoke.mjs ×2, scripts/smoke.mjs ×3 |
-| `__vg.demo` | scripts/demo.mjs ×14, scripts/mobile-check.mjs ×4, scripts/obsidian-smoke.mjs ×2, scripts/probe-cascade.mjs ×1, scripts/probe-dotsize.mjs ×4, scripts/probe-dotwhy.mjs ×1, scripts/probe-frame.mjs ×3, scripts/probe-room.mjs ×2, scripts/probe-trace.mjs ×1, scripts/record-native.mjs ×3, scripts/render-diff.mjs ×3, scripts/shoot-cascade-frame.mjs ×1, scripts/shoot-daterange.mjs ×1, scripts/shoot.mjs ×6, scripts/smoke-runner-selftest.mjs ×1, scripts/smoke-runner.mjs ×1, scripts/smoke.mjs ×20, scripts/teardown-check.mjs ×2, scripts/update-layout-snapshots.mjs ×1, scripts/webgl-recovery-check.mjs ×2 |
+| `__vg.demo` | scripts/demo.mjs ×14, scripts/mobile-check.mjs ×4, scripts/obsidian-smoke.mjs ×2, scripts/probe-cascade.mjs ×1, scripts/probe-dotsize.mjs ×4, scripts/probe-dotwhy.mjs ×1, scripts/probe-frame.mjs ×3, scripts/probe-room.mjs ×2, scripts/probe-trace.mjs ×1, scripts/record-native.mjs ×3, scripts/render-diff.mjs ×3, scripts/shoot-cascade-frame.mjs ×1, scripts/shoot-daterange.mjs ×1, scripts/shoot.mjs ×6, scripts/smoke-runner-selftest.mjs ×1, scripts/smoke-runner.mjs ×1, scripts/smoke.mjs ×20, scripts/teardown-check.mjs ×2, scripts/update-layout-snapshots.mjs ×1, scripts/usability-audit.mjs ×2, scripts/webgl-recovery-check.mjs ×2 |
 | `__vg.densityReport` | scripts/measure-density.mjs ×1, scripts/smoke.mjs ×6 |
 | `__vg.dotWhy` | scripts/probe-dotwhy.mjs ×5 |
 | `__vg.edgeInk` | scripts/render-diff.mjs ×2, scripts/smoke.mjs ×1 |
@@ -351,7 +352,7 @@ enforces each invariant; who calls each `__vg` entry point. Stale when
 | `__vg.folderOrder` | scripts/smoke.mjs ×3 |
 | `__vg.folderShown` | scripts/smoke.mjs ×2 |
 | `__vg.geomLock` | scripts/smoke.mjs ×2 |
-| `__vg.graph` | scripts/mobile-check.mjs ×7, scripts/obsidian-smoke.mjs ×4, scripts/probe-dotsize.mjs ×4, scripts/probe-frame.mjs ×3, scripts/probe-room.mjs ×4, scripts/record-live.mjs ×2, scripts/render-diff.mjs ×5, scripts/shoot-cascade-frame.mjs ×4, scripts/smoke-runner-selftest.mjs ×1, scripts/smoke.mjs ×112, scripts/teardown-check.mjs ×1, scripts/update-layout-snapshots.mjs ×2, scripts/webgl-recovery-check.mjs ×2 |
+| `__vg.graph` | scripts/mobile-check.mjs ×7, scripts/obsidian-smoke.mjs ×4, scripts/probe-dotsize.mjs ×4, scripts/probe-frame.mjs ×3, scripts/probe-room.mjs ×4, scripts/record-live.mjs ×2, scripts/render-diff.mjs ×5, scripts/shoot-cascade-frame.mjs ×4, scripts/smoke-runner-selftest.mjs ×1, scripts/smoke.mjs ×112, scripts/teardown-check.mjs ×1, scripts/update-layout-snapshots.mjs ×2, scripts/usability-audit.mjs ×1, scripts/webgl-recovery-check.mjs ×2 |
 | `__vg.groupCount` | scripts/probe-frame.mjs ×2, scripts/render-diff.mjs ×2, scripts/smoke.mjs ×18 |
 | `__vg.groupOf` | scripts/smoke.mjs ×14 |
 | `__vg.groupOrder` | scripts/measure-density.mjs ×1, scripts/probe-dotsize.mjs ×1, scripts/probe-frame.mjs ×1, scripts/render-diff.mjs ×2, scripts/smoke.mjs ×35 |
@@ -393,10 +394,10 @@ enforces each invariant; who calls each `__vg` entry point. Stale when
 | `__vg.probeReport` | scripts/probe-cascade.mjs ×1, scripts/render-diff.mjs ×1, scripts/smoke.mjs ×2 |
 | `__vg.pushReport` | scripts/smoke.mjs ×2 |
 | `__vg.rangeReport` | scripts/shoot-daterange.mjs ×1, scripts/smoke.mjs ×7 |
-| `__vg.readTheme` | scripts/render-diff.mjs ×2, scripts/shoot.mjs ×2, scripts/smoke.mjs ×5 |
+| `__vg.readTheme` | scripts/render-diff.mjs ×2, scripts/shoot.mjs ×2, scripts/smoke.mjs ×5, scripts/usability-audit.mjs ×1 |
 | `__vg.recentWindow` | scripts/smoke.mjs ×3 |
 | `__vg.relayout` | scripts/smoke.mjs ×4, scripts/update-layout-snapshots.mjs ×1 |
-| `__vg.renderer` | scripts/measure-density.mjs ×1, scripts/mobile-check.mjs ×16, scripts/obsidian-smoke.mjs ×1, scripts/probe-dotsize.mjs ×10, scripts/probe-frame.mjs ×1, scripts/probe-room.mjs ×2, scripts/record-live.mjs ×1, scripts/record-native.mjs ×1, scripts/render-diff.mjs ×10, scripts/shoot-cascade-frame.mjs ×17, scripts/shoot.mjs ×1, scripts/smoke-runner-selftest.mjs ×1, scripts/smoke.mjs ×123, scripts/webgl-recovery-check.mjs ×2 |
+| `__vg.renderer` | scripts/measure-density.mjs ×1, scripts/mobile-check.mjs ×16, scripts/obsidian-smoke.mjs ×1, scripts/probe-dotsize.mjs ×10, scripts/probe-frame.mjs ×1, scripts/probe-room.mjs ×2, scripts/record-live.mjs ×1, scripts/record-native.mjs ×1, scripts/render-diff.mjs ×10, scripts/shoot-cascade-frame.mjs ×17, scripts/shoot.mjs ×1, scripts/smoke-runner-selftest.mjs ×1, scripts/smoke.mjs ×123, scripts/usability-audit.mjs ×2, scripts/webgl-recovery-check.mjs ×2 |
 | `__vg.ribbonXOf` | scripts/smoke.mjs ×11 |
 | `__vg.rings` | scripts/probe-dotsize.mjs ×2, scripts/smoke.mjs ×1 |
 | `__vg.ringsLayout` | scripts/probe-frame.mjs ×1 |
