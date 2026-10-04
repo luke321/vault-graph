@@ -74,6 +74,8 @@ async function openBrowser(html, monitor, size, chrome) {
     "--disable-features=CalculateNativeWinOcclusion", "--disable-backgrounding-occluded-windows",
     "--disable-background-timer-throttling", "--disable-renderer-backgrounding", "--no-first-run",
     "--no-default-browser-check", "--autoplay-policy=no-user-gesture-required", "--allow-file-access-from-files",
+    // github#186
+    "--force-device-scale-factor=1",
     `--window-position=${monitor.x + 20},${monitor.y + 20}`, `--window-size=${size + 40},${size + 100}`,
     "--app=" + url], { stdio: "ignore" });
   let launchError = null; child.on("error", e => { launchError = e; });
