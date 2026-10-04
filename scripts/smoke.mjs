@@ -1411,6 +1411,8 @@ async (p) => {
 }, { on: "all" });
 
 check("tags: each grouping keeps its own colours, and the settings tabs reach both", async (p) => {
+  // github#151, github#186
+  const storedWas = await storeSnap(p);
   const r = await p.j(`(function(){
     // github#86, design/0015 -- the panel is opened on the FOLDER disc and switched to the Tags
     // tab: its rows are the tag dimension's, a pin lands in the tag map, and the folder map, the
@@ -1460,6 +1462,7 @@ check("tags: each grouping keeps its own colours, and the settings tabs reach bo
     gear.click();
     return out;
   })()`);
+  await storeBack(p, storedWas);
   if (r.none) return { ok: true, detail: "no settings panel on this host -- the plugin owns it" };
   const ok = r.tabs.join(",") === "folder,tag" && r.dim === "folder" && r.tagRows > 0 &&
              r.namesMatch && r.folderMapSize === 0 && r.foldersSame && r.colourSame &&
@@ -5945,7 +5948,7 @@ check("the ribbon rescales with its slot", async (p) => {
     var slot = years.getBoundingClientRect().width;
     var last = bs.length ? bs[bs.length - 1] : null;
     var lastX = last ? last.getBoundingClientRect().left + last.getBoundingClientRect().width / 2 - rb.left : null;
-    return { rib: Math.round(rb.width), slot: Math.round(slot),
+    return { rib: Math.round(rb.width), slot: Math.round(slot), ribExact: rb.width,
              inline: rib.style.width, bitmap: rib.width,
              lastX: lastX === null ? null : Math.round(lastX) };
   })()`);
@@ -5965,7 +5968,8 @@ check("the ribbon rescales with its slot", async (p) => {
   const settled = await at();
 
   const tracks = rows.every((r) => Math.abs(r.rib - r.slot) <= 1);
-  const pinned = rows.every((r) => r.inline === r.rib + "px");
+  // github#186
+  const pinned = rows.every((r) => /px$/.test(r.inline) && Math.abs(parseFloat(r.inline) - r.ribExact) <= 0.5);
   const moved = new Set(rows.map((r) => r.lastX)).size === rows.length || rows.length < 2;
   const restored = Math.abs(settled.rib - settled.slot) <= 1;
   return {
@@ -7114,6 +7118,8 @@ check("the (unlinked) row opens its menu with no notes in it", async (p) => {
              r.openedOk && r.closedAfter === true && r.turnedOff === true;
   // github#151
   await storeBack(p, storedWas);
+  // github#186
+  await settle(p);
   return { ok, detail: `row ${r.rowFound ? "present" : "MISSING"} at count ${r.empty}, ` +
     `dimmed=${r.dimmed}, eye dropped for a placeholder=${r.noEye}, only dropped for a ` +
     `placeholder=${r.noOnly}; menu ${r.openedOk ? "opened" : "DID NOT OPEN"} ` +
