@@ -11,7 +11,7 @@ changing the layout or the animation.
 | `changelog-detail.md` | The measurement behind every change, dated, with the numbers on both sides of it. **This file is the regression suite** — a change to how the disc looks or moves adds a row here |
 | `perf-cascade-frame-cost.md` | What an animated frame costs on a 10k vault, term by term; what was taken out of it and what is left (github#19). Read before optimising the cascade, and before believing anything about `renderer.refresh`'s options |
 | `releasing.md` | How a release is cut: enumerating the range, what must be finished on `release/<version>` before anything merges down, and why a tag is never edited after the fact |
-| `locking.md` | Why `scripts/lock.mjs`'s two lock names (`screen-*`, `suite`) stay separate rather than aliased, the deadlock that proved it, and the github issues behind each (github#87, github#92) |
+| `harness-hook.md` | The optional hook the harnesses call to hold a screen or the fixture store and to be told which monitor to use; with none configured they take no lock at all (github#192) |
 | `obsidian-trust-mode.md` | Why a vault Obsidian hasn't trusted opens in restricted mode and reads as a broken plugin, and the CDP workaround every harness uses |
 | `decisions/` | **ADRs** — structural choices, what they cost, and what was rejected |
 | `design/` | **DDRs** — the as-built design of each part of the disc |
@@ -50,6 +50,7 @@ numbers stay and the index spells them out.
 | `0013-a-tree-is-gated-once` | A green full suite run stamps the git tree it measured; the hook and `release.ps1` skip a stamped tree, and why not by commit, by time or by `SKIP_SMOKE` (github#93) |
 | `0014-a-pin-names-its-note-not-its-position` | Why a pin is stored by the note's path: an id is a position, and a position only holds while the input order does (github#143) |
 | `0015-mirror-the-explorer-not-its-api` | Why the file-explorer order is parsed from the sortspec text, which subset, and why it falls back loudly (github#71) |
+| `0016-the-suite-runs-headless-but-nothing-requires-it` | Why headless is a flag and never sniffed, why the lane seam is github#113's `clock`, why the screen lock is skipped rather than excepted, and why the soak measures the spread before anything becomes a required status (github#155) |
 
 ### DDRs — `design/`
 

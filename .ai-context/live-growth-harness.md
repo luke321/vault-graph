@@ -23,8 +23,8 @@ off the plugin does no work at all on an arrival — no rebuild, no build, no ap
 that survives is Obsidian parsing the note and updating `resolvedLinks`, which is not ours to defer.
 Measured, it refuted the hypothesis that the pan stall was Obsidian's floor.
 
-It places an Electron window on the leftmost screen, so it takes `screen-left` and releases it on
-every way out (github#87).
+It places an Electron window, so with a harness hook configured it claims a screen and releases
+it on every way out (github#87, github#192).
 
 ## What it samples, and why each one is there
 

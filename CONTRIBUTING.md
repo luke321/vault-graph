@@ -65,6 +65,7 @@ node scripts/check-build-order-determinism.mjs # nor on the order the filesystem
 node scripts/check-data-escape.mjs      # a note's frontmatter cannot close the exported data script
 node scripts/update-note-selftest.mjs   # the update note's grammar and decision table (design/0016)
 node scripts/smoke-runner-selftest.mjs  # a check that threw is scored as a failure (github#146)
+node scripts/make-mirror-vault-selftest.mjs # no real folder segment survives into a mirror (github#191)
 node scripts/check-link-resolution.mjs  # both producers agree where a link points (github#141)
 node scripts/check-producer-contract.mjs # both producers emit the same shape, and a difference is declared (github#149)
 node scripts/code-map.mjs --check       # the generated map and index still match the source
@@ -74,12 +75,62 @@ npm run lint                            # tsc --noEmit on the engine, then on th
 node scripts/smoke.mjs                  # the invariant suite: five fixtures, each check on the ones its assertion is about
 ```
 
+`check-pii` reads its deny list from the untracked `.pii-names`, or from the `PII_NAMES` secret in
+CI. The list holds names, plus typed `email:`, `jira:` and `vault:` entries for the rules that
+would otherwise name the maintainer in this public source (`github#196`). Copy
+`.pii-names.example` to see the format. In CI, a list with no entry of one kind fails. Locally,
+the check warns. Either way, every loaded value is planted and has to be caught on every run.
+
 **Only the last one has a skip flag.** `SKIP_SMOKE=1 git push` skips the suite; the sixteen
 above it do not have one and are not meant to — most of them are cheap, and what they prevent
 is damage to somebody else's software, somebody else's licence, or somebody else's name.
 
 While iterating, `node scripts/smoke.mjs --only <substring>` is the loop. The full suite
 belongs to the push that merges.
+
+**The suite can also run where there is no screen (github#155).** `--headless` opens
+`--headless=new`, places no window, and asks a configured harness hook for **no screen**
+(`.ai-context/harness-hook.md`) — a headless run puts nothing on one. `CI` being set turns
+it on by itself, so a runner that forgets the flag does not hang; `--headed` beats both.
+`--lane fast` runs the 131 checks that assert counts, geometry and plan parity, and `--lane walk`
+the 27 that assert frame cadence — github#113's `clock` classification, reused rather than
+invented a second time. Both flags are part of the run *shape*, so neither can stamp a tree as
+having passed the suite.
+
+A headless run corrects its own viewport to **1584×961**, the inner size a placed `--app` window
+of 1600×1000 gives the page on the machine the thresholds were tuned against. That is not
+cosmetic: measured 2026-09-21, uncorrected headless gives the page 905px of height instead of
+961, and that 56px alone failed *the disc's density follows the notes on screen* on the 10k vault
+three runs out of three while it passed headed every time. **The frame moved, not the threshold**
+— a threshold that has to move for the machine is measuring the machine.
+
+**A lane is only as good as the `clock` each check declares, and one has not declared it.**
+Three local headless fast-lane runs came back 2 of 3 green, the odd one out being *a swipe in
+the tail of a fit flight still scrolls* — a check that registers with no `clock` opt, so it
+defaults to `fast`, while its body samples a fit flight at +345ms. See decisions/0016; the soak
+is what settles whether the rest of that family belongs in the walk lane too.
+
+**The suite has no CI gate, and that is settled rather than pending.** Measured 2026-09-21
+(`ubuntu-latest`, run 35627190525): the fast lane takes a **median 30.9 minutes** there against
+**295 s** here — 6.3× — and came back **0 of 3 green**, with **22 of 29 failures** being
+`Runtime.evaluate … got no reply in 10s`, i.e. `cdp.mjs`'s own reply timeout rather than a check
+disagreeing. The rest are the same cause one level up. Every fix available for them — a longer
+CDP timeout, wider sampling windows, moved thresholds — is measuring the machine. A
+GitHub-hosted runner has no GPU and software-renders, which a Chrome-over-CDP suite cannot
+afford.
+
+The workflow that measured it has been removed — there is nothing left for it to gate, and a
+dormant workflow with a `push` trigger that costs hours is a trap rather than an asset. To
+re-take the measurement on faster infrastructure, run `node scripts/smoke.mjs --headless --lane
+fast` N times, keeping each run's stdout, and hand the files to `node scripts/soak-report.mjs
+run-*.txt`. That report stays, and is useful locally too: it prints the **spread** — every run,
+min/median/max wall, and every check that failed in any run with how many. It is what found the
+mis-declared `clock` above.
+
+**`--headless` is opt-in and stays that way.** A plain `node scripts/smoke.mjs` still places its
+windows on the harness screen. `CI` deliberately does **not**
+imply it: there is no CI running this suite, so the only thing that implication could still do is
+silently take the window away from someone whose shell happens to set `CI`.
 
 `npm run lint` runs `scripts/check-js-contracts.mjs` as part of that first line, and it is
 worth knowing what it does before you meet it failing. The JavaScript's JSDoc annotations are
@@ -148,6 +199,7 @@ node scripts/build-plugin.mjs
 node scripts/update-note-check.mjs                # the demo fixture; --keep leaves Obsidian open
 node scripts/update-note-selftest.mjs             # the decision table and the note grammar, no Obsidian (the hook runs it too)
 node scripts/smoke-runner-selftest.mjs           # the smoke runner's own scoring and error audit, no Chrome (the hook runs it too)
+node scripts/make-mirror-vault-selftest.mjs      # the mirror's sort-spec translation and its no-real-folder-name rule, on a fixture (the hook runs it too)
 ```
 
 One more if you touch the renderer (`src/engine/`): the suite asserts numbers, and none of
@@ -207,8 +259,8 @@ profile and port, turns on touch emulation, overrides the device metrics, calls
 `app.emulateMobile(true)` and only then opens the view — the ordering matters and each step
 carries its pointer in the file. It reports the band's six readings from github#178 with the
 number behind each. Like `obsidian-smoke.mjs` it needs Obsidian installed, takes a minute or
-two, and is not in the hook; it takes the `screen-left` lock, because it puts a window on that
-display.
+two, and is not in the hook; it asks a configured harness hook for a screen, because it puts a
+window on one.
 
 `git config core.hooksPath .githooks` once per clone runs those on every push to `develop` or
 `main`, along with a check that refuses to publish other people's names, two that keep the
@@ -230,8 +282,8 @@ checked-out commit, on a pull request into `develop` or `main` and on a push to 
 two lists are kept in step by `node scripts/check-ci-parity.mjs`, which the hook and the
 workflow both run: a gate added to one and not the other fails the push. The suite stays out
 of CI (no headless path, and a frame-sensitive lane tuned against one machine's Chrome), and
-`check-pii.mjs` is patterns-only there, since `.pii-names` is gitignored — read that step's
-output, not its exit code. `.ai-context/invariants.md` ("The merge boundary runs the gates the
+`check-pii.mjs` reads the `PII_NAMES` secret there — read that step's output, not its exit
+code: `NO NAME LIST` means the secret did not load. `.ai-context/invariants.md` ("The merge boundary runs the gates the
 hook runs") has the measurements and github#147 the reasoning.
 
 **A tree is gated once.** A green full run of `smoke.mjs` stamps the git *tree* it measured

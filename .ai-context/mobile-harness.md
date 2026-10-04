@@ -112,9 +112,9 @@ breakpoint, and it is the one viewport where the disc always had a sensible size
 
 ## What github#170 added, and the two readings that cost a morning
 
-**The harness now takes the `screen-left` lock**, which it seized without asking for two
-weeks. `spike-check.mjs` already took it, and the two place a window on the same display
-through the same `leftmostScreen()`. `--no-lock` is the opt-out for a caller that holds it.
+**The harness now claims its screen**, which it seized without asking for two weeks — since
+github#192 through the harness hook when one is configured (`.ai-context/harness-hook.md`),
+and on that screen rather than always the leftmost.
 The release is registered at module scope, not beside the browser's teardown, so a throw
 before Chrome is spawned still gives it back; `--keep` deliberately holds it, because the
 window it leaves behind is still on that display.

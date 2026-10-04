@@ -237,6 +237,14 @@ The outermost row is the exception: it is the partial one, and it draws the rim.
 what the band's largest dot needs to clear the seam, so its notes reach their edges — unless it
 holds a single note, which has no two ends and is centred.
 
+## Navigation camera (github#134)
+
+Walking to a search result, linked note or trail entry keeps its single 420 ms camera animation.
+The landing frames the visible focus web rather than imposing a fixed close-up: the bounding
+hull includes curved edges and dot radii, with a 24 px inset and 0.22 as the closest ratio.
+There is no post-flight fit. This changes camera state only; the lattice and cascade clocks are
+untouched. `design/0019` records the bounds calculation, locked-pan behaviour and measurements.
+
 ## Checking
 
 The invariant itself: sample every note's radius, angle and drawn radius on each frame while

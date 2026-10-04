@@ -317,6 +317,22 @@ EOF
   exit 1
 fi
 
+# THE MIRROR'S OWN CHECK NEXT, same bar -- a 16-note fixture, three subprocess runs, no Chrome,
+# about a second. github#191: the mirror kept every real folder name that was not a person and
+# copied three .obsidian files verbatim, so a "shareable" mirror carried the real vault's tree.
+echo "pre-push: checking no real folder segment survives into a mirror..."
+if ! node "$root/scripts/make-mirror-vault-selftest.mjs" </dev/null; then
+  cat >&2 <<'EOF'
+
+pre-push: the make-mirror-vault selftest failed -- push blocked.
+
+Read the FAIL lines above. scripts/make-mirror-vault.mjs, scripts/mirror-sortspec.mjs and
+scripts/make-mirror-vault-selftest.mjs must agree; .ai-context/invariants.md has the rule.
+There is no skip flag for this check.
+EOF
+  exit 1
+fi
+
 # LINK RESOLUTION NEXT, same bar -- a handful of subprocess builds of a few notes, no Chrome,
 # about a second. github#141: the exporter's resolver lost the source note a link was written in,
 # so a relative link landed on whichever same-named note was indexed first, a heading link was
@@ -486,28 +502,20 @@ if [ -n "$stamped" ]; then
   exit 0
 fi
 
-# ONE SUITE AT A TIME ON THIS MACHINE. Two runs fight for CDP ports and a screen, and each
-# blames the code (scripts/lock.mjs, github#92). The lock is taken here, around the suite only,
-# and released on every way out -- a lock held by a dead hook makes everyone else wait out its
-# stale window. A lock that cannot be had blocks the push rather than running on top of the
-# holder; the holder is named so the wait is a known one.
-#
-# THE PID IS PART OF THE OWNER, and the whole point (github#104). lock.mjs treats a same-owner
-# acquire as already held and exits 0, and lets that owner release -- so without $$ a second
-# push from this worktree while the first is still driving Chrome would start a second suite
-# immediately, which is the exact collision the lock exists to prevent, and whichever finished
-# first would delete the lock out from under the other. The branch name alone does not separate
-# them: two worktrees on detached HEAD both read "pre-push HEAD".
+# github#192, github#104 -- a configured harness hook holds "suite" around the run; with none,
+# nothing is held. The pid keeps two pushes from one worktree from sharing an owner; under Git
+# Bash a child's parent is a short-lived fork, so the hook names its own Windows pid as holder.
+lock_pid=$(cat /proc/$$/winpid 2>/dev/null || echo $$)
 lock_owner="pre-push $(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo '?') [$$]"
-release_lock() { node "$root/scripts/lock.mjs" release suite --owner "$lock_owner" </dev/null >/dev/null 2>&1; }
+release_lock() { node "$root/scripts/harness-hook.mjs" release suite --owner "$lock_owner" </dev/null >/dev/null 2>&1; }
 trap 'release_lock; exit 1' INT TERM HUP
-if ! node "$root/scripts/lock.mjs" acquire suite --owner "$lock_owner" --holder process </dev/null; then
+if ! node "$root/scripts/harness-hook.mjs" acquire suite --owner "$lock_owner" --pid "$lock_pid" </dev/null; then
   cat >&2 <<'EOF'
 
-pre-push: could not take the suite lock -- push blocked.
+pre-push: the harness hook could not hold the suite -- push blocked.
 
-Another invariant suite is running on this machine and the wait ran out. See who holds it
-with:  node scripts/lock.mjs status   and push again when it is free.
+Another invariant suite is running on this machine. See who holds it with:
+  node scripts/harness-hook.mjs status   and push again when it is free.
 EOF
   exit 1
 fi
@@ -515,9 +523,28 @@ fi
 echo "pre-push: running the invariant suite (SKIP_SMOKE=1 to skip)..."
 # The suite is a child so a signal to this hook can take it down too: releasing the lock
 # while the run it guarded keeps driving Chrome would hand the next run a contended screen.
-node "$root/scripts/smoke.mjs" </dev/null &
+# github#197
+stop_file="$(git rev-parse --absolute-git-dir)/vg-suite-stop-$$"
+rm -f "$stop_file"
+VG_STOP_FILE="$(cygpath -m "$stop_file" 2>/dev/null || echo "$stop_file")" \
+  node "$root/scripts/smoke.mjs" </dev/null &
 suite_pid=$!
-trap 'kill "$suite_pid" 2>/dev/null; release_lock; exit 1' INT TERM HUP
+stop_suite() {
+  suite_winpid=$(cat "/proc/$suite_pid/winpid" 2>/dev/null)
+  : > "$stop_file"
+  [ -n "$suite_winpid" ] || kill "$suite_pid" 2>/dev/null
+  for _ in 1 2 3 4 5 6 7 8 9 10; do
+    kill -0 "$suite_pid" 2>/dev/null || break
+    sleep 0.5
+  done
+  if kill -0 "$suite_pid" 2>/dev/null; then
+    if [ -n "$suite_winpid" ]; then taskkill //PID "$suite_winpid" //T //F >/dev/null 2>&1
+    else kill -9 "$suite_pid" 2>/dev/null; fi
+  fi
+  rm -f "$stop_file"
+  node "$root/scripts/interrupt.mjs" reap </dev/null
+}
+trap 'stop_suite; release_lock; exit 1' INT TERM HUP
 wait "$suite_pid"
 suite_rc=$?
 release_lock

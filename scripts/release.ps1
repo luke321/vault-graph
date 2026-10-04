@@ -214,9 +214,7 @@ try {
   if ($Version -match '\.0$') {
     Write-Host "`n=== update strip ===" -ForegroundColor Cyan
     Write-Host "  plugin/whats-new.md is for $noteVersion. RENDER IT AND LOOK BEFORE YOU TAG:" -ForegroundColor Yellow
-    Write-Host "    node scripts/lock.mjs acquire screen-left --owner `"release $Version`"" -ForegroundColor DarkGray
     Write-Host "    node scripts/update-note-check.mjs --out <dir>   # 01-strip-up.png" -ForegroundColor DarkGray
-    Write-Host "    node scripts/lock.mjs release screen-left --owner `"release $Version`"" -ForegroundColor DarkGray
   }
 
   Write-Host "`n=== release notes ===" -ForegroundColor Cyan
@@ -312,8 +310,8 @@ try {
   # passed; the dry run on the release branch is normally that run, and the merge into main
   # carries the same tree (measured byte-identical on 2.3.0, 2.4.0 and 2.4.1). So the suite is
   # skipped here when HEAD's tree already has a stamp against the fixtures now in the store,
-  # and named when it is. -ForceSuite runs it regardless. When it does run, it runs under the
-  # machine-wide suite lock (scripts/lock.mjs, github#92) and releases it on every way out.
+  # and named when it is. -ForceSuite runs it regardless. When it does run, a configured harness
+  # hook holds "suite" around it (scripts/harness-hook.mjs, github#92, github#192).
   Write-Host "`n=== invariants ===" -ForegroundColor Cyan
   $stamped = $false
   if (-not $ForceSuite) {
@@ -331,15 +329,15 @@ try {
   } else {
     # github#104 -- the pid separates two release runs that would otherwise share an owner
     $lockOwner = "release.ps1 $Version [$PID]"
-    try { Invoke-Native node @((Join-Path $here 'lock.mjs'), 'acquire', 'suite', '--owner', $lockOwner) }
-    catch { throw "could not take the suite lock -- another suite is running (node scripts/lock.mjs status); not releasing" }
+    try { Invoke-Native node @((Join-Path $here 'harness-hook.mjs'), 'acquire', 'suite', '--owner', $lockOwner) }
+    catch { throw "could not take the suite lock -- another suite is running (node scripts/harness-hook.mjs status); not releasing" }
     try {
       try { Invoke-Native node @((Join-Path $here 'smoke.mjs')) }
       catch { throw "the invariant suite failed -- not releasing" }
     } finally {
       $prev = $ErrorActionPreference
       $ErrorActionPreference = 'Continue'
-      try { & node (Join-Path $here 'lock.mjs') release suite --owner $lockOwner } finally { $ErrorActionPreference = $prev }
+      try { & node (Join-Path $here 'harness-hook.mjs') release suite --owner $lockOwner } finally { $ErrorActionPreference = $prev }
     }
   }
 

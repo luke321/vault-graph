@@ -249,6 +249,8 @@ wrong tool for exactly the check it exists for. So the mirror carries one — un
   keeps that name; a folder note keeps its folder's mapped name, or it stops being a folder note.
   The sort plugin's own `data.json` is rewritten to point at the mirrored note, so a globally
   registered spec is found in the mirror exactly as in the source.
+- **And since github#191 the folders the spec names are invented too**, not only the people. The
+  rule and its check are in `invariants.md` ("No real folder segment survives into the mirror").
 
 ## Not built
 

@@ -42,11 +42,9 @@ size, and the folder list second, because the disc visibly re-centres when the c
 ## Regenerating this feature's clip
 
 ```powershell
-node scripts/lock.mjs acquire record --owner "#82 collapse"
 .\scripts\record-demo.ps1 -Act collapse -Monitor right
 # wrote demo-collapse-<timestamp>.mp4
 .\scripts\make-hero.ps1 -In demo-collapse-<timestamp>.mp4 -Out assets\features\collapse.webp
-node scripts/lock.mjs release record --owner "#82 collapse"
 ```
 
 Commit `assets/features/collapse.webp` and update `Last re-recorded` below in the same commit —

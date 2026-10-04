@@ -13,8 +13,13 @@ import { dimensionSizingCheck } from "./check-dimension-sizing.mjs";
 import { countSizingCheck } from "./check-count-sizing.mjs";
 import { buildPayloadVault, PAYLOAD, NOTE_COUNT } from "./check-data-escape.mjs";
 import { findChrome } from "./chrome.mjs";
-import { leftmostScreen, leftWindowPos } from "./screen.mjs";
+import { harnessScreen, leftWindowPos } from "./screen.mjs";
+import { admission, claimScreen, noFreeScreen, release } from "./harness-hook.mjs";
 import { keepFocus } from "./focus.mjs";
+import { exited, interrupted, onInterrupt, reapStale, removeDir, runDir } from "./interrupt.mjs";
+// github#155
+import { chromeArgs, nextBounds, parseLane, pickLane, TUNED_VIEWPORT,
+         wantsHeadless } from "./smoke-shape.mjs";
 import { FIXTURE_MAX_AGE_DAYS, FIXTURE_NAMES, checkFixture, countNotes, describeFixture,
          DEFAULT_JOBS, fixtureDigest, fixtureStore, record as recordPass, shapeDeltas,
          stampFixture, startRun } from "./suite-stamp.mjs";
@@ -45,8 +50,14 @@ const AUDIT = arg("audit-state", "");
 // github#151 -- the state boundary
 const BOUNDARY = !argv.includes("--no-state-boundary");
 const HEADED = argv.includes("--headed");
-// github#87
-const NO_LOCK = argv.includes("--no-lock");
+// github#155, decisions/0016 -- no window, no screen lock; --headed beats it
+const HEADLESS = wantsHeadless({ argv, env: process.env });
+// github#113, github#155 -- all (the default), fast, or walk
+// github#155 -- the file's own voice for a bad argument, not a stack trace
+const LANE = (() => {
+  try { return parseLane(arg("lane", "all")); }
+  catch (e) { console.error("smoke failed to run: " + e.message); process.exit(1); }
+})();
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 async function freePorts(k) {
@@ -114,9 +125,10 @@ const needsIntro = (c) => NEEDS_INTRO.some((q) => c.name.toLowerCase().includes(
 // github#79
 const NEEDS_PRISTINE = ["the overview is absent at rest"];
 const needsPristine = (c) => NEEDS_PRISTINE.some((q) => c.name.toLowerCase().includes(q));
-const selected = () => (ONLY.length
+// github#113, github#155 -- --only picks by name, --lane by the clock
+const selected = () => pickLane(ONLY.length
   ? all.filter((c) => ONLY.some((q) => c.name.toLowerCase().includes(q)))
-  : all);
+  : all, LANE);
 
 // github#110, github#113, github#92
 const JOBS = Math.max(1, Number(arg("jobs", String(DEFAULT_JOBS))) || DEFAULT_JOBS);
@@ -125,14 +137,16 @@ const SERIAL_JOBS = Math.max(1, Number(arg("serial-jobs", "1")) || 1);
 // github#101
 const WIDTH = Math.max(JOBS, SERIAL_JOBS);
 
-const GRID = argv.includes("--no-grid") ? false
+// github#155 -- no screen to divide, and a constant viewport beats the grid
+const GRID = HEADLESS ? false
+          : argv.includes("--no-grid") ? false
           : argv.includes("--grid") ? true
           : WIDTH > 1;
 
 let SCREEN = null;
 
 function gridSlot(i, k) {
-  if (!SCREEN) SCREEN = leftmostScreen();
+  if (!SCREEN) SCREEN = harnessScreen();
   const cols = Math.ceil(Math.sqrt(Math.max(1, k)));
   const rows = Math.ceil(Math.max(1, k) / cols);
   const w = Math.floor(SCREEN.w / cols), h = Math.floor(SCREEN.h / rows);
@@ -147,8 +161,19 @@ check("page loads with no console errors", async (p, ctx) => {
 }, { on: "all" });
 
 check("__vg is present and the intro landed", async (p) => {
-  const r = await p.j(`{hasVg: !!window.__vg, until: __vg.state.until, notes: __vg.graph.order}`);
-  return { ok: r.hasVg && r.until === null, detail: `${r.notes} notes, until=${r.until}` };
+  // github#139
+  const r = await p.j(`(function () {
+    var lc = window.__vg ? __vg.lastCascade() : null;
+    return { hasVg: !!window.__vg, until: window.__vg ? __vg.state.until : undefined,
+             notes: window.__vg ? __vg.graph.order : -1,
+             path: lc ? lc.path : "", frames: lc ? lc.frames : -1, exit: lc ? lc.exit : "" };
+  })()`);
+  const animated = r.path === "animated" && r.exit === "converged";
+  return {
+    ok: r.hasVg && r.until === null && animated,
+    detail: `${r.notes} notes, until=${r.until}; intro cascade ${r.path || "?"}, ${r.frames} frames, ` +
+            `exit ${r.exit || "?"}` + (animated ? "" : "  <- THE LOAD INTRO DID NOT ANIMATE"),
+  };
 });
 
 // github#96
@@ -5959,10 +5984,7 @@ check("the intro sweeps the range end across the strip", async (p) => {
   await settle(p);
   const scale = await p.j(`__vg.timeScale`);
   await p.eval(`__vg.timeScale = 0.25; void 0`);
-  await p.eval(`document.querySelector("#vg-refresh").click(); void 0`);
-  const seen = [];
-  for (let i = 0; i < 90; i++) {
-    const r = await p.j(`(function(){
+  const SAMPLE = `(function(){
       var b = __vg.brushNow();
       if (!b) return null;
       var lit = 0; __vg.graph.forEachNode(function (id) { if ((__vg.alpha[id] || 0) > 0.004) lit++; });
@@ -5971,7 +5993,13 @@ check("the intro sweeps the range end across the strip", async (p) => {
                sweeping: b.sweeping, lit: lit,
                tip: tip && !tip.hidden ? tip.textContent : null,
                from: __vg.state.from, to: __vg.state.to, busy: !!__vg.demo.busy() };
-    })()`);
+    })()`;
+  // github#139
+  const seen = [];
+  const first = await p.j(`(function(){ document.querySelector("#vg-refresh").click(); return ${SAMPLE}; })()`);
+  if (first) seen.push(first);
+  for (let i = 0; i < 90; i++) {
+    const r = await p.j(SAMPLE);
     if (r) seen.push(r);
     if (seen.length > 2 && r && !r.busy && !r.sweeping) break;
     await sleep(40);
@@ -5997,6 +6025,63 @@ check("the intro sweeps the range end across the strip", async (p) => {
             `state stayed null: ${stayedPreview}; handle labelled: ${labelled}` +
             (startedLeft ? "" : "  <- DID NOT START AT THE LEFT END") +
             (landedRight ? "" : "  <- DID NOT LAND ON THE RIGHT END"),
+  };
+}, { clock: "real" });
+
+// github#139
+check("the intro lights the disc note by note, and the heat cells follow", async (p) => {
+  await clearRange(p);
+  await settle(p);
+  const scale = await p.j(`__vg.timeScale`);
+  await p.eval(`__vg.timeScale = 0.25; void 0`);
+  const SAMPLE = `(function(){
+    var lit = 0, total = 0;
+    __vg.graph.forEachNode(function (id) { total++; if ((__vg.alpha[id] || 0) > 0.004) lit++; });
+    var h = __vg.heat, heatLit = 0;
+    if (h) for (var i = 0; i < h.keys.length; i++) { if ((h.days[h.keys[i]].n || 0) > 0.004) heatLit++; }
+    var b = __vg.brushNow(), lc = __vg.lastCascade();
+    return { lit: lit, total: total, heatLit: heatLit, sweeping: !!(b && b.sweeping),
+             path: lc ? lc.path : "", frames: lc ? lc.frames : -1, exit: lc ? lc.exit : "",
+             busy: !!__vg.demo.busy() };
+  })()`;
+  // github#139
+  const seen = [await p.j(`(function(){ document.querySelector("#vg-refresh").click(); return ${SAMPLE}; })()`)];
+  for (let i = 0; i < 120; i++) {
+    const r = await p.j(SAMPLE);
+    if (r) seen.push(r);
+    if (seen.length > 2 && r && !r.busy && !r.sweeping) break;
+    await sleep(40);
+  }
+  await p.eval(`__vg.timeScale = ${JSON.stringify(scale)}; void 0`);
+  await settle(p);
+  const rest = await p.j(SAMPLE);
+
+  const mid = seen.filter((r) => r.sweeping);
+  const end = seen[seen.length - 1];
+  const first = mid[0];
+  let litBack = 0, heatBack = 0, restarted = 0;
+  for (let i = 1; i < seen.length; i++) {
+    if (seen[i].lit < seen[i - 1].lit) litBack++;
+    if (seen[i].heatLit < seen[i - 1].heatLit) heatBack++;
+    if (seen[i].frames < seen[i - 1].frames) restarted++;
+  }
+  const startedEmpty = !!first && first.lit <= 0.05 * first.total;
+  const grew = mid.length >= 3 && mid[mid.length - 1].lit > first.lit;
+  const landedFull = !!end && rest.lit > 0 && end.lit === rest.lit;
+  const heatLanded = !!end && end.heatLit === rest.heatLit;
+  const oneCascade = !!end && end.path === "animated" && end.exit === "converged" && restarted === 0;
+  return {
+    ok: mid.length >= 3 && startedEmpty && grew && litBack === 0 && landedFull &&
+        heatBack === 0 && heatLanded && oneCascade,
+    detail: `${mid.length} sweeping frames; lit ${first ? first.lit : "-"} -> ` +
+            `${mid.length ? mid[mid.length - 1].lit : "-"} of ${rest.total}, ${litBack} backwards, ` +
+            `at rest ${rest.lit}; heat cells ${first ? first.heatLit : "-"} -> ` +
+            `${mid.length ? mid[mid.length - 1].heatLit : "-"}, ${heatBack} backwards, at rest ${rest.heatLit}; ` +
+            `cascade ${end ? end.path : "?"}, ${end ? end.frames : "?"} frames, ${restarted} restarts, ` +
+            `exit ${end ? end.exit : "?"}` +
+            (startedEmpty ? "" : "  <- THE DISC DID NOT START EMPTY") +
+            (landedFull ? "" : "  <- THE DISC DID NOT LAND FULL") +
+            (heatLanded ? "" : "  <- THE HEAT CELLS DID NOT FOLLOW"),
   };
 }, { clock: "real" });
 
@@ -8390,6 +8475,110 @@ async function stepBack(p) {
   return ok;
 }
 
+// github#134, design/0019
+check("walk framing keeps the visible focus web on canvas", async (p) => {
+  const rows = [];
+  const storedWas = await storeSnap(p);
+  const sheetWas = await p.j(`__vg.sheetOpen`);
+  const panWas = await p.j(`__vg.panEnabled`);
+  let hiddenGroup = null;
+  try {
+    for (const [width, height] of [[960, 960], [1600, 1000], [420, 900]]) {
+      await p.send("Emulation.setDeviceMetricsOverride", { width, height, deviceScaleFactor: 1, mobile: false });
+      await sleep(400);
+      await settle(p);
+      for (const rank of (width === 960 ? [0, 9, 99, 499, -1, -2, -3] : [0, 9, 99, 499, -1])) {
+        if (rank === -2) {
+          await p.eval(`__vg.setPanEnabled(false); void 0`);
+          await sleep(500);
+        }
+        if (rank === -3) {
+          hiddenGroup = await biggestGroup(p);
+          await clickEye(p, hiddenGroup);
+          await settle(p);
+          await sleep(500);
+        }
+        const before = await p.j(`__vg.renderer.getCamera().getState()`);
+        const picked = await p.j(`(function () {
+          var G = __vg.graph, R = __vg.renderer, ids = [];
+          G.forEachNode(function (id, a) {
+            var d = R.getNodeDisplayData(id);
+            if (!a.dupOf && d && !d.hidden) ids.push(id);
+          });
+          ids.sort(function (a, b) { return G.getNodeAttribute(b, "deg") - G.getNodeAttribute(a, "deg"); });
+          var id = ids[${rank} === -1 ? ids.length - 1 : Math.min(Math.max(0, ${rank}), ids.length - 1)];
+          if (!id) return null;
+          var q = document.querySelector("#vg-q"); q.value = G.getNodeAttribute(id, "label");
+          q.dispatchEvent(new Event("input"));
+          var hit = Array.from(document.querySelectorAll("#vg-hits [data-hit]")).find(function (el) {
+            return el.getAttribute("data-hit") === id;
+          });
+          if (!hit) return null;
+          hit.click(); return id;
+        })()`);
+        await sleep(650);
+        const r = await p.j(`(function () {
+          var G = __vg.graph, R = __vg.renderer, id = __vg.state.selected;
+          var dim = R.getDimensions(), set = {}, seen = {}, nodes = 0, offDots = 0, samples = 0, offCurve = 0;
+          set[id] = true;
+          G.forEachEdge(id, function (e, a, s, t) { set[s] = true; set[t] = true; });
+          Object.keys(set).forEach(function (n) {
+            var d = R.getNodeDisplayData(n);
+            if (!d || d.hidden || (__vg.alpha[n] || 0) <= 0.004) { delete set[n]; return; }
+            var v = R.graphToViewport(G.getNodeAttributes(n)), radius = R.scaleSize(d.size);
+            nodes++;
+            if (v.x - radius < -1 || v.x + radius > dim.width + 1 ||
+                v.y - radius < -1 || v.y + radius > dim.height + 1) offDots++;
+          });
+          Object.keys(set).forEach(function (n) {
+            G.forEachEdge(n, function (e, a, s, t) {
+              if (seen[e] || !set[s] || !set[t]) return;
+              seen[e] = true;
+              var ed = R.getEdgeDisplayData(e); if (!ed || ed.hidden) return;
+              var ps = R.graphToViewport(G.getNodeAttributes(s)), pt = R.graphToViewport(G.getNodeAttributes(t));
+              var k = ed.type === "curve" ? ed.curvature || 0 : 0;
+              var cx = (ps.x + pt.x) / 2 + (pt.y - ps.y) * k;
+              var cy = (ps.y + pt.y) / 2 - (pt.x - ps.x) * k;
+              for (var i = 0; i <= 40; i++) {
+                var u = i / 40, v = 1 - u;
+                var x = v * v * ps.x + 2 * v * u * cx + u * u * pt.x;
+                var y = v * v * ps.y + 2 * v * u * cy + u * u * pt.y;
+                samples++;
+                if (x < 0 || x > dim.width || y < 0 || y > dim.height) offCurve++;
+              }
+            });
+          });
+          return { id: id, nodes: nodes, offDots: offDots, samples: samples, offCurve: offCurve,
+                   ratio: R.getCamera().getState().ratio, camera: R.getCamera().getState() };
+        })()`);
+        const lockMoved = rank === -2 && (Math.abs(r.camera.x - before.x) > 1e-6 || Math.abs(r.camera.y - before.y) > 1e-6);
+        rows.push({ width, height, rank, picked, lockMoved, ...r });
+        if (rank === -2) await p.eval(`__vg.setPanEnabled(${panWas}); void 0`);
+        if (hiddenGroup) {
+          await clickEye(p, hiddenGroup);
+          hiddenGroup = null;
+          await settle(p);
+        }
+      }
+    }
+  } finally {
+    await p.send("Emulation.clearDeviceMetricsOverride");
+    await sleep(400);
+    await closeCard(p);
+    if (hiddenGroup) { await clickEye(p, hiddenGroup); await settle(p); }
+    await p.eval(`(function () {
+      __vg.setPanEnabled(${panWas});
+      if (__vg.sheetOpen !== ${sheetWas}) document.querySelector("#vg-sheet").click();
+    })(); void 0`);
+    await sleep(500);
+    await storeBack(p, storedWas);
+  }
+  const failed = rows.filter((r) => !r.picked || r.id !== r.picked || !r.nodes || r.offDots || r.offCurve || r.lockMoved || !Number.isFinite(r.ratio));
+  return { ok: rows.length === 17 && !failed.length && rows.some((r) => r.samples > 0),
+           detail: `${rows.length} landings, ${rows.reduce((n, r) => n + r.nodes, 0)} dots, ` +
+             `${rows.reduce((n, r) => n + r.samples, 0)} curve samples; failures ${JSON.stringify(failed)}` };
+}, { on: ["demo-vault", "test-vault"] });
+
 check("only a hop lengthens the trail", async (p) => {
   await settle(p);
   const start = await selectBySearch(p);
@@ -8642,17 +8831,10 @@ check("the invalidation registry names every cache a live rebuild stales", async
 check("a live rebuild lands on the layout a fresh relayout gives", async (p) => {
   await settle(p);
   await p.eval(LIVE_JS);
-  const STATE = `(function () { var d = __vg.debugDump(); var h = __vg.state.hidden[__vg.state.dim] || {};
-    return { dim: __vg.state.dim, hidden: Object.keys(h).filter(function (k) { return h[k]; }).length, sub: Object.keys(__vg.state.hiddenSub).length,
-      range: [__vg.state.from, __vg.state.to, __vg.state.until], cam: d.camera, lock: d.locked, fold: __vg.foldSwitch, active: __vg.foldActive,
-      timeScale: __vg.timeScale, fitCap: __vg.fitCap, pins: __vg.pinned ? __vg.pinned().length : null, busy: __vg.demo.busyWhy(),
-      last: (function () { var c = __vg.lastCascade(); return c ? { path: c.path, exit: c.exit, frames: c.frames } : null; })() }; })()`;
-  console.log("         [diag before] " + JSON.stringify(await p.j(STATE)));
   const start = await p.j(`(function(){ window.__live.a = window.__live.snap();
                                         return { n: window.__live.a.n }; })()`);
   const res = await p.j(`__vg.applyData(window.__live.withOneMore("__live/Zz Live Probe.md"))`);
   await settle(p);
-  console.log("         [diag landed] " + JSON.stringify(await p.j(STATE)));
   // decisions/0011-a-live-rebuild-retakes-the-geometry-lock-at-rest, github#21
   const after = await p.j(`(function(){
     var landed = window.__live.snap();
@@ -8780,6 +8962,31 @@ check("an idle PNG export carries the graph, not just the background and the log
 });
 
 
+// github#155, decisions/0016 -- a real window resize, never a metrics override
+async function fitViewport(p, want = TUNED_VIEWPORT) {
+  // github#155 -- p.eval, not p.j: p.j is installed after the intro wait
+  const read = async () => JSON.parse(
+    await p.eval("JSON.stringify({ w: innerWidth, h: innerHeight })"));
+  let got = await read().catch(() => null);
+  if (!got) return null;
+  let id = null;
+  try { id = (await p.send("Browser.getWindowForTarget", {})).windowId; }
+  catch { return got; }
+  // github#155 -- a second pass, for a window manager that clamped the first
+  for (let i = 0; i < 2 && got; i++) {
+    let bounds;
+    try { bounds = (await p.send("Browser.getWindowBounds", { windowId: id })).bounds; }
+    catch { return got; }
+    const next = nextBounds(bounds, got, want);
+    if (!next) return got;
+    try { await p.send("Browser.setWindowBounds", { windowId: id, bounds: next }); }
+    catch { return got; }
+    await sleep(250);
+    got = await read().catch(() => got);
+  }
+  return got;
+}
+
 async function settle(p, ms = 6000) {
   const deadline = Date.now() + ms;
   for (;;) {
@@ -8805,7 +9012,7 @@ async function runOne(vault, work) {
   let url = (work && work.url) || arg("url", "");
   let scratch = null;
   if (!url) {
-    scratch = join(mkdtempSync(join(tmpdir(), "vg-smoke-build-")), "vault-graph.html");
+    scratch = join(runDir("vg-smoke-build-"), "vault-graph.html");
     const b = spawnSync(process.execPath,
                         [join(HERE, "..", "src", "build-graph.mjs"), "--out", scratch]
                           .concat(vault ? ["--vault", vault] : []),
@@ -8834,25 +9041,23 @@ async function runOne(vault, work) {
     if (/already serving CDP/.test(e.message)) throw e;
   }
 
-  const profile = mkdtempSync(join(tmpdir(), "vg-smoke-"));
+  // github#197
+  if (interrupted()) throw new Error("interrupted before this job's browser started");
+  const profile = runDir("vg-smoke-");
   // github#129
-  const focus = await keepFocus();
-  const chrome = spawn(chromeExe(), [
-    `--remote-debugging-port=${PORT}`, `--user-data-dir=${profile}`,
-    "--no-first-run", "--no-default-browser-check",
-    "--disable-extensions", "--disable-component-update", "--disable-client-side-phishing-detection",
-    "--disable-sync", "--no-service-autorun", "--disable-domain-reliability",
-    "--metrics-recording-only", "--no-pings", "--mute-audio",
-    "--disable-breakpad", "--disable-crash-reporter",
-    // github#7
-    "--disable-features=Translate,TranslateUI,CalculateNativeWinOcclusion",
-    "--disable-backgrounding-occluded-windows",
-    "--disable-renderer-backgrounding",
-    "--disable-background-timer-throttling",
-    ...(slot ? [`--window-position=${slot.x},${slot.y}`] : [leftWindowPos()]),
-    slot ? `--window-size=${slot.w},${slot.h}` : "--window-size=1600,1000", `--app=${url}`
-  ], { stdio: ["ignore", "ignore", "pipe"], detached: false });
-  void focus.watch(chrome.pid);
+  // github#155 -- no window ever takes the keyboard, so nothing to hand back
+  const focus = HEADLESS ? null : await keepFocus();
+  // github#155 -- the flag list lives in smoke-shape.mjs, where it is asserted
+  const chrome = spawn(chromeExe(), chromeArgs({
+    url, port: PORT, profile, headless: HEADLESS,
+    windowPos: slot ? `--window-position=${slot.x},${slot.y}`
+             : (HEADED || HEADLESS) ? null : leftWindowPos(),
+    windowSize: slot ? `${slot.w},${slot.h}` : "1600,1000",
+  }), { stdio: ["ignore", "ignore", "pipe"], detached: false });
+  if (focus) void focus.watch(chrome.pid);
+  // github#197
+  const lane = { chrome, port: PORT, profile };
+  LANES.add(lane);
 
   const chromeSaid = [];
   if (chrome.stderr) {
@@ -8876,15 +9081,15 @@ async function runOne(vault, work) {
       try { page = await attach(PORT, want); break; }
       catch (e) { if (Date.now() > deadline) throw e; await sleep(400); }
     }
-    // github#186
-    if (process.platform === "win32") {
+    // github#186, github#192 -- only a window this run placed on the hook's screen
+    if (process.platform === "win32" && !slot && !HEADED && !HEADLESS) {
       const { bounds } = await page.send("Browser.getWindowForTarget");
-      const screen = leftmostScreen();
+      const screen = harnessScreen();
       if (bounds.left < screen.x || bounds.top < screen.y ||
           bounds.left + bounds.width > screen.x + screen.w || bounds.top + bounds.height > screen.y + screen.h) {
-        throw new Error("Chrome is outside the claimed left screen: " + JSON.stringify(bounds));
+        throw new Error("Chrome is outside the claimed screen: " + JSON.stringify(bounds));
       }
-      log("Chrome bounds verified on left screen: " + JSON.stringify(bounds));
+      log("Chrome bounds verified on the claimed screen: " + JSON.stringify(bounds));
     }
     // github#104
     if (!BROWSER) { try { BROWSER = (await json(PORT, "/json/version")).Browser; } catch { void 0; } }
@@ -8902,6 +9107,17 @@ async function runOne(vault, work) {
         `attached to the wrong page.\n  wanted ${url}\n  got    ${at}\n` +
         "That is a leaked browser from an earlier run, not a defect in the page."
       );
+    }
+
+    // github#155 -- the frame, before the intro lands in it
+    if (HEADLESS) {
+      const saw = await fitViewport(page).catch(() => null);
+      if (!saw || saw.w !== TUNED_VIEWPORT.w || saw.h !== TUNED_VIEWPORT.h) {
+        // github#155 -- said, never silently tolerated
+        log(`  ! headless viewport is ${saw ? saw.w + "x" + saw.h : "unreadable"}, not ` +
+            `${TUNED_VIEWPORT.w}x${TUNED_VIEWPORT.h} -- frame-relative checks measure a ` +
+            `different stage than the thresholds were tuned in`);
+      }
     }
 
     const ready = Date.now() + 30000;
@@ -8963,10 +9179,19 @@ async function runOne(vault, work) {
     if (page) page.close();
 
     await killBrowser(chrome, PORT);
-    try { rmSync(profile, { recursive: true, force: true }); } catch {}
-    if (scratch) { try { rmSync(dirname(scratch), { recursive: true, force: true }); } catch {} }
+    // github#197
+    await exited(chrome, 5000);
+    removeDir(profile);
+    LANES.delete(lane);
+    if (scratch) removeDir(dirname(scratch));
   }
 }
+
+// github#197
+/** @type {Set<{ chrome: import("node:child_process").ChildProcess, port: number, profile: string }>} */
+const LANES = new Set();
+/** @type {string[]} */
+const BUILDS = [];
 
 // github#7
 async function killBrowser(child, PORT) {
@@ -9160,6 +9385,7 @@ function resolveVaults() {
     out.push({ path: dir, label, fixture: desc ? { name, ...desc } : null });
   };
 
+  // github#199, github#186
   gen("make-demo-vault.mjs", ["--end", "2026-09-22"], "demo-vault", "the demo vault (sparse tail, 2 dense years)");
   gen("make-test-vault.mjs", ["--notes", "10000", "--years", "10", "--end", "2026-08-28"],
       "test-vault", "the 10k synthetic vault (10 years)");
@@ -9177,7 +9403,8 @@ function resolveVaults() {
 
 async function buildFor(v) {
   if (arg("url", "")) return "";
-  const scratch = join(mkdtempSync(join(tmpdir(), "vg-smoke-build-")), "vault-graph.html");
+  const scratch = join(runDir("vg-smoke-build-"), "vault-graph.html");
+  BUILDS.push(dirname(scratch));
   const b = spawnSync(process.execPath,
                       [join(HERE, "..", "src", "build-graph.mjs"), "--out", scratch]
                         .concat(v.path ? ["--vault", v.path] : [])
@@ -9197,18 +9424,29 @@ async function buildFor(v) {
 
 async function main() {
   const picked = selected();
-  if (ONLY.length && !picked.length) {
-    throw new Error(`--only ${ONLY.join(", ")} matched none of the ${all.length} checks`);
+  // github#155 -- say which filter emptied the set, not just --only
+  if ((ONLY.length || LANE !== "all") && !picked.length) {
+    const how = [ONLY.length ? `--only ${ONLY.join(", ")}` : "", LANE !== "all" ? `--lane ${LANE}` : ""]
+      .filter(Boolean).join(" with ");
+    throw new Error(`${how} matched none of the ${all.length} checks`);
+  }
+  // github#155 -- the lane is part of what this run is
+  if (LANE !== "all") {
+    const fast = all.filter((c) => c.clock !== "real").length;
+    console.log(`--lane ${LANE}: ${LANE === "fast" ? fast : all.length - fast} of ${all.length} ` +
+                `checks run on the ${LANE === "fast" ? "fast" : "real"} clock`);
   }
   if (ONLY.length) {
     console.log(`--only: ${picked.length} of ${all.length} checks -- ` +
                 picked.map((c) => c.name).join("; "));
-    console.log("");
   }
+  if (ONLY.length || LANE !== "all") console.log("");
   // github#104 -- captured before anything is built from it
   const builtFrom = startRun(ROOT);
   const vaults = resolveVaults();
-  console.log(`checking ${vaults.length} vault(s): ${vaults.map((v) => v.label).join(", ")}`);
+  console.log(`checking ${vaults.length} vault(s): ${vaults.map((v) => v.label).join(", ")}` +
+              // github#155 -- a run that took no screen lock says so
+              (HEADLESS ? " -- headless, no window placed and no screen lock taken" : ""));
 
   const lanePorts = PINNED_PORT ? [] : await freePorts(Math.max(WIDTH, 1));
 
@@ -9266,6 +9504,9 @@ async function main() {
     console.log("");
   };
 
+  // github#198
+  const gate = admission("smoke", SCREEN_OWNER, Math.min(WIDTH, jobs.length));
+
   // github#113, github#101
   const pool = async (list, width) => {
     const walks = list.filter((j) => j.walk), fasts = list.filter((j) => !j.walk);
@@ -9273,11 +9514,17 @@ async function main() {
     let walkRunning = 0;
     const worker = async (lane) => {
       for (;;) {
+        const walkNext = walkRunning < walkWidth && walks.length > 0;
+        if (!walkNext && !fasts.length) {
+          if (!walks.length) return;
+          await sleep(500); continue;
+        }
+        // github#198 -- asked between jobs only, never inside one
+        if (!(await gate.enter(walkNext ? "walk" : "fast"))) continue;
         let w = null;
         if (walkRunning < walkWidth && walks.length) { w = walks.shift(); walkRunning++; }
         else if (fasts.length) w = fasts.shift();
-        else if (walks.length) { await sleep(500); continue; }
-        else return;
+        else { gate.leave(); continue; }
         w = { ...w, slot: lane, slots: Math.min(width, list.length), port: lanePorts[lane] || 0 };
         let r;
         try { r = await runOne(w.vault.path, w); }
@@ -9286,6 +9533,7 @@ async function main() {
                 lines: ["  !! this job did not run: " + e.message], timings: [] };
         }
         if (w.walk) walkRunning--;
+        gate.leave();
         report(w, r);
         bump(w, r);
       }
@@ -9363,14 +9611,21 @@ async function main() {
       const f = failures.get(v.label) || 0, t = ran.get(v.label) || 0;
       console.log(`  ${f ? "FAIL" : " ok "}  ${t - f}/${t}  ${v.label}`);
     }
-    console.log(`  ${wall}s wall over ${jobs.length} Chrome(s)`);
+    console.log(`  ${wall}s wall over ${jobs.length} Chrome(s)` +
+                (gate.heard() ? `, at most ${gate.peak} at once under the harness hook` : ""));
   }
 
   // github#93, decisions/0013
   // github#104 -- named first: a changed shape invalidates the measurement
   const deltas = shapeDeltas({ jobs: JOBS, serialJobs: SERIAL_JOBS, grid: GRID, headed: HEADED,
+                               // github#155
+                               headless: HEADLESS, lane: LANE,
                                port: PINNED_PORT, chrome: arg("chrome", "") });
   const notFull = (what) => `${what} is not the full suite`;
+  // github#198
+  if (gate.narrowest < Math.min(WIDTH, jobs.length)) {
+    deltas.push(`the harness hook's width ${gate.narrowest} (planned ${Math.min(WIDTH, jobs.length)})`);
+  }
   const partial = deltas.length ? `${deltas.join(", ")} is not the run shape the gates push with`
                 : ONLY.length ? notFull("--only")
                 : argAll("vault").length ? notFull("--vault")
@@ -9402,8 +9657,7 @@ async function main() {
   return worst ? 1 : 0;
 }
 
-// github#87
-const SCREEN_LOCK = "screen-left";
+// github#87, github#192
 const SCREEN_OWNER = (() => {
   let branch = "?";
   try {
@@ -9414,39 +9668,39 @@ const SCREEN_OWNER = (() => {
   return "smoke.mjs " + branch + " [" + process.pid + "]";
 })();
 
-// github#87
 function takeScreen() {
-  if (NO_LOCK) return false;
-  const r = spawnSync(process.execPath,
-    [join(HERE, "lock.mjs"), "acquire", SCREEN_LOCK, "--owner", SCREEN_OWNER, "--holder", "process"],
-    { stdio: "inherit" });
-  if (r.status !== 0) {
-    console.error("");
-    console.error("could not take the " + SCREEN_LOCK + " lock -- something else is driving that");
-    console.error("display, and two runs on one screen spoil each other's captures and timings.");
-    console.error("Who holds it:  node scripts/lock.mjs status");
-    console.error("Pass --no-lock ONLY when the caller already holds it.");
-    process.exit(1);
-  }
-  return true;
+  // github#155 -- a headless run is on no screen
+  if (HEADLESS) return null;
+  const s = claimScreen(SCREEN_OWNER);
+  if (!s.ok) { noFreeScreen(); process.exit(1); }
+  return s.lock;
 }
 
-// github#87
-function dropScreen(held) {
-  if (!held) return;
-  try {
-    spawnSync(process.execPath,
-      [join(HERE, "lock.mjs"), "release", SCREEN_LOCK, "--owner", SCREEN_OWNER],
-      { stdio: "ignore" });
-  } catch { void 0; }
-}
+/** @param {string | null} held */
+function dropScreen(held) { release(held, SCREEN_OWNER); }
 
 const heldScreen = takeScreen();
-for (const sig of ["SIGINT", "SIGTERM", "SIGHUP"]) {
-  process.on(sig, () => { dropScreen(heldScreen); process.exit(1); });
+// github#197
+const tidy = () => { for (const b of BUILDS.splice(0)) removeDir(b); };
+onInterrupt(() => { dropScreen(heldScreen); tidy(); }, { code: 1 });
+onInterrupt(async () => {
+  const lanes = [...LANES];
+  await Promise.all(lanes.map(async (l) => {
+    await killBrowser(l.chrome, l.port);
+    await exited(l.chrome, 1500);
+    removeDir(l.profile);
+  }));
+});
+{
+  const r = reapStale({ budgetMs: 1000 });
+  if (r.killed || r.removed) {
+    console.log(`reaped ${r.killed} browser(s) and ${r.removed} temp dir(s) left by runs that are gone` +
+                (r.left ? `, ${r.left} more next run` : ""));
+  }
 }
-main().then((code) => { dropScreen(heldScreen); process.exit(code); }).catch((e) => {
+main().then((code) => { dropScreen(heldScreen); tidy(); process.exit(code); }).catch((e) => {
   dropScreen(heldScreen);
+  tidy();
   console.error("smoke failed to run:", e.message);
   process.exit(1);
 });

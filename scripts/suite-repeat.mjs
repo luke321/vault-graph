@@ -5,6 +5,8 @@ import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { acquire, release } from "./harness-hook.mjs";
+import { interrupted, onInterrupt } from "./interrupt.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = dirname(HERE);
@@ -24,9 +26,9 @@ function usage(code) {
     "  --mode is repeatable. Example:\n" +
     "    --mode \"default=\" --mode \"fast=--serial-jobs 3\" --mode \"serial3=--serial-jobs 3 --jobs 3\"\n" +
     "\n" +
-    "  Each run takes the \"suite\" lock (scripts/lock.mjs) around the smoke.mjs invocation and\n" +
-    "  releases it after, so it never collides with a fixture-regenerating run elsewhere. Runs\n" +
-    "  across modes are interleaved (run 1 of every mode, then run 2 of every mode, ...) rather\n" +
+    "  With a harness hook configured, each run holds \"suite\" around its smoke.mjs invocation\n" +
+    "  (scripts/harness-hook.mjs). Runs across modes are interleaved (run 1 of every mode, then\n" +
+    "  run 2 of every mode, ...) rather\n" +
     "  than five-in-a-row, so machine drift does not land on one mode."
   );
   process.exit(code);
@@ -71,24 +73,11 @@ function parseModes() {
   });
 }
 
-function acquireLock(owner) {
-  const r = spawnSync(process.execPath,
-    [join(HERE, "lock.mjs"), "acquire", "suite", "--owner", owner],
-    { stdio: "inherit" });
-  return r.status === 0;
-}
-
-function releaseLock(owner) {
-  spawnSync(process.execPath, [join(HERE, "lock.mjs"), "release", "suite", "--owner", owner],
-            { stdio: "ignore" });
-}
-
 function runOnce(mode, run, outDir) {
   const owner = `suite-repeat #101 ${mode.name} run${run}`;
   const logPath = join(outDir, `${mode.name}-run${run}.log`);
   const metaPath = join(outDir, `${mode.name}-run${run}.meta.json`);
-  console.log(`\n>>> ${mode.name} run ${run}: waiting for the suite lock...`);
-  if (!acquireLock(owner)) {
+  if (!acquire("suite", owner)) {
     writeFileSync(metaPath, JSON.stringify({ mode: mode.name, run, ok: false, why: "BUSY" }, null, 1));
     console.log(`>>> ${mode.name} run ${run}: BUSY, skipped`);
     return;
@@ -100,7 +89,7 @@ function runOnce(mode, run, outDir) {
       [join(ROOT, "scripts", "smoke.mjs"), ...mode.args],
       { cwd: ROOT, encoding: "utf8" });
   } finally {
-    releaseLock(owner);
+    release("suite", owner);
   }
   const wallMs = Date.now() - started;
   const text = (r.stdout || "") + (r.stderr || "");
@@ -147,7 +136,7 @@ function tally(dir) {
   }
 }
 
-function main() {
+async function main() {
   if (argv.includes("--help") || argv.includes("-h")) usage(0);
 
   const tallyDir = arg("tally", "");
@@ -164,12 +153,18 @@ function main() {
   console.log(`${runs} run(s) x ${modes.length} mode(s) = ${runs * modes.length} smoke.mjs run(s), ` +
               `interleaved, into ${outDir}`);
   // github#101 -- modes interleaved, not five-in-a-row
+  // github#197
+  onInterrupt(() => {});
   for (let run = 1; run <= runs; run++) {
-    for (const mode of modes) runOnce(mode, run, outDir);
+    for (const mode of modes) {
+      runOnce(mode, run, outDir);
+      await new Promise((r) => setImmediate(r));
+      if (interrupted()) return;
+    }
   }
 
   console.log("\ndone. tally:");
   tally(outDir);
 }
 
-main();
+await main();

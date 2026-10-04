@@ -46,11 +46,31 @@ const data = (vault, label) => {
 };
 const a = data(source, "source"), b = data(mirror, "mirror");
 for (const key of ["nodes", "edges", "unresolved", "orphans"]) assert.equal(b.data.stats[key], a.data.stats[key], key);
-const signature = (n) => [n.folder, n.created, n.touched, n.type, n.deg, n.words, n.tags.map((t) => t.split("/").length).sort()].join("|");
-assert.deepEqual(b.data.nodes.filter((n) => !n.ghost).map(signature).sort(), a.data.nodes.filter((n) => !n.ghost).map(signature).sort());
+// github#191
+const FIXED_TYPES = new Set(["daily", "template", "note"]);
+const bare = (n) => [n.created, n.touched, n.deg, n.words, n.tags.map((t) => t.split("/").length).sort()].join("|");
+const tokens = (nodes, of, keep) => {
+  const groups = new Map();
+  for (const n of nodes) if (!keep(of(n))) (groups.get(of(n)) || groups.set(of(n), []).get(of(n))).push(bare(n));
+  const keyed = [...groups].map(([name, list]) => [name, (String(name).startsWith("_") ? "_" : "") + list.sort().join(";")]);
+  keyed.sort((x, y) => x[1] < y[1] ? -1 : x[1] > y[1] ? 1 : 0);
+  return new Map(keyed.map(([name, k], i) => [name, (k.startsWith("_") ? "_" : "") + "#" + i]));
+};
+const signer = (data) => {
+  const nodes = data.nodes.filter((n) => !n.ghost);
+  const folders = tokens(nodes, (n) => n.folder, () => false), types = tokens(nodes, (n) => n.type, (t) => FIXED_TYPES.has(t));
+  return (n) => [folders.get(n.folder), n.created, n.touched, types.get(n.type) ?? n.type, n.deg, n.words,
+    n.tags.map((t) => t.split("/").length).sort()].join("|");
+};
+const signOf = new Map([[a.data, signer(a.data)], [b.data, signer(b.data)]]);
+const signature = (n, data) => signOf.get(data)(n);
+const signed = (data) => data.nodes.filter((n) => !n.ghost).map((n) => signature(n, data)).sort();
+assert.deepEqual(signed(b.data), signed(a.data));
+const realTypes = new Set(a.data.nodes.filter((n) => !n.ghost).map((n) => n.type).filter((t) => t && !FIXED_TYPES.has(t)));
+assert.deepEqual(b.data.nodes.filter((n) => !n.ghost && realTypes.has(n.type)).map((n) => n.type), []);
 assert.deepEqual(b.data.edges.map((e) => e.w).sort(), a.data.edges.map((e) => e.w).sort());
 const topology = (data) => {
-  const keys = new Map(data.nodes.flatMap((n, i) => n.ghost ? [] : [[i, signature(n)]]));
+  const keys = new Map(data.nodes.flatMap((n, i) => n.ghost ? [] : [[i, signature(n, data)]]));
   for (let i = 0; i < data.nodes.length; i++) {
     if (!data.nodes[i].ghost) continue;
     keys.set(i, "ghost:" + data.edges.filter((e) => e.s === i || e.t === i)
@@ -61,11 +81,14 @@ const topology = (data) => {
 };
 assert.deepEqual(topology(b.data), topology(a.data));
 const settings = JSON.parse(readFileSync(join(mirror, ".obsidian/plugins/vault-graph/data.json"), "utf8"));
-assert.deepEqual(settings.folderShown, { Hidden: false, General: true });
+const mirroredFolder = (created) => b.data.nodes.find((n) => !n.ghost && n.created === created).folder;
+const hiddenAt = mirroredFolder("2019-01-01"), generalAt = mirroredFolder("2020-01-02"), privateAt = mirroredFolder("2018-01-01");
+for (const real of ["Hidden", "General", "_Private"]) assert.equal(b.html.includes('"' + real + '"'), false, real);
+assert.deepEqual(settings.folderShown, { [hiddenAt]: false, [generalAt]: true });
 assert.equal(settings.compactAxis, false); assert.equal(settings.fitCap, true);
 assert.equal(settings.privateText, undefined);
 assert.equal(Object.keys(settings.tagShown).length, 1); assert.equal(Object.values(settings.tagShown)[0], false);
-assert.equal(settings.folderColors.General, "g2");
+assert.equal(settings.folderColors[generalAt], "g2");
 assert.equal(Object.values(settings.subfolderColors)[0], "g3");
 assert.equal(Object.values(settings.tagColors)[0], "g4");
 assert.equal(Object.values(settings.subtagColors)[0], "g5");
@@ -75,8 +98,9 @@ assert.equal(JSON.parse(readFileSync(join(mirror, ".vault-graph-mirror.json"))).
 const embedded = JSON.parse(/window\.VAULT_SETTINGS=(\{[^\n]*\});<\/script>/.exec(b.html)[1]);
 assert.deepEqual(embedded.folderShown, settings.folderShown);
 assert.equal(b.html.includes("project/alpha"), false);
-assert.equal(b.data.nodes.filter((n) => n.folder === "_Private").length, 1);
-assert.equal(b.data.nodes.find((n) => n.folder === "_Private").tags[0].startsWith("_"), true);
+assert.equal(privateAt.startsWith("_"), true);
+assert.equal(b.data.nodes.filter((n) => n.folder === privateAt).length, 1);
+assert.equal(b.data.nodes.find((n) => n.folder === privateAt).tags[0].startsWith("_"), true);
 const same = spawnSync(process.execPath, ["scripts/make-mirror-vault.mjs", "--vault", source, "--out", source], { cwd: ROOT, encoding: "utf8" });
 assert.notEqual(same.status, 0);
 const ancestor = spawnSync(process.execPath, ["scripts/make-mirror-vault.mjs", "--vault", source, "--out", scratch], { cwd: ROOT, encoding: "utf8" });

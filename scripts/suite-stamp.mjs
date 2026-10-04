@@ -82,8 +82,9 @@ function defaultChrome() {
 
 // github#104 -- the shape the two gates always push with
 export function defaultShape() {
-  return { jobs: DEFAULT_JOBS, serialJobs: 1, grid: DEFAULT_JOBS > 1, headed: false, port: 0,
-           chrome: defaultChrome() };
+  // github#155, decisions/0013, decisions/0016 -- in the shape, so neither stamps
+  return { jobs: DEFAULT_JOBS, serialJobs: 1, grid: DEFAULT_JOBS > 1, headed: false,
+           headless: false, lane: "all", port: 0, chrome: defaultChrome() };
 }
 
 // github#104 -- takes the values the run USED, never a second parse of argv
@@ -100,6 +101,15 @@ export function shapeDeltas(shape) {
   }
   // github#129
   if (shape.headed) out.push("--headed (default: the window is placed on the harness display)");
+  // github#155
+  if (shape.headless) {
+    out.push("--headless (default: a real window on this machine's GPU, which is what the " +
+             "frame-sensitive thresholds were tuned against)");
+  }
+  // github#155
+  if ((shape.lane || "all") !== d.lane) {
+    out.push(`--lane ${shape.lane} (default ${d.lane} -- a lane is half the suite by definition)`);
+  }
   if (shape.port) out.push(`--port ${shape.port} (default: a free port per lane)`);
   const chrome = shape.chrome || d.chrome;
   if (chrome !== d.chrome) {

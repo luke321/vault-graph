@@ -5,6 +5,20 @@ import { makeErrorLog, runChecks, summarise } from "./smoke-runner.mjs";
 // github#151
 import { allowedToLeave, couplingReport, diffState, keysRead, leakReport, newLeaks,
          readable, tokensFor } from "./smoke-state.mjs";
+// github#155
+import { chromeArgs, laneOf, nextBounds, parseLane, pickLane, TUNED_VIEWPORT,
+         wantsHeadless } from "./smoke-shape.mjs";
+// github#155
+import { readRun } from "./soak-report.mjs";
+// github#197
+import { reapStale } from "./interrupt.mjs";
+import { spawn, spawnSync } from "node:child_process";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, utimesSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
+
+const HERE = dirname(fileURLToPath(import.meta.url));
 
 let failed = 0;
 /** @param {string} name @param {boolean} ok @param {string} [detail] */
@@ -542,6 +556,168 @@ console.log("github#151 -- the reset boundary");
     pass("runs after it")
   ], { stateBoundary: true, state: { "page.mounted": "true", "cam.ratio": "1" } });
   check("an unreadable sample fails nothing on its own", r.failed === 0, "failed " + r.failed);
+}
+
+// github#155, decisions/0016 -- the lane seam
+{
+  const checks = [{ name: "a", clock: "fast" }, { name: "b", clock: "real" },
+                  { name: "c" }, { name: "d", clock: "real" }];
+  check("a real clock is the walk lane", laneOf({ clock: "real" }) === "walk");
+  check("anything else is the fast lane",
+        laneOf({ clock: "fast" }) === "fast" && laneOf({}) === "fast" && laneOf(null) === "fast");
+  check("--lane all keeps every check", pickLane(checks, "all").length === 4);
+  check("--lane fast drops the frame-timed ones",
+        pickLane(checks, "fast").map((c) => c.name).join("") === "ac");
+  check("--lane walk keeps only them",
+        pickLane(checks, "walk").map((c) => c.name).join("") === "bd");
+  check("--lane all is the default", parseLane("") === "all" && parseLane(undefined) === "all");
+  check("an unknown lane is refused, not silently treated as all",
+        (() => { try { parseLane("frame"); return false; } catch { return true; } })());
+  // github#155 -- never hand back the caller's own array
+  check("the filter never returns the caller's own array", pickLane(checks, "all") !== checks);
+}
+
+// github#155 -- who decides headless, and in which order
+{
+  const w = (argv, env) => wantsHeadless({ argv, env: env || {} });
+  check("nothing asked for it", !w([], {}));
+  check("--headless asks for it", w(["--headless"], {}));
+  check("VG_HEADLESS asks for it", w([], { VG_HEADLESS: "1" }));
+  check("--headed beats --headless", !w(["--headed", "--headless"], {}));
+  check("--headed beats VG_HEADLESS", !w(["--headed"], { VG_HEADLESS: "1" }));
+  check("VG_HEADLESS=false is not a yes",
+        !w([], { VG_HEADLESS: "false" }) && !w([], { VG_HEADLESS: "0" }) &&
+        !w([], { VG_HEADLESS: "" }));
+  // github#155 -- the default is a window, and CI must not take it away
+  check("CI does NOT imply headless, on a runner or in a shell that happens to set it",
+        !w([], { CI: "true" }) && !w([], { CI: "1" }));
+  check("CI with the flag is still headless, because the flag said so",
+        w(["--headless"], { CI: "true" }));
+}
+
+// github#155 -- what a headless launch drops, asserted rather than described
+{
+  const base = { url: "file:///tmp/x/vault-graph.html", port: 9222, profile: "/tmp/p" };
+  const headed = chromeArgs({ ...base, windowPos: "--window-position=-2400,0" });
+  const bare = chromeArgs({ ...base, headless: true, windowPos: "--window-position=-2400,0" });
+  const has = (a, re) => a.some((x) => re.test(x));
+
+  check("a placed run still places its window and opens as an app",
+        has(headed, /^--window-position=/) && has(headed, /^--app=/) &&
+        !has(headed, /^--headless/));
+  check("a headless run places nothing, even when handed a position",
+        !has(bare, /^--window-position=/) && has(bare, /^--headless=new$/));
+  check("a headless run does not use --app, which is a windowing mode",
+        !has(bare, /^--app=/) && bare[bare.length - 1] === base.url);
+  check("a headless run keeps the headed viewport",
+        bare.indexOf("--window-size=1600,1000") >= 0 &&
+        headed.indexOf("--window-size=1600,1000") >= 0);
+  // github#155, decisions/0016 -- the two modes must differ ONLY in windowing
+  const windowing = (a) => a.filter((x) => !/^(--headless|--window-|--app=)/.test(x) && x !== base.url);
+  check("headed and headless differ only in how the page is windowed",
+        windowing(headed).join("|") === windowing(bare).join("|"));
+  check("the port and profile are the caller's either way",
+        has(bare, /^--remote-debugging-port=9222$/) && has(bare, /^--user-data-dir=\/tmp\/p$/) &&
+        has(headed, /^--remote-debugging-port=9222$/));
+  check("a grid slot's own size survives",
+        chromeArgs({ ...base, windowSize: "800,500" }).indexOf("--window-size=800,500") >= 0);
+  // github#7 -- the flags that stop Chrome throttling the page
+  const shared = ["--disable-renderer-backgrounding", "--disable-background-timer-throttling",
+                  "--disable-backgrounding-occluded-windows"];
+  check("both keep every flag that stops Chrome throttling the page",
+        shared.every((f) => headed.indexOf(f) >= 0 && bare.indexOf(f) >= 0));
+}
+
+// github#155, decisions/0016 -- the frame correction
+{
+  const want = TUNED_VIEWPORT;
+  check("the tuned viewport is the placed window's inner size", want.w === 1584 && want.h === 961);
+  check("a window already the right size is left alone",
+        nextBounds({ width: 1600, height: 1000 }, { w: 1584, h: 961 }, want) === null);
+  const n = nextBounds({ width: 1600, height: 1000 }, { w: 1584, h: 905 }, want);
+  check("56px short of the tuned height grows the window by 56px",
+        n.height === 1056 && n.width === 1600, n ? n.width + "x" + n.height : "null");
+  const wide = nextBounds({ width: 1600, height: 1000 }, { w: 1620, h: 961 }, want);
+  check("a page wider than the frame shrinks it", wide.width === 1564 && wide.height === 1000);
+  check("the correction never drives the window to nothing",
+        nextBounds({ width: 300, height: 300 }, { w: 9000, h: 9000 }, want).width === 200);
+}
+
+// github#155, decisions/0016 -- the soak's parser, which can silently stop matching
+{
+  const NL = String.fromCharCode(10);
+  const green = [
+    "checking 5 vault(s): a, b -- headless, no window placed and no screen lock taken",
+    "  ok   some check 1.2s",
+    "========================================================================",
+    "   ok   131/131  the demo vault (sparse tail, 2 dense years)",
+    "   ok   63/63  the 10k synthetic vault (10 years)",
+    "  299s wall over 7 Chrome(s)",
+  ].join(NL);
+  const red = [
+    " FAIL  the disc's density follows the notes on screen 5.0s",
+    "         step/pitch per band over 8 sampled states: worst square 1.13",
+    "   ok   131/131  the demo vault (sparse tail, 2 dense years)",
+    "  FAIL  62/63  the 10k synthetic vault (10 years)",
+    "  295s wall over 7 Chrome(s)",
+  ].join(NL);
+
+  const g = readRun(green);
+  check("a green run reads as green", g.wall === 299 && g.passed === 194 && g.ran === 194 &&
+        g.failures.length === 0, `${g.passed}/${g.ran} in ${g.wall}s`);
+  const r = readRun(red);
+  check("a red run reads as red", r.wall === 295 && r.passed === 193 && r.ran === 194,
+        `${r.passed}/${r.ran} in ${r.wall}s`);
+  check("and names the check that failed",
+        r.failures.length === 1 &&
+        r.failures[0] === "the disc's density follows the notes on screen", r.failures.join("; "));
+  // github#155 -- the per-vault FAIL line is indented deeper than a check's
+  check("the per-vault summary is not mistaken for a check",
+        !r.failures.some((f) => /[0-9]+[/][0-9]+/.test(f)));
+  const dead = readRun("smoke failed to run: Chrome not found; pass --chrome <path>");
+  check("a run that never started is not green", dead.ran === 0 && dead.wall === null);
+}
+
+// github#197
+{
+  const root = mkdtempSync(join(tmpdir(), "vg-reap-selftest-"));
+  const gone = spawnSync(process.execPath, ["-e", ""]).pid;
+  const DAY = 24 * 3600 * 1000;
+  const dirs = {
+    dead: `vg-smoke-p${gone}-aaaaaa`, deadBuild: `vg-smoke-build-p${gone}-bbbbbb`,
+    mine: `vg-smoke-p${process.pid}-cccccc`, parent: `vg-smoke-p${process.ppid}-dddddd`,
+    old: "vg-smoke-eeeeee", young: "vg-smoke-build-ffffff", other: "not-ours-gggggg",
+    reused: `vg-smoke-p${process.ppid}-hhhhhh`,
+  };
+  for (const d of Object.values(dirs)) mkdirSync(join(root, d));
+  const then = new Date(Date.now() - 2 * DAY);
+  for (const d of [dirs.old, dirs.other, dirs.reused]) utimesSync(join(root, d), then, then);
+  const r = reapStale({ root, budgetMs: 5000 });
+  const left = new Set(readdirSync(root));
+  check("a reap removes the dirs of a run that is gone", !left.has(dirs.dead) && !left.has(dirs.deadBuild));
+  check("and never a live run's, its own or another's", left.has(dirs.mine) && left.has(dirs.parent));
+  check("an untagged dir goes only once it is a day old", !left.has(dirs.old) && left.has(dirs.young));
+  check("and so does a live pid's, which a day on is a reused one", !left.has(dirs.reused));
+  check("and nothing without the prefix", left.has(dirs.other), `removed ${r.removed}`);
+
+  const stop = join(root, "stop");
+  const mark = join(root, "cleaned");
+  const kid = spawn(process.execPath, ["--input-type=module", "-e",
+    `import { onInterrupt } from ${JSON.stringify(pathToFileURL(join(HERE, "interrupt.mjs")).href)};
+     import { writeFileSync } from "node:fs";
+     onInterrupt(() => writeFileSync(${JSON.stringify(mark)}, "1"), { code: 7 });
+     setTimeout(() => {}, 20000);`],
+    { env: { ...process.env, VG_STOP_FILE: stop }, stdio: "ignore" });
+  await new Promise((res) => setTimeout(res, 500));
+  writeFileSync(stop, "");
+  const t0 = Date.now();
+  const code = await new Promise((res) => {
+    const t = setTimeout(() => { kid.kill(); res(null); }, 5000);
+    kid.once("exit", (c) => { clearTimeout(t); res(c); });
+  });
+  check("a stop file runs the teardown a signal would", code === 7 && existsSync(mark),
+        `exit ${code} after ${Date.now() - t0}ms`);
+  rmSync(root, { recursive: true, force: true });
 }
 
 console.log("");

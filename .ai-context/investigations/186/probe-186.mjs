@@ -73,15 +73,17 @@ const profile = mkdtempSync(join(tmpdir(), "vg-186-prof-"));
 const url = pathToFileURL(html).href + (has("clean") ? "?rest&slow=" : "?rest&wedges&slow=") + SLOW
   + (arg("query", "") ? "&" + arg("query", "") : "");
 const HEADED = has("headed");
-// headed: a real window on the free monitor, under the repo's own screen lock and focus guard,
+// headed: a real window on the free monitor, under the harness hook's screen and the focus guard,
 // exactly as smoke.mjs / probe-room.mjs do -- headless Chrome starves rAF on this page and the
 // cascade's 400 ms watchdog settles it after a handful of frames.
-let lockHeld = false, focus = null;
-const LOCK = "screen-left", OWNER = "probe-186 [" + process.pid + "]";
+// github#192 -- the screen comes from the optional harness hook, which also names the monitor
+let lockHeld = null, focus = null;
+const OWNER = "probe-186 [" + process.pid + "]";
+const hook = await import(pathToFileURL(join(REPO, "scripts", "harness-hook.mjs")).href);
 if (HEADED) {
-  const r = spawnSync(process.execPath, [join(REPO, "scripts", "lock.mjs"), "acquire", LOCK, "--owner", OWNER], { stdio: "inherit" });
-  if (r.status !== 0) throw new Error("could not take " + LOCK);
-  lockHeld = true;
+  const screen = hook.claimScreen(OWNER);
+  if (!screen.ok) { hook.noFreeScreen(); throw new Error("no free screen"); }
+  lockHeld = screen.lock;
   const { keepFocus } = await import(pathToFileURL(join(REPO, "scripts", "focus.mjs")).href);
   focus = await keepFocus();
 }
@@ -381,6 +383,6 @@ try {
   try { chrome.kill(); } catch { }
   if (lockHeld) {
     await sleep(300);
-    spawnSync(process.execPath, [join(REPO, "scripts", "lock.mjs"), "release", LOCK, "--owner", OWNER], { stdio: "ignore" });
+    hook.release(lockHeld, OWNER);
   }
 }

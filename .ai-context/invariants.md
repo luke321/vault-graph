@@ -141,6 +141,21 @@ check, pass or fail — exiting non-zero so it can gate a push. The one property
 **not** cover is the per-frame animation steps; that section says so and stays manual. Numbers below are from a 450-note vault (1458 links) on
 2026-08-22; the shape matters more than the exact figure.
 
+## A walk frames its visible focus web (github#134)
+
+Search, linked-note navigation and backtracking share `centerOn()`. The landing includes visible
+neighbour dots and the quadratic hull of edges among them, with a 24 px inset. The closest ratio
+remains 0.22 and the flight remains 420 ms. A locked camera keeps its centre and widens enough
+to contain that same geometry. Filtering out a neighbour removes its framing cost.
+
+Check: `node scripts/smoke.mjs --only "walk framing"`. It drives search at 960x960, 1600x1000 and
+420x900, samples whole dot radii and curves, and covers high/low-degree notes, an isolated note,
+a hidden group and locked panning on the demo and 10k fixtures. The layout is not moved by a
+camera flight; the existing hop/backtracking check protects that separately.
+
+Measured on the demo at a 960x960 window: 118 of 126 lit endpoints outside the canvas became 0;
+10,801 of 16,830 curve samples outside became 0. See `design/0019` for scope and geometry.
+
 ## Plan parity
 
 The static plan and the live (opacity-weighted) plan must agree cell for cell.
@@ -2022,7 +2037,7 @@ Today a strict subset: demo **37 of 113**, 10k **2 of 2**, dominant-folder **2 o
 2026-09-08: the newest `touched` day is 2026-09-05 on the demo and dominant-folder fixtures
 and 2026-08-28 on the 10k, so *Today* and the 7-day chip light **0 notes on all three** — a
 check written against `new Date()` passes by asserting nothing, and does so more thoroughly
-every day as the two ageing fixtures regenerate forward and the pinned 10k does not. This is
+every day as the ageing fixtures regenerate forward and the pinned ones do not (github#199). This is
 the same trap the 10k's pinned `--end` exists to avoid. `__vg.setRecent(kind, refMs)` and
 `__vg.recentWindow(kind, refMs)` both take a reference day for exactly this reason.
 Since 2026-09-29 the demo vault's `--end` is pinned too (2026-09-22): its daily notes are named
@@ -2167,6 +2182,42 @@ one afternoon, both plausible, both fitting the evidence:
 1. a parked mouse landing on a legend row — ruled out by `HEAD` passing in the same
    environment;
 2. `skipIndexation` — probably right, unprovable from that run.
+
+## The suite measures in a 1584x961 frame, and a headless run has to be put in it (github#155)
+
+`--window-size` is an **outer** size, and how much of it reaches the page depends on how much
+the browser keeps for itself. Every fit, clearance and density threshold in `smoke.mjs` was
+tuned in whatever that left over, and until github#155 nobody had written the number down.
+
+Measured 2026-09-21, same Chrome, same machine, same `--window-size=1600,1000`:
+
+| how it opens | `innerWidth` x `innerHeight` | `devicePixelRatio` |
+|---|---|---|
+| placed, `--app=<url>` (the tuned shape) | **1584 x 961** | 1 |
+| `--headless=new`, URL positional | 1584 x **905** | 1 |
+
+56px, 5.8% of the stage height, and it is not cosmetic. *The disc's density follows the notes
+on screen* on the 10k vault measured `diameter/step 0.81` against a `0.80` ceiling and **failed
+three runs out of three** headless, while passing headed every time — a shorter stage means a
+smaller disc, fewer pixels per lattice step, and dots that are relatively fatter.
+
+**The threshold did not move.** github#155's own wording is the rule: *a threshold that has to
+move for the machine is measuring the machine*. So the frame moves instead. `TUNED_VIEWPORT` in
+`scripts/smoke-shape.mjs` names `1584 x 961`, and a headless run reads what it actually got and
+resizes the **window** by the difference (`nextBounds()`, up to two passes).
+
+Two things about that, both deliberate:
+
+- **A real window resize, not `Emulation.setDeviceMetricsOverride`.** Several checks here set
+  their own metrics override and then clear it, and a clear drops back to the *window* — so a
+  baseline installed as an override would silently vanish after the first mobile check and leave
+  everything behind it measuring a different stage.
+- **Self-calibrating, not a hardcoded window size per platform.** Every OS and every Chrome mode
+  keeps a different slice of the window, so the only portable way to land on an inner size is to
+  measure what you got and correct. A Linux runner's chrome height is not this one's.
+
+A headless run that cannot reach `1584 x 961` **says so in its own output** rather than
+quietly reporting numbers that are not comparable to the tuned ones.
 
 ## A leaked Chrome on the debug port makes the suite measure a stale page
 
@@ -2429,6 +2480,48 @@ already lit, because a vault is not spread evenly in time. The visible consequen
 real vault — 0.70 of the strip crossed in the first ~5% of the run, then a crawl — is the
 vault's own distribution and not a regression; both evenly-dated fixtures sweep at 0.05–0.06
 at the same point. See `design/0007-timeline.md`.
+
+**A sample taken after a CDP round trip is not the first frame.** The cascade's first `step()`
+runs synchronously inside the click, and on a loaded machine the first `p.j` after a separate
+click eval landed at **0.248–0.336** of the strip (8–10 sweeping samples) and failed the check
+twice in three runs, with nothing wrong on the page. Both intro checks now take their first
+sample in the same eval as the click (github#139): first sample **0.002**, 22 sweeping samples,
+in every run since.
+
+## The intro lights the disc note by note, and the heat cells follow it
+
+The sweep above is the value side; this is the render side, and the two are asserted
+separately because a page can move the handle while nothing that draws follows it — the
+report behind github#139 described exactly that. What the renderer draws is `alpha[id]`
+(`nodeReducer` hides a dot at `alpha ≤ 0.004`), and the heat band tallies the same `alpha`
+in `heatCompute()` from `afterRender`, so counting both per frame is measuring the drawn
+state rather than the sweep value.
+
+```javascript
+__vg.alpha            // id -> 0..1, what the reducer and the heat band read
+__vg.heat.days[k].n   // a day's tally after the last afterRender
+__vg.lastCascade()    // { path, frames, exit } -- "animated"/"converged" for one uninterrupted run
+```
+
+Measured, at `timeScale 0.25` on the demo fixture (1403 notes): the first sample is **0 of
+1403** lit (the check allows 5% for the frame the click itself advances), lit never goes
+backwards and lands on the resting count (**1403**), the heat cells go **0 → 329** with no
+step back and land on the resting tally, and `lastCascade` is one `animated` run of 47–73
+frames ending `converged` — a second cascade started underneath the intro would reset that
+frame count, and `cascade()` → `stopPlay()` → `timelineFrame(true)` → `syncAlpha()` is the one
+path that lights every dot in a single frame. The load intro is asserted the same way in
+"__vg is present and the intro landed": `animated`, 229–330 frames at full speed, `converged`.
+
+`node scripts/smoke.mjs --only "intro"` runs all three.
+
+**Why the report read as "full from frame one" (github#139).** `record-demo.ps1` starts
+ffmpeg, sleeps 800 ms, then boots `demo.mjs`, whose clock starts after node start-up and the
+CDP attach — measured here, a driver-logged click at 0.71 s landed 2.36 s after the driver was
+spawned. Frames pulled at video times before that offset show the demo page at rest (fully
+lit, by design), and a frame after the sweep has passed ~0.97 shows it full again. The take's
+frame times are on the video clock; the beat times are on the driver clock. Every drive of the
+intro measured for the ticket — headless click, fresh load, the tree from the issue's date, a
+real 1368×1350 window under the real driver — grew from 0.
 
 ## The window's travel is what the history exceeds the window by
 
@@ -3621,6 +3714,18 @@ The cost is the live half of the heatmap-window check on that one vault, which t
 ageing vaults still carry. Re-recording the 10k golden means choosing a new `--end` in both
 scripts in the same commit.
 
+**The demo vault was not day-invariant either, and is pinned too (github#199).** The 3.5-year
+measurement above compared two dates that happened to agree. `04 - Daily Notes/` holds dated
+daily notes beside a `2025-06/` month folder, and the exporter walks each directory sorted, so
+as `--end` moves a note's name crosses `2025-06` in that order: same notes, different node
+order, and the layout breaks ties on node order. Measured on `develop@67c285b` with
+`--only golden`: **`--end` 2026-09-14…09-22 ok; 09-23…09-26 3 notes moved (worst #424, radius
+1754.4 → 1105.9); 09-27…10-04 31 moved (worst #855, angle −83.0° → −143.8°)**. It surfaced on
+2026-10-04 as the first refresh after the last stamped pass. That window is develop's golden; the
+github#186 merge brought the golden re-recorded at `7cbdf7a`, which holds for `--end` 2026-09-20…09-22
+only, so the demo fixture is generated with `--end 2026-09-22` in both scripts. The shape vault is the
+one fixture left ageing, and it carries the live half of the heatmap-window check alone.
+
 **Reading raw positions off `demo.busy() === false` is NOT enough, on its own.** This is the
 same defect as the section just above (github#21), for POSITION rather than SIZE: a
 still-running cascade's next animation frame can land after a bare `applyLayout(false)` —
@@ -3803,6 +3908,58 @@ tag (891) and spec (287) — and `spec-vault` is the one that could have moved, 
 spec-carrying vault with nothing stored opens in explorer mode, so its golden *is* the
 spec-ordered layout. It did not, because its only `order-desc: a-z` runs over zero-padded
 `YYYY-MM` folders, where numeric and plain collation agree.
+
+## No real folder segment survives into the mirror
+
+github#191. `scripts/make-mirror-vault.mjs` promises a mirror that can be recorded and shared in
+place of the real vault, and until this it only invented **note** names and **person** folders:
+`mapDir()` kept a folder's name unless `looksLikePerson()` said otherwise, so a numbered
+top-level folder and every project and employer name beneath it were copied verbatim. Three
+`.obsidian` files (`daily-notes.json`, `templates.json`, `app.json`) were copied byte for byte,
+and each can name real folders. Measured by the maintainer on a real 715-note, 79-folder vault:
+the mirror carried the real top-level structure through.
+
+```bash
+node scripts/make-mirror-vault-selftest.mjs     # the hook and both workflows run it too
+```
+
+The rule, and what the check asserts on a 16-note, 9-folder fixture with distinctive names:
+
+- **Every folder segment is invented**, seeded like the notes (`newFolder()`, drawn from `NOUN`
+  and `TOPIC`, `Adj noun` once those run out), unique across the mirror and **never equal,
+  case-insensitively, to any real segment of the source** — so an invented word cannot reproduce
+  a real one by coincidence. A person folder under a people parent still gets a person name.
+- **Only shape survives.** A name that is wholly `DATEISH` (`2024`, `2024-Q3`, `2025-W07`) is
+  kept. Otherwise `FOLDER_PREFIX` — `/^[_\d][\d_.\s-]*(?:[QW]\d{1,2}[\s_.-]*)?/i` — keeps the
+  leading number/underscore run and any quarter or week token, and the remainder is invented:
+  `01 - Projects` → `01 - Meadow`, `_ Archive` → `_ Printing`, `2024-Q3 Planning` → `2024-Q3
+  Beacon`. A name like `3D models` keeps its `3`, which is harmless.
+- **The three `.obsidian` files are rewritten from a key whitelist, never copied.**
+  `daily-notes.json`: `folder` (through `mapPath`), `format` (not a path), `template` (a note,
+  resolved to the mirrored note's path). `templates.json`: `folder`. `app.json`:
+  `attachmentFolderPath`, `newFileFolderPath`, `userIgnoreFilters` (each entry mapped, a trailing
+  `/` kept). A path that does not resolve is **dropped**, and so is every other key — the two
+  producers read only `folder` from the first two files (`src/build-graph.mjs`,
+  `plugin/build-data.mjs`), and nothing reads `app.json` at all. The summary line counts the
+  drops (`2 path(s) dropped as unmappable` on the fixture: an attachments folder holding no
+  notes, and an ignore filter naming a folder that does not exist).
+- **The sort spec follows the new names for free**: `mapPath` already routes through `dirMap`.
+  The check reads the translated spec back and asserts its pins and `target-folder:` lines name
+  the invented folders.
+
+The check's hunter takes every non-date real segment, strips its kept prefix, and greps the
+remainder (≥ 3 chars, case-insensitive) against every mirror **path** and every mirror **file's
+contents** — tree, `.obsidian/*.json` and the spec's front matter alike. A negative control runs
+the same hunter over the source fixture and requires 10 of 10 hits, so a hunter that went blind
+would fail before the real assertion could pass vacuously. Two runs at seed 1 must be
+byte-identical and a run at seed 2 must differ. Driven against the pre-fix generator
+(`5c223d3`) it fails **7 of 24**, the leak line naming both folder segments in `app.json` and the
+`01 - …` folder in the tree; against the fix, 24 of 24.
+
+One consequence to know: `newFolder()` consumes the seeded generator, so a mirror at seed 1 has
+**different person and note names than the same seed produced before github#191**. Nothing in the
+repo depends on a mirror's names — the golden snapshots and the fixture store exclude it on
+purpose (see "The vault generators are day-independent").
 
 ## A vault's layout matches its golden snapshot — the sortspec paths
 
@@ -5502,7 +5659,7 @@ does not build ends the run before Chrome starts. The same walk makes a stamp na
 now-corrupt fixture miss, a run against a corrupt fixture never stamps, and a run pointed at a
 scratch store by `VG_FIXTURE_STORE` (the test seam for that path) never stamps either. Both
 callers require the pass line, not exit 0 alone:
-the CLI realpaths itself against `argv[1]`, because through a junction (every Orca worktree)
+the CLI realpaths itself against `argv[1]`, because through a junction (a worktree reached that way)
 the two paths differed, the body never ran, and an empty exit 0 read as a stamp on every push.
 
 ```bash
@@ -5546,9 +5703,10 @@ trusted.
 
 Keyed by tree and not by commit because the merge into `main` is a new commit by construction
 while its tree is not; not by time because `develop` moves several times a day and "a recent
-green run" cannot say which tree it saw. While it runs, both gates hold the machine-wide
-`suite` lock (`scripts/lock.mjs`) and release it on every exit path; a lock that cannot be had
-blocks the push and names the holder rather than running on top of it.
+green run" cannot say which tree it saw. While it runs, both gates ask the optional harness hook
+(`.ai-context/harness-hook.md`) for the `suite` hold and release it on every exit path; a hold that
+cannot be had blocks the push rather than running on top of it. With no hook configured neither
+gate takes anything.
 
 ## Widening the suite's concurrency surfaced one real race and one window-size artifact
 
@@ -6903,7 +7061,7 @@ again. Its twin, "a narrow window with a pointer keeps the desktop's answer", ho
 half of the predicate at 390x844 with a fine pointer **and asserts the calendar is still open
 there, from the store** -- the fold keys off `phone()`, never off `narrow()`. Both put touch emulation and the
 metrics override back on every exit. `scripts/mobile-check.mjs` reports the same readings at any
-device and takes the `screen-left` lock.
+device and claims its screen through the harness hook when one is configured.
 
 **The scrollbar costs the disc 15px in a desktop-Chrome harness and nothing on a phone** --
 `overflow-y: auto` reserves a classic scrollbar there, so the square measures 375 and the radius
@@ -6982,7 +7140,7 @@ and without the push, and requires the two rides to agree on the flip count and 
 goes off within two sample periods; it also asserts the disc flies home exactly once, which is the
 half that fails on `develop`. Its wait is bounded at both ends (github#179) — a sampler tick that
 throws stops the ride and reports its message, and `rideCap()` fails it at **5 s** if the page
-stops ticking at all — so a future hang here fails with a reason instead of holding `screen-left`
+stops ticking at all — so a future hang here fails with a reason instead of holding its screen
 until the transport gives up with only the expression to show for it. "A rotation to landscape writes the host nothing" counts `onBandOpen`
 by wrapping the shell's `saveSettings` across the flip, and keeps github#173's own assertions on
 that rotation, so the zero cannot be bought by dropping the restore. "`narrow()` costs no
@@ -7067,3 +7225,61 @@ scroll the page.
 **Desktop unchanged, measured both ways:** all five goldens match, positions and band; and every
 box and reading at 1600x1000 is identical to `fd08e12` -- 64 of them, including the camera and both
 pan flags.
+
+## check-pii names nobody in its own source (`github#196`)
+
+The tracked `scripts/check-pii.mjs` holds only generic shapes: an email address outside the
+reserved and noreply domains, an `*.atlassian.net` host, a Windows user path, and the generic
+drive-root `Obsidian` vault path. Every rule that would name somebody is loaded from the same
+place as the names, never from a commit: the untracked `.pii-names`, or the `PII_NAMES` secret
+in CI (`quality.yml` and `release.yml` both pass it to the step). A bare entry is a name.
+`email: <domain>`, `jira: <KEY>` and `vault: <name>` are typed entries, and each adds a work
+email, Jira key or vault path rule. Any other `kind:` prefix exits 1. `.pii-names.example`
+documents the format with placeholder values.
+
+**A list that is loaded but lacks a kind fails in CI and warns locally.** `PII_NAMES` without an
+`email:`, `jira:` or `vault:` entry exits 1, so a secret that was never updated cannot run half
+the rules and pass. A local `.pii-names` without one prints a warning naming the missing kind and
+exits 0. With no list at all nothing has changed: the generic patterns run and the `NO NAME LIST`
+warning prints.
+
+**Negative controls run on every invocation.** Each generic pattern gets one. Each loaded name,
+domain, key and vault gets a synthetic line, and that line has to be flagged **by the rule it was
+built for**. The clean line prints the count (`12 names, rules 1 email, 2 jira, 1 vault, 7 patterns,
+20 negative controls caught` on the maintainer's list). A control that does not bite exits 1. The
+message names only its kind and index (`jira #1`) and never the value, because the CI log of a
+public repository is public too.
+
+## A stopped run takes its browsers and temp dirs with it (`github#197`)
+
+`smoke.mjs` names every temp dir it makes after its own pid (`vg-smoke-p<pid>-`,
+`vg-smoke-build-p<pid>-`, via `runDir` in `scripts/interrupt.mjs`). It removes a lane's profile only
+after that lane's browser process has exited, because the CDP port closes first and Chrome is still
+holding the files. It removes its builds when the run ends. A signal (INT, TERM, HUP, BREAK), or the
+stop file named by `VG_STOP_FILE`, runs the same teardown within a 4 s budget and exits: each lane's
+`killBrowser`, then its profile, then the builds and the screen. A job that has not started its
+browser yet refuses to start one.
+
+**A run starts by reaping what a finished run left.** `reapStale` removes any `vg-smoke-*` dir whose
+owning pid is no longer running, and first kills any browser still using it as its profile. It
+removes an untagged dir only once it is a day old. It never touches a dir whose owner is alive, in
+this worktree or another, until the dir is a day old too: no run lasts a day, so by then the pid has
+been reused. It works within a time budget (1 s at the start of a run), dead-owner
+dirs first, so an old backlog clears over several runs instead of stalling one.
+
+**The pre-push hook stops the suite through the stop file, never with a bare `kill`.** Under Git
+Bash a `kill` never reaches the native `node`: the suite ran on after the hook had released its
+lock. The trap writes the stop file and waits up to 5 s. Only if the suite is still there does it
+take the tree down by its Windows pid (or `kill -9` elsewhere). It then reaps and releases the lock.
+
+**The other harnesses that hold a lock or write into a vault register their cleanup with
+`onInterrupt`:** `spike-check`, `host-phone-check`, `mobile-check`, `probe-room`, `suite-repeat`,
+`refresh-check` (its probe note) and `deferred-check`. Without a listener, node exits on the spot
+and skips both `finally` and `exit` handlers.
+
+`smoke-runner-selftest.mjs` holds the rule with no Chrome:
+- a reap removes a gone run's profile and build;
+- it keeps a live run's, both its own and its parent's;
+- it removes an untagged dir, or a live pid's, only once it is a day old;
+- it leaves anything without the prefix;
+- a stop file runs a registered teardown and exits with its code.

@@ -98,13 +98,14 @@ jobs:
       - name: The hook's static gates all run here
         run: node scripts/check-ci-parity.mjs
 
-      # PATTERNS ONLY ON A RUNNER, AND THAT IS NOT A BUG TO BE FIXED HERE. .pii-names is
-      # gitignored on purpose -- the whole point is that those names are in no commit -- so a
-      # fresh checkout has no name list, check-pii.mjs says `NO NAME LIST`, checks its five
-      # patterns and exits 0. A green status here proves the patterns; the twelve names are
-      # proved by the hook, on a checkout that has the file. Read the step's output, not its
-      # exit code: `12 names` is the name check having run, `NO NAME LIST` is it having not.
+      # The deny list is the PII_NAMES repository secret (github#196): names plus the typed
+      # email:, jira: and vault: entries, comma-separated on one line. Read the step's output, not
+      # its exit code: `N names, rules ...` is the list having loaded, `NO NAME LIST` is not (a
+      # fork's run has no secret, so it checks the generic patterns only). A secret missing a kind
+      # fails the step.
       - name: No other people's names or identifiers
+        env:
+          PII_NAMES: ${{ secrets.PII_NAMES }}
         run: node scripts/check-pii.mjs
 
       - name: The page cannot style, or be styled by, its host
@@ -135,6 +136,9 @@ jobs:
 
       - name: The smoke runner scores a check that threw
         run: node scripts/smoke-runner-selftest.mjs
+
+      - name: No real folder segment survives into a mirror
+        run: node scripts/make-mirror-vault-selftest.mjs
 
       - name: Link destinations resolve against their source
         run: node scripts/check-link-resolution.mjs
