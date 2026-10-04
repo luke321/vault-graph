@@ -581,7 +581,7 @@ range, not the file. Stale when `node scripts/code-map.mjs --check` fails.
 | 12408 | · · · · · · · · · · `byPath` |
 | 12600 | `destroy` |
 
-## `scripts/smoke.mjs` — 9713 lines, 13 sections, 97 functions, 174 checks
+## `scripts/smoke.mjs` — 9718 lines, 13 sections, 97 functions, 174 checks
 
 ### Sections
 
@@ -595,11 +595,11 @@ range, not the file. Stale when `node scripts/code-map.mjs --check` fails.
 | 1941–2576 | github#86 D-9, design/0015 |
 | 2577–4899 | camera |
 | 4900–6607 | date range |
-| 6608–8159 | the hub |
-| 8160–8709 | github#165 |
-| 8710–9010 | live rebuild (github#72) |
-| 9011–9244 | the run |
-| 9245–9713 | which vaults, and why |
+| 6608–8164 | the hub |
+| 8165–8714 | github#165 |
+| 8715–9015 | live rebuild (github#72) |
+| 9016–9249 | the run |
+| 9250–9718 | which vaults, and why |
 
 ### Functions
 
@@ -676,32 +676,32 @@ range, not the file. Stale when `node scripts/code-map.mjs --check` fails.
 | 6617 | `pinN` |
 | 6796 | `pinIdentityBuilds` |
 | 6872 | · · · `name` |
-| 7461 | · `norm` |
-| 7618 | · · · `mean` |
-| 7675 | · `norm` |
-| 7777 | · `bars` |
-| 7778 | · `rows` |
-| 7884 | · `f` |
-| 7888 | · `read` |
-| 8001 | · `lower` |
-| 8002 | · `read` |
-| 8074 | · `look` |
-| 8392 | · `pick` |
-| 8441 | `pressKey` |
-| 8453 | `trailState` |
-| 8454 | `selectBySearch` |
-| 8463 | `hop` |
-| 8473 | `closeCard` |
-| 8478 | `stepBack` |
-| 8972 | `fitViewport` |
-| 8996 | `settle` |
-| 9013 | `runOne` |
-| 9203 | `killBrowser` |
-| 9323 | `resolveVaults` |
-| 9410 | `buildFor` |
-| 9431 | `main` |
-| 9677 | `takeScreen` |
-| 9686 | `dropScreen` |
+| 7465 | · `norm` |
+| 7623 | · · · `mean` |
+| 7680 | · `norm` |
+| 7782 | · `bars` |
+| 7783 | · `rows` |
+| 7889 | · `f` |
+| 7893 | · `read` |
+| 8006 | · `lower` |
+| 8007 | · `read` |
+| 8079 | · `look` |
+| 8397 | · `pick` |
+| 8446 | `pressKey` |
+| 8458 | `trailState` |
+| 8459 | `selectBySearch` |
+| 8468 | `hop` |
+| 8478 | `closeCard` |
+| 8483 | `stepBack` |
+| 8977 | `fitViewport` |
+| 9001 | `settle` |
+| 9018 | `runOne` |
+| 9208 | `killBrowser` |
+| 9328 | `resolveVaults` |
+| 9415 | `buildFor` |
+| 9436 | `main` |
+| 9682 | `takeScreen` |
+| 9691 | `dropScreen` |
 
 ### Checks
 
@@ -850,34 +850,34 @@ range, not the file. Stale when `node scripts/code-map.mjs --check` fails.
 | 7131 | the (unlinked) row's count is parenthesised while kept separate, plain once joined |
 | 7148 | legend count bars scale to the largest visible folder |
 | 7382 | the thinnest count bar survives a hover in pixels, not just in CSS |
-| 7493 | the count bars walk on the cascade's clock and land on the resting layout |
-| 7552 | a bar that loses its folder shrinks over the cascade instead of blinking out |
-| 7670 | the legend's swatch and count bar follow the token across a theme flip, with the picker |
-| 7767 | count bars are on by default, and the settings toggle removes every bar |
-| 7826 | the picker's contrast numbers are the harness's |
-| 7871 | the picker repaints itself on a theme change, with no rebuild |
-| 7932 | the picker draws the disc's own dot sizes |
-| 7985 | the picker's ladder is the ladder the disc draws |
-| 8067 | the picker's settings surface holds every slot without scrolling sideways |
-| 8133 | the picker stays inside the mount |
-| 8179 | the disc's right-click does nothing until Developer debug is on |
-| 8215 | a right-click on a note still pins it, and opens no developer menu |
-| 8256 | the developer menu's grid item draws the wedge overlay |
-| 8300 | the grid drawn from the menu is the whole grid, and no dot moves to get it |
-| 8338 | the grid's key sits bottom left, clear of every button over the graph |
-| 8387 | the developer menu's slow motion reaches the animation clock |
-| 8425 | focus web stays above dim notes |
-| 8485 | walk framing keeps the visible focus web on canvas |
-| 8588 | only a hop lengthens the trail |
-| 8607 | stepping back never re-collects a hop |
-| 8624 | a crumb click truncates the trail at the crumb |
-| 8639 | the trail is not layout |
-| 8662 | the page claims no keyboard shortcut |
-| 8685 | re-selecting the same note keeps the trail, and a filter does not clear it |
-| 8763 | a live rebuild with the same data moves nothing |
-| 8779 | a rebuild waits for a drag, and a right-click is not a drag |
-| 8828 | the invalidation registry names every cache a live rebuild stales |
-| 8837 | a live rebuild lands on the layout a fresh relayout gives |
-| 8869 | a live rebuild re-arms the chip, so a note that arrives inside its window is lit |
-| 8913 | word counts land by path, which is the only thing a live rebuild keeps |
-| 8957 | an idle PNG export carries the graph, not just the background and the logo |
+| 7498 | the count bars walk on the cascade's clock and land on the resting layout |
+| 7557 | a bar that loses its folder shrinks over the cascade instead of blinking out |
+| 7675 | the legend's swatch and count bar follow the token across a theme flip, with the picker |
+| 7772 | count bars are on by default, and the settings toggle removes every bar |
+| 7831 | the picker's contrast numbers are the harness's |
+| 7876 | the picker repaints itself on a theme change, with no rebuild |
+| 7937 | the picker draws the disc's own dot sizes |
+| 7990 | the picker's ladder is the ladder the disc draws |
+| 8072 | the picker's settings surface holds every slot without scrolling sideways |
+| 8138 | the picker stays inside the mount |
+| 8184 | the disc's right-click does nothing until Developer debug is on |
+| 8220 | a right-click on a note still pins it, and opens no developer menu |
+| 8261 | the developer menu's grid item draws the wedge overlay |
+| 8305 | the grid drawn from the menu is the whole grid, and no dot moves to get it |
+| 8343 | the grid's key sits bottom left, clear of every button over the graph |
+| 8392 | the developer menu's slow motion reaches the animation clock |
+| 8430 | focus web stays above dim notes |
+| 8490 | walk framing keeps the visible focus web on canvas |
+| 8593 | only a hop lengthens the trail |
+| 8612 | stepping back never re-collects a hop |
+| 8629 | a crumb click truncates the trail at the crumb |
+| 8644 | the trail is not layout |
+| 8667 | the page claims no keyboard shortcut |
+| 8690 | re-selecting the same note keeps the trail, and a filter does not clear it |
+| 8768 | a live rebuild with the same data moves nothing |
+| 8784 | a rebuild waits for a drag, and a right-click is not a drag |
+| 8833 | the invalidation registry names every cache a live rebuild stales |
+| 8842 | a live rebuild lands on the layout a fresh relayout gives |
+| 8874 | a live rebuild re-arms the chip, so a note that arrives inside its window is lit |
+| 8918 | word counts land by path, which is the only thing a live rebuild keeps |
+| 8962 | an idle PNG export carries the graph, not just the background and the logo |

@@ -7430,7 +7430,11 @@ check("the thinnest count bar survives a hover in pixels, not just in CSS", asyn
         if (rb > best) best = rb;
       }
       var el = document.querySelector(${JSON.stringify(`[data-g=${JSON.stringify(row.g)}]`)});
-      return { px: best, hovered: !!el && el.matches(':hover') };
+      var at = document.elementFromPoint(${row.cx}, ${row.cy});
+      var all = document.querySelectorAll(${JSON.stringify(`[data-g=${JSON.stringify(row.g)}]`)});
+      return { px: best, hovered: !!el && el.matches(':hover'),
+               at: at ? at.tagName.toLowerCase() + (at.id ? "#" + at.id : "") + "." + String(at.className).split(" ").join(".") : "none",
+               twins: all.length, first: el ? el.tagName.toLowerCase() + "." + String(el.className).split(" ").join(".") : "none" };
     })()`);
   };
 
@@ -7484,7 +7488,8 @@ check("the thinnest count bar survives a hover in pixels, not just in CSS", asyn
             `${lit.px}px highlighted (data-hl=${wasLit}); weakest asserted ${weakest}px of ` +
             states.map((s) => s[0]).join("/") +
             (nearAccent ? "  (highlighted NOT asserted: this bar's hue is the accent's)" : "") +
-            (over.hovered ? "" : "  <- NO :hover from the harness") +
+            (over.hovered ? "" : `  <- NO :hover from the harness (under the pointer: ${over.at}; ` +
+              `${over.twins} element(s) carry this data-g, the first is ${over.first})`) +
             (weakest < FLOOR_MIN ? `  <- a state paints under ${FLOOR_MIN}px` : "")
   };
 });
