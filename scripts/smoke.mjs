@@ -8919,7 +8919,8 @@ function resolveVaults() {
     out.push({ path: dir, label, fixture: desc ? { name, ...desc } : null });
   };
 
-  gen("make-demo-vault.mjs", [], "demo-vault", "the demo vault (sparse tail, 2 dense years)");
+  // github#199
+  gen("make-demo-vault.mjs", ["--end", "2026-09-14"], "demo-vault", "the demo vault (sparse tail, 2 dense years)");
   gen("make-test-vault.mjs", ["--notes", "10000", "--years", "10", "--end", "2026-08-28"],
       "test-vault", "the 10k synthetic vault (10 years)");
   gen("make-shape-vault.mjs", [], "shape-vault", "the dominant-folder vault");

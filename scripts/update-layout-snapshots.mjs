@@ -19,7 +19,8 @@ const OUT_DIR = join(ROOT, "scripts", "layout-snapshots");
 
 /* github#71 -- MUST AGREE WITH resolveVaults() in smoke.mjs, args included */
 const FIXTURES = [
-  { script: "make-demo-vault.mjs", args: [], name: "demo-vault" },
+  // github#199
+  { script: "make-demo-vault.mjs", args: ["--end", "2026-09-14"], name: "demo-vault" },
   { script: "make-test-vault.mjs", args: ["--notes", "10000", "--years", "10", "--end", "2026-08-28"], name: "test-vault" },
   { script: "make-shape-vault.mjs", args: [], name: "shape-vault" },
   // github#86, design/0015 -- recorded in the TAG dimension; that is its picture

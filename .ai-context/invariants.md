@@ -1281,7 +1281,7 @@ Today a strict subset: demo **37 of 113**, 10k **2 of 2**, dominant-folder **2 o
 2026-09-08: the newest `touched` day is 2026-09-05 on the demo and dominant-folder fixtures
 and 2026-08-28 on the 10k, so *Today* and the 7-day chip light **0 notes on all three** — a
 check written against `new Date()` passes by asserting nothing, and does so more thoroughly
-every day as the two ageing fixtures regenerate forward and the pinned 10k does not. This is
+every day as the ageing fixtures regenerate forward and the pinned ones do not (github#199). This is
 the same trap the 10k's pinned `--end` exists to avoid. `__vg.setRecent(kind, refMs)` and
 `__vg.recentWindow(kind, refMs)` both take a reference day for exactly this reason.
 
@@ -2953,6 +2953,17 @@ and a pinned fixture does not age in the store — regenerating it would write t
 The cost is the live half of the heatmap-window check on that one vault, which the two
 ageing vaults still carry. Re-recording the 10k golden means choosing a new `--end` in both
 scripts in the same commit.
+
+**The demo vault was not day-invariant either, and is pinned too (github#199).** The 3.5-year
+measurement above compared two dates that happened to agree. `04 - Daily Notes/` holds dated
+daily notes beside a `2025-06/` month folder, and the exporter walks each directory sorted, so
+as `--end` moves a note's name crosses `2025-06` in that order: same notes, different node
+order, and the layout breaks ties on node order. Measured on `develop@67c285b` with
+`--only golden`: **`--end` 2026-09-14…09-22 ok; 09-23…09-26 3 notes moved (worst #424, radius
+1754.4 → 1105.9); 09-27…10-04 31 moved (worst #855, angle −83.0° → −143.8°)**. It surfaced on
+2026-10-04 as the first refresh after the last stamped pass. The demo fixture is now generated
+with `--end 2026-09-14`, the day its golden was taken, in both scripts. The shape vault is the
+one fixture left ageing, and it carries the live half of the heatmap-window check alone.
 
 **Reading raw positions off `demo.busy() === false` is NOT enough, on its own.** This is the
 same defect as the section just above (github#21), for POSITION rather than SIZE: a
