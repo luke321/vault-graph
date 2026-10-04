@@ -396,9 +396,9 @@ function findings(results, k) {
   const add = (sev, text) => { if (!f.some((x) => x.text === text)) f.push({ sev, text }); };
   for (const r of results) {
     const tag = r.fixture + " @ " + r.profile;
-    if (r.dots.fail258 > 0) add("WCAG 2.5.8 (dots)", `${tag}: ${r.dots.fail258}% of ${r.dots.n} dots are under 24 px with a neighbour closer than 24 px (median spacing ${r.dots.spacingPx} px; ${r.zoomFor24}x zoom reaches 24 px, the camera allows ${r.maxZoom}x)`);
+    if (r.dots.fail258 > 0) add("dots (expected)", `${tag}: ${r.dots.fail258}% of ${r.dots.n} dots are under 24 px with a neighbour closer than 24 px (median spacing ${r.dots.spacingPx} px; ${r.zoomFor24}x zoom reaches 24 px, the camera allows ${r.maxZoom}x)`);
     if (r.dots.under5 > 0) add("perception", `${tag}: ${r.dots.under5}% of dots are below 5 arcmin (the 20/20 letter), ${r.dots.under1}% below 1 arcmin (unresolvable); median dot ${r.dots.diamArcmin} arcmin`);
-    if (r.coarse && r.dots.effUnder7 > 0) add("touch", `${tag}: ${r.dots.effUnder7}% of dots have an effective tap width under 7 mm (Hoober), ${r.dots.effUnder92}% under 9.2 mm (Parhi); median ${r.dots.effMm} mm`);
+    if (r.coarse && r.dots.effUnder7 > 0) add("dots (expected)", `${tag}: ${r.dots.effUnder7}% of dots have an effective tap width under 7 mm (Hoober), ${r.dots.effUnder92}% under 9.2 mm (Parhi); median ${r.dots.effMm} mm`);
     const failed = new Map();
     for (const c of r.controls.fail258) {
       const key = c.name + " " + Math.round(c.w) + "x" + Math.round(c.h);
@@ -479,7 +479,14 @@ function markdown(results, fs, k) {
   L.push("## Findings", "");
   const bySev = new Map();
   for (const x of fs) { if (!bySev.has(x.sev)) bySev.set(x.sev, []); bySev.get(x.sev).push(x.text); }
-  for (const [sev, items] of bySev) { L.push(`### ${sev} (${items.length})`, ""); for (const t of items) L.push("- " + t); L.push(""); }
+  const order = [...bySev.keys()].sort((a, b) => (a === "dots (expected)" ? 1 : 0) - (b === "dots (expected)" ? 1 : 0));
+  for (const sev of order) {
+    const items = bySev.get(sev);
+    L.push(`### ${sev} (${items.length})`, "");
+    if (sev === "dots (expected)") L.push("Data marks, not controls: WCAG 2.5.8's essential exception covers them. Context for zoom and density work, not defects.", "");
+    for (const t of items) L.push("- " + t);
+    L.push("");
+  }
   L.push("## Thresholds", "");
   for (const [key, v] of Object.entries(T)) L.push(`- \`${key}\` ${v.what} -- ${SOURCES[v.src]}`);
   return L.join("\n") + "\n";

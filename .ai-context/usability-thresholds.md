@@ -118,7 +118,9 @@ findings. The full report comes from `--md`; these are the headlines.
 | spec | desktop | 287 | 11.1 px | 16.2′ | 0% | 33.9 px | **0%** | — |
 | shape | desktop-large | 954 | 10.5 px | 12.0′ | 0% | 28.9 px | 1.4% | — |
 
-- **WCAG 2.5.8:** every dot fails on every touch profile of every fixture. Only the sparse
+- **Expected, not defects:** dots are data marks, which 2.5.8's essential exception covers.
+  The audit files them under `dots (expected)` as context for zoom and density work.
+- **2.5.8 geometry:** every dot fails on every touch profile of every fixture. Only the sparse
   fixtures on laptop-or-larger screens pass (spec ≥ laptop, shape/tag at 2560 px). The
   camera's zoom headroom (47.7×) covers it: the median dot reaches 24 px spacing at no more
   than 11.4× (the 10k vault in a sidebar).
