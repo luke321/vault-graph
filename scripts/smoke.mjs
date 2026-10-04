@@ -5974,7 +5974,7 @@ check("the ribbon rescales with its slot", async (p) => {
   const restored = Math.abs(settled.rib - settled.slot) <= 1;
   return {
     ok: tracks && pinned && moved && restored,
-    detail: rows.map((r) => `${r.w}px -> strip ${r.rib}/slot ${r.slot}` +
+    detail: rows.map((r) => `${r.w}px -> strip ${r.rib}/slot ${r.slot} (inline ${r.inline})` +
                             (r.lastX === null ? "" : `, last year at ${r.lastX}`)).join("; ") +
             `; cleared -> ${settled.rib}/${settled.slot}` +
             (tracks ? "" : "  <- STRIP DID NOT FOLLOW ITS SLOT") +
