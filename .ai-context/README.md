@@ -76,6 +76,7 @@ numbers stay and the index spells them out.
 | `0018-gallery-new-in` | The generated "New in <version>" line above the gallery's nav table: which features count as new, and why the strip is built rather than written (github#127) |
 | `0018-not-stealing-the-keyboard` | Why a harness run used to take the keyboard, why the screen lock never addressed it, and the three things counting activations changed about the fix (github#129) |
 | `0019-two-readings` | The sidebar's two readings, Groups and the selected note: what the floating card covered, the four prototypes measured against it, why tabs won, and why the panel is a plain wrapper (github#80, github#131) |
+| `0021-the-drill-root` | A folder as the whole disc: the two steps and the one flag between them, why the re-wedge crosses with every dot held rather than walking, the grouping rebased, identity over display name, colour across a drill, the nav (github#76) |
 | `0020-the-producer-contract` | The shape both producers owe the page, and the policy they share: what the line-for-line port had already cost, why the contract is declared *and* documented, why the plugin's adapter moved to its own file, and why a declared divergence has to still happen (github#149) |
 
 **ADR or DDR?** An ADR is a choice with alternatives that were weighed and one that won —

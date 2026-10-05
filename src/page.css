@@ -197,7 +197,7 @@
 
   .vault-graph #vg-legend { display: flex; flex-direction: column; gap: 1px; }
 
-  /* github#76: the root bar -- a back action and crumbs, at the top of the nav */
+  /* github#76, design/0021 */
   .vault-graph .lgroot {
     display: flex; align-items: center; gap: 4px; min-width: 0;
     padding: 1px 2px 6px; margin-bottom: 4px; border-bottom: 1px solid var(--border);

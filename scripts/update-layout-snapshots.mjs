@@ -24,8 +24,8 @@ const FIXTURES = [
   { script: "make-demo-vault.mjs", args: ["--end", "2026-09-22"], name: "demo-vault", drill: "03 - Resources" },
   { script: "make-test-vault.mjs", args: ["--notes", "10000", "--years", "10", "--end", "2026-08-28"], name: "test-vault", drill: "03 - Resources" },
   { script: "make-shape-vault.mjs", args: [], name: "shape-vault", drill: "projects" },
-  // github#86, design/0015 -- recorded in the TAG dimension; that is its picture. A root is a
-  // FOLDER, so the tag disc has no drilled golden: there is nothing to drill into (github#76).
+  // github#86, design/0015 -- recorded in the TAG dimension; that is its picture
+  // github#76, design/0021
   { script: "make-tag-vault.mjs", args: ["--end", "2026-09-09"], name: "tag-vault",
     gens: ["make-tag-vault.mjs"], dim: "tag" },
   // github#71 -- --end pinned: its dated subfolders are date-derived

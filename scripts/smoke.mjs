@@ -9002,11 +9002,7 @@ async function fitViewport(p, want = TUNED_VIEWPORT) {
 /* ------------------------------------------------------------- the drill root */
 // github#76
 
-// github#76 x github#113 -- every fixture that HAS a drilled golden, not just the default
-// one. These checks each read their root from that fixture's own golden and skip any vault
-// without one, so they were written to run on all of them; github#113's per-fixture default
-// arrived after this branch was cut and would otherwise have left two of the three drilled
-// goldens committed but never read.
+// github#76, github#113, design/0021
 const DRILL_ON = ["demo-vault", "test-vault", "shape-vault"];
 
 function drillSnapshot(vaultName) {
