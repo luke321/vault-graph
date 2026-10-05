@@ -3775,22 +3775,25 @@ notes. The temptation is to check it as its own kind of thing. It is not: it is 
 so it is held to the laws in `CLAUDE.md` rather than to a reduced set of them.
 
 ```
-node scripts/smoke.mjs --only "drill"      # 5 checks x 3 fixtures -- 15, and 0/0 on tag
+node scripts/smoke.mjs --only "drill"      # 6 checks x 3 fixtures -- 18, and 0/0 on tag
 ```
+
+On the github#186 packing, measured 2026-10-05 after merging it (`9a8896c`):
 
 | | demo | 10k | shape |
 |---|---|---|---|
 | root | `03 - Resources` | `03 - Resources` | `projects` |
 | notes, vault → drilled | 1403 → 60 | 10002 → 60 | 954 → 738 |
-| cells | 41 → 17 | 41 → 17 | 10 → 5 |
-| `r0` / `maxR` | 6.65/25.25 → 1.50/7.10 | → 1.50/7.10 | 5.48/20.08 → 5.30/17.90 |
-| wedges the vault could not name | 9 children, 3 named + a pool | same | 5 children |
-| row-0 dots, biggest vs cap | 11 · 11.7u / 15.4u | 12 · **15.4u / 15.4u** | 32 · 45.4u / 54.3u |
+| cells | 43 → 17 | 38 → 17 | 10 → 5 |
+| vault `maxR` → drilled `r0` / `maxR` | 25 → 2.85/8.45 | 63 → 1.95/7.55 | 21 → 5.54/19.14 |
+| drilled hub, share of the disc | 0.337 | 0.258 | 0.29 |
+| row-0 dots, biggest vs cap | 8 · 6u / 29.2u | 10 · 6.2u / 20u | 26 · **56.8u / 56.8u** |
 
-The 10k figure in bold is the point of measuring it: the drilled hub is small enough that
-`HUB_ROW0_FRAC` is *binding*, not passing vacuously. A drilled disc is exactly the shape
-that broke this law once already (a band collapsed to one row, the section below), so the
-check asserts it rather than assuming `dotPx` still holds.
+The shape figure in bold is the point of measuring it: the drilled hub is small enough that
+`HUB_ROW0_FRAC` is *binding*, not passing vacuously (on the packing before github#186 it bound
+on the 10k instead, 15.4u of 15.4u). A drilled disc is exactly the shape that broke this law
+once already (a band collapsed to one row, the section below), so the check asserts it rather
+than assuming `dotPx` still holds.
 
 **Every fixture that has a drilled golden runs all five checks** (`DRILL_ON` in
 `smoke.mjs`). Each check reads its root out of that fixture's own golden and returns
@@ -3827,9 +3830,40 @@ notes to 44, and the vault disc then shows 1387 of 1403, the same 16 notes.
 
 ## A drill crosses the two discs in one sweep, and two other animations were rejected
 
-github#76. `setRoot` cascades with `{ colToggle: true, cross: true }` plus `movesFrom`. Two
-alternatives were built, looked at and reverted on 2026-09-12; both are written down here so
-they are not re-tried on the strength of sounding better than they are.
+github#76. **As built now** (`design/0021`): a drill is two cascades. Step 1 solos the folder
+with the vault's own filter cascade; step 2, the re-wedge, crosses the solo's disc and the
+drilled one in one sweep with `{ colToggle, cross, hold }`, every visible note held exactly as it
+stood (position, drawn size, colour) until it crosses and seated at its final place and size
+after, and the camera scaled in the same frame as the renderer's bbox so the screen does not move.
+Coming out runs the same two in reverse. Under the github#186 packing the re-wedge had walked
+every mover through a plan built in the wrong rings, rescaled the whole disc in one frame and
+capped sizes by a wrong endpoint; the numbers are in `changelog-detail.md`, 2026-10-05.
+
+```
+node scripts/smoke.mjs --only "drill walks"   # rides a drill in and out, frame by frame
+```
+
+Each of the four cascades a round trip runs is held to: a converged exit, at least 20 frames,
+no lit dot outside its wedge (0.01°), no seat-order inversion on a walk, no dot over the larger of
+its two rests (×1.05), no fade that turns round between 0.05 and its peak, a last frame within
+16 units of rest, no single-frame rescale of the disc over ×1.25, and — on the two held crosses —
+no dot moving more than 4 px in a frame. Measured after the fix, demo / 10k / shape: every
+assertion clean; held crosses **0 / 0.4 / 0 px** worst frame step and **×1.03 / ×1.21 / ×1.003**
+worst frame-to-frame scale (the fit flight). Before it: **264 / 264 / 484 px** while lit, the disc
+rescaled **×2.99 / ×8.32 / ×1.08** in one frame, dots **×1.25 / ×1.27 / —** over both rests on
+the way out, 1–14 seat inversions per step.
+
+**The two solo steps are 186's filter cascade, and they sweep.** The same probe reads their
+worst frame step as context, not an assertion: **298 / 577 / 182 px** in and **161 / 566 /
+124 px** out, identical on a plain legend *only* with no drill involved (302 / 586 px on demo /
+10k). A dot whose serpentine target drops a row crosses its whole wedge, because the rows
+alternate direction, and the plan path eases the seat with no per-frame cap (`RADIAL_STEP_MAX`
+guards only the non-plan path). Recorded, not fixed: it is the cascade's walk model, not the
+drill's, and changing it changes how every filter looks — open as of 2026-10-05.
+
+The history below is how the drill animated before it was two steps. Two alternatives were
+built, looked at and reverted on 2026-09-12; both are written down here so they are not
+re-tried on the strength of sounding better than they are.
 
 **github#86's clock hand** (`{ hand: true, from }`). Rejected on sight: *"there are jumps, it
 does not look like the discs vanish in place and the new one shows in place at all."* The reason
