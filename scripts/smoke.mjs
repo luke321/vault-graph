@@ -8,6 +8,7 @@ import { couplingReport, leakReport } from "./smoke-state.mjs";
 import { pngCaptureJs, pngCarriesGraph, pngCaptureDetail } from "./png-capture.mjs";
 import { hiddenBaselineCheck } from "./check-hidden-baseline.mjs";
 import { cascadeWedgesCheck } from "./check-cascade-wedges.mjs";
+import { drillWalkCheck } from "./check-drill-walk.mjs";
 import { dimensionRefreshCheck } from "./check-dimension-refresh.mjs";
 import { dimensionSizingCheck } from "./check-dimension-sizing.mjs";
 import { countSizingCheck } from "./check-count-sizing.mjs";
@@ -9316,6 +9317,19 @@ check("a drill animates, and settle() is still a no-op at the end of it", async 
       : `${r.label}: nothing sampled`).join(" | "),
   };
 }, { on: DRILL_ON });
+
+// github#76, github#186
+check("a drill walks inside the laws, in and out", async (p) => {
+  const dd = await p.j("__vg.debugDump()");
+  const found = drillSnapshot(dd.vault.name);
+  if (!found) return { ok: true, detail: `NOT ASSERTED: "${dd.vault.name}" has no drilled golden` };
+  await withRoot(p, null);
+  await settle(p);
+  const r = await drillWalkCheck(p, found.snap.root);
+  await withRoot(p, null);
+  await settle(p);
+  return { ok: r.ok, detail: (r.bad && r.bad.length ? r.bad.join("; ") + " | " : "") + r.detail };
+}, { on: DRILL_ON, clock: "real" });
 
 async function settle(p, ms = 6000) {
   const deadline = Date.now() + ms;

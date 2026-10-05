@@ -4731,11 +4731,14 @@ function mountVaultGraph(root, data, deps) {
   var cellHold = null;
   /** @type {Record<string, number> | null} */
   var foldSizes = null;
+  // github#76
+  /** @type {Record<string, number> | null} */
+  var moveSizes = null;
   // github#186 -- one place drops what a walk held, wherever it is cut short
   function clearHolds() {
     moveFrom = null; splitHold = null; cellHold = null; leftColor = null; shrinkFade = false;
     colWalk = null; departing = null; leaveEdgeK = 1;
-    foldSizes = null;
+    foldSizes = null; moveSizes = null;
   }
   /** @type {Record<string, Point> | null} */
   var posSrc = null;
@@ -4784,9 +4787,11 @@ function mountVaultGraph(root, data, deps) {
    * @property {boolean} [hand]                        github#86: one clock sweep, by angle
    * @property {boolean} [fold]                        github#186, design/0015
    * @property {LeftDisc} [from]                       github#86: the disc being left
+   * @property {MoveHold} [hold]                       github#76: a mover as it stood
    * @property {number} [totalMs]
    * @property {(pr: number) => void} [onFrame]
    */
+  /** @typedef {{ pos: Record<string, Point>, size: Record<string, number>, color: Record<string, string> }} MoveHold */
   /** @typedef {{ ids: string[], a: number[], b: number[], out: Record<string, number> }} WalkPair */
   /**
    * github#145 -- done is optional; most callers pass nothing
@@ -4880,7 +4885,7 @@ function mountVaultGraph(root, data, deps) {
     if (opts.movesFrom) {
       moveFrom = opts.movesFrom;
       // github#86 -- the left disc keeps its own colours while it stands
-      leftColor = opts.from && opts.from.color ? opts.from.color : null;
+      leftColor = opts.from && opts.from.color ? opts.from.color : opts.hold ? opts.hold.color : null;
       Object.keys(opts.movesFrom).forEach(function (id) {
         if (!graph.hasNode(id)) return;
         moves.push(id);
@@ -5210,6 +5215,9 @@ function mountVaultGraph(root, data, deps) {
     // github#66
     /** @type {Record<string, number> | null} */
     var sizeCap = null;
+    // github#76
+    /** @type {Record<string, number> | null} */
+    var dstSizes = null;
     /** @type {Record<string, number>} */
     var rowsSrc = dict();
     /** @type {Record<string, number>} */
@@ -5408,6 +5416,7 @@ function mountVaultGraph(root, data, deps) {
       };
       var rA = inWorld(function () { return roomOf(a, null); });
       var rB = roomOf(b, function (id) { return willShow(id) ? timeFactor(id) : 0; });
+      dstSizes = rB ? rB.sizes : null;
       cellSrc = (rA && rA.cells) || null; cellDst = (rB && rB.cells) || null;
       edgeSrc = (rA && rA.edges) || null; edgeDst = (rB && rB.edges) || null;
       // github#66
@@ -5558,6 +5567,9 @@ function mountVaultGraph(root, data, deps) {
     };
     cascadeRun = { raf: 0, tick: NOW(), guard: WIN.setTimeout(watchdog, STALL_MS), sizeCap: sizeCap,
                    skel: moveFrom ? null : freshSkel() };
+    // github#76
+    moveSizes = opts.hold && moves.length ? dict() : null;
+    if (moveSizes) lastCascade.held = true;
     // github#78, design/0006
     // github#86 -- the switch's nav bar follows the notes (legendSwitchTick)
     var barWalking = opts.hand && legendSwitch ? false : barWalkStart();
@@ -5590,6 +5602,12 @@ function mountVaultGraph(root, data, deps) {
         var id = moving[i];
         if (isMove[id]) {
           if (moveFrom && moveFrom[id] !== undefined && frame >= crossAt[id]) delete moveFrom[id];
+          // github#76
+          if (moveSizes) {
+            var held = moveFrom && moveFrom[id] !== undefined;
+            var hs = held ? opts.hold && opts.hold.size[id] : dstSizes && dstSizes[id];
+            if (hs !== undefined && hs !== null) moveSizes[id] = hs; else delete moveSizes[id];
+          }
           if (frame < arriveAt[id]) {
             var q1 = (frame - delay[id]) / fadeLen;
             q1 = q1 < 0 ? 0 : q1 > 1 ? 1 : q1;
@@ -5782,6 +5800,7 @@ function mountVaultGraph(root, data, deps) {
         // github#76
         if (opts.cross && isMove[id] && finalPos[id] &&
             (!moveFrom || moveFrom[id] === undefined)) q = finalPos[id];
+        else if (opts.hold && isMove[id] && opts.hold.pos[id]) q = opts.hold.pos[id];
         if (!q) return;
         if (plan || folding) {
           graph.mergeNodeAttributes(id, { x: q.x, y: q.y });
@@ -6724,6 +6743,8 @@ function mountVaultGraph(root, data, deps) {
   var lastDotLo = 0;
   /** @param {number} size @param {string} [id] */
   function dotPx(size, id) {
+    // github#76
+    if (moveSizes && id !== undefined && moveSizes[id] !== undefined) return moveSizes[id];
     // github#186, design/0015
     if (foldSizes && id !== undefined && foldSizes[id] !== undefined) {
       var folded = foldSizes[id];
@@ -6946,7 +6967,7 @@ function mountVaultGraph(root, data, deps) {
           r.size = (r.size || a.size) * (foldSizes ? 1 : shrinkFade ? al : 0.45 + 0.55 * al);
           if (al < 0.62) { r.label = ""; r.forceLabel = false; r.highlighted = false; }
         }
-        if (colWalk) {
+        if (colWalk && !(moveSizes && moveSizes[id] !== undefined)) {
           var cwr = colWalk[groupOf(id)];
           if (cwr !== undefined) {
             r.size = Math.max(0.05, (r.size === undefined ? base : r.size) * cwr.f);
@@ -9904,14 +9925,34 @@ function mountVaultGraph(root, data, deps) {
     (order[state.dim] || []).forEach(function (n) { h[n] = n !== g0; });
   }
 
+  // github#76
+  /** @param {number} k the old bbox span over the new */
+  function holdCamera(k) {
+    if (!renderer || !(k > 0) || Math.abs(k - 1) < 1e-9) return;
+    var cam = renderer.getCamera(), s = cam.getState(), rest = camAtRest;
+    fitting = true;
+    if (!panEnabled) renderer.setSetting("enableCameraPanning", true);
+    try { cam.setState({ x: 0.5 + (s.x - 0.5) * k, y: 0.5 + (s.y - 0.5) * k, ratio: s.ratio * k }); }
+    finally {
+      if (!panEnabled) renderer.setSetting("enableCameraPanning", false);
+      fitting = false; camAtRest = rest;
+    }
+  }
+
   // github#76 -- STEP 2: the root's children become the wedges, or stop being them
   /** @param {boolean} on @param {boolean} live @param {(() => void) | null} done */
   function reWedgeTo(on, live, done) {
     /** @type {Record<string, string>} */
     var was = dict();
+    /** @type {MoveHold} */
+    var hold = { pos: dict(), size: dict(), color: dict() };
     if (live) {
       graph.forEachNode(function (id, a) {
-        if (inRootA(a) && visible(id) && (alpha[id] || 0) > 0.004) was[id] = groupOf(id);
+        if (!inRootA(a) || !visible(id) || (alpha[id] || 0) <= 0.004) return;
+        was[id] = groupOf(id);
+        hold.pos[id] = { x: a.x, y: a.y };
+        hold.size[id] = dotPx(a.size || 4, id);
+        hold.color[id] = nodeColor(id);
       });
     }
     reWedge = on;
@@ -9927,18 +9968,20 @@ function mountVaultGraph(root, data, deps) {
       soloHide(h);
       rootNoteColor = rootDepth ? wedgeColorsAhead().color : null;
     }
+    var spanWas = geomLock ? geomLock.maxR : 0;
     hardRelayout(false, live, true);
+    // github#76 -- the bbox follows the rings; the camera takes it back, so the screen does not
+    if (live && geomLock && geomLock.maxR > 0 && spanWas > 0) {
+      var k = spanWas / geomLock.maxR;
+      holdCamera(k);
+      Object.keys(hold.size).forEach(function (id) { hold.size[id] *= k; });
+    }
     attempt(placeLogo); attempt(heatBuild); attempt(buildLegend);
     if (!live) { if (done) done(); return; }
-    /** @type {Record<string, string> | null} */
-    var movesFrom = null;
-    Object.keys(was).forEach(function (id) {
-      if (groupOf(id) === was[id]) return;
-      (movesFrom || (movesFrom = dict()))[id] = was[id];
-    });
+    // github#76 -- every note crosses, its group changed or not: the rings did
     /** @type {CascadeOpts} */
-    var how = { colToggle: true };
-    if (movesFrom) how.movesFrom = movesFrom;
+    var how = { colToggle: true, cross: true, hold: hold };
+    if (hasKeys(was)) how.movesFrom = was;
     cascade(done, how);
   }
 
