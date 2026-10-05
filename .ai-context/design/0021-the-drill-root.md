@@ -60,6 +60,10 @@ So the re-wedge does not walk. It **crosses, in one sweep, with every dot held a
   as the user moving the camera, and with panning enabled for the instant the way `fit()` does. The
   held sizes are scaled by the same factor, because they are in normalised units. The screen does not
   change; the cascade's own deferred fit then flies to the new disc.
+- **The logo walks too** (`logoWalk`). It is sized by the hub of the rings in force, so the swap
+  shrank it to a third (or grew it threefold) in one frame while the disc held still. Across a held
+  cross its hub radius walks from the old `r0` to the new on the cascade's own ease (`visEase`), and
+  the frame step re-places it.
 - A held cascade has no walk, so the walk's seats say nothing about what is drawn. `lastCascade.held`
   says so, and the drill walk check reports seat order as `held` rather than reading dead seats.
 

@@ -4705,11 +4705,13 @@ function mountVaultGraph(root, data, deps) {
   // github#76
   /** @type {Record<string, number> | null} */
   var moveSizes = null;
+  /** @type {{ from: number, to: number } | null} */
+  var logoWalk = null;
   // github#186 -- one place drops what a walk held, wherever it is cut short
   function clearHolds() {
     moveFrom = null; splitHold = null; cellHold = null; leftColor = null; shrinkFade = false;
     colWalk = null; departing = null; leaveEdgeK = 1;
-    foldSizes = null; moveSizes = null;
+    foldSizes = null; moveSizes = null; logoWalk = null;
   }
   /** @type {Record<string, Point> | null} */
   var posSrc = null;
@@ -4762,7 +4764,7 @@ function mountVaultGraph(root, data, deps) {
    * @property {number} [totalMs]
    * @property {(pr: number) => void} [onFrame]
    */
-  /** @typedef {{ pos: Record<string, Point>, size: Record<string, number>, color: Record<string, string> }} MoveHold */
+  /** @typedef {{ pos: Record<string, Point>, size: Record<string, number>, color: Record<string, string>, r0: number }} MoveHold */
   /** @typedef {{ ids: string[], a: number[], b: number[], out: Record<string, number> }} WalkPair */
   /**
    * github#145 -- done is optional; most callers pass nothing
@@ -5541,6 +5543,7 @@ function mountVaultGraph(root, data, deps) {
     // github#76
     moveSizes = opts.hold && moves.length ? dict() : null;
     if (moveSizes) lastCascade.held = true;
+    logoWalk = moveSizes && opts.hold && geomLock && opts.hold.r0 > 0 ? { from: opts.hold.r0, to: geomLock.r0 } : null;
     // github#78, design/0006
     // github#86 -- the switch's nav bar follows the notes (legendSwitchTick)
     var barWalking = opts.hand && legendSwitch ? false : barWalkStart();
@@ -5568,6 +5571,8 @@ function mountVaultGraph(root, data, deps) {
       }
       // github#78
       if (barWalking) barWalkTick(ease);
+      // github#76
+      if (logoWalk) placeLogo();
       var busy = false;
       for (var i = 0; i < moving.length; i++) {
         var id = moving[i];
@@ -6600,7 +6605,9 @@ function mountVaultGraph(root, data, deps) {
       eli.style.opacity = yielded ? "0" : "";
     }
     var c = renderer.graphToViewport({ x: 0, y: 0 });
-    var edge = renderer.graphToViewport({ x: geomLock.r0 * INNER_SCALE * UNIT, y: 0 });
+    // github#76, design/0021
+    var r0 = logoWalk ? logoWalk.from + (logoWalk.to - logoWalk.from) * visEase : geomLock.r0;
+    var edge = renderer.graphToViewport({ x: r0 * INNER_SCALE * UNIT, y: 0 });
     var holePx = Math.hypot(edge.x - c.x, edge.y - c.y);
     var size = Math.max(24, Math.min(LOGO_PX, holePx * 2 * LOGO_OF_HOLE));
     el.style.width = size + "px";
@@ -9880,7 +9887,7 @@ function mountVaultGraph(root, data, deps) {
     /** @type {Record<string, string>} */
     var was = dict();
     /** @type {MoveHold} */
-    var hold = { pos: dict(), size: dict(), color: dict() };
+    var hold = { pos: dict(), size: dict(), color: dict(), r0: geomLock ? geomLock.r0 : 0 };
     if (live) {
       graph.forEachNode(function (id, a) {
         if (!inRootA(a) || !visible(id) || (alpha[id] || 0) <= 0.004) return;
