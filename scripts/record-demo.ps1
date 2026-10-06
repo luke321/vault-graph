@@ -95,6 +95,7 @@ $lockOwner = if ($env:VG_LOCK_OWNER) { $env:VG_LOCK_OWNER } else { "record-demo 
 $null = & node $hook admit record --owner $lockOwner --pid $PID
 $threads = "$(@(& node $hook threads encode --owner $lockOwner) | Select-Object -Last 1)".Trim()
 $screenLock = $null
+$region = $null
 if ($Monitor) {
   & node $hook acquire "screen-$Monitor" --owner $lockOwner
   if ($LASTEXITCODE -ne 0) {
@@ -106,7 +107,10 @@ if ($Monitor) {
   if ($LASTEXITCODE -ne 0) {
     throw "every screen is BUSY -- other sessions are using them. Nothing was recorded."
   }
-  if ($named) { $Monitor = $named; $screenLock = "screen-$Monitor" }
+  if ($named -match '^(\w+)(?:\s+(-?\d+),(-?\d+),(\d+),(\d+))?$') {
+    $Monitor = $Matches[1]; $screenLock = "screen-$Monitor"
+    if ($Matches[2]) { $region = New-Object System.Drawing.Rectangle ([int]$Matches[2]), ([int]$Matches[3]), ([int]$Matches[4]), ([int]$Matches[5]) }
+  }
 }
 
 try {
@@ -120,7 +124,7 @@ if ($Monitor) {
     'right'   { $screens | Sort-Object { $_.Bounds.X } | Select-Object -Last 1 }
   }
   if (-not $target) { throw "no monitor matched -Monitor $Monitor" }
-  $wa = $target.WorkingArea
+  $wa = if ($region) { $region } else { $target.WorkingArea }
   $posX = $wa.X + [int](($wa.Width  - $Width)  / 2)
   $posY = $wa.Y + [int](($wa.Height - $Height) / 2)
   Write-Host ("monitor {0} ({1}) -> window at {2},{3}" -f `

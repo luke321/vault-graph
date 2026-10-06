@@ -47,14 +47,28 @@ export function release(name, owner) {
   try { run(["release", name, "--owner", owner], "ignore"); } catch { void 0; }
 }
 
-/** @param {string} owner @param {number} [pid] @returns {{ ok: boolean, lock: string | null, which: string | null }} */
+/** @typedef {{ x: number, y: number, w: number, h: number }} Region */
+
+/** @param {string} out @returns {{ which: string, region: Region | null } | null} */
+export function parseScreen(out) {
+  const last = String(out || "").trim().split(/\r?\n/).pop() || "";
+  const m = /^(\w+)(?:\s+(-?\d+),(-?\d+),(\d+),(\d+))?$/.exec(last.trim());
+  if (!m || !SCREENS.includes(m[1])) return null;
+  const region = m[2] === undefined ? null : { x: +m[2], y: +m[3], w: +m[4], h: +m[5] };
+  return { which: m[1], region: region && region.w > 0 && region.h > 0 ? region : null };
+}
+
+/**
+ * @param {string} owner @param {number} [pid]
+ * @returns {{ ok: boolean, lock: string | null, which: string | null, region: Region | null }}
+ */
 export function claimScreen(owner, pid = process.pid) {
-  if (!hookPath()) return { ok: true, lock: null, which: null };
+  if (!hookPath()) return { ok: true, lock: null, which: null, region: null };
   const r = run(["screen", "--owner", owner, "--pid", String(pid)], "pipe");
-  const which = String(r.stdout || "").trim().split(/\s+/).pop() || "";
-  if (r.status !== 0 || !SCREENS.includes(which)) return { ok: false, lock: null, which: null };
-  useScreen(which);
-  return { ok: true, lock: "screen-" + which, which: which };
+  const s = r.status === 0 ? parseScreen(r.stdout) : null;
+  if (!s) return { ok: false, lock: null, which: null, region: null };
+  useScreen(s.which, s.region);
+  return { ok: true, lock: "screen-" + s.which, which: s.which, region: s.region };
 }
 
 export function noFreeScreen() {
@@ -190,7 +204,8 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     release(name, owner);
   } else if (verb === "screen" && owner) {
     const s = claimScreen(owner, pid);
-    if (s.which) console.log(s.which);
+    const r = s.region;
+    if (s.which) console.log(s.which + (r ? ` ${r.x},${r.y},${r.w},${r.h}` : ""));
     code = s.ok ? 0 : 1;
   } else if (verb === "admit" && name && owner) {
     const a = await admit(name, owner, {}, pid);
@@ -200,7 +215,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     if (n) console.log(n);
   } else {
     console.error("usage: node scripts/harness-hook.mjs <acquire|release> <name> --owner <id> [--pid N]");
-    console.error("       node scripts/harness-hook.mjs screen --owner <id> [--pid N]   (prints left|right|primary)");
+    console.error("       node scripts/harness-hook.mjs screen --owner <id> [--pid N]   (prints left|right|primary [x,y,w,h])");
     console.error("       node scripts/harness-hook.mjs admit <job> --owner <id>     (serves any wait, prints go|width N)");
     console.error("       node scripts/harness-hook.mjs threads <job> --owner <id>   (prints a count, or nothing)");
     console.error("       node scripts/harness-hook.mjs status");

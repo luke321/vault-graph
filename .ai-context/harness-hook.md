@@ -29,7 +29,7 @@ The hook is a Node script. The first of these that is set names it:
 |---|---|---|
 | `acquire <name>` | `--owner <id> --pid <n>` | Block until `<name>` is held for `<id>`. Exit 0 held, non-zero gave up |
 | `release <name>` | `--owner <id>` | Let it go. The exit code is ignored |
-| `screen` | `--owner <id> --pid <n>` | Block until a monitor is free, hold it, and print `left`, `right` or `primary` as the last line on stdout. Non-zero: none came free |
+| `screen` | `--owner <id> --pid <n>` | Block until a monitor is free, hold it, and print `left`, `right` or `primary` as the last line on stdout, optionally followed by a region of it, `x,y,w,h` in desktop pixels (`primary -2560,0,1280,1440`). Non-zero: none came free |
 | `status` | | Say who holds what (`node scripts/harness-hook.mjs status` forwards to it) |
 | `admit <job>` | `--owner <id> --pid <n>`, and from `smoke.mjs` also `--kind walk\|fast --running <n> --lanes <n>` | May a heavy unit start now? Print `go`, `wait <ms>` or `width <n>` as the last line on stdout (github#198) |
 | `threads <job>` | `--owner <id>` | Print a positive thread count for an encode, or nothing to leave ffmpeg's default alone (github#198) |
@@ -91,3 +91,9 @@ count or nothing.
 helper there (`leftWindow*`, `placeElectronLeft`, `harnessScreen()`) follows it for the rest of the
 run. `record-demo.ps1` takes it as its `-Monitor`. Without a hook `-Monitor`, `-X` and the default
 placement behave exactly as before.
+
+A region narrows that to part of the monitor — a hook that shares one screen between a harness and
+the person at it hands over only a part of it. `harnessScreen()` then returns the region, so a
+window is centred in it and the `smoke.mjs` grid tiles it; `record-demo.ps1` centres its window in
+it the same way. The release name is unchanged: `screen-<answer>`. An answer without a region, or
+one with a zero-size region, means the whole monitor.
