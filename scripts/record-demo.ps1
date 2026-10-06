@@ -110,7 +110,7 @@ if ($Monitor) {
   if ($named -match '^(\w+)(?:\s+(-?\d+),(-?\d+),(\d+),(\d+))?$') {
     $Monitor = $Matches[1]; $screenLock = "screen-$Monitor"
     if ($Matches[2]) { $region = New-Object System.Drawing.Rectangle ([int]$Matches[2]), ([int]$Matches[3]), ([int]$Matches[4]), ([int]$Matches[5]) }
-  }
+  } elseif ($named) { $Monitor = $named; $screenLock = "screen-$Monitor" }
 }
 
 try {
