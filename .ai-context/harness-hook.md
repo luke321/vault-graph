@@ -96,5 +96,6 @@ A region narrows that to part of the monitor — a hook that shares one screen b
 the person at it hands over only a part of it. `harnessScreen()` then returns the region, so a
 window is centred in it and the `smoke.mjs` grid tiles it; `record-demo.ps1` centres its window in
 it the same way, and `record-native.mjs` places and measures its capture inside it instead of the
-whole monitor (a take that would reach past the region fails rather than drawing outside it). The release name is unchanged: `screen-<answer>`. An answer without a region, or
-one with a zero-size region, means the whole monitor.
+whole monitor (a take that would reach past the region fails rather than drawing outside it).
+The release name is unchanged: `screen-<answer>`. An answer without a region, or one with a
+zero-size region, means the whole monitor.
