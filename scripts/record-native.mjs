@@ -124,7 +124,7 @@ try {
   recordHeld = true;
   screen = hook.claimScreen(owner);
   if (!screen.ok) throw Error("No guarded screen is available");
-  const monitor = await monitorBounds(screen.which || arg("monitor"));
+  const monitor = screen.region || await monitorBounds(screen.which || arg("monitor"));
   const hookThreads = hook.threads ? await hook.threads("encode", owner) : null;
   const threads = Math.min(requestedThreads, hookThreads || requestedThreads);
   mkdirSync(dirname(out), { recursive: true });
