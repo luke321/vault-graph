@@ -6,6 +6,8 @@ import { spawnSync } from "node:child_process";
 /** @type {(Box & { primary: boolean })[] | null} */
 let cached = null;
 let chosen = "left";
+/** @type {Box | null} */
+let region = null;
 
 function allScreens() {
   if (cached) return cached;
@@ -28,14 +30,15 @@ function allScreens() {
 /** @param {Box & { primary?: boolean }} s @returns {Box} */
 const box = (s) => ({ x: s.x, y: s.y, w: s.w, h: s.h });
 
-/** @param {string} which left | right | primary */
-export function useScreen(which) { chosen = which; }
+/** @param {string} which left | right | primary @param {Box | null} [part] */
+export function useScreen(which, part = null) { chosen = which; region = part; }
 
 /** @returns {Box} */
 export function leftmostScreen() { return box(allScreens()[0]); }
 
 /** @returns {Box} */
 export function harnessScreen() {
+  if (region) return box(region);
   const all = allScreens();
   if (chosen === "right") return box(all[all.length - 1]);
   if (chosen === "primary") return box(all.find((s) => s.primary) || all[0]);

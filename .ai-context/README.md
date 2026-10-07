@@ -16,6 +16,7 @@ changing the layout or the animation.
 | `decisions/` | **ADRs** — structural choices, what they cost, and what was rejected |
 | `design/` | **DDRs** — the as-built design of each part of the disc |
 | `mobile-harness.md` | `scripts/mobile-check.mjs`: the page at a phone's viewport with real touch, why the run needs a desktop control column, and the four ways the harness measured the wrong thing first (github#73) |
+| `usability-thresholds.md` | `scripts/usability-audit.mjs`: published target-size, acuity, legibility, contrast, colour-vision and gesture thresholds with their sources, the device profiles that turn CSS px into visual angle, and what the page fails today (github#200) |
 | `live-growth-harness.md` | `scripts/live-growth-check.mjs`: the live rebuild driven against a vault that is actually growing under it (github#72) |
 | `awaiting-a-page-promise.md` | Why a check that samples over time must use `p.eval` and not `p.j`, what the transport's 10s ceiling does and does not bound, and the two bounds a ride carries instead (github#179) |
 | `finding-notes-touch-mid-cascade.md` | The long-form investigation behind the mid-cascade dot-size finding — kept because the method is the point, not just the answer |
