@@ -48,15 +48,6 @@ then the stand-ins are removed and the result equals a fresh resting layout. The
 fixed-angle fold and its `FOLD_ENTER`, `FOLD_PHASE`, `FOLD_FADE` constants are superseded.
 The clock-hand fallback remains available through `foldSwitch = false`.
 
-Each note's fade during the fold is `FOLD_FADE_FRAMES = 4` frames against the cascade's
-`FADE_FRAMES = 12`, scaled the same way into the switch's span (about 4.6% of it instead of
-13%). Measured 2026-10-09 on the demo vault, folders to tags, every frame binned by angle: with
-12, the moving boundary between the two discs carried up to **42%** dots under half opacity
-(12% over the whole disc), which read as the arriving wedges loosely populated at the start
-and the leaving ones at the end. With 4 the worst boundary bin is **20%** (5% overall); the
-switch still converges in 5.7 s, and the compression at the boundary is the fold's geometry,
-not the fade. Only the fold uses it; every other cascade keeps `FADE_FRAMES`.
-
 `tags: parallel Refresh` checks both directions, reverse/forward date order, visible angular
 motion in both discs, simultaneous visibility, disjoint drawn angular extents, opacity
 monotonicity, convergence and temporary-node cleanup.
