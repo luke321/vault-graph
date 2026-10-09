@@ -486,6 +486,21 @@ options that remain.
 
 ### The real cause is the band split — fixed in github#117, in two halves
 
+### In the tag dimension, tags of three notes or fewer share one wedge (github#119, github#186)
+
+`SMALL_TAG_GROUP = 4` turns the dormant merge path on for the **tag dimension only**:
+a tag holding fewer than four notes lays out inside the one `MERGED` wedge instead of its own.
+`SMALL_GROUP` stays 0, so folders never merge, and `(unlinked)` and `(untagged)` are never
+pooled. It is layout-only, as the colour section above measured: the tag keeps its legend
+row, its colour and its place in the order; only its wedge, and the seams around it, go.
+Chosen by the maintainer on 2026-10-09 after the switch clips showed the dominant-folder
+vault's inner ring drawn in specks. Measured there, tags at rest: inner dots **1.30 -> 3.27 px**
+median (outer 4.03 -> 3.85), the first inner note's room 23 -> 130 units against a 135-unit
+pitch. The folder disc and every golden are unchanged (the goldens are taken in the folder
+dimension). A switch keeps the rings it was locked with (design/0015), so straight after a
+folders-to-tags switch the inner dots read 2.86 px against 3.27 after a relayout; before the
+merge the same gap was 1.26 against 1.30.
+
 Neither github#107 change touched why the inner lattice was tighter in the first place.
 `balanceBands()` optimised ring **thickness** — its cost was `|inner − BAND_RATIO · outer|`,
 `BAND_RATIO = 0.55` — with nothing in it aware of how much each ring was carrying. Room per

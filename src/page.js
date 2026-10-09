@@ -1767,6 +1767,8 @@ function mountVaultGraph(root, data, deps) {
 
   var NEST_MIN = 2;
   var SMALL_GROUP = 0;
+  // github#119, github#186
+  var SMALL_TAG_GROUP = 4;
   var SUB_SLOTS = 4;
   var SUB_NAMED = 3;
   var HUE_BUDGET_FRACTION = 0.60;
@@ -2390,8 +2392,10 @@ function mountVaultGraph(root, data, deps) {
     if (useCells && skel) ringsMerged = skel.merged;
     else {
       ringsMerged = dict();
+      // github#119, github#186
+      var smallBelow = state.dim === "tag" ? SMALL_TAG_GROUP : SMALL_GROUP;
       all.filter(function (g) { return cellsOf[g]; }).forEach(function (g) {
-        if ((counts[g] || 0) >= SMALL_GROUP) { big.push(g); return; }
+        if (g === UNLINKED || g === UNTAGGED || (counts[g] || 0) >= smallBelow) { big.push(g); return; }
         ringsMerged[g] = true;
         cellsOf[g].forEach(function (k) { smallIds = smallIds.concat(byCell[k]); });
       });
