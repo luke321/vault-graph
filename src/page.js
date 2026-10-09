@@ -7774,6 +7774,10 @@ function mountVaultGraph(root, data, deps) {
     bandLock = dict();
     base.cells.forEach(function (c) { bandLock[c.g] = c.inner; });
     if (bandHint) Object.keys(bandHint).forEach(function (g) { bandLock[g] = bandHint[g]; });
+    // github#186 -- pooled tags keep their names, but share the cell's band
+    base.cells.forEach(function (c) {
+      if (c.g === MERGED) c.list.forEach(function (id) { bandLock[groupOf(id)] = bandLock[c.g]; });
+    });
     var bandTotal = { i: 0, o: 0 };
     base.cells.forEach(function (c) { bandTotal[c.inner ? "i" : "o"] += c.wsum; });
     var bandR = { i: 0, o: 0 }, bandRows = { i: 0, o: 0 };
@@ -7847,6 +7851,7 @@ function mountVaultGraph(root, data, deps) {
     }
     if (anim) { WIN.cancelAnimationFrame(anim); anim = null; }
     if (animGuard) { WIN.clearTimeout(animGuard); animGuard = null; }
+    dropStandIns();
     clearHolds();
     pinnedPlan = null; planKeep = null;
     cellNow = null; edgeNow = null;

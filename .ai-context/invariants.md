@@ -501,6 +501,13 @@ dimension). A switch keeps the rings it was locked with (design/0015), so straig
 folders-to-tags switch the inner dots read 2.86 px against 3.27 after a relayout; before the
 merge the same gap was 1.26 against 1.30.
 
+Every original tag in the pooled cell inherits that cell's locked band, including when a
+previous band assignment is retained. Sizing, hub clearance, band colours and legend labels
+must agree with the planner. `tags: pooled rings and interrupted defaults retain note identity`
+checks a four-note inner pool at rest, after a hard relayout and under a temporary filter.
+It also interrupts a dimension switch through the visibility-default setting: no stand-ins
+may survive the resulting hard relayout, and all surviving notes must be their original nodes.
+
 Neither github#107 change touched why the inner lattice was tighter in the first place.
 `balanceBands()` optimised ring **thickness** — its cost was `|inner − BAND_RATIO · outer|`,
 `BAND_RATIO = 0.55` — with nothing in it aware of how much each ring was carrying. Room per
