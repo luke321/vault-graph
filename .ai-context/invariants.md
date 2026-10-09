@@ -43,6 +43,16 @@ Each uses the ordinary allocator's pitch and seam rules inside its allocation. P
 seams cannot cross either end, and drawn dot radii remain capped at their wedge edges;
 a zero-width seat stays hidden rather than becoming the renderer's default-size dot.
 
+Both discs keep their endpoint's full row depth for the whole switch; only the arc between
+them moves. The budget is divided by each note's fold weight, `smoothstep(min(1, alpha /
+FOLD_ROOM_AT))` with `FOLD_ROOM_AT = 0.25`, so a note holds its full seat from a quarter of its
+opacity: zero at zero, continuous, no step. Measured 2026-10-09 on the demo vault, folders to
+tags, notes per degree on each side against its resting density: with the rows folding to one
+on a smoothstep of the walk and the budget on raw alpha, the arriving wedges started at
+**16.3x** and the leaving ones ended at **20.1x** (many dots drawn on one seat, which read as a
+thinly populated trail). With full depth and the fold weight: **5.0x** and **7.9x**. The leaving
+wedges still run about 3x through the middle of the switch; that is not yet explained.
+
 Opacity stays monotone per display node. Both discs remain visible during the transition,
 then the stand-ins are removed and the result equals a fresh resting layout. The radial
 fixed-angle fold and its `FOLD_ENTER`, `FOLD_PHASE`, `FOLD_FADE` constants are superseded.

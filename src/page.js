@@ -4249,6 +4249,8 @@ function mountVaultGraph(root, data, deps) {
   var leaveEdgeK = 1;
   // github#186, design/0015 -- the worlds overlap while the rows fold
   var foldSwitch = true;
+  // github#186, design/0015
+  var FOLD_ROOM_AT = 0.25;
   var SPREAD_MAX  = 78;
   var SPREAD_PER  = 0.17;
   var SPREAD_MIN  = 24;
@@ -4890,6 +4892,12 @@ function mountVaultGraph(root, data, deps) {
 
     /** @param {string} id */
     var weightOf = function (id) { return alpha[id] || 0; };
+    // github#186, design/0015
+    /** @param {string} id */
+    var foldWeightOf = function (id) {
+      var q = Math.min(1, (alpha[id] || 0) / FOLD_ROOM_AT);
+      return q * q * (3 - 2 * q);
+    };
 
     /** @type {Record<string, boolean>} */
     var wasPresent = dict();
@@ -5239,11 +5247,6 @@ function mountVaultGraph(root, data, deps) {
       foldSizes = sizeCap;
       lastCascade.path = "parallel refresh";
     }
-    /** @param {number} v */
-    var foldEase = function (v) {
-      v = Math.max(0, Math.min(1, v));
-      return v * v * (3 - 2 * v);
-    };
     /** @param {FoldPlan | null} held @param {number} amount @param {number} start @param {number} end @param {(plan: Plan, seats: Record<string, { cell: string, at: number }>) => Record<string, Point> | null} walk @returns {Record<string, Point>} */
     var packFold = function (held, amount, start, end, walk) {
       if (!held || end - start < 1e-9) return {};
@@ -5259,7 +5262,7 @@ function mountVaultGraph(root, data, deps) {
       var depths = { i: 1 + ((endpoint.rows.i || 1) - 1) * amount,
                      o: 1 + ((endpoint.rows.o || 1) - 1) * amount };
       try {
-        var planned = buildWedgePlan(true, weightOf, function (c) { return rows[c.k] || 1; },
+        var planned = buildWedgePlan(true, foldWeightOf, function (c) { return rows[c.k] || 1; },
           { i: endpoint.spInner, o: endpoint.sp, depth: depths });
         var positions = planned ? walk(planned, held.seats) : null;
         var out = dict();
@@ -5445,12 +5448,13 @@ function mountVaultGraph(root, data, deps) {
       if (folding) {
         cellNow = null; edgeNow = null; colWalk = null;
         var outWeight = 0, inWeight = 0;
-        outs.forEach(function (id) { outWeight += weightOf(id); });
-        ins.forEach(function (id) { inWeight += weightOf(id); });
+        outs.forEach(function (id) { outWeight += foldWeightOf(id); });
+        ins.forEach(function (id) { inWeight += foldWeightOf(id); });
         var split = 2 * Math.PI * outWeight / Math.max(1e-9, outWeight + inWeight);
-        var oldSeats = pr < 1 ? inWorld(function () { return packFold(foldA, foldEase(1 - pr), 0, split, walkPlan); }) : {};
+        // github#186, design/0015 -- both discs keep their full depth; only the arc moves
+        var oldSeats = pr < 1 ? inWorld(function () { return packFold(foldA, 1, 0, split, walkPlan); }) : {};
         var oldFit = dotFit, oldEdges = edgeCap;
-        var newSeats = packFold(foldB, foldEase(pr), split, 2 * Math.PI, walkPlan);
+        var newSeats = packFold(foldB, 1, split, 2 * Math.PI, walkPlan);
         dotFit = Object.assign({}, oldFit, dotFit);
         edgeCap = Object.assign({}, oldEdges, edgeCap);
         targets = Object.assign({}, oldSeats, newSeats);
