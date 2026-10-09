@@ -4249,6 +4249,8 @@ function mountVaultGraph(root, data, deps) {
   var leaveEdgeK = 1;
   // github#186, design/0015 -- the worlds overlap while the rows fold
   var foldSwitch = true;
+  // github#186, design/0015
+  var FOLD_FADE_FRAMES = 4;
   var SPREAD_MAX  = 78;
   var SPREAD_PER  = 0.17;
   var SPREAD_MIN  = 24;
@@ -5229,7 +5231,7 @@ function mountVaultGraph(root, data, deps) {
     if (folding) {
       [outs, ins].forEach(function (ids, direction) {
         ids.sort(function (x, y) { var d = (tlRank[x] || 0) - (tlRank[y] || 0); return direction ? d : -d; });
-        var fade = span * FADE_FRAMES * TIME_SCALE / (windowFor(ids.length) + FADE_FRAMES * TIME_SCALE);
+        var fade = span * FOLD_FADE_FRAMES * TIME_SCALE / (windowFor(ids.length) + FOLD_FADE_FRAMES * TIME_SCALE);
         ids.forEach(function (id, index) {
           delay[id] = ids.length < 2 ? 0 : (span - fade) * index / (ids.length - 1);
           fadeOf[id] = fade;
