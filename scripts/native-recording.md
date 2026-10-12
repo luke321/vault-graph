@@ -15,7 +15,24 @@ node scripts/record-native.mjs --html <export.html> --out <new-directory> --labe
 Chrome, FFmpeg and FFprobe must be installed. Use `--chrome`, `--ffmpeg` or `--ffprobe`
 for explicit executables. The source must be a self-contained Vault Graph export.
 Default action is Refresh from `?rest`; `--trigger-file` accepts trusted JavaScript
-to start a different measured cascade. Timeout defaults to 30 seconds, maximum 120.
+to start a different measured cascade. `--setup-file` accepts trusted async JavaScript
+for settled preparation before recording (for example switching to tags or hiding a
+group that the recorded action restores). `--allow-static` is only for an explicitly
+expected zero-membership-change action: the app must report zero cascade frames and
+`instant: nothing to move`, in a new report object replacing the one retained immediately
+before the trigger. The identity comparison happens inside the page, before serialization,
+and is saved as `reportReplaced` in `capture.json`. A no-op trigger cannot reuse a setup's
+static report. The calendar or camera may still adjust. Stale cascade measurements never
+stand in for the recorded action.
+Timeout defaults to 30 seconds, maximum 120.
+Pass `--rehearse` to measure a warmed browser: the recorder first performs the same action,
+restores the original local storage, reloads the page in that browser and repeats setup.
+Recording starts only if the controls, complete node attributes, camera and viewport match
+their original state exactly. `rehearsal.json` retains the action report and both states;
+`capture.json` labels the take `warm-rehearsed` or the default `cold-profile`.
+This avoids paying first-use GPU costs in every comparison take while keeping the recorded
+action at normal speed. It does not fix cold-start rendering or repair an existing clip.
+Keep cold-profile tests separately, and use the same mode for both sides of a comparison.
 The tool rejects an existing output directory without changing it. Preserve both the
 original HTML and generated evidence when comparing app versions; use the same fixture,
 viewport, action, display and machine conditions serially.
@@ -43,6 +60,7 @@ The output retains `capture-lossless.mkv`, `capture.mp4`, `capture.log`, measure
 app timestamps and source SHA-256 in `capture.json`, native and lossless 60 FPS reference
 frame hashes, `verification.json`, and each headed playback trace. Each MP4 is played
 to ended twice by default. A pending video-frame callback is cancelled between plays.
+The PNG poster is extracted from the completed MP4 after capture; it cannot stall a take.
 
 Verification reports actual source versus encoded duration, exact distinct native states
 retained by the lossless 60 FPS reference, source timestamp gaps and repeated active

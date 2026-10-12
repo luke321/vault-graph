@@ -112,6 +112,11 @@ export const STATE_PROBE = `(function () {
   // github#151 -- the remainder: live values that are not in state and not on an input
   var one = function (k, fn) { try { put(k, flat(fn())); } catch (e) { put(k, "unreadable"); } };
   one("vg.timeScale", function () { return api.timeScale; });
+  one("vg.foldSwitch", function () { return api.foldSwitch; });
+  // github#186 -- the ring split and its rows: a check that leaves them changed is the one to find
+  one("vg.bandTotal", function () { var d = api.debugDump(); return d.locked ? d.locked.bandTotal : null; });
+  one("vg.lockRows", function () { var d = api.debugDump(); return d.locked ? d.locked.rows : null; });
+  one("vg.foldActive", function () { return api.foldActive; });
   one("vg.panEnabled", function () { return api.panEnabled; });
   one("vg.lazyEdges", function () { return api.lazyEdges; });
   one("vg.folderOrder", function () { return api.folderOrder(); });
