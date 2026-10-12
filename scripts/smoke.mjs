@@ -12,6 +12,7 @@ import { drillWalkCheck } from "./check-drill-walk.mjs";
 import { dimensionRefreshCheck } from "./check-dimension-refresh.mjs";
 import { dimensionSizingCheck } from "./check-dimension-sizing.mjs";
 import { countSizingCheck } from "./check-count-sizing.mjs";
+import { groupingRegressionCheck } from "./check-grouping-regressions.mjs";
 import { buildPayloadVault, PAYLOAD, NOTE_COUNT } from "./check-data-escape.mjs";
 import { findChrome } from "./chrome.mjs";
 import { harnessScreen, leftWindowPos } from "./screen.mjs";
@@ -903,6 +904,8 @@ async (p) => {
             (r.full ? ", both sides full width" : " <- the two sides are not equal and full width"),
   };
 }, { on: "all" });
+
+check("tags: pooled rings and interrupted defaults retain note identity", groupingRegressionCheck, { clock: "real" });
 
 check("tags: every note is filed in exactly one wedge, in either dimension", async (p) => {
   const r = await p.j(`(function(){

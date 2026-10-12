@@ -2003,6 +2003,8 @@ function mountVaultGraph(root, data, deps) {
 
   var NEST_MIN = 2;
   var SMALL_GROUP = 0;
+  // github#119, github#186
+  var SMALL_TAG_GROUP = 4;
   var SUB_SLOTS = 4;
   var SUB_NAMED = 3;
   var HUE_BUDGET_FRACTION = 0.60;
@@ -2642,8 +2644,10 @@ function mountVaultGraph(root, data, deps) {
     if (useCells && skel) ringsMerged = skel.merged;
     else {
       ringsMerged = dict();
+      // github#119, github#186
+      var smallBelow = state.dim === "tag" ? SMALL_TAG_GROUP : SMALL_GROUP;
       all.filter(function (g) { return cellsOf[g]; }).forEach(function (g) {
-        if ((counts[g] || 0) >= SMALL_GROUP) { big.push(g); return; }
+        if (g === UNLINKED || g === UNTAGGED || (counts[g] || 0) >= smallBelow) { big.push(g); return; }
         ringsMerged[g] = true;
         cellsOf[g].forEach(function (k) { smallIds = smallIds.concat(byCell[k]); });
       });
@@ -2797,9 +2801,9 @@ function mountVaultGraph(root, data, deps) {
       });
       /** @type {Record<string, boolean>} */
       var pinnedInner = dict();
-      // github#117
+      // github#117, github#119 -- the pooled tail stays where its tags sat
       names.forEach(function (g) {
-        if ((groupNotes[g] || 0) < PIN_BELOW) { pinnedInner[g] = true; assign[g] = true; }
+        if (g === MERGED || (groupNotes[g] || 0) < PIN_BELOW) { pinnedInner[g] = true; assign[g] = true; }
       });
       var movable = names.filter(function (g) { return !pinnedInner[g]; });
       // github#186, decisions/0017
@@ -4506,6 +4510,8 @@ function mountVaultGraph(root, data, deps) {
   var leaveEdgeK = 1;
   // github#186, design/0015 -- the worlds overlap while the rows fold
   var foldSwitch = true;
+  // github#186, design/0015
+  var FOLD_ROOM_AT = 0.25;
   var SPREAD_MAX  = 78;
   var SPREAD_PER  = 0.17;
   var SPREAD_MIN  = 24;
@@ -5155,6 +5161,12 @@ function mountVaultGraph(root, data, deps) {
 
     /** @param {string} id */
     var weightOf = function (id) { return alpha[id] || 0; };
+    // github#186, design/0015
+    /** @param {string} id */
+    var foldWeightOf = function (id) {
+      var q = Math.min(1, (alpha[id] || 0) / FOLD_ROOM_AT);
+      return q * q * (3 - 2 * q);
+    };
 
     /** @type {Record<string, boolean>} */
     var wasPresent = dict();
@@ -5508,11 +5520,6 @@ function mountVaultGraph(root, data, deps) {
       foldSizes = sizeCap;
       lastCascade.path = "parallel refresh";
     }
-    /** @param {number} v */
-    var foldEase = function (v) {
-      v = Math.max(0, Math.min(1, v));
-      return v * v * (3 - 2 * v);
-    };
     /** @param {FoldPlan | null} held @param {number} amount @param {number} start @param {number} end @param {(plan: Plan, seats: Record<string, { cell: string, at: number }>) => Record<string, Point> | null} walk @returns {Record<string, Point>} */
     var packFold = function (held, amount, start, end, walk) {
       if (!held || end - start < 1e-9) return {};
@@ -5528,7 +5535,7 @@ function mountVaultGraph(root, data, deps) {
       var depths = { i: 1 + ((endpoint.rows.i || 1) - 1) * amount,
                      o: 1 + ((endpoint.rows.o || 1) - 1) * amount };
       try {
-        var planned = buildWedgePlan(true, weightOf, function (c) { return rows[c.k] || 1; },
+        var planned = buildWedgePlan(true, foldWeightOf, function (c) { return rows[c.k] || 1; },
           { i: endpoint.spInner, o: endpoint.sp, depth: depths });
         var positions = planned ? walk(planned, held.seats) : null;
         var out = dict();
@@ -5726,12 +5733,13 @@ function mountVaultGraph(root, data, deps) {
       if (folding) {
         cellNow = null; edgeNow = null; colWalk = null;
         var outWeight = 0, inWeight = 0;
-        outs.forEach(function (id) { outWeight += weightOf(id); });
-        ins.forEach(function (id) { inWeight += weightOf(id); });
+        outs.forEach(function (id) { outWeight += foldWeightOf(id); });
+        ins.forEach(function (id) { inWeight += foldWeightOf(id); });
         var split = 2 * Math.PI * outWeight / Math.max(1e-9, outWeight + inWeight);
-        var oldSeats = pr < 1 ? inWorld(function () { return packFold(foldA, foldEase(1 - pr), 0, split, walkPlan); }) : {};
+        // github#186, design/0015 -- both discs keep their full depth; only the arc moves
+        var oldSeats = pr < 1 ? inWorld(function () { return packFold(foldA, 1, 0, split, walkPlan); }) : {};
         var oldFit = dotFit, oldEdges = edgeCap;
-        var newSeats = packFold(foldB, foldEase(pr), split, 2 * Math.PI, walkPlan);
+        var newSeats = packFold(foldB, 1, split, 2 * Math.PI, walkPlan);
         dotFit = Object.assign({}, oldFit, dotFit);
         edgeCap = Object.assign({}, oldEdges, edgeCap);
         targets = Object.assign({}, oldSeats, newSeats);
@@ -8125,6 +8133,10 @@ function mountVaultGraph(root, data, deps) {
     bandLock = dict();
     base.cells.forEach(function (c) { bandLock[c.g] = c.inner; });
     if (bandHint) Object.keys(bandHint).forEach(function (g) { bandLock[g] = bandHint[g]; });
+    // github#186 -- pooled tags keep their names, but share the cell's band
+    base.cells.forEach(function (c) {
+      if (c.g === MERGED) c.list.forEach(function (id) { bandLock[groupOf(id)] = bandLock[c.g]; });
+    });
     var bandTotal = { i: 0, o: 0 };
     base.cells.forEach(function (c) { bandTotal[c.inner ? "i" : "o"] += c.wsum; });
     var bandR = { i: 0, o: 0 }, bandRows = { i: 0, o: 0 };
@@ -8198,6 +8210,7 @@ function mountVaultGraph(root, data, deps) {
     }
     if (anim) { WIN.cancelAnimationFrame(anim); anim = null; }
     if (animGuard) { WIN.clearTimeout(animGuard); animGuard = null; }
+    dropStandIns();
     clearHolds();
     pinnedPlan = null; planKeep = null;
     cellNow = null; edgeNow = null;
