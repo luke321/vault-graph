@@ -2547,9 +2547,9 @@ function mountVaultGraph(root, data, deps) {
       });
       /** @type {Record<string, boolean>} */
       var pinnedInner = dict();
-      // github#117
+      // github#117, github#119 -- the pooled tail stays where its tags sat
       names.forEach(function (g) {
-        if ((groupNotes[g] || 0) < PIN_BELOW) { pinnedInner[g] = true; assign[g] = true; }
+        if (g === MERGED || (groupNotes[g] || 0) < PIN_BELOW) { pinnedInner[g] = true; assign[g] = true; }
       });
       var movable = names.filter(function (g) { return !pinnedInner[g]; });
       // github#186, decisions/0017
