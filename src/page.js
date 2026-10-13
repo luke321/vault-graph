@@ -5802,14 +5802,14 @@ function mountVaultGraph(root, data, deps) {
     var t = (basisSize(id) - NODE_MIN) / (NODE_MAX - NODE_MIN);
     t = t > 1 ? 1 : t < 0 ? 0 : t;
     restT[id] = t;
-    var v = dotPx(a.size || NODE_MIN, id), hi = lastDotHi, lo = Math.min(hi, DOT_MIN_PX);
+    var v = dotPx(a.size || NODE_MIN, id), hi = lastDotHi, lo = Math.min(hi, floorPx());
     restHiU[id] = hi / pxPerUnit;
     if (v < lo + (hi - lo) * t - 1e-9) restCapU[id] = v / pxPerUnit; else delete restCapU[id];
   }
   // github#186
   /** @param {string} id */
   function restAt(id) {
-    var hi = restHiU[id] * pxPerUnit, lo = Math.min(hi, DOT_MIN_PX);
+    var hi = restHiU[id] * pxPerUnit, lo = Math.min(hi, floorPx());
     var v = lo + (hi - lo) * (restT[id] || 0), cap = restCapU[id];
     return cap !== undefined && cap * pxPerUnit < v ? cap * pxPerUnit : v;
   }
@@ -6349,6 +6349,12 @@ function mountVaultGraph(root, data, deps) {
   // github#13
   var DOT_OF_PITCH = 11 / 28;
   var DOT_MIN_PX = 1.5;
+  // github#171
+  var DOT_REF_DISC_PX = 340;
+  function floorPx() {
+    var discPx = geomLock ? geomLock.maxR * UNIT * pxPerUnit : 0;
+    return DOT_MIN_PX * Math.max(1, discPx / DOT_REF_DISC_PX);
+  }
   // github#186
   var DOT_GROW_MAX = 3;
   var DOT_COUNT_GAIN = 0.7, DOT_COUNT_MAX_PX = 7.5;
@@ -6465,7 +6471,8 @@ function mountVaultGraph(root, data, deps) {
     lastDotHi = hi;
     // github#107 -- a floor in SCREEN px; the renderer divides by the ratio
     var cameraRatio = dotMeasureRatio !== null ? dotMeasureRatio : renderer ? renderer.getCamera().getState().ratio || 1 : 1;
-    var camLo = restTaking ? DOT_MIN_PX : DOT_MIN_PX * cameraRatio;
+    var floor = floorPx();
+    var camLo = restTaking ? floor : floor * cameraRatio;
     var lo = Math.min(hi, camLo);
     lastDotLo = lo;
     // github#107, github#186 -- the floor IS the ramp's bottom, so no dot is pinned to it
@@ -6473,7 +6480,7 @@ function mountVaultGraph(root, data, deps) {
     if (v < lo) v = lo;
     // github#186 -- the rest was taken at ratio 1; its floor share follows
     var rest = id !== undefined && !restTaking && restHiU[id] !== undefined
-      ? restAt(id) + (camLo - DOT_MIN_PX) * (1 - (restT[id] || 0)) : undefined;
+      ? restAt(id) + (camLo - floor) * (1 - (restT[id] || 0)) : undefined;
     // github#186 -- under a filter a dot keeps at least its resting size
     if (rest !== undefined && v < rest && filterOn()) v = rest;
     var countFloor = restTaking ? 0 : countFloorPx() * cameraRatio;
