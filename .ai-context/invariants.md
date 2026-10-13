@@ -372,6 +372,43 @@ and 0.75px, still hoverable, which is what *a sub-pixel dot can still be hovered
 walking dot can still be held under its two resting sizes, which is what the two dot-size cascade
 checks assert.
 
+### The floor grows with the disc, so a dot's size does not depend on the window (github#171)
+
+> Asserted by *a dot is the same size against the lattice in a bigger window* (all five fixtures:
+> the stage at 1700×1100, then 2400×1560, every lit dot within 1% in lattice units).
+
+The ramp runs from the floor to the ceiling, and the ceiling is in lattice units × pixels per
+unit, so it grows with the window. A floor fixed at 1.5 px did not, so **every dot below the top
+of the ramp shrank against the lattice as the window grew**: a mid-weight note was a smaller
+share of its slot at 2560×1440 than at 1400×1000, and the disc read as sparse on a big screen
+while its positions were unchanged. Only a ceiling-sized dot was window-independent.
+
+The floor is now `DOT_MIN_PX × max(1, disc radius in px / DOT_REF_DISC_PX)`, with the disc radius
+taken at camera ratio 1 from the locked `maxR` (so it does not breathe through a cascade).
+`DOT_REF_DISC_PX = 340` is the disc at the tuned 1584×961 harness viewport, measured on all five
+fixtures at **327–336 px**, so at that viewport and anything smaller every dot is unchanged and
+the floor is the 1.5 px legibility floor it was. Above it the floor is a fixed fraction of the
+disc, and the whole picture scales with the window.
+
+Measured headless, `?rest`, diameter in lattice units, outer-row median (develop → this):
+
+| fixture | 1400×1000 | 1920×1080 | 2560×1440 |
+|---|---|---|---|
+| shape | 0.353 → 0.356 | 0.341 → 0.356 | 0.309 → 0.356 |
+| demo | 0.332 → 0.336 | 0.316 → 0.336 | 0.273 → 0.336 |
+| 10k | 0.565 → 0.573 | 0.526 → 0.573 | 0.419 → 0.573 |
+
+1280×800 is unchanged (shape 0.398, demo 0.389, 10k 0.706): the disc there is under the
+reference and the floor genuinely binds. The github#186 acceptance script
+(`investigations/186/dotsize-186.mjs`, its own 1200×1000 window) reads identically before and
+after on shape, demo and the 10k — corr(degree, px), hub/leaf ratio, distinct sizes, column
+offset — and the goldens do not move.
+
+Rejected: anchoring the ramp's base to the ceiling (`lo = max(hi × NODE_MIN/NODE_MAX, floor)`),
+which the issue proposed. It only reaches dots whose ceiling is above ~6.4 px; on the demo and
+the 10k the ceiling sits near the floor, so 1920×1080 was untouched and the 10k did not move at
+all, which is exactly the shape of vault the report came from.
+
 ### What the two together moved
 
 Dots paired by identical link weight across the bands — the question github#107 actually asked:
@@ -732,7 +769,8 @@ own mechanism. What follows is what each one was, and what it reads now.
 
 ### How a dot is sized, and the four ways it was got wrong first (github#186)
 
-A dot is `DOT_MIN_PX + (ceiling − DOT_MIN_PX) × ramp(size)`, the ramp linear in `size` over
+A dot is `floor + (ceiling − floor) × ramp(size)`, the floor `DOT_MIN_PX` grown with the disc
+above the reference window (github#171), the ramp linear in `size` over
 `NODE_MIN..NODE_MAX`, and the ceiling
 
     DOT_OF_PITCH × min( the CELL's tightest tangential step × DOT_CLEAR,
